@@ -199,24 +199,20 @@ func runContext(processCtx context.Context, args []string, reporters ...*reporti
 	}
 	defer stopOffer()
 	var runtimeErr error
-	replaced := false
 	select {
 	case <-root.Done():
 	case <-released:
 		// The replacement accepts and reports from now on; this process only drains.
 		service.Handover.SetSilent(true)
-		replaced = true
+		if service.Handover.MoveTerminals != nil {
+			service.Handover.MoveTerminals(terminalMoveGrace)
+		}
 		stop()
 	case runtimeErr = <-service.Done():
 		stop()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
-	if replaced && service.Handover.MoveTerminals != nil {
-		// The goaway sent at the start of the drain makes each host dial the replacement; the browsers follow
-		// once that has had time to land, so their reconnect finds the host there.
-		defer time.AfterFunc(terminalMoveDelay, service.Handover.MoveTerminals).Stop()
-	}
 	service.Handover.Drain(ctx, time.Now().Add(cfg.ShutdownTimeout/2))
 	if err := service.Shutdown(ctx); err != nil {
 		return serviceFailure{error: err, definition: "service_shutdown"}
@@ -227,8 +223,9 @@ func runContext(processCtx context.Context, args []string, reporters ...*reporti
 	return nil
 }
 
-// terminalMoveDelay is how long a drain waits before moving browser terminals to the replacement process.
-const terminalMoveDelay = 3 * time.Second
+// terminalMoveGrace is how long a drain gives each host to move its carrier to the replacement (and so end its
+// browser terminals as "moved" by itself) before the terminals still open are moved. Less than the drain's deadline.
+const terminalMoveGrace = 8 * time.Second
 
 // handoverWarmTimeout bounds a replacement's warm-up; the serving process keeps serving meanwhile.
 const handoverWarmTimeout = 30 * time.Second

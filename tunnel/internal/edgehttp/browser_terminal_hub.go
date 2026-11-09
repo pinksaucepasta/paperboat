@@ -7,6 +7,7 @@ import (
 	yamux "github.com/libp2p/go-yamux/v5"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
@@ -117,21 +118,27 @@ func (h *BrowserTerminalHub) Moved(routeID string, fence BrowserTerminalRouteFen
 	return h.handingOver || ok && replacedGeneration(fence, current)
 }
 
-// HandOver ends every browser terminal now; each bridge tells its browser "moved" (4301), which reconnects at once
-// to the replacement process. An edge install keeps every machine generation, so Moved alone cannot see it: without
-// this the old process's exit cut the connections (WebSocket 1006). Prior art: the WebSocket close code 1012 "Service
-// Restart" (IANA registry) is the standard way to tell clients to reconnect after a restart; the console already
-// reattaches at once on our typed equivalent, 4301.
-func (h *BrowserTerminalHub) HandOver() {
+// HandOver is called the moment this edge process is released to its replacement. From then on every end of a browser
+// terminal is a move: each bridge tells its browser "moved" (4301), which reconnects at once to the replacement. An
+// edge install keeps every machine generation, so Moved alone cannot see it, and the old process's exit cut the
+// connections (WebSocket 1006). The usual end is the host's carrier detaching after the drain's goaway (the host is
+// then already on the replacement); grace is the backstop that moves the terminals still open. Prior art: the
+// WebSocket close code 1012 "Service Restart" (IANA registry) is the standard way to tell clients to reconnect after a
+// restart; the console already reattaches at once on our typed equivalent, 4301.
+func (h *BrowserTerminalHub) HandOver(grace time.Duration) {
 	if h == nil {
 		return
 	}
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	h.handingOver = true
-	for key, session := range h.sessions {
-		h.closeSessionLocked(key, session)
-	}
+	h.mu.Unlock()
+	time.AfterFunc(grace, func() {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		for key, session := range h.sessions {
+			h.closeSessionLocked(key, session)
+		}
+	})
 }
 
 func (h *BrowserTerminalHub) heldLocked(routeID string, identity datacarrier.Identity) bool {

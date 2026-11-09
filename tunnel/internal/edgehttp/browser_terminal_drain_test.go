@@ -207,10 +207,18 @@ func registerWhenSubscribed(t *testing.T, ctx context.Context, hub *BrowserTermi
 	}
 }
 
-// An edge install keeps every machine generation, so the old process's drain ends its browser terminals through
-// HandOver: each browser gets exactly one typed "moved" close (4301, before the process exits), and its reattach
-// continues with the next record, nothing repeated and nothing lost. Before, the exit cut the connection (1006).
+// An edge install keeps every machine generation, so a released edge process marks its hub with HandOver: whichever
+// ends a browser terminal next, the host's carrier detaching after the drain's goaway (live, 2026-11-09: it came
+// before any timer and ended the terminal as a plain drop, 1006) or the grace running out, the browser gets exactly one
+// typed "moved" close (4301, before the process exits), and its reattach continues with the next record, nothing
+// repeated and nothing lost.
 func TestHandOverEndsBrowserTerminalsMovedAndReattachContinues(t *testing.T) {
+	for _, end := range []string{"carrier detaches first", "grace ends first"} {
+		t.Run(end, func(t *testing.T) { handOverEndsBrowserTerminalsMoved(t, end == "carrier detaches first") })
+	}
+}
+
+func handOverEndsBrowserTerminalsMoved(t *testing.T, carrierFirst bool) {
 	var logs lockedBuffer
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
@@ -295,7 +303,13 @@ func TestHandOverEndsBrowserTerminalsMovedAndReattachContinues(t *testing.T) {
 	}
 	read(first, "r1")
 
-	hub.HandOver()
+	oldFence := BrowserTerminalRouteFence{Identity: identity, Revision: 1, AttachmentGeneration: 1}
+	if carrierFirst {
+		hub.HandOver(time.Hour)
+		hub.DeactivateRoute(route.RouteID, oldFence) // the host's carrier left the old process
+	} else {
+		hub.HandOver(50 * time.Millisecond)
+	}
 	// Exactly one close, and it is the first thing after the last record: no other frame, no plain drop.
 	_, _, err = first.Read(ctx)
 	var closed websocket.CloseError
@@ -311,6 +325,11 @@ func TestHandOverEndsBrowserTerminalsMovedAndReattachContinues(t *testing.T) {
 	}
 
 	// The browser reattaches (to the replacement process in production) and continues with the next record.
+	if carrierFirst {
+		if err := hub.ActivateRoute(route.RouteID, oldFence); err != nil {
+			t.Fatal(err)
+		}
+	}
 	second := dial()
 	defer second.CloseNow()
 	next := registerWhenSubscribed(t, ctx, hub, key, identity)
