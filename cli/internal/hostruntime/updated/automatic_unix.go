@@ -26,6 +26,7 @@ func (s *Service) automaticCheck(ctx context.Context) (autoupdate.Result, error)
 	defer s.controlMu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, maxUpdateControlTimeout)
 	defer cancel()
+	s.reevaluateActivePolicy(ctx)
 	settings, err := machineUpdateSettings(s.config.StateRoot, s.config.AutomaticUpdates, nil)
 	if err != nil {
 		return autoupdate.Result{}, err

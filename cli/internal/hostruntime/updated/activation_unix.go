@@ -1006,15 +1006,25 @@ func abandonCandidate(ctx context.Context, manager candidateAbandoner, cause err
 	return false, nil
 }
 
-// markRefusedActive is the end of every activation that leaves a version standing: when signed policy refuses it
-// (a recovery put back a revoked previous version, or the installed one was revoked mid-attempt) the journal says
-// release_revoked. A policy lookup that fails changes nothing: the next helper run asks again.
+// reevaluateActivePolicy asks again whether signed policy refuses the active version; the answer of the helper's own
+// lookup may have been unknown. An unknown answer here is not an error: the check's own resolution reports a
+// failing lookup.
+func (s *Service) reevaluateActivePolicy(ctx context.Context) {
+	if manager := s.currentManager(); manager != nil {
+		_ = s.markRefusedActive(ctx, manager)
+	}
+}
+
+// markRefusedActive records release_revoked when signed policy refuses the active version (a recovery put back a
+// revoked previous version, or the installed one was revoked mid-attempt). It runs when the helper finishes and in
+// every update check (reevaluateActivePolicy), so a lookup that fails now (network, expired metadata) changes
+// nothing and is asked again at the next check.
 func (s *Service) markRefusedActive(ctx context.Context, manager *workerupdate.Manager) error {
 	_, err := manager.MarkActiveRefused(ctx, func(active workerupdate.Release) bool {
 		if active.LocalSource != nil && active.LocalSource.Distribution != installsource.Official {
 			return false // a custom build is not bound by signed policy
 		}
-		return errors.Is(s.source.AuthorizeRecovery(ctx, active.Version, active.Platform, active.Architecture), workerupdate.ErrReleaseRevoked)
+		return errors.Is(s.authorize(ctx, active.Version, active.Platform, active.Architecture), workerupdate.ErrReleaseRevoked)
 	})
 	return err
 }
@@ -1044,7 +1054,7 @@ func (s *Service) resolveUnixPreparedRelease(ctx context.Context, handoff *unixA
 	if !handoff.Manual {
 		resolve = s.source.Resolve
 	}
-	return resolveUnixActivationRelease(ctx, handoff, original, nativeStarted, resolve, s.source.AuthorizeRecovery)
+	return resolveUnixActivationRelease(ctx, handoff, original, nativeStarted, resolve, s.authorize)
 }
 
 // Native progress fixes the original approval; ordinary queued work still uses

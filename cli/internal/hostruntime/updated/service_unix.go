@@ -89,8 +89,10 @@ type Config struct {
 }
 
 type Service struct {
-	manager       *workerupdate.Manager
-	source        workerupdate.TUFSource
+	manager *workerupdate.Manager
+	source  workerupdate.TUFSource
+	// authorize is signed policy for a version already on this machine (source.AuthorizeRecovery).
+	authorize     func(ctx context.Context, version, platform, architecture string) error
 	scheduler     *autoupdate.Scheduler
 	control       controlServer
 	controlMu     controlMutex
@@ -141,6 +143,7 @@ func New(config Config) (*Service, error) {
 	}
 	source := workerupdate.TUFSource{RepositoryURL: config.RepositoryURL, StateRoot: filepath.Join(config.StateRoot, "tuf"), MachineID: config.MachineID, FailureDomain: workerupdate.HostdFailureDomainSource{Client: client, MachineID: config.MachineID}, Deferral: deferral}
 	service := &Service{source: source, config: config, managerConfig: workerupdate.Config{StatePath: filepath.Join(config.StateRoot, "transaction.json"), Binary: config.Binary, BinaryStaged: config.BinaryStaged, Active: config.Active, OwnerUID: 0, OwnerGID: 0, Fetcher: source, Hostd: client, Health: config.Health, Gate: config.ActivationGate, Events: config.Events, MonitorWindow: 10 * time.Minute, HealthInterval: time.Second}}
+	service.authorize = source.AuthorizeRecovery
 	service.managerConfig.ApplyPrepared = service.applyPrepared
 	service.managerConfig.RecoverPrepared = service.recoverPrepared
 	service.managerConfig.RecoveryExecutable = config.RecoveryExecutable
@@ -440,6 +443,7 @@ func (s *Service) Check(ctx context.Context) (workerupdate.Result, error) {
 	if err := s.refreshManager(); err != nil {
 		return workerupdate.Result{}, err
 	}
+	s.reevaluateActivePolicy(ctx)
 	// A check only resolves and verifies the signed release metadata. It must
 	// never call Manager.Check, which performs the full activation transaction
 	// (including the health-monitoring hold) and made `pb update check` appear

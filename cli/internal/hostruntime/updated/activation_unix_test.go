@@ -1081,3 +1081,29 @@ func TestARepeatedlyFailingHelperBacksOffThenEndsTheAttempt(t *testing.T) {
 		t.Fatalf("status does not report recovery_required: %+v %v", state, err)
 	}
 }
+
+// An unknown policy answer (network down, metadata expired) when the helper finishes must not hide a revoked
+// version for good: every later update check asks again, and records release_revoked once the answer is known.
+func TestAnUnknownPolicyAnswerIsAskedAgainByTheNextCheck(t *testing.T) {
+	requireRoot(t)
+	_, s, _, _ := deadWriterFixture(t)
+	manager := s.currentManager()
+	answers := []error{errors.New("dial tcp: i/o timeout"), errors.New("metadata expired"), workerupdate.ErrReleaseRevoked}
+	asked := 0
+	s.authorize = func(context.Context, string, string, string) error { asked++; return answers[asked-1] }
+	for i := 1; i <= 2; i++ {
+		s.reevaluateActivePolicy(context.Background())
+		if state, err := manager.TransactionState(); err != nil || state.Failure != updateflow.FailureNone {
+			t.Fatalf("an unknown answer %d was taken for revoked: %+v %v", i, state, err)
+		}
+	}
+	s.reevaluateActivePolicy(context.Background())
+	state, err := manager.TransactionState()
+	if err != nil || state.Failure != updateflow.FailureRevoked || (ControlResponse{Status: "ok", Transaction: state}).UpdateHealth() != "recovery_required" || asked != 3 {
+		t.Fatalf("the known answer was not recorded: asked=%d %+v %v", asked, state, err)
+	}
+	s.reevaluateActivePolicy(context.Background())
+	if asked != 3 {
+		t.Fatalf("a terminal state was asked about again (%d lookups)", asked)
+	}
+}

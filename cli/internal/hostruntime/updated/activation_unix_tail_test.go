@@ -78,7 +78,7 @@ func TestActivationHelperTailChild(t *testing.T) {
 	}
 	buildinfo.Version = handoff.Previous.Version
 	controller := &lockProbingController{root: root}
-	service := &Service{config: Config{StateRoot: root, ActivationController: controller, ActivationGate: statusGate{}, Binary: filepath.Join(root, "pb")},
+	service := &Service{authorize: func(context.Context, string, string, string) error { return nil }, config: Config{StateRoot: root, ActivationController: controller, ActivationGate: statusGate{}, Binary: filepath.Join(root, "pb")},
 		managerConfig: workerupdate.Config{StatePath: filepath.Join(root, "transaction.json"), Binary: filepath.Join(root, "pb"), BinaryStaged: filepath.Join(root, "staged"),
 			OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), Fetcher: statusFetcher{}, Hostd: statusHostd{}, Health: statusHealth{},
 			ApplyPrepared: func(context.Context, workerupdate.PreparedActivation) (installsource.Source, error) {
