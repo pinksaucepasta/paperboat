@@ -64,7 +64,13 @@ func TestWindowsUninstallPlanIsProtectedBoundedAndHelperIsNonRecursive(t *testin
 	// Default state produced by an elevated CLI may have the Administrators
 	// owner. It is still this user's Paperboat namespace, bound to the exact
 	// token profile; an unrelated administrator directory is not authorized.
-	adminState := filepath.Join(directory, "Paperboat")
+	// The rule is bound to the token's real profile directory, wherever TEMP points, so this fixture lives there.
+	profileScratch, err := os.MkdirTemp(profile, "paperboat-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(profileScratch) })
+	adminState := filepath.Join(profileScratch, "Paperboat")
 	if err := os.Mkdir(adminState, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +102,7 @@ func TestWindowsUninstallPlanIsProtectedBoundedAndHelperIsNonRecursive(t *testin
 	if _, err := readWindowsUninstallPlan(planPath); err != nil {
 		t.Fatalf("nested elevated Paperboat state was rejected: %v", err)
 	}
-	unrelatedState := filepath.Join(directory, "unrelated-admin-state")
+	unrelatedState := filepath.Join(profileScratch, "unrelated-admin-state")
 	if err := os.Rename(adminState, unrelatedState); err != nil {
 		t.Fatal(err)
 	}

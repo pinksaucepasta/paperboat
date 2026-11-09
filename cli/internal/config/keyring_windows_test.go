@@ -668,6 +668,23 @@ func TestWindowsMachineScopeSetDoesNotMutateForeignOwnedRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	foreignOwner := changeFixtureOwnerToAdministrators(t, root)
+	// An Administrators-owned root whose ACL holds exactly SYSTEM, Administrators and the user is the trusted legacy
+	// layout that Set migrates, and a temporary directory can inherit exactly that. A foreign root admits someone else.
+	owner, err := currentUserSID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	descriptor, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;" + owner.String() + ")(A;OICI;FR;;;WD)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dacl, _, err := descriptor.DACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := windows.SetNamedSecurityInfo(root, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil); err != nil {
+		t.Fatal(err)
+	}
 	ref := fmt.Sprintf("native-foreign-root-%d", time.Now().UnixNano())
 	if err := (KeyringStore{}).Set(ref, "machine-secret"); !errors.Is(err, ErrCredentialStoreUnavailable) {
 		t.Fatalf("foreign-owned precreated root Set error=%v", err)
