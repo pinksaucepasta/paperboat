@@ -353,7 +353,7 @@ func TestPrivatePreviewGrantReachesTLSHTTPIngress(t *testing.T) {
 	identity.AccountID, identity.TunnelID, identity.ConnectorID, identity.HostID, identity.SessionID = id("user"), id("machine"), id("machine"), id("machine"), id("session")
 	server, client := testEdgePreviewCarrierPair(t, identity)
 	request := edgePrivateAccessRequest(now)
-	request.ExpiresAt = now.Add(time.Second)
+	request.ExpiresAt = now.Add(5 * time.Second)
 	request.AccountID, request.MachineID, request.CarrierSessionID = identity.AccountID, identity.HostID, identity.SessionID
 	request.ResourceID, request.RouteID, request.OperationID = id("preview"), id("route"), id("operation")
 	request.SessionID, request.IdempotencyKey, request.RequestID, request.CorrelationID = id("session"), id("operation"), id("request"), id("correlation")
@@ -440,6 +440,17 @@ func TestPrivatePreviewGrantReachesTLSHTTPIngress(t *testing.T) {
 		return fresh, nil
 	}
 	registry, _ := NewPrivateAccessConnectionRegistry(8)
+	// The connection's own refresh of an expired admission (production sets it in cmd/paperboat-tunnel); not counted
+	// in reauthorizations, which counts the transport's per-request checks.
+	registry.Revalidate = func(_ context.Context, prior connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error) {
+		if revoked.Load() {
+			return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
+		}
+		fresh := decision
+		fresh.IssuedAt = time.Now().UTC()
+		fresh.ExpiresAt = fresh.IssuedAt.Add(4 * time.Second)
+		return fresh, nil
+	}
 	policy, err := New(Config{SelfHosted: true, MaxHeaderBytes: 4096, MaxBodyBytes: 1024, Routes: NewPreviewCarrierRouteMatcher(published), PrivateAccessConnections: registry}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response, err := transport.RoundTrip(r)
 		if err != nil {
@@ -503,7 +514,6 @@ func TestPrivatePreviewGrantReachesTLSHTTPIngress(t *testing.T) {
 		t.Fatalf("HTTP status=%d body=%q err=%v", response.StatusCode, body, err)
 	}
 	response.Body.Close()
-	time.Sleep(time.Until(request.ExpiresAt.Add(50 * time.Millisecond)))
 	// The same admitted TLS connection retains proof after its short ingress
 	// snapshot expires; every new request must obtain current server authority.
 	registry.mu.Lock()

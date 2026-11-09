@@ -18,6 +18,9 @@ type privateConnectionEntry struct {
 	request connectorprotocol.PrivateAccessRequest
 	expires time.Time
 	token   uint64
+	// flight is the in-flight revalidation; retryAt is when a failed one may be tried again.
+	flight  *privateRevalidation
+	retryAt time.Time
 }
 type PrivateAccessConnectionRegistry struct {
 	mu      sync.Mutex
@@ -27,7 +30,7 @@ type PrivateAccessConnectionRegistry struct {
 	closed  bool
 	now     func() time.Time
 	// Revalidate asks the server for a current decision once the admitted one expired (set before
-	// serving). A connection outlives its IngressAuthorityLifetime decision; nil keeps the admitted one.
+	// serving). A connection outlives its IngressAuthorityLifetime decision; without it an expired one is denied.
 	Revalidate func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)
 }
 
@@ -155,32 +158,82 @@ func (r *PrivateAccessConnectionRegistry) RegisterIngress(address string, reques
 
 type privateIngressDecisionKey struct{}
 
+// privateRevalidation is one in-flight server revalidation shared by every request waiting on it.
+type privateRevalidation struct {
+	done chan struct{}
+	next connectorprotocol.IngressDecision
+	ok   bool
+}
+
+const (
+	// privateRevalidateBackoff is how long a transport failure denies without asking the server again.
+	privateRevalidateBackoff = 2 * time.Second
+	privateRevalidateTimeout = 10 * time.Second
+)
+
 func (r *PrivateAccessConnectionRegistry) ingress(ctx context.Context, address string, match route.RouteMatch) (connectorprotocol.IngressDecision, bool) {
 	r.mu.Lock()
 	entry, ok := r.entries[address]
-	if !ok || entry.ingress == nil || !privateAccessRouteMatches(entry.request, match) || entry.ingress.ValidateAdmitted(r.now()) != nil {
+	now := r.now()
+	if !ok || entry.ingress == nil || !privateAccessRouteMatches(entry.request, match) || entry.ingress.ValidateAdmitted(now) != nil {
 		r.mu.Unlock()
 		return connectorprotocol.IngressDecision{}, false
 	}
 	current := *entry.ingress
-	r.mu.Unlock()
-	if current.Validate(r.now()) == nil || r.Revalidate == nil {
+	if current.Validate(now) == nil {
+		r.mu.Unlock()
 		return current, true
 	}
-	// The server answers for the same grant and request, as it does for each preview request; the
-	// answer serves this connection's next requests until it expires too, so revocation lands within
-	// one decision lifetime and the server sees at most one call per lifetime per connection.
-	next, err := r.Revalidate(ctx, current)
-	if err != nil || next.Validate(r.now()) != nil || next.NativeAuthorization == nil || next.NativeAuthorization.Request != entry.request {
+	// An expired decision with no way to refresh it, or inside the backoff after a failed refresh, is denied.
+	if r.Revalidate == nil || now.Before(entry.retryAt) {
+		r.mu.Unlock()
 		return connectorprotocol.IngressDecision{}, false
 	}
-	evidence := *next.NativeAuthorization
-	next.NativeAuthorization = &evidence
+	flight := entry.flight
+	if flight == nil {
+		flight = &privateRevalidation{done: make(chan struct{})}
+		entry.flight = flight
+		r.entries[address] = entry
+		// Detached from this request: a client that gives up must not fail the requests waiting with it.
+		go r.revalidate(context.WithoutCancel(ctx), address, entry, current, flight)
+	}
+	r.mu.Unlock()
+	select {
+	case <-flight.done:
+		return flight.next, flight.ok
+	case <-ctx.Done():
+		return connectorprotocol.IngressDecision{}, false
+	}
+}
+
+// revalidate asks the server for a current decision for the same grant and request, as it does for each
+// preview request. The answer serves this connection's next requests until it expires too, so revocation
+// lands within one decision lifetime. One call is in flight per connection; a transport failure is
+// not retried for privateRevalidateBackoff and an explicit deny holds for the rest of the connection.
+func (r *PrivateAccessConnectionRegistry) revalidate(ctx context.Context, address string, entry privateConnectionEntry, current connectorprotocol.IngressDecision, flight *privateRevalidation) {
+	ctx, cancel := context.WithTimeout(ctx, privateRevalidateTimeout)
+	defer cancel()
+	next, err := r.Revalidate(ctx, current)
+	ok := err == nil && next.Validate(r.now()) == nil && next.NativeAuthorization != nil && next.NativeAuthorization.Request == entry.request
+	if ok {
+		evidence := *next.NativeAuthorization
+		next.NativeAuthorization = &evidence
+		flight.next = next
+	}
+	flight.ok = ok
 	r.mu.Lock()
-	if stored, ok := r.entries[address]; ok && stored.token == entry.token {
-		stored.ingress = &next
+	if stored, found := r.entries[address]; found && stored.token == entry.token {
+		stored.flight = nil
+		switch {
+		case ok:
+			stored.ingress = &next
+		case err == nil || errors.Is(err, connectorprotocol.ErrIngressDenied):
+			stored.retryAt = stored.expires
+		default:
+			stored.retryAt = r.now().Add(privateRevalidateBackoff)
+		}
 		r.entries[address] = stored
 	}
 	r.mu.Unlock()
-	return next, true
+	close(flight.done)
 }
