@@ -3,7 +3,6 @@
 import argparse
 import json
 import os
-from pathlib import Path
 import re
 import select
 import shlex
@@ -14,6 +13,8 @@ from exec_lifecycle import run
 from install_lifecycle import registration
 from terminal_lifecycle import Terminal
 from pairing_lifecycle import command_diagnostic
+import windows_target
+import winhost
 
 
 def shell_ready(terminal):
@@ -42,18 +43,25 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
     args = parser.parse_args()
-    binary = Path.home() / '.local/bin/pb'
+    binary = winhost.pb_path()
     before = registration()
     marker = 'PB_SSH_' + uuid.uuid4().hex
-    command = "printf '%s\\n' " + shlex.quote(marker + '_λ船') + "; printf '%s\\n' PB_SSH_STDERR >&2; exit 37"
+    windows = windows_target.is_windows(binary, args.target)
+    if windows:  # Windows OpenSSH runs the command in cmd.exe: the same bytes and exit code from PowerShell
+        command = windows_target.ssh_command(windows_target.exact_output_script(marker + '_λ船\n', 'PB_SSH_STDERR\n', 37))
+    else:
+        command = "printf '%s\\n' " + shlex.quote(marker + '_λ船') + "; printf '%s\\n' PB_SSH_STDERR >&2; exit 37"
     output, errors = run(binary, 'ssh', args.target, '--', command, expected=37)
     if output != (marker + '_λ船\n').encode() or errors != b'PB_SSH_STDERR\n':
         raise RuntimeError('SSH command changed stdout, Unicode, stderr or exit code')
-    terminal = Terminal([binary, 'ssh', args.target])
+    terminal = Terminal(winhost.terminal_argv(binary, ['ssh', args.target]))
     try:
         # Wait for the authenticated remote shell before sending its command.
         shell_ready(terminal)
-        terminal.send("printf '\\nPB_SSH_READY_%s\\n' '" + marker + "'\r")
+        if windows:
+            terminal.send(windows_target.typed_marker('PB_SSH_READY_' + marker) + '\r')
+        else:
+            terminal.send("printf '\\nPB_SSH_READY_%s\\n' '" + marker + "'\r")
         terminal.expect('PB_SSH_READY_' + marker, timeout=60)
         terminal.send('exit 0\r')
         if terminal.wait_exit(20) != 0:

@@ -91,6 +91,13 @@ SERVICE_PATHS = ("@(Get-CimInstance Win32_Service|Where-Object{$_.Name -like $re
                  "Select-Object Name,PathName)|ConvertTo-Json -Compress")
 LISTENING = ("try{$c=New-Object Net.Sockets.TcpClient('127.0.0.1',[int]$req.port);$c.Close();'yes'}catch{'no'}")
 ALIVE = "if(Get-Process -Id $req.pid -ErrorAction SilentlyContinue){'yes'}else{'no'}"
+WHICH = "(Get-Command $req.name -CommandType Application -ErrorAction SilentlyContinue|Select-Object -First 1).Source"
+# Every file under $req.path as [{p: relative path with /, h: sha256}], base64 of UTF-8 JSON: Windows PowerShell
+# writes stdout in the OEM code page, which would change a Unicode file name.
+TREE = ("$r=(Get-Item -LiteralPath $req.path).FullName;$s=[Security.Cryptography.SHA256]::Create()\n"
+        "$l=@(Get-ChildItem -LiteralPath $r -Recurse -File|ForEach-Object{@{p=$_.FullName.Substring($r.Length+1).Replace('\\','/');"
+        "h=-join($s.ComputeHash([IO.File]::ReadAllBytes($_.FullName))|ForEach-Object{$_.ToString('x2')})}})\n"
+        "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -Compress -InputObject $l)))")
 
 # Runs inside the detached wrapper: pb with output in files and the exit code in `rc` (Start-Process writes raw bytes).
 SPAWN = ("$o=@{FilePath=$req.exe;RedirectStandardInput=$req.inp;RedirectStandardOutput=$req.out;"
@@ -459,21 +466,26 @@ class RemotePath:
     def sha256(self):
         return self.device.sha256(self)
 
+    def tree_hashes(self):
+        """{relative path with /: sha256} of every file below this directory."""
+        listed = json.loads(base64.b64decode(self.device.ps('hash tree %s' % self, TREE, timeout=300, path=str(self))[1]))
+        return {item['p']: item['h'] for item in listed}
+
     def size(self):
         return self.device.size(self)
 
 
 class WindowsPb:
-    """The pb.exe on the device; str() is its path, run_remote() runs it there."""
+    """An executable on the device (pb.exe unless exe names another); str() is its path, run_remote() runs it there."""
 
-    def __init__(self, device):
-        self.device = device
+    def __init__(self, device, exe=None):
+        self.device, self.exe = device, exe or device.pb_exe
 
     def __str__(self):
-        return self.device.pb_exe
+        return self.exe
 
     def run_remote(self, arguments, input=None, env=None, timeout=180, text=True, read_delay=0):
-        return self.device.run([self.device.pb_exe, *arguments], input=input, env=env, timeout=timeout, text=text,
+        return self.device.run([self.exe, *arguments], input=input, env=env, timeout=timeout, text=text,
                                read_delay=read_delay)
 
 
@@ -661,6 +673,16 @@ def pb_path():
     """Replaces Path.home() / '.local/bin/pb' in the checks."""
     target = device()
     return WindowsPb(target) if target else pathlib.Path.home() / '.local/bin/pb'
+
+
+def which(name):
+    """shutil.which on the device under test: the tool as a runnable WindowsPb there, a Path here, None if absent."""
+    target = device()
+    if target:
+        found = target.ps('which ' + name, WHICH, name=name)[1]
+        return WindowsPb(target, found) if found else None
+    found = shutil.which(name)
+    return pathlib.Path(found) if found else None
 
 
 def runtime_dir(default):

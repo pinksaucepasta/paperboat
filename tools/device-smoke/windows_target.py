@@ -173,3 +173,54 @@ def restart_service_detached_script(pb_exe):
     command = "Start-Sleep 1; & %s service restart" % winhost.ps_quote(pb_exe)
     return ("Start-Process -WindowStyle Hidden -FilePath powershell.exe -ArgumentList '-NoProfile','-NonInteractive',"
             "'-EncodedCommand','%s'" % base64.b64encode(command.encode('utf-16-le')).decode())
+
+
+# ---- managed SSH to a Windows target ----------------------------------------------------------------------------
+# Windows OpenSSH hands a remote command to cmd.exe (no DefaultShell is configured by Paperboat) and starts cmd.exe
+# as the interactive shell; there is no sh, printf, id, python3 or rsync.
+
+def ssh_command(script):
+    """The one command string of `pb ssh <target> -- <string>` (or plain ssh) that runs script in PowerShell."""
+    return ' '.join(ps_argv(script))
+
+
+def exact_output_script(out_text, err_text, code):
+    """Writes the exact UTF-8 bytes of out_text to stdout and of err_text to stderr, then exits with code."""
+    return ("$o=[Console]::OpenStandardOutput();$b=[Convert]::FromBase64String('%s');$o.Write($b,0,$b.Length);$o.Flush()\n"
+            "$e=[Console]::OpenStandardError();$b=[Convert]::FromBase64String('%s');$e.Write($b,0,$b.Length);$e.Flush()\n"
+            "exit %d" % (b64(out_text), b64(err_text), code))
+
+
+def typed_marker(token, expression=''):
+    """A line to type at a Windows prompt (cmd.exe or PowerShell) that prints token on a line of its own.
+
+    The console echoes what is typed, so the typed text never contains token itself. expression is PowerShell
+    appended to the token (for example +$env:NAME)."""
+    assert re.fullmatch(r'[A-Za-z0-9_]{4,}', token), token
+    return "powershell -NoProfile -Command \"Write-Output ('%s'+'%s'%s)\"" % (token[:3], token[3:], expression)
+
+
+def username_script():
+    return "[Console]::Out.Write($env:USERNAME)"
+
+
+def _tools_root(name):
+    if not re.fullmatch(r'smoke-ssh-tools-[0-9a-f]{32}', name):
+        raise ValueError('not a directory name of the SSH tools check')
+    return "$r=Join-Path (Join-Path $env:USERPROFILE 'Paperboat') '%s'\n" % name
+
+
+def tools_setup_script(name):
+    """Creates ~/Paperboat/<name>/scp (it must not exist); scp and sftp then use the home-relative path."""
+    return (_tools_root(name) + "if(Test-Path -LiteralPath $r){throw 'the fixture directory already exists'}\n"
+            "[void](New-Item -ItemType Directory -Path (Join-Path $r 'scp'))\n[Console]::Out.Write('created')")
+
+
+def tools_cleanup_script(name):
+    return _tools_root(name) + "Remove-Item -LiteralPath $r -Recurse -Force"
+
+
+def long_script(seconds, marker, step=60):
+    """A line every `step` seconds until `seconds` have passed, then the marker (ssh_long's sh loop)."""
+    return ("$i=0;while($i -lt %d){Start-Sleep -Seconds %d;$i+=%d;[Console]::Out.Write(\"t$i`n\");[Console]::Out.Flush()}\n"
+            "[Console]::Out.Write(\"%s`n\")" % (seconds, step, step, marker))

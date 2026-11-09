@@ -9,9 +9,10 @@ PB_SMOKE_WINDOWS_PB set to the pb.exe path of the saved `pb install --json` rece
 results/windows-<UTC>.json. Checks that need a fixture the run was not given are SKIP, never PASS.
 
 Not ported (they need Git, systemd/launchd, sudo or a signal on the device, or a gate an external driver releases):
-terminal_matrix, install_lifecycle, pairing_lifecycle's uninstall flows, ssh_*, preview_survival/tunnel_survival,
-config_sync/config_sync_lifecycle and config_commands' repository rows, the gated preview_lifecycle/preview_protocols/
-session replay and cross checks, and the target side of exec_lifecycle/transfer_* when the target is Windows.
+terminal_matrix, install_lifecycle, pairing_lifecycle's uninstall flows, the ssh_*.sh and ssh_mac_* checks,
+preview_survival/tunnel_survival, config_sync/config_sync_lifecycle and config_commands' repository rows, and the gated
+preview_lifecycle/preview_protocols/session replay and cross checks. ssh-tools runs scp and sftp only (Windows has no
+rsync). ssh-long holds a session for SMOKE_SSH_LONG_SECONDS (3601 for the real check; pass --timeout above it).
 """
 import argparse
 import contextlib
@@ -63,6 +64,10 @@ def checks(args):
     table['transfer-errors'] = (['transfer_errors.py', args.peer], ['--peer'])
     table['session-manage'] = (['session_lifecycle.py', args.peer, '--check', 'manage'], ['--peer'])
     table['session-sharing-owner'] = (['session_sharing_lifecycle.py', args.peer, '--team', team], ['--peer', '--team'])
+    for name in ('lifecycle', 'tools_lifecycle', 'doctor_lifecycle', 'alias_lifecycle'):
+        table['ssh-' + name.split('_')[0].replace('lifecycle', 'main')] = (['ssh_%s.py' % name, args.peer], ['--peer'])
+    table['ssh-long'] = (['ssh_long.py', args.peer, '--seconds', os.environ.get('SMOKE_SSH_LONG_SECONDS', '')],
+                         ['--peer', 'SMOKE_SSH_LONG_SECONDS'])
     table['config-commands'] = (['config_commands.py'], [])
     table['config-survival'] = (['config_survival.py'], [])
     table['tunnel-manage'] = (['tunnel_manage.py'], [])

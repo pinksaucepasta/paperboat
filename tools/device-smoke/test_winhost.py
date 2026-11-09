@@ -553,5 +553,193 @@ class PreviewFamily(unittest.TestCase):
             self.assertIn('winhost', source, name)
 
 
+
+def shell_words(line):
+    """argv of a command line typed at a Windows prompt, with PowerShell taken from PB_TEST_PWSH."""
+    import shlex
+    words = shlex.split(line)
+    assert words[0] == 'powershell'
+    return [PWSH] + words[1:]
+
+
+@unittest.skipUnless(PWSH, 'set PB_TEST_PWSH to a pwsh binary to run the SSH snippets for real')
+class SshFamilyInPowerShell(unittest.TestCase):
+    def run_line(self, line, env=None):
+        return subprocess.run(shell_words(line), capture_output=True, env=dict(os.environ, **(env or {})))
+
+    def test_tree_hashes_and_which_on_the_device(self):
+        import hashlib
+        device = SnippetsInPowerShell.device if hasattr(SnippetsInPowerShell, 'device') else None
+        if device is None:
+            SnippetsInPowerShell.setUpClass()
+            device = SnippetsInPowerShell.device
+        with device.temp_dir('pb-test') as directory:
+            self.assertEqual({}, directory.tree_hashes())
+            (directory / 'data.bin').write_bytes(bytes(range(256)))
+            (directory / 'nested' / 'λ船.txt').write_text('exact Unicode λ船\n')
+            (directory / 'empty').write_bytes(b'')
+            self.assertEqual({'data.bin': hashlib.sha256(bytes(range(256))).hexdigest(), 'empty': hashlib.sha256(b'').hexdigest(),
+                              'nested/λ船.txt': hashlib.sha256('exact Unicode λ船\n'.encode()).hexdigest()}, directory.tree_hashes())
+        with patch.object(winhost, 'device', lambda: device):
+            self.assertEqual('sh', pathlib.PurePosixPath(str(winhost.which('sh'))).name)
+            self.assertTrue(hasattr(winhost.which('sh'), 'run_remote'))
+            self.assertIsNone(winhost.which('pb-no-such-tool'))
+
+    def test_ssh_command_is_one_line_cmd_passes_through_unchanged(self):
+        import windows_target
+        line = windows_target.ssh_command(windows_target.exact_output_script('m_λ船\n', 'PB_SSH_STDERR\n', 37))
+        self.assertNotRegex(line, r'["\'&|<>^%\n]')  # nothing cmd.exe or a POSIX shell would interpret
+        done = self.run_line(line)
+        self.assertEqual((37, 'm_λ船\n'.encode(), b'PB_SSH_STDERR\n'), (done.returncode, done.stdout, done.stderr))
+
+    def test_typed_marker_prints_the_token_its_own_text_does_not_contain(self):
+        import windows_target
+        line = windows_target.typed_marker('PB_SSH_READY_abc')
+        self.assertNotIn('PB_SSH_READY_abc', line)
+        self.assertEqual(b'PB_SSH_READY_abc', self.run_line(line).stdout.strip())
+        line = windows_target.typed_marker('PB_KEY_', "+$env:PB_MARK+'_k1'")
+        self.assertEqual(b'PB_KEY_m7_k1', self.run_line(line, {'PB_MARK': 'm7'}).stdout.strip())
+        with self.assertRaises(AssertionError):
+            windows_target.typed_marker("x'; exit")
+
+    def test_username_tools_directory_and_long_scripts(self):
+        import tempfile
+        import windows_target
+        run = lambda script, env=None: self.run_line(windows_target.ssh_command(script), env)  # noqa: E731
+        self.assertEqual(b'pb user', run(windows_target.username_script(), {'USERNAME': 'pb user'}).stdout)
+        name = 'smoke-ssh-tools-' + '0' * 32
+        with tempfile.TemporaryDirectory() as home:
+            env = {'USERPROFILE': home}
+            made = run(windows_target.tools_setup_script(name), env)
+            self.assertEqual((0, b'created'), (made.returncode, made.stdout))
+            self.assertTrue((pathlib.Path(home) / 'Paperboat' / name / 'scp').is_dir())
+            self.assertNotEqual(0, run(windows_target.tools_setup_script(name), env).returncode)  # exist_ok=False
+            (pathlib.Path(home) / 'Paperboat' / 'keep').write_text('mine')
+            self.assertEqual(0, run(windows_target.tools_cleanup_script(name), env).returncode)
+            self.assertEqual(['keep'], [p.name for p in (pathlib.Path(home) / 'Paperboat').iterdir()])
+        done = run(windows_target.long_script(2, 'PB_SSH_LONG_x', step=1))
+        self.assertEqual((0, b't1\nt2\nPB_SSH_LONG_x\n'), (done.returncode, done.stdout))
+
+
+class SshFamilyPlumbing(unittest.TestCase):
+    def test_tools_directory_names_are_only_this_checks(self):
+        import windows_target
+        for bad in ('Inbox', '..', 'smoke-ssh-tools-xyz', "smoke-ssh-tools-" + '0' * 32 + "'"):
+            with self.assertRaises(ValueError):
+                windows_target.tools_cleanup_script(bad)
+
+    def test_windows_pb_runs_another_executable_and_long_script_defaults_to_a_minute(self):
+        import windows_target
+        device = winhost.WindowsDevice(target='user@host', pb_exe=EXE, password='secret')
+        fake = FakeSsh((0, envelope(0, b'ok')))
+        with patch('subprocess.run', fake):
+            tool = winhost.WindowsPb(device, r'C:\Windows\System32\OpenSSH\ssh.exe')
+            self.assertEqual('ok', tool.run_remote(['-V']).stdout)
+        self.assertEqual(r'C:\Windows\System32\OpenSSH\ssh.exe', fake.calls[0]['payload']['exe'])
+        self.assertEqual(EXE, str(winhost.WindowsPb(device)))
+        self.assertIn('Start-Sleep -Seconds 60;$i+=60', windows_target.long_script(3601, 'M'))
+
+    def test_doctor_hides_openssh_by_path_on_unix_and_by_its_override_on_windows(self):
+        import ssh_doctor_lifecycle
+        ready = {'machine': {'alias': 'peer'}, 'openssh': {'ready': True}, 'local_configuration': 'ready',
+                 'managed_agent': 'ready', 'transport': 'ready', 'target': {'state': 'ready', 'port': 22},
+                 'host_identity': 'k', 'managed_keys': 'reconciled'}
+        refused = SimpleNamespace(returncode=1, args=[], stderr='', stdout=json.dumps(
+            {'error': {'message': 'A supported OpenSSH client is unavailable. Install OpenSSH'}}))
+        for windows in (False, True):
+            seen = {}
+
+            def result(binary, *arguments, env, timeout):
+                seen.update(env=env)
+                return refused
+
+            import contextlib
+            directory = winhost.RemotePath(winhost.WindowsDevice(pb_exe=EXE, password=''), r'C:\T\d') if windows else pathlib.Path('/tmp/d')
+            with patch.dict(os.environ, {'PB_SMOKE_WINDOWS_PB': EXE} if windows else {'CONTROLLER_ONLY': '1'}, clear=True), \
+                    patch.object(ssh_doctor_lifecycle, 'registration', lambda: 1), \
+                    patch.object(ssh_doctor_lifecycle, 'invoke', lambda *a, **k: ready), \
+                    patch.object(ssh_doctor_lifecycle, 'command_result', result), \
+                    patch.object(winhost, 'workdir', lambda prefix: contextlib.nullcontext(directory)), \
+                    patch('sys.argv', ['x', 'peer']), patch('builtins.print'):
+                ssh_doctor_lifecycle.main()
+            if windows:  # an overlay for the device: never the controller's environment
+                self.assertEqual({'PAPERBOAT_OPENSSH_PATH': r'C:\T\d\ssh.exe'}, seen['env'])
+            else:
+                self.assertEqual({'CONTROLLER_ONLY': '1', 'PATH': '/tmp/d'}, seen['env'])
+
+    def tools_run(self, windows):
+        """ssh_tools_lifecycle.main() against a fake pb whose scp/sftp/rsync copy inside a local directory."""
+        import shlex
+        import shutil
+        import tempfile
+        import ssh_tools_lifecycle
+        import windows_target
+        calls = []
+        with tempfile.TemporaryDirectory() as remote_home:
+            home = pathlib.Path(remote_home)
+
+            def local(operand):
+                if not operand.startswith('peer:'):
+                    return pathlib.Path(operand)
+                return home / operand[5:] if windows else pathlib.Path(operand[5:])
+
+            def run(binary, tool, *arguments, **_):
+                calls.append((tool, arguments))
+                if tool == 'ssh' and windows:  # the PowerShell itself runs for real in SshFamilyInPowerShell
+                    if len(calls) == 1:
+                        (home / 'Paperboat' / self.fixture / 'scp').mkdir(parents=True)
+                    else:
+                        shutil.rmtree(home / 'Paperboat' / self.fixture)
+                    return b'created', b''
+                if tool == 'ssh':
+                    code = shlex.split(arguments[2])[2]
+                    done = subprocess.run([sys.executable, '-c', code], capture_output=True, env=dict(os.environ, HOME=remote_home))
+                    self.assertEqual(0, done.returncode, done.stderr)
+                    return done.stdout, b''
+                if tool == 'scp':
+                    source, target = local(arguments[1]), local(arguments[2])
+                    shutil.copytree(source, target / source.name if str(arguments[2]).endswith('/') else target)
+                elif tool == 'rsync':
+                    shutil.copytree(local(arguments[1]), local(arguments[2]), dirs_exist_ok=True)
+                elif tool == 'sftp':
+                    for line in pathlib.Path(arguments[1]).read_text().splitlines():
+                        verb, *paths = shlex.split(line)
+                        remote = lambda p: home / p if windows else pathlib.Path(p)  # noqa: E731
+                        if verb == 'put':
+                            shutil.copyfile(paths[0], remote(paths[1]))
+                        elif verb == 'get':
+                            shutil.copyfile(remote(paths[0]), paths[1])
+                        else:
+                            remote(paths[0]).unlink()
+                return b'', b''
+
+            (home / 'Paperboat').mkdir()
+            fixed = SimpleNamespace(hex='ab' * 16)
+            self.fixture = 'smoke-ssh-tools-' + fixed.hex
+            printed = []
+            with patch.object(ssh_tools_lifecycle, 'run', run), patch.object(ssh_tools_lifecycle, 'registration', lambda: 1), \
+                    patch.object(windows_target, 'is_windows', lambda binary, target: windows), \
+                    patch.object(ssh_tools_lifecycle.uuid, 'uuid4', lambda: fixed), \
+                    patch.dict(os.environ, {'HOME': os.environ['HOME']}, clear=True), \
+                    patch('sys.argv', ['x', 'peer']), patch('builtins.print', printed.append):
+                ssh_tools_lifecycle.main()
+            return calls, json.loads(printed[-1]), sorted(p.name for p in (home / 'Paperboat').iterdir())
+
+    def test_tools_round_trip_to_a_unix_target_keeps_rsync_and_the_python_fixture(self):
+        calls, receipt, left = self.tools_run(windows=False)
+        self.assertEqual(['ssh', 'scp', 'scp', 'sftp', 'rsync', 'rsync', 'ssh'], [tool for tool, _ in calls])
+        self.assertTrue(calls[0][1][2].startswith('python3 -c '))
+        self.assertEqual(['scp', 'sftp', 'rsync'], receipt['tools'])
+        self.assertEqual([], left)
+
+    def test_tools_round_trip_to_a_windows_target_uses_powershell_and_home_relative_paths(self):
+        calls, receipt, left = self.tools_run(windows=True)
+        self.assertEqual([], left)
+        self.assertEqual(['ssh', 'scp', 'scp', 'sftp', 'ssh'], [tool for tool, _ in calls])
+        self.assertTrue(calls[0][1][2].startswith('powershell -NoProfile '))
+        self.assertEqual('peer:Paperboat/' + self.fixture + '/scp/', calls[1][1][2])
+        self.assertEqual(['scp', 'sftp'], receipt['tools'])
+
+
 if __name__ == '__main__':
     unittest.main()
