@@ -517,3 +517,26 @@ func TestRevokedSigningKeyReachesRelayTrustPostgres(t *testing.T) {
 		}
 	}
 }
+
+// A starting relay is answered with the current trust document, so it never trusts a stale startup file.
+func TestRelayStartAnswersTrustDocumentPostgres(t *testing.T) {
+	n := newRelaySubjectsNode(t, "relay_start_trust")
+	ctx := t.Context()
+	n.exec(ctx, `UPDATE control_tunnel_nodes SET transports=ARRAY['derp_quic','derp_wss'] WHERE id=$1`, n.id)
+	raw, _ := json.Marshal(relayNodeStart{NodeID: n.id, ExpectedGeneration: n.generation, ProcessEpoch: n.epoch + "-next"})
+	req := httptest.NewRequest(http.MethodPost, "/v1/relay/nodes/start", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	n.service.handleRelayStart(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("start status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var lease relayNodeLeaseDocument
+	if err := json.Unmarshal(rec.Body.Bytes(), &lease); err != nil {
+		t.Fatal(err)
+	}
+	want, err := n.service.signer.JWKSJSON()
+	if err != nil || string(lease.JWKS) != string(want) {
+		t.Fatalf("start trust document = %s, want %s (%v)", lease.JWKS, want, err)
+	}
+}

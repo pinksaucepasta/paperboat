@@ -4,6 +4,7 @@ package nodelifecycle
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -77,9 +78,11 @@ type Client struct {
 	// mu serializes observations: Run polls while a grant naming an unknown key id may refresh out of band.
 	mu    sync.Mutex
 	lease Lease
-	// jwks is the trust document last applied, so a steady one is not parsed again.
-	jwks []byte
-	lock *os.File
+	// jwks is the trust document last applied, so a steady one is not parsed again; startKeys are the keys
+	// the start answer's document left (nil when it carried none).
+	jwks      []byte
+	startKeys map[string]ed25519.PublicKey
+	lock      *os.File
 	// sentSubjects is the digest of the subjects list the control plane last accepted in full; an
 	// observation sends only the digest while the set is unchanged (~400 KB every 3 s at 4,096
 	// connections otherwise).
@@ -274,6 +277,14 @@ func (c *Client) Start(ctx context.Context) (Lease, error) {
 	if out.Generation != s.Generation+1 || out.ProcessEpoch != s.PendingEpoch {
 		return Lease{}, ErrControl
 	}
+	// The control plane's current trust document outranks the startup file the process was given.
+	if len(out.JWKS) != 0 {
+		keys, err := c.cfg.Trust.Apply(out.JWKS)
+		if err != nil {
+			return Lease{}, ErrControl
+		}
+		c.startKeys, c.jwks = keys, out.JWKS
+	}
 	s.Generation = out.Generation
 	s.PendingEpoch = ""
 	if err := c.save(s); err != nil {
@@ -282,6 +293,10 @@ func (c *Client) Start(ctx context.Context) (Lease, error) {
 	c.lease = out
 	return out, nil
 }
+
+// StartKeys are the grant keys the start answer's trust document left, or nil when it carried none: the
+// relay serves with them instead of a possibly stale startup file.
+func (c *Client) StartKeys() map[string]ed25519.PublicKey { return c.startKeys }
 
 // Close releases the process ownership lock after Run has stopped.
 func (c *Client) Close() error {

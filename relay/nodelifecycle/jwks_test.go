@@ -33,8 +33,11 @@ type trustRelay struct {
 }
 
 // A non-nil trust is the one the relay started from (its startup file), shared with the client.
-func newTrustRelay(t *testing.T, trust *jwks.Trust) *trustRelay {
+func newTrustRelay(t *testing.T, trust *jwks.Trust, startDoc ...string) *trustRelay {
 	r := &trustRelay{t: t, pubs: map[string]string{}}
+	if len(startDoc) != 0 {
+		r.doc = startDoc[0]
+	}
 	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		var in struct {
 			NodeID     string `json:"node_id"`
@@ -203,5 +206,18 @@ func TestStartupWithdrawalSurvivesAStaleObservation(t *testing.T) {
 	r.serve(r.document("", "old", "new"))
 	if err := r.observe(); err != nil || !slices.Equal(r.server.KeyIDs(), []string{"new"}) {
 		t.Fatalf("a stale document re-trusted a key the startup file withdrew: %v %v", r.server.KeyIDs(), err)
+	}
+}
+
+// The start answer carries the current trust document: a relay started from a stale file serves with the
+// answer's keys, and an answer that is not a usable document stops the start.
+func TestStartAnswerTrustDocumentOutranksTheStartupFile(t *testing.T) {
+	fresh := &trustRelay{pubs: map[string]string{}}
+	r := newTrustRelay(t, nil, fresh.document(`["old"]`, "old", "new"))
+	if got := r.client.StartKeys(); len(got) != 1 || got["new"] == nil {
+		t.Fatalf("start keys = %v, want only new", got)
+	}
+	if none := newTrustRelay(t, nil); none.client.StartKeys() != nil {
+		t.Fatal("an answer without a document produced start keys")
 	}
 }

@@ -149,6 +149,9 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 	if err != nil {
 		return serviceFailure{error: err, definition: "service_start"}
 	}
+	if keys := control.StartKeys(); keys != nil {
+		trusted = keys
+	}
 	server, err := derpquic.NewServer(derpquic.Verifier{Issuer: *issuer, NodeID: *node, NodeGeneration: lease.Generation, ProcessEpoch: lease.ProcessEpoch, Keys: trusted})
 	if err != nil {
 		return err

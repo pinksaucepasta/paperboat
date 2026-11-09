@@ -289,6 +289,11 @@ func (s *EdgeService) handleRelayStart(w http.ResponseWriter, r *http.Request) {
 		writeEdgeError(w, r, http.StatusConflict, "relay_node_fenced", false, 0, err)
 		return
 	}
+	// A starting relay gets the current trust document, so it never serves on a stale startup file.
+	if out.JWKS, err = s.trustKeys(r.Context()); err != nil {
+		writeEdgeError(w, r, http.StatusServiceUnavailable, "provider_unavailable", true, 1000, err)
+		return
+	}
 	writeEdgeJSON(w, http.StatusOK, out)
 }
 
