@@ -325,7 +325,7 @@ func (r *GitRepository) open(ctx context.Context) (accessResult RepositoryAccess
 		}
 		defer func() { resultErr = repositoryCleanupFailure(resultErr, os.RemoveAll(staging)) }()
 		_, cloneErr := git.PlainCloneContext(ctx, staging, false, &git.CloneOptions{
-			URL: repositoryURL, Auth: opts.auth, CABundle: opts.ca,
+			URL: gitRepositoryURL(repositoryURL), Auth: opts.auth, CABundle: opts.ca,
 			RemoteName: "origin", ReferenceName: plumbing.NewBranchReferenceName(access.Branch),
 			SingleBranch: true, NoCheckout: false, Tags: git.NoTags,
 		})
@@ -351,7 +351,7 @@ func (r *GitRepository) open(ctx context.Context) (accessResult RepositoryAccess
 	if err != nil {
 		return RepositoryAccess{}, nil, errors.Join(ErrGitRepositoryInvalid, sanitizeGitError(err))
 	}
-	if urls := remote.Config().URLs; len(urls) != 1 || urls[0] != repositoryURL {
+	if urls := remote.Config().URLs; len(urls) != 1 || urls[0] != gitRepositoryURL(repositoryURL) {
 		// The clone only caches the repository this assignment currently names. When the machine
 		// is pointed at another repository the cache is stale, not invalid: drop it and clone
 		// afresh (a baseline of another repository is already ignored by the reconciler).

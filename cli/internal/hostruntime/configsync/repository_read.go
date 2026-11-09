@@ -127,7 +127,7 @@ func readSharedRepositoryConfig(ctx context.Context, root, credentialRoot string
 		return fail(repositoryUnavailableFailure(err))
 	}
 	store := &repositoryReadStorage{Storer: filesystem.NewStorage(osfs.New(filepath.Clean(staging)), cache.NewObjectLRUDefault()), ctx: ctx, root: staging}
-	repository, err := git.CloneContext(ctx, store, nil, &git.CloneOptions{URL: access.CloneURL, Auth: opts.auth, CABundle: opts.ca, RemoteName: "origin", ReferenceName: plumbing.NewBranchReferenceName(access.Branch), SingleBranch: true, NoCheckout: true, Tags: git.NoTags})
+	repository, err := git.CloneContext(ctx, store, nil, &git.CloneOptions{URL: gitRepositoryURL(access.CloneURL), Auth: opts.auth, CABundle: opts.ca, RemoteName: "origin", ReferenceName: plumbing.NewBranchReferenceName(access.Branch), SingleBranch: true, NoCheckout: true, Tags: git.NoTags})
 	if err != nil {
 		underlying := gitUnderlyingError(err)
 		if errors.Is(underlying, ErrRepositoryReadLimit) && !errors.Is(underlying, ErrRepositoryUnavailable) {

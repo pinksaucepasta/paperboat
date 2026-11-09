@@ -4,17 +4,19 @@ import (
 	"context"
 	"crypto/x509"
 	"errors"
-	sshagent "github.com/xanzy/ssh-agent"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"unicode"
+
+	sshagent "github.com/xanzy/ssh-agent"
 
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/client"
@@ -95,6 +97,17 @@ func nativeRepositoryPath(endpoint string) (string, error) {
 		return "", ErrRepositoryUnavailable
 	}
 	return path, nil
+}
+
+// gitRepositoryURL is the URL go-git is given. It is the endpoint itself, except for a file URL on Windows: go-git's
+// file transport would open its "/C:/..." path literally, so it gets the drive path, which it handles.
+func gitRepositoryURL(endpoint string) string {
+	if runtime.GOOS == "windows" && strings.HasPrefix(endpoint, "file://") {
+		if native, err := nativeRepositoryPath(endpoint); err == nil {
+			return native
+		}
+	}
+	return endpoint
 }
 
 var installRepositoryTransports sync.Once

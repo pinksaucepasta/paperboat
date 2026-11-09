@@ -557,7 +557,11 @@ func TestCredentialProfileStrictDataAndRootProtection(t *testing.T) {
 func TestLocalFileURLNoGitPublish(t *testing.T) {
 	bare, _ := transportFixture(t)
 	t.Setenv("PATH", "")
-	repo := newTransportRepository(t, "file://localhost"+filepath.ToSlash(bare), "local", "")
+	urlPath := filepath.ToSlash(bare)
+	if !strings.HasPrefix(urlPath, "/") {
+		urlPath = "/" + urlPath // Windows: file://localhost/C:/...
+	}
+	repo := newTransportRepository(t, "file://localhost"+urlPath, "local", "")
 	snap, err := repo.Fetch(context.Background())
 	if err != nil {
 		t.Fatal(err)
