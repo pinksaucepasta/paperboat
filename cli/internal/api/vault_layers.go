@@ -52,6 +52,8 @@ type VaultLayerContext struct {
 	ActorAccountID string               `json:"actor_account_id"`
 	MachineID      string               `json:"machine_id"`
 	Layers         []VaultLayerDelivery `json:"layers"`
+	// NamesListable is the workspace setting "Commands on machines can list ENV names".
+	NamesListable bool `json:"names_listable"`
 }
 
 func (c *Client) VaultLayerRecipients(ctx context.Context, source VaultLayerCoordinate) ([]VaultLayerRecipient, error) {

@@ -26,8 +26,11 @@ const envHookBudget = 1500 * time.Millisecond
 // cause; quiet results (no login, other account) print nothing at all.
 type envHookResult struct {
 	values []string
+	names  []runtime.EnvironmentName // only from the names request
 	reason string
 	quiet  bool
+	// disabled: the workspace turned off "Commands on machines can list ENV names".
+	disabled bool
 }
 
 func (r envHookResult) summary() string {
@@ -101,6 +104,15 @@ func readEnvHookRecord(command *cobra.Command) (envHookRecord, error) {
 // this unix user is still the recorded one; the runtime then refuses any
 // account but its own.
 func loadEnvironmentHook(ctx context.Context, command *cobra.Command, record envHookRecord) envHookResult {
+	return loadFromRuntime(ctx, command, record, runtime.ShellEnvironmentPath)
+}
+
+// loadEnvironmentNames asks the same runtime for the names only (`pb env names`).
+func loadEnvironmentNames(ctx context.Context, command *cobra.Command, record envHookRecord) envHookResult {
+	return loadFromRuntime(ctx, command, record, runtime.ShellEnvironmentNamesPath)
+}
+
+func loadFromRuntime(ctx context.Context, command *cobra.Command, record envHookRecord, path string) envHookResult {
 	cfg, err := workspaceConfig(configPathFlag(command), "")
 	if err != nil {
 		return envHookResult{quiet: true}
@@ -113,15 +125,15 @@ func loadEnvironmentHook(ctx context.Context, command *cobra.Command, record env
 	if err != nil {
 		return envHookResult{reason: "the Paperboat runtime is not running"}
 	}
-	return requestShellEnvironment(ctx, endpoint, token, record)
+	return requestShellEnvironment(ctx, endpoint, token, path, record)
 }
 
-func requestShellEnvironment(ctx context.Context, endpoint, token string, record envHookRecord) envHookResult {
+func requestShellEnvironment(ctx context.Context, endpoint, token, path string, record envHookRecord) envHookResult {
 	body, err := json.Marshal(map[string]string{"workspace_id": record.WorkspaceID, "account_id": record.AccountID})
 	if err != nil {
 		return envHookResult{reason: "the request could not be built"}
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+runtime.ShellEnvironmentPath, bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+path, bytes.NewReader(body))
 	if err != nil {
 		return envHookResult{reason: "the request could not be built"}
 	}
@@ -138,7 +150,8 @@ func requestShellEnvironment(ctx context.Context, endpoint, token string, record
 	defer response.Body.Close()
 	var envelope struct {
 		Data *struct {
-			Values []string `json:"values"`
+			Values []string                  `json:"values"`
+			Names  []runtime.EnvironmentName `json:"names"`
 		} `json:"data"`
 		Error *struct {
 			Code string `json:"code"`
@@ -148,7 +161,7 @@ func requestShellEnvironment(ctx context.Context, endpoint, token string, record
 		return envHookResult{reason: "the Paperboat runtime sent an unreadable answer"}
 	}
 	if response.StatusCode == http.StatusOK && envelope.Data != nil {
-		return envHookResult{values: envelope.Data.Values}
+		return envHookResult{values: envelope.Data.Values, names: envelope.Data.Names}
 	}
 	code := ""
 	if envelope.Error != nil {
@@ -157,6 +170,8 @@ func requestShellEnvironment(ctx context.Context, endpoint, token string, record
 	switch code {
 	case "account_mismatch":
 		return envHookResult{quiet: true}
+	case "names_listing_disabled":
+		return envHookResult{disabled: true}
 	case "environment_pending":
 		return envHookResult{reason: "ENV delivery to this machine is pending (no network, or run `pb env vault unlock`)"}
 	case "environment_undeliverable":
@@ -213,7 +228,6 @@ func shellSingleQuote(value string) string {
 func fishSingleQuote(value string) string {
 	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(value) + "'"
 }
-
 
 // envHookTerminal is where the one-line notice goes. The hook line discards
 // pb's stderr so an old or broken pb never adds noise to shell startup; the

@@ -23,6 +23,18 @@ import (
 // the unix user that owns this runtime can call it.
 const ShellEnvironmentPath = "/v1/shell-environment"
 
+// ShellEnvironmentNamesPath serves only the names of the same ENV (`pb env names`), never values.
+const ShellEnvironmentNamesPath = ShellEnvironmentPath + "/names"
+
+// EnvironmentName is one variable a command here receives: its name and the layer it comes from.
+type EnvironmentName struct {
+	Name  string `json:"name"`
+	Scope string `json:"scope"`
+}
+
+// errEnvironmentNamesDisabled: the workspace turned off "Commands on machines can list ENV names".
+var errEnvironmentNamesDisabled = errors.New("the workspace does not let commands on machines list ENV names")
+
 // shellEnvironmentTTL bounds how long a delivered set is reused without the
 // control plane. Values stay in this process's memory only.
 const shellEnvironmentTTL = 60 * time.Second
@@ -38,6 +50,7 @@ const shellEnvironmentTimeout = 5 * time.Second
 // never read another account's values, even one that may launch here.
 type ownerShellEnvironment interface {
 	OwnerShellEnvironment(ctx context.Context, workspace, account string) ([]string, error)
+	OwnerEnvironmentNames(ctx context.Context, workspace, account string) ([]EnvironmentName, error)
 }
 
 type shellEnvironmentHandler struct {
@@ -84,6 +97,10 @@ func (h *shellEnvironmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		writeShellEnvironmentError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
+	if r.URL.Path == ShellEnvironmentNamesPath {
+		h.serveNames(w, r, in)
+		return
+	}
 	values, err := h.environment(r.Context(), in)
 	switch {
 	case errors.Is(err, errShellEnvironmentAccount):
@@ -92,6 +109,23 @@ func (h *shellEnvironmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		writeShellEnvironmentError(w, http.StatusServiceUnavailable, envinject.LaunchNoticeFor(err))
 	default:
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"values": values}})
+	}
+}
+
+// serveNames answers with names only. It is not cached, so turning the setting off applies at the next call.
+func (h *shellEnvironmentHandler) serveNames(w http.ResponseWriter, r *http.Request, in shellEnvironmentRequest) {
+	ctx, cancel := context.WithTimeout(r.Context(), shellEnvironmentTimeout)
+	defer cancel()
+	names, err := h.source.OwnerEnvironmentNames(ctx, in.WorkspaceID, in.AccountID)
+	switch {
+	case errors.Is(err, errShellEnvironmentAccount):
+		writeShellEnvironmentError(w, http.StatusForbidden, "account_mismatch")
+	case errors.Is(err, errEnvironmentNamesDisabled):
+		writeShellEnvironmentError(w, http.StatusForbidden, "names_listing_disabled")
+	case err != nil:
+		writeShellEnvironmentError(w, http.StatusServiceUnavailable, envinject.LaunchNoticeFor(err))
+	default:
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"names": names}})
 	}
 }
 
@@ -163,9 +197,8 @@ func writeShellEnvironmentError(w http.ResponseWriter, status int, code string) 
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": code}})
 }
 
-// OwnerShellEnvironment resolves the installation account's own ENV for one
-// workspace, exactly as a launch by that account would receive it.
-func (s *layerEnvironmentService) OwnerShellEnvironment(ctx context.Context, workspace, account string) ([]string, error) {
+// ownerLaunchContext is the shared start of every owner request: the installation's own account only.
+func (s *layerEnvironmentService) ownerLaunchContext(ctx context.Context, workspace, account string) (context.Context, error) {
 	if s == nil || s.isClosed() {
 		return nil, envinject.ErrNotReady
 	}
@@ -178,5 +211,38 @@ func (s *layerEnvironmentService) OwnerShellEnvironment(ctx context.Context, wor
 	if owner == "" || owner != account {
 		return nil, errShellEnvironmentAccount
 	}
-	return s.layerEnvironmentForLaunch(envinject.WithLaunchContext(ctx, workspace, owner))
+	return envinject.WithLaunchContext(ctx, workspace, owner), nil
+}
+
+// OwnerShellEnvironment resolves the installation account's own ENV for one
+// workspace, exactly as a launch by that account would receive it.
+func (s *layerEnvironmentService) OwnerShellEnvironment(ctx context.Context, workspace, account string) ([]string, error) {
+	launch, err := s.ownerLaunchContext(ctx, workspace, account)
+	if err != nil {
+		return nil, err
+	}
+	return s.layerEnvironmentForLaunch(launch)
+}
+
+// OwnerEnvironmentNames lists the names (never values) that launch would receive and the layer each comes
+// from. It refuses when the workspace has turned name listing off.
+func (s *layerEnvironmentService) OwnerEnvironmentNames(ctx context.Context, workspace, account string) ([]EnvironmentName, error) {
+	launch, err := s.ownerLaunchContext(ctx, workspace, account)
+	if err != nil {
+		return nil, err
+	}
+	var names layerEnvironmentNames
+	values, err := s.layerEnvironment(launch, &names)
+	if err != nil {
+		return nil, err
+	}
+	if !names.Listable {
+		return nil, errEnvironmentNamesDisabled
+	}
+	out := make([]EnvironmentName, 0, len(values))
+	for _, entry := range values { // already sorted by name
+		name, _, _ := strings.Cut(entry, "=")
+		out = append(out, EnvironmentName{Name: name, Scope: names.Scopes[name]})
+	}
+	return out, nil
 }

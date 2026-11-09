@@ -4,9 +4,13 @@ Manage automatic global ENV and device overrides
 
 ### Synopsis
 
-Manage automatic global ENV and device overrides
+Manage encrypted ENV values by personal, team or machine scope. Vault commands control key custody, while set and unset change exact values. Listing shows metadata without revealing a value.
 
-Manage encrypted ENV values by personal, team, or host scope. Vault commands control key custody, while set and unset change exact values. Listing shows metadata without revealing a value.
+How an AI agent finds and uses a secret:
+  pb env names                       which ENV names commands here receive (never values)
+  pb env run -- <command>            run a command with those values in its environment
+  printf %s "$SECRET" | pb env set NAME --value-stdin     store a secret the user gives you
+Never print, echo or write a value to a file or log: let the program that needs it read it from its environment.
 
 With --json, this command group lists its available commands.
 
@@ -38,6 +42,7 @@ pb env [flags]
 * [pb env host](pb_env_host.md)	 - Inspect automatic workspace ENV delivery
 * [pb env list](pb_env_list.md)	 - List configured environment-variable metadata
 * [pb env load](pb_env_load.md)	 - Load your workspace ENV into the current shell
+* [pb env names](pb_env_names.md)	 - List the names of the ENV variables commands on this machine receive (never values)
 * [pb env rotate](pb_env_rotate.md)	 - Rotate personal ENV scope keys while preserving values
 * [pb env run](pb_env_run.md)	 - Run a command with your workspace ENV in its environment
 * [pb env set](pb_env_set.md)	 - Set one environment variable through a hidden prompt or bounded stdin

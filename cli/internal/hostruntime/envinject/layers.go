@@ -68,6 +68,20 @@ func layerCoordinate(s api.VaultLayerSource) string {
 // Environment accepts only a fresh, machine-authenticated context. Values never
 // enter persistent state; authenticated floors survive restart and cache loss.
 func (s *LayerStore) Environment(ctx context.Context, binding LaunchContext, bundle api.VaultLayerContext) ([]string, error) {
+	return s.environment(ctx, binding, bundle, nil)
+}
+
+// EnvironmentWithScopes is Environment that also says which layer each name came from: "team", "personal"
+// (the account's own values on every machine) or "machine" (this machine's override). Names only, no values.
+func (s *LayerStore) EnvironmentWithScopes(ctx context.Context, binding LaunchContext, bundle api.VaultLayerContext) ([]string, map[string]string, error) {
+	scopes := map[string]string{}
+	values, err := s.environment(ctx, binding, bundle, scopes)
+	return values, scopes, err
+}
+
+var layerScopeNames = [...]string{"team", "personal", "machine"}
+
+func (s *LayerStore) environment(ctx context.Context, binding LaunchContext, bundle api.VaultLayerContext, scopes map[string]string) ([]string, error) {
 	if ctx == nil || s == nil {
 		return nil, ErrInvalidSnapshot
 	}
@@ -218,6 +232,9 @@ func (s *LayerStore) Environment(ctx context.Context, binding LaunchContext, bun
 		for name, value := range opened {
 			clear(values[name])
 			values[name] = value
+			if scopes != nil {
+				scopes[name] = layerScopeNames[n]
+			}
 		}
 		next := layerFloor{RecordFloors: recordFloors, RecordSequence: delivery.RecordSequence, Records: records, Generation: recipient.DeliveryGeneration, DocumentID: recipient.DocumentID, Fence: recipient.FenceGeneration, Epoch: source.KeyEpoch, Revision: source.Revision, SourceID: source.DocumentID, ObservationSeq: previous.ObservationSeq, ObservedState: previous.ObservedState, Pending: previous.Pending}
 		if previous.Generation != next.Generation || previous.DocumentID != next.DocumentID || previous.Fence != next.Fence || previous.ObservedState != "applied" {

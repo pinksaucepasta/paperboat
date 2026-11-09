@@ -10,10 +10,14 @@ pb-env - Manage automatic global ENV and device overrides
 
 
 .SH DESCRIPTION
-Manage automatic global ENV and device overrides
+Manage encrypted ENV values by personal, team or machine scope. Vault commands control key custody, while set and unset change exact values. Listing shows metadata without revealing a value.
 
 .PP
-Manage encrypted ENV values by personal, team, or host scope. Vault commands control key custody, while set and unset change exact values. Listing shows metadata without revealing a value.
+How an AI agent finds and uses a secret:
+  pb env names                       which ENV names commands here receive (never values)
+  pb env run -- <command>            run a command with those values in its environment
+  printf %s "$SECRET" | pb env set NAME --value-stdin     store a secret the user gives you
+Never print, echo or write a value to a file or log: let the program that needs it read it from its environment.
 
 .PP
 With --json, this command group lists its available commands.
@@ -46,4 +50,4 @@ With --json, this command group lists its available commands.
 
 
 .SH SEE ALSO
-\fBpb(1)\fP, \fBpb-env-grants(1)\fP, \fBpb-env-hook(1)\fP, \fBpb-env-host(1)\fP, \fBpb-env-list(1)\fP, \fBpb-env-load(1)\fP, \fBpb-env-rotate(1)\fP, \fBpb-env-run(1)\fP, \fBpb-env-set(1)\fP, \fBpb-env-team(1)\fP, \fBpb-env-unset(1)\fP, \fBpb-env-vault(1)\fP
+\fBpb(1)\fP, \fBpb-env-grants(1)\fP, \fBpb-env-hook(1)\fP, \fBpb-env-host(1)\fP, \fBpb-env-list(1)\fP, \fBpb-env-load(1)\fP, \fBpb-env-names(1)\fP, \fBpb-env-rotate(1)\fP, \fBpb-env-run(1)\fP, \fBpb-env-set(1)\fP, \fBpb-env-team(1)\fP, \fBpb-env-unset(1)\fP, \fBpb-env-vault(1)\fP

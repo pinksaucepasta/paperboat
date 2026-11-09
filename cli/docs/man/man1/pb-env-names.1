@@ -1,0 +1,64 @@
+.nh
+.TH "PB-ENV-NAMES" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-env-names - List the names of the ENV variables commands on this machine receive (never values)
+
+
+.SH SYNOPSIS
+\fBpb env names [flags]\fP
+
+
+.SH DESCRIPTION
+Print the names of the ENV variables that \fBpb env run\fR and the shell hook put into commands on this machine for the active workspace: your team's, your own and this machine's, merged the way they are delivered. Values, their length and their hash are never printed, so a person or an AI agent can see which secret to use (for example STRIPE_API_KEY) without seeing it. --json adds the layer each name comes from: team, personal or machine.
+
+.PP
+A workspace owner can turn this off ("Commands on machines can list ENV names" on the Environment page); then this command says so and prints nothing.
+
+.PP
+How an AI agent finds and uses a secret:
+  pb env names                       which ENV names commands here receive (never values)
+  pb env run -- <command>            run a command with those values in its environment
+  printf %s "$SECRET" | pb env set NAME --value-stdin     store a secret the user gives you
+Never print, echo or write a value to a file or log: let the program that needs it read it from its environment.
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for names
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb env names
+  pb env names --json
+  pb env names | grep -q '^STRIPE_API_KEY$' && pb env run -- ./charge.sh
+.EE
+
+
+.SH SEE ALSO
+\fBpb-env(1)\fP

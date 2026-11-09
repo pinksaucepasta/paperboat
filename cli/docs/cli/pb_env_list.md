@@ -4,7 +4,7 @@ List configured environment-variable metadata
 
 ### Synopsis
 
-List configured environment-variable metadata
+List the names configured in one scope (yours, or --team, or --machine), for managing ENV from your own CLI; this reads your unlocked vault and never prints values. To see which names commands on this machine receive, merged across scopes and without a vault password, run `pb env names`.
 
 List ENV names and scope metadata, optionally limited to a team or host. This does not print plaintext values or key material.
 

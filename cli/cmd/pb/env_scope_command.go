@@ -393,7 +393,7 @@ func listEnvironmentVariablesForScope(command *cobra.Command, team, requestedMac
 	}
 	metadata, err := readVaultScopeMetadata(command.Context(), manager, target)
 	if err != nil {
-		return safeEnvironmentVariableCommandError(err)
+		return withNamesHint(safeEnvironmentVariableCommandError(err))
 	}
 	if jsonOutput {
 		return writeVaultScopeMetadataJSON(command.OutOrStdout(), metadata)

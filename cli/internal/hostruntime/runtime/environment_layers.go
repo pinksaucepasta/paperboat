@@ -45,7 +45,20 @@ func readLayerControlBody(response *http.Response, limit int64) ([]byte, error) 
 	return raw, nil
 }
 
-func (s *layerEnvironmentService) layerEnvironmentForLaunch(ctx context.Context) (values []string, err error) {
+// layerEnvironmentNames says which names a launch would receive, from which layer, and whether the
+// workspace lets commands on machines list them.
+type layerEnvironmentNames struct {
+	Listable bool
+	Scopes   map[string]string
+}
+
+func (s *layerEnvironmentService) layerEnvironmentForLaunch(ctx context.Context) ([]string, error) {
+	return s.layerEnvironment(ctx, nil)
+}
+
+// layerEnvironment is the delivery a launch gets; names, when set, also receives the names' layers and
+// the workspace's names setting.
+func (s *layerEnvironmentService) layerEnvironment(ctx context.Context, names *layerEnvironmentNames) (values []string, err error) {
 	defer func() {
 		if err != nil {
 			err = &envinject.DeliveryError{Cause: err}
@@ -122,6 +135,9 @@ func (s *layerEnvironmentService) layerEnvironmentForLaunch(ctx context.Context)
 		return nil, envinject.ErrInvalidSnapshot
 	}
 	bundle := *envelope.Data
+	if names != nil {
+		names.Listable = bundle.NamesListable
+	}
 	// A fresh authorized empty context has no ENV to decrypt or apply. Preserve
 	// existing rollback floors for a later assigned source without opening them.
 	if len(bundle.Layers) == 0 {
@@ -147,7 +163,11 @@ func (s *layerEnvironmentService) layerEnvironmentForLaunch(ctx context.Context)
 			return nil, err
 		}
 	}
-	values, err = s.layers.Environment(ctx, binding, bundle)
+	var scopes map[string]string
+	values, scopes, err = s.layers.EnvironmentWithScopes(ctx, binding, bundle)
+	if names != nil {
+		names.Scopes = scopes
+	}
 	if flushErr := s.flushLayerObservationsLocked(ctx); flushErr != nil && !errorreport.HTTPAttemptObserved(flushErr) {
 		errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "environment_observation", "control_request", "control_request_failed", flushErr)
 	}

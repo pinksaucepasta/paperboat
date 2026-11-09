@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -237,12 +238,16 @@ func TestEnvHookRequestOutcomes(t *testing.T) {
 		{"locked or pending", `{"error":{"code":"environment_pending"}}`, 503, false, "pending", 0},
 		{"undeliverable", `{"error":{"code":"environment_undeliverable"}}`, 503, false, "failed", 0},
 		{"other account", `{"error":{"code":"account_mismatch"}}`, 403, true, "", 0},
+		{"names setting off", `{"error":{"code":"names_listing_disabled"}}`, 403, false, "", 0},
 	}
 	for _, tc := range cases {
 		url := shellEnvironmentTestServer(t, tc.status, tc.body, 0)
-		got := requestShellEnvironment(t.Context(), url, "token", record)
+		got := requestShellEnvironment(t.Context(), url, "token", runtime.ShellEnvironmentPath, record)
 		if got.quiet != tc.quiet || len(got.values) != tc.values || !strings.Contains(got.reason, tc.reason) {
 			t.Fatalf("%s: got %+v", tc.name, got)
+		}
+		if got.disabled != (tc.name == "names setting off") {
+			t.Fatalf("%s: disabled=%v", tc.name, got.disabled)
 		}
 	}
 }
@@ -252,7 +257,7 @@ func TestEnvHookGivesUpWithinItsBudgetWhenTheRuntimeHangs(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 	defer cancel()
 	started := time.Now()
-	got := requestShellEnvironment(ctx, url, "token", envHookRecord{AccountID: "acct_1", WorkspaceID: "personal"})
+	got := requestShellEnvironment(ctx, url, "token", runtime.ShellEnvironmentPath, envHookRecord{AccountID: "acct_1", WorkspaceID: "personal"})
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("hook waited %v", elapsed)
 	}
@@ -331,4 +336,22 @@ func TestEnvHookEmitSkipsTheRootPreRun(t *testing.T) {
 	if err := hook.PersistentPreRunE(hook, nil); err != nil || !called {
 		t.Fatalf("install/status must keep the root pre-run: called=%v err=%v", called, err)
 	}
+}
+
+func TestEnvNamesRequestReadsNamesFromTheNamesPath(t *testing.T) {
+	var path string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_, _ = w.Write([]byte(`{"data":{"names":[{"name":"STRIPE_API_KEY","scope":"personal"}]}}`))
+	}))
+	defer server.Close()
+	got := loadNamesForTest(t, server.URL)
+	if path != runtime.ShellEnvironmentNamesPath || len(got.names) != 1 || got.names[0].Name != "STRIPE_API_KEY" || len(got.values) != 0 {
+		t.Fatalf("path %q got %+v", path, got)
+	}
+}
+
+func loadNamesForTest(t *testing.T, url string) envHookResult {
+	t.Helper()
+	return requestShellEnvironment(t.Context(), url, "token", runtime.ShellEnvironmentNamesPath, envHookRecord{AccountID: "acct_1", WorkspaceID: "personal"})
 }

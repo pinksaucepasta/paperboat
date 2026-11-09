@@ -19,7 +19,18 @@ type fakeOwnerShellEnvironment struct {
 	block  chan struct{}
 	calls  int
 	values []string
+	names  []EnvironmentName
 	err    error
+}
+
+func (f *fakeOwnerShellEnvironment) OwnerEnvironmentNames(_ context.Context, workspace, account string) ([]EnvironmentName, error) {
+	f.mu.Lock()
+	f.calls++
+	f.mu.Unlock()
+	if account != "acct_owner" {
+		return nil, errShellEnvironmentAccount
+	}
+	return f.names, f.err
 }
 
 func (f *fakeOwnerShellEnvironment) OwnerShellEnvironment(_ context.Context, workspace, account string) ([]string, error) {
@@ -109,5 +120,44 @@ func TestShellEnvironmentFetchOutlivesAnImpatientCallerAndCachesFailure(t *testi
 	}
 	if source.calls != 1 {
 		t.Fatalf("one fetch expected, got %d", source.calls)
+	}
+}
+
+func serveShellEnvironmentNames(handler http.Handler, token, body string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(http.MethodPost, ShellEnvironmentNamesPath, strings.NewReader(body))
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
+}
+
+// The names endpoint answers names and layers only, needs the control token, is the owner's alone, is
+// refused with its own code when the workspace turned listing off, and is never served from the value cache.
+func TestShellEnvironmentNamesNeverCarryValuesAndHonourTheSetting(t *testing.T) {
+	const body = `{"workspace_id":"personal","account_id":"acct_owner"}`
+	source := &fakeOwnerShellEnvironment{values: []string{"STRIPE_API_KEY=sk-secret"}, names: []EnvironmentName{{Name: "STRIPE_API_KEY", Scope: "personal"}}}
+	handler := newShellEnvironmentHandler(source, "secret")
+	if got := serveShellEnvironmentNames(handler, "wrong", body); got.Code != http.StatusUnauthorized || source.calls != 0 {
+		t.Fatalf("wrong token: %d calls=%d", got.Code, source.calls)
+	}
+	if got := serveShellEnvironmentNames(handler, "secret", `{"workspace_id":"personal","account_id":"acct_other"}`); got.Code != http.StatusForbidden || !strings.Contains(got.Body.String(), "account_mismatch") {
+		t.Fatalf("other account: %d %s", got.Code, got.Body.String())
+	}
+	for range 2 {
+		got := serveShellEnvironmentNames(handler, "secret", body)
+		if got.Code != http.StatusOK || strings.TrimSpace(got.Body.String()) != `{"data":{"names":[{"name":"STRIPE_API_KEY","scope":"personal"}]}}` || strings.Contains(got.Body.String(), "sk-secret") {
+			t.Fatalf("names: %d %s", got.Code, got.Body.String())
+		}
+	}
+	if source.calls != 3 {
+		t.Fatalf("names must not be cached, so turning the setting off applies at once: calls=%d", source.calls)
+	}
+	source.err = errEnvironmentNamesDisabled
+	if got := serveShellEnvironmentNames(handler, "secret", body); got.Code != http.StatusForbidden || !strings.Contains(got.Body.String(), "names_listing_disabled") {
+		t.Fatalf("setting off: %d %s", got.Code, got.Body.String())
+	}
+	source.err = &envinject.DeliveryError{Cause: envinject.ErrNotReady}
+	if got := serveShellEnvironmentNames(handler, "secret", body); got.Code != http.StatusServiceUnavailable || !strings.Contains(got.Body.String(), envinject.LaunchNoticePending) {
+		t.Fatalf("pending: %d %s", got.Code, got.Body.String())
 	}
 }

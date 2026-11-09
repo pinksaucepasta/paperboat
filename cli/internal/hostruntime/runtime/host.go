@@ -505,6 +505,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	if source, ok := dependencies.ManagedEnvironment.(ownerShellEnvironment); ok {
 		if handler := newShellEnvironmentHandler(source, dependencies.LocalControlToken); handler != nil {
 			mux.Handle(ShellEnvironmentPath, handler)
+			mux.Handle(ShellEnvironmentNamesPath, handler)
 		}
 	}
 	if dependencies.Inspector != nil && dependencies.LocalControlToken != "" {

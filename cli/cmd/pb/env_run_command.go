@@ -100,24 +100,13 @@ func loadEnvironmentForRun(command *cobra.Command) ([]string, error) {
 	fail := func(reason string) error {
 		return &envCommandFailure{message: "Paperboat ENV not loaded: " + reason + "; the command did not run."}
 	}
-	cfg, err := workspaceConfig(configPathFlag(command), "")
-	if err != nil {
-		return nil, err
-	}
-	account, err := workspaceAccountID(cfg)
-	if errors.Is(err, config.ErrNoCredentials) || err == nil && account == "" {
-		return nil, fail("log in first with `pb login`")
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read the logged-in account: %w", err)
-	}
-	workspace, err := effectiveWorkspace(command)
+	record, err := currentEnvHookRecord(command, fail)
 	if err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(command.Context(), envRunBudget)
 	defer cancel()
-	result := loadEnvironmentHook(ctx, command, envHookRecord{Schema: envHookSchema, ServerURL: cfg.ServerURL, AccountID: account, WorkspaceID: workspace})
+	result := loadEnvironmentHook(ctx, command, record)
 	switch {
 	case result.quiet:
 		return nil, fail("this machine belongs to another Paperboat account")
@@ -131,4 +120,24 @@ func loadEnvironmentForRun(command *cobra.Command) ([]string, error) {
 		}
 	}
 	return values, nil
+}
+
+// currentEnvHookRecord is the logged-in account and active workspace in the form the runtime is asked with.
+func currentEnvHookRecord(command *cobra.Command, fail func(reason string) error) (envHookRecord, error) {
+	cfg, err := workspaceConfig(configPathFlag(command), "")
+	if err != nil {
+		return envHookRecord{}, err
+	}
+	account, err := workspaceAccountID(cfg)
+	if errors.Is(err, config.ErrNoCredentials) || err == nil && account == "" {
+		return envHookRecord{}, fail("log in first with `pb login`")
+	}
+	if err != nil {
+		return envHookRecord{}, fmt.Errorf("read the logged-in account: %w", err)
+	}
+	workspace, err := effectiveWorkspace(command)
+	if err != nil {
+		return envHookRecord{}, err
+	}
+	return envHookRecord{Schema: envHookSchema, ServerURL: cfg.ServerURL, AccountID: account, WorkspaceID: workspace}, nil
 }

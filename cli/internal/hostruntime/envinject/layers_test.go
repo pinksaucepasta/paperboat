@@ -95,9 +95,12 @@ func TestLayerStoreWorkspaceHierarchyFloorsAndForeignActor(t *testing.T) {
 	device := seal("team_1", "personal", "account_1", "machine_1", "device", 1, 1, env.DocumentID{})
 	bundle := api.VaultLayerContext{WorkspaceID: "team_1", ActorAccountID: "account_1", MachineID: "machine_1", Recipient: recipient, Layers: []api.VaultLayerDelivery{device, team, member}}
 	binding := LaunchContext{"team_1", "account_1"}
-	values, err := store.Environment(ctx, binding, bundle)
+	values, scopes, err := store.EnvironmentWithScopes(ctx, binding, bundle)
 	if err != nil || !reflect.DeepEqual(values, []string{"VALUE=device"}) {
 		t.Fatalf("hierarchy failed: %v", err)
+	}
+	if !reflect.DeepEqual(scopes, map[string]string{"VALUE": "machine"}) {
+		t.Fatalf("a name must report the layer that won: %v", scopes)
 	}
 	reports, err := store.PendingObservations(ctx)
 	if err != nil || len(reports) != 3 {
@@ -122,9 +125,9 @@ func TestLayerStoreWorkspaceHierarchyFloorsAndForeignActor(t *testing.T) {
 		t.Fatal("plaintext persisted")
 	}
 	bundle.Layers = []api.VaultLayerDelivery{member, team}
-	values, err = store.Environment(ctx, binding, bundle)
-	if err != nil || !reflect.DeepEqual(values, []string{"VALUE=member"}) {
-		t.Fatal("member precedence failed")
+	values, scopes, err = store.EnvironmentWithScopes(ctx, binding, bundle)
+	if err != nil || !reflect.DeepEqual(values, []string{"VALUE=member"}) || scopes["VALUE"] != "personal" {
+		t.Fatalf("member precedence failed: %v %v", err, scopes)
 	}
 	bundle.ActorAccountID = "account_2"
 	bundle.Layers = []api.VaultLayerDelivery{team}

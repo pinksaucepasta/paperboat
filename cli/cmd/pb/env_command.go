@@ -202,7 +202,9 @@ func environmentVariablesCobraCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "env",
 		Short: "Manage automatic global ENV and device overrides",
-		Args:  commandArgs(cobra.NoArgs),
+		Long: "Manage encrypted ENV values by personal, team or machine scope. Vault commands control key custody, while " +
+			"set and unset change exact values. Listing shows metadata without revealing a value.\n\n" + envNamesAgentGuide,
+		Args: commandArgs(cobra.NoArgs),
 		RunE: func(command *cobra.Command, _ []string) error {
 			if !environmentVariableTerminal(command) {
 				return command.Help()
@@ -214,7 +216,10 @@ func environmentVariablesCobraCommand() *cobra.Command {
 	list := &cobra.Command{
 		Use:   "list",
 		Short: "List configured environment-variable metadata",
-		Args:  commandArgs(cobra.NoArgs),
+		Long: "List the names configured in one scope (yours, or --team, or --machine), for managing ENV from your own " +
+			"CLI; this reads your unlocked vault and never prints values. To see which names commands on this machine " +
+			"receive, merged across scopes and without a vault password, run `pb env names`.",
+		Args: commandArgs(cobra.NoArgs),
 		RunE: func(command *cobra.Command, _ []string) error {
 			team, _ := command.Flags().GetString("team")
 			machine, _ := command.Flags().GetString("machine")
@@ -276,6 +281,7 @@ func environmentVariablesCobraCommand() *cobra.Command {
 	unset.Flags().Bool("json", false, "print redacted JSON metadata")
 
 	root.AddCommand(list, set, unset)
+	addEnvironmentNamesCommand(root)
 	addVaultScopeCommands(root)
 	addPasswordVaultCommands(root)
 	addEnvironmentHookCommand(root)
