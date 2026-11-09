@@ -59,7 +59,13 @@ done
 sleep 2" >"$work/edge-$target.log" 2>&1 &
 done
 
-probe "nohup python3 -m http.server $port --bind 127.0.0.1 >/dev/null 2>&1 & echo \$! > /tmp/pb-gate-origin.pid"
+# The preview is published only once the origin accepts a connection (10 s bound): publishing first lost the race.
+probe "nohup python3 -m http.server $port --bind 127.0.0.1 >/dev/null 2>&1 & echo \$! > /tmp/pb-gate-origin.pid
+for _ in \$(seq 50); do
+	python3 -c \"import socket; socket.create_connection(('127.0.0.1', $port), 1).close()\" 2>/dev/null && exit 0
+	sleep 0.2
+done
+exit 1" || { echo "edge gate: FAIL (the probe origin never listened on port $port)"; exit 1; }
 json=$(probe "pb preview $port --background --ttl 30m --json")
 id=$(printf '%s' "$json" | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d.get("data",d); print(d["id"])')
 url=$(printf '%s' "$json" | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d.get("data",d); print(d.get("url") or d["endpoint"])')

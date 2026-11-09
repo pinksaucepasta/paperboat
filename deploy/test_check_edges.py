@@ -13,6 +13,7 @@ STUBS = {
     # The probe machine: answers the preview request, ignores the rest.
     'probe': '''#!/bin/sh
 s=$(cat)
+case "$s" in *create_connection*) [ -e "$T/origin-down" ] && exit 1 ;; esac
 case "$s" in *"pb preview "*"--json"*) echo '{"data":{"id":"preview_1","url":"https://p1.preview.example.test"}}' ;; esac
 ''',
     # Read-only psql: online machines, machines offline since the start, 5xx count.
@@ -39,7 +40,7 @@ esac
 
 
 class CheckEdgesTest(unittest.TestCase):
-    def run_gate(self, edge_log='', server5xx='0', offline='', deploy='true'):
+    def run_gate(self, edge_log='', server5xx='0', offline='', deploy='true', origin_down=False):
         with tempfile.TemporaryDirectory() as directory:
             t = pathlib.Path(directory)
             bin_dir = t / 'bin'
@@ -52,6 +53,8 @@ class CheckEdgesTest(unittest.TestCase):
             (t / 'server5xx').write_text(server5xx + '\n')
             (t / 'offline').write_text(offline)
             (t / 'code').write_text('200')
+            if origin_down:
+                (t / 'origin-down').write_text('')
             env = dict(os.environ, T=str(t), PATH=f'{bin_dir}:{os.environ["PATH"]}', PROBE=str(bin_dir / 'probe'),
                        SQL=str(bin_dir / 'psql'), SETTLE='2', OBSERVE='1')
             result = subprocess.run(['sh', str(SCRIPT), '--deploy', deploy, 'local=192.0.2.1'], env=env,
@@ -97,6 +100,11 @@ class CheckEdgesTest(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn('docker logs --follow', self.stub_logs['timeout.log'])
         self.assertIn('[d]ocker logs --follow --since', self.stub_logs['pkill.log'])
+
+    def test_origin_that_never_listens_fails_before_publishing(self):
+        code, out = self.run_gate(origin_down=True)
+        self.assertEqual(code, 1, out)
+        self.assertIn('probe origin never listened', out)
 
     def test_failed_deploy_command_fails(self):
         code, out = self.run_gate(deploy='exit 3')
