@@ -80,14 +80,15 @@ type peerConn struct {
 	control         chan []byte
 	rate            *budget
 	sequence        atomic.Uint64
-	// paired remembers the last peer this connection's grant was found paired with, and both signed grants
-	// at the time, so a run of datagrams to one peer costs one check (guarded by Server.mu).
+	// paired remembers the last peer this connection's grant was checked against, both signed grants at the
+	// time and the answer, so a run of datagrams to one peer, paired or not, costs one check (guarded by Server.mu).
 	paired pairMemo
 }
 
 type pairMemo struct {
 	peer         *peerConn
 	mine, theirs [sha256.Size]byte
+	allowed      bool
 }
 
 func quicConfig() *quic.Config {
@@ -444,13 +445,10 @@ func (s *Server) authorizedLocked(p, q *peerConn, now time.Time) bool {
 	// Any new, merged or revoked grant changes a signed hash or the connection, so the memo cannot outlive
 	// the authority it was computed from.
 	if p.paired.peer == q && p.paired.mine == p.grant.signedHash && p.paired.theirs == q.grant.signedHash {
-		return true
+		return p.paired.allowed
 	}
-	if !allowedAdmitted(p.grant, q.grant) {
-		return false
-	}
-	p.paired = pairMemo{peer: q, mine: p.grant.signedHash, theirs: q.grant.signedHash}
-	return true
+	p.paired = pairMemo{peer: q, mine: p.grant.signedHash, theirs: q.grant.signedHash, allowed: allowedAdmitted(p.grant, q.grant)}
+	return p.paired.allowed
 }
 func (s *Server) route(p *peerConn, msg packet) {
 	s.mu.Lock()

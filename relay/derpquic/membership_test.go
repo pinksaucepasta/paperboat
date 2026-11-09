@@ -134,6 +134,12 @@ func TestTenThousandMeshEndpointsFitTheMembershipBudget(t *testing.T) {
 	if s.authorizedLocked(p, q, now) {
 		t.Fatal("the pair memo answered for a changed grant")
 	}
+	// A refusal is remembered too: datagrams to an unpaired peer do not re-run the scope check under
+	// Server.mu each time. Pairing the grant again under the same signed hash shows the memo answered.
+	q.grant.AccountID = grants[2].AccountID
+	if s.authorizedLocked(p, q, now) {
+		t.Fatal("a repeated datagram to an unpaired peer checked the pair again instead of using the memo")
+	}
 	runtime.KeepAlive(grants)
 }
 
