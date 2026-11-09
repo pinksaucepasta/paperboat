@@ -37,6 +37,7 @@ func TestHostedRelayInventoryFollowsPoolAndHeartbeatOnPostgres(t *testing.T) {
 		_, _ = database.SQL().ExecContext(cleanup, `DELETE FROM paperboat.selfhost_pool_policies WHERE scope_kind='account' AND scope_id=$1`, account)
 		_, _ = database.SQL().ExecContext(cleanup, `DELETE FROM paperboat.selfhost_installations WHERE node_id LIKE $1`, prefix+"%")
 		_, _ = database.SQL().ExecContext(cleanup, `DELETE FROM paperboat.control_tunnel_nodes WHERE id LIKE $1`, prefix+"%")
+		_, _ = database.SQL().ExecContext(cleanup, `DELETE FROM paperboat.user_machines WHERE user_id IN ($1,$2)`, account, other)
 		_, _ = database.SQL().ExecContext(cleanup, `DELETE FROM paperboat.users WHERE id IN ($1,$2)`, account, other)
 	})
 	exec := func(query string, args ...any) {
@@ -61,6 +62,18 @@ VALUES($1,'default','1.0','epoch',$2,$2='ready',$3,'fsn1','domain',ARRAY[$4]::te
 		key := make([]byte, 32)
 		key[0] = byte(index + 1) // the runtime hash is unique per installation
 		exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,$3,$3,'encrypted','my relay','relay','account',$4,$5,true)`, prefix+"inst_"+own.suffix, prefix+own.suffix, key, own.scope, prefix+"claim_"+own.suffix)
+	}
+	// Two of the account's machines and one of another account's measured relays: the best fresh sample of the
+	// account's own machines is shown, a stale one is not.
+	for _, machine := range []struct{ id, user string }{{prefix + "m1", account}, {prefix + "m2", account}, {prefix + "mo", other}} {
+		exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$1,'linux','amd64','/workspace','offline','released')`, machine.id, machine.user)
+	}
+	for _, sample := range []struct {
+		machine, node string
+		rtt           int
+		age           time.Duration
+	}{{"m1", "a", 30, time.Minute}, {"m2", "a", 12, 10 * time.Minute}, {"mo", "a", 2, time.Minute}, {"m1", "b", 8, 2 * time.Hour}, {"m1", "e", 55, time.Minute}} {
+		exec(`INSERT INTO paperboat.machine_node_latency(machine_id,node_id,role,rtt_ms,measured_at) VALUES($1,$2,'relay',$3,$4)`, prefix+sample.machine, prefix+sample.node, sample.rtt, now.Add(-sample.age))
 	}
 	service := NewEdgeService(database, "unused")
 	service.SetClock(func() time.Time { return now })
@@ -87,6 +100,17 @@ VALUES($1,'default','1.0','epoch',$2,$2='ready',$3,'fsn1','domain',ARRAY[$4]::te
 	for suffix, status := range want {
 		if got[prefix+suffix].Status != status || got[prefix+suffix].Region != "fsn1" {
 			t.Fatalf("relay %s = %+v, want %s", suffix, got[prefix+suffix], status)
+		}
+	}
+	if a := got[prefix+"a"]; a.BestRTTMillis == nil || *a.BestRTTMillis != 12 || a.MeasuredAt == nil || !a.MeasuredAt.Equal(now.Add(-10*time.Minute)) {
+		t.Fatalf("best rtt of relay a = %+v, want 12 ms measured 10 minutes ago", a)
+	}
+	if e := got[prefix+"e"]; e.BestRTTMillis == nil || *e.BestRTTMillis != 55 {
+		t.Fatalf("best rtt of relay e = %+v", e)
+	}
+	for _, suffix := range []string{"b", "c"} {
+		if got[prefix+suffix].BestRTTMillis != nil || got[prefix+suffix].MeasuredAt != nil {
+			t.Fatalf("relay %s shows a stale or missing measurement: %+v", suffix, got[prefix+suffix])
 		}
 	}
 	if own := got[prefix+"e"]; !own.SelfHosted || own.Name != "my relay" || got[prefix+"a"].SelfHosted || got[prefix+"a"].Name != "" {

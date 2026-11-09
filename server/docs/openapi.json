@@ -141,6 +141,11 @@
               "enrolled"
             ],
             "description": "Pending reservations are visible to authorized owners for resume/cleanup, remain not ready, and cannot be selected into traffic pools or placements."
+          },
+          "last_heartbeat_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the server's node last reported in; absent before its first report."
           }
         }
       },
@@ -19862,6 +19867,409 @@
         "operationId": "get_v1_edges"
       }
     },
+    "/v1/edges/pair": {
+      "get": {
+        "summary": "Read a workspace's primary and fallback edge",
+        "description": "Returns the two edges that serve the workspace's previews and tunnels: both Paperboat's or both its own servers. The pair is the workspace's stored edge set, assigned when a machine first attaches or the periodic reconcile runs; status is an observation from the node's heartbeat.",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "tunnels:read"
+        ],
+        "parameters": [
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Workspace whose edge pair this is: personal or a canonical team slug. Defaults to personal. Validated against current authority."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The workspace's edge pair.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "primary"
+                      ],
+                      "properties": {
+                        "primary": {
+                          "type": "object",
+                          "required": [
+                            "id",
+                            "kind",
+                            "region",
+                            "status"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "description": "A Paperboat edge's node id (as listed by GET /v1/edges), or a self-hosted server's tunnel installation id."
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "managed",
+                                "self_hosted"
+                              ]
+                            },
+                            "region": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string",
+                              "description": "A self-hosted server's name."
+                            },
+                            "endpoint_host": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ready",
+                                "draining",
+                                "unavailable"
+                              ]
+                            },
+                            "last_heartbeat_at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "best_rtt_ms": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Lowest connect time, in milliseconds, any of the account's machines measured to this edge in the last hour. Absent without a fresh measurement."
+                            },
+                            "measured_at": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "When best_rtt_ms was measured."
+                            }
+                          }
+                        },
+                        "fallback": {
+                          "type": "object",
+                          "required": [
+                            "id",
+                            "kind",
+                            "region",
+                            "status"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "description": "A Paperboat edge's node id (as listed by GET /v1/edges), or a self-hosted server's tunnel installation id."
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "managed",
+                                "self_hosted"
+                              ]
+                            },
+                            "region": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string",
+                              "description": "A self-hosted server's name."
+                            },
+                            "endpoint_host": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ready",
+                                "draining",
+                                "unavailable"
+                              ]
+                            },
+                            "last_heartbeat_at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "best_rtt_ms": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Lowest connect time, in milliseconds, any of the account's machines measured to this edge in the last hour. Absent without a fresh measurement."
+                            },
+                            "measured_at": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "When best_rtt_ms was measured."
+                            }
+                          },
+                          "description": "Absent while only one edge can serve the workspace."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "description": "No edge can serve the workspace yet (code edge_pair_unassigned).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "get_v1_edges_pair"
+      },
+      "put": {
+        "summary": "Choose a workspace's primary and fallback edge",
+        "description": "Pass ids from GET /v1/edges (Paperboat edges) or self-hosted tunnel installation ids; both must be of the same kind. The change goes through the tunnel pool policy and the workspace edge set, and the workspace's machines are told to look again. Switching between Paperboat's edges and your own servers is refused with 409 previews_running (details.count) while the workspace has running previews or tunnels. Only the owner or an admin of a team can change its pair.",
+        "security": [
+          {
+            "bearerAccess": []
+          },
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Workspace whose edge pair this is: personal or a canonical team slug. Defaults to personal. Validated against current authority."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "primary_id",
+                  "fallback_id"
+                ],
+                "properties": {
+                  "primary_id": {
+                    "type": "string",
+                    "maxLength": 128
+                  },
+                  "fallback_id": {
+                    "type": "string",
+                    "maxLength": 128
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The new pair.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "primary"
+                      ],
+                      "properties": {
+                        "primary": {
+                          "type": "object",
+                          "required": [
+                            "id",
+                            "kind",
+                            "region",
+                            "status"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "description": "A Paperboat edge's node id (as listed by GET /v1/edges), or a self-hosted server's tunnel installation id."
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "managed",
+                                "self_hosted"
+                              ]
+                            },
+                            "region": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string",
+                              "description": "A self-hosted server's name."
+                            },
+                            "endpoint_host": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ready",
+                                "draining",
+                                "unavailable"
+                              ]
+                            },
+                            "last_heartbeat_at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "best_rtt_ms": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Lowest connect time, in milliseconds, any of the account's machines measured to this edge in the last hour. Absent without a fresh measurement."
+                            },
+                            "measured_at": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "When best_rtt_ms was measured."
+                            }
+                          }
+                        },
+                        "fallback": {
+                          "type": "object",
+                          "required": [
+                            "id",
+                            "kind",
+                            "region",
+                            "status"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "description": "A Paperboat edge's node id (as listed by GET /v1/edges), or a self-hosted server's tunnel installation id."
+                            },
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "managed",
+                                "self_hosted"
+                              ]
+                            },
+                            "region": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string",
+                              "description": "A self-hosted server's name."
+                            },
+                            "endpoint_host": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "ready",
+                                "draining",
+                                "unavailable"
+                              ]
+                            },
+                            "last_heartbeat_at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "best_rtt_ms": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Lowest connect time, in milliseconds, any of the account's machines measured to this edge in the last hour. Absent without a fresh measurement."
+                            },
+                            "measured_at": {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "When best_rtt_ms was measured."
+                            }
+                          },
+                          "description": "Absent while only one edge can serve the workspace."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The ids are the same, unknown to this workspace, of different kinds, or an edge is not available right now.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "previews_running: the switch would strand running previews or tunnels; details.count says how many.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "put_v1_edges_pair"
+      }
+    },
     "/v1/relays": {
       "get": {
         "summary": "List the relays an account's machines can use",
@@ -19952,6 +20360,16 @@
                               },
                               "self_hosted": {
                                 "type": "boolean"
+                              },
+                              "best_rtt_ms": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Lowest connect time, in milliseconds, any of the account's machines measured to this relay in the last hour. Absent without a fresh measurement."
+                              },
+                              "measured_at": {
+                                "type": "string",
+                                "format": "date-time",
+                                "description": "When best_rtt_ms was measured."
                               }
                             }
                           }

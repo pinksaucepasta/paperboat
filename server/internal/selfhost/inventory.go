@@ -50,7 +50,7 @@ func (o InventoryOptions) normalized() (InventoryOptions, error) {
 }
 
 const installationInventorySQL = `WITH visible AS (
- SELECT i.id,i.node_id,coalesce(n.endpoint_host,'') AS endpoint_host,i.name,i.capability,i.scope_kind,i.scope_id,i.claim_complete,i.created_at,
+ SELECT i.id,i.node_id,coalesce(n.endpoint_host,'') AS endpoint_host,i.name,i.capability,i.scope_kind,i.scope_id,i.claim_complete,i.created_at,n.last_heartbeat_at,
  ` + installationReadySQL + ` AS ready
  FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id
  WHERE i.state='active' AND ($1 OR paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$2))
@@ -99,7 +99,7 @@ func (s *Service) ListScopedInventory(ctx context.Context, actor string, scope S
 	if err != nil {
 		return out, err
 	}
-	rows, err := tx.QueryContext(ctx, installationInventorySQL+`SELECT id,node_id,endpoint_host,name,capability,scope_kind,scope_id,claim_complete,ready,created_at FROM filtered WHERE `+keyed+` ORDER BY `+order+` LIMIT $10 OFFSET $11`, append(args, append([]any{options.Limit + 1, options.Offset}, after[:argc]...)...)...)
+	rows, err := tx.QueryContext(ctx, installationInventorySQL+`SELECT id,node_id,endpoint_host,name,capability,scope_kind,scope_id,claim_complete,ready,created_at,last_heartbeat_at FROM filtered WHERE `+keyed+` ORDER BY `+order+` LIMIT $10 OFFSET $11`, append(args, append([]any{options.Limit + 1, options.Offset}, after[:argc]...)...)...)
 	if err != nil {
 		return out, err
 	}
@@ -108,7 +108,7 @@ func (s *Service) ListScopedInventory(ctx context.Context, actor string, scope S
 		var i Installation
 		var complete bool
 		var at time.Time
-		if err = rows.Scan(&i.InstallationID, &i.NodeID, &i.EndpointHost, &i.Name, &i.Capability, &i.ScopeKind, &i.ScopeID, &complete, &i.Ready, &at); err != nil {
+		if err = rows.Scan(&i.InstallationID, &i.NodeID, &i.EndpointHost, &i.Name, &i.Capability, &i.ScopeKind, &i.ScopeID, &complete, &i.Ready, &at, &i.LastHeartbeat); err != nil {
 			return out, errors.Join(err, rows.Close())
 		}
 		i.EnrollmentState = "pending"
@@ -157,8 +157,8 @@ func (s *Service) GetInstallation(ctx context.Context, actor, id string, operato
 	}
 	var complete bool
 	err := s.database.SQL().QueryRowContext(ctx, `SELECT i.id,i.node_id,coalesce(n.endpoint_host,''),i.name,i.capability,i.scope_kind,i.scope_id,i.claim_complete,
- `+installationReadySQL+`
- FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.id=$1 AND i.state='active' AND (($2 AND i.scope_kind='global') OR (NOT $2 AND paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$3)))`, id, operator, actor).Scan(&i.InstallationID, &i.NodeID, &i.EndpointHost, &i.Name, &i.Capability, &i.ScopeKind, &i.ScopeID, &complete, &i.Ready)
+ `+installationReadySQL+`,n.last_heartbeat_at
+ FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.id=$1 AND i.state='active' AND (($2 AND i.scope_kind='global') OR (NOT $2 AND paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$3)))`, id, operator, actor).Scan(&i.InstallationID, &i.NodeID, &i.EndpointHost, &i.Name, &i.Capability, &i.ScopeKind, &i.ScopeID, &complete, &i.Ready, &i.LastHeartbeat)
 	if err == sql.ErrNoRows {
 		return i, ErrInstallationNotFound
 	}

@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/edgeset"
 )
 
 var ErrInvalidEdgePage = errors.New("invalid edge page")
@@ -32,17 +34,7 @@ func (s *EdgeService) ListHostedEdges(ctx context.Context, accountID, after stri
 	page := HostedEdgePage{Items: []HostedEdge{}, ObservedAt: at}
 	rows, err := s.store.SQL().QueryContext(ctx, `
 SELECT n.id, COALESCE(n.region,''),
-  CASE WHEN n.state='draining' OR n.drain_deadline IS NOT NULL THEN 'draining'
-       WHEN n.state='ready' AND n.ready=true
-         AND n.last_heartbeat_at>$3::timestamptz-interval '15 seconds'
-		 AND n.registry_expires_at>$3::timestamptz
-		 AND n.transports @> ARRAY['http3','http2']::text[]
-		 AND n.carrier_endpoint_host IS NOT NULL
-		 AND n.carrier_endpoint_tcp_port IS NOT NULL
-		 AND n.carrier_endpoint_quic_port IS NOT NULL
-		 AND n.carrier_server_spki_sha256 IS NOT NULL
-		 AND n.carrier_server_certificate_chain_pem IS NOT NULL
-		 THEN 'ready' ELSE 'unavailable' END,
+  `+edgeset.NodeStatusSQL("$3")+`,
   n.last_heartbeat_at
 FROM control_tunnel_nodes n
 WHERE n.roles @> ARRAY['edge']::text[] AND n.id>$2

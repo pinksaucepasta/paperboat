@@ -26,6 +26,8 @@ type Installation struct {
 	ScopeID         string `json:"scope_id"`
 	TrustNotice     string `json:"trust_notice"`
 	EnrollmentState string `json:"enrollment_state"`
+	// LastHeartbeat is when the server's node last reported in; absent before its first report.
+	LastHeartbeat *time.Time `json:"last_heartbeat_at,omitempty"`
 }
 type Policy struct {
 	Mode            string   `json:"mode"`
@@ -42,6 +44,17 @@ type PoolMember struct {
 }
 
 var ErrLiveEdgeModeChange = fmt.Errorf("%w: stop active workspace previews and tunnels before changing edge ownership; configure customer DNS and certificates before restarting them", ErrInvalid)
+
+// LivePublicationsError is ErrLiveEdgeModeChange with how many previews and tunnels are still running.
+type LivePublicationsError struct{ Count int }
+
+func (e *LivePublicationsError) Error() string { return ErrLiveEdgeModeChange.Error() }
+func (e *LivePublicationsError) Unwrap() error { return ErrLiveEdgeModeChange }
+
+// liveEdgePublicationsSQL counts a workspace's active previews and tunnels (args: account, team or NULL):
+// the publications an edge ownership change would strand.
+const liveEdgePublicationsSQL = `SELECT (SELECT count(*) FROM paperboat.preview_leases WHERE ($2::text IS NOT NULL OR account_id=$1) AND owner_team_id IS NOT DISTINCT FROM $2::text AND terminal_state='active' AND lease_deadline>now())
+ + (SELECT count(*) FROM paperboat.tunnels t WHERE ($2::text IS NOT NULL OR t.account_id=$1) AND paperboat.publication_workspace_team('tunnel',t.id) IS NOT DISTINCT FROM $2::text AND desired_state='active' AND deleted_at IS NULL)`
 
 var ErrIncompatibleTopology = errors.New("self-hosted-only HTTP publications require a verified custom domain")
 
@@ -88,7 +101,7 @@ func (s *Service) ListScoped(ctx context.Context, actor string, scope Scope, ope
 			return nil, err
 		}
 	}
-	rows, err := s.database.SQL().QueryContext(ctx, `SELECT i.id,i.node_id,n.endpoint_host,i.name,i.capability,i.scope_kind,i.scope_id,i.claim_complete,`+installationReadySQL+` FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.state='active' AND ($1 OR paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$2)) AND(NOT $3 OR(i.scope_kind=$4 AND i.scope_id=$5)) ORDER BY i.name,i.capability,i.id LIMIT 257`, operator, actor, filtered, scope.Kind, scope.ID)
+	rows, err := s.database.SQL().QueryContext(ctx, `SELECT i.id,i.node_id,n.endpoint_host,i.name,i.capability,i.scope_kind,i.scope_id,i.claim_complete,`+installationReadySQL+`,n.last_heartbeat_at FROM paperboat.selfhost_installations i JOIN paperboat.control_tunnel_nodes n ON n.id=i.node_id WHERE i.state='active' AND ($1 OR paperboat.selfhost_scope_visible(i.scope_kind,i.scope_id,$2)) AND(NOT $3 OR(i.scope_kind=$4 AND i.scope_id=$5)) ORDER BY i.name,i.capability,i.id LIMIT 257`, operator, actor, filtered, scope.Kind, scope.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +109,7 @@ func (s *Service) ListScoped(ctx context.Context, actor string, scope Scope, ope
 	for rows.Next() {
 		var i Installation
 		var complete bool
-		if err = rows.Scan(&i.InstallationID, &i.NodeID, &i.EndpointHost, &i.Name, &i.Capability, &i.ScopeKind, &i.ScopeID, &complete, &i.Ready); err != nil {
+		if err = rows.Scan(&i.InstallationID, &i.NodeID, &i.EndpointHost, &i.Name, &i.Capability, &i.ScopeKind, &i.ScopeID, &complete, &i.Ready, &i.LastHeartbeat); err != nil {
 			return nil, withDatabaseCleanupFailure("list_installations", err, rows.Close())
 		}
 		i.EnrollmentState = "pending"
@@ -226,7 +239,7 @@ func (s *Service) SetPoolScoped(ctx context.Context, actor, capability string, p
 			return p, err
 		}
 		var mode string
-		var live bool
+		var live int
 		var team any
 		if scope.Kind == "team" {
 			team = scope.ID
@@ -235,12 +248,11 @@ func (s *Service) SetPoolScoped(ctx context.Context, actor, capability string, p
 			return p, err
 		}
 		if mode != p.Mode {
-			err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.preview_leases WHERE ($2::text IS NOT NULL OR account_id=$1) AND owner_team_id IS NOT DISTINCT FROM $2::text AND terminal_state='active' AND lease_deadline>now()) OR EXISTS(SELECT 1 FROM paperboat.tunnels t WHERE ($2::text IS NOT NULL OR t.account_id=$1) AND paperboat.publication_workspace_team('tunnel',t.id) IS NOT DISTINCT FROM $2::text AND desired_state='active' AND deleted_at IS NULL)`, actor, team).Scan(&live)
-			if err != nil {
+			if err = tx.QueryRowContext(ctx, liveEdgePublicationsSQL, actor, team).Scan(&live); err != nil {
 				return p, err
 			}
-			if live {
-				return p, ErrLiveEdgeModeChange
+			if live > 0 {
+				return p, &LivePublicationsError{Count: live}
 			}
 		}
 	}

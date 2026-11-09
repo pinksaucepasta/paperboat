@@ -148,3 +148,37 @@ func (s *Service) SaveRelays(ctx context.Context, accountID, machineID string, s
 func (s *Service) List(ctx context.Context, machineID string) ([]Item, error) {
 	return List(ctx, s.DB, machineID, s.now())
 }
+
+// Best is the lowest RTT any of an account's machines measured to one node within Fresh, and when.
+type Best struct {
+	RTTMillis  int
+	MeasuredAt time.Time
+}
+
+// BestForAccount returns Best for each of nodeIDs (a page of at most 100) that one of the account's
+// machines measured in the last Fresh; nodes without a fresh sample are absent. One bounded query.
+func BestForAccount(ctx context.Context, database *sql.DB, accountID string, nodeIDs []string, now time.Time) (map[string]Best, error) {
+	out := map[string]Best{}
+	if len(nodeIDs) == 0 {
+		return out, nil
+	}
+	rows, err := database.QueryContext(ctx, `SELECT DISTINCT ON (l.node_id) l.node_id,l.rtt_ms,l.measured_at
+FROM machine_node_latency l JOIN user_machines m ON m.id=l.machine_id
+WHERE m.user_id=$1 AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND l.node_id=ANY($2::text[])
+ AND l.measured_at>$3::timestamptz-make_interval(secs=>$4::float8)
+ORDER BY l.node_id,l.rtt_ms,l.measured_at DESC`, accountID, nodeIDs, now, Fresh.Seconds())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var best Best
+		if err := rows.Scan(&id, &best.RTTMillis, &best.MeasuredAt); err != nil {
+			return nil, err
+		}
+		best.MeasuredAt = best.MeasuredAt.UTC()
+		out[id] = best
+	}
+	return out, rows.Err()
+}

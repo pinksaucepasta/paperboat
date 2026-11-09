@@ -349,6 +349,10 @@ func NewRouter(opts Options) http.Handler {
 			account := http.HandlerFunc(opts.Selfhost.Account)
 			read := requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:read", account))
 			write := requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:connect", requireCSRF(opts.Auth, account)))
+			if opts.Selfhost.Service != nil {
+				mux.Handle("GET /v1/edges/pair", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("tunnels:read", requireWorkspaceSelection(opts.Workspaces, edgePairGet(opts.Selfhost.Service)))))
+				mux.Handle("PUT /v1/edges/pair", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:connect", requireCSRF(opts.Auth, requireWorkspaceSelection(opts.Workspaces, edgePairPut(opts.Selfhost.Service))))))
+			}
 			mux.Handle("POST /v1/selfhost/enrollments", write)
 			mux.Handle("GET /v1/selfhost/installations", read)
 			mux.Handle("GET /v1/selfhost/installations/{installationID}", read)

@@ -92,15 +92,32 @@ func ReconcileScope(ctx context.Context, tx *db.Tx, scope Scope, now time.Time) 
 	if exists && currentMode == mode && equal(current, chosen) {
 		return false, nil
 	}
-	if exists {
-		_, err = tx.Exec(ctx, `UPDATE workspace_edge_sets SET mode=$3,node_ids=$4,generation=generation+1,assigned_at=$5 WHERE scope_kind=$1 AND scope_id=$2`, scope.Kind, scope.ID, mode, chosen, now)
-	} else {
-		_, err = tx.Exec(ctx, `INSERT INTO workspace_edge_sets(scope_kind,scope_id,mode,node_ids,assigned_at) VALUES($1,$2,$3,$4,$5)`, scope.Kind, scope.ID, mode, chosen, now)
-	}
-	if err != nil {
-		return false, fmt.Errorf("store workspace edge set: %w", err)
+	if err = Store(ctx, tx, scope, mode, chosen, now); err != nil {
+		return false, err
 	}
 	return true, nil
+}
+
+// Store writes the workspace's edge set, in order (the first is the primary, the second the fallback): a
+// new row, or the next generation of the existing one.
+func Store(ctx context.Context, tx *db.Tx, scope Scope, mode string, nodeIDs []string, now time.Time) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO workspace_edge_sets(scope_kind,scope_id,mode,node_ids,assigned_at) VALUES($1,$2,$3,$4,$5)
+ON CONFLICT (scope_kind,scope_id) DO UPDATE SET mode=excluded.mode,node_ids=excluded.node_ids,generation=workspace_edge_sets.generation+1,assigned_at=excluded.assigned_at`, scope.Kind, scope.ID, mode, nodeIDs, now); err != nil {
+		return fmt.Errorf("store workspace edge set: %w", err)
+	}
+	return nil
+}
+
+// NodeStatusSQL is the status an edge node shows account-visible inventories: ready only on a fresh
+// heartbeat with a complete carrier endpoint, as an observation and not a promise of admission. now is
+// the SQL placeholder holding the observation time; the node's alias is n.
+func NodeStatusSQL(now string) string {
+	return `CASE WHEN n.state='draining' OR n.drain_deadline IS NOT NULL THEN 'draining'
+ WHEN n.state='ready' AND n.ready=true AND n.last_heartbeat_at>` + now + `::timestamptz-interval '15 seconds'
+ AND n.registry_expires_at>` + now + `::timestamptz AND n.transports @> ARRAY['http3','http2']::text[]
+ AND n.carrier_endpoint_host IS NOT NULL AND n.carrier_endpoint_tcp_port IS NOT NULL AND n.carrier_endpoint_quic_port IS NOT NULL
+ AND n.carrier_server_spki_sha256 IS NOT NULL AND n.carrier_server_certificate_chain_pem IS NOT NULL
+ THEN 'ready' ELSE 'unavailable' END`
 }
 
 func readCandidates(ctx context.Context, tx *db.Tx, query string, now time.Time, scope Scope) ([]Candidate, error) {

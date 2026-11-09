@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/machinelatency"
 )
 
 // HostedRelay is one relay the account's machines can use: Paperboat's or one of its own self-hosted
@@ -16,6 +18,10 @@ type HostedRelay struct {
 	Status        string     `json:"status"`
 	SelfHosted    bool       `json:"self_hosted"`
 	LastHeartbeat *time.Time `json:"last_heartbeat_at,omitempty"`
+	// BestRTTMillis is the lowest connect time any of the account's machines measured to this relay in the
+	// last hour, and MeasuredAt when; both are absent without a fresh measurement.
+	BestRTTMillis *int       `json:"best_rtt_ms,omitempty"`
+	MeasuredAt    *time.Time `json:"measured_at,omitempty"`
 }
 
 type HostedRelayPage struct {
@@ -68,6 +74,21 @@ ORDER BY n.id LIMIT $4`, accountID, after, at, limit+1)
 	}
 	if err := rows.Err(); err != nil {
 		return HostedRelayPage{}, err
+	}
+	rows.Close()
+	ids := make([]string, len(page.Items))
+	for i, relay := range page.Items {
+		ids[i] = relay.ID
+	}
+	best, err := machinelatency.BestForAccount(ctx, s.store.SQL(), accountID, ids, at)
+	if err != nil {
+		return HostedRelayPage{}, err
+	}
+	for i := range page.Items {
+		if b, ok := best[page.Items[i].ID]; ok {
+			rtt, measured := b.RTTMillis, b.MeasuredAt
+			page.Items[i].BestRTTMillis, page.Items[i].MeasuredAt = &rtt, &measured
+		}
 	}
 	return page, nil
 }
