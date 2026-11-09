@@ -190,7 +190,11 @@ func browserTerminalFenceForMatch(match route.RouteMatch) BrowserTerminalRouteFe
 // ended the admission). endReason names the typed close the browser should get for the cause, if any; every other
 // end drops the connection (the browser reconnects).
 func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Conn, subscription *BrowserTerminalSubscription, stop <-chan struct{}, endReason func(error) (terminalend.Reason, bool)) (result error) {
-	ctx, cancel := context.WithCancel(ctx)
+	// The reads and writes run on a context only this function cancels, after the typed close: a request canceled
+	// from outside (the carrier it rode ended) would otherwise hard-close the browser's WebSocket under its blocked
+	// read before the close below, and the browser got a plain drop instead of "moved".
+	parent := ctx
+	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
 	var workers sync.WaitGroup
 	failures := make(chan error, 3)
 	defer func() {
@@ -302,8 +306,8 @@ func bridgeBrowserTerminal(ctx context.Context, browser, upstream *websocket.Con
 
 	for {
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-parent.Done():
+			return parent.Err()
 		case <-subscription.Done():
 			return bridgeEnd{"shared_output", ErrBrowserTerminalHubEnded}
 		case <-stop:

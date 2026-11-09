@@ -105,6 +105,75 @@ func TestBrowserTerminalBridgeFailureAndRecovery(t *testing.T) {
 	}
 }
 
+// A held browser whose carrier ends (a pb update's retiring generation stopping) has its request canceled; the
+// bridge still tells it "moved" so it reattaches at once. Canceling the reads first hard-closed the WebSocket and
+// the typed close was lost whenever the cancel won against the hub ending the session (terminal-drain, ~40% of runs).
+func TestBrowserTerminalBridgeSendsMovedWhenTheRequestIsCanceled(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	hub := NewBrowserTerminalHub()
+	defer hub.Close()
+	identity := testEdgePreviewIdentity(1, 1)
+	fence := BrowserTerminalRouteFence{Identity: identity, Revision: 1, AttachmentGeneration: 1}
+	if err := hub.ActivateRoute("route_moved", fence); err != nil {
+		t.Fatal(err)
+	}
+	key := BrowserTerminalSessionKey{RouteID: "route_moved", TerminalSessionID: "term_moved", ProcessGeneration: identity.ProcessGeneration}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+		for {
+			kind, message, err := conn.Read(r.Context())
+			if err != nil || conn.Write(r.Context(), kind, message) != nil {
+				return
+			}
+		}
+	}))
+	defer upstream.Close()
+	canceled := make(chan context.CancelFunc, 1)
+	edge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sub, err := hub.Subscribe(key, fence, "browser_moved")
+		if err != nil {
+			return
+		}
+		defer sub.Close()
+		host, _, err := websocket.Dial(r.Context(), "ws"+strings.TrimPrefix(upstream.URL, "http"), nil)
+		if err != nil {
+			return
+		}
+		browser, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			host.CloseNow()
+			return
+		}
+		requestCtx, cancelRequest := context.WithCancel(r.Context())
+		canceled <- cancelRequest
+		_ = bridgeBrowserTerminal(requestCtx, browser, host, sub, nil, func(error) (terminalend.Reason, bool) { return terminalend.Moved, true })
+	}))
+	defer edge.Close()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(edge.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	echo := []byte{browserTerminalTLSDiscriminator, 1}
+	if err := conn.Write(ctx, websocket.MessageBinary, echo); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := conn.Read(ctx); err != nil { // the bridge is running both directions
+		t.Fatal(err)
+	}
+	(<-canceled)()
+	_, _, err = conn.Read(ctx)
+	var closed websocket.CloseError
+	if !errors.As(err, &closed) || int(closed.Code) != terminalend.CodeMoved || closed.Reason != string(terminalend.Moved) {
+		t.Fatalf("browser saw %v, want close %d %q", err, terminalend.CodeMoved, terminalend.Moved)
+	}
+}
+
 func TestBrowserTerminalExpectedRequiresEveryLeaf(t *testing.T) {
 	if !browserTerminalExpected(errors.Join(context.Canceled, websocket.CloseError{Code: websocket.StatusNormalClosure})) {
 		t.Fatal("normal departure")
