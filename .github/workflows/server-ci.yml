@@ -11,10 +11,12 @@ on:
 permissions:
   contents: read
 
-# A newer push to main supersedes the older run; one full run per commit queued 10 deep (2026-11-05).
+# On main the run in progress finishes and only the newest waiting push is kept (GitHub replaces an older pending
+# run), so the queue stays one deep. Five lanes pushing cancelled every main run before it ended (2026-11-09); other
+# refs still supersede.
 concurrency:
   group: ci-${{ github.repository }}-${{ github.event_name == 'push' && github.ref || github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.event_name != 'workflow_dispatch' }}
 
 jobs:
   server:
