@@ -37,6 +37,9 @@ The brand guidelines live in the Paper file "Intuitive zephyr", page "Brand guid
   motion). Controls, inputs and panels holding
   forms or lists stay plain `surface`.
 - Numbers are tabular everywhere (global rule).
+- A command people copy is a `CommandBlock` (in `add-machine-dialog.tsx`), never inline body text.
+  Commands never wrap: one line per command, scrolling sideways under the copy icon. Copyable
+  values (addresses, IDs) are a `CopyRow`, one line, truncated.
 - Icons: Phosphor. `regular` by default, `fill` for the selected item. Server-imported modules use
   `@phosphor-icons/react/dist/ssr`.
 

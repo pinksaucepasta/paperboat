@@ -296,7 +296,11 @@ function EnrollmentStatus({
   )
 }
 
-/** The command is the click target: clicking anywhere on it copies it. */
+/**
+ * The command is the click target: clicking anywhere on it copies it. A command never wraps: it
+ * stays one line (one per command when there are several) and scrolls sideways under the copy
+ * icon, which fades the text out beneath it.
+ */
 export function CommandBlock({ command }: { command: string }) {
   const { copied, copy } = useCopy(command)
   return (
@@ -304,13 +308,17 @@ export function CommandBlock({ command }: { command: string }) {
       type="button"
       onClick={copy}
       aria-label={copied ? "Copied" : "Copy command"}
-      className="group/copy flex w-full items-start gap-3 rounded-lg bg-muted py-3 pr-3 pl-3.5 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/30"
+      className="group/copy relative flex w-full rounded-lg bg-muted text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/30"
     >
-      <code className="min-w-0 flex-1 font-mono text-xs leading-relaxed break-all">{command}</code>
-      <CopyIcons
-        copied={copied}
-        className={copied ? undefined : "text-muted-foreground group-hover/copy:text-foreground"}
-      />
+      <code className="no-scrollbar min-w-0 flex-1 overflow-x-auto py-3 pr-12 pl-3.5 font-mono text-xs leading-relaxed whitespace-pre">
+        {command}
+      </code>
+      <span className="pointer-events-none absolute inset-y-0 right-0 flex items-start rounded-r-lg bg-linear-to-l from-muted from-60% to-transparent py-3 pr-3 pl-8 group-hover/copy:from-accent">
+        <CopyIcons
+          copied={copied}
+          className={copied ? undefined : "text-muted-foreground group-hover/copy:text-foreground"}
+        />
+      </span>
     </button>
   )
 }
