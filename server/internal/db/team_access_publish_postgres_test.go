@@ -108,7 +108,7 @@ VALUES($1,$2,$3,'host','linux','amd64','/w','online','occupied',true,1)`, machin
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true) ON CONFLICT (team_id,account_id) DO UPDATE SET active=true`, team, member)
 
 	// Suspension and deletion: members' topics move once; an unrelated team update publishes nothing.
-	inv, acc = account(member, "inventory"), account(member, "machine_access")
+	inv = account(member, "inventory")
 	exec(`UPDATE paperboat.teams SET generation=generation+1 WHERE team_id=$1`, team)
 	if account(member, "inventory") != inv {
 		t.Fatal("a team update that changed neither suspended nor deleted_at published")
