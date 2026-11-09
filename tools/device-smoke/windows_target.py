@@ -197,7 +197,7 @@ def typed_marker(token, expression=''):
     The console echoes what is typed, so the typed text never contains token itself. expression is PowerShell
     appended to the token (for example +$env:NAME)."""
     assert re.fullmatch(r'[A-Za-z0-9_]{4,}', token), token
-    return "powershell -NoProfile -Command \"Write-Output ('%s'+'%s'%s)\"" % (token[:3], token[3:], expression)
+    return typed_line("Write-Output ('%s'+'%s'%s)" % (token[:3], token[3:], expression))
 
 
 def username_script():
@@ -224,3 +224,46 @@ def long_script(seconds, marker, step=60):
     """A line every `step` seconds until `seconds` have passed, then the marker (ssh_long's sh loop)."""
     return ("$i=0;while($i -lt %d){Start-Sleep -Seconds %d;$i+=%d;[Console]::Out.Write(\"t$i`n\");[Console]::Out.Flush()}\n"
             "[Console]::Out.Write(\"%s`n\")" % (seconds, step, step, marker))
+
+
+# ---- lines typed into a terminal session on a Windows target ---------------------------------------------------
+# The session shell is cmd.exe under ConPTY (the host runtime's PAPERBOAT_SHELL). It has no sh tools, so each step
+# is one PowerShell line typed there. Inside the double quotes cmd.exe leaves everything but % alone.
+
+def typed_line(script):
+    assert not re.search(r'["%\r\n]', script), script
+    return 'powershell -NoProfile -Command "%s"' % script
+
+
+def count_line(prefix, last, slow=False):
+    """Prints <prefix>1 .. <prefix>last, one per line; slow: one a second."""
+    return typed_line("1..%d|ForEach-Object{'%s'+$_%s}" % (last, prefix, ';Start-Sleep 1' if slow else ''))
+
+
+def flood_line(lines=None):
+    """`lines` lines of 49 characters (about 51 bytes each), or `y` lines without end (yes)."""
+    if lines is None:
+        return typed_line("while(1){[Console]::Out.WriteLine('y')}")
+    return typed_line("$l='0123456789012345678901234567890123456789012345678';"
+                      "for($i=0;$i -lt %d;$i++){[Console]::Out.WriteLine($l)}" % lines)
+
+
+def sink_line():
+    """Reads console lines until end of input (Ctrl-Z, Enter) and prints nothing: cat > /dev/null."""
+    return typed_line("while($null -ne [Console]::In.ReadLine()){}")
+
+
+def size_line():
+    """Prints `PB_SIZE <rows> <columns>` of the console window (stty size)."""
+    return typed_line("$s=$Host.UI.RawUI.WindowSize;Write-Output ('PB_'+'SIZE '+$s.Height+' '+$s.Width)")
+
+
+def colour_line():
+    """Prints PB_COLOUR in red (SGR 31) and resets."""
+    return typed_line("Write-Output ([char]27+'[31mPB_'+'COLOUR'+[char]27+'[0m')")
+
+
+def foreground_line(token, seconds):
+    """A foreground program that prints token, then sleeps."""
+    assert re.fullmatch(r'[A-Za-z0-9_]{4,}', token), token
+    return typed_line("Write-Output ('%s'+'%s');Start-Sleep %d" % (token[:3], token[3:], seconds))

@@ -8,6 +8,10 @@ iptables (network loss, control plane unreachable; macOS: a pf anchor), resize s
 large paste. Each row prints PASS/FAIL/SKIP with a short reason; output content is never
 printed. Only sessions named smoke-matrix-* are created, and all are closed and deleted.
 
+A Windows machine on either side (PB_SMOKE_WINDOWS_PB set: the clients are pb.exe on the Windows device, each driven
+through `ssh -tt`; a Windows TARGET: the session shell is cmd.exe under ConPTY, so rows type PowerShell one-liners):
+rows whose fault or measurement has no equivalent there print SKIP with the reason.
+
 Usage: terminal_matrix.py TARGET [--only ROW,ROW] [--member-cmd CMD [--member-pb PATH] --team TEAM --member ID]
        [--restart-target-cmd CMD --restart-client-cmd CMD]   (N14: commands that restart the target host runtime / this daemon)
 """
@@ -28,9 +32,13 @@ from session_cleanup import cleanup  # noqa: E402
 from session_lifecycle import selected  # noqa: E402
 from terminal_lifecycle import Terminal  # noqa: E402
 from network_drop import pf_block, pf_release  # noqa: E402
+import windows_target  # noqa: E402
+import winhost  # noqa: E402
 
-PB = Path.home() / '.local/bin/pb'
-DARWIN = os.uname().sysname == 'Darwin'
+PB = winhost.pb_path()
+DEVICE = winhost.device()  # the Windows device the clients run on, else None: they run on this machine
+TARGET = None  # set by main()
+DARWIN = not DEVICE and os.uname().sysname == 'Darwin'
 if DARWIN:
     RUNTIME = Path.home() / 'Library/Application Support/Paperboat/runtime'
     DIAGNOSTICS = Path.home() / 'Library/Application Support/Paperboat/state/diagnostics'
@@ -46,10 +54,64 @@ def row(name, ok, detail=''):
     print(f'{state} {name}' + (f': {detail}' if detail else ''), flush=True)
 
 
+def win():
+    """The sessions run on a Windows machine: cmd.exe under ConPTY, which echoes what is typed and has no sh tools."""
+    return TARGET is not None and windows_target.is_windows(PB, TARGET)  # importers of connect() keep sh
+
+
+def say(prefix, token):
+    """The line to type that prints <prefix><token> on a line of its own."""
+    if win():
+        return windows_target.typed_marker(prefix + token)
+    return "printf '\\n" + prefix + "%s\\n' '" + token + "'"
+
+
+def say_mark(prefix, key):
+    """Like say, with the shell's own PB_RESTART_MARK between prefix and key: only the same shell can print it."""
+    if win():
+        return windows_target.typed_marker(prefix, "+$env:PB_RESTART_MARK+'_%s'" % key)
+    return "printf '\\n" + prefix + "%s_%s\\n' \"$PB_RESTART_MARK\" '" + key + "'"
+
+
+def set_mark(mark):
+    return f'set "PB_RESTART_MARK={mark}"' if win() else f'export PB_RESTART_MARK={mark}'
+
+
+def count(prefix, last, slow=False):
+    """The command that prints <prefix>1 .. <prefix>last, one per line; slow: one a second."""
+    if win():
+        return windows_target.count_line(prefix, last, slow)
+    if slow:
+        return 'for i in $(seq 1 %d); do echo %s$i; sleep 1; done' % (last, prefix)
+    return "seq -f '%s%%g' 1 %d" % (prefix, last)
+
+
+def noop():
+    return '' if win() else 'true'
+
+
+def pb_run(*arguments, timeout=60, check=False):
+    """pb to completion with text output, on the machine the clients run on."""
+    if DEVICE:
+        result = PB.run_remote(arguments, timeout=timeout)
+    else:
+        result = subprocess.run([str(PB), *arguments], capture_output=True, text=True, timeout=timeout)
+    if check and result.returncode:
+        raise subprocess.CalledProcessError(result.returncode, [str(PB), *arguments])
+    return result
+
+
 class Client(Terminal):
     """One attached pb client. ready() waits for a shell that answers a marker."""
 
+    key = None  # the name or session id on its command line: finds pb.exe on the Windows device
+
     def ready(self, timeout=90):
+        if win():  # cmd.exe announces no bracketed paste and has no stty; its console always echoes
+            token = 'PB_READY_' + uuid.uuid4().hex
+            self.send(windows_target.typed_marker(token) + '\r')
+            self.expect(token, timeout)
+            return
         # Keys typed before the shell enables bracketed paste are lost by its line editor.
         self.expect(b'\x1b[?2004h', timeout)
         self.expect(self.marker('READY', 'stty -echo; '), timeout)
@@ -57,14 +119,40 @@ class Client(Terminal):
     def run(self, command, timeout=60):
         """Run command in the shell and wait until it has finished."""
         token = uuid.uuid4().hex
-        self.send(command + "; printf '\\nPB_DONE_%s\\n' '" + token + "'\r")
+        self.send((command + (' & ' if win() else '; ') if command or not win() else '') + say('PB_DONE_', token) + '\r')
         return self.expect('PB_DONE_' + token, timeout)
+
+    def device_pid(self):
+        found = [p['ProcessId'] for p in DEVICE.processes(re.escape(self.key)) if p['Name'].lower() == 'pb.exe']
+        if len(found) != 1:
+            raise RuntimeError('expected one pb.exe for this client on the device, found %d' % len(found))
+        return found[0]
+
+    def kill(self):
+        """The client dies without a goodbye."""
+        if DEVICE:
+            DEVICE.stop(self.device_pid())
+        else:
+            os.kill(self.pid, signal.SIGKILL)
+
+    def suspend(self):
+        """The client stops running (a sleeping laptop, a stalled window)."""
+        if DEVICE:
+            DEVICE.suspend(self.device_pid())
+        else:
+            os.kill(self.pid, signal.SIGSTOP)
+
+    def resume(self):
+        if DEVICE:
+            DEVICE.resume(self.device_pid())
+        else:
+            os.kill(self.pid, signal.SIGCONT)
 
     def run_discarding(self, command, timeout):
         """Like run, for output too large to keep: only a sliding tail is kept to find the marker."""
         import select
         token = ('PB_DONE_' + uuid.uuid4().hex).encode()
-        self.send(command + "; printf '\\nPB_DONE_%s\\n' '" + token.decode()[8:] + "'\r")
+        self.send((command + (' & ' if win() else '; ') if command or not win() else '') + say('PB_DONE_', token.decode()[8:]) + '\r')
         tail, deadline = b'', time.monotonic() + timeout
         while token not in tail:
             if time.monotonic() >= deadline:
@@ -91,20 +179,25 @@ class Client(Terminal):
         return None
 
     def size(self):
+        if win():  # read by typing in this window, which also makes it the active one
+            found = re.findall(rb'PB_SIZE (\d+) (\d+)', self.run(windows_target.size_line()))
+            return tuple(map(int, found[-1])) if found else None
         out = self.run('stty size')
         found = re.findall(rb'(\d+) (\d+)\r?\n', out)
         return tuple(map(int, found[-1])) if found else None
 
 
 def connect(target, name, rows=24, cols=80):
-    c = Client([PB, 'connect', target, '--name', name, '--status-bar', 'off'])
+    c = Client(winhost.terminal_argv(PB, ['connect', target, '--name', name, '--status-bar', 'off']))
+    c.key = name
     c.resize(rows, cols)
     c.ready()
     return c
 
 
 def attach(target, session, rows=24, cols=80, typing=True):
-    c = Client([PB, 'connect', target, '--session', session, '--status-bar', 'off'])
+    c = Client(winhost.terminal_argv(PB, ['connect', target, '--session', session, '--status-bar', 'off']))
+    c.key = session
     c.resize(rows, cols)
     if typing:
         c.ready()
@@ -143,11 +236,15 @@ def exactly_once(out, prefix, first, last):
 
 
 def has_iptables():
+    if DEVICE:
+        return False
     return subprocess.run(['sudo', '-n', 'pfctl', '-s', 'info'] if DARWIN else ['sudo', '-n', 'iptables', '-S'],
                           capture_output=True).returncode == 0
 
 
-NO_FIREWALL = 'no passwordless sudo pfctl on this machine' if DARWIN else 'no iptables on this machine'
+NO_FIREWALL = ('cutting the Windows device network from here would cut the SSH that drives its clients' if DEVICE
+               else 'no passwordless sudo pfctl on this machine' if DARWIN else 'no iptables on this machine')
+NO_OUTSIDE_SIZE = 'a Windows session has no tty to read its size from outside; reading it by typing would hide the fault'
 
 
 def iptables(*rule):
@@ -180,14 +277,13 @@ _TARGET_OS = {}
 def target_darwin(target):
     """True when the machine the sessions run on is a Mac (its tools are BSD: stty -f, shasum)."""
     if target not in _TARGET_OS:
-        out = subprocess.run([str(PB), 'exec', target, '--', 'uname', '-s'], capture_output=True, text=True, timeout=60).stdout
-        _TARGET_OS[target] = 'Darwin' in out
+        _TARGET_OS[target] = not win() and 'Darwin' in pb_run('exec', target, '--', 'uname', '-s').stdout
     return _TARGET_OS[target]
 
 
 def pty_size(target, tty):
     """The session's PTY size read from outside it (pb exec), so measuring never counts as activity."""
-    out = subprocess.run([str(PB), 'exec', target, '--', 'stty', '-f' if target_darwin(target) else '-F', tty, 'size'], capture_output=True, text=True, timeout=60).stdout
+    out = pb_run('exec', target, '--', 'stty', '-f' if target_darwin(target) else '-F', tty, 'size').stdout
     found = re.findall(r'(\d+) (\d+)', out)
     return tuple(map(int, found[-1])) if found else None
 
@@ -219,7 +315,7 @@ def two_clients(a, sessions):
         c2 = attach(a.target, s['id'], 24, 80)
         try:
             token = uuid.uuid4().hex
-            c2.send("printf '\\nPB_BOTH_%s\\n' '" + token + "'\r")
+            c2.send(say('PB_BOTH_', token) + '\r')
             c2.expect('PB_BOTH_' + token)
             seen = True
             try:
@@ -227,10 +323,18 @@ def two_clients(a, sessions):
             except RuntimeError:
                 seen = False
             row('N1 two windows: output typed in one shows in the other', seen)
+            if win():  # each window reads the size by typing, which is what makes it the active one
+                size = c2.size()
+                row('N1 two windows: the size is the window that typed last (window 2)', size == (24, 80), f'{size}')
+                size = c1.size()
+                row('N1 two windows: typing moves the size to that window (window 1)', size == (30, 100), f'{size}')
+                row('N1 two windows: the other window resizing does not change it', None, NO_OUTSIDE_SIZE)
+                row('N1 two windows: the active window resizing does', None, NO_OUTSIDE_SIZE)
+                return
             tty = session_tty(c2)  # typing in window 2: it is the latest active
             size = settled_size(a.target, tty, (24, 80))
             row('N1 two windows: the size is the window that typed last (window 2)', size == (24, 80), f'{size}')
-            c1.run('true')
+            c1.run(noop())
             size = settled_size(a.target, tty, (30, 100))
             row('N1 two windows: typing moves the size to that window (window 1)', size == (30, 100), f'{size}')
             c2.resize(20, 70)
@@ -248,6 +352,9 @@ def two_clients(a, sessions):
 
 def reconnect_keeps_control(a, sessions):
     """N15, F3-17: a window that reconnects does not take the size from the window in use."""
+    if win():
+        row('N15 a reconnecting window never takes control', None, NO_OUTSIDE_SIZE)
+        return
     name = fresh_name(); sessions.append(name)
     c1 = connect(a.target, name, 30, 100)
     try:
@@ -274,9 +381,9 @@ def leave_rejoin(a, sessions):
     _, s = selected(PB, a.target, name)
     c2 = attach(a.target, s['id'])
     try:
-        os.kill(c1.pid, signal.SIGKILL)
+        c1.kill()
         c1.close()
-        c2.run("seq -f 'LR%g' 1 2000", 60)
+        c2.run(count('LR', 2000), 60)
         c1 = attach(a.target, s['id'])
         c1.settle(2)
         # A fresh client joins at the live edge with a redraw and recent scrollback (as tmux does),
@@ -285,7 +392,7 @@ def leave_rejoin(a, sessions):
         ok = bool(got) and got[-1] == 2000 and got == list(range(got[0], 2001))
         row('N2 rejoin: replay is a contiguous tail ending at the newest line, nothing repeated', ok,
             f'{len(got)} of 2000 lines shown' if got else 'no lines')
-        c1.run('true')
+        c1.run(noop())
         row('N2 rejoin: the rejoined window types again', True)
     finally:
         c1.close()
@@ -299,11 +406,11 @@ def sleep_wake(a, sessions):
     _, s = selected(PB, a.target, name)
     c2 = attach(a.target, s['id'])
     try:
-        os.kill(c1.pid, signal.SIGSTOP)
-        c2.run("for i in $(seq 1 90); do echo SW$i; sleep 1; done", 150)
+        c1.suspend()
+        c2.run(count('SW', 90, slow=True), 150)
         key = uuid.uuid4().hex
-        c1.send("printf '\\nPB_KEY_%s\\n' '" + key + "'\r")  # sits in c1's PTY while it sleeps
-        os.kill(c1.pid, signal.SIGCONT)
+        c1.send(say('PB_KEY_', key) + '\r')  # sits in c1's PTY while it sleeps
+        c1.resume()
         t0 = time.monotonic()
         try:
             c1.expect('PB_KEY_' + key, 120)
@@ -328,7 +435,7 @@ def network_drop(a, sessions):
     name = fresh_name(); sessions.append(name)
     c1 = connect(a.target, name)
     try:
-        c1.send("for i in $(seq 1 60); do echo ND$i; sleep 1; done\r")
+        c1.send(count('ND', 60, slow=True) + '\r')
         time.sleep(5)
         block = drop_all(45)
         try:
@@ -404,7 +511,7 @@ def black_hole(a, sessions):
     name = fresh_name(); sessions.append(name)
     c1 = connect(a.target, name)
     try:
-        c1.send("for i in $(seq 1 90); do echo BH$i; sleep 1; done\r")
+        c1.send(count('BH', 90, slow=True) + '\r')
         time.sleep(5)
         block = drop_all(60)
         key = uuid.uuid4().hex
@@ -415,7 +522,7 @@ def black_hole(a, sessions):
                 if detected is None and b'reconnect' in bytes(c1.output)[seen:].lower():
                     detected = time.monotonic() - dropped
                 if not typed and time.monotonic() - dropped >= 20:
-                    c1.send("printf '\\nPB_KEY_%s\\n' '" + key + "'\r")  # typed into the black hole
+                    c1.send(say('PB_KEY_', key) + '\r')  # typed into the black hole
                     typed = True
         finally:
             drop_restore(block)
@@ -456,7 +563,7 @@ def restarts(a, sessions):
         row('N14 runtime and daemon restarts', None, 'needs --restart-target-cmd and --restart-client-cmd')
         return
     deadline = time.monotonic() + 180  # a target still recovering from an earlier restart is not this row's fault
-    while subprocess.run([PB, 'exec', a.target, '--', 'true'], capture_output=True, timeout=60).returncode != 0:
+    while pb_run('exec', a.target, '--', *(['cmd', '/c', 'exit', '0'] if win() else ['true'])).returncode != 0:
         if time.monotonic() > deadline:
             row('N14 restarts: target answers before the row starts', False, 'pb exec failed for 180 s')
             return
@@ -465,8 +572,8 @@ def restarts(a, sessions):
     c1 = connect(a.target, name)
     try:
         mark = uuid.uuid4().hex[:12]
-        c1.run(f'export PB_RESTART_MARK={mark}')
-        c1.send("for i in $(seq 1 120); do echo RS$i; sleep 1; done\r")
+        c1.run(set_mark(mark))
+        c1.send(count('RS', 120, slow=True) + '\r')
         gap_keys = []
         for step, command in (('host runtime', a.restart_target_cmd), ('client daemon', a.restart_client_cmd)):
             time.sleep(10)
@@ -474,7 +581,7 @@ def restarts(a, sessions):
             run_shell(command)
             print(f'  {step} restarted after {time.monotonic() - t0:.1f} s', flush=True)
             gap_keys.append(uuid.uuid4().hex)
-            c1.send("printf '\\nPB_GAP_%s\\n' '" + gap_keys[-1] + "'\r")  # typed right after the restart
+            c1.send(say('PB_GAP_', gap_keys[-1]) + '\r')  # typed right after the restart
         t0 = time.monotonic()
         try:
             c1.expect('RS120', 240)
@@ -491,7 +598,7 @@ def restarts(a, sessions):
         counts = [bytes(c1.output).count(b'PB_GAP_' + k.encode()) for k in gap_keys]
         row('N14 restarts: keys typed right after each restart ran exactly once', counts == [1] * len(counts), f'{counts}')
         key = uuid.uuid4().hex
-        c1.send("printf '\\nPB_KEY_%s_%s\\n' \"$PB_RESTART_MARK\" '" + key + "'\r")
+        c1.send(say_mark('PB_KEY_', key) + '\r')
         try:
             c1.expect('PB_KEY_' + mark + '_' + key, 60)
             row('N14 restarts: the same shell answers (its environment survived)', True)
@@ -511,13 +618,13 @@ def daemon_restart_typing(a, sessions):
     c1 = connect(a.target, name)
     try:
         mark = uuid.uuid4().hex[:12]
-        c1.run(f'export PB_RESTART_MARK={mark}')
-        c1.send("for i in $(seq 1 60); do echo DR$i; sleep 1; done\r")
+        c1.run(set_mark(mark))
+        c1.send(count('DR', 60, slow=True) + '\r')
         time.sleep(5)
         restart = subprocess.Popen(a.restart_client_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         key = uuid.uuid4().hex
         time.sleep(0.5)
-        c1.send("printf '\\nPB_DKEY_%s\\n' '" + key + "'\r")  # typed while the daemon restarts
+        c1.send(say('PB_DKEY_', key) + '\r')  # typed while the daemon restarts
         restart.wait(120)
         try:
             c1.expect('DR60', 180)
@@ -532,7 +639,7 @@ def daemon_restart_typing(a, sessions):
         count = out.count(b'PB_DKEY_' + key.encode())
         row('N12 daemon restart: keys typed during it ran exactly once', count == 1, f'{count} times')
         probe = uuid.uuid4().hex
-        c1.send("printf '\\nPB_SAME_%s_%s\\n' \"$PB_RESTART_MARK\" '" + probe + "'\r")
+        c1.send(say_mark('PB_SAME_', probe) + '\r')
         try:
             c1.expect('PB_SAME_' + mark + '_' + probe, 60)
             row('N12 daemon restart: the same shell answers', True)
@@ -549,10 +656,11 @@ def fast_output(a, sessions):
     _, s = selected(PB, a.target, name)
     c2 = attach(a.target, s['id'])
     try:
-        os.kill(c2.pid, signal.SIGSTOP)  # a stalled viewer must not stall others
+        c2.suspend()  # a stalled viewer must not stall others
         t0 = time.monotonic()
         try:
-            c1.run_discarding('yes 0123456789012345678901234567890123456789012345678 | head -c 50000000', 300)
+            c1.run_discarding(windows_target.flood_line(1000000) if win()
+                              else 'yes 0123456789012345678901234567890123456789012345678 | head -c 50000000', 300)
             row('N6 50 MB output finishes with a stalled second window', True, f'{time.monotonic() - t0:.0f} s')
         except RuntimeError:
             row('N6 50 MB output finishes with a stalled second window', False, 'not done in 300 s')
@@ -560,7 +668,7 @@ def fast_output(a, sessions):
         # The hardest real case at once: the foreground job floods output (yes) and never reads the
         # 256 KiB paste, which fills the tty queue, and the second viewer (c2) is stalled. The host
         # delivers Ctrl-C ahead of the stuck paste and discards what is left of it (F3-11).
-        c1.send('yes\r')
+        c1.send((windows_target.flood_line() if win() else 'yes') + '\r')
         time.sleep(3)
         c1.send(('x' * 1023 + '\n') * 256)
         c1.send('\x03')
@@ -573,14 +681,14 @@ def fast_output(a, sessions):
         else:
             row('N6 Ctrl-C stops yes promptly', stopped < 5, f'output stopped {stopped:.1f} s after Ctrl-C')
         try:
-            c1.run_discarding('true', 15)
+            c1.run_discarding(noop(), 15)
             row('N6 the shell answers after Ctrl-C', True)
         except RuntimeError as error:
             row('N6 the shell answers after Ctrl-C', False, str(error))
-        os.kill(c2.pid, signal.SIGCONT)
+        c2.resume()
         t0 = time.monotonic()
         try:
-            c2.run_discarding('true', 120)
+            c2.run_discarding(noop(), 120)
             row('N6 the stalled window recovers after it resumes', True, f'{time.monotonic() - t0:.0f} s')
         except RuntimeError as error:
             row('N6 the stalled window recovers after it resumes', False, f'{error} ({time.monotonic() - t0:.0f} s)')
@@ -595,21 +703,24 @@ def keystrokes(a, sessions):
     import glob
 
     def opens():
+        if DEVICE:  # the daemon's state directory holds runtime and diagnostics side by side
+            return DEVICE.count_in_files(DEVICE.runtime_dir().parent / 'diagnostics', 'events-*.ndjson', 'peer_stream_opened')
         files = glob.glob(str(DIAGNOSTICS / 'events-*.ndjson'))
         return sum(open(f).read().count('peer_stream_opened') for f in files)
 
     name = fresh_name(); sessions.append(name)
     c1 = connect(a.target, name)
     try:
-        c1.send('cat > /dev/null\r')
+        c1.send((windows_target.sink_line() if win() else 'cat > /dev/null') + '\r')
         time.sleep(1)
         before = opens()
-        for _ in range(2000):
-            c1.send('x')
+        for index in range(2000):
+            # a Windows console line holds about 250 characters: Enter every 100 keys keeps each key accepted
+            c1.send('\r' if win() and index % 100 == 99 else 'x')
             time.sleep(0.01)
-        c1.send('\r\x04')
+        c1.send('\r\x1a\r' if win() else '\r\x04')  # end of input: Ctrl-Z Enter on a Windows console
         t0 = time.monotonic()
-        c1.run_discarding('true', 60)
+        c1.run_discarding(noop(), 60)
         reopened = opens() - before
         row('N11 2 000 keystrokes: no stream reopen', reopened == 0, f'{reopened} reopens')
         row('N11 the shell answers right after typing', time.monotonic() - t0 < 2, f'{time.monotonic() - t0:.1f} s')
@@ -628,6 +739,8 @@ def echo_latency(a, sessions):
         for i in range(count):
             ch = 'abcdefghij'[i % 10].encode()
             c.pending.clear()
+            if win() and i % 100 == 99:
+                c.send('\r')  # a Windows console line holds about 250 characters
             t0 = time.monotonic()
             c.send(ch)
             deadline = t0 + 5
@@ -640,17 +753,20 @@ def echo_latency(a, sessions):
         q = statistics.quantiles(times, n=100)
         return q[49], q[98]
 
+    if DEVICE:
+        row('N16 echo latency', None, 'every key crosses the SSH hop from this controller to the Windows device: not the product latency')
+        return
     name = fresh_name(); sessions.append(name)
     c1 = connect(a.target, name)
     flood = None
     try:
-        c1.send('stty echo; cat\r')
+        c1.send((windows_target.sink_line() if win() else 'stty echo; cat') + '\r')
         c1.settle(1)
         p50, p99 = sample(c1)
         row('N16 echo latency idle', p99 < 150, f'p50 {p50:.0f} ms, p99 {p99:.0f} ms')
         other = fresh_name(); sessions.append(other)
         flood = connect(a.target, other)
-        flood.send('yes\r')
+        flood.send((windows_target.flood_line() if win() else 'yes') + '\r')
         time.sleep(2)
         p50, p99 = sample(c1)
         row('N16 echo latency while another session floods', p99 < 150, f'p50 {p50:.0f} ms, p99 {p99:.0f} ms')
@@ -680,6 +796,9 @@ def resize_storm(a, sessions):
 def large_paste(a, sessions):
     """W11: a 256 KiB paste reaches the program byte for byte; a bracketed paste at the shell
     prompt is inserted as one edit and runs only on Enter."""
+    if win():
+        row('N8 256 KiB paste arrives byte for byte', None, 'cmd.exe has no raw input mode (stty raw) and no bracketed paste')
+        return
     name = fresh_name(); sessions.append(name)
     c1 = connect(a.target, name)
     try:
@@ -725,7 +844,7 @@ def many_sessions(a, sessions):
         working = 0
         for c in clients:
             try:
-                c.run('true', 30)
+                c.run(noop(), 30)
                 working += 1
             except RuntimeError:
                 pass
@@ -752,33 +871,32 @@ def shared(a, sessions):
     try:
         _, s = selected(PB, a.target, name)
         share = ['--workspace', 'personal', 'session', 'share', s['id'], '--team', a.team, '--member', a.member]
-        subprocess.run([PB, *share, '--role', 'interactive', '--json'], check=True, capture_output=True, timeout=60)
+        pb_run(*share, '--role', 'interactive', '--json', check=True)
         joined = Client(shlex.split(a.member_cmd) + [a.member_pb, 'session', 'join', s['id']])
         token = uuid.uuid4().hex
-        joined.send("printf '\\nPB_MEMBER_%s\\n' '" + token + "'\r")
+        joined.send(say('PB_MEMBER_', token) + '\r')
         try:
             c1.expect('PB_MEMBER_' + token, 60)
             row('N10 interactive member: their typing reaches the owner', True)
         except RuntimeError:
             row('N10 interactive member: their typing reaches the owner', False, 'not seen by the owner in 60 s')
         joined.close()
-        subprocess.run([PB, *share, '--role', 'viewer', '--json'], check=True, capture_output=True, timeout=60)
+        pb_run(*share, '--role', 'viewer', '--json', check=True)
         joined = Client(shlex.split(a.member_cmd) + [a.member_pb, 'session', 'join', s['id']])
         time.sleep(5)
         token = uuid.uuid4().hex
-        joined.send("printf '\\nPB_VIEWER_%s\\n' '" + token + "'\r")
-        c1.run('sleep 5', 30)
+        joined.send(say('PB_VIEWER_', token) + '\r')
+        c1.run(windows_target.typed_line('Start-Sleep 5') if win() else 'sleep 5', 30)
         row('N10 viewer: their typing does not reach the shell',
             b'PB_VIEWER_' + token.encode() not in bytes(c1.output))
         live = uuid.uuid4().hex
-        c1.send("printf '\\nPB_LIVE_%s\\n' '" + live + "'\r")
+        c1.send(say('PB_LIVE_', live) + '\r')
         try:
             joined.expect('PB_LIVE_' + live, 30)
             row('N10 viewer: sees the owner\'s live output', True)
         except RuntimeError:
             row('N10 viewer: sees the owner\'s live output', False)
-        subprocess.run([PB, '--workspace', 'personal', 'session', 'unshare', s['id'], '--json'],
-                       check=True, capture_output=True, timeout=60)
+        pb_run('--workspace', 'personal', 'session', 'unshare', s['id'], '--json', check=True)
         try:
             joined.wait_exit(60)
             row('N10 unshare ends the member\'s view', True, f'exit {joined.status}')
@@ -806,6 +924,8 @@ def main():
     p.add_argument('--team', default='')
     p.add_argument('--member', default='', help='member account ID')
     a = p.parse_args()
+    global TARGET
+    TARGET = a.target
     sessions = []
     try:
         for key in a.only.split(','):
@@ -816,11 +936,16 @@ def main():
     finally:
         for name in sessions:
             try:
-                cleanup(str(PB), a.target, name)
+                cleanup(PB, a.target, name)
             except Exception as error:
                 print(f'cleanup {name}: {error}', file=sys.stderr)
     failed = [n for n, s in RESULTS if s == 'FAIL']
     print('RESULT', 'PASS' if not failed else 'FAIL ' + str(len(failed)))
+    if DEVICE:  # windows_checks.py reads one JSON status line; rows that all SKIP are not a pass
+        import json
+        states = [s for _, s in RESULTS]
+        print(json.dumps({'check': 'terminal-matrix', 'target': a.target, 'status': 'PASS' if not failed and 'PASS' in states else 'FAIL',
+                          'passed': states.count('PASS'), 'failed': len(failed), 'skipped': states.count('SKIP')}))
     return 1 if failed else 0
 
 

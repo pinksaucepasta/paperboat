@@ -741,5 +741,181 @@ class SshFamilyPlumbing(unittest.TestCase):
         self.assertEqual(['scp', 'sftp'], receipt['tools'])
 
 
+
+# Stands in for cmd.exe in a pty: a prompt, `a & b`, `set "N=V"`, exit, and Ctrl-C that ends only the foreground
+# program. Each `powershell -NoProfile -Command "<script>"` it is given runs for real in PB_TEST_PWSH.
+FAKE_CMD = r"""
+import os, re, signal, subprocess, sys
+signal.signal(signal.SIGINT, signal.SIG_IGN)
+env = dict(os.environ, LC_ALL='C.UTF-8')
+while True:
+    sys.stdout.write('C:\\>'); sys.stdout.flush()
+    line = sys.stdin.readline()
+    if not line or line.strip() == 'exit':
+        break
+    for part in line.strip().split(' & '):
+        setting = re.fullmatch(r'set "(\w+)=(.*)"', part)
+        script = re.fullmatch(r'powershell -NoProfile -Command "(.*)"', part)
+        if setting:
+            env[setting[1]] = setting[2]
+        elif script:
+            subprocess.run([sys.argv[1], '-NoProfile', '-Command', script[1]], env=env,
+                           preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
+        elif part:
+            print('not a command of this fixture: ' + part)
+"""
+
+
+@unittest.skipUnless(PWSH, 'set PB_TEST_PWSH to a pwsh binary to run the terminal lines for real')
+class TerminalFamilyInPowerShell(unittest.TestCase):
+    def run_line(self, line, input=None):
+        return subprocess.run(shell_words(line), capture_output=True, input=input)
+
+    def test_typed_lines_print_what_the_sh_commands_print(self):
+        import windows_target
+        self.assertEqual(b'LR1\nLR2\nLR3\n', self.run_line(windows_target.count_line('LR', 3)).stdout)
+        self.assertEqual(b'SW1\nSW2\n', self.run_line(windows_target.count_line('SW', 2, slow=True)).stdout)
+        flood = self.run_line(windows_target.flood_line(3)).stdout
+        self.assertEqual([b'0123456789012345678901234567890123456789012345678'] * 3, flood.split())
+        self.assertEqual(b'', self.run_line(windows_target.sink_line(), input=b'x' * 99 + b'\n' + b'xx\n').stdout)
+        self.assertEqual(b'\x1b[31mPB_COLOUR\x1b[0m', self.run_line(windows_target.colour_line()).stdout.strip())
+        self.assertEqual(b'PB_FOREGROUND_abc', self.run_line(windows_target.foreground_line('PB_FOREGROUND_abc', 0)).stdout.strip())
+        self.assertNotIn('PB_FOREGROUND_abc', windows_target.foreground_line('PB_FOREGROUND_abc', 0))
+        self.assertEqual(b'PB_ARITH_42', self.run_line(windows_target.typed_marker('PB_ARITH_', '+(6*7)')).stdout.strip())
+        for bad in ('say "x"', 'echo 100%', 'a\nb'):
+            with self.assertRaises(AssertionError):
+                windows_target.typed_line(bad)
+
+    def test_count_in_files_reads_files_another_process_writes(self):
+        SnippetsInPowerShell.setUpClass()
+        device = SnippetsInPowerShell.device
+        with device.temp_dir('pb-test') as directory:
+            self.assertEqual(0, device.count_in_files(directory, 'events-*.ndjson', 'peer_stream_opened'))
+            (directory / 'events-1.ndjson').write_text('{"e":"peer_stream_opened"}\n{"e":"other"}\n{"e":"peer_stream_opened"}\n')
+            (directory / 'events-2.ndjson').write_text('{"e":"peer_stream_opened"}\n')
+            (directory / 'other.log').write_text('peer_stream_opened')
+            with open(str(directory / 'events-2.ndjson'), 'a'):  # held open for writing, as the daemon does
+                self.assertEqual(3, device.count_in_files(directory, 'events-*.ndjson', 'peer_stream_opened'))
+
+    def fake_cmd(self):
+        import tempfile
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        script = pathlib.Path(directory.name) / 'cmd.py'
+        script.write_text(FAKE_CMD)
+        return [sys.executable, str(script), PWSH]
+
+    def test_terminal_lifecycle_windows_phases_against_a_console_that_echoes(self):
+        import terminal_lifecycle
+        terminal = terminal_lifecycle.Terminal(self.fake_cmd())
+        try:
+            phases = terminal_lifecycle.windows_phases(terminal, 'main', 'off')
+        finally:
+            terminal.close()
+        self.assertEqual(['input_output', 'unicode', 'resize', 'colour', 'ctrl_c', 'exit'], phases)
+        self.assertEqual(0, terminal.status)
+        for check in ('paste', 'typing', 'apps', 'monitor'):
+            with self.assertRaisesRegex(RuntimeError, 'no Windows form'):
+                terminal_lifecycle.windows_phases(None, check, 'off')
+
+    def test_matrix_client_types_powershell_lines_at_a_windows_session(self):
+        import terminal_matrix
+        import windows_target
+        with patch.object(terminal_matrix, 'TARGET', 'victus'), \
+                patch.dict(windows_target._platforms, {(str(terminal_matrix.PB), 'victus'): True}):
+            client = terminal_matrix.Client(self.fake_cmd())
+            try:
+                client.resize(31, 97)
+                client.ready()
+                self.assertEqual((31, 97), client.size())
+                out = client.run(terminal_matrix.count('LR', 5))
+                # pwsh on Linux starts its first line with a keypad escape, so the numbers are read without line anchors
+                self.assertEqual([b'1', b'2', b'3', b'4', b'5'], __import__('re').findall(rb'LR(\d+)', out))
+                client.run(terminal_matrix.set_mark('m7'))
+                client.send(terminal_matrix.say_mark('PB_KEY_', 'k1') + '\r')
+                client.expect('PB_KEY_m7_k1')
+                client.run(terminal_matrix.noop())
+                self.assertEqual(1, bytes(client.output).count(b'PB_KEY_m7_k1'))  # the echo of the typed line is not a hit
+            finally:
+                client.close()
+
+
+class TerminalFamilyPlumbing(unittest.TestCase):
+    def test_unix_command_strings_are_unchanged(self):
+        import terminal_matrix as matrix
+        self.assertIsNone(matrix.TARGET)  # importers of connect() (terminal_dead_machine) never ask for the platform
+        self.assertEqual("printf '\\nPB_BOTH_%s\\n' 'tok'", matrix.say('PB_BOTH_', 'tok'))
+        self.assertEqual("printf '\\nPB_KEY_%s_%s\\n' \"$PB_RESTART_MARK\" 'k'", matrix.say_mark('PB_KEY_', 'k'))
+        self.assertEqual('export PB_RESTART_MARK=m', matrix.set_mark('m'))
+        self.assertEqual("seq -f 'LR%g' 1 2000", matrix.count('LR', 2000))
+        self.assertEqual('for i in $(seq 1 90); do echo SW$i; sleep 1; done', matrix.count('SW', 90, slow=True))
+        self.assertEqual('true', matrix.noop())
+        sent = []
+        client = object.__new__(matrix.Client)
+        client.send, client.expect = sent.append, lambda token, timeout: token
+        token = client.run('stty size')[8:]
+        self.assertEqual(["stty size; printf '\\nPB_DONE_%s\\n' '" + token + "'\r"], sent)
+
+    def test_windows_target_strings_and_rows_without_an_equivalent(self):
+        import terminal_matrix as matrix
+        import windows_target
+        with patch.object(matrix, 'TARGET', 'victus'), patch.dict(windows_target._platforms, {(str(matrix.PB), 'victus'): True}), \
+                patch.object(matrix, 'RESULTS', []), patch('builtins.print'):
+            self.assertEqual('set "PB_RESTART_MARK=m"', matrix.set_mark('m'))
+            sent = []
+            client = object.__new__(matrix.Client)
+            client.send, client.expect = sent.append, lambda token, timeout: token
+            client.run(matrix.set_mark('m'))
+            client.run(matrix.noop())
+            self.assertRegex(sent[0], r'^set "PB_RESTART_MARK=m" & powershell -NoProfile -Command ".*"\r$')
+            self.assertRegex(sent[1], r'^powershell -NoProfile -Command ".*"\r$')
+            self.assertFalse(matrix.target_darwin('victus'))  # without running uname there
+            matrix.reconnect_keeps_control(SimpleNamespace(target='victus'), [])
+            matrix.large_paste(SimpleNamespace(target='victus'), [])
+            self.assertEqual(['SKIP', 'SKIP'], [state for _, state in matrix.RESULTS])
+
+    def test_device_clients_are_found_by_their_command_line_and_firewall_rows_skip(self):
+        import terminal_matrix as matrix
+
+        class Device:
+            calls = []
+
+            def processes(self, pattern):
+                self.calls.append(('processes', pattern))
+                return [{'ProcessId': 11, 'Name': 'powershell.exe'}, {'ProcessId': 12, 'Name': 'pb.exe'}]
+
+            def __getattr__(self, name):
+                return lambda pid: self.calls.append((name, pid))
+
+        device = Device()
+        with patch.object(matrix, 'DEVICE', device), patch.object(matrix, 'RESULTS', []), patch('builtins.print'):
+            client = object.__new__(matrix.Client)
+            client.key = 'smoke-matrix-0123456789'
+            client.suspend(), client.resume(), client.kill()
+            self.assertEqual([('suspend', 12), ('resume', 12), ('stop', 12)], [c for c in device.calls if c[0] != 'processes'])
+            self.assertEqual(('processes', 'smoke\\-matrix\\-0123456789'), device.calls[0])
+            self.assertFalse(matrix.has_iptables())
+            matrix.echo_latency(SimpleNamespace(target='hp'), [])
+            self.assertEqual(['SKIP'], [state for _, state in matrix.RESULTS])
+            device.processes = lambda pattern: []
+            with self.assertRaisesRegex(RuntimeError, 'expected one pb.exe'):
+                client.suspend()
+
+    def test_pb_run_checks_the_exit_code_when_asked(self):
+        import terminal_matrix as matrix
+        with patch.object(matrix, 'PB', sys.executable):
+            self.assertEqual('7\n', matrix.pb_run('-c', 'print(7)').stdout)
+            self.assertEqual(3, matrix.pb_run('-c', 'raise SystemExit(3)').returncode)
+            with self.assertRaises(subprocess.CalledProcessError):
+                matrix.pb_run('-c', 'raise SystemExit(3)', check=True)
+
+    def test_lifecycle_scripts_take_pb_and_their_terminal_from_winhost(self):
+        for name in ('terminal_lifecycle', 'terminal_matrix', 'ssh_lifecycle', 'ssh_tools_lifecycle', 'ssh_doctor_lifecycle',
+                     'ssh_alias_lifecycle', 'ssh_long'):
+            source = (pathlib.Path(__file__).parent / (name + '.py')).read_text()
+            self.assertNotIn("Path.home() / '.local/bin/pb'", source, name)
+            self.assertIn('winhost.pb_path()', source, name)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -21,6 +21,8 @@ from pairing_lifecycle import command_diagnostic
 from install_lifecycle import registration
 from machine_lifecycle import machine, restore_all
 from session_cleanup import cleanup
+import windows_target
+import winhost
 
 
 class Terminal:
@@ -202,6 +204,117 @@ def applications(terminal, monitor=None):
     return prompt
 
 
+def unix_phases(terminal, check, monitor, entry, cwd, status_bar):
+    """Every phase against a Unix target (sh, stty, vim, less, htop); returns the phases that ran."""
+    terminal.expect(b'\x1b[?2004h')
+    if status_bar == 'on':
+        terminal.expect(b'\x1b[1;23r')
+    terminal.expect(terminal.marker('READY', 'stty -echo; '))
+    if entry == 'new':
+        expected = shlex.quote(str(Path(cwd).resolve()))
+        terminal.expect(terminal.marker('LOCAL_CWD', '[ "$(pwd -P)" = ' + expected + ' ] && '))
+    if check not in ('paste', 'typing', 'apps', 'monitor'):
+        terminal.send("printf '\\nPB_ARITH_%s\\n' \"$((6*7))\"; printf '\\nPB_UNICODE_λ船\\n'\r")
+        terminal.expect('PB_ARITH_42')
+        terminal.expect('PB_UNICODE_λ船')
+        terminal.resize(37, 109)
+        # Resize travels pb -> daemon -> host; it is applied within a fraction of a second, not instantly.
+        wanted = 'PB_SIZE_' + ('36' if status_bar == 'on' else '37') + ' 109'
+        deadline = time.monotonic() + 5
+        while True:
+            terminal.send("printf '\\nPB_SIZE_'; stty size\r")
+            try:
+                terminal.expect(wanted, timeout=0.6)
+                break
+            except RuntimeError:
+                if time.monotonic() > deadline:
+                    raise RuntimeError('terminal size did not follow the local resize within 5 s')
+        terminal.send("printf '\\033[31mPB_COLOUR\\033[0m\\n'\r")
+        terminal.expect(b'\x1b[31mPB_COLOUR\x1b[0m')
+        for control, label in [(b'\x03', 'INTERRUPTED'), (b'\x1a', 'STOPPED')]:
+            suffix = uuid.uuid4().hex
+            ready = 'PB_FOREGROUND_' + suffix
+            command = "printf '\\nPB_FOREGROUND_%s\\n' '" + suffix + "'; exec sleep 60"
+            terminal.send('sh -c ' + shlex.quote(command) + '\r')
+            terminal.expect(ready)
+            terminal.send(control)
+            if control == b'\x1a':
+                jobs = terminal.expect(terminal.marker('JOBS', 'jobs -s; '))
+                if b'Stopped' not in jobs and b'suspended' not in jobs.lower():
+                    raise RuntimeError('Ctrl-Z did not stop the foreground fixture')
+                terminal.expect(terminal.marker(label, 'kill -KILL %1; wait %1 2>/dev/null; '))
+            else:
+                terminal.expect(terminal.marker(label))
+    if check in ('paste', 'typing', 'all'):
+        payload = 'paste_' + 'a' * 8192
+        command = "PB_PASTE='" + payload + "'; printf '\\nPB_PASTE_LENGTH_%s\\n' \"${#PB_PASTE}\""
+        if check == 'typing':
+            terminal.send(command + '\r')
+        else:
+            terminal.send(b'\x1b[200~' + command.encode() + b'\x1b[201~\r')
+        terminal.expect('PB_PASTE_LENGTH_' + str(len(payload)))
+    if check in ('main', 'apps', 'monitor', 'all'):
+        applications(terminal, monitor if check in ('monitor', 'all') else None)
+    terminal.expect(terminal.marker('DONE'))
+    terminal.settle()
+    terminal.send(b'\x04')
+    if terminal.wait_exit() != 0:
+        raise RuntimeError('Ctrl-D did not end the terminal successfully')
+    phases = ['input_output', 'unicode', 'resize', 'colour', 'ctrl_c', 'ctrl_z'] if check not in ('paste', 'typing', 'apps', 'monitor') else []
+    if check in ('paste', 'typing', 'all'):
+        phases.append('large_typing' if check == 'typing' else 'large_paste')
+    if check in ('main', 'apps', 'monitor', 'all'):
+        phases += ['vim', 'less']
+    if check in ('monitor', 'all'):
+        phases.append('htop')
+    return phases + ['ctrl_d']
+
+
+def windows_phases(terminal, check, status_bar):
+    """The phases that exist for a Windows target, whose shell is cmd.exe under ConPTY: each step is one PowerShell
+    line typed there. Left out: Ctrl-Z (no job control), the 8 KiB paste and typing (a cmd.exe line holds 8191
+    characters), vim, less and htop (not on Windows) and Ctrl-D (cmd.exe ends with exit)."""
+    if check not in ('main', 'all'):
+        raise RuntimeError('--check ' + check + ' has no Windows form: it needs sh, an editor, a pager or a monitor')
+
+    def say(label):
+        token = 'PB_' + label + '_' + uuid.uuid4().hex
+        terminal.send(windows_target.typed_marker(token) + '\r')
+        return token
+
+    if status_bar == 'on':
+        terminal.expect(b'\x1b[1;23r')
+    terminal.expect(say('READY'))
+    terminal.send(windows_target.typed_marker('PB_ARITH_', '+(6*7)') + '\r')
+    terminal.expect('PB_ARITH_42')
+    terminal.send(windows_target.typed_marker('PB_UNICODE_', "+'λ船'") + '\r')
+    terminal.expect('PB_UNICODE_λ船')
+    terminal.resize(37, 109)
+    wanted = 'PB_SIZE ' + ('36' if status_bar == 'on' else '37') + ' 109'
+    deadline = time.monotonic() + 20  # each reading starts a PowerShell, about a second
+    while True:
+        terminal.send(windows_target.size_line() + '\r')
+        try:
+            terminal.expect(wanted, timeout=5)
+            break
+        except RuntimeError:
+            if time.monotonic() > deadline:
+                raise RuntimeError('terminal size did not follow the local resize within 20 s')
+    terminal.send(windows_target.colour_line() + '\r')
+    terminal.expect(b'\x1b[31mPB_COLOUR')  # ConPTY writes the reset in its own form
+    ready = 'PB_FOREGROUND_' + uuid.uuid4().hex
+    terminal.send(windows_target.foreground_line(ready, 60) + '\r')
+    terminal.expect(ready)
+    terminal.send(b'\x03')
+    terminal.expect(say('INTERRUPTED'))  # within 45 s: the fixture uninterrupted would sleep 60
+    terminal.expect(say('DONE'))
+    terminal.settle()
+    terminal.send('exit\r')
+    if terminal.wait_exit() != 0:
+        raise RuntimeError('exit did not end the terminal successfully')
+    return ['input_output', 'unicode', 'resize', 'colour', 'ctrl_c', 'exit']
+
+
 def qualify(pb, target, check, monitor, entry='connect', cwd=None, status_bar='off'):
     name = 'smoke-terminal-' + uuid.uuid4().hex[:12]
     terminal = None
@@ -211,74 +324,17 @@ def qualify(pb, target, check, monitor, entry='connect', cwd=None, status_bar='o
             own = machine(pb, registration()['machine_id'])
             if target not in (own['id'], own['alias']):
                 raise RuntimeError('pb new must be checked against this exact enrolled machine')
-            arguments = [pb, 'new']
+            arguments = ['new']
         else:
-            arguments = [pb, target] if entry == 'root' else [pb, 'connect', target]
-        terminal = Terminal([*arguments, '--name', name, '--status-bar', status_bar], cwd=cwd)
-        terminal.expect(b'\x1b[?2004h')
-        if status_bar == 'on':
-            terminal.expect(b'\x1b[1;23r')
-        terminal.expect(terminal.marker('READY', 'stty -echo; '))
-        if entry == 'new':
-            expected = shlex.quote(str(Path(cwd).resolve()))
-            terminal.expect(terminal.marker('LOCAL_CWD', '[ "$(pwd -P)" = ' + expected + ' ] && '))
-        if check not in ('paste', 'typing', 'apps', 'monitor'):
-            terminal.send("printf '\\nPB_ARITH_%s\\n' \"$((6*7))\"; printf '\\nPB_UNICODE_λ船\\n'\r")
-            terminal.expect('PB_ARITH_42')
-            terminal.expect('PB_UNICODE_λ船')
-            terminal.resize(37, 109)
-            # Resize travels pb -> daemon -> host; it is applied within a fraction of a second, not instantly.
-            wanted = 'PB_SIZE_' + ('36' if status_bar == 'on' else '37') + ' 109'
-            deadline = time.monotonic() + 5
-            while True:
-                terminal.send("printf '\\nPB_SIZE_'; stty size\r")
-                try:
-                    terminal.expect(wanted, timeout=0.6)
-                    break
-                except RuntimeError:
-                    if time.monotonic() > deadline:
-                        raise RuntimeError('terminal size did not follow the local resize within 5 s')
-            terminal.send("printf '\\033[31mPB_COLOUR\\033[0m\\n'\r")
-            terminal.expect(b'\x1b[31mPB_COLOUR\x1b[0m')
-            for control, label in [(b'\x03', 'INTERRUPTED'), (b'\x1a', 'STOPPED')]:
-                suffix = uuid.uuid4().hex
-                ready = 'PB_FOREGROUND_' + suffix
-                command = "printf '\\nPB_FOREGROUND_%s\\n' '" + suffix + "'; exec sleep 60"
-                terminal.send('sh -c ' + shlex.quote(command) + '\r')
-                terminal.expect(ready)
-                terminal.send(control)
-                if control == b'\x1a':
-                    jobs = terminal.expect(terminal.marker('JOBS', 'jobs -s; '))
-                    if b'Stopped' not in jobs and b'suspended' not in jobs.lower():
-                        raise RuntimeError('Ctrl-Z did not stop the foreground fixture')
-                    terminal.expect(terminal.marker(label, 'kill -KILL %1; wait %1 2>/dev/null; '))
-                else:
-                    terminal.expect(terminal.marker(label))
-        if check in ('paste', 'typing', 'all'):
-            payload = 'paste_' + 'a' * 8192
-            command = "PB_PASTE='" + payload + "'; printf '\\nPB_PASTE_LENGTH_%s\\n' \"${#PB_PASTE}\""
-            if check == 'typing':
-                terminal.send(command + '\r')
-            else:
-                terminal.send(b'\x1b[200~' + command.encode() + b'\x1b[201~\r')
-            terminal.expect('PB_PASTE_LENGTH_' + str(len(payload)))
-        if check in ('main', 'apps', 'monitor', 'all'):
-            applications(terminal, monitor if check in ('monitor', 'all') else None)
-        terminal.expect(terminal.marker('DONE'))
-        terminal.settle()
-        terminal.send(b'\x04')
-        if terminal.wait_exit() != 0:
-            raise RuntimeError('Ctrl-D did not end the terminal successfully')
-        phases = ['input_output', 'unicode', 'resize', 'colour', 'ctrl_c', 'ctrl_z'] if check not in ('paste', 'typing', 'apps', 'monitor') else []
-        if check in ('paste', 'typing', 'all'):
-            phases.append('large_typing' if check == 'typing' else 'large_paste')
-        if check in ('main', 'apps', 'monitor', 'all'):
-            phases += ['vim', 'less']
-        if check in ('monitor', 'all'):
-            phases.append('htop')
+            arguments = [target] if entry == 'root' else ['connect', target]
+        terminal = Terminal(winhost.terminal_argv(pb, [*arguments, '--name', name, '--status-bar', status_bar]), cwd=cwd)
+        if entry != 'new' and windows_target.is_windows(pb, target):
+            phases = windows_phases(terminal, check, status_bar)
+        else:
+            phases = unix_phases(terminal, check, monitor, entry, cwd, status_bar)
         result = {'check': 'terminal-' + check, 'entry': entry, 'status_bar': status_bar, 'target': target, 'status': 'PASS',
                   'seconds': round(time.monotonic() - started, 1),
-                  'phases': phases + ['ctrl_d', 'exact_session_cleanup']}
+                  'phases': phases + ['exact_session_cleanup']}
     except Exception as error:
         if terminal is not None:
             receipt = command_diagnostic(terminal.arguments, terminal.output.decode(errors='replace'), '')
@@ -287,7 +343,7 @@ def qualify(pb, target, check, monitor, entry='connect', cwd=None, status_bar='o
     finally:
         restore_all(sys.exc_info()[1],
                     lambda: terminal.close() if terminal is not None else None,
-                    lambda: cleanup(str(pb), target, name))
+                    lambda: cleanup(pb, target, name))
     print(json.dumps(result), flush=True)
 
 
@@ -300,7 +356,9 @@ def main():
     parser.add_argument('--cwd-root', type=Path, default=Path.home(),
                         help='parent of the distinct project directory; /tmp exercises namespace isolation')
     args = parser.parse_args()
-    pb = Path.home() / '.local/bin/pb'
+    pb = winhost.pb_path()
+    if args.entry == 'new' and winhost.device():
+        parser.error('--entry new starts in a directory of the device; the ssh -tt harness cannot choose one')
     if args.entry == 'new':
         with tempfile.TemporaryDirectory(prefix='.paperboat-terminal-cwd-', dir=args.cwd_root) as directory:
             qualify(pb, args.target, args.check, args.monitor_path, args.entry, directory)

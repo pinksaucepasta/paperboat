@@ -92,6 +92,10 @@ SERVICE_PATHS = ("@(Get-CimInstance Win32_Service|Where-Object{$_.Name -like $re
 LISTENING = ("try{$c=New-Object Net.Sockets.TcpClient('127.0.0.1',[int]$req.port);$c.Close();'yes'}catch{'no'}")
 ALIVE = "if(Get-Process -Id $req.pid -ErrorAction SilentlyContinue){'yes'}else{'no'}"
 WHICH = "(Get-Command $req.name -CommandType Application -ErrorAction SilentlyContinue|Select-Object -First 1).Source"
+# How often $req.text occurs in the files of $req.dir matching $req.filter; a file the daemon is writing is shared.
+COUNT = ("$n=0;Get-ChildItem -LiteralPath $req.dir -Filter $req.filter -File -ErrorAction SilentlyContinue|ForEach-Object{"
+         "$f=[IO.File]::Open($_.FullName,'Open','Read','ReadWrite');$t=(New-Object IO.StreamReader($f)).ReadToEnd();$f.Close();"
+         "$n+=[regex]::Matches($t,[regex]::Escape($req.text)).Count};$n")
 # Every file under $req.path as [{p: relative path with /, h: sha256}], base64 of UTF-8 JSON: Windows PowerShell
 # writes stdout in the OEM code page, which would change a Unicode file name.
 TREE = ("$r=(Get-Item -LiteralPath $req.path).FullName;$s=[Security.Cryptography.SHA256]::Create()\n"
@@ -248,6 +252,9 @@ class WindowsDevice:
         if name not in self._environment:
             self._environment[name] = self.ps('environment ' + name, ENV, name=name)[1]
         return self._environment[name]
+
+    def count_in_files(self, directory, pattern, text):
+        return int(self.ps('count in %s' % directory, COUNT, dir=str(directory), filter=pattern, text=text)[1])
 
     def services(self, pattern='Paperboat*'):
         return self._list('services ' + pattern, SERVICES, pattern=pattern)
