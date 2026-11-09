@@ -2,6 +2,7 @@
 """Publish a bounded synthetic HTTP/WebSocket origin for an external protocol probe."""
 import argparse
 import base64
+import contextlib
 import hashlib
 import http.server
 import json
@@ -15,6 +16,8 @@ import uuid
 from tunnel_lifecycle import confirmed
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
+from preview_lifecycle import exposed
+import winhost
 from preview_receipt import PREVIEW_COMMAND_TIMEOUT, receipt_value
 
 
@@ -121,11 +124,13 @@ def main():
     args = parser.parse_args()
     check = 'tunnel-protocols' if args.tunnel else 'preview-protocols'
     before = registration()
-    binary = Path.home() / '.local/bin/pb'
+    binary = winhost.pb_path()
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), ProtocolOrigin)
     server.marker = 'PB_PREVIEW_PROTOCOL_' + uuid.uuid4().hex
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    stack = contextlib.ExitStack()  # holds the ssh -R forward on Windows
+    port = stack.enter_context(exposed(server.server_port))
     lease = None
     failure = None
     try:
@@ -133,11 +138,11 @@ def main():
             root = Path(directory)
             if args.tunnel:
                 lease = invoke(binary, 'tunnel', 'create', 'smoke-protocols-' + uuid.uuid4().hex[:10], '--port',
-                               str(server.server_port), '--duration', '30m', '--wait', '--timeout', '90s', '--json',
+                               str(port), '--duration', '30m', '--wait', '--timeout', '90s', '--json',
                                timeout=PREVIEW_COMMAND_TIMEOUT)['tunnel']
                 endpoint = lease['stable_endpoint']
             else:
-                lease = invoke(binary, 'preview', str(server.server_port), '--background', '--ttl', '5m', '--json', timeout=PREVIEW_COMMAND_TIMEOUT)
+                lease = invoke(binary, 'preview', str(port), '--background', '--ttl', '5m', '--json', timeout=PREVIEW_COMMAND_TIMEOUT)
                 endpoint = receipt_value(lease, 'endpoint')
             gate, refused = root / 'verified', root / 'failed'
             print(json.dumps({'state': 'preview_protocol_required', 'target': args.target,
@@ -164,6 +169,7 @@ def main():
                 raise
             failure.add_note('Exact protocol preview cleanup failed: ' + str(error))
         finally:
+            stack.close()
             server.shutdown()
             server.server_close()
             thread.join(timeout=5)

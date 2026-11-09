@@ -269,5 +269,61 @@ class PortedScriptsRouteToTheDevice(unittest.TestCase):
             self.assertEqual(['true'], winhost.true_argv())
 
 
+class PreviewFamily(unittest.TestCase):
+    def test_exposed_is_the_identity_on_unix_and_an_ssh_forward_on_windows(self):
+        import preview_lifecycle
+        with patch.dict(os.environ, {}, clear=True), preview_lifecycle.exposed(1234) as port:
+            self.assertEqual(1234, port)
+        calls = []
+
+        class Tunnel:
+            def poll(self):
+                return None
+
+            def terminate(self):
+                calls.append('terminated')
+
+            def wait(self, timeout):
+                pass
+
+        def popen(argv, **kwargs):
+            calls.append(argv)
+            return Tunnel()
+
+        device = winhost.WindowsDevice(target='user@host', pb_exe=EXE, password='secret')
+        with patch.dict(os.environ, {'PB_SMOKE_WINDOWS_PB': EXE}), patch('subprocess.Popen', popen), \
+                patch.object(winhost, '_device', lambda exe: device), \
+                patch.object(device, 'listening', lambda port: True), preview_lifecycle.exposed(4321) as port:
+            self.assertTrue(20000 <= port < 60000)
+            forward = calls[0]
+            self.assertEqual(['sshpass', '-e', 'ssh'], forward[:3])
+            self.assertIn('127.0.0.1:%d:127.0.0.1:4321' % port, forward)
+            self.assertIn('ExitOnForwardFailure=yes', forward)
+            self.assertEqual('user@host', forward[-1])
+            self.assertNotIn('secret', ' '.join(forward))
+        self.assertEqual('terminated', calls[-1])
+
+    def test_forward_gives_up_when_ssh_cannot_forward(self):
+        class Dead:
+            def poll(self):
+                return 255
+
+            def terminate(self):
+                pass
+
+        device = winhost.WindowsDevice(target='user@host', pb_exe=EXE, password=None)
+        with patch('subprocess.Popen', lambda *a, **k: Dead()):
+            with self.assertRaisesRegex(winhost.DeviceError, 'is TCP forwarding allowed'):
+                with device.forward(1):
+                    pass
+
+    def test_ported_family_uses_the_shared_origin_and_device_pb(self):
+        for name in ('tunnel_manage', 'tunnel_lifecycle', 'preview_manage', 'preview_access', 'preview_lifecycle',
+                     'preview_inspect', 'preview_protocols', 'tunnel_public_protocols'):
+            source = (pathlib.Path(__file__).parent / (name + '.py')).read_text()
+            self.assertNotIn(".local/bin/pb'", source, name)
+            self.assertIn('winhost', source, name)
+
+
 if __name__ == '__main__':
     unittest.main()

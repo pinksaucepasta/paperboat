@@ -9,22 +9,17 @@ while used, and hostname and domain are removed. Then `pb tunnel
 DNS records) is removed on every exit path.
 """
 import argparse
-import contextlib
 import json
 from pathlib import Path
 import secrets
 import time
 import urllib.error
 import urllib.request
-import http.server
-import functools
-import tempfile
-import threading
 
 import winhost
 from install_lifecycle import registration
 from pairing_lifecycle import command_result, confirmed_command, invoke
-from preview_lifecycle import QuietHandler
+from preview_lifecycle import serving
 
 BODY = 'synthetic tunnel origin'
 
@@ -60,27 +55,6 @@ class FixtureDns:
             if error.code == 404:
                 return False
             raise
-
-
-@contextlib.contextmanager
-def serving(body):
-    """The synthetic origin on the device under test; yields its loopback port."""
-    device = winhost.device()
-    if device:  # the tunnel dials the device's own loopback, so the origin must run there
-        with device.origin(body) as port:
-            yield port
-        return
-    with tempfile.TemporaryDirectory(prefix='paperboat-tunnel-domain-') as directory:
-        (Path(directory) / 'index.html').write_text(body)
-        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(QuietHandler, directory=directory))
-        worker = threading.Thread(target=server.serve_forever, daemon=True)
-        worker.start()
-        try:
-            yield server.server_port
-        finally:
-            server.shutdown()
-            server.server_close()
-            worker.join(timeout=5)
 
 
 def wait(test, what, seconds):

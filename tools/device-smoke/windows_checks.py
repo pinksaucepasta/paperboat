@@ -49,6 +49,11 @@ def checks(args):
     table['tunnel-command-rows'] = (['tunnel_command_rows.py', '--run', '{run}', '--build', 'windows', '--version', '{version}',
                                      '--server', '{server}', '--output', '{output}', '--fixtures-token-file', '{token}']
                                     + domain, list(SECRET_FIXTURES))
+    table['tunnel-manage'] = (['tunnel_manage.py'], [])
+    table['tunnel-lifecycle'] = (['tunnel_lifecycle.py'], [])
+    table['tunnel-public-protocols'] = (['tunnel_public_protocols.py'], [])
+    for name in ('manage', 'inspect', 'access'):
+        table['preview-' + name] = (['preview_%s.py' % name, 'victus'], [])
     for name in ('rename', 'settings', 'availability', 'capabilities'):
         table['machine-' + name] = (['machine_lifecycle.py', name], [])
     table['env-vault-lifecycle'] = (['env_vault_lifecycle.py', '{vault_password}', '{vault_recovery}'], [])

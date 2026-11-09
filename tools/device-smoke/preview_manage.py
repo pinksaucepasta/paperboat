@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 """Verify preview list/status, exact stop/delete, and the declared TTL."""
 import argparse
-import functools
-import http.server
 import json
-from pathlib import Path
-import tempfile
-import threading
 import time
 
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
-from preview_lifecycle import QuietHandler
+from preview_lifecycle import serving
+import winhost
 from preview_receipt import PREVIEW_COMMAND_TIMEOUT, receipt_timestamp, receipt_value
 
 
@@ -19,18 +15,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
     args = parser.parse_args()
-    binary = Path.home() / '.local/bin/pb'
+    binary = winhost.pb_path()
     before = registration()
     owned = set()
     failure = None
-    with tempfile.TemporaryDirectory(prefix='paperboat-preview-manage-') as directory:
-        (Path(directory) / 'index.html').write_text('Paperboat synthetic preview fixture')
-        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(QuietHandler, directory=directory))
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
+    with serving('Paperboat synthetic preview fixture') as port:
 
         def create(ttl):
-            lease = invoke(binary, 'preview', str(server.server_port), '--background', '--ttl', ttl, '--json', timeout=PREVIEW_COMMAND_TIMEOUT)
+            lease = invoke(binary, 'preview', str(port), '--background', '--ttl', ttl, '--json', timeout=PREVIEW_COMMAND_TIMEOUT)
             receipt_value(lease, 'endpoint')
             owned.add(lease['id'])
             return lease
@@ -74,10 +66,6 @@ def main():
                 if failure is None:
                     raise
                 failure.add_note('Exact preview cleanup failed: ' + str(error))
-            finally:
-                server.shutdown()
-                server.server_close()
-                thread.join(timeout=5)
     if registration() != before:
         raise RuntimeError('preview management changed the enrolled identity')
     print(json.dumps({'check': 'preview-manage', 'target': args.target, 'status': 'PASS',

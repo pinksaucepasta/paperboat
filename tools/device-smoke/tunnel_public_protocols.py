@@ -6,6 +6,7 @@ public port. An HTTP tunnel's default route is replaced by a TLS passthrough rou
 self-signed certificate, and the certificate that comes back through the edge is that origin's. Both tunnels are
 deleted on every exit path.
 """
+import contextlib
 import json
 from pathlib import Path
 import socket
@@ -19,6 +20,8 @@ import uuid
 
 from install_lifecycle import registration
 from pairing_lifecycle import confirmed_command, invoke
+from preview_lifecycle import exposed
+import winhost
 
 
 class Echo(socketserver.BaseRequestHandler):
@@ -66,7 +69,7 @@ def tls_origin(directory):
 
 
 def main():
-    binary = Path.home() / '.local/bin/pb'
+    binary = winhost.pb_path()
     before = registration()
     suffix = uuid.uuid4().hex[:12]
     created = []
@@ -77,11 +80,14 @@ def main():
     echo = socketserver.ThreadingTCPServer(('127.0.0.1', 0), Echo)
     echo.daemon_threads = True
     threading.Thread(target=echo.serve_forever, daemon=True).start()
+    stack = contextlib.ExitStack()  # holds the ssh -R forwards on Windows
+    echo_port = stack.enter_context(exposed(echo.server_address[1]))
     primary_error = None
     with tempfile.TemporaryDirectory(prefix='paperboat-public-protocols-') as directory:
         origin = tls_origin(directory)
+        origin_port = stack.enter_context(exposed(origin.getsockname()[1]))
         try:
-            tcp = call('create', 'smoke-tcp-' + suffix, '--from', 'tcp://127.0.0.1:%d' % echo.server_address[1],
+            tcp = call('create', 'smoke-tcp-' + suffix, '--from', 'tcp://127.0.0.1:%d' % echo_port,
                        '--wait', '--timeout', '90s')
             created.append(tcp['tunnel']['id'])
             route = call('route', 'list', created[-1])['items'][0]
@@ -94,12 +100,12 @@ def main():
                     return connection.recv(100)
             assert retry(through_tcp) == b'echo:smoke'
 
-            tls = call('create', 'smoke-tls-' + suffix, '--port', str(origin.getsockname()[1]), '--wait', '--timeout', '90s')
+            tls = call('create', 'smoke-tls-' + suffix, '--port', str(origin_port), '--wait', '--timeout', '90s')
             created.append(tls['tunnel']['id'])
             default = call('route', 'list', created[-1])['items'][0]
             confirmed_command(binary, 'tunnel', 'route', 'remove', created[-1], default['id'])
             call('route', 'add', created[-1], '--name', 'tls1', '--protocol', 'tls',
-                 '--to', 'tcp://127.0.0.1:%d' % origin.getsockname()[1], '--wait', '--timeout', '90s')
+                 '--to', 'tcp://127.0.0.1:%d' % origin_port, '--wait', '--timeout', '90s')
             added = call('route', 'list', created[-1])['items']
             assert [r['protocol'] for r in added] == ['tls'] and added[0]['public_tcp_port'] == 443, added
             tls_host = added[0]['host_match']['hostname']
@@ -122,6 +128,7 @@ def main():
             primary_error = error
             raise
         finally:
+            stack.close()
             origin.close()
             echo.shutdown()
             echo.server_close()

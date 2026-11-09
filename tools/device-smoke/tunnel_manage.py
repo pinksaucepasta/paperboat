@@ -1,31 +1,22 @@
 #!/usr/bin/env python3
 """Exercise durable tunnel and route management on the enrolled device."""
-import functools
-import http.server
 import json
-from pathlib import Path
-import tempfile
-import threading
 import uuid
 
 from install_lifecycle import registration
 from pairing_lifecycle import confirmed_command, invoke
-from preview_lifecycle import QuietHandler
+from preview_lifecycle import serving
+import winhost
 
 
 def main():
-    binary = Path.home() / '.local/bin/pb'
+    binary = winhost.pb_path()
     before = registration()
     name = 'smoke-tunnel-' + uuid.uuid4().hex[:16]
     renamed = name + '-new'
     identifier = None
     primary_error = None
-    with tempfile.TemporaryDirectory(prefix='paperboat-tunnel-') as directory:
-        (Path(directory) / 'index.html').write_text('synthetic tunnel origin')
-        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0),
-                    functools.partial(QuietHandler, directory=directory))
-        worker = threading.Thread(target=server.serve_forever, daemon=True)
-        worker.start()
+    with serving('synthetic tunnel origin') as port:
 
         def call(*args):
             return invoke(binary, 'tunnel', *args, '--json', timeout=90)
@@ -37,7 +28,7 @@ def main():
                     and item['desired_state'] != 'deleted']
 
         try:
-            created = call('create', name, '--port', str(server.server_port),
+            created = call('create', name, '--port', str(port),
                            '--duration', '5m', '--wait', '--timeout', '60s')
             identifier = created['tunnel']['id']
             assert created['tunnel']['account_id'] == before['account_id']
@@ -46,10 +37,10 @@ def main():
             assert shown['id'] == identifier and shown['name'] == name
             assert any(item['id'] == identifier for item in owned())
             routes = call('route', 'list', identifier)['items']
-            assert len(routes) == 1 and routes[0]['origin']['address'].endswith(':' + str(server.server_port))
+            assert len(routes) == 1 and routes[0]['origin']['address'].endswith(':' + str(port))
             added = call('route', 'add', identifier, '--name', 'smoke-extra',
                          '--path', '/smoke-extra', '--priority', '10',
-                         '--to', 'http://127.0.0.1:' + str(server.server_port))['route']
+                         '--to', 'http://127.0.0.1:' + str(port))['route']
             updated = call('route', 'update', identifier, added['id'],
                            '--name', 'smoke-edited', '--path', '/smoke-edited')['route']
             assert updated['id'] == added['id'], 'route update changed its resource identity'
@@ -77,10 +68,6 @@ def main():
                 if primary_error is None:
                     raise
                 print(json.dumps({'check': 'tunnel-manage', 'cleanup': 'failed'}), flush=True)
-            finally:
-                server.shutdown()
-                server.server_close()
-                worker.join(timeout=5)
     assert registration() == before
     print(json.dumps({'check': 'tunnel-manage', 'status': 'PASS',
                       'create_show_list_delete': True, 'route_add_update_remove': True,

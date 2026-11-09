@@ -1,13 +1,8 @@
 #!/usr/bin/env python3
 """F7-03 (refusal side): --private and --team previews refuse a visitor with no session; --public serves."""
 import argparse
-import functools
-import http.server
 import json
 import os
-from pathlib import Path
-import tempfile
-import threading
 import time
 import urllib.error
 import urllib.request
@@ -15,7 +10,8 @@ import uuid
 
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
-from preview_lifecycle import QuietHandler
+from preview_lifecycle import serving
+import winhost
 from preview_receipt import PREVIEW_COMMAND_TIMEOUT, receipt_value
 
 TEAM_WORKSPACE = os.environ.get('PAPERBOAT_SMOKE_TEAM', 'paperboat-smoke-paid')  # the retained paid team of the signed-in account
@@ -40,21 +36,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
     args = parser.parse_args()
-    binary = Path.home() / '.local/bin/pb'
+    binary = winhost.pb_path()
     before = registration()
     marker = 'PB_ACCESS_' + uuid.uuid4().hex
     owned = []
     failure = None
-    with tempfile.TemporaryDirectory(prefix='paperboat-preview-access-') as directory:
-        (Path(directory) / 'index.html').write_text(marker)
-        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(QuietHandler, directory=directory))
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
+    with serving(marker) as port:
         results = {}
         try:
             for mode, flags in [('public', []), ('private', ['--private']),
                                 ('team', ['--team', '--workspace', TEAM_WORKSPACE])]:
-                lease = invoke(binary, 'preview', str(server.server_port), '--background', '--ttl', '10m',
+                lease = invoke(binary, 'preview', str(port), '--background', '--ttl', '10m',
                                *flags, '--json', timeout=PREVIEW_COMMAND_TIMEOUT)
                 receipt_value(lease, 'endpoint')
                 owned.append((lease['id'], flags))
@@ -84,10 +76,6 @@ def main():
                 if failure is None:
                     raise
                 failure.add_note('Exact preview cleanup failed: ' + str(error))
-            finally:
-                server.shutdown()
-                server.server_close()
-                thread.join(timeout=5)
     if registration() != before:
         raise RuntimeError('preview access check changed the enrolled identity')
     print(json.dumps({'check': 'preview-access', 'target': args.target, 'status': 'PASS',

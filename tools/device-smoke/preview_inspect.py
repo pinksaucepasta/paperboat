@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """Verify preview HTTP capture: enable, list, show, deliberate replay, purge and disable."""
 import argparse
+import contextlib
 import http.server
 import json
-from pathlib import Path
 import threading
 import urllib.request
 import uuid
 
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
+from preview_lifecycle import exposed
+import winhost
 from preview_receipt import PREVIEW_COMMAND_TIMEOUT, receipt_value
 
 
@@ -42,15 +44,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
     args = parser.parse_args()
-    binary = Path.home() / '.local/bin/pb'
+    binary = winhost.pb_path()
     before = registration()
     server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Origin)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    stack = contextlib.ExitStack()  # holds the ssh -R forward on Windows
+    port = stack.enter_context(exposed(server.server_port))
     identity = None
     failure = None
     try:
-        lease = invoke(binary, 'preview', str(server.server_port), '--background', '--ttl', '10m', '--json',
+        lease = invoke(binary, 'preview', str(port), '--background', '--ttl', '10m', '--json',
                        timeout=PREVIEW_COMMAND_TIMEOUT)
         receipt_value(lease, 'endpoint')
         identity = lease['id']
@@ -101,6 +105,7 @@ def main():
                 raise
             failure.add_note('Exact preview cleanup failed: ' + str(error))
         finally:
+            stack.close()
             server.shutdown()
             server.server_close()
             thread.join(timeout=5)

@@ -1,20 +1,16 @@
 #!/usr/bin/env python3
 """Exercise durable tunnel health, capture, pause/resume and policy commands."""
-import functools
-import http.server
 import json
-from pathlib import Path
-import tempfile
-import threading
 import time
 import urllib.request
 import uuid
 
 from install_lifecycle import registration
 from pairing_lifecycle import command_result
-from preview_lifecycle import QuietHandler
+from preview_lifecycle import serving
+import winhost
 
-PB = Path.home() / '.local/bin/pb'
+PB = winhost.pb_path()
 
 
 def run(*args, expect_ok=True):
@@ -56,13 +52,8 @@ def main():
     identifier = None
     policy = None
     primary_error = None
-    with tempfile.TemporaryDirectory(prefix='paperboat-tunnel-life-') as directory:
-        (Path(directory) / 'index.html').write_text('synthetic tunnel origin')
-        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0),
-                    functools.partial(QuietHandler, directory=directory))
-        worker = threading.Thread(target=server.serve_forever, daemon=True)
-        worker.start()
-        port = str(server.server_port)
+    with serving('synthetic tunnel origin') as origin_port:
+        port = str(origin_port)
         try:
             created = run('tunnel', 'create', name, '--port', port, '--duration', '30m',
                           '--wait', '--timeout', '90s')
@@ -115,10 +106,6 @@ def main():
                 if primary_error is None:
                     raise
                 print(json.dumps({'check': 'tunnel-lifecycle', 'cleanup': 'failed'}), flush=True)
-            finally:
-                server.shutdown()
-                server.server_close()
-                worker.join(timeout=5)
     assert registration() == before
     print(json.dumps({'check': 'tunnel-lifecycle', 'status': 'PASS', 'status_doctor_logs': True,
                       'capture_replay': True, 'pause_resume': True,

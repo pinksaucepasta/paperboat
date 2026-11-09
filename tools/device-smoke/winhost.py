@@ -16,6 +16,7 @@ import functools
 import json
 import os
 import pathlib
+import random
 import subprocess
 import time
 import uuid
@@ -80,6 +81,7 @@ TASKS = ("@(Get-ScheduledTask -TaskPath $req.path -ErrorAction SilentlyContinue|
          "Select-Object TaskName,@{n='State';e={[string]$_.State}})|ConvertTo-Json -Compress")
 SERVICE_PATHS = ("@(Get-CimInstance Win32_Service|Where-Object{$_.Name -like $req.pattern}|"
                  "Select-Object Name,PathName)|ConvertTo-Json -Compress")
+LISTENING = ("try{$c=New-Object Net.Sockets.TcpClient('127.0.0.1',[int]$req.port);$c.Close();'yes'}catch{'no'}")
 ALIVE = "if(Get-Process -Id $req.pid -ErrorAction SilentlyContinue){'yes'}else{'no'}"
 
 # Runs inside the detached wrapper: pb with output in files and the exit code in `rc` (Start-Process writes raw bytes).
@@ -126,21 +128,24 @@ class WindowsDevice:
         self.password = os.environ.get('VICTUS_PASS') if password is None else password
         self._environment = {}
 
-    def ssh_command(self):
+    def ssh_prefix(self, *options):
         ssh = ['ssh', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=30', '-o', 'StrictHostKeyChecking=accept-new',
-               self.target, 'powershell -NoProfile -NonInteractive -InputFormat Text -OutputFormat Text '
-               '-EncodedCommand ' + _b64(BOOTSTRAP.encode('utf-16-le'))]
-        if self.password:
-            return ['sshpass', '-e'] + ssh
-        return ['ssh', '-o', 'BatchMode=yes'] + ssh[1:]
+               *options]
+        return ['sshpass', '-e'] + ssh if self.password else ['ssh', '-o', 'BatchMode=yes'] + ssh[1:]
+
+    def ssh_command(self):
+        return self.ssh_prefix(self.target, 'powershell -NoProfile -NonInteractive -InputFormat Text -OutputFormat Text '
+                               '-EncodedCommand ' + _b64(BOOTSTRAP.encode('utf-16-le')))
+
+    def ssh_environment(self):
+        return dict(os.environ, SSHPASS=self.password) if self.password else None
 
     def snippet(self, step, script, timeout=60, **payload):
         """Run script on the device with $req = payload; return (rc, stdout bytes, stderr bytes)."""
         stdin = _b64(script.encode()) + '\n' + _b64(json.dumps(payload).encode()) + '\n'
-        environment = dict(os.environ, SSHPASS=self.password) if self.password else None
         try:
             done = subprocess.run(self.ssh_command(), input=stdin.encode(), capture_output=True, timeout=timeout,
-                                  env=environment)
+                                  env=self.ssh_environment())
         except subprocess.TimeoutExpired as error:
             raise DeviceError('%s: the device did not answer within %ss; check that victus is reachable' %
                               (step, timeout)) from error
@@ -265,6 +270,35 @@ class WindowsDevice:
                 yield int(port_file.read_text().strip())
             finally:
                 self.stop(pid)
+
+    def listening(self, port):
+        return self.ps('listening %s' % port, LISTENING, port=int(port))[1] == 'yes'
+
+    @contextlib.contextmanager
+    def forward(self, local_port):
+        """Reach the controller's 127.0.0.1:local_port at 127.0.0.1:<port> on the device (ssh -R); yields that port.
+
+        For origins that cannot be a PowerShell listener (recording, WebSocket, TLS, raw TCP): the check keeps
+        its own Python server here and pb on the device dials the forwarded port."""
+        for _ in range(5):
+            port = random.randrange(20000, 60000)
+            tunnel = subprocess.Popen(self.ssh_prefix('-N', '-o', 'ExitOnForwardFailure=yes', '-R',
+                                                      '127.0.0.1:%d:127.0.0.1:%d' % (port, local_port), self.target),
+                                      env=self.ssh_environment(), stdin=subprocess.DEVNULL,
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                deadline = time.monotonic() + 20
+                while tunnel.poll() is None and not self.listening(port):
+                    if time.monotonic() > deadline:
+                        raise DeviceError('ssh -R to the device did not open port %d within 20s' % port)
+                if tunnel.poll() is None:
+                    yield port
+                    return
+            finally:
+                if tunnel.poll() is None:
+                    tunnel.terminate()
+                    tunnel.wait(timeout=10)
+        raise DeviceError('could not forward a port to the device: ssh -R failed 5 times (is TCP forwarding allowed?)')
 
     def home(self):
         return RemotePath(self, self.env('USERPROFILE'))
