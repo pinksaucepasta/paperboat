@@ -16,7 +16,7 @@ export function SectionPage({ id, children }: { id: keyof typeof sections; child
       <PageHeader>
         <Crumb>{section.title}</Crumb>
         {section.machineScoped && (
-          <Suspense fallback={<Skeleton className="h-5 w-28" />}>
+          <Suspense fallback={<Skeleton className="my-1.5 h-4 w-28" />}>
             {/* URL state reads search params, so it lives inside this boundary, not at the root. */}
             <NuqsAdapter>
               <MachineScope allowAll={!("oneMachine" in section && section.oneMachine)} />

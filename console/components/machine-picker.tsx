@@ -59,7 +59,7 @@ export function MachinePicker({ value, onChange, allowAll = false }: Props) {
     [page.data, value, workspace, open],
   )
 
-  if (value && isPending) return <Skeleton className="h-5 w-28" />
+  if (value && isPending) return <Skeleton className="my-1.5 h-4 w-28" />
 
   const searching = query.length > 0
   const machines = searching ? (results.data?.items ?? []) : suggestions

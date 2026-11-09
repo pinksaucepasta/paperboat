@@ -1,6 +1,7 @@
 import { Section } from "@/components/section"
 import { Empty, EmptyHeader, EmptyMedia } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
+import { cn } from "@/lib/utils"
 
 /* Loading states shaped like what they stand in for, so nothing moves when the data lands. */
 
@@ -18,14 +19,14 @@ export function SectionSkeleton({ title, rows }: { title: string; rows: number }
   )
 }
 
-/** Two-line list rows (a name over a detail line) while they load. */
-export function ListSkeleton({ rows }: { rows: number }) {
+/** Two-line list rows (a name over a detail line, `min-h-14` like the lists) while they load. */
+export function ListSkeleton({ rows, rowClassName = "min-h-14" }: { rows: number; rowClassName?: string }) {
   return (
     <div className="flex flex-col border-t border-divider">
       {Array.from({ length: rows }, (_, index) => (
-        <div key={index} className="flex min-h-12 flex-col justify-center gap-2 border-b border-divider py-3">
-          <Skeleton className="h-4 w-40" />
-          <Skeleton className="h-3.5 w-80 max-w-full" />
+        <div key={index} className={cn("flex flex-col justify-center border-b border-divider py-2", rowClassName)}>
+          <Skeleton className="my-0.5 h-4 w-40" />
+          <Skeleton className="my-0.5 h-4 w-80 max-w-full" />
         </div>
       ))}
     </div>

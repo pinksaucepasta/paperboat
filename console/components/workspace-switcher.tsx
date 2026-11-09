@@ -22,7 +22,7 @@ export function WorkspaceSwitcher() {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
 
-  if (!current) return <Skeleton className="h-5 w-24" />
+  if (!current) return <Skeleton className="my-1.5 h-4 w-24" />
 
   const query = search.trim().toLowerCase()
   const shown = workspaces?.filter((workspace) => workspace.name.toLowerCase().includes(query)) ?? []

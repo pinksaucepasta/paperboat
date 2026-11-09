@@ -37,7 +37,7 @@ export function TeamPage() {
     if (wanted && wanted !== workspace?.id && workspaces?.some((item) => item.kind === "team" && item.id === wanted))
       setWorkspace(wanted)
   }, [wanted, workspace?.id, workspaces])
-  if (!workspace) return <ListSkeleton rows={3} />
+  if (!workspace) return <ListSkeleton rows={3} rowClassName="h-16" />
   return workspace.kind === "team" ? <TeamManage workspace={workspace} /> : <Teams />
 }
 
@@ -141,7 +141,7 @@ function Teams() {
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium">Your teams</h2>
         {workspaces.isPending ? (
-          <ListSkeleton rows={3} />
+          <ListSkeleton rows={3} rowClassName="h-16" />
         ) : teams.length === 0 ? (
           <div className="flex flex-col items-center gap-3 surface rounded-lg px-6 py-12 text-center">
             <UsersThreeIcon className="size-8 text-muted-foreground" />
