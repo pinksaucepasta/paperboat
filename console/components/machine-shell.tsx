@@ -2,7 +2,7 @@
 
 import { ShareNetworkIcon, TerminalIcon } from "@phosphor-icons/react"
 import Link from "next/link"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams, useSelectedLayoutSegment } from "next/navigation"
 import { createContext, useContext, useEffect, useState, useSyncExternalStore } from "react"
 import { meQuery, useApiQuery, useMachine, type Machine } from "@/lib/api"
 import { formatPlatform } from "@/lib/format"
@@ -70,24 +70,10 @@ export function MachineShell({ machineId, children }: { machineId: string; child
   )
 
   if (isPending) {
-    // While the machine loads, the open tab draws its own loading state: its lists only need the
-    // machine's id (and read the rest defensively). Overview would show empty facts, so it gets
-    // its sections' placeholders.
-    const loading = { id: machineId, alias: "", tags: [] } as unknown as Machine
     return (
       <>
         {header}
-        <MachineSkeleton base={base} tab={tab} />
-        <div className="mx-auto w-full max-w-6xl px-4 py-6 md:px-8">
-          {tab ? (
-            <MachineContext value={loading}>{children}</MachineContext>
-          ) : (
-            <div className="flex flex-col gap-10">
-              <SectionSkeleton title="Details" rows={6} />
-              <SectionSkeleton title="Network" rows={2} />
-            </div>
-          )}
-        </div>
+        <MachineSkeleton machineId={machineId}>{children}</MachineSkeleton>
       </>
     )
   }
@@ -225,25 +211,43 @@ function MachineTabs({ base, tab }: { base?: string; tab?: string }) {
  * The loaded header's title and detail lines (their line heights) and Quick terminal (always there;
  * Share, for owners, sits left of it) over the real tabs.
  */
-export function MachineSkeleton({ base, tab }: { base?: string; tab?: string }) {
+export function MachineSkeleton({ machineId, children }: { machineId?: string; children: React.ReactNode }) {
+  // The open tab comes from the route, so the prerendered shell knows it before the machine id.
+  const tab = useSelectedLayoutSegment() ?? ""
+  // The tab draws its own loading state: its lists only need the machine's id (and read the rest
+  // defensively). Overview would show empty facts, so it gets its sections' placeholders.
+  // Before the id is known (the prerendered shell) a stand-in id still draws the machine-scoped columns.
+  const loading = { id: machineId ?? "pending", alias: "", tags: [] } as unknown as Machine
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 pt-6 md:px-8 md:pt-8">
-      <div className="flex flex-wrap items-start gap-4">
-        <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <Skeleton className="my-1 h-6 w-48" />
-          <Skeleton className="my-1 h-4 w-72 max-w-full" />
-          {/* On a phone the status, platform, address and tags wrap onto lines of their own. */}
-          <Skeleton className="my-1 h-4 w-28 sm:hidden" />
-          <Skeleton className="my-1 h-4 w-24 sm:hidden" />
-          <Skeleton className="my-1 h-4 w-32 sm:hidden" />
+    <>
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 pt-6 md:px-8 md:pt-8">
+        <div className="flex flex-wrap items-start gap-4">
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <Skeleton className="my-1 h-6 w-48" />
+            <Skeleton className="my-1 h-4 w-72 max-w-full" />
+            {/* On a phone the status, platform, address and tags wrap onto lines of their own. */}
+            <Skeleton className="my-1 h-4 w-28 sm:hidden" />
+            <Skeleton className="my-1 h-4 w-24 sm:hidden" />
+            <Skeleton className="my-1 h-4 w-32 sm:hidden" />
+          </div>
+          <Button variant="secondary" size="lg" tabIndex={-1} aria-hidden className="pointer-events-none">
+            <TerminalIcon data-icon="inline-start" />
+            Quick terminal
+          </Button>
         </div>
-        <Button variant="secondary" size="lg" tabIndex={-1} aria-hidden className="pointer-events-none">
-          <TerminalIcon data-icon="inline-start" />
-          Quick terminal
-        </Button>
+        <MachineTabs base={machineId && `/machines/${machineId}`} tab={tab} />
       </div>
-      <MachineTabs base={base} tab={tab} />
-    </div>
+      <div className="mx-auto w-full max-w-6xl px-4 py-6 md:px-8">
+        {tab ? (
+          <MachineContext value={loading}>{children}</MachineContext>
+        ) : (
+          <div className="flex flex-col gap-10">
+            <SectionSkeleton title="Details" rows={6} />
+            <SectionSkeleton title="Network" rows={2} />
+          </div>
+        )}
+      </div>
+    </>
   )
 }
 

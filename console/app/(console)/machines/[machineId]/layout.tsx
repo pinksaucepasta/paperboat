@@ -1,5 +1,6 @@
 import { Suspense } from "react"
 import { MachineShell, MachineSkeleton } from "@/components/machine-shell"
+import { MachineTabView } from "@/components/machine-tab-view"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CrumbLink, PageHeader } from "@/components/page-header"
 import { WithSession } from "@/components/with-session"
@@ -28,7 +29,7 @@ async function Machine({ params, children }: Pick<LayoutProps<"/machines/[machin
   )
 }
 
-/** The prerendered shell: the machine page's header and tabs before the machine id is known. */
+/** The prerendered shell: the machine page's header, tabs and open tab before the machine id is known. */
 function MachineFallback() {
   return (
     <>
@@ -36,7 +37,9 @@ function MachineFallback() {
         <CrumbLink href="/">Machines</CrumbLink>
         <Skeleton className="my-1.5 h-4 w-28" />
       </PageHeader>
-      <MachineSkeleton />
+      <MachineSkeleton>
+        <MachineTabView />
+      </MachineSkeleton>
     </>
   )
 }
