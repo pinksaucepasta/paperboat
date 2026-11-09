@@ -57,6 +57,7 @@ func actionSSH(command *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	environment = pbSSHEnvironment(environment)
 	err = executeManagedSSH(command, ctx, machine, destination, args[1:], dash == 1, environment)
 	explainSSHFailure(command, machine, err, func() (*api.Client, error) { return sshClientFor(ctx, client) })
 	return err
@@ -253,11 +254,21 @@ func (t *eofTracker) Read(p []byte) (int, error) {
 
 func (t *eofTracker) sawEOF() bool { return t.eof.Load() }
 
+// sshMessageOwnerEnv is set by `pb ssh` for the OpenSSH it runs (and so for its ProxyCommand): pb ssh explains the
+// failure itself once OpenSSH exits, so the proxy stays silent and the user reads the message once. A plain `ssh`
+// has no pb around it and the proxy prints it.
+const sshMessageOwnerEnv = "PAPERBOAT_SSH_MESSAGE_OWNER"
+
+// pbSSHEnvironment marks the environment of the OpenSSH that `pb ssh` runs.
+func pbSSHEnvironment(environment []string) []string {
+	return append(environment, sshMessageOwnerEnv+"=1")
+}
+
 // explainEndedSSHProxy says why the stream ended when the host closed it while OpenSSH still held it open: OpenSSH shows
 // this ProxyCommand's stderr, and alone it only prints a broken pipe (F5-10). An ordinary logout closes OpenSSH's side
 // first, so it asks nothing and prints nothing; a stream closed for another reason prints nothing either.
 func explainEndedSSHProxy(command *cobra.Command, machine api.UserMachine, inputClosed bool, clientFor func() (*api.Client, error)) {
-	if inputClosed {
+	if inputClosed || os.Getenv(sshMessageOwnerEnv) != "" {
 		return
 	}
 	explainSSHFailure(command, machine, managedssh.NativeExitError{Code: 255}, clientFor)

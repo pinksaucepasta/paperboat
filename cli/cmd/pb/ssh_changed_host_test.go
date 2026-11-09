@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -111,6 +112,28 @@ func TestSSHProxySaysAccessWasRevokedWhenTheHostClosedTheStream(t *testing.T) {
 	})
 	if !strings.Contains(stderr.String(), "access to studio was revoked: this sign-in was ended") {
 		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+// `pb ssh` prints the message itself after OpenSSH exits and marks its environment, so the proxy inside it is silent.
+func TestSSHProxyStaysSilentInsidePbSSH(t *testing.T) {
+	t.Setenv(sshMessageOwnerEnv, "1")
+	var stderr bytes.Buffer
+	command := &cobra.Command{}
+	command.SetErr(&stderr)
+	machine := api.UserMachine{ID: "machine_1", Alias: "studio", InstallationGeneration: 1}
+	explainEndedSSHProxy(command, machine, false, func() (*api.Client, error) {
+		t.Error("the proxy inside pb ssh asked for a client")
+		return nil, config.ErrNoCredentials
+	})
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestPbSSHMarksTheEnvironmentOfItsOpenSSH(t *testing.T) {
+	if got := pbSSHEnvironment([]string{"A=b"}); !slices.Contains(got, sshMessageOwnerEnv+"=1") || got[0] != "A=b" {
+		t.Fatalf("environment = %v", got)
 	}
 }
 
