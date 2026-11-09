@@ -18,7 +18,7 @@ const { lanes, caption } = Astro.props
 const used = new Set(lanes.flatMap((lane) => lane.wires))
 const legend: Record<Wire, string> = {
   e2e: "Encrypted between your machines. Nothing in the middle can read it.",
-  tls: "HTTPS. Encrypted to Paperboat's edge, which reads the request to route it.",
+  tls: "HTTPS. Encrypted to the edge, which reads the request to route it.",
   none: "Stays on the machine.",
 }
 ---

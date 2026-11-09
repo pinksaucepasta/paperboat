@@ -10,5 +10,7 @@ export default defineConfig({
   site: PAPERBOAT_SITE_URL ?? "http://localhost:4321",
   trailingSlash: "always",
   devToolbar: { enabled: false },
+  // Kept as written: compressing drops the space between a line of text and a link that starts the next line.
+  compressHTML: false,
   build: { inlineStylesheets: "always" },
 })

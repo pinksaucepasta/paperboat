@@ -77,6 +77,11 @@ for (const [path, html] of pages) {
   }
   for (const [, tag] of html.matchAll(/(<img [^>]*>)/g)) if (!/ alt="/.test(tag)) fail(path, `image without alt: ${tag.slice(0, 80)}`)
 
+  // No word run into a link or a command ("aside.What our servers"): a space was lost in the markup.
+  const marked = html.replace(/<(script|style)[\s\S]*?<\/\1>/g, "")
+  for (const [hit] of marked.matchAll(/[A-Za-z,.;:]<(?:a|code|strong|kbd)\b(?![^>]*class="(?:fn|command)")[^>]*>[^<]{0,24}|<\/(?:a|code|strong|kbd)>[A-Za-z][^<]{0,24}/g))
+    fail(path, `missing space around inline element: ${hit.replace(/<[^>]*>/g, "|")}`)
+
   // No placeholder or filler copy; no Windows claim beyond "coming"; no removed domains.
   for (const banned of [/being written/i, /keep going/i, /coming soon/i, /lorem ipsum/i, /\bseamless/i, /\bsupercharge/i, /\bunlock\b/i, /\brobust\b/i, /in today.s world/i, /—/])
     if (banned.test(body)) fail(path, `banned text ${banned}`)

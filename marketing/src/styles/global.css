@@ -383,7 +383,7 @@ button code {
   padding: 0;
   border-radius: 0;
   background: none;
-  font-size: inherit;
+  font-size: var(--text-code);
 }
 
 /* Specific points side by side: a short name and the fact under it. */
