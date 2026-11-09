@@ -203,6 +203,34 @@ func localDaemonServiceArguments(goos, configPath, server string) (string, strin
 	return configPath, server
 }
 
+// localDaemonConnectError is the local daemon's endpoint not answering: its service is stopped, or starting it
+// did not bring the endpoint up.
+type localDaemonConnectError struct {
+	socket string
+	cause  error
+}
+
+func (e localDaemonConnectError) Error() string {
+	return fmt.Sprintf("connect local daemon at %s: %v", e.socket, e.cause)
+}
+func (e localDaemonConnectError) Unwrap() error { return e.cause }
+
+// localDaemonStoppedRecovery is the step for a local service that does not answer. Linux and macOS restart it
+// from the command that needed it, so only Windows, where that takes administrator rights, names a repair.
+const (
+	localDaemonStoppedSummary  = "The Paperboat background service is not running, so this computer is offline."
+	localDaemonStoppedRecovery = "If an update just finished, run `pb doctor` again in a moment; otherwise run `pb doctor --repair`."
+)
+
+// localDaemonStopped reports whether err is a Windows command that could not reach the local service. A service
+// that is not installed keeps its own message (pb service install).
+func localDaemonStopped(goos string, err error) bool {
+	return goos == "windows" && boundedErrorWalk(err, func(e error) bool {
+		_, stopped := e.(localDaemonConnectError)
+		return stopped
+	}) && !boundedErrorWalk(err, func(e error) bool { return e == localdaemon.ErrServiceNotInstalled })
+}
+
 func waitForLocalDaemonSnapshot(ctx context.Context, client localDaemonSnapshotClient, socketPath string, lastSocketErr error) (localapi.Snapshot, error) {
 	if ctx == nil || client == nil || strings.TrimSpace(socketPath) == "" {
 		return localapi.Snapshot{}, localdaemon.ErrInvalidInventoryConfig
@@ -216,7 +244,7 @@ func waitForLocalDaemonSnapshot(ctx context.Context, client localDaemonSnapshotC
 		}
 		if contextErr := ctx.Err(); contextErr != nil {
 			if lastSocketErr == nil && localDaemonSocketUnavailable(err) {
-				lastSocketErr = fmt.Errorf("connect local daemon at %s: %w", socketPath, err)
+				lastSocketErr = localDaemonConnectError{socket: socketPath, cause: err}
 			}
 			if lastSocketErr != nil {
 				return localapi.Snapshot{}, errors.Join(lastSocketErr, contextErr)
@@ -226,7 +254,7 @@ func waitForLocalDaemonSnapshot(ctx context.Context, client localDaemonSnapshotC
 		if !localDaemonSocketUnavailable(err) {
 			return localapi.Snapshot{}, err
 		}
-		lastSocketErr = fmt.Errorf("connect local daemon at %s: %w", socketPath, err)
+		lastSocketErr = localDaemonConnectError{socket: socketPath, cause: err}
 		select {
 		case <-ctx.Done():
 			return localapi.Snapshot{}, errors.Join(lastSocketErr, ctx.Err())
@@ -254,14 +282,14 @@ func recoverLocalDaemonSnapshot(ctx context.Context, client localDaemonSnapshotC
 	}
 	if contextErr := ctx.Err(); contextErr != nil {
 		if localDaemonSocketUnavailable(err) {
-			err = fmt.Errorf("connect local daemon at %s: %w", socketPath, err)
+			err = localDaemonConnectError{socket: socketPath, cause: err}
 		}
 		return localapi.Snapshot{}, errors.Join(err, contextErr)
 	}
 	if !localDaemonSocketUnavailable(err) {
 		return localapi.Snapshot{}, err
 	}
-	lastSocketErr := fmt.Errorf("connect local daemon at %s: %w", socketPath, err)
+	lastSocketErr := localDaemonConnectError{socket: socketPath, cause: err}
 	release, err := acquireLocalDaemonLaunch(ctx)
 	if err != nil {
 		return localapi.Snapshot{}, errors.Join(lastSocketErr, err)
@@ -278,7 +306,7 @@ func recoverLocalDaemonSnapshot(ctx context.Context, client localDaemonSnapshotC
 	if !localDaemonSocketUnavailable(err) {
 		return localapi.Snapshot{}, err
 	}
-	lastSocketErr = fmt.Errorf("connect local daemon at %s: %w", socketPath, err)
+	lastSocketErr = localDaemonConnectError{socket: socketPath, cause: err}
 	if err := launch(ctx); err != nil {
 		return localapi.Snapshot{}, errors.Join(lastSocketErr, err)
 	}

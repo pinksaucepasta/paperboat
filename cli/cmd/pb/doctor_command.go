@@ -166,23 +166,34 @@ func doctorCommandV1() *cobra.Command {
 				// daemon service, so repair runs the same checks.
 			}
 			_, snapshot, err := localDaemonSnapshot(command, installLocalDaemonService)
-			if err != nil {
-				return fmt.Errorf("read local Paperboat diagnostics: %w", err)
-			}
 			var machine *localapi.MachineStatus
 			var reportMachine *doctorpkg.Machine
-			if len(args) == 1 {
-				selected, selectErr := selectStatusMachine(snapshot.Machines, args[0])
-				if selectErr != nil {
-					return selectErr
+			var probes []doctorpkg.Probe
+			switch {
+			case err == nil:
+				if len(args) == 1 {
+					selected, selectErr := selectStatusMachine(snapshot.Machines, args[0])
+					if selectErr != nil {
+						return selectErr
+					}
+					machine = &selected
+					reportMachine = &doctorpkg.Machine{ID: selected.ID, Alias: selected.Alias}
 				}
-				machine = &selected
-				reportMachine = &doctorpkg.Machine{ID: selected.ID, Alias: selected.Alias}
+				probes = doctorProbes(command, snapshot, machine)
+			case localDaemonStopped(commandGOOS, err):
+				// Every other check reads the local service: its absence is the report (victus 2026-11-10: doctor
+				// on a machine whose services an interrupted update had stopped said only "could not finish").
+				observeLocalDoctorFailure(command.Context(), err)
+				probes = []doctorpkg.Probe{{Code: "daemon", Run: func(context.Context) doctorpkg.Check {
+					return doctorpkg.Check{Category: "local", Code: "daemon", Status: doctorpkg.StatusFail, Summary: localDaemonStoppedSummary, Recovery: localDaemonStoppedRecovery}
+				}}}
+			default:
+				return fmt.Errorf("read local Paperboat diagnostics: %w", err)
 			}
 			report, err := doctorpkg.Run(command.Context(), doctorpkg.Config{
 				Timeout: doctorRunTimeout, ProbeTimeout: doctorProbeTimeout, Clock: time.Now,
 				Correlation: func() (string, error) { return supportref.FromContext(command.Context()), nil },
-			}, reportMachine, doctorProbes(command, snapshot, machine))
+			}, reportMachine, probes)
 			if err != nil {
 				return err
 			}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"runtime"
 	"syscall"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -24,6 +25,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
+
+// commandGOOS is the platform whose rules a command follows; tests check the Windows ones on any host.
+var commandGOOS = runtime.GOOS
 
 // boundedErrorWalk reports whether match holds for an error in the chain without trusting its shape: the
 // walk is breadth-first and capped, so a self-referencing cause cannot hang the command (errors.Is and
@@ -71,6 +75,9 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	// administrator rights for that, so its commands stop here and name the one that asks for them.
 	if boundedErrorWalk(err, func(e error) bool { return e == localdaemon.ErrServiceNotInstalled }) && failure.kind != commandCanceled && failure.kind != commandInteractiveCanceled {
 		return "The Paperboat background service is not installed. Run `pb service install`, then retry."
+	}
+	if localDaemonStopped(commandGOOS, err) && failure.kind != commandCanceled && failure.kind != commandInteractiveCanceled {
+		return localDaemonStoppedSummary + " " + localDaemonStoppedRecovery
 	}
 	if boundedErrorWalk(err, func(e error) bool { return e == ErrPreviewOwnerSessionUnavailable }) && failure.kind != commandCanceled && failure.kind != commandInteractiveCanceled {
 		return "The local Paperboat service did not keep the preview open: it did not answer in time or is restarting. Retry; if this continues, run `pb doctor`."
