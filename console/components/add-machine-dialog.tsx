@@ -13,11 +13,13 @@ import {
   nameProblem,
   normalizeName,
   startEnrollment,
+  type Shell,
 } from "@/lib/enrollment"
 import { CopyIcons, useCopy } from "@/components/copy-button"
 import { ShareMachine } from "@/components/share-machine-dialog"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { isLimitReached, LimitReached } from "@/components/limit-reached"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
@@ -122,8 +124,8 @@ function AddMachine({
   onDone: () => void
 }) {
   const queryClient = useQueryClient()
-  // Launch is macOS and Linux only; Windows comes in the first update (PLAN.md 1.1).
-  const shell = "posix"
+  // A pairing token carries its shell, so Windows gets its own token and command.
+  const [shell, setShell] = useState<Shell>("posix")
   const [name, setName] = useState("")
 
   // The command is the point of this dialog, so a pairing token is requested as soon as it opens.
@@ -135,21 +137,24 @@ function AddMachine({
       alive.current = false
     }
   }, [])
+  const wanted = useRef(shell)
   const start = useMutation({
     mutationFn: async (input: Parameters<typeof startEnrollment>[0]) => {
       const created = await startEnrollment(input)
-      if (!alive.current) void cancelEnrollment(created.id).catch(() => {})
+      if (!alive.current || wanted.current !== input.shell) void cancelEnrollment(created.id).catch(() => {})
       return created
     },
   })
   const enrollment = start.data
-  const requested = useRef(false)
+  const requested = useRef<Shell | undefined>(undefined)
   useEffect(() => {
-    // Exactly one request, even when effects run twice in development.
-    if (requested.current) return
-    requested.current = true
+    // One request per shell, even when effects run twice in development.
+    if (requested.current === shell) return
+    requested.current = shell
+    wanted.current = shell
+    start.reset()
     start.mutate({ shell, workspace })
-  }, [start, workspace])
+  }, [start, workspace, shell])
 
   const live = useApiQuery({ ...enrollmentQuery(enrollment?.id ?? ""), enabled: Boolean(enrollment) })
   const state = live.data?.state ?? enrollment?.state
@@ -170,6 +175,14 @@ function AddMachine({
   useEffect(() => {
     if (state === "ready" && machineId) void queryClient.invalidateQueries({ queryKey: ["machines"] })
   }, [state, machineId, queryClient])
+
+  // Switching computers revokes the token of the one left behind.
+  function chooseShell(next: Shell) {
+    if (next === shell) return
+    if (pending.current) void cancelEnrollment(pending.current).catch(() => {})
+    pending.current = undefined
+    setShell(next)
+  }
 
   const finalName = name.replace(/-+$/, "")
   const problem = nameProblem(name)
@@ -192,6 +205,16 @@ function AddMachine({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
+        <ToggleGroup
+          value={[shell]}
+          onValueChange={(next) => next[0] && chooseShell(next[0] as Shell)}
+          variant="outline"
+          spacing={0}
+          aria-label="Operating system of the new computer"
+        >
+          <ToggleGroupItem value="posix">macOS and Linux</ToggleGroupItem>
+          <ToggleGroupItem value="powershell">Windows</ToggleGroupItem>
+        </ToggleGroup>
         {command ? (
           <CommandBlock command={command} />
         ) : (

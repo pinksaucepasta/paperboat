@@ -72,15 +72,13 @@
     pass("Add machine is on the page", Boolean(add))
     if (!add || !installUrl) return steps
     add.click()
-    const withToken = await until(() => /\?p=/.test(command()) && command())
+    let withToken = await until(() => /\?p=/.test(command()) && command())
     pass("the dialog shows a pairing command", Boolean(withToken))
     if (!withToken) return steps
-    // Launch is macOS and Linux only (PLAN.md 1.1): the POSIX one-liner, no Windows command.
-    const shape = new RegExp(
-      `^curl -fsSL '${installUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\?p=[A-Za-z0-9_.-]+' \\| bash$`,
-    )
+    // The first command is the POSIX one-liner; Windows has its own switch below.
+    const escapedUrl = installUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    const shape = new RegExp(`^curl -fsSL '${escapedUrl}\\?p=[A-Za-z0-9_.-]+' \\| bash$`)
     pass("the command is the published install address with the token, piped to bash", shape.test(withToken))
-    pass("no Windows command is offered yet", !/powershell/i.test(dialog().innerText))
     const token = withToken.match(/\?p=([^']+)'/)?.[1] ?? ""
 
     // The enrollment the dialog created is waiting for a machine.
@@ -93,6 +91,25 @@
     )
     const label = await until(() => /Waiting for the machine/.test(dialog()?.innerText ?? "") || null)
     pass("the dialog says it is waiting for the machine", Boolean(label))
+
+    // Windows gets its own pairing token (the shell is part of the token); the macOS and Linux one is revoked.
+    const posixId = enrollmentId
+    button(dialog(), (t) => t === "Windows")?.click()
+    const windowsCommand = await until(() => /^powershell -c "iex \(irm '/.test(command()) && command())
+    pass("Windows shows a PowerShell command", Boolean(windowsCommand))
+    const windowsShape = new RegExp(`^powershell -c "iex \\(irm '${escapedUrl}\\?p=[A-Za-z0-9_.-]+'\\)"$`)
+    pass("it is the install address with a token, run by PowerShell", windowsShape.test(windowsCommand ?? ""))
+    const windowsToken = windowsCommand?.match(/\?p=([^']+)'/)?.[1] ?? ""
+    pass("it carries its own token", Boolean(windowsToken) && windowsToken !== token)
+    await until(() => enrollmentId && enrollmentId !== posixId)
+    const windowsWaiting = enrollmentId !== posixId && (await get(`machine-enrollments/${enrollmentId}`))
+    pass("the server has a second enrollment waiting", windowsWaiting?.state === "awaiting_bootstrap", windowsWaiting?.state ?? "")
+    const left = await until(async () => (await get(`machine-enrollments/${posixId}`)).state === "cancelled")
+    pass("the macOS and Linux token was revoked when Windows was chosen", Boolean(left))
+    button(dialog(), (t) => t === "macOS and Linux")?.click()
+    const posixAgain = await until(() => /^curl -fsSL .*\?p=/.test(command()) && command())
+    pass("switching back shows a macOS and Linux command", Boolean(posixAgain))
+    withToken = posixAgain || withToken
 
     // "Approve in browser instead": the plain command, no token, nothing to cancel on the server.
     button(dialog(), (t) => t === "Approve in browser instead")?.click()
