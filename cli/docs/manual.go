@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -68,7 +69,14 @@ func Install(directory string) (resultErr error) {
 }
 
 // syncFile is the only fsync of a refresh; tests count it.
-var syncFile = func(file *os.File) error { return file.Sync() }
+// Windows cannot flush a directory handle (FlushFileBuffers needs a file opened for writing) and NTFS journals
+// the rename, so a directory is not synced there.
+var syncFile = func(file *os.File) error {
+	if info, err := file.Stat(); runtime.GOOS == "windows" && err == nil && info.IsDir() {
+		return nil
+	}
+	return file.Sync()
+}
 
 func syncDirectory(path string) error {
 	directory, err := os.Open(path)
@@ -108,10 +116,11 @@ func writePage(path string, page []byte) (resultErr error) {
 	return os.Rename(temporary.Name(), path)
 }
 
-// unchanged reports whether path is already a regular, world-readable file holding exactly page.
+// unchanged reports whether path is already a regular, world-readable file holding exactly page (Windows has no
+// POSIX mode: it reports 0666, and access comes from the directory's ACL).
 func unchanged(path string, page []byte) bool {
 	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0644 || info.Size() != int64(len(page)) {
+	if err != nil || !info.Mode().IsRegular() || (runtime.GOOS != "windows" && info.Mode().Perm() != 0644) || info.Size() != int64(len(page)) {
 		return false
 	}
 	existing, err := os.ReadFile(path)

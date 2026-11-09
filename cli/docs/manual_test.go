@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -140,6 +141,9 @@ func TestManualInstallLeavesIdenticalPagesUntouched(t *testing.T) {
 	if err != nil || !os.SameFile(before, after) {
 		t.Fatalf("an identical page was replaced: %v", err)
 	}
+	if runtime.GOOS == "windows" {
+		return // no POSIX modes to correct
+	}
 	if err := os.Chmod(page, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +161,7 @@ func TestManualInstallLeavesIdenticalPagesUntouched(t *testing.T) {
 func TestManualRefreshOfEveryPageSyncsOnce(t *testing.T) {
 	var syncs int
 	previous := syncFile
-	syncFile = func(file *os.File) error { syncs++; return file.Sync() }
+	syncFile = func(file *os.File) error { syncs++; return previous(file) }
 	defer func() { syncFile = previous }()
 	dir := t.TempDir()
 	if err := Install(dir); err != nil { // every page is new
