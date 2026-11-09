@@ -302,24 +302,28 @@ func TestLifecycleMalformedJournalFailsClosedWithoutMutation(t *testing.T) {
 	}
 }
 
-func TestLifecycleStaleJournalFailsClosedWithoutMutation(t *testing.T) {
+func TestLifecycleStaleJournalIsRecovered(t *testing.T) {
 	var calls []string
 	var callMu sync.Mutex
 	component := newFakeTransactionalComponent("hostd", &calls, &callMu)
 	manager := lifecycleForTest(t, component)
-	journal := lifecycleJournal{
-		Version: lifecycleJournalVersion, Operation: lifecycleInstall,
-		StartedAt: manager.now().Add(-maxLifecycleJournalAge - time.Minute),
-		Order:     []string{"hostd"}, Before: []NativeComponentStatus{{ID: "hostd"}},
-	}
-	if err := manager.writeJournal(journal); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.Recover(context.Background()); !errors.Is(err, ErrLifecycleUncertain) {
-		t.Fatalf("recover err=%v", err)
-	}
-	if len(calls) != 0 {
-		t.Fatalf("mutated on stale journal: %v", calls)
+	for name, startedAt := range map[string]time.Time{
+		"month old":    manager.now().Add(-30 * 24 * time.Hour),
+		"clock jumped": manager.now().Add(24 * time.Hour),
+	} {
+		journal := lifecycleJournal{
+			Version: lifecycleJournalVersion, Operation: lifecycleInstall, StartedAt: startedAt,
+			Order: []string{"hostd"}, Before: []NativeComponentStatus{{ID: "hostd"}},
+		}
+		if err := manager.writeJournal(journal); err != nil {
+			t.Fatal(err)
+		}
+		if err := manager.Recover(context.Background()); err != nil {
+			t.Fatalf("%s: recover err=%v", name, err)
+		}
+		if _, err := manager.readJournal(); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s: journal not removed: %v", name, err)
+		}
 	}
 }
 

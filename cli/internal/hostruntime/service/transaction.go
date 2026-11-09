@@ -19,8 +19,6 @@ import (
 const (
 	lifecycleJournalVersion = "paperboat.service-lifecycle/v1"
 	maxLifecycleJournalSize = 256 << 10
-	maxLifecycleJournalAge  = 24 * time.Hour
-	lifecycleClockSkew      = 5 * time.Minute
 )
 
 var (
@@ -601,8 +599,8 @@ func (m *LifecycleManager) readJournal() (lifecycleJournal, error) {
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return lifecycleJournal{}, ErrLifecycleInvalid
 	}
-	now := m.now().UTC()
-	if journal.Version != lifecycleJournalVersion || !validLifecycleOperation(journal.Operation) || journal.StartedAt.IsZero() || journal.StartedAt.After(now.Add(lifecycleClockSkew)) || now.Sub(journal.StartedAt) > maxLifecycleJournalAge || len(journal.Order) == 0 || len(journal.Order) > len(m.components) || len(journal.Before) != len(journal.Order) || journal.Next < 0 || journal.Next > len(journal.Order) {
+	// Age and clock skew never block recovery (dpkg --configure -a): a machine off for days must still roll back.
+	if journal.Version != lifecycleJournalVersion || !validLifecycleOperation(journal.Operation) || journal.StartedAt.IsZero() || len(journal.Order) == 0 || len(journal.Order) > len(m.components) || len(journal.Before) != len(journal.Order) || journal.Next < 0 || journal.Next > len(journal.Order) {
 		return lifecycleJournal{}, ErrLifecycleInvalid
 	}
 	if journal.Operation == lifecycleReplace {
