@@ -144,10 +144,10 @@ func TestAPITokenLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if list, err := s.List(ctx, f.member, f.team, 0, ""); err != nil || len(list.Items) != 2 || list.Total != 2 {
+	if list, err := s.List(ctx, f.member, f.team, "", 0, ""); err != nil || len(list.Items) != 2 || list.Total != 2 {
 		t.Fatalf("member list: %d of %d %v", len(list.Items), list.Total, err)
 	}
-	if list, err := s.List(ctx, f.owner, f.team, 0, ""); err != nil || len(list.Items) != 3 || list.Total != 3 {
+	if list, err := s.List(ctx, f.owner, f.team, "", 0, ""); err != nil || len(list.Items) != 3 || list.Total != 3 {
 		t.Fatalf("owner list: %d of %d %v", len(list.Items), list.Total, err)
 	}
 	// Paging one at a time walks all three tokens, newest first, with no repeats, keeping the total; a cursor of
@@ -155,7 +155,7 @@ func TestAPITokenLifecycle(t *testing.T) {
 	seen, cursor := map[string]bool{}, ""
 	var newest []time.Time
 	for i := 0; i < 5; i++ {
-		page, err := s.List(ctx, f.owner, f.team, 1, cursor)
+		page, err := s.List(ctx, f.owner, f.team, "", 1, cursor)
 		if err != nil || page.Total != 3 || len(page.Items) != 1 || seen[page.Items[0].ID] {
 			t.Fatalf("page %d: %+v %v", i, page, err)
 		}
@@ -164,14 +164,14 @@ func TestAPITokenLifecycle(t *testing.T) {
 		if cursor = page.NextCursor; cursor == "" {
 			break
 		}
-		if _, err := s.List(ctx, f.owner, workspace.Scope{}, 1, cursor); !errors.Is(err, ErrInvalidPage) {
+		if _, err := s.List(ctx, f.owner, workspace.Scope{}, "", 1, cursor); !errors.Is(err, ErrInvalidPage) {
 			t.Fatalf("a team cursor paged the personal list: %v", err)
 		}
 	}
 	if len(seen) != 3 || newest[0].Before(newest[len(newest)-1]) {
 		t.Fatalf("walked %d tokens, order %v", len(seen), newest)
 	}
-	if _, err := s.List(ctx, f.owner, f.team, 201, ""); !errors.Is(err, ErrInvalidPage) {
+	if _, err := s.List(ctx, f.owner, f.team, "", 201, ""); !errors.Is(err, ErrInvalidPage) {
 		t.Fatalf("limit 201 accepted: %v", err)
 	}
 	if _, err := s.Revoke(ctx, f.member, f.team, ownerToken.ID); !errors.Is(err, ErrNotFound) {
@@ -189,6 +189,21 @@ func TestAPITokenLifecycle(t *testing.T) {
 	}
 	if _, err := s.Authenticate(ctx, secret); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("revoked token authenticates: %v", err)
+	}
+	// The state filter splits live from revoked and keeps both counts whatever the filter.
+	ended, err := s.List(ctx, f.owner, f.team, StateEnded, 0, "")
+	if err != nil || len(ended.Items) != 1 || ended.Items[0].ID != token.ID || ended.Total != 1 || ended.Active != 2 || ended.Ended != 1 {
+		t.Fatalf("ended list: %+v %v", ended, err)
+	}
+	active, err := s.List(ctx, f.owner, f.team, StateActive, 1, "")
+	if err != nil || len(active.Items) != 1 || active.Items[0].RevokedAt != nil || active.Total != 2 || active.NextCursor == "" {
+		t.Fatalf("active list: %+v %v", active, err)
+	}
+	if _, err := s.List(ctx, f.owner, f.team, StateEnded, 1, active.NextCursor); !errors.Is(err, ErrInvalidPage) {
+		t.Fatalf("an active cursor paged the ended list: %v", err)
+	}
+	if _, err := s.List(ctx, f.owner, f.team, "bogus", 0, ""); !errors.Is(err, ErrInvalidPage) {
+		t.Fatalf("unknown state accepted: %v", err)
 	}
 	if _, _, err := s.Create(ctx, f.member, f.team, CreateInput{Name: "ci"}, ""); err != nil {
 		t.Fatalf("name reusable after revoke: %v", err)

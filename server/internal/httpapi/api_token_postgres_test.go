@@ -102,6 +102,15 @@ func TestAPITokenBearerRequests(t *testing.T) {
 	if len(list) != 1 || list[0].(map[string]any)["id"] != memberToken.ID || list[0].(map[string]any)["created_by"] != "user:"+member+"@example.test" || list[0].(map[string]any)["scope"] == nil {
 		t.Fatalf("member sees %v", list)
 	}
+	if out["active_total"] != float64(1) || out["ended_total"] != float64(0) {
+		t.Fatalf("totals %v %v", out["active_total"], out["ended_total"])
+	}
+	if status, out = do(http.MethodGet, "/v1/workspaces/"+team+"/api-tokens?state=ended", secret, ""); status != http.StatusOK || len(out["api_tokens"].([]any)) != 0 {
+		t.Fatalf("ended list = %d %v", status, out)
+	}
+	if status, out = do(http.MethodGet, "/v1/workspaces/"+team+"/api-tokens?state=bogus", secret, ""); status != http.StatusBadRequest {
+		t.Fatalf("bogus state = %d %v", status, out)
+	}
 	if status, out = do(http.MethodGet, "/v1/workspaces/personal/api-tokens", secret, ""); status != http.StatusForbidden || code(out) != "workspace_unavailable" {
 		t.Fatalf("other workspace path = %d %v", status, out)
 	}

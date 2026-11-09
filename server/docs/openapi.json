@@ -46783,6 +46783,19 @@
               "maxLength": 512
             },
             "description": "next_cursor of the previous page."
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "ended"
+              ]
+            },
+            "description": "Only live tokens (active) or only revoked and expired ones (ended). Omitted lists every token. A cursor works only with the state it came from."
           }
         ],
         "responses": {
@@ -46802,7 +46815,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "description": "Members see their own tokens, owners and admins all."
+        "description": "Members see their own tokens, owners and admins all. total counts the tokens the state filter matches; active_total and ended_total count all visible tokens whatever the filter."
       },
       "post": {
         "operationId": "post_v1_workspace_api_tokens",

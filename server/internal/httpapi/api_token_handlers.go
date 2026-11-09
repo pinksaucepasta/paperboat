@@ -169,7 +169,7 @@ func apiTokenList(tokens *apitokens.Service) http.HandlerFunc {
 			}
 			limit = n
 		}
-		page, err := tokens.List(r.Context(), account, ws, limit, r.URL.Query().Get("cursor"))
+		page, err := tokens.List(r.Context(), account, ws, r.URL.Query().Get("state"), limit, r.URL.Query().Get("cursor"))
 		if err != nil {
 			writeAPITokenError(w, r, tokens, err)
 			return
@@ -178,7 +178,7 @@ func apiTokenList(tokens *apitokens.Service) http.HandlerFunc {
 		for _, t := range page.Items {
 			out = append(out, apiTokenView(t))
 		}
-		data := map[string]any{"api_tokens": out, "total": page.Total}
+		data := map[string]any{"api_tokens": out, "total": page.Total, "active_total": page.Active, "ended_total": page.Ended}
 		if page.NextCursor != "" {
 			data["next_cursor"] = page.NextCursor
 		}

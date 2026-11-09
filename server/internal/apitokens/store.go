@@ -134,21 +134,30 @@ func mapInsertError(err error) error {
 	return err
 }
 
-// Page is one keyset page of a workspace's tokens, newest first; Total counts every token the cursor pages through.
+// Page is one keyset page of a workspace's tokens, newest first. Total counts every token the cursor pages
+// through (those matching the state filter); Active and Ended count all the actor can see, whatever the filter.
 type Page struct {
-	Items      []Token
-	NextCursor string
-	Total      int
+	Items         []Token
+	NextCursor    string
+	Total         int
+	Active, Ended int
 }
 
+// ListState filters List: "" is every token, StateActive the live ones, StateEnded the revoked and expired.
+const (
+	StateActive = "active"
+	StateEnded  = "ended"
+)
+
 // List pages actor's own tokens in ws, or every member's when actor owns or administers ws, newest first
-// (limit 0 is 50, at most 200). The cursor names the last token sent and is bound to the workspace.
-func (s *Service) List(ctx context.Context, actor string, ws workspace.Scope, limit int, cursor string) (Page, error) {
+// (limit 0 is 50, at most 200), optionally only the active or only the ended ones. The cursor names the last
+// token sent and is bound to the workspace and the state.
+func (s *Service) List(ctx context.Context, actor string, ws workspace.Scope, state string, limit int, cursor string) (Page, error) {
 	if limit == 0 {
 		limit = 50
 	}
-	after, err := decodeListCursor(ws, cursor)
-	if limit < 1 || limit > 200 || err != nil {
+	after, err := decodeListCursor(ws, state, cursor)
+	if limit < 1 || limit > 200 || err != nil || (state != "" && state != StateActive && state != StateEnded) {
 		return Page{}, ErrInvalidPage
 	}
 	var page Page
@@ -161,12 +170,22 @@ func (s *Service) List(ctx context.Context, actor string, ws workspace.Scope, li
 			return err
 		}
 		const visible = ` FROM api_tokens t JOIN users u ON u.id=t.account_id WHERE coalesce(t.team_id,'')=$1 AND ($2 OR t.account_id=$3)`
-		if err := tx.QueryRow(ctx, `SELECT count(*)`+visible, ws.TeamID, admin, actor).Scan(&page.Total); err != nil {
+		now := s.now().UTC()
+		const live = `(t.revoked_at IS NULL AND t.expires_at>$4)`
+		if err := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE `+live+`), count(*) FILTER (WHERE NOT `+live+`)`+visible,
+			ws.TeamID, admin, actor, now).Scan(&page.Active, &page.Ended); err != nil {
 			return err
 		}
+		page.Total = page.Active + page.Ended
+		if state == StateActive {
+			page.Total = page.Active
+		} else if state == StateEnded {
+			page.Total = page.Ended
+		}
 		rows, err := tx.Query(ctx, `SELECT `+tokenColumns+visible+`
-		 AND ($4::timestamptz IS NULL OR (t.created_at, t.id) < ($4, $5)) ORDER BY t.created_at DESC, t.id DESC LIMIT $6`,
-			ws.TeamID, admin, actor, after.at, after.id, limit+1)
+		 AND ($5='' OR ($5='active')=`+live+`)
+		 AND ($6::timestamptz IS NULL OR (t.created_at, t.id) < ($6, $7)) ORDER BY t.created_at DESC, t.id DESC LIMIT $8`,
+			ws.TeamID, admin, actor, now, state, after.at, after.id, limit+1)
 		if err != nil {
 			return err
 		}
@@ -179,7 +198,7 @@ func (s *Service) List(ctx context.Context, actor string, ws workspace.Scope, li
 	if len(page.Items) > limit {
 		page.Items = page.Items[:limit]
 		last := page.Items[limit-1]
-		page.NextCursor = encodeListCursor(ws, last.CreatedAt, last.ID)
+		page.NextCursor = encodeListCursor(ws, state, last.CreatedAt, last.ID)
 	}
 	return page, nil
 }
@@ -189,24 +208,24 @@ type listPosition struct {
 	id string
 }
 
-func encodeListCursor(ws workspace.Scope, at time.Time, id string) string {
-	return base64.RawURLEncoding.EncodeToString([]byte(strings.Join([]string{"api-tokens", ws.TeamID, at.UTC().Format(time.RFC3339Nano), id}, "\x00")))
+func encodeListCursor(ws workspace.Scope, state string, at time.Time, id string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(strings.Join([]string{"api-tokens", ws.TeamID, state, at.UTC().Format(time.RFC3339Nano), id}, "\x00")))
 }
 
-func decodeListCursor(ws workspace.Scope, cursor string) (listPosition, error) {
+func decodeListCursor(ws workspace.Scope, state, cursor string) (listPosition, error) {
 	if cursor == "" {
 		return listPosition{}, nil
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(cursor)
 	fields := strings.Split(string(raw), "\x00")
-	if err != nil || len(cursor) > 512 || len(fields) != 4 || fields[0] != "api-tokens" || fields[1] != ws.TeamID {
+	if err != nil || len(cursor) > 512 || len(fields) != 5 || fields[0] != "api-tokens" || fields[1] != ws.TeamID || fields[2] != state {
 		return listPosition{}, ErrInvalidPage
 	}
-	at, err := time.Parse(time.RFC3339Nano, fields[2])
-	if err != nil || fields[3] == "" {
+	at, err := time.Parse(time.RFC3339Nano, fields[3])
+	if err != nil || fields[4] == "" {
 		return listPosition{}, ErrInvalidPage
 	}
-	return listPosition{at: &at, id: fields[3]}, nil
+	return listPosition{at: &at, id: fields[4]}, nil
 }
 
 // Revoke revokes token id in ws when actor created it or owns or administers ws. Revoking a
