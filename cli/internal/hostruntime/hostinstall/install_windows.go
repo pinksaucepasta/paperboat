@@ -2082,7 +2082,8 @@ func purgeWindows(ctx context.Context, ownerSID string, preserveCLI bool) (resul
 	var result error
 	cleanup := func(name string, operation func() error) {
 		if err := operation(); err != nil {
-			result = errors.Join(result, hostInstallFailure("Paperboat installation operation failed", err))
+			// The step's name is what tells a failed uninstall apart (FailureDetail).
+			result = errors.Join(result, hostInstallFailure(name, err))
 		}
 	}
 	// Purge is a recovery boundary. Keep attempting every independently owned
@@ -2183,7 +2184,7 @@ func purgeWindows(ctx context.Context, ownerSID string, preserveCLI bool) (resul
 		if err != nil {
 			return err
 		}
-		result = purgeWindowsSharedResidue(ctx, sharedLayout, WindowsProgramDataRoot(), instance)
+		result = hostInstallFailure("remove shared Paperboat directories and logs", purgeWindowsSharedResidue(ctx, sharedLayout, WindowsProgramDataRoot(), instance))
 		if result == nil && atRestart {
 			result = deleteWindowsSharedParentsAtRestart(sharedLayout, WindowsProgramDataRoot())
 		}

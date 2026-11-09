@@ -177,7 +177,7 @@ func TestWindowsPurgeConvergesWhileAnOldCLIIsRunning(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	if err := Purge(ctx, ownerSID); err != nil {
-		t.Fatalf("purge with an old CLI still running: %v", err)
+		t.Fatalf("purge with an old CLI still running: %v (%s)", err, FailureDetail(err))
 	}
 	waitExited(t, exited)
 	for _, path := range []string{layout.InstallRoot, shared.InstallRoot} {

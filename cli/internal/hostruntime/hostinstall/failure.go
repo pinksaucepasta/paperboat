@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"reflect"
+	"slices"
+	"strings"
 	"syscall"
 )
 
@@ -177,6 +180,78 @@ func FailureMessage(err error) (string, bool) {
 		failure = inner
 	}
 	return failure.message, true
+}
+
+// MaxFailureDetail bounds FailureDetail.
+const MaxFailureDetail = 1024
+
+// FailureDetail names every failed step of an error tree and its cause as one line without file paths, for a
+// status file or log the user reads after the command is gone. Curated step messages are kept, a file error
+// keeps its operation and native text but not its path, and any other text that holds a path separator is
+// replaced by what it wraps, or by its type.
+func FailureDetail(err error) (detail string) {
+	// A broken Error or Unwrap must not interrupt the cleanup that reports it.
+	defer func() {
+		if recover() != nil {
+			detail = ""
+		}
+	}()
+	budget := 64
+	detail = strings.Join(strings.Fields(failureDetail(err, 0, &budget)), " ")
+	if len(detail) > MaxFailureDetail {
+		detail = strings.ToValidUTF8(detail[:MaxFailureDetail], "")
+	}
+	return detail
+}
+
+func failureDetail(err error, depth int, budget *int) string {
+	if err == nil || depth > 32 || *budget <= 0 {
+		return ""
+	}
+	*budget--
+	var children []error
+	switch wrapped := err.(type) {
+	case interface{ Unwrap() []error }:
+		children = wrapped.Unwrap()
+	case interface{ Unwrap() error }:
+		children = []error{wrapped.Unwrap()}
+	}
+	var parts []string
+	for _, child := range children {
+		if part := failureDetail(child, depth+1, budget); part != "" && !slices.Contains(parts, part) {
+			parts = append(parts, part)
+		}
+	}
+	below := strings.Join(parts, "; ")
+	prefix := ""
+	switch typed := err.(type) {
+	case *installFailure:
+		prefix = typed.message
+	case *fs.PathError:
+		prefix = typed.Op
+	case *os.LinkError:
+		prefix = typed.Op
+	case *os.SyscallError:
+		prefix = typed.Syscall
+	case interface{ Unwrap() []error }:
+		return below
+	default:
+		own := err.Error()
+		switch {
+		case strings.ContainsAny(own, `\/`):
+			if below == "" {
+				return reflect.TypeOf(err).String()
+			}
+			return below
+		case below == "" || strings.Contains(own, below):
+			return own
+		}
+		prefix = own
+	}
+	if below == "" {
+		return prefix
+	}
+	return prefix + ": " + below
 }
 
 // withCleanup attaches cleanup failures to a primary result without

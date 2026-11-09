@@ -70,13 +70,16 @@ type windowsUninstallStatus struct {
 	CompletedAt      time.Time                        `json:"completed_at,omitempty"`
 }
 
-// Only producer-owned finite fault metadata crosses the process boundary. Native
+// Only producer-owned fault metadata crosses the process boundary. Native
 // errno remains metadata from the helper platform, never a local syscall error.
 type windowsUninstallFailureMetadata struct {
 	CleanupOperations []string `json:"cleanup_operations,omitempty"`
 	Cause             string   `json:"cause"`
 	Errno             int      `json:"errno,omitempty"`
-	SupportReference  string   `json:"support_reference"`
+	// Detail names the steps that failed and why, without file paths (hostinstall.FailureDetail). The status
+	// file is the only thing left of the helper, and a cause class alone did not say what failed.
+	Detail           string `json:"detail,omitempty"`
+	SupportReference string `json:"support_reference"`
 }
 
 type windowsUninstallFailure struct {
@@ -107,7 +110,7 @@ func windowsUninstallStatusValue(ctx context.Context, state string, cause error)
 	value := windowsUninstallStatus{Schema: windowsUninstallStatusSchema, State: state, UpdatedAt: time.Now().UTC()}
 	if cause != nil {
 		fault := errorreport.ProjectFault(ctx, "paperboat-cli", "lifecycle", "component_shutdown", "service_failed", cause)
-		value.Failure = &windowsUninstallFailureMetadata{Cause: fault.Cause, Errno: fault.Errno, SupportReference: fault.SupportReference, CleanupOperations: uninstallCleanupOperations(cause)}
+		value.Failure = &windowsUninstallFailureMetadata{Cause: fault.Cause, Errno: fault.Errno, SupportReference: fault.SupportReference, CleanupOperations: uninstallCleanupOperations(cause), Detail: hostinstall.FailureDetail(cause)}
 	}
 	if state == "completed" || state == "failed" || state == "timed_out" {
 		value.CompletedAt = value.UpdatedAt
@@ -746,7 +749,7 @@ func readWindowsUninstallStatus(statusPath string) (windowsUninstallStatus, erro
 	if failure := status.Failure; failure != nil {
 		// WFP uses a bounded HRESULT facility instead of a 16-bit Win32 code.
 		validErrno := failure.Errno >= 0 && (failure.Errno <= 65535 || failure.Errno >= 0x80320001 && failure.Errno <= 0x80320039)
-		if !errorreport.ValidCause(failure.Cause) || !validErrno || !supportref.Valid(failure.SupportReference) || !validUninstallCleanupOperations(failure.CleanupOperations) || (status.State != "failed" && status.State != "timed_out") {
+		if !errorreport.ValidCause(failure.Cause) || !validErrno || !supportref.Valid(failure.SupportReference) || !validUninstallCleanupOperations(failure.CleanupOperations) || len(failure.Detail) > hostinstall.MaxFailureDetail || (status.State != "failed" && status.State != "timed_out") {
 			return windowsUninstallStatus{}, errors.New(message)
 		}
 	}

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
@@ -186,6 +187,7 @@ func TestWindowsUninstallHandoffAcceptsOnlyReadyProtectedStatus(t *testing.T) {
 		{Cause: "internal", SupportReference: "PRIVATE reference"},
 		{Cause: "internal", SupportReference: supportref.New(), CleanupOperations: []string{"PRIVATE cleanup path"}},
 		{Cause: "internal", SupportReference: supportref.New(), CleanupOperations: []string{"guard_task_remove", "guard_task_remove"}},
+		{Cause: "internal", SupportReference: supportref.New(), Detail: strings.Repeat("x", hostinstall.MaxFailureDetail+1)},
 	} {
 		value := windowsUninstallStatus{Schema: windowsUninstallStatusSchema, State: "failed", UpdatedAt: time.Now().UTC(), Failure: &invalid}
 		if err := writeProtectedWindowsUninstallJSON(statusPath, value); err != nil {
