@@ -15,6 +15,9 @@ import (
 // private TCP services.
 const privateAccessPermission = "private_access"
 
+// managedSSHPermission is the team machine capability that lets a member open managed SSH to it.
+const managedSSHPermission = "managed_ssh"
+
 const (
 	// A team lookup must not eat the inventory refresh's own time budget.
 	sharedMachinesBudget       = 5 * time.Second
@@ -114,4 +117,18 @@ func listTeamSharedMachines(ctx context.Context, scoped func(workspace string) (
 		shared = append(shared, machines...)
 	}
 	return shared, nil
+}
+
+// sshMachines is the machines teams shared with this account together with managed SSH, from the last
+// good lookup. They are not in the private-access topology (join), only in the OpenSSH aliases.
+func (c *teamSharedMachines) sshMachines() []api.UserMachine {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var machines []api.UserMachine
+	for _, machine := range c.last {
+		if slices.Contains(machine.Permissions, managedSSHPermission) {
+			machines = append(machines, machine)
+		}
+	}
+	return machines
 }

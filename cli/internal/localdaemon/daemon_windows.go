@@ -123,7 +123,11 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) (runErr error) {
 			authorityInvalidator.Observe(machines)
 			if managedSSH != nil {
 				sshCtx, cancelSSH := context.WithTimeout(refreshCtx, 15*time.Second)
-				observeSSHRefresh(managedSSH.refresh(sshCtx, machines))
+				sshMachines := machines
+				if config.SharedSSHMachines != nil {
+					sshMachines = withSharedSSHMachines(machines, config.SharedSSHMachines())
+				}
+				observeSSHRefresh(managedSSH.refresh(sshCtx, sshMachines))
 				publishSSHDomain(store, managedSSH.domain())
 				cancelSSH()
 			}

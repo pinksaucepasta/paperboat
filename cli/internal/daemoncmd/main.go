@@ -401,6 +401,7 @@ func localDaemonCommand() *cobra.Command {
 					InventoryEvents: inventoryEvents, AccessEvents: accessEvents, Steps: steps,
 					Paths: paths, Source: source, ManagedSSH: managedConfig, IssuePeerStream: source.IssuePeerStream,
 					OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(),
+					SharedSSHMachines: teamShared.sshMachines,
 					ReconcileMachines: func(ctx context.Context, machines []api.UserMachine) error {
 						credential, err := authSource.WithContext(ctx).Credential()
 						if err != nil {

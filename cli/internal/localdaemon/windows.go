@@ -50,6 +50,8 @@ type DaemonConfig struct {
 	FileTransfers           localapi.FileTransferBroker
 	ReconcileMachines       func(context.Context, []api.UserMachine) error
 	OnMachines              func(context.Context, []api.UserMachine)
+	// SharedSSHMachines are machines teams shared for managed SSH, added to the OpenSSH aliases only.
+	SharedSSHMachines func() []api.UserMachine
 	// InventoryEvents wakes the machine inventory refresh when the server reports a change.
 	InventoryEvents *machineevents.Subscription
 	// AccessEvents wakes it at once for an access change (see InventoryConfig.AccessEvents).

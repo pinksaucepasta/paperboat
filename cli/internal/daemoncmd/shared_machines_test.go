@@ -94,3 +94,31 @@ func TestFailedTeamLookupKeepsTheMachinesAlreadyOffered(t *testing.T) {
 		t.Fatalf("machines = %v, err = %v; want the own and the already shared machine plus the failure", machines, err)
 	}
 }
+
+func TestTeamSharedSSHMachinesFollowTheManagedSSHGrant(t *testing.T) {
+	ssh := &api.MachineSSH{OSUser: "ubuntu", Port: 22}
+	granted := api.UserMachine{ID: "machine_t", Alias: "t", Permissions: []string{"exec", "managed_ssh"}, SSH: ssh}
+	execOnly := api.UserMachine{ID: "machine_exec", Alias: "exec-only", Permissions: []string{"exec"}}
+	byWorkspace := map[string][]api.UserMachine{"team-a": {granted, execOnly}, "team-b": {}}
+	server := sharedMachinesServer(t, byWorkspace)
+	defer server.Close()
+	scoped := func(workspace string) (*api.Client, error) {
+		client := api.New(server.URL, config.Credential{AccessToken: "session"}, server.Client())
+		return client, client.SetWorkspace(workspace)
+	}
+	cache := &teamSharedMachines{}
+	topology, err := cache.join(context.Background(), nil, scoped)
+	if err != nil || len(topology) != 0 {
+		t.Fatalf("topology = %v, err = %v; managed SSH alone must not enter the private-access topology", topology, err)
+	}
+	if got := cache.sshMachines(); len(got) != 1 || got[0].ID != "machine_t" {
+		t.Fatalf("ssh machines = %v, want only the machine granted managed_ssh", got)
+	}
+	byWorkspace["team-a"] = []api.UserMachine{{ID: "machine_t", Alias: "t", Permissions: []string{"exec"}}}
+	if _, err := cache.join(context.Background(), nil, scoped); err != nil {
+		t.Fatal(err)
+	}
+	if got := cache.sshMachines(); len(got) != 0 {
+		t.Fatalf("ssh machines = %v after the grant was removed, want none", got)
+	}
+}

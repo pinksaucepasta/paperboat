@@ -43,3 +43,22 @@ func managedSSHKnownHosts(machines []api.UserMachine, domain string) []byte {
 	}
 	return content
 }
+
+// withSharedSSHMachines adds machines teams shared for managed SSH to the account's own, so they get
+// OpenSSH aliases and known_hosts lines too. An own machine wins an id or alias clash.
+func withSharedSSHMachines(own, shared []api.UserMachine) []api.UserMachine {
+	ids := make(map[string]bool, len(own)+len(shared))
+	aliases := make(map[string]bool, len(own)+len(shared))
+	for _, machine := range own {
+		ids[machine.ID], aliases[machine.Alias] = true, true
+	}
+	machines := append([]api.UserMachine(nil), own...)
+	for _, machine := range shared {
+		if ids[machine.ID] || aliases[machine.Alias] {
+			continue
+		}
+		ids[machine.ID], aliases[machine.Alias] = true, true
+		machines = append(machines, machine)
+	}
+	return machines
+}
