@@ -8,9 +8,7 @@ export const metadata: Metadata = { title: sections.access.title }
 export default function Page() {
   return (
     <SectionPage id="access">
-      <div className="mx-auto max-w-4xl">
-        <AccessPage />
-      </div>
+      <AccessPage />
     </SectionPage>
   )
 }

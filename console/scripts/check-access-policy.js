@@ -64,18 +64,18 @@
     pass("the page says the policy isn't available yet", Boolean(unavailable))
     return steps
   }
-  for (const name of ["Simple", "Policy file", "Test", "History"])
+  for (const name of ["Overview", "Policy file", "Test", "History"])
     pass(`the ${name} tab is on the page`, Boolean(await until(() => tab(name))))
 
-  // Simple: every tag in the file shows on its machines.
-  tab("Simple").click()
+  // Overview: every tag in the file shows on its machines.
+  tab("Overview").click()
   const tagged = Object.entries(
     JSON.parse(policy.data.policy.replace(/\/\/.*$/gm, "").replace(/,(\s*[}\]])/g, "$1")).tags ?? {},
   )
   const tagsShown = await until(() =>
     tagged.every(([tag]) => document.body.innerText.includes(tag.replace(/^tag:/, ""))),
   )
-  pass("Simple shows the file's tags", tagged.length === 0 || Boolean(tagsShown), `${tagged.length} tags`)
+  pass("Overview shows the file's tags", tagged.length === 0 || Boolean(tagsShown), `${tagged.length} tags`)
 
   // Policy file: the saved text, and inline errors for a broken draft.
   tab("Policy file").click()

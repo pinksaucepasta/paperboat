@@ -12,7 +12,7 @@ import { PolicyTest } from "@/components/access/policy-test"
 import { Skeleton } from "@/components/ui/skeleton"
 
 const tabs = [
-  { id: "simple", title: "Simple" },
+  { id: "simple", title: "Overview" },
   { id: "file", title: "Policy file" },
   { id: "test", title: "Test" },
   { id: "history", title: "History" },
@@ -35,8 +35,7 @@ export function AccessPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <header className="flex flex-col gap-4">
-        <h1 className="font-heading text-2xl font-semibold tracking-tight">Access</h1>
+      <header>
         <div className="border-b border-divider">
           <nav className="-mb-px no-scrollbar flex gap-1 overflow-x-auto" role="tablist">
             {tabs.map(({ id, title }) => (
