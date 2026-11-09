@@ -25,6 +25,7 @@ import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { SectionHeading } from "@/components/section"
 
 
 export function TeamPage() {
@@ -121,7 +122,7 @@ function Teams() {
 
       {pending.length > 0 && (
         <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-medium">Invitations</h2>
+          <SectionHeading title="Invitations" />
           {pending.map((invitation) => (
             <InvitationCard
               key={invitation.invitation_id}
@@ -141,7 +142,7 @@ function Teams() {
       )}
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium">Your teams</h2>
+        <SectionHeading title="Your teams" />
         {workspaces.isPending ? (
           <TeamRowsSkeleton />
         ) : teams.length === 0 ? (
@@ -375,7 +376,7 @@ export function TeamsSkeleton() {
         </Button>
       </header>
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium">Your teams</h2>
+        <SectionHeading title="Your teams" />
         <TeamRowsSkeleton />
       </section>
     </div>

@@ -5,6 +5,7 @@ import { requestsQuery, type InboxRequest } from "@/lib/files"
 import { formatBytes } from "@/lib/format"
 import { pauseReasons, transferModesLive } from "@/lib/transfer-mode"
 import { useNow } from "@/lib/use-now"
+import { SectionHeading } from "@/components/section"
 
 /**
  * Transfers in progress (approved Team Inbox requests that are sending, paused or failed), to or
@@ -32,7 +33,7 @@ export function Transfers({ scope }: { scope?: string | null }) {
     "a removed machine"
   return (
     <div className="flex flex-col gap-2">
-      <h2 className="text-sm font-medium">Transfers</h2>
+      <SectionHeading title="Transfers" />
       <div className="flex flex-col divide-y divide-divider rounded-lg bg-surface px-4" data-transfers>
         {running.map((request) => (
           <TransferRow key={request.request_id} request={request} to={aliasOf(request)} />

@@ -36,6 +36,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { ListSkeleton } from "@/components/skeletons"
+import { SectionHeading } from "@/components/section"
 
 const expiries = [7, 30, 90] as const
 
@@ -58,10 +59,7 @@ export function ApiTokens() {
   if (!workspace || tokens.isPending) {
     return (
       <section className="flex flex-col gap-3">
-        <div className="flex items-center">
-          <h2 className="text-sm font-medium">Active</h2>
-          <div className="ml-auto">{create}</div>
-        </div>
+        <SectionHeading title="Active" action={create} />
         <ListSkeleton rows={3} detail="w-[36rem]" action />
       </section>
     )
@@ -101,10 +99,7 @@ export function ApiTokens() {
         </Empty>
       ) : (
         <section className="flex flex-col gap-3">
-          <div className="flex items-center">
-            <h2 className="text-sm font-medium">Active</h2>
-            <div className="ml-auto">{create}</div>
-          </div>
+          <SectionHeading title="Active" action={create} />
           <TokenList tokens={active} now={now} onRevoke={setRevoking} />
         </section>
       )}

@@ -22,7 +22,7 @@ import { SearchField, useListScope } from "@/components/list-toolbar"
 import { Detail } from "@/components/machine-overview"
 import { useCurrentMachine } from "@/components/machine-shell"
 import { StatusDot } from "@/components/machine-status"
-import { Section } from "@/components/section"
+import { Section, SectionHeading } from "@/components/section"
 import { Time } from "@/components/time"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { EmptySkeleton, TableRowsSkeleton } from "@/components/skeletons"
@@ -238,7 +238,7 @@ function MachineSync({ environment }: { environment: ConfigEnvironment }) {
       </div>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium">Details</h2>
+        <SectionHeading title="Details" />
         <dl className="grid border-t border-divider sm:grid-cols-2 sm:gap-x-10">
           <Detail label="Repository">{environment.repository_name}</Detail>
           <Detail label="Direction">{directionLabels[environment.mode ?? ""]}</Detail>

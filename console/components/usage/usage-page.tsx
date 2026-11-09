@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { LoadError } from "@/components/load-error"
 import { TableRowsSkeleton } from "@/components/skeletons"
+import { SectionHeading } from "@/components/section"
 import { useTimeFormat } from "@/lib/use-time-format"
 import { useLastCount } from "@/lib/last-count"
 
@@ -164,7 +165,7 @@ function Loaded({ usage, period, showMachine }: { usage: Usage; period: UsagePer
       <Chart usage={usage} period={period} />
 
       <div className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium">{resources.length > topResources ? "Top resources" : "By resource"}</h2>
+        <SectionHeading title={resources.length > topResources ? "Top resources" : "By resource"} />
         <ResourceTable showMachine={showMachine}>
           {shown.map(({ resource, total: bytes }) => (
             <tr
@@ -306,7 +307,7 @@ function UsageSkeleton({ showMachine, rows }: { showMachine: boolean; rows: numb
         </div>
       </div>
       <div className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium">By resource</h2>
+        <SectionHeading title="By resource" />
         <ResourceTable showMachine={showMachine}>
           <TableRowsSkeleton
             rows={rows}

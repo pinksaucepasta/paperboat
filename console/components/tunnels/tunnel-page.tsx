@@ -35,7 +35,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
-import { DangerZone } from "@/components/section"
+import { DangerZone, SectionHeading } from "@/components/section"
 
 /**
  * A tunnel's page, laid out like a machine's Overview: who and where it serves, the hostnames
@@ -117,7 +117,7 @@ function Loaded({ tunnel }: { tunnel: Tunnel }) {
       <HealthNotice tunnel={tunnel} />
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium">Details</h2>
+        <SectionHeading title="Details" />
         <dl className="grid border-t border-divider sm:grid-cols-2 sm:gap-x-10">
           <Detail label="Address" control>
             <AddressValue tunnel={tunnel} />

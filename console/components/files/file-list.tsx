@@ -34,6 +34,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { TableRowsSkeleton } from "@/components/skeletons"
+import { SectionHeading } from "@/components/section"
 
 /** The machine page's Files tab. */
 export function MachineFiles() {
@@ -381,7 +382,7 @@ function Requests({ scope }: { scope?: string | null }) {
   const aliasOf = (id: string) => machines.data?.find((entry) => entry.id === id)?.alias ?? "your machine"
   return (
     <div className="flex flex-col gap-2">
-      <h2 className="text-sm font-medium">Waiting for you</h2>
+      <SectionHeading title="Waiting for you" />
       <div className="flex flex-col divide-y divide-divider rounded-lg bg-surface px-4">
         {waiting.map((request) => (
           <RequestRow
