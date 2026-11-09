@@ -36,6 +36,9 @@ type Config struct {
 	HTTP                               *http.Client
 	ControlTrace                       func(context.Context, string) (string, string, func(string, string))
 	ControlFailure                     func(context.Context, string, error)
+	// Trust remembers withdrawn issuer key ids for the process; main shares the one that read the startup
+	// file. Nil starts empty.
+	Trust *jwks.Trust
 }
 type Lease struct {
 	NodeID        string                      `json:"node_id"`
@@ -108,6 +111,9 @@ func New(cfg Config) (*Client, error) {
 		cfg.HTTP = &copy
 	}
 	cfg.URL = strings.TrimRight(cfg.URL, "/")
+	if cfg.Trust == nil {
+		cfg.Trust = &jwks.Trust{}
+	}
 	return &Client{cfg: cfg}, nil
 }
 
@@ -326,7 +332,7 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 		}
 	}
 	if len(out.JWKS) != 0 && !bytes.Equal(out.JWKS, c.jwks) {
-		keys, err := jwks.Parse(out.JWKS)
+		keys, err := c.cfg.Trust.Apply(out.JWKS)
 		if err != nil || server.SetKeys(keys) != nil {
 			return ErrControl
 		}

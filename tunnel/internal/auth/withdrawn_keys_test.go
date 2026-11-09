@@ -48,3 +48,20 @@ func TestWithdrawnKeysAreRefusedWhileStillListed(t *testing.T) {
 		t.Fatal("an empty withdrawn key id was accepted")
 	}
 }
+
+// A rolling rotation can serve an older document after the withdrawal; the edge must not trust the key again.
+func TestStaleDocumentDoesNotRetrustWithdrawnKey(t *testing.T) {
+	oldPublic, _, _ := ed25519.GenerateKey(rand.Reader)
+	newPublic, _, _ := ed25519.GenerateKey(rand.Reader)
+	keys := map[string]ed25519.PublicKey{"old": oldPublic, "new": newPublic}
+	snapshot := NewSnapshot()
+	if err := snapshot.ReplaceJWKS(withdrawn(t, makeJWKS(t, keys), "old")); err != nil {
+		t.Fatal(err)
+	}
+	if err := snapshot.ReplaceJWKS(makeJWKS(t, keys)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := snapshot.Key(context.Background(), "old"); err == nil {
+		t.Fatal("a stale document re-trusted a withdrawn key")
+	}
+}

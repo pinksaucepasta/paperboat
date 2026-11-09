@@ -27,6 +27,7 @@ const maximumRevocationWatchers = 8192
 type Snapshot struct {
 	mu                                         sync.RWMutex
 	keys                                       map[string]ed25519.PublicKey
+	trust                                      jwks.Trust // remembers withdrawn key ids, so a stale document never re-trusts one
 	revokedJTI, revokedEnvironment, revokedKey map[string]struct{}
 	revokedConnectorGeneration                 map[connectorGeneration]struct{}
 	revocationMaxAge                           time.Duration
@@ -63,7 +64,7 @@ func (s *Snapshot) ConfigureRevocationFreshness(maxAge time.Duration, now func()
 }
 
 func (s *Snapshot) ReplaceJWKS(data []byte) error {
-	next, err := jwks.Parse(data)
+	next, err := s.trust.Apply(data)
 	if err != nil {
 		return ErrSnapshotInvalid
 	}

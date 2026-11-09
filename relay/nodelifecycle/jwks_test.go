@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/shared/jwks"
 )
 
 // trustRelay is a relay client observing a control plane whose trust document the test sets.
@@ -31,7 +32,8 @@ type trustRelay struct {
 	pubs   map[string]string
 }
 
-func newTrustRelay(t *testing.T) *trustRelay {
+// A non-nil trust is the one the relay started from (its startup file), shared with the client.
+func newTrustRelay(t *testing.T, trust *jwks.Trust) *trustRelay {
 	r := &trustRelay{t: t, pubs: map[string]string{}}
 	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		var in struct {
@@ -57,7 +59,7 @@ func newTrustRelay(t *testing.T) *trustRelay {
 		_ = json.NewEncoder(w).Encode(out)
 	}))
 	t.Cleanup(api.Close)
-	c, err := New(Config{URL: api.URL, HTTP: api.Client(), Credential: strings.Repeat("test", 16), NodeID: "relay", ExpectedGeneration: 1, StatePath: filepath.Join(t.TempDir(), "state")})
+	c, err := New(Config{URL: api.URL, HTTP: api.Client(), Credential: strings.Repeat("test", 16), NodeID: "relay", Trust: trust, ExpectedGeneration: 1, StatePath: filepath.Join(t.TempDir(), "state")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +110,7 @@ func (r *trustRelay) observe() error { return r.client.Observe(r.ctx, r.server, 
 // A signing-key rotation reaches a running relay with its next observation, no restart or re-enrollment:
 // the new key is trusted next to the old one, a withdrawal drops the old one, a malformed document changes nothing.
 func TestObservationAppliesIssuerTrustDocument(t *testing.T) {
-	r := newTrustRelay(t)
+	r := newTrustRelay(t, nil)
 	if err := r.observe(); err != nil || !slices.Equal(r.server.KeyIDs(), []string{"old"}) {
 		t.Fatalf("an observation without a trust document changed the keys: %v %v", r.server.KeyIDs(), err)
 	}
@@ -128,7 +130,7 @@ func TestObservationAppliesIssuerTrustDocument(t *testing.T) {
 
 // A malformed trust document fails closed: the observation errors and the last good key set stays.
 func TestObservationRefusesMalformedIssuerTrustDocument(t *testing.T) {
-	r := newTrustRelay(t)
+	r := newTrustRelay(t, nil)
 	r.serve(r.document("", "good"))
 	if err := r.observe(); err != nil || !slices.Equal(r.server.KeyIDs(), []string{"good"}) {
 		t.Fatalf("setup: %v %v", r.server.KeyIDs(), err)
@@ -174,5 +176,32 @@ func TestObservationRefusesMalformedIssuerTrustDocument(t *testing.T) {
 				t.Fatalf("keys changed to %v", r.server.KeyIDs())
 			}
 		})
+	}
+}
+
+// A rolling rotation behind several control-plane instances can answer new-then-old: the older document
+// must not trust a withdrawn key again.
+func TestObservationNeverRetrustsAWithdrawnKey(t *testing.T) {
+	r := newTrustRelay(t, nil)
+	r.serve(r.document(`["old"]`, "old", "new"))
+	if err := r.observe(); err != nil || !slices.Equal(r.server.KeyIDs(), []string{"new"}) {
+		t.Fatalf("withdrawal not applied: %v %v", r.server.KeyIDs(), err)
+	}
+	r.serve(r.document("", "old", "new"))
+	if err := r.observe(); err != nil || !slices.Equal(r.server.KeyIDs(), []string{"new"}) {
+		t.Fatalf("a stale document re-trusted the withdrawn key: %v %v", r.server.KeyIDs(), err)
+	}
+}
+
+// The startup file's withdrawals count too: the relay was started from a document that already withdrew "old".
+func TestStartupWithdrawalSurvivesAStaleObservation(t *testing.T) {
+	var trust jwks.Trust
+	if _, err := trust.Apply([]byte((&trustRelay{pubs: map[string]string{}}).document(`["old"]`, "old", "new"))); err != nil {
+		t.Fatal(err)
+	}
+	r := newTrustRelay(t, &trust)
+	r.serve(r.document("", "old", "new"))
+	if err := r.observe(); err != nil || !slices.Equal(r.server.KeyIDs(), []string{"new"}) {
+		t.Fatalf("a stale document re-trusted a key the startup file withdrew: %v %v", r.server.KeyIDs(), err)
 	}
 }

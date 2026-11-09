@@ -65,3 +65,44 @@ func TestParseRefusesWhatTheStrictTunnelParserRefused(t *testing.T) {
 		}
 	}
 }
+
+// A withdrawn key id stays withdrawn: an older document served after the withdrawal (a rolling rotation
+// behind several control-plane instances) must not trust it again; a refused document remembers nothing.
+func TestTrustNeverRetrustsAWithdrawnKey(t *testing.T) {
+	oldKey, newKey := key(t, "old"), key(t, "new")
+	var trust Trust
+	if _, err := trust.Apply([]byte(`{"keys":[` + oldKey + `,` + newKey + `],"withdrawn_key_ids":["old"]}`)); err != nil {
+		t.Fatal(err)
+	}
+	keys, err := trust.Apply([]byte(`{"keys":[` + oldKey + `,` + newKey + `]}`))
+	if err != nil || len(keys) != 1 || keys["new"] == nil {
+		t.Fatalf("stale document re-trusted old: %v, %v", keys, err)
+	}
+	if _, err = trust.Apply([]byte(`{"keys":[` + oldKey + `]}`)); err == nil {
+		t.Fatal("a stale document whose only key is withdrawn was accepted")
+	}
+	// A document refused as a whole withdraws nothing.
+	var fresh Trust
+	if _, err = fresh.Apply([]byte(`{"keys":[` + newKey + `],"withdrawn_key_ids":["new"]}`)); err == nil {
+		t.Fatal("all-withdrawn accepted")
+	}
+	if keys, err = fresh.Apply([]byte(`{"keys":[` + newKey + `]}`)); err != nil || keys["new"] == nil {
+		t.Fatalf("a refused document withdrew a key: %v, %v", keys, err)
+	}
+}
+
+func TestTrustBoundsTheWithdrawnSet(t *testing.T) {
+	var trust Trust
+	for i := 0; i < maxWithdrawn/MaxKeys; i++ {
+		ids := make([]string, MaxKeys)
+		for j := range ids {
+			ids[j] = fmt.Sprintf(`"w%d-%d"`, i, j)
+		}
+		if _, err := trust.Apply([]byte(`{"keys":[` + key(t, "k") + `],"withdrawn_key_ids":[` + strings.Join(ids, ",") + `]}`)); err != nil {
+			t.Fatalf("batch %d: %v", i, err)
+		}
+	}
+	if _, err := trust.Apply([]byte(`{"keys":[` + key(t, "k") + `],"withdrawn_key_ids":["one-too-many"]}`)); err == nil {
+		t.Fatal("the withdrawn set grew past its bound")
+	}
+}

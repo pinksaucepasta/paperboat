@@ -101,7 +101,8 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 	if err != nil {
 		return serviceFailure{error: err, definition: "service_build"}
 	}
-	trusted, err := jwks.Parse(raw)
+	trust := &jwks.Trust{}
+	trusted, err := trust.Apply(raw)
 	if err != nil {
 		return err
 	}
@@ -135,7 +136,7 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 	if reporter != nil {
 		controlTrace = reporter.ControlTrace
 	}
-	control, err := nodelifecycle.New(nodelifecycle.Config{URL: *controlURL, Credential: strings.TrimSpace(string(credential)), NodeID: *node, ExpectedGeneration: *generation, StatePath: *nodeState, HTTP: controlHTTP, ControlTrace: controlTrace, ControlFailure: func(ctx context.Context, reference string, err error) {
+	control, err := nodelifecycle.New(nodelifecycle.Config{URL: *controlURL, Credential: strings.TrimSpace(string(credential)), NodeID: *node, Trust: trust, ExpectedGeneration: *generation, StatePath: *nodeState, HTTP: controlHTTP, ControlTrace: controlTrace, ControlFailure: func(ctx context.Context, reference string, err error) {
 		reporter.ObserveFailure(reporting.WithSupportReference(ctx, reference), "control_request", err)
 	}})
 	if err != nil {
