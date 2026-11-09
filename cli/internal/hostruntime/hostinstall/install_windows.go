@@ -1029,6 +1029,8 @@ func waitWindowsLocalDaemonReady(ctx context.Context, ownerSID, stateRoot string
 		}
 		if probeErr != nil {
 			lastErr = probeErr
+		} else {
+			lastErr = fmt.Errorf("the local daemon is not running: no live process is recorded in %s", lockPath)
 		}
 		select {
 		case <-ctx.Done():
