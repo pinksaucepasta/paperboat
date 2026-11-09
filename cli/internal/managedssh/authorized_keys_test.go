@@ -3,12 +3,16 @@
 package managedssh
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func TestReconcileAuthorizedKeysPreservesUnrelatedBytesAndIsIdempotent(t *testing.T) {
@@ -127,4 +131,62 @@ func managedSSHTestHome(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return home
+}
+
+func TestReconcileAuthorizedKeysRestrictsManagedLinesToLoopback(t *testing.T) {
+	home := managedSSHTestHome(t)
+	directory := filepath.Join(home, ".ssh")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, "authorized_keys")
+	own := "command=\"/bin/true\" " + authorizedPublicLine(t) + " own\n"
+	key := authorizedPublicLine(t)
+	// A managed line whose option was edited out is rewritten with it; the user's own line is kept.
+	bare := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(mustParseKey(t, key)))) + " " + managedAuthorizedKeyMarker + fingerprintHex(t, key) + "\n"
+	if err := os.WriteFile(path, []byte(own+bare), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), []string{key})
+	if err != nil || !result.Changed {
+		t.Fatalf("result=%+v error=%v", result, err)
+	}
+	value, _ := os.ReadFile(path)
+	lines := strings.Split(strings.TrimSpace(string(value)), "\n")
+	if len(lines) != 2 || lines[0]+"\n" != own || !strings.HasPrefix(lines[1], `from="127.0.0.1,::1" ssh-ed25519 `) || !strings.HasSuffix(lines[1], managedAuthorizedKeyMarker+fingerprintHex(t, key)) {
+		t.Fatalf("authorized_keys=%q", value)
+	}
+	parsed, _, options, _, err := ssh.ParseAuthorizedKey([]byte(lines[1]))
+	if err != nil || parsed == nil || len(options) != 1 || options[0] != managedAuthorizedKeyFrom {
+		t.Fatalf("managed line options=%q error=%v", options, err)
+	}
+	if replay, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), []string{key}); err != nil || replay.Changed {
+		t.Fatalf("replay=%+v error=%v", replay, err)
+	}
+	// Any other option on a managed line is a conflict, never rewritten silently.
+	widened := strings.Replace(lines[1], `from="127.0.0.1,::1"`, `from="*"`, 1) + "\n"
+	if err := os.WriteFile(path, []byte(widened), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReconcileAuthorizedKeys(home, uint32(os.Getuid()), []string{key}); !errors.Is(err, ErrAuthorizedKeysConflict) {
+		t.Fatalf("widened option error=%v", err)
+	}
+	if after, _ := os.ReadFile(path); string(after) != widened {
+		t.Fatal("conflicting authorized_keys was modified")
+	}
+}
+
+func mustParseKey(t *testing.T, line string) ssh.PublicKey {
+	t.Helper()
+	key, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return key
+}
+
+func fingerprintHex(t *testing.T, line string) string {
+	t.Helper()
+	sum := sha256.Sum256(mustParseKey(t, line).Marshal())
+	return hex.EncodeToString(sum[:])
 }

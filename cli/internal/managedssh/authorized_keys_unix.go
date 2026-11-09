@@ -22,7 +22,11 @@ import (
 
 const (
 	managedAuthorizedKeyMarker = "paperboat-managed-ssh-v1:"
-	maxAuthorizedKeysBytes     = 4 << 20
+	// managedAuthorizedKeyFrom limits every managed key to the loopback connections the host's own
+	// bridge makes (BridgeSSH dials 127.0.0.1 or ::1), so a managed key never opens a session that
+	// bypasses the stream and survives revocation (direct sshd over LAN or tailnet is refused at login).
+	managedAuthorizedKeyFrom = `from="127.0.0.1,::1"`
+	maxAuthorizedKeysBytes   = 4 << 20
 )
 
 var ErrAuthorizedKeysConflict = errors.New("managed SSH authorized_keys reconciliation conflict")
@@ -133,7 +137,7 @@ func canonicalManagedAuthorizedKeys(values []string) ([]string, error) {
 		}
 		seen[fingerprint] = true
 		canonical := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(public)))
-		result = append(result, canonical+" "+managedAuthorizedKeyMarker+hex.EncodeToString(fingerprint[:]))
+		result = append(result, managedAuthorizedKeyFrom+" "+canonical+" "+managedAuthorizedKeyMarker+hex.EncodeToString(fingerprint[:]))
 	}
 	slices.Sort(result)
 	return result, nil
@@ -152,7 +156,8 @@ func replaceManagedAuthorizedKeys(existing []byte, managed []string) ([]byte, er
 		trimmed := bytes.TrimSuffix(line, []byte{'\n'})
 		trimmed = bytes.TrimSuffix(trimmed, []byte{'\r'})
 		public, comment, options, rest, err := ssh.ParseAuthorizedKey(trimmed)
-		if err != nil || public.Type() != ssh.KeyAlgoED25519 || len(options) != 0 || len(strings.TrimSpace(string(rest))) != 0 {
+		// A managed line is ours with the loopback option, or without it (edited out): both are replaced.
+		if err != nil || public.Type() != ssh.KeyAlgoED25519 || len(options) > 1 || len(options) == 1 && options[0] != managedAuthorizedKeyFrom || len(strings.TrimSpace(string(rest))) != 0 {
 			return nil, ErrAuthorizedKeysConflict
 		}
 		fingerprint := sha256.Sum256(public.Marshal())
