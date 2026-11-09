@@ -264,6 +264,24 @@
   scrollbar-color: color-mix(in oklab, var(--term-fg) 25%, transparent) transparent;
 }
 
+/*
+ * The prerendered shell a page shows until its per-request render streams in (WithSession) stays
+ * invisible for 300 ms: when the server answers sooner, which is the usual case, the first thing
+ * on screen is the real page; on a slow connection the shell (its matching skeleton) appears then.
+ */
+.shell-delay {
+  animation: shell-reveal 0s linear 300ms both;
+}
+
+@keyframes shell-reveal {
+  from {
+    visibility: hidden;
+  }
+  to {
+    visibility: visible;
+  }
+}
+
 @keyframes surface-drift {
   to {
     transform: translate(40px, 40px);

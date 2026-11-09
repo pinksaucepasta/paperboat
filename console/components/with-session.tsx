@@ -9,7 +9,7 @@ import { ServerData } from "@/components/server-data"
  * Renders `children` with the visitor's session (user, workspaces, billing) and the page's own first
  * `reads` already in the query cache, so the HTML arrives filled in, and pages that read search
  * params render on the server instead of only after hydration. The static shell shows `children`
- * meanwhile.
+ * meanwhile, hidden for its first 300 ms.
  */
 export function WithSession({
   reads,
@@ -19,7 +19,9 @@ export function WithSession({
   children: React.ReactNode
 }) {
   return (
-    <Suspense fallback={children}>
+    // The shell waits a moment before showing (globals.css .shell-delay); a fast server render
+    // replaces it unseen. The wrapper keeps the frame's flex column.
+    <Suspense fallback={<div className="shell-delay flex min-h-0 flex-1 flex-col">{children}</div>}>
       <Session reads={reads}>{children}</Session>
     </Suspense>
   )
