@@ -437,13 +437,6 @@ func TestOpenAPIFreezesPreviewTunnelV1Endpoints(t *testing.T) {
 	assertPreviewTunnelSecurity(t, previewDomainDelete, "previews:write", true, "DELETE preview domain")
 	assertParameterRefs(t, previewDomainDelete, "#/components/parameters/IdempotencyKey", "#/components/parameters/IfMatch")
 
-	previewDomainVerify := objectValue(t, doc.Paths["/v1/previews/{preview_id}/domains/{domain_id}/verify"]["post"], "POST preview domain verify")
-	assertPreviewTunnelSecurity(t, previewDomainVerify, "previews:write", true, "POST preview domain verify")
-	assertParameterRefs(t, previewDomainVerify, "#/components/parameters/IdempotencyKey", "#/components/parameters/IfMatch")
-	previewDomainInstructions := objectValue(t, doc.Paths["/v1/previews/{preview_id}/domains/{domain_id}/instructions"]["get"], "GET preview domain instructions")
-	assertPreviewTunnelSecurity(t, previewDomainInstructions, "previews:read", false, "GET preview domain instructions")
-	assertResponseSchema(t, previewDomainInstructions, "200", "#/components/schemas/PreviewDNSInstructionsResponse")
-
 	tunnelList := objectValue(t, doc.Paths["/v1/tunnels"]["get"], "GET /v1/tunnels")
 	assertPreviewTunnelSecurity(t, tunnelList, "tunnels:read", false, "GET /v1/tunnels")
 	assertParameterRefs(t, tunnelList, "#/components/parameters/EventCursor", "#/components/parameters/PageLimit")

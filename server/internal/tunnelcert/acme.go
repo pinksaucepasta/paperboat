@@ -326,15 +326,22 @@ func parseACMECertificate(certificatePEM []byte) (*x509.Certificate, error) {
 // up on success, cancellation, authorization failure, and certificate parse
 // failure.
 func (i *ACMEIssuer) IssueDNS01(ctx context.Context, domain Domain) (CertificateBundle, error) {
+	return i.IssueDNS01Names(ctx, domain, []string{domain.Hostname})
+}
+
+// IssueDNS01Names orders one certificate for several names whose DNS-01
+// authorizations share the domain's challenge target, such as a workspace
+// domain and its one-label wildcard.
+func (i *ACMEIssuer) IssueDNS01Names(ctx context.Context, domain Domain, names []string) (CertificateBundle, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return CertificateBundle{}, ErrIssuerUnavailable
 	}
-	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{DNSNames: []string{domain.Hostname}}, key)
+	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{DNSNames: names}, key)
 	if err != nil {
 		return CertificateBundle{}, ErrInvalid
 	}
-	bundle, err := i.issueDNS01CSR(ctx, domain, []string{domain.Hostname}, csr)
+	bundle, err := i.issueDNS01CSR(ctx, domain, names, csr)
 	if err != nil {
 		return CertificateBundle{}, err
 	}

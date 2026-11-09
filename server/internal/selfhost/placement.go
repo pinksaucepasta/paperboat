@@ -156,9 +156,9 @@ func (s *Service) SetPlacement(ctx context.Context, actor, kind, id string, inst
 		if marshalErr != nil {
 			return out, marshalErr
 		}
+		// Ownership comes from the hostname's workspace domain, so a move keeps it verified.
 		_, err = tx.ExecContext(ctx, `UPDATE `+domainTable+` SET dns_target=$2,expected_records=$3::jsonb,
-            ownership_state='pending',conflict_state='clear',quarantine_until=NULL,observed_records='[]'::jsonb,
-            verification_attempts=0,dns_last_checked_at=NULL,dns_next_check_at=now(),dns_ttl_seconds=NULL,last_verified_at=NULL,
+            conflict_state='clear',quarantine_until=NULL,observed_records='[]'::jsonb,
             generation=generation+1,updated_at=now() WHERE id=$1`, domain.id, target, records)
 		if err != nil {
 			return out, err

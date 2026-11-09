@@ -10,6 +10,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspacedomain"
 )
 
 // ErrCertificateRuntimeUnavailable identifies a deployment that enabled the
@@ -48,6 +49,9 @@ type CertificateRuntimeConfig struct {
 	// runtime for deterministic tests and migrations before rollout.
 	PlatformBases       tunnelcert.PlatformCertificateBases
 	PlatformEdgeTargets PlatformEdgeTargetResolver
+
+	// WorkspaceCertificates serves workspace domains' wildcard certificates to the hostnames under them.
+	WorkspaceCertificates tunnelcert.WorkspaceCertificateSource
 }
 
 // CertificateRuntime owns the one server-side certificate worker and its
@@ -60,6 +64,8 @@ type CertificateRuntime struct {
 	// HTTP01 is non-nil only for the staging http-01 challenge; the edge
 	// control service serves its responses in each ingress snapshot.
 	HTTP01 *tunnelcert.HTTP01Responses
+	// WorkspaceDomains checks workspace domains and issues their wildcard certificates.
+	WorkspaceDomains *workspacedomain.Worker
 
 	closeOnce sync.Once
 	closeErr  error
@@ -137,6 +143,7 @@ func NewCertificateRuntime(config CertificateRuntimeConfig) (*CertificateRuntime
 		CAA:                    config.CAA,
 		Distributor:            distributor,
 		Operations:             operations,
+		WorkspaceCertificates:  config.WorkspaceCertificates,
 		MasterKeyReference:     config.MasterKeyReference,
 		IssuerName:             config.IssuerName,
 		OwnerID:                config.OwnerID,

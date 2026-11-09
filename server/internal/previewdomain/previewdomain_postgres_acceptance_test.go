@@ -15,6 +15,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewdomain"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
+	"github.com/pinksaucepasta/paperboat/server/internal/testutil"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspacedomain"
 )
 
 // TestPreviewDomainAtomicLifecycleOnPostgres is opt-in and intentionally uses
@@ -88,8 +90,10 @@ VALUES ($1, $2, $3, 'active')`, account, "workos_"+account, account+"@example.te
 	}
 
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	hostname := "alias-" + suffix + ".example.test"
+	hostname := "alias.s-" + suffix + ".example.test"
 	wildcard := "*.apps-" + suffix + ".example.test"
+	testutil.VerifiedWorkspaceDomain(t, database.SQL(), accountID, "", "s-"+suffix+".example.test")
+	testutil.VerifiedWorkspaceDomain(t, database.SQL(), accountID, "", "apps-"+suffix+".example.test")
 	created, err := store.CreatePreviewLeaseV1(ctx, previewtunnelstore.CreatePreviewLeaseV1Input{
 		OperationID: "op_preview_domain_create_" + suffix, LeaseID: "prv_preview_domain_" + suffix,
 		AuditEventID: "aud_preview_domain_create_" + suffix, AccountID: accountID,
@@ -146,7 +150,7 @@ VALUES ($1, $2, $3, 'active')`, account, "workos_"+account, account+"@example.te
 	}
 	assertWithdrawnPreviewDomains(t, database, ctx, created.Lease.ID, accountID, now.Add(2*time.Minute))
 
-	// A different account cannot reclaim the hostname during quarantine. The
+	// A different account cannot use the hostname at all: it is under another workspace's domain. The
 	// failed create is transactional, so it leaves no partial lease or alias.
 	_, err = store.CreatePreviewLeaseV1(ctx, previewtunnelstore.CreatePreviewLeaseV1Input{
 		OperationID: "op_preview_domain_other_" + suffix, LeaseID: "prv_preview_domain_other_" + suffix,
@@ -159,8 +163,8 @@ VALUES ($1, $2, $3, 'active')`, account, "workos_"+account, account+"@example.te
 		SourceMachineID: "machine_other_" + suffix, Now: now.Add(3 * time.Minute),
 		Domains: []previewtunnelstore.PreviewDomainCreateRequest{{Hostname: hostname, Provider: "generic", CertificateStrategy: "managed"}},
 	})
-	if !errors.Is(err, previewdomain.ErrDomainConflict) {
-		t.Fatalf("cross-account quarantined hostname error = %v, want ErrDomainConflict", err)
+	if !errors.Is(err, workspacedomain.ErrNotCovered) {
+		t.Fatalf("cross-account hostname error = %v, want ErrNotCovered", err)
 	}
 
 	// The original account may reuse a withdrawn hostname after the atomic

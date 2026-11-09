@@ -51,8 +51,6 @@ type fakeResourceRepository struct {
 	createDomainErr    error
 	deleteDomainResult ResourceMutationRecord
 	deleteDomainErr    error
-	verifyDomainResult ResourceMutationRecord
-	verifyDomainErr    error
 
 	tunnelLogs     []dbsqlc.ListTunnelLogsV1Row
 	tunnelLogsErr  error
@@ -121,13 +119,6 @@ func (f *fakeResourceRepository) DeleteResourceDomain(context.Context, DomainRec
 		f.deleteDomainResult = ResourceMutationRecord{Domain: resourceDomain("dom_1", "foo.example.test", "revoked", "quarantined"), Operation: resourceOperation("op_1", "dom_1", "draining", "running", "changed"), Changed: true}
 	}
 	return f.deleteDomainResult, f.deleteDomainErr
-}
-
-func (f *fakeResourceRepository) BeginResourceDomainVerification(context.Context, DomainRecord) (ResourceMutationRecord, error) {
-	if f.verifyDomainResult.Domain.ID == "" {
-		f.verifyDomainResult = ResourceMutationRecord{Domain: resourceDomain("dom_1", "foo.example.test", "pending", "clear"), Operation: resourceOperation("op_1", "dom_1", "waiting_dns", "running", "changed"), Changed: true}
-	}
-	return f.verifyDomainResult, f.verifyDomainErr
 }
 
 func (f *fakeResourceRepository) ListResourceTunnelLogs(_ context.Context, accountID, scopeID string, after int64, limit int) ([]dbsqlc.ListTunnelLogsV1Row, error) {
@@ -418,30 +409,6 @@ func TestResourceServiceListCursorsAreScopedAndTailBounded(t *testing.T) {
 
 }
 
-func TestResourceServiceDomainInstructionsUsePersistedStateAndSupportApex(t *testing.T) {
-	repo := &fakeResourceRepository{domain: resourceDomain("dom_1", "foo.example.co.uk", "verified", "clear"), route: resourceRoute("rte_1", "http", "managed")}
-	service := resourceServiceForTest(t, repo)
-	instructions, err := service.DomainInstructions(context.Background(), testRequest(false), "tun_1", "dom_1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if instructions.VerificationState != "verified" || instructions.Provider != "generic" || len(instructions.Records) != 1 || instructions.Records[0].Type != "CNAME" {
-		t.Fatalf("domain instructions = %+v", instructions)
-	}
-	for _, hostname := range []string{"example.com", "example.co.uk"} {
-		repo.domain = resourceDomain("dom_1", hostname, "pending", "clear")
-		instructions, err = service.DomainInstructions(context.Background(), testRequest(false), "tun_1", "dom_1")
-		if err != nil || instructions.Records[0].Type != "ANAME" {
-			t.Fatalf("apex %q instructions = %+v, %v", hostname, instructions, err)
-		}
-	}
-	repo.domain = resourceDomain("dom_1", "*.example.co.uk", "pending", "clear")
-	instructions, err = service.DomainInstructions(context.Background(), testRequest(false), "tun_1", "dom_1")
-	if err != nil || instructions.VerificationState != "waiting_dns" {
-		t.Fatalf("wildcard instructions = %+v, %v", instructions, err)
-	}
-}
-
 func TestResourceServicePublicTCPDomainUsesDNSWithoutHTTPTLS(t *testing.T) {
 	route := resourceRoute("rte_1", "tcp", "managed")
 	route.PublicTcpListenerID = sql.NullString{String: "listener_1", Valid: true}
@@ -462,18 +429,6 @@ func TestResourceServicePublicTCPDomainUsesDNSWithoutHTTPTLS(t *testing.T) {
 		t.Fatalf("TCP certificate strategy = %q", repo.createDomain.CertificateStrategy)
 	}
 
-	instructions, err := service.DomainInstructions(context.Background(), testRequest(false), "tun_1", "dom_1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if instructions.PublicTCPPort != 25432 || instructions.CertificateStrategy != "none" || len(instructions.Records) != 1 || strings.Contains(instructions.Note, "_acme-challenge") {
-		t.Fatalf("TCP instructions = %+v", instructions)
-	}
-	for _, required := range []string{"db.example.test:25432", "passes application TLS through unchanged", "does not route by TLS SNI"} {
-		if !strings.Contains(instructions.Note, required) {
-			t.Fatalf("TCP instructions omit %q: %q", required, instructions.Note)
-		}
-	}
 	if _, err := service.CreateDomain(context.Background(), testRequest(false), "tun_1", DomainCreateRequest{
 		Hostname: "db2.example.test", RouteID: "rte_1", CertificateStrategy: "managed", Mutation: ResourceMutationInput{IdempotencyKey: "tcp-domain-managed", RequestHash: testHash()},
 	}); !errors.Is(err, ErrInvalidInput) {

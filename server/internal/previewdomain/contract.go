@@ -46,7 +46,6 @@ var (
 // identifiers and never for a customer hostname or credential.
 type Config struct {
 	CursorKey       []byte
-	ChallengeZone   string
 	Now             func() time.Time
 	NewID           func(prefix string) (string, error)
 	LeaseOwnerGrace time.Duration
@@ -132,20 +131,6 @@ type DNSRecord struct {
 	TTL   int    `json:"ttl"`
 }
 
-type DNSInstructions struct {
-	Schema              string      `json:"schema"`
-	Kind                string      `json:"kind"`
-	TargetKind          string      `json:"target_kind"`
-	PreviewID           string      `json:"preview_id"`
-	DomainID            string      `json:"domain_id"`
-	Hostname            string      `json:"hostname"`
-	Provider            string      `json:"provider"`
-	Records             []DNSRecord `json:"records"`
-	CertificateStrategy string      `json:"certificate_strategy"`
-	VerificationState   string      `json:"verification_state"`
-	Note                string      `json:"note"`
-}
-
 // ReadyAlias is intentionally smaller than DomainView and is used by edge
 // admission publication.  It is returned only when the lease, DNS ownership,
 // certificate, and certificate reference are all current.
@@ -168,15 +153,6 @@ type ReadyAliasRecord struct {
 	Domain                dbsqlc.PreviewDomain
 	CertificateReference  string
 	CertificateGeneration int64
-}
-
-type DNSObservation struct {
-	Records     []string
-	TTL         time.Duration
-	Verified    bool
-	FailureCode string
-	Now         time.Time
-	NextCheck   time.Time
 }
 
 type CertificateObservation struct {
@@ -209,9 +185,7 @@ type PreviewDomainRepository interface {
 	Get(context.Context, string, string, string) (dbsqlc.PreviewDomain, error)
 	Lease(context.Context, string, string) (LeaseContext, error)
 	Create(context.Context, CreateRecord) (RepositoryMutation, error)
-	Verify(context.Context, MutationRecord) (RepositoryMutation, error)
 	Delete(context.Context, MutationRecord) (RepositoryMutation, error)
-	ApplyDNSObservation(context.Context, DNSObservationRecord) (RepositoryMutation, error)
 	ApplyCertificateObservation(context.Context, CertificateObservationRecord) (RepositoryMutation, error)
 	ReadyAliases(context.Context, string, string, time.Time) ([]ReadyAliasRecord, error)
 }
@@ -260,16 +234,6 @@ type MutationRecord struct {
 	CorrelationID      string
 	SourceMachineID    string
 	Now                time.Time
-}
-
-type DNSObservationRecord struct {
-	MutationRecord
-	ObservedRecords []byte
-	OwnershipState  string
-	ConflictState   string
-	NextCheckAt     time.Time
-	TTLSeconds      *int32
-	Verified        bool
 }
 
 type CertificateObservationRecord struct {
@@ -345,15 +309,9 @@ func ValidateCertificateStrategy(raw, matchType string) (string, error) {
 	if strategy == "" {
 		strategy = "managed"
 	}
+	// A preview hostname serves its workspace domain's wildcard certificate.
 	switch strategy {
-	case "managed", "provided_reference":
-		return strategy, nil
-	case "on_demand_leaf":
-		if matchType != "one_label_wildcard" {
-			return "", fmt.Errorf("%w: on_demand_leaf requires one-label wildcard", ErrInvalidInput)
-		}
-		return strategy, nil
-	case "none":
+	case "managed":
 		return strategy, nil
 	default:
 		return "", fmt.Errorf("%w: unsupported certificate strategy", ErrInvalidInput)
@@ -388,13 +346,6 @@ func DNSRecordType(hostname, provider string) string {
 	return "CNAME"
 }
 
-func DNSInstructionNote(hostname, provider string) string {
-	if DNSRecordType(hostname, provider) == "CNAME" {
-		return "Add the shown CNAME. Paperboat waits for the exact record before TLS becomes ready."
-	}
-	return "Create the shown apex alias using your provider's supported ANAME, ALIAS, or CNAME-flattening record. Paperboat waits for DNS before TLS becomes ready."
-}
-
 func StableTargetHostname(endpoint string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(endpoint))
 	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
@@ -405,20 +356,6 @@ func StableTargetHostname(endpoint string) (string, error) {
 		return "", fmt.Errorf("%w: preview endpoint hostname is invalid", ErrInvalidInput)
 	}
 	return host, nil
-}
-
-func delegatedChallengeTarget(domainID, accountID, previewID, challengeReference, zone string) (string, error) {
-	zoneHost, wildcard, err := normalizeHostname(zone)
-	if err != nil || wildcard {
-		return "", ErrDNSUnavailable
-	}
-	for _, value := range []string{domainID, accountID, previewID, challengeReference} {
-		if strings.TrimSpace(value) == "" || len(value) > 512 || strings.ContainsAny(value, "\r\n\x00") {
-			return "", ErrDNSUnavailable
-		}
-	}
-	digest := sha256.Sum256([]byte(strings.Join([]string{domainID, accountID, TargetKind, previewID, challengeReference}, "\x00")))
-	return "pb-" + fmt.Sprintf("%x", digest[:16]) + "." + zoneHost, nil
 }
 
 func DomainViewFromRow(row dbsqlc.PreviewDomain) DomainView {

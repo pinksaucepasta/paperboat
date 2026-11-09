@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/domaininventory"
 	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspacedomain"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/accountdeletion"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountprefs"
@@ -137,7 +137,7 @@ type Options struct {
 	PreviewDomains           previewdomain.API
 	Tunnels                  tunnelv1.API
 	TunnelResources          tunnelv1.ResourceAPI
-	Domains                  *domaininventory.Service
+	Domains                  *workspacedomain.Service
 	PreviewLogs              tunnelv1.PreviewLogAPI
 	RuntimeCarrierAttachment http.Handler
 	// PrivateAccessAuthorize and PrivateAccessGrant are edge-only handlers.
@@ -240,8 +240,6 @@ func NewRouter(opts Options) http.Handler {
 				mux.Handle("GET /v1/previews/{preview_id}/domains", previewRead(PreviewDomainList(opts.PreviewDomains)))
 				mux.Handle("GET /v1/previews/{preview_id}/domains/{domain_id}", previewRead(PreviewDomainGet(opts.PreviewDomains)))
 				mux.Handle("DELETE /v1/previews/{preview_id}/domains/{domain_id}", previewWrite(PreviewDomainDelete(opts.PreviewDomains)))
-				mux.Handle("POST /v1/previews/{preview_id}/domains/{domain_id}/verify", previewWrite(PreviewDomainVerify(opts.PreviewDomains)))
-				mux.Handle("GET /v1/previews/{preview_id}/domains/{domain_id}/instructions", previewRead(PreviewDomainInstructions(opts.PreviewDomains)))
 			}
 		}
 		if opts.PreviewLeases != nil && opts.RuntimeIdentity != nil {
@@ -273,8 +271,18 @@ func NewRouter(opts Options) http.Handler {
 			mux.Handle("POST /v1/tunnels", tunnelCreateAuth(opts.Auth, opts.DeviceAuth, tunnelCreate(opts.Tunnels, opts.Enrollment)))
 			mux.Handle("GET /v1/tunnels", tunnelRead(requireWorkspaceSelection(opts.Workspaces, tunnelList(opts.Tunnels))))
 			if opts.Domains != nil {
-				// The workspace's tunnel and live preview domains in one list: both read scopes.
-				mux.Handle("GET /v1/domains", tunnelRead(requireScope("previews:read", requireWorkspaceSelection(opts.Workspaces, domainInventoryList(opts.Domains)))))
+				// Workspace domains: tunnel and preview hostnames live under them, so reads need both read scopes.
+				domainRead := func(action string) http.Handler {
+					return tunnelRead(requireScope("previews:read", requireWorkspaceSelection(opts.Workspaces, workspaceDomainHandler(opts.Domains, action))))
+				}
+				domainWrite := func(action string) http.Handler {
+					return tunnelWrite(requireWorkspaceSelection(opts.Workspaces, workspaceDomainHandler(opts.Domains, action)))
+				}
+				mux.Handle("GET /v1/domains", domainRead("list"))
+				mux.Handle("POST /v1/domains", domainWrite("add"))
+				mux.Handle("GET /v1/domains/{domain_id}", domainRead("get"))
+				mux.Handle("POST /v1/domains/{domain_id}/check", domainWrite("check"))
+				mux.Handle("DELETE /v1/domains/{domain_id}", domainWrite("remove"))
 			}
 			mux.Handle("GET /v1/tunnels/{tunnel_id}", tunnelRead(tunnelGet(opts.Tunnels)))
 			mux.Handle("PATCH /v1/tunnels/{tunnel_id}", tunnelWrite(tunnelPatch(opts.Tunnels)))
@@ -293,8 +301,6 @@ func NewRouter(opts Options) http.Handler {
 				mux.Handle("GET /v1/tunnels/{tunnel_id}/domains", tunnelRead(tunnelResourceDomainList(opts.TunnelResources)))
 				mux.Handle("GET /v1/tunnels/{tunnel_id}/domains/{domain_id}", tunnelRead(tunnelResourceDomainGet(opts.TunnelResources)))
 				mux.Handle("DELETE /v1/tunnels/{tunnel_id}/domains/{domain_id}", tunnelWrite(tunnelResourceDomainDelete(opts.TunnelResources)))
-				mux.Handle("POST /v1/tunnels/{tunnel_id}/domains/{domain_id}/verify", tunnelWrite(tunnelResourceDomainVerify(opts.TunnelResources)))
-				mux.Handle("GET /v1/tunnels/{tunnel_id}/domains/{domain_id}/instructions", tunnelRead(tunnelResourceDomainInstructions(opts.TunnelResources)))
 				mux.Handle("GET /v1/tunnels/{tunnel_id}/logs", tunnelRead(tunnelResourceTunnelLogs(opts.TunnelResources)))
 			}
 		}

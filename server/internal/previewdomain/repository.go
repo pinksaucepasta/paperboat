@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
 	"github.com/pinksaucepasta/paperboat/server/internal/publicationdns"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspacedomain"
 )
 
 type SQLRepository struct {
@@ -162,19 +163,24 @@ func (r *SQLRepository) Create(ctx context.Context, input CreateRecord) (Reposit
 		if err != nil {
 			return err
 		}
+		workspaceDomainID, err := coveringWorkspaceDomain(ctx, tx, input.AccountID, input.PreviewID, input.Hostname)
+		if err != nil {
+			return err
+		}
 		domain, err := q.CreatePreviewDomainV1(ctx, dbsqlc.CreatePreviewDomainV1Params{
 			ID: input.DomainID, AccountID: input.AccountID, PreviewID: input.PreviewID, PreviewGeneration: input.PreviewGeneration,
 			Hostname: input.Hostname, MatchType: input.MatchType, OwnershipChallengeReference: input.ChallengeReference,
 			DnsTarget: input.DNSTarget, DnsProvider: input.DNSProvider, ExpectedRecords: input.ExpectedRecords, Now: input.Now.UTC(), CertificateStrategy: input.CertificateStrategy,
+			WorkspaceDomainID: workspaceDomainID,
 		})
 		if err != nil {
 			return mapDatabaseError(err)
 		}
-		op, err = advanceOperation(ctx, q, op.ID, domain.ID, "waiting_for_dns", 35, input.Now)
+		op, err = advanceOperation(ctx, q, op.ID, domain.ID, "issuing_certificate", 60, input.Now)
 		if err != nil {
 			return err
 		}
-		if err := recordAudit(ctx, q, input.AuditEventID, input.AccountID, input.ActorID, input.ActorType, "preview.domain.created", domain.ID, input.IdempotencyKey, input.RequestID, input.CorrelationID, input.SourceMachineID, input.Now, map[string]any{"hostname": input.Hostname, "state": "waiting_dns"}); err != nil {
+		if err := recordAudit(ctx, q, input.AuditEventID, input.AccountID, input.ActorID, input.ActorType, "preview.domain.created", domain.ID, input.IdempotencyKey, input.RequestID, input.CorrelationID, input.SourceMachineID, input.Now, map[string]any{"hostname": input.Hostname, "workspace_domain_id": workspaceDomainID.String}); err != nil {
 			return err
 		}
 		result = RepositoryMutation{Domain: domain, Operation: op, Changed: true}
@@ -183,15 +189,7 @@ func (r *SQLRepository) Create(ctx context.Context, input CreateRecord) (Reposit
 	return result, translate(err)
 }
 
-func (r *SQLRepository) Verify(ctx context.Context, input MutationRecord) (RepositoryMutation, error) {
-	return r.mutate(ctx, input, true)
-}
-
 func (r *SQLRepository) Delete(ctx context.Context, input MutationRecord) (RepositoryMutation, error) {
-	return r.mutate(ctx, input, false)
-}
-
-func (r *SQLRepository) mutate(ctx context.Context, input MutationRecord, verify bool) (RepositoryMutation, error) {
 	if err := validateMutationRecord(input); err != nil {
 		return RepositoryMutation{}, err
 	}
@@ -208,11 +206,7 @@ func (r *SQLRepository) mutate(ctx context.Context, input MutationRecord, verify
 		if err := requireActiveLease(lease, input.Now); err != nil {
 			return err
 		}
-		opType := "preview.domain.delete"
-		if verify {
-			opType = "preview.domain.verify"
-		}
-		op, replayed, err := beginOperation(ctx, q, operationRecord{ID: input.OperationID, AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey, RequestHash: input.RequestHash, OperationType: opType, ResourceID: input.DomainID, CorrelationID: input.CorrelationID})
+		op, replayed, err := beginOperation(ctx, q, operationRecord{ID: input.OperationID, AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey, RequestHash: input.RequestHash, OperationType: "preview.domain.delete", ResourceID: input.DomainID, CorrelationID: input.CorrelationID})
 		if err != nil {
 			return err
 		}
@@ -236,82 +230,21 @@ func (r *SQLRepository) mutate(ctx context.Context, input MutationRecord, verify
 		if current.Generation != input.ExpectedGeneration {
 			return ErrGenerationConflict
 		}
-		var targets []string
-		var records []byte
-		if verify {
-			targets, err = publicationdns.ResolveTargetsTx(ctx, tx, "preview", input.PreviewID, lease.Endpoint)
-			if err != nil {
-				return err
-			}
-			records, err = json.Marshal(publicationdns.Records(targets, current.Hostname, current.DnsProvider))
-			if err != nil {
-				return err
-			}
-		}
-		if verify {
-			current, err = q.BeginPreviewDomainVerificationV1(ctx, dbsqlc.BeginPreviewDomainVerificationV1Params{Now: input.Now.UTC(), DomainID: input.DomainID, AccountID: input.AccountID, PreviewID: input.PreviewID, ExpectedGeneration: input.ExpectedGeneration})
-		} else {
-			current, err = q.DeletePreviewDomainV1(ctx, dbsqlc.DeletePreviewDomainV1Params{QuarantineUntil: sql.NullTime{Time: input.Now.UTC().Add(Quarantine), Valid: true}, Now: sql.NullTime{Time: input.Now.UTC(), Valid: true}, DomainID: input.DomainID, AccountID: input.AccountID, PreviewID: input.PreviewID, ExpectedGeneration: input.ExpectedGeneration})
-		}
+		current, err = q.DeletePreviewDomainV1(ctx, dbsqlc.DeletePreviewDomainV1Params{QuarantineUntil: sql.NullTime{Time: input.Now.UTC().Add(Quarantine), Valid: true}, Now: sql.NullTime{Time: input.Now.UTC(), Valid: true}, DomainID: input.DomainID, AccountID: input.AccountID, PreviewID: input.PreviewID, ExpectedGeneration: input.ExpectedGeneration})
 		if isSolePreviewDomainError(err, pgx.ErrNoRows) {
 			return ErrGenerationConflict
 		}
 		if err != nil {
 			return mapDatabaseError(err)
 		}
-		if verify {
-			if err = tx.QueryRow(ctx, `UPDATE paperboat.preview_domains SET ownership_state=CASE WHEN expected_records<>$3::jsonb THEN 'pending' ELSE ownership_state END,dns_target=$2,expected_records=$3::jsonb,observed_records='[]'::jsonb,dns_ttl_seconds=NULL,last_verified_at=NULL WHERE id=$1 AND generation=$4 RETURNING ownership_state`, current.ID, targets[0], records, current.Generation).Scan(&current.OwnershipState); err != nil {
-				return err
-			}
-			current.DnsTarget = targets[0]
-			current.ExpectedRecords = records
-			current.ObservedRecords = []byte(`[]`)
-			current.DnsTtlSeconds = sql.NullInt32{}
-			current.LastVerifiedAt = sql.NullTime{}
-		}
-		phase, progress, event := "waiting_for_dns", int16(35), "preview.domain.verification_requested"
-		if !verify {
-			phase, progress, event = "ready", 100, "preview.domain.deleted"
-		}
-		if progress == 100 {
-			op, err = completeOperation(ctx, q, op.ID, current.ID, phase, "changed", input.Now)
-		} else {
-			op, err = advanceOperation(ctx, q, op.ID, current.ID, phase, progress, input.Now)
-		}
+		op, err = completeOperation(ctx, q, op.ID, current.ID, "ready", "changed", input.Now)
 		if err != nil {
 			return err
 		}
-		if err := recordAudit(ctx, q, input.AuditEventID, input.AccountID, input.ActorID, input.ActorType, event, current.ID, input.IdempotencyKey, input.RequestID, input.CorrelationID, input.SourceMachineID, input.Now, map[string]any{"hostname": current.Hostname, "state": wireState(current)}); err != nil {
+		if err := recordAudit(ctx, q, input.AuditEventID, input.AccountID, input.ActorID, input.ActorType, "preview.domain.deleted", current.ID, input.IdempotencyKey, input.RequestID, input.CorrelationID, input.SourceMachineID, input.Now, map[string]any{"hostname": current.Hostname, "state": wireState(current)}); err != nil {
 			return err
 		}
 		result = RepositoryMutation{Domain: current, Operation: op, Changed: true}
-		return nil
-	})
-	return result, translate(err)
-}
-
-func (r *SQLRepository) ApplyDNSObservation(ctx context.Context, input DNSObservationRecord) (RepositoryMutation, error) {
-	if err := validateMutationRecord(input.MutationRecord); err != nil {
-		return RepositoryMutation{}, err
-	}
-	if input.NextCheckAt.IsZero() || input.Now.IsZero() || input.OwnershipState == "" || input.ConflictState == "" || len(input.ObservedRecords) == 0 {
-		return RepositoryMutation{}, ErrInvalidInput
-	}
-	var result RepositoryMutation
-	err := r.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		domain, err := tx.Queries().ApplyPreviewDomainDNSObservationV1(ctx, dbsqlc.ApplyPreviewDomainDNSObservationV1Params{
-			ObservedRecords: input.ObservedRecords, OwnershipState: input.OwnershipState, ConflictState: input.ConflictState,
-			Now: sql.NullTime{Time: input.Now.UTC(), Valid: true}, NextCheckAt: input.NextCheckAt.UTC(),
-			TtlSeconds: nullableSQLInt32(input.TTLSeconds), ObservationVerified: input.Verified, DomainID: input.DomainID,
-			AccountID: input.AccountID, PreviewID: input.PreviewID, ExpectedGeneration: input.ExpectedGeneration,
-		})
-		if err != nil {
-			if isSolePreviewDomainError(err, pgx.ErrNoRows) {
-				return ErrGenerationConflict
-			}
-			return translate(err)
-		}
-		result = RepositoryMutation{Domain: domain, Changed: true}
 		return nil
 	})
 	return result, translate(err)
@@ -403,6 +336,7 @@ func (r *SQLRepository) CreateForPreviewTx(ctx context.Context, tx *db.Tx, input
 	type candidate struct {
 		id, hostname, matchType, challenge, provider, strategy string
 		expected                                               []byte
+		workspaceDomainID                                      sql.NullString
 	}
 	candidates := make([]candidate, 0, len(input.Domains))
 	seen := make(map[string]struct{}, len(input.Domains))
@@ -435,17 +369,35 @@ func (r *SQLRepository) CreateForPreviewTx(ctx context.Context, tx *db.Tx, input
 		if marshalErr != nil {
 			return nil, marshalErr
 		}
-		candidates = append(candidates, candidate{id: domainID, hostname: hostname, matchType: matchType, challenge: "dns-challenge://" + challengeID, provider: provider, strategy: strategy, expected: expected})
+		workspaceDomainID, coverErr := coveringWorkspaceDomain(ctx, tx, input.AccountID, input.PreviewID, hostname)
+		if coverErr != nil {
+			return nil, coverErr
+		}
+		candidates = append(candidates, candidate{id: domainID, hostname: hostname, matchType: matchType, challenge: "dns-challenge://" + challengeID, provider: provider, strategy: strategy, expected: expected, workspaceDomainID: workspaceDomainID})
 	}
 	rows := make([]dbsqlc.PreviewDomain, 0, len(candidates))
 	for _, candidate := range candidates {
-		row, createErr := tx.Queries().CreatePreviewDomainV1(ctx, dbsqlc.CreatePreviewDomainV1Params{ID: candidate.id, AccountID: input.AccountID, PreviewID: input.PreviewID, PreviewGeneration: input.PreviewGeneration, Hostname: candidate.hostname, MatchType: candidate.matchType, OwnershipChallengeReference: candidate.challenge, DnsTarget: target, DnsProvider: candidate.provider, ExpectedRecords: candidate.expected, Now: input.Now.UTC(), CertificateStrategy: candidate.strategy})
+		row, createErr := tx.Queries().CreatePreviewDomainV1(ctx, dbsqlc.CreatePreviewDomainV1Params{ID: candidate.id, AccountID: input.AccountID, PreviewID: input.PreviewID, PreviewGeneration: input.PreviewGeneration, Hostname: candidate.hostname, MatchType: candidate.matchType, OwnershipChallengeReference: candidate.challenge, DnsTarget: target, DnsProvider: candidate.provider, ExpectedRecords: candidate.expected, Now: input.Now.UTC(), CertificateStrategy: candidate.strategy, WorkspaceDomainID: candidate.workspaceDomainID})
 		if createErr != nil {
 			return nil, mapDatabaseError(createErr)
 		}
 		rows = append(rows, row)
 	}
 	return rows, nil
+}
+
+// coveringWorkspaceDomain is the verified domain of the preview's workspace that hostname lives under: the
+// preview reuses its verification and certificate instead of a DNS step of its own.
+func coveringWorkspaceDomain(ctx context.Context, tx *db.Tx, accountID, previewID, hostname string) (sql.NullString, error) {
+	var team sql.NullString
+	if err := tx.QueryRow(ctx, `SELECT owner_team_id FROM paperboat.preview_leases WHERE id=$1 AND account_id=$2`, previewID, accountID).Scan(&team); err != nil {
+		return sql.NullString{}, translate(err)
+	}
+	domain, err := workspacedomain.Covering(ctx, tx, accountID, team, hostname)
+	if err != nil {
+		return sql.NullString{}, err
+	}
+	return sql.NullString{String: domain.ID, Valid: true}, nil
 }
 
 func lockLease(ctx context.Context, tx *db.Tx, accountID, previewID string) (LeaseContext, error) {

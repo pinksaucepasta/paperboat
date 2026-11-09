@@ -20,6 +20,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
 	"github.com/pinksaucepasta/paperboat/server/internal/publicationdns"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspacedomain"
 )
 
 func (r *SQLRepository) ListResourceRoutes(ctx context.Context, accountID, tunnelID string, after *ListPosition, limit int) ([]dbsqlc.TunnelRoute, error) {
@@ -812,8 +813,14 @@ func (r *SQLRepository) CreateResourceDomain(ctx context.Context, input DomainRe
 			}
 			return nil
 		}
+		// The hostname lives under a verified domain of the tunnel's workspace and reuses its verification
+		// and certificate: no DNS step of its own.
+		workspaceDomain, err := workspacedomain.Covering(ctx, tx, input.AccountID, tunnel.OwnerTeamID, input.Hostname)
+		if err != nil {
+			return err
+		}
 		if existing, lookupErr := q.GetTunnelDomainByHostnameV1(ctx, input.Hostname); lookupErr == nil {
-			if err := domainClaimError(existing, input.Now); err != nil {
+			if err := domainClaimError(existing, workspaceDomain.ID, input.Now); err != nil {
 				return err
 			}
 		} else if !errors.Is(lookupErr, pgx.ErrNoRows) {
@@ -842,11 +849,16 @@ func (r *SQLRepository) CreateResourceDomain(ctx context.Context, input DomainRe
 		}
 		domain, err := q.CreateTunnelDomainV1(ctx, dbsqlc.CreateTunnelDomainV1Params{ID: input.DomainID, AccountID: input.AccountID, TunnelID: input.TunnelID, RouteID: input.RouteID,
 			Hostname: input.Hostname, MatchType: input.MatchType, OwnershipChallengeReference: input.ChallengeReference, DnsTarget: input.DNSTarget,
-			ObservedRecords: []byte("[]"), CertificateStrategy: input.CertificateStrategy, DnsProvider: input.DNSProvider, ExpectedRecords: input.ExpectedRecords, Now: input.Now})
+			ObservedRecords: []byte("[]"), CertificateStrategy: input.CertificateStrategy, DnsProvider: input.DNSProvider, ExpectedRecords: input.ExpectedRecords, Now: input.Now,
+			WorkspaceDomainID: sql.NullString{String: workspaceDomain.ID, Valid: true}})
 		if err != nil {
 			return translate(err)
 		}
-		op, err = advanceResourceOperation(ctx, q, op.ID, domain.ID, "waiting_for_dns", 35, input.Now)
+		if domain.CertificateStrategy == "none" {
+			op, err = completeResourceOperation(ctx, q, op.ID, domain.ID, "ready", "changed", input.Now)
+		} else {
+			op, err = advanceResourceOperation(ctx, q, op.ID, domain.ID, "issuing_certificate", 60, input.Now)
+		}
 		if err != nil {
 			return err
 		}
@@ -854,7 +866,7 @@ func (r *SQLRepository) CreateResourceDomain(ctx context.Context, input DomainRe
 			ActorID: auditActorID(input.ActorID, input.AuditActorID), ActorType: input.ActorType, EventType: "domain.created", ParentEventType: "tunnel.domain_created",
 			ResourceType: "domain_binding", ResourceID: domain.ID, TunnelID: input.TunnelID, OperationID: op.ID, IdempotencyKey: input.IdempotencyKey,
 			RequestID: input.RequestID, CorrelationID: input.CorrelationID, SourceMachineID: input.SourceMachineID, Now: input.Now,
-			Metadata: map[string]any{"hostname": input.Hostname, "state": "waiting_dns"}, Message: "domain binding persisted; DNS ownership proof pending"}); err != nil {
+			Metadata: map[string]any{"hostname": input.Hostname, "workspace_domain_id": workspaceDomain.ID}, Message: "domain binding persisted under its verified workspace domain"}); err != nil {
 			return err
 		}
 		result = ResourceMutationRecord{Domain: domain, Operation: op, Changed: true}
@@ -865,10 +877,13 @@ func (r *SQLRepository) CreateResourceDomain(ctx context.Context, input DomainRe
 
 // domainClaimError says why a hostname cannot be bound: another binding holds it, or it was removed
 // recently and is quarantined. Nil when it can be claimed.
-func domainClaimError(existing dbsqlc.TunnelDomain, now time.Time) error {
+// A hostname removed under the same workspace domain is free again at once: only its workspace can bind it.
+func domainClaimError(existing dbsqlc.TunnelDomain, workspaceDomainID string, now time.Time) error {
 	switch {
 	case !existing.DeletedAt.Valid:
 		return ErrDomainConflict
+	case existing.WorkspaceDomainID.String == workspaceDomainID:
+		return nil
 	case existing.QuarantineUntil.Valid && existing.QuarantineUntil.Time.After(now):
 		return fmt.Errorf("%w: %w", ErrDomainConflict, ErrDomainQuarantined)
 	}
@@ -944,89 +959,6 @@ func (r *SQLRepository) DeleteResourceDomain(ctx context.Context, input DomainRe
 			ResourceType: "domain_binding", ResourceID: current.ID, TunnelID: input.TunnelID, OperationID: op.ID, IdempotencyKey: input.IdempotencyKey,
 			RequestID: input.RequestID, CorrelationID: input.CorrelationID, SourceMachineID: input.SourceMachineID, Now: input.Now,
 			Metadata: map[string]any{"state": "quarantined"}, Message: "domain binding and certificates revoked; user DNS preserved"}); err != nil {
-			return err
-		}
-		result = ResourceMutationRecord{Domain: current, Operation: op, Changed: true}
-		return nil
-	})
-	return result, translate(err)
-}
-
-func (r *SQLRepository) BeginResourceDomainVerification(ctx context.Context, input DomainRecord) (ResourceMutationRecord, error) {
-	if err := validateDomainRecord(input, true); err != nil {
-		return ResourceMutationRecord{}, err
-	}
-	var result ResourceMutationRecord
-	err := r.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		if err := authorizeTunnelManagementTx(ctx, tx); err != nil {
-			return err
-		}
-		q := tx.Queries()
-		tunnel, err := q.GetTunnelForResourceV1(ctx, dbsqlc.GetTunnelForResourceV1Params{TunnelID: input.TunnelID, AccountID: input.AccountID})
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrNotFound
-		}
-		if err != nil {
-			return translate(err)
-		}
-		if tunnel.DesiredState == DesiredDeleted {
-			return ErrTerminalState
-		}
-		op, replayed, err := beginResourceOperation(ctx, q, resourceOperationInput{ID: input.OperationID, AccountID: input.AccountID, IdempotencyKey: input.IdempotencyKey, RequestHash: input.RequestHash, OperationType: "domain.verify", ResourceKind: "domain_binding", ResourceID: input.DomainID, CorrelationID: input.CorrelationID})
-		if err != nil {
-			return err
-		}
-		current, err := q.GetTunnelDomainV1(ctx, dbsqlc.GetTunnelDomainV1Params{DomainID: input.DomainID, AccountID: input.AccountID, TunnelID: input.TunnelID})
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrDomainNotFound
-		}
-		if err != nil {
-			return translate(err)
-		}
-		if replayed {
-			result = ResourceMutationRecord{Domain: current, Operation: op, Replayed: true, Changed: op.Outcome == "changed"}
-			return nil
-		}
-		if current.DeletedAt.Valid {
-			return ErrTerminalState
-		}
-		if current.Generation != input.ExpectedGeneration {
-			return ErrGenerationConflict
-		}
-		targets, err := publicationdns.ResolveTargetsTx(ctx, tx, "tunnel", input.TunnelID, tunnel.StableEndpoint)
-		if err != nil {
-			return err
-		}
-		records, err := json.Marshal(publicationdns.Records(targets, current.Hostname, current.DnsProvider))
-		if err != nil {
-			return err
-		}
-		current, err = q.BeginTunnelDomainVerificationV1(ctx, dbsqlc.BeginTunnelDomainVerificationV1Params{Now: input.Now, DomainID: input.DomainID, AccountID: input.AccountID, TunnelID: input.TunnelID, ExpectedGeneration: input.ExpectedGeneration})
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrGenerationConflict
-		}
-		if err != nil {
-			return translate(err)
-		}
-		if err = tx.QueryRow(ctx, `UPDATE paperboat.tunnel_domains SET ownership_state=CASE WHEN expected_records<>$3::jsonb THEN 'pending' ELSE ownership_state END,dns_target=$2,expected_records=$3::jsonb,observed_records='[]'::jsonb,dns_ttl_seconds=NULL,last_verified_at=NULL WHERE id=$1 AND generation=$4 RETURNING ownership_state`, current.ID, targets[0], records, current.Generation).Scan(&current.OwnershipState); err != nil {
-			return err
-		}
-		current.DnsTarget = targets[0]
-		current.ExpectedRecords = records
-		current.ObservedRecords = []byte(`[]`)
-		current.DnsTtlSeconds = sql.NullInt32{}
-		current.LastVerifiedAt = sql.NullTime{}
-		// Verification is intentionally not marked successful here. TRK-18 owns
-		// external DNS observation and will perform the proof-bearing transition.
-		op, err = advanceResourceOperation(ctx, q, op.ID, current.ID, "waiting_for_dns", 40, input.Now)
-		if err != nil {
-			return err
-		}
-		if err := recordResourceChange(ctx, q, resourceAuditInput{AuditEventID: input.AuditEventID, ParentAuditEventID: input.ParentAuditEventID, AccountID: input.AccountID,
-			ActorID: auditActorID(input.ActorID, input.AuditActorID), ActorType: input.ActorType, EventType: "domain.verification_requested", ParentEventType: "tunnel.domain_verification_requested",
-			ResourceType: "domain_binding", ResourceID: current.ID, TunnelID: input.TunnelID, OperationID: op.ID, IdempotencyKey: input.IdempotencyKey,
-			RequestID: input.RequestID, CorrelationID: input.CorrelationID, SourceMachineID: input.SourceMachineID, Now: input.Now,
-			Metadata: map[string]any{"state": "waiting_dns"}, Message: "DNS verification requested; no external proof observed yet"}); err != nil {
 			return err
 		}
 		result = ResourceMutationRecord{Domain: current, Operation: op, Changed: true}

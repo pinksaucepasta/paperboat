@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspacedomain"
 	"net/http"
 	"strings"
 
@@ -457,47 +458,6 @@ func tunnelResourceDomainDelete(service tunnelv1.ResourceAPI) http.HandlerFunc {
 	}
 }
 
-func tunnelResourceDomainVerify(service tunnelv1.ResourceAPI) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		body, hash, ok := resourceMutationBody(w, r, true)
-		if !ok {
-			return
-		}
-		_ = body
-		domainID := strings.TrimSpace(r.PathValue("domain_id"))
-		input, err := resourceMutationInput(r, "domain_binding", domainID, hash, true)
-		if err != nil {
-			writeTunnelResourceError(w, r, err)
-			return
-		}
-		request, ok := resourceRequestContext(w, r)
-		if !ok {
-			return
-		}
-		result, err := service.VerifyDomain(r.Context(), request, tunnelIDFromPath(r), domainID, input)
-		if err != nil {
-			writeTunnelResourceError(w, r, err)
-			return
-		}
-		writeDomainMutation(w, result, false)
-	}
-}
-
-func tunnelResourceDomainInstructions(service tunnelv1.ResourceAPI) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		request, ok := resourceRequestContext(w, r)
-		if !ok {
-			return
-		}
-		value, err := service.DomainInstructions(r.Context(), request, tunnelIDFromPath(r), strings.TrimSpace(r.PathValue("domain_id")))
-		if err != nil {
-			writeTunnelResourceError(w, r, err)
-			return
-		}
-		writeResourceJSON(w, http.StatusOK, value)
-	}
-}
-
 func tunnelResourceTunnelLogs(service tunnelv1.ResourceAPI) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		request, ok := resourceRequestContext(w, r)
@@ -606,12 +566,14 @@ func writeTunnelResourceError(w http.ResponseWriter, r *http.Request, err error)
 		status, code, message, outcome, retryable, action = http.StatusConflict, "domain_conflict", "The domain binding conflicts with an existing binding.", "unchanged", false, "inspect_domain"
 	case expectedHTTPErrorOnly(err, tunnelv1.ErrConflict):
 		status, code, message, outcome, retryable, action = http.StatusConflict, "resource_conflict", "The resource conflicts with current state.", "unchanged", false, "refresh_and_retry"
-	case expectedHTTPErrorOnly(err, tunnelv1.ErrDNSInstructionsUnavailable):
-		status, code, message, outcome, retryable, action = http.StatusNotImplemented, "dns_instructions_unavailable", "Provider-aware instructions for this domain are not available yet.", "unchanged", false, "configure_dns_provider"
 	case expectedHTTPErrorOnly(err, tunnelv1.ErrTerminalState):
 		status, code, message, outcome, retryable, action = http.StatusConflict, "resource_deleted", "The resource is terminal and cannot be changed.", "unchanged", false, "create_new_resource"
 	case expectedHTTPErrorOnly(err, tunnelv1.ErrOperationInProgress):
 		status, code, message, outcome, retryable, action = http.StatusConflict, "operation_in_progress", "An earlier resource operation is still in progress.", "uncertain", true, "inspect_operation"
+	case expectedHTTPErrorOnly(err, workspacedomain.ErrNotCovered):
+		status, code, message, outcome, retryable, action = http.StatusBadRequest, "domain_not_in_workspace", "This hostname is not under a domain of this workspace. Add the domain on the Domains page (or pb domain add <domain>), verify it, then use any name one level under it.", "unchanged", false, "add_workspace_domain"
+	case expectedHTTPErrorOnly(err, workspacedomain.ErrNotVerified):
+		status, code, message, outcome, retryable, action = http.StatusConflict, "domain_not_verified", "This hostname's domain is not verified yet. Add its DNS records (Domains page or pb domain show <domain>), then check again.", "unchanged", true, "verify_workspace_domain"
 	case expectedHTTPErrorOnly(err, tunnelv1.ErrInvalidInput):
 		status, code, message, outcome, retryable, action = http.StatusBadRequest, "invalid_request", "The resource request is invalid.", "unchanged", false, "fix_request"
 	}

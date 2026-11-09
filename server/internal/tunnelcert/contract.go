@@ -37,9 +37,12 @@ var (
 	ErrIssuerRateLimited       = errors.New("certificate issuer rate limited")
 	ErrCertificateInvalid      = errors.New("issued certificate is invalid")
 	ErrCertificateNotReady     = errors.New("certificate distribution is not ready")
-	ErrDistributionUnavailable = errors.New("certificate distribution is unavailable")
-	ErrGenerationConflict      = errors.New("certificate domain generation is stale")
-	ErrCertificateRevoked      = errors.New("certificate is revoked")
+	// ErrWorkspaceCertificatePending: the workspace domain has no (newer)
+	// wildcard certificate yet; the hostname retries after it is issued.
+	ErrWorkspaceCertificatePending = fmt.Errorf("%w: the workspace domain's certificate is not issued yet", ErrCertificateNotReady)
+	ErrDistributionUnavailable     = errors.New("certificate distribution is unavailable")
+	ErrGenerationConflict          = errors.New("certificate domain generation is stale")
+	ErrCertificateRevoked          = errors.New("certificate is revoked")
 )
 
 type Strategy string
@@ -80,6 +83,10 @@ const (
 	// wildcard. It is distributed to exact edge process targets, but is not
 	// owned by a tunnel route or preview lease.
 	TargetPlatformWildcard TargetKind = "platform_wildcard"
+	// TargetWorkspaceDomain is a workspace domain's own wildcard order. Its
+	// certificate is never distributed under this kind: each tunnel or preview
+	// hostname under the domain stores and distributes a copy as its own target.
+	TargetWorkspaceDomain TargetKind = "workspace_domain"
 
 	// These aliases keep the meaning obvious at call sites that refer to the
 	// field rather than the target value.
@@ -140,6 +147,10 @@ func (t CertificateTarget) Validate() error {
 		if t.TunnelID != "" || t.RouteID != "" || t.PreviewID != "" || t.PreviewGeneration != 0 || t.PreviewState != "" || !t.PreviewExpiresAt.IsZero() {
 			return fmt.Errorf("%w: platform wildcard target contains route or lease identity", ErrInvalid)
 		}
+	case TargetWorkspaceDomain:
+		if t.TunnelID != "" || t.RouteID != "" || t.PreviewID != "" || t.PreviewGeneration != 0 || t.PreviewState != "" || !t.PreviewExpiresAt.IsZero() {
+			return fmt.Errorf("%w: workspace domain target contains route or lease identity", ErrInvalid)
+		}
 	default:
 		return fmt.Errorf("%w: target kind is invalid", ErrInvalid)
 	}
@@ -195,8 +206,11 @@ type Domain struct {
 	// one-label wildcard binding. It is never persisted as the wildcard
 	// domain's primary certificate hostname.
 	LeafHostname string
-	Issuer       string
-	EdgeTargets  []EdgeTarget
+	// WorkspaceDomainID names the workspace domain whose wildcard certificate
+	// this tunnel or preview hostname reuses instead of ordering its own.
+	WorkspaceDomainID string
+	Issuer            string
+	EdgeTargets       []EdgeTarget
 }
 
 func (d Domain) Target() CertificateTarget {
@@ -231,6 +245,28 @@ func DelegatedChallengeTarget(domainID, accountID, tunnelID, challengeReference,
 	return canonicalTarget, nil
 }
 
+// WorkspaceChallengeTarget is the server-owned name a workspace domain's
+// _acme-challenge CNAME points at. Only whoever controls the domain's DNS can
+// create that CNAME, so its presence is also the domain's ownership proof. It
+// depends only on the workspace (scopeKey) and the hostname, so removing and
+// adding the domain again keeps the DNS record valid, and another workspace
+// claiming the same hostname gets a different target it cannot make verify.
+func WorkspaceChallengeTarget(scopeKey, hostname, challengeZone string) (string, error) {
+	if !validMetadata(scopeKey, 512) {
+		return "", fmt.Errorf("%w: workspace is invalid", ErrDNSChallengeUnavailable)
+	}
+	host, hostWildcard, err := normalizeHostname(hostname)
+	if err != nil || hostWildcard {
+		return "", fmt.Errorf("%w: hostname is invalid", ErrDNSChallengeUnavailable)
+	}
+	zone, wildcard, err := normalizeHostname(challengeZone)
+	if err != nil || wildcard {
+		return "", fmt.Errorf("%w: challenge zone is invalid", ErrDNSChallengeUnavailable)
+	}
+	digest := sha256.Sum256([]byte(strings.Join([]string{string(TargetWorkspaceDomain), scopeKey, host}, "\x00")))
+	return "pb-" + hex.EncodeToString(digest[:16]) + "." + zone, nil
+}
+
 // DelegatedChallengeTargetForDomain derives the same server-owned challenge
 // name for user-owned target families. Platform wildcards are Cloudflare-owned
 // zones and deliberately write the ACME TXT directly at their authorization
@@ -241,8 +277,11 @@ func DelegatedChallengeTargetForDomain(domain Domain, challengeZone string) (str
 	if kind == TargetPreviewLease {
 		targetID = domain.PreviewID
 	}
-	if kind != TargetDurableRoute && kind != TargetPreviewLease && kind != TargetPlatformWildcard {
+	if kind != TargetDurableRoute && kind != TargetPreviewLease && kind != TargetPlatformWildcard && kind != TargetWorkspaceDomain {
 		return "", fmt.Errorf("%w: target kind is invalid", ErrDNSChallengeUnavailable)
+	}
+	if kind == TargetWorkspaceDomain {
+		return WorkspaceChallengeTarget(domain.ChallengeReference, strings.TrimPrefix(domain.Hostname, "*."), challengeZone)
 	}
 	if kind == TargetPlatformWildcard {
 		return PlatformDNSChallengeTargetForDomain(domain)

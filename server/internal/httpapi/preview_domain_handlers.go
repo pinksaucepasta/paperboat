@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspacedomain"
 	"net/http"
 	"strings"
 
@@ -103,15 +104,7 @@ func PreviewDomainCreateHandler(service previewdomain.API) http.HandlerFunc {
 	}
 }
 
-func PreviewDomainVerifyHandler(service previewdomain.API) http.HandlerFunc {
-	return previewDomainMutationHandler(service, true)
-}
-
 func PreviewDomainDeleteHandler(service previewdomain.API) http.HandlerFunc {
-	return previewDomainMutationHandler(service, false)
-}
-
-func previewDomainMutationHandler(service previewdomain.API, verify bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		_, hash, ok := previewDomainBody(w, r, true)
 		if !ok {
@@ -137,37 +130,12 @@ func previewDomainMutationHandler(service previewdomain.API, verify bool) http.H
 			return
 		}
 		input := previewdomain.MutationInput{ExpectedGeneration: generation, IdempotencyKey: key, RequestHash: hash}
-		var result previewdomain.MutationResult
-		if verify {
-			result, err = service.Verify(r.Context(), request, previewDomainPreviewID(r), domainID, input)
-		} else {
-			result, err = service.Delete(r.Context(), request, previewDomainPreviewID(r), domainID, input)
-		}
+		result, err := service.Delete(r.Context(), request, previewDomainPreviewID(r), domainID, input)
 		if err != nil {
 			writePreviewDomainError(w, r, err)
 			return
 		}
 		writePreviewDomainMutation(w, result, false)
-	}
-}
-
-func PreviewDomainInstructionsHandler(service previewdomain.API) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		request, ok := previewDomainRequestContext(w, r)
-		if !ok {
-			return
-		}
-		if service == nil {
-			writePreviewDomainError(w, r, previewdomain.ErrDNSUnavailable)
-			return
-		}
-		instructions, err := service.Instructions(r.Context(), request, previewDomainPreviewID(r), previewDomainID(r))
-		if err != nil {
-			writePreviewDomainError(w, r, err)
-			return
-		}
-		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, http.StatusOK, SuccessResponse{Data: instructions})
 	}
 }
 
@@ -186,16 +154,8 @@ func PreviewDomainCreate(service previewdomain.API) http.HandlerFunc {
 	return PreviewDomainCreateHandler(service)
 }
 
-func PreviewDomainVerify(service previewdomain.API) http.HandlerFunc {
-	return PreviewDomainVerifyHandler(service)
-}
-
 func PreviewDomainDelete(service previewdomain.API) http.HandlerFunc {
 	return PreviewDomainDeleteHandler(service)
-}
-
-func PreviewDomainInstructions(service previewdomain.API) http.HandlerFunc {
-	return PreviewDomainInstructionsHandler(service)
 }
 
 func previewDomainRequestContext(w http.ResponseWriter, r *http.Request) (previewtunnelapi.RequestContext, bool) {
@@ -288,6 +248,10 @@ func writePreviewDomainError(w http.ResponseWriter, r *http.Request, err error) 
 		status, code, message, outcome, retryable, action = http.StatusServiceUnavailable, "dns_unavailable", "DNS verification is temporarily unavailable.", "unchanged", true, "retry"
 	case expectedHTTPErrorOnly(err, previewdomain.ErrCertificatePending):
 		status, code, message, outcome, retryable, action = http.StatusConflict, "certificate_pending", "The preview domain certificate is not ready.", "unchanged", true, "retry"
+	case expectedHTTPErrorOnly(err, workspacedomain.ErrNotCovered):
+		status, code, message, outcome, retryable, action = http.StatusBadRequest, "domain_not_in_workspace", "This hostname is not under a domain of this workspace. Add the domain on the Domains page (or pb domain add <domain>), verify it, then use any name one level under it.", "unchanged", false, "add_workspace_domain"
+	case expectedHTTPErrorOnly(err, workspacedomain.ErrNotVerified):
+		status, code, message, outcome, retryable, action = http.StatusConflict, "domain_not_verified", "This hostname's domain is not verified yet. Add its DNS records (Domains page or pb domain show <domain>), then check again.", "unchanged", true, "verify_workspace_domain"
 	case expectedHTTPErrorOnly(err, previewdomain.ErrInvalidInput):
 		status, code, message, outcome, retryable, action = http.StatusBadRequest, "invalid_request", "The preview-domain request is invalid.", "unchanged", false, "fix_request"
 	}

@@ -460,7 +460,7 @@ func certificateDomainWithConfig(row dbsqlc.TunnelDomain, edges []dbsqlc.ListRea
 	if issuerName == "" {
 		issuerName = "letsencrypt"
 	}
-	return tunnelcert.Domain{ID: row.ID, AccountID: row.AccountID, TunnelID: row.TunnelID, TargetKind: tunnelcert.TargetDurableRoute, RouteID: row.RouteID, Hostname: row.Hostname, ChallengeReference: row.OwnershipChallengeReference, Generation: uint64(row.Generation), Strategy: strategy, OwnershipState: row.OwnershipState, CAAState: row.CaaState, CertificateReference: row.CertificateReference.String, CertificateGeneration: 0, RenewalDue: !row.CertificateExpiresAt.Valid || !row.CertificateExpiresAt.Time.After(now.Add(renewBefore)), AllowOnDemandFallback: onDemandPolicy, EdgeTargets: targets, Issuer: issuerName}, nil
+	return tunnelcert.Domain{ID: row.ID, AccountID: row.AccountID, TunnelID: row.TunnelID, TargetKind: tunnelcert.TargetDurableRoute, RouteID: row.RouteID, Hostname: row.Hostname, ChallengeReference: row.OwnershipChallengeReference, Generation: uint64(row.Generation), Strategy: strategy, OwnershipState: row.OwnershipState, CAAState: row.CaaState, CertificateReference: row.CertificateReference.String, CertificateGeneration: 0, RenewalDue: !row.CertificateExpiresAt.Valid || !row.CertificateExpiresAt.Time.After(now.Add(renewBefore)), AllowOnDemandFallback: onDemandPolicy, EdgeTargets: targets, Issuer: issuerName, WorkspaceDomainID: row.WorkspaceDomainID.String}, nil
 }
 
 func previewCertificateDomainWithConfig(row dbsqlc.PreviewDomain, lease dbsqlc.PreviewLease, edges []dbsqlc.ListReadyPreviewCertificateEdgesV1Row, now time.Time, renewBefore time.Duration, issuerName string) (tunnelcert.Domain, error) {
@@ -488,7 +488,7 @@ func previewCertificateDomainWithConfig(row dbsqlc.PreviewDomain, lease dbsqlc.P
 	if issuerName == "" {
 		issuerName = "letsencrypt"
 	}
-	return tunnelcert.Domain{ID: row.ID, AccountID: row.AccountID, TargetKind: tunnelcert.TargetPreviewLease, PreviewID: row.PreviewID, PreviewGeneration: uint64(row.PreviewGeneration), PreviewOwnerMachineID: lease.OwnerMachineID, PreviewOwnerSessionID: lease.OwnerSessionID, PreviewState: "active", PreviewExpiresAt: expiresAt.UTC(), Hostname: row.Hostname, ChallengeReference: row.OwnershipChallengeReference, Generation: uint64(row.Generation), Strategy: strategy, OwnershipState: row.OwnershipState, CAAState: row.CaaState, CertificateReference: row.CertificateReference.String, RenewalDue: row.CertificateState != "ready" || !row.CertificateExpiresAt.Valid || !row.CertificateExpiresAt.Time.After(now.Add(renewBefore)), AllowOnDemandFallback: strategy == tunnelcert.StrategyOnDemandLeaf, EdgeTargets: targets, Issuer: issuerName}, nil
+	return tunnelcert.Domain{ID: row.ID, AccountID: row.AccountID, TargetKind: tunnelcert.TargetPreviewLease, PreviewID: row.PreviewID, PreviewGeneration: uint64(row.PreviewGeneration), PreviewOwnerMachineID: lease.OwnerMachineID, PreviewOwnerSessionID: lease.OwnerSessionID, PreviewState: "active", PreviewExpiresAt: expiresAt.UTC(), Hostname: row.Hostname, ChallengeReference: row.OwnershipChallengeReference, Generation: uint64(row.Generation), Strategy: strategy, OwnershipState: row.OwnershipState, CAAState: row.CaaState, CertificateReference: row.CertificateReference.String, RenewalDue: row.CertificateState != "ready" || !row.CertificateExpiresAt.Valid || !row.CertificateExpiresAt.Time.After(now.Add(renewBefore)), AllowOnDemandFallback: strategy == tunnelcert.StrategyOnDemandLeaf, EdgeTargets: targets, Issuer: issuerName, WorkspaceDomainID: row.WorkspaceDomainID.String}, nil
 }
 
 func certificateStrategy(value string) (tunnelcert.Strategy, error) {
@@ -537,6 +537,8 @@ func certificateFailureCode(err error) string {
 		return "issuer_unavailable"
 	case errors.Is(err, tunnelcert.ErrCertificateInvalid):
 		return "certificate_invalid"
+	case errors.Is(err, tunnelcert.ErrWorkspaceCertificatePending):
+		return "workspace_certificate_pending"
 	case errors.Is(err, tunnelcert.ErrCertificateNotReady):
 		return "edge_certificate_not_ready"
 	case errors.Is(err, tunnelcert.ErrDistributionUnavailable):

@@ -239,29 +239,16 @@ INSERT INTO tunnel_domains
    ownership_challenge_reference, ownership_state, dns_target,
    observed_records, certificate_strategy, certificate_state, caa_state,
    conflict_state, generation, created_at, updated_at,
-   dns_provider, expected_records, dns_next_check_at)
+   dns_provider, expected_records, dns_next_check_at, workspace_domain_id, last_verified_at)
 VALUES
   (sqlc.arg(id), sqlc.arg(account_id), sqlc.arg(tunnel_id), sqlc.arg(route_id),
    sqlc.arg(hostname), sqlc.arg(match_type),
-   sqlc.arg(ownership_challenge_reference), 'pending', sqlc.arg(dns_target),
+   sqlc.arg(ownership_challenge_reference), 'verified', sqlc.arg(dns_target),
    sqlc.arg(observed_records)::jsonb, sqlc.arg(certificate_strategy),
-   CASE WHEN sqlc.arg(certificate_strategy) = 'none' THEN 'not_applicable' ELSE 'pending' END,
+   CASE WHEN sqlc.arg(certificate_strategy) = 'none' THEN 'not_applicable' ELSE 'issuing' END, -- verified at creation: the certificate is next
    CASE WHEN sqlc.arg(certificate_strategy) = 'none' THEN 'not_applicable' ELSE 'unknown' END, 'clear',
    1, sqlc.arg(now), sqlc.arg(now), sqlc.arg(dns_provider),
-   sqlc.arg(expected_records)::jsonb, sqlc.arg(now))
-RETURNING *;
-
--- name: BeginTunnelDomainVerificationV1 :one
-UPDATE tunnel_domains
-SET ownership_state = CASE WHEN ownership_state IN ('pending','failed') THEN 'pending' ELSE ownership_state END,
-    conflict_state = CASE WHEN conflict_state = 'conflicted' THEN 'clear' ELSE conflict_state END,
-    dns_next_check_at = sqlc.arg(now), verification_attempts = 0,
-    generation = generation + 1, updated_at = sqlc.arg(now)
-WHERE id = sqlc.arg(domain_id)
-  AND account_id = sqlc.arg(account_id)
-  AND tunnel_id = sqlc.arg(tunnel_id)
-  AND generation = sqlc.arg(expected_generation)
-  AND deleted_at IS NULL
+   sqlc.arg(expected_records)::jsonb, sqlc.arg(now), sqlc.arg(workspace_domain_id), sqlc.arg(now))
 RETURNING *;
 
 -- name: DeleteTunnelDomainV1 :one
@@ -273,16 +260,6 @@ WHERE id = sqlc.arg(domain_id)
   AND account_id = sqlc.arg(account_id)
   AND tunnel_id = sqlc.arg(tunnel_id)
   AND generation = sqlc.arg(expected_generation)
-  AND deleted_at IS NULL
-RETURNING *;
-
--- name: MarkTunnelDomainVerifiedV1 :one
-UPDATE tunnel_domains
-SET ownership_state = 'verified', last_verified_at = sqlc.arg(now),
-    generation = generation + 1, updated_at = sqlc.arg(now)
-WHERE id = sqlc.arg(domain_id)
-  AND account_id = sqlc.arg(account_id)
-  AND tunnel_id = sqlc.arg(tunnel_id)
   AND deleted_at IS NULL
 RETURNING *;
 
@@ -321,7 +298,3 @@ WHERE account_id = sqlc.arg(account_id)
   AND cursor_sequence > sqlc.arg(after_sequence)
 ORDER BY cursor_sequence ASC
 LIMIT sqlc.arg(row_limit);
-
--- name: ListTunnelDomainsByIDsV1 :many
--- The rows of a page of the workspace domain list (domaininventory), whose query authorized them.
-SELECT * FROM tunnel_domains WHERE id = ANY(sqlc.arg(ids)::text[]) AND deleted_at IS NULL;

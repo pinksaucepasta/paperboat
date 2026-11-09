@@ -14,16 +14,13 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
-	"github.com/pinksaucepasta/paperboat/server/internal/publicationdns"
 )
 
 type API interface {
 	List(context.Context, previewtunnelapi.RequestContext, string, string, int) (Page, error)
 	Get(context.Context, previewtunnelapi.RequestContext, string, string) (DomainView, error)
 	Create(context.Context, previewtunnelapi.RequestContext, string, Request) (MutationResult, error)
-	Verify(context.Context, previewtunnelapi.RequestContext, string, string, MutationInput) (MutationResult, error)
 	Delete(context.Context, previewtunnelapi.RequestContext, string, string, MutationInput) (MutationResult, error)
-	Instructions(context.Context, previewtunnelapi.RequestContext, string, string) (DNSInstructions, error)
 	ReadyAliases(context.Context, previewtunnelapi.RequestContext, string) ([]ReadyAlias, error)
 }
 
@@ -32,11 +29,10 @@ type BatchCreator interface {
 }
 
 type Service struct {
-	repository    PreviewDomainRepository
-	cursors       *cursorCodec
-	challengeZone string
-	now           func() time.Time
-	newID         func(prefix string) (string, error)
+	repository PreviewDomainRepository
+	cursors    *cursorCodec
+	now        func() time.Time
+	newID      func(prefix string) (string, error)
 }
 
 func NewService(repository PreviewDomainRepository, config Config) (*Service, error) {
@@ -55,15 +51,7 @@ func NewService(repository PreviewDomainRepository, config Config) (*Service, er
 	if newID == nil {
 		newID = defaultID
 	}
-	zone := strings.TrimSpace(config.ChallengeZone)
-	if zone != "" {
-		if normalized, wildcard, zoneErr := normalizeHostname(zone); zoneErr != nil || wildcard {
-			return nil, fmt.Errorf("%w: challenge zone is invalid", ErrInvalidInput)
-		} else {
-			zone = normalized
-		}
-	}
-	return &Service{repository: repository, cursors: cursors, challengeZone: zone, now: now, newID: newID}, nil
+	return &Service{repository: repository, cursors: cursors, now: now, newID: newID}, nil
 }
 
 func (s *Service) List(ctx context.Context, request previewtunnelapi.RequestContext, previewID, rawCursor string, limit int) (Page, error) {
@@ -204,15 +192,7 @@ func (s *Service) Create(ctx context.Context, request previewtunnelapi.RequestCo
 	return mutationResult(result, request.RequestID), nil
 }
 
-func (s *Service) Verify(ctx context.Context, request previewtunnelapi.RequestContext, previewID, domainID string, input MutationInput) (MutationResult, error) {
-	return s.mutate(ctx, request, previewID, domainID, input, true)
-}
-
 func (s *Service) Delete(ctx context.Context, request previewtunnelapi.RequestContext, previewID, domainID string, input MutationInput) (MutationResult, error) {
-	return s.mutate(ctx, request, previewID, domainID, input, false)
-}
-
-func (s *Service) mutate(ctx context.Context, request previewtunnelapi.RequestContext, previewID, domainID string, input MutationInput, verify bool) (MutationResult, error) {
 	if err := authorize(request, "write"); err != nil {
 		return MutationResult{}, err
 	}
@@ -243,61 +223,11 @@ func (s *Service) mutate(ctx context.Context, request previewtunnelapi.RequestCo
 		return MutationResult{}, err
 	}
 	record := MutationRecord{OperationID: operationID, AuditEventID: auditID, AccountID: request.Actor.AccountID, PreviewID: previewID, DomainID: domainID, ExpectedGeneration: input.ExpectedGeneration, IdempotencyKey: input.IdempotencyKey, RequestHash: input.RequestHash, ActorID: request.Actor.ActorID, ActorType: actorType(request.Actor), RequestID: request.RequestID, CorrelationID: request.CorrelationID, SourceMachineID: request.Actor.MachineID, Now: now}
-	var result RepositoryMutation
-	if verify {
-		result, err = s.repository.Verify(ctx, record)
-	} else {
-		result, err = s.repository.Delete(ctx, record)
-	}
+	result, err := s.repository.Delete(ctx, record)
 	if err != nil {
 		return MutationResult{}, err
 	}
 	return mutationResult(result, request.RequestID), nil
-}
-
-func (s *Service) Instructions(ctx context.Context, request previewtunnelapi.RequestContext, previewID, domainID string) (DNSInstructions, error) {
-	if err := authorize(request, "read"); err != nil {
-		return DNSInstructions{}, err
-	}
-	ctx, request, scopeErr := s.scopeWorkspacePreview(ctx, request, previewID)
-	if scopeErr != nil {
-		return DNSInstructions{}, scopeErr
-	}
-	lease, err := s.repository.Lease(ctx, request.Actor.AccountID, previewID)
-	if err != nil {
-		return DNSInstructions{}, err
-	}
-	if err := requireActiveLease(lease, s.now()); err != nil {
-		return DNSInstructions{}, err
-	}
-	domain, err := s.repository.Get(ctx, request.Actor.AccountID, previewID, domainID)
-	if err != nil {
-		return DNSInstructions{}, err
-	}
-	if domain.PreviewGeneration != lease.Generation {
-		return DNSInstructions{}, ErrGenerationConflict
-	}
-	if domain.DeletedAt.Valid {
-		return DNSInstructions{}, ErrNotFound
-	}
-	provider := domain.DnsProvider
-	records := []DNSRecord{{Name: domain.Hostname, Type: publicationdns.RecordType(domain.DnsTarget, DNSRecordType(domain.Hostname, provider)), Value: domain.DnsTarget, TTL: 300}}
-	if len(domain.ExpectedRecords) > 0 {
-		if err := json.Unmarshal(domain.ExpectedRecords, &records); err != nil || len(records) == 0 {
-			return DNSInstructions{}, ErrDNSUnavailable
-		}
-	}
-	note := publicationdns.Note(domain.DnsTarget, DNSInstructionNote(domain.Hostname, provider))
-	if s.challengeZone != "" && (domain.CertificateStrategy == "managed" || domain.CertificateStrategy == "on_demand_leaf") {
-		challengeTarget, targetErr := delegatedChallengeTarget(domain.ID, domain.AccountID, domain.PreviewID, domain.OwnershipChallengeReference, s.challengeZone)
-		if targetErr != nil {
-			return DNSInstructions{}, ErrDNSUnavailable
-		}
-		base := strings.TrimPrefix(domain.Hostname, "*.")
-		records = append(records, DNSRecord{Name: "_acme-challenge." + base, Type: "CNAME", Value: challengeTarget, TTL: 300})
-		note += " Paperboat writes ACME TXT values only below its authoritative challenge zone; TLS becomes ready after DNS propagation and certificate distribution."
-	}
-	return DNSInstructions{Schema: Schema, Kind: "dns_instructions", TargetKind: TargetKind, PreviewID: previewID, DomainID: domain.ID, Hostname: domain.Hostname, Provider: provider, Records: records, CertificateStrategy: domain.CertificateStrategy, VerificationState: wireState(domain), Note: note}, nil
 }
 
 func (s *Service) ReadyAliases(ctx context.Context, request previewtunnelapi.RequestContext, previewID string) ([]ReadyAlias, error) {

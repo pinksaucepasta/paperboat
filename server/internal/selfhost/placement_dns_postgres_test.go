@@ -96,7 +96,8 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 			exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,origin_scheme,origin_address,created_by_actor_id,updated_by_actor_id) VALUES($1,$2,$1,'http','managed','managed.example.test','http','127.0.0.1:3000','actor','actor')`, route, id)
 		}
 		domainID := "dns_domain_" + kind + "_" + suffix
-		hostname := kind + "-" + testutil.EndpointLabel(endpointID) + ".example.test"
+		hostname := kind + "." + testutil.EndpointLabel(endpointID) + ".example.test"
+		testutil.VerifiedWorkspaceDomain(t, store.SQL(), owner, "", testutil.EndpointLabel(endpointID)+".example.test")
 		now := time.Now().UTC()
 		hash := sha256.Sum256([]byte(domainID))
 		if kind == "preview" {
@@ -116,9 +117,8 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 				t.Fatalf("%s target=%q state=%q type=%q generation=%d: %v", kind, actualTarget, actualState, actualType, actualGeneration, err)
 			}
 		}
-		check("140.245.11.41", "pending", "A", 1)
-		// A self-hosted placement needs a verified custom domain; each placement change resets the domain to pending.
-		exec(`UPDATE `+table+` SET ownership_state='verified' WHERE id=$1`, domainID)
+		// A hostname under a verified workspace domain is verified from creation, and placement moves keep it so.
+		check("140.245.11.41", "verified", "A", 1)
 		if _, err = service.SetPlacement(ctx, owner, kind, id, &installation.InstallationID); err != nil {
 			t.Fatal(err)
 		}
@@ -134,7 +134,7 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 		if _, err = service.SetPlacement(ctx, owner, kind, id, nil); err != nil {
 			t.Fatal(err)
 		}
-		check(stable, "pending", "CNAME", 2)
+		check(stable, "verified", "CNAME", 2)
 		var quarantineCleared bool
 		if err := store.SQL().QueryRowContext(ctx, `SELECT quarantine_until IS NULL FROM `+table+` WHERE id=$1`, domainID).Scan(&quarantineCleared); err != nil || !quarantineCleared {
 			t.Fatal("placement retained quarantine")
@@ -151,7 +151,7 @@ func TestPlacementDNSCreationAndResetOnPostgres(t *testing.T) {
 		if _, err = service.SetPlacement(ctx, owner, kind, id, &installation.InstallationID); err != nil {
 			t.Fatal(err)
 		}
-		check("140.245.11.41", "pending", "A", 3)
+		check("140.245.11.41", "verified", "A", 3)
 		// Repeating the same placement on the verified domain changes nothing: the target is unchanged.
 		exec(`UPDATE `+table+` SET ownership_state='verified' WHERE id=$1`, domainID)
 		if _, err = service.SetPlacement(ctx, owner, kind, id, &installation.InstallationID); err != nil {

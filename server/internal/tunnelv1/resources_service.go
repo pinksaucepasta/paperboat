@@ -19,10 +19,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
-	"github.com/pinksaucepasta/paperboat/server/internal/publicationdns"
-	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
 	"golang.org/x/net/idna"
-	"golang.org/x/net/publicsuffix"
 )
 
 type ResourceService struct {
@@ -31,7 +28,6 @@ type ResourceService struct {
 	now                      func() time.Time
 	newID                    func(prefix string) (string, error)
 	allowInsecureDevelopment bool
-	challengeZone            string
 	publicTCPPortMin         int32
 	publicTCPPortMax         int32
 }
@@ -60,13 +56,7 @@ func NewResourceService(repository ResourceRepository, config ResourceConfig) (*
 	if config.PublicTCPPortMin < 1024 || config.PublicTCPPortMax > 65535 || config.PublicTCPPortMin > config.PublicTCPPortMax {
 		return nil, fmt.Errorf("public TCP port range is invalid")
 	}
-	challengeZone := strings.TrimSpace(config.ChallengeZone)
-	if challengeZone != "" {
-		if _, wildcard, zoneErr := tunnelcert.NormalizeChallengeZone(challengeZone); zoneErr != nil || wildcard {
-			return nil, fmt.Errorf("challenge zone is invalid")
-		}
-	}
-	return &ResourceService{repository: repository, cursors: cursors, now: now, newID: newID, allowInsecureDevelopment: config.AllowInsecureDevelopment, challengeZone: challengeZone, publicTCPPortMin: config.PublicTCPPortMin, publicTCPPortMax: config.PublicTCPPortMax}, nil
+	return &ResourceService{repository: repository, cursors: cursors, now: now, newID: newID, allowInsecureDevelopment: config.AllowInsecureDevelopment, publicTCPPortMin: config.PublicTCPPortMin, publicTCPPortMax: config.PublicTCPPortMax}, nil
 }
 
 func (s *ResourceService) authorize(request previewtunnelapi.RequestContext, action string, requireHost bool) error {
@@ -359,14 +349,6 @@ func (s *ResourceService) CreateDomain(ctx context.Context, request previewtunne
 }
 
 func (s *ResourceService) DeleteDomain(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID, domainID string, input ResourceMutationInput) (DomainMutationResult, error) {
-	return s.mutateDomain(ctx, request, tunnelID, domainID, input, false)
-}
-
-func (s *ResourceService) VerifyDomain(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID, domainID string, input ResourceMutationInput) (DomainMutationResult, error) {
-	return s.mutateDomain(ctx, request, tunnelID, domainID, input, true)
-}
-
-func (s *ResourceService) mutateDomain(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID, domainID string, input ResourceMutationInput, verify bool) (DomainMutationResult, error) {
 	if err := s.authorize(request, "write", false); err != nil {
 		return DomainMutationResult{}, err
 	}
@@ -388,78 +370,11 @@ func (s *ResourceService) mutateDomain(ctx context.Context, request previewtunne
 	record := DomainRecord{OperationID: opID, AuditEventID: auditID, ParentAuditEventID: parentAuditID, AccountID: request.Actor.AccountID, TunnelID: tunnelID, DomainID: domainID,
 		ExpectedGeneration: input.ExpectedGeneration, IdempotencyKey: input.IdempotencyKey, RequestHash: input.RequestHash, ActorID: request.Actor.ActorID, AuditActorID: auditActorIDForActor(request.Actor), ActorType: auditActorType(request.Actor),
 		RequestID: request.RequestID, CorrelationID: request.CorrelationID, SourceMachineID: request.Actor.MachineID, Now: s.now().UTC()}
-	var result ResourceMutationRecord
-	if verify {
-		result, err = s.repository.BeginResourceDomainVerification(ctx, record)
-	} else {
-		result, err = s.repository.DeleteResourceDomain(ctx, record)
-	}
+	result, err := s.repository.DeleteResourceDomain(ctx, record)
 	if err != nil {
 		return DomainMutationResult{}, err
 	}
 	return DomainMutationResult{Domain: DomainViewFromRow(result.Domain), Operation: previewtunnelapi.OperationView(result.Operation, request.RequestID), Replayed: result.Replayed, Changed: result.Changed}, nil
-}
-
-func (s *ResourceService) DomainInstructions(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID, domainID string) (DNSInstructions, error) {
-	if err := s.authorize(request, "read", false); err != nil {
-		return DNSInstructions{}, err
-	}
-	ctx, request, _, scopeErr := scopeTunnelManagement(ctx, s.repository, request, tunnelID)
-	if scopeErr != nil {
-		return DNSInstructions{}, scopeErr
-	}
-	domain, err := s.repository.GetResourceDomain(ctx, request.Actor.AccountID, tunnelID, domainID)
-	if err != nil {
-		return DNSInstructions{}, err
-	}
-	if domain.DeletedAt.Valid {
-		return DNSInstructions{}, ErrDomainNotFound
-	}
-	route, err := s.repository.GetResourceRoute(ctx, request.Actor.AccountID, tunnelID, domain.RouteID)
-	if err != nil {
-		return DNSInstructions{}, err
-	}
-	name := domain.Hostname
-	recordName := name
-	verificationState := wireDomainState(domain.OwnershipState, domain.ConflictState)
-	provider := normalizeDNSProvider(domain.DnsProvider)
-	recordType, note := dnsRecordTypeAndNote(name, provider)
-	recordType = publicationdns.RecordType(domain.DnsTarget, recordType)
-	note = publicationdns.Note(domain.DnsTarget, note)
-	records := []DNSRecordInstruction{{Name: recordName, Type: recordType, Value: domain.DnsTarget, TTL: 300}}
-	if s.challengeZone != "" && (domain.CertificateStrategy == "managed" || domain.CertificateStrategy == "on_demand_leaf") {
-		challengeTarget, targetErr := tunnelcert.DelegatedChallengeTarget(domain.ID, domain.AccountID, domain.TunnelID, domain.OwnershipChallengeReference, s.challengeZone)
-		if targetErr != nil {
-			return DNSInstructions{}, ErrDNSInstructionsUnavailable
-		}
-		base := strings.TrimPrefix(name, "*.")
-		records = append(records, DNSRecordInstruction{Name: "_acme-challenge." + base, Type: "CNAME", Value: challengeTarget, TTL: 300})
-		note += " For managed TLS, also add the shown _acme-challenge CNAME; Paperboat writes the TXT token only under its authoritative challenge zone."
-	}
-	publicTCPPort := int32(0)
-	if route.Protocol == "tcp" {
-		if !route.PublicTcpPort.Valid || route.PublicTcpPort.Int32 < 1024 {
-			return DNSInstructions{}, ErrDNSInstructionsUnavailable
-		}
-		publicTCPPort = route.PublicTcpPort.Int32
-		note += fmt.Sprintf(" Connect an ordinary TCP client to %s:%d. This hostname does not route by TLS SNI; Paperboat passes application TLS through unchanged, and no HTTP edge certificate secures this connection.", strings.TrimPrefix(name, "*."), publicTCPPort)
-	} else if route.Protocol == "tls" {
-		if !route.PublicTcpPort.Valid || route.PublicTcpPort.Int32 != 443 {
-			return DNSInstructions{}, ErrDNSInstructionsUnavailable
-		}
-		publicTCPPort = route.PublicTcpPort.Int32
-		note += fmt.Sprintf(" Connect a TLS client using SNI %s to port %d. Paperboat forwards the original TLS bytes; the origin owns certificate presentation and termination, and no HTTP edge certificate or cookie authentication applies.", name, publicTCPPort)
-	}
-	return DNSInstructions{Schema: Schema, Kind: "dns_instructions", TunnelID: tunnelID, DomainID: domain.ID, Hostname: name, Provider: provider, Records: records, CertificateStrategy: domain.CertificateStrategy, VerificationState: verificationState, PublicTCPPort: publicTCPPort, Note: note}, nil
-}
-
-func normalizeDNSProvider(value string) string {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "cloudflare", "route53", "google_cloud_dns", "digitalocean", "namecheap":
-		return strings.ToLower(strings.TrimSpace(value))
-	default:
-		return "generic"
-	}
 }
 
 func validateDNSProvider(value string) (string, error) {
@@ -486,36 +401,14 @@ func normalizeDomainCertificateStrategy(value, matchType, protocol string) (stri
 	if strategy == "" {
 		strategy = "managed"
 	}
+	// Every HTTP hostname serves its workspace domain's wildcard certificate.
 	switch strategy {
 	case "managed":
-		return strategy, nil
-	case "on_demand_leaf":
-		if matchType != "one_label_wildcard" {
-			return "", fmt.Errorf("%w: on_demand_leaf requires a one-label wildcard hostname", ErrInvalidInput)
-		}
 		return strategy, nil
 	case "none":
 		return "", fmt.Errorf("%w: HTTP domains require managed certificates", ErrInvalidInput)
 	default:
 		return "", fmt.Errorf("%w: certificate strategy is unsupported", ErrInvalidInput)
-	}
-}
-
-func dnsRecordTypeAndNote(hostname, provider string) (string, string) {
-	registrable, err := publicsuffix.EffectiveTLDPlusOne(strings.TrimPrefix(hostname, "*."))
-	apex := err == nil && registrable == strings.TrimPrefix(hostname, "*.") && !strings.HasPrefix(hostname, "*.")
-	if !apex {
-		return "CNAME", "Add the shown CNAME. Paperboat polls authoritative DNS and starts TLS issuance only after the exact record is observed."
-	}
-	switch provider {
-	case "cloudflare":
-		return "CNAME", "Create an apex CNAME with Cloudflare flattening enabled and proxying disabled until verification and TLS are ready."
-	case "route53":
-		return "ALIAS", "Create a Route 53 apex ALIAS to the stable Paperboat target."
-	case "google_cloud_dns", "digitalocean", "namecheap", "generic":
-		return "ANAME", "Use your provider's apex ANAME, ALIAS, or CNAME-flattening record. Do not use transient connector addresses."
-	default:
-		return "ANAME", "Use your provider's apex ANAME, ALIAS, or CNAME-flattening record."
 	}
 }
 

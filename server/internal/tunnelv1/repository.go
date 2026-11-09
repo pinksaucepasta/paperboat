@@ -43,13 +43,12 @@ var (
 	ErrDomainConflict       = errors.New("domain binding conflicts with an existing binding")
 	// ErrDomainQuarantined (always with ErrDomainConflict): the domain was removed recently and is held
 	// before it can be bound again.
-	ErrDomainQuarantined          = errors.New("domain was removed recently and is held before it can be added again")
-	ErrRouteNotFound              = errors.New("route not found")
-	ErrDomainNotFound             = errors.New("domain binding not found")
-	ErrDNSInstructionsUnavailable = errors.New("dns instructions are unavailable for this domain")
-	ErrPublicListenerCapacity     = errors.New("public listener port range is exhausted")
-	ErrConfigGenerationChain      = errors.New("tunnel configuration generation chain is incomplete")
-	ErrOperatorForbidden          = errors.New("tunnel operator transition forbidden")
+	ErrDomainQuarantined      = errors.New("domain was removed recently and is held before it can be added again")
+	ErrRouteNotFound          = errors.New("route not found")
+	ErrDomainNotFound         = errors.New("domain binding not found")
+	ErrPublicListenerCapacity = errors.New("public listener port range is exhausted")
+	ErrConfigGenerationChain  = errors.New("tunnel configuration generation chain is incomplete")
+	ErrOperatorForbidden      = errors.New("tunnel operator transition forbidden")
 )
 
 // TunnelRepository is the narrow persistence boundary used by the lifecycle

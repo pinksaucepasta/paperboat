@@ -23,7 +23,6 @@ type previewDomainAPIStub struct {
 	page       previewdomain.Page
 	view       previewdomain.DomainView
 	result     previewdomain.MutationResult
-	instr      previewdomain.DNSInstructions
 	err        error
 	createBody previewdomain.Request
 	mutation   previewdomain.MutationInput
@@ -42,18 +41,9 @@ func (f *previewDomainAPIStub) Create(_ context.Context, _ previewtunnelapi.Requ
 	return f.result, f.err
 }
 
-func (f *previewDomainAPIStub) Verify(_ context.Context, _ previewtunnelapi.RequestContext, _ string, _ string, mutation previewdomain.MutationInput) (previewdomain.MutationResult, error) {
-	f.mutation = mutation
-	return f.result, f.err
-}
-
 func (f *previewDomainAPIStub) Delete(_ context.Context, _ previewtunnelapi.RequestContext, _ string, _ string, mutation previewdomain.MutationInput) (previewdomain.MutationResult, error) {
 	f.mutation = mutation
 	return f.result, f.err
-}
-
-func (f *previewDomainAPIStub) Instructions(context.Context, previewtunnelapi.RequestContext, string, string) (previewdomain.DNSInstructions, error) {
-	return f.instr, f.err
 }
 
 func (f *previewDomainAPIStub) ReadyAliases(context.Context, previewtunnelapi.RequestContext, string) ([]previewdomain.ReadyAlias, error) {
@@ -117,10 +107,12 @@ func TestPreviewDomainMutationHandlerETagAndTypedErrors(t *testing.T) {
 	}
 
 	stub.err = previewdomain.ErrDNSUnavailable
-	request = previewLeaseHandlerRequest(http.MethodGet, "/v1/previews/preview-1/domains/domain-1/instructions", "")
+	request = previewLeaseHandlerRequest(http.MethodDelete, "/v1/previews/preview-1/domains/domain-1", `{}`)
 	request.SetPathValue("domain_id", "domain-1")
+	request.Header.Set(previewtunnelapi.IdempotencyHeader, "domain-delete-3")
+	request.Header.Set(previewtunnelapi.IfMatchHeader, stub.result.Domain.ETag)
 	recorder = httptest.NewRecorder()
-	PreviewDomainInstructionsHandler(stub).ServeHTTP(recorder, request)
+	PreviewDomainDeleteHandler(stub).ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusServiceUnavailable || !strings.Contains(recorder.Body.String(), `"code":"dns_unavailable"`) {
 		t.Fatalf("dns status=%d body=%s", recorder.Code, recorder.Body.String())
 	}

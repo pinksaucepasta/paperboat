@@ -350,16 +350,19 @@ func samePreviewIssuanceBinding(captured, current Domain) bool {
 }
 
 type Config struct {
-	Store                  CertificateStore
-	Locks                  IssuanceLock
-	Keys                   MasterKeySource
-	Issuer                 Issuer
-	Fallback               LeafFallbackIssuer
-	CAA                    CAAInspector
-	Delegated              DNS01Delegator
-	Distributor            CertificateDistributor
-	Alerts                 ExpiryAlertSink
-	Operations             OperationCompleter
+	Store       CertificateStore
+	Locks       IssuanceLock
+	Keys        MasterKeySource
+	Issuer      Issuer
+	Fallback    LeafFallbackIssuer
+	CAA         CAAInspector
+	Delegated   DNS01Delegator
+	Distributor CertificateDistributor
+	Alerts      ExpiryAlertSink
+	Operations  OperationCompleter
+	// WorkspaceCertificates supplies the wildcard certificate of a workspace
+	// domain to the tunnel and preview hostnames under it.
+	WorkspaceCertificates  WorkspaceCertificateSource
 	MasterKeyReference     string
 	IssuerName             string
 	OwnerID                string
@@ -678,6 +681,35 @@ func NewCoordinator(config Config) (*Coordinator, error) {
 	return &Coordinator{config: config, alerted: make(map[string]struct{})}, nil
 }
 
+// WorkspaceCertificateSource opens the current wildcard certificate of a
+// workspace domain. It returns ErrWorkspaceCertificatePending until one exists.
+type WorkspaceCertificateSource interface {
+	WorkspaceCertificate(ctx context.Context, accountID, workspaceDomainID string) (CertificateBundle, error)
+}
+
+// workspaceBundle is the certificate a hostname under a workspace domain stores
+// as its own: the domain's wildcard. A renewal waits until the domain holds a
+// newer certificate than the hostname already serves.
+func (c *Coordinator) workspaceBundle(ctx context.Context, domain Domain, current StoredCertificate, found bool, now time.Time) (CertificateBundle, error) {
+	if c.config.WorkspaceCertificates == nil {
+		return CertificateBundle{}, fmt.Errorf("%w: workspace certificates are not configured", ErrIssuerUnavailable)
+	}
+	bundle, err := c.config.WorkspaceCertificates.WorkspaceCertificate(ctx, domain.AccountID, domain.WorkspaceDomainID)
+	if err != nil {
+		return CertificateBundle{}, err
+	}
+	identity, err := bundle.Validate(domain.Hostname, now, c.config.MaxCertificateLifetime)
+	if err != nil {
+		wipeCertificateBundle(&bundle)
+		return CertificateBundle{}, err
+	}
+	if found && current.State == StateActive && current.ExpiresAt.After(now) && !identity.NotAfter.After(current.ExpiresAt) {
+		wipeCertificateBundle(&bundle)
+		return CertificateBundle{}, ErrWorkspaceCertificatePending
+	}
+	return bundle, nil
+}
+
 func (c *Coordinator) recoverDistributionBundle(ctx context.Context, domain Domain, now time.Time) (CertificateBundle, error) {
 	source, ok := c.config.Store.(DistributionCertificateSource)
 	kind := domain.Target().normalizedKind()
@@ -800,7 +832,7 @@ func (c *Coordinator) Ensure(ctx context.Context, domain Domain) (result Result,
 	if len(domain.EdgeTargets) == 0 {
 		return Result{}, ErrCertificateNotReady
 	}
-	if c.config.CAA != nil {
+	if c.config.CAA != nil && domain.WorkspaceDomainID == "" { // the workspace domain's own order checked CAA
 		caa, checkErr := c.config.CAA.Check(ctx, domain.Hostname, c.config.IssuerName)
 		if checkErr != nil {
 			if errors.Is(checkErr, ErrCAABlocked) || errors.Is(checkErr, ErrCAAUnavailable) {
@@ -861,6 +893,13 @@ func (c *Coordinator) Ensure(ctx context.Context, domain Domain) (result Result,
 	}
 	issuedBundle = recovered
 	reused := len(issuedBundle.CertificatePEM) != 0
+	if !reused && domain.WorkspaceDomainID != "" {
+		issuedBundle, err = c.workspaceBundle(ctx, domain, current, found, now)
+		if err != nil {
+			return Result{}, err
+		}
+		reused = true
+	}
 	challenge := DNSChallenge{}
 	var challengePtr *DNSChallenge
 	_, completeDNS01Issuer := c.config.Issuer.(DNS01Issuer)

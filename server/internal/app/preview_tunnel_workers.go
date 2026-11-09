@@ -5,10 +5,8 @@ import (
 	"github.com/google/uuid"
 
 	"fmt"
-	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/previewdomain"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewv1"
 	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
@@ -17,52 +15,6 @@ import (
 
 type previewLeaseReconciler interface {
 	Reconcile(context.Context, string, string, string) (previewv1.ReconcileResult, error)
-}
-
-func previewDNSReconcileTelemetry(producer *telemetry.Producer) previewdomain.DNSReconcileEventSink {
-	return previewdomain.DNSReconcileEventSinkFunc(func(_ context.Context, event previewdomain.DNSReconcileEvent) {
-		if producer == nil {
-			return
-		}
-		outcome := telemetry.DNSVerificationWaiting
-		failure := telemetry.DNSFailureUnknown
-		retry := telemetry.RetryWaitForChange
-		nextRetryAt := event.NextCheckAt
-		switch {
-		case event.Verified:
-			outcome, retry, nextRetryAt = telemetry.DNSVerificationSucceeded, telemetry.RetryNone, time.Time{}
-		case event.ConflictState != "" && event.ConflictState != "none":
-			outcome, failure, retry, nextRetryAt = telemetry.DNSVerificationFailed, telemetry.DNSFailureConflict, telemetry.RetryNotRetryable, time.Time{}
-		case strings.Contains(event.Code, "timeout"):
-			outcome, failure, retry = telemetry.DNSVerificationFailed, telemetry.DNSFailureTimeout, telemetry.RetryScheduled
-		case strings.Contains(event.Code, "invalid"):
-			outcome, failure, retry, nextRetryAt = telemetry.DNSVerificationFailed, telemetry.DNSFailureInvalid, telemetry.RetryNotRetryable, time.Time{}
-		}
-		_ = producer.RecordDNSVerification(telemetry.DNSVerificationInput{
-			Outcome: outcome, FailureClass: failure, Retry: retry, NextRetryAt: nextRetryAt,
-			Identity: telemetry.ProducerIdentity{IDs: telemetry.SafeIDs{DomainID: event.DomainID}},
-		})
-	})
-}
-
-func tunnelDNSReconcileTelemetry(producer *telemetry.Producer) func(context.Context, tunnelv1.DomainDNSReconcileEvent) {
-	return func(_ context.Context, event tunnelv1.DomainDNSReconcileEvent) {
-		if producer == nil {
-			return
-		}
-		outcome, failure, retry, nextRetryAt := telemetry.DNSVerificationWaiting, telemetry.DNSFailureUnknown, telemetry.RetryWaitForChange, event.NextCheckAt
-		if event.Verified {
-			outcome, retry, nextRetryAt = telemetry.DNSVerificationSucceeded, telemetry.RetryNone, time.Time{}
-		} else if event.ConflictState != "" && event.ConflictState != "clear" {
-			outcome, failure, retry, nextRetryAt = telemetry.DNSVerificationFailed, telemetry.DNSFailureConflict, telemetry.RetryNotRetryable, time.Time{}
-		} else if event.Code == "dns_verification_failed" {
-			outcome, failure, retry = telemetry.DNSVerificationFailed, telemetry.DNSFailureUnknown, telemetry.RetryScheduled
-		}
-		_ = producer.RecordDNSVerification(telemetry.DNSVerificationInput{
-			Outcome: outcome, FailureClass: failure, Retry: retry, NextRetryAt: nextRetryAt,
-			Identity: telemetry.ProducerIdentity{IDs: telemetry.SafeIDs{DomainID: event.DomainID}},
-		})
-	}
 }
 
 func certificateTelemetry(producer *telemetry.Producer) func(context.Context, tunnelv1.CertificateTelemetryEvent) {

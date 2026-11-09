@@ -2846,117 +2846,6 @@
           }
         }
       },
-      "DNSRecordInstruction": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "name",
-          "type",
-          "value",
-          "ttl"
-        ],
-        "properties": {
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 253
-          },
-          "type": {
-            "enum": [
-              "A",
-              "AAAA",
-              "ALIAS",
-              "ANAME",
-              "CNAME"
-            ]
-          },
-          "value": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 253
-          },
-          "ttl": {
-            "type": "integer",
-            "minimum": 30,
-            "maximum": 86400
-          }
-        }
-      },
-      "DNSInstructions": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "schema",
-          "kind",
-          "tunnel_id",
-          "domain_id",
-          "hostname",
-          "provider",
-          "records",
-          "certificate_strategy",
-          "verification_state",
-          "note"
-        ],
-        "properties": {
-          "schema": {
-            "const": "paperboat.preview-tunnel/v1"
-          },
-          "kind": {
-            "const": "dns_instructions"
-          },
-          "tunnel_id": {
-            "type": "string",
-            "minLength": 3
-          },
-          "domain_id": {
-            "type": "string",
-            "minLength": 3
-          },
-          "hostname": {
-            "type": "string",
-            "minLength": 1
-          },
-          "provider": {
-            "type": "string",
-            "minLength": 1
-          },
-          "records": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 8,
-            "items": {
-              "$ref": "#/components/schemas/DNSRecordInstruction"
-            }
-          },
-          "certificate_strategy": {
-            "type": "string"
-          },
-          "verification_state": {
-            "enum": [
-              "waiting_dns",
-              "verified",
-              "dns_error",
-              "conflict",
-              "quarantined"
-            ]
-          },
-          "note": {
-            "type": "string",
-            "minLength": 1
-          }
-        }
-      },
-      "DNSInstructionsResponse": {
-        "type": "object",
-        "required": [
-          "data"
-        ],
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/DNSInstructions"
-          }
-        }
-      },
       "PreviewTunnelError": {
         "type": "object",
         "additionalProperties": false,
@@ -7202,85 +7091,6 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/PreviewDomainPage"
-          }
-        }
-      },
-      "PreviewDNSInstructions": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "schema",
-          "kind",
-          "domain_id",
-          "hostname",
-          "provider",
-          "records",
-          "certificate_strategy",
-          "verification_state",
-          "note",
-          "target_kind",
-          "preview_id"
-        ],
-        "properties": {
-          "schema": {
-            "const": "paperboat.preview-tunnel/v1"
-          },
-          "kind": {
-            "const": "dns_instructions"
-          },
-          "domain_id": {
-            "type": "string",
-            "minLength": 3
-          },
-          "hostname": {
-            "type": "string",
-            "minLength": 1
-          },
-          "provider": {
-            "type": "string",
-            "minLength": 1
-          },
-          "records": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 8,
-            "items": {
-              "$ref": "#/components/schemas/DNSRecordInstruction"
-            }
-          },
-          "certificate_strategy": {
-            "type": "string"
-          },
-          "verification_state": {
-            "enum": [
-              "waiting_dns",
-              "verified",
-              "dns_error",
-              "conflict",
-              "quarantined"
-            ]
-          },
-          "note": {
-            "type": "string",
-            "minLength": 1
-          },
-          "target_kind": {
-            "const": "preview_lease"
-          },
-          "preview_id": {
-            "type": "string",
-            "minLength": 3
-          }
-        }
-      },
-      "PreviewDNSInstructionsResponse": {
-        "type": "object",
-        "required": [
-          "data"
-        ],
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/PreviewDNSInstructions"
           }
         }
       },
@@ -15527,73 +15337,181 @@
       },
       "WorkspaceDomain": {
         "type": "object",
-        "additionalProperties": false,
         "required": [
-          "kind",
-          "domain"
+          "id",
+          "hostname",
+          "workspace",
+          "state",
+          "records",
+          "observed_records",
+          "next_check_at",
+          "certificate",
+          "used_by",
+          "created_at"
         ],
         "properties": {
-          "kind": {
+          "id": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "workspace": {
+            "type": "string",
+            "description": "personal or the team slug"
+          },
+          "state": {
             "type": "string",
             "enum": [
-              "tunnel",
-              "preview"
+              "pending_dns",
+              "verified",
+              "failed"
             ]
           },
-          "domain": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/TunnelDomain"
-              },
-              {
-                "$ref": "#/components/schemas/PreviewDomain"
-              }
-            ],
-            "description": "The same view as GET /v1/tunnels/{tunnel_id}/domains (kind tunnel) or GET /v1/previews/{preview_id}/domains (kind preview)."
-          },
-          "owner_name": {
-            "type": "string",
-            "description": "kind tunnel: the tunnel's name."
-          },
-          "endpoint": {
-            "type": "string",
-            "description": "kind preview: the preview's endpoint URL."
-          }
-        }
-      },
-      "WorkspaceDomainPageResponse": {
-        "type": "object",
-        "required": [
-          "data"
-        ],
-        "properties": {
-          "data": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "items",
-              "total"
-            ],
-            "properties": {
-              "items": {
-                "type": "array",
-                "maxItems": 200,
-                "items": {
-                  "$ref": "#/components/schemas/WorkspaceDomain"
+          "records": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "type",
+                "value",
+                "purpose",
+                "required"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                },
+                "purpose": {
+                  "type": "string",
+                  "enum": [
+                    "verification",
+                    "routing",
+                    "apex_routing"
+                  ]
+                },
+                "required": {
+                  "type": "boolean"
                 }
-              },
-              "total": {
-                "type": "integer",
-                "minimum": 0,
-                "description": "Every domain the filters select (the same on every page)."
-              },
-              "next_cursor": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 1024,
-                "description": "Present when domains follow this page."
               }
             }
+          },
+          "observed_records": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "last_checked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "next_check_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "verified_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "dns_failure": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          },
+          "certificate": {
+            "type": "object",
+            "required": [
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "ready",
+                  "failed"
+                ]
+              },
+              "expires_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "failure": {
+                "type": "object",
+                "required": [
+                  "code",
+                  "message"
+                ],
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "used_by": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "kind",
+                "id",
+                "name",
+                "hostname",
+                "domain_binding_id",
+                "certificate_state"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "tunnel",
+                    "preview"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "hostname": {
+                  "type": "string"
+                },
+                "domain_binding_id": {
+                  "type": "string"
+                },
+                "certificate_state": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -15846,6 +15764,54 @@
           "code": {
             "type": "string",
             "maxLength": 200
+          }
+        }
+      },
+      "WorkspaceDomainCreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "hostname"
+        ],
+        "properties": {
+          "hostname": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 253,
+            "description": "An apex or subdomain you control, such as example.com or dev.example.com."
+          }
+        }
+      },
+      "WorkspaceDomainResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WorkspaceDomain"
+          }
+        }
+      },
+      "WorkspaceDomainListResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": [
+              "items"
+            ],
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/WorkspaceDomain"
+                }
+              }
+            }
           }
         }
       }
@@ -21560,190 +21526,6 @@
           }
         },
         "operationId": "delete_v1_tunnels_tunnel_id_domains_domain_id"
-      }
-    },
-    "/v1/tunnels/{tunnel_id}/domains/{domain_id}/verify": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/TunnelID"
-        },
-        {
-          "name": "domain_id",
-          "in": "path",
-          "required": true,
-          "schema": {
-            "type": "string",
-            "minLength": 3,
-            "maxLength": 128
-          }
-        }
-      ],
-      "post": {
-        "summary": "Request domain verification",
-        "description": "Schedules a waiting_dns verification operation. The endpoint never marks a domain verified without external DNS evidence.",
-        "security": [
-          {
-            "cookieSession": [],
-            "csrfHeader": []
-          },
-          {
-            "bearerAccess": []
-          }
-        ],
-        "x-required-bearer-scopes": [
-          "tunnels:write"
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          },
-          {
-            "$ref": "#/components/parameters/IfMatch"
-          },
-          {
-            "name": "workspace",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "maxLength": 63
-            },
-            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
-          }
-        ],
-        "requestBody": {
-          "required": false,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TunnelStateMutationRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "202": {
-            "description": "Verification is waiting for external DNS proof.",
-            "headers": {
-              "ETag": {
-                "$ref": "#/components/headers/ETag"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PreviewTunnelOperationResponse"
-                }
-              }
-            }
-          },
-          "200": {
-            "description": "Already verified or idempotent replay.",
-            "headers": {
-              "ETag": {
-                "$ref": "#/components/headers/ETag"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TunnelDomainResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error"
-          },
-          "412": {
-            "$ref": "#/components/responses/Error"
-          },
-          "428": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "operationId": "post_v1_tunnels_tunnel_id_domains_domain_id_verify"
-      }
-    },
-    "/v1/tunnels/{tunnel_id}/domains/{domain_id}/instructions": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/TunnelID"
-        },
-        {
-          "name": "domain_id",
-          "in": "path",
-          "required": true,
-          "schema": {
-            "type": "string",
-            "minLength": 3,
-            "maxLength": 128
-          }
-        }
-      ],
-      "get": {
-        "summary": "Get provider-aware DNS instructions",
-        "description": "Returns a stable non-origin target and exact CNAME, ALIAS, ANAME, or flattening guidance for subdomain, apex, and wildcard bindings.",
-        "security": [
-          {
-            "cookieSession": []
-          },
-          {
-            "bearerAccess": []
-          }
-        ],
-        "x-required-bearer-scopes": [
-          "tunnels:read"
-        ],
-        "responses": {
-          "200": {
-            "description": "DNS instructions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DNSInstructionsResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Error"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error"
-          },
-          "501": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "operationId": "get_v1_tunnels_tunnel_id_domains_domain_id_instructions",
-        "parameters": [
-          {
-            "name": "workspace",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "maxLength": 63
-            },
-            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
-          }
-        ]
       }
     },
     "/v1/machine-events/wait": {
@@ -29126,190 +28908,6 @@
           }
         },
         "operationId": "delete_v1_previews_preview_id_domains_domain_id"
-      }
-    },
-    "/v1/previews/{preview_id}/domains/{domain_id}/verify": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/PreviewID"
-        },
-        {
-          "name": "domain_id",
-          "in": "path",
-          "required": true,
-          "schema": {
-            "type": "string",
-            "minLength": 3,
-            "maxLength": 128
-          }
-        }
-      ],
-      "post": {
-        "summary": "Request domain verification",
-        "description": "Schedules a waiting_dns verification operation. The endpoint never marks a domain verified without external DNS evidence.",
-        "security": [
-          {
-            "cookieSession": [],
-            "csrfHeader": []
-          },
-          {
-            "bearerAccess": []
-          }
-        ],
-        "x-required-bearer-scopes": [
-          "previews:write"
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          },
-          {
-            "$ref": "#/components/parameters/IfMatch"
-          },
-          {
-            "name": "workspace",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "maxLength": 63
-            },
-            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
-          }
-        ],
-        "requestBody": {
-          "required": false,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TunnelStateMutationRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "202": {
-            "description": "Verification is waiting for external DNS proof.",
-            "headers": {
-              "ETag": {
-                "$ref": "#/components/headers/ETag"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PreviewTunnelOperationResponse"
-                }
-              }
-            }
-          },
-          "200": {
-            "description": "Already verified or idempotent replay.",
-            "headers": {
-              "ETag": {
-                "$ref": "#/components/headers/ETag"
-              }
-            },
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PreviewDomainResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error"
-          },
-          "409": {
-            "$ref": "#/components/responses/Error"
-          },
-          "412": {
-            "$ref": "#/components/responses/Error"
-          },
-          "428": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "operationId": "post_v1_previews_preview_id_domains_domain_id_verify"
-      }
-    },
-    "/v1/previews/{preview_id}/domains/{domain_id}/instructions": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/PreviewID"
-        },
-        {
-          "name": "domain_id",
-          "in": "path",
-          "required": true,
-          "schema": {
-            "type": "string",
-            "minLength": 3,
-            "maxLength": 128
-          }
-        }
-      ],
-      "get": {
-        "summary": "Get provider-aware DNS instructions",
-        "description": "Returns a stable non-origin target and exact CNAME, ALIAS, ANAME, or flattening guidance for subdomain, apex, and wildcard bindings.",
-        "security": [
-          {
-            "cookieSession": []
-          },
-          {
-            "bearerAccess": []
-          }
-        ],
-        "x-required-bearer-scopes": [
-          "previews:read"
-        ],
-        "responses": {
-          "200": {
-            "description": "DNS instructions.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PreviewDNSInstructionsResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Error"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error"
-          },
-          "501": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "operationId": "get_v1_previews_preview_id_domains_domain_id_instructions",
-        "parameters": [
-          {
-            "name": "workspace",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "maxLength": 63
-            },
-            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
-          }
-        ]
       }
     },
     "/v1/peer-network/register": {
@@ -38528,8 +38126,6 @@
                 "worker_tunnel_expiry",
                 "worker_connector_rotation",
                 "worker_connector_drain",
-                "worker_domain_dns",
-                "worker_preview_dns",
                 "worker_preview_outbox",
                 "worker_team_retention",
                 "worker_team_entitlements",
@@ -48399,8 +47995,20 @@
     "/v1/domains": {
       "get": {
         "operationId": "get_v1_domains",
-        "summary": "List the selected workspace's tunnel domains and live previews' custom domains",
-        "description": "Hostname order (then id), keyset paged, with the total. Tunnels and previews are the ones GET /v1/tunnels and GET /v1/previews?state=active list; deleted domains are not listed.",
+        "summary": "List the selected workspace's domains",
+        "description": "Every domain added to the workspace, with its DNS records, verification and certificate state and the tunnel and preview hostnames under it.",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "tunnels:read",
+          "previews:read"
+        ],
         "parameters": [
           {
             "name": "workspace",
@@ -48411,64 +48019,81 @@
               "maxLength": 63
             },
             "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 200,
-              "default": 50
-            }
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "maxLength": 1024
-            }
-          },
-          {
-            "name": "q",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "maxLength": 253
-            },
-            "description": "Hostname substring."
-          },
-          {
-            "name": "kind",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": [
-                "tunnel",
-                "preview"
-              ]
-            },
-            "description": "Without kind both are listed."
           }
         ],
         "responses": {
           "200": {
-            "description": "Workspace domain page.",
+            "description": "Workspace domains.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WorkspaceDomainPageResponse"
+                  "$ref": "#/components/schemas/WorkspaceDomainListResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Workspace unavailable."
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_v1_domains",
+        "summary": "Add a domain to the selected workspace",
+        "description": "Adds an apex or subdomain. It verifies once its _acme-challenge CNAME exists; then any name one level under it can be used by tunnels and previews. Team domains are added by owners and admins. A domain another workspace added but never verified is taken over; a verified one is refused.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "tunnels:write"
+        ],
+        "parameters": [
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceDomainCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Domain added (or already in this workspace).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceDomainResponse"
                 }
               }
             }
           },
           "400": {
-            "description": "Invalid query."
+            "description": "invalid_domain or domain_reserved."
+          },
+          "403": {
+            "description": "domain_forbidden: not a team owner or admin."
+          },
+          "409": {
+            "description": "domain_conflict: verified in another workspace."
           }
         }
       }
@@ -49027,6 +48652,167 @@
           }
         },
         "x-operator-capability": "admin"
+      }
+    },
+    "/v1/domains/{domain_id}": {
+      "get": {
+        "operationId": "get_v1_domains_domain_id",
+        "summary": "Show a workspace domain",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "tunnels:read",
+          "previews:read"
+        ],
+        "parameters": [
+          {
+            "name": "domain_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^wsd_[a-z0-9]{8,64}$"
+            }
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workspace domain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceDomainResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "domain_not_found."
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_v1_domains_domain_id",
+        "summary": "Remove a workspace domain",
+        "description": "Refused with domain_in_use (and the hostnames that use it) while a tunnel or preview uses a name under it.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "tunnels:write"
+        ],
+        "parameters": [
+          {
+            "name": "domain_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^wsd_[a-z0-9]{8,64}$"
+            }
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed."
+          },
+          "403": {
+            "description": "domain_forbidden."
+          },
+          "404": {
+            "description": "domain_not_found."
+          },
+          "409": {
+            "description": "domain_in_use; details.used_by lists the hostnames."
+          }
+        }
+      }
+    },
+    "/v1/domains/{domain_id}/check": {
+      "post": {
+        "operationId": "post_v1_domains_domain_id_check",
+        "summary": "Check a workspace domain's DNS now",
+        "description": "Schedules an immediate DNS check (and a certificate retry after a failure); poll the domain for the result.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "tunnels:write"
+        ],
+        "parameters": [
+          {
+            "name": "domain_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^wsd_[a-z0-9]{8,64}$"
+            }
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Check scheduled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceDomainResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "domain_not_found."
+          }
+        }
       }
     }
   }

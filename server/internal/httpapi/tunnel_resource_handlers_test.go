@@ -23,11 +23,10 @@ import (
 // it exercises; uncalled methods cannot accidentally become a second fake API.
 type resourceAPIStub struct {
 	tunnelv1.ResourceAPI
-	createRouteFn        func(context.Context, previewtunnelapi.RequestContext, string, tunnelv1.RouteCreateRequest) (tunnelv1.RouteMutationResult, error)
-	patchRouteFn         func(context.Context, previewtunnelapi.RequestContext, string, string, tunnelv1.RoutePatchRequest) (tunnelv1.RouteMutationResult, error)
-	domainInstructionsFn func(context.Context, previewtunnelapi.RequestContext, string, string) (tunnelv1.DNSInstructions, error)
-	tunnelLogsFn         func(context.Context, previewtunnelapi.RequestContext, string, string, int) (tunnelv1.LogPage, error)
-	createRouteInput     tunnelv1.RouteCreateRequest
+	createRouteFn    func(context.Context, previewtunnelapi.RequestContext, string, tunnelv1.RouteCreateRequest) (tunnelv1.RouteMutationResult, error)
+	patchRouteFn     func(context.Context, previewtunnelapi.RequestContext, string, string, tunnelv1.RoutePatchRequest) (tunnelv1.RouteMutationResult, error)
+	tunnelLogsFn     func(context.Context, previewtunnelapi.RequestContext, string, string, int) (tunnelv1.LogPage, error)
+	createRouteInput tunnelv1.RouteCreateRequest
 }
 
 func (s *resourceAPIStub) CreateRoute(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID string, input tunnelv1.RouteCreateRequest) (tunnelv1.RouteMutationResult, error) {
@@ -37,10 +36,6 @@ func (s *resourceAPIStub) CreateRoute(ctx context.Context, request previewtunnel
 
 func (s *resourceAPIStub) PatchRoute(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID, routeID string, input tunnelv1.RoutePatchRequest) (tunnelv1.RouteMutationResult, error) {
 	return s.patchRouteFn(ctx, request, tunnelID, routeID, input)
-}
-
-func (s *resourceAPIStub) DomainInstructions(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID, domainID string) (tunnelv1.DNSInstructions, error) {
-	return s.domainInstructionsFn(ctx, request, tunnelID, domainID)
 }
 
 func (s *resourceAPIStub) ListTunnelLogs(ctx context.Context, request previewtunnelapi.RequestContext, tunnelID, cursor string, limit int) (tunnelv1.LogPage, error) {
@@ -129,27 +124,15 @@ func TestTunnelResourceMutationsRejectUnknownEmptyBodiesAndInvalidETags(t *testi
 	}
 }
 
-func TestTunnelResourceDNSInstructionsAndLogsExposeTypedOutcomes(t *testing.T) {
+func TestTunnelResourceLogsExposeTypedOutcomes(t *testing.T) {
 	service := &resourceAPIStub{
-		domainInstructionsFn: func(context.Context, previewtunnelapi.RequestContext, string, string) (tunnelv1.DNSInstructions, error) {
-			return tunnelv1.DNSInstructions{}, tunnelv1.ErrDNSInstructionsUnavailable
-		},
 		tunnelLogsFn: func(context.Context, previewtunnelapi.RequestContext, string, string, int) (tunnelv1.LogPage, error) {
 			return tunnelv1.LogPage{Items: []tunnelv1.LogEntry{{Schema: tunnelv1.Schema, Kind: "log_entry", ID: "log_1", TunnelID: "tun_1", Level: "info", Component: "control", Code: "route_updated", Message: "route persisted", Metadata: map[string]any{"attempt": 2}, CorrelationID: "corr_1", OccurredAt: time.Date(2026, 8, 30, 10, 0, 0, 0, time.UTC), Cursor: "1"}}}, nil
 		},
 	}
-	request := tunnelHandlerRequest(http.MethodGet, "/v1/tunnels/tun_1/domains/dom_1/instructions", nil)
+	request := tunnelHandlerRequest(http.MethodGet, "/v1/tunnels/tun_1/logs?limit=20", nil)
 	request.SetPathValue("tunnel_id", "tun_1")
-	request.SetPathValue("domain_id", "dom_1")
 	response := httptest.NewRecorder()
-	tunnelResourceDomainInstructions(service).ServeHTTP(response, request)
-	if response.Code != http.StatusNotImplemented || !bytes.Contains(response.Body.Bytes(), []byte(`"code":"dns_instructions_unavailable"`)) {
-		t.Fatalf("DNS response = %d %s", response.Code, response.Body.String())
-	}
-
-	request = tunnelHandlerRequest(http.MethodGet, "/v1/tunnels/tun_1/logs?limit=20", nil)
-	request.SetPathValue("tunnel_id", "tun_1")
-	response = httptest.NewRecorder()
 	tunnelResourceTunnelLogs(service).ServeHTTP(response, request)
 	if response.Code != http.StatusOK || bytes.Contains(response.Body.Bytes(), []byte(`"next_cursor"`)) {
 		t.Fatalf("tail log page = %d %s", response.Code, response.Body.String())

@@ -226,13 +226,7 @@ func (f *serviceRepositoryFake) Create(_ context.Context, input CreateRecord) (R
 	row := previewDomainRow(input.DomainID, input.AccountID, input.PreviewID, input.Hostname, input.MatchType, input.PreviewGeneration, input.Now)
 	return RepositoryMutation{Domain: row, Operation: dbsqlc.Operation{ID: input.OperationID, ResourceKind: Kind, ResourceID: sql.NullString{String: input.DomainID, Valid: true}, Phase: "waiting_for_dns", State: "running", Progress: 35, CorrelationID: input.CorrelationID, CreatedAt: input.Now, UpdatedAt: input.Now}, Changed: true}, nil
 }
-func (f *serviceRepositoryFake) Verify(context.Context, MutationRecord) (RepositoryMutation, error) {
-	return RepositoryMutation{}, ErrInvalidInput
-}
 func (f *serviceRepositoryFake) Delete(context.Context, MutationRecord) (RepositoryMutation, error) {
-	return RepositoryMutation{}, ErrInvalidInput
-}
-func (f *serviceRepositoryFake) ApplyDNSObservation(context.Context, DNSObservationRecord) (RepositoryMutation, error) {
 	return RepositoryMutation{}, ErrInvalidInput
 }
 func (f *serviceRepositoryFake) ApplyCertificateObservation(context.Context, CertificateObservationRecord) (RepositoryMutation, error) {

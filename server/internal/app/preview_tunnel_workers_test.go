@@ -3,12 +3,12 @@ package app
 import (
 	"context"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/previewdomain"
+	"github.com/pinksaucepasta/paperboat/server/internal/workers"
+
 	"github.com/pinksaucepasta/paperboat/server/internal/previewv1"
 	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
@@ -17,54 +17,6 @@ import (
 type recordingPreviewLeaseReconciler struct {
 	actorID, correlationID, requestID string
 	err                               error
-}
-
-func TestPreviewDNSReconcileTelemetryProjectsTypedOutcome(t *testing.T) {
-	events, err := telemetry.NewEventLog(8)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer events.Close()
-	health, err := telemetry.NewHealthTracker(time.Now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	producer := &telemetry.Producer{Metrics: telemetry.NewMetrics(), Events: events, Health: health, Now: time.Now}
-	sink := previewDNSReconcileTelemetry(producer)
-	sink.EmitDNSReconcileEvent(context.Background(), previewdomain.DNSReconcileEvent{DomainID: "domain_1", PreviewID: "preview_1", Code: "verified", OwnershipState: "verified", ConflictState: "none", Verified: true})
-	if state := health.Snapshot().Dimensions.DNS; state.Status != telemetry.StatusReady || state.Code != "dns_verified" {
-		t.Fatalf("verified DNS health = %+v", state)
-	}
-	sink.EmitDNSReconcileEvent(context.Background(), previewdomain.DNSReconcileEvent{DomainID: "domain_1", PreviewID: "preview_1", Code: "dns_conflict", OwnershipState: "pending", ConflictState: "conflict"})
-	if state := health.Snapshot().Dimensions.DNS; state.Status != telemetry.StatusDegraded || state.Retry != telemetry.RetryNotRetryable {
-		t.Fatalf("conflict DNS health = %+v", state)
-	}
-	recorded := events.Snapshot()
-	if len(recorded) != 2 || recorded[0].Name != "dns_verification" || recorded[1].Outcome != telemetry.OutcomeFailed || recorded[1].IDs.DomainID != "domain_1" {
-		t.Fatalf("DNS telemetry events = %+v", recorded)
-	}
-}
-
-func TestTunnelDNSReconcileTelemetryProjectsTypedOutcome(t *testing.T) {
-	events, err := telemetry.NewEventLog(4)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer events.Close()
-	health, err := telemetry.NewHealthTracker(time.Now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	producer := &telemetry.Producer{Metrics: telemetry.NewMetrics(), Events: events, Health: health, Now: time.Now}
-	observe := tunnelDNSReconcileTelemetry(producer)
-	observe(context.Background(), tunnelv1.DomainDNSReconcileEvent{DomainID: "domain_2", Code: "dns_verification_failed", NextCheckAt: time.Now().Add(time.Minute)})
-	state := health.Snapshot().Dimensions.DNS
-	if state.Status != telemetry.StatusDegraded || state.Retry != telemetry.RetryScheduled || state.NextRetryAt == nil {
-		t.Fatalf("failed tunnel DNS health = %+v", state)
-	}
-	if recorded := events.Snapshot(); len(recorded) != 1 || recorded[0].IDs.DomainID != "domain_2" || recorded[0].Outcome != telemetry.OutcomeFailed {
-		t.Fatalf("tunnel DNS events = %+v", recorded)
-	}
 }
 
 func TestCertificateTelemetryProjectsLifecycleOutcome(t *testing.T) {

@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"errors"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/testutil"
 )
 
 func TestDomainCreateLostResponseReplayOnPostgres(t *testing.T) {
@@ -17,7 +19,8 @@ func TestDomainCreateLostResponseReplayOnPostgres(t *testing.T) {
 	if err := f.database.SQL().QueryRowContext(ctx, `SELECT id FROM paperboat.tunnel_routes WHERE tunnel_id=$1 AND deleted_at IS NULL ORDER BY id LIMIT 1`, tunnelID).Scan(&routeID); err != nil {
 		t.Fatal(err)
 	}
-	input := DomainRecord{OperationID: "op_domain_replay_" + f.suffix, AuditEventID: "aud_domain_replay_" + f.suffix, AccountID: account, TunnelID: tunnelID, DomainID: "dom_original_" + f.suffix, RouteID: routeID, Hostname: "replay-" + f.suffix + ".example.test", MatchType: "exact", ChallengeReference: "dns-challenge://" + f.suffix, DNSTarget: "target.example.test", IdempotencyKey: "domain-replay:" + f.suffix, RequestHash: sha256.Sum256([]byte("same-domain-body")), ActorID: account, AuditActorID: host, ActorType: "host", RequestID: "req_domain_replay_" + f.suffix, CorrelationID: "corr_domain_replay_" + f.suffix, SourceMachineID: host, Now: f.now}
+	testutil.VerifiedWorkspaceDomain(t, f.database.SQL(), account, "", "replay-"+f.suffix+".example.test")
+	input := DomainRecord{OperationID: "op_domain_replay_" + f.suffix, AuditEventID: "aud_domain_replay_" + f.suffix, AccountID: account, TunnelID: tunnelID, DomainID: "dom_original_" + f.suffix, RouteID: routeID, Hostname: "app.replay-" + f.suffix + ".example.test", MatchType: "exact", ChallengeReference: "dns-challenge://" + f.suffix, DNSTarget: "target.example.test", IdempotencyKey: "domain-replay:" + f.suffix, RequestHash: sha256.Sum256([]byte("same-domain-body")), ActorID: account, AuditActorID: host, ActorType: "host", RequestID: "req_domain_replay_" + f.suffix, CorrelationID: "corr_domain_replay_" + f.suffix, SourceMachineID: host, Now: f.now}
 	first, err := f.repository.CreateResourceDomain(ctx, input)
 	if err != nil {
 		t.Fatal(err)

@@ -14,10 +14,7 @@ import (
 // CursorKey is deliberately separate from the tunnel list key so a token from
 // one resource family can never be replayed against another family.
 type ResourceConfig struct {
-	CursorKey []byte
-	// ChallengeZone is the server-owned authoritative zone used for delegated
-	// ACME DNS-01 TXT targets. It is never a customer-controlled hostname.
-	ChallengeZone            string
+	CursorKey                []byte
 	Now                      func() time.Time
 	NewID                    func(prefix string) (string, error)
 	PublicTCPPortMin         int32
@@ -36,8 +33,6 @@ type ResourceAPI interface {
 	GetDomain(context.Context, previewtunnelapi.RequestContext, string, string) (DomainView, error)
 	CreateDomain(context.Context, previewtunnelapi.RequestContext, string, DomainCreateRequest) (DomainMutationResult, error)
 	DeleteDomain(context.Context, previewtunnelapi.RequestContext, string, string, ResourceMutationInput) (DomainMutationResult, error)
-	VerifyDomain(context.Context, previewtunnelapi.RequestContext, string, string, ResourceMutationInput) (DomainMutationResult, error)
-	DomainInstructions(context.Context, previewtunnelapi.RequestContext, string, string) (DNSInstructions, error)
 
 	ListTunnelLogs(context.Context, previewtunnelapi.RequestContext, string, string, int) (LogPage, error)
 	ListPreviewLogs(context.Context, previewtunnelapi.RequestContext, string, string, int) (LogPage, error)
@@ -231,27 +226,6 @@ type LogPage struct {
 	NextCursor string     `json:"next_cursor,omitempty"`
 }
 
-type DNSRecordInstruction struct {
-	Name  string `json:"name"`
-	Type  string `json:"type"`
-	Value string `json:"value"`
-	TTL   int    `json:"ttl"`
-}
-
-type DNSInstructions struct {
-	Schema              string                 `json:"schema"`
-	Kind                string                 `json:"kind"`
-	TunnelID            string                 `json:"tunnel_id"`
-	DomainID            string                 `json:"domain_id"`
-	Hostname            string                 `json:"hostname"`
-	Provider            string                 `json:"provider"`
-	Records             []DNSRecordInstruction `json:"records"`
-	CertificateStrategy string                 `json:"certificate_strategy"`
-	VerificationState   string                 `json:"verification_state"`
-	PublicTCPPort       int32                  `json:"public_tcp_port,omitempty"`
-	Note                string                 `json:"note"`
-}
-
 type ResourceMutationRecord struct {
 	Route             dbsqlc.TunnelRoute
 	Domain            dbsqlc.TunnelDomain
@@ -274,7 +248,6 @@ type ResourceRepository interface {
 	GetResourceDomain(context.Context, string, string, string) (dbsqlc.TunnelDomain, error)
 	CreateResourceDomain(context.Context, DomainRecord) (ResourceMutationRecord, error)
 	DeleteResourceDomain(context.Context, DomainRecord) (ResourceMutationRecord, error)
-	BeginResourceDomainVerification(context.Context, DomainRecord) (ResourceMutationRecord, error)
 	ListResourceTunnelLogs(context.Context, string, string, int64, int) ([]dbsqlc.ListTunnelLogsV1Row, error)
 	ListResourcePreviewLogs(context.Context, string, string, int64, int) ([]dbsqlc.TunnelLogEntry, error)
 }

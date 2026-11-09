@@ -18,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspacedomain"
 )
 
 // newCertificateRuntime is the server's concrete managed-TLS composition.
@@ -72,7 +73,21 @@ func newCertificateRuntime(ctx context.Context, database *db.DB, cfg config.Conf
 		TunnelBaseDomain:  cfg.Tunnel.BaseDomain,
 		RuntimeBaseDomain: cfg.RuntimeBaseDomain,
 	}, platformEdges.Resolve)
+	// Wildcard certificates need DNS-01: an http-01 deployment checks workspace domains but issues nothing.
+	var namesIssuer workspacedomain.NamesIssuer
+	if certificateConfig.ChallengeType() == config.CertificateChallengeDNS01 {
+		namesIssuer = issuer
+	}
+	domains, err := workspacedomain.NewWorker(database, workspaceDomainConfig(cfg), workspacedomain.WorkerConfig{
+		Issuer: namesIssuer, CAA: caaInspector, Keys: secrets, MasterKeyReference: certificateConfig.MasterKeyReference,
+		IssuerName: certificateConfig.Issuer, OwnerID: certificateConfig.OwnerID, RenewBefore: certificateConfig.RenewBefore,
+		LockTTL: certificateConfig.LockTTL, MaxLifetime: certificateConfig.MaxCertificateLifetime,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: workspace domains: %w", tunnelv1.ErrCertificateRuntimeUnavailable, err)
+	}
 	runtime, err := tunnelv1.NewCertificateRuntime(tunnelv1.CertificateRuntimeConfig{
+		WorkspaceCertificates:  domains,
 		NodeCredentials:        nodeauth.Composite{operatorinfra.NewService(database, cfg.Secrets.EncryptionKey), selfhost.New(database, cfg.Secrets.EncryptionKey)},
 		Database:               database,
 		Issuer:                 issuer,
@@ -94,7 +109,12 @@ func newCertificateRuntime(ctx context.Context, database *db.DB, cfg config.Conf
 		return nil, err
 	}
 	runtime.HTTP01 = http01
+	runtime.WorkspaceDomains = domains
 	return runtime, nil
+}
+
+func workspaceDomainConfig(cfg config.Config) workspacedomain.Config {
+	return workspacedomain.Config{ChallengeZone: cfg.Certificates.ChallengeZone, RoutingBase: cfg.Tunnel.BaseDomain}
 }
 
 // platformWildcardInputs returns the server-owned wildcard inputs. Wildcard

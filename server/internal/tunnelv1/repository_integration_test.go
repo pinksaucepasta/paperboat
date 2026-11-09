@@ -21,8 +21,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
-	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/testutil"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspacedomain"
 )
 
 // TestSQLRepositoryExpiryResetOnPostgres is intentionally opt-in. It covers
@@ -318,9 +318,10 @@ func TestSQLRepositoryDeletionWithdrawsCertificatesOnPostgres(t *testing.T) {
 			domains := make([]DomainRecord, 2)
 			for i := range domains {
 				id := fmt.Sprintf("dom_delete_%d_%s", i, f.suffix)
+				testutil.VerifiedWorkspaceDomain(t, f.database.SQL(), account, "", fmt.Sprintf("delete-%d-%s.example.test", i, f.suffix))
 				input := DomainRecord{OperationID: "op_" + id, AuditEventID: "aud_" + id, AccountID: account, TunnelID: tunnel.Tunnel.ID,
 					DomainID: id, RouteID: routeID, Hostname: fmt.Sprintf("*.delete-%d-%s.example.test", i, f.suffix), MatchType: "one_label_wildcard",
-					CertificateStrategy: "on_demand_leaf", ChallengeReference: "dns-challenge://" + id, DNSTarget: "target.example.test",
+					CertificateStrategy: "managed", ChallengeReference: "dns-challenge://" + id, DNSTarget: "target.example.test",
 					IdempotencyKey: id, RequestHash: sha256.Sum256([]byte(id)), ActorID: account, AuditActorID: host, ActorType: "host",
 					RequestID: "req_" + id, CorrelationID: "corr_" + id, SourceMachineID: host, Now: f.now}
 				created, err := f.repository.CreateResourceDomain(ctx, input)
@@ -676,37 +677,42 @@ ORDER BY generation`, tunnelID)
 		t.Fatalf("route %s missing from final config snapshot: %#v", routeID, last.Routes)
 	}
 
-	// Domain persistence is independently scoped from route persistence. The
-	// create path must keep the state pending until external DNS proof exists;
-	// verify only advances the state machine to another waiting generation.
-	domainHost := "domain-" + fixture.suffix + ".example.test"
+	// A tunnel hostname lives under a verified domain of the tunnel's workspace and inherits its
+	// verification: it is created verified and waits only for its certificate. A hostname outside the
+	// workspace's domains, or under a domain still waiting for DNS, is refused.
 	domainInput := DomainRecord{OperationID: "op_trk07_domain_" + fixture.suffix, AuditEventID: "aud_trk07_domain_" + fixture.suffix,
 		AccountID: accountID, TunnelID: tunnelID, DomainID: "dom_trk07_" + fixture.suffix, RouteID: routeID,
-		Hostname: domainHost, MatchType: "exact", ChallengeReference: "dns-challenge://" + fixture.suffix, DNSTarget: "target.example.test",
+		Hostname: "app.domain-" + fixture.suffix + ".example.test", MatchType: "exact", ChallengeReference: "dns-challenge://" + fixture.suffix, DNSTarget: "target.example.test",
 		IdempotencyKey: "domain:" + fixture.suffix, RequestHash: sha256.Sum256([]byte("domain:" + fixture.suffix)), ActorID: accountID,
 		AuditActorID: hostID, ActorType: "host", RequestID: "req_domain_" + fixture.suffix, CorrelationID: "corr_domain_" + fixture.suffix,
 		SourceMachineID: hostID, Now: fixture.now}
+	if _, err := fixture.repository.CreateResourceDomain(ctx, domainInput); !errors.Is(err, workspacedomain.ErrNotCovered) {
+		t.Fatalf("hostname outside the workspace's domains = %v, want ErrNotCovered", err)
+	}
+	workspaceDomainID := testutil.VerifiedWorkspaceDomain(t, fixture.database.SQL(), accountID, "", "domain-"+fixture.suffix+".example.test")
+	if _, err := fixture.database.SQL().ExecContext(ctx, `UPDATE paperboat.workspace_domains SET ownership_state='pending' WHERE id=$1`, workspaceDomainID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.repository.CreateResourceDomain(ctx, domainInput); !errors.Is(err, workspacedomain.ErrNotVerified) {
+		t.Fatalf("hostname under a pending domain = %v, want ErrNotVerified", err)
+	}
+	if _, err := fixture.database.SQL().ExecContext(ctx, `UPDATE paperboat.workspace_domains SET ownership_state='verified' WHERE id=$1`, workspaceDomainID); err != nil {
+		t.Fatal(err)
+	}
 	domainResult, err := fixture.repository.CreateResourceDomain(ctx, domainInput)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if domainResult.Domain.OwnershipState != "pending" || domainResult.Operation.Phase != "waiting_for_dns" || domainResult.Operation.State != "running" {
+	if domainResult.Domain.OwnershipState != "verified" || domainResult.Domain.WorkspaceDomainID.String != workspaceDomainID ||
+		domainResult.Operation.Phase != "issuing_certificate" || domainResult.Operation.State != "running" {
 		t.Fatalf("domain create readiness = %#v", domainResult)
 	}
-	verifyInput := domainInput
-	verifyInput.OperationID = "op_trk07_domain_verify_" + fixture.suffix
-	verifyInput.AuditEventID = "aud_trk07_domain_verify_" + fixture.suffix
-	verifyInput.IdempotencyKey = "domain:verify:" + fixture.suffix
-	verifyInput.RequestHash = sha256.Sum256([]byte(verifyInput.IdempotencyKey))
-	verifyInput.RequestID = "req_domain_verify_" + fixture.suffix
-	verifyInput.CorrelationID = "corr_domain_verify_" + fixture.suffix
-	verifyInput.ExpectedGeneration = domainResult.Domain.Generation
-	verifiedRequest, err := fixture.repository.BeginResourceDomainVerification(ctx, verifyInput)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if verifiedRequest.Domain.OwnershipState != "pending" || verifiedRequest.Domain.Generation != 2 || verifiedRequest.Operation.Phase != "waiting_for_dns" || verifiedRequest.Operation.State != "running" {
-		t.Fatalf("domain verify readiness = %#v", verifiedRequest)
+	deeper := domainInput
+	deeper.DomainID, deeper.OperationID, deeper.AuditEventID, deeper.IdempotencyKey = "dom_trk07_deep_"+fixture.suffix, "op_deep_"+fixture.suffix, "aud_deep_"+fixture.suffix, "domain:deep:"+fixture.suffix
+	deeper.RequestHash = sha256.Sum256([]byte(deeper.IdempotencyKey))
+	deeper.Hostname = "a.b.domain-" + fixture.suffix + ".example.test" // two labels under: the wildcard certificate does not cover it
+	if _, err := fixture.repository.CreateResourceDomain(ctx, deeper); !errors.Is(err, workspacedomain.ErrNotCovered) {
+		t.Fatalf("two labels under the domain = %v, want ErrNotCovered", err)
 	}
 
 	// The targeted conflict query is serialized by the tunnel lock and treats
@@ -775,8 +781,9 @@ ORDER BY generation`, tunnelID)
 	otherDomain.RequestID = "req_domain_conflict_" + fixture.suffix
 	otherDomain.CorrelationID = "corr_domain_conflict_" + fixture.suffix
 	otherDomain.SourceMachineID = otherHost
-	if _, err := fixture.repository.CreateResourceDomain(ctx, otherDomain); !errors.Is(err, ErrDomainConflict) {
-		t.Fatalf("cross-account hostname conflict = %v", err)
+	// Another account cannot bind a name under this workspace's domain at all.
+	if _, err := fixture.repository.CreateResourceDomain(ctx, otherDomain); !errors.Is(err, workspacedomain.ErrNotCovered) {
+		t.Fatalf("cross-account hostname = %v, want ErrNotCovered", err)
 	}
 
 	// A child route reference is scoped in the same transaction. Supplying a
@@ -791,14 +798,14 @@ ORDER BY generation`, tunnelID)
 	if _, err := fixture.repository.CreateResourceDomain(ctx, crossDomain); !errors.Is(err, ErrRouteNotFound) {
 		t.Fatalf("cross-account domain route binding = %v", err)
 	}
-	deleteDomain := verifyInput
+	deleteDomain := domainInput
 	deleteDomain.OperationID = "op_trk07_domain_delete_" + fixture.suffix
 	deleteDomain.AuditEventID = "aud_trk07_domain_delete_" + fixture.suffix
 	deleteDomain.IdempotencyKey = "domain:delete:" + fixture.suffix
 	deleteDomain.RequestHash = sha256.Sum256([]byte(deleteDomain.IdempotencyKey))
 	deleteDomain.RequestID = "req_domain_delete_" + fixture.suffix
 	deleteDomain.CorrelationID = "corr_domain_delete_" + fixture.suffix
-	deleteDomain.ExpectedGeneration = verifiedRequest.Domain.Generation
+	deleteDomain.ExpectedGeneration = domainResult.Domain.Generation
 	deletedDomain, err := fixture.repository.DeleteResourceDomain(ctx, deleteDomain)
 	if err != nil {
 		t.Fatal(err)
@@ -993,9 +1000,10 @@ func TestDomainMutationOperationTimestampsOnPostgres(t *testing.T) {
 	if _, err := fixture.repository.CreateResourceRoute(ctx, trk07RouteInput(fixture, account, host, tunnel, route, "web", "app.example.test")); err != nil {
 		t.Fatal(err)
 	}
+	testutil.VerifiedWorkspaceDomain(t, fixture.database.SQL(), account, "", "clock-"+fixture.suffix+".example.test")
 	input := DomainRecord{OperationID: "op_domain_clock_" + fixture.suffix, AuditEventID: "aud_domain_clock_" + fixture.suffix,
 		AccountID: account, TunnelID: tunnel, DomainID: "dom_clock_" + fixture.suffix, RouteID: route,
-		Hostname: "clock-" + fixture.suffix + ".example.test", MatchType: "exact", ChallengeReference: "dns-challenge://clock", DNSTarget: "target.example.test",
+		Hostname: "app.clock-" + fixture.suffix + ".example.test", MatchType: "exact", ChallengeReference: "dns-challenge://clock", DNSTarget: "target.example.test",
 		IdempotencyKey: "domain-clock:" + fixture.suffix, RequestHash: sha256.Sum256([]byte("domain-clock:" + fixture.suffix)), ActorID: account,
 		AuditActorID: host, ActorType: "host", RequestID: "req_clock_" + fixture.suffix, CorrelationID: "corr_clock_" + fixture.suffix,
 		SourceMachineID: host, Now: fixture.now.Add(-time.Minute)}
@@ -1086,29 +1094,4 @@ func TestSelfhostTunnelCreateBootstrapsCustomDomainOnPostgres(t *testing.T) {
 	if durableEndpoint == configured.StableEndpoint || durableEndpoint == "" {
 		t.Fatal("API projection replaced durable managed identity")
 	}
-	if _, err := f.database.SQL().ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET public_ingress_ipv4='140.245.11.42',public_ingress_verified_at=now(),last_heartbeat_at=now() WHERE id=$1`, node); err != nil {
-		t.Fatal(err)
-	}
-	domain, err := f.repository.GetResourceDomain(ctx, account, created.Tunnel.ID, "dom_bootstrap_"+f.suffix)
-	if err != nil {
-		t.Fatal(err)
-	}
-	verified, err := f.repository.BeginResourceDomainVerification(ctx, DomainRecord{OperationID: "op_reverify_bootstrap_" + f.suffix, AuditEventID: "aud_reverify_bootstrap_" + f.suffix, AccountID: account, TunnelID: created.Tunnel.ID, DomainID: domain.ID, ExpectedGeneration: domain.Generation, IdempotencyKey: "reverify-bootstrap:" + f.suffix, RequestHash: sha256.Sum256([]byte("reverify:" + f.suffix)), ActorID: account, ActorType: "user", CorrelationID: "corr_reverify_" + f.suffix, Now: time.Now().UTC()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if verified.Domain.OwnershipState != "pending" || verified.Domain.Generation != domain.Generation+1 || verified.Domain.DnsTarget != "140.245.11.42" {
-		t.Fatalf("reverification did not fence changed ingress: %+v", verified.Domain)
-	}
-	var instructions []DNSRecordInstruction
-	if err := json.Unmarshal(verified.Domain.ExpectedRecords, &instructions); err != nil {
-		t.Fatal(err)
-	}
-	if len(instructions) != 1 || instructions[0].Type != "A" || instructions[0].Value != "140.245.11.42" {
-		t.Fatalf("new DNS instructions = %+v", instructions)
-	}
-	if _, err := f.database.Queries().ApplyTunnelDomainDNSObservationV1(ctx, dbsqlc.ApplyTunnelDomainDNSObservationV1Params{DomainID: domain.ID, ExpectedGeneration: domain.Generation, ObservedRecords: []byte(`["A 140.245.11.41"]`), OwnershipState: "verified", ConflictState: "clear", ObservationVerified: true, Now: sql.NullTime{Time: time.Now().UTC(), Valid: true}, NextCheckAt: time.Now().UTC().Add(time.Minute)}); !errors.Is(err, pgx.ErrNoRows) {
-		t.Fatalf("old-generation observation was accepted: %v", err)
-	}
-
 }

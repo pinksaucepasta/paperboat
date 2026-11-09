@@ -165,50 +165,25 @@ func TestPreviewCustomDomainsHTTPIntegration(t *testing.T) {
 		t.Fatalf("cross-account nested get status=%d body=%s", response.Code, response.Body.String())
 	}
 
-	response = harness.do(t, http.MethodGet, "/v1/previews/"+previewID+"/domains/"+apexID+"/instructions", "", account, readScopes, "", "")
-	if response.Code != http.StatusOK {
-		t.Fatalf("domain instructions status=%d body=%s", response.Code, response.Body.String())
-	}
-	var instructions previewdomain.DNSInstructions
-	decodePreviewCustomDomainJSON(t, response, &instructions)
-	if instructions.Hostname != "example.com" || len(instructions.Records) < 2 || instructions.Records[0].Type != "ANAME" {
-		t.Fatalf("apex instructions=%#v", instructions)
-	}
-	if strings.Contains(response.Body.String(), "super-secret") || strings.Contains(response.Body.String(), "route_id") || strings.Contains(response.Body.String(), "tunnel_id") {
-		t.Fatalf("instructions leaked internal metadata: %s", response.Body.String())
-	}
-
-	// Verify is a generation and idempotency mutation. A replay with the
-	// original If-Match succeeds, while a different mutation with that stale
-	// ETag is rejected before persistence.
 	exact := harness.repository.previewDomain(account, previewID, exactID)
-	oldExactETag := previewtunnelapi.ETag(previewdomain.Kind, exactID, exact.Generation)
-	response = harness.do(t, http.MethodPost, "/v1/previews/"+previewID+"/domains/"+exactID+"/verify", "{}", account, fullScopes, "verify-exact-1", oldExactETag)
-	if response.Code != http.StatusAccepted || response.Header().Get("ETag") == oldExactETag {
-		t.Fatalf("verify status=%d old_etag=%q new_etag=%q body=%s", response.Code, oldExactETag, response.Header().Get("ETag"), response.Body.String())
-	}
-	verifiedETag := response.Header().Get("ETag")
-	verifyCalls := harness.repository.domainMutationCalls("verify")
-	replay = harness.do(t, http.MethodPost, "/v1/previews/"+previewID+"/domains/"+exactID+"/verify", "{}", account, fullScopes, "verify-exact-1", oldExactETag)
-	if replay.Code != http.StatusAccepted || replay.Header().Get("ETag") != verifiedETag || harness.repository.domainMutationCalls("verify") != verifyCalls {
-		t.Fatalf("verify replay status=%d etag=%q calls=%d/%d body=%s", replay.Code, replay.Header().Get("ETag"), harness.repository.domainMutationCalls("verify"), verifyCalls, replay.Body.String())
-	}
-
-	response = harness.do(t, http.MethodDelete, "/v1/previews/"+previewID+"/domains/"+exactID, "{}", account, fullScopes, "delete-stale-1", oldExactETag)
+	currentExactETag := previewtunnelapi.ETag(previewdomain.Kind, exactID, exact.Generation)
+	// A delete with a generation the row does not have is rejected before persistence.
+	staleExactETag := previewtunnelapi.ETag(previewdomain.Kind, exactID, exact.Generation+1)
+	response = harness.do(t, http.MethodDelete, "/v1/previews/"+previewID+"/domains/"+exactID, "{}", account, fullScopes, "delete-stale-1", staleExactETag)
 	if response.Code != http.StatusPreconditionFailed || !strings.Contains(response.Body.String(), `"code":"generation_conflict"`) {
 		t.Fatalf("stale delete status=%d body=%s", response.Code, response.Body.String())
 	}
-	response = harness.do(t, http.MethodDelete, "/v1/previews/"+previewID+"/domains/"+exactID, "{}", account, fullScopes, "", verifiedETag)
+	response = harness.do(t, http.MethodDelete, "/v1/previews/"+previewID+"/domains/"+exactID, "{}", account, fullScopes, "", currentExactETag)
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"idempotency_key_required"`) {
 		t.Fatalf("missing delete idempotency status=%d body=%s", response.Code, response.Body.String())
 	}
-	response = harness.do(t, http.MethodDelete, "/v1/previews/"+previewID+"/domains/"+exactID, "{}", account, fullScopes, "delete-exact-1", verifiedETag)
+	response = harness.do(t, http.MethodDelete, "/v1/previews/"+previewID+"/domains/"+exactID, "{}", account, fullScopes, "delete-exact-1", currentExactETag)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"state":"quarantined"`) {
 		t.Fatalf("domain delete status=%d body=%s", response.Code, response.Body.String())
 	}
 	deletedETag := response.Header().Get("ETag")
 	deleteCalls := harness.repository.domainMutationCalls("delete")
-	replay = harness.do(t, http.MethodDelete, "/v1/previews/"+previewID+"/domains/"+exactID, "{}", account, fullScopes, "delete-exact-1", verifiedETag)
+	replay = harness.do(t, http.MethodDelete, "/v1/previews/"+previewID+"/domains/"+exactID, "{}", account, fullScopes, "delete-exact-1", currentExactETag)
 	if replay.Code != http.StatusOK || replay.Header().Get("ETag") != deletedETag || harness.repository.domainMutationCalls("delete") != deleteCalls {
 		t.Fatalf("delete replay status=%d etag=%q calls=%d/%d body=%s", replay.Code, replay.Header().Get("ETag"), harness.repository.domainMutationCalls("delete"), deleteCalls, replay.Body.String())
 	}
@@ -267,10 +242,9 @@ func newPreviewCustomDomainsHTTPHarness(t *testing.T, now time.Time, account, ot
 		t.Fatal(err)
 	}
 	domainService, err := previewdomain.NewService(repository, previewdomain.Config{
-		CursorKey:     bytes.Repeat([]byte("d"), 32),
-		ChallengeZone: "challenge.paperboat.test",
-		Now:           func() time.Time { return now },
-		NewID:         previewCustomDomainIDFactory(),
+		CursorKey: bytes.Repeat([]byte("d"), 32),
+		Now:       func() time.Time { return now },
+		NewID:     previewCustomDomainIDFactory(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -291,8 +265,6 @@ func newPreviewCustomDomainsHTTPRouter(previewAPI PreviewLeaseAPI, domainAPI pre
 	mux.Handle("GET /v1/previews/{preview_id}/domains", PreviewDomainList(domainAPI))
 	mux.Handle("GET /v1/previews/{preview_id}/domains/{domain_id}", PreviewDomainGet(domainAPI))
 	mux.Handle("DELETE /v1/previews/{preview_id}/domains/{domain_id}", PreviewDomainDelete(domainAPI))
-	mux.Handle("POST /v1/previews/{preview_id}/domains/{domain_id}/verify", PreviewDomainVerify(domainAPI))
-	mux.Handle("GET /v1/previews/{preview_id}/domains/{domain_id}/instructions", PreviewDomainInstructions(domainAPI))
 	return mux
 }
 
@@ -774,27 +746,8 @@ func (f *previewCustomDomainsRepository) Create(_ context.Context, input preview
 	return result, nil
 }
 
-func (f *previewCustomDomainsRepository) Verify(_ context.Context, input previewdomain.MutationRecord) (previewdomain.RepositoryMutation, error) {
-	return f.mutateDomain(input, true)
-}
-
 func (f *previewCustomDomainsRepository) Delete(_ context.Context, input previewdomain.MutationRecord) (previewdomain.RepositoryMutation, error) {
-	return f.mutateDomain(input, false)
-}
-
-func (f *previewCustomDomainsRepository) ApplyDNSObservation(_ context.Context, input previewdomain.DNSObservationRecord) (previewdomain.RepositoryMutation, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	key := previewCustomDomainScope(input.AccountID, input.PreviewID, input.DomainID)
-	row, ok := f.domains[key]
-	if !ok || row.DeletedAt.Valid || row.Generation != input.ExpectedGeneration {
-		return previewdomain.RepositoryMutation{}, previewdomain.ErrGenerationConflict
-	}
-	row.ObservedRecords, row.OwnershipState, row.ConflictState = append([]byte(nil), input.ObservedRecords...), input.OwnershipState, input.ConflictState
-	row.Generation++
-	row.UpdatedAt = input.Now
-	f.domains[key] = row
-	return previewdomain.RepositoryMutation{Domain: row, Changed: true}, nil
+	return f.mutateDomain(input)
 }
 
 func (f *previewCustomDomainsRepository) ApplyCertificateObservation(_ context.Context, input previewdomain.CertificateObservationRecord) (previewdomain.RepositoryMutation, error) {
@@ -828,13 +781,10 @@ func (f *previewCustomDomainsRepository) ReadyAliases(_ context.Context, account
 	return result, nil
 }
 
-func (f *previewCustomDomainsRepository) mutateDomain(input previewdomain.MutationRecord, verify bool) (previewdomain.RepositoryMutation, error) {
+func (f *previewCustomDomainsRepository) mutateDomain(input previewdomain.MutationRecord) (previewdomain.RepositoryMutation, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	opType := "delete"
-	if verify {
-		opType = "verify"
-	}
 	key := opType + ":" + previewCustomDomainScope(input.AccountID, input.IdempotencyKey)
 	if previous, ok := f.domainOps[key]; ok {
 		if previous.hash != input.RequestHash {
@@ -858,16 +808,10 @@ func (f *previewCustomDomainsRepository) mutateDomain(input previewdomain.Mutati
 	}
 	row.Generation++
 	row.UpdatedAt = input.Now
-	phase, state, progress := "waiting_for_dns", "running", int16(35)
-	if verify {
-		row.OwnershipState, row.ConflictState = "pending", "clear"
-		row.VerificationAttempts = 0
-	} else {
-		row.OwnershipState, row.CertificateState, row.ConflictState = "revoked", "revoked", "quarantined"
-		row.DeletedAt = sql.NullTime{Time: input.Now, Valid: true}
-		row.QuarantineUntil = sql.NullTime{Time: input.Now.Add(previewdomain.Quarantine), Valid: true}
-		phase, state, progress = "ready", "succeeded", 100
-	}
+	row.OwnershipState, row.CertificateState, row.ConflictState = "revoked", "revoked", "quarantined"
+	row.DeletedAt = sql.NullTime{Time: input.Now, Valid: true}
+	row.QuarantineUntil = sql.NullTime{Time: input.Now.Add(previewdomain.Quarantine), Valid: true}
+	phase, state, progress := "ready", "succeeded", int16(100)
 	f.domains[domainKey] = row
 	op := previewCustomDomainOperation(input.OperationID, input.AccountID, input.IdempotencyKey, "preview.domain."+opType, input.DomainID, phase, state, progress, input.Now)
 	result := previewdomain.RepositoryMutation{Domain: row, Operation: op, Changed: true}

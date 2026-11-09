@@ -2044,6 +2044,7 @@ type PreviewDomain struct {
 	UpdatedAt                     time.Time
 	DeletedAt                     sql.NullTime
 	QuarantineUntil               sql.NullTime
+	WorkspaceDomainID             sql.NullString
 }
 
 type PreviewLease struct {
@@ -2792,6 +2793,7 @@ type TunnelDomain struct {
 	QuarantineUntil               sql.NullTime
 	CertificateRetryAt            sql.NullTime
 	CertificateFailureAttempts    int32
+	WorkspaceDomainID             sql.NullString
 }
 
 type TunnelLogEntry struct {
@@ -3230,6 +3232,33 @@ type WorkosEventCursor struct {
 	Singleton  bool
 	AfterEvent string
 	UpdatedAt  time.Time
+}
+
+type WorkspaceDomain struct {
+	ID                     string
+	AccountID              string
+	OwnerTeamID            sql.NullString
+	Hostname               string
+	ChallengeReference     string
+	OwnershipState         string
+	DnsFailureCode         sql.NullString
+	ObservedRecords        []byte
+	DnsLastCheckedAt       sql.NullTime
+	DnsNextCheckAt         time.Time
+	VerificationAttempts   int32
+	VerifiedAt             sql.NullTime
+	CertificateState       string
+	CertificateFailureCode sql.NullString
+	CertificateAttempts    int32
+	CertificateRetryAt     sql.NullTime
+	MasterKeyReference     sql.NullString
+	CertificateCiphertext  []byte
+	PrivateKeyCiphertext   []byte
+	CertificateFingerprint []byte
+	CertificateExpiresAt   sql.NullTime
+	CreatedByActorID       string
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
 }
 
 type WorkspaceEdgeSet struct {

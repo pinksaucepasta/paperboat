@@ -3,6 +3,7 @@ package publicationdns
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"golang.org/x/net/publicsuffix"
 	"net"
@@ -117,13 +118,6 @@ func RecordType(target, hostnameRecordType string) string {
 	return hostnameRecordType
 }
 
-func Note(target, hostnameNote string) string {
-	if net.ParseIP(target) != nil {
-		return "Add the shown address record for the selected server. Paperboat waits for DNS verification before TLS becomes ready."
-	}
-	return hostnameNote
-}
-
 // DomainRecordType preserves provider-specific apex aliases for hostname targets.
 func DomainRecordType(target, hostname, provider string) string {
 	hostnameType := "CNAME"
@@ -139,4 +133,47 @@ func DomainRecordType(target, hostname, provider string) string {
 		}
 	}
 	return RecordType(target, hostnameType)
+}
+
+// WorkspaceTargetsTx is where a workspace domain's names point: managedName (a name under the platform
+// wildcard) for a managed workspace, or the observed ingress addresses of at most two of the workspace's
+// eligible self-hosted edges in distinct failure domains.
+func WorkspaceTargetsTx(ctx context.Context, tx *db.Tx, account string, team sql.NullString, managedName string) ([]string, error) {
+	var mode string
+	if err := tx.QueryRow(ctx, `SELECT paperboat.workspace_edge_mode($1,$2)`, account, team).Scan(&mode); err != nil {
+		return nil, err
+	}
+	if mode == "managed-only" {
+		return []string{managedName}, nil
+	}
+	rows, err := tx.Query(ctx, `SELECT v4,v6 FROM (SELECT DISTINCT ON (n.failure_domain) n.failure_domain,n.id,
+ coalesce(host(n.public_ingress_ipv4),'') v4,coalesce(host(n.public_ingress_ipv6),'') v6
+ FROM paperboat.control_tunnel_nodes n
+ WHERE paperboat.node_workspace_edge_eligible(n.id,$1,$2) AND n.ready AND n.state='ready' AND n.drain_deadline IS NULL
+   AND n.last_heartbeat_at>now()-interval '15 seconds' AND n.registry_expires_at>now() AND n.roles @> ARRAY['edge']::text[]
+   AND n.public_ingress_verified_at IS NOT NULL AND (n.public_ingress_ipv4 IS NOT NULL OR n.public_ingress_ipv6 IS NOT NULL)
+ ORDER BY n.failure_domain,n.id) pick ORDER BY id LIMIT 2`, account, team)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	targets := []string{}
+	for rows.Next() {
+		var v4, v6 string
+		if err := rows.Scan(&v4, &v6); err != nil {
+			return nil, err
+		}
+		for _, value := range []string{v4, v6} {
+			if value != "" {
+				targets = append(targets, value)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(targets) == 0 {
+		return nil, ErrSelfhostPlacementRequired
+	}
+	return targets, nil
 }

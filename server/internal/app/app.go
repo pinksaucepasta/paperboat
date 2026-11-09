@@ -32,7 +32,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/server/internal/diagnosticuploads"
-	"github.com/pinksaucepasta/paperboat/server/internal/domaininventory"
 	"github.com/pinksaucepasta/paperboat/server/internal/edgeset"
 	"github.com/pinksaucepasta/paperboat/server/internal/endpoints"
 	"github.com/pinksaucepasta/paperboat/server/internal/environment"
@@ -84,6 +83,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 	"github.com/pinksaucepasta/paperboat/server/internal/workers"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/server/internal/workspacedomain"
 )
 
 func New(opts Options) (*App, error) {
@@ -136,8 +136,7 @@ func New(opts Options) (*App, error) {
 	}
 	cursorKey := sha256.Sum256([]byte("paperboat.preview-tunnel.cursor\x00" + opts.Config.Secrets.EncryptionKey))
 	previewDomainService, err := previewdomain.NewService(previewDomainRepository, previewdomain.Config{
-		CursorKey:     cursorKey[:],
-		ChallengeZone: opts.Config.Certificates.ChallengeZone,
+		CursorKey: cursorKey[:],
 	})
 	if err != nil {
 		_ = store.Close()
@@ -183,21 +182,11 @@ func New(opts Options) (*App, error) {
 		return nil, fmt.Errorf("configure tunnel service: %w", err)
 	}
 	tunnelResourceService, err := tunnelv1.NewResourceService(tunnelRepository, tunnelv1.ResourceConfig{
-		CursorKey: cursorKey[:], ChallengeZone: opts.Config.Certificates.ChallengeZone, AllowInsecureDevelopment: opts.Config.Environment == config.EnvironmentDevelopment,
+		CursorKey: cursorKey[:], AllowInsecureDevelopment: opts.Config.Environment == config.EnvironmentDevelopment,
 	})
 	if err != nil {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure tunnel resource service: %w", err)
-	}
-	domainReconciler, err := tunnelv1.NewDomainReconciler(store, tunnelv1.NetDomainDNSResolver{}, nil)
-	if err != nil {
-		_ = store.Close()
-		return nil, fmt.Errorf("configure tunnel domain reconciler: %w", err)
-	}
-	previewDomainReconciler, err := previewdomain.NewDNSReconciler(previewDomainRepository, tunnelv1.NetDomainDNSResolver{}, previewdomain.ReconcilerConfig{})
-	if err != nil {
-		_ = store.Close()
-		return nil, fmt.Errorf("configure preview domain reconciler: %w", err)
 	}
 	trustedLoginOrigin := opts.Config.HTTP.BrowserLoginOrigin
 	if trustedLoginOrigin == "" && len(opts.Config.HTTP.AllowedOrigins) == 1 {
@@ -599,14 +588,6 @@ func New(opts Options) (*App, error) {
 		_ = store.Close()
 		return nil, fmt.Errorf("configure telemetry diagnostics: %w", telemetryErr)
 	}
-	if err = previewDomainReconciler.SetEventSink(previewDNSReconcileTelemetry(telemetryProducer)); err != nil {
-		_ = store.Close()
-		return nil, fmt.Errorf("configure preview DNS telemetry: %w", err)
-	}
-	if err = domainReconciler.SetTelemetryObserver(tunnelDNSReconcileTelemetry(telemetryProducer)); err != nil {
-		_ = store.Close()
-		return nil, fmt.Errorf("configure tunnel DNS telemetry: %w", err)
-	}
 	if opts.CertificateWorker != nil {
 		if err = opts.CertificateWorker.SetTelemetryObserver(certificateTelemetry(telemetryProducer)); err != nil {
 			_ = store.Close()
@@ -812,7 +793,7 @@ func New(opts Options) (*App, error) {
 		PreviewDomains:           previewDomainService,
 		Tunnels:                  tunnelService,
 		TunnelResources:          tunnelResourceService,
-		Domains:                  domaininventory.New(store),
+		Domains:                  workspacedomain.New(store, workspaceDomainConfig(opts.Config)),
 		PreviewLogs:              tunnelResourceService,
 		RuntimeCarrierAttachment: runtimeAttachmentHandler,
 		BrowserAccess:            browserAccessHandlers,
@@ -841,9 +822,17 @@ func New(opts Options) (*App, error) {
 		observedWorker(supportService, "worker_config_revocation", configRepositoryAccessService.RevocationWorker(opts.Config.TerminalSessions.WorkerInterval, 25), progress),
 		observedWorker(supportService, "worker_preview_leases", previewLeaseReconciliationWorker(previewLeaseService, opts.Config.TerminalSessions.WorkerInterval, telemetryProducer), progress),
 		observedWorker(supportService, "worker_tunnel_expiry", tunnelExpiryReconciliationWorker(tunnelService, opts.Config.TerminalSessions.WorkerInterval), progress),
-		observedWorker(supportService, "worker_domain_dns", domainReconciler.Worker(opts.Config.TerminalSessions.WorkerInterval, 100), progress),
-		observedWorker(supportService, "worker_preview_dns", previewDomainReconciler.Worker(opts.Config.TerminalSessions.WorkerInterval, 100), progress),
 	}
+	workspaceDomainWorker := (*workspacedomain.Worker)(nil)
+	if certificateRuntime != nil {
+		workspaceDomainWorker = certificateRuntime.WorkspaceDomains
+	}
+	if workspaceDomainWorker == nil { // managed certificates off: domains are checked, no certificate is issued
+		if workspaceDomainWorker, err = workspacedomain.NewWorker(store, workspaceDomainConfig(opts.Config), workspacedomain.WorkerConfig{}); err != nil {
+			return nil, fmt.Errorf("configure workspace domains: %w", err)
+		}
+	}
+	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_workspace_domains", workspaceDomainWorker.Worker(opts.Config.TerminalSessions.WorkerInterval, 50), progress))
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_team_retention", periodicPreviewTunnelWorker(time.Minute, func(ctx context.Context) error {
 		pruneContext, cancel := context.WithTimeout(ctx, opts.Config.Retention.Budget+opts.Config.HTTP.RequestTimeout)
 		defer cancel()
