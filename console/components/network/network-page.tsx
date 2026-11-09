@@ -1,6 +1,6 @@
 "use client"
 
-import { CheckCircleIcon, CopyIcon, HardDrivesIcon, PlusIcon, ShieldCheckIcon, TrashIcon } from "@phosphor-icons/react"
+import { CheckCircleIcon, CopyIcon, PlusIcon, ShieldCheckIcon, TrashIcon } from "@phosphor-icons/react"
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useDeferredValue, useState } from "react"
 import { toast } from "sonner"
@@ -29,10 +29,9 @@ import { ListPager } from "@/components/list-pager"
 import { ConfirmAction, SearchField } from "@/components/list-toolbar"
 import { StatusDot } from "@/components/machine-status"
 import { RowMenus, type Entry } from "@/components/row-menus"
-import { Section } from "@/components/section"
+import { PageIntro, Section } from "@/components/section"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -63,45 +62,53 @@ function nodeState(node: Node): { ok: boolean; label: string } {
 export function NetworkPage() {
   const workspace = useWorkspace()
   const scope = scopeOf(workspace)
+  const team = workspace?.kind === "team"
   const [search, setSearch] = useState("")
   const q = useDeferredValue(search.trim())
   const pages = usePageParam(q)
   const installations = useApiQuery({ ...installationsQuery(scope, q, pages.page), enabled: Boolean(workspace) })
-  const [adding, setAdding] = useState(false)
+  const [adding, setAdding] = useState<"relay" | "tunnel" | undefined>()
   const nodes = groupNodes(installations.data?.items ?? [])
   const none = installations.isSuccess && installations.data.total === 0 && !q
-  const team = workspace?.kind === "team"
-  const addButton = (
-    <Button size="lg" onClick={() => setAdding(true)}>
-      <PlusIcon data-icon="inline-start" />
-      Add server
-    </Button>
-  )
 
   return (
     <div className="flex flex-col gap-10">
-      {none ? (
-        <Empty className="py-16">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <HardDrivesIcon />
-            </EmptyMedia>
-            <EmptyTitle>{team ? `No servers in ${workspace?.name}` : "No servers of your own"}</EmptyTitle>
-            <EmptyDescription>
-              {team ? "The team’s machines" : "Your machines"} use Paperboat’s servers. Run a relay or tunnel server on
-              your own Linux server to keep traffic on hardware you control.
-            </EmptyDescription>
-          </EmptyHeader>
-          <EmptyContent>{addButton}</EmptyContent>
-        </Empty>
-      ) : (
-        <section className="flex flex-col gap-3">
-          <div className="flex items-center gap-2">
-            {(q || (installations.data?.total ?? 0) > cursorPageSize) && (
-              <SearchField value={search} onChange={setSearch} placeholder="Search servers" />
-            )}
-            <div className="ml-auto">{addButton}</div>
+      <PageIntro
+        title="Network"
+        description="How your machines’ traffic travels, whether it’s healthy, and the servers that carry it."
+        action={
+          <Button size="lg" onClick={() => setAdding("relay")}>
+            <PlusIcon data-icon="inline-start" />
+            Add server
+          </Button>
+        }
+      />
+
+      <Section title="How your traffic travels">
+        <div className="grid gap-3 pt-3 sm:grid-cols-2">
+          <PathCard capability="relay" scope={scope} team={team} onAdd={() => setAdding("relay")} />
+          <PathCard capability="tunnel" scope={scope} team={team} onAdd={() => setAdding("tunnel")} />
+        </div>
+      </Section>
+
+      <Section
+        title={team ? `${workspace?.name ?? "Team"} servers` : "Your servers"}
+        action={
+          (q || (installations.data?.total ?? 0) > cursorPageSize) && (
+            <SearchField value={search} onChange={setSearch} placeholder="Search servers" />
+          )
+        }
+      >
+        {none ? (
+          <div className="flex flex-wrap items-center gap-4 border-b border-divider py-3 text-sm">
+            <span className="min-w-0 flex-1 text-muted-foreground">
+              None yet. Run a relay or tunnel server on a Linux machine to keep traffic on your hardware.
+            </span>
+            <Button variant="secondary" onClick={() => setAdding("relay")}>
+              Add server
+            </Button>
           </div>
+        ) : (
           <div>
             <table className="w-full table-fixed text-sm">
               <colgroup>
@@ -113,7 +120,7 @@ export function NetworkPage() {
               </colgroup>
               <thead className="border-b border-divider text-left text-xs text-muted-foreground">
                 <tr className="[&>th]:h-9 [&>th]:px-3 [&>th]:font-normal">
-                  <th>Your servers</th>
+                  <th>Server</th>
                   <th className="hidden md:table-cell">Runs</th>
                   <th className="hidden sm:table-cell">Address</th>
                   <th>Status</th>
@@ -122,7 +129,7 @@ export function NetworkPage() {
               </thead>
               <tbody className="divide-y divide-divider border-b border-divider">
                 {installations.isPending
-                  ? Array.from({ length: 2 }, (_, index) => (
+                  ? Array.from({ length: 1 }, (_, index) => (
                       <tr key={index} className="[&>td]:h-14 [&>td]:px-3">
                         <td colSpan={5}>
                           <Skeleton className="h-5 w-1/3" />
@@ -147,16 +154,16 @@ export function NetworkPage() {
               <p className="py-12 text-center text-sm text-muted-foreground">No servers match “{q}”</p>
             )}
           </div>
-        </section>
-      )}
-
-      <PaperboatServers />
-      <Section title="Servers in use">
-        <PoolRow capability="relay" scope={scope} team={team} />
-        <PoolRow capability="tunnel" scope={scope} team={team} />
+        )}
       </Section>
 
-      {adding && <AddServerDialog workspaceName={workspace?.name ?? "Personal"} onClose={() => setAdding(false)} />}
+      {adding && (
+        <AddServerDialog
+          workspaceName={workspace?.name ?? "Personal"}
+          initial={adding}
+          onClose={() => setAdding(undefined)}
+        />
+      )}
     </div>
   )
 }
@@ -236,27 +243,41 @@ function NodeRow({ node }: { node: Node }) {
 const poolCopy = {
   relay: {
     title: "Relays",
-    about: "Carry traffic only when two machines can’t connect directly. They never see inside the encryption.",
+    about: "Used only when two machines can’t connect directly. They never see inside the encryption.",
     shared: { mode: "mixed" as const, title: "Paperboat’s and yours" },
     own: "Traffic that can’t go directly uses only the relays you pick. If they’re down, it fails instead of using Paperboat’s.",
   },
   tunnel: {
-    title: "Tunnels and previews",
-    about: "Where public addresses meet the internet. Browser HTTPS ends on this server.",
+    title: "Tunnels & previews",
+    about: "Where public addresses meet the internet. Browser HTTPS ends here.",
     shared: { mode: "managed-only" as const, title: "Paperboat’s" },
     own: "Tunnels and previews are served only from the servers you pick, on your own domains. Stop running previews and tunnels before switching.",
   },
 }
 
-/** Which servers carry one kind of traffic: Paperboat's (and yours, for relays), or only yours. */
-function PoolRow({
+type Health = { ok: boolean; label: string }
+
+const health = (ready: number, total: number): Health =>
+  ready === total
+    ? { ok: true, label: "Ready" }
+    : ready
+      ? { ok: false, label: `${ready} of ${total} ready` }
+      : { ok: false, label: total ? "Not ready" : "None chosen" }
+
+/**
+ * One way traffic travels (relays, or tunnels and previews): who serves it now and whether it's
+ * healthy, and, once you have a server of that kind, the choice between Paperboat's and only yours.
+ */
+function PathCard({
   capability,
   scope,
   team,
+  onAdd,
 }: {
   capability: Capability
   scope: ReturnType<typeof scopeOf>
   team: boolean
+  onAdd: () => void
 }) {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState("")
@@ -264,7 +285,10 @@ function PoolRow({
   const found = useInfiniteQuery(poolServersQuery(capability, scope, q))
   const servers = found.data?.pages.flatMap((page) => page.items) ?? []
   // Whether any server exists comes from the unfiltered total, not from what a search matched.
-  const anyServer = useInfiniteQuery(poolServersQuery(capability, scope, "")).data?.pages[0]?.total ?? 0
+  const allServers = useInfiniteQuery(poolServersQuery(capability, scope, ""))
+  const anyServer = allServers.data?.pages[0]?.total ?? 0
+  const known = allServers.data?.pages.flatMap((page) => page.items) ?? []
+  const edges = useApiQuery({ ...edgesQuery, enabled: capability === "tunnel" })
   const copy = poolCopy[capability]
   const pool = useApiQuery(poolQuery(capability, scope))
   const [draft, setDraft] = useState<Pool>()
@@ -298,28 +322,59 @@ function PoolRow({
         ? [...current.installation_ids, id].slice(0, 32)
         : current.installation_ids.filter((entry) => entry !== id),
     })
-  const kind = capability === "relay" ? "relay" : "tunnel server"
+
+  // Who serves it now, from the saved setting (not the unsaved draft).
+  let served: React.ReactNode = <Skeleton className="h-4 w-40" />
+  let status: Health | undefined
+  if (pool.data?.mode === "self-hosted-only") {
+    const members = pool.data.members ?? []
+    served = members.map((member) => member.name).join(", ") || "Your servers"
+    const ready = known.filter((server) => pool.data!.installation_ids.includes(server.installation_id) && server.ready)
+    status = health(ready.length, pool.data.installation_ids.length)
+  } else if (capability === "tunnel" && edges.data) {
+    const regions = [...new Set(edges.data.map((edge) => placeName(edge.region)))]
+    served = `Paperboat · ${regions.join(", ") || "no region"}${edges.data.length > 1 ? ` · ${edges.data.length} servers` : ""}`
+    status = health(edges.data.filter((edge) => edge.status === "ready").length, edges.data.length)
+  } else if (capability === "relay" && pool.data) {
+    // Paperboat's relays aren't listed for the browser (no API names them), so no health is claimed.
+    served = anyServer ? "Paperboat’s and yours" : "Paperboat"
+  } else if (edges.isError || pool.isError) {
+    served = <span className="text-muted-foreground">Couldn’t load</span>
+  }
 
   return (
-    <div className="flex flex-col gap-3 border-b border-divider py-4 text-sm">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-8">
-        <div className="flex max-w-lg flex-col gap-1">
-          <span className="font-medium">{copy.title}</span>
-          <span className="text-muted-foreground">
-            {copy.about}
-            {capability === "relay" && team && " This is set for your account, in every workspace."}
-          </span>
-        </div>
-        {pool.isError ? (
-          <span className="text-muted-foreground">Couldn’t load this setting. {pool.error.message}</span>
-        ) : !current ? (
-          <Skeleton className="h-8 w-48" />
-        ) : !anyServer && !own ? (
-          <span className="flex flex-col gap-1 sm:items-end">
-            <span>Paperboat’s</span>
-            <span className="text-xs text-muted-foreground">Pair a {kind} to use your own</span>
+    <div className="flex flex-col gap-4 surface rounded-lg p-4 text-sm">
+      <div className="flex flex-col gap-1">
+        <span className="font-medium">{copy.title}</span>
+        <span className="text-muted-foreground">
+          {copy.about}
+          {capability === "relay" && team && " Set for your account, in every workspace."}
+        </span>
+      </div>
+      <div className="flex min-h-5 items-center justify-between gap-3">
+        <span className="min-w-0 truncate">{served}</span>
+        {status ? (
+          <span className="flex shrink-0 items-center gap-2 text-muted-foreground">
+            <StatusDot online={status.ok} />
+            {status.label}
           </span>
         ) : (
+          capability === "relay" &&
+          pool.data && <span className="shrink-0 text-muted-foreground">Picked for each connection</span>
+        )}
+      </div>
+      {pool.isError ? (
+        <p className="text-muted-foreground">Couldn’t load this setting. {pool.error.message}</p>
+      ) : !anyServer && !own ? (
+        <button
+          type="button"
+          onClick={onAdd}
+          className="self-start text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+        >
+          Use your own server
+        </button>
+      ) : (
+        current && (
           <ToggleGroup
             variant="outline"
             spacing={0}
@@ -330,16 +385,15 @@ function PoolRow({
             <ToggleGroupItem value="shared">{copy.shared.title}</ToggleGroupItem>
             <ToggleGroupItem value="own">Only yours</ToggleGroupItem>
           </ToggleGroup>
-        )}
-      </div>
-      {own && (
+        )
+      )}
+      {own && draft && (
         <div className="flex flex-col gap-2">
           <p className="text-muted-foreground">{copy.own}</p>
           <div className="flex items-center justify-between gap-3">
             <SearchField value={search} onChange={setSearch} placeholder="Search servers" />
-            <span className="text-muted-foreground">
-              {current!.installation_ids.length} of 32 chosen · {found.data?.pages[0]?.total ?? 0}{" "}
-              {q ? "found" : "servers"}
+            <span className="shrink-0 text-muted-foreground">
+              {current!.installation_ids.length} of 32 · {found.data?.pages[0]?.total ?? 0} {q ? "found" : "servers"}
             </span>
           </div>
           <ul className="flex flex-col divide-y divide-divider border-y border-divider">
@@ -352,11 +406,6 @@ function PoolRow({
                     <label className="flex min-h-11 cursor-pointer items-center gap-3">
                       <Checkbox checked onCheckedChange={(on) => toggle(id, on)} />
                       <span className="min-w-0 flex-1 truncate">{member?.name ?? "Server no longer paired"}</span>
-                      {member && (
-                        <span className="hidden truncate font-mono text-code text-muted-foreground sm:inline">
-                          {member.endpoint_host}
-                        </span>
-                      )}
                     </label>
                   </li>
                 )
@@ -373,9 +422,6 @@ function PoolRow({
                     onCheckedChange={(on) => toggle(server.installation_id, on)}
                   />
                   <span className="min-w-0 flex-1 truncate">{server.name}</span>
-                  <span className="hidden truncate font-mono text-code text-muted-foreground sm:inline">
-                    {server.endpoint_host}
-                  </span>
                   <StatusDot online={server.ready} />
                 </label>
               </li>
@@ -409,65 +455,21 @@ function PoolRow({
 }
 
 /**
- * The edges Paperboat serves this account's tunnels and previews from, one row per place. Paperboat's
- * relays are not listed: no API names them for the browser.
- */
-function PaperboatServers() {
-  const edges = useApiQuery(edgesQuery)
-  if (edges.isPending)
-    return (
-      <Section title="Paperboat’s servers">
-        <div className="flex min-h-12 items-center border-b border-divider">
-          <Skeleton className="h-4 w-1/3" />
-        </div>
-      </Section>
-    )
-  if (edges.isError)
-    return (
-      <Section title="Paperboat’s servers">
-        <p className="border-b border-divider py-3 text-sm text-muted-foreground">
-          Couldn’t load Paperboat’s servers. {edges.error.message}
-        </p>
-      </Section>
-    )
-  if (!edges.data.length) return null
-  const places = new Map<string, { total: number; ready: number }>()
-  for (const edge of edges.data) {
-    const place = places.get(edge.region) ?? { total: 0, ready: 0 }
-    place.total++
-    if (edge.status === "ready") place.ready++
-    places.set(edge.region, place)
-  }
-  return (
-    <Section title="Paperboat’s servers">
-      {[...places].map(([region, place]) => (
-        <div key={region} className="flex min-h-12 items-center gap-3 border-b border-divider text-sm">
-          <span className="w-1/3 min-w-0 truncate">{placeName(region)}</span>
-          <span className="hidden min-w-0 flex-1 truncate text-muted-foreground sm:block">
-            Tunnels and previews{place.total > 1 && ` · ${place.total} servers`}
-          </span>
-          <span className="ml-auto flex items-center gap-2 text-muted-foreground">
-            <StatusDot online={place.ready > 0} />
-            {place.ready === place.total
-              ? "Ready"
-              : place.ready
-                ? `${place.ready} of ${place.total} ready`
-                : "Unavailable"}
-          </span>
-        </div>
-      ))}
-    </Section>
-  )
-}
-
-/**
  * Add server, modeled on Add machine: the install command first, then the address and code it
  * prints. The node belongs to the selected workspace.
  */
-function AddServerDialog({ workspaceName, onClose }: { workspaceName: string; onClose: () => void }) {
+function AddServerDialog({
+  workspaceName,
+  initial,
+  onClose,
+}: {
+  workspaceName: string
+  initial: "relay" | "tunnel"
+  onClose: () => void
+}) {
   const queryClient = useQueryClient()
   const workspace = useWorkspace()
-  const [components, setComponents] = useState<"relay" | "tunnel" | "both">("relay")
+  const [components, setComponents] = useState<"relay" | "tunnel" | "both">(initial)
   const installer = useApiQuery(clientConfigQuery).data?.installer_base_url
   const [address, setAddress] = useState("")
   const [code, setCode] = useState("")
@@ -494,7 +496,7 @@ function AddServerDialog({ workspaceName, onClose }: { workspaceName: string; on
                 </li>
               ))}
             </ul>
-            <p className="text-xs text-muted-foreground">It carries traffic once you choose it under “Servers in use”.</p>
+            <p className="text-xs text-muted-foreground">It carries traffic once you choose it in “How your traffic travels”.</p>
             <Button size="lg" className="mt-1" onClick={onClose}>
               Done
             </Button>
