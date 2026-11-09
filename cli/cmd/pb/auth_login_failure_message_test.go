@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -56,5 +57,13 @@ func TestExpiredBrowserLoginLinkSaysSo(t *testing.T) {
 	message := commandFailureMessage(err, classifyCommandFailure(err))
 	if !strings.Contains(message, "sign-in link expired") || strings.Contains(message, "could not finish the command") {
 		t.Fatalf("expired login link reported generically: %q", message)
+	}
+}
+
+func TestDaemonRefreshFailureAfterRevocationPointsToFreshLogin(t *testing.T) {
+	revoked := daemonRefreshFailureMessage(fmt.Errorf("refresh: %w", &localapi.RemoteError{Code: localapi.AuthenticationRequiredCode}))
+	other := daemonRefreshFailureMessage(errors.New("socket closed"))
+	if !strings.Contains(revoked, "pb login --fresh") || strings.Contains(revoked, "pb login again") || !strings.Contains(other, "pb login again") {
+		t.Fatalf("revoked=%q other=%q", revoked, other)
 	}
 }

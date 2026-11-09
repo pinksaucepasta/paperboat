@@ -16,6 +16,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/selector"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
@@ -262,7 +263,7 @@ func browserLogin(c *command.Context) error {
 			return fmt.Errorf("sign-in saved; retry `pb login` to finish configuration: %w", err)
 		}
 		if err = refreshSignedInDaemon(c.Context, cfg); err != nil {
-			return browserLoginFailure{message: "Sign-in is saved, but the installed daemon could not refresh. Run pb login again to finish, or pb doctor to check recovery.", cause: err}
+			return browserLoginFailure{message: daemonRefreshFailureMessage(err), cause: err}
 		}
 		account := state.Profile.Account
 		joinedWorkspace, joinedAdmission := "", ""
@@ -341,4 +342,15 @@ func cancelBrowserLogin(ctx context.Context, issuer string, s *config.BrowserLog
 }
 func abortBrowserLogin(ctx context.Context, issuer string, s *config.BrowserLoginState, save func() error, cause error) error {
 	return errors.Join(cause, cancelBrowserLogin(ctx, issuer, s, save))
+}
+
+// daemonRefreshFailureMessage says what to do when the installed daemon could not refresh after sign-in. A daemon
+// that answers "signed out" after a fresh sign-in lost its enrollment (the machine was revoked); signing in again
+// cannot restore it, so it gets the existing recovery instead of "run pb login again".
+func daemonRefreshFailureMessage(err error) string {
+	var remote *localapi.RemoteError
+	if errors.As(err, &remote) && remote.Code == localapi.AuthenticationRequiredCode {
+		return "Sign-in is saved, but this computer's Paperboat service is not enrolled any more. Run pb login --fresh to remove this computer's setup and add it again."
+	}
+	return "Sign-in is saved, but the installed daemon could not refresh. Run pb login again to finish, or pb doctor to check recovery."
 }
