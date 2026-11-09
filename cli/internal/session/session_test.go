@@ -222,20 +222,45 @@ func TestRunStartsSendingInputWhenReadOnlyEnds(t *testing.T) {
 	}
 }
 
-// exitThenCancelConn's process exits as the caller cancels: Wait cancels the run's context and returns the real code.
-type exitThenCancelConn struct {
+// A user's Ctrl-C with no remote exit returns 130 at once; Run no longer waits for an exit that is not coming.
+func TestRunExternalCancelReturns130Promptly(t *testing.T) {
+	inR, inW, _ := os.Pipe()
+	outR, outW, _ := os.Pipe()
+	oldIn, oldOut := os.Stdin, os.Stdout
+	os.Stdin, os.Stdout = inR, outW
+	defer func() {
+		os.Stdin, os.Stdout = oldIn, oldOut
+		_ = inR.Close()
+		_ = inW.Close()
+		_ = outR.Close()
+		_ = outW.Close()
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	c := &closeStampConn{testConn: &testConn{Reader: bytes.NewBuffer(nil), wait: make(chan struct{})}, at: make(chan time.Time, 1)}
+	cancelled := make(chan time.Time, 1)
+	go func() { time.Sleep(20 * time.Millisecond); cancelled <- time.Now(); cancel() }()
+	code, err := Run(ctx, c, &sink{})
+	// The connection is torn down at once; the remaining wait is the stdin poll interval, not a grace for an exit.
+	if took := (<-c.at).Sub(<-cancelled); err != nil || code != 130 || took > 50*time.Millisecond {
+		t.Fatalf("code=%d err=%v, conn closed %v after the cancel, want 130 and under 50ms", code, err, took)
+	}
+}
+
+// closeStampConn records when Run first closes it.
+type closeStampConn struct {
 	*testConn
-	cancel context.CancelFunc
+	at chan time.Time
 }
 
-func (c *exitThenCancelConn) Wait() (int, error) {
-	c.cancel()
-	time.Sleep(10 * time.Millisecond) // on several cores Run sees the cancel before the exit is published
-	return c.code, nil
+func (c *closeStampConn) Close() error {
+	select {
+	case c.at <- time.Now():
+	default:
+	}
+	return c.testConn.Close()
 }
 
-// A Ctrl-C that lands as the remote exits was reported as 130 or as the real code at random; a remote result that is
-// already in wins.
+// A remote exit that is already in when the caller cancels is the true result, not 130.
 func TestRunPrefersAReadyRemoteExitOverCancellation(t *testing.T) {
 	inR, inW, _ := os.Pipe()
 	outR, outW, _ := os.Pipe()
@@ -250,7 +275,9 @@ func TestRunPrefersAReadyRemoteExitOverCancellation(t *testing.T) {
 	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	c := &exitThenCancelConn{testConn: &testConn{Reader: bytes.NewBuffer(nil), wait: make(chan struct{}), code: 7}, cancel: cancel}
+	c := &testConn{Reader: bytes.NewBuffer(nil), wait: make(chan struct{}), code: 7}
+	close(c.wait)
+	time.AfterFunc(20*time.Millisecond, cancel) // the exit is in well before the cancel
 	code, err := Run(ctx, c, &sink{})
 	if err != nil || code != 7 {
 		t.Fatalf("code=%d err=%v, want the remote's 7", code, err)

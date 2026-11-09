@@ -20,9 +20,6 @@ import (
 	"golang.org/x/term"
 )
 
-// exitGrace bounds how long a cancelled run waits for a remote exit that is being published.
-const exitGrace = 100 * time.Millisecond
-
 const terminalOutputBufferBytes = 128 * 1024
 
 const terminalCleanupSequence = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l\x1b[?2004l\x1b[?1049l\x1b[?25h"
@@ -252,18 +249,15 @@ func Run(ctx context.Context, conn tunnel.Conn, stdinSink io.WriteCloser, opts .
 	select {
 	case <-ctx.Done():
 		// External cancellation (e.g. parent signalled): tear down and report.
-		// A remote exit that is already in, or lands within the grace (Wait cancels the
-		// context before it publishes the exit), is the true result.
-		grace := time.NewTimer(exitGrace)
+		// A remote exit that is already in is the true result; a user's Ctrl-C returns at once.
 		select {
 		case r := <-done:
-			grace.Stop()
 			stopInput()
 			_ = conn.Close()
 			<-outputDone
 			<-inputDone
 			return r.code, r.err
-		case <-grace.C:
+		default:
 		}
 		stopInput()
 		_ = conn.Close()
