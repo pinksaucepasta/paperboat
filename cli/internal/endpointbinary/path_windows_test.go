@@ -3,9 +3,11 @@
 package endpointbinary
 
 import (
+	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -128,7 +130,8 @@ func TestResolveWindowsExecutableLink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != target {
-		t.Fatalf("resolved link = %q, want %q", got, target)
+	// The resolver answers with the long-name spelling; TEMP may hold 8.3 names (RUNNER~1) for the same file.
+	if want := windowssecurity.LongPath(target); !strings.EqualFold(got, want) {
+		t.Fatalf("resolved link = %q, want %q", got, want)
 	}
 }
