@@ -166,6 +166,11 @@ def run_check(check, argv, args, device):
         command = [sys.executable, str(HERE / argv[0])] + [replacements.get(word, word) for word in argv[1:]]
         started = time.monotonic()
         done = run_streaming(command, environment, args.timeout)
+    # The whole output is kept beside the result file (owner-only): per-row receipts and failure causes live there.
+    output = HERE / 'results' / 'windows-output' / ('%s-%s.out' % (time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()), check))
+    output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with os.fdopen(os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as handle:
+        handle.write(done.stdout + '\n--- stderr ---\n' + done.stderr)
     outcome = verdict(done.returncode, done.stdout)
     detail = ((done.stdout.strip().splitlines() or [''])[-1][:300] if outcome == 'PASS'
               else 'exit %s: %s' % (done.returncode, (done.stderr.strip() or done.stdout.strip())[-300:]))
