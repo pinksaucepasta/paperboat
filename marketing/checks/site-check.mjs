@@ -5,6 +5,7 @@
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { spawnSync } from "node:child_process"
+import { checkCommands } from "./commands.mjs"
 
 const dist = new URL("../dist/", import.meta.url).pathname
 const env = Object.fromEntries(
@@ -82,8 +83,9 @@ for (const [path, html] of pages) {
   for (const [hit] of marked.matchAll(/[A-Za-z,.;:]<(?:a|code|strong|kbd)\b(?![^>]*class="(?:fn|command)")[^>]*>[^<]{0,24}|<\/(?:a|code|strong|kbd)>[A-Za-z][^<]{0,24}/g))
     fail(path, `missing space around inline element: ${hit.replace(/<[^>]*>/g, "|")}`)
 
+  // (Never call our own text honest or plain; "in seconds" and "in a minute" are time claims nobody measured.)
   // No placeholder or filler copy; no Windows claim beyond "coming"; no removed domains.
-  for (const banned of [/being written/i, /keep going/i, /coming soon/i, /lorem ipsum/i, /\bseamless/i, /\bsupercharge/i, /\bunlock\b/i, /\brobust\b/i, /in today.s world/i, /—/])
+  for (const banned of [/being written/i, /keep going/i, /coming soon/i, /lorem ipsum/i, /\bseamless/i, /\bsupercharge/i, /\bunlock\b/i, /\brobust\b/i, /in today.s world/i, /—/, /\bhonest/i, /plain account/i, /\bin seconds\b/i, /\b(with)?in a minute\b/i, /\bhappily\b/i])
     if (banned.test(body)) fail(path, `banned text ${banned}`)
   // Windows is not shipped: our own pages may only say it is coming. (Compare pages list other products' platforms.)
   if (!path.startsWith("/compare/"))
@@ -106,25 +108,48 @@ for (const claim of ["$0", "$8", "$80/year", "$15", "$150/seat/year", "5 GB", "1
   if (!pricing.includes(claim)) fail("/pricing/", `missing pricing claim ${claim}`)
 if (!existsSync(join(dist, "robots.txt"))) fail("/robots.txt", "missing")
 
-// The limits on the pricing page are the server's own defaults (server/internal/config/config.go), when this
-// build runs inside the repository.
-const serverConfig = new URL("../../server/internal/config/config.go", import.meta.url).pathname
-if (existsSync(serverConfig)) {
-  const go = readFileSync(serverConfig, "utf8")
-  const number = (pattern) => Number(go.match(pattern)?.[1]?.replace(/_/g, ""))
+// Every pb and pbh command on the site runs as written (checks/commands.mjs). Inside the repository this
+// needs a pb built from the same checkout: PB_BIN=/path/to/pb (cd cli && go build -o /path/to/pb ./cmd/pb).
+const repo = new URL("../../", import.meta.url).pathname
+if (existsSync(join(repo, "cli/cmd/pb"))) {
+  if (!process.env.PB_BIN || !existsSync(process.env.PB_BIN)) fail("commands", "set PB_BIN to a pb built from this checkout (cd cli && go build -o /tmp/pb ./cmd/pb); the commands on the site are checked against it")
+  else console.log(`site-check: ${checkCommands(pages, fail, { pb: process.env.PB_BIN, repo })} commands checked against ${process.env.PB_BIN}`)
+}
+
+// Numbers that have a source in the code are compared with it, when this build runs inside the repository.
+//   Checked here: machine, preview/tunnel, browser-terminal and public-TCP limits, the free bandwidth
+//   allowance, the trial length, shared-terminal viewers (server/internal/config/config.go); audit log
+//   retention and the SSO seat minimum (config/business.go); the top-up size (billing/workspace_topups.go);
+//   the file-send limits (config.go).
+//   NOT checked, because no code holds them (they live in Stripe or the database): the prices ($8, $80,
+//   $15, $150), the 100 GB of Pro and Team, the top-up price ($5), the 7-day grace after a failed payment.
+//   Those follow PLAN.md 1.3 and are only asserted to be on the page.
+const source = (path) => (existsSync(join(repo, path)) ? readFileSync(join(repo, path), "utf8") : "")
+const serverConfig = source("server/internal/config/config.go")
+if (serverConfig) {
+  const business = source("server/internal/config/business.go")
+  const number = (from, pattern) => Number(from.match(pattern)?.[1]?.replace(/_/g, ""))
   const shown = (n) => n.toLocaleString("en-US")
-  const limits = {
-    machines: [number(/Machines: PlanLimit\{Free: (\d+)/), number(/Machines: PlanLimit\{Free: \d+, Pro: (\d+)/)],
-    "previews and tunnels": [number(/Publications: PlanLimit\{Free: (\d+)/), number(/Publications: PlanLimit\{Free: \d+, Pro: (\d+)/)],
-    "browser terminals": [number(/BrowserTerminals: PlanLimit\{Free: (\d+)/), number(/BrowserTerminals: PlanLimit\{Free: \d+, Pro: (\d+)/)],
-    "public TCP": [number(/PublicTCP: PublicTCPLimit\{Free: (\d+)/), number(/PublicTCPLimit\{Free: \d+, Pro: (\d+)/)],
+  const pageText = (page) => text(pages.get(page)).replace(/\s+/g, " ")
+  const expect = (page, wanted, what) => {
+    if (wanted.includes("NaN") || !pageText(page).includes(wanted)) fail(page, `${what} differs from the server's (expected "${wanted}")`)
   }
-  const rows = { machines: "Machines", "previews and tunnels": "Previews and tunnels running at once", "browser terminals": "Terminals open in the web console at once", "public TCP": "Public raw-TCP tunnel addresses" }
-  for (const [name, [free, pro]] of Object.entries(limits))
-    if (!new RegExp(`${rows[name]}\\s+${shown(free)}\\s+${shown(pro)}\\s`).test(pricing)) fail("/pricing/", `${name} limits differ from the server's ${free} / ${pro}`)
-  if (!pricing.includes(`${number(/TeamTrialDays: (\d+)/)}-day`)) fail("/pricing/", "Team trial length differs from the server's")
-  if (!pricing.includes(`${number(/PersonalAllowanceBytes: new\(int64\(([\d_]+)/) / 1e9} GB`)) fail("/pricing/", "free bandwidth differs from the server's")
-  if (!pricing.includes(`${number(/ViewersPerSharedTerminal: (\d+)/)} possible viewers`)) fail("/pricing/", "shared terminal viewer limit differs from the server's")
+  const limit = (name) => [number(serverConfig, new RegExp(`${name}: \\w+\\{Free: (\\d+)`)), number(serverConfig, new RegExp(`${name}: \\w+\\{Free: \\d+, Pro: (\\d+)`))]
+  for (const [row, name] of [["Machines", "Machines"], ["Previews and tunnels running at once", "Publications"], ["Terminals open in the web console at once", "BrowserTerminals"]]) {
+    const [free, pro] = limit(name)
+    expect("/pricing/", `${row} ${shown(free)} ${shown(pro)} Unlimited`, `${name} limits`)
+  }
+  const [tcpFree, tcpPro] = limit("PublicTCP")
+  expect("/pricing/", `Public raw-TCP tunnel addresses ${tcpFree} ${tcpPro} ${number(serverConfig, /TeamPerSeat: (\d+)/)} per seat`, "public TCP limits")
+  expect("/pricing/", `${number(serverConfig, /TeamTrialDays: (\d+)/)}-day`, "Team trial length")
+  expect("/pricing/", `${number(serverConfig, /PersonalAllowanceBytes: new\(int64\(([\d_]+)/) / 1e9} GB`, "free bandwidth")
+  expect("/pricing/", `${number(serverConfig, /ViewersPerSharedTerminal: (\d+)/)} possible viewers`, "shared terminal viewers")
+  const days = (plan) => number(business, new RegExp(`AuditRetention${plan}: +(\\d+) \\* day`))
+  expect("/pricing/", `Audit log kept for ${days("Free")} days ${days("Pro")} days ${days("Team")} days`, "audit log retention")
+  expect("/pricing/", `From ${number(business, /SSOMinSeats: (\d+)/)} seats`, "SSO seat minimum")
+  expect("/pricing/", `per ${number(source("server/internal/billing/workspace_topups.go"), /TopupUnitBytes int64 = ([\d_]+)/) / 1e9} GB`, "top-up size")
+  expect("/features/files/", `Up to ${number(serverConfig, /AutomaticMaxBatchBytes: ([\d_]+)/) / 1e9} GB per send`, "file size limit")
+  expect("/features/files/", `Files per send Up to ${number(serverConfig, /MaxBatchFiles: (\d+)/)}.`, "files per send")
 }
 
 // One type scale: every font size in the source is a token (the lockup follows the brand's mark-height rule).
