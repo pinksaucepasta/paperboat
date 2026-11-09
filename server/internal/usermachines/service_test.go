@@ -214,6 +214,22 @@ func TestSetupAndPairingRejectDarwinAMD64BeforePersistence(t *testing.T) {
 	}
 }
 
+// Windows machines pair although the release pipeline publishes no Windows asset (PLAN 1.1).
+func TestPairingAcceptsWindowsIndependentOfReleaseMatrix(t *testing.T) {
+	publicIdentityKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	service := New(nil, nil, Policy{AllowedPlatforms: []string{"darwin", "linux", "windows"}, PairingLifetime: time.Minute}, nil)
+	for _, architecture := range []string{"amd64", "arm64"} {
+		pairing := PairingInput{Verifier: "verifier", Alias: "win", Platform: "windows", Architecture: architecture, WorkspaceRoot: `C:\Users\Paperboat`, PublicIdentityKey: publicIdentityKey}
+		if err := service.validatePairing(pairing); err != nil {
+			t.Fatalf("windows %s pairing error = %v", architecture, err)
+		}
+	}
+	pairing := PairingInput{Verifier: "verifier", Alias: "win", Platform: "windows", Architecture: "386", WorkspaceRoot: `C:\Users\Paperboat`, PublicIdentityKey: publicIdentityKey}
+	if err := service.validatePairing(pairing); err == nil {
+		t.Fatal("windows 386 pairing was accepted")
+	}
+}
+
 func TestConnectionDescriptorSerializesCanonicalPayload(t *testing.T) {
 	expires := time.Now().UTC().Add(time.Minute)
 	response := ConnectionDescriptor{
