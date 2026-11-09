@@ -486,5 +486,5 @@ function Card({
 }
 
 function Figure({ children }: { children: React.ReactNode }) {
-  return <span className="font-heading text-3xl font-semibold tracking-tight">{children}</span>
+  return <span className="shrink-0 font-heading text-3xl font-semibold tracking-tight whitespace-nowrap">{children}</span>
 }
