@@ -87,19 +87,20 @@ func hostKeysMoveToTheReplacement(t *testing.T, retiredState string) {
 		}
 		return other
 	}
-	// Another account's machine with the same keys (two OS users of one computer) is no conflict.
-	if err := observe("operation_reenroll_foreign", other, otherID, hostKey); err != nil {
-		t.Fatalf("another account could not record host keys the first account owns: %v", err)
-	}
-	var owners int
-	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.machine_ssh_host_key_owners WHERE user_machine_id IN ($1,$2)`, oldID, otherID).Scan(&owners); err != nil || owners != 2 || conflictOf(otherID) != "" {
-		t.Fatalf("a cross-account host key must be owned by both accounts without a conflict: owners=%d error=%v", owners, err)
-	}
 	if conflictOf(liveID) != oldID {
 		t.Fatal("the refused observation was not recorded for the machine list")
 	}
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET state=$2,online=false WHERE id=$1`, oldID, retiredState); err != nil {
 		t.Fatal(err)
+	}
+	if retiredState == "revoked" {
+		if err := observe("operation_reenroll_foreign", other, otherID, hostKey); err != nil {
+			t.Fatalf("another account could not record the host key of a revoked record: %v", err)
+		}
+		return
+	}
+	if err := observe("operation_reenroll_foreign", other, otherID, hostKey); !errors.As(err, &inUse) || inUse.MachineName != "" {
+		t.Fatalf("another account took a retired record's host key, or its owner was named to it: %v", err)
 	}
 	if err := observe("operation_reenroll_new", user, newID, hostKey); err != nil {
 		t.Fatalf("the replacement machine could not record the host keys it now has: %v", err)

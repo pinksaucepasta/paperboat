@@ -1689,7 +1689,7 @@ type MachineSshHostKeyOwner struct {
 	Algorithm       string
 	PublicKey       string
 	FirstObservedAt time.Time
-	AccountID       string
+	AccountID       sql.NullString
 }
 
 type MachineSshHostKeySet struct {

@@ -473,7 +473,7 @@ func (r *SQLRepository) observeHost(ctx context.Context, request ObserveHostRequ
 		}
 		var retiredOwners []string
 		for _, key := range proposed.Keys {
-			owner, ownerErr := q.GetMachineSSHHostKeyOwner(ctx, dbsqlc.GetMachineSSHHostKeyOwnerParams{AccountID: request.UserID, Fingerprint: key.Fingerprint[:]})
+			owner, ownerErr := q.GetMachineSSHHostKeyOwner(ctx, key.Fingerprint[:])
 			if ownerErr == nil && owner.UserMachineID != request.UserMachineID {
 				// The same computer enrolled again (reset, reinstall): its host keys are
 				// still recorded for the disconnected record, which no longer needs them.
@@ -498,7 +498,7 @@ func (r *SQLRepository) observeHost(ctx context.Context, request ObserveHostRequ
 			if ownerErr != pgx.ErrNoRows {
 				return ownerErr
 			}
-			if _, err := q.CreateMachineSSHHostKeyOwner(ctx, dbsqlc.CreateMachineSSHHostKeyOwnerParams{Fingerprint: key.Fingerprint[:], UserMachineID: request.UserMachineID, AccountID: request.UserID, Algorithm: key.Algorithm, PublicKey: key.PublicKey, FirstObservedAt: proposed.ObservedAt}); err != nil {
+			if _, err := q.CreateMachineSSHHostKeyOwner(ctx, dbsqlc.CreateMachineSSHHostKeyOwnerParams{Fingerprint: key.Fingerprint[:], UserMachineID: request.UserMachineID, AccountID: sql.NullString{String: request.UserID, Valid: true}, Algorithm: key.Algorithm, PublicKey: key.PublicKey, FirstObservedAt: proposed.ObservedAt}); err != nil {
 				return err
 			}
 		}
@@ -788,8 +788,8 @@ func nullTime(value sql.NullTime) time.Time {
 }
 
 // releaseRetiredHostKeyOwner removes the claim a retired record holds on a host key, so the machine that
-// now has that key can record it: a revoked, deleted, disconnected or unreachable offline record of the same
-// account. Other accounts' records never hold it: keys are unique per account.
+// now has that key can record it: a revoked or deleted record of any account (the computer was paired
+// into another account), a disconnected or unreachable offline record only of the same account.
 func releaseRetiredHostKeyOwner(ctx context.Context, q *dbsqlc.Queries, userID string, fingerprint []byte) (bool, error) {
 	if err := q.DeleteRetiredMachineSSHHostKeys(ctx, dbsqlc.DeleteRetiredMachineSSHHostKeysParams{Fingerprint: fingerprint, UserID: userID}); err != nil {
 		return false, err
@@ -798,10 +798,9 @@ func releaseRetiredHostKeyOwner(ctx context.Context, q *dbsqlc.Queries, userID s
 	return released > 0, err
 }
 
-// hostKeyInUse refuses host keys another live machine of the same account already owns (a VM or container
-// image cloned with its /etc/ssh keys). Another account's machine presenting the same keys (two OS users of
-// one computer paired to two accounts) is not a conflict. The other machine is named only when the
-// observing account may see it.
+// hostKeyInUse refuses host keys another live machine already owns (a VM or container
+// image cloned with its /etc/ssh keys). The other machine is named only when the
+// observing account may see it, so other accounts' machines are never revealed.
 func hostKeyInUse(ctx context.Context, tx *db.Tx, userID, otherMachineID string) error {
 	var name sql.NullString
 	err := tx.QueryRow(ctx, `SELECT CASE WHEN m.user_id=$1 OR paperboat.machine_management_allowed($1,m.id) THEN coalesce(nullif(m.alias,''),m.id) END FROM paperboat.user_machines m WHERE m.id=$2`, userID, otherMachineID).Scan(&name)
