@@ -367,7 +367,7 @@ class WindowsTargetScripts(unittest.TestCase):
             (inbox / 'keep.txt').write_text('mine')
             env = {'USERPROFILE': home}
             ok = self.run_ps(windows_target.inbox_verify_script(expected, 'VERIFIED', 3, 'smoke-'), env=env)
-            self.assertEqual((0, b'VERIFIED'), (ok.returncode, ok.stdout))
+            self.assertEqual((0, b'VERIFIED\n'), (ok.returncode, ok.stdout))
             bad = dict(expected, **{'smoke-a.bin': '0' * 64})
             self.assertNotEqual(0, self.run_ps(windows_target.inbox_verify_script(bad, 'VERIFIED'), env=env).returncode)
             self.assertNotEqual(0, self.run_ps(windows_target.inbox_verify_script(expected, 'V', 4), env=env).returncode)

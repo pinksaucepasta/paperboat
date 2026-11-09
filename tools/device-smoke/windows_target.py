@@ -163,7 +163,7 @@ def inbox_verify_script(expected, marker, size=None, glob=None):
     if size is not None:
         check += "if((Get-Item -LiteralPath $p).Length -ne %d){throw ('wrong size '+$n)}\n" % size
     check += ("if((Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLower() -ne $e[$n]){throw ('hash '+$n)}}\n"
-              "[Console]::Out.Write('%s')" % marker)
+              '[Console]::Out.Write("%s`n")' % marker)  # the Unix fixtures print the marker with print(): a newline follows
     return check
 
 
