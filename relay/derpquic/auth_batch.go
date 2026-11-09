@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"time"
 
 	"tailscale.com/types/key"
@@ -44,6 +45,9 @@ func (s *Server) admitAuthParts(p *peerConn, body []byte, count uint32, now time
 	var merged Grant
 	digest := sha256.New()
 	expired := false
+	// Parts arrive over up to the read deadline: each is verified on the clock it arrives at, and
+	// every part must still be valid when the merged grant is admitted.
+	earliest := int64(math.MaxInt64)
 	for i := uint32(0); i < count; i++ {
 		if i != 0 {
 			kind, next, err := readFrame(p.stream)
@@ -61,7 +65,7 @@ func (s *Server) admitAuthParts(p *peerConn, body []byte, count uint32, now time
 				return ErrOverload
 			}
 		}
-		grant, err := s.verifier.Verify(string(body), p.state(), now)
+		grant, err := s.verifier.Verify(string(body), p.state(), time.Now())
 		if errors.Is(err, ErrExpired) {
 			expired = true
 			continue
@@ -72,6 +76,7 @@ func (s *Server) admitAuthParts(p *peerConn, body []byte, count uint32, now time
 		if expired {
 			continue
 		}
+		earliest = min(earliest, grant.ExpiresAt)
 		digest.Write(grant.signedHash[:])
 		if i == 0 {
 			merged = grant
@@ -85,7 +90,8 @@ func (s *Server) admitAuthParts(p *peerConn, body []byte, count uint32, now time
 			return err
 		}
 	}
-	if expired {
+	now = time.Now()
+	if expired || earliest <= now.Unix() {
 		return ErrExpired
 	}
 	if count > 1 {
