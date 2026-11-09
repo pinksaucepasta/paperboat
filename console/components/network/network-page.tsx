@@ -70,6 +70,7 @@ export function NetworkPage() {
   const [adding, setAdding] = useState(false)
   const nodes = groupNodes(installations.data?.items ?? [])
   const none = installations.isSuccess && installations.data.total === 0 && !q
+  const team = workspace?.kind === "team"
   const addButton = (
     <Button size="lg" onClick={() => setAdding(true)}>
       <PlusIcon data-icon="inline-start" />
@@ -85,10 +86,10 @@ export function NetworkPage() {
             <EmptyMedia variant="icon">
               <HardDrivesIcon />
             </EmptyMedia>
-            <EmptyTitle>No servers of your own</EmptyTitle>
+            <EmptyTitle>{team ? `No servers in ${workspace?.name}` : "No servers of your own"}</EmptyTitle>
             <EmptyDescription>
-              Your machines use Paperboat’s servers. Run a relay or tunnel server on your own Linux server to keep
-              traffic on hardware you control.
+              {team ? "The team’s machines" : "Your machines"} use Paperboat’s servers. Run a relay or tunnel server on
+              your own Linux server to keep traffic on hardware you control.
             </EmptyDescription>
           </EmptyHeader>
           <EmptyContent>{addButton}</EmptyContent>
@@ -151,8 +152,8 @@ export function NetworkPage() {
 
       <PaperboatServers />
       <Section title="Servers in use">
-        <PoolRow capability="relay" scope={scope} team={workspace?.kind === "team"} />
-        <PoolRow capability="tunnel" scope={scope} team={workspace?.kind === "team"} />
+        <PoolRow capability="relay" scope={scope} team={team} />
+        <PoolRow capability="tunnel" scope={scope} team={team} />
       </Section>
 
       {adding && <AddServerDialog workspaceName={workspace?.name ?? "Personal"} onClose={() => setAdding(false)} />}

@@ -107,12 +107,12 @@ function Teams() {
 
   return (
     <div className="flex flex-col gap-10">
-      <header className="flex items-center gap-4">
-        <h1 className="flex-1 font-heading text-2xl font-semibold tracking-tight">Teams</h1>
+      <header className="flex items-center justify-end gap-2">
         <Button variant="outline" size="lg" onClick={() => setAdding(true)}>
           Add member
         </Button>
         <Button size="lg" onClick={() => setCreating(true)}>
+          <PlusIcon data-icon="inline-start" />
           Create team
         </Button>
       </header>
