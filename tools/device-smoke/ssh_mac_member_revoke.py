@@ -48,6 +48,15 @@ HOLD = PROLOGUE + r'''perr=$($PB $PBW ssh $A -- 'exit 0' </dev/null 2>&1 >/dev/n
 # the proxy names a team-shared machine on stderr ("apple (team X)"): informational, not an error
 perr=$(sed -E 's/^[^ ]+ \(team [^)]*\) ?//' <<<"$perr"); lerr=$(sed -E 's/^[^ ]+ \(team [^)]*\) ?//' <<<"$lerr")
 echo "RESULT normal pb_stderr=[$perr] plain_stderr=[$lerr]"
+# ten more plain exits: stderr empty (but for the team banner), exit status 0 each, with their wall time
+fails=0; bad=; tt=
+for i in $(seq 1 10); do
+  s0=$(date +%s.%N); o=$(ssh $H 'exit 0' </dev/null 2>&1 >/dev/null); rc=$?; s1=$(date +%s.%N)
+  o=$(sed -E 's/^[^ ]+ \(team [^)]*\) ?//' <<<"$o" | tr '\n' ' ')
+  tt="$tt $(python3 -c "print(round($s1-$s0,1))")"
+  if [ $rc != 0 ] || [ -n "$(tr -d ' ' <<<"$o")" ]; then fails=$((fails+1)); bad="$bad rc=$rc:$(cut -c1-120 <<<"$o")"; fi
+done
+echo "RESULT exit10 fails=$fails seconds=[$tt ] bad=[$bad ]"
 ref=$(grep -o 'support_[0-9a-f-]*' <<<"$perr$lerr" | head -1)
 [ -n "$ref" ] && echo "RESULT diag-ref [$ref: $(cat ~/.local/state/paperboat/diagnostics/*.ndjson 2>/dev/null | grep "$ref" | python3 -c "import sys,json
 for l in sys.stdin:
@@ -142,6 +151,8 @@ def main():
             time.sleep(2)
         res = member('cat ~/hold.out')[1]
         ok, why = m.revoke_verdict(res)
+        if ok and not re.search(r'RESULT exit10 fails=0 ', re.sub(r'\s+', ' ', res)):
+            ok, why = False, 'a plain ssh exit 0 printed something or failed'
         status, detail = ('PASS' if ok else 'FAIL'), '%s %s %s' % (detail, '' if ok else why + ':', re.sub(r'\s+', ' ', res)[-3600:])
     except Exception as error:  # every failure names its step
         detail = '%s %s' % (detail, error)

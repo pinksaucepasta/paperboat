@@ -8,7 +8,7 @@ from unittest import mock
 os.environ.setdefault('TEAM', 'team-x')
 import ssh_mac_member_revoke as r  # noqa: E402
 
-HELD = ('RESULT normal pb_stderr=[] plain_stderr=[]\nHOLDING\nRESULT seconds=2.0 alive=no plain_seconds=2.1 plain_alive=no '
+HELD = ('RESULT normal pb_stderr=[] plain_stderr=[]\nRESULT exit10 fails=0 seconds=[ 1.0 ] bad=[ ]\nHOLDING\nRESULT seconds=2.0 alive=no plain_seconds=2.1 plain_alive=no '
         'stderr=[pb: access to apple was revoked] plain_stderr=[pb: access to apple was revoked]')
 ACCESS = 'RESULT access plain_s=1.2 pb_s=1.4 config_block=1 known_hosts_lines=3'
 
@@ -53,6 +53,16 @@ class MemberRevoke(unittest.TestCase):
         result, calls, _ = run_main('team')
         self.assertEqual('PASS', result['status'], result)
         self.assertEqual(1, sum('team remove "$TEAM" \'user_b\'' in c or "team remove \"$TEAM\" user_b" in c for c in calls[:-1]))
+
+    def test_a_noisy_plain_exit_fails_the_check(self):
+        global HELD
+        saved = HELD
+        HELD = saved.replace('fails=0', 'fails=1')
+        try:
+            result, _, _ = run_main('grant')
+        finally:
+            HELD = saved
+        self.assertEqual('FAIL', result['status'])
 
     def test_a_slow_member_gate_fails_before_any_revoke(self):
         result, calls, _ = run_main('grant', 'RESULT access plain_s=31.0 pb_s=1.4 config_block=1 known_hosts_lines=3')
