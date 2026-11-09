@@ -565,7 +565,7 @@ func runWindowsUninstallHelper(ctx context.Context, planPath string) (result err
 	if result == nil {
 		result = config.PurgeCredentialStore()
 		for _, path := range plan.UserStatePaths {
-			result = errors.Join(result, retryWindowsRemoval(cleanupCtx, path, plan.InboxPaths))
+			result = errors.Join(result, retryWindowsRemoval(cleanupCtx, plan.OwnerProfile, path, plan.InboxPaths))
 		}
 	}
 	if cleanupCtx.Err() != nil {
@@ -969,9 +969,44 @@ func waitForWindowsProcess(ctx context.Context, processID uint32, deadline time.
 	}
 }
 
-func retryWindowsRemoval(ctx context.Context, path string, preserved []string) error {
+var errWindowsUserStateRefused = errors.New("a Paperboat user state path is outside the owner's profile or passes through a link; it was not removed")
+
+// checkWindowsUserStatePath authorizes one user state path for removal by the elevated helper. These places are
+// writable by the user, who can plant a junction or symlink there; this process would then delete, as an
+// administrator, wherever it points. The path must lie below the owner's profile, and neither it nor any
+// directory between the profile and it may be a reparse point. Below the path nothing is followed: os.RemoveAll
+// removes a link as an entry, and removePathPreserving refuses to descend into one.
+func checkWindowsUserStatePath(profile, path string) error {
+	current := filepath.Clean(profile)
+	relative, err := filepath.Rel(current, filepath.Clean(path))
+	if err != nil || relative == "." || !filepath.IsLocal(relative) {
+		return errWindowsUserStateRefused
+	}
+	for _, part := range strings.Split(relative, string(filepath.Separator)) {
+		current = filepath.Join(current, part)
+		info, err := os.Lstat(current)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if unsafeTraversal, err := unsafeCleanupPathTraversal(current, info); err != nil {
+			return err
+		} else if unsafeTraversal {
+			return errWindowsUserStateRefused
+		}
+	}
+	return nil
+}
+
+func retryWindowsRemoval(ctx context.Context, profile, path string, preserved []string) error {
 	var last error
 	for {
+		// Before every attempt: the user can change these directories while the helper waits.
+		if err := checkWindowsUserStatePath(profile, path); err != nil {
+			return err
+		}
 		last = removePathPreserving(path, preserved)
 		if last == nil {
 			return nil
