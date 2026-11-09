@@ -101,7 +101,7 @@ def check_doctor(win, args):
 
 def check_status(win, args):
     code, out = win.run('status')
-    assert code == 0 and 'Version' in out, f'status rc={code}'
+    assert code == 0 and 'Daemon: ready' in out, f'status rc={code}: ' + ' '.join(out.split())[:100]
 
 
 def check_service(win, args):
@@ -125,13 +125,21 @@ def check_crash(win, args):
 
 
 def check_availability(win, args):
-    """F2-06 / C032: keep_awake then allow_sleep from the CLI show up as a Windows power request."""
+    """F2-06 / C032: keep-awake then allow-sleep from the CLI show up as a Windows power request on the device."""
     def keep_awake_requested():
         return 'paperboat' in victus('powercfg /requests | Out-String')[1].lower()
-    for mode, wanted in (('keep_awake', True), ('allow_sleep', False)):
-        code, out = hp(f'{PB_HP} machine availability {args.machine} {mode}')
-        assert code == 0, f'availability {mode}: {out.strip()[:120]}'
-        wait_for(lambda: keep_awake_requested() == wanted, 60, f'powercfg request present={wanted} after {mode}')
+
+    def set_mode(mode):
+        base = f'{PB_HP} machine availability {args.machine} --mode {mode} --json'
+        if mode == 'keep-awake':  # the CLI first asks for its confirmation code (exit 2), then takes it with --confirm
+            code, out = hp(base)
+            token = json.loads(out)['data']['confirmation_token']
+            base += f' --confirm {token}'
+        code, out = hp(base)
+        assert code == 0, f'availability {mode}: {out.strip()[:140]}'
+    for mode, wanted in (('keep-awake', True), ('allow-sleep', False)):
+        set_mode(mode)
+        wait_for(lambda: keep_awake_requested() == wanted, 90, f'powercfg request present={wanted} after {mode}')
 
 
 def check_exec(win, args):
@@ -143,7 +151,7 @@ def check_exec(win, args):
 def check_reset_pair(win, args):
     """F1-10: pb reset + pair with a new token on the same machine; the old record is replaced; doctor healthy."""
     mint_token(args.token_from, args.machine)
-    host = victus('$env:COMPUTERNAME')[1].strip()
+    host = victus('hostname')[1].strip()
     try:
         code, receipt = win.json('reset', '--confirmation', 'RESET PAPERBOAT', '--hostname', host, '--enrollment-token-file', TOKEN_FILE, timeout=300)
         assert code == 0 and receipt.get('data', {}).get('reset'), 'reset failed: ' + json.dumps(receipt.get('error', {}))[:160]
@@ -151,14 +159,15 @@ def check_reset_pair(win, args):
         assert code == 0 and receipt.get('ok'), 'pair failed: ' + json.dumps(receipt.get('error', {}))[:200]
     finally:
         victus(f"Remove-Item -Force '{TOKEN_FILE}' -ErrorAction SilentlyContinue")
+    machine_id = receipt['data']['machine_id']
     wait_for(lambda: 'doctor: healthy' in win.run('doctor')[1], 180, 'doctor healthy after re-pair')
-    code, out = hp(f'{PB_HP} machine list')
-    assert re.search(rf'^{re.escape(args.machine)}\s+personal\s+online', out, re.M), 'machine is not online in the account after re-pair'
+    wait_for(lambda: re.search(rf'\sonline\s.*{re.escape(machine_id)}', hp(f'{PB_HP} machine list')[1]), 120, 'the new machine record online in the account')
+    args.machine = re.search(rf'^(\S+)\s.*{re.escape(machine_id)}', hp(f'{PB_HP} machine list')[1], re.M).group(1)  # the pair may suffix a taken name
 
 
 def check_uninstall(win, args):
     """F1-09: pb uninstall removes everything: the Windows inventory finds nothing left."""
-    host = victus('$env:COMPUTERNAME')[1].strip()
+    host = victus('hostname')[1].strip()
     code, out = win.run('uninstall', '--confirmation', 'UNINSTALL PAPERBOAT', '--hostname', host, timeout=600)
     assert code == 0, f'uninstall rc={code}: {out.strip()[-200:]}'
     inventory(args)
