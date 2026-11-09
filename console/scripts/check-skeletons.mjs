@@ -12,6 +12,7 @@
 //     column header moves by more than 2 px.
 // usage: ORIGIN=<console origin> STATE=<playwright storage state> PW_CHROMIUM=<chromium> [PW_MODULE=<playwright-core
 //        index.mjs>] [OUT=<screenshot dir>] [VIEWPORT=1440x900|390x844] [SCHEME=light|dark] [MACHINE=<machine id>]
+//        [WARM=1: visit each route once first, as a returning visitor whose lists remember their row counts]
 //        node check-skeletons.mjs [route…]
 // Read only: it only navigates. Exits 1 when a route fails.
 import { mkdirSync } from "node:fs"
@@ -110,6 +111,13 @@ for (const route of routes) {
   await shot(shellPage, route, "shell")
   await shellPage.close()
 
+  if (process.env.WARM) {
+    const warm = await context.newPage()
+    await warm.goto(origin + route)
+    await warm.waitForLoadState("networkidle").catch(() => {})
+    await warm.waitForTimeout(1500)
+    await warm.close()
+  }
   const page = await context.newPage()
   let release
   const released = new Promise((resolve) => (release = resolve))
