@@ -328,3 +328,9 @@ Container mode, recorded 2026-10-23 with the entry above: today `pb` runs in Doc
 systemd container (`--privileged`, systemd as PID 1). The standard shape (Tailscale, cloudflared) is an
 official image: `pb daemon` in the foreground as the main process, pairing from a one-time key in an
 environment variable, state on a volume, no extra privileges. Covers Docker hosts, Kubernetes and CI.
+
+## Fleets of temporary machines — right after launch (2026-11-10)
+
+User decision: first work after launch; announced at launch. Many machines join with one
+enrollment key and leave on their own when they disappear, then are used as a group (exec,
+files, ENV, config). Details are kept outside this public file until it ships.
