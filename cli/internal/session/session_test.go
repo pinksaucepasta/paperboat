@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -229,7 +228,11 @@ type exitThenCancelConn struct {
 	cancel context.CancelFunc
 }
 
-func (c *exitThenCancelConn) Wait() (int, error) { c.cancel(); return c.code, nil }
+func (c *exitThenCancelConn) Wait() (int, error) {
+	c.cancel()
+	time.Sleep(10 * time.Millisecond) // on several cores Run sees the cancel before the exit is published
+	return c.code, nil
+}
 
 // A Ctrl-C that lands as the remote exits was reported as 130 or as the real code at random; a remote result that is
 // already in wins.
@@ -245,8 +248,6 @@ func TestRunPrefersAReadyRemoteExitOverCancellation(t *testing.T) {
 		_ = outR.Close()
 		_ = outW.Close()
 	}()
-	// One P: the cancel wakes Run, which runs only after Wait's goroutine has published the exit.
-	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := &exitThenCancelConn{testConn: &testConn{Reader: bytes.NewBuffer(nil), wait: make(chan struct{}), code: 7}, cancel: cancel}
