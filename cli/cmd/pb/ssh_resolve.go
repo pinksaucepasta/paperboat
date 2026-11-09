@@ -130,3 +130,29 @@ func sshConnectInfo(machine api.UserMachine, descriptor api.SSHDescriptor, selec
 func pendingSSHDescriptor(machine api.UserMachine, operationID string) api.SSHDescriptor {
 	return api.SSHDescriptor{OperationID: operationID, ExpiresAt: time.Now().Add(2 * time.Minute), Auth: api.AuthMaterial{ExpiresAt: time.Now().Add(2 * time.Minute)}, Environment: &api.Environment{ID: machine.EnvironmentID, Kind: "machine", ResourceID: machine.ID, Root: machine.WorkspaceRoot}}
 }
+
+// refreshInventoryForSSHHostKeys is replaced in tests.
+var refreshInventoryForSSHHostKeys = refreshLocalInventory
+
+// sshHostKeysRefreshTimeout bounds the one refresh a connection waits for.
+const sshHostKeysRefreshTimeout = 5 * time.Second
+
+// freshenSSHHostKeys covers a machine that published its SSH host keys after this computer's last
+// inventory refresh (sshd installed after pairing, a first set): the daemon writes the known-hosts file OpenSSH
+// reads from that inventory, so until the next refresh OpenSSH finds no key and ends with a bare "Host key
+// verification failed." A first set is not a changed key (the server activates it, as at pairing), so the
+// connection asks the daemon for one refresh now instead of waiting for its event. The returned bool is true when
+// the machine still has no host keys, which the caller names. Only the warm path (no client) needs it.
+func freshenSSHHostKeys(ctx context.Context, machine api.UserMachine, resolve func() (api.UserMachine, error)) (api.UserMachine, bool) {
+	if len(machine.SSHHostKeys) > 0 {
+		return machine, false
+	}
+	refreshCtx, cancel := context.WithTimeout(ctx, sshHostKeysRefreshTimeout)
+	defer cancel()
+	if err := refreshInventoryForSSHHostKeys(refreshCtx); err == nil {
+		if refreshed, err := resolve(); err == nil {
+			machine = refreshed
+		}
+	}
+	return machine, len(machine.SSHHostKeys) == 0
+}
