@@ -54,7 +54,7 @@ def main():
     output, errors = run(binary, 'ssh', args.target, '--', command, expected=37)
     if output != (marker + '_λ船\n').encode() or errors != b'PB_SSH_STDERR\n':
         raise RuntimeError('SSH command changed stdout, Unicode, stderr or exit code')
-    terminal = Terminal(winhost.terminal_argv(binary, ['ssh', args.target]))
+    terminal = Terminal(winhost.terminal_argv(binary, ['ssh', args.target]), env=winhost.terminal_env(binary))
     try:
         # Wait for the authenticated remote shell before sending its command.
         shell_ready(terminal)

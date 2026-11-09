@@ -327,7 +327,7 @@ def qualify(pb, target, check, monitor, entry='connect', cwd=None, status_bar='o
             arguments = ['new']
         else:
             arguments = [target] if entry == 'root' else ['connect', target]
-        terminal = Terminal(winhost.terminal_argv(pb, [*arguments, '--name', name, '--status-bar', status_bar]), cwd=cwd)
+        terminal = Terminal(winhost.terminal_argv(pb, [*arguments, '--name', name, '--status-bar', status_bar]), cwd=cwd, env=winhost.terminal_env(pb))
         if entry != 'new' and windows_target.is_windows(pb, target):
             phases = windows_phases(terminal, check, status_bar)
         else:

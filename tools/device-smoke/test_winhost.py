@@ -447,6 +447,13 @@ class SessionFamily(unittest.TestCase):
         command = argv[-1]
         self.assertIn("& 'C:\\Program Files\\Paperboat\\bin\\pb.exe' 'connect' 'my box' '--name' 'it''s'", command)
 
+    def test_every_terminal_argv_harness_gets_the_password_environment(self):
+        # Without SSHPASS the pty child is sshpass printing its usage: the terminal closes before any output.
+        for path in pathlib.Path(__file__).parent.glob('*_*.py'):
+            for line in [] if path.name.startswith('test_') else path.read_text().splitlines():
+                if '(winhost.terminal_argv(' in line:
+                    self.assertIn('env=winhost.terminal_env(', line, path.name)
+
     def test_session_cleanup_reads_the_device_receipt(self):
         import session_cleanup
 

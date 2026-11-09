@@ -188,7 +188,7 @@ class Client(Terminal):
 
 
 def connect(target, name, rows=24, cols=80):
-    c = Client(winhost.terminal_argv(PB, ['connect', target, '--name', name, '--status-bar', 'off']))
+    c = Client(winhost.terminal_argv(PB, ['connect', target, '--name', name, '--status-bar', 'off']), env=winhost.terminal_env(PB))
     c.key = name
     c.resize(rows, cols)
     c.ready()
@@ -196,7 +196,7 @@ def connect(target, name, rows=24, cols=80):
 
 
 def attach(target, session, rows=24, cols=80, typing=True):
-    c = Client(winhost.terminal_argv(PB, ['connect', target, '--session', session, '--status-bar', 'off']))
+    c = Client(winhost.terminal_argv(PB, ['connect', target, '--session', session, '--status-bar', 'off']), env=winhost.terminal_env(PB))
     c.key = session
     c.resize(rows, cols)
     if typing:
