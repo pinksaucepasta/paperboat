@@ -4,7 +4,7 @@ import { ArrowSquareOutIcon, PowerIcon, TerminalIcon, TerminalWindowIcon } from 
 import { useQueryClient } from "@tanstack/react-query"
 import { Fragment, useDeferredValue, useState } from "react"
 import { toast } from "sonner"
-import { useApiQuery, type Machine } from "@/lib/api"
+import { useApiQuery, useMachines, type Machine } from "@/lib/api"
 import { formatRelative } from "@/lib/format"
 import { closeTerminal, terminalCountsQuery, terminalKeys, terminalPageSize, terminalsPageQuery } from "@/lib/terminal/queries"
 import { usePageParam } from "@/lib/use-page-param"
@@ -80,11 +80,24 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
   const total = query.data?.total ?? 0
   const shown = (query.data?.items ?? []).map((session) => ({ session, time: lastUsed(session, now) }))
 
-  // Open terminals are all current, so they're one list; closed ones group by when they were used.
-  const columns = 4 + (scope ? 0 : 1) + (view === "open" ? 1 : 0)
-  const groups: { key: string; label: string; rows: typeof shown }[] = []
-  if (view === "open" && shown.length) groups.push({ key: "open", label: "", rows: shown })
-  else
+  // Open terminals are current: live ones first, then those whose machine isn't reporting them (shown
+  // as last reported). Closed ones group by when they were used. The split covers the loaded page.
+  // What's running is unknown for unreachable terminals, so the column shows only when one is live.
+  const running = view === "open" && shown.some(({ session }) => session.state !== "unavailable")
+  const columns = 4 + (scope ? 0 : 1) + (running ? 1 : 0)
+  const groups: { key: string; label: string; note?: string; rows: typeof shown }[] = []
+  if (view === "open") {
+    const live = shown.filter(({ session }) => session.state !== "unavailable")
+    const away = shown.filter(({ session }) => session.state === "unavailable")
+    if (live.length) groups.push({ key: "open", label: "", rows: live })
+    if (away.length)
+      groups.push({
+        key: "away",
+        label: live.length ? "Not reachable" : "",
+        note: "Their machine isn’t reporting them, usually because it’s offline. They come back when it reconnects; closing one ends its shell then.",
+        rows: away,
+      })
+  } else
     for (const row of shown) {
       const { key, label } = groupOf(row.time, now, date)
       const group = groups.at(-1)
@@ -135,7 +148,7 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
           <colgroup>
             <col />
             {!scope && <col className="hidden w-[16%] md:table-column" />}
-            {view === "open" && <col className="hidden w-[22%] lg:table-column" />}
+            {running && <col className="hidden w-[22%] lg:table-column" />}
             <col className="hidden w-[24%] lg:table-column" />
             <col className="hidden w-[14%] sm:table-column" />
             <col className="w-12" />
@@ -144,7 +157,7 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
             <tr className="[&>th]:h-9 [&>th]:px-3 [&>th]:font-normal">
               <th>Terminal</th>
               {!scope && <th className="hidden md:table-cell">Machine</th>}
-              {view === "open" && <th className="hidden lg:table-cell">Running</th>}
+              {running && <th className="hidden lg:table-cell">Running</th>}
               <th className="hidden lg:table-cell">Folder</th>
               <th className="hidden sm:table-cell">{view === "open" ? "Status" : "Last used"}</th>
               <th className="w-12" aria-label="Actions" />
@@ -163,18 +176,19 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
           ) : (
             groups.map((group) => (
               <Fragment key={group.key}>
-                {group.label && (
+                {(group.label || group.note) && (
                   <tbody>
                     <tr>
-                      <th colSpan={columns} className="h-11 px-3 pt-4 text-left text-xs font-medium text-foreground">
-                        {group.label}
+                      <th colSpan={columns} className="px-3 pt-4 pb-2 text-left text-xs font-normal">
+                        {group.label && <span className="block font-medium text-foreground">{group.label}</span>}
+                        {group.note && <span className="block text-muted-foreground">{group.note}</span>}
                       </th>
                     </tr>
                   </tbody>
                 )}
                 <tbody className="divide-y divide-divider border-b border-divider">
-                  {group.rows.map(({ session }) => (
-                    <Row key={session.id} session={session} now={now} showMachine={!scope} />
+                  {group.rows.map(({ session, time }) => (
+                    <Row key={session.id} session={session} time={time} now={now} showMachine={!scope} showRunning={running} />
                   ))}
                 </tbody>
               </Fragment>
@@ -214,9 +228,11 @@ function localCommand(session: TerminalSession) {
 /**
  * Whether anyone is in an open terminal right now: attached means a tab or a `pb` client is
  * connected (the server counts participants); detached means it keeps running with nobody in it.
- * Unavailable means the machine isn’t reporting it, usually because it’s offline.
+ * Unavailable means the machine isn’t reporting it: offline (`target.status`, with when it was last
+ * seen), or online but not answering for it.
  */
-function TerminalStatus({ session }: { session: TerminalSession }) {
+function TerminalStatus({ session, now }: { session: TerminalSession; now: number }) {
+  const machines = useMachines()
   if (session.state === "attached")
     return (
       <span className="flex items-center gap-2">
@@ -224,7 +240,16 @@ function TerminalStatus({ session }: { session: TerminalSession }) {
         In use
       </span>
     )
-  if (session.state === "unavailable") return <span className="text-muted-foreground">Unavailable</span>
+  if (session.state === "unavailable") {
+    if (session.target.status !== "offline") return <span className="text-muted-foreground">Machine not answering</span>
+    const seen = machines.data?.find((machine) => machine.id === session.target.machine_id)?.last_seen_at
+    return (
+      <span className="flex flex-col text-muted-foreground">
+        <span>Machine offline</span>
+        {seen && now > 0 && <span className="text-xs">seen {formatRelative(seen, now)}</span>}
+      </span>
+    )
+  }
   return (
     <span className="flex items-center gap-2">
       <StatusDot online={false} />
@@ -233,75 +258,84 @@ function TerminalStatus({ session }: { session: TerminalSession }) {
   )
 }
 
-function Row({ session, now, showMachine }: { session: TerminalSession; now: number; showMachine: boolean }) {
+function Row({
+  session,
+  time: used,
+  now,
+  showMachine,
+  showRunning,
+}: {
+  session: TerminalSession
+  time: number
+  now: number
+  showMachine: boolean
+  showRunning: boolean
+}) {
   const queryClient = useQueryClient()
   const [closing, setClosing] = useState(false)
   const open = terminalCanAttach(session)
+  // Open, but its machine isn't reporting it: nothing to attach to until the machine is back.
+  const away = open && session.state === "unavailable"
+  const offline = session.target.status === "offline"
   const folder = session.current_directory || session.started_in
   // What's running: the app's own window title, or the foreground program.
   const activity = session.title || session.foreground_process
   const href = `/terminals/${encodeURIComponent(session.id)}`
   const time = useTimeFormat()
   const lastUsedLabel =
-    session.last_active_at && now > 0
-      ? now - Date.parse(session.last_active_at) < day
-        ? formatRelative(session.last_active_at, now)
-        : time.date(session.last_active_at, "day")
-      : "—"
+    used && now > 0
+      ? now - used < day
+        ? formatRelative(new Date(used).toISOString(), now)
+        : time.date(new Date(used).toISOString(), "day")
+      : ""
 
-  const entries: Entry[] = open
-    ? [
-        {
-          kind: "item",
-          label: "Open in new tab",
-          icon: ArrowSquareOutIcon,
-          onSelect: () => window.open(href, "_blank", "noopener"),
-        },
-        // Terminals shared only through a browser link can't be joined from the CLI.
-        ...(session.browser_only
-          ? []
-          : ([
-              {
-                kind: "item",
-                label: "Continue in local terminal",
-                icon: TerminalWindowIcon,
-                onSelect: () => void copyWithToast(localCommand(session), "Command", "Run it in your terminal app."),
-              },
-            ] satisfies Entry[])),
-        ...(session.can_manage
-          ? ([
-              { kind: "separator" },
-              {
-                kind: "item",
-                label: "Close terminal",
-                icon: PowerIcon,
-                destructive: true,
-                onSelect: () => setClosing(true),
-              },
-            ] satisfies Entry[])
-          : []),
-      ]
+  const close: Entry[] = session.can_manage
+    ? [{ kind: "item", label: "Close terminal", icon: PowerIcon, destructive: true, onSelect: () => setClosing(true) }]
     : []
+  const entries: Entry[] = away
+    ? close
+    : open
+      ? [
+          {
+            kind: "item",
+            label: "Open in new tab",
+            icon: ArrowSquareOutIcon,
+            onSelect: () => window.open(href, "_blank", "noopener"),
+          },
+          // Terminals shared only through a browser link can't be joined from the CLI.
+          ...(session.browser_only
+            ? []
+            : ([
+                {
+                  kind: "item",
+                  label: "Continue in local terminal",
+                  icon: TerminalWindowIcon,
+                  onSelect: () => void copyWithToast(localCommand(session), "Command", "Run it in your terminal app."),
+                },
+              ] satisfies Entry[])),
+          ...(close.length ? ([{ kind: "separator" }, ...close] satisfies Entry[]) : []),
+        ]
+      : []
 
   const row = (actions: React.ReactNode) => (
     <tr
-      className={`group relative [&>td]:h-14 [&>td]:px-3 ${open ? "transition-colors hover:bg-surface data-popup-open:bg-surface" : ""}`}
+      className={`group relative [&>td]:h-14 [&>td]:px-3 ${open && !away ? "transition-colors hover:bg-surface data-popup-open:bg-surface" : ""}`}
     >
       <td>
         <div className="flex min-w-0 items-center gap-2">
-          {open ? (
+          {open && !away ? (
             // Terminals open in their own tab, like a meeting from a calendar.
             <a
               href={href}
               target="_blank"
               rel="noopener"
-              className="truncate-x font-medium trim-cap after:absolute after:inset-0"
+              className="min-w-0 truncate-x font-medium trim-cap after:absolute after:inset-0"
             >
               {session.name}
             </a>
           ) : (
-            // A closed terminal's shell is gone; there is nothing to open.
-            <span className="truncate-x font-medium text-muted-foreground trim-cap">{session.name}</span>
+            // A closed terminal's shell is gone, and an unreachable one can't be opened until its machine is back.
+            <span className="min-w-0 truncate-x font-medium text-muted-foreground trim-cap">{session.name}</span>
           )}
           {/* Someone else's terminal; your own need no label. */}
           {session.role !== "owner" && (
@@ -312,10 +346,11 @@ function Row({ session, now, showMachine }: { session: TerminalSession; now: num
         </div>
       </td>
       {showMachine && <td className="hidden truncate md:table-cell">{session.target.name}</td>}
-      {open && <td className="hidden truncate text-muted-foreground lg:table-cell">{activity || "—"}</td>}
-      <td className="hidden truncate font-mono text-code text-muted-foreground lg:table-cell">{folder || "—"}</td>
+      {/* Unknown stays blank: what an unreachable terminal runs isn't known while its machine is away. */}
+      {showRunning && <td className="hidden truncate text-muted-foreground lg:table-cell">{away ? "" : activity}</td>}
+      <td className="hidden truncate font-mono text-code text-muted-foreground lg:table-cell">{folder}</td>
       <td className="hidden whitespace-nowrap text-muted-foreground sm:table-cell">
-        {open ? <TerminalStatus session={session} /> : lastUsedLabel}
+        {open ? <TerminalStatus session={session} now={now} /> : lastUsedLabel}
       </td>
       <td className="text-right">{actions}</td>
     </tr>
@@ -332,14 +367,20 @@ function Row({ session, now, showMachine }: { session: TerminalSession; now: num
           open={closing}
           onOpenChange={setClosing}
           title={`Close ${session.name}?`}
-          description={`The shell on ${session.target.name} ends for everyone, along with anything running in it.`}
+          description={
+            away && offline
+              ? `${session.target.name} is offline. The terminal moves to Closed now, and its shell ends when ${session.target.name} reconnects.`
+              : `The shell on ${session.target.name} ends for everyone, along with anything running in it.`
+          }
           action="Close terminal"
           pending="Closing…"
           mutation={{
             mutationFn: () => closeTerminal(session.target.machine_id, session.id),
             onSuccess: async () => {
               await queryClient.invalidateQueries({ queryKey: terminalKeys.list })
-              toast.success(`${session.name} closed`)
+              toast.success(`${session.name} closed`, {
+                description: away && offline ? `Its shell ends when ${session.target.name} reconnects.` : undefined,
+              })
             },
           }}
         />
