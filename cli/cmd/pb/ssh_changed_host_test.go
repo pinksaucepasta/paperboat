@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -218,5 +219,26 @@ func TestSSHDialNamesAnUnclassifiedNetworkFailure(t *testing.T) {
 	err := explainSSHDial("studio", &net.OpError{Op: "read", Net: "unix", Err: errors.New("i/o timeout")})
 	if message := sshFailureMessage(err); !strings.Contains(message, "studio") || !strings.Contains(message, "(step: open stream)") || strings.Contains(message, "unreachable") {
 		t.Fatalf("message = %q", message)
+	}
+}
+
+// A completed session closes the stream under the copy loop (OpenSSH exited, taking the proxy's context with it, or
+// closed its input): the proxy exits 0 silently. device: a team member's plain `ssh host exit 0` printed "Paperboat is
+// unreachable" from the proxy's "use of closed network connection".
+func TestSSHProxyTreatsTheCloseOfACompletedSessionAsTheEnd(t *testing.T) {
+	closed := &net.OpError{Op: "read", Net: "unix", Err: net.ErrClosed}
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := finishSSHProxy(canceled, closed, false); err != nil {
+		t.Fatalf("closed stream after the context ended = %v", err)
+	}
+	if err := finishSSHProxy(t.Context(), closed, true); err != nil {
+		t.Fatalf("closed stream after OpenSSH closed its input = %v", err)
+	}
+	if err := finishSSHProxy(t.Context(), closed, false); err == nil {
+		t.Fatal("a closed stream in the middle of a live session was hidden")
+	}
+	if err := finishSSHProxy(canceled, io.ErrUnexpectedEOF, true); err == nil {
+		t.Fatal("another failure was hidden")
 	}
 }

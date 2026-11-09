@@ -244,6 +244,17 @@ func actionSSHProxy(command *cobra.Command, _ []string) error {
 	input := &eofTracker{Reader: command.InOrStdin()}
 	err = copySSHProxy(connection, halfCloser, input, command.OutOrStdout())
 	explainEndedSSHProxy(command, machine, input.sawEOF(), func() (*api.Client, error) { return sshClientFor(ctx, nil) })
+	return finishSSHProxy(command.Context(), err, input.sawEOF())
+}
+
+// finishSSHProxy is the proxy's result. A session that ended normally (OpenSSH closed its input, or exited and took the
+// proxy's context with it) closes the stream under the copy loop; that read or write on a closed stream is the end of
+// the session, not a failure, and must not print Paperboat's generic network text after a successful `ssh host cmd`.
+// A closed-stream error with neither of those is a real mid-session failure and is kept.
+func finishSSHProxy(ctx context.Context, err error, inputClosed bool) error {
+	if errors.Is(err, net.ErrClosed) && (inputClosed || ctx.Err() != nil) {
+		return nil
+	}
 	return err
 }
 
