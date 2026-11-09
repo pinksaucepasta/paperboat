@@ -49,7 +49,7 @@ $ot=$p.StandardOutput.BaseStream.CopyToAsync($om);$et=$p.StandardError.BaseStrea
 try{$b=[Convert]::FromBase64String($req.input);$p.StandardInput.BaseStream.Write($b,0,$b.Length)}catch{}
 try{$p.StandardInput.Close()}catch{}
 $t=-not $p.WaitForExit([int]$req.timeout_ms)
-if($t){& taskkill.exe /T /F /PID $p.Id *> $null;[void]$p.WaitForExit(10000)}
+if($t){& cmd.exe /c "taskkill /T /F /PID $($p.Id) >nul 2>&1";[void]$p.WaitForExit(10000)}
 [void]$ot.Wait(5000);[void]$et.Wait(5000)
 @{rc=$(if($t){-1}else{$p.ExitCode});timed_out=$t;out=[Convert]::ToBase64String($om.ToArray());err=[Convert]::ToBase64String($em.ToArray())}|ConvertTo-Json -Compress
 """
@@ -76,12 +76,17 @@ SERVICES = ("@(Get-Service -Name $req.pattern -ErrorAction SilentlyContinue|"
 # -WindowStyle does not exist on pwsh for Linux.
 START = ("[void](New-Item -ItemType Directory -Force -Path $req.dir)\n"
          "$z=Join-Path $req.dir 'start.in';[IO.File]::WriteAllBytes($z,[byte[]]@())\n"
+         # Windows OpenSSH ends every process of the session when it closes (job object), so a process that must
+         # outlive this snippet is created by WMI, outside the session. It has no console window and no handles of ours.
+         "if($IsWindows -ne $false){$r=Invoke-CimMethod -ClassName Win32_Process -MethodName Create "
+         "-Arguments @{CommandLine=$req.cmdline}\n"
+         "if($r.ReturnValue -ne 0){throw ('process create failed: '+$r.ReturnValue)};$r.ProcessId;exit 0}\n"
+         # pwsh on Linux (unit tests): a plain detached child with its handles in files.
          "$o=@{FilePath=$req.exe;PassThru=$true;RedirectStandardInput=$z;"
          "RedirectStandardOutput=(Join-Path $req.dir 'start.out');RedirectStandardError=(Join-Path $req.dir 'start.err')}\n"
-         "if($IsWindows -ne $false){$o.WindowStyle='Hidden'}\n"
          "if($req.args){$o.ArgumentList=$req.args}\n"
          "(Start-Process @o).Id")
-STOP = ("& taskkill.exe /T /F /PID $req.pid *> $null\n"
+STOP = ("& cmd.exe /c \"taskkill /T /F /PID $($req.pid) >nul 2>&1\"\n"
         "for($i=0;$i -lt 50 -and (Get-Process -Id $req.pid -ErrorAction SilentlyContinue);$i++){Start-Sleep -Milliseconds 100}\n"
         "if(Get-Process -Id $req.pid -ErrorAction SilentlyContinue){exit 1}")
 PROCESSES = ("@(Get-CimInstance Win32_Process|Where-Object{$_.CommandLine -match $req.pattern}|"
@@ -288,7 +293,7 @@ class WindowsDevice:
     def start(self, argv, directory):
         """Start argv[0] hidden and detached, its standard handles in directory/start.*; return its pid."""
         return int(self.ps('start ' + argv[0], START, exe=argv[0], args=subprocess.list2cmdline(list(argv[1:])),
-                           dir=str(directory))[1])
+                           cmdline=subprocess.list2cmdline(list(argv)), dir=str(directory))[1])
 
     def suspend(self, pid):
         self.ps('suspend %s' % pid, SUSPEND, pid=int(pid), action='suspend')

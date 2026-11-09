@@ -10,7 +10,7 @@ import argparse
 import contextlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import platform
 import re
 import subprocess
@@ -229,7 +229,8 @@ def rows(args):
 
     r = Row('C228', 'config'); r.help(); r.invalid('bogus')
     v = Row('C228', 'config show').json_ok()
-    r.expect(isinstance(v, dict) and v.get('server_url') and Path(v.get('path', '')).is_absolute(), 'config show lacks server_url/path')
+    absolute = (PureWindowsPath if DEVICE else Path)((v or {}).get('path', '')).is_absolute()  # the device's own path form
+    r.expect(isinstance(v, dict) and v.get('server_url') and absolute, 'config show lacks server_url/path')
     r.expect(run('config', 'path')[1].strip() == (v or {}).get('path'), 'config path and show disagree')
     r.expect(Row('C228', 'config status').json_ok() is not None, 'config status --json invalid')
     out.append(r)

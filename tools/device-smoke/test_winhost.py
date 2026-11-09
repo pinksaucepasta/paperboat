@@ -155,6 +155,9 @@ class SnippetsInPowerShell(unittest.TestCase):
         taskkill = pathlib.Path(cls.bin.name) / 'taskkill.exe'
         taskkill.write_text('#!/bin/sh\nfor last; do :; done\nkill -9 "$last" 2>/dev/null\nexit 0\n')
         taskkill.chmod(0o755)
+        cmd = pathlib.Path(cls.bin.name) / 'cmd.exe'  # the snippets kill through `cmd /c "taskkill /T /F /PID n >nul 2>&1"`
+        cmd.write_text('#!/bin/sh\nkill -9 "$(echo "$2" | sed -E "s/.*PID ([0-9]+).*/\\1/")" 2>/dev/null\nexit 0\n')
+        cmd.chmod(0o755)
         shim = pathlib.Path(cls.bin.name) / 'powershell.exe'
         shim.write_text('#!/bin/sh\nexec "%s" "$@"\n' % PWSH)
         shim.chmod(0o755)
