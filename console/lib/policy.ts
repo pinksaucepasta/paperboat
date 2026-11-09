@@ -395,56 +395,6 @@ export function parsePolicy(text: string): PolicyFile | undefined {
   }
 }
 
-/** Tags per machine alias, from the file's `tags`. */
-export function tagsByMachine(file: PolicyFile | undefined): Map<string, string[]> {
-  const result = new Map<string, string[]>()
-  for (const [tag, machines] of Object.entries(file?.tags ?? {}))
-    for (const entry of Array.isArray(machines) ? machines : []) {
-      const alias = String(entry).replace(/^machine:/, "")
-      result.set(alias, [...(result.get(alias) ?? []), tag])
-    }
-  return result
-}
-
-/**
- * Whether the per-machine access grid shows this rule: everyone or one member, allowed one
- * machine's actions, no ports. Anything else exists only in the file.
- */
-export function gridRule(rule: PolicyRule): boolean {
-  return (
-    Array.isArray(rule.src) &&
-    rule.src.length === 1 &&
-    (rule.src[0] === "*" || rule.src[0].startsWith("user:")) &&
-    Array.isArray(rule.dst) &&
-    rule.dst.length === 1 &&
-    rule.dst[0].startsWith("machine:") &&
-    rule.dst[0] !== "machine:*" &&
-    Array.isArray(rule.allow) &&
-    !rule.deny &&
-    !rule.ports
-  )
-}
-
-/**
- * A member's own team ENV grant (`pb team grant … env`): one `user:` subject, `env:team`, only
- * env_read/env_write allowed (README "Team ENV"). Returns the email and whether it can write.
- */
-export function envGrant(rule: PolicyRule): { email: string; write: boolean } | undefined {
-  const simple =
-    Array.isArray(rule.src) &&
-    rule.src.length === 1 &&
-    rule.src[0].startsWith("user:") &&
-    Array.isArray(rule.dst) &&
-    rule.dst.length === 1 &&
-    rule.dst[0] === "env:team" &&
-    Array.isArray(rule.allow) &&
-    rule.allow.length > 0 &&
-    rule.allow.every((action) => action === "env_read" || action === "env_write") &&
-    !rule.deny
-  if (!simple) return undefined
-  return { email: rule.src[0].slice("user:".length), write: rule.allow!.includes("env_write") }
-}
-
 /** A line diff (longest common subsequence), for comparing policy versions. Sizes are bounded by the file limit. */
 export function lineDiff(before: string, after: string): { kind: " " | "-" | "+"; text: string }[] {
   const a = before.split("\n")
@@ -479,6 +429,6 @@ export function savedBy(policy: Policy) {
 export function readOnlyNote(policy: Policy) {
   if (policy.can_edit === "all") return null
   return policy.can_edit === "own_machines"
-    ? "You can change access only for your own machines, on the Simple tab."
+    ? "You can change access only for your own machines, from the Team page."
     : "Only owners and admins can change access."
 }

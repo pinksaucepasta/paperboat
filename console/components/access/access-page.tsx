@@ -5,14 +5,13 @@ import { useState } from "react"
 import { useApiQuery, useWorkspace } from "@/lib/api"
 import { notOnServer, PolicyError, policyQuery } from "@/lib/policy"
 import { cn } from "@/lib/utils"
-import { AccessSimple, OverviewSkeleton } from "@/components/access/access-simple"
 import { PolicyEditor } from "@/components/access/policy-editor"
 import { PolicyHistory } from "@/components/access/policy-history"
 import { PolicyTest } from "@/components/access/policy-test"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { Skeleton } from "@/components/ui/skeleton"
 
 const tabs = [
-  { id: "simple", title: "Overview" },
   { id: "file", title: "Policy file" },
   { id: "test", title: "Test" },
   { id: "history", title: "History" },
@@ -20,11 +19,11 @@ const tabs = [
 
 export type AccessTab = (typeof tabs)[number]["id"]
 
-/** Workspace → Access: one policy per workspace, shown as a grid, a file, a tester and its history. */
+/** Workspace → Access: one policy per workspace: the file, a tester and its history. */
 export function AccessPage() {
   const workspace = useWorkspace()
   const policy = useApiQuery(policyQuery(workspace?.id ?? ""))
-  const [tab, setTab] = useState<AccessTab>("simple")
+  const [tab, setTab] = useState<AccessTab>("file")
   // The unsaved file lives here so Test can try it and switching tabs keeps it.
   const [draft, setDraft] = useState<{ base: number; text: string } | null>(null)
 
@@ -59,9 +58,7 @@ export function AccessPage() {
         </div>
       </header>
       {!workspace || !data || text === undefined ? (
-        <OverviewSkeleton />
-      ) : tab === "simple" ? (
-        <AccessSimple workspace={workspace} policy={data} onEditFile={() => setTab("file")} />
+        <Skeleton className="h-[32rem] rounded-lg" />
       ) : tab === "file" ? (
         <PolicyEditor
           workspace={workspace.id}

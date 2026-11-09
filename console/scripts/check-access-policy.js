@@ -1,7 +1,7 @@
 // Browser check for F18-09 (workspace Access page and Settings → API tokens). Paste into the
 // console of a signed-in tab, in the workspace under test (personal or a team you own or admin).
 //
-// On /access: the four tabs, the Simple view's tags against the file (GET .../policy), the
+// On /access: the three tabs (the page opens on Policy file), the
 // editor holding the saved file, a broken draft getting inline errors (path and code) from
 // .../policy/validate and a fixed one getting none, Test answering what POST .../policy/explain
 // answers, and History listing what .../policy/versions lists. With `window.__save = true` it also
@@ -64,18 +64,8 @@
     pass("the page says the policy isn't available yet", Boolean(unavailable))
     return steps
   }
-  for (const name of ["Overview", "Policy file", "Test", "History"])
+  for (const name of ["Policy file", "Test", "History"])
     pass(`the ${name} tab is on the page`, Boolean(await until(() => tab(name))))
-
-  // Overview: every tag in the file shows on its machines.
-  tab("Overview").click()
-  const tagged = Object.entries(
-    JSON.parse(policy.data.policy.replace(/\/\/.*$/gm, "").replace(/,(\s*[}\]])/g, "$1")).tags ?? {},
-  )
-  const tagsShown = await until(() =>
-    tagged.every(([tag]) => document.body.innerText.includes(tag.replace(/^tag:/, ""))),
-  )
-  pass("Overview shows the file's tags", tagged.length === 0 || Boolean(tagsShown), `${tagged.length} tags`)
 
   // Policy file: the saved text, and inline errors for a broken draft.
   tab("Policy file").click()
