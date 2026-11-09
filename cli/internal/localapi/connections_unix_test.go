@@ -74,14 +74,11 @@ func TestLocalAPIReportsOpenSSHStreams(t *testing.T) {
 // pb logout must end every managed session this computer holds: a relayed close from the host can be lost, so the
 // daemon closes its own open peer streams once the sign-in is gone (device: a plain ssh survived logout until killed).
 func TestLocalAPIClosesOpenPeerStreamsWhenTheSignInEnds(t *testing.T) {
-	interval := credentialsEndedPoll
-	credentialsEndedPoll = 20 * time.Millisecond
-	t.Cleanup(func() { credentialsEndedPoll = interval })
 	var ended atomic.Bool
 	socket := filepath.Join(localAPITestDir(t), "signout.sock")
 	server, err := NewServer(ServerConfig{SocketPath: socket, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(),
 		Source:           snapshotSourceFunc(func(context.Context) (Snapshot, error) { return validSnapshot(), nil }),
-		CredentialsEnded: ended.Load,
+		CredentialsEnded: ended.Load, CredentialsEndedPoll: 20 * time.Millisecond,
 		PeerStreams: peerStreamBrokerFunc(func(context.Context, Peer, PeerStreamRequest) (net.Conn, error) {
 			local, remote := net.Pipe() // a host that never answers and never closes
 			t.Cleanup(func() { _ = remote.Close() })

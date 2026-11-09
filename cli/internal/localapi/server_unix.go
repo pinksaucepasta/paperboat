@@ -94,7 +94,9 @@ type ServerConfig struct {
 	// CredentialsEnded reports that this computer's sign-in is gone (pb logout, or a session the server rejected). The
 	// daemon polls it for every open peer stream and closes them all within a second of it turning true, so no managed
 	// session outlives the sign-in on a path the host could not close (a relayed close frame can be eaten).
-	CredentialsEnded     func() bool
+	CredentialsEnded func() bool
+	// CredentialsEndedPoll is how often an open peer stream checks CredentialsEnded; zero means one second.
+	CredentialsEndedPoll time.Duration
 	PeerProbes           PeerProbeBroker
 	InspectorRequests    InspectorBroker
 	RelayInventory       func(context.Context) (RelayInventory, error)
@@ -131,6 +133,9 @@ func NewServer(config ServerConfig) (*Server, error) {
 	}
 	if config.WatchDuration == 0 {
 		config.WatchDuration = 10 * time.Minute
+	}
+	if config.CredentialsEndedPoll == 0 {
+		config.CredentialsEndedPoll = time.Second
 	}
 	if config.MaxWatchEvents == 0 {
 		config.MaxWatchEvents = 1024
@@ -677,7 +682,7 @@ func (s *Server) peerStream(writer http.ResponseWriter, request *http.Request, r
 	streamCtx, cancel := context.WithCancel(context.WithoutCancel(request.Context()))
 	go watchPeerHangup(streamCtx, local, peer, cancel)
 	if s.config.CredentialsEnded != nil {
-		go watchCredentialsEnded(streamCtx, cancel, s.config.CredentialsEnded)
+		go watchCredentialsEnded(streamCtx, cancel, s.config.CredentialsEnded, s.config.CredentialsEndedPoll)
 	}
 	go func() {
 		defer cancel()
@@ -688,11 +693,8 @@ func (s *Server) peerStream(writer http.ResponseWriter, request *http.Request, r
 	}()
 }
 
-// credentialsEndedPoll is how often an open peer stream checks that its computer is still signed in.
-var credentialsEndedPoll = time.Second
-
-func watchCredentialsEnded(ctx context.Context, cancel context.CancelFunc, ended func() bool) {
-	ticker := time.NewTicker(credentialsEndedPoll)
+func watchCredentialsEnded(ctx context.Context, cancel context.CancelFunc, ended func() bool, poll time.Duration) {
+	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
 	for {
 		select {
