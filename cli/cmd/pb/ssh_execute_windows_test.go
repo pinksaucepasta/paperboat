@@ -88,7 +88,7 @@ func TestWindowsSSHCommandInputDuplicateCloseCancelsReadAndPreservesOriginal(t *
 }
 
 func TestWindowsLoopbackOpenSSHArgumentsPreserveManagedIdentityAndHost(t *testing.T) {
-	destination := managedssh.Destination{User: "root", Host: "hn.local.example.test", Port: 2222}
+	destination := managedssh.Destination{User: "root", Host: "hn.local.example.test", Port: 2222, Managed: true}
 	got := windowsLoopbackOpenSSHArguments(destination, 49152, `C:\Program Files\Paperboat\pb.exe`, []string{"/usr/bin/printf", "VICTUS_PB_SSH_OK"}, true)
 	want := []string{
 		"-o", "BatchMode=yes",

@@ -12,6 +12,8 @@ import (
 
 func TestSSHDoctorNamesMissingOpenSSHAndRecovery(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
+	// Windows ignores PATH and uses the system OpenSSH locations; an override naming no client makes it missing there.
+	t.Setenv("PAPERBOAT_OPENSSH_PATH", filepath.Join(t.TempDir(), "ssh.exe"))
 	command := newRootCommand()
 	var output bytes.Buffer
 	command.SetOut(&output)
