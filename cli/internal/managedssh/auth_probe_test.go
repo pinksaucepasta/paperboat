@@ -97,3 +97,39 @@ func TestProbeSSHAuthenticationKeepsTransportCauseWithStaticText(t *testing.T) {
 		t.Fatalf("authentication failure exposed transport text: %q", err)
 	}
 }
+
+// A host presenting a key outside the active set (its keys changed, the new set waits for trust) fails the
+// probe with ErrKnownHosts in the cause chain, which pb ssh doctor turns into the trust-host instruction.
+func TestProbeSSHAuthenticationNamesAHostKeyOutsideTheActiveSet(t *testing.T) {
+	clientSigner, _ := testKey(t)
+	presented, _ := testKey(t)
+	allowed, _ := testKey(t)
+	serverConfig := &ssh.ServerConfig{NoClientAuth: true}
+	serverConfig.AddHostKey(presented)
+	// A real socket: both SSH ends write their version line first, which deadlocks on an unbuffered net.Pipe.
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		server, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer server.Close()
+		if connection, _, _, err := ssh.NewServerConn(server, serverConfig); err == nil {
+			_ = connection.Close()
+		}
+	}()
+	clientSide, err := net.Dial("tcp4", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clientSide.Close()
+	public := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(allowed.PublicKey())))
+	err = ProbeSSHAuthentication(t.Context(), clientSide, "studio.machines.example.test:22", "deploy", clientSigner, []string{public})
+	if !errors.Is(err, ErrKnownHosts) || !errors.Is(err, ErrSSHAuthentication) {
+		t.Fatalf("host key outside the active set: %v", err)
+	}
+}

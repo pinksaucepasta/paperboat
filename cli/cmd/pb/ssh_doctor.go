@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/spf13/cobra"
 )
@@ -98,6 +99,9 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 	stopWatch()
 	closeErr := connection.Close()
 	if authErr != nil {
+		if changed := pendingHostKeyFailure(command.Context(), client, machine, authErr); changed != nil {
+			return changed
+		}
 		return fmt.Errorf("managed SSH host verification or key reconciliation is not ready: %w", authErr)
 	}
 	if closeErr != nil && !errors.Is(closeErr, net.ErrClosed) {
@@ -117,3 +121,18 @@ type bufferedStream struct {
 }
 
 func (s bufferedStream) Read(p []byte) (int, error) { return s.reader.Read(p) }
+
+// pendingHostKeyFailure is the doctor's answer when the machine presented a host key outside the active set: the
+// changed identity and the command to trust it when the server holds a newer set waiting for the owner's trust, and
+// otherwise (the machine has not reported its new keys yet, or this is a different machine) the plain fact and what
+// to do, in pb's words: the generic failure text names neither. Any other failure returns nil.
+func pendingHostKeyFailure(ctx context.Context, client *api.Client, machine api.UserMachine, authErr error) error {
+	if !errors.Is(authErr, managedssh.ErrKnownHosts) {
+		return nil
+	}
+	pending, err := client.ManagedSSHPendingHostKeys(ctx, machine.ID, uint64(machine.InstallationGeneration))
+	if err != nil || pending.Fingerprint == "" {
+		return &sshDialError{message: machine.Alias + " presented an SSH host key that is not in its trusted set, and has not reported new keys yet. If you changed its host keys, retry `pb ssh doctor " + machine.Alias + "` in a minute; if you did not, do not connect: it may not be that machine.", cause: authErr}
+	}
+	return &sshDialError{message: pendingSSHHostIdentityMessage(machine.Alias, pending.Fingerprint), cause: authErr}
+}

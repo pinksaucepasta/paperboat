@@ -125,7 +125,12 @@ func explainChangedSSHHostIdentity(command *cobra.Command, client *api.Client, m
 	if pendingErr != nil || pending.Fingerprint == "" {
 		return
 	}
-	fmt.Fprintf(command.ErrOrStderr(), "pb: %s published a new SSH host identity that is not trusted yet (pending %s). If you expected the change, trust it with `pb ssh trust-host %s --fingerprint %s`.\n", machine.Alias, pending.Fingerprint, machine.Alias, pending.Fingerprint)
+	fmt.Fprintf(command.ErrOrStderr(), "pb: %s\n", pendingSSHHostIdentityMessage(machine.Alias, pending.Fingerprint))
+}
+
+// pendingSSHHostIdentityMessage names a changed host identity that waits for the owner's trust, with the exact command.
+func pendingSSHHostIdentityMessage(alias, fingerprint string) string {
+	return fmt.Sprintf("%s published a new SSH host identity that is not trusted yet (pending %s). If you expected the change, trust it with `pb ssh trust-host %s --fingerprint %s`.", alias, fingerprint, alias, fingerprint)
 }
 
 func resolveSSHRequestedUser(targetUser, flagUser string) (string, error) {
