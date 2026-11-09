@@ -206,6 +206,11 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 			result.Category = "conflict"
 		case 408, 429, 500, 502, 503, 504:
 			result.Category, result.Retryable = "unavailable_retryable", true
+		default:
+			// The server refused this request as invalid (400, 404, 422...): not a local disk or daemon failure.
+			if typed.Status >= 400 && typed.Status < 500 {
+				result.Category = "usage"
+			}
 		}
 		if typed.Code == "machine_offline" || typed.Code == "machine_capability_unavailable" || typed.Code == "team_suspended" || strings.HasPrefix(typed.Code, "config_compare_") {
 			// The target was refused before anything was sent or started.

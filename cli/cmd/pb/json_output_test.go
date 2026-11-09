@@ -322,3 +322,12 @@ func TestCLIJSONRejectsUnknownServerCodeAndMessage(t *testing.T) {
 		t.Fatal("known protocol code was lost")
 	}
 }
+
+// A server 4xx that is not auth, conflict or retryable is a refused request, not disk or daemon I/O.
+func TestCLIJSONServerValidationRefusalIsNotLocalIO(t *testing.T) {
+	for _, status := range []int{400, 404, 422} {
+		if got := classifyCLIJSONError(&api.APIError{Status: status, Code: "validation_failed"}); got.Category != "usage" {
+			t.Fatalf("status %d: %#v", status, got)
+		}
+	}
+}
