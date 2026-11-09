@@ -494,56 +494,30 @@ func (r *DataCarrierRouteRegistry) OpenRouteStream(ctx context.Context, rule rou
 	if ctx == nil || requestID == "" || connectorprotocol.ValidateIdentifier(requestID) != nil {
 		return nil, ErrDataCarrierRouteInvalid
 	}
-	entry, err := r.entryFor(rule, requestID)
-	if _, native := ctx.Value(privateIngressDecisionKey{}).(connectorprotocol.IngressDecision); native {
-		entry, err = r.entryForExactAssignment(rule)
-	}
-	if err != nil {
-		return nil, err
-	}
-	open := connectorprotocol.StreamOpen{
-		Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion,
-		AccountID: entry.identity.AccountID, TunnelID: entry.identity.TunnelID, ConnectorID: entry.identity.ConnectorID,
-		SessionID: entry.identity.SessionID, ProcessGeneration: entry.identity.ProcessGeneration,
-		Generation: entry.identity.Generation, RouteID: carrierRouteID(rule), RequestID: requestID,
-		Kind: routeStreamKind(ctx, entry, rule),
-	}
 	openContext, cancel := context.WithTimeout(ctx, defaultDataCarrierRouteOpenTimeout)
 	defer cancel()
-	decision, err := r.ingressDecision(openContext, rule, open)
-	if err != nil {
-		return nil, err
+	return r.openWithTimeout(openContext, ctx, rule, requestID)
+}
+
+// routeEntry picks the carrier for one request. A browser or native decision names the rule's own
+// connector session (IngressDecision.Authorize), so such a request opens only on that session.
+func (r *DataCarrierRouteRegistry) routeEntry(ctx context.Context, rule route.RouteRule, requestID string) (*dataCarrierRouteEntry, error) {
+	if _, native := ctx.Value(privateIngressDecisionKey{}).(connectorprotocol.IngressDecision); native || rule.AccessMode != "public" {
+		return r.entryForExactAssignment(rule)
 	}
-	var lease *IngressLease
-	if decision != nil {
-		lease, err = r.AcquireIngress(openContext, *decision)
-		if err != nil {
-			return nil, err
-		}
-		defer func() {
-			if lease != nil {
-				lease.Release()
-			}
-		}()
+	return r.entryFor(rule, requestID)
+}
+
+// servedRule is rule as served by entry: the server issues a public decision per carrier session
+// (ingressprojection), so a sibling replica is authorized by its own assignment's decision.
+func servedRule(rule route.RouteRule, entry *dataCarrierRouteEntry) route.RouteRule {
+	binding, ok := replicaRouteBinding(entry.state.RouteBindings, carrierRouteID(rule))
+	if !ok {
+		return rule
 	}
-	started := time.Now()
-	stream, err := entry.server.OpenStreamWithLifetime(openContext, ctx, open)
-	if err != nil {
-		return nil, errors.Join(ErrDataCarrierRouteTransport, err)
-	}
-	if writesIngressDecision(entry, decision) {
-		if err := connectorprotocol.WriteIngressDecision(stream, *decision, time.Now().UTC()); err != nil {
-			_ = stream.Close()
-			return nil, err
-		}
-	}
-	var application io.ReadWriteCloser = stream
-	if lease != nil {
-		application = lease.Wrap(ctx, stream)
-		lease = nil
-	}
-	r.recordOpenLatency(entry, time.Since(started))
-	return application, nil
+	rule.HostID, rule.ConnectorID, rule.ConnectorSessionID, rule.ConnectorProcessGeneration = entry.identity.HostID, entry.identity.ConnectorID, entry.identity.SessionID, entry.identity.ProcessGeneration
+	rule.AssignmentID, rule.AssignmentGeneration = binding.AssignmentID, binding.AssignmentGeneration
+	return rule
 }
 
 // OpenPrivateTCPStream is the non-HTTP access-only carrier seam. Unlike
@@ -855,10 +829,7 @@ func (r *DataCarrierRouteRegistry) openWithTimeout(openCtx, lifetimeCtx context.
 	if openCtx == nil || lifetimeCtx == nil {
 		return nil, ErrDataCarrierRouteInvalid
 	}
-	entry, err := r.entryFor(rule, requestID)
-	if _, native := openCtx.Value(privateIngressDecisionKey{}).(connectorprotocol.IngressDecision); native {
-		entry, err = r.entryForExactAssignment(rule)
-	}
+	entry, err := r.routeEntry(openCtx, rule, requestID)
 	if err != nil {
 		return nil, err
 	}
@@ -869,7 +840,7 @@ func (r *DataCarrierRouteRegistry) openWithTimeout(openCtx, lifetimeCtx context.
 		Generation: entry.identity.Generation, RouteID: carrierRouteID(rule), RequestID: requestID,
 		Kind: routeStreamKind(openCtx, entry, rule),
 	}
-	decision, err := r.ingressDecision(openCtx, rule, open)
+	decision, err := r.ingressDecision(openCtx, servedRule(rule, entry), open)
 	if err != nil {
 		return nil, err
 	}

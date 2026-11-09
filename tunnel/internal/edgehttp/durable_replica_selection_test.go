@@ -1,10 +1,12 @@
 package edgehttp
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
 )
@@ -185,4 +187,52 @@ func replicaRule() route.RouteRule {
 func replicaState(rule route.RouteRule, generation uint64, assignmentID, failureDomain string, latency time.Duration, capacity uint32) ReplicaState {
 	routeID := carrierRouteID(rule)
 	return ReplicaState{Ready: true, Generation: generation, RouteIDs: []string{routeID}, HealthyRoutes: []string{routeID}, RouteBindings: []ReplicaRouteBinding{{RouteID: routeID, AssignmentID: assignmentID, AssignmentGeneration: rule.AssignmentGeneration, RouteGeneration: rule.RouteGeneration, ConfigContentHash: rule.ConfigContentHash}}, FailureDomain: failureDomain, Latency: latency, Capacity: capacity}
+}
+
+// A public decision names one carrier session, so a request routed to a sibling replica carries
+// that replica's own decision instead of the representative's (which Authorize would refuse).
+func TestDurableReplicaPublicRequestUsesSelectedReplicaDecision(t *testing.T) {
+	rule := replicaRule()
+	rule.AccessMode, rule.Node, rule.EdgeProcessEpoch, rule.ViewerPolicyGeneration = "public", "edge_01", "epoch_0001", 1
+	authority := func(_ context.Context, r route.RouteRule) (connectorprotocol.IngressDecision, error) {
+		d := publicTCPDecision(time.Now().UTC(), 443)
+		d.Binding.RouteID, d.Binding.RouteGeneration = r.RouteID, r.RouteGeneration
+		d.ConnectorID, d.SessionID, d.ProcessGeneration, d.ConfigGeneration, d.AssignmentGeneration = r.ConnectorID, r.ConnectorSessionID, r.ConnectorProcessGeneration, r.ConfigGeneration, r.AssignmentGeneration
+		return d, nil
+	}
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4, IngressAuthority: authority})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	representative, _ := testEdgePreviewCarrierPair(t, replicaIdentity(rule.HostID, rule.ConnectorID, rule.ConnectorSessionID, 3))
+	sibling, siblingClient := testEdgePreviewCarrierPair(t, replicaIdentity("host_fast", "connector_fast", "session_fast", 3))
+	if err := registry.AttachReplica(representative, "key-a", "thumb-a", replicaState(rule, 3, rule.AssignmentID, "zone_a", 20*time.Millisecond, 4)); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.AttachReplica(sibling, "key-b", "thumb-b", replicaState(rule, 3, "assignment_fast", "zone_b", time.Millisecond, 4)); err != nil {
+		t.Fatal(err)
+	}
+	opened := make(chan error, 1)
+	go func() {
+		stream, err := registry.OpenRouteStream(context.Background(), rule, "request_sibling")
+		if stream != nil {
+			defer stream.Close()
+		}
+		opened <- err
+	}()
+	acceptCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	stream, _, err := siblingClient.AcceptStream(acceptCtx)
+	if err != nil {
+		t.Fatalf("sibling accepted no stream: %v (open: %v)", err, <-opened)
+	}
+	defer stream.Close()
+	got, err := connectorprotocol.ReadIngressDecision(stream, time.Now().UTC())
+	if err != nil || got.SessionID != "session_fast" || got.ConnectorID != "connector_fast" {
+		t.Fatalf("decision session=%q connector=%q err=%v, want the sibling's own", got.SessionID, got.ConnectorID, err)
+	}
+	if err := <-opened; err != nil {
+		t.Fatal(err)
+	}
 }
