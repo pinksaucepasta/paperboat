@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/causetext"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
@@ -247,7 +248,8 @@ func recordWindowsLaunchFailure(path string, cause error) {
 	fault := errorreport.Current().ObserveFailure(context.Background(), "paperboat-daemon", "daemon", "command", "command_failed", cause)
 	body, err := json.Marshal(fault)
 	if err == nil {
-		err = os.WriteFile(path, append(body, '\n'), 0600)
+		// The fault carries only the error's types; the service log is the one place its cause can be read.
+		err = os.WriteFile(path, append(body, []byte("\ncause: "+causetext.Text(cause)+"\n")...), 0600)
 	}
 	if err != nil {
 		observeRuntimeFailure(context.Background(), "diagnostic", runtimeFailure("runtime startup diagnostics could not be saved", err))
