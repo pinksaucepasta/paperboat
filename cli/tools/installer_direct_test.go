@@ -8,12 +8,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestMacOSInstallerRunsOnlyVerifiedDirectProduct(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("install.sh targets POSIX hosts (Windows installs with install.ps1); under Git Bash its fixtures see MSYS paths")
+	}
 	for _, scenario := range []string{"valid", "no-join", "wrong-hash", "wrong-length", "wrong-url", "install-failure", "reset-failure"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := t.TempDir()
@@ -132,6 +136,9 @@ esac
 // F1-01 (pbmac, 2026-11-06): macOS TMPDIR ends with "/", the installer staged its token file at ".../T//paperboat-install.X/enrollment-token"
 // and pb reset rejected the unclean path with a bare "could not finish the command".
 func TestInstallerStagesACleanTokenFilePathWhenTMPDIRHasATrailingSlash(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("install.sh targets POSIX hosts (Windows installs with install.ps1); under Git Bash its fixtures see MSYS paths")
+	}
 	root := t.TempDir()
 	spaced := filepath.Join(root, "a b")
 	if err := os.Mkdir(spaced, 0o700); err != nil {
