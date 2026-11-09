@@ -943,7 +943,11 @@ func (s *Service) resolveUnixPreparedRelease(ctx context.Context, handoff *unixA
 		if err != nil {
 			return workerupdate.Release{}, err
 		}
-		committed = nativeStarted && s.committedCandidateInstalled(payload)
+		if nativeStarted {
+			if committed, err = s.committedCandidateInstalled(payload); err != nil {
+				return workerupdate.Release{}, err
+			}
+		}
 	}
 	resolve := s.source.ResolveManual
 	if !handoff.Manual {
@@ -953,12 +957,19 @@ func (s *Service) resolveUnixPreparedRelease(ctx context.Context, handoff *unixA
 }
 
 // committedCandidateInstalled reports that the native owner committed the candidate payload as the installed source.
-func (s *Service) committedCandidateInstalled(payload workerupdate.Release) bool {
+// An uncommitted installation is "no"; a failure to read it is returned (retry), never taken for "no".
+func (s *Service) committedCandidateInstalled(payload workerupdate.Release) (bool, error) {
 	if s.config.LoadInstalledSource == nil {
-		return false
+		return false, nil
 	}
-	source, err := s.config.LoadInstalledSource() // fails while the installation is uncommitted
-	return err == nil && source.Version == payload.Version && source.SHA256 == payload.SHA256 && source.Length == payload.Length
+	source, err := s.config.LoadInstalledSource()
+	if errors.Is(err, ErrInstallationPending) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the installed source: %w", err)
+	}
+	return source.Version == payload.Version && source.SHA256 == payload.SHA256 && source.Length == payload.Length, nil
 }
 
 // Native progress fixes the original approval; ordinary queued work still uses

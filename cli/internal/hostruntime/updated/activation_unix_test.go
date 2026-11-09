@@ -950,3 +950,29 @@ func TestReleaseCommittedUnixActivationFreesOnlyACommittedFinishRetry(t *testing
 		})
 	}
 }
+
+// A transient failure to read the installed source was taken for "not committed": the previous version was authorized,
+// and when it was revoked a healthy committed candidate was ended as terminal. Only an uncommitted installation is
+// "not committed"; any other read error is returned so the attempt retries.
+func TestCommittedCandidateInstalledTreatsAReadErrorAsTransient(t *testing.T) {
+	payload := workerupdate.Release{Version: "2026.10.13.2", SHA256: strings.Repeat("b", 64), Length: 7}
+	installed := installsource.Source{Version: payload.Version, SHA256: payload.SHA256, Length: payload.Length}
+	readErr := errors.New("read installed source")
+	for _, tc := range []struct {
+		name    string
+		load    func() (installsource.Source, error)
+		want    bool
+		wantErr error
+	}{
+		{"committed", func() (installsource.Source, error) { return installed, nil }, true, nil},
+		{"another version installed", func() (installsource.Source, error) { return installsource.Source{Version: "2026.10.13.1"}, nil }, false, nil},
+		{"installation uncommitted", func() (installsource.Source, error) { return installsource.Source{}, ErrInstallationPending }, false, nil},
+		{"read error", func() (installsource.Source, error) { return installsource.Source{}, readErr }, false, readErr},
+	} {
+		service := &Service{config: Config{LoadInstalledSource: tc.load}}
+		got, err := service.committedCandidateInstalled(payload)
+		if got != tc.want || !errors.Is(err, tc.wantErr) || (tc.wantErr == nil && err != nil) {
+			t.Fatalf("%s: committed=%v err=%v, want %v %v", tc.name, got, err, tc.want, tc.wantErr)
+		}
+	}
+}
