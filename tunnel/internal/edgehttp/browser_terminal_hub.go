@@ -61,6 +61,7 @@ type BrowserTerminalHub struct {
 	OnFailure    func(context.Context, error)
 	mu           sync.Mutex
 	closed       bool
+	handingOver  bool // HandOver ran: the replacement edge process serves, so every end is a move
 	activeRoutes map[string]BrowserTerminalRouteFence
 	// heldRoutes are the fences a newer worker generation of the same machine replaced (pb update):
 	// their carriers keep publishing to the browsers they already serve until they detach. New
@@ -103,8 +104,9 @@ func replacedGeneration(old, next BrowserTerminalRouteFence) bool {
 	return next.Identity.AccountID == old.Identity.AccountID && next.Identity.HostID == old.Identity.HostID && next.Identity.ProcessGeneration > old.Identity.ProcessGeneration
 }
 
-// Moved reports whether fence's carrier was replaced by a newer worker generation of the same machine
-// that is the route's active one: a browser it served reconnects at once (terminalend.Moved).
+// Moved reports whether a browser served through fence's carrier reconnects at once (terminalend.Moved): the
+// carrier was replaced by a newer worker generation of the same machine that is the route's active one (pb update),
+// or this edge process handed over to its replacement (HandOver).
 func (h *BrowserTerminalHub) Moved(routeID string, fence BrowserTerminalRouteFence) bool {
 	if h == nil {
 		return false
@@ -112,7 +114,24 @@ func (h *BrowserTerminalHub) Moved(routeID string, fence BrowserTerminalRouteFen
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	current, ok := h.activeRoutes[routeID]
-	return ok && replacedGeneration(fence, current)
+	return h.handingOver || ok && replacedGeneration(fence, current)
+}
+
+// HandOver ends every browser terminal now; each bridge tells its browser "moved" (4301), which reconnects at once
+// to the replacement process. An edge install keeps every machine generation, so Moved alone cannot see it: without
+// this the old process's exit cut the connections (WebSocket 1006). Prior art: the WebSocket close code 1012 "Service
+// Restart" (IANA registry) is the standard way to tell clients to reconnect after a restart; the console already
+// reattaches at once on our typed equivalent, 4301.
+func (h *BrowserTerminalHub) HandOver() {
+	if h == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.handingOver = true
+	for key, session := range h.sessions {
+		h.closeSessionLocked(key, session)
+	}
 }
 
 func (h *BrowserTerminalHub) heldLocked(routeID string, identity datacarrier.Identity) bool {

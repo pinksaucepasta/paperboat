@@ -124,6 +124,8 @@ type Handover struct {
 	Epoch string
 	// Drain stops intake gracefully and drains the carriers until deadline (Assembly.Drain).
 	Drain func(ctx context.Context, deadline time.Time)
+	// MoveTerminals ends the browser terminals as "moved" once the replacement serves (BrowserTerminalHub.HandOver).
+	MoveTerminals func()
 	// SetSilent turns this process's node state reports off or on (control.HTTPClient.SetSilent).
 	SetSilent func(bool)
 	// Warm is closed once this process has pulled its admissions.

@@ -204,3 +204,105 @@ func registerWhenSubscribed(t *testing.T, ctx context.Context, hub *BrowserTermi
 		}
 	}
 }
+
+// An edge install keeps every machine generation, so the old process's drain ends its browser terminals through
+// HandOver: each browser gets exactly one typed "moved" close (4301, before the process exits), and its reattach
+// continues with the next record, nothing repeated and nothing lost. Before, the exit cut the connection (1006).
+func TestHandOverEndsBrowserTerminalsMovedAndReattachContinues(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	identity := testEdgePreviewIdentity(1, 1)
+	server, client := testEdgePreviewCarrierPair(t, identity)
+	defer server.Close()
+	defer client.Close()
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "runtime.example.test", ProcessEpoch: "edge_epoch_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	route := DataCarrierPreviewRoute{RouteID: "runtime_browser", Hostname: "machine.runtime.example.test", Kind: runtimewire.RouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: 1, Identity: identity, Server: server, ExpiresAt: time.Now().Add(time.Minute)}
+	if err := registry.Attach(route); err != nil {
+		t.Fatal(err)
+	}
+	hub := NewBrowserTerminalHub()
+	defer hub.Close()
+	if err := hub.ActivateRoute(route.RouteID, BrowserTerminalRouteFence{Identity: identity, Revision: 1, AttachmentGeneration: 1}); err != nil {
+		t.Fatal(err)
+	}
+	hostDone := make(chan struct{})
+	defer close(hostDone)
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		connection, err := websocket.Accept(w, r, &websocket.AcceptOptions{InsecureSkipVerify: true, Subprotocols: []string{browserTerminalSubprotocol}})
+		if err != nil {
+			return
+		}
+		defer connection.CloseNow()
+		select {
+		case <-hostDone:
+		case <-r.Context().Done():
+		}
+	}))
+	defer host.Close()
+	hostURL, err := url.Parse(host.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admissions := 0
+	policy, err := New(Config{
+		PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test",
+		MaxHeaderBytes: 4096, MaxBodyBytes: 4096, Routes: NewPreviewCarrierRouteMatcher(registry),
+		RuntimeCarrierTransport: browserTerminalTestRoundTripper{target: hostURL}, BrowserTerminalHub: hub, BrowserTerminalEdgeHost: "edge.example.test",
+		BrowserTerminal: browserTerminalAdmissionFunc(func(context.Context, string, string, string) (control.BrowserTerminalAdmission, error) {
+			admissions++
+			return control.BrowserTerminalAdmission{Credential: "host-credential", TerminalSessionID: "term_1", AttachmentID: "attach_" + strconv.Itoa(admissions), Closed: make(chan struct{}), Close: func() {}}, nil
+		}),
+	}, http.NotFoundHandler())
+	if err != nil {
+		t.Fatal(err)
+	}
+	edge := httptest.NewServer(policy)
+	defer edge.Close()
+	dial := func() *websocket.Conn {
+		header := make(http.Header)
+		header.Set("Origin", "https://dashboard.example.test")
+		connection, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(edge.URL, "http")+"/v1/browser-terminal/"+route.Hostname, &websocket.DialOptions{
+			Host: "edge.example.test", HTTPHeader: header, CompressionMode: websocket.CompressionDisabled,
+			Subprotocols: []string{browserTerminalSubprotocol, browserTerminalTicketPrefix + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return connection
+	}
+	read := func(connection *websocket.Conn, want string) {
+		t.Helper()
+		if _, payload, err := connection.Read(ctx); err != nil || string(payload) != "\x01"+want {
+			t.Fatalf("browser read %q, %v; want record %q", payload, err, want)
+		}
+	}
+	key := BrowserTerminalSessionKey{RouteID: route.RouteID, TerminalSessionID: "term_1", ProcessGeneration: 1}
+	first := dial()
+	defer first.CloseNow()
+	publisher := registerWhenSubscribed(t, ctx, hub, key, identity)
+	if err := publisher.Publish([]byte("r1")); err != nil {
+		t.Fatal(err)
+	}
+	read(first, "r1")
+
+	hub.HandOver()
+	// Exactly one close, and it is the first thing after the last record: no other frame, no plain drop.
+	_, _, err = first.Read(ctx)
+	var closed websocket.CloseError
+	if !errors.As(err, &closed) || closed.Code != websocket.StatusCode(terminalend.CodeMoved) {
+		t.Fatalf("browser saw %v, want close %d (moved)", err, terminalend.CodeMoved)
+	}
+
+	// The browser reattaches (to the replacement process in production) and continues with the next record.
+	second := dial()
+	defer second.CloseNow()
+	next := registerWhenSubscribed(t, ctx, hub, key, identity)
+	if err := next.Publish([]byte("r2")); err != nil {
+		t.Fatal(err)
+	}
+	read(second, "r2")
+}
