@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -598,6 +599,9 @@ func WriteFile(path string, body []byte, max int64) (resultErr error) {
 		return fileFailure("release metadata could not be committed", err)
 	}
 	committed = true
+	if runtime.GOOS == "windows" {
+		return nil // a directory handle cannot be flushed there; NTFS journals the rename
+	}
 	directoryFile, err := os.Open(directory)
 	if err != nil {
 		return fileFailure("release metadata was replaced but durability could not be confirmed", err)
