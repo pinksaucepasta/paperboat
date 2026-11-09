@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -790,14 +791,17 @@ func (s unixSweep) leftovers(ctx context.Context) ([]string, error) {
 				continue
 			}
 		}
-		if present {
+		// The plan's names and the matched definitions overlap, as do payload paths: name each item once.
+		if present && !slices.Contains(items, path) {
 			items = append(items, path)
 		}
 	}
 	processes, err := s.accountProcesses(ctx)
 	failure = errors.Join(failure, err)
 	for _, process := range processes {
-		items = append(items, fmt.Sprintf("process %d (%s)", process.pid, process.exe))
+		if item := fmt.Sprintf("process %d (%s)", process.pid, process.exe); !slices.Contains(items, item) {
+			items = append(items, item)
+		}
 	}
 	return items, failure
 }

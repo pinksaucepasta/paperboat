@@ -819,3 +819,42 @@ func TestPurgeAfterACorruptLifecycleStillFailsOnALeftover(t *testing.T) {
 		t.Fatalf("a surviving process was not reported: %v", err)
 	}
 }
+
+// agents read removed_by_name: every path or process is named once, however many lists of the plan contain it.
+func TestPurgeRemovedByNameNamesEachItemOnce(t *testing.T) {
+	root := t.TempDir()
+	plantLinuxAccount(t, root)
+	plan, err := newUnixPurgePlan("linux", 1001)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The same definition and payload named by several lists of the plan, and two processes of one executable.
+	plan.definitions = append(plan.definitions, plan.definitions...)
+	plan.payloadPaths = append(plan.payloadPaths, plan.payloadPaths...)
+	fake := newPurgeFake(
+		unixProcess{pid: 4001, ppid: 1, exe: "/usr/local/libexec/paperboat/users/u1001/bin/pb"},
+		unixProcess{pid: 4002, ppid: 1, exe: "/usr/local/libexec/paperboat/users/u1001/bin/pb"})
+	fake.jobs[4001], fake.jobs[4002] = "paperboat-hostd-u1001.service", "paperboat-hostd-u1001.service"
+	fake.uninstallErr = errors.Join(service.ErrLifecycleUncertain, errors.New("corrupt"))
+	var removed []string
+	sweep := testSweep(root, plan, fake)
+	sweep.removedByName = &removed
+	if err := sweep.purgeAccount(context.Background()); err != nil {
+		t.Fatalf("purge failed: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, item := range removed {
+		if seen[item] {
+			t.Errorf("%q is listed twice: %v", item, removed)
+		}
+		seen[item] = true
+		if !validPurgeRemaining(item) {
+			t.Errorf("%q is not a path or \"process <pid> (<path>)\"", item)
+		}
+	}
+	for _, want := range []string{"process 4001 (/usr/local/libexec/paperboat/users/u1001/bin/pb)", "process 4002 (/usr/local/libexec/paperboat/users/u1001/bin/pb)"} {
+		if !seen[want] {
+			t.Errorf("the report lacks %q: %v", want, removed)
+		}
+	}
+}
