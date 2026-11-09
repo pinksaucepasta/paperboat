@@ -3,7 +3,6 @@ package causetext
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 )
 
@@ -15,8 +14,15 @@ func (e *stepError) Unwrap() error { return e.cause }
 func TestTextFollowsAWrapperThatHidesItsCause(t *testing.T) {
 	deep := errors.New("the service did not respond")
 	err := fmt.Errorf("install supplied runtime: %w", errors.Join(&stepError{cause: errors.Join(&stepError{cause: deep})}))
-	if got := Text(err); !strings.Contains(got, "the service did not respond") {
-		t.Fatalf("cause missing from %q", got)
+	if got := Text(err); got != "install supplied runtime: install runtime services: the service did not respond" {
+		t.Fatalf("got %q, want the step names and the cause once each", got)
+	}
+}
+
+func TestTextKeepsEachJoinedCauseUnderItsStep(t *testing.T) {
+	err := &stepError{cause: errors.Join(errors.New("first"), fmt.Errorf("probe: %w", errors.New("second")))}
+	if got := Text(err); got != "install runtime services: first; install runtime services: probe: second" {
+		t.Fatalf("got %q", got)
 	}
 }
 

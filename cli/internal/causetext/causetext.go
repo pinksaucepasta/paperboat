@@ -13,10 +13,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 )
 
-// Text lists the distinct leaf errors under err, bounded in depth
-// and length. A CommandFailure's own message is public prose; the leaves are
-// the diagnostic causes it retains. A single wrapper that hides its cause (a step name over the real
-// error) is looked through; one whose text already ends with its only cause stands for it.
+// Text lists the distinct leaf errors under err, each with the step names above it ("install services: start
+// hostd: context deadline exceeded"), bounded in depth and length. A CommandFailure's own message is public
+// prose; the leaves are the diagnostic causes it retains.
 func Text(err error) string {
 	leaves := leafTexts(err, 0)
 	if len(leaves) > 8 {
@@ -35,25 +34,45 @@ func leafTexts(current error, depth int) []string {
 	} else if single, ok := current.(interface{ Unwrap() error }); ok && single.Unwrap() != nil {
 		children = []error{single.Unwrap()}
 	}
+	text := current.Error()
 	if len(children) == 0 || depth >= 12 {
-		text := current.Error()
-		if len(text) > 300 {
-			text = text[:300] + "..."
+		return []string{bounded(text)}
+	}
+	// A wrapper's own words are a step name: what precedes its cause ("read state: %w"), or its whole text
+	// when that names none of its causes (a typed step error). errors.Join has no words of its own.
+	step := text
+	for _, child := range children {
+		if child == nil {
+			continue
 		}
-		return []string{text}
+		if len(children) == 1 && strings.HasSuffix(text, child.Error()) {
+			step = strings.TrimSuffix(strings.TrimSpace(strings.TrimSuffix(text, child.Error())), ":")
+			break
+		}
+		if strings.Contains(text, child.Error()) {
+			step = ""
+			break
+		}
 	}
 	var leaves []string
 	for _, child := range children {
-		for _, text := range leafTexts(child, depth+1) {
-			if !slices.Contains(leaves, text) {
-				leaves = append(leaves, text)
+		for _, leaf := range leafTexts(child, depth+1) {
+			if step != "" && !strings.HasPrefix(leaf, step) {
+				leaf = bounded(step + ": " + leaf)
+			}
+			if !slices.Contains(leaves, leaf) {
+				leaves = append(leaves, leaf)
 			}
 		}
 	}
-	if _, joined := current.(interface{ Unwrap() []error }); !joined && len(leaves) == 1 && strings.HasSuffix(current.Error(), leaves[0]) {
-		return []string{current.Error()}
-	}
 	return leaves
+}
+
+func bounded(text string) string {
+	if len(text) > 400 {
+		return text[:400] + "..."
+	}
+	return text
 }
 
 // Record writes the operation, support reference and Text(err) to directory/name (0600), replacing the
