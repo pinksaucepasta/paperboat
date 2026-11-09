@@ -8,6 +8,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -168,6 +169,53 @@ func TestLinuxUserTrustInstallsAndRemovesExactOwnedRoot(t *testing.T) {
 	if !bytes.Equal(fake.certificates[profile+"\x00"+foreignName], foreignPEM) {
 		t.Fatal("unrelated NSS certificate was removed")
 	}
+}
+
+// Browser trust belongs to the signed-in user's session: as root every entry point refuses with that error, runs no NSS
+// command and leaves the home directory untouched (the unprivileged test above covers the user path).
+func TestLinuxUserTrustRefusesRoot(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root; runs in tools/cli-root-tests.sh")
+	}
+	_, _, rootPEM := renewalFixture(t, 365)
+	root, err := parseLocalTrustRoot(rootPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	if err = os.MkdirAll(filepath.Join(home, ".mozilla", "firefox", "profile.default"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	before := linuxTrustTree(t, home)
+	commands := 0
+	run := func(context.Context, ...string) ([]byte, error) { commands++; return nil, nil }
+	for name, call := range map[string]func() error{
+		"install":        func() error { return installLinuxUserTrust(t.Context(), rootPEM, run) },
+		"cleanup":        func() error { return cleanupLinuxUserTrust(t.Context(), run) },
+		"cleanup except": func() error { return cleanupLinuxUserTrustExcept(t.Context(), root, run) },
+		"remove receipt": func() error { return removeLinuxUserTrustReceipt(t.Context(), root, run) },
+	} {
+		if err := call(); err == nil || !strings.Contains(err.Error(), "signed-in user session") {
+			t.Fatalf("%s as root: %v, want the signed-in user session refusal", name, err)
+		}
+	}
+	if commands != 0 || linuxTrustTree(t, home) != before {
+		t.Fatalf("root refusal touched things: %d NSS commands, tree changed=%v", commands, linuxTrustTree(t, home) != before)
+	}
+}
+
+func linuxTrustTree(t *testing.T, home string) string {
+	t.Helper()
+	var paths []string
+	if err := filepath.WalkDir(home, func(path string, _ fs.DirEntry, err error) error {
+		paths = append(paths, path)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return strings.Join(paths, "\n")
 }
 
 func TestLinuxFirefoxProfileIndexAllowsOrdinaryReadPermissions(t *testing.T) {
