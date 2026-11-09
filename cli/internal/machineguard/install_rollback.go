@@ -89,6 +89,11 @@ func (r *guardFileRollback) record(path string) {
 	for _, item := range r.files {
 		if item.path == path {
 			item.current, _ = os.Lstat(path)
+			if item.current != nil {
+				// On Windows os.SameFile reads a file's identity (volume and index) when first asked, not when the
+				// info was taken, so a replaced file would compare equal to itself. Asking now pins this one.
+				os.SameFile(item.current, item.current)
+			}
 			return
 		}
 	}
