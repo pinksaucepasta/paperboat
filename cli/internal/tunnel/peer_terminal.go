@@ -148,7 +148,7 @@ func (t *PeerTerminalTunnel) dial(ctx context.Context, info resolver.ConnectInfo
 	if t == nil || ctx == nil || info.TargetKind != "machine" || info.MachineID == "" || info.MachineGeneration == 0 || info.Terminal == nil || info.Terminal.EnvironmentID == "" || info.Terminal.Auth.ResourceID == "" && !info.Terminal.Auth.Offline || consumer == "" || (application.helper == nil) == (application.raw == nil) || application.raw != nil && application.stream == "" || application.helper != nil && application.stream != "" {
 		return nil, ErrPeerTerminalInvalid
 	}
-	credential, err := t.config.Auth.Credential()
+	credential, err := dialCredential(t.config.Auth, info.Terminal.Auth.Offline)
 	if err != nil {
 		return nil, err
 	}
@@ -180,6 +180,18 @@ func (t *PeerTerminalTunnel) dial(ctx context.Context, info resolver.ConnectInfo
 		return nil, &terminalTransportError{transport: "native application", cause: err}
 	}
 	return connection, nil
+}
+
+// dialCredential is the account credential for the control requests of one dial. An offline stream needs none (the
+// host admits it from its own signed rules) and the cached local identity answers while Paperboat is unreachable
+// (clientauthority.Cache.ResolveLocal, F21-11), so an access token that expired during the outage, whose refresh
+// cannot reach Paperboat, does not stop it. Any other credential failure (signed out, refused) still does.
+func dialCredential(auth config.AuthSource, offline bool) (config.Credential, error) {
+	credential, err := auth.Credential()
+	if err != nil && offline && api.Unreachable(err) {
+		return config.Credential{}, nil
+	}
+	return credential, err
 }
 
 // Reuse signed, live peer authority like Tailscale's cached netmap. The new
