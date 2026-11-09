@@ -710,7 +710,7 @@ function TeamSettings({ team, owner }: { team: Team; owner: boolean }) {
       <SettingRow
         label="Allow private access"
         htmlFor="team-private-access"
-        description="Members can reach ports on the team’s shared machines over the private network. Off by default."
+        description="Members can reach ports on the team’s shared machines over the private network."
       >
         <Switch
           id="team-private-access"

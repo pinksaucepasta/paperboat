@@ -164,9 +164,10 @@ function AllMachines(props: {
           go={go}
         />
       ) : (
-        <p className="border-b border-divider py-3 text-sm text-muted-foreground">
-          No machine syncs config yet. Set it up on the machine with pb config sync init.
-        </p>
+        <div className="flex flex-col gap-2 border-b border-divider py-3 text-sm text-muted-foreground">
+          <p>No machine syncs config yet. Set it up on a machine:</p>
+          <CommandBlock command="pb config sync init" />
+        </div>
       )}
       {idle.total > 0 && (
         <div className="flex flex-col gap-3">
@@ -342,7 +343,7 @@ function MachineSync({ environment }: { environment: ConfigEnvironment }) {
           command="pb config approve"
         />
       )}
-      {skipped.length > 0 && <PathList title="Skipped" paths={skipped} note="Not syncing — see the reason on each file." />}
+      {skipped.length > 0 && <PathList title="Skipped" paths={skipped} />}
     </div>
   )
 }
@@ -357,15 +358,17 @@ function PathList({
 }: {
   title: string
   paths: ConfigPath[]
-  note: string
+  note?: string
   command?: string
 }) {
   return (
     <Section title={title}>
-      <div className="flex flex-col gap-2 border-b border-divider py-2 text-sm text-muted-foreground">
-        <p>{note}</p>
-        {command && <CommandBlock command={command} />}
-      </div>
+      {note && (
+        <div className="flex flex-col gap-2 border-b border-divider py-2 text-sm text-muted-foreground">
+          <p>{note}</p>
+          {command && <CommandBlock command={command} />}
+        </div>
+      )}
       {paths.map((path) => (
         <div key={path.path} className="flex min-h-11 items-center gap-4 border-b border-divider py-1 text-sm">
           <span className="min-w-0 flex-1 truncate font-mono text-code">{path.path}</span>

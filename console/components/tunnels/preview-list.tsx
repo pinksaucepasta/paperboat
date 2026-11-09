@@ -126,8 +126,7 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
           </EmptyMedia>
           <EmptyTitle>No previews yet</EmptyTitle>
           <EmptyDescription>
-            Share a file or a dev server on {machine ? machine.alias : "a machine"} at a temporary address. Stop it
-            any time.
+            Share a file or a dev server on {machine ? machine.alias : "a machine"} at a temporary address.
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent className="flex-row justify-center">
@@ -211,7 +210,7 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
             {q
               ? `No previews match “${q}”`
               : view === "live"
-                ? "Nothing is live. Start a preview with New preview."
+                ? "Nothing is live."
                 : "No ended previews"}
           </p>
         )}

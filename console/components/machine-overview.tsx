@@ -182,10 +182,7 @@ function Network() {
           ) : loading ? (
             <Skeleton className="my-0.5 h-4 w-[36rem] max-w-full" />
           ) : (
-            <p className="text-sm text-muted-foreground">
-              No relay times from {machine.alias} in the last hour. Relays only carry traffic when machines can’t
-              connect directly.
-            </p>
+            <p className="text-sm text-muted-foreground">No relay times from {machine.alias} in the last hour.</p>
           )}
         </div>
       </div>

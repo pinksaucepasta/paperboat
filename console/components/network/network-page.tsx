@@ -428,9 +428,6 @@ function AddServerDialog({ initial, onClose }: { initial: "relay" | "tunnel"; on
                 </li>
               ))}
             </ul>
-            <p className="text-xs text-muted-foreground">
-              Choose this server under “How your traffic travels” to start using it.
-            </p>
             <Button size="lg" className="mt-1" onClick={onClose}>
               Done
             </Button>

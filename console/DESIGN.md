@@ -15,6 +15,10 @@ fast, obvious. These rules come from product review; follow them for every new s
   machine isn't reporting them" under nothing is wrong). Dialog body text may say "it" only when
   the dialog title names the thing.
 - Say what the user can do, not how it works. At most 20 words a sentence.
+- Before writing a sentence, ask whether a user would miss it if it were gone; if not, leave it
+  out. Keep only what the user can't see or must do. No descriptions under self-explanatory
+  titles, no second sentence in an empty state that restates its title, no implementation facts
+  (where TLS ends, how a value is read).
 - No CLI names in body text; a command the user should run is a copyable `CommandBlock`.
 - No raw server codes ("unknown", "route_unavailable"): map each to plain words, or show nothing.
 

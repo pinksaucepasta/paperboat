@@ -114,7 +114,6 @@ function MachineInbox({ machineId }: { machineId: string }) {
             <FolderIcon />
           </EmptyMedia>
           <EmptyTitle>{machine?.alias ?? "This machine"} is offline</EmptyTitle>
-          <EmptyDescription>Its Inbox shows when {machine?.alias ?? "it"} is back online.</EmptyDescription>
         </EmptyHeader>
       </Empty>
     )
@@ -130,7 +129,6 @@ function MachineInbox({ machineId }: { machineId: string }) {
               <FolderIcon />
             </EmptyMedia>
             <EmptyTitle>{machine ? `${machine.alias}’s Inbox is empty` : "The Inbox is empty"}</EmptyTitle>
-            <EmptyDescription>Files sent to {machine?.alias ?? "this machine"} land in its Paperboat Inbox.</EmptyDescription>
           </EmptyHeader>
           {inboxLive.upload && (
             <EmptyContent>

@@ -171,7 +171,6 @@ function NewPreviewDialog({ machine, onClose }: { machine?: Machine; onClose: ()
                   </ToggleGroupItem>
                 ))}
               </ToggleGroup>
-              <p className="text-xs text-muted-foreground">You can stop it any time before.</p>
             </Field>
             {isLimitReached(create.error) ? (
               <LimitReached error={create.error} />

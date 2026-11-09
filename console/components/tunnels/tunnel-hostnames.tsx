@@ -100,9 +100,7 @@ export function TunnelHostnames({ tunnel }: { tunnel: Tunnel }) {
           Couldn’t load hostnames. {routes.error.message}
         </p>
       ) : routes.data.length === 0 ? (
-        <p className="border-b border-divider py-3 text-sm text-muted-foreground">
-          No hostnames yet. Add one to send traffic to a service on this machine.
-        </p>
+        <p className="border-b border-divider py-3 text-sm text-muted-foreground">No hostnames yet.</p>
       ) : (
         [...routes.data]
           .sort((a, b) => a.priority - b.priority)

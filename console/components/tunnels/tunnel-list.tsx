@@ -59,8 +59,7 @@ export function TunnelList({ machine: tabMachine }: { machine?: Machine }) {
         </EmptyMedia>
         <EmptyTitle>No tunnels yet</EmptyTitle>
         <EmptyDescription>
-          Give a service on {machine ? machine.alias : "a machine"} a lasting address. It keeps working through
-          restarts, and you can add routes and your own domains.
+          Give a service on {machine ? machine.alias : "a machine"} a lasting address.
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>

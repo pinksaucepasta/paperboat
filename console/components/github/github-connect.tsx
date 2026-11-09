@@ -88,10 +88,7 @@ function Review({ link, token }: { link: string; token: string }) {
           </>
         }
       />
-      <p className="text-sm text-white/75">
-        Paperboat stores your config in a private GitHub repository you choose. Approve only if you just started this
-        from your terminal.
-      </p>
+      <p className="text-sm text-white/75">Approve only if you just started this from your terminal.</p>
       {failed && (
         <p className="text-sm text-white">
           {failed instanceof ApiError ? (githubErrors[failed.code] ?? failed.message) : failed.message}

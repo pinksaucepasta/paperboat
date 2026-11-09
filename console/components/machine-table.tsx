@@ -285,11 +285,7 @@ function NoMachines() {
           <LaptopIcon />
         </EmptyMedia>
         <EmptyTitle>{team ? `No machines in ${workspace.name} yet` : "Add your first machine"}</EmptyTitle>
-        <EmptyDescription>
-          {team
-            ? "Add a machine so your team can use it."
-            : "Run one command on a computer to add it. You can then reach it from anywhere."}
-        </EmptyDescription>
+        {!team && <EmptyDescription>Run one command on a computer to add it.</EmptyDescription>}
       </EmptyHeader>
       <EmptyContent>
         <AddMachineDialog />

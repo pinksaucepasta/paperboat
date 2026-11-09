@@ -237,10 +237,7 @@ function AddMachine({
             {problem ? (
               <FieldError>{problem}</FieldError>
             ) : (
-              <p className="text-xs text-muted-foreground">
-                Keep it short, like <span className="font-mono">homelab</span> or{" "}
-                <span className="font-mono">studio</span>. Lowercase letters, numbers and dashes.
-              </p>
+              <p className="text-xs text-muted-foreground">Lowercase letters, numbers and dashes.</p>
             )}
           </Field>
         </div>
