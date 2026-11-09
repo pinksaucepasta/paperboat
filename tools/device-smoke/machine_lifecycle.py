@@ -2,11 +2,11 @@
 """Exercise normal machine rename and policy commands, restoring original settings."""
 import argparse
 import json
-from pathlib import Path
 import sys
 import time
 import uuid
 
+import winhost
 from install_lifecycle import registration
 from pairing_lifecycle import check_machine_revoked, confirmed_command, denied_exec, invoke
 
@@ -42,7 +42,7 @@ def rename(pb, original):
             raise RuntimeError('rename receipt did not identify the new alias')
         if machine(pb, machine_id)['alias'] != temporary:
             raise RuntimeError('machine list did not publish the renamed alias')
-        invoke(pb, 'exec', temporary, '--', 'true', raw=True, timeout=COMMAND_TIMEOUT)
+        invoke(pb, 'exec', temporary, '--', *winhost.true_argv(), raw=True, timeout=COMMAND_TIMEOUT)
         status = invoke(pb, 'status', temporary, '--json')
         if len(status['machines']) != 1 or status['machines'][0]['id'] != machine_id:
             raise RuntimeError('status did not resolve the renamed machine')
@@ -87,13 +87,13 @@ def settings(pb, original):
     machine_id = original['id']
     availability_only(pb, original)
     try:
-        invoke(pb, 'exec', original['alias'], '--', 'true', raw=True, timeout=COMMAND_TIMEOUT)
+        invoke(pb, 'exec', original['alias'], '--', *winhost.true_argv(), raw=True, timeout=COMMAND_TIMEOUT)
         capabilities(pb, machine_id, {key: False for key in original['machine_capabilities']['desired']})
         denied_exec(pb, original['alias'], {'transport_unavailable'})
     finally:
         restore_all(sys.exc_info()[1],
                     lambda: capabilities(pb, machine_id, original['machine_capabilities']['desired']))
-    invoke(pb, 'exec', original['alias'], '--', 'true', raw=True, timeout=COMMAND_TIMEOUT)
+    invoke(pb, 'exec', original['alias'], '--', *winhost.true_argv(), raw=True, timeout=COMMAND_TIMEOUT)
 
 
 def availability_only(pb, original):
@@ -109,7 +109,7 @@ def individual_capabilities(pb, original):
     baseline = original['machine_capabilities']['desired']
     if not all(baseline.values()):
         raise RuntimeError('individual capability check requires the enabled baseline; nothing changed')
-    invoke(pb, 'exec', original['alias'], '--json', '--', 'true',
+    invoke(pb, 'exec', original['alias'], '--json', '--', *winhost.true_argv(),
            raw=True, timeout=COMMAND_TIMEOUT)
     for name in baseline:
         selection = dict(baseline, **{name: False})
@@ -121,7 +121,7 @@ def individual_capabilities(pb, original):
             restore_all(sys.exc_info()[1], lambda: capabilities(pb, original['id'], baseline))
         print(json.dumps({'check': 'individual-capability', 'name': name,
                           'status': 'PASS', 'original_selection_restored': True}), flush=True)
-    invoke(pb, 'exec', original['alias'], '--json', '--', 'true',
+    invoke(pb, 'exec', original['alias'], '--json', '--', *winhost.true_argv(),
            raw=True, timeout=COMMAND_TIMEOUT)
 
 
@@ -133,7 +133,7 @@ def main():
     args = parser.parse_args()
     if args.check == 'revoke' and (not args.machine_id or not args.expected_account):
         parser.error('revoke requires --machine-id and --expected-account from the waiting target')
-    pb, enrolled = Path.home() / '.local/bin/pb', registration()
+    pb, enrolled = winhost.pb_path(), registration()
     original = machine(pb, enrolled['machine_id'])
     if args.check == 'revoke':
         target = machine(pb, args.machine_id)

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Verify normal signed-in inventory against this device's enrolled identity."""
 import json
-from pathlib import Path
 
+import winhost
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
 
 
 def main():
-    pb = Path.home() / '.local/bin/pb'
+    pb = winhost.pb_path()
     enrolled = registration()
     auth = invoke(pb, 'auth', 'status', '--json')
     if not auth['signed_in'] or auth['account']['id'] != enrolled['account_id']:

@@ -12,11 +12,14 @@ import subprocess
 import sys
 import time
 
+import winhost
+
 
 def registration():
     relative = ('.local/state/paperboat/runtime' if os.uname().sysname == 'Linux'
                 else 'Library/Application Support/Paperboat/runtime')
-    record = json.loads((Path.home() / relative / 'machine-registration.json').read_text())
+    root = winhost.runtime_dir(Path.home() / relative)
+    record = json.loads((root / 'machine-registration.json').read_text())
     return {key: record[key] for key in ('machine_id', 'environment_id',
             'public_identity_key', 'public_key_id', 'installation_generation', 'account_id', 'inbox_path')}
 

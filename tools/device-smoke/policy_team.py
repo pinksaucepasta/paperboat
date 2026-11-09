@@ -16,6 +16,8 @@ Afterwards it restores the team policy's starting version and unshares the machi
 Usage: policy_team.py --team T --machine-id ID --machine-name NAME \
          --owner-cmd 'ssh pbvm2 sudo docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 lk-a' \
          --member-cmd 'ssh pujan@ubuntu24'
+Either side may be `windows`: pb.exe on the Windows device (PB_SMOKE_WINDOWS_PB, VICTUS_PASS; see winhost.py) runs from
+here with no shell quoting, and its policy drafts go to the device's temp directory.
 """
 import argparse
 import json
@@ -25,11 +27,24 @@ import sys
 import time
 
 from remote_timeout import timeout_words
+import winhost
 
+
+
+WINDOWS = 'windows'
+
+
+def scratch(prefix, name):
+    """A file name for one side's drafts: /tmp on Unix, the temp directory on the Windows device."""
+    device = winhost.device()
+    return str(winhost.RemotePath(device, device.env('TEMP')) / name) if prefix == WINDOWS else '/tmp/' + name
 
 
 def sh(prefix, pb, args, timeout=150, stdin=None):
     """Runs pb on one side: prefix is the ssh/docker command line, quoted once for its remote shell."""
+    if prefix == WINDOWS:
+        done = winhost.device().run([winhost.device().pb_exe, *args], input=stdin, timeout=timeout)
+        return done.returncode, done.stdout, done.stderr
     remote = ' '.join(shlex.quote(x) for x in timeout_words(prefix) + [pb] + list(args))
     done = subprocess.run(shlex.split(prefix) + [remote], capture_output=True, text=True, timeout=timeout, input=stdin)
     return done.returncode, done.stdout, done.stderr
@@ -108,6 +123,9 @@ def main():
 
 def put(prefix, path, text):
     """Writes text to path on one side (a draft for --file)."""
+    if prefix == WINDOWS:
+        winhost.RemotePath(winhost.device(), path).write_text(text)
+        return
     subprocess.run(shlex.split(prefix) + ['sh -c ' + shlex.quote('cat > ' + shlex.quote(path))], input=text, text=True, timeout=60, check=True)
 
 
@@ -152,13 +170,14 @@ def deny_checks(a, owner, member, step, doc, marker):
     # The owner guard (PLAN F18 evaluation step 2) is the personal workspace's: a draft that denies
     # everything still leaves the owner every action on their own machine.
     me = 'user:' + email(a.owner_cmd, a.owner_pb)
-    put(a.owner_cmd, '/tmp/f18-deny-all.hujson', json.dumps({'rules': [{'src': ['*'], 'dst': ['machine:*'], 'deny': ['*']}]}))
-    dec = explain(owner, 'personal', '--src', me, '--dst', target, '--action', 'exec', '--file', '/tmp/f18-deny-all.hujson').get('decision') or {}
+    deny_all = scratch(a.owner_cmd, 'f18-deny-all.hujson')
+    put(a.owner_cmd, deny_all, json.dumps({'rules': [{'src': ['*'], 'dst': ['machine:*'], 'deny': ['*']}]}))
+    dec = explain(owner, 'personal', '--src', me, '--dst', target, '--action', 'exec', '--file', deny_all).get('decision') or {}
     step('F18-04 the owner guard holds against any deny (personal draft)', dec.get('allowed') is True and dec.get('reason') == 'owner', str(dec))
     what = explain(owner, a.team, '--src', who).get('what_can') or []
     step('F18-04 what-can has no exec on the machine for the member',
          not any(x.get('target') == target and x.get('action') == 'exec' for x in what), str(what)[:300])
-    path = '/tmp/f18-draft.hujson'
+    path = scratch(a.owner_cmd, 'f18-draft.hujson')
     put(a.owner_cmd, path, granted)
     dec = explain(owner, a.team, '--src', who, '--dst', target, '--action', 'exec', '--file', path).get('decision') or {}
     step('F18-04 explain on a draft without the deny allows the member', dec.get('allowed') is True and dec.get('reason') == 'rule', str(dec))
@@ -218,11 +237,11 @@ _emails = {}
 
 
 def email(prefix, pb):
-    if prefix not in _emails:
+    if (prefix, pb) not in _emails:
         rc, out, _ = sh(prefix, pb, ['auth', 'status', '--json'])
         d = data(out)
-        _emails[prefix] = ((d.get('account') or {}).get('email') or d.get('email') or '').lower()
-    return _emails[prefix]
+        _emails[prefix, pb] = ((d.get('account') or {}).get('email') or d.get('email') or '').lower()
+    return _emails[prefix, pb]
 
 
 if __name__ == '__main__':

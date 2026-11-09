@@ -7,6 +7,7 @@ Rows that change the machine (machine-guard install/uninstall) run with --sudo-p
 Prints one receipt per row; exits 1 if any row failed. Needs the ENV vault unlocked for env rows.
 """
 import argparse
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -16,20 +17,57 @@ import subprocess
 import sys
 import tempfile
 
+import winhost
+
 ACCESS_ROWS = {'C002', 'C124', 'C125', 'C126', 'C139', 'C141'}
-PB = Path.home() / '.local/bin/pb'
+PB = winhost.pb_path()
 BAD = re.compile(r'panic|goroutine|Traceback|runtime error|nil pointer')
 
 
+DEVICE = winhost.device()  # the Windows device when PB_SMOKE_WINDOWS_PB is set: pb.exe and probes run there
+
+
+def pb_run(*args, timeout=90, env=None):
+    if DEVICE:
+        return PB.run_remote(args, env=env, timeout=timeout)
+    return subprocess.run([str(PB), *args], capture_output=True, text=True, timeout=timeout,
+                          stdin=subprocess.DEVNULL, env=env)
+
+
 def run(*args, timeout=90):
-    result = subprocess.run([str(PB), *args], capture_output=True, text=True, timeout=timeout,
-                            stdin=subprocess.DEVNULL)
+    result = pb_run(*args, timeout=timeout)
     return result.returncode, result.stdout, result.stderr
 
 
 def sh(*args, timeout=60):
     result = subprocess.run(list(args), capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
     return result.returncode, result.stdout + result.stderr
+
+
+def scratch(name):
+    return winhost.RemotePath(DEVICE, DEVICE.env('TEMP')) / name if DEVICE else Path('/tmp') / name
+
+
+def size_of(path):
+    return path.size() if DEVICE else path.stat().st_size
+
+
+def private(path):
+    # Windows keeps a file in the user's profile private by its inherited ACL; only Unix modes can be checked.
+    return DEVICE is not None or path.stat().st_mode & 0o077 == 0
+
+
+@contextlib.contextmanager
+def sandbox_home():
+    """A throwaway home for `config sync init`: (home, environment, make_path); never the real file."""
+    if DEVICE:
+        with DEVICE.temp_dir('pbsmoke-sync-init') as home:
+            yield str(home), {'USERPROFILE': str(home), 'XDG_CONFIG_HOME': str(home / 'config')}, \
+                lambda value: winhost.RemotePath(DEVICE, value)
+        return
+    with tempfile.TemporaryDirectory(prefix='pbsmoke-sync-init-') as home:
+        home = os.path.realpath(home)  # macOS /var is a symlink; init refuses linked parents by design
+        yield home, dict(os.environ, HOME=home, XDG_CONFIG_HOME=os.path.join(home, 'config')), Path
 
 
 def sudo(password, *args):
@@ -43,10 +81,19 @@ DARWIN = platform.system() == 'Darwin'
 
 
 def guard_active():
+    if DEVICE:
+        return any(task['State'] in ('Running', 'Ready') for task in DEVICE.scheduled_tasks('\\Paperboat\\')
+                   if task['TaskName'] == 'MachineGuard')
     if DARWIN:
         job = sh('sudo', '-n', 'launchctl', 'print', 'system/io.paperboat.machineguard')[1]
         return 'state = running' in job and 'deny-only' not in job  # an uninstalled guard keeps its deny-only job
     return sh('systemctl', 'is-active', 'paperboat-machineguard')[1].strip() == 'active'
+
+
+def process_running(pattern):
+    if DEVICE:
+        return bool(DEVICE.processes(pattern))
+    return sh('pgrep', '-f', pattern)[0] == 0
 
 
 def guard_denies():
@@ -57,6 +104,8 @@ def guard_denies():
 
 
 def daemon_unit_text():
+    if DEVICE:  # the daemon's service command line, e.g. "pb.exe daemon __runtime-local-daemon ..."
+        return ' '.join(item['PathName'] or '' for item in DEVICE.service_paths('PaperboatLocalDaemon*'))
     if DARWIN:
         return sh('launchctl', 'print', 'gui/%d/com.pinksaucepasta.paperboatd' % os.getuid())[1]
     return sh('systemctl', '--user', 'cat', 'paperboatd')[1]
@@ -139,28 +188,24 @@ def rows(args):
     out.append(r)
 
     r = Row('C217', 'update bundle'); r.help(); r.invalid(hint='output')
-    target = Path('/tmp/pbsmoke-command-rows.pb-update')
+    target = scratch('pbsmoke-command-rows.pb-update')
     target.unlink(missing_ok=True)
     code, o, e = run('update', 'bundle', '--output', str(target), timeout=300)
-    r.expect(code == 0 and target.exists() and target.stat().st_size > 1000 and 'pb update --from' in o + e, 'bundle was not saved with install instructions')
+    r.expect(code == 0 and target.exists() and size_of(target) > 1000 and 'pb update --from' in o + e, 'bundle was not saved with install instructions')
     r.expect(run('update', 'bundle', '--output', str(target))[0] != 0, 'bundle overwrote an existing output file')
     target.unlink(missing_ok=True)
     out.append(r)
 
     r = Row('C185', 'config sync init'); r.help()
-    with tempfile.TemporaryDirectory(prefix='pbsmoke-sync-init-') as home:
-        home = os.path.realpath(home)  # macOS /var is a symlink; init refuses linked parents by design
-        env = dict(os.environ, HOME=home, XDG_CONFIG_HOME=os.path.join(home, 'config'))  # never the real file
-
+    with sandbox_home() as (home, env, make_path):
         def init(*extra):
-            result = subprocess.run([str(PB), 'config', 'sync', *extra, '--json'], capture_output=True, text=True,
-                                    timeout=60, stdin=subprocess.DEVNULL, env=env)
+            result = pb_run('config', 'sync', *extra, '--json', timeout=60, env=env)
             return result.returncode, (json.loads(result.stdout or '{}').get('data') or {}), result.stdout + result.stderr
         _, where, _ = init('path')
         code, made, _ = init('init')
-        path = Path(where.get('path', '/nonexistent'))
+        path = make_path(where.get('path', '/nonexistent'))
         r.expect(code == 0 and made.get('path') == str(path) and str(path).startswith(home), 'init did not create the file at its path')
-        r.expect(path.exists() and path.stat().st_mode & 0o077 == 0, 'the created file is missing or readable by others')
+        r.expect(path.exists() and private(path), 'the created file is missing or readable by others')
         before = path.read_bytes() if path.exists() else b''
         code, _, text = init('init')
         r.expect(code != 0 and not BAD.search(text) and path.read_bytes() == before, 'a second init overwrote the file or gave no clear error')
@@ -205,14 +250,15 @@ def rows(args):
     out.append(r)
 
     r = Row('C004', 'daemon'); r.help(); r.invalid('bogus')
-    code, o = sh(str(PB), 'service', 'status')
+    code, o, e = run('service', 'status')
+    o += e
     r.expect(code == 0 and 'running' in o, 'service status does not report the daemon running')
-    r.expect(sh('pgrep', '-f', r'pb daemon --config')[0] == 0, 'no daemon process is running')
+    r.expect(process_running(r'pb(\.exe)?"? daemon' if DEVICE else r'pb daemon --config'), 'no daemon process is running')
     out.append(r)
 
     r = Row('C009', 'daemon run'); r.help()
     unit = daemon_unit_text()
-    r.expect('daemon' in unit and ('program' in unit if DARWIN else 'ExecStart' in unit), 'user service does not start pb daemon')
+    r.expect('daemon' in unit and ('program' in unit if DARWIN else 'daemon' in unit if DEVICE else 'ExecStart' in unit), 'user service does not start pb daemon')
     out.append(r)
 
 
@@ -220,7 +266,7 @@ def rows(args):
     guard.expect(guard_active(), 'machine guard service is not active')
     out.append(guard)
     r = Row('C007', 'daemon machine-guard run'); r.help()
-    r.expect(sh('pgrep', '-f', 'daemon machine-guard run')[0] == 0, 'machine guard run entrypoint is not running under supervision')
+    r.expect(process_running('daemon machine-guard run'), 'machine guard run entrypoint is not running under supervision')
     out.append(r)
     install = Row('C006', 'daemon machine-guard install'); install.help()
     uninstall = Row('C008', 'daemon machine-guard uninstall'); uninstall.help()

@@ -9,6 +9,7 @@ while used, and hostname and domain are removed. Then `pb tunnel
 DNS records) is removed on every exit path.
 """
 import argparse
+import contextlib
 import json
 from pathlib import Path
 import secrets
@@ -20,6 +21,7 @@ import functools
 import tempfile
 import threading
 
+import winhost
 from install_lifecycle import registration
 from pairing_lifecycle import command_result, confirmed_command, invoke
 from preview_lifecycle import QuietHandler
@@ -58,6 +60,27 @@ class FixtureDns:
             if error.code == 404:
                 return False
             raise
+
+
+@contextlib.contextmanager
+def serving(body):
+    """The synthetic origin on the device under test; yields its loopback port."""
+    device = winhost.device()
+    if device:  # the tunnel dials the device's own loopback, so the origin must run there
+        with device.origin(body) as port:
+            yield port
+        return
+    with tempfile.TemporaryDirectory(prefix='paperboat-tunnel-domain-') as directory:
+        (Path(directory) / 'index.html').write_text(body)
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(QuietHandler, directory=directory))
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        try:
+            yield server.server_port
+        finally:
+            server.shutdown()
+            server.server_close()
+            worker.join(timeout=5)
 
 
 def wait(test, what, seconds):
@@ -214,7 +237,7 @@ def main():
     parser.add_argument('--zone')
     parser.add_argument('--help-rows-only', action='store_true')
     args = parser.parse_args()
-    binary = Path.home() / '.local/bin/pb'
+    binary = winhost.pb_path()
     help_and_errors(binary)
     if args.help_rows_only:
         print(json.dumps({'check': 'tunnel-domain-help', 'status': 'PASS', 'rows': sorted(ROWS)}))
@@ -222,19 +245,9 @@ def main():
     assert args.fixtures_token_file and args.fixtures_url and args.zone, '--fixtures-token-file, --fixtures-url and --zone are required'
     before = registration()
     dns = FixtureDns(args.fixtures_token_file, args.fixtures_url, args.zone)
-    with tempfile.TemporaryDirectory(prefix='paperboat-tunnel-domain-') as directory:
-        (Path(directory) / 'index.html').write_text(BODY)
-        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0),
-                    functools.partial(QuietHandler, directory=directory))
-        worker = threading.Thread(target=server.serve_forever, daemon=True)
-        worker.start()
-        try:
-            ephemeral(binary, server.server_port)
-            domain(binary, dns, server.server_port)
-        finally:
-            server.shutdown()
-            server.server_close()
-            worker.join(timeout=5)
+    with serving(BODY) as port:
+        ephemeral(binary, port)
+        domain(binary, dns, port)
     assert registration() == before
     print(json.dumps({'check': 'tunnel-domain', 'status': 'PASS', 'ephemeral_start_stop': True,
                       'workspace_domain_add_verify_use_remove': True, 'served_over_https': True,

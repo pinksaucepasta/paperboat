@@ -1,19 +1,15 @@
 #!/usr/bin/env python3
 """Verify tunnel command main/error paths on one disposable enrolled Linux machine."""
 import argparse
-import functools
-import http.server
 import json
 import os
 from pathlib import Path
-import tempfile
-import threading
 
+import winhost
 from install_lifecycle import registration
 import pairing_lifecycle
 from pairing_lifecycle import command_result, confirmed_command, invoke
-from preview_lifecycle import QuietHandler
-from tunnel_domain import FixtureDns, BODY, ephemeral, fetch, wait
+from tunnel_domain import FixtureDns, BODY, ephemeral, fetch, serving, wait
 
 
 class CheckFailure(RuntimeError):
@@ -43,7 +39,7 @@ ROWS = [f'C{i:03d}' for i in range(98, 124) if i not in (102, 105)] + ['C242']
 class Suite:
     def __init__(self, args):
         self.args = args
-        self.pb = Path.home() / '.local/bin/pb'
+        self.pb = winhost.pb_path()
         self.before = registration()
         self.rows = {row: {'main': False, 'error': False, 'failures': []} for row in ROWS}
         self.last = None
@@ -263,11 +259,8 @@ class Suite:
 
     def main(self):
         self.errors()
-        with tempfile.TemporaryDirectory(prefix='paperboat-tunnel-command-') as directory:
-            (Path(directory) / 'index.html').write_text(BODY)
-            server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(QuietHandler, directory=directory))
-            worker = threading.Thread(target=server.serve_forever, daemon=True)
-            worker.start(); self.port = str(server.server_port)
+        with serving(BODY) as port:
+            self.port = str(port)
             try:
                 try:
                     created = self.command('create', self.name, '--port', self.port, '--duration', '30m', '--wait', '--timeout', '90s', timeout=150)
@@ -296,7 +289,6 @@ class Suite:
                         self.dns.remove(record)
                         self.save_dns()
                     except Exception as error: self.rows['C104']['failures'].append({'mode': 'cleanup', 'reason': str(error)})
-                server.shutdown(); server.server_close(); worker.join(timeout=5)
                 if not self.dns:
                     Path(self.args.fixtures_token_file).unlink(missing_ok=True)
                 self.save()

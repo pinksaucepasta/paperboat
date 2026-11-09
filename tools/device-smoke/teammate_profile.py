@@ -3,8 +3,12 @@ import json
 import os
 from pathlib import Path
 
+import winhost
+
 
 def profile_root():
+    if winhost.device():
+        return winhost.device().home() / '.pb-smoke' / 'teammate'
     if os.uname().sysname == 'Darwin':
         # Darwin's local API socket has a104-byte pathname limit.
         return Path.home() / '.pb-smoke'
@@ -12,10 +16,12 @@ def profile_root():
 
 
 def environment(root):
-    env = dict(os.environ)
+    # On the Windows device this is an overlay on the device's own environment, never the controller's.
+    windows = winhost.device() is not None
+    env = {} if windows else dict(os.environ)
     # macOS security uses HOME to locate the existing login Keychain. XDG
     # overrides isolate credential publication without hiding that Keychain.
-    if os.uname().sysname != 'Darwin':
+    if not windows and os.uname().sysname != 'Darwin':
         env['HOME'] = str(root / 'home')
     for name, child in [('XDG_CONFIG_HOME', 'config'), ('XDG_DATA_HOME', 'data'),
                         ('XDG_STATE_HOME', 'state'), ('XDG_CACHE_HOME', 'cache')]:

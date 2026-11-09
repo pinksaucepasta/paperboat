@@ -27,16 +27,25 @@ def without_env_notice(errors):
 
 def run(binary, *arguments, input=b'', expected=0):
     command = [str(binary), *arguments]
-    # Bound output on disk rather than retaining an unbounded communicate buffer.
-    with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+    if hasattr(binary, 'run_remote'):  # pb.exe on the Windows device, output bounded after the fact
         try:
-            result = subprocess.run(command, input=input, stdout=stdout, stderr=stderr, timeout=90)
+            result = binary.run_remote(arguments, input=input, timeout=90, text=False)
         except subprocess.TimeoutExpired as error:
             raise RuntimeError('exec fixture command exceeded90s') from error
-        if stdout.tell() > OUTPUT_BYTES + (1 << 20) or stderr.tell() > 1 << 20:
+        if len(result.stdout) > OUTPUT_BYTES + (1 << 20) or len(result.stderr) > 1 << 20:
             raise RuntimeError('exec fixture exceeded its output bound')
-        stdout.seek(0); stderr.seek(0)
-        output, errors = stdout.read(), without_env_notice(stderr.read())
+        output, errors = result.stdout, without_env_notice(result.stderr)
+    else:
+        # Bound output on disk rather than retaining an unbounded communicate buffer.
+        with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+            try:
+                result = subprocess.run(command, input=input, stdout=stdout, stderr=stderr, timeout=90)
+            except subprocess.TimeoutExpired as error:
+                raise RuntimeError('exec fixture command exceeded90s') from error
+            if stdout.tell() > OUTPUT_BYTES + (1 << 20) or stderr.tell() > 1 << 20:
+                raise RuntimeError('exec fixture exceeded its output bound')
+            stdout.seek(0); stderr.seek(0)
+            output, errors = stdout.read(), without_env_notice(stderr.read())
     if result.returncode != expected:
         diagnostic = command_diagnostic(command, output, errors)
         raise RuntimeError('remote exit status differs; private diagnostics: ' + str(diagnostic))

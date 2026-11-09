@@ -8,9 +8,9 @@ The enrolled device account is the team owner by default (--device-role owner); 
 import argparse
 import json
 import os
-from pathlib import Path
 import secrets
 
+import winhost
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
 from teammate_profile import environment, profile_root
@@ -48,7 +48,7 @@ def main():
     parser.add_argument('--team', default=os.environ.get('PAPERBOAT_SMOKE_TEAM', ''))
     parser.add_argument('--delete', action='store_true', help='the --team fixture is a paid throwaway: delete it at the end')
     args = parser.parse_args()
-    pb = Path.home() / '.local/bin/pb'
+    pb = winhost.pb_path()
     root = profile_root()
     config = root / 'config.json'
     if not config.exists():

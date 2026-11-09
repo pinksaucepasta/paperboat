@@ -7,13 +7,13 @@ device account); the team owner reads the activity. Usage: team_machines.py TEAM
 """
 import argparse
 import json
-from pathlib import Path
 
+import winhost
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
 from teammate_profile import environment, profile_root
 
-PB = Path.home() / '.local/bin/pb'
+PB = winhost.pb_path()
 
 
 def main():

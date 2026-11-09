@@ -11,15 +11,42 @@ import json
 import os
 from pathlib import Path
 import secrets
-import subprocess
 import tempfile
 
-PB = Path.home() / '.local/bin/pb'
+from pairing_lifecycle import command_result
+import winhost
+
+PB = winhost.pb_path()
+
+
+def device_path(value):
+    """A secret file named on the command line lives on the device under test."""
+    return winhost.RemotePath(winhost.device(), value) if winhost.device() else Path(value)
+
+
+def temp_dir():
+    device = winhost.device()
+    return device.temp_dir('pb-vault') if device else tempfile.TemporaryDirectory(prefix='paperboat-vault-')
+
+
+def write_secret(path, value):
+    if isinstance(path, Path):
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'w') as handle:
+            handle.write(value)
+    else:
+        path.write_text(value)
+
+
+def replace(source, target):
+    if isinstance(source, Path):
+        os.replace(source, target)
+    else:
+        target.write_bytes(source.read_bytes())
 
 
 def run(*args, stdin=None):
-    result = subprocess.run([str(PB), 'env', 'vault', *args, '--json'], input=stdin,
-                            capture_output=True, text=True, timeout=90)
+    result = command_result(PB, 'env', 'vault', *args, '--json', input=stdin, timeout=90)
     try:
         receipt = json.loads(result.stdout)
     except ValueError:
@@ -40,34 +67,31 @@ def refuse(ok_receipt, step):
 
 
 def owner_only(path):
-    if path.stat().st_mode & 0o077 or not path.read_text().strip():
+    # On Windows the profile's inherited ACL keeps the file private; only Unix modes can be checked here.
+    if (isinstance(path, Path) and path.stat().st_mode & 0o077) or not path.read_text().strip():
         raise RuntimeError('secret file is not owner-only and non-empty')
 
 
 def personal_inventory():
-    out = subprocess.run([str(PB), 'env', 'list', '--json'], capture_output=True, text=True, timeout=60).stdout
-    return json.loads(out)['data']
+    return json.loads(command_result(PB, 'env', 'list', '--json', timeout=60).stdout)['data']
 
 
 def account_id():
-    out = subprocess.run([str(PB), 'auth', 'status', '--json'], capture_output=True, text=True, timeout=30).stdout
-    return json.loads(out)['account']['id']
+    return json.loads(command_result(PB, 'auth', 'status', '--json', timeout=30).stdout)['account']['id']
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('password_file', type=Path)
-    parser.add_argument('recovery_file', type=Path)
+    parser.add_argument('password_file', type=device_path)
+    parser.add_argument('recovery_file', type=device_path)
     args = parser.parse_args()
     original = args.password_file
     owner_only(original)
     owner_only(args.recovery_file)
-    with tempfile.TemporaryDirectory(prefix='paperboat-vault-') as directory:
-        base = Path(directory)
+    with temp_dir() as directory:
+        base = directory if winhost.device() else Path(directory)
         replacement = base / 'replacement'
-        fd = os.open(replacement, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, 'w') as handle:
-            handle.write('pbsmoke-' + secrets.token_urlsafe(24))
+        write_secret(replacement, 'pbsmoke-' + secrets.token_urlsafe(24))
         unlock = lambda path: run('unlock', '--password-file', str(path))
         first = unlock(original)
         if not first[0] and first[1].get('error', {}).get('code') == 'not_found':  # an account without a vault yet
@@ -104,8 +128,7 @@ def main():
             need(run('resume'), 'resume')
             # Reset replaces the personal keys and deletes every personal value.
             mark = 'PB_RESET_MARK'
-            marked = subprocess.run([str(PB), 'env', 'set', mark, '--value-stdin', '--json'], input='reset-me',
-                                    capture_output=True, text=True, timeout=60)
+            marked = command_result(PB, 'env', 'set', mark, '--value-stdin', '--json', input='reset-me', timeout=60)
             if marked.returncode:
                 raise RuntimeError('could not set the value that reset must delete')
             before = personal_inventory()
@@ -123,7 +146,7 @@ def main():
         finally:
             for newest in reversed(codes):
                 if newest.exists():
-                    os.replace(newest, args.recovery_file)
+                    replace(newest, args.recovery_file)
                     break
     print(json.dumps({'check': 'env-vault-lifecycle', 'status': 'PASS',
                       'lock_unlock': True, 'password_rewrap': True, 'recovery_replace_recover': True,

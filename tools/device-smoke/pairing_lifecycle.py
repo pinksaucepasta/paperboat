@@ -18,6 +18,7 @@ import uuid
 
 from pairing_fault import PairingFaultProxy
 import terminal_command
+import winhost
 from failure_triage import emit_network_failure
 
 
@@ -45,7 +46,9 @@ def command_diagnostic(arguments, stdout, stderr, timeout=None):
 def command_result(binary, *arguments, timeout=180, input=None, env=None, terminal=False, password=None):
     command = [str(binary), *arguments]
     try:
-        if terminal:
+        if hasattr(binary, 'run_remote'):  # pb.exe on the Windows device; it has no pty or sudo prompt to answer
+            result = binary.run_remote(arguments, input=input, env=env, timeout=timeout)
+        elif terminal:
             result = terminal_command.run(command, password=password, env=env, timeout=timeout)
         else:
             result = subprocess.run(command, input=input, capture_output=True,
@@ -78,6 +81,8 @@ def invoke(binary, *arguments, timeout=180, input=None, env=None, raw=False, ter
 
 
 def runtime_root():
+    if winhost.device():
+        return winhost.device().runtime_dir()
     if os.uname().sysname == 'Linux':
         return Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'paperboat/runtime'
     return Path.home() / 'Library/Application Support/Paperboat/runtime'

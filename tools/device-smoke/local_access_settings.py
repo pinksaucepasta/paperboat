@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """Exercise installed local-access settings through the ordinary apply owner."""
 import json
-from pathlib import Path
 import sys
 import uuid
 import urllib.request
 
+import winhost
 from install_lifecycle import registration
 from pairing_lifecycle import invoke, command_result, command_diagnostic, runtime_root
 
 
 def main():
     password = sys.stdin.readline().rstrip('\n') or None
-    binary = Path.home() / '.local/bin/pb'
+    binary = winhost.pb_path()
     before = registration()
     shown = invoke(binary, 'config', 'local-access', 'show', '--json')
     original = {'domain': shown['domain'], **shown['local_access']}

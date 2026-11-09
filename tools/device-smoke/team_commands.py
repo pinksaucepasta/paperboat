@@ -10,10 +10,9 @@ delete) refuse this account's own call with a nonzero exit. The two-account succ
 import argparse
 import json
 import os
-from pathlib import Path
 import secrets
-import subprocess
 
+import winhost
 from install_lifecycle import registration
 from pairing_lifecycle import command_result, invoke
 
@@ -24,7 +23,7 @@ def main():
     args = parser.parse_args()
     if not args.team:
         raise RuntimeError('--team or PAPERBOAT_SMOKE_TEAM names the retained paid team')
-    pb = Path.home() / '.local/bin/pb'
+    pb = winhost.pb_path()
     before = registration()
 
     def call(*words):
@@ -68,8 +67,8 @@ def main():
     finally:
         if invitation:
             current = call('team', 'get', args.team, '--json')['generation']
-            subprocess.run([str(pb), 'team', 'cancel-invite', args.team, invitation, '--generation', str(current), '--json'],
-                           capture_output=True, timeout=60)
+            command_result(pb, 'team', 'cancel-invite', args.team, invitation, '--generation', str(current), '--json',
+                           timeout=60)
     assert call('team', 'get', args.team, '--json')['owner_account'] == me
     assert registration() == before
     print(json.dumps({'check': 'team-commands', 'status': 'PASS', 'get_list_create_checkout': True,
