@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 )
 
@@ -139,5 +141,52 @@ func TestInstallRefusedForDiskSpaceChangesNothingAndStopsThere(t *testing.T) {
 	}
 	if _, statErr := os.Lstat(filepath.Join(directory, "pb")); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("a refused install published the pb command: %v", statErr)
+	}
+}
+
+// F14-03 (failed restart): when the new version's user service cannot be put in place after the privileged
+// install, the update rolls back at once: the privileged rollback runs, the previous pb command is back and the
+// error says what failed. The step fails here because no installed binary exists on this machine; a machine
+// that has one would run the real service manager, so the test skips there.
+func TestFailedServiceReplacementRollsTheUpdateBackToThePreviousCommand(t *testing.T) {
+	executable, source, home := suppliedInstallFixture(t)
+	layout, err := service.UserLayout(runtime.GOOS, os.Getuid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(layout.Binary); err == nil {
+		t.Skip("a Paperboat installation exists on this machine; the test must not touch its services")
+	}
+	directory := filepath.Join(home, "bin")
+	previous := filepath.Join(home, "previous-pb")
+	if err := os.WriteFile(previous, []byte("previous version"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(previous, filepath.Join(directory, "pb")); err != nil {
+		t.Fatal(err)
+	}
+	original := privilegedInstallCommand
+	t.Cleanup(func() { privilegedInstallCommand = original })
+	var operations []string
+	privilegedInstallCommand = func(ctx context.Context, _ int, _, _, _ string, arguments ...string) *exec.Cmd {
+		operation := arguments[len(arguments)-1]
+		operations = append(operations, operation)
+		if operation == "inventory" {
+			return exec.CommandContext(ctx, "/bin/false")
+		}
+		return exec.CommandContext(ctx, "/bin/true")
+	}
+	_, err = InstallRunningBinary(t.Context(), executable, source, directory, "")
+	if err == nil || !strings.Contains(err.Error(), "Paperboat executable is unavailable") {
+		t.Fatalf("update with a failing service replacement = %v, want the failed step named", err)
+	}
+	if want := []string{"install-supplied", "rollback-supplied", "inventory"}; !reflect.DeepEqual(operations, want) {
+		t.Fatalf("privileged steps = %v, want the install, then its rollback, then the inventory %v", operations, want)
+	}
+	if target, err := os.Readlink(filepath.Join(directory, "pb")); err != nil || target != previous {
+		t.Fatalf("pb command points at %q (%v) after the rollback, want the previous version %q", target, err, previous)
 	}
 }
