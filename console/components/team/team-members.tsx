@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { useState } from "react"
+import { toast } from "sonner"
 import { meQuery, useApiQuery, useWorkspace, workspacesQuery, type Me, type Workspace } from "@/lib/api"
 import { billingKey, billingQuery, notLiveTitle } from "@/lib/billing"
 import {
@@ -449,8 +450,16 @@ function InvitationsTable({
   me: Me
 }) {
   const refresh = useRefreshTeam(team.team_id)
-  const revoke = useMutation({ mutationFn: (id: string) => cancelInvitation(team, id), onSuccess: refresh })
-  const resend = useMutation({ mutationFn: (id: string) => resendInvitation(team, id), onSuccess: refresh })
+  const revoke = useMutation({
+    mutationFn: (id: string) => cancelInvitation(team, id),
+    onSuccess: refresh,
+    onError: (error) => toast.error("The invitation wasn’t revoked", { description: error.message }),
+  })
+  const resend = useMutation({
+    mutationFn: (id: string) => resendInvitation(team, id),
+    onSuccess: refresh,
+    onError: (error) => toast.error("The invitation wasn’t sent again", { description: error.message }),
+  })
   return (
     <table className="w-full table-fixed text-sm">
       <colgroup>

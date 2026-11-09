@@ -74,7 +74,7 @@ export function ApiTokens() {
           <EmptyMedia variant="icon">
             <KeyIcon />
           </EmptyMedia>
-          <EmptyTitle>{missing ? "API tokens aren't available on this server yet" : "Couldn't load API tokens"}</EmptyTitle>
+          <EmptyTitle>{missing ? "API tokens aren’t available on this server yet" : "Couldn’t load API tokens"}</EmptyTitle>
           {!missing && <EmptyDescription>{tokens.error.message}</EmptyDescription>}
         </EmptyHeader>
       </Empty>
@@ -125,6 +125,7 @@ export function ApiTokens() {
           <Button variant="secondary" onClick={() => tokens.fetchNextPage()} disabled={tokens.isFetchingNextPage}>
             {tokens.isFetchingNextPage ? "Loading…" : "Load more"}
           </Button>
+          {tokens.isFetchNextPageError && <span className="text-destructive">Couldn’t load more. Try again.</span>}
         </div>
       )}
       <Dialog open={creating} onOpenChange={setCreating}>

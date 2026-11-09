@@ -257,6 +257,9 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
               {activity.isFetchingNextPage ? "Loading…" : "Load more"}
             </Button>
           )}
+          {activity.isFetchNextPageError && (
+            <p className="mt-2 text-center text-sm text-destructive">Couldn’t load more. Try again.</p>
+          )}
         </div>
       )}
     </section>

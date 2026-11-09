@@ -24,7 +24,8 @@ export function tunnelState(tunnel: Tunnel): { healthy: boolean; label: string }
     case "tunnel_expired":
       return { healthy: false, label: "Expired" }
     default:
-      return { healthy: false, label: "Unknown" }
+      // A state this console doesn't know yet: the server's own code, readable, beats "Unknown".
+      return { healthy: false, label: tunnel.summary_code ? capitalize(tunnel.summary_code.replaceAll("_", " ")) : "Unknown" }
   }
 }
 
@@ -37,3 +38,5 @@ export function TunnelStatus({ tunnel }: { tunnel: Tunnel }) {
     </span>
   )
 }
+
+const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
