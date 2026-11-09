@@ -14,6 +14,7 @@ import uuid
 
 import winhost
 
+# Comparisons of exact values use PowerShell's case-sensitive operators (-ceq/-cne/-cmatch): Unix compares exactly.
 PREAMBLE = "$ProgressPreference='SilentlyContinue';$ErrorActionPreference='Stop';"
 INBOX = "(Join-Path (Join-Path $env:USERPROFILE 'Paperboat') 'Inbox')"
 _platforms = {}
@@ -87,10 +88,10 @@ def exec_script(argument, digest, unicode_line, stderr_line, exit_code):
     stderr line, and exits with exit_code (the Windows form of exec_lifecycle's python3 -c fixture)."""
     return ("param([string]$a)\n"
             "$want=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s'))\n"
-            "if($a -ne $want){exit 91}\n"
+            "if($a -cne $want){exit 91}\n"
             "$m=New-Object IO.MemoryStream;[Console]::OpenStandardInput().CopyTo($m)\n"
             "$h=-join([Security.Cryptography.SHA256]::Create().ComputeHash($m.ToArray())|ForEach-Object{$_.ToString('x2')})\n"
-            "if($h -ne '%s'){exit 92}\n"
+            "if($h -cne '%s'){exit 92}\n"
             "$o=[Console]::OpenStandardOutput();$blk=New-Object byte[] 65536\n"
             "for($j=0;$j -lt 65536;$j++){$blk[$j]=$j%%256}\n"
             "for($k=0;$k -lt 256;$k++){$o.Write($blk,0,$blk.Length)}\n"
@@ -124,13 +125,13 @@ def sleeper_script():
 def stopped_script(pid, nonce):
     return ("$d=(Get-Date).AddSeconds(5)\n"
             "while((Get-Date) -lt $d){$c=(Get-CimInstance Win32_Process -Filter 'ProcessId=%d').CommandLine\n"
-            "if(-not $c -or $c -notmatch '%s'){exit 0};Start-Sleep -Milliseconds 100}\n"
+            "if(-not $c -or $c -cnotmatch '%s'){exit 0};Start-Sleep -Milliseconds 100}\n"
             "throw 'canceled remote process remains alive'" % (int(pid), re.escape(nonce)))
 
 
 def kill_script(pid, nonce):
     return ("$c=(Get-CimInstance Win32_Process -Filter 'ProcessId=%d').CommandLine\n"
-            "if($c -match '%s'){Stop-Process -Id %d -Force}" % (int(pid), re.escape(nonce), int(pid)))
+            "if($c -cmatch '%s'){Stop-Process -Id %d -Force}" % (int(pid), re.escape(nonce), int(pid)))
 
 
 # ---- scripts for the transfer checks: the receiving Inbox ------------------------------------------------------
@@ -156,13 +157,13 @@ def inbox_verify_script(expected, marker, size=None, glob=None):
     check = ("$r=%s\n$e=@{%s}\n" % (INBOX, pairs))
     if glob:
         check += ("$f=@(Get-ChildItem -LiteralPath $r -Filter %s|Sort-Object Name|ForEach-Object{$_.Name})\n"
-                  "if((($f -join '|') -ne (($e.Keys|Sort-Object) -join '|'))){throw ('unexpected files: '+($f -join ','))}\n"
+                  "if((($f -join '|') -cne (($e.Keys|Sort-Object) -join '|'))){throw ('unexpected files: '+($f -join ','))}\n"
                   % winhost.ps_quote(glob + '*'))
     check += ("foreach($n in $e.Keys){$p=Join-Path $r $n\n"
               "if(-not(Test-Path -LiteralPath $p)){throw ('missing '+$n)}\n")
     if size is not None:
         check += "if((Get-Item -LiteralPath $p).Length -ne %d){throw ('wrong size '+$n)}\n" % size
-    check += ("if((Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLower() -ne $e[$n]){throw ('hash '+$n)}}\n"
+    check += ("if((Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLower() -cne $e[$n]){throw ('hash '+$n)}}\n"
               '[Console]::Out.Write("%s`n")' % marker)  # the Unix fixtures print the marker with print(): a newline follows
     return check
 

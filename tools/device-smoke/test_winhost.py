@@ -342,6 +342,7 @@ class WindowsTargetScripts(unittest.TestCase):
         self.assertEqual(bytes(range(256)) * 65536 + 'PB_UNICODE_λ船\n'.encode(), done.stdout)
         self.assertEqual('PB_STDERR_λ船\n'.encode(), done.stderr)
         self.assertEqual(91, self.run_file(script, 'other', input=incoming).returncode)
+        self.assertEqual(91, self.run_file(script, argument.upper(), input=incoming).returncode)  # exact, not case-folded
         self.assertEqual(92, self.run_file(script, argument, input=b'wrong').returncode)
 
     def test_small_fixtures(self):
@@ -368,6 +369,8 @@ class WindowsTargetScripts(unittest.TestCase):
             env = {'USERPROFILE': home}
             ok = self.run_ps(windows_target.inbox_verify_script(expected, 'VERIFIED', 3, 'smoke-'), env=env)
             self.assertEqual((0, b'VERIFIED\n'), (ok.returncode, ok.stdout))
+            shouted = dict(expected, **{'smoke-a.bin': expected['smoke-a.bin'].upper()})
+            self.assertNotEqual(0, self.run_ps(windows_target.inbox_verify_script(shouted, 'V'), env=env).returncode)
             bad = dict(expected, **{'smoke-a.bin': '0' * 64})
             self.assertNotEqual(0, self.run_ps(windows_target.inbox_verify_script(bad, 'VERIFIED'), env=env).returncode)
             self.assertNotEqual(0, self.run_ps(windows_target.inbox_verify_script(expected, 'V', 4), env=env).returncode)
@@ -408,6 +411,12 @@ class WindowsTargetPlumbing(unittest.TestCase):
         self.assertEqual('exec', calls[0][0])
         self.assertEqual(2, len(calls))
         self.assertEqual(['powershell', '-NoProfile'], list(calls[1][5:7]))
+
+    def test_exact_comparisons_are_case_sensitive(self):
+        import windows_target
+        for script in (windows_target.stopped_script(1, 'Nonce'), windows_target.kill_script(1, 'Nonce')):
+            self.assertRegex(script, r'-c(not)?match')
+            self.assertNotRegex(script, r'-(not)?match')
 
     def test_target_pb_prefers_the_environment(self):
         import windows_target
