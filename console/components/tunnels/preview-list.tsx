@@ -24,6 +24,7 @@ import { LoadError } from "@/components/load-error"
 import { TableRowsSkeleton } from "@/components/skeletons"
 import { copyWithToast } from "@/lib/clipboard"
 import { useLastCount } from "@/lib/last-count"
+import { useWorkspaceId } from "@/lib/workspace"
 
 type View = "live" | "ended"
 
@@ -107,11 +108,13 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
   )
 
   const shown = query.data?.items ?? []
-  const lastRows = useLastCount(`previews:${ws}:${scope ?? ""}:${view}`, query.data ? shown.length : undefined)
+  // The cookie's workspace: known in the browser before the session is (the prerendered shell).
+  const workspaceId = useWorkspaceId()
+  const lastRows = useLastCount(`previews:${workspaceId}:${scope ?? ""}:${view}`, query.data ? shown.length : undefined)
 
   // Whether there were no previews last time: then the page loads as its empty state, not as a table.
   const lastEmpty = useLastCount(
-    `previews-empty:${ws}:${scope ?? ""}`,
+    `previews-empty:${workspaceId}:${scope ?? ""}`,
     counts.data ? Number(counts.data.live + counts.data.ended === 0) : undefined,
   )
   if ((counts.data ? counts.data.live + counts.data.ended === 0 : lastEmpty === 1) && !q) {

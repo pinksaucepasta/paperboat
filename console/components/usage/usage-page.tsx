@@ -18,6 +18,7 @@ import { TableRowsSkeleton } from "@/components/skeletons"
 import { SectionHeading } from "@/components/section"
 import { useTimeFormat } from "@/lib/use-time-format"
 import { useLastCount } from "@/lib/last-count"
+import { useWorkspaceId } from "@/lib/workspace"
 
 /*
  * How much traffic Paperboat carried and which way it went: directly between machines, through a
@@ -83,8 +84,10 @@ export function UsagePage({ machine: tabMachine }: { machine?: Machine }) {
   const [period, setPeriod] = useState<UsagePeriod>("7d")
   const usage = useApiQuery({ ...usageForQuery(workspace?.id ?? "", period, scope), enabled: Boolean(workspace) })
   const data = usage.data
+  // The cookie's workspace: known in the browser before the session is (the prerendered shell).
+  const workspaceId = useWorkspaceId()
   const lastRows = useLastCount(
-    `usage:${workspace?.id}:${scope ?? ""}:${period}`,
+    `usage:${workspaceId}:${scope ?? ""}:${period}`,
     data ? Math.min(data.resources.length, topResources) : undefined,
   )
 

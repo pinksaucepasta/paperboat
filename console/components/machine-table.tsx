@@ -20,6 +20,7 @@ import { parseQuery, type FilterKey } from "@/lib/machine-filter"
 import { machineListQuery } from "@/lib/machine-list"
 import { tagsLive, tagsQuery } from "@/lib/policy"
 import { useLastCount } from "@/lib/last-count"
+import { useWorkspaceId } from "@/lib/workspace"
 import { ListPager } from "@/components/list-pager"
 import { TagChips } from "@/components/machine-tags"
 import { AddMachineDialog } from "@/components/add-machine-dialog"
@@ -63,7 +64,9 @@ export function MachineTable() {
   // The cards' count (already loaded with them) sizes the loading rows.
   const summary = useApiQuery({ ...machineSummaryQuery(workspace?.id ?? ""), enabled: Boolean(workspace) })
   const shown = list.data?.items
-  const lastRows = useLastCount(`machines:${workspace?.id}:${query}:${pages.page}`, shown?.length)
+  // The cookie's workspace: known in the browser before the session is (the prerendered shell).
+  const workspaceId = useWorkspaceId()
+  const lastRows = useLastCount(`machines:${workspaceId}:${query}:${pages.page}`, shown?.length)
   const total = list.data?.total ?? 0
 
   return (
