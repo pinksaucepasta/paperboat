@@ -22,12 +22,12 @@ type updateHealthAvailability struct {
 	}
 }
 
-func (a updateHealthAvailability) Observation() *availability.Observation {
+func (a updateHealthAvailability) Observation(ctx context.Context) *availability.Observation {
 	observation := a.source.Observation()
 	if observation == nil || observation.UpdateHealth != "unknown" {
 		return observation
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	status, err := a.updater.Status(ctx)
 	if err != nil {

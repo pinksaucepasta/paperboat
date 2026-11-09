@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/availability"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
@@ -45,12 +46,31 @@ func TestUpdateHealthAvailabilityReportsTheUpdatersHealth(t *testing.T) {
 		{"host service value kept", "healthy", "healthy", fixedUpdater{err: errors.New("must not be asked")}},
 	} {
 		source := fixedAvailability{&availability.Observation{UpdateHealth: tc.reported}}
-		got := updateHealthAvailability{source, tc.updater}.Observation()
+		got := updateHealthAvailability{source, tc.updater}.Observation(context.Background())
 		if got == nil || got.UpdateHealth != tc.want {
 			t.Fatalf("%s: update health %+v, want %s", tc.name, got, tc.want)
 		}
 	}
-	if got := (updateHealthAvailability{fixedAvailability{}, fixedUpdater{}}).Observation(); got != nil {
+	if got := (updateHealthAvailability{fixedAvailability{}, fixedUpdater{}}).Observation(context.Background()); got != nil {
 		t.Fatalf("no availability observation yet, got %+v", got)
+	}
+}
+
+type blockedUpdater struct{}
+
+func (blockedUpdater) Status(ctx context.Context) (updated.ControlResponse, error) {
+	<-ctx.Done()
+	return updated.ControlResponse{}, ctx.Err()
+}
+
+// A cancelled send or shutdown waited up to 2 s on a wedged updater socket because the probe ignored the caller's context.
+func TestUpdateHealthAvailabilityStopsWithTheCallersContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	source := fixedAvailability{&availability.Observation{UpdateHealth: "unknown"}}
+	started := time.Now()
+	got := updateHealthAvailability{source, blockedUpdater{}}.Observation(ctx)
+	if took := time.Since(started); took > 500*time.Millisecond || got == nil || got.UpdateHealth != "recovery_required" {
+		t.Fatalf("returned %+v after %v, want recovery_required at once", got, took)
 	}
 }

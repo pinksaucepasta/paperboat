@@ -215,7 +215,7 @@ type runtimeObservationSender struct {
 	operationID  func() (string, error)
 	client       *http.Client
 	availability interface {
-		Observation() *availability.Observation
+		Observation(context.Context) *availability.Observation
 	}
 	updater interface {
 		Status(context.Context) (updated.ControlResponse, error)
@@ -249,7 +249,7 @@ func (s *runtimeObservationSender) send(ctx context.Context, mayConfirm bool) er
 	}
 	now := time.Now().UTC()
 	observedCapabilities := s.capabilitiesController.Observation(now)
-	availabilityState := availabilityObservation(s.availability)
+	availabilityState := availabilityObservation(ctx, s.availability)
 	var updaterState *updated.ControlResponse
 	var updaterErr error
 	if s.updater != nil {
@@ -576,11 +576,11 @@ func writeServerHeartbeatReceipt(path string, receipt serverHeartbeatReceipt) er
 	return atomicfile.Write(path, body, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1})
 }
 
-func availabilityObservation(source interface {
-	Observation() *availability.Observation
+func availabilityObservation(ctx context.Context, source interface {
+	Observation(context.Context) *availability.Observation
 }) *availability.Observation {
 	if source == nil {
 		return nil
 	}
-	return source.Observation()
+	return source.Observation(ctx)
 }
