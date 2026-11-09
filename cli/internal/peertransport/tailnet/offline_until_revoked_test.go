@@ -100,6 +100,31 @@ func TestHostSessionRightsLastUntilRevoked(t *testing.T) {
 	}
 }
 
+// A team member's CLI document names the shared host with machine_access dial scopes without expiry, at the deciding
+// policy version and under the host's endpoint id (server teamHostPeers). The document must verify, or the CLI keeps
+// its old one and every `pb exec` / `pb ssh` to the machine is refused ("peer network admission refused").
+func TestMemberCLIStandingDialRightsVerify(t *testing.T) {
+	a, cfg, signer, _ := networkTestAuthority(t)
+	cfg.Peers[0].Scopes = []NetworkScope{
+		{ResourceKind: "machine_access", ResourceID: "machine_test", ResourceGeneration: 9, Capability: "exec", Direction: "dial", Port: 443},
+		{ResourceKind: "machine_access", ResourceID: "machine_test", ResourceGeneration: 9, Capability: "managed_ssh", Direction: "dial", Port: 443},
+	}
+	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
+		t.Fatal("standing dial rights rejected:", err)
+	}
+	if _, err := a.Descriptor("machine_test"); err != nil {
+		t.Fatal("host with standing dial rights not admitted:", err)
+	}
+	if !a.Allows("machine_test", "machine_test", "managed_ssh", "dial") {
+		t.Fatal("standing dial right not allowed")
+	}
+	cfg.Generation++
+	cfg.Peers[0].Scopes[0].ResourceID = "someone_elses_grant"
+	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); !errors.Is(err, ErrAuthority) {
+		t.Fatalf("a dial grant without expiry under another resource id = %v, want refused", err)
+	}
+}
+
 type unreachableKeys struct{}
 
 func (unreachableKeys) Lookup(context.Context, string) (ed25519.PublicKey, bool, error) {

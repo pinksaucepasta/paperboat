@@ -361,9 +361,10 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time, res
 			scopes++
 			networkOnly := scope.ResourceKind == "machine_network" && scope.Capability == "connect" && b.AccountID == s.AccountID
 			validResource := networkOnly || peernetwork.ValidScope(scope.ResourceKind, scope.Capability)
-			// Until-revoked scopes (expires_at 0, F21-01/F21-11): the network pair, and a host's offline session
-			// rights (machine_access accept), whose generation is the deciding policy version.
-			sessionRight := scope.ResourceKind == "machine_access" && scope.Direction == "accept" && scope.Capability != "private_access"
+			// Until-revoked scopes (expires_at 0, F21-01/F21-11): the network pair, a host's offline session rights
+			// (machine_access accept) and the mirror in a member's CLI document (machine_access dial, named by the
+			// host's endpoint id), whose generation is the deciding policy version.
+			sessionRight := scope.ResourceKind == "machine_access" && scope.Capability != "private_access" && (scope.Direction == "accept" || scope.ResourceID == b.EndpointID)
 			validGeneration := scope.ResourceGeneration == 1 || sessionRight && scope.ResourceGeneration >= 1 && scope.ResourceGeneration <= 1<<53-1
 			if scopes > MaxConfigurationScopes || !validResource || !validID(scope.ResourceID) || !validGeneration || scope.Port != NetworkPort || scope.ExpiresAt < 0 || scope.ExpiresAt == 0 && !networkOnly && !sessionRight || scope.Direction != "dial" && scope.Direction != "accept" || s.Role == "cli" && scope.Direction != "dial" || !networkOnly && (s.Role == b.Role || s.Role == "machine" && scope.Direction != "accept") {
 				return cfg, "", ErrAuthority
