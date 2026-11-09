@@ -59,10 +59,22 @@ func TestObservationAppliesUnknownAndRepeatedRevocations(t *testing.T) {
 	if err := c.Observe(ctx, server, false); err != nil {
 		t.Fatalf("unknown and repeated revocations: %v", err)
 	}
-	mu.Lock()
-	revocations = []Revocation{{AccountID: "account_a", EndpointID: "endpoint_gone", MinGeneration: 1}}
-	mu.Unlock()
-	if err := c.Observe(ctx, server, false); err != ErrFenced {
-		t.Fatalf("malformed generation error = %v, want ErrFenced", err)
+	long := strings.Repeat("x", 257)
+	for name, bad := range map[string]Revocation{
+		"generation 1":      {AccountID: "account_a", EndpointID: "endpoint_gone", MinGeneration: 1},
+		"generation 0":      {AccountID: "account_a", EndpointID: "endpoint_gone"},
+		"empty ids":         {MinGeneration: 3},
+		"empty account":     {EndpointID: "endpoint_gone", MinGeneration: 3},
+		"empty endpoint":    {AccountID: "account_a", MinGeneration: 3},
+		"oversize account":  {AccountID: long, EndpointID: "endpoint_gone", MinGeneration: 3},
+		"oversize endpoint": {AccountID: "account_a", EndpointID: long, MinGeneration: 3},
+	} {
+		mu.Lock()
+		// A valid entry listed before the malformed one must not turn the answer into a retry.
+		revocations = []Revocation{{AccountID: "account_b", EndpointID: "endpoint_other", MinGeneration: 3}, bad}
+		mu.Unlock()
+		if err := c.Observe(ctx, server, false); err != ErrFenced {
+			t.Fatalf("malformed revocation (%s) error = %v, want ErrFenced", name, err)
+		}
 	}
 }

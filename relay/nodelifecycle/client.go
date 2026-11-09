@@ -313,8 +313,9 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	}
 	// A revocation only restricts: one for an endpoint this relay does not hold fences its future
 	// grants, a repeated one is a no-op (Server.Revoke keeps the highest), so neither drains the relay.
+	// A malformed entry is a broken authority, not a transient failure: it fences before any is applied.
 	for _, rev := range out.Revocations {
-		if rev.MinGeneration < 2 {
+		if !derpquic.ValidRevocation(rev.AccountID, rev.EndpointID, rev.MinGeneration) {
 			return ErrFenced
 		}
 	}
