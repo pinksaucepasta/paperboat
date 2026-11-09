@@ -101,7 +101,9 @@ func protectedDACLMatches(got *windows.SECURITY_DESCRIPTOR, expected string) (ma
 	if !strings.HasSuffix(user.User.Sid.String(), "-500") {
 		return false, nil
 	}
-	return actual == dacl(strings.Replace(expected, user.User.Sid.String(), "LA", 1)), nil
+	// The built-in Administrator (RID 500) is written "LA" by the API; an expected string with an owner prefix names the
+	// SID more than once, and every occurrence must be rewritten.
+	return actual == dacl(strings.ReplaceAll(expected, user.User.Sid.String(), "LA")), nil
 }
 
 // x/sys's SECURITY_DESCRIPTOR.String discards this native conversion error.
