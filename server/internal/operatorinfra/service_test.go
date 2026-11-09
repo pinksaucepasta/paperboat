@@ -188,8 +188,16 @@ func TestOperatorNodeSiteIsSetByTheSiteAction(t *testing.T) {
 		t.Fatal(err)
 	}
 	set := NodeMutation{Action: "site", NodeID: in.NodeID, Reason: "case:test", Site: "Mumbai"}
-	if _, err = s.MutateNode(ctx, admin, "site-"+x, set); err != nil || site() != "Mumbai" {
+	got, err := s.MutateNode(ctx, admin, "site-"+x, set)
+	if err != nil || site() != "Mumbai" {
 		t.Fatalf("site action: site=%q err=%v", site(), err)
+	}
+	// The response is the whole node (OperatorNode), read from the node row alone.
+	if n := got.Node; n.ID != in.NodeID || n.RegionID != region.ID || n.EdgePool != in.EdgePool || n.FailureDomain != "zone-a" || n.EndpointHost != in.EndpointHost || n.EndpointTCPPort != in.EndpointTCPPort || n.CapacityLimit != 8 || len(n.Roles) != 1 || n.Roles[0] != "edge" || len(n.Transports) != 1 || n.Transports[0] != "http3" || n.State == "" || n.RegistryExpiresAt.IsZero() || n.Revision != 0 {
+		t.Fatalf("site action returned %+v", n)
+	}
+	if replay, replayErr := s.MutateNode(ctx, admin, "site-"+x, set); replayErr != nil || fmt.Sprint(replay.Node) != fmt.Sprint(got.Node) {
+		t.Fatalf("site replay %+v err=%v, want %+v", replay.Node, replayErr, got.Node)
 	}
 	set.Site = " Mumbai"
 	if _, err = s.MutateNode(ctx, admin, "site-bad-"+x, set); !errors.Is(err, ErrInvalid) {

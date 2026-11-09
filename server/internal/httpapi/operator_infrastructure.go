@@ -81,7 +81,12 @@ func registerOperatorInfrastructure(mux *http.ServeMux, opts Options) {
 			if !decodeStrictJSON(w, r, &in) {
 				return
 			}
-			if action != "enroll" && action != "update" && (in.Site != "" && action != "site" || in.RegionID != "" || in.EdgePool != "" || in.FailureDomain != "" || in.EndpointHost != "" || in.EndpointTCPPort != 0 || in.EndpointQUICPort != 0 || len(in.Roles) != 0 || len(in.Transports) != 0 || in.CapacityLimit != 0 || len(in.UsagePublicKey) != 0 || len(in.PeerWireGuardPublicKey) != 0 || len(in.PeerDiscoPublicKey) != 0 || in.PeerVirtualAddress != "") {
+			other := in.RegionID != "" || in.EdgePool != "" || in.FailureDomain != "" || in.EndpointHost != "" || in.EndpointTCPPort != 0 || in.EndpointQUICPort != 0 || len(in.Roles) != 0 || len(in.Transports) != 0 || in.CapacityLimit != 0 || len(in.UsagePublicKey) != 0 || len(in.PeerWireGuardPublicKey) != 0 || len(in.PeerDiscoPublicKey) != 0 || in.PeerVirtualAddress != ""
+			if action == "site" && (other || in.Revision != 0) {
+				writeError(w, r, 400, "invalid_request", "Only site is accepted for this node action.")
+				return
+			}
+			if action != "enroll" && action != "update" && action != "site" && (other || in.Site != "") {
 				writeError(w, r, 400, "invalid_request", "Only revision is accepted for this node action.")
 				return
 			}

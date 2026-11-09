@@ -307,7 +307,7 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 				return err
 			}
 		case "site":
-			// Any non-retired node: Paperboat's own pbh installations have no managed_node_authority row.
+			// Any non-retired node: Paperboat's own pbh installations have no managed_node_authority row (readNodeTx left-joins it).
 			if !validSite(in.Site) {
 				return ErrInvalid
 			}
@@ -318,8 +318,6 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 			if tag.RowsAffected() != 1 {
 				return ErrNotFound
 			}
-			out.Node = Node{ID: in.NodeID} // readNodeTx joins managed_node_authority, which these nodes lack
-			return nil
 		case "drain", "resume", "retire":
 			if in.Revision < 1 {
 				return ErrInvalid
@@ -411,7 +409,7 @@ func (s *Service) ListNodes(ctx context.Context, actor, region, after string, li
 		if err := allowRead(ctx, tx, actor); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT n.id,m.region_id,n.edge_pool,n.failure_domain,n.state,n.endpoint_host,n.endpoint_tcp_port,n.endpoint_quic_port,n.roles,n.transports,n.capacity_limit,m.revision,n.node_generation,n.last_heartbeat_at,n.registry_expires_at,(n.ready AND n.registry_expires_at>now() AND n.last_heartbeat_at>$4 AND r.enabled AND m.retired_at IS NULL) FROM control_tunnel_nodes n JOIN managed_node_authority m ON m.node_id=n.id JOIN operator_regions r ON r.id=m.region_id WHERE ($1='' OR m.region_id=$1) AND n.id>$2 ORDER BY n.id LIMIT $3`, region, after, limit+1, time.Now().Add(-controlplane.ControlTunnelNodeStaleAfter()))
+		rows, err := tx.Query(ctx, `SELECT n.id,coalesce(m.region_id,n.region,''),n.edge_pool,n.failure_domain,n.state,n.endpoint_host,n.endpoint_tcp_port,n.endpoint_quic_port,n.roles,n.transports,n.capacity_limit,m.revision,n.node_generation,n.last_heartbeat_at,n.registry_expires_at,(n.ready AND n.registry_expires_at>now() AND n.last_heartbeat_at>$4 AND r.enabled AND m.retired_at IS NULL) FROM control_tunnel_nodes n JOIN managed_node_authority m ON m.node_id=n.id JOIN operator_regions r ON r.id=m.region_id WHERE ($1='' OR m.region_id=$1) AND n.id>$2 ORDER BY n.id LIMIT $3`, region, after, limit+1, time.Now().Add(-controlplane.ControlTunnelNodeStaleAfter()))
 		if err != nil {
 			return err
 		}
@@ -577,7 +575,7 @@ func (s *Service) RuntimeCredential(ctx context.Context, node string) (string, e
 
 func (s *Service) IsSelfHosted(context.Context, string) (bool, error) { return false, nil }
 func readNodeTx(ctx context.Context, tx *db.Tx, id string, out *Node) error {
-	return tx.QueryRow(ctx, `SELECT n.id,m.region_id,n.edge_pool,n.failure_domain,n.state,n.endpoint_host,n.endpoint_tcp_port,n.endpoint_quic_port,n.roles,n.transports,n.capacity_limit,m.revision,n.node_generation,n.last_heartbeat_at,n.registry_expires_at,(n.ready AND n.registry_expires_at>now() AND n.last_heartbeat_at>$2 AND r.enabled AND m.retired_at IS NULL) FROM control_tunnel_nodes n JOIN managed_node_authority m ON m.node_id=n.id JOIN operator_regions r ON r.id=m.region_id WHERE n.id=$1`, id, time.Now().Add(-controlplane.ControlTunnelNodeStaleAfter())).Scan(&out.ID, &out.RegionID, &out.EdgePool, &out.FailureDomain, &out.State, &out.EndpointHost, &out.EndpointTCPPort, &out.EndpointQUICPort, &out.Roles, &out.Transports, &out.CapacityLimit, &out.Revision, &out.NodeGeneration, &out.ObservedAt, &out.RegistryExpiresAt, &out.Ready)
+	return tx.QueryRow(ctx, `SELECT n.id,coalesce(m.region_id,n.region,''),n.edge_pool,n.failure_domain,n.state,n.endpoint_host,n.endpoint_tcp_port,n.endpoint_quic_port,n.roles,n.transports,n.capacity_limit,coalesce(m.revision,0),n.node_generation,n.last_heartbeat_at,n.registry_expires_at,(n.ready AND n.registry_expires_at>now() AND n.last_heartbeat_at>$2 AND coalesce(r.enabled,true) AND m.retired_at IS NULL) FROM control_tunnel_nodes n LEFT JOIN managed_node_authority m ON m.node_id=n.id LEFT JOIN operator_regions r ON r.id=m.region_id WHERE n.id=$1`, id, time.Now().Add(-controlplane.ControlTunnelNodeStaleAfter())).Scan(&out.ID, &out.RegionID, &out.EdgePool, &out.FailureDomain, &out.State, &out.EndpointHost, &out.EndpointTCPPort, &out.EndpointQUICPort, &out.Roles, &out.Transports, &out.CapacityLimit, &out.Revision, &out.NodeGeneration, &out.ObservedAt, &out.RegistryExpiresAt, &out.Ready)
 }
 
 var identifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)

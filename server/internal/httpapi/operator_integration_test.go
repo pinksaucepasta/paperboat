@@ -381,8 +381,10 @@ func TestOperatorConnectedAuthenticationDisclosureAndRevocation(t *testing.T) {
 		t.Fatal("enrollment replay changed", replay.Code)
 	}
 	infraHeaders["Idempotency-Key"] = "node-site-" + user.ID
-	if response := request("POST", "/v1/admin/nodes/"+nodeID+"/site", `{"site":"Mumbai","region_id":"x"}`, true, infraHeaders); response.Code != 400 {
-		t.Fatalf("site action accepted another field: %d", response.Code)
+	for _, body := range []string{`{"site":"Mumbai","region_id":"x"}`, `{"site":"Mumbai","revision":1}`} {
+		if response := request("POST", "/v1/admin/nodes/"+nodeID+"/site", body, true, infraHeaders); response.Code != 400 || !strings.Contains(response.Body.String(), "Only site is accepted") {
+			t.Fatalf("site action %s: %d %s", body, response.Code, response.Body.String())
+		}
 	}
 	if response := request("POST", "/v1/admin/nodes/"+nodeID+"/site", `{"site":"Mumbai"}`, true, infraHeaders); response.Code != 200 {
 		t.Fatalf("site action %d %s", response.Code, response.Body.String())
