@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -129,7 +130,11 @@ func TestStartLocalDaemonAndWaitAllowsColdReadinessBeyondLegacyFiveSeconds(t *te
 	installCalls := 0
 	installer := func(_ context.Context, _ string, gotConfigPath, serverURL string) error {
 		installCalls++
-		if gotConfigPath != configPath || serverURL != "https://api.paperboat.test" {
+		wantConfig, wantServer := configPath, "https://api.paperboat.test"
+		if runtime.GOOS == "windows" {
+			wantConfig, wantServer = "", "" // the SCM service launches from its persisted installation, not CLI overrides
+		}
+		if gotConfigPath != wantConfig || serverURL != wantServer {
 			t.Fatalf("config=%q server=%q", gotConfigPath, serverURL)
 		}
 		go func() {

@@ -7,6 +7,16 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	bugreportpkg "github.com/pinksaucepasta/paperboat/internal/bugreport"
@@ -17,15 +27,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/localwait"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
-	"net/http"
-	"net/http/httptest"
-	"os"
-	"path/filepath"
-	"runtime"
-	"slices"
-	"strings"
-	"testing"
-	"time"
 )
 
 func TestAuthStatusRejectsProfileWithMissingSecret(t *testing.T) {
@@ -624,6 +625,7 @@ func TestCommandUsesTestSafeLocalDaemonInstaller(t *testing.T) {
 		if !strings.HasSuffix(strings.ToLower(executable), ".test") && !strings.HasSuffix(strings.ToLower(executable), ".test.exe") {
 			t.Fatalf("expected test executable, got %q", executable)
 		}
+		// A command's own snapshot recovery passes its config and server on every platform (localDaemonSnapshot).
 		if gotConfigPath != configPath || server != "https://api.paperboat.test" {
 			t.Fatalf("config=%q server=%q", gotConfigPath, server)
 		}
@@ -715,7 +717,11 @@ func TestEnsureLocalDaemonServiceUsesInstallerAfterRegistration(t *testing.T) {
 		if !strings.HasSuffix(strings.ToLower(executable), ".test") && !strings.HasSuffix(strings.ToLower(executable), ".test.exe") {
 			t.Fatalf("expected test executable, got %q", executable)
 		}
-		if gotConfigPath != configPath || server != "https://api.paperboat.test" {
+		wantConfig, wantServer := configPath, "https://api.paperboat.test"
+		if runtime.GOOS == "windows" {
+			wantConfig, wantServer = "", "" // the SCM service launches from its persisted installation, not CLI overrides
+		}
+		if gotConfigPath != wantConfig || server != wantServer {
 			t.Fatalf("config=%q server=%q", gotConfigPath, server)
 		}
 		return sentinel
