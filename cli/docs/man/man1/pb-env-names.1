@@ -21,6 +21,7 @@ How an AI agent finds and uses a secret:
   pb env run -- <command>            run a command with those values in its environment
   printf %s "$SECRET" | pb env set NAME --value-stdin     store a secret the user gives you
 Never print, echo or write a value to a file or log: let the program that needs it read it from its environment.
+\fBpb env run\fR gives a command the whole workspace set; there is no per-name scoping.
 
 .PP
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.

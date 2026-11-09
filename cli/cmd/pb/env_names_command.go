@@ -13,7 +13,8 @@ const envNamesAgentGuide = "How an AI agent finds and uses a secret:\n" +
 	"  pb env names                       which ENV names commands here receive (never values)\n" +
 	"  pb env run -- <command>            run a command with those values in its environment\n" +
 	"  printf %s \"$SECRET\" | pb env set NAME --value-stdin     store a secret the user gives you\n" +
-	"Never print, echo or write a value to a file or log: let the program that needs it read it from its environment."
+	"Never print, echo or write a value to a file or log: let the program that needs it read it from its environment.\n" +
+	"`pb env run` gives a command the whole workspace set; there is no per-name scoping."
 
 func addEnvironmentNamesCommand(root *cobra.Command) {
 	root.AddCommand(&cobra.Command{
