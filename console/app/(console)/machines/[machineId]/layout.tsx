@@ -16,7 +16,11 @@ export default function MachineLayout({ params, children }: LayoutProps<"/machin
 async function Machine({ params, children }: Pick<LayoutProps<"/machines/[machineId]">, "params" | "children">) {
   const { machineId } = await params
   // Read on the server, the machine's header and tabs are in the first HTML.
-  const reads = () => [{ key: queryKeys.machine(machineId), path: `machines/${encodeURIComponent(machineId)}` }]
+  // The workspace's tags decide whether the header offers "Edit tags"; read together so it doesn't pop in.
+  const reads = (workspace: string) => [
+    { key: queryKeys.machine(machineId), path: `machines/${encodeURIComponent(machineId)}` },
+    { key: queryKeys.tags(workspace), path: `workspaces/${encodeURIComponent(workspace)}/tags` },
+  ]
   return (
     <WithSession reads={reads}>
       <MachineShell machineId={machineId}>{children}</MachineShell>

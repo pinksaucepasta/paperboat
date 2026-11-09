@@ -163,7 +163,7 @@ export type WorkspaceTags = {
 /** The workspace's tags (`tag:<name>`) and the machines carrying each; the policy file is their store. */
 export const tagsQuery = (workspace: string) =>
   queryOptions({
-    queryKey: ["policy", workspace, "tags"],
+    queryKey: queryKeys.tags(workspace),
     queryFn: ({ signal }) => call<WorkspaceTags>("Loading tags", `${ws(workspace)}/tags`, { signal }),
     enabled: tagsLive && Boolean(workspace),
   })
