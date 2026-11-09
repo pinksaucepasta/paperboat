@@ -35,7 +35,7 @@ import { RowMenus, type Entry } from "@/components/row-menus"
 import { ConfirmAction, SearchField, ViewToggle } from "@/components/list-toolbar"
 import { Time } from "@/components/time"
 import { MachineAccess } from "@/components/team/machine-access"
-import { DangerZone as DangerZonePanel, Row, Section } from "@/components/section"
+import { DangerZone as DangerZonePanel, Section, SettingRow } from "@/components/section"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -672,7 +672,11 @@ function TeamSettings({ team, owner }: { team: Team; owner: boolean }) {
   })
   return (
     <Section title="Settings">
-      <Row label="Approve new machines" htmlFor="team-approval">
+      <SettingRow
+        label="Approve new machines"
+        htmlFor="team-approval"
+        description="Machines that members add wait for an owner or admin to accept them. Owners and admins add machines directly."
+      >
         <Switch
           id="team-approval"
           checked={team.approve_new_machines ?? true}
@@ -680,12 +684,13 @@ function TeamSettings({ team, owner }: { team: Team; owner: boolean }) {
           onCheckedChange={(on) => approval.mutate(on)}
           aria-label="Approve new machines"
         />
-      </Row>
-      <p className="pb-2 text-xs text-muted-foreground">
-        Machines that members add wait for an owner or admin to accept them. Owners and admins add machines directly.
-      </p>
+      </SettingRow>
       {approval.isError && <p className="py-2 text-sm text-destructive">{approval.error.message}</p>}
-      <Row label="Allow private access" htmlFor="team-private-access">
+      <SettingRow
+        label="Allow private access"
+        htmlFor="team-private-access"
+        description="Lets members reach the ports of the team’s shared machines over the private network, on top of the Private network access you grant on each machine. Off by default."
+      >
         <Switch
           id="team-private-access"
           checked={team.allow_private_access ?? false}
@@ -693,14 +698,10 @@ function TeamSettings({ team, owner }: { team: Team; owner: boolean }) {
           onCheckedChange={(on) => privateAccess.mutate(on)}
           aria-label="Allow private access"
         />
-      </Row>
-      <p className="pb-2 text-xs text-muted-foreground">
-        Lets members reach the ports of the team’s shared machines over the private network, on top of the Private
-        network access you grant on each machine. Off by default.
-      </p>
+      </SettingRow>
       {privateAccess.isError && <p className="py-2 text-sm text-destructive">{privateAccess.error.message}</p>}
       {owner && (
-        <Row label="Team name" htmlFor="team-name">
+        <SettingRow label="Team name" htmlFor="team-name">
           <form
             className="flex items-center gap-2"
             onSubmit={(event) => {
@@ -720,14 +721,14 @@ function TeamSettings({ team, owner }: { team: Team; owner: boolean }) {
               Save
             </Button>
           </form>
-        </Row>
+        </SettingRow>
       )}
-      <Row label="Team ID">
+      <SettingRow label="Team ID">
         <span className="flex items-center gap-1 font-mono text-code">
           {team.team_id}
           <CopyButton value={team.team_id} label="Copy team ID" />
         </span>
-      </Row>
+      </SettingRow>
       {rename.isError && <p className="py-2 text-sm text-destructive">{rename.error.message}</p>}
     </Section>
   )

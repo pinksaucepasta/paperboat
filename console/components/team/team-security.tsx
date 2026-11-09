@@ -19,7 +19,7 @@ import {
 } from "@/lib/identity"
 import { roleLabels, type Team } from "@/lib/teams"
 import { useTimeFormat } from "@/lib/use-time-format"
-import { Row, Section } from "@/components/section"
+import { Row, Section, SettingRow } from "@/components/section"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -248,13 +248,9 @@ function Toggle({
   onChange: (value: boolean) => void
 }) {
   return (
-    <div className="flex items-center justify-between gap-6 border-b border-divider py-3 text-sm">
-      <div className="flex flex-col gap-0.5">
-        <span>{label}</span>
-        <span className="text-xs text-muted-foreground">{description}</span>
-      </div>
+    <SettingRow label={label} description={description}>
       <Switch aria-label={label} checked={checked} disabled={disabled} onCheckedChange={onChange} />
-    </div>
+    </SettingRow>
   )
 }
 

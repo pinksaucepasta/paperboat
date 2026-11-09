@@ -1,39 +1,42 @@
 "use client"
 
-import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { meQuery, useApiQuery } from "@/lib/api"
 import { accountDeletionLive } from "@/lib/account-deletion"
 import { setHideEmail, useHideEmail } from "@/lib/privacy"
 import { Email } from "@/components/email"
 import { TransferModeSection } from "@/components/transfer-mode"
-import { Row, Section } from "@/components/section"
-import { Button } from "@/components/ui/button"
+import { DangerZone, Section, SettingRow } from "@/components/section"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 
 export function Account() {
+  const router = useRouter()
   const { data: me } = useApiQuery(meQuery)
   const hideEmail = useHideEmail()
   return (
     <>
       <Section title="Profile">
-        <Row label="Name">{me ? me.display_name || "Not set" : <Skeleton className="h-4 w-32" />}</Row>
-        <Row label="Email">{me ? <Email value={me.email} revealable /> : <Skeleton className="h-4 w-48" />}</Row>
+        <SettingRow label="Name">{me ? me.display_name || "Not set" : <Skeleton className="h-4 w-32" />}</SettingRow>
+        <SettingRow label="Email">{me ? <Email value={me.email} revealable /> : <Skeleton className="h-4 w-48" />}</SettingRow>
       </Section>
       <Section title="Privacy">
-        <Row label="Hide my email" htmlFor="hide-email">
+        <SettingRow
+          label="Hide my email"
+          htmlFor="hide-email"
+          description="Blurs your email in this browser, for screen sharing and screenshots."
+        >
           <Switch id="hide-email" checked={hideEmail} onCheckedChange={setHideEmail} />
-        </Row>
+        </SettingRow>
       </Section>
       <TransferModeSection />
       {accountDeletionLive && (
-        <Section title="Delete account">
-          <Row label="Delete your account and everything in it">
-            <Button variant="outline" nativeButton={false} render={<Link href="/account/delete" />}>
-              Delete account…
-            </Button>
-          </Row>
-        </Section>
+        <DangerZone
+          title="Delete account"
+          description="Deletes your account and everything in it. The next page lists what goes."
+          action="Delete account…"
+          onAction={() => router.push("/account/delete")}
+        />
       )}
     </>
   )
