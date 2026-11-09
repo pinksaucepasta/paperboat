@@ -579,6 +579,17 @@ func userMachineGet(service *usermachines.Service) http.HandlerFunc {
 		}
 		machine, err := service.Get(r.Context(), p.User.ID, r.PathValue("machine_id"))
 		if errors.Is(err, usermachines.ErrNotFound) {
+			// "Not found" also covers a live machine this caller cannot see, so only an explicit removal of the
+			// caller's own enrollment says "removed"; clients wipe local setup on that answer alone.
+			removed, removedErr := service.RemovedBy(r.Context(), p.User.ID, r.PathValue("machine_id"))
+			if removedErr != nil {
+				writeError(w, r, http.StatusInternalServerError, "internal_error", "Internal server error.", removedErr)
+				return
+			}
+			if removed {
+				writeError(w, r, http.StatusGone, "user_machine_removed", "This machine was removed from the account.")
+				return
+			}
 			writeError(w, r, http.StatusNotFound, "user_machine_not_found", "Machine was not found.")
 			return
 		}

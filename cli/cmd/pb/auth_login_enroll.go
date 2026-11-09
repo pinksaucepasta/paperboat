@@ -234,15 +234,13 @@ func startFresh(c *command.Context, replacesRecord bool) error {
 		if _, err := rememberReplacedMachineFunc(); err != nil {
 			return machineReplacementError{step: replaceStepRemember, cause: err}
 		}
+	} else if err := bootstrap.ClearReplacement(); err != nil {
+		// The record is gone; an older reset's note would make pairing replace whatever it names. Cleared before
+		// anything is wiped, so a failure here leaves the working setup untouched.
+		return fmt.Errorf("clear the old replacement note before resetting this computer: %w", err)
 	}
 	if err := freshEnrollmentCleanup(cobraCommand); err != nil {
 		return err
-	}
-	if !replacesRecord {
-		// The record is gone; an older reset's note would make pairing replace whatever it names.
-		if err := bootstrap.ClearReplacement(); err != nil {
-			return fmt.Errorf("clear the old replacement note: %w", err)
-		}
 	}
 	executable, source, err := runningInstallSource()
 	if err != nil {
@@ -311,8 +309,8 @@ func readdRemovedComputer(c *command.Context, cfg *config.Config, store config.P
 		return declined
 	}
 	choice, err := chooseLoginAction(selector.Options{Context: ctx, Title: "This computer was removed from " + account + ". Add it again?", Items: []selector.Item{
+		{ID: "keep", Title: "Not now", Description: "Leaves this computer as it is"}, // first, so Enter declines
 		{ID: "add", Title: "Add it again", Description: "Resets this computer's local Paperboat setup; your Inbox is kept"},
-		{ID: "keep", Title: "Not now"},
 	}, Stdin: os.Stdin, Output: c.ErrWriter})
 	if errors.Is(err, selector.ErrCanceled) || err == nil && choice.ID != "add" {
 		return declined

@@ -222,6 +222,17 @@ func (s *Service) Get(ctx context.Context, userID, userMachineID string) (UserMa
 	return item, nil
 }
 
+// RemovedBy reports whether the machine record was removed or revoked and userID is the account that enrolled it:
+// a soft-removed row, or the final-delete audit event written for the account that owned the row. A live machine
+// the caller can merely not see (left the team, binding revoked, no grant), another account's machine and an
+// unknown id are all false, so the answer never leaks existence and never calls a live machine removed.
+func (s *Service) RemovedBy(ctx context.Context, userID, userMachineID string) (bool, error) {
+	var removed bool
+	err := s.db.SQL().QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.user_machines WHERE id=$1 AND user_id=$2 AND (deleted_at IS NOT NULL OR revoked_at IS NOT NULL))
+ OR EXISTS(SELECT 1 FROM paperboat.audit_events WHERE event_type='user_machine.final_deleted' AND resource_type='user_machine' AND resource_id=$1 AND actor_user_id=$2)`, userMachineID, userID).Scan(&removed)
+	return removed, err
+}
+
 func (s *Service) Rename(ctx context.Context, userID, userMachineID, alias string) (UserMachine, error) {
 	userID, userMachineID, alias = strings.TrimSpace(userID), strings.TrimSpace(userMachineID), strings.TrimSpace(alias)
 	if userID == "" || userMachineID == "" || invalidMachineAlias(alias) {

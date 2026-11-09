@@ -658,6 +658,7 @@ type loginDeviceFixture struct {
 	approvedBy string // set: /v1/me answers this other account (an approval by the wrong account)
 	machines   []any  // machines GET /v1/machines/{id} finds (any workspace); the personal list stays empty
 	lookupFail int    // set: GET /v1/machines/{id} answers this status with an unrelated code
+	invisible  bool   // set: the lookup answers 404 user_machine_not_found for a machine that may still be live
 	// enrollRefusal: set, POST /v1/machine-enrollments answers 403 with this message; enrollCalls counts them.
 	enrollRefusal string
 	enrollCalls   int
@@ -715,8 +716,13 @@ func loginDeviceServer(t *testing.T, f *loginDeviceFixture) *httptest.Server {
 					return
 				}
 			}
-			w.WriteHeader(404)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "user_machine_not_found", "message": "Machine was not found."}})
+			if f.invisible {
+				w.WriteHeader(404)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "user_machine_not_found", "message": "Machine was not found."}})
+				return
+			}
+			w.WriteHeader(410)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "user_machine_removed", "message": "This machine was removed from the account."}})
 		case "/v1/machine-enrollments":
 			f.enrollCalls++
 			var asked struct{ Workspace string }

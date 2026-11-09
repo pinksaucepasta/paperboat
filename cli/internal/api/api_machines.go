@@ -315,7 +315,7 @@ func (c *Client) ListUserMachinesFiltered(ctx context.Context, filters url.Value
 }
 
 // GetUserMachine reads one machine by id across every workspace the caller can see (personal and team),
-// unlike the personal-only list. A removed machine answers 404 user_machine_not_found.
+// unlike the personal-only list. A machine removed from the caller's enrollment answers 410 user_machine_removed.
 func (c *Client) GetUserMachine(ctx context.Context, machineID string) (UserMachine, error) {
 	var out UserMachine
 	if strings.TrimSpace(machineID) == "" {
@@ -325,11 +325,12 @@ func (c *Client) GetUserMachine(ctx context.Context, machineID string) (UserMach
 	return out, err
 }
 
-// IsMachineRemoved reports the server's explicit answer that the machine does not exist (removed), not a refusal
-// or a failure to answer.
+// IsMachineRemoved reports the server's explicit answer that the machine record was removed from the caller's
+// own enrollment (410 user_machine_removed). A 404 user_machine_not_found also covers live machines the caller
+// cannot see, so it never counts.
 func IsMachineRemoved(err error) bool {
 	var apiErr *APIError
-	return errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound && apiErr.Code == "user_machine_not_found"
+	return errors.As(err, &apiErr) && apiErr.Status == http.StatusGone && apiErr.Code == "user_machine_removed"
 }
 
 func (c *Client) DisconnectUserMachine(ctx context.Context, machineID string) error {

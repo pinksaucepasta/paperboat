@@ -87,6 +87,9 @@ func newRemovedScenario(t *testing.T, f *loginDeviceFixture) removedScenario {
 	workspaceTerminal = func() bool { return true }
 	chooseLoginAction = func(o selector.Options) (selector.Item, error) {
 		*titles = append(*titles, o.Title)
+		if answer == "" { // Enter: the selector's default is the first item
+			return o.Items[0], nil
+		}
 		for _, item := range o.Items {
 			if item.ID == answer {
 				return item, nil
@@ -161,6 +164,8 @@ func TestLoginDoesNotReaddAComputerThatIsStillOnTheAccount(t *testing.T) {
 		"personal":       {machines: []any{map[string]any{"id": "machine_login", "alias": "hp"}}},
 		"team-owned":     {machines: []any{map[string]any{"id": "machine_login", "alias": "hp", "owner_team_id": "team_x"}}},
 		"lookup failure": {lookupFail: 500},
+		// A 404 is also what a live machine the account cannot see (left the team, no grant) answers.
+		"invisible but alive": {invisible: true},
 	} {
 		t.Run(name, func(t *testing.T) { assertNotReadded(t, f) })
 	}
@@ -250,5 +255,22 @@ func TestLoginReaddsToTheNamedWorkspaceOrFallsBackToPersonal(t *testing.T) {
 				t.Fatalf("paired=%q asked=%v line=%v\n%s", *s.paired, s.f.enrollWorkspaces, line, out)
 			}
 		})
+	}
+}
+
+// The old replacement note is cleared before anything is wiped: when it cannot be cleared the working setup is left
+// untouched instead of stranded half-reset.
+func TestLoginReaddStopsBeforeTheWipeWhenTheStaleNoteCannotBeCleared(t *testing.T) {
+	s := newRemovedScenario(t, &loginDeviceFixture{})
+	note, err := bootstrap.ReplacementPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(filepath.Join(note, "blocker"), 0o700); err != nil { // removing a non-empty directory fails
+		t.Fatal(err)
+	}
+	_, err = runBrowserLogin(t, t.Context(), s.configPath, "login", "--no-browser", "--reauth")
+	if err == nil || !strings.Contains(err.Error(), "replacement note") || len(*s.steps) != 0 {
+		t.Fatalf("err=%v steps=%v", err, *s.steps)
 	}
 }
