@@ -45,6 +45,8 @@ type Team struct {
 	MachineRequests    []TeamMachineAdmission `json:"machine_requests"`
 	// AllowPrivateAccess: members may reach the ports of machines shared into the team.
 	AllowPrivateAccess bool `json:"allow_private_access"`
+	// ENVNamesListable: commands on the team's machines may list the names (never values) of its ENV.
+	ENVNamesListable bool `json:"env_names_listable"`
 }
 
 // TeamMachineAdmission is a machine waiting for (or refused by) a team's owners and admins.
@@ -89,6 +91,8 @@ type TeamMutationRequest struct {
 	Confirmation       string `json:"confirmation"`
 	// ApproveNewMachines is the value for the machine_approval action.
 	ApproveNewMachines *bool `json:"approve_new_machines,omitempty"`
+	// ENVNamesListable is the value for the env_names action.
+	ENVNamesListable *bool `json:"env_names_listable,omitempty"`
 }
 type TeamInviteRequest struct {
 	OperationID        string `json:"operation_id"`

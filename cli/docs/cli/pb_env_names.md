@@ -48,4 +48,5 @@ pb env names [flags]
 ### SEE ALSO
 
 * [pb env](pb_env.md)	 - Manage automatic global ENV and device overrides
+* [pb env names access](pb_env_names_access.md)	 - Show or set whether commands on machines can list ENV names in this workspace
 

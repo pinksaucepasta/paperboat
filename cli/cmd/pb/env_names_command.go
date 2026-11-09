@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/environmentmanager"
 	"github.com/spf13/cobra"
 )
@@ -31,7 +32,71 @@ func addEnvironmentNamesCommand(root *cobra.Command) {
 		RunE:    runEnvironmentNames,
 	}
 	names.Flags().Bool("json", false, "print the names and the layer each comes from as JSON")
+	names.AddCommand(envNamesAccessCommand())
 	root.AddCommand(names)
+}
+
+func envNamesAccessCommand() *cobra.Command {
+	access := &cobra.Command{
+		Use:   "access [on|off]",
+		Short: "Show or set whether commands on machines can list ENV names in this workspace",
+		Long: "Show, or with on|off set, \"Commands on machines can list ENV names\" for the active workspace (--workspace, " +
+			"default personal). It is on by default. Off, `pb env names` on the workspace's machines is refused; " +
+			"`pb env run` still gives commands their values, so this is a policy for the listing, not a lock. " +
+			"For a team only an owner or admin may change it.",
+		Example: "  pb env names access\n  pb env names access off\n  pb env names access on --workspace my-team",
+		Args:    commandArgs(cobra.MaximumNArgs(1)),
+		RunE: func(command *cobra.Command, args []string) error {
+			workspace, err := effectiveWorkspace(command)
+			if err != nil {
+				return err
+			}
+			return runEnvironmentNamesAccess(command, workspace, args)
+		},
+	}
+	access.Flags().Bool("json", false, "print the setting as JSON")
+	return access
+}
+
+func runEnvironmentNamesAccess(command *cobra.Command, workspace string, args []string) error {
+	if len(args) == 1 && args[0] != "on" && args[0] != "off" {
+		return localArgumentError("use: pb env names access [on|off]")
+	}
+	client, err := environmentVariableBackendForCommand(command)
+	if err != nil {
+		return err
+	}
+	ctx := command.Context()
+	team := workspace != "personal"
+	var current api.Team
+	listable := false
+	if team {
+		if current, err = client.GetTeam(ctx, workspace); err == nil {
+			listable = current.ENVNamesListable
+		}
+	} else {
+		listable, err = client.ENVNamesListable(ctx)
+	}
+	if err != nil {
+		return err
+	}
+	if len(args) == 1 {
+		on := args[0] == "on"
+		if team {
+			_, err = client.MutateTeam(ctx, workspace, api.TeamMutationRequest{OperationID: newIdempotencyKey(), ExpectedGeneration: current.Generation, Action: "env_names", ENVNamesListable: &on})
+		} else {
+			err = client.SetENVNamesListable(ctx, on)
+		}
+		if err != nil {
+			return err
+		}
+		listable = on
+	}
+	if jsonOutputRequested(command) {
+		return writeCLIJSON(command.OutOrStdout(), map[string]any{"workspace_id": workspace, "names_listable": listable})
+	}
+	_, err = fmt.Fprintf(command.OutOrStdout(), "Commands on machines can list ENV names in %s: %s.\n", workspace, map[bool]string{true: "on", false: "off"}[listable])
+	return err
 }
 
 func runEnvironmentNames(command *cobra.Command, _ []string) error {

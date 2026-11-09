@@ -2,12 +2,17 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/environmentmanager"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtime"
 	"github.com/spf13/cobra"
@@ -135,5 +140,96 @@ func TestEnvNamesDeclaresJSONOutput(t *testing.T) {
 	}
 	if err := prepareJSONCommand(command); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func namesAccessServer(t *testing.T, team bool, forbidden bool) (*httptest.Server, *[]string) {
+	t.Helper()
+	listable := true
+	var calls []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case !team && r.URL.Path == "/v1/me/preferences" && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"env_names_listable": listable}})
+		case !team && r.URL.Path == "/v1/me/preferences" && r.Method == http.MethodPatch:
+			var in map[string]bool
+			_ = json.NewDecoder(r.Body).Decode(&in)
+			if len(in) != 1 {
+				t.Errorf("patch must change only the names setting: %v", in)
+			}
+			listable = in["env_names_listable"]
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"env_names_listable": listable}})
+		case team && r.URL.Path == "/v1/teams/team-one" && r.Method == http.MethodGet:
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"team_id": "team-one", "generation": 7, "env_names_listable": listable}})
+		case team && r.URL.Path == "/v1/teams/team-one/actions" && r.Method == http.MethodPost:
+			if forbidden {
+				w.WriteHeader(http.StatusForbidden)
+				json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "forbidden", "message": "Only an owner or admin can change this."}})
+				return
+			}
+			var in api.TeamMutationRequest
+			_ = json.NewDecoder(r.Body).Decode(&in)
+			if in.Action != "env_names" || in.ExpectedGeneration != 7 || in.ENVNamesListable == nil {
+				t.Errorf("wrong team action: %+v", in)
+			}
+			listable = *in.ENVNamesListable
+			json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"team_id": "team-one", "generation": 8, "env_names_listable": listable}})
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server, &calls
+}
+
+func useNamesAccessServer(t *testing.T, server *httptest.Server) {
+	t.Helper()
+	previous := environmentVariableBackendForCommand
+	t.Cleanup(func() { environmentVariableBackendForCommand = previous })
+	environmentVariableBackendForCommand = func(*cobra.Command) (*api.Client, error) {
+		return api.New(server.URL, config.Credential{AccessToken: "token"}, server.Client()), nil
+	}
+}
+
+func TestEnvNamesAccessShowsAndSetsTheSettingForPersonalAndTeam(t *testing.T) {
+	for _, workspace := range []string{"personal", "team-one"} {
+		server, calls := namesAccessServer(t, workspace != "personal", false)
+		useNamesAccessServer(t, server)
+		run := func(args ...string) string {
+			command, out, _ := namesTestCommand()
+			command.SetContext(t.Context())
+			if err := runEnvironmentNamesAccess(command, workspace, args); err != nil {
+				t.Fatal(err)
+			}
+			return out.String()
+		}
+		if got := run(); got != "Commands on machines can list ENV names in "+workspace+": on.\n" {
+			t.Fatalf("%s default: %q", workspace, got)
+		}
+		if got := run("off"); !strings.Contains(got, ": off.") {
+			t.Fatalf("%s off: %q", workspace, got)
+		}
+		if got := run(); !strings.Contains(got, ": off.") {
+			t.Fatalf("%s read back: %q (%v)", workspace, got, *calls)
+		}
+		if got := run("on"); !strings.Contains(got, ": on.") {
+			t.Fatalf("%s on: %q", workspace, got)
+		}
+	}
+}
+
+func TestEnvNamesAccessRejectsBadValuesAndSurfacesATeamRefusal(t *testing.T) {
+	command, _, _ := namesTestCommand()
+	command.SetContext(t.Context())
+	if err := runEnvironmentNamesAccess(command, "personal", []string{"maybe"}); err == nil || !strings.Contains(err.Error(), "on|off") {
+		t.Fatalf("bad value: %v", err)
+	}
+	server, _ := namesAccessServer(t, true, true)
+	useNamesAccessServer(t, server)
+	if err := runEnvironmentNamesAccess(command, "team-one", []string{"off"}); err == nil {
+		t.Fatal("a refusal from the server must reach the user, not read as success")
 	}
 }

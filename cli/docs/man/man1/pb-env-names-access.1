@@ -1,0 +1,54 @@
+.nh
+.TH "PB-ENV-NAMES-ACCESS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-env-names-access - Show or set whether commands on machines can list ENV names in this workspace
+
+
+.SH SYNOPSIS
+\fBpb env names access [on|off] [flags]\fP
+
+
+.SH DESCRIPTION
+Show, or with on|off set, "Commands on machines can list ENV names" for the active workspace (--workspace, default personal). It is on by default. Off, \fBpb env names\fR on the workspace's machines is refused; \fBpb env run\fR still gives commands their values, so this is a policy for the listing, not a lock. For a team only an owner or admin may change it.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for access
+
+.PP
+\fB--json\fP[=false]
+	print the setting as JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH EXAMPLE
+.EX
+  pb env names access
+  pb env names access off
+  pb env names access on --workspace my-team
+.EE
+
+
+.SH SEE ALSO
+\fBpb-env-names(1)\fP

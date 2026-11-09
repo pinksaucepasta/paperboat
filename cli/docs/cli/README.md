@@ -99,6 +99,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb env list](pb_env_list.md) | List configured environment-variable metadata |
 | [pb env load](pb_env_load.md) | Load your workspace ENV into the current shell |
 | [pb env names](pb_env_names.md) | List the names of the ENV variables commands on this machine receive (never values) |
+| [pb env names access](pb_env_names_access.md) | Show or set whether commands on machines can list ENV names in this workspace |
 | [pb env rotate](pb_env_rotate.md) | Rotate personal ENV scope keys while preserving values |
 | [pb env rotate cancel](pb_env_rotate_cancel.md) | Cancel an uncommitted personal ENV key rotation |
 | [pb env run](pb_env_run.md) | Run a command with your workspace ENV in its environment |
