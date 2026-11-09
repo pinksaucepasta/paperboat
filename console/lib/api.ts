@@ -468,6 +468,8 @@ export function useMachine(id: string | null | undefined) {
   const machines = useMachines()
   const listed = id ? machines.data?.find((machine) => machine.id === id) : undefined
   const single = useApiQuery({ ...machineQuery(id ?? ""), enabled: Boolean(id) && machines.isSuccess && !listed })
+  // The machine page's server read seeds this machine alone; show it until the list has it.
+  if (id && !listed && single.data) return single
   if (!id || listed || machines.isPending || machines.isError) return { ...machines, data: listed }
   return single
 }
