@@ -107,6 +107,8 @@ const rows = []
 for (const route of routes) {
   const shellPage = await shellContext.newPage()
   await shellPage.goto(origin + route, { waitUntil: "load" })
+  // The shell is hidden for its first 300 ms (globals.css .shell-delay); judge it once visible.
+  await shellPage.waitForTimeout(500)
   const shell = await shellPage.evaluate(leaves)
   await shot(shellPage, route, "shell")
   await shellPage.close()
