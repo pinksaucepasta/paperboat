@@ -221,6 +221,7 @@ func TestWindowsControllerRecoveryMatchesStartupResume(t *testing.T) {
 		{name: "rollback_ready_previous", stage: windowsActivationRollbackReady, activeVersion: j.PreviousVersion, want: true},
 		{name: "rollback_ready_candidate", stage: windowsActivationRollbackReady, activeVersion: j.Version, want: false},
 		{name: "switching_candidate", stage: windowsActivationSwitching, activeVersion: j.Version, want: false},
+		{name: "services_live_candidate", stage: windowsActivationServicesLive, activeVersion: j.Version, want: false},
 		{name: "committed_previous", stage: windowsActivationCommitted, activeVersion: j.PreviousVersion, want: false},
 		{name: "rolled_back_previous", stage: windowsActivationRolledBack, activeVersion: j.PreviousVersion, want: false},
 	} {
