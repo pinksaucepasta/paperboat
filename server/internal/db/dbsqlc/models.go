@@ -1689,6 +1689,7 @@ type MachineSshHostKeyOwner struct {
 	Algorithm       string
 	PublicKey       string
 	FirstObservedAt time.Time
+	AccountID       string
 }
 
 type MachineSshHostKeySet struct {
@@ -1974,7 +1975,6 @@ type PeerNetworkIdentity struct {
 	DiscoPublicKey             []byte
 	RelayRevocationGeneration  int64
 	Endpoints                  []string
-	EndpointsCapable           bool
 	PublishedEndpoints         []string
 	EndpointsPublishedAt       sql.NullTime
 	EndpointsDueAt             sql.NullTime

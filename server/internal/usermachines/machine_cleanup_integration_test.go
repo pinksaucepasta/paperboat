@@ -187,8 +187,8 @@ VALUES ($1, 1, 1, $2, $3, $4, $5)`, machineID, "renewal_"+suffix, "jti_"+suffix,
 	}
 	if _, err := store.SQL().ExecContext(ctx, `
 INSERT INTO paperboat.machine_ssh_host_key_owners
-  (fingerprint, user_machine_id, algorithm, public_key, first_observed_at)
-VALUES ($1, $2, 'ssh-ed25519', $3, $4)`, sshHostFingerprint[:], machineID, hostSSHPublicKey, now); err != nil {
+  (fingerprint, user_machine_id, account_id, algorithm, public_key, first_observed_at)
+VALUES ($1, $2, $5, 'ssh-ed25519', $3, $4)`, sshHostFingerprint[:], machineID, hostSSHPublicKey, now, userID); err != nil {
 		t.Fatal(err)
 	}
 	sshSetID := newID("keyset")

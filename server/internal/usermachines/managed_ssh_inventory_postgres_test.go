@@ -39,8 +39,8 @@ func TestMachineInventoryCarriesManagedSSHTargetsOnPostgres(t *testing.T) {
  SELECT 'inv_ssh_'||g||'_'||$1,1,'pbt',2200+g,now(),now() FROM generate_series(1,4) g`, suffix)
 	keyA := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI" + strings.Repeat("A", 43)
 	keyB := "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABB" + strings.Repeat("B", 60)
-	exec(`INSERT INTO paperboat.machine_ssh_host_key_owners(fingerprint,user_machine_id,algorithm,public_key,first_observed_at) VALUES
- (decode(repeat('01',32),'hex'),'inv_ssh_1_'||$1,'ssh-ed25519',$2,now()),(decode(repeat('02',32),'hex'),'inv_ssh_1_'||$1,'ecdsa-sha2-nistp256',$3,now())`, suffix, keyA, keyB)
+	exec(`INSERT INTO paperboat.machine_ssh_host_key_owners(fingerprint,user_machine_id,account_id,algorithm,public_key,first_observed_at) VALUES
+ (decode(repeat('01',32),'hex'),'inv_ssh_1_'||$1,$4,'ssh-ed25519',$2,now()),(decode(repeat('02',32),'hex'),'inv_ssh_1_'||$1,$4,'ecdsa-sha2-nistp256',$3,now())`, suffix, keyA, keyB, owner)
 	setID := "keyset_" + uuid.NewString()
 	topic := func() int64 {
 		var generation int64

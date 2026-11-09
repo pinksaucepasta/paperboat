@@ -54,16 +54,17 @@ func (q *Queries) CountActiveManagedSSHClientKeysForUser(ctx context.Context, ar
 
 const createMachineSSHHostKeyOwner = `-- name: CreateMachineSSHHostKeyOwner :one
 INSERT INTO machine_ssh_host_key_owners
-  (fingerprint, user_machine_id, algorithm, public_key, first_observed_at)
+  (fingerprint, user_machine_id, account_id, algorithm, public_key, first_observed_at)
 VALUES
-  ($1, $2, $3,
-   $4, $5)
-RETURNING fingerprint, user_machine_id, algorithm, public_key, first_observed_at
+  ($1, $2, $3, $4,
+   $5, $6)
+RETURNING fingerprint, user_machine_id, algorithm, public_key, first_observed_at, account_id
 `
 
 type CreateMachineSSHHostKeyOwnerParams struct {
 	Fingerprint     []byte
 	UserMachineID   string
+	AccountID       string
 	Algorithm       string
 	PublicKey       string
 	FirstObservedAt time.Time
@@ -73,6 +74,7 @@ func (q *Queries) CreateMachineSSHHostKeyOwner(ctx context.Context, arg CreateMa
 	row := q.db.QueryRow(ctx, createMachineSSHHostKeyOwner,
 		arg.Fingerprint,
 		arg.UserMachineID,
+		arg.AccountID,
 		arg.Algorithm,
 		arg.PublicKey,
 		arg.FirstObservedAt,
@@ -84,6 +86,7 @@ func (q *Queries) CreateMachineSSHHostKeyOwner(ctx context.Context, arg CreateMa
 		&i.Algorithm,
 		&i.PublicKey,
 		&i.FirstObservedAt,
+		&i.AccountID,
 	)
 	return i, err
 }
@@ -273,9 +276,8 @@ func (q *Queries) CreateManagedSSHOperation(ctx context.Context, arg CreateManag
 const deleteRetiredMachineSSHHostKeyOwner = `-- name: DeleteRetiredMachineSSHHostKeyOwner :execrows
 DELETE FROM machine_ssh_host_key_owners o
 USING user_machines m
-WHERE o.fingerprint = $1 AND m.id = o.user_machine_id
-  AND (m.state IN ('revoked', 'deleted')
-    OR (m.user_id = $2 AND (m.state = 'disconnected' OR (m.state = 'offline' AND NOT m.online))))
+WHERE o.fingerprint = $1 AND m.id = o.user_machine_id AND o.account_id = $2
+  AND (m.state IN ('revoked', 'deleted', 'disconnected') OR (m.state = 'offline' AND NOT m.online))
 `
 
 type DeleteRetiredMachineSSHHostKeyOwnerParams struct {
@@ -294,9 +296,8 @@ func (q *Queries) DeleteRetiredMachineSSHHostKeyOwner(ctx context.Context, arg D
 const deleteRetiredMachineSSHHostKeys = `-- name: DeleteRetiredMachineSSHHostKeys :exec
 DELETE FROM machine_ssh_host_keys k
 USING user_machines m
-WHERE k.fingerprint = $1 AND m.id = k.user_machine_id
-  AND (m.state IN ('revoked', 'deleted')
-    OR (m.user_id = $2 AND (m.state = 'disconnected' OR (m.state = 'offline' AND NOT m.online))))
+WHERE k.fingerprint = $1 AND m.id = k.user_machine_id AND m.user_id = $2
+  AND (m.state IN ('revoked', 'deleted', 'disconnected') OR (m.state = 'offline' AND NOT m.online))
 `
 
 type DeleteRetiredMachineSSHHostKeysParams struct {
@@ -382,12 +383,17 @@ func (q *Queries) GetActiveManagedSSHClientKeyForUpdate(ctx context.Context, cli
 }
 
 const getMachineSSHHostKeyOwner = `-- name: GetMachineSSHHostKeyOwner :one
-SELECT fingerprint, user_machine_id, algorithm, public_key, first_observed_at FROM machine_ssh_host_key_owners
-WHERE fingerprint = $1
+SELECT fingerprint, user_machine_id, algorithm, public_key, first_observed_at, account_id FROM machine_ssh_host_key_owners
+WHERE account_id = $1 AND fingerprint = $2
 `
 
-func (q *Queries) GetMachineSSHHostKeyOwner(ctx context.Context, fingerprint []byte) (MachineSshHostKeyOwner, error) {
-	row := q.db.QueryRow(ctx, getMachineSSHHostKeyOwner, fingerprint)
+type GetMachineSSHHostKeyOwnerParams struct {
+	AccountID   string
+	Fingerprint []byte
+}
+
+func (q *Queries) GetMachineSSHHostKeyOwner(ctx context.Context, arg GetMachineSSHHostKeyOwnerParams) (MachineSshHostKeyOwner, error) {
+	row := q.db.QueryRow(ctx, getMachineSSHHostKeyOwner, arg.AccountID, arg.Fingerprint)
 	var i MachineSshHostKeyOwner
 	err := row.Scan(
 		&i.Fingerprint,
@@ -395,6 +401,7 @@ func (q *Queries) GetMachineSSHHostKeyOwner(ctx context.Context, fingerprint []b
 		&i.Algorithm,
 		&i.PublicKey,
 		&i.FirstObservedAt,
+		&i.AccountID,
 	)
 	return i, err
 }
