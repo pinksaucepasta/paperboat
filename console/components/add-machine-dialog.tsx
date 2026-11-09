@@ -1,6 +1,6 @@
 "use client"
 
-import { CheckCircleIcon, CircleNotchIcon, PlusIcon } from "@phosphor-icons/react"
+import { CaretDownIcon, CheckCircleIcon, CircleNotchIcon, PlusIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useEffect, useRef, useState } from "react"
@@ -25,7 +25,14 @@ import { isLimitReached, LimitReached } from "@/components/limit-reached"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { NewMachineAccess } from "@/components/team/new-machine-access"
-import { WorkspacePicker } from "@/components/workspace-picker"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { roleLabels } from "@/lib/teams"
 
 /** Install on a new computer in any workspace; in a team, also share one of your machines. */
 export function AddMachineDialog() {
@@ -83,7 +90,7 @@ function AddMachineChoices({
       {!plain && workspaces && workspaces.length > 1 && (
         <Field className="gap-1.5">
           <FieldLabel>Workspace</FieldLabel>
-          <WorkspacePicker workspaces={workspaces} value={target} onChange={setTarget} />
+          <WorkspaceSelect workspaces={workspaces} value={target} onChange={setTarget} />
         </Field>
       )}
       <AddMachine
@@ -107,6 +114,49 @@ function AddMachineChoices({
         </button>
       )}
     </div>
+  )
+}
+
+/** One line for the destination: the current workspace, with the others a click away. */
+function WorkspaceSelect({
+  workspaces,
+  value,
+  onChange,
+}: {
+  workspaces: Workspace[]
+  value: string
+  onChange: (id: string) => void
+}) {
+  const note = (workspace: Workspace) =>
+    workspace.kind !== "team"
+      ? undefined
+      : workspace.approve_new_machines && workspace.role === "member"
+        ? "Needs an owner or admin to accept"
+        : (roleLabels[workspace.role] ?? workspace.role)
+  const selected = workspaces.find((workspace) => workspace.id === value)
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label="Workspace"
+        className="flex h-7 w-full items-center gap-2 rounded-md border border-input bg-input/20 px-2 text-left text-xs/relaxed outline-none hover:bg-accent focus-visible:border-ring focus-visible:ring-2 dark:bg-input/30 focus-visible:ring-ring/30"
+      >
+        <span className="min-w-0 flex-1 truncate">{selected?.name}</span>
+        {selected && note(selected) && (
+          <span className="shrink-0 text-xs text-muted-foreground">{note(selected)}</span>
+        )}
+        <CaretDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-72">
+        <DropdownMenuRadioGroup value={value} onValueChange={(next) => onChange(String(next))}>
+          {workspaces.map((workspace) => (
+            <DropdownMenuRadioItem key={workspace.id} value={workspace.id}>
+              <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
+              {note(workspace) && <span className="shrink-0 text-xs text-muted-foreground">{note(workspace)}</span>}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
