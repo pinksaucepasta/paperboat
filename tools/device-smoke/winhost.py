@@ -52,7 +52,9 @@ try{$p.StandardInput.Close()}catch{}
 $t=-not $p.WaitForExit([int]$req.timeout_ms)
 if($t){& cmd.exe /c "taskkill /T /F /PID $($p.Id) >nul 2>&1";[void]$p.WaitForExit(10000)}
 [void]$ot.Wait(5000);[void]$et.Wait(5000)
-@{rc=$(if($t){-1}else{$p.ExitCode});timed_out=$t;out=[Convert]::ToBase64String($om.ToArray());err=[Convert]::ToBase64String($em.ToArray())}|ConvertTo-Json -Compress
+[Console]::Out.Write('{"rc":'+$(if($t){-1}else{$p.ExitCode})+',"timed_out":'+$(if($t){'true'}else{'false'})+',"out":"')
+[Console]::Out.Write([Convert]::ToBase64String($om.ToArray()));[Console]::Out.Write('","err":"')
+[Console]::Out.Write([Convert]::ToBase64String($em.ToArray()));[Console]::Out.Write('"}')
 """
 
 READ = ("if(-not(Test-Path -LiteralPath $req.path -PathType Leaf)){exit 3}\n"
@@ -298,7 +300,8 @@ class WindowsDevice:
 
     def start(self, argv, directory):
         """Start argv[0] hidden and detached, its standard handles in directory/start.*; return its pid."""
-        return int(self.ps('start ' + argv[0], START, exe=argv[0], args=subprocess.list2cmdline(list(argv[1:])),
+        # 180 s: the first CIM call of a session can take over a minute on a busy Windows machine.
+        return int(self.ps('start ' + argv[0], START, timeout=180, exe=argv[0], args=subprocess.list2cmdline(list(argv[1:])),
                            cmdline=subprocess.list2cmdline(list(argv)), dir=str(directory))[1])
 
     def suspend(self, pid):
