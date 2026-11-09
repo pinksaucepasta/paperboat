@@ -297,7 +297,7 @@ func TestHostClientAppliesVersionZeroAndRejectsMismatchedResponse(t *testing.T) 
 			}
 			observation, err := client.Apply(context.Background(), Resolution{Schema: PolicySchemaV1, UserMachineID: "um_1", Mode: "allow_sleep", Version: 0})
 			if strings.HasPrefix(name, "valid") && (err != nil || observation.Version != 0) {
-				t.Fatalf("observation=%+v err=%v", observation, err)
+				t.Fatalf("observation=%+v err=%v cause=%v", observation, err, errors.Unwrap(err))
 			}
 			if name == "mismatch" && !errors.Is(err, ErrInvalid) {
 				t.Fatalf("mismatch error=%v", err)
