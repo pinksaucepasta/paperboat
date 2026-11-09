@@ -33,6 +33,9 @@ func TestEdgePairOnPostgres(t *testing.T) {
 	if err = db.Migrate(ctx, store); err != nil {
 		t.Fatal(err)
 	}
+	// One machine per page, so the wake-up below must page through both of the owner's machines.
+	pairPublishBatch = 1
+	t.Cleanup(func() { pairPublishBatch = 1000 })
 	stamp := randomIdentity()
 	owner, other, admin, member := "pair_owner_"+stamp, "pair_other_"+stamp, "pair_admin_"+stamp, "pair_member_"+stamp
 	team := "pair-team-" + stamp[:8]

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -178,6 +179,10 @@ func (s *Service) SetEdgePair(ctx context.Context, actor string, scope Scope, pr
 	if err != nil {
 		return EdgePair{}, err
 	}
+	// The pair is stored; a failed wake-up only leaves machines to see it when their attachment next refreshes.
+	if err = s.publishPairChange(ctx, ws); err != nil {
+		slog.ErrorContext(ctx, "edge_pair_publish_failed", "scope_kind", ws.Kind, "scope_id", ws.ID, "error", err)
+	}
 	return s.readPair(ctx, actor, ws, nodes)
 }
 
@@ -252,39 +257,47 @@ ON CONFLICT(scope_kind,scope_id,capability) DO UPDATE SET mode=excluded.mode,ins
 	if err = edgeset.Store(ctx, tx, ws, mode, nodes, now); err != nil {
 		return nil, err
 	}
-	return nodes, publishPairChange(ctx, tx, ws)
+	return nodes, nil
 }
 
+// pairPublishBatch bounds how many machines one wake-up read and one topic write cover.
+var pairPublishBatch = 1000
+
 // publishPairChange wakes the workspace's machines on the topics their runtime watches for edge changes, so each
-// looks at its attachment again instead of waiting for it to expire.
-func publishPairChange(ctx context.Context, tx *db.Tx, ws edgeset.Scope) error {
-	rows, err := tx.Query(ctx, `SELECT id FROM paperboat.user_machines WHERE deleted_at IS NULL AND revoked_at IS NULL
- AND CASE WHEN $1='team' THEN owner_team_id=$2 ELSE user_id=$2 AND owner_team_id IS NULL END ORDER BY id`, ws.Kind, ws.ID)
-	if err != nil {
-		return err
-	}
-	var machines []string
-	for rows.Next() {
-		var id string
-		if err = rows.Scan(&id); err != nil {
-			break
+// looks at its attachment again instead of waiting for it to expire. It pages through the machines by id, after the
+// pair is committed, so a workspace with many machines never holds the write transaction open.
+func (s *Service) publishPairChange(ctx context.Context, ws edgeset.Scope) error {
+	pool := s.database.Pool()
+	after := ""
+	for {
+		rows, err := pool.Query(ctx, `SELECT id FROM paperboat.user_machines WHERE deleted_at IS NULL AND revoked_at IS NULL AND id>$3
+ AND CASE WHEN $1='team' THEN owner_team_id=$2 ELSE user_id=$2 AND owner_team_id IS NULL END ORDER BY id LIMIT $4`, ws.Kind, ws.ID, after, pairPublishBatch)
+		if err != nil {
+			return fmt.Errorf("list machines to wake: %w", err)
 		}
-		machines = append(machines, id)
-	}
-	rows.Close()
-	if err == nil {
-		err = rows.Err()
-	}
-	if err != nil {
-		return err
-	}
-	for start := 0; start < len(machines); start += 1000 {
-		batch := machines[start:min(start+1000, len(machines))]
+		machines := make([]string, 0, pairPublishBatch)
+		for rows.Next() {
+			var id string
+			if err = rows.Scan(&id); err != nil {
+				break
+			}
+			machines = append(machines, id)
+		}
+		rows.Close()
+		if err == nil {
+			err = rows.Err()
+		}
+		if err != nil {
+			return fmt.Errorf("list machines to wake: %w", err)
+		}
 		for _, topic := range []string{machineevents.TopicTunnels, machineevents.TopicPreviews} {
-			if err = machineevents.Publish(ctx, tx, batch, topic); err != nil {
-				return err
+			if err = machineevents.Publish(ctx, pool, machines, topic); err != nil {
+				return fmt.Errorf("wake machines on %s: %w", topic, err)
 			}
 		}
+		if len(machines) < pairPublishBatch {
+			return nil
+		}
+		after = machines[len(machines)-1]
 	}
-	return nil
 }
