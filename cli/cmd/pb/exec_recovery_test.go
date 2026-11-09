@@ -118,6 +118,11 @@ func runExecRecoveryHandshake(t *testing.T, transient bool) {
 	bridges := make(chan struct{}, 3)
 	var started atomic.Int32
 	defer func() {
+		if runtime.GOOS == "windows" {
+			// The daemon ends a stream its client dropped when that client's process exits (peer_hangup_windows.go);
+			// this client is the test process itself, so a stream replaced by a recovery outlives the test here.
+			return
+		}
 		for n := int32(0); n < started.Load(); n++ {
 			select {
 			case <-bridges:
