@@ -59,6 +59,7 @@ type SharedTerminalSession struct {
 	CreatedAt             time.Time             `json:"created_at"`
 	UpdatedAt             time.Time             `json:"updated_at"`
 	ExpiresAt             *time.Time            `json:"expires_at,omitempty"`
+	ClosedAt              *time.Time            `json:"closed_at,omitempty"`
 	ClosedReason          string                `json:"closed_reason,omitempty"`
 	Target                SharedTerminalTarget  `json:"target"`
 	OwnerAccount          string                `json:"owner_account"`
@@ -150,7 +151,13 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account string, 
 	if err := tx.QueryRow(ctx, "SELECT count(*) FROM ("+query+") inventory", args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := tx.Query(ctx, query+" ORDER BY lower(x.name),x.id LIMIT $10 OFFSET $11", append(args, opts.Limit, opts.Offset)...)
+	// Closed sessions list newest closed first (a session closed without a timestamp counts from its last update);
+	// the rest by name.
+	order := "lower(x.name),x.id"
+	if (opts.Closed != nil && *opts.Closed) || opts.State == "closed" {
+		order = "coalesce(x.closed_at,x.updated_at) DESC,x.id"
+	}
+	rows, err := tx.Query(ctx, query+" ORDER BY "+order+" LIMIT $10 OFFSET $11", append(args, opts.Limit, opts.Offset)...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -175,6 +182,10 @@ func (s *Service) terminalSessionInventory(ctx context.Context, account string, 
 		v.StartedIn = cleanTerminalMetadata(v.StartedIn, 1024)
 		v.RuntimeState = runtimeState
 		v.ClosedReason = closedReason.String
+		if closedAt.Valid {
+			value := closedAt.Time
+			v.ClosedAt = &value
+		}
 		v.IsDefault = isDefault
 		v.State = terminalDisplayState(v.DesiredState, runtimeState, false, 0)
 		if lastActive.Valid {

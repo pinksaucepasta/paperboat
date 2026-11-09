@@ -720,6 +720,11 @@
               "unreachable_timeout"
             ],
             "description": "Why the session ended; present only once it is closed. user_closed: closed on request. host_closed: the host reported it closed. exited: its process exited. host_gone: the host no longer has the session. unreachable_timeout: the host did not confirm it for 30 days."
+          },
+          "closed_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the session was closed; present only once it is closed."
           }
         }
       },
@@ -16502,7 +16507,7 @@
     "/v1/terminal-sessions": {
       "get": {
         "summary": "List owned and explicitly shared terminal sessions",
-        "description": "Returns a bounded catalog. Team membership or machine access alone does not expose sessions.",
+        "description": "Returns a bounded catalog. Team membership or machine access alone does not expose sessions. Sessions are ordered by name; when closed=true (or state=closed) they are ordered by closed_at, newest first.",
         "security": [
           {
             "bearerAccess": []
