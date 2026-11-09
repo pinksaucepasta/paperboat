@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"os"
 	"path/filepath"
@@ -48,7 +49,7 @@ func TestCarrierOnlyRollbackPreservesInstalledRuntime(t *testing.T) {
 	if err := os.WriteFile(paths.journal, marker, 0600); err != nil {
 		t.Fatal(err)
 	}
-	baseline := unixCarrierBaseline{CarrierOnly: true, Worker: &source, Metadata: metadata}
+	baseline := unixCarrierBaseline{CarrierOnly: true, Worker: &source, Metadata: metadata, Candidate: source}
 	body, err := json.Marshal(baseline)
 	if err != nil {
 		t.Fatal(err)
@@ -83,5 +84,35 @@ func TestRestoreBaselineCarrierPublishesItsDescriptorBeforeStartingIt(t *testing
 	failed := func(CarrierConfig) error { return os.ErrPermission }
 	if err := restoreBaselineCarrier(context.Background(), CarrierConfig{}, failed, start); err == nil || len(steps) != 0 {
 		t.Fatalf("a baseline that could not be made active was started: %v %v", steps, err)
+	}
+}
+
+// pbvm1 F14-03: a killed install's lifecycle journal records the hostd of its CANDIDATE generation, but a recovery
+// builds its services from the installed record (the previous generation). Restoring "not installed" through that
+// unit stopped and removed the serving hostd, and nothing started it again: the machine went offline with no hostd.
+// The recovery must address the journaled candidate's unit.
+func TestRecoveryAddressesTheJournaledCandidateHostdNotTheServingOne(t *testing.T) {
+	serving, candidate := generationRequest("a"), generationRequest("b")
+	captured, err := json.Marshal(unixCarrierBaseline{Worker: &serving.Source, Candidate: candidate.Source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovery, err := journaledCandidateRequest(serving, captured) // the request a recovery starts from
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostd, _, err := installersWithMaintenance(recovery, platformPaths(serving.UID), true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generation, err := sourceGeneration(candidate.Source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := hostdGenerationDefinition(serving.Platform, serving.UID, generation); hostd.DefinitionPath() != want {
+		t.Fatalf("recovery addresses %s, want the candidate's %s", hostd.DefinitionPath(), want)
+	}
+	if _, err := journaledCandidateRequest(serving, []byte(`{"candidate":{}}`)); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("a baseline without a valid candidate was accepted: %v", err)
 	}
 }

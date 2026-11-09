@@ -101,6 +101,42 @@ func newLifecycleManagerWithRestorePolicy(request Request, paths installPaths, h
 	if hostd == nil || updater == nil {
 		return nil, service.ErrLifecycleInvalid
 	}
+	manager, err := buildLifecycleManager(request, paths, host, hostd, updater, carrierOnly, authorize)
+	if err != nil {
+		return nil, err
+	}
+	// The journal's hostd baseline describes the interrupted replacement's candidate generation, whatever request
+	// this manager was built from (recovery starts from the installed record, which is the previous generation):
+	// recovering through the serving generation's unit stops and removes the hostd that serves.
+	captured, err := manager.CapturedInstallation(context.Background())
+	if err != nil {
+		return manager, nil // no replacement pending: Recover reports an unreadable journal itself
+	}
+	candidate, err := journaledCandidateRequest(request, captured)
+	if err != nil || candidate.Source.SHA256 == request.Source.SHA256 {
+		return manager, nil // an unreadable baseline is reported by Restore
+	}
+	candidateHostd, _, err := installersWithMaintenance(candidate, paths, true, false)
+	if err != nil {
+		return nil, err
+	}
+	return buildLifecycleManager(request, paths, host, candidateHostd, updater, carrierOnly, authorize)
+}
+
+// journaledCandidateRequest is request with the source of the replacement whose baseline is captured.
+func journaledCandidateRequest(request Request, captured []byte) (Request, error) {
+	var baseline unixCarrierBaseline
+	if err := decodeInstallJSON(bytes.NewReader(captured), &baseline, 256<<10); err != nil {
+		return Request{}, err
+	}
+	if baseline.Candidate.Validate() != nil {
+		return Request{}, ErrInvalidRequest
+	}
+	request.Source = baseline.Candidate
+	return request, nil
+}
+
+func buildLifecycleManager(request Request, paths installPaths, host, hostd, updater *service.Installer, carrierOnly bool, authorize func(context.Context, installsource.Source, string) error) (*service.LifecycleManager, error) {
 	probe, err := service.NewHTTPReadinessProbe("http://" + request.HelperListenAddress + "/healthz")
 	if err != nil {
 		return nil, err

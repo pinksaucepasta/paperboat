@@ -31,6 +31,9 @@ type unixCarrierBaseline struct {
 	Carrier     *CarrierConfig                  `json:"carrier,omitempty"`
 	Metadata    []byte                          `json:"metadata,omitempty"`
 	Worker      *installsource.Source           `json:"worker,omitempty"`
+	// Candidate is the source being installed. The journal outlives the request that made it: a recovery starts
+	// from the installed record, so the candidate's carrier, hostd and executable are named here, never derived.
+	Candidate installsource.Source `json:"candidate"`
 }
 
 func deriveUnixCarrierConfig(r Request, paths installPaths) (CarrierConfig, error) {
@@ -50,7 +53,7 @@ func (s unixCarrierInstallation) Capture(ctx context.Context) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	baseline := unixCarrierBaseline{CarrierOnly: s.carrierOnly}
+	baseline := unixCarrierBaseline{CarrierOnly: s.carrierOnly, Candidate: s.request.Source}
 	carrier, err := readCarrierConfigFile(ctx, s.paths.instance)
 	if err == nil {
 		if err = carrier.Source.Verify(carrier.Executable); err != nil {
@@ -120,6 +123,10 @@ func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) error
 	if err := decodeInstallJSON(bytes.NewReader(body), &baseline, 256<<10); err != nil {
 		return err
 	}
+	if baseline.Candidate.Validate() != nil {
+		return ErrInvalidRequest
+	}
+	s.request.Source = baseline.Candidate
 	// The candidate generation is removed; the baseline generation never stopped
 	// serving and keeps all accepted streams. Only its descriptor is put back.
 	canonical, err := deriveUnixCarrierConfig(s.request, s.paths)

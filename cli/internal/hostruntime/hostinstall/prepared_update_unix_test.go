@@ -136,7 +136,7 @@ func TestPreparedUpdateRecoveryRechecksPinnedSourcePolicy(t *testing.T) {
 	if err = os.WriteFile(paths.metadata, metadata, 0600); err != nil {
 		t.Fatal(err)
 	}
-	body, err := json.Marshal(unixCarrierBaseline{Worker: &request.Source, Metadata: []byte("previous protected metadata")})
+	body, err := json.Marshal(unixCarrierBaseline{Worker: &request.Source, Metadata: []byte("previous protected metadata"), Candidate: request.Source})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestPreparedUpdateRecoveryProofBindsProtectedInstallation(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				baseline := unixCarrierBaseline{Worker: &previous, Metadata: metadata}
+				baseline := unixCarrierBaseline{Worker: &previous, Metadata: metadata, Candidate: candidate}
 				if mode == "wrong baseline" {
 					other := previous
 					other.Version = "foreign"
