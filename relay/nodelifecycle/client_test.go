@@ -371,3 +371,33 @@ func TestControlFailurePreservesCauseStatusAndRecovery(t *testing.T) {
 		t.Fatal("original transport cause lost")
 	}
 }
+
+// A field the control plane adds to the lease later must not fence the relay; trailing data still does.
+func TestLeaseIgnoresUnknownFieldsAndRejectsTrailingData(t *testing.T) {
+	for _, tc := range []struct {
+		name, suffix string
+		ok           bool
+	}{{"unknown field", `,"future_field":{"x":1}}`, true}, {"trailing data", `}{}`, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var in struct {
+					NodeID     string `json:"node_id"`
+					Generation uint64 `json:"expected_generation"`
+					Epoch      string `json:"process_epoch"`
+				}
+				_ = json.NewDecoder(r.Body).Decode(&in)
+				raw, _ := json.Marshal(Lease{NodeID: in.NodeID, Generation: in.Generation + 1, ProcessEpoch: in.Epoch, CapacityLimit: 256, ExpiresAt: time.Now().Add(10 * time.Second).Unix(), Revocations: []Revocation{}})
+				_, _ = w.Write(append(raw[:len(raw)-1], tc.suffix...))
+			}))
+			defer api.Close()
+			client, err := New(Config{URL: api.URL, HTTP: api.Client(), Credential: strings.Repeat("test", 16), NodeID: "relay", ExpectedGeneration: 1, StatePath: filepath.Join(t.TempDir(), "state")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer client.Close()
+			if _, err := client.Start(context.Background()); (err == nil) != tc.ok {
+				t.Fatalf("start error = %v, want ok=%v", err, tc.ok)
+			}
+		})
+	}
+}

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/shared/wirejson"
 )
 
 var ErrControl = errors.New("relay control authority unavailable or expired")
@@ -49,6 +50,7 @@ type Lease struct {
 	// no stored set for this process or its digest differs. Such an answer carries no quota list.
 	SubjectsRequired bool `json:"subjects_required,omitempty"`
 }
+
 // Revocation fences one endpoint this relay holds: grants below MinGeneration, the first
 // generation still valid, are closed and refused. The control plane resends it every observation
 // until the endpoint re-keys; an applied one is a no-op.
@@ -159,12 +161,9 @@ func (c *Client) post(ctx context.Context, path string, in any) (out Lease, resu
 	if len(raw) >= 256<<10 {
 		return out, ErrFenced
 	}
-	d := json.NewDecoder(bytes.NewReader(raw))
-	d.DisallowUnknownFields()
-	if err := d.Decode(&out); err != nil {
-		return Lease{}, failure(err, 0, true)
-	}
-	if err := d.Decode(new(any)); err != io.EOF {
+	// A lease is control data over the authenticated channel, not a signed claim: a field the server
+	// adds later must not fence every relay (AGENTS.md, internal/wirejson).
+	if err := wirejson.Decode(raw, &out); err != nil {
 		return Lease{}, failure(err, 0, true)
 	}
 	if out.NodeID != c.cfg.NodeID || out.Generation == 0 || out.ProcessEpoch == "" || out.CapacityLimit == 0 || out.CapacityLimit > derpquic.MaxConnections || len(out.Revocations) > derpquic.MaxConnections {
