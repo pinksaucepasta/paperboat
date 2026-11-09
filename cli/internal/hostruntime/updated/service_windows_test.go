@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
@@ -283,5 +284,21 @@ func TestWindowsInstanceServiceRecoveryPolicy(t *testing.T) {
 		if !windowsRecoveryActionsMatch(windowsRecoveryActionsForService(name), standardWindowsRecoveryActions()) {
 			t.Errorf("unexpected recovery policy for %q", name)
 		}
+	}
+}
+
+// A supplied build has no release artifact; the updater must still start for it (first Windows enrollment).
+func TestWindowsPersistedTargetMatchesACustomBuildWithoutAnArtifact(t *testing.T) {
+	custom := hostinstall.WindowsRuntimeConfig{Source: installsource.Source{Distribution: installsource.Custom, Platform: "windows", Architecture: "amd64"}}
+	if !windowsPersistedTargetMatches(custom, "amd64") || windowsPersistedTargetMatches(custom, "arm64") {
+		t.Fatal("custom build target not read from its Source")
+	}
+	official := hostinstall.WindowsRuntimeConfig{Source: installsource.Source{Distribution: installsource.Official, Platform: "windows", Architecture: "amd64"}}
+	if windowsPersistedTargetMatches(official, "amd64") {
+		t.Fatal("an official build without its artifact target matched")
+	}
+	official.Artifact.Platform, official.Artifact.Architecture = "windows", "amd64"
+	if !windowsPersistedTargetMatches(official, "amd64") {
+		t.Fatal("an official build with its artifact target did not match")
 	}
 }

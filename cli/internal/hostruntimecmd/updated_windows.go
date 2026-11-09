@@ -4,6 +4,7 @@ package hostruntimecmd
 
 import (
 	"context"
+	"errors"
 	"io"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
@@ -25,6 +26,10 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 	serviceName := windowsInstanceServiceName("PaperboatUpdated", instance.name)
 	err = service.RunWindowsSystemServiceWithReady(serviceName, func(serviceCtx context.Context, ready func() error) error {
 		runErr := updated.RunWindowsWithReady(serviceCtx, workerConfig, ready)
+		// The service wrapper turns a failed run into exit code 1 without its cause; keep the cause readable.
+		if runErr != nil && !errors.Is(runErr, service.ErrWindowsServiceHandoff) && !errors.Is(runErr, context.Canceled) {
+			recordWindowsServiceLaunchFailure(serviceName, runErr)
+		}
 		return runErr
 	})
 	if err != nil {

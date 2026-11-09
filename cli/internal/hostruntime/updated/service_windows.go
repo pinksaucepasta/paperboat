@@ -179,10 +179,19 @@ func validateWindowsPrivilegedInstallConfig(config WindowsConfig) error {
 	// journal is rolling forward/back, or while MSI has installed a newer
 	// signed updater. reconcileWindowsInstallVersion binds that one mutable
 	// field to signed TUF metadata before committing it.
-	if persisted.Source != config.Source || config.Pending != !persisted.Committed || config.AutomaticChecks != config.Source.AutomaticUpdates || persisted.OwnerSID != config.OwnerSID || persisted.MachineID != config.MachineID || persisted.StateRoot != config.RuntimeStateRoot || persisted.TokenFile != config.TokenFile || persisted.Artifact.Platform != "windows" || persisted.Artifact.Architecture != config.Architecture || persisted.Artifact.RepositoryURL != config.RepositoryURL || "http://"+persisted.ListenAddress+"/healthz" != config.HealthURL {
+	if persisted.Source != config.Source || config.Pending != !persisted.Committed || config.AutomaticChecks != config.Source.AutomaticUpdates || persisted.OwnerSID != config.OwnerSID || persisted.MachineID != config.MachineID || persisted.StateRoot != config.RuntimeStateRoot || persisted.TokenFile != config.TokenFile || !windowsPersistedTargetMatches(persisted, config.Architecture) || persisted.Artifact.RepositoryURL != config.RepositoryURL || "http://"+persisted.ListenAddress+"/healthz" != config.HealthURL {
 		return ErrInvalidWindowsConfig
 	}
 	return nil
+}
+
+// windowsPersistedTargetMatches checks the installed build is for this Windows architecture. A supplied (custom)
+// build has no release artifact, so its protected Source names the target; an official one keeps the artifact's.
+func windowsPersistedTargetMatches(persisted hostinstall.WindowsRuntimeConfig, architecture string) bool {
+	if persisted.Source.Distribution == installsource.Custom {
+		return persisted.Source.Platform == "windows" && persisted.Source.Architecture == architecture
+	}
+	return persisted.Artifact.Platform == "windows" && persisted.Artifact.Architecture == architecture
 }
 
 func validateWindowsReadOnlyOwnerFile(path, ownerSID string) error {
