@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -348,8 +349,13 @@ func (s *EdgeService) Revocations(ctx context.Context) (RevocationDocument, erro
 
 func (s *EdgeService) RevokeSigningKey(ctx context.Context, actorID, idempotencyKey, keyID, reason string, revokedAt time.Time) error {
 	actorID, idempotencyKey, keyID, reason = strings.TrimSpace(actorID), strings.TrimSpace(idempotencyKey), strings.TrimSpace(keyID), strings.TrimSpace(reason)
-	if actorID == "" || idempotencyKey == "" || keyID == "" || reason == "" || revokedAt.IsZero() {
+	if actorID == "" || idempotencyKey == "" || keyID == "" || reason == "" || revokedAt.IsZero() || s.signer == nil {
 		return invalidUsage("edge.go:386")
+	}
+	// A kid the mint does not publish would reach every served trust document and, if malformed, make clients
+	// refuse it; the active key would make them drop the key the mint still signs with.
+	if err := s.signer.CheckRevocable(keyID); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidUsageReport, err)
 	}
 	return s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		if err := requireActiveGlobalRole(ctx, tx, actorID, "admin"); err != nil {
@@ -367,6 +373,10 @@ func (s *EdgeService) RevokeSigningKey(ctx context.Context, actorID, idempotency
 		}
 		if _, err := tx.Queries().RevokeControlSigningKey(ctx, dbsqlc.RevokeControlSigningKeyParams{KeyID: keyID, Reason: reason, RevokedAt: revokedAt.UTC(), ActorUserID: sql.NullString{String: actorID, Valid: true}}); err != nil {
 			return err
+		}
+		// The new set must still be a document clients accept (cap on withdrawn ids); otherwise roll back.
+		if _, err := s.trustKeysFrom(ctx, tx.Queries()); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalidUsageReport, err)
 		}
 		return s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: actorID, ActorType: audit.ActorAdmin, EventType: "mint.signing_key_revoked", ResourceType: "mint_signing_key", ResourceID: keyID, IdempotencyKey: idempotencyKey, Metadata: map[string]any{"reason": reason}})
 	})
@@ -793,31 +803,49 @@ func (s *EdgeService) handleRevocations(w http.ResponseWriter, r *http.Request) 
 	writeEdgeJSON(w, http.StatusOK, document)
 }
 
-// trustKeys is the mint trust document (keys plus withdrawn_key_ids) running relays and edges refresh from, so a
+// TrustKeys is the mint trust document (keys plus withdrawn_key_ids) running relays and edges refresh from, so a
 // signing-key rotation or withdrawal reaches them without a re-enrollment (Teleport lib/auth/rotate.go distributes
 // the phased CA set over the authenticated channel).
-func (s *EdgeService) trustKeys(ctx context.Context) (json.RawMessage, error) {
+func (s *EdgeService) TrustKeys(ctx context.Context) (json.RawMessage, error) {
+	if s.store == nil {
+		return s.trustKeysFrom(ctx, nil)
+	}
+	return s.trustKeysFrom(ctx, s.store.Queries())
+}
+
+func (s *EdgeService) trustKeysFrom(ctx context.Context, queries *dbsqlc.Queries) (json.RawMessage, error) {
 	if s.signer == nil {
 		return nil, errors.New("mint trust document is not configured")
 	}
 	var revoked []string
-	if s.store != nil {
+	if queries != nil {
 		// An operator's signing-key revocation (RevokeSigningKey) reaches relays through the same document
-		// the tunnel edges already get it in as key_ids.
+		// the tunnel edges already get it in as key_ids. JWKSJSON refuses a total no client would accept.
 		var err error
-		if revoked, err = s.store.Queries().ListRevokedControlSigningKeyIDs(ctx, jwks.MaxKeys+1); err != nil {
+		if revoked, err = queries.ListRevokedControlSigningKeyIDs(ctx, jwks.MaxKeys+1); err != nil {
 			return nil, err
-		}
-		if len(revoked) > jwks.MaxKeys {
-			// Clients refuse a longer withdrawn list and keep their last set: fail loudly instead of truncating.
-			return nil, errors.New("more revoked signing keys than the trust document carries")
 		}
 	}
 	return s.signer.JWKSJSON(revoked...)
 }
 
+// TrustDocuments is what a self-host enrollment claim carries: the same trust document and revocations the
+// relays and edges refresh from, so a claim never trusts a key an operator revoked.
+func (s *EdgeService) TrustDocuments(ctx context.Context) ([]byte, []byte, error) {
+	keys, err := s.TrustKeys(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	revocations, err := s.Revocations(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	raw, err := json.Marshal(revocations)
+	return keys, raw, err
+}
+
 func (s *EdgeService) handleJWKS(w http.ResponseWriter, r *http.Request) {
-	document, err := s.trustKeys(r.Context())
+	document, err := s.TrustKeys(r.Context())
 	if err != nil {
 		writeEdgeError(w, r, http.StatusServiceUnavailable, "provider_unavailable", true, 5, err)
 		return

@@ -1,7 +1,11 @@
 package derpquic
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/binary"
+	"errors"
+	"io"
 	"testing"
 	"time"
 
@@ -48,5 +52,31 @@ func TestGrantPartExpiredBeforeAdmissionIsRefused(t *testing.T) {
 	// replaces it (and fences the client's own refresh of the old one, dropping the connection).
 	if peer := s.peers[kb]; peer == nil || peer.grant.Generation != gb.Generation {
 		t.Fatal("a grant part that expired before admission was admitted")
+	}
+}
+
+type nullStream struct{}
+
+func (nullStream) Read([]byte) (int, error)         { return 0, io.EOF }
+func (nullStream) Write(b []byte) (int, error)      { return len(b), nil }
+func (nullStream) SetReadDeadline(time.Time) error  { return nil }
+func (nullStream) SetWriteDeadline(time.Time) error { return nil }
+
+// Admission judges the grant at the clock it is given, not at the wall clock.
+func TestAdmitAuthPartsUsesTheGivenClock(t *testing.T) {
+	f := newFixture(t)
+	s, err := NewServer(f.verifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert := f.tls.Certificates[0]
+	g := f.grant(key.NewNode().Public(), cert, "clocked")
+	p := &peerConn{stream: nullStream{}, tlsState: tls.ConnectionState{PeerCertificates: []*x509.Certificate{cert.Leaf}}, rate: newBudget(1 << 20)}
+	now := time.Now()
+	if err := s.admitAuthParts(p, []byte(f.token(g)), 1, now.Add(2*time.Minute)); !errors.Is(err, ErrExpired) {
+		t.Fatalf("a grant expired at the given clock was admitted: %v", err)
+	}
+	if err := s.admitAuthParts(p, []byte(f.token(g)), 1, now); err != nil {
+		t.Fatalf("a live grant was refused: %v", err)
 	}
 }

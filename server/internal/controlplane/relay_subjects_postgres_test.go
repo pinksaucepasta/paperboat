@@ -410,7 +410,7 @@ func TestRelaySubjectsObservationBodyCarriesFullListPostgres(t *testing.T) {
 	if len(lease.Revocations) != len(list) {
 		t.Fatalf("revocations = %d, want %d (no identity rows)", len(lease.Revocations), len(list))
 	}
-	want, err := n.service.trustKeys(t.Context())
+	want, err := n.service.TrustKeys(t.Context())
 	if err != nil || string(lease.JWKS) != string(want) {
 		t.Fatalf("lease trust document = %s, want %s (%v)", lease.JWKS, want, err)
 	}
@@ -517,6 +517,14 @@ func TestRevokedSigningKeyReachesRelayTrustPostgres(t *testing.T) {
 			t.Fatalf("%s: a client keeps %v (%v), want only k2", name, keys, err)
 		}
 	}
+	// A self-host enrollment claim carries the same document.
+	claimKeys, _, err := n.service.TrustDocuments(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := trustWithdrawn(t, claimKeys); !slices.Contains(w, "k1") {
+		t.Fatalf("claim trust document withdrawn_key_ids = %v, want k1: %s", w, claimKeys)
+	}
 }
 
 // A starting relay is answered with the current trust document, so it never trusts a stale startup file.
@@ -536,7 +544,7 @@ func TestRelayStartAnswersTrustDocumentPostgres(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &lease); err != nil {
 		t.Fatal(err)
 	}
-	want, err := n.service.trustKeys(t.Context())
+	want, err := n.service.TrustKeys(t.Context())
 	if err != nil || string(lease.JWKS) != string(want) {
 		t.Fatalf("start trust document = %s, want %s (%v)", lease.JWKS, want, err)
 	}

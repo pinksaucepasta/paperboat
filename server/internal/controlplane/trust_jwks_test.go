@@ -4,8 +4,10 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,5 +78,17 @@ func TestEdgeServesMintTrustDocumentThroughRotation(t *testing.T) {
 	unconfigured.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("unconfigured status = %d", response.Code)
+	}
+}
+
+// An operator revocation names a key the mint publishes and does not sign with: an unknown, overlong or
+// active kid is refused before it can reach a served trust document (and make every client refuse it).
+func TestRevokeSigningKeyRefusesUnknownOverlongAndActiveKeys(t *testing.T) {
+	service := NewEdgeService(nil, "managed-control-credential-012345678901")
+	service.SetCredentialIssuer(testMintProvider(t, "new", "old", "new"), "https://issuer.example.test", "")
+	for _, kid := range []string{"unknown", strings.Repeat("k", 200), "new"} {
+		if err := service.RevokeSigningKey(t.Context(), "opr_1", "op-"+kid[:3], kid, "compromise", time.Now()); !errors.Is(err, ErrInvalidUsageReport) {
+			t.Errorf("RevokeSigningKey(%.12q) = %v, want ErrInvalidUsageReport", kid, err)
+		}
 	}
 }

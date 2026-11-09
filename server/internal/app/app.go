@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -495,19 +494,9 @@ func New(opts Options) (*App, error) {
 		selfhostService.AllowPrivateIngress()
 	}
 	selfhostService.ControlURL = publicBaseURL
-	selfhostService.TrustDocuments = func(ctx context.Context) ([]byte, []byte, error) {
-		keys, err := mintKeys.JWKSJSON()
-		if err != nil {
-			return nil, nil, err
-		}
-		service := controlplane.NewEdgeService(store, opts.Config.Secrets.EdgeControlCredential)
-		revocations, err := service.Revocations(ctx)
-		if err != nil {
-			return nil, nil, err
-		}
-		raw, err := json.Marshal(revocations)
-		return keys, raw, err
-	}
+	trustService := controlplane.NewEdgeService(store, opts.Config.Secrets.EdgeControlCredential)
+	trustService.SetCredentialIssuer(mintKeys, config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL), opts.Config.Secrets.EncryptionKey)
+	selfhostService.TrustDocuments = trustService.TrustDocuments
 	infrastructureService := operatorinfra.NewService(store, opts.Config.Secrets.EncryptionKey)
 	nodeCredentials := nodeauth.Composite{infrastructureService, selfhostService}
 	var edgeControlHandler http.Handler
