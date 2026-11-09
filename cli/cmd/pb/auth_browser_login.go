@@ -47,21 +47,33 @@ func authBrowserLogin(c *command.Context) error {
 		return apiTokenLogin(c, path)
 	}
 	if c.Bool("fresh") {
-		if err := startFresh(c); err != nil {
+		if err := startFresh(c, true); err != nil {
 			return err
 		}
 	}
-	err := browserLogin(c)
+	err := browserLogin(c, nil)
 	if errors.Is(err, errStartFresh) {
-		if err = startFresh(c); err != nil {
+		if err = startFresh(c, true); err != nil {
 			return err
 		}
-		return browserLogin(c)
+		return browserLogin(c, nil)
+	}
+	var removed *machineRemovedError
+	if errors.As(err, &removed) {
+		if _, err = fmt.Fprintf(c.ErrWriter, "This computer was removed from %s; adding it again.\n", removed.account); err != nil {
+			return err
+		}
+		if err = startFresh(c, false); err != nil {
+			return err
+		}
+		return browserLogin(c, &removed.resume)
 	}
 	return err
 }
 
-func browserLogin(c *command.Context) error {
+// browserLogin signs in. resume, set after a removed computer's setup was wiped, is the approved sign-in and
+// enrollment to finish instead of asking for a new approval.
+func browserLogin(c *command.Context, resume *config.BrowserLoginState) error {
 	cfg, err := config.Load(c.String("config"))
 	if err != nil {
 		return err
@@ -101,6 +113,12 @@ func browserLogin(c *command.Context) error {
 		return invocationError(errors.New("choose either --reauth or --change-account"))
 	}
 	return store.WithBrowserLogin(issuer, func(state *config.BrowserLoginState, save func() error) error {
+		if resume != nil {
+			*state = *resume
+			if err := save(); err != nil {
+				return err
+			}
+		}
 		if state.Cancelled {
 			if err := cancelBrowserLogin(c.Context, issuer, state, save); err != nil {
 				return err
@@ -263,6 +281,9 @@ func browserLogin(c *command.Context) error {
 			return fmt.Errorf("sign-in saved; retry `pb login` to finish configuration: %w", err)
 		}
 		if err = refreshSignedInDaemon(c.Context, cfg); err != nil {
+			if readd := readdRemovedComputer(c.Context, cfg, store, issuer, state, err); readd != nil {
+				return readd
+			}
 			return browserLoginFailure{message: daemonRefreshFailureMessage(err), cause: err}
 		}
 		account := state.Profile.Account

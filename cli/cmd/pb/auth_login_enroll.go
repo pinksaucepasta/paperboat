@@ -144,7 +144,9 @@ func offerLoginChoices(c *command.Context, store config.ProfileStore, issuer str
 	who := firstNonEmpty(old.Account.Email, old.Account.DisplayName, old.Account.ID)
 	if loginDaemonAwaitingEnrollment(c.Context) {
 		// The sign-in is valid but this computer's service lost its enrollment; signing in again cannot restore it.
-		return false, browserLoginFailure{message: "Signed in as " + who + ", but this computer's Paperboat service is not enrolled any more. Run pb login --fresh to remove this computer's setup and add it again."}
+		// Approving again proves the account; login then re-adds the computer if its machine record is gone.
+		state.ExpectedAccountID = old.Account.ID
+		return true, nil
 	}
 	summary := "Already signed in as " + who
 	if where := machineWorkspaceSummary(c.Context, store, issuer, machineID); where != "" {
@@ -222,13 +224,15 @@ func machineWorkspaceSummary(ctx context.Context, store config.ProfileStore, iss
 
 // startFresh removes this computer's local setup and reinstalls the running executable, so login can add
 // the computer again from nothing; the new pairing then replaces the old machine record.
-func startFresh(c *command.Context) error {
+func startFresh(c *command.Context, replacesRecord bool) error {
 	cobraCommand, ok := c.Context.Value(confirmationCommandKey{}).(*cobra.Command)
 	if !ok {
 		return errors.New("start fresh needs a CLI command context")
 	}
-	if _, err := rememberReplacedMachineFunc(); err != nil {
-		return machineReplacementError{step: replaceStepRemember, cause: err}
+	if replacesRecord {
+		if _, err := rememberReplacedMachineFunc(); err != nil {
+			return machineReplacementError{step: replaceStepRemember, cause: err}
+		}
 	}
 	if err := freshEnrollmentCleanup(cobraCommand); err != nil {
 		return err
@@ -242,6 +246,65 @@ func startFresh(c *command.Context) error {
 	if _, err = installSuppliedExecutable(ctx, executable, source, "", selectedInstallServer(cobraCommand)); err != nil {
 		return fmt.Errorf("reinstall after cleanup: %w", err)
 	}
+	if !replacesRecord {
+		return nil
+	}
 	_, err = fmt.Fprintln(c.ErrWriter, "Removed this computer's setup. Adding it again; the new machine replaces the old record once it works.")
 	return err
+}
+
+// machineRemovedError says the account this computer signed in to no longer has its machine record. It carries the
+// sign-in and a new enrollment, so login can add the computer again once the old local setup is wiped.
+type machineRemovedError struct {
+	account string
+	resume  config.BrowserLoginState
+}
+
+func (e *machineRemovedError) Error() string { return "this computer was removed from " + e.account }
+
+// readdRemovedComputer decides, after a sign-in that left the daemon refused, whether this computer's machine record
+// was removed from that same account (the sign-in was approved by the expected account, and its machine list no
+// longer holds the local machine). It then asks for a new enrollment in the account's personal workspace. nil means
+// not that case; a server refusal (plan limit, policy) is returned to the user.
+func readdRemovedComputer(ctx context.Context, cfg *config.Config, store config.ProfileStore, issuer string, state *config.BrowserLoginState, refreshErr error) error {
+	var remote *localapi.RemoteError
+	if !errors.As(refreshErr, &remote) || remote.Code != localapi.AuthenticationRequiredCode || state.ExpectedAccountID == "" {
+		return nil
+	}
+	machineID, err := loginLocalMachineID(cfg)
+	if err != nil || machineID == "" {
+		return nil
+	}
+	profile, err := store.Load(issuer)
+	if err != nil || profile.Account.ID != state.ExpectedAccountID {
+		return nil
+	}
+	credential, err := store.CredentialFor(issuer)
+	if err != nil {
+		return nil
+	}
+	client := api.New(issuer, credential, loginHTTPClient())
+	machines, err := client.ListUserMachines(ctx)
+	if err != nil {
+		return nil
+	}
+	for _, machine := range machines {
+		if machine.ID == machineID {
+			return nil
+		}
+	}
+	account := firstNonEmpty(profile.Account.Email, profile.Account.DisplayName, profile.Account.ID)
+	shell := "posix"
+	if runtime.GOOS == "windows" {
+		shell = "powershell"
+	}
+	enrollment, err := client.StartMachineEnrollment(ctx, newIdempotencyKey(), shell)
+	if err != nil {
+		return browserLoginFailure{message: "Signed in as " + account + ", but this computer was removed from the account and could not be added again: " + err.Error(), cause: err}
+	}
+	resume := *state
+	resume.Credential = &credential
+	resume.Profile = &config.Profile{Issuer: issuer, Account: profile.Account, CLIClientSessionID: profile.CLIClientSessionID, AccessExpiresAt: credential.ExpiresAt}
+	resume.Enrollment = &config.LoginEnrollment{BootstrapToken: enrollment.BootstrapToken, WorkspaceID: "personal", ExpiresAt: enrollment.ExpiresAt}
+	return &machineRemovedError{account: account, resume: resume}
 }

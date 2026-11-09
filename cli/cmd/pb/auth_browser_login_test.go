@@ -656,6 +656,10 @@ type loginDeviceFixture struct {
 	authorize  map[string]any
 	enrollment map[string]any
 	approvedBy string // set: /v1/me answers this other account (an approval by the wrong account)
+	machines   []any  // the account's machines (default none)
+	// enrollRefusal: set, POST /v1/machine-enrollments answers 403 with this message; enrollCalls counts them.
+	enrollRefusal string
+	enrollCalls   int
 }
 
 func loginDeviceServer(t *testing.T, f *loginDeviceFixture) *httptest.Server {
@@ -683,9 +687,25 @@ func loginDeviceServer(t *testing.T, f *loginDeviceFixture) *httptest.Server {
 		case "/v1/auth/device/cancel": // a refused approval cancels its device grant
 			w.WriteHeader(204)
 		case "/v1/e2ee/bootstrap":
-			acceptBrowserPeerEnrollment(t, w, r, "usr_browser", "cls_browser")
+			user := "usr_browser"
+			if f.approvedBy != "" {
+				user = "usr_other"
+			}
+			acceptBrowserPeerEnrollment(t, w, r, user, "cls_browser")
 		case "/v1/machines":
-			writeAPIData(t, w, map[string]any{"items": []any{}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 0, "next_offset": nil}})
+			items := f.machines
+			if items == nil {
+				items = []any{}
+			}
+			writeAPIData(t, w, map[string]any{"items": items, "pagination": map[string]any{"limit": 200, "offset": 0, "total": len(items), "next_offset": nil}})
+		case "/v1/machine-enrollments":
+			f.enrollCalls++
+			if f.enrollRefusal != "" {
+				w.WriteHeader(403)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "machine_limit_reached", "message": f.enrollRefusal}})
+				return
+			}
+			writeAPIData(t, w, map[string]any{"id": "enr_1", "bootstrap_token": "readd-token", "server_url": srv.URL, "expires_at": time.Now().Add(10 * time.Minute)})
 		case "/v1/teams":
 			writeAPIData(t, w, []any{})
 		default:

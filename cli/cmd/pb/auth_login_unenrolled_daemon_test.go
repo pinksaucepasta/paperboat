@@ -10,8 +10,9 @@ import (
 )
 
 // pbmac 2026-11-05: the CLI session was valid but the daemon said awaiting_enrollment, and pb login answered
-// "Already signed in" (and --reauth could not fix it). It must say the service is not enrolled and point at --fresh.
-func TestLoginOnASignedInComputerWhoseDaemonIsNotEnrolledPointsAtFresh(t *testing.T) {
+// "Already signed in" (and --reauth could not fix it). It must ask for an approval again (that is how a removed
+// computer is added back), never "Already signed in".
+func TestLoginOnASignedInComputerWhoseDaemonIsNotEnrolledAsksForApprovalAgain(t *testing.T) {
 	f := &loginDeviceFixture{}
 	srv := loginDeviceServer(t, f)
 	oldMachine, oldPair, oldDaemon := loginLocalMachineID, pairLoginDevice, loginDaemonAwaitingEnrollment
@@ -26,12 +27,9 @@ func TestLoginOnASignedInComputerWhoseDaemonIsNotEnrolledPointsAtFresh(t *testin
 		t.Fatalf("login: %v\n%s", err, out)
 	}
 	loginDaemonAwaitingEnrollment = func(context.Context) bool { return true }
+	f.authorize = nil
 	again, err := runBrowserLogin(t, context.Background(), path, "login", "--no-browser")
-	if err == nil || strings.Contains(again, "Already signed in") {
-		t.Fatalf("login with an unenrolled daemon: err=%v output=%s", err, again)
-	}
-	// What the user sees (the CLI renders errors), not only the raw error.
-	if shown := commandFailureMessage(err, classifyCommandFailure(err)); !strings.Contains(shown, "pb login --fresh") || !strings.Contains(shown, "not enrolled") {
-		t.Fatalf("shown message: %q", shown)
+	if err != nil || strings.Contains(again, "Already signed in") || f.authorize["enrolled_machine_id"] != "machine_abc" {
+		t.Fatalf("login with an unenrolled daemon: err=%v authorize=%v output=%s", err, f.authorize, again)
 	}
 }
