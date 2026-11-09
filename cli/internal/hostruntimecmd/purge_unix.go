@@ -23,17 +23,24 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 )
 
-func runPurgeCommand(ctx context.Context, args []string, _ io.Reader, _, stderr io.Writer) error {
+func runPurgeCommand(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	_, err := runPurge(ctx, args, stdin, stdout, stderr)
+	return err
+}
+
+// runPurge is runPurgeCommand that also returns what the cleanup removed by known names after an unreadable
+// lifecycle state (and prints it to stderr).
+func runPurge(ctx context.Context, args []string, _ io.Reader, _, stderr io.Writer) ([]string, error) {
 	if len(args) != 0 && (len(args) != 1 || args[0] != "--preserve-cli") {
-		return errors.New("purge accepts no arguments")
+		return nil, errors.New("purge accepts no arguments")
 	}
 	executable, err := os.Executable()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	executable, err = filepath.EvalSymlinks(executable)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	arguments := append([]string{"--", "/usr/bin/env", "PAPERBOAT_INVOKING_UID=" + strconv.Itoa(os.Getuid()), executable, "__runtime-service", "purge"}, args...)
 	command := sudoCommand(ctx, arguments...)
@@ -42,13 +49,13 @@ func runPurgeCommand(ctx context.Context, args []string, _ io.Reader, _, stderr 
 	command.Stdout = &output
 	err = command.Run()
 	if output.exceeded {
-		return runtimeFailure("privileged cleanup result exceeded its bound", err)
+		return nil, runtimeFailure("privileged cleanup result exceeded its bound", err)
 	}
 	removed, err := readPurgeReport(output.data, errors.Join(err, runtimeContextFailure(ctx)))
 	if len(removed) > 0 {
 		fmt.Fprintf(stderr, "Paperboat's service state could not be read, so everything it owns was removed by its known names: %s.\n", strings.Join(removed, ", "))
 	}
-	return err
+	return removed, err
 }
 
 // purgeSystemInstallation is the root side of uninstall and reset. The order is

@@ -194,12 +194,13 @@ func (w *purgeOutput) Write(data []byte) (int, error) {
 	return count, nil
 }
 
-// ExecutePurge retains the privileged cleanup's safe typed failure for the public owner.
-func ExecutePurge(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) error {
+// ExecutePurge retains the privileged cleanup's safe typed failure for the public owner. It also returns what the
+// cleanup removed by known names when the native lifecycle state was unreadable.
+func ExecutePurge(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer) ([]string, error) {
 	if ctx == nil || stdin == nil || stdout == nil || stderr == nil {
-		return runtimeFailure("privileged cleanup invocation is invalid")
+		return nil, runtimeFailure("privileged cleanup invocation is invalid")
 	}
-	return runPurgeCommand(ctx, nil, stdin, stdout, stderr)
+	return runPurge(ctx, nil, stdin, stdout, stderr)
 }
 
 // ExecuteResetPurge is ExecutePurge for pb reset: it keeps the account CLI it can prove.

@@ -152,7 +152,7 @@ func (windowsUninstallNoticeFailure) Error() string {
 
 func (e windowsUninstallNoticeFailure) Unwrap() error { return e.cause }
 
-func purgePlatformRuntime(*cobra.Command) error { return nil }
+func purgePlatformRuntime(*cobra.Command) ([]string, error) { return nil, nil }
 
 func platformUninstallSuccessMessage() string {
 	return "Windows cleanup was started. Removal continues after this command exits; the Paperboat Inbox is preserved."

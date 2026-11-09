@@ -33,7 +33,7 @@ func unsafeCleanupPathTraversal(_ string, info os.FileInfo) (bool, error) {
 	return info.Mode()&os.ModeSymlink != 0, nil
 }
 
-func purgePlatformRuntime(command *cobra.Command) error {
+func purgePlatformRuntime(command *cobra.Command) ([]string, error) {
 	return hostruntimecmd.ExecutePurge(command.Context(), command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr())
 }
 

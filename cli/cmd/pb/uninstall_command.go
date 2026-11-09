@@ -76,6 +76,7 @@ func uninstallCommand() *cobra.Command {
 			productStatusPath := ""
 			daemonStopConfirmed := false
 			runtimePurged := false
+			var removedByName []string
 			cleanupErr := performUninstallCleanup([]uninstallCleanupStep{
 				{name: "remove installed CLI manuals", run: func() error {
 					if homeErr != nil {
@@ -110,7 +111,8 @@ func uninstallCommand() *cobra.Command {
 					return managedssh.UninstallManagedIdentityPublicKey(home, uint32(os.Geteuid()))
 				}},
 				{name: "remove system Paperboat runtime", run: func() error {
-					err := purgePlatformRuntime(command)
+					removed, err := purgePlatformRuntime(command)
+					removedByName = removed
 					runtimePurged = err == nil
 					return err
 				}},
@@ -157,7 +159,7 @@ func uninstallCommand() *cobra.Command {
 				return uninstallCleanupError{err: cleanupErr}
 			}
 			if jsonOutput {
-				result := map[string]any{"uninstalled": true, "hostname": hostname, "inbox_preserved": true}
+				result := uninstallJSONResult(hostname, removedByName)
 				if platformProductHandoffRequired() {
 					result["uninstalled"] = false
 					result["state"] = "pending"
@@ -380,4 +382,14 @@ func pathWithinOrEqual(root, candidate string) bool {
 func filesystemRoot(path string) bool {
 	path = filepath.Clean(path)
 	return path == filepath.VolumeName(path)+string(os.PathSeparator)
+}
+
+// uninstallJSONResult is the success result of `pb uninstall --json`. removed_by_name lists what the cleanup removed by
+// known names because Paperboat's service state could not be read, so agents see it as well as the stderr line.
+func uninstallJSONResult(hostname string, removedByName []string) map[string]any {
+	result := map[string]any{"uninstalled": true, "hostname": hostname, "inbox_preserved": true}
+	if len(removedByName) > 0 {
+		result["removed_by_name"] = removedByName
+	}
+	return result
 }
