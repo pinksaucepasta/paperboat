@@ -39,7 +39,11 @@ func TestNativeWindowsSharedPurgeRetiresOnlyOwnedResidue(t *testing.T) {
 				t.Fatal(err)
 			}
 			foreign := filepath.Join(state, "foreign.txt")
+			installLog := filepath.Join(state, "PaperboatInstall-"+instance+"-startup-error.log")
 			if scenario == "foreign and other account" {
+				if err := os.WriteFile(installLog, []byte("install failure cause"), 0600); err != nil {
+					t.Fatal(err)
+				}
 				if err := os.WriteFile(foreign, []byte("foreign fixture"), 0600); err != nil {
 					t.Fatal(err)
 				}
@@ -114,8 +118,10 @@ func TestNativeWindowsSharedPurgeRetiresOnlyOwnedResidue(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := os.Stat(log); !errors.Is(err, os.ErrNotExist) {
-					t.Fatalf("owned diagnostic retained: %v", err)
+				for _, owned := range []string{log, installLog} {
+					if _, err := os.Stat(owned); !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("owned diagnostic retained: %s: %v", filepath.Base(owned), err)
+					}
 				}
 				for _, p := range []string{foreign, filepath.Join(program, "users", "u222222222222222222222222"), filepath.Join(state, "users", "u222222222222222222222222"), filepath.Join(state, "PaperboatLocalDaemon-u222222222222222222222222-startup-error.log")} {
 					if _, err := os.Stat(p); err != nil {

@@ -170,7 +170,15 @@ def check_uninstall(win, args):
     host = victus('hostname')[1].strip()
     code, out = win.run('uninstall', '--confirmation', 'UNINSTALL PAPERBOAT', '--hostname', host, timeout=600)
     assert code == 0, f'uninstall rc={code}: {out.strip()[-200:]}'
-    inventory(args)
+    # The uninstall hands the removal to a helper that outlives the command (services stop after it returns).
+    deadline = time.time() + 240
+    while True:
+        try:
+            return inventory(args)
+        except AssertionError:
+            if time.time() > deadline:
+                raise
+            time.sleep(10)
 
 
 def inventory(args):

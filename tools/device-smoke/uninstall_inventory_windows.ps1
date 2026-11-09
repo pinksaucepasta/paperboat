@@ -10,17 +10,25 @@ function Add-Left($kind, $detail) { $left.Add("leftover ${kind}: $detail") }
 Get-Service | Where-Object { $_.Name -like 'Paperboat*' } | ForEach-Object { Add-Left 'service' "$($_.Name) $($_.Status)" }
 Get-Process | Where-Object { $_.Name -eq 'pb' -or $_.Name -like 'Paperboat*' } | ForEach-Object { Add-Left 'process' "$($_.Name) pid $($_.Id)" }
 Get-ScheduledTask | Where-Object { $_.TaskPath -like '*Paperboat*' -or $_.TaskName -like '*Paperboat*' } | ForEach-Object { Add-Left 'scheduled-task' "$($_.TaskPath)$($_.TaskName)" }
-if (Test-Path "$env:SystemRoot\System32\Tasks\Paperboat") { Add-Left 'scheduled-task' 'System32\Tasks\Paperboat' }
+# Windows itself creates 'pb.exe' / 'TCP Query User{guid}path' allow rules when a program listens; those are the OS's, not ours.
 Get-NetFirewallRule | Where-Object { $_.DisplayName -like '*Paperboat*' -or $_.Group -like '*Paperboat*' } | ForEach-Object { Add-Left 'firewall-rule' $_.DisplayName }
 Get-DnsClientNrptRule | Where-Object { $_.Comment -like '*Paperboat*' } | ForEach-Object { Add-Left 'nrpt-rule' $_.Name }
 foreach ($store in 'Cert:\LocalMachine\Root', 'Cert:\CurrentUser\Root') {
     Get-ChildItem $store | Where-Object { $_.Subject -like '*Paperboat*' } | ForEach-Object { Add-Left 'certificate' "$store $($_.Subject)" }
 }
-# WFP: the machine guard's provider and persistent filters carry the display name "Paperboat machine guard".
+# WFP: the machine guard's provider and persistent filters carry the display name "Paperboat machine guard"; filters of
+# Windows Firewall (provider MPSSVC) that merely name a pb.exe path are the OS's own and are not counted.
 $wfp = Join-Path $env:TEMP "pb-wfp-$PID.xml"
 netsh wfp show filters file=$wfp verbose=off | Out-Null
-if ((Test-Path $wfp) -and (Select-String -Path $wfp -Pattern 'Paperboat' -Quiet)) { Add-Left 'wfp' 'filter or provider named Paperboat' }
-Remove-Item $wfp -Force
+if (Test-Path $wfp) {
+    [xml]$doc = Get-Content $wfp
+    $own = @($doc.wfpdiag.filters.item | Where-Object { $_.providerKey -ne 'FWPM_PROVIDER_MPSSVC_WF' -and $_.OuterXml -match 'paperboat' })
+    if ($own.Count -gt 0) { Add-Left 'wfp' "$($own.Count) filter(s) naming Paperboat outside Windows Firewall" }
+    Remove-Item $wfp -Force
+}
+netsh wfp show state file=$wfp | Out-Null
+if ((Test-Path $wfp) -and (Select-String -Path $wfp -Pattern 'Paperboat machine guard' -Quiet)) { Add-Left 'wfp' 'provider Paperboat machine guard' }
+Remove-Item $wfp -Force -ErrorAction SilentlyContinue
 foreach ($scope in 'Machine', 'User') {
     ([Environment]::GetEnvironmentVariable('Path', $scope) -split ';') | Where-Object { $_ -like '*Paperboat*' } | ForEach-Object { Add-Left 'path' "$scope $_" }
 }
