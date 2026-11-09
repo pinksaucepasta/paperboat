@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -95,5 +96,45 @@ func TestManagedSSHSaysAccessWasRevokedWhenSignedOut(t *testing.T) {
 	})
 	if !strings.Contains(stderr.String(), "access to studio was revoked: this sign-in was ended") {
 		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+// F5-10: a plain `ssh` through the managed config shows this ProxyCommand's stderr. The host closing the stream
+// while OpenSSH still holds it open, after `pb logout`, says the access was revoked.
+func TestSSHProxySaysAccessWasRevokedWhenTheHostClosedTheStream(t *testing.T) {
+	var stderr bytes.Buffer
+	command := &cobra.Command{}
+	command.SetErr(&stderr)
+	machine := api.UserMachine{ID: "machine_1", Alias: "studio", InstallationGeneration: 1}
+	explainEndedSSHProxy(command, machine, false, func() (*api.Client, error) {
+		return nil, fmt.Errorf("load credential: %w", config.ErrNoCredentials)
+	})
+	if !strings.Contains(stderr.String(), "access to studio was revoked: this sign-in was ended") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+// An ordinary logout (OpenSSH closed its side first) prints nothing and asks nothing, even when signed out.
+func TestSSHProxyStaysSilentOnAnOrdinaryClose(t *testing.T) {
+	var stderr bytes.Buffer
+	command := &cobra.Command{}
+	command.SetErr(&stderr)
+	machine := api.UserMachine{ID: "machine_1", Alias: "studio", InstallationGeneration: 1}
+	explainEndedSSHProxy(command, machine, true, func() (*api.Client, error) {
+		t.Error("an ordinary close asked for a client")
+		return nil, config.ErrNoCredentials
+	})
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestEOFTrackerSeesOpenSSHClosingTheInput(t *testing.T) {
+	input := &eofTracker{Reader: strings.NewReader("x")}
+	if _, err := io.Copy(io.Discard, input); err != nil || !input.sawEOF() {
+		t.Fatalf("err = %v, sawEOF = %v", err, input.sawEOF())
+	}
+	if (&eofTracker{Reader: strings.NewReader("x")}).sawEOF() {
+		t.Fatal("EOF reported before the input was read")
 	}
 }

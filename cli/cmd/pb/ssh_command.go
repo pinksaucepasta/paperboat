@@ -19,6 +19,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -230,8 +231,36 @@ func actionSSHProxy(command *cobra.Command, _ []string) error {
 		<-command.Context().Done()
 		_ = connection.Close()
 	}()
-	err = copySSHProxy(connection, halfCloser, command.InOrStdin(), command.OutOrStdout())
+	input := &eofTracker{Reader: command.InOrStdin()}
+	err = copySSHProxy(connection, halfCloser, input, command.OutOrStdout())
+	explainEndedSSHProxy(command, machine, input.sawEOF(), func() (*api.Client, error) { return sshClientFor(ctx, nil) })
 	return err
+}
+
+// eofTracker remembers that OpenSSH closed the proxy's input.
+type eofTracker struct {
+	io.Reader
+	eof atomic.Bool
+}
+
+func (t *eofTracker) Read(p []byte) (int, error) {
+	n, err := t.Reader.Read(p)
+	if err == io.EOF {
+		t.eof.Store(true)
+	}
+	return n, err
+}
+
+func (t *eofTracker) sawEOF() bool { return t.eof.Load() }
+
+// explainEndedSSHProxy says why the stream ended when the host closed it while OpenSSH still held it open: OpenSSH shows
+// this ProxyCommand's stderr, and alone it only prints a broken pipe (F5-10). An ordinary logout closes OpenSSH's side
+// first, so it asks nothing and prints nothing; a stream closed for another reason prints nothing either.
+func explainEndedSSHProxy(command *cobra.Command, machine api.UserMachine, inputClosed bool, clientFor func() (*api.Client, error)) {
+	if inputClosed {
+		return
+	}
+	explainSSHFailure(command, machine, managedssh.NativeExitError{Code: 255}, clientFor)
 }
 
 // sshDialError names why pb's ProxyCommand could not open the SSH stream, in pb's words (F5-09).
