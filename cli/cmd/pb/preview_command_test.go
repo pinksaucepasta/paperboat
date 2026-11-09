@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -30,14 +31,16 @@ func TestParsePreviewTarget(t *testing.T) {
 		scheme  string
 		address string
 		invalid bool
+		// A Unix socket target is a rooted POSIX path, which Windows refuses as not absolute.
+		posixPath bool
 	}{
 		{name: "port", input: "3000", scheme: "http", address: "127.0.0.1:3000"},
 		{name: "http URL", input: "http://localhost:3000", scheme: "http", address: "localhost:3000"},
 		{name: "https IPv6 URL", input: "https://[::1]:8443", scheme: "https", address: "[::1]:8443"},
 		{name: "h2c URL", input: "h2c://127.0.0.1:8080", scheme: "h2c", address: "127.0.0.1:8080"},
 		{name: "tcp URL", input: "tcp://relay.example.test:9000", scheme: "tcp", address: "relay.example.test:9000"},
-		{name: "Unix URL", input: "unix:///run/my-app.sock", scheme: "unix", address: "/run/my-app.sock"},
-		{name: "absolute Unix path", input: "/tmp/my-app.sock", scheme: "unix", address: "/tmp/my-app.sock"},
+		{name: "Unix URL", input: "unix:///run/my-app.sock", scheme: "unix", address: "/run/my-app.sock", posixPath: true},
+		{name: "absolute Unix path", input: "/tmp/my-app.sock", scheme: "unix", address: "/tmp/my-app.sock", posixPath: true},
 		{name: "zero port", input: "0", invalid: true},
 		{name: "too large port", input: "65536", invalid: true},
 		{name: "relative path", input: "./app.sock", invalid: true},
@@ -50,7 +53,7 @@ func TestParsePreviewTarget(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			got, err := parsePreviewTarget(test.input)
-			if test.invalid {
+			if test.invalid || test.posixPath && runtime.GOOS == "windows" {
 				if err == nil || !errors.Is(err, ErrPreviewInvalidTarget) {
 					t.Fatalf("error = %v, want ErrPreviewInvalidTarget", err)
 				}
