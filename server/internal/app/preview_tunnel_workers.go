@@ -159,22 +159,39 @@ func periodicPreviewTunnelWorker(interval time.Duration, run func(context.Contex
 	if interval <= 0 {
 		interval = time.Second
 	}
+	return pausedWorker(interval, interval, run)
+}
+
+// listenerWorker runs LISTEN sessions of at most session back to back. Pausing between them (periodicPreviewTunnelWorker
+// waited 25 s after every 24 s session) left the listener detached about half the time: a NOTIFY in that half woke no
+// waiting host, which then learned of a grant or revocation only at its 5 s recheck (pbvm2 2026-11-09: 5 of 12 team
+// share changes reached the host 0.9-4.0 s late). A failed session still backs off.
+func listenerWorker(session time.Duration, run func(context.Context) error) workers.Worker {
+	return pausedWorker(session+time.Second, 0, run)
+}
+
+// pausedWorker runs run, waits pause after a success and a jittered exponential backoff after a failure.
+// progressInterval is the iteration length the worker progress tracker expects.
+func pausedWorker(progressInterval, pause time.Duration, run func(context.Context) error) workers.Worker {
 	return func(ctx context.Context) error {
 		failures := 0
 		for {
-			finishProgress := workers.BeginIteration(ctx, interval)
+			finishProgress := workers.BeginIteration(ctx, progressInterval)
 			err := run(ctx)
 			if ctx.Err() != nil {
 				finishProgress(nil)
 				return ctx.Err()
 			}
 			finishProgress(err)
-			wait := interval
+			wait := pause
 			if err != nil {
 				failures++
-				wait = workers.FailureBackoff(interval, failures)
+				wait = workers.FailureBackoff(progressInterval, failures)
 			} else {
 				failures = 0
+			}
+			if wait <= 0 {
+				continue
 			}
 			timer := time.NewTimer(wait)
 			select {

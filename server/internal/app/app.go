@@ -944,10 +944,10 @@ func New(opts Options) (*App, error) {
 	// server keeps serving held connections after it hands over leadership (F21-04), and the new
 	// one serves waits before it wins it.
 	processListeners := workers.NewSupervisor(
-		observedWorker(supportService, "worker_mint_withdrawals", periodicPreviewTunnelWorker(25*time.Second, func(ctx context.Context) error {
+		observedWorker(supportService, "worker_mint_withdrawals", listenerWorker(24*time.Second, func(ctx context.Context) error {
 			return mintWithdrawals.ListenFor(ctx, 24*time.Second)
 		}), progress),
-		observedWorker(supportService, "worker_machine_events", periodicPreviewTunnelWorker(25*time.Second, func(ctx context.Context) error {
+		observedWorker(supportService, "worker_machine_events", listenerWorker(24*time.Second, func(ctx context.Context) error {
 			return machineEventHub.ListenFor(ctx, 24*time.Second)
 		}), progress))
 	serverWorkers = append(serverWorkers, observedWorker(supportService, "worker_edge_sets", periodicPreviewTunnelWorker(opts.Config.TerminalSessions.WorkerInterval, func(ctx context.Context) error {

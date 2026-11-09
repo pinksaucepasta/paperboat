@@ -130,6 +130,25 @@ func TestPeriodicPreviewTunnelWorkerKeepsRunningThroughFailures(t *testing.T) {
 	}
 }
 
+// A LISTEN session that ends normally is followed by the next one at once: every pause is a window in which
+// a NOTIFY wakes no waiting host. A failed session still waits out a backoff.
+func TestListenerWorkerRestartsWithoutPauseAfterASession(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	calls := 0
+	started := time.Now()
+	worker := listenerWorker(24*time.Second, func(context.Context) error {
+		calls++
+		if calls == 5 {
+			cancel()
+		}
+		return nil
+	})
+	if err := worker(ctx); !errors.Is(err, context.Canceled) || calls != 5 || time.Since(started) > time.Second {
+		t.Fatalf("worker ended with %v after %d calls in %s; want 5 sessions back to back", err, calls, time.Since(started))
+	}
+}
+
 func TestPeriodicPreviewTunnelWorkerStopsWithContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	calls := 0
