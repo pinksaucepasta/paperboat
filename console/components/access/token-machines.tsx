@@ -1,7 +1,7 @@
 "use client"
 
 import { CaretUpDownIcon, CheckIcon, XIcon } from "@phosphor-icons/react"
-import { useState } from "react"
+import { useId, useState } from "react"
 import { useApiQuery, useMachines, useWorkspace } from "@/lib/api"
 import { memberEmails, teamInvitationsQuery, teamQuery } from "@/lib/teams"
 import { machineOptions, targetName } from "@/lib/token-scope"
@@ -18,11 +18,14 @@ const visibleChips = 3
  * the picks show as removable chips (a few, then "+N more"). Targets are `tag:x` and `machine:alias`.
  */
 export function TokenMachines({
+  labelledBy,
   tags,
   names,
   value,
   onChange,
 }: {
+  /** The id of the "Machines" heading; with the trigger's own text it names the control. */
+  labelledBy: string
   tags: string[]
   /** The policy's canonical machine names (`names.machines`). */
   names: string[]
@@ -40,6 +43,7 @@ export function TokenMachines({
     machines.data ?? [],
     members.data ? memberEmails(members.data, invitations.data) : new Map(),
   )
+  const triggerId = useId()
   const [open, setOpen] = useState(false)
   const [all, setAll] = useState(false)
   const toggle = (target: string) =>
@@ -49,6 +53,8 @@ export function TokenMachines({
     <div className="flex flex-col gap-2">
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
+          id={triggerId}
+          aria-labelledby={`${labelledBy} ${triggerId}`}
           className="flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-transparent px-2.5 text-left text-sm text-muted-foreground outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
         >
           <span className="truncate">

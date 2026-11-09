@@ -3,7 +3,7 @@
 import { CheckCircleIcon, KeyIcon, SlidersHorizontalIcon, WarningIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
-import { useState } from "react"
+import { useId, useState } from "react"
 import { clientConfigQuery, useApiQuery, useMachines, useWorkspace } from "@/lib/api"
 import { actionLabels, createApiToken, machineActions, namePattern, PolicyError, policyQuery } from "@/lib/policy"
 import { queryKeys } from "@/lib/query-keys"
@@ -141,11 +141,11 @@ function Start({ onChoose }: { onChoose: (mode: Mode) => void }) {
 }
 
 /** A form section: a title and one muted line, then its controls. */
-function Block({ title, hint, children }: { title: string; hint: string; children: React.ReactNode }) {
+function Block({ title, hint, id, children }: { title: string; hint: string; id?: string; children: React.ReactNode }) {
   return (
     <section className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <SectionHeading title={title} />
+        <SectionHeading title={title} id={id} />
         <p className="text-sm text-muted-foreground">{hint}</p>
       </div>
       <div className="flex flex-col gap-3 border-t border-divider pt-4">{children}</div>
@@ -249,6 +249,7 @@ function TokenForm({
 
 function MachinesBlock({ form, onChange }: { form: Form; onChange: (next: Partial<Form>) => void }) {
   const workspace = useWorkspace()
+  const labelId = useId()
   const policy = useApiQuery(policyQuery(workspace?.id ?? ""))
   const machines = useMachines()
   const tags = policy.data?.names.tags ?? []
@@ -258,7 +259,7 @@ function MachinesBlock({ form, onChange }: { form: Form; onChange: (next: Partia
     { id: "selected" as const, label: none ? "Only selected (no machines yet)" : "Only selected", disabled: none },
   ]
   return (
-    <Block title="Machines" hint="Which machines the token can reach.">
+    <Block title="Machines" hint="Which machines the token can reach." id={labelId}>
       <div role="radiogroup" aria-label="Machines" className="flex flex-col gap-2 text-sm">
         {choices.map((choice) => (
           <label
@@ -278,7 +279,7 @@ function MachinesBlock({ form, onChange }: { form: Form; onChange: (next: Partia
       </div>
       {form.machines === "selected" && (
         <div className="max-w-md">
-          <TokenMachines tags={tags} names={policy.data?.names.machines ?? []} value={form.targets} onChange={(targets) => onChange({ targets })} />
+          <TokenMachines labelledBy={labelId} tags={tags} names={policy.data?.names.machines ?? []} value={form.targets} onChange={(targets) => onChange({ targets })} />
         </div>
       )}
     </Block>

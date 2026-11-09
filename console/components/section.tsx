@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils"
 
 type Heading = {
   title: string
+  /** The title's element id, for a control that is labelled by it. */
+  id?: string
   /** An ⓘ next to the title explaining the section, with its own short heading. */
   info?: { title: string; body: React.ReactNode }
   /** A control on the right of the title, such as "Add". */
@@ -17,10 +19,10 @@ type Heading = {
  * A section's title row (32 px, the title on its cap height, an optional ⓘ and action). Section uses
  * it; a section whose body is a table, a panel or cards uses it alone over that body.
  */
-export function SectionHeading({ title, info, action, className }: Heading & { className?: string }) {
+export function SectionHeading({ title, id, info, action, className }: Heading & { className?: string }) {
   return (
     <div className="flex min-h-8 items-center gap-1.5">
-      <h2 className={cn("flex items-center gap-1.5 text-sm font-medium", className)}>
+      <h2 id={id} className={cn("flex items-center gap-1.5 text-sm font-medium", className)}>
         <span className="trim-cap">{title}</span>
         {info && (
           <Tooltip>
