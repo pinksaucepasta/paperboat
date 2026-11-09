@@ -1002,12 +1002,13 @@ func TestSharedLockSerializesAndRecoversDeadOwner(t *testing.T) {
 	}
 
 	dead := newSharedLock(path)
-	if err := os.MkdirAll(dead.path, 0o700); err != nil {
+	// The platform helpers give the fixture the owner and ACL of a real lock (Windows rejects a plain directory).
+	if err := createSharedLockDirectory(dead.path); err != nil {
 		t.Fatal(err)
 	}
 	hostname, _ := os.Hostname()
 	owner := `{"pid":999999999,"hostname":` + strconv.Quote(hostname) + `,"created_at":"2026-07-11T00:00:00Z","token":"dead"}`
-	if err := os.WriteFile(filepath.Join(dead.path, "owner.json"), []byte(owner), 0o600); err != nil {
+	if err := writeSharedLockOwner(filepath.Join(dead.path, "owner.json"), []byte(owner)); err != nil {
 		t.Fatal(err)
 	}
 	if err := dead.Lock(); err != nil {
