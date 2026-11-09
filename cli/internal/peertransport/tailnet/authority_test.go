@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -915,11 +916,16 @@ func TestConfigCompareAdmissionIsExactAndCannotOpenTerminal(t *testing.T) {
 func TestNetworkRunRenewsShortSignedValidityAndRecoversAfterExpiry(t *testing.T) {
 	a, c, signer, _ := networkTestAuthority(t)
 	var failing atomic.Bool
+	// A renewal and the switch to failing are one step, so the last expiry the test waits out is final.
+	var renewalMu sync.Mutex
+	var latest int64
 	stalled := make(chan struct{}, 1)
 	resume := make(chan struct{})
 	renewed := make(chan int64, 32)
 	client := networkAPIFunc{configuration: func(ctx context.Context, _ string) (string, error) {
+		renewalMu.Lock()
 		if failing.Load() {
+			renewalMu.Unlock()
 			select {
 			case stalled <- struct{}{}:
 			default:
@@ -933,9 +939,12 @@ func TestNetworkRunRenewsShortSignedValidityAndRecoversAfterExpiry(t *testing.T)
 		}
 		c.Generation++
 		c.IssuedAt = time.Now().Unix()
-		c.ExpiresAt = c.IssuedAt + 3
+		// Strictly later than the last one: an endpoint report can renew within the same wall-clock second.
+		c.ExpiresAt = max(c.IssuedAt+3, latest+1)
 		c.Peers[0].Scopes[0].ExpiresAt = c.ExpiresAt
 		token := networkToken(t, signer, c)
+		latest = c.ExpiresAt
+		renewalMu.Unlock()
 		renewed <- c.ExpiresAt
 		return token, nil
 	}}
@@ -973,8 +982,11 @@ func TestNetworkRunRenewsShortSignedValidityAndRecoversAfterExpiry(t *testing.T)
 	if err != nil || again != attached {
 		t.Fatal("valid renewal replaced the attached native client", err)
 	}
+	renewalMu.Lock()
 	failing.Store(true)
-	deadline := time.NewTimer(time.Until(time.Unix(second, 0)) + 500*time.Millisecond)
+	last := latest
+	renewalMu.Unlock()
+	deadline := time.NewTimer(time.Until(time.Unix(last, 0)) + 500*time.Millisecond)
 	defer deadline.Stop()
 	<-deadline.C
 	if a.Allows("machine_test", "grant_test", "terminal", "dial") {
