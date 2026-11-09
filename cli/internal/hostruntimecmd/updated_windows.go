@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
@@ -25,6 +26,7 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 	}
 	serviceName := windowsInstanceServiceName("PaperboatUpdated", instance.name)
 	err = service.RunWindowsSystemServiceWithReady(serviceName, func(serviceCtx context.Context, ready func() error) error {
+		go sweepRetiredImages(serviceCtx, instance.layout)
 		runErr := updated.RunWindowsWithReady(serviceCtx, workerConfig, ready)
 		// The service wrapper turns a failed run into exit code 1 without its cause; keep the cause readable.
 		if runErr != nil && !errors.Is(runErr, service.ErrWindowsServiceHandoff) && !errors.Is(runErr, context.Canceled) {
@@ -41,6 +43,19 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 		}
 	}
 	return err
+}
+
+// sweepRetiredImages removes executables an update moved aside while a process still ran them. The updater
+// starts after every install, rollback and boot; the process that held the image (the user's own pb update) has
+// usually exited seconds later, so the sweep repeats for ten minutes and leaves the rest to the next start.
+func sweepRetiredImages(ctx context.Context, layout service.Layout) {
+	for attempt := 0; attempt < 20 && hostinstall.SweepWindowsRetiredImages(layout) > 0; attempt++ {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(30 * time.Second):
+		}
+	}
 }
 
 func runActivator(_ context.Context, args []string, _ io.Writer, _ io.Writer) error {
