@@ -562,7 +562,12 @@ func TestLocalDaemonSnapshotInstallsOnlyForUnavailableSocket(t *testing.T) {
 	installCalls := 0
 	installer := func(_ context.Context, executable, configPath, server string) error {
 		installCalls++
-		if !filepath.IsAbs(executable) || configPath != filepath.Join(root, "config.json") || server != "https://api.paperboat.test" {
+		wantConfig, wantServer := filepath.Join(root, "config.json"), "https://api.paperboat.test"
+		if runtime.GOOS == "windows" {
+			// The Windows installer refuses launch overrides; passing them left a stopped daemon stopped.
+			wantConfig, wantServer = "", ""
+		}
+		if !filepath.IsAbs(executable) || configPath != wantConfig || server != wantServer {
 			t.Fatalf("executable=%q config=%q server=%q", executable, configPath, server)
 		}
 		serverConfig, err := commandLocalAPIServerConfig(paths.SocketPath, store)

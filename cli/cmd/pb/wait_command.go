@@ -182,11 +182,6 @@ func localDaemonLaunchValues(cfg *config.Config) (string, string, string, error)
 	if err != nil {
 		return "", "", "", err
 	}
-	if runtime.GOOS == "windows" {
-		// The owner-scoped SCM service uses its persisted installation authority.
-		// CLI config/server overrides are not service launch arguments.
-		return executable, "", "", nil
-	}
 	configPath := cfg.Path()
 	if configPath != "" {
 		configPath, err = filepath.Abs(configPath)
@@ -194,7 +189,18 @@ func localDaemonLaunchValues(cfg *config.Config) (string, string, string, error)
 			return "", "", "", err
 		}
 	}
-	return executable, configPath, cfg.ServerURL, nil
+	configPath, server := localDaemonServiceArguments(runtime.GOOS, configPath, cfg.ServerURL)
+	return executable, configPath, server, nil
+}
+
+// localDaemonServiceArguments are the config path and server a command passes when it starts the local
+// daemon service. The Windows SCM service uses its persisted installation authority: CLI config/server
+// values are not service launch arguments, and the Windows installer refuses them.
+func localDaemonServiceArguments(goos, configPath, server string) (string, string) {
+	if goos == "windows" {
+		return "", ""
+	}
+	return configPath, server
 }
 
 func waitForLocalDaemonSnapshot(ctx context.Context, client localDaemonSnapshotClient, socketPath string, lastSocketErr error) (localapi.Snapshot, error) {
@@ -387,6 +393,7 @@ func localDaemonSnapshot(command *cobra.Command, install localDaemonServiceInsta
 		if strings.TrimSpace(server) == "" {
 			server = effectiveConfig.ServerURL
 		}
+		configPath, server = localDaemonServiceArguments(runtime.GOOS, configPath, server)
 		return install(launchCtx, executable, configPath, server)
 	})
 	if err != nil {

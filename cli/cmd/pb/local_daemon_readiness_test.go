@@ -299,3 +299,15 @@ func TestRecoverLocalDaemonSnapshotConcurrentCallersConvergeOnOneLaunch(t *testi
 		t.Fatalf("initial calls=%d launch calls=%d, want 2/1", state.initialCalls.Load(), state.launchCalls.Load())
 	}
 }
+
+func TestLocalDaemonServiceArgumentsAreUnixOnly(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin"} {
+		if config, server := localDaemonServiceArguments(goos, "/home/u/config.json", "https://api.example.test"); config != "/home/u/config.json" || server != "https://api.example.test" {
+			t.Fatalf("%s config=%q server=%q", goos, config, server)
+		}
+	}
+	// The Windows SCM service refuses launch overrides: pb status and pb doctor passed them and could not start a stopped daemon.
+	if config, server := localDaemonServiceArguments("windows", `C:\Users\u\config.json`, "https://api.example.test"); config != "" || server != "" {
+		t.Fatalf("windows config=%q server=%q", config, server)
+	}
+}
