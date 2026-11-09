@@ -82,7 +82,16 @@ def main():
                                                                   capture_output=True, text=True).stdout)['data']['version']):
             raise RuntimeError('killed update left an unexpected version')
         # Finish or retry cleanly so the next row starts from a known state.
-        p.invoke(PB, 'update', '--from', str(candidate), '--json', raw=True, terminal=True, password=password, timeout=300)
+        # A killed update's root helper may still hold the install lock: the typed `update_busy` refusal says retry.
+        deadline = time.monotonic() + 120
+        while True:
+            retry = p.command_result(PB, 'update', '--from', str(candidate), '--json', timeout=300, terminal=True,
+                                     password=password)
+            if retry.returncode == 0:
+                break
+            if '"update_busy"' not in retry.stdout or time.monotonic() > deadline:
+                raise RuntimeError('the retried update failed: ' + retry.stdout[-300:])
+            time.sleep(5)
         if not healthy(args.target, 240):
             raise RuntimeError('install is not healthy after the retried update')
     print(json.dumps({'check': 'update-failures', 'target': args.target, 'status': 'PASS',

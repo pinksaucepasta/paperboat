@@ -240,7 +240,12 @@ func LockSuppliedOperation(path string, uid int) (*os.File, error) {
 		return nil, hostInstallFailure("invalid installation lock", ErrInvalidRequest, err, f.Close())
 	}
 	if err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		return nil, hostInstallFailure("Paperboat installation lock could not be acquired; retry when the current installation finishes", err, f.Close())
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			// Another installation (a killed update's root helper still finishing) holds the lock: the typed busy
+			// refusal, so the caller says "retry" instead of a generic failure. Nothing was changed.
+			return nil, errors.Join(&MaintenanceBusyTimeoutError{Cause: err}, f.Close())
+		}
+		return nil, hostInstallFailure("Paperboat installation lock could not be acquired", err, f.Close())
 	}
 	return f, nil
 }

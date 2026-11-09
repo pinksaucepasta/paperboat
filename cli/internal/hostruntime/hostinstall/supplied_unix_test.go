@@ -3,6 +3,8 @@
 package hostinstall
 
 import (
+	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"os"
 	"path/filepath"
@@ -16,9 +18,15 @@ func TestSuppliedOperationLockExcludesConcurrencyAndRejectsSymlink(t *testing.T)
 		t.Fatal(err)
 	}
 	defer first.Close()
-	if second, err := LockSuppliedOperation(path, os.Geteuid()); err == nil {
-		second.Close()
+	blocked, err := LockSuppliedOperation(path, os.Geteuid())
+	if err == nil {
+		blocked.Close()
 		t.Fatal("concurrent installation acquired lock")
+	}
+	// A busy lock is the typed busy refusal (the CLI says "retry"), never a bare errno (F14-03 on macOS: errno 35).
+	var busy *MaintenanceBusyTimeoutError
+	if !errors.Is(err, hostdproto.ErrMaintenanceBusy) || !errors.As(err, &busy) {
+		t.Fatalf("busy installation lock = %v, want the typed maintenance-busy refusal", err)
 	}
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
