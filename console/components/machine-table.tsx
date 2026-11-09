@@ -4,7 +4,6 @@ import { InfoIcon, LaptopIcon, MagnifyingGlassIcon, XIcon } from "@phosphor-icon
 import Link from "next/link"
 import { useDeferredValue, useState } from "react"
 import {
-  ApiError,
   useApiQuery,
   machineOwner,
   meQuery,
@@ -28,11 +27,11 @@ import { MachineAddressStack } from "@/components/machine-address"
 import { FilterButton, FilterChip } from "@/components/machine-filters"
 import { MachineUpdate } from "@/components/machine-update"
 import { MachineDot, machineVersion } from "@/components/machine-status"
-import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { LoadError } from "@/components/load-error"
 
 export function MachineTable() {
   const { data: me } = useApiQuery(meQuery)
@@ -155,21 +154,7 @@ export function MachineTable() {
             ))}
           </tbody>
         </table>
-        {isError && (
-          <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
-            {/* A refusal (such as a team that requires SSO) says what to do; retrying won't help. */}
-            {error instanceof ApiError && error.status === 403 ? (
-              error.message
-            ) : (
-              <>
-                Couldn’t load machines.
-                <Button variant="outline" size="sm" onClick={() => refetch()}>
-                  Retry
-                </Button>
-              </>
-            )}
-          </div>
-        )}
+        {isError && <LoadError what="machines" error={error} retry={() => refetch()} />}
         {list.data && <ListPager page={list.data.page} size={cursorPageSize} total={total} go={pages.go} />}
         {list.data && total === 0 && !filtered && <NoMachines />}
         {list.data && total === 0 && filtered && (

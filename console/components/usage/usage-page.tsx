@@ -13,6 +13,8 @@ import { useCurrentMachine } from "@/components/machine-shell"
 import { smoothPath } from "@/components/usage-limits"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { LoadError } from "@/components/load-error"
+import { TableRowsSkeleton } from "@/components/skeletons"
 import { useTimeFormat } from "@/lib/use-time-format"
 
 /*
@@ -94,7 +96,7 @@ export function UsagePage({ machine: tabMachine }: { machine?: Machine }) {
       </div>
 
       {usage.isError ? (
-        <p className="py-12 text-center text-sm text-muted-foreground">Couldn’t load usage. {usage.error.message}</p>
+        <LoadError what="usage" error={usage.error} retry={() => usage.refetch()} />
       ) : !data ? (
         <UsageSkeleton showMachine={!scope} />
       ) : (
@@ -299,13 +301,17 @@ function UsageSkeleton({ showMachine }: { showMachine: boolean }) {
       <div className="flex flex-col gap-3">
         <h2 className="text-sm font-medium">By resource</h2>
         <ResourceTable showMachine={showMachine}>
-          {Array.from({ length: 5 }, (_, index) => (
-            <tr key={index} className="[&>td]:h-14 [&>td]:px-3">
-              <td colSpan={6}>
-                <Skeleton className="h-5 w-1/3" />
-              </td>
-            </tr>
-          ))}
+          <TableRowsSkeleton
+            rows={5}
+            cells={[
+              "",
+              showMachine && "hidden md:table-cell",
+              "hidden lg:table-cell",
+              "hidden sm:table-cell",
+              "hidden sm:table-cell",
+              "",
+            ]}
+          />
         </ResourceTable>
       </div>
     </>

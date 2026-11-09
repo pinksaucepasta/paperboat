@@ -47,3 +47,21 @@ export function EmptySkeleton() {
     </Empty>
   )
 }
+
+/**
+ * Table rows while they load: one cell per column carrying its header cell's classes (pass `false`
+ * for a column not shown), so columns hidden at this width stay hidden and the widths hold. The
+ * placeholder sits in column `at`.
+ */
+export function TableRowsSkeleton({ rows, cells, at = 0 }: { rows: number; cells: (string | false)[]; at?: number }) {
+  const shown = cells.filter((cell) => cell !== false)
+  return Array.from({ length: rows }, (_, row) => (
+    <tr key={row} className="[&>td]:h-14 [&>td]:px-3">
+      {shown.map((className, cell) => (
+        <td key={cell} className={className}>
+          {cell === at && <Skeleton className="h-5 w-32 max-w-full" />}
+        </td>
+      ))}
+    </tr>
+  ))
+}

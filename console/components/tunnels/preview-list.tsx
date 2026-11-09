@@ -19,9 +19,9 @@ import { useCurrentMachine } from "@/components/machine-shell"
 import { StatusDot } from "@/components/machine-status"
 import { RowMenus, type Entry } from "@/components/row-menus"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadError } from "@/components/load-error"
+import { TableRowsSkeleton } from "@/components/skeletons"
 import { copyWithToast } from "@/lib/clipboard"
 
 type View = "live" | "ended"
@@ -106,7 +106,6 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
   )
 
   const shown = query.data?.items ?? []
-  const columns = (view === "live" ? 5 : 4) + (scope ? 0 : 1)
 
   if (counts.data && counts.data.live + counts.data.ended === 0 && !q) {
     return (
@@ -171,13 +170,17 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
           </thead>
           <tbody className="divide-y divide-divider border-b border-divider">
             {query.isPending
-              ? Array.from({ length: 3 }, (_, index) => (
-                  <tr key={index} className="[&>td]:h-14 [&>td]:px-3">
-                    <td colSpan={columns}>
-                      <Skeleton className="h-5 w-1/3" />
-                    </td>
-                  </tr>
-                ))
+              ? <TableRowsSkeleton
+                  rows={3}
+                  cells={[
+                    "",
+                    !scope && "hidden md:table-cell",
+                    "hidden lg:table-cell",
+                    "hidden sm:table-cell",
+                    view === "live" && "hidden md:table-cell",
+                    "w-12",
+                  ]}
+                />
               : shown.map((preview) => (
                   <Row
                     key={preview.id}
@@ -189,14 +192,7 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
           </tbody>
         </table>
         {query.data && <ListPager page={query.data.page} size={cursorPageSize} total={query.data.total} go={pages.go} />}
-        {query.isError && (
-          <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
-            Couldn’t load previews.
-            <Button variant="outline" size="sm" onClick={() => query.refetch()}>
-              Retry
-            </Button>
-          </div>
-        )}
+        {query.isError && <LoadError what="previews" error={query.error} retry={() => query.refetch()} />}
         {query.isSuccess && shown.length === 0 && (
           <p className="py-12 text-center text-sm text-muted-foreground">
             {q ? (

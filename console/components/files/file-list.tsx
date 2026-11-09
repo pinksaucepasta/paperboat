@@ -32,7 +32,7 @@ import { Time } from "@/components/time"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { Skeleton } from "@/components/ui/skeleton"
+import { TableRowsSkeleton } from "@/components/skeletons"
 
 /** The machine page's Files tab. */
 export function MachineFiles() {
@@ -104,7 +104,6 @@ function MachineInbox({ machineId }: { machineId: string }) {
       else next.delete(key)
       return next
     })
-  const columns = 4
 
   const dropped = (
     <>
@@ -195,13 +194,7 @@ function MachineInbox({ machineId }: { machineId: string }) {
             </thead>
             <tbody className="divide-y divide-divider border-b border-divider">
               {loading && !rows.length
-                ? Array.from({ length: 3 }, (_, index) => (
-                    <tr key={index} className="[&>td]:h-14 [&>td]:px-3">
-                      <td colSpan={columns + 1}>
-                        <Skeleton className="h-5 w-1/3" />
-                      </td>
-                    </tr>
-                  ))
+                ? <TableRowsSkeleton rows={3} at={1} cells={["", "", "hidden sm:table-cell", "hidden sm:table-cell", "w-12"]} />
                 : rows.map((row) => (
                     <FileRow
                       key={rowKey(row)}

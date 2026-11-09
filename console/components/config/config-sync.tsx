@@ -23,10 +23,9 @@ import { useCurrentMachine } from "@/components/machine-shell"
 import { StatusDot } from "@/components/machine-status"
 import { Section } from "@/components/section"
 import { Time } from "@/components/time"
-import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { EmptySkeleton } from "@/components/skeletons"
-import { Skeleton } from "@/components/ui/skeleton"
+import { EmptySkeleton, TableRowsSkeleton } from "@/components/skeletons"
+import { LoadError } from "@/components/load-error"
 
 /** The machine page's Config sync tab. */
 export function MachineConfigSync() {
@@ -47,16 +46,7 @@ export function ConfigSync({ machine: tabMachine }: { machine?: Machine }) {
   const environments = status.data?.items ?? []
 
   if (status.isPending && scope) return <EmptySkeleton />
-  if (status.isError) {
-    return (
-      <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
-        Couldn’t load config sync. {status.error.message}
-        <Button variant="outline" size="sm" onClick={() => status.refetch()}>
-          Retry
-        </Button>
-      </div>
-    )
-  }
+  if (status.isError) return <LoadError what="config sync" error={status.error} retry={() => status.refetch()} />
 
   if (scope) {
     return environments[0] ? (
@@ -152,14 +142,12 @@ function AllMachines(props: {
           </tr>
         </thead>
         <tbody className="divide-y divide-divider border-b border-divider">
-          {loading &&
-            Array.from({ length: 4 }, (_, index) => (
-              <tr key={index} className="[&>td]:h-14 [&>td]:px-3">
-                <td colSpan={6}>
-                  <Skeleton className="h-5 w-1/3" />
-                </td>
-              </tr>
-            ))}
+          {loading && (
+            <TableRowsSkeleton
+              rows={4}
+              cells={["", "hidden md:table-cell", "hidden lg:table-cell", "hidden sm:table-cell", "", "hidden sm:table-cell"]}
+            />
+          )}
           {environments.map((environment) => {
             const state = syncState(environment)
             return (

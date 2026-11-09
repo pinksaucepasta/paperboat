@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
+import { LoadError } from "@/components/load-error"
 import { useTimeFormat } from "@/lib/use-time-format"
 
 /** The machine page's Activity tab. */
@@ -159,9 +160,7 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
           </div>
         </div>
       ) : activity.isError ? (
-        <p className="py-12 text-center text-sm text-muted-foreground">
-          Couldn’t load activity. {activity.error.message}
-        </p>
+        <LoadError what="activity" error={activity.error} retry={() => activity.refetch()} />
       ) : !events.length ? (
         <Empty className="py-16">
           <EmptyHeader>

@@ -15,9 +15,9 @@ import { SearchField, useListScope } from "@/components/list-toolbar"
 import { useCurrentMachine } from "@/components/machine-shell"
 import { RowMenus } from "@/components/row-menus"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadError } from "@/components/load-error"
+import { TableRowsSkeleton } from "@/components/skeletons"
 
 /** The machine page's Tunnels tab. */
 export function MachineTunnels() {
@@ -40,7 +40,6 @@ export function TunnelList({ machine: tabMachine }: { machine?: Machine }) {
     enabled: Boolean(workspace),
   })
   const shown = query.data?.items ?? []
-  const columns = 4 + (scope ? 0 : 1)
 
   if (query.isSuccess && query.data.total === 0 && !q) {
     return (
@@ -91,13 +90,10 @@ export function TunnelList({ machine: tabMachine }: { machine?: Machine }) {
           </thead>
           <tbody className="divide-y divide-divider border-b border-divider">
             {query.isPending
-              ? Array.from({ length: 3 }, (_, index) => (
-                  <tr key={index} className="[&>td]:h-14 [&>td]:px-3">
-                    <td colSpan={columns}>
-                      <Skeleton className="h-5 w-1/3" />
-                    </td>
-                  </tr>
-                ))
+              ? <TableRowsSkeleton
+                  rows={3}
+                  cells={["", "hidden lg:table-cell", !scope && "hidden md:table-cell", "hidden sm:table-cell", "w-12"]}
+                />
               : shown.map((tunnel) => (
                   <Row
                     key={tunnel.id}
@@ -108,14 +104,7 @@ export function TunnelList({ machine: tabMachine }: { machine?: Machine }) {
           </tbody>
         </table>
         {query.data && <ListPager page={query.data.page} size={cursorPageSize} total={query.data.total} go={pages.go} />}
-        {query.isError && (
-          <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
-            Couldn’t load tunnels.
-            <Button variant="outline" size="sm" onClick={() => query.refetch()}>
-              Retry
-            </Button>
-          </div>
-        )}
+        {query.isError && <LoadError what="tunnels" error={query.error} retry={() => query.refetch()} />}
         {query.isSuccess && shown.length === 0 && (
           <p className="py-12 text-center text-sm text-muted-foreground">No tunnels match “{search.trim()}”</p>
         )}
