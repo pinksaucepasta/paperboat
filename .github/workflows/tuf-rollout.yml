@@ -128,10 +128,10 @@ jobs:
           live_bundle="$RUNNER_TEMP/paperboat-live-release.tgz"
           staged="$RUNNER_TEMP/paperboat-tuf-rollout"
           ssh -i "$HOME/.ssh/paperboat-release" -o BatchMode=yes -o StrictHostKeyChecking=yes "root@$RELEASE_HOST" \
-            'tar -C /opt/paperboat/releases/current -czf - install tuf' > "$live_bundle"
+            'tar -C /opt/paperboat/releases/current -czf - install windows tuf' > "$live_bundle"
           mkdir -p "$staged"
           tar -C "$staged" -xzf "$live_bundle"
-          test -f "$staged/install"
+          test -f "$staged/install" && test -f "$staged/windows"
           test -d "$staged/tuf/metadata"
           test -d "$staged/tuf/targets"
           test -z "$(find "$staged/tuf/targets" -mindepth 1 -print -quit)"
@@ -168,7 +168,7 @@ jobs:
           PY
           )
           bundle="$RUNNER_TEMP/paperboat-tuf-rollout-$release_version.tgz"
-          tar -C "$staged" -czf "$bundle" install tuf
+          tar -C "$staged" -czf "$bundle" install windows tuf
           digest=$(sha256sum "$bundle" | awk '{print $1}')
           {
             printf 'PAPERBOAT_REFRESH_VERSION=%s\n' "$release_version"

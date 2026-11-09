@@ -77,6 +77,8 @@ var artifactSpecs = []artifactSpec{
 	{Platform: "darwin", Architecture: "arm64", Format: "macho", Name: "pb-darwin-arm64"},
 	{Platform: "linux", Architecture: "amd64", Format: "elf", Name: "pb-linux-amd64"},
 	{Platform: "linux", Architecture: "arm64", Format: "elf", Name: "pb-linux-arm64"},
+	{Platform: "windows", Architecture: "amd64", Format: "pe", Name: "pb-windows-amd64.exe"},
+	{Platform: "windows", Architecture: "arm64", Format: "pe", Name: "pb-windows-arm64.exe"},
 }
 
 // Artifact is the immutable identity of one native release asset. Its fields

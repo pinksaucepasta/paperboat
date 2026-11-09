@@ -17,8 +17,11 @@ const testVersion = "2026.08.25.1"
 
 func testCurrent() Current {
 	current := Current{Schema: CurrentSchemaV1, Version: testVersion, Repository: testRepository, Assets: map[string]Asset{}}
-	for _, target := range []struct{ platform, architecture, format string }{{"darwin", "arm64", "macho"}, {"linux", "amd64", "elf"}, {"linux", "arm64", "elf"}} {
+	for _, target := range []struct{ platform, architecture, format string }{{"darwin", "arm64", "macho"}, {"linux", "amd64", "elf"}, {"linux", "arm64", "elf"}, {"windows", "amd64", "pe"}, {"windows", "arm64", "pe"}} {
 		name := "pb-" + target.platform + "-" + target.architecture
+		if target.platform == "windows" {
+			name += ".exe"
+		}
 		body := []byte(name + " bytes")
 		digest := sha256.Sum256(body)
 		current.Assets[name] = Asset{Version: testVersion, Platform: target.platform, Architecture: target.architecture, Format: target.format, URL: "https://github.com/" + testRepository + "/releases/download/" + testVersion + "/" + name, SHA256: hex.EncodeToString(digest[:]), Length: int64(len(body))}
@@ -26,11 +29,19 @@ func testCurrent() Current {
 	return current
 }
 
+func testAssetName(asset Asset) string {
+	name := "pb-" + asset.Platform + "-" + asset.Architecture
+	if asset.Platform == "windows" {
+		name += ".exe"
+	}
+	return name
+}
+
 func TestReadCurrent(t *testing.T) {
 	directory := t.TempDir()
 	writeReadyBundle(t, directory, false)
 	current, err := ReadCurrent(directory)
-	if err != nil || current.Version != testVersion || len(current.Assets) != 3 {
+	if err != nil || current.Version != testVersion || len(current.Assets) != 5 {
 		t.Fatalf("current = %#v, %v", current, err)
 	}
 }
@@ -291,7 +302,7 @@ func editTargets(t *testing.T, directory string, edit func(map[string]any)) {
 func writeReadyBundle(t *testing.T, directory string, _ bool) {
 	t.Helper()
 	current := testCurrent()
-	for _, relative := range []string{"install", "tuf/metadata/root.json", "tuf/metadata/timestamp.json", "tuf/metadata/snapshot.json", "tuf/metadata/targets.json"} {
+	for _, relative := range []string{"install", "windows", "tuf/metadata/root.json", "tuf/metadata/timestamp.json", "tuf/metadata/snapshot.json", "tuf/metadata/targets.json"} {
 		path := filepath.Join(directory, filepath.FromSlash(relative))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -352,7 +363,7 @@ func testPublishedReleaseIndex(asset Asset, now time.Time) publishedReleaseIndex
 	index := publishedReleaseIndex{
 		Schema: "paperboat.release-index/v1", ReleaseID: "rel_" + testVersion, Version: testVersion, Channel: "stable", Severity: "routine", CreatedAt: now.Add(-time.Minute),
 		Platform: asset.Platform, Architecture: asset.Architecture, BinaryFormat: asset.Format,
-		Targets:     []publishedReleaseTarget{{Component: "pb", TargetPath: "pb-" + asset.Platform + "-" + asset.Architecture, AssetName: "pb-" + asset.Platform + "-" + asset.Architecture, Repository: testRepository, DownloadURL: asset.URL, SHA256: asset.SHA256, Length: asset.Length, Platform: asset.Platform, Architecture: asset.Architecture, BinaryFormat: asset.Format}},
+		Targets:     []publishedReleaseTarget{{Component: "pb", TargetPath: testAssetName(asset), AssetName: testAssetName(asset), Repository: testRepository, DownloadURL: asset.URL, SHA256: asset.SHA256, Length: asset.Length, Platform: asset.Platform, Architecture: asset.Architecture, BinaryFormat: asset.Format}},
 		HostdAPIMin: 1, HostdAPIMax: 2, RuntimeAPIMin: 1, RuntimeAPIMax: 2, RolloutPolicyRevision: 1, ManifestSHA256: manifest,
 		DeploymentPlanSHA256: hex.EncodeToString(planDigest[:]), DeploymentPlan: planBody,
 	}
@@ -368,7 +379,7 @@ func testPublishedReleaseIndex(asset Asset, now time.Time) publishedReleaseIndex
 
 func TestSupportedPlatformArchitectureMatchesReleaseMatrix(t *testing.T) {
 	supported := map[string]bool{
-		"darwin/arm64": true, "linux/amd64": true, "linux/arm64": true,
+		"darwin/arm64": true, "linux/amd64": true, "linux/arm64": true, "windows/amd64": true, "windows/arm64": true,
 	}
 	for _, platform := range []string{"darwin", "linux", "windows", "freebsd"} {
 		for _, architecture := range []string{"amd64", "arm64", "386"} {

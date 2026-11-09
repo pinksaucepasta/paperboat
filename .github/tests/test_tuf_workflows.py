@@ -78,7 +78,7 @@ class TUFWorkflowSignerTest(unittest.TestCase):
         names = [s.get("name") for s in publication["jobs"]["release-publication"]["steps"]]
         public = names.index("Verify the release is public to an anonymous client before signing")
         self.assertLess(names.index("Publish release assets without changing Latest"), public)
-        self.assertLess(public, names.index("Sign the three qualified release targets"))
+        self.assertLess(public, names.index("Sign the five qualified release targets"))
         check = publication["jobs"]["release-publication"]["steps"][public]
         self.assertNotIn("env", check, "the public check must not read with a token, which also sees drafts")
         self.assertIn('"draft") is False', check["run"])
@@ -114,7 +114,7 @@ class TUFWorkflowSignerTest(unittest.TestCase):
             self.assertEqual(creation[creation.index("--repo")+1], repository)
             self.assertIn("--verify-tag", creation)
 
-    def test_launch_candidate_accepts_three_binaries_and_rejects_incomplete_or_extra_products(self):
+    def test_launch_candidate_accepts_five_binaries_and_rejects_incomplete_or_extra_products(self):
         publication = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
         step = next(s for s in publication["jobs"]["release-publication"]["steps"]
                     if s.get("name", "").startswith("Validate the exact"))
@@ -122,23 +122,38 @@ class TUFWorkflowSignerTest(unittest.TestCase):
             directory = Path(temporary)
             artifacts = directory / "candidate-artifacts"
             artifacts.mkdir()
-            products = ["pb-linux-amd64", "pb-linux-arm64", "pb-darwin-arm64"]
+            products = ["pb-linux-amd64", "pb-linux-arm64", "pb-darwin-arm64",
+                        "pb-windows-amd64.exe", "pb-windows-arm64.exe"]
             for name in products:
                 (artifacts / name).write_bytes(b"qualified product bytes")
             environment = dict(os.environ, RUNNER_TEMP=str(directory))
             def validate():
                 return subprocess.run(["bash", "-c", step["run"]], env=environment,
                                       capture_output=True, timeout=10).returncode
-            self.assertEqual(validate(), 0, "launch binaries cannot reach signing")
+            self.assertEqual(validate(), 0, "release binaries cannot reach signing")
             (artifacts / products[0]).unlink()
-            self.assertNotEqual(validate(), 0, "missing launch product accepted")
+            self.assertNotEqual(validate(), 0, "missing product accepted")
             (artifacts / products[0]).write_bytes(b"qualified product bytes")
-            extra = artifacts / "pb-windows-amd64.exe"
-            extra.write_bytes(b"post-launch product")
+            (artifacts / products[3]).unlink()
+            self.assertNotEqual(validate(), 0, "missing Windows product accepted")
+            (artifacts / products[3]).write_bytes(b"qualified product bytes")
+            extra = artifacts / "pb-windows-amd64.msi"
+            extra.write_bytes(b"unqualified product")
             self.assertNotEqual(validate(), 0, "unqualified extra product accepted")
             extra.unlink()
             (artifacts / products[1]).write_bytes(b"")
             self.assertNotEqual(validate(), 0, "empty product accepted")
+
+    def test_release_workflow_builds_unsigned_windows_products_with_native_evidence(self):
+        workflow = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
+        text = (ROOT / ".github/workflows/release.yml").read_text()
+        self.assertNotIn("Authenticode", text)
+        self.assertNotIn("SIGNING_PFX", text)
+        for architecture in ("amd64", "arm64"):
+            job = workflow["jobs"]["windows-" + architecture]
+            self.assertIn(job["runs-on"], ("windows-2025", "windows-11-arm"))
+            self.assertTrue(any("windows-" + architecture + "-native-qualification.json" in str(step.get("with", {}).get("path", "")) for step in job["steps"]))
+            self.assertIn("windows-" + architecture, workflow["jobs"]["release-publication"]["needs"])
 
     def test_publication_and_refresh_authorize_the_configured_online_secret(self):
         with tempfile.TemporaryDirectory() as temporary:

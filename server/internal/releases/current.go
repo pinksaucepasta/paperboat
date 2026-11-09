@@ -33,6 +33,8 @@ var supportedPlatformArchitectures = [...]struct {
 	{platform: "darwin", architecture: "arm64"},
 	{platform: "linux", architecture: "amd64"},
 	{platform: "linux", architecture: "arm64"},
+	{platform: "windows", architecture: "amd64"},
+	{platform: "windows", architecture: "arm64"},
 }
 
 type Current struct {
@@ -157,7 +159,7 @@ func Ready(directory string) error {
 	if err != nil {
 		return err
 	}
-	for _, relative := range []string{"install", "tuf/metadata/root.json", "tuf/metadata/timestamp.json", "tuf/metadata/snapshot.json", "tuf/metadata/targets.json"} {
+	for _, relative := range []string{"install", "windows", "tuf/metadata/root.json", "tuf/metadata/timestamp.json", "tuf/metadata/snapshot.json", "tuf/metadata/targets.json"} {
 		info, err := os.Lstat(filepath.Join(directory, filepath.FromSlash(relative)))
 		if err != nil {
 			return releaseReadError("release bundle is incomplete", err)

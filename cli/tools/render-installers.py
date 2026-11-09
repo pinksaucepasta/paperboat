@@ -8,18 +8,20 @@ import sys
 
 
 def main() -> None:
-    if len(sys.argv) != 3:
-        raise SystemExit("usage: render-installers.py VERIFIED_TARGETS_JSON OUTPUT_INSTALL")
-    metadata, output_install = sys.argv[1:]
+    if len(sys.argv) != 4:
+        raise SystemExit("usage: render-installers.py VERIFIED_TARGETS_JSON OUTPUT_INSTALL OUTPUT_WINDOWS")
+    metadata, output_install, output_windows = sys.argv[1:]
     document = json.loads(pathlib.Path(metadata).read_text(encoding="utf-8"))
     targets = document["signed"]["targets"]
     assets = {
         "pb-linux-amd64": ("linux", "amd64", "elf"),
         "pb-linux-arm64": ("linux", "arm64", "elf"),
         "pb-darwin-arm64": ("darwin", "arm64", "macho"),
+        "pb-windows-amd64.exe": ("windows", "amd64", "pe"),
+        "pb-windows-arm64.exe": ("windows", "arm64", "pe"),
     }
     if set(targets) != set(assets):
-        raise SystemExit("verified publication must contain exactly three product targets")
+        raise SystemExit("verified publication must contain exactly five product targets")
     values = {}
     repositories = set()
     for name, (platform, architecture, binary_format) in assets.items():
@@ -45,7 +47,7 @@ def main() -> None:
         raise SystemExit("verified product targets must share one immutable repository")
     values["PAPERBOAT_PRODUCT_REPOSITORY"] = repositories.pop()
     root = pathlib.Path(__file__).resolve().parent
-    for template, output in ((root / "install.sh", pathlib.Path(output_install)),):
+    for template, output in ((root / "install.sh", pathlib.Path(output_install)), (root / "install.ps1", pathlib.Path(output_windows))):
         body = template.read_text(encoding="utf-8")
         for key, value in values.items():
             body = body.replace("@" + key + "@", value)

@@ -23,6 +23,8 @@ func TestRenderInstallersUsesEachVerifiedProductIdentity(t *testing.T) {
 				{"pb-linux-amd64", "linux", "amd64", "elf"},
 				{"pb-linux-arm64", "linux", "arm64", "elf"},
 				{"pb-darwin-arm64", "darwin", "arm64", "macho"},
+				{"pb-windows-amd64.exe", "windows", "amd64", "pe"},
+				{"pb-windows-arm64.exe", "windows", "arm64", "pe"},
 			} {
 				version := "2026.10.08.21"
 				if product.platform != "darwin" && product.arch == "arm64" {
@@ -51,13 +53,13 @@ func TestRenderInstallersUsesEachVerifiedProductIdentity(t *testing.T) {
 			if err := os.WriteFile(metadata, body, 0600); err != nil {
 				t.Fatal(err)
 			}
-			install := filepath.Join(root, "install")
-			output, err := exec.Command("python3", "render-installers.py", metadata, install).CombinedOutput()
+			install, windows := filepath.Join(root, "install"), filepath.Join(root, "windows")
+			output, err := exec.Command("python3", "render-installers.py", metadata, install, windows).CombinedOutput()
 			if scenario != "retained-platforms" {
 				if err == nil {
 					t.Fatalf("invalid metadata was accepted: %s", output)
 				}
-				for _, path := range []string{install} {
+				for _, path := range []string{install, windows} {
 					if _, err := os.Stat(path); !os.IsNotExist(err) {
 						t.Fatalf("invalid metadata wrote %s", path)
 					}
@@ -67,7 +69,7 @@ func TestRenderInstallersUsesEachVerifiedProductIdentity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("renderer: %v: %s", err, output)
 			}
-			for _, path := range []string{install} {
+			for _, path := range []string{install, windows} {
 				body, err := os.ReadFile(path)
 				if err != nil {
 					t.Fatal(err)
@@ -77,6 +79,10 @@ func TestRenderInstallersUsesEachVerifiedProductIdentity(t *testing.T) {
 				}
 				for name, target := range targets {
 					custom := target.(map[string]any)["custom"].(map[string]any)
+					// Each installer pins only its own platform's products.
+					if (path == windows) != (custom["platform"] == "windows") {
+						continue
+					}
 					for _, key := range []string{"version", "url", "sha256"} {
 						if !strings.Contains(string(body), custom[key].(string)) {
 							t.Fatalf("%s lacks %s %s", path, name, key)
