@@ -4,6 +4,8 @@ package runtime
 
 import (
 	"context"
+	hostruntimeservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"golang.org/x/sys/windows"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -37,7 +39,19 @@ func TestWindowsManagedSSHDelegatesAuthorizedKeysToPrivilegedHostService(t *test
 		return recorder, nil
 	}
 	keys := []string{"ssh-ed25519 test"}
-	root := filepath.Join(hostinstall.WindowsProgramDataRoot(), "ssh")
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, err := hostruntimeservice.WindowsUserInstance(user.User.Sid.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	instanceRoot, err := hostinstall.WindowsInstanceRoot(instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(instanceRoot, "ssh") // the enrolled user's instance, not the machine-wide root
 	changed, err := reconcilePlatformAuthorizedKeys(root, 0, keys)
 	if err != nil || !changed || !recorder.deadline || !reflect.DeepEqual(recorder.keys, keys) {
 		t.Fatalf("changed=%t deadline=%t keys=%v err=%v", changed, recorder.deadline, recorder.keys, err)

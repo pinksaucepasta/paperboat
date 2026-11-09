@@ -76,6 +76,7 @@ func TestReadWindowsHostdTokenRejectsRelativePath(t *testing.T) {
 
 func TestProductionRunDoesNotClaimReadinessWithoutHostdCredentials(t *testing.T) {
 	t.Setenv("PAPERBOAT_HOSTD_TOKEN_FILE", "")
+	t.Setenv("PAPERBOAT_HOSTD_SOCKET", `\\.\pipe\PaperboatHostd-test-no-credentials`) // no installed instance to take it from
 	var output bytes.Buffer
 	err := runProduction(context.Background(), &output)
 	if err == nil || !strings.Contains(err.Error(), "token path is invalid") {

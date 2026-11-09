@@ -5,10 +5,12 @@ import (
 	"encoding/base64"
 	"net"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/adrg/xdg"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
@@ -16,6 +18,13 @@ import (
 
 func TestFreshBootstrapCannotReplaceExistingEnrollment(t *testing.T) {
 	root := t.TempDir()
+	if runtime.GOOS == "windows" {
+		// Windows bootstrap refuses a custom state root, so its default one is pointed into the test directory.
+		previous := xdg.StateHome
+		xdg.StateHome = root
+		t.Cleanup(func() { xdg.StateHome = previous })
+		root = filepath.Join(root, "Paperboat", "runtime")
+	}
 	store, err := identity.Open(identity.Config{StateRoot: root})
 	if err != nil {
 		t.Fatal(err)

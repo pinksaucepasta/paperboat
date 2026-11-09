@@ -42,6 +42,25 @@ func TestSSHGenerationStartupBeforeRuntimeCommit(t *testing.T) {
 	if _, err := os.Lstat(layout.InstallRoot); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("isolated pin fixture already exists")
 	}
+	// The "users" parents exist on an installed machine. Create the missing ones; this cleanup is registered first,
+	// so it runs last and removes them again, deepest first, once the fixture below them is gone.
+	var createdParents []string
+	t.Cleanup(func() {
+		for _, parent := range createdParents {
+			_ = os.Remove(parent)
+		}
+	})
+	for _, parent := range []string{filepath.Dir(layout.InstallRoot), filepath.Dir(accountRoot)} {
+		for missing := parent; ; missing = filepath.Dir(missing) {
+			if _, err := os.Lstat(missing); err == nil {
+				break
+			}
+			createdParents = append(createdParents, missing)
+		}
+		if err := os.MkdirAll(parent, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
 	t.Cleanup(func() { _ = os.RemoveAll(accountRoot); _ = os.RemoveAll(layout.InstallRoot) })
 	secureDirectory := func(path string) {
 		t.Helper()

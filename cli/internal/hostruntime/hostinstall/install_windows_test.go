@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -61,11 +62,14 @@ func TestFreshStandaloneInstallVerifiesBeforeCleanup(t *testing.T) {
 	previousAdministrator := isAdministratorForStandaloneInstall
 	previousVerify := verifyStandaloneReleaseForInstall
 	previousPurge := purgeStandaloneInstall
+	previousRelease := buildinfo.DefaultReleaseURL
 	t.Cleanup(func() {
 		isAdministratorForStandaloneInstall = previousAdministrator
 		verifyStandaloneReleaseForInstall = previousVerify
 		purgeStandaloneInstall = previousPurge
+		buildinfo.DefaultReleaseURL = previousRelease
 	})
+	buildinfo.DefaultReleaseURL = "https://releases.example.test/downloads/" // a release build carries its release host
 	verificationCalled, recoveryCalled, purgeCalled := false, false, false
 	want := errors.New("signed release rejected")
 	isAdministratorForStandaloneInstall = func() bool { return true }
@@ -144,7 +148,7 @@ func TestWindowsSSHServiceSetPreservesUnifiedInstallation(t *testing.T) {
 	if err := ensureWindowsTokenAt(tokenPath, ownerSID); err != nil {
 		t.Fatal(err)
 	}
-	pinned, err := WindowsPinnedRuntimePath(layout, source.Version)
+	pinned, err := WindowsPinnedSourcePath(layout, source) // a custom build is pinned by its bytes, not its version
 	if err != nil {
 		t.Fatal(err)
 	}

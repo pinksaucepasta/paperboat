@@ -59,7 +59,16 @@ func TestWindowsServiceInstanceNamesAreBoundedAndRoleScoped(t *testing.T) {
 
 func TestNativeWindowsRebootMetadataValidationIsFailClosed(t *testing.T) {
 	instance := "trk34-reboot-00112233445566778899"
-	root := `C:\ProgramData\paperboat-trk34-123456`
+	// The validator checks that the fixture root and its executable exist, so they are real, under a stand-in
+	// for ProgramData.
+	programData := t.TempDir()
+	root := filepath.Join(programData, "paperboat-trk34-123456")
+	if err := os.Mkdir(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "service.test.exe"), []byte("fixture"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	suffix := strings.TrimPrefix(instance, "trk34-reboot-")
 	metadata := nativeWindowsRebootMetadata{
 		Schema:                  nativeWindowsRebootMetadataSchema,
@@ -80,9 +89,7 @@ func TestNativeWindowsRebootMetadataValidationIsFailClosed(t *testing.T) {
 		HostdWorkloadFailure:    filepath.Join(os.TempDir(), nativeWindowsRebootMetadataPrefix+suffix+"-hostd-workload.failure.txt"),
 		UpdaterWorkloadFailure:  filepath.Join(os.TempDir(), nativeWindowsRebootMetadataPrefix+suffix+"-updater-workload.failure.txt"),
 	}
-	// The shape validator receives the platform temp root implicitly but touches
-	// neither SCM nor the filesystem.
-	if err := validateNativeWindowsRebootMetadataShape(metadata, metadata.metadataPath(), `C:\ProgramData`); err != nil {
+	if err := validateNativeWindowsRebootMetadataShape(metadata, metadata.metadataPath(), programData); err != nil {
 		t.Fatalf("valid reboot metadata rejected: %v", err)
 	}
 	mutations := []func(*nativeWindowsRebootMetadata){
@@ -102,24 +109,25 @@ func TestNativeWindowsRebootMetadataValidationIsFailClosed(t *testing.T) {
 	for index, mutate := range mutations {
 		candidate := metadata
 		mutate(&candidate)
-		if err := validateNativeWindowsRebootMetadataShape(candidate, candidate.metadataPath(), `C:\ProgramData`); !errors.Is(err, ErrInvalidDefinition) {
+		if err := validateNativeWindowsRebootMetadataShape(candidate, candidate.metadataPath(), programData); !errors.Is(err, ErrInvalidDefinition) {
 			t.Fatalf("metadata mutation %d accepted: %v", index, err)
 		}
 	}
 }
 
 func TestWindowsServiceConfigTransitionRestoresOwnedDeclaration(t *testing.T) {
-	layout, err := DefaultLayout("windows")
+	const instance = "u0123456789abcdef01234567" // services belong to one enrolled user's instance
+	layout, err := windowsLayoutForInstance(instance)
 	if err != nil {
 		t.Fatal(err)
 	}
 	old := windowsServiceDefinition{
-		Schema: "paperboat.windows-service/v1", Name: "PaperboatHostd",
+		Schema: "paperboat.windows-service/v1", Name: "PaperboatHostd-" + instance,
 		DisplayName: "old hostd", Description: "old declaration",
-		Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-hostd", "--restored"}, Account: "SYSTEM",
+		Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-hostd", "--instance", instance, "--restored"}, Account: "SYSTEM",
 	}
 	current := mgr.Config{
-		BinaryPathName:   windows.ComposeCommandLine([]string{layout.Binary, "daemon", "__runtime-hostd"}),
+		BinaryPathName:   windows.ComposeCommandLine([]string{layout.Binary, "daemon", "__runtime-hostd", "--instance", instance}),
 		ServiceStartName: "LocalSystem", StartType: mgr.StartAutomatic,
 		SidType: windows.SERVICE_SID_TYPE_UNRESTRICTED,
 	}
@@ -127,14 +135,14 @@ func TestWindowsServiceConfigTransitionRestoresOwnedDeclaration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("owned transition rejected: %v", err)
 	}
-	wantPath := windows.ComposeCommandLine([]string{layout.Binary, "daemon", "__runtime-hostd", "--restored"})
+	wantPath := windows.ComposeCommandLine([]string{layout.Binary, "daemon", "__runtime-hostd", "--instance", instance, "--restored"})
 	if updated.BinaryPathName != wantPath || updated.DisplayName != old.DisplayName || updated.Description != old.Description || updated.StartType != mgr.StartAutomatic || !isWindowsSystemAccount(updated.ServiceStartName) {
 		t.Fatalf("restored config=%+v want path=%q and old metadata", updated, wantPath)
 	}
 	for _, foreign := range []mgr.Config{
-		{BinaryPathName: windows.ComposeCommandLine([]string{`C:\Foreign\pb.exe`, "daemon", "__runtime-hostd"}), ServiceStartName: "LocalSystem", SidType: windows.SERVICE_SID_TYPE_UNRESTRICTED},
-		{BinaryPathName: windows.ComposeCommandLine([]string{layout.Binary, "daemon", "__runtime-hostd"}), ServiceStartName: "Administrator", SidType: windows.SERVICE_SID_TYPE_UNRESTRICTED},
-		{BinaryPathName: windows.ComposeCommandLine([]string{layout.Binary, "daemon", "__runtime-hostd"}), ServiceStartName: "LocalSystem", SidType: windows.SERVICE_SID_TYPE_NONE},
+		{BinaryPathName: windows.ComposeCommandLine([]string{`C:\Foreign\pb.exe`, "daemon", "__runtime-hostd", "--instance", instance}), ServiceStartName: "LocalSystem", SidType: windows.SERVICE_SID_TYPE_UNRESTRICTED},
+		{BinaryPathName: windows.ComposeCommandLine([]string{layout.Binary, "daemon", "__runtime-hostd", "--instance", instance}), ServiceStartName: "Administrator", SidType: windows.SERVICE_SID_TYPE_UNRESTRICTED},
+		{BinaryPathName: windows.ComposeCommandLine([]string{layout.Binary, "daemon", "__runtime-hostd", "--instance", instance}), ServiceStartName: "LocalSystem", SidType: windows.SERVICE_SID_TYPE_NONE},
 	} {
 		if _, err := windowsServiceConfigForDefinition(foreign, old); !errors.Is(err, ErrInvalidDefinition) {
 			t.Fatalf("foreign transition accepted: config=%+v err=%v", foreign, err)
