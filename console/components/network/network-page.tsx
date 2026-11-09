@@ -358,9 +358,11 @@ function PathCard({
             <StatusDot online={status.ok} />
             {status.label}
           </span>
+        ) : capability === "relay" && pool.data?.mode !== "self-hosted-only" ? (
+          // Paperboat's relays are the default, so this shows while the setting loads too.
+          <span className="shrink-0 text-muted-foreground">Picked for each connection</span>
         ) : (
-          capability === "relay" &&
-          pool.data && <span className="shrink-0 text-muted-foreground">Picked for each connection</span>
+          <Skeleton className="my-1 h-3 w-14 shrink-0" />
         )}
       </div>
       {pool.isError ? (

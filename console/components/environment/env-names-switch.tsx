@@ -18,7 +18,8 @@ const helper = (
 /** Environment page: whether `pb env names` on the active workspace's machines may list ENV names. */
 export function EnvNamesSwitch() {
   const workspace = useWorkspace()
-  if (!workspace) return null
+  // The static shell has no session yet: the same row, on and disabled, until the workspace is known.
+  if (!workspace) return <EnvNamesSetting checked disabled error={null} onChange={() => {}} />
   return workspace.kind === "team" ? <TeamEnvNames team={workspace} /> : <PersonalEnvNames />
 }
 

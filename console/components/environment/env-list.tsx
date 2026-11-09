@@ -13,7 +13,6 @@ import { useCurrentMachine } from "@/components/machine-shell"
 import { useListScope } from "@/components/list-toolbar"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { SectionSkeleton } from "@/components/skeletons"
 import { PageIntro, Section } from "@/components/section"
 import { EnvNamesSwitch } from "@/components/environment/env-names-switch"
 
@@ -86,9 +85,9 @@ export function EnvironmentList({
   const { scope: machineId } = useListScope(tabMachine)
   const unlocked = useSyncExternalStore(subscribeVaultLock, vaultUnlocked, () => false)
   const vault = useQuery({ queryKey: ["env-vault"], queryFn: ({ signal }) => readVault(signal), staleTime: 0 })
-  if (!workspace || !me.data) return <SectionSkeleton title="Variables" rows={2} />
-  // Most visits find the vault locked, so it loads as the unlock card (typing works, Unlock waits).
-  if (vault.isPending) return <EnvUnlock loading />
+  // Most visits find the vault locked, so it loads as the unlock card (typing works, Unlock waits),
+  // in the static shell too, before the session is known.
+  if (!workspace || !me.data || vault.isPending) return <EnvUnlock loading />
   if (vault.isError) {
     return <p className="py-16 text-center text-sm text-destructive">{vault.error.message}</p>
   }
