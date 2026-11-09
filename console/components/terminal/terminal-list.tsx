@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { LoadError } from "@/components/load-error"
 import { TableRowsSkeleton } from "@/components/skeletons"
+import { Skeleton } from "@/components/ui/skeleton"
 import { copyWithToast } from "@/lib/clipboard"
 import { useTimeFormat } from "@/lib/use-time-format"
 import { useLastCount } from "@/lib/last-count"
@@ -86,10 +87,6 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
 
   // Open terminals are current: live ones first, then those whose machine isn't reporting them (shown
   // as last reported). Closed ones group by when they were used. The split covers the loaded page.
-  // Columns come from what is known before the list loads, so the header never changes when it lands;
-  // an unreachable terminal's Running cell stays blank.
-  const running = view === "open"
-  const columns = 4 + (scope ? 0 : 1) + (running ? 1 : 0)
   const groups: { key: string; label: string; note?: string; rows: typeof shown }[] = []
   if (view === "open") {
     const live = shown.filter(({ session }) => session.state !== "unavailable")
@@ -116,6 +113,15 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
   const lastRows = useLastCount(remembered, query.data ? shown.length : undefined)
   // Whether the list opened with the unreachable note, so the loading state reserves its line.
   const lastNote = useLastCount(`${remembered}:note`, query.data ? (groups[0]?.note ? 1 : 0) : undefined)
+  // Running shows only when a visible terminal reports what it runs (unreachable ones never do), so
+  // the name gets the room otherwise. The first page is read on the server (terminals/page.tsx);
+  // before any data (the static shell) the last visit's answer decides, hidden on a first visit.
+  const reporting = shown.some(
+    ({ session }) => session.state !== "unavailable" && Boolean(session.title || session.foreground_process),
+  )
+  const lastRunning = useLastCount(`${remembered}:running`, query.data && view === "open" ? Number(reporting) : undefined)
+  const running = view === "open" && (query.data ? reporting : lastRunning === 1)
+  const columns = 4 + (scope ? 0 : 1) + (running ? 1 : 0)
 
   if (counts.data && counts.data.open + counts.data.closed === 0) {
     return (
@@ -263,8 +269,11 @@ function TerminalStatus({ session, now }: { session: TerminalSession; now: numbe
     return (
       <span className="flex flex-col text-muted-foreground">
         <span>Machine offline</span>
-        {seen && now > 0 && (
-          <span className="text-xs">since {date(seen, now - Date.parse(seen) < day ? "time" : "day")}</span>
+        {/* The second line holds its place while the machines list (last seen) loads. */}
+        {seen ? (
+          <span className="text-xs">since {date(seen, now && now - Date.parse(seen) < day ? "time" : "day")}</span>
+        ) : (
+          machines.isPending && <Skeleton className="my-[3px] h-2.5 w-16" />
         )}
       </span>
     )

@@ -26,6 +26,9 @@ export const queryKeys = {
   machineOverview: ["machines", "overview"],
   machine: (id: string) => ["machines", "one", id],
   machineSummary: (workspace: string) => ["machines", workspace, "summary"],
+  /** One page of Terminals (yours across workspaces): open or closed, search, page, machine. */
+  terminalPage: (options: { closed: boolean; q: string; page: number; machine?: string }) =>
+    ["terminal-sessions", "page", options] as const,
 } as const
 
 /**

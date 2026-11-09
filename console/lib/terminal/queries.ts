@@ -2,6 +2,7 @@
 
 import { queryOptions } from "@tanstack/react-query"
 import { api, apiAction, ApiError, idempotencyKey, retryAfterMs, send, type Data } from "@/lib/api"
+import { queryKeys } from "@/lib/query-keys"
 import type { TerminalSession } from "@/lib/terminal/use-terminal-connection"
 
 export type AccessPolicy = Data<"/v1/terminal-sessions/{session_id}/browser-access-policy">
@@ -37,7 +38,7 @@ function terminalsPath(params: Record<string, string>) {
  */
 export const terminalsPageQuery = (options: { closed: boolean; q: string; page: number; machine?: string }) =>
   queryOptions({
-    queryKey: [...terminalKeys.list, "page", options],
+    queryKey: queryKeys.terminalPage(options),
     queryFn: async ({ signal }) => {
       const page = await api<TerminalPage>(
         terminalsPath({
