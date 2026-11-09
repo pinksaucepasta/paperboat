@@ -486,9 +486,9 @@ function Card({
   children: React.ReactNode
 }) {
   return (
-    // The row takes the bandwidth card's height (the others stretch to it); every card reserves
-    // that height while loading, so nothing moves when data arrives.
-    <div className={cn("surface-pattern flex min-h-[11.125rem] flex-col gap-3 p-5", className)}>
+    // One height for all three cards, loading and loaded (the tallest loaded body is 110 px; the
+    // grid stretches the others to it), so nothing moves when data arrives.
+    <div className={cn("surface-pattern flex min-h-[11.25rem] flex-col gap-3 p-5", className)}>
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span className="font-medium">{label}</span>
         {action}
@@ -592,10 +592,8 @@ function BandwidthSkeleton() {
           </span>
         </div>
       </div>
-      {/* The chart's band, as a flat line at zero until the series arrives. */}
-      <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="-mx-5 mt-auto -mb-5 h-16 w-[calc(100%+2.5rem)] shrink-0">
-        <line x1="0" y1="39" x2="100" y2="39" className="stroke-foreground/10" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
-      </svg>
+      {/* The chart's band, empty until the series arrives (no line: an idle period draws none). */}
+      <div className="-mx-5 mt-auto -mb-5 h-16 shrink-0" />
     </div>
   )
 }
