@@ -156,12 +156,6 @@ function Loaded({ usage, period, showMachine }: { usage: Usage; period: UsagePer
 
       <Chart usage={usage} period={period} />
 
-      {!usage.coverage.native && (
-        <p className="text-sm text-muted-foreground">
-          Not every machine reports its direct traffic yet, so direct totals may be low.
-        </p>
-      )}
-
       <div className="flex flex-col gap-3">
         <h2 className="text-sm font-medium">{resources.length > topResources ? "Top resources" : "By resource"}</h2>
         <ResourceTable showMachine={showMachine}>
@@ -214,6 +208,13 @@ function Loaded({ usage, period, showMachine }: { usage: Usage; period: UsagePer
           </Button>
         )}
       </div>
+
+      {/* A footnote below the table, so it doesn't push the page down when the data lands. */}
+      {!usage.coverage.native && (
+        <p className="text-sm text-muted-foreground">
+          Not every machine reports its direct traffic yet, so direct totals may be low.
+        </p>
+      )}
     </>
   )
 }
