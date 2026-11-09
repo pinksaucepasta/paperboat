@@ -63,8 +63,9 @@ VALUES($1,'default','1.0','epoch', $2,$3,$4,'fsn1','domain',ARRAY[$5]::text[],AR
 	exec(`INSERT INTO paperboat.operator_regions(id,display_name,enabled) VALUES($1,'Test region',false)`, regionID)
 	exec(`INSERT INTO paperboat.managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config) VALUES($1,$2,$3,'encrypted','{}'::jsonb)`, prefix+"f", regionID, make([]byte, 32))
 	// Edge a is a managed node of an enabled region: it shows its site.
+	exec(`UPDATE paperboat.control_tunnel_nodes SET endpoint_host='edge.example.test',endpoint_tcp_port=443,endpoint_quic_port=444 WHERE id=$1`, prefix+"a")
 	exec(`INSERT INTO paperboat.operator_regions(id,display_name,enabled) VALUES($1,'Test region',true)`, regionID+"_on")
-	exec(`INSERT INTO paperboat.managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config,site) VALUES($1,$2,$3,'encrypted','{}'::jsonb,'Mumbai')`, prefix+"a", regionID+"_on", make([]byte, 32))
+	exec(`INSERT INTO paperboat.managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config,site) VALUES($1,$2,$3,'encrypted','{}'::jsonb,'Mumbai')`, prefix+"a", regionID+"_on", append([]byte{1}, make([]byte, 31)...)) // the runtime hash is unique
 	service := NewEdgeService(database, "unused")
 	service.SetClock(func() time.Time { return now })
 	first, err := service.ListHostedEdges(ctx, account, prefix, 2)
