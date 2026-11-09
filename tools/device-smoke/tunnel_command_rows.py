@@ -11,7 +11,7 @@ import threading
 
 from install_lifecycle import registration
 import pairing_lifecycle
-from pairing_lifecycle import command_result, confirmed_command
+from pairing_lifecycle import command_result, confirmed_command, invoke
 from preview_lifecycle import QuietHandler
 from tunnel_domain import FixtureDns, BODY, ephemeral, fetch, wait
 
@@ -35,21 +35,27 @@ def redacted(value):
     return value
 
 
+# C102 (tunnel domain instructions) and C105 (tunnel domain verify) are gone: hostnames inherit their
+# workspace domain's verification.
+ROWS = [f'C{i:03d}' for i in range(98, 124) if i not in (102, 105)] + ['C242']
+
+
 class Suite:
     def __init__(self, args):
         self.args = args
         self.pb = Path.home() / '.local/bin/pb'
         self.before = registration()
-        self.rows = {f'C{i:03d}': {'main': False, 'error': False, 'failures': []}
-                     for i in range(98, 124)}
-        self.rows['C242'] = {'main': False, 'error': False, 'failures': []}
+        self.rows = {row: {'main': False, 'error': False, 'failures': []} for row in ROWS}
         self.last = None
         self.tunnel = self.extra = self.policy = self.capture = None
         self.dns = []
         self.zone_dns = None
         self.name = args.run
         self.missing = 'missing-' + args.run
-        self.hostname = args.run + '.' + args.zone
+        # Tunnel hostnames live under a verified workspace domain (pb domain add).
+        self.workspace_domain = args.run + '.' + args.zone
+        self.hostname = 'app.' + self.workspace_domain
+        self.domain_added = False
         pairing_lifecycle.command_result = self.observe
 
     def observe(self, binary, *argv, **kwargs):
@@ -111,10 +117,8 @@ class Suite:
             'C098': ['delete', self.missing], 'C099': ['doctor', self.missing],
             'C100': ['domain', '--unknown-fixture-flag'],
             'C101': ['domain', 'add', self.missing, self.hostname],
-            'C102': ['domain', 'instructions', self.missing, self.hostname],
             'C103': ['domain', 'list', self.missing],
             'C104': ['domain', 'remove', self.missing, self.hostname],
-            'C105': ['domain', 'verify', self.missing, self.hostname],
             'C106': ['inspect', self.missing], 'C107': ['list', '--limit', '0'],
             'C108': ['logs', self.missing], 'C109': ['pause', self.missing],
             'C110': ['policy', '--unknown-fixture-flag'],
@@ -217,36 +221,33 @@ class Suite:
     def domains(self):
         self.check('C101', 'main', self.add_domain)
         self.check('C103', 'main', lambda: require(any(x['hostname'] == self.hostname for x in self.command('domain', 'list', self.resource())['items']), 'domain not listed'))
-        self.check('C102', 'main', self.instructions)
-        self.check('C105', 'main', self.verify_domain)
         self.check('C104', 'main', self.remove_domain)
 
     def add_domain(self):
-        route = self.routes()[0]['id']
-        out = self.command('domain', 'add', self.resource(), self.hostname, '--route', route, '--provider', 'cloudflare')['domain']
-        require(out['hostname'] == self.hostname, 'wrong hostname')
-
-    def instructions(self):
-        self.guide = self.command('domain', 'instructions', self.resource(), self.hostname)
-        require(self.guide['hostname'] == self.hostname and self.guide['records'], 'DNS instructions missing')
-
-    def verify_domain(self):
-        require(getattr(self, 'guide', None), 'DNS instructions prerequisite failed')
+        wsd = invoke(self.pb, 'domain', 'add', self.workspace_domain, '--json', timeout=60)
+        self.domain_added = True
+        records = {r['purpose']: r for r in wsd['records']}
         self.zone_dns = FixtureDns(self.args.fixtures_token_file, self.args.fixtures_url, self.args.zone)
-        for record in self.guide['records']:
-            require(record['type'] == 'CNAME', 'unexpected DNS record type')
-            self.dns.append(self.zone_dns.add_cname(record['name'], record['value']))
+        # The fixtures endpoint writes no wildcard; the one hostname used gets the routing record.
+        for name, value in ((records['verification']['name'], records['verification']['value']), (self.hostname, records['routing']['value'])):
+            self.dns.append(self.zone_dns.add_cname(name, value))
             self.save_dns()
-        self.command('domain', 'verify', self.resource(), self.hostname, '--wait', '--timeout', '3m', timeout=240)
+        verified = invoke(self.pb, 'domain', 'verify', self.workspace_domain, '--timeout', '4m', '--json', timeout=300)
+        require(verified['state'] == 'verified' and verified['certificate']['state'] == 'ready', 'workspace domain not verified')
+        route = self.routes()[0]['id']
+        out = self.command('domain', 'add', self.resource(), self.hostname, '--route', route)['domain']
+        require(out['hostname'] == self.hostname, 'wrong hostname')
         def ready():
             items = self.command('domain', 'list', self.resource())['items']
             return next((x for x in items if x['hostname'] == self.hostname and x['state'] == 'ready' and x['certificate']['state'] == 'ready'), None)
-        require(wait(ready, 'verified domain and TLS', 480), 'domain not ready')
-        require(wait(lambda: fetch('https://' + self.hostname)[0] == 200, 'custom-domain HTTPS', 180), 'custom domain did not serve')
+        require(wait(ready, 'hostname certificate', 300), 'hostname not ready')
+        require(wait(lambda: fetch('https://' + self.hostname)[0] == 200, 'custom-hostname HTTPS', 180), 'custom hostname did not serve')
 
     def remove_domain(self):
         confirmed_command(self.pb, 'tunnel', 'domain', 'remove', self.resource(), self.hostname, timeout=90)
         require(not any(x['hostname'] == self.hostname for x in self.command('domain', 'list', self.resource())['items']), 'removed domain remains')
+        confirmed_command(self.pb, 'domain', 'remove', self.workspace_domain, timeout=60)
+        self.domain_added = False
 
     def save_dns(self):
         Path(self.args.output + '.dns').write_text(json.dumps(self.dns))
@@ -286,12 +287,15 @@ class Suite:
                             confirmed_command(self.pb, 'tunnel', 'delete', item['id'])
                 except Exception as error:
                     self.rows['C098']['failures'].append({'mode': 'cleanup', 'reason': str(error)})
+                if self.domain_added:
+                    try: confirmed_command(self.pb, 'domain', 'remove', self.workspace_domain, timeout=60)
+                    except Exception as error: self.rows['C104']['failures'].append({'mode': 'cleanup', 'reason': str(error)})
                 for record in list(self.dns):
                     try:
                         self.zone_dns.remove(record)
                         self.dns.remove(record)
                         self.save_dns()
-                    except Exception as error: self.rows['C105']['failures'].append({'mode': 'cleanup', 'reason': str(error)})
+                    except Exception as error: self.rows['C104']['failures'].append({'mode': 'cleanup', 'reason': str(error)})
                 server.shutdown(); server.server_close(); worker.join(timeout=5)
                 if not self.dns:
                     Path(self.args.fixtures_token_file).unlink(missing_ok=True)
@@ -311,8 +315,7 @@ def main():
         parser.add_argument('--' + name, required=True)
     parser.add_argument('--rows', nargs='+', default=[], help='verify only these command rows')
     args = parser.parse_args()
-    allowed = {f'C{i:03d}' for i in range(98, 124)} | {'C242'}
-    if not set(args.rows) <= allowed:
+    if not set(args.rows) <= set(ROWS):
         parser.error('unknown command row')
     raise SystemExit(0 if Suite(args).main() else 1)
 

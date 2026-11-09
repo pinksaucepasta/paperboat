@@ -1,11 +1,9 @@
-// Browser check for F8-02 (custom domain: add -> DNS instructions -> verify -> TLS -> remove). Paste
-// into the console of a signed-in tab on a tunnel page (/tunnels/<id>, Personal workspace) whose
-// service is up, with `window.__domain` set to a hostname in a zone you control. Needs a caller that
-// creates the two DNS records the page shows: the script publishes them in `window.__dnsRecords`
-// ([{type, name, value}]) and waits for `window.__dnsReady = true`. It adds the hostname from the
-// "Your domain" tab, reads the instructions, checks DNS until verified, waits for the certificate on
-// the server, then removes the hostname and checks the binding is gone. Removed domains are held for
-// a week, so use a new hostname each run. Prints the steps (also in window.__checkSteps).
+// Browser check for F8-02 (a tunnel hostname under a workspace domain: pick -> served with TLS ->
+// remove). Paste into the console of a signed-in tab on a tunnel page (/tunnels/<id>, Personal
+// workspace) whose service is up, with `window.__domain` set to a new hostname one level under a
+// verified workspace domain (Domains page). The routing record for that one name is published in
+// `window.__dnsRecords` ([{type, name, value}]) for a caller whose DNS cannot hold the domain's
+// wildcard; the script waits for `window.__dnsReady = true`. Prints the steps (window.__checkSteps).
 ;(async () => {
   const domain = window.__domain
   delete window.__domain
@@ -52,64 +50,50 @@
   if (!domain) return steps
   pass("hostname is not bound yet", !(await mine()))
 
+  const workspaceDomains = (await (await fetch("/api/v1/domains?workspace=personal")).json()).data?.items ?? []
+  const parent = workspaceDomains.find((d) => d.state === "verified" && domain.endsWith(`.${d.hostname}`))
+  pass("the hostname is under a verified workspace domain", Boolean(parent), parent?.hostname ?? "")
+  if (!parent) return steps
   ;(await until(() => button("Add")))?.click() // the tunnel page renders Add after its first fetch
   const yours = await until(() => button("Your domain", dialog() ?? main()))
   yours?.click()
-  await sleep(500)
-  const hostInput = await until(() =>
-    [...(dialog()?.querySelectorAll("input") ?? [])].find((i) => /example/.test(i.placeholder)),
-  )
-  pass("Add a public hostname offers Your domain", Boolean(hostInput))
-  if (!hostInput) return steps
-  type(hostInput, domain)
+  const nameInput = await until(() => dialog()?.querySelector('input[aria-label="Name"]'))
+  pass("Add a public hostname offers a name under your domains", Boolean(nameInput))
+  if (!nameInput) return steps
+  const domainMenu = dialog().querySelector('[aria-label="Domain"]')
+  if (domainMenu) {
+    domainMenu.click()
+    ;(
+      await until(() =>
+        [...document.querySelectorAll("[role=menuitemradio]")].find((i) => i.textContent.trim() === parent.hostname),
+      )
+    )?.click()
+    await sleep(300)
+  }
+  type(nameInput, domain.slice(0, -parent.hostname.length - 1))
   type(document.getElementById("hostname-service"), window.__port ?? "18088")
   await sleep(300)
+  pass("no DNS step is asked for", !/Add record|DNS record/.test(dialog()?.innerText ?? ""))
   button("Add hostname", dialog())?.click()
-  pass("domain bound on the server", Boolean(await until(mine, 30000)))
-  const records = await until(() => {
-    const found = [...section().matchAll(/Add record (\S+) (\S+) → (\S+)/g)].map((m) => ({
-      type: m[1],
-      name: m[2],
-      value: m[3],
-    }))
-    return found.length >= 2 ? found : null
-  })
-  pass(
-    "page shows the DNS records to add",
-    Boolean(records),
-    records ? records.map((r) => `${r.type} ${r.name}`).join(" | ") : section(),
-  )
-  if (!records) return steps
-  pass(
-    "one record points the name at the tunnel and one answers the certificate challenge",
-    records.some((r) => r.name === domain) && records.some((r) => r.name === `_acme-challenge.${domain}`),
-  )
-  window.__dnsRecords = records
+  pass("hostname bound on the server", Boolean(await until(mine, 30000)))
+  window.__dnsRecords = [
+    { type: "CNAME", name: domain, value: parent.records.find((r) => r.purpose === "routing").value },
+  ]
   await until(() => window.__dnsReady, 180000)
-  const verified = await until(async () => {
-    button("Check again")?.click()
-    await sleep(2000)
-    const d = await mine()
-    return d && d.dns?.observed_records?.length && !/Waiting for DNS/.test(section()) ? d : null
-  }, 120000)
-  pass("DNS verified from the console", Boolean(verified))
   const ready = await until(async () => (await mine())?.certificate?.state === "ready", 240000)
-  pass("certificate issued", Boolean(ready))
+  pass("the domain's certificate is in place for the hostname", Boolean(ready))
   const final = await mine()
   pass(
-    "domain reports ready with a certificate expiry",
+    "hostname reports ready with a certificate expiry",
     final?.state === "ready" && Boolean(final?.certificate?.expires_at),
     `${final?.state} until ${final?.certificate?.expires_at ?? "?"}`,
   )
-  // The page refreshes domain states every 15 seconds.
+  // The page refreshes hostname states every 15 seconds.
   pass(
     "page shows the hostname as ready",
     Boolean(
       await until(
-        () =>
-          !/Certificate failed|Waiting for DNS|Getting a certificate/.test(
-            section().split(domain)[1]?.slice(0, 60) ?? "",
-          ),
+        () => !/Certificate failed|Getting a certificate/.test(section().split(domain)[1]?.slice(0, 60) ?? ""),
         45000,
       ),
     ),
@@ -127,10 +111,7 @@
   )
   remove?.click()
   const confirm = await until(() => dialog())
-  pass(
-    "remove asks to confirm and says the DNS record stays",
-    Boolean(confirm) && /DNS record stays/.test(confirm.innerText),
-  )
+  pass("remove asks to confirm", Boolean(confirm) && /stops reaching this tunnel/.test(confirm.innerText))
   ;[...(confirm?.querySelectorAll("button") ?? [])].find((b) => /^Remove/.test(b.textContent.trim()))?.click()
   pass("binding removed on the server", Boolean(await until(async () => !(await mine()), 30000)))
   pass("hostname gone from the page", Boolean(await until(() => !section().includes(domain))))

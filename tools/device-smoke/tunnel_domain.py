@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Tunnel domains end to end (C100-C105) and the ephemeral tunnel start/stop (C089, C123).
 
-Runs on an enrolled Linux machine. A durable tunnel gets a custom domain in the given DNS zone: add,
-list, instructions, the records from the instructions written through the fixtures endpoint (token
-file, zone name from the command line), verify, serving over HTTPS, remove. Then `pb tunnel
+Runs on an enrolled Linux machine. A workspace domain in the given DNS zone is added (pb domain add),
+its records written through the fixtures endpoint (token file, zone name from the command line) and
+verified; a durable tunnel then serves a hostname under it over HTTPS, the domain refuses removal
+while used, and hostname and domain are removed. Then `pb tunnel
 --ephemeral` starts a preview and `pb tunnel stop` ends it. Everything created (tunnel, domain,
 DNS records) is removed on every exit path.
 """
@@ -101,49 +102,59 @@ def ephemeral(binary, port):
 
 
 def domain(binary, dns, port):
+    """A workspace domain (pb domain add/verify/remove) and a tunnel hostname under it, served over HTTPS."""
     name = 'smoke-domain-' + secrets.token_hex(6)
-    hostname = '%s.%s' % (name, dns.zone_name)
+    workspace_domain = '%s.%s' % (name, dns.zone_name)
+    hostname = 'app.' + workspace_domain
     records = []
     tunnel = None
+    added_domain = False
 
     def call(*args, timeout=90):
         return invoke(binary, 'tunnel', *args, '--json', timeout=timeout)
 
     try:
+        wsd = invoke(binary, 'domain', 'add', workspace_domain, '--json', timeout=60)
+        added_domain = True
+        assert wsd['hostname'] == workspace_domain and wsd['state'] == 'pending_dns', wsd
+        by_purpose = {record['purpose']: record for record in wsd['records']}
+        challenge, routing = by_purpose['verification'], by_purpose['routing']
+        assert challenge['name'] == '_acme-challenge.' + workspace_domain and challenge['type'] == 'CNAME'
+        assert routing['name'] == '*.' + workspace_domain and routing['type'] == 'CNAME'
+        records.append(dns.add_cname(challenge['name'], challenge['value']))
+        # The fixtures endpoint writes no wildcard; the one hostname used gets the routing record.
+        records.append(dns.add_cname(hostname, routing['value']))
+        verified = invoke(binary, 'domain', 'verify', workspace_domain, '--timeout', '4m', '--json', timeout=300)
+        assert verified['state'] == 'verified' and verified['certificate']['state'] == 'ready', verified
+
         created = call('create', name, '--port', str(port), '--duration', '2h', '--wait', '--timeout', '60s')
         tunnel = created['tunnel']['id']
         route = call('route', 'list', tunnel)['items'][0]['id']
-
-        added = call('domain', 'add', tunnel, hostname, '--route', route, '--provider', 'cloudflare')
+        added = call('domain', 'add', tunnel, hostname, '--route', route)
         domain_id = added['domain']['id']
         assert added['domain']['hostname'] == hostname
         listed = call('domain', 'list', tunnel)['items']
-        assert [item['id'] for item in listed] == [domain_id], 'domain list does not show the new domain'
-        assert listed[0]['state'] != 'ready', 'a domain without DNS records must not be ready'
-
-        guide = call('domain', 'instructions', tunnel, hostname)
-        assert guide['hostname'] == hostname and guide['provider'] == 'cloudflare'
-        assert guide['records'] and guide['records'][0]['name'] == hostname
-        assert all(record['type'] == 'CNAME' and record['value'] for record in guide['records'])
-        for record in guide['records']:
-            records.append(dns.add_cname(record['name'], record['value']))
-
-        verified = call('domain', 'verify', tunnel, hostname, '--wait', '--timeout', '3m', timeout=240)
-        assert verified['domain']['id'] == domain_id
+        assert [item['id'] for item in listed] == [domain_id], 'domain list does not show the new hostname'
 
         def ready():
             item = call('domain', 'list', tunnel)['items'][0]
             return item if item['state'] == 'ready' and item['certificate']['state'] == 'ready' else None
-        item = wait(ready, 'the domain to become ready', 480)
-        assert item['dns']['observed_records'], 'ready domain lists no observed DNS records'
+        wait(ready, 'the hostname to become ready', 300)
+        shown = invoke(binary, 'domain', 'show', workspace_domain, '--json', timeout=60)
+        assert [use['hostname'] for use in shown['used_by']] == [hostname], 'pb domain show does not list the hostname'
+        refused = command_result(binary, 'domain', 'remove', workspace_domain, '--json', timeout=60)
+        assert refused.returncode != 0 and hostname in refused.stdout + refused.stderr, 'a domain in use was removed'
         url = 'https://' + hostname + '/'
         status, body = wait(lambda: (lambda r: r if r[0] == 200 else None)(fetch(url)),
-                            'the custom domain to serve over HTTPS', 180)
-        assert body == BODY, 'custom domain served the wrong content'
+                            'the custom hostname to serve over HTTPS', 180)
+        assert body == BODY, 'custom hostname served the wrong content'
 
         confirmed_command(binary, 'tunnel', 'domain', 'remove', tunnel, hostname, timeout=90)
-        assert not call('domain', 'list', tunnel)['items'], 'removed domain is still listed'
-        wait(lambda: fetch(url)[0] != 200, 'the removed domain to stop serving', 120)
+        assert not call('domain', 'list', tunnel)['items'], 'removed hostname is still listed'
+        wait(lambda: fetch(url)[0] != 200, 'the removed hostname to stop serving', 120)
+        confirmed_command(binary, 'domain', 'remove', workspace_domain, timeout=60)
+        added_domain = False
+        assert workspace_domain not in [d['hostname'] for d in invoke(binary, 'domain', 'list', '--json', timeout=60)['items']]
     finally:
         problems = []
         for record in records:
@@ -156,15 +167,20 @@ def domain(binary, dns, port):
                 confirmed_command(binary, 'tunnel', 'delete', tunnel, timeout=90)
             except Exception as error:
                 problems.append(str(error))
+        if added_domain:
+            try:
+                confirmed_command(binary, 'domain', 'remove', workspace_domain, timeout=60)
+            except Exception as error:
+                problems.append(str(error))
         if problems:
             print(json.dumps({'check': 'tunnel-domain', 'cleanup': 'failed', 'problems': problems}), flush=True)
             raise RuntimeError('cleanup failed: ' + '; '.join(problems))
 
 
 ROWS = {'C089': ['tunnel'], 'C100': ['tunnel', 'domain'], 'C101': ['tunnel', 'domain', 'add'],
-        'C102': ['tunnel', 'domain', 'instructions'], 'C103': ['tunnel', 'domain', 'list'],
-        'C104': ['tunnel', 'domain', 'remove'], 'C105': ['tunnel', 'domain', 'verify'],
-        'C123': ['tunnel', 'stop']}
+        'C103': ['tunnel', 'domain', 'list'], 'C104': ['tunnel', 'domain', 'remove'], 'C123': ['tunnel', 'stop'],
+        'C267': ['domain'], 'C268': ['domain', 'add'], 'C269': ['domain', 'list'], 'C270': ['domain', 'show'],
+        'C271': ['domain', 'verify'], 'C272': ['domain', 'remove']}
 BAD = ('panic', 'goroutine', 'Traceback', 'runtime error', 'nil pointer')
 
 
@@ -178,11 +194,9 @@ def help_and_errors(binary):
         bare = command_result(binary, *words, timeout=30)
         text = bare.stdout + bare.stderr
         assert not any(word in text for word in BAD) and text.strip(), row + ': bare invocation printed nothing or a trace'
-        if row not in ('C089', 'C100'):
+        if row not in ('C089', 'C100', 'C267', 'C269'):
             assert bare.returncode != 0, row + ': accepted missing arguments'
-    for row, words in (('C101', ['domain', 'add']), ('C102', ['domain', 'instructions']),
-                       ('C103', ['domain', 'list']), ('C104', ['domain', 'remove']),
-                       ('C105', ['domain', 'verify'])):
+    for row, words in (('C101', ['domain', 'add']), ('C103', ['domain', 'list']), ('C104', ['domain', 'remove'])):
         missing = command_result(binary, 'tunnel', *words, 'tunnel_zz_missing', 'missing.invalid', '--json', '--route',
                                  'rte_zz', timeout=60)
         text = missing.stdout + missing.stderr
@@ -223,7 +237,7 @@ def main():
             worker.join(timeout=5)
     assert registration() == before
     print(json.dumps({'check': 'tunnel-domain', 'status': 'PASS', 'ephemeral_start_stop': True,
-                      'domain_add_list_instructions_verify_remove': True, 'served_over_https': True,
+                      'workspace_domain_add_verify_use_remove': True, 'served_over_https': True,
                       'help_and_errors': True, 'enrollment_preserved': True}))
 
 
