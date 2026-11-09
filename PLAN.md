@@ -370,7 +370,7 @@ state).
 - F3-02: Detach and reattach the same session with output replay; reattach from another device.
 - F3-03: Network drop, sleep/wake, Wi-Fi switch → reconnects to the same shell; no lost or duplicated input.
 - F3-04: A session idle for 8 hours is still usable.
-- F3-05: `pb session list/attach/close/rename/delete`; the 20-session limit gives a clear message (closed and unavailable sessions don't count).
+- F3-05: `pb session list/attach/close/rename/delete`; native terminals have no plan limit, closed sessions never count, and the machine's 256-session protection ceiling gives a clear message.
 - F3-06: Sharing: `pb session share` (view / interact), `shared`, `participants`, `join`, `unshare`, `remove`; revoking while connected ends access immediately.
 - F3-07: Browser terminal from the console (browser on M → targets L, M, W): open, type, resize, reconnect, close.
 - F3-08: Console sharing panel: participants show real identities, join codes and guests work (with and without an account), presence updates.
