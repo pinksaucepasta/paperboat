@@ -27,6 +27,7 @@ import {
 import { DropOverlay, usePageFileDrop } from "@/components/file-drop"
 import { Transfers } from "@/components/files/transfers"
 import { ConfirmAction, SearchField, useListScope } from "@/components/list-toolbar"
+import { MachineChooser } from "@/components/machine-chooser"
 import { useCurrentMachine } from "@/components/machine-shell"
 import { RowMenus, type Entry } from "@/components/row-menus"
 import { Time } from "@/components/time"
@@ -35,6 +36,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { TableRowsSkeleton } from "@/components/skeletons"
 import { SectionHeading } from "@/components/section"
+
+const filesOf = (id: string) => `/files?machine=${encodeURIComponent(id)}`
 
 /** The machine page's Files tab. */
 export function MachineFiles() {
@@ -46,9 +49,9 @@ const rowKey = (row: Row) => `${row.machine.id}/${row.file.id}`
 
 /**
  * One machine's Paperboat Inbox: files sent from here, dropped into a terminal, sent with `pb send`,
- * or approved from a teammate. Files are browsed one machine at a time (pick it above); the machine
- * answers for its own Inbox live, nothing is stored, and an offline machine's Inbox is unavailable
- * until it is back. Downloading and deleting wait for `inboxLive`.
+ * or approved from a teammate. Files are browsed one machine at a time (picked from the list or the
+ * header); the machine answers for its own Inbox live, nothing is stored, and an offline machine's
+ * Inbox is unavailable until it is back. Downloading and deleting wait for `inboxLive`.
  */
 export function FileList({ machine: tabMachine }: { machine?: Machine }) {
   const { scope } = useListScope(tabMachine)
@@ -56,22 +59,8 @@ export function FileList({ machine: tabMachine }: { machine?: Machine }) {
     <section className="flex flex-col gap-4">
       <Requests scope={scope} />
       <Transfers scope={scope} />
-      {scope ? <MachineInbox machineId={scope} /> : <ChooseMachine />}
+      {scope ? <MachineInbox machineId={scope} /> : <MachineChooser href={filesOf} />}
     </section>
-  )
-}
-
-function ChooseMachine() {
-  return (
-    <Empty className="py-16">
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <FolderIcon />
-        </EmptyMedia>
-        <EmptyTitle>Choose a machine</EmptyTitle>
-        <EmptyDescription>Each machine keeps its own Inbox. Pick one above to see its files.</EmptyDescription>
-      </EmptyHeader>
-    </Empty>
   )
 }
 
