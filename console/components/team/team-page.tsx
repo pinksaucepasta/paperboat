@@ -143,18 +143,7 @@ function Teams() {
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium">Your teams</h2>
         {workspaces.isPending ? (
-          <div className="flex flex-col divide-y divide-divider border-y border-divider">
-            {Array.from({ length: 3 }, (_, index) => (
-              <div key={index} className="flex h-16 items-center gap-3 px-3 text-sm">
-                <Skeleton className="size-9 rounded-md" />
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <Skeleton className="my-[3px] h-3.5 w-32" />
-                  <Skeleton className="my-[3px] h-2.5 w-48" />
-                </span>
-                <span className="text-muted-foreground">Open</span>
-              </div>
-            ))}
-          </div>
+          <TeamRowsSkeleton />
         ) : teams.length === 0 ? (
           <div className="flex flex-col items-center gap-3 surface rounded-lg px-6 py-12 text-center">
             <UsersThreeIcon className="size-8 text-muted-foreground" />
@@ -348,5 +337,47 @@ function CreateTeamForm() {
         </Button>
       </DialogFooter>
     </form>
+  )
+}
+
+/** Team rows while they load: avatar tile, name and role lines, and "Open". */
+function TeamRowsSkeleton() {
+  return (
+    <div className="flex flex-col divide-y divide-divider border-y border-divider">
+      {Array.from({ length: 3 }, (_, index) => (
+        <div key={index} className="flex h-16 items-center gap-3 px-3 text-sm">
+          <Skeleton className="size-9 rounded-md" />
+          <span className="flex min-w-0 flex-1 flex-col">
+            <Skeleton className="my-[3px] h-3.5 w-32" />
+            <Skeleton className="my-[3px] h-2.5 w-48" />
+          </span>
+          <span className="text-muted-foreground">Open</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * The Teams page's fixed chrome (its two buttons and heading) over team-row placeholders, for the
+ * prerendered shell, which can't read the URL the page itself reads.
+ */
+export function TeamsSkeleton() {
+  return (
+    <div className="flex flex-col gap-10">
+      <header className="flex items-center justify-end gap-2">
+        <Button variant="outline" size="lg" tabIndex={-1} aria-hidden className="pointer-events-none">
+          Add member
+        </Button>
+        <Button size="lg" tabIndex={-1} aria-hidden className="pointer-events-none">
+          <PlusIcon data-icon="inline-start" />
+          Create team
+        </Button>
+      </header>
+      <section className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium">Your teams</h2>
+        <TeamRowsSkeleton />
+      </section>
+    </div>
   )
 }
