@@ -120,3 +120,33 @@ func TestManualRemovalPreservesUnreadablePageAndRecovers(t *testing.T) {
 		t.Fatal("recovered removal left owned page")
 	}
 }
+
+// pbvm1 F14-09: the activation helper's manual refresh rewrote all pages (two fsyncs each) on every update and was
+// killed by its 30 s deadline three times on a loaded 1-vCPU VM. An installed, identical page is not rewritten.
+func TestManualInstallLeavesIdenticalPagesUntouched(t *testing.T) {
+	dir := t.TempDir()
+	if err := Install(dir); err != nil {
+		t.Fatal(err)
+	}
+	page := filepath.Join(dir, "man1", "pb.1")
+	before, err := os.Stat(page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Install(dir); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(page)
+	if err != nil || !os.SameFile(before, after) {
+		t.Fatalf("an identical page was replaced: %v", err)
+	}
+	if err := os.Chmod(page, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Install(dir); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(page); err != nil || info.Mode().Perm() != 0644 {
+		t.Fatalf("a page with the wrong mode was kept: %v", err)
+	}
+}

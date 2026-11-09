@@ -49,12 +49,27 @@ func Install(directory string) (resultErr error) {
 		if err != nil {
 			return err
 		}
-		if err := atomicfile.Write(filepath.Join(section, entry.Name()), append([]byte(manualMarker), data...), atomicfile.Options{Mode: 0644, OwnerUID: -1, OwnerGID: -1}); err != nil {
+		page, path := append([]byte(manualMarker), data...), filepath.Join(section, entry.Name())
+		if unchanged(path, page) {
+			current[entry.Name()] = true // 268 pages with two fsyncs each outlasted the updater's deadline on a loaded 1-vCPU VM (pbvm1 F14-09)
+			continue
+		}
+		if err := atomicfile.Write(path, page, atomicfile.Options{Mode: 0644, OwnerUID: -1, OwnerGID: -1}); err != nil {
 			return fmt.Errorf("install manual %s: %w", entry.Name(), err)
 		}
 		current[entry.Name()] = true
 	}
 	return removeOwned(section, current)
+}
+
+// unchanged reports whether path is already a regular, world-readable file holding exactly page.
+func unchanged(path string, page []byte) bool {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0644 || info.Size() != int64(len(page)) {
+		return false
+	}
+	existing, err := os.ReadFile(path)
+	return err == nil && bytes.Equal(existing, page)
 }
 
 // Remove removes only pages bearing our ownership marker, preserving shared
