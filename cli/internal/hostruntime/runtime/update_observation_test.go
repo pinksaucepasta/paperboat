@@ -11,6 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/availability"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 )
 
 func TestRuntimeUpdateObservationUsesPlatformChannelAndFences(t *testing.T) {
@@ -53,6 +54,25 @@ func TestRuntimeUpdateObservationUsesUpdaterStatus(t *testing.T) {
 	}
 	if observation := sender.updateObservationFrom(now, nil, nil, updated.ErrUnavailable); observation == nil || observation.State != "failed" || observation.ErrorCode != "updater_unavailable" {
 		t.Fatalf("unavailable updater observation=%+v", observation)
+	}
+}
+
+func TestRuntimeUpdateObservationReportsCandidateAndActivation(t *testing.T) {
+	now := time.Now().UTC()
+	sender := &runtimeObservationSender{reporterVersion: "2026.11.08.4", installationGeneration: 4, workerGeneration: 9, osBootID: "boot-1"}
+	candidate := &workerupdate.PreparedCandidate{Version: "2026.11.09.0"}
+	for _, tc := range []struct {
+		name, state, target string
+		response            *updated.ControlResponse
+	}{
+		{"healthy", "healthy", "", &updated.ControlResponse{Status: "ok", Version: "2026.11.08.4"}},
+		{"deferred", "deferred", "2026.11.09.0", &updated.ControlResponse{Status: "ok", Version: "2026.11.08.4", Candidate: candidate}},
+		{"activating", "activating", "2026.11.09.0", &updated.ControlResponse{Status: "ok", Version: "2026.11.08.4", Candidate: candidate, Pending: true}},
+	} {
+		got := sender.updateObservationFrom(now, nil, tc.response, nil)
+		if got == nil || got.State != tc.state || got.TargetVersion != tc.target || got.CurrentVersion != "2026.11.08.4" {
+			t.Fatalf("%s observation=%+v", tc.name, got)
+		}
 	}
 }
 

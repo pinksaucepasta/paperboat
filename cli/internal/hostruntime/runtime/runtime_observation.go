@@ -477,8 +477,17 @@ func (s *runtimeObservationSender) updateObservationFrom(now time.Time, availabi
 		}
 		// The updater owns activation and is authoritative for the installed
 		// version. The runtime process can remain alive across that activation.
+		// A downloaded candidate awaiting approval is "deferred"; a queued activation handoff is "activating". Both
+		// name the candidate version (the server requires a target for every state but idle/healthy).
+		state, target := "healthy", ""
+		if candidate := updaterState.Candidate; candidate != nil && candidate.Version != "" {
+			state, target = "deferred", candidate.Version
+			if updaterState.Pending {
+				state = "activating"
+			}
+		}
 		return &runtimeUpdateObservation{
-			Schema: "paperboat.update-observation/v1", State: "healthy", CurrentVersion: currentVersion,
+			Schema: "paperboat.update-observation/v1", State: state, CurrentVersion: currentVersion, TargetVersion: target,
 			Channel: channel, OperationID: "update-" + strconv.FormatUint(s.workerGeneration, 10) + "-" + strconv.FormatInt(now.UnixNano(), 10),
 			InstallationGeneration: s.installationGeneration, WorkerGeneration: s.workerGeneration, OSBootID: s.osBootID,
 			ObservedAt: now,
