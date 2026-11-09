@@ -68,6 +68,10 @@ func TestRuntimeUpdateObservationReportsCandidateAndActivation(t *testing.T) {
 		{"healthy", "healthy", "", &updated.ControlResponse{Status: "ok", Version: "2026.11.08.4"}},
 		{"deferred", "deferred", "2026.11.09.0", &updated.ControlResponse{Status: "ok", Version: "2026.11.08.4", Candidate: candidate}},
 		{"activating", "activating", "2026.11.09.0", &updated.ControlResponse{Status: "ok", Version: "2026.11.08.4", Candidate: candidate, Pending: true}},
+		// After --approve the staged candidate is consumed: only the journal names the target.
+		{"activating from the journal", "activating", "2026.11.09.0", &updated.ControlResponse{Status: "ok", Version: "2026.11.08.4", Pending: true, Transaction: workerupdate.TransactionState{CandidateVersion: "2026.11.09.0"}}},
+		{"pending without a target", "healthy", "", &updated.ControlResponse{Status: "ok", Version: "2026.11.08.4", Pending: true}},
+		{"journal candidate without a handoff", "healthy", "", &updated.ControlResponse{Status: "ok", Version: "2026.11.08.4", Transaction: workerupdate.TransactionState{CandidateVersion: "2026.11.09.0"}}},
 	} {
 		got := sender.updateObservationFrom(now, nil, tc.response, nil)
 		if got == nil || got.State != tc.state || got.TargetVersion != tc.target || got.CurrentVersion != "2026.11.08.4" {

@@ -486,6 +486,10 @@ func (s *runtimeObservationSender) updateObservationFrom(now time.Time, availabi
 				state = "activating"
 			}
 		}
+		// An approved activation consumes the staged candidate, so only the journal still names its target.
+		if target == "" && updaterState.Pending && updaterState.Transaction.CandidateVersion != "" {
+			state, target = "activating", updaterState.Transaction.CandidateVersion
+		}
 		return &runtimeUpdateObservation{
 			Schema: "paperboat.update-observation/v1", State: state, CurrentVersion: currentVersion, TargetVersion: target,
 			Channel: channel, OperationID: "update-" + strconv.FormatUint(s.workerGeneration, 10) + "-" + strconv.FormatInt(now.UnixNano(), 10),

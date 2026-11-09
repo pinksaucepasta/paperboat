@@ -185,6 +185,12 @@ func (s *Service) controlRequestWithRequest(ctx context.Context, request Control
 	if err := s.requireCommittedSource(); err != nil {
 		response := ControlResponse{Schema: ControlProtocolV1, Status: "ok", Pending: errors.Is(err, ErrInstallationPending), UpdaterVersion: buildinfo.Version}
 		if response.Pending && request.Operation == "status" {
+			// The journal names the target while the pending source cannot vouch for the active version. A
+			// journal that cannot be read keeps the bare response: this status only reports readiness.
+			if state, stateErr := s.currentManager().TransactionState(); stateErr == nil {
+				state.ActiveVersion, state.ActiveDigest, state.ActiveLength = "", "", 0
+				response.Transaction = state
+			}
 			return response, nil
 		}
 		return response, err
