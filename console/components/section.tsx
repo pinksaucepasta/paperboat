@@ -1,49 +1,96 @@
 "use client"
 
 import { InfoIcon } from "@phosphor-icons/react"
+import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
 
-/** A titled page section (Account, a tunnel's hostnames, Network…), its rows divided below the title. */
-export function Section({
-  title,
-  info,
-  action,
-  children,
-}: {
+type Heading = {
   title: string
   /** An ⓘ next to the title explaining the section, with its own short heading. */
   info?: { title: string; body: React.ReactNode }
   /** A control on the right of the title, such as "Add". */
   action?: React.ReactNode
-  children: React.ReactNode
+}
+
+/**
+ * A section's title row (32 px, the title on its cap height, an optional ⓘ and action). Section uses
+ * it; a section whose body is a table, a panel or cards uses it alone over that body.
+ */
+export function SectionHeading({ title, info, action, className }: Heading & { className?: string }) {
+  return (
+    <div className="flex min-h-8 items-center gap-1.5">
+      <h2 className={cn("flex items-center gap-1.5 text-sm font-medium", className)}>
+        <span className="trim-cap">{title}</span>
+        {info && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span
+                  className="inline-flex text-muted-foreground hover:text-foreground"
+                  aria-label={`About ${title.toLowerCase()}`}
+                />
+              }
+            >
+              <InfoIcon className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipContent className="flex max-w-72 flex-col items-start gap-1 py-2">
+              <span className="font-medium">{info.title}</span>
+              <span className="opacity-80">{info.body}</span>
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </h2>
+      {action && <div className="ml-auto">{action}</div>}
+    </div>
+  )
+}
+
+/** A titled page section (Account, a tunnel's hostnames, Network…), its rows divided below the title. */
+export function Section({ children, ...heading }: Heading & { children: React.ReactNode }) {
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionHeading {...heading} />
+      <div className="flex flex-col border-t border-divider">{children}</div>
+    </section>
+  )
+}
+
+/**
+ * The end of an object's page (DESIGN.md, Destructive actions): a faint red panel saying what goes,
+ * and a light chip with red text that opens the confirmation (`children`: the dialogs).
+ */
+export function DangerZone({
+  title,
+  description,
+  action,
+  onAction,
+  children,
+}: {
+  title: string
+  description: React.ReactNode
+  action: string
+  onAction: () => void
+  children?: React.ReactNode
 }) {
   return (
     <section className="flex flex-col gap-3">
-      <div className="flex min-h-8 items-center gap-1.5">
-        <h2 className="flex items-center gap-1.5 text-sm font-medium">
-          <span className="trim-cap">{title}</span>
-          {info && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span
-                    className="inline-flex text-muted-foreground hover:text-foreground"
-                    aria-label={`About ${title.toLowerCase()}`}
-                  />
-                }
-              >
-                <InfoIcon className="size-3.5" />
-              </TooltipTrigger>
-              <TooltipContent className="flex max-w-72 flex-col items-start gap-1 py-2">
-                <span className="font-medium">{info.title}</span>
-                <span className="opacity-80">{info.body}</span>
-              </TooltipContent>
-            </Tooltip>
-          )}
-        </h2>
-        {action && <div className="ml-auto">{action}</div>}
+      <SectionHeading title="Danger zone" className="text-destructive" />
+      <div className="flex flex-wrap items-center gap-4 rounded-lg bg-destructive/5 p-4 dark:bg-destructive/10">
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <p className="text-sm font-medium">{title}</p>
+          <p className="text-sm text-muted-foreground">{description}</p>
+        </div>
+        <Button
+          variant="secondary"
+          size="lg"
+          className="bg-background text-destructive hover:bg-background/70 dark:bg-white/10 dark:hover:bg-white/15"
+          onClick={onAction}
+        >
+          {action}
+        </Button>
       </div>
-      <div className="flex flex-col border-t border-divider">{children}</div>
+      {children}
     </section>
   )
 }

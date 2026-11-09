@@ -35,7 +35,7 @@ import { RowMenus, type Entry } from "@/components/row-menus"
 import { ConfirmAction, SearchField, ViewToggle } from "@/components/list-toolbar"
 import { Time } from "@/components/time"
 import { MachineAccess } from "@/components/team/machine-access"
-import { Row, Section } from "@/components/section"
+import { DangerZone as DangerZonePanel, Row, Section } from "@/components/section"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -760,28 +760,16 @@ function DangerZone({ team, owner }: { team: Team; owner: boolean }) {
   const workspace = useWorkspace()
   const [open, setOpen] = useState(false)
   return (
-    <section className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium text-destructive">Danger zone</h2>
-      <div className="flex flex-wrap items-center gap-4 rounded-lg bg-destructive/5 p-4 dark:bg-destructive/10">
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <p className="text-sm font-medium">{owner ? "Delete team" : "Leave team"}</p>
-          <p className="text-sm text-muted-foreground">
-            {owner
-              ? "Members lose access, team ENV and config are deleted, team machines go back to their owners. Cancel the plan in Billing first."
-              : "You lose access to the team's machines, ENV and config."}
-          </p>
-        </div>
-        <Button
-          variant="secondary"
-          size="lg"
-          className={cn(
-            "bg-background text-destructive hover:bg-background/70 dark:bg-white/10 dark:hover:bg-white/15",
-          )}
-          onClick={() => setOpen(true)}
-        >
-          {owner ? "Delete team" : "Leave team"}
-        </Button>
-      </div>
+    <DangerZonePanel
+      title={owner ? "Delete team" : "Leave team"}
+      description={
+        owner
+          ? "Members lose access, team ENV and config are deleted, team machines go back to their owners. Cancel the plan in Billing first."
+          : "You lose access to the team's machines, ENV and config."
+      }
+      action={owner ? "Delete team" : "Leave team"}
+      onAction={() => setOpen(true)}
+    >
       {open && !owner && <LeaveDialog team={team} onClose={() => setOpen(false)} />}
       {owner && (
         <ConfirmAction
@@ -801,6 +789,6 @@ function DangerZone({ team, owner }: { team: Team; owner: boolean }) {
           }}
         />
       )}
-    </section>
+    </DangerZonePanel>
   )
 }

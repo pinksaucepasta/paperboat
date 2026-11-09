@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { useMachineEdit } from "@/components/machine-edit"
 import { TagChips } from "@/components/machine-tags"
 import { RemoveMachineDialog } from "@/components/machine-remove"
+import { DangerZone as DangerZonePanel } from "@/components/section"
 
 /**
  * The machine's name and tags. Hovering shows a pencil; editing happens in the title
@@ -116,23 +117,12 @@ export function DangerZone({ machine }: { machine: Machine }) {
   if (!machine.can_manage) return null
 
   return (
-    <section className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium text-destructive">Danger zone</h2>
-      {/* A faint red fill, no frame; the button is a light chip with red text. */}
-      <div className="flex flex-wrap items-center gap-4 rounded-lg bg-destructive/5 p-4 dark:bg-destructive/10">
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <p className="text-sm font-medium">Remove machine</p>
-          <p className="text-sm text-muted-foreground">It loses access right away and its open sessions end.</p>
-        </div>
-        <Button
-          variant="secondary"
-          size="lg"
-          className="bg-background text-destructive hover:bg-background/70 dark:bg-white/10 dark:hover:bg-white/15"
-          onClick={() => setConfirming(true)}
-        >
-          Remove
-        </Button>
-      </div>
+    <DangerZonePanel
+      title="Remove machine"
+      description="It loses access right away and its open sessions end."
+      action="Remove"
+      onAction={() => setConfirming(true)}
+    >
       {confirming && (
         <RemoveMachineDialog
           machine={machine}
@@ -140,6 +130,6 @@ export function DangerZone({ machine }: { machine: Machine }) {
           onRemoved={() => router.push("/")}
         />
       )}
-    </section>
+    </DangerZonePanel>
   )
 }

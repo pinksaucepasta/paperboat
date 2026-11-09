@@ -35,6 +35,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
+import { DangerZone } from "@/components/section"
 
 /**
  * A tunnel's page, laid out like a machine's Overview: who and where it serves, the hostnames
@@ -143,23 +144,12 @@ function Loaded({ tunnel }: { tunnel: Tunnel }) {
 
       <TunnelHostnames tunnel={tunnel} />
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium text-destructive">Danger zone</h2>
-        <div className="flex flex-wrap items-center gap-4 rounded-lg bg-destructive/5 p-4 dark:bg-destructive/10">
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <p className="text-sm font-medium">Delete tunnel</p>
-            <p className="text-sm text-muted-foreground">Its address and public hostnames stop working for good.</p>
-          </div>
-          <Button
-            variant="secondary"
-            size="lg"
-            className="bg-background text-destructive hover:bg-background/70 dark:bg-white/10 dark:hover:bg-white/15"
-            onClick={openDelete}
-          >
-            Delete
-          </Button>
-        </div>
-      </section>
+      <DangerZone
+        title="Delete tunnel"
+        description="Its address and public hostnames stop working for good."
+        action="Delete"
+        onAction={openDelete}
+      />
       {dialogs}
     </>
   )
