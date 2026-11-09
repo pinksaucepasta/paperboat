@@ -615,7 +615,7 @@ func Install(ctx context.Context, request Request) (resultErr error) {
 	if err := manager.Recover(ctx); err != nil {
 		return err
 	}
-	return manager.Replace(ctx, func(ctx context.Context) error { return installWindows(ctx, request, true) })
+	return replaceWindowsCandidate(ctx, manager, request, func(ctx context.Context) error { return installWindows(ctx, request, true) })
 }
 
 func installWindows(ctx context.Context, request Request, lifecycleOwned bool) (resultErr error) {
@@ -688,9 +688,7 @@ func installWindows(ctx context.Context, request Request, lifecycleOwned bool) (
 			return err
 		}
 	}
-	if err := runWindowsInstallPhase(ctx, "install Paperboat machine guard", func() error { return installMachineGuard(ctx, request) }); err != nil {
-		return err
-	}
+	// The machine guard is installed, and put back on failure, by replaceWindowsCandidate around this replacement.
 	if err := runWindowsInstallPhase(ctx, "register Paperboat command path", func() error { return winenv.EnsureMachinePath(filepath.Dir(layout.Binary)) }); err != nil {
 		return err
 	}

@@ -390,6 +390,84 @@ func PrepareWindowsSuppliedMaintenance(ctx context.Context, layout service.Layou
 	return func() { _ = abort() }, nil
 }
 
+// replaceWindowsCandidate is the one way a Windows installation is replaced by request's source: a failed attempt
+// leaves the previous version complete (lifecycle rollback, machine guard) and nothing of the candidate.
+func replaceWindowsCandidate(ctx context.Context, manager *service.LifecycleManager, request Request, replace func(context.Context) error) error {
+	candidate, err := newCandidateSessionOwner(request)
+	if err != nil {
+		return err
+	}
+	installGuard := func(ctx context.Context) (guardUndo, error) {
+		var undo guardUndo
+		err := runWindowsInstallPhase(ctx, "install Paperboat machine guard", func() (err error) {
+			undo, err = installMachineGuardReversible(ctx, request)
+			return err
+		})
+		if err != nil {
+			return nil, err
+		}
+		return undo, nil
+	}
+	return replaceCandidate(ctx, manager.Replace, installGuard, replace, func(ctx context.Context) error {
+		// A rollback that did not finish keeps its journal: recovery still owns both versions.
+		if manager.RequireRecovered(ctx) != nil {
+			return nil
+		}
+		return withdrawWindowsCandidate(ctx, request, candidate)
+	})
+}
+
+// withdrawWindowsCandidate removes what a replacement that did not commit published for its source: the session
+// owner (service and catalogue descriptor) and the SSH generation (victus 2026-11-10: both stayed after the
+// rollback). The restored installation's own generation is never touched.
+func withdrawWindowsCandidate(ctx context.Context, request Request, candidate candidateSessionOwner) error {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	instance, err := WindowsInstanceForSID(request.OwnerSID)
+	if err != nil {
+		return err
+	}
+	// A first installation that failed leaves no record: nothing is committed.
+	installed, err := LoadWindowsRuntimeConfigForInstance(instance)
+	if err != nil && !installNotExistOnly(err) {
+		return err
+	}
+	return hostInstallFailure("remove the failed version's session owner and SSH service",
+		candidate.withdrawUnless(ctx, installed.SessionOwnerGeneration),
+		withdrawWindowsSSHCandidate(ctx, instance, request, installed.Source))
+}
+
+func withdrawWindowsSSHCandidate(ctx context.Context, instance string, request Request, committed installsource.Source) error {
+	if committed.SHA256 == request.Source.SHA256 {
+		return nil
+	}
+	generations, err := windowsopenssh.ListGenerations(ctx, request.OwnerSID)
+	if err != nil {
+		return err
+	}
+	for _, generation := range generations {
+		if generation.Source.SHA256 != request.Source.SHA256 {
+			continue
+		}
+		present, err := windowsCarrierPresentForSSH(ctx, instance)
+		if err != nil {
+			return err
+		}
+		if !present {
+			// No carrier is left that could have admitted a connection to it.
+			return windowsopenssh.RetireGeneration(ctx, generation)
+		}
+		// The restored carrier knows which generations still hold connections; a busy one is retired by the
+		// updater's reconciliation once they end.
+		carrier, err := ReadCarrierConfig(ctx, instance)
+		if err != nil {
+			return err
+		}
+		return pruneWindowsSSHGenerations(ctx, carrier, committed)
+	}
+	return nil
+}
+
 // Preparation can probe/stop legacy roles before lifecycle recovery. Reject a
 // foreign signed owner before that preparation; Recover repeats the check under
 // its own lock so this read-only preflight cannot grant mutation authority.
@@ -498,9 +576,9 @@ func PrepareWindowsReplacement(ctx context.Context, request Request) (func(), er
 		if installed, err := LoadWindowsRuntimeConfigForInstance(layout.Instance); err == nil && installed.Source == request.Source {
 			return
 		}
-		// Publication of an independent owner outlives feature-install rollback.
-		// Its protected descriptor remains executable authority even if readiness
-		// failed. The normal reference-aware GC owns eventual retirement.
+		// A session owner or SSH generation of the candidate that could not be
+		// withdrawn (a rollback that did not finish, connections its carrier still
+		// holds) runs this pin. The normal reference-aware GC owns its retirement.
 		catalogue, _, err := sessionOwnerCatalog(request)
 		if err != nil {
 			return
@@ -511,6 +589,15 @@ func PrepareWindowsReplacement(ctx context.Context, request Request) (func(), er
 		}
 		for _, descriptor := range descriptors {
 			if descriptor.Source.SameArtifact(request.Source) {
+				return
+			}
+		}
+		generations, err := windowsopenssh.ListGenerations(context.WithoutCancel(ctx), request.OwnerSID)
+		if err != nil {
+			return
+		}
+		for _, generation := range generations {
+			if generation.Source.SHA256 == request.Source.SHA256 {
 				return
 			}
 		}
@@ -595,7 +682,7 @@ func replaceWindowsInstallationLocked(ctx context.Context, request Request, stat
 		return err
 	}
 	defer cleanup()
-	return manager.Replace(ctx, replace)
+	return replaceWindowsCandidate(ctx, manager, request, replace)
 }
 
 // InstallWindowsReplacement is called only inside the owning lifecycle Replace.
