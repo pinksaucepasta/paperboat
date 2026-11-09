@@ -35,6 +35,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 )
 
@@ -160,7 +161,14 @@ func connectedRegionalTokens(t *testing.T, signer ed25519.PrivateKey, configurat
 	for _, peer := range configuration.Peers {
 		entry := derpquic.Peer{WireGuardPublicKey: peer.Identity.WireGuardPublicKey, DiscoPublicKey: peer.Identity.DiscoPublicKey}
 		for _, scope := range peer.Scopes {
-			entry.Scopes = append(entry.Scopes, derpquic.Scope{ResourceKind: scope.ResourceKind, ResourceID: scope.ResourceID, ResourceGeneration: scope.ResourceGeneration, Capability: scope.Capability, Direction: scope.Direction, Port: scope.Port, ExpiresAt: scope.ExpiresAt})
+			stamped := scope.ExpiresAt
+			if stamped == 0 { // a standing scope of another account's peer rides the grant with the grant's expiry
+				if !peernetwork.RelayGrantKeepsStanding(scope.ResourceKind, scope.Capability, scope.Direction, int64(scope.ResourceGeneration), int(scope.Port), false) {
+					continue
+				}
+				stamped = expires
+			}
+			entry.Scopes = append(entry.Scopes, derpquic.Scope{ResourceKind: scope.ResourceKind, ResourceID: scope.ResourceID, ResourceGeneration: scope.ResourceGeneration, Capability: scope.Capability, Direction: scope.Direction, Port: scope.Port, ExpiresAt: stamped})
 		}
 		grant.Peers = append(grant.Peers, entry)
 	}
@@ -317,8 +325,7 @@ func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
 		if lateGrant {
 			hostScope := clientConfig.Peers[0].Scopes[0]
 			hostScope.ResourceID, hostScope.ExpiresAt = machineID, 0
-			// An expiring scope pairs the relay (a standing right alone is left out of relay grants, as the server's
-			// are); the standing one is what the host-rules stream is admitted by.
+			// The standing scope is what the host-rules stream is admitted by; the expiring one is the session scope.
 			clientConfig.Peers[0].Scopes = append(clientConfig.Peers[0].Scopes, hostScope)
 			state.clientNet = clientConfig
 			clientConfig.Peers = nil // the document the CLI fetched before the grant
@@ -496,9 +503,7 @@ func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
 		state.clientNet = granted
 		state.network = connectedSignedJWT(t, signerPrivate, "paperboat-network-config+jwt", granted)
 		var grant string
-		relayView := granted
-		relayView.Peers = []tailnet.NetworkPeer{{Identity: granted.Peers[0].Identity, Scopes: granted.Peers[0].Scopes[:1]}}
-		state.candidate, grant = connectedRegionalTokens(t, signerPrivate, relayView, node)
+		state.candidate, grant = connectedRegionalTokens(t, signerPrivate, granted, node)
 		state.grants = []string{grant}
 		state.mu.Unlock()
 		runtime.identityFingerprint = identity.LocalCertificate.Fingerprint()
