@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -367,6 +368,11 @@ func removePathPreserving(root string, preserved []string) error {
 }
 
 func pathWithinOrEqual(root, candidate string) bool {
+	// macOS and Windows volumes are case-insensitive by default: the note lives under "paperboat" and the daemon's
+	// state under "Paperboat", one directory, so a case-sensitive match removed the preserved diagnostics (F1-09).
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		root, candidate = strings.ToLower(root), strings.ToLower(candidate)
+	}
 	relative, err := filepath.Rel(root, candidate)
 	return err == nil && (relative == "." || relative != ".." && !strings.HasPrefix(relative, ".."+string(os.PathSeparator)))
 }
