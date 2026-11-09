@@ -2,8 +2,8 @@
 """Windows lifecycle checks on victus, driven from a Linux host over SSH (PowerShell), with hp as the peer client.
 
   VICTUS_PASS=... windows_lifecycle.py --expect-version V --windows-install-json FILE CHECK...
-  CHECK: install-pair version doctor status service crash availability exec exec-self reset-pair uninstall
-  install-pair needs --build (the new pb.exe already copied to victus); it writes the install receipt to the
+  CHECK: install-pair update version doctor status service crash availability exec exec-self reset-pair uninstall
+  install-pair and update need --build (the new pb.exe already copied to victus); install-pair writes the install receipt to the
   --windows-install-json file. install-pair and reset-pair mint tokens on hp. Results go to results/windows-lifecycle-<UTC>.json.
 
 Prints one `PASS|FAIL id seconds detail` line per check and exits non-zero on any failure. Never prints tokens,
@@ -114,6 +114,19 @@ def check_install_pair(win, args):
     wait_for(lambda: re.search(rf'\sonline\s.*{re.escape(machine_id)}', hp(f'{PB_HP} machine list')[1]), 30, 'the machine online in the account within 30 s of pairing')
     wait_for(lambda: 'doctor: healthy' in win.run('doctor')[1], max(1, 60 - (time.time() - paired)), 'doctor healthy within 60 s of pairing')
     args.machine = machine_named(machine_id)  # the pair may suffix a taken name
+
+
+def check_update(win, args):
+    """F14-01: pb update --from <newer build> succeeds, reports the new version, and leaves one healthy generation."""
+    assert args.build, 'update needs --build <newer pb.exe on victus>'
+    code, receipt = win.json('update', '--from', args.build, timeout=600)
+    data = receipt.get('data', {})
+    assert code == 0 and receipt.get('ok'), 'update failed: ' + json.dumps(receipt.get('error', {}))[:200]
+    assert data.get('changed') is True and data.get('version') == args.expect_version, f"update reported {data.get('previous_version')} -> {data.get('version')}"
+    check_version(win, args)
+    wait_for(lambda: 'doctor: healthy' in win.run('doctor')[1], 120, 'doctor healthy after the update')
+    count = "(Get-Service | Where-Object { $_.Name -like 'PaperboatSessionOwner-*' -or $_.Name -like 'PaperboatSshd-*' } | Measure-Object).Count"
+    wait_for(lambda: victus(count)[1].strip() == '2', 120, 'only the new session-owner and SSH generation left')
 
 
 def check_version(win, args):
@@ -227,7 +240,7 @@ def inventory(args):
     assert code == 0 and 'inventory: clean' in out, 'leftovers: ' + ' | '.join(l for l in out.splitlines() if l.startswith('leftover'))[:400]
 
 
-CHECKS = {'install-pair': check_install_pair, 'exec-self': check_exec_self, 'version': check_version, 'doctor': check_doctor, 'status': check_status, 'service': check_service, 'crash': check_crash,
+CHECKS = {'install-pair': check_install_pair, 'update': check_update, 'exec-self': check_exec_self, 'version': check_version, 'doctor': check_doctor, 'status': check_status, 'service': check_service, 'crash': check_crash,
           'availability': check_availability, 'exec': check_exec, 'reset-pair': check_reset_pair, 'uninstall': check_uninstall}
 
 
