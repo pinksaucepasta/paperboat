@@ -54,6 +54,9 @@ The brand guidelines live in the Paper file "Intuitive zephyr", page "Brand guid
   (default variant) per view.
 - **Empty states.** A list that has never had items uses `Empty` (`className="py-16"`, icon, title,
   one line, the action). A search or filter with no matches is one muted centered line in the table.
+- **Load errors.** A list or page that couldn't load shows `LoadError` (`components/load-error.tsx`):
+  "Couldn't load X." with Retry, or the server's sentence for a refusal. Errors from an action sit
+  under the control that failed, in `text-destructive`.
 
 ## Loading states
 
@@ -62,7 +65,8 @@ The brand guidelines live in the Paper file "Intuitive zephyr", page "Brand guid
   without data (labels, column headers, tab names, radio choices) renders as text, not a grey bar. A
   placeholder for a line of text is its line height: a `Skeleton` of the text's cap height with
   `my-*` making up the rest (`my-0.5 h-4` for `text-sm`).
-- Reuse `components/skeletons.tsx` (`SectionSkeleton`, `ListSkeleton`, `EmptySkeleton`) or render
+- Reuse `components/skeletons.tsx` (`SectionSkeleton`, `ListSkeleton`, `EmptySkeleton`,
+  `TableRowsSkeleton`: one cell per column with the header cell's responsive classes) or render
   the real component with an empty body; never a generic grey box.
 - What every page needs (user, workspaces, billing) is read on the server in the layout
   (`WithSession`); a page may add its own first reads (`<WithSession reads={…}>`) so its first HTML is
