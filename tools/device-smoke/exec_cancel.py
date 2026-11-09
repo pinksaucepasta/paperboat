@@ -56,20 +56,25 @@ def verify_stopped(binary, target, pid, nonce):
 
 def one(binary, target, mode):
     nonce = 'PB_EXEC_CANCEL_' + uuid.uuid4().hex
-    windows = windows_target.is_windows(binary, target)
     stack = contextlib.ExitStack()  # holds the staged PowerShell fixture on a Windows target
-    if windows:
-        fixture = windows_target.file_argv(
-            stack.enter_context(windows_target.staged(binary, target, windows_target.sleeper_script())), nonce)
-    else:
-        code = "import os,sys,time; print(sys.argv[1],os.getpid(),flush=True); time.sleep(120)"
-        fixture = ['python3', '-c', code, nonce]
-    arguments = [str(binary), 'exec', target, '--timeout', '15s' if mode == 'timeout' else '2m',
-                 '--json', '--', *fixture]
+    windows = False
+    arguments = [str(binary), 'exec', target]
     pid = None
     failure = None
-    process = winhost.job(binary, arguments[1:])
+    process = None
     try:
+        # Everything that can fail before the child runs is inside this try, so every startup failure keeps its
+        # private diagnostic (the platform lookup and the staging run pb too).
+        windows = windows_target.is_windows(binary, target)
+        if windows:
+            fixture = windows_target.file_argv(
+                stack.enter_context(windows_target.staged(binary, target, windows_target.sleeper_script())), nonce)
+        else:
+            code = "import os,sys,time; print(sys.argv[1],os.getpid(),flush=True); time.sleep(120)"
+            fixture = ['python3', '-c', code, nonce]
+        arguments = [str(binary), 'exec', target, '--timeout', '15s' if mode == 'timeout' else '2m',
+                     '--json', '--', *fixture]
+        process = winhost.job(binary, arguments[1:])
         deadline = time.monotonic() + 35
         while pid is None and time.monotonic() < deadline:
             pid = process_identity(process, nonce)
@@ -88,17 +93,19 @@ def one(binary, target, mode):
             raise RuntimeError('cancellation lost its known outcome')
         verify_stopped(binary, target, pid, nonce)
     except Exception as error:
-        diagnostic = command_diagnostic(arguments, process.stdout(1 << 20), process.stderr())
+        diagnostic = getattr(error, 'diagnostic_path', None) or command_diagnostic(
+            arguments, process.stdout(1 << 20) if process else b'', process.stderr() if process else str(error))
         failure = FixtureCommandFailure(diagnostic)
         raise failure from error
     finally:
-        if process.poll() is None:
-            try:
-                process.interrupt()
-                process.wait(35)
-            except (RuntimeError, subprocess.TimeoutExpired):
-                process.kill()
-        process.close()
+        if process is not None:
+            if process.poll() is None:
+                try:
+                    process.interrupt()
+                    process.wait(35)
+                except (RuntimeError, subprocess.TimeoutExpired):
+                    process.kill()
+            process.close()
         if pid is not None:
             # Exact nonce guards the PID against reuse; only our synthetic child is removed.
             cleanup = ("import os,signal,subprocess\npid=" + str(pid) + "\n"

@@ -43,6 +43,14 @@ def command_diagnostic(arguments, stdout, stderr, timeout=None):
     return diagnostic
 
 
+class CommandFailed(RuntimeError):
+    """A command exited non-zero; diagnostic_path holds its argv and output (owner-only)."""
+
+    def __init__(self, diagnostic):
+        super().__init__('command failed; private diagnostics: ' + str(diagnostic))
+        self.diagnostic_path = diagnostic
+
+
 def command_result(binary, *arguments, timeout=180, input=None, env=None, terminal=False, password=None):
     command = [str(binary), *arguments]
     try:
@@ -67,7 +75,7 @@ def invoke(binary, *arguments, timeout=180, input=None, env=None, raw=False, ter
         diagnostic = command_diagnostic(command, result.stdout, result.stderr)
         if '--json' in arguments:
             emit_network_failure(result.stdout)
-        raise RuntimeError('command failed; private diagnostics: ' + str(diagnostic))
+        raise CommandFailed(diagnostic)
     if raw:
         return result.stdout + result.stderr
     try:
