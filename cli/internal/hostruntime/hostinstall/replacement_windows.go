@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
@@ -392,11 +393,27 @@ func PrepareWindowsSuppliedMaintenance(ctx context.Context, layout service.Layou
 }
 
 // replaceWindowsCandidate is the one way a Windows installation is replaced by request's source: a failed attempt
-// leaves the previous version complete (lifecycle rollback, machine guard) and nothing of the candidate.
+// leaves the previous version complete (lifecycle rollback, machine guard) and nothing of the candidate. The
+// candidate is recorded first, so the recovery of an attempt whose process died withdraws it too.
 func replaceWindowsCandidate(ctx context.Context, manager *service.LifecycleManager, request Request, replace func(context.Context) error) error {
+	// What a killed attempt published goes before this one decides what existed before it.
+	if err := withdrawRecordedWindowsCandidate(ctx, request.OwnerSID); err != nil {
+		return err
+	}
 	candidate, err := newCandidateSessionOwner(request)
 	if err != nil {
 		return err
+	}
+	record, err := windowsCandidateRecordPath(request.OwnerSID)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(windowsCandidateRecord{Source: request.Source, Existed: candidate.existed})
+	if err != nil {
+		return err
+	}
+	if err := atomicfile.Write(record, body, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1}); err != nil {
+		return hostInstallFailure("record the version being installed", err)
 	}
 	installGuard := func(ctx context.Context) (guardUndo, error) {
 		var undo guardUndo
@@ -409,14 +426,91 @@ func replaceWindowsCandidate(ctx context.Context, manager *service.LifecycleMana
 		}
 		return undo, nil
 	}
-	return replaceCandidate(ctx, manager.Replace, installGuard, replace, func(ctx context.Context) error {
-		// A rollback that did not finish keeps its journal: recovery still owns both versions.
+	err = replaceCandidate(ctx, manager.Replace, installGuard, replace, func(ctx context.Context) error {
+		// A rollback that did not finish keeps its journal and the record: recovery still owns both versions.
 		if manager.RequireRecovered(ctx) != nil {
 			return nil
 		}
-		return withdrawWindowsCandidate(ctx, request, candidate)
+		return withdrawRecordedWindowsCandidate(ctx, request.OwnerSID)
 	})
+	if err == nil {
+		err = removeInstallFile(record) // committed: the candidate is the installation
+	}
+	return err
 }
+
+// windowsCandidateRecord names the version a replacement is installing and whether its session owner was
+// published before the attempt (candidateSessionOwner.existed). Linux keeps the same in its install journal
+// (installJournal.Source); the Windows lifecycle journal holds only the previous installation.
+type windowsCandidateRecord struct {
+	Source  installsource.Source `json:"source"`
+	Existed bool                 `json:"existed"`
+}
+
+func windowsCandidateRecordPath(ownerSID string) (string, error) {
+	instance, err := WindowsInstanceForSID(ownerSID)
+	if err != nil {
+		return "", err
+	}
+	root, err := WindowsInstanceRoot(instance)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "install-candidate.json"), nil
+}
+
+// WindowsInstallInterrupted reports whether a replacement's candidate record is left: it is written before the
+// lifecycle journal and removed after it, so with no installer holding the install locks that replacement's
+// process died. Uninstall, stop and repair journals are not replacements and stay with their own command.
+func WindowsInstallInterrupted(ownerSID string) (bool, error) {
+	record, err := windowsCandidateRecordPath(ownerSID)
+	if err != nil {
+		return false, err
+	}
+	if _, err := os.Lstat(record); err == nil {
+		return true, nil
+	} else if !installNotExistOnly(err) {
+		return false, err
+	}
+	return false, nil
+}
+
+// withdrawRecordedWindowsCandidate removes what the recorded replacement published for its version unless that
+// version is the installed one, then the record. It runs once the lifecycle journal is gone: after a failed
+// attempt's rollback, and after the recovery of an attempt whose process died (victus 2026-11-10: the killed
+// update's session owner stayed running until the next update).
+func withdrawRecordedWindowsCandidate(ctx context.Context, ownerSID string) error {
+	path, err := windowsCandidateRecordPath(ownerSID)
+	if err != nil {
+		return err
+	}
+	body, err := os.ReadFile(path)
+	if installNotExistOnly(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var record windowsCandidateRecord
+	if err := json.Unmarshal(body, &record); err != nil || record.Source.Validate() != nil {
+		return hostInstallFailure("read the record of the interrupted installation's version", ErrInvalidRequest, err)
+	}
+	request := Request{OwnerSID: ownerSID, Source: record.Source}
+	catalog, _, err := sessionOwnerCatalog(request)
+	if err != nil {
+		return err
+	}
+	generation, err := sourceGeneration(record.Source)
+	if err != nil {
+		return err
+	}
+	if err := withdrawRecordedCandidate(ctx, request, candidateSessionOwner{catalog: catalog, generation: generation, existed: record.Existed}); err != nil {
+		return err
+	}
+	return removeInstallFile(path)
+}
+
+var withdrawRecordedCandidate = withdrawWindowsCandidate
 
 // withdrawWindowsCandidate removes what a replacement that did not commit published for its source: the session
 // owner (service and catalogue descriptor) and the SSH generation (victus 2026-11-10: both stayed after the
@@ -522,7 +616,10 @@ func recoverWindowsInstallationLocked(ctx context.Context, ownerSID string, stat
 			return err
 		}
 	}
-	return manager.Recover(ctx)
+	if err := manager.Recover(ctx); err != nil {
+		return err
+	}
+	return withdrawRecordedWindowsCandidate(ctx, ownerSID)
 }
 
 // PrepareWindowsReplacement pins both the protected prior image and candidate
