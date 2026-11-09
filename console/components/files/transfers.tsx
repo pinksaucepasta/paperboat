@@ -3,7 +3,8 @@
 import { meQuery, useApiQuery, useMachines, useWorkspace } from "@/lib/api"
 import { requestsQuery, type InboxRequest } from "@/lib/files"
 import { formatBytes } from "@/lib/format"
-import { pauseReasons, transferModes, transferModesLive } from "@/lib/transfer-mode"
+import { pauseReasons, transferModesLive } from "@/lib/transfer-mode"
+import { useNow } from "@/lib/use-now"
 
 /**
  * Transfers in progress (approved Team Inbox requests that are sending, paused or failed), to or
@@ -14,20 +15,27 @@ export function Transfers({ scope }: { scope?: string | null }) {
   const { data: me } = useApiQuery(meQuery)
   const machines = useMachines()
   const requests = useApiQuery({ ...requestsQuery(workspace?.id ?? ""), enabled: Boolean(workspace) && transferModesLive.progress })
+  const now = useNow(60_000)
+  // A failed transfer stays listed only until its request expires; after that it can't be retried.
   const running = (requests.data ?? []).filter(
     (request) =>
-      ["sending", "paused", "failed"].includes(request.transfer_state ?? "") &&
+      request.status === "approved" &&
+      (["sending", "paused"].includes(request.transfer_state ?? "") ||
+        (request.transfer_state === "failed" && Date.parse(request.expires_at) > now)) &&
       (request.sender_account === me?.id || request.recipient_account === me?.id) &&
       (!scope || request.destination_machine_id === scope || request.source_machine_id === scope),
   )
   if (!transferModesLive.progress || !running.length) return null
-  const aliasOf = (id: string) => machines.data?.find((entry) => entry.id === id)?.alias ?? "a machine"
+  const aliasOf = (request: InboxRequest) =>
+    machines.data?.find((entry) => entry.id === request.destination_machine_id)?.alias ??
+    request.destination_machine_name ??
+    "a removed machine"
   return (
     <div className="flex flex-col gap-2">
       <h2 className="text-sm font-medium">Transfers</h2>
       <div className="flex flex-col divide-y divide-divider rounded-lg bg-surface px-4" data-transfers>
         {running.map((request) => (
-          <TransferRow key={request.request_id} request={request} to={aliasOf(request.destination_machine_id)} />
+          <TransferRow key={request.request_id} request={request} to={aliasOf(request)} />
         ))}
       </div>
     </div>
@@ -38,7 +46,6 @@ function TransferRow({ request, to }: { request: InboxRequest; to: string }) {
   const [first, ...rest] = request.files
   const total = request.total_bytes ?? request.files.reduce((sum, file) => sum + file.size, 0)
   const done = request.committed_bytes ?? 0
-  const mode = request.transfer_mode ? transferModes[request.transfer_mode]?.label : undefined
   return (
     <div className="flex flex-col gap-1 py-3 text-sm">
       <span className="truncate">
@@ -47,9 +54,8 @@ function TransferRow({ request, to }: { request: InboxRequest; to: string }) {
       </span>
       <span className="text-xs text-muted-foreground">
         {formatBytes(done)} of {formatBytes(total)}
-        {mode && ` · ${mode}`}
         {request.transfer_state === "sending" && " · Sending"}
-        {request.transfer_state === "failed" && " · Failed"}
+        {request.transfer_state === "failed" && " · Failed. Send it again from the sending machine."}
       </span>
       {request.transfer_state === "paused" && (
         <span className="text-xs">

@@ -199,7 +199,16 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
         )}
         {query.isSuccess && shown.length === 0 && (
           <p className="py-12 text-center text-sm text-muted-foreground">
-            {q ? `No previews match “${q}”` : view === "live" ? "No live previews" : "No ended previews"}
+            {q ? (
+              `No previews match “${q}”`
+            ) : view === "live" ? (
+              <>
+                Nothing is live right now. Start one with New preview, or run{" "}
+                <span className="font-mono text-code text-foreground">pb preview 3000</span> on a machine.
+              </>
+            ) : (
+              "No ended previews"
+            )}
           </p>
         )}
       </div>

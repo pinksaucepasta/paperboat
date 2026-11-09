@@ -38,6 +38,7 @@ export type InboxRequest = {
   recipient_account: string
   source_machine_id: string
   destination_machine_id: string
+  destination_machine_name?: string
   files: { basename: string; size: number; sha256: string }[]
   status: "pending" | "approved" | "declined" | "expired" | "revoked" | "completed" | string
   /** After approval, how the transfer is going (File transfer modes, PLAN 3b); `status` is the approval. */
