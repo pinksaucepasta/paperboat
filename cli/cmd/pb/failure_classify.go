@@ -231,7 +231,7 @@ func classifyCommandFailure(err error) (failure commandFailure) {
 				remaining = append(remaining, causeFrame{err: owner.cause, status: frame.status})
 			}
 			continue
-		case daemoncmd.ErrDaemonAccountMismatch, *daemoncmd.ApprovalRefusal:
+		case daemoncmd.ErrDaemonAccountMismatch, *daemoncmd.ApprovalRefusal, *daemoncmd.DaemonDegraded:
 			set(commandRejected, current)
 			continue
 		case *inspectorDaemonError:

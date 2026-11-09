@@ -52,6 +52,27 @@ func (readinessFailure) Error() string {
 }
 func (e readinessFailure) Unwrap() error { return e.cause }
 
+// DaemonDegraded is a daemon that is up but reports a problem it cannot clear by itself: restarting the
+// service cannot fix it, so the command says what is wrong and what to do instead of timing out.
+type DaemonDegraded struct{ State, Title, Recovery string }
+
+func (e *DaemonDegraded) Error() string {
+	return "The Paperboat local daemon is running but not ready (" + e.State + "): " + e.Title + ". " + e.Recovery + "."
+}
+
+// degradedHealth is the item that explains a daemon that is not ready, or nil when it names none.
+func degradedHealth(snapshot localapi.Snapshot) *localapi.HealthItem {
+	for _, item := range snapshot.Health {
+		if item.Severity == "error" {
+			return &item
+		}
+	}
+	if len(snapshot.Health) > 0 {
+		return &snapshot.Health[0]
+	}
+	return nil
+}
+
 func waitDaemonReady(ctx context.Context) error {
 	paths, err := servicePaths()
 	if err != nil {
@@ -65,10 +86,11 @@ func waitDaemonReady(ctx context.Context) error {
 	defer ticker.Stop()
 	lastState := "unavailable"
 	var lastErr error
+	var lastHealth *localapi.HealthItem
 	for {
 		snapshot, snapshotErr := client.Snapshot(ctx)
 		if snapshotErr == nil {
-			lastState, lastErr = snapshot.DaemonState, nil
+			lastState, lastErr, lastHealth = snapshot.DaemonState, nil, degradedHealth(snapshot)
 			if snapshot.DaemonState == "ready" {
 				return nil
 			}
@@ -81,6 +103,9 @@ func waitDaemonReady(ctx context.Context) error {
 		case <-ctx.Done():
 			if lastErr != nil {
 				return readinessFailure{cause: errors.Join(lastErr, ctx.Err(), context.Cause(ctx))}
+			}
+			if lastHealth != nil {
+				return &DaemonDegraded{State: lastState, Title: lastHealth.Title, Recovery: lastHealth.Recovery}
 			}
 			return fmt.Errorf("Paperboat local daemon did not become ready; last state was %q; run pb status and retry: %w", lastState, ctx.Err())
 		case <-ticker.C:

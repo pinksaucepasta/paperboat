@@ -403,3 +403,12 @@ func TestENVNotSetUpIsNamedNotAuthentication(t *testing.T) {
 		}
 	}
 }
+
+func TestServiceCommandOnADegradedDaemonIsRejectedWithItsHealth(t *testing.T) {
+	err := rejectDaemonDegraded(fmt.Errorf("start: %w", &daemoncmd.DaemonDegraded{State: "degraded", Title: "Local machine access is unavailable: the guard connect step failed (connection_refused)", Recovery: "Check Paperboat local access settings and repair the installation"}))
+	failure := classifyCommandFailure(err)
+	message := commandFailureMessage(err, failure)
+	if failure.kind != commandRejected || !strings.Contains(message, "the guard connect step failed") || !strings.Contains(message, "repair the installation") || strings.Contains(message, "timed out") {
+		t.Fatalf("kind=%v message=%q", failure.kind, message)
+	}
+}

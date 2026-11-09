@@ -87,6 +87,24 @@ func TestWaitDaemonReadyReportsLastStateOnCancellation(t *testing.T) {
 	}
 }
 
+// pbvm2, 2026-11-09: a restart onto a degraded daemon printed "The operation timed out"; it now names the daemon's own
+// health item, and the deadline is not part of the error.
+func TestWaitDaemonReadyReportsTheDegradedDaemonHealth(t *testing.T) {
+	snapshot := readinessSnapshot(1, "degraded")
+	snapshot.Health = []localapi.HealthItem{{Code: "local_access_unavailable", Severity: "error", Title: "Local machine access is unavailable: the guard connect step failed (connection_refused)", Recovery: "Check Paperboat local access settings and repair the installation", ETag: "local_access_unavailable"}}
+	_, paths := startReadinessServer(t, snapshot)
+	old := servicePaths
+	t.Cleanup(func() { servicePaths = old })
+	servicePaths = func() (localapi.Paths, error) { return paths, nil }
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+	err := waitDaemonReady(ctx)
+	var degraded *DaemonDegraded
+	if !errors.As(err, &degraded) || degraded.State != "degraded" || !strings.Contains(err.Error(), "the guard connect step failed") || !strings.Contains(err.Error(), "repair the installation") || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("readiness error=%v", err)
+	}
+}
+
 func TestWaitDaemonReadyRetainsSocketFailureAndRecovers(t *testing.T) {
 	old := servicePaths
 	t.Cleanup(func() { servicePaths = old })

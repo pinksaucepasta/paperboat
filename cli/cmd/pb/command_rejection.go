@@ -47,6 +47,7 @@ const (
 	commandRejectUpdaterRestarting
 	commandRejectUpdateApprovalID
 	commandRejectUpdateSource
+	commandRejectDaemonDegraded
 )
 
 // commandRejection describes a command-owned refusal. Its
@@ -58,7 +59,7 @@ type commandRejection struct {
 }
 
 func (e commandRejection) valid() bool {
-	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectUpdateSource
+	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectDaemonDegraded
 }
 func (e commandRejection) Error() string {
 	switch e.reason {
@@ -94,6 +95,11 @@ func (e commandRejection) Error() string {
 		var mismatch daemoncmd.ErrDaemonAccountMismatch
 		if errors.As(e.cause, &mismatch) {
 			return mismatch.Error()
+		}
+	case commandRejectDaemonDegraded:
+		var degraded *daemoncmd.DaemonDegraded
+		if errors.As(e.cause, &degraded) {
+			return degraded.Error()
 		}
 	case commandRejectApproval:
 		var refusal *daemoncmd.ApprovalRefusal
@@ -225,6 +231,15 @@ func rejectApprovalRefusal(err error) error {
 	var refusal *daemoncmd.ApprovalRefusal
 	if errors.As(err, &refusal) {
 		return commandRejection{reason: commandRejectApproval, cause: err}
+	}
+	return err
+}
+
+// rejectDaemonDegraded presents a service command that ended on a running but degraded daemon.
+func rejectDaemonDegraded(err error) error {
+	var degraded *daemoncmd.DaemonDegraded
+	if errors.As(err, &degraded) {
+		return commandRejection{reason: commandRejectDaemonDegraded, cause: err}
 	}
 	return err
 }
