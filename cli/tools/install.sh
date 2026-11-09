@@ -75,6 +75,8 @@ command -v curl >/dev/null 2>&1 || { echo "pb installer: curl is required" >&2; 
 tmp_root=${TMPDIR:-/tmp}
 temporary=$(mktemp -d "${tmp_root%/}/paperboat-install.XXXXXX")
 temporary=$(cd "$temporary" && pwd -P)
+# macOS sh keeps a leading "//" (POSIX leaves it implementation-defined) when TMPDIR starts with two slashes.
+temporary=/${temporary#"${temporary%%[!/]*}"}
 cleanup() { rm -rf -- "$temporary"; }
 trap cleanup EXIT HUP INT TERM
 if [ "$pair" = true ]; then
