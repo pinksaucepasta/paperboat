@@ -4,7 +4,7 @@ import { CheckCircleIcon, CopyIcon, PlusIcon, ShieldCheckIcon, TrashIcon } from 
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useDeferredValue, useState } from "react"
 import { toast } from "sonner"
-import { clientConfigQuery, edgesQuery, useApiQuery, useWorkspace } from "@/lib/api"
+import { clientConfigQuery, edgesQuery, relaysQuery, useApiQuery, useWorkspace } from "@/lib/api"
 import { copyWithToast } from "@/lib/clipboard"
 import { cursorPageSize } from "@/lib/cursor-pages"
 import { placeName } from "@/lib/format"
@@ -283,6 +283,7 @@ function PathCard({
   const anyServer = allServers.data?.pages[0]?.total ?? 0
   const known = allServers.data?.pages.flatMap((page) => page.items) ?? []
   const edges = useApiQuery({ ...edgesQuery, enabled: capability === "tunnel" })
+  const relays = useApiQuery({ ...relaysQuery, enabled: capability === "relay" })
   const copy = poolCopy[capability]
   const pool = useApiQuery(poolQuery(capability, scope))
   const [draft, setDraft] = useState<Pool>()
@@ -335,12 +336,14 @@ function PathCard({
     detail = plural(edges.data.length)
     status = health(edges.data.filter((edge) => edge.status === "ready").length, edges.data.length)
   } else if (capability === "relay") {
-    // Paperboat's relays are the default and aren't listed for the browser (no API names them or
-    // their health), so no status is claimed; this also stands while the setting loads.
+    // Every relay the settings let these machines use, Paperboat's and yours, with its heartbeat.
     served = anyServer && pool.data ? "Paperboat’s and yours" : "Paperboat"
-    detail = "Picked for each connection"
+    if (relays.data) {
+      detail = `${plural(relays.data.length)} · picked for each connection`
+      status = health(relays.data.filter((relay) => relay.status === "ready").length, relays.data.length)
+    }
   }
-  if (edges.isError || pool.isError) detail = "Couldn’t load"
+  if (edges.isError || relays.isError || pool.isError) detail = "Couldn’t load"
 
   return (
     <div className="flex flex-col gap-4 surface rounded-lg p-4 text-sm">
@@ -360,7 +363,7 @@ function PathCard({
               {status.label}
             </span>
           ) : (
-            capability === "tunnel" && <Skeleton className="my-1 h-3 w-14 shrink-0" />
+            !(edges.isError || relays.isError || pool.isError) && <Skeleton className="my-1 h-3 w-14 shrink-0" />
           )}
         </div>
         <span className="flex h-5 items-center text-muted-foreground">{detail}</span>

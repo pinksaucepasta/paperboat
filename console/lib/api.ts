@@ -415,6 +415,15 @@ export const edgesQuery = queryOptions({
   staleTime: 60_000,
 })
 
+/** A relay the account's machines can use (Paperboat's or its own), with its heartbeat status. */
+export type Relay = Data<"/v1/relays">["items"][number]
+
+export const relaysQuery = queryOptions({
+  queryKey: ["relays"],
+  queryFn: async ({ signal }) => (await api<Data<"/v1/relays">>("relays?limit=100", { signal })).items,
+  staleTime: 60_000,
+})
+
 /** How long this machine took to reach an edge or relay, as the machine measured it. Display only. */
 export type NodeLatency = Data<"/v1/machines/{machine_id}/network-latency">["items"][number]
 
