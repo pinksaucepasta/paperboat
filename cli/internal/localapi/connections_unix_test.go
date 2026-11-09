@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -68,4 +69,55 @@ func TestLocalAPIReportsOpenSSHStreams(t *testing.T) {
 	_ = second.Close()
 	_ = other.Close()
 	eventually(0)
+}
+
+// pb logout must end every managed session this computer holds: a relayed close from the host can be lost, so the
+// daemon closes its own open peer streams once the sign-in is gone (device: a plain ssh survived logout until killed).
+func TestLocalAPIClosesOpenPeerStreamsWhenTheSignInEnds(t *testing.T) {
+	interval := credentialsEndedPoll
+	credentialsEndedPoll = 20 * time.Millisecond
+	t.Cleanup(func() { credentialsEndedPoll = interval })
+	var ended atomic.Bool
+	socket := filepath.Join(localAPITestDir(t), "signout.sock")
+	server, err := NewServer(ServerConfig{SocketPath: socket, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(),
+		Source:           snapshotSourceFunc(func(context.Context) (Snapshot, error) { return validSnapshot(), nil }),
+		CredentialsEnded: ended.Load,
+		PeerStreams: peerStreamBrokerFunc(func(context.Context, Peer, PeerStreamRequest) (net.Conn, error) {
+			local, remote := net.Pipe() // a host that never answers and never closes
+			t.Cleanup(func() { _ = remote.Close() })
+			return local, nil
+		})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() { _ = server.Run(ctx) }()
+	waitForSocket(t, socket)
+	client, err := NewClient(socket, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := NewPeerStreamRequest("machine_1", "environment_1", 2, "ssh", "operation_1", "credential", time.Now().Add(time.Minute), 1024, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := client.OpenPeerStream(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	read := make(chan error, 1)
+	go func() { _, err := stream.Read(make([]byte, 1)); read <- err }()
+	select {
+	case err := <-read:
+		t.Fatalf("the stream ended while signed in: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+	ended.Store(true)
+	select {
+	case <-read:
+	case <-time.After(3 * time.Second):
+		t.Fatal("an open peer stream outlived the sign-in")
+	}
 }

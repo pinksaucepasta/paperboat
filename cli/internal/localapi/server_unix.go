@@ -90,7 +90,11 @@ type ServerConfig struct {
 	PeerStreams  PeerStreamBroker
 	// SignedOut reads current local authentication state without waiting for the
 	// control plane. Typed credential refusals are returned directly.
-	SignedOut            func(context.Context) bool
+	SignedOut func(context.Context) bool
+	// CredentialsEnded reports that this computer's sign-in is gone (pb logout, or a session the server rejected). The
+	// daemon polls it for every open peer stream and closes them all within a second of it turning true, so no managed
+	// session outlives the sign-in on a path the host could not close (a relayed close frame can be eaten).
+	CredentialsEnded     func() bool
 	PeerProbes           PeerProbeBroker
 	InspectorRequests    InspectorBroker
 	RelayInventory       func(context.Context) (RelayInventory, error)
@@ -672,6 +676,9 @@ func (s *Server) peerStream(writer http.ResponseWriter, request *http.Request, r
 	// is canceled by either endpoint closing, not by credential expiry.
 	streamCtx, cancel := context.WithCancel(context.WithoutCancel(request.Context()))
 	go watchPeerHangup(streamCtx, local, peer, cancel)
+	if s.config.CredentialsEnded != nil {
+		go watchCredentialsEnded(streamCtx, cancel, s.config.CredentialsEnded)
+	}
 	go func() {
 		defer cancel()
 		if value.Consumer == "ssh" {
@@ -679,6 +686,25 @@ func (s *Server) peerStream(writer http.ResponseWriter, request *http.Request, r
 		}
 		bridgePeerStream(streamCtx, local, stream)
 	}()
+}
+
+// credentialsEndedPoll is how often an open peer stream checks that its computer is still signed in.
+var credentialsEndedPoll = time.Second
+
+func watchCredentialsEnded(ctx context.Context, cancel context.CancelFunc, ended func() bool) {
+	ticker := time.NewTicker(credentialsEndedPoll)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if ended() {
+				cancel()
+				return
+			}
+		}
+	}
 }
 
 type localHandlerPanic struct{}

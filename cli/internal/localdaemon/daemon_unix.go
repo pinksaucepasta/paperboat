@@ -52,6 +52,8 @@ type DaemonConfig struct {
 	// Steps is the daemon's step tracker: start steps and background loops that are failing show in the
 	// snapshot's health (applySteps).
 	Steps *health.Registry
+	// CredentialsEnded closes every open peer stream when this computer's sign-in is gone (localapi.ServerConfig).
+	CredentialsEnded func() bool
 }
 
 func Run(ctx context.Context, config DaemonConfig) (runErr error) {
@@ -180,6 +182,7 @@ func Run(ctx context.Context, config DaemonConfig) (runErr error) {
 		Observations:         observations,
 		PeerStreams:          peerStreamBroker{open: config.OpenPeerStream, issue: config.IssuePeerStream},
 		SignedOut:            inventory.SignedOut,
+		CredentialsEnded:     config.CredentialsEnded,
 		PeerProbes:           peerProbeBroker{probe: config.ProbePeer},
 		InspectorRequests:    inspectorBroker(config.InspectorRequest),
 		RelayInventory:       config.RelayInventory,

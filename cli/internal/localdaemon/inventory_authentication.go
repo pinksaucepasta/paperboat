@@ -51,3 +51,7 @@ func inventoryAuthenticationRequired(err error) bool {
 	}
 	return false
 }
+
+// AuthenticationRequired reports that err proves the sign-in is gone (removed by pb logout, or rejected by the server),
+// not a transient failure to reach Paperboat.
+func AuthenticationRequired(err error) bool { return inventoryAuthenticationRequired(err) }
