@@ -96,11 +96,7 @@ export function UsagePage({ machine: tabMachine }: { machine?: Machine }) {
       {usage.isError ? (
         <p className="py-12 text-center text-sm text-muted-foreground">Couldn’t load usage. {usage.error.message}</p>
       ) : !data ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }, (_, index) => (
-            <Skeleton key={index} className="h-28 rounded-xl" />
-          ))}
-        </div>
+        <UsageSkeleton showMachine={!scope} />
       ) : (
         <Loaded usage={data} period={period} showMachine={!scope} />
       )}
@@ -168,67 +164,47 @@ function Loaded({ usage, period, showMachine }: { usage: Usage; period: UsagePer
 
       <div className="flex flex-col gap-3">
         <h2 className="text-sm font-medium">{resources.length > topResources ? "Top resources" : "By resource"}</h2>
-        <table className="w-full table-fixed text-sm">
-          <colgroup>
-            <col />
-            {showMachine && <col className="hidden w-[16%] md:table-column" />}
-            <col className="hidden w-[20%] lg:table-column" />
-            <col className="hidden w-[12%] sm:table-column" />
-            <col className="hidden w-[12%] sm:table-column" />
-            <col className="w-[12%]" />
-          </colgroup>
-          <thead className="border-b border-divider text-left text-xs text-muted-foreground">
-            <tr className="[&>th]:h-9 [&>th]:px-3 [&>th]:font-normal">
-              <th>Resource</th>
-              {showMachine && <th className="hidden md:table-cell">Machine</th>}
-              <th className="hidden lg:table-cell">Path</th>
-              <th className="hidden text-right sm:table-cell">Up</th>
-              <th className="hidden text-right sm:table-cell">Down</th>
-              <th className="text-right">Total</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-divider border-b border-divider">
-            {shown.map(({ resource, total: bytes }) => (
-              <tr
-                key={`${resource.resource_kind}:${resource.resource_id}:${resource.resource_route_id ?? ""}:${resource.machine_id}`}
-                className="[&>td]:h-14 [&>td]:px-3"
-              >
-                <td>
-                  <span className="flex min-w-0 flex-col">
-                    <span className="truncate font-medium">{resource.resource_name || resource.resource_id}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {kindLabels[resource.resource_kind] ?? resource.resource_kind}
-                    </span>
+        <ResourceTable showMachine={showMachine}>
+          {shown.map(({ resource, total: bytes }) => (
+            <tr
+              key={`${resource.resource_kind}:${resource.resource_id}:${resource.resource_route_id ?? ""}:${resource.machine_id}`}
+              className="[&>td]:h-14 [&>td]:px-3"
+            >
+              <td>
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate font-medium">{resource.resource_name || resource.resource_id}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {kindLabels[resource.resource_kind] ?? resource.resource_kind}
                   </span>
+                </span>
+              </td>
+              {showMachine && (
+                <td className="hidden truncate md:table-cell">
+                  {resource.machine_id ? (
+                    <Link
+                      href={`/machines/${encodeURIComponent(resource.machine_id)}/usage`}
+                      className="underline-offset-4 hover:underline"
+                    >
+                      {resource.machine_name || resource.machine_id}
+                    </Link>
+                  ) : (
+                    "—"
+                  )}
                 </td>
-                {showMachine && (
-                  <td className="hidden truncate md:table-cell">
-                    {resource.machine_id ? (
-                      <Link
-                        href={`/machines/${encodeURIComponent(resource.machine_id)}/usage`}
-                        className="underline-offset-4 hover:underline"
-                      >
-                        {resource.machine_name || resource.machine_id}
-                      </Link>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                )}
-                <td className="hidden lg:table-cell">
-                  <PathBar resource={resource} />
-                </td>
-                <td className="hidden text-right text-muted-foreground tabular-nums sm:table-cell">
-                  {formatBytes(resource.upload_bytes)}
-                </td>
-                <td className="hidden text-right text-muted-foreground tabular-nums sm:table-cell">
-                  {formatBytes(resource.download_bytes)}
-                </td>
-                <td className="text-right tabular-nums">{formatBytes(bytes)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+              )}
+              <td className="hidden lg:table-cell">
+                <PathBar resource={resource} />
+              </td>
+              <td className="hidden text-right text-muted-foreground tabular-nums sm:table-cell">
+                {formatBytes(resource.upload_bytes)}
+              </td>
+              <td className="hidden text-right text-muted-foreground tabular-nums sm:table-cell">
+                {formatBytes(resource.download_bytes)}
+              </td>
+              <td className="text-right tabular-nums">{formatBytes(bytes)}</td>
+            </tr>
+          ))}
+        </ResourceTable>
         {!resources.length && (
           <p className="py-8 text-center text-sm text-muted-foreground">No traffic in this period.</p>
         )}
@@ -239,6 +215,33 @@ function Loaded({ usage, period, showMachine }: { usage: Usage; period: UsagePer
         )}
       </div>
     </>
+  )
+}
+
+/** The By resource table: columns and header, around its rows. */
+function ResourceTable({ showMachine, children }: { showMachine: boolean; children: React.ReactNode }) {
+  return (
+    <table className="w-full table-fixed text-sm">
+      <colgroup>
+        <col />
+        {showMachine && <col className="hidden w-[16%] md:table-column" />}
+        <col className="hidden w-[20%] lg:table-column" />
+        <col className="hidden w-[12%] sm:table-column" />
+        <col className="hidden w-[12%] sm:table-column" />
+        <col className="w-[12%]" />
+      </colgroup>
+      <thead className="border-b border-divider text-left text-xs text-muted-foreground">
+        <tr className="[&>th]:h-9 [&>th]:px-3 [&>th]:font-normal">
+          <th>Resource</th>
+          {showMachine && <th className="hidden md:table-cell">Machine</th>}
+          <th className="hidden lg:table-cell">Path</th>
+          <th className="hidden text-right sm:table-cell">Up</th>
+          <th className="hidden text-right sm:table-cell">Down</th>
+          <th className="text-right">Total</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-divider border-b border-divider">{children}</tbody>
+    </table>
   )
 }
 
@@ -269,6 +272,45 @@ function PathBar({ resource }: { resource: Usage["resources"][number] }) {
   )
 }
 
+/** The loaded page's cards, chart panel and table header, with placeholders for the numbers. */
+function UsageSkeleton({ showMachine }: { showMachine: boolean }) {
+  const line = (className: string) => <Skeleton className={cn("my-0.5 h-3", className)} />
+  return (
+    <>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {["Total", ...paths.map((path) => path.label)].map((label) => (
+          <Stat key={label} label={label}>
+            <Skeleton className="my-1 h-6 w-24" />
+            {line("w-32")}
+          </Stat>
+        ))}
+      </div>
+      {/* The chart panel's own rows (same markup, so the same heights), without the chart. */}
+      <div className="surface-pattern flex flex-col gap-3 p-5">
+        <div className="flex items-baseline justify-between text-xs text-muted-foreground">
+          <span className="font-medium">Traffic</span>
+        </div>
+        <div className="h-48" />
+        <div className="flex justify-between text-xs text-muted-foreground tabular-nums">
+          <span>&nbsp;</span>
+        </div>
+      </div>
+      <div className="flex flex-col gap-3">
+        <h2 className="text-sm font-medium">By resource</h2>
+        <ResourceTable showMachine={showMachine}>
+          {Array.from({ length: 5 }, (_, index) => (
+            <tr key={index} className="[&>td]:h-14 [&>td]:px-3">
+              <td colSpan={6}>
+                <Skeleton className="h-5 w-1/3" />
+              </td>
+            </tr>
+          ))}
+        </ResourceTable>
+      </div>
+    </>
+  )
+}
+
 function Stat({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="surface-pattern flex flex-col gap-2 p-5">
@@ -281,7 +323,6 @@ function Stat({ label, children }: { label: React.ReactNode; children: React.Rea
 function Figure({ children }: { children: React.ReactNode }) {
   return <span className="font-heading text-2xl font-semibold tracking-tight tabular-nums">{children}</span>
 }
-
 
 /** Traffic over the period, hourly or daily as the server buckets it, with the busiest point marked. */
 function Chart({ usage, period }: { usage: Usage; period: UsagePeriod }) {
