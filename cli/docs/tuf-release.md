@@ -1,25 +1,27 @@
 # TUF release operations
 
-Paperboat publishes three canonical native product assets. The signer accepts any nonempty subset of them; the release workflow publishes all three. Each is the complete unified `pb` executable for its platform and architecture:
+Paperboat publishes five canonical native product assets. The signer accepts any nonempty subset of them; the release workflow publishes all five. Each is the complete unified `pb` executable for its platform and architecture:
 
 - `pb-linux-amd64`
 - `pb-linux-arm64`
 - `pb-darwin-arm64`
+- `pb-windows-amd64.exe`
+- `pb-windows-arm64.exe`
 
-Linux assets are raw ELF executables. The macOS asset is a raw arm64 Mach-O executable, ad-hoc signed by the release runner. Windows is not published. The executable's public `install` command selects the invoking owner's canonical service path and links `~/.local/bin/pb`. The installed executable handles CLI commands and explicit `pb daemon` service invocations.
+Linux assets are raw ELF executables. The macOS asset is a raw arm64 Mach-O executable, ad-hoc signed by the release runner. The Windows assets are PE executables and are **not Authenticode-signed**: trust comes from the signed TUF metadata and the pinned SHA-256, exactly as on Linux, and no client checks a publisher certificate. Windows SmartScreen may warn if someone downloads `pb.exe` by hand in a browser (the browser adds a Mark-of-the-Web); the PowerShell one-liner below downloads with `Invoke-WebRequest`, which adds none. Each Windows product is built and smoke-tested with `--version` on a native runner (`windows-2025`, `windows-11-arm`), which records the native-qualification evidence the signer requires. The executable's public `install` command selects the invoking owner's canonical service path and links `~/.local/bin/pb`. The installed executable handles CLI commands and explicit `pb daemon` service invocations.
 
 Darwin verification requires a valid executable code signature (`codesign --verify --deep --strict`). Gatekeeper admission is not an updater authenticity gate; the updater retains TUF verification and executable format validation without requiring a Gatekeeper override.
 
 ## Distribution contract
 
-GitHub Releases hosts the three canonical products. It does not host a separate first-install verifier. The release origin serves only:
+GitHub Releases hosts the five canonical products. It does not host a separate first-install verifier. The release origin serves only:
 
-- the shell installer at `/install`
+- the shell installer at `/install` and the PowerShell installer (file `windows`, served from `/install` to PowerShell clients, which is what `irm <installer_base>/install | iex` fetches)
 - signed TUF metadata under `/tuf/metadata/`
 
 The origin's `tuf/targets/` directory must be empty. No release binary bytes are copied to the origin.
 
-Each TUF target is one of the three canonical asset names. Its custom metadata has schema `paperboat.tuf-asset/v1`, kind `github-release-asset`, and includes:
+Each TUF target is one of the five canonical asset names. Its custom metadata has schema `paperboat.tuf-asset/v1`, kind `github-release-asset`, and includes:
 
 - `version`, `platform`, `architecture`, and `format`
 - `asset_name`, `repository`, immutable GitHub `url`
@@ -41,10 +43,10 @@ The trusted HTTPS installer and its embedded product pin are the first-install t
 
 1. Create and push a release tag.
 2. The workflow validates the tag and source commit, the protected release endpoints and that the production metadata origin is readable, and that the deployed server already contains this release's server and shared commits (server first, then client).
-3. It builds the three assets (Linux amd64 and arm64, macOS arm64) and smoke-tests each with `--version`.
+3. It builds the five assets (Linux amd64 and arm64, macOS arm64, Windows amd64 and arm64) and smoke-tests each with `--version`; the Windows jobs also record native-qualification evidence.
 4. It creates or resumes the GitHub release through the GitHub API, uploads the missing assets as a draft, and verifies the API-reported size and digest.
 5. The TUF signer updates the signed targets with their GitHub URLs and inline release policy.
-6. The workflow renders the shell installer with each product's exact URL, version, SHA-256, and length, then stages it with TUF metadata for atomic activation on the server origin. Only then is the release marked Latest.
+6. The workflow renders the shell and PowerShell installers with each product's exact URL, version, SHA-256, and length, then stages it with TUF metadata for atomic activation on the server origin. Only then is the release marked Latest.
 
 The release workflow runs no test suite of its own: pull requests and `main` run the cross-platform and server checks, and the release builds are smoke-tested with `--version` before publication. No separate binary transfer or checksum-file handoff is part of the release.
 
@@ -53,6 +55,12 @@ The release workflow runs no test suite of its own: pull requests and `main` run
 Users start with the trusted HTTPS installer:
 
 `curl -fsSL https://get.pprbt.dev/install | sh`
+
+Windows (PowerShell, or `powershell -c "iex (irm '<url>')"` from Command Prompt):
+
+`irm https://get.pprbt.dev/install | iex`
+
+The PowerShell installer pins the selected product (`pb-windows-amd64.exe` or `pb-windows-arm64.exe`) exactly like the shell installer, downloads it with `Invoke-WebRequest`, checks the length and SHA-256, runs `pb install --json` (which asks for administrator approval), then `pb pair` with a dashboard token or `pb login` for browser approval.
 
 Before first execution, the shell installer checks the pinned product URL, version, length, and SHA-256. Linux invokes the checked executable as `pb install --install-dir ABSOLUTE_DIRECTORY --json` (default `~/.local/bin`). On macOS, the installer invokes the checked executable as `pb install --json`; `--install-dir` is not supported there. `pb install` validates the administrator-approved baseline bytes, format, and hash, then selects the owner-scoped absolute executable path returned in `data.executable`. First installation does not locally authenticate a TUF signature. Ordinary installation preserves enrollment and settings. A dashboard/token pairing securely stages the required token, then asks the installed binary to classify the protected resume journal. The same token resumes the existing partial pairing without reset or a replacement install. A new token runs confirmed `pb reset`, which synchronously removes Paperboat-owned services, configuration, credentials, keys, runtime state, and the prior installation while preserving Inbox payloads; any incomplete cleanup aborts before the token is consumed. It then installs and pairs through the returned installed binary without downloading a second artifact.
 
