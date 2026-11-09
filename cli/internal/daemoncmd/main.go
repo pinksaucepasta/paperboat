@@ -399,8 +399,15 @@ func localDaemonCommand() *cobra.Command {
 				teamShared := &teamSharedMachines{}
 				return localdaemon.Run(ctx, localdaemon.DaemonConfig{
 					InventoryEvents: inventoryEvents, AccessEvents: accessEvents, Steps: steps,
-					CredentialsEnded: func() bool { _, err := authSource.Credential(); return localdaemon.AuthenticationRequired(err) },
-					Paths:            paths, Source: source, ManagedSSH: managedConfig, IssuePeerStream: source.IssuePeerStream,
+					CredentialsEnded: func() bool {
+						_, err := authSource.Credential()
+						ended := localdaemon.AuthenticationRequired(err)
+						if ended {
+							go peerTunnel.ReleaseNative() // the engine stops reconnecting paths it can no longer authorize
+						}
+						return ended
+					},
+					Paths: paths, Source: source, ManagedSSH: managedConfig, IssuePeerStream: source.IssuePeerStream,
 					OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(),
 					SharedSSHMachines: teamShared.sshMachines,
 					ReconcileMachines: func(ctx context.Context, machines []api.UserMachine) error {

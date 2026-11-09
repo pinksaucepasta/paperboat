@@ -561,6 +561,14 @@ func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
 		_ = connection.Close()
 		t.Fatal("revoked peer opened another application")
 	}
+	if hostRules && !lateGrant {
+		// Signed out: the daemon releases the native runtime, which ends its engine and the streams riding it.
+		released := &PeerTerminalTunnel{nativeRuntime: runtime}
+		released.ReleaseNative()
+		if runtime.alive() || released.nativeRuntime != nil {
+			t.Fatal("the native runtime outlived its release")
+		}
+	}
 	cancel()
 	select {
 	case <-listenDone:

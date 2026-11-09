@@ -132,6 +132,22 @@ func (t *PeerTerminalTunnel) Close() error {
 	return err
 }
 
+// ReleaseNative closes the native runtime (its engine, sessions and the streams riding them) once the sign-in ended,
+// so the engine stops probing and reconnecting paths for peers it can no longer authorize. The next dial after a new
+// sign-in builds a fresh runtime.
+func (t *PeerTerminalTunnel) ReleaseNative() {
+	if t == nil {
+		return
+	}
+	t.nativeMu.Lock()
+	runtime := t.nativeRuntime
+	t.nativeRuntime = nil
+	t.nativeMu.Unlock()
+	if runtime != nil {
+		_ = runtime.Close()
+	}
+}
+
 func (t *PeerTerminalTunnel) InvalidateMachine(machineID string) {
 	if t != nil && machineID != "" && t.authorities != nil {
 		t.authorities.InvalidateMachine(machineID)
