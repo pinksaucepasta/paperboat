@@ -18,7 +18,7 @@ PORT = '2201'
 
 
 def run(*args, timeout=60):
-    result = command_result(PB, *args, timeout=timeout)
+    result = command_result(PB, *args, timeout=timeout, input='')  # EOF on stdin, as before the Windows port
     return result.returncode, result.stdout + result.stderr
 
 
