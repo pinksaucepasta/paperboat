@@ -380,6 +380,17 @@ func TestOperatorConnectedAuthenticationDisclosureAndRevocation(t *testing.T) {
 	if replay := request("POST", "/v1/admin/nodes/"+nodeID+"/enroll", string(nodeBody), true, infraHeaders); replay.Code != 200 || replay.Body.String() != nodeResponse.Body.String() {
 		t.Fatal("enrollment replay changed", replay.Code)
 	}
+	infraHeaders["Idempotency-Key"] = "node-site-" + user.ID
+	if response := request("POST", "/v1/admin/nodes/"+nodeID+"/site", `{"site":"Mumbai","region_id":"x"}`, true, infraHeaders); response.Code != 400 {
+		t.Fatalf("site action accepted another field: %d", response.Code)
+	}
+	if response := request("POST", "/v1/admin/nodes/"+nodeID+"/site", `{"site":"Mumbai"}`, true, infraHeaders); response.Code != 200 {
+		t.Fatalf("site action %d %s", response.Code, response.Body.String())
+	}
+	var site string
+	if err = store.Pool().QueryRow(ctx, `SELECT coalesce(site,'') FROM control_tunnel_nodes WHERE id=$1`, nodeID).Scan(&site); err != nil || site != "Mumbai" {
+		t.Fatalf("stored site %q %v", site, err)
+	}
 	infraHeaders["Operator-Target"] = regionID
 	infraHeaders["Idempotency-Key"] = "region-disable-" + user.ID
 	if response := request("POST", "/v1/admin/regions/"+regionID+"/disable", `{"revision":1}`, true, infraHeaders); response.Code != 200 {

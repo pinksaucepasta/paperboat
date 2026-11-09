@@ -5594,6 +5594,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/nodes/{node_id}/site": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set the city or site a node shows next to its region */
+        post: operations["set_admin_node_site"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/nodes/{node_id}/rotate": {
         parameters: {
             query?: never;
@@ -24274,6 +24291,48 @@ export interface operations {
         };
         responses: {
             /** @description Retired node or exact idempotent replay. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorNodeMutationResult"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    set_admin_node_site: {
+        parameters: {
+            query?: never;
+            header: {
+                "Operator-Target": string;
+                /** @description Opaque incident, ticket, or change reference; do not send prose or secrets. */
+                "Operator-Reason": string;
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                node_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description A short display name, for example a city. Applies to any non-retired node, with no revision, and without restarting it. */
+                    site: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The node with its site set, or an exact idempotent replay. */
             200: {
                 headers: {
                     [name: string]: unknown;

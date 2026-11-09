@@ -48,6 +48,7 @@ var operatorPolicies = map[string]operatorPolicy{
 	"POST /v1/admin/nodes/{node_id}/retire":                    {"admin", "node_id", ""},
 	"POST /v1/admin/nodes/{node_id}/rotate":                    {"admin", "node_id", ""},
 	"POST /v1/admin/nodes/{node_id}/verify-ingress":            {"admin", "node_id", ""},
+	"POST /v1/admin/nodes/{node_id}/site":                      {"admin", "node_id", ""},
 
 	"GET /v1/admin/backups":                                                         {"operations", "", "backups"},
 	"GET /v1/admin/backups/runs":                                                    {"operations", "", "backup-runs"},
