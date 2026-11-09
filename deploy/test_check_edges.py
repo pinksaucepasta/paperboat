@@ -2,6 +2,8 @@
 carriers, a preview 503 and a machine_offline passed the old gate). Run: python3 deploy/test_check_edges.py"""
 import os
 import pathlib
+import re
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -35,7 +37,7 @@ esac
 ''',
     'timeout': '#!/bin/sh\necho "$*" >>"$T/timeout.log"\nshift\nexec "$@"\n',
     'pkill': '#!/bin/sh\necho "$*" >>"$T/pkill.log"\n',
-    'curl': '#!/bin/sh\ncat "$T/code"\n',
+    'curl': '#!/bin/sh\nprintf "%s 0.010" "$(cat "$T/code")"\n',
 }
 
 
@@ -78,6 +80,12 @@ class CheckEdgesTest(unittest.TestCase):
         code, out = self.run_gate(deploy='echo 503 > "$T/code"; sleep 2; echo 200 > "$T/code"')
         self.assertEqual(code, 1, out)
         self.assertRegex(out, r'preview failures=[1-9]')
+        # each failed request names its time, edge, status, duration and path
+        self.assertRegex(out, r'failed request: \d\d:\d\d:\d\d\.\d+ local 503 0\.010s GET p1\.preview\.example\.test/')
+        kept = re.search(r'edge logs of the window kept in (\S+)', out)
+        self.assertTrue(kept, out)
+        self.assertTrue(pathlib.Path(kept.group(1), 'edge-local.log').exists())
+        shutil.rmtree(kept.group(1))
 
     def test_edge_5xx_and_attach_refusal_fail(self):
         code, out = self.run_gate(edge_log='{"msg":"edge_http_5xx","status":503}\n{"msg":"runtime_route_attach_refused","route_id":"r"}\n')

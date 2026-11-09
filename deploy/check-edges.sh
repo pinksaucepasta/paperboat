@@ -21,7 +21,7 @@ if [ "${1:-}" = --deploy ]; then deploy=$2; shift 2; fi
 	echo "usage: PROBE='<cmd>' SQL='<cmd>' $0 [--deploy '<cmd>'] <ssh-target>=<public-ip> ..." >&2
 	exit 2
 }
-SETTLE=${SETTLE:-30} OBSERVE=${OBSERVE:-30}
+SETTLE=${SETTLE:-30} OBSERVE=${OBSERVE:-30} INTERVAL=${INTERVAL:-1}
 # Scripts go over stdin, so ssh and docker exec -i never re-split them.
 probe() { printf '%s\n' "$1" | $PROBE sh; }
 sql() { printf 'set default_transaction_read_only = on;\n%s\n' "$1" | $SQL | grep -v '^SET$' || true; }
@@ -70,11 +70,12 @@ json=$(probe "pb preview $port --background --ttl 30m --json")
 id=$(printf '%s' "$json" | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d.get("data",d); print(d["id"])')
 url=$(printf '%s' "$json" | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d.get("data",d); print(d.get("url") or d["endpoint"])')
 host=${url#https://}; host=${host%%/*}
-get() { curl -s -o /dev/null -w '%{http_code}' --max-time 5 --resolve "$host:443:$1" "https://$host/" || true; }
+# Prints "<status> <seconds>"; the status alone is what the checks compare.
+get() { curl -s -o /dev/null -w '%{http_code} %{time_total}' --max-time 5 --resolve "$host:443:$1" "https://$host/" || true; }
 fail=0
 for edge in "$@"; do # the new route reaches each edge within a few seconds
 	code=000
-	for _ in 1 2 3 4 5 6; do code=$(get "${edge#*=}"); [ "$code" = 200 ] && break; sleep 5; done
+	for _ in 1 2 3 4 5 6; do code=$(get "${edge#*=}"); code=${code%% *}; code=${code:-000}; [ "$code" = 200 ] && break; sleep 5; done
 	echo "edge ${edge%%=*}: preview before the deploy https=$code"
 	[ "$code" = 200 ] || fail=1
 done
@@ -87,15 +88,16 @@ sql "select id from paperboat.user_machines where state = 'online' and online an
 	n=0
 	while [ ! -e "$work/stop" ]; do
 		for edge in "$@"; do
-			code=$(get "${edge#*=}")
-			[ "$code" = 200 ] || echo "$(date -u +%T) ${edge%%=*} $code" >>"$work/probe-failed"
+			at=$(date -u +%T.%N | cut -c1-12)
+			got=$(get "${edge#*=}"); code=${got%% *}; code=${code:-000}
+			[ "$code" = 200 ] || echo "$at ${edge%%=*} $code ${got#* }s GET $host/" >>"$work/probe-failed"
 		done
 		n=$((n + 1))
 		if [ $((n % 5)) = 0 ]; then
 			sql "select id from paperboat.user_machines where updated_at >= '$start' and not online;" |
 				grep -Fxf "$work/online-before" >>"$work/offline" || true
 		fi
-		sleep 1
+		sleep "$INTERVAL"
 	done
 ) &
 
@@ -130,4 +132,9 @@ offline=$(sort -u "$work/offline" | grep -c . || true)
 echo "server: 5xx=$server5xx; machines online before and offline during the deploy=$offline"
 sort -u "$work/offline" | sed 's/^/  offline: /'
 [ "$server5xx" = 0 ] && [ "$offline" = 0 ] || fail=1
-[ $fail = 0 ] && echo "edge gate: PASS" || { echo "edge gate: FAIL (roll back: deploy/README.md step 5)"; exit 1; }
+sed 's/^/  failed request: /' "$work/probe-failed"
+if [ $fail = 0 ]; then echo "edge gate: PASS"; exit 0; fi
+# The replaced container is removed with its logs, so the edge logs of the window are kept for the post-mortem.
+kept=$(mktemp -d /tmp/pb-gate-failed.XXXXXX); cp "$work"/edge-*.log "$kept"/
+echo "edge logs of the window kept in $kept"
+echo "edge gate: FAIL (roll back: deploy/README.md step 5)"; exit 1
