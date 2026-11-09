@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
@@ -177,5 +179,44 @@ func TestEOFTrackerSeesOpenSSHClosingTheInput(t *testing.T) {
 	}
 	if (&eofTracker{Reader: strings.NewReader("x")}).sawEOF() {
 		t.Fatal("EOF reported before the input was read")
+	}
+}
+
+// An established stream the host closed (revocation) ends the proxy at once even while OpenSSH holds its input open, with
+// no dial retry (those cover only opening the stream), and then says why: the whole path of a plain ssh after `pb logout`.
+func TestEstablishedSSHStreamClosedByTheHostEndsTheProxyAndSaysWhy(t *testing.T) {
+	proxy, remote := net.Pipe()
+	inputReader, inputWriter := io.Pipe()
+	defer inputWriter.Close()
+	connection := &sshProxyTestConn{Conn: proxy, closeWrite: func() error { return nil }}
+	input := &eofTracker{Reader: inputReader}
+	done := make(chan error, 1)
+	go func() { done <- copySSHProxy(connection, connection, input, io.Discard) }()
+	_, _ = remote.Write([]byte("SSH-2.0-banner\r\n"))
+	_ = remote.Close() // the host closes the stream: access ended
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("the proxy stayed alive after the host closed an established stream")
+	}
+	var stderr bytes.Buffer
+	command := &cobra.Command{}
+	command.SetErr(&stderr)
+	machine := api.UserMachine{ID: "machine_1", Alias: "studio", InstallationGeneration: 1}
+	explainEndedSSHProxy(command, machine, input.sawEOF(), func() (*api.Client, error) {
+		return nil, fmt.Errorf("load credential: %w", config.ErrNoCredentials)
+	})
+	if !strings.Contains(stderr.String(), "access to studio was revoked: this sign-in was ended") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestSSHDialNamesAnUnclassifiedNetworkFailure(t *testing.T) {
+	err := explainSSHDial("studio", &net.OpError{Op: "read", Net: "unix", Err: errors.New("i/o timeout")})
+	if message := sshFailureMessage(err); !strings.Contains(message, "studio") || !strings.Contains(message, "(step: open stream)") || strings.Contains(message, "unreachable") {
+		t.Fatalf("message = %q", message)
 	}
 }

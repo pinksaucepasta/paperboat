@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"slices"
@@ -301,6 +302,12 @@ func explainSSHDial(alias string, err error) error {
 	}
 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, syscall.ECONNRESET) {
 		return &sshDialError{"this computer's Paperboat service dropped the connection while opening the SSH stream to " + alias + " (step: open stream); retry", err}
+	}
+	// Any other network error would reach the generic "Paperboat is unreachable" text, which hides that the dial to the
+	// local service (not Paperboat) failed and where.
+	var network net.Error
+	if errors.As(err, &network) {
+		return &sshDialError{"opening the SSH stream to " + alias + " through this computer's Paperboat service failed (step: open stream): " + api.BoundedServerMessage(err.Error()), err}
 	}
 	return err
 }
