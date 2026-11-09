@@ -314,7 +314,9 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 
 func activeWindowsServiceTargetsMatch(layout service.Layout, version string, hostd, updater, ssh windowsServiceTarget, sources ...installsource.Source) bool {
 	local := len(sources) == 1 && sources[0].Validate() == nil && sources[0].Version == version
-	if !(exactReleasePattern.MatchString(version) || local) || !windowsOwnedServiceExecutable(layout, hostd.Executable) || !windowsOwnedServiceExecutable(layout, updater.Executable) {
+	// The rollback slot holds the previous runtime for restore; a live hostd never runs from it. The updater may.
+	hostdOwned := strings.EqualFold(hostd.Executable, layout.Binary) || windowsPinnedServiceExecutable(layout, hostd.Executable)
+	if !(exactReleasePattern.MatchString(version) || local) || !hostdOwned || !windowsOwnedServiceExecutable(layout, updater.Executable) {
 		return false
 	}
 	return ssh.Executable == "" || windowsOwnedServiceExecutable(layout, ssh.Executable)
