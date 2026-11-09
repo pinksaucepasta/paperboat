@@ -97,14 +97,9 @@ export function NetworkPage() {
         }
       >
         {none ? (
-          <div className="flex flex-wrap items-center gap-4 border-b border-divider py-3 text-sm">
-            <span className="min-w-0 flex-1 text-muted-foreground">
-              None yet. Run a relay or tunnel server on a Linux machine to keep traffic on your hardware.
-            </span>
-            <Button variant="secondary" onClick={() => setAdding("relay")}>
-              Add server
-            </Button>
-          </div>
+          <p className="border-b border-divider py-3 text-sm text-muted-foreground">
+            None yet. Run a relay or tunnel server on a Linux machine to keep traffic on your hardware.
+          </p>
         ) : (
           <div>
             <table className="w-full table-fixed text-sm">
@@ -320,24 +315,30 @@ function PathCard({
         : current.installation_ids.filter((entry) => entry !== id),
     })
 
-  // Who serves it now, from the saved setting (not the unsaved draft).
-  let served: React.ReactNode = <Skeleton className="h-4 w-40" />
+  // Who serves it now (from the saved setting, not the unsaved draft), one detail line under it, and
+  // its health where it is known. Both cards keep the same rows in the same order.
+  const plural = (count: number) => `${count} ${count === 1 ? "server" : "servers"}`
+  let served: React.ReactNode = <Skeleton className="my-1 h-3 w-40" />
+  let detail: React.ReactNode = <Skeleton className="my-1 h-3 w-24" />
   let status: Health | undefined
   if (pool.data?.mode === "self-hosted-only") {
     const members = pool.data.members ?? []
     served = members.map((member) => member.name).join(", ") || "Your servers"
+    detail = `Only yours · ${plural(pool.data.installation_ids.length)}`
     const ready = known.filter((server) => pool.data!.installation_ids.includes(server.installation_id) && server.ready)
     status = health(ready.length, pool.data.installation_ids.length)
   } else if (capability === "tunnel" && edges.data) {
     const regions = [...new Set(edges.data.map((edge) => placeName(edge.region)))]
-    served = `Paperboat · ${regions.join(", ") || "no region"}${edges.data.length > 1 ? ` · ${edges.data.length} servers` : ""}`
+    served = `Paperboat · ${regions.join(", ") || "no region"}`
+    detail = plural(edges.data.length)
     status = health(edges.data.filter((edge) => edge.status === "ready").length, edges.data.length)
-  } else if (capability === "relay" && pool.data) {
-    // Paperboat's relays aren't listed for the browser (no API names them), so no health is claimed.
-    served = anyServer ? "Paperboat’s and yours" : "Paperboat"
-  } else if (edges.isError || pool.isError) {
-    served = <span className="text-muted-foreground">Couldn’t load</span>
+  } else if (capability === "relay") {
+    // Paperboat's relays are the default and aren't listed for the browser (no API names them or
+    // their health), so no status is claimed; this also stands while the setting loads.
+    served = anyServer && pool.data ? "Paperboat’s and yours" : "Paperboat"
+    detail = "Picked for each connection"
   }
+  if (edges.isError || pool.isError) detail = "Couldn’t load"
 
   return (
     <div className="flex flex-col gap-4 surface rounded-lg p-4 text-sm">
@@ -348,19 +349,19 @@ function PathCard({
           {capability === "relay" && team && " Set for your account, in every workspace."}
         </span>
       </div>
-      <div className="flex min-h-5 items-center justify-between gap-3">
-        <span className="min-w-0 truncate">{served}</span>
-        {status ? (
-          <span className="flex shrink-0 items-center gap-2 text-muted-foreground">
-            <StatusDot online={status.ok} />
-            {status.label}
-          </span>
-        ) : capability === "relay" && pool.data?.mode !== "self-hosted-only" ? (
-          // Paperboat's relays are the default, so this shows while the setting loads too.
-          <span className="shrink-0 text-muted-foreground">Picked for each connection</span>
-        ) : (
-          <Skeleton className="my-1 h-3 w-14 shrink-0" />
-        )}
+      <div className="flex flex-col gap-0.5">
+        <div className="flex h-5 items-center justify-between gap-3">
+          <span className="min-w-0 truncate">{served}</span>
+          {status ? (
+            <span className="flex shrink-0 items-center gap-2 text-muted-foreground">
+              <StatusDot online={status.ok} />
+              {status.label}
+            </span>
+          ) : (
+            capability === "tunnel" && <Skeleton className="my-1 h-3 w-14 shrink-0" />
+          )}
+        </div>
+        <span className="flex h-5 items-center text-muted-foreground">{detail}</span>
       </div>
       {pool.isError ? (
         <p className="text-muted-foreground">Couldn’t load this setting. {pool.error.message}</p>
@@ -368,7 +369,7 @@ function PathCard({
         <button
           type="button"
           onClick={onAdd}
-          className="self-start text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+          className="self-start underline decoration-muted-foreground/50 underline-offset-4 outline-none hover:decoration-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
         >
           Use your own server
         </button>

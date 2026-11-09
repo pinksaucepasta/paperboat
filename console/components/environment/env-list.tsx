@@ -39,7 +39,8 @@ export function EnvironmentPage() {
           </div>
           <div className="flex flex-col gap-1.5">
             <span className="text-muted-foreground">
-              Or add them to your shell: install the hook once, then run pb env load in a new shell.
+              Or add them to your shell: install the hook once, then run{" "}
+              <code className="font-mono text-code text-foreground">pb env load</code> in a new shell.
             </span>
             <CommandBlock command="pb env hook --install" />
           </div>
