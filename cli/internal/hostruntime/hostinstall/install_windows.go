@@ -3733,7 +3733,7 @@ func windowsFinalPath(handle windows.Handle) (string, error) {
 }
 
 func windowsExpectedFinalPath(path string) string {
-	path = filepath.Clean(path)
+	path = filepath.Clean(windowssecurity.LongPath(path)) // the handle's final path uses long names
 	if strings.HasPrefix(path, `\\`) {
 		return filepath.Clean(`\\?\UNC\` + strings.TrimPrefix(path, `\\`))
 	}

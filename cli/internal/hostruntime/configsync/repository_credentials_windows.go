@@ -73,7 +73,7 @@ func repositoryReferencePathMatches(path, resolved string) bool {
 	if path == resolved {
 		return true
 	}
-	if !strings.EqualFold(path, resolved) {
+	if !strings.EqualFold(windowssecurity.LongPath(path), windowssecurity.LongPath(resolved)) {
 		return false
 	}
 	original, err := os.Stat(path)

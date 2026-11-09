@@ -29,7 +29,8 @@ func windowsFileSecretBinding(path string) ([sha256.Size]byte, error) {
 	// Windows paths are case-insensitive. Bind the envelope to one canonical
 	// spelling so the same FileSecretStore can read it across process sessions,
 	// while moving the blob to another secret reference fails closed.
-	canonical := strings.ToLower(filepath.Clean(absolute))
+	// The same file can be spelled with 8.3 short names (TEMP often is); the file may not exist yet, so expand its directory.
+	canonical := strings.ToLower(filepath.Join(windowssecurity.LongPath(filepath.Dir(absolute)), filepath.Base(absolute)))
 	return sha256.Sum256([]byte(canonical)), nil
 }
 

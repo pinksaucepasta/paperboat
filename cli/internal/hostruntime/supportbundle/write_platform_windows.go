@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -64,7 +65,7 @@ func openWindowsOutputParent(outputPath string) (windows.Handle, error) {
 		return 0, errors.Join(windows.ERROR_REPARSE_TAG_MISMATCH, windows.CloseHandle(handle))
 	}
 	finalPath, err := windowsFinalPath(handle)
-	if err != nil || !strings.EqualFold(filepath.Clean(finalPath), filepath.Clean(parent)) {
+	if err != nil || !strings.EqualFold(filepath.Clean(finalPath), filepath.Clean(windowssecurity.LongPath(parent))) {
 		if err == nil {
 			err = windows.ERROR_REPARSE_TAG_MISMATCH
 		}

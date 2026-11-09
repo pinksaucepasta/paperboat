@@ -86,7 +86,7 @@ func windowsSSHHandlePathMatches(handle windows.Handle, expected string) bool {
 				actual = strings.TrimPrefix(actual, `\\?\`)
 			}
 			actualPath, actualErr := filepath.Abs(actual)
-			expectedPath, expectedErr := filepath.Abs(expected)
+			expectedPath, expectedErr := filepath.Abs(windowssecurity.LongPath(expected))
 			return actualErr == nil && expectedErr == nil && strings.EqualFold(filepath.Clean(actualPath), filepath.Clean(expectedPath))
 		}
 		if n >= 32768 {
