@@ -1,6 +1,7 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
+import { queryKeys } from "@/lib/query-keys"
 import { api, apiAction, idempotencyKey } from "@/lib/api"
 import { resourceId, type OperationOrResource } from "@/lib/tunnels"
 import { uploadFile } from "@/lib/upload"
@@ -57,7 +58,7 @@ const filePath = (machineId: string, fileId: string) => `${inboxPath(machineId)}
 export const fileKeys = {
   /** Every machine's Inbox listing; refreshed after a send or delete. */
   inboxes: ["inbox"] as const,
-  requests: (workspace: string) => ["team-inbox", workspace] as const,
+  requests: queryKeys.inboxRequests,
 }
 
 /** `GET /v1/machines/{id}/inbox`: one machine's Inbox, read live from the machine, newest first. */

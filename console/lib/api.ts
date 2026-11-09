@@ -306,7 +306,7 @@ export type MachineSummary = {
 /** Workspace totals from the server (GET /v1/machines/summary), never counted from a loaded list. */
 export const machineSummaryQuery = (workspace: string) =>
   queryOptions({
-    queryKey: ["machines", workspace, "summary"],
+    queryKey: queryKeys.machineSummary(workspace),
     queryFn: ({ signal }) => api<MachineSummary>(`machines/summary?${new URLSearchParams({ workspace })}`, { signal }),
     refetchInterval: 15_000,
   })
@@ -321,14 +321,14 @@ export const machineSearchQuery = (workspace: string, q: string) =>
 
 export const machineQuery = (id: string) =>
   queryOptions({
-    queryKey: ["machines", "one", id],
+    queryKey: queryKeys.machine(id),
     queryFn: ({ signal }) => api<Machine>(`machines/${encodeURIComponent(id)}`, { signal }),
     refetchInterval: 15_000,
   })
 
 /** Seat limits and the install command exist for the personal workspace only. */
 export const machineOverviewQuery = queryOptions({
-  queryKey: ["machines", "overview"],
+  queryKey: queryKeys.machineOverview,
   queryFn: ({ signal }) => api<MachineOverview>("machines/overview", { signal }),
 })
 

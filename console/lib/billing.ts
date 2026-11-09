@@ -1,6 +1,7 @@
 "use client"
 
 import { queryOptions } from "@tanstack/react-query"
+import { queryKeys } from "@/lib/query-keys"
 import { api, idempotencyKey, type Workspace } from "@/lib/api"
 import type { components } from "@/lib/api-schema"
 
@@ -47,7 +48,7 @@ function billingPath(workspace: Workspace) {
     : "billing/workspaces/personal"
 }
 
-export const billingKey = (workspace: string) => ["billing", workspace] as const
+export const billingKey = queryKeys.billing
 
 /**
  * Days of free trial a new team would get (the personal overview's `team_trial_days`; 0 once used).
@@ -88,7 +89,7 @@ export function usageWindowStart(billing: BillingWorkspace, now = new Date()): s
 /** Plans this workspace can buy, with verified prices. Personal sees Pro, a team sees Team. */
 export const billingProductsQuery = (workspace: Workspace | undefined) =>
   queryOptions({
-    queryKey: ["billing-products", workspace?.id ?? ""],
+    queryKey: queryKeys.billingProducts(workspace?.id ?? ""),
     queryFn: async ({ signal }) =>
       (await api<{ items: BillingProduct[] }>(`${billingPath(workspace!)}/products`, { signal })).items,
     enabled: Boolean(workspace),

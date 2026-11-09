@@ -30,14 +30,24 @@ export function AddMachineDialog() {
   const { data } = useApiQuery(machineOverviewQuery)
   const installUrl = installUrlFrom(data?.bootstrap_command)
   const [open, setOpen] = useState(false)
-  if (!installUrl || !workspace) return null
+  const trigger = (
+    <>
+      <PlusIcon data-icon="inline-start" />
+      Add machine
+    </>
+  )
+  // While the install command loads, the button holds its place.
+  if (!data || !workspace)
+    return (
+      <Button size="lg" disabled>
+        {trigger}
+      </Button>
+    )
+  if (!installUrl) return null
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="lg" />}>
-        <PlusIcon data-icon="inline-start" />
-        Add machine
-      </DialogTrigger>
+      <DialogTrigger render={<Button size="lg" />}>{trigger}</DialogTrigger>
       <DialogContent className="gap-4 sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Add a machine</DialogTitle>
@@ -194,7 +204,11 @@ function AddMachine({
           ) : start.isError ? (
             <span className="text-destructive">{start.error.message}</span>
           ) : (
-            <EnrollmentStatus state={state} failure={live.data?.failure_code} onRetry={() => start.mutate({ shell, workspace })} />
+            <EnrollmentStatus
+              state={state}
+              failure={live.data?.failure_code}
+              onRetry={() => start.mutate({ shell, workspace })}
+            />
           )}
           <button
             type="button"
@@ -259,7 +273,8 @@ function EnrollmentStatus({
   failure?: string
   onRetry: () => void
 }) {
-  if (state === "failed_retryable" && failure === "machine_limit_reached") return <LimitReached error={machineLimit} removeMachines />
+  if (state === "failed_retryable" && failure === "machine_limit_reached")
+    return <LimitReached error={machineLimit} removeMachines />
   if (state === "expired" || state === "cancelled" || state === "denied" || state === "failed_retryable") {
     return (
       <span className="flex items-center gap-2">

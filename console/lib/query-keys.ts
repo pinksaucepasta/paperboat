@@ -10,4 +10,10 @@ export const queryKeys = {
   machineList: (workspace: string, text: string, filters: object, page: number) =>
     ["machines", workspace, "list", text, filters, page] as const,
   usage: (workspace: string, period: string) => ["usage", period, workspace],
+  billing: (workspace: string) => ["billing", workspace],
+  billingProducts: (workspace: string) => ["billing-products", workspace],
+  inboxRequests: (workspace: string) => ["team-inbox", workspace],
+  machineOverview: ["machines", "overview"],
+  machine: (id: string) => ["machines", "one", id],
+  machineSummary: (workspace: string) => ["machines", workspace, "summary"],
 } as const

@@ -38,23 +38,60 @@ const request = cache(async () => {
   return { workspace, get }
 })
 
-/** The session data every page shows (the user menu, the workspace crumb), fetched once per request. */
-const session = cache(async () => {
-  const { workspace, get } = await request()
-  const [me, workspaces] = await Promise.all([get("me"), get<{ items: unknown[] }>("workspaces")])
-  return { workspace, me, workspaces }
-})
-
-function seed(queryClient: QueryClient, me: unknown, workspaces: { items: unknown[] } | undefined) {
-  if (me) queryClient.setQueryData(queryKeys.me, me)
-  if (workspaces) queryClient.setQueryData(queryKeys.workspaces, workspaces.items)
+type Session = {
+  me?: unknown
+  workspaces?: { items: { id: string; kind: string }[] }
+  billing?: unknown
+  products?: { items: unknown[] }
 }
 
-/** The session data alone, for every console page (see `WithSession`). */
-export async function prefetchSession(): Promise<{ state: DehydratedState; workspace: string }> {
-  const { workspace, me, workspaces } = await session()
+/**
+ * What every page shows (the user menu, the workspace crumb, the quota banner), fetched once per
+ * request. Billing is read in parallel by the selected id; it is kept only when the list confirms
+ * that workspace (a stale cookie falls back to personal in the browser, which then fetches its own).
+ */
+const session = cache(async () => {
+  const { workspace, get } = await request()
+  const billingPath =
+    workspace === "personal"
+      ? "billing/workspaces/personal"
+      : `billing/workspaces/teams/${encodeURIComponent(workspace)}`
+  const [me, workspaces, billing, products] = await Promise.all([
+    get("me"),
+    get<NonNullable<Session["workspaces"]>>("workspaces"),
+    get(billingPath),
+    get<{ items: unknown[] }>(`${billingPath}/products`),
+  ])
+  const confirmed = workspaces?.items.some((item) => item.id === workspace)
+  return confirmed ? { workspace, me, workspaces, billing, products } : { workspace, me, workspaces }
+})
+
+function seed(queryClient: QueryClient, workspace: string, { me, workspaces, billing, products }: Session) {
+  if (me) queryClient.setQueryData(queryKeys.me, me)
+  if (workspaces) queryClient.setQueryData(queryKeys.workspaces, workspaces.items)
+  if (billing) queryClient.setQueryData(queryKeys.billing(workspace), billing)
+  if (products) queryClient.setQueryData(queryKeys.billingProducts(workspace), products.items)
+}
+
+/** A page's own first read: its query key, its control-plane path, and the field the browser query keeps. */
+export type PageRead = { key: readonly unknown[]; path: string; field?: string }
+
+/** The session data, plus a page's own reads (see `WithSession`), for every console page. */
+export async function prefetchSession(
+  reads?: (workspace: string) => PageRead[],
+): Promise<{ state: DehydratedState; workspace: string }> {
+  const { workspace, get } = await request()
+  const list = reads?.(workspace) ?? []
+  const [data, ...results] = await Promise.all([
+    session(),
+    ...list.map((read) => get<Record<string, unknown>>(read.path)),
+  ])
   const queryClient = new QueryClient()
-  seed(queryClient, me, workspaces)
+  seed(queryClient, workspace, data)
+  list.forEach((read, index) => {
+    const result = results[index]
+    if (result) queryClient.setQueryData(read.key, read.field ? result[read.field] : result)
+  })
   return { state: dehydrate(queryClient), workspace }
 }
 
@@ -66,15 +103,19 @@ export async function prefetchMachinesPage(): Promise<{ state: DehydratedState; 
   const { workspace, get } = await request()
   const queryClient = new QueryClient()
 
-  const [{ me, workspaces }, machines, usage] = await Promise.all([
+  const [data, machines, usage, overview, summary] = await Promise.all([
     session(),
     // The Machines table's first page (lib/machine-list.ts), not every machine.
     get<{ items: unknown[]; total: number }>(`machines?${new URLSearchParams({ workspace, limit: "50" })}`),
     get(`usage?${usageParams(workspace, defaultUsagePeriod)}`),
+    get("machines/overview"),
+    get(`machines/summary?${new URLSearchParams({ workspace })}`),
   ])
 
   // Shapes match the browser query functions in lib/api.ts.
-  seed(queryClient, me, workspaces)
+  seed(queryClient, workspace, data)
+  if (overview) queryClient.setQueryData(queryKeys.machineOverview, overview)
+  if (summary) queryClient.setQueryData(queryKeys.machineSummary(workspace), summary)
   if (machines)
     queryClient.setQueryData(queryKeys.machineList(workspace, "", {}, 1), {
       items: machines.items,
