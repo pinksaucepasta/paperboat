@@ -11,6 +11,7 @@ import { useLastCount } from "@/lib/last-count"
 import { useWorkspaceId } from "@/lib/workspace"
 import { ListPager } from "@/components/list-pager"
 import { NewTunnelButton } from "@/components/tunnels/new-tunnel"
+import { RememberedEmpty } from "@/components/remembered-empty"
 import { useTunnelActions } from "@/components/tunnels/tunnel-actions"
 import { TunnelStatus } from "@/components/tunnels/tunnel-status"
 import { SearchField, useListScope } from "@/components/list-toolbar"
@@ -68,80 +69,70 @@ export function TunnelList({ machine: tabMachine }: { machine?: Machine }) {
     </Empty>
   )
   if ((query.isSuccess ? query.data.total === 0 : query.isPending && lastEmpty === 1) && !q) return empty
-  // Before the browser can read what it remembered (the prerendered shell, the server's render),
-  // both forms are drawn; the inline script after the list, run as the HTML is parsed, shows the
-  // empty state if the list was empty last time, before anything is painted.
   const remembered = lastEmpty === undefined && query.isPending && !q
 
-  return (
-    <>
-      {remembered && (
-        <div hidden suppressHydrationWarning>
-          {empty}
+  const list = (
+    <section className="flex flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <SearchField value={search} onChange={setSearch} placeholder="Search tunnels" />
+        <div className="ml-auto">
+          <NewTunnelButton machine={machine} />
         </div>
-      )}
-      <section suppressHydrationWarning className="flex flex-col gap-3">
-        <div className="flex items-center gap-2">
-          <SearchField value={search} onChange={setSearch} placeholder="Search tunnels" />
-          <div className="ml-auto">
-            <NewTunnelButton machine={machine} />
-          </div>
-        </div>
+      </div>
 
-        <div>
-          <table className="w-full table-fixed text-sm">
-            <colgroup>
-              <col className="w-[24%]" />
-              <col className="hidden lg:table-column" />
-              {!scope && <col className="hidden w-[16%] md:table-column" />}
-              <col className="hidden w-[20%] sm:table-column" />
-              <col className="w-12" />
-            </colgroup>
-            <thead className="border-b border-divider text-left text-xs text-muted-foreground">
-              <tr className="[&>th]:h-9 [&>th]:px-3 [&>th]:font-normal">
-                <th>Tunnel</th>
-                <th className="hidden lg:table-cell">Address</th>
-                {!scope && <th className="hidden md:table-cell">Machine</th>}
-                <th className="hidden sm:table-cell">Status</th>
-                <th className="w-12" aria-label="Actions" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-divider border-b border-divider">
-              {query.isPending
-                ? <TableRowsSkeleton
-                    rows={lastRows}
-                    columns={[
-                      { bar: "w-36" },
-                      { className: "hidden lg:table-cell", bar: "w-56" },
-                      !scope && { className: "hidden md:table-cell", bar: "w-20" },
-                      { className: "hidden sm:table-cell", bar: "w-16" },
-                      { empty: true },
-                    ]}
+      <div>
+        <table className="w-full table-fixed text-sm">
+          <colgroup>
+            <col className="w-[24%]" />
+            <col className="hidden lg:table-column" />
+            {!scope && <col className="hidden w-[16%] md:table-column" />}
+            <col className="hidden w-[20%] sm:table-column" />
+            <col className="w-12" />
+          </colgroup>
+          <thead className="border-b border-divider text-left text-xs text-muted-foreground">
+            <tr className="[&>th]:h-9 [&>th]:px-3 [&>th]:font-normal">
+              <th>Tunnel</th>
+              <th className="hidden lg:table-cell">Address</th>
+              {!scope && <th className="hidden md:table-cell">Machine</th>}
+              <th className="hidden sm:table-cell">Status</th>
+              <th className="w-12" aria-label="Actions" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-divider border-b border-divider">
+            {query.isPending
+              ? <TableRowsSkeleton
+                  rows={lastRows}
+                  columns={[
+                    { bar: "w-36" },
+                    { className: "hidden lg:table-cell", bar: "w-56" },
+                    !scope && { className: "hidden md:table-cell", bar: "w-20" },
+                    { className: "hidden sm:table-cell", bar: "w-16" },
+                    { empty: true },
+                  ]}
+                />
+              : shown.map((tunnel) => (
+                  <Row
+                    key={tunnel.id}
+                    tunnel={tunnel}
+                    machineName={scope ? undefined : (aliasOf(tunnel.created_by_host_id) ?? "")}
                   />
-                : shown.map((tunnel) => (
-                    <Row
-                      key={tunnel.id}
-                      tunnel={tunnel}
-                      machineName={scope ? undefined : (aliasOf(tunnel.created_by_host_id) ?? "")}
-                    />
-                  ))}
-            </tbody>
-          </table>
-          {query.data && <ListPager page={query.data.page} size={cursorPageSize} total={query.data.total} go={pages.go} />}
-          {query.isError && <LoadError what="tunnels" error={query.error} retry={() => query.refetch()} />}
-          {query.isSuccess && shown.length === 0 && (
-            <p className="py-12 text-center text-sm text-muted-foreground">No tunnels match “{search.trim()}”</p>
-          )}
-        </div>
-      </section>
-      {remembered && (
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `try{var w=(document.cookie.match(/(?:^|; )pb-workspace=([a-z0-9-]+)/)||[,"personal"])[1];if(localStorage.getItem(${JSON.stringify(`pb-rows:tunnels-empty:`)}+w+${JSON.stringify(`:${scope ?? ""}`)})==="1"){var l=document.currentScript.previousElementSibling;l.hidden=true;l.previousElementSibling.hidden=false}}catch(e){}`,
-          }}
-        />
-      )}
-    </>
+                ))}
+          </tbody>
+        </table>
+        {query.data && <ListPager page={query.data.page} size={cursorPageSize} total={query.data.total} go={pages.go} />}
+        {query.isError && <LoadError what="tunnels" error={query.error} retry={() => query.refetch()} />}
+        {query.isSuccess && shown.length === 0 && (
+          <p className="py-12 text-center text-sm text-muted-foreground">No tunnels match “{search.trim()}”</p>
+        )}
+      </div>
+    </section>
+  )
+  return remembered ? (
+    <RememberedEmpty name="tunnels-empty" empty={empty}>
+      {list}
+    </RememberedEmpty>
+  ) : (
+    list
   )
 }
 

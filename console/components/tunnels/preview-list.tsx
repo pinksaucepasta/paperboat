@@ -24,6 +24,7 @@ import { LoadError } from "@/components/load-error"
 import { TableRowsSkeleton } from "@/components/skeletons"
 import { copyWithToast } from "@/lib/clipboard"
 import { useLastCount } from "@/lib/last-count"
+import { RememberedEmpty } from "@/components/remembered-empty"
 import { useWorkspaceId } from "@/lib/workspace"
 
 type View = "live" | "ended"
@@ -117,28 +118,28 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
     `previews-empty:${workspaceId}:${scope ?? ""}`,
     counts.data ? Number(counts.data.live + counts.data.ended === 0) : undefined,
   )
-  if ((counts.data ? counts.data.live + counts.data.ended === 0 : lastEmpty === 1) && !q) {
-    return (
-      <Empty className="py-16">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <EyeIcon />
-          </EmptyMedia>
-          <EmptyTitle>No previews yet</EmptyTitle>
-          <EmptyDescription>
-            Share a file or a dev server on {machine ? machine.alias : "a machine"} at a temporary address.
-          </EmptyDescription>
-        </EmptyHeader>
-        <EmptyContent className="flex-row justify-center">
-          <ShareFileButton machine={machine} />
-          <NewPreviewButton machine={machine} />
-        </EmptyContent>
-        {dropped}
-      </Empty>
-    )
-  }
+  const empty = (
+    <Empty className="py-16">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <EyeIcon />
+        </EmptyMedia>
+        <EmptyTitle>No previews yet</EmptyTitle>
+        <EmptyDescription>
+          Share a file or a dev server on {machine ? machine.alias : "a machine"} at a temporary address.
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent className="flex-row justify-center">
+        <ShareFileButton machine={machine} />
+        <NewPreviewButton machine={machine} />
+      </EmptyContent>
+      {dropped}
+    </Empty>
+  )
+  if ((counts.data ? counts.data.live + counts.data.ended === 0 : lastEmpty === 1) && !q) return empty
+  const remembered = lastEmpty === undefined && counts.isPending && !q
 
-  return (
+  const list = (
     <section className="flex flex-col gap-3">
       {dropped}
       {/* On a phone the search takes its own line, so the toggle and buttons keep their size. */}
@@ -216,6 +217,13 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
         )}
       </div>
     </section>
+  )
+  return remembered ? (
+    <RememberedEmpty name="previews-empty" empty={empty}>
+      {list}
+    </RememberedEmpty>
+  ) : (
+    list
   )
 }
 
