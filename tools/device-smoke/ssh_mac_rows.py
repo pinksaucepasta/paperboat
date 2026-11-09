@@ -211,25 +211,49 @@ def refusals():
     report(row, 'PASS' if ran and not bad else 'FAIL', ' '.join(l for l in res.splitlines() if l.startswith('CASE'))[:600])
 
 
-REVOKE = r'''A=%s; PB=~/.local/bin/pb
-"$PB" ssh "$A" -- 'echo session-up; sleep 300' > ~/slr.out 2> ~/slr.err & pid=$!
-for i in $(seq 1 60); do grep -q session-up ~/slr.out && break; sleep 1; done
-grep -q session-up ~/slr.out || { echo "RESULT no-session $(tr '\n' ' ' < ~/slr.err | cut -c1-200)"; exit 0; }
-start=$(date +%%s.%%N); "$PB" logout >/dev/null 2>&1
-for i in $(seq 1 600); do kill -0 $pid 2>/dev/null || break; sleep 0.1; done
-end=$(date +%%s.%%N); alive=$(kill -0 $pid 2>/dev/null && echo yes || echo no); kill $pid 2>/dev/null
-echo "RESULT seconds=$(python3 -c "print(round($end-$start,1))") alive=$alive stderr=[$(tr '\n' ' ' < ~/slr.err | cut -c1-200)]"'''
+# F5-10 cli mode on a Mac target (twin of ssh_live_revoke.sh): the client holds a `pb ssh` AND a plain managed ssh session
+# to the Mac, `pb logout` revokes its CLI session; both must end within 15 s and both must say access was revoked; a
+# normal exit of either prints nothing. The clock starts before the logout.
+REVOKE = r'''# normal exits print nothing
+perr=$(timeout 60 $PB ssh $A -- 'exit 0' </dev/null 2>&1 >/dev/null | tr '\n' ' '); lerr=$(timeout 60 ssh $H 'exit 0' </dev/null 2>&1 >/dev/null | tr '\n' ' ')
+echo "RESULT normal pb_stderr=[$perr] plain_stderr=[$lerr]"
+$PB ssh $A -- 'echo session-up; sleep 300' > ~/slr.out 2> ~/slr.err < /dev/null & pid=$!
+ssh $H 'echo plain-up; sleep 300' > ~/slrp.out 2> ~/slrp.err < /dev/null & ppid=$!
+for i in $(seq 1 60); do grep -q session-up ~/slr.out && grep -q plain-up ~/slrp.out && break; sleep 1; done
+grep -q session-up ~/slr.out && grep -q plain-up ~/slrp.out || { echo "RESULT no-session pb=$(tr '\n' ' ' < ~/slr.err | cut -c1-160) plain=$(tr '\n' ' ' < ~/slrp.err | cut -c1-160)"; exit 0; }
+start=$(date +%s.%N); $PB logout >/dev/null 2>&1
+for i in $(seq 1 300); do kill -0 $pid 2>/dev/null || break; sleep 0.1; done
+end=$(date +%s.%N)
+for i in $(seq 1 300); do kill -0 $ppid 2>/dev/null || break; sleep 0.1; done
+pend=$(date +%s.%N)
+palive=$(kill -0 $ppid 2>/dev/null && echo yes || echo no); alive=$(kill -0 $pid 2>/dev/null && echo yes || echo no); kill $pid $ppid 2>/dev/null
+echo "RESULT seconds=$(python3 -c "print(round($end-$start,1))") alive=$alive plain_seconds=$(python3 -c "print(round($pend-$start,1))") plain_alive=$palive stderr=[$(tr '\n' ' ' < ~/slr.err | cut -c1-200)] plain_stderr=[$(tr '\n' ' ' < ~/slrp.err | cut -c1-200)]"'''
+
+
+def revoke_verdict(out):
+    """(ok, why) for the REVOKE script's output: both sessions end within 15 s, both say access was revoked, normal exits are silent."""
+    out = re.sub(r'\s+', ' ', out)  # ssh error text carries line breaks
+    m = re.search(r'RESULT seconds=([0-9.]+) alive=(\w+) plain_seconds=([0-9.]+) plain_alive=(\w+) stderr=\[(.*?)\] plain_stderr=\[(.*)\]', out)
+    if not m:
+        return False, 'no measurement'
+    revoked = re.compile(r'access (to \S+ )?was revoked', re.I)
+    if not (float(m[1]) <= 15 and float(m[3]) <= 15 and m[2] == 'no' and m[4] == 'no'):
+        return False, 'a session outlived the revoke'
+    if not (revoked.search(m[5]) and revoked.search(m[6])):
+        return False, 'a session did not say access was revoked'
+    if 'RESULT normal pb_stderr=[] plain_stderr=[]' not in out:
+        return False, 'a normal exit printed something'
+    return True, ''
 
 
 def revoke():
     # `pb logout` signs the client out for good, so it only runs on a FRESH throwaway client (REVOKE_CLIENT_CMD).
     if not os.environ.get('REVOKE_CLIENT_CMD'):
-        report('F5-10 revoke', 'SKIP', 'set REVOKE_CLIENT_CMD to a fresh throwaway client; logout would sign out CLIENT_CMD')
+        report('F5-10 revoke', 'SKIP', 'set REVOKE_CLIENT_CMD to a fresh throwaway client; logout would sign out REVOKE_CLIENT_CMD')
         return
-    _, out = run('REVOKE_CLIENT_CMD', REVOKE % shlex.quote(ARGS.alias), timeout=240)
-    m = re.search(r'RESULT seconds=([0-9.]+) alive=(\w+)', out)
-    ok = m and float(m.group(1)) <= 15 and m.group(2) == 'no' and re.search(r'access (to \S+ )?was revoked', out, re.I)
-    report('F5-10 revoke', 'PASS' if ok else 'FAIL', out.strip()[-300:])
+    _, out = run('REVOKE_CLIENT_CMD', prelude() + REVOKE, timeout=300)
+    ok, why = revoke_verdict(out)
+    report('F5-10 revoke', 'PASS' if ok else 'FAIL', ('' if ok else why + ': ') + ' | '.join(l for l in out.splitlines() if l.startswith('RESULT') or 'revoked' in l or 'client_loop' in l)[-900:])
 
 
 OTHER_USER = r'''B=%s; U=%s
