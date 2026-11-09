@@ -517,6 +517,14 @@ func TestRevokedSigningKeyReachesRelayTrustPostgres(t *testing.T) {
 			t.Fatalf("%s: a client keeps %v (%v), want only k2", name, keys, err)
 		}
 	}
+	// A self-host enrollment claim carries the same document.
+	claimKeys, _, err := n.service.TrustDocuments(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := trustWithdrawn(t, claimKeys); !slices.Contains(w, "k1") {
+		t.Fatalf("claim trust document withdrawn_key_ids = %v, want k1: %s", w, claimKeys)
+	}
 }
 
 // A starting relay is answered with the current trust document, so it never trusts a stale startup file.

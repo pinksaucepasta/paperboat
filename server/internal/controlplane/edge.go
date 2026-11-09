@@ -829,6 +829,21 @@ func (s *EdgeService) trustKeysFrom(ctx context.Context, queries *dbsqlc.Queries
 	return s.signer.JWKSJSON(revoked...)
 }
 
+// TrustDocuments is what a self-host enrollment claim carries: the same trust document and revocations the
+// relays and edges refresh from, so a claim never trusts a key an operator revoked.
+func (s *EdgeService) TrustDocuments(ctx context.Context) ([]byte, []byte, error) {
+	keys, err := s.TrustKeys(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	revocations, err := s.Revocations(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	raw, err := json.Marshal(revocations)
+	return keys, raw, err
+}
+
 func (s *EdgeService) handleJWKS(w http.ResponseWriter, r *http.Request) {
 	document, err := s.TrustKeys(r.Context())
 	if err != nil {
