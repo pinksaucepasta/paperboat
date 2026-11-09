@@ -19,7 +19,7 @@ func init() {
 			"selfhost_claim":       {Operation: "service_lifecycle", Stage: "selfhost", Name: "selfhost_failed", Code: "selfhost_claim_failed"},
 		},
 		Codes:    []string{"selfhost_command_failed", "selfhost_child_failed", "selfhost_certificate_failed", "selfhost_claim_failed"},
-		Causes:   []string{"authority_unavailable", "authority_rejected", "authorization_rejected", "protocol_rejected", "capacity_exhausted", "authority_expired", "relay_closed"},
+		Causes:   []string{"authority_unavailable", "authority_rejected", "authorization_rejected", "protocol_rejected", "capacity_exhausted", "authority_expired", "relay_closed", "bandwidth_quota_exhausted"},
 		Stages:   map[string]string{"selfhost": "selfhost_failed"},
 		Classify: classify,
 		Metrics: []reporting.Metric{
@@ -47,6 +47,8 @@ func classify(err error) (string, int) {
 		return "capacity_exhausted", 83
 	case reporting.SameError(err, derpquic.ErrExpired):
 		return "authority_expired", 83
+	case reporting.SameError(err, derpquic.ErrQuota):
+		return "bandwidth_quota_exhausted", 83
 	case reporting.SameError(err, derpquic.ErrClosed):
 		return "relay_closed", 82
 	}
@@ -60,6 +62,8 @@ func classify(err error) (string, int) {
 			return "capacity_exhausted", 83
 		case 4:
 			return "authority_expired", 83
+		case 5:
+			return "bandwidth_quota_exhausted", 83
 		}
 	}
 	return "", 0
