@@ -574,6 +574,36 @@ func CapturedWindowsPreparedSource(ctx context.Context, ownerSID, candidateID st
 	return capturedWindowsSource(ctx, ownerSID, candidateID)
 }
 
+// windowsCapturedSourceProjection reads the source out of a captured installation snapshot. A snapshot that
+// recorded no installation (first enrollment) has no predecessor: os.ErrNotExist, which callers read as
+// "nothing captured". Anything else that lacks a valid source is a corrupt record.
+func windowsCapturedSourceProjection(body []byte, candidateID string) (*installsource.Source, error) {
+	var projection struct {
+		Source              *installsource.Source
+		InstallationAbsent  bool   `json:"installation_absent"`
+		PreparedCandidateID string `json:"prepared_candidate_id"`
+		Installation        []byte `json:"installation"`
+	}
+	if err := json.Unmarshal(body, &projection); err != nil {
+		return nil, ErrInvalidRequest
+	}
+	if candidateID != "" && (projection.PreparedCandidateID != candidateID || len(projection.Installation) != 0) {
+		return nil, ErrSignedUpdatePending
+	}
+	if len(projection.Installation) != 0 {
+		if err := json.Unmarshal(projection.Installation, &projection); err != nil {
+			return nil, ErrInvalidRequest
+		}
+	}
+	if projection.InstallationAbsent && projection.Source == nil {
+		return nil, os.ErrNotExist
+	}
+	if projection.Source == nil || projection.Source.Validate() != nil {
+		return nil, ErrInvalidRequest
+	}
+	return projection.Source, nil
+}
+
 func capturedWindowsSource(ctx context.Context, ownerSID, candidateID string) (installsource.Source, error) {
 	layout, err := service.WindowsUserLayout(ownerSID)
 	if err != nil {
@@ -591,31 +621,16 @@ func capturedWindowsSource(ctx context.Context, ownerSID, candidateID string) (i
 	if err != nil {
 		return installsource.Source{}, err
 	}
-	var projection struct {
-		Source              *installsource.Source
-		PreparedCandidateID string `json:"prepared_candidate_id"`
-		Installation        []byte `json:"installation"`
-	}
-	if err := json.Unmarshal(body, &projection); err != nil {
-		return installsource.Source{}, ErrInvalidRequest
-	}
-	if candidateID != "" && (projection.PreparedCandidateID != candidateID || len(projection.Installation) != 0) {
-		return installsource.Source{}, ErrSignedUpdatePending
-	}
-	if len(projection.Installation) != 0 {
-		if err := json.Unmarshal(projection.Installation, &projection); err != nil {
-			return installsource.Source{}, ErrInvalidRequest
-		}
-	}
-	if projection.Source == nil || projection.Source.Validate() != nil {
-		return installsource.Source{}, ErrInvalidRequest
-	}
-	pin, err := WindowsPinnedSourcePath(layout, *projection.Source)
+	source, err := windowsCapturedSourceProjection(body, candidateID)
 	if err != nil {
 		return installsource.Source{}, err
 	}
-	if err := verifyWindowsSource(ctx, pin, *projection.Source, ownerSID); err != nil {
+	pin, err := WindowsPinnedSourcePath(layout, *source)
+	if err != nil {
 		return installsource.Source{}, err
 	}
-	return *projection.Source, nil
+	if err := verifyWindowsSource(ctx, pin, *source, ownerSID); err != nil {
+		return installsource.Source{}, err
+	}
+	return *source, nil
 }
