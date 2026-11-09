@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -358,6 +359,19 @@ func TestInspectCandidateRejectsMalformedOversizedAndCanceledProbes(t *testing.T
 	defer cancel()
 	if _, err := InspectCandidate(ctx, binary); !errors.Is(err, ErrInput) || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("canceled probe error=%v", err)
+	}
+}
+
+func TestInspectCandidateKeepsALocalFailureToRunTheProbe(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can run a file without the execute bit")
+	}
+	binary := buildPaperboatFixture(t, t.TempDir(), "pb", runtime.GOOS, runtime.GOARCH)
+	if err := os.Chmod(binary, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectCandidate(context.Background(), binary); errors.Is(err, ErrInput) || !errors.Is(err, fs.ErrPermission) {
+		t.Fatalf("a permission failure to run the probe is %v, want a local failure that is not ErrInput", err)
 	}
 }
 

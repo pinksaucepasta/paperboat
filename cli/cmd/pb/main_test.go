@@ -19,6 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"github.com/spf13/cobra"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -835,6 +836,28 @@ func TestUpdateStatusShowsAFinishThatIsBeingRetriedOrGaveUp(t *testing.T) {
 
 // A file that is not a Paperboat build (a text file, another program) is refused as unreadable input with that reason, not as the
 // generic "could not finish the command" (C216 error bar).
+func TestUpdateFromAFileThatCouldNotBeInspectedKeepsItsLocalFailure(t *testing.T) {
+	notABuild := filepath.Join(t.TempDir(), "build")
+	if err := os.WriteFile(notABuild, []byte("hello\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	command, _, err := newRootCommand().Find([]string{"update"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command.SetOut(&bytes.Buffer{})
+	command.SetErr(&bytes.Buffer{})
+	previous := inspectUpdateCandidate
+	inspectUpdateCandidate = func(context.Context, string) (installsource.Source, error) {
+		return installsource.Source{}, fs.ErrPermission
+	}
+	defer func() { inspectUpdateCandidate = previous }()
+	err = installStagedUpdateSource(command, context.Background(), notABuild, false)
+	if result := classifyCLIJSONError(err); !errors.Is(err, fs.ErrPermission) || result.Code == "update_source_unreadable" || result.Category != "local_io" {
+		t.Fatalf("a permission failure was classified %+v (%v)", result, err)
+	}
+}
+
 func TestUpdateFromAFileThatIsNotAPaperboatBuildIsRefusedClearly(t *testing.T) {
 	notABuild := filepath.Join(t.TempDir(), "not-a-build")
 	if err := os.WriteFile(notABuild, []byte("hello\n"), 0o600); err != nil {
@@ -848,7 +871,7 @@ func TestUpdateFromAFileThatIsNotAPaperboatBuildIsRefusedClearly(t *testing.T) {
 	command.SetErr(&bytes.Buffer{})
 	previous := inspectUpdateCandidate
 	inspectUpdateCandidate = func(context.Context, string) (installsource.Source, error) {
-		return installsource.Source{}, errors.New("fork/exec: exec format error")
+		return installsource.Source{}, installsource.ErrInput
 	}
 	defer func() { inspectUpdateCandidate = previous }()
 	err = installStagedUpdateSource(command, context.Background(), notABuild, false)

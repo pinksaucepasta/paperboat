@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -182,7 +183,13 @@ func InspectCandidate(ctx context.Context, path string) (Source, error) {
 		if probeCtx.Err() != nil {
 			return Source{}, inputFailure(probeCtx.Err())
 		}
-		return Source{}, ErrInput
+		// Only a program that ran and failed, or that the system will not execute as a program, is not a build.
+		// Anything else (EACCES on a noexec mount, ENOSPC, EMFILE) is a local failure a retry can fix.
+		var exit *exec.ExitError
+		if errors.As(err, &exit) || errors.Is(err, syscall.ENOEXEC) {
+			return Source{}, ErrInput
+		}
+		return Source{}, sourceIOFailure(err)
 	}
 	if err := probeCtx.Err(); err != nil {
 		return Source{}, inputFailure(err)
