@@ -8,7 +8,10 @@
 set -eu
 # One deploy at a time: two lanes running this together once deleted the slot the other had just
 # pointed the server at (it crash-looped, one run rolled back). The lock waits up to 30 minutes.
-exec 9>"${TMPDIR:-/tmp}/paperboat-console-live.lock"
+# A fixed path: each session has its own TMPDIR, so a lock there let two deploys build into the
+# same slot at once (11-09: tsc found .next/types files the other build had just removed).
+mkdir -p "$HOME/.config/paperboat-console"
+exec 9>"$HOME/.config/paperboat-console/live.lock"
 flock -w 1800 9 || { echo "console-live: another deploy is still running" >&2; exit 1; }
 tree=${PB_CONSOLE_TREE:-$HOME/paperboat}
 url=${PB_CONSOLE_URL:-http://100.95.70.63:3000}
