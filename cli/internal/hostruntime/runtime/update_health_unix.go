@@ -27,10 +27,13 @@ func (a updateHealthAvailability) Observation(ctx context.Context) *availability
 	if observation == nil || observation.UpdateHealth != "unknown" {
 		return observation
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	probe, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	status, err := a.updater.Status(ctx)
+	status, err := a.updater.Status(probe)
 	if err != nil {
+		if ctx.Err() != nil {
+			return observation // the caller ended (shutdown, send timeout), which says nothing about the updater
+		}
 		// An updater that cannot be reached needs a service restart, the same recovery doctor names.
 		observation.UpdateHealth = "recovery_required"
 		return observation

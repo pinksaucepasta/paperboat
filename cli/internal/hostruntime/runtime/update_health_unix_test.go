@@ -43,6 +43,7 @@ func TestUpdateHealthAvailabilityReportsTheUpdatersHealth(t *testing.T) {
 		{"contradictory journal", "unknown", "recovery_required", fixedUpdater{response: failed(updateflow.FailureContradictoryJournal)}},
 		{"updater error status", "unknown", "recovery_required", fixedUpdater{response: updated.ControlResponse{Status: "error"}}},
 		{"updater unreachable", "unknown", "recovery_required", fixedUpdater{err: updated.ErrUnavailable}},
+		{"updater wedged past its own cap", "unknown", "recovery_required", fixedUpdater{err: context.DeadlineExceeded}},
 		{"host service value kept", "healthy", "healthy", fixedUpdater{err: errors.New("must not be asked")}},
 	} {
 		source := fixedAvailability{&availability.Observation{UpdateHealth: tc.reported}}
@@ -64,13 +65,14 @@ func (blockedUpdater) Status(ctx context.Context) (updated.ControlResponse, erro
 }
 
 // A cancelled send or shutdown waited up to 2 s on a wedged updater socket because the probe ignored the caller's context.
+// The caller ending says nothing about the updater, so the health stays "unknown" rather than "recovery_required".
 func TestUpdateHealthAvailabilityStopsWithTheCallersContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	source := fixedAvailability{&availability.Observation{UpdateHealth: "unknown"}}
 	started := time.Now()
 	got := updateHealthAvailability{source, blockedUpdater{}}.Observation(ctx)
-	if took := time.Since(started); took > 500*time.Millisecond || got == nil || got.UpdateHealth != "recovery_required" {
-		t.Fatalf("returned %+v after %v, want recovery_required at once", got, took)
+	if took := time.Since(started); took > 500*time.Millisecond || got == nil || got.UpdateHealth != "unknown" {
+		t.Fatalf("returned %+v after %v, want update health left unknown at once", got, took)
 	}
 }
