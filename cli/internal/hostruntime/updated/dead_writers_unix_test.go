@@ -129,7 +129,7 @@ func TestRunningUpdaterLeavesACutoverRecordToTheHelper(t *testing.T) {
 	root, s, idle, _ := deadWriterFixture(t)
 	cutover := idle
 	cutover.Stage, cutover.NativeActivation = updateflow.StageCutover, true
-	cutover.CandidateVersion, cutover.CandidateDigest, cutover.CandidateLength, cutover.StagedPath = "1.2.3.5", strings.Repeat("a", 64), 1, filepath.Join(root, "pb.next")
+	cutover.CandidateVersion, cutover.CandidateDigest, cutover.CandidateLength, cutover.StagedPath = "2026.10.08.31", strings.Repeat("a", 64), 1, filepath.Join(root, "pb.next")
 	if err := updateflow.Write(filepath.Join(root, "transaction.json"), cutover, 0, 0); err != nil {
 		t.Fatal(err)
 	}
