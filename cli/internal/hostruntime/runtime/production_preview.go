@@ -5,10 +5,12 @@ package runtime
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"time"
@@ -227,6 +229,12 @@ func startPreviewPrivateAccess(ctx context.Context, service previewPrivateAccess
 	}
 	err := service.Start(ctx)
 	if privateproxyconfig.UnsupportedOnly(err) {
+		return nil
+	}
+	// The Windows hostd runs as LocalSystem, which has no interactive user whose PAC it could set.
+	var configurator *privatepreviewproxy.ConfiguratorError
+	if goruntime.GOOS == "windows" && errors.As(err, &configurator) {
+		slog.Warn("private preview access is not configured for any desktop user", "error", err)
 		return nil
 	}
 	return err

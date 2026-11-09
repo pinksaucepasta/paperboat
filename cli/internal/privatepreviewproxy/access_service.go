@@ -56,6 +56,13 @@ func NewAccessService(config AccessServiceConfig) (*AccessService, error) {
 	return &AccessService{config: config}, nil
 }
 
+// ConfiguratorError marks a failure of the system PAC configuration, as opposed to the proxy itself: a host
+// with no interactive desktop to configure (a Windows LocalSystem hostd) can still serve previews without it.
+type ConfiguratorError struct{ Err error }
+
+func (e *ConfiguratorError) Error() string { return e.Err.Error() }
+func (e *ConfiguratorError) Unwrap() error { return e.Err }
+
 // Start owns the listener and discovery retries. A discovery outage leaves
 // system settings untouched; PACURL reports ready only after a valid snapshot
 // has been published and installed. Platform installation failures are errors.
@@ -74,7 +81,7 @@ func (s *AccessService) Start(ctx context.Context) error {
 		return ErrAccessProxyInvalid
 	}
 	if err := s.config.Configurator.Recover(ctx); err != nil {
-		return err
+		return &ConfiguratorError{Err: err}
 	}
 	runContext, cancel := context.WithCancel(ctx)
 	proxy, err := StartAccessProxy(ctx, s.config.Proxy)
@@ -96,7 +103,7 @@ func (s *AccessService) Start(ctx context.Context) error {
 		observePrivateAccessAttempt(runContext, err)
 	} else if err := s.config.Configurator.Install(ctx, pacURL); err != nil {
 		cancel()
-		return errors.Join(err, proxy.Close())
+		return errors.Join(&ConfiguratorError{Err: err}, proxy.Close())
 	}
 	s.proxy = proxy
 	s.running = true
