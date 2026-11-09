@@ -1,9 +1,10 @@
 "use client"
 
-import { keepPreviousData, queryOptions } from "@tanstack/react-query"
+import { queryOptions } from "@tanstack/react-query"
 import { api } from "@/lib/api"
 import { cursorPage } from "@/lib/cursor-pages"
 import type { TunnelDomain } from "@/lib/tunnels"
+import { keepWithinWorkspace } from "@/lib/query-keys"
 
 /**
  * One hostname a tunnel or a live preview publishes, as GET /v1/domains lists it (Lane Q, PQ-04
@@ -35,7 +36,7 @@ export const domainsPageQuery = (options: { workspace: string; q: string; page: 
     queryKey: ["domains", options.workspace, "page", options],
     queryFn: ({ signal }) =>
       cursorPage<DomainItem>("domains", params(options.workspace, options.q, options.kind), options.page, signal),
-    placeholderData: keepPreviousData,
+    placeholderData: keepWithinWorkspace(options.workspace),
     refetchInterval: 15_000,
   })
 

@@ -1,9 +1,9 @@
 "use client"
 
-import { keepPreviousData, queryOptions } from "@tanstack/react-query"
+import { queryOptions } from "@tanstack/react-query"
 import { cursorPage } from "@/lib/cursor-pages"
 import type { Machine } from "@/lib/api"
-import { queryKeys } from "@/lib/query-keys"
+import { queryKeys, keepWithinWorkspace } from "@/lib/query-keys"
 import type { Filters } from "@/lib/machine-filter"
 
 /** The search box's filters as GET /v1/machines takes them (Lane Q, PQ-04 C1). */
@@ -26,6 +26,6 @@ export const machineListQuery = (workspace: string, text: string, filters: Filte
     queryKey: queryKeys.machineList(workspace, text, filters, page),
     queryFn: ({ signal }) =>
       cursorPage<Machine>("machines", { workspace, ...(text && { q: text }), ...serverFilters(filters) }, page, signal),
-    placeholderData: keepPreviousData,
+    placeholderData: keepWithinWorkspace(workspace),
     refetchInterval: 15_000,
   })

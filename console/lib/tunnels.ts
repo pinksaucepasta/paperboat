@@ -1,9 +1,10 @@
 "use client"
 
-import { keepPreviousData, queryOptions } from "@tanstack/react-query"
+import { queryOptions } from "@tanstack/react-query"
 import { cursorPage } from "@/lib/cursor-pages"
 import { allPages, api, ApiError, idempotencyKey, send, type Data } from "@/lib/api"
 import { uploadFile } from "@/lib/upload"
+import { keepWithinWorkspace } from "@/lib/query-keys"
 
 /*
  * The server's tunnel API. Previews and tunnels are one tunnel resource with two lifecycles (plans: "Preview and tunnel
@@ -59,7 +60,7 @@ export const previewsPageQuery = (options: {
         options.page,
         signal,
       ),
-    placeholderData: keepPreviousData,
+    placeholderData: keepWithinWorkspace(options.workspace),
     refetchInterval: 10_000,
   })
 
@@ -96,7 +97,7 @@ export const tunnelsPageQuery = (options: { workspace: string; q: string; page: 
         options.page,
         signal,
       ),
-    placeholderData: keepPreviousData,
+    placeholderData: keepWithinWorkspace(options.workspace),
     refetchInterval: 15_000,
   })
 

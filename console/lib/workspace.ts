@@ -24,7 +24,12 @@ export function setWorkspace(id: string) {
 
 function subscribe(listener: () => void) {
   listeners.add(listener)
-  return () => listeners.delete(listener)
+  // Another tab may have switched workspace (the cookie is shared): look again when this one is back.
+  window.addEventListener("focus", listener)
+  return () => {
+    listeners.delete(listener)
+    window.removeEventListener("focus", listener)
+  }
 }
 
 /** The workspace the server rendered for (from the same cookie), so hydration agrees with it. */
