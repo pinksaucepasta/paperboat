@@ -6,7 +6,8 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "check": "astro check"
+    "check": "astro check",
+    "check:site": "node checks/site-check.mjs"
   },
   "dependencies": {
     "@fontsource-variable/figtree": "^5.3.0",
