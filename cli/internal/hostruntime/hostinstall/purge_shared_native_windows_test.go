@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
@@ -190,8 +191,12 @@ func TestNativeWindowsSharedPurgeRemovesTheAccountsOwnInstallLog(t *testing.T) {
 	if err := atomicfile.Write(log, []byte("install failure cause"), atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1}); err != nil {
 		t.Fatal(err)
 	}
-	if err := purgeWindowsSharedResidue(t.Context(), shared, state, instance, "S-1-5-21-49157-49158-49159-1001"); err == nil {
+	err = purgeWindowsSharedResidue(t.Context(), shared, state, instance, "S-1-5-21-49157-49158-49159-1001")
+	if err == nil {
 		t.Fatal("another account's purge removed a log this account can write")
+	}
+	if detail := FailureDetail(err); !strings.Contains(detail, "remove the PaperboatInstall startup log") {
+		t.Fatalf("the refusal does not name its log: %q", detail)
 	}
 	if _, err := os.Lstat(log); err != nil {
 		t.Fatalf("refused log changed: %v", err)
