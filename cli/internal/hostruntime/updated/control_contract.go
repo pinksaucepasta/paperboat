@@ -9,6 +9,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 )
 
@@ -58,6 +59,16 @@ type ControlResponse struct {
 	Settings          *autoupdate.Preferences            `json:"settings,omitempty"`
 	NextMaintenanceAt time.Time                          `json:"next_maintenance_at,omitempty"`
 	OwnerMaintenance  *autoupdate.OwnerMaintenanceNotice `json:"owner_maintenance,omitempty"`
+}
+
+// UpdateHealth is the availability value doctor reads: "recovery_required" when the updater errors or its journal
+// shows a rollback that failed or contradicts itself, otherwise "healthy". A pending activation and a rejected or
+// quarantined candidate leave the running version fine, so they are not faults.
+func (r ControlResponse) UpdateHealth() string {
+	if r.Status != "ok" || r.Transaction.Failure == updateflow.FailureRollback || r.Transaction.Failure == updateflow.FailureContradictoryJournal {
+		return "recovery_required"
+	}
+	return "healthy"
 }
 
 func validControlRequest(request ControlRequest) bool {
