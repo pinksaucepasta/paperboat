@@ -52,7 +52,8 @@ export function UsageLimits() {
   const [source, setSource] = useState<TrafficSource>("all")
   // The bandwidth card opens on the billing period, the window the allowance card counts, so the
   // two agree; the other periods are one click away.
-  const period = chosen ?? (billing.data ? "billing" : defaultUsagePeriod)
+  // While billing loads the card already says what it will open on (most workspaces have a plan).
+  const period = chosen ?? (billing.data || billing.isPending ? "billing" : defaultUsagePeriod)
   const periodStart = billing.data ? usageWindowStart(billing.data) : ""
   const fixed = useApiQuery({
     ...usageQuery(workspace?.id ?? "", period === "billing" ? defaultUsagePeriod : period),
@@ -61,8 +62,8 @@ export function UsageLimits() {
   const since = useApiQuery(usageSinceQuery(workspace?.id ?? "", periodStart))
   const usage = period === "billing" ? since : fixed
   const periods: Record<string, string> = {
-    ...(billing.data && {
-      billing: allowanceWindow(billing.data).start ? "This billing period" : "This month",
+    ...((billing.data || billing.isPending) && {
+      billing: !billing.data || allowanceWindow(billing.data).start ? "This billing period" : "This month",
     }),
     ...Object.fromEntries(Object.entries(usagePeriods).map(([key, { label }]) => [key, label])),
   }
@@ -70,10 +71,20 @@ export function UsageLimits() {
   return (
     // Machines and what is left of the hosted allowance first, then bandwidth across the other half.
     <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <Card label="Machines" loading={!workspace || summary.isPending} failed={summary.isError}>
+      <Card
+        label="Machines"
+        loading={!workspace || summary.isPending}
+        failed={summary.isError}
+        skeleton={<MachinesSkeleton />}
+      >
         {summary.data && <Machines summary={summary.data} />}
       </Card>
-      <Card label="Hosted allowance" loading={!workspace || billing.isPending} failed={billing.isError}>
+      <Card
+        label="Hosted allowance"
+        loading={!workspace || billing.isPending}
+        failed={billing.isError}
+        skeleton={<AllowanceSkeleton />}
+      >
         {billing.data && workspace && <Allowance billing={billing.data} workspace={workspace.id} />}
       </Card>
       <Card
@@ -87,6 +98,7 @@ export function UsageLimits() {
         loading={!workspace || (chosen === undefined && billing.isPending) || usage.isPending}
         failed={usage.isError}
         className="sm:col-span-2"
+        skeleton={<BandwidthSkeleton />}
       >
         {usage.data && <Bandwidth usage={usage.data} source={source} />}
       </Card>
@@ -270,7 +282,11 @@ function Allowance({ billing, workspace }: { billing: BillingWorkspace; workspac
               <span key={path.mode} className="flex items-center gap-1.5">
                 {allowance !== null && <span className={cn("size-2 shrink-0 rounded-full", path.dot)} />}
                 {path.label}
-                <span className="text-foreground tabular-nums">{split ? formatBytes(split[path.mode]) : "…"}</span>
+                {split ? (
+                  <span className="text-foreground tabular-nums">{formatBytes(split[path.mode])}</span>
+                ) : (
+                  <Skeleton className="h-2.5 w-10" />
+                )}
               </span>
             ))}
         </div>
@@ -457,6 +473,7 @@ function Card({
   loading,
   failed,
   className,
+  skeleton,
   children,
 }: {
   label: string
@@ -464,6 +481,8 @@ function Card({
   loading: boolean
   failed: boolean
   className?: string
+  /** The card's own layout with placeholders for its numbers, shown while loading. */
+  skeleton: React.ReactNode
   children: React.ReactNode
 }) {
   return (
@@ -474,13 +493,109 @@ function Card({
         <span className="font-medium">{label}</span>
         {action}
       </div>
-      {loading ? (
-        <Skeleton className="h-8 w-24" />
-      ) : failed ? (
-        <span className="text-sm text-muted-foreground">Couldn’t load</span>
-      ) : (
-        children
-      )}
+      {loading ? skeleton : failed ? <span className="text-sm text-muted-foreground">Couldn’t load</span> : children}
+    </div>
+  )
+}
+
+/** Placeholders on the cards' patterned fill need more contrast than the page's. */
+const onCard = "bg-foreground/10"
+/** A number placeholder on the figure's 36 px line, and a short one on a 16 px text-xs line. */
+const figureSkeleton = (width: string) => (
+  <span className="flex h-9 items-center">
+    <Skeleton className={cn("h-6", onCard, width)} />
+  </span>
+)
+const smallSkeleton = (width: string) => <Skeleton className={cn("my-[3px] h-2.5", onCard, width)} />
+
+/** The Machines card's layout (two counts with their labels, the platform row) without the numbers. */
+function MachinesSkeleton() {
+  return (
+    <div className="flex flex-1 flex-col justify-between gap-4">
+      <div className="grid grid-cols-2 gap-4">
+        {[
+          { label: "Online", dot: "bg-success" },
+          { label: "Offline", dot: "bg-muted-foreground/40" },
+        ].map(({ label, dot }) => (
+          <div key={label} className="flex flex-col gap-1">
+            {figureSkeleton("w-10")}
+            <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <span className={cn("size-2 shrink-0 rounded-full", dot)} />
+              <span className="trim-cap">{label}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+        {[LinuxLogoIcon, AppleLogoIcon, WindowsLogoIcon].map((PlatformIcon, index) => (
+          <span key={index} className="flex items-center gap-1.5">
+            <PlatformIcon weight="fill" className="size-4" />
+            <Skeleton className={cn("h-2.5 w-3", onCard)} />
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** The allowance card's layout: the figure, the meter and its two rows of facts. */
+function AllowanceSkeleton() {
+  return (
+    <div className="flex flex-1 flex-col gap-3">
+      <span className="flex items-center gap-2">
+        {figureSkeleton("w-28")}
+        <span className="text-sm text-muted-foreground">left</span>
+      </span>
+      <div className="mt-auto flex flex-col gap-2.5">
+        <div className="h-1.5 rounded-full bg-muted" />
+        <div className="flex items-center justify-between gap-3">
+          {smallSkeleton("w-24")}
+          {smallSkeleton("w-20")}
+        </div>
+        <div className="flex items-center gap-4 text-xs whitespace-nowrap text-muted-foreground">
+          {paths
+            .filter((path) => path.mode !== "direct")
+            .map((path) => (
+              <span key={path.mode} className="flex items-center gap-1.5">
+                <span className={cn("size-2 shrink-0 rounded-full", path.dot)} />
+                {path.label}
+                <Skeleton className={cn("h-2.5 w-10", onCard)} />
+              </span>
+            ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/** The bandwidth card's layout: the total, upload/download and the legend beside it, the chart's band. */
+function BandwidthSkeleton() {
+  return (
+    <div className="flex flex-1 flex-col gap-3">
+      <div className="flex items-center gap-5">
+        {figureSkeleton("w-24")}
+        <div className="flex min-w-0 flex-col gap-1.5 text-xs text-muted-foreground">
+          <span className="flex items-center gap-4">
+            <Mark icon={<ArrowUpIcon className="size-3" />}>
+              <Skeleton className={cn("inline-block h-2.5 w-12 align-middle", onCard)} />
+            </Mark>
+            <Mark icon={<ArrowDownIcon className="size-3" />}>
+              <Skeleton className={cn("inline-block h-2.5 w-12 align-middle", onCard)} />
+            </Mark>
+          </span>
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+            {paths.map((path) => (
+              <Mark key={path.mode} icon={<span className={cn("size-1.5 rounded-full", path.dot)} />}>
+                {path.label} <Skeleton className={cn("inline-block h-2.5 w-10 align-middle", onCard)} />
+              </Mark>
+            ))}
+          </span>
+        </div>
+      </div>
+      {/* The chart's band, as a flat line at zero until the series arrives. */}
+      <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="-mx-5 mt-auto -mb-5 h-16 w-[calc(100%+2.5rem)] shrink-0">
+        <line x1="0" y1="39" x2="100" y2="39" className="stroke-foreground/10" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+      </svg>
     </div>
   )
 }
