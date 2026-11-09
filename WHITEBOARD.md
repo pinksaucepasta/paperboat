@@ -341,3 +341,14 @@ native-layer work: a lifecycle op that records a revoked-baseline journal after 
 state, a metadata-to-bytes reconcile or clean-reinstall mode, a terminal `recovery_required` state with
 uninstall allowed, and an interrupt-at-every-stage device matrix on Linux and macOS. The realistic window
 (revocation while a committed candidate retries its finish) is handled since 23fd4ac25.
+
+## End direct-sshd sessions on revocation — after launch
+
+Recorded 2026-11-09. Managed plain `ssh` rides a `pb __ssh-proxy` stream, so revoking a CLI session, grant or
+team membership closes an open session within seconds. A user who bypasses the managed config
+(`ssh -o ProxyCommand=none` to the machine's own sshd over LAN/tailnet, Unix only; Windows sshd binds loopback)
+keeps an already-open session: the key leaves `authorized_keys` within seconds, but OpenSSH never re-checks
+live sessions. Prior art: Tailscale `ssh/tailssh/tailssh.go` (OnPolicyChange → checkStillValid → "Access
+revoked."), Teleport `lib/srv/monitor.go` (lock watcher disconnects live sessions). Fix: enable sshd
+`ExposeAuthInfo`, and on key withdrawal end sshd sessions whose auth fingerprint matches (TERM, then KILL),
+audited as revoked; or bind sshd to loopback like Windows.
