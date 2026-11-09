@@ -368,17 +368,18 @@ var windowsHostdRunning = func(ctx context.Context, layout service.Layout) (bool
 	return status.Running, err
 }
 
-// prepareWindowsReplacementMaintenance asks the running hostd to admit maintenance. A stopped hostd holds no work
-// to protect and has no pipe to ask, so installing over a broken installation proceeds (the rule repair follows).
+// prepareWindowsReplacementMaintenance asks hostd to admit maintenance. Only when hostd cannot be asked and its
+// service is stopped is there no work to protect, so installing over a broken installation proceeds (the rule
+// repair follows). Asking first keeps a hostd that the service manager restarts in between under admission.
 func prepareWindowsReplacementMaintenance(ctx context.Context, layout service.Layout, tokenFile string, force bool, timeout time.Duration) (func() error, error) {
-	running, err := windowsHostdRunning(ctx, layout)
-	if err != nil {
+	abort, err := prepareMaintenance(ctx, layout.HostdSocket, tokenFile, force, timeout)
+	if err == nil {
+		return abort, nil
+	}
+	if running, inspectErr := windowsHostdRunning(ctx, layout); inspectErr != nil || running || !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
-	if !running {
-		return func() error { return nil }, nil
-	}
-	return prepareMaintenance(ctx, layout.HostdSocket, tokenFile, force, timeout)
+	return func() error { return nil }, nil
 }
 
 // PrepareWindowsSuppliedMaintenance is prepareWindowsReplacementMaintenance for the supplied-install command.
