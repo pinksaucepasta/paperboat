@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 )
@@ -109,5 +110,34 @@ func TestInventoryOnAnOlderServiceNamesTheVersionNotAnInvalidResult(t *testing.T
 	message := runtimeFailureMessage(err)
 	if strings.Contains(err.Error()+message, "invalid result") || !strings.Contains(err.Error(), "Paperboat dev-ab41be003 cannot run the install inventory (it is older than this pb); install it with its own installer") {
 		t.Fatalf("failure reads %q / %q", err.Error(), message)
+	}
+}
+
+// F14-03 (disk full): the privileged step's insufficient-space exit status crosses the elevation boundary as
+// hostinstall.ErrInsufficientSpace. The update then goes no further: nothing is committed or rolled back, no
+// command link is published, and only the inventory runs.
+func TestInstallRefusedForDiskSpaceChangesNothingAndStopsThere(t *testing.T) {
+	executable, source, home := suppliedInstallFixture(t)
+	original := privilegedInstallCommand
+	t.Cleanup(func() { privilegedInstallCommand = original })
+	var operations []string
+	privilegedInstallCommand = func(ctx context.Context, _ int, _, _, _ string, arguments ...string) *exec.Cmd {
+		operation := arguments[len(arguments)-1]
+		operations = append(operations, operation)
+		if operation == "install-supplied" {
+			return exec.CommandContext(ctx, "/bin/sh", "-c", "exit "+strconv.Itoa(InsufficientSpaceExitCode))
+		}
+		return exec.CommandContext(ctx, "/bin/false")
+	}
+	directory := filepath.Join(home, "bin")
+	_, err := InstallRunningBinary(t.Context(), executable, source, directory, "")
+	if !errors.Is(err, hostinstall.ErrInsufficientSpace) {
+		t.Fatalf("install on a full disk = %v, want ErrInsufficientSpace", err)
+	}
+	if want := []string{"install-supplied", "inventory"}; !reflect.DeepEqual(operations, want) {
+		t.Fatalf("privileged steps = %v, want %v", operations, want)
+	}
+	if _, statErr := os.Lstat(filepath.Join(directory, "pb")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("a refused install published the pb command: %v", statErr)
 	}
 }
