@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/relay/nodetls"
+	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"sort"
 	"strings"
@@ -99,7 +100,7 @@ func (a *Authority) ApplyRegionalCandidates(ctx context.Context, token string) e
 	if a.current == nil || c.AuthorizationGeneration != a.current.Generation {
 		return ErrRegionalAuthority
 	}
-	if c.Schema != "paperboat.regional-candidates.v1" || c.Issuer != a.options.Issuer || c.Audience != "paperboat-regional-candidates" || c.AccountID != a.options.Self.AccountID || c.EndpointID != a.options.Self.EndpointID || c.Generation == 0 || c.IssuedAt > now.Add(derpquic.MaxClockSkew).Unix() || c.ExpiresAt <= now.Unix() || c.ExpiresAt-c.IssuedAt > 60 || len(c.Nodes) > MaxRegionalCandidates {
+	if c.Schema != "paperboat.regional-candidates.v1" || c.Issuer != a.options.Issuer || c.Audience != "paperboat-regional-candidates" || c.AccountID != a.options.Self.AccountID || c.EndpointID != a.options.Self.EndpointID || c.Generation == 0 || c.IssuedAt > now.Add(derpquic.MaxClockSkew).Unix() || c.ExpiresAt <= now.Unix() || c.ExpiresAt-c.IssuedAt > int64(relaylimits.MaxGrantLifetime/time.Second) || len(c.Nodes) > MaxRegionalCandidates {
 		return ErrRegionalAuthority
 	}
 	if a.regional != nil && c.Generation < a.regional.Generation {
@@ -149,18 +150,28 @@ func (a *Authority) RegionalNodes(now time.Time) ([]RegionalNode, error) {
 	return nodes, nil
 }
 
-// regionalObservationMaxAge is how old a signed health or capacity observation may be for its
-// node to be selected; an older one withdraws the node until the configuration is renewed.
+// regionalObservationMaxAge is how old a signed health or capacity observation may be, when the candidate set was
+// signed, for its node to be selected. A set is the control plane's statement as of IssuedAt and stays usable until
+// it expires (relaylimits.MaxGrantLifetime): with Paperboat unreachable no fresher statement arrives, and an
+// endpoint that dropped its relay carrier (a restart, a network change) still has to open a new one through the
+// last known relays (offline until revoked). Judged against the present, every relayed path ended 15 s into an outage.
+// A relay that failed since is not selected by the next renewal, which only lists relays that heartbeat.
 const regionalObservationMaxAge = 15 * time.Second
 
 func (c *RegionalCandidates) Eligible(role, transport string, regions map[string]bool, now time.Time) ([]RegionalNode, Redundancy, error) {
 	if c == nil || c.ExpiresAt <= now.Unix() {
 		return nil, RedundancyNone, ErrRegionalAuthority
 	}
+	// The nodes' observation age and lease are judged as of signing, not now; "observed in the future" stays a
+	// check against now (a heartbeat can land a second after the set's issue time).
+	at := now
+	if signed := time.Unix(c.IssuedAt, 0); signed.Before(now) {
+		at = signed
+	}
 	out := make([]RegionalNode, 0, len(c.Nodes))
 	seen := map[string]bool{}
 	for _, n := range c.Nodes {
-		if !validID(n.NodeID) || !validID(n.ProcessEpoch) || !validID(n.Region) || !validID(n.FailureDomain) || seen[n.NodeID] || n.NodeGeneration == 0 || n.State != "ready" || n.ObservedAt > now.Unix() || now.Unix()-n.ObservedAt > int64(regionalObservationMaxAge/time.Second) || n.ExpiresAt <= now.Unix() || n.CapacityObservedAt > now.Unix() || now.Unix()-n.CapacityObservedAt > int64(regionalObservationMaxAge/time.Second) || n.CapacityLimit == 0 || n.CapacityUsed >= n.CapacityLimit-n.CapacityLimit/10 || n.DrainDeadline != nil {
+		if !validID(n.NodeID) || !validID(n.ProcessEpoch) || !validID(n.Region) || !validID(n.FailureDomain) || seen[n.NodeID] || n.NodeGeneration == 0 || n.State != "ready" || n.ObservedAt > now.Unix() || at.Unix()-n.ObservedAt > int64(regionalObservationMaxAge/time.Second) || n.ExpiresAt <= at.Unix() || n.CapacityObservedAt > now.Unix() || at.Unix()-n.CapacityObservedAt > int64(regionalObservationMaxAge/time.Second) || n.CapacityLimit == 0 || n.CapacityUsed >= n.CapacityLimit-n.CapacityLimit/10 || n.DrainDeadline != nil {
 			continue
 		}
 		if len(regions) > 0 && !regions[n.Region] || !contains(n.Roles, role) || !contains(n.Transports, transport) || !validEndpointHost(n.EndpointHost) || (n.EndpointTCPPort == 0 && n.EndpointQUICPort == 0) {

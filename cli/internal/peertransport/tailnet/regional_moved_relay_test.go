@@ -27,7 +27,7 @@ func TestMovedRelayKeepsItsAddressUntilItsGrantFromTheSameRefresh(t *testing.T) 
 	state := func(generation uint64, candidate RegionalNode, grantGeneration uint64) uint16 {
 		t.Helper()
 		a.mu.Lock()
-		a.regional = &RegionalCandidates{AuthorizationGeneration: generation, ExpiresAt: now + 60, Nodes: []RegionalNode{candidate}}
+		a.regional = &RegionalCandidates{AuthorizationGeneration: generation, IssuedAt: now, ExpiresAt: now + 60, Nodes: []RegionalNode{candidate}}
 		a.mu.Unlock()
 		a.relay.mu.Lock()
 		a.relay.grants = map[string]derpquic.Grant{node.NodeID: {NodeID: node.NodeID, NodeGeneration: 1, ProcessEpoch: "epoch_test", Generation: grantGeneration, ExpiresAt: now + 60}}

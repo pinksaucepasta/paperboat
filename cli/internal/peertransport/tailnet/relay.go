@@ -24,6 +24,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/relay/nodetls"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"net/netip"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-derp-carrier
@@ -159,7 +160,7 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 			Type      string `json:"typ"`
 			KeyID     string `json:"kid"`
 		}
-		if strictDecode(header, &fullHeader) != nil || fullHeader.Algorithm != "EdDSA" || fullHeader.Type != "paperboat-relay-grant+jwt" || strictDecode(body, &g) != nil || g.Version != 1 || g.Issuer != a.options.Issuer || g.Audience != "paperboat-relay" || g.AccountID != cfg.Self.AccountID || g.EndpointID != cfg.Self.EndpointID || g.WireGuardPublicKey != cfg.Self.WireGuardPublicKey || g.CertificateFingerprint != cfg.Self.QUICCertificateFingerprint || g.QUICPublicKey != cfg.Self.QUICPublicKey || g.Generation != cfg.Generation || g.NodeGeneration != node.NodeGeneration || g.ProcessEpoch != node.ProcessEpoch || g.IssuedAt > serverclock.Now().Add(derpquic.MaxClockSkew).Unix() || g.ExpiresAt <= serverclock.Now().Unix() || g.ExpiresAt-g.IssuedAt > 60 || g.ExpiresAt > cfg.ExpiresAt || g.ExpiresAt > node.ExpiresAt {
+		if strictDecode(header, &fullHeader) != nil || fullHeader.Algorithm != "EdDSA" || fullHeader.Type != "paperboat-relay-grant+jwt" || strictDecode(body, &g) != nil || g.Version != 1 || g.Issuer != a.options.Issuer || g.Audience != "paperboat-relay" || g.AccountID != cfg.Self.AccountID || g.EndpointID != cfg.Self.EndpointID || g.WireGuardPublicKey != cfg.Self.WireGuardPublicKey || g.CertificateFingerprint != cfg.Self.QUICCertificateFingerprint || g.QUICPublicKey != cfg.Self.QUICPublicKey || g.Generation != cfg.Generation || g.NodeGeneration != node.NodeGeneration || g.ProcessEpoch != node.ProcessEpoch || g.IssuedAt > serverclock.Now().Add(derpquic.MaxClockSkew).Unix() || g.ExpiresAt <= serverclock.Now().Unix() || g.ExpiresAt-g.IssuedAt > int64(relaylimits.MaxGrantLifetime/time.Second) {
 			next = nil
 			grants = nil
 			return ErrAuthority

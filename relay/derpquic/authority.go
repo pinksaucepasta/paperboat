@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"tailscale.com/types/key"
 )
 
@@ -26,7 +27,7 @@ import (
 const MaxClockSkew = time.Minute
 
 // MaxGrantLifetime bounds a signed grant's exp - iat.
-const MaxGrantLifetime = time.Minute
+const MaxGrantLifetime = relaylimits.MaxGrantLifetime
 
 var ErrAdmission = &Error{Code: 1, Message: "relay authorization rejected"}
 var ErrProtocol = &Error{Code: 2, Message: "relay protocol rejected"}

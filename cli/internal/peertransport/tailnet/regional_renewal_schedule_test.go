@@ -43,7 +43,7 @@ func TestRegionalRecoveryRenewalSurvivesTheAppliedConfigurationWake(t *testing.T
 	a, c, signer, _ := networkTestAuthority(t)
 	now := time.Now()
 	// Observed 10 s ago: it ends in 5 s, so the renewal is due after the 4 s minimum.
-	a.regional = &RegionalCandidates{ExpiresAt: now.Add(time.Minute).Unix(), Nodes: []RegionalNode{{
+	a.regional = &RegionalCandidates{IssuedAt: now.Unix() - 10, ExpiresAt: now.Add(time.Minute).Unix(), Nodes: []RegionalNode{{
 		NodeID: "relay_renewal", NodeGeneration: 1, ProcessEpoch: "epoch_renewal", Region: "test", FailureDomain: "rack",
 		Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443,
 		State: "ready", ObservedAt: now.Unix() - 10, CapacityObservedAt: now.Unix() - 10, ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 10,

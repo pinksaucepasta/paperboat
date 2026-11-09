@@ -31,16 +31,25 @@ type regionalRelay struct {
 	stop func()
 }
 
-func TestNativeRegionalFailoverPreservesSession(t *testing.T) { testNativeRegionalFailover(t) }
+func TestNativeRegionalFailoverPreservesSession(t *testing.T) { testNativeRegionalFailover(t, false) }
 
-func testNativeRegionalFailover(t *testing.T) {
+// A control outage longer than the signed candidate set withdraws the relays; when Paperboat answers again they
+// are selected and carry data within regionalRecoveryBound.
+func TestNativeRegionalRecoversWhenControlReturnsAfterTheSetExpired(t *testing.T) {
+	testNativeRegionalFailover(t, true)
+}
+
+// regionalRecoveryBound is one normal refresh (the tests renew every 5 s) and a few seconds.
+const regionalRecoveryBound = 10 * time.Second
+
+func testNativeRegionalFailover(t *testing.T, expiry bool) {
 	if testing.Short() {
 		t.Skip("real two-node DERP/QUIC integration")
 	}
 	leaks := goleak.IgnoreCurrent()
 	t.Cleanup(func() { goleak.VerifyNone(t, leaks) })
 	t.Setenv("IN_TS_TEST", "true")
-	ctx, cancel := context.WithTimeout(t.Context(), 80*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Second)
 	defer cancel()
 
 	pub, signer, _ := ed25519.GenerateKey(nil)
@@ -128,6 +137,13 @@ func testNativeRegionalFailover(t *testing.T) {
 		serverConfig.Generation++
 		clientConfig.IssuedAt = time.Now().Unix()
 		serverConfig.IssuedAt = clientConfig.IssuedAt
+		// The server signs a fresh expiry with every configuration; a fixed one ended this long test at 300 s.
+		for _, config := range []*tailnet.NetworkConfiguration{&clientConfig, &serverConfig} {
+			config.ExpiresAt = config.IssuedAt + 300
+			for i := range config.Peers[0].Scopes {
+				config.Peers[0].Scopes[i].ExpiresAt = config.ExpiresAt
+			}
+		}
 		applyTestConfiguration(t, clientAuthority, signer, clientConfig)
 		applyTestConfiguration(t, serverAuthority, signer, serverConfig)
 		tick := time.Now()
@@ -154,8 +170,8 @@ func testNativeRegionalFailover(t *testing.T) {
 		t.Fatalf("asymmetric candidate intersection: %+v", got)
 	}
 	refresh()
-	waitRegional := func(wantDifferent string, redundancy tailnet.Redundancy) tailnet.RegionalStatus {
-		deadline := time.Now().Add(25 * time.Second)
+	waitRegional := func(within time.Duration, wantDifferent string, redundancy tailnet.Redundancy) tailnet.RegionalStatus {
+		deadline := time.Now().Add(within)
 		nextRefresh := time.Now().Add(5 * time.Second)
 		for time.Now().Before(deadline) {
 			if time.Now().After(nextRefresh) {
@@ -178,60 +194,61 @@ func testNativeRegionalFailover(t *testing.T) {
 		t.Fatalf("regional status did not converge: %+v", clientAuthority.RegionalStatus())
 		return tailnet.RegionalStatus{}
 	}
-	initial := waitRegional("", tailnet.RedundancyAvailable)
-	failed := a
-	if initial.NodeID == b.node.NodeID {
-		failed = b
-	}
-	failed.stop()
-	failover := waitRegional(initial.NodeID, tailnet.RedundancyReduced)
-	assertRegionalBytes(t, ctx, session, "after-failover")
-
-	restored := start(failed.node.NodeID, failed.node.FailureDomain, failed.addr)
-	if failed == a {
-		a = restored
-	} else {
-		b = restored
-	}
-	for deadline := time.Now().Add(11 * time.Second); time.Now().Before(deadline); {
-		time.Sleep(4 * time.Second)
-		refresh()
-	}
-	afterRestore := clientAuthority.RegionalStatus()
-	if afterRestore.NodeID != failover.NodeID {
-		t.Fatalf("restored node caused rapid flap: before=%+v after=%+v", failover, afterRestore)
-	}
-	if afterRestore.Redundancy != tailnet.RedundancyAvailable || afterRestore.BackupNodeID == "" {
-		t.Fatalf("restored failure-domain backup unavailable: %+v", afterRestore)
-	}
-	assertRegionalBytes(t, ctx, session, "after-restore")
-	// Stop control refresh. Cached signed health expires without widening scope. RegionalStatus shows it once it
-	// has lasted the 10 s warning delay.
-	expiryDeadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(expiryDeadline) && clientAuthority.RegionalStatus().Reason != "no_authorized_common_node" {
-		time.Sleep(100 * time.Millisecond)
-	}
-	if clientAuthority.RegionalStatus().Reason != "no_authorized_common_node" {
-		t.Fatalf("expired control authority remains usable: %+v", clientAuthority.RegionalStatus())
-	}
-	h, _ := streamauth.New("regional-expired", "terminal", "regional-expired-stream", "credential_terminal", time.Now().Add(time.Minute), 1<<20)
-	// Admission now waits for the host's acknowledgement; include it in the
-	// expired-authority probe's existing one-second I/O budget.
-	expiredCtx, stopExpired := context.WithTimeout(ctx, time.Second)
-	expired, expiredErr := session.OpenAuthorized(expiredCtx, h, "grant_test", "terminal")
-	stopExpired()
-	if expiredErr == nil {
-		_ = expired.SetDeadline(time.Now().Add(time.Second))
-		_, writeErr := expired.Write([]byte("must-not-forward"))
-		got := make([]byte, 16)
-		_, readErr := io.ReadFull(expired, got)
-		_ = expired.Close()
-		if writeErr == nil && readErr == nil {
-			t.Fatal("regional data forwarded after signed node authority expired")
+	initial := waitRegional(25*time.Second, "", tailnet.RedundancyAvailable)
+	if !expiry {
+		failed := a
+		if initial.NodeID == b.node.NodeID {
+			failed = b
 		}
+		failed.stop()
+		failover := waitRegional(25*time.Second, initial.NodeID, tailnet.RedundancyReduced)
+		assertRegionalBytes(t, ctx, session, "after-failover")
+
+		restored := start(failed.node.NodeID, failed.node.FailureDomain, failed.addr)
+		if failed == a {
+			a = restored
+		} else {
+			b = restored
+		}
+		for deadline := time.Now().Add(11 * time.Second); time.Now().Before(deadline); {
+			time.Sleep(4 * time.Second)
+			refresh()
+		}
+		afterRestore := clientAuthority.RegionalStatus()
+		if afterRestore.NodeID != failover.NodeID {
+			t.Fatalf("restored node caused rapid flap: before=%+v after=%+v", failover, afterRestore)
+		}
+		if afterRestore.Redundancy != tailnet.RedundancyAvailable || afterRestore.BackupNodeID == "" {
+			t.Fatalf("restored failure-domain backup unavailable: %+v", afterRestore)
+		}
+		assertRegionalBytes(t, ctx, session, "after-restore")
 	}
+	// Stop control refresh for longer than the 15 s observation window, inside the signed candidate set (60 s here;
+	// relaylimits.MaxGrantLifetime in production): the relays stay selected and carry data while Paperboat is
+	// unreachable (offline until revoked), instead of being withdrawn as their observations age.
+	if expiry {
+		// No refresh until the 60 s set (and with it the relay grants) ends: the relays are withdrawn.
+		for deadline := time.Now().Add(90 * time.Second); time.Now().Before(deadline) && clientAuthority.RegionalStatus().Reason != "no_authorized_common_node"; {
+			time.Sleep(100 * time.Millisecond)
+		}
+		if got := clientAuthority.RegionalStatus(); got.Reason != "no_authorized_common_node" {
+			t.Fatalf("relays still usable after their signed set expired: %+v", got)
+		}
+		time.Sleep(10 * time.Second) // the recovery worker keeps probing the expired set; its failures must not slow recovery
+		returned := time.Now()
+		refresh()
+		waitRegional(regionalRecoveryBound, "", tailnet.RedundancyAvailable)
+		assertRegionalBytes(t, ctx, session, "after-set-expiry-recovery")
+		t.Logf("relays re-selected and carrying data %s after control returned", time.Since(returned).Round(100*time.Millisecond))
+		return
+	}
+	time.Sleep(20 * time.Second)
+	if got := clientAuthority.RegionalStatus(); got.NodeID == "" || got.Reason == "no_authorized_common_node" {
+		t.Fatalf("relays withdrawn %s into a control outage, inside their signed set: %+v", 20*time.Second, got)
+	}
+	assertRegionalBytes(t, ctx, session, "during-control-outage")
 	refresh()
-	waitRegional("", tailnet.RedundancyAvailable)
+	waitRegional(25*time.Second, "", tailnet.RedundancyAvailable)
 	assertRegionalBytes(t, ctx, session, "after-control-recovery")
 }
 

@@ -148,7 +148,7 @@ func TestRegionalStatusDoesNotExposePreparationErrorText(t *testing.T) {
 		Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: 443,
 		State: "ready", ObservedAt: now, ExpiresAt: now + 60, CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now,
 	}
-	a.regional = &RegionalCandidates{ExpiresAt: now + 60, Nodes: []RegionalNode{node}}
+	a.regional = &RegionalCandidates{IssuedAt: now, ExpiresAt: now + 60, Nodes: []RegionalNode{node}}
 	a.relay.mu.Lock()
 	a.relay.grants = map[string]derpquic.Grant{node.NodeID: {NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, ExpiresAt: now + 60}}
 	r := &regionalRecovery{

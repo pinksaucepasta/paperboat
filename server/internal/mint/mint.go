@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/jwks"
+	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 )
 
 const (
@@ -96,7 +97,7 @@ func (p *Provider) SignRelayGrant(claims map[string]any) (string, error) {
 		!wgOK || wgDecodeErr != nil || len(decodedWGKey) != 32 || base64.RawURLEncoding.EncodeToString(decodedWGKey) != wgKey ||
 		!certOK || fingerprintDecodeErr != nil || len(decodedFingerprint) != 32 || hex.EncodeToString(decodedFingerprint) != certFingerprint ||
 		!nodeOK || nodeID == "" || !epochOK || processEpoch == "" || !discoOK || !peerRelayOK || !relayPeersClaim(peers) || !peersOK ||
-		!issuedOK || !expiresOK || expiresAt <= issuedAt || expiresAt-issuedAt > 60 || !configGenerationOK || configGeneration < 1 || !nodeGenerationOK || nodeGeneration < 1 {
+		!issuedOK || !expiresOK || expiresAt <= issuedAt || expiresAt-issuedAt > int64(relaylimits.MaxGrantLifetime/time.Second) || !configGenerationOK || configGeneration < 1 || !nodeGenerationOK || nodeGeneration < 1 {
 		return "", errors.New("relay grant claims are invalid")
 	}
 	return p.signClaims(RelayGrantType, claims)
@@ -194,8 +195,8 @@ type peersRelayScope struct {
 	ExpiresAt          int64  `json:"expires_at"`
 }
 
-// SignRegionalCandidates signs the endpoint-bound, short-lived registry
-// projection. It deliberately cannot be minted through operation credentials.
+// SignRegionalCandidates signs the endpoint-bound registry projection, which lives as long as the relay grants it
+// names (relaylimits.MaxGrantLifetime). It deliberately cannot be minted through operation credentials.
 func (p *Provider) SignRegionalCandidates(claims map[string]any) (string, error) {
 	if p == nil || claims == nil || claims["schema"] != "paperboat.regional-candidates.v1" || claims["aud"] != "paperboat-regional-candidates" {
 		return "", errors.New("regional candidate claims are invalid")
@@ -203,7 +204,7 @@ func (p *Provider) SignRegionalCandidates(claims map[string]any) (string, error)
 	issuedAt, issuedOK := integerClaim(claims["iat"])
 	expiresAt, expiresOK := integerClaim(claims["exp"])
 	generation, generationOK := integerClaim(claims["generation"])
-	if _, ok := claims["account_id"].(string); !ok || !issuedOK || !expiresOK || !generationOK || generation < 1 || expiresAt <= issuedAt || expiresAt-issuedAt > 60 {
+	if _, ok := claims["account_id"].(string); !ok || !issuedOK || !expiresOK || !generationOK || generation < 1 || expiresAt <= issuedAt || expiresAt-issuedAt > int64(relaylimits.MaxGrantLifetime/time.Second) {
 		return "", errors.New("regional candidate claims are invalid")
 	}
 	if _, ok := claims["endpoint_id"].(string); !ok {

@@ -74,7 +74,7 @@ func TestRelayGrantsNameEveryPeerOfAHundredPeerAccountOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	grants, err := service.relayGrants(ctx, tx, self, peers, peers, 7, now, now.Add(time.Hour))
+	grants, err := service.relayGrants(ctx, tx, self, peers, peers, 7, now)
 	if err != nil {
 		t.Fatal(err)
 	}

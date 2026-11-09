@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/jwks"
+	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 )
 
 func testKey(seedByte byte) ed25519.PrivateKey {
@@ -67,9 +68,9 @@ func TestSignRelayGrantPublishesFrozenTypeAndRejectsLongLifetime(t *testing.T) {
 	if header["alg"] != "EdDSA" || header["typ"] != RelayGrantType || header["kid"] != "relay-key" {
 		t.Fatalf("header = %#v", header)
 	}
-	claims["exp"] = int64(1_700_000_061)
+	claims["exp"] = int64(1_700_000_000) + int64(relaylimits.MaxGrantLifetime/time.Second) + 1
 	if _, err := provider.SignRelayGrant(claims); err == nil {
-		t.Fatal("accepted relay grant longer than 60 seconds")
+		t.Fatal("accepted relay grant longer than relaylimits.MaxGrantLifetime")
 	}
 	claims["exp"] = int64(1_700_000_060)
 	claims["peer_relay"] = map[string]any{"wireguard_public_key": strings.Repeat("A", 43), "disco_public_key": strings.Repeat("A", 43), "virtual_address": "fd7a:115c:a1e0::9"}

@@ -366,8 +366,7 @@ func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 	}
 	id := g.AccountID + "\x00" + g.EndpointID
 	for id, old := range s.fences {
-		live := s.liveGrantLocked(old.Grant)
-		if old.ExpiresAt <= now.Unix() && (live == nil || grantID(live.grant) != id) {
+		if old.ExpiresAt <= now.Unix() && s.liveGrantLocked(old.Grant) == nil {
 			delete(s.fences, id)
 		}
 	}
@@ -393,7 +392,7 @@ func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 		}
 		count--
 	}
-	if p.key.IsZero() && (count >= s.accountShareLocked() || len(s.fences) >= MaxConnections && s.fences[id] == nil) {
+	if p.key.IsZero() && (count >= s.accountShareLocked() || len(s.fences) >= MaxConnections && s.fences[id] == nil && !s.evictIdleFenceLocked()) {
 		return ErrOverload
 	}
 	if old != nil && old != p {
@@ -587,6 +586,29 @@ func (s *Server) QuotaDenied() []string {
 	return accounts
 }
 
+// evictIdleFenceLocked makes room in a full fence table: a grant lives MaxGrantLifetime, so the table holds every
+// endpoint admitted in that time, not only the connected ones, and would refuse new endpoints while the relay has
+// connection capacity. It drops the admission fence that ends soonest of an endpoint with no connection now. A
+// revocation's fence (no signed grant) is never dropped: that is what refuses a revoked endpoint's grants. Without
+// its admission fence an idle endpoint can present an older, unrevoked grant of its own until that grant ends.
+func (s *Server) evictIdleFenceLocked() bool {
+	connected := make(map[string]bool, len(s.peers))
+	for _, p := range s.peers {
+		connected[grantID(p.grant)] = true
+	}
+	victim, soonest := "", int64(0)
+	for id, f := range s.fences {
+		if f.AccountID != "" && !connected[id] && (victim == "" || f.ExpiresAt < soonest) {
+			victim, soonest = id, f.ExpiresAt
+		}
+	}
+	if victim == "" {
+		return false
+	}
+	delete(s.fences, victim)
+	return true
+}
+
 // Revoke fences an endpoint's grants below minGeneration, the first generation still valid: it
 // closes their connections now, and only a grant of minGeneration or later is admitted again.
 // ValidRevocation is the shape Revoke accepts: both ids present and bounded, and a first valid
@@ -610,7 +632,7 @@ func (s *Server) Revoke(account, endpoint string, minGeneration uint64) error {
 	if minGeneration <= g.Generation {
 		return nil
 	}
-	if g.Generation == 0 && len(s.fences) >= MaxConnections {
+	if g.Generation == 0 && len(s.fences) >= MaxConnections && !s.evictIdleFenceLocked() {
 		return ErrOverload
 	}
 	g.Generation = minGeneration

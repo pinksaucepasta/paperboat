@@ -410,7 +410,9 @@ func (r *regionalRecovery) snapshot() ([]RegionalNode, map[key.NodePublic]Networ
 	a := r.authority
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.current == nil || a.closed || a.current.ExpiresAt <= serverclock.Now().Unix() {
+	// Past the configuration's expiry the last verified one stays in force while Paperboat is unreachable (usableLocked,
+	// F21-01); the relays it names stay usable until the candidate set and their grants end.
+	if a.current == nil || a.closed {
 		return nil, nil, 0, ErrExpiredAuthority
 	}
 	nodes, _, err := a.regional.Eligible("relay", "derp_quic", nil, serverclock.Now())
