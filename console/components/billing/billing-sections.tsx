@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { ApiError, idempotencyKey, useApiQuery, type Workspace } from "@/lib/api"
 import {
+  allowanceWindow,
   billingLive,
   billingProductsQuery,
   billingQuery,
@@ -155,6 +156,7 @@ export function TopUps({ workspace, billing }: { workspace: Workspace; billing: 
   const product = products.data?.find((p) => p.catalog_type === "top_up" && p.price_verified)
   const step = product?.unit_bytes ?? topupDefaults.unitBytes
   const max = product?.max_quantity ?? topupDefaults.maxQuantity
+  const time = useTimeFormat()
   const [units, setUnits] = useState(1)
   // Same rule as plan Checkout: an unknown provider outcome keeps the key so a retry can't buy twice.
   const [key, setKey] = useState(idempotencyKey)
@@ -168,6 +170,9 @@ export function TopUps({ workspace, billing }: { workspace: Workspace; billing: 
   // Top-ups extend a paid plan's allowance; Free upgrades first (server: 409 paid_plan_required).
   if (!billing.product_code) return null
   const live = billingLive.topups && Boolean(product) && billing.can_manage
+  // The server gives each top-up its own expiry; before the first one, the month's end.
+  const expiry = billing.topups?.at(-1)?.expires_at ?? allowanceWindow(billing).end
+  const expires = expiry && time.date(expiry, "date")
   const total = product?.unit_amount != null ? formatMoney(product.unit_amount * units, product.currency) : null
   return (
     <Section
@@ -227,7 +232,8 @@ export function TopUps({ workspace, billing }: { workspace: Workspace; billing: 
         </span>
       </div>
       <p className="py-2 text-xs text-muted-foreground">
-        Used after the plan&apos;s allowance runs out. It doesn&apos;t expire or renew.
+        Adds to this billing period.
+        {expires && ` Unused bandwidth ends when your plan renews on ${expires}.`}
       </p>
       {buy.isError && <p className="py-2 text-sm text-destructive">{buy.error.message}</p>}
     </Section>

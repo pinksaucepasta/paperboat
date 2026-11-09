@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: sections.billing.title }
 
 export default function Page() {
   return (
-    <SectionPage id="billing" narrow>
+    <SectionPage id="billing">
       <BillingPage />
     </SectionPage>
   )

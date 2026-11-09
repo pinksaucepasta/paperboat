@@ -11,7 +11,7 @@ export default function AccountPage() {
         <Crumb>Account</Crumb>
       </PageHeader>
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-8 md:py-8">
-        <div className="flex max-w-3xl flex-col gap-10">
+        <div className="flex flex-col gap-10">
           <Account />
         </div>
       </main>

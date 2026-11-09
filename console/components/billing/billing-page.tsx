@@ -115,8 +115,8 @@ function Plan({
         ) : billing.product ? (
           `${planName(billing.product)} · ${formatPrice(billing.product)}/${billing.product.interval}`
         ) : (
-          // A plan granted outside the catalog (test data) has a code but no price.
-          (billing.product_code ?? "Free")
+          // A plan granted outside the catalog (test data) has a code but no price or name.
+          (billing.product_code ? codeName(billing.product_code) : "Free")
         )}
       </Row>
       {failed ? (
@@ -268,6 +268,14 @@ function planName(product: BillingProduct) {
   return product.name.replace(/^Paperboat\s+/, "").replace(/\s*\((month|year)\)$/, "")
 }
 
+/** "team-pro" → "Team Pro": the name of a plan the catalog has no display name for. */
+function codeName(code: string) {
+  return code
+    .split(/[-_]/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ")
+}
+
 /** The subscription's state in plain words; a state this console doesn't know shows no Status row. */
 function stateLabel(state: string): string | undefined {
   const labels: Record<string, string> = {
@@ -316,7 +324,8 @@ function BillingSkeleton() {
           </span>
         </div>
         <p className="py-2 text-xs text-muted-foreground">
-          Used after the plan&apos;s allowance runs out. It doesn&apos;t expire or renew.
+          Adds to this billing period. Unused bandwidth ends when your plan renews on{" "}
+          <Skeleton className="inline-block h-3 w-20 align-middle" />.
         </p>
       </Section>
     </div>

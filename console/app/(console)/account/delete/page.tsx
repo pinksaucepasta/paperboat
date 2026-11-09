@@ -11,7 +11,7 @@ export default function DeleteAccountPage() {
         <CrumbLink href="/account">Account</CrumbLink>
         <Crumb>Delete account</Crumb>
       </PageHeader>
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-8 px-4 py-6 md:px-8 md:py-8">
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-8 px-4 py-6 md:px-8 md:py-8">
         <DeleteAccount />
       </main>
     </>

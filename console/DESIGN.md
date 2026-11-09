@@ -47,10 +47,9 @@ The brand guidelines live in the Paper file "Intuitive zephyr", page "Brand guid
 
 - **One column.** Every page's content sits in one container owned by its frame (`SectionPage`,
   `MachineShell`, or a page main with the same classes: `max-w-6xl`, centered, the header's
-  gutters); pages never add their own width wrapper. Lists, tables, dashboards and tools (the
-  inspector) fill it. Pages made only of label–value rows (Account, Billing) pass `narrow`
-  (`max-w-3xl` at the column's left edge, never centered), so the content's left edge is the same
-  on every page.
+  gutters); pages never add their own width wrapper (no `max-w-*` inside it). Lists, tables, dashboards and tools (the
+  inspector) fill it. Pages made only of label–value rows (Account, Billing) fill it too: every
+  page uses the one content column, so the content's edges are the same on every page.
 - **No page title on section pages.** The breadcrumb names the page; the primary action sits at the
   right of the first toolbar or Section heading. An `h1` belongs only to an object's page (a machine, a
   tunnel, a team), where it is the object's editable name.
