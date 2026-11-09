@@ -3,6 +3,7 @@ package streamauth
 import (
 	"bytes"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -122,5 +123,33 @@ func TestResumeHeaderIsTerminalOnlyAndCarriesNoCredential(t *testing.T) {
 		if value.Validate(now) == nil {
 			t.Fatalf("accepted %+v", value)
 		}
+	}
+}
+
+// The OS user an ssh stream logs in as rides in the header so the host can check it before sshd does.
+func TestSSHHeaderCarriesAPortableLoginUserAndOnlyForSSH(t *testing.T) {
+	deadline := time.Now().Add(time.Minute)
+	header, err := New("operation_1", "ssh", "stream_1", "credential", deadline, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	header.LoginUser = "pbmac2"
+	encoded, err := header.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := Parse(encoded, time.Time{})
+	if err != nil || parsed.LoginUser != "pbmac2" {
+		t.Fatalf("round trip: %+v %v", parsed, err)
+	}
+	for _, user := range []string{"-oProxyCommand=x", ".hidden", "a b", "a/b", "a\nb", strings.Repeat("a", 65)} {
+		header.LoginUser = user
+		if _, err := header.MarshalBinary(); err == nil {
+			t.Errorf("login user %q was accepted", user)
+		}
+	}
+	header.LoginUser, header.Consumer = "pbmac2", "terminal"
+	if _, err := header.MarshalBinary(); err == nil {
+		t.Error("a terminal stream carried a login user")
 	}
 }

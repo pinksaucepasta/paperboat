@@ -1,6 +1,7 @@
 package managedssh
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"sync"
@@ -30,20 +31,44 @@ func RemoteLoginDenied(user string, run ExitRunner) bool {
 	return err == nil && code != 0
 }
 
-// loginDenied caches the answer: the ACL changes rarely and every SSH stream asks.
+// loginDenied caches the answer per user: the ACL changes rarely and every SSH stream asks.
 type loginDenied struct {
 	mu      sync.Mutex
+	entries map[string]loginDeniedEntry
+}
+
+type loginDeniedEntry struct {
 	checked time.Time
 	denied  bool
 }
 
-const loginDeniedCacheFor = 15 * time.Second
+const (
+	loginDeniedCacheFor = 15 * time.Second
+	loginDeniedMaxUsers = 64
+)
 
-func (c *loginDenied) get(check func() bool) bool {
+func (c *loginDenied) get(user string, check func(string) bool) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.checked.IsZero() || time.Since(c.checked) > loginDeniedCacheFor {
-		c.denied, c.checked = check(), time.Now()
+	if entry, ok := c.entries[user]; ok && time.Since(entry.checked) <= loginDeniedCacheFor {
+		return entry.denied
 	}
-	return c.denied
+	if c.entries == nil || len(c.entries) >= loginDeniedMaxUsers {
+		c.entries = make(map[string]loginDeniedEntry)
+	}
+	denied := check(user)
+	c.entries[user] = loginDeniedEntry{checked: time.Now(), denied: denied}
+	return denied
+}
+
+type loginUserKey struct{}
+
+// WithLoginUser names the OS user a stream will log in as; the stream's header carries it.
+func WithLoginUser(ctx context.Context, user string) context.Context {
+	return context.WithValue(ctx, loginUserKey{}, user)
+}
+
+func loginUserFrom(ctx context.Context) string {
+	user, _ := ctx.Value(loginUserKey{}).(string)
+	return user
 }

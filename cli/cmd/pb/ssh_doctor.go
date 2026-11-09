@@ -76,7 +76,7 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 	descriptor := pendingSSHDescriptor(machine, operationID)
 	probeCtx, cancel := context.WithTimeout(command.Context(), 20*time.Second)
 	defer cancel()
-	connection, err := d.peerApplications.DialSSH(probeCtx, sshConnectInfo(machine, descriptor, client.Workspace()), operationID)
+	connection, err := d.peerApplications.DialSSH(probeCtx, sshConnectInfo(machine, descriptor, client.Workspace(), target.OSUser), operationID)
 	if err != nil {
 		return fmt.Errorf("managed SSH transport or loopback target is not ready: %w", err)
 	}

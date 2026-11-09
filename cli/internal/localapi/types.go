@@ -119,6 +119,8 @@ type PeerTerminalPayload struct {
 	InputAttachmentID   string            `json:"input_attachment_id,omitempty"`
 	// InputOwner identifies one pb connect across redials so the daemon keeps its unanswered input.
 	InputOwner string `json:"input_owner,omitempty"`
+	// LoginUser is the OS user an ssh stream logs in as; see resolver.TerminalTarget.LoginUser.
+	LoginUser string `json:"login_user,omitempty"`
 }
 
 // InspectorRequest is one explicit inspector call. The daemon owns the CLI-role peer identity,

@@ -117,13 +117,14 @@ func newSSHOperationID() string {
 	return "operation_" + uuid.NewString()
 }
 
-func sshConnectInfo(machine api.UserMachine, descriptor api.SSHDescriptor, selectedWorkspace string) resolver.ConnectInfo {
+// sshConnectInfo: loginUser is the OS user the session logs in as ("" when unknown), carried to the host.
+func sshConnectInfo(machine api.UserMachine, descriptor api.SSHDescriptor, selectedWorkspace, loginUser string) resolver.ConnectInfo {
 	workspace := selectedWorkspace
 	return resolver.ConnectInfo{
 		Workspace:  workspace,
 		TargetKind: "machine", MachineID: machine.ID, Machine: machine.Alias, MachineState: machine.State,
 		MachineGeneration: uint64(machine.InstallationGeneration), TunnelTarget: descriptor.Endpoints.WSS,
-		Terminal: &resolver.TerminalTarget{Protocol: "paperboat.ssh.v1", EnvironmentID: descriptor.Environment.ID, QUICEndpoint: descriptor.Endpoints.QUIC, WSSEndpoint: descriptor.Endpoints.WSS, Auth: resolver.AuthTarget{Method: descriptor.Auth.Method, Token: descriptor.Auth.Token, ExpiresAt: descriptor.Auth.ExpiresAt.Format(time.RFC3339Nano), Scopes: descriptor.Auth.Scopes, ResourceID: descriptor.Auth.AccessSessionID}, CWD: descriptor.Environment.Root},
+		Terminal: &resolver.TerminalTarget{LoginUser: loginUser, Protocol: "paperboat.ssh.v1", EnvironmentID: descriptor.Environment.ID, QUICEndpoint: descriptor.Endpoints.QUIC, WSSEndpoint: descriptor.Endpoints.WSS, Auth: resolver.AuthTarget{Method: descriptor.Auth.Method, Token: descriptor.Auth.Token, ExpiresAt: descriptor.Auth.ExpiresAt.Format(time.RFC3339Nano), Scopes: descriptor.Auth.Scopes, ResourceID: descriptor.Auth.AccessSessionID}, CWD: descriptor.Environment.Root},
 	}
 }
 

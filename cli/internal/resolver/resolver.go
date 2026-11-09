@@ -258,6 +258,9 @@ type AuthTarget struct {
 // by the broker. It carries scoped terminal auth, not
 // raw machine addresses, SSH credentials, or tunnel control tokens.
 type TerminalTarget struct {
+	// LoginUser is the OS user an SSH stream will log in as (OpenSSH %r); the host checks it against the machine's
+	// Remote Login before sshd does. Empty when unknown.
+	LoginUser     string
 	Protocol      string
 	EnvironmentID string
 	QUICEndpoint  string

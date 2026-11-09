@@ -30,11 +30,9 @@ type HostConfig struct {
 	DialTimeout  time.Duration
 	// Audit records the sessions the host serves, refuses and ends (F5-12). Optional.
 	Audit SessionAudit
-	// LoginUser and LoginDenied: when LoginDenied(LoginUser) is true the machine's sshd refuses that user (macOS
-	// Remote Login restricted to other users), so a stream is refused with the reason instead of failing as a
-	// bare "Connection closed". It also covers other OS users on that machine: the host cannot see the login
-	// name before sshd does. Optional.
-	LoginUser   string
+	// LoginDenied: when LoginDenied(user) is true for the OS user a stream logs in as (WithLoginUser), the machine's
+	// sshd refuses that user (macOS Remote Login restricted to other users), so the stream is refused with the reason
+	// instead of failing as a bare "Connection closed". A stream that names no user is never refused here: sshd decides.
 	LoginDenied func(user string) bool
 }
 
@@ -50,7 +48,7 @@ type Host struct {
 	disabled       bool
 	flows          map[*hostFlow]struct{}
 	changed        chan struct{}
-	loginDenied    loginDenied
+	loginDenied    *loginDenied
 }
 
 // SetAudit installs the audit for a Host built before its queue exists (the carrier's). Call it before the
@@ -67,7 +65,7 @@ func NewHost(config HostConfig) (*Host, error) {
 	if config.ProbeTimeout <= 0 || config.ProbeTimeout > 30*time.Second || config.DialTimeout <= 0 || config.DialTimeout > 30*time.Second {
 		return nil, ErrSSHHostInvalid
 	}
-	return &Host{config: config, active: make(map[uint64]int), activeBySource: make(map[string]int), flows: make(map[*hostFlow]struct{})}, nil
+	return &Host{config: config, active: make(map[uint64]int), activeBySource: make(map[string]int), flows: make(map[*hostFlow]struct{}), loginDenied: &loginDenied{}}, nil
 }
 
 // ReconcileTarget proves listener readiness for a source-less target. Callers
@@ -247,9 +245,9 @@ func (h *Host) Serve(ctx context.Context, generation uint64, stream io.ReadWrite
 		h.Refused(ctx, stream, generation, RefusedNotSetUp)
 		return BridgeResult{}, ErrSSHHostStale
 	}
-	if h.config.LoginDenied != nil && h.loginDenied.get(func() bool { return h.config.LoginDenied(h.config.LoginUser) }) {
+	if user := loginUserFrom(ctx); user != "" && h.config.LoginDenied != nil && h.loginDenied.get(user, h.config.LoginDenied) {
 		h.mu.Unlock()
-		h.refuse(ctx, stream, generation, RefusedLoginNotAllowed+":"+h.config.LoginUser, RefusedLoginNotAllowed)
+		h.refuse(ctx, stream, generation, RefusedLoginNotAllowed+":"+user, RefusedLoginNotAllowed)
 		return BridgeResult{}, ErrSSHLoginNotAllowed
 	}
 	h.active[generation]++

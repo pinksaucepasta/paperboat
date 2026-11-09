@@ -666,6 +666,9 @@ func (s *productionNativePeerService) serveStream(ctx context.Context, header st
 			offline := header.Offline && !s.paperboatAnswering()
 			ctx = managedssh.WithPeer(ctx, managedssh.Peer{AccountID: peer.AccountID, EndpointID: peer.EndpointID, OperationID: header.OperationID, Offline: offline})
 		}
+		if header.LoginUser != "" {
+			ctx = managedssh.WithLoginUser(ctx, header.LoginUser)
+		}
 		target, ok := s.config.ssh.Target()
 		if !ok {
 			s.config.ssh.Refused(ctx, stream, 0, managedssh.RefusedNotSetUp)

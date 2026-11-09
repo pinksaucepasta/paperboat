@@ -233,7 +233,7 @@ func actionSSHProxy(command *cobra.Command, _ []string) error {
 	dialCtx, cancelDial := context.WithTimeout(command.Context(), sshDialTimeout)
 	// The target's carrier restarts for a pb update: a dial that finds its transport closed is repeated for a few seconds.
 	connection, err := retrySSHDial(dialCtx, func() (tunnel.Conn, error) {
-		return d.peerApplications.DialSSH(dialCtx, sshConnectInfo(machine, descriptor, workspace), operationID)
+		return d.peerApplications.DialSSH(dialCtx, sshConnectInfo(machine, descriptor, workspace, proxyUser), operationID)
 	})
 	cancelDial()
 	if err != nil {

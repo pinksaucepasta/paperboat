@@ -44,6 +44,9 @@ type Header struct {
 	// new carrier without a fresh credential. It carries no secret: the host checks the peer's current
 	// authority here and the attachment's resume secret inside the stream.
 	Resume string `json:"resume,omitempty"`
+	// LoginUser is the OS user an ssh stream logs in as (OpenSSH %r). The host checks it against the machine's Remote
+	// Login before sshd does; empty means unknown and the host leaves the decision to sshd.
+	LoginUser string `json:"login_user,omitempty"`
 }
 
 // OfflineConsumers are the sessions a host may start without Paperboat.
@@ -96,6 +99,9 @@ func (h Header) Validate(now time.Time) error {
 	if len(h.UsageSessionID) > 128 || strings.ContainsAny(h.UsageSessionID, "\x00\r\n") || h.UsageSessionID != "" && h.Consumer != "config_compare" {
 		return ErrInvalid
 	}
+	if h.LoginUser != "" && (h.Consumer != "ssh" || !validLoginUser(h.LoginUser)) {
+		return ErrInvalid
+	}
 	private := h.Consumer == "private_http" || h.Consumer == "private_tcp" || h.Consumer == "inspector"
 	if private != (h.Target != "") || h.Target != "" && !json.Valid([]byte(h.Target)) {
 		return ErrInvalid
@@ -140,4 +146,17 @@ func Parse(encoded []byte, now time.Time) (Header, error) {
 		return Header{}, ErrInvalid
 	}
 	return value, nil
+}
+
+// validLoginUser is a portable account name: what OpenSSH accepts after %r, never an option or a path.
+func validLoginUser(user string) bool {
+	if user == "" || len(user) > 64 || user[0] == '-' || user[0] == '.' {
+		return false
+	}
+	for _, r := range user {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '_' || r == '-') {
+			return false
+		}
+	}
+	return true
 }

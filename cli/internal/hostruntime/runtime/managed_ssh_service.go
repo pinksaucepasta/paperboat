@@ -43,7 +43,7 @@ func newProductionManagedSSH(controlURL string, transport http.RoundTripper, reg
 	if registration.SSHUser == "" || registration.SSHPort == 0 {
 		return nil, nil, ErrManagedSSHUnavailable
 	}
-	host, err := managedssh.NewHost(managedssh.HostConfig{ProbeTimeout: 3 * time.Second, DialTimeout: 10 * time.Second, Audit: audit, LoginUser: registration.SSHUser, LoginDenied: managedssh.SystemRemoteLoginDenied})
+	host, err := managedssh.NewHost(managedssh.HostConfig{ProbeTimeout: 3 * time.Second, DialTimeout: 10 * time.Second, Audit: audit, LoginDenied: managedssh.SystemRemoteLoginDenied})
 	if err != nil {
 		return nil, nil, err
 	}

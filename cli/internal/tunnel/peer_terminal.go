@@ -287,6 +287,9 @@ func (a peerApplication) authorizationHeader(target *resolver.TerminalTarget, co
 	}
 	if err == nil {
 		header.Resumable = consumer != "config_compare"
+		if consumer == "ssh" {
+			header.LoginUser = target.LoginUser
+		}
 		if consumer == "config_compare" {
 			header.UsageSessionID = target.Auth.UsageSessionID
 		}
