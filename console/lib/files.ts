@@ -38,6 +38,7 @@ export type InboxRequest = {
   sender_account: string
   recipient_account: string
   source_machine_id: string
+  source_machine_name?: string
   destination_machine_id: string
   destination_machine_name?: string
   files: { basename: string; size: number; sha256: string }[]

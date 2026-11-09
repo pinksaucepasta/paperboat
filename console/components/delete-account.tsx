@@ -80,7 +80,7 @@ function Blocking({ teams }: { teams: DeletionPreview["teams_blocking"] }) {
   return (
     <div className="flex flex-col gap-2 rounded-md border border-destructive/40 p-4 text-sm" data-deletion-blocked>
       <p className="font-medium">First hand over or delete these teams</p>
-      <p className="text-muted-foreground">You own them and they have other members, so they can’t be deleted with you.</p>
+      <p className="text-muted-foreground">You own these teams and they have other members. Transfer or delete them first.</p>
       <ul className="flex flex-col gap-1">
         {teams.map((team) => (
           <li key={team.slug}>
@@ -122,7 +122,7 @@ function Confirm({ preview }: { preview: DeletionPreview }) {
   if (reauthenticate) {
     return stuck ? (
       <div className="flex flex-col items-start gap-3 text-sm">
-        <p>Paperboat still needs a fresh sign-in to delete your account. You come back here afterwards.</p>
+        <p>Sign in again to confirm. You’ll come back here.</p>
         <Button variant="outline" nativeButton={false} render={<a href={reauthPath} />}>
           Sign in again
         </Button>

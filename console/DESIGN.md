@@ -11,6 +11,12 @@ fast, obvious. These rules come from product review; follow them for every new s
   list item, like "Default". A short hint under a field
   is fine when it prevents a mistake ("Lowercase letters, numbers and dashes. Up to 63.").
 - Mark optional fields with a muted "Optional" on the right of the label.
+- Every sentence names its subject, or sits directly under a title or row that does ("Their
+  machine isn't reporting them" under nothing is wrong). Dialog body text may say "it" only when
+  the dialog title names the thing.
+- Say what the user can do, not how it works. At most 20 words a sentence.
+- No CLI names in body text; a command the user should run is a copyable `CommandBlock`.
+- No raw server codes ("unknown", "route_unavailable"): map each to plain words, or show nothing.
 
 ## Brand
 

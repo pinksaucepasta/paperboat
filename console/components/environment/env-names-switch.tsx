@@ -60,7 +60,7 @@ function TeamEnvNames({ team }: { team: Workspace }) {
       checked={(change.isPending ? change.variables : summary.data?.env_names_listable) ?? !summary.isPending}
       disabled={!manage || summary.isPending || change.isPending}
       error={change.error}
-      note={manage ? undefined : "Only owners and admins can change this for the team."}
+      note={manage ? undefined : "Only owners and admins can change this setting."}
       onChange={(on) => change.mutate(on)}
     />
   )

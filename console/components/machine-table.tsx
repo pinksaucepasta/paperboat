@@ -141,7 +141,7 @@ export function MachineTable() {
                       <InfoIcon className="size-3.5" />
                     </TooltipTrigger>
                     <TooltipContent className="max-w-64">
-                      Reachable from any machine signed in with Paperboat, by address or by IP.
+                      Open it from any of your machines with Paperboat, by name or IP.
                     </TooltipContent>
                   </Tooltip>
                 </span>
@@ -287,8 +287,8 @@ function NoMachines() {
         <EmptyTitle>{team ? `No machines in ${workspace.name} yet` : "Add your first machine"}</EmptyTitle>
         <EmptyDescription>
           {team
-            ? "Add one of your machines so the team can reach it."
-            : "Run one command on a computer to reach it from anywhere."}
+            ? "Add a machine so your team can use it."
+            : "Run one command on a computer to add it. You can then reach it from anywhere."}
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>

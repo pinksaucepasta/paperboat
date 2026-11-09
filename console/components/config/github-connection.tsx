@@ -97,7 +97,7 @@ export function GitHubConnection() {
         open={disconnecting}
         onOpenChange={setDisconnecting}
         title="Disconnect GitHub?"
-        description="Machines stop syncing config until GitHub is connected again. Your repository stays on GitHub, and Paperboat still appears under Applications in your GitHub settings, where you can revoke it too."
+        description="Machines stop syncing until you reconnect GitHub. Your repository stays. You can also revoke Paperboat in GitHub → Settings → Applications."
         action="Disconnect"
         pending="Disconnecting…"
         mutation={{

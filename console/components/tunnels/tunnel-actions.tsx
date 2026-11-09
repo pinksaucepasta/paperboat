@@ -67,7 +67,7 @@ export function useTunnelActions(tunnel: Tunnel, { onDeleted }: { onDeleted?: ()
         open={deleting}
         onOpenChange={setDeleting}
         title={`Delete ${tunnel.name}?`}
-        description={`${hostOf(tunnel.stable_endpoint)} and its public hostnames stop working, and the address is released. DNS records you added for your own domains stay; remove them at your DNS provider.`}
+        description={`${hostOf(tunnel.stable_endpoint)} and its hostnames stop working and the address is released. Remove DNS records for your own domains at your DNS provider.`}
         action="Delete tunnel"
         pending="Deleting…"
         confirmName={tunnel.name}

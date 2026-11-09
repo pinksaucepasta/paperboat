@@ -34,7 +34,7 @@ export function UploadDialog({
         <DialogHeader>
           <DialogTitle>Upload to {machineName}</DialogTitle>
           <DialogDescription>
-            Files go to the Paperboat Inbox on {machineName}, and their paths are typed into the terminal.
+            Files go to the Paperboat Inbox on {machineName}. Their paths are typed into the terminal.
           </DialogDescription>
         </DialogHeader>
         <button

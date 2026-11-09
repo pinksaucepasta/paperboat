@@ -126,8 +126,8 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
           </EmptyMedia>
           <EmptyTitle>No terminals yet</EmptyTitle>
           <EmptyDescription>
-            {machine ? `Open a shell on ${machine.alias}.` : "Open a shell on any of your machines."} It keeps running
-            when you close the tab, and you can share it live.
+            {machine ? `Open a shell on ${machine.alias}.` : "Open a shell on any of your machines."} The shell keeps
+            running after you close the tab, and you can share it.
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
@@ -434,7 +434,7 @@ function Row({
           title={`Close ${session.name}?`}
           description={
             away && offline
-              ? `${session.target.name} is offline. The terminal moves to Closed now, and its shell ends when ${session.target.name} reconnects.`
+              ? `${session.target.name} is offline. This terminal moves to Closed now; its shell ends when ${session.target.name} reconnects.`
               : `The shell on ${session.target.name} ends for everyone, along with anything running in it.`
           }
           action="Close terminal"

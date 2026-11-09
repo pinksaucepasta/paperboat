@@ -291,8 +291,8 @@ function AccessValue({ tunnel }: { tunnel: Tunnel }) {
           <AlertDialogHeader>
             <AlertDialogTitle>Make {tunnel.name} public?</AlertDialogTitle>
             <AlertDialogDescription>
-              Anyone who has {hostOf(tunnel.stable_endpoint)} can reach the service without signing in. Its own login,
-              if it has one, is the only protection.
+              Anyone with {hostOf(tunnel.stable_endpoint)} can reach this service without signing in. Only the app’s
+              own login protects it.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

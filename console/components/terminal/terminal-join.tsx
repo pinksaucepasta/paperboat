@@ -123,7 +123,7 @@ function JoinForm({ id, signedIn }: { id: string; signedIn?: Me }) {
     join.error instanceof ApiError && (join.error.status === 429 || join.error.code === "terminal_guest_capacity")
       ? join.error.message
       : join.isError
-        ? "That code didn’t work. It may have expired or been replaced; ask for a new one."
+        ? "That code didn’t work. Codes expire or get replaced — ask for a new one."
         : ""
 
   return (

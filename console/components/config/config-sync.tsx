@@ -26,7 +26,8 @@ import { StatusDot } from "@/components/machine-status"
 import { Section, SectionHeading } from "@/components/section"
 import { Time } from "@/components/time"
 import { Button } from "@/components/ui/button"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { CommandBlock } from "@/components/add-machine-dialog"
 import { EmptySkeleton, TableRowsSkeleton } from "@/components/skeletons"
 import { LoadError } from "@/components/load-error"
 
@@ -108,10 +109,12 @@ function NotSetUp({ name }: { name?: string }) {
         </EmptyMedia>
         <EmptyTitle>{name ? `${name} doesn’t sync config` : "No machine syncs config yet"}</EmptyTitle>
         <EmptyDescription>
-          Keep files like your shell and editor settings in a Git repository, the same on every machine. Set it up on
-          the machine with pb config sync init.
+          Keep your shell and editor settings in a Git repository, the same on every machine. Set it up on a machine:
         </EmptyDescription>
       </EmptyHeader>
+      <EmptyContent className="w-full max-w-sm">
+        <CommandBlock command="pb config sync init" />
+      </EmptyContent>
     </Empty>
   )
 }
@@ -137,15 +140,16 @@ function AllMachines(props: {
       {conflicted > 0 && (
         <div className="flex items-start gap-3 rounded-lg bg-surface p-4 text-sm">
           <WarningCircleIcon weight="fill" className="mt-0.5 size-4 shrink-0 text-destructive" />
-          <div className="flex min-w-0 flex-col gap-0.5">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <p className="font-medium">
               {conflicted === 1
                 ? "Files on a machine changed in two places"
                 : `Files on ${conflicted} machines changed in two places`}
             </p>
-            <p className="text-muted-foreground">
-              Those files stop syncing until you choose which version to keep, on the machine with pb config conflict.
-            </p>
+            <p className="text-muted-foreground">{conflictNote}</p>
+            <div className="mt-2">
+              <CommandBlock command="pb config conflict" />
+            </div>
           </div>
         </div>
       )}
@@ -326,25 +330,42 @@ function MachineSync({ environment }: { environment: ConfigEnvironment }) {
         <PathList
           title="Conflicts"
           paths={conflicts}
-          note="Changed both here and in the repository. They stop syncing until you choose which version to keep, on the machine with pb config conflict."
+          note={conflictNote}
+          command="pb config conflict"
         />
       )}
       {review.length > 0 && (
         <PathList
           title="Waiting for approval"
           paths={review}
-          note="Changes from the repository that apply once approved on the machine with pb config approve."
+          note="Repository changes waiting for approval on the machine:"
+          command="pb config approve"
         />
       )}
-      {skipped.length > 0 && <PathList title="Skipped" paths={skipped} note="Not synced, for the reason shown." />}
+      {skipped.length > 0 && <PathList title="Skipped" paths={skipped} note="Not syncing — see the reason on each file." />}
     </div>
   )
 }
 
-function PathList({ title, paths, note }: { title: string; paths: ConfigPath[]; note: string }) {
+const conflictNote = "These files changed on the machine and in the repository. Choose which to keep on the machine:"
+
+function PathList({
+  title,
+  paths,
+  note,
+  command,
+}: {
+  title: string
+  paths: ConfigPath[]
+  note: string
+  command?: string
+}) {
   return (
     <Section title={title}>
-      <p className="border-b border-divider py-2 text-sm text-muted-foreground">{note}</p>
+      <div className="flex flex-col gap-2 border-b border-divider py-2 text-sm text-muted-foreground">
+        <p>{note}</p>
+        {command && <CommandBlock command={command} />}
+      </div>
       {paths.map((path) => (
         <div key={path.path} className="flex min-h-11 items-center gap-4 border-b border-divider py-1 text-sm">
           <span className="min-w-0 flex-1 truncate font-mono text-code">{path.path}</span>

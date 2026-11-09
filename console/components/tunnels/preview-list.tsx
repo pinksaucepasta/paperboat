@@ -102,7 +102,7 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
   const drop = usePageFileDrop()
   const dropped = (
     <>
-      {drop.over && !drop.files.length && <DropOverlay title="Drop to share" detail="It gets a link right away" />}
+      {drop.over && !drop.files.length && <DropOverlay title="Drop to share" detail="You get a link right away." />}
       {drop.files[0] && <ShareFileDialog machine={machine} file={drop.files[0]} onClose={drop.clear} />}
     </>
   )
@@ -126,8 +126,8 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
           </EmptyMedia>
           <EmptyTitle>No previews yet</EmptyTitle>
           <EmptyDescription>
-            Share a file, or something running on {machine ? machine.alias : "a machine"}, like a dev server, at a
-            temporary address. It ends when you stop it.
+            Share a file or a dev server on {machine ? machine.alias : "a machine"} at a temporary address. Stop it
+            any time.
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent className="flex-row justify-center">
@@ -208,16 +208,11 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
         {query.isError && <LoadError what="previews" error={query.error} retry={() => query.refetch()} />}
         {(query.isSuccess ? shown.length === 0 : query.isPending && lastRows === 0) && (
           <p className="py-12 text-center text-sm text-muted-foreground">
-            {q ? (
-              `No previews match “${q}”`
-            ) : view === "live" ? (
-              <>
-                Nothing is live right now. Start one with New preview, or run{" "}
-                <span className="font-mono text-code text-foreground">pb preview 3000</span> on a machine.
-              </>
-            ) : (
-              "No ended previews"
-            )}
+            {q
+              ? `No previews match “${q}”`
+              : view === "live"
+                ? "Nothing is live. Start a preview with New preview."
+                : "No ended previews"}
           </p>
         )}
       </div>

@@ -224,14 +224,14 @@ function SuspendedNotice({ owner }: { owner: boolean }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg bg-destructive/5 px-4 py-3 text-sm dark:bg-destructive/10">
       <span className="text-destructive">
-        This team is suspended. Members, machines and sharing are paused until it is restored.
+        This team is suspended: members, machines and sharing are paused until the owner restores it.
       </span>
       {owner ? (
         <Button nativeButton={false} render={<Link href="/billing" />}>
           Restore billing
         </Button>
       ) : (
-        <span className="text-muted-foreground">Ask the team owner to restore it.</span>
+        <span className="text-muted-foreground">Ask the team owner to restore the team.</span>
       )}
     </div>
   )
@@ -408,7 +408,7 @@ function MemberRow({
         open={confirm === "remove"}
         onOpenChange={(open) => !open && setConfirm(null)}
         title={`Remove ${who}?`}
-        description="They lose access to the team's machines, ENV and config right away. Their seat stays paid until the billing date and can be reused."
+        description={`${who} loses access to the team's machines, ENV and config now. The seat stays paid until the billing date and can be reused.`}
         action="Remove"
         pending="Removing…"
         mutation={{
@@ -420,7 +420,7 @@ function MemberRow({
         open={confirm === "transfer"}
         onOpenChange={(open) => !open && setConfirm(null)}
         title={`Make ${who} the owner?`}
-        description="They get billing and delete rights. You become a member. Only they can give ownership back."
+        description={`${who} becomes owner with billing and delete rights. You become a member; only ${who} can give ownership back.`}
         action="Transfer ownership"
         pending="Transferring…"
         mutation={{
@@ -696,7 +696,7 @@ function TeamSettings({ team, owner }: { team: Team; owner: boolean }) {
       <SettingRow
         label="Approve new machines"
         htmlFor="team-approval"
-        description="Machines that members add wait for an owner or admin to accept them. Owners and admins add machines directly."
+        description="Machines added by members wait for an owner or admin to accept them."
       >
         <Switch
           id="team-approval"
@@ -710,7 +710,7 @@ function TeamSettings({ team, owner }: { team: Team; owner: boolean }) {
       <SettingRow
         label="Allow private access"
         htmlFor="team-private-access"
-        description="Lets members reach the ports of the team’s shared machines over the private network, on top of the Private network access you grant on each machine. Off by default."
+        description="Members can reach ports on the team’s shared machines over the private network. Off by default."
       >
         <Switch
           id="team-private-access"
@@ -762,7 +762,7 @@ function LeaveDialog({ team, onClose }: { team: Team; onClose: () => void }) {
       open
       onOpenChange={(open) => !open && onClose()}
       title={`Leave ${team.display_name || team.team_id}?`}
-      description="You lose access to its machines, ENV and config. You need a new invitation to come back."
+      description="You lose access to the team’s machines, ENV and config. You’ll need a new invitation to return."
       action="Leave team"
       pending="Leaving…"
       mutation={{
@@ -786,7 +786,7 @@ function DangerZone({ team, owner }: { team: Team; owner: boolean }) {
       title={owner ? "Delete team" : "Leave team"}
       description={
         owner
-          ? "Members lose access, team ENV and config are deleted, team machines go back to their owners. Cancel the plan in Billing first."
+          ? "Members lose access, team ENV and config are deleted, and machines return to their owners. Cancel the plan in Billing first."
           : "You lose access to the team's machines, ENV and config."
       }
       action={owner ? "Delete team" : "Leave team"}

@@ -75,7 +75,7 @@ export function TerminalPage({ id }: { id: string }) {
             <p className="font-medium">{missing ? "Terminal not found" : "Couldn’t load this terminal"}</p>
             <p className="mt-1 text-sm text-muted-foreground">
               {missing
-                ? "It may have closed, or it isn’t shared with you. Ask its owner for access."
+                ? "This terminal is closed or not shared with you. Ask the person who shared it."
                 : "Check your connection and try again."}
             </p>
             <Button variant="secondary" className="mt-4" nativeButton={false} render={<Link href="/terminals" />}>

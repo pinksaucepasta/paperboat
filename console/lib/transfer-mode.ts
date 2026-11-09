@@ -15,7 +15,7 @@ export type TransferMode = "automatic" | "unlimited"
 export const transferModes: Record<TransferMode, { label: string; detail: string }> = {
   automatic: {
     label: "Automatic",
-    detail: "Files up to 2 GB. Uses Paperboat’s relays when machines can’t connect directly.",
+    detail: "Files up to 2 GB. Relays are used when machines can’t connect directly.",
   },
   unlimited: {
     label: "Unlimited",
@@ -25,7 +25,7 @@ export const transferModes: Record<TransferMode, { label: string; detail: string
 
 /** Why a transfer is paused (pause_reason), in plain words. */
 export const pauseReasons: Record<string, string> = {
-  no_eligible_path: "The machines can’t connect directly, and there is no relay of yours to use.",
+  no_eligible_path: "These machines can’t connect directly and you have no relay of your own.",
   destination_offline: "The receiving machine is offline.",
   relay_quota_exhausted: "This workspace’s hosted bandwidth is used up.",
 }

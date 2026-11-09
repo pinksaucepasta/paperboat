@@ -89,7 +89,7 @@ function Review({ link, token }: { link: string; token: string }) {
         }
       />
       <p className="text-sm text-white/75">
-        Paperboat keeps your config files in a private GitHub repository you choose. Approve only if you just ran this
+        Paperboat stores your config in a private GitHub repository you choose. Approve only if you just started this
         from your terminal.
       </p>
       {failed && (

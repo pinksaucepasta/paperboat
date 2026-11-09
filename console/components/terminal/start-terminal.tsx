@@ -49,7 +49,7 @@ export function StartTerminal() {
       </TopBar>
       <main className="flex flex-1 items-center justify-center p-8 text-center">
         {!machineId ? (
-          <Problem title="No machine chosen" detail="Start a terminal from the Terminals page." />
+          <Problem title="No machine chosen" detail="Start a terminal from Terminals." />
         ) : isLimitReached(start.error) ? (
           <div className="flex max-w-sm flex-col items-center gap-3">
             <p className="font-medium">Couldn’t start a shell on {name}</p>

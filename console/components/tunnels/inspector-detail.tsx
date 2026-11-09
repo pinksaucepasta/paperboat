@@ -76,12 +76,15 @@ export function CaptureRow({
 const bodyStates: Record<string, string> = {
   "": "Not captured. Turn on “Capture bodies” to record bodies.",
   unsupported: "Not shown: binary or streamed body.",
-  dropped: "Dropped: the machine was over its capture budget.",
+
   expired: "Expired.",
 }
 
-function Body({ text, state }: { text?: string; state: string }) {
-  if (!text) return <p className="text-sm text-muted-foreground">{bodyStates[state] ?? "No body."}</p>
+function Body({ text, state, machine }: { text?: string; state: string; machine: string }) {
+  if (!text) {
+    const why = state === "dropped" ? `Not captured: ${machine} hit its capture limit.` : bodyStates[state]
+    return <p className="text-sm text-muted-foreground">{why ?? "No body."}</p>
+  }
   let shown = text
   try {
     shown = JSON.stringify(JSON.parse(text), null, 2)
@@ -132,10 +135,13 @@ function Section({ title, children }: { title: React.ReactNode; children: React.
 /** Request and response of one capture, exactly as captured, headers in full. */
 export function CaptureDetail({
   record,
+  machine,
   load,
   onReplay,
 }: {
   record: Capture
+  /** The machine that captured it, named in "Not captured: <machine> hit its capture limit." */
+  machine: string
   load: (id: string) => Promise<Capture>
   onReplay?: (id: string) => Promise<unknown>
 }) {
@@ -181,7 +187,7 @@ export function CaptureDetail({
         <Headers headers={record.request_headers} truncated={record.headers_truncated} />
       </Section>
       <Section title="Request body">
-        <Body text={record.request_body} state={record.request_body_state} />
+        <Body text={record.request_body} state={record.request_body_state} machine={machine} />
       </Section>
       <Section
         title={
@@ -197,7 +203,7 @@ export function CaptureDetail({
         <Headers headers={record.response_headers} truncated={record.headers_truncated} />
       </Section>
       <Section title="Response body">
-        <Body text={record.response_body} state={record.response_body_state} />
+        <Body text={record.response_body} state={record.response_body_state} machine={machine} />
       </Section>
     </div>
   )

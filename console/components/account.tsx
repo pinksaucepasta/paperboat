@@ -33,7 +33,7 @@ export function Account() {
       {accountDeletionLive && (
         <DangerZone
           title="Delete account"
-          description="Deletes your account and everything in it. The next page lists what goes."
+          description="Deletes your account and its data. The next page lists exactly what’s removed."
           action="Delete account…"
           onAction={() => router.push("/account/delete")}
         />

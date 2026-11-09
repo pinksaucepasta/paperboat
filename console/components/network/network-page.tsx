@@ -101,7 +101,7 @@ export function NetworkPage() {
       >
         {none ? (
           <p className="border-b border-divider py-3 text-sm text-muted-foreground">
-            None yet. Run a relay or tunnel server on a Linux machine to keep traffic on your hardware.
+            None yet. Run a relay or tunnel server on your own Linux server.
           </p>
         ) : (
           <div>
@@ -154,7 +154,6 @@ export function NetworkPage() {
 
       {adding && (
         <AddServerDialog
-          workspaceName={workspace?.name ?? "Personal"}
           initial={adding}
           onClose={() => setAdding(undefined)}
         />
@@ -216,7 +215,7 @@ function NodeRow({ node }: { node: Node }) {
           open={removing}
           onOpenChange={setRemoving}
           title={`Remove ${node.name}?`}
-          description="It stops carrying your traffic right away. Machines fall back to other servers where your settings allow. To use it again, pair it with a fresh code."
+          description="This server stops carrying traffic now. Machines switch to other servers your settings allow. To use it again, pair it with a new code."
           action="Remove server"
           pending="Removing…"
           confirmName={node.name}
@@ -471,11 +470,9 @@ function PathCard({
  * prints. The node belongs to the selected workspace.
  */
 function AddServerDialog({
-  workspaceName,
   initial,
   onClose,
 }: {
-  workspaceName: string
   initial: "relay" | "tunnel"
   onClose: () => void
 }) {
@@ -508,7 +505,7 @@ function AddServerDialog({
                 </li>
               ))}
             </ul>
-            <p className="text-xs text-muted-foreground">It carries traffic once you choose it in “How your traffic travels”.</p>
+            <p className="text-xs text-muted-foreground">Choose this server under “How your traffic travels” to start using it.</p>
             <Button size="lg" className="mt-1" onClick={onClose}>
               Done
             </Button>
@@ -545,7 +542,7 @@ function AddServerDialog({
                 <Skeleton className="h-12 w-full" />
               )}
               <p className="text-xs text-muted-foreground">
-                Run it on a Linux server with a public address. It prints an address and a code for the next step.
+                Run this on a Linux server with a public IP. It prints an address and a pairing code.
               </p>
             </div>
 
@@ -573,8 +570,7 @@ function AddServerDialog({
                   spellCheck={false}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Works once, for 15 minutes; run pbh selfhost code on the server for a new one. The server joins{" "}
-                  {workspaceName}.
+                  The code works once, for 15 minutes. Get a new one on the server with the command above.
                 </p>
               </Field>
             </div>

@@ -104,7 +104,7 @@ export function EnvVariables({
         open={removing !== null}
         onOpenChange={(open) => !open && setRemoving(null)}
         title={`Remove ${removing ?? ""}?`}
-        description="Machines stop receiving it the next time a process starts there."
+        description="Machines get the change in new terminals and commands."
         action="Remove"
         pending="Removing…"
         mutation={{
@@ -180,7 +180,7 @@ function SetDialog({
               onChange={(event) => setValue_(event.target.value)}
               autoFocus={Boolean(initial)}
             />
-            <p className="text-xs text-muted-foreground">Encrypted here. It is never shown again.</p>
+            <p className="text-xs text-muted-foreground">Encrypted in your browser. You won’t see the value again.</p>
             {save.isError && !(save.error instanceof DeliveryPending) && <FieldError>{save.error.message}</FieldError>}
           </Field>
           <DialogFooter>

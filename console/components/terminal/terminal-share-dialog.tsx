@@ -84,7 +84,7 @@ export function TerminalShareDialog({
         <DialogHeader>
           <DialogTitle>Share {session.name}</DialogTitle>
           <DialogDescription>
-            Everyone who joins sees this terminal live, including any secrets it prints.
+            Everyone who joins sees this terminal live, including any secrets shown in it.
           </DialogDescription>
         </DialogHeader>
         {open && <Share session={session} onDone={() => onOpenChange(false)} />}
@@ -190,7 +190,7 @@ function Share({ session, onDone }: { session: TerminalSession; onDone: () => vo
           <p className="-mt-1 text-xs text-muted-foreground">
             {shown.emails.length
               ? "Only these people can join, after signing in."
-              : "Leave this empty to let anyone with the link and code join."}
+              : "Leave empty to let anyone with the link and code join."}
           </p>
 
           {shown.emails.length > 0 ? (
@@ -509,7 +509,7 @@ function JoiningInfo({
         </DropdownMenu>
       </div>
       {guests > 0 && (
-        <p className="text-xs text-muted-foreground">Changing either makes a new code and disconnects guests.</p>
+        <p className="text-xs text-muted-foreground">Changing the link or code disconnects current guests.</p>
       )}
       <Button
         className="mt-3 self-start"

@@ -130,7 +130,7 @@ export function TerminalPeople({
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {!session.participants_available ? (
-          <p className="px-4 py-3 text-muted-foreground">The machine isn’t reporting who’s here right now.</p>
+          <p className="px-4 py-3 text-muted-foreground">Can’t see who’s here: {session.target.name} isn’t reachable right now.</p>
         ) : (
           <ul className="divide-y divide-divider border-b border-divider">
             {people.map((person) => {
@@ -222,7 +222,7 @@ function RemoveParticipant({
         <AlertDialogHeader>
           <AlertDialogTitle>Remove {name}?</AlertDialogTitle>
           <AlertDialogDescription>
-            They’re disconnected now and can’t rejoin until you share this terminal with them again.
+            {name} is disconnected and can’t rejoin until you share this terminal with them again.
           </AlertDialogDescription>
         </AlertDialogHeader>
         {remove.isError && <p className="text-sm text-destructive">{remove.error.message}</p>}

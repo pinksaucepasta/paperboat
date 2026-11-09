@@ -113,8 +113,8 @@ function MachineInbox({ machineId }: { machineId: string }) {
           <EmptyMedia variant="icon">
             <FolderIcon />
           </EmptyMedia>
-          <EmptyTitle>{machine?.alias ?? "This machine"}: machine offline, Inbox unavailable</EmptyTitle>
-          <EmptyDescription>An Inbox is read from its machine, so it shows when the machine is back online.</EmptyDescription>
+          <EmptyTitle>{machine?.alias ?? "This machine"} is offline</EmptyTitle>
+          <EmptyDescription>Its Inbox shows when {machine?.alias ?? "it"} is back online.</EmptyDescription>
         </EmptyHeader>
       </Empty>
     )
@@ -130,9 +130,7 @@ function MachineInbox({ machineId }: { machineId: string }) {
               <FolderIcon />
             </EmptyMedia>
             <EmptyTitle>{machine ? `${machine.alias}’s Inbox is empty` : "The Inbox is empty"}</EmptyTitle>
-            <EmptyDescription>
-              Files you send here, drop into a terminal, or send with pb send land in the machine’s Paperboat Inbox.
-            </EmptyDescription>
+            <EmptyDescription>Files sent to {machine?.alias ?? "this machine"} land in its Paperboat Inbox.</EmptyDescription>
           </EmptyHeader>
           {inboxLive.upload && (
             <EmptyContent>

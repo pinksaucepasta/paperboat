@@ -184,8 +184,8 @@ export function SendFilesDialog({
             </button>
             <p className="text-xs text-muted-foreground">
               {target || machines.isPending
-                ? "They land in its Paperboat Inbox, in the machine’s Downloads folder."
-                : "None of your machines can take files right now. Bring one online to send."}
+                ? `Files land in ${target?.alias ?? "the machine"}’s Paperboat Inbox, in its Downloads folder.`
+                : "No machine can receive files right now. Bring a machine online to send."}
             </p>
             <input
               ref={inputRef}
@@ -322,7 +322,7 @@ export function SendToMachineDialog({
         </div>
         <p className="text-xs text-muted-foreground">
           {target
-            ? `It goes straight from ${machine.alias} to ${target.alias}, ${formatBytes(file.size)}.`
+            ? `Sends directly from ${machine.alias} to ${target.alias} (${formatBytes(file.size)}).`
             : "None of your other machines can take files right now."}
         </p>
         {send.isError && <p className="text-sm text-destructive">{send.error.message}</p>}

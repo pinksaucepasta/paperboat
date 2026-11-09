@@ -61,8 +61,7 @@ function NewTunnelDialog({ machine, onClose }: { machine?: Machine; onClose: () 
         <div className="flex flex-col gap-2">
           <CommandBlock command={command} />
           <p className="text-xs text-muted-foreground">
-            Run it on {machine ? machine.alias : "the machine"} that serves the port. The tunnel shows up here when it
-            connects.
+            Run this on {machine ? machine.alias : "the machine"}. The tunnel appears here when it connects.
           </p>
         </div>
         <div className="flex flex-col gap-4 border-t border-divider pt-4">

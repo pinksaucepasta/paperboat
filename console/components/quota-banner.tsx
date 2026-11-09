@@ -4,7 +4,6 @@ import Link from "next/link"
 import { WarningCircleIcon } from "@phosphor-icons/react"
 import { allowanceWindow, billingQuery } from "@/lib/billing"
 import { useApiQuery, useWorkspace } from "@/lib/api"
-import { formatBytes } from "@/lib/format"
 import { useTimeFormat } from "@/lib/use-time-format"
 
 /** The workspace's hosted allowance when it is used up, else undefined. */
@@ -34,18 +33,15 @@ export function QuotaMessage({ fallbackName }: { fallbackName?: string }) {
       </p>
     )
   }
-  const { workspace, data, allowance } = exhausted
+  const { workspace, data } = exhausted
   const window = allowanceWindow(data)
-  const renews = window.end ? ` It renews ${time.date(window.end, "day")}.` : ""
-  const plan = data.product?.name ?? "Free"
+  const until = window.end ? ` until ${time.date(window.end, "day")}` : ""
   const canBuy = workspace.kind === "personal" || workspace.role === "owner" || workspace.role === "admin"
   return (
     <p className="min-w-0 flex-1">
-      <span className="font-medium">
-        {workspace.name} has used its {formatBytes(allowance)} of bandwidth ({plan}).
-      </span>{" "}
+      <span className="font-medium">{workspace.name} used its bandwidth for this period.</span>{" "}
       <span className="text-muted-foreground">
-        Previews, tunnels and relayed connections are paused.{renews} Direct machine-to-machine access still works.
+        Previews, tunnels and relayed connections are paused{until}. Direct connections still work.
         {!canBuy && " Ask an owner or admin to add bandwidth."}
       </span>
       {canBuy && (

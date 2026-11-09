@@ -101,7 +101,7 @@ export function TunnelHostnames({ tunnel }: { tunnel: Tunnel }) {
         </p>
       ) : routes.data.length === 0 ? (
         <p className="border-b border-divider py-3 text-sm text-muted-foreground">
-          Nothing is published yet. Add a hostname to send it to a service on the machine.
+          No hostnames yet. Add one to send traffic to a service on this machine.
         </p>
       ) : (
         [...routes.data]
@@ -212,8 +212,8 @@ function HostnameRow({
             title={`Remove ${host}${route.path_prefix ?? ""}?`}
             description={
               domain
-                ? "It stops reaching this tunnel. The name stays free to use again under its domain."
-                : `It stops sending traffic to ${originLabel(route.origin)}.`
+                ? "This hostname stops reaching the tunnel. The name stays free to use again under its domain."
+                : `This route stops sending traffic to ${originLabel(route.origin)}.`
             }
             action="Remove hostname"
             pending="Removing…"

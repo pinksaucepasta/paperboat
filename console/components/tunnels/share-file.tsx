@@ -230,7 +230,7 @@ export function ShareFileDialog({
               <p className="text-xs text-muted-foreground">
                 {host
                   ? "Web pages, Markdown, PDFs and images open in the browser; other files download."
-                  : "None of your machines can host files right now. Bring one online to share."}
+                  : "No machine can host files right now. Bring a machine online to share."}
               </p>
             )}
             <input

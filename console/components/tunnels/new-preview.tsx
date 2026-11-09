@@ -255,7 +255,7 @@ export function Starting({
         <p className="text-sm text-muted-foreground">
           {preview.isError
             ? preview.error.message
-            : `${machineName} couldn’t connect it. Check that it’s online and try again.`}
+            : `Couldn’t start the preview on ${machineName}. Check that ${machineName} is online and try again.`}
         </p>
         <Button variant="secondary" size="lg" className="mt-1" onClick={onDone}>
           Close

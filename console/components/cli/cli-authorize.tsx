@@ -95,11 +95,14 @@ function Request({ code }: { code: string }) {
         icon={<CheckCircleIcon className="size-8 text-white" />}
         title={data.enroll ? `Added to ${workspaceName(data.workspace_id)}` : "Signed in"}
       >
-        {data.enroll && data.admission === "pending"
-          ? `${data.client_label} is waiting for an owner or admin of ${workspaceName(data.workspace_id)} to accept it. `
-          : ""}
-        Return to your terminal; {data.client_label} is {data.enroll ? "added" : "signed in"} as {data.account.email}.
-        You can close this tab.
+        {data.enroll && data.admission === "pending" ? (
+          `${data.client_label} is waiting for an owner or admin of ${workspaceName(data.workspace_id)} to approve it. You can close this tab and return to your terminal.`
+        ) : (
+          <>
+            Return to your terminal; {data.client_label} is {data.enroll ? "added" : "signed in"} as{" "}
+            {data.account.email}. You can close this tab.
+          </>
+        )}
       </Outcome>
     )
   }

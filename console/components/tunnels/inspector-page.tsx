@@ -4,7 +4,7 @@ import { CaretDownIcon, PauseIcon, PlayIcon, TrashIcon } from "@phosphor-icons/r
 import Link from "next/link"
 import { useDeferredValue, useEffect, useState } from "react"
 import { toast } from "sonner"
-import { useApiQuery } from "@/lib/api"
+import { useApiQuery, useMachine } from "@/lib/api"
 import { useInspectorChannel, type ChannelPhase } from "@/lib/inspector/channel"
 import { useCaptureFeed, type Capture } from "@/lib/inspector/feed"
 import { hostOf, previewPoll, previewQuery, type Preview } from "@/lib/tunnels"
@@ -49,9 +49,9 @@ export function InspectorPage({ id }: { id: string }) {
           <State title="Preview not found" detail={query.error.message} />
         ) : !preview ? (
           // What comes next is the connecting state, so the page loads as it.
-          <State title={phaseText.connecting[0]} detail={phaseText.connecting[1]} />
+          <State title="Connecting" detail="Opening an encrypted connection to the machine…" />
         ) : ended(preview, now) ? (
-          <State title="Preview stopped" detail="Captures end with the preview. Start a new preview to inspect it." />
+          <State title="Preview stopped" detail="This preview has stopped. Start a new preview to inspect requests." />
         ) : (
           <Inspector preview={preview} onDenied={query.refetch} />
         )}
@@ -75,19 +75,22 @@ function State({ title, detail, children }: { title: string; detail: string; chi
   )
 }
 
-const phaseText: Record<Exclude<ChannelPhase, "ready">, [string, string]> = {
-  connecting: ["Connecting", "Opening an encrypted connection to the machine…"],
-  reconnecting: ["Connection lost", "Reconnecting to the machine…"],
-  offline: ["Machine offline", "The machine running this preview isn’t connected. Retrying…"],
-  denied: ["Not allowed", "You need inspect access to this preview. Ask its owner."],
-  update: ["Machine needs an update", "Update Paperboat on this machine (pb update) to inspect its previews."],
+const phaseText = (machine: string): Record<Exclude<ChannelPhase, "ready">, [string, string]> => ({
+  connecting: ["Connecting", `Opening an encrypted connection to ${machine}…`],
+  reconnecting: ["Connection lost", `Reconnecting to ${machine}…`],
+  offline: ["Machine offline", `${machine} isn’t connected. Retrying…`],
+  denied: ["Not allowed", "You need inspect access. Ask the preview’s owner."],
+  update: ["Machine needs an update", `Update Paperboat on ${machine} to inspect its previews.`],
   gone: ["Preview not found", "This preview no longer exists."],
-}
+})
 
 function Inspector({ preview, onDenied }: { preview: Preview; onDenied: () => unknown }) {
   // The server grants inspection only while the preview routes. While it starts or its machine
   // reconnects, a refusal means 'wait', not 'not allowed'; the list collected so far stays.
   const routing = preview.state === "ready"
+  const machine = useMachine(preview.owner_machine_id).data?.alias || "the machine"
+  const phases = phaseText(machine)
+  const waiting = `Reconnecting to ${machine}… Requests appear again when it’s back.`
   const channel = useInspectorChannel(preview.id, preview.owner_machine_id, true, routing)
   // A refusal right after the owner stops the preview is the stop, not a lost right: re-read the preview now.
   useEffect(() => {
@@ -104,9 +107,9 @@ function Inspector({ preview, onDenied }: { preview: Preview; onDenied: () => un
 
   // Final states replace the page; while reconnecting the last list stays visible under a notice.
   if (!routing && channel.phase !== "ready" && feed.records.length === 0)
-    return <State title="Waiting for the preview" detail="The preview is starting or its machine is reconnecting. Inspection continues when it is back." />
+    return <State title="Waiting for the preview" detail={waiting} />
   if (channel.phase !== "ready" && (feed.records.length === 0 || ["denied", "update", "gone"].includes(channel.phase))) {
-    const [title, detail] = phaseText[channel.phase]
+    const [title, detail] = phases[channel.phase]
     return <State title={title} detail={channel.phase === "denied" && channel.message ? channel.message : detail} />
   }
 
@@ -130,9 +133,7 @@ function Inspector({ preview, onDenied }: { preview: Preview; onDenied: () => un
     <section className="flex flex-col gap-3" data-inspector-phase={channel.phase} data-capture={feed.capture}>
       {channel.phase !== "ready" && (
         <p className="text-sm text-muted-foreground" role="status">
-          {routing
-            ? phaseText[channel.phase][1]
-            : "The preview is starting or its machine is reconnecting. Inspection continues when it is back."}
+          {routing ? phases[channel.phase][1] : waiting}
         </p>
       )}
       <div className="flex flex-wrap items-center gap-2">
@@ -177,15 +178,16 @@ function Inspector({ preview, onDenied }: { preview: Preview; onDenied: () => un
           detail={
             channel.canReplay
               ? "Turn on Capture to record requests to this preview."
-              : "Ask the preview’s owner to turn on capture, or run pb preview inspect on the machine."
+              : "Ask the preview’s owner to turn on capture."
           }
         />
       ) : feed.records.length === 0 ? (
         <p className="py-16 text-center text-sm text-muted-foreground" data-inspector-state="No requests yet">
-          No requests yet. Open {hostOf(preview.endpoint)} and they appear here.
+          No requests yet. Open {hostOf(preview.endpoint)} to see them here.
         </p>
       ) : (
         <Panes
+          machine={machine}
           shown={shown}
           selected={current}
           onSelect={setSelected}
@@ -227,12 +229,14 @@ function MethodFilter({ value, onChange }: { value: string; onChange: (value: st
 }
 
 function Panes({
+  machine,
   shown,
   selected,
   onSelect,
   load,
   onReplay,
 }: {
+  machine: string
   shown: Capture[]
   selected?: Capture
   onSelect: (id: string) => void
@@ -275,7 +279,7 @@ function Panes({
       </div>
       <div className="min-w-0">
         {selected ? (
-          <CaptureDetail key={selected.id} record={selected} load={load} onReplay={onReplay} />
+          <CaptureDetail key={selected.id} record={selected} machine={machine} load={load} onReplay={onReplay} />
         ) : (
           <p className="py-12 text-center text-sm text-muted-foreground">Select a request to see its details</p>
         )}

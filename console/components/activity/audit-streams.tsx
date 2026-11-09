@@ -53,8 +53,7 @@ export function AuditStreams({ team, canConfigure }: { team: string; canConfigur
   return (
     <div className="flex flex-col gap-10">
       <p className="max-w-2xl text-sm text-muted-foreground">
-        Send this team’s audit log to your security tools as it happens. A new stream starts with events after it is set
-        up; each arrives within 30 seconds, at least once and in order.
+        Send this team’s audit log to your security tools as events happen. Events arrive within 30 seconds, in order.
       </p>
       {(["https", "s3"] as const).map((kind) => (
         <Destination

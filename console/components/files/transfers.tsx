@@ -27,23 +27,26 @@ export function Transfers({ scope }: { scope?: string | null }) {
       (!scope || request.destination_machine_id === scope || request.source_machine_id === scope),
   )
   if (!transferModesLive.progress || !running.length) return null
-  const aliasOf = (request: InboxRequest) =>
-    machines.data?.find((entry) => entry.id === request.destination_machine_id)?.alias ??
-    request.destination_machine_name ??
-    "a removed machine"
+  const aliasOf = (id: string, name?: string) =>
+    machines.data?.find((entry) => entry.id === id)?.alias ?? name ?? "a removed machine"
   return (
     <div className="flex flex-col gap-2">
       <SectionHeading title="Transfers" />
       <div className="flex flex-col divide-y divide-divider rounded-lg bg-surface px-4" data-transfers>
         {running.map((request) => (
-          <TransferRow key={request.request_id} request={request} to={aliasOf(request)} />
+          <TransferRow
+            key={request.request_id}
+            request={request}
+            from={aliasOf(request.source_machine_id, request.source_machine_name)}
+            to={aliasOf(request.destination_machine_id, request.destination_machine_name)}
+          />
         ))}
       </div>
     </div>
   )
 }
 
-function TransferRow({ request, to }: { request: InboxRequest; to: string }) {
+function TransferRow({ request, from, to }: { request: InboxRequest; from: string; to: string }) {
   const [first, ...rest] = request.files
   const total = request.total_bytes ?? request.files.reduce((sum, file) => sum + file.size, 0)
   const done = request.committed_bytes ?? 0
@@ -56,7 +59,7 @@ function TransferRow({ request, to }: { request: InboxRequest; to: string }) {
       <span className="text-xs text-muted-foreground">
         {formatBytes(done)} of {formatBytes(total)}
         {request.transfer_state === "sending" && " · Sending"}
-        {request.transfer_state === "failed" && " · Failed. Send it again from the sending machine."}
+        {request.transfer_state === "failed" && ` · Failed. Send the file again from ${from}.`}
       </span>
       {request.transfer_state === "paused" && (
         <span className="text-xs">
