@@ -30,6 +30,8 @@ def reset_phase(password):
     before = json.loads((root / 'machine-registration.json').read_text())
     original = next(m for m in machines() if m['id'] == before['machine_id'])
     alias = original['alias']
+    if not original.get('assigned_ip'):
+        raise RuntimeError('the old record has no assigned_ip: the check cannot prove the local address is kept')
     inbox = Path(before['inbox_path'])
     sentinel = inbox / ('.paperboat-f1-reset-' + os.urandom(6).hex())
     inbox.mkdir(parents=True, exist_ok=True)
@@ -97,7 +99,7 @@ def pair_phase(password):
         if old is not None:
             failures.append('old machine record %s still exists (%s) after reset + pair' % (before['machine_id'], old['state']))
         # ... and the new record keeps the computer's local address, so pasted connection strings still work.
-        if original.get('assigned_ip') and new.get('assigned_ip') != original['assigned_ip']:
+        if new.get('assigned_ip') != original['assigned_ip']:
             failures.append('local address changed from %s to %s' % (original['assigned_ip'], new.get('assigned_ip')))
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline and p.command_result(PB, 'exec', alias, '--', 'true').returncode:

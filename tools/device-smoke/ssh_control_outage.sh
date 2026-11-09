@@ -87,17 +87,25 @@ for ct in $C $R; do ssh "$HOST" "sudo -n docker exec -i -u pbt $ct sh -c 'cat > 
 X="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $C timeout 300 bash /home/pbt/run.sh $ALIAS"
 warm=$(ssh "$HOST" "$X warm" 2>&1)
 grep -q warm-ok <<<"$warm" || finish FAIL "no session before the outage: $(tail -c 200 <<<"$warm" | tr '\n' ' ')"
-# The host's managed keys: each client publishes its own key; R's must leave the target's authorized_keys after R
-# signs out (the host has the withdrawal), C's must stay. keyin CONTAINER CLIENT-CONTAINER: is the client's key listed?
+# The host's managed keys: each client publishes its own key. The exact keys are read BEFORE R signs out (a sign-out
+# may delete the client's key file, which would make "absent" vacuous); R's must leave the target's authorized_keys
+# (the host has the withdrawal) and stay out before, during and after the outage; C's must stay in. A live login with
+# R's key is not possible: the private key never leaves the daemon's credential store. sshd must really consult
+# authorized_keys (sshd -T), or its content proves nothing.
 RX="sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $R timeout 300 bash /home/pbt/run.sh $ALIAS"
-keyin() { ssh "$HOST" "k=\$(sudo -n docker exec -u pbt $1 awk '{print \$2}' /home/pbt/.ssh/paperboat-managed-ssh.pub); [ -n \"\$k\" ] && sudo -n docker exec $T grep -qF \"\$k\" /home/pbt/.ssh/authorized_keys"; }
-for i in $(seq 1 30); do keyin $R && keyin $C && break; sleep 2; done
-keyin $C || finish FAIL "the unrevoked client's managed key is not in the target's authorized_keys"
-keyin $R || finish FAIL "the revoked client's key was never in the target's authorized_keys (nothing to withdraw)"
+pubkey() { ssh "$HOST" "sudo -n docker exec -u pbt $1 awk '{print \$2}' /home/pbt/.ssh/paperboat-managed-ssh.pub"; }
+RK=$(pubkey $R); CK=$(pubkey $C)
+[ -n "$RK" ] && [ -n "$CK" ] && [ "$RK" != "$CK" ] || finish FAIL "could not read two distinct managed public keys (R=${#RK} C=${#CK} chars)"
+listed() { ssh "$HOST" "sudo -n docker exec $T grep -qF \"$1\" /home/pbt/.ssh/authorized_keys"; }
+sshd=$(ssh "$HOST" "sudo -n docker exec $T sshd -T -C user=pbt,host=localhost,addr=127.0.0.1" 2>&1)
+grep -qiE '^authorizedkeysfile .*\.ssh/authorized_keys' <<<"$sshd" && grep -qiE '^authorizedkeyscommand none' <<<"$sshd" || finish FAIL "sshd does not read only ~/.ssh/authorized_keys: $(grep -iE '^authorizedkeys' <<<"$sshd" | tr '\n' ' ')"
+for i in $(seq 1 30); do listed "$RK" && listed "$CK" && break; sleep 2; done
+listed "$CK" || finish FAIL "the unrevoked client's managed key is not in the target's authorized_keys"
+listed "$RK" || finish FAIL "the revoked client's key was never in the target's authorized_keys (nothing to withdraw)"
 revoke=$(ssh "$HOST" "$RX revoke" 2>&1)
 grep -q 'revoke=signed-out' <<<"$revoke" || finish FAIL "R could not sign out: $(tail -c 200 <<<"$revoke" | tr '\n' ' ')"
 start=$(date +%s); withdrawn=
-for i in $(seq 1 45); do keyin $R || { withdrawn=$(( $(date +%s)-start )); break; }; sleep 2; done
+for i in $(seq 1 45); do listed "$RK" || { withdrawn=$(( $(date +%s)-start )); break; }; sleep 2; done
 [ -n "$withdrawn" ] || finish FAIL "R signed out but the target still lists its key after 90 s"
 # the control plane's addresses, blackholed in all containers (iproute2 in the image), removed on every exit
 res=$(ssh "$HOST" "bash -s" <<EOF 2>&1
@@ -105,16 +113,17 @@ api=\$(sudo -n docker exec -u pbt $C sed -n 's/.*"server_url": *"https:\\/\\/\\(
 addrs=\$(sudo -n docker exec $C getent ahosts "\$api" | awk '{print \$1}' | sort -u)
 for ct in $T $C $R; do for a in \$addrs; do sudo -n docker exec \$ct ip route add blackhole "\$a" 2>/dev/null || sudo -n docker exec \$ct ip -6 route add blackhole "\$a" 2>/dev/null; done; done
 sleep 45
+for who in R C; do k=\$([ \$who = R ] && echo "$RK" || echo "$CK"); sudo -n docker exec $T grep -qF "\$k" /home/pbt/.ssh/authorized_keys && echo "KEYS-DURING \$who=listed" || echo "KEYS-DURING \$who=absent"; done
 $X outage
 echo "R-\$($RX outage | grep ^RESULT)"
 for ct in $T $C $R; do for a in \$addrs; do sudo -n docker exec \$ct ip route del blackhole "\$a" 2>/dev/null || sudo -n docker exec \$ct ip -6 route del blackhole "\$a" 2>/dev/null; done; done
 EOF
 )
-detail=$(grep -E "^(RESULT|R-RESULT)" <<<"$res" | tr '\n' ' ')
-# after the outage the target still lists C's key and not R's
-keyin $C && ! keyin $R && keysok=yes || keysok=no
+detail=$(grep -E "^(RESULT|R-RESULT|KEYS-DURING)" <<<"$res" | tr '\n' ' ')
+# after the outage the target still lists C's exact key and not R's
+listed "$CK" && ! listed "$RK" && keysok=yes || keysok=no
 detail="withdrawn_after=${withdrawn}s keys_after_outage_ok=$keysok $detail"
-if [ "$keysok" = yes ] && grep -q 'api=000' <<<"$detail" && grep -q ' RESULT api=000 plain=\[[^]]*outage-plain-ok' <<<"$detail" && grep -q ' pb=\[[^]]*outage-pb-ok' <<<"$detail" && ! grep -q 'R-RESULT.*outage-\(plain\|pb\)-ok' <<<"$detail"; then
+if [ "$keysok" = yes ] && grep -q 'KEYS-DURING R=absent' <<<"$detail" && grep -q 'KEYS-DURING C=listed' <<<"$detail" && grep -q ' RESULT api=000 plain=\[[^]]*outage-plain-ok' <<<"$detail" && grep -q ' pb=\[[^]]*outage-pb-ok' <<<"$detail" && ! grep -q 'R-RESULT.*outage-\(plain\|pb\)-ok' <<<"$detail"; then
   finish PASS "$detail"
 fi
 finish FAIL "$detail $(tail -c 300 <<<"$res" | tr '\n' ' ')"

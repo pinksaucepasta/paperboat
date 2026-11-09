@@ -822,7 +822,7 @@ test_reset_lifecycle() {
     checker=$CLIENT; [ "$checker" != "$device" ] || checker=$PEER
     if [ "$status" = 0 ]; then
       listing=$(on "$checker" "~/.local/bin/pb machine list --json" 2>&1)
-      python3 -c 'import json,sys;r=json.loads(sys.argv[1].splitlines()[-1]);m=[x for x in json.loads(sys.argv[2])["machines"] if x["id"]==r["old_machine_id"]];assert m and m[0]["alias"]==r["alias"] and m[0].get("assigned_ip")==r["assigned_ip"]' "$out" "$listing" 2>/dev/null || { status=1; out="a failed pair after reset lost the old record, its name or its address: $out"; }
+      python3 -c 'import json,sys;r=json.loads(sys.argv[1].splitlines()[-1]);m=[x for x in json.loads(sys.argv[2])["machines"] if x["id"]==r["old_machine_id"]];assert r["assigned_ip"] and m and m[0]["alias"]==r["alias"] and m[0].get("assigned_ip")==r["assigned_ip"]' "$out" "$listing" 2>/dev/null || { status=1; out="a failed pair after reset lost the old record, its name or its address: $out"; }
     fi
     [ "$status" != 0 ] || { out=$(printf '%s\n' "$password" | on "$device" "python3 /tmp/$RUN_ID/reset_lifecycle.py pair" 2>&1); status=$?; }
     if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1]);assert r["check"]=="reset-lifecycle" and r["status"]=="PASS" and r["old_record_removed"] and r["local_address_kept"] and r["new_record_same_alias"] and r["inbox_preserved"]' "$out" 2>/dev/null; then
