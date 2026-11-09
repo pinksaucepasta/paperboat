@@ -23,7 +23,7 @@ import (
 func actionUpdateFrom(command *cobra.Command, input string, force bool) error {
 	approval, _ := command.Flags().GetString("approve")
 	if approval != "" {
-		return errors.New("--from cannot be combined with --approve")
+		return commandRejection{reason: commandRejectUpdateFlags}
 	}
 	ctx, cancel := context.WithTimeout(command.Context(), 15*time.Minute)
 	defer cancel()
@@ -34,7 +34,7 @@ func actionUpdateFrom(command *cobra.Command, input string, force bool) error {
 	defer os.RemoveAll(directory)
 	staged, err := installsource.StageInput(ctx, input, directory, nil)
 	if err != nil {
-		return commandRejection{reason: commandRejectUpdateSource, cause: err}
+		return commandRejection{reason: commandRejectUpdateSource, detail: err.Error()}
 	}
 	return installStagedUpdateSource(command, ctx, staged.Path, force)
 }

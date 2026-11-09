@@ -782,7 +782,17 @@ func TestUpdateRefusesABadApprovalIDAndAnUnreadableSourceWithAClearMessage(t *te
 		command.SetErr(&bytes.Buffer{})
 		return actionUpdate(command, nil)
 	}
+	// --json carries a stable code and the usage category for each refusal.
+	assertJSON := func(err error, code string) {
+		t.Helper()
+		var output bytes.Buffer
+		if writeErr := writeCLIJSONError(&output, err); writeErr != nil {
+			t.Fatal(writeErr)
+		}
+		assertCLIJSONFailure(t, output.Bytes(), code, "usage")
+	}
 	err := run("approve", "bogus")
+	assertJSON(err, "invalid_update_approval")
 	var rejection commandRejection
 	if !errors.As(err, &rejection) || rejection.reason != commandRejectUpdateApprovalID || !strings.Contains(err.Error(), "64-character") || !strings.Contains(err.Error(), "pb update --approve") {
 		t.Fatalf("a malformed approval ID: %v", err)
@@ -792,4 +802,13 @@ func TestUpdateRefusesABadApprovalIDAndAnUnreadableSourceWithAClearMessage(t *te
 	if !errors.As(err, &rejection) || rejection.reason != commandRejectUpdateSource || !strings.Contains(err.Error(), "--from takes the path") || !strings.Contains(err.Error(), "Nothing was changed") {
 		t.Fatalf("an unreadable source: %v", err)
 	}
+	assertJSON(err, "update_source_unreadable")
+	if message := userFacingError(err); !strings.Contains(message, "--from takes the path") {
+		t.Fatalf("an unreadable source reaches the user as %q", message)
+	}
+	conflict := run("from", filepath.Join(t.TempDir(), "x"), "approve", strings.Repeat("a", 64))
+	if !errors.As(conflict, &rejection) || rejection.reason != commandRejectUpdateFlags || !strings.Contains(conflict.Error(), "--from") || !strings.Contains(conflict.Error(), "--approve") {
+		t.Fatalf("--from with --approve: %v", conflict)
+	}
+	assertJSON(conflict, "conflicting_update_flags")
 }

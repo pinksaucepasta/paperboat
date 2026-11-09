@@ -277,6 +277,10 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 				result.Code, result.Category, result.StateChanged, result.Retryable = "update_source_unreadable", "usage", false, false
 				result.Recovery = "Give --from the path of an executable, package or .pb-update bundle, or an HTTPS URL."
 			}
+			if typed.reason == commandRejectUpdateFlags {
+				result.Code, result.Category, result.StateChanged, result.Retryable = "conflicting_update_flags", "usage", false, false
+				result.Recovery = "Run `pb update --from <path-or-URL>` or `pb update --approve <id>`, not both."
+			}
 			if typed.reason == commandRejectUpdateBusy {
 				result.Code, result.StateChanged, result.Retryable = "update_busy", false, true
 				result.Recovery = "Wait for active work or another update to finish, then retry."
