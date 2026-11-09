@@ -465,4 +465,8 @@ func TestInspectCandidateWaitsForASlowFirstRun(t *testing.T) {
 	if err != nil || candidate.Version != "fixture-version" {
 		t.Fatalf("a candidate that answers after 6 s was rejected: version=%q err=%v", candidate.Version, err)
 	}
+	// The fixture is quicker than the real scan (8.8 s); the budget keeps a wide margin above it.
+	if inputProbeTimeout < 30*time.Second {
+		t.Fatalf("probe budget %v is too close to the 8.8 s first-run scan measured on Windows", inputProbeTimeout)
+	}
 }
