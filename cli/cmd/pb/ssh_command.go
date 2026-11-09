@@ -17,6 +17,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -84,18 +85,24 @@ const sshSignInEndedMessage = "pb: access to %s was revoked: this sign-in was en
 
 // explainRevokedSSHAccess follows an OpenSSH connection failure (exit 255) with the reason when it is a revocation: the
 // host closes open sessions within seconds of the user's access ending, and OpenSSH itself only says the connection closed.
-// The server answers a cheap read about this machine with 401 (this sign-in was revoked) or 403 (access to the machine ended).
+// The server answers a read of this machine with 401 (this sign-in was revoked), 404 user_machine_not_found (the machine is
+// no longer visible to this account: its grant, the team share or the membership ended) or a machine whose permissions no
+// longer include managed_ssh. The managed-SSH host-key reads cannot tell these apart: they answer 404 for a missing
+// pending set and for no access alike.
 func explainRevokedSSHAccess(command *cobra.Command, client *api.Client, machine api.UserMachine, err error) bool {
 	var exit managedssh.NativeExitError
 	if !errors.As(err, &exit) || exit.Code != 255 || client == nil {
 		return false
 	}
-	_, probeErr := client.ManagedSSHPendingHostKeys(command.Context(), machine.ID, uint64(machine.InstallationGeneration))
+	current, probeErr := client.GetUserMachine(command.Context(), machine.ID)
 	var apiErr *api.APIError
 	switch {
 	case errors.Is(probeErr, api.ErrUnauthenticated):
 		fmt.Fprintf(command.ErrOrStderr(), sshSignInEndedMessage, machine.Alias)
-	case errors.As(probeErr, &apiErr) && apiErr.Status == http.StatusForbidden:
+	case errors.As(probeErr, &apiErr) && (apiErr.Status == http.StatusNotFound && apiErr.Code == "user_machine_not_found"):
+		fmt.Fprintf(command.ErrOrStderr(), "pb: access to %s was revoked: it is no longer shared with you. Ask its owner or team admin.\n", machine.Alias)
+	case errors.As(probeErr, &apiErr) && apiErr.Status == http.StatusForbidden,
+		probeErr == nil && current.Ownership != "personal" && !slices.Contains(current.Permissions, "managed_ssh"):
 		fmt.Fprintf(command.ErrOrStderr(), "pb: access to %s was revoked: your account no longer has permission to use it. Ask its owner or team admin.\n", machine.Alias)
 	default:
 		return false

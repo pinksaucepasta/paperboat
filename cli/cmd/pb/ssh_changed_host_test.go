@@ -51,29 +51,47 @@ func TestManagedSSHNamesTheTrustHostCommandAfterAHostKeyChange(t *testing.T) {
 	}
 }
 
-// F5-10: a session closed by revocation says so, for a signed-out CLI (401) and for a withdrawn grant (403); other
-// failures say nothing.
+// F5-10: a session closed by revocation says so: a signed-out CLI (401), a machine the account can no longer see (a
+// withdrawn grant or share, a removed member: 404 user_machine_not_found; the host-key reads answer 404 for that and for an
+// ordinary missing pending set alike, so they cannot be the probe) and a machine still visible without managed_ssh. A
+// machine that is still usable, and other failures, say nothing.
 func TestManagedSSHSaysAccessWasRevoked(t *testing.T) {
-	status := 0
+	status, code, body := 0, "", ""
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/machines/machine_1" {
+			t.Errorf("probe asked %s", r.URL.Path)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
-		_, _ = w.Write([]byte(`{"error":{"code":"x","message":"x"}}`))
+		if body != "" {
+			_, _ = w.Write([]byte(body))
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"error":{"code":%q,"message":"x"}}`, code)
 	}))
 	defer server.Close()
 	client := api.New(server.URL, config.Credential{AccessToken: "token"}, server.Client())
 	machine := api.UserMachine{ID: "machine_1", Alias: "studio", InstallationGeneration: 1}
+	visible := func(ownership, permissions string) string {
+		return `{"data":{"id":"machine_1","ownership":"` + ownership + `","permissions":[` + permissions + `]}}`
+	}
 	for name, test := range map[string]struct {
 		status int
+		code   string
+		body   string
 		err    error
 		want   string
 	}{
-		"signed out":       {401, managedssh.NativeExitError{Code: 255}, "access to studio was revoked: this sign-in was ended"},
-		"grant withdrawn":  {403, managedssh.NativeExitError{Code: 255}, "access to studio was revoked: your account no longer has permission"},
-		"no pending keys":  {404, managedssh.NativeExitError{Code: 255}, ""},
-		"remote exit code": {401, managedssh.NativeExitError{Code: 1}, ""},
+		"signed out":               {401, "unauthenticated", "", managedssh.NativeExitError{Code: 255}, "access to studio was revoked: this sign-in was ended"},
+		"grant or share withdrawn": {404, "user_machine_not_found", "", managedssh.NativeExitError{Code: 255}, "access to studio was revoked: it is no longer shared with you"},
+		"forbidden":                {403, "forbidden", "", managedssh.NativeExitError{Code: 255}, "access to studio was revoked: your account no longer has permission"},
+		"managed_ssh withdrawn":    {200, "", visible("team", `"exec"`), managedssh.NativeExitError{Code: 255}, "access to studio was revoked: your account no longer has permission"},
+		"still granted":            {200, "", visible("team", `"exec","managed_ssh"`), managedssh.NativeExitError{Code: 255}, ""},
+		"own machine":              {200, "", visible("personal", ``), managedssh.NativeExitError{Code: 255}, ""},
+		"server error":             {500, "internal_error", "", managedssh.NativeExitError{Code: 255}, ""},
+		"remote exit code":         {401, "unauthenticated", "", managedssh.NativeExitError{Code: 1}, ""},
 	} {
-		status = test.status
+		status, code, body = test.status, test.code, test.body
 		var stderr bytes.Buffer
 		command := &cobra.Command{}
 		command.SetErr(&stderr)
