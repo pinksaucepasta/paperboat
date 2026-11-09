@@ -167,7 +167,15 @@ func (t *PeerTerminalTunnel) dial(ctx context.Context, info resolver.ConnectInfo
 		return nil, err
 	}
 	runtimeEnd := diagnostics.ReconnectStep(ctx, "runtime_acquire")
+	t.nativeMu.Lock()
+	reused := t.nativeRuntime != nil
+	t.nativeMu.Unlock()
 	runtime, consumed, err := t.acquireNativeRuntime(ctx, profile.Account.ID, profile.CLIClientSessionID, authority, hostRulesAdmission(info.Terminal, info.MachineID, nativeCapability(consumer)))
+	if err != nil && reused && info.Terminal.Auth.Offline && api.Unreachable(err) {
+		// The host admits this stream from its own rules and the refresh for a peer the cached document lacks cannot
+		// reach Paperboat: dial on the cached document, as an offline stream always did.
+		runtime, consumed, err = t.acquireNativeRuntime(ctx, profile.Account.ID, profile.CLIClientSessionID, authority, func(*tailnet.Authority) bool { return true })
+	}
 	runtimeEnd(err)
 	if !consumed {
 		authority.Clear()
@@ -203,7 +211,9 @@ func hostRulesAdmission(target *resolver.TerminalTarget, machineID, capability s
 		return nil
 	}
 	if target.Auth.Offline {
-		return func(*tailnet.Authority) bool { return true }
+		// A peer the cached document lacks (a machine shared or granted since it was fetched; ssh makes no control-plane
+		// request, so nothing else refreshes it) is looked for in a fresh one before the dial fails.
+		return func(network *tailnet.Authority) bool { _, err := network.Descriptor(machineID); return err == nil }
 	}
 	if target.Resume {
 		// A re-attach names the access session it already holds; the host decides (that session's scope or its

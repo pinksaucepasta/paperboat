@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 )
@@ -78,9 +79,15 @@ func TestCachedNativeRuntimeSkipsRefreshWhenItAlreadyAdmitsTheTarget(t *testing.
 	if err != nil || got != current || consumed || refreshes.Load() != 0 {
 		t.Fatalf("admitting runtime: same=%t consumed=%t refreshes=%d err=%v", got == current, consumed, refreshes.Load(), err)
 	}
-	// F5-07/08: a stream the host admits from its own rules reuses the engine with no request, even offline.
-	if got, _, err := peer.acquireNativeRuntime(t.Context(), accountID, endpointID, identity, hostRulesAdmission(&resolver.TerminalTarget{Auth: resolver.AuthTarget{Offline: true}}, "machine_connected", "managed_ssh")); err != nil || got != current || refreshes.Load() != 0 {
-		t.Fatalf("host-rules stream: same=%t refreshes=%d err=%v", got == current, refreshes.Load(), err)
+	// F5-07/08: a stream the host admits from its own rules reuses the engine with no request for a peer the document
+	// names, even offline. A peer it lacks (shared since) is looked for in a fresh document first; with Paperboat
+	// unreachable that is an unreachable error, and the dial then goes on with the cached document (PeerTerminalTunnel.dial).
+	offline := hostRulesAdmission(&resolver.TerminalTarget{Auth: resolver.AuthTarget{Offline: true}}, "machine_connected", "managed_ssh")
+	if _, _, err := peer.acquireNativeRuntime(t.Context(), accountID, endpointID, identity, offline); !api.Unreachable(err) || refreshes.Load() != 1 {
+		t.Fatalf("host-rules stream to a peer the document lacks: refreshes=%d err=%v", refreshes.Load(), err)
+	}
+	if got, _, err := peer.acquireNativeRuntime(t.Context(), accountID, endpointID, identity, func(*tailnet.Authority) bool { return true }); err != nil || got != current || refreshes.Load() != 1 {
+		t.Fatalf("offline fallback: same=%t refreshes=%d err=%v", got == current, refreshes.Load(), err)
 	}
 	if admitted := hostRulesAdmission(&resolver.TerminalTarget{Auth: resolver.AuthTarget{Token: "credential"}}, "machine_connected", "managed_ssh"); admitted == nil || admitted(networkAuthority) {
 		t.Fatal("a credentialed stream reused missing signed peer authority")

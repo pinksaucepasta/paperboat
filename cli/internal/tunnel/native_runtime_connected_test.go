@@ -187,7 +187,7 @@ func (c *connectedRawConn) Resize(uint16, uint16) error { return nil }
 func (c *connectedRawConn) Wait() (int, error)          { return 0, nil }
 
 func TestProductionCLINativeRuntimeConnectsOrdinaryApplicationAndReusesOwner(t *testing.T) {
-	for _, mode := range []string{"quic", "wss_fallback", "quic_sender_wss_receiver", "receiver_authority_refresh", "host_rules"} {
+	for _, mode := range []string{"quic", "wss_fallback", "quic_sender_wss_receiver", "receiver_authority_refresh", "host_rules", "host_rules_late_grant"} {
 		t.Run(mode, func(t *testing.T) { connectedProductionRuntime(t, mode) })
 	}
 }
@@ -201,7 +201,10 @@ func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
 	mixed := mode == "quic_sender_wss_receiver"
 	refresh := mode == "receiver_authority_refresh"
 	// host_rules: the stream carries no credential; the machine admits it from its own signed scope (SSH, D1).
-	hostRules := mode == "host_rules"
+	hostRules := mode == "host_rules" || mode == "host_rules_late_grant"
+	// host_rules_late_grant: the machine was shared and granted after the CLI's cached document was fetched, so that
+	// document lacks it; the first ssh-style dial must find it in a fresh one without any other command refreshing.
+	lateGrant := mode == "host_rules_late_grant"
 	if testing.Short() {
 		t.Skip("real authenticated DERP/QUIC production-constructor integration")
 	}
@@ -311,6 +314,15 @@ func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
 		state.client = client
 		state.clientNet = clientConfig
 		state.machineNet = machineConfig
+		if lateGrant {
+			hostScope := clientConfig.Peers[0].Scopes[0]
+			hostScope.ResourceID, hostScope.ExpiresAt = machineID, 0
+			// An expiring scope pairs the relay (a standing right alone is left out of relay grants, as the server's
+			// are); the standing one is what the host-rules stream is admitted by.
+			clientConfig.Peers[0].Scopes = append(clientConfig.Peers[0].Scopes, hostScope)
+			state.clientNet = clientConfig
+			clientConfig.Peers = nil // the document the CLI fetched before the grant
+		}
 		state.network = connectedSignedJWT(t, signerPrivate, "paperboat-network-config+jwt", clientConfig)
 		var grant string
 		state.candidate, grant = connectedRegionalTokens(t, signerPrivate, clientConfig, node)
@@ -324,6 +336,11 @@ func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
 	clientHTTP := &http.Client{Transport: connectedRoundTripper(func(request *http.Request) (*http.Response, error) {
 		if machine != nil && request.URL.Path != "/.well-known/jwks.json" {
 			return machine.control(request, identity, networkAPI)
+		}
+		if lateGrant && request.URL.Path == "/v1/peer-network/config" {
+			result, _ := networkAPI.config()
+			body, _ := json.Marshal(map[string]any{"data": result})
+			return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: request}, nil
 		}
 		if request.URL.Path != "/.well-known/jwks.json" {
 			return nil, errors.New("unexpected HTTP request")
@@ -468,6 +485,30 @@ func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
 			t.Fatal("cached peer without the requested scope skipped refresh")
 		}
 
+	}
+	if lateGrant {
+		if _, err := runtime.authority.Descriptor(machineID); err == nil {
+			t.Fatal("the document fetched before the grant already names the machine")
+		}
+		state.mu.Lock()
+		granted := state.clientNet
+		granted.Generation, granted.IssuedAt, granted.ExpiresAt = 2, time.Now().Unix(), time.Now().Unix()+300
+		state.clientNet = granted
+		state.network = connectedSignedJWT(t, signerPrivate, "paperboat-network-config+jwt", granted)
+		var grant string
+		relayView := granted
+		relayView.Peers = []tailnet.NetworkPeer{{Identity: granted.Peers[0].Identity, Scopes: granted.Peers[0].Scopes[:1]}}
+		state.candidate, grant = connectedRegionalTokens(t, signerPrivate, relayView, node)
+		state.grants = []string{grant}
+		state.mu.Unlock()
+		runtime.identityFingerprint = identity.LocalCertificate.Fingerprint()
+		peer := &PeerTerminalTunnel{nativeRuntime: runtime, config: PeerTerminalConfig{Issuer: issuer, Auth: &rotatingNativeAuth{token: "fixture-token"}, HTTPClient: clientHTTP}}
+		if got, consumed, err := peer.acquireNativeRuntime(ctx, accountID, cliID, identity, hostRulesAdmission(target, machineID, "managed_ssh")); err != nil || consumed || got != runtime {
+			t.Fatalf("first ssh-style dial after the grant: same=%t consumed=%t err=%v", got == runtime, consumed, err)
+		}
+		if _, err := runtime.authority.Descriptor(machineID); err != nil {
+			t.Fatalf("the refreshed document still lacks the granted machine: %v", err)
+		}
 	}
 	application := peerApplication{operationID: "operation_connected", stream: "ssh", raw: func(_ context.Context, stream io.ReadWriteCloser) (Conn, error) {
 		return &connectedRawConn{Conn: stream.(net.Conn)}, nil
