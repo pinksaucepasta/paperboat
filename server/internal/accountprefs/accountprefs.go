@@ -23,11 +23,14 @@ var (
 
 type Preferences struct {
 	FileTransferMode string `json:"file_transfer_mode"`
+	// ENVNamesListable: commands on the account's machines may list the names (never values) of its personal ENV.
+	ENVNamesListable bool `json:"env_names_listable"`
 }
 
 // Update is a partial change; a nil field keeps its value.
 type Update struct {
 	FileTransferMode *string `json:"file_transfer_mode"`
+	ENVNamesListable *bool   `json:"env_names_listable"`
 }
 
 type Service struct{ db *db.DB }
@@ -36,7 +39,7 @@ func New(store *db.DB) *Service { return &Service{db: store} }
 
 func (s *Service) Get(ctx context.Context, accountID string) (Preferences, error) {
 	var out Preferences
-	err := s.db.SQL().QueryRowContext(ctx, `SELECT file_transfer_mode FROM paperboat.users WHERE id=$1`, accountID).Scan(&out.FileTransferMode)
+	err := s.db.SQL().QueryRowContext(ctx, `SELECT file_transfer_mode,env_names_listable FROM paperboat.users WHERE id=$1`, accountID).Scan(&out.FileTransferMode, &out.ENVNamesListable)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Preferences{}, ErrNotFound
 	}
@@ -44,12 +47,11 @@ func (s *Service) Get(ctx context.Context, accountID string) (Preferences, error
 }
 
 func (s *Service) Set(ctx context.Context, accountID string, update Update) (Preferences, error) {
-	if update.FileTransferMode != nil {
-		mode := *update.FileTransferMode
-		if mode != TransferModeAutomatic && mode != TransferModeUnlimited {
-			return Preferences{}, ErrInvalid
-		}
-		result, err := s.db.SQL().ExecContext(ctx, `UPDATE paperboat.users SET file_transfer_mode=$2 WHERE id=$1`, accountID, mode)
+	if mode := update.FileTransferMode; mode != nil && *mode != TransferModeAutomatic && *mode != TransferModeUnlimited {
+		return Preferences{}, ErrInvalid
+	}
+	if update.FileTransferMode != nil || update.ENVNamesListable != nil {
+		result, err := s.db.SQL().ExecContext(ctx, `UPDATE paperboat.users SET file_transfer_mode=coalesce($2,file_transfer_mode),env_names_listable=coalesce($3,env_names_listable) WHERE id=$1`, accountID, update.FileTransferMode, update.ENVNamesListable)
 		if err != nil {
 			return Preferences{}, err
 		}

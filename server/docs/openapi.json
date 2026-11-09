@@ -8436,6 +8436,10 @@
             "type": "boolean",
             "description": "Members may reach the ports of machines shared into the team when their grant includes private_access. Off by default; an owner or admin changes it with action private_access."
           },
+          "env_names_listable": {
+            "type": "boolean",
+            "description": "Commands on the team's machines may list the names (never values) of the team workspace's ENV. On by default; an owner or admin changes it with action env_names."
+          },
           "machine_requests": {
             "type": "array",
             "description": "Owners and admins see every request; other members see their own.",
@@ -8606,7 +8610,8 @@
               "delete",
               "rename",
               "machine_approval",
-              "private_access"
+              "private_access",
+              "env_names"
             ]
           },
           "account_id": {
@@ -8630,6 +8635,10 @@
           "allow_private_access": {
             "type": "boolean",
             "description": "With action private_access: whether members may reach the ports of machines shared into the team (needs a private_access grant too)."
+          },
+          "env_names_listable": {
+            "type": "boolean",
+            "description": "With action env_names: whether commands on the team's machines may list the names (never values) of the team workspace's ENV."
           }
         },
         "required": [
@@ -15427,7 +15436,8 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "file_transfer_mode"
+          "file_transfer_mode",
+          "env_names_listable"
         ],
         "properties": {
           "file_transfer_mode": {
@@ -15437,6 +15447,10 @@
               "unlimited"
             ],
             "description": "Default mode of `pb send` and console sends. automatic: up to the published automatic_max_batch_bytes, any path including Paperboat-hosted relays. unlimited: no size bound, direct paths and self-hosted relays only."
+          },
+          "env_names_listable": {
+            "type": "boolean",
+            "description": "Commands on your machines may list the names (never values) of your personal-workspace ENV (`pb env names`). On by default."
           }
         }
       },
@@ -15461,6 +15475,9 @@
               "automatic",
               "unlimited"
             ]
+          },
+          "env_names_listable": {
+            "type": "boolean"
           }
         }
       },

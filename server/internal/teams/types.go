@@ -107,6 +107,8 @@ type Team struct {
 	// AllowPrivateAccess: members may reach the ports of machines shared into the team, given a
 	// private_access grant. Off until an owner or admin turns it on.
 	AllowPrivateAccess bool `json:"allow_private_access"`
+	// ENVNamesListable: commands on the team's machines may list the names (never values) of the team workspace's ENV.
+	ENVNamesListable bool `json:"env_names_listable"`
 	// SSORequired: members reach the team only after a recent SSO sign-in (PLAN F19-04).
 	SSORequired bool `json:"sso_required"`
 	// SSOSignedIn tells the viewer whether their SSO sign-in currently satisfies the team.
@@ -165,6 +167,8 @@ type MutationRequest struct {
 	ApproveNewMachines *bool `json:"approve_new_machines,omitempty"`
 	// AllowPrivateAccess is the value for the private_access action.
 	AllowPrivateAccess *bool `json:"allow_private_access,omitempty"`
+	// ENVNamesListable is the value for the env_names action.
+	ENVNamesListable *bool `json:"env_names_listable,omitempty"`
 }
 type InviteRequest struct {
 	Role               string `json:"role,omitempty"`

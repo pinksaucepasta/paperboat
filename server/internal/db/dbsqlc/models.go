@@ -2347,6 +2347,7 @@ type Team struct {
 	SsoSessionSeconds    sql.NullInt32
 	SsoJit               bool
 	DirectoryMappedOnly  bool
+	EnvNamesListable     bool
 }
 
 type TeamConfigDefault struct {
@@ -2906,6 +2907,7 @@ type User struct {
 	EmailVerified    bool
 	CanonicalEmail   sql.NullString
 	FileTransferMode string
+	EnvNamesListable bool
 }
 
 type UserFavorite struct {

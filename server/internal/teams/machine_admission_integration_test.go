@@ -68,6 +68,23 @@ func TestPostgresMachineAdmission(t *testing.T) {
 	if !state.ApproveNewMachines {
 		t.Fatal("approval must be on by default")
 	}
+	// "Commands on machines can list ENV names": on by default; only an owner or admin changes it.
+	if !state.ENVNamesListable {
+		t.Fatal("ENV names listing must be on by default")
+	}
+	namesOff, namesOn := false, true
+	if _, err = s.Mutate(ctx, member2, team, MutationRequest{OperationID: "envnames-member", ExpectedGeneration: state.Generation, Action: "env_names", ENVNamesListable: &namesOff}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("a member changed the ENV names setting: %v", err)
+	}
+	if state, err = s.Mutate(ctx, owner, team, MutationRequest{OperationID: "envnames-owner", ExpectedGeneration: state.Generation, Action: "env_names", ENVNamesListable: &namesOff}); err != nil || state.ENVNamesListable {
+		t.Fatalf("owner could not turn ENV names off: listable=%v err=%v", state.ENVNamesListable, err)
+	}
+	if state, err = s.Mutate(ctx, owner, team, MutationRequest{OperationID: "envnames-owner-on", ExpectedGeneration: state.Generation, Action: "env_names", ENVNamesListable: &namesOn}); err != nil || !state.ENVNamesListable {
+		t.Fatalf("owner could not turn ENV names back on: listable=%v err=%v", state.ENVNamesListable, err)
+	}
+	if _, err = s.Mutate(ctx, owner, team, MutationRequest{OperationID: "envnames-missing", ExpectedGeneration: state.Generation, Action: "env_names"}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("env_names without a value: %v", err)
+	}
 	machine := func(id, user string) string {
 		t.Helper()
 		id += "_" + suffix

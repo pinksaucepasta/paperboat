@@ -156,6 +156,9 @@ func (s *Service) mutate(ctx context.Context, account, team, op, kind string, ex
 			if r.Action == "private_access" && r.AllowPrivateAccess != nil {
 				metadata["active"] = *r.AllowPrivateAccess
 			}
+			if r.Action == "env_names" && r.ENVNamesListable != nil {
+				metadata["active"] = *r.ENVNamesListable
+			}
 		case GrantRequest:
 			metadata["target_account"] = r.AccountID
 			metadata["resource_kind"] = r.ResourceKind
@@ -207,6 +210,12 @@ func (s *Service) Mutate(ctx context.Context, account, team string, r MutationRe
 				return ErrForbidden
 			}
 			_, err := tx.Exec(ctx, `UPDATE teams SET approve_new_machines=$2 WHERE team_id=$1`, team, *r.ApproveNewMachines)
+			return err
+		case "env_names":
+			if !Allowed(actor.Role, PermissionSettingsManage) || r.ENVNamesListable == nil {
+				return ErrForbidden
+			}
+			_, err := tx.Exec(ctx, `UPDATE teams SET env_names_listable=$2 WHERE team_id=$1`, team, *r.ENVNamesListable)
 			return err
 		case "private_access":
 			if !Allowed(actor.Role, PermissionSettingsManage) || r.AllowPrivateAccess == nil {

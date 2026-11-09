@@ -65,6 +65,8 @@ type VaultLayerContext struct {
 	ActorAccountID string               `json:"actor_account_id"`
 	MachineID      string               `json:"machine_id"`
 	Layers         []VaultLayerDelivery `json:"layers"`
+	// NamesListable is the workspace's "Commands on machines can list ENV names" setting.
+	NamesListable bool `json:"names_listable"`
 }
 type vaultLayerSourceClaims struct {
 	_           struct{} `cbor:",toarray"`
@@ -322,6 +324,9 @@ func (s *Service) VaultLayerContext(ctx context.Context, machineOwner, machine, 
 		}
 		out.Recipient.MachineID = machine
 		out.Recipient.HostPublic = b64VaultPublic(public)
+		if err := tx.QueryRow(ctx, `SELECT coalesce(CASE WHEN $2='personal' THEN (SELECT env_names_listable FROM users WHERE id=$1) ELSE (SELECT env_names_listable FROM teams WHERE team_id=$2) END,true)`, actor, workspace).Scan(&out.NamesListable); err != nil {
+			return err
+		}
 		coordinates := []VaultLayerCoordinate{}
 		if workspace == "personal" {
 			if actor != machineOwner {

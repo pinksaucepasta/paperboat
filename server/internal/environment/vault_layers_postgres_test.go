@@ -374,6 +374,30 @@ func TestPostgresVaultLayersFanoutSignedPublicationAndWorkspaceIsolation(t *test
 	if _, err := service.VaultLayerContext(ctx, member, memberHost, outsider, team); !errors.Is(err, ErrKeyAuthorizationRequired) {
 		t.Fatalf("nonmember Team launch: %v", err)
 	}
+	// "Commands on machines can list ENV names" is on by default and is read per workspace.
+	listable := func(workspace string) bool {
+		t.Helper()
+		out, err := service.VaultLayerContext(ctx, member, memberHost, member, workspace)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.NamesListable
+	}
+	if !listable(team) || !listable("personal") {
+		t.Fatal("ENV names listing must default to on")
+	}
+	exec(`UPDATE teams SET env_names_listable=false WHERE team_id=$1`, team)
+	if listable(team) || !listable("personal") {
+		t.Fatal("turning it off for the team must not change the personal workspace")
+	}
+	exec(`UPDATE users SET env_names_listable=false WHERE id=$1`, member)
+	if listable(team) || listable("personal") {
+		t.Fatal("both workspaces are off")
+	}
+	exec(`UPDATE teams SET env_names_listable=true WHERE team_id=$1`, team)
+	if !listable(team) || listable("personal") {
+		t.Fatal("the team setting is independent of the account setting")
+	}
 	exec(`INSERT INTO teams(team_id,owner_account,generation) VALUES($1,$2,1)`, otherTeam, owner)
 	for _, account := range []string{owner, member} {
 		exec(`INSERT INTO team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true)`, otherTeam, account)

@@ -441,6 +441,25 @@ func TestAccountPreferencesFileTransferModePostgres(t *testing.T) {
 	if code, body := call(http.MethodGet, ""); code != http.StatusOK || !strings.Contains(body, `"file_transfer_mode":"unlimited"`) {
 		t.Fatalf("read back: %d %s", code, body)
 	}
+	// The ENV names switch is on by default, changes alone and keeps the transfer mode.
+	if code, body := call(http.MethodGet, ""); code != http.StatusOK || !strings.Contains(body, `"env_names_listable":true`) {
+		t.Fatalf("default ENV names switch: %d %s", code, body)
+	}
+	if code, body := call(http.MethodPatch, `{"env_names_listable":false}`); code != http.StatusOK || !strings.Contains(body, `"env_names_listable":false`) || !strings.Contains(body, `"file_transfer_mode":"unlimited"`) {
+		t.Fatalf("turn ENV names off: %d %s", code, body)
+	}
+	if code, body := call(http.MethodGet, ""); code != http.StatusOK || !strings.Contains(body, `"env_names_listable":false`) {
+		t.Fatalf("ENV names read back: %d %s", code, body)
+	}
+	if code, body := call(http.MethodPatch, `{"env_names_listable":"no"}`); code != http.StatusBadRequest {
+		t.Fatalf("non-boolean ENV names switch: %d %s", code, body)
+	}
+	if code, body := call(http.MethodPatch, `{"file_transfer_mode":"automatic","env_names_listable":true}`); code != http.StatusOK || !strings.Contains(body, `"env_names_listable":true`) || !strings.Contains(body, `"file_transfer_mode":"automatic"`) {
+		t.Fatalf("both fields in one patch: %d %s", code, body)
+	}
+	if code, body := call(http.MethodPatch, `{"file_transfer_mode":"unlimited"}`); code != http.StatusOK || !strings.Contains(body, `"file_transfer_mode":"unlimited"`) {
+		t.Fatalf("restore unlimited: %d %s", code, body)
+	}
 	for _, bad := range []string{`{"file_transfer_mode":"fast"}`, `{"theme":"dark"}`, `not json`} {
 		if code, body := call(http.MethodPatch, bad); code != http.StatusBadRequest {
 			t.Fatalf("patch %s: %d %s", bad, code, body)
