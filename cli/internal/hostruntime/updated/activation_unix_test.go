@@ -791,3 +791,75 @@ func TestActivationHelperHoldsTheLockWhileRetiring(t *testing.T) {
 		})
 	}
 }
+
+type abandonerFixture struct{ unavailable, superseded int }
+
+func (f *abandonerFixture) AbandonUnavailableCandidate(context.Context) (bool, error) {
+	f.unavailable++
+	return true, nil
+}
+func (f *abandonerFixture) AbandonSupersededCandidate(context.Context) (bool, error) {
+	f.superseded++
+	return true, nil
+}
+
+// A resolve failure that a retry cannot fix (the candidate was superseded or revoked after approval) ends the
+// attempt; before this the handoff stayed Started and repeated it on every helper restart. A refusal after
+// native activation began is left to native recovery, and a transient error retries.
+func TestDeterministicResolveFailuresEndTheAttemptButNativeOwnedAndTransientOnesDoNot(t *testing.T) {
+	original := workerupdate.Release{Version: "2026.10.14.1", SHA256: strings.Repeat("a", 64), Length: 1, Platform: runtime.GOOS, Architecture: runtime.GOARCH, HostdAPIMin: 1, HostdAPIMax: 1, RuntimeAPIMin: 1, RuntimeAPIMax: 1}
+	receipt, err := workerupdate.PreparedCandidateForRelease(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handoff := func() *unixActivationHandoff {
+		h := &unixActivationHandoff{ApprovalID: receipt.ID, Candidate: original.Version, Started: true, Previous: original}
+		h.Previous.Version = "2026.10.13.1"
+		return h
+	}
+	deny := func(denied string) func(context.Context, string, string, string) error {
+		return func(_ context.Context, v, _, _ string) error {
+			if v == denied {
+				return workerupdate.ErrReleaseRevoked
+			}
+			return nil
+		}
+	}
+	resolveRevoked := func(context.Context) (workerupdate.Release, bool, error) {
+		return workerupdate.Release{}, false, workerupdate.ErrReleaseRevoked
+	}
+	resolveNetwork := func(context.Context) (workerupdate.Release, bool, error) {
+		return workerupdate.Release{}, false, errors.New("dial tcp: i/o timeout")
+	}
+	resolveNewer := func(context.Context) (workerupdate.Release, bool, error) {
+		newer := original
+		newer.Version = "2026.10.14.2"
+		return newer, true, nil
+	}
+	h := handoff()
+	for _, tc := range []struct {
+		name               string
+		native             bool
+		resolve            func(context.Context) (workerupdate.Release, bool, error)
+		authorize          func(context.Context, string, string, string) error
+		unavailable, newer int
+	}{
+		{"candidate superseded", false, resolveNewer, deny(""), 0, 1},
+		{"candidate revoked before native activation", false, resolveRevoked, deny(""), 0, 1},
+		{"network error retries", false, resolveNetwork, deny(""), 0, 0},
+		{"candidate revoked after native activation began", true, nil, deny(original.Version), 0, 0},
+		{"previous revoked after native activation began", true, nil, deny(h.Previous.Version), 0, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := resolveUnixActivationRelease(context.Background(), handoff(), original, tc.native, tc.resolve, tc.authorize)
+			if err == nil {
+				t.Fatal("resolve succeeded")
+			}
+			f := &abandonerFixture{}
+			abandoned, abandonErr := abandonCandidate(context.Background(), f, err)
+			if abandonErr != nil || abandoned != (tc.newer > 0) || f.unavailable != tc.unavailable || f.superseded != tc.newer {
+				t.Fatalf("abandoned=%v err=%v calls=%+v for %v", abandoned, abandonErr, f, err)
+			}
+		})
+	}
+}

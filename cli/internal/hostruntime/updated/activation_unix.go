@@ -859,13 +859,25 @@ func UnixLegacyRollback(root string, release workerupdate.Release) (bool, error)
 	return release.Version == previous.Version && release.SHA256 == previous.SHA256 && release.Length == previous.Length && release.Platform == previous.Platform && release.Architecture == previous.Architecture, nil
 }
 
-// abandonCandidate ends an approved attempt that can never activate: its payload is gone, or a newer
-// release superseded it before native activation began. Any other cause is not abandoned.
-func abandonCandidate(ctx context.Context, manager *workerupdate.Manager, cause error) (bool, error) {
+// errNativeActivationStarted marks a resolve failure after native activation began. The native
+// installation owns the machine then and its recovery must run, so the attempt is never abandoned.
+var errNativeActivationStarted = errors.New("native activation already started")
+
+type candidateAbandoner interface {
+	AbandonUnavailableCandidate(context.Context) (bool, error)
+	AbandonSupersededCandidate(context.Context) (bool, error)
+}
+
+// abandonCandidate ends an approved attempt that can never activate and cannot succeed on a retry:
+// its payload is gone, or a newer release or a revocation ruled it out before native activation began.
+// Any other cause (a network error, a timeout) is not abandoned and retries.
+func abandonCandidate(ctx context.Context, manager candidateAbandoner, cause error) (bool, error) {
 	switch {
+	case errors.Is(cause, errNativeActivationStarted):
+		return false, nil
 	case errors.Is(cause, workerupdate.ErrPreparedCandidate):
 		return manager.AbandonUnavailableCandidate(ctx)
-	case errors.Is(cause, ErrCandidateChanged):
+	case errors.Is(cause, ErrCandidateChanged), errors.Is(cause, workerupdate.ErrReleaseRevoked):
 		return manager.AbandonSupersededCandidate(ctx)
 	}
 	return false, nil
@@ -905,12 +917,12 @@ func resolveUnixActivationRelease(ctx context.Context, handoff *unixActivationHa
 	release := original
 	if nativeStarted {
 		if err := authorize(ctx, release.Version, release.Platform, release.Architecture); err != nil {
-			return workerupdate.Release{}, err
+			return workerupdate.Release{}, errors.Join(errNativeActivationStarted, err)
 		}
 		previous := handoff.Previous
 		if previous.LocalSource == nil || previous.LocalSource.Distribution == installsource.Official {
 			if err := authorize(ctx, previous.Version, previous.Platform, previous.Architecture); err != nil {
-				return workerupdate.Release{}, err
+				return workerupdate.Release{}, errors.Join(errNativeActivationStarted, err)
 			}
 		}
 	} else {

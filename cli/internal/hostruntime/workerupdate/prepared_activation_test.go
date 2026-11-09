@@ -391,6 +391,20 @@ func TestApprovedCandidateSupersededWhileStagedIsAbandonedWithItsPayload(t *test
 	if abandoned, err := f.manager.AbandonUnavailableCandidate(context.Background()); abandoned || err != nil {
 		t.Fatalf("a staged payload was treated as unavailable: %v %v", abandoned, err)
 	}
+	// A payload a native installation already moved is owned by that installation: recovery must run.
+	saved, err := os.ReadFile(journal.StagedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(journal.StagedPath); err != nil {
+		t.Fatal(err)
+	}
+	if abandoned, err := f.manager.AbandonSupersededCandidate(context.Background()); abandoned || err != nil {
+		t.Fatalf("a candidate whose payload native activation took was abandoned: %v %v", abandoned, err)
+	}
+	if err := os.WriteFile(journal.StagedPath, saved, 0700); err != nil {
+		t.Fatal(err)
+	}
 	if abandoned, err := f.manager.AbandonSupersededCandidate(context.Background()); !abandoned || err != nil {
 		t.Fatalf("a superseded approved candidate was kept: %v %v", abandoned, err)
 	}

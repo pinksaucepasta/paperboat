@@ -330,9 +330,10 @@ func (m *Manager) AbandonUnavailableCandidate(ctx context.Context) (bool, error)
 }
 
 // AbandonSupersededCandidate does the same for an approved candidate that is still staged but can
-// no longer be activated because a newer release replaced it: the staged payload is dropped too, so
-// the user can download and approve the new candidate. It does nothing, and reports false, when the
-// candidate is already installed or the journal is not an approved candidate.
+// no longer be activated because a newer release replaced it or its release was revoked: the staged
+// payload is dropped too, so the user can download and approve the new candidate. It does nothing, and
+// reports false, when the candidate is installed, its payload is gone (a native installation owns it and
+// recovery must run) or the journal is not an approved candidate.
 func (m *Manager) AbandonSupersededCandidate(ctx context.Context) (bool, error) {
 	return m.abandonCandidate(ctx, true)
 }
@@ -348,7 +349,7 @@ func (m *Manager) abandonCandidate(ctx context.Context, dropStaged bool) (bool, 
 		return false, err
 	}
 	if journal.Stage != updateflow.StageAwaitingApproval || journal.ApprovedCandidateID == "" ||
-		m.candidateInstalled(journal) || !dropStaged && !stagedConsumed(journal.StagedPath) {
+		m.candidateInstalled(journal) || stagedConsumed(journal.StagedPath) != !dropStaged {
 		return false, nil
 	}
 	if dropStaged {
