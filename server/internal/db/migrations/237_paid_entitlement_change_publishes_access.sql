@@ -6,6 +6,7 @@
 -- for members), and only when the paid flag flips, so a billing row update that keeps it publishes nothing.
 -- The flag is the one team_paid_entitled uses (renewal grace counts as paid, migration 078); the baseline function
 -- looked at state alone and missed a flip between active and grace.
+SET LOCAL lock_timeout = '5s';
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION paperboat.fence_team_paid_entitlement_change() RETURNS trigger
     LANGUAGE plpgsql
@@ -18,11 +19,11 @@ DECLARE
 BEGIN
  IF TG_OP<>'INSERT' THEN
   team:=OLD.team_id;
-  old_paid:=OLD.team_id IS NOT NULL AND OLD.user_id IS NULL AND OLD.period_start<=now() AND now()<billing_workspace_paid_until(OLD);
+  old_paid:=coalesce(OLD.team_id IS NOT NULL AND OLD.user_id IS NULL AND OLD.period_start<=now() AND now()<billing_workspace_paid_until(OLD),false);
  END IF;
  IF TG_OP<>'DELETE' THEN
   team:=coalesce(NEW.team_id,team);
-  new_paid:=NEW.team_id IS NOT NULL AND NEW.user_id IS NULL AND NEW.period_start<=now() AND now()<billing_workspace_paid_until(NEW);
+  new_paid:=coalesce(NEW.team_id IS NOT NULL AND NEW.user_id IS NULL AND NEW.period_start<=now() AND now()<billing_workspace_paid_until(NEW),false);
  END IF;
  IF team IS NOT NULL AND old_paid IS DISTINCT FROM new_paid THEN
   UPDATE teams SET generation=generation+1 WHERE team_id=team;
@@ -34,6 +35,7 @@ END $$;
 -- +goose StatementEnd
 
 -- +goose Down
+SET LOCAL lock_timeout = '5s';
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION paperboat.fence_team_paid_entitlement_change() RETURNS trigger
     LANGUAGE plpgsql
