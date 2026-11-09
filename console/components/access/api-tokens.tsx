@@ -1,6 +1,6 @@
 "use client"
 
-import { KeyIcon } from "@phosphor-icons/react"
+import { CaretRightIcon, KeyIcon, PlusIcon } from "@phosphor-icons/react"
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { useApiQuery, useWorkspace } from "@/lib/api"
@@ -31,6 +31,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -46,6 +47,7 @@ export function ApiTokens() {
   const total = tokens.data?.pages[0]?.total ?? 0
   const [creating, setCreating] = useState(false)
   const [revoking, setRevoking] = useState<APIToken | null>(null)
+  const [showEnded, setShowEnded] = useState(false)
   const now = useNow(60_000)
   if (!workspace || tokens.isPending) return <Skeleton className="h-40 w-full" />
   if (tokens.isError) {
@@ -60,74 +62,57 @@ export function ApiTokens() {
       </div>
     )
   }
+  // Active tokens first; revoked and expired ones are history, folded away below them. The server has
+  // no state filter, so this splits the pages loaded so far.
+  const active = items.filter((token) => !token.revoked_at && Date.parse(token.expires_at) >= now)
+  const ended = items.filter((token) => !active.includes(token))
+  const create = (
+    <Button size="lg" onClick={() => setCreating(true)}>
+      <PlusIcon data-icon="inline-start" />
+      Create token
+    </Button>
+  )
   return (
     <div className="flex flex-col gap-6">
-      <header className="flex items-center gap-4">
-        <h1 className="flex-1 font-heading text-2xl font-semibold tracking-tight">API tokens</h1>
-        <Button size="lg" onClick={() => setCreating(true)}>
-          Create token
-        </Button>
-      </header>
-      {items.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No tokens. A token lets a script or agent act as you in {workspace.name}.
-        </p>
+      {active.length === 0 && !tokens.hasNextPage ? (
+        <Empty className="py-12">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <KeyIcon />
+            </EmptyMedia>
+            <EmptyTitle>No active tokens</EmptyTitle>
+            <EmptyDescription>
+              A token lets a script or agent act as you in {workspace.name}, limited to what you allow.
+            </EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>{create}</EmptyContent>
+        </Empty>
       ) : (
-        <ul className="flex flex-col border-t border-divider">
-          {items.map((token) => {
-            const expired = Date.parse(token.expires_at) < now
-            return (
-              <li
-                key={token.id}
-                className="flex min-h-12 flex-wrap items-center gap-3 border-b border-divider py-2 text-sm"
-                data-token={token.name}
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-2 font-medium">
-                    {token.name}
-                    {token.revoked_at ? (
-                      <Badge variant="outline" className="font-normal text-muted-foreground">
-                        Revoked
-                      </Badge>
-                    ) : expired ? (
-                      <Badge variant="outline" className="font-normal text-muted-foreground">
-                        Expired
-                      </Badge>
-                    ) : null}
-                  </span>
-                  <span className="block text-muted-foreground">
-                    {token.created_by.replace(/^user:/, "")} ·{" "}
-                    {token.scope?.length ? scopeText(token) : "Everything you can do"} ·{" "}
-                    {token.last_used_at ? (
-                      <>
-                        used <Time iso={token.last_used_at} relative />
-                      </>
-                    ) : (
-                      "never used"
-                    )}{" "}
-                    · {expired ? "expired" : "expires"} <Time iso={token.expires_at} relative />
-                  </span>
-                </span>
-                {!token.revoked_at && !expired && (
-                  <Button variant="outline" onClick={() => setRevoking(token)}>
-                    Revoke
-                  </Button>
-                )}
-              </li>
-            )
-          })}
-        </ul>
+        <section className="flex flex-col gap-3">
+          <div className="flex items-center">
+            <h2 className="text-sm font-medium">Active</h2>
+            <div className="ml-auto">{create}</div>
+          </div>
+          <TokenList tokens={active} now={now} onRevoke={setRevoking} />
+        </section>
       )}
-      {items.length > 0 && (
+      {ended.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <Button variant="ghost" className="self-start px-0 text-muted-foreground" onClick={() => setShowEnded(!showEnded)}>
+            <CaretRightIcon data-icon="inline-start" className={showEnded ? "rotate-90" : undefined} />
+            Revoked and expired · {ended.length}
+          </Button>
+          {showEnded && <TokenList tokens={ended} now={now} onRevoke={setRevoking} />}
+        </section>
+      )}
+      {tokens.hasNextPage && (
         <div className="flex items-center gap-3 text-sm text-muted-foreground">
           <span>
-            {items.length} of {total} tokens
+            {items.length} of {total} tokens loaded
           </span>
-          {tokens.hasNextPage && (
-            <Button variant="secondary" onClick={() => tokens.fetchNextPage()} disabled={tokens.isFetchingNextPage}>
-              {tokens.isFetchingNextPage ? "Loading…" : "Load more"}
-            </Button>
-          )}
+          <Button variant="secondary" onClick={() => tokens.fetchNextPage()} disabled={tokens.isFetchingNextPage}>
+            {tokens.isFetchingNextPage ? "Loading…" : "Load more"}
+          </Button>
         </div>
       )}
       <Dialog open={creating} onOpenChange={setCreating}>
@@ -324,5 +309,54 @@ function RevokeToken({ workspace, token, onClose }: { workspace: string; token: 
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  )
+}
+
+function TokenList({ tokens, now, onRevoke }: { tokens: APIToken[]; now: number; onRevoke: (token: APIToken) => void }) {
+  return (
+    <ul className="flex flex-col border-t border-divider">
+      {tokens.map((token) => {
+        const expired = Date.parse(token.expires_at) < now
+        return (
+          <li
+            key={token.id}
+            className="flex min-h-14 flex-wrap items-center gap-3 border-b border-divider py-2 text-sm"
+            data-token={token.name}
+          >
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-2 font-medium">
+                {token.name}
+                {token.revoked_at ? (
+                  <Badge variant="outline" className="font-normal text-muted-foreground">
+                    Revoked
+                  </Badge>
+                ) : expired ? (
+                  <Badge variant="outline" className="font-normal text-muted-foreground">
+                    Expired
+                  </Badge>
+                ) : null}
+              </span>
+              <span className="block truncate text-muted-foreground">
+                {token.created_by.replace(/^user:/, "")} ·{" "}
+                {token.scope?.length ? scopeText(token) : "Everything you can do"} ·{" "}
+                {token.last_used_at ? (
+                  <>
+                    used <Time iso={token.last_used_at} relative />
+                  </>
+                ) : (
+                  "never used"
+                )}{" "}
+                · {expired ? "expired" : "expires"} <Time iso={token.expires_at} relative />
+              </span>
+            </span>
+            {!token.revoked_at && !expired && (
+              <Button variant="outline" onClick={() => onRevoke(token)}>
+                Revoke
+              </Button>
+            )}
+          </li>
+        )
+      })}
+    </ul>
   )
 }
