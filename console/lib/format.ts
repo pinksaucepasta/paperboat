@@ -73,9 +73,21 @@ const dateFormatters = Object.fromEntries(
   Object.entries(dateStyles).map(([style, options]) => [style, new Intl.DateTimeFormat(undefined, options)]),
 ) as Record<DateStyle, Intl.DateTimeFormat>
 
+/** The viewer's time zone and locale, known to the server from a cookie and Accept-Language. */
+export type Viewer = { zone: string; locale: string }
+
+const viewerFormatters = new Map<string, Intl.DateTimeFormat>()
+/** A formatter in the viewer's zone and locale, so the server and the browser write the same text. */
+function inViewer(viewer: Viewer, options: Intl.DateTimeFormatOptions, key: string): Intl.DateTimeFormat {
+  const id = `${viewer.locale}|${viewer.zone}|${key}`
+  let format = viewerFormatters.get(id)
+  if (!format) viewerFormatters.set(id, (format = new Intl.DateTimeFormat(viewer.locale, { ...options, timeZone: viewer.zone })))
+  return format
+}
+
 /** A date in the viewer's locale and zone. In components use `useTimeFormat().date`. */
-export function formatDate(iso: string, style: DateStyle): string {
-  return dateFormatters[style].format(new Date(iso))
+export function formatDate(iso: string, style: DateStyle, viewer?: Viewer): string {
+  return (viewer ? inViewer(viewer, dateStyles[style], style) : dateFormatters[style]).format(new Date(iso))
 }
 
 /** The same date in a form that needs no locale or zone (UTC), for the first render. */
@@ -100,10 +112,26 @@ export function formatStable(iso: string): string {
 }
 
 /** "Aug 31, 2026, 5:26 AM GMT+5:30" in the viewer's zone. */
-export function formatDateTime(iso: string): string {
+export function formatDateTime(iso: string, viewer?: Viewer): string {
   const date = new Date(iso)
-  const name = zone.formatToParts(date).find((part) => part.type === "timeZoneName")?.value
-  return name ? `${dateTime.format(date)} ${name}` : dateTime.format(date)
+  const zoneFormat = viewer ? inViewer(viewer, { timeZoneName: "short" }, "zone") : zone
+  const format = viewer ? inViewer(viewer, { dateStyle: "medium", timeStyle: "short" }, "dateTime") : dateTime
+  const name = zoneFormat.formatToParts(date).find((part) => part.type === "timeZoneName")?.value
+  return name ? `${format.format(date)} ${name}` : format.format(date)
+}
+
+/** A viewer from a cookie's zone and an Accept-Language header, or undefined when either is unusable. */
+export function viewerFrom(zone: string | undefined, acceptLanguage: string | null): Viewer | undefined {
+  const locale = acceptLanguage?.split(",")[0]?.split(";")[0]?.trim()
+  if (!zone || !locale) return undefined
+  try {
+    // Both throw a RangeError when invalid; supportedLocalesOf also rejects unknown tags.
+    new Intl.DateTimeFormat("en", { timeZone: zone })
+    const [supported] = Intl.DateTimeFormat.supportedLocalesOf([locale])
+    return supported ? { zone, locale: supported } : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /** Both exact forms, for a tooltip: local with zone, then UTC. */

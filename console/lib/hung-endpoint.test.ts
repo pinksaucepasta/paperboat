@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 
 mock.module("server-only", () => ({}))
-mock.module("next/headers", () => ({ cookies: async () => new Map([["pb-workspace", { value: "personal" }]]) }))
+mock.module("next/headers", () => ({
+  cookies: async () => new Map([["pb-workspace", { value: "personal" }]]),
+  headers: async () => new Headers(),
+}))
 mock.module("next/server", () => ({ connection: async () => {} }))
 process.env.PAPERBOAT_SERVER_URL = "http://control.example.test"
 const { prefetchMachinesPage } = await import("@/lib/server/prefetch")
@@ -36,7 +39,7 @@ describe("a hung endpoint", () => {
     const { state } = await prefetchMachinesPage()
     expect(Date.now() - started).toBeLessThan(4_000)
     expect(JSON.stringify(state)).toContain("u1")
-    expect(aborted.length).toBe(7)
+    expect(aborted.length).toBe(6)
   })
 
   test("a browser read stops when its query is cancelled", async () => {

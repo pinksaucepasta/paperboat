@@ -23,9 +23,9 @@ export function WithSession({
 }
 
 async function Session({ reads, children }: { reads?: (workspace: string) => PageRead[]; children: React.ReactNode }) {
-  const { state, workspace } = await prefetchSession(reads)
+  const { state, workspace, viewer } = await prefetchSession(reads)
   return (
-    <ServerData state={state} workspace={workspace}>
+    <ServerData state={state} workspace={workspace} viewer={viewer}>
       {children}
     </ServerData>
   )

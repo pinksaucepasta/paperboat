@@ -4,6 +4,8 @@ import { hydrate, useQueryClient, type DehydratedState } from "@tanstack/react-q
 import { useContext, useMemo } from "react"
 import { ServerQueries } from "@/lib/api"
 import { ServerWorkspace } from "@/lib/workspace"
+import type { Viewer } from "@/lib/format"
+import { ViewerTime } from "@/lib/use-time-format"
 
 /**
  * Seeds the query cache with what the server fetched for this page, and tells `useApiQuery` it
@@ -17,22 +19,28 @@ import { ServerWorkspace } from "@/lib/workspace"
 export function ServerData({
   state,
   workspace,
+  viewer,
   children,
 }: {
   state: DehydratedState
   workspace: string
+  /** The viewer's zone and locale; a nested ServerData without one keeps its parent's. */
+  viewer?: Viewer
   children: React.ReactNode
 }) {
   const queryClient = useQueryClient()
   // A page's own ServerData sits inside the layout's (session): both sets were server-rendered.
   const outer = useContext(ServerQueries)
+  const outerViewer = useContext(ViewerTime)
   const hashes = useMemo(() => {
     hydrate(queryClient, state)
     return new Set([...outer, ...state.queries.map((query) => query.queryHash)])
   }, [queryClient, state, outer])
   return (
     <ServerWorkspace value={workspace}>
-      <ServerQueries value={hashes}>{children}</ServerQueries>
+      <ServerQueries value={hashes}>
+        <ViewerTime value={viewer ?? outerViewer}>{children}</ViewerTime>
+      </ServerQueries>
     </ServerWorkspace>
   )
 }

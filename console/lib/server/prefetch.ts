@@ -1,10 +1,10 @@
 import "server-only"
 
 import { dehydrate, QueryClient, type DehydratedState } from "@tanstack/react-query"
-import { cookies } from "next/headers"
+import { cookies, headers } from "next/headers"
 import { connection } from "next/server"
 import { cache } from "react"
-import { defaultUsagePeriod, usageParams } from "@/lib/usage-period"
+import { viewerFrom, type Viewer } from "@/lib/format"
 import { queryKeys } from "@/lib/query-keys"
 import { controlPlaneFetch } from "@/lib/server/control-plane"
 
@@ -35,7 +35,9 @@ const request = cache(async () => {
       return
     }
   }
-  return { workspace, get }
+  // The browser keeps its time zone in pb-tz (Providers); with the locale it lets the server write dates as the browser will.
+  const viewer = viewerFrom(jar.get("pb-tz")?.value, (await headers()).get("accept-language"))
+  return { workspace, get, viewer }
 })
 
 type Session = {
@@ -79,8 +81,8 @@ export type PageRead = { key: readonly unknown[]; path: string; field?: string }
 /** The session data, plus a page's own reads (see `WithSession`), for every console page. */
 export async function prefetchSession(
   reads?: (workspace: string) => PageRead[],
-): Promise<{ state: DehydratedState; workspace: string }> {
-  const { workspace, get } = await request()
+): Promise<{ state: DehydratedState; workspace: string; viewer?: Viewer }> {
+  const { workspace, get, viewer } = await request()
   const list = reads?.(workspace) ?? []
   const [data, ...results] = await Promise.all([
     session(),
@@ -92,7 +94,7 @@ export async function prefetchSession(
     const result = results[index]
     if (result) queryClient.setQueryData(read.key, read.field ? result[read.field] : result)
   })
-  return { state: dehydrate(queryClient), workspace }
+  return { state: dehydrate(queryClient), workspace, viewer }
 }
 
 /**
@@ -103,11 +105,11 @@ export async function prefetchMachinesPage(): Promise<{ state: DehydratedState; 
   const { workspace, get } = await request()
   const queryClient = new QueryClient()
 
-  const [data, machines, usage, overview, summary] = await Promise.all([
+  // Not usage: it takes ~1.7 s and would hold the whole page back; the bandwidth card loads it.
+  const [data, machines, overview, summary] = await Promise.all([
     session(),
     // The Machines table's first page (lib/machine-list.ts), not every machine.
     get<{ items: unknown[]; total: number }>(`machines?${new URLSearchParams({ workspace, limit: "50" })}`),
-    get(`usage?${usageParams(workspace, defaultUsagePeriod)}`),
     get("machines/overview"),
     get(`machines/summary?${new URLSearchParams({ workspace })}`),
   ])
@@ -122,6 +124,5 @@ export async function prefetchMachinesPage(): Promise<{ state: DehydratedState; 
       total: machines.total,
       page: 1,
     })
-  if (usage) queryClient.setQueryData(queryKeys.usage(workspace, defaultUsagePeriod), usage)
   return { state: dehydrate(queryClient), workspace }
 }
