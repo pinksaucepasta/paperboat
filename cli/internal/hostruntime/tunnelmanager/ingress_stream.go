@@ -243,7 +243,7 @@ func (f OriginStreamForwarder) serveTCP(ctx context.Context, stream io.ReadWrite
 	}
 	dialer := f.Transport.Dialer
 	if dialer == nil {
-		dialer = &net.Dialer{Timeout: time.Duration(route.ConnectTimeoutMs) * time.Millisecond}
+		dialer = &LocalhostDialer{Dialer: net.Dialer{Timeout: time.Duration(route.ConnectTimeoutMs) * time.Millisecond}}
 	}
 	connection, err := dialer.DialContext(ctx, "tcp", route.OriginAddress)
 	if err != nil {

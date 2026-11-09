@@ -44,7 +44,10 @@ func previewCaptureIdentity(lease Lease, routeGeneration uint64) *tunnelmanager.
 	}
 }
 
-// normalizePreviewTarget keeps the loopback origin in its canonical dial form.
+// normalizePreviewTarget is the form the server binds an ingress decision to:
+// localhost is stored as 127.0.0.1. Only authority checks compare against it;
+// dialing keeps the target as written, so localhost reaches an app listening on
+// ::1 only (Windows resolves it first) as well as one on 127.0.0.1.
 func normalizePreviewTarget(target LeaseTarget) LeaseTarget {
 	if host, port, err := net.SplitHostPort(target.Address); err == nil && strings.EqualFold(host, "localhost") {
 		target.Address = net.JoinHostPort("127.0.0.1", port)
@@ -88,7 +91,8 @@ func (c *DataCarrierPreviewCarrier) forwardBrowser(ctx context.Context, stream *
 	if err != nil || endpoint.Scheme != "https" || endpoint.Hostname() == "" {
 		return connectorprotocol.ErrIngressDenied
 	}
-	target := normalizePreviewTarget(lease.Target)
+	target := lease.Target
+	bound := normalizePreviewTarget(target)
 	verification := "not_applicable"
 	if target.Scheme == "https" {
 		verification = "system"
@@ -101,7 +105,7 @@ func (c *DataCarrierPreviewCarrier) forwardBrowser(ctx context.Context, stream *
 	authority := func(ctx context.Context, open connectorprotocol.StreamOpen, claimed connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error) {
 		current, err := c.browserIngress(ctx, open, claimed)
 		b := current.Binding
-		if err != nil || b.Lifecycle != connectorprotocol.TunnelEphemeral || b.AccountID != lease.AccountID || b.HostID != c.identity.HostID || b.ResourceGeneration != c.browserRouteGeneration || b.RouteGeneration != c.browserRouteGeneration || b.PublicationID != lease.ID || b.PublicationGeneration != b.ResourceGeneration || b.TargetID != open.RouteID || b.TargetGeneration != b.ResourceGeneration || b.Hostname != strings.ToLower(endpoint.Hostname()) || b.PathPrefix != "/" || b.Audience != lease.AccessMode || b.OriginScheme != target.Scheme || b.OriginAddress != target.Address || b.TLSVerification != verification || b.TLSServerName != "" || b.CAReference != "" || b.MTLSCredentialReference != "" {
+		if err != nil || b.Lifecycle != connectorprotocol.TunnelEphemeral || b.AccountID != lease.AccountID || b.HostID != c.identity.HostID || b.ResourceGeneration != c.browserRouteGeneration || b.RouteGeneration != c.browserRouteGeneration || b.PublicationID != lease.ID || b.PublicationGeneration != b.ResourceGeneration || b.TargetID != open.RouteID || b.TargetGeneration != b.ResourceGeneration || b.Hostname != strings.ToLower(endpoint.Hostname()) || b.PathPrefix != "/" || b.Audience != lease.AccessMode || b.OriginScheme != target.Scheme || b.OriginAddress != bound.Address || b.TLSVerification != verification || b.TLSServerName != "" || b.CAReference != "" || b.MTLSCredentialReference != "" {
 			return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
 		}
 		return current, nil

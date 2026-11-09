@@ -591,7 +591,7 @@ func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready 
 		// HTTP (which carries no per-stream decision) replays against current
 		// lease authority. Browser streams use the same lease identity.
 		if identity := previewCaptureIdentity(lease, c.browserRouteGeneration); identity != nil && c.registry != nil && c.inspector != nil && isPreviewHTTPScheme(lease.Target.Scheme) {
-			target := normalizePreviewTarget(lease.Target)
+			target := lease.Target
 			dialWait := c.dialWait
 			if lease.LazyLifecycle != nil && dialWait > LazyOriginConnectTimeout {
 				dialWait = LazyOriginConnectTimeout
@@ -820,7 +820,7 @@ func dialPreviewOrigin(ctx context.Context, target LeaseTarget) (io.ReadWriteClo
 	if strings.TrimSpace(target.Address) == "" {
 		return nil, ErrDataCarrierPreviewInvalid
 	}
-	dialer := &net.Dialer{}
+	dialer := &tunnelmanager.LocalhostDialer{}
 	var (
 		connection net.Conn
 		err        error
@@ -873,7 +873,6 @@ func (c *DataCarrierPreviewCarrier) forward(ctx context.Context, stream *connect
 // never sees partial parses because sniffing consumed nothing.
 func (c *DataCarrierPreviewCarrier) forwardPublicHTTP(ctx context.Context, stream *connector.DataCarrierStream, buffered *bufio.Reader, target LeaseTarget, lease Lease, identity tunnelmanager.CaptureIdentity) error {
 	defer stream.Close()
-	target = normalizePreviewTarget(target)
 	dialWait := c.dialWait
 	if lease.LazyLifecycle != nil && dialWait > LazyOriginConnectTimeout {
 		dialWait = LazyOriginConnectTimeout

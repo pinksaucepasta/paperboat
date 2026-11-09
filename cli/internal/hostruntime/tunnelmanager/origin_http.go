@@ -102,7 +102,7 @@ func (t *OriginHTTPTransport) transportFor(ctx context.Context, route hoststate.
 	t.mu.Unlock()
 	dialer := t.Dialer
 	if dialer == nil {
-		dialer = &net.Dialer{Timeout: time.Duration(route.ConnectTimeoutMs) * time.Millisecond, KeepAlive: 30 * time.Second}
+		dialer = &LocalhostDialer{Dialer: net.Dialer{Timeout: time.Duration(route.ConnectTimeoutMs) * time.Millisecond, KeepAlive: 30 * time.Second}}
 	}
 	var transport originRoundTripper
 	standard := &http.Transport{

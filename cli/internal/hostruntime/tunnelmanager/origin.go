@@ -165,7 +165,7 @@ func (p NetworkOriginProber) ProbeOrigin(ctx context.Context, route hoststate.Tu
 	}
 	dialer := p.Dialer
 	if dialer == nil {
-		dialer = &net.Dialer{}
+		dialer = &LocalhostDialer{}
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, time.Duration(route.ConnectTimeoutMs)*time.Millisecond)
 	defer cancel()

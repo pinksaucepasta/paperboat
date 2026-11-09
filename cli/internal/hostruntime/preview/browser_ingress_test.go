@@ -19,7 +19,7 @@ import (
 )
 
 func TestBrowserPreviewAdmissionAndAdmittedLifetime(t *testing.T) {
-	for _, mode := range []string{"allowed", "viewer", "host", "path", "target", "publication", "control-loss", "lifetime", "unix", "team", "team-raw", "renewal"} {
+	for _, mode := range []string{"allowed", "viewer", "host", "path", "target", "publication", "control-loss", "lifetime", "unix", "team", "team-raw", "renewal", "localhost-ipv6"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 			defer cancel()
@@ -64,6 +64,15 @@ func TestBrowserPreviewAdmissionAndAdmittedLifetime(t *testing.T) {
 				_ = origin.Listener.Close()
 				origin.Listener = socket
 			}
+			if mode == "localhost-ipv6" {
+				// An app that listens only on ::1: Windows resolves localhost to it first.
+				socket, err := net.Listen("tcp", "[::1]:0")
+				if err != nil {
+					t.Skip("no IPv6 loopback")
+				}
+				_ = origin.Listener.Close()
+				origin.Listener = socket
+			}
 			origin.Start()
 			defer origin.Close()
 			identity := testPreviewCarrierIdentity(1)
@@ -77,6 +86,10 @@ func TestBrowserPreviewAdmissionAndAdmittedLifetime(t *testing.T) {
 			lease := Lease{ID: "preview-browser", AccountID: identity.AccountID, Generation: 1, AccessMode: "private", Endpoint: "https://browser.example.test", Target: LeaseTarget{Scheme: "http", Address: origin.Listener.Addr().String()}}
 			if mode == "unix" {
 				lease.Target.Scheme = "unix"
+			}
+			_, originPort, _ := net.SplitHostPort(origin.Listener.Addr().String())
+			if mode == "localhost-ipv6" {
+				lease.Target.Address = net.JoinHostPort("localhost", originPort)
 			}
 			if mode == "renewal" {
 				lease.Generation = 17
@@ -92,6 +105,9 @@ func TestBrowserPreviewAdmissionAndAdmittedLifetime(t *testing.T) {
 			if mode == "lifetime" {
 				d.ExpiresAt = now.Add(time.Second)
 			}
+			if mode == "localhost-ipv6" {
+				d.Binding.OriginAddress = net.JoinHostPort("127.0.0.1", originPort) // the server binds localhost as 127.0.0.1
+			}
 			authority := d
 			if mode == "viewer" {
 				d.PrincipalID = "viewer-other"
@@ -106,6 +122,9 @@ func TestBrowserPreviewAdmissionAndAdmittedLifetime(t *testing.T) {
 			}
 			carrier, err := NewDataCarrierPreviewCarrier(DataCarrierPreviewCarrierConfig{Hub: hub, Identity: identity, BrowserRouteGeneration: 1, DialOrigin: func(ctx context.Context, target LeaseTarget) (io.ReadWriteCloser, error) {
 				dials.Add(1)
+				if mode == "localhost-ipv6" {
+					return dialPreviewOrigin(ctx, target) // the production dialer
+				}
 				network := "tcp"
 				if target.Scheme == "unix" {
 					network = "unix"
@@ -175,7 +194,7 @@ func TestBrowserPreviewAdmissionAndAdmittedLifetime(t *testing.T) {
 			}
 			_, _ = fmt.Fprintf(stream, "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", path, host)
 			response, err := http.ReadResponse(bufio.NewReader(stream), nil)
-			allowed := mode == "allowed" || mode == "lifetime" || mode == "unix" || mode == "team" || mode == "renewal"
+			allowed := mode == "allowed" || mode == "lifetime" || mode == "unix" || mode == "team" || mode == "renewal" || mode == "localhost-ipv6"
 			if !allowed {
 				if err == nil {
 					response.Body.Close()
@@ -190,7 +209,7 @@ func TestBrowserPreviewAdmissionAndAdmittedLifetime(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer response.Body.Close()
-			if mode == "allowed" || mode == "unix" || mode == "team" || mode == "renewal" {
+			if mode == "allowed" || mode == "unix" || mode == "team" || mode == "renewal" || mode == "localhost-ipv6" {
 				body, err := io.ReadAll(response.Body)
 				if err != nil || string(body) != "browser-ok" {
 					t.Fatalf("body=%q error=%v", body, err)
