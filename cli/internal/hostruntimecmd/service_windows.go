@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/causetext"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
@@ -235,6 +236,8 @@ func installWindowsRuntimeFromSuppliedBytesWithCommit(ctx context.Context, reque
 			if remote, ok := resultErr.(*elevation.RemoteError); ok && (remote.Code == "maintenance_busy" || remote.Code == "update_verification_failed" || remote.Code == "legacy_carrier_running") {
 				return
 			}
+			// The step's public message is finite; the cause stays readable here (owner-only, never uploaded).
+			_ = causetext.Record(hostinstall.WindowsProgramDataRoot(), "last-install-failure.txt", step, "", resultErr)
 			resultErr = &windowsInstallationStepError{step: step, cause: resultErr}
 		}
 	}()
