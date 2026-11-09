@@ -225,9 +225,11 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 	}
 }
 
-// awaitAdmission waits, within the takeover grace, for host to be admitted (its carrier attached here).
+// awaitAdmission waits, within the takeover grace, for host to be authorized for HTTPS: admitted by its attached
+// carrier, or a public preview whose attachment the server confirms with a current ingress decision (the same two
+// ways dispatch authorizes a name; the first only covers restricted routes).
 func (l *SharedTLSListener) awaitAdmission(host string) bool {
-	if l.routeGrace == nil || l.admittedHTTPSHostname == nil || l.routeGrace() <= 0 {
+	if l.routeGrace == nil || l.routeGrace() <= 0 {
 		return false
 	}
 	select {
@@ -238,7 +240,7 @@ func (l *SharedTLSListener) awaitAdmission(host string) bool {
 	}
 	ctx, cancel := context.WithTimeout(l.ctx, l.routeGrace())
 	defer cancel()
-	for !l.admittedHTTPSHostname(host) {
+	for !(l.admittedHTTPSHostname != nil && l.admittedHTTPSHostname(host)) && !l.previewDecisionExists(ctx, host) {
 		select {
 		case <-ctx.Done():
 			return false
@@ -246,6 +248,24 @@ func (l *SharedTLSListener) awaitAdmission(host string) bool {
 		}
 	}
 	return true
+}
+
+// previewDecisionExists: the public preview's exact authority refreshes and the current snapshot holds its valid
+// http decision.
+func (l *SharedTLSListener) previewDecisionExists(ctx context.Context, host string) bool {
+	if l.previewHTTPSAuthority == nil || l.previewHTTPSAuthority(ctx, host) != nil {
+		return false
+	}
+	decisions, err := l.authority.Snapshot(ctx)
+	if err != nil || len(decisions) > 4096 {
+		return false
+	}
+	for _, decision := range decisions {
+		if decision.Binding.Protocol == "http" && decision.Binding.Hostname == host {
+			return decision.Validate(time.Now().UTC()) == nil
+		}
+	}
+	return false
 }
 
 func (l *SharedTLSListener) Accept() (net.Conn, error) {

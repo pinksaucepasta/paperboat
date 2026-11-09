@@ -133,8 +133,9 @@ echo "server: 5xx=$server5xx; machines online before and offline during the depl
 sort -u "$work/offline" | sed 's/^/  offline: /'
 [ "$server5xx" = 0 ] && [ "$offline" = 0 ] || fail=1
 sed 's/^/  failed request: /' "$work/probe-failed"
-if [ $fail = 0 ]; then echo "edge gate: PASS"; exit 0; fi
+if [ $fail = 0 ] && [ -z "${KEEP_LOGS:-}" ]; then echo "edge gate: PASS"; exit 0; fi
 # The replaced container is removed with its logs, so the edge logs of the window are kept for the post-mortem.
 kept=$(mktemp -d /tmp/pb-gate-failed.XXXXXX); cp "$work"/edge-*.log "$kept"/
 echo "edge logs of the window kept in $kept"
+[ $fail = 0 ] && { echo "edge gate: PASS"; exit 0; }
 echo "edge gate: FAIL (roll back: deploy/README.md step 5)"; exit 1

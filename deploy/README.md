@@ -207,7 +207,7 @@ all of these are 0: preview failures, edge control failures, refused host carrie
 (`carrier_connection_failed`), host route attach refusals, edge-made 5xx (`edge_http_5xx`), server 5xx
 (`support_reports`), and machines online before the deploy that went offline during it. A failure means roll
 back (step 5). A failure prints each failed request (time, edge, status, duration, path) and keeps the edge logs of the window
-in a `/tmp/pb-gate-failed.*` directory (the replaced container's logs go with it); `INTERVAL=0.2` fetches faster than once a second. Without `--deploy` it watches for 30 s. The 2026-11-04 outage (server .3 answer field
+in a `/tmp/pb-gate-failed.*` directory (the replaced container's logs go with it; `KEEP_LOGS=1` keeps them on a pass too); `INTERVAL=0.2` fetches faster than once a second. Without `--deploy` it watches for 30 s. The 2026-11-04 outage (server .3 answer field
 rejected by every .2 edge) and the 2026-11-05 edge restart (22 refused carriers, a preview 503, a
 machine_offline) both fail it. Its test: `python3 deploy/test_check_edges.py`. Then: public health (`/healthz`, `/readyz`), the `server-version`
 commit, one preview created and fetched through each edge, and `docker logs --since 5m` of the active

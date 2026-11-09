@@ -659,3 +659,59 @@ func TestSharedTLSNameAdmittedAfterTakeoverIsServedNotAnswered404(t *testing.T) 
 		})
 	}
 }
+
+// lateDecisionAuthority publishes a public preview's http decision only after `at`: the server confirms a preview's
+// attachment on the replacement edge a moment after the handover.
+type lateDecisionAuthority struct {
+	host string
+	at   time.Time
+}
+
+func (a *lateDecisionAuthority) Snapshot(context.Context) ([]connectorprotocol.IngressDecision, error) {
+	if time.Now().Before(a.at) {
+		return nil, nil
+	}
+	d := publicTCPDecision(time.Now().UTC(), 443)
+	d.Binding.Protocol, d.Binding.OriginScheme, d.Binding.PathPrefix = "http", "http", "/"
+	d.Binding.ListenerID, d.Binding.PublicPort, d.Binding.Hostname = "", 0, a.host
+	d.Binding.Lifecycle = connectorprotocol.TunnelEphemeral
+	return []connectorprotocol.IngressDecision{d}, nil
+}
+
+func (a *lateDecisionAuthority) ResolveDecision(_ context.Context, d connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error) {
+	return d, nil
+}
+
+// A public preview is authorized by its ingress decision, not by HasAdmittedHTTPSHostname (restricted routes only):
+// the held name must be re-authorized the same way (anvit 2026-11-09: a name held 14 s after its route attached).
+func TestSharedTLSPublicPreviewDecisionAfterTakeoverIsServed(t *testing.T) {
+	match, _ := browserTestMatch()
+	clientTLS, serverTLS, _, _, _ := task24Certificates(t, match.Host)
+	clientTLS.ServerName = match.Host
+	raw, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	defer registry.Close()
+	authority := &lateDecisionAuthority{host: match.Host, at: time.Now().Add(700 * time.Millisecond)}
+	shared := newSharedTLSListener(raw, authority, registry, func(string) bool { return true }, make(chan struct{}, 4), "", func(string) bool { return false },
+		func(context.Context, string) error { return nil }, nil)
+	shared.ServeUnknownNamesWithPage(serverTLS)
+	shared.routeGrace = func() time.Duration { return 5 * time.Second }
+	server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })}
+	defer server.Close()
+	go server.ServeTLS(shared, "", "")
+	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: clientTLS, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", raw.Addr().String())
+	}}}
+	start := time.Now()
+	response, err := client.Get("https://" + match.Host + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNoContent || time.Since(start) > 3*time.Second {
+		t.Fatalf("status %d after %v, want 204 within 3s", response.StatusCode, time.Since(start))
+	}
+}
