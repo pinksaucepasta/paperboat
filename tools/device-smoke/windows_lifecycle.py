@@ -192,13 +192,24 @@ def check_status(win, args):
 
 
 def check_service(win, args):
-    """C013-C019: status, stop, start, restart, then doctor healthy."""
+    """C013-C019: status, stop, start, restart, uninstall, install (each of the last two twice: both are idempotent), then doctor healthy."""
     def state():
         return win.run('service', 'status')[1].strip().lower()
-    for action, expected in (('stop', 'stopped'), ('start', 'running'), ('restart', 'running')):
-        code, out = win.run('service', action)
-        assert code == 0, f'service {action} rc={code}: {out.strip()[:120]}'
-        wait_for(lambda: expected in state(), 60, f'service {action} -> {expected} (now: {state()[:60]})')
+    steps = (('stop', 'stopped'), ('start', 'running'), ('restart', 'running'), ('uninstall', 'not-installed'),
+             ('uninstall', 'not-installed'), ('install', 'running'), ('install', 'running'))
+    try:
+        for action, expected in steps:
+            code, out = win.run('service', action)
+            assert code == 0, f'service {action} rc={code}: {out.strip()[:120]}'
+            wait_for(lambda: expected in state(), 60, f'service {action} -> {expected} (now: {state()[:60]})')
+            if expected == 'not-installed':
+                # Linux reinstalls the user unit from any command; Windows needs administrator rights for that,
+                # so a command that needs the daemon fails and names the command that brings it back.
+                code, out = win.run('doctor')
+                assert code != 0 and 'pb service install' in out, f'doctor without the daemon service rc={code}: {out.strip()[:120]}'
+                assert 'not-installed' in state(), 'doctor recreated the uninstalled daemon service'
+    finally:
+        win.run('service', 'install')  # leave a working daemon even when a step fails
     check_doctor(win, args)
 
 
