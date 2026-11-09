@@ -201,7 +201,7 @@ with the previous tags. Release the lock, then tell the lane that was waiting wh
 **6. Recheck and smoke.** Every server or edge deploy runs inside the deploy gate (from oracle):
 `PROBE='<runs a shell on the paired probe machine>' SQL='<runs read-only psql on the production database,
 SQL on stdin, -At>' deploy/check-edges.sh --deploy '<the step 3 or 4 command>' local=<oracle ip> anvit=<anvit ip>`.
-It makes a preview on the probe before the deploy, fetches it through every edge each second during it, and
+The probe machine must run a `pb` built from `main` (`pb update --from <build>`): a build from before a9f2a2e5f (2026-11-05, host handling of the edge goaway) cannot move to the replacement edge process and shows a 5 s run of 404s on every edge swap (anvit, 2026-11-09), whatever the images are. It makes a preview on the probe before the deploy, fetches it through every edge each second during it, and
 follows the log of every tunnel container that runs in the window, the replaced one included. It fails unless
 all of these are 0: preview failures, edge control failures, refused host carriers
 (`carrier_connection_failed`), host route attach refusals, edge-made 5xx (`edge_http_5xx`), server 5xx
