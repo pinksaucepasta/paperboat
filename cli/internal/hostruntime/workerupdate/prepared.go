@@ -268,7 +268,7 @@ func (m *Manager) verifyPrepared(ctx context.Context, j updateflow.Journal) erro
 	if err := binarytarget.Validate(j.StagedPath, j.ArtifactPlatform, j.ArtifactArchitecture); err != nil {
 		return errors.Join(ErrPreparedCandidate, ErrPreparedWrongTarget, err)
 	}
-	if err := m.config.NativeVerifier.Verify(ctx, j.StagedPath, j.ArtifactPlatform, j.ArtifactArchitecture); err != nil {
+	if err := m.config.NativeVerifier.VerifyRelease(ctx, j.StagedPath, j.ArtifactPlatform, j.ArtifactArchitecture, j.CandidateAuthenticodeSigned); err != nil {
 		return errors.Join(ErrPreparedCandidate, ErrPreparedNotSigned, err)
 	}
 	return nil

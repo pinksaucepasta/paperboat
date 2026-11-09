@@ -661,3 +661,60 @@ func TestQualifiedSubsetPublicationRetainsOtherPlatformTargets(t *testing.T) {
 		t.Fatal("tampered retained target was re-signed")
 	}
 }
+
+// The Authenticode mark is the release step's switch: unset it publishes nothing new (clients trust the TUF digest),
+// set it marks only the Windows targets, inside the signed release index.
+func TestWindowsAuthenticodeMarkIsPublishedOnlyWhenAskedAndOnlyOnWindows(t *testing.T) {
+	t.Setenv("PAPERBOAT_TUF_CI", "1")
+	for _, signed := range []bool{false, true} {
+		repository := filepath.Join(t.TempDir(), "repository")
+		if err := initializeTestRepository(t, repository); err != nil {
+			t.Fatal(err)
+		}
+		artifacts, evidence := t.TempDir(), map[string]string{}
+		version := "2026.08.22.14"
+		for _, target := range supportedReleaseTargets() {
+			name := releaseAssetName(target.platform, target.architecture)
+			if err := os.WriteFile(filepath.Join(artifacts, name), []byte("asset "+name), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if target.platform == "windows" {
+				body, _ := json.Marshal(windowsNativeQualification{Schema: windowsNativeQualificationSchema, ReleaseVersion: version, Platform: "windows", Architecture: target.architecture, Status: "passed", NativeTested: true, WindowsBuild: "26100", Runner: "unit-test"})
+				path := filepath.Join(t.TempDir(), windowsNativeQualificationTarget(target.architecture))
+				if err := os.WriteFile(path, body, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				evidence[target.architecture] = path
+			}
+		}
+		if err := publishWithPolicy(repository, version, artifacts, evidence, 1, "routine", false, signed, "", ""); err != nil {
+			t.Fatal(err)
+		}
+		if err := verifyPublished(repository); err != nil {
+			t.Fatal(err)
+		}
+		targets, err := metadata.Targets().FromFile(filepath.Join(repository, "metadata", "targets.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, target := range targets.Signed.Targets {
+			var custom struct {
+				ReleaseIndex struct {
+					Targets []struct {
+						AuthenticodeSigned bool `json:"authenticode_signed"`
+					} `json:"targets"`
+				} `json:"release_index"`
+			}
+			if err := json.Unmarshal(*target.Custom, &custom); err != nil || len(custom.ReleaseIndex.Targets) != 1 {
+				t.Fatalf("%s custom: %v", name, err)
+			}
+			want := signed && strings.HasSuffix(name, ".exe")
+			if custom.ReleaseIndex.Targets[0].AuthenticodeSigned != want {
+				t.Fatalf("signed=%v: %s marked %v, want %v", signed, name, custom.ReleaseIndex.Targets[0].AuthenticodeSigned, want)
+			}
+			if !signed && strings.Contains(string(*target.Custom), "authenticode") {
+				t.Fatalf("an unmarked release mentions Authenticode: %s", name)
+			}
+		}
+	}
+}

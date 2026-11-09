@@ -267,6 +267,8 @@ type publishedReleaseTarget struct {
 	Platform     string `json:"platform"`
 	Architecture string `json:"architecture"`
 	BinaryFormat string `json:"binary_format"`
+	// Set by the release workflow when the Windows binary is Authenticode-signed; only clients act on it.
+	AuthenticodeSigned bool `json:"authenticode_signed,omitempty"`
 }
 
 func (c Current) Validate() error {

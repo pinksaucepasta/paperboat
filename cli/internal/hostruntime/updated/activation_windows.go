@@ -24,6 +24,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesignature"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
@@ -215,6 +216,12 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 	if err != nil {
 		return windowsActivationJournal{}, err
 	}
+	verifyCtx, cancelVerify := context.WithTimeout(ctx, 30*time.Second)
+	if err := nativesignature.New(nil).Verify(verifyCtx, layout.Binary, "windows", config.Architecture); err != nil {
+		cancelVerify()
+		return windowsActivationJournal{}, err
+	}
+	cancelVerify()
 	if err := hostinstall.PrepareWindowsPinNamespace(ctx, config.OwnerSID); err != nil {
 		return windowsActivationJournal{}, err
 	}
@@ -234,7 +241,7 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 	// Every role executes the same authenticated pb target. Stage it once;
 	// downloading aliases independently can leave different snapshots of the
 	// same signed release in one transaction if metadata changes mid-stage.
-	target := workerupdate.ComponentTarget{SHA256: release.SHA256, Length: release.Length, Platform: release.Platform, Architecture: release.Architecture}
+	target := workerupdate.ComponentTarget{SHA256: release.SHA256, Length: release.Length, Platform: release.Platform, Architecture: release.Architecture, AuthenticodeSigned: release.AuthenticodeSigned}
 	if target.Platform != "windows" || target.Architecture != config.Architecture || target.Length <= 0 || target.Length > maxWindowsComponentSize || len(target.SHA256) != 64 || !lowerHex(target.SHA256) {
 		return windowsActivationJournal{}, workerupdate.ErrInvalidRelease
 	}
@@ -349,7 +356,9 @@ func stageWindowsComponent(ctx context.Context, source workerupdate.TUFSource, r
 		if err := secureWindowsReleaseFile(destination, ownerSID); err != nil {
 			return err
 		}
-		return nil
+		verifyCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		return nativesignature.New(nil).VerifyRelease(verifyCtx, destination, "windows", target.Architecture, target.AuthenticodeSigned)
 	}
 	if _, err := os.Lstat(destination); err == nil {
 		return errInvalidWindowsActivation
@@ -394,6 +403,11 @@ func stageWindowsComponent(ctx context.Context, source workerupdate.TUFSource, r
 		return removeTemporary(workerupdate.ErrInvalidRelease)
 	}
 	if err := binarytarget.Validate(temporary, "windows", target.Architecture); err != nil {
+		return removeTemporary(err)
+	}
+	verifyCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := nativesignature.New(nil).VerifyRelease(verifyCtx, temporary, "windows", target.Architecture, target.AuthenticodeSigned); err != nil {
 		return removeTemporary(err)
 	}
 	if err := secureWindowsReleaseFile(temporary, ownerSID); err != nil {
@@ -797,7 +811,9 @@ func verifyWindowsActivationComponent(ctx context.Context, path string, target w
 	if !matchesWindowsComponent(path, target) {
 		return errInvalidWindowsActivation
 	}
-	return nil
+	verifyCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return nativesignature.New(nil).VerifyRelease(verifyCtx, path, "windows", target.Architecture, target.AuthenticodeSigned)
 }
 
 func verifyWindowsStableBinary(ctx context.Context, path string, target workerupdate.ComponentTarget, ownerSID string) error {
@@ -1295,8 +1311,16 @@ func startVerifiedWindowsActivation(ctx context.Context, config WindowsConfig, j
 	if !windowsMachineFileSecurityMatches(helper, windowsStableBinaryDACL(config.OwnerSID)) && !windowsMachineFileSecurityMatches(helper, windowsStableBinaryDACL("BU")) {
 		return false, errInvalidWindowsActivation
 	}
+	if journal.PreviousSource.Distribution == installsource.Official {
+		verifyCtx, cancelVerify := context.WithTimeout(ctx, 30*time.Second)
+		err := nativesignature.New(nil).Verify(verifyCtx, helper, "windows", journal.Architecture)
+		cancelVerify()
+		if err != nil {
+			return false, err
+		}
+	}
 
-	// Verification can take long enough for an activator that was
+	// Signature verification can take long enough for an activator that was
 	// already starting to become visible in SCM. Re-check ownership immediately
 	// before mutating the activator service so this updater never steals a live
 	// transaction during that handoff window.

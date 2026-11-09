@@ -18,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/binarytarget"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesignature"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
@@ -284,5 +285,10 @@ func validateWindowsSlot(ctx context.Context, current, rollback, architecture st
 }
 
 func verifyWindowsRecoveryExecutable(ctx context.Context, path, architecture string) error {
-	return binarytarget.Validate(path, "windows", architecture)
+	if err := binarytarget.Validate(path, "windows", architecture); err != nil {
+		return err
+	}
+	verifyCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return nativesignature.New(nil).Verify(verifyCtx, path, "windows", architecture)
 }

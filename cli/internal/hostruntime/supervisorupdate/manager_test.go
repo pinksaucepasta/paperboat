@@ -68,7 +68,7 @@ func (w *testWorkloads) Snapshot(context.Context) (WorkloadSnapshot, error) {
 
 type testVerifier struct{}
 
-func (testVerifier) Verify(context.Context, string, string, string) error { return nil }
+func (testVerifier) VerifyRelease(context.Context, string, string, string, bool) error { return nil }
 
 type testActivator struct{ err error }
 

@@ -351,3 +351,36 @@ func (*privateIndexError) Error() string { panic("private index cause formatted"
 type indexErrorReader struct{ cause error }
 
 func (r indexErrorReader) Read([]byte) (int, error) { return 0, r.cause }
+
+func TestAuthenticodeMarkIsOnlyValidOnAWindowsTarget(t *testing.T) {
+	windows := fixture()
+	windows.Platform, windows.Architecture, windows.BinaryFormat = "windows", "amd64", "pe"
+	plan, err := releasepolicy.Default(windows.Version, windows.ManifestSHA256, 1, "routine", "seed", []releasepolicy.PlatformTarget{{Platform: "windows", Architecture: "amd64"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	windows.DeploymentPlan = &plan
+	windows.DeploymentPlanSHA256, _ = plan.PlanSHA256()
+	target := &windows.Targets[0]
+	target.Platform, target.Architecture, target.BinaryFormat = "windows", "amd64", "pe"
+	target.TargetPath, target.AssetName = "pb-windows-amd64.exe", "pb-windows-amd64.exe"
+	target.DownloadURL = "https://github.com/example/paperboat-cli/releases/download/" + windows.Version + "/pb-windows-amd64.exe"
+	windows.Stability, windows.NativeTested, windows.TestedWindowsBuilds = "stable", true, []string{"26100"}
+	windows.OpenSSHPackageID, windows.OpenSSHApprovedVersion = "Microsoft.OpenSSH.Preview", "10.0.0.0"
+	decode := func(index Index) (Index, error) {
+		body, _ := json.Marshal(index)
+		return Decode(strings.NewReader(string(body)), time.Now().UTC())
+	}
+	for _, marked := range []bool{false, true} {
+		windows.Targets[0].AuthenticodeSigned = marked
+		got, err := decode(windows)
+		if err != nil || got.Targets[0].AuthenticodeSigned != marked {
+			t.Fatalf("marked=%v: %+v %v", marked, got.Targets, err)
+		}
+	}
+	linux := fixture()
+	linux.Targets[0].AuthenticodeSigned = true
+	if _, err := decode(linux); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("a Linux target marked Authenticode-signed was accepted: %v", err)
+	}
+}

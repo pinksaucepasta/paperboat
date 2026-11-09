@@ -30,6 +30,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/nativesignature"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseindex"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
@@ -333,6 +334,11 @@ func verifyStandaloneRelease(ctx context.Context, source string, artifact bootst
 	}
 	if err := binarytarget.Validate(source, "windows", artifact.Architecture); err != nil {
 		return releaseindex.Target{}, hostInstallFailure("downloaded Paperboat executable format", ErrInvalidRequest, err)
+	}
+	verifyCtx, cancel := context.WithTimeout(preflightCtx, 30*time.Second)
+	defer cancel()
+	if err := nativesignature.New(nil).VerifyRelease(verifyCtx, source, "windows", artifact.Architecture, target.AuthenticodeSigned); err != nil {
+		return releaseindex.Target{}, hostInstallFailure("downloaded Paperboat Authenticode", ErrInvalidRequest, err)
 	}
 	return target, nil
 }
@@ -3236,6 +3242,13 @@ func stageWindowsBinary(ctx context.Context, source, current, rollback string, i
 	if err := installSource.Verify(source); err != nil {
 		return suppliedRuntimeSourceFailure{cause: err}
 	}
+	if installSource.Distribution == installsource.Official {
+		sourceVerifyCtx, cancelSourceVerify := context.WithTimeout(ctx, 30*time.Second)
+		defer cancelSourceVerify()
+		if err := nativesignature.New(nil).Verify(sourceVerifyCtx, source, "windows", installSource.Architecture); err != nil {
+			return hostInstallFailure("downloaded runtime Authenticode", ErrInvalidRequest, err)
+		}
+	}
 	// The dashboard bootstrap may execute the verified binary directly from the
 	// installed active slot. That process necessarily keeps the image open on
 	// Windows, so rotating the slot would fail with a sharing violation. The
@@ -3280,6 +3293,13 @@ func stageWindowsBinary(ctx context.Context, source, current, rollback string, i
 	}
 	if err := installSource.Verify(temporaryPath); err != nil {
 		return hostInstallFailure("staged runtime bytes changed", ErrInvalidRequest, err)
+	}
+	if installSource.Distribution == installsource.Official {
+		verifyCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		if err := nativesignature.New(nil).Verify(verifyCtx, temporaryPath, "windows", installSource.Architecture); err != nil {
+			return hostInstallFailure("staged runtime Authenticode", ErrInvalidRequest, err)
+		}
 	}
 	trustedOwner, err := windowsRuntimeTrustedOwner()
 	if err != nil {
@@ -3472,11 +3492,16 @@ func verifyWindowsSource(ctx context.Context, path string, source installsource.
 	return nil
 }
 
-func verifyWindowsInstalledBinary(_ context.Context, path, architecture string) error {
+func verifyWindowsInstalledBinary(ctx context.Context, path, architecture string) error {
 	if err := secureWindowsFile(path, ""); err != nil {
 		return err
 	}
-	return binarytarget.Validate(path, "windows", architecture)
+	if err := binarytarget.Validate(path, "windows", architecture); err != nil {
+		return err
+	}
+	verifyCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return nativesignature.New(nil).Verify(verifyCtx, path, "windows", architecture)
 }
 
 func ensureWindowsDirectory(path, ownerSID string) error {

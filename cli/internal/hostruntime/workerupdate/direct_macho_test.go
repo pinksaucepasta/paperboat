@@ -29,7 +29,7 @@ func TestDirectMachOStagingPreservesSignedIdentityAndRejectsUnverifiedBytes(t *t
 				candidate.SHA256 = strings.Repeat("f", 64)
 			}
 			fixture.fetcher.body = body
-			fixture.manager.config.NativeVerifier = nativeVerifierFunc(func(_ context.Context, path, platform, arch string) error {
+			fixture.manager.config.NativeVerifier = nativeVerifierFunc(func(_ context.Context, path, platform, arch string, _ bool) error {
 				if platform != "darwin" || arch != "arm64" || !regularMatches(path, candidate.Length, candidate.SHA256) {
 					t.Fatal("native validator did not receive the exact authenticated product")
 				}

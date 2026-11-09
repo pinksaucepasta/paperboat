@@ -65,6 +65,9 @@ type Target struct {
 	Platform     string `json:"platform"`
 	Architecture string `json:"architecture"`
 	BinaryFormat string `json:"binary_format"`
+	// AuthenticodeSigned is set by the release workflow once the Windows binary carries the publisher's signature;
+	// clients then require it (nativesignature.VerifyRelease). Unset, the TUF digest alone is the trust root.
+	AuthenticodeSigned bool `json:"authenticode_signed,omitempty"`
 }
 
 // indexDecodeFailure keeps native reader and JSON parser causes available to
@@ -145,6 +148,9 @@ func (i Index) Validate(now time.Time) error {
 	}
 	target := i.Targets[0]
 	assetName := AssetName(i.Platform, i.Architecture)
+	if target.AuthenticodeSigned && i.Platform != "windows" {
+		return ErrInvalid
+	}
 	if target.Component != "pb" || target.TargetPath != assetName || target.AssetName != assetName || !validRepository(target.Repository) || target.Platform != i.Platform || target.Architecture != i.Architecture || target.BinaryFormat != i.BinaryFormat || target.Length < 1 || target.Length > 512<<20 || len(target.SHA256) != sha256.Size*2 || !lowerHex(target.SHA256) || !ValidDownloadURL(target.DownloadURL, target.Repository, i.Version, assetName) {
 		return ErrInvalid
 	}

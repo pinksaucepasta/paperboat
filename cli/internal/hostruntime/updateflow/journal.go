@@ -112,6 +112,7 @@ type Journal struct {
 	CandidateVersion             string                `json:"candidate_version,omitempty"`
 	CandidateDigest              string                `json:"candidate_digest,omitempty"`
 	CandidateManifestDigest      string                `json:"candidate_manifest_digest,omitempty"`
+	CandidateAuthenticodeSigned  bool                  `json:"candidate_authenticode_signed,omitempty"`
 	CandidatePolicy              *ActivationPolicy     `json:"candidate_policy,omitempty"`
 	CandidateLength              int64                 `json:"candidate_length,omitempty"`
 	StagedPath                   string                `json:"staged_path,omitempty"`

@@ -64,6 +64,8 @@ type Release struct {
 	CLILength         int64
 	CLIPlatform       string
 	CLIArchitecture   string
+	// AuthenticodeSigned is the signed index's mark on the pb target (Windows only).
+	AuthenticodeSigned bool
 	HostdAPIMin       uint16
 	HostdAPIMax       uint16
 	RuntimeAPIMin     uint16
@@ -83,10 +85,11 @@ type Release struct {
 // ComponentTarget is the immutable target identity copied from the verified
 // release index. It is never populated from a local path or a caller.
 type ComponentTarget struct {
-	SHA256       string
-	Length       int64
-	Platform     string
-	Architecture string
+	SHA256             string
+	Length             int64
+	Platform           string
+	Architecture       string
+	AuthenticodeSigned bool
 }
 
 // Resolver returns the newest signed and cohort-eligible release. found=false
@@ -122,7 +125,9 @@ type HealthChecker interface {
 // digest, length, and binary-format validation has completed in a private
 // staging path and before the candidate is made executable by hostd.
 type NativeVerifier interface {
-	Verify(context.Context, string, string, string) error
+	// VerifyRelease checks path for platform and architecture; authenticodeSigned is the signed release metadata's
+	// mark that a Windows binary carries the publisher's signature.
+	VerifyRelease(ctx context.Context, path, platform, architecture string, authenticodeSigned bool) error
 }
 
 type Config struct {
@@ -515,7 +520,7 @@ func (m *Manager) stage(ctx context.Context, release Release) (Release, error) {
 	if err := binarytarget.Validate(pendingPath, release.Platform, release.Architecture); err != nil {
 		return Release{}, ErrInvalidRelease
 	}
-	if err := m.config.NativeVerifier.Verify(ctx, pendingPath, release.Platform, release.Architecture); err != nil {
+	if err := m.config.NativeVerifier.VerifyRelease(ctx, pendingPath, release.Platform, release.Architecture, release.AuthenticodeSigned); err != nil {
 		return Release{}, ErrInvalidRelease
 	}
 	//paperboat:allow-source-policy atomic-replacement owner=worker-update reason=verified-runtime-download-publication
@@ -549,7 +554,7 @@ func (m *Manager) verifyRecovery(ctx context.Context, release Release, path stri
 	if err := binarytarget.Validate(path, release.Platform, release.Architecture); err != nil {
 		return ErrInvalidRelease
 	}
-	if err := m.config.NativeVerifier.Verify(ctx, path, release.Platform, release.Architecture); err != nil {
+	if err := m.config.NativeVerifier.VerifyRelease(ctx, path, release.Platform, release.Architecture, release.AuthenticodeSigned); err != nil {
 		return ErrInvalidRelease
 	}
 	return nil
@@ -603,6 +608,7 @@ func withRelease(journal updateflow.Journal, release Release, path string) updat
 	journal.SupervisorMaintenance, journal.OwnerMaintenanceGraceSeconds = release.SupervisorMaintenance, release.OwnerMaintenanceGraceSeconds
 	journal.CandidateVersion, journal.CandidateDigest, journal.CandidateLength, journal.StagedPath = release.Version, release.SHA256, release.Length, path
 	journal.CandidateManifestDigest = release.ManifestSHA256
+	journal.CandidateAuthenticodeSigned = release.AuthenticodeSigned
 	journal.CandidatePolicy = nil
 	if release.ManifestSHA256 != "" {
 		policy := activationPolicy(release)
@@ -644,7 +650,7 @@ func activeReleaseFromJournal(journal updateflow.Journal) Release {
 }
 
 func completeJournalRelease(release Release) (Release, error) {
-	component := ComponentTarget{SHA256: release.SHA256, Length: release.Length, Platform: release.Platform, Architecture: release.Architecture}
+	component := ComponentTarget{SHA256: release.SHA256, Length: release.Length, Platform: release.Platform, Architecture: release.Architecture, AuthenticodeSigned: release.AuthenticodeSigned}
 	release.CLISHA256, release.CLILength, release.CLIPlatform, release.CLIArchitecture = release.SHA256, release.Length, release.Platform, release.Architecture
 	release.Hostd, release.Updater, release.Launcher = component, component, component
 	if err := validateRelease(release); err != nil {
@@ -656,6 +662,7 @@ func completeJournalRelease(release Release) (Release, error) {
 func releaseFromJournal(j updateflow.Journal) Release {
 	release := Release{Version: j.CandidateVersion, SHA256: j.CandidateDigest, ManifestSHA256: j.CandidateManifestDigest, Length: j.CandidateLength, Platform: runtime.GOOS, Architecture: runtime.GOARCH, HostdAPIMin: j.HostdAPIMin, HostdAPIMax: j.HostdAPIMax, RuntimeAPIMin: j.RuntimeAPIMin, RuntimeAPIMax: j.RuntimeAPIMax}
 	release.SupervisorMaintenance, release.OwnerMaintenanceGraceSeconds = j.SupervisorMaintenance, j.OwnerMaintenanceGraceSeconds
+	release.AuthenticodeSigned = j.CandidateAuthenticodeSigned
 	if p := j.CandidatePolicy; p != nil {
 		release.CanaryPath, release.CanaryStatus, release.CanarySamples = p.CanaryPath, p.CanaryStatus, p.CanarySamples
 		release.CanaryTimeout, release.DrainTimeout, release.StabilityWindow, release.StabilityInterval, release.RollbackTimeout = p.CanaryTimeout, p.DrainTimeout, p.StabilityWindow, p.StabilityInterval, p.RollbackTimeout

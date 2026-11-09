@@ -109,7 +109,7 @@ func TestWorkerUpdateRejectsTamperedArtifactBeforeCandidateStart(t *testing.T) {
 func TestWorkerUpdateRejectsNativeSignatureBeforeCandidateStart(t *testing.T) {
 	fixture := newFixture(t)
 	calls := 0
-	fixture.manager.config.NativeVerifier = nativeVerifierFunc(func(_ context.Context, path, platform, architecture string) error {
+	fixture.manager.config.NativeVerifier = nativeVerifierFunc(func(_ context.Context, path, platform, architecture string, _ bool) error {
 		calls++
 		if filepath.Dir(path) != filepath.Dir(fixture.paths.staged) || filepath.Base(path) == filepath.Base(fixture.paths.staged) || platform != runtime.GOOS || architecture != runtime.GOARCH {
 			t.Fatalf("native verification input path=%q platform=%q architecture=%q", path, platform, architecture)
@@ -234,7 +234,7 @@ func newFixture(t *testing.T) fixture {
 		committed = &selected
 		return a.Source, nil
 	}
-	manager, err = New(Config{ApplyPrepared: apply, StatePath: paths.journal, Binary: paths.current, BinaryStaged: paths.staged, Active: active, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), Fetcher: fetcher, Hostd: hostd, Health: health, Gate: fakeActivationGate{}, NativeVerifier: nativeVerifierFunc(func(context.Context, string, string, string) error { return nil }), MonitorWindow: time.Millisecond, HealthInterval: time.Millisecond})
+	manager, err = New(Config{ApplyPrepared: apply, StatePath: paths.journal, Binary: paths.current, BinaryStaged: paths.staged, Active: active, OwnerUID: os.Geteuid(), OwnerGID: os.Getegid(), Fetcher: fetcher, Hostd: hostd, Health: health, Gate: fakeActivationGate{}, NativeVerifier: nativeVerifierFunc(func(context.Context, string, string, string, bool) error { return nil }), MonitorWindow: time.Millisecond, HealthInterval: time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,10 +381,10 @@ func (h *blockingHealth) Check(context.Context, hostdproto.Status, Release) erro
 	return nil
 }
 
-type nativeVerifierFunc func(context.Context, string, string, string) error
+type nativeVerifierFunc func(context.Context, string, string, string, bool) error
 
-func (f nativeVerifierFunc) Verify(ctx context.Context, path, platform, architecture string) error {
-	return f(ctx, path, platform, architecture)
+func (f nativeVerifierFunc) VerifyRelease(ctx context.Context, path, platform, architecture string, signed bool) error {
+	return f(ctx, path, platform, architecture, signed)
 }
 
 // activatePrepared exercises explicit user authorization in the existing

@@ -270,9 +270,9 @@ func releaseFromIndex(index releaseindex.Index) (Release, bool) {
 	if !ok {
 		return Release{}, false
 	}
-	component := ComponentTarget{SHA256: target.SHA256, Length: target.Length, Platform: target.Platform, Architecture: target.Architecture}
+	component := ComponentTarget{SHA256: target.SHA256, Length: target.Length, Platform: target.Platform, Architecture: target.Architecture, AuthenticodeSigned: target.AuthenticodeSigned}
 	return Release{
-		Version: index.Version, SHA256: target.SHA256, Length: target.Length, Platform: target.Platform, Architecture: target.Architecture,
+		Version: index.Version, SHA256: target.SHA256, Length: target.Length, Platform: target.Platform, Architecture: target.Architecture, AuthenticodeSigned: target.AuthenticodeSigned,
 		ManifestSHA256: index.ManifestSHA256,
 		CanaryPath:     index.DeploymentPlan.Canary.Path, CanaryStatus: index.DeploymentPlan.Canary.ExpectedStatus, CanarySamples: index.DeploymentPlan.Canary.Samples,
 		CanaryTimeout:     time.Duration(index.DeploymentPlan.Canary.TimeoutSeconds) * time.Second,

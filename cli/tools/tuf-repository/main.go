@@ -127,13 +127,14 @@ func run(args []string) error {
 		supervisorMaintenance := fs.Bool("supervisor-maintenance", false, "release updates stable supervisor components")
 		amd64QualificationEvidence := fs.String("windows-amd64-native-evidence", "", "absolute JSON evidence for Windows amd64 native qualification")
 		arm64QualificationEvidence := fs.String("windows-arm64-native-evidence", "", "absolute JSON evidence for Windows arm64 native qualification")
+		authenticodeSigned := fs.Bool("windows-authenticode-signed", false, "the Windows binaries carry the publisher's Authenticode signature; clients then require it")
 		if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
 			return errors.New("usage: paperboat-tuf publish -repository DIR -version VERSION -artifacts DIR -manifest FILE -deployment-plan FILE -windows-amd64-native-evidence FILE -windows-arm64-native-evidence FILE -rollout-revision N")
 		}
 		if *rolloutRevision == 0 || (*severity != "routine" && *severity != "security" && *severity != "critical") {
 			return errors.New("valid rollout revision and severity are required")
 		}
-		return publishWithPolicy(*repo, *version, *artifacts, map[string]string{"amd64": *amd64QualificationEvidence, "arm64": *arm64QualificationEvidence}, *rolloutRevision, *severity, *supervisorMaintenance, *manifestPath, *planPath)
+		return publishWithPolicy(*repo, *version, *artifacts, map[string]string{"amd64": *amd64QualificationEvidence, "arm64": *arm64QualificationEvidence}, *rolloutRevision, *severity, *supervisorMaintenance, *authenticodeSigned, *manifestPath, *planPath)
 	case "refresh":
 		fs := flag.NewFlagSet("refresh", flag.ContinueOnError)
 		repo := fs.String("repository", "", "repository directory")
@@ -233,10 +234,10 @@ func validateSigners(repo, trustedRootPath string) error {
 }
 
 func publish(repo, version, artifacts string, qualificationEvidencePaths map[string]string, rolloutRevision uint64, severity string, supervisorMaintenance bool) error {
-	return publishWithPolicy(repo, version, artifacts, qualificationEvidencePaths, rolloutRevision, severity, supervisorMaintenance, "", "")
+	return publishWithPolicy(repo, version, artifacts, qualificationEvidencePaths, rolloutRevision, severity, supervisorMaintenance, false, "", "")
 }
 
-func publishWithPolicy(repo, version, artifacts string, qualificationEvidencePaths map[string]string, rolloutRevision uint64, severity string, supervisorMaintenance bool, manifestPath, planPath string) error {
+func publishWithPolicy(repo, version, artifacts string, qualificationEvidencePaths map[string]string, rolloutRevision uint64, severity string, supervisorMaintenance, windowsAuthenticodeSigned bool, manifestPath, planPath string) error {
 	repo, err := validateRepository(repo, true)
 	if err != nil {
 		return err
@@ -348,6 +349,7 @@ func publishWithPolicy(repo, version, artifacts string, qualificationEvidencePat
 			openSSHID, openSSHVersion = "Microsoft.OpenSSH.Preview", "10.0.0.0"
 			qualification := qualifications[architecture]
 			nativeTested, testedBuilds = true, []string{qualification.WindowsBuild}
+			component.AuthenticodeSigned = windowsAuthenticodeSigned
 		}
 		planCopy := deploymentPlan
 		index := releaseIndex{Schema: "paperboat.release-index/v1", ReleaseID: "rel_" + version, Version: version, Channel: channel, Severity: severity, CreatedAt: createdAt, Platform: platform, Architecture: architecture, BinaryFormat: format, Targets: []componentTarget{component}, HostdAPIMin: 1, HostdAPIMax: 2, RuntimeAPIMin: 1, RuntimeAPIMax: 2, RolloutPolicyRevision: deploymentPlan.PolicyRevision, SupervisorMaintenance: supervisorMaintenance, Stability: stability, NativeTested: nativeTested, TestedWindowsBuilds: testedBuilds, OpenSSHPackageID: openSSHID, OpenSSHApprovedVersion: openSSHVersion, ManifestSHA256: manifestSHA256, DeploymentPlanSHA256: deploymentPlanSHA256, DeploymentPlan: &planCopy}

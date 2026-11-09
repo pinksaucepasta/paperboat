@@ -105,6 +105,8 @@ type targetState struct {
 	Platform     string `json:"platform"`
 	Architecture string `json:"architecture"`
 	Applied      bool   `json:"applied"`
+	// AuthenticodeSigned mirrors the signed index's mark so a journal reload compares equal to the index.
+	AuthenticodeSigned bool `json:"authenticode_signed,omitempty"`
 }
 
 type journal struct {
@@ -613,7 +615,7 @@ func writeArtifact(ctx context.Context, stream io.ReadCloser, path string, targe
 	if verifier == nil {
 		return ErrInvalidRelease
 	}
-	if err := verifier.Verify(ctx, temp, target.Platform, target.Architecture); err != nil {
+	if err := verifier.VerifyRelease(ctx, temp, target.Platform, target.Architecture, target.AuthenticodeSigned); err != nil {
 		return artifactTransferFailure(errors.Join(ErrInvalidRelease, err))
 	}
 	//paperboat:allow-source-policy atomic-replacement owner=supervisor-update reason=verified-staged-component-publication
@@ -747,10 +749,10 @@ func idleJournal(from journal, active string, now time.Time) journal {
 }
 
 func stateFromTarget(t workerupdate.ComponentTarget) targetState {
-	return targetState{Digest: t.SHA256, Length: t.Length, Platform: t.Platform, Architecture: t.Architecture}
+	return targetState{Digest: t.SHA256, Length: t.Length, Platform: t.Platform, Architecture: t.Architecture, AuthenticodeSigned: t.AuthenticodeSigned}
 }
 func componentFromState(t targetState) workerupdate.ComponentTarget {
-	return workerupdate.ComponentTarget{SHA256: t.Digest, Length: t.Length, Platform: t.Platform, Architecture: t.Architecture}
+	return workerupdate.ComponentTarget{SHA256: t.Digest, Length: t.Length, Platform: t.Platform, Architecture: t.Architecture, AuthenticodeSigned: t.AuthenticodeSigned}
 }
 func sameSupervisorRelease(a, b workerupdate.Release) bool {
 	return a.Version == b.Version && a.Hostd == b.Hostd && a.Updater == b.Updater && a.Launcher == b.Launcher

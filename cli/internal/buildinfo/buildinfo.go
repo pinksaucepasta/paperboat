@@ -18,6 +18,11 @@ var DefaultSentryRelease = ""
 // with the same DSN, so test machines report through the release code path, kept apart by environment.
 var DefaultSentryEnvironment = ""
 
+// WindowsPublisher is the exact simple name (CN) of the Authenticode signer
+// certificate required of a Windows release the signed metadata marks as
+// signed. Release builds replace it with the legal publisher name.
+var WindowsPublisher = "Paperboat"
+
 // Commit is the source revision. Replaced by release builds.
 var Commit = "unknown"
 

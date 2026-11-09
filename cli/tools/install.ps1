@@ -20,11 +20,13 @@ if ($arch -eq 'amd64') {
   $productUrl = '@PAPERBOAT_PRODUCT_WINDOWS_AMD64_URL@'
   $productSha = '@PAPERBOAT_PRODUCT_WINDOWS_AMD64_SHA256@'
   $productLength = '@PAPERBOAT_PRODUCT_WINDOWS_AMD64_LENGTH@'
+  $productAuthenticode = '@PAPERBOAT_PRODUCT_WINDOWS_AMD64_AUTHENTICODE@'
 } else {
   $productVersion = '@PAPERBOAT_PRODUCT_WINDOWS_ARM64_VERSION@'
   $productUrl = '@PAPERBOAT_PRODUCT_WINDOWS_ARM64_URL@'
   $productSha = '@PAPERBOAT_PRODUCT_WINDOWS_ARM64_SHA256@'
   $productLength = '@PAPERBOAT_PRODUCT_WINDOWS_ARM64_LENGTH@'
+  $productAuthenticode = '@PAPERBOAT_PRODUCT_WINDOWS_ARM64_AUTHENTICODE@'
 }
 if ($productVersion -notmatch '^20[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.(0|[1-9][0-9]*)$' -or $productSha -cnotmatch '^[0-9a-f]{64}$' -or $productLength -notmatch '^[1-9][0-9]*$') { throw 'Use the published Paperboat installer.' }
 if ([int64]$productLength -gt 536870912) { throw 'Paperboat product length exceeds the release bound.' }
@@ -83,6 +85,12 @@ try {
   if ($downloadItem.PSIsContainer -or ($downloadItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Paperboat product must be a regular non-reparse file.' }
   if ($downloadItem.Length -ne [int64]$productLength) { throw 'Paperboat product length mismatch.' }
   if ((Get-FileHash -Algorithm SHA256 -LiteralPath $download).Hash.ToLowerInvariant() -ne $productSha) { throw 'Paperboat product digest mismatch.' }
+  # The signed release metadata marks a signed binary; unmarked, the digest above is the trust root.
+  if ($productAuthenticode -eq 'true') {
+    $signature = Get-AuthenticodeSignature -LiteralPath $download
+    $signer = if ($null -ne $signature.SignerCertificate) { $signature.SignerCertificate.GetNameInfo('SimpleName', $false) } else { '' }
+    if ($signature.Status -ne 'Valid' -or $signer -cne '@PAPERBOAT_WINDOWS_PUBLISHER@') { throw 'Paperboat product Authenticode signature is not valid for the expected publisher.' }
+  }
   Unblock-File -LiteralPath $download -ErrorAction SilentlyContinue
 
   if ($null -ne $tokenFile) {
