@@ -298,13 +298,13 @@ function EnrollmentStatus({
  * stays one line (one per command when there are several) and scrolls sideways under the copy
  * icon, which fades the text out beneath it.
  */
-export function CommandBlock({ command }: { command: string }) {
+export function CommandBlock({ command, label = "Copy command" }: { command: string; label?: string }) {
   const { copied, copy } = useCopy(command)
   return (
     <button
       type="button"
       onClick={copy}
-      aria-label={copied ? "Copied" : "Copy command"}
+      aria-label={copied ? "Copied" : label}
       className="group/copy relative flex w-full rounded-lg bg-muted text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring/30"
     >
       <code className="no-scrollbar min-w-0 flex-1 overflow-x-auto py-3 pr-12 pl-3.5 font-mono text-xs leading-relaxed whitespace-pre">

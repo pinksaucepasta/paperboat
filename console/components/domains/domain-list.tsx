@@ -17,7 +17,7 @@ import {
   type WorkspaceDomain,
 } from "@/lib/workspace-domains"
 import { cn } from "@/lib/utils"
-import { CopyText } from "@/components/copy-button"
+import { CommandBlock } from "@/components/add-machine-dialog"
 import { ConfirmAction } from "@/components/list-toolbar"
 import { RowMenus, type Entry } from "@/components/row-menus"
 import { Time } from "@/components/time"
@@ -229,7 +229,7 @@ function RemoveDomain({
 
 const purposes: Record<string, string> = {
   verification: "Proves you control the domain",
-  routing: "Sends every name under it to Paperboat",
+  routing: "Needed to serve names under it",
   apex_routing: `Optional: serves the domain itself`,
 }
 
@@ -260,11 +260,7 @@ function DomainPanel({ domain, onRemoved }: { domain: WorkspaceDomain; onRemoved
             </Button>
           }
         >
-          {!verified && (
-            <p className="text-sm text-muted-foreground">
-              Add these at your DNS provider. Paperboat checks them on its own and this page updates.
-            </p>
-          )}
+          {!verified && <p className="text-sm text-muted-foreground">Add these records at your DNS provider.</p>}
           {domain.records.map((record) => (
             <Record key={`${record.name}-${record.type}-${record.value}`} record={record} />
           ))}
@@ -373,21 +369,21 @@ function PanelSection({
   )
 }
 
-/** One DNS record to add; each part copies on click. */
+/** One DNS record to add. Name and value stay whole on one line, scroll sideways, and copy on click. */
 function Record({ record }: { record: WorkspaceDomain["records"][number] }) {
   return (
     <div className="flex flex-col gap-1.5">
       <p className="text-xs text-muted-foreground">{purposes[record.purpose] ?? record.purpose}</p>
-      <dl className="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 rounded-lg bg-surface p-3 text-sm">
+      <dl className="grid grid-cols-[3rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-sm">
         <dt className="text-muted-foreground">Type</dt>
         <dd className="font-mono text-code">{record.type}</dd>
         <dt className="text-muted-foreground">Name</dt>
         <dd className="min-w-0">
-          <CopyText value={record.name} className="font-mono text-code" />
+          <CommandBlock command={record.name} label="Copy name" />
         </dd>
         <dt className="text-muted-foreground">Value</dt>
         <dd className="min-w-0">
-          <CopyText value={record.value} className="font-mono text-code" />
+          <CommandBlock command={record.value} label="Copy value" />
         </dd>
       </dl>
     </div>
@@ -433,13 +429,7 @@ function AddDomainDialog({ onClose, onAdded }: { onClose: () => void; onAdded: (
               spellCheck={false}
               className="font-mono"
             />
-            {problem || add.isError ? (
-              <FieldError>{problem ?? add.error?.message}</FieldError>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                A domain you control. Next you’ll get the DNS records to add.
-              </p>
-            )}
+            {(problem || add.isError) && <FieldError>{problem ?? add.error?.message}</FieldError>}
           </Field>
           <DialogFooter>
             <Button type="button" variant="secondary" size="lg" onClick={onClose} disabled={add.isPending}>
