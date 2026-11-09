@@ -1,12 +1,17 @@
 package edgehttp
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -14,13 +19,14 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
+	edgetelemetry "github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
 )
 
 func assertBrandedPage(t *testing.T, w *httptest.ResponseRecorder, status int, sentence string) {
 	t.Helper()
 	body := w.Body.String()
 	if w.Code != status || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") ||
-		!strings.Contains(body, "<!doctype html>") || !strings.Contains(body, "paperboat") || !strings.Contains(body, sentence) {
+		!strings.Contains(body, "<!doctype html>") || !strings.Contains(body, `aria-label="Paperboat"`) || !strings.Contains(body, sentence) {
 		t.Fatalf("status=%d type=%q want branded page %d containing %q: %q", w.Code, w.Header().Get("Content-Type"), status, sentence, body)
 	}
 }
@@ -122,5 +128,81 @@ func TestHoldForRouteWaitsOnlyWithinTheGrace(t *testing.T) {
 	calls.Store(0)
 	if _, _, err := holdForRoute(ctx, time.Minute, acquire(1<<30)); !errors.Is(err, route.ErrNoMatch) || calls.Load() != 1 {
 		t.Fatalf("a request that ended stops waiting: err=%v after %d calls", err, calls.Load())
+	}
+}
+
+// Each status shows its plain-language title, never the HTTP reason phrase; the reference id on the page, in the
+// X-Paperboat-Reference header and in the edge log line are one value; the page ships its dark-mode styles.
+func TestErrorPageTitleReferenceAndDarkMode(t *testing.T) {
+	titles := map[int]string{
+		400: "This link doesn't work", 401: "Sign in to continue", 403: "You don't have access to this app",
+		404: "Page not found", 409: "Paperboat couldn't finish this request", 413: "Request too large",
+		429: "Too many requests", 502: "This app isn't responding", 503: "Paperboat couldn't finish this request",
+		504: "Paperboat couldn't finish this request",
+	}
+	actions := map[int]string{401: "Sign in", 409: "Try again", 429: "Try again", 502: "Try again", 503: "Try again", 504: "Try again"}
+	reference := regexp.MustCompile(`^[0-9a-f]{12}$`)
+	for status, title := range titles {
+		var logged bytes.Buffer
+		restore := edgetelemetry.CaptureLog(&logged)
+		w := httptest.NewRecorder()
+		writeErrorPage(w, status, "")
+		restore()
+		body := w.Body.String()
+		if !strings.Contains(body, "<h1>"+template.HTMLEscapeString(title)+"</h1>") {
+			t.Errorf("%d: title %q missing: %q", status, title, body)
+		}
+		if strings.Contains(body, http.StatusText(status)) {
+			t.Errorf("%d: the page shows the reason phrase %q", status, http.StatusText(status))
+		}
+		for _, want := range []string{"prefers-color-scheme:dark", `<meta name="color-scheme" content="light dark">`, `aria-label="Paperboat"`} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%d: page lacks %s", status, want)
+			}
+		}
+		if got, want := strings.Contains(body, `class="action"`), actions[status] != ""; got != want || want && !strings.Contains(body, ">"+actions[status]+"</a>") {
+			t.Errorf("%d: action %q present=%v", status, actions[status], got)
+		}
+		ref := w.Header().Get("X-Paperboat-Reference")
+		if !reference.MatchString(ref) {
+			t.Fatalf("%d: reference header %q", status, ref)
+		}
+		footer := "Error " + strconv.Itoa(status) + " · Reference " + ref + " · "
+		if !strings.Contains(body, footer) {
+			t.Errorf("%d: footer %q missing: %q", status, footer, body)
+		}
+		var line struct {
+			Operation string `json:"operation"`
+			Reference string `json:"reference"`
+			Status    int    `json:"status"`
+		}
+		wantEvent := "edge_http_4xx"
+		if status >= 500 {
+			wantEvent = "edge_http_5xx"
+		}
+		if err := json.Unmarshal(logged.Bytes(), &line); err != nil || line.Operation != wantEvent || line.Reference != ref || line.Status != status {
+			t.Errorf("%d: logged %q (err %v), want %s with reference %s", status, logged.String(), err, wantEvent, ref)
+		}
+		if h := w.Header(); h.Get("Cache-Control") != "no-store" || h.Get("X-Content-Type-Options") != "nosniff" || w.Code != status {
+			t.Errorf("%d: headers %v code %d", status, h, w.Code)
+		}
+	}
+}
+
+func TestErrorPageReferenceIsPerRequest(t *testing.T) {
+	a, b := httptest.NewRecorder(), httptest.NewRecorder()
+	writeErrorPage(a, 502, "")
+	writeErrorPage(b, 502, "")
+	if a.Header().Get("X-Paperboat-Reference") == b.Header().Get("X-Paperboat-Reference") {
+		t.Fatal("two failures share a reference")
+	}
+}
+
+func TestErrorPageLinkIsTheAction(t *testing.T) {
+	w := httptest.NewRecorder()
+	writeErrorPageLink(w, 403, deniedMessage, "Use a different account", "https://login.example.test/x?a=1&b=2")
+	body := w.Body.String()
+	if !strings.Contains(body, `href="https://login.example.test/x?a=1&amp;b=2">Use a different account</a>`) {
+		t.Fatalf("link action missing: %q", body)
 	}
 }

@@ -300,7 +300,7 @@ func (p *Policy) awaitPreviewRoute(ctx context.Context, host string) (string, st
 
 const edgeRateLimitedMessage = "This address is getting more requests than Paperboat allows at once. Wait a moment and retry."
 
-const upstreamUnavailableMessage = "Paperboat could not reach the app behind this address. If it is yours, start it and reload the page."
+const upstreamUnavailableMessage = "Paperboat could not reach the app behind this address. If you own the app, start it and try again."
 
 type retryPreviewTransport struct{ next http.RoundTripper }
 
