@@ -291,7 +291,10 @@ func releaseFromIndex(index releaseindex.Index) (Release, bool) {
 func sameReleaseTargets(a, b Release) bool {
 	return a.Version == b.Version && a.SHA256 == b.SHA256 && a.Length == b.Length && a.Platform == b.Platform && a.Architecture == b.Architecture &&
 		a.ManifestSHA256 == b.ManifestSHA256 && a.CanaryPath == b.CanaryPath && a.CanaryStatus == b.CanaryStatus && a.CanarySamples == b.CanarySamples && a.CanaryTimeout == b.CanaryTimeout && a.DrainTimeout == b.DrainTimeout && a.StabilityWindow == b.StabilityWindow && a.StabilityInterval == b.StabilityInterval && a.RollbackTimeout == b.RollbackTimeout &&
-		a.HostdAPIMin == b.HostdAPIMin && a.HostdAPIMax == b.HostdAPIMax && a.RuntimeAPIMin == b.RuntimeAPIMin && a.RuntimeAPIMax == b.RuntimeAPIMax && a.SupervisorMaintenance == b.SupervisorMaintenance && a.OwnerMaintenanceGraceSeconds == b.OwnerMaintenanceGraceSeconds
+		a.HostdAPIMin == b.HostdAPIMin && a.HostdAPIMax == b.HostdAPIMax && a.RuntimeAPIMin == b.RuntimeAPIMin && a.RuntimeAPIMax == b.RuntimeAPIMax && a.SupervisorMaintenance == b.SupervisorMaintenance && a.OwnerMaintenanceGraceSeconds == b.OwnerMaintenanceGraceSeconds &&
+		// The Authenticode mark picks the native check run on the fetched bytes: a mark added after the caller resolved must fail, not be skipped.
+		// Hostd/Updater/Launcher are copies of the same pb target, and a release rebuilt from a journal leaves them empty, so they are not compared.
+		a.AuthenticodeSigned == b.AuthenticodeSigned
 }
 
 func openReadOnly(path string) (io.ReadCloser, error) { return os.Open(path) }

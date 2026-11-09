@@ -107,6 +107,27 @@ func TestReleaseFromIndexProjectsSignedActivationPolicy(t *testing.T) {
 	}
 }
 
+// Signing enabled between Resolve and FetchComponent: the caller's release is unmarked, the fresh signed index marks the
+// target. FetchComponent compares them, so the stale release (whose mark would skip the signature check) is refused.
+func TestMarkedAfterResolveFailsTheFetchInsteadOfSkippingTheSignatureCheck(t *testing.T) {
+	manifest := strings.Repeat("b", 64)
+	plan, err := releasepolicy.Default("2026.11.09.1", manifest, 7, "routine", "seed", []releasepolicy.PlatformTarget{{Platform: "windows", Architecture: "amd64"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := releaseindex.Target{Component: "pb", SHA256: strings.Repeat("a", 64), Length: 10, Platform: "windows", Architecture: "amd64"}
+	index := releaseindex.Index{Version: plan.Version, ManifestSHA256: manifest, DeploymentPlan: &plan, Targets: []releaseindex.Target{target}, HostdAPIMin: 1, HostdAPIMax: 2, RuntimeAPIMin: 1, RuntimeAPIMax: 2}
+	resolved, _ := releaseFromIndex(index)
+	index.Targets[0].AuthenticodeSigned = true
+	fresh, _ := releaseFromIndex(index)
+	if sameReleaseTargets(fresh, resolved) || sameReleaseTargets(resolved, fresh) {
+		t.Fatal("a mark added after resolve was not detected")
+	}
+	if !sameReleaseTargets(fresh, fresh) {
+		t.Fatal("an unchanged marked release no longer matches itself")
+	}
+}
+
 func TestHostdFailureDomainSourceBindsFreshSignedInputs(t *testing.T) {
 	client := &failureDomainClient{result: hostdproto.UpdateGateResponse{Target: validFailureDomainTarget("machine_1", "iad-1")}}
 	source := HostdFailureDomainSource{Client: client, MachineID: "machine_1"}
