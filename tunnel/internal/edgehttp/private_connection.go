@@ -1,6 +1,7 @@
 package edgehttp
 
 import (
+	"context"
 	"errors"
 	"net"
 	"sync"
@@ -25,6 +26,9 @@ type PrivateAccessConnectionRegistry struct {
 	entries map[string]privateConnectionEntry
 	closed  bool
 	now     func() time.Time
+	// Revalidate asks the server for a current decision once the admitted one expired (set before
+	// serving). A connection outlives its IngressAuthorityLifetime decision; nil keeps the admitted one.
+	Revalidate func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)
 }
 
 func NewPrivateAccessConnectionRegistry(maximum int) (*PrivateAccessConnectionRegistry, error) {
@@ -151,12 +155,32 @@ func (r *PrivateAccessConnectionRegistry) RegisterIngress(address string, reques
 
 type privateIngressDecisionKey struct{}
 
-func (r *PrivateAccessConnectionRegistry) ingress(address string, match route.RouteMatch) (connectorprotocol.IngressDecision, bool) {
+func (r *PrivateAccessConnectionRegistry) ingress(ctx context.Context, address string, match route.RouteMatch) (connectorprotocol.IngressDecision, bool) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	entry, ok := r.entries[address]
-	if !ok || entry.ingress == nil || !privateAccessRouteMatches(entry.request, match) || entry.ingress.Validate(entry.ingress.IssuedAt) != nil {
+	if !ok || entry.ingress == nil || !privateAccessRouteMatches(entry.request, match) || entry.ingress.ValidateAdmitted(r.now()) != nil {
+		r.mu.Unlock()
 		return connectorprotocol.IngressDecision{}, false
 	}
-	return *entry.ingress, true
+	current := *entry.ingress
+	r.mu.Unlock()
+	if current.Validate(r.now()) == nil || r.Revalidate == nil {
+		return current, true
+	}
+	// The server answers for the same grant and request, as it does for each preview request; the
+	// answer serves this connection's next requests until it expires too, so revocation lands within
+	// one decision lifetime and the server sees at most one call per lifetime per connection.
+	next, err := r.Revalidate(ctx, current)
+	if err != nil || next.Validate(r.now()) != nil || next.NativeAuthorization == nil || next.NativeAuthorization.Request != entry.request {
+		return connectorprotocol.IngressDecision{}, false
+	}
+	evidence := *next.NativeAuthorization
+	next.NativeAuthorization = &evidence
+	r.mu.Lock()
+	if stored, ok := r.entries[address]; ok && stored.token == entry.token {
+		stored.ingress = &next
+		r.entries[address] = stored
+	}
+	r.mu.Unlock()
+	return next, true
 }

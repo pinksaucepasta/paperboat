@@ -529,7 +529,8 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if err != nil {
 		return nil, fmt.Errorf("create private access authorizer: %w", err)
 	}
-	previewTransport, err := edgehttp.NewDataCarrierPreviewTransport(edgehttp.DataCarrierPreviewTransportConfig{Registry: previewRoutes, StreamOpenTimeout: deployment.ControlTimeout, IngressRegistry: durableRoutes, PrivateAuthority: func(ctx context.Context, decision connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error) {
+	// revalidatePrivate asks the server for a current decision for an admitted private connection's grant.
+	revalidatePrivate := func(ctx context.Context, decision connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error) {
 		evidence := decision.NativeAuthorization
 		if evidence == nil {
 			return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
@@ -542,7 +543,8 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 			return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
 		}
 		return *result.Ingress, nil
-	}, PublicAuthority: publicPreviewAuthority,
+	}
+	previewTransport, err := edgehttp.NewDataCarrierPreviewTransport(edgehttp.DataCarrierPreviewTransportConfig{Registry: previewRoutes, StreamOpenTimeout: deployment.ControlTimeout, IngressRegistry: durableRoutes, PrivateAuthority: revalidatePrivate, PublicAuthority: publicPreviewAuthority,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create preview carrier transport: %w", err)
@@ -611,6 +613,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if err != nil {
 		return nil, fmt.Errorf("create private connection registry: %w", err)
 	}
+	privateConnections.Revalidate = revalidatePrivate
 	var browserAccess *edgehttp.BrowserAccess
 	if deployment.BrowserAccessEnabled {
 		browserAccess = &edgehttp.BrowserAccess{Authority: &control.BrowserAccessClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, LoginOrigin: deployment.BrowserLoginOrigin}

@@ -512,7 +512,7 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if privateAuthorized {
 		r = r.WithContext(context.WithValue(r.Context(), privateAccessRequestContextKey{}, privateRequest))
-		if ingress, ok := p.config.PrivateAccessConnections.ingress(r.RemoteAddr, matched); ok {
+		if ingress, ok := p.config.PrivateAccessConnections.ingress(r.Context(), r.RemoteAddr, matched); ok {
 			r = r.WithContext(context.WithValue(r.Context(), privateIngressDecisionKey{}, ingress))
 		}
 	}

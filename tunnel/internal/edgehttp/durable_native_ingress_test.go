@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,7 +19,24 @@ import (
 )
 
 func TestPrivateDurableGrantReachesTLSHTTPIngress(t *testing.T) {
+	testPrivateDurableGrantReachesTLSHTTPIngress(t, false, nil)
+}
+
+// A private connection outlives the 10 s ingress decision it was admitted with: a request sent on it
+// after that decision expired reaches the origin on a decision the server revalidated, which the
+// connection keeps for its next requests; a revalidation the server refuses (revoked) is refused.
+func TestPrivateDurableRequestAfterAdmissionDecisionExpiry(t *testing.T) {
+	testPrivateDurableGrantReachesTLSHTTPIngress(t, true, nil)
+	testPrivateDurableGrantReachesTLSHTTPIngress(t, true, connectorprotocol.ErrIngressDenied)
+}
+
+func testPrivateDurableGrantReachesTLSHTTPIngress(t *testing.T, afterExpiry bool, revalidateErr error) {
 	now := time.Now().UTC()
+	issued := now
+	if afterExpiry {
+		issued = now.Add(-connectorprotocol.IngressAuthorityLifetime + time.Second) // expires 1 s from now
+	}
+	refused := revalidateErr != nil
 	identity := testEdgePreviewIdentity(2, 3)
 	id := func(noun string) string { return noun + "_11111111-1111-4111-8111-111111111111" }
 	identity.AccountID, identity.TunnelID, identity.ConnectorID, identity.HostID, identity.SessionID = id("user"), id("machine"), id("machine"), id("machine"), id("session")
@@ -62,7 +80,7 @@ func TestPrivateDurableGrantReachesTLSHTTPIngress(t *testing.T) {
 	}
 
 	evidence := connectorprotocol.PrivateAccessOpen{Schema: connectorprotocol.PrivateAccessSchema, Kind: connectorprotocol.PrivateAccessKind, Grant: "signed-grant", Request: request}
-	decision := connectorprotocol.IngressDecision{Binding: connectorprotocol.IngressBinding{EnvironmentID: "environment_test", AccountID: request.AccountID, TunnelID: request.ResourceID, Lifecycle: "durable", ResourceGeneration: 1, RouteID: request.RouteID, RouteGeneration: request.RouteGeneration, TargetID: request.RouteID, TargetGeneration: request.RouteGeneration, HostID: identity.HostID, InstallationGeneration: 1, Audience: "private", ConnectionMethod: "edge", Protocol: "http", Hostname: request.Host, PathPrefix: "/", OriginScheme: "http", OriginAddress: "127.0.0.1:3000", TLSVerification: "not_applicable", PublicationID: request.RouteID, PublicationGeneration: request.RouteGeneration}, DecisionID: "decision_test", PolicyGeneration: 1, EdgeNodeID: request.EdgeNodeID, EdgeProcessEpoch: request.EdgeProcessEpoch, ConnectorID: identity.ConnectorID, SessionID: identity.SessionID, ProcessGeneration: identity.ProcessGeneration, ConfigGeneration: identity.Generation, AssignmentGeneration: request.AssignmentGeneration, PrincipalID: request.MachineID, GrantID: request.Nonce, GrantGeneration: request.InstallationGeneration, Action: "view", IssuedAt: now, ExpiresAt: now.Add(10 * time.Second), NativeAuthorization: &evidence}
+	decision := connectorprotocol.IngressDecision{Binding: connectorprotocol.IngressBinding{EnvironmentID: "environment_test", AccountID: request.AccountID, TunnelID: request.ResourceID, Lifecycle: "durable", ResourceGeneration: 1, RouteID: request.RouteID, RouteGeneration: request.RouteGeneration, TargetID: request.RouteID, TargetGeneration: request.RouteGeneration, HostID: identity.HostID, InstallationGeneration: 1, Audience: "private", ConnectionMethod: "edge", Protocol: "http", Hostname: request.Host, PathPrefix: "/", OriginScheme: "http", OriginAddress: "127.0.0.1:3000", TLSVerification: "not_applicable", PublicationID: request.RouteID, PublicationGeneration: request.RouteGeneration}, DecisionID: "decision_test", PolicyGeneration: 1, EdgeNodeID: request.EdgeNodeID, EdgeProcessEpoch: request.EdgeProcessEpoch, ConnectorID: identity.ConnectorID, SessionID: identity.SessionID, ProcessGeneration: identity.ProcessGeneration, ConfigGeneration: identity.Generation, AssignmentGeneration: request.AssignmentGeneration, PrincipalID: request.MachineID, GrantID: request.Nonce, GrantGeneration: request.InstallationGeneration, Action: "view", IssuedAt: issued, ExpiresAt: issued.Add(connectorprotocol.IngressAuthorityLifetime), NativeAuthorization: &evidence}
 	if err = decision.Validate(now); err != nil {
 		t.Fatal(err)
 	}
@@ -86,10 +104,19 @@ func TestPrivateDurableGrantReachesTLSHTTPIngress(t *testing.T) {
 		originDone <- datacarrier.ServeHTTPStream(context.Background(), stream, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "private origin reached") }), 4096, time.Second)
 	}()
 	registry, _ := NewPrivateAccessConnectionRegistry(8)
+	var revalidations atomic.Int32
+	registry.Revalidate = func(_ context.Context, current connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error) {
+		revalidations.Add(1)
+		current.IssuedAt = time.Now().UTC()
+		current.ExpiresAt = current.IssuedAt.Add(connectorprotocol.IngressAuthorityLifetime)
+		return current, revalidateErr
+	}
 	policy, err := New(Config{SelfHosted: true, MaxHeaderBytes: 4096, MaxBodyBytes: 1024, Routes: routes, PrivateAccessConnections: registry}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		response, err := transport.RoundTrip(r)
 		if err != nil {
-			t.Errorf("private origin transport: %v", err)
+			if !refused {
+				t.Errorf("private origin transport: %v", err)
+			}
 			http.Error(w, "origin failed", 502)
 			return
 		}
@@ -134,7 +161,11 @@ func TestPrivateDurableGrantReachesTLSHTTPIngress(t *testing.T) {
 	if err = secured.Handshake(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = io.WriteString(secured, "GET / HTTP/1.1\r\nHost: "+request.Host+"\r\nConnection: close\r\n\r\n"); err != nil {
+	if afterExpiry {
+		time.Sleep(time.Until(decision.ExpiresAt) + 200*time.Millisecond)
+		secured.SetDeadline(time.Now().Add(5 * time.Second))
+	}
+	if _, err = io.WriteString(secured, "GET / HTTP/1.1\r\nHost: "+request.Host+"\r\n\r\n"); err != nil {
 		t.Fatal(err)
 	}
 	response, err := http.ReadResponse(bufio.NewReader(secured), &http.Request{Method: http.MethodGet})
@@ -143,8 +174,28 @@ func TestPrivateDurableGrantReachesTLSHTTPIngress(t *testing.T) {
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(response.Body)
+	if refused {
+		if response.StatusCode == 200 || revalidations.Load() != 1 {
+			t.Fatalf("revoked revalidation: status=%d revalidations=%d", response.StatusCode, revalidations.Load())
+		}
+		return
+	}
 	if err != nil || response.StatusCode != 200 || string(body) != "private origin reached" {
 		t.Fatalf("HTTP status=%d body=%q err=%v", response.StatusCode, body, err)
+	}
+	if afterExpiry {
+		// The refreshed decision is kept: the connection's next request does not ask the server again.
+		registry.mu.Lock()
+		var address string
+		for key := range registry.entries {
+			address = key
+		}
+		registry.mu.Unlock()
+		if _, ok := registry.ingress(context.Background(), address, route.RouteMatch{Rule: rule, Host: request.Host}); !ok || revalidations.Load() != 1 {
+			t.Fatalf("refreshed decision not kept: ok=%v revalidations=%d", ok, revalidations.Load())
+		}
+	} else if revalidations.Load() != 0 {
+		t.Fatalf("a current admission decision was revalidated %d times", revalidations.Load())
 	}
 	select {
 	case err := <-originDone:
