@@ -3,6 +3,8 @@ package billing_test
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -111,5 +113,45 @@ func TestTopupEndsWithAllowanceMonthPostgres(t *testing.T) {
 	debit(renewal.Add(time.Hour), 200, 60, true) // only what is left of the new plan month
 	if a, b := spent(); a != 10 || b != 50 {
 		t.Fatalf("expired top-up was drawn: %d/%d", a, b)
+	}
+}
+
+// A top-up that predates the expiry (expires_at='infinity' after migration 249) made the overview
+// fail with 503 in production; migration 254 dates it, and the overview reads it afterwards.
+func TestLegacyTopupExpiryMigrationKeepsOverviewReadablePostgres(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	x := fmt.Sprint(time.Now().UnixNano())
+	user, workspace := "usr_legacy_"+x, "personal:usr_legacy_"+x
+	insertUser(t, store, user, user+"@example.test")
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, q, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		exec(`DELETE FROM paperboat.billing_workspace_topups WHERE workspace_id=$1`, workspace)
+		exec(`DELETE FROM paperboat.billing_workspace_operations WHERE workspace_id=$1`, workspace)
+		exec(`DELETE FROM paperboat.billing_workspace_usage_periods WHERE workspace_id=$1`, workspace)
+		exec(`DELETE FROM paperboat.billing_workspaces WHERE id=$1`, workspace)
+		exec(`DELETE FROM paperboat.users WHERE id=$1`, user)
+	})
+	exec(`INSERT INTO paperboat.billing_workspaces(id,user_id,state) VALUES($1,$2,'free')`, workspace, user)
+	exec(`INSERT INTO paperboat.billing_workspace_operations(idempotency_key,workspace_id,actor_user_id,kind,request_hash,state) VALUES($1,$2,$3,'topup','fixture','succeeded')`, x, workspace, user)
+	exec(`INSERT INTO paperboat.billing_workspace_topups(provider_session_id,operation_key,workspace_id,purchased_bytes,remaining_bytes,purchased_at,expires_at) VALUES($1,$1,$2,50,50,now()-interval '1 day','infinity')`, x, workspace)
+	file, err := os.ReadFile("../db/migrations/254_workspace_topup_legacy_expiry.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	up, _, _ := strings.Cut(string(file), "-- +goose Down")
+	exec(strings.ReplaceAll(up, "-- +goose Up", ""))
+	s := billing.NewWorkspaceService(store, nil, "")
+	overview, err := s.Overview(ctx, user, "")
+	if err != nil {
+		t.Fatalf("overview after the legacy top-up was dated: %v", err)
+	}
+	if overview.TopupBytesRemaining != 50 || len(overview.Topups) != 1 || overview.Topups[0].ExpiresAt.Before(time.Now()) {
+		t.Fatalf("legacy top-up %+v remaining=%d", overview.Topups, overview.TopupBytesRemaining)
 	}
 }
