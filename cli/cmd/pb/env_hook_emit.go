@@ -47,7 +47,7 @@ func (r envHookResult) summary() string {
 // leaves stdout empty so the shell's eval is a no-op, and says one short
 // line on stderr when a person is watching.
 func emitEnvironmentHook(command *cobra.Command, shell string) {
-	if shell != "bash" && shell != "zsh" && shell != "fish" {
+	if shell != "bash" && shell != "zsh" && shell != "fish" && shell != envHookPowerShell {
 		return
 	}
 	ctx, cancel := context.WithTimeout(command.Context(), envHookBudget)
@@ -70,13 +70,21 @@ func emitEnvironmentHook(command *cobra.Command, shell string) {
 		if !ok || !envHookName(name) {
 			continue
 		}
-		if shell == "fish" {
-			out.WriteString("set -gx " + name + " " + fishSingleQuote(value) + "\n")
-		} else {
-			out.WriteString("export " + name + "=" + shellSingleQuote(value) + "\n")
-		}
+		out.WriteString(envHookAssignment(shell, name, value))
 	}
 	_, _ = io.WriteString(command.OutOrStdout(), out.String())
+}
+
+// envHookAssignment is one `set the variable` line for shell; value is always
+// a quoted literal, never code.
+func envHookAssignment(shell, name, value string) string {
+	switch shell {
+	case "fish":
+		return "set -gx " + name + " " + fishSingleQuote(value) + "\n"
+	case envHookPowerShell:
+		return "$env:" + name + " = " + powerShellSingleQuote(value) + "\n"
+	}
+	return "export " + name + "=" + shellSingleQuote(value) + "\n"
 }
 
 func readEnvHookRecord(command *cobra.Command) (envHookRecord, error) {
@@ -225,6 +233,16 @@ func shellSingleQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
+// powerShellSingleQuote is a literal: PowerShell interpolates nothing inside
+// single quotes, and its parser treats the four typographic single quotes as
+// quote characters too, so each is doubled like '. Line breaks become
+// [char]10 and [char]13 joins, because PowerShell splits native output into
+// lines and would rejoin them with CRLF, changing the value.
+func powerShellSingleQuote(value string) string {
+	return "'" + strings.NewReplacer("'", "''", "\u2018", "\u2018\u2018", "\u2019", "\u2019\u2019",
+		"\u201a", "\u201a\u201a", "\u201b", "\u201b\u201b", "\r", "' + [char]13 + '", "\n", "' + [char]10 + '").Replace(value) + "'"
+}
+
 func fishSingleQuote(value string) string {
 	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(value) + "'"
 }
@@ -233,7 +251,7 @@ func fishSingleQuote(value string) string {
 // pb's stderr so an old or broken pb never adds noise to shell startup; the
 // notice goes to the controlling terminal, which non-interactive ssh and VS
 // Code's environment probe do not have.
-var envHookTerminal = "/dev/tty"
+var envHookTerminal = envHookConsole
 
 func writeEnvHookNotice(message string) {
 	tty, err := os.OpenFile(envHookTerminal, os.O_WRONLY, 0)

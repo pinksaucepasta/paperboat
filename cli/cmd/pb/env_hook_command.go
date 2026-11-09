@@ -33,12 +33,26 @@ type envHookRecord struct {
 
 var envHookShells = []string{"bash", "zsh", "fish"}
 
+// envHookPowerShell is the one Windows shell with a hook. cmd.exe has none: its
+// quoting cannot carry arbitrary values (`"`, `%`, `&` and newlines break out of
+// set "NAME=value"), conda and clink only use AutoRun for fixed code, never for
+// secrets; `pb env run -- cmd` hands values to the process without a parser.
+const envHookPowerShell = "powershell"
+
+// envHookShellsHere are the shells the hook supports on this OS.
+func envHookShellsHere() []string {
+	if runtime.GOOS == "windows" {
+		return []string{envHookPowerShell}
+	}
+	return envHookShells
+}
+
 func addEnvironmentHookCommand(root *cobra.Command) {
 	hook := &cobra.Command{
-		Use:   "hook [bash|zsh|fish]",
+		Use:   "hook [bash|zsh|fish|powershell]",
 		Short: "Load ENV in plain ssh and VS Code shells through a shell startup hook",
 		Long: "Without flags, print the hook line for a shell. --install adds that line to the shell's startup file " +
-			"(~/.bashrc, ~/.zshenv or ~/.config/fish/config.fish) for the account logged in here and the active workspace, and defines a pb shell function so `pb env load` loads ENV into the current shell; " +
+			"(~/.bashrc, ~/.zshenv, ~/.config/fish/config.fish or, on Windows, the PowerShell profile.ps1 of Windows PowerShell and PowerShell 7; cmd.exe has no hook, use `pb env run -- <command>`) for the account logged in here and the active workspace, and defines a pb shell function so `pb env load` loads ENV into the current shell; " +
 			"--uninstall removes it. VS Code Remote-SSH: after installing, run \"Remote-SSH: Kill VS Code Server on Host\" and reconnect.",
 		Args: commandArgs(cobra.MaximumNArgs(1)),
 		RunE: runEnvironmentHook,
@@ -64,9 +78,6 @@ func runEnvironmentHook(command *cobra.Command, args []string) error {
 		emitEnvironmentHook(command, shell)
 		return nil
 	}
-	if runtime.GOOS == "windows" {
-		return localArgumentError("pb env hook supports bash, zsh and fish on Linux and macOS")
-	}
 	install, _ := command.Flags().GetBool("install")
 	uninstall, _ := command.Flags().GetBool("uninstall")
 	status, _ := command.Flags().GetBool("status")
@@ -91,16 +102,19 @@ func runEnvironmentHook(command *cobra.Command, args []string) error {
 }
 
 func envHookShell(args []string) (string, error) {
-	shell := ""
+	shell := envHookPowerShell
 	if len(args) == 1 {
 		shell = args[0]
-	} else {
+	} else if runtime.GOOS != "windows" {
 		shell = filepath.Base(os.Getenv("SHELL"))
 	}
-	for _, known := range envHookShells {
+	for _, known := range envHookShellsHere() {
 		if shell == known {
 			return shell, nil
 		}
+	}
+	if runtime.GOOS == "windows" {
+		return "", localArgumentError("only PowerShell has a hook: pb env hook powershell. cmd.exe cannot load values safely; run `pb env run -- <command>` there")
 	}
 	return "", localArgumentError("name the shell: pb env hook bash, zsh or fish")
 }
@@ -111,6 +125,9 @@ func envHookShell(args []string) (string, error) {
 // only `pb env load`, loading into the current shell, and passes every other
 // call to the real pb unchanged.
 func envHookLine(shell, pb string) string {
+	if shell == envHookPowerShell {
+		return powerShellHookLine(pb)
+	}
 	quoted := shellSingleQuote(pb)
 	if shell == "fish" {
 		return fmt.Sprintf("test -x %s; and %s env hook --emit fish 2>/dev/null | source; "+
@@ -120,6 +137,19 @@ func envHookLine(shell, pb string) string {
 	return fmt.Sprintf("[ -x %s ] && eval \"$(%s env hook --emit %s 2>/dev/null)\"; "+
 		"pb() { if [ $# -eq 2 ] && [ \"$1\" = env ] && [ \"$2\" = load ]; then eval \"$(%s env hook --emit %s)\"; "+
 		"else %s \"$@\"; fi; } %s", quoted, quoted, shell, quoted, shell, quoted, envHookMarker)
+}
+
+// powerShellHookLine is envHookLine for PowerShell: same absolute path, silent
+// when pb is gone or fails, and a pb function for `pb env load` that otherwise
+// forwards arguments, piped input and the exit code to the real pb. The
+// values reach the shell only as single-quoted literals.
+func powerShellHookLine(pb string) string {
+	q := powerShellSingleQuote(pb)
+	load := "& { $s = (& " + q + " env hook --emit powershell | Out-String); if ($s) { Invoke-Expression $s } }"
+	quiet := strings.Replace(load, "powershell |", "powershell 2>$null |", 1)
+	return "if (Test-Path -LiteralPath " + q + ") { try { " + quiet + " } catch {} }; " +
+		"function pb { if ($args.Count -eq 2 -and $args[0] -eq 'env' -and $args[1] -eq 'load') { " + load + " } " +
+		"elseif ($MyInvocation.ExpectingInput) { $input | & " + q + " @args } else { & " + q + " @args } } " + envHookMarker
 }
 
 // envHookExecutable prefers the stable pb on PATH over this process's
@@ -134,6 +164,16 @@ func envHookExecutable() string {
 		return path
 	}
 	return "pb"
+}
+
+// envHookRCFiles are the startup files a shell reads; PowerShell has one per
+// edition (CurrentUserAllHosts of Windows PowerShell 5.1 and PowerShell 7).
+func envHookRCFiles(home, shell string) []string {
+	if shell == envHookPowerShell {
+		docs := envHookDocumentsDir(home)
+		return []string{filepath.Join(docs, "WindowsPowerShell", "profile.ps1"), filepath.Join(docs, "PowerShell", "profile.ps1")}
+	}
+	return []string{envHookRCFile(home, shell)}
 }
 
 func envHookRCFile(home, shell string) string {
@@ -191,16 +231,18 @@ func installEnvironmentHook(command *cobra.Command, shell string) error {
 	if err != nil {
 		return err
 	}
-	rc := envHookRCFile(home, shell)
-	changed, err := writeEnvHookLine(rc, envHookLine(shell, envHookExecutable()), shell == "bash")
-	if err != nil {
-		return fmt.Errorf("update %s: %w", rc, err)
-	}
+	files := envHookRCFiles(home, shell)
 	state := "already installed in"
-	if changed {
-		state = "installed in"
+	for _, rc := range files {
+		changed, err := writeEnvHookLine(rc, envHookLine(shell, envHookExecutable()), shell == "bash")
+		if err != nil {
+			return fmt.Errorf("update %s: %w", rc, err)
+		}
+		if changed {
+			state = "installed in"
+		}
 	}
-	_, err = fmt.Fprintf(command.OutOrStdout(), "Paperboat ENV hook %s %s for workspace %s.\nNew ssh shells load it; VS Code Remote-SSH: run \"Remote-SSH: Kill VS Code Server on Host\" and reconnect.\n", state, rc, workspace)
+	_, err = fmt.Fprintf(command.OutOrStdout(), "Paperboat ENV hook %s %s for workspace %s.\nNew ssh shells load it; VS Code Remote-SSH: run \"Remote-SSH: Kill VS Code Server on Host\" and reconnect.\n", state, strings.Join(files, ", "), workspace)
 	return err
 }
 
@@ -223,6 +265,9 @@ func writeEnvHookLine(path, line string, first bool) (bool, error) {
 	}
 	var next string
 	switch {
+	case kept == "" && strings.HasSuffix(path, ".ps1"):
+		// Windows PowerShell 5.1 reads a profile without a BOM as ANSI, which garbles a non-ASCII user path.
+		next = "\ufeff" + line + "\n"
 	case first:
 		next = line + "\n" + kept
 	case kept == "" || strings.HasSuffix(kept, "\n"):
@@ -250,14 +295,21 @@ func removeEnvHookLines(content string) (string, int) {
 	return strings.Join(kept, ""), found
 }
 
+func envHookAllRCFiles(home string) []string {
+	var files []string
+	for _, shell := range envHookShellsHere() {
+		files = append(files, envHookRCFiles(home, shell)...)
+	}
+	return files
+}
+
 func uninstallEnvironmentHook(command *cobra.Command) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
 	}
 	removed := []string{}
-	for _, shell := range envHookShells {
-		rc := envHookRCFile(home, shell)
+	for _, rc := range envHookAllRCFiles(home) {
 		data, err := os.ReadFile(rc)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
@@ -300,11 +352,11 @@ func environmentHookStatus(command *cobra.Command) error {
 		return err
 	}
 	installed := []string{}
-	for _, shell := range envHookShells {
-		data, err := os.ReadFile(envHookRCFile(home, shell))
+	for _, rc := range envHookAllRCFiles(home) {
+		data, err := os.ReadFile(rc)
 		if err == nil {
 			if _, found := removeEnvHookLines(string(data)); found > 0 {
-				installed = append(installed, envHookRCFile(home, shell))
+				installed = append(installed, rc)
 			}
 		}
 	}
