@@ -258,6 +258,7 @@ func doctorProbes(command *cobra.Command, snapshot localapi.Snapshot, machine *l
 	probes = append(probes, doctorDaemonHealthProbes(snapshot.Health)...)
 	probes = append(probes, doctorLingerProbes()...)
 	probes = append(probes, doctorCarrierProbes()...)
+	probes = append(probes, doctorHostdProbes()...)
 	if machine != nil {
 		probes = append(probes, doctorMachineProbes(*machine)...)
 		probes = append(probes, doctorPathReachabilityProbes(command, machine.ID)...)
