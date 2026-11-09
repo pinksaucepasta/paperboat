@@ -1,6 +1,6 @@
 "use client"
 
-import { keepPreviousData, queryOptions } from "@tanstack/react-query"
+import { queryOptions } from "@tanstack/react-query"
 import { api, apiAction, ApiError, idempotencyKey, retryAfterMs, send, type Data } from "@/lib/api"
 import type { TerminalSession } from "@/lib/terminal/use-terminal-connection"
 
@@ -51,7 +51,9 @@ export const terminalsPageQuery = (options: { closed: boolean; q: string; page: 
       )
       return { items: page.sessions, total: page.pagination.total }
     },
-    placeholderData: keepPreviousData,
+    // Keep the last page while paging or searching, never across Open/Closed: those rows don't belong there.
+    placeholderData: (previous, previousQuery) =>
+      (previousQuery?.queryKey.at(-1) as typeof options | undefined)?.closed === options.closed ? previous : undefined,
     refetchInterval: 15_000,
   })
 

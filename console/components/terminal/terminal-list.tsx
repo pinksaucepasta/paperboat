@@ -28,13 +28,13 @@ const retention = 30 * day
 
 /**
  * When a terminal was last in use: open ones are current (the server's list carries no
- * participants or reliable activity time for them), closed ones were last used at
- * `last_active_at`, or 30 days before they expire.
+ * participants or reliable activity time for them); closed ones ended 30 days before they expire,
+ * or, without an expiry, were last active at `last_active_at`.
  */
 function lastUsed(session: TerminalSession, now: number): number {
   if (terminalCanAttach(session)) return now
-  if (session.last_active_at) return Date.parse(session.last_active_at)
   if (session.expires_at) return Date.parse(session.expires_at) - retention
+  if (session.last_active_at) return Date.parse(session.last_active_at)
   return 0
 }
 
@@ -94,11 +94,12 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
       groups.push({
         key: "away",
         label: live.length ? "Not reachable" : "",
-        note: "Their machine isn’t reporting them, usually because it’s offline. They come back when it reconnects; closing one ends its shell then.",
+        note: "Their machine isn’t reporting them, usually because it’s offline. They come back when it reconnects, and close on their own after 30 days without it.",
         rows: away,
       })
   } else
-    for (const row of shown) {
+    // The server orders by name; groups need newest first (within the loaded page).
+    for (const row of [...shown].sort((x, y) => y.time - x.time)) {
       const { key, label } = groupOf(row.time, now, date)
       const group = groups.at(-1)
       if (group?.key === key) group.rows.push(row)
@@ -159,7 +160,7 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
               {!scope && <th className="hidden md:table-cell">Machine</th>}
               {running && <th className="hidden lg:table-cell">Running</th>}
               <th className="hidden lg:table-cell">Folder</th>
-              <th className="hidden sm:table-cell">{view === "open" ? "Status" : "Last used"}</th>
+              <th className="hidden sm:table-cell">{view === "open" ? "Status" : "Ended"}</th>
               <th className="w-12" aria-label="Actions" />
             </tr>
           </thead>
@@ -230,6 +231,7 @@ function localCommand(session: TerminalSession) {
  */
 function TerminalStatus({ session, now }: { session: TerminalSession; now: number }) {
   const machines = useMachines()
+  const { date } = useTimeFormat()
   if (session.state === "attached")
     return (
       <span className="flex items-center gap-2">
@@ -243,7 +245,9 @@ function TerminalStatus({ session, now }: { session: TerminalSession; now: numbe
     return (
       <span className="flex flex-col text-muted-foreground">
         <span>Machine offline</span>
-        {seen && now > 0 && <span className="text-xs">seen {formatRelative(seen, now)}</span>}
+        {seen && now > 0 && (
+          <span className="text-xs">since {date(seen, now - Date.parse(seen) < day ? "time" : "day")}</span>
+        )}
       </span>
     )
   }
@@ -253,6 +257,23 @@ function TerminalStatus({ session, now }: { session: TerminalSession; now: numbe
       Idle
     </span>
   )
+}
+
+/** Why a closed terminal ended (`closed_reason`, absent on terminals closed before the server kept it). */
+function closedReason(session: TerminalSession): string | undefined {
+  switch (session.closed_reason) {
+    case "user_closed":
+      // Anyone who may manage it can close it; only the owner's own close is certainly "you".
+      return session.role === "owner" ? "Closed by you" : "Closed"
+    case "host_closed":
+      return "Ended on the machine"
+    case "exited":
+      return "Program exited"
+    case "host_gone":
+      return "Gone from the machine"
+    case "unreachable_timeout":
+      return "Machine unreachable for 30 days"
+  }
 }
 
 function Row({
@@ -347,7 +368,16 @@ function Row({
       {showRunning && <td className="hidden truncate text-muted-foreground lg:table-cell">{away ? "" : activity}</td>}
       <td className="hidden truncate font-mono text-code text-muted-foreground lg:table-cell">{folder}</td>
       <td className="hidden whitespace-nowrap text-muted-foreground sm:table-cell">
-        {open ? <TerminalStatus session={session} now={now} /> : lastUsedLabel}
+        {open ? (
+          <TerminalStatus session={session} now={now} />
+        ) : closedReason(session) ? (
+          <span className="flex flex-col">
+            <span>{closedReason(session)}</span>
+            <span className="text-xs">{lastUsedLabel}</span>
+          </span>
+        ) : (
+          lastUsedLabel
+        )}
       </td>
       <td className="text-right">{actions}</td>
     </tr>

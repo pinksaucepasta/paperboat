@@ -7911,6 +7911,11 @@ export interface components {
             desired_state: "open" | "closed" | "deleted";
             /** @description Latest persisted or observed runtime lifecycle; may lag the accepted close request. */
             runtime_state: string;
+            /**
+             * @description Why the session ended; present only once it is closed. user_closed: closed on request. host_closed: the host reported it closed. exited: its process exited. host_gone: the host no longer has the session. unreachable_timeout: the host did not confirm it for 30 days.
+             * @enum {string}
+             */
+            closed_reason?: "user_closed" | "host_closed" | "exited" | "host_gone" | "unreachable_timeout";
         };
         SharedTerminalSessionResponse: {
             data: components["schemas"]["SharedTerminalSession"];
