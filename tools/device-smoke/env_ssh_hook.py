@@ -11,7 +11,8 @@ or missing login loads nothing within the budget, and that uninstall removes onl
 C264: with the variable unset in an interactive shell, `pb env load` (the hook's pb function) loads it there.
 C265: `pb env run -- sh -c ...` gives the child the value with the variable unset in the caller, and passes
 the child's exit code through.
-C266: `pb env names` lists the probe's name (no value in its output) and `--json` names its layer (personal).
+C266: `pb env names` lists the probe's name (no value in its output) and `--json` names its layer (personal);
+`pb env names access off` refuses the listing (`env run` still works), `on` lists again.
 Cleans up the probe and the hook on every exit.
 
 A macOS host is detected over ssh (`uname -s`): its login shell is zsh, so the hook goes in ~/.zshenv
@@ -100,6 +101,16 @@ def main():
         scoped = json.loads(must(ssh(host, f'{PB} env names --json'), 'env names --json'))['data']['names']
         report['env_names'] = PROBE in listed.split() and value not in listed
         report['env_names_scope'] = {'name': PROBE, 'scope': 'personal'} in scoped
+        # The workspace setting: off refuses the listing with a message and prints no name, `env run` still
+        # delivers the value, on lists again. `pb env names access` is the CLI way to flip it.
+        must(account(host, f'{PB} env names access off'), 'env names access off')
+        refused = ssh(host, f'{PB} env names')
+        still = must(ssh(host, f"unset {PROBE}; {PB} env run -- sh -c '{show}'"), 'env run with names off')
+        report['env_names_off_refused'] = (refused.returncode != 0 and 'turned off' in refused.stderr
+                                           and PROBE not in refused.stdout + refused.stderr)
+        report['env_names_off_run_still_works'] = probe_hash_line(still) == want
+        must(account(host, f'{PB} env names access on'), 'env names access on')
+        report['env_names_back_on'] = PROBE in must(ssh(host, f'{PB} env names'), 'env names again').split()
         passed = ssh(host, f"{PB} env run -- sh -c 'exit 7'; echo rc=$?").stdout
         report['env_run_exit_code'] = 'rc=7' in passed
         emit = f'{PB} env hook --emit {shell} >/dev/null'
@@ -118,10 +129,13 @@ def main():
         report['ok'] = (report['noninteractive'] and report['interactive'] and report['cached_ms'] < 500
                         and report['env_load'] and report['env_run'] and report['env_run_exit_code']
                         and report['env_names'] and report['env_names_scope']
+                        and report['env_names_off_refused'] and report['env_names_off_run_still_works']
+                        and report['env_names_back_on']
                         and report['quiet_output_bytes'] == 0 and quiet_ms < 3000
                         and report['uninstall_restores_rc'])
     finally:
         ssh(host, f'{PB} env hook --uninstall >/dev/null 2>&1')
+        account(host, f'{PB} env names access on >/dev/null 2>&1')
         account(host, UNSET_MAC if mac else UNSET)
     print(json.dumps(report, sort_keys=True))
     return 0 if report.get('ok') else 1
