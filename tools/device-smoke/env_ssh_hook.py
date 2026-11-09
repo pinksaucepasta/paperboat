@@ -11,6 +11,7 @@ or missing login loads nothing within the budget, and that uninstall removes onl
 C264: with the variable unset in an interactive shell, `pb env load` (the hook's pb function) loads it there.
 C265: `pb env run -- sh -c ...` gives the child the value with the variable unset in the caller, and passes
 the child's exit code through.
+C266: `pb env names` lists the probe's name (no value in its output) and `--json` names its layer (personal).
 Cleans up the probe and the hook on every exit.
 
 A macOS host is detected over ssh (`uname -s`): its login shell is zsh, so the hook goes in ~/.zshenv
@@ -94,6 +95,11 @@ def main():
         report['env_load'] = probe_hash_line(load.stdout.replace('\r', '')) == want
         injected = must(ssh(host, f"unset {PROBE}; {PB} env run -- sh -c '{show}'"), 'env run')
         report['env_run'] = probe_hash_line(injected) == want
+        # `pb env names` needs no vault password: the runtime lists names (and layers), never values.
+        listed = must(ssh(host, f'{PB} env names'), 'env names')
+        scoped = json.loads(must(ssh(host, f'{PB} env names --json'), 'env names --json'))['data']['names']
+        report['env_names'] = PROBE in listed.split() and value not in listed
+        report['env_names_scope'] = {'name': PROBE, 'scope': 'personal'} in scoped
         passed = ssh(host, f"{PB} env run -- sh -c 'exit 7'; echo rc=$?").stdout
         report['env_run_exit_code'] = 'rc=7' in passed
         emit = f'{PB} env hook --emit {shell} >/dev/null'
@@ -111,6 +117,7 @@ def main():
         report['uninstall_restores_rc'] = rc_after == rc_before
         report['ok'] = (report['noninteractive'] and report['interactive'] and report['cached_ms'] < 500
                         and report['env_load'] and report['env_run'] and report['env_run_exit_code']
+                        and report['env_names'] and report['env_names_scope']
                         and report['quiet_output_bytes'] == 0 and quiet_ms < 3000
                         and report['uninstall_restores_rc'])
     finally:
