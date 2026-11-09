@@ -18,6 +18,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
+	"github.com/pinksaucepasta/paperboat/shared/jwks"
 )
 
 // relaySubjectsNode is a relay node with one account whose endpoints the observation tests revoke or keep.
@@ -442,6 +443,77 @@ func TestRelaySubjectsObservationsCountedByShapePostgres(t *testing.T) {
 	for shape, value := range want {
 		if got[shape] != value {
 			t.Fatalf("observations counted = %v, want %v", got, want)
+		}
+	}
+}
+
+// trustWithdrawn lists the withdrawn_key_ids of a served trust document and the keys a client keeps.
+func trustWithdrawn(t *testing.T, raw []byte) []string {
+	t.Helper()
+	var document struct {
+		Withdrawn []string `json:"withdrawn_key_ids"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatalf("trust document %s: %v", raw, err)
+	}
+	return document.Withdrawn
+}
+
+// An operator's signing-key revocation reaches relays and edges through the one trust document: the relay
+// lease (start and observe) and /v1/trust/jwks all name the revoked kid, and a client then trusts only the other key.
+func TestRevokedSigningKeyReachesRelayTrustPostgres(t *testing.T) {
+	n := newRelaySubjectsNode(t, "relay_revoked_key")
+	ctx := t.Context()
+	n.service.SetCredentialIssuer(testMintProvider(t, "k2", "k1", "k2"), "https://issuer.example.test", "")
+	n.exec(ctx, `UPDATE control_tunnel_nodes SET transports=ARRAY['derp_quic','derp_wss'] WHERE id=$1`, n.id)
+	operator := "opr_" + n.account
+	n.exec(ctx, `INSERT INTO operator_accounts (id,email,password_hash,role) VALUES ($1,$1||'@example.test','unused-test-password-hash','admin')`, operator)
+	t.Cleanup(func() {
+		_, _ = n.store.SQL().ExecContext(context.Background(), `DELETE FROM control_signing_key_revocations WHERE key_id='k1'`)
+		_, _ = n.store.SQL().ExecContext(context.Background(), `DELETE FROM control_signing_key_revocation_operations WHERE operation_key=$1`, "revoke-"+n.id)
+		_, _ = n.store.SQL().ExecContext(context.Background(), `DELETE FROM operator_accounts WHERE id=$1`, operator)
+	})
+	served := func() map[string][]byte {
+		n.t.Helper()
+		out := map[string][]byte{}
+		do := func(name, path string, body any, handler func(http.ResponseWriter, *http.Request)) {
+			raw, _ := json.Marshal(body)
+			req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			handler(rec, req)
+			if rec.Code != http.StatusOK {
+				n.t.Fatalf("%s status = %d: %s", name, rec.Code, rec.Body.String())
+			}
+			if name == "jwks" {
+				out[name] = rec.Body.Bytes()
+				return
+			}
+			var lease relayNodeLeaseDocument
+			if err := json.Unmarshal(rec.Body.Bytes(), &lease); err != nil {
+				n.t.Fatal(err)
+			}
+			out[name] = lease.JWKS
+		}
+		do("observe", "/v1/relay/nodes/observe", relayNodeObservation{NodeID: n.id, Generation: n.generation, ProcessEpoch: n.epoch, Ready: true}, n.service.handleRelayObserve)
+		do("jwks", "/v1/trust/jwks", nil, n.service.handleJWKS)
+		return out
+	}
+	for name, raw := range served() {
+		if w := trustWithdrawn(t, raw); len(w) != 0 {
+			t.Fatalf("%s names withdrawn keys %v before any revocation", name, w)
+		}
+	}
+	if err := n.service.RevokeSigningKey(ctx, operator, "revoke-"+n.id, "k1", "compromise", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for name, raw := range served() {
+		if w := trustWithdrawn(t, raw); len(w) != 1 || w[0] != "k1" {
+			t.Fatalf("%s withdrawn_key_ids = %v, want [k1]: %s", name, w, raw)
+		}
+		keys, err := jwks.Parse(raw)
+		if err != nil || len(keys) != 1 || keys["k2"] == nil {
+			t.Fatalf("%s: a client keeps %v (%v), want only k2", name, keys, err)
 		}
 	}
 }

@@ -310,7 +310,7 @@ func (s *EdgeService) handleRelayObserve(w http.ResponseWriter, r *http.Request)
 		writeEdgeError(w, r, http.StatusConflict, "relay_node_fenced", false, 0, err)
 		return
 	}
-	if out.JWKS, err = s.trustKeys(); err != nil {
+	if out.JWKS, err = s.trustKeys(r.Context()); err != nil {
 		writeEdgeError(w, r, http.StatusServiceUnavailable, "provider_unavailable", true, 1000, err)
 		return
 	}

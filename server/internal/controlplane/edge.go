@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
+	"github.com/pinksaucepasta/paperboat/shared/jwks"
 
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
@@ -795,15 +796,28 @@ func (s *EdgeService) handleRevocations(w http.ResponseWriter, r *http.Request) 
 // trustKeys is the mint trust document (keys plus withdrawn_key_ids) running relays and edges refresh from, so a
 // signing-key rotation or withdrawal reaches them without a re-enrollment (Teleport lib/auth/rotate.go distributes
 // the phased CA set over the authenticated channel).
-func (s *EdgeService) trustKeys() (json.RawMessage, error) {
+func (s *EdgeService) trustKeys(ctx context.Context) (json.RawMessage, error) {
 	if s.signer == nil {
 		return nil, errors.New("mint trust document is not configured")
 	}
-	return s.signer.JWKSJSON()
+	var revoked []string
+	if s.store != nil {
+		// An operator's signing-key revocation (RevokeSigningKey) reaches relays through the same document
+		// the tunnel edges already get it in as key_ids.
+		var err error
+		if revoked, err = s.store.Queries().ListRevokedControlSigningKeyIDs(ctx, jwks.MaxKeys+1); err != nil {
+			return nil, err
+		}
+		if len(revoked) > jwks.MaxKeys {
+			// Clients refuse a longer withdrawn list and keep their last set: fail loudly instead of truncating.
+			return nil, errors.New("more revoked signing keys than the trust document carries")
+		}
+	}
+	return s.signer.JWKSJSON(revoked...)
 }
 
 func (s *EdgeService) handleJWKS(w http.ResponseWriter, r *http.Request) {
-	document, err := s.trustKeys()
+	document, err := s.trustKeys(r.Context())
 	if err != nil {
 		writeEdgeError(w, r, http.StatusServiceUnavailable, "provider_unavailable", true, 5, err)
 		return

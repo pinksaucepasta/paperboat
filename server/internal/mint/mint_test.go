@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1018,5 +1019,26 @@ func TestSignMachineEventsCarriesKindTopicsAndRequestBinding(t *testing.T) {
 		if _, err := provider.SignMachineEvents(input); err == nil {
 			t.Errorf("%s: answer signed", name)
 		}
+	}
+}
+
+// Ids withdrawn elsewhere (an operator's signing-key revocation) join the provider's own, sorted and without duplicates.
+func TestJWKSJSONMergesRevokedKeyIDs(t *testing.T) {
+	provider, err := New([]Key{{ID: "current", PrivateKey: testKey(3)}, {ID: "previous", PrivateKey: testKey(4)}}, "current", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.Withdraw([]string{"previous"}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := provider.JWKSJSON("zeta", "previous", "alpha", "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body struct {
+		Withdrawn []string `json:"withdrawn_key_ids"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil || !slices.Equal(body.Withdrawn, []string{"alpha", "previous", "zeta"}) {
+		t.Fatalf("withdrawn = %v, %v", body.Withdrawn, err)
 	}
 }

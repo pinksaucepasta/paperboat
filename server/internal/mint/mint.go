@@ -1454,8 +1454,9 @@ type trustDocument struct {
 }
 
 // JWKSJSON exposes the same public trust document to enrolled infrastructure. withdrawn_key_ids
-// lists every key that must no longer be trusted, including ones no longer present in keys.
-func (p *Provider) JWKSJSON() ([]byte, error) {
+// lists every key that must no longer be trusted, including ones no longer present in keys; revoked adds
+// ids withdrawn elsewhere (an operator's signing-key revocation) to that list.
+func (p *Provider) JWKSJSON(revoked ...string) ([]byte, error) {
 	p.mu.RLock()
 	keys := make([]map[string]string, 0, len(p.keys))
 	ids := make([]string, 0, len(p.keys))
@@ -1471,12 +1472,12 @@ func (p *Provider) JWKSJSON() ([]byte, error) {
 			"x": base64.RawURLEncoding.EncodeToString(publicKey),
 		})
 	}
-	withdrawn := make([]string, 0, len(p.withdrawn))
+	ids = ids[:0]
 	for id := range p.withdrawn {
-		withdrawn = append(withdrawn, id)
+		ids = append(ids, id)
 	}
 	p.mu.RUnlock()
-	sort.Strings(withdrawn)
+	withdrawn := slices.Compact(slices.Sorted(slices.Values(append(ids, revoked...))))
 	return json.Marshal(trustDocument{Keys: keys, WithdrawnKeyIDs: withdrawn})
 }
 func (p *Provider) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
