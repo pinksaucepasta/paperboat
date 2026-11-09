@@ -5,9 +5,9 @@ go 1.27.3
 require (
 	github.com/libp2p/go-buffer-pool v0.0.2 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
-	golang.org/x/crypto v0.57.0 // indirect
-	golang.org/x/sys v0.48.0 // indirect
-	golang.org/x/text v0.42.0 // indirect
+	golang.org/x/crypto v0.58.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 )
 
 require (
@@ -18,7 +18,7 @@ require (
 	github.com/pinksaucepasta/paperboat/shared v0.0.0
 	github.com/quic-go/quic-go v0.61.0
 	github.com/realclientip/realclientip-go v1.0.0
-	golang.org/x/net v0.60.0
+	golang.org/x/net v0.62.0
 	golang.org/x/time v0.15.0
 )
 
