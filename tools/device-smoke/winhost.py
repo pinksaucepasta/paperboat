@@ -13,6 +13,7 @@ process tree, and comes back as one JSON envelope, so PowerShell's CLIXML/encodi
 import base64
 import contextlib
 import functools
+import gzip
 import hashlib
 import json
 import os
@@ -134,7 +135,10 @@ RANDOM_FILE = ("$f=[IO.File]::Create($req.path);$h=[Security.Cryptography.SHA256
                "$r=[Security.Cryptography.RandomNumberGenerator]::Create();$b=New-Object byte[] 1048576\n"
                "for($i=0;$i -lt $req.mib;$i++){$r.GetBytes($b);[void]$h.TransformBlock($b,0,$b.Length,$null,0);$f.Write($b,0,$b.Length)}\n"
                "$f.Close();[void]$h.TransformFinalBlock($b,0,0);-join($h.Hash|ForEach-Object{$_.ToString('x2')})")
-PATTERN_FILE = ("$b=[Convert]::FromBase64String($req.block);$f=[IO.File]::Create($req.path)\n"
+# The block arrives gzipped: a repeating 64 KiB block is a few hundred bytes on stdin instead of ~117 KB.
+PATTERN_FILE = ("$z=New-Object IO.MemoryStream(,[Convert]::FromBase64String($req.block));$m=New-Object IO.MemoryStream\n"
+                "$g=New-Object IO.Compression.GZipStream($z,[IO.Compression.CompressionMode]::Decompress);$g.CopyTo($m);$g.Close()\n"
+                "$b=$m.ToArray();$f=[IO.File]::Create($req.path)\n"
                 "for($i=0;$i -lt $req.repeat;$i++){$f.Write($b,0,$b.Length)}\n$f.Close()")
 TRUNCATE_FILE = "$f=[IO.File]::Open($req.path,'Create');$f.SetLength([long]$req.size);$f.Close()"
 # Windows has no SIGSTOP/SIGCONT; ntdll suspends and resumes every thread of the process.
@@ -473,7 +477,8 @@ class RemotePath:
         self.device.unlink(self)
 
     def write_pattern(self, block, repeat):
-        self.device.ps('write pattern %s' % self, PATTERN_FILE, timeout=300, path=str(self), block=_b64(block), repeat=repeat)
+        self.device.ps('write pattern %s' % self, PATTERN_FILE, timeout=300, path=str(self), block=_b64(gzip.compress(block)),
+                       repeat=repeat)
 
     def write_random(self, size):
         """Random bytes of the given size (whole MiB), made on the device; returns their sha256."""

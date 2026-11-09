@@ -237,6 +237,10 @@ class SnippetsInPowerShell(unittest.TestCase):
             pattern = directory / 'pattern.bin'
             winhost.write_pattern(pattern, bytes(range(256)) * 4, 5)
             self.assertEqual(bytes(range(256)) * 20, pattern.read_bytes())
+            calls = []
+            with patch.object(self.device, 'snippet', lambda *a, **payload: calls.append(payload) or (0, b'', b'')):
+                winhost.write_pattern(pattern, bytes(range(256)) * 256, 800)  # the checks' 50 MiB file
+            self.assertLess(len(calls[0]['block']), 1024)  # victus stopped answering SSH at this step with ~117 KB of stdin
             random = directory / 'random.bin'
             digest = winhost.write_random(random, 3 << 20)
             self.assertEqual(3 << 20, random.size())
