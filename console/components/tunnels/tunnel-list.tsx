@@ -43,7 +43,12 @@ export function TunnelList({ machine: tabMachine }: { machine?: Machine }) {
   const shown = query.data?.items ?? []
   const lastRows = useLastCount(`tunnels:${workspace?.id}:${scope ?? ""}`, query.data ? shown.length : undefined)
 
-  if (query.isSuccess && query.data.total === 0 && !q) {
+  // Whether the list was empty last time: an empty list loads as its empty state, not as a table.
+  const lastEmpty = useLastCount(
+    `tunnels-empty:${workspace?.id}:${scope ?? ""}`,
+    query.isSuccess ? Number(query.data.total === 0) : undefined,
+  )
+  if ((query.isSuccess ? query.data.total === 0 : query.isPending && lastEmpty === 1) && !q) {
     return (
       <Empty className="py-16">
         <EmptyHeader>

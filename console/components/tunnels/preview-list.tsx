@@ -109,7 +109,12 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
   const shown = query.data?.items ?? []
   const lastRows = useLastCount(`previews:${ws}:${scope ?? ""}:${view}`, query.data ? shown.length : undefined)
 
-  if (counts.data && counts.data.live + counts.data.ended === 0 && !q) {
+  // Whether there were no previews last time: then the page loads as its empty state, not as a table.
+  const lastEmpty = useLastCount(
+    `previews-empty:${ws}:${scope ?? ""}`,
+    counts.data ? Number(counts.data.live + counts.data.ended === 0) : undefined,
+  )
+  if ((counts.data ? counts.data.live + counts.data.ended === 0 : lastEmpty === 1) && !q) {
     return (
       <Empty className="py-16">
         <EmptyHeader>
