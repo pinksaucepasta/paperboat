@@ -120,7 +120,7 @@ function Domains({ team, identity }: { team: Team; identity: TeamIdentity }) {
       {domains.length ? (
         domains.map((domain) => (
           <Row key={domain.domain} label={domain.domain}>
-            <State ok={ready(domain.state)}>{domainStates[domain.state] ?? domain.state}</State>
+            <State ok={ready(domain.state)}>{domainStates[domain.state] ?? "Not verified"}</State>
           </Row>
         ))
       ) : (

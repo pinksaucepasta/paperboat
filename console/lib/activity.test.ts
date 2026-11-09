@@ -8,6 +8,6 @@ test("events seen on the server read as sentences", () => {
   expect(sentence(event("machine.access_ended"))).toBe("closed access to")
 })
 
-test("an unknown event still reads as a sentence, never 'did …'", () => {
-  expect(sentence(event("user_machine.foo_bar"))).toBe("recorded “foo bar” for")
+test("an unknown event still reads as a sentence, without the server's code", () => {
+  expect(sentence(event("user_machine.foo_bar"))).toBe("changed")
 })

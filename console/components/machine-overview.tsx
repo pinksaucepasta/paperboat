@@ -80,16 +80,18 @@ export function MachineOverview() {
   )
 }
 
-/** Only says something when updates are not healthy; a healthy machine needs no words here. */
+/**
+ * Only says something when an update was rolled back. Recovery is the panel above; "unknown" (the
+ * machine hasn't reported update health) says nothing.
+ */
 function UpdateHealth({ machine }: { machine: Machine }) {
   const availability = machine.availability
-  if (!availability || updateNeedsAttention(machine)) return null // the panel above says it
-  if (availability.update_health === "healthy" && availability.update_rollbacks === 0) return null
+  if (!availability || updateNeedsAttention(machine)) return null
   const rollbacks = availability.update_rollbacks
+  if (availability.update_health !== "healthy" || rollbacks === 0) return null
   return (
     <span className="text-muted-foreground">
-      · {availability.update_health.replace(/_/g, " ")}
-      {rollbacks > 0 && `, ${rollbacks} rolled back`}
+      · {rollbacks === 1 ? "last update rolled back" : `${rollbacks} updates rolled back`}
     </span>
   )
 }
@@ -179,7 +181,11 @@ function EdgeTile({
       <div className="flex h-[1lh] items-center gap-2">
         <span className="font-medium trim-cap">{placeName(region)}</span>
         <StatusDot online={ready} />
-        {!ready && <span className="text-xs text-muted-foreground trim-cap">{status.replace(/_/g, " ")}</span>}
+        {!ready && (
+          <span className="text-xs text-muted-foreground trim-cap">
+            {status === "draining" ? "Being replaced" : "Not reachable"}
+          </span>
+        )}
       </div>
       <div className="flex items-baseline justify-between text-sm">
         <Hosting selfHosted={selfHosted} />

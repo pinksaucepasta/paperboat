@@ -8,9 +8,10 @@ import { cursorPageSize } from "@/lib/cursor-pages"
 import { usePageParam } from "@/lib/use-page-param"
 import { ListPager } from "@/components/list-pager"
 import {
+  actionLabels,
   configStatusQuery,
   directionLabels,
-  humanize,
+  reasonLabel,
   syncState,
   type ConfigEnvironment,
   type ConfigPath,
@@ -287,7 +288,7 @@ function MachineSync({ environment }: { environment: ConfigEnvironment }) {
   const conflicts = environment.conflicts ?? []
   const review = environment.review ?? []
   const skipped = environment.skipped ?? []
-  const actions = environment.recovery_actions ?? []
+  const actions = actionLabels(environment.recovery_actions ?? [])
   return (
     <div className="flex flex-col gap-10">
       <div className="flex flex-col gap-1.5">
@@ -302,9 +303,7 @@ function MachineSync({ environment }: { environment: ConfigEnvironment }) {
             </span>
           )}
         </span>
-        {actions.length > 0 && (
-          <p className="text-sm text-muted-foreground">To fix: {actions.map(humanize).join("; ")}.</p>
-        )}
+        {actions.length > 0 && <p className="text-sm text-muted-foreground">To fix: {actions.join("; ")}.</p>}
       </div>
 
       <section className="flex flex-col gap-3">
@@ -354,7 +353,7 @@ function PathList({ title, paths, note }: { title: string; paths: ConfigPath[]; 
               {formatBytes(path.bytes)}
             </span>
           )}
-          <span className="shrink-0 text-muted-foreground">{humanize(path.reason)}</span>
+          <span className="shrink-0 text-muted-foreground">{reasonLabel(path.reason)}</span>
         </div>
       ))}
     </Section>

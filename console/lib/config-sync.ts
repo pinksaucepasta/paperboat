@@ -69,11 +69,54 @@ export const directionLabels: Record<string, string> = {
   disabled: "Off",
 }
 
-/** A reason or error code, readable: `binary_file` → "Binary file". */
-export const humanize = (code: string) => {
-  const text = code.replace(/_/g, " ")
-  return text.charAt(0).toUpperCase() + text.slice(1)
+/** Why a path is listed (skipped, waiting for review, in conflict), in plain words; unknown codes say nothing. */
+const reasons: Record<string, string> = {
+  added: "New file",
+  changed: "Changed",
+  changed_both: "Changed on both sides",
+  delete_modify: "Deleted on one side, changed on the other",
+  concurrent_update: "Changed while syncing",
+  case_collision: "Name differs only in case",
+  excluded: "Excluded",
+  file_changing: "Still being written",
+  max_batch_bytes: "Too much to sync at once",
+  max_file_bytes: "Too large",
+  special_file: "Not a regular file",
+  unsafe_permissions: "Readable by others",
+  unsafe_symlink: "Link points outside the folder",
 }
+export const reasonLabel = (code: string): string | undefined => reasons[code]
+
+/** What to do to recover, in plain words; unknown codes are left out. */
+const actions: Record<string, string> = {
+  apply_configuration: "apply the configuration again",
+  check_repository_access: "check the repository's access",
+  check_status: "check the status on the machine",
+  configure_repository_credentials: "connect the repository again",
+  fix_configuration: "fix the configuration",
+  fix_manifest: "fix the config manifest",
+  fix_path_rules: "fix the path rules",
+  keep_local: "keep the machine's version",
+  keep_remote: "keep the repository's version",
+  observe_remote: "wait for the repository to settle",
+  retry: "try again",
+  review_revision: "review the change",
+  wait_for_lease: "wait for the other machine to finish",
+  wait_for_rollout: "wait for the update to finish",
+}
+export const actionLabels = (codes: string[]): string[] => codes.flatMap((code) => actions[code] ?? [])
+
+/** A sync error in plain words; one this console doesn't know yet is a plain "Couldn’t sync". */
+const errors: Record<string, string> = {
+  access_decrypt_failed: "Couldn’t read the repository credentials",
+  config_conflict: "Conflict",
+  config_sync_failed: "Couldn’t sync",
+  config_writes_disabled: "Writing config is turned off",
+  credential_expired: "Repository access expired",
+  network_error: "Couldn’t reach the repository",
+  provider_outcome_uncertain: "Couldn’t confirm the last sync",
+}
+const errorLabel = (code: string) => errors[code] ?? "Couldn’t sync"
 
 /**
  * A machine's sync in a few words, whether it's fine, and whether it's a problem (conflicts,
@@ -118,7 +161,7 @@ export function syncState(environment: ConfigEnvironment): {
     default:
       return {
         ok: false,
-        label: environment.error_code ? humanize(environment.error_code) : "Error",
+        label: environment.error_code ? errorLabel(environment.error_code) : "Couldn’t sync",
         attention: true,
         danger: true,
       }

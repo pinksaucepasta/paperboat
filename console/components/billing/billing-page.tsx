@@ -147,7 +147,7 @@ function Plan({
           )}
         </div>
       ) : (
-        billing.state !== "free" && billing.state !== "active" && <Row label="Status">{stateLabel(billing.state)}</Row>
+        stateLabel(billing.state) && <Row label="Status">{stateLabel(billing.state)}</Row>
       )}
       {end && !trialing && (
         <Row label={billing.cancel_at_period_end ? "Ends" : billing.product_code ? "Renews" : "Bandwidth resets"}>
@@ -268,13 +268,18 @@ function planName(product: BillingProduct) {
   return product.name.replace(/^Paperboat\s+/, "").replace(/\s*\((month|year)\)$/, "")
 }
 
-function stateLabel(state: string) {
+/** The subscription's state in plain words; a state this console doesn't know shows no Status row. */
+function stateLabel(state: string): string | undefined {
   const labels: Record<string, string> = {
     canceled: "Canceled",
     incomplete: "Payment incomplete",
+    incomplete_expired: "Payment didn’t go through",
+    past_due: "Payment overdue",
+    unpaid: "Payment overdue",
     pending: "Payment processing",
+    trialing: "Trial",
   }
-  return labels[state] ?? state.replace(/_/g, " ")
+  return labels[state]
 }
 
 /**

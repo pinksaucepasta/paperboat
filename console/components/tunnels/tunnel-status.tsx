@@ -15,6 +15,7 @@ export function tunnelState(tunnel: Tunnel): { healthy: boolean; label: string }
     case "pending":
       return { healthy: false, label: "Connecting" }
     case "route_unavailable":
+    case "origin_unreachable":
       return { healthy: false, label: "Can’t reach the service" }
     case "bandwidth_exhausted":
       return { healthy: false, label: "Bandwidth used up" }
@@ -24,8 +25,8 @@ export function tunnelState(tunnel: Tunnel): { healthy: boolean; label: string }
     case "tunnel_expired":
       return { healthy: false, label: "Expired" }
     default:
-      // A state this console doesn't know yet: the server's own code, readable, beats "Unknown".
-      return { healthy: false, label: tunnel.summary_code ? capitalize(tunnel.summary_code.replaceAll("_", " ")) : "Unknown" }
+      // A state this console doesn't know yet: plain words, never the server's code.
+      return { healthy: false, label: "Not ready" }
   }
 }
 
@@ -38,5 +39,3 @@ export function TunnelStatus({ tunnel }: { tunnel: Tunnel }) {
     </span>
   )
 }
-
-const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)

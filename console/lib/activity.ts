@@ -264,8 +264,8 @@ export function describe(event: ActivityEvent): string {
   return (
     phrases[event.action] ??
     prefixPhrases.find(([prefix]) => event.action.startsWith(prefix))?.[1] ??
-    // Unknown types still read as a sentence: `user_machine.foo_bar` → recorded “foo bar” for <target>.
-    `recorded “${event.action.split(".").slice(1).join(" ").replace(/_/g, " ")}” for`
+    // A type this console doesn't know yet still reads as a sentence, without the server's code.
+    "changed"
   )
 }
 

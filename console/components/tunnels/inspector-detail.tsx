@@ -65,7 +65,7 @@ export function CaptureRow({
         )}
       </td>
       <td className={`font-mono text-code ${statusTone(record.response_status)}`}>
-        {record.response_status || record.error_code || "—"}
+        {record.response_status || failureLabel(record.error_code) || "—"}
       </td>
       <td className="hidden text-right text-muted-foreground sm:table-cell">{durationOf(record)}</td>
       <td className="hidden text-right text-muted-foreground md:table-cell">{timeOf(record, time.date)}</td>
@@ -188,7 +188,7 @@ export function CaptureDetail({
           <>
             Response{" "}
             <span className={`font-mono ${statusTone(record.response_status)}`}>
-              {record.response_status || record.error_code.replaceAll("_", " ") || "pending"}
+              {record.response_status || failureLabel(record.error_code) || "pending"}
             </span>{" "}
             · {durationOf(record)}
           </>
@@ -208,4 +208,11 @@ function replayBlocked(reason?: string) {
   if (!reason) return undefined
   if (reason === "raw_disabled") return "Turn on Bodies before the request to replay it"
   return `Can’t replay: ${reason.replaceAll("_", " ")}`
+}
+
+/** Why a request got no response, in plain words; "none" and unknown codes say nothing specific. */
+function failureLabel(code: string): string | undefined {
+  if (code === "origin_unavailable") return "Can’t reach the service"
+  if (code === "forwarding_failed") return "Couldn’t forward"
+  return code && code !== "none" ? "Failed" : undefined
 }

@@ -179,7 +179,7 @@ function Loaded({ usage, period, showMachine }: { usage: Usage; period: UsagePer
                 <span className="flex min-w-0 flex-col">
                   <span className="truncate font-medium">{resource.resource_name || resource.resource_id}</span>
                   <span className="text-xs text-muted-foreground">
-                    {kindLabels[resource.resource_kind] ?? resource.resource_kind}
+                    {kindLabels[resource.resource_kind] ?? "Other"}
                   </span>
                 </span>
               </td>
