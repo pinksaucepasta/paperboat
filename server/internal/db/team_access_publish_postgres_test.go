@@ -107,6 +107,20 @@ VALUES($1,$2,$3,'host','linux','amd64','/w','online','occupied',true,1)`, machin
 	}
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true) ON CONFLICT (team_id,account_id) DO UPDATE SET active=true`, team, member)
 
+	// Suspension and deletion: members' topics move once; an unrelated team update publishes nothing.
+	inv, acc = account(member, "inventory"), account(member, "machine_access")
+	exec(`UPDATE paperboat.teams SET generation=generation+1 WHERE team_id=$1`, team)
+	if account(member, "inventory") != inv {
+		t.Fatal("a team update that changed neither suspended nor deleted_at published")
+	}
+	for _, change := range []string{`suspended=true,suspended_at=now(),suspended_by=owner_account`, `suspended=false,suspended_at=NULL,suspended_by=NULL`, `deleted_at=now()`, `deleted_at=NULL`} {
+		inv, acc = account(member, "inventory"), account(member, "machine_access")
+		exec(`UPDATE paperboat.teams SET `+change+` WHERE team_id=$1`, team)
+		if account(member, "inventory") != inv+1 || account(member, "machine_access") != acc+1 {
+			t.Fatalf("%s: member topics moved inventory +%d, machine_access +%d; want +1 each", change, account(member, "inventory")-inv, account(member, "machine_access")-acc)
+		}
+	}
+
 	// Entitlement: a paid row, then a past_due row inside no grace, then paid again. Only flips publish.
 	exec(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,quantity,period_start,period_end) VALUES('team:'||$1,$1,'active',2,now()-interval '1 day',now()+interval '30 days')`, team)
 	inv, acc = account(member, "inventory"), account(member, "machine_access")
