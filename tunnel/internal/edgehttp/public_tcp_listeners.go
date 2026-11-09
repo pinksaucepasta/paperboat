@@ -28,6 +28,8 @@ type PublicTCPAuthority interface {
 type PublicTCPListenerConfig struct {
 	OnFailure             func(context.Context, string, error)
 	PreviewHTTPSAuthority func(context.Context, string) error
+	// RouteGrace is how long a TLS name that is not admitted yet waits to be (after a handover takeover); nil or 0 waits not.
+	RouteGrace func() time.Duration
 	// UnknownNameTLS answers names with no live decision with the branded not-found page (wildcard fallback).
 	UnknownNameTLS         *tls.Config
 	ListenHost             string
@@ -367,6 +369,7 @@ func (p *PublicTCPListeners) WrapTLSListener(listener net.Listener, httpsHostnam
 		p.observe(ctx, phase, cause)
 	})
 	shared.ServeUnknownNamesWithPage(p.cfg.UnknownNameTLS)
+	shared.routeGrace = p.cfg.RouteGrace
 	p.sharedTLS = shared
 	return shared, nil
 }

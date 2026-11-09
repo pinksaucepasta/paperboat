@@ -337,6 +337,16 @@ func wipeRecords(records [][]byte) {
 
 var tookOverAt atomic.Int64
 
+// RemainingAfterTakeover is how much of window is left since this process took over accepting, or 0 when it
+// did not take over one or the window passed. The window is the replaced process's drain deadline: hosts
+// re-attach their carriers here on its GOAWAY, and nothing re-attaches after it.
+func RemainingAfterTakeover(window time.Duration) time.Duration {
+	if since, ok := SinceTakeover(); ok && since < window {
+		return window - since
+	}
+	return 0
+}
+
 // SinceTakeover is how long ago this process took over accepting from the process it replaced, and
 // false when it did not take over one.
 func SinceTakeover() (time.Duration, bool) {

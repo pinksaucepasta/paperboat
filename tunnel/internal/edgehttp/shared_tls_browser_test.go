@@ -609,3 +609,53 @@ func TestSharedTLSUnknownNameCompletesTLSWithNotFoundPageOnly(t *testing.T) {
 	default:
 	}
 }
+
+// Right after a handover takeover a host re-attaches its carrier late (anvit 2026-11-09: 404s for up to 6 s):
+// its name is held until admitted, and answered not-found only when the grace ends or nothing is held for it.
+func TestSharedTLSNameAdmittedAfterTakeoverIsServedNotAnswered404(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		grace      time.Duration
+		admitAfter time.Duration // 0: never
+		wantStatus int
+		maxWait    time.Duration
+	}{
+		{"host re-attaches 700 ms after takeover", 5 * time.Second, 700 * time.Millisecond, http.StatusNoContent, 3 * time.Second},
+		{"never re-attaches: not found when the grace ends", 600 * time.Millisecond, 0, http.StatusNotFound, 3 * time.Second},
+		{"no takeover: not found at once", 0, 200 * time.Millisecond, http.StatusNotFound, 400 * time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			match, _ := browserTestMatch()
+			clientTLS, serverTLS, _, _, _ := task24Certificates(t, match.Host)
+			clientTLS.ServerName = match.Host
+			raw, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+			defer registry.Close()
+			var admitted atomic.Bool
+			if tc.admitAfter > 0 {
+				time.AfterFunc(tc.admitAfter, func() { admitted.Store(true) })
+			}
+			shared := newSharedTLSListener(raw, &quotaDeniedAuthority{}, registry, func(string) bool { return false }, make(chan struct{}, 4), "", func(string) bool { return admitted.Load() }, nil, nil)
+			shared.ServeUnknownNamesWithPage(serverTLS)
+			shared.routeGrace = func() time.Duration { return tc.grace }
+			server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })}
+			defer server.Close()
+			go server.ServeTLS(shared, "", "")
+			client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: clientTLS, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, "tcp", raw.Addr().String())
+			}}}
+			start := time.Now()
+			response, err := client.Get("https://" + match.Host + "/")
+			if err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			if response.StatusCode != tc.wantStatus || time.Since(start) > tc.maxWait {
+				t.Fatalf("status %d after %v, want %d within %v", response.StatusCode, time.Since(start), tc.wantStatus, tc.maxWait)
+			}
+		})
+	}
+}

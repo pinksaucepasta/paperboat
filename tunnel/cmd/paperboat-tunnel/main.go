@@ -472,7 +472,10 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return ingressAuthority.ResolvePreview(ctx, r.PreviewID, r.Hostname, r.Revision, connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: r.Identity.AccountID, TunnelID: r.Identity.TunnelID, ConnectorID: r.Identity.ConnectorID, SessionID: r.Identity.SessionID, ProcessGeneration: r.Identity.ProcessGeneration, Generation: r.Identity.Generation, RouteID: r.RouteID, RequestID: "preview-authority", Kind: "http"})
 	}
 	previewHTTPSMatcher := edgehttp.NewPreviewCarrierRouteMatcher(previewRoutes)
-	publicTCP, err := edgehttp.NewPublicTCPListeners(edgehttp.PublicTCPListenerConfig{OnFailure: func(ctx context.Context, phase string, cause error) {
+	// A request for a host whose carrier is still on the replaced process waits, bounded by that process's drain
+	// deadline (it gets the host's GOAWAY then), for the host to re-attach here.
+	routeGrace := func() time.Duration { return handover.RemainingAfterTakeover(cfg.ShutdownTimeout / 2) }
+	publicTCP, err := edgehttp.NewPublicTCPListeners(edgehttp.PublicTCPListenerConfig{RouteGrace: routeGrace, OnFailure: func(ctx context.Context, phase string, cause error) {
 		switch phase {
 		case "public_tcp_reconcile", "public_tcp_listener", "public_tcp_stream", "tls_dispatch":
 			reporter.ObserveFailure(ctx, phase, cause)
@@ -638,7 +641,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 			}
 		}
 		reporter.ObserveFailure(ctx, "upstream_request", cause)
-	}, RouteUnavailable: unavailableRoutes.Has, RouteGrace: takeoverRouteGrace, SelfHosted: deployment.SelfHosted, RuntimeCarrierTransport: runtimeTransport, BrowserTerminalHub: browserTerminalHub, BrowserTerminalEdgeHost: deployment.ConnectorAdvertiseHost, BrowserAccess: browserAccess, BrowserTerminal: &control.BrowserTerminalClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, InspectorAccess: inspectorAccess, PreviewBaseDomain: deployment.PreviewBaseDomain, TunnelBaseDomain: deployment.TunnelBaseDomain, RuntimeBaseDomain: deployment.RuntimeBaseDomain, TrustedProxies: trusted, MaxHeaderBytes: deployment.MaxHeaderBytes, MaxBodyBytes: deployment.MaxBodyBytes, BodyIdleTimeout: deployment.RequestBodyIdle(), Routes: routeMatcher, PrivateAccessConnections: privateConnections, Readiness: previewReadiness{Canonical: previewRoutes, Fallback: routes}, PreviewPending: func(host string) bool {
+	}, RouteUnavailable: unavailableRoutes.Has, RouteGrace: routeGrace, SelfHosted: deployment.SelfHosted, RuntimeCarrierTransport: runtimeTransport, BrowserTerminalHub: browserTerminalHub, BrowserTerminalEdgeHost: deployment.ConnectorAdvertiseHost, BrowserAccess: browserAccess, BrowserTerminal: &control.BrowserTerminalClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, InspectorAccess: inspectorAccess, PreviewBaseDomain: deployment.PreviewBaseDomain, TunnelBaseDomain: deployment.TunnelBaseDomain, RuntimeBaseDomain: deployment.RuntimeBaseDomain, TrustedProxies: trusted, MaxHeaderBytes: deployment.MaxHeaderBytes, MaxBodyBytes: deployment.MaxBodyBytes, BodyIdleTimeout: deployment.RequestBodyIdle(), Routes: routeMatcher, PrivateAccessConnections: privateConnections, Readiness: previewReadiness{Canonical: previewRoutes, Fallback: routes}, PreviewPending: func(host string) bool {
 		now := time.Now()
 		return runtimeExpected.Expects(host, now)
 	}, HelperAccess: verifier, Revocations: trust.Snapshot, RevocationCheckInterval: deployment.ControlInterval}, "", previewForwarder, durableForwarder)
@@ -1293,16 +1296,3 @@ func (p componentPair) Shutdown(ctx context.Context) error {
 	return errors.Join(p.second.Shutdown(ctx), p.first.Shutdown(ctx))
 }
 
-const (
-	// takeoverRouteWindow is how long after taking over from a replaced process a request for an unknown
-	// host waits (takeoverRouteHold) for the host to re-attach its carrier here.
-	takeoverRouteWindow = 10 * time.Second
-	takeoverRouteHold   = 3 * time.Second
-)
-
-func takeoverRouteGrace() time.Duration {
-	if since, tookOver := handover.SinceTakeover(); tookOver && since < takeoverRouteWindow {
-		return takeoverRouteHold
-	}
-	return 0
-}

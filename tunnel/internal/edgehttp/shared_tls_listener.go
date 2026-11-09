@@ -45,6 +45,11 @@ type SharedTLSListener struct {
 	// unknown completes TLS for a name with no live decision (a stopped or unknown preview) and answers
 	// only the branded "does not exist" page; it never reaches the HTTPS handler or an origin.
 	unknown *tls.Config
+	// routeGrace and held: right after a handover takeover a name whose host has not re-attached its carrier
+	// yet is held (at most cap(held) at a time) until it is admitted or the grace ends, instead of answering the
+	// not-found page at once (anvit 2026-11-09: 404s up to 6 s after every edge swap).
+	routeGrace func() time.Duration
+	held       chan struct{}
 }
 
 // ServeUnknownNamesWithPage sets the TLS config (the edge certificate selector, wildcard fallback) used to
@@ -66,7 +71,7 @@ func NewSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, r
 
 func newSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, routes *DataCarrierRouteRegistry, httpsHostname func(string) bool, slots chan struct{}, infrastructureHostname string, admittedHTTPSHostname func(string) bool, previewHTTPSAuthority func(context.Context, string) error, observe func(context.Context, string, error)) *SharedTLSListener {
 	ctx, cancel := context.WithCancel(context.Background())
-	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, admittedHTTPSHostname: admittedHTTPSHostname, previewHTTPSAuthority: previewHTTPSAuthority, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), slots: slots, passthrough: make(chan struct{}, cap(slots)), https: make(chan struct{}, cap(slots)), forward: routes.ForwardPublicTCP, done: make(chan struct{}), onFailure: observe}
+	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, admittedHTTPSHostname: admittedHTTPSHostname, previewHTTPSAuthority: previewHTTPSAuthority, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), held: make(chan struct{}, 256), slots: slots, passthrough: make(chan struct{}, cap(slots)), https: make(chan struct{}, cap(slots)), forward: routes.ForwardPublicTCP, done: make(chan struct{}), onFailure: observe}
 	go l.run()
 	return l
 }
@@ -197,10 +202,14 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 		return
 	}
 	if !authorizedHTTPS && !infrastructureHTTPS {
-		if l.unknown != nil {
-			serveNotFoundPage(replay, l.unknown)
+		if l.awaitAdmission(host) {
+			authorizedHTTPS = true
+		} else {
+			if l.unknown != nil {
+				serveNotFoundPage(replay, l.unknown)
+			}
+			return
 		}
-		return
 	}
 	select {
 	case l.https <- struct{}{}:
@@ -214,6 +223,29 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 	case <-l.ctx.Done():
 		_ = replay.Close()
 	}
+}
+
+// awaitAdmission waits, within the takeover grace, for host to be admitted (its carrier attached here).
+func (l *SharedTLSListener) awaitAdmission(host string) bool {
+	if l.routeGrace == nil || l.admittedHTTPSHostname == nil || l.routeGrace() <= 0 {
+		return false
+	}
+	select {
+	case l.held <- struct{}{}:
+		defer func() { <-l.held }()
+	default:
+		return false
+	}
+	ctx, cancel := context.WithTimeout(l.ctx, l.routeGrace())
+	defer cancel()
+	for !l.admittedHTTPSHostname(host) {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(routeHoldPoll):
+		}
+	}
+	return true
 }
 
 func (l *SharedTLSListener) Accept() (net.Conn, error) {
