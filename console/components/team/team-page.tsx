@@ -23,7 +23,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { ListSkeleton } from "@/components/skeletons"
+import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
 
@@ -37,7 +37,9 @@ export function TeamPage() {
     if (wanted && wanted !== workspace?.id && workspaces?.some((item) => item.kind === "team" && item.id === wanted))
       setWorkspace(wanted)
   }, [wanted, workspace?.id, workspaces])
-  if (!workspace) return <ListSkeleton rows={3} rowClassName="h-16" />
+  // Before the workspace is known (the prerendered shell) the page draws the Teams view, whose
+  // buttons and headings are fixed; only its rows are placeholders.
+  if (!workspace) return <Teams />
   return workspace.kind === "team" ? <TeamManage workspace={workspace} /> : <Teams />
 }
 
@@ -141,7 +143,18 @@ function Teams() {
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-medium">Your teams</h2>
         {workspaces.isPending ? (
-          <ListSkeleton rows={3} rowClassName="h-16" />
+          <div className="flex flex-col divide-y divide-divider border-y border-divider">
+            {Array.from({ length: 3 }, (_, index) => (
+              <div key={index} className="flex h-16 items-center gap-3 px-3 text-sm">
+                <Skeleton className="size-9 rounded-md" />
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <Skeleton className="my-[3px] h-3.5 w-32" />
+                  <Skeleton className="my-[3px] h-2.5 w-48" />
+                </span>
+                <span className="text-muted-foreground">Open</span>
+              </div>
+            ))}
+          </div>
         ) : teams.length === 0 ? (
           <div className="flex flex-col items-center gap-3 surface rounded-lg px-6 py-12 text-center">
             <UsersThreeIcon className="size-8 text-muted-foreground" />

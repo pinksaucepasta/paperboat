@@ -19,7 +19,6 @@ import {
 import { formatBytes } from "@/lib/format"
 import { PlanActions, Seats, TopUps } from "@/components/billing/billing-sections"
 import { Row, Section } from "@/components/section"
-import { SectionSkeleton } from "@/components/skeletons"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -34,7 +33,7 @@ export function BillingPage() {
   const billing = useApiQuery(billingQuery(workspace))
   const confirming = useConfirmingCheckout(workspace, billing.data)
 
-  if (!workspace || billing.isPending) return <SectionSkeleton title="Plan" rows={8} />
+  if (!workspace || billing.isPending) return <BillingSkeleton />
   if (billing.isError) return <p className="text-sm text-muted-foreground">{billing.error.message}</p>
   const subscribed = Boolean(billing.data.product_code)
   return (
@@ -276,4 +275,45 @@ function stateLabel(state: string) {
     pending: "Payment processing",
   }
   return labels[state] ?? state.replace(/_/g, " ")
+}
+
+/**
+ * The plan page before billing is known (the prerendered shell): its headings, row labels and
+ * buttons as a subscribed plan shows them, with placeholders where the plan's own values go.
+ */
+function BillingSkeleton() {
+  const value = (width: string) => <Skeleton className={`my-[4px] ml-auto h-3 ${width}`} />
+  const button = (width: string) => <Skeleton className={`ml-auto h-7 ${width}`} />
+  return (
+    <div className="flex flex-col gap-10">
+      <Section title="Plan" action={<Skeleton className="h-8 w-28" />}>
+        {["Plan", "Renews", "Hosted allowance", "Machines", "Previews & tunnels", "Browser terminals", "Public TCP tunnels"].map(
+          (label) => (
+            <Row key={label} label={label}>
+              {value("w-24")}
+            </Row>
+          ),
+        )}
+        <Row label="Billing period">{button("w-40")}</Row>
+        <Row label="Cancel">{button("w-24")}</Row>
+      </Section>
+      <Section title="Add bandwidth">
+        <div className="flex min-h-14 items-center justify-between gap-x-6 border-b border-divider py-2 text-sm">
+          <span className="flex items-center gap-2">
+            <Skeleton className="size-6" />
+            <Skeleton className="h-7 w-24" />
+            <span className="text-muted-foreground">GB</span>
+            <Skeleton className="size-6" />
+          </span>
+          <span className="flex items-center gap-3">
+            <Skeleton className="h-3 w-8" />
+            <Skeleton className="h-7 w-12" />
+          </span>
+        </div>
+        <p className="py-2 text-xs text-muted-foreground">
+          Used after the plan&apos;s allowance runs out. It doesn&apos;t expire or renew.
+        </p>
+      </Section>
+    </div>
+  )
 }

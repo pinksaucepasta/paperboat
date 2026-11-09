@@ -146,14 +146,13 @@ export function ActivityPage({ machine: tabMachine }: { machine?: Machine }) {
 
       {activity.isPending ? (
         <div className="flex flex-col">
-          <div className="pt-5 pb-2">
-            <Skeleton className="h-4 w-12" />
-          </div>
+          {/* The newest events are usually today's; the day heading is text, not a bar. */}
+          <h2 className="pt-5 pb-2 text-xs font-medium">Today</h2>
           <div className="flex flex-col divide-y divide-divider border-y border-divider">
             {Array.from({ length: 8 }, (_, index) => (
               <div key={index} className="flex min-h-12 items-center gap-4 py-2">
                 <Skeleton className="h-3.5 w-16 shrink-0" />
-                <Skeleton className="size-6 shrink-0 rounded-md" />
+                <span className="size-6 shrink-0 rounded-md bg-primary/12" />
                 <Skeleton className="h-4 w-3/4" />
               </div>
             ))}
