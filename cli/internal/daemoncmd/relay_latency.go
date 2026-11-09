@@ -9,9 +9,9 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/netlatency"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
-	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 // newRelayLatencyReporter measures this machine's connect time to the relays the account can use
@@ -38,7 +38,7 @@ func newRelayLatencyReporter(serverURL, machineID string, transport http.RoundTr
 			return api.New(serverURL, token, &http.Client{Transport: transport}).ReportRelayLatency(ctx, machineID, report)
 		},
 		OnFailure: func(stage string, err error) {
-			diagnosticlog.TryInfo("relay latency report skipped", "stage", stage)
+			errorreport.Current().ObserveFailure(context.Background(), "paperboat-daemon", "relay_latency", "relay_"+stage, "relay_latency_failed", err)
 		},
 	}
 }

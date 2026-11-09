@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/netlatency"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
 )
@@ -53,5 +54,19 @@ func TestRelayLatencyReporterPutsMeasurementsForThisMachine(t *testing.T) {
 	got := <-seen
 	if got.Path != "PUT /v1/machines/machine_1/network-latency" || got.Auth != "Bearer token" || len(got.Body.Relays) != 1 || got.Body.Relays[0].NodeID != "node_relay" || got.Body.Relays[0].RTT != 23 {
 		t.Fatalf("request=%+v", got)
+	}
+}
+
+// A failed round must reach the diagnostics with its stage and cause; it was a bare "skipped" line.
+func TestRelayLatencyFailureIsRecordedWithStageAndCode(t *testing.T) {
+	faults := make(chan errorreport.Fault, 1)
+	defer errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) { faults <- fault })()
+	reporter := newRelayLatencyReporter("https://api.example.test", "machine_1", http.DefaultTransport,
+		func(context.Context) (config.Credential, error) { return config.Credential{}, nil },
+		func(context.Context) ([]tailnet.RegionalNode, error) { return nil, tailnet.ErrRegionalAuthority })
+	reporter.OnFailure("targets", tailnet.ErrRegionalAuthority)
+	fault := <-faults
+	if fault.Operation != "relay_latency" || fault.Stage != "relay_targets" || fault.Code != "relay_latency_failed" {
+		t.Fatalf("fault=%+v", fault)
 	}
 }
