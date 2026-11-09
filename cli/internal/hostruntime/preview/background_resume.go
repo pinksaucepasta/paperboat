@@ -80,8 +80,11 @@ func (m *DispatchManager) forgetBackground(operationID string) {
 // of this host runtime on the same boot. It blocks until every record has been
 // resumed or dropped, so run it in the background of the runtime start.
 func (m *DispatchManager) RestoreBackground(ctx context.Context) {
+	if m == nil {
+		return
+	}
 	resume := m.config.Background
-	if m == nil || resume == nil || resume.Store == nil {
+	if resume == nil || resume.Store == nil {
 		return
 	}
 	records, err := resume.Store.Load()
