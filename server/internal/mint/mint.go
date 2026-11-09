@@ -22,6 +22,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/jwks"
 )
 
 const (
@@ -634,6 +636,22 @@ func (p *Provider) Withdraw(ids []string) error {
 		}
 		delete(p.keys, id)
 		p.withdrawn[id] = struct{}{}
+	}
+	return nil
+}
+
+// CheckRevocable says whether an operator may revoke id: it must be a key this mint publishes or already
+// withdrew, and not the active one (clients would drop the key the mint still signs with).
+func (p *Provider) CheckRevocable(id string) error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	_, listed := p.keys[id]
+	_, withdrawn := p.withdrawn[id]
+	switch {
+	case id == p.activeID:
+		return fmt.Errorf("mint key %q is the active signing key; rotate to another key first", id)
+	case !listed && !withdrawn:
+		return fmt.Errorf("mint key %q is not a known signing key", id)
 	}
 	return nil
 }
@@ -1478,6 +1496,10 @@ func (p *Provider) JWKSJSON(revoked ...string) ([]byte, error) {
 	}
 	p.mu.RUnlock()
 	withdrawn := slices.Compact(slices.Sorted(slices.Values(append(ids, revoked...))))
+	if len(withdrawn) > jwks.MaxKeys {
+		// Every client refuses a longer withdrawn list and freezes on its last set: fail instead of serving it.
+		return nil, fmt.Errorf("trust document would withdraw %d keys, more than the %d clients accept", len(withdrawn), jwks.MaxKeys)
+	}
 	return json.Marshal(trustDocument{Keys: keys, WithdrawnKeyIDs: withdrawn})
 }
 func (p *Provider) ServeHTTP(w http.ResponseWriter, _ *http.Request) {

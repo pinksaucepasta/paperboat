@@ -410,7 +410,7 @@ func TestRelaySubjectsObservationBodyCarriesFullListPostgres(t *testing.T) {
 	if len(lease.Revocations) != len(list) {
 		t.Fatalf("revocations = %d, want %d (no identity rows)", len(lease.Revocations), len(list))
 	}
-	want, err := n.service.trustKeys(t.Context())
+	want, err := n.service.TrustKeys(t.Context())
 	if err != nil || string(lease.JWKS) != string(want) {
 		t.Fatalf("lease trust document = %s, want %s (%v)", lease.JWKS, want, err)
 	}
@@ -536,7 +536,7 @@ func TestRelayStartAnswersTrustDocumentPostgres(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &lease); err != nil {
 		t.Fatal(err)
 	}
-	want, err := n.service.trustKeys(t.Context())
+	want, err := n.service.TrustKeys(t.Context())
 	if err != nil || string(lease.JWKS) != string(want) {
 		t.Fatalf("start trust document = %s, want %s (%v)", lease.JWKS, want, err)
 	}
