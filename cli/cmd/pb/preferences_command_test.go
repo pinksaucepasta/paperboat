@@ -50,7 +50,8 @@ func TestCustomizationImportShowAndInvalidRecovery(t *testing.T) {
 		t.Fatalf("show: %s (%v)", out, err)
 	}
 	code, out, errOut = invoke("where", "--json")
-	if code != 0 || errOut != "" || !strings.Contains(out, configPath) {
+	quotedConfigPath, _ := json.Marshal(configPath) // JSON escapes a Windows path's separators
+	if code != 0 || errOut != "" || !strings.Contains(out, string(quotedConfigPath)) {
 		t.Fatalf("shortcut dispatch: %d %s %s", code, out, errOut)
 	}
 	if err := os.WriteFile(path, []byte(`{"version":1,"bogus":true}`), 0600); err != nil {
