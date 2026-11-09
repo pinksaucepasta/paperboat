@@ -319,6 +319,22 @@ func validateOwnerToken(token windows.Token, ownerSID string) error {
 	return nil
 }
 
+// ownNewObjectsAsUser makes the enrolled user the owner of everything the workload creates. A token of the
+// built-in Administrator, or of any administrator with UAC off (the default on Windows Server), names the
+// Administrators group as default owner; the credential and lock stores accept only user-owned files, so the
+// carrier failed with "OS credential store unavailable" (Windows Sandbox, 2026-11-10). A user may always own
+// their own objects, so this needs no privilege.
+func ownNewObjectsAsUser(token windows.Token) error {
+	user, err := token.GetTokenUser()
+	if err != nil {
+		return err
+	}
+	owner := struct{ Owner *windows.SID }{Owner: user.User.Sid}
+	err = windows.SetTokenInformation(token, windows.TokenOwner, (*byte)(unsafe.Pointer(&owner)), uint32(unsafe.Sizeof(owner)))
+	runtime.KeepAlive(user)
+	return err
+}
+
 func stripOwnerTokenPrivileges(token windows.Token) error {
 	if err := adjustTokenPrivileges(token, true, nil); err != nil {
 		return err

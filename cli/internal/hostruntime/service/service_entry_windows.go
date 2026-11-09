@@ -578,6 +578,9 @@ func launchEnrolledProcess(config ServiceEntryConfig) (result *enrolledProcess, 
 	if err := validateOwnerToken(primary, config.EnrolledSID); err != nil {
 		return nil, err
 	}
+	if err := ownNewObjectsAsUser(primary); err != nil {
+		return nil, err
+	}
 	if err := stripOwnerTokenPrivileges(primary); err != nil {
 		return nil, err
 	}
