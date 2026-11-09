@@ -2,8 +2,9 @@
 """Windows lifecycle checks on victus, driven from a Linux host over SSH (PowerShell), with hp as the peer client.
 
   VICTUS_PASS=... windows_lifecycle.py --expect-version V --windows-install-json FILE CHECK...
-  CHECK: version doctor status service crash availability exec reset-pair uninstall
-  reset-pair and uninstall need --token-from HOST (a paired Linux machine that mints enrollment tokens).
+  CHECK: install-pair version doctor status service crash availability exec exec-self reset-pair uninstall
+  install-pair needs --build (the new pb.exe already copied to victus); it writes the install receipt to the
+  --windows-install-json file. install-pair and reset-pair mint tokens on hp. Results go to results/windows-lifecycle-<UTC>.json.
 
 Prints one `PASS|FAIL id seconds detail` line per check and exits non-zero on any failure. Never prints tokens,
 passwords or file contents.
@@ -89,6 +90,32 @@ def mint_token(host, alias):
         raise RuntimeError('could not stage the enrollment token on victus')
 
 
+def machine_named(machine_id):
+    found = re.search(rf'^(\S+)\s.*{re.escape(machine_id)}', hp(f'{PB_HP} machine list')[1], re.M)
+    return found.group(1) if found else None
+
+
+def check_install_pair(win, args):
+    """F1-01/F1-02 (custom build): the build's own `pb install`, then `pb pair`; online and healthy within 30 s."""
+    assert args.build, 'install-pair needs --build <pb.exe on victus>'
+    code, out = victus(f"& '{args.build}' install --json 2>&1 | Out-String -Width 4000; exit $LASTEXITCODE", 600)
+    receipt = json.loads(out[out.index('{'):])
+    assert code == 0 and receipt.get('ok'), 'install failed: ' + json.dumps(receipt.get('error', {}))[:200]
+    with open(args.windows_install_json, 'w') as saved:
+        json.dump(receipt, saved)
+    win.pb = receipt['data']['executable']
+    mint_token(args.token_from, args.machine)
+    try:
+        code, receipt = win.json('pair', '--enrollment-token-file', TOKEN_FILE, '--name', args.machine, timeout=420)
+        assert code == 0 and receipt.get('ok'), 'pair failed: ' + json.dumps(receipt.get('error', {}))[:200]
+    finally:
+        victus(f"Remove-Item -Force '{TOKEN_FILE}' -ErrorAction SilentlyContinue")
+    paired, machine_id = time.time(), receipt['data']['machine_id']
+    wait_for(lambda: re.search(rf'\sonline\s.*{re.escape(machine_id)}', hp(f'{PB_HP} machine list')[1]), 30, 'the machine online in the account within 30 s of pairing')
+    wait_for(lambda: 'doctor: healthy' in win.run('doctor')[1], max(1, 60 - (time.time() - paired)), 'doctor healthy within 60 s of pairing')
+    args.machine = machine_named(machine_id)  # the pair may suffix a taken name
+
+
 def check_version(win, args):
     code, out = win.run('--version')
     assert args.expect_version in out, 'version differs: ' + out.strip().splitlines()[-1][:80]
@@ -148,8 +175,16 @@ def check_exec(win, args):
     assert code == 0 and marker in out, f'exec rc={code}: {out.strip()[-120:]}'
 
 
+def check_exec_self(win, args):
+    """pb exec run on Windows (to this machine itself)."""
+    marker = 'pbself-' + secrets.token_hex(4)
+    code, out = win.run('exec', args.machine, '--', 'cmd', '/c', 'echo', marker, timeout=90)
+    assert code == 0 and marker in out, f'exec on Windows rc={code}: {" ".join(out.split())[-140:]}'
+
+
 def check_reset_pair(win, args):
     """F1-10: pb reset + pair with a new token on the same machine; the old record is replaced; doctor healthy."""
+    old_id = json.loads(victus(r"Get-Content -Raw (Join-Path $env:LOCALAPPDATA 'Paperboat\runtime\machine-registration.json')")[1])['machine_id']
     mint_token(args.token_from, args.machine)
     host = victus('hostname')[1].strip()
     try:
@@ -162,7 +197,8 @@ def check_reset_pair(win, args):
     machine_id = receipt['data']['machine_id']
     wait_for(lambda: 'doctor: healthy' in win.run('doctor')[1], 180, 'doctor healthy after re-pair')
     wait_for(lambda: re.search(rf'\sonline\s.*{re.escape(machine_id)}', hp(f'{PB_HP} machine list')[1]), 120, 'the new machine record online in the account')
-    args.machine = re.search(rf'^(\S+)\s.*{re.escape(machine_id)}', hp(f'{PB_HP} machine list')[1], re.M).group(1)  # the pair may suffix a taken name
+    args.machine = machine_named(machine_id)  # the pair may suffix a taken name
+    assert machine_id != old_id and machine_named(old_id) is None, 'the old machine record is still in the account after re-pair'
 
 
 def check_uninstall(win, args):
@@ -191,7 +227,7 @@ def inventory(args):
     assert code == 0 and 'inventory: clean' in out, 'leftovers: ' + ' | '.join(l for l in out.splitlines() if l.startswith('leftover'))[:400]
 
 
-CHECKS = {'version': check_version, 'doctor': check_doctor, 'status': check_status, 'service': check_service, 'crash': check_crash,
+CHECKS = {'install-pair': check_install_pair, 'exec-self': check_exec_self, 'version': check_version, 'doctor': check_doctor, 'status': check_status, 'service': check_service, 'crash': check_crash,
           'availability': check_availability, 'exec': check_exec, 'reset-pair': check_reset_pair, 'uninstall': check_uninstall}
 
 
@@ -201,13 +237,14 @@ def main():
     parser.add_argument('--windows-install-json', required=True)
     parser.add_argument('--machine', default='victus', help='machine name in the account')
     parser.add_argument('--token-from', default='hp')
+    parser.add_argument('--build', help='path on victus of the pb.exe to install (install-pair)')
     parser.add_argument('checks', nargs='+', choices=sorted(CHECKS))
     args = parser.parse_args()
     if not os.environ.get('VICTUS_PASS'):
         sys.exit('export VICTUS_PASS (see REMOTE_TESTING.md)')
     from install_path import windows_executable
-    win = Windows(windows_executable(json.load(open(args.windows_install_json))))
-    failed = False
+    win = Windows(None if args.checks[0] == 'install-pair' else windows_executable(json.load(open(args.windows_install_json))))
+    failed, rows = False, []
     for name in args.checks:
         started = time.time()
         try:
@@ -216,6 +253,12 @@ def main():
         except (AssertionError, RuntimeError, subprocess.SubprocessError) as error:
             status, detail, failed = 'FAIL', str(error), True
         print(f'{status} windows:{name} {time.time() - started:.0f}s {detail}', flush=True)
+        rows.append({'id': f'windows:{name}', 'status': status, 'seconds': round(time.time() - started), 'detail': detail})
+    os.makedirs(os.path.join(HERE, 'results'), exist_ok=True)
+    result = os.path.join(HERE, 'results', time.strftime('windows-lifecycle-%Y%m%dT%H%M%SZ.json', time.gmtime()))
+    with open(result, 'w') as saved:
+        json.dump({'version': args.expect_version, 'device': 'victus', 'results': rows}, saved, indent=1)
+    print('results:', os.path.relpath(result, os.path.dirname(HERE)))
     sys.exit(1 if failed else 0)
 
 
