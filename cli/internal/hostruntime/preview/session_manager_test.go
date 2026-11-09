@@ -14,6 +14,11 @@ func TestSessionManagerTracksGenerationAndRekeysOnRenewal(t *testing.T) {
 		<-ctx.Done()
 		return ctx.Err()
 	})
+	// The carrier reports readiness on its own goroutine; renewing by hand before that lets the ready lease
+	// overwrite the renewed one.
+	if _, err := session.WaitReady(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	manager := NewSessionManager()
 	if err := manager.Track(session); err != nil {
 		t.Fatal(err)
