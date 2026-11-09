@@ -166,3 +166,29 @@ func TestContradictoryJournalFailsClosed(t *testing.T) {
 		t.Fatalf("recovery=%s", got)
 	}
 }
+
+// A committed-but-unfinished candidate with no retry time made the helper's finish loop retry back to back, and one with
+// no attempts count never reached its cap.
+func TestJournalNativeCommittedNeedsAttemptsAndRetryTime(t *testing.T) {
+	approval := strings.Repeat("b", 64)
+	committed := func() Journal {
+		j := validJournal(t.TempDir(), StageAwaitingApproval)
+		j.CandidateID, j.ApprovedCandidateID = approval, approval
+		j.ArtifactDigest, j.ArtifactLength, j.ArtifactPlatform, j.ArtifactArchitecture = strings.Repeat("c", 64), 1, "linux", "amd64"
+		j.NativeCommitted, j.CommitAttempts, j.NextCommitRetry = true, 1, time.Date(2026, 8, 18, 1, 1, 0, 0, time.UTC)
+		return j
+	}
+	if err := committed().Validate(); err != nil {
+		t.Fatalf("committed journal with its retry schedule: %v", err)
+	}
+	for name, mutate := range map[string]func(*Journal){
+		"no attempts":   func(j *Journal) { j.CommitAttempts = 0 },
+		"no retry time": func(j *Journal) { j.NextCommitRetry = time.Time{} },
+	} {
+		j := committed()
+		mutate(&j)
+		if err := j.Validate(); !errors.Is(err, ErrInvalidJournal) {
+			t.Fatalf("%s: validation error=%v, want invalid journal", name, err)
+		}
+	}
+}

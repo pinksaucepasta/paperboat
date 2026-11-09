@@ -168,7 +168,7 @@ func (j Journal) Validate() error {
 	if j.Stage == StageAwaitingApproval && j.CandidateID == "" {
 		return ErrInvalidJournal
 	}
-	if j.NativeCommitted && (j.Stage != StageAwaitingApproval || j.ApprovedCandidateID == "") || !j.NativeCommitted && (j.CommitAttempts != 0 || !j.NextCommitRetry.IsZero()) {
+	if j.NativeCommitted && (j.Stage != StageAwaitingApproval || j.ApprovedCandidateID == "" || j.CommitAttempts == 0 || j.NextCommitRetry.IsZero()) || !j.NativeCommitted && (j.CommitAttempts != 0 || !j.NextCommitRetry.IsZero()) {
 		return ErrInvalidJournal
 	}
 	// A signed deployment manifest must carry its complete activation policy.
