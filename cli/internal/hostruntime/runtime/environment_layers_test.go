@@ -409,9 +409,12 @@ func TestLayerObservationFlushTraverses129ContextsAndKeepsRejectedWorkspace(t *t
 		t.Fatal("pending reports silently truncated")
 	}
 	credentials := &layerTestCredentials{token: "fixture-token", proof: []byte("fixture-proof")}
+	var mu sync.Mutex
 	calls := 0
-	accepted := map[string]int{}
+	accepted := map[string]map[string]bool{} // workspace -> operation ids; a repeated id is an idempotent retry, as on the real server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
 		calls++
 		var batch struct {
 			OperationID  string                      `json:"operation_id"`
@@ -426,7 +429,11 @@ func TestLayerObservationFlushTraverses129ContextsAndKeepsRejectedWorkspace(t *t
 			w.WriteHeader(http.StatusForbidden)
 			return
 		}
-		accepted[batch.Observations[0].WorkspaceID]++
+		workspace := batch.Observations[0].WorkspaceID
+		if accepted[workspace] == nil {
+			accepted[workspace] = map[string]bool{}
+		}
+		accepted[workspace][batch.OperationID] = true
 		json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"operation_id": batch.OperationID, "accepted": true}})
 	}))
 	defer server.Close()
@@ -453,11 +460,13 @@ func TestLayerObservationFlushTraverses129ContextsAndKeepsRejectedWorkspace(t *t
 			t.Fatal("bounded report flush made no progress on authorized workspaces")
 		}
 	}
+	mu.Lock()
+	defer mu.Unlock()
 	if calls < 129 || len(accepted) != 128 || pending[0].WorkspaceID != "team_000" {
 		t.Fatalf("report completion count=%d acknowledged=%d pending=%d", calls, len(accepted), len(pending))
 	}
-	for _, count := range accepted {
-		if count != 1 {
+	for _, operations := range accepted {
+		if len(operations) != 1 {
 			t.Fatal("durably acknowledged report was retransmitted")
 		}
 	}
