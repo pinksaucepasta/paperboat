@@ -3,11 +3,13 @@ package edgehttp
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -209,6 +211,10 @@ func registerWhenSubscribed(t *testing.T, ctx context.Context, hub *BrowserTermi
 // HandOver: each browser gets exactly one typed "moved" close (4301, before the process exits), and its reattach
 // continues with the next record, nothing repeated and nothing lost. Before, the exit cut the connection (1006).
 func TestHandOverEndsBrowserTerminalsMovedAndReattachContinues(t *testing.T) {
+	var logs lockedBuffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(previous)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	identity := testEdgePreviewIdentity(1, 1)
@@ -297,6 +303,13 @@ func TestHandOverEndsBrowserTerminalsMovedAndReattachContinues(t *testing.T) {
 		t.Fatalf("browser saw %v, want close %d (moved)", err, terminalend.CodeMoved)
 	}
 
+	// The edge's end log names the code it sent, so support can tell a move from a drop without the browser.
+	for deadline := time.Now().Add(2 * time.Second); !strings.Contains(logs.String(), "close_sent=4301"); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the end log lacks close_sent=4301: %q", logs.String())
+		}
+	}
+
 	// The browser reattaches (to the replacement process in production) and continues with the next record.
 	second := dial()
 	defer second.CloseNow()
@@ -305,4 +318,21 @@ func TestHandOverEndsBrowserTerminalsMovedAndReattachContinues(t *testing.T) {
 		t.Fatal(err)
 	}
 	read(second, "r2")
+}
+
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

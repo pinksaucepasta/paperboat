@@ -134,15 +134,21 @@ func (p *Policy) serveBrowserTerminal(w http.ResponseWriter, request *http.Reque
 
 	close(bridging)
 	moved := false
+	sent := 0 // the typed close code the browser got; 0 when the connection was dropped plain
 	ended := bridgeBrowserTerminal(ctx, browser, upstream, subscription, admission.Closed, func(cause error) (terminalend.Reason, bool) {
-		if reason, typed := browserTerminalEnd(cause, admission); typed {
-			return reason, true
+		reason, typed := browserTerminalEnd(cause, admission)
+		if !typed {
+			// A terminal pb update's retiring generation held until it stopped, or this edge process handed over to
+			// its replacement: the new one serves already.
+			moved = p.config.BrowserTerminalHub.Moved(key.RouteID, fence)
+			reason, typed = terminalend.Moved, moved
 		}
-		// A terminal pb update's retiring generation held until it stopped: the new one serves already.
-		moved = p.config.BrowserTerminalHub.Moved(key.RouteID, fence)
-		return terminalend.Moved, moved
+		if typed {
+			sent = reason.CloseCode()
+		}
+		return reason, typed
 	})
-	logBrowserTerminalEnd(ctx, ended)
+	logBrowserTerminalEnd(ctx, ended, sent)
 	if !moved { // the end of a drain is expected, not an edge failure
 		p.observeBrowserTerminal(ctx, ended)
 	}
@@ -159,14 +165,14 @@ func (e bridgeEnd) Unwrap() error { return e.err }
 
 // logBrowserTerminalEnd records how every browser terminal bridge ended, expected ends included: a drop the
 // browser sees as connection_lost otherwise leaves no trace. Only fixed values are logged, never error text.
-func logBrowserTerminalEnd(ctx context.Context, err error) {
+func logBrowserTerminalEnd(ctx context.Context, err error, sent int) {
 	step := "unknown"
 	var end bridgeEnd
 	if errors.As(err, &end) {
 		step = end.step
 	}
 	slog.InfoContext(ctx, "browser_terminal_ended", "step", step, "close_status", int(websocket.CloseStatus(err)),
-		"canceled", errors.Is(err, context.Canceled), "hub_ended", errors.Is(err, ErrBrowserTerminalHubEnded))
+		"canceled", errors.Is(err, context.Canceled), "hub_ended", errors.Is(err, ErrBrowserTerminalHubEnded), "close_sent", sent)
 }
 
 func browserTerminalFenceForMatch(match route.RouteMatch) BrowserTerminalRouteFence {
