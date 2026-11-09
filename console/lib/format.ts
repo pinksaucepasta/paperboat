@@ -120,10 +120,15 @@ export function formatDateTime(iso: string, viewer?: Viewer): string {
   return name ? `${format.format(date)} ${name}` : format.format(date)
 }
 
-/** A viewer from a cookie's zone and an Accept-Language header, or undefined when either is unusable. */
+/**
+ * A viewer from a cookie's zone and an Accept-Language header, or undefined without a usable locale.
+ * Without the zone cookie (a first visit, before the browser has set it) the zone is UTC, so the
+ * date reads the same on the server and after hydration; the next load uses the real zone.
+ */
 export function viewerFrom(zone: string | undefined, acceptLanguage: string | null): Viewer | undefined {
   const locale = acceptLanguage?.split(",")[0]?.split(";")[0]?.trim()
-  if (!zone || !locale) return undefined
+  if (!locale) return undefined
+  zone ||= "UTC"
   try {
     // Both throw a RangeError when invalid; supportedLocalesOf also rejects unknown tags.
     new Intl.DateTimeFormat("en", { timeZone: zone })

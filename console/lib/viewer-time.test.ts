@@ -5,7 +5,7 @@ describe("dates in the viewer's zone and locale", () => {
   test("a cookie zone and an Accept-Language make a viewer; anything unusable makes none", () => {
     expect(viewerFrom("Asia/Kolkata", "en-GB,en;q=0.9")).toEqual({ zone: "Asia/Kolkata", locale: "en-GB" })
     expect(viewerFrom("Not/AZone", "en-GB")).toBeUndefined()
-    expect(viewerFrom(undefined, "en-GB")).toBeUndefined()
+    expect(viewerFrom(undefined, "en-GB")).toEqual({ zone: "UTC", locale: "en-GB" })
     expect(viewerFrom("UTC", null)).toBeUndefined()
   })
 
