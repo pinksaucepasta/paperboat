@@ -15,8 +15,9 @@ type StatusPage = { environments: unknown[] | null; pagination: { total: number 
 const reads = () => [
   { key: queryKeys.githubStatus, path: "github/status" },
   {
-    key: queryKeys.configStatus({ q: "", page: 1 }),
-    path: "config-sync/status?limit=50",
+    // The same options the page's list asks with (All machines: the ones that sync).
+    key: queryKeys.configStatus({ q: "", state: "configured", page: 1 }),
+    path: "config-sync/status?limit=50&state=configured",
     select: (data: Record<string, unknown>) => {
       const page = data as unknown as StatusPage
       return { items: page.environments ?? [], total: page.pagination.total, page: 1 }
