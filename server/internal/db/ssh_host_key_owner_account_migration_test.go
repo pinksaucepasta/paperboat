@@ -10,8 +10,9 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-// Expand step of per-account host-key ownership: owners get their account (backfill and trigger for the
-// running server's inserts) and nothing the running server uses is dropped or tightened.
+// Per-account host-key ownership. Expand (238-240): owners get their account (backfill and a trigger for the
+// running server's inserts) and nothing the running server uses is dropped. Contract (243-245): account_id is
+// required, the global key is dropped, cross-account conflicts are resolved and same-account ones stay.
 func TestSSHHostKeyOwnerAccountMigration(t *testing.T) {
 	dsn := os.Getenv("PAPERBOAT_MIGRATION_TEST_DATABASE_DSN")
 	if dsn == "" {
@@ -67,5 +68,19 @@ func TestSSHHostKeyOwnerAccountMigration(t *testing.T) {
 	}
 	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.machine_ssh_host_key_owners(fingerprint,user_machine_id,algorithm,public_key,first_observed_at) VALUES(decode(repeat('01',32),'hex'),'hkacct_b1','ssh-ed25519',repeat('k',100),now())`); err == nil {
 		t.Fatal("the global host-key owner key was dropped while the running server still uses it")
+	}
+	// Contract: cross-account conflicts are resolved (same-account ones stay) and one fingerprint is owned once per account.
+	exec(`INSERT INTO paperboat.machine_ssh_host_key_conflicts VALUES('hkacct_b1','hkacct_a1',now()),('hkacct_a2','hkacct_a1',now())`)
+	if err = goose.UpToContext(ctx, store.SQL(), migrationsDir, 245); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.SQL().QueryRowContext(ctx, `SELECT (SELECT array_agg(user_machine_id)=ARRAY['hkacct_a2'] FROM paperboat.machine_ssh_host_key_conflicts)
+ AND (SELECT is_nullable='NO' FROM information_schema.columns WHERE table_schema='paperboat' AND table_name='machine_ssh_host_key_owners' AND column_name='account_id')`).Scan(&ok); err != nil || !ok {
+		t.Fatalf("contract: ok=%v error=%v", ok, err)
+	}
+	owner := `INSERT INTO paperboat.machine_ssh_host_key_owners(fingerprint,user_machine_id,account_id,algorithm,public_key,first_observed_at) VALUES(decode(repeat('01',32),'hex'),$1,$2,'ssh-ed25519',repeat('k',100),now())`
+	exec(owner, "hkacct_b1", "hkacct_b")
+	if _, err = store.SQL().ExecContext(ctx, owner, "hkacct_a2", "hkacct_a"); err == nil {
+		t.Fatal("one account owns the same host key twice")
 	}
 }

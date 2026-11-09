@@ -130,7 +130,7 @@ func TestAddingTheSameComputerAgainRemovesItsRetiredRecordAndKeepsTheName(t *tes
 		t.Fatalf("a different computer took the name: %q", alias)
 	}
 
-	// 3. Another account's retired record is never touched, even when the host keys match.
+	// 3. Another account's retired record is never touched, even when the host keys match, and is no conflict.
 	foreignKey := hostKeyLine(t)
 	foreignOld, foreignNew := "mch_foreignold_"+suffix, "mch_foreignnew_"+suffix
 	addMachine(foreignOld, userB, "desk", "online")
@@ -142,8 +142,8 @@ func TestAddingTheSameComputerAgainRemovesItsRetiredRecordAndKeepsTheName(t *tes
 	}
 	addMachine(foreignNew, userA, "desk", "online")
 	var inUse *managedssh.HostKeyInUseError
-	if err := observe(userA, foreignNew, foreignKey); !errors.As(err, &inUse) || inUse.MachineName != "" {
-		t.Fatalf("another account's host key was taken, or its machine was named: %v", err)
+	if err := observe(userA, foreignNew, foreignKey); err != nil {
+		t.Fatalf("keys another account's machine holds are not a conflict: %v", err)
 	}
 	if _, status, deleted := state(foreignOld); status != "disconnected" || deleted {
 		t.Fatalf("another account's record was touched: %q %v", status, deleted)

@@ -112,21 +112,19 @@ RETURNING *;
 
 -- name: GetMachineSSHHostKeyOwner :one
 SELECT * FROM machine_ssh_host_key_owners
-WHERE fingerprint = sqlc.arg(fingerprint);
+WHERE account_id = sqlc.arg(account_id) AND fingerprint = sqlc.arg(fingerprint);
 
 -- name: DeleteRetiredMachineSSHHostKeys :exec
 DELETE FROM machine_ssh_host_keys k
 USING user_machines m
-WHERE k.fingerprint = sqlc.arg(fingerprint) AND m.id = k.user_machine_id
-  AND (m.state IN ('revoked', 'deleted')
-    OR (m.user_id = sqlc.arg(user_id) AND (m.state = 'disconnected' OR (m.state = 'offline' AND NOT m.online))));
+WHERE k.fingerprint = sqlc.arg(fingerprint) AND m.id = k.user_machine_id AND m.user_id = sqlc.arg(user_id)
+  AND (m.state IN ('revoked', 'deleted', 'disconnected') OR (m.state = 'offline' AND NOT m.online));
 
 -- name: DeleteRetiredMachineSSHHostKeyOwner :execrows
 DELETE FROM machine_ssh_host_key_owners o
 USING user_machines m
-WHERE o.fingerprint = sqlc.arg(fingerprint) AND m.id = o.user_machine_id
-  AND (m.state IN ('revoked', 'deleted')
-    OR (m.user_id = sqlc.arg(user_id) AND (m.state = 'disconnected' OR (m.state = 'offline' AND NOT m.online))));
+WHERE o.fingerprint = sqlc.arg(fingerprint) AND m.id = o.user_machine_id AND o.account_id = sqlc.arg(user_id)
+  AND (m.state IN ('revoked', 'deleted', 'disconnected') OR (m.state = 'offline' AND NOT m.online));
 
 -- name: CreateMachineSSHHostKeyOwner :one
 INSERT INTO machine_ssh_host_key_owners
@@ -134,7 +132,15 @@ INSERT INTO machine_ssh_host_key_owners
 VALUES
   (sqlc.arg(fingerprint), sqlc.arg(user_machine_id), sqlc.arg(account_id), sqlc.arg(algorithm),
    sqlc.arg(public_key), sqlc.arg(first_observed_at))
+ON CONFLICT DO NOTHING
 RETURNING *;
+
+-- The machine holding a fingerprint after an insert found it taken: the account's own owner first.
+-- name: FindMachineSSHHostKeyOwnerMachine :one
+SELECT user_machine_id FROM machine_ssh_host_key_owners
+WHERE fingerprint = sqlc.arg(fingerprint)
+ORDER BY (account_id = sqlc.arg(account_id)) DESC
+LIMIT 1;
 
 -- name: GetMachineSSHHostKeySetByObservation :one
 SELECT * FROM machine_ssh_host_key_sets
