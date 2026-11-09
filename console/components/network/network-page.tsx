@@ -414,7 +414,23 @@ function PoolRow({
  */
 function PaperboatServers() {
   const edges = useApiQuery(edgesQuery)
-  if (!edges.data?.length) return null
+  if (edges.isPending)
+    return (
+      <Section title="Paperboat’s servers">
+        <div className="flex min-h-12 items-center border-b border-divider">
+          <Skeleton className="h-4 w-1/3" />
+        </div>
+      </Section>
+    )
+  if (edges.isError)
+    return (
+      <Section title="Paperboat’s servers">
+        <p className="border-b border-divider py-3 text-sm text-muted-foreground">
+          Couldn’t load Paperboat’s servers. {edges.error.message}
+        </p>
+      </Section>
+    )
+  if (!edges.data.length) return null
   const places = new Map<string, { total: number; ready: number }>()
   for (const edge of edges.data) {
     const place = places.get(edge.region) ?? { total: 0, ready: 0 }

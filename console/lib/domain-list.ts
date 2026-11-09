@@ -54,5 +54,6 @@ export const domainUsesQuery = (workspace: string, name: string) =>
       const [tunnels, previews] = await Promise.all([total("tunnel"), total("preview")])
       return { tunnels, previews }
     },
-    refetchInterval: 30_000,
+    // Two requests per domain, so no polling: counts refresh when the page mounts or regains focus.
+    // shortcut: one request per domain; ask the server for per-name counts if accounts keep many domains.
   })
