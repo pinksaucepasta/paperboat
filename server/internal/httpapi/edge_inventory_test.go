@@ -44,6 +44,30 @@ func TestHostedEdgeListBindsAccountAndReturnsPublicFields(t *testing.T) {
 	}
 }
 
+type relayInventoryStub struct{ account, after string }
+
+func (s *relayInventoryStub) ListHostedRelays(_ context.Context, account, after string, _ int) (controlplane.HostedRelayPage, error) {
+	s.account, s.after = account, after
+	return controlplane.HostedRelayPage{Items: []controlplane.HostedRelay{{ID: "relay_1", Region: "fsn1", Status: "ready", SelfHosted: true, Name: "mine"}}}, nil
+}
+
+func TestHostedRelayListBindsAccountAndReturnsRelays(t *testing.T) {
+	stub := &relayInventoryStub{}
+	request := httptest.NewRequest(http.MethodGet, "/v1/relays?after=relay_0", nil)
+	request = request.WithContext(context.WithValue(request.Context(), authContextKey{}, principal{User: auth.User{ID: "acct_1"}}))
+	response := httptest.NewRecorder()
+	hostedRelayList(stub).ServeHTTP(response, request)
+	if response.Code != http.StatusOK || stub.account != "acct_1" || stub.after != "relay_0" ||
+		!strings.Contains(response.Body.String(), `"self_hosted":true`) || !strings.Contains(response.Body.String(), "relay_1") {
+		t.Fatalf("code=%d account=%q body=%s", response.Code, stub.account, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	hostedRelayList(stub).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/relays", nil))
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated code=%d", response.Code)
+	}
+}
+
 func TestHostedEdgeListRejectsMissingAuthAndInvalidLimit(t *testing.T) {
 	stub := &edgeInventoryStub{}
 	for _, testcase := range []struct {

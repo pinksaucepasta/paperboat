@@ -257,6 +257,7 @@ func NewRouter(opts Options) http.Handler {
 		}
 		if opts.EdgeControlAdmin != nil && opts.Auth != nil && opts.DeviceAuth != nil {
 			mux.Handle("GET /v1/edges", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("tunnels:read", hostedEdgeList(opts.EdgeControlAdmin))))
+			mux.Handle("GET /v1/relays", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("machines:read", hostedRelayList(opts.EdgeControlAdmin))))
 		}
 		if opts.Tunnels != nil && opts.PreviewTunnelAPI != nil && opts.Auth != nil && opts.DeviceAuth != nil {
 			tunnelRead := func(next http.Handler) http.Handler {

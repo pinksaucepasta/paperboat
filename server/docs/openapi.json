@@ -19873,6 +19873,130 @@
         "operationId": "get_v1_edges"
       }
     },
+    "/v1/relays": {
+      "get": {
+        "summary": "List the relays an account's machines can use",
+        "description": "Returns a bounded, cursor-paged observation of the relay nodes this account's pool policy lets its machines use: Paperboat's and the account's own self-hosted ones (a self-hosted-only policy lists only the chosen ones). Status comes from the node's heartbeat and does not guarantee a particular connection will be relayed.",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:read"
+        ],
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Relays the account can use.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "items",
+                        "observed_at"
+                      ],
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "region",
+                              "status",
+                              "self_hosted"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "region": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "ready",
+                                  "draining",
+                                  "unavailable"
+                                ]
+                              },
+                              "last_heartbeat_at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "name": {
+                                "type": "string",
+                                "description": "A self-hosted relay's name."
+                              },
+                              "self_hosted": {
+                                "type": "boolean"
+                              }
+                            }
+                          }
+                        },
+                        "next_cursor": {
+                          "type": "string"
+                        },
+                        "observed_at": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "get_v1_relays"
+      }
+    },
     "/v1/tunnels": {
       "get": {
         "summary": "List durable tunnels",

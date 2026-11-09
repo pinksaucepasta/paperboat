@@ -1230,6 +1230,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/relays": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the relays an account's machines can use
+         * @description Returns a bounded, cursor-paged observation of the relay nodes this account's pool policy lets its machines use: Paperboat's and the account's own self-hosted ones (a self-hosted-only policy lists only the chosen ones). Status comes from the node's heartbeat and does not guarantee a particular connection will be relayed.
+         */
+        get: operations["get_v1_relays"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/tunnels": {
         parameters: {
             query?: never;
@@ -13843,6 +13863,50 @@ export interface operations {
                                 status: "ready" | "draining" | "unavailable";
                                 /** Format: date-time */
                                 last_heartbeat_at?: string;
+                            }[];
+                            next_cursor?: string;
+                            /** Format: date-time */
+                            observed_at: string;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    get_v1_relays: {
+        parameters: {
+            query?: {
+                after?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Relays the account can use. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            items: {
+                                id: string;
+                                region: string;
+                                /** @enum {string} */
+                                status: "ready" | "draining" | "unavailable";
+                                /** Format: date-time */
+                                last_heartbeat_at?: string;
+                                /** @description A self-hosted relay's name. */
+                                name?: string;
+                                self_hosted: boolean;
                             }[];
                             next_cursor?: string;
                             /** Format: date-time */
