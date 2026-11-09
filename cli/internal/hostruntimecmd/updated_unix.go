@@ -285,7 +285,10 @@ func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 		return updaterService.RunActivationHelper(ctx)
 	}
 	return runNotifiedUpdater(ctx, updaterRunnerFunc(func(ctx context.Context, ready func() error) error {
-		return superviseInterruptedInstall(ctx, interruptedInstallPoll, recoverWhileRunning(uid, stderr), func(ctx context.Context) error {
+		report := func(err error) {
+			fmt.Fprintf(stderr, "paperboat-updated: recovering state a dead writer left failed, retrying later: %v\n", err)
+		}
+		return superviseDeadWriters(ctx, deadWriterPoll, deadWriterMaxWait, recoverDeadWriters(uid, stderr, updaterService.RecoverDeadWriters), report, func(ctx context.Context) error {
 			return updaterService.RunWithReady(ctx, ready)
 		})
 	}), notifier)

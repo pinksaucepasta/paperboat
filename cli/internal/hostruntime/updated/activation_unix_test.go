@@ -77,10 +77,14 @@ func (p *participantFixture) Restart(context.Context) error { p.restarts++; retu
 
 type controllerFixture struct {
 	retireErr error
+	installs  int
 }
 
-func (c *controllerFixture) Install(context.Context, string, map[string]string) error { return nil }
-func (c *controllerFixture) Retire(context.Context) error                             { return c.retireErr }
+func (c *controllerFixture) Install(context.Context, string, map[string]string) error {
+	c.installs++
+	return nil
+}
+func (c *controllerFixture) Retire(context.Context) error { return c.retireErr }
 
 type gateFixture struct {
 	started, stopped chan struct{}

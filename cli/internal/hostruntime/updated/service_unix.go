@@ -224,6 +224,100 @@ func (s *Service) abandonUnavailableCandidate(ctx context.Context, cause error) 
 	return retireUnixHandoff(ctx, s.config.StateRoot, s.config.ActivationController)
 }
 
+// recoverUnderActivationLock runs the recoveries of state a dead writer left: the native-install marker, an
+// unfinished transaction, a handoff without its helper. The caller holds the activation lock, which a live
+// installer, activation or helper holds for its whole run, so what it finds is a dead writer's. At start (periodic
+// false) it also restarts a helper for any retained handoff; a running updater (periodic) only does so for one
+// whose activation had Started, because a queued one is retried by its own schedule and restarting its helper
+// every tick would be a retry storm. It reports whether it changed state: the caller's in-memory view is stale then.
+func (s *Service) recoverUnderActivationLock(ctx context.Context, periodic bool) (acted bool, _ error) {
+	if pending, err := nativeInstallPending(s.config.StateRoot); err != nil {
+		return false, err
+	} else if pending {
+		// An installer holds this lock for its whole run, so a marker seen under the lock is a dead
+		// installer's: restore the pre-install transaction instead of refusing activation forever.
+		if err := RollbackUnixNativeInstall(s.config.StateRoot); err != nil {
+			return false, fmt.Errorf("roll back the interrupted native install: %w", err)
+		}
+		acted = true
+	}
+	handoff, handoffErr := readUnixHandoff(s.config.StateRoot)
+	if handoffErr != nil {
+		return acted, handoffErr
+	}
+	if handoff == nil {
+		// New already bound this manager to the verified executing release.
+		// Recover owns reconciliation with an older native-install journal;
+		// refreshing from that journal first would reject the new executable.
+		before, _ := s.currentManager().TransactionState()
+		if err := s.currentManager().Recover(ctx); err != nil {
+			if periodic && errors.Is(err, workerupdate.ErrBlocked) {
+				return acted, nil // a cutover record is the activation helper's to recover (its handoff), never this loop's
+			}
+			return acted, err
+		}
+		after, err := s.currentManager().TransactionState()
+		return acted || err == nil && after != before, nil
+	}
+	if periodic && !handoff.Started && !handoff.ParticipantsTouched {
+		return acted, nil // queued, or the helper has not begun: its own schedule owns it
+	}
+	if s.config.Active.Version != handoff.Previous.Version {
+		if periodic {
+			return acted, nil // this process's view of the active release is stale: the restart path decides
+		}
+		// A separately verified native package install is allowed to supersede an
+		// older interrupted transaction. The manager validates the signed active
+		// identity and atomically resets only a permitted older journal before the
+		// activation owner retires its now-obsolete helper and marker.
+		if err := s.currentManager().Recover(ctx); err != nil {
+			return acted, err
+		}
+		state, err := s.currentManager().TransactionState()
+		if err != nil || state.Stage != "idle" || state.ActiveVersion != s.config.Active.Version {
+			return acted, errors.Join(err, workerupdate.ErrBlocked)
+		}
+		return true, retireUnixHandoff(ctx, s.config.StateRoot, s.config.ActivationController)
+	}
+	state, err := s.currentManager().TransactionState()
+	if err != nil {
+		return acted, err
+	}
+	if handoff.ActiveTerminalBusy && state.Stage == updateflow.StageIdle {
+		return true, retireUnixHandoff(ctx, s.config.StateRoot, s.config.ActivationController)
+	}
+	if !s.config.AutomaticUpdates && !handoff.Manual && !handoff.Started {
+		return true, retireUnixHandoff(ctx, s.config.StateRoot, s.config.ActivationController)
+	}
+	if err = s.config.ActivationController.Install(ctx, filepath.Join(s.config.StateRoot, "activation", "pb"), s.config.Environment); err != nil {
+		return acted, s.abandonUnavailableCandidate(ctx, err)
+	}
+	return acted, nil // the helper finishes the activation; it is not state this process must re-read
+}
+
+// RecoverDeadWriters is recoverUnderActivationLock for a running updater: it tries the activation lock without
+// waiting and borrows the control mutex, so a live writer (an installer, an activation, a control request) is
+// never touched. It reports whether it changed state, after which the caller restarts the updater.
+func (s *Service) RecoverDeadWriters(ctx context.Context) (bool, error) {
+	if s == nil || s.currentManager() == nil {
+		return false, ErrInvalidConfig
+	}
+	borrowed, ok := s.controlMu.borrow(ctx)
+	if !ok {
+		return false, nil
+	}
+	defer s.controlMu.returnBorrowed()
+	lock, err := unixActivationLock(s.config.StateRoot)
+	if errors.Is(err, ErrActivationPending) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	acted, err := s.recoverUnderActivationLock(borrowed, true)
+	return acted, errors.Join(err, lock.Close())
+}
+
 // RunWithReady is the service-manager entry point for Unix service
 // declarations using Type=notify. The callback runs only after the updater's
 // authenticated control listener has been created, so READY=1 cannot race
@@ -247,59 +341,8 @@ func (s *Service) run(ctx context.Context, ready func() error) (resultErr error)
 			return owned.Close()
 		}
 		defer func() { resultErr = errors.Join(resultErr, releaseLock()) }()
-		if pending, err := nativeInstallPending(s.config.StateRoot); err != nil {
+		if _, err := s.recoverUnderActivationLock(ctx, false); err != nil {
 			return err
-		} else if pending {
-			// An installer holds this lock for its whole run, so a marker seen under the lock is a dead
-			// installer's: restore the pre-install transaction instead of refusing activation forever.
-			if err := RollbackUnixNativeInstall(s.config.StateRoot); err != nil {
-				return fmt.Errorf("roll back the interrupted native install: %w", err)
-			}
-		}
-		handoff, handoffErr := readUnixHandoff(s.config.StateRoot)
-		if handoffErr != nil {
-			return handoffErr
-		}
-		if handoff == nil {
-			// New already bound this manager to the verified executing release.
-			// Recover owns reconciliation with an older native-install journal;
-			// refreshing from that journal first would reject the new executable.
-			if err := s.currentManager().Recover(ctx); err != nil {
-				return err
-			}
-		} else if s.config.Active.Version != handoff.Previous.Version {
-			// A separately verified native package install is allowed to supersede an
-			// older interrupted transaction. The manager validates the signed active
-			// identity and atomically resets only a permitted older journal before the
-			// activation owner retires its now-obsolete helper and marker.
-			if err := s.currentManager().Recover(ctx); err != nil {
-				return err
-			}
-			state, err := s.currentManager().TransactionState()
-			if err != nil || state.Stage != "idle" || state.ActiveVersion != s.config.Active.Version {
-				return errors.Join(err, workerupdate.ErrBlocked)
-			}
-			if err := retireUnixHandoff(ctx, s.config.StateRoot, s.config.ActivationController); err != nil {
-				return err
-			}
-		} else {
-			state, err := s.currentManager().TransactionState()
-			if err != nil {
-				return err
-			}
-			if handoff.ActiveTerminalBusy && state.Stage == updateflow.StageIdle {
-				if err = retireUnixHandoff(ctx, s.config.StateRoot, s.config.ActivationController); err != nil {
-					return err
-				}
-			} else if !s.config.AutomaticUpdates && !handoff.Manual && !handoff.Started {
-				if err = retireUnixHandoff(ctx, s.config.StateRoot, s.config.ActivationController); err != nil {
-					return err
-				}
-			} else if err = s.config.ActivationController.Install(ctx, filepath.Join(s.config.StateRoot, "activation", "pb"), s.config.Environment); err != nil {
-				if err = s.abandonUnavailableCandidate(ctx, err); err != nil {
-					return err
-				}
-			}
 		}
 		if err := releaseLock(); err != nil {
 			return err
