@@ -816,9 +816,17 @@ test_reset_lifecycle() {
     fi
     password=""
     [ "$device" != apple ] || password="$APPLE_PASS"
-    out=$(printf '%s\n' "$password" | on "$device" "python3 /tmp/$RUN_ID/reset_lifecycle.py" 2>&1); status=$?
+    # Phase 1 resets and interrupts the first pair; a reset signs the device out, so ANOTHER device of the account
+    # lists machines: the old record, its name and its local address must still be there (make-before-break).
+    out=$(printf '%s\n' "$password" | on "$device" "python3 /tmp/$RUN_ID/reset_lifecycle.py reset" 2>&1); status=$?
+    checker=$CLIENT; [ "$checker" != "$device" ] || checker=$PEER
+    if [ "$status" = 0 ]; then
+      listing=$(on "$checker" "~/.local/bin/pb machine list --json" 2>&1)
+      python3 -c 'import json,sys;r=json.loads(sys.argv[1].splitlines()[-1]);m=[x for x in json.loads(sys.argv[2])["machines"] if x["id"]==r["old_machine_id"]];assert m and m[0]["alias"]==r["alias"] and m[0].get("assigned_ip")==r["assigned_ip"]' "$out" "$listing" 2>/dev/null || { status=1; out="a failed pair after reset lost the old record, its name or its address: $out"; }
+    fi
+    [ "$status" != 0 ] || { out=$(printf '%s\n' "$password" | on "$device" "python3 /tmp/$RUN_ID/reset_lifecycle.py pair" 2>&1); status=$?; }
     if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1]);assert r["check"]=="reset-lifecycle" and r["status"]=="PASS" and r["old_record_removed"] and r["local_address_kept"] and r["new_record_same_alias"] and r["inbox_preserved"]' "$out" 2>/dev/null; then
-      record "$id" PASS $(( $(now)-t0 )) "reset then pair: same name and local address, old record removed, Inbox kept"
+      record "$id" PASS $(( $(now)-t0 )) "failed pair after reset kept the old record, name and address; then reset + pair: same name and local address, old record removed, Inbox kept"
     else
       record_command_failure "$id" $(( $(now)-t0 )) "$out"
     fi
