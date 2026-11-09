@@ -3,7 +3,7 @@
 import { DotsThreeVerticalIcon, MonitorIcon, MoonIcon, SignOutIcon, SunIcon, UserIcon } from "@phosphor-icons/react"
 import Link from "next/link"
 import { useTheme } from "next-themes"
-import { useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useApiQuery, meQuery } from "@/lib/api"
 import { useHideEmail } from "@/lib/privacy"
 import { Email } from "@/components/email"
@@ -34,6 +34,14 @@ export function UserMenu() {
   const { theme, setTheme } = useTheme()
   const ThemeIcon = themes.find((item) => item.value === theme)?.icon ?? MonitorIcon
   const signOut = useRef<HTMLFormElement>(null)
+  // Signing out goes through WorkOS and takes a few seconds; say so at once instead of looking stuck.
+  const [signingOut, setSigningOut] = useState(false)
+  useEffect(() => {
+    // Back from the sign-in page restores this page from the back-forward cache: drop the screen.
+    const restored = (event: PageTransitionEvent) => event.persisted && setSigningOut(false)
+    window.addEventListener("pageshow", restored)
+    return () => window.removeEventListener("pageshow", restored)
+  }, [])
   const hideEmail = useHideEmail()
   // Initials from the email would leak part of it while it is hidden.
   const initialsSource = me?.display_name || (hideEmail ? "" : me?.email) || ""
@@ -85,12 +93,22 @@ export function UserMenu() {
               </DropdownMenuSubContent>
             </DropdownMenuSub>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => signOut.current?.requestSubmit()}>
+            <DropdownMenuItem
+              onClick={() => {
+                setSigningOut(true)
+                signOut.current?.requestSubmit()
+              }}
+            >
               <SignOutIcon /> Sign out
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
         <form ref={signOut} action="/auth/sign-out" method="post" hidden />
+        {signingOut && (
+          <div className="fixed inset-0 z-50 grid place-items-center bg-background text-sm text-muted-foreground">
+            Signing out…
+          </div>
+        )}
       </SidebarMenuItem>
     </SidebarMenu>
   )
