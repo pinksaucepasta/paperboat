@@ -59,9 +59,17 @@
     )
   }
 
-  const status = await get("config-sync/status?limit=200")
+  // The table lists the machines that sync; the ones that don't are folded under "Not syncing".
+  const status = await get("config-sync/status?limit=200&state=configured")
+  const idle = await get("config-sync/status?limit=1&state=disabled")
   const environments = status?.environments ?? []
-  pass("the server reports config sync", Boolean(status), `${environments.length} machines`)
+  const idleTotal = idle?.pagination?.total ?? 0
+  pass("the server reports config sync", Boolean(status), `${environments.length} sync, ${idleTotal} don't`)
+  if (idleTotal)
+    pass(
+      "machines that don't sync are folded under Not syncing",
+      (await until(() => main()?.innerText.includes(`Not syncing · ${idleTotal}`))) !== null,
+    )
   if (!environments.length) {
     pass("the page says config sync is not set up", /not set up|Set up|No machine/i.test(main()?.innerText ?? ""))
     return steps
@@ -119,7 +127,8 @@
           ?.trim()
   }
   pass("details show the repository", pick.repository_name ? detail("Repository") === pick.repository_name : true)
-  pass("details show the direction", detail("Direction") === (direction[pick.mode ?? ""] ?? ""))
+  // A machine that doesn't sync has no direction; the details show a dash for it.
+  pass("details show the direction", detail("Direction") === (direction[pick.mode ?? ""] ?? "—"))
   pass("details show the file count", detail("Files synced") === String(pick.managed_path_count))
   pass(
     "details show how updates apply",

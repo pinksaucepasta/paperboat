@@ -1,6 +1,6 @@
 "use client"
 
-import { ArrowsClockwiseIcon, WarningCircleIcon } from "@phosphor-icons/react"
+import { ArrowsClockwiseIcon, CaretRightIcon, WarningCircleIcon } from "@phosphor-icons/react"
 import Link from "next/link"
 import { useDeferredValue, useState } from "react"
 import { useApiQuery, type Machine } from "@/lib/api"
@@ -24,6 +24,7 @@ import { useCurrentMachine } from "@/components/machine-shell"
 import { StatusDot } from "@/components/machine-status"
 import { Section, SectionHeading } from "@/components/section"
 import { Time } from "@/components/time"
+import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { EmptySkeleton, TableRowsSkeleton } from "@/components/skeletons"
 import { LoadError } from "@/components/load-error"
@@ -42,7 +43,16 @@ export function ConfigSync({ machine: tabMachine }: { machine?: Machine }) {
   const [search, setSearch] = useState("")
   const q = useDeferredValue(search.trim())
   const pages = usePageParam(`${q}|${scope ?? ""}`)
-  const status = useApiQuery(configStatusQuery({ q, machine: scope ?? undefined, page: pages.page }))
+  // All machines: the ones that sync lead; the ones that don't are folded below (server `state` groups).
+  const status = useApiQuery(
+    configStatusQuery({ q, machine: scope ?? undefined, state: scope ? undefined : "configured", page: pages.page }),
+  )
+  const [idleAt, setIdleAt] = useState({ q, page: 1 })
+  const idlePage = idleAt.q === q ? idleAt.page : 1 // a new search starts at page 1
+  const idle = useApiQuery({
+    ...configStatusQuery({ q, state: "disabled", page: idlePage }),
+    enabled: !scope,
+  })
   const conflicts = useApiQuery({ ...configStatusQuery({ state: "conflict" }), enabled: !scope })
   const environments = status.data?.items ?? []
   const lastRows = useLastCount(`config:${scope ?? ""}:${q}:${pages.page}`, status.data ? environments.length : undefined)
@@ -60,7 +70,7 @@ export function ConfigSync({ machine: tabMachine }: { machine?: Machine }) {
   return (
     <div className="flex flex-col gap-10">
       <GitHubConnection />
-      {status.isPending || status.data.total || q ? (
+      {status.isPending || status.data.total || q || idle.data?.total ? (
         <AllMachines
           loading={status.isPending}
           lastRows={lastRows}
@@ -71,6 +81,7 @@ export function ConfigSync({ machine: tabMachine }: { machine?: Machine }) {
           conflicted={conflicts.data?.total ?? 0}
           search={search}
           setSearch={setSearch}
+          idle={{ environments: idle.data?.items ?? [], total: idle.data?.total ?? 0, page: idlePage, go: (page) => setIdleAt({ q, page }) }}
         />
       ) : (
         <NotSetUp />
@@ -107,8 +118,11 @@ function AllMachines(props: {
   conflicted: number
   search: string
   setSearch: (value: string) => void
+  /** Machines that don't sync config, folded below the rest. */
+  idle: { environments: ConfigEnvironment[]; total: number; page: number; go: (page: number) => void }
 }) {
-  const { loading, environments, total, page, go, conflicted, search, setSearch } = props
+  const { loading, environments, total, page, go, conflicted, search, setSearch, idle } = props
+  const [showIdle, setShowIdle] = useState(false)
   return (
     <section className="flex flex-col gap-4">
       {conflicted > 0 && (
@@ -127,6 +141,52 @@ function AllMachines(props: {
         </div>
       )}
       <SearchField value={search} onChange={setSearch} placeholder="Search machines" />
+      {loading || total > 0 || search ? (
+        <MachineTable
+          loading={loading}
+          lastRows={props.lastRows}
+          environments={environments}
+          total={total}
+          page={page}
+          go={go}
+        />
+      ) : (
+        <p className="border-b border-divider py-3 text-sm text-muted-foreground">
+          No machine syncs config yet. Set it up on the machine with pb config sync init.
+        </p>
+      )}
+      {idle.total > 0 && (
+        <div className="flex flex-col gap-3">
+          <Button variant="ghost" className="self-start px-0 text-muted-foreground" onClick={() => setShowIdle(!showIdle)}>
+            <CaretRightIcon data-icon="inline-start" className={showIdle ? "rotate-90" : undefined} />
+            Not syncing · {idle.total}
+          </Button>
+          {showIdle && (
+            <MachineTable
+              loading={false}
+              environments={idle.environments}
+              total={idle.total}
+              page={idle.page}
+              go={idle.go}
+            />
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function MachineTable(props: {
+  loading: boolean
+  lastRows?: number
+  environments: ConfigEnvironment[]
+  total: number
+  page: number
+  go: (page: number) => void
+}) {
+  const { loading, environments, total, page, go } = props
+  return (
+    <>
       <table className="w-full table-fixed text-sm">
         <colgroup>
           <col className="w-[20%]" />
@@ -208,7 +268,7 @@ function AllMachines(props: {
         </tbody>
       </table>
       <ListPager page={page} size={cursorPageSize} total={total} go={go} />
-    </section>
+    </>
   )
 }
 
