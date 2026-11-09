@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -34,8 +35,25 @@ func TestSnapshotExcludesForeignUIDListener(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("requires root to create a listener under a different UID")
 	}
-	executable, err := os.Executable()
+	// go test builds the binary under a root-only directory the foreign UID cannot execute from.
+	source, err := os.Executable()
 	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory, err := os.MkdirTemp("", "foreign-uid-listener")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(directory) })
+	if err = os.Chmod(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(directory, "machineservices.test")
+	if err = os.WriteFile(executable, data, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(executable, "-test.run=^TestSnapshotExcludesForeignUIDListener$")

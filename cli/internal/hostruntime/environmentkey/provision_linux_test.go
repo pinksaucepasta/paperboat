@@ -68,6 +68,7 @@ func TestSystemdCredentialGenerationReplacementHasOneAtomicWriteBoundary(t *test
 		t.Fatalf("failed replacement damaged active credential: %v", err)
 	}
 	config.Writer = rootCredentialWriter{}
+	config.Random = bytes.NewReader(bytes.Repeat([]byte{0x22}, privateKeySize))
 	created, err = EnsureSystemdCredential(context.Background(), config)
 	if err != nil || !created {
 		t.Fatalf("replacement created=%v err=%v", created, err)

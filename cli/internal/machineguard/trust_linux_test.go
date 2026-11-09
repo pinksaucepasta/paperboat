@@ -130,6 +130,9 @@ func (db *fakeNSSDatabase) run(_ context.Context, args ...string) ([]byte, error
 }
 
 func TestLinuxUserTrustInstallsAndRemovesExactOwnedRoot(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("browser trust cleanup refuses root by design; this runs in the unprivileged test step")
+	}
 	_, _, rootPEM := renewalFixture(t, 365)
 	root, err := parseLocalTrustRoot(rootPEM)
 	if err != nil {

@@ -22,7 +22,8 @@ func TestBrowserDomainCallerRequiresInvokingUID(t *testing.T) {
 	if err := validateBrowserDomainCaller(strconv.Itoa(self)); err != nil {
 		t.Fatal(err)
 	}
-	for _, owner := range []string{"2000", "0" + strconv.Itoa(self), "-1", "foreign"} {
+	// Another user's uid; as root the invoking user is SUDO_UID (2000), so the foreign one is derived from it.
+	for _, owner := range []string{strconv.Itoa(self + 1), "0" + strconv.Itoa(self), "-1", "foreign"} {
 		if validateBrowserDomainCaller(owner) == nil {
 			t.Fatalf("accepted owner %s", owner)
 		}
@@ -35,7 +36,7 @@ func TestBrowserDomainProtectedLifecycle(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("protected-state lifecycle requires root; OS trust boundary is injected")
 	}
-	state := t.TempDir()
+	state := testStateDir(t)
 	cfg := Config{StateDir: state}
 	var removed []string
 	install := func(context.Context, Config, []byte) error { return nil }
