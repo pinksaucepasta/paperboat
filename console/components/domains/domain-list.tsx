@@ -87,9 +87,30 @@ function usedFor(entry: Entryish) {
   return uses.length ? uses.join(", ") : "Not used yet"
 }
 
-function ownership(entry: Entryish): { tone: Tone; label: string } {
-  if (entry.managed) return { tone: "ok", label: "Paperboat’s" }
-  return { tone: "ok", label: "Yours" }
+/** Whether the domain works: Paperboat's always does; yours once its wildcard record points at the gateway. */
+function useDomainState(entry: Entryish): { tone: Tone; label: string; busy?: boolean } {
+  const check = useApiQuery({ ...domainCheckQuery(entry.name), enabled: !entry.managed })
+  if (entry.managed) return { tone: "ok", label: "Ready" }
+  if (check.isPending) return { tone: "wait", label: "Checking DNS…", busy: true }
+  switch (check.data?.status) {
+    case "ready":
+      return { tone: "ok", label: "DNS record found" }
+    case "wrong_address":
+      return { tone: "bad", label: "Points elsewhere" }
+    case "not_found":
+      return { tone: "wait", label: "Needs a DNS record" }
+    default:
+      return { tone: "wait", label: "Couldn’t check DNS" }
+  }
+}
+
+/** Custom machine domains live in this browser until the server stores them (NOTES.md, "Machine domains"). */
+function BrowserOnly() {
+  return (
+    <Badge variant="outline" className="font-normal text-muted-foreground trim-cap">
+      This browser only
+    </Badge>
+  )
 }
 
 export function DomainList() {
@@ -184,9 +205,10 @@ export function DomainList() {
 
 function DomainRow({ entry, onOpen }: { entry: Entryish; onOpen: () => void }) {
   const [removing, setRemoving] = useState(false)
-  const state = ownership(entry)
+  const state = useDomainState(entry)
   const menu: Entry[] = [
-    ...(entry.machines
+    // Only Paperboat's domain can be the default until machines answer on your own domains.
+    ...(entry.machines && entry.managed
       ? ([
           {
             kind: "item",
@@ -220,11 +242,12 @@ function DomainRow({ entry, onOpen }: { entry: Entryish; onOpen: () => void }) {
               Default
             </Badge>
           )}
+          {!entry.managed && <BrowserOnly />}
         </span>
       </td>
       <td className="truncate text-muted-foreground">{usedFor(entry)}</td>
       <td>
-        <State tone={state.tone} label={state.label} />
+        <State tone={state.tone} label={state.label} busy={state.busy} />
       </td>
       <td className="text-right">{actions}</td>
     </tr>
@@ -257,7 +280,7 @@ function RemoveDomain({
       open={open}
       onOpenChange={onOpenChange}
       title={`Remove ${entry.name}?`}
-      description="Machines stop answering on it. DNS records stay at your DNS provider."
+      description="It’s removed from this browser. DNS records stay at your DNS provider."
       action="Remove domain"
       pending="Removing…"
       mutation={{
@@ -277,12 +300,12 @@ function RemoveDomain({
 /** A domain's panel: machine addresses, and what uses it. */
 function DomainPanel({ entry, onRemoved }: { entry: Entryish; onRemoved: () => void }) {
   const [removing, setRemoving] = useState(false)
-  const state = ownership(entry)
+  const state = useDomainState(entry)
   return (
     <>
       <SheetHeader className="gap-1 border-b border-divider p-6">
         <SheetTitle className="font-mono text-base">{entry.name}</SheetTitle>
-        <State tone={state.tone} label={state.label} />
+        <State tone={state.tone} label={state.label} busy={state.busy} />
       </SheetHeader>
       <div className="flex flex-col gap-8 overflow-y-auto p-6">
         {entry.machines && <MachineAddresses entry={entry} />}
@@ -294,7 +317,7 @@ function DomainPanel({ entry, onRemoved }: { entry: Entryish; onRemoved: () => v
           <div className="flex flex-wrap items-center gap-4 rounded-lg bg-destructive/5 p-4 dark:bg-destructive/10">
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
               <p className="text-sm font-medium">Remove domain</p>
-              <p className="text-sm text-muted-foreground">Machines stop answering on it.</p>
+              <p className="text-sm text-muted-foreground">Removes it from this browser.</p>
             </div>
             <Button
               variant="secondary"
@@ -345,8 +368,8 @@ function DomainUses({ name, kind }: { name: string; kind: "tunnel" | "preview" }
 
 /** Machine addresses on this domain (`homelab.<domain>`): a switch, and its DNS record until it works. */
 function MachineAddresses({ entry }: { entry: Entryish }) {
-  const check = useApiQuery({ ...domainCheckQuery(entry.name), enabled: entry.machines })
-  const ready = check.data?.status === "ready"
+  const check = useApiQuery({ ...domainCheckQuery(entry.name), enabled: !entry.managed })
+  const ready = entry.managed || check.data?.status === "ready"
   return (
     <PanelSection
       title="Machine addresses"
@@ -361,13 +384,17 @@ function MachineAddresses({ entry }: { entry: Entryish }) {
       }
     >
       <p className="text-sm text-muted-foreground">
-        {entry.machines ? (
+        {entry.managed ? (
           <>
             Machines answer as <span className="font-mono text-code text-foreground">homelab.{entry.name}</span> from
             any computer running Paperboat.
           </>
         ) : (
-          <>Give every machine an address under {entry.name}, reachable from any computer running Paperboat.</>
+          <>
+            Saved in this browser only. Machines don’t pick up your own domains yet, so{" "}
+            <span className="font-mono text-code text-foreground">homelab.{entry.name}</span> won’t answer until they
+            do. You can add the DNS record now.
+          </>
         )}
       </p>
       {entry.machines && !entry.managed && !check.isPending && !ready && (
@@ -386,7 +413,7 @@ function MachineAddresses({ entry }: { entry: Entryish }) {
           </div>
         </>
       )}
-      {entry.machines && !entry.primary && (
+      {entry.machines && entry.managed && !entry.primary && (
         <Button variant="secondary" className="w-fit" disabled={!ready} onClick={() => setPrimaryDomain(entry.name)}>
           Make default for machines
         </Button>
@@ -472,7 +499,8 @@ function AddDomainDialog({ onClose, onAdded }: { onClose: () => void; onAdded: (
               <FieldError>{problem}</FieldError>
             ) : (
               <p className="text-xs text-muted-foreground">
-                Machines get addresses under it. Tunnel hostnames are added on the tunnel.
+                For machine addresses; saved in this browser until your account can store it. For a tunnel, add the
+                hostname on the tunnel’s page.
               </p>
             )}
           </Field>

@@ -117,6 +117,11 @@ cannot be removed; custom ones can be added and removed; exactly one is the defa
 wherever an address appears. The machines table shows the default-domain address (click to copy);
 machine details show it with "+N", and clicking it opens every address to copy, as does the header's IP menu. The list starts as Paperboat's domain alone, as default.
 
+Until that support exists the page says so instead of pretending: custom domains carry a "This browser
+only" badge, their panel says machines don't pick them up yet, Status is the DNS check (Paperboat's
+domain is "Ready"), and only Paperboat's domain can be made the default, so the machines table never
+shows an address that doesn't answer.
+
 Limitations, all from there being no server support yet:
 
 - Stored per browser in `localStorage` (`lib/machine-domains.ts`); nothing reaches the server and

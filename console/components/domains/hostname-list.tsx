@@ -43,7 +43,16 @@ export function HostnameList() {
     enabled: Boolean(workspace),
   })
   const items = list.data?.items ?? []
-  if (list.data && list.data.total === 0 && !q) return null
+  if (list.data && list.data.total === 0 && !q)
+    return (
+      <p className="text-sm text-muted-foreground">
+        Tunnels can publish on your own domain too: open a{" "}
+        <Link href="/tunnels" className="text-foreground underline-offset-4 hover:underline">
+          tunnel
+        </Link>{" "}
+        and add a public hostname. Its hostnames show up here.
+      </p>
+    )
   return (
     <section className="flex flex-col gap-3" data-hostnames>
       <div className="flex items-center gap-2">
