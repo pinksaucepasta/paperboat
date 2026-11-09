@@ -203,7 +203,11 @@ func finalizeUninstall(ctx context.Context, request Request, paths installPaths,
 	if err := restoreUserLinger(ctx, request, paths); err != nil {
 		return withUninstallStage("uninstall_linger", err)
 	}
-	linkErr := removeCommandLink(request, paths)
+	// A reset retains its CLI slot (ResetCLIForCurrentAccount), so the account keeps the link to it: `pb pair` follows.
+	var linkErr error
+	if keep, _ := ctx.Value(resetCLIContextKey{}).(string); keep != paths.worker {
+		linkErr = removeCommandLink(request, paths)
+	}
 	journal, journalErr := loadJournal(paths.journal)
 	if journalErr == nil {
 		return withUninstallStage("uninstall_files", errors.Join(linkErr, rollbackFiles(paths, journal)))

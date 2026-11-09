@@ -644,3 +644,36 @@ func TestUninstallRemovesTheInstalledCommandLinkOnly(t *testing.T) {
 		}
 	}
 }
+
+// Regression (e33aec9f3): the root uninstall removed ~/.local/bin/pb even for `pb reset`, which keeps its CLI slot, so
+// the pairing that follows a reset found no `pb` (reset_lifecycle.py on pbvm2: FileNotFoundError ~/.local/bin/pb).
+func TestResetKeepsTheCommandLinkOfTheRetainedCLI(t *testing.T) {
+	home, root := t.TempDir(), t.TempDir()
+	worker := filepath.Join(root, "pb")
+	if err := os.WriteFile(worker, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(bin, "pb")
+	if err := os.Symlink(worker, link); err != nil {
+		t.Fatal(err)
+	}
+	paths := installPaths{root: root, worker: worker, metadata: filepath.Join(root, "install-metadata.json")}
+	ok := func(context.Context) error { return nil }
+	reset := context.WithValue(context.Background(), resetCLIContextKey{}, worker)
+	if err := finalizeUninstall(reset, Request{Home: home}, paths, ok, ok); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(link); err != nil {
+		t.Fatalf("reset removed the command link of the CLI it kept: %v", err)
+	}
+	if err := finalizeUninstall(context.Background(), Request{Home: home}, paths, ok, ok); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(link); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a full uninstall left the command link: %v", err)
+	}
+}
