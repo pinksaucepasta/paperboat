@@ -102,8 +102,12 @@ The sidebar has these sections; each needs the listed control-plane support.
   `GET /v1/machines/{id}/network-latency` (`machineLatencyQuery`). Edge times arrive on the
   machine's runtime attachment (the server keeps only candidates it issued), relay times from its
   signed-in daemon every ~5 min; the server shows measurements under an hour old. The Network
-  section shows "—" for an edge and "Not reported yet" for relays until the machine reports. There
-  are no sample numbers. `scripts/check-network-latency.js` compares the page with the API.
+  section shows "—" for an edge and "No relay times from <machine> in the last hour" until the machine
+  reports. There are no sample numbers. Relay times come from the user daemon
+  (`cli/internal/daemoncmd/relay_latency.go`, needs the user's CLI credential) and only 1 of 8 online
+  machines reported any on 2026-11-09, while all 8 reported edges. Needed: find why the others skip
+  (the reporter logs "relay latency report skipped" with the stage), and an API listing the account's relays (`GET /v1/edges` lists edges only)
+  so Network can name Paperboat's relays without measurements. `scripts/check-network-latency.js` compares the page with the API.
 
 ## Machine domains (dummy UI)
 

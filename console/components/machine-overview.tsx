@@ -136,7 +136,10 @@ function Network() {
           {relays.length > 0 ? (
             <RelayList relays={relays} />
           ) : (
-            <p className="text-sm text-muted-foreground">Not reported yet</p>
+            <p className="text-sm text-muted-foreground">
+              No relay times from {machine.alias} in the last hour. Relays only carry traffic when machines can’t
+              connect directly.
+            </p>
           )}
         </div>
       </div>

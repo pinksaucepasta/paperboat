@@ -1,6 +1,6 @@
 "use client"
 
-import { CheckCircleIcon, CopyIcon, PlusIcon, ShieldCheckIcon, TrashIcon } from "@phosphor-icons/react"
+import { CheckCircleIcon, CopyIcon, HardDrivesIcon, PlusIcon, ShieldCheckIcon, TrashIcon } from "@phosphor-icons/react"
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useDeferredValue, useState } from "react"
 import { toast } from "sonner"
@@ -20,12 +20,10 @@ import {
   scopeOf,
   verifyIngress,
   type Capability,
-  type Installation,
   type Node,
   type Pool,
 } from "@/lib/network"
 import { usePageParam } from "@/lib/use-page-param"
-import { cn } from "@/lib/utils"
 import { CommandBlock } from "@/components/add-machine-dialog"
 import { ListPager } from "@/components/list-pager"
 import { ConfirmAction, SearchField } from "@/components/list-toolbar"
@@ -34,6 +32,7 @@ import { RowMenus, type Entry } from "@/components/row-menus"
 import { Section } from "@/components/section"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -70,59 +69,91 @@ export function NetworkPage() {
   const installations = useApiQuery({ ...installationsQuery(scope, q, pages.page), enabled: Boolean(workspace) })
   const [adding, setAdding] = useState(false)
   const nodes = groupNodes(installations.data?.items ?? [])
+  const none = installations.isSuccess && installations.data.total === 0 && !q
+  const addButton = (
+    <Button size="lg" onClick={() => setAdding(true)}>
+      <PlusIcon data-icon="inline-start" />
+      Add server
+    </Button>
+  )
 
   return (
     <div className="flex flex-col gap-10">
-      <Section
-        title="Your servers"
-        action={
-          <Button variant="secondary" size="sm" onClick={() => setAdding(true)}>
-            <PlusIcon data-icon="inline-start" />
-            Add server
-          </Button>
-        }
-      >
-        {installations.isPending ? (
-          <div className="flex h-12 items-center border-b border-divider">
-            <Skeleton className="h-4 w-1/3" />
-          </div>
-        ) : installations.isError ? (
-          <p className="border-b border-divider py-3 text-sm text-muted-foreground">
-            Couldn’t load your servers. {installations.error.message}
-          </p>
-        ) : nodes.length === 0 && !q ? (
-          <p className="border-b border-divider py-3 text-sm text-muted-foreground">
-            Run a relay or tunnel server on your own Linux server, then pair it here.
-          </p>
-        ) : (
-          <>
-            {(installations.data.total > cursorPageSize || q) && (
-              <div className="py-2">
-                <SearchField value={search} onChange={setSearch} placeholder="Search servers" />
-              </div>
+      {none ? (
+        <Empty className="py-6">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <HardDrivesIcon />
+            </EmptyMedia>
+            <EmptyTitle>No servers of your own</EmptyTitle>
+            <EmptyDescription>
+              Your machines use Paperboat’s servers. Run a relay or tunnel server on your own Linux server to keep
+              traffic on hardware you control.
+            </EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>{addButton}</EmptyContent>
+        </Empty>
+      ) : (
+        <section className="flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            {(q || (installations.data?.total ?? 0) > cursorPageSize) && (
+              <SearchField value={search} onChange={setSearch} placeholder="Search servers" />
             )}
+            <div className="ml-auto">{addButton}</div>
+          </div>
+          <div>
             <table className="w-full table-fixed text-sm">
               <colgroup>
-                <col className="w-[24%]" />
-                <col className="hidden w-[24%] md:table-column" />
+                <col className="w-[26%]" />
+                <col className="hidden w-[22%] md:table-column" />
                 <col className="hidden sm:table-column" />
                 <col className="w-[22%]" />
                 <col className="w-12" />
               </colgroup>
+              <thead className="border-b border-divider text-left text-xs text-muted-foreground">
+                <tr className="[&>th]:h-9 [&>th]:px-3 [&>th]:font-normal">
+                  <th>Your servers</th>
+                  <th className="hidden md:table-cell">Runs</th>
+                  <th className="hidden sm:table-cell">Address</th>
+                  <th>Status</th>
+                  <th className="w-12" aria-label="Actions" />
+                </tr>
+              </thead>
               <tbody className="divide-y divide-divider border-b border-divider">
-                {nodes.map((node) => (
-                  <NodeRow key={node.id} node={node} />
-                ))}
+                {installations.isPending
+                  ? Array.from({ length: 2 }, (_, index) => (
+                      <tr key={index} className="[&>td]:h-14 [&>td]:px-3">
+                        <td colSpan={5}>
+                          <Skeleton className="h-5 w-1/3" />
+                        </td>
+                      </tr>
+                    ))
+                  : nodes.map((node) => <NodeRow key={node.id} node={node} />)}
               </tbody>
             </table>
-            <ListPager page={pages.page} size={cursorPageSize} total={installations.data.total} go={pages.go} />
-          </>
-        )}
-      </Section>
+            {installations.data && (
+              <ListPager page={pages.page} size={cursorPageSize} total={installations.data.total} go={pages.go} />
+            )}
+            {installations.isError && (
+              <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
+                Couldn’t load your servers.
+                <Button variant="outline" size="sm" onClick={() => installations.refetch()}>
+                  Retry
+                </Button>
+              </div>
+            )}
+            {installations.isSuccess && nodes.length === 0 && q && (
+              <p className="py-12 text-center text-sm text-muted-foreground">No servers match “{q}”</p>
+            )}
+          </div>
+        </section>
+      )}
 
-      <PoolSection capability="relay" scope={scope} />
-      <PoolSection capability="tunnel" scope={scope} />
       <PaperboatServers />
+      <Section title="Servers in use">
+        <PoolRow capability="relay" scope={scope} team={workspace?.kind === "team"} />
+        <PoolRow capability="tunnel" scope={scope} team={workspace?.kind === "team"} />
+      </Section>
 
       {adding && <AddServerDialog workspaceName={workspace?.name ?? "Personal"} onClose={() => setAdding(false)} />}
     </div>
@@ -164,7 +195,7 @@ function NodeRow({ node }: { node: Node }) {
       label={`Actions for ${node.name}`}
       entries={entries}
       row={(actions) => (
-        <tr className="data-popup-open:bg-surface [&>td]:h-14 [&>td]:px-3 [&>td:first-child]:pl-0">
+        <tr className="data-popup-open:bg-surface [&>td]:h-14 [&>td]:px-3">
           <td className="truncate font-medium">{node.name}</td>
           <td className="hidden truncate text-muted-foreground md:table-cell">{runs(node)}</td>
           <td className="hidden truncate font-mono text-code text-muted-foreground sm:table-cell">{node.host}</td>
@@ -204,32 +235,28 @@ function NodeRow({ node }: { node: Node }) {
 const poolCopy = {
   relay: {
     title: "Relays",
-    shared: {
-      mode: "mixed" as const,
-      title: "Paperboat’s and yours",
-      body: "Your relays are used alongside Paperboat’s. Machines still connect directly whenever they can.",
-    },
-    own: {
-      title: "Only yours",
-      body: "Traffic that can’t go directly uses only the relays you pick. If they’re down, it fails instead of using Paperboat’s.",
-    },
+    about: "Carry traffic only when two machines can’t connect directly. They never see inside the encryption.",
+    shared: { mode: "mixed" as const, title: "Paperboat’s and yours" },
+    own: "Traffic that can’t go directly uses only the relays you pick. If they’re down, it fails instead of using Paperboat’s.",
   },
   tunnel: {
-    title: "Tunnel servers",
-    shared: {
-      mode: "managed-only" as const,
-      title: "Paperboat’s",
-      body: "Tunnels and previews are served from Paperboat’s servers.",
-    },
-    own: {
-      title: "Only yours",
-      body: "Tunnels and previews are served only from the servers you pick, on your own domains. Stop running previews and tunnels before switching.",
-    },
+    title: "Tunnels and previews",
+    about: "Where public addresses meet the internet. Browser HTTPS ends on this server.",
+    shared: { mode: "managed-only" as const, title: "Paperboat’s" },
+    own: "Tunnels and previews are served only from the servers you pick, on your own domains. Stop running previews and tunnels before switching.",
   },
 }
 
 /** Which servers carry one kind of traffic: Paperboat's (and yours, for relays), or only yours. */
-function PoolSection({ capability, scope }: { capability: Capability; scope: ReturnType<typeof scopeOf> }) {
+function PoolRow({
+  capability,
+  scope,
+  team,
+}: {
+  capability: Capability
+  scope: ReturnType<typeof scopeOf>
+  team: boolean
+}) {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState("")
   const q = useDeferredValue(search.trim())
@@ -270,127 +297,120 @@ function PoolSection({ capability, scope }: { capability: Capability; scope: Ret
         ? [...current.installation_ids, id].slice(0, 32)
         : current.installation_ids.filter((entry) => entry !== id),
     })
+  const kind = capability === "relay" ? "relay" : "tunnel server"
 
   return (
-    <Section title={copy.title}>
-      {pool.isError ? (
-        <p className="border-b border-divider py-3 text-sm text-muted-foreground">
-          Couldn’t load this setting. {pool.error.message}
-        </p>
-      ) : (
-        <div className="flex flex-col gap-3 pt-3">
-          <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label={copy.title}>
-            {(["shared", "own"] as const).map((option) => {
-              const selected = option === "own" ? own : Boolean(current) && !own
-              const text = option === "own" ? copy.own : copy.shared
-              const disabled = !current || (option === "own" && !anyServer)
-              return (
-                <button
-                  key={option}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  disabled={disabled}
-                  onClick={() => choose(option)}
-                  className={cn(
-                    "flex flex-col gap-1 rounded-lg border p-4 text-left text-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50",
-                    selected ? "border-ring bg-ring/5" : "border-border hover:bg-surface",
-                  )}
-                >
-                  <span className="flex items-center gap-2 font-medium">
-                    {selected && <CheckCircleIcon weight="fill" className="size-4 text-primary" />}
-                    {text.title}
-                  </span>
-                  <span className="text-muted-foreground">
-                    {option === "own" && !anyServer
-                      ? `Pair a ${capability === "relay" ? "relay" : "tunnel server"} first.`
-                      : text.body}
-                  </span>
-                </button>
-              )
-            })}
+    <div className="flex flex-col gap-3 border-b border-divider py-4 text-sm">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-8">
+        <div className="flex max-w-lg flex-col gap-1">
+          <span className="font-medium">{copy.title}</span>
+          <span className="text-muted-foreground">
+            {copy.about}
+            {capability === "relay" && team && " This is set for your account, in every workspace."}
+          </span>
+        </div>
+        {pool.isError ? (
+          <span className="text-muted-foreground">Couldn’t load this setting. {pool.error.message}</span>
+        ) : !current ? (
+          <Skeleton className="h-8 w-48" />
+        ) : !anyServer && !own ? (
+          <span className="flex flex-col gap-1 sm:items-end">
+            <span>Paperboat’s</span>
+            <span className="text-xs text-muted-foreground">Pair a {kind} to use your own</span>
+          </span>
+        ) : (
+          <ToggleGroup
+            variant="outline"
+            spacing={0}
+            value={[own ? "own" : "shared"]}
+            onValueChange={(next) => next[0] && choose(next[0] as "shared" | "own")}
+            aria-label={copy.title}
+          >
+            <ToggleGroupItem value="shared">{copy.shared.title}</ToggleGroupItem>
+            <ToggleGroupItem value="own">Only yours</ToggleGroupItem>
+          </ToggleGroup>
+        )}
+      </div>
+      {own && (
+        <div className="flex flex-col gap-2">
+          <p className="text-muted-foreground">{copy.own}</p>
+          <div className="flex items-center justify-between gap-3">
+            <SearchField value={search} onChange={setSearch} placeholder="Search servers" />
+            <span className="text-muted-foreground">
+              {current!.installation_ids.length} of 32 chosen · {found.data?.pages[0]?.total ?? 0}{" "}
+              {q ? "found" : "servers"}
+            </span>
           </div>
-          {own && (
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between gap-3">
-                <SearchField value={search} onChange={setSearch} placeholder="Search servers" />
-                <span className="text-sm text-muted-foreground">
-                  {current!.installation_ids.length} of 32 chosen · {found.data?.pages[0]?.total ?? 0}{" "}
-                  {q ? "found" : "servers"}
-                </span>
-              </div>
-              <ul className="flex flex-col divide-y divide-divider border-y border-divider">
-                {current!.installation_ids
-                  .filter((id) => !servers.some((server) => server.installation_id === id))
-                  .map((id) => {
-                    const member = pool.data?.members?.find((entry) => entry.installation_id === id)
-                    return (
-                      <li key={id}>
-                        <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
-                          <Checkbox checked onCheckedChange={(on) => toggle(id, on)} />
-                          <span className="min-w-0 flex-1 truncate">{member?.name ?? "Server no longer paired"}</span>
-                          {member && (
-                            <span className="hidden truncate font-mono text-code text-muted-foreground sm:inline">
-                              {member.endpoint_host}
-                            </span>
-                          )}
-                        </label>
-                      </li>
-                    )
-                  })}
-                {servers.map((server) => (
-                  <li key={server.installation_id}>
-                    <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
-                      <Checkbox
-                        checked={current!.installation_ids.includes(server.installation_id)}
-                        disabled={
-                          !current!.installation_ids.includes(server.installation_id) &&
-                          current!.installation_ids.length >= 32
-                        }
-                        onCheckedChange={(on) => toggle(server.installation_id, on)}
-                      />
-                      <span className="min-w-0 flex-1 truncate">{server.name}</span>
-                      <span className="hidden truncate font-mono text-code text-muted-foreground sm:inline">
-                        {server.endpoint_host}
-                      </span>
-                      <StatusDot online={server.ready} />
+          <ul className="flex flex-col divide-y divide-divider border-y border-divider">
+            {current!.installation_ids
+              .filter((id) => !servers.some((server) => server.installation_id === id))
+              .map((id) => {
+                const member = pool.data?.members?.find((entry) => entry.installation_id === id)
+                return (
+                  <li key={id}>
+                    <label className="flex min-h-11 cursor-pointer items-center gap-3">
+                      <Checkbox checked onCheckedChange={(on) => toggle(id, on)} />
+                      <span className="min-w-0 flex-1 truncate">{member?.name ?? "Server no longer paired"}</span>
+                      {member && (
+                        <span className="hidden truncate font-mono text-code text-muted-foreground sm:inline">
+                          {member.endpoint_host}
+                        </span>
+                      )}
                     </label>
                   </li>
-                ))}
-              </ul>
-              {found.hasNextPage && (
-                <Button
-                  variant="secondary"
-                  className="self-start"
-                  onClick={() => found.fetchNextPage()}
-                  disabled={found.isFetchingNextPage}
-                >
-                  {found.isFetchingNextPage ? "Loading…" : "Load more"}
-                </Button>
-              )}
-            </div>
-          )}
-          {save.isError && <p className="text-sm text-destructive">{save.error.message}</p>}
-          {dirty && (
-            <div className="flex gap-2">
-              <Button
-                onClick={() => save.mutate()}
-                disabled={save.isPending || (own && !current!.installation_ids.length)}
-              >
-                {save.isPending ? "Saving…" : "Save"}
-              </Button>
-              <Button variant="secondary" onClick={() => setDraft(undefined)} disabled={save.isPending}>
-                Cancel
-              </Button>
-            </div>
+                )
+              })}
+            {servers.map((server) => (
+              <li key={server.installation_id}>
+                <label className="flex min-h-11 cursor-pointer items-center gap-3">
+                  <Checkbox
+                    checked={current!.installation_ids.includes(server.installation_id)}
+                    disabled={
+                      !current!.installation_ids.includes(server.installation_id) &&
+                      current!.installation_ids.length >= 32
+                    }
+                    onCheckedChange={(on) => toggle(server.installation_id, on)}
+                  />
+                  <span className="min-w-0 flex-1 truncate">{server.name}</span>
+                  <span className="hidden truncate font-mono text-code text-muted-foreground sm:inline">
+                    {server.endpoint_host}
+                  </span>
+                  <StatusDot online={server.ready} />
+                </label>
+              </li>
+            ))}
+          </ul>
+          {found.hasNextPage && (
+            <Button
+              variant="secondary"
+              className="self-start"
+              onClick={() => found.fetchNextPage()}
+              disabled={found.isFetchingNextPage}
+            >
+              {found.isFetchingNextPage ? "Loading…" : "Load more"}
+            </Button>
           )}
         </div>
       )}
-    </Section>
+      {save.isError && <p className="text-destructive">{save.error.message}</p>}
+      {dirty && (
+        <div className="flex gap-2">
+          <Button onClick={() => save.mutate()} disabled={save.isPending || (own && !current!.installation_ids.length)}>
+            {save.isPending ? "Saving…" : "Save"}
+          </Button>
+          <Button variant="secondary" onClick={() => setDraft(undefined)} disabled={save.isPending}>
+            Cancel
+          </Button>
+        </div>
+      )}
+    </div>
   )
 }
 
-/** The regions Paperboat serves your account from: one row per place, with how many servers are up. */
+/**
+ * The edges Paperboat serves this account's tunnels and previews from, one row per place. Paperboat's
+ * relays are not listed: no API names them for the browser.
+ */
 function PaperboatServers() {
   const edges = useApiQuery(edgesQuery)
   if (!edges.data?.length) return null
@@ -404,12 +424,12 @@ function PaperboatServers() {
   return (
     <Section title="Paperboat’s servers">
       {[...places].map(([region, place]) => (
-        <div key={region} className="flex min-h-11 items-center gap-3 border-b border-divider text-sm">
-          <span className="min-w-0 flex-1 truncate">
-            {placeName(region)}
-            {place.total > 1 && <span className="text-muted-foreground"> · {place.total} servers</span>}
+        <div key={region} className="flex min-h-12 items-center gap-3 border-b border-divider text-sm">
+          <span className="w-1/3 min-w-0 truncate">{placeName(region)}</span>
+          <span className="hidden min-w-0 flex-1 truncate text-muted-foreground sm:block">
+            Tunnels and previews{place.total > 1 && ` · ${place.total} servers`}
           </span>
-          <span className="flex items-center gap-2 text-muted-foreground">
+          <span className="ml-auto flex items-center gap-2 text-muted-foreground">
             <StatusDot online={place.ready > 0} />
             {place.ready === place.total
               ? "Ready"
@@ -457,7 +477,7 @@ function AddServerDialog({ workspaceName, onClose }: { workspaceName: string; on
                 </li>
               ))}
             </ul>
-            <p className="text-xs text-muted-foreground">It’s used once you choose it below.</p>
+            <p className="text-xs text-muted-foreground">It carries traffic once you choose it under “Servers in use”.</p>
             <Button size="lg" className="mt-1" onClick={onClose}>
               Done
             </Button>

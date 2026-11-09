@@ -20,7 +20,7 @@
   check("no time is shown that was not reported", shown.length === reported.length, `API ${reported}, page ${shown}`)
   check(
     "relays say so when none reported",
-    items.some((i) => i.role === "relay") || /Not reported yet/.test(section?.innerText ?? ""),
+    items.some((i) => i.role === "relay") || /No relay times from/.test(section?.innerText ?? ""),
     "",
   )
   check(
