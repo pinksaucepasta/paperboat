@@ -20,6 +20,7 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 import { LoadError } from "@/components/load-error"
 import { TableRowsSkeleton } from "@/components/skeletons"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { copyWithToast } from "@/lib/clipboard"
 import { useTimeFormat } from "@/lib/use-time-format"
 import { useLastCount } from "@/lib/last-count"
@@ -59,9 +60,6 @@ function groupOf(
 
 type View = "open" | "closed"
 
-const unreachableNote =
-  "Their machine isn’t reporting them, usually because it’s offline. They come back when it reconnects, and close on their own after 30 days without it."
-
 /** The machine page's Terminals tab. */
 export function MachineTerminals() {
   return <TerminalList machine={useCurrentMachine()} />
@@ -85,18 +83,12 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
 
   // Open terminals are current: live ones first, then those whose machine isn't reporting them (shown
   // as last reported). Closed ones group by when they were used.
-  const groups: { key: string; label: string; note?: string; rows: typeof shown }[] = []
+  const groups: { key: string; label?: string; rows: typeof shown }[] = []
   if (view === "open") {
     const live = shown.filter(({ session }) => session.state !== "unavailable")
     const away = shown.filter(({ session }) => session.state === "unavailable")
-    if (live.length) groups.push({ key: "open", label: "", rows: live })
-    if (away.length)
-      groups.push({
-        key: "away",
-        label: live.length ? "Not reachable" : "",
-        note: unreachableNote,
-        rows: away,
-      })
+    if (live.length) groups.push({ key: "open", rows: live })
+    if (away.length) groups.push({ key: "away", label: "Offline machines", rows: away })
   } else
     // The server lists closed terminals newest closed first, which is the order of the groups.
     for (const row of shown) {
@@ -109,8 +101,8 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
   // Terminals are yours across workspaces, so the count isn't per workspace.
   const remembered = `terminals:${scope ?? ""}:${view}`
   const lastRows = useLastCount(remembered, query.data ? shown.length : undefined)
-  // Whether the list opened with the unreachable note, so the loading state reserves its line.
-  const lastNote = useLastCount(`${remembered}:note`, query.data ? (groups[0]?.note ? 1 : 0) : undefined)
+  // Whether the list opened with the offline group, so the loading state reserves its label's line.
+  const lastOffline = useLastCount(`${remembered}:offline`, query.data ? Number(groups[0]?.key === "away") : undefined)
   // Running shows only when a visible terminal reports what it runs (unreachable ones never do), so
   // the name gets the room otherwise. The first page is read on the server (terminals/page.tsx);
   // before any data (the static shell) the last visit's answer decides, hidden on a first visit.
@@ -183,10 +175,10 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
           </thead>
           {query.isPending ? (
             <tbody>
-              {lastNote ? (
+              {lastOffline ? (
                 <tr>
                   <SpanShown scope={Boolean(scope)} running={running}>
-                    <span className="block text-muted-foreground">{unreachableNote}</span>
+                    <GroupLabel label="Offline machines" />
                   </SpanShown>
                 </tr>
               ) : null}
@@ -205,12 +197,11 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
           ) : (
             groups.map((group) => (
               <Fragment key={group.key}>
-                {(group.label || group.note) && (
+                {group.label && (
                   <tbody>
                     <tr>
                       <SpanShown scope={Boolean(scope)} running={running}>
-                        {group.label && <span className="block font-medium text-foreground">{group.label}</span>}
-                        {group.note && <span className="block text-muted-foreground">{group.note}</span>}
+                        <GroupLabel label={group.label} count={group.rows.length} />
                       </SpanShown>
                     </tr>
                   </tbody>
@@ -268,7 +259,12 @@ function TerminalStatus({ session, now }: { session: TerminalSession; now: numbe
     const seen = machines.data?.find((machine) => machine.id === session.target.machine_id)?.last_seen_at
     return (
       <span className="flex flex-col text-muted-foreground">
-        <span>Machine offline</span>
+        <Tooltip>
+          <TooltipTrigger render={<span className="w-fit" />}>Machine offline</TooltipTrigger>
+          <TooltipContent className="max-w-64">
+            The terminal comes back when the machine reconnects, and closes after 30 days offline.
+          </TooltipContent>
+        </Tooltip>
         {/* The second line holds its place while the machines list (last seen) loads. */}
         {seen ? (
           <span className="text-xs">since {date(seen, now && now - Date.parse(seen) < day ? "time" : "day")}</span>
@@ -282,6 +278,16 @@ function TerminalStatus({ session, now }: { session: TerminalSession; now: numbe
     <span className="flex items-center gap-2">
       <StatusDot online={false} />
       Idle
+    </span>
+  )
+}
+
+/** A group's name above its rows, like a table section header; the count is a placeholder while loading. */
+function GroupLabel({ label, count }: { label: string; count?: number }) {
+  return (
+    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+      {label}
+      {count === undefined ? <Skeleton className="h-2.5 w-3" /> : <span className="tabular-nums">· {count}</span>}
     </span>
   )
 }
