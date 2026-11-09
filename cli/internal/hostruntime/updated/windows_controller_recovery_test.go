@@ -9,7 +9,28 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 )
+
+// installedWindowsRuntimeForTest stands in for the installed, committed per-user runtime the controller reads on every
+// request (its source, its install record and the prepared candidate file), and returns that installation's owner SID.
+func installedWindowsRuntimeForTest(t *testing.T, version string) string {
+	t.Helper()
+	const ownerSID = "S-1-5-21-1-2-3-1001"
+	oldSource, oldConfig, oldVerify := windowsFeatureSourceForController, loadWindowsRuntimeConfigForController, verifyWindowsPreparedCandidateForController
+	t.Cleanup(func() {
+		windowsFeatureSourceForController, loadWindowsRuntimeConfigForController, verifyWindowsPreparedCandidateForController = oldSource, oldConfig, oldVerify
+	})
+	windowsFeatureSourceForController = func(context.Context, WindowsConfig) (installsource.Source, error) {
+		return installsource.Source{Version: version}, nil
+	}
+	loadWindowsRuntimeConfigForController = func(string) (hostinstall.WindowsRuntimeConfig, error) {
+		return hostinstall.WindowsRuntimeConfig{OwnerSID: ownerSID, Committed: true}, nil
+	}
+	verifyWindowsPreparedCandidateForController = func(context.Context, windowsActivationJournal) error { return nil }
+	return ownerSID
+}
 
 func TestWindowsControllerReclaimsStaleRollbackReady(t *testing.T) {
 	journal := testWindowsActivationJournal()
@@ -182,7 +203,8 @@ func TestWindowsControllerReadOnlyOperationsDoNotRecover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	controller := &windowsController{activeVersion: journal.PreviousVersion, scheduler: scheduler}
+	ownerSID := installedWindowsRuntimeForTest(t, journal.PreviousVersion)
+	controller := &windowsController{config: WindowsConfig{OwnerSID: ownerSID, StateRoot: t.TempDir()}, activeVersion: journal.PreviousVersion, scheduler: scheduler}
 
 	status, err := controller.invoke(context.Background(), ControlRequest{Operation: "status"})
 	if err != nil || !status.Pending || status.ActivationFailure != "recovery_pending" || status.Transaction.TransactionID != journal.TransactionID {

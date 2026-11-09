@@ -114,7 +114,8 @@ func TestWindowsManualPendingRetryAcknowledgesHandoff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := &windowsController{config: WindowsConfig{StateRoot: t.TempDir()}, activeVersion: journal.PreviousVersion, scheduler: scheduler, handoff: make(chan struct{})}
+	ownerSID := installedWindowsRuntimeForTest(t, journal.PreviousVersion)
+	c := &windowsController{config: WindowsConfig{OwnerSID: ownerSID, StateRoot: t.TempDir()}, activeVersion: journal.PreviousVersion, scheduler: scheduler, handoff: make(chan struct{})}
 
 	for _, testCase := range []struct {
 		name               string

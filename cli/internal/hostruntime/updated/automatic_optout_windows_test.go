@@ -19,7 +19,8 @@ func TestWindowsAutomaticActivationRechecksOptOut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := &windowsController{config: WindowsConfig{StateRoot: root, AutomaticChecks: true}, activeVersion: "2026.10.08.20", scheduler: scheduler}
+	ownerSID := installedWindowsRuntimeForTest(t, "2026.10.08.20")
+	c := &windowsController{config: WindowsConfig{OwnerSID: ownerSID, StateRoot: root, AutomaticChecks: true}, activeVersion: "2026.10.08.20", scheduler: scheduler}
 	for _, operation := range []string{"download", "install"} {
 		response, err := c.invokeWithAutomatic(context.Background(), ControlRequest{Schema: ControlProtocolV1, Operation: operation}, true)
 		if err != nil || response.Pending || response.Candidate != nil || response.Settings == nil || response.Settings.Enabled {

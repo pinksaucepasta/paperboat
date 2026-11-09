@@ -38,6 +38,13 @@ var startWindowsActivator = startWindowsActivatorService
 var resumeWindowsActivationForController = resumeWindowsActivation
 var loadWindowsActivationJournalForController = loadWindowsActivationJournal
 
+// The controller reads the installed per-user runtime on every request; these are its seams for that machine state.
+var (
+	windowsFeatureSourceForController           = WindowsFeatureSource
+	loadWindowsRuntimeConfigForController       = hostinstall.LoadWindowsRuntimeConfigForInstance
+	verifyWindowsPreparedCandidateForController = verifyWindowsPreparedCandidate
+)
+
 type windowsController struct {
 	activeVersion string
 	ownerSID      string
@@ -263,7 +270,7 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	committedSource, err := WindowsFeatureSource(ctx, c.config)
+	committedSource, err := windowsFeatureSourceForController(ctx, c.config)
 	currentVersion := committedSource.Version
 	if err != nil {
 		return ControlResponse{}, err
@@ -273,7 +280,7 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 	if err != nil {
 		return ControlResponse{}, err
 	}
-	installed, err := hostinstall.LoadWindowsRuntimeConfigForInstance(instance)
+	installed, err := loadWindowsRuntimeConfigForController(instance)
 	if err != nil {
 		return ControlResponse{}, err
 	}
@@ -357,7 +364,7 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 			response.Transaction.ActiveDigest = committedSource.SHA256
 			response.Transaction.ActiveLength = committedSource.Length
 			if journal.Stage != windowsActivationCommitted && journal.Stage != windowsActivationRolledBack {
-				if err := verifyWindowsPreparedCandidate(ctx, journal); err != nil {
+				if err := verifyWindowsPreparedCandidateForController(ctx, journal); err != nil {
 					return response, err
 				}
 				candidate := journal.Candidate
