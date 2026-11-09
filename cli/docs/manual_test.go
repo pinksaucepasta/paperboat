@@ -91,6 +91,9 @@ func TestManualRemovalPreservesUnreadablePageAndRecovers(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root bypasses file read permissions")
 	}
+	if runtime.GOOS == "windows" {
+		t.Skip("mode 0 only makes a Windows file read-only; it stays readable")
+	}
 	dir := t.TempDir()
 	section := filepath.Join(dir, "man1")
 	if err := os.Mkdir(section, 0o755); err != nil {
