@@ -16,6 +16,7 @@ import (
 	"unsafe"
 
 	"github.com/pinksaucepasta/paperboat/internal/machineguard/wfp"
+	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
@@ -85,16 +86,20 @@ func protectedDirectory(path string, mode os.FileMode) error {
 		return err
 	}
 	attributes := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: descriptor}
-	for i := len(missing) - 1; i >= 0; i-- {
-		value, pointerErr := windows.UTF16PtrFromString(missing[i])
-		if pointerErr != nil {
-			return pointerErr
+	// Only a token with SeRestorePrivilege enabled may name LocalSystem as the owner of a new object. An
+	// administrator's token holds the privilege disabled (an SSH session's has it enabled, which hid this).
+	return windowssecurity.WithRestorePrivilege(func() error {
+		for i := len(missing) - 1; i >= 0; i-- {
+			value, pointerErr := windows.UTF16PtrFromString(missing[i])
+			if pointerErr != nil {
+				return pointerErr
+			}
+			if err := windows.CreateDirectory(value, &attributes); err != nil {
+				return err
+			}
 		}
-		if err = windows.CreateDirectory(value, &attributes); err != nil {
-			return err
-		}
-	}
-	return nil
+		return nil
+	})
 }
 
 func validateDirectoryAncestors(path string, system *windows.SID) error {
