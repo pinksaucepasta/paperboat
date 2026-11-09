@@ -142,6 +142,43 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 		return offline, mesh
 	}
 
+	// The member's CLI document names the host with dial scopes for what the member may start there, held until
+	// revoked: SSH to a team machine makes no control-plane request, so no access session puts the host in it.
+	cliHostScopes := func(account, authority string) []string {
+		t.Helper()
+		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "cli_configuration_" + suffix + account + authority, UserID: account, EndpointID: "offline_cli_" + account, Authority: authority})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var capabilities []string
+		for _, raw := range networkClaims(t, result.Configuration)["peers"].([]any) {
+			peer := raw.(map[string]any)
+			if peer["identity"].(map[string]any)["endpoint_id"] != host {
+				continue
+			}
+			for _, rawScope := range peer["scopes"].([]any) {
+				scope := rawScope.(map[string]any)
+				if scope["resource_kind"] == "machine_access" && scope["resource_id"] == host {
+					if scope["direction"] != "dial" || scope["expires_at"].(float64) != 0 {
+						t.Fatalf("CLI scope shape: %v", scope)
+					}
+					capabilities = append(capabilities, scope["capability"].(string))
+				}
+			}
+		}
+		slices.Sort(capabilities)
+		return capabilities
+	}
+	if got := cliHostScopes(member, AuthorityUntilRevoked); !slices.Equal(got, []string{"terminal"}) {
+		t.Errorf("member granted terminal only: its CLI document has host scopes %v, want [terminal]", got)
+	}
+	if got := cliHostScopes(member, ""); len(got) != 0 {
+		t.Errorf("a daemon that does not ask for until-revoked got host scopes %v", got)
+	}
+	if got := cliHostScopes(outsider, AuthorityUntilRevoked); len(got) != 0 {
+		t.Errorf("an account without access has host scopes %v in its CLI document", got)
+	}
+
 	offline, mesh := read(AuthorityUntilRevoked)
 	for cli, account := range clis {
 		var want []string
@@ -210,6 +247,9 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 	// A revoked grant leaves the member's next document without the scope.
 	moves("grant revoked", true, func() { teamstest.SetMachineAccess(t, store, team, host, revokedMember) })
 	after, _ := read(AuthorityUntilRevoked)
+	if got := cliHostScopes(revokedMember, AuthorityUntilRevoked); len(got) != 0 {
+		t.Errorf("CLI document host scopes after the grant was revoked: %v", got)
+	}
 	if got := after["offline_cli_"+member]; len(got) != 0 {
 		t.Errorf("a disabled member still has offline scopes %v", got)
 	}

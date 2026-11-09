@@ -525,6 +525,32 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		p.Scopes = append(p.Scopes, personalNetworkScope(self, binding, meshExpiry))
 		scopes++
 	}
+	if untilRevoked && self.Role == "cli" {
+		hosts, err := teamHostPeers(ctx, tx, self, now)
+		if err != nil {
+			return NetworkConfigResult{}, err
+		}
+		for _, h := range hosts {
+			p := byPeer[h.binding.EndpointID]
+			if p == nil {
+				if len(byPeer) >= maximumAccountEndpoints {
+					break
+				}
+				p = &networkPeer{Identity: h.binding}
+				byPeer[h.binding.EndpointID] = p
+				if h.certExpiry.After(now) && h.certExpiry.Before(expiry) {
+					expiry = h.certExpiry
+				}
+			}
+			for _, capability := range h.capabilities {
+				if scopes >= peernetwork.MaxScopes {
+					return NetworkConfigResult{}, ErrResourceLimit
+				}
+				p.Scopes = append(p.Scopes, networkScope{"machine_access", h.binding.EndpointID, h.generation, capability, "dial", 443, 0})
+				scopes++
+			}
+		}
+	}
 	if untilRevoked && self.Role == "machine" {
 		offline, err := offlineAccessPeers(ctx, tx, self, now)
 		if err != nil {

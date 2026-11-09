@@ -70,12 +70,60 @@ GROUP BY e.id,e.user_id,e.generation ORDER BY e.id`, self.EndpointID, self.Accou
 	if err != nil {
 		return nil, err
 	}
+	return bindOfflinePeers(ctx, tx, rows, now)
+}
+
+func policyNames() []string {
+	out := make([]string, len(offlineCapabilities))
+	for i, c := range offlineCapabilities {
+		out[i] = c[0]
+	}
+	return out
+}
+
+func networkNames() []string {
+	out := make([]string, len(offlineCapabilities))
+	for i, c := range offlineCapabilities {
+		out[i] = c[1]
+	}
+	return out
+}
+
+// teamHostPeers is offlineAccessPeers seen from the member's CLI: the active hosts of the teams the CLI's account is an
+// active member of, with the capabilities the member may start there (team_machine_capability_allowed, the decision the
+// host's own document applies). SSH to a team machine makes no control-plane request, so no access session puts the host
+// in the CLI's document; without these dial scopes the client refuses the peer ("peer network admission refused").
+// The generation is the greatest of the deciding inputs' versions, as for the host's side.
+func teamHostPeers(ctx context.Context, tx *sql.Tx, self networkBinding, now time.Time) ([]offlinePeer, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT n.endpoint_id,m.user_id,array_to_json(array_agg(cap.network ORDER BY cap.network)),
+ max(greatest(b.generation,coalesce(policy.version,1),member.membership_generation))
+FROM paperboat.team_members member
+JOIN paperboat.teams t ON t.team_id=member.team_id AND NOT t.suspended AND t.deleted_at IS NULL
+JOIN paperboat.team_resource_bindings b ON b.team_id=member.team_id AND b.resource_kind='machine' AND b.active
+JOIN paperboat.user_machines m ON m.id=b.resource_id AND m.user_id<>member.account_id AND m.revoked_at IS NULL AND m.deleted_at IS NULL
+JOIN paperboat.users owner ON owner.id=m.user_id AND owner.status='active'
+JOIN paperboat.control_environments environment ON environment.id=m.environment_id AND environment.desired_state='active' AND environment.revoked_at IS NULL
+JOIN paperboat.peer_network_identities n ON n.machine_id=m.id AND n.user_id=m.user_id AND n.role='machine' AND n.revoked_at IS NULL
+LEFT JOIN paperboat.workspace_policies policy ON policy.team_id=member.team_id
+CROSS JOIN unnest($2::text[],$3::text[]) AS cap(policy,network)
+WHERE member.account_id=$1 AND member.active AND NOT cap.network=ANY($4::text[])
+ AND paperboat.team_machine_capability_allowed(member.account_id,member.team_id,m.id,cap.policy)
+GROUP BY n.endpoint_id,m.user_id ORDER BY n.endpoint_id LIMIT $5`, self.AccountID, policyNames(), networkNames(), offlineOwnerOnly, maximumOfflinePeers)
+	if err != nil {
+		return nil, err
+	}
+	return bindOfflinePeers(ctx, tx, rows, now)
+}
+
+// bindOfflinePeers reads (endpoint, account, capabilities, generation) rows and loads each endpoint's network binding.
+func bindOfflinePeers(ctx context.Context, tx *sql.Tx, rows *sql.Rows, now time.Time) ([]offlinePeer, error) {
 	type candidate struct {
 		endpoint, account string
 		capabilities      []string
 		generation        int64
 	}
 	var candidates []candidate
+	var err error
 	for rows.Next() {
 		var c candidate
 		var raw []byte
@@ -106,20 +154,4 @@ GROUP BY e.id,e.user_id,e.generation ORDER BY e.id`, self.EndpointID, self.Accou
 		out = append(out, offlinePeer{binding: binding, certExpiry: certExpiry, capabilities: c.capabilities, generation: c.generation})
 	}
 	return out, nil
-}
-
-func policyNames() []string {
-	out := make([]string, len(offlineCapabilities))
-	for i, c := range offlineCapabilities {
-		out[i] = c[0]
-	}
-	return out
-}
-
-func networkNames() []string {
-	out := make([]string, len(offlineCapabilities))
-	for i, c := range offlineCapabilities {
-		out[i] = c[1]
-	}
-	return out
 }
