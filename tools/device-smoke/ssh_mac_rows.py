@@ -84,36 +84,81 @@ echo "RESULT plain_p50=$(echo $plain | p50) pb_p50=$(echo $pb | p50) plain=[$pla
     report('F5-07 setup', 'PASS' if ok else 'FAIL', m[0] if m else out[-300:].replace('\n', ' '))
 
 
+def rcl(script, timeout=300):
+    return run('REVOKE_CLIENT_CMD', script, timeout)[1]
+
+
+def key_blob(call):
+    return call("awk '{print $2}' ~/.ssh/paperboat-managed-ssh.pub").strip().splitlines()[-1:] or ['']
+
+
+def listed(blob):
+    """Is this managed key in the Mac's authorized_keys (the file sshd reads, asserted in outage())?"""
+    return mac('grep -cF %s "$HOME/.ssh/authorized_keys"' % shlex.quote(blob)).strip().splitlines()[-1:] == ['1']
+
+
 def outage():
+    """F5-08: R (REVOKE_CLIENT_CMD, a fresh throwaway client) signs out first and the Mac's sshd stops listing its
+    key; then the control plane is blackholed on the Mac and on both clients: the unrevoked client C (CLIENT_CMD)
+    still opens plain ssh and `pb ssh` sessions, R is still refused, and the key lists agree before, during and after."""
     row = 'F5-08 outage'
-    if 'sudo-ok' not in cl('sudo -n true && command -v ip >/dev/null && echo sudo-ok'):
-        return report(row, 'SKIP', 'client has no passwordless sudo/ip to blackhole the control plane')
+    if not os.environ.get('REVOKE_CLIENT_CMD'):
+        return report(row, 'SKIP', 'set REVOKE_CLIENT_CMD to a fresh throwaway client R (it signs out)')
+    for who, call in (('C', cl), ('R', rcl)):
+        if 'sudo-ok' not in call('sudo -n true && command -v ip >/dev/null && echo sudo-ok'):
+            return report(row, 'SKIP', 'client %s has no passwordless sudo/ip to blackhole the control plane' % who)
     if not check_warm(row):
         return
-    api = cl(r'''sed -n 's/.*"server_url": *"https:\/\/\([^"\/]*\).*/\1/p' ~/.config/paperboat/config.json''').strip()
+    sshd = msudo("sshd -T -C user=%s,host=localhost,addr=127.0.0.1 | grep -i '^authorizedkeysfile'" % ARGS.mac_user)
+    if '.ssh/authorized_keys' not in sshd:
+        return report(row, 'FAIL', "sshd does not read ~/.ssh/authorized_keys: " + sshd.strip()[-120:])
+    base = rcl(prelude() + 'ssh $H echo warm-ok </dev/null 2>&1; $PB ssh $A -- echo warm-pb-ok </dev/null 2>&1')
+    if 'warm-ok' not in base or 'warm-pb-ok' not in base:
+        return report(row, 'FAIL', 'R had no session before it signed out: ' + base[-200:].replace('\n', ' '))
+    kc, kr = key_blob(cl)[0], key_blob(rcl)[0]
+    if not (kc and kr and kc != kr and listed(kc) and listed(kr)):
+        return report(row, 'FAIL', 'both clients keys must be distinct and listed before the revoke')
+    rcl(prelude(False) + '$PB logout >/dev/null 2>&1; echo signed-out')
+    start, withdrawn = time.time(), None
+    while time.time() - start < 90:
+        if not listed(kr):
+            withdrawn = round(time.time() - start, 1)
+            break
+        time.sleep(2)
+    if withdrawn is None or not listed(kc):
+        return report(row, 'FAIL', "after R signed out: withdrawn=%s, C's key listed=%s" % (withdrawn, listed(kc)))
+    api = cl(r"""sed -n 's/.*"server_url": *"https:\/\/\([^"\/]*\).*/\1/p' ~/.config/paperboat/config.json""").strip()
     addrs = sorted(set(cl("getent ahosts %s | awk '{print $1}'" % shlex.quote(api)).split())) if api else []
     if not addrs:
-        return report(row, 'SKIP', 'could not resolve the control plane address on the client')
+        return report(row, 'FAIL', 'could not resolve the control plane address on the client')
     rule = 'block drop out quick proto { tcp udp } to { %s }' % ' '.join(addrs)
-    token = None
-    res = ''
+    token, c_out, r_out = None, '', ''
+    probe = prelude(False) + r"""plain=$(timeout 40 ssh -o BatchMode=yes -o ConnectTimeout=20 $H echo outage-plain-ok </dev/null 2>&1 | tr '\n' ' '); pbo=$(timeout 40 $PB ssh $A -- echo outage-pb-ok </dev/null 2>&1 | tr '\n' ' ')
+api=$(curl -s -m 5 -o /dev/null -w '%%{http_code}' https://%s/ || true); echo "RESULT api=$api plain=[$plain] pb=[$pbo]"
+""" % api
     try:
-        msudo('sleep 150; /sbin/pfctl -a %s -F all' % ANCHOR, bg=True)  # root failsafe on the Mac
-        for a in addrs:
-            cl('sudo -n ip route add blackhole %s 2>/dev/null || sudo -n ip -6 route add blackhole %s' % (a, a))
+        msudo('sleep 240; /sbin/pfctl -a %s -F all' % ANCHOR, bg=True)  # root failsafe on the Mac
+        for call in (cl, rcl):
+            for a in addrs:
+                call('sudo -n ip route add blackhole %s 2>/dev/null || sudo -n ip -6 route add blackhole %s' % (a, a))
         out = msudo('printf "%%s\\n" %s | /sbin/pfctl -a %s -f - 2>&1; /sbin/pfctl -E 2>&1; /sbin/pfctl -F states 2>&1' % (shlex.quote(rule), ANCHOR))
         t = re.search(r'Token : (\d+)', out)
         token = t[1] if t else None
         time.sleep(45)
-        res = cl(prelude(False) + r'''plain=$(ssh $H echo outage-plain-ok </dev/null 2>&1 | tr '\n' ' '); pbo=$($PB ssh $A -- echo outage-pb-ok </dev/null 2>&1 | tr '\n' ' ')
-api=$(curl -s -m 5 -o /dev/null -w '%%{http_code}' https://%s/ || true); echo "RESULT api=$api plain=[$plain] pb=[$pbo]"''' % api, 400)
+        during = (listed(kc), listed(kr))
+        c_out, r_out = cl(probe, 400), rcl(probe, 400)
     finally:
         msudo('/sbin/pfctl -a %s -F all%s' % (ANCHOR, '; /sbin/pfctl -X %s' % token if token else ''))
-        for a in addrs:
-            cl('sudo -n ip route del blackhole %s 2>/dev/null || sudo -n ip -6 route del blackhole %s' % (a, a))
-    d = ' '.join(l for l in res.splitlines() if l.startswith('RESULT'))
-    ok = 'api=000' in d and re.search(r'plain=\[[^\]]*outage-plain-ok', d) and re.search(r'pb=\[[^\]]*outage-pb-ok', d)
-    report(row, 'PASS' if ok else 'FAIL', d or res[-300:].replace('\n', ' '))
+        for call in (cl, rcl):
+            for a in addrs:
+                call('sudo -n ip route del blackhole %s 2>/dev/null || sudo -n ip -6 route del blackhole %s' % (a, a))
+    after = (listed(kc), listed(kr))
+    c = ' '.join(l for l in c_out.splitlines() if l.startswith('RESULT'))
+    r = ' '.join(l for l in r_out.splitlines() if l.startswith('RESULT'))
+    ok = ('api=000' in c and re.search(r'plain=\[[^\]]*outage-plain-ok', c) and re.search(r'pb=\[[^\]]*outage-pb-ok', c)
+          and 'api=000' in r and 'outage-plain-ok' not in r and 'outage-pb-ok' not in r
+          and during == (True, False) and after == (True, False))
+    report(row, 'PASS' if ok else 'FAIL', 'withdrawn_after=%ss keys(C,R) during=%s after=%s | C %s | R %s' % (withdrawn, during, after, c or c_out[-200:], r or r_out[-200:]))
 
 
 def wait_sshd():
