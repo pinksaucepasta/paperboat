@@ -335,7 +335,27 @@ func (s windowsInstallationState) Restore(ctx context.Context, snapshot []byte) 
 	if err := writeWindowsConfigAt(config, root); err != nil {
 		return err
 	}
-	return restoreSSH()
+	if err := restoreSSH(); err != nil {
+		return err
+	}
+	return restoreWindowsSessionOwner(ctx, config, s.layout)
+}
+
+var prepareRestoredSessionOwner = PrepareSessionOwner
+
+// restoreWindowsSessionOwner starts the restored installation's session owner again, as repair does, before the
+// lifecycle restores its services: hostd exits without its owner's pipe (victus 2026-11-10: the rolled-back hostd
+// found none and stayed stopped).
+func restoreWindowsSessionOwner(ctx context.Context, config WindowsRuntimeConfig, layout service.Layout) error {
+	if config.SessionOwnerGeneration == "" {
+		return nil
+	}
+	request := windowsRepairRequest(config)
+	request.Executable, request.WorkspaceRoot = layout.Binary, config.Workspace
+	if err := prepareRestoredSessionOwner(ctx, request); err != nil {
+		return hostInstallFailure("start the previous version's session owner", err)
+	}
+	return nil
 }
 
 // windowsHostdRunning reports whether the installed hostd service runs.

@@ -64,3 +64,41 @@ func TestWindowsReplacementSkipsMaintenanceAdmissionWhenHostdIsStopped(t *testin
 		t.Fatal("a running hostd was not asked for maintenance admission")
 	}
 }
+
+// victus 2026-11-10: after a failed update the restored hostd exited with "terminal owner unavailable": nothing
+// started the previous version's session owner again. The installation restore, which the lifecycle runs before it
+// restores any service, prepares the restored record's own owner from the restored executable.
+func TestWindowsRestoreStartsThePreviousSessionOwner(t *testing.T) {
+	layout, err := service.WindowsUserLayout("S-1-5-21-111-222-333-1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := prepareRestoredSessionOwner
+	t.Cleanup(func() { prepareRestoredSessionOwner = old })
+	var prepared []Request
+	unavailable := errors.New("session owner did not become ready")
+	var prepareErr error
+	prepareRestoredSessionOwner = func(_ context.Context, request Request) error {
+		prepared = append(prepared, request)
+		return prepareErr
+	}
+	config := WindowsRuntimeConfig{OwnerSID: "S-1-5-21-111-222-333-1001", StateRoot: `C:\Users\dev\AppData\Local\Paperboat`, Workspace: `C:\Users\dev`, ListenAddress: "127.0.0.1:7777"}
+	config.Source.SHA256 = strings.Repeat("ab", 32)
+	// A record without a session owner (awaiting enrollment) has none to start.
+	if err := restoreWindowsSessionOwner(context.Background(), config, layout); err != nil || len(prepared) != 0 {
+		t.Fatalf("record without a session owner: err=%v prepared=%d", err, len(prepared))
+	}
+	config.SessionOwnerGeneration = config.Source.SHA256[:32]
+	if err := restoreWindowsSessionOwner(context.Background(), config, layout); err != nil || len(prepared) != 1 {
+		t.Fatalf("restored record: err=%v prepared=%d", err, len(prepared))
+	}
+	got := prepared[0]
+	if got.Source != config.Source || got.SessionOwnerGeneration != config.SessionOwnerGeneration || got.Executable != layout.Binary ||
+		got.OwnerSID != config.OwnerSID || got.StateRoot != config.StateRoot || got.WorkspaceRoot != config.Workspace {
+		t.Fatalf("session owner prepared for another installation than the restored one: %+v", got)
+	}
+	prepareErr = unavailable
+	if err := restoreWindowsSessionOwner(context.Background(), config, layout); !errors.Is(err, unavailable) {
+		t.Fatalf("a session owner that did not start must fail the restore, got %v", err)
+	}
+}

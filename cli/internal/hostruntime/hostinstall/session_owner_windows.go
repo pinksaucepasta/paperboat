@@ -88,6 +88,16 @@ func InstalledSessionOwnerCoordinator(ctx context.Context, instance string) (ses
 		return sessionowner.Coordinator{}, err
 	}
 	request := Request{Platform: "windows", OwnerSID: cfg.OwnerSID, User: cfg.User, StateRoot: cfg.StateRoot, WorkspaceRoot: cfg.Workspace, Executable: layout.Binary, Source: cfg.Source, SessionOwnerGeneration: cfg.SessionOwnerGeneration}
+	// A replacement that may still roll back owns both generations: the candidate's updater, already running on
+	// the uncommitted record, must not retire the one the rollback restores (victus 2026-11-10: it did, and the
+	// restored hostd had no session owner). Carrier reconciliation waits the same way (reconcileInstalledCarrier).
+	lifecycle, err := newWindowsLifecycleManager(windowsRepairRequest(cfg), layout, true)
+	if err != nil {
+		return sessionowner.Coordinator{}, err
+	}
+	if err := lifecycle.RequireRecovered(ctx); err != nil {
+		return sessionowner.Coordinator{}, hostInstallFailure("session owners wait for the pending installation to finish", err)
+	}
 	if err := cfg.Source.Verify(layout.Binary); err != nil {
 		return sessionowner.Coordinator{}, err
 	}
