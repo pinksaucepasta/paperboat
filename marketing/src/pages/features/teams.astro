@@ -13,16 +13,18 @@ const hero = [
 ]
 
 const policy = `{
-  // Team-wide switch for reaching ports. Off unless you turn it on.
+  // Reaching ports is off for a team until you turn it on.
   "allow_private_access": true,
-  "groups": { "group:ops": ["user:ana@example.test", "user:bo@example.test"] },
-  "tags":   { "tag:prod": ["machine:db", "machine:web-01"] },
+  "groups": {
+    "group:ops": ["user:ana@example.test", "user:bo@example.test"]
+  },
+  "tags": { "tag:prod": ["machine:db", "machine:web-01"] },
   "rules": [
     // Ops can do everything on production.
     { "src": ["group:ops"], "dst": ["tag:prod"], "allow": ["*"] },
     // Nobody opens an SSH session there, ops included.
     { "src": ["*"], "dst": ["tag:prod"], "deny": ["managed_ssh"] },
-    // Everyone on the team may reach the database port, and only that port.
+    // Every member may reach the database port, and only it.
     { "src": ["role:member"], "dst": ["machine:db"],
       "allow": ["private_access"], "ports": [5432] }
   ]

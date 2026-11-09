@@ -340,7 +340,7 @@ const sshSources = {
   sshd: "https://man.openbsd.org/sshd_config",
   scp: "https://man.openbsd.org/scp",
   tmux: "https://github.com/tmux/tmux/wiki",
-  openssh: "https://www.openssh.com/",
+  openssh: "https://www.openssh.org/",
 }
 
 // VS Code Remote Tunnels and dev tunnels

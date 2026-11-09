@@ -1,13 +1,18 @@
 ---
 /** Every feature as a line of help output: the command, what it gets you, and its page. */
 import { features, featureGroups } from "../features"
+interface Props {
+  /** The heading level of a group's name: h2 directly under the page's h1, h3 inside a titled section. */
+  level?: "h2" | "h3"
+}
+const { level: Heading = "h3" } = Astro.props
 ---
 
 <div class="index">
   {
     featureGroups.map((group) => (
       <section class="group" aria-label={group}>
-        <h3 class="group-title">{group}</h3>
+        <Heading class="group-title">{group}</Heading>
         <ul>
           {features
             .filter((item) => item.group === group)
