@@ -15,7 +15,7 @@ type HostedRelay struct {
 	ID            string     `json:"id"`
 	Name          string     `json:"name,omitempty"` // a self-hosted relay's name
 	Region        string     `json:"region"`
-	Site          string     `json:"site"` // the city or site; a self-hosted relay shows its name
+	Site          string     `json:"site"` // the operator-set site, else the installation's name ("oracle", or a self-hosted relay's name)
 	Status        string     `json:"status"`
 	SelfHosted    bool       `json:"self_hosted"`
 	LastHeartbeat *time.Time `json:"last_heartbeat_at,omitempty"`
@@ -41,7 +41,7 @@ func (s *EdgeService) ListHostedRelays(ctx context.Context, accountID, after str
 	page := HostedRelayPage{Items: []HostedRelay{}, ObservedAt: at}
 	rows, err := s.store.SQL().QueryContext(ctx, `
 SELECT n.id, COALESCE(n.region,''),
-  COALESCE((SELECT i.name FROM selfhost_installations i WHERE i.node_id=n.id AND i.capability='relay' AND i.scope_kind IN ('account','team') LIMIT 1),(SELECT m.site FROM managed_node_authority m WHERE m.node_id=n.id AND m.retired_at IS NULL),''),
+  COALESCE((SELECT m.site FROM managed_node_authority m WHERE m.node_id=n.id AND m.retired_at IS NULL),(SELECT i.name FROM selfhost_installations i WHERE i.node_id=n.id AND i.state='active' ORDER BY i.id LIMIT 1),''),
   COALESCE((SELECT i.name FROM selfhost_installations i WHERE i.node_id=n.id AND i.capability='relay' AND i.scope_kind IN ('account','team') LIMIT 1),''),
   EXISTS (SELECT 1 FROM selfhost_installations i WHERE i.node_id=n.id AND i.scope_kind IN ('account','team')),
   CASE WHEN n.state='draining' OR n.drain_deadline IS NOT NULL THEN 'draining'

@@ -64,6 +64,8 @@ VALUES($1,'default','1.0','epoch', $2,$3,$4,'fsn1','domain',ARRAY[$5]::text[],AR
 	exec(`INSERT INTO paperboat.managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config) VALUES($1,$2,$3,'encrypted','{}'::jsonb)`, prefix+"f", regionID, make([]byte, 32))
 	// Edge a is a managed node of an enabled region: it shows its site.
 	exec(`UPDATE paperboat.control_tunnel_nodes SET endpoint_host='edge.example.test',endpoint_tcp_port=443,endpoint_quic_port=444 WHERE id=$1`, prefix+"a")
+	// Edge c is one of Paperboat's own pbh installations (no operator row): it shows the installation's name.
+	exec(`INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) VALUES($1,$2,$3,$3,'encrypted','oracle','tunnel','global','global',$4,true)`, prefix+"ginstallation", prefix+"c", append([]byte{2}, make([]byte, 31)...), prefix+"gclaim")
 	exec(`INSERT INTO paperboat.operator_regions(id,display_name,enabled) VALUES($1,'Test region',true)`, regionID+"_on")
 	exec(`INSERT INTO paperboat.managed_node_authority(node_id,region_id,runtime_hash,runtime_ciphertext,config,site) VALUES($1,$2,$3,'encrypted','{}'::jsonb,'Mumbai')`, prefix+"a", regionID+"_on", append([]byte{1}, make([]byte, 31)...)) // the runtime hash is unique
 	service := NewEdgeService(database, "unused")
@@ -73,7 +75,7 @@ VALUES($1,'default','1.0','epoch', $2,$3,$4,'fsn1','domain',ARRAY[$5]::text[],AR
 		t.Fatalf("first page=%+v error=%v", first, err)
 	}
 	second, err := service.ListHostedEdges(ctx, account, first.NextCursor, 2)
-	if err != nil || len(second.Items) != 1 || second.Items[0].ID != prefix+"c" || second.Items[0].Status != "draining" || second.NextCursor != "" {
+	if err != nil || len(second.Items) != 1 || second.Items[0].ID != prefix+"c" || second.Items[0].Status != "draining" || second.Items[0].Site != "oracle" || second.NextCursor != "" {
 		t.Fatalf("second page=%+v error=%v", second, err)
 	}
 	exec(`INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES('account',$1,'relay','self-hosted-only',ARRAY[]::text[])`, account)
