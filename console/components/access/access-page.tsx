@@ -90,10 +90,10 @@ function PolicyUnavailable({ error }: { error: Error }) {
         </EmptyMedia>
         <EmptyTitle>
           {missing
-            ? "Access policy isn't available on this server yet"
+            ? "Access policy isn’t available on this server yet"
             : forbidden
               ? "No access"
-              : "Couldn't load access"}
+              : "Couldn’t load access"}
         </EmptyTitle>
         {!missing && <EmptyDescription>{error.message}</EmptyDescription>}
       </EmptyHeader>

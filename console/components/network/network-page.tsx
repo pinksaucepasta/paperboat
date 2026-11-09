@@ -437,6 +437,7 @@ function PathCard({
               {found.isFetchingNextPage ? "Loading…" : "Load more"}
             </Button>
           )}
+          {found.isFetchNextPageError && <p className="text-destructive">Couldn’t load more. Try again.</p>}
         </div>
       )}
       {save.isError && <p className="text-destructive">{save.error.message}</p>}
