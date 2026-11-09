@@ -139,8 +139,8 @@ func (p *Policy) serveBrowserTerminal(w http.ResponseWriter, request *http.Reque
 		reason, typed := browserTerminalEnd(cause, admission)
 		if !typed {
 			// A terminal pb update's retiring generation held until it stopped, or this edge process handed over to
-			// its replacement: the new one serves already.
-			moved = p.config.BrowserTerminalHub.Moved(key.RouteID, fence)
+			// its replacement and ended the session: the new one serves already.
+			moved = p.config.BrowserTerminalHub.Moved(key.RouteID, fence) || p.config.BrowserTerminalHub.MovedByHandOver(cause)
 			reason, typed = terminalend.Moved, moved
 		}
 		if typed {

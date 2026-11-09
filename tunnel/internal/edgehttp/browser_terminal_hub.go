@@ -62,7 +62,7 @@ type BrowserTerminalHub struct {
 	OnFailure     func(context.Context, error)
 	mu            sync.Mutex
 	closed        bool
-	handingOver   bool // HandOver ran: the replacement edge process serves, so every end is a move
+	handingOver   bool // HandOver ran: the replacement edge process serves, so a session the hub ends is a move
 	handoverTimer *time.Timer
 	activeRoutes  map[string]BrowserTerminalRouteFence
 	// heldRoutes are the fences a newer worker generation of the same machine replaced (pb update):
@@ -107,8 +107,7 @@ func replacedGeneration(old, next BrowserTerminalRouteFence) bool {
 }
 
 // Moved reports whether a browser served through fence's carrier reconnects at once (terminalend.Moved): the
-// carrier was replaced by a newer worker generation of the same machine that is the route's active one (pb update),
-// or this edge process handed over to its replacement (HandOver).
+// carrier was replaced by a newer worker generation of the same machine that is the route's active one (pb update).
 func (h *BrowserTerminalHub) Moved(routeID string, fence BrowserTerminalRouteFence) bool {
 	if h == nil {
 		return false
@@ -116,14 +115,26 @@ func (h *BrowserTerminalHub) Moved(routeID string, fence BrowserTerminalRouteFen
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	current, ok := h.activeRoutes[routeID]
-	return h.handingOver || ok && replacedGeneration(fence, current)
+	return ok && replacedGeneration(fence, current)
 }
 
-// HandOver is called the moment this edge process is released to its replacement. From then on every end of a browser
-// terminal is a move: each bridge tells its browser "moved" (4301), which reconnects at once to the replacement. An
-// edge install keeps every machine generation, so Moved alone cannot see it, and the old process's exit cut the
-// connections (WebSocket 1006). The usual end is the host's carrier detaching after the drain's goaway (the host is
-// then already on the replacement); grace is the backstop that moves the terminals still open. Prior art: the
+// MovedByHandOver reports whether a bridge that ended with cause ended because this edge process handed over: the hub
+// ended its session after HandOver. Any other cause (the browser left, the host's stream failed, a typed end such as a
+// revocation) keeps its own reason.
+func (h *BrowserTerminalHub) MovedByHandOver(cause error) bool {
+	if h == nil || !errors.Is(cause, ErrBrowserTerminalHubEnded) {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.handingOver
+}
+
+// HandOver is called the moment this edge process is released to its replacement. From then on a session the hub ends
+// is a move: its bridge tells the browser "moved" (4301), which reconnects at once to the replacement. An edge install
+// keeps every machine generation, so Moved alone cannot see it, and the old process's exit cut the connections
+// (WebSocket 1006). The usual end is the host's carrier detaching after the drain's goaway (the host is then already
+// on the replacement); grace is the backstop that moves the terminals still open, and Close cancels it. Prior art: the
 // WebSocket close code 1012 "Service Restart" (IANA registry) is the standard way to tell clients to reconnect after a
 // restart; the console already reattaches at once on our typed equivalent, 4301.
 func (h *BrowserTerminalHub) HandOver(grace time.Duration) {

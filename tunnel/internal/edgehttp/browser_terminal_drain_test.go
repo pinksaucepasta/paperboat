@@ -213,12 +213,52 @@ func registerWhenSubscribed(t *testing.T, ctx context.Context, hub *BrowserTermi
 // typed "moved" close (4301, before the process exits), and its reattach continues with the next record, nothing
 // repeated and nothing lost.
 func TestHandOverEndsBrowserTerminalsMovedAndReattachContinues(t *testing.T) {
-	for _, end := range []string{"carrier detaches first", "grace ends first"} {
-		t.Run(end, func(t *testing.T) { handOverEndsBrowserTerminalsMoved(t, end == "carrier detaches first") })
+	for _, end := range []string{"carrier detaches first", "grace ends first", "revoked while handing over"} {
+		t.Run(end, func(t *testing.T) { handOverEndsBrowserTerminalsMoved(t, end) })
 	}
 }
 
-func handOverEndsBrowserTerminalsMoved(t *testing.T, carrierFirst bool) {
+// A browser terminal the control plane ends (a revocation) while the edge hands over keeps that typed reason; only a
+// session the hub ended is a move.
+func TestMovedByHandOverOnlyForASessionTheHubEnded(t *testing.T) {
+	hub := NewBrowserTerminalHub()
+	defer hub.Close()
+	if hub.MovedByHandOver(ErrBrowserTerminalHubEnded) {
+		t.Fatal("moved before any hand over")
+	}
+	hub.HandOver(time.Hour)
+	if !hub.MovedByHandOver(bridgeEnd{"shared_output", ErrBrowserTerminalHubEnded}) || !hub.MovedByHandOver(errors.Join(errors.New("x"), ErrBrowserTerminalHubEnded)) {
+		t.Fatal("a session the hub ended after the hand over is not a move")
+	}
+	for _, cause := range []error{nil, context.Canceled, bridgeEnd{"browser_read", errors.New("eof")}, ErrIngressQuotaExhausted} {
+		if hub.MovedByHandOver(cause) {
+			t.Fatalf("%v counted as moved by the hand over", cause)
+		}
+	}
+}
+
+// Close cancels the grace timer: a closed hub has nothing left to move and no timer outlives it.
+func TestHubCloseStopsTheHandOverTimer(t *testing.T) {
+	hub := NewBrowserTerminalHub()
+	hub.HandOver(time.Hour)
+	timer := hub.handoverTimer
+	if timer == nil {
+		t.Fatal("HandOver kept no timer")
+	}
+	hub.HandOver(time.Hour) // a second call replaces it
+	if timer.Stop() {
+		t.Fatal("the first timer was still pending after a second HandOver")
+	}
+	pending := hub.handoverTimer
+	_ = hub.Close()
+	if pending.Stop() {
+		t.Fatal("Close left the timer pending")
+	}
+}
+
+func handOverEndsBrowserTerminalsMoved(t *testing.T, mode string) {
+	carrierFirst := mode == "carrier detaches first"
+	revoked := make(chan struct{})
 	var logs lockedBuffer
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
@@ -268,7 +308,15 @@ func handOverEndsBrowserTerminalsMoved(t *testing.T, carrierFirst bool) {
 		RuntimeCarrierTransport: browserTerminalTestRoundTripper{target: hostURL}, BrowserTerminalHub: hub, BrowserTerminalEdgeHost: "edge.example.test",
 		BrowserTerminal: browserTerminalAdmissionFunc(func(context.Context, string, string, string) (control.BrowserTerminalAdmission, error) {
 			admissions++
-			return control.BrowserTerminalAdmission{Credential: "host-credential", TerminalSessionID: "term_1", AttachmentID: "attach_" + strconv.Itoa(admissions), Closed: make(chan struct{}), Close: func() {}}, nil
+			return control.BrowserTerminalAdmission{Credential: "host-credential", TerminalSessionID: "term_1", AttachmentID: "attach_" + strconv.Itoa(admissions), Closed: revoked, Close: func() {},
+				EndReason: func() terminalend.Reason {
+					select {
+					case <-revoked:
+						return terminalend.Revoked
+					default:
+						return ""
+					}
+				}}, nil
 		}),
 	}, http.NotFoundHandler())
 	if err != nil {
@@ -304,6 +352,16 @@ func handOverEndsBrowserTerminalsMoved(t *testing.T, carrierFirst bool) {
 	read(first, "r1")
 
 	oldFence := BrowserTerminalRouteFence{Identity: identity, Revision: 1, AttachmentGeneration: 1}
+	if mode == "revoked while handing over" {
+		hub.HandOver(time.Hour)
+		close(revoked)
+		_, _, err = first.Read(ctx)
+		var closed websocket.CloseError
+		if !errors.As(err, &closed) || closed.Code != websocket.StatusCode(terminalend.CodeRevoked) {
+			t.Fatalf("browser saw %v, want the revocation's own close %d", err, terminalend.CodeRevoked)
+		}
+		return
+	}
 	if carrierFirst {
 		hub.HandOver(time.Hour)
 		hub.DeactivateRoute(route.RouteID, oldFence) // the host's carrier left the old process
@@ -354,23 +412,4 @@ func (b *lockedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
-}
-
-// Close cancels the grace timer: a closed hub has nothing left to move and no timer outlives it.
-func TestHubCloseStopsTheHandOverTimer(t *testing.T) {
-	hub := NewBrowserTerminalHub()
-	hub.HandOver(time.Hour)
-	timer := hub.handoverTimer
-	if timer == nil {
-		t.Fatal("HandOver kept no timer")
-	}
-	hub.HandOver(time.Hour) // a second call replaces it
-	if timer.Stop() {
-		t.Fatal("the first timer was still pending after a second HandOver")
-	}
-	pending := hub.handoverTimer
-	_ = hub.Close()
-	if pending.Stop() {
-		t.Fatal("Close left the timer pending")
-	}
 }
