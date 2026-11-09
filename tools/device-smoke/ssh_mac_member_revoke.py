@@ -48,9 +48,12 @@ HOLD = PROLOGUE + r'''perr=$($PB $PBW ssh $A -- 'exit 0' </dev/null 2>&1 >/dev/n
 # the proxy names a team-shared machine on stderr ("apple (team X)"): informational, not an error
 perr=$(sed -E 's/^[^ ]+ \(team [^)]*\) ?//' <<<"$perr"); lerr=$(sed -E 's/^[^ ]+ \(team [^)]*\) ?//' <<<"$lerr")
 echo "RESULT normal pb_stderr=[$perr] plain_stderr=[$lerr]"
-grep -q unreachable <<<"$perr$lerr" && echo "RESULT diag [$(cat ~/.local/state/paperboat/diagnostics/*.ndjson 2>/dev/null | grep -E 'peer_descriptor|quic_handshake|redial_step|peer_stream|relay' | tail -14 | python3 -c "import sys,json
+ref=$(grep -o 'support_[0-9a-f-]*' <<<"$perr$lerr" | head -1)
+[ -n "$ref" ] && echo "RESULT diag-ref [$ref: $(cat ~/.local/state/paperboat/diagnostics/*.ndjson 2>/dev/null | grep "$ref" | python3 -c "import sys,json
 for l in sys.stdin:
-    d=json.loads(l); f=d.get('fields',{}); print(d['at'][11:23], d['code'], f.get('step'), f.get('state'), f.get('cause'), f.get('outcome'), f.get('duration_ms'), end='; ')" | cut -c1-1500)]"
+    d=json.loads(l); f=d.get('fields',{})
+    if f.get('state') in ('started','ready') and d['code']=='redial_step': continue
+    print(d['at'][11:23], d['code'], json.dumps({k:v for k,v in f.items() if k not in ('attempt_id','connection_id','step_id','source_line')}, sort_keys=True), end=' ;; ')" | cut -c1-2600)]"
 $PB $PBW ssh $A -- 'echo session-up; sleep 300' > ~/slr.out 2> ~/slr.err < /dev/null & pid=$!
 ssh $H 'echo plain-up; sleep 300' > ~/slrp.out 2> ~/slrp.err < /dev/null & ppid=$!
 for i in $(seq 1 60); do grep -q session-up ~/slr.out && grep -q plain-up ~/slrp.out && break; sleep 1; done
@@ -139,7 +142,7 @@ def main():
             time.sleep(2)
         res = member('cat ~/hold.out')[1]
         ok, why = m.revoke_verdict(res)
-        status, detail = ('PASS' if ok else 'FAIL'), '%s %s %s' % (detail, '' if ok else why + ':', re.sub(r'\s+', ' ', res)[-1600:])
+        status, detail = ('PASS' if ok else 'FAIL'), '%s %s %s' % (detail, '' if ok else why + ':', re.sub(r'\s+', ' ', res)[-3600:])
     except Exception as error:  # every failure names its step
         detail = '%s %s' % (detail, error)
     finally:
