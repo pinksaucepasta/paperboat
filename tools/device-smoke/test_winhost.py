@@ -435,7 +435,9 @@ class SessionFamily(unittest.TestCase):
         device = winhost.WindowsDevice(target='user@host', pb_exe=EXE, password='secret')
         with patch.dict(os.environ, {}, clear=True):
             argv = winhost.terminal_argv(winhost.WindowsPb(device), ['connect', 'my box', '--name', "it's"])
-            self.assertEqual('secret', os.environ['SSHPASS'])
+            self.assertNotIn('SSHPASS', os.environ)  # only the harness child gets it
+        self.assertEqual({'SSHPASS': 'secret'}, winhost.terminal_env(winhost.WindowsPb(device)))
+        self.assertEqual({}, winhost.terminal_env(pathlib.Path('/bin/pb')))
         self.assertEqual(['sshpass', '-e', 'ssh'], argv[:3])
         self.assertIn('-tt', argv)
         self.assertNotIn('secret', ' '.join(argv))

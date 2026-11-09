@@ -29,7 +29,7 @@ def qualify(pb, target, check):
     clients = []
     terminal = None
     try:
-        terminal = Terminal(winhost.terminal_argv(pb, ['connect', target, '--name', name, '--status-bar', 'off']))
+        terminal = Terminal(winhost.terminal_argv(pb, ['connect', target, '--name', name, '--status-bar', 'off']), env=winhost.terminal_env(pb))
         clients.append(terminal)
         terminal.expect(b'\x1b[?2004h')
         terminal.expect(terminal.marker('READY', 'stty -echo; '))
@@ -46,7 +46,7 @@ def qualify(pb, target, check):
             if current['id'] != identifier:
                 raise RuntimeError('rename catalog changed the session identity')
         terminal.close()
-        terminal = Terminal(winhost.terminal_argv(pb, ['session', 'attach', target, identifier, '--status-bar', 'off']))
+        terminal = Terminal(winhost.terminal_argv(pb, ['session', 'attach', target, identifier, '--status-bar', 'off']), env=winhost.terminal_env(pb))
         clients.append(terminal)
         terminal.expect(b'\x1b[?2004h')
         if check in ('replay', 'cross'):
@@ -91,7 +91,7 @@ def resume(pb, target, identifier, nonce, account):
     session = next((item for item in sessions if item['id'] == identifier), None)
     if session is None or not session['name'].startswith('smoke-session-') or session['is_default'] is not False:
         raise RuntimeError('cross-device fixture does not identify an exact owned non-default terminal')
-    terminal = Terminal(winhost.terminal_argv(pb, ['session', 'attach', target, identifier, '--status-bar', 'off']))
+    terminal = Terminal(winhost.terminal_argv(pb, ['session', 'attach', target, identifier, '--status-bar', 'off']), env=winhost.terminal_env(pb))
     try:
         terminal.expect(b'\x1b[?2004h')
         terminal.expect('PB_DURABLE_' + nonce, timeout=15)

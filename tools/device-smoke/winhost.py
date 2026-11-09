@@ -591,14 +591,18 @@ def terminal_argv(binary, arguments):
     """argv for a local pty harness (terminal_lifecycle.Terminal) to run `pb <arguments>` interactively.
 
     On the device it is `ssh -tt`, so Windows OpenSSH gives pb.exe a ConPTY and the harness drives that console.
-    sshpass reads the password from SSHPASS, which is set in this process for the harness's child."""
+    sshpass reads the password from SSHPASS: pass terminal_env(binary) to that child only."""
     if not hasattr(binary, 'device'):
         return [str(binary), *arguments]
     target = binary.device
-    if target.password:
-        os.environ['SSHPASS'] = target.password
     command = "& %s %s" % (ps_quote(binary), ' '.join(ps_quote(word) for word in arguments))
     return target.ssh_prefix('-tt', target.target, 'powershell -NoProfile -NonInteractive -Command ' + subprocess.list2cmdline([command]))
+
+
+def terminal_env(binary):
+    """Extra environment for the terminal_argv child alone; the password never enters this process's environment."""
+    target = getattr(binary, 'device', None)
+    return {'SSHPASS': target.password} if target is not None and target.password else {}
 
 
 def run_pb(binary, arguments, timeout):

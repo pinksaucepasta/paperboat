@@ -26,7 +26,7 @@ import winhost
 
 
 class Terminal:
-    def __init__(self, arguments, cwd=None):
+    def __init__(self, arguments, cwd=None, env=None):
         self.arguments = list(map(str, arguments))
         self.output = bytearray()
         self.pending = bytearray()
@@ -36,7 +36,7 @@ class Terminal:
         if self.pid == 0:
             if cwd is not None:
                 os.chdir(cwd)
-            environment = dict(os.environ, TERM='xterm-256color', LC_ALL='C')
+            environment = dict(os.environ, TERM='xterm-256color', LC_ALL='C', **(env or {}))
             os.execvpe(self.arguments[0], self.arguments, environment)
         self.resize(24, 80)
 

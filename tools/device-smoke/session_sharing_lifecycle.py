@@ -44,7 +44,7 @@ def main():
         if not args.team:
             invoke(pb, *prefix, 'team', 'create', team, '--json')
             created = True
-        terminal = Terminal(winhost.terminal_argv(pb, [*prefix, 'connect', args.target, '--name', name, '--status-bar', 'off']))
+        terminal = Terminal(winhost.terminal_argv(pb, [*prefix, 'connect', args.target, '--name', name, '--status-bar', 'off']), env=winhost.terminal_env(pb))
         terminal.expect(b'\x1b[?2004h')
         terminal.expect(terminal.marker('READY', 'stty -echo; '))
         _, session = selected(pb, args.target, name)
