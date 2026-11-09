@@ -528,7 +528,7 @@ func initializeProductionManagedSSHUnix(ctx context.Context, host *managedssh.Ho
 	}
 	reconciler := &managedSSHKeyReconciler{
 		client: client, identity: identitySource, registration: registration,
-		workerGeneration: observationGeneration, publicKeys: publicKeys, readPublicKeys: readSSHHostPublicKeysUnix,
+		workerGeneration: observationGeneration, publicKeys: publicKeys, readPublicKeys: readSSHHostPublicKeysUnix, watchHostKeys: watchSSHHostKeys,
 		home: account.HomeDir, ownerUID: uint32(uid), interval: 30 * time.Second, timeout: 10 * time.Second, events: keyEvents,
 	}
 	return reconciler, nil

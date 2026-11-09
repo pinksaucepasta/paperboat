@@ -29,7 +29,13 @@ type managedSSHKeyReconciler struct {
 	// readPublicKeys re-reads the host's SSH public keys. While the server refuses them as another
 	// machine's, a changed set (the owner regenerated them) is published at the next tick.
 	readPublicKeys func() ([]string, error)
-	refusedAt      time.Time
+	// watchHostKeys signals changes to the host key files (nil: poll them every interval). While the watch
+	// is open the files are re-read on a signal, and otherwise only at the fallback; a watch that cannot be
+	// opened, or ends, leaves the poll in charge and is opened again at the next interval.
+	watchHostKeys func(context.Context) (<-chan struct{}, error)
+	keyWatch      <-chan struct{}
+	keyWatchLost  bool
+	refusedAt     time.Time
 	// keyChanges counts host-key sets re-read after start. The server keeps one set per observation
 	// generation, so each changed set is observed under its own generation (observationGeneration).
 	keyChanges   uint64
@@ -78,6 +84,7 @@ func (s *managedSSHKeyReconciler) Start(ctx context.Context) error {
 	workerCtx, cancel := context.WithCancel(context.Background())
 	s.cancel = cancel
 	s.done = make(chan struct{})
+	s.openKeyWatch(workerCtx)
 	go s.run(workerCtx, s.done)
 	return nil
 }
@@ -92,7 +99,7 @@ func (s *managedSSHKeyReconciler) run(ctx context.Context, done chan<- struct{})
 	last := time.Now()
 	for {
 		timer := time.NewTimer(s.interval)
-		published := false
+		published, keysSignalled := false, false
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -100,10 +107,18 @@ func (s *managedSSHKeyReconciler) run(ctx context.Context, done chan<- struct{})
 		case <-s.events.Changed():
 			timer.Stop()
 			published = true
+		case _, open := <-s.keyWatch:
+			timer.Stop()
+			keysSignalled = true
+			if !open {
+				s.keyWatch = nil
+			}
 		case <-timer.C:
+			// Keys changed while no watch was open are caught by the read this opens it with.
+			keysSignalled = s.keyWatch == nil && s.openKeyWatch(ctx)
 		}
 		now := time.Now()
-		if !s.reconcileDue(now, last, failed, published) {
+		if !s.reconcileDue(now, last, failed, published, keysSignalled) {
 			continue
 		}
 		reconcileCtx, cancel := context.WithTimeout(ctx, s.timeout)
@@ -233,11 +248,12 @@ func (s *managedSSHKeyReconciler) observationGeneration() uint64 {
 	return s.workerGeneration<<20 | s.keyChanges
 }
 
-// reconcileDue reports whether this wake-up asks the server. Changed host keys on disk always do.
+// reconcileDue reports whether this wake-up asks the server. Changed host keys on disk always do; they are read
+// when the watch signalled, at the fallback, and every wake-up while no watch is open.
 // Refused host keys do not change by asking again, so while they are refused only managedSSHHostKeyInUseRetry
 // passing does.
-func (s *managedSSHKeyReconciler) reconcileDue(now, last time.Time, failed, published bool) bool {
-	if s.readPublicKeys != nil {
+func (s *managedSSHKeyReconciler) reconcileDue(now, last time.Time, failed, published, keysSignalled bool) bool {
+	if s.readPublicKeys != nil && (keysSignalled || s.keyWatch == nil || now.Sub(last) >= managedSSHKeyFallback) {
 		if keys, err := s.readPublicKeys(); err == nil && len(keys) > 0 && !slices.Equal(keys, s.publicKeys) {
 			s.publicKeys = keys
 			s.keyChanges++
@@ -248,4 +264,22 @@ func (s *managedSSHKeyReconciler) reconcileDue(now, last time.Time, failed, publ
 		return now.Sub(s.refusedAt) >= managedSSHHostKeyInUseRetry
 	}
 	return published || failed || !s.events.Healthy() || now.Sub(last) >= managedSSHKeyFallback
+}
+
+// openKeyWatch opens the host key watch when one is configured and none is open; it reports whether it opened one.
+// A failure is logged once, not at every interval it is retried.
+func (s *managedSSHKeyReconciler) openKeyWatch(ctx context.Context) bool {
+	if s.watchHostKeys == nil || s.keyWatch != nil {
+		return false
+	}
+	changes, err := s.watchHostKeys(ctx)
+	if err != nil {
+		if !s.keyWatchLost {
+			slog.Warn("SSH host key watch unavailable; polling the key files instead", "error", err)
+			s.keyWatchLost = true
+		}
+		return false
+	}
+	s.keyWatch, s.keyWatchLost = changes, false
+	return true
 }
