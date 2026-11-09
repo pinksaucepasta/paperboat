@@ -80,9 +80,10 @@ export function useMachineDomains(): MachineDomains {
   return useMemo(() => build(added, managed), [added, managed])
 }
 
-/** Every address a machine name has, the primary domain first. */
+/** Every address a machine name has, the primary domain first; none until a domain is known. */
 export function useMachineHostnames(alias: string): string[] {
   const { domains, primary } = useMachineDomains()
+  if (!primary) return []
   return [primary, ...domains.map((domain) => domain.name).filter((name) => name !== primary)].map(
     (domain) => `${alias}.${domain}`,
   )

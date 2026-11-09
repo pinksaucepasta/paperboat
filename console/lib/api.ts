@@ -258,7 +258,7 @@ export const meQuery = queryOptions({
 export type ClientConfiguration = Data<"/v1/client-configuration">
 
 export const clientConfigQuery = queryOptions({
-  queryKey: ["client-configuration"],
+  queryKey: queryKeys.clientConfig,
   queryFn: ({ signal }) => api<ClientConfiguration>("client-configuration", { signal }),
   staleTime: Infinity,
 })

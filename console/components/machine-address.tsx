@@ -5,6 +5,7 @@ import type { Machine } from "@/lib/api"
 import { useMachineHostnames } from "@/lib/machine-domains"
 import { CopyRow, CopyText } from "@/components/copy-button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Skeleton } from "@/components/ui/skeleton"
 
 /** Every address a machine has, each copied by clicking its row; `ip` adds the IP. */
 function AddressList({ machine, hostnames, ip }: { machine: Machine; hostnames: string[]; ip?: boolean }) {
@@ -23,7 +24,8 @@ export function MachineAddressStack({ machine }: { machine: Machine }) {
   const [hostname] = useMachineHostnames(machine.alias)
   return (
     <div className="flex min-w-0 flex-col items-start font-mono text-code">
-      {hostname && <CopyText value={hostname} />}
+      {/* Until the domain is known the address line holds its place, never "name." alone. */}
+      {hostname ? <CopyText value={hostname} /> : <Skeleton className="my-[4px] h-3 w-40" />}
       {machine.assigned_ip && <CopyText value={machine.assigned_ip} className="text-xs text-muted-foreground" />}
     </div>
   )

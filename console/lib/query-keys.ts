@@ -4,6 +4,7 @@
  */
 export const queryKeys = {
   me: ["me"],
+  clientConfig: ["client-configuration"],
   workspaces: ["workspaces"],
   machines: (workspace: string) => ["machines", workspace],
   /** One page of the Machines table: search text, filters, page number. */

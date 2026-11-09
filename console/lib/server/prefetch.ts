@@ -45,6 +45,7 @@ type Session = {
   workspaces?: { items: { id: string; kind: string }[] }
   billing?: unknown
   products?: { items: unknown[] }
+  clientConfig?: unknown
 }
 
 /**
@@ -58,18 +59,23 @@ const session = cache(async () => {
     workspace === "personal"
       ? "billing/workspaces/personal"
       : `billing/workspaces/teams/${encodeURIComponent(workspace)}`
-  const [me, workspaces, billing, products] = await Promise.all([
+  // The client configuration names the machines' domain, which every address shows.
+  const [me, workspaces, billing, products, clientConfig] = await Promise.all([
     get("me"),
     get<NonNullable<Session["workspaces"]>>("workspaces"),
     get(billingPath),
     get<{ items: unknown[] }>(`${billingPath}/products`),
+    get("client-configuration"),
   ])
   const confirmed = workspaces?.items.some((item) => item.id === workspace)
-  return confirmed ? { workspace, me, workspaces, billing, products } : { workspace, me, workspaces }
+  return confirmed
+    ? { workspace, me, workspaces, billing, products, clientConfig }
+    : { workspace, me, workspaces, clientConfig }
 })
 
-function seed(queryClient: QueryClient, workspace: string, { me, workspaces, billing, products }: Session) {
+function seed(queryClient: QueryClient, workspace: string, { me, workspaces, billing, products, clientConfig }: Session) {
   if (me) queryClient.setQueryData(queryKeys.me, me)
+  if (clientConfig) queryClient.setQueryData(queryKeys.clientConfig, clientConfig)
   if (workspaces) queryClient.setQueryData(queryKeys.workspaces, workspaces.items)
   if (billing) queryClient.setQueryData(queryKeys.billing(workspace), billing)
   if (products) queryClient.setQueryData(queryKeys.billingProducts(workspace), products.items)
