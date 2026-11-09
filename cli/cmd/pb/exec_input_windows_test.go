@@ -135,7 +135,9 @@ func TestExecInputPrivateConsoleBorrowedReadiness(t *testing.T) {
 	}
 	overbound := make([]execConsoleEvent, protocol.MaxBinaryFrame/int(unsafe.Sizeof(execConsoleEvent{}))+1)
 	for i := range overbound {
-		overbound[i] = keyEvent(0x10, 0)
+		// Character keys, two alternating: in VT input mode the console host keeps no record for a bare
+		// modifier, and it merges a run of identical keys into one record.
+		overbound[i] = keyEvent(uint16('X'+i%2), uint16('x'+i%2))
 	}
 	inject(overbound)
 	var queued uint32
@@ -146,7 +148,7 @@ func TestExecInputPrivateConsoleBorrowedReadiness(t *testing.T) {
 	_, err = readExecInput(ctx, file, value[:])
 	cancel()
 	if !errors.Is(err, errExecInputLimit) {
-		t.Fatal("overbound console input did not fail before mutation")
+		t.Fatalf("overbound console input did not fail before mutation: err=%v injected=%d queued before=%d after=%d", err, len(overbound), queuedBefore, queued)
 	}
 	var remaining uint32
 	if err := windows.GetNumberOfConsoleInputEvents(handle, &remaining); err != nil || remaining != queued || remaining <= queuedBefore {
