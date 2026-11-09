@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -418,7 +419,11 @@ func TestCleanupExpiredRetainsRecordUntilPayloadRemovalSucceeds(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(blockedPath, privateName), []byte("secret"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.CleanupExpired(context.Background()); !errors.Is(err, syscall.ENOTEMPTY) {
+	notEmpty := error(syscall.ENOTEMPTY)
+	if runtime.GOOS == "windows" {
+		notEmpty = syscall.Errno(145) // ERROR_DIR_NOT_EMPTY: syscall.ENOTEMPTY is only a placeholder there
+	}
+	if err := service.CleanupExpired(context.Background()); !errors.Is(err, notEmpty) {
 		t.Fatalf("cleanup did not retain unlink cause: %v", err)
 	} else if strings.Contains(err.Error(), root) || strings.Contains(err.Error(), privateName) {
 		t.Fatalf("cleanup error exposed private path: %q", err.Error())
