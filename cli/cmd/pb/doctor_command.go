@@ -27,7 +27,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	service "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/internal/inbox"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/localwait"
@@ -137,6 +136,20 @@ const (
 	doctorPathReachabilityTimeout = 8 * time.Second
 )
 
+// doctorPrivilegedRepair is what --repair does before the checks: nothing on Linux and macOS, the elevated
+// repair of a paired installation on Windows.
+var doctorPrivilegedRepair = platformDoctorRepair
+
+// repairEnrolled runs the privileged repair only for a paired installation. A computer that is not installed or
+// not paired has no services to repair: it asks for no administrator approval and the checks say what to do.
+func repairEnrolled(ctx context.Context, enrolled func() (bool, error), repair func(context.Context) error) error {
+	present, err := enrolled()
+	if err != nil || !present {
+		return err
+	}
+	return repair(ctx)
+}
+
 func doctorCommandV1() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "doctor [machine]",
@@ -151,19 +164,12 @@ func doctorCommandV1() *cobra.Command {
 				if len(args) != 0 {
 					return localArgumentError("doctor --repair does not accept a machine")
 				}
-				if runtime.GOOS == "windows" {
-					doctorArgs := []string{"doctor", "--repair"}
-					if jsonOutput, _ := command.Flags().GetBool("json"); jsonOutput {
-						doctorArgs = append(doctorArgs, "--json")
-					}
-					if code := hostruntimecmd.Execute(command.Context(), doctorArgs, command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr()); code != 0 {
-						return exitCodeError{code: code}
-					}
-					return nil
+				// Linux and macOS own no privileged dependency: reading the snapshot below already reinstalls and
+				// restarts the local daemon service. Windows first repairs a paired installation's services; then
+				// every platform runs the same checks and prints the same report.
+				if err := doctorPrivilegedRepair(command.Context()); err != nil {
+					return commandPreparationFailure{step: prepareDoctorRepair, cause: err}
 				}
-				// Linux and macOS own no privileged dependency: reading the
-				// snapshot below already reinstalls and restarts the local
-				// daemon service, so repair runs the same checks.
 			}
 			_, snapshot, err := localDaemonSnapshot(command, installLocalDaemonService)
 			var machine *localapi.MachineStatus

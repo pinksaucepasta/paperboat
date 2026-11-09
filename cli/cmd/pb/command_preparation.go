@@ -20,6 +20,7 @@ const (
 	prepareSelectedFile
 	prepareOpenSSH
 	prepareMachineNotAdded
+	prepareDoctorRepair
 )
 
 // Only finite local phases become public prose. The original error remains
@@ -46,6 +47,8 @@ func (e commandPreparationFailure) Error() string {
 		return "Paperboat could not verify Inbox preservation. Check the machine registration with `pb doctor`, then retry `pb uninstall`."
 	case prepareOpenSSH:
 		return "A supported OpenSSH client is unavailable. Install OpenSSH or repair its PATH entry, then retry `pb ssh doctor`."
+	case prepareDoctorRepair:
+		return "Paperboat could not repair the installation: administrator approval was not given or the repair did not finish. Run `pb doctor` to see the current state, then retry `pb doctor --repair`."
 	case prepareSelectedFile:
 		return "A selected file or folder is unavailable. Check that it exists and is readable, then select it again."
 	default:
