@@ -489,6 +489,8 @@ func doctorMachineProbes(machine localapi.MachineStatus) []doctorpkg.Probe {
 				return doctorpkg.Check{Category: "transport", Code: "selected_path", Status: doctorpkg.StatusWarning, Summary: "The active Paperboat path uses a regional relay.", Recovery: "Direct connectivity is retried automatically; check UDP availability if relay use persists."}
 			case "wss":
 				return doctorpkg.Check{Category: "transport", Code: "selected_path", Status: doctorpkg.StatusWarning, Summary: "The active Paperboat path uses WebSocket fallback.", Recovery: "Check UDP and QUIC access; Paperboat will retry stronger paths automatically."}
+			case "mixed": // open connections use different paths (statusPath lists them)
+				return doctorpkg.Check{Category: "transport", Code: "selected_path", Status: doctorpkg.StatusWarning, Summary: "The active Paperboat connections use different paths: " + statusPath(machine) + ".", Recovery: "Direct connectivity is retried automatically; check UDP availability if relay use persists."}
 			default:
 				if item, ok := machineNoPath(machine); ok {
 					return doctorpkg.Check{Category: "transport", Code: "selected_path", Status: doctorpkg.StatusFail, Summary: item.Title + ".", Recovery: item.Recovery}

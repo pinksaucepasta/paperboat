@@ -55,3 +55,20 @@ func TestDoctorReportsNoPathToAPeerAsUnhealthy(t *testing.T) {
 		}
 	}
 }
+
+// A machine whose open connections use different paths has selected_path "mixed": doctor names them instead of
+// saying no path is observed.
+func TestDoctorSelectedPathNamesMixedPaths(t *testing.T) {
+	machine := localapi.MachineStatus{ID: "machine_team", Alias: "team", SelectedPath: "mixed", ActiveConsumers: 3, TransportConsumers: []localapi.TransportConsumer{{Path: "direct", ActiveConsumers: 2}, {Path: "relay", ActiveConsumers: 1, RelayRegion: "india"}}}
+	for _, probe := range doctorMachineProbes(machine) {
+		if probe.Code != "selected_path" {
+			continue
+		}
+		got := probe.Run(context.Background())
+		if got.Status != doctor.StatusWarning || !strings.Contains(got.Summary, "direct=2, relay/india=1") {
+			t.Fatalf("selected_path for mixed paths = %+v", got)
+		}
+		return
+	}
+	t.Fatal("no selected_path probe")
+}
