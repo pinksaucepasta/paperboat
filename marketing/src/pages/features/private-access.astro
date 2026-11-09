@@ -1,0 +1,118 @@
+---
+import Feature from "../../layouts/Feature.astro"
+import Sheet from "../../components/Sheet.astro"
+import Lanes from "../../components/Lanes.astro"
+import { localDomain } from "../../site"
+import { directLane, relayLane } from "../../diagrams"
+
+const hero = [
+  { lines: ["$ pb access machine studio --port 5432 --listen 127.0.0.1:5432"], note: "Port 5432 on studio is now port 5432 on this laptop, until you stop the command." },
+  { lines: ["$ psql -h 127.0.0.1 -p 5432 app"], note: "Any TCP client. It thinks the database is local." },
+]
+
+const reach = [
+  [`https://3000.studio.${localDomain}`, "Port 3000 on studio over HTTPS and WebSocket, with a certificate your browser trusts"],
+  [`https://studio.${localDomain}:3000`, "The same service, with the port after the name"],
+  [`https://studio.${localDomain}`, "A page listing the ports studio is serving to you"],
+  ["studio's own 127.100.x.y address, any port", "Raw TCP of any kind: a database, Redis, a game server"],
+]
+
+const names = [
+  { lines: ["$ pb config local-access alias set studio grafana 3000"], note: `Now <code>https://grafana.studio.${localDomain}</code> opens port 3000.` },
+  { lines: ["$ pb resolve studio"], note: "Shows the local address this computer uses for studio, and which ports are open to you." },
+  { lines: ["$ pb ping studio", "sample 1: path=direct connect=18.42ms", "sample 2: path=direct connect=11.07ms", "sample 3: path=direct connect=10.88ms", "sample 4: path=direct connect=11.31ms", "summary: sent=4 received=4 loss=0.0% connect min/avg/max=10.88/12.92/18.42ms"], note: "Direct or relayed, and how long a connection takes." },
+]
+
+const faq = [
+  {
+    q: "Is Paperboat a VPN?",
+    a: 'No. It does not give your devices a network interface, route subnets or act as an exit node. It forwards TCP ports between machines that run pb. If you need a full private network, including phones, <a href="/compare/tailscale/">Tailscale</a> or <a href="/compare/netbird/">NetBird</a> is the better tool.',
+  },
+  {
+    q: "Does it change my DNS, hosts file or VPN settings?",
+    a: `No. The ${localDomain} names resolve to a loopback address on your own computer, where pb listens. Nothing on the network changes, so it does not fight with a VPN you already run.`,
+  },
+  {
+    q: "Which ports can I reach?",
+    a: "On your own machines, the ports your user is listening on from 1024 upward are found automatically. Port 80, and ports of other users or of Docker, need to be allowed explicitly. Ports below 1024 are reached by address, not by name.",
+  },
+  {
+    q: "Can teammates reach ports on my machine?",
+    a: "Only if the team has private access turned on, which is off by default, and a rule grants them that machine and those ports. Removing the rule cuts connections that are open.",
+  },
+  {
+    q: "Does UDP work?",
+    a: "No. Private access carries TCP, which covers HTTP, databases and most developer tools.",
+  },
+  {
+    q: "How do I reach a service behind a reverse proxy such as Coolify?",
+    a: `Set the app's domain to a name like <code>jellyfin.homelab.${localDomain}</code>. pb sends the request to the proxy on port 80 with that host name, and the proxy picks the app. <code>pb config local-access proxy set</code> changes the port.`,
+  },
+]
+---
+
+<Feature
+  slug="private-access"
+  title="Reach a port on another machine without exposing it | Paperboat"
+  description="Open a database, an admin page or a dev server on another machine as if it were local. End-to-end encrypted, peer to peer where possible, with trusted HTTPS names and no changes to DNS or VPN settings."
+  headline="Reach a port on another machine without publishing it"
+  faq={faq}
+  related={["tunnels", "ssh", "teams"]}
+  compare={["tailscale", "netbird", "zerotier"]}
+>
+  <p slot="lede">
+    The staging database, the admin page on the home server, the dev server on your desktop. Private access brings one port to the machine you
+    are on, for you alone.
+  </p>
+  <Sheet slot="aside" steps={hero} />
+
+  <section class="section section-tint" aria-labelledby="reach-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="reach-title">Or just type a name</h2>
+        <p class="lede">
+          For web services there is nothing to run. Every machine has a name that works only on your own machines, with HTTPS your browser
+          accepts.
+        </p>
+      </header>
+      <table class="facts">
+        <thead><tr><th scope="col">You type</th><th scope="col">You reach</th></tr></thead>
+        <tbody>
+          {reach.map(([what, where]) => <tr><th scope="row">{what.startsWith("https") ? <code>{what}</code> : what}</th><td>{where}</td></tr>)}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="paths-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="paths-title">Private the whole way</h2>
+        <p class="lede">
+          The connection is encrypted between the two machines. It goes directly when the networks allow and through a relay when they do not,
+          and the relay cannot read it.
+        </p>
+      </header>
+      <Lanes
+        lanes={[directLane, relayLane]}
+        caption="Direct: laptop to studio, end-to-end encrypted. Relayed: laptop to relay to studio, still end-to-end encrypted."
+      />
+    </div>
+  </section>
+
+  <section class="section section-tint" aria-labelledby="names-title">
+    <div class="wrap cols">
+      <div class="stack">
+        <h2 class="h2" id="names-title">Readable names, and a way to check</h2>
+        <div class="prose">
+          <p>Give a port a name you will remember. The name grants nothing by itself; it only works while you are allowed to reach that port.</p>
+          <p>
+            When something is slow, <code>pb ping</code> tells you whether the two machines found a direct path. <code>pb relay list</code> shows
+            the relays you can use; the console's Network page adds their latency.
+          </p>
+        </div>
+      </div>
+      <Sheet steps={names} />
+    </div>
+  </section>
+</Feature>

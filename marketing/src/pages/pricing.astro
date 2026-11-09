@@ -1,23 +1,319 @@
 ---
 import Page from "../layouts/Page.astro"
-import PageHead from "../components/PageHead.astro"
-import Pricing from "../components/Pricing.astro"
-import FeatureTable from "../components/FeatureTable.astro"
-import BandwidthNotes from "../components/BandwidthNotes.astro"
+import Head from "../components/Head.astro"
+import Lanes from "../components/Lanes.astro"
 import Faq from "../components/Faq.astro"
 import Closing from "../components/Closing.astro"
+import Icon from "../components/Icon.astro"
+import { consoleUrl, plans, teamTrial, topUp } from "../site"
+import { faq, featureGroups, planNames } from "../pricing-data"
+import { directLane, relayLane, publicLane } from "../diagrams"
+import { breadcrumbSchema, faqSchema } from "../schema"
+
+const actions = [
+  { href: "/#install", label: "Install pb", primary: false },
+  { href: consoleUrl, label: "Upgrade in the console", primary: false },
+  { href: consoleUrl, label: "Start a 14-day trial", primary: true },
+]
+const lanes = [
+  { ...directLane, name: "Direct: never counted", text: "Machines that can reach each other talk peer to peer. That is most traffic, and it is free on every plan." },
+  { ...relayLane, name: "Relayed: counted", text: "When a network blocks the direct path, our relay carries the encrypted bytes. Those bytes count." },
+  { ...publicLane, name: "Public links: counted", text: "Requests to a preview or tunnel pass through our edge. Those bytes count too." },
+]
 ---
 
-<Page title="Pricing — Paperboat" description="Paperboat is free to start. Free and Pro have everything for one person and differ only in bandwidth; Team adds people.">
-  <PageHead title="Pricing">
+<Page
+  title="Paperboat pricing: free for one person, $8 Pro, $15 per seat for teams"
+  description="Every Paperboat feature for one person is free, with 100 machines. Pro is $8 a month for more bandwidth. Team is $15 a seat with SSO, roles and audit log export. Direct traffic is never counted."
+  schema={[breadcrumbSchema(Astro.site, [["Pricing", "/pricing/"]]), faqSchema(faq)]}
+>
+  <Head title="Free for one person. Paid for bandwidth or a team.">
     <p>
-      Everything one person needs is on every plan, with 100 machines on Free, 1,000 on Pro and no limit on Team. You pay for more bandwidth, or for a
-      team. <a href="/compare">See how Paperboat compares</a> with Tailscale, ngrok, Cloudflare and others.
+      Free and Pro have the same features. You move up when you need more traffic through our servers, or when other people need lasting access to
+      your machines.
     </p>
-  </PageHead>
-  <Pricing />
-  <FeatureTable />
-  <BandwidthNotes />
-  <Faq />
+  </Head>
+
+  <section class="section plans-section" aria-label="Plans">
+    <div class="wrap">
+      <div class="plans">
+        {
+          plans.map((plan, index) => (
+            <article class="plan">
+              <h2 class="h3">{plan.name}</h2>
+              <p class="price">
+                <span class="amount">{plan.price}</span>
+                <span class="period">{plan.period || "for good"}</span>
+              </p>
+              <p class="for">{plan.detail}</p>
+              <dl class="limits">
+                <div>
+                  <dt>Relay and edge bandwidth</dt>
+                  <dd>{plan.bandwidth} a month</dd>
+                </div>
+                <div>
+                  <dt>Machines</dt>
+                  <dd>{plan.machines}</dd>
+                </div>
+                <div>
+                  <dt>Previews and tunnels at once</dt>
+                  <dd>{plan.publications}</dd>
+                </div>
+                <div>
+                  <dt>Console terminals at once</dt>
+                  <dd>{plan.browserTerminals}</dd>
+                </div>
+              </dl>
+              <a class:list={["button", actions[index].primary ? "button-primary" : "button-quiet"]} href={actions[index].href}>
+                {actions[index].label}
+              </a>
+            </article>
+          ))
+        }
+      </div>
+      <p class="small trial">{teamTrial}</p>
+    </div>
+  </section>
+
+  <section class="section section-tint" aria-labelledby="bandwidth-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="bandwidth-title">What counts as bandwidth</h2>
+        <p class="lede">
+          Only bytes that pass through a server we run. If you <a href="/features/self-hosting/">run your own relay or edge</a>, those bytes are not
+          counted either.
+        </p>
+      </header>
+      <Lanes
+        lanes={lanes}
+        caption="Direct traffic between two machines is never counted. Traffic through a Paperboat relay is counted. Requests to a public preview or tunnel through a Paperboat edge are counted."
+      />
+      <div class="cols cols-3 rules">
+        <div class="stack">
+          <h3 class="h3">When it runs out</h3>
+          <p class="rule-text">
+            Relayed connections, previews and tunnels pause until the next month. Direct connections keep working. <code>pb</code> and the console
+            name the limit and link to where you raise it.
+          </p>
+        </div>
+        <div class="stack">
+          <h3 class="h3">Adding more</h3>
+          <p class="rule-text">
+            On Pro and Team, add {topUp.size} for {topUp.price}, as many as you need. It is used after the plan's own allowance and lasts until that
+            month's allowance resets.
+          </p>
+        </div>
+        <div class="stack">
+          <h3 class="h3">On a team</h3>
+          <p class="rule-text">
+            Each member has their own 100 GB inside the team. Extra bandwidth goes into one pool the whole team draws from. A personal plan and a
+            team share nothing.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="table-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="table-title">Everything, plan by plan</h2>
+        <p class="lede">
+          Not sure which tool you need at all? <a href="/compare/">Compare Paperboat</a> with Tailscale, ngrok, Cloudflare Tunnel and others.
+        </p>
+      </header>
+      <div class="scroll" tabindex="0" role="region" aria-labelledby="table-title">
+        <table class="facts table">
+          <thead>
+            <tr>
+              <th scope="col"><span class="visually-hidden">Feature</span></th>
+              {planNames.map((name) => <th scope="col">{name}</th>)}
+            </tr>
+          </thead>
+          {
+            featureGroups.map((group) => (
+              <tbody>
+                <tr class="group">
+                  <th scope="colgroup" colspan="4">
+                    {group.title}
+                  </th>
+                </tr>
+                {group.rows.map((row) => (
+                  <tr>
+                    <th scope="row">{row.feature}</th>
+                    {row.cells.map((cell) => (
+                      <td>
+                        {cell === true ? (
+                          <>
+                            <Icon name="check" size={18} class="yes" />
+                            <span class="visually-hidden">Included</span>
+                          </>
+                        ) : cell === false ? (
+                          <>
+                            <span class="no" aria-hidden="true">–</span>
+                            <span class="visually-hidden">Not included</span>
+                          </>
+                        ) : (
+                          cell
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            ))
+          }
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <Faq items={faq} title="Pricing questions" />
   <Closing />
 </Page>
+
+<style>
+  .plans-section {
+    padding-top: 0;
+  }
+
+  .plans {
+    display: grid;
+    border-top: 1px solid var(--ink);
+  }
+
+  .plan {
+    display: grid;
+    gap: var(--s4);
+    align-content: start;
+    padding-block: var(--s6);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .price {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--s2);
+  }
+
+  .amount {
+    font-family: var(--font-brand);
+    font-size: var(--text-h2);
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    color: var(--ink);
+  }
+
+  .period,
+  .for {
+    font-size: var(--text-ui);
+    line-height: 1.5;
+    color: var(--fog);
+  }
+
+  .for {
+    min-height: 3em;
+  }
+
+  .limits {
+    display: grid;
+    margin-block: var(--s2);
+    font-size: var(--text-ui);
+  }
+
+  .limits div {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--s4);
+    padding-block: var(--s2);
+    border-top: 1px solid var(--rule);
+  }
+
+  .limits dt {
+    color: var(--fog);
+  }
+
+  .limits dd {
+    color: var(--ink);
+    font-weight: 500;
+    text-align: right;
+  }
+
+  .plan .button {
+    justify-self: start;
+  }
+
+  .trial {
+    margin-top: var(--s5);
+    max-width: 70ch;
+  }
+
+  @media (min-width: 900px) {
+    .plans {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .plan {
+      padding-inline: var(--s6);
+      border-bottom: 0;
+      border-left: 1px solid var(--rule);
+    }
+
+    .plan:first-child {
+      padding-left: 0;
+      border-left: 0;
+    }
+
+    .plan:last-child {
+      padding-right: 0;
+    }
+  }
+
+  .rules {
+    margin-top: var(--s7);
+  }
+
+  .rule-text {
+    font-size: var(--text-ui);
+    line-height: 1.55;
+    color: var(--fog);
+    text-wrap: pretty;
+  }
+
+  .table {
+    min-width: 640px;
+  }
+
+  .table thead th {
+    font-size: var(--text-ui);
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  .table tbody th {
+    width: 46%;
+    font-weight: 400;
+    color: var(--text);
+  }
+
+  .table .group th {
+    padding-top: var(--s6);
+    font-weight: 500;
+    color: var(--ink);
+    border-bottom-color: var(--ink);
+  }
+
+  .table td {
+    color: var(--ink);
+  }
+
+  .table :global(.yes) {
+    color: var(--good);
+  }
+
+  .no {
+    color: var(--fog);
+  }
+</style>

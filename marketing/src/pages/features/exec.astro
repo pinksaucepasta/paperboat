@@ -1,0 +1,129 @@
+---
+import Feature from "../../layouts/Feature.astro"
+import Sheet from "../../components/Sheet.astro"
+import Code from "../../components/Code.astro"
+
+const hero = [
+  { lines: ["$ pb exec studio -- systemctl is-active api", "active", "$ echo $?", "0"], note: "The remote program's output, and its exit code as your exit code." },
+  { lines: ["$ pb exec studio --cwd /srv/api -- git pull --ff-only", "Already up to date."], note: "<code>--cwd</code> sets where it runs." },
+  { lines: ["$ pb studio -- uptime"], note: "The short form, for typing by hand." },
+]
+
+const script = `#!/bin/sh
+set -e
+
+# Wait until the build machine answers, at most five minutes.
+pb wait build-01 --for transport
+
+# Run the tests there. A failing test fails this script.
+pb exec build-01 --cwd /src/app --timeout 20m -- make test
+
+# Ship the result and restart the service on the server.
+pb send ./dist/app.tar.gz --to web-01
+pb exec web-01 -- sudo systemctl restart app`
+
+const flags = [
+  ["-- <argv...>", "Everything after -- is run exactly as given. No shell on the way, so nothing is expanded or split twice."],
+  ["--cwd /path", "Absolute working directory on the remote machine."],
+  ["--env NAME=value", "One extra variable for this run. Repeatable. Your ENV values are already there."],
+  ["--timeout 20m", "Ends the remote command when the time is up."],
+  ["--pty", "Gives the command a terminal, for programs that insist on one."],
+  ["--json", "Output, errors and the exit status as JSON Lines events (paperboat.exec-event/v1)."],
+]
+
+const faq = [
+  {
+    q: "How is this different from ssh host command?",
+    a: "No keys, no open port, and no shell quoting: the arguments after -- arrive as the exact argument list. You also get a real timeout, JSON output, and a clear answer when the outcome is unknown.",
+  },
+  {
+    q: "How do I use a pipe or a redirect on the remote side?",
+    a: "Run a shell yourself: <code>pb exec studio -- sh -c 'journalctl -u api | tail -n 50'</code>. Pipes on your side of the command work as usual, and stdin is passed through.",
+  },
+  {
+    q: "What if the machine reboots or the network dies mid-command?",
+    a: "pb says the outcome is unknown instead of guessing. It never reports success for a command it could not confirm, so your script can decide whether running it again is safe.",
+  },
+  {
+    q: "Can a command run for a long time?",
+    a: "Yes. Commands that run for more than half an hour return their final output and exit code. For work you want to watch or come back to, use a <a href=\"/features/terminal/\">terminal session</a>.",
+  },
+  {
+    q: "Who is allowed to run commands on a machine?",
+    a: 'You, on your own machines. For anyone else, exec is one capability you grant per machine, separate from terminal or SSH. See <a href="/features/teams/">teams and access</a>.',
+  },
+]
+---
+
+<Feature
+  slug="exec"
+  title="Run a command on a remote machine and get its exit code | Paperboat"
+  description="pb exec runs one exact command on another machine and returns its output and exit code. No SSH keys, no open ports, no shell quoting. Timeouts, JSON output and clear failures for scripts and agents."
+  headline="Run one command on another machine"
+  faq={faq}
+  related={["terminal", "env", "ssh"]}
+  compare={["ssh-bastion", "teleport"]}
+>
+  <p slot="lede">
+    <code>pb exec</code> runs an exact command on a machine you name and hands back what it printed and how it exited. It is the piece you put in
+    scripts, CI jobs and agent tools.
+  </p>
+  <Sheet slot="aside" steps={hero} />
+
+  <section class="section section-tint" aria-labelledby="script-title">
+    <div class="wrap cols">
+      <div class="stack">
+        <h2 class="h2" id="script-title">It behaves in a script</h2>
+        <div class="prose">
+          <p>
+            A non-zero exit on the remote side is a non-zero exit here, so <code>set -e</code> works. Standard input, output and errors pass
+            through separately.
+          </p>
+          <p>
+            <code>pb wait</code> blocks until a machine is ready (<code>runtime</code>, <code>transport</code> or <code>ssh</code>).
+            <code>pb ping</code> measures the connection and tells you whether it is direct or relayed.
+          </p>
+          <p>Fifty commands in a row, or ten at once, is a normal load and is part of what we test.</p>
+        </div>
+      </div>
+      <Code name="deploy.sh" text={script} />
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="flags-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="flags-title">The whole interface</h2>
+        <p class="lede"><code>pb exec &lt;machine&gt; [flags] -- &lt;argv...&gt;</code></p>
+      </header>
+      <table class="facts">
+        <tbody>
+          {flags.map(([flag, text]) => <tr><th scope="row"><code>{flag}</code></th><td>{text}</td></tr>)}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section section-tint" aria-labelledby="fail-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="fail-title">When it cannot run, it says why</h2>
+        <p class="lede">Scripts break on vague errors. These are the cases pb tells apart.</p>
+      </header>
+      <div class="points points-3">
+        <div>
+          <h3 class="h3">The machine is offline</h3>
+          <p>A plain message naming the machine. Nothing was started.</p>
+        </div>
+        <div>
+          <h3 class="h3">A secret could not be delivered</h3>
+          <p>If the machine should receive ENV values and cannot, the command does not start half-configured. You get the specific ENV error.</p>
+        </div>
+        <div>
+          <h3 class="h3">The outcome is unknown</h3>
+          <p>If the connection is lost after the command started, pb reports that it may have run. With <code>--json</code>, that is a field you can branch on.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</Feature>

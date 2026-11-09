@@ -1,0 +1,176 @@
+---
+/**
+ * A terminal transcript on a sheet of paper, with notes in the margin. The commands are real pb
+ * commands and the output is what pb prints (formats from cli/cmd/pb). On a phone the notes sit
+ * under their lines.
+ */
+export type Step = {
+  /**
+   * The lines, as on screen. "$ pb send a --to b" is a command you type; "ana@studio:~$ make" is a
+   * command typed in a shell on another machine; "# ..." is our remark; anything else is output.
+   */
+  lines: string[]
+  /** Said in the margin, beside these lines. */
+  note?: string
+}
+interface Props {
+  steps: Step[]
+  /** Where this is typed, shown above the first line ("On your laptop"). */
+  where?: string
+  /** Output is a table: keep its columns and scroll sideways instead of wrapping. */
+  table?: boolean
+  class?: string
+}
+const { steps, where, table = false, class: className } = Astro.props
+const hasNotes = steps.some((step) => step.note)
+const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+const prompt = /^(\$|[\w.-]+@[\w.-]+:\S*[$#]) (.*)$/
+const line = (text: string) => {
+  const command = text.match(prompt)
+  if (command) return `<span class="p">${escape(command[1])}</span> <span class="r">${escape(command[2])}</span>`
+  if (text.startsWith("#")) return `<span class="c">${escape(text)}</span>`
+  return escape(text).replace(/https:\/\/[^\s)]+/g, (url) => `<span class="u">${url}</span>`)
+}
+/** One string per step, so no stray whitespace gets inside the <pre>. */
+const html = (step: Step) => step.lines.map(line).join("\n")
+---
+
+<figure class:list={["sheet", { "sheet-notes": hasNotes, "sheet-table": table }, className]}>
+  {where && <figcaption class="where">{where}</figcaption>}
+  <div class="rows">
+    {
+      steps.map((step) => (
+        <div class="row">
+          <pre class="lines" tabindex={table ? 0 : undefined}><code set:html={html(step)} /></pre>
+          {step.note && <p class="note" set:html={step.note} />}
+        </div>
+      ))
+    }
+  </div>
+</figure>
+
+<style>
+  .sheet {
+    --notes: 0px;
+    --pad: clamp(16px, 2.4vw, 28px);
+    position: relative;
+    min-width: 0;
+  }
+
+  /* The paper: one sheet behind every row's lines. */
+  .sheet::before {
+    content: "";
+    position: absolute;
+    inset: 0 var(--notes) 0 0;
+    border-radius: var(--radius);
+    background: var(--paper);
+    box-shadow: var(--shadow-sheet);
+  }
+
+  .where,
+  .rows {
+    position: relative;
+  }
+
+  .where {
+    padding: var(--s3) var(--pad) 0;
+    margin-right: var(--notes);
+    font-size: var(--text-small);
+    color: var(--fog);
+  }
+
+  .rows {
+    display: grid;
+    padding-block: calc(var(--pad) - 6px);
+  }
+
+  .where + .rows {
+    padding-top: var(--s2);
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s2);
+    padding: 6px var(--pad);
+  }
+
+  .lines {
+    min-width: 0;
+    line-height: var(--leading-code);
+    color: var(--text);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .sheet-table .lines {
+    white-space: pre;
+    overflow-x: auto;
+  }
+
+  .lines :global(.p) {
+    color: var(--cobalt);
+    user-select: none;
+  }
+
+  .lines :global(.r) {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  .lines :global(.u) {
+    color: var(--cobalt);
+  }
+
+  .lines :global(.c) {
+    color: var(--fog);
+  }
+
+  .note {
+    padding-left: var(--s3);
+    border-left: 2px solid var(--hull);
+    font-size: var(--text-ui);
+    line-height: 1.5;
+    color: var(--fog);
+    text-wrap: pretty;
+  }
+
+  .note :global(strong) {
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  /* Wide: the notes leave the sheet and stand in the margin, level with their lines. */
+  @media (min-width: 760px) {
+    .sheet-notes {
+      --notes: min(38%, 300px);
+    }
+
+    .sheet-notes .row {
+      grid-template-columns: minmax(0, 1fr) var(--notes);
+      gap: 0;
+      padding-right: 0;
+    }
+
+    .sheet-notes .lines {
+      padding-right: var(--pad);
+    }
+
+    .sheet-notes .note {
+      position: relative;
+      margin-top: 3px;
+      padding-left: var(--s5);
+      border-left: 0;
+    }
+
+    /* A short rule ties the note to its line. */
+    .sheet-notes .note::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0.72em;
+      width: var(--s3);
+      border-top: 1px solid var(--cobalt);
+    }
+  }
+</style>

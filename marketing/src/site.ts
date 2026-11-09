@@ -23,7 +23,11 @@ export const localDomain = config.local_access_base_domain
 export const previewDomain = config.preview_base_domain
 export const tunnelDomain = config.tunnel_base_domain
 
+/** The public source repository (LICENSING.md: PolyForm Noncommercial). */
+export const sourceUrl = "https://github.com/pinksaucepasta/paperboat"
+
 /** Launch platforms (PLAN 1.1): macOS on Apple Silicon and Linux; Windows follows after launch. */
+export const platforms = "macOS (Apple Silicon) and Linux"
 export const installCommand = `curl -fsSL ${installUrl} | bash`
 
 /** Plans and prices (PLAN 1.3): the one place the site states them. */
@@ -59,6 +63,15 @@ export const plans = [
     detail: "Members, and lasting access to each other's machines. Try it free for 14 days.",
   },
 ] as const
+
+/** Extra bandwidth (PLAN 1.3): bought in 100 GB units for a paid workspace, used after the plan's own allowance. */
+export const topUp = { size: "100 GB", price: "$5" }
+
+/** Audit log retention per plan (server config business.audit_retention_*; server/docs/teams-business.md). */
+export const auditRetention = ["30 days", "90 days", "365 days"] as const
+
+/** Public raw-TCP tunnel addresses per plan (server config billing.limits.public_tcp). */
+export const publicTcp = ["1", "10", "10 per seat"] as const
 
 /** The Team plan's trial, said once wherever it is mentioned. */
 export const teamTrial =

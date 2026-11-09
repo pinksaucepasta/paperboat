@@ -1,0 +1,167 @@
+---
+import Feature from "../../layouts/Feature.astro"
+import Sheet from "../../components/Sheet.astro"
+
+const hero = [
+  {
+    lines: ["$ pb connect studio", "ana@studio:~$ ./train.sh --epochs 40"],
+    note: "A shell on studio. The session belongs to studio, not to this connection.",
+  },
+  { lines: ["# lid closed, Wi-Fi gone, laptop in a bag"], note: "The script keeps running. Nothing is buffered on your laptop." },
+  {
+    lines: ["$ pb connect studio", "# epoch 31/40 ... the output you missed, then live"],
+    note: "From this laptop, another machine or a browser tab.",
+  },
+]
+
+const sessions = [
+  {
+    lines: [
+      "$ pb session list studio",
+      "NAME     TITLE / PROCESS  DIRECTORY     STATE    ATTACHED  LAST ACTIVE  CREATED",
+      "default  train.sh         ~/experiments running  1         now          3h ago",
+      "logs     tail             /var/log      running  0         12m ago      1d ago",
+    ],
+  },
+  { lines: ["$ pb connect studio new --name deploy", "$ pb connect studio --session logs", "$ pb session rename studio logs nginx-logs", "$ pb session close studio logs"] },
+]
+
+const survives = [
+  ["You close the laptop or it sleeps", "The shell keeps running. On wake, pb reconnects to it by itself."],
+  ["Wi-Fi drops or you change networks", "Reconnects to the same shell. Keys typed in the gap are sent once, not lost and not repeated."],
+  ["The session sits idle for 8 hours", "Still there and usable."],
+  ["Paperboat updates on the machine", "Ordinary updates keep shells and their programs alive; the connection blinks and comes back."],
+  ["Our servers restart", "Open terminals keep working or recover on their own, and say why while they do."],
+  ["The machine reboots", "The shell ends, like any process. Paperboat does not snapshot your programs."],
+]
+
+const faq = [
+  {
+    q: "How is this different from tmux over SSH?",
+    a: "tmux keeps the shell alive, but you still need a way in: an open port, keys, and a reconnect by hand after every drop. Paperboat keeps the shell alive, reconnects on its own, and needs no open port. You can still run tmux inside it.",
+  },
+  {
+    q: "How is this different from mosh?",
+    a: "mosh survives roaming but needs UDP ports open on the server and does not keep scrollback. Paperboat needs nothing opened, replays recent output when you return, and the session can be opened from a second device or shared.",
+  },
+  {
+    q: "How much output is replayed when I come back?",
+    a: "The recent tail, about a screenful or two (up to 64 KiB), then live output. It is not a full scrollback archive; for long logs, write to a file or use tmux inside the session.",
+  },
+  {
+    q: "Which shell does it run?",
+    a: "Your own login shell on that machine: bash, zsh or fish, with your normal dotfiles. Full-screen programs such as vim, htop and less work, with colours and resize.",
+  },
+  {
+    q: "Is there a limit on sessions?",
+    a: "Terminals from the pb command are unlimited on every plan. One machine holds up to 256 open sessions. Terminals opened in the web console are limited per plan: 10 at once on Free, 100 on Pro.",
+  },
+  {
+    q: "Can Paperboat read my terminal?",
+    a: 'No. Terminal traffic is encrypted between the two machines, and from the browser when you use the console. Our servers pass ciphertext. See <a href="/security/">security</a>.',
+  },
+]
+---
+
+<Feature
+  slug="terminal"
+  title="Persistent remote terminal that survives disconnects | Paperboat"
+  description="A remote terminal that keeps running when your laptop sleeps or the network drops, replays the output you missed, opens from any machine or a browser, and can be shared. No open ports."
+  headline="A terminal that is still there when you come back"
+  faq={faq}
+  related={["ssh", "exec", "console"]}
+  compare={["ssh-bastion", "tailscale", "vscode-tunnels"]}
+>
+  <p slot="lede">
+    <code>pb connect</code> opens a shell that lives on the machine. Your laptop only attaches to it, so a closed lid or a dead connection ends
+    nothing.
+  </p>
+  <Sheet slot="aside" steps={hero} />
+
+  <section class="section section-tint" aria-labelledby="survives-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="survives-title">What it survives</h2>
+        <p class="lede">Each row is checked on real Linux and macOS machines before a release, including the one where the answer is no.</p>
+      </header>
+      <table class="facts">
+        <thead>
+          <tr><th scope="col">What happens</th><th scope="col">What you see</th></tr>
+        </thead>
+        <tbody>
+          {survives.map(([event, result]) => <tr><th scope="row">{event}</th><td>{result}</td></tr>)}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="sessions-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="sessions-title">More than one, and you can name them</h2>
+        <p class="lede">
+          A machine holds many sessions. <code>pb connect studio</code> returns to the default one; <code>new</code> starts another.
+          <code>pb new</code> does the same on the machine you are sitting at.
+        </p>
+      </header>
+      <Sheet steps={sessions} table />
+    </div>
+  </section>
+
+  <section class="section section-tint" aria-labelledby="share-title">
+    <div class="wrap cols">
+      <div class="stack">
+        <h2 class="h2" id="share-title">Let someone watch, or type</h2>
+        <div class="prose">
+          <p>
+            Share one session with a teammate or a whole team as a viewer or as interactive. They join the live shell and first see its recent
+            output. From the console you can also hand out a join code to someone without an account.
+          </p>
+          <p>
+            Up to 50 people can watch one session. Only the owner and interactive participants can type or resize; removing someone ends their
+            access at once.
+          </p>
+          <p>
+            <strong>Careful:</strong> a new participant sees up to 64 KiB of recent output. If a secret was printed there, they see it too.
+          </p>
+        </div>
+      </div>
+      <Sheet
+        steps={[
+          { lines: ["$ pb session share <session-id> --member <account> --role interactive"], note: "One named teammate may type." },
+          { lines: ["$ pb session share <session-id> --team <team> --all"], note: "Everyone on the team may watch." },
+          { lines: ["$ pb session join <session-id>"], note: "What your teammate runs." },
+          { lines: ["$ pb session participants <session-id>", "$ pb session unshare <session-id>"], note: "See who is in, and end it." },
+        ]}
+      />
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="browser-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="browser-title">The same session in a browser</h2>
+        <p class="lede">
+          Open a machine in the <a href="/features/console/">web console</a> and you are in the same shell, encrypted from the browser to the
+          machine. Useful on a computer where you cannot install anything.
+        </p>
+      </header>
+      <div class="points points-3">
+        <div>
+          <h3 class="h3">Two windows, one shell</h3>
+          <p>A terminal app and a browser tab can be attached together. Output shows in both and either can type.</p>
+        </div>
+        <div>
+          <h3 class="h3">A hidden tab costs nothing</h3>
+          <p>Switch away for an hour and come back: what was printed meanwhile is drawn at once, with no reconnect.</p>
+        </div>
+        <div>
+          <h3 class="h3">A status bar, if you want one</h3>
+          <p>
+            <code>pb config status-bar</code> shows the machine, session and connection state on the last line, and hides in full-screen programs.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+</Feature>

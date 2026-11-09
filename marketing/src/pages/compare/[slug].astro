@@ -1,216 +1,219 @@
 ---
 import Page from "../../layouts/Page.astro"
-import PageHead from "../../components/PageHead.astro"
-import Section from "../../components/Section.astro"
+import Head from "../../components/Head.astro"
+import Sheet from "../../components/Sheet.astro"
 import CompareTable from "../../components/CompareTable.astro"
-import CommandExample from "../../components/CommandExample.astro"
+import Faq from "../../components/Faq.astro"
 import Closing from "../../components/Closing.astro"
-import { paperboat, products } from "../../compare-data"
+import { checked, paperboat, products } from "../../compare-data"
+import { breadcrumbSchema, faqSchema } from "../../schema"
 
 export function getStaticPaths() {
   return products.map((product) => ({ params: { slug: product.slug }, props: { product } }))
 }
 const { product } = Astro.props
-const title = `Paperboat vs ${product.name}`
+const title = `Paperboat vs ${product.label}`
+const others = products.filter((item) => item.slug !== product.slug)
+const sheet = (text: string) => [{ lines: text.split("\n") }]
+const schema = [
+  breadcrumbSchema(Astro.site, [["Compare", "/compare/"], [product.label, `/compare/${product.slug}/`]]),
+  faqSchema(product.faq),
+]
 ---
 
-<Page title={`${title} — Paperboat`} description={product.summary}>
-  <PageHead title={title}>
+<Page
+  title={`${title}: differences, pricing, which to pick`}
+  description={`Considering Paperboat instead of ${product.name}? A fair comparison as of ${checked}: ${product.summary.split(". ")[0]}.`}
+  schema={schema}
+>
+  <Head title={title} trail={[["Compare", "/compare/"]]} here={product.label}>
     <p>{product.summary}</p>
-    <p class="back"><a href={`/compare?vs=${product.slug}`}>Compare with other tools</a></p>
-  </PageHead>
+    <p class="small">Checked against {product.label}'s own documentation and pricing, {checked}. Sources are listed under the table.</p>
+    <div class="verdict" slot="aside">
+      <div>
+        <h2 class="h3">Choose {product.label} when</h2>
+        <ul>{product.chooseThem.map((point) => <li>{point}</li>)}</ul>
+      </div>
+      <div>
+        <h2 class="h3">Choose Paperboat when</h2>
+        <ul>{product.chooseUs.map((point) => <li>{point}</li>)}</ul>
+      </div>
+    </div>
+  </Head>
 
-  <Section id="differences" title="Key differences">
-    <div class="differences">
-      {
-        product.differences.map((difference) => (
-          <article class="difference">
-            <div class="difference-text">
-              <h3 class="subtitle">{difference.title}</h3>
-              {difference.body.map((paragraph) => (
-                <p class="body">{paragraph}</p>
-              ))}
-            </div>
-            {(difference.them || difference.us) && (
-              <div class="difference-code">
-                {difference.them && (
-                  <figure>
-                    <figcaption>{product.label}</figcaption>
-                    <CommandExample text={difference.them} />
-                  </figure>
-                )}
-                {difference.us && (
-                  <figure>
-                    <figcaption>Paperboat</figcaption>
-                    <CommandExample text={difference.us} />
-                  </figure>
-                )}
+  <section class="section section-tint" aria-labelledby="differences-title">
+    <div class="wrap">
+      <h2 class="h2 differences-title" id="differences-title">Where they differ</h2>
+      <div class="differences">
+        {
+          product.differences.map((difference) => (
+            <article class="difference">
+              <div class="stack">
+                <h3 class="h3">{difference.title}</h3>
+                <div class="prose">
+                  {difference.body.map((paragraph) => (
+                    <p>{paragraph}</p>
+                  ))}
+                </div>
               </div>
-            )}
-          </article>
-        ))
-      }
-    </div>
-  </Section>
-
-  <Section id="table" title="Feature by feature" tone="surface">
-    <CompareTable products={[product]} picked={[product.slug]} />
-  </Section>
-
-  <Section id="choose" title="Which to choose">
-    <div class="pair">
-      <div>
-        <h3 class="subtitle">Choose {product.label} when</h3>
-        <ul class="points">{product.chooseThem.map((point) => <li class="body">{point}</li>)}</ul>
-      </div>
-      <div>
-        <h3 class="subtitle">Choose Paperboat when</h3>
-        <ul class="points">{product.chooseUs.map((point) => <li class="body">{point}</li>)}</ul>
+              {(difference.them || difference.us) && (
+                <div class="stack">
+                  {difference.them && <Sheet steps={sheet(difference.them)} where={product.label} />}
+                  {difference.us && <Sheet steps={sheet(difference.us)} where="Paperboat" />}
+                </div>
+              )}
+            </article>
+          ))
+        }
       </div>
     </div>
-  </Section>
+  </section>
 
-  <Section id="pricing" title="Pricing" tone="surface">
-    <div class="pair">
-      <div>
-        <h3 class="subtitle">{product.label}</h3>
-        <ul class="points">{product.pricing.lines.map((line) => <li class="body">{line}</li>)}</ul>
-        <p class="source">
-          <a href={product.pricing.source} rel="noopener">Source: {product.pricing.source.replace(/^https:\/\//, "")}</a>
+  <section class="section" aria-labelledby="table-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="table-title">Feature by feature</h2>
+        <p class="lede">
+          Every answer in the {product.label} column carries a number that links to the page of theirs that says it.
+          <a href={`/compare/?vs=${product.slug}`}>Put a second tool beside it</a>
         </p>
-      </div>
-      <div>
-        <h3 class="subtitle">Paperboat</h3>
-        <ul class="points">{paperboat.pricing.map((line) => <li class="body">{line}</li>)}</ul>
-        <p class="source"><a href="/pricing">Pricing</a></p>
+      </header>
+      <CompareTable products={[product]} picked={[product.slug]} />
+    </div>
+  </section>
+
+  <section class="section section-tint" aria-labelledby="pricing-title">
+    <div class="wrap">
+      <h2 class="h2 differences-title" id="pricing-title">Pricing</h2>
+      <div class="cols cols-even">
+        <div class="stack">
+          <h3 class="h3">{product.label}</h3>
+          <ul class="lines">{product.pricing.lines.map((line) => <li>{line}</li>)}</ul>
+          <p class="small">
+            <a class="link" href={product.pricing.source} rel="noopener">{product.pricing.source.replace(/^https:\/\//, "")}</a>, {checked}
+          </p>
+        </div>
+        <div class="stack">
+          <h3 class="h3">Paperboat</h3>
+          <ul class="lines">{paperboat.pricing.map((line) => <li>{line}</li>)}</ul>
+          <p class="small"><a class="link" href="/pricing/">Paperboat pricing in full</a></p>
+        </div>
       </div>
     </div>
-  </Section>
+  </section>
 
-  <Section id="switching" title={`Switching from ${product.name}`}>
-    <ol class="steps">{product.switching.map((step) => <li class="body">{step}</li>)}</ol>
-  </Section>
+  <section class="section" aria-labelledby="switching-title">
+    <div class="wrap cols">
+      <h2 class="h2" id="switching-title">Moving from {product.name}</h2>
+      <ol class="steps">{product.switching.map((step) => <li>{step}</li>)}</ol>
+    </div>
+  </section>
 
-  <Section id="faq" title="Questions" tone="surface">
-    <dl class="faq">
-      {
-        product.faq.map((item) => (
-          <div>
-            <dt class="subtitle">{item.q}</dt>
-            <dd class="body">{item.a}</dd>
-          </div>
-        ))
-      }
-    </dl>
-  </Section>
+  <Faq items={product.faq} />
+
+  <section class="section section-tint" aria-labelledby="others-title">
+    <div class="wrap cols">
+      <h2 class="h2" id="others-title">Other comparisons</h2>
+      <ul class="others">
+        {others.map((item) => <li><a class="link" href={`/compare/${item.slug}/`}>Paperboat vs {item.label}</a></li>)}
+      </ul>
+    </div>
+  </section>
 
   <Closing />
 </Page>
 
 <style>
-  .back {
-    margin-top: 8px;
+  .verdict {
+    display: grid;
+    gap: var(--s6);
+    padding: clamp(20px, 3vw, 32px);
+    border-radius: var(--radius);
+    background: var(--paper);
+    box-shadow: var(--shadow-sheet);
   }
 
-  .back a {
-    color: var(--link);
+  .verdict > div {
+    display: grid;
+    gap: var(--s3);
+  }
+
+  .verdict ul,
+  .lines {
+    display: grid;
+    font-size: var(--text-ui);
+    line-height: 1.5;
+    color: var(--text);
+    border-top: 1px solid var(--rule);
+  }
+
+  .verdict li,
+  .lines li {
+    padding-block: var(--s3);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .differences-title {
+    margin-bottom: clamp(32px, 4vw, 56px);
   }
 
   .differences {
     display: grid;
-    gap: clamp(48px, 6vw, 72px);
+    border-top: 1px solid var(--rule);
   }
 
   .difference {
     display: grid;
-    gap: 24px;
-    align-items: start;
+    gap: var(--s5);
+    padding-block: var(--s6);
+    border-bottom: 1px solid var(--rule);
   }
 
-  .difference-text {
-    display: grid;
-    gap: 12px;
-    max-width: 560px;
-  }
-
-  .difference-code {
-    display: grid;
-    gap: 16px;
-    min-width: 0;
-  }
-
-  figure {
-    display: grid;
-    gap: 8px;
-    margin: 0;
-    min-width: 0;
-  }
-
-  figcaption {
-    font-size: 0.8125rem;
-    color: var(--fog);
-  }
-
-  .pair {
-    display: grid;
-    gap: 40px;
-  }
-
-  .pair > div {
-    display: grid;
-    gap: 16px;
-    align-content: start;
-  }
-
-  .points {
-    display: grid;
-    gap: 10px;
-    margin: 0;
-    padding-left: 1.1em;
-  }
-
-  .source {
-    margin: 0;
-    font-size: 0.8125rem;
-  }
-
-  .source a {
-    color: var(--fog);
-    word-break: break-all;
-  }
-
-  .steps {
-    display: grid;
-    gap: 12px;
-    max-width: 640px;
-    margin: 0;
-    padding-left: 1.25rem;
-  }
-
-  .faq {
-    display: grid;
-    gap: 32px;
-    max-width: 720px;
-    margin: 0;
-  }
-
-  .faq div {
-    display: grid;
-    gap: 8px;
-  }
-
-  .faq dd {
-    margin: 0;
-  }
-
-  @media (min-width: 960px) {
+  @media (min-width: 900px) {
     .difference {
-      grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-      gap: 48px;
+      grid-template-columns: minmax(0, 6fr) minmax(0, 6fr);
+      column-gap: var(--s8);
+      align-items: start;
     }
+  }
 
-    .pair {
-      grid-template-columns: repeat(2, 1fr);
+  /* A real sequence, so it is numbered. */
+  .steps {
+    counter-reset: step;
+    display: grid;
+    border-top: 1px solid var(--rule);
+  }
+
+  .steps li {
+    counter-increment: step;
+    display: grid;
+    grid-template-columns: 2em 1fr;
+    padding-block: var(--s4);
+    border-bottom: 1px solid var(--rule);
+    color: var(--text);
+  }
+
+  .steps li::before {
+    content: counter(step);
+    color: var(--cobalt);
+    font-weight: 500;
+  }
+
+  .others {
+    display: grid;
+    gap: 0 var(--s6);
+    font-size: var(--text-ui);
+  }
+
+  .others a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  @media (min-width: 640px) {
+    .others {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 </style>

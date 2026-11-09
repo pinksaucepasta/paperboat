@@ -1,0 +1,32 @@
+---
+/** A use-case page's frame: breadcrumb and data, then the page's own story, questions and next steps. */
+import Page from "./Page.astro"
+import Head from "../components/Head.astro"
+import Faq, { type Question } from "../components/Faq.astro"
+import Related from "../components/Related.astro"
+import Closing from "../components/Closing.astro"
+import { breadcrumbSchema, faqSchema } from "../schema"
+interface Props {
+  slug: string
+  name: string
+  title: string
+  description: string
+  headline: string
+  faq: Question[]
+  related: string[]
+  compare?: string[]
+}
+const { slug, name, title, description, headline, faq, related, compare = [] } = Astro.props
+const schema = [breadcrumbSchema(Astro.site, [["Features", "/features/"], [name, `/use-cases/${slug}/`]]), faqSchema(faq)]
+---
+
+<Page title={title} description={description} schema={schema}>
+  <Head title={headline} trail={[["Features", "/features/"]]} here={name}>
+    <slot name="lede" />
+    <slot name="aside" slot="aside" />
+  </Head>
+  <slot />
+  <Faq items={faq} />
+  <Related features={related} compare={compare} />
+  <Closing />
+</Page>

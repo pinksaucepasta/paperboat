@@ -1,18 +1,19 @@
 ---
-/** The one layout for every page: same header, same footer, the page between them. */
+/** Every page: the header, the page, the footer. */
 import Base from "./Base.astro"
 import Nav from "../components/Nav.astro"
 import Footer from "../components/Footer.astro"
 interface Props {
-  title?: string
-  description?: string
+  title: string
+  description: string
+  schema?: Record<string, unknown>[]
+  noindex?: boolean
 }
-const { title, description } = Astro.props
 ---
 
-<Base title={title} description={description}>
+<Base {...Astro.props}>
   <Nav />
-  <main>
+  <main id="main">
     <slot />
   </main>
   <Footer />

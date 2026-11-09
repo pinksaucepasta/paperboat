@@ -1,17 +1,27 @@
 ---
 import Install from "./Install.astro"
 import Mark from "./Mark.astro"
-import { consoleUrl } from "../site"
+/** The last thing on a page: install it. One sentence above the command says what happens next. */
+interface Props {
+  title?: string
+}
+const { title = "Start with the machine in front of you." } = Astro.props
 ---
 
 <section class="closing sea" aria-labelledby="closing-title">
   <div class="wrap closing-inner">
-    <Mark height={48} class="closing-mark" />
-    <h2 class="title closing-title" id="closing-title">Start with your first machine.</h2>
+    <div class="closing-text">
+      <Mark height={36} class="closing-mark" />
+      <h2 class="h2 closing-title" id="closing-title">{title}</h2>
+      <p class="closing-lede">
+        Install <code>pb</code>, sign in, then run the same line on a second machine. Free for one person: 100 machines, no card.
+      </p>
+    </div>
     <div class="closing-install">
       <Install tone="sea" />
-      <p class="closing-after">
-        macOS and Linux. Already installed somewhere? <a href={consoleUrl}>Open the console</a>
+      <p class="closing-links">
+        <a href="/docs/">Read the quickstart</a>
+        <a href="/pricing/">See pricing</a>
       </p>
     </div>
   </div>
@@ -19,51 +29,74 @@ import { consoleUrl } from "../site"
 
 <style>
   .closing {
-    padding-block: clamp(112px, 14vw, 208px) clamp(96px, 12vw, 176px);
-    overflow: hidden;
+    padding-block: clamp(72px, 9vw, 128px);
   }
 
   .closing-inner {
     display: grid;
-    gap: 36px;
-    justify-items: center;
-    text-align: center;
+    gap: var(--s7);
+    align-items: center;
+  }
+
+  .closing-text {
+    display: grid;
+    gap: var(--s4);
   }
 
   .closing :global(.closing-mark) {
     color: #fff;
-    filter: drop-shadow(0 1px 1px rgb(0 0 40 / 0.25));
+    margin-bottom: var(--s2);
   }
 
   .closing-title {
     color: #fff;
-    max-width: 20ch;
+    max-width: 18ch;
   }
 
-  .closing-install :global(.install-tabs) {
-    justify-content: center;
+  .closing-lede {
+    max-width: 44ch;
+    color: rgb(255 255 255 / 0.9);
+  }
+
+  .closing-lede code {
+    background: rgb(255 255 255 / 0.16);
+    color: #fff;
   }
 
   .closing-install {
     display: grid;
-    gap: 14px;
-    width: 100%;
-    max-width: 560px;
+    gap: var(--s4);
   }
 
-  .closing-after {
-    font-size: 0.875rem;
-    color: rgb(255 255 255 / 0.75);
+  .closing-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2) var(--s5);
+    font-size: var(--text-ui);
   }
 
-  .closing-after a {
+  .closing-links a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
     color: #fff;
     text-decoration: underline;
-    text-decoration-color: rgb(255 255 255 / 0.4);
+    text-decoration-color: rgb(255 255 255 / 0.5);
     text-underline-offset: 3px;
   }
 
-  .closing-after a:hover {
+  .closing-links a:hover {
     text-decoration-color: #fff;
+  }
+
+  .closing :global(:focus-visible) {
+    outline-color: #fff;
+  }
+
+  @media (min-width: 900px) {
+    .closing-inner {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: var(--s8);
+    }
   }
 </style>

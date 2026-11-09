@@ -1,0 +1,166 @@
+---
+import Feature from "../../layouts/Feature.astro"
+import Sheet from "../../components/Sheet.astro"
+import { tunnelDomain, plans, publicTcp } from "../../site"
+
+const hero = [
+  {
+    lines: [
+      "$ pb tunnel create api --port 8080 --wait",
+      "Created tunnel api (tunnel_4kq81zc2)",
+      `https://calm-summer-beach-3476.${tunnelDomain} -> http://127.0.0.1:8080`,
+      "Status: ready",
+    ],
+    note: "The address is generated once and stays for the life of the tunnel. <code>api</code> is only a label you can rename.",
+  },
+]
+
+const versus = [
+  ["Lives", "While the command runs, or up to 24 hours in the background", "Until you delete it"],
+  ["After a reboot", "Gone", "Comes back by itself"],
+  ["Routes", "One target", "Many: by host, by path, plus raw TCP"],
+  ["Pause without deleting", "No", "Yes"],
+  ["Custom domain", "Yes", "Yes"],
+]
+
+const domain = [
+  { lines: ["$ pb domain add dev.example.com"], note: "Prints two DNS records: a CNAME that proves the domain is yours, and a wildcard that sends its names to Paperboat." },
+  { lines: ["$ pb domain verify dev.example.com"], note: "Once the records exist. One certificate is issued for the domain and every name one level under it." },
+  { lines: ["$ pb tunnel domain add api api.dev.example.com"], note: "Any tunnel or preview can now take a name under the domain, with no DNS step of its own." },
+]
+
+const routes = [
+  { lines: ["$ pb tunnel route add api --name web --to http://127.0.0.1:3000 --path / --wait"], note: "A second app behind the same tunnel. The longest matching path wins." },
+  { lines: ["$ pb tunnel route add api --name db --to 127.0.0.1:5432 --protocol tcp --wait"], note: "Raw TCP on a public port of its own. Your service does its own authentication." },
+  { lines: ["$ pb tunnel route add api --name db --to 127.0.0.1:5432 --protocol tcp_private --wait"], note: "TCP that is never public: only your signed-in machines can open it." },
+]
+
+const codes = [
+  ["connector_offline", "The machine is off or Paperboat is stopped on it", "Turn it on and run pb doctor there. The tunnel reconnects by itself."],
+  ["origin_refused", "Your app is not listening on the route's port", "Start it, or fix the port with pb tunnel route update."],
+  ["origin_timeout", "Your app is up but did not answer in time", "Check that it is healthy and not behind a firewall."],
+  ["origin_tls", "Your app's TLS certificate was not accepted", "Trust it in the route's settings, or use an http origin."],
+  ["dns_pending", "The custom domain is not verified yet", "Add the records from pb domain show, then pb domain verify."],
+  ["certificate_pending", "The certificate is still being issued", "Wait. Issuance starts once DNS is verified."],
+  ["bandwidth_exhausted", "The workspace used its bandwidth for the month", "Add bandwidth or change plan. Traffic resumes when there is allowance."],
+]
+
+const faq = [
+  {
+    q: "Are custom domains a paid feature?",
+    a: "No. Your own domains, with certificates issued and renewed for you, are on every plan including Free.",
+  },
+  {
+    q: "Does the address ever change?",
+    a: `No. A tunnel's address under ${tunnelDomain} is generated when you create it and belongs to that tunnel until you delete it. Renaming the tunnel changes only its label.`,
+  },
+  {
+    q: "Can I expose a database or another TCP service?",
+    a: `Yes, with a tcp route, which gets a stable public port. Free includes ${publicTcp[0]} public TCP address, Pro ${publicTcp[1]}, Team ${publicTcp[2]}; on an edge you host yourself there is no limit. If only your own machines need it, a tcp_private route or <a href="/features/private-access/">private access</a> is safer.`,
+  },
+  {
+    q: "Is this a Cloudflare Tunnel alternative?",
+    a: 'For publishing a service from a machine behind NAT, yes, and you do not need to move your DNS anywhere to start. Cloudflare puts its CDN, WAF and Access in front of your tunnel, which Paperboat does not have. See the <a href="/compare/cloudflare-tunnel/">comparison</a>.',
+  },
+  {
+    q: "Can I put a login in front of a tunnel?",
+    a: "A tunnel created with <code>--private</code> or <code>--team</code> only answers your own or your teammates' signed-in machines. There is no hosted login page for outside visitors; put your own authentication in the app for that.",
+  },
+  {
+    q: "Where does TLS end?",
+    a: "At the edge, as with any public HTTPS service you do not host yourself. From the edge to your machine the traffic is encrypted again. You can run the edge on your own server.",
+  },
+]
+---
+
+<Feature
+  slug="tunnels"
+  title="Permanent tunnels with custom domains on every plan | Paperboat"
+  description="pb tunnel gives a service on your machine a public address that never changes and survives reboots. Custom domains with certificates on the free plan, multiple routes, raw TCP, and status codes that name the fix."
+  headline="A permanent public address for a service"
+  faq={faq}
+  related={["previews", "self-hosting", "private-access"]}
+  compare={["ngrok", "cloudflare-tunnel", "tailscale"]}
+>
+  <p slot="lede">
+    A tunnel is a preview that stays. It keeps one address, comes back after a reboot or an update, and can serve several apps under your own
+    domain.
+  </p>
+  <Sheet slot="aside" steps={hero} />
+
+  <section class="section section-tint" aria-labelledby="versus-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="versus-title">Preview or tunnel</h2>
+        <p class="lede">Same engine, different lifetime. Start with a <a href="/features/previews/">preview</a>; press <kbd>t</kbd> in it when you want to keep it.</p>
+      </header>
+      <div class="scroll">
+        <table class="facts wide">
+          <thead><tr><th scope="col"><span class="visually-hidden">Question</span></th><th scope="col">Preview</th><th scope="col">Tunnel</th></tr></thead>
+          <tbody>
+            {versus.map(([name, preview, tunnel]) => <tr><th scope="row">{name}</th><td>{preview}</td><td>{tunnel}</td></tr>)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="domain-title">
+    <div class="wrap cols">
+      <div class="stack">
+        <h2 class="h2" id="domain-title">Your own domain, in three steps</h2>
+        <div class="prose">
+          <p>
+            Add a domain or a subdomain to your workspace once. After that, giving a tunnel a name under it is one command and takes effect
+            without touching DNS again.
+          </p>
+          <p>Your DNS stays where it is. Paperboat never edits it, and removing a domain here leaves your records alone.</p>
+        </div>
+      </div>
+      <Sheet steps={domain} />
+    </div>
+  </section>
+
+  <section class="section section-tint" aria-labelledby="routes-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="routes-title">Several services, one tunnel</h2>
+        <p class="lede">
+          Routes decide where a request goes: by host name, by path, or as plain TCP. Up to {plans[0].publications} previews and tunnels run at
+          once on Free, {plans[1].publications} on Pro.
+        </p>
+      </header>
+      <Sheet steps={routes} />
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="codes-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="codes-title">When it is not serving, it names the step</h2>
+        <p class="lede">
+          <code>pb tunnel status</code>, <code>pb tunnel logs</code> and <code>pb tunnel doctor</code> report one of these, and the same code is
+          in <code>--json</code> for your monitoring.
+        </p>
+      </header>
+      <div class="scroll">
+        <table class="facts wide">
+          <thead><tr><th scope="col">Code</th><th scope="col">Meaning</th><th scope="col">What to do</th></tr></thead>
+          <tbody>
+            {codes.map(([code, meaning, fix]) => <tr><th scope="row"><code>{code}</code></th><td>{meaning}</td><td>{fix}</td></tr>)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</Feature>
+
+<style>
+  .wide {
+    min-width: 620px;
+  }
+
+  .wide tbody th {
+    width: 26%;
+  }
+</style>

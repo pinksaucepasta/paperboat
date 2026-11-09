@@ -1,39 +1,76 @@
 ---
 import "../styles/global.css"
+import figtree from "@fontsource-variable/figtree/files/figtree-latin-wght-normal.woff2?url"
+import geist from "@fontsource-variable/geist/files/geist-latin-wght-normal.woff2?url"
+import mono from "@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2?url"
+
 interface Props {
-  title?: string
-  description?: string
+  /** The whole title tag: unique per page, the search phrase first. */
+  title: string
+  description: string
+  /** Structured data for this page (schema.org objects), added to the site-wide Organization. */
+  schema?: Record<string, unknown>[]
+  /** Pages that are not ready to be found (legal drafts, the 404 page). */
+  noindex?: boolean
 }
-const {
-  title = "Paperboat",
-  description = "Install Paperboat once per machine. Then terminals, SSH, previews and files just work, for you and your team.",
-} = Astro.props
+const { title, description, schema = [], noindex = false } = Astro.props
+const canonical = new URL(Astro.url.pathname, Astro.site).href
+// One share image per page, named after its path (made by checks/og.mjs).
+const ogName = (!noindex && Astro.url.pathname.replace(/^\/|\/$/g, "").replace(/\//g, "-")) || "home"
+const ogImage = new URL(`/og/${ogName}.png`, Astro.site).href
+const organization = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  name: "Paperboat",
+  url: new URL("/", Astro.site).href,
+  logo: new URL("/favicon.svg", Astro.site).href,
+}
+const graph = [organization, ...schema.map((item) => ({ "@context": "https://schema.org", ...item }))]
 ---
 
 <!doctype html>
-<html lang="en" class="no-js">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
+    {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={canonical} />}
     <meta name="theme-color" content="#ffffff" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href={figtree} as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href={geist} as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href={mono} as="font" type="font/woff2" crossorigin />
+    <meta property="og:site_name" content="Paperboat" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonical} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
-    <script is:inline>document.documentElement.classList.remove("no-js")</script>
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+    {graph.map((item) => <script type="application/ld+json" set:html={JSON.stringify(item)} />)}
   </head>
   <body>
+    <a class="skip" href="#main">Skip to content</a>
     <slot />
     <script>
-      // Anything copyable copies when clicked (console design rules); the icon shows the result.
+      // A command copies when its button is pressed; the button says so, also to a screen reader.
       document.querySelectorAll<HTMLElement>("[data-copy]").forEach((el) => {
+        const status = el.querySelector("[data-copy-status]")
         el.addEventListener("click", async () => {
-          const text = el.dataset.copy ?? el.querySelector("[data-copy-text]")?.textContent ?? ""
           try {
-            await navigator.clipboard.writeText(text)
+            await navigator.clipboard.writeText(el.dataset.copy ?? "")
             el.dataset.copied = ""
-            setTimeout(() => delete el.dataset.copied, 1600)
+            if (status) status.textContent = "Copied"
+            setTimeout(() => {
+              delete el.dataset.copied
+              if (status) status.textContent = ""
+            }, 1600)
           } catch {
             // Clipboard blocked: the command stays selectable.
           }

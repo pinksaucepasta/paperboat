@@ -1,34 +1,20 @@
 ---
 import Lockup from "./Lockup.astro"
-import { navGroups, getStartedLinks, legalLinks } from "../nav"
-// Groups with links become columns; single links (Pricing, Docs) share one column.
-const columns = [
-  ...navGroups
-    .filter((group) => group.links.length)
-    .map((group) => ({
-      title: group.title,
-      links: group.href ? [{ href: group.href, label: "Overview" }, ...group.links] : group.links,
-    })),
-  {
-    title: "Get started",
-    links: [
-      ...navGroups.filter((group) => !group.links.length).map((group) => ({ href: group.href!, label: group.title })),
-      ...getStartedLinks,
-    ],
-  },
-  { title: "Legal", links: legalLinks },
-]
+import { footerColumns } from "../nav"
 ---
 
 <footer class="footer">
   <div class="wrap footer-inner">
-    <div class="footer-brand"><Lockup /></div>
+    <div class="footer-brand">
+      <Lockup />
+      <p class="small">Terminals, SSH, files, previews and tunnels for the machines you own.</p>
+    </div>
     {
-      columns.map((group) => (
-        <nav aria-label={group.title}>
-          <div class="group-title">{group.title}</div>
+      footerColumns.map((column) => (
+        <nav aria-label={column.title}>
+          <h2 class="column-title">{column.title}</h2>
           <ul>
-            {group.links.map((link) => (
+            {column.links.map((link) => (
               <li>
                 <a href={link.href}>{link.label}</a>
               </li>
@@ -39,37 +25,45 @@ const columns = [
     }
   </div>
   <div class="wrap">
-    <div class="footer-base">© 2026 Paperboat</div>
+    <p class="footer-base small">© 2026 Paperboat</p>
   </div>
 </footer>
 
 <style>
   .footer {
-    padding-block: 64px 32px;
-    font-size: 0.875rem;
+    padding-block: var(--s8) var(--s6);
+    border-top: 1px solid var(--rule);
   }
 
   .footer-inner {
     display: grid;
-    gap: 40px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--s7) var(--s5);
   }
 
   .footer-brand {
-    align-self: start;
-  }
-
-  .group-title {
-    color: var(--ink);
-    font-weight: 500;
-    margin-bottom: 12px;
-  }
-
-  ul {
+    grid-column: 1 / -1;
     display: grid;
-    gap: 8px;
+    gap: var(--s3);
+    align-content: start;
+    max-width: 30ch;
   }
 
+  .column-title {
+    margin-bottom: var(--s2);
+    font-family: var(--font-sans);
+    font-size: var(--text-ui);
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  /* Each link is a full-height row, so a thumb can hit it. */
   ul a {
+    display: flex;
+    align-items: center;
+    min-height: 36px;
+    font-size: var(--text-ui);
+    line-height: 1.3;
     color: var(--fog);
   }
 
@@ -78,15 +72,23 @@ const columns = [
   }
 
   .footer-base {
-    margin-top: 64px;
-    padding-top: 20px;
+    margin-top: var(--s8);
+    padding-top: var(--s5);
     border-top: 1px solid var(--rule);
-    color: var(--fog);
   }
 
-  @media (min-width: 760px) {
+  @media (min-width: 900px) {
     .footer-inner {
-      grid-template-columns: 2fr repeat(4, 1fr);
+      grid-template-columns: 1.3fr repeat(4, minmax(0, 1fr));
+      gap: var(--s6);
+    }
+
+    .footer-brand {
+      grid-column: auto;
+    }
+
+    ul a {
+      min-height: 30px;
     }
   }
 </style>

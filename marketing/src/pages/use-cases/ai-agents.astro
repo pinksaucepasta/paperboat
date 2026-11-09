@@ -1,0 +1,139 @@
+---
+import UseCase from "../../layouts/UseCase.astro"
+import Sheet from "../../components/Sheet.astro"
+import Code from "../../components/Code.astro"
+
+const hero = [
+  { lines: ["$ pb connect gpu-box", "ana@gpu-box:~/repo$ claude"], note: "Start the agent in a Paperboat terminal on the machine with the code and the GPU." },
+  { lines: ["# close the laptop; the agent keeps working"], note: "The session lives on gpu-box." },
+  { lines: ["$ pb connect gpu-box"], note: "Check on it from another computer, or from the console in a browser." },
+]
+
+const mcp = `{
+  "mcpServers": {
+    "paperboat": {
+      "command": "pb",
+      "args": ["mcp", "--allow-send-dir", "/home/ana/artifacts"]
+    }
+  }
+}`
+
+const tools = [
+  ["list_machines", "The machines this login may use, a page at a time."],
+  ["exec", "Run an exact argument list on one machine. No shell, output is bounded, five minutes at most."],
+  ["send_file", "Deliver a file to a machine's Inbox. Only from directories you allowed; symlinks cannot escape them."],
+]
+
+const token = [
+  { lines: ["$ pb machine tag build-01 add agents", "$ pb machine tag build-02 add agents"], note: "Mark the machines an agent may touch." },
+  { lines: [`$ pb api-token create agent --expires 7d --scope '[{"dst":["tag:agents"],"allow":["exec","files"]}]'`], note: "A token for exec and files on those machines, for a week. The secret prints once." },
+  { lines: ["$ pb login --api-token-file ./agent.token"], note: "Where the agent runs. No browser needed." },
+  { lines: ["$ pb policy explain --dst machine:db --action exec --api-token agent"], note: "Confirm what it cannot do before you hand it over." },
+]
+
+const faq = [
+  {
+    q: "Does Paperboat sandbox what the agent runs?",
+    a: "No. Paperboat decides which machines and which actions a token can reach. Once a command runs, it has the permissions of the operating-system user it runs as. Use a dedicated user or a container on the target machine for real isolation.",
+  },
+  {
+    q: "Which MCP clients work?",
+    a: "Any client that launches a local MCP server over standard input and output. Point it at <code>pb mcp</code>. The computer running the client needs pb installed and signed in.",
+  },
+  {
+    q: "Can the agent read my secrets?",
+    a: "It can run commands that receive them, and a command could print its environment, so scope the token and choose the machines with that in mind. What Paperboat adds is that the agent never needs the value in its prompt, its arguments or a file. A workspace owner can also stop commands from listing ENV names.",
+  },
+  {
+    q: "How do I see what an agent did?",
+    a: "The audit log records each action with the token that performed it, the machine, and whether it was allowed. It does not record command output or file contents.",
+  },
+  {
+    q: "Is there an SDK?",
+    a: "Not yet. Today the interfaces are the pb command with <code>--json</code>, and MCP. Both are stable enough to build on.",
+  },
+]
+---
+
+<UseCase
+  slug="ai-agents"
+  name="AI agents"
+  title="Run AI coding agents on remote machines, with scoped access | Paperboat"
+  description="Keep a coding agent running on a remote machine after your laptop sleeps, give it other machines through MCP or pb exec, limit it with an expiring scoped token, and let it use secrets without seeing them."
+  headline="Give a coding agent your other machines"
+  faq={faq}
+  related={["exec", "env", "teams", "terminal"]}
+>
+  <p slot="lede">
+    Agents run for hours and want a shell. That fits badly with a laptop that sleeps and SSH keys that open everything. Paperboat keeps the agent
+    running where the work is, and gives it exactly the reach you decide.
+  </p>
+  <Sheet slot="aside" steps={hero} />
+
+  <section class="section section-tint" aria-labelledby="mcp-title">
+    <div class="wrap cols">
+      <div class="stack-loose">
+        <div class="stack">
+          <h2 class="h2" id="mcp-title">Other machines as tools</h2>
+          <p class="lede">
+            <code>pb mcp</code> serves three tools to an MCP client, using the login pb already has on that computer.
+          </p>
+        </div>
+        <table class="facts">
+          <tbody>
+            {tools.map(([name, text]) => <tr><th scope="row"><code>{name}</code></th><td>{text}</td></tr>)}
+          </tbody>
+        </table>
+      </div>
+      <Code name="MCP client configuration" text={mcp} />
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="token-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="token-title">A token that can only do what you wrote down</h2>
+        <p class="lede">
+          An agent should not inherit everything you can do. Tag the machines, create a token for those tags and those actions, and give it an
+          expiry.
+        </p>
+      </header>
+      <Sheet steps={token} />
+    </div>
+  </section>
+
+  <section class="section section-tint" aria-labelledby="shape-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="shape-title">Commands shaped for a program to call</h2>
+        <p class="lede">The same properties that make pb safe in a shell script make it predictable for a model.</p>
+      </header>
+      <div class="points points-3">
+        <div>
+          <h3 class="h3">No shell in between</h3>
+          <p><code>pb exec studio -- git status</code> runs that argument list exactly. Nothing a model writes is expanded or split a second time.</p>
+        </div>
+        <div>
+          <h3 class="h3">JSON in, exit code out</h3>
+          <p>Commands that return data take <code>--json</code>; <code>pb exec --json</code> streams events and ends with the remote exit status.</p>
+        </div>
+        <div>
+          <h3 class="h3">Honest about unknowns</h3>
+          <p>If a connection dies mid-command, the result says the outcome is unknown, so the agent can check before trying again.</p>
+        </div>
+        <div>
+          <h3 class="h3">Secrets by name</h3>
+          <p><code>pb env names</code> lists what exists. <code>pb env run -- cmd</code> puts the values in that command's environment and nowhere else.</p>
+        </div>
+        <div>
+          <h3 class="h3">Help it can read</h3>
+          <p><code>pb COMMAND --help --json</code> describes any command in a structured form, so an agent can discover the interface.</p>
+        </div>
+        <div>
+          <h3 class="h3">You can watch</h3>
+          <p>Share the agent's terminal session and a teammate sees it live. Make them interactive and they can step in.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</UseCase>

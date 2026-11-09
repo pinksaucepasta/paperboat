@@ -1,0 +1,106 @@
+---
+/**
+ * The top of an inner page: where you are, the page's one h1, a short introduction, and beside
+ * them (slot "aside") the thing itself: a command, a table, a diagram.
+ */
+interface Props {
+  title: string
+  /** The path from the home page, without the page itself: [["Features", "/features/"]]. */
+  trail?: [string, string][]
+  /** Name of the page in the breadcrumb. */
+  here?: string
+}
+const { title, trail = [], here } = Astro.props
+const hasAside = Astro.slots.has("aside")
+---
+
+<section class="head">
+  <div class:list={["wrap", "head-inner", { "head-split": hasAside }]}>
+    <div class="head-text">
+      {
+        here && (
+          <nav class="crumbs" aria-label="Breadcrumb">
+            <ol>
+              {trail.map(([label, href]) => (
+                <li>
+                  <a href={href}>{label}</a>
+                </li>
+              ))}
+              <li aria-current="page">{here}</li>
+            </ol>
+          </nav>
+        )
+      }
+      <h1 class="h1">{title}</h1>
+      <div class="lede head-lede"><slot /></div>
+      <slot name="actions" />
+    </div>
+    {hasAside && <div class="head-aside"><slot name="aside" /></div>}
+  </div>
+</section>
+
+<style>
+  .head {
+    padding-block: clamp(40px, 6vw, 88px) var(--section);
+  }
+
+  .head-inner {
+    display: grid;
+    gap: var(--s7);
+  }
+
+  .head-text {
+    display: grid;
+    gap: var(--s5);
+    align-content: start;
+    max-width: 46rem;
+  }
+
+  .head-lede {
+    display: grid;
+    gap: var(--s3);
+  }
+
+  .crumbs ol {
+    display: flex;
+    flex-wrap: wrap;
+    font-size: var(--text-ui);
+    color: var(--fog);
+  }
+
+  .crumbs li + li::before {
+    content: "/";
+    margin-inline: var(--s2);
+    color: var(--rule);
+  }
+
+  .crumbs a {
+    display: inline-block;
+    padding-block: var(--s2);
+  }
+
+  .crumbs a:hover {
+    color: var(--ink);
+  }
+
+  .crumbs [aria-current] {
+    padding-block: var(--s2);
+    color: var(--ink);
+  }
+
+  .head-aside {
+    min-width: 0;
+  }
+
+  @media (min-width: 1000px) {
+    .head-split {
+      grid-template-columns: minmax(0, 6fr) minmax(0, 6fr);
+      column-gap: var(--s8);
+      align-items: center;
+    }
+
+    .head-split .h1 {
+      font-size: clamp(2.375rem, 1rem + 3.2vw, 3.5rem);
+    }
+  }
+</style>

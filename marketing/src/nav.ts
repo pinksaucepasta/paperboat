@@ -1,34 +1,36 @@
 import { consoleUrl } from "./site"
 import { compares } from "./compare-data"
-import { products } from "./product-data"
+import { features, useCases } from "./features"
 import { legalPages } from "./legal-data"
 
 /** The site's navigation, in one place: the header and the footer both read it. */
 export type NavLink = { href: string; label: string }
-/** A group with an `href` is one link in the header (its own page lists the rest); the footer lists its links. */
-export type NavGroup = { title: string; href?: string; links: NavLink[] }
 
-export const navGroups: NavGroup[] = [
-  {
-    title: "Product",
-    links: products.map((product) => ({ href: `/product/${product.slug}`, label: product.name })),
-  },
-  {
-    title: "Compare",
-    href: "/compare",
-    links: compares.map((compare) => ({ href: `/compare/${compare.slug}`, label: `Paperboat vs ${compare.name}` })),
-  },
-  { title: "Pricing", href: "/pricing", links: [] },
-  { title: "Docs", href: "/docs", links: [] },
+export const featureLinks: NavLink[] = features.map((item) => ({ href: `/features/${item.slug}/`, label: item.name }))
+export const useCaseLinks: NavLink[] = useCases.map((item) => ({ href: `/use-cases/${item.slug}/`, label: item.name }))
+export const compareLinks: NavLink[] = compares.map((item) => ({ href: `/compare/${item.slug}/`, label: item.label }))
+
+/** The header's plain links, after the Features menu. */
+export const topLinks: NavLink[] = [
+  { href: "/compare/", label: "Compare" },
+  { href: "/pricing/", label: "Pricing" },
+  { href: "/security/", label: "Security" },
+  { href: "/docs/", label: "Docs" },
 ]
 
-export const getStartedLinks: NavLink[] = [
-  { href: "/#install", label: "Install" },
-  { href: consoleUrl, label: "Console" },
-]
-
-/** The footer's last column: security and the legal pages. */
-export const legalLinks: NavLink[] = [
-  { href: "/security", label: "Security" },
-  ...legalPages.map((page) => ({ href: `/legal/${page.slug}`, label: page.title })),
+export const footerColumns: { title: string; links: NavLink[] }[] = [
+  { title: "Features", links: [{ href: "/features/", label: "All features" }, ...featureLinks] },
+  { title: "Use cases", links: useCaseLinks },
+  { title: "Compare", links: [{ href: "/compare/", label: "All comparisons" }, ...compareLinks] },
+  {
+    title: "Paperboat",
+    links: [
+      { href: "/pricing/", label: "Pricing" },
+      { href: "/security/", label: "Security" },
+      { href: "/docs/", label: "Docs" },
+      { href: "/#install", label: "Install" },
+      { href: consoleUrl, label: "Sign in" },
+      ...legalPages.map((page) => ({ href: `/legal/${page.slug}/`, label: page.title })),
+    ],
+  },
 ]

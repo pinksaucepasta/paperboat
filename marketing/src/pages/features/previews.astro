@@ -1,0 +1,154 @@
+---
+import Feature from "../../layouts/Feature.astro"
+import Sheet from "../../components/Sheet.astro"
+import Lanes from "../../components/Lanes.astro"
+import { previewDomain } from "../../site"
+import { publicLane } from "../../diagrams"
+
+const hero = [
+  {
+    lines: ["$ pb preview 3000", "Preview ready", `https://quiet-river-lantern-4821.${previewDomain} -> http://127.0.0.1:3000`, "", "Press Ctrl+C to stop"],
+    note: "pb checks that something answers on port 3000 before it publishes anything.",
+  },
+]
+
+const targets = [
+  { lines: ["$ pb preview 3000"], note: "A port on this machine." },
+  { lines: ["$ pb preview http://127.0.0.1:8080"], note: "A full origin URL." },
+  { lines: ["$ pb preview ./dist"], note: "A folder of static files. Dotfiles and directory listings are not served." },
+  { lines: ["$ pb preview unix:///tmp/app.sock"], note: "A Unix socket." },
+]
+
+const who = [
+  ["pb preview 3000", "Anyone with the link. No account, no Paperboat on their side."],
+  ["pb preview 3000 --private", "Only you, from machines signed in to your account. Everyone else is refused."],
+  ["pb preview 3000 --team", "Teammates you granted this preview to, from their own signed-in machines."],
+]
+
+const life = [
+  ["In the foreground", "Until you press Ctrl+C. Press <kbd>b</kbd> to hand it to the background, or <kbd>t</kbd> to turn it into a tunnel."],
+  ["--ttl 2h", "Stops by itself after the time you give."],
+  ["--background", "Returns your prompt. Lasts 30 minutes unless you set <code>--ttl</code>, up to 24 hours. Keeps its address through a Paperboat restart or update."],
+  ["After a reboot", "Gone. A preview is never restored after a reboot; that is what a <a href=\"/features/tunnels/\">tunnel</a> is for."],
+]
+
+const inspect = [
+  { lines: ["$ pb preview inspect <preview> --enable --body"], note: "Start recording requests, with bodies." },
+  { lines: ["$ pb preview inspect <preview>"], note: "List what came in: method, path, status, how long it took." },
+  { lines: ["$ pb preview replay <preview> <capture-id>"], note: "Send one recorded request to your app again." },
+]
+
+const faq = [
+  {
+    q: "Is this an ngrok alternative?",
+    a: 'For sharing a local port over HTTPS, yes: one command, a stable generated address, request inspection and replay. ngrok does much more on the gateway side (traffic policies, OAuth in front of your app, load balancing). The <a href="/compare/ngrok/">comparison</a> lists both honestly.',
+  },
+  {
+    q: "Is a preview end-to-end encrypted?",
+    a: "No, and it cannot be: visitors use a normal browser, so their HTTPS ends at our edge, which then forwards the request to your machine over an encrypted connection. Use private access when both ends are your own machines.",
+  },
+  {
+    q: "What does the address look like, and does it change?",
+    a: `Three words and four digits under ${previewDomain}, generated for you and never reused for anyone else. It stays the same for the life of the preview. For a name of your own, add <code>--domain demo.example.com</code> under a domain you verified.`,
+  },
+  {
+    q: "Do WebSockets and HTTP/3 work?",
+    a: "Yes. Previews carry HTTP/1.1, HTTP/2, HTTP/3 and WebSocket, including large uploads and downloads.",
+  },
+  {
+    q: "How many previews can I run?",
+    a: "100 previews and tunnels at once on Free, 1,000 on Pro, no limit on Team. Stopped ones do not count. Requests through our edge use your plan's bandwidth: 5 GB a month on Free.",
+  },
+  {
+    q: "Where are inspected requests stored?",
+    a: "On your machine, in a bounded buffer. The console reads them from your machine over an end-to-end encrypted channel; our servers never hold them.",
+  },
+]
+---
+
+<Feature
+  slug="previews"
+  title="Share localhost over HTTPS with one command | Paperboat"
+  description="pb preview 3000 gives a local port a public HTTPS link in seconds. Private and team-only links, time limits, static folders, WebSocket and HTTP/3, request inspection and replay. Free plan included."
+  headline="Share a local port over HTTPS"
+  faq={faq}
+  related={["tunnels", "private-access", "self-hosting"]}
+  compare={["ngrok", "cloudflare-tunnel", "vscode-tunnels"]}
+>
+  <p slot="lede">
+    <code>pb preview</code> puts the app running on your machine at a public address. Send the link for a review, point a webhook at it, show a
+    demo. Stop the command and the link is gone.
+  </p>
+  <Sheet slot="aside" steps={hero} />
+
+  <section class="section section-tint" aria-labelledby="who-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="who-title">Who can open it, and for how long</h2>
+        <p class="lede">A link is public unless you say otherwise. Both choices are a flag on the same command.</p>
+      </header>
+      <div class="cols cols-even">
+        <table class="facts">
+          <thead><tr><th scope="col">You run</th><th scope="col">Who gets in</th></tr></thead>
+          <tbody>
+            {who.map(([command, text]) => <tr><th scope="row"><code>{command}</code></th><td>{text}</td></tr>)}
+          </tbody>
+        </table>
+        <table class="facts">
+          <thead><tr><th scope="col">How you run it</th><th scope="col">How long it lives</th></tr></thead>
+          <tbody>
+            {life.map(([name, text]) => <tr><th scope="row">{name.startsWith("--") ? <code>{name}</code> : name}</th><td set:html={text} /></tr>)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="targets-title">
+    <div class="wrap cols">
+      <div class="stack">
+        <h2 class="h2" id="targets-title">Point it at what you have</h2>
+        <div class="prose">
+          <p>A dev server, a built site, a socket. Run <code>pb preview</code> with no argument and it walks you through the choices.</p>
+          <p>
+            <code>pb preview list</code> shows what is running and <code>pb preview stop</code> ends one. The console shows the same list, with
+            each preview's expiry time.
+          </p>
+        </div>
+      </div>
+      <Sheet steps={targets} />
+    </div>
+  </section>
+
+  <section class="section section-tint" aria-labelledby="inspect-title">
+    <div class="wrap cols cols-flip">
+      <div class="stack">
+        <h2 class="h2" id="inspect-title">See each request, and send it again</h2>
+        <div class="prose">
+          <p>
+            Turn on capture and every request to the preview is recorded on your machine: method, path, status, duration, full headers and, if
+            you ask, bodies. Replay one after you fix the handler, without waiting for the webhook to fire again.
+          </p>
+          <p>
+            The <a href="/features/console/">web console</a> shows the same list live, with filters. Capture is off until you turn it on, and
+            it is free on every plan.
+          </p>
+        </div>
+      </div>
+      <Sheet steps={inspect} />
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="path-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="path-title">Where the encryption ends</h2>
+        <p class="lede">
+          A visitor's browser speaks HTTPS to our edge. The edge reads the request to route it, then sends it to your machine over an encrypted
+          connection. Run <a href="/features/self-hosting/">your own edge</a> if that middle should be yours.
+        </p>
+      </header>
+      <Lanes lanes={[publicLane]} caption="Any browser connects over HTTPS to the edge. The edge forwards the request to your machine over an encrypted connection." />
+    </div>
+  </section>
+</Feature>

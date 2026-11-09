@@ -1,0 +1,99 @@
+---
+import UseCase from "../../layouts/UseCase.astro"
+import Sheet from "../../components/Sheet.astro"
+import { plans, previewDomain } from "../../site"
+
+const hero = [
+  { lines: ["$ pb team invite acme bo@example.com"], note: "Bo joins the team. That alone opens nothing." },
+  { lines: ["$ pb team machine grant acme <machine-id> --member <bo> --capability terminal,exec"], note: "Bo gets a terminal and commands on staging. No SSH, no ports, no files." },
+  { lines: ["$ pb preview 3000 --team", "Preview ready", `https://quiet-river-lantern-4821.${previewDomain} -> http://127.0.0.1:3000`], note: "A review link only teammates you grant can open." },
+]
+
+const week = [
+  ["A new developer starts", "Invite them and add one rule. They install pb, sign in, and the staging box is there. No VPN profile, no key to collect."],
+  ["A pull request needs eyes", "<code>pb preview 3000 --team</code> on your laptop. Reviewers open the link; nobody else can."],
+  ["The staging database needs a look", "A rule grants port 5432 on that one machine. <code>pb access machine staging --port 5432</code> and the usual client."],
+  ["A deploy script needs the API key", "The key is in the team's ENV. <code>pb env run -- ./deploy.sh</code> on the build machine; nobody pastes it into chat."],
+  ["Something breaks at night", "Share your terminal session. A colleague watches, then types, in the same shell."],
+  ["Someone leaves", "Remove them. Their sessions end at once, their tokens stop working, and the audit log shows what they did last."],
+]
+
+const faq = [
+  {
+    q: "Do we need the Team plan to work together?",
+    a: `Not always. Sharing a live terminal or a preview link works on Free. Team, at ${plans[2].price} a seat a month, is for lasting access to each other's machines, with roles, single sign-on and an exportable audit log. It has a 14-day trial.`,
+  },
+  {
+    q: "We already have a VPN. Why this?",
+    a: "A VPN puts people on a network and leaves everything else to you: accounts on each box, keys, tmux, a tunnel service, a secrets store. Paperboat is those pieces with one access policy. If you need whole networks joined, keep the VPN; the two do not conflict.",
+  },
+  {
+    q: "Who owns a machine a member brings?",
+    a: "They do, until they transfer it. Sharing a personal machine with the team lends it; leaving the team takes it back. A machine enrolled into the team belongs to the team.",
+  },
+  {
+    q: "How is the bandwidth counted for a team?",
+    a: "Each member has 100 GB a month of relay and edge traffic inside the team. Extra bandwidth goes into one shared pool. Direct traffic between machines is never counted.",
+  },
+  {
+    q: "Is there a contract or a minimum?",
+    a: "No. One seat is the minimum, billed monthly or yearly by card, and you can cancel in the console.",
+  },
+]
+---
+
+<UseCase
+  slug="small-teams"
+  name="Small teams"
+  title="Shared server access for small dev teams, without a VPN | Paperboat"
+  description="Give teammates a terminal on staging, a review link, one database port or a deploy secret, each as a readable rule. Sessions end the moment someone is removed. $15 a seat with SSO and audit log, 14-day trial."
+  headline="A staging box, review links and secrets for a team of five"
+  faq={faq}
+  related={["teams", "env", "previews", "terminal"]}
+  compare={["teleport", "tailscale", "twingate"]}
+>
+  <p slot="lede">
+    Small teams share machines by sharing keys, and then nobody knows who can reach what. Paperboat makes each kind of access a rule you can
+    read, and takes it away the second you remove it.
+  </p>
+  <Sheet slot="aside" steps={hero} />
+
+  <section class="section section-tint" aria-labelledby="week-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="week-title">An ordinary week</h2>
+        <p class="lede">The things that usually mean a ticket, a shared password or a message that says "can you send me the key".</p>
+      </header>
+      <table class="facts">
+        <tbody>
+          {week.map(([when, what]) => <tr><th scope="row">{when}</th><td set:html={what} /></tr>)}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="cost-title">
+    <div class="wrap cols">
+      <div class="stack">
+        <h2 class="h2" id="cost-title">What it costs</h2>
+        <div class="prose">
+          <p>
+            <strong>{plans[2].price} a seat a month</strong>, or $150 a year. Every feature is included, single sign-on and directory sync too.
+            Machines are not counted.
+          </p>
+          <p>
+            Five people is $75 a month. The trial is 14 days; a card is taken at the start and nothing is charged if you cancel before day 15.
+          </p>
+          <p><a href="/pricing/">Pricing in full</a></p>
+        </div>
+      </div>
+      <div class="prose">
+        <p>
+          <strong>Where a bigger tool fits better.</strong> If you need recorded sessions for compliance, access requests with approvals, or
+          Kubernetes and database protocols proxied and audited per query, that is <a href="/compare/teleport/">Teleport</a>'s job. Paperboat
+          records who connected to what and when, not what they typed.
+        </p>
+      </div>
+    </div>
+  </section>
+</UseCase>

@@ -6,7 +6,7 @@
  * rendered and the column headings are menus: compare-picker.ts shows the chosen ones and keeps
  * them in the URL (?vs=). Without it, only the given columns are rendered.
  */
-import { paperboat, sections, type Cell, type Product } from "../compare-data"
+import { checked, paperboat, sections, type Cell, type Product } from "../compare-data"
 
 interface Props {
   /** The other products, in column order. */
@@ -38,7 +38,7 @@ const shown = (slug: string) => slug === "paperboat" || picked.includes(slug)
 const order = (slug: string) => (picked.includes(slug) ? picked.indexOf(slug) + 2 : 9)
 // The picker's two menus: the first picked product, then the second (or none).
 const slots = picker ? [picked[0], picked[1] ?? ""] : []
-const empty = (text: string) => text === "—" || text === "No"
+const empty = (text: string) => text === "n/a" || text === "No"
 ---
 
 <div
@@ -87,11 +87,12 @@ const empty = (text: string) => text === "—" || text === "No"
               <p class="group-sentence">{section.sentence}</p>
             </header>
             {section.rows.map((row) => (
-              <div class="row" role="row">
-                <div class="label" role="rowheader">
+              <div class="row">
+                <div class="label">
                   {row.label}
                 </div>
-                <div class="cell us" role="cell" style="order: 1">
+                <div class="cell us" style="order: 1">
+                  <span class="visually-hidden">Paperboat: </span>
                   {paperboat.cells[row.id].text}
                 </div>
                 {products.map((product) => {
@@ -100,11 +101,11 @@ const empty = (text: string) => text === "—" || text === "No"
                   return (
                     <div
                       class:list={["cell", empty(cell.text) && "none"]}
-                      role="cell"
                       data-col={product.slug}
                       hidden={!shown(product.slug)}
                       style={`order: ${order(product.slug)}`}
                     >
+                      <span class="visually-hidden">{product.label}: </span>
                       {cell.text}
                       {n && (
                         <a class="fn" href={`#src-${product.slug}-${n}`} aria-label={`Source ${n} for ${product.label}`}>
@@ -125,8 +126,8 @@ const empty = (text: string) => text === "—" || text === "No"
   <div class="sources">
     <h3 class="sources-title">Sources</h3>
     <p class="sources-note">
-      What each product does, from its own documentation, checked on 23 October 2026. “No” means its documentation
-      describes no such feature.
+      What each product does, from its own documentation, as of {checked}. “No” means its documentation describes no such
+      feature. Found something out of date? The other product's page wins; tell us and we fix ours.
     </p>
     {
       products.map((product) => (
@@ -171,8 +172,8 @@ const empty = (text: string) => text === "—" || text === "No"
     overflow: hidden;
   }
 
-  :global(.section-surface) .heads {
-    background: rgb(246 246 247 / 0.94);
+  .compare-tint .heads {
+    background: rgb(245 246 248 / 0.94);
   }
 
   .heads-track,
@@ -193,7 +194,7 @@ const empty = (text: string) => text === "—" || text === "No"
     min-height: 64px;
     font-family: var(--font-brand);
     font-weight: 600;
-    font-size: 1.0625rem;
+    font-size: var(--text-body);
     letter-spacing: -0.01em;
     color: var(--ink);
   }
@@ -227,7 +228,7 @@ const empty = (text: string) => text === "—" || text === "No"
   }
 
   .slot select:focus-visible {
-    outline: 2px solid var(--focus);
+    outline: 2px solid var(--cobalt);
     outline-offset: 2px;
   }
 
@@ -255,7 +256,7 @@ const empty = (text: string) => text === "—" || text === "No"
     margin: 0;
     font-family: var(--font-brand);
     font-weight: 600;
-    font-size: 1.375rem;
+    font-size: var(--text-h3);
     letter-spacing: -0.02em;
     color: var(--ink);
   }
@@ -263,13 +264,13 @@ const empty = (text: string) => text === "—" || text === "No"
   .group-sentence {
     margin: 0;
     color: var(--fog);
-    font-size: 0.9375rem;
+    font-size: var(--text-ui);
   }
 
   .row {
     padding-block: 14px;
-    border-top: 1px solid var(--divider);
-    font-size: 0.9375rem;
+    border-top: 1px solid var(--rule);
+    font-size: var(--text-ui);
     line-height: 1.45;
   }
 
@@ -282,20 +283,26 @@ const empty = (text: string) => text === "—" || text === "No"
   }
 
   .cell.none {
-    color: var(--faint);
+    color: var(--fog);
   }
 
+  .cell.us {
+    font-weight: 500;
+  }
+
+  /* The source number: small to read, but with room around it for a finger. */
   .fn {
-    margin-left: 3px;
-    font-size: 0.6875rem;
-    vertical-align: super;
-    line-height: 0;
-    color: var(--fog);
+    display: inline-block;
+    margin: -8px -4px -8px 0;
+    padding: 8px 6px;
+    font-size: var(--text-small);
+    line-height: 1;
+    color: var(--cobalt);
     text-decoration: none;
   }
 
   .fn:hover {
-    color: var(--cobalt);
+    text-decoration: underline;
   }
 
   .sources {
@@ -304,7 +311,7 @@ const empty = (text: string) => text === "—" || text === "No"
     margin-top: 64px;
     padding-top: 24px;
     border-top: 1px solid var(--rule);
-    font-size: 0.8125rem;
+    font-size: var(--text-small);
     color: var(--fog);
   }
 
@@ -312,7 +319,7 @@ const empty = (text: string) => text === "—" || text === "No"
     margin: 0;
     font-family: var(--font-brand);
     font-weight: 600;
-    font-size: 1rem;
+    font-size: var(--text-body);
     color: var(--ink);
   }
 
@@ -335,7 +342,11 @@ const empty = (text: string) => text === "—" || text === "No"
   }
 
   .source-list a {
+    display: inline-block;
+    padding-block: 6px;
     color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 3px;
     word-break: break-all;
   }
 
@@ -367,7 +378,7 @@ const empty = (text: string) => text === "—" || text === "No"
     .label {
       grid-column: 1 / -1;
       padding-bottom: 6px;
-      font-size: 0.8125rem;
+      font-size: var(--text-small);
     }
 
     .group-head {
@@ -383,7 +394,7 @@ const empty = (text: string) => text === "—" || text === "No"
     }
 
     .head {
-      font-size: 0.9375rem;
+      font-size: var(--text-ui);
       min-height: 56px;
     }
   }

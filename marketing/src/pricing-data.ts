@@ -2,7 +2,7 @@
  * What the pricing page compares (user pricing decisions 2026-10-22). Free and Pro have everything
  * for one person and differ only in bandwidth, which comes from `plans` in site.ts; Team adds people.
  */
-import { plans, teamTrial } from "./site"
+import { auditRetention, plans, publicTcp, teamTrial, topUp } from "./site"
 
 const limitCells = (key: "machines" | "publications" | "browserTerminals"): [PlanCell, PlanCell, PlanCell] => [
   plans[0][key],
@@ -12,84 +12,90 @@ const limitCells = (key: "machines" | "publications" | "browserTerminals"): [Pla
 
 /** One row per feature: true is included, false is not, a string is shown as it is. */
 export type PlanCell = boolean | string
-export const featureRows: { feature: string; cells: [PlanCell, PlanCell, PlanCell] }[] = [
-  { feature: "Machines", cells: limitCells("machines") },
-  { feature: "Terminals that survive a dropped connection, with replay", cells: [true, true, true] },
-  { feature: "Remote commands", cells: [true, true, true] },
-  { feature: "SSH, SCP, SFTP and rsync, with managed keys", cells: [true, true, true] },
-  { feature: "Send and receive files", cells: [true, true, true] },
-  { feature: "Previews and tunnels (active, combined)", cells: limitCells("publications") },
-  { feature: "Browser terminals (open in the console)", cells: limitCells("browserTerminals") },
-  { feature: "Terminals from the pb command", cells: ["Unlimited", "Unlimited", "Unlimited"] },
-  { feature: "Your own domains", cells: [true, true, true] },
-  { feature: "Environment variables, end-to-end encrypted", cells: [true, true, true] },
-  { feature: "Config sync from a Git repository", cells: [true, true, true] },
-  { feature: "Tags and access rules", cells: [true, true, true] },
-  { feature: "Share a terminal session or a preview link", cells: [true, true, true] },
-  { feature: "Self-hosted relays and tunnel servers", cells: [true, true, true] },
-  { feature: "Team members", cells: [false, false, true] },
-  { feature: "Lasting access to each other’s machines", cells: [false, false, true] },
-  { feature: "Roles", cells: [false, false, "Coming"] },
-  { feature: "SSO and SCIM", cells: [false, false, "Coming"] },
-  { feature: "Audit log export", cells: [false, false, "Coming"] },
-  { feature: "Invoices and receipts", cells: [false, true, true] },
+export const featureGroups: { title: string; rows: { feature: string; cells: [PlanCell, PlanCell, PlanCell] }[] }[] = [
+  {
+    title: "Limits",
+    rows: [
+      { feature: "Relay and edge bandwidth a month", cells: [plans[0].bandwidth, plans[1].bandwidth, plans[2].bandwidth] },
+      { feature: "Direct traffic between your machines", cells: ["Unlimited", "Unlimited", "Unlimited"] },
+      { feature: "Machines", cells: limitCells("machines") },
+      { feature: "Previews and tunnels running at once", cells: limitCells("publications") },
+      { feature: "Public raw-TCP tunnel addresses", cells: [publicTcp[0], publicTcp[1], publicTcp[2]] },
+      { feature: "Terminals open in the web console at once", cells: limitCells("browserTerminals") },
+      { feature: "Terminals from the pb command", cells: ["Unlimited", "Unlimited", "Unlimited"] },
+      { feature: `Extra bandwidth, ${topUp.price} per ${topUp.size}`, cells: [false, true, true] },
+    ],
+  },
+  {
+    title: "On your machines",
+    rows: [
+      { feature: "Terminals that survive a dropped connection, with replay", cells: [true, true, true] },
+      { feature: "Remote commands", cells: [true, true, true] },
+      { feature: "SSH, SCP, SFTP and rsync with managed keys", cells: [true, true, true] },
+      { feature: "File sending and the Inbox", cells: [true, true, true] },
+      { feature: "Private access to ports", cells: [true, true, true] },
+      { feature: "ENV: end-to-end encrypted environment variables", cells: [true, true, true] },
+      { feature: "Config sync from a Git repository", cells: [true, true, true] },
+    ],
+  },
+  {
+    title: "Public links",
+    rows: [
+      { feature: "Previews and tunnels over HTTP/1.1, HTTP/2, HTTP/3 and WebSocket", cells: [true, true, true] },
+      { feature: "Your own domains, with certificates", cells: [true, true, true] },
+      { feature: "Request inspector and replay", cells: [true, true, true] },
+      { feature: "Self-hosted relays and tunnel servers", cells: [true, true, true] },
+    ],
+  },
+  {
+    title: "Access and people",
+    rows: [
+      { feature: "Share a live terminal or a preview link", cells: [true, true, true] },
+      { feature: "Tags, policy file and API tokens", cells: [true, true, true] },
+      { feature: "Audit log kept for", cells: [auditRetention[0], auditRetention[1], auditRetention[2]] },
+      { feature: "Team members with lasting access to shared machines", cells: [false, false, true] },
+      { feature: "Roles: owner, admin, billing, auditor, member", cells: [false, false, true] },
+      { feature: "Single sign-on (SAML, OIDC) and directory sync (SCIM)", cells: [false, false, true] },
+      { feature: "Audit log export and streaming", cells: [false, false, true] },
+      { feature: "Invoices and receipts", cells: [false, true, true] },
+    ],
+  },
 ]
 
 export const planNames = plans.map((plan) => plan.name)
-export const bandwidthRow = plans.map((plan) => plan.bandwidth)
-
-/** “How bandwidth works”: short, plain answers. */
-export const bandwidthNotes = [
-  {
-    title: "Direct traffic is always free",
-    text: "When your machines can reach each other directly, nothing is counted. That is most of the time.",
-  },
-  {
-    title: "What counts",
-    text: "Traffic that goes through our relays (when machines can’t connect directly) and through our edges (public previews and tunnels).",
-  },
-  {
-    title: "When you run out",
-    text: "Previews, tunnels and relayed connections pause until next month or until you add more. Direct connections keep working.",
-  },
-  {
-    title: "Adding more",
-    text: "Add 100 GB at a time from the console, whenever you need it. On a team, it goes into one shared pool.",
-  },
-]
 
 export const faq = [
   {
-    question: "Is there a limit on machines?",
-    answer: "Free allows 100 machines and Pro 1,000. Team has no limit.",
+    q: "What exactly do I pay for?",
+    a: "Bandwidth that passes through servers we run: relays, when two machines cannot connect directly, and edges, which serve public previews and tunnels. Traffic that goes straight between your machines is never counted, on any plan.",
   },
   {
-    question: "Are features locked behind a plan?",
-    answer:
-      "Free and Pro have everything one person needs, with generous limits on machines, previews and tunnels; they differ in those limits and in bandwidth. Team adds people: members and lasting access to each other’s machines.",
+    q: "What happens when the bandwidth runs out?",
+    a: `Relayed connections, previews and tunnels pause until the next month, or until you add more on a paid plan (${topUp.price} per ${topUp.size}). Direct connections keep working, and you are told which limit was reached and where to raise it.`,
   },
   {
-    question: "What counts as a browser terminal?",
-    answer: "A terminal open in the console. Terminals from the pb command are unlimited on every plan. A shared terminal counts once, with up to 50 viewers.",
+    q: "Are features locked behind a paid plan?",
+    a: "Not for one person. Free and Pro have the same features and differ in limits and bandwidth. Team adds what a company needs: members, roles, single sign-on, directory sync, and audit log export.",
   },
   {
-    question: "Do I need Team to share with someone?",
-    answer: "No. Sharing a terminal session or a preview link is free on every plan. Team is for people who work on each other’s machines every day.",
+    q: "Do I need Team to share with someone?",
+    a: "No. Sharing a live terminal or a preview link works on every plan. Team is for people who use each other's machines every day.",
   },
   {
-    question: "How does the Team trial work?",
-    answer: teamTrial,
+    q: "What counts as a browser terminal?",
+    a: "A terminal open in the web console. Terminals from the pb command are unlimited on every plan. A shared terminal counts once, however many of its 50 possible viewers are watching.",
+  },
+  { q: "How does the Team trial work?", a: teamTrial },
+  {
+    q: "What if I host my own relay or tunnel server?",
+    a: 'Traffic through servers you run is not counted against your plan. <a href="/features/self-hosting/">Self-hosting</a> works on every plan, including Free.',
   },
   {
-    question: "What if I host my own relay or tunnel server?",
-    answer: "Traffic through servers you host yourself isn’t counted against your plan.",
+    q: "What if a payment fails?",
+    a: "Paid benefits stay for 7 days while the payment is retried. After that the workspace drops to the free limits until the payment goes through. Your machines, sessions and settings are untouched.",
   },
   {
-    question: "Can I pay yearly?",
-    answer: "Yes. Pro is $80 a year and Team is $150 per seat a year.",
-  },
-  {
-    question: "What happens to my machines if I cancel?",
-    answer: "You move back to Free. Your machines, terminals and settings stay; only the bandwidth goes back to 5 GB.",
+    q: "What happens to my machines if I cancel?",
+    a: "You move back to Free. Machines, terminals and settings stay; only the limits change.",
   },
 ]

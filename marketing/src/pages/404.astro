@@ -1,0 +1,43 @@
+---
+import Page from "../layouts/Page.astro"
+import Head from "../components/Head.astro"
+import { features } from "../features"
+---
+
+<Page title="Page not found | Paperboat" description="There is no page at this address. Here are the pages people usually look for on the Paperboat site." noindex>
+  <Head title="There is no page at this address">
+    <p>The link may be old, or the address mistyped. These are the pages people usually want.</p>
+    <div class="actions" slot="actions">
+      <a class="button button-primary" href="/">Home</a>
+      <a class="button button-quiet" href="/docs/">Quickstart</a>
+      <a class="button button-quiet" href="/pricing/">Pricing</a>
+    </div>
+  </Head>
+  <section class="section list">
+    <div class="wrap">
+      <ul class="links">
+        {features.map((item) => <li><a class="link" href={`/features/${item.slug}/`}>{item.name}</a></li>)}
+        <li><a class="link" href="/compare/">Comparisons</a></li>
+        <li><a class="link" href="/security/">Security</a></li>
+      </ul>
+    </div>
+  </section>
+</Page>
+
+<style>
+  .list {
+    padding-top: 0;
+  }
+
+  .links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--s2) var(--s5);
+  }
+
+  .links a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+</style>

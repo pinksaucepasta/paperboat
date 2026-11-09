@@ -1,0 +1,103 @@
+---
+import Feature from "../../layouts/Feature.astro"
+import Sheet from "../../components/Sheet.astro"
+import Lanes from "../../components/Lanes.astro"
+import { selfhostInstallUrl } from "../../site"
+
+const hero = [
+  { lines: [`$ curl -fsSL ${selfhostInstallUrl} | sh -s -- --enable both`], note: "On a Linux server with a public address. Installs <code>pbh</code>, which runs a relay, a tunnel server, or both." },
+  { lines: ["$ pbh selfhost code"], note: "Prints an address and a one-time code that lasts fifteen minutes." },
+  { lines: ["# Console → Network → Add self-hosted node"], note: "Paste them in, and pick the workspace that owns the node." },
+]
+
+const lanes = [
+  {
+    name: "Your relay",
+    text: "When two of your machines cannot connect directly, they meet at your server instead of ours. It still sees only ciphertext.",
+    nodes: [{ label: "laptop" }, { label: "your relay" }, { label: "studio" }],
+    wires: ["e2e" as const, "e2e" as const],
+  },
+  {
+    name: "Your tunnel server",
+    text: "Visitors to your previews and tunnels connect to your server, on your domain. Their HTTPS ends on a box you run.",
+    nodes: [{ label: "any browser", kind: "public" as const }, { label: "your edge" }, { label: "studio:3000" }],
+    wires: ["tls" as const, "e2e" as const],
+  },
+]
+
+const facts = [
+  ["Server", "Ubuntu 22.04 or 24.04, or Debian 12, on amd64 or arm64, with a public IP address."],
+  ["What gets installed", "The <code>pbh</code> helper, Docker if it is missing, and the relay and tunnel images, run as a system service."],
+  ["Domain", "None needed for a relay. A tunnel server serves your own domain, with a certificate you provide for its host name."],
+  ["Bandwidth", "Traffic through your servers is never counted against your plan."],
+  ["File transfers", "Unlimited mode sends any size through your own relay."],
+  ["Public TCP tunnels", "No limit on addresses on an edge you host."],
+  ["Upgrades", "Run the install line again. It upgrades in place and keeps its data."],
+  ["Plans", "Every plan, Free included."],
+]
+
+const faq = [
+  {
+    q: "Can I self-host all of Paperboat?",
+    a: "Not as a supported product. Sign-in, authorization and machine records stay with the hosted control plane. What you can run yourself are the two servers that carry traffic: the relay and the tunnel edge. The control plane never sees the contents of your private traffic either way.",
+  },
+  {
+    q: "Why would I run my own relay?",
+    a: "To keep relayed traffic on a server and a network you choose, to stop counting bandwidth, or to send files of any size. In the console you can keep relayed traffic on your own relays only.",
+  },
+  {
+    q: "Can I mix my tunnel server with Paperboat's?",
+    a: "Not within one workspace. For previews and tunnels a workspace uses either Paperboat's edges or your own, so that it is always clear who terminates your visitors' TLS. Relays can be mixed.",
+  },
+  {
+    q: "How do I check a node is healthy?",
+    a: "<code>pbh status</code> shows the service, and <code>pbh doctor</code> checks the host, its network and its ports and tells you what to open on your cloud firewall. The console's Network page shows each node with its latency.",
+  },
+  {
+    q: "Is the source available?",
+    a: 'Yes. The repository is public under the PolyForm Noncommercial licence: you may read, build and modify it for noncommercial use. Using the hosted service and the official binaries at work is covered by the terms of service.',
+  },
+]
+---
+
+<Feature
+  slug="self-hosting"
+  title="Self-hosted relay and tunnel server on your own Linux box | Paperboat"
+  description="Run Paperboat's relay and tunnel edge on your own Linux server with one command. Traffic through your servers is not metered, file transfers have no size limit, and your visitors' TLS ends on your box."
+  headline="Run the relay and the tunnel server yourself"
+  faq={faq}
+  related={["tunnels", "files", "private-access"]}
+  compare={["netbird", "tailscale", "cloudflare-tunnel"]}
+>
+  <p slot="lede">
+    Two kinds of Paperboat server ever carry your traffic: relays and tunnel edges. You can run both on a box you own, on any plan, and the
+    hosted ones step out of the path.
+  </p>
+  <Sheet slot="aside" steps={hero} />
+
+  <section class="section section-tint" aria-labelledby="what-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="what-title">What moves to your server</h2>
+        <p class="lede">Direct connections between machines never touched a server in the first place. These are the two paths that did.</p>
+      </header>
+      <Lanes lanes={lanes} caption="With a self-hosted relay, relayed traffic between your machines passes through your server, end-to-end encrypted. With a self-hosted tunnel server, visitors connect over HTTPS to your server, which forwards to your machine." />
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="facts-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="facts-title">What it takes, and what you get</h2>
+        <p class="lede">
+          The default install is a relay only. Add <code>--enable tunnel</code> or <code>--enable both</code> for a tunnel server.
+        </p>
+      </header>
+      <table class="facts">
+        <tbody>
+          {facts.map(([name, text]) => <tr><th scope="row">{name}</th><td set:html={text} /></tr>)}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</Feature>

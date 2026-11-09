@@ -1,21 +1,364 @@
 ---
 import Page from "../layouts/Page.astro"
-import PageHead from "../components/PageHead.astro"
-import Section from "../components/Section.astro"
-import { securitySections } from "../security-data"
+import Head from "../components/Head.astro"
+import Lanes from "../components/Lanes.astro"
+import Closing from "../components/Closing.astro"
+import { sourceUrl } from "../site"
+import { directLane, relayLane, publicLane } from "../diagrams"
+import { breadcrumbSchema } from "../schema"
+
+const sections = [
+  ["summary", "Who can read what"],
+  ["paths", "How traffic travels"],
+  ["servers", "What our servers see"],
+  ["keys", "Keys and identity"],
+  ["env", "ENV values"],
+  ["access", "Access and revocation"],
+  ["updates", "Updates"],
+  ["limits", "What we cannot protect"],
+  ["status", "Audits and source"],
+  ["report", "Reporting a vulnerability"],
+]
+
+const readers = [
+  ["Terminals, remote commands, SSH", "The two machines", "End-to-end encrypted. A relay, when used, forwards ciphertext."],
+  ["File transfers", "The two machines", "End-to-end encrypted. Nothing is stored on our servers."],
+  ["Private access to ports", "The two machines", "End-to-end encrypted, including the trusted HTTPS names."],
+  ["Terminals in the web console", "Your browser and the machine", "The encryption runs in the browser. Our servers carry ciphertext."],
+  ["Request inspector captures", "Your machine, and your browser while you look", "Captures stay on the machine. Our servers never hold them."],
+  ["ENV values", "Your devices and the machines you send them to", "Encrypted on your device. Our servers store ciphertext only."],
+  ["Public previews and tunnels", "The visitor, our edge, your machine", "HTTPS ends at the edge, which reads each request to route it, then forwards it to your machine encrypted. Not end-to-end."],
+  ["Config sync files", "Whoever can read your Git repository", "Plain files in your repository. Paperboat adds no encryption there."],
+]
+
+const seen = [
+  "Your account email and how you signed in",
+  "Machine names, operating system, version and online state",
+  "Public keys and certificates of your machines",
+  "Network addresses while two machines are being introduced",
+  "Which machine connected to which, when, and by which path",
+  "How many bytes went through relays and edges, for billing",
+  "Audit events: who did what to which machine, allowed or denied",
+  "Names of ENV variables, and who may receive them",
+]
+
+const unseen = [
+  "Terminal input and output",
+  "Commands you run and their arguments",
+  "File names, paths and contents",
+  "SSH traffic",
+  "Traffic to private ports",
+  "ENV values, your master password and recovery code",
+  "Any machine's private key",
+  "Requests captured by the inspector",
+]
 ---
 
-<Page title="Security — Paperboat" description="What Paperboat encrypts end to end, what our servers can see, and where your data lives.">
-  <PageHead title="Security">
-    <p>What we can see, what we can’t, and where your data lives.</p>
-  </PageHead>
-  {
-    securitySections.map((section, index) => (
-      <Section id={section.id} title={section.title} tone={index % 2 === 0 ? "plain" : "surface"}>
-        <Fragment slot="text">
-          <p>{section.text}</p>
-        </Fragment>
-      </Section>
-    ))
-  }
+<Page
+  title="Paperboat security: what is end-to-end encrypted and what our servers see"
+  description="A plain account of Paperboat's security model: which traffic is end-to-end encrypted, where public links end TLS, what metadata our servers hold, where keys live, how revocation works, and what we cannot protect."
+  schema={[breadcrumbSchema(Astro.site, [["Security", "/security/"]])]}
+>
+  <Head title="What we can see, and what we cannot">
+    <p>
+      Paperboat is built so that private traffic between your machines is unreadable to us. One feature is the exception by design, and this
+      page says exactly which. No certifications are claimed here because we do not have any yet.
+    </p>
+  </Head>
+
+  <div class="wrap layout">
+    <nav class="toc" aria-label="On this page">
+      <ol>
+        {sections.map(([id, label]) => <li><a href={`#${id}`}>{label}</a></li>)}
+      </ol>
+    </nav>
+
+    <div class="body">
+      <section id="summary" aria-labelledby="summary-title">
+        <h2 class="h2" id="summary-title">Who can read what</h2>
+        <div class="scroll">
+          <table class="facts readers">
+            <thead><tr><th scope="col">What</th><th scope="col">Who can read it</th><th scope="col">How</th></tr></thead>
+            <tbody>
+              {readers.map(([what, who, how]) => <tr><th scope="row">{what}</th><td class="who">{who}</td><td>{how}</td></tr>)}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="paths" aria-labelledby="paths-title">
+        <h2 class="h2" id="paths-title">How traffic travels</h2>
+        <div class="prose">
+          <p>
+            Our control plane introduces two machines and checks that the connection is allowed. The traffic itself goes directly between
+            them when their networks permit, and through a relay when they do not.
+          </p>
+        </div>
+        <Lanes
+          lanes={[directLane, relayLane, publicLane]}
+          caption="Direct: machine to machine, end-to-end encrypted. Relayed: through a relay that forwards ciphertext. Public link: browser to edge over HTTPS, then edge to machine, encrypted."
+        />
+        <div class="prose">
+          <p>
+            A connection never falls back to something weaker. If the preferred path is unavailable, pb may choose another path with the same
+            encryption. If authentication, a certificate or an access check fails, the connection ends; it does not try a different route.
+          </p>
+          <p>
+            You can run the relay and the edge yourself. See <a href="/features/self-hosting/">self-hosting</a>.
+          </p>
+        </div>
+      </section>
+
+      <section id="servers" aria-labelledby="servers-title">
+        <h2 class="h2" id="servers-title">What our servers see</h2>
+        <div class="prose">
+          <p>To authorize, route and bill, the control plane needs metadata. It does not need content, and it is not given any.</p>
+        </div>
+        <div class="two">
+          <div>
+            <h3 class="h3">They hold</h3>
+            <ul class="list">{seen.map((item) => <li>{item}</li>)}</ul>
+          </div>
+          <div>
+            <h3 class="h3">They never receive</h3>
+            <ul class="list list-no">{unseen.map((item) => <li>{item}</li>)}</ul>
+          </div>
+        </div>
+        <div class="prose">
+          <p>
+            A relay or an observer on the network can still see that two addresses are talking, when, and roughly how much. Encryption does
+            not hide that.
+          </p>
+        </div>
+      </section>
+
+      <section id="keys" aria-labelledby="keys-title">
+        <h2 class="h2" id="keys-title">Keys and identity</h2>
+        <div class="prose">
+          <p>
+            Each machine creates its own identity keys when it is set up. The private keys stay on that machine, in the operating system's
+            credential store where there is one, or in files only your user can read on a headless server. They are never sent to us and never
+            appear in logs or diagnostic bundles.
+          </p>
+          <p>
+            Our server registers the public half and issues short-lived certificates that tie a key to your account and that machine. Two
+            machines verify each other's certificates before any traffic flows, so a relay or our own control plane cannot stand in the
+            middle of a session and read it.
+          </p>
+          <p>
+            Signing in uses a hosted identity provider. When you run <code>pb login</code>, your browser shows a short code and asks you to
+            approve that computer; no token is ever put in a URL. Sessions are short-lived and refreshed, and each refresh replaces the last.
+          </p>
+        </div>
+      </section>
+
+      <section id="env" aria-labelledby="env-title">
+        <h2 class="h2" id="env-title">ENV values</h2>
+        <div class="prose">
+          <p>
+            <a href="/features/env/">ENV</a> values are encrypted on your device before they are uploaded. The keys are unlocked by a master
+            password, with an optional recovery code. Neither is sent to us, so we cannot decrypt your values and cannot reset your password.
+          </p>
+          <p>
+            A machine that should receive a value has its own key pair, and gets only the selected values encrypted to it. It never receives
+            your personal or team keys. Unlocked keys are kept in the operating system's credential store; on a headless Linux server they
+            live in memory for 15 minutes and are never written to disk.
+          </p>
+          <p>
+            Rotating keys after you remove a machine stops it from reading anything new. It cannot make that machine forget values it already
+            had, so change those secrets at their source too.
+          </p>
+        </div>
+      </section>
+
+      <section id="access" aria-labelledby="access-title">
+        <h2 class="h2" id="access-title">Access and revocation</h2>
+        <div class="prose">
+          <p>
+            Every action on a machine is checked against the workspace's <a href="/features/teams/">policy</a> before it is allowed, by the
+            server and again by the machine that is being reached. Joining a team grants nothing by itself.
+          </p>
+          <p>
+            Removing a person, a rule or a machine ends the sessions that depended on it within seconds, including open SSH connections. API
+            tokens expire, can be narrowed to single actions, and lose access when their creator does.
+          </p>
+          <p>
+            If our servers are unreachable, machines that already trust each other keep working with the access they last verified. A
+            revocation that was delivered before the outage stays in force. This is a deliberate trade: an outage on our side should not lock
+            you out of your own machines.
+          </p>
+          <p>The audit log records who did what, to which machine, and whether it was allowed. It never contains terminal or file contents.</p>
+        </div>
+      </section>
+
+      <section id="updates" aria-labelledby="updates-title">
+        <h2 class="h2" id="updates-title">Updates</h2>
+        <div class="prose">
+          <p>
+            <code>pb</code> updates itself from signed release metadata. It checks the signature, the file's hash and that the version is not
+            older than the one installed before anything is replaced. A new version whose background service fails to start is rolled back.
+          </p>
+          <p>
+            Updates install at 04:00 local time by default. <code>pb update settings</code> changes the time or turns automatic updates off;
+            <code>pb update check</code> and <code>pb update download</code> let you review a release first.
+          </p>
+        </div>
+      </section>
+
+      <section id="limits" aria-labelledby="limits-title">
+        <h2 class="h2" id="limits-title">What we cannot protect</h2>
+        <div class="prose">
+          <ul>
+            <li>
+              <strong>A compromised machine.</strong> Traffic is decrypted on your machines. Whoever controls one can read what reaches it and
+              use the keys on it. Remove the machine and rotate what it knew.
+            </li>
+            <li>
+              <strong>Public links.</strong> A preview or tunnel without <code>--private</code> is on the internet. Anyone with the address
+              can send it requests, and our edge handles those requests in the clear.
+            </li>
+            <li>
+              <strong>People you let in.</strong> An interactive participant in a shared terminal types with your shell's permissions. A new
+              participant sees recent output.
+            </li>
+            <li>
+              <strong>Metadata.</strong> Timing, sizes and network addresses are visible to relays and to us.
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="status" aria-labelledby="status-title">
+        <h2 class="h2" id="status-title">Audits and source</h2>
+        <div class="prose">
+          <p>
+            Paperboat has not had a third-party security audit and holds no certification such as SOC 2. When that changes, the report will
+            be linked here.
+          </p>
+          <p>
+            The source code of the client, the relay, the tunnel edge and the server is public at
+            <a href={sourceUrl} rel="noopener">{sourceUrl.replace("https://", "")}</a> under the PolyForm Noncommercial licence. The
+            claims on this page can be checked against it; the threat model is in <code>cli/docs/threat-model.md</code>.
+          </p>
+        </div>
+      </section>
+
+      <section id="report" aria-labelledby="report-title">
+        <h2 class="h2" id="report-title">Reporting a vulnerability</h2>
+        <div class="prose">
+          <p>
+            Please report privately, not in a public issue. Until a dedicated security address is published on this page, use the contact
+            listed in the repository's <a href={`${sourceUrl}/blob/main/LICENSING.md`} rel="noopener">LICENSING file</a>. Include what you
+            found and how to reproduce it; a person reads every report.
+          </p>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <Closing />
 </Page>
+
+<style>
+  .layout {
+    display: grid;
+    gap: var(--s7);
+    padding-bottom: var(--section);
+  }
+
+  .toc ol {
+    display: grid;
+    padding-block: var(--s3);
+    border-block: 1px solid var(--rule);
+    font-size: var(--text-ui);
+  }
+
+  .toc a {
+    display: flex;
+    align-items: center;
+    min-height: 36px;
+    color: var(--fog);
+  }
+
+  .toc a:hover {
+    color: var(--ink);
+  }
+
+  .body {
+    display: grid;
+    gap: var(--s8);
+    min-width: 0;
+  }
+
+  .body > section {
+    display: grid;
+    gap: var(--s5);
+  }
+
+  .readers {
+    min-width: 640px;
+  }
+
+  .readers tbody th {
+    width: 27%;
+  }
+
+  .readers .who {
+    width: 26%;
+    color: var(--ink);
+  }
+
+  .two {
+    display: grid;
+    gap: var(--s6);
+  }
+
+  .two > div {
+    display: grid;
+    gap: var(--s3);
+    align-content: start;
+  }
+
+  .list {
+    font-size: var(--text-ui);
+    line-height: 1.5;
+    border-top: 1px solid var(--rule);
+  }
+
+  .list li {
+    padding: var(--s2) 0 var(--s2) var(--s5);
+    border-bottom: 1px solid var(--rule);
+    background: no-repeat left 0.95em / 10px 2px linear-gradient(var(--cobalt), var(--cobalt));
+    color: var(--text);
+  }
+
+  .list-no li {
+    background-image: linear-gradient(var(--fog), var(--fog));
+    color: var(--fog);
+  }
+
+  @media (min-width: 720px) {
+    .two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: var(--s7);
+    }
+  }
+
+  @media (min-width: 1000px) {
+    .layout {
+      grid-template-columns: 220px minmax(0, 1fr);
+      gap: var(--s8);
+      align-items: start;
+    }
+
+    .toc {
+      position: sticky;
+      top: calc(var(--header) + var(--s5));
+    }
+
+    .toc ol {
+      border: 0;
+      padding: 0;
+    }
+  }
+</style>

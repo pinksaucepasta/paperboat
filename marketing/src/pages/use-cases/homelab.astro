@@ -1,0 +1,131 @@
+---
+import UseCase from "../../layouts/UseCase.astro"
+import Sheet from "../../components/Sheet.astro"
+import { localDomain, plans, tunnelDomain } from "../../site"
+
+const hero = [
+  { lines: ["$ pb ssh homelab"], note: "From a café, a hotel, your phone's hotspot. No port forwarded on the router at home." },
+  { lines: [`# browser: https://jellyfin.homelab.${localDomain}`], note: "A service on the home server, by name, with HTTPS your browser trusts. Only your machines can open it." },
+]
+
+const publish = [
+  { lines: ["$ pb tunnel create blog --port 8080 --wait", "Created tunnel blog (tunnel_7c2m9xqa)", `https://amber-quiet-harbor-5120.${tunnelDomain} -> http://127.0.0.1:8080`, "Status: ready"], note: "The one thing you do want public." },
+  { lines: ["$ pb domain add home.example.com", "$ pb tunnel domain add blog blog.home.example.com"], note: "On your own domain. Free plan included." },
+]
+
+const jobs = [
+  ["SSH in from outside", "pb ssh homelab", "Works behind NAT and carrier-grade NAT. Your router's admin page stays closed."],
+  ["Open a web UI", `https://<port>.homelab.${localDomain}`, "Grafana, Home Assistant, the router's own page. Private to your machines."],
+  ["Reach apps behind a reverse proxy", `https://<app>.homelab.${localDomain}`, "Works with Coolify's default proxy and others. No public certificates to manage."],
+  ["Use a database or other TCP service", "pb access machine homelab --port 5432", "The port appears on your laptop for as long as the command runs."],
+  ["Copy a backup off the box", "pb rsync -a homelab:/srv/backups/ ./backups/", "Plain rsync, through the same private path."],
+  ["Leave a job running", "pb connect homelab", "A terminal that is still there next weekend."],
+]
+
+const faq = [
+  {
+    q: "Does this work behind CGNAT, without a public IP?",
+    a: "Yes. Both machines connect outward, so nothing needs to be reachable from the internet. If the two networks will not allow a direct connection, traffic goes through a relay, still encrypted end to end.",
+  },
+  {
+    q: "Is the free plan enough for a home lab?",
+    a: `Usually. Free has every feature and ${plans[0].machines} machines. The ${plans[0].bandwidth} a month applies only to relayed traffic and to public tunnels; direct traffic between your machines is unlimited. If you publish something busy, Pro is ${plans[1].price} a month for ${plans[1].bandwidth}, or you can run the relay and tunnel server on a small VPS and count nothing.`,
+  },
+  {
+    q: "Can I reach my home lab from my phone?",
+    a: "A terminal, yes, through the web console in the phone's browser. Private names and ports, no: those need pb on the device, and there is no mobile app. If phone access to services matters most to you, Tailscale is the better fit.",
+  },
+  {
+    q: "Can my family use a service I host without installing anything?",
+    a: "Publish it with a tunnel and they open a normal HTTPS link. That link is public, so put a login in the app itself.",
+  },
+  {
+    q: "Is it safe to stream media through it?",
+    a: "It works, but mind the path. Between your own machines on a direct connection it costs nothing. Through a public tunnel, every byte is edge bandwidth, and video adds up fast.",
+  },
+  {
+    q: "Which machines can I install it on?",
+    a: "Linux on x86-64 and ARM64, and macOS on Apple Silicon. Windows support is coming.",
+  },
+]
+---
+
+<UseCase
+  slug="homelab"
+  name="Home lab"
+  title="Access your home lab from anywhere without port forwarding | Paperboat"
+  description="SSH into a home server behind NAT or CGNAT, open its web apps by name with trusted HTTPS, and publish one service on your own domain. No port forwarding, no dynamic DNS. Free for 100 machines."
+  headline="Reach the server at home without opening the router"
+  faq={faq}
+  related={["private-access", "ssh", "tunnels", "self-hosting"]}
+  compare={["tailscale", "cloudflare-tunnel", "zerotier"]}
+>
+  <p slot="lede">
+    Port forwarding exposes your home network, and dynamic DNS breaks at the worst time. Install <code>pb</code> on the server and on your
+    laptop, and the server is one name away wherever you are.
+  </p>
+  <Sheet slot="aside" steps={hero} />
+
+  <section class="section section-tint" aria-labelledby="jobs-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="jobs-title">The usual jobs</h2>
+        <p class="lede">Each of these is one line, and none of them changes your router, your DNS or your firewall.</p>
+      </header>
+      <div class="scroll">
+        <table class="facts wide">
+          <thead><tr><th scope="col">You want to</th><th scope="col">You type</th><th scope="col">Worth knowing</th></tr></thead>
+          <tbody>
+            {jobs.map(([job, command, note]) => <tr><th scope="row">{job}</th><td><code>{command}</code></td><td>{note}</td></tr>)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="public-title">
+    <div class="wrap cols">
+      <div class="stack">
+        <h2 class="h2" id="public-title">Publish one thing, keep the rest private</h2>
+        <div class="prose">
+          <p>
+            Most of a home lab should never be on the internet. For the blog or the status page that should, a tunnel gives it a permanent
+            HTTPS address without exposing the machine behind it.
+          </p>
+          <p>
+            The tunnel comes back by itself after a power cut. If your home IP changes, nothing needs updating, because the server connects out
+            to the edge.
+          </p>
+        </div>
+      </div>
+      <Sheet steps={publish} />
+    </div>
+  </section>
+
+  <section class="section section-tint" aria-labelledby="not-title">
+    <div class="wrap cols">
+      <h2 class="h2" id="not-title">What it does not do</h2>
+      <div class="prose">
+        <p>
+          Paperboat is not a network. It will not put your TV, your phone or a whole subnet behind one address, act as an exit node, or carry
+          UDP for a game server.
+        </p>
+        <p>
+          It connects the computers you install it on, port by port. If you want every device at home on one private network,
+          <a href="/compare/tailscale/">Tailscale</a>, <a href="/compare/zerotier/">ZeroTier</a> or
+          <a href="/compare/netbird/">NetBird</a> is the right tool, and Paperboat runs happily beside any of them.
+        </p>
+      </div>
+    </div>
+  </section>
+</UseCase>
+
+<style>
+  .wide {
+    min-width: 760px;
+  }
+
+  .wide tbody th {
+    width: 24%;
+  }
+</style>

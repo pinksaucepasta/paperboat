@@ -1,0 +1,108 @@
+---
+import Feature from "../../layouts/Feature.astro"
+import Sheet from "../../components/Sheet.astro"
+import Code from "../../components/Code.astro"
+
+const hero = [
+  { lines: ["$ pb config repository connect git@github.com:ana/dotfiles.git"], note: "Any Git repository: HTTPS, SSH or a local path. It stays yours." },
+  { lines: ["$ pb config sync init", "$ pb config sync validate --repository <repository-id>", "$ pb config sync apply --repository <repository-id>"], note: "Run on the machine you are configuring. Apply shows exactly what will change and asks you to confirm." },
+  { lines: ["$ pb config status"], note: "What is in sync, what is pending, what conflicts." },
+]
+
+const shared = `version = 1
+mode = "pull_only"
+
+[os.linux.paths."myapp/settings.json"]
+local_path = "~/.config/myapp/settings.json"
+kind = "file"
+
+[os.darwin.paths."myapp/settings.json"]
+local_path = "~/Library/Application Support/myapp/settings.json"
+kind = "file"
+
+# One machine that is different, said where everyone can see it.
+[machine.build-server.paths."myapp/settings.json"]
+local_path = "/srv/myapp/settings.json"`
+
+const conflicts = [
+  { lines: ["$ pb config conflict list studio"], note: "Paths that changed on the machine and in the repository." },
+  { lines: ["$ pb config conflict compare studio <path>"], note: "Both versions, side by side." },
+  { lines: ["$ pb config conflict resolve studio <path> --keep repository"], note: "Or <code>--keep machine</code>. Nothing is overwritten until you choose." },
+]
+
+const faq = [
+  {
+    q: "Is my repository encrypted by Paperboat?",
+    a: "No. Synced files and their Git history are ordinary files in your repository, readable by whoever can read the repository. Keep secrets in <a href=\"/features/env/\">ENV</a>, not in tracked files.",
+  },
+  {
+    q: "Which files does it refuse to sync?",
+    a: "Credentials, <code>.env</code> files, SSH key material and Paperboat's own state are always excluded, whatever your rules say.",
+  },
+  {
+    q: "Does it guess where files go on each operating system?",
+    a: "No. You name each destination, per operating system if they differ. Paperboat never translates or infers a path.",
+  },
+  {
+    q: "How is this different from a dotfiles manager like chezmoi or stow?",
+    a: "Those are run by you on each machine. Config sync runs as part of Paperboat on machines you already manage with it, applies changes after you approve them, and shows conflicts for every machine in one place. If chezmoi already works for you, there is no need to switch.",
+  },
+  {
+    q: "Can a team share defaults?",
+    a: "Yes. A team sets a default repository, and members adopt or leave it per machine with <code>pb config team-default-adopt</code> and <code>team-default-unadopt</code>.",
+  },
+]
+---
+
+<Feature
+  slug="config-sync"
+  title="Sync dotfiles across machines from your own Git repository | Paperboat"
+  description="Keep the same shell, editor and tool settings on every machine. Paperboat syncs chosen files from a Git repository you own, with per-OS paths, explicit approval, and conflicts you resolve by hand."
+  headline="The same dotfiles on every machine"
+  faq={faq}
+  related={["env", "terminal", "teams"]}
+>
+  <p slot="lede">
+    A new server should feel like your laptop within a minute. Point Paperboat at your dotfiles repository, say which files go where, and
+    approve the change.
+  </p>
+  <Sheet slot="aside" steps={hero} />
+
+  <section class="section section-tint" aria-labelledby="file-title">
+    <div class="wrap cols">
+      <div class="stack">
+        <h2 class="h2" id="file-title">One file says what goes where</h2>
+        <div class="prose">
+          <p>
+            Shared rules live in <code>.paperboat/config-sync.toml</code> in the repository. Each machine can also keep its own small file for
+            what differs only there.
+          </p>
+          <p>
+            The order is simple: the machine's own file wins, then its <code>[machine.&lt;name&gt;]</code> section, then its operating system's
+            section, then the shared defaults.
+          </p>
+          <p>
+            <code>mode = "pull_only"</code> makes a machine follow the repository without ever pushing its local edits back.
+          </p>
+        </div>
+      </div>
+      <Code name=".paperboat/config-sync.toml" text={shared} />
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="conflict-title">
+    <div class="wrap cols cols-flip">
+      <div class="stack">
+        <h2 class="h2" id="conflict-title">Conflicts wait for you</h2>
+        <div class="prose">
+          <p>
+            If a file changed on the machine and in the repository, Paperboat does not merge and does not pick a winner. It lists the path,
+            shows both versions, and applies the side you keep.
+          </p>
+          <p>The web console lists the same conflicts.</p>
+        </div>
+      </div>
+      <Sheet steps={conflicts} />
+    </div>
+  </section>
+</Feature>

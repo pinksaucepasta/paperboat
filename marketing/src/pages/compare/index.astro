@@ -1,70 +1,133 @@
 ---
 import Page from "../../layouts/Page.astro"
-import PageHead from "../../components/PageHead.astro"
-import Section from "../../components/Section.astro"
+import Head from "../../components/Head.astro"
 import CompareTable from "../../components/CompareTable.astro"
 import Closing from "../../components/Closing.astro"
-import { defaultPicks, products } from "../../compare-data"
+import { checked, defaultPicks, products } from "../../compare-data"
+import { breadcrumbSchema } from "../../schema"
+
+/** What people come looking for, and the tool we would pick for it, ours or not. */
+const guide = [
+  ["A terminal on my machines that survives a closed laptop, plus SSH and files", "Paperboat", "/features/terminal/"],
+  ["A public HTTPS link to localhost, now", "Paperboat or ngrok. Cloudflare's quick tunnels if you want no account at all", "/compare/ngrok/"],
+  ["One private network for every device I own, phones included", "Tailscale. NetBird if you want to host all of it yourself", "/compare/tailscale/"],
+  ["A production site behind a CDN and a firewall", "Cloudflare Tunnel", "/compare/cloudflare-tunnel/"],
+  ["An API gateway: traffic policies, OAuth and rate limits in front of my app", "ngrok", "/compare/ngrok/"],
+  ["Recorded sessions and access requests for compliance; Kubernetes and database access", "Teleport", "/compare/teleport/"],
+  ["Company-wide access with device posture checks", "Twingate or Cloudflare Zero Trust", "/compare/twingate/"],
+  ["Devices that must share one Ethernet-like network", "ZeroTier", "/compare/zerotier/"],
+  ["Terminals, tunnels and shared secrets for a small team, in one tool", "Paperboat", "/use-cases/small-teams/"],
+]
 ---
 
 <Page
-  title="Compare — Paperboat"
-  description="Paperboat side by side with Tailscale, ngrok, Cloudflare, Teleport, NetBird, ZeroTier, Twingate, enterprise VPNs, SSH and VS Code Remote Tunnels: terminals, SSH, files, ENV, previews, tunnels, encryption, teams and pricing."
+  title="Paperboat vs Tailscale, ngrok, Cloudflare Tunnel, Teleport, NetBird"
+  description={`An honest guide to which tool fits which job, and a feature-by-feature table of Paperboat beside Tailscale, ngrok, Cloudflare Tunnel, Teleport, NetBird and six more. Every claim sourced, as of ${checked}.`}
+  schema={[breadcrumbSchema(Astro.site, [["Compare", "/compare/"]])]}
 >
-  <PageHead title="Compare">
+  <Head title="Which tool for which job">
     <p>
-      Pick up to two tools and see them beside Paperboat, feature by feature. Every answer about another product
-      links to its own documentation.
+      Paperboat overlaps with a mesh VPN, a tunnel service and SSH, and does not replace any of them completely. This page says which tool we
+      would pick for what, and then sets them side by side.
     </p>
-  </PageHead>
+    <p class="small">Claims about other products link to their own documentation and were checked in {checked}.</p>
+  </Head>
 
-  <Section id="table">
-    <CompareTable products={products} picked={defaultPicks} picker />
-  </Section>
+  <section class="section guide" aria-labelledby="guide-title">
+    <div class="wrap">
+      <h2 class="visually-hidden" id="guide-title">Our pick, by need</h2>
+      <div class="scroll">
+        <table class="facts picks">
+          <thead><tr><th scope="col">If you need</th><th scope="col">We would use</th><th scope="col"><span class="visually-hidden">Read more</span></th></tr></thead>
+          <tbody>
+            {
+              guide.map(([need, pick, href]) => (
+                <tr>
+                  <th scope="row">{need}</th>
+                  <td class:list={{ ours: pick === "Paperboat" }}>{pick}</td>
+                  <td><a class="link" href={href}>{href.startsWith("/compare/") ? "Compare" : "Details"}</a></td>
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
 
-  <Section id="pages" title="Side by side, in more detail" tone="surface">
-    <Fragment slot="text">
-      <p>What is different, which to choose, pricing and how to switch.</p>
-    </Fragment>
-    <ul class="pages">
-      {
-        products.map((product) => (
-          <li>
-            <a href={`/compare/${product.slug}`}>
-              <span class="page-name">Paperboat vs {product.label}</span>
-              <span class="page-line">{product.summary.split(". ")[0]}.</span>
-            </a>
-          </li>
-        ))
-      }
-    </ul>
-  </Section>
+  <section class="section section-tint compare-tint" aria-labelledby="table-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="table-title">Side by side</h2>
+        <p class="lede">Choose up to two tools to stand beside Paperboat. The choice is kept in the address, so you can send the link.</p>
+      </header>
+      <CompareTable products={products} picked={defaultPicks} picker />
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="pages-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="pages-title">One at a time, in detail</h2>
+        <p class="lede">What differs, what each costs, when to choose the other one, and how to move.</p>
+      </header>
+      <ul class="pages">
+        {
+          products.map((product) => (
+            <li>
+              <a href={`/compare/${product.slug}/`}>
+                <span class="page-name">Paperboat vs {product.label}</span>
+                <span class="page-line">{product.summary.split(". ")[0]}.</span>
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
 
   <Closing />
 </Page>
 
 <style>
+  .guide {
+    padding-top: 0;
+  }
+
+  .picks {
+    min-width: 640px;
+  }
+
+  .picks tbody th {
+    width: 50%;
+    font-weight: 400;
+    color: var(--text);
+  }
+
+  .picks td {
+    color: var(--ink);
+  }
+
+  .picks .ours {
+    color: var(--cobalt);
+    font-weight: 500;
+  }
+
   .pages {
     display: grid;
-    gap: 0 48px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
+    gap: 0 var(--s7);
+    border-top: 1px solid var(--rule);
   }
 
   .pages a {
     display: grid;
-    gap: 4px;
-    padding-block: 18px;
-    border-top: 1px solid var(--rule);
-    color: inherit;
-    text-decoration: none;
+    gap: 2px;
+    padding-block: var(--s4);
+    border-bottom: 1px solid var(--rule);
   }
 
   .page-name {
-    font-family: var(--font-brand);
-    font-weight: 600;
-    font-size: 1.0625rem;
+    font-weight: 500;
     color: var(--ink);
   }
 
@@ -74,13 +137,13 @@ import { defaultPicks, products } from "../../compare-data"
 
   .page-line {
     color: var(--fog);
-    font-size: 0.9375rem;
-    max-width: 52ch;
+    font-size: var(--text-ui);
+    line-height: 1.5;
   }
 
   @media (min-width: 860px) {
     .pages {
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 </style>

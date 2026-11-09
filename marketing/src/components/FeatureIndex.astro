@@ -1,0 +1,91 @@
+---
+/** Every feature as a line of help output: the command, what it gets you, and its page. */
+import { features, featureGroups } from "../features"
+---
+
+<div class="index">
+  {
+    featureGroups.map((group) => (
+      <section class="group" aria-label={group}>
+        <h3 class="group-title">{group}</h3>
+        <ul>
+          {features
+            .filter((item) => item.group === group)
+            .map((item) => (
+              <li>
+                <a class="item" href={`/features/${item.slug}/`}>
+                  <code class="command">{item.command}</code>
+                  <span class="text">
+                    <span class="name">{item.name}</span>
+                    <span class="line">{item.line}</span>
+                  </span>
+                </a>
+              </li>
+            ))}
+        </ul>
+      </section>
+    ))
+  }
+</div>
+
+<style>
+  .index {
+    display: grid;
+    gap: var(--s7);
+  }
+
+  .group-title {
+    padding-bottom: var(--s3);
+    border-bottom: 1px solid var(--ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-ui);
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  .item {
+    display: grid;
+    gap: var(--s2);
+    padding-block: var(--s4);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .item .command {
+    padding: 0;
+    background: none;
+    white-space: normal;
+    font-size: var(--text-code);
+    color: var(--cobalt);
+    font-weight: 500;
+    overflow-wrap: anywhere;
+  }
+
+  .text {
+    display: grid;
+    gap: 2px;
+  }
+
+  .name {
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  .item:hover .name {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .line {
+    font-size: var(--text-ui);
+    line-height: 1.5;
+    color: var(--fog);
+  }
+
+  @media (min-width: 860px) {
+    .item {
+      grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+      column-gap: var(--s7);
+      align-items: baseline;
+    }
+  }
+</style>

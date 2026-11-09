@@ -1,8 +1,8 @@
 ---
 import Page from "../../layouts/Page.astro"
-import PageHead from "../../components/PageHead.astro"
-import Section from "../../components/Section.astro"
+import Head from "../../components/Head.astro"
 import { legalPages } from "../../legal-data"
+import { sourceUrl } from "../../site"
 
 export function getStaticPaths() {
   return legalPages.map((page) => ({ params: { slug: page.slug }, props: { page } }))
@@ -10,11 +10,40 @@ export function getStaticPaths() {
 const { page } = Astro.props
 ---
 
-<Page title={`${page.title} — Paperboat`} description={`${page.title} for Paperboat.`}>
-  <PageHead title={page.title}>
-    <p>Not published yet.</p>
-  </PageHead>
-  <Section id="text">
-    <p class="body">{page.text}</p>
-  </Section>
+<Page title={`${page.title} | Paperboat`} description={`Paperboat's ${page.title.toLowerCase()} is not published yet. This page says what it will cover and what is already written down.`} noindex>
+  <Head title={page.title}>
+    <p>
+      This document is not published yet. Paperboat is in pre-launch, and the final text will be here before the service opens to the public.
+      It will cover {page.covers}.
+    </p>
+  </Head>
+
+  <section class="section now">
+    <div class="wrap cols">
+      <h2 class="h2">What is already written down</h2>
+      <div class="prose">
+        <ul>
+          <li>
+            <a href="/security/">Security</a>: what is end-to-end encrypted, what metadata our servers hold, and what they never receive.
+          </li>
+          <li>
+            <a href="/pricing/">Pricing</a>: plans, limits, the Team trial and what happens when a payment fails.
+          </li>
+          <li>
+            <a href={`${sourceUrl}/blob/main/LICENSING.md`} rel="noopener">Licensing</a>: the source code is public under the PolyForm
+            Noncommercial licence; the hosted service and official builds may be used at work.
+          </li>
+          <li>
+            Deleting your account is self-service in the console and takes effect at once: <code>pb account delete</code> prints the link.
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
 </Page>
+
+<style>
+  .now {
+    padding-top: 0;
+  }
+</style>

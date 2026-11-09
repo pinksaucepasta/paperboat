@@ -1,0 +1,67 @@
+---
+/** Where to go next: other features and the comparisons that apply, each named for what it answers. */
+import { feature } from "../features"
+import { compares } from "../compare-data"
+interface Props {
+  features?: string[]
+  compare?: string[]
+}
+const { features: slugs = [], compare = [] } = Astro.props
+const items = slugs.map(feature)
+const versus = compares.filter((item) => compare.includes(item.slug))
+---
+
+<section class="section section-tint" aria-labelledby="related-title">
+  <div class="wrap cols">
+    <h2 class="h2" id="related-title">Goes well with</h2>
+    <ul class="related">
+      {
+        items.map((item) => (
+          <li>
+            <a href={`/features/${item.slug}/`}>
+              <span class="name">{item.name}</span>
+              <span class="line">{item.line}</span>
+            </a>
+          </li>
+        ))
+      }
+      {
+        versus.map((item) => (
+          <li>
+            <a href={`/compare/${item.slug}/`}>
+              <span class="name">Paperboat and {item.name}, compared</span>
+              <span class="line">What each does, what each costs, and when to pick which.</span>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</section>
+
+<style>
+  .related {
+    border-top: 1px solid var(--rule);
+  }
+
+  .related a {
+    display: grid;
+    gap: 2px;
+    padding-block: var(--s4);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .name {
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  .related a:hover .name {
+    color: var(--cobalt);
+  }
+
+  .line {
+    font-size: var(--text-ui);
+    color: var(--fog);
+  }
+</style>

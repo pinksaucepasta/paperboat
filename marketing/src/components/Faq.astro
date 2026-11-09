@@ -1,33 +1,38 @@
 ---
-import Section from "./Section.astro"
-import Icon from "./Icon.astro"
-import { faq } from "../pricing-data"
+/** Questions people ask, answered in a sentence or two. The page also publishes them as FAQPage data (faqSchema). */
+export type Question = { q: string; a: string }
+interface Props {
+  items: Question[]
+  title?: string
+}
+const { items, title = "Questions" } = Astro.props
 ---
 
-<Section id="faq" title="Questions" tone="surface">
-  <div class="faq">
-    {
-      faq.map((item) => (
-        <details class="item">
-          <summary>
-            <span class="question">{item.question}</span>
-            <Icon name="plus" size={16} class="open-icon" />
-          </summary>
-          <p class="body answer">{item.answer}</p>
-        </details>
-      ))
-    }
+<section class="section" aria-labelledby="faq-title">
+  <div class="wrap cols">
+    <h2 class="h2" id="faq-title">{title}</h2>
+    <div class="faq">
+      {
+        items.map((item) => (
+          <details>
+            <summary>
+              <span>{item.q}</span>
+              <span class="mark" aria-hidden="true" />
+            </summary>
+            <p set:html={item.a} />
+          </details>
+        ))
+      }
+    </div>
   </div>
-</Section>
+</section>
 
 <style>
   .faq {
-    display: grid;
-    max-width: 760px;
     border-top: 1px solid var(--rule);
   }
 
-  .item {
+  details {
     border-bottom: 1px solid var(--rule);
   }
 
@@ -35,29 +40,55 @@ import { faq } from "../pricing-data"
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 16px;
-    padding-block: 20px;
+    gap: var(--s4);
+    min-height: 60px;
+    padding-block: var(--s3);
     cursor: pointer;
     list-style: none;
+    font-weight: 500;
+    color: var(--ink);
   }
 
   summary::-webkit-details-marker {
     display: none;
   }
 
-  .question {
-    font-family: var(--font-brand);
-    font-weight: 600;
-    font-size: 1.125rem;
-    color: var(--ink);
+  /* A plus that becomes a minus. */
+  .mark {
+    position: relative;
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
   }
 
-  .item[open] :global(.open-icon) {
-    transform: rotate(45deg);
+  .mark::before,
+  .mark::after {
+    content: "";
+    position: absolute;
+    inset: 6px 0 auto 0;
+    height: 2px;
+    border-radius: 1px;
+    background: var(--fog);
   }
 
-  .answer {
-    padding-bottom: 20px;
+  .mark::after {
+    transform: rotate(90deg);
+  }
+
+  details[open] .mark::after {
+    display: none;
+  }
+
+  details p {
+    padding-bottom: var(--s5);
     max-width: 62ch;
+    color: var(--fog);
+    text-wrap: pretty;
+  }
+
+  details p :global(a) {
+    color: var(--cobalt);
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
 </style>

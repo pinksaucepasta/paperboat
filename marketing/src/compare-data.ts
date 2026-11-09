@@ -1,10 +1,13 @@
 /**
  * The compare pages: /compare (pick up to two products and see them beside Paperboat) and one
  * long page per product (pages/compare/[slug].astro). Every claim about another product links to
- * the page of its own documentation, pricing page or repository that says it; claims were
- * checked on 2026-10-23 and must be rechecked before each release of the site.
+ * the page of its own documentation, pricing page or repository that says it; claims are rechecked
+ * before each release of the site, and `checked` is the month of the last pass.
  * "No" means the product's documentation describes no such feature.
  */
+
+/** When the claims about other products were last checked against their sources. */
+export const checked = "November 2026"
 
 export type RowId =
   | "terminal_persistent"
@@ -47,7 +50,7 @@ export const sections: Section[] = [
     rows: [
       { id: "terminal_persistent", label: "Keeps running when you disconnect" },
       { id: "terminal_replay", label: "Shows the output you missed" },
-      { id: "terminal_browser", label: "From a browser or a phone" },
+      { id: "terminal_browser", label: "From a browser" },
       { id: "terminal_share", label: "Share a live session" },
     ],
   },
@@ -172,13 +175,13 @@ function cells(sources: Record<string, string>, values: Record<RowId, [string, s
   ) as Cells
 }
 
-/** Paperboat's own answers (PLAN.md; "coming" where the feature is built but not released). */
+/** Paperboat's own answers: what is verified on Linux and macOS (CHECKLIST.md). */
 export const paperboat = {
   name: "Paperboat",
   cells: cells({}, {
     terminal_persistent: ["Yes, sessions keep running on the machine"],
     terminal_replay: ["Yes, replays what you missed on reconnect"],
-    terminal_browser: ["Yes, in the web console, phones too"],
+    terminal_browser: ["Yes, in the web console"],
     terminal_share: ["Yes, view-only or interactive, by invite"],
     exec: ["Yes, pb exec, with exit codes"],
     ssh_keys: ["Yes, keys and host trust handled"],
@@ -187,22 +190,22 @@ export const paperboat = {
     files_send: ["Yes, pb send, resumes if interrupted"],
     files_inbox: ["Yes, an Inbox on each machine"],
     env_secrets: ["Yes, end-to-end encrypted"],
-    env_where: ["Terminals and pb exec; plain SSH coming"],
+    env_where: ["Terminals, pb exec, scripts, plain SSH and VS Code"],
     config_sync: ["Yes, from your Git repository"],
     preview_url: ["Yes, pb preview 3000"],
-    preview_inspect: ["Coming: inspector in the console"],
+    preview_inspect: ["Yes, inspect and replay, in pb and the console"],
     tunnel_permanent: ["Yes, names that stay"],
     tunnel_domains: ["Yes, on every plan"],
-    tunnel_protocols: ["HTTP/1.1, HTTP/2, HTTP/3, WebSocket"],
-    private_network: ["Yes, private names for every machine"],
+    tunnel_protocols: ["HTTP/1.1, HTTP/2, HTTP/3, WebSocket, raw TCP"],
+    private_network: ["TCP ports and private names; not a full network"],
     encryption_native: ["End to end; direct when possible"],
     encryption_public: ["TLS ends at Paperboat's edge"],
-    teams: ["Yes, owners, admins and members"],
-    access_rules: ["Per-machine access; tags and rules coming"],
-    api_tokens: ["Coming"],
+    teams: ["Yes, five roles; SSO and SCIM on Team"],
+    access_rules: ["Yes, a policy file with groups, tags and deny rules"],
+    api_tokens: ["Yes, scoped API tokens that expire"],
     selfhost: ["Relays and tunnel servers"],
-    platforms: ["Linux and macOS; Windows coming; any browser"],
-    pricing_model: ["By bandwidth; Team per seat"],
+    platforms: ["Linux and macOS; Windows coming; no mobile apps"],
+    pricing_model: ["By relay and edge bandwidth; Team per seat"],
     free_tier: ["Everything for one person, 5 GB a month"],
   }),
   pricing: [
@@ -355,7 +358,7 @@ const vscodeSources = {
 /** Paperboat's side of the differences that recur, written once. */
 const ours = {
   terminals:
-    "Paperboat terminals run on the machine and keep running when your laptop sleeps or the network drops. When you come back, from the same computer, another one or a phone's browser, you see what happened while you were away, and you can let someone watch or type along.",
+    "Paperboat terminals run on the machine and keep running when your laptop sleeps or the network drops. When you come back, from the same computer, another one or a browser, you see what happened while you were away, and you can let someone watch or type along.",
   previews:
     "pb preview gives a port a public HTTPS link in one command, and pb tunnel keeps a permanent address with your own domain, on every plan.",
   files:
@@ -383,7 +386,7 @@ export const products: Product[] = [
       files_send: ["Yes, Taildrop between your own devices", "taildrop"],
       files_inbox: ["No; files land in Downloads", "taildrop"],
       env_secrets: ["No", "pricing"],
-      env_where: ["—"],
+      env_where: ["n/a"],
       config_sync: ["No", "pricing"],
       preview_url: ["Yes, tailscale funnel 3000", "funnel"],
       preview_inspect: ["No", "funnel"],
@@ -440,7 +443,7 @@ export const products: Product[] = [
         title: "Access rules for a whole company",
         body: [
           "Tailscale's policy file (grants, ACLs, groups, tags) and its clients for phones are mature and cover whole companies.",
-          "Paperboat gives team members access per machine today; tags and access rules are being built. If you need company-wide network policy now, Tailscale is the stronger choice.",
+          "Paperboat has its own policy file with groups, tags and deny rules, and a command that explains any decision. It governs what people may do on machines, not a network. If you need subnet routes, exit nodes or policy for phones, Tailscale is the stronger choice.",
         ],
       },
     ],
@@ -500,7 +503,7 @@ export const products: Product[] = [
       files_send: ["No", "agent"],
       files_inbox: ["No", "agent"],
       env_secrets: ["No", "agent"],
-      env_where: ["—"],
+      env_where: ["n/a"],
       config_sync: ["No", "agent"],
       preview_url: ["Yes, ngrok http 3000", "start"],
       preview_inspect: ["Yes, traffic inspector with replay", "start"],
@@ -508,7 +511,7 @@ export const products: Product[] = [
       tunnel_domains: ["Yes, from Pay-as-you-go", "pricing"],
       tunnel_protocols: ["HTTP, HTTPS, TCP, TLS", "pricing"],
       private_network: ["No", "agent"],
-      encryption_native: ["—"],
+      encryption_native: ["n/a"],
       encryption_public: ["TLS ends at ngrok; end-to-end TLS optional", "tls"],
       teams: ["Yes, users from Pay-as-you-go", "pricing"],
       access_rules: ["IP policies; roles as a paid add-on", "pricing"],
@@ -541,7 +544,7 @@ export const products: Product[] = [
         title: "Request inspection",
         body: [
           "ngrok's traffic inspector shows each request and lets you replay it; that is one of its strongest features.",
-          "Paperboat's inspector, with replay, is being built into the console. Until it ships, ngrok is ahead here.",
+          "Paperboat records requests on your own machine once you turn capture on, and lists and replays them from pb or the console, on every plan. ngrok's inspector is always on and keeps traffic for 24 to 72 hours depending on the plan, which is handier when you did not know you would need it.",
         ],
       },
       {
@@ -554,7 +557,7 @@ export const products: Product[] = [
     ],
     chooseThem: [
       "You only need public URLs, with traffic features such as policies, load balancing and an API gateway.",
-      "You want request inspection and replay today.",
+      "You want traffic policies, OAuth or rate limiting in front of your app, or an inspector that is always recording.",
     ],
     chooseUs: [
       "You also want to reach and work on the machine itself.",
@@ -608,7 +611,7 @@ export const products: Product[] = [
       files_send: ["No", "tunnel"],
       files_inbox: ["No", "tunnel"],
       env_secrets: ["No", "tunnel"],
-      env_where: ["—"],
+      env_where: ["n/a"],
       config_sync: ["No", "tunnel"],
       preview_url: ["Yes, quick tunnels on trycloudflare.com", "quick"],
       preview_inspect: ["No", "tunnel"],
@@ -707,7 +710,7 @@ export const products: Product[] = [
       files_send: ["Through tsh scp", "tsh"],
       files_inbox: ["No", "matrix"],
       env_secrets: ["No", "matrix"],
-      env_where: ["—"],
+      env_where: ["n/a"],
       config_sync: ["No", "matrix"],
       preview_url: ["No, internal apps only", "matrix"],
       preview_inspect: ["No", "matrix"],
@@ -716,7 +719,7 @@ export const products: Product[] = [
       tunnel_protocols: ["SSH, Kubernetes, databases, apps, desktops", "matrix"],
       private_network: ["No; access goes through its proxy", "matrix"],
       encryption_native: ["TLS to Teleport's proxy", "matrix"],
-      encryption_public: ["—"],
+      encryption_public: ["n/a"],
       teams: ["Yes, users and roles", "matrix"],
       access_rules: ["Yes, roles and access requests", "matrix"],
       api_tokens: ["Yes, bots with short-lived credentials", "matrix"],
@@ -754,7 +757,7 @@ export const products: Product[] = [
         title: "Audit and compliance",
         body: [
           "Teleport's session recording, access requests and audit export are mature and made for regulated companies.",
-          "Paperboat records activity per workspace; roles, SSO and audit export for businesses are being built. If you need them now, Teleport is the better fit.",
+          "Paperboat has roles, single sign-on, directory sync and an audit log you can export or stream. It records who connected to what and when, not what was typed, and it has no access-request workflow. If you need recorded sessions or approvals, Teleport is the better fit.",
         ],
       },
     ],
@@ -807,16 +810,16 @@ export const products: Product[] = [
       files_send: ["No", "docs"],
       files_inbox: ["No", "docs"],
       env_secrets: ["No", "docs"],
-      env_where: ["—"],
+      env_where: ["n/a"],
       config_sync: ["No", "docs"],
       preview_url: ["No", "docs"],
       preview_inspect: ["No", "docs"],
       tunnel_permanent: ["No", "docs"],
       tunnel_domains: ["No", "docs"],
-      tunnel_protocols: ["—"],
+      tunnel_protocols: ["n/a"],
       private_network: ["Yes, a WireGuard mesh", "docs"],
       encryption_native: ["End to end (WireGuard)", "docs"],
-      encryption_public: ["—"],
+      encryption_public: ["n/a"],
       teams: ["Yes, users and groups", "plans"],
       access_rules: ["Yes, policies and groups", "ssh"],
       api_tokens: ["Yes, access tokens for its API", "docs"],
@@ -902,16 +905,16 @@ export const products: Product[] = [
       files_send: ["No", "protocol"],
       files_inbox: ["No", "protocol"],
       env_secrets: ["No", "protocol"],
-      env_where: ["—"],
+      env_where: ["n/a"],
       config_sync: ["No", "protocol"],
       preview_url: ["No", "protocol"],
       preview_inspect: ["No", "protocol"],
       tunnel_permanent: ["No", "protocol"],
       tunnel_domains: ["No", "protocol"],
-      tunnel_protocols: ["—"],
+      tunnel_protocols: ["n/a"],
       private_network: ["Yes, a virtual Ethernet network", "protocol"],
       encryption_native: ["End to end; its relays can't read traffic", "protocol"],
-      encryption_public: ["—"],
+      encryption_public: ["n/a"],
       teams: ["Owners and administrators", "orgs"],
       access_rules: ["Network membership and rules", "orgs"],
       api_tokens: ["Yes, service account tokens", "orgs"],
@@ -993,7 +996,7 @@ export const products: Product[] = [
       files_send: ["Through sftp or rsync", "ssh"],
       files_inbox: ["No", "ssh"],
       env_secrets: ["No", "faq"],
-      env_where: ["—"],
+      env_where: ["n/a"],
       config_sync: ["No", "faq"],
       preview_url: ["No", "faq"],
       preview_inspect: ["No", "faq"],
@@ -1002,7 +1005,7 @@ export const products: Product[] = [
       tunnel_protocols: ["TCP, UDP and ICMP, privately", "resources"],
       private_network: ["People reach resources, not machines each other", "resources"],
       encryption_native: ["End to end, client to connector", "relays"],
-      encryption_public: ["—"],
+      encryption_public: ["n/a"],
       teams: ["Yes, users and admin roles", "users"],
       access_rules: ["Yes, groups, policies and approvals", "users"],
       api_tokens: ["Yes, API tokens", "api"],
@@ -1084,7 +1087,7 @@ export const products: Product[] = [
       files_send: ["No", "setup"],
       files_inbox: ["No", "setup"],
       env_secrets: ["No", "setup"],
-      env_where: ["—"],
+      env_where: ["n/a"],
       config_sync: ["No", "setup"],
       preview_url: ["Through Tunnel, set up in the dashboard", "tunnel"],
       preview_inspect: ["No", "tunnel"],
@@ -1175,16 +1178,16 @@ export const products: Product[] = [
       files_send: ["No", "openvpn"],
       files_inbox: ["No", "openvpn"],
       env_secrets: ["No", "openvpn"],
-      env_where: ["—"],
+      env_where: ["n/a"],
       config_sync: ["No", "openvpn"],
       preview_url: ["No", "openvpn"],
       preview_inspect: ["No", "openvpn"],
       tunnel_permanent: ["No", "openvpn"],
       tunnel_domains: ["No", "openvpn"],
-      tunnel_protocols: ["—"],
+      tunnel_protocols: ["n/a"],
       private_network: ["Into the company network", "prisma"],
       encryption_native: ["To the gateway or the vendor's cloud", "zpa"],
-      encryption_public: ["—"],
+      encryption_public: ["n/a"],
       teams: ["Through your identity provider", "zpa"],
       access_rules: ["Yes, detailed central policy", "prisma"],
       api_tokens: ["Varies by vendor", "zpa"],
@@ -1263,7 +1266,7 @@ export const products: Product[] = [
       files_send: ["scp or rsync", "scp"],
       files_inbox: ["No", "scp"],
       env_secrets: ["No; SetEnv sends plain variables", "config"],
-      env_where: ["—"],
+      env_where: ["n/a"],
       config_sync: ["No", "openssh"],
       preview_url: ["Only with ssh -R to a server you run", "ssh"],
       preview_inspect: ["No", "ssh"],
@@ -1356,7 +1359,7 @@ export const products: Product[] = [
       files_send: ["No", "tunnels"],
       files_inbox: ["No", "tunnels"],
       env_secrets: ["No", "tunnels"],
-      env_where: ["—"],
+      env_where: ["n/a"],
       config_sync: ["VS Code settings sync only", "overview"],
       preview_url: ["Yes, a forwarded port made public", "ports"],
       preview_inspect: ["In browser DevTools; no replay", "devtunnels"],
@@ -1410,7 +1413,7 @@ export const products: Product[] = [
       "You already sign in to VS Code with GitHub and need nothing else.",
     ],
     chooseUs: [
-      "You use other editors, plain terminals, agents or a phone.",
+      "You use other editors, plain terminals or agents.",
       "You want permanent tunnels, your own domains, sharing with a team, or plain SSH.",
     ],
     pricing: {

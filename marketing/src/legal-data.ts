@@ -1,9 +1,12 @@
-/** The legal pages are stubs until the text is written. */
-export type Legal = { slug: string; title: string; text: string }
+/**
+ * The legal pages. The legal text itself is not written yet (it needs the operating company's
+ * details), so each page says so plainly and points to what is already true and published.
+ */
+export type Legal = { slug: string; title: string; covers: string }
 
 export const legalPages: Legal[] = [
-  { slug: "terms", title: "Terms of service", text: "This page is being written and will be published before launch." },
-  { slug: "privacy", title: "Privacy policy", text: "This page is being written and will be published before launch." },
-  { slug: "dpa", title: "Data processing agreement", text: "This page is being written and will be published before launch." },
-  { slug: "acceptable-use", title: "Acceptable use policy", text: "This page is being written and will be published before launch." },
+  { slug: "terms", title: "Terms of service", covers: "the rules for using the hosted service and the official pb builds, including use at work" },
+  { slug: "privacy", title: "Privacy policy", covers: "what personal data Paperboat holds, why, for how long, and your rights over it" },
+  { slug: "dpa", title: "Data processing agreement", covers: "how Paperboat processes personal data on behalf of a team, for customers who need a signed agreement" },
+  { slug: "acceptable-use", title: "Acceptable use policy", covers: "what public previews and tunnels may not be used for, such as phishing or distributing malware" },
 ]

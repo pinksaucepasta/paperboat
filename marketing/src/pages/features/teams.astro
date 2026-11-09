@@ -1,0 +1,195 @@
+---
+import Feature from "../../layouts/Feature.astro"
+import Sheet from "../../components/Sheet.astro"
+import Code from "../../components/Code.astro"
+import { auditRetention, plans } from "../../site"
+
+const hero = [
+  {
+    lines: ["$ pb policy explain --src user:bo@example.test --dst machine:db --action private_access --port 5432", "ALLOWED: rule", "Rules: /rules/2"],
+    note: "Ask why someone can, or cannot, do something. The answer names the rule.",
+  },
+  { lines: ["$ pb policy explain --dst machine:db --action exec"], note: "Or ask who can run commands on a machine." },
+]
+
+const policy = `{
+  // Team-wide switch for reaching ports. Off unless you turn it on.
+  "allow_private_access": true,
+  "groups": { "group:ops": ["user:ana@example.test", "user:bo@example.test"] },
+  "tags":   { "tag:prod": ["machine:db", "machine:web-01"] },
+  "rules": [
+    // Ops can do everything on production.
+    { "src": ["group:ops"], "dst": ["tag:prod"], "allow": ["*"] },
+    // Nobody opens an SSH session there, ops included.
+    { "src": ["*"], "dst": ["tag:prod"], "deny": ["managed_ssh"] },
+    // Everyone on the team may reach the database port, and only that port.
+    { "src": ["role:member"], "dst": ["machine:db"],
+      "allow": ["private_access"], "ports": [5432] }
+  ]
+}`
+
+const capabilities = [
+  ["terminal", "Open and attach to terminal sessions"],
+  ["exec", "Run single commands"],
+  ["managed_ssh", "SSH, scp, sftp and rsync"],
+  ["files", "Send files to the machine's Inbox"],
+  ["preview_manage", "Start and stop previews from the machine"],
+  ["tunnel_manage", "Create and change tunnels on the machine"],
+  ["private_access", "Reach its ports, optionally only listed ones"],
+]
+
+const roles = [
+  ["Owner", "One person. Can delete the team or transfer it."],
+  ["Admin", "Members, machines, policy, security settings and the audit log."],
+  ["Billing", "Plan, seats, extra bandwidth and invoices. Nothing else."],
+  ["Auditor", "Reads everything an admin sees, and exports the audit log. Changes nothing."],
+  ["Member", "Uses what the policy grants."],
+]
+
+const faq = [
+  {
+    q: "Does joining a team give someone access to my machines?",
+    a: "No. Membership grants nothing by itself. A machine is shared with a team on purpose, and each person's access to it is a rule you can read.",
+  },
+  {
+    q: "Do I need the Team plan for tags, the policy file and API tokens?",
+    a: "No. They work in a personal workspace on Free and Pro, for example to give a CI token nothing but exec on machines tagged ci. Team adds members, roles, single sign-on, directory sync and audit log export.",
+  },
+  {
+    q: "What happens when someone leaves?",
+    a: "Remove them, or let directory sync do it when they are removed from your identity provider. Their open sessions end at once, their team API tokens are revoked, and machines they shared leave the team.",
+  },
+  {
+    q: "Which identity providers work for single sign-on?",
+    a: "Any SAML or OpenID Connect provider, including Okta, Microsoft Entra ID and Google Workspace. Your IT admin sets it up in a guided portal, and you can then require SSO for the whole team.",
+  },
+  {
+    q: "What does the audit log record?",
+    a: `Who did what to which machine or setting, whether it was allowed, and from where. Never terminal contents, file contents or secrets. It is kept ${auditRetention[0]} on Free, ${auditRetention[1]} on Pro and ${auditRetention[2]} on Team, where you can also export it or stream it to your own storage.`,
+  },
+  {
+    q: "How is a team billed?",
+    a: `${plans[2].price} per seat a month, or $150 a year. Every member takes a seat whatever their role. Seats added mid-cycle are charged right away, and the billing date does not move.`,
+  },
+]
+---
+
+<Feature
+  slug="teams"
+  title="Team access to servers with a policy file and audit log | Paperboat"
+  description="Share machines with a team one capability at a time. A readable policy file with groups, tags and deny rules, an explain command, scoped API tokens, SSO, SCIM directory sync, and an exportable audit log."
+  headline="Share a machine with people, one capability at a time"
+  faq={faq}
+  related={["env", "ssh", "console"]}
+  compare={["teleport", "tailscale", "twingate"]}
+>
+  <p slot="lede">
+    A teammate who needs to tail a log does not need a root shell. Access in Paperboat is a short file of rules, and one command tells you what
+    any rule lets anyone do.
+  </p>
+  <Sheet slot="aside" steps={hero} />
+
+  <section class="section section-tint" aria-labelledby="policy-title">
+    <div class="wrap cols">
+      <div class="stack">
+        <h2 class="h2" id="policy-title">The whole policy is one file</h2>
+        <div class="prose">
+          <p>
+            Who, what, and which actions. Group people, tag machines, allow or deny. A deny always wins, and the owner can never lock
+            themselves out.
+          </p>
+          <p>
+            <code>pb policy set</code> shows every person whose access would change and asks before saving. Each save is a version you can
+            diff and restore. <code>pb policy test</code> checks a draft before you apply it.
+          </p>
+          <p>Prefer clicking? The console's Access page edits the same file as a grid.</p>
+        </div>
+      </div>
+      <Code name="policy.hujson" text={policy} />
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="caps-title">
+    <div class="wrap cols cols-even">
+      <div class="stack-loose">
+        <div class="stack">
+          <h2 class="h2" id="caps-title">Seven things a person can be allowed</h2>
+          <p class="lede">Each is granted per machine or per tag. ENV has its own two, for reading and for changing a team's values.</p>
+        </div>
+        <table class="facts">
+          <tbody>
+            {capabilities.map(([name, text]) => <tr><th scope="row"><code>{name}</code></th><td>{text}</td></tr>)}
+          </tbody>
+        </table>
+      </div>
+      <div class="stack-loose">
+        <div class="stack">
+          <h2 class="h2">Five roles, for running the team</h2>
+          <p class="lede">Roles are about administration only. Using machines is always the policy's decision.</p>
+        </div>
+        <table class="facts">
+          <tbody>
+            {roles.map(([name, text]) => <tr><th scope="row">{name}</th><td>{text}</td></tr>)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section-tint" aria-labelledby="tokens-title">
+    <div class="wrap cols cols-flip">
+      <div class="stack">
+        <h2 class="h2" id="tokens-title">Tokens that can do one thing</h2>
+        <div class="prose">
+          <p>
+            An API token acts as the person who made it, narrowed to the scope you give it, until it expires. If its creator loses access, so
+            does the token.
+          </p>
+          <p>Use one in CI or hand one to an agent. The secret is shown once.</p>
+        </div>
+      </div>
+      <Sheet
+        steps={[
+          { lines: [`$ pb api-token create ci --expires 30d --scope '[{"dst":["tag:ci"],"allow":["exec"]}]'`], note: "Thirty days, exec only, only on machines tagged ci." },
+          { lines: ["$ pb machine tag build-01 add ci"], note: "Tagging is a reviewed policy change, like any other." },
+          { lines: ["$ pb api-token list", "$ pb api-token revoke ci"] },
+        ]}
+      />
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="company-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="company-title">What a company asks for</h2>
+        <p class="lede">All of it is part of the Team plan at {plans[2].price} a seat. There is no enterprise tier to call about.</p>
+      </header>
+      <div class="points points-3">
+        <div>
+          <h3 class="h3">Single sign-on</h3>
+          <p>SAML or OpenID Connect with a verified domain. Turn on Require SSO after reviewing who would lose access; the owner stays as the break-glass account.</p>
+        </div>
+        <div>
+          <h3 class="h3">Directory sync</h3>
+          <p>People added to or removed from your directory are added to or removed from the team, with roles mapped from directory groups.</p>
+        </div>
+        <div>
+          <h3 class="h3">Audit log</h3>
+          <p>Search by person, action, target and result. Export as CSV or JSON, or stream it, signed, to an HTTPS endpoint or S3-compatible storage.</p>
+        </div>
+        <div>
+          <h3 class="h3">Machine approval</h3>
+          <p>A team can hold a member's newly shared machine until an owner or admin accepts it.</p>
+        </div>
+        <div>
+          <h3 class="h3">Team secrets</h3>
+          <p>A team has its own <a href="/features/env/">ENV</a> scope with its own keys. Rules decide who reads and who writes.</p>
+        </div>
+        <div>
+          <h3 class="h3">Your machine stays yours</h3>
+          <p>Share a personal machine and take it back later, or transfer it to the team for good. Those are different commands on purpose.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</Feature>

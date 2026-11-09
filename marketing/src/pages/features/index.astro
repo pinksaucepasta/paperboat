@@ -1,0 +1,78 @@
+---
+import Page from "../../layouts/Page.astro"
+import Head from "../../components/Head.astro"
+import FeatureIndex from "../../components/FeatureIndex.astro"
+import Closing from "../../components/Closing.astro"
+import { useCases } from "../../features"
+import { breadcrumbSchema } from "../../schema"
+---
+
+<Page
+  title="Paperboat features: terminal, SSH, files, tunnels, ENV and teams"
+  description="Everything pb does, one command per line: persistent terminals, remote commands, SSH, file sending, private ports, public previews and tunnels, encrypted environment variables, config sync, teams and self-hosting."
+  schema={[breadcrumbSchema(Astro.site, [["Features", "/features/"]])]}
+>
+  <Head title="Everything pb does">
+    <p>
+      Twelve things, one program. Every one of them is on the free plan. Each page shows the real commands, what they print, the limits, and
+      where another tool would serve you better.
+    </p>
+  </Head>
+
+  <section class="section list">
+    <div class="wrap">
+      <FeatureIndex />
+    </div>
+  </section>
+
+  <section class="section section-tint" aria-labelledby="uses-title">
+    <div class="wrap cols">
+      <h2 class="h2" id="uses-title">Put together</h2>
+      <ul class="uses">
+        {
+          useCases.map((item) => (
+            <li>
+              <a href={`/use-cases/${item.slug}/`}>
+                <span class="name">Paperboat for {item.name === "AI agents" ? item.name : item.name.toLowerCase() + "s"}</span>
+                <span class="line">{item.line}</span>
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+
+  <Closing />
+</Page>
+
+<style>
+  .list {
+    padding-top: 0;
+  }
+
+  .uses {
+    border-top: 1px solid var(--rule);
+  }
+
+  .uses a {
+    display: grid;
+    gap: 2px;
+    padding-block: var(--s4);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .name {
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  .uses a:hover .name {
+    color: var(--cobalt);
+  }
+
+  .line {
+    font-size: var(--text-ui);
+    color: var(--fog);
+  }
+</style>

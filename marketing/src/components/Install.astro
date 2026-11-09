@@ -1,72 +1,67 @@
 ---
 import Icon from "./Icon.astro"
-import { installCommand } from "../site"
-/** The install command, as the console's Add machine dialog shows it: the command, and clicking copies. */
+import { installCommand, platforms } from "../site"
+/** The install command; pressing it copies. */
 interface Props {
   tone?: "light" | "sea"
 }
 const { tone = "light" } = Astro.props
 ---
+
 <div class:list={["install", `install-${tone}`]}>
-  <p class="install-platform">macOS and Linux. Your browser opens to sign in when it’s done.</p>
-  <button class="install-command" aria-label="Copy install command" data-copy={installCommand}>
-    <code>{installCommand}</code>
+  <button class="install-command" type="button" data-copy={installCommand}>
+    <span class="visually-hidden">Copy the install command: </span>
+    <code><span class="prompt">$ </span>{installCommand}</code>
     <span class="install-icon">
-      <Icon name="copy" size={16} class="when-idle" />
-      <Icon name="check" size={16} class="when-copied" />
+      <Icon name="copy" size={18} class="when-idle" />
+      <Icon name="check" size={18} class="when-copied" />
     </span>
+    <span class="visually-hidden" role="status" data-copy-status></span>
   </button>
+  <p class="install-note">{platforms}. No account needed first: your browser opens to sign in when it finishes.</p>
 </div>
+
 <style>
   .install {
+    display: grid;
+    gap: var(--s3);
     width: 100%;
-    max-width: 560px;
-  }
-
-  .install-platform {
-    margin-bottom: 8px;
-    font-size: 0.8125rem;
-    color: var(--fog);
+    max-width: 540px;
   }
 
   .install-command {
+    position: relative;
     display: flex;
     width: 100%;
     align-items: center;
-    gap: 12px;
-    min-height: 52px;
-    padding: 12px 14px 12px 16px;
-    border-radius: 10px;
-    background: var(--surface);
+    gap: var(--s3);
+    min-height: 56px;
+    padding: var(--s3) var(--s4);
+    border-radius: var(--radius);
+    background: var(--ink);
     text-align: left;
-    transition: background-color 0.15s ease;
-  }
-
-  .install-command:hover {
-    background: var(--surface-strong);
   }
 
   .install-command code {
     flex: 1;
     min-width: 0;
-    font-size: 0.875rem;
     line-height: 1.5;
-    color: var(--ink);
-    word-break: break-all;
+    color: #fff;
+    overflow-wrap: anywhere;
   }
 
-  .install-command code::before {
-    content: "$ ";
-    color: var(--faint);
+  .prompt {
+    color: rgb(255 255 255 / 0.55);
+    user-select: none;
   }
 
   .install-icon {
-    color: var(--fog);
     flex-shrink: 0;
+    color: rgb(255 255 255 / 0.7);
   }
 
   .install-command:hover .install-icon {
-    color: var(--ink);
+    color: #fff;
   }
 
   .install-icon :global(.when-copied),
@@ -76,34 +71,26 @@ const { tone = "light" } = Astro.props
 
   [data-copied] .install-icon :global(.when-copied) {
     display: block;
-    color: var(--success);
+    color: #fff;
   }
 
-  /* On the brand gradient: white on blue, no tints of the blue (brand guidelines 05). */
-  .install-sea .install-platform {
-    color: rgb(255 255 255 / 0.72);
+  .install-note {
+    font-size: var(--text-small);
+    line-height: 1.5;
+    color: var(--fog);
   }
 
   .install-sea .install-command {
-    background: rgb(11 11 12 / 0.28);
-    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.12);
+    background: rgb(11 11 12 / 0.32);
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.16);
   }
 
-  .install-sea .install-command:hover {
-    background: rgb(11 11 12 / 0.36);
+  .install-sea .install-note {
+    color: rgb(255 255 255 / 0.85);
   }
 
-  .install-sea .install-command code {
-    color: #fff;
-  }
-
-  .install-sea .install-command code::before,
-  .install-sea .install-icon {
-    color: rgb(255 255 255 / 0.6);
-  }
-
-  .install-sea [data-copied] .install-icon :global(.when-copied),
-  .install-sea .install-command:hover .install-icon {
-    color: #fff;
+  .install-sea :global(:focus-visible),
+  .install-sea.install :focus-visible {
+    outline-color: #fff;
   }
 </style>

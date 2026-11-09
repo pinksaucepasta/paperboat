@@ -2,70 +2,122 @@
 import Lockup from "./Lockup.astro"
 import Icon from "./Icon.astro"
 import { consoleUrl } from "../site"
-import { navGroups } from "../nav"
+import { features, featureGroups, useCases } from "../features"
+import { topLinks } from "../nav"
+const here = Astro.url.pathname
+const current = (href: string) => (here.startsWith(href) ? "page" : undefined)
 ---
 
-<header class="nav">
+<header class="nav" data-nav>
   <div class="wrap nav-inner">
     <Lockup />
     <nav class="nav-links" aria-label="Main">
+      <button type="button" class="nav-link nav-menu-button" aria-expanded="false" aria-controls="nav-menu" data-menu-button>
+        Features
+        <Icon name="caret-down" size={12} class="caret" />
+      </button>
       {
-        navGroups.map((group) =>
-          group.links.length && !group.href ? (
-            <div class="group">
-              <button type="button" class="group-title" aria-haspopup="true">
-                {group.title}
-                <Icon name="caret-down" size={12} />
-              </button>
-              <div class="menu">
-                {group.links.map((link) => (
-                  <a href={link.href}>{link.label}</a>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <a class="group-title" href={group.href}>
-              {group.title}
-            </a>
-          ),
-        )
+        topLinks.map((link) => (
+          <a class="nav-link wide-only" href={link.href} aria-current={current(link.href)}>
+            {link.label}
+          </a>
+        ))
       }
     </nav>
-    <details class="mobile-menu">
-      <summary aria-label="Menu"><Icon name="list" size={22} /></summary>
-      <nav class="mobile-panel" aria-label="Menu">
-        {
-          navGroups.map((group) =>
-            group.links.length && !group.href ? (
-              <div class="mobile-group">
-                <div class="mobile-title">{group.title}</div>
-                {group.links.map((link) => (
-                  <a href={link.href}>{link.label}</a>
-                ))}
-              </div>
-            ) : (
-              <a class="mobile-title" href={group.href}>
-                {group.title}
-              </a>
-            ),
-          )
-        }
-      </nav>
-    </details>
     <div class="nav-actions">
-      <a class="nav-signin" href={consoleUrl}>Sign in</a>
+      <a class="nav-link wide-only" href={consoleUrl}>Sign in</a>
       <a class="button button-primary nav-cta" href="/#install">Install</a>
+      <button type="button" class="nav-burger" aria-expanded="false" aria-controls="nav-menu" aria-label="Menu" data-menu-button>
+        <Icon name="list" size={22} class="when-closed" />
+        <Icon name="x" size={22} class="when-open" />
+      </button>
+    </div>
+  </div>
+
+  <div class="menu" id="nav-menu" hidden>
+    <div class="wrap menu-inner">
+      {
+        featureGroups.map((group) => (
+          <div class="menu-group">
+            <p class="menu-title">{group}</p>
+            <ul>
+              {features
+                .filter((item) => item.group === group)
+                .map((item) => (
+                  <li>
+                    <a class="menu-item" href={`/features/${item.slug}/`}>
+                      <span class="menu-name">{item.name}</span>
+                      <span class="menu-line">{item.line}</span>
+                    </a>
+                  </li>
+                ))}
+            </ul>
+          </div>
+        ))
+      }
+      <div class="menu-group menu-side">
+        <p class="menu-title">Use cases</p>
+        <ul>
+          {
+            useCases.map((item) => (
+              <li>
+                <a class="menu-item" href={`/use-cases/${item.slug}/`}>
+                  <span class="menu-name">{item.name}</span>
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+        <ul class="menu-top">
+          {
+            topLinks.map((link) => (
+              <li>
+                <a class="menu-item" href={link.href}>
+                  <span class="menu-name">{link.label}</span>
+                </a>
+              </li>
+            ))
+          }
+          <li>
+            <a class="menu-item" href={consoleUrl}><span class="menu-name">Sign in</span></a>
+          </li>
+        </ul>
+        <a class="menu-all link" href="/features/">All features</a>
+      </div>
     </div>
   </div>
 </header>
+
+<script>
+  // The menu opens on a press, never on hover: Escape, a press outside or moving focus away closes it.
+  const nav = document.querySelector<HTMLElement>("[data-nav]")!
+  const menu = nav.querySelector<HTMLElement>("#nav-menu")!
+  const buttons = [...nav.querySelectorAll<HTMLButtonElement>("[data-menu-button]")]
+  const set = (open: boolean) => {
+    menu.hidden = !open
+    buttons.forEach((button) => button.setAttribute("aria-expanded", String(open)))
+  }
+  buttons.forEach((button) => button.addEventListener("click", () => set(menu.hidden)))
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || menu.hidden) return
+    set(false)
+    buttons.find((button) => button.offsetParent)?.focus()
+  })
+  document.addEventListener("click", (event) => {
+    if (!nav.contains(event.target as Node)) set(false)
+  })
+  nav.addEventListener("focusout", (event) => {
+    const next = (event as FocusEvent).relatedTarget as Node | null
+    if (next && !nav.contains(next)) set(false)
+  })
+</script>
 
 <style>
   .nav {
     position: sticky;
     top: 0;
     z-index: 50;
-    height: var(--header);
-    background: rgb(255 255 255 / 0.86);
+    background: rgb(255 255 255 / 0.9);
     backdrop-filter: saturate(1.6) blur(14px);
     -webkit-backdrop-filter: saturate(1.6) blur(14px);
     box-shadow: 0 1px 0 var(--rule);
@@ -74,152 +126,164 @@ import { navGroups } from "../nav"
   .nav-inner {
     display: flex;
     align-items: center;
-    height: 100%;
+    height: var(--header);
   }
 
   .nav-links {
     display: none;
-    gap: 28px;
-    margin-left: 40px;
-    font-size: 0.9375rem;
+    align-items: center;
+    gap: var(--s1);
+    margin-left: var(--s6);
+  }
+
+  .nav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+    padding-inline: var(--s3);
+    border-radius: 8px;
+    font-size: var(--text-ui);
     color: var(--fog);
   }
 
-  .nav-links {
-    align-items: center;
-  }
-
-  .group {
-    position: relative;
-  }
-
-  .group-title {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    height: var(--header);
-    font-size: inherit;
-    color: inherit;
-  }
-
-  /* The menu opens on hover and on keyboard focus, with no script. */
-  .menu {
-    position: absolute;
-    top: calc(100% - 8px);
-    left: -14px;
-    display: none;
-    min-width: 240px;
-    padding: 8px;
-    background: var(--background);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-frame);
-  }
-
-  .group:hover .menu,
-  .group:focus-within .menu {
-    display: grid;
-  }
-
-  .menu a {
-    padding: 8px 12px;
-    border-radius: 6px;
-    white-space: nowrap;
-  }
-
-  .menu a:hover {
-    background: var(--surface);
-  }
-
-  .nav-links .group-title:hover,
-  .group:hover .group-title,
-  .nav-links a:hover,
-  .nav-signin:hover {
+  .nav-link:hover,
+  .nav-link[aria-current],
+  .nav-link[aria-expanded="true"] {
     color: var(--ink);
+  }
+
+  .nav-link :global(.caret) {
+    transition: transform 0.15s ease;
+  }
+
+  .nav-link[aria-expanded="true"] :global(.caret) {
+    transform: rotate(180deg);
   }
 
   .nav-actions {
     margin-left: auto;
     display: flex;
     align-items: center;
-    gap: 20px;
-  }
-
-  .nav-signin {
-    font-size: 0.9375rem;
-    color: var(--fog);
+    gap: var(--s2);
   }
 
   .nav-cta {
-    height: 34px;
+    min-height: 36px;
     padding-inline: 14px;
   }
 
-  /* On a phone the groups live behind a menu button; it opens without script. */
-  .mobile-menu {
-    margin-left: auto;
-    order: 3;
-  }
-
-  .mobile-menu summary {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 40px;
-    height: 40px;
-    margin-left: 4px;
-    cursor: pointer;
-    list-style: none;
-    color: var(--ink);
-  }
-
-  .mobile-menu summary::-webkit-details-marker {
+  .wide-only {
     display: none;
   }
 
-  .mobile-panel {
-    position: absolute;
-    top: var(--header);
-    left: 0;
-    right: 0;
-    display: grid;
-    gap: 4px;
-    padding: 12px var(--gutter) 20px;
-    background: var(--background);
-    box-shadow: 0 1px 0 var(--rule), 0 24px 40px -24px rgb(16 24 64 / 0.18);
-    font-size: 1rem;
-  }
-
-  .mobile-group {
-    display: grid;
-    padding-bottom: 8px;
-  }
-
-  .mobile-title {
-    padding: 10px 0;
+  .nav-burger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    margin-right: -10px;
     color: var(--ink);
-    font-weight: 500;
   }
 
-  .mobile-panel a:not(.mobile-title) {
-    padding: 8px 0 8px 12px;
+  .nav-burger :global(.when-open),
+  .nav-burger[aria-expanded="true"] :global(.when-closed) {
+    display: none;
+  }
+
+  .nav-burger[aria-expanded="true"] :global(.when-open) {
+    display: block;
+  }
+
+  .menu {
+    position: absolute;
+    inset: var(--header) 0 auto 0;
+    max-height: calc(100dvh - var(--header));
+    overflow-y: auto;
+    background: var(--paper);
+    box-shadow: 0 1px 0 var(--rule), 0 32px 48px -32px rgb(15 61 216 / 0.25);
+  }
+
+  .menu-inner {
+    display: grid;
+    gap: var(--s6);
+    padding-block: var(--s5) var(--s6);
+  }
+
+  .menu-title {
+    margin-bottom: var(--s2);
+    font-size: var(--text-small);
     color: var(--fog);
   }
 
-  .nav-actions {
-    margin-left: auto;
+  .menu-item {
+    display: grid;
+    gap: 2px;
+    padding: var(--s2) var(--s3);
+    margin-inline: calc(var(--s3) * -1);
+    border-radius: 8px;
+    min-height: 44px;
+    align-content: center;
   }
 
-  .mobile-menu {
-    margin-left: 0;
+  .menu-item:hover {
+    background: var(--surface);
   }
 
-  @media (min-width: 860px) {
+  .menu-name {
+    font-size: var(--text-ui);
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  .menu-line {
+    display: none;
+    font-size: var(--text-small);
+    line-height: 1.45;
+    color: var(--fog);
+  }
+
+  .menu-top {
+    margin-top: var(--s5);
+  }
+
+  .menu-all {
+    display: none;
+    font-size: var(--text-ui);
+  }
+
+  @media (min-width: 960px) {
     .nav-links {
       display: flex;
     }
 
-    .mobile-menu {
+    .wide-only {
+      display: inline-flex;
+    }
+
+    .nav-burger,
+    .menu-top {
       display: none;
+    }
+
+    .nav-actions {
+      gap: var(--s3);
+    }
+
+    .menu-inner {
+      grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(0, 0.6fr);
+      gap: var(--s7);
+      padding-block: var(--s6) var(--s7);
+    }
+
+    .menu-line {
+      display: block;
+    }
+
+    .menu-all {
+      display: inline-block;
+      margin-top: var(--s5);
     }
   }
 </style>

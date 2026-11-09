@@ -1,0 +1,39 @@
+---
+/**
+ * A feature page's frame: the search title and data, the breadcrumb, then the page's own sections,
+ * its questions, what it goes with, and the install line. Everything between is the page's own.
+ */
+import Page from "./Page.astro"
+import Head from "../components/Head.astro"
+import Faq, { type Question } from "../components/Faq.astro"
+import Related from "../components/Related.astro"
+import Closing from "../components/Closing.astro"
+import { feature } from "../features"
+import { breadcrumbSchema, faqSchema } from "../schema"
+interface Props {
+  slug: string
+  /** The title tag. */
+  title: string
+  description: string
+  /** The h1. */
+  headline: string
+  faq: Question[]
+  related?: string[]
+  compare?: string[]
+}
+const { slug, title, description, headline, faq, related = [], compare = [] } = Astro.props
+const item = feature(slug)
+const trail: [string, string][] = [["Features", "/features/"]]
+const schema = [breadcrumbSchema(Astro.site, [...trail, [item.name, `/features/${slug}/`]]), faqSchema(faq)]
+---
+
+<Page title={title} description={description} schema={schema}>
+  <Head title={headline} trail={trail} here={item.name}>
+    <slot name="lede" />
+    <slot name="aside" slot="aside" />
+  </Head>
+  <slot />
+  <Faq items={faq} />
+  <Related features={related} compare={compare} />
+  <Closing />
+</Page>

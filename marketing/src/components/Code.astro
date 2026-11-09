@@ -1,0 +1,37 @@
+---
+/** A file as it is on disk (a policy, a config, an MCP entry): its name, then its text. */
+interface Props {
+  name: string
+  text: string
+}
+const { name, text } = Astro.props
+---
+
+<figure class="code">
+  <figcaption>{name}</figcaption>
+  <pre tabindex="0"><code>{text}</code></pre>
+</figure>
+
+<style>
+  .code {
+    min-width: 0;
+    border-radius: var(--radius);
+    background: var(--paper);
+    box-shadow: var(--shadow-sheet);
+  }
+
+  figcaption {
+    padding: var(--s3) var(--s5);
+    border-bottom: 1px solid var(--rule);
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    color: var(--fog);
+  }
+
+  pre {
+    padding: var(--s4) var(--s5) var(--s5);
+    overflow-x: auto;
+    line-height: var(--leading-code);
+    color: var(--text);
+  }
+</style>

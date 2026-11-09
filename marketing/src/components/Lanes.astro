@@ -1,0 +1,160 @@
+---
+/**
+ * A diagram of who talks to whom: each lane is a row of things joined by wires, and a wire's style
+ * says how the traffic on it is protected. Used for connection paths and for how ENV values travel.
+ */
+export type Wire = "e2e" | "tls" | "none"
+export type Lane = {
+  name: string
+  text: string
+  nodes: { label: string; kind?: "yours" | "ours" | "public" }[]
+  wires: Wire[]
+}
+interface Props {
+  lanes: Lane[]
+  caption: string
+}
+const { lanes, caption } = Astro.props
+const used = new Set(lanes.flatMap((lane) => lane.wires))
+const legend: Record<Wire, string> = {
+  e2e: "Encrypted between your machines. Nothing in the middle can read it.",
+  tls: "HTTPS. Encrypted to Paperboat's edge, which reads the request to route it.",
+  none: "Stays on the machine.",
+}
+---
+
+<figure class="lanes">
+  <div class="lanes-list">
+    {
+      lanes.map((lane) => (
+        <div class="lane">
+          <div class="lane-text">
+            <p class="lane-name">{lane.name}</p>
+            <p class="lane-line">{lane.text}</p>
+          </div>
+          <div class="lane-draw" aria-hidden="true">
+            {lane.nodes.map((node, index) => (
+              <>
+                <span class:list={["node", `node-${node.kind ?? "yours"}`]}>{node.label}</span>
+                {index < lane.wires.length && <span class:list={["wire", `wire-${lane.wires[index]}`]} />}
+              </>
+            ))}
+          </div>
+        </div>
+      ))
+    }
+  </div>
+  <figcaption>
+    <ul class="legend">
+      {
+        (["e2e", "tls", "none"] as Wire[])
+          .filter((wire) => used.has(wire))
+          .map((wire) => (
+            <li>
+              <span class:list={["wire", "wire-key", `wire-${wire}`]} aria-hidden="true" />
+              {legend[wire]}
+            </li>
+          ))
+      }
+    </ul>
+    <p class="visually-hidden">{caption}</p>
+  </figcaption>
+</figure>
+
+<style>
+  .lanes-list {
+    border-top: 1px solid var(--rule);
+  }
+
+  .lane {
+    display: grid;
+    gap: var(--s4);
+    padding-block: var(--s5);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .lane-name {
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  .lane-line {
+    font-size: var(--text-ui);
+    line-height: 1.5;
+    color: var(--fog);
+    text-wrap: pretty;
+  }
+
+  .lane-draw {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .node {
+    min-width: 0;
+    text-align: center;
+    padding: var(--s2) var(--s3);
+    border-radius: 8px;
+    font-family: var(--font-mono);
+    font-size: var(--text-small);
+    line-height: 1.3;
+    color: var(--ink);
+    background: var(--paper);
+    box-shadow: 0 0 0 1px var(--rule);
+  }
+
+  .node-ours {
+    background: var(--hull);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--cobalt) 30%, transparent);
+    color: var(--deep);
+  }
+
+  .node-public {
+    border-radius: 999px;
+  }
+
+  .wire {
+    flex: 1;
+    min-width: 16px;
+    height: 0;
+    border-top: 2px solid var(--cobalt);
+  }
+
+  .wire-tls {
+    border-top-style: dashed;
+    border-top-color: var(--fog);
+  }
+
+  .wire-none {
+    border-top: 2px dotted var(--rule);
+  }
+
+  .legend {
+    display: grid;
+    gap: var(--s2);
+    margin-top: var(--s5);
+    font-size: var(--text-small);
+    line-height: 1.5;
+    color: var(--fog);
+  }
+
+  .legend li {
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    gap: var(--s3);
+    align-items: center;
+  }
+
+  .wire-key {
+    width: 28px;
+  }
+
+  @media (min-width: 760px) {
+    .lane {
+      grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+      gap: var(--s7);
+      align-items: center;
+    }
+  }
+</style>

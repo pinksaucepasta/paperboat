@@ -1,0 +1,101 @@
+---
+import Feature from "../../layouts/Feature.astro"
+import Sheet from "../../components/Sheet.astro"
+
+const hero = [
+  {
+    lines: [
+      "$ pb send ./report.pdf ./data.csv --to studio",
+      "Sending to studio (machine_8a1d5c2e-3b47-4f0e-9d62-1c7e5b0a4f93)",
+      "report.pdf: delivered to /home/ana/Paperboat/Inbox/report.pdf on studio",
+      "data.csv: delivered to /home/ana/Paperboat/Inbox/data.csv on studio",
+    ],
+    note: "\"Delivered\" means the other machine checked the file's hash and wrote it to disk.",
+  },
+  { lines: ["$ pb inbox path", "/home/ana/Paperboat/Inbox"], note: "Where files land on this machine. <code>pb inbox set</code> moves it." },
+]
+
+const limits = [
+  ["Size, Automatic mode", "Up to 2 GB per send. Goes directly when it can, through a relay when it must. Relayed bytes count as bandwidth."],
+  ["Size, Unlimited mode", "No limit. Only directly, or through a relay you host. If neither path is up, the send waits instead of using our relay. Per send with <code>--unlimited</code>, or as your default in Settings."],
+  ["Files per send", "Up to 10. For whole directory trees, use <code>pb rsync</code> or <code>pb scp</code>."],
+  ["If it is interrupted", "It resumes from the last confirmed byte. No duplicates, no half files in the Inbox."],
+  ["Both machines", "Must be online. There is no cloud drop box in between holding your file."],
+  ["Full disk, offline target, too large", "Each has its own plain message, and nothing partial is left behind."],
+]
+
+const faq = [
+  {
+    q: "Where do my files go on the way?",
+    a: "From one machine to the other, encrypted between them. If they cannot connect directly, a relay passes the encrypted bytes along. No Paperboat server stores your files or can read them.",
+  },
+  {
+    q: "Is this a replacement for scp or rsync?",
+    a: 'For "get this file onto that machine", yes: one command, no path to remember, safe to retry. For syncing a tree or pulling from a path, <a href="/features/ssh/">pb scp and pb rsync</a> are right there.',
+  },
+  {
+    q: "Can a teammate send files to my machine?",
+    a: "Yes, as a request. You approve or decline it with <code>pb inbox approve</code> or in the console, or set a policy that accepts requests from your team. Requests expire if you ignore them.",
+  },
+  {
+    q: "Can I get to received files from a browser?",
+    a: "Yes. Each machine's page in the web console lists its Inbox, and you can download or remove items there.",
+  },
+  {
+    q: "How is this different from Taildrop?",
+    a: "Taildrop works across phones and desktops on a tailnet and drops files in Downloads. Paperboat sends between Linux and macOS machines, confirms delivery by hash, resumes, and has no size limit in Unlimited mode.",
+  },
+]
+---
+
+<Feature
+  slug="files"
+  title="Send files between your computers from the command line | Paperboat"
+  description="pb send puts files in another machine's Inbox: encrypted machine to machine, verified by hash, resumed after a drop. Up to 2 GB by default, any size directly or through your own relay."
+  headline="Send a file to another machine"
+  faq={faq}
+  related={["ssh", "self-hosting", "console"]}
+  compare={["tailscale", "ssh-bastion"]}
+>
+  <p slot="lede">
+    <code>pb send</code> takes a file and a machine name. The file lands in that machine's Inbox folder, and the command only succeeds once the
+    other side has confirmed it.
+  </p>
+  <Sheet slot="aside" steps={hero} />
+
+  <section class="section section-tint" aria-labelledby="limits-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="limits-title">Limits and what happens at them</h2>
+        <p class="lede">Two transfer modes, because "any size" and "always arrives" pull in different directions.</p>
+      </header>
+      <table class="facts">
+        <tbody>
+          {limits.map(([name, text]) => <tr><th scope="row">{name}</th><td set:html={text} /></tr>)}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="manage-title">
+    <div class="wrap cols">
+      <div class="stack">
+        <h2 class="h2" id="manage-title">Keeping track of sends</h2>
+        <div class="prose">
+          <p>
+            Every send has a record. List them, check one, or cancel one that is waiting. Set a default destination if you always send to the
+            same machine.
+          </p>
+          <p>Sending to the machine you are on simply copies the file into its own Inbox.</p>
+        </div>
+      </div>
+      <Sheet
+        steps={[
+          { lines: ["$ pb send list", "$ pb send status <transfer-id>", "$ pb send cancel <transfer-id>"] },
+          { lines: ["$ pb send destination set studio", "$ pb send ./notes.md"], note: "With a default destination, <code>--to</code> is optional." },
+          { lines: ["$ pb inbox requests", "$ pb inbox approve <request-id>"], note: "Files a teammate wants to send you." },
+        ]}
+      />
+    </div>
+  </section>
+</Feature>

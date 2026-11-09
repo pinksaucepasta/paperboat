@@ -1,16 +1,225 @@
 ---
 import Page from "../layouts/Page.astro"
-import PageHead from "../components/PageHead.astro"
-import Section from "../components/Section.astro"
+import Head from "../components/Head.astro"
+import Sheet from "../components/Sheet.astro"
+import Install from "../components/Install.astro"
+import Closing from "../components/Closing.astro"
+import { features } from "../features"
+import { previewDomain, sourceUrl } from "../site"
+import { breadcrumbSchema } from "../schema"
+
+const steps = [
+  {
+    title: "Install pb on the computer you are at",
+    text: "The installer puts <code>pb</code> in your user's path and starts its background service. When it finishes, your browser opens: sign in and approve this computer.",
+    install: true,
+  },
+  {
+    title: "Check that it is healthy",
+    text: "<code>pb doctor</code> checks sign-in, the background service and connectivity, and says what to do about anything that is wrong.",
+    sheet: [{ lines: ["$ pb doctor", "$ pb auth status"] }],
+  },
+  {
+    title: "Add a second machine",
+    text: "Run the same install line there. On a server with no browser, pb prints a link and a short code; open the link on any device and approve. Or create a ready-made install line that needs no approval:",
+    sheet: [{ lines: ["$ pb machine add --name studio"], note: "Prints an install command for Linux and macOS with a one-time token. Run it on the new machine within ten minutes." }],
+  },
+  {
+    title: "See your machines",
+    text: "Names are what you type everywhere else. Rename one with <code>pb machine rename</code>.",
+    sheet: [
+      {
+        lines: [
+          "$ pb environments",
+          "NAME    STATE   PLATFORM      ID",
+          "laptop  online  darwin/arm64  machine_2f6c0b1e-77a4-4c1d-b0f3-5d9a41c8e2a7",
+          "studio  online  linux/amd64   machine_8a1d5c2e-3b47-4f0e-9d62-1c7e5b0a4f93",
+        ],
+      },
+    ],
+    table: true,
+  },
+  {
+    title: "Open a terminal on the other one",
+    text: "You are in a shell on studio. Close the window whenever you like; run the same command to come back to it.",
+    sheet: [{ lines: ["$ pb connect studio"] }],
+  },
+  {
+    title: "Share something",
+    text: "Start any web server and give it a public address. Press Ctrl+C to take it down.",
+    sheet: [{ lines: ["$ pb preview 3000", "Preview ready", `https://quiet-river-lantern-4821.${previewDomain} -> http://127.0.0.1:3000`, "", "Press Ctrl+C to stop"] }],
+  },
+]
+
+const help = [
+  ["pb", "With no arguments, opens a home screen: machines, sessions, previews, tunnels and every command, searchable."],
+  ["pb help, pb <command> --help", "Every command explains itself, with examples. Add --json for a structured description."],
+  ["man pb, man pb-tunnel-create", "Manual pages are installed with pb. Spaces in a command become hyphens."],
+  ["pb doctor [machine]", "Diagnoses this computer, or the path to another machine. --repair fixes what it can."],
+  ["pb bugreport", "Builds a diagnostic bundle with secrets and contents removed, for a support request."],
+  ["pb update", "Updates now. By default pb updates itself at 04:00 local time; pb update settings changes that."],
+  ["pb completion bash|zsh|fish", "Shell completion, including your machine names."],
+  ["pb uninstall", "Removes Paperboat from this machine completely. Files in the Inbox are kept."],
+]
 ---
 
-<Page title="Docs — Paperboat" description="Paperboat documentation: install, the pb command, and every feature.">
-  <PageHead title="Docs">
-    <p>Everything about installing and using Paperboat.</p>
-  </PageHead>
-  <Section id="docs-sections" title="Start here">
-    <Fragment slot="text">
-      <p>The docs are being written. Until then, run <code>pb help</code> or <code>pb &lt;command&gt; --help</code>; every command explains itself.</p>
-    </Fragment>
-  </Section>
+<Page
+  title="Paperboat quickstart: install pb and connect two machines in five minutes"
+  description="Install pb, sign in, add a second machine, open a terminal on it and share a local port. Plus where every command is documented: built-in help, man pages and pb doctor."
+  schema={[breadcrumbSchema(Astro.site, [["Docs", "/docs/"]])]}
+>
+  <Head title="Two machines, five minutes">
+    <p>
+      This is the quickstart. The full reference ships inside <code>pb</code> itself, as built-in help and manual pages that always match the
+      version you have installed.
+    </p>
+  </Head>
+
+  <section class="section start" aria-label="Quickstart">
+    <div class="wrap">
+      <ol class="steps">
+        {
+          steps.map((step) => (
+            <li class="step">
+              <div class="step-text">
+                <h2 class="h3">{step.title}</h2>
+                <p set:html={step.text} />
+              </div>
+              <div class="step-show">
+                {step.install && <Install />}
+                {step.sheet && <Sheet steps={step.sheet} table={step.table} />}
+              </div>
+            </li>
+          ))
+        }
+      </ol>
+    </div>
+  </section>
+
+  <section class="section section-tint" aria-labelledby="next-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="next-title">What to read next</h2>
+        <p class="lede">Each feature has a page with its commands, real output and limits.</p>
+      </header>
+      <ul class="next">
+        {
+          features.map((item) => (
+            <li>
+              <a href={`/features/${item.slug}/`}>
+                <span class="next-name">{item.name}</span>
+                <code>{item.command}</code>
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="help-title">
+    <div class="wrap">
+      <header class="section-head">
+        <h2 class="h2" id="help-title">Where the reference lives</h2>
+        <p class="lede">
+          The complete command reference is generated from the same code as <code>pb</code> and is
+          <a href={`${sourceUrl}/tree/main/cli/docs/cli`} rel="noopener">browsable in the repository</a>. On your machine, these get you there
+          faster.
+        </p>
+      </header>
+      <table class="facts">
+        <tbody>
+          {help.map(([command, text]) => <tr><th scope="row"><code>{command}</code></th><td>{text}</td></tr>)}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <Closing title="That was the whole setup." />
 </Page>
+
+<style>
+  .start {
+    padding-top: 0;
+  }
+
+  /* A real sequence, so the steps are numbered. */
+  .steps {
+    counter-reset: step;
+    border-top: 1px solid var(--ink);
+  }
+
+  .step {
+    counter-increment: step;
+    display: grid;
+    gap: var(--s5);
+    padding-block: var(--s6);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .step-text {
+    display: grid;
+    gap: var(--s2);
+    align-content: start;
+  }
+
+  .step-text .h3::before {
+    content: counter(step) ". ";
+    color: var(--cobalt);
+  }
+
+  .step-text p {
+    color: var(--fog);
+    max-width: 52ch;
+    text-wrap: pretty;
+  }
+
+  .step-show {
+    min-width: 0;
+  }
+
+  @media (min-width: 900px) {
+    .step {
+      grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+      column-gap: var(--s8);
+      align-items: start;
+    }
+  }
+
+  .next {
+    display: grid;
+    border-top: 1px solid var(--rule);
+  }
+
+  .next a {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--s1) var(--s4);
+    padding-block: var(--s3);
+    border-bottom: 1px solid var(--rule);
+    min-height: 48px;
+  }
+
+  .next-name {
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  .next a:hover .next-name {
+    color: var(--cobalt);
+  }
+
+  .next code {
+    color: var(--fog);
+    overflow-wrap: anywhere;
+  }
+
+  @media (min-width: 760px) {
+    .next {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      column-gap: var(--s7);
+    }
+  }
+</style>
