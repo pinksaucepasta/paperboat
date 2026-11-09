@@ -17,6 +17,7 @@ import {
 import { CopyIcons, useCopy } from "@/components/copy-button"
 import { ShareMachine } from "@/components/share-machine-dialog"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { isLimitReached, LimitReached } from "@/components/limit-reached"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
@@ -36,15 +37,10 @@ export function AddMachineDialog() {
       Add machine
     </>
   )
-  // While the install command loads, the button holds its place.
-  if (!data || !workspace)
-    return (
-      <Button size="lg" disabled>
-        {trigger}
-      </Button>
-    )
-  if (!installUrl) return null
+  // Loaded without an install command: this workspace can't add machines here.
+  if (data && !installUrl) return null
 
+  // While the install command loads the button looks and works the same; the dialog waits for it.
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger render={<Button size="lg" />}>{trigger}</DialogTrigger>
@@ -52,7 +48,12 @@ export function AddMachineDialog() {
         <DialogHeader>
           <DialogTitle>Add a machine</DialogTitle>
         </DialogHeader>
-        {open && <AddMachineChoices installUrl={installUrl} workspace={workspace} onDone={() => setOpen(false)} />}
+        {open &&
+          (installUrl && workspace ? (
+            <AddMachineChoices installUrl={installUrl} workspace={workspace} onDone={() => setOpen(false)} />
+          ) : (
+            <Skeleton className="h-24 w-full" />
+          ))}
       </DialogContent>
     </Dialog>
   )
