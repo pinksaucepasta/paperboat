@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestWindowsReplacementRejectsMalformedNativeSnapshotBeforeMutation(t *testing.T) {
@@ -38,5 +39,28 @@ func TestWindowsCapturedSourceOfAnAbsentInstallationIsNotExist(t *testing.T) {
 		if _, err := windowsCapturedSourceProjection([]byte(corrupt), ""); !errors.Is(err, ErrInvalidRequest) {
 			t.Fatalf("corrupt snapshot %q error = %v, want ErrInvalidRequest", corrupt, err)
 		}
+	}
+}
+
+// victus: after a failed update left hostd stopped, `pb install` of a good build failed with "hostd lifecycle pipe
+// connection failed" and could never recover the machine. A stopped hostd has nothing to admit.
+func TestWindowsReplacementSkipsMaintenanceAdmissionWhenHostdIsStopped(t *testing.T) {
+	layout, err := service.WindowsUserLayout("S-1-5-21-111-222-333-1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore := windowsHostdRunning
+	t.Cleanup(func() { windowsHostdRunning = restore })
+	windowsHostdRunning = func(context.Context, service.Layout) (bool, error) { return false, nil }
+	abort, err := prepareWindowsReplacementMaintenance(context.Background(), layout, `C:\does-not-exist\hostd.token`, false, time.Second)
+	if err != nil {
+		t.Fatalf("stopped hostd still required maintenance admission: %v", err)
+	}
+	if err := abort(); err != nil {
+		t.Fatal(err)
+	}
+	windowsHostdRunning = func(context.Context, service.Layout) (bool, error) { return true, nil }
+	if _, err := prepareWindowsReplacementMaintenance(context.Background(), layout, `C:\does-not-exist\hostd.token`, false, time.Second); err == nil {
+		t.Fatal("a running hostd was not asked for maintenance admission")
 	}
 }

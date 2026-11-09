@@ -338,6 +338,38 @@ func (s windowsInstallationState) Restore(ctx context.Context, snapshot []byte) 
 	return restoreSSH()
 }
 
+// windowsHostdRunning reports whether the installed hostd service runs.
+var windowsHostdRunning = func(ctx context.Context, layout service.Layout) (bool, error) {
+	hostd, _, _, err := windowsRoleInstallers(layout, true)
+	if err != nil {
+		return false, err
+	}
+	status, err := (service.WindowsController{}).Inspect(ctx, hostd.DefinitionPath())
+	return status.Running, err
+}
+
+// prepareWindowsReplacementMaintenance asks the running hostd to admit maintenance. A stopped hostd holds no work
+// to protect and has no pipe to ask, so installing over a broken installation proceeds (the rule repair follows).
+func prepareWindowsReplacementMaintenance(ctx context.Context, layout service.Layout, tokenFile string, force bool, timeout time.Duration) (func() error, error) {
+	running, err := windowsHostdRunning(ctx, layout)
+	if err != nil {
+		return nil, err
+	}
+	if !running {
+		return func() error { return nil }, nil
+	}
+	return prepareMaintenance(ctx, layout.HostdSocket, tokenFile, force, timeout)
+}
+
+// PrepareWindowsSuppliedMaintenance is prepareWindowsReplacementMaintenance for the supplied-install command.
+func PrepareWindowsSuppliedMaintenance(ctx context.Context, layout service.Layout, tokenFile string, force bool) (func(), error) {
+	abort, err := prepareWindowsReplacementMaintenance(ctx, layout, tokenFile, force, 35*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	return func() { _ = abort() }, nil
+}
+
 // Preparation can probe/stop legacy roles before lifecycle recovery. Reject a
 // foreign signed owner before that preparation; Recover repeats the check under
 // its own lock so this read-only preflight cannot grant mutation authority.
@@ -527,7 +559,7 @@ func replaceWindowsInstallationLocked(ctx context.Context, request Request, stat
 		if timeout == 0 {
 			timeout = 35 * time.Second
 		}
-		abort, err := prepareMaintenance(ctx, layout.HostdSocket, installed.TokenFile, request.Force, timeout)
+		abort, err := prepareWindowsReplacementMaintenance(ctx, layout, installed.TokenFile, request.Force, timeout)
 		if err != nil {
 			return err
 		}
