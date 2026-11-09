@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -30,7 +31,11 @@ func TestEnvRunInjectsValuesAndPassesStdioThrough(t *testing.T) {
 }
 
 func TestEnvRunPassesExitCodesAndSignalsThrough(t *testing.T) {
-	for script, want := range map[string]int{"exit 7": 7, "kill -TERM $$": 143} {
+	scripts := map[string]int{"exit 7": 7, "kill -TERM $$": 143}
+	if runtime.GOOS == "windows" {
+		delete(scripts, "kill -TERM $$") // Windows has no death-by-signal status to map to 128+n
+	}
+	for script, want := range scripts {
 		command, _ := runTestCommand()
 		err := runWithEnvironment(command, []string{"sh", "-c", script}, nil)
 		var exit exitCodeError
