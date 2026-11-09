@@ -66,10 +66,10 @@ type Release struct {
 	CLIArchitecture   string
 	// AuthenticodeSigned is the signed index's mark on the pb target (Windows only).
 	AuthenticodeSigned bool
-	HostdAPIMin       uint16
-	HostdAPIMax       uint16
-	RuntimeAPIMin     uint16
-	RuntimeAPIMax     uint16
+	HostdAPIMin        uint16
+	HostdAPIMax        uint16
+	RuntimeAPIMin      uint16
+	RuntimeAPIMax      uint16
 	// Supervisor targets are present in every signed release index. They are
 	// kept separate from the worker/CLI targets because replacing them is a
 	// supervisor-class maintenance operation.
