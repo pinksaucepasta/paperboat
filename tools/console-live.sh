@@ -21,6 +21,10 @@ case $old in .next-a) new=.next-b ;; *) old=.next-b new=.next-a ;; esac
 point() { printf 'NEXT_DIST_DIR=%s\n' "$1" > "$slot_file"; systemctl --user restart paperboat-console; }
 
 git -C "$tree" pull -q --ff-only origin main
+# Runs queued behind the lock usually find main already built by the run before them.
+built=$HOME/.config/paperboat-console/built.commit
+head=$(git -C "$tree" rev-parse HEAD)
+[ "$(cat "$built" 2>/dev/null)" = "$head" ] && { echo "console-live: already serving $(git -C "$tree" rev-parse --short HEAD)"; exit 0; }
 cd "$tree/console"
 bun install --frozen-lockfile
 rm -rf "$new"
@@ -28,7 +32,7 @@ NEXT_DIST_DIR=$new bun run build || { echo "console-live: build failed; $old kee
 
 point "$new"
 for _ in $(seq 30); do
-  curl -fsS -o /dev/null --max-time 5 "$url/" 2>/dev/null && { echo "console-live: serving $new at $(git -C "$tree" rev-parse --short HEAD)"; exit 0; }
+  curl -fsS -o /dev/null --max-time 5 "$url/" 2>/dev/null && { echo "$head" > "$built"; echo "console-live: serving $new at $(git -C "$tree" rev-parse --short HEAD)"; exit 0; }
   sleep 1
 done
 echo "console-live: $new did not answer at $url; back on $old" >&2
