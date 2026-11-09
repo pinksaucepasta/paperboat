@@ -22,6 +22,7 @@ import config_sync_lifecycle as sync
 from install_lifecycle import registration
 from pairing_lifecycle import command_result, confirmed_command, runtime_root
 from tunnel_command_rows import redacted
+import winhost
 
 ROWS = [f'C{i:03d}' for i in range(127, 139)] + ['C169', 'C172', 'C177', 'C179', 'C180', 'C181']
 GROUPS = {'C127': [], 'C128': ['alias'], 'C132': ['domain'], 'C135': ['proxy']}
@@ -37,7 +38,9 @@ def require(condition, message):
 class Suite:
     def __init__(self, args):
         self.args = args
-        self.pb = Path.home() / '.local/bin/pb'
+        self.pb = winhost.pb_path()
+        # Repository rows need Git and the config worker's service on the device itself (Unix-only fixtures for now).
+        self.selected = args.rows or ([r for r in ROWS if r not in REPOSITORIES] if winhost.device() else ROWS)
         self.before = registration()
         self.machine = self.before['machine_id']
         self.rows = {row: {'main': False, 'error': False, 'failures': []} for row in ROWS}
@@ -237,13 +240,13 @@ class Suite:
     def run(self, password):
         self.error_paths()
         self.groups()
-        if set(self.args.rows or ROWS) & SETTINGS:
+        if set(self.selected) & SETTINGS:
             try:
                 self.settings(password)
             except Exception as error:
                 for row in SETTINGS:
                     self.rows[row]['failures'].append({'phase': 'main', 'reason': str(error), 'command': self.last})
-        if set(self.args.rows or ROWS) & REPOSITORIES:
+        if set(self.selected) & REPOSITORIES:
             # Retain fixture files if cleanup fails, rather than leave an active assignment pointing at deleted data.
             cache = None
             if sync.DARWIN:  # $TMPDIR is under the /var symlink; keep the fixture in the home tree like config_sync_lifecycle.py
@@ -259,7 +262,7 @@ class Suite:
             if not self.cleanup_errors:
                 shutil.rmtree(root)
         require(registration() == self.before, 'config command check changed enrollment')
-        selected = self.args.rows or ROWS
+        selected = self.selected
         passed = not self.cleanup_errors and all(self.rows[row]['main'] and self.rows[row]['error']
                                                 and not self.rows[row]['failures'] for row in selected)
         receipt = {'check': 'config-commands', 'status': 'PASS' if passed else 'FAIL',

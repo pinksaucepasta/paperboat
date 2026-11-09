@@ -8,8 +8,10 @@ PB_SMOKE_WINDOWS_PB set to the pb.exe path of the saved `pb install --json` rece
 `<id>:victus`; PASS needs exit 0 and every JSON status line the check printed to be PASS. Results go to
 results/windows-<UTC>.json. Checks that need a fixture the run was not given are SKIP, never PASS.
 
-Not ported (they drive a POSIX pty, systemd/launchd or sudo on the device): terminal_matrix, terminal_lifecycle,
-session_lifecycle, session_sharing_lifecycle, install_lifecycle, pairing_lifecycle's uninstall flows, ssh_*.
+Not ported (they need Git, systemd/launchd, sudo or a signal on the device, or a gate an external driver releases):
+terminal_matrix, install_lifecycle, pairing_lifecycle's uninstall flows, ssh_*, preview_survival/tunnel_survival,
+config_sync/config_sync_lifecycle and config_commands' repository rows, the gated preview_lifecycle/preview_protocols/
+session replay and cross checks, and the target side of exec_lifecycle/transfer_* when the target is Windows.
 """
 import argparse
 import contextlib
@@ -49,6 +51,19 @@ def checks(args):
     table['tunnel-command-rows'] = (['tunnel_command_rows.py', '--run', '{run}', '--build', 'windows', '--version', '{version}',
                                      '--server', '{server}', '--output', '{output}', '--fixtures-token-file', '{token}']
                                     + domain, list(SECRET_FIXTURES))
+    table['exec-main'] = (['exec_lifecycle.py', args.peer, '--check', 'exec'], ['--peer'])
+    table['readiness-main'] = (['exec_lifecycle.py', args.peer, '--check', 'readiness'], ['--peer'])
+    table['exec-repeat'] = (['exec_lifecycle.py', args.peer, '--check', 'repeated'], ['--peer'])
+    table['exec-cancel'] = (['exec_cancel.py', args.peer], ['--peer'])
+    table['exec-messages'] = (['exec_messages.py'], [])
+    table['transfer-manage'] = (['transfer_manage.py', args.peer], ['--peer'])
+    table['transfer-multi'] = (['transfer_lifecycle.py', args.peer], ['--peer'])
+    table['transfer-resume'] = (['transfer_resume.py', args.peer], ['--peer'])
+    table['transfer-errors'] = (['transfer_errors.py', args.peer], ['--peer'])
+    table['session-manage'] = (['session_lifecycle.py', args.peer, '--check', 'manage'], ['--peer'])
+    table['session-sharing-owner'] = (['session_sharing_lifecycle.py', args.peer, '--team', team], ['--peer', '--team'])
+    table['config-commands'] = (['config_commands.py'], [])
+    table['config-survival'] = (['config_survival.py'], [])
     table['tunnel-manage'] = (['tunnel_manage.py'], [])
     table['tunnel-lifecycle'] = (['tunnel_lifecycle.py'], [])
     table['tunnel-public-protocols'] = (['tunnel_public_protocols.py'], [])

@@ -3,7 +3,6 @@
 import argparse
 import json
 import os
-from pathlib import Path
 import sys
 import uuid
 
@@ -13,6 +12,7 @@ from pairing_lifecycle import command_diagnostic, command_result, invoke
 from session_cleanup import cleanup
 from session_lifecycle import selected
 from terminal_lifecycle import Terminal
+import winhost
 
 
 def main():
@@ -21,7 +21,7 @@ def main():
     # Team creation needs a paid Checkout, so a retained paid team is the fixture.
     parser.add_argument('--team', default=os.environ.get('PAPERBOAT_SMOKE_TEAM', ''))
     args = parser.parse_args()
-    pb = Path.home() / '.local/bin/pb'
+    pb = winhost.pb_path()
     name = 'smoke-session-' + uuid.uuid4().hex[:12]
     team = args.team or 'smoke-sharing-' + uuid.uuid4().hex[:12]
     terminal = None
@@ -44,7 +44,7 @@ def main():
         if not args.team:
             invoke(pb, *prefix, 'team', 'create', team, '--json')
             created = True
-        terminal = Terminal([pb, *prefix, 'connect', args.target, '--name', name, '--status-bar', 'off'])
+        terminal = Terminal(winhost.terminal_argv(pb, [*prefix, 'connect', args.target, '--name', name, '--status-bar', 'off']))
         terminal.expect(b'\x1b[?2004h')
         terminal.expect(terminal.marker('READY', 'stty -echo; '))
         _, session = selected(pb, args.target, name)
@@ -77,7 +77,7 @@ def main():
     finally:
         restore_all(sys.exc_info()[1], end_sharing,
                     *([terminal.close] if terminal is not None else []),
-                    lambda: cleanup(str(pb), args.target, name), delete_team)
+                    lambda: cleanup(pb, args.target, name), delete_team)
     print(json.dumps({'check': 'session-sharing-owner', 'target': args.target, 'status': 'PASS',
                       'viewer_grant': True, 'interactive_grant': True, 'live_participants': True,
                       'shared_catalog': True, 'owner_survives_unshare': True,

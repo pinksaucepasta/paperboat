@@ -3,6 +3,7 @@ import json
 import os
 import pathlib
 import subprocess
+import sys
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -205,6 +206,46 @@ class SnippetsInPowerShell(unittest.TestCase):
             running.kill()
             self.assertFalse(self.device.alive(running.pid))
 
+    def test_slow_reader_still_receives_all_output(self):
+        import time
+        big = pathlib.Path(self.bin.name) / 'big.exe'
+        big.write_text('#!/bin/sh\nhead -c 3000000 /dev/zero\n')
+        big.chmod(0o755)
+        started = time.monotonic()
+        result = self.device.run([str(big)], text=False, read_delay=2, timeout=60)
+        self.assertEqual(0, result.returncode)
+        self.assertEqual(3000000, len(result.stdout))
+        self.assertGreaterEqual(time.monotonic() - started, 2)
+
+    def test_remote_exec_reads_events_and_waits_for_its_exit_code(self):
+        import exec_cancel
+        remote = winhost.job(winhost.WindowsPb(self.device), ['x'])
+        try:
+            self.assertEqual(0, remote.wait(30))
+            self.assertTrue(remote.stdout().startswith(b'args=x'))
+            with self.assertRaises(RuntimeError):
+                remote.interrupt()
+        finally:
+            remote.close()
+
+    def test_generated_files_and_child_pid(self):
+        import hashlib
+        with self.device.temp_dir('pb-test') as directory:
+            pattern = directory / 'pattern.bin'
+            winhost.write_pattern(pattern, bytes(range(256)) * 4, 5)
+            self.assertEqual(bytes(range(256)) * 20, pattern.read_bytes())
+            random = directory / 'random.bin'
+            digest = winhost.write_random(random, 3 << 20)
+            self.assertEqual(3 << 20, random.size())
+            self.assertEqual(hashlib.sha256(random.read_bytes()).hexdigest(), digest)
+            sparse = directory / 'sparse.bin'
+            winhost.truncate(sparse, 5000)
+            self.assertEqual(5000, sparse.size())
+            done = self.device.spawn([self.exe, 'x'], directory / 'job')
+            done.wait(30, interval=.5)
+            self.assertGreater(done.child_pid(), 1)
+            self.assertNotEqual(done.pid, done.child_pid())
+
     def test_origin_serves_its_body(self):
         import urllib.request
         with self.device.origin('synthetic <origin> "body"') as port:
@@ -267,6 +308,74 @@ class PortedScriptsRouteToTheDevice(unittest.TestCase):
             self.assertEqual(['cmd', '/c', 'exit', '0'], winhost.true_argv())
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(['true'], winhost.true_argv())
+
+
+class SessionFamily(unittest.TestCase):
+    def test_terminal_argv_is_plain_on_unix_and_ssh_tt_on_windows(self):
+        self.assertEqual(['/bin/pb', 'connect', 'hp'], winhost.terminal_argv(pathlib.Path('/bin/pb'), ['connect', 'hp']))
+        device = winhost.WindowsDevice(target='user@host', pb_exe=EXE, password='secret')
+        with patch.dict(os.environ, {}, clear=True):
+            argv = winhost.terminal_argv(winhost.WindowsPb(device), ['connect', 'my box', '--name', "it's"])
+            self.assertEqual('secret', os.environ['SSHPASS'])
+        self.assertEqual(['sshpass', '-e', 'ssh'], argv[:3])
+        self.assertIn('-tt', argv)
+        self.assertNotIn('secret', ' '.join(argv))
+        command = argv[-1]
+        self.assertIn("& 'C:\\Program Files\\Paperboat\\bin\\pb.exe' 'connect' 'my box' '--name' 'it''s'", command)
+
+    def test_session_cleanup_reads_the_device_receipt(self):
+        import session_cleanup
+
+        class Remote:
+            def run_remote(self, arguments, timeout, text):
+                self.arguments = arguments
+                return SimpleNamespace(returncode=0, stdout=b'{"version":"1","sessions":[]}')
+
+        remote = Remote()
+        self.assertEqual((0, {'version': '1', 'sessions': []}), session_cleanup.command(remote, 'list', 'hp'))
+        self.assertEqual(['session', 'list', 'hp', '--json'], remote.arguments)
+
+
+class LocalTransferHelpers(unittest.TestCase):
+    def test_local_files_match_the_remote_contract(self):
+        import hashlib
+        with winhost.workdir('pb-test') as directory:
+            winhost.write_pattern(directory / 'p', b'ab', 3)
+            self.assertEqual(b'ababab', (directory / 'p').read_bytes())
+            digest = winhost.write_random(directory / 'r', 2 << 20)
+            self.assertEqual(hashlib.sha256((directory / 'r').read_bytes()).hexdigest(), digest)
+            winhost.truncate(directory / 's', 100)
+            self.assertEqual(100, (directory / 's').stat().st_size)
+            self.assertIsInstance(directory, pathlib.Path)
+
+    def test_run_pb_and_job_pick_the_side(self):
+        out = winhost.run_pb(sys.executable, ['-c', 'print(7)'], 10)
+        self.assertEqual(b'7\n', out.stdout)
+        job = winhost.job(sys.executable, ['-c', 'print(8)'])
+        try:
+            self.assertEqual(0, job.wait(10))
+            self.assertEqual(b'8\n', job.stdout())
+        finally:
+            job.close()
+
+
+class ExecFamily(unittest.TestCase):
+    def test_events_and_local_exec(self):
+        import exec_cancel
+        self.assertEqual([{'a': 1}, {'b': 2}], exec_cancel.events(b'{"a":1}\n{"b":2}\n{"partial'))
+        local = winhost.LocalJob([sys.executable, '-c', 'import signal,time;signal.signal(signal.SIGINT,signal.SIG_DFL);print("hello",flush=True);time.sleep(30)'])
+        try:
+            import time
+            for _ in range(50):
+                if local.stdout():
+                    break
+                time.sleep(.1)
+            self.assertEqual(b'hello\n', local.stdout())
+            self.assertIsNone(local.poll())
+            local.interrupt()
+            self.assertEqual(-2, local.wait(10))
+        finally:
+            local.close()
 
 
 class PreviewFamily(unittest.TestCase):

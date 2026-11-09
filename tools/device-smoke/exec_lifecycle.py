@@ -4,7 +4,6 @@ import argparse
 import base64
 import hashlib
 import json
-from pathlib import Path
 import subprocess
 import tempfile
 import time
@@ -13,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from install_lifecycle import registration
 from pairing_lifecycle import command_diagnostic, invoke
+import winhost
 
 
 OUTPUT_BYTES = 16 << 20
@@ -63,6 +63,12 @@ def large_output(binary, target):
     output, _ = run(binary, *argv)
     if output != bytes(size):
         raise RuntimeError('exec lost or changed immediate large output (%d of %d bytes)' % (len(output), size))
+    if hasattr(binary, 'run_remote'):  # the device's pb.exe reads nothing for 3 s, then everything
+        slow = binary.run_remote(argv, timeout=120, text=False, read_delay=3)
+        if slow.returncode != 0 or len(slow.stdout) != size:
+            raise RuntimeError('exec failed for a slow reader of large output (exit %s, %d of %d bytes): %s'
+                               % (slow.returncode, len(slow.stdout), size, without_env_notice(slow.stderr)[:300].decode(errors='replace')))
+        return
     command = [str(binary), *argv]
     received = 0
     with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
@@ -158,7 +164,7 @@ def main():
     parser.add_argument('target')
     parser.add_argument('--check', choices=['exec', 'readiness', 'repeated'], required=True)
     args = parser.parse_args()
-    binary = Path.home() / '.local/bin/pb'
+    binary = winhost.pb_path()
     enrolled = registration()
     {'exec': execute, 'readiness': readiness, 'repeated': repeated}[args.check](binary, args.target)
     if registration() != enrolled:

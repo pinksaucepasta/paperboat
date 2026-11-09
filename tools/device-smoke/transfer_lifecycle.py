@@ -3,30 +3,33 @@
 import argparse
 import hashlib
 import json
-from pathlib import Path
-import tempfile
 import uuid
 
 from exec_lifecycle import run
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
+import winhost
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
     args = parser.parse_args()
-    binary = Path.home() / '.local/bin/pb'
+    binary = winhost.pb_path()
     before = registration()
     prefix = 'paperboat-smoke-' + uuid.uuid4().hex
     expected = {}
     names = []
-    with tempfile.TemporaryDirectory(prefix=prefix) as directory:
-        for suffix, content in [('large.bin', bytes(range(256)) * 204800),
+    with winhost.workdir(prefix) as directory:
+        for suffix, content in [('large.bin', None),
                                 ('unicode-λ船.txt', 'λ船\n'.encode() * 4096),
                                 ('empty.bin', b'')]:
-            path = Path(directory) / (prefix + '-' + suffix)
-            path.write_bytes(content)
+            path = directory / (prefix + '-' + suffix)
+            if content is None:  # 50 MiB, made on the device so it is not sent over SSH
+                content = bytes(range(256)) * 204800
+                winhost.write_pattern(path, bytes(range(256)) * 256, 800)
+            else:
+                path.write_bytes(content)
             names.append(str(path))
             expected[path.name] = hashlib.sha256(content).hexdigest()
         # Receiver verification and cleanup use only our exact random filenames.

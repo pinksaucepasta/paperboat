@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """F15-04: config set/customize persist through `pb update --from`, then reset restores the originals."""
 import json
-import os
-from pathlib import Path
-import shutil
 import subprocess
 import sys
-import tempfile
 
 from install_lifecycle import registration
+from pairing_lifecycle import command_result
+import pathlib
+import winhost
 
-PB = Path.home() / '.local/bin/pb'
-HERE = Path(__file__).resolve().parent
+PB = winhost.pb_path()
+HERE = pathlib.Path(__file__).resolve().parent
 
 
 def phase(name, state):
@@ -24,12 +23,11 @@ def phase(name, state):
 
 def main():
     before = registration()
-    with tempfile.TemporaryDirectory(prefix='paperboat-config-survival-', dir=Path.home()) as directory:
-        state = Path(directory) / 'state'
+    with winhost.workdir('paperboat-config-survival-') as directory:
+        state = directory / 'state'
         state.mkdir(mode=0o700)
-        copy = Path(directory) / 'pb'
-        shutil.copy2(PB, copy)
-        os.chmod(copy, 0o700)
+        copy = directory / ('pb.exe' if winhost.device() else 'pb')
+        winhost.copy_file(str(PB), copy)
         try:
             phase('set', state)
         except Exception:
@@ -40,7 +38,8 @@ def main():
                 pass
             raise
         try:
-            subprocess.run([str(PB), 'update', '--from', str(copy)], check=True, timeout=300, capture_output=True)
+            if command_result(PB, 'update', '--from', str(copy), timeout=300).returncode:
+                raise RuntimeError('pb update --from failed')
         finally:
             verified = phase('verify', state)
     if registration()['machine_id'] != before['machine_id']:

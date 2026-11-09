@@ -13,8 +13,17 @@ class CleanupError(Exception):
 
 
 def command(pb, *args):
+    """pb is a path string, a Path, or the Windows device's pb.exe (winhost.WindowsPb)."""
+    if hasattr(pb, 'run_remote'):
+        result = pb.run_remote(["session", *args, "--json"], timeout=30, text=False)
+        if len(result.stdout) > 2 * 1024 * 1024:
+            raise CleanupError('pb session output over 2 MiB')
+        receipt = json.loads(result.stdout)
+        if not isinstance(receipt, dict):
+            raise CleanupError('pb session output is not a JSON object')
+        return result.returncode, receipt
     with tempfile.TemporaryFile() as output:
-        result = subprocess.run([pb, "session", *args, "--json"], stdout=output,
+        result = subprocess.run([str(pb), "session", *args, "--json"], stdout=output,
                                 stderr=subprocess.DEVNULL, timeout=30, check=False)
         if output.tell() > 2 * 1024 * 1024:
             raise CleanupError('pb session output over 2 MiB')

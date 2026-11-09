@@ -5,15 +5,16 @@ Uses one machine of the signed-in account that is not online, and a name no mach
 Nothing is changed: both are rejected before a descriptor or a peer stream is requested.
 """
 import json
-from pathlib import Path
-import subprocess
 import uuid
 
-PB = Path.home() / '.local/bin/pb'
+from pairing_lifecycle import command_result
+import winhost
+
+PB = winhost.pb_path()
 
 
 def run(*args):
-    result = subprocess.run([str(PB), *args], capture_output=True, text=True, timeout=90)
+    result = command_result(PB, *args, timeout=90)
     return result.returncode, result.stdout, result.stderr
 
 

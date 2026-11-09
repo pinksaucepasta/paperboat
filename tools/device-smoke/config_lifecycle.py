@@ -7,18 +7,18 @@ Phase `set` records originals under STATE_DIR and applies the changes. Phase `ve
 import argparse
 import json
 import re
-from pathlib import Path
-import subprocess
-import tempfile
+import pathlib
 
-PB = Path.home() / '.local/bin/pb'
+from pairing_lifecycle import command_result
+import winhost
+
+PB = winhost.pb_path()
 SHORTCUT = 'smokeuptime'
 PORT = '2201'
 
 
 def run(*args, timeout=60):
-    result = subprocess.run([str(PB), *args], capture_output=True, text=True, timeout=timeout,
-                            stdin=subprocess.DEVNULL)
+    result = command_result(PB, *args, timeout=timeout)
     return result.returncode, result.stdout + result.stderr
 
 
@@ -44,7 +44,7 @@ def preferences():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('phase', choices=['set', 'verify'])
-    parser.add_argument('state_dir', type=Path)
+    parser.add_argument('state_dir', type=winhost.device_path)
     args = parser.parse_args()
     state = args.state_dir / 'originals.json'
     if args.phase == 'set':
@@ -53,7 +53,8 @@ def main():
         originals = {'port': shown.get('ssh_target_port'), 'preferences': preferences()}
         state.write_text(json.dumps(originals))
         path = run('config', 'path')[1].strip()
-        if path != shown['path'] or not Path(path).is_absolute():
+        absolute = pathlib.PureWindowsPath(path).is_absolute() if winhost.device() else pathlib.Path(path).is_absolute()
+        if path != shown['path'] or not absolute:
             raise RuntimeError('config path and show disagree')
         data('config', 'set', 'ssh-target-port', PORT)
         if str(effective().get('ssh_target_port')) != PORT:
@@ -61,8 +62,8 @@ def main():
         document = dict(originals['preferences'])
         document['shortcuts'] = {SHORTCUT: {'command': ['exec'], 'args': ['{1}', '--', 'uptime']}}
         document['defaults'] = {'exec': {'timeout': '45s'}}
-        with tempfile.TemporaryDirectory(prefix='paperboat-prefs-') as directory:
-            candidate = Path(directory) / 'preferences.json'
+        with winhost.workdir('paperboat-prefs-') as directory:
+            candidate = directory / 'preferences.json'
             candidate.write_text(json.dumps(document))
             data('config', 'customize', 'import', str(candidate))
         explained = run('config', 'customize', 'explain', '--', SHORTCUT, 'machine1')[1]

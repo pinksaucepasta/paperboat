@@ -12,10 +12,11 @@ from machine_lifecycle import restore_all
 from pairing_lifecycle import await_external_action, command_diagnostic, invoke
 from session_cleanup import cleanup, inventory, mutate
 from terminal_lifecycle import Terminal
+import winhost
 
 
 def selected(pb, target, name, environment=None):
-    actual, sessions = inventory(str(pb), target, environment)
+    actual, sessions = inventory(pb, target, environment)
     matches = [session for session in sessions if session['name'] == name]
     if len(matches) != 1 or matches[0]['is_default'] is not False:
         raise RuntimeError('catalog did not identify the exact named non-default session')
@@ -28,7 +29,7 @@ def qualify(pb, target, check):
     clients = []
     terminal = None
     try:
-        terminal = Terminal([pb, 'connect', target, '--name', name, '--status-bar', 'off'])
+        terminal = Terminal(winhost.terminal_argv(pb, ['connect', target, '--name', name, '--status-bar', 'off']))
         clients.append(terminal)
         terminal.expect(b'\x1b[?2004h')
         terminal.expect(terminal.marker('READY', 'stty -echo; '))
@@ -45,7 +46,7 @@ def qualify(pb, target, check):
             if current['id'] != identifier:
                 raise RuntimeError('rename catalog changed the session identity')
         terminal.close()
-        terminal = Terminal([pb, 'session', 'attach', target, identifier, '--status-bar', 'off'])
+        terminal = Terminal(winhost.terminal_argv(pb, ['session', 'attach', target, identifier, '--status-bar', 'off']))
         clients.append(terminal)
         terminal.expect(b'\x1b[?2004h')
         if check in ('replay', 'cross'):
@@ -60,7 +61,7 @@ def qualify(pb, target, check):
                                        'expected_state': nonce,
                                        'expected_account': registration()['account_id']})
         if check == 'manage':
-            mutate(str(pb), 'close', target, environment, identifier)
+            mutate(pb, 'close', target, environment, identifier)
             terminal.wait_exit()
             # The shared cleanup verifies closed state, deletes the exact ID,
             # and confirms absence; it never selects another user's terminal.
@@ -77,8 +78,8 @@ def qualify(pb, target, check):
     finally:
         restore_all(sys.exc_info()[1],
                     *[client.close for client in clients],
-                    lambda: cleanup(str(pb), target, renamed),
-                    lambda: cleanup(str(pb), target, name))
+                    lambda: cleanup(pb, target, renamed),
+                    lambda: cleanup(pb, target, name))
     print(json.dumps(result), flush=True)
 
 
@@ -86,11 +87,11 @@ def resume(pb, target, identifier, nonce, account):
     enrolled = registration()
     if enrolled['account_id'] != account:
         raise RuntimeError('controller account differs from the fixture owner; nothing attached')
-    _, sessions = inventory(str(pb), target)
+    _, sessions = inventory(pb, target)
     session = next((item for item in sessions if item['id'] == identifier), None)
     if session is None or not session['name'].startswith('smoke-session-') or session['is_default'] is not False:
         raise RuntimeError('cross-device fixture does not identify an exact owned non-default terminal')
-    terminal = Terminal([pb, 'session', 'attach', target, identifier, '--status-bar', 'off'])
+    terminal = Terminal(winhost.terminal_argv(pb, ['session', 'attach', target, identifier, '--status-bar', 'off']))
     try:
         terminal.expect(b'\x1b[?2004h')
         terminal.expect('PB_DURABLE_' + nonce, timeout=15)
@@ -115,7 +116,7 @@ def main():
     parser.add_argument('--expected-state')
     parser.add_argument('--expected-account')
     args = parser.parse_args()
-    pb = Path.home() / '.local/bin/pb'
+    pb = winhost.pb_path()
     if args.check == 'resume':
         if not all([args.session_id, args.expected_state, args.expected_account]):
             parser.error('resume requires the exact fixture ID, synthetic state and account')

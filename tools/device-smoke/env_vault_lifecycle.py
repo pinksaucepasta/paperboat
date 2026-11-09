@@ -19,11 +19,6 @@ import winhost
 PB = winhost.pb_path()
 
 
-def device_path(value):
-    """A secret file named on the command line lives on the device under test."""
-    return winhost.RemotePath(winhost.device(), value) if winhost.device() else Path(value)
-
-
 def temp_dir():
     device = winhost.device()
     return device.temp_dir('pb-vault') if device else tempfile.TemporaryDirectory(prefix='paperboat-vault-')
@@ -82,8 +77,8 @@ def account_id():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('password_file', type=device_path)
-    parser.add_argument('recovery_file', type=device_path)
+    parser.add_argument('password_file', type=winhost.device_path)
+    parser.add_argument('recovery_file', type=winhost.device_path)
     args = parser.parse_args()
     original = args.password_file
     owner_only(original)

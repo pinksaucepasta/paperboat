@@ -6,18 +6,16 @@ network: drop this user's outbound non-loopback traffic for DROP_SECONDS (iptabl
 every exit path and by a root failsafe timer, as network_drop.py does).
 """
 import argparse
-import hashlib
 import json
 import os
-from pathlib import Path
 import subprocess
-import tempfile
 import threading
 import time
 import uuid
 
 from exec_lifecycle import run
 from install_lifecycle import registration
+import winhost
 
 FILES = 4
 FILE_SIZE = 24 << 20  # 96 MiB batch: about two minutes on the hp-dadape path; per-file limit is 50 MiB
@@ -33,7 +31,9 @@ def main():
     parser.add_argument('target')
     parser.add_argument('--interrupt', choices=('receiver', 'sender', 'network'), default='receiver')
     args = parser.parse_args()
-    binary = Path.home() / '.local/bin/pb'
+    binary = winhost.pb_path()
+    if winhost.device() and args.interrupt == 'network':
+        parser.error('--interrupt network drops traffic with iptables; it has no Windows form')
     before = registration()
     prefix = 'paperboat-smoke-resume-' + uuid.uuid4().hex
     expected = {}
@@ -41,18 +41,12 @@ def main():
                "root=Path.home()/'Paperboat/Inbox'\n"
                "for path in root.glob(" + repr(prefix + '*') + "): path.unlink()\n")
     failure = None
-    with tempfile.TemporaryDirectory(prefix='paperboat-resume-') as directory:
+    with winhost.workdir('paperboat-resume-') as directory:
         sources = []
         for number in range(FILES):
-            path = Path(directory) / ('%s-%d.bin' % (prefix, number))
-            digest = hashlib.sha256()
-            with path.open('wb') as handle:
-                for _ in range(FILE_SIZE >> 20):
-                    block = os.urandom(1 << 20)
-                    digest.update(block)
-                    handle.write(block)
+            path = directory / ('%s-%d.bin' % (prefix, number))
+            expected[path.name] = winhost.write_random(path, FILE_SIZE)
             sources.append(str(path))
-            expected[path.name] = digest.hexdigest()
         restarted = {}
 
         def interrupt():
@@ -60,6 +54,8 @@ def main():
             command = '(sleep 1; ~/.local/bin/pb service restart) >/dev/null 2>&1 &'
             if args.interrupt == 'receiver':
                 run(binary, 'exec', args.target, '--', 'sh', '-c', command)
+            elif args.interrupt == 'sender' and winhost.device():
+                binary.run_remote(['service', 'restart'], timeout=120)
             elif args.interrupt == 'sender':
                 subprocess.run(['sh', '-c', command], timeout=30, check=True)
             else:
@@ -77,8 +73,7 @@ def main():
             thread = threading.Thread(target=interrupt, daemon=True)
             started = time.monotonic()
             thread.start()
-            result = subprocess.run([str(binary), 'send', *sources, '--to', args.target, '--json'],
-                                    capture_output=True, timeout=SEND_TIMEOUT)
+            result = winhost.run_pb(binary, ['send', *sources, '--to', args.target, '--json'], SEND_TIMEOUT)
             finished = time.monotonic()
             thread.join(timeout=60)
             if result.returncode:
