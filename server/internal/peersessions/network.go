@@ -815,14 +815,18 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 // authority and mint both refuse more); more peers are carried in more grants.
 const maximumRelayGrantPeers = 64
 
+// maximumRelayGrantScopes is the relay's bound on the scopes of all peers of one grant.
+const maximumRelayGrantScopes = 128
+
 // relayGrantChunk is one grant's share of the peers: their entries, and the keys of those among them that
 // may use this endpoint as a peer relay (same account).
 type relayGrantChunk struct {
 	peers   []map[string]any
 	control []string
+	scopes  int
 }
 
-// relayGrantChunks splits every peer into grants of at most size peers, sorted by key. Each chunk carries the
+// relayGrantChunks splits every peer into grants of at most size peers and maximumRelayGrantScopes scopes, sorted by key. Each chunk carries the
 // control keys of its own peers, so the chunks are disjoint (the mesh refuses a duplicate control peer). A grant lives
 // at most a minute, so a scope held until revoked (expires_at 0, AuthorityUntilRevoked) ends with the grant there
 // (grantExpiry); relays and mint refuse a scope without an expiry. A peer without a WireGuard key cannot be relayed
@@ -843,7 +847,7 @@ func relayGrantChunks(self networkBinding, peers []networkPeer, size int, grantE
 			continue
 		}
 		last := &chunks[len(chunks)-1]
-		if len(last.peers) == size {
+		if len(last.peers) == size || len(last.peers) > 0 && last.scopes+len(scopes) > maximumRelayGrantScopes {
 			chunks = append(chunks, relayGrantChunk{})
 			last = &chunks[len(chunks)-1]
 		}
@@ -852,6 +856,7 @@ func relayGrantChunks(self networkBinding, peers []networkPeer, size int, grantE
 			entry["disco_public_key"] = peer.Identity.DiscoPublicKey
 		}
 		last.peers = append(last.peers, entry)
+		last.scopes += len(scopes)
 		if peer.Identity.AccountID != self.AccountID || peer.Identity.EndpointID == self.EndpointID {
 			continue
 		}
@@ -860,16 +865,17 @@ func relayGrantChunks(self networkBinding, peers []networkPeer, size int, grantE
 	return chunks
 }
 
-// relayGrantScopes is the part of a peer's document scopes a relay grant carries. An until-revoked scope that is not a
-// machine_network scope is a session right (offline machine_access): it authorizes no relay pair, the relay pairs on
-// reciprocal machine_network dial and accept scopes, so it stays out; they would also push a grant past the relay's
-// 128-scope bound (P0 2026-10-26: pairing failed with 64 CLI peers x 4 session rights). A machine_network scope with
-// no expiry ends with the grant. The CLI builds the same set to compare a grant with its configuration.
+// relayGrantScopes is the part of a peer's document scopes a relay grant carries; peernetwork.RelayGrantKeepsStanding
+// decides which until-revoked scopes (expires_at 0) it keeps and stamps with the grant expiry. An account's own CLI
+// peers pair by machine_network and leave their session rights out (P0 2026-10-26: 64 CLI peers x 4 session rights
+// went past the relay's 128-scope bound); a team peer of another account has no machine_network scope, so its standing
+// machine_access scopes are the pair. The CLI builds the same set to compare a grant with its configuration.
 func relayGrantScopes(scopes []networkScope, grantExpiry int64) []networkScope {
+	mesh := slices.ContainsFunc(scopes, func(s networkScope) bool { return s.ResourceKind == "machine_network" })
 	out := make([]networkScope, 0, len(scopes))
 	for _, scope := range scopes {
 		if scope.ExpiresAt == 0 {
-			if scope.ResourceKind != "machine_network" {
+			if !peernetwork.RelayGrantKeepsStanding(scope.ResourceKind, scope.Capability, scope.Direction, scope.ResourceGeneration, scope.Port, mesh) {
 				continue
 			}
 			scope.ExpiresAt = grantExpiry

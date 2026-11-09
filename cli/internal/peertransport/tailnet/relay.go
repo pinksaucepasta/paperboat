@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,6 +25,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/relay/nodetls"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"net/netip"
@@ -216,17 +218,17 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 		configured := make(map[string]string, len(cfg.Peers))
 		for _, peer := range cfg.Peers {
 			// Until-revoked scopes (expires_at 0, F21-01) differ in a grant: relays and the mint refuse peer scopes
-			// without expiry, so a machine_network scope appears with the grant's own expiry, and a session right
-			// (any other kind, which authorizes no relay pair) is left out. A peer with only session rights is not
+			// without expiry, so a kept scope appears with the grant's own expiry and the rest is left out
+			// (peernetwork.RelayGrantKeepsStanding, the rule the server applies). A peer with nothing kept is not
 			// named. Everything else must match exactly.
+			mesh := slices.ContainsFunc(peer.Scopes, func(s NetworkScope) bool { return s.ResourceKind == "machine_network" })
 			var scopes []NetworkScope
 			for _, scope := range peer.Scopes {
-				switch {
-				case scope.ExpiresAt != 0:
-				case scope.ResourceKind == "machine_network":
+				if scope.ExpiresAt == 0 {
+					if !peernetwork.RelayGrantKeepsStanding(scope.ResourceKind, scope.Capability, scope.Direction, int64(scope.ResourceGeneration), int(scope.Port), mesh) {
+						continue
+					}
 					scope.ExpiresAt = g.ExpiresAt
-				default:
-					continue
 				}
 				scopes = append(scopes, scope)
 			}
