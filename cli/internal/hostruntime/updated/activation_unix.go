@@ -509,10 +509,7 @@ func (s *Service) RunActivationHelper(ctx context.Context) (resultErr error) {
 			// An earlier attempt that was rolled back consumed the approved payload, so this
 			// start can never activate it. End the attempt (journal reset to idle, installation
 			// left on the previous version) instead of failing the same way on every restart.
-			if !errors.Is(resolveErr, workerupdate.ErrPreparedCandidate) {
-				return resolveErr
-			}
-			abandoned, abandonErr := manager.AbandonUnavailableCandidate(ctx)
+			abandoned, abandonErr := abandonCandidate(ctx, manager, resolveErr)
 			if abandonErr != nil || !abandoned {
 				return errors.Join(resolveErr, abandonErr)
 			}
@@ -866,6 +863,18 @@ func UnixLegacyRollback(root string, release workerupdate.Release) (bool, error)
 	}
 	previous := handoff.Previous
 	return release.Version == previous.Version && release.SHA256 == previous.SHA256 && release.Length == previous.Length && release.Platform == previous.Platform && release.Architecture == previous.Architecture, nil
+}
+
+// abandonCandidate ends an approved attempt that can never activate: its payload is gone, or a newer
+// release superseded it before native activation began. Any other cause is not abandoned.
+func abandonCandidate(ctx context.Context, manager *workerupdate.Manager, cause error) (bool, error) {
+	switch {
+	case errors.Is(cause, workerupdate.ErrPreparedCandidate):
+		return manager.AbandonUnavailableCandidate(ctx)
+	case errors.Is(cause, ErrCandidateChanged):
+		return manager.AbandonSupersededCandidate(ctx)
+	}
+	return false, nil
 }
 
 func (s *Service) resolveUnixPreparedRelease(ctx context.Context, handoff *unixActivationHandoff, manager *workerupdate.Manager) (workerupdate.Release, error) {

@@ -326,6 +326,18 @@ func (m *Manager) Recover(ctx context.Context) error {
 // restart-loop the updater and block checking for a replacement. It does nothing, and reports
 // false, when the candidate is installed, still staged, or the journal is not an approved candidate.
 func (m *Manager) AbandonUnavailableCandidate(ctx context.Context) (bool, error) {
+	return m.abandonCandidate(ctx, false)
+}
+
+// AbandonSupersededCandidate does the same for an approved candidate that is still staged but can
+// no longer be activated because a newer release replaced it: the staged payload is dropped too, so
+// the user can download and approve the new candidate. It does nothing, and reports false, when the
+// candidate is already installed or the journal is not an approved candidate.
+func (m *Manager) AbandonSupersededCandidate(ctx context.Context) (bool, error) {
+	return m.abandonCandidate(ctx, true)
+}
+
+func (m *Manager) abandonCandidate(ctx context.Context, dropStaged bool) (bool, error) {
 	if ctx == nil {
 		return false, ErrInvalidConfig
 	}
@@ -336,8 +348,13 @@ func (m *Manager) AbandonUnavailableCandidate(ctx context.Context) (bool, error)
 		return false, err
 	}
 	if journal.Stage != updateflow.StageAwaitingApproval || journal.ApprovedCandidateID == "" ||
-		!stagedConsumed(journal.StagedPath) || m.candidateInstalled(journal) {
+		m.candidateInstalled(journal) || !dropStaged && !stagedConsumed(journal.StagedPath) {
 		return false, nil
+	}
+	if dropStaged {
+		if err = m.removeStaged(); err != nil {
+			return false, err
+		}
 	}
 	return true, m.write(m.idleJournal(journal, updateflow.FailureCandidate, ""))
 }

@@ -208,15 +208,12 @@ func (s *Service) Run(ctx context.Context) error {
 	return s.run(ctx, nil)
 }
 
-// abandonUnavailableCandidate ends a resumed activation whose approved payload no longer exists.
-// A rolled-back installation consumes it, so retrying on every start would restart-loop the updater
+// abandonUnavailableCandidate ends a resumed activation whose approved payload no longer exists or was
+// superseded by a newer release. A rolled-back installation consumes it, so retrying on every start would restart-loop the updater
 // for good. The approval is reset to an idle journal that records the failure and the helper is
 // retired; any other failure is returned unchanged.
 func (s *Service) abandonUnavailableCandidate(ctx context.Context, cause error) error {
-	if !errors.Is(cause, workerupdate.ErrPreparedCandidate) {
-		return cause
-	}
-	abandoned, err := s.currentManager().AbandonUnavailableCandidate(ctx)
+	abandoned, err := abandonCandidate(ctx, s.currentManager(), cause)
 	if err != nil {
 		return errors.Join(cause, err)
 	}

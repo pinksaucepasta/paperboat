@@ -363,3 +363,45 @@ func TestApprovedCandidateWhoseStagedPayloadIsGoneIsAbandoned(t *testing.T) {
 		t.Fatalf("a replacement candidate cannot be prepared after the reset: %v", err)
 	}
 }
+
+// A newer release published after approval makes the activation helper refuse the approved payload
+// (ErrCandidateChanged) while the payload is still staged. The attempt must end fully: before this,
+// the handoff stayed Started, every restart repeated the refusal, downloads, automatic updates and
+// uninstall were blocked forever.
+func TestApprovedCandidateSupersededWhileStagedIsAbandonedWithItsPayload(t *testing.T) {
+	f := newFixture(t)
+	candidate, err := f.manager.Prepare(context.Background(), f.candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if abandoned, err := f.manager.AbandonSupersededCandidate(context.Background()); abandoned || err != nil {
+		t.Fatalf("a candidate that is not approved was abandoned: %v %v", abandoned, err)
+	}
+	if err := f.manager.Approve(context.Background(), candidate.ID); err != nil {
+		t.Fatal(err)
+	}
+	journal, err := updateflow.Load(f.paths.journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(journal.StagedPath); err != nil {
+		t.Fatalf("approved payload is not staged: %v", err)
+	}
+	// The unavailable-payload variant must keep refusing a payload that is still there.
+	if abandoned, err := f.manager.AbandonUnavailableCandidate(context.Background()); abandoned || err != nil {
+		t.Fatalf("a staged payload was treated as unavailable: %v %v", abandoned, err)
+	}
+	if abandoned, err := f.manager.AbandonSupersededCandidate(context.Background()); !abandoned || err != nil {
+		t.Fatalf("a superseded approved candidate was kept: %v %v", abandoned, err)
+	}
+	if _, err := os.Lstat(journal.StagedPath); !os.IsNotExist(err) {
+		t.Fatalf("staged payload survived the abandon: %v", err)
+	}
+	journal, err = updateflow.Load(f.paths.journal)
+	if err != nil || journal.Stage != updateflow.StageIdle || journal.LastFailure != updateflow.FailureCandidate || journal.CandidateID != "" || journal.ApprovedCandidateID != "" {
+		t.Fatalf("journal not reset to idle with the failure: %+v %v", journal, err)
+	}
+	if _, err := f.manager.Prepare(context.Background(), f.candidate); err != nil {
+		t.Fatalf("the new candidate cannot be downloaded after the reset: %v", err)
+	}
+}
