@@ -260,13 +260,19 @@ type machineRemovedError struct {
 	resume  config.BrowserLoginState
 }
 
+// computerRemovedError is the typed cause of a login that found the computer removed but did not wipe it, so JSON
+// callers get the code computer_removed.
+type computerRemovedError struct{}
+
+func (*computerRemovedError) Error() string { return "this computer was removed from the account" }
+
 func (e *machineRemovedError) Error() string { return "this computer was removed from " + e.account }
 
 // readdRemovedComputer decides, after a sign-in that left the daemon refused, whether this computer's machine record
 // was removed from that same account (the sign-in was approved by the expected account, and its machine list no
 // longer holds the local machine). It then asks for a new enrollment in the account's personal workspace. nil means
 // not that case; a server refusal (plan limit, policy) is returned to the user.
-func readdRemovedComputer(ctx context.Context, cfg *config.Config, store config.ProfileStore, issuer string, state *config.BrowserLoginState, refreshErr error) error {
+func readdRemovedComputer(c *command.Context, cfg *config.Config, store config.ProfileStore, issuer string, state *config.BrowserLoginState, refreshErr error) error {
 	var remote *localapi.RemoteError
 	if !errors.As(refreshErr, &remote) || remote.Code != localapi.AuthenticationRequiredCode || state.ExpectedAccountID == "" {
 		return nil
@@ -279,6 +285,7 @@ func readdRemovedComputer(ctx context.Context, cfg *config.Config, store config.
 	if err != nil || profile.Account.ID != state.ExpectedAccountID {
 		return nil
 	}
+	ctx := c.Context
 	credential, err := store.CredentialFor(issuer)
 	if err != nil {
 		return nil
@@ -290,6 +297,22 @@ func readdRemovedComputer(ctx context.Context, cfg *config.Config, store config.
 		return nil
 	}
 	account := firstNonEmpty(profile.Account.Email, profile.Account.DisplayName, profile.Account.ID)
+	// The approval authorized signing in, not resetting this computer's setup: that needs its own yes, and a
+	// script or --json caller never gets to wipe.
+	declined := browserLoginFailure{message: "Signed in as " + account + ", but this computer was removed from the account. Run pb login --fresh to add it again; that resets its local Paperboat setup (your Inbox is kept).", cause: &computerRemovedError{}}
+	if c.Bool("json") || !workspaceTerminal() {
+		return declined
+	}
+	choice, err := chooseLoginAction(selector.Options{Context: ctx, Title: "This computer was removed from " + account + ". Add it again?", Items: []selector.Item{
+		{ID: "add", Title: "Add it again", Description: "Resets this computer's local Paperboat setup; your Inbox is kept"},
+		{ID: "keep", Title: "Not now"},
+	}, Stdin: os.Stdin, Output: c.ErrWriter})
+	if errors.Is(err, selector.ErrCanceled) || err == nil && choice.ID != "add" {
+		return declined
+	}
+	if err != nil {
+		return err
+	}
 	shell := "posix"
 	if runtime.GOOS == "windows" {
 		shell = "powershell"

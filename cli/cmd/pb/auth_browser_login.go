@@ -281,7 +281,7 @@ func browserLogin(c *command.Context, resume *config.BrowserLoginState) error {
 			return fmt.Errorf("sign-in saved; retry `pb login` to finish configuration: %w", err)
 		}
 		if err = refreshSignedInDaemon(c.Context, cfg); err != nil {
-			if readd := readdRemovedComputer(c.Context, cfg, store, issuer, state, err); readd != nil {
+			if readd := readdRemovedComputer(c, cfg, store, issuer, state, err); readd != nil {
 				return readd
 			}
 			return browserLoginFailure{message: daemonRefreshFailureMessage(err), cause: err}

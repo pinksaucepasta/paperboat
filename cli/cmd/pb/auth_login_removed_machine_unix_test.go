@@ -21,6 +21,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
+	"github.com/pinksaucepasta/paperboat/internal/selector"
 )
 
 // removedScenario is a signed-in computer whose daemon the server refuses (401): the real daemon, local API and
@@ -34,6 +35,9 @@ type removedScenario struct {
 	steps      *[]string
 	refused    *atomic.Bool
 	token      *string
+	// answer is the choice made at the "Add it again?" prompt; titles records what it asked.
+	answer *string
+	titles *[]string
 }
 
 func newRemovedScenario(t *testing.T, f *loginDeviceFixture) removedScenario {
@@ -66,13 +70,26 @@ func newRemovedScenario(t *testing.T, f *loginDeviceFixture) removedScenario {
 	}()
 	steps := &[]string{}
 	var token string
+	oldTerminal, oldChoose := workspaceTerminal, chooseLoginAction
 	oldMachine, oldPair, oldRemember, oldCleanup, oldSource, oldInstall := loginLocalMachineID, pairLoginDevice, rememberReplacedMachineFunc, freshEnrollmentCleanup, runningInstallSource, installSuppliedExecutable
 	t.Cleanup(func() {
 		cancel()
 		<-done
 		currentLocalDaemonPaths = oldPaths
+		workspaceTerminal, chooseLoginAction = oldTerminal, oldChoose
 		loginLocalMachineID, pairLoginDevice, rememberReplacedMachineFunc, freshEnrollmentCleanup, runningInstallSource, installSuppliedExecutable = oldMachine, oldPair, oldRemember, oldCleanup, oldSource, oldInstall
 	})
+	answer, titles := "add", &[]string{}
+	workspaceTerminal = func() bool { return true }
+	chooseLoginAction = func(o selector.Options) (selector.Item, error) {
+		*titles = append(*titles, o.Title)
+		for _, item := range o.Items {
+			if item.ID == answer {
+				return item, nil
+			}
+		}
+		return selector.Item{}, selector.ErrCanceled
+	}
 	loginLocalMachineID = func(*config.Config) (string, error) {
 		if len(*steps) > 0 {
 			return "", nil // the setup was wiped
@@ -93,7 +110,7 @@ func newRemovedScenario(t *testing.T, f *loginDeviceFixture) removedScenario {
 		return nil
 	}
 	waitForCommandSocket(t, paths.SocketPath)
-	s := removedScenario{f: f, configPath: configPath, profiles: profiles, url: srv.URL, steps: steps, refused: &refused, token: &token}
+	s := removedScenario{f: f, configPath: configPath, profiles: profiles, url: srv.URL, steps: steps, refused: &refused, token: &token, answer: &answer, titles: titles}
 	// The first sign-in is the one the computer later loses; the daemon accepts it.
 	if out, err := runBrowserLogin(t, ctx, configPath, "login", "--no-browser"); err != nil {
 		t.Fatalf("first login: %v\n%s", err, out)
@@ -116,6 +133,9 @@ func TestLoginAddsRemovedComputerBackToTheSameAccount(t *testing.T) {
 	}
 	if strings.Count(out, "Code: ABCD-EFGH") != 1 || !strings.Contains(out, "This computer was removed from browser@example.test; adding it again.") || !strings.Contains(out, "Added") {
 		t.Fatalf("one approval and the message expected:\n%s", out)
+	}
+	if len(*s.titles) != 1 || !strings.Contains((*s.titles)[0], "This computer was removed from browser@example.test. Add it again?") {
+		t.Fatalf("confirmation prompts=%v", *s.titles)
 	}
 	if profile, err := s.profiles.Load(s.url); err != nil || profile.Account.ID != "usr_browser" {
 		t.Fatalf("sign-in not saved after the wipe: %v %+v", err, profile)
@@ -162,5 +182,36 @@ func TestLoginShowsTheServersRefusalToReaddARemovedComputer(t *testing.T) {
 	}
 	if profile, err := s.profiles.Load(s.url); err != nil || profile.Account.ID != "usr_browser" {
 		t.Fatalf("sign-in not kept: %v %+v", err, profile)
+	}
+}
+
+// The browser approval signs in; it does not authorize resetting the computer. Without a yes at the prompt (declined,
+// no terminal, --json) nothing is wiped and the result says computer_removed with the --fresh advice.
+func TestLoginDoesNotWipeARemovedComputerWithoutAYes(t *testing.T) {
+	for name, c := range map[string]struct {
+		terminal bool
+		answer   string
+		args     []string
+	}{
+		"declined":    {true, "keep", nil},
+		"no terminal": {false, "add", nil},
+		"json":        {true, "add", []string{"--json"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newRemovedScenario(t, &loginDeviceFixture{})
+			workspaceTerminal = func() bool { return c.terminal }
+			*s.answer = c.answer
+			out, err := runBrowserLogin(t, t.Context(), s.configPath, append([]string{"login", "--no-browser", "--reauth"}, c.args...)...)
+			if err == nil || len(*s.steps) != 0 || s.f.enrollCalls != 0 {
+				t.Fatalf("err=%v steps=%v enrollments=%d\n%s", err, *s.steps, s.f.enrollCalls, out)
+			}
+			failure := classifyCLIJSONError(err)
+			if failure.Code != "computer_removed" || !strings.Contains(failure.Recovery, "pb login --fresh") || failure.StateChanged != false {
+				t.Fatalf("json failure=%+v", failure)
+			}
+			if shown := commandFailureMessage(err, classifyCommandFailure(err)); !strings.Contains(shown, "pb login --fresh") {
+				t.Fatalf("shown=%q", shown)
+			}
+		})
 	}
 }
