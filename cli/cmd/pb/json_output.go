@@ -125,8 +125,7 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 	if result.Message == "" {
 		result.Message = "The operation failed."
 	}
-	var removed *computerRemovedError
-	if errors.As(err, &removed) {
+	if boundedErrorWalk(err, func(cause error) bool { _, ok := cause.(*computerRemovedError); return ok }) {
 		result.Code, result.Category, result.StateChanged = "computer_removed", "conflict", false
 		result.Recovery = "Run pb login --fresh to add this computer again; it resets the local Paperboat setup (the Inbox is kept)."
 	}
