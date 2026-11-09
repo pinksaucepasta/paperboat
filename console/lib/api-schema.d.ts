@@ -81,7 +81,7 @@ export interface paths {
         };
         /**
          * List owned and explicitly shared terminal sessions
-         * @description Returns a bounded catalog. Team membership or machine access alone does not expose sessions.
+         * @description Returns a bounded catalog. Team membership or machine access alone does not expose sessions. Sessions are ordered by name; when closed=true (or state=closed) they are ordered by closed_at, newest first.
          */
         get: operations["get_v1_terminal_sessions"];
         put?: never;
@@ -7193,7 +7193,7 @@ export interface paths {
         };
         /**
          * List API tokens
-         * @description Members see their own tokens, owners and admins all.
+         * @description Members see their own tokens, owners and admins all. total counts the tokens the state filter matches; active_total and ended_total count all visible tokens whatever the filter.
          */
         get: operations["get_v1_workspace_api_tokens"];
         put?: never;
@@ -7916,6 +7916,11 @@ export interface components {
              * @enum {string}
              */
             closed_reason?: "user_closed" | "host_closed" | "exited" | "host_gone" | "unreachable_timeout";
+            /**
+             * Format: date-time
+             * @description When the session was closed; present only once it is closed.
+             */
+            closed_at?: string;
         };
         SharedTerminalSessionResponse: {
             data: components["schemas"]["SharedTerminalSession"];
@@ -27508,6 +27513,8 @@ export interface operations {
                 limit?: number;
                 /** @description next_cursor of the previous page. */
                 cursor?: string;
+                /** @description Only live tokens (active) or only revoked and expired ones (ended). Omitted lists every token. A cursor works only with the state it came from. */
+                state?: "active" | "ended";
             };
             header?: never;
             path: {

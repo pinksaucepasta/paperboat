@@ -26,19 +26,16 @@ import { useLastCount } from "@/lib/last-count"
 import { cn } from "@/lib/utils"
 
 const day = 86_400_000
-/** Closed terminals are kept for 30 days after closing (`expires_at`), which dates the close. */
-const retention = 30 * day
 
 /**
  * When a terminal was last in use: open ones are current (the server's list carries no
- * participants or reliable activity time for them); closed ones ended 30 days before they expire,
- * or, without an expiry, were last active at `last_active_at`.
+ * participants or reliable activity time for them); closed ones ended at `closed_at`, or, without
+ * one, were last active at `last_active_at`.
  */
 function lastUsed(session: TerminalSession, now: number): number {
   if (terminalCanAttach(session)) return now
-  if (session.expires_at) return Date.parse(session.expires_at) - retention
-  if (session.last_active_at) return Date.parse(session.last_active_at)
-  return 0
+  const ended = session.closed_at ?? session.last_active_at
+  return ended ? Date.parse(ended) : 0
 }
 
 /** Google Photos-style groups: Today, Yesterday, earlier this week, earlier this month, then months. */
@@ -87,7 +84,7 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
   const shown = (query.data?.items ?? []).map((session) => ({ session, time: lastUsed(session, now) }))
 
   // Open terminals are current: live ones first, then those whose machine isn't reporting them (shown
-  // as last reported). Closed ones group by when they were used. The split covers the loaded page.
+  // as last reported). Closed ones group by when they were used.
   const groups: { key: string; label: string; note?: string; rows: typeof shown }[] = []
   if (view === "open") {
     const live = shown.filter(({ session }) => session.state !== "unavailable")
@@ -101,8 +98,8 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
         rows: away,
       })
   } else
-    // The server orders by name; groups need newest first (within the loaded page).
-    for (const row of [...shown].sort((x, y) => y.time - x.time)) {
+    // The server lists closed terminals newest closed first, which is the order of the groups.
+    for (const row of shown) {
       const { key, label } = groupOf(row.time, now, date)
       const group = groups.at(-1)
       if (group?.key === key) group.rows.push(row)
