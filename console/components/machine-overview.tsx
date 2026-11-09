@@ -10,7 +10,7 @@ import { CopyRow } from "@/components/copy-button"
 import { DangerZone } from "@/components/machine-identity"
 import { useCurrentMachine } from "@/components/machine-shell"
 import { StatusDot, machineVersion } from "@/components/machine-status"
-import { MachineUpdate } from "@/components/machine-update"
+import { MachineUpdate, UpdateAttention, updateNeedsAttention } from "@/components/machine-update"
 import { useKeepAwake } from "@/components/machine-actions"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -28,6 +28,7 @@ export function MachineOverview() {
 
   return (
     <div className="flex flex-col gap-10">
+      <UpdateAttention machine={machine} />
       <Section title="Details">
         <dl className="grid border-t border-divider sm:grid-cols-2 sm:gap-x-10">
           <Detail label="Name">{machine.alias}</Detail>
@@ -81,7 +82,8 @@ export function MachineOverview() {
 /** Only says something when updates are not healthy; a healthy machine needs no words here. */
 function UpdateHealth({ machine }: { machine: Machine }) {
   const availability = machine.availability
-  if (!availability || (availability.update_health === "healthy" && availability.update_rollbacks === 0)) return null
+  if (!availability || updateNeedsAttention(machine)) return null // the panel above says it
+  if (availability.update_health === "healthy" && availability.update_rollbacks === 0) return null
   const rollbacks = availability.update_rollbacks
   return (
     <span className="text-muted-foreground">

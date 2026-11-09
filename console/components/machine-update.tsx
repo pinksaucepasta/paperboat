@@ -15,6 +15,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { CommandBlock } from "@/components/add-machine-dialog"
+
+/** An interrupted update ended on a version the signed policy withdrew; only `pb update` or `pb uninstall` on the machine moves it on. */
+export const updateNeedsAttention = (machine: Machine) =>
+  machine.update?.error_code === "recovery_required" || machine.availability?.update_health === "recovery_required"
 
 const inProgress = new Set(["checking", "downloading", "staged", "activating"])
 
@@ -36,6 +41,13 @@ export function MachineUpdate({ machine }: { machine: Machine }) {
     },
   })
 
+  if (updateNeedsAttention(machine)) {
+    return (
+      <Hint label="Update needs attention">
+        <WarningCircleIcon className="size-4 text-destructive" />
+      </Hint>
+    )
+  }
   const target = update?.target_version
   if (!update || !target) return null
 
@@ -80,6 +92,26 @@ export function MachineUpdate({ machine }: { machine: Machine }) {
         </DialogContent>
       </Dialog>
     </>
+  )
+}
+
+/** On the machine page: why the update stopped and the one command that fixes it, run on that machine. */
+export function UpdateAttention({ machine }: { machine: Machine }) {
+  if (!updateNeedsAttention(machine)) return null
+  return (
+    <div className="flex flex-col gap-3 rounded-lg bg-destructive/5 p-4 dark:bg-destructive/10">
+      <div className="flex flex-col gap-1">
+        <h2 className="flex items-center gap-2 text-sm font-medium">
+          <WarningCircleIcon className="size-4 text-destructive" />
+          Update needs attention
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          This machine’s Paperboat version was withdrawn and the update didn’t finish. Run this on the machine to
+          install the current release.
+        </p>
+      </div>
+      <CommandBlock command="pb update" />
+    </div>
   )
 }
 
