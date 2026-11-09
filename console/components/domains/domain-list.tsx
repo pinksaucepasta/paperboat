@@ -1,53 +1,41 @@
 "use client"
 
-import {
-  CheckCircleIcon,
-  CircleNotchIcon,
-  PlusIcon,
-  StarIcon,
-  TrashIcon,
-  WarningCircleIcon,
-} from "@phosphor-icons/react"
-import { useQueries, useQueryClient } from "@tanstack/react-query"
-import { useDeferredValue, useState } from "react"
+import { CheckCircleIcon, CircleNotchIcon, PlusIcon, TrashIcon, WarningCircleIcon } from "@phosphor-icons/react"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import Link from "next/link"
+import { useState } from "react"
 import { toast } from "sonner"
 import { clientConfigQuery, useApiQuery, useWorkspace } from "@/lib/api"
-import { cleanDomain, isUnder } from "@/lib/domains"
+import { cleanDomain, domainPattern } from "@/lib/domains"
 import {
-  addDomain as addMachineDomain,
-  domainCheckQuery,
-  domainProblem,
-  gatewayAddress,
-  recordName,
-  removeDomain as removeMachineDomain,
-  setPrimaryDomain,
-  useMachineDomains,
-} from "@/lib/machine-domains"
-import { domainsPageQuery, domainUsesQuery } from "@/lib/domain-list"
+  addWorkspaceDomain,
+  checkWorkspaceDomain,
+  domainStatus,
+  removeWorkspaceDomain,
+  workspaceDomainsQuery,
+  type Tone,
+  type WorkspaceDomain,
+} from "@/lib/workspace-domains"
 import { cn } from "@/lib/utils"
-import { HostnameList, HostnameOwner } from "@/components/domains/hostname-list"
 import { CopyText } from "@/components/copy-button"
-import { ConfirmAction, SearchField } from "@/components/list-toolbar"
+import { ConfirmAction } from "@/components/list-toolbar"
 import { RowMenus, type Entry } from "@/components/row-menus"
-import { Badge } from "@/components/ui/badge"
+import { Time } from "@/components/time"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
-import { Switch } from "@/components/ui/switch"
-import { TableRowsSkeleton } from "@/components/skeletons"
+import { Skeleton } from "@/components/ui/skeleton"
 
 /*
- * Where your workspace is reachable by name: Paperboat's machine domain, machine domains you add
- * (a wildcard A record to the local gateway), and the custom hostnames your tunnels publish. A
- * tunnel hostname is verified on its tunnel (DNS record, then check); the list shows its state and
- * its panel links there.
+ * Domains you add to the workspace once (ngrok reserved domains, Vercel team domains): verified by
+ * one _acme-challenge CNAME, then any name under them serves tunnels and previews with HTTPS from
+ * the domain's certificate. Paperboat's own machine domain is listed first; it gives machine
+ * addresses only.
  */
 
-type Tone = "ok" | "wait" | "bad"
-
-function State({ tone, label, busy }: { tone: Tone; label: string; busy?: boolean }) {
+function State({ tone, label }: { tone: Tone; label: string }) {
   return (
     <span
       className={cn(
@@ -55,99 +43,42 @@ function State({ tone, label, busy }: { tone: Tone; label: string; busy?: boolea
         tone === "ok" ? "text-success" : tone === "bad" ? "text-destructive" : "text-muted-foreground",
       )}
     >
-      {busy ? (
-        <CircleNotchIcon className="size-3.5 animate-spin" />
-      ) : tone === "ok" ? (
+      {tone === "ok" ? (
         <CheckCircleIcon weight="fill" className="size-3.5" />
       ) : tone === "bad" ? (
         <WarningCircleIcon weight="fill" className="size-3.5" />
-      ) : null}
+      ) : (
+        <CircleNotchIcon className="size-3.5 animate-spin" />
+      )}
       <span className="trim-cap">{label}</span>
     </span>
   )
 }
 
-/** One domain name, and how many tunnel and preview hostnames use it (server totals). */
-type Entryish = {
-  name: string
-  /** Paperboat's own machine domain, which can't be removed. */
-  managed: boolean
-  machines: boolean
-  primary: boolean
-  uses?: { tunnels: number; previews: number }
-}
-
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
 
-function usedFor(entry: Entryish) {
+function usedBy(domain: WorkspaceDomain) {
+  const tunnels = domain.used_by.filter((use) => use.kind === "tunnel").length
+  const previews = domain.used_by.length - tunnels
   const uses = [
-    entry.machines && "Machine addresses",
-    entry.uses && entry.uses.tunnels > 0 && plural(entry.uses.tunnels, "tunnel hostname", "tunnel hostnames"),
-    entry.uses && entry.uses.previews > 0 && plural(entry.uses.previews, "preview", "previews"),
-  ].filter(Boolean)
-  return uses.length ? uses.join(", ") : "Not used yet"
-}
-
-/** Whether the domain works: Paperboat's always does; yours once its wildcard record points at the gateway. */
-function useDomainState(entry: Entryish): { tone: Tone; label: string; busy?: boolean } {
-  const check = useApiQuery({ ...domainCheckQuery(entry.name), enabled: !entry.managed })
-  if (entry.managed) return { tone: "ok", label: "Ready" }
-  if (check.isPending) return { tone: "wait", label: "Checking DNS…", busy: true }
-  switch (check.data?.status) {
-    case "ready":
-      return { tone: "ok", label: "DNS record found" }
-    case "wrong_address":
-      return { tone: "bad", label: "Points elsewhere" }
-    case "not_found":
-      return { tone: "wait", label: "Needs a DNS record" }
-    default:
-      return { tone: "wait", label: "Couldn’t check DNS" }
-  }
-}
-
-/** Custom machine domains live in this browser until the server stores them (NOTES.md, "Machine domains"). */
-function BrowserOnly() {
-  return (
-    <Badge variant="outline" className="font-normal text-muted-foreground trim-cap">
-      This browser only
-    </Badge>
-  )
+    tunnels && plural(tunnels, "tunnel hostname", "tunnel hostnames"),
+    previews && plural(previews, "preview", "previews"),
+  ]
+  return uses.filter(Boolean).join(", ") || "Not used yet"
 }
 
 export function DomainList() {
   const workspace = useWorkspace()
   const ws = workspace?.id ?? ""
-  const machineDomains = useMachineDomains()
-  // Paperboat's own domain comes from the client configuration; until it answers the list isn't known.
-  const loading = useApiQuery(clientConfigQuery).isPending
-  const [search, setSearch] = useState("")
-  const text = useDeferredValue(search.trim().toLowerCase())
+  const list = useApiQuery({ ...workspaceDomainsQuery(ws), enabled: Boolean(workspace) })
+  const machineDomain = useApiQuery(clientConfigQuery).data?.local_access_base_domain
   const [adding, setAdding] = useState(false)
   const [open, setOpen] = useState<string>()
-
-  // Machine domains (kept in this browser until the server stores them), Paperboat's first; each
-  // shows how many tunnel and preview hostnames use it. Every hostname is paged below.
-  const domains = [
-    ...machineDomains.domains.filter((domain) => domain.managed),
-    ...machineDomains.domains.filter((domain) => !domain.managed),
-  ]
-  const uses = useQueries({
-    queries: domains.map((domain) => ({ ...domainUsesQuery(ws, domain.name), enabled: Boolean(workspace) })),
-  })
-  const entries: Entryish[] = domains.map((domain, index) => ({
-    name: domain.name,
-    managed: domain.managed,
-    machines: true,
-    primary: machineDomains.primary === domain.name,
-    uses: uses[index]?.data,
-  }))
-  const shown = entries.filter((entry) => !text || entry.name.includes(text))
-  const selected = entries.find((entry) => entry.name === open)
+  const selected = list.data?.find((domain) => domain.id === open)
 
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
-        <SearchField value={search} onChange={setSearch} placeholder="Search domains" />
         <div className="ml-auto">
           <Button size="lg" onClick={() => setAdding(true)}>
             <PlusIcon data-icon="inline-start" />
@@ -158,7 +89,7 @@ export function DomainList() {
 
       <table className="w-full table-fixed text-sm">
         <colgroup>
-          <col className="w-[34%]" />
+          <col className="w-[38%]" />
           <col />
           <col className="w-[24%]" />
           <col className="w-12" />
@@ -166,136 +97,129 @@ export function DomainList() {
         <thead className="border-b border-divider text-left text-xs text-muted-foreground">
           <tr className="[&>th]:h-9 [&>th]:px-3 [&>th]:font-normal">
             <th>Domain</th>
-            <th>Used for</th>
+            <th>Used by</th>
             <th>Status</th>
             <th aria-label="Actions" />
           </tr>
         </thead>
         <tbody className="divide-y divide-divider border-b border-divider">
-          {loading
-            ? <TableRowsSkeleton
-                rows={1}
-                columns={[{ bar: "w-32" }, { bar: "w-36" }, { bar: "w-20" }, { empty: true }]}
-              />
-            : shown.map((entry) => <DomainRow key={entry.name} entry={entry} onOpen={() => setOpen(entry.name)} />)}
+          {machineDomain && (
+            <tr className="[&>td]:h-14 [&>td]:px-3">
+              <td className="truncate font-mono text-code font-medium">{machineDomain}</td>
+              <td className="truncate text-muted-foreground">
+                Machine addresses, like <span className="font-mono text-code">homelab.{machineDomain}</span>
+              </td>
+              <td>
+                <State tone="ok" label="Ready" />
+              </td>
+              <td />
+            </tr>
+          )}
+          {list.data?.map((domain) => (
+            <DomainRow key={domain.id} domain={domain} onOpen={() => setOpen(domain.id)} />
+          ))}
         </tbody>
       </table>
-      {text && !shown.length && (
-        <p className="py-12 text-center text-sm text-muted-foreground">No domains match “{search.trim()}”</p>
+      {list.isPending && <Skeleton className="h-4 w-1/3" />}
+      {list.isError && (
+        <p className="py-3 text-sm text-muted-foreground">Couldn’t load domains. {list.error.message}</p>
       )}
-      {!loading && !text && !entries.length && (
-        <p className="py-12 text-center text-sm text-muted-foreground">
-          No domains yet. Add one to give your previews and tunnels an address on your own name.
-        </p>
+      {list.data?.length === 0 && (
+        <div className="flex flex-col items-center gap-3 py-12 text-center">
+          <p className="text-sm text-muted-foreground">
+            Add a domain once, then use any name under it for your tunnels and previews.
+          </p>
+          <Button variant="secondary" onClick={() => setAdding(true)}>
+            <PlusIcon data-icon="inline-start" />
+            Add domain
+          </Button>
+        </div>
       )}
-
-      {!loading && <HostnameList />}
 
       {adding && (
         <AddDomainDialog
           onClose={() => setAdding(false)}
-          onAdded={(name) => {
+          onAdded={(id) => {
             setAdding(false)
-            setOpen(name)
+            setOpen(id)
           }}
         />
       )}
       <Sheet open={Boolean(selected)} onOpenChange={(next) => !next && setOpen(undefined)}>
         <SheetContent className="w-full gap-0 sm:max-w-lg">
-          {selected && <DomainPanel entry={selected} onRemoved={() => setOpen(undefined)} />}
+          {selected && <DomainPanel domain={selected} onRemoved={() => setOpen(undefined)} />}
         </SheetContent>
       </Sheet>
     </section>
   )
 }
 
-function DomainRow({ entry, onOpen }: { entry: Entryish; onOpen: () => void }) {
+function DomainRow({ domain, onOpen }: { domain: WorkspaceDomain; onOpen: () => void }) {
   const [removing, setRemoving] = useState(false)
-  const state = useDomainState(entry)
+  const status = domainStatus(domain)
   const menu: Entry[] = [
-    // Only Paperboat's domain can be the default until machines answer on your own domains.
-    ...(entry.machines && entry.managed
-      ? ([
-          {
-            kind: "item",
-            label: "Make default for machines",
-            icon: StarIcon,
-            disabled: entry.primary,
-            onSelect: () => setPrimaryDomain(entry.name),
-          },
-        ] satisfies Entry[])
-      : []),
-    ...(entry.managed || !entry.machines
-      ? []
-      : ([
-          ...(entry.machines ? ([{ kind: "separator" }] satisfies Entry[]) : []),
-          { kind: "item", label: "Remove", icon: TrashIcon, destructive: true, onSelect: () => setRemoving(true) },
-        ] satisfies Entry[])),
+    {
+      kind: "item",
+      label: domain.used_by.length ? "Remove (in use)" : "Remove",
+      icon: TrashIcon,
+      destructive: true,
+      disabled: domain.used_by.length > 0,
+      onSelect: () => setRemoving(true),
+    },
   ]
-  const row = (actions: React.ReactNode) => (
-    <tr className="group relative transition-colors hover:bg-surface data-popup-open:bg-surface [&>td]:h-14 [&>td]:px-3">
-      <td>
-        <span className="flex h-[1lh] min-w-0 items-center gap-2">
-          <button
-            type="button"
-            onClick={onOpen}
-            className="min-w-0 truncate-x text-left font-mono text-code font-medium outline-none trim-cap after:absolute after:inset-0"
-          >
-            {entry.name}
-          </button>
-          {entry.primary && (
-            <Badge variant="outline" className="font-normal text-muted-foreground trim-cap">
-              Default
-            </Badge>
-          )}
-          {!entry.managed && <BrowserOnly />}
-        </span>
-      </td>
-      <td className="truncate text-muted-foreground">{usedFor(entry)}</td>
-      <td>
-        <State tone={state.tone} label={state.label} busy={state.busy} />
-      </td>
-      <td className="text-right">{actions}</td>
-    </tr>
-  )
-  if (!menu.some((item) => item.kind === "item" && !item.disabled)) return row(null)
   return (
     <RowMenus
-      label={`Actions for ${entry.name}`}
+      label={`Actions for ${domain.hostname}`}
       entries={menu}
-      row={row}
-      dialogs={<RemoveDomain entry={entry} open={removing} onOpenChange={setRemoving} />}
+      row={(actions) => (
+        <tr className="group relative transition-colors hover:bg-surface data-popup-open:bg-surface [&>td]:h-14 [&>td]:px-3">
+          <td>
+            <button
+              type="button"
+              onClick={onOpen}
+              className="max-w-full truncate-x text-left font-mono text-code font-medium outline-none trim-cap after:absolute after:inset-0"
+            >
+              {domain.hostname}
+            </button>
+          </td>
+          <td className="truncate text-muted-foreground">{usedBy(domain)}</td>
+          <td>
+            <State tone={status.tone} label={status.label} />
+          </td>
+          <td className="text-right">{actions}</td>
+        </tr>
+      )}
+      dialogs={<RemoveDomain domain={domain} open={removing} onOpenChange={setRemoving} />}
     />
   )
 }
 
 function RemoveDomain({
-  entry,
+  domain,
   open,
   onOpenChange,
   onRemoved,
 }: {
-  entry: Entryish
+  domain: WorkspaceDomain
   open: boolean
   onOpenChange: (open: boolean) => void
   onRemoved?: () => void
 }) {
+  const workspace = useWorkspace()
   const queryClient = useQueryClient()
   return (
     <ConfirmAction
       open={open}
       onOpenChange={onOpenChange}
-      title={`Remove ${entry.name}?`}
-      description="It’s removed from this browser. DNS records stay at your DNS provider."
+      title={`Remove ${domain.hostname}?`}
+      description="Tunnels and previews can no longer use names under it. Your DNS records stay at your provider."
       action="Remove domain"
       pending="Removing…"
       mutation={{
-        mutationFn: async () => {
-          if (entry.machines) removeMachineDomain(entry.name)
-        },
+        mutationFn: () => removeWorkspaceDomain(workspace?.id ?? "", domain.id),
         onSuccess: async () => {
-          await queryClient.invalidateQueries({ queryKey: ["domains"] })
-          toast.success(`${entry.name} removed`)
+          await queryClient.invalidateQueries({ queryKey: ["workspace-domains"] })
+          toast.success(`${domain.hostname} removed`)
           onRemoved?.()
         },
       }}
@@ -303,128 +227,129 @@ function RemoveDomain({
   )
 }
 
-/** A domain's panel: machine addresses, and what uses it. */
-function DomainPanel({ entry, onRemoved }: { entry: Entryish; onRemoved: () => void }) {
+const purposes: Record<string, string> = {
+  verification: "Proves you control the domain",
+  routing: "Sends every name under it to Paperboat",
+  apex_routing: `Optional: serves the domain itself`,
+}
+
+/** A domain's panel: the DNS records with live status, the certificate, and what uses it. */
+function DomainPanel({ domain, onRemoved }: { domain: WorkspaceDomain; onRemoved: () => void }) {
+  const workspace = useWorkspace()
+  const queryClient = useQueryClient()
   const [removing, setRemoving] = useState(false)
-  const state = useDomainState(entry)
+  const status = domainStatus(domain)
+  const check = useMutation({
+    mutationFn: () => checkWorkspaceDomain(workspace?.id ?? "", domain.id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["workspace-domains"] }),
+    onError: (error) => toast.error("Couldn’t check DNS", { description: error.message }),
+  })
+  const verified = domain.state === "verified"
   return (
     <>
       <SheetHeader className="gap-1 border-b border-divider p-6">
-        <SheetTitle className="font-mono text-base">{entry.name}</SheetTitle>
-        <State tone={state.tone} label={state.label} busy={state.busy} />
+        <SheetTitle className="font-mono text-base">{domain.hostname}</SheetTitle>
+        <State tone={status.tone} label={status.label} />
       </SheetHeader>
       <div className="flex flex-col gap-8 overflow-y-auto p-6">
-        {entry.machines && <MachineAddresses entry={entry} />}
-
-        <DomainUses name={entry.name} kind="tunnel" />
-        <DomainUses name={entry.name} kind="preview" />
-
-        {entry.machines && !entry.managed && (
-          <div className="flex flex-wrap items-center gap-4 rounded-lg bg-destructive/5 p-4 dark:bg-destructive/10">
-            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <p className="text-sm font-medium">Remove domain</p>
-              <p className="text-sm text-muted-foreground">Removes it from this browser.</p>
-            </div>
-            <Button
-              variant="secondary"
-              className="bg-background text-destructive hover:bg-background/70 dark:bg-white/10 dark:hover:bg-white/15"
-              onClick={() => setRemoving(true)}
-            >
-              Remove
+        <PanelSection
+          title="DNS records"
+          action={
+            <Button variant="secondary" size="sm" disabled={check.isPending} onClick={() => check.mutate()}>
+              {check.isPending ? "Checking…" : "Check now"}
             </Button>
-          </div>
-        )}
-      </div>
-      <RemoveDomain entry={entry} open={removing} onOpenChange={setRemoving} onRemoved={onRemoved} />
-    </>
-  )
-}
-
-/** The tunnel or preview hostnames under a domain name: the server's first page, and how many in all. */
-function DomainUses({ name, kind }: { name: string; kind: "tunnel" | "preview" }) {
-  const workspace = useWorkspace()
-  const list = useApiQuery({
-    ...domainsPageQuery({ workspace: workspace?.id ?? "", q: name, page: 1, kind }),
-    enabled: Boolean(workspace),
-  })
-  const items = (list.data?.items ?? []).filter((item) => item.domain.hostname === name || isUnder(item.domain.hostname, name))
-  const more = (list.data?.total ?? 0) - (list.data?.items.length ?? 0)
-  return (
-    <PanelSection title={kind === "tunnel" ? "Tunnels" : "Previews"}>
-      {items.length ? (
-        <ul className="flex flex-col divide-y divide-divider border-y border-divider">
-          {items.map((item) => (
-            <li key={item.domain.id} className="flex min-h-11 items-center gap-3 text-sm">
-              <span className="min-w-0 flex-1 truncate font-mono text-code">{item.domain.hostname}</span>
-              <HostnameOwner item={item} />
-            </li>
+          }
+        >
+          {!verified && (
+            <p className="text-sm text-muted-foreground">
+              Add these at your DNS provider. Paperboat checks them on its own and this page updates.
+            </p>
+          )}
+          {domain.records.map((record) => (
+            <Record key={`${record.name}-${record.type}-${record.value}`} record={record} />
           ))}
-        </ul>
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          {kind === "tunnel"
-            ? `Use names like app.${name} or *.${name} from a tunnel’s Public hostnames.`
-            : `New previews can use addresses like demo.${name}.`}
-        </p>
-      )}
-      {more > 0 && <p className="text-xs text-muted-foreground">And {more} more under Tunnel and preview hostnames.</p>}
-    </PanelSection>
-  )
-}
+          {domain.dns_failure && <p className="text-sm text-destructive">{domain.dns_failure.message}</p>}
+          {domain.last_checked_at && (
+            <p className="text-xs text-muted-foreground">
+              Checked <Time iso={domain.last_checked_at} relative />
+            </p>
+          )}
+        </PanelSection>
 
-/** Machine addresses on this domain (`homelab.<domain>`): a switch, and its DNS record until it works. */
-function MachineAddresses({ entry }: { entry: Entryish }) {
-  const check = useApiQuery({ ...domainCheckQuery(entry.name), enabled: !entry.managed })
-  const ready = entry.managed || check.data?.status === "ready"
-  return (
-    <PanelSection
-      title="Machine addresses"
-      action={
-        !entry.managed && (
-          <Switch
-            aria-label="Use for machine addresses"
-            checked={entry.machines}
-            onCheckedChange={(on) => (on ? addMachineDomain(entry.name) : removeMachineDomain(entry.name))}
-          />
-        )
-      }
-    >
-      <p className="text-sm text-muted-foreground">
-        {entry.managed ? (
-          <>
-            Machines answer as <span className="font-mono text-code text-foreground">homelab.{entry.name}</span> from
-            any computer running Paperboat.
-          </>
-        ) : (
-          <>
-            Saved in this browser only. Machines don’t pick up your own domains yet, so{" "}
-            <span className="font-mono text-code text-foreground">homelab.{entry.name}</span> won’t answer until they
-            do. You can add the DNS record now.
-          </>
-        )}
-      </p>
-      {entry.machines && !entry.managed && !check.isPending && !ready && (
-        <>
-          <Record type="A" name={recordName(entry.name, check.data?.zone)} value={gatewayAddress} />
-          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-            {check.data?.status === "wrong_address" && <span>Now {check.data.addresses.join(", ")}.</span>}
-            <button
-              type="button"
-              onClick={() => check.refetch()}
-              disabled={check.isFetching}
-              className="underline-offset-4 hover:text-foreground hover:underline"
-            >
-              Check again
-            </button>
+        <PanelSection title="Certificate">
+          <p className="text-sm text-muted-foreground">
+            {domain.certificate.state === "ready" && domain.certificate.expires_at ? (
+              <>
+                Covers {domain.hostname} and every name under it until <Time iso={domain.certificate.expires_at} />.
+              </>
+            ) : domain.certificate.state === "failed" ? (
+              <span className="text-destructive">
+                {domain.certificate.failure?.message ?? "Couldn’t be issued yet."}
+              </span>
+            ) : verified ? (
+              "Being issued for the domain and every name under it."
+            ) : (
+              "Issued once the domain is verified."
+            )}
+          </p>
+        </PanelSection>
+
+        <PanelSection title="Used by">
+          {domain.used_by.length ? (
+            <ul className="flex flex-col divide-y divide-divider border-y border-divider">
+              {domain.used_by.map((use) => (
+                <li key={`${use.kind}-${use.hostname}`} className="flex min-h-11 items-center gap-3 text-sm">
+                  <span className="min-w-0 flex-1 truncate font-mono text-code">{use.hostname}</span>
+                  {use.kind === "tunnel" ? (
+                    <Link
+                      href={`/tunnels/${encodeURIComponent(use.id)}`}
+                      className="truncate text-muted-foreground hover:text-foreground"
+                    >
+                      Tunnel {use.name}
+                    </Link>
+                  ) : (
+                    <Link href="/previews" className="truncate text-muted-foreground hover:text-foreground">
+                      Preview
+                    </Link>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {verified ? (
+                <>
+                  Use names like <span className="font-mono text-code text-foreground">app.{domain.hostname}</span> in a
+                  tunnel’s Public hostnames or a new preview.
+                </>
+              ) : (
+                "Tunnels and previews can use names under it once it’s verified."
+              )}
+            </p>
+          )}
+        </PanelSection>
+
+        <div className="flex flex-wrap items-center gap-4 rounded-lg bg-destructive/5 p-4 dark:bg-destructive/10">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <p className="text-sm font-medium">Remove domain</p>
+            <p className="text-sm text-muted-foreground">
+              {domain.used_by.length
+                ? "Remove the hostnames that use it first."
+                : "Your DNS records stay at your provider."}
+            </p>
           </div>
-        </>
-      )}
-      {entry.machines && entry.managed && !entry.primary && (
-        <Button variant="secondary" className="w-fit" disabled={!ready} onClick={() => setPrimaryDomain(entry.name)}>
-          Make default for machines
-        </Button>
-      )}
-    </PanelSection>
+          <Button
+            variant="secondary"
+            disabled={domain.used_by.length > 0}
+            className="bg-background text-destructive hover:bg-background/70 dark:bg-white/10 dark:hover:bg-white/15"
+            onClick={() => setRemoving(true)}
+          >
+            Remove
+          </Button>
+        </div>
+      </div>
+      <RemoveDomain domain={domain} open={removing} onOpenChange={setRemoving} onRemoved={onRemoved} />
+    </>
   )
 }
 
@@ -449,31 +374,41 @@ function PanelSection({
 }
 
 /** One DNS record to add; each part copies on click. */
-function Record({ type, name, value }: { type: string; name: string; value: string }) {
+function Record({ record }: { record: WorkspaceDomain["records"][number] }) {
   return (
-    <dl className="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 rounded-lg bg-surface p-3 text-sm">
-      <dt className="text-muted-foreground">Type</dt>
-      <dd className="font-mono text-code">{type}</dd>
-      <dt className="text-muted-foreground">Name</dt>
-      <dd className="min-w-0">
-        <CopyText value={name} className="font-mono text-code" />
-      </dd>
-      <dt className="text-muted-foreground">Value</dt>
-      <dd className="min-w-0">
-        <CopyText value={value} className="font-mono text-code" />
-      </dd>
-    </dl>
+    <div className="flex flex-col gap-1.5">
+      <p className="text-xs text-muted-foreground">{purposes[record.purpose] ?? record.purpose}</p>
+      <dl className="grid grid-cols-[4rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 rounded-lg bg-surface p-3 text-sm">
+        <dt className="text-muted-foreground">Type</dt>
+        <dd className="font-mono text-code">{record.type}</dd>
+        <dt className="text-muted-foreground">Name</dt>
+        <dd className="min-w-0">
+          <CopyText value={record.name} className="font-mono text-code" />
+        </dd>
+        <dt className="text-muted-foreground">Value</dt>
+        <dd className="min-w-0">
+          <CopyText value={record.value} className="font-mono text-code" />
+        </dd>
+      </dl>
+    </div>
   )
 }
 
-/** Adds a machine domain: machines answer as `<name>.<domain>` once its wildcard record points at the gateway. */
-function AddDomainDialog({ onClose, onAdded }: { onClose: () => void; onAdded: (name: string) => void }) {
-  const machineDomains = useMachineDomains()
+function AddDomainDialog({ onClose, onAdded }: { onClose: () => void; onAdded: (id: string) => void }) {
+  const workspace = useWorkspace()
+  const queryClient = useQueryClient()
   const [draft, setDraft] = useState("")
   const name = cleanDomain(draft)
-  const problem = name ? domainProblem(name, machineDomains) : undefined
+  const problem = name && !domainPattern.test(name) ? "Enter a domain like example.com or dev.example.com" : undefined
+  const add = useMutation({
+    mutationFn: () => addWorkspaceDomain(workspace?.id ?? "", name),
+    onSuccess: async (domain) => {
+      await queryClient.invalidateQueries({ queryKey: ["workspace-domains"] })
+      onAdded(domain.id)
+    },
+  })
   return (
-    <Dialog open onOpenChange={(next) => !next && onClose()}>
+    <Dialog open onOpenChange={(next) => !next && !add.isPending && onClose()}>
       <DialogContent className="gap-4 sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Add a domain</DialogTitle>
@@ -482,18 +417,15 @@ function AddDomainDialog({ onClose, onAdded }: { onClose: () => void; onAdded: (
           className="flex flex-col gap-4"
           onSubmit={(event) => {
             event.preventDefault()
-            if (name && !problem) {
-              addMachineDomain(name)
-              onAdded(name)
-            }
+            if (name && !problem) add.mutate()
           }}
         >
-          <Field data-invalid={Boolean(problem)} className="gap-1.5">
+          <Field data-invalid={Boolean(problem || add.isError)} className="gap-1.5">
             <FieldLabel htmlFor="domain-name">Domain</FieldLabel>
             <Input
               id="domain-name"
               autoFocus
-              placeholder="home.acme.dev"
+              placeholder="dev.example.com"
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               aria-invalid={Boolean(problem)}
@@ -501,21 +433,20 @@ function AddDomainDialog({ onClose, onAdded }: { onClose: () => void; onAdded: (
               spellCheck={false}
               className="font-mono"
             />
-            {problem ? (
-              <FieldError>{problem}</FieldError>
+            {problem || add.isError ? (
+              <FieldError>{problem ?? add.error?.message}</FieldError>
             ) : (
               <p className="text-xs text-muted-foreground">
-                For machine addresses; saved in this browser until your account can store it. For a tunnel, add the
-                hostname on the tunnel’s page.
+                A domain you control. Next you’ll get the DNS records to add.
               </p>
             )}
           </Field>
           <DialogFooter>
-            <Button type="button" variant="secondary" size="lg" onClick={onClose}>
+            <Button type="button" variant="secondary" size="lg" onClick={onClose} disabled={add.isPending}>
               Cancel
             </Button>
-            <Button type="submit" size="lg" disabled={!name || Boolean(problem)}>
-              Add domain
+            <Button type="submit" size="lg" disabled={!name || Boolean(problem) || add.isPending}>
+              {add.isPending ? "Adding…" : "Add domain"}
             </Button>
           </DialogFooter>
         </form>

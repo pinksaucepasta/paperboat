@@ -60,8 +60,7 @@ owns it.
 - **Updates are personal only.** `GET /v1/machines/update-summary` uses the personal workspace,
   so team machines show no update state. Update = request + approve a maintenance approval; if
   the approve call fails, the pending request remains until it expires.
-- **Custom machine domain.** Domains lists machine domains (browser-local for now). Storing them
-  needs the server to keep them per account and the CLI/daemon to resolve them.
+- **Custom machine domain.** Not yet: see "Machine domains".
 - **Hide my email.** Replaces the address with random letters of the same shape. A per-browser preference (`lib/privacy.ts`) until the control plane stores
   it so the CLI and other clients can honor it too.
 - **Previews and tunnels.** One tunnel resource underneath (`pb preview` = `pb tunnel
@@ -109,51 +108,14 @@ The sidebar has these sections; each needs the listed control-plane support.
   (the reporter logs "relay latency report skipped" with the stage), and an API listing the account's relays (`GET /v1/edges` lists edges only)
   so Network can name Paperboat's relays without measurements. `scripts/check-network-latency.js` compares the page with the API.
 
-## Machine domains (dummy UI)
+## Machine domains
 
-Every machine answers on `<name>.<domain>` for each of the account's machine domains. The Domains
-page lists them (with tunnel and preview domains, below): Paperboat's own (`local_access_base_domain` from the client configuration)
-cannot be removed; custom ones can be added and removed; exactly one is the default, shown
-wherever an address appears. The machines table shows the default-domain address (click to copy);
-machine details show it with "+N", and clicking it opens every address to copy, as does the header's IP menu. The list starts as Paperboat's domain alone, as default.
-
-Until that support exists the page says so instead of pretending: custom domains carry a "This browser
-only" badge, their panel says machines don't pick them up yet, Status is the DNS check (Paperboat's
-domain is "Ready"), and only Paperboat's domain can be made the default, so the machines table never
-shows an address that doesn't answer.
-
-Limitations, all from there being no server support yet:
-
-- Stored per browser in `localStorage` (`lib/machine-domains.ts`); nothing reaches the server and
-  other browsers see the default list. Only that module changes when an API exists.
-- How a custom domain works: the user adds a wildcard A record `*.example.com → 127.100.0.1`
-  and adds `example.com` here; `name.example.com` then reaches the machine from any computer
-  running Paperboat (Add domain says this).
-- DNS check (built, console only): `GET /api/domain-check?domain=` in the console's own server
-  confirms the caller is signed in (`/v1/me`), then resolves `pb-check-<random>.<domain>` and
-  reports ready / wrong address / no record / couldn't check. A random label proves the record is
-  a wildcard. Domains shows the result on each row, "Make default" stays off until it is
-  ready, and "Check again" re-runs it (results are cached 5 minutes). It checks public DNS
-  from the console server, not from each machine.
-- Setup instructions (built): a domain that isn't set up shows one line under it, "Add record
-  A `*.home` → 127.100.0.1" (Name relative to the DNS zone the check route finds from the first
-  parent with an SOA record; each part copies on click), what it points to now, and "Check again".
-- Removing a custom domain has no confirmation, and nothing checks whether anything (bookmarks,
-  configs) still uses it.
-- Server side, `machineservices.BrowserSuffix` is a single fixed suffix; per-account domains and
-  a default are missing.
-- On machines, `pb` serves one browser domain per install: `local_access.domain` in its config,
-  approved by an administrator because it installs a local HTTPS certificate authority limited
-  to that domain (`splitdns.NormalizeBrowserDomain`, `machineguard`, `browser-domains.json`).
-  A list of account domains needs the daemon to fetch them and get each one approved per machine.
-- Backend work needed for custom domains to actually work, in order:
-  1. Server: store an account's (and team's) domains and default, with an API to list, add,
-     remove and set default; re-run the DNS check server-side when saving.
-  2. Server → machines: deliver the domain list to each machine (machine policy or heartbeat).
-  3. `pb`: accept several browser domains instead of one, and ask once per machine for
-     administrator approval of each new domain's local HTTPS certificate authority; report per
-     domain whether it is approved so the console can show "waiting for approval on homelab".
-- Team workspaces will need their own list (who may change it: owner/admin).
+Machines answer on `<name>.<local_access_base_domain>` only (`lib/machine-domains.ts`). Machine
+addresses on your own domains need, in order: the server delivering a workspace's verified domains
+to its machines (machine policy or heartbeat); `pb` accepting several browser domains and asking
+once per machine for administrator approval of each domain's local HTTPS certificate authority,
+reporting per domain whether it is approved. Until then the Domains page lists your domains for
+tunnels and previews only.
 
 ## Bandwidth card
 
@@ -407,15 +369,16 @@ shows them humanized (`changed_both_sides` → "Changed both sides").
 
 ## Domains page
 
-Where the workspace is reachable by name (`lib/domains.ts`, `components/domains/`): Paperboat's machine
-domain (`local_access_base_domain`), machine domains you add (browser-local, a wildcard A record to
-the local gateway, DNS check by the console's own route), and the custom hostnames tunnels publish
-(from `GET /v1/tunnels/{id}/domains`, with the state from the server: requested, waiting DNS,
-verified, ...). A tunnel hostname's DNS record and verification live on its tunnel page ("Add public
-hostname", instructions, verify); the Domains page only lists them and links there. There is no
-account-level domain API (`/v1/domains` was never built; the first console build assumed it), and no
-"verified once, used everywhere" step: ownership is proven per hostname. Machine domains still come
-from `lib/machine-domains.ts` until the server stores them per domain.
+Workspace domains (`lib/workspace-domains.ts`, `components/domains/`), on `GET/POST /v1/domains`,
+`GET/DELETE /v1/domains/{id}` and `POST /v1/domains/{id}/check`. A domain is added once; its panel
+shows the DNS records (the `_acme-challenge` CNAME that proves control, the `*.domain` record that
+routes names to Paperboat, an optional apex record), live verification (polled every 5 s while DNS or
+the certificate is pending), the one wildcard certificate, and the tunnel and preview hostnames that
+use it. Removing is refused while anything uses it. Tunnels ("Add a public hostname") and new
+previews pick a name under a verified domain (`HostnameInput`); there is no DNS step per hostname.
+Paperboat's own machine domain (`local_access_base_domain`) is listed first for machine addresses
+only. Custom machine-address domains were a browser-only stand-in and are gone until the server
+delivers domains to machines (see "Machine domains").
 
 ## Network (self-hosted relays and tunnel servers)
 

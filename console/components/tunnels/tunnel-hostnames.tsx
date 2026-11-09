@@ -2,7 +2,6 @@
 
 import {
   CheckCircleIcon,
-  CircleNotchIcon,
   PencilSimpleIcon,
   PlusIcon,
   PowerIcon,
@@ -19,7 +18,6 @@ import {
   deleteRoute,
   domainsQuery,
   hostOf,
-  instructionsQuery,
   originLabel,
   patchRoute,
   removeDomain,
@@ -27,14 +25,12 @@ import {
   routeName,
   routesQuery,
   tunnelKeys,
-  verifyDomain,
   type RouteInput,
   type Tunnel,
   type TunnelDomain,
   type TunnelRoute,
 } from "@/lib/tunnels"
 import { cn } from "@/lib/utils"
-import { CopyText } from "@/components/copy-button"
 import { ConfirmAction } from "@/components/list-toolbar"
 import { RowMenus, type Entry } from "@/components/row-menus"
 import { HostnameInput } from "@/components/domains/hostname-input"
@@ -51,8 +47,9 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 /*
  * Cloudflare Tunnel's model: a tunnel has public hostnames, each sending one hostname (and
  * optionally a path) to one service on the machine. The server keeps that as two things, a route
- * (hostname → service) and, for your own domain, a domain binding (DNS record and certificate).
- * Here they are one row: adding a hostname creates both, removing it removes both.
+ * (hostname → service) and, for your own domain, a domain binding that serves the hostname with
+ * its workspace domain's certificate. Here they are one row: adding a hostname creates both,
+ * removing it removes both. Hostnames come from the workspace's verified domains (Domains page).
  */
 
 /** The hostname a route answers, as people write it. */
@@ -63,7 +60,7 @@ function routeHost(route: TunnelRoute) {
   return match.hostname ?? ""
 }
 
-/** A domain's setup, in the order it happens: DNS, then a certificate, then ready. */
+/** A hostname's state: its workspace domain is verified already, so a certificate copy, then ready. */
 export const domainStates: Record<TunnelDomain["state"], { label: string; tone: "ok" | "wait" | "bad" }> = {
   requested: { label: "Waiting for DNS", tone: "wait" },
   waiting_dns: { label: "Waiting for DNS", tone: "wait" },
@@ -76,9 +73,6 @@ export const domainStates: Record<TunnelDomain["state"], { label: string; tone: 
   expired: { label: "Expired", tone: "bad" },
   quarantined: { label: "Blocked", tone: "bad" },
 }
-
-export const needsDns = (domain: { state: TunnelDomain["state"] }) =>
-  domain.state === "requested" || domain.state === "waiting_dns" || domain.state === "dns_error"
 
 export function TunnelHostnames({ tunnel }: { tunnel: Tunnel }) {
   const routes = useApiQuery(routesQuery(tunnel.id))
@@ -134,11 +128,6 @@ function HostnameRow({ route, domain, tunnel }: { route: TunnelRoute; domain?: T
     onSuccess: refresh,
     onError: (error) => toast.error("Couldn’t change the hostname", { description: error.message }),
   })
-  const verify = useMutation({
-    mutationFn: () => verifyDomain(domain!),
-    onSuccess: refresh,
-    onError: (error) => toast.error("Couldn’t check the DNS record", { description: error.message }),
-  })
   const state = domain && domainStates[domain.state]
 
   const entries: Entry[] = [
@@ -179,11 +168,7 @@ function HostnameRow({ route, domain, tunnel }: { route: TunnelRoute; domain?: T
                     state.tone === "bad" ? "text-destructive" : "text-muted-foreground",
                   )}
                 >
-                  {verify.isPending ? (
-                    <CircleNotchIcon className="size-3.5 animate-spin" />
-                  ) : state.tone === "bad" ? (
-                    <WarningCircleIcon weight="fill" className="size-3.5" />
-                  ) : null}
+                  {state.tone === "bad" ? <WarningCircleIcon weight="fill" className="size-3.5" /> : null}
                   <span className="trim-cap">{state.label}</span>
                 </span>
               )}
@@ -193,9 +178,6 @@ function HostnameRow({ route, domain, tunnel }: { route: TunnelRoute; domain?: T
               {actions}
             </span>
           </div>
-          {domain && needsDns(domain) && (
-            <DnsRecord domain={domain} onCheck={() => verify.mutate()} checking={verify.isPending} />
-          )}
         </div>
       )}
       dialogs={
@@ -209,7 +191,7 @@ function HostnameRow({ route, domain, tunnel }: { route: TunnelRoute; domain?: T
             title={`Remove ${host}${route.path_prefix ?? ""}?`}
             description={
               domain
-                ? "It stops reaching this tunnel. The DNS record stays at your DNS provider; remove it there."
+                ? "It stops reaching this tunnel. The name stays free to use again under its domain."
                 : `It stops sending traffic to ${originLabel(route.origin)}.`
             }
             action="Remove hostname"
@@ -225,45 +207,6 @@ function HostnameRow({ route, domain, tunnel }: { route: TunnelRoute; domain?: T
         </>
       }
     />
-  )
-}
-
-/** The record to add at the DNS provider, each part copied on click, then "Check again". */
-export function DnsRecord({
-  domain,
-  onCheck,
-  checking,
-}: {
-  domain: TunnelDomain
-  onCheck: () => void
-  checking: boolean
-}) {
-  const instructions = useApiQuery(instructionsQuery(domain.tunnel_id, domain.id))
-  const records = instructions.data?.records ?? [
-    { type: "CNAME" as const, name: domain.hostname, value: domain.dns.target, ttl: 300 },
-  ]
-  return (
-    <div className="flex flex-col gap-0.5 text-xs text-muted-foreground">
-      {records.map((record) => (
-        <div key={`${record.name}-${record.value}`} className="flex flex-wrap items-center gap-x-2">
-          Add record
-          <span className="font-mono text-foreground">{record.type}</span>
-          <CopyText value={record.name} className="font-mono text-foreground" />→
-          <CopyText value={record.value} className="font-mono text-foreground" />
-        </div>
-      ))}
-      <div className="flex flex-wrap items-center gap-x-2">
-        {domain.dns.observed_records?.length ? <span>Now {domain.dns.observed_records.join(", ")}.</span> : null}
-        <button
-          type="button"
-          onClick={onCheck}
-          disabled={checking}
-          className="underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:underline"
-        >
-          Check again
-        </button>
-      </div>
-    </div>
   )
 }
 
@@ -321,10 +264,7 @@ function HostnameDialog({
       ? { type: "one_label_wildcard", hostname: domain, wildcard_labels: 1 }
       : { type: "exact", hostname: domain }
   const problems = {
-    domain:
-      own && !/^(\*\.)?([a-z0-9-]+\.)+[a-z]{2,}$/.test(domain)
-        ? "Enter a domain like app.example.com, or *.example.com for all its subdomains."
-        : undefined,
+    domain: own && !/^(\*\.)?([a-z0-9-]+\.)+[a-z]{2,}$/.test(domain) ? "Enter a name, or * for every name." : undefined,
     service: service.trim() && !origin ? "Use a port, host:port, or a URL like https://localhost:8443." : undefined,
   }
   const ready = Boolean(origin) && !problems.domain
@@ -338,7 +278,7 @@ function HostnameDialog({
         origin: origin!,
       }
       const routeId = route ? (await patchRoute(route, input), route.id) : await createRoute(tunnel.id, input)
-      // Your own domain needs its DNS record and certificate; the tunnel's address has both.
+      // Your own hostname is bound to the tunnel; its domain's verification and certificate cover it.
       const keep = own && binding?.hostname === domain
       if (binding && !keep) await removeDomain(binding)
       if (own && !keep) {
@@ -398,9 +338,7 @@ function HostnameDialog({
                 {hostname && problems.domain ? (
                   <FieldError>{problems.domain}</FieldError>
                 ) : (
-                  <p className="text-xs text-muted-foreground">
-                    Use * for every subdomain. You’ll add one DNS record for it.
-                  </p>
+                  <p className="text-xs text-muted-foreground">Use * for every name. HTTPS comes from the domain.</p>
                 )}
               </>
             ) : (

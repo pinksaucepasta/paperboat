@@ -1490,52 +1490,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/tunnels/{tunnel_id}/domains/{domain_id}/verify": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-                domain_id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Request domain verification
-         * @description Schedules a waiting_dns verification operation. The endpoint never marks a domain verified without external DNS evidence.
-         */
-        post: operations["post_v1_tunnels_tunnel_id_domains_domain_id_verify"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tunnels/{tunnel_id}/domains/{domain_id}/instructions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-                domain_id: string;
-            };
-            cookie?: never;
-        };
-        /**
-         * Get provider-aware DNS instructions
-         * @description Returns a stable non-origin target and exact CNAME, ALIAS, ANAME, or flattening guidance for subdomain, apex, and wildcard bindings.
-         */
-        get: operations["get_v1_tunnels_tunnel_id_domains_domain_id_instructions"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/machine-events/wait": {
         parameters: {
             query?: never;
@@ -3295,52 +3249,6 @@ export interface paths {
         post?: never;
         /** Delete a preview domain binding */
         delete: operations["delete_v1_previews_preview_id_domains_domain_id"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/previews/{preview_id}/domains/{domain_id}/verify": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                preview_id: components["parameters"]["PreviewID"];
-                domain_id: string;
-            };
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Request domain verification
-         * @description Schedules a waiting_dns verification operation. The endpoint never marks a domain verified without external DNS evidence.
-         */
-        post: operations["post_v1_previews_preview_id_domains_domain_id_verify"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/previews/{preview_id}/domains/{domain_id}/instructions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                preview_id: components["parameters"]["PreviewID"];
-                domain_id: string;
-            };
-            cookie?: never;
-        };
-        /**
-         * Get provider-aware DNS instructions
-         * @description Returns a stable non-origin target and exact CNAME, ALIAS, ANAME, or flattening guidance for subdomain, apex, and wildcard bindings.
-         */
-        get: operations["get_v1_previews_preview_id_domains_domain_id_instructions"];
-        put?: never;
-        post?: never;
-        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -7603,12 +7511,16 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List the selected workspace's tunnel domains and live previews' custom domains
-         * @description Hostname order (then id), keyset paged, with the total. Tunnels and previews are the ones GET /v1/tunnels and GET /v1/previews?state=active list; deleted domains are not listed.
+         * List the selected workspace's domains
+         * @description Every domain added to the workspace, with its DNS records, verification and certificate state and the tunnel and preview hostnames under it.
          */
         get: operations["get_v1_domains"];
         put?: never;
-        post?: never;
+        /**
+         * Add a domain to the selected workspace
+         * @description Adds an apex or subdomain. It verifies once its _acme-challenge CNAME exists; then any name one level under it can be used by tunnels and previews. Team domains are added by owners and admins. A domain another workspace added but never verified is taken over; a verified one is refused.
+         */
+        post: operations["post_v1_domains"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7746,6 +7658,47 @@ export interface paths {
          * @description Any enrolled node serves this (equal peers).
          */
         post: operations["post_v1_admin_server_nodes_remove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/domains/{domain_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Show a workspace domain */
+        get: operations["get_v1_domains_domain_id"];
+        put?: never;
+        post?: never;
+        /**
+         * Remove a workspace domain
+         * @description Refused with domain_in_use (and the hostnames that use it) while a tunnel or preview uses a name under it.
+         */
+        delete: operations["delete_v1_domains_domain_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/domains/{domain_id}/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check a workspace domain's DNS now
+         * @description Schedules an immediate DNS check (and a certificate retry after a failure); poll the domain for the result.
+         */
+        post: operations["post_v1_domains_domain_id_check"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8448,31 +8401,6 @@ export interface components {
         };
         TunnelLogPageResponse: {
             data: components["schemas"]["TunnelLogPage"];
-        };
-        DNSRecordInstruction: {
-            name: string;
-            /** @enum {unknown} */
-            type: "A" | "AAAA" | "ALIAS" | "ANAME" | "CNAME";
-            value: string;
-            ttl: number;
-        };
-        DNSInstructions: {
-            /** @constant */
-            schema: "paperboat.preview-tunnel/v1";
-            /** @constant */
-            kind: "dns_instructions";
-            tunnel_id: string;
-            domain_id: string;
-            hostname: string;
-            provider: string;
-            records: components["schemas"]["DNSRecordInstruction"][];
-            certificate_strategy: string;
-            /** @enum {unknown} */
-            verification_state: "waiting_dns" | "verified" | "dns_error" | "conflict" | "quarantined";
-            note: string;
-        };
-        DNSInstructionsResponse: {
-            data: components["schemas"]["DNSInstructions"];
         };
         PreviewTunnelError: {
             /** @constant */
@@ -9480,26 +9408,6 @@ export interface components {
         };
         PreviewDomainPageResponse: {
             data: components["schemas"]["PreviewDomainPage"];
-        };
-        PreviewDNSInstructions: {
-            /** @constant */
-            schema: "paperboat.preview-tunnel/v1";
-            /** @constant */
-            kind: "dns_instructions";
-            domain_id: string;
-            hostname: string;
-            provider: string;
-            records: components["schemas"]["DNSRecordInstruction"][];
-            certificate_strategy: string;
-            /** @enum {unknown} */
-            verification_state: "waiting_dns" | "verified" | "dns_error" | "conflict" | "quarantined";
-            note: string;
-            /** @constant */
-            target_kind: "preview_lease";
-            preview_id: string;
-        };
-        PreviewDNSInstructionsResponse: {
-            data: components["schemas"]["PreviewDNSInstructions"];
         };
         PeerNetworkRegisterRequest: {
             operation_id: string;
@@ -11617,23 +11525,52 @@ export interface components {
             env_names_listable?: boolean;
         };
         WorkspaceDomain: {
+            id: string;
+            hostname: string;
+            /** @description personal or the team slug */
+            workspace: string;
             /** @enum {string} */
-            kind: "tunnel" | "preview";
-            /** @description The same view as GET /v1/tunnels/{tunnel_id}/domains (kind tunnel) or GET /v1/previews/{preview_id}/domains (kind preview). */
-            domain: components["schemas"]["TunnelDomain"] | components["schemas"]["PreviewDomain"];
-            /** @description kind tunnel: the tunnel's name. */
-            owner_name?: string;
-            /** @description kind preview: the preview's endpoint URL. */
-            endpoint?: string;
-        };
-        WorkspaceDomainPageResponse: {
-            data: {
-                items: components["schemas"]["WorkspaceDomain"][];
-                /** @description Every domain the filters select (the same on every page). */
-                total: number;
-                /** @description Present when domains follow this page. */
-                next_cursor?: string;
+            state: "pending_dns" | "verified" | "failed";
+            records: {
+                name: string;
+                type: string;
+                value: string;
+                /** @enum {string} */
+                purpose: "verification" | "routing" | "apex_routing";
+                required: boolean;
+            }[];
+            observed_records: string[];
+            /** Format: date-time */
+            last_checked_at?: string;
+            /** Format: date-time */
+            next_check_at: string;
+            /** Format: date-time */
+            verified_at?: string;
+            dns_failure?: {
+                code: string;
+                message: string;
             };
+            certificate: {
+                /** @enum {string} */
+                state: "pending" | "ready" | "failed";
+                /** Format: date-time */
+                expires_at?: string;
+                failure?: {
+                    code: string;
+                    message: string;
+                };
+            };
+            used_by: {
+                /** @enum {string} */
+                kind: "tunnel" | "preview";
+                id: string;
+                name: string;
+                hostname: string;
+                domain_binding_id: string;
+                certificate_state: string;
+            }[];
+            /** Format: date-time */
+            created_at: string;
         };
         InventoryCursorPagination: {
             limit: number;
@@ -11701,6 +11638,18 @@ export interface components {
         ServerNodeEnrollment: {
             address: string;
             code: string;
+        };
+        WorkspaceDomainCreateRequest: {
+            /** @description An apex or subdomain you control, such as example.com or dev.example.com. */
+            hostname: string;
+        };
+        WorkspaceDomainResponse: {
+            data: components["schemas"]["WorkspaceDomain"];
+        };
+        WorkspaceDomainListResponse: {
+            data: {
+                items: components["schemas"]["WorkspaceDomain"][];
+            };
         };
     };
     responses: {
@@ -14690,87 +14639,6 @@ export interface operations {
             409: components["responses"]["Error"];
             412: components["responses"]["Error"];
             428: components["responses"]["Error"];
-        };
-    };
-    post_v1_tunnels_tunnel_id_domains_domain_id_verify: {
-        parameters: {
-            query?: {
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-            };
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-                domain_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["TunnelStateMutationRequest"];
-            };
-        };
-        responses: {
-            /** @description Already verified or idempotent replay. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TunnelDomainResponse"];
-                };
-            };
-            /** @description Verification is waiting for external DNS proof. */
-            202: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PreviewTunnelOperationResponse"];
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            412: components["responses"]["Error"];
-            428: components["responses"]["Error"];
-        };
-    };
-    get_v1_tunnels_tunnel_id_domains_domain_id_instructions: {
-        parameters: {
-            query?: {
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-            };
-            header?: never;
-            path: {
-                tunnel_id: components["parameters"]["TunnelID"];
-                domain_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description DNS instructions. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DNSInstructionsResponse"];
-                };
-            };
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-            501: components["responses"]["Error"];
         };
     };
     post_v1_machine_events_wait: {
@@ -18511,87 +18379,6 @@ export interface operations {
             409: components["responses"]["Error"];
             412: components["responses"]["Error"];
             428: components["responses"]["Error"];
-        };
-    };
-    post_v1_previews_preview_id_domains_domain_id_verify: {
-        parameters: {
-            query?: {
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-            };
-            header: {
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-                "If-Match": components["parameters"]["IfMatch"];
-            };
-            path: {
-                preview_id: components["parameters"]["PreviewID"];
-                domain_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["TunnelStateMutationRequest"];
-            };
-        };
-        responses: {
-            /** @description Already verified or idempotent replay. */
-            200: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PreviewDomainResponse"];
-                };
-            };
-            /** @description Verification is waiting for external DNS proof. */
-            202: {
-                headers: {
-                    ETag: components["headers"]["ETag"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PreviewTunnelOperationResponse"];
-                };
-            };
-            400: components["responses"]["Error"];
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
-            412: components["responses"]["Error"];
-            428: components["responses"]["Error"];
-        };
-    };
-    get_v1_previews_preview_id_domains_domain_id_instructions: {
-        parameters: {
-            query?: {
-                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
-                workspace?: string;
-            };
-            header?: never;
-            path: {
-                preview_id: components["parameters"]["PreviewID"];
-                domain_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description DNS instructions. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PreviewDNSInstructionsResponse"];
-                };
-            };
-            401: components["responses"]["Error"];
-            403: components["responses"]["Error"];
-            404: components["responses"]["Error"];
-            501: components["responses"]["Error"];
         };
     };
     post_peer_network_register: {
@@ -23600,7 +23387,7 @@ export interface operations {
                 instance?: string;
                 period?: "1h" | "6h" | "24h" | "7d";
                 /** @description Fixed mounted worker name; accepted only for paperboat.worker.state and paperboat.worker.progress_age_seconds. Historical interval aggregates are not current worker health. */
-                worker?: "worker_machines" | "worker_config_warnings" | "worker_config_revocation" | "worker_preview_leases" | "worker_tunnel_expiry" | "worker_connector_rotation" | "worker_connector_drain" | "worker_domain_dns" | "worker_preview_dns" | "worker_preview_outbox" | "worker_team_retention" | "worker_team_entitlements" | "worker_team_billing" | "worker_team_inbox" | "worker_edge_assignments" | "worker_stale_nodes" | "worker_edge_dns" | "worker_diagnostic_uploads" | "worker_certificates" | "worker_platform_certificates";
+                worker?: "worker_machines" | "worker_config_warnings" | "worker_config_revocation" | "worker_preview_leases" | "worker_tunnel_expiry" | "worker_connector_rotation" | "worker_connector_drain" | "worker_preview_outbox" | "worker_team_retention" | "worker_team_entitlements" | "worker_team_billing" | "worker_team_inbox" | "worker_edge_assignments" | "worker_stale_nodes" | "worker_edge_dns" | "worker_diagnostic_uploads" | "worker_certificates" | "worker_platform_certificates";
             };
             header?: never;
             path?: never;
@@ -28321,12 +28108,6 @@ export interface operations {
             query?: {
                 /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
                 workspace?: string;
-                limit?: number;
-                cursor?: string;
-                /** @description Hostname substring. */
-                q?: string;
-                /** @description Without kind both are listed. */
-                kind?: "tunnel" | "preview";
             };
             header?: never;
             path?: never;
@@ -28334,17 +28115,65 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Workspace domain page. */
+            /** @description Workspace domains. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WorkspaceDomainPageResponse"];
+                    "application/json": components["schemas"]["WorkspaceDomainListResponse"];
                 };
             };
-            /** @description Invalid query. */
+            /** @description Workspace unavailable. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    post_v1_domains: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceDomainCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Domain added (or already in this workspace). */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceDomainResponse"];
+                };
+            };
+            /** @description invalid_domain or domain_reserved. */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description domain_forbidden: not a team owner or admin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description domain_conflict: verified in another workspace. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -28590,6 +28419,114 @@ export interface operations {
             409: components["responses"]["Error"];
             429: components["responses"]["Error"];
             503: components["responses"]["Error"];
+        };
+    };
+    get_v1_domains_domain_id: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path: {
+                domain_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Workspace domain. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceDomainResponse"];
+                };
+            };
+            /** @description domain_not_found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_v1_domains_domain_id: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path: {
+                domain_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description domain_forbidden. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description domain_not_found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description domain_in_use; details.used_by lists the hostnames. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    post_v1_domains_domain_id_check: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header?: never;
+            path: {
+                domain_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Check scheduled. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceDomainResponse"];
+                };
+            };
+            /** @description domain_not_found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
 }

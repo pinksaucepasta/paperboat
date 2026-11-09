@@ -19,7 +19,6 @@ export type Tunnel = Data<"/v1/tunnels">["items"][number]
 export type TunnelRoute = Data<"/v1/tunnels/{tunnel_id}/routes">["items"][number]
 export type TunnelDomain = Data<"/v1/tunnels/{tunnel_id}/domains">["items"][number]
 export type TunnelHealth = Data<"/v1/tunnels/{tunnel_id}/status">
-export type DnsInstructions = Data<"/v1/tunnels/{tunnel_id}/domains/{domain_id}/instructions">
 
 const previewPath = (id: string) => `previews/${encodeURIComponent(id)}`
 const tunnelPath = (id: string) => `tunnels/${encodeURIComponent(id)}`
@@ -31,7 +30,6 @@ export const tunnelKeys = {
   health: (id: string) => ["tunnel", id, "health"] as const,
   routes: (id: string) => ["tunnel", id, "routes"] as const,
   domains: (id: string) => ["tunnel", id, "domains"] as const,
-  instructions: (id: string, domainId: string) => ["tunnel", id, "domains", domainId, "instructions"] as const,
 }
 
 /** Every page of a cursor collection, bounded so one huge account cannot stall the page. */
@@ -130,13 +128,6 @@ export const domainsQuery = (id: string) =>
     queryFn: async ({ signal }) => (await allPages<TunnelDomain>(`${tunnelPath(id)}/domains`, {}, signal)).items,
     // Domains move through DNS and certificate states on their own.
     refetchInterval: 15_000,
-  })
-
-export const instructionsQuery = (id: string, domainId: string) =>
-  queryOptions({
-    queryKey: tunnelKeys.instructions(id, domainId),
-    queryFn: ({ signal }) =>
-      api<DnsInstructions>(`${tunnelPath(id)}/domains/${encodeURIComponent(domainId)}/instructions`, { signal }),
   })
 
 /**
@@ -311,10 +302,6 @@ export async function removeRouteById(tunnelId: string, routeId: string) {
 
 export const addDomain = (tunnelId: string, hostname: string, routeId: string) =>
   change(`${tunnelPath(tunnelId)}/domains`, "POST", { body: { hostname, route_id: routeId } })
-export const verifyDomain = (domain: TunnelDomain) =>
-  change(`${tunnelPath(domain.tunnel_id)}/domains/${encodeURIComponent(domain.id)}/verify`, "POST", {
-    etag: domain.etag,
-  })
 export const removeDomain = (domain: TunnelDomain) =>
   change(`${tunnelPath(domain.tunnel_id)}/domains/${encodeURIComponent(domain.id)}`, "DELETE", { etag: domain.etag })
 
