@@ -42,7 +42,7 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 	now := time.Now().UTC().Truncate(time.Second)
 	suffix := fmt.Sprint(time.Now().UnixNano())
 	owner, member, outsider := "offline_owner_"+suffix, "offline_member_"+suffix, "offline_outsider_"+suffix
-	previewMember := "offline_preview_" + suffix
+	previewMember, shellMember := "offline_preview_"+suffix, "offline_shell_"+suffix
 	revokedMember, suspendedMember := "offline_revoked_"+suffix, "offline_suspended_"+suffix
 	host, team := "offline_host_"+suffix, "offline-team-"+suffix
 	_, signer, err := ed25519.GenerateKey(rand.Reader)
@@ -63,7 +63,7 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	for _, account := range []string{owner, member, outsider, revokedMember, suspendedMember, previewMember} {
+	for _, account := range []string{owner, member, outsider, revokedMember, suspendedMember, previewMember, shellMember} {
 		exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, account)
 	}
 	exec(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, "env_"+host, owner)
@@ -71,13 +71,15 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 	exec(`SELECT paperboat.ensure_machine_address_leases((SELECT user_id FROM paperboat.user_machines WHERE id=$1), ARRAY[$1]::text[])`, host)
 	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, owner)
 	exec(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,period_start,period_end) VALUES($1,$2,'active',now()-interval '1 hour',now()+interval '1 hour')`, "billing_"+team, team)
-	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'member',true),($1,$4,1,'member',true),($1,$5,1,'member',true),($1,$6,1,'member',true)`, team, owner, member, revokedMember, suspendedMember, previewMember)
+	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'member',true),($1,$4,1,'member',true),($1,$5,1,'member',true),($1,$6,1,'member',true),($1,$7,1,'member',true)`, team, owner, member, revokedMember, suspendedMember, previewMember, shellMember)
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, team, host, owner)
 	for _, account := range []string{member, revokedMember, suspendedMember} {
 		teamstest.SetMachineAccess(t, store, team, host, account, "terminal")
 	}
 	// preview_manage is the machine capability nearest to inspecting; it must not confer the offline inspector right.
 	teamstest.SetMachineAccess(t, store, team, host, previewMember, "preview_manage")
+	// exec and managed_ssh are what a shared machine is used for from a CLI (pb exec, pb ssh).
+	teamstest.SetMachineAccess(t, store, team, host, shellMember, "exec", "managed_ssh")
 
 	register := func(account, endpoint string, role wire.Role) {
 		name := map[wire.Role]string{wire.RoleCLI: "cli", wire.RoleMachine: "machine"}[role]
@@ -103,7 +105,7 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 	})
 	register(owner, host, wire.RoleMachine)
 	clis := map[string]string{}
-	for _, account := range []string{owner, member, outsider, revokedMember, suspendedMember} {
+	for _, account := range []string{owner, member, outsider, revokedMember, suspendedMember, shellMember} {
 		cli := "offline_cli_" + account
 		clis[cli] = account
 		exec(`INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES($1,$2,$1,'offline test','desktop','test',ARRAY['machines:connect'],'active',$3,$3)`, cli, account, now)
@@ -171,6 +173,9 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 	}
 	if got := cliHostScopes(member, AuthorityUntilRevoked); !slices.Equal(got, []string{"terminal"}) {
 		t.Errorf("member granted terminal only: its CLI document has host scopes %v, want [terminal]", got)
+	}
+	if got := cliHostScopes(shellMember, AuthorityUntilRevoked); !slices.Equal(got, []string{"exec", "managed_ssh"}) {
+		t.Errorf("member granted exec and managed_ssh: its CLI document has host scopes %v, want [exec managed_ssh]", got)
 	}
 	if got := cliHostScopes(member, ""); len(got) != 0 {
 		t.Errorf("a daemon that does not ask for until-revoked got host scopes %v", got)
@@ -245,10 +250,15 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 	// A disabled account has no offline rights (online, its sessions are refused).
 	moves("member disabled", true, func() { exec(`UPDATE paperboat.users SET status='disabled' WHERE id=$1`, member) })
 	// A revoked grant leaves the member's next document without the scope.
-	moves("grant revoked", true, func() { teamstest.SetMachineAccess(t, store, team, host, revokedMember) })
+	moves("grant revoked", true, func() {
+		teamstest.SetMachineAccess(t, store, team, host, revokedMember)
+		teamstest.SetMachineAccess(t, store, team, host, shellMember)
+	})
 	after, _ := read(AuthorityUntilRevoked)
-	if got := cliHostScopes(revokedMember, AuthorityUntilRevoked); len(got) != 0 {
-		t.Errorf("CLI document host scopes after the grant was revoked: %v", got)
+	for _, account := range []string{revokedMember, shellMember} {
+		if got := cliHostScopes(account, AuthorityUntilRevoked); len(got) != 0 {
+			t.Errorf("CLI document host scopes of %s after the grant was revoked: %v", account, got)
+		}
 	}
 	if got := after["offline_cli_"+member]; len(got) != 0 {
 		t.Errorf("a disabled member still has offline scopes %v", got)
