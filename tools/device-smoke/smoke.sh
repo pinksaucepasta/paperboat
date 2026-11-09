@@ -166,6 +166,17 @@ pb_on() { # pb_on DEVICE ARGS... (args are already quoted for the remote shell)
   esac
 }
 
+# device_py DEVICE SCRIPT ARGS...: run one check script where its device is. On the Windows device it runs from here
+# against pb.exe (winhost.py: PB_SMOKE_WINDOWS_PB), so nothing is staged and python3 is not needed there.
+device_py() {
+  local device=$1 script=$2; shift 2
+  if [ "$device" = victus ]; then
+    (cd "$HERE" && PB_SMOKE_WINDOWS_PB="$PB_VICTUS" PAPERBOAT_SMOKE_TEAM="$SMOKE_TEAM" python3 "$script" "$@")
+  else
+    on "$device" "PAPERBOAT_SMOKE_TEAM=$SMOKE_TEAM python3 /tmp/$RUN_ID/$script $*"
+  fi
+}
+
 # ---------------------------------------------------------------- results
 declare -a ROWS=()
 FAILED=0
@@ -491,6 +502,7 @@ update_target() { # update TARGET with the build in UPDATE_DIR while work is liv
 TERMINAL_FIXTURES_READY=","
 stage_terminal_fixtures() {
   local source=$1
+  [ "$source" != victus ] || return 0  # the Windows device runs the scripts from here (device_py)
   [[ "$TERMINAL_FIXTURES_READY" != *",$source,"* ]] || return 0
   if ! on "$source" "umask 077; mkdir -p /tmp/$RUN_ID; tar -xzf - -C /tmp/$RUN_ID" < "$PAPERBOAT_SMOKE_FIXTURES"; then
     return 1
@@ -525,7 +537,7 @@ test_application_pairs() {
       fi
       arguments="$target"
       [ -z "$check" ] || arguments+=" --check $check"
-      out=$(on "$source" "PAPERBOAT_SMOKE_TEAM=$SMOKE_TEAM python3 /tmp/$RUN_ID/$script $arguments" 2>&1); status=$?
+      out=$(device_py "$source" "$script" $arguments 2>&1); status=$?
       if [ "$status" = 0 ] && python3 -c '
 import json,sys
 r=json.loads(sys.argv[1]); assert r["status"]=="PASS" and r["target"]==sys.argv[2]
@@ -794,7 +806,7 @@ test_local_access_settings() {
     fi
     password="${HP_PASS:-}"
     [ "$device" != apple ] || password="$APPLE_PASS"
-    out=$(printf '%s\n' "$password" | on "$device" "python3 /tmp/$RUN_ID/local_access_settings.py" 2>&1); status=$?
+    out=$(printf '%s\n' "$password" | device_py "$device" local_access_settings.py 2>&1); status=$?
     if [ "$status" = 0 ] && python3 -c 'import json,sys;r=json.loads(sys.argv[1]);assert r["check"]=="local-access-settings" and r["status"]=="PASS" and r["alias_proxy_apply_reset"] and r["enrollment_preserved"]' "$out" 2>/dev/null; then
       record "$id" PASS $(( $(now)-t0 )) "alias, proxy, apply, domain set/reset; original settings restored"
     else
@@ -1014,7 +1026,7 @@ test_device_application() {
         [ "$device" != "$TEAMMATE" ] || flags+=" --device-role member" ;;
       doctor-lifecycle|session-limit) flags=$device ;;
     esac
-    out=$(on "$device" "python3 /tmp/$RUN_ID/$script $flags" 2>&1); status=$?
+    out=$(device_py "$device" "$script" $flags 2>&1); status=$?
     if [ "$status" = 0 ] && python3 -c '
 import json,sys
 r=json.loads(sys.argv[1])
