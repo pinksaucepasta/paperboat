@@ -2,7 +2,7 @@
 """Windows lifecycle checks on victus, driven from a Linux host over SSH (PowerShell), with hp as the peer client.
 
   VICTUS_PASS=... windows_lifecycle.py --expect-version V --windows-install-json FILE CHECK...
-  CHECK: install-pair update version doctor status service crash availability exec exec-self reset-pair uninstall
+  CHECK: install-pair update update-failures version doctor status service crash availability exec exec-self reset-pair uninstall
   install-pair and update need --build (the new pb.exe already copied to victus); install-pair writes the install receipt to the
   --windows-install-json file. install-pair and reset-pair mint tokens on hp. Results go to results/windows-lifecycle-<UTC>.json.
 
@@ -129,6 +129,53 @@ def check_update(win, args):
     wait_for(lambda: victus(count)[1].strip() == '2', 120, 'only the new session-owner and SSH generation left')
 
 
+def check_update_failures(win, args):
+    """F14-03: a bad, truncated or wrong-platform file is refused and a killed update recovers; the install keeps working."""
+    assert args.build and args.wrong_platform, 'update-failures needs --build <good pb.exe> and --wrong-platform <non-Windows pb> on victus'
+    original = installed_version(win)
+    good_version = installed_version(Windows(args.build))
+    work = 'C:\\Users\\pujan\\pb-update-fail'
+
+    def healthy(seconds):
+        wait_for(lambda: 'doctor: healthy' in win.run('doctor')[1], seconds, 'doctor healthy')
+        check_exec(win, args)
+    victus(f"New-Item -ItemType Directory -Force '{work}' | Out-Null; "
+           f"$b = New-Object byte[] 4096; (New-Object Random).NextBytes($b); [IO.File]::WriteAllBytes('{work}\\garbage.exe', $b); "
+           f"$g = [IO.File]::ReadAllBytes('{args.build}'); [IO.File]::WriteAllBytes('{work}\\truncated.exe', $g[0..([int]($g.Length / 3))]); "
+           f"Copy-Item '{args.wrong_platform}' '{work}\\wrong-platform.exe' -Force", 120)
+    try:
+        for name in ('garbage', 'truncated', 'wrong-platform'):
+            code, receipt = win.json('update', '--from', f'{work}\\{name}.exe', timeout=300)
+            assert code != 0 and receipt.get('ok') is False, f'{name} update was accepted'
+            assert receipt['error'].get('message'), f'{name} update was refused without a message'
+            assert installed_version(win) == original, f'{name} update changed the installed version'
+            healthy(150)
+        # Killed mid-update: the previous or the new version must work afterwards, and a retry completes.
+        victus(f"$p = Start-Process -FilePath '{win.pb}' -ArgumentList 'update','--from','{args.build}','--force','--json' -PassThru -WindowStyle Hidden; "
+               "Start-Sleep 20; taskkill /PID $p.Id /T /F | Out-Null; "
+               "Get-Process | Where-Object { $_.Name -like '.pb-elevated-*' } | ForEach-Object { taskkill /PID $_.Id /T /F | Out-Null }", 120)
+        healthy(300)
+        after_kill = installed_version(win)
+        assert after_kill in (original, good_version), f'a killed update left version {after_kill}'
+        deadline = time.time() + 180
+        while True:
+            code, receipt = win.json('update', '--from', args.build, timeout=600)
+            if code == 0:
+                break
+            busy = receipt.get('error', {}).get('code') == 'update_busy'
+            assert busy and time.time() < deadline, 'the retried update failed: ' + json.dumps(receipt.get('error', {}))[:200]
+            time.sleep(5)
+        healthy(300)
+        assert installed_version(win) == good_version, 'the retried update did not install the good build'
+    finally:
+        victus(f"Remove-Item -Recurse -Force '{work}' -ErrorAction SilentlyContinue")
+
+
+def installed_version(win):
+    code, out = win.run('--version', '--json')
+    return json.loads(out[out.index('{'):])['data']['version']
+
+
 def check_version(win, args):
     code, out = win.run('--version')
     assert args.expect_version in out, 'version differs: ' + out.strip().splitlines()[-1][:80]
@@ -240,7 +287,7 @@ def inventory(args):
     assert code == 0 and 'inventory: clean' in out, 'leftovers: ' + ' | '.join(l for l in out.splitlines() if l.startswith('leftover'))[:400]
 
 
-CHECKS = {'install-pair': check_install_pair, 'update': check_update, 'exec-self': check_exec_self, 'version': check_version, 'doctor': check_doctor, 'status': check_status, 'service': check_service, 'crash': check_crash,
+CHECKS = {'install-pair': check_install_pair, 'update': check_update, 'update-failures': check_update_failures, 'exec-self': check_exec_self, 'version': check_version, 'doctor': check_doctor, 'status': check_status, 'service': check_service, 'crash': check_crash,
           'availability': check_availability, 'exec': check_exec, 'reset-pair': check_reset_pair, 'uninstall': check_uninstall}
 
 
@@ -251,6 +298,7 @@ def main():
     parser.add_argument('--machine', default='victus', help='machine name in the account')
     parser.add_argument('--token-from', default='hp')
     parser.add_argument('--build', help='path on victus of the pb.exe to install (install-pair)')
+    parser.add_argument('--wrong-platform', help='path on victus of a pb built for another OS (update-failures)')
     parser.add_argument('checks', nargs='+', choices=sorted(CHECKS))
     args = parser.parse_args()
     if not os.environ.get('VICTUS_PASS'):
