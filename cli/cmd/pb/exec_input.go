@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"runtime"
 )
 
 var errExecInputLimit = errors.New("remote execution input queue exceeds its bounded capacity")
@@ -25,7 +26,9 @@ func readExecInput(ctx context.Context, reader io.Reader, value []byte) (int, er
 		}
 		// Darwin poll rejects the valid null device with POLLNVAL. Its read
 		// is already nonblocking EOF; identify the borrowed object, not its name.
-		if info.Mode()&os.ModeCharDevice != 0 {
+		// Not on Windows: os.SameFile cannot tell character devices apart there, so a console
+		// compared equal to NUL and was read with a blocking, uncancellable ReadConsole.
+		if runtime.GOOS != "windows" && info.Mode()&os.ModeCharDevice != 0 {
 			null, err := os.Stat(os.DevNull)
 			if err == nil && os.SameFile(info, null) {
 				return file.Read(value)

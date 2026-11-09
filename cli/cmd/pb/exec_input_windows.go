@@ -38,7 +38,7 @@ func readExecInputFile(ctx context.Context, file *os.File, value []byte) (int, e
 	var mode uint32
 	if kind == windows.FILE_TYPE_CHAR {
 		if err := windows.GetConsoleMode(handle, &mode); err != nil {
-			return 0, err
+			return file.Read(value) // a character device that is not a console is NUL: an immediate EOF
 		}
 	} else if kind != windows.FILE_TYPE_PIPE {
 		return 0, os.ErrInvalid

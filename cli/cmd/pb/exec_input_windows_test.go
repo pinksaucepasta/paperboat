@@ -24,7 +24,8 @@ func TestExecInputPrivateConsoleBorrowedReadiness(t *testing.T) {
 		}
 		ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
 		defer cancel()
-		child := exec.CommandContext(ctx, executable, "-test.run=^TestExecInputPrivateConsoleBorrowedReadiness$")
+		// The child's own timeout fires first, so a hang reports where it is instead of a bare kill.
+		child := exec.CommandContext(ctx, executable, "-test.run=^TestExecInputPrivateConsoleBorrowedReadiness$", "-test.timeout=6s")
 		child.Env = append(os.Environ(), "PB_EXEC_INPUT_CONSOLE_HELPER=1")
 		child.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.DETACHED_PROCESS}
 		if output, err := child.CombinedOutput(); err != nil {
