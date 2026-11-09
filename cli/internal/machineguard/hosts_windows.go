@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"unsafe"
 
 	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
@@ -117,8 +118,18 @@ func replaceHostsFile(ctx context.Context, path string, info os.FileInfo, origin
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(displaced, original) || !bytes.Equal(installed, next) || installedSD.String() != security.String() {
-		return fmt.Errorf("hosts changed during replacement or security verification failed; displaced file retained at %s", backup)
+	var failed []string
+	if !bytes.Equal(displaced, original) {
+		failed = append(failed, "the displaced file differs from the original")
+	}
+	if !bytes.Equal(installed, next) {
+		failed = append(failed, "the installed file differs from the update")
+	}
+	if installedSD.String() != security.String() {
+		failed = append(failed, "the installed file's security differs from the original's")
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("hosts changed during replacement or security verification failed (%s); displaced file retained at %s", strings.Join(failed, "; "), backup)
 	}
 	return os.Remove(backup)
 }
