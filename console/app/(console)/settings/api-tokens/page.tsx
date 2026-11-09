@@ -8,9 +8,7 @@ export const metadata: Metadata = { title: sections.apiTokens.title }
 export default function Page() {
   return (
     <SectionPage id="apiTokens">
-      <div className="mx-auto max-w-3xl">
-        <ApiTokens />
-      </div>
+      <ApiTokens />
     </SectionPage>
   )
 }

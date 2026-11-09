@@ -10,8 +10,10 @@ export default function AccountPage() {
       <PageHeader>
         <Crumb>Account</Crumb>
       </PageHeader>
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-10 px-4 py-6 md:px-8 md:py-8">
-        <Account />
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-8 md:py-8">
+        <div className="flex max-w-3xl flex-col gap-10">
+          <Account />
+        </div>
       </main>
     </>
   )
