@@ -183,6 +183,10 @@ func TestOperatorNodeSiteIsSetByTheSiteAction(t *testing.T) {
 		}
 		return v
 	}
+	// Paperboat's own pbh nodes have no managed_node_authority row; the action must not need one.
+	if _, err = store.SQL().ExecContext(ctx, `DELETE FROM paperboat.managed_node_authority WHERE node_id=$1`, in.NodeID); err != nil {
+		t.Fatal(err)
+	}
 	set := NodeMutation{Action: "site", NodeID: in.NodeID, Reason: "case:test", Site: "Mumbai"}
 	if _, err = s.MutateNode(ctx, admin, "site-"+x, set); err != nil || site() != "Mumbai" {
 		t.Fatalf("site action: site=%q err=%v", site(), err)

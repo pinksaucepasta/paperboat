@@ -318,6 +318,8 @@ func (s *Service) MutateNode(ctx context.Context, actor, key string, in NodeMuta
 			if tag.RowsAffected() != 1 {
 				return ErrNotFound
 			}
+			out.Node = Node{ID: in.NodeID} // readNodeTx joins managed_node_authority, which these nodes lack
+			return nil
 		case "drain", "resume", "retire":
 			if in.Revision < 1 {
 				return ErrInvalid
