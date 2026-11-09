@@ -10,7 +10,8 @@ import { Field, FieldError } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 
 /** The password opens the vault inside this browser; it is cleared as soon as it is submitted. */
-export function EnvUnlock({ title }: { title: string }) {
+/** `loading`: the vault is still being read; typing works (and keeps focus), unlocking waits. */
+export function EnvUnlock({ title, loading }: { title: string; loading?: boolean }) {
   const [password, setPassword] = useState("")
   const client = useQueryClient()
   const unlock = useMutation({
@@ -48,7 +49,7 @@ export function EnvUnlock({ title }: { title: string }) {
           />
           {unlock.isError && <FieldError>{unlock.error.message}</FieldError>}
         </Field>
-        <Button type="submit" size="lg" disabled={!password || unlock.isPending}>
+        <Button type="submit" size="lg" disabled={loading || !password || unlock.isPending}>
           {unlock.isPending ? "Unlocking…" : "Unlock"}
         </Button>
       </form>

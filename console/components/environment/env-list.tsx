@@ -31,11 +31,7 @@ export function EnvironmentList({ machine: tabMachine }: { machine?: Machine }) 
   const { scope: machineId } = useListScope(tabMachine)
   const unlocked = useSyncExternalStore(subscribeVaultLock, vaultUnlocked, () => false)
   const vault = useQuery({ queryKey: ["env-vault"], queryFn: ({ signal }) => readVault(signal), staleTime: 0 })
-  if (!workspace || !me.data || vault.isPending) return <EmptySkeleton />
-  if (vault.isError) {
-    return <p className="py-16 text-center text-sm text-destructive">{vault.error.message}</p>
-  }
-  if (!vault.data) return <NoVault />
+  if (!workspace || !me.data) return <EmptySkeleton />
   const team = workspace.kind === "team" && !machineId
   const scope: EnvScope = {
     kind: team ? "team" : "personal",
@@ -44,6 +40,12 @@ export function EnvironmentList({ machine: tabMachine }: { machine?: Machine }) 
     workspace: workspace.id,
   }
   const title = machineId ? "Variables for this machine" : team ? `${workspace.name} variables` : "Variables"
+  // Most visits find the vault locked, so it loads as the unlock card.
+  if (vault.isPending) return <EnvUnlock title={title} loading />
+  if (vault.isError) {
+    return <p className="py-16 text-center text-sm text-destructive">{vault.error.message}</p>
+  }
+  if (!vault.data) return <NoVault />
   if (!unlocked) return <EnvUnlock title={title} />
   return (
     <div className="flex flex-col gap-3">
