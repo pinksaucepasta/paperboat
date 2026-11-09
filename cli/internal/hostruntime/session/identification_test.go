@@ -1,18 +1,24 @@
 package session
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 	"unicode/utf8"
 )
 
 func TestIdentificationFragmentation(t *testing.T) {
+	// A file URL with a host names a network share on Windows, which the tracker spells as a UNC path.
+	wantDirectory := "/projects/my api"
+	if runtime.GOOS == "windows" {
+		wantDirectory = "//machine/projects/my api"
+	}
 	stream := "hello\x1b]0;✳ API debugging\x07\x1b]7;file://machine/projects/my%20api\x1b\\world\x1b]1;ignored\x07"
 	for split := 0; split <= len(stream); split++ {
 		var tracker identificationTracker
 		tracker.Consume([]byte(stream[:split]))
 		tracker.Consume([]byte(stream[split:]))
-		if tracker.title != "✳ API debugging" || tracker.directory != "/projects/my api" {
+		if tracker.title != "✳ API debugging" || tracker.directory != wantDirectory {
 			t.Fatalf("split %d: title=%q directory=%q", split, tracker.title, tracker.directory)
 		}
 	}
@@ -20,7 +26,7 @@ func TestIdentificationFragmentation(t *testing.T) {
 	for _, b := range []byte(stream) {
 		tracker.Consume([]byte{b})
 	}
-	if tracker.title != "✳ API debugging" || tracker.directory != "/projects/my api" {
+	if tracker.title != "✳ API debugging" || tracker.directory != wantDirectory {
 		t.Fatal("bytewise metadata differs")
 	}
 	tracker.Consume([]byte("\x1b]2;\x1b\\"))
