@@ -75,6 +75,7 @@ export function PolicyHistory({ workspace, policy }: { workspace: string; policy
             {versions.isFetchingNextPage ? "Loading…" : "Load more"}
           </Button>
         )}
+        {versions.isFetchNextPageError && <span className="text-destructive">Couldn’t load more. Try again.</span>}
       </div>
       {restoring !== null && (
         <ChangesDialog
