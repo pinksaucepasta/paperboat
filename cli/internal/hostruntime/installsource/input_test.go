@@ -452,3 +452,11 @@ func assertOnlyFiles(t *testing.T, directory string, allowed ...string) {
 		}
 	}
 }
+
+// pb update --from stages a fresh copy and runs it once to read its version. On Windows that first run is held for
+// Defender's scan (about 9 s measured on victus), which a 5 s probe budget turned into 'not a Paperboat executable'.
+func TestInputProbeBudgetCoversTheFirstScanOfAFreshLargeBinary(t *testing.T) {
+	if inputProbeTimeout < 30*time.Second {
+		t.Fatalf("probe budget %v is shorter than a first-run antivirus scan of a 99 MB executable", inputProbeTimeout)
+	}
+}

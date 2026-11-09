@@ -26,8 +26,10 @@ import (
 const MaxInputBytes int64 = (512 + 8) << 20
 
 const (
-	inputHTTPTimeout     = 15 * time.Minute
-	inputProbeTimeout    = 5 * time.Second
+	inputHTTPTimeout = 15 * time.Minute
+	// The first run of a freshly written executable waits for Windows Defender's real-time scan: about 9 s for the
+	// 99 MB pb.exe on a laptop. The probe ends as soon as the program exits, so only a hung one waits this long.
+	inputProbeTimeout    = 30 * time.Second
 	inputProbeWaitDelay  = 250 * time.Millisecond
 	maxInputProbeOutput  = 4 << 10
 	maxInputRedirects    = 5
