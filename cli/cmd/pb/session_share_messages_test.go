@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -40,11 +41,13 @@ func TestSharedSessionsAreFoundInEveryWorkspace(t *testing.T) {
 	}))
 	defer backend.Close()
 	writeTestProfile(t, root, configPath, backend.URL)
-	previousPaths := currentLocalDaemonPaths
-	currentLocalDaemonPaths = func() (localapi.Paths, error) {
-		return localapi.Paths{SocketPath: filepath.Join(root, "local-api.sock")}, nil
+	if runtime.GOOS != "windows" { // there commandRuntimeTestRoot already names a private pipe nothing listens on
+		previousPaths := currentLocalDaemonPaths
+		currentLocalDaemonPaths = func() (localapi.Paths, error) {
+			return localapi.Paths{SocketPath: filepath.Join(root, "local-api.sock")}, nil
+		}
+		t.Cleanup(func() { currentLocalDaemonPaths = previousPaths })
 	}
-	t.Cleanup(func() { currentLocalDaemonPaths = previousPaths })
 	var out, stderr bytes.Buffer
 	if code := runWithReporter(context.Background(), []string{"--no-customization", "--config", configPath, "session", "shared"}, &out, &stderr, nil); code != 0 || !strings.Contains(out.String(), "terminal_1") {
 		t.Fatalf("code=%d out=%s err=%s", code, out.String(), stderr.String())

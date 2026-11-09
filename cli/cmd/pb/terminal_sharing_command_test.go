@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -95,11 +96,13 @@ func TestTerminalSharingReturnsOutputErrorsBeforeReportingSuccessOrMutating(t *t
 	defer backend.Close()
 	writeTestProfile(t, root, configPath, backend.URL)
 
-	previousPaths := currentLocalDaemonPaths
-	currentLocalDaemonPaths = func() (localapi.Paths, error) {
-		return localapi.Paths{SocketPath: filepath.Join(root, "local-api.sock")}, nil
+	if runtime.GOOS != "windows" { // there commandRuntimeTestRoot already names a private pipe nothing listens on
+		previousPaths := currentLocalDaemonPaths
+		currentLocalDaemonPaths = func() (localapi.Paths, error) {
+			return localapi.Paths{SocketPath: filepath.Join(root, "local-api.sock")}, nil
+		}
+		t.Cleanup(func() { currentLocalDaemonPaths = previousPaths })
 	}
-	t.Cleanup(func() { currentLocalDaemonPaths = previousPaths })
 
 	var stderr bytes.Buffer
 	var faults []errorreport.Fault
