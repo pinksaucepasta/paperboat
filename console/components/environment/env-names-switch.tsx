@@ -4,12 +4,16 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { api, useApiQuery, useWorkspace, type Workspace } from "@/lib/api"
 import { teamAction, teamQuery } from "@/lib/teams"
 import { preferencesQuery } from "@/lib/transfer-mode"
-import { Row } from "@/components/section"
+import { Section, SettingRow } from "@/components/section"
 import { Switch } from "@/components/ui/switch"
 
-const label = "Commands on machines can list ENV names"
-const helper =
-  "Lets `pb env names` on your machines print the names of your ENV variables (never values), so an AI agent can find the secret it needs. Commands run with `pb env run` still receive the values."
+const label = "Let commands on machines list variable names"
+const helper = (
+  <>
+    <code className="font-mono text-code">pb env names</code> shows names only, never values. Commands started with{" "}
+    <code className="font-mono text-code">pb env run</code> still get the values.
+  </>
+)
 
 /** Environment page: whether `pb env names` on the active workspace's machines may list ENV names. */
 export function EnvNamesSwitch() {
@@ -75,8 +79,17 @@ function EnvNamesSetting({
   onChange: (on: boolean) => void
 }) {
   return (
-    <div className="flex flex-col">
-      <Row label={label} htmlFor="env-names-listable">
+    <Section title="Settings">
+      <SettingRow
+        label={label}
+        htmlFor="env-names-listable"
+        description={
+          <>
+            {helper}
+            {note && ` ${note}`}
+          </>
+        }
+      >
         <Switch
           id="env-names-listable"
           checked={checked}
@@ -84,9 +97,8 @@ function EnvNamesSetting({
           onCheckedChange={onChange}
           aria-label={label}
         />
-      </Row>
-      <p className="py-2 text-xs text-muted-foreground">{note ? `${helper} ${note}` : helper}</p>
-      {error && <p className="pb-2 text-sm text-destructive">{error.message}</p>}
-    </div>
+      </SettingRow>
+      {error && <p className="py-2 text-sm text-destructive">{error.message}</p>}
+    </Section>
   )
 }

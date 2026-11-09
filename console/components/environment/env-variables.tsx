@@ -14,12 +14,29 @@ import { Skeleton } from "@/components/ui/skeleton"
 
 const namePattern = /^[A-Za-z_][A-Za-z0-9_]*$/
 
-/** Names with Set and Remove, and a form to add one. Values go in, never out. */
-export function EnvVariables({ scope }: { scope: EnvScope }) {
+/**
+ * Names with Set and Remove, and a form to add one. Values go in, never out. With `adding` the
+ * Add variable button lives elsewhere (the page header) and opens the form through it.
+ */
+export function EnvVariables({
+  scope,
+  adding,
+  onAddingChange,
+}: {
+  scope: EnvScope
+  adding?: boolean
+  onAddingChange?: (adding: boolean) => void
+}) {
   const client = useQueryClient()
   const key = ["env-names", scope]
   const names = useQuery({ queryKey: key, queryFn: ({ signal }) => listNames(scope, signal), staleTime: 0 })
-  const [editing, setEditing] = useState<string | null>(null)
+  const [ownEditing, setOwnEditing] = useState<string | null>(null)
+  // A header's Add variable opens the same form with an empty name.
+  const editing = adding ? "" : ownEditing
+  const setEditing = (name: string | null) => {
+    if (name === null) onAddingChange?.(false)
+    setOwnEditing(name)
+  }
   const [removing, setRemoving] = useState<string | null>(null)
   const refresh = () => client.invalidateQueries({ queryKey: key })
   // The change is saved even when some machine still needs its key; say so instead of failing.
@@ -32,18 +49,20 @@ export function EnvVariables({ scope }: { scope: EnvScope }) {
   }
   return (
     <div className="flex flex-col">
-      <div className="flex min-h-12 items-center border-t border-divider py-2">
-        <Button variant="secondary" size="lg" onClick={() => setEditing("")}>
-          Add variable
-        </Button>
-      </div>
+      {adding === undefined && (
+        <div className="flex min-h-12 items-center border-b border-divider py-2">
+          <Button variant="secondary" size="lg" onClick={() => setEditing("")}>
+            Add variable
+          </Button>
+        </div>
+      )}
       {names.isPending && <Skeleton className="h-12 w-full" />}
       {names.isError && <p className="py-4 text-sm text-destructive">{names.error.message}</p>}
       {names.data?.length === 0 && (
-        <p className="border-t border-divider py-4 text-sm text-muted-foreground">No variables yet.</p>
+        <p className="border-b border-divider py-4 text-sm text-muted-foreground">No variables yet.</p>
       )}
       {names.data?.map((name) => (
-        <div key={name} className="flex min-h-12 items-center gap-3 border-t border-divider py-2 text-sm">
+        <div key={name} className="flex min-h-12 items-center gap-3 border-b border-divider py-2 text-sm">
           <code className="min-w-0 flex-1 truncate font-mono text-xs">{name}</code>
           <span className="text-xs text-muted-foreground">Value hidden</span>
           <Button variant="ghost" size="lg" onClick={() => setEditing(name)}>
