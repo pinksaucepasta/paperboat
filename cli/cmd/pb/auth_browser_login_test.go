@@ -656,7 +656,8 @@ type loginDeviceFixture struct {
 	authorize  map[string]any
 	enrollment map[string]any
 	approvedBy string // set: /v1/me answers this other account (an approval by the wrong account)
-	machines   []any  // the account's machines (default none)
+	machines   []any  // machines GET /v1/machines/{id} finds (any workspace); the personal list stays empty
+	lookupFail int    // set: GET /v1/machines/{id} answers this status with an unrelated code
 	// enrollRefusal: set, POST /v1/machine-enrollments answers 403 with this message; enrollCalls counts them.
 	enrollRefusal string
 	enrollCalls   int
@@ -698,6 +699,20 @@ func loginDeviceServer(t *testing.T, f *loginDeviceFixture) *httptest.Server {
 				items = []any{}
 			}
 			writeAPIData(t, w, map[string]any{"items": items, "pagination": map[string]any{"limit": 200, "offset": 0, "total": len(items), "next_offset": nil}})
+		case "/v1/machines/machine_login":
+			if f.lookupFail != 0 {
+				w.WriteHeader(f.lookupFail)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "internal_error", "message": "failed"}})
+				return
+			}
+			for _, m := range f.machines {
+				if m.(map[string]any)["id"] == "machine_login" {
+					writeAPIData(t, w, m)
+					return
+				}
+			}
+			w.WriteHeader(404)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "user_machine_not_found", "message": "Machine was not found."}})
 		case "/v1/machine-enrollments":
 			f.enrollCalls++
 			if f.enrollRefusal != "" {

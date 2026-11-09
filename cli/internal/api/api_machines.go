@@ -304,6 +304,24 @@ func (c *Client) ListUserMachinesFiltered(ctx context.Context, filters url.Value
 	return collectOffsetInventory[UserMachine](ctx, c, "/v1/machines", "items", query)
 }
 
+// GetUserMachine reads one machine by id across every workspace the caller can see (personal and team),
+// unlike the personal-only list. A removed machine answers 404 user_machine_not_found.
+func (c *Client) GetUserMachine(ctx context.Context, machineID string) (UserMachine, error) {
+	var out UserMachine
+	if strings.TrimSpace(machineID) == "" {
+		return out, errors.New("machine ID is required")
+	}
+	err := c.do(ctx, http.MethodGet, "/v1/machines/"+url.PathEscape(machineID), nil, &out)
+	return out, err
+}
+
+// IsMachineRemoved reports the server's explicit answer that the machine does not exist (removed), not a refusal
+// or a failure to answer.
+func IsMachineRemoved(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound && apiErr.Code == "user_machine_not_found"
+}
+
 func (c *Client) DisconnectUserMachine(ctx context.Context, machineID string) error {
 	if strings.TrimSpace(machineID) == "" {
 		return errors.New("machine ID is required")

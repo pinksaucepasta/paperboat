@@ -122,9 +122,21 @@ func TestLoginAddsRemovedComputerBackToTheSameAccount(t *testing.T) {
 	}
 }
 
-// A machine that is still on the account is not re-added: the refusal keeps the --fresh advice.
+// A machine that is still on the account is not re-added, whether personal or owned by a team (the personal
+// machine list never shows team machines): the refusal keeps the --fresh advice and nothing is wiped. A lookup
+// that fails without saying "no such machine" proves nothing and wipes nothing either.
 func TestLoginDoesNotReaddAComputerThatIsStillOnTheAccount(t *testing.T) {
-	s := newRemovedScenario(t, &loginDeviceFixture{machines: []any{map[string]any{"id": "machine_login", "alias": "hp"}}})
+	for name, f := range map[string]*loginDeviceFixture{
+		"personal":       {machines: []any{map[string]any{"id": "machine_login", "alias": "hp"}}},
+		"team-owned":     {machines: []any{map[string]any{"id": "machine_login", "alias": "hp", "owner_team_id": "team_x"}}},
+		"lookup failure": {lookupFail: 500},
+	} {
+		t.Run(name, func(t *testing.T) { assertNotReadded(t, f) })
+	}
+}
+
+func assertNotReadded(t *testing.T, f *loginDeviceFixture) {
+	s := newRemovedScenario(t, f)
 	out, err := runBrowserLogin(t, t.Context(), s.configPath, "login", "--no-browser", "--reauth")
 	if err == nil || !strings.Contains(err.Error(), "pb login --fresh") || len(*s.steps) != 0 || s.f.enrollCalls != 0 {
 		t.Fatalf("err=%v steps=%v enrollments=%d\n%s", err, *s.steps, s.f.enrollCalls, out)

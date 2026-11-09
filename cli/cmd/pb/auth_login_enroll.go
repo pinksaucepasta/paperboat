@@ -284,14 +284,10 @@ func readdRemovedComputer(ctx context.Context, cfg *config.Config, store config.
 		return nil
 	}
 	client := api.New(issuer, credential, loginHTTPClient())
-	machines, err := client.ListUserMachines(ctx)
-	if err != nil {
+	// Only the server's explicit "no such machine" counts: team-owned machines are not in the personal list, and a
+	// refusal or a failure to answer proves nothing, so none of those may wipe a working setup.
+	if _, err = client.GetUserMachine(ctx, machineID); !api.IsMachineRemoved(err) {
 		return nil
-	}
-	for _, machine := range machines {
-		if machine.ID == machineID {
-			return nil
-		}
 	}
 	account := firstNonEmpty(profile.Account.Email, profile.Account.DisplayName, profile.Account.ID)
 	shell := "posix"
