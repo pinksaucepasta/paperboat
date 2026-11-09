@@ -14,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/selector"
@@ -236,6 +237,12 @@ func startFresh(c *command.Context, replacesRecord bool) error {
 	}
 	if err := freshEnrollmentCleanup(cobraCommand); err != nil {
 		return err
+	}
+	if !replacesRecord {
+		// The record is gone; an older reset's note would make pairing replace whatever it names.
+		if err := bootstrap.ClearReplacement(); err != nil {
+			return fmt.Errorf("clear the old replacement note: %w", err)
+		}
 	}
 	executable, source, err := runningInstallSource()
 	if err != nil {

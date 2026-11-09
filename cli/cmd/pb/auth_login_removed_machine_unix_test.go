@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
@@ -43,6 +44,8 @@ type removedScenario struct {
 func newRemovedScenario(t *testing.T, f *loginDeviceFixture) removedScenario {
 	t.Helper()
 	srv := loginDeviceServer(t, f)
+	t.Setenv("HOME", t.TempDir()) // the replacement note lives in the user config directory
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "config"))
 	configPath, profiles := browserLoginFixture(t, srv.URL)
 	root := commandRuntimeTestRoot(t)
 	t.Setenv("PAPERBOAT_RUNTIME_STATE_ROOT", filepath.Join(root, "identity"))
@@ -124,6 +127,10 @@ func newRemovedScenario(t *testing.T, f *loginDeviceFixture) removedScenario {
 // to the same account, once, with one approval, and says so.
 func TestLoginAddsRemovedComputerBackToTheSameAccount(t *testing.T) {
 	s := newRemovedScenario(t, &loginDeviceFixture{})
+	// An older reset left a note naming another record; pairing would replace it, so the re-add must clear it.
+	if err := bootstrap.SaveReplacement("machine_stale", time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	out, err := runBrowserLogin(t, t.Context(), s.configPath, "login", "--no-browser", "--reauth")
 	if err != nil {
 		t.Fatalf("login --reauth: %v\n%s", err, out)
@@ -133,6 +140,9 @@ func TestLoginAddsRemovedComputerBackToTheSameAccount(t *testing.T) {
 	}
 	if strings.Count(out, "Code: ABCD-EFGH") != 1 || !strings.Contains(out, "This computer was removed from browser@example.test; adding it again.") || !strings.Contains(out, "Added") {
 		t.Fatalf("one approval and the message expected:\n%s", out)
+	}
+	if left := bootstrap.LoadReplacement(time.Now()); left != "" {
+		t.Fatalf("stale replacement note %q survived the re-add", left)
 	}
 	if len(*s.titles) != 1 || !strings.Contains((*s.titles)[0], "This computer was removed from browser@example.test. Add it again?") {
 		t.Fatalf("confirmation prompts=%v", *s.titles)
