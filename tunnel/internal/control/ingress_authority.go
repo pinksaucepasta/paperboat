@@ -42,20 +42,29 @@ type IngressAuthority struct {
 	stop          context.CancelFunc
 	done          chan struct{}
 	previewMisses map[previewAuthorityKey]previewMiss
+	lastForced    time.Time // the last forced fetch a preview miss caused, for the grace's global rate limit
 }
 
 // previewMiss is one refresh for a publication the edge has not heard of; done closes when it ends.
 type previewMiss struct {
-	at   time.Time
-	done chan struct{}
+	at     time.Time
+	done   chan struct{}
+	streak int // consecutive misses for this publication; each one doubles how long the next is not rechecked
 }
 
-// previewRecheckInGrace is how long a preview miss is remembered during a takeover grace.
-const previewRecheckInGrace = 500 * time.Millisecond
+// previewRecheckInGrace is how long a preview miss is remembered during a takeover grace; from the third miss of the
+// same publication on it doubles, up to previewMissMaxStreak (0.5 s, 0.5 s, 1 s, 2 s): a decision issued a moment late
+// is still found quickly, a name that never comes back stops costing fetches. It is also the
+// least time between two forced fetches for all publications together: one fetch answers every name, so held
+// connections of many names must not each cause their own.
+const (
+	previewRecheckInGrace = 500 * time.Millisecond
+	previewMissMaxStreak  = 3
+)
 
-func (a *IngressAuthority) previewMissTTL() time.Duration {
+func (a *IngressAuthority) previewMissTTL(streak int) time.Duration {
 	if a.Grace != nil && a.Grace() > 0 {
-		return previewRecheckInGrace
+		return previewRecheckInGrace << max(0, min(streak, previewMissMaxStreak)-1)
 	}
 	return connectorprotocol.IngressRefreshInterval
 }
@@ -447,11 +456,14 @@ func (a *IngressAuthority) ResolvePreview(ctx context.Context, publication, host
 	a.mu.Lock()
 	now := time.Now().UTC()
 	for k, miss := range a.previewMisses {
-		if now.Sub(miss.at) >= a.previewMissTTL() {
+		if now.Sub(miss.at) >= a.previewMissTTL(previewMissMaxStreak) {
 			delete(a.previewMisses, k)
 		}
 	}
-	if miss, checked := a.previewMisses[key]; checked {
+	streak := 0
+	if miss, checked := a.previewMisses[key]; checked && now.Sub(miss.at) >= a.previewMissTTL(miss.streak) {
+		streak = miss.streak + 1 // stale: recheck, but wait longer next time
+	} else if checked {
 		a.mu.Unlock()
 		// Another request is refreshing for this publication: share its answer, never a second fetch.
 		select {
@@ -473,11 +485,19 @@ func (a *IngressAuthority) ResolvePreview(ctx context.Context, publication, host
 	if a.previewMisses == nil {
 		a.previewMisses = make(map[previewAuthorityKey]previewMiss)
 	}
-	miss := previewMiss{at: now, done: make(chan struct{})}
+	miss := previewMiss{at: now, done: make(chan struct{}), streak: streak}
 	a.previewMisses[key] = miss
+	force := true
+	if a.Grace != nil && a.Grace() > 0 {
+		if now.Sub(a.lastForced) < previewRecheckInGrace {
+			force = false // another name's miss fetched just now; its snapshot is as fresh as a new one would be
+		} else {
+			a.lastForced = now
+		}
+	}
 	a.mu.Unlock()
 	defer close(miss.done)
-	if decisions, err = a.snapshot(ctx, true); err != nil {
+	if decisions, err = a.snapshot(ctx, force); err != nil {
 		return connectorprotocol.IngressDecision{}, err
 	}
 	if d, ok := selectDecision(decisions); ok {

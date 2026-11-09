@@ -8,6 +8,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -450,5 +451,37 @@ func TestIngressAuthorityPreviewMissIsRecheckedDuringTakeoverGrace(t *testing.T)
 				t.Fatalf("decision found within 1.5 s = %v, want %v (control calls %d)", found, grace, calls.Load())
 			}
 		})
+	}
+}
+
+// Held connections of many names must not each cost their own forced fetch: during the grace one fetch answers every
+// name, so 20 publications rechecked every 50 ms for 1.2 s cause a handful of fetches, not dozens; and one name that
+// keeps missing is asked again less and less often.
+func TestIngressAuthorityPreviewMissesInGraceShareFetchesAndBackOff(t *testing.T) {
+	now := time.Now().UTC()
+	d := ingressAuthorityTestDecision(now)
+	d.Binding.Lifecycle = connectorprotocol.TunnelEphemeral
+	var calls atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": []connectorprotocol.IngressDecision{}})
+	}))
+	defer server.Close()
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &IngressAuthority{Client: client, NodeID: d.EdgeNodeID, ProcessEpoch: d.EdgeProcessEpoch, fetched: now, Grace: func() time.Duration { return 10 * time.Second }}
+	open := connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: d.Binding.AccountID, TunnelID: d.Binding.TunnelID, ConnectorID: d.ConnectorID, SessionID: d.SessionID, ProcessGeneration: d.ProcessGeneration, Generation: d.ConfigGeneration, RouteID: d.Binding.RouteID, RequestID: "preview-authority", Kind: "http"}
+	for end := time.Now().Add(1200 * time.Millisecond); time.Now().Before(end); time.Sleep(50 * time.Millisecond) {
+		for i := 0; i < 20; i++ {
+			_, _ = a.ResolvePreview(context.Background(), "publication_"+strconv.Itoa(i), "n"+strconv.Itoa(i)+".preview.example.test", d.Binding.RouteGeneration, open)
+		}
+	}
+	if got := calls.Load(); got > 6 {
+		t.Fatalf("%d control fetches for 20 missing names in 1.2 s, want a handful (<= 6)", got)
+	}
+	if ttl := a.previewMissTTL(previewMissMaxStreak); ttl != 2*time.Second || a.previewMissTTL(0) != previewRecheckInGrace || a.previewMissTTL(1) != previewRecheckInGrace || a.previewMissTTL(2) != time.Second {
+		t.Fatalf("backoff %v %v %v %v, want 0.5s 0.5s 1s 2s", a.previewMissTTL(0), a.previewMissTTL(1), a.previewMissTTL(2), ttl)
 	}
 }
