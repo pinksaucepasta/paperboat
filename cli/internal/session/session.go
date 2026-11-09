@@ -249,6 +249,16 @@ func Run(ctx context.Context, conn tunnel.Conn, stdinSink io.WriteCloser, opts .
 	select {
 	case <-ctx.Done():
 		// External cancellation (e.g. parent signalled): tear down and report.
+		// A remote exit that is already in is the true result.
+		select {
+		case r := <-done:
+			stopInput()
+			_ = conn.Close()
+			<-outputDone
+			<-inputDone
+			return r.code, r.err
+		default:
+		}
 		stopInput()
 		_ = conn.Close()
 		<-outputDone

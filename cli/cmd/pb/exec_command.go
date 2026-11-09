@@ -105,26 +105,9 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		}
 	}
 	dial := func(attempt context.Context, current api.ExecDescriptor) (tunnel.ExecConn, error) {
-		// Keep caller cancellation attached while dialing, then detach the
-		// established carrier so actionRemoteExec can complete the remote cancel
-		// RPC before transport teardown.
-		dialCtx, cancelDial := context.WithCancel(context.WithoutCancel(c.Context))
-		defer cancelDial()
-		stopCallerCancel := context.AfterFunc(c.Context, cancelDial)
-		stopAttempt := context.AfterFunc(attempt, cancelDial)
-		defer stopAttempt()
-		connection, dialErr := d.peerApplications.DialExec(dialCtx, execConnectInfo(machine, current, client.Workspace()), request)
-		if dialErr != nil {
-			stopCallerCancel()
-			cancelDial()
-			return nil, dialErr
-		}
-		if !stopCallerCancel() || c.Context.Err() != nil {
-			cancelDial()
-			_ = connection.Close()
-			return nil, c.Context.Err()
-		}
-		return connection, nil
+		return dialExecAttached(c.Context, attempt, func(ctx context.Context) (tunnel.ExecConn, error) {
+			return d.peerApplications.DialExec(ctx, execConnectInfo(machine, current, client.Workspace()), request)
+		})
 	}
 	connection, err := dial(c.Context, descriptor)
 	initialUncertain := false
@@ -180,9 +163,11 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 	processSignals := make(chan os.Signal, 1)
 	var cancelRequested atomic.Bool
 	cancelResult := make(chan execCancelOutcome, 1)
+	cancelCtx, abandonCancel := context.WithCancel(workerCtx)
+	defer abandonCancel()
 	cancelRemote := func() execCancelOutcome {
 		// A separate idempotent attachment avoids queuing cancellation behind output.
-		ctx, cancel := context.WithTimeout(workerCtx, 25*time.Second)
+		ctx, cancel := context.WithTimeout(cancelCtx, 25*time.Second)
 		defer cancel()
 		var failures []error
 		for attempt := 0; attempt < 2; attempt++ {
@@ -213,29 +198,19 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		workers.Add(1)
 		go func() { defer workers.Done(); cancelResult <- cancelRemote() }()
 	}
-	// SIGINT cancels the remote process; hangup remains an explicit process signal.
-	signal.Notify(processSignals, syscall.SIGHUP, os.Interrupt)
+	// SIGINT and SIGTERM cancel the remote process; hangup remains an explicit process signal.
+	signal.Notify(processSignals, syscall.SIGHUP, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(processSignals)
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
-		for {
-			select {
-			case received := <-processSignals:
-				if received == os.Interrupt {
-					startCancel()
-				} else if active := connectionRef.Current(); active != nil {
-					if signalErr := active.Signal(received.String()); signalErr != nil {
-						observeExecFailure(workerCtx, signalErr)
-					}
+		watchExecSignals(processSignals, c.Context.Done(), execDone, startCancel, abandonCancel, func(received os.Signal) {
+			if active := connectionRef.Current(); active != nil {
+				if signalErr := active.Signal(received.String()); signalErr != nil {
+					observeExecFailure(workerCtx, signalErr)
 				}
-			case <-c.Context.Done():
-				startCancel()
-				return
-			case <-execDone:
-				return
 			}
-		}
+		})
 	}()
 	if request.PTY && term.IsTerminal(int(os.Stdin.Fd())) {
 		state, rawErr := term.MakeRaw(int(os.Stdin.Fd()))
@@ -546,3 +521,42 @@ func (e *execNotStartedError) Error() string {
 	return "exec connection did not open: " + e.cause.Error()
 }
 func (e *execNotStartedError) Unwrap() error { return e.cause }
+
+// dialExecAttached dials one exec attachment under the caller's and the attempt's cancellation.
+func dialExecAttached(caller, attempt context.Context, dial func(context.Context) (tunnel.ExecConn, error)) (tunnel.ExecConn, error) {
+	dialCtx, cancelDial := context.WithCancel(context.WithoutCancel(caller))
+	defer cancelDial()
+	stopCallerCancel := context.AfterFunc(caller, cancelDial)
+	stopAttempt := context.AfterFunc(attempt, cancelDial)
+	defer stopAttempt()
+	defer stopCallerCancel()
+	// An opened connection is kept even if the caller cancelled meanwhile: the host may have started the command, and
+	// the caller's cancel path stops it remotely.
+	return dial(dialCtx)
+}
+
+// watchExecSignals runs until execDone: an interrupt, SIGTERM or the caller's cancellation cancels the remote process,
+// a second interrupt or SIGTERM abandons that cancel so the CLI exits now; other signals are forwarded. One Ctrl-C both
+// cancels the caller's context and arrives on signals, so only signals are counted.
+func watchExecSignals(signals <-chan os.Signal, callerDone, execDone <-chan struct{}, cancel, abandon func(), forward func(os.Signal)) {
+	stops := 0
+	for {
+		select {
+		case received := <-signals:
+			if received != os.Interrupt && received != syscall.SIGTERM {
+				forward(received)
+				continue
+			}
+			if stops++; stops > 1 {
+				abandon()
+				return
+			}
+			cancel()
+		case <-callerDone:
+			callerDone = nil
+			cancel()
+		case <-execDone:
+			return
+		}
+	}
+}

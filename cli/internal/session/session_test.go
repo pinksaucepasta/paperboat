@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -219,5 +220,38 @@ func TestRunStartsSendingInputWhenReadOnlyEnds(t *testing.T) {
 	close(c.wait)
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// exitThenCancelConn's process exits as the caller cancels: Wait cancels the run's context and returns the real code.
+type exitThenCancelConn struct {
+	*testConn
+	cancel context.CancelFunc
+}
+
+func (c *exitThenCancelConn) Wait() (int, error) { c.cancel(); return c.code, nil }
+
+// A Ctrl-C that lands as the remote exits was reported as 130 or as the real code at random; a remote result that is
+// already in wins.
+func TestRunPrefersAReadyRemoteExitOverCancellation(t *testing.T) {
+	inR, inW, _ := os.Pipe()
+	outR, outW, _ := os.Pipe()
+	oldIn, oldOut := os.Stdin, os.Stdout
+	os.Stdin, os.Stdout = inR, outW
+	defer func() {
+		os.Stdin, os.Stdout = oldIn, oldOut
+		_ = inR.Close()
+		_ = inW.Close()
+		_ = outR.Close()
+		_ = outW.Close()
+	}()
+	// One P: the cancel wakes Run, which runs only after Wait's goroutine has published the exit.
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := &exitThenCancelConn{testConn: &testConn{Reader: bytes.NewBuffer(nil), wait: make(chan struct{}), code: 7}, cancel: cancel}
+	code, err := Run(ctx, c, &sink{})
+	if err != nil || code != 7 {
+		t.Fatalf("code=%d err=%v, want the remote's 7", code, err)
 	}
 }

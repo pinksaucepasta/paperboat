@@ -492,15 +492,21 @@ func (r *execConnectionRef) SendInput(ctx context.Context, data []byte) (tunnel.
 	return connection, nil
 }
 
+// CloseInput holds inputMu so EOF never overtakes a reattach's journal resend (Set) on the new connection.
 func (r *execConnectionRef) CloseInput() error {
+	r.inputMu.Lock()
+	defer r.inputMu.Unlock()
 	r.mu.Lock()
 	r.eof = true
 	connection := r.conn
 	r.mu.Unlock()
-	if connection != nil {
-		return connection.CloseWrite()
+	if connection == nil {
+		return nil
 	}
-	return nil
+	if err := r.flushLocked(connection); err != nil {
+		return err
+	}
+	return connection.CloseWrite()
 }
 
 func forwardExecInput(ctx context.Context, reader io.Reader, connections *execConnectionRef) error {

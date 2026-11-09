@@ -312,3 +312,53 @@ func TestExecRecoveryEndsAtTheReattachWindow(t *testing.T) {
 		t.Fatal("the window did not end the recovery; the attempt budget did")
 	}
 }
+
+// gateConn holds its first write until release, and records how much stdin the host had when EOF arrived.
+type gateConn struct {
+	cutConn
+	writing   chan struct{}
+	release   chan struct{}
+	eofAtSize chan int
+}
+
+func (c *gateConn) Write(p []byte) (int, error) {
+	if c.writes == 0 {
+		close(c.writing)
+		<-c.release
+	}
+	return c.cutConn.Write(p)
+}
+func (c *gateConn) CloseWrite() error {
+	c.host.mu.Lock()
+	c.eofAtSize <- len(c.host.received)
+	c.host.mu.Unlock()
+	return nil
+}
+
+// Stdin EOF that raced a reattach's journal resend reached the new connection before the resent tail: the execution
+// saw EOF early and lost the tail. CloseInput now waits for the resend.
+func TestExecStdinEOFWaitsForTheReattachResend(t *testing.T) {
+	host := &hostStdin{}
+	ref := newExecConnectionRef(&cutConn{host: host, failAt: 1})
+	if connection, err := ref.SendInput(context.Background(), []byte("tail")); err != nil {
+		ref.Clear(connection)
+	}
+	second := &gateConn{cutConn: cutConn{host: host, offset: ref.BeginReattach(), deliver: -1},
+		writing: make(chan struct{}), release: make(chan struct{}), eofAtSize: make(chan int, 2)}
+	set := make(chan error, 1)
+	go func() { set <- ref.Set(second) }()
+	<-second.writing
+	closed := make(chan error, 1)
+	go func() { closed <- ref.CloseInput() }()
+	time.Sleep(50 * time.Millisecond) // let an unserialized CloseInput reach the new connection first
+	close(second.release)
+	if err := <-set; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-closed; err != nil {
+		t.Fatal(err)
+	}
+	if size := <-second.eofAtSize; size != len("tail") {
+		t.Fatalf("EOF reached the execution after %d stdin bytes, want %d", size, len("tail"))
+	}
+}
