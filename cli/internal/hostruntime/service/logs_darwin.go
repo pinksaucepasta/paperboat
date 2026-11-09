@@ -163,3 +163,9 @@ func removeRetiredServiceLog(path string, uid int) error {
 	}
 	return unix.Unlinkat(parent, name, 0)
 }
+
+// RemoveRetiredGenerationLog removes the native log of one retired carrier or hostd generation after its unit is gone;
+// every generation has its own /var/log file, so without this each update leaves two behind.
+func RemoveRetiredGenerationLog(label string, uid int) error {
+	return removeRetiredServiceLog(RetiredGenerationLogPath(label), uid)
+}

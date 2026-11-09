@@ -480,7 +480,7 @@ func renderLaunchd(config Config) ([]byte, error) {
 		EnvironmentVariables: config.Environment, RunAtLoad: true, KeepAlive: keepAlive, Umask: 0o77,
 	}
 	if config.Kind == WorkerKind || config.Kind == HostKind || config.Kind == HostdKind || config.Kind == UpdaterKind || config.Kind == SessionOwnerKind || config.Kind == CarrierKind {
-		definition.StandardOutPath = "/var/log/" + label + ".log"
+		definition.StandardOutPath = RetiredGenerationLogPath(label)
 		definition.StandardErrorPath = definition.StandardOutPath
 	}
 	// launchd user agents inherit the logged-in user and reject UserName and

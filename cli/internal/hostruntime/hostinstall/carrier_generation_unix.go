@@ -92,7 +92,7 @@ func removeCarrierGeneration(ctx context.Context, c CarrierConfig) error {
 			return err
 		}
 	}
-	return nil
+	return service.RemoveRetiredGenerationLog(service.CarrierLabel+"."+c.Instance+"."+c.Generation, c.UID)
 }
 
 // sweepHostdGeneration removes a non-active hostd generation once it exited. A
@@ -122,7 +122,7 @@ func sweepHostdGeneration(ctx context.Context, request Request, generation, defi
 	if err := os.Remove(definition); err != nil && !installNotExistOnly(err) {
 		return err
 	}
-	return nil
+	return service.RemoveRetiredGenerationLog(service.HostdLabel+".u"+strconv.Itoa(request.UID)+"."+generation, request.UID)
 }
 
 // hostdGenerationDefinition is the native declaration of one hostd generation

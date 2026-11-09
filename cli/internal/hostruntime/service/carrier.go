@@ -15,6 +15,9 @@ func generationalUnit(config Config) bool {
 	return (config.Kind == CarrierKind || config.Kind == HostdKind) && config.Platform != "windows"
 }
 
+// RetiredGenerationLogPath is where launchd writes a generation's unit output (renderLaunchd's StandardOutPath).
+func RetiredGenerationLogPath(label string) string { return "/var/log/" + label + ".log" }
+
 func validateCarrierConfig(config Config) error {
 	if config.Kind != CarrierKind {
 		return nil
