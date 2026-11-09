@@ -4,6 +4,7 @@ package hostruntimecmd
 
 import (
 	"context"
+	"path/filepath"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
@@ -25,7 +26,12 @@ func runNativeCarrier(ctx context.Context, config hostinstall.CarrierConfig) err
 		return err
 	}
 	if sid == config.OwnerSID {
-		return runCarrierProcess(ctx, config, func() error { return nil }, func() error { return nil }, 0, nil)
+		err := runCarrierProcess(ctx, config, func() error { return nil }, func() error { return nil }, 0, nil)
+		if err != nil && filepath.IsAbs(config.RuntimeRoot) {
+			// The service that started this process sees only its exit code; keep the cause where hostd keeps its own.
+			recordWindowsLaunchFailure(filepath.Join(config.RuntimeRoot, "carrier-startup-error.log"), err)
+		}
+		return err
 	}
 	if sid != "S-1-5-18" {
 		return hostinstall.ErrInvalidRequest
@@ -37,5 +43,6 @@ func runNativeCarrier(ctx context.Context, config hostinstall.CarrierConfig) err
 	if err != nil {
 		return err
 	}
-	return service.RunWindowsService(service.ServiceEntryConfig{Name: name, Executable: config.Executable, EnrolledSID: config.OwnerSID, Arguments: []string{"daemon", "__runtime-carrier", "--instance", config.Instance}, Environment: config.Environment})
+	return service.RunWindowsService(service.ServiceEntryConfig{Name: name, Executable: config.Executable, EnrolledSID: config.OwnerSID, Arguments: []string{"daemon", "__runtime-carrier", "--instance", config.Instance}, Environment: config.Environment,
+		LaunchFailure: func(err error) { recordWindowsServiceLaunchFailure(name, err) }})
 }

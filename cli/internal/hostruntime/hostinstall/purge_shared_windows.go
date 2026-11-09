@@ -38,7 +38,7 @@ func purgeWindowsSharedResidue(ctx context.Context, shared service.Layout, progr
 	// The producers in hostruntimecmd use these exact account-scoped names.
 	// No wildcard or neighboring account's diagnostic grants removal authority.
 	if state != nil {
-		for _, base := range []string{"PaperboatHostd", "PaperboatHostd-worker", "PaperboatUpdated", "PaperboatLocalDaemon", "PaperboatUpdateActivator", "PaperboatInstall"} {
+		for _, base := range []string{"PaperboatCarrier", "PaperboatHostd", "PaperboatHostd-worker", "PaperboatUpdated", "PaperboatLocalDaemon", "PaperboatUpdateActivator", "PaperboatInstall"} {
 			path := filepath.Join(programData, base+"-"+instance+"-startup-error.log")
 			resultErr = errors.Join(resultErr, retireWindowsSharedObject(ctx, path, false))
 		}
