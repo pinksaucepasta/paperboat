@@ -19,9 +19,7 @@ import {
   savePool,
   scopeOf,
   verifyIngress,
-  type Capability,
   type Node,
-  type Pool,
 } from "@/lib/network"
 import { usePageParam } from "@/lib/use-page-param"
 import { CommandBlock } from "@/components/add-machine-dialog"
@@ -29,12 +27,12 @@ import { ListPager } from "@/components/list-pager"
 import { ConfirmAction, SearchField } from "@/components/list-toolbar"
 import { StatusDot } from "@/components/machine-status"
 import { RowMenus, type Entry } from "@/components/row-menus"
-import { Section } from "@/components/section"
+import { Section, SectionHeading } from "@/components/section"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { TableRowsSkeleton } from "@/components/skeletons"
@@ -75,33 +73,26 @@ export function NetworkPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <Section
-        title="How your traffic travels"
-        action={
-          <Button size="lg" onClick={() => setAdding("relay")}>
-            <PlusIcon data-icon="inline-start" />
-            Add server
-          </Button>
-        }
-      >
-        {/* The cards share row tracks (subgrid), so their rows line up whatever wraps. */}
-        <div className="grid gap-x-3 gap-y-3 pt-3 sm:grid-cols-2">
-          <PathCard capability="relay" scope={scope} team={team} onAdd={() => setAdding("relay")} />
-          <PathCard capability="tunnel" scope={scope} team={team} onAdd={() => setAdding("tunnel")} />
-        </div>
-      </Section>
+      <RelaysSection scope={scope} />
+      <EdgesSection scope={scope} />
 
       <Section
         title={team ? `${workspace?.name ?? "Team"} servers` : "Your servers"}
         action={
-          (q || (installations.data?.total ?? 0) > cursorPageSize) && (
-            <SearchField value={search} onChange={setSearch} placeholder="Search servers" />
-          )
+          <div className="flex items-center gap-2">
+            {(q || (installations.data?.total ?? 0) > cursorPageSize) && (
+              <SearchField value={search} onChange={setSearch} placeholder="Search servers" />
+            )}
+            <Button size="lg" onClick={() => setAdding("relay")}>
+              <PlusIcon data-icon="inline-start" />
+              Add server
+            </Button>
+          </div>
         }
       >
         {none ? (
           <p className="border-b border-divider py-3 text-sm text-muted-foreground">
-            None yet. Run a relay or tunnel server on your own Linux server.
+            None. Add a server to run your own relay or edge.
           </p>
         ) : (
           <div>
@@ -116,7 +107,7 @@ export function NetworkPage() {
               <thead className="border-b border-divider text-left text-xs text-muted-foreground">
                 <tr className="[&>th]:h-9 [&>th]:px-3 [&>th]:font-normal">
                   <th>Server</th>
-                  <th className="hidden md:table-cell">Runs</th>
+                  <th className="hidden md:table-cell">Role</th>
                   <th className="hidden sm:table-cell">Address</th>
                   <th>Status</th>
                   <th className="w-12" aria-label="Actions" />
@@ -152,12 +143,7 @@ export function NetworkPage() {
         )}
       </Section>
 
-      {adding && (
-        <AddServerDialog
-          initial={adding}
-          onClose={() => setAdding(undefined)}
-        />
-      )}
+      {adding && <AddServerDialog initial={adding} onClose={() => setAdding(undefined)} />}
     </div>
   )
 }
@@ -234,234 +220,177 @@ function NodeRow({ node }: { node: Node }) {
   )
 }
 
-const poolCopy = {
-  relay: {
-    title: "Relays",
-    about: "Used only when machines can’t connect directly. End-to-end encrypted.",
-    shared: { mode: "mixed" as const, title: "Paperboat’s and yours" },
-    own: "Machines that can’t connect directly use only your relays. If your relays are down, those connections fail.",
-  },
-  tunnel: {
-    title: "Tunnels & previews",
-    about: "Public addresses for your apps. Browser HTTPS ends here.",
-    shared: { mode: "managed-only" as const, title: "Paperboat’s" },
-    own: "Tunnels and previews run only on your servers and your own domains. Stop running previews and tunnels before switching.",
-  },
+const nodeStatus = { ready: "Ready", draining: "Being replaced", unavailable: "Not reachable" } as const
+
+/** One row of the Relays or Edges table: where it is, who runs it, and whether it's ready. */
+function NodeLine({
+  location,
+  operator,
+  ok,
+  status,
+}: {
+  location: string
+  operator: string
+  ok: boolean
+  status: string
+}) {
+  return (
+    <tr className="[&>td]:h-12 [&>td]:px-3">
+      <td className="truncate">{location}</td>
+      <td className="truncate text-muted-foreground">{operator}</td>
+      <td>
+        <span className="flex items-center gap-2 text-muted-foreground">
+          <StatusDot online={ok} />
+          {status}
+        </span>
+      </td>
+    </tr>
+  )
 }
 
-type Health = { ok: boolean; label: string }
-
-const health = (ready: number, total: number): Health =>
-  ready === total
-    ? { ok: true, label: "Ready" }
-    : ready
-      ? { ok: false, label: `${ready} of ${total} ready` }
-      : { ok: false, label: total ? "Not ready" : "None chosen" }
+/** The Relays and Edges tables: Location, Operator, Status. */
+function NodeTable({ loading, rows, children }: { loading: boolean; rows: number; children: React.ReactNode }) {
+  return (
+    <table className="w-full table-fixed text-sm">
+      <colgroup>
+        <col />
+        <col className="w-[34%]" />
+        <col className="w-[28%]" />
+      </colgroup>
+      <thead className="border-b border-divider text-left text-xs text-muted-foreground">
+        <tr className="[&>th]:h-9 [&>th]:px-3 [&>th]:font-normal">
+          <th>Location</th>
+          <th>Operator</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-divider border-b border-divider">
+        {loading ? (
+          <TableRowsSkeleton rows={rows} columns={[{ bar: "w-24" }, { bar: "w-20" }, { bar: "w-14", dot: true }]} />
+        ) : (
+          children
+        )}
+      </tbody>
+    </table>
+  )
+}
 
 /**
- * One way traffic travels (relays, or tunnels and previews): who serves it now and whether it's
- * healthy, and, once you have a server of that kind, the choice between Paperboat's and only yours.
+ * Every relay the workspace's machines can use, Paperboat's and yours, ready ones first. With a
+ * relay of your own, a switch keeps relayed traffic on your relays only (the account's relay pool).
  */
-function PathCard({
-  capability,
-  scope,
-  team,
-  onAdd,
-}: {
-  capability: Capability
-  scope: ReturnType<typeof scopeOf>
-  team: boolean
-  onAdd: () => void
-}) {
+function RelaysSection({ scope }: { scope: ReturnType<typeof scopeOf> }) {
   const queryClient = useQueryClient()
-  const [search, setSearch] = useState("")
-  const q = useDeferredValue(search.trim())
-  const found = useInfiniteQuery(poolServersQuery(capability, scope, q))
-  const servers = found.data?.pages.flatMap((page) => page.items) ?? []
-  // Whether any server exists comes from the unfiltered total, not from what a search matched.
-  const allServers = useInfiniteQuery(poolServersQuery(capability, scope, ""))
-  const anyServer = allServers.data?.pages[0]?.total ?? 0
-  const known = allServers.data?.pages.flatMap((page) => page.items) ?? []
-  const edges = useApiQuery({ ...edgesQuery, enabled: capability === "tunnel" })
-  const relays = useApiQuery({ ...relaysQuery, enabled: capability === "relay" })
-  const copy = poolCopy[capability]
-  const pool = useApiQuery(poolQuery(capability, scope))
-  const [draft, setDraft] = useState<Pool>()
-  const current = draft ?? pool.data
-  const own = current?.mode === "self-hosted-only"
-  const dirty = Boolean(draft) && JSON.stringify(draft) !== JSON.stringify(pool.data)
+  const relays = useApiQuery(relaysQuery)
+  const pool = useApiQuery(poolQuery("relay", scope))
+  const own = useInfiniteQuery(poolServersQuery("relay", scope, ""))
+  const ownIds = (own.data?.pages.flatMap((page) => page.items) ?? []).map((server) => server.installation_id)
+  const only = pool.data?.mode === "self-hosted-only"
   const save = useMutation({
-    mutationFn: () => savePool(capability, scope, draft!),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["selfhost", "pool", capability] })
-      setDraft(undefined)
-      toast.success(`${copy.title} updated`)
+    mutationFn: (on: boolean) =>
+      savePool(
+        "relay",
+        scope,
+        on
+          ? { mode: "self-hosted-only", installation_ids: ownIds.slice(0, 32) }
+          : { mode: "mixed", installation_ids: [] },
+      ),
+    onSuccess: async (_, on) => {
+      await queryClient.invalidateQueries({ queryKey: ["selfhost", "pool", "relay"] })
+      toast.success(on ? "Relayed traffic uses only your relays" : "Relayed traffic can use Paperboat’s relays")
     },
+    onError: (error) => toast.error(`Couldn’t change relays: ${error.message}`),
   })
-  const choose = (next: "shared" | "own") =>
-    setDraft(
-      next === "shared"
-        ? { mode: copy.shared.mode, installation_ids: [] }
-        : {
-            mode: "self-hosted-only",
-            installation_ids: current?.installation_ids.length
-              ? current.installation_ids
-              : servers.map((server) => server.installation_id).slice(0, 32),
-          },
-    )
-  const toggle = (id: string, on: boolean) =>
-    current &&
-    setDraft({
-      mode: "self-hosted-only",
-      installation_ids: on
-        ? [...current.installation_ids, id].slice(0, 32)
-        : current.installation_ids.filter((entry) => entry !== id),
-    })
-
-  // Who serves it now (from the saved setting, not the unsaved draft), one detail line under it, and
-  // its health where it is known. Both cards keep the same rows in the same order.
-  const plural = (count: number) => `${count} ${count === 1 ? "server" : "servers"}`
-  let served: React.ReactNode = <Skeleton className="my-1 h-3 w-40" />
-  let detail: React.ReactNode = <Skeleton className="my-1 h-3 w-24" />
-  let status: Health | undefined
-  if (pool.data?.mode === "self-hosted-only") {
-    const members = pool.data.members ?? []
-    served = members.map((member) => member.name).join(", ") || "Your servers"
-    detail = `Only yours · ${plural(pool.data.installation_ids.length)}`
-    const ready = known.filter((server) => pool.data!.installation_ids.includes(server.installation_id) && server.ready)
-    status = health(ready.length, pool.data.installation_ids.length)
-  } else if (capability === "tunnel" && edges.data) {
-    const regions = [...new Set(edges.data.map((edge) => placeName(edge.region)))]
-    served = `Paperboat · ${regions.join(", ") || "no region"}`
-    detail = plural(edges.data.length)
-    status = health(edges.data.filter((edge) => edge.status === "ready").length, edges.data.length)
-  } else if (capability === "relay" && relays.data) {
-    // Every relay the settings let these machines use, Paperboat's and yours, with its heartbeat.
-    const regions = [
-      ...new Set(relays.data.filter((relay) => !relay.self_hosted).map((relay) => placeName(relay.region))),
-    ]
-    served = `${anyServer ? "Paperboat’s and yours" : "Paperboat"} · ${regions.join(", ") || "no region"}`
-    detail = plural(relays.data.length)
-    status = health(relays.data.filter((relay) => relay.status === "ready").length, relays.data.length)
-  }
-  if (edges.isError || relays.isError || pool.isError) detail = "Couldn’t load"
-
+  const rows = [...(relays.data ?? [])].sort(
+    (a, b) =>
+      Number(b.status === "ready") - Number(a.status === "ready") ||
+      placeName(a.region).localeCompare(placeName(b.region)),
+  )
   return (
-    <div className="row-span-4 grid grid-rows-subgrid gap-y-4 surface rounded-lg p-4 text-sm">
+    <section className="flex flex-col gap-3">
       <div className="flex flex-col gap-1">
-        <span className="font-medium">{copy.title}</span>
-        <span className="text-muted-foreground">{copy.about}</span>
+        <SectionHeading
+          title="Relays"
+          action={
+            ownIds.length > 0 &&
+            pool.data && (
+              <label className="flex items-center gap-2 text-sm">
+                Use only my relays
+                <Switch checked={only} disabled={save.isPending} onCheckedChange={(on) => save.mutate(on)} />
+              </label>
+            )
+          }
+        />
+        <p className="text-sm text-muted-foreground">
+          Used only when two machines can’t connect directly. Paperboat picks the fastest one for each connection.
+        </p>
       </div>
-      <div className="border-t border-divider" />
-      <div className="flex flex-col gap-0.5">
-        <div className="flex h-5 items-center justify-between gap-3">
-          <span className="min-w-0 truncate">{served}</span>
-          {status ? (
-            <span className="flex shrink-0 items-center gap-2 text-muted-foreground">
-              <StatusDot online={status.ok} />
-              {status.label}
-            </span>
-          ) : (
-            !(edges.isError || relays.isError || pool.isError) && <Skeleton className="my-1 h-3 w-14 shrink-0" />
-          )}
-        </div>
-        <span className="flex h-5 items-center text-muted-foreground">{detail}</span>
+      <NodeTable loading={relays.isPending} rows={2}>
+        {rows.map((relay) => (
+          <NodeLine
+            key={relay.id}
+            location={placeName(relay.region)}
+            operator={relay.self_hosted ? (relay.name ?? "Your server") : "Paperboat"}
+            ok={relay.status === "ready"}
+            status={nodeStatus[relay.status]}
+          />
+        ))}
+      </NodeTable>
+      {relays.isError && <LoadError what="relays" error={relays.error} retry={() => relays.refetch()} />}
+    </section>
+  )
+}
+
+/**
+ * Where the workspace's tunnels and previews are served: Paperboat's edges, or your own tunnel
+ * servers when the workspace uses only those (the tunnel pool).
+ */
+function EdgesSection({ scope }: { scope: ReturnType<typeof scopeOf> }) {
+  const pool = useApiQuery(poolQuery("tunnel", scope))
+  const own = pool.data?.mode === "self-hosted-only"
+  const edges = useApiQuery({ ...edgesQuery, enabled: pool.isSuccess && !own })
+  const servers = useInfiniteQuery({ ...poolServersQuery("tunnel", scope, ""), enabled: own })
+  const ready = new Set(
+    (servers.data?.pages.flatMap((page) => page.items) ?? [])
+      .filter((server) => server.ready)
+      .map((server) => server.installation_id),
+  )
+  const loading = pool.isPending || (own ? servers.isPending : edges.isPending)
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex flex-col gap-1">
+        <SectionHeading title="Edges" />
+        <p className="text-sm text-muted-foreground">Your tunnels and previews are served from these two edges.</p>
       </div>
-      {/* Bottom-aligned, so "Use your own server" (or the choice) sits at the same height in both cards. */}
-      <div className="flex flex-col justify-end gap-4">
-        {capability === "relay" && team && (
-          <p className="text-muted-foreground">Applies to your account in every workspace.</p>
-        )}
-        {pool.isError ? (
-          <p className="text-muted-foreground">Couldn’t load this setting. {pool.error.message}</p>
-        ) : !anyServer && !own ? (
-          <button
-            type="button"
-            onClick={onAdd}
-            className="self-start underline decoration-muted-foreground/50 underline-offset-4 outline-none hover:decoration-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
-          >
-            Use your own server
-          </button>
-        ) : (
-          current && (
-            <ToggleGroup
-              variant="outline"
-              spacing={0}
-              value={[own ? "own" : "shared"]}
-              onValueChange={(next) => next[0] && choose(next[0] as "shared" | "own")}
-              aria-label={copy.title}
-            >
-              <ToggleGroupItem value="shared">{copy.shared.title}</ToggleGroupItem>
-              <ToggleGroupItem value="own">Only yours</ToggleGroupItem>
-            </ToggleGroup>
-          )
-        )}
-        {own && draft && (
-          <div className="flex flex-col gap-2">
-            <p className="text-muted-foreground">{copy.own}</p>
-            <div className="flex items-center justify-between gap-3">
-              <SearchField value={search} onChange={setSearch} placeholder="Search servers" />
-              <span className="shrink-0 text-muted-foreground">
-                {current!.installation_ids.length} of 32 · {found.data?.pages[0]?.total ?? 0} {q ? "found" : "servers"}
-              </span>
-            </div>
-            <ul className="flex flex-col divide-y divide-divider border-y border-divider">
-              {current!.installation_ids
-                .filter((id) => !servers.some((server) => server.installation_id === id))
-                .map((id) => {
-                  const member = pool.data?.members?.find((entry) => entry.installation_id === id)
-                  return (
-                    <li key={id}>
-                      <label className="flex min-h-11 cursor-pointer items-center gap-3">
-                        <Checkbox checked onCheckedChange={(on) => toggle(id, on)} />
-                        <span className="min-w-0 flex-1 truncate">{member?.name ?? "Server no longer paired"}</span>
-                      </label>
-                    </li>
-                  )
-                })}
-              {servers.map((server) => (
-                <li key={server.installation_id}>
-                  <label className="flex min-h-11 cursor-pointer items-center gap-3">
-                    <Checkbox
-                      checked={current!.installation_ids.includes(server.installation_id)}
-                      disabled={
-                        !current!.installation_ids.includes(server.installation_id) &&
-                        current!.installation_ids.length >= 32
-                      }
-                      onCheckedChange={(on) => toggle(server.installation_id, on)}
-                    />
-                    <span className="min-w-0 flex-1 truncate">{server.name}</span>
-                    <StatusDot online={server.ready} />
-                  </label>
-                </li>
-              ))}
-            </ul>
-            {found.hasNextPage && (
-              <div className="flex items-center gap-3">
-                <Button variant="secondary" onClick={() => found.fetchNextPage()} disabled={found.isFetchingNextPage}>
-                  {found.isFetchingNextPage ? "Loading…" : "Load more"}
-                </Button>
-                {found.isFetchNextPageError && <span className="text-destructive">Couldn’t load more. Try again.</span>}
-              </div>
-            )}
-          </div>
-        )}
-        {save.isError && <p className="text-destructive">{save.error.message}</p>}
-        {dirty && (
-          <div className="flex gap-2">
-            <Button
-              onClick={() => save.mutate()}
-              disabled={save.isPending || (own && !current!.installation_ids.length)}
-            >
-              {save.isPending ? "Saving…" : "Save"}
-            </Button>
-            <Button variant="secondary" onClick={() => setDraft(undefined)} disabled={save.isPending}>
-              Cancel
-            </Button>
-          </div>
-        )}
-      </div>
-    </div>
+      <NodeTable loading={loading} rows={2}>
+        {own
+          ? (pool.data?.members ?? []).map((member) => (
+              <NodeLine
+                key={member.installation_id}
+                location={member.endpoint_host}
+                operator={member.name}
+                ok={ready.has(member.installation_id)}
+                status={ready.has(member.installation_id) ? "Ready" : "Not ready"}
+              />
+            ))
+          : (edges.data ?? []).map((edge) => (
+              <NodeLine
+                key={edge.id}
+                location={placeName(edge.region)}
+                operator="Paperboat"
+                ok={edge.status === "ready"}
+                status={nodeStatus[edge.status]}
+              />
+            ))}
+      </NodeTable>
+      {(pool.isError || edges.isError) && (
+        <LoadError
+          what="edges"
+          error={(pool.error ?? edges.error)!}
+          retry={() => (pool.isError ? pool.refetch() : edges.refetch())}
+        />
+      )}
+    </section>
   )
 }
 
@@ -469,13 +398,7 @@ function PathCard({
  * Add server, modeled on Add machine: the install command first, then the address and code it
  * prints. The node belongs to the selected workspace.
  */
-function AddServerDialog({
-  initial,
-  onClose,
-}: {
-  initial: "relay" | "tunnel"
-  onClose: () => void
-}) {
+function AddServerDialog({ initial, onClose }: { initial: "relay" | "tunnel"; onClose: () => void }) {
   const queryClient = useQueryClient()
   const workspace = useWorkspace()
   const [components, setComponents] = useState<"relay" | "tunnel" | "both">(initial)
@@ -505,7 +428,9 @@ function AddServerDialog({
                 </li>
               ))}
             </ul>
-            <p className="text-xs text-muted-foreground">Choose this server under “How your traffic travels” to start using it.</p>
+            <p className="text-xs text-muted-foreground">
+              Choose this server under “How your traffic travels” to start using it.
+            </p>
             <Button size="lg" className="mt-1" onClick={onClose}>
               Done
             </Button>
