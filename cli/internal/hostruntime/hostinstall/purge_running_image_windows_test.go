@@ -146,6 +146,40 @@ func TestAccountPayloadStillInUseIsDeletedAtRestart(t *testing.T) {
 	}
 }
 
+// Security review, 2026-11-10: the sweep read a process ID's user and image, then opened the ID again to end it.
+// Windows reuses the IDs of exited processes, so the second open could name, and end, somebody else's process.
+func TestPayloadProcessThatIsNotTheListedOneIsNotEnded(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "users", "account")
+	_, exited := startOldWindowsCLI(t, root)
+	processIDs, err := payloadProcessIDs([]string{root}, "")
+	if err != nil || len(processIDs) != 1 {
+		t.Fatalf("fixture: processes running from the root = %v, %v; want one", processIDs, err)
+	}
+	users := payloadProcessUsers("")
+	stillRunning := func(reason string) {
+		t.Helper()
+		select {
+		case <-exited:
+			t.Fatalf("a process that %s was ended", reason)
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	// To the sweep a reused ID is an ID whose process, once opened, is not the account's.
+	if err := endPayloadProcesses(processIDs, []string{filepath.Join(base, "users", "listed")}, users); err != nil {
+		t.Fatal(err)
+	}
+	stillRunning("runs another image")
+	if err := endPayloadProcesses(processIDs, []string{root}, []string{"S-1-5-21-1-2-3-1002"}); err != nil {
+		t.Fatal(err)
+	}
+	stillRunning("runs as another user")
+	if err := endPayloadProcesses(processIDs, []string{root}, users); err != nil {
+		t.Fatal(err)
+	}
+	waitExited(t, exited)
+}
+
 // The whole purge on a machine without Paperboat: it must end the old CLI, remove the account and succeed.
 func TestWindowsPurgeConvergesWhileAnOldCLIIsRunning(t *testing.T) {
 	if allowed, err := checkAdministrator(); err != nil || !allowed {

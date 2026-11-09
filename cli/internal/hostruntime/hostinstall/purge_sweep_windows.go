@@ -276,11 +276,18 @@ func stopAndDeleteAccountService(ctx context.Context, manager *mgr.Mgr, name str
 // terminatePayloadProcesses ends the account's processes that run an image under the account payload roots
 // (windowsPayloadProcessIDs). All of them are ended first and then awaited against one deadline, so the step is
 // bounded however many there are.
-func terminatePayloadProcesses(roots []string, ownerSID string) (result error) {
+func terminatePayloadProcesses(roots []string, ownerSID string) error {
 	processIDs, err := payloadProcessIDs(roots, ownerSID)
 	if err != nil {
 		return hostInstallFailure("list Paperboat processes", err)
 	}
+	return endPayloadProcesses(processIDs, roots, payloadProcessUsers(ownerSID))
+}
+
+// endPayloadProcesses ends the listed processes. A process ID can name another process by the time it is opened
+// (the listed one exited and Windows reused the number), so each process is opened once and that one handle
+// proves it is the account's (windowsPayloadProcess), ends it and awaits it.
+func endPayloadProcesses(processIDs []uint32, roots, users []string) (result error) {
 	ended := map[uint32]windows.Handle{}
 	defer func() {
 		for _, handle := range ended {
@@ -288,13 +295,19 @@ func terminatePayloadProcesses(roots []string, ownerSID string) (result error) {
 		}
 	}()
 	for _, processID := range processIDs {
-		handle, err := windows.OpenProcess(windows.PROCESS_TERMINATE|windows.SYNCHRONIZE, false, processID)
+		handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.PROCESS_TERMINATE|windows.SYNCHRONIZE, false, processID)
 		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
 			continue // already gone
 		}
 		if err != nil {
 			result = errors.Join(result, hostInstallFailure(fmt.Sprintf("open Paperboat process %d", processID), err))
 			continue
+		}
+		image, _ := processHandleImagePath(handle)
+		sid, _ := processHandleUserSID(handle)
+		if !windowsPayloadProcess(image, sid, roots, users) {
+			result = withCleanup("close Paperboat process handle failed", result, windows.CloseHandle(handle))
+			continue // the ID was reused: this is not the listed process
 		}
 		if err := windows.TerminateProcess(handle, 1); err != nil {
 			result = errors.Join(result, hostInstallFailure(fmt.Sprintf("terminate Paperboat process %d", processID), err), windows.CloseHandle(handle))
@@ -315,6 +328,16 @@ func terminatePayloadProcesses(roots []string, ownerSID string) (result error) {
 	return result
 }
 
+// payloadProcessUsers are the users whose processes are the account's: its owner, LocalSystem for its services
+// and the user doing the purge (its own elevated helpers).
+func payloadProcessUsers(ownerSID string) []string {
+	users := []string{ownerSID, "S-1-5-18"}
+	if self, ok := processUserSID(uint32(os.Getpid())); ok {
+		users = append(users, self)
+	}
+	return users
+}
+
 // payloadProcessIDs lists the account's running processes (windowsPayloadProcessIDs). The current process and
 // its ancestry are never listed: the parent may be the non-elevated pb that is waiting for this purge.
 func payloadProcessIDs(roots []string, ownerSID string) ([]uint32, error) {
@@ -331,12 +354,8 @@ func payloadProcessIDs(roots []string, ownerSID string) ([]uint32, error) {
 	if !errors.Is(err, windows.ERROR_NO_MORE_FILES) {
 		return nil, err
 	}
-	users := []string{ownerSID, "S-1-5-18"}
-	if self, ok := processUserSID(uint32(os.Getpid())); ok {
-		users = append(users, self)
-	}
 	keep := []uint32{uint32(os.Getpid()), uint32(os.Getppid())}
-	return windowsPayloadProcessIDs(entries, keep, roots, users, processImagePath, processUserSID), nil
+	return windowsPayloadProcessIDs(entries, keep, roots, payloadProcessUsers(ownerSID), processImagePath, processUserSID), nil
 }
 
 func processUserSID(processID uint32) (string, bool) {
@@ -345,6 +364,10 @@ func processUserSID(processID uint32) (string, bool) {
 		return "", false
 	}
 	defer windows.CloseHandle(handle)
+	return processHandleUserSID(handle)
+}
+
+func processHandleUserSID(handle windows.Handle) (string, bool) {
 	var token windows.Token
 	if err := windows.OpenProcessToken(handle, windows.TOKEN_QUERY, &token); err != nil {
 		return "", false
@@ -363,6 +386,10 @@ func processImagePath(processID uint32) (string, bool) {
 		return "", false
 	}
 	defer windows.CloseHandle(handle)
+	return processHandleImagePath(handle)
+}
+
+func processHandleImagePath(handle windows.Handle) (string, bool) {
 	buffer := make([]uint16, 32768)
 	size := uint32(len(buffer))
 	if err := windows.QueryFullProcessImageName(handle, 0, &buffer[0], &size); err != nil {

@@ -80,15 +80,20 @@ func windowsPayloadProcessIDs(entries []windowsProcessEntry, keep []uint32, root
 		if entry.id == 0 || protected[entry.id] {
 			continue
 		}
-		if path, ok := image(entry.id); !ok || !windowsImageUnderRoots(path, roots) {
-			continue
+		path, _ := image(entry.id)
+		if !windowsImageUnderRoots(path, roots) {
+			continue // the user is read only for the few processes that run the account's images
 		}
-		sid, ok := user(entry.id)
-		if ok && sid != "" && slices.ContainsFunc(users, func(allowed string) bool { return strings.EqualFold(allowed, sid) }) {
+		if sid, _ := user(entry.id); windowsPayloadProcess(path, sid, roots, users) {
 			processIDs = append(processIDs, entry.id)
 		}
 	}
 	return processIDs
+}
+
+// windowsPayloadProcess is the rule of windowsPayloadProcessIDs for one process; an unreadable image or user is "".
+func windowsPayloadProcess(image, sid string, roots, users []string) bool {
+	return sid != "" && windowsImageUnderRoots(image, roots) && slices.ContainsFunc(users, func(allowed string) bool { return strings.EqualFold(allowed, sid) })
 }
 
 // windowsOtherAccountEntries returns users-directory entries that belong to
