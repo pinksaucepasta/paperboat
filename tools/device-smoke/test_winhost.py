@@ -1051,3 +1051,52 @@ class PrivateAccessFamily(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+@unittest.skipUnless(PWSH, 'set PB_TEST_PWSH to a pwsh binary to run the teammate sign-in for real')
+class TeammateSigninOnTheDevice(unittest.TestCase):
+    """teammate_signin.device_signin against a pb.exe stand-in, run through the real RUN snippet."""
+
+    PB = ('#!/bin/sh\n'
+          'case "$*" in\n'
+          '"config show --json") echo \'{"data":{"server_url":"https://api.example.test","auth_file_fallback":true}}\';;\n'
+          '*"auth status --json") if [ -f "$XDG_CONFIG_HOME/in" ]; then echo \'{"signed_in":true}\'; '
+          'else echo \'{"signed_in":false}\'; exit 1; fi;;\n'
+          '*"login --api-token-file -") mkdir -p "$XDG_CONFIG_HOME"; cat > "$XDG_CONFIG_HOME/in"; '
+          'printf "%s|%s" "$2" "$XDG_STATE_HOME" > "$XDG_CONFIG_HOME/seen";;\n'
+          '*) exit 9;;\nesac\n')
+
+    def test_first_run_prepares_the_profile_and_logs_in_from_stdin_and_the_second_does_nothing(self):
+        import tempfile
+        import teammate_signin
+        with tempfile.TemporaryDirectory() as home:
+            exe = pathlib.Path(home) / 'pb.exe'
+            exe.write_text(self.PB)
+            exe.chmod(0o755)
+            device = LocalDevice(pb_exe=str(exe), password='')
+            device._environment = {'USERPROFILE': home}
+            root = pathlib.Path(home) / '.pb-smoke' / 'teammate'
+            minted = []
+            with patch('winhost.device', lambda: device):
+                self.assertTrue(teammate_signin.device_signin(lambda: minted.append(1) or b'pbt_secret'))
+                self.assertFalse(teammate_signin.device_signin(lambda: self.fail('a signed-in profile mints no token')))
+            self.assertEqual([1], minted)
+            self.assertEqual({'server_url': 'https://api.example.test', 'auth': {
+                'allow_file_fallback': True, 'profile_dir': str(root / 'credentials')}},
+                json.loads((root / 'config.json').read_text()))
+            self.assertEqual('pbt_secret', (root / 'config' / 'in').read_text())
+            # the login ran with the profile's config and with the state directory moved off the device's registration
+            self.assertEqual('%s|%s' % (root / 'config.json', root / 'state'), (root / 'config' / 'seen').read_text())
+
+    def test_a_refused_token_is_an_error(self):
+        import teammate_signin
+        device = winhost.WindowsDevice(target='user@host', pb_exe=EXE, password='secret')
+        device._environment = {'USERPROFILE': r'C:\Users\u'}
+        fake = FakeSsh((0, b'yes'), (0, envelope(1, b'{"signed_in":false}')), (0, envelope(1, b'', b'pb: token refused')))
+        with patch('winhost.device', lambda: device), patch('subprocess.run', fake):
+            with self.assertRaisesRegex(RuntimeError, 'teammate sign-in failed: pb: token refused'):
+                teammate_signin.device_signin(lambda: b'pbt_secret')
+        login = fake.calls[2]
+        self.assertEqual(r'--config C:\Users\u\.pb-smoke\teammate\config.json login --api-token-file -', login['payload']['args'])
+        self.assertEqual(r'C:\Users\u\.pb-smoke\teammate\state', login['payload']['env']['XDG_STATE_HOME'])
+        self.assertNotIn('pbt_secret', ' '.join(login['argv']))

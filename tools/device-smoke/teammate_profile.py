@@ -36,6 +36,9 @@ def prepare(root, config):
     value = {'server_url': config['server_url'], 'auth': {
         'allow_file_fallback': config.get('auth', {}).get('allow_file_fallback', False),
         'profile_dir': str(root / 'credentials')}}
+    if isinstance(root, winhost.RemotePath):  # under %USERPROFILE%: private to that user by its inherited ACL
+        path.write_text(json.dumps(value))
+        return path
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, 'w') as output:
         json.dump(value, output)
