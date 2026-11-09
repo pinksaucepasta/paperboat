@@ -15,34 +15,45 @@ import (
 
 // Text lists the distinct leaf errors under err, bounded in depth
 // and length. A CommandFailure's own message is public prose; the leaves are
-// the diagnostic causes it retains.
+// the diagnostic causes it retains. A single wrapper that hides its cause (a step name over the real
+// error) is looked through; one whose text already ends with its only cause stands for it.
 func Text(err error) string {
+	leaves := leafTexts(err, 0)
+	if len(leaves) > 8 {
+		leaves = leaves[:8]
+	}
+	return strings.Join(leaves, "; ")
+}
+
+func leafTexts(current error, depth int) []string {
+	if current == nil {
+		return nil
+	}
+	var children []error
+	if joined, ok := current.(interface{ Unwrap() []error }); ok {
+		children = joined.Unwrap()
+	} else if single, ok := current.(interface{ Unwrap() error }); ok && single.Unwrap() != nil {
+		children = []error{single.Unwrap()}
+	}
+	if len(children) == 0 || depth >= 12 {
+		text := current.Error()
+		if len(text) > 300 {
+			text = text[:300] + "..."
+		}
+		return []string{text}
+	}
 	var leaves []string
-	var walk func(error, int)
-	walk = func(current error, depth int) {
-		if current == nil || len(leaves) >= 8 {
-			return
-		}
-		var children []error
-		if joined, ok := current.(interface{ Unwrap() []error }); ok {
-			children = joined.Unwrap()
-		}
-		if len(children) == 0 || depth >= 6 {
-			text := current.Error()
-			if len(text) > 300 {
-				text = text[:300] + "..."
-			}
+	for _, child := range children {
+		for _, text := range leafTexts(child, depth+1) {
 			if !slices.Contains(leaves, text) {
 				leaves = append(leaves, text)
 			}
-			return
-		}
-		for _, child := range children {
-			walk(child, depth+1)
 		}
 	}
-	walk(err, 0)
-	return strings.Join(leaves, "; ")
+	if _, joined := current.(interface{ Unwrap() []error }); !joined && len(leaves) == 1 && strings.HasSuffix(current.Error(), leaves[0]) {
+		return []string{current.Error()}
+	}
+	return leaves
 }
 
 // Record writes the operation, support reference and Text(err) to directory/name (0600), replacing the
