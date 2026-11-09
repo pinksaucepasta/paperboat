@@ -6,6 +6,10 @@
 # restarts it. A failed build or a new slot that does not answer leaves the previous build running.
 # Usage: tools/console-live.sh   (any worktree; touches only ~/paperboat and the paperboat-console unit)
 set -eu
+# One deploy at a time: two lanes running this together once deleted the slot the other had just
+# pointed the server at (it crash-looped, one run rolled back). The lock waits up to 30 minutes.
+exec 9>"${TMPDIR:-/tmp}/paperboat-console-live.lock"
+flock -w 1800 9 || { echo "console-live: another deploy is still running" >&2; exit 1; }
 tree=${PB_CONSOLE_TREE:-$HOME/paperboat}
 url=${PB_CONSOLE_URL:-http://100.95.70.63:3000}
 slot_file=$HOME/.config/paperboat-console/slot.env
