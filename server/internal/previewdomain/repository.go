@@ -591,13 +591,6 @@ func nullableSQLTime(value *time.Time) sql.NullTime {
 	return sql.NullTime{Time: value.UTC(), Valid: true}
 }
 
-func nullableSQLInt32(value *int32) sql.NullInt32 {
-	if value == nil {
-		return sql.NullInt32{}
-	}
-	return sql.NullInt32{Int32: *value, Valid: true}
-}
-
 func defaultID(prefix string) (string, error) {
 	value, err := uuid.NewRandom()
 	if err != nil {

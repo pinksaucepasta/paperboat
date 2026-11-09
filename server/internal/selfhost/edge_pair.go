@@ -18,7 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/machinelatency"
 )
 
-// ErrEdgePairUnassigned: no edge can serve the workspace yet, so it has no pair to show.
+// ErrEdgePairUnassigned means no edge can serve the workspace yet, so it has no pair to show.
 var ErrEdgePairUnassigned = errors.New("the workspace has no edge pair yet")
 
 // PairEdge is one edge of a workspace's pair. A self-hosted edge is named by its installation id (what
