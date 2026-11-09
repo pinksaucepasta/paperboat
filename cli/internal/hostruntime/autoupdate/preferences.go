@@ -157,7 +157,7 @@ func SaveMaintenanceState(path string, p Preferences, now time.Time, pending boo
 
 func readPrivateJSON(path string, out any) (result error) {
 	info, err := os.Lstat(path)
-	if err != nil {
+	if err = atomicfile.AbsentOrBlocked(path, err); err != nil {
 		return updateFailure("automatic update state could not be inspected", err)
 	}
 	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() > 4096 {

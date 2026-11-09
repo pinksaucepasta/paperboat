@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 )
 
 var ErrRepositoryCredentials = errors.New("repository credentials unavailable or invalid")
@@ -137,7 +139,7 @@ func credentialProfilePath(root, repositoryID string) (string, error) {
 	}
 	resolved, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		return "", repositoryCredentialReferenceFailure(err)
+		return "", repositoryCredentialReferenceFailure(atomicfile.AbsentOrBlocked(root, err))
 	}
 	if !repositoryReferencePathMatches(root, resolved) {
 		return "", ErrRepositoryCredentials

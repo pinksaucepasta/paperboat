@@ -5,14 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
-	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 )
@@ -113,8 +114,8 @@ func TestSaveRepositoryCredentialProfilePreservesRootFilesystemFailure(t *testin
 	}
 	root := filepath.Join(blocker, "credentials")
 	err := SaveRepositoryCredentialProfile(root, "repository", RepositoryCredentialProfile{Transport: "https", Auth: "anonymous"})
-	if !errors.Is(err, ErrRepositoryUnavailable) || errors.Is(err, ErrRepositoryCredentials) || !errors.Is(err, syscall.ENOTDIR) || strings.Contains(err.Error(), blocker) {
-		t.Fatalf("profile root failure lost its operational cause/classification or exposed its path: unavailable=%t credentials=%t not_directory=%t path_exposed=%t", errors.Is(err, ErrRepositoryUnavailable), errors.Is(err, ErrRepositoryCredentials), errors.Is(err, syscall.ENOTDIR), strings.Contains(err.Error(), blocker))
+	if !errors.Is(err, ErrRepositoryUnavailable) || errors.Is(err, ErrRepositoryCredentials) || !errors.Is(err, atomicfile.ErrNotDirectory) || strings.Contains(err.Error(), blocker) {
+		t.Fatalf("profile root failure lost its operational cause/classification or exposed its path: unavailable=%t credentials=%t not_directory=%t path_exposed=%t", errors.Is(err, ErrRepositoryUnavailable), errors.Is(err, ErrRepositoryCredentials), errors.Is(err, atomicfile.ErrNotDirectory), strings.Contains(err.Error(), blocker))
 	}
 }
 

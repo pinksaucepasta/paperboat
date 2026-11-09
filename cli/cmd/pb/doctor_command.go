@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	sessionauth "github.com/pinksaucepasta/paperboat/internal/auth"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
@@ -739,7 +740,7 @@ func collectLocalDoctor(ctx context.Context) (report localDoctorReport) {
 	identityPath := filepath.Join(stateRoot, "machine-identity.json")
 	registrationPath := filepath.Join(stateRoot, "machine-registration.json")
 	if _, err := os.Lstat(registrationPath); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if err = atomicfile.AbsentOrBlocked(registrationPath, err); errors.Is(err, os.ErrNotExist) {
 			report.RecoveryActions = append(report.RecoveryActions, "run pb setup")
 		} else {
 			report.failure = err

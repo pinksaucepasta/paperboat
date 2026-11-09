@@ -6,9 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 )
 
 func TestMaintenanceUsesLocalCalendarAndCatchesMissedWindow(t *testing.T) {
@@ -107,7 +108,7 @@ func TestMachinePreferencesPreserveNativeAndDecodeFailuresAndRecover(t *testing.
 	if err := os.WriteFile(blocker, []byte("not a directory"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadPreferences(filepath.Join(blocker, "settings.json"), true); !errors.Is(err, syscall.ENOTDIR) || strings.Contains(err.Error(), blocker) {
+	if _, err := LoadPreferences(filepath.Join(blocker, "settings.json"), true); !errors.Is(err, atomicfile.ErrNotDirectory) || strings.Contains(err.Error(), blocker) {
 		t.Fatal("native failure lost or private path exposed")
 	}
 	path := filepath.Join(dir, "settings.json")
