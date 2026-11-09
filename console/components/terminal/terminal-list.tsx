@@ -23,6 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { copyWithToast } from "@/lib/clipboard"
 import { useTimeFormat } from "@/lib/use-time-format"
 import { useLastCount } from "@/lib/last-count"
+import { cn } from "@/lib/utils"
 
 const day = 86_400_000
 /** Closed terminals are kept for 30 days after closing (`expires_at`), which dates the close. */
@@ -121,7 +122,6 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
   )
   const lastRunning = useLastCount(`${remembered}:running`, query.data && view === "open" ? Number(reporting) : undefined)
   const running = view === "open" && (query.data ? reporting : lastRunning === 1)
-  const columns = 4 + (scope ? 0 : 1) + (running ? 1 : 0)
 
   if (counts.data && counts.data.open + counts.data.closed === 0) {
     return (
@@ -185,9 +185,9 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
             <tbody>
               {lastNote ? (
                 <tr>
-                  <th colSpan={columns} className="px-3 pt-4 pb-2 text-left text-xs font-normal">
+                  <SpanShown scope={Boolean(scope)} running={running}>
                     <span className="block text-muted-foreground">{unreachableNote}</span>
-                  </th>
+                  </SpanShown>
                 </tr>
               ) : null}
               <TableRowsSkeleton
@@ -208,10 +208,10 @@ export function TerminalList({ machine: tabMachine }: { machine?: Machine }) {
                 {(group.label || group.note) && (
                   <tbody>
                     <tr>
-                      <th colSpan={columns} className="px-3 pt-4 pb-2 text-left text-xs font-normal">
+                      <SpanShown scope={Boolean(scope)} running={running}>
                         {group.label && <span className="block font-medium text-foreground">{group.label}</span>}
                         {group.note && <span className="block text-muted-foreground">{group.note}</span>}
-                      </th>
+                      </SpanShown>
                     </tr>
                   </tbody>
                 )}
@@ -441,4 +441,24 @@ function Row({
       }
     />
   )
+}
+
+/**
+ * A group heading's cell, spanning just the columns shown at each width (Terminal and the "…" on a
+ * phone, then Status, Machine, Folder and Running as they appear). One cell spanning every column,
+ * hidden ones included, gave the table phantom columns that squeezed the names to "smok…" on a phone.
+ */
+function SpanShown({ scope, running, children }: { scope: boolean; running: boolean; children: React.ReactNode }) {
+  const md = 3 + (scope ? 0 : 1)
+  const spans: [string, number][] = [
+    ["sm:hidden", 2],
+    ["hidden sm:table-cell md:hidden", 3],
+    ["hidden md:table-cell lg:hidden", md],
+    ["hidden lg:table-cell", md + 1 + (running ? 1 : 0)],
+  ]
+  return spans.map(([display, span]) => (
+    <th key={display} colSpan={span} className={cn("px-3 pt-4 pb-2 text-left text-xs font-normal", display)}>
+      {children}
+    </th>
+  ))
 }
