@@ -1025,3 +1025,59 @@ func TestEveryInterruptStageFinishesForwardOrEnds(t *testing.T) {
 		}
 	}
 }
+
+// A helper whose runs keep failing (a recovery that cannot complete, a restored daemon that never becomes ready)
+// used to be restarted by its supervisor for ever, holding the handoff that blocks uninstall and later updates.
+// Each failure now backs off, and the last allowed one ends the attempt: idle journal marked rollback_failed
+// (recovery_required), handoff retired, so nothing is held. Runs of an attempt that never started are not counted.
+func TestARepeatedlyFailingHelperBacksOffThenEndsTheAttempt(t *testing.T) {
+	requireRoot(t)
+	root, s, idle, _ := deadWriterFixture(t)
+	approval := strings.Repeat("b", 64)
+	handoff := &unixActivationHandoff{Schema: unixHandoffSchema, Previous: s.config.Active, Candidate: "2026.10.13.2", ApprovalID: approval, ParticipantsTouched: true}
+	if err := writeUnixHandoff(root, handoff); err != nil {
+		t.Fatal(err)
+	}
+	failed := idle
+	failed.Stage, failed.CandidateID, failed.ApprovedCandidateID, failed.CandidateVersion = updateflow.StageAwaitingApproval, approval, approval, "2026.10.13.2"
+	failed.ArtifactDigest, failed.ArtifactLength, failed.ArtifactPlatform, failed.ArtifactArchitecture = strings.Repeat("c", 64), 1, runtime.GOOS, runtime.GOARCH
+	failed.CandidateDigest, failed.CandidateLength, failed.StagedPath = strings.Repeat("c", 64), 1, filepath.Join(root, "staged")
+	if err := updateflow.Write(filepath.Join(root, "transaction.json"), failed, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	manager := s.currentManager()
+	if ended, err := s.noteActivationFailure(context.Background(), manager); ended || err != nil {
+		t.Fatalf("a run of an attempt that never started was counted: %v %v", ended, err)
+	}
+	handoff.Started = true
+	if err := writeUnixHandoff(root, handoff); err != nil {
+		t.Fatal(err)
+	}
+	var last time.Time
+	for failures := 1; failures < maxActivationFailures; failures++ {
+		if ended, err := s.noteActivationFailure(context.Background(), manager); ended || err != nil {
+			t.Fatalf("failure %d ended the attempt early: %v %v", failures, ended, err)
+		}
+		got, err := readUnixHandoff(root)
+		if err != nil || got == nil || got.Failures != failures || !got.NextAttemptAt.After(time.Now()) || got.NextAttemptAt.Before(last) {
+			t.Fatalf("failure %d: handoff=%+v err=%v (no backoff, or it moves backwards from %v)", failures, got, err, last)
+		}
+		last = got.NextAttemptAt
+	}
+	if ended, err := s.noteActivationFailure(context.Background(), manager); !ended || err != nil {
+		t.Fatalf("the last allowed failure did not end the attempt: %v %v", ended, err)
+	}
+	if got, err := readUnixHandoff(root); err != nil || got != nil {
+		t.Fatalf("the handoff still holds uninstall and updates: %+v %v", got, err)
+	}
+	if _, active, err := UnixActivationActive(root, "", nil); err != nil || active {
+		t.Fatalf("an activation is still active: %v %v", active, err)
+	}
+	journal, err := updateflow.Load(filepath.Join(root, "transaction.json"))
+	if err != nil || journal.Stage != updateflow.StageIdle || journal.LastFailure != updateflow.FailureRollback || journal.CandidateVersion != "2026.10.13.2" {
+		t.Fatalf("not a terminal recovery_required state: %+v %v", journal, err)
+	}
+	if state, err := manager.TransactionState(); err != nil || (ControlResponse{Status: "ok", Transaction: state}).UpdateHealth() != "recovery_required" {
+		t.Fatalf("status does not report recovery_required: %+v %v", state, err)
+	}
+}

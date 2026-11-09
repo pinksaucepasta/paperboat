@@ -295,3 +295,32 @@ func (m *Manager) MarkActiveRefused(ctx context.Context, refused func(Release) b
 	}
 	return true, m.write(m.idleJournal(journal, updateflow.FailureRevoked, journal.CandidateVersion))
 }
+
+// EndStuckAttempt ends an attempt whose activation helper failed for as long as its retry budget allows, so no
+// helper start repeats it and uninstall and later updates are no longer held by its handoff. The journal goes
+// idle with the candidate quarantined: as rollback_failed (recovery_required in status, doctor and the console)
+// when native replacement may have begun (fault), else as an ordinary failed candidate. A journal that already ended
+// with a failure, or whose candidate is committed (its finish has its own retry cap), is left alone. It reports
+// whether it wrote.
+func (m *Manager) EndStuckAttempt(ctx context.Context, fault bool) (bool, error) {
+	if ctx == nil {
+		return false, ErrInvalidConfig
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	journal, err := updateflow.Load(m.config.StatePath)
+	if err != nil {
+		return false, err
+	}
+	if journal.NativeCommitted || journal.Stage == updateflow.StageIdle && (journal.LastFailure != updateflow.FailureNone || !fault) {
+		return false, nil
+	}
+	if err = m.removeStaged(); err != nil {
+		return false, err
+	}
+	failure := updateflow.FailureCandidate
+	if fault {
+		failure = updateflow.FailureRollback
+	}
+	return true, m.write(m.idleJournal(journal, failure, journal.CandidateVersion))
+}

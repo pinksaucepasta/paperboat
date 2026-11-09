@@ -79,6 +79,9 @@ type unixActivationHandoff struct {
 	ActiveTerminalBusy      bool                 `json:"active_terminal_busy,omitempty"`
 	BusyRequiredVersion     string               `json:"busy_required_version,omitempty"`
 	BusyNextCheckAt         time.Time            `json:"busy_next_check_at,omitempty,omitzero"`
+	// Failures counts helper runs that ended in an error; NextAttemptAt is when the next may start (backoff).
+	Failures      int       `json:"failures,omitempty"`
+	NextAttemptAt time.Time `json:"next_attempt_at,omitempty,omitzero"`
 }
 
 const unixHandoffSchema = "paperboat.update-activation/v1"
@@ -434,7 +437,18 @@ var errCommitPending = errors.New("the update is installed but its finish is bei
 // while it runs, so an uninstall can take it between attempts; the cap ends it in the journal.
 func (s *Service) RunActivationHelper(ctx context.Context) error {
 	for {
+		if err := s.waitForNextAttempt(ctx); err != nil {
+			return err
+		}
 		err := s.runActivationHelperOnce(ctx)
+		if err != nil && !errors.Is(err, errCommitPending) && !errors.Is(err, ErrActivationPending) && ctx.Err() == nil {
+			if ended, endErr := s.noteActivationFailure(ctx, s.currentManager()); endErr != nil {
+				return errors.Join(err, endErr)
+			} else if ended {
+				fmt.Fprintf(os.Stderr, "paperboat-updated: the update attempt failed %d times and was ended; run `pb update status`: %v\n", maxActivationFailures, err)
+				return nil // retired: restarting this helper would find no handoff
+			}
+		}
 		if !errors.Is(err, errCommitPending) {
 			return err
 		}
@@ -450,6 +464,58 @@ func (s *Service) RunActivationHelper(ctx context.Context) error {
 		case <-timer.C:
 		}
 	}
+}
+
+// maxActivationFailures bounds the helper runs that end in an error (a recovery that keeps failing, a restored
+// daemon that never becomes ready): the next attempts back off like the commit retry, and the last ends the
+// attempt so its handoff stops holding uninstall and later updates.
+const maxActivationFailures = 10
+
+func activationRetryDelay(failures int) time.Duration {
+	return min(5*time.Minute, 5*time.Second<<failures)
+}
+
+// waitForNextAttempt holds no lock while it waits out the backoff the last failure scheduled.
+func (s *Service) waitForNextAttempt(ctx context.Context) error {
+	handoff, err := readUnixHandoff(s.config.StateRoot)
+	if err != nil || handoff == nil || !time.Now().Before(handoff.NextAttemptAt) {
+		return nil
+	}
+	timer := time.NewTimer(time.Until(handoff.NextAttemptAt))
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+type stuckAttemptEnder interface {
+	EndStuckAttempt(context.Context, bool) (bool, error)
+}
+
+// noteActivationFailure counts a failed helper run of a started attempt and schedules the next with backoff. The
+// last allowed failure ends the attempt (journal idle, handoff retired) and reports true.
+func (s *Service) noteActivationFailure(ctx context.Context, manager stuckAttemptEnder) (bool, error) {
+	lock, err := unixActivationLock(s.config.StateRoot)
+	if err != nil {
+		return false, nil // another process owns the activation; it counts its own runs
+	}
+	defer lock.Close()
+	handoff, err := readUnixHandoff(s.config.StateRoot)
+	if err != nil || handoff == nil || !handoff.Started {
+		return false, err
+	}
+	handoff.Failures++
+	if handoff.Failures < maxActivationFailures {
+		handoff.NextAttemptAt = time.Now().Add(activationRetryDelay(handoff.Failures))
+		return false, writeUnixHandoff(s.config.StateRoot, handoff)
+	}
+	if _, err = manager.EndStuckAttempt(ctx, handoff.ParticipantsTouched); err != nil {
+		return false, err
+	}
+	return true, retireUnixHandoff(ctx, s.config.StateRoot, s.config.ActivationController)
 }
 
 func (s *Service) runActivationHelperOnce(ctx context.Context) (resultErr error) {
