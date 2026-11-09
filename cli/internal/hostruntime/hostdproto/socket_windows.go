@@ -16,6 +16,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/Microsoft/go-winio"
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
@@ -612,14 +613,39 @@ func protectedWindowsPath(path, enrolledSID string) bool {
 	if err != nil || control&windows.SE_DACL_PROTECTED == 0 {
 		return false
 	}
-	text := descriptor.String()
-	if strings.Count(text, "(A;") != 3 || strings.Contains(text, "(D;") {
+	// Compare principals as SIDs, not SDDL text: the API spells the built-in Administrator (RID 500) "LA".
+	acl, _, err := descriptor.DACL()
+	if err != nil || acl == nil {
 		return false
 	}
-	allows := func(sid string) bool {
-		return strings.Contains(text, ";FA;;;"+sid+")") || strings.Contains(text, ";GA;;;"+sid+")")
+	system, systemErr := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
+	administrators, administratorsErr := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	enrolled, enrolledErr := windows.StringToSid(enrolledSID)
+	if systemErr != nil || administratorsErr != nil || enrolledErr != nil {
+		return false
 	}
-	return allows("SY") && allows("BA") && allows(enrolledSID)
+	granted := map[*windows.SID]bool{system: false, administrators: false, enrolled: false}
+	for index := uint32(0); index < uint32(acl.AceCount); index++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if windows.GetAce(acl, index, &ace) != nil || ace == nil || ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
+			return false // a deny or any other entry type
+		}
+		const fileAllAccess = 0x1F01FF
+		if ace.Mask&fileAllAccess != fileAllAccess && ace.Mask&windows.GENERIC_ALL == 0 {
+			return false
+		}
+		principal := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		matched := false
+		for sid := range granted {
+			if principal.Equals(sid) {
+				granted[sid], matched = true, true
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return granted[system] && granted[administrators] && granted[enrolled]
 }
 
 func (s *Server) AcquireActive(workerID string, epoch uint64) (func(), error) {
