@@ -74,7 +74,7 @@ export function NetworkPage() {
   const none = installations.isSuccess && installations.data.total === 0 && !q
 
   return (
-    <div className="flex flex-col gap-10">
+    <div className="flex flex-col gap-8">
       <Section
         title="How your traffic travels"
         action={
@@ -84,7 +84,8 @@ export function NetworkPage() {
           </Button>
         }
       >
-        <div className="grid gap-3 pt-3 sm:grid-cols-2">
+        {/* The cards share row tracks (subgrid), so their rows line up whatever wraps. */}
+        <div className="grid gap-x-3 gap-y-3 pt-3 sm:grid-cols-2">
           <PathCard capability="relay" scope={scope} team={team} onAdd={() => setAdding("relay")} />
           <PathCard capability="tunnel" scope={scope} team={team} onAdd={() => setAdding("tunnel")} />
         </div>
@@ -237,15 +238,15 @@ function NodeRow({ node }: { node: Node }) {
 const poolCopy = {
   relay: {
     title: "Relays",
-    about: "Used only when two machines can’t connect directly. They never see inside the encryption.",
+    about: "Used only when machines can’t connect directly. End-to-end encrypted.",
     shared: { mode: "mixed" as const, title: "Paperboat’s and yours" },
-    own: "Traffic that can’t go directly uses only the relays you pick. If they’re down, it fails instead of using Paperboat’s.",
+    own: "Machines that can’t connect directly use only your relays. If your relays are down, those connections fail.",
   },
   tunnel: {
     title: "Tunnels & previews",
-    about: "Where public addresses meet the internet. Browser HTTPS ends here.",
+    about: "Public addresses for your apps. Browser HTTPS ends here.",
     shared: { mode: "managed-only" as const, title: "Paperboat’s" },
-    own: "Tunnels and previews are served only from the servers you pick, on your own domains. Stop running previews and tunnels before switching.",
+    own: "Tunnels and previews run only on your servers and your own domains. Stop running previews and tunnels before switching.",
   },
 }
 
@@ -335,25 +336,24 @@ function PathCard({
     served = `Paperboat · ${regions.join(", ") || "no region"}`
     detail = plural(edges.data.length)
     status = health(edges.data.filter((edge) => edge.status === "ready").length, edges.data.length)
-  } else if (capability === "relay") {
+  } else if (capability === "relay" && relays.data) {
     // Every relay the settings let these machines use, Paperboat's and yours, with its heartbeat.
-    served = anyServer && pool.data ? "Paperboat’s and yours" : "Paperboat"
-    if (relays.data) {
-      detail = `${plural(relays.data.length)} · picked for each connection`
-      status = health(relays.data.filter((relay) => relay.status === "ready").length, relays.data.length)
-    }
+    const regions = [
+      ...new Set(relays.data.filter((relay) => !relay.self_hosted).map((relay) => placeName(relay.region))),
+    ]
+    served = `${anyServer ? "Paperboat’s and yours" : "Paperboat"} · ${regions.join(", ") || "no region"}`
+    detail = plural(relays.data.length)
+    status = health(relays.data.filter((relay) => relay.status === "ready").length, relays.data.length)
   }
   if (edges.isError || relays.isError || pool.isError) detail = "Couldn’t load"
 
   return (
-    <div className="flex flex-col gap-4 surface rounded-lg p-4 text-sm">
+    <div className="row-span-4 grid grid-rows-subgrid gap-y-4 surface rounded-lg p-4 text-sm">
       <div className="flex flex-col gap-1">
         <span className="font-medium">{copy.title}</span>
-        <span className="text-muted-foreground">
-          {copy.about}
-          {capability === "relay" && team && " Set for your account, in every workspace."}
-        </span>
+        <span className="text-muted-foreground">{copy.about}</span>
       </div>
+      <div className="border-t border-divider" />
       <div className="flex flex-col gap-0.5">
         <div className="flex h-5 items-center justify-between gap-3">
           <span className="min-w-0 truncate">{served}</span>
@@ -368,91 +368,100 @@ function PathCard({
         </div>
         <span className="flex h-5 items-center text-muted-foreground">{detail}</span>
       </div>
-      {pool.isError ? (
-        <p className="text-muted-foreground">Couldn’t load this setting. {pool.error.message}</p>
-      ) : !anyServer && !own ? (
-        <button
-          type="button"
-          onClick={onAdd}
-          className="self-start underline decoration-muted-foreground/50 underline-offset-4 outline-none hover:decoration-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
-        >
-          Use your own server
-        </button>
-      ) : (
-        current && (
-          <ToggleGroup
-            variant="outline"
-            spacing={0}
-            value={[own ? "own" : "shared"]}
-            onValueChange={(next) => next[0] && choose(next[0] as "shared" | "own")}
-            aria-label={copy.title}
+      {/* Bottom-aligned, so "Use your own server" (or the choice) sits at the same height in both cards. */}
+      <div className="flex flex-col justify-end gap-4">
+        {capability === "relay" && team && (
+          <p className="text-muted-foreground">Applies to your account in every workspace.</p>
+        )}
+        {pool.isError ? (
+          <p className="text-muted-foreground">Couldn’t load this setting. {pool.error.message}</p>
+        ) : !anyServer && !own ? (
+          <button
+            type="button"
+            onClick={onAdd}
+            className="self-start underline decoration-muted-foreground/50 underline-offset-4 outline-none hover:decoration-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
           >
-            <ToggleGroupItem value="shared">{copy.shared.title}</ToggleGroupItem>
-            <ToggleGroupItem value="own">Only yours</ToggleGroupItem>
-          </ToggleGroup>
-        )
-      )}
-      {own && draft && (
-        <div className="flex flex-col gap-2">
-          <p className="text-muted-foreground">{copy.own}</p>
-          <div className="flex items-center justify-between gap-3">
-            <SearchField value={search} onChange={setSearch} placeholder="Search servers" />
-            <span className="shrink-0 text-muted-foreground">
-              {current!.installation_ids.length} of 32 · {found.data?.pages[0]?.total ?? 0} {q ? "found" : "servers"}
-            </span>
-          </div>
-          <ul className="flex flex-col divide-y divide-divider border-y border-divider">
-            {current!.installation_ids
-              .filter((id) => !servers.some((server) => server.installation_id === id))
-              .map((id) => {
-                const member = pool.data?.members?.find((entry) => entry.installation_id === id)
-                return (
-                  <li key={id}>
-                    <label className="flex min-h-11 cursor-pointer items-center gap-3">
-                      <Checkbox checked onCheckedChange={(on) => toggle(id, on)} />
-                      <span className="min-w-0 flex-1 truncate">{member?.name ?? "Server no longer paired"}</span>
-                    </label>
-                  </li>
-                )
-              })}
-            {servers.map((server) => (
-              <li key={server.installation_id}>
-                <label className="flex min-h-11 cursor-pointer items-center gap-3">
-                  <Checkbox
-                    checked={current!.installation_ids.includes(server.installation_id)}
-                    disabled={
-                      !current!.installation_ids.includes(server.installation_id) &&
-                      current!.installation_ids.length >= 32
-                    }
-                    onCheckedChange={(on) => toggle(server.installation_id, on)}
-                  />
-                  <span className="min-w-0 flex-1 truncate">{server.name}</span>
-                  <StatusDot online={server.ready} />
-                </label>
-              </li>
-            ))}
-          </ul>
-          {found.hasNextPage && (
-            <div className="flex items-center gap-3">
-              <Button variant="secondary" onClick={() => found.fetchNextPage()} disabled={found.isFetchingNextPage}>
-                {found.isFetchingNextPage ? "Loading…" : "Load more"}
-              </Button>
-              {found.isFetchNextPageError && <span className="text-destructive">Couldn’t load more. Try again.</span>}
+            Use your own server
+          </button>
+        ) : (
+          current && (
+            <ToggleGroup
+              variant="outline"
+              spacing={0}
+              value={[own ? "own" : "shared"]}
+              onValueChange={(next) => next[0] && choose(next[0] as "shared" | "own")}
+              aria-label={copy.title}
+            >
+              <ToggleGroupItem value="shared">{copy.shared.title}</ToggleGroupItem>
+              <ToggleGroupItem value="own">Only yours</ToggleGroupItem>
+            </ToggleGroup>
+          )
+        )}
+        {own && draft && (
+          <div className="flex flex-col gap-2">
+            <p className="text-muted-foreground">{copy.own}</p>
+            <div className="flex items-center justify-between gap-3">
+              <SearchField value={search} onChange={setSearch} placeholder="Search servers" />
+              <span className="shrink-0 text-muted-foreground">
+                {current!.installation_ids.length} of 32 · {found.data?.pages[0]?.total ?? 0} {q ? "found" : "servers"}
+              </span>
             </div>
-          )}
-        </div>
-      )}
-      {save.isError && <p className="text-destructive">{save.error.message}</p>}
-      {dirty && (
-        <div className="flex gap-2">
-          <Button onClick={() => save.mutate()} disabled={save.isPending || (own && !current!.installation_ids.length)}>
-            {save.isPending ? "Saving…" : "Save"}
-          </Button>
-          <Button variant="secondary" onClick={() => setDraft(undefined)} disabled={save.isPending}>
-            Cancel
-          </Button>
-        </div>
-      )}
+            <ul className="flex flex-col divide-y divide-divider border-y border-divider">
+              {current!.installation_ids
+                .filter((id) => !servers.some((server) => server.installation_id === id))
+                .map((id) => {
+                  const member = pool.data?.members?.find((entry) => entry.installation_id === id)
+                  return (
+                    <li key={id}>
+                      <label className="flex min-h-11 cursor-pointer items-center gap-3">
+                        <Checkbox checked onCheckedChange={(on) => toggle(id, on)} />
+                        <span className="min-w-0 flex-1 truncate">{member?.name ?? "Server no longer paired"}</span>
+                      </label>
+                    </li>
+                  )
+                })}
+              {servers.map((server) => (
+                <li key={server.installation_id}>
+                  <label className="flex min-h-11 cursor-pointer items-center gap-3">
+                    <Checkbox
+                      checked={current!.installation_ids.includes(server.installation_id)}
+                      disabled={
+                        !current!.installation_ids.includes(server.installation_id) &&
+                        current!.installation_ids.length >= 32
+                      }
+                      onCheckedChange={(on) => toggle(server.installation_id, on)}
+                    />
+                    <span className="min-w-0 flex-1 truncate">{server.name}</span>
+                    <StatusDot online={server.ready} />
+                  </label>
+                </li>
+              ))}
+            </ul>
+            {found.hasNextPage && (
+              <div className="flex items-center gap-3">
+                <Button variant="secondary" onClick={() => found.fetchNextPage()} disabled={found.isFetchingNextPage}>
+                  {found.isFetchingNextPage ? "Loading…" : "Load more"}
+                </Button>
+                {found.isFetchNextPageError && <span className="text-destructive">Couldn’t load more. Try again.</span>}
+              </div>
+            )}
+          </div>
+        )}
+        {save.isError && <p className="text-destructive">{save.error.message}</p>}
+        {dirty && (
+          <div className="flex gap-2">
+            <Button
+              onClick={() => save.mutate()}
+              disabled={save.isPending || (own && !current!.installation_ids.length)}
+            >
+              {save.isPending ? "Saving…" : "Save"}
+            </Button>
+            <Button variant="secondary" onClick={() => setDraft(undefined)} disabled={save.isPending}>
+              Cancel
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
