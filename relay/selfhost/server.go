@@ -1,6 +1,7 @@
 package selfhost
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
@@ -132,22 +133,24 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 		b, _ := json.Marshal(identity)
 		sum := sha256.Sum256(b)
 		hash := encoding.EncodeToString(sum[:])
-		if s.Claim != nil {
-			if s.ClaimHash != hash {
-				http.Error(w, "code has already been claimed", 409)
-				return
-			}
-		} else {
-			if time.Now().Unix() >= s.ExpiresAt {
-				http.Error(w, "code expired", http.StatusGone)
-				return
-			}
+		if s.Claim != nil && s.ClaimHash != hash {
+			http.Error(w, "code has already been claimed", 409)
+			return
+		}
+		if s.Claim == nil && time.Now().Unix() >= s.ExpiresAt {
+			http.Error(w, "code expired", http.StatusGone)
+			return
+		}
+		// A retry of the applied claim may carry rotated trust documents (issuer JWKS, revocations):
+		// they replace the stored ones and the runtime is rebuilt on them, never kept stale.
+		if s.Claim == nil || !sameJSON(s.Claim.JWKS, req.JWKS) || !sameJSON(s.Claim.Revocations, req.Revocations) {
 			if err := validateClaim(s.Config, req); err != nil {
 				http.Error(w, err.Error(), 400)
 				return
 			}
 			s.Claim = &req
 			s.ClaimHash = hash
+			s.RuntimeReady = false
 			if err := save(dir, s); err != nil {
 				if observe != nil {
 					observe(r.Context(), "selfhost_claim", err)
@@ -156,7 +159,8 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 				return
 			}
 		}
-		if !s.RuntimeReady {
+		applied := !s.RuntimeReady
+		if applied {
 			if err := applyClaim(r.Context(), dir, &s); err != nil {
 				if observe != nil {
 					observe(r.Context(), "selfhost_claim", err)
@@ -166,7 +170,7 @@ func Handler(dir string, onClaim func(), observe func(context.Context, string, e
 			}
 		}
 		respond(w, s.Receipt)
-		if onClaim != nil {
+		if applied && onClaim != nil {
 			onClaim()
 		}
 	})
@@ -207,6 +211,13 @@ func respond(w http.ResponseWriter, v any) {
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(v)
 }
+
+// sameJSON compares two documents ignoring formatting: the state file stores them re-indented.
+func sameJSON(a, b json.RawMessage) bool {
+	var x, y bytes.Buffer
+	return bytes.Equal(a, b) || json.Compact(&x, a) == nil && json.Compact(&y, b) == nil && bytes.Equal(x.Bytes(), y.Bytes())
+}
+
 func validateClaim(c Config, r ClaimRequest) error {
 	if r.ClaimID == "" || len(r.ClaimID) > 100 || r.ScopeID == "" || len(r.ScopeID) > 100 || (r.ScopeType != "account" && r.ScopeType != "team" && r.ScopeType != "global") {
 		return errors.New("invalid claim identity or scope")

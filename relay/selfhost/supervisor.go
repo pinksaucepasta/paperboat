@@ -104,6 +104,13 @@ func runWithLauncher(ctx context.Context, dir string, launcher RuntimeLauncher, 
 			wg.Wait()
 			return err
 		case <-wake:
+			if started {
+				// A claim retry rebuilt the runtime on rotated trust documents: rerun the components on them.
+				stopChildren()
+				wg.Wait()
+				childContext, stopChildren = context.WithCancel(ctx)
+				started = false
+			}
 			if err := start(); err != nil {
 				cancel()
 				stopChildren()
