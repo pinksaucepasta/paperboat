@@ -85,11 +85,6 @@ for duration in "$LONG_EXEC" "$LONG_SSH"; do
     exit 2
   fi
 done
-# PLAN.md 1.1: Windows device work resumes after launch.
-if [[ ",$TARGETS," == *,victus,* ]]; then
-  echo "Windows device smoke is deferred until after launch (PLAN.md 1.1)." >&2
-  exit 2
-fi
 [ -n "$EXPECT_VERSION" ] || { echo "--expect-version is required" >&2; exit 2; }
 ONLY_IDS="|" ONLY_GROUPS="|"
 if [ -n "$ONLY_LIST" ]; then
@@ -1133,6 +1128,14 @@ echo "Paperboat device smoke  run=$RUN_ID  expect=$EXPECT_VERSION  targets=$TARG
 printf '%-28s %-5s %7s  %s\n' TEST RESULT TIME DETAIL
 
 for d in "${TLIST[@]}"; do check_device "$d"; done
+# windows-lifecycle: service stop/start/restart, crash recovery, keep-awake, exec (windows_lifecycle.py). The
+# destructive reset-pair and uninstall checks run by hand: windows_lifecycle.py ... reset-pair uninstall.
+if [[ ",$TARGETS," == *,victus,* ]] && ! skipped windows-lifecycle; then
+  t0=$(now); out=$(python3 "$HERE/windows_lifecycle.py" --expect-version "$EXPECT_VERSION" --windows-install-json "$WINDOWS_INSTALL_JSON" \
+    service crash availability exec 2>&1); status=$?
+  if [ "$status" = 0 ]; then record windows-lifecycle:victus PASS $(( $(now)-t0 ))
+  else record_command_failure windows-lifecycle:victus $(( $(now)-t0 )) "$out"; fi
+fi
 
 # Long-running work starts first so it overlaps the short checks.
 for t in "${TLIST[@]}"; do

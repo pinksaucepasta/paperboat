@@ -341,9 +341,8 @@ done
                                'seconds': '0', 'detail': 'controlled failure'}],
                              json.loads(current.read_text())['results'])
 
-    def test_launch_rejects_windows_target_before_credentials_or_device_access(self):
+    def test_windows_target_needs_its_password_before_any_device_access(self):
         environment = dict(os.environ)
-        environment.pop("APPLE_PASS", None)
         environment.pop("VICTUS_PASS", None)
         for targets in ("victus", "hp,victus"):
             with self.subTest(targets=targets):
@@ -351,7 +350,7 @@ done
                     ["bash", str(HERE / "smoke.sh"), "--expect-version", "fixture", "--targets", targets],
                     env=environment, capture_output=True, text=True, timeout=5)
                 self.assertEqual(result.returncode, 2)
-                self.assertIn("Windows device smoke is deferred until after launch", result.stderr)
+                self.assertIn("export VICTUS_PASS", result.stderr)
 
     def test_exec_failure_retains_private_diagnostics_without_leaking_output(self):
         prefix = (HERE / 'smoke.sh').read_text().split('# ---------------------------------------------------------------- run')[0]
