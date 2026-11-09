@@ -241,9 +241,17 @@ const phrases: Record<string, string> = {
   "config.consent_removed": "stopped config sync on",
   "transfer_destination.session_set": "changed the Inbox folder for a session on",
   "transfer_destination.session_cleared": "reset the Inbox folder for a session on",
+  "machine.access_ended": "closed access to",
+  "user_machine.revoked": "revoked",
+  "user_machine.final_deleted": "finished removing",
+  "team.policy.updated": "changed the access policy of",
+  "team.policy.rewritten": "rewrote the access policy of",
+  "team.policy.restored": "restored an earlier access policy of",
+  "team.attach": "changed which previews and tunnels belong to",
+  "team.machine_remove": "removed a machine from",
+  "team.machine_transfer_to_team": "moved a machine into",
 }
 
-/** Unknown types read as their verb part: `user_machine.foo_bar` → "did foo bar". */
 /** Families of actions named by prefix (the server adds members to them over time). */
 const prefixPhrases: [string, string][] = [
   ["team.sso_", "changed the team's SSO settings"],
@@ -254,7 +262,8 @@ export function describe(event: ActivityEvent): string {
   return (
     phrases[event.action] ??
     prefixPhrases.find(([prefix]) => event.action.startsWith(prefix))?.[1] ??
-    `did ${event.action.split(".").slice(1).join(" ").replace(/_/g, " ")}`
+    // Unknown types still read as a sentence: `user_machine.foo_bar` → recorded “foo bar” for <target>.
+    `recorded “${event.action.split(".").slice(1).join(" ").replace(/_/g, " ")}” for`
   )
 }
 

@@ -41,7 +41,7 @@
     "every row has an actor and a sentence",
     text.every((line) => /^\S+.* \S+/.test(line) && line.length > 8),
   )
-  const raw = text.filter((line) => /^(You|Paperboat|A machine|Someone|\S+) did /.test(line))
+  const raw = text.filter((line) => /^(You|Paperboat|A machine|Someone|\S+) (did |recorded “)/.test(line))
   pass("no raw event names in sentences", raw.length === 0, raw.slice(0, 3).join(" | "))
   for (const fragment of expected) {
     pass(
