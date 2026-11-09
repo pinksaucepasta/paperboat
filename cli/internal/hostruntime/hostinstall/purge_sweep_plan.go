@@ -2,6 +2,7 @@ package hostinstall
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -53,6 +54,41 @@ func windowsImageUnderRoots(image string, roots []string) bool {
 		}
 	}
 	return false
+}
+
+type windowsProcessEntry struct{ id, parent uint32 }
+
+// windowsPayloadProcessIDs selects the account's running processes: the ones the sweep ends and the re-scan
+// counts. A process is the account's when its image lies under the account's roots and it runs as one of users
+// (the account's owner, LocalSystem for its services, the user doing the purge). The image path alone is not
+// enough: another user's process is never ended, and neither is one whose image or user cannot be read; the files
+// such a process holds are left to the restart. The ancestry of every keep id is never selected: it is the
+// invocation that runs this purge (reset can come through several elevation helpers).
+func windowsPayloadProcessIDs(entries []windowsProcessEntry, keep []uint32, roots, users []string, image, user func(uint32) (string, bool)) []uint32 {
+	parents := make(map[uint32]uint32, len(entries))
+	for _, entry := range entries {
+		parents[entry.id] = entry.parent
+	}
+	protected := map[uint32]bool{}
+	for _, start := range keep {
+		for id := start; id != 0 && !protected[id]; id = parents[id] {
+			protected[id] = true
+		}
+	}
+	var processIDs []uint32
+	for _, entry := range entries {
+		if entry.id == 0 || protected[entry.id] {
+			continue
+		}
+		if path, ok := image(entry.id); !ok || !windowsImageUnderRoots(path, roots) {
+			continue
+		}
+		sid, ok := user(entry.id)
+		if ok && sid != "" && slices.ContainsFunc(users, func(allowed string) bool { return strings.EqualFold(allowed, sid) }) {
+			processIDs = append(processIDs, entry.id)
+		}
+	}
+	return processIDs
 }
 
 // windowsOtherAccountEntries returns users-directory entries that belong to

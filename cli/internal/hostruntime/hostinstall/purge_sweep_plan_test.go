@@ -136,3 +136,45 @@ func TestWindowsAccountLeftoversNamesEveryItemKind(t *testing.T) {
 		t.Fatalf("leftovers = %q, want %q", got, want)
 	}
 }
+
+// Security review, 2026-11-10: the sweep ended every process whose image lay under the account's roots, whoever
+// ran it. Only the account's own processes are selected now.
+func TestWindowsPayloadProcessesAreOnlyTheAccountsOwn(t *testing.T) {
+	const owner, system, purger, stranger = "S-1-5-21-1-2-3-1001", "S-1-5-18", "S-1-5-21-1-2-3-500", "S-1-5-21-1-2-3-1002"
+	root := `C:\Program Files\Paperboat\users\` + sweepTestInstance('a')
+	type process struct {
+		parent      uint32
+		image, user string
+	}
+	processes := map[uint32]process{
+		4:  {0, ``, system},                                // image cannot be read
+		10: {4, root + `\bin\pb.exe`, system},              // the account's service
+		11: {4, root + `\releases\pb.rollback.exe`, owner}, // an old CLI of the owner
+		12: {4, root + `\bin\pb.exe`, strings.ToLower(purger)},
+		13: {4, root + `\bin\pb.exe`, stranger},          // another user runs the account's image
+		14: {4, root + `\bin\pb.exe`, ``},                // token cannot be read
+		15: {4, `C:\Windows\System32\cmd.exe`, owner},    // the owner's, but not Paperboat
+		20: {4, root + `\bin\pb.exe`, owner},             // the pb that asked for this purge
+		21: {20, `C:\Temp\helper.exe`, owner},            // its elevated helper
+		22: {21, root + `\bin\pb.exe`, owner},            // this process
+		23: {22, root + `\bin\pb.exe`, owner},            // a child is not ancestry
+		24: {0, root + `2\bin\pb.exe`, owner},            // a sibling root
+		25: {4, strings.ToUpper(root) + `\X.EXE`, owner}, // case-insensitive
+	}
+	var entries []windowsProcessEntry
+	for id := uint32(0); id < 30; id++ {
+		if item, ok := processes[id]; ok {
+			entries = append(entries, windowsProcessEntry{id: id, parent: item.parent})
+		}
+	}
+	image := func(id uint32) (string, bool) { return processes[id].image, processes[id].image != "" }
+	user := func(id uint32) (string, bool) { return processes[id].user, processes[id].user != "" }
+	got := windowsPayloadProcessIDs(entries, []uint32{22, 21}, []string{root}, []string{owner, system, purger}, image, user)
+	if want := []uint32{10, 11, 12, 23, 25}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("selected processes = %v, want %v", got, want)
+	}
+	// An account without a known owner still never matches a process whose user is unknown.
+	if got := windowsPayloadProcessIDs(entries, nil, []string{root}, []string{""}, image, user); len(got) != 0 {
+		t.Fatalf("an empty owner selected %v", got)
+	}
+}

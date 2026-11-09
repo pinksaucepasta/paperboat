@@ -81,7 +81,7 @@ func TestAccountSweepEndsARunningImageBeforeRemovingItsRoot(t *testing.T) {
 		t.Fatal("fixture: the root of a running image was removed")
 	}
 
-	if err := terminatePayloadProcesses([]string{root}); err != nil {
+	if err := terminatePayloadProcesses([]string{root}, ""); err != nil {
 		t.Fatalf("end the processes that run from the root: %v", err)
 	}
 	waitExited(t, exited)
@@ -134,7 +134,7 @@ func TestAccountPayloadStillInUseIsDeletedAtRestart(t *testing.T) {
 		t.Fatalf("an empty directory stayed: %v", err)
 	}
 
-	if err := terminatePayloadProcesses([]string{root}); err != nil {
+	if err := terminatePayloadProcesses([]string{root}, ""); err != nil {
 		t.Fatal(err)
 	}
 	waitExited(t, exited)

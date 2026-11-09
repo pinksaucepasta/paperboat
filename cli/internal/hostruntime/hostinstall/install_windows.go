@@ -2177,7 +2177,7 @@ func purgeWindows(ctx context.Context, ownerSID string, preserveCLI bool) (resul
 	}
 	// The account sweep is shared by uninstall and reset, because both reach
 	// Purge. It removes what the ordered steps above missed and names leftovers.
-	atRestart, sweepErr := purgeAccountSweepKeepingCLI(ctx, layout, keep)
+	atRestart, sweepErr := purgeAccountSweepKeepingCLI(ctx, layout, ownerSID, keep)
 	result = errors.Join(result, sweepErr)
 	if !preserveCLI && result == nil {
 		sharedLayout, err := service.DefaultLayout("windows")

@@ -48,7 +48,7 @@ var ErrRemovalAtRestart = errors.New("Paperboat was removed; files that are stil
 // it is ended), applies the machine-guard rule, and re-scans every item it owns.
 // Every step is attempted, so one failure cannot hide another. atRestart reports
 // that files in use were left to Windows to delete at the next restart.
-func purgeAccountSweepKeepingCLI(ctx context.Context, layout service.Layout, keep string) (atRestart bool, _ error) {
+func purgeAccountSweepKeepingCLI(ctx context.Context, layout service.Layout, ownerSID, keep string) (atRestart bool, _ error) {
 	instanceRoot, err := WindowsInstanceRoot(layout.Instance)
 	if err != nil {
 		return false, err
@@ -56,7 +56,7 @@ func purgeAccountSweepKeepingCLI(ctx context.Context, layout service.Layout, kee
 	roots := []string{layout.InstallRoot, instanceRoot}
 	var result error
 	result = errors.Join(result, removeAccountServices(ctx, layout.Instance))
-	result = errors.Join(result, terminatePayloadProcesses(roots))
+	result = errors.Join(result, terminatePayloadProcesses(roots, ownerSID))
 	var deferred []string
 	for _, root := range []string{layout.InstallRoot, layout.UpdateStateRoot, instanceRoot} {
 		pending, err := removeWindowsAccountPayloadKeepingCLI(ctx, root, keep)
@@ -67,7 +67,7 @@ func purgeAccountSweepKeepingCLI(ctx context.Context, layout service.Layout, kee
 		}
 	}
 	result = errors.Join(result, purgeMachineGuardWhenUnshared(ctx, layout.Instance))
-	leftovers, err := accountLeftoversKeepingCLI(ctx, layout, instanceRoot, keep, deferred)
+	leftovers, err := accountLeftoversKeepingCLI(ctx, layout, ownerSID, instanceRoot, keep, deferred)
 	if err != nil {
 		result = errors.Join(result, hostInstallFailure("re-scan Paperboat installation items", err))
 	} else if len(leftovers) > 0 {
@@ -273,85 +273,88 @@ func stopAndDeleteAccountService(ctx context.Context, manager *mgr.Mgr, name str
 	return nil
 }
 
-// terminatePayloadProcesses kills processes whose executable lies under the
-// account payload roots. The current process and its parent are never killed:
-// the parent may be the non-elevated pb that is waiting for this purge.
-func terminatePayloadProcesses(roots []string) error {
-	processIDs, err := payloadProcessIDs(roots)
+// terminatePayloadProcesses ends the account's processes that run an image under the account payload roots
+// (windowsPayloadProcessIDs). All of them are ended first and then awaited against one deadline, so the step is
+// bounded however many there are.
+func terminatePayloadProcesses(roots []string, ownerSID string) (result error) {
+	processIDs, err := payloadProcessIDs(roots, ownerSID)
 	if err != nil {
 		return hostInstallFailure("list Paperboat processes", err)
 	}
-	var result error
+	ended := map[uint32]windows.Handle{}
+	defer func() {
+		for _, handle := range ended {
+			result = withCleanup("close Paperboat process handle failed", result, windows.CloseHandle(handle))
+		}
+	}()
 	for _, processID := range processIDs {
-		result = errors.Join(result, terminatePayloadProcess(processID))
+		handle, err := windows.OpenProcess(windows.PROCESS_TERMINATE|windows.SYNCHRONIZE, false, processID)
+		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
+			continue // already gone
+		}
+		if err != nil {
+			result = errors.Join(result, hostInstallFailure(fmt.Sprintf("open Paperboat process %d", processID), err))
+			continue
+		}
+		if err := windows.TerminateProcess(handle, 1); err != nil {
+			result = errors.Join(result, hostInstallFailure(fmt.Sprintf("terminate Paperboat process %d", processID), err), windows.CloseHandle(handle))
+			continue
+		}
+		ended[processID] = handle
+	}
+	deadline := time.Now().Add(windowsAccountProcessExitTimeout)
+	for processID, handle := range ended {
+		wait := max(time.Until(deadline), 0)
+		state, err := windows.WaitForSingleObject(handle, uint32(wait/time.Millisecond))
+		if err != nil {
+			result = errors.Join(result, hostInstallFailure(fmt.Sprintf("wait for Paperboat process %d", processID), err))
+		} else if state != windows.WAIT_OBJECT_0 {
+			result = errors.Join(result, hostInstallFailure(fmt.Sprintf("Paperboat process %d did not exit in time", processID), context.DeadlineExceeded))
+		}
 	}
 	return result
 }
 
-func terminatePayloadProcess(processID uint32) (resultErr error) {
-	handle, err := windows.OpenProcess(windows.PROCESS_TERMINATE|windows.SYNCHRONIZE, false, processID)
-	if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
-		return nil
-	}
-	if err != nil {
-		return hostInstallFailure(fmt.Sprintf("open Paperboat process %d", processID), err)
-	}
-	defer func() {
-		resultErr = withCleanup("close Paperboat process handle failed", resultErr, windows.CloseHandle(handle))
-	}()
-	if err := windows.TerminateProcess(handle, 1); err != nil {
-		return hostInstallFailure(fmt.Sprintf("terminate Paperboat process %d", processID), err)
-	}
-	result, err := windows.WaitForSingleObject(handle, uint32(windowsAccountProcessExitTimeout/time.Millisecond))
-	if err != nil {
-		return hostInstallFailure(fmt.Sprintf("wait for Paperboat process %d", processID), err)
-	}
-	if result != windows.WAIT_OBJECT_0 {
-		return hostInstallFailure(fmt.Sprintf("Paperboat process %d did not exit in time", processID), context.DeadlineExceeded)
-	}
-	return nil
-}
-
-// payloadProcessIDs lists running processes whose image is under a root. A
-// process whose image cannot be queried is not provably Paperboat payload and
-// is left alone; the re-scan reports it if it still holds payload open.
-func payloadProcessIDs(roots []string) ([]uint32, error) {
+// payloadProcessIDs lists the account's running processes (windowsPayloadProcessIDs). The current process and
+// its ancestry are never listed: the parent may be the non-elevated pb that is waiting for this purge.
+func payloadProcessIDs(roots []string, ownerSID string) ([]uint32, error) {
 	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
 		return nil, err
 	}
 	defer windows.CloseHandle(snapshot)
-	var entries []windows.ProcessEntry32
+	var entries []windowsProcessEntry
 	entry := windows.ProcessEntry32{Size: uint32(unsafe.Sizeof(windows.ProcessEntry32{}))}
 	for err = windows.Process32First(snapshot, &entry); err == nil; err = windows.Process32Next(snapshot, &entry) {
-		entries = append(entries, entry)
+		entries = append(entries, windowsProcessEntry{id: entry.ProcessID, parent: entry.ParentProcessID})
 	}
 	if !errors.Is(err, windows.ERROR_NO_MORE_FILES) {
 		return nil, err
 	}
-	parents := make(map[uint32]uint32, len(entries))
-	for _, entry := range entries {
-		parents[entry.ProcessID] = entry.ParentProcessID
+	users := []string{ownerSID, "S-1-5-18"}
+	if self, ok := processUserSID(uint32(os.Getpid())); ok {
+		users = append(users, self)
 	}
-	// Reset can run from an installed CLI through multiple elevation helpers.
-	// Keep its full visible invocation ancestry, as Unix teardown does.
-	protected := map[uint32]bool{}
-	for _, start := range []uint32{uint32(os.Getpid()), uint32(os.Getppid())} {
-		for id := start; id != 0 && !protected[id]; id = parents[id] {
-			protected[id] = true
-		}
+	keep := []uint32{uint32(os.Getpid()), uint32(os.Getppid())}
+	return windowsPayloadProcessIDs(entries, keep, roots, users, processImagePath, processUserSID), nil
+}
+
+func processUserSID(processID uint32) (string, bool) {
+	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, processID)
+	if err != nil {
+		return "", false
 	}
-	var processIDs []uint32
-	for _, entry := range entries {
-		if entry.ProcessID == 0 || protected[entry.ProcessID] {
-			continue
-		}
-		image, ok := processImagePath(entry.ProcessID)
-		if ok && windowsImageUnderRoots(image, roots) {
-			processIDs = append(processIDs, entry.ProcessID)
-		}
+	defer windows.CloseHandle(handle)
+	var token windows.Token
+	if err := windows.OpenProcessToken(handle, windows.TOKEN_QUERY, &token); err != nil {
+		return "", false
 	}
-	return processIDs, nil
+	defer token.Close()
+	user, err := token.GetTokenUser()
+	if err != nil || user.User.Sid == nil {
+		return "", false
+	}
+	return user.User.Sid.String(), true
 }
 
 func processImagePath(processID uint32) (string, bool) {
@@ -469,12 +472,12 @@ func windowsAccountDeclarationInventory(ctx context.Context, instance string) ([
 
 // accountLeftoversKeepingCLI gathers the post-sweep inventory for this account only. Other accounts' items are not
 // leftovers of this purge, and neither is a root whose remaining files Windows deletes at restart (deferred).
-func accountLeftoversKeepingCLI(ctx context.Context, layout service.Layout, instanceRoot, keep string, deferred []string) ([]string, error) {
+func accountLeftoversKeepingCLI(ctx context.Context, layout service.Layout, ownerSID, instanceRoot, keep string, deferred []string) ([]string, error) {
 	names, err := listWindowsServiceNames()
 	if err != nil {
 		return nil, err
 	}
-	processIDs, err := payloadProcessIDs([]string{layout.InstallRoot, instanceRoot})
+	processIDs, err := payloadProcessIDs([]string{layout.InstallRoot, instanceRoot}, ownerSID)
 	if err != nil {
 		return nil, err
 	}
