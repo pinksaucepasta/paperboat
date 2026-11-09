@@ -20,11 +20,12 @@ const readUrl = (): MachineUrl => {
 /**
  * Starts from `?q=` (a tag link such as /?q=tag:prod), so pages can link to a filtered list; typing
  * takes over until the page is opened again from a link. The URL is read whenever the page is
- * shown: on mount, and when Next shows the page it kept (its effects run again then). The server
- * renders without the URL's search.
+ * shown: on mount, and when Next shows the page it kept (its effects run again then). The server's
+ * per-request render passes the URL it was asked for as `initial`, so a filtered link never paints
+ * the unfiltered list first.
  */
-export function MachineQueryProvider({ children }: { children: React.ReactNode }) {
-  const [url, setUrl] = useState<MachineUrl>({ q: "", page: 1 })
+export function MachineQueryProvider({ initial, children }: { initial?: MachineUrl; children: React.ReactNode }) {
+  const [url, setUrl] = useState<MachineUrl>(initial ?? { q: "", page: 1 })
   const [typed, setTyped] = useState<{ text: string; under: MachineUrl } | null>(null)
   // Reads the URL each time the page is shown: Next re-runs effects when it shows the kept page.
   // eslint-disable-next-line react-hooks/set-state-in-effect
