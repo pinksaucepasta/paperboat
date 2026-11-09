@@ -10,7 +10,8 @@ export default defineConfig({
   site: PAPERBOAT_SITE_URL ?? "http://localhost:4321",
   trailingSlash: "always",
   devToolbar: { enabled: false },
-  // Kept as written: compressing drops the space between a line of text and a link that starts the next line.
-  compressHTML: false,
+  // Lossless whitespace handling. Astro 7's default ("jsx") removes the line break between a line of text and
+  // a link that starts the next line, which glues the two words together.
+  compressHTML: true,
   build: { inlineStylesheets: "always" },
 })
