@@ -2,6 +2,8 @@ import { Suspense } from "react"
 import { ActiveNavigation, AppSidebar, Navigation } from "@/components/app-sidebar"
 import { QuotaBanner } from "@/components/quota-banner"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
+import { UserMenu } from "@/components/user-menu"
+import { WithSession } from "@/components/with-session"
 
 export default function ConsoleLayout({ children }: LayoutProps<"/">) {
   return (
@@ -13,10 +15,15 @@ export default function ConsoleLayout({ children }: LayoutProps<"/">) {
             <ActiveNavigation />
           </Suspense>
         }
+        userMenu={
+          <WithSession>
+            <UserMenu />
+          </WithSession>
+        }
       />
       <SidebarInset className="min-w-0">
         <QuotaBanner />
-        {children}
+        <WithSession>{children}</WithSession>
       </SidebarInset>
     </SidebarProvider>
   )

@@ -1,7 +1,7 @@
 "use client"
 
 import { hydrate, useQueryClient, type DehydratedState } from "@tanstack/react-query"
-import { useMemo } from "react"
+import { useContext, useMemo } from "react"
 import { ServerQueries } from "@/lib/api"
 import { ServerWorkspace } from "@/lib/workspace"
 
@@ -24,10 +24,12 @@ export function ServerData({
   children: React.ReactNode
 }) {
   const queryClient = useQueryClient()
+  // A page's own ServerData sits inside the layout's (session): both sets were server-rendered.
+  const outer = useContext(ServerQueries)
   const hashes = useMemo(() => {
     hydrate(queryClient, state)
-    return new Set(state.queries.map((query) => query.queryHash))
-  }, [queryClient, state])
+    return new Set([...outer, ...state.queries.map((query) => query.queryHash)])
+  }, [queryClient, state, outer])
   return (
     <ServerWorkspace value={workspace}>
       <ServerQueries value={hashes}>{children}</ServerQueries>

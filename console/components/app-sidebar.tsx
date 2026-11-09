@@ -3,7 +3,6 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { navigationGroups, type Section } from "@/lib/sections"
-import { UserMenu } from "@/components/user-menu"
 import { BrandBar } from "@/components/brand-bar"
 import {
   Sidebar,
@@ -18,8 +17,8 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 
-/** `navigation` is passed in so the server layout owns its Suspense boundary. */
-export function AppSidebar({ navigation }: { navigation: React.ReactNode }) {
+/** `navigation` and `userMenu` are passed in so the server layout owns their Suspense boundaries. */
+export function AppSidebar({ navigation, userMenu }: { navigation: React.ReactNode; userMenu: React.ReactNode }) {
   const { setOpenMobile } = useSidebar()
   return (
     <Sidebar>
@@ -31,9 +30,7 @@ export function AppSidebar({ navigation }: { navigation: React.ReactNode }) {
         <div className="flex flex-col py-2">{navigation}</div>
       </SidebarContent>
       <SidebarFooter className="gap-0 p-0">
-        <div className="border-t p-2">
-          <UserMenu />
-        </div>
+        <div className="border-t p-2">{userMenu}</div>
       </SidebarFooter>
     </Sidebar>
   )
