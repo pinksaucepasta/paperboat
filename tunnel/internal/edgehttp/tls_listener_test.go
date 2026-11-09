@@ -433,3 +433,67 @@ func TestTLSPassthroughStreamReleasesItsAcceptSlot(t *testing.T) {
 		t.Fatal("passthrough admission leaked after close")
 	}
 }
+
+// An HTTPS connection handed to the HTTP server keeps a slot of its own pool until it closes, so
+// established connections are capped too; closing one admits the next.
+func TestSharedTLSHTTPSConnectionsAreCapped(t *testing.T) {
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := probe.Addr().String()
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	defer registry.Close()
+	https := func(string) bool { return true }
+	manager := newSharedTLSListener(probe, &tlsAuthorityFixture{}, registry, https, make(chan struct{}, 1), "", https, nil, nil)
+	defer manager.Close()
+	accepted := make(chan net.Conn, 4)
+	go func() {
+		for {
+			conn, err := manager.Accept()
+			if err != nil {
+				return
+			}
+			accepted <- conn
+		}
+	}()
+	hello := func() net.Conn {
+		t.Helper()
+		conn, err := net.Dial("tcp", address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		go func() { _ = tls.Client(conn, &tls.Config{ServerName: "app.example.test"}).Handshake() }()
+		return conn
+	}
+	first := hello()
+	defer first.Close()
+	var held net.Conn
+	select {
+	case held = <-accepted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first HTTPS connection not handed off")
+	}
+	excess := hello()
+	defer excess.Close()
+	_ = excess.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := excess.Read(make([]byte, 1)); err == nil {
+		t.Fatal("excess HTTPS connection served")
+	} else if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
+		t.Fatal("excess HTTPS connection held instead of refused")
+	}
+	select {
+	case <-accepted:
+		t.Fatal("excess HTTPS connection handed off beyond the cap")
+	default:
+	}
+	_ = held.Close()
+	next := hello()
+	defer next.Close()
+	select {
+	case conn := <-accepted:
+		_ = conn.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("closing a connection did not free its slot")
+	}
+}

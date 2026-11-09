@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -53,6 +54,16 @@ type replayTLSConn struct {
 	reader         io.Reader
 	hostname       string
 	sharedListener bool
+	release        func() // frees the shared listener's HTTPS slot once, on Close
+	releaseOnce    sync.Once
+}
+
+func (c *replayTLSConn) Close() error {
+	err := c.Conn.Close()
+	if c.release != nil {
+		c.releaseOnce.Do(c.release)
+	}
+	return err
 }
 
 func (c *replayTLSConn) Read(p []byte) (int, error) { return c.reader.Read(p) }

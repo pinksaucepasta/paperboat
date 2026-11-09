@@ -30,6 +30,9 @@ type SharedTLSListener struct {
 	// passthrough bounds the TLS-passthrough streams handed off from dispatch; they are long-lived,
 	// so they must not hold the dispatch slots new HTTPS connections need (audit T3).
 	passthrough chan struct{}
+	// https bounds the HTTPS connections handed to the HTTP server for their whole life; a dispatch
+	// slot is freed at hand-off (golang.org/x/net/netutil LimitListener holds its slot until Close).
+	https chan struct{}
 	// forward carries one passthrough stream (the route registry's ForwardPublicTCP).
 	forward   func(context.Context, net.Conn, connectorprotocol.IngressDecision, func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)) error
 	done      chan struct{}
@@ -63,7 +66,7 @@ func NewSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, r
 
 func newSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, routes *DataCarrierRouteRegistry, httpsHostname func(string) bool, slots chan struct{}, infrastructureHostname string, admittedHTTPSHostname func(string) bool, previewHTTPSAuthority func(context.Context, string) error, observe func(context.Context, string, error)) *SharedTLSListener {
 	ctx, cancel := context.WithCancel(context.Background())
-	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, admittedHTTPSHostname: admittedHTTPSHostname, previewHTTPSAuthority: previewHTTPSAuthority, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), slots: slots, passthrough: make(chan struct{}, cap(slots)), forward: routes.ForwardPublicTCP, done: make(chan struct{}), onFailure: observe}
+	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, admittedHTTPSHostname: admittedHTTPSHostname, previewHTTPSAuthority: previewHTTPSAuthority, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), slots: slots, passthrough: make(chan struct{}, cap(slots)), https: make(chan struct{}, cap(slots)), forward: routes.ForwardPublicTCP, done: make(chan struct{}), onFailure: observe}
 	go l.run()
 	return l
 }
@@ -200,9 +203,16 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 		return
 	}
 	select {
+	case l.https <- struct{}{}:
+	default:
+		return
+	}
+	owned = false
+	replay.(*replayTLSConn).release = func() { <-l.https }
+	select {
 	case l.ready <- replay:
-		owned = false
 	case <-l.ctx.Done():
+		_ = replay.Close()
 	}
 }
 
