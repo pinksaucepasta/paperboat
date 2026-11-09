@@ -16,6 +16,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"github.com/spf13/cobra"
 )
 
@@ -50,7 +51,7 @@ func noServer(t *testing.T) {
 // isolatedReplacementNote points the replacement note (and the user's state) at a temporary home.
 func isolatedReplacementNote(t *testing.T) string {
 	t.Helper()
-	home := t.TempDir()
+	home := shorttemp.Dir(t) // macOS's local socket path must fit 104 bytes under the state root
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
@@ -125,13 +126,17 @@ func TestFreshEnrollmentResetFailureNamesTheStepAndKeepsTheOldRecord(t *testing.
 // F1-09: the note naming the old record and the local diagnostics survive the reset's wipe, so a pairing
 // that fails afterwards can still be investigated and the next one still replaces the old record.
 func TestFreshEnrollmentResetKeepsTheNoteAndDiagnosticsThroughTheWipe(t *testing.T) {
-	home := isolatedReplacementNote(t)
+	isolatedReplacementNote(t)
 	if err := bootstrap.SaveReplacement("machine_old", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	command := freshEnrollmentResetCommand()
 	preserved := freshEnrollmentPreserved(command)
-	diagnostics := filepath.Join(home, ".local", "state", "paperboat", "diagnostics")
+	paths, err := currentLocalDaemonPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	diagnostics := filepath.Join(paths.StateRoot, "diagnostics") // under XDG_STATE_HOME on Linux, Library on macOS
 	note, _ := bootstrap.ReplacementPath()
 	if len(preserved) != 2 || preserved[0] != note || preserved[1] != diagnostics {
 		t.Fatalf("preserved=%v, want [%s %s]", preserved, note, diagnostics)
