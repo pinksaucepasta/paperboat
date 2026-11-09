@@ -871,6 +871,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/trust/jwks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fetch the mint trust document
+         * @description Private edge-control endpoint consumed by tunnel trust refresh: the issuer signing keys plus withdrawn_key_ids.
+         */
+        get: operations["get_v1_trust_jwks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/config-repositories": {
         parameters: {
             query?: never;
@@ -3380,26 +3400,6 @@ export interface paths {
          * @description Requires machine-control bearer credential and an identity proof covering the exact HTTP method, path, body and operation ID.
          */
         post: operations["post_machine_peer_network_config"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/machine-peer-network/carrier": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Report the machine's active carrier generation offer
-         * @description Requires machine-control bearer credential and an identity proof covering the exact HTTP method, path, body and operation ID. Stores the machine-signed carrier generation offer (at most 8 KiB, bound to this machine's account, installation generation and QUIC key, expiring within 5 minutes) and delivers it unchanged as carrier_offer on the machine's entry in every peer's signed configuration until it expires; an empty offer withdraws it. Peers are told at once (peer_network topic).
-         */
-        post: operations["post_machine_peer_network_carrier"];
         delete?: never;
         options?: never;
         head?: never;
@@ -9539,6 +9539,8 @@ export interface components {
             revocations: components["schemas"]["NativeRelayRevocation"][];
             /** @description Only for relays that sent subjects_digest: resend the full subjects list. No revocations are given with it. */
             subjects_required?: boolean;
+            /** @description Mint trust document: the issuer signing keys plus withdrawn_key_ids. The relay replaces its trusted grant keys with it. */
+            jwks?: Record<string, never>;
             peer_relay?: {
                 wireguard_public_key: string;
                 disco_public_key: string;
@@ -13018,6 +13020,25 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Revocation document. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            503: components["responses"]["Error"];
+        };
+    };
+    get_v1_trust_jwks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JWKS document with optional withdrawn_key_ids. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -18722,87 +18743,6 @@ export interface operations {
             };
             /** @description Current endpoint authority denied; remove installed peers and reauthorize. */
             403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Authority temporarily unavailable; retry before current authority expires. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    post_machine_peer_network_carrier: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description Unpadded base64url signed machine request proof. */
-                "X-Paperboat-Machine-Proof": string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    operation_id: string;
-                    /**
-                     * Format: byte
-                     * @description Standard base64 of the native carrier offer JSON; empty withdraws it.
-                     */
-                    offer: string;
-                };
-            };
-        };
-        responses: {
-            /** @description Offer stored. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        data?: Record<string, never>;
-                    };
-                };
-            };
-            /** @description Invalid request. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Endpoint authentication or signed machine proof rejected. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description The offer is not bound to this machine's current identity. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-            /** @description Reported too often; retry after Retry-After. */
-            429: {
                 headers: {
                     [name: string]: unknown;
                 };
