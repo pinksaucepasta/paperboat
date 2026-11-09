@@ -67,7 +67,7 @@ func TestStageInputCopiesRelativeLocalFileAndBindsStagedBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0600 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 { // Windows reports 0666 whatever the ACL says
 		t.Fatalf("staged file mode=%#o", info.Mode().Perm())
 	}
 	if markerBytes, err := os.ReadFile(marker); err != nil || string(markerBytes) != "keep" {
