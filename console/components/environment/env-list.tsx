@@ -13,7 +13,7 @@ import { useCurrentMachine } from "@/components/machine-shell"
 import { useListScope } from "@/components/list-toolbar"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
-import { PageIntro, Section } from "@/components/section"
+import { Section } from "@/components/section"
 import { EnvNamesSwitch } from "@/components/environment/env-names-switch"
 
 /** The machine page's Environment tab: that machine's own variables. */
@@ -22,29 +22,13 @@ export function MachineEnvironment() {
 }
 
 /**
- * Environment page: what the page is, the variables (an inline unlock card while locked), the
- * workspace's settings and how machines use the values. Add variable sits in the header once the
- * vault is open.
+ * Environment page: the variables (an inline unlock card while locked; Add variable in their
+ * Section header once open), the workspace's settings and how machines use the values.
  */
 export function EnvironmentPage() {
   const [adding, setAdding] = useState(false)
-  const unlocked = useSyncExternalStore(subscribeVaultLock, vaultUnlocked, () => false)
-  const vault = useQuery({ queryKey: ["env-vault"], queryFn: ({ signal }) => readVault(signal), staleTime: 0 })
   return (
     <div className="flex flex-col gap-10">
-      <PageIntro
-        title="Environment"
-        description="End-to-end encrypted variables, delivered to your machines’ shells and commands."
-        action={
-          unlocked &&
-          vault.data && (
-            <Button size="lg" onClick={() => setAdding(true)}>
-              <PlusIcon data-icon="inline-start" />
-              Add variable
-            </Button>
-          )
-        }
-      />
       <EnvironmentList adding={adding} onAddingChange={setAdding} />
       <EnvNamesSwitch />
       <Section title="Use them">
@@ -69,7 +53,7 @@ export function EnvironmentPage() {
  * Variable names and values, end to end encrypted: the vault password opens the vault in this
  * browser, names are listed, values are written and never shown. Setting up the vault, its
  * recovery code and password changes stay in `pb env vault`. On the Environment page Add variable
- * lives in the header (`adding`); on a machine's tab it sits above the list.
+ * is the Section's action (`adding`); on a machine's tab it sits above the list.
  */
 export function EnvironmentList({
   machine: tabMachine,
@@ -105,9 +89,17 @@ export function EnvironmentList({
     <Section
       title={title}
       action={
-        <Button variant="ghost" className="text-muted-foreground" onClick={lockVault}>
-          <LockSimpleIcon /> Lock
-        </Button>
+        <span className="flex items-center gap-2">
+          <Button variant="ghost" className="text-muted-foreground" onClick={lockVault}>
+            <LockSimpleIcon /> Lock
+          </Button>
+          {onAddingChange && (
+            <Button size="lg" onClick={() => onAddingChange(true)}>
+              <PlusIcon data-icon="inline-start" />
+              Add variable
+            </Button>
+          )}
+        </span>
       }
     >
       <EnvVariables key={JSON.stringify(scope)} scope={scope} adding={adding} onAddingChange={onAddingChange} />

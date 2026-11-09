@@ -29,7 +29,7 @@ import { ListPager } from "@/components/list-pager"
 import { ConfirmAction, SearchField } from "@/components/list-toolbar"
 import { StatusDot } from "@/components/machine-status"
 import { RowMenus, type Entry } from "@/components/row-menus"
-import { PageIntro, Section } from "@/components/section"
+import { Section } from "@/components/section"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -73,18 +73,15 @@ export function NetworkPage() {
 
   return (
     <div className="flex flex-col gap-10">
-      <PageIntro
-        title="Network"
-        description="How your machines’ traffic travels, whether it’s healthy, and the servers that carry it."
+      <Section
+        title="How your traffic travels"
         action={
           <Button size="lg" onClick={() => setAdding("relay")}>
             <PlusIcon data-icon="inline-start" />
             Add server
           </Button>
         }
-      />
-
-      <Section title="How your traffic travels">
+      >
         <div className="grid gap-3 pt-3 sm:grid-cols-2">
           <PathCard capability="relay" scope={scope} team={team} onAdd={() => setAdding("relay")} />
           <PathCard capability="tunnel" scope={scope} team={team} onAdd={() => setAdding("tunnel")} />

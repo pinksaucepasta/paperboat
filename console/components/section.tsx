@@ -59,30 +59,6 @@ export function Row({ label, htmlFor, children }: { label: string; htmlFor?: str
   )
 }
 
-/**
- * A section page's title, one line on what the page answers, and its primary action on the right
- * (Network, Environment). Pages that are only a list keep the breadcrumb as their title.
- */
-export function PageIntro({
-  title,
-  description,
-  action,
-}: {
-  title: string
-  description: string
-  action?: React.ReactNode
-}) {
-  return (
-    <div className="flex flex-wrap items-start gap-4">
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <h1 className="font-heading text-xl font-semibold tracking-tight">{title}</h1>
-        <p className="text-sm text-muted-foreground">{description}</p>
-      </div>
-      {action}
-    </div>
-  )
-}
-
 /** A setting inside a Section: label, a muted line under it, and its control (a switch) on the right. */
 export function SettingRow({
   label,
