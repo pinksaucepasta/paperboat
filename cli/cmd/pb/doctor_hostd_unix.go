@@ -24,7 +24,7 @@ func doctorHostdProbes() []doctorpkg.Probe {
 		if err != nil {
 			return doctorpkg.Check{Category: "local", Code: "hostd", Status: doctorpkg.StatusUnavailable, Summary: "Whether the host service answers could not be checked.", Recovery: "Run pb doctor again."}
 		}
-		return doctorHostdCheck(ctx, layout.Binary, layout.HostdSocket, dialHostdSocket)
+		return doctorHostdCheck(ctx, layout.Binary, layout.HostdSocket, dialHostdSocket, doctorHostdWindow, doctorHostdInterval)
 	}}}
 }
 
@@ -38,16 +38,30 @@ func dialHostdSocket(ctx context.Context, socket string) error {
 	return connection.Close()
 }
 
+// A hostd restart or hand-over (an update starts the next generation before the serving one exits) refuses
+// connections for a moment; doctor retries for this long (inside the doctor probe budget) before it calls the service not running. A refusal
+// cannot tell a restart from a stopped service (a stopped one leaves its socket file too), so the wording after
+// the window stays "not running" and says to run doctor again if an update just finished.
+const (
+	doctorHostdWindow   = 6 * time.Second // the probe budget is 10 s and one dial takes up to 3 s
+	doctorHostdInterval = 500 * time.Millisecond
+)
+
 // doctorHostdCheck: a computer without the native installation (no executable slot) has no host service to check.
-func doctorHostdCheck(ctx context.Context, installed, socket string, dial func(context.Context, string) error) doctorpkg.Check {
+func doctorHostdCheck(ctx context.Context, installed, socket string, dial func(context.Context, string) error, window, interval time.Duration) doctorpkg.Check {
 	check := doctorpkg.Check{Category: "local", Code: "hostd"}
 	if _, err := os.Stat(installed); errors.Is(err, os.ErrNotExist) {
 		check.Status, check.Summary = doctorpkg.StatusPass, "This computer runs no Paperboat host service."
 		return check
 	}
-	if err := dial(ctx, socket); err != nil {
+	err := dial(ctx, socket)
+	for deadline := time.Now().Add(window); err != nil && time.Now().Before(deadline) && ctx.Err() == nil; {
+		time.Sleep(interval)
+		err = dial(ctx, socket)
+	}
+	if err != nil {
 		check.Status, check.Summary = doctorpkg.StatusFail, "The Paperboat host service is not running, so this computer is offline for exec, files and terminals."
-		check.Recovery = "Run `pb install` to repair it, then run `pb doctor` again."
+		check.Recovery = "If an update just finished, run `pb doctor` again in a moment; otherwise run `pb install` to repair it."
 		return check
 	}
 	check.Status, check.Summary = doctorpkg.StatusPass, "The Paperboat host service answers."

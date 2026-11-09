@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	doctorpkg "github.com/pinksaucepasta/paperboat/internal/doctor"
 )
@@ -19,14 +20,33 @@ func TestDoctorFailsWhenTheInstalledHostServiceDoesNotAnswer(t *testing.T) {
 		t.Fatal(err)
 	}
 	refused := func(context.Context, string) error { return errors.New("connect: connection refused") } // a stale socket file
-	if got := doctorHostdCheck(t.Context(), installed, "/run/stale.sock", refused); got.Status != doctorpkg.StatusFail || got.Recovery == "" {
+	if got := doctorHostdCheck(t.Context(), installed, "/run/stale.sock", refused, 20*time.Millisecond, time.Millisecond); got.Status != doctorpkg.StatusFail || got.Recovery == "" {
 		t.Fatalf("a missing host service reported %+v", got)
 	}
 	answering := func(context.Context, string) error { return nil }
-	if got := doctorHostdCheck(t.Context(), installed, "/run/hostd.sock", answering); got.Status != doctorpkg.StatusPass {
+	if got := doctorHostdCheck(t.Context(), installed, "/run/hostd.sock", answering, 20*time.Millisecond, time.Millisecond); got.Status != doctorpkg.StatusPass {
 		t.Fatalf("a serving host service reported %+v", got)
 	}
-	if got := doctorHostdCheck(t.Context(), filepath.Join(t.TempDir(), "absent"), "/run/none.sock", refused); got.Status != doctorpkg.StatusPass {
+	if got := doctorHostdCheck(t.Context(), filepath.Join(t.TempDir(), "absent"), "/run/none.sock", refused, 20*time.Millisecond, time.Millisecond); got.Status != doctorpkg.StatusPass {
 		t.Fatalf("a computer without the native installation reported %+v", got)
+	}
+}
+
+// A hostd restart or hand-over refuses connections for a moment: interactive `pb doctor` must not report it as
+// not running when it answers inside the window.
+func TestDoctorWaitsOutAHostdRestart(t *testing.T) {
+	installed := filepath.Join(t.TempDir(), "pb")
+	if err := os.WriteFile(installed, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	restarting := func(context.Context, string) error {
+		if calls++; calls < 4 {
+			return errors.New("connect: connection refused")
+		}
+		return nil
+	}
+	if got := doctorHostdCheck(t.Context(), installed, "/run/hostd.sock", restarting, time.Second, time.Millisecond); got.Status != doctorpkg.StatusPass || calls != 4 {
+		t.Fatalf("a restart inside the window reported %+v after %d dials", got, calls)
 	}
 }
