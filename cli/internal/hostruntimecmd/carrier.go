@@ -71,7 +71,7 @@ func runCarrierProcess(ctx context.Context, config hostinstall.CarrierConfig, re
 	if err != nil {
 		return err
 	}
-	ssh, err := managedssh.NewHost(managedssh.HostConfig{ProbeTimeout: 3 * time.Second, DialTimeout: 10 * time.Second})
+	ssh, err := managedssh.NewHost(managedssh.HostConfig{ProbeTimeout: 3 * time.Second, DialTimeout: 10 * time.Second, LoginUser: config.User, LoginDenied: managedssh.SystemRemoteLoginDenied})
 	if err != nil {
 		return err
 	}

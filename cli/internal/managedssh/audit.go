@@ -42,6 +42,8 @@ const (
 	// Why a session was refused.
 	RefusedNoAccess = "no_access"
 	RefusedNotSetUp = "not_set_up"
+	// RefusedLoginNotAllowed is followed by ":" and the OS user the machine's Remote Login does not allow.
+	RefusedLoginNotAllowed = "login_not_allowed"
 
 	// How a session ended.
 	EndedClosed  = "closed"
@@ -70,7 +72,12 @@ var ErrSSHAuditUnavailable = errors.New("managed SSH session could not be record
 
 // Refused tells the client why its stream is refused and audits it.
 func (h *Host) Refused(ctx context.Context, stream io.Writer, generation uint64, reason string) {
-	streamauth.WriteSSHRefusal(stream, reason)
+	h.refuse(ctx, stream, generation, reason, reason)
+}
+
+// refuse sends the client wire (which may carry detail, such as the user) and audits the bare reason.
+func (h *Host) refuse(ctx context.Context, stream io.Writer, generation uint64, wire, reason string) {
+	streamauth.WriteSSHRefusal(stream, wire)
 	if h == nil || h.config.Audit == nil {
 		return
 	}

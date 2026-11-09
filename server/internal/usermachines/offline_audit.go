@@ -54,7 +54,7 @@ var offlineAuditIdentifier = regexp.MustCompile(`^[A-Za-z0-9_.:-]{1,128}$`)
 var offlinePolicyCapability = map[string]string{"terminal": "terminal", "exec": "exec", "managed_ssh": "managed_ssh", "file_transfer": "files"}
 
 var offlineRefusalReasons = map[string]bool{"no_scope": true, "backlog_full": true, "peer_unknown": true}
-var sshRefusalReasons = map[string]bool{"busy": true, "no_access": true, "wrong_user": true, "not_set_up": true}
+var sshRefusalReasons = map[string]bool{"busy": true, "no_access": true, "wrong_user": true, "not_set_up": true, "login_not_allowed": true}
 var sshEndOutcomes = map[string]bool{"closed": true, "revoked": true, "failed": true}
 
 const sshCapability = "managed_ssh"

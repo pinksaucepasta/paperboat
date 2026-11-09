@@ -31,3 +31,14 @@ func TestSSHRefusalsAreShownInPbsWords(t *testing.T) {
 		}
 	}
 }
+
+// A Mac whose Remote Login excludes the managed user: pb says so, instead of "Connection closed".
+func TestSSHRefusalForADeniedRemoteLoginUserNamesTheUserAndTheSetting(t *testing.T) {
+	err := &managedssh.RefusedError{Reason: managedssh.RefusedLoginNotAllowed + ":pbmac2"}
+	message := commandFailureMessage(err, classifyCommandFailure(err))
+	for _, want := range []string{"pbmac2 isn't allowed to log in over SSH", "System Settings", "Remote Login"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message %q lacks %q", message, want)
+		}
+	}
+}

@@ -30,6 +30,12 @@ type HostConfig struct {
 	DialTimeout  time.Duration
 	// Audit records the sessions the host serves, refuses and ends (F5-12). Optional.
 	Audit SessionAudit
+	// LoginUser and LoginDenied: when LoginDenied(LoginUser) is true the machine's sshd refuses that user (macOS
+	// Remote Login restricted to other users), so a stream is refused with the reason instead of failing as a
+	// bare "Connection closed". It also covers other OS users on that machine: the host cannot see the login
+	// name before sshd does. Optional.
+	LoginUser   string
+	LoginDenied func(user string) bool
 }
 
 // Host owns the bounded runtime boundary between an authorized Paperboat SSH
@@ -44,6 +50,7 @@ type Host struct {
 	disabled       bool
 	flows          map[*hostFlow]struct{}
 	changed        chan struct{}
+	loginDenied    loginDenied
 }
 
 // SetAudit installs the audit for a Host built before its queue exists (the carrier's). Call it before the
@@ -239,6 +246,11 @@ func (h *Host) Serve(ctx context.Context, generation uint64, stream io.ReadWrite
 		h.mu.Unlock()
 		h.Refused(ctx, stream, generation, RefusedNotSetUp)
 		return BridgeResult{}, ErrSSHHostStale
+	}
+	if h.config.LoginDenied != nil && h.loginDenied.get(func() bool { return h.config.LoginDenied(h.config.LoginUser) }) {
+		h.mu.Unlock()
+		h.refuse(ctx, stream, generation, RefusedLoginNotAllowed+":"+h.config.LoginUser, RefusedLoginNotAllowed)
+		return BridgeResult{}, ErrSSHLoginNotAllowed
 	}
 	h.active[generation]++
 	h.activeBySource[target.SourceSHA256]++

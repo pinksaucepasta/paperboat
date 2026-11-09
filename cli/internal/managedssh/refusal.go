@@ -26,6 +26,9 @@ func (e *RefusedError) Error() string {
 	case RefusedNotSetUp:
 		return "SSH is not set up on this machine yet; run `pb ssh doctor <machine>` for the next step"
 	default:
+		if user, ok := strings.CutPrefix(e.Reason, RefusedLoginNotAllowed+":"); ok {
+			return user + " isn't allowed to log in over SSH on this machine: on the Mac open System Settings → General → Sharing → Remote Login and allow this user, then retry"
+		}
 		return "the machine refused the SSH session (" + e.Reason + ")"
 	}
 }

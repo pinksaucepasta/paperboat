@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strconv"
@@ -83,7 +85,17 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 		_ = connection.Close()
 		return err
 	}
-	authErr := managedssh.ProbeSSHAuthentication(probeCtx, connection, net.JoinHostPort(host, strconv.Itoa(int(target.Port))), target.OSUser, identity.Signer, keys.Keys)
+	// The host writes a refusal line before sshd's banner when it knows sshd will refuse (macOS Remote Login);
+	// read it first, and stop waiting for a silent stream when the probe's time is up.
+	stopWatch := context.AfterFunc(probeCtx, func() { _ = connection.Close() })
+	reader := bufio.NewReader(connection)
+	if refused := managedssh.ReadRefusal(reader); refused != nil {
+		stopWatch()
+		_ = connection.Close()
+		return refused
+	}
+	authErr := managedssh.ProbeSSHAuthentication(probeCtx, bufferedStream{ReadWriteCloser: connection, reader: reader}, net.JoinHostPort(host, strconv.Itoa(int(target.Port))), target.OSUser, identity.Signer, keys.Keys)
+	stopWatch()
 	closeErr := connection.Close()
 	if authErr != nil {
 		return fmt.Errorf("managed SSH host verification or key reconciliation is not ready: %w", authErr)
@@ -97,3 +109,11 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 	fmt.Fprintf(command.OutOrStdout(), "OpenSSH: %s\nLocal configuration: ready\nManaged agent: ready\nMachine: %s\nTransport: ready\nTarget: ready on port %d\nHost identity: %s\nManaged keys: reconciled\n", capabilities.Version, machine.Alias, target.Port, keys.Fingerprint)
 	return nil
 }
+
+// bufferedStream reads through the reader that already took the first bytes of the stream.
+type bufferedStream struct {
+	io.ReadWriteCloser
+	reader *bufio.Reader
+}
+
+func (s bufferedStream) Read(p []byte) (int, error) { return s.reader.Read(p) }
