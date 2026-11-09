@@ -296,6 +296,12 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 		}
 	}
 
+	// The refresh handler answers authentication_required for api.ErrUnauthenticated; a signed-out credential or a
+	// missing one is the same state, so the login that asked can tell it from a broken daemon.
+	if (inventoryAuthenticationRequired(sourceErr) || inventoryAuthenticationRequired(reconcileErr)) && !errors.Is(refreshErr, api.ErrUnauthenticated) {
+		refreshErr = errors.Join(refreshErr, api.ErrUnauthenticated)
+	}
+
 	now := i.clock().UTC()
 	if _, err := i.store.Update(now, func(current *localapi.Snapshot) (localapi.Snapshot, error) {
 		desired := localapi.Snapshot{DaemonState: "ready", DaemonVersion: buildinfo.Version}

@@ -2,9 +2,11 @@ package localapi
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"net/http"
 )
@@ -34,6 +36,11 @@ func (s *Server) refreshInventory(w http.ResponseWriter, r *http.Request, reques
 	ctx, cancel := context.WithTimeout(r.Context(), inventoryRefreshTimeout)
 	defer cancel()
 	if err := source.Refresh(ctx); err != nil {
+		if errors.Is(err, api.ErrUnauthenticated) {
+			// Signed out is a state with its own recovery (pb login), not a broken daemon.
+			writeError(w, http.StatusUnauthorized, requestID, AuthenticationRequiredCode, "this machine is signed out of Paperboat")
+			return
+		}
 		errorreport.Current().CaptureFailure(ctx, "paperboatd", "login", "local_gateway", "local_gateway_failed", err)
 		writeError(w, http.StatusServiceUnavailable, requestID, "inventory_unavailable", "inventory refresh failed; run pb doctor")
 		return
