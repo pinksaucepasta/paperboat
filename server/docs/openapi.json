@@ -7539,6 +7539,10 @@
             "type": "boolean",
             "description": "Only for relays that sent subjects_digest: resend the full subjects list. No revocations are given with it."
           },
+          "jwks": {
+            "type": "object",
+            "description": "Mint trust document: the issuer signing keys plus withdrawn_key_ids. The relay replaces its trusted grant keys with it."
+          },
           "peer_relay": {
             "type": "object",
             "additionalProperties": false,
@@ -18306,6 +18310,26 @@
           }
         },
         "operationId": "get_v1_trust_revocations"
+      }
+    },
+    "/v1/trust/jwks": {
+      "get": {
+        "summary": "Fetch the mint trust document",
+        "description": "Private edge-control endpoint consumed by tunnel trust refresh: the issuer signing keys plus withdrawn_key_ids.",
+        "security": [
+          {
+            "bearerEdgeControl": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "JWKS document with optional withdrawn_key_ids."
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "operationId": "get_v1_trust_jwks"
       }
     },
     "/v1/config-repositories": {

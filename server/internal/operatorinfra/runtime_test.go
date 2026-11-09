@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"github.com/pinksaucepasta/paperboat/server/internal/nodeauth"
 	"github.com/pinksaucepasta/paperboat/server/internal/operatoractions"
 )
@@ -63,6 +64,11 @@ func TestManagedRelayRuntimeLifecycleAndAudit(t *testing.T) {
 	assertRuntimeState("", "registered", 1, false)
 	edge := controlplane.NewEdgeService(store, strings.Repeat("fleet", 10))
 	edge.SetNodeCredentials(nodeauth.Composite{service})
+	signer, err := mint.NewEphemeral(time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edge.SetCredentialIssuer(signer, "https://issuer.example.test", "")
 	handler := edge.Handler()
 	request := func(path, token string, body any) *httptest.ResponseRecorder {
 		raw, _ := json.Marshal(body)

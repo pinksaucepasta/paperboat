@@ -37,7 +37,9 @@ func newRelaySubjectsNode(t *testing.T, name string) *relaySubjectsNode {
 	store := openControlPlaneTestDB(t)
 	ctx := t.Context()
 	x := fmt.Sprint(time.Now().UnixNano())
-	n := &relaySubjectsNode{t: t, store: store, service: NewEdgeService(store, "relay-subjects-test-credential-0123456789"), id: name + "_node_" + x, epoch: name + "_epoch_" + x, account: name + "_acct_" + x, generation: 1}
+	service := NewEdgeService(store, "relay-subjects-test-credential-0123456789")
+	service.SetCredentialIssuer(testMintProvider(t, "k1", "k1"), "https://issuer.example.test", "")
+	n := &relaySubjectsNode{t: t, store: store, service: service, id: name + "_node_" + x, epoch: name + "_epoch_" + x, account: name + "_acct_" + x, generation: 1}
 	t.Cleanup(func() {
 		bg := context.Background()
 		_, _ = store.SQL().ExecContext(bg, `DELETE FROM peer_network_identities WHERE user_id=$1`, n.account)
@@ -405,6 +407,10 @@ func TestRelaySubjectsObservationBodyCarriesFullListPostgres(t *testing.T) {
 	}
 	if len(lease.Revocations) != len(list) {
 		t.Fatalf("revocations = %d, want %d (no identity rows)", len(lease.Revocations), len(list))
+	}
+	want, err := n.service.signer.JWKSJSON()
+	if err != nil || string(lease.JWKS) != string(want) {
+		t.Fatalf("lease trust document = %s, want %s (%v)", lease.JWKS, want, err)
 	}
 }
 

@@ -729,6 +729,7 @@ func (s *EdgeService) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/edge/routes/observations", s.handleObservedRoutes)
 	mux.HandleFunc("POST /v1/edge/usage-reports", s.handleUsage)
 	mux.HandleFunc("GET /v1/trust/revocations", s.handleRevocations)
+	mux.HandleFunc("GET /v1/trust/jwks", s.handleJWKS)
 	mux.HandleFunc("GET /v1/edge/browser-terminal/control", func(w http.ResponseWriter, r *http.Request) {
 		if s.browserTerminal == nil {
 			captureEdgeFailure(r, http.StatusServiceUnavailable, "control_unavailable", errBrowserTerminalControlUnavailable)
@@ -784,6 +785,25 @@ func (s *EdgeService) handleObservedRoutes(w http.ResponseWriter, r *http.Reques
 
 func (s *EdgeService) handleRevocations(w http.ResponseWriter, r *http.Request) {
 	document, err := s.Revocations(r.Context())
+	if err != nil {
+		writeEdgeError(w, r, http.StatusServiceUnavailable, "provider_unavailable", true, 5, err)
+		return
+	}
+	writeEdgeJSON(w, http.StatusOK, document)
+}
+
+// trustKeys is the mint trust document (keys plus withdrawn_key_ids) running relays and edges refresh from, so a
+// signing-key rotation or withdrawal reaches them without a re-enrollment (Teleport lib/auth/rotate.go distributes
+// the phased CA set over the authenticated channel).
+func (s *EdgeService) trustKeys() (json.RawMessage, error) {
+	if s.signer == nil {
+		return nil, errors.New("mint trust document is not configured")
+	}
+	return s.signer.JWKSJSON()
+}
+
+func (s *EdgeService) handleJWKS(w http.ResponseWriter, r *http.Request) {
+	document, err := s.trustKeys()
 	if err != nil {
 		writeEdgeError(w, r, http.StatusServiceUnavailable, "provider_unavailable", true, 5, err)
 		return

@@ -793,6 +793,7 @@ func TestOpenAPIDocumentCoversPublicAndFrozenTargetPaths(t *testing.T) {
 		"/v1/machine-installation-failures":                                  {"post"},
 		"/v1/edge/routes/observations":                                       {"post"},
 		"/v1/trust/revocations":                                              {"get"},
+		"/v1/trust/jwks":                                                     {"get"},
 		"/v1/me":                                                             {"get"},
 		"/v1/favorites":                                                      {"get", "put"},
 		"/v1/config-repositories":                                            {"get", "post"},

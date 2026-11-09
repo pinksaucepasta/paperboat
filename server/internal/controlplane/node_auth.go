@@ -34,7 +34,7 @@ func (s *EdgeService) authorizeNodeRequest(r *http.Request) (bool, error) {
 	if node == "" {
 		return false, nil
 	}
-	if r.Method == http.MethodGet && r.URL.Path == "/v1/trust/revocations" {
+	if r.Method == http.MethodGet && (r.URL.Path == "/v1/trust/revocations" || r.URL.Path == "/v1/trust/jwks") {
 		return true, nil
 	}
 	if r.Method == http.MethodGet && r.URL.Path == "/v1/edge/browser-terminal/control" {

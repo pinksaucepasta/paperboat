@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"net/http"
@@ -68,6 +69,9 @@ type relayNodeLeaseDocument struct {
 	// SubjectsRequired asks a relay that sent SubjectsDigest for its full list; no revocations are given with it.
 	// Only relays that sent a digest are ever sent the field.
 	SubjectsRequired bool `json:"subjects_required,omitempty"`
+	// JWKS is the mint trust document (keys plus withdrawn_key_ids). The relay replaces its trusted grant
+	// keys with it, so a rotation or withdrawal applies within one observation.
+	JWKS json.RawMessage `json:"jwks,omitempty"`
 }
 type relayServiceIdentity struct {
 	WireGuardPublicKey string `json:"wireguard_public_key"`
@@ -304,6 +308,10 @@ func (s *EdgeService) handleRelayObserve(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		writeEdgeError(w, r, http.StatusConflict, "relay_node_fenced", false, 0, err)
+		return
+	}
+	if out.JWKS, err = s.trustKeys(); err != nil {
+		writeEdgeError(w, r, http.StatusServiceUnavailable, "provider_unavailable", true, 1000, err)
 		return
 	}
 	writeEdgeJSON(w, http.StatusOK, out)
