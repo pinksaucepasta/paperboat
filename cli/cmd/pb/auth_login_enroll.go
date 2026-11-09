@@ -324,13 +324,24 @@ func readdRemovedComputer(c *command.Context, cfg *config.Config, store config.P
 	if runtime.GOOS == "windows" {
 		shell = "powershell"
 	}
-	enrollment, err := client.StartMachineEnrollment(ctx, newIdempotencyKey(), shell)
+	// The removed record's team is not kept anywhere once it is gone, so the workspace is the one the user named
+	// with --workspace (else Personal). A team that no longer accepts this account falls back to Personal, said aloud.
+	workspace := firstNonEmpty(strings.TrimSpace(c.String("workspace")), "personal")
+	enrollment, err := client.StartMachineEnrollmentIn(ctx, newIdempotencyKey(), shell, workspace)
+	var refused *api.APIError
+	if errors.As(err, &refused) && refused.Code == "workspace_forbidden" && workspace != "personal" {
+		if _, err = fmt.Fprintf(c.ErrWriter, "You can no longer add computers to %s; adding this one to Personal instead.\n", workspace); err != nil {
+			return err
+		}
+		workspace = "personal"
+		enrollment, err = client.StartMachineEnrollmentIn(ctx, newIdempotencyKey(), shell, workspace)
+	}
 	if err != nil {
 		return browserLoginFailure{message: "Signed in as " + account + ", but this computer was removed from the account and could not be added again: " + err.Error(), cause: err}
 	}
 	resume := *state
 	resume.Credential = &credential
 	resume.Profile = &config.Profile{Issuer: issuer, Account: profile.Account, CLIClientSessionID: profile.CLIClientSessionID, AccessExpiresAt: credential.ExpiresAt}
-	resume.Enrollment = &config.LoginEnrollment{BootstrapToken: enrollment.BootstrapToken, WorkspaceID: "personal", ExpiresAt: enrollment.ExpiresAt}
+	resume.Enrollment = &config.LoginEnrollment{BootstrapToken: enrollment.BootstrapToken, WorkspaceID: workspace, ExpiresAt: enrollment.ExpiresAt}
 	return &machineRemovedError{account: account, resume: resume}
 }

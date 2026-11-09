@@ -661,6 +661,10 @@ type loginDeviceFixture struct {
 	// enrollRefusal: set, POST /v1/machine-enrollments answers 403 with this message; enrollCalls counts them.
 	enrollRefusal string
 	enrollCalls   int
+	// enrollWorkspaces records the workspace each enrollment asked for; forbidTeam makes a team one answer 403
+	// workspace_forbidden.
+	enrollWorkspaces []string
+	forbidTeam       bool
 }
 
 func loginDeviceServer(t *testing.T, f *loginDeviceFixture) *httptest.Server {
@@ -715,6 +719,14 @@ func loginDeviceServer(t *testing.T, f *loginDeviceFixture) *httptest.Server {
 			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "user_machine_not_found", "message": "Machine was not found."}})
 		case "/v1/machine-enrollments":
 			f.enrollCalls++
+			var asked struct{ Workspace string }
+			_ = json.NewDecoder(r.Body).Decode(&asked)
+			f.enrollWorkspaces = append(f.enrollWorkspaces, asked.Workspace)
+			if f.forbidTeam && asked.Workspace != "" && asked.Workspace != "personal" {
+				w.WriteHeader(403)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "workspace_forbidden", "message": "You cannot add machines to that workspace."}})
+				return
+			}
 			if f.enrollRefusal != "" {
 				w.WriteHeader(403)
 				_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "machine_limit_reached", "message": f.enrollRefusal}})

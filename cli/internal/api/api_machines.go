@@ -192,6 +192,12 @@ type MachineEnrollmentStart struct {
 // StartMachineEnrollment creates the single-use credential used by the
 // dashboard, CLI, and TUI one-shot installers.
 func (c *Client) StartMachineEnrollment(ctx context.Context, idempotencyKey, shell string) (MachineEnrollmentStart, error) {
+	return c.StartMachineEnrollmentIn(ctx, idempotencyKey, shell, "")
+}
+
+// StartMachineEnrollmentIn is StartMachineEnrollment into a destination workspace ("personal" or a team slug;
+// empty means personal). The server refuses a team the account may not add machines to (workspace_forbidden).
+func (c *Client) StartMachineEnrollmentIn(ctx context.Context, idempotencyKey, shell, workspace string) (MachineEnrollmentStart, error) {
 	var out MachineEnrollmentStart
 	if strings.TrimSpace(idempotencyKey) == "" {
 		return out, errors.New("machine enrollment idempotency key is required")
@@ -199,7 +205,11 @@ func (c *Client) StartMachineEnrollment(ctx context.Context, idempotencyKey, she
 	if shell != "posix" && shell != "powershell" {
 		return out, errors.New("machine enrollment shell must be posix or powershell")
 	}
-	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/machine-enrollments", map[string]string{"shell": shell}, &out, http.Header{"Idempotency-Key": []string{idempotencyKey}})
+	body := map[string]string{"shell": shell}
+	if workspace != "" {
+		body["workspace"] = workspace
+	}
+	err := c.doWithHeaders(ctx, http.MethodPost, "/v1/machine-enrollments", body, &out, http.Header{"Idempotency-Key": []string{idempotencyKey}})
 	return out, err
 }
 

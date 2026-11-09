@@ -36,6 +36,7 @@ type removedScenario struct {
 	steps      *[]string
 	refused    *atomic.Bool
 	token      *string
+	paired     *string // workspace the pairing enrollment was for
 	// answer is the choice made at the "Add it again?" prompt; titles records what it asked.
 	answer *string
 	titles *[]string
@@ -72,7 +73,7 @@ func newRemovedScenario(t *testing.T, f *loginDeviceFixture) removedScenario {
 		})})
 	}()
 	steps := &[]string{}
-	var token string
+	var token, paired string
 	oldTerminal, oldChoose := workspaceTerminal, chooseLoginAction
 	oldMachine, oldPair, oldRemember, oldCleanup, oldSource, oldInstall := loginLocalMachineID, pairLoginDevice, rememberReplacedMachineFunc, freshEnrollmentCleanup, runningInstallSource, installSuppliedExecutable
 	t.Cleanup(func() {
@@ -109,11 +110,11 @@ func newRemovedScenario(t *testing.T, f *loginDeviceFixture) removedScenario {
 	}
 	pairLoginDevice = func(_ *command.Context, _ string, e *config.LoginEnrollment, _ string) error {
 		*steps = append(*steps, "pair")
-		token = e.BootstrapToken
+		token, paired = e.BootstrapToken, e.WorkspaceID
 		return nil
 	}
 	waitForCommandSocket(t, paths.SocketPath)
-	s := removedScenario{f: f, configPath: configPath, profiles: profiles, url: srv.URL, steps: steps, refused: &refused, token: &token, answer: &answer, titles: titles}
+	s := removedScenario{f: f, configPath: configPath, profiles: profiles, url: srv.URL, steps: steps, refused: &refused, token: &token, paired: &paired, answer: &answer, titles: titles}
 	// The first sign-in is the one the computer later loses; the daemon accepts it.
 	if out, err := runBrowserLogin(t, ctx, configPath, "login", "--no-browser"); err != nil {
 		t.Fatalf("first login: %v\n%s", err, out)
@@ -221,6 +222,32 @@ func TestLoginDoesNotWipeARemovedComputerWithoutAYes(t *testing.T) {
 			}
 			if shown := commandFailureMessage(err, classifyCommandFailure(err)); !strings.Contains(shown, "pb login --fresh") {
 				t.Fatalf("shown=%q", shown)
+			}
+		})
+	}
+}
+
+// The workspace the user named is carried into the re-enrollment; a team that refuses this account falls back to
+// Personal with a line saying so.
+func TestLoginReaddsToTheNamedWorkspaceOrFallsBackToPersonal(t *testing.T) {
+	for name, c := range map[string]struct {
+		forbid   bool
+		wantWS   string
+		wantAsks []string
+		wantLine bool
+	}{
+		"team":      {false, "myteam", []string{"myteam"}, false},
+		"forbidden": {true, "personal", []string{"myteam", "personal"}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newRemovedScenario(t, &loginDeviceFixture{forbidTeam: c.forbid})
+			out, err := runBrowserLogin(t, t.Context(), s.configPath, "login", "--no-browser", "--reauth", "--workspace", "myteam")
+			if err != nil {
+				t.Fatalf("login: %v\n%s", err, out)
+			}
+			line := strings.Contains(out, "You can no longer add computers to myteam; adding this one to Personal instead.")
+			if *s.paired != c.wantWS || strings.Join(s.f.enrollWorkspaces, ",") != strings.Join(c.wantAsks, ",") || line != c.wantLine {
+				t.Fatalf("paired=%q asked=%v line=%v\n%s", *s.paired, s.f.enrollWorkspaces, line, out)
 			}
 		})
 	}
