@@ -30,7 +30,7 @@ export const pauseReasons: Record<string, string> = {
   relay_quota_exhausted: "This workspace’s hosted bandwidth is used up.",
 }
 
-type Preferences = { file_transfer_mode: TransferMode }
+type Preferences = { file_transfer_mode: TransferMode; env_names_listable: boolean }
 
 /** The account's preferences (GET /v1/me/preferences); the CLI's transfers.mode is the same field. */
 export const preferencesQuery = queryOptions({

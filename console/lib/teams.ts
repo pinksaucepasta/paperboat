@@ -18,7 +18,7 @@ export type Team = TeamSummary & {
 export type TeamInvitation = Schemas["TeamInvitationSummary"]
 export type MachineAdmission = Schemas["TeamMachineAdmission"]
 export type TeamAction =
-  "role" | "remove" | "leave" | "transfer" | "delete" | "rename" | "machine_approval" | "private_access"
+  "role" | "remove" | "leave" | "transfer" | "delete" | "rename" | "machine_approval" | "private_access" | "env_names"
 export type TeamRole = "owner" | "admin" | "billing" | "auditor" | "member"
 
 /**
@@ -205,6 +205,7 @@ export async function teamAction(
     name?: string
     approve_new_machines?: boolean
     allow_private_access?: boolean
+    env_names_listable?: boolean
   } = {},
 ) {
   const expected_generation = await freshGeneration(team)

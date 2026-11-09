@@ -9750,6 +9750,8 @@ export interface components {
             approve_new_machines?: boolean;
             /** @description Members may reach the ports of machines shared into the team when their grant includes private_access. Off by default; an owner or admin changes it with action private_access. */
             allow_private_access?: boolean;
+            /** @description Commands on the team's machines may list the names (never values) of the team workspace's ENV. On by default; an owner or admin changes it with action env_names. */
+            env_names_listable?: boolean;
             /** @description Owners and admins see every request; other members see their own. */
             machine_requests?: components["schemas"]["TeamMachineAdmission"][];
             machine_grants?: components["schemas"]["TeamMachineGrant"][];
@@ -9795,7 +9797,7 @@ export interface components {
             operation_id: string;
             expected_generation: number;
             /** @enum {string} */
-            action: "role" | "remove" | "leave" | "transfer" | "delete" | "rename" | "machine_approval" | "private_access";
+            action: "role" | "remove" | "leave" | "transfer" | "delete" | "rename" | "machine_approval" | "private_access" | "env_names";
             account_id?: string;
             role?: string;
             confirmation?: string;
@@ -9804,6 +9806,8 @@ export interface components {
             approve_new_machines?: boolean;
             /** @description With action private_access: whether members may reach the ports of machines shared into the team (needs a private_access grant too). */
             allow_private_access?: boolean;
+            /** @description With action env_names: whether commands on the team's machines may list the names (never values) of the team workspace's ENV. */
+            env_names_listable?: boolean;
         };
         TeamInviteRequest: {
             operation_id: string;
@@ -11555,6 +11559,8 @@ export interface components {
              * @enum {string}
              */
             file_transfer_mode: "automatic" | "unlimited";
+            /** @description Commands on your machines may list the names (never values) of your personal-workspace ENV (`pb env names`). On by default. */
+            env_names_listable: boolean;
         };
         AccountPreferencesResponse: {
             data: components["schemas"]["AccountPreferences"];
@@ -11562,6 +11568,7 @@ export interface components {
         AccountPreferencesUpdate: {
             /** @enum {string} */
             file_transfer_mode?: "automatic" | "unlimited";
+            env_names_listable?: boolean;
         };
         WorkspaceDomain: {
             /** @enum {string} */
