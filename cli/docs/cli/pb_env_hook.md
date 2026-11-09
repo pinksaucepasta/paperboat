@@ -4,12 +4,12 @@ Load ENV in plain ssh and VS Code shells through a shell startup hook
 
 ### Synopsis
 
-Without flags, print the hook line for a shell. --install adds that line to the shell's startup file (~/.bashrc, ~/.zshenv or ~/.config/fish/config.fish) for the account logged in here and the active workspace, and defines a pb shell function so `pb env load` loads ENV into the current shell; --uninstall removes it. VS Code Remote-SSH: after installing, run "Remote-SSH: Kill VS Code Server on Host" and reconnect.
+Without flags, print the hook line for a shell. --install adds that line to the shell's startup file (~/.bashrc, ~/.zshenv, ~/.config/fish/config.fish or, on Windows, the PowerShell profile.ps1 of Windows PowerShell and PowerShell 7; cmd.exe has no hook, use `pb env run -- <command>`) for the account logged in here and the active workspace, and defines a pb shell function so `pb env load` loads ENV into the current shell; --uninstall removes it. VS Code Remote-SSH: after installing, run "Remote-SSH: Kill VS Code Server on Host" and reconnect.
 
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 
 ```
-pb env hook [bash|zsh|fish] [flags]
+pb env hook [bash|zsh|fish|powershell] [flags]
 ```
 
 ### Options
