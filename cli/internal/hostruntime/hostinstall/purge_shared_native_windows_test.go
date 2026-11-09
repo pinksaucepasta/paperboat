@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"golang.org/x/sys/windows"
 )
@@ -18,6 +19,8 @@ func TestNativeWindowsSharedPurgeRetiresOnlyOwnedResidue(t *testing.T) {
 		t.Skip("requires elevated native filesystem custody")
 	}
 	const instance = "u111111111111111111111111"
+	// A different account than the one running the test, so its own SID earns the fixtures nothing.
+	const ownerSID = "S-1-5-21-49157-49158-49159-1001"
 	for _, scenario := range []string{"empty inherited scaffolding", "foreign and other account", "held diagnostic", "diagnostic hardlink", "mutable diagnostic", "reparse diagnostic", "canceled"} {
 		t.Run(scenario, func(t *testing.T) {
 			root := t.TempDir()
@@ -100,7 +103,7 @@ func TestNativeWindowsSharedPurgeRetiresOnlyOwnedResidue(t *testing.T) {
 				ctx, cancel = context.WithCancel(ctx)
 				cancel()
 			}
-			err := purgeWindowsSharedResidue(ctx, shared, state, instance)
+			err := purgeWindowsSharedResidue(ctx, shared, state, instance, ownerSID)
 			switch scenario {
 			case "empty inherited scaffolding":
 				if err != nil {
@@ -111,7 +114,7 @@ func TestNativeWindowsSharedPurgeRetiresOnlyOwnedResidue(t *testing.T) {
 						t.Fatalf("empty shared root retained: %v", err)
 					}
 				}
-				if err := purgeWindowsSharedResidue(ctx, shared, state, instance); err != nil {
+				if err := purgeWindowsSharedResidue(ctx, shared, state, instance, ownerSID); err != nil {
 					t.Fatalf("idempotent purge: %v", err)
 				}
 			case "foreign and other account":
@@ -148,11 +151,82 @@ func TestNativeWindowsSharedPurgeRetiresOnlyOwnedResidue(t *testing.T) {
 						t.Fatal(err)
 					}
 					held = 0
-					if err := purgeWindowsSharedResidue(t.Context(), shared, state, instance); err != nil {
+					if err := purgeWindowsSharedResidue(t.Context(), shared, state, instance, ownerSID); err != nil {
 						t.Fatalf("held file recovery: %v", err)
 					}
 				}
 			}
 		})
+	}
+}
+
+// victus, 2026-11-10: after a failed in-place update `pb uninstall` removed the services and Program Files but
+// reported {"state":"failed","cause":"internal"}, kept the user's credentials and left one ProgramData log. The
+// failed install had written PaperboatInstall-<instance>-startup-error.log with atomicfile's descriptor (full
+// access for the installing account), which the shared cleanup refused as an untrusted writer.
+func TestNativeWindowsSharedPurgeRemovesTheAccountsOwnInstallLog(t *testing.T) {
+	if !windows.GetCurrentProcessToken().IsElevated() {
+		t.Skip("requires elevated native filesystem custody")
+	}
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const instance = "u111111111111111111111111"
+	// The cleanup compares final paths, so the fixture must not sit behind a short (8.3) name.
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	program, state := filepath.Join(root, "program"), filepath.Join(root, "state")
+	for _, p := range []string{program, state} {
+		if err := secureSharedProgramRoot(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	shared := service.Layout{InstallRoot: program, UpdateStateRoot: filepath.Join(state, "updated")}
+	log := filepath.Join(state, "PaperboatInstall-"+instance+"-startup-error.log")
+	// Written the way the elevated installer records its failure (causetext.Record).
+	if err := atomicfile.Write(log, []byte("install failure cause"), atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := purgeWindowsSharedResidue(t.Context(), shared, state, instance, "S-1-5-21-49157-49158-49159-1001"); err == nil {
+		t.Fatal("another account's purge removed a log this account can write")
+	}
+	if _, err := os.Lstat(log); err != nil {
+		t.Fatalf("refused log changed: %v", err)
+	}
+	if err := purgeWindowsSharedResidue(t.Context(), shared, state, instance, user.User.Sid.String()); err != nil {
+		t.Fatalf("the account's own install log blocked its purge: %v (%s)", err, FailureDetail(err))
+	}
+	for _, p := range []string{log, state, program} {
+		if _, err := os.Lstat(p); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s is still there: %v", filepath.Base(p), err)
+		}
+	}
+}
+
+// The same rule on descriptors alone, so it needs neither elevation nor files.
+func TestSharedProgramObjectDescriptorAcceptsOnlyTheAccountItself(t *testing.T) {
+	const account, other = "S-1-5-21-49157-49158-49159-1001", "S-1-5-21-49157-49158-49159-1002"
+	for _, row := range []struct {
+		name, sddl, accountSID string
+		accepted               bool
+	}{
+		{"service log", "O:SYD:(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)", "", true},
+		{"install log of this account", "O:" + account + "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;" + account + ")", account, true},
+		{"install log written as Administrators", "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;" + account + ")", account, true},
+		{"install log, no account named", "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;" + account + ")", "", false},
+		{"install log of another account", "O:" + other + "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;" + other + ")", account, false},
+		{"owned by another account", "O:" + other + "D:P(A;;FA;;;SY)(A;;FA;;;BA)", account, false},
+		{"writable for all users", "O:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;" + account + ")(A;;FA;;;BU)", account, false},
+	} {
+		descriptor, err := windows.SecurityDescriptorFromString(row.sddl)
+		if err != nil {
+			t.Fatalf("%s: %v", row.name, err)
+		}
+		if err := checkSharedProgramObjectDescriptor(descriptor, false, row.accountSID); (err == nil) != row.accepted {
+			t.Errorf("%s: accepted=%v, want %v (%v)", row.name, err == nil, row.accepted, err)
+		}
 	}
 }

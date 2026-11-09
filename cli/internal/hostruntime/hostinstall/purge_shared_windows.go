@@ -17,18 +17,20 @@ import (
 
 // Full removal retires diagnostics for the exact account and empty shared
 // scaffolding. Reset and nonempty shared directories retain their ownership.
-func purgeWindowsSharedResidue(ctx context.Context, shared service.Layout, programData, instance string) (resultErr error) {
-	if !validWindowsInstance(instance) {
+func purgeWindowsSharedResidue(ctx context.Context, shared service.Layout, programData, instance, ownerSID string) (resultErr error) {
+	owner, err := windows.StringToSid(ownerSID)
+	if err != nil || !validWindowsInstance(instance) {
 		return ErrInvalidRequest
 	}
-	program, err := openWindowsSharedCleanupObject(ctx, shared.InstallRoot, true, true)
+	ownerSID = owner.String() // the spelling a descriptor reports
+	program, err := openWindowsSharedCleanupObject(ctx, shared.InstallRoot, true, true, "")
 	if err != nil {
 		return err
 	}
 	if program != nil {
 		defer func() { resultErr = errors.Join(resultErr, program.Close()) }()
 	}
-	state, err := openWindowsSharedCleanupObject(ctx, programData, true, true)
+	state, err := openWindowsSharedCleanupObject(ctx, programData, true, true, "")
 	if err != nil {
 		return err
 	}
@@ -40,14 +42,14 @@ func purgeWindowsSharedResidue(ctx context.Context, shared service.Layout, progr
 	if state != nil {
 		for _, base := range []string{"PaperboatCarrier", "PaperboatHostd", "PaperboatHostd-worker", "PaperboatUpdated", "PaperboatLocalDaemon", "PaperboatUpdateActivator", "PaperboatInstall"} {
 			path := filepath.Join(programData, base+"-"+instance+"-startup-error.log")
-			resultErr = errors.Join(resultErr, retireWindowsSharedObject(ctx, path, false))
+			resultErr = errors.Join(resultErr, retireWindowsSharedObject(ctx, path, false, ownerSID))
 		}
 		for _, path := range []string{filepath.Join(programData, "services"), filepath.Join(programData, "users"), filepath.Join(shared.UpdateStateRoot, "users"), shared.UpdateStateRoot} {
-			resultErr = errors.Join(resultErr, retireWindowsSharedObject(ctx, path, true))
+			resultErr = errors.Join(resultErr, retireWindowsSharedObject(ctx, path, true, ""))
 		}
 	}
 	if program != nil {
-		resultErr = errors.Join(resultErr, retireWindowsSharedObject(ctx, filepath.Join(shared.InstallRoot, "users"), true))
+		resultErr = errors.Join(resultErr, retireWindowsSharedObject(ctx, filepath.Join(shared.InstallRoot, "users"), true, ""))
 		resultErr = errors.Join(resultErr, markEmptyWindowsSharedDirectory(ctx, program))
 	}
 	if state != nil {
@@ -56,7 +58,7 @@ func purgeWindowsSharedResidue(ctx context.Context, shared service.Layout, progr
 	return resultErr
 }
 
-func openWindowsSharedCleanupObject(ctx context.Context, path string, directory, requireProtected bool) (*os.File, error) {
+func openWindowsSharedCleanupObject(ctx context.Context, path string, directory, requireProtected bool, accountSID string) (*os.File, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -90,14 +92,14 @@ func openWindowsSharedCleanupObject(ctx context.Context, path string, directory,
 	if err != nil {
 		return fail(err)
 	}
-	if err := checkSharedProgramObjectDescriptor(descriptor, requireProtected); err != nil {
+	if err := checkSharedProgramObjectDescriptor(descriptor, requireProtected, accountSID); err != nil {
 		return fail(err)
 	}
 	return os.NewFile(uintptr(handle), path), nil
 }
 
-func retireWindowsSharedObject(ctx context.Context, path string, directory bool) (resultErr error) {
-	file, err := openWindowsSharedCleanupObject(ctx, path, directory, false)
+func retireWindowsSharedObject(ctx context.Context, path string, directory bool, accountSID string) (resultErr error) {
+	file, err := openWindowsSharedCleanupObject(ctx, path, directory, false, accountSID)
 	if err != nil || file == nil {
 		return err
 	}

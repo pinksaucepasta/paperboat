@@ -2184,7 +2184,7 @@ func purgeWindows(ctx context.Context, ownerSID string, preserveCLI bool) (resul
 		if err != nil {
 			return err
 		}
-		result = hostInstallFailure("remove shared Paperboat directories and logs", purgeWindowsSharedResidue(ctx, sharedLayout, WindowsProgramDataRoot(), instance))
+		result = hostInstallFailure("remove shared Paperboat directories and logs", purgeWindowsSharedResidue(ctx, sharedLayout, WindowsProgramDataRoot(), instance, ownerSID))
 		if result == nil && atRestart {
 			result = deleteWindowsSharedParentsAtRestart(sharedLayout, WindowsProgramDataRoot())
 		}
@@ -2240,30 +2240,38 @@ func uninstallWindows(ctx context.Context, layout service.Layout, purge bool, ow
 }
 
 func uninstallWindowsKeepingCLI(ctx context.Context, layout service.Layout, purge bool, ownerSID, keep string) error {
+	// A purge is a recovery boundary: a step that fails is reported under its name and the later steps still run,
+	// so a half-upgraded installation loses everything that can be removed in one run. Uninstall stops at once.
+	var result error
 	if err := removeWindowsRuntimeGenerations(ctx, layout, ownerSID); err != nil {
-		return err
+		if !purge {
+			return err
+		}
+		result = hostInstallFailure("remove session owner and SSH generations", err)
 	}
 	// Optional configuration sync is owned by the same enrolled instance.
 	// Stop/remove it before removing its protected executable and metadata.
 	configDefinition, err := windowsConfigServiceDefinitionForLayout(layout)
 	if err != nil {
-		return err
+		return errors.Join(result, err)
 	}
 	configInstaller, err := service.NewPending(configDefinition)
 	if err != nil {
-		return err
+		return errors.Join(result, err)
 	}
 	if err := configInstaller.Uninstall(ctx); err != nil {
-		return err
+		if !purge {
+			return err
+		}
+		result = errors.Join(result, hostInstallFailure("remove configuration sync service", err))
 	}
-	var result error
 	if purge {
 		// Explicit removal does not restore an interrupted installation. Protected
 		// declarations plus exact SCM ownership suffice even after slots vanished.
 		for _, base := range []string{"PaperboatHost", "PaperboatCarrier", "PaperboatHostd", "PaperboatLocalDaemon", "PaperboatUpdated"} {
 			path := filepath.Join(`C:\ProgramData\Paperboat\services`, base+"-"+layout.Instance+".json")
 			if err := (service.WindowsController{}).Remove(ctx, path); err != nil {
-				result = errors.Join(result, err)
+				result = errors.Join(result, hostInstallFailure("remove Windows service "+base, err))
 			} else {
 				result = errors.Join(result, removeInstallFile(path))
 			}
@@ -2291,9 +2299,6 @@ func uninstallWindowsKeepingCLI(ctx context.Context, layout service.Layout, purg
 		if result != nil {
 			return result
 		}
-	}
-	if result != nil {
-		return result
 	}
 	if keep == "" {
 		result = errors.Join(result, winenv.RemoveMachinePath(filepath.Dir(layout.Binary)))

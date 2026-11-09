@@ -63,12 +63,16 @@ func safeSharedProgramRootDescriptor(descriptor *windows.SECURITY_DESCRIPTOR) bo
 	return checkSharedProgramRootDescriptor(descriptor) == nil
 }
 func checkSharedProgramRootDescriptor(descriptor *windows.SECURITY_DESCRIPTOR) error {
-	return checkSharedProgramObjectDescriptor(descriptor, true)
+	return checkSharedProgramObjectDescriptor(descriptor, true, "")
 }
 
 // Inherited descendants can use the same trust policy while their protected
 // shared root remains pinned by the cleanup owner.
-func checkSharedProgramObjectDescriptor(descriptor *windows.SECURITY_DESCRIPTOR, requireProtected bool) error {
+//
+// accountSID, when set, is the account whose own diagnostic file this is. Its elevated installer writes that
+// file owned by and writable for the account itself (atomicfile's current-owner descriptor); removing a file
+// its account may remove is no elevation, and refusing it made every uninstall after a failed install fail.
+func checkSharedProgramObjectDescriptor(descriptor *windows.SECURITY_DESCRIPTOR, requireProtected bool, accountSID string) error {
 	if descriptor == nil {
 		return ErrInvalidRequest
 	}
@@ -80,7 +84,7 @@ func checkSharedProgramObjectDescriptor(descriptor *windows.SECURITY_DESCRIPTOR,
 	if owner == nil || requireProtected && control&windows.SE_DACL_PROTECTED == 0 {
 		return ErrInvalidRequest
 	}
-	if owner.String() != "S-1-5-18" && owner.String() != "S-1-5-32-544" {
+	if owner.String() != "S-1-5-18" && owner.String() != "S-1-5-32-544" && owner.String() != accountSID {
 		return ErrInvalidRequest
 	}
 	dacl, _, err := descriptor.DACL()
@@ -108,7 +112,7 @@ func checkSharedProgramObjectDescriptor(descriptor *windows.SECURITY_DESCRIPTOR,
 			continue
 		}
 		switch sid.String() {
-		case "S-1-5-18", "S-1-5-32-544", trustedInstallerSID:
+		case "S-1-5-18", "S-1-5-32-544", trustedInstallerSID, accountSID:
 			continue
 		}
 		mask := uint32(ace.Mask)
