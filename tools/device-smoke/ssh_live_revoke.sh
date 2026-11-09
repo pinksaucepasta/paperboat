@@ -2,7 +2,8 @@
 # ssh_live_revoke.sh HOST BINARY  (check id: ssh-live-revoke, CHECKLIST F5-10)
 # Revoking access ends open SSH sessions (F5-10). Pairs two FRESH throwaway containers on HOST (as
 # ssh_other_user.sh), the target with OpenSSH; the client opens `pb ssh <target>` running a long command, then
-# `pb logout` revokes its CLI session. The open session must end within 15 s and pb must say access was revoked ("access to <m> was revoked").
+# `pb logout` revokes its CLI session. BOTH open sessions (`pb ssh` and a plain `ssh <alias>.<domain>` through the managed
+# OpenSSH config) must end within 15 s and pb must say access was revoked ("access to <m> was revoked").
 # Prints one JSON line {"check":"ssh-live-revoke",...}; machines revoked by exact id, containers removed on exit.
 set -uo pipefail
 HOST=${1:?host} BIN=${2:?binary}
@@ -59,19 +60,27 @@ set -u
 ALIAS=$1
 PB=~/.local/bin/pb
 for i in $(seq 1 60); do "$PB" machine list 2>/dev/null | grep -q "$ALIAS " && break; sleep 2; done
+DOMAIN=
+for i in $(seq 1 60); do DOMAIN=$(grep -o 'Host \*\.[^ ]*' ~/.ssh/paperboat_config 2>/dev/null | head -1 | sed 's/Host \*\.//'); [ -n "$DOMAIN" ] && break; sleep 2; done
+# Two open sessions to the target: `pb ssh` and a plain ssh through the managed OpenSSH config (pb __ssh-proxy).
 "$PB" ssh "$ALIAS" -- 'echo session-up; sleep 300' > ~/slr.out 2> ~/slr.err & pid=$!
-for i in $(seq 1 60); do grep -q session-up ~/slr.out && break; sleep 1; done
-grep -q session-up ~/slr.out || { echo "RESULT fail:[no-session $(tr '\n' ' ' < ~/slr.err | cut -c1-200)]"; exit 0; }
+ssh "$ALIAS.$DOMAIN" 'echo plain-up; sleep 300' > ~/slrp.out 2> ~/slrp.err < /dev/null & ppid=$!
+for i in $(seq 1 60); do grep -q session-up ~/slr.out && grep -q plain-up ~/slrp.out && break; sleep 1; done
+grep -q session-up ~/slr.out && grep -q plain-up ~/slrp.out || { echo "RESULT fail:[no-session pb=$(tr '\n' ' ' < ~/slr.err | cut -c1-120) plain=$(tr '\n' ' ' < ~/slrp.err | cut -c1-120)]"; exit 0; }
 start=$(date +%s.%N); "$PB" logout >/dev/null 2>&1
 for i in $(seq 1 600); do kill -0 $pid 2>/dev/null || break; sleep 0.1; done
-end=$(date +%s.%N); kill $pid 2>/dev/null
-echo "RESULT seconds=$(python3 -c "print(round($end-$start,1))") alive=$(kill -0 $pid 2>/dev/null && echo yes || echo no) stderr=[$(tr '\n' ' ' < ~/slr.err | cut -c1-200)]"
+end=$(date +%s.%N)
+for i in $(seq 1 600); do kill -0 $ppid 2>/dev/null || break; sleep 0.1; done
+pend=$(date +%s.%N)
+palive=$(kill -0 $ppid 2>/dev/null && echo yes || echo no); alive=$(kill -0 $pid 2>/dev/null && echo yes || echo no); kill $pid $ppid 2>/dev/null
+echo "RESULT seconds=$(python3 -c "print(round($end-$start,1))") alive=$alive plain_seconds=$(python3 -c "print(round($pend-$start,1))") plain_alive=$palive stderr=[$(tr '\n' ' ' < ~/slr.err | cut -c1-200)] plain_stderr=[$(tr '\n' ' ' < ~/slrp.err | cut -c1-200)]"
 RUN
 ssh "$HOST" "sudo -n docker exec -i -u pbt $C sh -c 'cat > /home/pbt/run.sh'" < /tmp/$T-run.sh; rm -f /tmp/$T-run.sh
 res=$(ssh "$HOST" "sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 $C timeout 600 bash /home/pbt/run.sh $ALIAS" 2>&1)
 detail=$(grep -E "^(domain=|RESULT)" <<<"$res" | tr '\n' ' ')
 secs=$(sed -n 's/^RESULT seconds=\([0-9.]*\) .*/\1/p' <<<"$res")
-if [ -n "$secs" ] && python3 -c "import sys; sys.exit(0 if float('$secs') <= 15 else 1)" && grep -q "alive=no" <<<"$res" && grep -qiE "access (to [^ ]+ )?was revoked" <<<"$res"; then
+psecs=$(sed -n 's/^RESULT .* plain_seconds=\([0-9.]*\) .*/\1/p' <<<"$res")
+if [ -n "$secs" ] && [ -n "$psecs" ] && python3 -c "import sys; sys.exit(0 if float('$secs') <= 15 and float('$psecs') <= 15 else 1)" && grep -q "alive=no" <<<"$res" && grep -q "plain_alive=no" <<<"$res" && grep -qiE "access (to [^ ]+ )?was revoked" <<<"$res"; then
   finish PASS "$detail"
 fi
 finish FAIL "$detail $(tail -c 300 <<<"$res" | tr '\n' ' ')"
