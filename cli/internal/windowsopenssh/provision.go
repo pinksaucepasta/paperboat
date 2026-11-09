@@ -34,6 +34,21 @@ var (
 	ErrServiceOwnership     = errors.New("openssh_service_ownership_conflict")
 )
 
+// Unobtainable reports that this machine could not supply the approved OpenSSH (it could not be inventoried,
+// has no usable package client, or the package did not install). Installation continues without managed SSH,
+// as on Linux and macOS without sshd. Trust and ownership failures are never unobtainable: they abort.
+func Unobtainable(err error) bool {
+	if !errors.Is(err, ErrInstallerUnavailable) && !errors.Is(err, ErrInstallFailed) {
+		return false
+	}
+	for _, refusal := range []error{ErrInvalidConfig, ErrUntrustedBinary, ErrVersionMismatch, ErrConflictingInstall, ErrServiceOwnership, ErrFirewallSnapshot, ErrFirewallOwnership} {
+		if errors.Is(err, refusal) {
+			return false
+		}
+	}
+	return true
+}
+
 type Runner interface {
 	Run(context.Context, string, ...string) ([]byte, error)
 }

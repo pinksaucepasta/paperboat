@@ -415,6 +415,26 @@ func TestInventoryClassifiesSSHAuthorityTransitions(t *testing.T) {
 	}
 }
 
+// A Windows machine that could not install OpenSSH still pairs; its item names the Windows next step, and pb ssh
+// refuses with it (sshTargetHealth reads ssh_ items).
+func TestInventoryNamesTheWindowsStepForAMachineWithoutManagedSSH(t *testing.T) {
+	machine := api.UserMachine{ID: "machine_1", Alias: "studio", Online: true, InstallationGeneration: 4, SSHLocalReady: true}
+	linux := mapMachines([]api.UserMachine{machine})[0]
+	machine.Platform = "windows"
+	windows := mapMachines([]api.UserMachine{machine})[0]
+	for _, status := range []localapi.MachineStatus{linux, windows} {
+		if status.RuntimeState != "ready" || !status.Eligible || status.SSHReadiness != "unavailable" || len(status.Health) != 1 || status.Health[0].Code != "ssh_target_not_ready" || status.Health[0].Severity != "warning" {
+			t.Fatalf("status=%#v", status)
+		}
+	}
+	if item := windows.Health[0]; item.Title != "Managed SSH is not ready" || item.Recovery != managedSSHWindowsTargetRecovery || !strings.Contains(item.Recovery, "pb doctor --repair") {
+		t.Fatalf("windows item=%#v", item)
+	}
+	if item := linux.Health[0]; item.Title != "SSH target is not ready" || strings.Contains(item.Recovery, "winget") {
+		t.Fatalf("linux item=%#v", item)
+	}
+}
+
 func TestInventoryProjectsOnlyTypedUpdateHealth(t *testing.T) {
 	observed := time.Now().UTC()
 	base := api.UserMachine{ID: "machine_1", Alias: "studio", Availability: api.AvailabilityPolicy{Schema: "paperboat.availability-policy/v1", ObservedAt: &observed}}

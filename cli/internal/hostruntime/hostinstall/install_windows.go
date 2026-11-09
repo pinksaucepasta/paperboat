@@ -793,7 +793,7 @@ func installWindows(ctx context.Context, request Request, lifecycleOwned bool) (
 	} else if err := EnsureExistingCarrier(ctx, carrier); err != nil {
 		return err
 	}
-	if _, err := PrepareWindowsSSHGeneration(ctx, request); err != nil {
+	if err := prepareWindowsSSHGenerationIfObtainable(ctx, request); err != nil {
 		return err
 	}
 	request.Artifact.Version = request.Source.Version
@@ -1331,8 +1331,7 @@ func installWindowsSSHAfterActivation(ctx context.Context, request Request, layo
 		return err
 	}
 	if carrier {
-		_, err := PrepareWindowsSSHGeneration(ctx, request)
-		return err
+		return prepareWindowsSSHGenerationIfObtainable(ctx, request)
 	}
 
 	config, err := windowsOpenSSHConfig(layout, request.OwnerSID)
@@ -1345,7 +1344,12 @@ func installWindowsSSHAfterActivation(ctx context.Context, request Request, layo
 	}
 	config.ServiceExecutable = pinned
 	_, err = setupPaperboatSSH(ctx, config)
-	return err
+	return skipUnobtainableWindowsSSH(ctx, err)
+}
+
+func prepareWindowsSSHGenerationIfObtainable(ctx context.Context, request Request) error {
+	_, err := PrepareWindowsSSHGeneration(ctx, request)
+	return skipUnobtainableWindowsSSH(ctx, err)
 }
 
 // PrepareWindowsSSHGeneration prepares the verified candidate before feature
@@ -1392,8 +1396,7 @@ func prepareWindowsSSHGenerationWhenCarrierPresent(ctx context.Context, request 
 	if err != nil || !present {
 		return err
 	}
-	_, err = PrepareWindowsSSHGeneration(ctx, request)
-	return err
+	return prepareWindowsSSHGenerationIfObtainable(ctx, request)
 }
 
 func windowsCarrierPresentForSSH(ctx context.Context, instance string) (bool, error) {

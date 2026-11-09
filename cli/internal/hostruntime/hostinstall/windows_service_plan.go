@@ -9,7 +9,19 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
 )
+
+// skipUnobtainableWindowsSSH lets an installation, update or repair finish on a machine that cannot supply
+// OpenSSH (no App Installer on Windows Server, LTSC or Sandbox), as Linux and macOS do without sshd: the
+// worker reports managed SSH as not ready and the next install, update or repair prepares it again. Trust,
+// ownership and cancellation failures still abort.
+func skipUnobtainableWindowsSSH(ctx context.Context, err error) error {
+	if err != nil && ctx.Err() == nil && windowsopenssh.Unobtainable(err) {
+		return nil
+	}
+	return err
+}
 
 var standaloneVersionPattern = regexp.MustCompile(`^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]+$`)
 
@@ -158,9 +170,9 @@ func executeWindowsServiceInstallPlan(installSSH, recoverRuntime, installRuntime
 	if installSSH == nil || recoverRuntime == nil || installRuntime == nil || cleanupSSH == nil {
 		return ErrInvalidRequest
 	}
-	// Hostd validates the managed SSH loopback endpoint as it starts. The
-	// service SID used by the host-key ACL is deterministic, so OpenSSH can
-	// be installed before Hostd is first registered.
+	// The worker reconciles the managed SSH loopback endpoint as it starts (and
+	// keeps retrying without it). The service SID used by the host-key ACL is
+	// deterministic, so OpenSSH can be installed before Hostd is first registered.
 	if err := installSSH(); err != nil {
 		return err
 	}

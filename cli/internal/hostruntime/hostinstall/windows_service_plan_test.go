@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
 )
 
 type fakeWindowsServicePlanStep struct {
@@ -228,6 +229,50 @@ func TestWindowsHostServicesInstallSSHBeforeStartingRuntime(t *testing.T) {
 	})
 	if err != nil || !reflect.DeepEqual(events, []string{"ssh", "recover", "runtime"}) {
 		t.Fatalf("events=%q err=%v", events, err)
+	}
+}
+
+// A Windows guest without App Installer aborted pairing at the OpenSSH step (2026-11-10). Like Linux and macOS
+// without sshd, the rest installs; only a machine that cannot supply OpenSSH is let through.
+func TestWindowsPlansContinueWithoutObtainableOpenSSHAndAbortOnTrustFailures(t *testing.T) {
+	cause := errors.New("exit status 1")
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	for name, test := range map[string]struct {
+		ctx      context.Context
+		err      error
+		proceeds bool
+	}{
+		"inventory unavailable":   {context.Background(), errors.Join(windowsopenssh.ErrInstallerUnavailable, cause), true},
+		"package install failed":  {context.Background(), errors.Join(windowsopenssh.ErrInstallFailed, cause), true},
+		"untrusted binary":        {context.Background(), errors.Join(windowsopenssh.ErrUntrustedBinary, cause), false},
+		"foreign service":         {context.Background(), windowsopenssh.ErrServiceOwnership, false},
+		"unavailable and foreign": {context.Background(), errors.Join(windowsopenssh.ErrInstallerUnavailable, windowsopenssh.ErrServiceOwnership), false},
+		"unclassified":            {context.Background(), cause, false},
+		"cancelled installation":  {cancelled, errors.Join(windowsopenssh.ErrInstallerUnavailable, cause), false},
+	} {
+		for plan, run := range map[string]func(ssh, phase func() error, cleanup func() error) error{
+			"install": func(ssh, phase, cleanup func() error) error {
+				return executeWindowsServiceInstallPlan(ssh, phase, phase, cleanup)
+			},
+			"repair": func(ssh, phase, cleanup func() error) error {
+				return executeWindowsServiceRepairPlan(ssh, phase, phase, phase, cleanup)
+			},
+		} {
+			phases, cleaned := 0, false
+			err := run(
+				func() error { return skipUnobtainableWindowsSSH(test.ctx, test.err) },
+				func() error { phases++; return nil },
+				func() error { cleaned = true; return nil },
+			)
+			if test.proceeds {
+				if err != nil || phases == 0 || cleaned {
+					t.Errorf("%s %s: err=%v phases=%d cleaned=%t, want the runtime installed without OpenSSH", name, plan, err, phases, cleaned)
+				}
+			} else if !errors.Is(err, test.err) || phases != 0 {
+				t.Errorf("%s %s: err=%v phases=%d, want the installation aborted with the cause", name, plan, err, phases)
+			}
+		}
 	}
 }
 

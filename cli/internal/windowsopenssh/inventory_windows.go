@@ -17,11 +17,11 @@ func collectInventory(ctx context.Context, config Config) (InventoryRecord, erro
 	output, err := config.Runner.Run(probeCtx, "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script)
 	cancel()
 	if err != nil {
-		return InventoryRecord{}, operationFailure("could not read Windows OpenSSH inventory", nil, err)
+		return InventoryRecord{}, operationFailure("could not read Windows OpenSSH inventory", ErrInstallerUnavailable, err)
 	}
 	var record InventoryRecord
 	if err := json.Unmarshal(output, &record); err != nil {
-		return InventoryRecord{}, fmt.Errorf("decode OpenSSH inventory: %w", err)
+		return InventoryRecord{}, errors.Join(ErrInstallerUnavailable, fmt.Errorf("decode OpenSSH inventory: %w", err))
 	}
 	// Resolve only the registered Microsoft-signed App Installer executable. Do
 	// not inspect package registration by running a PATH-resolved winget.exe.
@@ -96,7 +96,9 @@ func inventoryPowerShell(config Config) string {
 		"function A($p){$f=[IO.File]::Open($p,'Open','Read','Read');try{$r=[IO.BinaryReader]::new($f);if($r.ReadUInt16()-ne 0x5a4d){return ''};$f.Position=0x3c;$o=$r.ReadUInt32();$f.Position=$o;if($r.ReadUInt32()-ne 0x00004550){return ''};switch($r.ReadUInt16()){0x8664{'amd64'};0xaa64{'arm64'};default{''}}}finally{$f.Dispose()}}",
 		"function B($p){$i=Get-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue;if($null -eq $i){return [pscustomobject]@{path=$p;exists=$false;regular=$false;reparse_point=$false;signature_valid=$false;publisher='';version='';architecture=''}};$s=Get-AuthenticodeSignature -LiteralPath $p;$v=$i.VersionInfo.FileVersion;[pscustomobject]@{path=$p;exists=$true;regular=(-not $i.PSIsContainer);reparse_point=(($i.Attributes -band [IO.FileAttributes]::ReparsePoint)-ne 0);signature_valid=($s.Status -eq 'Valid');publisher=([string]$s.SignerCertificate.Subject);version=([string]$v);architecture=(A $p)}}",
 		"function S($n){$x=Get-CimInstance Win32_Service -Filter (\"Name='\"+$n+\"'\") -ErrorAction SilentlyContinue;if($null -eq $x){return [pscustomobject]@{name=$n;exists=$false;state='';process_id=0;path_name=''}};[pscustomobject]@{name=$n;exists=$true;state=([string]$x.State);process_id=[uint32]$x.ProcessId;path_name=([string]$x.PathName)}}",
-		"$cap=Get-WindowsCapability -Online -Name 'OpenSSH.Server*' -ErrorAction SilentlyContinue|Where-Object {$_.State -eq 'Installed'}|Select-Object -First 1",
+		// The capability is data only. Its query can throw despite -ErrorAction (0x80072ee6 on a clean
+		// Windows 11 guest, 2026-11-10); that counts as absent.
+		"$cap=$null;try{$cap=Get-WindowsCapability -Online -Name 'OpenSSH.Server*' -ErrorAction SilentlyContinue|Where-Object {$_.State -eq 'Installed'}|Select-Object -First 1}catch{$cap=$null}",
 		"$root=" + installRoot,
 		"[pscustomobject]@{winget_registered=$false;winget_version='';capability_present=($null -ne $cap);system_sshd=(B (Join-Path $env:WINDIR 'System32\\OpenSSH\\sshd.exe'));program_files_sshd=(B (Join-Path $root 'sshd.exe'));system_service=(S 'sshd');paperboat_service=(S " + serviceName + ")}|ConvertTo-Json -Compress -Depth 4",
 	}, ";")

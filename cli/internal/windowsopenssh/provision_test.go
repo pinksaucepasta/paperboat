@@ -103,6 +103,61 @@ func TestProvisionDoesNotFallBackWhenWingetIsUnavailable(t *testing.T) {
 	}
 }
 
+// noPackageClientRunner is a machine with neither App Installer nor the WinGet PowerShell module: every
+// command but the firewall snapshot fails (Windows Sandbox, Server, LTSC).
+type noPackageClientRunner struct{}
+
+func (noPackageClientRunner) Run(_ context.Context, _ string, arguments ...string) ([]byte, error) {
+	if len(arguments) > 0 && strings.Contains(arguments[len(arguments)-1], "Convert-PaperboatFirewallRule") {
+		return []byte(`{"captured_at":"2026-08-20T00:00:00Z","system_sshd":false,"profiles":[],"openssh_inbound":[]}`), nil
+	}
+	return []byte("private transcript"), errors.New("exit status 1")
+}
+
+func TestProvisionWithoutAnyPackageClientIsUnobtainable(t *testing.T) {
+	root := t.TempDir()
+	_, err := Provision(context.Background(), Config{Platform: "windows", InstallRoot: filepath.Join(root, "OpenSSH"), StateRoot: filepath.Join(root, "state"), ApprovedVersion: ApprovedVersion, ExpectedPublisher: "Microsoft", Port: 38222, Runner: noPackageClientRunner{}})
+	if !errors.Is(err, ErrInstallerUnavailable) || !Unobtainable(err) {
+		t.Fatalf("provision without a package client = %v, want unobtainable", err)
+	}
+}
+
+func TestProvisionOfUntrustedBinariesIsNotUnobtainable(t *testing.T) {
+	root := t.TempDir()
+	// The package client reports success and leaves nothing verifiable behind.
+	_, err := Provision(context.Background(), Config{Platform: "windows", WingetPath: "winget.exe", InstallRoot: filepath.Join(root, "OpenSSH"), StateRoot: filepath.Join(root, "state"), ApprovedVersion: ApprovedVersion, ExpectedPublisher: "Microsoft", Port: 38222, Runner: &fakeRunner{}})
+	if !errors.Is(err, ErrUntrustedBinary) || Unobtainable(err) {
+		t.Fatalf("provision of unverifiable binaries = %v, want untrusted and not unobtainable", err)
+	}
+}
+
+func TestUnobtainableNeverCoversTrustOrOwnershipFailures(t *testing.T) {
+	cause := errors.New("exit status 1")
+	for name, test := range map[string]struct {
+		err  error
+		want bool
+	}{
+		"no error":                {nil, false},
+		"unclassified":            {cause, false},
+		"installer unavailable":   {operationFailure("no package client", ErrInstallerUnavailable, cause), true},
+		"inventory unavailable":   {errors.Join(ErrInstallerUnavailable, cause, cause), true},
+		"package install failed":  {operationFailure("install failed", ErrInstallFailed, cause), true},
+		"invalid configuration":   {ErrInvalidConfig, false},
+		"untrusted binary":        {operationFailure("signature", ErrUntrustedBinary, cause), false},
+		"version mismatch":        {operationFailure("version", ErrVersionMismatch, cause), false},
+		"conflicting install":     {ErrConflictingInstall, false},
+		"service ownership":       {ErrServiceOwnership, false},
+		"service unhealthy":       {ErrServiceUnhealthy, false},
+		"firewall ownership":      {errors.Join(ErrRepairFailed, ErrFirewallOwnership), false},
+		"unavailable and foreign": {errors.Join(ErrInstallerUnavailable, ErrServiceOwnership), false},
+		"failed and untrusted":    {errors.Join(ErrInstallFailed, operationFailure("signature", ErrUntrustedBinary, cause)), false},
+	} {
+		if got := Unobtainable(test.err); got != test.want {
+			t.Errorf("%s: Unobtainable(%v) = %t, want %t", name, test.err, got, test.want)
+		}
+	}
+}
+
 func TestWriteServiceConfigIsLoopbackOnlyAndKeyOnly(t *testing.T) {
 	root := t.TempDir()
 	path, err := WriteServiceConfig(ServiceConfig{StateRoot: root, SSHDPath: filepath.Join(root, "sshd.exe"), SFTPPath: filepath.Join(root, "sftp-server.exe"), AuthorizedKeys: filepath.Join(root, "authorized_keys", "paperboat"), Port: 38222})

@@ -36,3 +36,11 @@ func TestNoInstalledWingetPackageRequiresAuthoritativeMessage(t *testing.T) {
 		}
 	}
 }
+
+// A clean Windows 11 guest threw 0x80072ee6 from the capability query and pairing aborted (2026-11-10).
+func TestInventoryTreatsThrowingCapabilityQueryAsAbsent(t *testing.T) {
+	script := inventoryPowerShell(Config{InstallRoot: `C:\Program Files\OpenSSH`})
+	if !strings.Contains(script, "$cap=$null;try{$cap=Get-WindowsCapability -Online -Name 'OpenSSH.Server*'") || !strings.Contains(script, "}catch{$cap=$null};") {
+		t.Fatalf("capability query can abort the inventory: %s", script)
+	}
+}

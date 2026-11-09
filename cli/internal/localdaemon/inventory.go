@@ -544,6 +544,11 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 			}
 		} else if generation > 0 && machine.SSHAuthority.TargetGeneration != generation {
 			status.Health = []localapi.HealthItem{{Code: "ssh_target_not_ready", Severity: "warning", Title: "SSH target is not ready", Recovery: "Ensure the machine's existing SSH service is listening on loopback", ETag: "ssh_target_not_ready"}}
+			if machine.Platform == "windows" {
+				// Windows has no SSH service of its own to point at: Paperboat installs OpenSSH there and
+				// pairing finishes without it when the machine cannot supply the package.
+				status.Health[0].Title, status.Health[0].Recovery = "Managed SSH is not ready", managedSSHWindowsTargetRecovery
+			}
 		} else if generation > 0 && machine.SSHAuthority.HostKeyGeneration == 0 && machine.SSHAuthority.HostKeyInUse {
 			status.Health = []localapi.HealthItem{hostKeyInUseHealth(machine.SSHAuthority.HostKeyInUseBy)}
 		} else if generation > 0 && machine.SSHAuthority.HostKeyGeneration == 0 {
@@ -569,6 +574,9 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 	})
 	return result
 }
+
+const managedSSHWindowsTargetRecovery = "If this stays, install \"App Installer\" (winget) from the Microsoft Store " +
+	"on the machine, then run pb doctor --repair there"
 
 // A machine shows this from pairing until its host service has installed and published the keys (about a minute
 // on a fresh container, dadape ltc-d7 2026-10-27).

@@ -523,10 +523,7 @@ func reconcileInstalledCarrier(ctx context.Context, instance string, pinReferenc
 		if err := waitCarrierReady(ctx, desired); err != nil {
 			return err
 		}
-		if _, err := PrepareWindowsSSHGeneration(ctx, request); err != nil {
-			return err
-		}
-		return nil
+		return prepareWindowsSSHGenerationIfObtainable(ctx, request)
 	})
 }
 

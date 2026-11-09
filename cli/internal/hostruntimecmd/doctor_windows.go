@@ -93,7 +93,12 @@ func collectWindowsDoctor(ctx context.Context) doctorReport {
 	sshConfig := windowsopenssh.DefaultConfig(nil)
 	sshConfig.OwnerSID = instance.config.OwnerSID
 	sshConfig = windowsOpenSSHBootstrapConfig(sshConfig, instance.name)
-	if err := windowsopenssh.CheckFirewallOwnership(ctx, sshConfig); err != nil {
+	// Setup finishes without OpenSSH on a machine that cannot supply it (windowsopenssh.Unobtainable): there is
+	// then no SSH generation and no firewall state to own. An installation awaiting enrollment has neither yet.
+	if generations, err := windowsopenssh.ListGenerations(ctx, instance.config.OwnerSID); err == nil && len(generations) == 0 && !instance.config.EnrollmentPending {
+		add("managed_ssh", "warning", "Managed SSH is not ready: Paperboat could not install OpenSSH on this machine. Terminal, exec and files work.",
+			"Install \"App Installer\" (winget) from the Microsoft Store, or "+windowsopenssh.PackageID+" "+windowsopenssh.ApprovedVersion+" into "+sshConfig.InstallRoot+", then run pb doctor --repair.")
+	} else if err := windowsopenssh.CheckFirewallOwnership(ctx, sshConfig); err != nil {
 		report.causes = append(report.causes, err)
 		add("openssh_firewall", "error", "Paperboat OpenSSH firewall ownership is missing or unsafe.", "Run pb doctor --repair from an elevated prompt.")
 	} else {
