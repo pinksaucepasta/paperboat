@@ -133,7 +133,7 @@ func uninstallValidated(ctx context.Context, request Request, paths installPaths
 		if err := restoreUserLinger(ctx, request, paths); err != nil {
 			return withUninstallStage("uninstall_linger", err)
 		}
-		return withUninstallStage("uninstall_files", errors.Join(removeCommandLink(request, paths), removeInstalledFiles(ctx, paths)))
+		return withUninstallStage("uninstall_files", errors.Join(removeCommandLinkUnlessKept(ctx, request, paths), removeInstalledFiles(ctx, paths)))
 	}
 	hostd, updater, err := pendingInstallers(request, paths)
 	if err != nil {
@@ -204,10 +204,7 @@ func finalizeUninstall(ctx context.Context, request Request, paths installPaths,
 		return withUninstallStage("uninstall_linger", err)
 	}
 	// A reset retains its CLI slot (ResetCLIForCurrentAccount), so the account keeps the link to it: `pb pair` follows.
-	var linkErr error
-	if keep, _ := ctx.Value(resetCLIContextKey{}).(string); keep != paths.worker {
-		linkErr = removeCommandLink(request, paths)
-	}
+	linkErr := removeCommandLinkUnlessKept(ctx, request, paths)
 	journal, journalErr := loadJournal(paths.journal)
 	if journalErr == nil {
 		return withUninstallStage("uninstall_files", errors.Join(linkErr, rollbackFiles(paths, journal)))
@@ -216,6 +213,15 @@ func finalizeUninstall(ctx context.Context, request Request, paths installPaths,
 		return withUninstallStage("uninstall_journal", errors.Join(linkErr, journalErr))
 	}
 	return withUninstallStage("uninstall_files", errors.Join(linkErr, removeInstalledFiles(ctx, paths)))
+}
+
+// removeCommandLinkUnlessKept leaves the link when a reset retains this installation's CLI slot
+// (ResetCLIForCurrentAccount): the account keeps the link to it, so `pb pair` follows.
+func removeCommandLinkUnlessKept(ctx context.Context, request Request, paths installPaths) error {
+	if keep, _ := ctx.Value(resetCLIContextKey{}).(string); keep == paths.worker {
+		return nil
+	}
+	return removeCommandLink(request, paths)
 }
 
 // removeCommandLink removes the ~/.local/bin/pb link the install made, so the account is not left with a `pb` that

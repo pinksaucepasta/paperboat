@@ -552,6 +552,42 @@ func TestResetNativeCleanupRetainsOnlyCLI(t *testing.T) {
 	}
 }
 
+// Reset on a machine that never paired keeps the CLI slot, and the ~/.local/bin/pb link to it with it
+// (pbvm2: `pb pair` after the reset found no pb); a plain uninstall of the same machine removes the link.
+func TestResetOfAnEnrollmentPendingMachineKeepsTheCommandLink(t *testing.T) {
+	for name, keepSlot := range map[string]bool{"reset": true, "uninstall": false} {
+		t.Run(name, func(t *testing.T) {
+			root, home := t.TempDir(), t.TempDir()
+			worker := filepath.Join(root, "pb")
+			metadata := filepath.Join(root, "install-metadata.json")
+			for _, path := range []string{worker, metadata} {
+				if err := os.WriteFile(path, []byte("owned"), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			link := filepath.Join(home, ".local", "bin", "pb")
+			if err := os.MkdirAll(filepath.Dir(link), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(worker, link); err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			if keepSlot {
+				ctx = context.WithValue(ctx, resetCLIContextKey{}, worker)
+			}
+			paths := installPaths{root: root, worker: worker, metadata: metadata}
+			if err := uninstallValidated(ctx, Request{EnrollmentPending: true, Home: home}, paths); err != nil {
+				t.Fatal(err)
+			}
+			_, err := os.Readlink(link)
+			if kept := err == nil; kept != keepSlot {
+				t.Fatalf("command link kept=%v (%v), want %v", kept, err, keepSlot)
+			}
+		})
+	}
+}
+
 func TestInstallLockRecreatesResetStateWithoutRepairingUnsafeEntries(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("requires root-owned installation custody")
