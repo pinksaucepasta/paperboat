@@ -222,3 +222,31 @@ func (m *Manager) failCommit(journal updateflow.Journal, signed Release, cause e
 	}
 	return cause
 }
+
+// EndRevokedCommittedCandidate ends an approved attempt whose candidate the native owner already installed and
+// committed (committed is the installed source) but whose finish current signed policy refuses: it never installs
+// a revoked version in either direction, and retrying the same refusal would block every later update. The journal
+// goes idle on the installed version, the candidate quarantined, with release_revoked, so status and doctor say
+// it needs attention and a newer authorized release supersedes it through the normal download and approval. It
+// does nothing, and reports false, unless the journal is that approved candidate and committed is exactly it.
+func (m *Manager) EndRevokedCommittedCandidate(ctx context.Context, committed installsource.Source) (bool, error) {
+	if ctx == nil {
+		return false, ErrInvalidConfig
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	journal, err := updateflow.Load(m.config.StatePath)
+	if err != nil {
+		return false, err
+	}
+	if journal.Stage != updateflow.StageAwaitingApproval || journal.ApprovedCandidateID == "" || !m.candidateInstalled(journal) ||
+		committed.Version != journal.CandidateVersion || committed.SHA256 != journal.CandidateDigest || committed.Length != journal.CandidateLength || committed.Verify(m.config.Binary) != nil {
+		return false, nil
+	}
+	active, err := InstalledBaseline(committed, m.config.Binary)
+	if err != nil {
+		return false, err
+	}
+	m.setActive(active)
+	return true, m.write(m.idleJournal(journal, updateflow.FailureRevoked, journal.CandidateVersion))
+}

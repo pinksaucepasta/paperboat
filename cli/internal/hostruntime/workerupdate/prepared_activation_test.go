@@ -491,3 +491,66 @@ func TestApprovedCandidateSupersededWhileStagedIsAbandonedWithItsPayload(t *test
 		t.Fatalf("the new candidate cannot be downloaded after the reset: %v", err)
 	}
 }
+
+// A candidate the native owner already committed whose finish current signed policy refuses (it was revoked, or the
+// version it replaced was) ends visibly instead of retrying forever: idle on the installed version, quarantined,
+// release_revoked, and a newer authorized release can be downloaded to supersede it. An uncommitted or still staged
+// candidate is left alone: the native owner (or the superseded path) owns it.
+func TestRevokedCommittedCandidateEndsTerminalAndIsSupersedable(t *testing.T) {
+	f := newFixture(t)
+	var completeErr error
+	if f.candidate, completeErr = completeJournalRelease(f.candidate); completeErr != nil {
+		t.Fatal(completeErr)
+	}
+	f.manager.config.FinalizePrepared = func(context.Context, installsource.Source) error { return errors.New("manual refresh is pending") }
+	f.manager.config.ApplyPrepared = func(ctx context.Context, a PreparedActivation) (installsource.Source, error) {
+		if err := a.Prepare(ctx); err != nil {
+			return installsource.Source{}, err
+		}
+		body, err := os.ReadFile(a.Executable)
+		if err != nil {
+			return installsource.Source{}, err
+		}
+		if err := os.WriteFile(f.paths.current, body, 0700); err != nil {
+			return installsource.Source{}, err
+		}
+		if err := os.Remove(a.Executable); err != nil {
+			return installsource.Source{}, err
+		}
+		f.hostd.active = hostdproto.Status{State: hostdproto.StateActive, WorkerID: workerID(a.Source.Version), APIVersion: 1, Epoch: 42}
+		if err := a.Validate(ctx); err != nil {
+			return installsource.Source{}, err
+		}
+		return a.Source, nil
+	}
+	previous := f.manager.active
+	if _, err := activatePrepared(context.Background(), f.manager, f.candidate); err == nil {
+		t.Fatal("the failing finish was not reported")
+	}
+	f.manager.setActive(previous) // the helper restarts on the previous release
+	committed := f.manager.candidateSource(f.candidate)
+	// A different committed source is not this candidate.
+	other := committed
+	other.Version = "2026.08.18.9"
+	if ended, err := f.manager.EndRevokedCommittedCandidate(context.Background(), other); ended || err != nil {
+		t.Fatalf("a source that is not the candidate ended the attempt: %v %v", ended, err)
+	}
+	if ended, err := f.manager.EndRevokedCommittedCandidate(context.Background(), committed); !ended || err != nil {
+		t.Fatalf("the revoked committed candidate was kept: %v %v", ended, err)
+	}
+	j, err := updateflow.Load(f.paths.journal)
+	if err != nil || j.Stage != updateflow.StageIdle || j.LastFailure != updateflow.FailureRevoked || j.NativeCommitted || j.ApprovedCandidateID != "" || j.ActiveVersion != f.candidate.Version || j.CandidateVersion != f.candidate.Version {
+		t.Fatalf("not terminal on the installed version: %+v %v", j, err)
+	}
+	if state, err := f.manager.TransactionState(); err != nil || !state.Quarantined || state.Failure != updateflow.FailureRevoked || state.CommitPending {
+		t.Fatalf("terminal state not reported: %+v %v", state, err)
+	}
+	// Supersedable: a newer release downloads and is offered for approval.
+	body, err := os.ReadFile(f.paths.current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if candidate, err := f.manager.Prepare(context.Background(), release("2026.08.18.3", body)); err != nil || candidate.ID == "" {
+		t.Fatalf("a newer release cannot supersede the ended attempt: %+v %v", candidate, err)
+	}
+}

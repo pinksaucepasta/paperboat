@@ -792,7 +792,7 @@ func TestActivationHelperHoldsTheLockWhileRetiring(t *testing.T) {
 	}
 }
 
-type abandonerFixture struct{ unavailable, superseded int }
+type abandonerFixture struct{ unavailable, superseded, endedRevoked int }
 
 func (f *abandonerFixture) AbandonUnavailableCandidate(context.Context) (bool, error) {
 	f.unavailable++
@@ -802,10 +802,15 @@ func (f *abandonerFixture) AbandonSupersededCandidate(context.Context) (bool, er
 	f.superseded++
 	return true, nil
 }
+func (f *abandonerFixture) EndRevokedCommittedCandidate(context.Context, installsource.Source) (bool, error) {
+	f.endedRevoked++
+	return true, nil
+}
 
 // A resolve failure that a retry cannot fix (the candidate was superseded or revoked after approval) ends the
-// attempt; before this the handoff stayed Started and repeated it on every helper restart. A refusal after
-// native activation began is left to native recovery, and a transient error retries.
+// attempt; before this the handoff stayed Started and repeated it on every helper restart. A refusal after native
+// activation began (candidate or previous revoked) ends it only when the native owner already committed the
+// candidate, so nothing half-replaced is left to recover; otherwise native recovery owns it. A transient error retries.
 func TestDeterministicResolveFailuresEndTheAttemptButNativeOwnedAndTransientOnesDoNot(t *testing.T) {
 	original := workerupdate.Release{Version: "2026.10.14.1", SHA256: strings.Repeat("a", 64), Length: 1, Platform: runtime.GOOS, Architecture: runtime.GOARCH, HostdAPIMin: 1, HostdAPIMax: 1, RuntimeAPIMin: 1, RuntimeAPIMax: 1}
 	receipt, err := workerupdate.PreparedCandidateForRelease(original)
@@ -836,19 +841,24 @@ func TestDeterministicResolveFailuresEndTheAttemptButNativeOwnedAndTransientOnes
 		newer.Version = "2026.10.14.2"
 		return newer, true, nil
 	}
-	h := handoff()
+	committed := func() (installsource.Source, error) { return installsource.Source{Version: original.Version}, nil }
+	uncommitted := func() (installsource.Source, error) { return installsource.Source{}, ErrInstallationPending }
+	previous := handoff().Previous.Version
 	for _, tc := range []struct {
-		name               string
-		native             bool
-		resolve            func(context.Context) (workerupdate.Release, bool, error)
-		authorize          func(context.Context, string, string, string) error
-		unavailable, newer int
+		name      string
+		native    bool
+		resolve   func(context.Context) (workerupdate.Release, bool, error)
+		authorize func(context.Context, string, string, string) error
+		installed func() (installsource.Source, error)
+		want      abandonerFixture
 	}{
-		{"candidate superseded", false, resolveNewer, deny(""), 0, 1},
-		{"candidate revoked before native activation", false, resolveRevoked, deny(""), 0, 1},
-		{"network error retries", false, resolveNetwork, deny(""), 0, 0},
-		{"candidate revoked after native activation began", true, nil, deny(original.Version), 0, 0},
-		{"previous revoked after native activation began", true, nil, deny(h.Previous.Version), 0, 0},
+		{"candidate superseded", false, resolveNewer, deny(""), uncommitted, abandonerFixture{superseded: 1}},
+		{"candidate revoked before native activation", false, resolveRevoked, deny(""), uncommitted, abandonerFixture{superseded: 1}},
+		{"network error retries", false, resolveNetwork, deny(""), uncommitted, abandonerFixture{}},
+		{"candidate revoked after native commit", true, nil, deny(original.Version), committed, abandonerFixture{endedRevoked: 1}},
+		{"previous revoked after native commit", true, nil, deny(previous), committed, abandonerFixture{endedRevoked: 1}},
+		{"candidate revoked, native not committed", true, nil, deny(original.Version), uncommitted, abandonerFixture{}},
+		{"previous revoked, native not committed", true, nil, deny(previous), uncommitted, abandonerFixture{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := resolveUnixActivationRelease(context.Background(), handoff(), original, tc.native, tc.resolve, tc.authorize)
@@ -856,9 +866,10 @@ func TestDeterministicResolveFailuresEndTheAttemptButNativeOwnedAndTransientOnes
 				t.Fatal("resolve succeeded")
 			}
 			f := &abandonerFixture{}
-			abandoned, abandonErr := abandonCandidate(context.Background(), f, err)
-			if abandonErr != nil || abandoned != (tc.newer > 0) || f.unavailable != tc.unavailable || f.superseded != tc.newer {
-				t.Fatalf("abandoned=%v err=%v calls=%+v for %v", abandoned, abandonErr, f, err)
+			abandoned, abandonErr := abandonCandidate(context.Background(), f, err, tc.installed)
+			wantEnded := tc.want.superseded+tc.want.unavailable+tc.want.endedRevoked > 0
+			if abandonErr != nil || abandoned != wantEnded || *f != tc.want {
+				t.Fatalf("abandoned=%v err=%v calls=%+v, want %+v for %v", abandoned, abandonErr, *f, tc.want, err)
 			}
 		})
 	}

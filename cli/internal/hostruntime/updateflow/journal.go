@@ -60,6 +60,9 @@ const (
 	// FailureCommit ends an update whose native installation committed but whose hostd ledger commit or
 	// finalization kept failing: the candidate is installed, quarantined, and the machine needs attention.
 	FailureCommit Failure = "commit_failed"
+	// FailureRevoked ends an update whose candidate was natively committed but whose finish was refused
+	// because current signed policy no longer permits the candidate or the version it replaced.
+	FailureRevoked Failure = "release_revoked"
 )
 
 // ActivationPolicy is the verified static policy needed to resume a transaction.
@@ -349,7 +352,7 @@ func knownStage(stage Stage) bool {
 	return false
 }
 func knownFailure(f Failure) bool {
-	for _, value := range []Failure{FailureNone, FailureVerification, FailureCompatibility, FailureCandidate, FailureCanary, FailureDrain, FailureHealth, FailureRollback, FailureContradictoryJournal, FailureCommit} {
+	for _, value := range []Failure{FailureNone, FailureVerification, FailureCompatibility, FailureCandidate, FailureCanary, FailureDrain, FailureHealth, FailureRollback, FailureContradictoryJournal, FailureCommit, FailureRevoked} {
 		if value == f {
 			return true
 		}

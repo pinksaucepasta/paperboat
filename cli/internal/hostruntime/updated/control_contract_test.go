@@ -16,6 +16,7 @@ func TestUpdateHealthReportsAnUpdateWhoseCommitNeverFinished(t *testing.T) {
 		want        string
 	}{
 		{"commit failed", workerupdate.TransactionState{Failure: updateflow.FailureCommit, Quarantined: true}, "recovery_required"},
+		{"release revoked", workerupdate.TransactionState{Failure: updateflow.FailureRevoked, Quarantined: true}, "recovery_required"},
 		{"rollback failed", workerupdate.TransactionState{Failure: updateflow.FailureRollback}, "recovery_required"},
 		{"commit being retried", workerupdate.TransactionState{CommitPending: true}, "healthy"},
 		{"candidate quarantined", workerupdate.TransactionState{Failure: updateflow.FailureHealth, Quarantined: true}, "healthy"},

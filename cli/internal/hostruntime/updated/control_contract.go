@@ -65,7 +65,7 @@ type ControlResponse struct {
 // shows a rollback that failed, an installed update whose commit never finished, or contradicts itself, otherwise "healthy". A pending activation and a rejected or
 // quarantined candidate leave the running version fine, so they are not faults.
 func (r ControlResponse) UpdateHealth() string {
-	if r.Status != "ok" || r.Transaction.Failure == updateflow.FailureRollback || r.Transaction.Failure == updateflow.FailureContradictoryJournal || r.Transaction.Failure == updateflow.FailureCommit {
+	if r.Status != "ok" || r.Transaction.Failure == updateflow.FailureRollback || r.Transaction.Failure == updateflow.FailureContradictoryJournal || r.Transaction.Failure == updateflow.FailureCommit || r.Transaction.Failure == updateflow.FailureRevoked {
 		return "recovery_required"
 	}
 	return "healthy"

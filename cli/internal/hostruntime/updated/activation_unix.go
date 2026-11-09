@@ -529,7 +529,7 @@ func (s *Service) runActivationHelperOnce(ctx context.Context) (resultErr error)
 			// An earlier attempt that was rolled back consumed the approved payload, so this
 			// start can never activate it. End the attempt (journal reset to idle, installation
 			// left on the previous version) instead of failing the same way on every restart.
-			abandoned, abandonErr := abandonCandidate(ctx, manager, resolveErr)
+			abandoned, abandonErr := abandonCandidate(ctx, manager, resolveErr, s.config.LoadInstalledSource)
 			if abandonErr != nil || !abandoned {
 				return errors.Join(resolveErr, abandonErr)
 			}
@@ -895,15 +895,26 @@ var errNativeActivationStarted = errors.New("native activation already started")
 type candidateAbandoner interface {
 	AbandonUnavailableCandidate(context.Context) (bool, error)
 	AbandonSupersededCandidate(context.Context) (bool, error)
+	EndRevokedCommittedCandidate(context.Context, installsource.Source) (bool, error)
 }
 
 // abandonCandidate ends an approved attempt that can never activate and cannot succeed on a retry:
 // its payload is gone, or a newer release or a revocation ruled it out before native activation began.
-// Any other cause (a network error, a timeout) is not abandoned and retries.
-func abandonCandidate(ctx context.Context, manager candidateAbandoner, cause error) (bool, error) {
+// A policy refusal after native activation began ends it only when the native owner already committed
+// the candidate (installed returns that committed source): nothing half-replaced is left to recover,
+// and recovery never installs a revoked version in either direction. Any other cause (a network
+// error, a timeout) is not abandoned and retries, and so is a native-owned attempt that is not committed.
+func abandonCandidate(ctx context.Context, manager candidateAbandoner, cause error, installed func() (installsource.Source, error)) (bool, error) {
 	switch {
 	case errors.Is(cause, errNativeActivationStarted):
-		return false, nil
+		if !errors.Is(cause, workerupdate.ErrReleaseRevoked) || installed == nil {
+			return false, nil
+		}
+		source, err := installed()
+		if err != nil {
+			return false, nil // uncommitted or unreadable: native recovery owns it
+		}
+		return manager.EndRevokedCommittedCandidate(ctx, source)
 	case errors.Is(cause, workerupdate.ErrPreparedCandidate):
 		return manager.AbandonUnavailableCandidate(ctx)
 	case errors.Is(cause, ErrCandidateChanged), errors.Is(cause, workerupdate.ErrReleaseRevoked):
