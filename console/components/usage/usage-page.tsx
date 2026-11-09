@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils"
 import { useListScope, ViewToggle } from "@/components/list-toolbar"
 import { useCurrentMachine } from "@/components/machine-shell"
 import { smoothPath } from "@/components/usage-limits"
+import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useTimeFormat } from "@/lib/use-time-format"
 
@@ -38,6 +39,15 @@ const kindLabels: Record<string, string> = {
   preview: "Preview",
   preview_lease: "Preview",
   file_transfer: "Files",
+  // Native consumers (server/internal/resourceusage/native.go).
+  terminal: "Terminal",
+  exec: "Commands",
+  ssh: "SSH",
+  file: "Files",
+  private_http: "Private access",
+  private_tcp: "Private access",
+  inspector: "Request inspector",
+  config_compare: "Config sync",
 }
 
 const usageForQuery = (workspace: string, period: UsagePeriod, machineId: string | null) =>
@@ -98,12 +108,17 @@ export function UsagePage({ machine: tabMachine }: { machine?: Machine }) {
   )
 }
 
+const topResources = 10
+
 function Loaded({ usage, period, showMachine }: { usage: Usage; period: UsagePeriod; showMachine: boolean }) {
   const byPath = split(usage)
   const total = usage.totals.upload_bytes + usage.totals.download_bytes
   const resources = [...usage.resources]
     .map((resource) => ({ resource, total: resource.upload_bytes + resource.download_bytes }))
     .sort((a, b) => b.total - a.total)
+  // The biggest few answer "what used my bandwidth"; the long tail opens on request.
+  const [all, setAll] = useState(false)
+  const shown = all ? resources : resources.slice(0, topResources)
 
   return (
     <>
@@ -152,7 +167,7 @@ function Loaded({ usage, period, showMachine }: { usage: Usage; period: UsagePer
       )}
 
       <div className="flex flex-col gap-3">
-        <h2 className="text-sm font-medium">By resource</h2>
+        <h2 className="text-sm font-medium">{resources.length > topResources ? "Top resources" : "By resource"}</h2>
         <table className="w-full table-fixed text-sm">
           <colgroup>
             <col />
@@ -173,7 +188,7 @@ function Loaded({ usage, period, showMachine }: { usage: Usage; period: UsagePer
             </tr>
           </thead>
           <tbody className="divide-y divide-divider border-b border-divider">
-            {resources.map(({ resource, total: bytes }) => (
+            {shown.map(({ resource, total: bytes }) => (
               <tr
                 key={`${resource.resource_kind}:${resource.resource_id}:${resource.resource_route_id ?? ""}:${resource.machine_id}`}
                 className="[&>td]:h-14 [&>td]:px-3"
@@ -216,6 +231,11 @@ function Loaded({ usage, period, showMachine }: { usage: Usage; period: UsagePer
         </table>
         {!resources.length && (
           <p className="py-8 text-center text-sm text-muted-foreground">No traffic in this period.</p>
+        )}
+        {resources.length > topResources && (
+          <Button variant="secondary" className="self-start" onClick={() => setAll(!all)}>
+            {all ? `Show top ${topResources}` : `Show all ${resources.length}`}
+          </Button>
         )}
       </div>
     </>
