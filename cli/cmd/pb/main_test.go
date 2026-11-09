@@ -763,3 +763,33 @@ func TestGroupsExecuteDeclaredFlagsIntoActions(t *testing.T) {
 		})
 	}
 }
+
+// F14-09/C216: a malformed approval ID and an unreadable --from source are refused with what is wrong and what to run, before any
+// request is made, not with the generic "could not finish the command".
+func TestUpdateRefusesABadApprovalIDAndAnUnreadableSourceWithAClearMessage(t *testing.T) {
+	run := func(args ...string) error {
+		command, _, err := newRootCommand().Find([]string{"update"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for index := 0; index+1 < len(args); index += 2 {
+			if err := command.Flags().Set(args[index], args[index+1]); err != nil {
+				t.Fatal(err)
+			}
+		}
+		command.SetContext(context.Background())
+		command.SetOut(&bytes.Buffer{})
+		command.SetErr(&bytes.Buffer{})
+		return actionUpdate(command, nil)
+	}
+	err := run("approve", "bogus")
+	var rejection commandRejection
+	if !errors.As(err, &rejection) || rejection.reason != commandRejectUpdateApprovalID || !strings.Contains(err.Error(), "64-character") || !strings.Contains(err.Error(), "pb update --approve") {
+		t.Fatalf("a malformed approval ID: %v", err)
+	}
+	missing := filepath.Join(t.TempDir(), "missing-update")
+	err = run("from", missing)
+	if !errors.As(err, &rejection) || rejection.reason != commandRejectUpdateSource || !strings.Contains(err.Error(), "--from takes the path") || !strings.Contains(err.Error(), "Nothing was changed") {
+		t.Fatalf("an unreadable source: %v", err)
+	}
+}

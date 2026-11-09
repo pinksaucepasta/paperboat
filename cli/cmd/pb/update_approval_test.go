@@ -245,7 +245,8 @@ func TestUpdateApprovalFlowStagesAndInstallsOnlyTheReviewedCandidate(t *testing.
 	t.Run("malformed approval is rejected before updater access", func(t *testing.T) {
 		fixture := startUpdateApprovalControlFixture(t)
 		_, _, err := runUpdateApprovalCommand(t, fixture, []string{"update", "--approve", "not-a-candidate"}, "", false)
-		if err == nil || !strings.Contains(err.Error(), "invalid paperboat-updated control request") {
+		// The refusal says what the ID must look like and what to run (it was the control client's generic invalid-request text).
+		if err == nil || !strings.Contains(err.Error(), "64-character") || !strings.Contains(err.Error(), "pb update --approve") {
 			t.Fatalf("malformed approval error = %v", err)
 		}
 		requireUpdateRequests(t, fixture)

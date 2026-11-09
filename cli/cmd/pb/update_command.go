@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/user"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -316,6 +317,10 @@ var updateInputIsTerminal = func(command *cobra.Command) bool {
 	return ok && term.IsTerminal(int(input.Fd()))
 }
 
+// updateApprovalIDPattern is the shape of a candidate ID: the updater refuses anything else, and the user is told so before
+// any request is made.
+var updateApprovalIDPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
+
 func actionUpdate(command *cobra.Command, _ []string) error {
 	from, _ := command.Flags().GetString("from")
 	force, _ := command.Flags().GetBool("force")
@@ -329,6 +334,9 @@ func actionUpdate(command *cobra.Command, _ []string) error {
 		return err
 	}
 	approvalID, _ := command.Flags().GetString("approve")
+	if approvalID != "" && !updateApprovalIDPattern.MatchString(approvalID) {
+		return commandRejection{reason: commandRejectUpdateApprovalID}
+	}
 	if approvalID == "" {
 		response, err := updateWithProgress(command, ctx, client.Download)
 		if err != nil {

@@ -45,6 +45,8 @@ const (
 	commandRejectUpdateNotReady
 	commandRejectApproval
 	commandRejectUpdaterRestarting
+	commandRejectUpdateApprovalID
+	commandRejectUpdateSource
 )
 
 // commandRejection describes a command-owned refusal. Its
@@ -56,7 +58,7 @@ type commandRejection struct {
 }
 
 func (e commandRejection) valid() bool {
-	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectUpdaterRestarting
+	return e.reason >= commandRejectDefaultSessionRename && e.reason <= commandRejectUpdateSource
 }
 func (e commandRejection) Error() string {
 	switch e.reason {
@@ -127,6 +129,14 @@ func (e commandRejection) Error() string {
 		return "An approved signed update owns installation recovery. Wait for its update service to finish, then retry; run pb doctor if this continues."
 	case commandRejectUpdaterRestarting:
 		return "The Paperboat updater is not answering. It restarts while an approved update activates, which takes about a minute; run `pb update status` again then. If it still fails, run `pb doctor`."
+	case commandRejectUpdateApprovalID:
+		return "The approval ID must be the 64-character ID that `pb update` prints after it downloads an update. Run `pb update` to download and review the current update, then install it with `pb update --approve <id>`."
+	case commandRejectUpdateSource:
+		message := "The update to install cannot be read"
+		if e.cause != nil {
+			message += " (" + e.cause.Error() + ")"
+		}
+		return message + ". --from takes the path of an executable, package or .pb-update bundle, or an HTTPS URL. Nothing was changed."
 	case commandRejectUpdateBusy:
 		return "Paperboat is busy; the installed version is unchanged. Wait for active work or another update to finish, then retry. Use --force only if you want to interrupt active sessions."
 	case commandRejectNoninteractiveHome:

@@ -34,7 +34,7 @@ func actionUpdateFrom(command *cobra.Command, input string, force bool) error {
 	defer os.RemoveAll(directory)
 	staged, err := installsource.StageInput(ctx, input, directory, nil)
 	if err != nil {
-		return err
+		return commandRejection{reason: commandRejectUpdateSource, cause: err}
 	}
 	return installStagedUpdateSource(command, ctx, staged.Path, force)
 }
