@@ -26,6 +26,10 @@ export class ApiError extends Error {
   }
 }
 
+/** A refusal retrying cannot fix, whose sentence the page shows instead of "Couldn't load": a 403 or the quota 409. */
+export const isFinalRefusal = (error: unknown): error is ApiError =>
+  error instanceof ApiError && (error.status === 403 || (error.status === 409 && error.code === "bandwidth_quota_exhausted"))
+
 /** Retry-After in milliseconds (seconds or an HTTP date), bounded to 10 minutes. */
 export function retryAfterMs(response: Response, now = Date.now()): number | undefined {
   const value = response.headers.get("retry-after")?.trim()

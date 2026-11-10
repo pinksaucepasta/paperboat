@@ -1,6 +1,6 @@
 "use client"
 
-import { ApiError } from "@/lib/api"
+import { isFinalRefusal } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 
 /**
@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 export function LoadError({ what, error, retry }: { what: string; error: Error; retry: () => void }) {
   return (
     <div className="flex items-center justify-center gap-3 py-12 text-sm text-muted-foreground">
-      {error instanceof ApiError && (error.status === 403 || error.code === "bandwidth_quota_exhausted") ? (
+      {isFinalRefusal(error) ? (
         error.message
       ) : (
         <>
