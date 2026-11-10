@@ -155,6 +155,12 @@ class TUFWorkflowSignerTest(unittest.TestCase):
             self.assertTrue(any("windows-" + architecture + "-native-qualification.json" in str(step.get("with", {}).get("path", "")) for step in job["steps"]))
             self.assertIn("windows-" + architecture, workflow["jobs"]["release-publication"]["needs"])
 
+    # 2026-11-10: release.yml published five targets and the refresh still demanded three ("invalid release identity").
+    def test_refresh_expects_the_number_of_targets_the_release_publishes(self):
+        count = "len(targets) != 5"
+        for name in ("release.yml", "tuf-refresh.yml"):
+            self.assertIn(count, (ROOT / ".github/workflows" / name).read_text(), name)
+
     def test_publication_and_refresh_authorize_the_configured_online_secret(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
