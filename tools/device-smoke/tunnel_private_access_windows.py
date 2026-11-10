@@ -10,7 +10,7 @@ import sys
 import time
 import uuid
 
-from pairing_lifecycle import command_result, invoke
+from pairing_lifecycle import command_result, confirmed_command
 from tunnel_private_access import error_case, one_session
 import winhost
 
@@ -41,8 +41,7 @@ threading.Event().wait()
 
 
 def delete_tunnel(pb, tunnel):
-    token = invoke(pb, 'tunnel', 'delete', tunnel, '--json')['confirmation_token']
-    invoke(pb, 'tunnel', 'delete', tunnel, '--confirm', token, '--json')
+    confirmed_command(pb, 'tunnel', 'delete', tunnel)
 
 
 def main():

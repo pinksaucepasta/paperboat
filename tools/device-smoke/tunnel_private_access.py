@@ -31,9 +31,8 @@ def error_case(pb, words):
 def echo(host, port, payload):
     """Send payload to the private listener and return what came back, from the device when pb runs there."""
     if winhost.device():
-        require(len(payload) <= 8192, 'payload exceeds the EXCHANGE reply ceiling (winhost.py)')
-        rc, out = winhost.device().ps('tunnel echo with %s:%s' % (host, port), winhost.EXCHANGE, timeout=90,
-                                      address=host, port=port, block=base64.b64encode(payload).decode(), repeat=1)
+        rc, out = winhost.device().ps('tunnel echo with %s:%s' % (host, port), winhost.ECHO, timeout=90,
+                                      address=host, port=port, block=base64.b64encode(payload).decode())
         return base64.b64decode(out)
     with socket.create_connection((host, port), timeout=20) as connection:
         connection.settimeout(20)

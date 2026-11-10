@@ -146,6 +146,13 @@ EXCHANGE = ("$c=New-Object Net.Sockets.TcpClient\ntry{$c.Connect($req.address,[i
             "$m=New-Object IO.MemoryStream;$r=New-Object byte[] 4096\n"
             "while($m.Length -le 4096){$n=$s.Read($r,0,4096);if($n -le 0){break};$m.Write($r,0,$n)}\n"
             "$c.Close();[Convert]::ToBase64String($m.ToArray())")
+# Connects, sends $req.block once and returns the first $req.block.Length bytes of the reply as base64, WITHOUT
+# half-closing: a full-duplex echo through a proxy that ends the whole connection on a client FIN.
+ECHO = ("$c=New-Object Net.Sockets.TcpClient\ntry{$c.Connect($req.address,[int]$req.port)}catch{exit 4}\n"
+        "$c.SendTimeout=20000;$c.ReceiveTimeout=20000;$s=$c.GetStream();$b=[Convert]::FromBase64String($req.block)\n"
+        "$s.Write($b,0,$b.Length);$m=New-Object IO.MemoryStream;$r=New-Object byte[] 4096\n"
+        "while($m.Length -lt $b.Length){$n=$s.Read($r,0,4096);if($n -le 0){break};$m.Write($r,0,$n)}\n"
+        "$c.Close();[Convert]::ToBase64String($m.ToArray())")
 # How often $req.text occurs in the files of $req.dir matching $req.filter; a file the daemon is writing is shared.
 COUNT = ("$n=0;Get-ChildItem -LiteralPath $req.dir -Filter $req.filter -File -Recurse:([bool]$req.recurse) -ErrorAction SilentlyContinue|ForEach-Object{"
          "$f=[IO.File]::Open($_.FullName,'Open','Read','ReadWrite');$t=(New-Object IO.StreamReader($f)).ReadToEnd();$f.Close();"
