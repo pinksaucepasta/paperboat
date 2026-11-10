@@ -336,11 +336,19 @@ class WindowsDevice:
         return done.returncode, re.sub(rb'\x1b\[[0-9;?]*[a-zA-Z]', b'', done.stdout), done.stderr
 
     def ps(self, step, script, timeout=60, ok=(0,), **payload):
-        if script in READ_ONLY:  # a session that never answers (seen on victus for a tiny read) is tried once more
-            try:
-                rc, out, err = self.snippet(step, script, min(timeout, 30), **payload)
-            except DeviceError:
-                rc, out, err = self.snippet(step, script, timeout, **payload)
+        if script in READ_ONLY:
+            # A session that never answers (seen on victus for a tiny read) or whose ssh itself failed (exit 255: a banner
+            # timeout on a hosted runner killed a 20 min transfer check while it polled a job's rc file) is tried again;
+            # a read changes nothing. Every attempt is bounded.
+            for attempt in range(3):
+                try:
+                    rc, out, err = self.snippet(step, script, min(timeout, 30) if attempt == 0 else timeout, **payload)
+                except DeviceError:
+                    if attempt == 2:
+                        raise
+                    continue
+                if rc != 255 or attempt == 2:
+                    break
         else:
             rc, out, err = self.snippet(step, script, timeout, **payload)
         if rc not in ok:

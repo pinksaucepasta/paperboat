@@ -40,6 +40,22 @@ class WindowsDeviceTest(unittest.TestCase):
     def device(self, password='secret'):
         return winhost.WindowsDevice(target='user@host', pb_exe=EXE, password=password)
 
+    def test_a_read_survives_a_failed_ssh_session_and_a_change_does_not_repeat(self):
+        device = self.device()
+        calls = []
+        replies = [(255, b'', b'Connection timed out during banner exchange'), (0, b'ok', b'')]
+        def snippet(step, script, timeout=60, **payload):
+            calls.append(script)
+            return replies.pop(0) if replies else (0, b'ok', b'')
+        device.snippet = snippet
+        self.assertEqual((0, 'ok'), device.ps('read', winhost.READ))
+        self.assertEqual(2, len(calls))
+        replies[:] = [(255, b'', b'Connection timed out during banner exchange')]
+        calls.clear()
+        with self.assertRaises(winhost.DeviceError):
+            device.ps('change', winhost.RUN)  # a snippet that changes the device is never sent twice
+        self.assertEqual(1, len(calls))
+
     def test_command_line_reads_the_script_from_stdin_and_carries_no_secret(self):
         argv = self.device().ssh_command()
         self.assertEqual(['sshpass', '-e', 'ssh'], argv[:3])
