@@ -8,11 +8,11 @@ import (
 )
 
 // removeBelowDirectory is removePathPreserving for a process that must not trust the paths: it removes the
-// entry name of the open directory parent (path is where that entry is, for the Inbox comparison only) and
-// keeps every preserved Inbox. Nothing is resolved by path and no link is followed: os.Root works relative to
-// the open directory and removes a link as an entry. A directory that holds an Inbox is entered; check must
-// accept each one before anything in it is touched.
-func removeBelowDirectory(parent *os.Root, name, path string, preserved []string, check func(directory *os.Root, path string) error) (result error) {
+// entry name of the open directory parent (path is where that entry is, for the Inbox comparison and check) and
+// keeps every preserved Inbox. Nothing is resolved by path: os.Root works relative to the open directory. A file
+// or a link is removed as one entry and never followed. A directory is opened once, and check must accept that
+// open directory before anything in it is touched; its entries are then removed the same way.
+func removeBelowDirectory(parent *os.Root, name, path string, preserved []string, check func(directory *os.Root, path string) error) error {
 	holdsInbox := false
 	for _, keep := range preserved {
 		keep = filepath.Clean(keep)
@@ -21,13 +21,27 @@ func removeBelowDirectory(parent *os.Root, name, path string, preserved []string
 		}
 		holdsInbox = holdsInbox || pathWithinOrEqual(path, keep)
 	}
-	if !holdsInbox {
-		return parent.RemoveAll(name)
-	}
-	directory, err := parent.OpenRoot(name)
+	info, err := parent.Lstat(name)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		// A directory swapped for a link after the Lstat is opened through the link; check refuses it.
+		if err := emptyCheckedDirectory(parent, name, path, preserved, check); err != nil || holdsInbox {
+			return err
+		}
+	}
+	if err := parent.Remove(name); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func emptyCheckedDirectory(parent *os.Root, name, path string, preserved []string, check func(directory *os.Root, path string) error) (result error) {
+	directory, err := parent.OpenRoot(name)
 	if err != nil {
 		return err
 	}

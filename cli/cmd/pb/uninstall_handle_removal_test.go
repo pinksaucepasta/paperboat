@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -71,9 +72,34 @@ func TestRemoveBelowDirectoryFollowsNoLinkAndKeepsTheInbox(t *testing.T) {
 		}
 		survived(t, received)
 		survived(t, sentinel)
-		// Only the directory that holds the Inbox is entered, and it is checked first.
-		if len(entered) != 1 || entered[0] != state {
-			t.Fatalf("checked directories = %v, want %v", entered, state)
+		// Every directory is checked before it is emptied; a link and the Inbox are never entered.
+		want := []string{state, filepath.Join(state, "runtime"), filepath.Join(state, "runtime", "store")}
+		if !slices.Equal(entered, want) {
+			t.Fatalf("checked directories = %v, want %v", entered, want)
+		}
+	})
+	t.Run("a nested directory the check refuses stays with its content", func(t *testing.T) {
+		parent := build(t)
+		refused := errors.New("refused")
+		store := filepath.Join(state, "runtime", "store")
+		err := removeBelowDirectory(parent, "Paperboat", state, nil, func(_ *os.Root, path string) error {
+			if path == store {
+				return refused
+			}
+			return nil
+		})
+		if !errors.Is(err, refused) {
+			t.Fatalf("a refused nested directory: %v, want the refusal", err)
+		}
+		survived(t, filepath.Join(store, "state.json"))
+		for _, gone := range []string{filepath.Join(state, "credentials.json"), filepath.Join(state, "link"), filepath.Join(state, "runtime", "link")} {
+			if _, err := os.Lstat(gone); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("%s was not removed: %v", gone, err)
+			}
+		}
+		survived(t, sentinel)
+		if err := os.RemoveAll(state); err != nil {
+			t.Fatal(err)
 		}
 	})
 	t.Run("a directory the check refuses is not touched", func(t *testing.T) {

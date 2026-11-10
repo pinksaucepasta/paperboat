@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
+	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
 	"golang.org/x/sys/windows"
 )
 
@@ -377,6 +378,29 @@ func TestWindowsUserStateOwnedByAdministratorsIsRemoved(t *testing.T) {
 		}
 		survived(t, received)
 		survived(t, sentinel)
+	})
+	t.Run("what belongs to another account is refused", func(t *testing.T) {
+		profile, state := newProfile(t)
+		foreign := filepath.Join(state, "runtime")
+		administratorsOnly(t, foreign)
+		kept := filepath.Join(foreign, "state.json")
+		writeTestFile(t, kept)
+		localService, err := windows.CreateWellKnownSid(windows.WinLocalServiceSid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := windowssecurity.WithRestorePrivilege(func() error {
+			return windows.SetNamedSecurityInfo(foreign, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, localService, nil, nil, nil)
+		}); err != nil {
+			t.Fatalf("fixture: give the directory to another account: %v", err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		// The owner is read from the open directory right before it would be emptied, not from the plan.
+		if err := retryWindowsRemoval(ctx, profile, state, nil); !errors.Is(err, errWindowsUserStateRefused) {
+			t.Fatalf("a directory of another account: %v, want the refusal", err)
+		}
+		survived(t, kept)
 	})
 	t.Run("through a junction it is refused", func(t *testing.T) {
 		profile, _ := newProfile(t)
