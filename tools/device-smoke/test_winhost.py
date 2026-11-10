@@ -481,6 +481,18 @@ class WindowsTargetScripts(unittest.TestCase):
 
 
 class WindowsTargetPlumbing(unittest.TestCase):
+    def test_windows_pid_reads_digits_with_or_without_a_newline(self):
+        import update_continuity
+        class Held:
+            def __init__(self, *chunks):
+                self.pending, self.chunks = bytearray(), list(chunks)
+            def settle(self, quiet=0.5):
+                if self.chunks:
+                    self.pending.extend(self.chunks.pop(0))
+        self.assertEqual('9368', update_continuity.windows_pid(Held(b'9368\r\n')))
+        # ConPTY sometimes ends the line with cursor moves and the prompt; the digits arrive in two reads
+        self.assertEqual('8456', update_continuity.windows_pid(Held(b'84', b'56\x1b]2;\x07\x1b[8;1HC:\\>')))
+
     def test_is_windows_reads_the_machine_platform_once(self):
         import windows_target
         windows_target._platforms.clear()

@@ -10,6 +10,7 @@ import argparse
 import json
 from pathlib import Path
 import os
+import re
 import subprocess
 import sys
 import time
@@ -25,6 +26,19 @@ PB = winhost.pb_path()
 
 # PowerShell appended to a typed marker: the id of the cmd.exe this line was typed into.
 SHELL_PID = "+(Get-CimInstance Win32_Process -Filter ('ProcessId='+$PID)).ParentProcessId"
+
+
+def windows_pid(terminal):
+    """The digits after the marker. ConPTY ends that line with \\r\\n or, sometimes, with cursor moves and the prompt only
+    (1 of 5 loops on winpool-9), so wait for the first non-digit instead of a newline."""
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        terminal.settle(0.5)
+        match = re.match(rb'(\d+)\D', bytes(terminal.pending))
+        if match:
+            del terminal.pending[:match.end(1)]
+            return match.group(1).decode()
+    raise RuntimeError('the held shell identity line did not arrive')
 
 
 def owners():
@@ -103,7 +117,7 @@ def main():
         else:
             terminal.send("printf '\\nPB_" + label + "''_%s\\n' \"$$\"\r")
         terminal.expect('PB_' + label + '_', timeout=180)
-        return terminal.expect('\n', timeout=10).decode().strip()
+        return windows_pid(terminal) if windows else terminal.expect('\n', timeout=10).decode().strip()
     try:
         if not windows:
             terminal.expect(b'\x1b[?2004h')

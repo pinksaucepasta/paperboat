@@ -32,7 +32,7 @@ from preview_lifecycle import QuietHandler
 from preview_receipt import PREVIEW_COMMAND_TIMEOUT, receipt_value
 from session_cleanup import cleanup
 from terminal_lifecycle import Terminal
-from update_continuity import SHELL_PID
+from update_continuity import SHELL_PID, windows_pid
 import windows_target
 import winhost
 
@@ -105,7 +105,7 @@ def main():
         else:
             held.send("printf '\\nPB_" + label + "''_%s\\n' \"$$\"\r")  # the typed echo must not contain the marker
         held.expect('PB_' + label + '_', timeout=180)
-        return held.expect('\n', timeout=10).decode().strip()
+        return windows_pid(held) if windows else held.expect('\n', timeout=10).decode().strip()
     with tempfile.TemporaryDirectory(prefix='paperboat-update-survive-') as directory, \
             winhost.workdir('paperboat-update-survive-') as files, contextlib.ExitStack() as stack:
         (Path(directory) / 'index.html').write_text('<p>' + marker + '</p>')
