@@ -215,7 +215,9 @@ func purgeUserPaperboatState(command *cobra.Command, preserved []string) error {
 	paths, pathErr := userPaperboatRemovalPaths(command)
 	result := errors.Join(config.PurgeCredentialStore(), pathErr)
 	for _, path := range paths {
-		result = errors.Join(result, removePathPreserving(path, preserved))
+		if err := removePathPreserving(path, preserved); err != nil && !leftoverLockedBridgeDirectory(err) {
+			result = errors.Join(result, err)
+		}
 	}
 	return result
 }
