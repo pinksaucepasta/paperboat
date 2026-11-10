@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Windows lifecycle checks on the Windows device, driven from a Linux host over SSH (PowerShell), with hp as the peer
-client. The device is SMOKE_WINDOWS_SSH (default pujan@victus, password VICTUS_PASS; any other target logs in by key).
+client. The device is SMOKE_WINDOWS_SSH (default pujan@victus, password VICTUS_PASS; any other target logs in by key);
+the peer is SMOKE_PEER_SSH (default anvit@hp), a paired Unix machine of the same account.
 
   VICTUS_PASS=... windows_lifecycle.py --expect-version V --windows-install-json FILE CHECK...
   CHECK: install-pair update update-failures version doctor status service crash availability exec exec-self reset-pair uninstall
@@ -26,6 +27,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SSH = ['-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=20', '-o', 'StrictHostKeyChecking=accept-new']
 DEVICE = winhost.WindowsDevice()
 PB_HP = '$HOME/.local/bin/pb'
+PEER = os.environ.get('SMOKE_PEER_SSH', 'anvit@hp')
 
 
 def home(name):
@@ -43,7 +45,7 @@ def victus(script, timeout=180):
 
 
 def hp(command, timeout=120):
-    result = subprocess.run(['ssh', *SSH, '-o', 'BatchMode=yes', 'anvit@hp', command], capture_output=True, text=True,
+    result = subprocess.run(['ssh', *SSH, '-o', 'BatchMode=yes', PEER, command], capture_output=True, text=True,
                             timeout=timeout, stdin=subprocess.DEVNULL)
     return result.returncode, result.stdout + result.stderr
 

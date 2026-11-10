@@ -34,7 +34,9 @@ REFUSED = 4  # exit code of EXCHANGE when nothing accepts the connection
 BOOTSTRAP = ("$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';"
              # Lines up to a single "." and never end-of-input: Windows OpenSSH sometimes does not deliver EOF on a
              # session's stdin (an identical 3 KB write answered once and hung the next time on victus).
-             "$a=@();while(($l=[Console]::In.ReadLine()) -ne $null -and $l.Trim() -ne '.'){$a+=$l};"
+             # A reader on the raw stream: [Console]::In.ReadLine() never returns on a hosted Windows Server runner.
+             "$i=New-Object IO.StreamReader([Console]::OpenStandardInput());"
+             "$a=@();while(($l=$i.ReadLine()) -ne $null -and $l.Trim() -ne '.'){$a+=$l};"
              "$s=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($a[0].Trim()));"
              "$req=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String((($a[1..($a.Length-1)]|ForEach-Object{$_.Trim()}) -join '')))|ConvertFrom-Json;"
              "Invoke-Expression $s")
