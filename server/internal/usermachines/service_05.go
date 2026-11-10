@@ -286,6 +286,7 @@ func (s *Service) ListTerminalSessions(ctx context.Context, userID, userMachineI
 			item.CurrentDirectory, item.ForegroundProcess = live.CurrentDirectory, live.ForegroundProcess
 			count := len(live.Participants)
 			item.AttachedCount = &count
+			item.Columns, item.Rows = live.Columns, live.Rows
 		}
 		out = append(out, item)
 	}

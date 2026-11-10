@@ -69,6 +69,8 @@ type SharedTerminalSession struct {
 	Sharing               SharedTerminalSharing `json:"sharing"`
 	Participants          []SessionParticipant  `json:"participants"`
 	ParticipantsAvailable bool                  `json:"participants_available"`
+	Columns               *int                  `json:"columns,omitempty"`
+	Rows                  *int                  `json:"rows,omitempty"`
 	RuntimeGeneration     uint64                `json:"-"`
 }
 
@@ -635,6 +637,11 @@ func projectTerminalIdentification(item *SharedTerminalSession, snapshot helperr
 	item.Title = cleanTerminalMetadata(snapshot.Title, 128)
 	item.CurrentDirectory = cleanTerminalMetadata(snapshot.CurrentDirectory, 1024)
 	item.ForegroundProcess = cleanTerminalMetadata(snapshot.ForegroundProcess, 128)
+	item.Columns, item.Rows = nil, nil
+	if snapshot.Dimensions.Columns > 0 && snapshot.Dimensions.Rows > 0 { // 0x0: the host has applied no size yet
+		columns, rows := int(snapshot.Dimensions.Columns), int(snapshot.Dimensions.Rows)
+		item.Columns, item.Rows = &columns, &rows
+	}
 }
 
 // A live snapshot never overrides an accepted close request. Readiness is

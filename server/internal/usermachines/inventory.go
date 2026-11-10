@@ -206,6 +206,7 @@ func (s *Service) ListTerminalSessionInventory(ctx context.Context, account, mac
 		if live.ParticipantsAvailable {
 			count := len(live.Participants)
 			item.AttachedCount = &count
+			item.Columns, item.Rows = live.Columns, live.Rows
 		}
 	}
 	return out, total, nil

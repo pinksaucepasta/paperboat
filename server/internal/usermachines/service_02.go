@@ -515,6 +515,8 @@ type TerminalSession struct {
 	IsDefault         bool       `json:"is_default"`
 	State             string     `json:"state"`
 	AttachedCount     *int       `json:"attached_count,omitempty"`
+	Columns           *int       `json:"columns,omitempty"` // the live PTY size in cells; absent while the host is unobserved
+	Rows              *int       `json:"rows,omitempty"`
 	LastActiveAt      *time.Time `json:"last_active_at,omitempty"`
 	ExpiresAt         *time.Time `json:"expires_at,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`

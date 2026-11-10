@@ -70,6 +70,8 @@ type TerminalSession struct {
 	IsDefault         bool             `json:"is_default"`
 	State             string           `json:"state"`
 	AttachedCount     *int             `json:"attached_count"`
+	Columns           *int             `json:"columns,omitempty"`
+	Rows              *int             `json:"rows,omitempty"`
 	LastActiveAt      *time.Time       `json:"last_active_at"`
 	CreatedAt         time.Time        `json:"created_at"`
 	UpdatedAt         time.Time        `json:"updated_at"`

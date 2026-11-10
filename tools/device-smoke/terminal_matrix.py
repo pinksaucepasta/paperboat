@@ -254,7 +254,6 @@ def has_iptables():
 
 
 NO_FIREWALL = ('no passwordless sudo pfctl on this machine' if DARWIN else 'no iptables on this machine')
-NO_OUTSIDE_SIZE = 'a Windows session has no tty to read its size from outside; reading it by typing would hide the fault'
 
 
 def iptables(*rule):
@@ -312,6 +311,18 @@ def settled_size(target, tty, want, seconds=10):
     return size
 
 
+def session_size(target, session_id, want=None, seconds=10):
+    """The session's live PTY size (rows, columns) from `pb session list --json`: passive, so it also works for a
+    ConPTY session, which has no tty to ask from outside and where typing a query would make that window active."""
+    deadline = time.monotonic() + seconds
+    while True:
+        match = [s for s in inventory(PB, target)[1] if s.get('id') == session_id]
+        size = (match[0]['rows'], match[0]['columns']) if len(match) == 1 and match[0].get('columns') and match[0].get('rows') else None
+        if want is None or size == want or time.monotonic() >= deadline:
+            return size
+        time.sleep(0.5)
+
+
 def session_tty(c):
     out = c.run('tty')
     found = re.findall(rb'(/dev/pts/\d+)', out)
@@ -342,8 +353,13 @@ def two_clients(a, sessions):
                 row('N1 two windows: the size is the window that typed last (window 2)', size == (24, 80), f'{size}')
                 size = c1.size()
                 row('N1 two windows: typing moves the size to that window (window 1)', size == (30, 100), f'{size}')
-                row('N1 two windows: the other window resizing does not change it', None, NO_OUTSIDE_SIZE)
-                row('N1 two windows: the active window resizing does', None, NO_OUTSIDE_SIZE)
+                c2.resize(20, 70)
+                time.sleep(2)
+                size = session_size(a.target, s['id'])
+                row('N1 two windows: the other window resizing does not change it', size == (30, 100), f'{size}')
+                c1.resize(40, 120)
+                size = session_size(a.target, s['id'], (40, 120))
+                row('N1 two windows: the active window resizing does', size == (40, 120), f'{size}')
                 return
             tty = session_tty(c2)  # typing in window 2: it is the latest active
             size = settled_size(a.target, tty, (24, 80))
@@ -366,21 +382,22 @@ def two_clients(a, sessions):
 
 def reconnect_keeps_control(a, sessions):
     """N15, F3-17: a window that reconnects does not take the size from the window in use."""
-    if win():
-        row('N15 a reconnecting window never takes control', None, NO_OUTSIDE_SIZE)
-        return
     name = fresh_name(); sessions.append(name)
     c1 = connect(a.target, name, 30, 100)
     try:
         _, s = selected(PB, a.target, name)
         c2 = attach(a.target, s['id'], 24, 80)
         try:
-            tty = session_tty(c1)  # window 1 is in use
-            before = settled_size(a.target, tty, (30, 100))
+            if win():  # window 1 is in use (it typed last)
+                c1.size()
+                before = session_size(a.target, s['id'], (30, 100))
+            else:
+                tty = session_tty(c1)
+                before = settled_size(a.target, tty, (30, 100))
             c2.close()
             c2 = attach(a.target, s['id'], 24, 80, typing=False)  # window 2 reconnects without typing
             time.sleep(3)
-            after = pty_size(a.target, tty)
+            after = session_size(a.target, s['id']) if win() else pty_size(a.target, tty)
             row('N15 a reconnecting window never takes control', before == (30, 100) and after == (30, 100), f'{before} -> {after}')
         finally:
             c2.close()

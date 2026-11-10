@@ -32,3 +32,17 @@ func TestTerminalIdentificationNeverUsesStoredManualTitleOrLaunchAsCurrent(t *te
 		t.Fatalf("durable metadata misrepresented as live: %+v", item)
 	}
 }
+
+func TestTerminalIdentificationProjectsTheLivePTYSize(t *testing.T) {
+	item := SharedTerminalSession{}
+	projectTerminalIdentification(&item, helperruntime.Snapshot{Dimensions: helperruntime.Dimensions{Columns: 100, Rows: 30}})
+	if item.Columns == nil || item.Rows == nil || *item.Columns != 100 || *item.Rows != 30 {
+		t.Fatalf("size not projected: %+v %+v", item.Columns, item.Rows)
+	}
+	for _, unobserved := range []helperruntime.Dimensions{{}, {Columns: 100}, {Rows: 30}} {
+		projectTerminalIdentification(&item, helperruntime.Snapshot{Dimensions: unobserved})
+		if item.Columns != nil || item.Rows != nil {
+			t.Fatalf("%+v kept a stale or half size: %v %v", unobserved, item.Columns, item.Rows)
+		}
+	}
+}
