@@ -98,24 +98,86 @@ func (noisyCloseWriteConn) CloseWrite() error {
 	return &net.OpError{Op: "close", Net: "tcp", Err: errors.New("use of closed network connection")}
 }
 
-// A connection reset after the client had everything is how Windows OpenSSH ends a session, whether the client
-// half-closed its input first or left afterwards; the same reset while the client still waits for data is a
-// truncated session and must be audited as a failure.
-func TestConnectionResetIsCleanOnlyWhenTheClientHadItsFullReply(t *testing.T) {
-	for _, order := range []string{"after", "stdin-first", "abort", "noisy"} {
+// Windows OpenSSH ends a connection with an RST where a Unix sshd sends a FIN, so a reset READ from sshd is its end of
+// output and is recorded like the Unix EOF, whatever the client does around it: leaves after the full reply, half-closes
+// first, its stream's CloseWrite reports noise, or it is still waiting. (A sshd that dies mid-transfer ends the same
+// way on both: the bridge cannot tell it from a normal end, on Unix either.) A client that aborts its stream is not
+// forgiven on either OS (CloseWrite towards an aborted client fails and its EOF never shows), so it is not in this list.
+func TestWindowsReadResetIsHowSSHDEnds(t *testing.T) {
+	for _, order := range []string{"after", "stdin-first", "noisy", "never"} {
 		if err := resetBridge(t, order); err != nil {
-			t.Fatalf("reset after a complete reply (%s): %v, want a clean end", order, err)
+			t.Fatalf("sshd's reset (%s): %v, want the clean end a Unix sshd's EOF gives", order, err)
 		}
 	}
-	err := resetBridge(t, "never")
-	if err == nil {
-		t.Fatal("a reset while the client still waited for data was reported as a clean end")
+}
+
+// A client that aborts its stream after the full reply is recorded as failed, as on Unix (22bb0ac26 and before): the
+// bridge reports the failed FIN towards a client that never showed a clean EOF.
+func TestClientAbortAfterTheReplyIsRecordedLikeOnUnix(t *testing.T) {
+	if err := resetBridge(t, "abort"); err == nil {
+		t.Fatal("a client abort was recorded as a clean end; Unix records it as failed")
 	}
-	// The failure names the direction and that the reset rule ran, for the diagnostics (types only are recorded).
-	var from *fromSSHDError
-	var unexcused *resetNotExcusedError
-	if !errors.As(err, &from) || !errors.As(err, &unexcused) {
-		t.Fatalf("the failure does not say which copier and rule it came from: %v", err)
+}
+
+// On Unix a reset from sshd is not an end: closeResets is empty there (bridge_reset_other.go), so it stays a failure.
+func TestUnixResetFromSSHDStaysAFailure(t *testing.T) {
+	if len(closeResets) != 0 {
+		t.Skip("closeResets lists the Windows reset")
+	}
+	previous := resetGrace
+	resetGrace = 200 * time.Millisecond
+	defer func() { resetGrace = previous }()
+	listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		if connection, acceptErr := listener.AcceptTCP(); acceptErr == nil {
+			_, _ = connection.Write([]byte("reply"))
+			time.Sleep(50 * time.Millisecond)
+			_ = connection.SetLinger(0)
+			_ = connection.Close()
+		}
+	}()
+	bridgeSide, clientSide := tcpPair(t)
+	defer clientSide.Close()
+	go func() { _, _ = io.Copy(io.Discard, clientSide) }()
+	if _, err := BridgeSSH(t.Context(), bridgeSide, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second); err == nil {
+		t.Fatal("a reset from sshd was recorded as a clean end on a Unix host")
+	}
+}
+
+// A client that aborts mid-upload while sshd is still running is a cut session on every OS: sshd has not ended, so
+// nothing forgives the client's error.
+func TestClientAbortWhileSSHDIsStillRunningIsAFailure(t *testing.T) {
+	if len(closeResets) == 0 { // the Windows reset error is already listed; a Unix host lists none
+		closeResets = []error{syscall.ECONNRESET}
+		defer func() { closeResets = nil }()
+	}
+	previous := resetGrace
+	resetGrace = 200 * time.Millisecond
+	defer func() { resetGrace = previous }()
+	listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		if connection, acceptErr := listener.AcceptTCP(); acceptErr == nil {
+			defer connection.Close()
+			_, _ = io.Copy(io.Discard, connection) // sshd keeps reading the upload
+		}
+	}()
+	bridgeSide, clientSide := tcpPair(t)
+	go func() {
+		_, _ = clientSide.Write([]byte("part of an upload"))
+		time.Sleep(100 * time.Millisecond)
+		_ = clientSide.SetLinger(0)
+		_ = clientSide.Close() // the abort
+	}()
+	if _, err := BridgeSSH(t.Context(), bridgeSide, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second); err == nil {
+		t.Fatal("a client that aborted mid-upload, sshd still running, was recorded as a clean end")
 	}
 }
 

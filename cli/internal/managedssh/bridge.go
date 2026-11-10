@@ -138,22 +138,18 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 	results := make(chan copyResult, 2)
 	// sshdDone is set once sshd's output is drained and the bridge closes both sides itself.
 	var sshdDone atomic.Bool
-	// streamEnded closes when the client's side of the stream ends in any way (its EOF, or an abort the native stream
-	// reports as an error): the client has left. sshdEOF closes when sshd's output ended with a plain EOF.
-	streamEnded, sshdEOF := make(chan struct{}), make(chan struct{})
-	// sshdEnded closes when sshd's output ended in any way (EOF or reset).
-	sshdEnded := make(chan struct{})
-	var streamEndOnce sync.Once
+	// clientEOF / sshdEOF close when that direction's copy ended with a plain EOF: the peer finished sending. A reset
+	// read from sshd counts as sshd's EOF (sshdReadReset).
+	clientEOF, sshdEOF := make(chan struct{}), make(chan struct{})
 	go func() {
-		count, copyErr := io.Copy(sshd, endNotifier{stream, func() { streamEndOnce.Do(func() { close(streamEnded) }) }})
+		count, copyErr := io.Copy(sshd, stream)
+		if copyErr == nil {
+			close(clientEOF)
+		}
 		if sshdDone.Load() {
 			copyErr = nil // the read failed because the bridge closed the stream after sshd's end
 		}
 		copyErr = normalizeBridgeError(copyErr)
-		// A client that aborts its stream as the session ends (a read error here) while sshd ends too is how a normal
-		// end looks; sshd's own direction is judged by its copier. sshd still running after resetGrace means the client
-		// cut the session short: that stays a failure.
-		copyErr = waitSSHDEnded(ctx, copyErr, sshdEnded)
 		if half, ok := sshd.(interface{ CloseWrite() error }); ok {
 			closedBefore := sshdClosed.Load() // read before the call: a close that races it is not assumed ours
 			copyErr = errors.Join(copyErr, closeWriteFailure(half.CloseWrite(), closedBefore))
@@ -165,15 +161,19 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 		results <- copyResult{direction: "to_sshd", bytes: count, err: labelStep(copyErr, func(err error) error { return &toSSHDError{err} })}
 	}()
 	go func() {
-		count, copyErr := io.Copy(stream, sshd)
-		close(sshdEnded)
+		// onlyWriter keeps the stream's own ReadFrom out of it, so a failed read from sshd is reported as that read
+		// (Op "read", what sshdReadReset looks for) and not folded into one "readfrom" error with the write.
+		count, copyErr := io.Copy(onlyWriter{stream}, sshd)
+		// Windows OpenSSH ends a connection with an RST where a Unix sshd sends a FIN: a reset READ from sshd is its
+		// end of output, recorded exactly like the Unix EOF. A reset while writing to the client, or anything else,
+		// stays an error.
+		if sshdReadReset(copyErr) {
+			copyErr = nil
+		}
 		if copyErr == nil {
 			close(sshdEOF)
 		}
 		copyErr = normalizeBridgeError(copyErr)
-		// The reset is judged on its own: the stream's CloseWrite noise below must not sit beside it (a leaf that is not
-		// a reset keeps the rule from excusing it: measured on a fresh Windows carrier, F5-12).
-		copyErr = excuseReset(ctx, copyErr, streamEnded)
 		if half, ok := stream.(interface{ CloseWrite() error }); ok {
 			closeErr := normalizeBridgeError(half.CloseWrite())
 			if copyErr != nil {
@@ -181,7 +181,7 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 			} else {
 				// After sshd's end the client may already have torn its side down, which is its normal exit: that
 				// shows as its stream ending. A failed FIN to a client that never left is a failure.
-				copyErr = waitClientLeft(ctx, closeErr, streamEnded)
+				copyErr = waitClientLeft(ctx, closeErr, clientEOF)
 			}
 		}
 		// Target EOF is terminal for an SSH connection. Some OpenSSH clients
@@ -214,20 +214,6 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 		return result, managedSSHBoundary("command", errors.Join(ctx.Err(), context.Cause(ctx), resultErr, cleanupErr))
 	}
 	return result, managedSSHBoundary("command", errors.Join(resultErr, cleanupErr))
-}
-
-// endNotifier calls onEnd the first time a Read returns an error of any kind, EOF included.
-type endNotifier struct {
-	io.Reader
-	onEnd func()
-}
-
-func (e endNotifier) Read(p []byte) (int, error) {
-	n, err := e.Reader.Read(p)
-	if err != nil {
-		e.onEnd()
-	}
-	return n, err
 }
 
 // toSSHDError and fromSSHDError name the direction an error came from. The diagnostics record error types only (the
@@ -278,23 +264,7 @@ func resultOfOwnClose(err error) bool {
 	return !errors.As(err, &errno) && !errors.As(err, &system)
 }
 
-// waitSSHDEnded forgives err (a client-to-sshd copy error) when sshd's output ends within resetGrace.
-func waitSSHDEnded(ctx context.Context, err error, sshdEnded <-chan struct{}) error {
-	if err == nil {
-		return nil
-	}
-	timer := time.NewTimer(resetGrace)
-	defer timer.Stop()
-	select {
-	case <-sshdEnded:
-		return nil
-	case <-timer.C:
-	case <-ctx.Done():
-	}
-	return err
-}
-
-// waitClientLeft keeps err (a failed CloseWrite towards the client) only if the client's stream does not end.
+// waitClientLeft keeps err (a failed CloseWrite towards the client) only if the client does not show its EOF.
 func waitClientLeft(ctx context.Context, err error, clientLeft <-chan struct{}) error {
 	if err == nil {
 		return nil
@@ -320,13 +290,26 @@ func normalizeBridgeError(err error) error {
 	return err
 }
 
-// excuseReset turns a connection reset (Windows OpenSSH RST-closes after a normal end, see closeResets) into a clean
-// end only when the other direction ends with an EOF, within resetGrace. What reaches the bridge is the whole SSH
-// transport (the ProxyCommand pipe or its native stream): an EOF on it means the SSH client closed its connection,
-// which it does once its session is over, and a stdin half-close inside the session never shows here (it is in the
-// encrypted channel). A client still waiting for data after the reset (a transfer cut short) never EOFs, so the reset
-// stays a failure and is audited as one. The bytes alone cannot tell a complete reply from a cut one, so no count of
-// them is used.
+type onlyWriter struct{ io.Writer }
+
+// sshdReadReset reports a connection reset read from sshd (Op "read" with only reset leaves): on Windows the way a
+// sshd connection ends, where a Unix sshd ends with EOF. closeResets is empty on Unix, so this never fires there.
+func sshdReadReset(err error) bool {
+	if err == nil || len(closeResets) == 0 || !managedSSHLeavesMatch(err, closeResets...) {
+		return false
+	}
+	// Go's WriteTo wraps the failed read ("writeto") around the read's own OpError: look for the read in the chain.
+	for e := err; e != nil; e = errors.Unwrap(e) {
+		if op, ok := e.(*net.OpError); ok && op.Op == "read" {
+			return true
+		}
+	}
+	return false
+}
+
+// excuseReset forgives a connection reset while writing to sshd (the client kept sending as sshd's end came): sshd's
+// own output must have ended too, within resetGrace, which sshdReadReset records as its EOF. A reset with sshd still
+// sending is a failure.
 func excuseReset(ctx context.Context, err error, otherEOF <-chan struct{}) error {
 	if err == nil || len(closeResets) == 0 || !managedSSHLeavesMatch(err, closeResets...) {
 		return err
