@@ -45,10 +45,10 @@ C:\ProgramData\Paperboat\MachineGuard\browser-domains.json
 C:\ProgramData\Paperboat\MachineGuard\lifecycle.lock                                                                   
 C:\ProgramData\Paperboat\MachineGuard\lock                                                                             
 C:\ProgramData\Paperboat\MachineGuard\reservations.json                                                                
-C:\ProgramData\Paperboat\MachineGuard\certificates\ppr.boats                                                           
-C:\ProgramData\Paperboat\MachineGuard\certificates\ppr.boats\rootCA-key.pem                                            
-C:\ProgramData\Paperboat\MachineGuard\certificates\ppr.boats\rootCA.crl                                                
-C:\ProgramData\Paperboat\MachineGuard\certificates\ppr.boats\rootCA.pem                                                
+C:\ProgramData\Paperboat\MachineGuard\certificates\example.test                                                           
+C:\ProgramData\Paperboat\MachineGuard\certificates\example.test\rootCA-key.pem                                            
+C:\ProgramData\Paperboat\MachineGuard\certificates\example.test\rootCA.crl                                                
+C:\ProgramData\Paperboat\MachineGuard\certificates\example.test\rootCA.pem                                                
 C:\ProgramData\Paperboat\MachineGuard\diagnostics\writer.lock                                                          
 C:\ProgramData\Paperboat\services\PaperboatCarrier-ue655ce475da61ffc2e916d1d.json                                      
 C:\ProgramData\Paperboat\services\PaperboatHostd-ue655ce475da61ffc2e916d1d.json                                        
