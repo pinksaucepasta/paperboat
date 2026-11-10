@@ -779,7 +779,7 @@ class SshFamilyPlumbing(unittest.TestCase):
             else:
                 self.assertEqual({'CONTROLLER_ONLY': '1', 'PATH': '/tmp/d'}, seen['env'])
 
-    def tools_run(self, windows):
+    def tools_run(self, windows, tools=None):
         """ssh_tools_lifecycle.main() against a fake pb whose scp/sftp/rsync copy inside a local directory."""
         import shlex
         import shutil
@@ -833,7 +833,8 @@ class SshFamilyPlumbing(unittest.TestCase):
                     patch.object(windows_target, 'is_windows', lambda binary, target: windows), \
                     patch.object(ssh_tools_lifecycle.uuid, 'uuid4', lambda: fixed), \
                     patch.dict(os.environ, {'HOME': os.environ['HOME']}, clear=True), \
-                    patch('sys.argv', ['x', 'peer']), patch('builtins.print', printed.append):
+                    patch('sys.argv', ['x', 'peer'] + (['--tools', *tools] if tools else [])), \
+                    patch('builtins.print', printed.append):
                 ssh_tools_lifecycle.main()
             return calls, json.loads(printed[-1]), sorted(p.name for p in (home / 'Paperboat').iterdir())
 
@@ -845,12 +846,15 @@ class SshFamilyPlumbing(unittest.TestCase):
         self.assertEqual([], left)
 
     def test_tools_round_trip_to_a_windows_target_uses_powershell_and_home_relative_paths(self):
-        calls, receipt, left = self.tools_run(windows=True)
-        self.assertEqual([], left)
-        self.assertEqual(['ssh', 'scp', 'scp', 'sftp', 'ssh'], [tool for tool, _ in calls])
-        self.assertTrue(calls[0][1][2].startswith('powershell -NoProfile '))
-        self.assertEqual('peer:Paperboat/' + self.fixture + '/scp/', calls[1][1][2])
-        self.assertEqual(['scp', 'sftp'], receipt['tools'])
+        for tools, expected in [(None, ['scp', 'sftp']), (['rsync'], ['rsync'])]:
+            with self.subTest(tools=tools):
+                calls, receipt, left = self.tools_run(windows=True, tools=tools)
+                self.assertEqual([], left)
+                transfers = ['scp', 'scp', 'sftp'] if tools is None else ['rsync', 'rsync']
+                self.assertEqual(['ssh', *transfers, 'ssh'], [tool for tool, _ in calls])
+                self.assertTrue(calls[0][1][2].startswith('powershell -NoProfile '))
+                self.assertEqual('peer:Paperboat/' + self.fixture + ('/scp/' if tools is None else '/rsync/'), calls[1][1][2])
+                self.assertEqual(expected, receipt['tools'])
 
 
 

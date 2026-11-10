@@ -26,13 +26,16 @@ def tree_hashes(directory):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
+    parser.add_argument('--tools', nargs='+', choices=['scp', 'sftp', 'rsync'],
+                        help='tools to qualify; rsync must be installed on both endpoints')
     args = parser.parse_args()
     binary = winhost.pb_path()
     before = registration()
     name = 'smoke-ssh-tools-' + uuid.uuid4().hex
     windows = windows_target.is_windows(binary, args.target)
-    # Windows has no rsync on either side; scp and sftp are the tools that exist there.
-    tools = ['scp', 'sftp'] if windows or winhost.device() else ['scp', 'sftp', 'rsync']
+    # Native Windows OpenSSH ships scp/sftp. An installed rsync is qualified by
+    # selecting it explicitly, with the same round-trip hash checks as Unix.
+    tools = args.tools or (['scp', 'sftp'] if windows or winhost.device() else ['scp', 'sftp', 'rsync'])
     with winhost.workdir(name) as root:
         source = root / 'tree'
         (source / 'nested').mkdir(parents=True)
@@ -51,20 +54,22 @@ def main():
             destination = json.loads(remote(binary, args.target, setup))
         failure = None
         try:
-            run(binary, 'scp', '-r', str(source), args.target + ':' + destination + '/scp/')
-            copied = root / 'scp-return'
-            run(binary, 'scp', '-r', args.target + ':' + destination + '/scp/tree', str(copied))
-            if tree_hashes(copied) != expected:
-                raise RuntimeError('managed SCP changed the round-trip tree')
-            batch = root / 'sftp.batch'
-            returned = root / 'sftp-return.bin'
-            # sftp reads a backslash in a batch file as an escape; Windows takes / in a local path
-            batch.write_text('put "' + str(source / 'data.bin').replace('\\', '/') + '" "' + destination + '/sftp.bin"\n'
-                             'get "' + destination + '/sftp.bin" "' + str(returned).replace('\\', '/') + '"\n'
-                             'rm "' + destination + '/sftp.bin"\n')
-            run(binary, 'sftp', '-b', str(batch), args.target)
-            if returned.read_bytes() != (source / 'data.bin').read_bytes():
-                raise RuntimeError('managed SFTP changed the round-trip bytes')
+            if 'scp' in tools:
+                run(binary, 'scp', '-r', str(source), args.target + ':' + destination + '/scp/')
+                copied = root / 'scp-return'
+                run(binary, 'scp', '-r', args.target + ':' + destination + '/scp/tree', str(copied))
+                if tree_hashes(copied) != expected:
+                    raise RuntimeError('managed SCP changed the round-trip tree')
+            if 'sftp' in tools:
+                batch = root / 'sftp.batch'
+                returned = root / 'sftp-return.bin'
+                # sftp's batch paths escape backslashes; Windows accepts forward slashes.
+                batch.write_text('put "' + str(source / 'data.bin').replace('\\', '/') + '" "' + destination + '/sftp.bin"\n'
+                                 'get "' + destination + '/sftp.bin" "' + str(returned).replace('\\', '/') + '"\n'
+                                 'rm "' + destination + '/sftp.bin"\n')
+                run(binary, 'sftp', '-b', str(batch), args.target)
+                if returned.read_bytes() != (source / 'data.bin').read_bytes():
+                    raise RuntimeError('managed SFTP changed the round-trip bytes')
             if 'rsync' in tools:
                 run(binary, 'rsync', '-a', str(source) + '/', args.target + ':' + destination + '/rsync/')
                 copied = root / 'rsync-return'
