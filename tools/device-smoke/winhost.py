@@ -71,6 +71,8 @@ WRITE = ("$d=Split-Path -Parent $req.path;if($d){[void](New-Item -ItemType Direc
 # so anything larger travels in pieces of this many bytes.
 CHUNK = 3000
 EXISTS = "if(Test-Path -LiteralPath $req.path){'yes'}else{'no'}"
+OWNER_ONLY = ('& icacls.exe $req.path /inheritance:r /grant:r "$([Security.Principal.WindowsIdentity]::GetCurrent().Name):(F)" | Out-Null\n'
+              "if($LASTEXITCODE -ne 0){throw 'icacls failed'}")
 COPY = "Copy-Item -LiteralPath $req.source -Destination $req.target -Force"
 UNLINK = "Remove-Item -LiteralPath $req.path -Recurse -Force -ErrorAction SilentlyContinue"
 MKDIR = "[void](New-Item -ItemType Directory -Force -Path $req.path)"
@@ -509,7 +511,10 @@ class RemotePath:
         self.device.ps('truncate %s' % self, TRUNCATE_FILE, path=str(self), size=size)
 
     def chmod(self, mode):
-        pass  # files under the user's profile are private to that user by their inherited ACL
+        """Owner-only (no group/other bits): drop inherited entries and grant the current user alone, as pb's
+        owner-only file checks require on Windows. Other modes change nothing."""
+        if mode & 0o077 == 0:
+            self.device.ps('owner-only %s' % self, OWNER_ONLY, path=str(self))
 
     def sha256(self):
         return self.device.sha256(self)

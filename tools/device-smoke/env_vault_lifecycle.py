@@ -17,6 +17,11 @@ from pairing_lifecycle import command_result
 import winhost
 
 PB = winhost.pb_path()
+PROFILE = {'prefix': [], 'env': None}  # --teammate: the device's second signed-in account profile (teammate_profile.py)
+
+
+def pb(*args, **kwargs):
+    return command_result(PB, *PROFILE['prefix'], *args, env=PROFILE['env'], **kwargs)
 
 
 def temp_dir():
@@ -31,6 +36,7 @@ def write_secret(path, value):
             handle.write(value)
     else:
         path.write_text(value)
+        path.chmod(0o600)
 
 
 def replace(source, target):
@@ -41,7 +47,7 @@ def replace(source, target):
 
 
 def run(*args, stdin=None):
-    result = command_result(PB, 'env', 'vault', *args, '--json', input=stdin, timeout=90)
+    result = pb('env', 'vault', *args, '--json', input=stdin, timeout=90)
     try:
         receipt = json.loads(result.stdout)
     except ValueError:
@@ -68,18 +74,22 @@ def owner_only(path):
 
 
 def personal_inventory():
-    return json.loads(command_result(PB, 'env', 'list', '--json', timeout=60).stdout)['data']
+    return json.loads(pb('env', 'list', '--json', timeout=60).stdout)['data']
 
 
 def account_id():
-    return json.loads(command_result(PB, 'auth', 'status', '--json', timeout=30).stdout)['account']['id']
+    return json.loads(pb('auth', 'status', '--json', timeout=30).stdout)['account']['id']
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('password_file', type=winhost.device_path)
     parser.add_argument('recovery_file', type=winhost.device_path)
+    parser.add_argument('--teammate', action='store_true', help="use the device's second account profile (a fresh vault)")
     args = parser.parse_args()
+    if args.teammate:
+        from teammate_profile import environment, profile_root
+        PROFILE.update(prefix=['--config', str(profile_root() / 'config.json')], env=environment(profile_root()))
     original = args.password_file
     owner_only(original)
     owner_only(args.recovery_file)
@@ -123,7 +133,7 @@ def main():
             need(run('resume'), 'resume')
             # Reset replaces the personal keys and deletes every personal value.
             mark = 'PB_RESET_MARK'
-            marked = command_result(PB, 'env', 'set', mark, '--value-stdin', '--json', input='reset-me', timeout=60)
+            marked = pb('env', 'set', mark, '--value-stdin', '--json', input='reset-me', timeout=60)
             if marked.returncode:
                 raise RuntimeError('could not set the value that reset must delete')
             before = personal_inventory()

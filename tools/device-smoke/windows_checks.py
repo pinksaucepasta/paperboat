@@ -95,7 +95,7 @@ def checks(args):
                              '--machine-name', args.owner_machine_name or '', '--owner-cmd', args.owner_cmd or '',
                              '--owner-pb', args.owner_pb, '--member-cmd', 'windows'],
                             ['--team', '--owner_cmd', '--owner_machine_id', '--owner_machine_name'])
-    table['env-vault-lifecycle'] = (['env_vault_lifecycle.py', '{vault_password}', '{vault_recovery}'], [])
+    table['env-vault-lifecycle'] = (['env_vault_lifecycle.py', '{vault_password}', '{vault_recovery}', '--teammate'], [])
     return table
 
 
@@ -150,8 +150,9 @@ def run_check(check, argv, args, device):
     with contextlib.ExitStack() as stack:
         if check == 'env-vault-lifecycle':  # a fresh vault on a fresh account; its secret files stay on the device
             vault = stack.enter_context(device.temp_dir('pb-vault'))
-            (vault / 'password').write_text(secrets.token_urlsafe(24))
-            (vault / 'recovery').write_text(secrets.token_urlsafe(24))
+            for name in ('password', 'recovery'):  # pb reads secrets only from owner-only files
+                (vault / name).write_text(secrets.token_urlsafe(24))
+                (vault / name).chmod(0o600)
             replacements = {'{vault_password}': str(vault / 'password'), '{vault_recovery}': str(vault / 'recovery')}
         if '{token}' in argv:  # the check may delete its copy of the token; never the original
             scratch = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix='pb-windows-checks-')))
