@@ -24,18 +24,21 @@ func ReconcileAuthorizedKeysContext(ctx context.Context, stateRoot string, publi
 	return changed, err
 }
 
-// ReconcileAuthorizedKeysRevoking is ReconcileAuthorizedKeysContext that also reports whether a key left the file,
-// the one change after which open sessions must end (sshd checks keys only at login).
-func ReconcileAuthorizedKeysRevoking(ctx context.Context, stateRoot string, publicKeys []string) (changed, removed bool, err error) {
+// AllSessions stands in the removed list for a key that left the file but could not be fingerprinted.
+const AllSessions = "*"
+
+// ReconcileAuthorizedKeysRevoking is ReconcileAuthorizedKeysContext that also returns the SHA256 fingerprints of the
+// keys that left the file, the one change after which their open sessions must end (sshd checks keys only at login).
+func ReconcileAuthorizedKeysRevoking(ctx context.Context, stateRoot string, publicKeys []string) (changed bool, removed []string, err error) {
 	if ctx == nil || !filepath.IsAbs(stateRoot) || filepath.Clean(stateRoot) != stateRoot || len(publicKeys) > 256 {
-		return false, false, ErrInvalidConfig
+		return false, nil, ErrInvalidConfig
 	}
 	if err := ctx.Err(); err != nil {
-		return false, false, err
+		return false, nil, err
 	}
 	unlock, err := lockAuthorizedKeys(ctx, stateRoot)
 	if err != nil {
-		return false, false, err
+		return false, nil, err
 	}
 	defer unlock()
 	lines := make([]string, 0, len(publicKeys))
@@ -43,7 +46,7 @@ func ReconcileAuthorizedKeysRevoking(ctx context.Context, stateRoot string, publ
 	for _, value := range publicKeys {
 		key, comment, options, rest, err := ssh.ParseAuthorizedKey([]byte(strings.TrimSpace(value)))
 		if err != nil || key == nil || key.Type() != ssh.KeyAlgoED25519 || len(options) != 0 || len(bytes.TrimSpace(rest)) != 0 || strings.ContainsAny(comment, "\x00\r\n") {
-			return false, false, ErrQualificationEnrollment
+			return false, nil, ErrQualificationEnrollment
 		}
 		line := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
 		if seen[line] {
@@ -59,33 +62,39 @@ func ReconcileAuthorizedKeysRevoking(ctx context.Context, stateRoot string, publ
 	}
 	directory := filepath.Join(stateRoot, "authorized_keys")
 	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return false, false, err
+		return false, nil, err
 	}
 	path := filepath.Join(directory, "paperboat")
 	existing, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return false, false, err
+		return false, nil, err
 	}
 	if bytes.Equal(existing, body) {
-		return false, false, nil
+		return false, nil, nil
 	}
 	if err := ctx.Err(); err != nil {
-		return false, false, err
+		return false, nil, err
 	}
 	if err := atomicfile.Write(path, body, managedKeysFileOptions()); err != nil {
-		return false, false, err
+		return false, nil, err
 	}
-	return true, keyLeft(existing, seen), nil
+	return true, keysLeft(existing, seen), nil
 }
 
-// keyLeft reports whether the old file held a key that the new set (normalized lines) does not.
-func keyLeft(existing []byte, kept map[string]bool) bool {
+// keysLeft returns the fingerprints of old-file keys that the new set (normalized lines) does not hold.
+func keysLeft(existing []byte, kept map[string]bool) []string {
+	var left []string
 	for _, line := range strings.Split(string(existing), "\n") {
-		if line = strings.TrimSpace(line); line != "" && !kept[line] {
-			return true
+		if line = strings.TrimSpace(line); line == "" || kept[line] {
+			continue
+		}
+		if key, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line)); err == nil {
+			left = append(left, ssh.FingerprintSHA256(key))
+		} else {
+			left = append(left, AllSessions)
 		}
 	}
-	return false
+	return left
 }
 
 // protectManagedKeys gives Paperboat's key file its fixed owner and DACL at

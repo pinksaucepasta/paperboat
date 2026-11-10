@@ -1,7 +1,12 @@
 package windowsopenssh
 
 import (
+	"bufio"
+	"encoding/hex"
+	"io"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -43,4 +48,96 @@ func sessionPIDs(table []processEntry, servicePIDs map[uint32]bool) []uint32 {
 		}
 	}
 	return slices.DeleteFunc(result, func(pid uint32) bool { return slices.Contains(listeners, pid) })
+}
+
+var acceptedKey = regexp.MustCompile(`^Accepted publickey for .* ssh2: [A-Z0-9-]+ (SHA256:[A-Za-z0-9+/]{43})$`)
+
+// parseSessionLog maps the pid sshd names in "User child is on pid N" to the key of the "Accepted publickey ...
+// SHA256:<fp>" line before it. The two lines are only paired when exactly one Accepted line is waiting: with two in
+// flight (interleaved logins) the order is unknown, so neither pid is mapped and sessionPIDsForKeys ends both. A pid
+// logged again takes the newer key (the older process is dead).
+func parseSessionLog(log io.Reader) map[uint32]string {
+	pidKey := map[uint32]string{}
+	var pending []string
+	scanner := bufio.NewScanner(log)
+	scanner.Buffer(make([]byte, 64<<10), 1<<20)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if match := acceptedKey.FindStringSubmatch(line); match != nil {
+			pending = append(pending, match[1])
+		} else if rest, ok := strings.CutPrefix(line, "User child is on pid "); ok {
+			if pid, err := strconv.ParseUint(rest, 10, 32); err == nil && len(pending) == 1 {
+				pidKey[uint32(pid)] = pending[0]
+			} else if err == nil {
+				delete(pidKey, uint32(pid))
+			}
+			pending = nil
+		}
+	}
+	return pidKey
+}
+
+// sessionPIDsForKeys narrows sessionPIDs to the sessions of the removed keys. Each logged pid names a session's
+// process; its ancestors below the listener and everything under it are that session. A live session the log does not
+// name (log rotated, lines interleaved) is ended too: over-ending is the safe direction. removed == nil ends all.
+func sessionPIDsForKeys(table []processEntry, servicePIDs map[uint32]bool, pidKey map[uint32]string, removed map[string]bool) []uint32 {
+	all := sessionPIDs(table, servicePIDs)
+	if removed == nil {
+		return all
+	}
+	inAll := map[uint32]bool{}
+	for _, pid := range all {
+		inAll[pid] = true
+	}
+	parent, children := map[uint32]uint32{}, map[uint32][]uint32{}
+	for _, entry := range table {
+		if inAll[entry.PID] {
+			parent[entry.PID] = entry.PPID
+			children[entry.PPID] = append(children[entry.PPID], entry.PID)
+		}
+	}
+	session := func(root uint32) map[uint32]bool {
+		group := map[uint32]bool{}
+		for pid := root; inAll[pid] && !group[pid]; pid = parent[pid] {
+			group[pid] = true
+		}
+		for queue := []uint32{root}; len(queue) > 0; queue = queue[1:] {
+			for _, child := range children[queue[0]] {
+				if !group[child] {
+					group[child] = true
+					queue = append(queue, child)
+				}
+			}
+		}
+		return group
+	}
+	covered, end := map[uint32]bool{}, map[uint32]bool{}
+	for pid, key := range pidKey {
+		if !inAll[pid] {
+			continue
+		}
+		for member := range session(pid) {
+			covered[member] = true
+			if removed[key] {
+				end[member] = true
+			}
+		}
+	}
+	var result []uint32
+	for _, pid := range all {
+		if end[pid] || !covered[pid] {
+			result = append(result, pid)
+		}
+	}
+	return result
+}
+
+// managedGeneration returns the generation of a PaperboatSshd-<instance>-<generation> service name, matching the
+// whole name (a 32-digit lowercase hex generation), so instance "u-1" never matches "u-10".
+func managedGeneration(name, instance string) (string, bool) {
+	generation, ok := strings.CutPrefix(name, ServiceName+"-"+instance+"-")
+	if _, err := hex.DecodeString(generation); !ok || err != nil || len(generation) != 32 || strings.ToLower(generation) != generation {
+		return "", false
+	}
+	return generation, true
 }

@@ -50,7 +50,10 @@ func TestWindowsAuthorizedKeysEndsSessionsOnlyWhenAKeyLeaves(t *testing.T) {
 	}
 	var ended []string
 	reconciler.instance = "u-test"
-	reconciler.terminate = func(instance string) error { ended = append(ended, instance); return nil }
+	reconciler.terminate = func(instance, _ string, removed []string) error {
+		ended = append(ended, instance+":"+strings.Join(removed, ","))
+		return nil
+	}
 	newKey := func() string {
 		public, _, _ := ed25519.GenerateKey(rand.Reader)
 		key, _ := ssh.NewPublicKey(public)
@@ -68,8 +71,8 @@ func TestWindowsAuthorizedKeysEndsSessionsOnlyWhenAKeyLeaves(t *testing.T) {
 			t.Fatalf("after %d keys ended=%v, want %d", len(step.keys), ended, step.want)
 		}
 	}
-	if ended[0] != "u-test" {
-		t.Fatalf("ended instance %q", ended[0])
+	if want := "u-test:" + fingerprintOf(a); ended[0] != want {
+		t.Fatalf("ended %q, want only the removed key %q", ended[0], want)
 	}
 }
 
@@ -80,7 +83,7 @@ func TestWindowsAuthorizedKeysRetriesAFailedSessionEnd(t *testing.T) {
 	}
 	attempts, fail := 0, true
 	reconciler.instance = "u-test"
-	reconciler.terminate = func(string) error {
+	reconciler.terminate = func(string, string, []string) error {
 		attempts++
 		if fail {
 			return os.ErrPermission
@@ -104,4 +107,9 @@ func TestWindowsAuthorizedKeysRetriesAFailedSessionEnd(t *testing.T) {
 	if attempts != 2 {
 		t.Fatalf("a finished duty ran again: %d", attempts)
 	}
+}
+
+func fingerprintOf(line string) string {
+	key, _, _, _, _ := ssh.ParseAuthorizedKey([]byte(line))
+	return ssh.FingerprintSHA256(key)
 }
