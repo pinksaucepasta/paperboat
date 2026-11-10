@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"io"
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
@@ -48,3 +49,20 @@ func ReadRefusal(r *bufio.Reader) error {
 	}
 	return &RefusedError{Reason: strings.TrimSpace(strings.TrimPrefix(line, refusalPrefix))}
 }
+
+// ReadServerStart is ReadRefusal for pb's own SSH client: a stream that ends before its first byte is also named
+// (ErrSSHServerClosed), where the client would only report a bare handshake EOF.
+func ReadServerStart(r *bufio.Reader) error {
+	if _, err := r.Peek(1); errors.Is(err, io.EOF) {
+		return ErrSSHServerClosed
+	}
+	return ReadRefusal(r)
+}
+
+// startedStream reads through the reader that already took the first bytes of the stream.
+type startedStream struct {
+	io.ReadWriteCloser
+	reader *bufio.Reader
+}
+
+func (s startedStream) Read(p []byte) (int, error) { return s.reader.Read(p) }

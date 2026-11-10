@@ -319,8 +319,29 @@ func TestRunSSHCommandCancellationDuringSessionAndEarlyEOF(t *testing.T) {
 		Address: "hn.machines.example.test:22", User: "root", Command: "true", Signer: clientSigner,
 		AuthorizedHostKeys: []string{authorizedSSHKey(hostSigner)}, Output: io.Discard, ErrorOutput: io.Discard,
 	})
-	if err == nil {
-		t.Fatal("early transport EOF was accepted")
+	if !errors.Is(err, ErrSSHServerClosed) {
+		t.Fatalf("early transport EOF error=%v, want ErrSSHServerClosed", err)
+	}
+}
+
+// victus -> hp 2026-11-10: the host ended the stream before sshd's banner and `pb ssh hp -- cmd` printed only the
+// generic failure text ("ssh: handshake failed: EOF" underneath). A refusal line is named the same way as on Unix.
+func TestRunSSHCommandNamesAHostRefusalInsteadOfAHandshakeFailure(t *testing.T) {
+	clientSigner, _ := testKey(t)
+	hostSigner, _ := testKey(t)
+	client, remote := net.Pipe()
+	go func() { _, _ = io.Copy(io.Discard, remote) }()
+	go func() {
+		_, _ = remote.Write([]byte(refusalPrefix + RefusedNotSetUp + "\r\n"))
+		_ = remote.Close()
+	}()
+	err := RunSSHCommand(t.Context(), client, SSHCommandConfig{
+		Address: "hn.machines.example.test:22", User: "root", Command: "true", Signer: clientSigner,
+		AuthorizedHostKeys: []string{authorizedSSHKey(hostSigner)}, Output: io.Discard, ErrorOutput: io.Discard,
+	})
+	var refused *RefusedError
+	if !errors.As(err, &refused) || refused.Reason != RefusedNotSetUp {
+		t.Fatalf("refused stream error=%v, want RefusedError %q", err, RefusedNotSetUp)
 	}
 }
 

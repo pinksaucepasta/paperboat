@@ -1,6 +1,7 @@
 package managedssh
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -81,7 +82,13 @@ func RunSSHCommand(ctx context.Context, stream io.ReadWriteCloser, config SSHCom
 	}
 	handshakeDone := make(chan sshCommandHandshake, 1)
 	go func() {
-		connection, channels, requests, handshakeErr := ssh.NewClientConn(sshProbeConn{ReadWriteCloser: stream}, config.Address, clientConfig)
+		// The host answers first: its refusal line, sshd's banner, or nothing at all when it ended the stream.
+		reader := bufio.NewReader(stream)
+		if startErr := ReadServerStart(reader); startErr != nil {
+			handshakeDone <- sshCommandHandshake{err: startErr}
+			return
+		}
+		connection, channels, requests, handshakeErr := ssh.NewClientConn(sshProbeConn{ReadWriteCloser: startedStream{ReadWriteCloser: stream, reader: reader}}, config.Address, clientConfig)
 		handshakeDone <- sshCommandHandshake{connection: connection, channels: channels, requests: requests, err: handshakeErr}
 	}()
 	var handshake sshCommandHandshake

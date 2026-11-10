@@ -86,11 +86,12 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 		_ = connection.Close()
 		return err
 	}
-	// The host writes a refusal line before sshd's banner when it knows sshd will refuse (macOS Remote Login);
-	// read it first, and stop waiting for a silent stream when the probe's time is up.
+	// The host writes a refusal line before sshd's banner when it knows sshd will refuse (macOS Remote Login), and
+	// ends the stream with nothing when it does not serve it; read that first, and stop waiting for a silent
+	// stream when the probe's time is up.
 	stopWatch := context.AfterFunc(probeCtx, func() { _ = connection.Close() })
 	reader := bufio.NewReader(connection)
-	if refused := managedssh.ReadRefusal(reader); refused != nil {
+	if refused := managedssh.ReadServerStart(reader); refused != nil {
 		stopWatch()
 		_ = connection.Close()
 		return refused
