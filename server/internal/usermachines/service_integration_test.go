@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -2734,59 +2735,47 @@ func TestMachineControlInitialReplayRotatesAfterExpiryWithoutCrossMachineCollisi
 	body := []byte(`{}`)
 	bodyDigest := sha256.Sum256(body)
 	claims := MachineProofClaims{MachineID: machineID, EnvironmentID: environmentID, InstallationGeneration: 3, OperationID: "renew-before-remove-" + suffix, Method: "POST", Path: "/v1/machine-control-renewals", BodySHA256: base64.RawURLEncoding.EncodeToString(bodyDigest[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute)}
-	payload, err := json.Marshal(claims)
-	if err != nil {
-		t.Fatal(err)
+	// Every proof carries its own one-use nonce; a proof without one is refused (TestMachineProofNonceIsUsedOnceOnPostgres).
+	signProof := func(c MachineProofClaims, nonce string) []byte {
+		t.Helper()
+		c.Nonce = nonce
+		payload, err := json.Marshal(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		proof, err := json.Marshal(machineProofEnvelope{Algorithm: "EdDSA", Payload: base64.RawURLEncoding.EncodeToString(payload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(privateKey, payload))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return proof
 	}
-	proof, err := json.Marshal(machineProofEnvelope{Algorithm: "EdDSA", Payload: base64.RawURLEncoding.EncodeToString(payload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(privateKey, payload))})
-	if err != nil {
-		t.Fatal(err)
-	}
+	proof := signProof(claims, "n0nce-baseline-"+suffix)
 	renewed, err := service.RenewMachineControl(ctx, reconnected.Credential, proof, body, "POST", claims.Path)
 	if err != nil {
 		t.Fatal("live machine-control credential rejected", err)
 	}
-	// Prove the exact credential/proof pair used below succeeds while the
-	// machine is active, so revocation is the only changed authorization input.
-	if _, err := service.RenewMachineControl(ctx, renewed.Credential, proof, body, "POST", claims.Path); err != nil {
-		t.Fatal("current machine-control credential/proof baseline", err)
-	}
-	// Clients since b684f426 (F21-13) put a one-use nonce in every proof. Renewal decoded proofs strictly
-	// and refused the unknown field, so every renewal on prod answered 401 (1,248 of 1,261 in 6 h) and
-	// machines went offline until they re-issued. A nonce-bearing proof renews (replay refusal: TestMachineProofNonceIsUsedOnceOnPostgres).
+	// Prove a fresh proof with the current credential succeeds while the machine is active, so revocation
+	// is the only changed authorization input for the proof used after Delete.
 	nonceClaims := claims
-	nonceClaims.OperationID, nonceClaims.Nonce = "renew-nonce-"+suffix, "n0nce-"+strings.Repeat("a", 20)
-	noncePayload, err := json.Marshal(nonceClaims)
+	nonceClaims.OperationID = "renew-nonce-" + suffix
+	renewed, err = service.RenewMachineControl(ctx, renewed.Credential, signProof(nonceClaims, "n0nce-"+strings.Repeat("a", 20)), body, "POST", claims.Path)
 	if err != nil {
-		t.Fatal(err)
-	}
-	nonceProof, err := json.Marshal(machineProofEnvelope{Algorithm: "EdDSA", Payload: base64.RawURLEncoding.EncodeToString(noncePayload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(privateKey, noncePayload))})
-	if err != nil {
-		t.Fatal(err)
-	}
-	renewed, err = service.RenewMachineControl(ctx, renewed.Credential, nonceProof, body, "POST", claims.Path)
-	if err != nil {
-		t.Fatal("renewal with a nonce-bearing proof rejected", err)
+		t.Fatal("renewal with a fresh nonce-bearing proof rejected", err)
 	}
 	// F21-02: a correctly signed proof from a clock 10 minutes ahead is a clock_skew refusal, not a bad
 	// credential, so the machine corrects its time instead of being treated as signed out.
 	skewClaims := claims
 	skewClaims.OperationID, skewClaims.IssuedAt, skewClaims.ExpiresAt = "renew-skew-"+suffix, now.Add(10*time.Minute), now.Add(11*time.Minute)
-	skewPayload, err := json.Marshal(skewClaims)
-	if err != nil {
-		t.Fatal(err)
-	}
-	skewProof, err := json.Marshal(machineProofEnvelope{Algorithm: "EdDSA", Payload: base64.RawURLEncoding.EncodeToString(skewPayload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(privateKey, skewPayload))})
-	if err != nil {
-		t.Fatal(err)
-	}
+	skewProof := signProof(skewClaims, "n0nce-skew-"+suffix)
 	if _, err := service.RenewMachineControl(ctx, renewed.Credential, skewProof, body, "POST", claims.Path); ControlRejectionReason(err) != ProofClockSkewReason {
 		t.Fatalf("skewed proof = %v, want reason %s", err, ProofClockSkewReason)
 	}
 	if err := service.Delete(ctx, userID, machineID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.RenewMachineControl(ctx, renewed.Credential, proof, body, "POST", claims.Path); !errors.Is(err, ErrMachineControlInvalid) {
+	afterRemoval := claims
+	afterRemoval.OperationID = "renew-after-remove-" + suffix
+	if _, err := service.RenewMachineControl(ctx, renewed.Credential, signProof(afterRemoval, "n0nce-removed-"+suffix), body, "POST", claims.Path); !errors.Is(err, ErrMachineControlInvalid) {
 		t.Fatalf("removed machine-control credential accepted: %v", err)
 	}
 	for table := range map[string]struct{}{
@@ -3700,10 +3689,11 @@ func TestMachineControlRenewalReplayAfterLostResponse(t *testing.T) {
 	now := time.Date(2026, 8, 23, 1, 2, 3, 0, time.UTC)
 	service.now = func() time.Time { return now }
 	body := []byte(`{}`)
+	var renewNonce atomic.Int64
 	renew := func(credential, machine, operation string) (MachineControlCredential, error) {
 		t.Helper()
 		digest := sha256.Sum256(body)
-		claims := MachineProofClaims{MachineID: machine, EnvironmentID: "env_" + machine, InstallationGeneration: 3, OperationID: operation, Method: "POST", Path: "/v1/machine-control-renewals", BodySHA256: base64.RawURLEncoding.EncodeToString(digest[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute)}
+		claims := MachineProofClaims{MachineID: machine, EnvironmentID: "env_" + machine, InstallationGeneration: 3, OperationID: operation, Method: "POST", Path: "/v1/machine-control-renewals", BodySHA256: base64.RawURLEncoding.EncodeToString(digest[:]), Nonce: fmt.Sprintf("n0nce-renew-%012d", renewNonce.Add(1)), IssuedAt: now, ExpiresAt: now.Add(time.Minute)}
 		payload, err := json.Marshal(claims)
 		if err != nil {
 			t.Fatal(err)

@@ -626,7 +626,7 @@ func stormAdmissionRequest(ctx context.Context, client *http.Client, baseURL, pr
 	}
 	bodyHash := sha256.Sum256(payload)
 	now := time.Now().UTC()
-	claims := HelperProofClaims{HelperID: helper.HelperID, EnvironmentID: prefix + "env_" + strconv.Itoa(index), OperationID: operationID,
+	claims := HelperProofClaims{HelperID: helper.HelperID, EnvironmentID: prefix + "env_" + strconv.Itoa(index), OperationID: operationID, Nonce: proofTestNonce(),
 		Method: http.MethodPost, Path: "/v1/connectors/admission", BodySHA256: base64.RawURLEncoding.EncodeToString(bodyHash[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute)}
 	proofPayload, err := json.Marshal(claims)
 	if err != nil {

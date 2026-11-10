@@ -327,7 +327,7 @@ VALUES($1,$2,$1,$1,$3,$3,'consumed','installing',1,$4,$3,'OBSERVE123','fixture-o
 	heartbeat := func(handler http.Handler, operation string, tamper bool) int {
 		t.Helper()
 		hash := sha256.Sum256(body)
-		claims := controlplane.HelperProofClaims{HelperID: exchanged.Data.HelperID, EnvironmentID: environment, OperationID: operation, Method: http.MethodPost, Path: "/v1/runtime-observations", BodySHA256: base64.RawURLEncoding.EncodeToString(hash[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute)}
+		claims := controlplane.HelperProofClaims{HelperID: exchanged.Data.HelperID, EnvironmentID: environment, OperationID: operation, Nonce: proofTestNonce(), Method: http.MethodPost, Path: "/v1/runtime-observations", BodySHA256: base64.RawURLEncoding.EncodeToString(hash[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute)}
 		payload, err := json.Marshal(claims)
 		if err != nil {
 			t.Fatal(err)

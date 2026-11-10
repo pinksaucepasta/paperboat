@@ -242,7 +242,7 @@ func TestTeamConfigPublicationAuditUsesAuthoritativeAdoptionAndCommitsAtomically
 		body := []byte(`{}`)
 		digest := sha256.Sum256(body)
 		claims := HelperProofClaims{HelperID: identity.HelperID, EnvironmentID: environmentID,
-			OperationID: operation, Method: "POST", Path: "/v1/config/status", BodySHA256: base64.RawURLEncoding.EncodeToString(digest[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute)}
+			OperationID: operation, Nonce: proofTestNonce(), Method: "POST", Path: "/v1/config/status", BodySHA256: base64.RawURLEncoding.EncodeToString(digest[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute)}
 		payload, _ := json.Marshal(claims)
 		proof, _ := json.Marshal(helperProofEnvelope{Algorithm: "EdDSA", Payload: base64.RawURLEncoding.EncodeToString(payload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(helperPrivate, payload))})
 		return statuses.Record(ctx, identity.Credential, proof, body, "POST", "/v1/config/status", report)

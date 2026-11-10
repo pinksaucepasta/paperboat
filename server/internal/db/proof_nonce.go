@@ -11,7 +11,7 @@ import (
 // reserved until the proof expires; a second use is a replay. Requests that HTTP itself may send again
 // (GET/HEAD, or any request with an Idempotency-Key, which Go's transport re-sends after a dropped
 // connection) are idempotent by design and are not reserved, so such a re-send is never mistaken for a
-// replay. Proofs without a nonce (clients before the nonce) are accepted as before. Every verifier of a
+// replay. A proof without a nonce is refused. Every verifier of a
 // machine or helper proof uses this one implementation (controlplane and the machine-control renewal).
 
 type resendableKey struct{}
@@ -28,10 +28,13 @@ func resendable(ctx context.Context, method string) bool {
 
 var proofNoncePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{16,64}$`)
 
-// ReserveProofNonce records signer's nonce until expires. It reports false for a malformed nonce or one
-// seen before (a replay); an empty nonce or a resendable request is not reserved and reports true.
+// ReserveProofNonce records signer's nonce until expires. It reports false for a missing or malformed nonce
+// or one seen before (a replay); a resendable request with a nonce is not reserved and reports true.
 func (d *DB) ReserveProofNonce(ctx context.Context, signer, nonce, method string, expires time.Time) (bool, error) {
-	if nonce == "" || resendable(ctx, method) {
+	if nonce == "" {
+		return false, nil
+	}
+	if resendable(ctx, method) {
 		return true, nil
 	}
 	if !proofNoncePattern.MatchString(nonce) {

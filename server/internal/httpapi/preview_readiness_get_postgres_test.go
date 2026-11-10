@@ -119,7 +119,7 @@ func TestMachinePreviewReadinessGetPostgres(t *testing.T) {
 		if signed {
 			digest := sha256.Sum256(nil)
 			proofNow := time.Now().UTC()
-			payload, _ := json.Marshal(map[string]any{"machine_id": machine, "environment_id": machine, "installation_generation": 1, "operation_id": "readiness_" + suffix, "method": http.MethodGet, "path": path, "body_sha256": base64.RawURLEncoding.EncodeToString(digest[:]), "issued_at": proofNow, "expires_at": proofNow.Add(time.Minute)})
+			payload, _ := json.Marshal(map[string]any{"machine_id": machine, "environment_id": machine, "installation_generation": 1, "operation_id": "readiness_" + suffix, "nonce": proofTestNonce(), "method": http.MethodGet, "path": path, "body_sha256": base64.RawURLEncoding.EncodeToString(digest[:]), "issued_at": proofNow, "expires_at": proofNow.Add(time.Minute)})
 			proof, _ := json.Marshal(map[string]string{"alg": "EdDSA", "payload": base64.RawURLEncoding.EncodeToString(payload), "signature": base64.RawURLEncoding.EncodeToString(ed25519.Sign(private, payload))})
 			request.Header.Set("Authorization", "Bearer "+token)
 			request.Header.Set("X-Paperboat-Machine-Identity", token)

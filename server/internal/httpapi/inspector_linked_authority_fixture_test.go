@@ -206,7 +206,7 @@ func TestInspectorLinkedAuthorityProductionPostgres(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"credential_token": grant.Token, "resource_kind": "preview", "resource_id": lease, "route_id": lease, "action": "inspect"})
 	digest := sha256.Sum256(body)
 	issued := time.Now().UTC()
-	proofBody, _ := json.Marshal(map[string]any{"machine_id": linked.Descriptor["MachineID"], "environment_id": linked.Descriptor["EnvironmentID"], "installation_generation": 1, "operation_id": "inspector-proof-" + suffix, "method": "POST", "path": "/v1/inspector/authorize", "body_sha256": base64.RawURLEncoding.EncodeToString(digest[:]), "issued_at": issued, "expires_at": issued.Add(time.Minute)})
+	proofBody, _ := json.Marshal(map[string]any{"machine_id": linked.Descriptor["MachineID"], "environment_id": linked.Descriptor["EnvironmentID"], "installation_generation": 1, "operation_id": "inspector-proof-" + suffix, "nonce": proofTestNonce(), "method": "POST", "path": "/v1/inspector/authorize", "body_sha256": base64.RawURLEncoding.EncodeToString(digest[:]), "issued_at": issued, "expires_at": issued.Add(time.Minute)})
 	private, _ := base64.RawURLEncoding.DecodeString(linked.Descriptor["MachinePrivateKey"].(string))
 	proof, _ := json.Marshal(map[string]string{"alg": "EdDSA", "payload": base64.RawURLEncoding.EncodeToString(proofBody), "signature": base64.RawURLEncoding.EncodeToString(ed25519.Sign(ed25519.PrivateKey(private), proofBody))})
 	req, _ := http.NewRequest(http.MethodPost, server.URL+"/v1/inspector/authorize", bytes.NewReader(body))

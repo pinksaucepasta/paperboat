@@ -103,14 +103,14 @@ func TestHelperEnrollmentExchangeIsSingleUseAndKeyBound(t *testing.T) {
 	service.clock = func() time.Time { return renewNow }
 	renewBody := []byte(`{"operation_id":"helper-renew-operation-01"}`)
 	renewHash := sha256.Sum256(renewBody)
-	renewClaims := HelperProofClaims{HelperID: identity.HelperID, EnvironmentID: environmentID, OperationID: "helper-renew-operation-01", Method: "POST", Path: "/v1/helper-identity-renewals", BodySHA256: base64.RawURLEncoding.EncodeToString(renewHash[:]), IssuedAt: renewNow, ExpiresAt: renewNow.Add(time.Minute)}
+	renewClaims := HelperProofClaims{HelperID: identity.HelperID, EnvironmentID: environmentID, OperationID: "helper-renew-operation-01", Nonce: proofTestNonce(), Method: "POST", Path: "/v1/helper-identity-renewals", BodySHA256: base64.RawURLEncoding.EncodeToString(renewHash[:]), IssuedAt: renewNow, ExpiresAt: renewNow.Add(time.Minute)}
 	renewPayload, _ := json.Marshal(renewClaims)
 	renewProof, _ := json.Marshal(helperProofEnvelope{Algorithm: "EdDSA", Payload: base64.RawURLEncoding.EncodeToString(renewPayload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(helperPrivate, renewPayload))})
 	renewed, err := service.Renew(ctx, renewProof, renewBody)
 	if err != nil || renewed.Credential == identity.Credential || !renewed.ExpiresAt.After(identity.ExpiresAt) {
 		t.Fatalf("renewed identity = %#v, %v", renewed, err)
 	}
-	renewedReplay, err := service.Renew(ctx, renewProof, renewBody)
+	renewedReplay, err := service.Renew(ctx, resignHelperProof(renewClaims, helperPrivate), renewBody)
 	if err != nil || renewedReplay != renewed {
 		t.Fatalf("renewal replay = %#v, %v", renewedReplay, err)
 	}
@@ -178,7 +178,7 @@ func TestMachineControlRequestRejectsSupersededAndRevokedSessions(t *testing.T) 
 	}
 	body := []byte(`{"route_id":"route_1"}`)
 	digest := sha256.Sum256(body)
-	proofClaims := canonicalMachineProofClaims{MachineID: machineID, EnvironmentID: environmentID, InstallationGeneration: 3, OperationID: "private-access-operation-1", Method: "POST", Path: GrantPathForMachineProofTest, BodySHA256: base64.RawURLEncoding.EncodeToString(digest[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute)}
+	proofClaims := canonicalMachineProofClaims{MachineID: machineID, EnvironmentID: environmentID, InstallationGeneration: 3, OperationID: "private-access-operation-1", Nonce: proofTestNonce(), Method: "POST", Path: GrantPathForMachineProofTest, BodySHA256: base64.RawURLEncoding.EncodeToString(digest[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute)}
 	payload, _ := json.Marshal(proofClaims)
 	proof, _ := json.Marshal(helperProofEnvelope{Algorithm: "EdDSA", Payload: base64.RawURLEncoding.EncodeToString(payload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(privateKey, payload))})
 	service := NewEnrollmentService(store, signer, nil, "https://api.example.test", "")
@@ -420,7 +420,7 @@ func TestConnectorAdmissionBindsProofGenerationNodeAndReplay(t *testing.T) {
 	}
 	body := []byte(`{"operation_id":"admission-operation-01","environment_id":"` + environmentID + `","machine_id":"` + identity.MachineID + `","connector_id":"runtime","edge_pool":"default","protocol_version":"1.0"}`)
 	bodyHash := sha256.Sum256(body)
-	proofClaims := HelperProofClaims{HelperID: identity.HelperID, EnvironmentID: environmentID, OperationID: "admission-operation-01", Method: "POST", Path: "/v1/connectors/admission", BodySHA256: base64.RawURLEncoding.EncodeToString(bodyHash[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute)}
+	proofClaims := HelperProofClaims{HelperID: identity.HelperID, EnvironmentID: environmentID, OperationID: "admission-operation-01", Nonce: proofTestNonce(), Method: "POST", Path: "/v1/connectors/admission", BodySHA256: base64.RawURLEncoding.EncodeToString(bodyHash[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute)}
 	payload, _ := json.Marshal(proofClaims)
 	proof, _ := json.Marshal(helperProofEnvelope{Algorithm: "EdDSA", Payload: base64.RawURLEncoding.EncodeToString(payload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(helperPrivate, payload))})
 	edge := NewEdgeService(store, "edge-control-credential-01234567890123456789")
@@ -438,7 +438,7 @@ func TestConnectorAdmissionBindsProofGenerationNodeAndReplay(t *testing.T) {
 	if _, err := signer.VerifyCredential(admission.Credential, "https://api.example.test", "connector_admission", now); err != nil {
 		t.Fatalf("admission credential = %v", err)
 	}
-	replay, err := edge.IssueConnectorAdmission(ctx, identity.Credential, proof, body, "default", "POST", "/v1/connectors/admission")
+	replay, err := edge.IssueConnectorAdmission(ctx, identity.Credential, resignHelperProof(proofClaims, helperPrivate), body, "default", "POST", "/v1/connectors/admission")
 	if err != nil || replay.Credential != admission.Credential {
 		t.Fatalf("admission replay = %#v, %v", replay, err)
 	}
@@ -449,9 +449,7 @@ func TestConnectorAdmissionBindsProofGenerationNodeAndReplay(t *testing.T) {
 	edge.SetClock(func() time.Time { return next })
 	nextBody := []byte(`{"operation_id":"admission-operation-02","environment_id":"` + environmentID + `","machine_id":"` + identity.MachineID + `","connector_id":"runtime","edge_pool":"default","protocol_version":"1.0"}`)
 	nextHash := sha256.Sum256(nextBody)
-	nextClaims := HelperProofClaims{HelperID: identity.HelperID, EnvironmentID: environmentID, OperationID: "admission-operation-02", Method: "POST", Path: "/v1/connectors/admission", BodySHA256: base64.RawURLEncoding.EncodeToString(nextHash[:]), IssuedAt: next, ExpiresAt: next.Add(time.Minute)}
-	nextPayload, _ := json.Marshal(nextClaims)
-	nextProof, _ := json.Marshal(helperProofEnvelope{Algorithm: "EdDSA", Payload: base64.RawURLEncoding.EncodeToString(nextPayload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(helperPrivate, nextPayload))})
+	nextClaims := HelperProofClaims{HelperID: identity.HelperID, EnvironmentID: environmentID, OperationID: "admission-operation-02", Nonce: proofTestNonce(), Method: "POST", Path: "/v1/connectors/admission", BodySHA256: base64.RawURLEncoding.EncodeToString(nextHash[:]), IssuedAt: next, ExpiresAt: next.Add(time.Minute)}
 	const concurrentRenewals = 16
 	renewals := make(chan ConnectorAdmission, concurrentRenewals)
 	renewalErrors := make(chan error, concurrentRenewals)
@@ -460,7 +458,7 @@ func TestConnectorAdmissionBindsProofGenerationNodeAndReplay(t *testing.T) {
 		renewalGroup.Add(1)
 		go func() {
 			defer renewalGroup.Done()
-			renewed, err := edge.IssueConnectorAdmission(ctx, identity.Credential, nextProof, nextBody, "default", "POST", "/v1/connectors/admission")
+			renewed, err := edge.IssueConnectorAdmission(ctx, identity.Credential, resignHelperProof(nextClaims, helperPrivate), nextBody, "default", "POST", "/v1/connectors/admission")
 			if err != nil {
 				renewalErrors <- err
 				return
@@ -488,7 +486,7 @@ func TestConnectorAdmissionBindsProofGenerationNodeAndReplay(t *testing.T) {
 	newAdmissionRequest := func(operationID string) ([]byte, []byte) {
 		body := []byte(`{"operation_id":"` + operationID + `","environment_id":"` + environmentID + `","machine_id":"` + identity.MachineID + `","connector_id":"runtime","edge_pool":"default","protocol_version":"1.0"}`)
 		bodyHash := sha256.Sum256(body)
-		claims := HelperProofClaims{HelperID: identity.HelperID, EnvironmentID: environmentID, OperationID: operationID, Method: "POST", Path: "/v1/connectors/admission", BodySHA256: base64.RawURLEncoding.EncodeToString(bodyHash[:]), IssuedAt: next, ExpiresAt: next.Add(time.Minute)}
+		claims := HelperProofClaims{HelperID: identity.HelperID, EnvironmentID: environmentID, OperationID: operationID, Nonce: proofTestNonce(), Method: "POST", Path: "/v1/connectors/admission", BodySHA256: base64.RawURLEncoding.EncodeToString(bodyHash[:]), IssuedAt: next, ExpiresAt: next.Add(time.Minute)}
 		payload, _ := json.Marshal(claims)
 		envelope, _ := json.Marshal(helperProofEnvelope{Algorithm: "EdDSA", Payload: base64.RawURLEncoding.EncodeToString(payload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(helperPrivate, payload))})
 		return body, envelope

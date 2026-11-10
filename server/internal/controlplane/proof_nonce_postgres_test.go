@@ -11,7 +11,7 @@ import (
 )
 
 // F21-13 (Lane X #16): a proof nonce is used once until the proof expires; requests HTTP may send
-// again (GET/HEAD, Idempotency-Key) are not reserved, and proofs without a nonce pass as before.
+// again (GET/HEAD, Idempotency-Key) are not reserved, and a proof without a nonce is refused.
 func TestProofNonceIsUsedOnce(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
@@ -33,7 +33,6 @@ func TestProofNonceIsUsedOnce(t *testing.T) {
 		"Idempotency-Key": func() error {
 			return s.reserveProofNonce(db.WithResendableRequest(ctx), signer, nonce, http.MethodPost, expires)
 		},
-		"no nonce": func() error { return s.reserveProofNonce(ctx, signer, "", http.MethodPost, expires) },
 	} {
 		if err := try(); err != nil {
 			t.Fatalf("%s re-send refused: %v", name, err)
@@ -41,6 +40,11 @@ func TestProofNonceIsUsedOnce(t *testing.T) {
 	}
 	if err := s.reserveProofNonce(ctx, signer, "short", http.MethodPost, expires); !errors.Is(err, ErrHelperProof) {
 		t.Fatalf("malformed nonce: %v", err)
+	}
+	for _, method := range []string{http.MethodPost, http.MethodGet} {
+		if err := s.reserveProofNonce(db.WithResendableRequest(ctx), signer, "", method, expires); !errors.Is(err, ErrHelperProof) {
+			t.Fatalf("%s proof without a nonce: %v", method, err)
+		}
 	}
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.proof_nonces SET expires_at=now()-interval '1 second' WHERE signer=$1`, signer); err != nil {
 		t.Fatal(err)

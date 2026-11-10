@@ -78,7 +78,7 @@ func TestConfigCustomRepositoryRulesAccessAndRevocation(t *testing.T) {
 	body := []byte(`{}`)
 	proofFor := func(operation, path string) []byte {
 		sum := sha256.Sum256(body)
-		payload, _ := json.Marshal(HelperProofClaims{HelperID: identity.HelperID, EnvironmentID: environmentID, OperationID: operation, Method: "POST", Path: path, BodySHA256: base64.RawURLEncoding.EncodeToString(sum[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute)})
+		payload, _ := json.Marshal(HelperProofClaims{HelperID: identity.HelperID, EnvironmentID: environmentID, OperationID: operation, Nonce: proofTestNonce(), Method: "POST", Path: path, BodySHA256: base64.RawURLEncoding.EncodeToString(sum[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute)})
 		proof, _ := json.Marshal(helperProofEnvelope{Algorithm: "EdDSA", Payload: base64.RawURLEncoding.EncodeToString(payload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(helperPrivate, payload))})
 		return proof
 	}

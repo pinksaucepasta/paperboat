@@ -195,7 +195,7 @@ func TestConfigCredentialIsBoundReplaySafeAndRevokedWithAssignment(t *testing.T)
 	}
 	body := []byte(`{}`)
 	bodyHash := sha256.Sum256(body)
-	proofClaims := HelperProofClaims{HelperID: identity.HelperID, EnvironmentID: environmentID, OperationID: "config-credential-operation-01", Method: "POST", Path: "/v1/config/credentials", BodySHA256: base64.RawURLEncoding.EncodeToString(bodyHash[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute)}
+	proofClaims := HelperProofClaims{HelperID: identity.HelperID, EnvironmentID: environmentID, OperationID: "config-credential-operation-01", Nonce: proofTestNonce(), Method: "POST", Path: "/v1/config/credentials", BodySHA256: base64.RawURLEncoding.EncodeToString(bodyHash[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute)}
 	payload, _ := json.Marshal(proofClaims)
 	proof, _ := json.Marshal(helperProofEnvelope{Algorithm: "EdDSA", Payload: base64.RawURLEncoding.EncodeToString(payload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(helperPrivate, payload))})
 	credentials := NewConfigCredentialService(store, signer, "https://api.example.test", "config-credential-encryption-key")
@@ -210,7 +210,7 @@ func TestConfigCredentialIsBoundReplaySafeAndRevokedWithAssignment(t *testing.T)
 	if err != nil || claims.AssignmentID != assignment.ID || claims.WarningRevision != "warning-7" || claims.MachineID != identity.MachineID {
 		t.Fatalf("claims = %#v, %v", claims, err)
 	}
-	replay, err := credentials.Issue(ctx, identity.Credential, proof, body, "POST", "/v1/config/credentials")
+	replay, err := credentials.Issue(ctx, identity.Credential, resignHelperProof(proofClaims, helperPrivate), body, "POST", "/v1/config/credentials")
 	if err != nil || replay.Credential != issued.Credential {
 		t.Fatalf("replay = %#v, %v", replay, err)
 	}
@@ -220,13 +220,13 @@ func TestConfigCredentialIsBoundReplaySafeAndRevokedWithAssignment(t *testing.T)
 	if err != nil || replacement.ID != assignment.ID || replacement.Version <= assignment.Version {
 		t.Fatalf("a live assignment keeps its id when replaced and its version moves: %#v, %v", replacement, err)
 	}
-	if _, err := credentials.Issue(ctx, identity.Credential, proof, body, "POST", "/v1/config/credentials"); !errors.Is(err, ErrConfigCredentialReplay) {
+	if _, err := credentials.Issue(ctx, identity.Credential, resignHelperProof(proofClaims, helperPrivate), body, "POST", "/v1/config/credentials"); !errors.Is(err, ErrConfigCredentialReplay) {
 		t.Fatalf("replaced assignment replay error = %v", err)
 	}
 	if err := assignments.Clear(ctx, user, identity.MachineID, replacement.Version); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := credentials.Issue(ctx, identity.Credential, proof, body, "POST", "/v1/config/credentials"); !errors.Is(err, ErrConfigCredentialReplay) {
+	if _, err := credentials.Issue(ctx, identity.Credential, resignHelperProof(proofClaims, helperPrivate), body, "POST", "/v1/config/credentials"); !errors.Is(err, ErrConfigCredentialReplay) {
 		t.Fatalf("revoked replay error = %v", err)
 	}
 	edge := NewEdgeService(store, "edge-control-test")
@@ -519,7 +519,7 @@ func TestConfigUpdatePolicyPreservesBaselineIdentity(t *testing.T) {
 	}
 	body := []byte(`{}`)
 	bodyHash := sha256.Sum256(body)
-	proofClaims := HelperProofClaims{HelperID: identity.HelperID, EnvironmentID: environmentID, OperationID: "config-credential-operation-01", Method: "POST", Path: "/v1/config/credentials", BodySHA256: base64.RawURLEncoding.EncodeToString(bodyHash[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute)}
+	proofClaims := HelperProofClaims{HelperID: identity.HelperID, EnvironmentID: environmentID, OperationID: "config-credential-operation-01", Nonce: proofTestNonce(), Method: "POST", Path: "/v1/config/credentials", BodySHA256: base64.RawURLEncoding.EncodeToString(bodyHash[:]), IssuedAt: now, ExpiresAt: now.Add(time.Minute)}
 	payload, _ := json.Marshal(proofClaims)
 	proof, _ := json.Marshal(helperProofEnvelope{Algorithm: "EdDSA", Payload: base64.RawURLEncoding.EncodeToString(payload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(helperPrivate, payload))})
 	credentials := NewConfigCredentialService(store, signer, "https://api.example.test", "config-credential-encryption-key")
@@ -534,7 +534,7 @@ func TestConfigUpdatePolicyPreservesBaselineIdentity(t *testing.T) {
 	if err != nil || claims.AssignmentID != assignment.ID || claims.WarningRevision != "warning-7" || claims.MachineID != identity.MachineID {
 		t.Fatalf("claims = %#v, %v", claims, err)
 	}
-	replay, err := credentials.Issue(ctx, identity.Credential, proof, body, "POST", "/v1/config/credentials")
+	replay, err := credentials.Issue(ctx, identity.Credential, resignHelperProof(proofClaims, helperPrivate), body, "POST", "/v1/config/credentials")
 	if err != nil || replay.Credential != issued.Credential {
 		t.Fatalf("replay = %#v, %v", replay, err)
 	}
@@ -547,7 +547,7 @@ func TestConfigUpdatePolicyPreservesBaselineIdentity(t *testing.T) {
 		if _, err := assignConfigTestTargets(assignments, ctx, user, identity.MachineID, repository.ID, repository.ID, ConfigModeBidirectional, !automatic, "warning-7", previous.Version); !errors.Is(err, ErrAssignmentConflict) {
 			t.Fatalf("stale policy change = %v", err)
 		}
-		if _, err := credentials.Issue(ctx, identity.Credential, proof, body, "POST", "/v1/config/credentials"); !errors.Is(err, ErrConfigCredentialReplay) {
+		if _, err := credentials.Issue(ctx, identity.Credential, resignHelperProof(proofClaims, helperPrivate), body, "POST", "/v1/config/credentials"); !errors.Is(err, ErrConfigCredentialReplay) {
 			t.Fatalf("policy change failed credential revocation: %v", err)
 		}
 		assignment, err = assignments.AcceptConsent(ctx, user, identity.MachineID, "warning-7", assignment.Version)
@@ -563,13 +563,13 @@ func TestConfigUpdatePolicyPreservesBaselineIdentity(t *testing.T) {
 	if err != nil || replacement.ID != assignment.ID || replacement.Version != assignment.Version+1 || replacement.ConsentState != "pending" {
 		t.Fatalf("replacement = %#v, %v", replacement, err)
 	}
-	if _, err := credentials.Issue(ctx, identity.Credential, proof, body, "POST", "/v1/config/credentials"); !errors.Is(err, ErrConfigCredentialReplay) {
+	if _, err := credentials.Issue(ctx, identity.Credential, resignHelperProof(proofClaims, helperPrivate), body, "POST", "/v1/config/credentials"); !errors.Is(err, ErrConfigCredentialReplay) {
 		t.Fatalf("replaced assignment replay error = %v", err)
 	}
 	if err := assignments.Clear(ctx, user, identity.MachineID, replacement.Version); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := credentials.Issue(ctx, identity.Credential, proof, body, "POST", "/v1/config/credentials"); !errors.Is(err, ErrConfigCredentialReplay) {
+	if _, err := credentials.Issue(ctx, identity.Credential, resignHelperProof(proofClaims, helperPrivate), body, "POST", "/v1/config/credentials"); !errors.Is(err, ErrConfigCredentialReplay) {
 		t.Fatalf("revoked replay error = %v", err)
 	}
 	reenabled, err := assignConfigTestProjection(updatedAssignments, ctx, user, identity.MachineID, repository.ID, ConfigModePullOnly, "warning-8", replacement.Version+1)
