@@ -58,7 +58,7 @@ func (c *helperTerminalConn) decodeScreenCheckpoint(frame protocol.TerminalOutpu
 		return helperOutput{}, errors.New("terminal screen checkpoint exceeds its boundary or size")
 	}
 	c.checkpointBytes += len(frame.Data) - 1
-	output := helperOutput{data: frame.Data[1:]}
+	output := helperOutput{checkpoint: true, data: frame.Data[1:]}
 	if frame.Data[0] == 1 {
 		c.checkpointActive = false
 		output.endSequence = frame.StartSequence

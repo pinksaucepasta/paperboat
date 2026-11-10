@@ -100,6 +100,7 @@ func (e *helperRemoteError) Error() string {
 
 type helperOutput struct {
 	byteCursor  bool
+	checkpoint  bool // a screen checkpoint chunk: never held
 	data        []byte
 	endSequence uint64
 }
@@ -203,6 +204,7 @@ type helperTerminalConn struct {
 	compressionDecodeFailures atomic.Uint64
 	lastMessage               atomic.Int64 // unix nanoseconds of the last message from the host
 	stalled                   atomic.Bool
+	hold                      helperHold
 	stallAfter                time.Duration // helperStallAfter when the connection was made; read only by watchSilence
 	linkState                 atomic.Pointer[func(stalled bool)]
 }
@@ -532,6 +534,7 @@ func (c *helperTerminalConn) watchSilence() {
 
 func (c *helperTerminalConn) readLoop() {
 	defer close(c.out)
+	defer c.flushHold()
 	c.lastMessage.Store(time.Now().UnixNano())
 	go c.watchSilence()
 	firstOutput := true
@@ -591,9 +594,7 @@ func (c *helperTerminalConn) readLoop() {
 				diagnosticlog.TryInfo("peer terminal first output", "source", "live", "bytes", len(output.data))
 				firstOutput = false
 			}
-			select {
-			case c.out <- output:
-			case <-c.done:
+			if !c.routeOutput(output) {
 				return
 			}
 		default:
@@ -605,16 +606,19 @@ func (c *helperTerminalConn) readLoop() {
 
 func (c *helperTerminalConn) handleEvent(frame helperFrame) bool {
 	var event struct {
-		Event         string `json:"event"`
-		SessionID     string `json:"session_id"`
-		StreamID      uint32 `json:"stream_id"`
-		Sequence      uint64 `json:"sequence"`
-		Status        string `json:"status"`
-		BytesWritten  int    `json:"bytes_written"`
-		ErrorCode     string `json:"error_code,omitempty"`
-		State         string `json:"state"`
-		FinalSequence uint64 `json:"final_sequence"`
-		Exit          *struct {
+		Event        string `json:"event"`
+		SessionID    string `json:"session_id"`
+		StreamID     uint32 `json:"stream_id"`
+		Sequence     uint64 `json:"sequence"`
+		Status       string `json:"status"`
+		BytesWritten int    `json:"bytes_written"`
+		ErrorCode    string `json:"error_code,omitempty"`
+		// The host's cut for a lone Ctrl-C (helper_hold.go).
+		InterruptThrough   uint64 `json:"interrupt_through"`
+		InterruptDiscarded bool   `json:"interrupt_discarded"`
+		State              string `json:"state"`
+		FinalSequence      uint64 `json:"final_sequence"`
+		Exit               *struct {
 			Code   int    `json:"code"`
 			Signal string `json:"signal"`
 		} `json:"exit"`
@@ -632,6 +636,7 @@ func (c *helperTerminalConn) handleEvent(frame helperFrame) bool {
 		if event.Status != "accepted" {
 			diagnosticlog.TryInfo("terminal input not accepted", "sequence", event.Sequence, "status", event.Status, "code", event.ErrorCode)
 		}
+		c.resolveHold(event.Sequence, event.InterruptThrough, event.Status == "accepted" && event.InterruptDiscarded)
 		return false
 	}
 	if event.Event != "terminal_stream_end" {
@@ -801,6 +806,9 @@ func (c *helperTerminalConn) Write(p []byte) (int, error) {
 	written := 0
 	for _, chunk := range chunks {
 		c.inputSeq.Store(chunk.Sequence)
+		if len(chunk.Data) == 1 && chunk.Data[0] == 0x03 {
+			c.startHold(chunk.Sequence) // output is held from here until the host answers this key
+		}
 		if err := c.queueWrite(c.inputWrites, helperWrite{messageType: helperBinaryMessage, data: c.inputFrame(chunk), result: make(chan error, 1)}); err != nil {
 			return written, err
 		}
