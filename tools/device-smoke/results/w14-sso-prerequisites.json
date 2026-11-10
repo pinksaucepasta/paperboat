@@ -1,0 +1,21 @@
+{
+  "lane": "W14",
+  "build_commit": "9b7af936400c86a690f15c467d7b854e15f58903",
+  "build": "PASS: windows/amd64, PE32+ x86-64",
+  "runner": "assigned hosted Windows runner; SSH connects",
+  "rows": {
+    "F19-03": {
+      "status": "NOT_RUN",
+      "prerequisite": "current Keycloak realm URL and credential file paths for SP/IdP sign-in"
+    },
+    "F19-04": {
+      "status": "NOT_RUN",
+      "prerequisite": "current SSO browser sessions for directory member and non-SSO member, to verify enforcement from isolated Windows CLI profiles."
+    },
+    "F19-06": {
+      "status": "NOT_RUN",
+      "prerequisite": "current SCIM endpoint/token file directory and directory-user browser session"
+    }
+  },
+  "cleanup": "No enrollment, machine records, SSO settings or directory state changed."
+}

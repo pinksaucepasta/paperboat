@@ -3425,6 +3425,8 @@ The coolify format (S1) also removes the old dev deployment and its test backups
 
 ## 5. Log
 
+2026-11-11 | W14 F19-03/04/06 W waits for reliability fixture owner: current Keycloak URL/credential file paths, SSO member sessions, SCIM endpoint/token directory; documented fixtures unavailable. Windows build 9b7af9364 PE32+ x86-64 PASS; winpool-8 assigned, no enrollment or shared fixture changes.
+
 2026-11-04 | SDK F24-09 | Revocation capacity/history fixture now seeds expired history directly, avoiding the bulk expiry update's peer-authority rebuild; all 10,001-row overflow/pruning assertions retained. | Focused isolated-PG PASS 3.0s; affected server CI before push.
 
 
