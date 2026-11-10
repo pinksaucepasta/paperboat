@@ -1154,6 +1154,54 @@ class UpdateSurvivalMarkers(unittest.TestCase):
         for line in typed:
             self.assertNotRegex(line, r"PB_[A-Z]+_%s")
 
+    class FakeSender:
+        def __init__(self, clock, finish_at):
+            self.clock, self.finish_at, self.killed = clock, finish_at, False
+
+        def wait(self, timeout):
+            if self.clock[0] + timeout >= self.finish_at:
+                self.clock[0] = self.finish_at
+                return 0
+            self.clock[0] += timeout
+            raise subprocess.TimeoutExpired('send', timeout)
+
+        def stdout(self):
+            return b''
+
+        def stderr(self):
+            return b''
+
+        def kill(self):
+            self.killed = True
+
+    def test_a_slow_transfer_that_keeps_committing_is_waited_for(self):
+        import update_survival
+        clock = [0.0]
+        sender = self.FakeSender(clock, finish_at=40 * 60)  # 2 x 600 MiB at ~0.5 MiB/s: far past the old 10 minutes
+        code = update_survival.wait_sender(sender, lambda: int(clock[0]) * 500_000, clock=lambda: clock[0])
+        self.assertEqual(code, 0)
+        self.assertFalse(sender.killed)
+
+    def test_a_transfer_that_stops_committing_fails_as_stalled(self):
+        import update_survival
+        clock = [0.0]
+        sender = self.FakeSender(clock, finish_at=10 ** 9)
+        progress = lambda: min(int(clock[0]), 120) * 1000  # commits for two minutes, then nothing
+        with self.assertRaisesRegex(RuntimeError, 'made no progress for 300 s .*committed 120000 bytes'):
+            update_survival.wait_sender(sender, progress, clock=lambda: clock[0])
+        self.assertTrue(sender.killed)
+        self.assertLess(clock[0], 120 + update_survival.STALL_SECONDS + 2 * update_survival.POLL_SECONDS)
+
+    def test_a_failing_listing_counts_as_no_progress(self):
+        import update_survival
+        clock = [0.0]
+        sender = self.FakeSender(clock, finish_at=10 ** 9)
+
+        def progress():
+            raise RuntimeError('listing failed')
+        with self.assertRaisesRegex(RuntimeError, 'made no progress'):
+            update_survival.wait_sender(sender, progress, clock=lambda: clock[0])
+
     def test_update_continuity_markers_are_split_too(self):
         import re
         source = pathlib.Path(__file__).with_name('update_continuity.py').read_text()

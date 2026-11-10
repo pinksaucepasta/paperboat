@@ -37,6 +37,9 @@ PB = winhost.pb_path()
 FILES = 2
 FILE_SIZE = 40 << 20  # default; --mib overrides
 GAP_SECONDS = 240
+POLL_SECONDS = 60
+STALL_SECONDS = 300
+CAP_SECONDS = 90 * 60
 
 
 def body(url):
@@ -67,6 +70,37 @@ def tunnel(*args):
 
 def peer(target, command, timeout=120):
     return command_result(PB, 'exec', target, '--', 'sh', '-c', command, timeout=timeout)
+
+
+def committed(target, prefix):
+    """Bytes the receiver has committed for this run's files (its durable offset, the one a resumed send continues from)."""
+    page = invoke(PB, 'send', 'list', '--on', target, '--q', prefix, '--json', timeout=60)
+    return sum(item.get('committed_offset', 0) for item in page['items'] if item['basename'].startswith(prefix))
+
+
+def wait_sender(sender, progress, clock=time.monotonic):
+    """Wait while the receiver's committed bytes keep growing: a slow path (a hosted runner with a 250-800 ms RTT moves
+    under 1 MiB/s) is not a hung transfer. Fails on STALL_SECONDS without progress, or after CAP_SECONDS in all."""
+    started = last_change = clock()
+    seen = -1
+    while True:
+        try:
+            return sender.wait(POLL_SECONDS)
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            now = progress()
+        except RuntimeError:  # a failed listing is no progress
+            now = seen
+        if now > seen:
+            seen, last_change = now, clock()
+        stalled = clock() - last_change >= STALL_SECONDS
+        if stalled or clock() - started >= CAP_SECONDS:
+            text = (sender.stdout() + sender.stderr()).decode(errors='replace')[-2000:]  # read before the kill removes the job
+            sender.kill()
+            what = 'made no progress for %d s' % STALL_SECONDS if stalled else 'did not finish within %d s' % CAP_SECONDS
+            raise RuntimeError('the transfer %s after the update (receiver committed %d bytes); sender output: %s'
+                               % (what, max(seen, 0), text or 'none'))
 
 
 def main():
@@ -169,12 +203,7 @@ def main():
                         return None
                 wait_for(lambda: ready_endpoint() == preview_url, 'the preview lease to report ready on the same URL')
                 wait_for(lambda: tunnel('status', tunnel_id).get('overall_code') == 'ready', 'the tunnel to report ready (same stable URL already served)')
-            try:
-                code = sender.wait(600)
-            except subprocess.TimeoutExpired:
-                text = (sender.stdout() + sender.stderr()).decode(errors='replace')[-2000:]  # read before the kill removes the job
-                sender.kill()
-                raise RuntimeError('the transfer did not finish within 10 minutes of the update; sender output: %s' % (text or 'none'))
+            code = wait_sender(sender, lambda: committed(args.peer, prefix))
             if code != 0:
                 raise RuntimeError('the transfer failed after the update (rc %s): %s' % (code, (sender.stdout() + sender.stderr()).decode()[-2000:]))
             listing = peer(args.peer, 'cd ~/Paperboat/Inbox && sha256sum %s-*.bin' % prefix, 120).stdout
