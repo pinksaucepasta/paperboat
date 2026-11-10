@@ -169,9 +169,9 @@ func ensureDPAPIDirectoryWithCreate(path, sddl string, create dpapiDirectoryCrea
 
 	ownerMatches := windowssecurity.HandleOwnerMatchesSID(handle, ownerSID)
 	if !ownerMatches {
-		trustedLegacy := trustedLegacyDPAPIHandle(handle, information, ownerSID)
+		adminOwnedExact := adminOwnedExactDPAPIHandle(handle, information, ownerSID)
 		trustedNetworkLayout := trustedParent && transientDPAPICredentialSubdirectory(path) && trustedNetworkDPAPIDirectoryHandle(handle, information)
-		if !createdBelowTrustedParent && !trustedLegacy && !trustedNetworkLayout && !dpapiHandlePrivate(handle, ownerSID, sddl) {
+		if !createdBelowTrustedParent && !adminOwnedExact && !trustedNetworkLayout && !dpapiHandlePrivate(handle, ownerSID, sddl) {
 			return fmt.Errorf("%w: refusing to change a foreign-owned credential directory", ErrCredentialStoreUnavailable)
 		}
 	}
@@ -186,7 +186,7 @@ func ensureDPAPIDirectoryWithCreate(path, sddl string, create dpapiDirectoryCrea
 
 // openVerifiedDPAPICredentialParent pins the exact default credential root
 // without delete sharing. Only its direct children can use the narrow
-// elevated/network-token migration. The Paperboat root itself never enters
+// elevated/network-token adoption. The Paperboat root itself never enters
 // this path.
 func openVerifiedDPAPICredentialParent(path string, userSID *windows.SID, sddl string) (windows.Handle, string, bool) {
 	credentialDirectory, err := dpapiCredentialDirectory()
@@ -264,7 +264,7 @@ func dpapiObjectAlreadyExists(err error) bool {
 
 // openDPAPISecurityObject opens and pins one ordinary filesystem object while
 // ownership and ACLs are inspected or changed. Omitting FILE_SHARE_DELETE keeps
-// the verified object bound to its name until the migration finishes.
+// the verified object bound to its name until the repair finishes.
 func openDPAPISecurityObject(path string, parentReadOnly bool) (windows.Handle, windows.ByHandleFileInformation, string, error) {
 	pointer, err := windows.UTF16PtrFromString(path)
 	if err != nil {
@@ -303,7 +303,7 @@ func inspectDPAPIDirectoryHandle(handle windows.Handle) (windows.ByHandleFileInf
 	return information, finalPath, nil
 }
 
-func openDPAPILegacyObject(path string, directory bool) (windows.Handle, windows.ByHandleFileInformation, error) {
+func openDPAPIPinnedObject(path string, directory bool) (windows.Handle, windows.ByHandleFileInformation, error) {
 	pointer, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return 0, windows.ByHandleFileInformation{}, err
@@ -356,11 +356,11 @@ func dpapiHandlePrivate(handle windows.Handle, userSID *windows.SID, sddl string
 	return userSID != nil && userSID.IsValid() && windowssecurity.HandleOwnerMatchesSID(handle, userSID) && windowssecurity.ProtectedHandleDACLMatches(handle, sddl)
 }
 
-// Older elevated Windows installs created per-user objects with Administrators
-// as owner while granting only SYSTEM, Administrators, and the enrolled user
-// full control. Preserve that exact transition, but validate it through the
-// same pinned handle that will be changed.
-func trustedLegacyDPAPIHandle(handle windows.Handle, information windows.ByHandleFileInformation, userSID *windows.SID) bool {
+// An elevated token's default owner is Administrators, so a file or directory this build created with the
+// exact credential DACL stays Administrators-owned if the process stops before the owner is set to the
+// user (setDPAPISecret, applyDPAPIObjectSecurityHandle). Accept only that exact state, validated through the
+// same pinned handle that is then repaired.
+func adminOwnedExactDPAPIHandle(handle windows.Handle, information windows.ByHandleFileInformation, userSID *windows.SID) bool {
 	if userSID == nil || !userSID.IsValid() {
 		return false
 	}
@@ -534,12 +534,12 @@ func applyDPAPIObjectSecurityHandle(handle windows.Handle, ownerSID *windows.SID
 	return nil
 }
 
-func migrateTrustedLegacyDPAPIObject(path, sddl string) error {
+func repairAdminOwnedDPAPIObject(path, sddl string) error {
 	info, err := os.Lstat(path)
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() && !info.Mode().IsRegular() {
 		return errors.Join(ErrCredentialStoreUnavailable, err)
 	}
-	handle, information, err := openDPAPILegacyObject(path, info.IsDir())
+	handle, information, err := openDPAPIPinnedObject(path, info.IsDir())
 	if err != nil {
 		return errors.Join(ErrCredentialStoreUnavailable, err)
 	}
@@ -551,11 +551,11 @@ func migrateTrustedLegacyDPAPIObject(path, sddl string) error {
 	if dpapiHandlePrivate(handle, ownerSID, sddl) {
 		return nil
 	}
-	if !trustedLegacyDPAPIHandle(handle, information, ownerSID) && !dpapiHandlePrivate(handle, ownerSID, sddl) {
+	if !adminOwnedExactDPAPIHandle(handle, information, ownerSID) && !dpapiHandlePrivate(handle, ownerSID, sddl) {
 		return fmt.Errorf("%w: refusing to change a foreign-owned credential object", ErrCredentialStoreUnavailable)
 	}
 	if err := applyDPAPIObjectSecurityHandle(handle, ownerSID, sddl); err != nil {
-		return fmt.Errorf("%w: migrate credential owner and DACL: %v", ErrCredentialStoreUnavailable, err)
+		return fmt.Errorf("%w: repair credential owner and DACL: %v", ErrCredentialStoreUnavailable, err)
 	}
 	return nil
 }
@@ -736,7 +736,7 @@ func getDPAPISecret(ref string) (string, error) {
 	if err != nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 		return "", errors.Join(ErrCredentialStoreUnavailable, err)
 	}
-	if err := migrateTrustedLegacyDPAPIObject(path, sddl); err != nil {
+	if err := repairAdminOwnedDPAPIObject(path, sddl); err != nil {
 		return "", err
 	}
 	attributes, err := windows.GetFileAttributes(windows.StringToUTF16Ptr(path))

@@ -112,10 +112,9 @@ func (KeyringStore) Set(ref, value string) (resultErr error) {
 	if err := service.CreateItem(collection, fmt.Sprintf("%s/%s", keyringService, ref), linuxSecretAttributes(ref), secretservice.NewSecret(session.Path(), value)); err != nil {
 		return unavailableCredentialStore(err)
 	}
-	// Secret Service's replace flag is not consistently implemented when a
-	// legacy client already created duplicate matching items. Reconcile to one
-	// deterministic item before reporting success so reads can always fail
-	// closed instead of selecting an arbitrary old secret.
+	// CreateItem's replace flag is not honoured by every Secret Service backend, and two Paperboat processes can
+	// Set the same ref at once, so this Set can itself leave duplicates. Get and Delete fail closed on more than
+	// one item, so reconcile to one deterministic item before reporting success.
 	items, err := linuxSecretItems(service, ref)
 	if err != nil {
 		return unavailableCredentialStore(err)
