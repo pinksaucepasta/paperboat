@@ -437,7 +437,7 @@ func TestNormalizeConfigStatusTimestampPreservesAgeAcrossClockSkew(t *testing.T)
 
 func TestValidObservedCapabilitiesRejectsUnknownDuplicatesAndMachineRelay(t *testing.T) {
 	if !validObservedCapabilities([]string{"file_receive", "file_transfer_modes"}) {
-		t.Fatal("a destination that receives per the signed transfer claims was refused")
+		t.Fatal("the previous release's daemon reports file_transfer_modes: its observation must still be accepted")
 	}
 	if !validObservedCapabilities([]string{"file_receive", "preview_launch"}) {
 		t.Fatal("client capabilities should be valid")

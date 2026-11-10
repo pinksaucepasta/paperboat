@@ -2878,7 +2878,6 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 		t.Fatal(err)
 	}
 	service.ConfigureTerminalSessions(signer, nil)
-	service.ConfigureTransferModes("2026.10.27.0")
 	response, err := service.ConnectTerminalSession(ctx, userID, sourceMachineID, userMachineID, "cls_1", terminalSessionID)
 	if err != nil {
 		t.Fatal(err)
@@ -2966,7 +2965,6 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 		t.Fatal(err)
 	}
 	service.ConfigureTerminalSessions(signer, nil)
-	service.ConfigureTransferModes("2026.10.27.0")
 
 	created, err := service.CreateConfiguredTerminalSessionInDirectory(ctx, userID, userMachineID, userMachineID, "bench-run", "pb-mc-key", "/tmp/local project")
 	if err != nil {
@@ -3856,7 +3854,7 @@ func TestPairedMachineHasALocalAddressLease(t *testing.T) {
 	}
 }
 
-func TestObservedFileTransferModesIsAcceptedPostgres(t *testing.T) {
+func TestObservedCapabilitiesRejectUnknownPostgres(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
@@ -3864,8 +3862,8 @@ func TestObservedFileTransferModesIsAcceptedPostgres(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id,workos_subject,primary_email,status) VALUES ($1,$1,$1||'@example.test','active')`, userID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,observed_capabilities) VALUES ($1,$2,$1,'linux','amd64','/w','online','occupied',true,ARRAY['file_receive','file_transfer_modes'])`, machineID, userID); err != nil {
-		t.Fatalf("a destination observing file_transfer_modes was refused: %v", err)
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines (id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,observed_capabilities) VALUES ($1,$2,$1,'linux','amd64','/w','online','occupied',true,ARRAY['file_receive'])`, machineID, userID); err != nil {
+		t.Fatalf("a destination observing file_receive was refused: %v", err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET observed_capabilities=ARRAY['file_receive','unknown_capability'] WHERE id=$1`, machineID); err == nil {
 		t.Fatal("an unknown observed capability was accepted")

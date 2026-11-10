@@ -104,42 +104,7 @@ func TestFileTransferModesBoundAutomaticAndSignTheModePostgres(t *testing.T) {
 		return claims.TransferMode, claims.MaxBytes
 	}
 
-	setModes := func(on bool) {
-		t.Helper()
-		query := `UPDATE paperboat.user_machines SET observed_capabilities=array_remove(observed_capabilities,'file_transfer_modes') WHERE id=$1`
-		if on {
-			query = `UPDATE paperboat.user_machines SET observed_capabilities=array_append(array_remove(observed_capabilities,'file_transfer_modes'),'file_transfer_modes') WHERE id=$1`
-		}
-		if _, err := f.store.SQL().ExecContext(ctx, query, f.machine); err != nil {
-			t.Fatal("set destination capability failed")
-		}
-	}
-
-	// Every supported pb declares (PLAN 3b step 3): an undeclared send is refused, naming the update.
-	if _, err := descriptor(TransferIntent{}); !errors.Is(err, ErrTransferIntentRequired) {
-		t.Fatalf("undeclared send: %v", err)
-	}
-
-	// A destination that predates modes: a declared send within today's caps keeps today's
-	// credential; Unlimited, or more than today's caps, asks for the destination's update.
-	setModes(false)
-	small, err := descriptor(TransferIntent{Mode: "automatic", DeclaredBytes: 500 << 20})
-	if err != nil {
-		t.Fatalf("declared send within today's caps to an old destination: %v", err)
-	}
-	if mode, max := signed(small); mode != "" || max != 0 {
-		t.Fatalf("old destination got claims it refuses: mode=%q max_bytes=%d", mode, max)
-	}
-	for _, intent := range []TransferIntent{{Mode: "automatic", DeclaredBytes: 500<<20 + 1}, {Mode: "unlimited", DeclaredBytes: 1}} {
-		_, err := descriptor(intent)
-		var old *DestinationUpdateRequiredError
-		if !errors.As(err, &old) {
-			t.Fatalf("%+v to an old destination: %v", intent, err)
-		}
-	}
-
-	// A destination that observes file_transfer_modes gets the mode and Automatic's declared total.
-	setModes(true)
+	// Every declared send gets the mode and, for Automatic, its declared total; an undeclared one is invalid.
 	at, err := descriptor(TransferIntent{Mode: "automatic", DeclaredBytes: 2_000_000_000})
 	if err != nil {
 		t.Fatalf("automatic at the bound: %v", err)
@@ -159,10 +124,9 @@ func TestFileTransferModesBoundAutomaticAndSignTheModePostgres(t *testing.T) {
 	if mode, max := signed(big); mode != "unlimited" || max != 0 {
 		t.Fatalf("unlimited claims: mode=%q max_bytes=%d", mode, max)
 	}
-	for _, bad := range []TransferIntent{{Mode: "", DeclaredBytes: 1}, {Mode: "fast", DeclaredBytes: 1}, {Mode: "automatic", DeclaredBytes: 0}, {Mode: "unlimited", DeclaredBytes: -1}} {
+	for _, bad := range []TransferIntent{{}, {Mode: "", DeclaredBytes: 1}, {Mode: "fast", DeclaredBytes: 1}, {Mode: "automatic", DeclaredBytes: 0}, {Mode: "unlimited", DeclaredBytes: -1}} {
 		if _, err := descriptor(bad); !errors.Is(err, ErrInvalidTransferIntent) {
 			t.Fatalf("intent %+v: %v", bad, err)
 		}
 	}
-	setModes(false)
 }

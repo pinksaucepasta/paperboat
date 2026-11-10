@@ -352,7 +352,8 @@ func captureRuntimeObservationFailure(r *http.Request, code string, err error) {
 }
 
 func validObservedCapabilities(capabilities []string) bool {
-	// file_transfer_modes: the destination receives per the signed transfer_mode/max_bytes claims.
+	// file_transfer_modes is no longer a capability the server acts on, but runtimes of the previous release still
+	// report it; it is accepted and ignored so their observations are not refused.
 	allowed := []string{"file_receive", "preview_launch", "terminal_host", "session_host", "ssh_host", "keep_awake", "environment_injection", "file_transfer_modes"}
 	if len(capabilities) > len(allowed) {
 		return false

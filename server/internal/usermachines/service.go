@@ -71,7 +71,6 @@ var (
 	ErrMachineCapabilityUnavailable         = errors.New("machine capability is unavailable")
 	ErrMachineOffline                       = errors.New("machine is offline")
 	ErrInvalidTransferIntent                = errors.New("file transfer mode or declared size is invalid")
-	ErrTransferIntentRequired               = errors.New("file transfer mode and declared size are required")
 	ErrExecOperationInvalid                 = errors.New("exec operation id is invalid")
 )
 
@@ -262,7 +261,6 @@ type Service struct {
 	credentials                 access.CredentialIssuer
 	issuer                      string
 	fileTransferPolicy          accessdescriptor.FileTransferPolicy
-	transferModesMinimumVersion string
 	teamInbox                   *teaminbox.Service
 	controlSigner               *mint.Provider
 	controlRuntime              userMachineHelperRuntime
@@ -435,12 +433,6 @@ func (s *Service) ConfigureCLIAuth(clientID string, scopes []string, accessLifet
 
 func (s *Service) ConfigureFileTransfer(policy accessdescriptor.FileTransferPolicy) {
 	s.fileTransferPolicy = policy
-}
-
-// ConfigureTransferModes names the first official pb whose destination receives per the signed
-// transfer claims (destination_update_required); the Automatic bound is the published policy's.
-func (s *Service) ConfigureTransferModes(minimumVersion string) {
-	s.transferModesMinimumVersion = minimumVersion
 }
 
 func (s *Service) ConfigureTeamInbox(service *teaminbox.Service) { s.teamInbox = service }

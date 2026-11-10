@@ -123,7 +123,6 @@ func TestTask44ConnectedCollaboration(t *testing.T) {
 	machines.ConfigureAccess(nil, "https://task44.invalid")
 	machines.ConfigureTerminalSessions(signer, nil)
 	machines.ConfigureFileTransfer(accessdescriptor.FileTransferPolicy{Revision: "task44", MaxBatchFiles: 2, AutomaticMaxBatchBytes: 2 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 60, DeliveryTimeoutSeconds: 60, MaxPendingSpoolBytes: 2 << 20})
-	machines.ConfigureTransferModes("2026.10.27.0")
 	inbox, err := teaminbox.New(store, config.Default().Access.FileTransfer)
 	if err != nil {
 		t.Fatal(err)

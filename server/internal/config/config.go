@@ -432,9 +432,6 @@ type FileTransferPolicy struct {
 	// AutomaticMaxBatchBytes bounds one Automatic `pb send` (every file summed, so also any one
 	// file); Unlimited has no bound but never uses a Paperboat-hosted relay. Published to clients.
 	AutomaticMaxBatchBytes int64 `json:"automatic_max_batch_bytes"`
-	// ModesMinimumVersion is the first official pb whose destination receives per the signed
-	// transfer_mode/max_bytes claims (named in destination_update_required).
-	ModesMinimumVersion string `json:"modes_minimum_version"`
 }
 
 type Diagnostics struct {

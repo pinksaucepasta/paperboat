@@ -42,11 +42,6 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 	if destinationMachineID == "" || cliClientSessionID == "" || s.controlSigner == nil {
 		return FileTransferDescriptor{}, ErrNotFound
 	}
-	// Every supported pb declares its mode and batch total (PLAN 3b step 3); an undeclared send is
-	// a pb older than the oldest supported release.
-	if !intent.declared() {
-		return FileTransferDescriptor{}, ErrTransferIntentRequired
-	}
 	if err := s.checkTransferIntent(intent); err != nil {
 		return FileTransferDescriptor{}, err
 	}
@@ -132,17 +127,10 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 		EnvironmentID: routeMachine.EnvironmentID, MachineID: routeMachine.ID, SourceMachineID: sourceMachineID,
 		UserID: userID, CLIClientSessionID: cliClientSessionID, SessionID: sessionID, OperationID: operationID, AssignmentID: accessSessionID,
 	}
-	signed := intent
-	if !tokenSource {
-		signed, err = s.signedIntent(intent, destination.Alias, destination.ObservedCapabilities)
-	} else {
+	if tokenSource {
 		credentialInput.TransferDirection = "send"
 	}
-
-	if err != nil {
-		return FileTransferDescriptor{}, err
-	}
-	credentialInput.TransferMode, credentialInput.MaxBytes = signed.Mode, signedMaxBytes(signed)
+	credentialInput.TransferMode, credentialInput.MaxBytes = intent.Mode, signedMaxBytes(intent)
 	if acceptedRequest != nil {
 		credentialInput.RequestID, credentialInput.IdempotencyKey, credentialInput.RequestHash = acceptedRequest.RequestID, acceptedRequest.BatchID, acceptedRequest.ManifestDigest
 	}
