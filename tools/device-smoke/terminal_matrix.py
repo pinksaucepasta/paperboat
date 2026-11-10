@@ -753,7 +753,11 @@ def keystrokes(a, sessions):
         c1.run_discarding(noop(), 60)
         reopened = opens() - before
         row('N11 2 000 keystrokes: no stream reopen', reopened == 0, f'{reopened} reopens')
-        row('N11 the shell answers right after typing', time.monotonic() - t0 < 2, f'{time.monotonic() - t0:.1f} s')
+        # A Windows client reaches the target through the controller's ssh -tt and the device's ConPTY: about 12 ms per key against the 10 ms the
+        # keys are sent at (measured idle: marker round trip 0.5 s, 2000 keys then marker 0.6 s; matrix runs 4.6, 4.7 and 5.1 s), so up to ~5 s of
+        # the typing queue drains after the last key. The zero-reopen row above is the starvation proof; the bound is 10 s there, 2 s elsewhere.
+        bound = 10 if DEVICE else 2
+        row('N11 the shell answers right after typing', time.monotonic() - t0 < bound, f'{time.monotonic() - t0:.1f} s (bound {bound} s)')
     finally:
         c1.close()
 
