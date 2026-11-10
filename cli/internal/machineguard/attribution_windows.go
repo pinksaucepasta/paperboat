@@ -48,19 +48,20 @@ func attributeSID(accepted net.Conn, lookup func(socketTuple) ([]tcpOwner, error
 	if err != nil {
 		return "", err
 	}
-	var bound int64
+	var rows []tcpOwner // the last answer: on success it is the single accepted row
 	pid, err := attributeOwner(tuple, func(tuple socketTuple) ([]socketOwner, error) {
-		rows, err := lookup(tuple)
+		var err error
+		rows, err = lookup(tuple)
 		owners := make([]socketOwner, len(rows))
 		for i, row := range rows {
-			owners[i], bound = row.socketOwner, row.bound // attributeOwner accepts a single row only
+			owners[i] = row.socketOwner
 		}
 		return owners, err
 	})
 	if err != nil {
 		return "", err
 	}
-	return user(pid, bound)
+	return user(pid, rows[0].bound)
 }
 
 func lookupTCPOwners(tuple socketTuple) ([]tcpOwner, error) {
@@ -145,3 +146,6 @@ func processUserSID(pid uint32, bound int64) (string, error) {
 func processBoundConnection(created, bound int64) bool {
 	return bound != 0 && created <= bound
 }
+
+// ConnectionOwnerSID is connectionOwnerSID for callers outside the guard (the per-user preview proxy).
+func ConnectionOwnerSID(accepted net.Conn) (string, error) { return connectionOwnerSID(accepted) }

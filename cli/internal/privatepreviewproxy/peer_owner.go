@@ -19,33 +19,50 @@ const (
 	refusalLookupFailed = "lookup_failed"
 )
 
-// platformPeerOwner is nil where the platform has no attribution (see peer_other.go).
-var platformPeerOwner func(net.Conn) (uint32, error)
+// platformPeerOwner (a uid) or platformPeerSID (Windows) is nil where the platform has no attribution (see peer_other.go).
+var (
+	platformPeerOwner func(net.Conn) (uint32, error)
+	platformPeerSID   func(net.Conn) (string, error)
+)
 
 var errOtherUser = errors.New("connection is not from the owning OS user")
 
 type peerGate struct {
-	owner   func(net.Conn) (uint32, error)
-	uid     uint32
-	mu      sync.Mutex
-	refused map[string]uint64
+	owner    func(net.Conn) (uint32, error)
+	uid      uint32
+	ownerSID func(net.Conn) (string, error) // Windows: the owner is a SID, which a uint32 cannot hold
+	sid      string
+	mu       sync.Mutex
+	refused  map[string]uint64
 }
 
 func newPeerGate() *peerGate {
-	return &peerGate{owner: platformPeerOwner, uid: uint32(os.Geteuid())}
+	return &peerGate{owner: platformPeerOwner, uid: uint32(os.Geteuid()), ownerSID: platformPeerSID, sid: platformOwnSID()}
 }
+
+func (g *peerGate) enforced() bool { return g.owner != nil || g.ownerSID != nil }
 
 // allow reports whether conn's peer is the owning user, counting a refusal by reason.
 func (g *peerGate) allow(conn net.Conn) bool {
-	if g.owner == nil {
+	if !g.enforced() {
 		return true
 	}
-	uid, err := g.owner(conn)
+	var err error
+	other := false
+	if g.ownerSID != nil {
+		var sid string
+		sid, err = g.ownerSID(conn)
+		other = sid != g.sid
+	} else {
+		var uid uint32
+		uid, err = g.owner(conn)
+		other = uid != g.uid
+	}
 	reason := ""
 	switch {
 	case err != nil:
 		reason = peerRefusalReason(err)
-	case uid != g.uid:
+	case other:
 		reason = refusalOtherUser
 	default:
 		return true
@@ -91,7 +108,7 @@ func peerConnContext(ctx context.Context, conn net.Conn) context.Context {
 func (p *AccessProxy) peerAllowed(request *http.Request) bool {
 	check, _ := request.Context().Value(peerCheckKey{}).(*peerCheck)
 	if check == nil {
-		return p.gate.owner == nil
+		return !p.gate.enforced()
 	}
 	check.once.Do(func() { check.allowed = p.gate.allow(check.conn) })
 	return check.allowed
