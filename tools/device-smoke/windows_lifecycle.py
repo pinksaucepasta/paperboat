@@ -100,7 +100,7 @@ def mint_token(host, alias):
 
 
 def machine_named(machine_id):
-    found = re.search(rf'^(\S+)\s.*{re.escape(machine_id)}', hp(f'{PB_HP} machine list')[1], re.M)
+    found = re.search(rf'^(\S+)\s.*{re.escape(machine_id)}', hp(f'{PB_HP} machine list --all')[1], re.M)
     return found.group(1) if found else None
 
 
@@ -120,9 +120,40 @@ def check_install_pair(win, args):
     finally:
         victus(f"Remove-Item -Force '{TOKEN_FILE}' -ErrorAction SilentlyContinue")
     paired, machine_id = time.time(), receipt['data']['machine_id']
-    wait_for(lambda: re.search(rf'\sonline\s.*{re.escape(machine_id)}', hp(f'{PB_HP} machine list')[1]), 30, 'the machine online in the account within 30 s of pairing')
+    wait_for(lambda: re.search(rf'\sonline\s.*{re.escape(machine_id)}', hp(f'{PB_HP} machine list --all')[1]), 30, 'the machine online in the account within 30 s of pairing')
     wait_for(lambda: 'doctor: healthy' in win.run('doctor')[1], max(1, 60 - (time.time() - paired)), 'doctor healthy within 60 s of pairing')
     args.machine = machine_named(machine_id)  # the pair may suffix a taken name
+
+
+NET_SECURITY = r'C:\Windows\System32\WindowsPowerShell\v1.0\Modules\NetSecurity'
+
+
+def check_pair_firewall_failure(win, args):
+    """F1-01: a first pair whose firewall step keeps failing ends in a clear, retryable error, never a stuck install;
+    after the firewall works again the same pair completes without a new token. Needs an elevated shell (hosted runner)."""
+    assert args.build, 'pair-firewall-failure needs --build <pb.exe on the device>'
+    code, out = victus(f"& '{args.build}' install --json 2>&1 | Out-String -Width 4000; exit $LASTEXITCODE", 600)
+    receipt = json.loads(out[out.index('{'):])
+    assert code == 0 and receipt.get('ok'), 'install failed: ' + json.dumps(receipt.get('error', {}))[:200]
+    win.pb = receipt['data']['executable']
+    mint_token(args.token_from, args.machine)
+    # The firewall cmdlets live in NetSecurity: without it the snapshot fails on every retry like a broken ActiveStore read.
+    victus(f"Rename-Item -Path '{NET_SECURITY}' -NewName NetSecurity.pbtest")
+    try:
+        code, receipt = win.json('pair', '--enrollment-token-file', TOKEN_FILE, '--name', args.machine, timeout=420)
+    finally:
+        victus(f"Remove-Item -Force '{TOKEN_FILE}' -ErrorAction SilentlyContinue; "
+               f"if (Test-Path '{NET_SECURITY}.pbtest') {{ Rename-Item -Path '{NET_SECURITY}.pbtest' -NewName NetSecurity }}")
+    assert code != 0 and receipt.get('ok') is False, 'pair succeeded although the firewall step could not run'
+    assert receipt['error'].get('message'), 'the failed pair gave no message'
+    start_type = victus("(Get-Service | Where-Object { $_.Name -like 'PaperboatLocalDaemon-*' } | Select-Object -First 1).StartType")[1].strip()
+    assert start_type != 'Disabled', 'the failed pair left the local daemon disabled'
+    code, receipt = win.json('pair', '--name', args.machine, timeout=420)
+    assert code == 0 and receipt.get('ok'), 'the retry without a token failed: ' + json.dumps(receipt.get('error', {}))[:200]
+    machine_id = receipt['data']['machine_id']
+    wait_for(lambda: re.search(rf'\sonline\s.*{re.escape(machine_id)}', hp(f'{PB_HP} machine list --all')[1]), 60, 'the machine online after the retry')
+    wait_for(lambda: 'doctor: healthy' in win.run('doctor')[1], 90, 'doctor healthy after the retry')
+    args.machine = machine_named(machine_id)
 
 
 def check_update(win, args):
@@ -316,7 +347,7 @@ def inventory(args):
     assert code == 0 and 'inventory: clean' in out, 'leftovers: ' + ' | '.join(l for l in out.splitlines() if l.startswith('leftover'))[:400]
 
 
-CHECKS = {'install-pair': check_install_pair, 'update': check_update, 'update-failures': check_update_failures, 'exec-self': check_exec_self, 'version': check_version, 'doctor': check_doctor, 'status': check_status, 'service': check_service, 'crash': check_crash,
+CHECKS = {'install-pair': check_install_pair, 'pair-firewall-failure': check_pair_firewall_failure, 'update': check_update, 'update-failures': check_update_failures, 'exec-self': check_exec_self, 'version': check_version, 'doctor': check_doctor, 'status': check_status, 'service': check_service, 'crash': check_crash,
           'availability': check_availability, 'exec': check_exec, 'reset-pair': check_reset_pair, 'uninstall': check_uninstall, 'uninstall-after-failed-update': check_uninstall_after_failed_update}
 
 
