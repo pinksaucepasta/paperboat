@@ -273,7 +273,7 @@ def enrollment_file(binary, alias, directory):
     path = directory / 'enrollment-token'
     if hasattr(binary, 'device'):
         path.write_text(token)
-        path.chmod(0o600)
+        path.enrollment_token_file()
         return path
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, 'w') as output:

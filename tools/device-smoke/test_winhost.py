@@ -1907,6 +1907,15 @@ class RemainingFamilyPlumbing(unittest.TestCase):
         self.assertIn('result', sent)
         self.assertEqual(150, sent['seconds'])
 
+    def test_enrollment_token_file_acl_is_system_and_the_user_only(self):
+        # pb pair refuses a token file with one ACE (the user): token_file_windows.go wants SYSTEM and the user.
+        self.assertIn('*S-1-5-18:(F)', winhost.TOKEN_FILE)
+        self.assertIn('/inheritance:r', winhost.TOKEN_FILE)
+        calls = []
+        path = winhost.RemotePath(SimpleNamespace(path_flavor=pathlib.PureWindowsPath, ps=lambda step, script, **payload: calls.append((script, payload))), r'C:\Temp\token')
+        path.enrollment_token_file()
+        self.assertEqual([(winhost.TOKEN_FILE, {'path': r'C:\Temp\token'})], calls)
+
     def test_pb_text_keeps_the_stdin_of_the_local_call(self):
         done = winhost.pb_text(sys.executable, ['-c', 'import sys;print(len(sys.stdin.read()))'], timeout=30, stdin=subprocess.DEVNULL)
         self.assertEqual('0\n', done.stdout)

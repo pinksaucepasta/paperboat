@@ -71,6 +71,10 @@ CHUNK = 3000
 EXISTS = "if(Test-Path -LiteralPath $req.path){'yes'}else{'no'}"
 OWNER_ONLY = ('& icacls.exe $req.path /inheritance:r /grant:r "$([Security.Principal.WindowsIdentity]::GetCurrent().Name):(F)" | Out-Null\n'
               "if($LASTEXITCODE -ne 0){throw 'icacls failed'}")
+# The enrollment token file ACL pb's pair requires (bootstrap token_file_windows.go): exactly SYSTEM and the current user,
+# full control, nothing inherited (OWNER_ONLY's user alone is refused: 1 ACE instead of 2).
+TOKEN_FILE = ('& icacls.exe $req.path /inheritance:r /grant:r "$([Security.Principal.WindowsIdentity]::GetCurrent().Name):(F)" "*S-1-5-18:(F)" | Out-Null\n'
+              "if($LASTEXITCODE -ne 0){throw 'icacls failed'}")
 # pb's own private file ACL (configsync currentPrivateFileDescriptor): protected, full control for SYSTEM,
 # Administrators and the user, in that order. pb compares the DACL text, so icacls (which orders entries itself) won't do.
 PRIVATE = ("$u=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value\n"
@@ -706,6 +710,10 @@ class RemotePath:
         owner-only file checks require on Windows. Other modes change nothing."""
         if mode & 0o077 == 0:
             self.device.ps('owner-only %s' % self, OWNER_ONLY, path=str(self))
+
+    def enrollment_token_file(self):
+        """The ACL pb pair requires of an enrollment token file: SYSTEM and the current user only."""
+        self.device.ps('token-file %s' % self, TOKEN_FILE, path=str(self))
 
     def private(self):
         """The ACL pb gives its own private files and requires of a credential reference (a key, known_hosts)."""
