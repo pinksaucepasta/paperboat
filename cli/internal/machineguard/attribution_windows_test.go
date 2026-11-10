@@ -262,3 +262,56 @@ func TestConnectionOwnerSIDOnTheLiveKernel(t *testing.T) {
 		}
 	}
 }
+
+// F23-02: the Windows twin of the Linux/darwin churn tests. A client port reused after a reset reaches the
+// gateway as the same tuple: the live connection is attributed to this user's SID and the reset one is
+// refused, never another SID. 100 rounds on tcp4 and tcp6 loopback.
+func TestConnectionOwnerSIDUnderTupleReuseChurn(t *testing.T) {
+	self := currentUserSID(t)
+	for _, network := range []string{"tcp4", "tcp6"} {
+		host := map[string]string{"tcp4": "127.0.0.1", "tcp6": "::1"}[network]
+		listen := host
+		if network == "tcp6" {
+			listen = "[::1]"
+		}
+		listener, err := net.Listen(network, listen+":0")
+		if err != nil {
+			t.Skipf("no %s loopback", network)
+		}
+		probe, err := net.Listen(network, listen+":0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := probe.Addr().(*net.TCPAddr).Port
+		_ = probe.Close()
+		dialer := &net.Dialer{LocalAddr: &net.TCPAddr{IP: net.ParseIP(host), Port: port}}
+		var previous string
+		for round := 0; round < 100; round++ {
+			accepted := make(chan net.Conn, 1)
+			go func() {
+				c, _ := listener.Accept()
+				accepted <- c
+			}()
+			client, err := dialer.Dial(network, listener.Addr().String())
+			if err != nil {
+				t.Fatalf("%s round %d: %v", network, round, err)
+			}
+			server := <-accepted
+			if sid, err := connectionOwnerSID(server); err != nil || sid != self {
+				t.Fatalf("%s round %d: live connection attributed to %q, %v; want %s", network, round, sid, err, self)
+			}
+			if previous != "" && previous != server.RemoteAddr().String() {
+				t.Fatalf("%s round %d: tuple was not reused", network, round)
+			}
+			previous = server.RemoteAddr().String()
+			_ = client.(*net.TCPConn).SetLinger(0)
+			_ = client.Close()
+			time.Sleep(10 * time.Millisecond) // let the reset land; a missing row is retried within the lookup budget
+			if sid, err := connectionOwnerSID(server); !errors.Is(err, ErrAttribution) {
+				t.Fatalf("%s round %d: reset client attributed to %q, %v; want a refusal", network, round, sid, err)
+			}
+			_ = server.Close()
+		}
+		_ = listener.Close()
+	}
+}
