@@ -26,7 +26,7 @@ def is_windows(binary, target):
     key = (str(binary), target)
     if key not in _platforms:
         from pairing_lifecycle import invoke
-        machines = invoke(binary, '--workspace', 'personal', 'machine', 'list', '--json')['machines']
+        machines = invoke(binary, '--workspace', 'personal', 'machine', 'list', '--all', '--json')['machines']
         match = next((m for m in machines if target in (m['id'], m['alias'])), None)
         _platforms[key] = bool(match) and str(match.get('platform', '')).lower().startswith('windows')
     return _platforms[key]

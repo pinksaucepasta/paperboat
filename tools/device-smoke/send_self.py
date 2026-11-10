@@ -19,7 +19,7 @@ def main():
     binary = winhost.pb_path()
     device = winhost.device()  # the Windows device: the source file and the Inbox are there
     before = registration()
-    machines = invoke(binary, '--workspace', 'personal', 'machine', 'list', '--json')
+    machines = invoke(binary, '--workspace', 'personal', 'machine', 'list', '--all', '--json')
     machines = machines.get('machines', machines.get('items', []))
     own = [m for m in machines if m['id'] == before['machine_id']]
     if len(own) != 1:

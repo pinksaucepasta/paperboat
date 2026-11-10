@@ -492,6 +492,7 @@ class WindowsTargetPlumbing(unittest.TestCase):
             self.assertFalse(windows_target.is_windows('pb', 'machine_2'))
             self.assertFalse(windows_target.is_windows('pb', 'unknown'))
         self.assertEqual(3, invoke.call_count)
+        self.assertIn('--all', invoke.call_args.args)  # one page of an account with 56 machines hid the record
         windows_target._platforms.clear()
 
     def test_staged_writes_and_removes_its_file_even_when_the_check_fails(self):

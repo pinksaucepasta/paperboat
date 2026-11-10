@@ -22,7 +22,7 @@ def send(*paths, target):
 
 
 def offline_machine():
-    result = command_result(PB, '--workspace', 'personal', 'machine', 'list', '--json', timeout=60)
+    result = command_result(PB, '--workspace', 'personal', 'machine', 'list', '--all', '--json', timeout=60)
     machines = json.loads(result.stdout).get('machines', [])
     return next((m['alias'] for m in machines if not m['online'] and m['state'] in ('offline', 'disconnected')
                  and not m['alias'].startswith(('lanea-', 'smoke-'))), None)
