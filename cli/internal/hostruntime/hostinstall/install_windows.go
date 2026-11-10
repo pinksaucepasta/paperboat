@@ -2164,6 +2164,9 @@ func purgeWindows(ctx context.Context, ownerSID string, preserveCLI bool) (resul
 	} else if err != nil {
 		result = errors.Join(result, hostInstallFailure("inspect Windows ProgramData root", err))
 	}
+	// A replacement killed before it committed leaves its candidate record, session owner and SSH generation
+	// declared; their removal below would refuse the mismatch and strand the credentials and logs (F1-09).
+	cleanup("remove the interrupted installation's candidate", func() error { return withdrawRecordedWindowsCandidate(ctx, ownerSID) })
 	// Windows OpenSSH is a shared WinGet dependency. Purge only removes the
 	// dedicated PaperboatSshd service, Paperboat SSH keys/configuration, and
 	// firewall deltas that Paperboat recorded as its own. This must happen

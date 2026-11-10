@@ -180,6 +180,16 @@ def check_update_failures(win, args):
         victus(f"Remove-Item -Recurse -Force '{work}' -ErrorAction SilentlyContinue")
 
 
+def check_uninstall_after_failed_update(win, args):
+    """F1-09: an uninstall after an update killed mid-way (candidate record and install log left) removes everything."""
+    assert args.build, 'uninstall-after-failed-update needs --build <good pb.exe> on victus'
+    victus(f"$p = Start-Process -FilePath '{win.pb}' -ArgumentList 'update','--from','{args.build}','--force','--json' -PassThru -WindowStyle Hidden; "
+           "Start-Sleep 20; taskkill /PID $p.Id /T /F | Out-Null; "
+           "Get-Process | Where-Object { $_.Name -like '.pb-elevated-*' } | ForEach-Object { taskkill /PID $_.Id /T /F | Out-Null }", 120)
+    # Not healed: the uninstall starts from the half-updated state.
+    return check_uninstall(win, args)
+
+
 def installed_version(win):
     code, out = win.run('--version', '--json')
     return json.loads(out[out.index('{'):])['data']['version']
@@ -307,7 +317,7 @@ def inventory(args):
 
 
 CHECKS = {'install-pair': check_install_pair, 'update': check_update, 'update-failures': check_update_failures, 'exec-self': check_exec_self, 'version': check_version, 'doctor': check_doctor, 'status': check_status, 'service': check_service, 'crash': check_crash,
-          'availability': check_availability, 'exec': check_exec, 'reset-pair': check_reset_pair, 'uninstall': check_uninstall}
+          'availability': check_availability, 'exec': check_exec, 'reset-pair': check_reset_pair, 'uninstall': check_uninstall, 'uninstall-after-failed-update': check_uninstall_after_failed_update}
 
 
 def main():
