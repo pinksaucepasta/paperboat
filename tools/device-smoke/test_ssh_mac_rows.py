@@ -1,4 +1,5 @@
 import base64
+import shlex
 import subprocess
 import unittest
 from unittest import mock
@@ -118,6 +119,18 @@ class WindowsTarget(unittest.TestCase):
                 for script in scripts:
                     done = subprocess.run(['bash', '-n'], input=ssh_mac_rows.prelude() + script, capture_output=True, text=True)
                     self.assertEqual('', done.stderr)
+
+    def test_windows_forwarding_accepts_the_stock_sshd_agent_limit_and_a_working_agent_only(self):
+        script = ssh_mac_rows.forwarding_script(True)
+        self.assertEqual(ssh_mac_rows.FORWARDING, ssh_mac_rows.forwarding_script(False))
+        self.assertIn('ssh -v -A $H', script)
+        self.assertNotIn('check agent-forward-plain ED25519 ssh -A', script)
+        pattern = shlex.split(next(l for l in script.splitlines() if l.startswith('check agent-forward-plain')))[2]
+        for output, ok in (('debug1: Remote: Agent forwarding disabled: mkdtemp() failed: No such file or directory', True),
+                           ('256 SHA256:x key (ED25519)', True),
+                           ('debug1: Remote: Agent forwarding disabled', False), ('The agent has no identities.', False)):
+            done = subprocess.run(['grep', '-q', '--', pattern], input=output, text=True)
+            self.assertEqual(ok, done.returncode == 0, output)
 
     def test_the_mac_target_keeps_its_commands(self):
         with mock.patch.object(ssh_mac_rows, 'WIN', None):
