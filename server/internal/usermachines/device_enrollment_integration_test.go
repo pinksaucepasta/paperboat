@@ -43,15 +43,15 @@ func TestDeviceEnrollmentPlacesMachineInChosenWorkspace(t *testing.T) {
 		return HelperEnrollmentGrant{EnrollmentID: "henr_devenroll_" + suffix, HelperID: "hlp_devenroll_" + suffix, Credential: "enrollment-credential", ExpiresAt: time.Now().UTC().Add(10 * time.Minute)}, nil
 	})
 
-	if _, err := service.IssueDeviceEnrollment(ctx, user, "grant-out-"+suffix, otherTeam, "posix"); !errors.Is(err, ErrWorkspaceForbidden) {
+	if _, err := service.IssueDeviceEnrollment(ctx, user, "grant-out-"+suffix, otherTeam); !errors.Is(err, ErrWorkspaceForbidden) {
 		t.Fatalf("enrollment for a team the account is not in: %v", err)
 	}
 
-	first, err := service.IssueDeviceEnrollment(ctx, user, "grant-team-"+suffix, team, "posix")
+	first, err := service.IssueDeviceEnrollment(ctx, user, "grant-team-"+suffix, team)
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := service.IssueDeviceEnrollment(ctx, user, "grant-team-"+suffix, team, "posix")
+	again, err := service.IssueDeviceEnrollment(ctx, user, "grant-team-"+suffix, team)
 	if err != nil || again.BootstrapToken != first.BootstrapToken {
 		t.Fatalf("a retried poll of the same grant must return the same enrollment: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestDeviceEnrollmentPlacesMachineInChosenWorkspace(t *testing.T) {
 		t.Fatalf("machine was not placed in the chosen team: bound=%d err=%v", bound, err)
 	}
 
-	personal, err := service.IssueDeviceEnrollment(ctx, user, "grant-personal-"+suffix, "", "posix")
+	personal, err := service.IssueDeviceEnrollment(ctx, user, "grant-personal-"+suffix, "")
 	if err != nil {
 		t.Fatal(err)
 	}

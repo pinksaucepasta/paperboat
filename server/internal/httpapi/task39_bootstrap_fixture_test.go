@@ -172,11 +172,7 @@ func TestTask39ServeAuthenticatedEnrollment(t *testing.T) {
 		}
 		// An authenticated account issues the one-shot token through the same
 		// service used by the already-tested HTTP enrollment endpoint.
-		shell := "posix"
-		if name == "pb39b" {
-			shell = "powershell"
-		}
-		started, err := machines.StartEnrollmentWithOptions(ctx, account, "bootstrap_"+name, usermachines.EnrollmentOptions{Shell: shell})
+		started, err := machines.StartEnrollment(ctx, account, "bootstrap_"+name)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -191,21 +191,18 @@ type MachineEnrollmentStart struct {
 
 // StartMachineEnrollment creates the single-use credential used by the
 // dashboard, CLI, and TUI one-shot installers.
-func (c *Client) StartMachineEnrollment(ctx context.Context, idempotencyKey, shell string) (MachineEnrollmentStart, error) {
-	return c.StartMachineEnrollmentIn(ctx, idempotencyKey, shell, "")
+func (c *Client) StartMachineEnrollment(ctx context.Context, idempotencyKey string) (MachineEnrollmentStart, error) {
+	return c.StartMachineEnrollmentIn(ctx, idempotencyKey, "")
 }
 
 // StartMachineEnrollmentIn is StartMachineEnrollment into a destination workspace ("personal" or a team slug;
 // empty means personal). The server refuses a team the account may not add machines to (workspace_forbidden).
-func (c *Client) StartMachineEnrollmentIn(ctx context.Context, idempotencyKey, shell, workspace string) (MachineEnrollmentStart, error) {
+func (c *Client) StartMachineEnrollmentIn(ctx context.Context, idempotencyKey, workspace string) (MachineEnrollmentStart, error) {
 	var out MachineEnrollmentStart
 	if strings.TrimSpace(idempotencyKey) == "" {
 		return out, errors.New("machine enrollment idempotency key is required")
 	}
-	if shell != "posix" && shell != "powershell" {
-		return out, errors.New("machine enrollment shell must be posix or powershell")
-	}
-	body := map[string]string{"shell": shell}
+	body := map[string]string{}
 	if workspace != "" {
 		body["workspace"] = workspace
 	}

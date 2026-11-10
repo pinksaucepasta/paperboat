@@ -17418,7 +17418,7 @@
       "get": {
         "summary": "Download the Paperboat installer",
         "security": [],
-        "description": "Without a query, serves the published installer without adding enrollment or reset options. A PowerShell User-Agent selects the Windows script; other clients receive the POSIX script. The optional p parameter carries one exact dashboard enrollment parameter. Empty, duplicate, malformed or additional query parameters are rejected. Responses are not cached and vary by User-Agent.",
+        "description": "Without a query, serves the published shell installer (`curl … | bash`) without adding enrollment options. The optional p parameter carries one exact dashboard enrollment parameter. Empty, duplicate, malformed or additional query parameters are rejected. Responses are not cached.",
         "parameters": [
           {
             "name": "p",
@@ -17446,6 +17446,40 @@
           }
         },
         "operationId": "get_install"
+      }
+    },
+    "/install.ps1": {
+      "get": {
+        "summary": "Download the Paperboat PowerShell installer",
+        "security": [],
+        "description": "Without a query, serves the published PowerShell installer (`irm … | iex`) without adding enrollment options. The optional p parameter carries one exact dashboard enrollment parameter. Empty, duplicate, malformed or additional query parameters are rejected. Responses are not cached.",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "query",
+            "required": false,
+            "description": "Dashboard enrollment token, optionally prefixed by the machine alias and a hyphen.",
+            "schema": {
+              "type": "string",
+              "minLength": 26
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Product-pinned Paperboat installer with exact Content-Length.",
+            "content": {
+              "text/plain": {}
+            }
+          },
+          "400": {
+            "description": "Invalid enrollment parameter."
+          },
+          "404": {
+            "description": "No installer has been published."
+          }
+        },
+        "operationId": "get_install_ps1"
       }
     },
     "/tuf/{path...}": {
@@ -25116,13 +25150,6 @@
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
-                  "shell": {
-                    "type": "string",
-                    "enum": [
-                      "posix",
-                      "powershell"
-                    ]
-                  },
                   "workspace": {
                     "type": "string",
                     "description": "Workspace the machine joins when it enrolls: personal (default) or a team the account may add machines to."
@@ -25542,7 +25569,7 @@
             "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
           }
         ],
-        "description": "Enrollment-token rejections do not claim or modify the enrollment. HTTP 410 enrollment_token_expired means a fresh unclaimed command expired; create a new command. HTTP 409 enrollment_token_used means the command was already claimed, including a claimed journal past expiry; resume only on its original machine. HTTP 400 enrollment_token_invalid covers malformed, unknown and revoked commands. HTTP 400 pairing_platform_unsupported covers unsupported platform/architecture pairs, platforms disabled by policy, or a syntactically valid enrollment token whose first-character installer shell tag does not match the requested platform. This check occurs before token lookup, claim or allocation. Existing verifier- and identity-bound installation recovery remains separate."
+        "description": "Enrollment-token rejections do not claim or modify the enrollment. HTTP 410 enrollment_token_expired means a fresh unclaimed command expired; create a new command. HTTP 409 enrollment_token_used means the command was already claimed, including a claimed journal past expiry; resume only on its original machine. HTTP 400 enrollment_token_invalid covers malformed, unknown and revoked commands. HTTP 400 pairing_platform_unsupported covers unsupported platform/architecture pairs and platforms disabled by policy (the token carries no platform; the install path does). This check occurs before token lookup, claim or allocation. Existing verifier- and identity-bound installation recovery remains separate."
       }
     },
     "/v1/machines/pairings/installation": {

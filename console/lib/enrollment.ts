@@ -71,24 +71,20 @@ export function installUrlFrom(bootstrapCommand: string | undefined): string | u
   return bootstrapCommand?.match(/https:\/\/[^\s'"]+\/install\b/)?.[0]
 }
 
+/** The same token goes to either installer; the path says which: /install is the shell script, /install.ps1 PowerShell. */
 export function installCommand(installUrl: string, shell: Shell, token?: string, name?: string): string {
   const parameter = token ? `?p=${name ? `${name}-${token}` : token}` : ""
-  const url = installUrl + parameter
-  return shell === "posix" ? `curl -fsSL '${url}' | bash` : `powershell -c "iex (irm '${url}')"`
+  return shell === "posix"
+    ? `curl -fsSL '${installUrl}${parameter}' | bash`
+    : `powershell -c "iex (irm '${installUrl}.ps1${parameter}')"`
 }
 
 /** `workspace` is "personal" (the default) or the team the machine joins when it pairs. */
-export async function startEnrollment({
-  shell,
-  workspace,
-}: {
-  shell: Shell
-  workspace: string
-}): Promise<EnrollmentStart> {
+export async function startEnrollment({ workspace }: { workspace: string }): Promise<EnrollmentStart> {
   return api<EnrollmentStart>("machine-enrollments", {
     method: "POST",
     headers: { "content-type": "application/json", "idempotency-key": idempotencyKey() },
-    body: JSON.stringify(workspace === "personal" ? { shell } : { shell, workspace }),
+    body: JSON.stringify(workspace === "personal" ? {} : { workspace }),
   })
 }
 

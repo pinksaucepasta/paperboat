@@ -34,36 +34,28 @@ func machineEnrollmentCommand() *cobra.Command {
 		if err != nil || base.Scheme != "https" || base.Hostname() == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
 			return errors.New("server discovery does not provide a valid installer URL; ask the server operator to configure installation")
 		}
-		posix, err := client.StartMachineEnrollment(ctx.Context, newIdempotencyKey(), "posix")
+		enrollment, err := client.StartMachineEnrollment(ctx.Context, newIdempotencyKey())
 		if err != nil {
 			return friendlyCommandError(err)
 		}
-		windows, err := client.StartMachineEnrollment(ctx.Context, newIdempotencyKey(), "powershell")
-		if err != nil {
-			return cancelEnrollmentCommands(ctx.Context, client, err, posix)
-		}
-		installerURL := strings.TrimRight(base.String(), "/") + "/install"
-		makeURL := func(token string) string {
-			parameter := token
+		// One token for every platform: the installer path says which shell runs it.
+		makeURL := func(installer string) string {
+			parameter := enrollment.BootstrapToken
 			if name != "" {
 				parameter = name + "-" + parameter
 			}
-			return installerURL + "?p=" + url.QueryEscape(parameter)
+			return strings.TrimRight(base.String(), "/") + installer + "?p=" + url.QueryEscape(parameter)
 		}
-		linuxCommand := "curl -fsSL '" + makeURL(posix.BootstrapToken) + "' | bash"
-		windowsCommand := windowsEnrollmentCommand(makeURL(windows.BootstrapToken))
-		expires := posix.ExpiresAt
-		if windows.ExpiresAt.Before(expires) {
-			expires = windows.ExpiresAt
-		}
+		linuxCommand := "curl -fsSL '" + makeURL("/install") + "' | bash"
+		windowsCommand := windowsEnrollmentCommand(makeURL("/install.ps1"))
 		asJSON, _ := command.Flags().GetBool("json")
 		if asJSON {
-			err = writeCLIJSON(command.OutOrStdout(), map[string]any{"expires_at": expires, "linux_macos_command": linuxCommand, "windows_command": windowsCommand})
+			err = writeCLIJSON(command.OutOrStdout(), map[string]any{"expires_at": enrollment.ExpiresAt, "linux_macos_command": linuxCommand, "windows_command": windowsCommand})
 		} else {
 			_, err = fmt.Fprintf(command.OutOrStdout(), "Linux/macOS:\n%s\n\nWindows (PowerShell or Command Prompt):\n%s\n", linuxCommand, windowsCommand)
 		}
 		if err != nil {
-			return cancelEnrollmentCommands(ctx.Context, client, err, posix, windows)
+			return cancelEnrollmentCommands(ctx.Context, client, err, enrollment)
 		}
 		return nil
 	}}

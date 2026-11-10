@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -59,16 +58,9 @@ func TestPairingTokenErrorsPreserveEnrollmentPostgres(t *testing.T) {
 		{"unknown", "", "enrollment_token_invalid", http.StatusBadRequest},
 		{"malformed", "", "enrollment_token_invalid", http.StatusBadRequest},
 		{"unsupported platform", "", "pairing_platform_unsupported", http.StatusBadRequest},
-		{"wrong shape linux", "", "pairing_platform_unsupported", http.StatusBadRequest},
-		{"wrong shape darwin", "", "pairing_platform_unsupported", http.StatusBadRequest},
-		{"issued wrong shape", "", "pairing_platform_unsupported", http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			shell := "posix"
-			if tc.name == "issued wrong shape" {
-				shell = "powershell"
-			}
-			enrollment, err := service.StartEnrollmentWithOptions(ctx, owner, fmt.Sprintf("%s-%d", owner, i), usermachines.EnrollmentOptions{Shell: shell})
+			enrollment, err := service.StartEnrollment(ctx, owner, fmt.Sprintf("%s-%d", owner, i))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -103,11 +95,6 @@ func TestPairingTokenErrorsPreserveEnrollmentPostgres(t *testing.T) {
 				token = "invalid-token"
 			case "unsupported platform":
 				platform = "unsupported"
-			case "wrong shape linux":
-				token = "1" + strings.Repeat("Z", 25)
-			case "wrong shape darwin":
-				token = "A" + strings.Repeat("Z", 25)
-				platform = "darwin"
 			}
 			body, err := json.Marshal(map[string]any{"enrollment_token": token, "verifier": "fresh-unclaimed-verifier-" + owner + tc.name, "alias": "fresh-host", "platform": platform, "architecture": "amd64", "workspace_root": "/workspace", "public_identity_key": base64.RawURLEncoding.EncodeToString(publicKey)})
 			if err != nil {

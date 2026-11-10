@@ -16,7 +16,7 @@ Darwin verification requires a valid executable code signature (`codesign --veri
 
 GitHub Releases hosts the five canonical products. It does not host a separate first-install verifier. The release origin serves only:
 
-- the shell installer at `/install` and the PowerShell installer (file `windows`, served from `/install` to PowerShell clients, which is what `irm <installer_base>/install | iex` fetches)
+- the shell installer at `/install` and the PowerShell installer at `/install.ps1` (file `windows`; `irm <installer_base>/install.ps1 | iex` fetches it). The path picks the installer, never the client or the enrollment token, which is the same kind for both
 - signed TUF metadata under `/tuf/metadata/`
 
 The origin's `tuf/targets/` directory must be empty. No release binary bytes are copied to the origin.
@@ -58,7 +58,7 @@ Users start with the trusted HTTPS installer:
 
 Windows (PowerShell, or `powershell -c "iex (irm '<url>')"` from Command Prompt):
 
-`irm https://get.pprbt.dev/install | iex`
+`irm https://get.pprbt.dev/install.ps1 | iex`
 
 The PowerShell installer pins the selected product (`pb-windows-amd64.exe` or `pb-windows-arm64.exe`) exactly like the shell installer, downloads it with `Invoke-WebRequest`, checks the length and SHA-256, runs `pb install --json` (which asks for administrator approval), then `pb pair` with a dashboard token or `pb login` for browser approval.
 

@@ -166,25 +166,21 @@ func userMachineEnrollmentStart(service *usermachines.Service) http.HandlerFunc 
 			return
 		}
 		var body struct {
-			Shell     string `json:"shell"`
 			Workspace string `json:"workspace"`
 		}
 		if r.Body != nil {
 			decoder := json.NewDecoder(io.LimitReader(r.Body, 1025))
 			decoder.DisallowUnknownFields()
 			if err := decoder.Decode(&body); err != nil && !errors.Is(err, io.EOF) {
-				writeError(w, r, http.StatusBadRequest, "validation_failed", "Request body accepts only the installer shell and the destination workspace.")
+				writeError(w, r, http.StatusBadRequest, "validation_failed", "Request body accepts only the destination workspace.")
 				return
 			}
-		}
-		if body.Shell == "" {
-			body.Shell = "posix"
 		}
 		team := body.Workspace
 		if team == "personal" {
 			team = ""
 		}
-		result, err := service.StartEnrollmentWithOptions(r.Context(), p.User.ID, r.Header.Get("Idempotency-Key"), usermachines.EnrollmentOptions{Shell: body.Shell, WorkspaceTeamID: team})
+		result, err := service.StartEnrollmentWithOptions(r.Context(), p.User.ID, r.Header.Get("Idempotency-Key"), usermachines.EnrollmentOptions{WorkspaceTeamID: team})
 		if err != nil {
 			if writePlanLimitReached(w, r, err) {
 				return
@@ -249,19 +245,7 @@ func userMachineEnrollmentRetry(service *usermachines.Service) http.HandlerFunc 
 			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "Authentication is required.")
 			return
 		}
-		var body struct {
-			Shell string `json:"shell"`
-		}
-		decoder := json.NewDecoder(io.LimitReader(r.Body, 1025))
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&body); err != nil && !errors.Is(err, io.EOF) {
-			writeError(w, r, http.StatusBadRequest, "validation_failed", "Request body accepts only the installer shell.")
-			return
-		}
-		if body.Shell == "" {
-			body.Shell = "posix"
-		}
-		result, err := service.RetryEnrollmentWithOptions(r.Context(), p.User.ID, r.PathValue("enrollment_id"), usermachines.EnrollmentOptions{Shell: body.Shell})
+		result, err := service.RetryEnrollment(r.Context(), p.User.ID, r.PathValue("enrollment_id"))
 		if errors.Is(err, usermachines.ErrEnrollmentState) {
 			writeError(w, r, http.StatusConflict, "user_machine_enrollment_not_retryable", "User-machine enrollment cannot be retried in its current state.")
 			return

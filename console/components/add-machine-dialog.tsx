@@ -174,7 +174,7 @@ function AddMachine({
   onDone: () => void
 }) {
   const queryClient = useQueryClient()
-  // A pairing token carries its shell, so Windows gets its own token and command.
+  // The token is the same for every computer; the toggle only picks which installer path the command uses.
   const [shell, setShell] = useState<Shell>("posix")
   const [name, setName] = useState("")
 
@@ -187,24 +187,21 @@ function AddMachine({
       alive.current = false
     }
   }, [])
-  const wanted = useRef(shell)
   const start = useMutation({
     mutationFn: async (input: Parameters<typeof startEnrollment>[0]) => {
       const created = await startEnrollment(input)
-      if (!alive.current || wanted.current !== input.shell) void cancelEnrollment(created.id).catch(() => {})
+      if (!alive.current) void cancelEnrollment(created.id).catch(() => {})
       return created
     },
   })
   const enrollment = start.data
-  const requested = useRef<Shell | undefined>(undefined)
+  const requested = useRef(false)
   useEffect(() => {
-    // One request per shell, even when effects run twice in development.
-    if (requested.current === shell) return
-    requested.current = shell
-    wanted.current = shell
-    start.reset()
-    start.mutate({ shell, workspace })
-  }, [start, workspace, shell])
+    // One request, even when effects run twice in development.
+    if (requested.current) return
+    requested.current = true
+    start.mutate({ workspace })
+  }, [start, workspace])
 
   const live = useApiQuery({ ...enrollmentQuery(enrollment?.id ?? ""), enabled: Boolean(enrollment) })
   const state = live.data?.state ?? enrollment?.state
@@ -225,14 +222,6 @@ function AddMachine({
   useEffect(() => {
     if (state === "ready" && machineId) void queryClient.invalidateQueries({ queryKey: ["machines"] })
   }, [state, machineId, queryClient])
-
-  // Switching computers revokes the token of the one left behind.
-  function chooseShell(next: Shell) {
-    if (next === shell) return
-    if (pending.current) void cancelEnrollment(pending.current).catch(() => {})
-    pending.current = undefined
-    setShell(next)
-  }
 
   const finalName = name.replace(/-+$/, "")
   const problem = nameProblem(name)
@@ -257,7 +246,7 @@ function AddMachine({
       <div className="flex flex-col gap-2">
         <ToggleGroup
           value={[shell]}
-          onValueChange={(next) => next[0] && chooseShell(next[0] as Shell)}
+          onValueChange={(next) => next[0] && setShell(next[0] as Shell)}
           variant="outline"
           spacing={0}
           aria-label="Operating system of the new computer"
@@ -281,7 +270,7 @@ function AddMachine({
             <EnrollmentStatus
               state={state}
               failure={live.data?.failure_code}
-              onRetry={() => start.mutate({ shell, workspace })}
+              onRetry={() => start.mutate({ workspace })}
             />
           )}
           <button

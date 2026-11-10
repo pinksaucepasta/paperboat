@@ -536,13 +536,12 @@ type EnrollmentStart struct {
 }
 
 type EnrollmentOptions struct {
-	Shell string // posix or powershell
 	// WorkspaceTeamID is the team the machine joins when it enrolls; empty keeps it Personal.
 	WorkspaceTeamID string
 }
 
 func (s *Service) StartEnrollment(ctx context.Context, userID, idempotencyKey string) (EnrollmentStart, error) {
-	return s.StartEnrollmentWithOptions(ctx, userID, idempotencyKey, EnrollmentOptions{Shell: "posix"})
+	return s.StartEnrollmentWithOptions(ctx, userID, idempotencyKey, EnrollmentOptions{})
 }
 
 func (s *Service) StartEnrollmentWithOptions(ctx context.Context, userID, idempotencyKey string, options EnrollmentOptions) (EnrollmentStart, error) {
@@ -568,7 +567,7 @@ func (s *Service) StartEnrollmentWithOptions(ctx context.Context, userID, idempo
 	}); err != nil {
 		return EnrollmentStart{}, err
 	}
-	token, err := randomEnrollmentTokenFor(options.Shell)
+	token, err := randomEnrollmentToken()
 	if err != nil {
 		return EnrollmentStart{}, err
 	}
@@ -636,14 +635,10 @@ func (s *Service) CancelEnrollment(ctx context.Context, userID, enrollmentID str
 }
 
 func (s *Service) RetryEnrollment(ctx context.Context, userID, enrollmentID string) (EnrollmentStart, error) {
-	return s.RetryEnrollmentWithOptions(ctx, userID, enrollmentID, EnrollmentOptions{Shell: "posix"})
-}
-
-func (s *Service) RetryEnrollmentWithOptions(ctx context.Context, userID, enrollmentID string, options EnrollmentOptions) (EnrollmentStart, error) {
 	if strings.TrimSpace(s.encryptionKey) == "" {
 		return EnrollmentStart{}, errors.New("user-machine enrollment encryption is not configured")
 	}
-	token, err := randomEnrollmentTokenFor(options.Shell)
+	token, err := randomEnrollmentToken()
 	if err != nil {
 		return EnrollmentStart{}, err
 	}

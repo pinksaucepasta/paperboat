@@ -7,36 +7,22 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
-func TestMachineAddCancelsUnusedPosixEnrollmentWhenWindowsCreationFails(t *testing.T) {
-	var shells []string
-	cancelled := false
+func TestMachineAddJSONCarriesOneTokenForBothInstallers(t *testing.T) {
+	creates := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/client-configuration":
 			writeAPIData(t, w, map[string]string{"version": "1", "machines_url": "https://console.example.test/machines", "installer_base_url": "https://install.example.test"})
 		case "/v1/machine-enrollments":
 			var input map[string]string
-			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-				t.Error(err)
-				return
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil || len(input) != 0 {
+				t.Errorf("enrollment body = %v (%v), want empty: the token has no platform", input, err)
 			}
-			shells = append(shells, input["shell"])
-			if input["shell"] == "powershell" {
-				w.WriteHeader(http.StatusServiceUnavailable)
-				json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": "unavailable", "message": "Enrollment unavailable"}})
-				return
-			}
-			writeAPIData(t, w, map[string]string{"id": "ume_posix", "bootstrap_token": "test-private-bootstrap-token"})
-		case "/v1/machine-enrollments/ume_posix/cancel":
-			if r.Method != http.MethodPost || r.Header.Get("Idempotency-Key") == "" {
-				t.Error("cleanup lost resource or operation binding")
-			}
-			cancelled = true
-			w.WriteHeader(http.StatusNoContent)
+			creates++
+			writeAPIData(t, w, map[string]string{"id": "ume_one", "bootstrap_token": "ABCDEFGHIJKLMNOPQRSTUVWXYZ"})
 		default:
 			http.NotFound(w, r)
 		}
@@ -46,12 +32,20 @@ func TestMachineAddCancelsUnusedPosixEnrollmentWhenWindowsCreationFails(t *testi
 	path := filepath.Join(dir, "config.json")
 	writeTestProfile(t, dir, path, server.URL)
 	var output bytes.Buffer
-	code := run(context.Background(), []string{"--config", path, "machine", "add", "--json"}, &output, &output)
-	if code == 0 || !cancelled || strings.Join(shells, ",") != "posix,powershell" {
-		t.Fatalf("partial enrollment did not retire: code=%d cancelled=%v shells=%v", code, cancelled, shells)
+	if code := run(context.Background(), []string{"--config", path, "machine", "add", "--json"}, &output, &output); code != 0 {
+		t.Fatalf("exit=%d output=%q", code, output.String())
 	}
-	if strings.Contains(output.String(), "test-private-bootstrap-token") {
-		t.Fatal("partial commands exposed an unused credential")
+	var envelope struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	result := envelope.Data
+	if creates != 1 ||
+		result["linux_macos_command"] != "curl -fsSL 'https://install.example.test/install?p=ABCDEFGHIJKLMNOPQRSTUVWXYZ' | bash" ||
+		result["windows_command"] != `powershell -c "iex (irm 'https://install.example.test/install.ps1?p=ABCDEFGHIJKLMNOPQRSTUVWXYZ')"` {
+		t.Fatalf("creates=%d result=%v", creates, result)
 	}
 }
 

@@ -256,8 +256,7 @@ func (s *Service) validatePairingPlatform(token, platform, architecture string) 
 		return ErrEnrollmentTokenInvalid
 	}
 	platform, architecture = strings.ToLower(strings.TrimSpace(platform)), strings.ToLower(strings.TrimSpace(architecture))
-	if !supportedMachineTarget(platform, architecture) || !slices.Contains(s.policy.AllowedPlatforms, platform) ||
-		token != "" && EnrollmentTokenUsesPowerShell(token) != (platform == "windows") {
+	if !supportedMachineTarget(platform, architecture) || !slices.Contains(s.policy.AllowedPlatforms, platform) {
 		return ErrPairingPlatformUnsupported
 	}
 	return nil
@@ -431,31 +430,18 @@ func randomCode(length int) (string, error) {
 }
 
 const enrollmentTokenLength = 26
-const posixEnrollmentMetadata = "02468BDFHJLNPRTVXZ"
-const powershellEnrollmentMetadata = "13579ACEGIKMOQSUWY"
-
-// EnrollmentTokenUsesPowerShell is the installer and pairing shell contract.
-func EnrollmentTokenUsesPowerShell(token string) bool {
-	token = strings.TrimSpace(token)
-	return validEnrollmentToken(token) && strings.ContainsRune(powershellEnrollmentMetadata, rune(token[0]))
-}
 
 func validEnrollmentToken(token string) bool {
-	_, ok := enrollmentTokenSecret(strings.TrimSpace(token))
-	return ok
-}
-
-func enrollmentTokenSecret(token string) (string, bool) {
 	token = strings.TrimSpace(token)
 	if len(token) != enrollmentTokenLength {
-		return "", false
+		return false
 	}
 	for i := range token {
 		if !((token[i] >= '0' && token[i] <= '9') || (token[i] >= 'A' && token[i] <= 'Z')) {
-			return "", false
+			return false
 		}
 	}
-	return token[1:], true
+	return true
 }
 
 func enrollmentTokenHash(token string) [sha256.Size]byte {
@@ -463,40 +449,10 @@ func enrollmentTokenHash(token string) [sha256.Size]byte {
 	return sha256.Sum256([]byte(token))
 }
 
-// randomEnrollmentToken returns one URL-safe credential. The first character
-// carries installer-platform parity and the remaining characters carry the
-// secret entropy.
+// randomEnrollmentToken returns one URL-safe credential, the same kind for every platform: the installer path
+// (/install or /install.ps1) says which shell runs it, not the token.
 func randomEnrollmentToken() (string, error) {
-	const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	metadata, err := randomCodeFromAlphabet(alphabet, 1)
-	if err != nil {
-		return "", err
-	}
-	rest, err := randomCodeFromAlphabet(alphabet, enrollmentTokenLength-1)
-	if err != nil {
-		return "", err
-	}
-	return metadata + rest, nil
-}
-
-func randomEnrollmentTokenFor(shell string) (string, error) {
-	shell = strings.ToLower(strings.TrimSpace(shell))
-	if shell != "posix" && shell != "powershell" {
-		return "", errors.New("enrollment shell is invalid")
-	}
-	chars := powershellEnrollmentMetadata
-	if shell == "posix" {
-		chars = posixEnrollmentMetadata
-	}
-	metadata, err := randomCodeFromAlphabet(chars, 1)
-	if err != nil {
-		return "", err
-	}
-	rest, err := randomCodeFromAlphabet("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", enrollmentTokenLength-1)
-	if err != nil {
-		return "", err
-	}
-	return metadata + rest, nil
+	return randomCodeFromAlphabet("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ", enrollmentTokenLength)
 }
 
 func randomCodeFromAlphabet(alphabet string, length int) (string, error) {

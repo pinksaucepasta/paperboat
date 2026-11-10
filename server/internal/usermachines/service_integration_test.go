@@ -1838,11 +1838,11 @@ func TestDashboardEnrollmentsStayBoundToTheirOwnTokenAndInstallation(t *testing.
 		}, nil
 	})
 
-	first, err := service.StartEnrollmentWithOptions(ctx, userID, "idem-enrollment-isolation-first-"+suffix, EnrollmentOptions{Shell: "posix"})
+	first, err := service.StartEnrollment(ctx, userID, "idem-enrollment-isolation-first-"+suffix)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := service.StartEnrollmentWithOptions(ctx, userID, "idem-enrollment-isolation-second-"+suffix, EnrollmentOptions{Shell: "posix"})
+	second, err := service.StartEnrollment(ctx, userID, "idem-enrollment-isolation-second-"+suffix)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2233,7 +2233,7 @@ func testExpiredInstallationRecovery(t *testing.T, revoke bool) {
 		grantMu.Unlock()
 		return HelperEnrollmentGrant{EnrollmentID: "henr_recovered_" + suffix, HelperID: "helper_recovered_" + suffix, Credential: strings.Repeat("recovered", 8), ExpiresAt: time.Now().UTC().Add(10 * time.Minute)}, nil
 	})
-	start, err := service.StartEnrollmentWithOptions(ctx, userID, "idem-install-recovery-"+suffix, EnrollmentOptions{Shell: "posix"})
+	start, err := service.StartEnrollment(ctx, userID, "idem-install-recovery-"+suffix)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3834,7 +3834,7 @@ func TestPairedMachineHasALocalAddressLease(t *testing.T) {
 	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
 		t.Fatal(err)
 	}
-	start, err := service.StartEnrollmentWithOptions(ctx, userID, "idem-pair-lease-"+suffix, EnrollmentOptions{Shell: "posix"})
+	start, err := service.StartEnrollment(ctx, userID, "idem-pair-lease-"+suffix)
 	if err != nil {
 		t.Fatal(err)
 	}

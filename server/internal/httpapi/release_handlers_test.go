@@ -76,51 +76,49 @@ func TestReleaseEndpointsServeInstallAndTUF(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := NewRouter(Options{OverrideHandler: nil, ReleaseFiles: files})
-	for _, test := range []struct{ userAgent, body string }{
-		{"curl/8.5.0", "#!/bin/sh\necho paperboat\n"},
-		{"Mozilla/5.0 WindowsPowerShell/5.1", "Write-Output paperboat-windows\n"},
-		{"PowerShell/7.5", "Write-Output paperboat-windows\n"},
+	// The path says which installer: /install is the shell script and /install.ps1 the PowerShell one, whatever the client says.
+	for _, test := range []struct{ path, userAgent, body string }{
+		{"/install", "curl/8.5.0", "#!/bin/sh\necho paperboat\n"},
+		{"/install", "Mozilla/5.0 WindowsPowerShell/5.1", "#!/bin/sh\necho paperboat\n"},
+		{"/install.ps1", "curl/8.5.0", "Write-Output paperboat-windows\n"},
+		{"/install.ps1", "PowerShell/7.5", "Write-Output paperboat-windows\n"},
 	} {
-		request := httptest.NewRequest(http.MethodGet, "/install", nil)
+		request := httptest.NewRequest(http.MethodGet, test.path, nil)
 		request.Header.Set("User-Agent", test.userAgent)
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, request)
-		if response.Code != http.StatusOK || response.Body.String() != test.body || response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Vary") != "User-Agent" || response.Result().ContentLength != int64(len(test.body)) {
-			t.Fatalf("plain installer for %q: status=%d body=%q headers=%v", test.userAgent, response.Code, response.Body.String(), response.Header())
+		if response.Code != http.StatusOK || response.Body.String() != test.body || response.Header().Get("Cache-Control") != "no-store" || response.Result().ContentLength != int64(len(test.body)) {
+			t.Fatalf("plain installer %s for %q: status=%d body=%q headers=%v", test.path, test.userAgent, response.Code, response.Body.String(), response.Header())
 		}
 	}
-	for _, query := range []string{"?p=", "?other=value", "?p=4J7M9Q2V8X4N6P5R1T0W8Y2ZAB&p=4J7M9Q2V8X4N6P5R1T0W8Y2ZAB", "?p=4J7M9Q2V8X4N6P5R1T0W8Y2ZAB&other=value", "?p=%invalid"} {
-		response := httptest.NewRecorder()
-		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/install"+query, nil))
-		if response.Code != http.StatusBadRequest {
-			t.Fatalf("malformed installer query %q: status=%d", query, response.Code)
+	for _, path := range []string{"/install", "/install.ps1"} {
+		for _, query := range []string{"?p=", "?other=value", "?p=4J7M9Q2V8X4N6P5R1T0W8Y2ZAB&p=4J7M9Q2V8X4N6P5R1T0W8Y2ZAB", "?p=4J7M9Q2V8X4N6P5R1T0W8Y2ZAB&other=value", "?p=%invalid"} {
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path+query, nil))
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("malformed installer query %s%q: status=%d", path, query, response.Code)
+			}
 		}
 	}
 
-	install := httptest.NewRecorder()
-	router.ServeHTTP(install, httptest.NewRequest(http.MethodGet, "/install?p=4J7M9Q2V8X4N6P5R1T0W8Y2ZAB", nil))
-	if install.Code != http.StatusOK || !strings.Contains(install.Body.String(), "echo paperboat") || !strings.Contains(install.Body.String(), "PAPERBOAT_ENROLLMENT_TOKEN") {
-		t.Fatalf("install response = %d %q", install.Code, install.Body.String())
-	}
-	if !strings.HasPrefix(install.Body.String(), "#!/bin/sh\nPAPERBOAT_ENROLLMENT_TOKEN=") || !strings.Contains(install.Body.String(), "\nexport PAPERBOAT_ENROLLMENT_TOKEN PAPERBOAT_MACHINE_ALIAS\n") {
-		t.Fatalf("install response is not an executable POSIX script: %q", install.Body.String())
-	}
-	if got := install.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
-		t.Fatalf("install content type = %q", got)
-	}
-	windows := httptest.NewRecorder()
-	windowsRequest := httptest.NewRequest(http.MethodGet, "/install?p=5K7M9Q2V8X4N6P5R1T0W8Y2ZAB", nil)
-	windowsRequest.Header.Set("User-Agent", "Mozilla/5.0 PowerShell/7.5")
-	router.ServeHTTP(windows, windowsRequest)
-	if windows.Code != http.StatusOK || !strings.Contains(windows.Body.String(), "PAPERBOAT_ENROLLMENT_TOKEN") {
-		t.Fatalf("windows response = %d %q", windows.Code, windows.Body.String())
-	}
-	legacyWindows := httptest.NewRecorder()
-	legacyWindowsRequest := httptest.NewRequest(http.MethodGet, "/install?p=5K7M9Q2V8X4N6P5R1T0W8Y2ZAB", nil)
-	legacyWindowsRequest.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT; Windows NT 10.0; en-US)")
-	router.ServeHTTP(legacyWindows, legacyWindowsRequest)
-	if legacyWindows.Code != http.StatusOK || !strings.Contains(legacyWindows.Body.String(), "Write-Output paperboat-windows") {
-		t.Fatalf("Windows PowerShell 5.1 response = %d %q", legacyWindows.Code, legacyWindows.Body.String())
+	// One kind of token: the same token (any first character) goes to either installer.
+	for _, token := range []string{"4J7M9Q2V8X4N6P5R1T0W8Y2ZAB", "5K7M9Q2V8X4N6P5R1T0W8Y2ZAB"} {
+		install := httptest.NewRecorder()
+		router.ServeHTTP(install, httptest.NewRequest(http.MethodGet, "/install?p="+token, nil))
+		if install.Code != http.StatusOK || !strings.Contains(install.Body.String(), "echo paperboat") || !strings.Contains(install.Body.String(), "PAPERBOAT_ENROLLMENT_TOKEN") {
+			t.Fatalf("install response = %d %q", install.Code, install.Body.String())
+		}
+		if !strings.HasPrefix(install.Body.String(), "#!/bin/sh\nPAPERBOAT_ENROLLMENT_TOKEN='"+token+"'") || !strings.Contains(install.Body.String(), "\nexport PAPERBOAT_ENROLLMENT_TOKEN PAPERBOAT_MACHINE_ALIAS\n") {
+			t.Fatalf("install response is not an executable POSIX script: %q", install.Body.String())
+		}
+		if got := install.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+			t.Fatalf("install content type = %q", got)
+		}
+		windows := httptest.NewRecorder()
+		router.ServeHTTP(windows, httptest.NewRequest(http.MethodGet, "/install.ps1?p="+token, nil))
+		if windows.Code != http.StatusOK || !strings.HasPrefix(windows.Body.String(), "$env:PAPERBOAT_ENROLLMENT_TOKEN='"+token+"';") || !strings.Contains(windows.Body.String(), "Write-Output paperboat-windows") {
+			t.Fatalf("windows response = %d %q", windows.Code, windows.Body.String())
+		}
 	}
 	removed := httptest.NewRecorder()
 	router.ServeHTTP(removed, httptest.NewRequest(http.MethodGet, "/windows?p=5K7M9Q2V8X4N6P5R1T0W8Y2ZAB", nil))

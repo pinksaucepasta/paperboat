@@ -46,7 +46,7 @@ func writePairingRejection(w http.ResponseWriter, r *http.Request, err error) bo
 	case expectedHTTPErrorOnly(err, usermachines.ErrEnrollmentTokenInvalid):
 		writeError(w, r, http.StatusBadRequest, "enrollment_token_invalid", "This install command is invalid or revoked. Create a new install command.")
 	case expectedHTTPErrorOnly(err, usermachines.ErrPairingPlatformUnsupported):
-		writeError(w, r, http.StatusBadRequest, "pairing_platform_unsupported", "This platform or architecture is unsupported. Use a supported platform with its matching install command.")
+		writeError(w, r, http.StatusBadRequest, "pairing_platform_unsupported", "This platform or architecture is unsupported. Use a supported platform.")
 
 	case expectedHTTPErrorOnly(err, usermachines.ErrPairingResetInvalid):
 		writeError(w, r, 400, "pairing_reset_invalid", "Reset needs the exact saved machine identities. Retry the original command.")

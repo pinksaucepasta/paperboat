@@ -92,20 +92,19 @@
     const label = await until(() => /Waiting for the machine/.test(dialog()?.innerText ?? "") || null)
     pass("the dialog says it is waiting for the machine", Boolean(label))
 
-    // Windows gets its own pairing token (the shell is part of the token); the macOS and Linux one is revoked.
+    // One token for every computer: Windows shows the same token on the PowerShell installer path (/install.ps1),
+    // and the enrollment is neither replaced nor revoked.
     const posixId = enrollmentId
     button(dialog(), (t) => t === "Windows")?.click()
     const windowsCommand = await until(() => /^powershell -c "iex \(irm '/.test(command()) && command())
     pass("Windows shows a PowerShell command", Boolean(windowsCommand))
-    const windowsShape = new RegExp(`^powershell -c "iex \\(irm '${escapedUrl}\\?p=[A-Za-z0-9_.-]+'\\)"$`)
-    pass("it is the install address with a token, run by PowerShell", windowsShape.test(windowsCommand ?? ""))
+    const windowsShape = new RegExp(`^powershell -c "iex \\(irm '${escapedUrl}\\.ps1\\?p=[A-Za-z0-9_.-]+'\\)"$`)
+    pass("it is the PowerShell installer address with a token, run by PowerShell", windowsShape.test(windowsCommand ?? ""))
     const windowsToken = windowsCommand?.match(/\?p=([^']+)'/)?.[1] ?? ""
-    pass("it carries its own token", Boolean(windowsToken) && windowsToken !== token)
-    await until(() => enrollmentId && enrollmentId !== posixId)
-    const windowsWaiting = enrollmentId !== posixId && (await get(`machine-enrollments/${enrollmentId}`))
-    pass("the server has a second enrollment waiting", windowsWaiting?.state === "awaiting_bootstrap", windowsWaiting?.state ?? "")
-    const left = await until(async () => (await get(`machine-enrollments/${posixId}`)).state === "cancelled")
-    pass("the macOS and Linux token was revoked when Windows was chosen", Boolean(left))
+    pass("it carries the same token", Boolean(windowsToken) && windowsToken === token)
+    await sleep(1500)
+    const kept = await get(`machine-enrollments/${posixId}`)
+    pass("choosing Windows neither replaces nor revokes the enrollment", enrollmentId === posixId && kept?.state === "awaiting_bootstrap", kept?.state ?? "")
     button(dialog(), (t) => t === "macOS and Linux")?.click()
     const posixAgain = await until(() => /^curl -fsSL .*\?p=/.test(command()) && command())
     pass("switching back shows a macOS and Linux command", Boolean(posixAgain))

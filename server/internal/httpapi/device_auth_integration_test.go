@@ -417,7 +417,7 @@ func TestMachineEnrollmentRoutesAcceptScopedBearerAndRequireCookieCSRF(t *testin
 	tokens := authorizeCLI(t, router, cookies)
 
 	start := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/machine-enrollments", strings.NewReader(`{"shell":"posix"}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/machine-enrollments", strings.NewReader(`{}`))
 	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
 	req.Header.Set("Idempotency-Key", "machine-enrollment-bearer")
 	router.ServeHTTP(start, req)
@@ -447,7 +447,7 @@ func TestMachineEnrollmentRoutesAcceptScopedBearerAndRequireCookieCSRF(t *testin
 	}
 
 	missingCSRF := httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/v1/machine-enrollments", strings.NewReader(`{"shell":"posix"}`))
+	req = httptest.NewRequest(http.MethodPost, "/v1/machine-enrollments", strings.NewReader(`{}`))
 	addCookies(req, cookies)
 	req.Header.Set("Idempotency-Key", "machine-enrollment-cookie")
 	router.ServeHTTP(missingCSRF, req)

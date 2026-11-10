@@ -78,7 +78,7 @@ func TestNativeF1PairingTokenRejections(t *testing.T) {
 	}
 	fixture := nativeF1PairingConfig(t, dependencies.cfg.ServerURL)
 	used := nativeF1UsedEnrollment(t, ctx, client, fixture, before.MachineID)
-	revoked, err := client.StartMachineEnrollment(ctx, newIdempotencyKey(), "posix")
+	revoked, err := client.StartMachineEnrollment(ctx, newIdempotencyKey())
 	if err != nil {
 		t.Fatal("create revocation fixture")
 	}
@@ -93,8 +93,6 @@ func TestNativeF1PairingTokenRejections(t *testing.T) {
 		{"expired", expired, "token expired", bootstrap.ErrEnrollmentTokenExpired},
 		{"used", used, "already used", bootstrap.ErrEnrollmentTokenUsed},
 		{"revoked", revoked.BootstrapToken, "revoked or invalid", bootstrap.ErrEnrollmentTokenInvalid},
-		// Odd shell metadata is an unsupported command shape on Unix; no Windows enrollment is created.
-		{"platform", "1" + strings.Repeat("Z", 25), "operating system", bootstrap.ErrPairingPlatformUnsupported},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -165,7 +163,7 @@ func nativeF1PairingConfig(t *testing.T, server string) bootstrap.Config {
 
 func nativeF1UsedEnrollment(t *testing.T, ctx context.Context, client *api.Client, config bootstrap.Config, protected string) string {
 	t.Helper()
-	enrollment, err := client.StartMachineEnrollment(ctx, newIdempotencyKey(), "posix")
+	enrollment, err := client.StartMachineEnrollment(ctx, newIdempotencyKey())
 	if err != nil {
 		t.Fatal("create used-token fixture")
 	}

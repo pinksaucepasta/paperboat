@@ -171,7 +171,7 @@ func checkPairingResetDenials(t *testing.T, f pairingResetFixture) {
 				in.Machines[1].IdentitySignature = "not-a-signature"
 				want, code = 400, "pairing_reset_invalid"
 			case "wrong platform":
-				in.EnrollmentToken = "1" + in.EnrollmentToken[1:]
+				in.Platform = "unsupported"
 				want, code = 400, "pairing_platform_unsupported"
 			case "expired":
 				exec(`UPDATE user_machine_pairings SET expires_at=now()-interval '1 second' WHERE id=$1`, enrollment.ID)

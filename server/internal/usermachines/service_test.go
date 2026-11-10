@@ -103,51 +103,44 @@ func TestEnvironmentInjectionRemainsInInternalServiceComposition(t *testing.T) {
 	}
 }
 
-func TestEnrollmentTokenMetadataParityAndLength(t *testing.T) {
-	tests := []struct {
-		shell string
-		even  bool
-	}{
-		{shell: "posix", even: true},
-		{shell: "powershell", even: false},
-	}
-	for _, test := range tests {
-		token, err := randomEnrollmentTokenFor(test.shell)
+func TestEnrollmentTokenIsOneKindWithNoPlatformMarker(t *testing.T) {
+	seen := map[byte]bool{}
+	for i := 0; i < 400; i++ {
+		token, err := randomEnrollmentToken()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(token) != 26 {
-			t.Fatalf("%s token length = %d, want 26", test.shell, len(token))
+		if !validEnrollmentToken(token) {
+			t.Fatalf("minted token %q is not valid", token)
 		}
-		if enrollmentCharacterEven(token[0]) != test.even {
-			t.Fatalf("%s token metadata = %q, wrong parity", test.shell, token[:1])
+		seen[token[0]] = true
+	}
+	// Every character of the 36-letter alphabet is random, the first included: both old parity halves occur.
+	even, odd := false, false
+	for c := range seen {
+		if (c >= '0' && c <= '9' && (c-'0')%2 == 0) || (c >= 'A' && c <= 'Z' && (c-'A'+1)%2 == 0) {
+			even = true
+		} else {
+			odd = true
 		}
+	}
+	if !even || !odd {
+		t.Fatalf("first characters %v carry a pattern", seen)
 	}
 }
 
-func TestEnrollmentTokenMetadataIsPartOfCredential(t *testing.T) {
-	token, err := randomEnrollmentTokenFor("posix")
+func TestEnrollmentTokenChangeChangesTheCredentialHash(t *testing.T) {
+	token, err := randomEnrollmentToken()
 	if err != nil {
 		t.Fatal(err)
 	}
-	variant := "1" + token[1:]
-	if enrollmentTokenHash(token) == enrollmentTokenHash(variant) {
-		t.Fatal("metadata-only token variant retained the credential hash")
+	for _, position := range []int{0, len(token) - 1} {
+		changed := []byte(token)
+		changed[position] = map[bool]byte{true: '0', false: '1'}[changed[position] != '0']
+		if enrollmentTokenHash(token) == enrollmentTokenHash(string(changed)) {
+			t.Fatalf("changing character %d kept the credential hash", position)
+		}
 	}
-	changedSecret := variant[:1] + variant[1:len(variant)-1] + "0"
-	if changedSecret == variant {
-		changedSecret = variant[:len(variant)-1] + "1"
-	}
-	if enrollmentTokenHash(token) == enrollmentTokenHash(changedSecret) {
-		t.Fatal("secret change did not change the credential hash")
-	}
-}
-
-func enrollmentCharacterEven(character byte) bool {
-	if character >= '0' && character <= '9' {
-		return (character-'0')%2 == 0
-	}
-	return (character-'A'+1)%2 == 0
 }
 
 func TestCanonicalWorkspaceRootIsPlatformAware(t *testing.T) {

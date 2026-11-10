@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/server/internal/machinealias"
-	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 	"io"
 	"net"
 	"net/http"
@@ -71,21 +70,23 @@ func openRegularFile(root, relative string) (*os.File, os.FileInfo, error) {
 	return file, info, nil
 }
 
+// installScript serves the shell installer at /install (`curl … | bash`); installScriptPowerShell serves the PowerShell
+// installer at /install.ps1 (`irm … | iex`). The path says which, never the token or the client.
 func installScript(files http.Handler) http.HandlerFunc {
+	return installHandler(files, "/install", false)
+}
+
+func installScriptPowerShell(files http.Handler) http.HandlerFunc {
+	return installHandler(files, "/windows", true)
+}
+
+func installHandler(files http.Handler, path string, powershell bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Vary", "User-Agent")
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		// A plain installation selects the shell from its HTTP client. An
-		// enrollment parameter also carries the shell choice in its token tag.
-		powershell := strings.Contains(strings.ToLower(r.UserAgent()), "powershell")
-		path := "/install"
-		if powershell {
-			path = "/windows"
-		}
 		serveEnrollmentScript(w, r, files, path, powershell)
 	}
 }
@@ -105,10 +106,6 @@ func serveEnrollmentScript(w http.ResponseWriter, r *http.Request, files http.Ha
 			http.Error(w, "invalid enrollment parameter", http.StatusBadRequest)
 			return
 		}
-	}
-	powershell = powershell || usermachines.EnrollmentTokenUsesPowerShell(token)
-	if powershell {
-		path = "/windows"
 	}
 	recorder := httptest.NewRecorder()
 	clone := r.Clone(r.Context())

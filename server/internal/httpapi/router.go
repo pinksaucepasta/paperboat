@@ -192,6 +192,7 @@ func NewRouter(opts Options) http.Handler {
 		mux.HandleFunc("GET /v1/server-version", serverVersion)
 		if opts.ReleaseFiles != nil {
 			mux.Handle("GET /install", installScript(opts.ReleaseFiles))
+			mux.Handle("GET /install.ps1", installScriptPowerShell(opts.ReleaseFiles))
 			mux.Handle("GET /selfhost/install", selfhostInstaller(opts.ReleaseFiles))
 			mux.Handle("GET /selfhost/versions/{path...}", selfhostPackage(opts.ReleaseFiles))
 			mux.HandleFunc("GET /selfhost/address", selfhostAddress)

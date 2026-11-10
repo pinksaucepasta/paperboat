@@ -79,7 +79,7 @@ var ErrWorkspaceForbidden = errors.New("workspace is unavailable for new machine
 // at approval, mints the enrollment, and describes a machine that is already enrolled.
 type DeviceEnroller interface {
 	ValidateWorkspace(ctx context.Context, userID, workspaceID string) error
-	IssueEnrollment(ctx context.Context, userID, grantID, workspaceID, os string) (DeviceEnrollment, error)
+	IssueEnrollment(ctx context.Context, userID, grantID, workspaceID string) (DeviceEnrollment, error)
 	EnrolledMachine(ctx context.Context, userID, machineID string) (EnrolledMachine, bool, error)
 	// Admission says whether a machine this account adds to the workspace is accepted at once or waits.
 	Admission(ctx context.Context, userID, workspaceID string) (string, error)
@@ -313,7 +313,7 @@ func (s *DeviceService) Poll(ctx context.Context, in DeviceTokenInput) (TokenSet
 			if s.enroller == nil {
 				return errors.New("device enrollment is not configured")
 			}
-			issued, err := s.enroller.IssueEnrollment(ctx, grant.UserID, grant.ID, grant.WorkspaceTeamID.String, grant.Os)
+			issued, err := s.enroller.IssueEnrollment(ctx, grant.UserID, grant.ID, grant.WorkspaceTeamID.String)
 			if err != nil {
 				return fmt.Errorf("issue device enrollment: %w", err)
 			}

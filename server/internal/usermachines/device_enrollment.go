@@ -19,8 +19,8 @@ func DeviceEnrollmentKey(grantID string) string { return "device_grant:" + grant
 
 // IssueDeviceEnrollment mints the normal one-shot enrollment for an approved device login.
 // workspaceTeamID is empty for Personal.
-func (s *Service) IssueDeviceEnrollment(ctx context.Context, userID, grantID, workspaceTeamID, shell string) (EnrollmentStart, error) {
-	return s.StartEnrollmentWithOptions(ctx, userID, DeviceEnrollmentKey(grantID), EnrollmentOptions{Shell: shell, WorkspaceTeamID: workspaceTeamID})
+func (s *Service) IssueDeviceEnrollment(ctx context.Context, userID, grantID, workspaceTeamID string) (EnrollmentStart, error) {
+	return s.StartEnrollmentWithOptions(ctx, userID, DeviceEnrollmentKey(grantID), EnrollmentOptions{WorkspaceTeamID: workspaceTeamID})
 }
 
 // EnrolledMachineWorkspaces names where an already enrolled machine of this account lives:
@@ -80,12 +80,8 @@ func (e DeviceEnroller) ValidateWorkspace(ctx context.Context, userID, workspace
 }
 
 // IssueEnrollment mints the enrollment for an approved grant; teamID is empty for Personal.
-func (e DeviceEnroller) IssueEnrollment(ctx context.Context, userID, grantID, teamID, os string) (auth.DeviceEnrollment, error) {
-	shell := "posix"
-	if os == "windows" {
-		shell = "powershell"
-	}
-	start, err := e.Service.IssueDeviceEnrollment(ctx, userID, grantID, teamID, shell)
+func (e DeviceEnroller) IssueEnrollment(ctx context.Context, userID, grantID, teamID string) (auth.DeviceEnrollment, error) {
+	start, err := e.Service.IssueDeviceEnrollment(ctx, userID, grantID, teamID)
 	if err != nil {
 		return auth.DeviceEnrollment{}, err
 	}

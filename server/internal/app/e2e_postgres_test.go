@@ -137,7 +137,7 @@ func TestE2EServe(t *testing.T) {
 	}
 	tokens := map[string]string{}
 	for _, name := range []string{"e2e-a", "e2e-b", "e2e-c"} {
-		tokens[name], _ = post("/v1/machine-enrollments", `{"shell":"posix"}`)["bootstrap_token"].(string)
+		tokens[name], _ = post("/v1/machine-enrollments", `{}`)["bootstrap_token"].(string)
 	}
 	for name, value := range tokens {
 		if value == "" {

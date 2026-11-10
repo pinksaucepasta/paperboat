@@ -266,7 +266,7 @@ def inventory(script, inbox, installed, password):
 def enrollment_file(binary, alias, directory):
     receipt = invoke(binary, '--workspace', 'personal', 'machine', 'add',
                      '--name', alias, '--json')
-    if hasattr(binary, 'device'):  # tokens are per OS: the Windows enrollment, not the Linux/macOS one
+    if hasattr(binary, 'device'):  # the Windows command (same token kind, its own /install.ps1 path)
         token = re.search(r"p=([^'\"&]+)", receipt['windows_command']).group(1)[-26:]
     else:
         address = next(word for word in shlex.split(receipt['linux_macos_command'])
