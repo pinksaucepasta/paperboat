@@ -185,6 +185,33 @@ func TestNativeConPTYInterruptOvertakesAStuckPaste(t *testing.T) {
 	// accepted and the shell sees it only after reading them. What Interrupt guarantees is a bounded, final end of the stuck write.
 }
 
+// Interrupt must stop a foreground program that never reads its input and ignores the pipe ETX (cmd.exe running ping -t): Signal does it
+// through the descendant fallback, and the overtake path used to leave it running (it wrote the ETX and reported handled).
+func TestNativeConPTYInterruptStopsAForegroundProgramThatIgnoresETX(t *testing.T) {
+	commandShell := os.Getenv("ComSpec")
+	if commandShell == "" {
+		commandShell = filepath.Join(os.Getenv("WINDIR"), "System32", "cmd.exe")
+	}
+	process, output := startNativePTY(t, commandShell, []string{"/d", "/q"})
+	defer process.CloseIO()
+	if _, err := process.Write([]byte("ping -t 127.0.0.1\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	output.waitFor(t, "Reply from")
+	if handled, err := process.Interrupt(0x03, nil); err != nil || !handled {
+		t.Fatalf("Interrupt handled=%v err=%v", handled, err)
+	}
+	if _, err := process.Write([]byte("echo paperboat-after-interrupt\r\nexit /b 9\r\n")); err != nil {
+		t.Fatalf("shell did not survive: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	result, err := process.Wait(ctx)
+	if err != nil || result.Code != 9 {
+		t.Fatalf("ping was not stopped by Interrupt: result=%+v err=%v", result, err)
+	}
+}
+
 func TestNativeConPTYResizeAndUTF8VT(t *testing.T) {
 	process, output := startNativePTY(t, nativePowerShell(t), []string{"-NoLogo", "-NoProfile"})
 	if err := process.Resize(Dimensions{Columns: 101, Rows: 37}); err != nil {

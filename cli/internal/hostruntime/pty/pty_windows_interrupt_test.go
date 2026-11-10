@@ -101,3 +101,13 @@ func TestCancelInputLeavesAClosedProcessAlone(t *testing.T) {
 		t.Fatal("cancelInput did not cancel the pending write of an open process")
 	}
 }
+
+// The descendant fallback kills what jobProcessIDs lists; for a Process without a job that must be nothing. Before the guard
+// QueryInformationJobObject(NULL) returned unrelated PIDs and the second Interrupt test run terminated the test runner itself.
+func TestNoJobMeansNoDescendantsToTerminate(t *testing.T) {
+	if ids := jobProcessIDs(0); len(ids) != 0 {
+		t.Fatalf("jobProcessIDs(0)=%v, want none", ids)
+	}
+	p, _ := pipeProcess(t)
+	p.terminateForegroundDescendants() // must neither panic nor touch any process
+}

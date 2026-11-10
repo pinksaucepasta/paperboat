@@ -285,8 +285,11 @@ func (p *Process) Interrupt(key byte, accepted func()) (bool, error) {
 		return false, err
 	}
 	defer p.writeMu.Unlock()
-	_, err = writeInput(p.input, []byte{key}, inputTimeout(context.Background()))
-	return true, err
+	if _, err = writeInput(p.input, []byte{key}, inputTimeout(context.Background())); err != nil {
+		return true, err
+	}
+	p.terminateForegroundDescendants() // like Signal(Interrupt): the ETX alone does not stop every foreground program
+	return true, nil
 }
 
 // cancelInput cancels the pending write on the input pipe; a closed pipe has nothing to cancel.
@@ -320,27 +323,10 @@ func (p *Process) Signal(signal Signal) error {
 		// event an interactive console receives. Do not terminate the shell:
 		// the foreground command must be interrupted while the session remains
 		// usable for subsequent commands.
-		if _, err := p.WriteContext(context.Background(), []byte{0x03}); err != nil {  // under writeMu: never races a write in progress
+		if _, err := p.WriteContext(context.Background(), []byte{0x03}); err != nil { // under writeMu: never races a write in progress
 			return err
 		}
-		// Some inbox console applications on Windows 11 do not translate ETX
-		// into a control event when hosted below cmd.exe in ConPTY. Give native
-		// handling a short opportunity, then terminate only foreground
-		// descendants. The shell remains alive and all processes stay bounded by
-		// the same Job Object.
-		//paperboat:allow-source-policy sleep owner=windows-conpty reason=bounded-native-ctrl-c-grace-before-descendant-fallback
-		time.Sleep(100 * time.Millisecond)
-		for _, pid := range jobProcessIDs(p.job) {
-			if pid == p.processID {
-				continue
-			}
-			handle, err := windows.OpenProcess(windows.PROCESS_TERMINATE, false, pid)
-			if err != nil {
-				continue
-			}
-			_ = windows.TerminateProcess(handle, 130)
-			windows.CloseHandle(handle)
-		}
+		p.terminateForegroundDescendants()
 		return nil
 	}
 	code := uint32(1)
@@ -356,7 +342,32 @@ func (p *Process) Signal(signal Signal) error {
 	return nil
 }
 
+// terminateForegroundDescendants is the fallback after an ETX: a pipe ETX does not signal every console program (measured on
+// Windows 11: cmd.exe running ping -t ignores it, with or without queued input), so after a short opportunity for native
+// handling it terminates the foreground descendants. The shell remains alive and all processes stay bounded by the same Job Object.
+func (p *Process) terminateForegroundDescendants() {
+	if p.job == 0 {
+		return
+	}
+	//paperboat:allow-source-policy sleep owner=windows-conpty reason=bounded-native-ctrl-c-grace-before-descendant-fallback
+	time.Sleep(100 * time.Millisecond)
+	for _, pid := range jobProcessIDs(p.job) {
+		if pid == p.processID {
+			continue
+		}
+		handle, err := windows.OpenProcess(windows.PROCESS_TERMINATE, false, pid)
+		if err != nil {
+			continue
+		}
+		_ = windows.TerminateProcess(handle, 130)
+		windows.CloseHandle(handle)
+	}
+}
+
 func jobProcessIDs(job windows.Handle) []uint32 {
+	if job == 0 { // no job (a Process over a plain pipe): QueryInformationJobObject(NULL) would list unrelated processes
+		return nil
+	}
 	// JOBOBJECT_BASIC_PROCESS_ID_LIST has two DWORD counters followed by a
 	// pointer-width process ID array. Cap collection to 256 processes so signal
 	// handling remains bounded even under a hostile workload.
