@@ -115,14 +115,23 @@ func runServiceBridge(ctx context.Context, args []string) error {
 	return elevation.Execute(ctx, *requestPath, *resultPath, *cancelPath, dispatchElevatedOperation)
 }
 
+// openSSHUnobtainableAsRemote gives an OpenSSH operation that failed only because this machine cannot supply the package
+// a stable code, which survives the elevation boundary where the typed error does not; any other error is returned as is.
+func openSSHUnobtainableAsRemote(request elevation.Request, err error) error {
+	if request.Operation == elevation.OperationOpenSSH && windowsopenssh.Unobtainable(err) {
+		return &elevation.RemoteError{Code: elevation.CodeOpenSSHUnobtainable, Message: "this machine cannot supply OpenSSH (no App Installer or package source)"}
+	}
+	return err
+}
+
 func dispatchElevatedOperation(ctx context.Context, request elevation.Request) (resultErr error) {
 	defer func() {
 		if runtimeCausesOnly(resultErr, hostinstall.ErrSignedUpdatePending, service.ErrLifecycleUncertain) {
 			resultErr = &elevation.RemoteError{Code: "activation_pending", Message: hostinstall.ErrSignedUpdatePending.Error()}
 			return
 		}
-		if request.Operation == elevation.OperationOpenSSH && windowsopenssh.Unobtainable(resultErr) {
-			resultErr = &elevation.RemoteError{Code: elevation.CodeOpenSSHUnobtainable, Message: "this machine cannot supply OpenSSH (no App Installer or package source)"}
+		if mapped := openSSHUnobtainableAsRemote(request, resultErr); mapped != resultErr {
+			resultErr = mapped
 			return
 		}
 		if runtimeCausesOnly(resultErr, hostinstall.ErrLegacyCarrierRunning) {

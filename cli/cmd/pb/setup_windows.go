@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -16,6 +17,9 @@ import (
 // setupOpenSSHBudget bounds the OpenSSH step like an install or pair does: the package may only be reachable through
 // slow fallbacks, and setup must still finish without managed SSH.
 var setupOpenSSHBudget = 75 * time.Second
+
+// setupNoticeWriter receives the notice that setup went on without managed SSH.
+var setupNoticeWriter io.Writer = os.Stderr
 
 func setupPlatformHostPrerequisites(ctx context.Context) (uint16, error) {
 	executable, err := os.Executable()
@@ -47,6 +51,6 @@ func runSetupOpenSSH(ctx context.Context, step func(context.Context) error) erro
 	default:
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "Managed SSH was not prepared (%v); setup continues without it. Run `pb doctor --repair` to prepare it.\n", err)
+	fmt.Fprintf(setupNoticeWriter, "Managed SSH was not prepared (%v); setup continues without it. Run `pb doctor --repair` to prepare it.\n", err)
 	return nil
 }

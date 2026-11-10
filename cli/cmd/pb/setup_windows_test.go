@@ -3,8 +3,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,13 +14,20 @@ import (
 )
 
 func TestSetupOpenSSHSkipsOnlyWhatMeansUnobtainableOrOutOfTime(t *testing.T) {
-	previous := setupOpenSSHBudget
-	t.Cleanup(func() { setupOpenSSHBudget = previous })
+	previous, previousWriter := setupOpenSSHBudget, setupNoticeWriter
+	t.Cleanup(func() { setupOpenSSHBudget, setupNoticeWriter = previous, previousWriter })
+	var notice bytes.Buffer
+	setupNoticeWriter = &notice
 	setupOpenSSHBudget = 30 * time.Millisecond
 
 	unobtainable := &elevation.RemoteError{Code: elevation.CodeOpenSSHUnobtainable, Message: "no package"}
 	if err := runSetupOpenSSH(context.Background(), func(context.Context) error { return unobtainable }); err != nil {
 		t.Fatalf("an unobtainable package was not skipped: %v", err)
+	}
+	for _, want := range []string{"Managed SSH was not prepared", "setup continues without it", "pb doctor --repair"} {
+		if !strings.Contains(notice.String(), want) {
+			t.Fatalf("the notice lacks %q: %q", want, notice.String())
+		}
 	}
 	if err := runSetupOpenSSH(context.Background(), func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }); err != nil {
 		t.Fatalf("the budget's expiry was not skipped: %v", err)
