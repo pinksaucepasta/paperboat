@@ -377,5 +377,5 @@ func (cc *wssClientConn) authorize(token string) error {
 	cc.writeMu.Lock()
 	defer cc.writeMu.Unlock()
 	cc.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	return writeAuthRequest(cc.conn, parts, cc.namespace, cc.generationDisco)
+	return authorizeError(writeAuthRequest(cc.conn, parts, cc.namespace, cc.generationDisco))
 }

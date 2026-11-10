@@ -3,6 +3,7 @@ package derpquic
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
 	"time"
 )
@@ -10,6 +11,17 @@ import (
 // errAuthorizeTransport marks a re-authentication that failed in the network, as opposed to one the relay refused
 // or a grant that could not be encoded.
 var errAuthorizeTransport = errors.New("re-authentication was not delivered")
+
+// authorizeError classifies the failure of writing a re-authentication: a fatal carrier error (a grant too large to
+// frame, ErrProtocol) comes from the grant, not the network, and stays itself so the carrier is revoked instead of
+// retrying a send that can never succeed; anything else was lost in the network.
+func authorizeError(err error) error {
+	var fatal interface{ Fatal() bool }
+	if err == nil || errors.As(err, &fatal) && fatal.Fatal() {
+		return err
+	}
+	return fmt.Errorf("%w: %v", errAuthorizeTransport, err)
+}
 
 // The carrier has already authenticated. Refresh publishes policy changes; a
 // credential's TTL or a failed refresh cannot revoke its admitted lifetime.
