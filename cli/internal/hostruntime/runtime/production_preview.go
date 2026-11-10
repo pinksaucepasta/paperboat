@@ -19,6 +19,7 @@ import (
 	clientconfig "github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/privateproxyconfig"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
@@ -63,6 +64,8 @@ type productionPreviewAssemblyConfig struct {
 	InspectorStore    *inspector.Store
 	InspectorRegistry *inspector.Registry
 	InspectorHTTP     tunnelmanager.AuthenticatedInspectorHTTP
+	// PrivateRouteEvents is the machine-events subscription to the private_routes topic.
+	PrivateRouteEvents *machineevents.Subscription
 }
 
 func newProductionPreviewAssembly(config productionPreviewAssemblyConfig) (*productionPreviewAssembly, error) {
@@ -70,15 +73,16 @@ func newProductionPreviewAssembly(config productionPreviewAssemblyConfig) (*prod
 		return nil, errors.Join(ErrProductionInvalid, preview.ErrMachinePreviewRuntimeInvalid)
 	}
 	runtime, err := preview.NewMachinePreviewRuntime(preview.MachinePreviewRuntimeConfig{
-		ControlURL:    config.ControlURL,
-		StateRoot:     config.StateRoot,
-		RunContext:    config.RunContext,
-		Transport:     config.Transport,
-		Carrier:       config.Carrier,
-		OriginDial:    config.OriginDial,
-		Inspector:     config.InspectorStore,
-		Registry:      config.InspectorRegistry,
-		InspectorHTTP: config.InspectorHTTP,
+		ControlURL:         config.ControlURL,
+		StateRoot:          config.StateRoot,
+		RunContext:         config.RunContext,
+		Transport:          config.Transport,
+		Carrier:            config.Carrier,
+		OriginDial:         config.OriginDial,
+		Inspector:          config.InspectorStore,
+		Registry:           config.InspectorRegistry,
+		InspectorHTTP:      config.InspectorHTTP,
+		PrivateRouteEvents: config.PrivateRouteEvents,
 		ObserveStreamError: func(err error) {
 			if err != nil {
 				errorreport.Current().CaptureFailure(config.RunContext, "paperboat-daemon", "preview", "delivery", "transport_failed", err)

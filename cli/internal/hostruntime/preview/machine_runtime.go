@@ -15,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
@@ -53,6 +54,9 @@ type MachinePreviewRuntimeConfig struct {
 	Inspector     *inspector.Store
 	Registry      *inspector.Registry
 	InspectorHTTP tunnelmanager.AuthenticatedInspectorHTTP
+	// PrivateRouteEvents wakes the private-route discovery when the machine's private routes change, so open
+	// private TCP sessions stop asking the server every second. Nil keeps the 1 s refetch.
+	PrivateRouteEvents *machineevents.Subscription
 }
 
 // MachinePreviewRuntime owns one authenticated machine carrier source and
@@ -125,6 +129,7 @@ func NewMachinePreviewRuntime(config MachinePreviewRuntimeConfig) (*MachinePrevi
 		_ = sessions.Close(context.WithoutCancel(config.RunContext))
 		return nil, errors.Join(ErrMachinePreviewRuntimeInvalid, err)
 	}
+	discovery.events = config.PrivateRouteEvents
 	if err = privateAccess.configureAccessor(discovery, sessions); err != nil {
 		_ = sessions.Close(context.WithoutCancel(config.RunContext))
 		return nil, errors.Join(ErrMachinePreviewRuntimeInvalid, err)

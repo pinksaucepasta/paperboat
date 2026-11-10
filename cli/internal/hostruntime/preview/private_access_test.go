@@ -20,6 +20,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents/eventstest"
 	"github.com/pinksaucepasta/paperboat/internal/privatepreviewproxy"
 )
 
@@ -603,6 +605,79 @@ func TestRoutesSnapshotIsSharedByEverySessionForASecond(t *testing.T) {
 	if _, err := client.snapshot(t.Context()); err != nil || requests.Load() != 2 {
 		t.Fatalf("a check a second later made %d requests in total (err %v), want a fresh snapshot", requests.Load(), err)
 	}
+}
+
+// With the machine-events wait healthy, open private TCP sessions do not ask the server for their routes
+// every second: the snapshot is refetched only when the private_routes topic moves (F21-18).
+func TestPrivateRoutesAreRefetchedOnATopicMoveNotEverySecond(t *testing.T) {
+	now := time.Now().UTC()
+	admission := validAccessorAdmission(t, now, "private_tcp")
+	admission.Hostname = ""
+	var requests atomic.Int32
+	var withdrawn atomic.Bool
+	transport := privateAccessRoundTripper(func(request *http.Request) (*http.Response, error) {
+		requests.Add(1)
+		admissions := []accessorAdmission{admission}
+		if withdrawn.Load() {
+			admissions = []accessorAdmission{} // complete and empty: every route withdrawn
+		}
+		body, _ := json.Marshal(accessorSnapshot{Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_carrier_snapshot", Complete: true, Admissions: admissions})
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}, Request: request}, nil
+	})
+	client, err := newAccessorDiscoveryClient("https://api.example.test", privateAccessTestAuth{}, transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub, subs, plane := eventstest.Start(t, time.Hour, machineevents.TopicPrivateRoutes)
+	client.events = subs[0]
+	for deadline := time.Now().Add(5 * time.Second); !hub.Healthy() && time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+	}
+	if !hub.Healthy() {
+		t.Fatal("the machine-events wait never became healthy")
+	}
+	// Subscribing wakes the subscriber once so it refreshes right away: that is the first fetch.
+	clock := now
+	client.now = func() time.Time { return clock }
+	if got, err := client.snapshot(t.Context()); err != nil || len(got) != 1 || requests.Load() != 1 {
+		t.Fatalf("first snapshot: %d admissions, %d requests, err %v", len(got), requests.Load(), err)
+	}
+	// Twenty minutes of the sessions' own once-a-second check without a topic move: no further request
+	// until the safety refetch, which is one a minute at most (so at most 20, not 1200).
+	for second := 0; second < 20*60; second++ {
+		clock = clock.Add(time.Second)
+		if _, err := client.snapshot(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := requests.Load(); got > 22 {
+		t.Fatalf("%d requests in 20 minutes of per-second checks, want at most the one-a-minute safety refetch (<= 22)", got)
+	}
+	// Within a minute of a fetch, and with no move, the check is free.
+	before := requests.Load()
+	for second := 0; second < 30; second++ {
+		clock = clock.Add(time.Second)
+		if _, err := client.snapshot(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if requests.Load() > before+1 {
+		t.Fatalf("30 per-second checks made %d requests without a topic move", requests.Load()-before)
+	}
+	// A move of the topic is refetched at once, and a withdrawn route is seen.
+	settled := requests.Load()
+	withdrawn.Store(true)
+	plane.Publish(machineevents.TopicPrivateRoutes)
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if got, err := client.snapshot(t.Context()); err != nil {
+			t.Fatal(err)
+		} else if len(got) == 0 {
+			if requests.Load() != settled+1 {
+				t.Fatalf("the withdrawal took %d requests, want 1", requests.Load()-settled)
+			}
+			return
+		}
+	}
+	t.Fatal("a private_routes move did not refetch the routes within 5 s")
 }
 
 // privateTestLeaseAdmission is a private preview lease at generation 3 and the carrier admission
