@@ -293,13 +293,18 @@ func installControlURL(selected, configured string) string {
 // KeepInstallFailureOwner adds the inventory's failure to a failed install without making it a second owner: the
 // inventory is privileged too, so it fails for the same reason (a non-admin user has no sudo) and a plain join of
 // the two left no sole owner, which turned the authored refusal (F1-07) into "could not finish the command". The
-// authored failure keeps the prose; the inventory failure stays among its inspectable causes.
+// authored failure keeps the prose, extended by the inventory's own authored sentence when it has one (an older
+// service that cannot run the inventory names its version); the inventory failure stays among the inspectable causes.
 func KeepInstallFailureOwner(installErr, inventoryErr error) error {
 	if inventoryErr == nil {
 		return installErr
 	}
 	if failure, ok := installErr.(*CommandFailure); ok {
-		return &CommandFailure{message: failure.message, causes: append(append([]error(nil), failure.causes...), inventoryErr)}
+		message := failure.message
+		if authored, ok := inventoryErr.(*CommandFailure); ok && authored.message != "" {
+			message += "\n" + authored.message
+		}
+		return &CommandFailure{message: message, causes: append(append([]error(nil), failure.causes...), inventoryErr)}
 	}
 	return errors.Join(installErr, inventoryErr)
 }

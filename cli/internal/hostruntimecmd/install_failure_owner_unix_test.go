@@ -4,6 +4,7 @@ package hostruntimecmd
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -17,6 +18,11 @@ func TestKeepInstallFailureOwnerKeepsTheAuthoredFailureAsTheOnlyOwner(t *testing
 	}
 	if !errors.Is(got, inventoryErr) {
 		t.Fatal("the inventory failure was dropped from the causes")
+	}
+	// an inventory that has its own authored sentence adds it, so "older service" stays visible
+	named := KeepInstallFailureOwner(authored, runtimeFailure("Paperboat dev-x cannot run the install inventory", errors.New("exit 64")))
+	if !strings.Contains(named.Error(), authored.Error()) || !strings.Contains(named.Error(), "cannot run the install inventory") {
+		t.Fatalf("an authored inventory sentence was lost: %q", named.Error())
 	}
 	if KeepInstallFailureOwner(authored, nil) != authored {
 		t.Fatal("a successful inventory changed the failure")
