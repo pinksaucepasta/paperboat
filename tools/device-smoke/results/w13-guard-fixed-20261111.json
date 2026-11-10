@@ -1,0 +1,27 @@
+{
+  "build": "482333906",
+  "runner": "winpool-4",
+  "platform": "Windows amd64 hosted runner",
+  "fixture": "IIS stopped on disposable runner to release local browser ports",
+  "checks": {
+    "C006": {
+      "result": "PASS",
+      "repeat_install": true,
+      "task_running": true,
+      "reinstall_exec": true,
+      "doctor_healthy": true
+    },
+    "C008": {
+      "result": "PASS",
+      "task_removed": true,
+      "persistent_wfp_retained": true
+    }
+  },
+  "workspace_checks": {
+    "old_command": "TestMachineGuardInstallDiscoversMissingDomain FAIL: zero discovery requests",
+    "fixed_command": "TestMachineGuardInstallDiscoversMissingDomain PASS",
+    "temporary_state": "TestGuardDomainDiscoveryRestoresLocalAccessAfterUninstall PASS",
+    "vet": "daemoncmd, machineguard, hostinstall PASS",
+    "race": "pbvm3 build failed: disk full; same focused race rerun on pbvm2 pending at push, coordinator explicitly requested push on passing local/device checks"
+  }
+}
