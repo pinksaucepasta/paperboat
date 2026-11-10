@@ -287,7 +287,8 @@ func (a peerApplication) authorizationHeader(target *resolver.TerminalTarget, co
 	}
 	if err == nil {
 		header.Resumable = consumer != "config_compare"
-		if consumer == "ssh" {
+		// A name the header cannot carry (Windows DOMAIN\user) is left out: the host then leaves the login to sshd.
+		if consumer == "ssh" && streamauth.ValidLoginUser(target.LoginUser) {
 			header.LoginUser = target.LoginUser
 		}
 		if consumer == "config_compare" {

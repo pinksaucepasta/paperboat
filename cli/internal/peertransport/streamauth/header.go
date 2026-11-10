@@ -99,7 +99,7 @@ func (h Header) Validate(now time.Time) error {
 	if len(h.UsageSessionID) > 128 || strings.ContainsAny(h.UsageSessionID, "\x00\r\n") || h.UsageSessionID != "" && h.Consumer != "config_compare" {
 		return ErrInvalid
 	}
-	if h.LoginUser != "" && (h.Consumer != "ssh" || !validLoginUser(h.LoginUser)) {
+	if h.LoginUser != "" && (h.Consumer != "ssh" || !ValidLoginUser(h.LoginUser)) {
 		return ErrInvalid
 	}
 	private := h.Consumer == "private_http" || h.Consumer == "private_tcp" || h.Consumer == "inspector"
@@ -148,8 +148,8 @@ func Parse(encoded []byte, now time.Time) (Header, error) {
 	return value, nil
 }
 
-// validLoginUser is a portable account name: what OpenSSH accepts after %r, never an option or a path.
-func validLoginUser(user string) bool {
+// ValidLoginUser is a portable account name: what OpenSSH accepts after %r, never an option or a path.
+func ValidLoginUser(user string) bool {
 	if user == "" || len(user) > 64 || user[0] == '-' || user[0] == '.' {
 		return false
 	}
