@@ -425,8 +425,8 @@ def sleep_wake(a, sessions):
         except RuntimeError:
             row('N3 wake: keys typed during sleep arrive', False, 'not echoed within 120 s')
         c2.settle(2)
-        count = bytes(c2.output).count(b'PB_KEY_' + key.encode())
-        row('N3 wake: those keys ran exactly once', count == 1, f'{count} times')
+        runs = bytes(c2.output).count(b'PB_KEY_' + key.encode())
+        row('N3 wake: those keys ran exactly once', runs == 1, f'{runs} times')
         ok, why = exactly_once(bytes(c1.output), b'SW', 1, 90)
         row('N3 wake: output made during sleep is replayed exactly once', ok, why)
     finally:
@@ -555,8 +555,8 @@ def black_hole(a, sessions):
         out = bytes(c1.output)
         ok, why = exactly_once(out, b'BH', 1, 90)
         row('N13 black hole 60 s: output during the gap arrives exactly once', ok, why)
-        count = out.count(b'PB_KEY_' + key.encode())
-        row('N13 black hole 60 s: keys typed meanwhile ran exactly once', count == 1, f'{count} times')
+        runs = out.count(b'PB_KEY_' + key.encode())
+        row('N13 black hole 60 s: keys typed meanwhile ran exactly once', runs == 1, f'{runs} times')
     finally:
         c1.close()
 
@@ -647,8 +647,8 @@ def daemon_restart_typing(a, sessions):
         out = bytes(c1.output)
         ok, why = exactly_once(out, b'DR', 1, 60)
         row('N12 daemon restart: output arrives exactly once', ok, why)
-        count = out.count(b'PB_DKEY_' + key.encode())
-        row('N12 daemon restart: keys typed during it ran exactly once', count == 1, f'{count} times')
+        runs = out.count(b'PB_DKEY_' + key.encode())
+        row('N12 daemon restart: keys typed during it ran exactly once', runs == 1, f'{runs} times')
         probe = uuid.uuid4().hex
         c1.send(say_mark('PB_SAME_', probe) + '\r')
         try:
