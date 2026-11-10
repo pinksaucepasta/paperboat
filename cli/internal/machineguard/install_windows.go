@@ -170,7 +170,7 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 			candidateTaskCreated = true
 		}
 	}
-	if err := waitGuardReady(ctx, guardReadyTimeout, func(probeCtx context.Context) error {
+	if err := startGuardWithRetry(ctx, func(probeCtx context.Context) error {
 		client, connectErr := Connect(probeCtx, DefaultSocket)
 		if connectErr != nil {
 			return connectErr
@@ -180,6 +180,13 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 			return closeErr
 		}
 		return readyErr
+	}, func(restartCtx context.Context) error {
+		// Not running (it already exited) is fine for /End; the /Run must work.
+		_ = exec.CommandContext(restartCtx, "schtasks.exe", "/End", "/TN", windowsGuardTask).Run()
+		if output, err := exec.CommandContext(restartCtx, "schtasks.exe", "/Run", "/TN", windowsGuardTask).CombinedOutput(); err != nil {
+			return fmt.Errorf("%w: %s", err, bytes.TrimSpace(output))
+		}
+		return nil
 	}); err != nil {
 		return err
 	}

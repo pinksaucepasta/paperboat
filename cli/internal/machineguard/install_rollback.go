@@ -116,7 +116,7 @@ func (r *guardFileRollback) restore() error {
 			}
 			item.backup = ""
 		} else if current != nil {
-			if err := os.Remove(item.path); err != nil {
+			if err := removeGuardImage(item.path, 10*time.Second); err != nil {
 				return err
 			}
 		}
