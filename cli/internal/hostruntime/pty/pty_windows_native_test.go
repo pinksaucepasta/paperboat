@@ -354,6 +354,13 @@ func TestNativeConPTYInterruptWithAPowerShellShellTerminatesNothing(t *testing.T
 // is the interrupt there: Interrupt reports true and the running ping stops (it prints Control-C), with the shell alive. This is
 // the proof the raw-mode check did not break interrupting a running command in PowerShell.
 func TestNativeConPTYInterruptStopsAPingRunInPowerShell(t *testing.T) {
+	// The enrolled host is started in its own process group, so it ignores Ctrl+C and its children inherit that
+	// (measured on the runner: flag 1 on session-owner, cmd, powershell, ping). Start from the same state: the
+	// adapter must clear it for the session child, or no ETX ever reaches ping.
+	if err := setIgnoreCtrlC(true); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = setIgnoreCtrlC(false) })
 	process, output := startNativePTY(t, nativePowerShell(t), []string{"-NoLogo", "-NoProfile"})
 	defer process.CloseIO()
 	if _, err := process.Write([]byte("ping -t 127.0.0.1\r\n")); err != nil {

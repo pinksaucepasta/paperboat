@@ -177,6 +177,11 @@ func (a *Adapter) Start(command Command) (*Process, error) {
 	// ConPTY sessions need terminal ETX input to reach the foreground command,
 	// so process-tree ownership comes from the Job Object instead.
 	flags := uint32(windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_SUSPENDED | windows.EXTENDED_STARTUPINFO_PRESENT)
+	// The host runs in its own process group (service_entry_windows.go), which marks it as ignoring Ctrl+C, and the
+	// flag is inherited by every child: a shell started here would ignore the CTRL_C_EVENT conhost makes of a typed
+	// ETX, so only the cmd.exe fallback kill could stop a running command, and it took PowerShell down with it
+	// (measured: spark/ctrlc-flag-product.md). Clear it for the child; a failure keeps the old behaviour.
+	_ = setIgnoreCtrlC(false)
 	// user-console: the user's ConPTY session child needs its console attached to the pseudoconsole.
 	if err := windows.CreateProcess(nil, &commandLine[0], nil, nil, false, flags, environment, workingDirectory, &startup.StartupInfo, &processInfo); err != nil {
 		windows.Close(job)
