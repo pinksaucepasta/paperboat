@@ -177,6 +177,7 @@ func (a *Adapter) Start(command Command) (*Process, error) {
 	// ConPTY sessions need terminal ETX input to reach the foreground command,
 	// so process-tree ownership comes from the Job Object instead.
 	flags := uint32(windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_SUSPENDED | windows.EXTENDED_STARTUPINFO_PRESENT)
+	// user-console: the user's ConPTY session child needs its console attached to the pseudoconsole.
 	if err := windows.CreateProcess(nil, &commandLine[0], nil, nil, false, flags, environment, workingDirectory, &startup.StartupInfo, &processInfo); err != nil {
 		windows.Close(job)
 		windows.ClosePseudoConsole(console)

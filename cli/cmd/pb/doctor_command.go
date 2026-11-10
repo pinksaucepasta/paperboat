@@ -877,6 +877,7 @@ func localConfigServiceState() string {
 	if err != nil {
 		return "installed_unknown"
 	}
+	// other-os: macOS only.
 	if err := exec.CommandContext(ctx, "launchctl", "print", service.UserAgentTarget(uid, service.ConfigLabel)).Run(); err == nil {
 		return "active"
 	}

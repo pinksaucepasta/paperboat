@@ -110,7 +110,7 @@ func runOpenSSHProbe(ctx context.Context, executable string, arguments ...string
 }
 
 func runOpenSSHProbeEnv(ctx context.Context, environment []string, executable string, arguments ...string) (string, error) {
-	// user-console: runOpenSSHProbeCommand hides it on Windows.
+	// hidden: runOpenSSHProbeCommand configures it on Windows.
 	command := exec.CommandContext(ctx, executable, arguments...)
 	if environment != nil {
 		command.Env = append([]string(nil), environment...)

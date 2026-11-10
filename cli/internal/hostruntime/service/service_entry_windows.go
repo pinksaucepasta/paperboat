@@ -612,6 +612,7 @@ func launchEnrolledProcess(config ServiceEntryConfig) (result *enrolledProcess, 
 	// particular, a fast process could otherwise create grandchildren between
 	// CreateProcessAsUser and AssignProcessToJobObject.
 	flags := enrolledProcessCreationFlags()
+	// hidden: flags above set CREATE_NO_WINDOW and STARTF_USESHOWWINDOW/SW_HIDE.
 	if err := windows.CreateProcessAsUser(primary, nil, &command[0], nil, nil, true, flags, &environment[0], workingDirectoryUTF16, &startup.StartupInfo, &processInfo); err != nil {
 		return nil, err
 	}

@@ -1446,6 +1446,7 @@ func createProcessForRun(executable, parameters, directory string) (windows.Hand
 	// would look detached to the caller but would die as soon as the session
 	// closes.
 	flags := createProcessFlagsForRun()
+	// hidden: flags above set CREATE_NO_WINDOW and STARTF_USESHOWWINDOW/SW_HIDE.
 	if err := windows.CreateProcess(nil, commandLine, nil, nil, false, flags, nil, workingDirectory, &startup, &process); err != nil {
 		return 0, err
 	}

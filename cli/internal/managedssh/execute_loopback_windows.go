@@ -21,7 +21,7 @@ const (
 // LoopbackOpenSSHExecutor runs Windows OpenSSH against a one-shot owner-bound
 // loopback TCP proxy. This avoids the native ProxyCommand pipe shutdown cycle,
 // while retaining OpenSSH's inherited console and exact exit status.
-// user-console: terminal-only like OpenSSHExecutor; the interactive ssh needs the inherited console.
+// Terminal-only like OpenSSHExecutor; the interactive ssh needs the inherited console.
 type LoopbackOpenSSHExecutor struct{}
 
 func (LoopbackOpenSSHExecutor) Execute(ctx context.Context, executable string, arguments func(port uint16) []string, environment []string, stream LoopbackSSHStream) error {
@@ -41,6 +41,7 @@ func (LoopbackOpenSSHExecutor) Execute(ctx context.Context, executable string, a
 		if !validProcessValues(values) {
 			return nil, ErrOpenSSHExecution
 		}
+		// user-console: pb ssh in the user's terminal.
 		command := exec.Command(path, values...)
 		command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
 		command.SysProcAttr = &windows.SysProcAttr{CreationFlags: windows.CREATE_NEW_PROCESS_GROUP}

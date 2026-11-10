@@ -12,7 +12,7 @@ import (
 
 var ErrOpenSSHExecution = errors.New("OpenSSH execution request is invalid")
 
-// user-console: OpenSSHExecutor is for the user's own terminal (pb ssh) and keeps the inherited console;
+// OpenSSHExecutor is for the user's own terminal (pb ssh) and keeps the inherited console;
 // a background caller needs its own hidden constructor.
 type OpenSSHExecutor struct{}
 
@@ -29,6 +29,7 @@ func (OpenSSHExecutor) Execute(ctx context.Context, executable string, arguments
 	if err != nil {
 		return NativeLaunchError{Err: errors.Join(ErrOpenSSHExecution, err)}
 	}
+	// user-console: pb ssh in the user's terminal.
 	command := exec.Command(path, arguments...)
 	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if environment != nil {
