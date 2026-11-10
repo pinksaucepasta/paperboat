@@ -204,11 +204,16 @@ def applications(terminal, monitor=None):
     return prompt
 
 
+# pb draws its bar on row 24 and reserves it with a scroll region. A Windows client's ConPTY swallows the region
+# escapes (\x1b[1;23r, \x1b[s, \x1b[u: zero bytes arrive), so there the bar's own draw is what is observable.
+STATUS_BAR_DRAWN = b'\x1b[24;1H' if winhost.device() else b'\x1b[1;23r'
+
+
 def unix_phases(terminal, check, monitor, entry, cwd, status_bar):
     """Every phase against a Unix target (sh, stty, vim, less, htop); returns the phases that ran."""
     terminal.expect(b'\x1b[?2004h')
     if status_bar == 'on':
-        terminal.expect(b'\x1b[1;23r')
+        terminal.expect(STATUS_BAR_DRAWN)
     terminal.expect(terminal.marker('READY', 'stty -echo; '))
     if entry == 'new':
         expected = shlex.quote(str(Path(cwd).resolve()))
@@ -284,7 +289,7 @@ def windows_phases(terminal, check, status_bar):
         return token
 
     if status_bar == 'on':
-        terminal.expect(b'\x1b[1;23r')
+        terminal.expect(STATUS_BAR_DRAWN)
     terminal.expect(say('READY'))
     terminal.send(windows_target.typed_marker('PB_ARITH_', '+(6*7)') + '\r')
     terminal.expect('PB_ARITH_42')
