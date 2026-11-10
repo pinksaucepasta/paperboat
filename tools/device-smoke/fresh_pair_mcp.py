@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Pair two disposable machines, run MCP acceptance, revoke their exact IDs."""
+"""Pair two disposable machines, run MCP acceptance, revoke their exact IDs.
+
+With --windows-target CONTAINER the source is the paired Windows device (PB_SMOKE_WINDOWS_PB, see winhost.py): `pb mcp`
+runs as pb.exe there, reached over ssh by mcp_exec.py, and the target is that already paired container of the same
+account on --host. Nothing is paired or revoked; --probe is an mcp-smoke built for this controller.
+"""
 import argparse
 import json
 import os
@@ -12,6 +17,7 @@ import tempfile
 import uuid
 
 from pairing_lifecycle import command_diagnostic
+import winhost
 
 
 HERE = Path(__file__).resolve().parent
@@ -125,6 +131,39 @@ def run_checks(args, run_id, target, source):
     return rows
 
 
+# The send fixture of mcp-smoke's prepare(), made on the device: an allowed file and a symlink out of the allowed directory.
+FIXTURE = ("$a=Join-Path $req.root 'allowed';$o=Join-Path $req.root 'outside'\n"
+           "[void](New-Item -ItemType Directory -Force -Path $a,$o)\n"
+           "[IO.File]::WriteAllText((Join-Path $a $req.name),'mcp-fixture')\n"
+           "[IO.File]::WriteAllText((Join-Path $o 'outside.bin'),'outside-root')\n"
+           "[void](New-Item -ItemType SymbolicLink -Path (Join-Path $a 'escape.bin') -Target (Join-Path $o 'outside.bin'))")
+
+
+def run_windows(args, run_id):
+    device = winhost.device()
+    source_state = json.loads((device.runtime_dir() / 'machine-registration.json').read_text())
+    target_state = registration(args.host, args.windows_target)
+    if target_state['account_id'] != source_state['account_id']:
+        raise RuntimeError('source and target were paired to different accounts')
+    waited = winhost.pb_text(winhost.pb_path(), ['--workspace', 'personal', 'wait', target_state['machine_id'], '--for',
+                                                 'transport', '--timeout', '60s', '--json'], timeout=75)
+    if waited.returncode:
+        raise RuntimeError('the device has no transport to the target')
+    with device.temp_dir(run_id) as root:
+        device.ps('make the MCP send fixture', FIXTURE, root=str(root), name=run_id + '.bin')
+        environment = dict(os.environ, MCP_SMOKE_EXEC=str(HERE / 'mcp_exec.py'), MCP_SMOKE_SOURCE_PB=device.pb_exe,
+                           MCP_SMOKE_SOURCE_ROOT=str(root).replace('\\', '/'), MCP_EXEC_HOST=args.host,
+                           MCP_EXEC_TARGET=args.windows_target)
+        done = subprocess.run([args.probe, '--source-container', run_id + '-c', '--target-container', run_id + '-t',
+                               '--source-id', source_state['machine_id'], '--target-id', target_state['machine_id'],
+                               '--target-inbox', target_state['inbox_path'], '--run-id', run_id],
+                              env=environment, capture_output=True, text=True, timeout=420)
+    rows = [json.loads(line) for line in done.stdout.splitlines() if line.startswith('{')]
+    if done.returncode:
+        raise CheckFailure(rows)
+    return rows
+
+
 class CheckFailure(RuntimeError):
     def __init__(self, rows):
         self.rows = rows
@@ -139,19 +178,28 @@ class RemoteFailure(RuntimeError):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ['host', 'binary', 'probe', 'build-commit', 'server-version', 'cleanup-host', 'output']:
+    for name in ['host', 'probe', 'build-commit', 'server-version', 'output']:
         parser.add_argument('--' + name, required=True)
+    parser.add_argument('--windows-target', help='source is the Windows device; target is this paired container on --host')
+    for name in ['binary', 'cleanup-host']:
+        parser.add_argument('--' + name)
     args = parser.parse_args()
+    if not args.windows_target and not (args.binary and args.cleanup_host):
+        parser.error('--binary and --cleanup-host are required to pair fresh containers')
     if not re.fullmatch(r'[0-9a-f]{40}', args.build_commit):
         parser.error('--build-commit must be the complete source commit')
     run_id = 'lanesdk' + uuid.uuid4().hex[:16]
     target, source = run_id + '-t', run_id + '-c'
     result = {'check': 'fresh-pair-mcp', 'build_commit': args.build_commit,
               'server_version': args.server_version, 'run_id': run_id, 'rows': []}
-    accounts = {registration(args.host)['account_id']}
+    fresh = [] if args.windows_target else [target, source]
+    accounts = {registration(args.host)['account_id']} if fresh else set()
     try:
-        setup(args, run_id, [target, source])
-        result['rows'] = run_checks(args, run_id, target, source)
+        if fresh:
+            setup(args, run_id, fresh)
+            result['rows'] = run_checks(args, run_id, target, source)
+        else:
+            result['rows'] = run_windows(args, run_id)
     except CheckFailure as error:
         result['rows'] = error.rows
         result['failure'] = str(error)
@@ -160,8 +208,8 @@ def main():
         if getattr(error, 'diagnostic_path', None):
             result['diagnostic_path'] = error.diagnostic_path
     finally:
-        result['cleanup'] = cleanup(args, run_id, [target, source], accounts)
-    if len(result['rows']) == 4 and len(result['cleanup']['revoked_ids']) != 2:
+        result['cleanup'] = cleanup(args, run_id, fresh, accounts) if fresh else {'revoked_ids': [], 'failures': []}
+    if len(result['rows']) == 4 and len(result['cleanup']['revoked_ids']) != len(fresh):
         result['cleanup']['failures'].append('both fresh machine IDs were not revoked')
     result['status'] = ('PASS' if not result.get('failure') and
                         not result['cleanup']['failures'] and len(result['rows']) == 4 else 'FAIL')

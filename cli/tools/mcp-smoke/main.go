@@ -45,6 +45,23 @@ func (s *suite) docker(ctx context.Context, container string, args ...string) *e
 	return exec.CommandContext(ctx, "sudo", append(command, args...)...)
 }
 
+// sourcePB and sourceRoot are pb and the send fixture's directory on the source. MCP_SMOKE_SOURCE_PB and
+// MCP_SMOKE_SOURCE_ROOT name them for a source that is not a container (the Windows device, which has no
+// python3: the caller makes the fixture in that directory).
+func (s *suite) sourcePB() string {
+	if pb := os.Getenv("MCP_SMOKE_SOURCE_PB"); pb != "" {
+		return pb
+	}
+	return "/home/pbt/.local/bin/pb"
+}
+
+func (s *suite) sourceRoot() string {
+	if root := os.Getenv("MCP_SMOKE_SOURCE_ROOT"); root != "" {
+		return root
+	}
+	return "/tmp/" + s.run
+}
+
 func (s *suite) python(container, code string) string {
 	ctx, cancel := context.WithTimeout(s.ctx, 15*time.Second)
 	defer cancel()
@@ -55,7 +72,7 @@ func (s *suite) python(container, code string) string {
 }
 
 func (s *suite) open() *mcp.ClientSession {
-	command := s.docker(s.ctx, s.source, "/home/pbt/.local/bin/pb", "--workspace", "personal", "mcp", "--allow-send-dir", "/tmp/"+s.run+"/allowed")
+	command := s.docker(s.ctx, s.source, s.sourcePB(), "--workspace", "personal", "mcp", "--allow-send-dir", s.sourceRoot()+"/allowed")
 	command.Stderr = io.Discard
 	client := mcp.NewClient(&mcp.Implementation{Name: "paperboat-device-smoke", Version: "1"}, nil)
 	session, err := client.Connect(s.ctx, &mcp.CommandTransport{Command: command}, nil)
@@ -205,14 +222,17 @@ func (s *suite) protocol() map[string]any {
 }
 
 func (s *suite) prepare() {
-	root, name := "/tmp/"+s.run, s.run+".bin"
+	if os.Getenv("MCP_SMOKE_SOURCE_ROOT") != "" {
+		return
+	}
+	root, name := s.sourceRoot(), s.run+".bin"
 	code := "from pathlib import Path\nimport os\nos.umask(0o077)\np=Path(" + strconv.Quote(root) + ")\n(p/'allowed').mkdir(parents=True)\n(p/'outside').mkdir()\n"
 	code += "(p/'allowed'/" + strconv.Quote(name) + ").write_bytes(b'mcp-fixture')\n(p/'outside'/'outside.bin').write_bytes(b'outside-root')\n(p/'allowed'/'escape.bin').symlink_to('../outside/outside.bin')"
 	s.python(s.source, code)
 }
 
 func (s *suite) send() map[string]any {
-	root, name := "/tmp/"+s.run, s.run+".bin"
+	root, name := s.sourceRoot(), s.run+".bin"
 	session := s.open()
 	defer session.Close()
 	result, sent := call[mcpserver.SendResult](s.ctx, session, "send_file", mcpserver.SendArgs{Machine: s.targetID, Path: root + "/allowed/" + name, TimeoutSeconds: 90})
