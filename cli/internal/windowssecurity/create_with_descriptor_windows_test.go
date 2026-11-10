@@ -44,3 +44,39 @@ func TestProtectedHandleDACLMatchesADescriptorWithAnOwnerPrefix(t *testing.T) {
 		t.Fatalf("the DACL created from %s does not match it", descriptor)
 	}
 }
+
+// The enrolled user's entry is checked by services running as LocalSystem too: when that user is the built-in
+// Administrator, the API's "LA" must match its SID whoever asks (pb install failed on such a machine: the daemon
+// service refused its own install state).
+func TestProtectedHandleDACLMatchesTheBuiltInAdministratorForAnyCaller(t *testing.T) {
+	computer, err := windows.ComputerName()
+	if err != nil {
+		t.Fatal(err)
+	}
+	machine, _, _, err := windows.LookupSID("", computer)
+	if err != nil {
+		t.Skipf("no machine SID: %v", err)
+	}
+	descriptor := "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;" + machine.String() + "-500)"
+	sd, err := windows.SecurityDescriptorFromString(descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name, err := windows.UTF16PtrFromString(filepath.Join(t.TempDir(), "f"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	attributes := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: sd}
+	handle, err := windows.CreateFile(name, windows.GENERIC_WRITE|windows.READ_CONTROL, 0, &attributes, windows.CREATE_NEW, windows.FILE_ATTRIBUTE_NORMAL, 0)
+	runtime.KeepAlive(sd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(handle)
+	if !ProtectedHandleDACLMatches(handle, descriptor) {
+		t.Fatalf("the DACL created from %s does not match it", descriptor)
+	}
+	if ProtectedHandleDACLMatches(handle, "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;"+machine.String()+"-501)") {
+		t.Fatal("another account's entry matched the built-in Administrator's")
+	}
+}

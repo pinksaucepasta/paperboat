@@ -17,10 +17,9 @@ func OwnerFullControlDirectoryDACL(ownerSID string) string {
 }
 
 // ProtectedDACLMatches compares a protected file DACL with the requested
-// descriptor. Windows may serialize the current elevated administrator SID as
-// the well-known LA alias, so compare that canonical representation too. LA
-// is accepted only for an elevated token; non-admin users still require their
-// exact SID.
+// descriptor. Windows serializes the built-in Administrator's SID as the
+// well-known LA alias, so the expected descriptor is compared in the API's
+// own spelling: the same SIDs, written the same way.
 func ProtectedDACLMatches(path, expected string) bool {
 	matches, err := CheckProtectedDACLMatches(path, expected)
 	return err == nil && matches
@@ -67,7 +66,7 @@ func CheckProtectedHandleDACLMatches(handle windows.Handle, expected string) (bo
 	return protectedDACLMatches(got, expected)
 }
 
-func protectedDACLMatches(got *windows.SECURITY_DESCRIPTOR, expected string) (matches bool, resultErr error) {
+func protectedDACLMatches(got *windows.SECURITY_DESCRIPTOR, expected string) (bool, error) {
 	control, _, err := got.Control()
 	if err != nil {
 		return false, err
@@ -86,24 +85,17 @@ func protectedDACLMatches(got *windows.SECURITY_DESCRIPTOR, expected string) (ma
 	if actual == expectedDACL {
 		return true, nil
 	}
-	token, err := windows.OpenCurrentProcessToken()
+	// The API writes some SIDs as aliases (the built-in Administrator, RID 500, is "LA"), whoever asks: a service
+	// running as LocalSystem checks the enrolled user's entry too. Spell the expected descriptor the same way.
+	want, err := windows.SecurityDescriptorFromString(expected)
 	if err != nil {
 		return false, err
 	}
-	defer func() { resultErr = errors.Join(resultErr, token.Close()) }()
-	user, err := token.GetTokenUser()
+	canonical, err := descriptorSDDL(want)
 	if err != nil {
 		return false, err
 	}
-	if user == nil || user.User.Sid == nil {
-		return false, nil
-	}
-	if !strings.HasSuffix(user.User.Sid.String(), "-500") {
-		return false, nil
-	}
-	// The built-in Administrator (RID 500) is written "LA" by the API; an expected string with an owner prefix names the
-	// SID more than once, and every occurrence must be rewritten.
-	return actual == dacl(strings.ReplaceAll(expected, user.User.Sid.String(), "LA")), nil
+	return actual == dacl(canonical), nil
 }
 
 // x/sys's SECURITY_DESCRIPTOR.String discards this native conversion error.
