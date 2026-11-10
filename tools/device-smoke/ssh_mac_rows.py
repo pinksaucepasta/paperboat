@@ -434,26 +434,11 @@ check no-x11-pb "display=<>" env DISPLAY=:0 $PB ssh $A -- "$SHOW_DISPLAY"
 echo "RESULT ok:[$ok ] fail:[$fail ]"'''
 
 
-# Microsoft's sshd (stock and managed alike) cannot forward an agent: session.c hardcodes /tmp/ssh-XXX, mkdtemp fails and, with the
-# directory made, the AF_UNIX bind is refused (spark/w6-f513-agent.md). "As the machine's OpenSSH allows" then means the managed
-# sshd must behave as the stock one: the request reaches the forwarding code (not disabled by Paperboat's config, which would not
-# print the mkdtemp line) and X11 stays off.
-WINDOWS_AGENT = 'check agent-forward-plain "Agent forwarding disabled: mkdtemp() failed\\|ED25519" ssh -v -A $H "$AGENT_LIST"'
-
-
-def forwarding_script(windows):
-    if not windows:
-        return FORWARDING
-    old = 'check agent-forward-plain ED25519 ssh -A $H "$AGENT_LIST"'
-    assert old in FORWARDING
-    return FORWARDING.replace(old, WINDOWS_AGENT)
-
-
 def forwarding():
     row = 'F5-13 forwarding'
     if not check_warm(row):
         return
-    out = cl(prelude() + forwarding_script(WIN is not None), 600)
+    out = cl(prelude() + FORWARDING, 600)
     want = 'RESULT ok:[ port-forward-plain agent-forward-plain no-x11-plain no-x11-pb ] fail:[ ]'
     report(row, 'PASS' if want in out else 'FAIL', ' '.join(l for l in out.splitlines() if l.startswith('RESULT')) or out[-300:].replace('\n', ' '))
 
