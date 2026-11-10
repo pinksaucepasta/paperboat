@@ -135,14 +135,9 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 	var sshdDone atomic.Bool
 	// clientEOF / sshdEOF close when that direction's copy ended with a plain EOF: the peer finished sending.
 	clientEOF, sshdEOF := make(chan struct{}), make(chan struct{})
-	// fromSSHD counts what sshd has sent; clientLeftAt is that count when the client's EOF arrived. A reset is a
-	// normal end only if sshd sent nothing after the client left: a client that went away while sshd was still
-	// sending (a download in flight) is a session cut short.
-	var fromSSHD, clientLeftAt atomic.Int64
 	go func() {
 		count, copyErr := io.Copy(sshd, stream)
 		if copyErr == nil {
-			clientLeftAt.Store(fromSSHD.Load())
 			close(clientEOF)
 		}
 		if sshdDone.Load() {
@@ -152,14 +147,14 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 		if half, ok := sshd.(interface{ CloseWrite() error }); ok {
 			copyErr = errors.Join(copyErr, closeWriteFailure(half.CloseWrite(), finished.Load()))
 		}
-		copyErr = excuseReset(ctx, copyErr, sshdEOF, func() bool { return true })
+		copyErr = excuseReset(ctx, copyErr, sshdEOF)
 		if copyErr != nil {
 			_ = finish()
 		}
 		results <- copyResult{direction: "to_sshd", bytes: count, err: copyErr}
 	}()
 	go func() {
-		count, copyErr := io.Copy(stream, countingReader{sshd, &fromSSHD})
+		count, copyErr := io.Copy(stream, sshd)
 		if copyErr == nil {
 			close(sshdEOF)
 		}
@@ -174,7 +169,7 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 				copyErr = waitClientLeft(ctx, closeErr, clientEOF)
 			}
 		}
-		copyErr = excuseReset(ctx, copyErr, clientEOF, func() bool { return fromSSHD.Load() == clientLeftAt.Load() })
+		copyErr = excuseReset(ctx, copyErr, clientEOF)
 		// Target EOF is terminal for an SSH connection. Some OpenSSH clients
 		// keep ProxyCommand input open until the proxy exits, so waiting for the
 		// opposite copier here deadlocks after a remote command has completed.
@@ -242,23 +237,14 @@ func normalizeBridgeError(err error) error {
 	return err
 }
 
-// countingReader counts the bytes read through it.
-type countingReader struct {
-	io.Reader
-	n *atomic.Int64
-}
-
-func (c countingReader) Read(p []byte) (int, error) {
-	n, err := c.Reader.Read(p)
-	c.n.Add(int64(n))
-	return n, err
-}
-
 // excuseReset turns a connection reset (Windows OpenSSH RST-closes after a normal end, see closeResets) into a clean
-// end only when the other direction already ended with EOF, i.e. the peer had finished sending, and consistent
-// reports that nothing was in flight after it did: a reset in the middle of a transfer stays a failure and is
-// audited as one.
-func excuseReset(ctx context.Context, err error, otherEOF <-chan struct{}, consistent func() bool) error {
+// end only when the other direction ends with an EOF, within resetGrace. What reaches the bridge is the whole SSH
+// transport (the ProxyCommand pipe or its native stream): an EOF on it means the SSH client closed its connection,
+// which it does once its session is over, and a stdin half-close inside the session never shows here (it is in the
+// encrypted channel). A client still waiting for data after the reset (a transfer cut short) never EOFs, so the reset
+// stays a failure and is audited as one. The bytes alone cannot tell a complete reply from a cut one, so no count of
+// them is used.
+func excuseReset(ctx context.Context, err error, otherEOF <-chan struct{}) error {
 	if err == nil || len(closeResets) == 0 || !managedSSHLeavesMatch(err, closeResets...) {
 		return err
 	}
@@ -266,9 +252,7 @@ func excuseReset(ctx context.Context, err error, otherEOF <-chan struct{}, consi
 	defer timer.Stop()
 	select {
 	case <-otherEOF:
-		if consistent() {
-			return nil
-		}
+		return nil
 	case <-timer.C:
 	case <-ctx.Done():
 	}
