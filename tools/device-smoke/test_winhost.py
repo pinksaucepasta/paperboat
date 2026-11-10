@@ -1825,6 +1825,9 @@ class RemainingFamilyPlumbing(unittest.TestCase):
         self.assertEqual('PASS', windows_checks.verdict(0, 'PASS F11-04 team-default-set - version 3\n{"x": {"ok": true}}\n'))
         self.assertEqual('FAIL', windows_checks.verdict(0, 'PASS a - b\nFAIL c - d\n'))
 
+    def test_completion_snippet_does_not_stop_on_cobras_stderr_directive_line(self):
+        self.assertLess(winhost.COMPLETE.index("$ErrorActionPreference='Continue'"), winhost.COMPLETE.index('TabExpansion2'))
+
     def test_pb_text_keeps_the_stdin_of_the_local_call(self):
         done = winhost.pb_text(sys.executable, ['-c', 'import sys;print(len(sys.stdin.read()))'], timeout=30, stdin=subprocess.DEVNULL)
         self.assertEqual('0\n', done.stdout)

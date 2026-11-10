@@ -156,6 +156,7 @@ FILES = ("@(Get-ChildItem -LiteralPath $req.dir -Filter $req.filter -File -Error
 # execution policy of the device may refuse a .ps1 file.
 COMPLETE = ("$env:PATH=(Split-Path -Parent $req.exe)+[IO.Path]::PathSeparator+$env:PATH\n"
             ". ([scriptblock]::Create([IO.File]::ReadAllText($req.path)))\n"
+            "$ErrorActionPreference='Continue'  # cobra's __complete always prints a directive line to stderr, which Stop would raise\n"
             "$r=TabExpansion2 $req.line $req.line.Length\n"
             "[Console]::Out.Write((@($r.CompletionMatches|ForEach-Object{$_.CompletionText.Trim()}) -join ','))")
 # The lines of the files of $req.dir matching $req.filter that match the regex $req.pattern, base64 of UTF-8.
