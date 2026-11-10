@@ -140,11 +140,12 @@ async function w15() {
 const screenText = (p) => p.evaluate(() => document.querySelector(".terminal-host")?.innerText ?? "")
 const sttyCols = async (p) => {
   const m = marker("size")
-  // `stty size` prints "rows cols"; PowerShell has no stty, so it prints the same shape from its window size.
+  // `stty size` prints "rows cols"; a Windows machine has no stty, and its session shell may be cmd.exe, so it
+  // asks PowerShell for the same shape from the window size.
   await type(
     p,
     process.env.MACHINE_SHELL === "powershell"
-      ? `$w=$Host.UI.RawUI.WindowSize; "${m}$($w.Height) $($w.Width)"`
+      ? `powershell -NoProfile -Command "$w=$Host.UI.RawUI.WindowSize;('{0}{1} {2}' -f '${m}',$w.Height,$w.Width)"`
       : `printf '${m}%s\\n' "$(stty size)"`,
   )
   const answer = new RegExp(`${m}(\\d+)[ \\u00a0](\\d+)`, "g")
