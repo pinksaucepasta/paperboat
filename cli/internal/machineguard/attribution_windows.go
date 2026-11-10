@@ -41,16 +41,16 @@ type tcpOwner struct {
 // connectionOwnerSID is the SID of the OS user that owns the client end of an accepted loopback TCP connection.
 // It fails closed: no single live owner, or a process that cannot be shown to be the one that bound it, is an error.
 func connectionOwnerSID(accepted net.Conn) (string, error) {
-	return attributeSID(accepted, lookupTCPOwners, processUserSID)
+	return attributeSID(accepted, lookupTCPOwners, processUserSID, false)
 }
 
-func attributeSID(accepted net.Conn, lookup func(socketTuple) ([]tcpOwner, error), user func(pid uint32, bound int64) (string, error)) (string, error) {
+func attributeSID(accepted net.Conn, lookup func(socketTuple) ([]tcpOwner, error), user func(pid uint32, bound int64) (string, error), live bool) (string, error) {
 	tuple, err := clientTuple(accepted)
 	if err != nil {
 		return "", err
 	}
 	var bound int64 // bind time of the row of the last answer; attributeOwner accepts only that answer
-	pid, err := attributeOwner(tuple, func(tuple socketTuple) ([]socketOwner, error) {
+	pid, err := attributeOwnerState(tuple, func(tuple socketTuple) ([]socketOwner, error) {
 		rows, err := lookup(tuple)
 		owners := make([]socketOwner, len(rows))
 		bound = 0
@@ -59,7 +59,7 @@ func attributeSID(accepted net.Conn, lookup func(socketTuple) ([]tcpOwner, error
 			bound = row.bound
 		}
 		return owners, err
-	})
+	}, live)
 	if err != nil {
 		return "", err
 	}
@@ -166,5 +166,8 @@ func processBoundConnection(created, bound int64) bool {
 	return bound != 0 && created <= bound
 }
 
-// ConnectionOwnerSID is connectionOwnerSID for callers outside the guard (the per-user preview proxy).
-func ConnectionOwnerSID(accepted net.Conn) (string, error) { return connectionOwnerSID(accepted) }
+// ConnectionOwnerSID is connectionOwnerSID for the per-user preview proxy, which serves a client that may already
+// have sent its request and half-closed (FIN_WAIT2 still names its user), like Linux's ConnectionOwnerUID.
+func ConnectionOwnerSID(accepted net.Conn) (string, error) {
+	return attributeSID(accepted, lookupTCPOwners, processUserSID, true)
+}

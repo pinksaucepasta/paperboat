@@ -101,13 +101,14 @@ func TestWindowsAttributionFailsClosed(t *testing.T) {
 	owner := func(established bool) tcpOwner {
 		return tcpOwner{bound: 100, socketOwner: socketOwner{Tuple: tuple, UID: 4321, Established: established}}
 	}
+	halfClosed := tcpOwner{bound: 100, socketOwner: socketOwner{Tuple: tuple, UID: 4321, Live: true}}
 	user := func(pid uint32, bound int64) (string, error) {
 		if pid != 4321 || bound != 100 {
 			t.Fatalf("user looked up for pid %d bound %d", pid, bound)
 		}
 		return "S-1-5-21-1-2-3-1001", nil
 	}
-	if sid, err := attributeSID(accepted, func(socketTuple) ([]tcpOwner, error) { return []tcpOwner{owner(true)}, nil }, user); err != nil || sid != "S-1-5-21-1-2-3-1001" {
+	if sid, err := attributeSID(accepted, func(socketTuple) ([]tcpOwner, error) { return []tcpOwner{owner(true)}, nil }, user, false); err != nil || sid != "S-1-5-21-1-2-3-1001" {
 		t.Fatalf("single established owner: %q, %v", sid, err)
 	}
 	refused := map[string]func(socketTuple) ([]tcpOwner, error){
@@ -120,10 +121,17 @@ func TestWindowsAttributionFailsClosed(t *testing.T) {
 		sid, err := attributeSID(accepted, lookup, func(uint32, int64) (string, error) {
 			t.Fatalf("%s: the user was looked up", name)
 			return "", nil
-		})
+		}, false)
 		if sid != "" || !errors.Is(err, ErrAttribution) {
 			t.Fatalf("%s: %q, %v; want a refusal", name, sid, err)
 		}
+	}
+	halfClosedLookup := func(socketTuple) ([]tcpOwner, error) { return []tcpOwner{halfClosed}, nil }
+	if sid, err := attributeSID(accepted, halfClosedLookup, user, true); err != nil || sid != "S-1-5-21-1-2-3-1001" {
+		t.Fatalf("a half-closed client for the proxy: %q, %v", sid, err)
+	}
+	if sid, err := attributeSID(accepted, halfClosedLookup, user, false); sid != "" || !errors.Is(err, ErrAttribution) {
+		t.Fatalf("a half-closed client for the gateway: %q, %v; want a refusal", sid, err)
 	}
 	if processBoundConnection(101, 100) || processBoundConnection(100, 0) || !processBoundConnection(100, 100) {
 		t.Fatal("a process created after the bind, or a connection without a bind time, must be refused")
