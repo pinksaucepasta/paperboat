@@ -38,6 +38,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -86,7 +87,10 @@ def checks(args):
         table['ssh-' + name.split('_')[0].replace('lifecycle', 'main')] = (['ssh_%s.py' % name, args.peer], ['--peer'])
     for name in ('main', 'paste', 'typing'):  # paste and typing need a Unix peer (sh)
         table['terminal-' + name] = (['terminal_lifecycle.py', args.peer, '--check', name], ['--peer'])
-    table['terminal-matrix'] = (['terminal_matrix.py', args.peer], ['--peer'])  # about 25 min: pass --timeout 3600
+    # about 25 min: pass --timeout 3600. N14/N12 restart the peer's host runtime (--restart-target-cmd, a shell command
+    # here) and this device's daemon (pb.exe service restart over ssh, built in run_check).
+    table['terminal-matrix'] = (['terminal_matrix.py', args.peer, '--restart-client-cmd', '{restart_client}'] +
+                                (['--restart-target-cmd', args.restart_target_cmd] if args.restart_target_cmd else []), ['--peer'])
     for name in ('access-machine', 'private-address', 'private-https', 'path-direct', 'path-relay'):  # the device is the client; the origin runs on the peer
         table[name] = (['private_access.py', 'pair', '--target', args.peer, '--check', name], ['--peer'])
     table['ssh-long'] = (['ssh_long.py', args.peer, '--seconds', os.environ.get('SMOKE_SSH_LONG_SECONDS', '')],
@@ -104,6 +108,7 @@ def checks(args):
         table['preview-' + mode] = (['preview_lifecycle.py', '--mode', mode], [])
     table['preview-protocols'] = (['preview_protocols.py', 'victus'], [])
     table['tunnel-protocols'] = (['preview_protocols.py', 'victus', '--tunnel'], [])
+    table['network-drop'] = (['network_drop.py', args.peer], ['--peer'])
     table['path-display'] = (['path_display.py', args.peer], ['--peer'])
     for name in ('preview_survival', 'tunnel_survival', 'tunnel_failures', 'tunnel_transfer', 'network_inventory'):
         table[name.replace('_', '-')] = ([name + '.py'], [])
@@ -298,6 +303,11 @@ def run_check(check, argv, args, device):
             replacements.update({'{teammate_account}': account['id'], '{teammate_email}': account['email']})
         if '{machine_id}' in argv:
             replacements['{machine_id}'] = json.loads((device.runtime_dir() / 'machine-registration.json').read_text())['machine_id']
+        if '{restart_client}' in argv:
+            command = "powershell -NoProfile -NonInteractive -Command \"& '%s' service restart\"" % device.pb_exe
+            replacements['{restart_client}'] = shlex.join(device.ssh_prefix(device.target, command))
+            environment = device.ssh_environment() or environment  # the password (never printed) for sshpass -e
+            environment['PB_SMOKE_WINDOWS_PB'] = device.pb_exe
         if '{server}' in argv:
             replacements.update({
                 '{server}': json.loads((device.runtime_dir() / 'machine-registration.json').read_text())['server_url'],
@@ -336,6 +346,7 @@ def build_parser():
     parser.add_argument('--owner-machine-id', help='policy-team: the owner machine shared into the team')
     parser.add_argument('--owner-machine-name')
     parser.add_argument('--owner-pb', default='.local/bin/pb')
+    parser.add_argument('--restart-target-cmd', default='', help="terminal-matrix N14: shell command restarting the peer's host runtime")
     parser.add_argument('--vault-password-file', help="owner-only file on the device: the device account's ENV vault password")
     parser.add_argument('--teammate-vault-password-file', help="the same for the device's second account profile")
     parser.add_argument('--readonly-team', help='env-messages: a team the device account is a read-only member of')

@@ -312,6 +312,25 @@ class WindowsChecksRunner(unittest.TestCase):
             self.assertEqual('', windows_checks.protocol_gate(probe)('{"state": "approval_required"}'))
             self.assertEqual([], [item.name for item in root.iterdir() if not item.name.startswith('probe')])
 
+    def test_a_network_cut_is_scoped_timed_and_lifted_on_every_path(self):
+        calls = []
+        device = winhost.WindowsDevice(target='t', pb_exe='C:\\pb.exe')
+        device.ps = lambda step, script, **kw: calls.append((script, kw.get('action'), kw.get('addr'), kw.get('inbound'))) or (0, '')
+        device.start = lambda argv, directory: calls.append(('start', argv[0])) or 1
+        device.temp_dir = lambda prefix: __import__('contextlib').nullcontext('dir')
+        cut = device.cut_network(45)
+        self.assertEqual(winhost.NET_CUT, calls[0][0])
+        self.assertEqual(('add', winhost.NON_LOOPBACK, True), calls[0][1:])
+        self.assertIn('-Program $x', winhost.NET_CUT)  # program scope: the controller's SSH is not pb.exe
+        self.assertEqual(('start', 'powershell.exe'), calls[1])  # the timer that lifts it whatever happens here
+        cut.release(), cut.release()
+        self.assertEqual(['add', 'remove'], [c[1] for c in calls if c[0] == winhost.NET_CUT])
+        calls.clear()
+        device.start = lambda argv, directory: (_ for _ in ()).throw(winhost.DeviceError('no timer'))
+        with self.assertRaises(winhost.DeviceError):
+            device.cut_network(5, addresses=['203.0.113.7'], inbound=False)
+        self.assertEqual(['add', 'remove'], [c[1] for c in calls if c[0] == winhost.NET_CUT])  # no timer: the rule goes again
+
     def test_every_check_names_a_script_and_missing_fixtures_are_reported(self):
         import windows_checks
         table = windows_checks.checks(self.args())
@@ -960,7 +979,7 @@ class TerminalFamilyPlumbing(unittest.TestCase):
             matrix.large_paste(SimpleNamespace(target='victus'), [])
             self.assertEqual(['SKIP', 'SKIP'], [state for _, state in matrix.RESULTS])
 
-    def test_device_clients_are_found_by_their_command_line_and_firewall_rows_skip(self):
+    def test_device_clients_are_found_by_their_command_line_and_firewall_rows_use_the_device(self):
         import terminal_matrix as matrix
 
         class Device:
@@ -980,7 +999,7 @@ class TerminalFamilyPlumbing(unittest.TestCase):
             client.suspend(), client.resume(), client.kill()
             self.assertEqual([('suspend', 12), ('resume', 12), ('stop', 12)], [c for c in device.calls if c[0] != 'processes'])
             self.assertEqual(('processes', 'smoke\\-matrix\\-0123456789'), device.calls[0])
-            self.assertFalse(matrix.has_iptables())
+            self.assertTrue(matrix.has_iptables())  # the device's firewall is the cut (winhost.cut_network)
             matrix.echo_latency(SimpleNamespace(target='hp'), [])
             self.assertEqual(['SKIP'], [state for _, state in matrix.RESULTS])
             device.processes = lambda pattern: []

@@ -42,6 +42,9 @@ DARWIN = not DEVICE and os.uname().sysname == 'Darwin'
 if DARWIN:
     RUNTIME = Path.home() / 'Library/Application Support/Paperboat/runtime'
     DIAGNOSTICS = Path.home() / 'Library/Application Support/Paperboat/state/diagnostics'
+elif DEVICE:
+    RUNTIME = DEVICE.runtime_dir()
+    DIAGNOSTICS = None
 else:
     RUNTIME = Path.home() / '.local/state/paperboat/runtime'
     DIAGNOSTICS = Path.home() / '.local/state/paperboat/diagnostics'
@@ -236,14 +239,14 @@ def exactly_once(out, prefix, first, last):
 
 
 def has_iptables():
+    """Whether this controller (or, for the Windows device, the device's firewall) can cut the clients' network."""
     if DEVICE:
-        return False
+        return True
     return subprocess.run(['sudo', '-n', 'pfctl', '-s', 'info'] if DARWIN else ['sudo', '-n', 'iptables', '-S'],
                           capture_output=True).returncode == 0
 
 
-NO_FIREWALL = ('cutting the Windows device network from here would cut the SSH that drives its clients' if DEVICE
-               else 'no passwordless sudo pfctl on this machine' if DARWIN else 'no iptables on this machine')
+NO_FIREWALL = ('no passwordless sudo pfctl on this machine' if DARWIN else 'no iptables on this machine')
 NO_OUTSIDE_SIZE = 'a Windows session has no tty to read its size from outside; reading it by typing would hide the fault'
 
 
@@ -253,6 +256,8 @@ def iptables(*rule):
 
 def drop_all(seconds):
     """Silently drop every non-loopback packet in both directions; drop_restore undoes it."""
+    if DEVICE:  # pb.exe's own traffic only: the SSH that drives the device keeps working
+        return DEVICE.cut_network(seconds + 60)
     if DARWIN:
         return pf_block('block drop quick on ! lo0 all\n', seconds + 60)
     iptables('-I', 'OUTPUT', '-o', 'lo', '-j', 'ACCEPT')
@@ -262,6 +267,8 @@ def drop_all(seconds):
 
 
 def drop_restore(block):
+    if DEVICE:
+        return block.release()
     if DARWIN:
         return pf_release(block)
     for chain, iface in [('OUTPUT', '-o'), ('INPUT', '-i')]:
@@ -477,7 +484,9 @@ def control_plane_down(a, sessions):
     name = fresh_name(); sessions.append(name)
     c1 = connect(a.target, name)
     try:
-        if DARWIN:
+        if DEVICE:
+            block = DEVICE.cut_network(240, addresses=addrs, inbound=False)
+        elif DARWIN:
             block = pf_block('block drop out quick to { %s }\n' % ' '.join(addrs), 240)
         else:
             for ip in addrs:
@@ -493,7 +502,9 @@ def control_plane_down(a, sessions):
                     break
             row('N5 server unreachable 2 min: open terminal keeps working', ok, f'{(i + 1) * 30} s')
         finally:
-            if DARWIN:
+            if DEVICE:
+                block.release()
+            elif DARWIN:
                 pf_release(block)
             else:
                 for ip in addrs:

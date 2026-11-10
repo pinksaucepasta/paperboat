@@ -127,6 +127,17 @@ SERVICE = ("$s=Get-Service -Name $req.name\n"
 UDP_BLOCK = ("if($req.action -eq 'remove'){Remove-NetFirewallRule -DisplayName $req.name -ErrorAction SilentlyContinue;exit 0}\n"
              "if(@(Get-NetFirewallProfile|Where-Object{-not $_.Enabled}).Count){throw 'Windows Firewall is off for a profile: a block rule would not be enforced'}\n"
              "[void](New-NetFirewallRule -DisplayName $req.name -Direction Outbound -Action Block -Protocol UDP -RemotePort @('1-52','54-65535'))")
+# Blocks pb.exe's own traffic (every pb.exe under Program Files\\Paperboat: the daemon, the host runtime, the client) to
+# $req.addr and, with $req.inbound, from them; the program scope keeps the controller's SSH (sshd, the runner's tunnel
+# ssh.exe) alive, which a machine-wide cut would sever. The firewall drops silently: no reset, no link-down.
+NET_CUT = ("if($req.action -eq 'remove'){Remove-NetFirewallRule -DisplayName $req.name -ErrorAction SilentlyContinue;exit 0}\n"
+           "if(@(Get-NetFirewallProfile|Where-Object{-not $_.Enabled}).Count){throw 'Windows Firewall is off for a profile: a block rule would not be enforced'}\n"
+           "$p=@(Get-ChildItem -LiteralPath (Join-Path $env:ProgramFiles 'Paperboat') -Recurse -Filter pb.exe -File|ForEach-Object{$_.FullName})\n"
+           "if(-not $p.Count){throw 'no pb.exe under Program Files\\Paperboat'}\n"
+           "foreach($d in @('Outbound')+$(if($req.inbound){@('Inbound')}else{@()})){foreach($x in $p){\n"
+           "[void](New-NetFirewallRule -DisplayName $req.name -Direction $d -Action Block -Program $x -RemoteAddress @($req.addr))}}")
+# Every non-loopback IPv4 and global/link-local/unique-local IPv6 address.
+NON_LOOPBACK = ['0.0.0.0-126.255.255.255', '128.0.0.0-255.255.255.255', '2000::/3', 'fe80::/10', 'fc00::/7']
 LISTENING = ("try{$c=New-Object Net.Sockets.TcpClient('127.0.0.1',[int]$req.port);$c.Close();'yes'}catch{'no'}")
 ALIVE = "if(Get-Process -Id $req.pid -ErrorAction SilentlyContinue){'yes'}else{'no'}"
 WHICH = "(Get-Command $req.name -CommandType Application -ErrorAction SilentlyContinue|Select-Object -First 1).Source"
@@ -151,6 +162,12 @@ COMPLETE = ("$env:PATH=(Split-Path -Parent $req.exe)+[IO.Path]::PathSeparator+$e
             ". ([scriptblock]::Create([IO.File]::ReadAllText($req.path)))\n"
             "$r=TabExpansion2 $req.line $req.line.Length\n"
             "[Console]::Out.Write((@($r.CompletionMatches|ForEach-Object{$_.CompletionText.Trim()}) -join ','))")
+# The lines of the files of $req.dir matching $req.filter that match the regex $req.pattern, base64 of UTF-8.
+MATCHING_LINES = ("$o=New-Object Collections.Generic.List[string]\n"
+                  "Get-ChildItem -LiteralPath $req.dir -Filter $req.filter -File -ErrorAction SilentlyContinue|ForEach-Object{\n"
+                  "$f=[IO.File]::Open($_.FullName,'Open','Read','ReadWrite');$r=New-Object IO.StreamReader($f)\n"
+                  "while($null -ne ($l=$r.ReadLine())){if($l -match $req.pattern){$o.Add($l)}};$f.Close()}\n"
+                  "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($o -join \"`n\")))")
 # Every file under $req.path as [{p: relative path with /, h: sha256}], base64 of UTF-8 JSON: Windows PowerShell
 # writes stdout in the OEM code page, which would change a Unicode file name.
 TREE = ("$r=(Get-Item -LiteralPath $req.path).FullName;$s=[Security.Cryptography.SHA256]::Create()\n"
@@ -399,6 +416,11 @@ class WindowsDevice:
                       exit_ms=exit_seconds * 1000)[1].split()
         return out[-2] == '1', int(out[-1])
 
+    def matching_lines(self, directory, filter_, pattern):
+        """The lines of the files of directory matching the glob filter_ that match the regex pattern (grep)."""
+        out = self.ps('lines in %s' % directory, MATCHING_LINES, timeout=120, dir=str(directory), filter=filter_, pattern=pattern)[1]
+        return base64.b64decode(out).decode('utf-8', 'replace').splitlines()
+
     def services(self, pattern='Paperboat*'):
         return self._list('services ' + pattern, SERVICES, pattern=pattern)
 
@@ -477,6 +499,22 @@ class WindowsDevice:
             finally:
                 self.stop(pid)
 
+    def cut_network(self, seconds, addresses=None, inbound=True):
+        """Drop pb.exe's traffic to `addresses` (default: everything but loopback) until release(), or after `seconds`
+        when a detached timer on the device removes the rule whatever happens to this controller."""
+        name = 'PaperboatSmoke-cut-' + uuid.uuid4().hex[:12]
+        self.ps('cut the network', NET_CUT, action='add', name=name, addr=list(addresses or NON_LOOPBACK), inbound=inbound)
+        scratch = self.temp_dir('pb-cut')
+        try:
+            timer = "Start-Sleep %d; Remove-NetFirewallRule -DisplayName '%s' -ErrorAction SilentlyContinue" % (seconds, name)
+            self.start(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand',
+                        _b64(timer.encode('utf-16-le'))], scratch.__enter__())
+        except BaseException:
+            self.ps('restore the network', NET_CUT, action='remove', name=name)
+            scratch.__exit__(None, None, None)
+            raise
+        return NetCut(self, name, scratch)
+
     @contextlib.contextmanager
     def udp_blocked(self):
         """Outgoing UDP except DNS dropped on the device for the duration; removed on every exit path."""
@@ -532,6 +570,25 @@ class WindowsDevice:
             yield path
         finally:
             path.unlink()
+
+
+class NetCut:
+    """A firewall cut made by WindowsDevice.cut_network; release() lifts it (also when called twice)."""
+
+    def __init__(self, device, name, scratch):
+        self.device, self.name, self.scratch = device, name, scratch
+
+    def release(self):
+        if self.scratch is None:
+            return
+        scratch, self.scratch = self.scratch, None
+        try:
+            self.device.ps('restore the network', NET_CUT, action='remove', name=self.name)
+        finally:
+            scratch.__exit__(None, None, None)  # also removes the timer's directory; the timer is idempotent
+
+    __enter__ = lambda self: self
+    __exit__ = lambda self, *exc: self.release()
 
 
 class RemoteProcess:
