@@ -291,8 +291,8 @@ def main():
         report['env_names_off_run_still_works'] = probe_hash_line(still) == want
         must(account(host, f'{PB} env names access on'), 'env names access on')
         report['env_names_back_on'] = PROBE in must(ssh(host, f'{PB} env names'), 'env names again').split()
-        passed = ssh(host, f"{PB} env run -- sh -c 'exit 7'; echo rc=$?").stdout
-        report['env_run_exit_code'] = 'rc=7' in passed
+        exit_line = ssh(host, f"{PB} env run -- sh -c 'exit 7'; echo rc=$?").stdout
+        report['env_run_exit_code'] = 'rc=7' in exit_line
         emit = f'{PB} env hook --emit {shell} >/dev/null'
         timing = must(ssh(host, f'{emit}; s=$({now}); {emit}; e=$({now}); echo $(((e-s){ms}))'),
                       'timing')

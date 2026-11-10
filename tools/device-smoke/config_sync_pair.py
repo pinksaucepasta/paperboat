@@ -327,8 +327,8 @@ def main():
     except Exception:  # noqa: BLE001
         pass
     finally:
-        for machine in (a, b):
-            cleanup(machine, repository)
+        for side in (a, b):
+            cleanup(side, repository)
         if repository.get('id'):
             a.delete_repository(repository['id'])
         forwards.close()

@@ -144,9 +144,9 @@ def main():
     finally:
         if shared and identifier is not None:
             pb(args.owner_host, 'session', 'unshare', identifier, '--json')
-        for terminal in (joined, owner):
-            if terminal is not None:
-                terminal.close()
+        for open_terminal in (joined, owner):
+            if open_terminal is not None:
+                open_terminal.close()
         if identifier is not None:
             for action in ('close', 'delete'):
                 code, out, _ = pb(args.owner_host, 'session', action, args.owner_target, identifier, '--json')
