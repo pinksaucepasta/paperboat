@@ -144,7 +144,11 @@ def checks(args):
     # and transfer-to-team then remove would end the device's enrollment, so approval and transfer are skipped.
     two = ['team_two_account.py', '--team', team, '--owner-ssh', winhost.WINDOWS, '--machine', '{machine_id}',
            '--member-cmd', winhost.WINDOWS_TEAMMATE]
-    table['team-two-account'] = (two + ['--skip', 'approval,suspension,transfer'], ['--team'])
+    if args.member_cmd:  # a Unix machine of the second account: the approval and transfer flows end *its* enrollment, not the device's
+        table['team-two-account'] = (two[:-1] + [args.member_cmd, '--member-machine', args.member_machine or '', '--skip', 'suspension'],
+                                     ['--team', '--member_machine'])
+    else:
+        table['team-two-account'] = (two + ['--skip', 'approval,suspension,transfer'], ['--team'])
     table['team-suspension'] = (two + ['--skip', 'share,approval,resources,transfer', '--suspend-cmd', args.suspend_cmd or ''],
                                 ['--team', '--suspend_cmd'])
     # Only pb runs on the device: no F19-07 token steps and no streaming (their helper is Python on the machine).
@@ -312,6 +316,8 @@ def build_parser():
     parser.add_argument('--token-allowed', help='policy-token: the machine name the token may exec on')
     parser.add_argument('--token-other', help='policy-token: another machine name of the account')
     parser.add_argument('--token-pb', default='/home/pbt/.local/bin/pb', help='policy-token: pb on the --token-cmd side')
+    parser.add_argument('--member-cmd', help='team-two-account: ssh/docker prefix of a machine of the second account (enables approval and transfer)')
+    parser.add_argument('--member-machine', help="team-two-account: that machine's id")
     parser.add_argument('--suspend-cmd', help='team-suspension: controller command that runs SQL from stdin on the server database')
     parser.add_argument('--sso-team', help='team-identity-commands: a team the device account owns, with SSO and a directory group')
     parser.add_argument('--empty-team', help='workspace-switch: a team of the device account without machines')

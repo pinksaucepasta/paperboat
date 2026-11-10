@@ -330,7 +330,9 @@ def probe(args):
         assert len(matches) == 1 and matches[0]['network_approved'], 'private target is not approved in inventory'
         if args.check.startswith('path-'):  # pair only: the UDP block is the Windows device's firewall rule
             expected = args.check[5:]
-            with winhost.device().udp_blocked() if expected == 'relay' else contextlib.nullcontext():
+            device = winhost.device()
+            assert expected != 'relay' or device is not None, 'the relay path needs the Windows device (its firewall blocks UDP)'
+            with device.udp_blocked() if expected == 'relay' else contextlib.nullcontext():
                 ping_paths(binary, matches[0]['alias'], expected)
                 address_exchange(binary, matches[0], phase)
                 ping_paths(binary, matches[0]['alias'], expected)

@@ -1196,6 +1196,57 @@ class ConfigSyncPairOnTheDevice(unittest.TestCase):
         self.assertEqual(['ssh', 'x'], config_sync_pair.machine('ssh x', 'u').prefix)
 
 
+class FreePlanUnixPath(unittest.TestCase):
+    """free_plan.main on a Unix device, with the account, pb and the diagnostics faked: every assertion still bites."""
+
+    plan = {'state': 'free', 'seats_bought': 0, 'allowance_bytes': 5, 'usage_bytes': 1, 'allowance_period_end': '2026-12-01T00:00:00Z'}
+
+    def run_main(self, plan=None, machines=None, exec_codes=(0,), diagnostics=''):
+        import contextlib
+        import io
+        import tempfile
+        import free_plan
+        machines = machines if machines is not None else [{'alias': 't', 'state': 'online', 'permissions': ['terminal', 'exec']}]
+        codes = list(exec_codes)
+
+        def run(*arguments):
+            if arguments[0] == 'machine':
+                return 0, json.dumps({'machines': machines})
+            return (codes.pop(0) if len(codes) > 1 else codes[0]), 'out'
+
+        fake = SimpleNamespace(access_token=lambda: 'tok', server_url=lambda: 'https://api.example.test', DARWIN=False)
+        with tempfile.TemporaryDirectory() as home:
+            diagnostics_dir = pathlib.Path(home) / '.local/state/paperboat/diagnostics'
+            diagnostics_dir.mkdir(parents=True)
+            (diagnostics_dir / 'e.ndjson').write_text(diagnostics)
+            out = io.StringIO()
+            with patch('winhost.device', return_value=None), patch.dict(sys.modules, {'cli_credential': fake}), \
+                    patch.object(free_plan, 'api', lambda path, token, server: plan or self.plan), patch.object(free_plan, 'run', run), \
+                    patch.object(free_plan, 'HOME', pathlib.Path(home)), patch('time.sleep'), \
+                    patch('sys.argv', ['free_plan.py', 't']), contextlib.redirect_stdout(out):
+                free_plan.main()
+        return json.loads(out.getvalue())
+
+    def test_a_free_account_with_an_online_exec_machine_passes(self):
+        self.assertEqual('PASS', self.run_main()['status'])
+
+    def test_every_assertion_still_bites(self):
+        for message, kwargs in (
+                ('plain Free', dict(plan=dict(self.plan, state='team'))),
+                ('plain Free', dict(plan=dict(self.plan, seats_bought=1))),
+                ('allowance', dict(plan=dict(self.plan, usage_bytes=5))),
+                ('online with terminal and exec', dict(machines=[])),
+                ('online with terminal and exec', dict(machines=[{'alias': 't', 'state': 'online', 'permissions': ['terminal']}])),
+                ('exec failed', dict(exec_codes=(1,))),
+                ('plan gate', dict(diagnostics='{"code": "Subscription_Required"}\n')),
+                ('plan gate', dict(diagnostics='{"http_status": "402"}\n'))):
+            with self.subTest(message), self.assertRaisesRegex(RuntimeError, message):
+                self.run_main(**kwargs)
+
+    def test_exec_is_retried_before_it_fails(self):
+        self.assertEqual('PASS', self.run_main(exec_codes=(1, 1, 0))['status'])
+
+
 if __name__ == '__main__':
     unittest.main()
 

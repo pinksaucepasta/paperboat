@@ -60,7 +60,38 @@ def gate_events():
         directory = winhost.RemotePath(device, device.env('LOCALAPPDATA')) / 'Paperboat' / 'state' / 'diagnostics'
         return sum(device.count_in_files(directory, '*.ndjson', text) for text in GATES + ('"http_status": "402"',))
     import cli_credential
+    gate = 0
     state = HOME / ('Library/Application Support/Paperboat/state' if cli_credential.DARWIN else '.local/state/paperboat')
+    for path in glob.glob(str(state / 'diagnostics/*.ndjson')):
+        for line in open(path, errors='replace'):
+            lowered = line.lower()
+            if 'machine_plan_inactive' in lowered or 'subscription_required' in lowered or '"http_status":"402"' in lowered.replace(' ', ''):
+                gate += 1
+    return gate
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('target')
+    args = parser.parse_args()
+    with credential() as (token, server):
+        plan = api('/v1/billing/workspaces/personal', token, server)
+    if plan['state'] != 'free' or plan['seats_bought'] != 0:
+        raise RuntimeError('account is not a plain Free account: state=%s seats=%s' % (plan['state'], plan['seats_bought']))
+    if plan['allowance_bytes'] <= 0 or plan['usage_bytes'] >= plan['allowance_bytes'] or not plan['allowance_period_end']:
+        raise RuntimeError('Free allowance is missing or already exhausted')
+    machines = json.loads(run('machine', 'list', '--json')[1])['machines']
+    me = next((m for m in machines if m['alias'] == args.target), None)
+    if me is None or me['state'] != 'online' or 'terminal' not in me['permissions'] or 'exec' not in me['permissions']:
+        raise RuntimeError('paired machine is not online with terminal and exec on the Free plan')
+    for attempt in range(6):  # native path can need a moment after a daemon restart
+        code, out = run('exec', args.target, '--', *winhost.true_argv())
+        if code == 0:
+            break
+        time.sleep(15)
+    if code:
+        raise RuntimeError('exec failed on the Free plan: ' + out[-160:])
+    # No subscription, trial or payment gate anywhere in what the CLI recorded locally.
     gate = gate_events()
     if gate:
         raise RuntimeError('%d local diagnostics events mention a plan gate (402/machine_plan_inactive/subscription_required)' % gate)
