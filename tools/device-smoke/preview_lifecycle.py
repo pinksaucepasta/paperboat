@@ -44,6 +44,25 @@ def serving(body):
             thread.join(timeout=5)
 
 
+def stoppable_origin(directory, page, port=0):
+    """(port pb is given, stop function) of a static origin that can be stopped and started again on the same port.
+
+    A server here is stopped with its port refusing connections; for the Windows device the origin is a listener on the
+    device itself, because an ssh -R forward would keep accepting after the origin behind it stopped and the daemon's
+    TCP probe would never see the app go away."""
+    device = winhost.device()
+    if device:
+        stack = contextlib.ExitStack()
+        return stack.enter_context(device.origin(page, port)), stack.close
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', port), functools.partial(QuietHandler, directory=directory))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    def stop():
+        server.shutdown()
+        server.server_close()
+    return server.server_port, stop
+
+
 @contextlib.contextmanager
 def exposed(local_port):
     """The port pb must be given for a server this check runs itself: unchanged on Unix, an ssh -R forward on Windows."""

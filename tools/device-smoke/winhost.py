@@ -200,7 +200,7 @@ SUSPEND = ("Add-Type -Namespace Pb -Name Ps -MemberDefinition '[DllImport(\"ntdl
 
 # A one-connection-at-a-time HTTP origin on the device's loopback; its port goes to $req.port_file.
 ORIGIN = r"""
-$l=New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback,0);$l.Start()
+$l=New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback,[int]$req.port);$l.Start()
 [IO.File]::WriteAllText($req.port_file,[string]$l.LocalEndpoint.Port)
 $b=[Text.Encoding]::UTF8.GetBytes($req.body)
 $h=[Text.Encoding]::ASCII.GetBytes("HTTP/1.1 200 OK`r`nContent-Type: text/html`r`nContent-Length: $($b.Length)`r`nConnection: close`r`n`r`n")
@@ -474,11 +474,12 @@ class WindowsDevice:
         return RemoteProcess(self, pid, directory)
 
     @contextlib.contextmanager
-    def origin(self, body):
-        """An HTTP origin on the device's loopback that answers every request with body; yields its port."""
+    def origin(self, body, port=0):
+        """An HTTP origin on the device's loopback that answers every request with body; yields its port (a given one
+        to start again where an earlier origin stopped)."""
         with self.temp_dir('pb-origin') as directory:
             port_file = directory / 'port'
-            script = ('$req=@{port_file=%s;body=%s};' % (ps_quote(port_file), ps_quote(body)) + ORIGIN)
+            script = ('$req=@{port_file=%s;body=%s;port=%d};' % (ps_quote(port_file), ps_quote(body), port) + ORIGIN)
             pid = self.start(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand',
                               _b64(script.encode('utf-16-le'))], directory)
             try:

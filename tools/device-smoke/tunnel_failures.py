@@ -6,21 +6,16 @@ do, in all three commands, and that the tunnel returns to ready by itself once t
   1. the local app stops           -> origin_unreachable, log tunnel_origin_unreachable
   2. the Paperboat host service stops (Linux, Windows) -> connector_offline
 """
-import contextlib
-import functools
-import http.server
 import json
-import os
 from pathlib import Path
 import platform
 import tempfile
-import threading
 import time
 import uuid
 
 from install_lifecycle import registration
 from pairing_lifecycle import command_result
-from preview_lifecycle import QuietHandler, exposed
+from preview_lifecycle import stoppable_origin
 from tunnel_survival import PB, confirmed, host_service, run, status_code, wait_status
 import winhost
 
@@ -61,12 +56,6 @@ def explained(identifier, code):
     return logs
 
 
-def serve(directory, port=0):
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', port), functools.partial(QuietHandler, directory=directory))
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server
-
-
 def main():
     before = registration()
     name = 'smoke-tunnel-explain-' + uuid.uuid4().hex[:10]
@@ -74,26 +63,24 @@ def main():
     stopped_host = None
     primary_error = None
     result = {'check': 'tunnel-failures', 'status': 'PASS'}
-    with tempfile.TemporaryDirectory(prefix='paperboat-tunnel-explain-') as directory, contextlib.ExitStack() as stack:
+    with tempfile.TemporaryDirectory(prefix='paperboat-tunnel-explain-') as directory:
         (Path(directory) / 'index.html').write_text('synthetic tunnel origin')
-        server = serve(directory)
-        local_port = server.server_port
+        port, stop_origin = stoppable_origin(directory, 'synthetic tunnel origin')  # on the device itself for Windows
         try:
-            port = stack.enter_context(exposed(local_port))  # Windows: the device's port that reaches this origin
             created = run('tunnel', 'create', name, '--port', str(port), '--duration', '30m', '--wait', '--timeout', '90s')
             identifier = created['tunnel']['id']
             endpoint = created['tunnel']['stable_endpoint']
             wait_status(endpoint, 200, 'after creation')
             wait_code(identifier, 'ready', 60, 'creation')
 
-            server.shutdown()
-            server.server_close()
+            stop_origin()
             wait_code(identifier, 'origin_unreachable', CAUSE_SECONDS, 'stopping the local app')
             logs = explained(identifier, 'origin_unreachable')
             assert 'tunnel_origin_unreachable' in logs, 'tunnel logs do not record the local app going down'
             origin = run('tunnel', 'status', identifier)['dimensions']['origin']['code']
             assert origin.startswith('origin_'), 'origin dimension does not carry the reason: ' + origin
-            server = serve(directory, local_port)
+            again, stop_origin = stoppable_origin(directory, 'synthetic tunnel origin', port)
+            assert again == port, 'the origin did not come back on its port'
             wait_code(identifier, 'ready', RECOVER_SECONDS, 'restarting the local app')
             wait_status(endpoint, 200, 'after the local app returned')
             assert 'tunnel_origin_recovered' in human('tunnel', 'logs', identifier), 'tunnel logs do not record the recovery'
@@ -125,8 +112,7 @@ def main():
                 print(json.dumps({'check': 'tunnel-failures', 'cleanup': 'failed'}), flush=True)
             finally:
                 try:
-                    server.shutdown()
-                    server.server_close()
+                    stop_origin()
                 except Exception:
                     pass
     assert registration() == before

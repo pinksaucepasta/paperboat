@@ -9,15 +9,10 @@
   6. Linux, Windows: a second background preview survives a restart of the host service (an update
      restarts it): the same URL serves again and the lease stays ready; `preview stop` ends it
 """
-import contextlib
-import functools
-import http.server
 import json
-import os
 from pathlib import Path
 import platform
 import tempfile
-import threading
 import time
 import urllib.error
 import urllib.request
@@ -25,7 +20,7 @@ import uuid
 
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
-from preview_lifecycle import QuietHandler, exposed
+from preview_lifecycle import stoppable_origin
 from preview_receipt import PREVIEW_COMMAND_TIMEOUT, receipt_value
 from tunnel_survival import host_service
 import winhost
@@ -56,24 +51,16 @@ def state(identifier):
     return invoke(PB, 'preview', 'status', identifier, '--json', timeout=30)['state']
 
 
-def serve(directory, port=0):
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', port), functools.partial(QuietHandler, directory=directory))
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server
-
-
 def main():
     before = registration()
     marker = 'PB_PREVIEW_SURVIVE_' + uuid.uuid4().hex
     identifier = None
     primary_error = None
     result = {'check': 'preview-survival', 'status': 'PASS'}
-    with tempfile.TemporaryDirectory(prefix='paperboat-preview-survive-') as directory, contextlib.ExitStack() as stack:
+    with tempfile.TemporaryDirectory(prefix='paperboat-preview-survive-') as directory:
         (Path(directory) / 'index.html').write_text('<p>' + marker + '</p>')
-        server = serve(directory)
-        local_port = server.server_port
+        port, stop_origin = stoppable_origin(directory, '<p>' + marker + '</p>')  # on the device itself for Windows
         try:
-            port = stack.enter_context(exposed(local_port))  # Windows: the device's port that reaches this origin
             lease = invoke(PB, 'preview', str(port), '--background', '--ttl', '15m', '--json', timeout=PREVIEW_COMMAND_TIMEOUT)
             endpoint = receipt_value(lease, 'endpoint')
             identifier = lease['id']
@@ -84,13 +71,13 @@ def main():
             wait_for(lambda: marker in body(endpoint) and state(identifier) == 'ready', 'the same URL after a daemon restart')
             result['daemon_restart'] = True
 
-            server.shutdown()
-            server.server_close()
+            stop_origin()
             wait_for(lambda: state(identifier) == 'origin_unavailable', 'origin_unavailable after the app stopped')
             assert marker not in body(endpoint), 'the preview kept serving a stopped app'
             result['origin_unavailable'] = True
 
-            server = serve(directory, local_port)
+            again, stop_origin = stoppable_origin(directory, '<p>' + marker + '</p>', port)
+            assert again == port, 'the origin did not come back on its port'
             wait_for(lambda: state(identifier) == 'ready' and marker in body(endpoint), 'ready again after the app returned')
             result['origin_recovers'] = True
 
@@ -126,8 +113,7 @@ def main():
                 print(json.dumps({'check': 'preview-survival', 'cleanup': 'failed'}), flush=True)
             finally:
                 try:
-                    server.shutdown()
-                    server.server_close()
+                    stop_origin()
                 except Exception:
                     pass
     assert registration() == before
