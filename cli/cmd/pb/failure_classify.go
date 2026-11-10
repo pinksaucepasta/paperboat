@@ -327,7 +327,7 @@ func classifyCommandFailure(err error) (failure commandFailure) {
 		case api.ErrUnauthenticated, config.ErrSecretNotFound, config.ErrNoCredentials, environmentmanager.ErrVaultPending, environmentmanager.ErrVaultNotSetUp, environmentmanager.ErrVaultLocked, environmentmanager.ErrVaultChanged, environmentmanager.ErrVaultTeamGrantRequired, environmentmanager.ErrVariableNotConfigured, identitybootstrap.ErrPairingRequired, identitybootstrap.ErrEnrollmentExpired, preferences.ErrChanged, preferences.ErrBusy, localwait.ErrMachineNotFound, localwait.ErrMachineAmbiguous, resolver.ErrMachineNotFound, resolver.ErrMachineAmbiguous, resolver.ErrSharedSessionAuthority, localwait.ErrInvalid, tailnet.ErrAuthority, tailnet.ErrAdmission:
 			set(commandRejected, current)
 			continue
-		case tunnel.ErrTransportLost:
+		case tunnel.ErrTransportLost, localapi.ErrTransportUnavailable:
 			set(commandOperational, current)
 			continue
 		case ErrAccessTunnelAuthentication, ErrAccessTunnelForbidden, ErrAccessTunnelRuntimeRPCUnavailable:
