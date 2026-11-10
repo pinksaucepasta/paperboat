@@ -19,6 +19,7 @@ import secrets
 import subprocess
 import sys
 import time
+import urllib.parse
 
 import winhost
 
@@ -114,7 +115,11 @@ echo "B_ADD=$({mint_b} machine add --name {name}-hb --json | tr -d '\\n')"
         for side in 'AB':
             added = re.search(r'^%s_ADD=(\{.*\})$' % side, out, re.M)
             assert added, 'targets were not prepared on %s: %s' % (target, re.sub(r'_ADD=.*', '_ADD=…', out)[-400:])
-            tokens[side] = re.search(r"p=([^'\"&]+)", json.loads(added.group(1))['data']['windows_command']).group(1)[-26:]
+            # ?p= is the URL-escaped `<name>-<token>`; the command may carry a trailing quote or backslash.
+            parameter = urllib.parse.unquote(re.search(r"p=([^'\"&\\\s]+)", json.loads(added.group(1))['data']['windows_command']).group(1))
+            token = re.fullmatch(r'%s-h%s-([0-9A-Z]{26})' % (re.escape(name), side.lower()), parameter)
+            assert token, 'unexpected enrollment parameter shape for user %s' % side
+            tokens[side] = token.group(1)
         scp = ['scp', '-q', '-o', 'StrictHostKeyChecking=accept-new', exe, '%s:/%s' % (windows, shared.replace('\\', '/'))]
         subprocess.run((['sshpass', '-e'] + scp) if user_a.device.password else (scp[:1] + ['-o', 'BatchMode=yes'] + scp[1:]), check=True, timeout=600, env=user_a.device.ssh_environment())
         user_a.device.run(['net.exe', 'user', USER_B, password, '/add', '/y'])
