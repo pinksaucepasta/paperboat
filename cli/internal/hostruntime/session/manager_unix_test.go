@@ -1103,8 +1103,11 @@ func TestCtrlCResyncScreenHoldsTheAnswer(t *testing.T) {
 // F3-11: a lone Ctrl-C is always answered with the cut the host made for it, whatever the terminal mode, so the
 // client's hold ends on it: through is the end of the output that predates the key, discarded says the sender's
 // queued output up to there was dropped for a screen.
+// The shells ignore SIGINT (trap '' INT, inherited by the sleep they exec into): the test interrupts and then writes
+// the key, and a program that died of the SIGINT would make that write fail with a stale generation, as it did in CI
+// under -race.
 func TestLoneCtrlCIsAnsweredWithTheCut(t *testing.T) {
-	flood := "head -c 300000 /dev/zero | tr '\\0' x; exec sleep 30"
+	flood := "trap '' INT; head -c 300000 /dev/zero | tr '\\0' x; exec sleep 30"
 	cases := []struct {
 		name          string
 		script        string
@@ -1114,8 +1117,8 @@ func TestLoneCtrlCIsAnsweredWithTheCut(t *testing.T) {
 		wantThrough   bool
 	}{
 		{"flood, overtaken", flood, 300000, true, true, true},
-		{"small backlog, overtaken", "printf small; exec sleep 30", 5, true, false, true},
-		{"idle, written without the overtake", "printf prompt; exec sleep 30", 6, false, false, true},
+		{"small backlog, overtaken", "trap '' INT; printf small; exec sleep 30", 5, true, false, true},
+		{"idle, written without the overtake", "trap '' INT; printf prompt; exec sleep 30", 6, false, false, true},
 		{"raw mode: the key is data", "stty -isig; printf raw; exec sleep 30", 3, true, false, true},
 	}
 	for _, c := range cases {
@@ -1170,7 +1173,7 @@ func TestLoneCtrlCIsAnsweredWithTheCut(t *testing.T) {
 // first's record, and the viewer the first resynced is resynced for the second key too (its screen is still pending).
 func TestTwoViewersPressingCtrlCTogetherAreBothAnswered(t *testing.T) {
 	manager, root, shell := realManager(t)
-	created, err := manager.Create(context.Background(), CreateRequest{Name: "two", Command: shellCommand(shell, root, "head -c 300000 /dev/zero | tr '\\0' x; exec sleep 30")})
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "two", Command: shellCommand(shell, root, "trap '' INT; head -c 300000 /dev/zero | tr '\\0' x; exec sleep 30")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1210,7 +1213,7 @@ func TestTwoViewersPressingCtrlCTogetherAreBothAnswered(t *testing.T) {
 // again under the same ids and starts its input numbering over is not handed the old cut.
 func TestInterruptRecordIsDroppedWhenTheAttachmentDetaches(t *testing.T) {
 	manager, root, shell := realManager(t)
-	created, err := manager.Create(context.Background(), CreateRequest{Name: "record", Command: shellCommand(shell, root, "head -c 300000 /dev/zero | tr '\\0' x; exec sleep 30")})
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "record", Command: shellCommand(shell, root, "trap '' INT; head -c 300000 /dev/zero | tr '\\0' x; exec sleep 30")})
 	if err != nil {
 		t.Fatal(err)
 	}
