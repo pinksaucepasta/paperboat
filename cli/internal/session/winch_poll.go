@@ -8,6 +8,10 @@ import (
 // winchPollInterval is how often a console without resize signals is asked for its size.
 const winchPollInterval = 250 * time.Millisecond
 
+// NotifyWinch wakes ch whenever the terminal is resized (SIGWINCH on Unix, a console size poll on Windows) until the
+// returned stop function is called. pb exec --pty uses it as pb connect does.
+func NotifyWinch(ch chan<- os.Signal) (stop func()) { return notifyWinch(ch) }
+
 // pollWinch notifies ch each time size reports a different console size than
 // on the previous tick, until done closes. A notification nobody has taken yet
 // is not doubled: the receiver reads the size current when it handles one, so

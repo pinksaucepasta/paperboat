@@ -11,6 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
+	"github.com/pinksaucepasta/paperboat/internal/session"
 	"github.com/pinksaucepasta/paperboat/shared/reattach"
 	"golang.org/x/term"
 	"os"
@@ -219,8 +220,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		}
 		restoreTerminal = func() error { return term.Restore(int(os.Stdin.Fd()), state) }
 		resizeSignals := make(chan os.Signal, 1)
-		notifyResizeSignals(resizeSignals)
-		defer signal.Stop(resizeSignals)
+		defer session.NotifyWinch(resizeSignals)() // SIGWINCH on Unix; Windows has none, so it polls the console size
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
