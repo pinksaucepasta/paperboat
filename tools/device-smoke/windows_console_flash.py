@@ -27,9 +27,11 @@ def run_in_session(device, name, exe, argument_line, seconds, control=False):
     if control:
         arguments.append('-Control')
     line = 'powershell.exe ' + ' '.join('"%s"' % a.replace('"', '\\"') for a in arguments)
+    launcher = work + '\\run.cmd'  # a path without quotes keeps schtasks /TR free of nested quoting
+    device.write_bytes(launcher, ('@echo off\r\n' + line + '\r\n').encode())
     device.ps('register ' + name, "$u=[Security.Principal.WindowsIdentity]::GetCurrent().Name;"
               "schtasks /Create /TN $req.t /SC ONCE /ST 00:00 /RU $u /IT /RL LIMITED /F /TR $req.c | Out-Null;"
-              "if($LASTEXITCODE){throw 'schtasks /Create failed'};schtasks /Run /TN $req.t | Out-Null", t=TASK, c=line)
+              "if($LASTEXITCODE){throw 'schtasks /Create failed'};schtasks /Run /TN $req.t | Out-Null", t=TASK, c=launcher)
     deadline = time.time() + seconds * 3 + 60
     while time.time() < deadline and not device.exists(out):
         time.sleep(2)
@@ -52,7 +54,7 @@ def check(device, name, exe, argument_line, seconds=30):
 
 
 def main():
-    device = winhost.device()
+    device = winhost.WindowsDevice()  # no pb.exe needed: the check runs on the desktop
     case = sys.argv[1] if len(sys.argv) > 1 else sys.exit(__doc__)
     if case == 'runonce':
         system = device.env('SystemRoot') + '\\System32'
