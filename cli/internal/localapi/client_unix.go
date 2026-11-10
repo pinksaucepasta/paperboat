@@ -155,7 +155,8 @@ func newClient(socketPath string, timeout time.Duration) *Client {
 
 func newClientWithDial(socketPath string, timeout time.Duration, dial func(context.Context) (net.Conn, error)) *Client {
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return dial(ctx)
+		connection, err := dial(ctx)
+		return connection, localDialFailure(err) // a daemon that is not listening is ErrTransportUnavailable for every request, not only streams
 	}, DisableCompression: true, MaxConnsPerHost: 4, MaxIdleConnsPerHost: 4, IdleConnTimeout: timeout}
 	return &Client{http: &http.Client{Transport: supportReferenceTransport{base: transport}}, timeout: timeout, socket: socketPath}
 }
