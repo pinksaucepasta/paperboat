@@ -24,6 +24,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	previewruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimeentry"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
@@ -78,6 +79,7 @@ func NewCommand() *cobra.Command {
 	root.AddCommand(localDaemonRuntimeCommand())
 	root.AddCommand(windowsSSHDServiceCommand())
 	root.AddCommand(windowsSSHGenerationCommand())
+	root.AddCommand(consoleFlushCommand())
 	root.AddCommand(privilegedHostServiceCommand())
 	root.AddCommand(configRuntimeCommand())
 	root.AddCommand(runDaemonCommand())
@@ -224,6 +226,12 @@ func windowsSSHDServiceCommand() *cobra.Command {
 	command.Flags().String("instance", "", "enrolled OS-user instance")
 	_ = command.MarkFlagRequired("instance")
 	return command
+}
+
+// consoleFlushCommand is started by pty.Process.Interrupt inside a session's pseudoconsole to discard its queued input.
+func consoleFlushCommand() *cobra.Command {
+	return &cobra.Command{Use: "__flush-console-input", Hidden: true, Args: commandArgs(cobra.NoArgs), SilenceUsage: true, SilenceErrors: true,
+		RunE: func(*cobra.Command, []string) error { return pty.FlushConsoleInput() }}
 }
 
 func localDaemonCommand() *cobra.Command {
