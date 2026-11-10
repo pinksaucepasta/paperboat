@@ -585,6 +585,30 @@ type edgeNodeObservation struct {
 	Draining      bool      `json:"draining"`
 	ActiveStreams uint32    `json:"active_streams"`
 	At            time.Time `json:"at"`
+	// ErrorPages are the support references this edge's error pages showed visitors since its last heartbeat.
+	ErrorPages []edgeErrorPage `json:"error_pages,omitempty"`
+}
+
+// edgeErrorPage is one error page an edge answered: the reference its footer and X-Paperboat-Reference carry.
+type edgeErrorPage struct {
+	Reference string `json:"support_reference"`
+	Status    int    `json:"status"`
+}
+
+// maxEdgeErrorPages bounds the references taken from one heartbeat (the edge sends at most as many).
+const maxEdgeErrorPages = 64
+
+// recordEdgeErrorPages stores each page's reference in support_reports, so a reference a visitor read off an edge error
+// page resolves like any other support reference. A malformed entry is skipped; nothing here fails the heartbeat.
+func recordEdgeErrorPages(ctx context.Context, pages []edgeErrorPage) {
+	for i, page := range pages {
+		if i >= maxEdgeErrorPages {
+			return
+		}
+		if page.Status >= 400 && page.Status <= 599 {
+			supportreport.RecordReferencedFromContext(ctx, page.Reference, "http_edge", "edge_error_page", page.Status)
+		}
+	}
 }
 
 type edgeUsageRequest struct {
@@ -947,6 +971,7 @@ func (s *EdgeService) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		writeEdgeError(w, r, http.StatusServiceUnavailable, "control_unavailable", true, 1000, err)
 		return
 	}
+	recordEdgeErrorPages(r.Context(), input.ErrorPages)
 	writeHeartbeatAnswer(w, s.ingressLimits)
 }
 

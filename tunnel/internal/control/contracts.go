@@ -295,6 +295,15 @@ type NodeObservation struct {
 	Draining      bool      `json:"draining"`
 	ActiveStreams uint32    `json:"active_streams"`
 	At            time.Time `json:"at"`
+	// ErrorPages are the support references this edge's error pages showed visitors since the last heartbeat; the
+	// server stores each in support_reports so the reference resolves.
+	ErrorPages []ErrorPageReference `json:"error_pages,omitempty"`
+}
+
+// ErrorPageReference is one error page an edge answered: the reference its footer and X-Paperboat-Reference carry.
+type ErrorPageReference struct {
+	Reference string `json:"support_reference"`
+	Status    int    `json:"status"`
 }
 
 type NodeSink interface {

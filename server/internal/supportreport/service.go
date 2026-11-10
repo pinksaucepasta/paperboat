@@ -448,6 +448,28 @@ func (s *Service) RecordRejection(ctx context.Context, component, operation, cod
 	return s.enqueue(ctx, fault, nil, false, true)
 }
 
+// RecordReferenced stores a refusal under a reference minted elsewhere and already shown to a person, such as an edge
+// error page's footer, so support finds it with the same lookup as any other reference. It is counted with the other
+// rejections, so a flood of pages cannot crowd out failure reports.
+func (s *Service) RecordReferenced(ctx context.Context, reference, operation, code string, status int) Fault {
+	fault := ProjectFault(ctx, "paperboat-server", operation, "http_handler", code, WithDiagnosticStatus(status, errReferencedRefusal))
+	fault.Outcome, fault.Severity, fault.SupportReference = "rejected", "warning", reference
+	if s == nil || !ValidReference(reference) {
+		return fault
+	}
+	return s.enqueue(ctx, fault, nil, false, true)
+}
+
+var errReferencedRefusal = errors.New("refusal shown with a reference")
+
+// RecordReferencedFromContext is RecordReferenced on the reporter bound to this request (Service.Begin); with none
+// bound it records nothing.
+func RecordReferencedFromContext(ctx context.Context, reference, operation, code string, status int) {
+	if sc, ok := ctx.Value(signalContextKey{}).(signalContext); ok && sc.service != nil {
+		sc.service.RecordReferenced(ctx, reference, operation, code, status)
+	}
+}
+
 func (s *Service) enqueueFault(ctx context.Context, fault Fault, stack *sentry.Stacktrace, unexpected bool) Fault {
 	return s.enqueue(ctx, fault, stack, unexpected, false)
 }

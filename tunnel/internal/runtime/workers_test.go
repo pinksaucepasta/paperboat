@@ -10,6 +10,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/node"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/testedge"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/usage"
 )
@@ -165,6 +166,52 @@ func TestNodeWorkerReportsReadyAndDrain(t *testing.T) {
 	}
 	if observation, _ := fake.Node("edge"); observation.Ready || !observation.Draining {
 		t.Fatalf("final = %+v", observation)
+	}
+}
+
+// observedHeartbeats records every heartbeat an edge sends.
+type observedHeartbeats struct {
+	control.NodeSink
+	mu   sync.Mutex
+	seen []control.NodeObservation
+}
+
+func (o *observedHeartbeats) Heartbeat(ctx context.Context, observation control.NodeObservation) (control.NodeAnswer, error) {
+	o.mu.Lock()
+	o.seen = append(o.seen, observation)
+	o.mu.Unlock()
+	return o.NodeSink.Heartbeat(ctx, observation)
+}
+
+// The references of the error pages an edge showed visitors ride the next heartbeat once, then are forgotten.
+func TestNodeWorkerHeartbeatCarriesErrorPageReferencesOnce(t *testing.T) {
+	telemetry.TakeErrorPages()
+	state := node.New("edge")
+	state.MarkReady()
+	manager, _ := node.NewManager(state, 2)
+	sink := &observedHeartbeats{NodeSink: testedge.New()}
+	pulse := make(chan time.Time)
+	worker := &NodeWorker{Manager: manager, Sink: sink, Registration: testNodeRegistration(t, "edge", "process", 2), Pulse: pulse, Now: func() time.Time { return time.Unix(10, 0) }}
+	if err := worker.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer worker.Shutdown(context.Background())
+	reference := "support_11111111-2222-4333-8444-555555555555"
+	telemetry.NoteErrorPage(reference, 502)
+	pulse <- time.Unix(11, 0)
+	pulse <- time.Unix(12, 0) // accepted only once the first heartbeat is done
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	carried := 0
+	for _, observation := range sink.seen {
+		for _, page := range observation.ErrorPages {
+			if page.Reference == reference && page.Status == 502 {
+				carried++
+			}
+		}
+	}
+	if carried != 1 {
+		t.Fatalf("the reference rode %d heartbeats, want 1: %+v", carried, sink.seen)
 	}
 }
 

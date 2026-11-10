@@ -254,3 +254,34 @@ func TestNewReferenceFallsBackWhenRandomFails(t *testing.T) {
 		seen[ref] = true
 	}
 }
+
+// Every 5xx page and each sampled 4xx page hands its reference to the next heartbeat, which stores it in support_reports.
+func TestErrorPageNotesItsReferenceForTheControlPlane(t *testing.T) {
+	sampler := fourxxSample
+	fourxxSample = &sampledLog{limit: 1 << 20}
+	defer func() { fourxxSample = sampler }()
+	edgetelemetry.TakeErrorPages()
+	var out bytes.Buffer
+	defer edgetelemetry.CaptureLog(&out)()
+	want := map[string]int{}
+	for _, status := range []int{404, 502, 503} {
+		w := httptest.NewRecorder()
+		writeErrorPage(w, status, "")
+		want[w.Header().Get("X-Paperboat-Reference")] = status
+	}
+	got := map[string]int{}
+	for _, page := range edgetelemetry.TakeErrorPages() {
+		got[page.Reference] = page.Status
+	}
+	if len(got) != 3 {
+		t.Fatalf("noted %v, want %v", got, want)
+	}
+	for reference, status := range want {
+		if got[reference] != status {
+			t.Errorf("reference %s noted with status %d, want %d", reference, got[reference], status)
+		}
+	}
+	if again := edgetelemetry.TakeErrorPages(); len(again) != 0 {
+		t.Fatalf("pages noted twice: %v", again)
+	}
+}

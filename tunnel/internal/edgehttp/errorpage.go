@@ -194,10 +194,13 @@ func writeErrorPageLink(w http.ResponseWriter, status int, message, linkText, li
 	case status >= http.StatusInternalServerError:
 		// Every 5xx the edge itself answers is a user-visible failure; the deploy gate counts these.
 		edgetelemetry.Log(context.Background(), edgetelemetry.SeverityWarn, "edge_http_5xx", edgetelemetry.OutcomeFailed, "status", status, "reference", ref)
+		edgetelemetry.NoteErrorPage(ref, status)
 	case status >= http.StatusBadRequest:
-		// A 4xx flood (a scanner, a dead link in a page) must not become a log flood: sampled, 5xx never are.
+		// A 4xx flood (a scanner, a dead link in a page) must not become a log flood: sampled, 5xx never are. The same
+		// sample decides which 4xx references go to the server's support_reports.
 		if ok, suppressed := fourxxSample.allow(time.Now()); ok {
 			edgetelemetry.Log(context.Background(), edgetelemetry.SeverityInfo, "edge_http_4xx", edgetelemetry.OutcomeRejected, "status", status, "reference", ref, "suppressed", suppressed)
+			edgetelemetry.NoteErrorPage(ref, status)
 		}
 	}
 	h := w.Header()

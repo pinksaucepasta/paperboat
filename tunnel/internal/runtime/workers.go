@@ -27,6 +27,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgehttp"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/node"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/usage"
 )
 
@@ -211,6 +212,10 @@ func (w *NodeWorker) run(ctx context.Context) {
 
 func (w *NodeWorker) heartbeat(ctx context.Context, at time.Time) error {
 	observation := w.Manager.Observation(w.Registration.NodeID, w.Registration.ProcessEpoch, at)
+	// shortcut: references of a heartbeat that fails are dropped (bounded, still in the edge log), not re-queued.
+	for _, page := range telemetry.TakeErrorPages() {
+		observation.ErrorPages = append(observation.ErrorPages, control.ErrorPageReference{Reference: page.Reference, Status: page.Status})
+	}
 	answer, err := w.Sink.Heartbeat(ctx, observation)
 	if errors.Is(err, control.ErrNodeObservationStale) {
 		answer, err = w.Manager.RegisterAndHeartbeat(ctx, w.Sink, w.Registration, at)
