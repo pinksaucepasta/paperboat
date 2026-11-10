@@ -3,8 +3,7 @@
 
 multi_account_host.sh with the two-user host being a Windows machine instead of a container: its host side runs
 inside one container shell on HOST, a Windows machine is driven from here over SSH, so this is its own file.
-Two OS users on WINDOWS (the SSH host; user A is its login, user B is WIN_USER_B, default pbu2, reachable as
-pbu2@WINDOWS), each paired to its own account, use machines of the same name at the same time. HOST is the Docker
+Two OS users on WINDOWS (the SSH host; user A is its login, user B a throwaway local administrator the script creates and removes), each paired to its own account, use machines of the same name at the same time. HOST is the Docker
 host of fresh_pair_lib.sh (its pb is account A), BINARY the Linux build on this machine, PB_EXE the Windows build
 on this machine, MINT_B a command on HOST that runs `pb` signed in to a second account.
 Fresh throwaway containers: target TA in account A and TB in account B, both named N, each serving its own marker
@@ -16,6 +15,7 @@ cleanup_test_account.py, B with MINT_B), the containers are removed and both use
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import time
@@ -24,6 +24,7 @@ import winhost
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = 18480
+USER_B = 'pbmahu2'
 
 
 def host(target, script, timeout=900):
@@ -36,19 +37,16 @@ def host(target, script, timeout=900):
 class User:
     """One OS user of the Windows machine with its own pb."""
 
-    def __init__(self, target):
-        self.device = winhost.WindowsDevice(target=target, password='')
+    def __init__(self, target, password=None):
+        self.device = winhost.WindowsDevice(target=target, password=password)
         self.pb = None
 
     def json(self, *args, timeout=420):
         out = self.device.run([self.pb, *args, '--json'], timeout=timeout).stdout
         return json.loads(out[out.index('{'):])
 
-    def install_and_pair(self, exe, token, name):
-        build = self.device.home() / 'pb-mah.exe'
-        scp = ['scp', '-q', '-o', 'BatchMode=yes', exe, '%s:pb-mah.exe' % self.device.target]
-        subprocess.run(scp, check=True, timeout=600)
-        self.pb = str(build)
+    def install_and_pair(self, build, token, name):
+        self.pb = build
         receipt = self.json('install', timeout=600)
         assert receipt.get('ok'), 'install failed: ' + json.dumps(receipt.get('error', {}))[:200]
         self.pb = receipt['data']['executable']
@@ -58,7 +56,6 @@ class User:
             receipt = self.json('pair', '--enrollment-token-file', str(token_file), '--name', name)
         finally:
             token_file.unlink()
-            build.unlink()
         assert receipt.get('ok'), 'pair failed: ' + json.dumps(receipt.get('error', {}))[:200]
         return receipt['data']['machine_id']
 
@@ -92,7 +89,11 @@ def main():
     target, binary, windows, exe, mint_b = sys.argv[1:6]
     stamp = int(time.time())
     ta, tb, name = 'mah-ta-%d' % stamp, 'mah-tb-%d' % stamp, 'winpool-mah-%d' % stamp
-    user_a, user_b = User(windows), User('%s@%s' % (os.environ.get('WIN_USER_B', 'pbu2'), windows))
+    # User B is a throwaway local administrator (an SSH session is elevated, as pb install needs) with a random
+    # password; it and its profile are removed on every exit path.
+    password = secrets.token_urlsafe(18) + 'aA1!'
+    user_a, user_b = User(windows), User('%s@%s' % (USER_B, windows), password)
+    shared = r'C:\Users\Public\pb-mah.exe'
     ids_a, ids_b, detail, status = [], [], '', 'FAIL'
     try:
         subprocess.run(['scp', '-q', binary, '%s:/tmp/%s-pb' % (target, ta)], check=True, timeout=600)
@@ -114,8 +115,12 @@ echo "B_ADD=$({mint_b} machine add --name {name}-hb --json | tr -d '\\n')"
             added = re.search(r'^%s_ADD=(\{.*\})$' % side, out, re.M)
             assert added, 'targets were not prepared on %s: %s' % (target, re.sub(r'_ADD=.*', '_ADD=…', out)[-400:])
             tokens[side] = re.search(r"p=([^'\"&]+)", json.loads(added.group(1))['data']['windows_command']).group(1)[-26:]
-        ids_a.append(user_a.install_and_pair(exe, tokens['A'], name + '-ha'))
-        ids_b.append(user_b.install_and_pair(exe, tokens['B'], name + '-hb'))
+        scp = ['scp', '-q', '-o', 'StrictHostKeyChecking=accept-new', exe, '%s:/%s' % (windows, shared.replace('\\', '/'))]
+        subprocess.run((['sshpass', '-e'] + scp) if user_a.device.password else (scp[:1] + ['-o', 'BatchMode=yes'] + scp[1:]), check=True, timeout=600, env=user_a.device.ssh_environment())
+        user_a.device.run(['net.exe', 'user', USER_B, password, '/add', '/y'])
+        user_a.device.run(['net.exe', 'localgroup', 'Administrators', USER_B, '/add'])
+        ids_a.append(user_a.install_and_pair(shared, tokens['A'], name + '-ha'))
+        ids_b.append(user_b.install_and_pair(shared, tokens['B'], name + '-hb'))
         guard = user_a.device.run([user_a.pb, 'daemon', 'machine-guard', 'install'], timeout=300)
         assert guard.returncode == 0, 'machine guard install failed: ' + (guard.stdout + guard.stderr)[-300:]
         domain_a, domain_b = user_a.domain(), user_b.domain()
@@ -140,6 +145,11 @@ echo "B_ADD=$({mint_b} machine add --name {name}-hb --json | tr -d '\\n')"
     finally:
         for user in (user_b, user_a):
             user.uninstall()
+        try:  # the throwaway user and its profile, and the shared copy of the build
+            user_a.device.run(['net.exe', 'user', USER_B, '/delete'])
+            user_a.device.run(['cmd.exe', '/c', 'rmdir /s /q C:\\Users\\%s & del /f /q %s' % (USER_B, shared)])
+        except (winhost.DeviceError, subprocess.TimeoutExpired):
+            detail += '; the throwaway user %s was not removed' % USER_B
         cleaned = host(target, 'sudo -n docker rm -f %s %s >/dev/null 2>&1; rm -f /tmp/%s-pb\n' % (ta, tb, ta) + ''.join(
             # B's machines are revoked by exact id with the second account's own pb.
             '%s machine revoke %s --json --confirm "$(%s machine revoke %s --json | python3 -c \'import json,sys;print(json.load(sys.stdin)["data"]["confirmation_token"])\')" >/dev/null 2>&1 || echo REVOKE_FAILED %s\n'

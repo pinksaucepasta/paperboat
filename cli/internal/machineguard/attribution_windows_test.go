@@ -56,6 +56,29 @@ func TestTCPTableAnswersForTheConnectingSocketOnly(t *testing.T) {
 	}
 }
 
+func tcp6Row(local, remote netip.AddrPort, state, pid uint32, bound int64) []byte {
+	row := make([]byte, tcp6RowOwnerModuleLen)
+	copy(row, local.Addr().AsSlice())
+	binary.BigEndian.PutUint16(row[20:], local.Port())
+	copy(row[24:], remote.Addr().AsSlice())
+	binary.BigEndian.PutUint16(row[44:], remote.Port())
+	binary.LittleEndian.PutUint32(row[48:], state)
+	binary.LittleEndian.PutUint32(row[52:], pid)
+	binary.LittleEndian.PutUint64(row[56:], uint64(bound))
+	return row
+}
+
+// An IPv6 loopback client (the preview proxy listens on ::1) is attributed from the IPv6 table.
+func TestTCP6TableAnswersForTheConnectingSocketOnly(t *testing.T) {
+	client, gateway := netip.MustParseAddrPort("[::1]:50123"), netip.MustParseAddrPort("[::1]:8443")
+	tuple := socketTuple{Source: client, Destination: gateway}
+	table := tcpTable(2, tcp6Row(gateway, client, tcpStateEstablished, 4, 90), tcp6Row(client, gateway, tcpStateEstablished, 4321, 100))
+	owners, err := matchTCPOwners(table, tuple)
+	if err != nil || len(owners) != 1 || owners[0].UID != 4321 || owners[0].bound != 100 || !owners[0].Established {
+		t.Fatalf("owners=%+v err=%v; want the connecting process 4321 only", owners, err)
+	}
+}
+
 // F23-02: no row, two rows, a closing socket, a failed read and a process that cannot be the one that bound the
 // connection are all refused; the user is looked up only for a single established owner.
 func TestWindowsAttributionFailsClosed(t *testing.T) {
@@ -151,6 +174,24 @@ func TestConnectionOwnerSIDOnTheLiveKernel(t *testing.T) {
 	owners, err := lookupTCPOwners(tuple)
 	if err != nil || len(owners) != 1 || owners[0].UID != uint32(os.Getpid()) {
 		t.Fatalf("owners=%+v err=%v; want this process", owners, err)
+	}
+	v6, err := net.Listen("tcp6", "[::1]:0")
+	if err != nil {
+		t.Skipf("no IPv6 loopback: %v", err)
+	}
+	defer v6.Close()
+	v6client, err := net.Dial("tcp6", v6.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v6client.Close()
+	v6accepted, err := v6.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer v6accepted.Close()
+	if sid, err := connectionOwnerSID(v6accepted); err != nil || sid != self {
+		t.Fatalf("IPv6 loopback connection attributed to %q, %v; want %s", sid, err, self)
 	}
 	var created, exited, kernel, user windows.Filetime
 	if err := windows.GetProcessTimes(windows.CurrentProcess(), &created, &exited, &kernel, &user); err != nil {

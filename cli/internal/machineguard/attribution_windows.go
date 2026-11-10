@@ -23,6 +23,7 @@ const (
 	tcpTableOwnerModuleConnections = 7        // TCP_TABLE_OWNER_MODULE_CONNECTIONS
 	tcpTableHeaderLen              = 8        // dwNumEntries, padded to the rows' alignment
 	tcpRowOwnerModuleLen           = 160      // MIB_TCPROW_OWNER_MODULE
+	tcp6RowOwnerModuleLen          = 192      // MIB_TCP6ROW_OWNER_MODULE
 	tcpStateEstablished            = 5        // MIB_TCP_STATE_ESTAB
 	tcpStateCloseWait              = 8        // MIB_TCP_STATE_CLOSE_WAIT; 6 and 7 are FIN_WAIT1 and FIN_WAIT2
 	maxTCPTableLen                 = 64 << 20 // about 400,000 connections
@@ -65,13 +66,16 @@ func attributeSID(accepted net.Conn, lookup func(socketTuple) ([]tcpOwner, error
 }
 
 func lookupTCPOwners(tuple socketTuple) ([]tcpOwner, error) {
-	if !tuple.Source.Addr().Is4() || !tuple.Destination.Addr().Is4() {
+	family := uint32(windows.AF_INET)
+	if tuple.Source.Addr().Is6() && tuple.Destination.Addr().Is6() {
+		family = windows.AF_INET6
+	} else if !tuple.Source.Addr().Is4() || !tuple.Destination.Addr().Is4() {
 		return nil, errAttributionUnsupported
 	}
 	size := uint32(64 << 10)
 	for range 4 {
 		table := make([]byte, size)
-		result, _, _ := getExtendedTCPTable.Call(uintptr(unsafe.Pointer(&table[0])), uintptr(unsafe.Pointer(&size)), 0, windows.AF_INET, tcpTableOwnerModuleConnections, 0)
+		result, _, _ := getExtendedTCPTable.Call(uintptr(unsafe.Pointer(&table[0])), uintptr(unsafe.Pointer(&size)), 0, uintptr(family), tcpTableOwnerModuleConnections, 0)
 		switch windows.Errno(result) {
 		case windows.ERROR_SUCCESS:
 			return matchTCPOwners(table, tuple)
@@ -94,21 +98,35 @@ func matchTCPOwners(table []byte, tuple socketTuple) ([]tcpOwner, error) {
 	}
 	rows := table[tcpTableHeaderLen:]
 	count := binary.LittleEndian.Uint32(table)
-	if uint64(count)*tcpRowOwnerModuleLen > uint64(len(rows)) {
+	// Row layouts (tcpmib.h), little-endian words, addresses and ports in network byte order. IPv4: state, local
+	// address, local port, remote address, remote port, pid, bind time. IPv6: local address, scope, port, remote
+	// address, scope, port, state, pid, bind time.
+	length, v6 := tcpRowOwnerModuleLen, tuple.Source.Addr().Is6()
+	if v6 {
+		length = tcp6RowOwnerModuleLen
+	}
+	if uint64(count)*uint64(length) > uint64(len(rows)) {
 		return nil, errors.New("truncated TCP connection table")
 	}
 	var owners []tcpOwner
-	for ; count > 0; count, rows = count-1, rows[tcpRowOwnerModuleLen:] {
-		// state, local address, local port, remote address, remote port, pid: 4 bytes each, addresses and ports
-		// in network byte order; then the bind timestamp.
-		local := netip.AddrPortFrom(netip.AddrFrom4([4]byte(rows[4:8])), binary.BigEndian.Uint16(rows[8:10]))
-		remote := netip.AddrPortFrom(netip.AddrFrom4([4]byte(rows[12:16])), binary.BigEndian.Uint16(rows[16:18]))
+	for ; count > 0; count, rows = count-1, rows[length:] {
+		var local, remote netip.AddrPort
+		var state, pid uint32
+		var bound int64
+		if v6 {
+			local = netip.AddrPortFrom(netip.AddrFrom16([16]byte(rows[0:16])), binary.BigEndian.Uint16(rows[20:22]))
+			remote = netip.AddrPortFrom(netip.AddrFrom16([16]byte(rows[24:40])), binary.BigEndian.Uint16(rows[44:46]))
+			state, pid, bound = binary.LittleEndian.Uint32(rows[48:]), binary.LittleEndian.Uint32(rows[52:]), int64(binary.LittleEndian.Uint64(rows[56:]))
+		} else {
+			local = netip.AddrPortFrom(netip.AddrFrom4([4]byte(rows[4:8])), binary.BigEndian.Uint16(rows[8:10]))
+			remote = netip.AddrPortFrom(netip.AddrFrom4([4]byte(rows[12:16])), binary.BigEndian.Uint16(rows[16:18]))
+			state, pid, bound = binary.LittleEndian.Uint32(rows), binary.LittleEndian.Uint32(rows[20:]), int64(binary.LittleEndian.Uint64(rows[24:]))
+		}
 		if local != tuple.Source || remote != tuple.Destination {
 			continue
 		}
-		state := binary.LittleEndian.Uint32(rows)
-		owners = append(owners, tcpOwner{bound: int64(binary.LittleEndian.Uint64(rows[24:32])), socketOwner: socketOwner{
-			Tuple: tuple, UID: binary.LittleEndian.Uint32(rows[20:24]),
+		owners = append(owners, tcpOwner{bound: bound, socketOwner: socketOwner{
+			Tuple: tuple, UID: pid,
 			Established: state == tcpStateEstablished, Live: state >= tcpStateEstablished && state <= tcpStateCloseWait,
 		}})
 	}
