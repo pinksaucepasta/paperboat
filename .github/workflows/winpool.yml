@@ -65,6 +65,12 @@ jobs:
             throw "sshd would listen beyond loopback or accept passwords: $listen"
           }
 
+          # pb pair installs OpenSSH through the WinGet PowerShell module, whose `winget source add` never returns here
+          # while winget draws its progress bar into the module's pipe (pair then fails after 3 minutes).
+          $winget = "$env:LOCALAPPDATA\Packages\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe\LocalState"
+          New-Item -ItemType Directory -Force $winget | Out-Null
+          Set-Content -Encoding ascii "$winget\settings.json" '{"visual":{"progressBar":"disabled"}}'
+
           $dir = "$env:USERPROFILE\.ssh"
           New-Item -ItemType Directory -Force $dir | Out-Null
           $key = "$dir\winpool_tunnel"; $known = "$dir\winpool_known_hosts"
