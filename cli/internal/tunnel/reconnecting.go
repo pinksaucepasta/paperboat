@@ -285,9 +285,10 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 			return
 		}
 		next := c.probed.Swap(nil)
-		if next != nil && next.stalled != conn {
-			// The probe connected after this supervisor had replaced the link it was made for. Adopting it now
-			// attached a second time when the replacement ended: an exited terminal came back and replayed its output.
+		if next != nil && (next.stalled != conn || c.ctx.Err() != nil) {
+			// The probe connected after this supervisor had replaced the link it was made for, or the terminal was
+			// closed. Adopting it attached a second time when the replacement ended (an exited terminal came back and
+			// replayed its output), or after Close, which left the link and this goroutine behind.
 			c.recordOldLink(connection, "supervise", "probe_discarded", nil)
 			_ = next.conn.Close()
 			next = nil
@@ -356,6 +357,8 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 			conn = next
 			attachedAt = time.Now()
 			c.setCurrent(next)
+			// A probe that stored its link while this redial ran was made for the link just replaced.
+			c.closeProbed()
 			c.notify(ReconnectRecovered)
 			c.record("terminal.reconnect", "success", attemptStarted)
 			return nil
@@ -654,6 +657,7 @@ func (c *ReconnectingConn) Close() error {
 		if c.cancel != nil {
 			c.cancel()
 		}
+		c.closeProbed() // before the current link ends, so the supervisor finds none to adopt
 		c.mu.RLock()
 		conn := c.current
 		c.mu.RUnlock()
@@ -662,4 +666,11 @@ func (c *ReconnectingConn) Close() error {
 		}
 	})
 	return err
+}
+
+// closeProbed closes a probe link nobody will adopt.
+func (c *ReconnectingConn) closeProbed() {
+	if stale := c.probed.Swap(nil); stale != nil {
+		_ = stale.conn.Close()
+	}
 }

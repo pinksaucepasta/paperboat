@@ -667,6 +667,56 @@ func TestReconnectingConnDropsAProbeMadeForAnEarlierLink(t *testing.T) {
 	}
 }
 
+// A probe can store its link while the supervisor is already redialing the same ended link. Once the redial has a
+// link, the probe's is closed at once: the terminal never holds two.
+func TestReconnectingConnClosesAProbeThatStoredDuringTheSupervisorsRedial(t *testing.T) {
+	first := &blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}
+	second := &blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}
+	stale := &blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}
+	dialing, release := make(chan struct{}), make(chan struct{})
+	c := NewReconnectingConn(context.Background(), first, 2, 0, func(context.Context) (Conn, error) {
+		close(dialing)
+		<-release
+		return second, nil
+	})
+	defer c.Close()
+	c.Redial() // the supervisor leaves the first link and redials
+	<-dialing
+	c.probed.Store(&probedLink{stalled: first, conn: stale}) // the probe stores its link in that window
+	close(release)
+	deadline := time.Now().Add(5 * time.Second)
+	for !stale.once.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("the probe's link stayed open beside the supervisor's")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if second.once.Load() {
+		t.Fatal("the supervisor's own link was closed")
+	}
+}
+
+// Close ends a stored probe link too, and the supervisor does not adopt one after Close.
+func TestReconnectingConnCloseEndsAStoredProbe(t *testing.T) {
+	first := &blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}
+	stale := &blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}
+	c := NewReconnectingConn(context.Background(), first, 2, 0, func(context.Context) (Conn, error) {
+		return nil, errors.New("must not redial")
+	})
+	c.probed.Store(&probedLink{stalled: first, conn: stale})
+	_ = c.Close()
+	ended := make(chan struct{})
+	go func() { _, _ = c.Wait(); close(ended) }()
+	select {
+	case <-ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the supervisor adopted a probe after Close and never ended")
+	}
+	if !stale.once.Load() {
+		t.Fatal("Close left the stored probe link open")
+	}
+}
+
 // F3-15 N4 (1 run in 16): the daemon tore down both silent links at once and each reported a clean end (code 0, no error),
 // which ended the terminal as if the shell had exited, 46 s into a 45 s outage. A shell exit is heard before it is
 // reported, and hearing the host clears the stall; a clean end of a link still flagged silent is a local teardown, so the
