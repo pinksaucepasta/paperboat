@@ -620,7 +620,9 @@ func expectedBridgePath(path string) (string, error) {
 	return normalizeBridgePath(windows.UTF16ToString(buffer[:n])), nil
 }
 
-func verifyHandleFinalPath(handle windows.Handle, expected string) error {
+// VerifyHandleFinalPath refuses an open handle that is not the object expected names: Windows reports where
+// the handle really is, so a link on the way to it, or a swapped directory, gives another path.
+func VerifyHandleFinalPath(handle windows.Handle, expected string) error {
 	actual, err := finalBridgePath(handle)
 	if err != nil {
 		return err
@@ -680,7 +682,7 @@ func openBridgeDirectoryChain(path string, finalAccess uint32) ([]windows.Handle
 			closeAll()
 			return nil, "", fmt.Errorf("validate protected directory %q: %w", component, inspectErr)
 		}
-		if pathErr := verifyHandleFinalPath(handle, component); pathErr != nil {
+		if pathErr := VerifyHandleFinalPath(handle, component); pathErr != nil {
 			_ = windows.CloseHandle(handle)
 			closeAll()
 			return nil, "", fmt.Errorf("validate protected directory %q: %w", component, pathErr)
@@ -704,7 +706,7 @@ func openBridgeFile(path string, access uint32) (windows.Handle, error) {
 		_ = windows.CloseHandle(handle)
 		return 0, inspectErr
 	}
-	if pathErr := verifyHandleFinalPath(handle, path); pathErr != nil {
+	if pathErr := VerifyHandleFinalPath(handle, path); pathErr != nil {
 		_ = windows.CloseHandle(handle)
 		return 0, pathErr
 	}
@@ -732,7 +734,7 @@ func openBridgeHandles(paths bridgePaths) (*bridgeHandles, error) {
 			return nil, fmt.Errorf("open protected %s: %w", item.name, openErr)
 		}
 		want := directoryPath + `\` + item.name
-		if finalErr := verifyHandleFinalPath(file, want); finalErr != nil {
+		if finalErr := VerifyHandleFinalPath(file, want); finalErr != nil {
 			_ = windows.CloseHandle(file)
 			closeOnError()
 			return nil, fmt.Errorf("validate protected %s: %w", item.name, finalErr)
@@ -789,7 +791,7 @@ func pinExecutable(path string) (string, windows.Handle, error) {
 		_ = windows.CloseHandle(handle)
 		return "", 0, fmt.Errorf("validate elevation executable: %w", err)
 	}
-	if err := verifyHandleFinalPath(handle, abs); err != nil {
+	if err := VerifyHandleFinalPath(handle, abs); err != nil {
 		_ = windows.CloseHandle(handle)
 		return "", 0, fmt.Errorf("validate elevation executable identity: %w", err)
 	}
@@ -818,7 +820,7 @@ func copyBridgeExecutable(ctx context.Context, sourcePath string, source windows
 	if _, err := inspectBridgeHandle(source, false); err != nil {
 		return nil, err
 	}
-	if err := verifyHandleFinalPath(source, sourcePath); err != nil {
+	if err := VerifyHandleFinalPath(source, sourcePath); err != nil {
 		return nil, err
 	}
 	size, err := bridgeHandleSize(source)
@@ -858,7 +860,7 @@ func copyBridgeExecutable(ctx context.Context, sourcePath string, source windows
 	if _, err := inspectBridgeHandle(writer, false); err != nil {
 		return nil, err
 	}
-	if err := verifyHandleFinalPath(writer, directoryPath+`\`+"helper.exe"); err != nil {
+	if err := VerifyHandleFinalPath(writer, directoryPath+`\`+"helper.exe"); err != nil {
 		return nil, err
 	}
 	if err := applyProtectedACLHandle(writer, ownerSID, false); err != nil {
@@ -906,7 +908,7 @@ func copyBridgeExecutable(ctx context.Context, sourcePath string, source windows
 	if err != nil {
 		return nil, err
 	}
-	if err := verifyHandleFinalPath(helper.handle, directoryPath+`\`+"helper.exe"); err != nil {
+	if err := VerifyHandleFinalPath(helper.handle, directoryPath+`\`+"helper.exe"); err != nil {
 		return nil, err
 	}
 	if err := verifyProtectedACLHandle(helper.handle, ownerSID, false); err != nil {
@@ -1077,7 +1079,7 @@ func applyProtectedACL(path, ownerSID string, directory bool) error {
 	if _, err := inspectBridgeHandle(handle, false); err != nil {
 		return err
 	}
-	if err := verifyHandleFinalPath(handle, path); err != nil {
+	if err := VerifyHandleFinalPath(handle, path); err != nil {
 		return err
 	}
 	return applyProtectedACLHandle(handle, ownerSID, false)
@@ -1185,7 +1187,7 @@ func createProtectedPlaceholder(path, ownerSID, directoryPath string) error {
 	if _, err := inspectBridgeHandle(handle, false); err != nil {
 		return err
 	}
-	if err := verifyHandleFinalPath(handle, directoryPath+`\`+filepath.Base(path)); err != nil {
+	if err := VerifyHandleFinalPath(handle, directoryPath+`\`+filepath.Base(path)); err != nil {
 		return err
 	}
 	if err := applyProtectedACLHandle(handle, ownerSID, false); err != nil {
