@@ -243,7 +243,8 @@ func applyWindowsPrivilegedACL(path string, directory bool) error {
 	if directory {
 		inherit = "OICI"
 	}
-	descriptor, err := windows.SecurityDescriptorFromString("D:P(A;" + inherit + ";FA;;;SY)(A;" + inherit + ";FA;;;BA)")
+	access := "D:P(A;" + inherit + ";FA;;;SY)(A;" + inherit + ";FA;;;BA)"
+	descriptor, err := windows.SecurityDescriptorFromString(access)
 	if err != nil {
 		return err
 	}
@@ -257,9 +258,29 @@ func applyWindowsPrivilegedACL(path string, directory bool) error {
 	}
 	// LocalSystem owns updater state whoever created it: the elevated installer makes the directory first when it
 	// checks an official installation, and the release eligibility store refuses a directory another principal owns.
-	return windowssecurity.WithRestorePrivilege(func() error {
+	if err := windowssecurity.WithRestorePrivilege(func() error {
 		return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, system, nil, dacl, nil)
-	})
+	}); err != nil {
+		return err
+	}
+	return verifyWindowsPrivilegedACL(path, access)
+}
+
+// verifyWindowsPrivilegedACL reads back what was set: the set goes by path, so a path that was swapped, or a set
+// that did not take, must not pass as secured.
+func verifyWindowsPrivilegedACL(path, access string) error {
+	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
+	if err != nil {
+		return err
+	}
+	owned, err := windowssecurity.CheckOwnerMatchesSID(path, system)
+	if err != nil {
+		return err
+	}
+	if !owned || !windowssecurity.ProtectedDACLMatches(path, access) {
+		return ErrInvalidWindowsConfig
+	}
+	return nil
 }
 func recoverWindowsSlots(ctx context.Context, config WindowsConfig) error {
 	verify := config.VerifyExecutable

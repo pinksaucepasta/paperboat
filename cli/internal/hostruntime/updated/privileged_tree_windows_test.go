@@ -26,6 +26,9 @@ func TestUpdaterStateIsOwnedByLocalSystemWhoeverCreatedIt(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "tuf", "index", "root.json"), []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := verifyWindowsPrivilegedACL(root, "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"); err == nil {
+		t.Fatal("a directory this account just created passed as secured")
+	}
 	if err := secureWindowsPrivilegedTree(root); errors.Is(err, windows.ERROR_INVALID_OWNER) {
 		// The service is LocalSystem and may always name itself owner. An administrator may only where its restore
 		// privilege is honoured for this call (victus over SSH: yes; a hosted CI runner: no).
