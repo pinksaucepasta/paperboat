@@ -27,7 +27,10 @@ import subprocess
 import time
 import uuid
 
-PB = Path.home() / '.local/bin/pb'
+import windows_target
+import winhost
+
+PB = winhost.pb_path()
 WAIT_SECONDS = 180
 DIAGNOSTICS = '$HOME/.local/state/paperboat/diagnostics'
 DARWIN = platform.system() == 'Darwin'
@@ -42,13 +45,15 @@ class Output:
 
 def run(*args, stdin=None, timeout=90, records_value=False):
     """Run pb. A command that prints a value on purpose (exec printenv) is not searched for leaks."""
-    result = subprocess.run([str(PB), *args], input=stdin, capture_output=True, text=True, timeout=timeout)
+    result = winhost.pb_text(PB, args, input=stdin, timeout=timeout)
     if not records_value:
         Output.seen.extend([result.stdout, result.stderr])
     return result.returncode, result.stdout, result.stderr
 
 
 def own_machine_id():
+    if winhost.device():
+        return json.loads((winhost.device().runtime_dir() / 'machine-registration.json').read_text())['machine_id']
     default = Path.home() / ('Library/Application Support/Paperboat/runtime' if DARWIN else '.local/state/paperboat/runtime')
     root = Path(os.environ.get('PAPERBOAT_RUNTIME_ROOT', default))
     return json.loads((root / 'machine-registration.json').read_text())['machine_id']
@@ -64,9 +69,25 @@ def resolve(target):
     raise RuntimeError('target %s is not a machine of this account' % target)
 
 
+PLATFORMS = {}
+
+
+def windows(machine):
+    """Whether MACHINE (alias or id) is a Windows machine: it gets PowerShell in place of printenv, sh and printf."""
+    if not PLATFORMS:
+        code, out, err = run('machine', 'list', '--json')
+        if code:
+            raise RuntimeError('machine list failed: ' + err[:120])
+        for listed in json.loads(out)['machines']:
+            for key in (listed['id'], listed.get('alias')):
+                PLATFORMS[key] = str(listed.get('platform', '')).lower().startswith('windows')
+    return PLATFORMS.get(machine, False)
+
+
 def sees(machine, name):
     """The value a new exec on MACHINE gets for NAME (None when it is unset); the first exec also applies a delivery."""
-    code, out, _ = run('exec', machine, '--', 'printenv', name, records_value=True)
+    argv = windows_target.ps_argv(windows_target.printenv_script(name)) if windows(machine) else ['printenv', name]
+    code, out, _ = run('exec', machine, '--', *argv, records_value=True)
     return out.rstrip('\n') if code == 0 else None
 
 
@@ -84,10 +105,16 @@ def wait_sees(machine, name, expected, what):
 
 def terminal_sees(machine, name, marker):
     """The value a brand new terminal session (pb connect) on MACHINE has, read from the terminal."""
+    # On the Windows device pb.exe gets its console from `ssh -tt`, where Enter is a carriage return.
+    argv = winhost.terminal_argv(PB, ['connect', machine, 'new', '--name', 'smoke-env-' + uuid.uuid4().hex[:6]])
+    command = 'printf "%s<%%s>\\n" "$%s"; exit\n' % (marker, name)
+    if windows(machine):  # its shell is cmd.exe: one PowerShell line, then exit
+        command = windows_target.env_marker_line(marker, name) + '\r'
+    elif winhost.device():
+        command = command.replace('\n', '\r')
     pid, fd = pty.fork()
     if pid == 0:
-        os.execv(str(PB), [str(PB), 'connect', machine, 'new', '--name', 'smoke-env-' + uuid.uuid4().hex[:6]])
-    command = 'printf "%s<%%s>\\n" "$%s"; exit\n' % (marker, name)
+        os.execvpe(argv[0], argv, dict(os.environ, **winhost.terminal_env(PB)))
     sent, collected, deadline = False, b'', time.monotonic() + 90
     while time.monotonic() < deadline:
         ready, _, _ = select.select([fd], [], [], 1)
@@ -135,10 +162,16 @@ def leaked(values, target):
     text = '\n'.join(Output.seen)
     patterns = [flag for value in values for flag in ('-e', value)]
     local_directory = MAC_DIAGNOSTICS if DARWIN else DIAGNOSTICS
-    local = subprocess.run(['grep', '-rlF', *patterns, os.path.expandvars(local_directory)], capture_output=True, text=True).stdout
+    device = winhost.device()
+    if device:  # the daemon's state root on Windows is %LOCALAPPDATA%\Paperboat\state
+        directory = winhost.RemotePath(device, device.env('LOCALAPPDATA')) / 'Paperboat' / 'state' / 'diagnostics'
+        local = 'found' if any(device.count_in_files(directory, '*', value, recurse=True) for value in values) else ''
+    else:
+        local = subprocess.run(['grep', '-rlF', *patterns, os.path.expandvars(local_directory)], capture_output=True, text=True).stdout
     remote_directories = DIAGNOSTICS + (' "%s"' % MAC_DIAGNOSTICS if DARWIN else '')
     remote_command = 'grep -rlF %s %s 2>/dev/null; true' % (' '.join(patterns), remote_directories)
-    remote = run('exec', target, '--', 'sh', '-c', remote_command, records_value=True)[1]
+    scan = windows_target.ps_argv(windows_target.diagnostics_scan_script(values)) if windows(target) else ['sh', '-c', remote_command]
+    remote = run('exec', target, '--', *scan, records_value=True)[1]
     for label, value in zip(('personal', 'override'), values):
         if value in text:
             found.append(label + ' value in command output')

@@ -21,13 +21,15 @@ import time
 import uuid
 
 from pairing_lifecycle import confirmed_command
+import windows_target
+import winhost
 
-PB = Path.home() / '.local/bin/pb'
+PB = winhost.pb_path()
 WAIT_SECONDS = 180
 
 
 def run(*args, stdin=None, timeout=90):
-    result = subprocess.run([str(PB), *args], input=stdin, capture_output=True, text=True, timeout=timeout)
+    result = winhost.pb_text(PB, args, input=stdin, timeout=timeout)
     return result.returncode, result.stdout, result.stderr
 
 
@@ -38,7 +40,7 @@ def host(machine):
 
 def launch(machine):
     # The host reports an ENV delivery as applied when a process is launched with it.
-    run('exec', machine, '--', 'true')
+    run('exec', machine, '--', *windows_target.true_argv(PB, machine))
 
 
 def fence(show):
@@ -79,7 +81,7 @@ def main():
                 raise RuntimeError('the surviving machine never showed a pending delivery after the revoke: %s' % (
                     json.dumps({'published': show['published'], 'applied': show['applied'], 'fence': fence(show)}) if code == 0 else 'unreadable'))
             time.sleep(3)
-        code, out, err = run('exec', args.survivor, '--', 'true')
+        code, out, err = run('exec', args.survivor, '--', *windows_target.true_argv(PB, args.survivor))
         if code or 'ENV not applied' not in err:
             raise RuntimeError('a command on the pending machine did not run and say that ENV was not applied')
         code, _, _ = run('env', 'vault', 'unlock', '--password-file', args.password_file, '--json')
@@ -95,7 +97,8 @@ def main():
                 raise RuntimeError('delivery was not re-sealed after unlocking: before=%s now=%s' % (
                     before, json.dumps({'published': show['published'], 'applied': show['applied'], 'fence': fence(show)}) if code == 0 else 'unreadable'))
             time.sleep(3)
-        code, out, _ = run('exec', args.survivor, '--', 'sh', '-c', 'echo "[$%s]"' % name)
+        code, out, _ = run('exec', args.survivor, '--', *windows_target.target_argv(
+            PB, args.survivor, ['sh', '-c', 'echo "[$%s]"' % name], windows_target.bracket_env_script(name)))
         if code or '[rotation-value]' not in out:
             raise RuntimeError('the surviving machine does not see the value after rotation')
         code, revoked = host(args.revoked)

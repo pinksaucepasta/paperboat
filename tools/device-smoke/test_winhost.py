@@ -281,8 +281,8 @@ class SnippetsInPowerShell(unittest.TestCase):
 
 class WindowsChecksRunner(unittest.TestCase):
     def args(self, **values):
-        defaults = dict(machine='m', peer='p', team='t', teammate_machine_id='', teammate_account_id='', owner_cmd='',
-                        owner_machine_id='', owner_machine_name='', owner_pb='pb')
+        import windows_checks
+        defaults = dict(vars(windows_checks.build_parser().parse_args([])), machine='m', peer='p', team='t', owner_pb='pb')
         return SimpleNamespace(**dict(defaults, **values))
 
     def test_verdict_needs_exit_zero_and_only_pass_statuses(self):
@@ -1143,3 +1143,137 @@ class TeammateSigninOnTheDevice(unittest.TestCase):
         self.assertEqual(r'--config C:\Users\u\.pb-smoke\teammate\config.json login --api-token-file -', login['payload']['args'])
         self.assertEqual(r'C:\Users\u\.pb-smoke\teammate\state', login['payload']['env']['XDG_STATE_HOME'])
         self.assertNotIn('pbt_secret', ' '.join(login['argv']))
+
+
+class FakeCmdMixin:
+    def fake_cmd(self):
+        import tempfile
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        script = pathlib.Path(directory.name) / 'cmd.py'
+        script.write_text(FAKE_CMD)
+        return [sys.executable, str(script), PWSH]
+
+
+@unittest.skipUnless(PWSH, 'set PB_TEST_PWSH to a pwsh binary to run the ENV target scripts for real')
+class EnvFamilyInPowerShell(FakeCmdMixin, unittest.TestCase):
+    def run_ps(self, script, env):
+        import windows_target
+        argv = windows_target.ps_argv(script)
+        argv[0] = PWSH
+        return subprocess.run(argv, capture_output=True, env=dict(os.environ, **env))
+
+    def test_printenv_and_bracket_scripts_print_what_the_sh_commands_print(self):
+        import windows_target
+        done = self.run_ps(windows_target.printenv_script('PB_T_SET'), {'PB_T_SET': 'p-1 λ'})
+        self.assertEqual((0, 'p-1 λ\n'.encode()), (done.returncode, done.stdout))
+        done = self.run_ps(windows_target.printenv_script('PB_T_UNSET'), {})
+        self.assertEqual((1, b''), (done.returncode, done.stdout))
+        self.assertEqual(b'[ok-value]\n', self.run_ps(windows_target.bracket_env_script('PB_T_SET'), {'PB_T_SET': 'ok-value'}).stdout)
+        self.assertEqual(b'[]\n', self.run_ps(windows_target.bracket_env_script('PB_T_UNSET'), {}).stdout)
+        with self.assertRaises(AssertionError):
+            windows_target.printenv_script("X');exit 0;('")
+
+    def test_diagnostics_scan_names_only_files_that_hold_a_value(self):
+        import tempfile
+        import windows_target
+        with tempfile.TemporaryDirectory() as root:
+            directory = pathlib.Path(root) / 'Paperboat' / 'state' / 'diagnostics' / 'nested'
+            script = windows_target.diagnostics_scan_script(['p-secret', 'o-secret'])
+            self.assertEqual(b'', self.run_ps(script, {'LOCALAPPDATA': root}).stdout)  # no directory yet
+            directory.mkdir(parents=True)
+            (directory / 'clean.ndjson').write_text('{"event":"p-other"}\n')
+            self.assertEqual(b'', self.run_ps(script, {'LOCALAPPDATA': root}).stdout)
+            (directory / 'leak.ndjson').write_text('{"event":"x","value":"o-secret"}\n')
+            done = self.run_ps(script, {'LOCALAPPDATA': root})
+            self.assertEqual((0, [str(directory / 'leak.ndjson')]), (done.returncode, done.stdout.decode().split()))
+
+    def test_recursive_count_finds_a_value_below_the_directory(self):
+        SnippetsInPowerShell.setUpClass()
+        device = SnippetsInPowerShell.device
+        with device.temp_dir('pb-test') as directory:
+            (directory / 'deep' / 'events.ndjson').write_text('p-value p-value')
+            self.assertEqual(0, device.count_in_files(directory, '*', 'p-value'))
+            self.assertEqual(2, device.count_in_files(directory, '*', 'p-value', recurse=True))
+            self.assertEqual(0, device.count_in_files(directory / 'missing', '*', 'p-value', recurse=True))
+
+    def test_a_new_terminal_on_a_windows_target_reports_the_value(self):
+        import env_scopes
+        import windows_target
+        argv = self.fake_cmd()
+        with patch.object(winhost, 'terminal_argv', lambda binary, arguments: argv), \
+                patch.object(env_scopes, 'windows', lambda machine: True), \
+                patch.dict(os.environ, {'PB_T_TERM': 'o-77'}):
+            self.assertEqual('o-77', env_scopes.terminal_sees('victus', 'PB_T_TERM', 'PBENVab12cd'))
+            self.assertEqual('', env_scopes.terminal_sees('victus', 'PB_T_NONE', 'PBENVab12cd'))
+
+
+class EnvFamilyPlumbing(unittest.TestCase):
+    def test_pb_text_is_subprocess_run_here_and_run_remote_on_the_device(self):
+        done = winhost.pb_text(sys.executable, ['-c', 'import sys;print(sys.stdin.read()+"!")'], input='in', timeout=30)
+        self.assertEqual((0, 'in!\n', ''), (done.returncode, done.stdout, done.stderr))
+        calls = []
+        binary = SimpleNamespace(run_remote=lambda arguments, **options: calls.append((arguments, options)) or 'done')
+        self.assertEqual('done', winhost.pb_text(binary, ('env', 'list'), input='x', timeout=9, env={'A': 'b'}))
+        self.assertEqual([(('env', 'list'), {'input': 'x', 'env': {'A': 'b'}, 'timeout': 9})], calls)
+
+    def test_sides_run_pb_on_the_device_as_its_account_or_its_second_profile(self):
+        self.assertTrue(winhost.is_side('windows') and winhost.is_side('windows-teammate'))
+        self.assertFalse(winhost.is_side('sudo docker exec ct pb'))
+        fake = FakeSsh((0, envelope(out=b'{}')), (0, rb'C:\Users\u'), (0, envelope(out=b'{}')))
+        with patch.dict(os.environ, {'PB_SMOKE_WINDOWS_PB': EXE, 'VICTUS_PASS': 'p'}), patch('subprocess.run', fake):
+            winhost._device.cache_clear()
+            winhost.side_run('windows', ['env', 'list', '--json'], input='v')
+            winhost.side_run('windows-teammate', ['RESET ENV TEAM t'])
+        winhost._device.cache_clear()
+        own, teammate = fake.calls[0]['payload'], fake.calls[2]['payload']
+        self.assertEqual((EXE, 'env list --json', {}, 'dg=='), (own['exe'], own['args'], own['env'], own['input']))
+        self.assertEqual(r'--config C:\Users\u\.pb-smoke\teammate\config.json "RESET ENV TEAM t"', teammate['args'])
+        self.assertEqual(r'C:\Users\u\.pb-smoke\teammate\config', teammate['env']['XDG_CONFIG_HOME'])
+
+    def test_env_scripts_route_pb_and_target_commands(self):
+        import env_delivery
+        import env_scopes
+        import windows_target
+        for name in ('env_scopes', 'env_messages', 'env_delivery', 'env_undeliverable', 'env_revoke_rotation'):
+            source = (pathlib.Path(__file__).parent / (name + '.py')).read_text()
+            self.assertNotIn("Path.home() / '.local/bin/pb'", source, name)
+            self.assertNotIn('subprocess.run([str(PB)', source, name)
+        seen = []
+        done = subprocess.CompletedProcess([], 0, 'p-1\n', '')
+        listing = subprocess.CompletedProcess([], 0, json.dumps({'machines': [
+            {'id': 'machine_1', 'alias': 'victus', 'platform': 'windows'}, {'id': 'machine_2', 'alias': 'hp', 'platform': 'linux'}]}), '')
+        answer = lambda binary, arguments, **options: seen.append(arguments) or (listing if arguments[0] == 'machine' else done)
+        with patch.object(winhost, 'pb_text', answer), patch.dict(env_scopes.PLATFORMS, {}, clear=True):
+            self.assertEqual('p-1', env_scopes.sees('hp', 'PB_N'))
+            self.assertEqual(('exec', 'hp', '--', 'printenv', 'PB_N'), seen[-1])
+            for machine in ('victus', 'machine_1'):  # by alias and by id
+                env_scopes.sees(machine, 'PB_N')
+                self.assertEqual(('exec', machine, '--', 'powershell'), seen[-1][:4])
+            self.assertEqual(1, sum(arguments[0] == 'machine' for arguments in seen))  # the platforms are read once
+        self.assertEqual(env_delivery.PB, env_scopes.PB)
+
+    def test_leak_scan_on_the_device_counts_in_its_diagnostics_directory(self):
+        import env_scopes
+        import windows_target
+        counted = []
+        device = SimpleNamespace(env=lambda name: r'C:\Users\u\AppData\Local', path_flavor=pathlib.PureWindowsPath,
+                                 count_in_files=lambda directory, pattern, text, recurse: counted.append((str(directory), text, recurse)) or (text == 'o-2'))
+        with patch.object(winhost, 'device', lambda: device), patch.object(env_scopes, 'run', lambda *a, **k: (0, '', '')), \
+                patch.object(env_scopes, 'windows', lambda machine: False):
+            env_scopes.Output.seen = ['clean']
+            self.assertEqual(['diagnostics on this machine'], env_scopes.leaked(('p-1', 'o-2'), 'hp'))
+        self.assertEqual([(r'C:\Users\u\AppData\Local\Paperboat\state\diagnostics', 'p-1', True),
+                          (r'C:\Users\u\AppData\Local\Paperboat\state\diagnostics', 'o-2', True)], counted)
+
+    def test_team_scope_sides_and_runner_fixtures(self):
+        import windows_checks
+        table = windows_checks.checks(WindowsChecksRunner().args(vault_password_file=r'C:\v\pw'))
+        self.assertEqual(['--teammate_vault_password_file'],
+                         windows_checks.missing(table['env-team-scopes'][1], WindowsChecksRunner().args(vault_password_file='x')))
+        self.assertEqual(['--vault_password_file'], windows_checks.missing(table['env-scopes'][1], WindowsChecksRunner().args()))
+        argv = table['env-team-scopes'][0]
+        self.assertEqual(('windows', 'windows-teammate'), (argv[argv.index('--owner-cmd') + 1], argv[argv.index('--member-cmd') + 1]))
+        for check in ('env-messages', 'env-delivery', 'env-undeliverable', 'env-revoke-rotation'):
+            self.assertTrue(windows_checks.missing(table[check][1], WindowsChecksRunner().args()), check)
+

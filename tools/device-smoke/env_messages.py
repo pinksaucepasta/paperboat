@@ -10,12 +10,15 @@ from pathlib import Path
 import subprocess
 import uuid
 
-PB = Path.home() / '.local/bin/pb'
+import windows_target
+import winhost
+
+PB = winhost.pb_path()
 DENIED = 'do not have write access'
 
 
 def run(*args, stdin=None, timeout=60):
-    result = subprocess.run([str(PB), *args], input=stdin, capture_output=True, text=True, timeout=timeout)
+    result = winhost.pb_text(PB, args, input=stdin, timeout=timeout)
     return result.returncode, result.stdout, result.stderr
 
 
@@ -40,7 +43,7 @@ def main():
     names = data(run('env', 'list', '--json'), 'env list')['data']['names']
     if names:
         raise RuntimeError('personal ENV is not empty; the empty-ENV case needs an empty scope')
-    code, out, _ = run('exec', args.target, '--', 'true')
+    code, out, _ = run('exec', args.target, '--', *windows_target.true_argv(PB, args.target))
     if code:
         raise RuntimeError('exec with no ENV assigned failed')
     # Read-only Team write: definitive, plain denial.
@@ -56,7 +59,8 @@ def main():
     # Nothing staged: the vault accepts a personal write and delivers it.
     data(run('env', 'set', name, '--value-stdin', '--json', stdin='ok-value'), 'personal set')
     try:
-        code, out, _ = run('exec', args.target, '--', 'sh', '-c', 'echo "[$' + name + ']"')
+        code, out, _ = run('exec', args.target, '--', *windows_target.target_argv(
+            PB, args.target, ['sh', '-c', 'echo "[$' + name + ']"'], windows_target.bracket_env_script(name)))
         if code or '[ok-value]' not in out:
             raise RuntimeError('personal value was not delivered after the denied Team write')
     finally:

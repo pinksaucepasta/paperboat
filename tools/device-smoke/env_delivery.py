@@ -16,14 +16,17 @@ import json
 from pathlib import Path
 import subprocess
 
-PB = Path.home() / '.local/bin/pb'
+import windows_target
+import winhost
+
+PB = winhost.pb_path()
 SENTINEL = 'PB_ENV_DELIVERY_PROBE'
 PENDING = ('delivery to this machine is pending', 'pb env vault unlock')
 UNDELIVERABLE = ('delivery to this machine failed', 'pb env host show')
 
 
 def run(*args, timeout=90):
-    result = subprocess.run([str(PB), *args], capture_output=True, text=True, timeout=timeout)
+    result = winhost.pb_text(PB, args, timeout=timeout)
     return result.returncode, result.stdout, result.stderr
 
 
@@ -36,7 +39,8 @@ def main():
     if code:
         raise RuntimeError('env host show failed')
     host = json.loads(out)
-    code, out, err = run('exec', args.target, '--', 'sh', '-c', 'echo "[$%s]"' % SENTINEL)
+    code, out, err = run('exec', args.target, '--', *windows_target.target_argv(
+        PB, args.target, ['sh', '-c', 'echo "[$%s]"' % SENTINEL], windows_target.bracket_env_script(SENTINEL)))
     if code:
         raise RuntimeError('the command did not run (exit %d); managed ENV must never stop a launch' % code)
     has_line = 'ENV not applied' in err

@@ -21,13 +21,20 @@ from pathlib import Path
 import subprocess
 import time
 
-PB = Path.home() / '.local/bin/pb'
+import windows_target
+import winhost
+
+PB = winhost.pb_path()
 FAILED = ('delivery to this machine failed', 'pb env host show')
 
 
 def run(*args):
-    result = subprocess.run([str(PB), *args], capture_output=True, text=True, timeout=120)
+    result = winhost.pb_text(PB, args, timeout=120)
     return result.returncode, result.stdout, result.stderr
+
+
+def echo(target, word):
+    return windows_target.target_argv(PB, target, ['sh', '-c', 'echo ' + word], windows_target.print_script(word))
 
 
 def sh(command):
@@ -43,14 +50,14 @@ def main():
     parser.add_argument('--clear', required=True)
     parser.add_argument('--wait', type=int, default=100)
     args = parser.parse_args()
-    code, out, err = run('exec', args.target, '--', 'sh', '-c', 'echo baseline')
+    code, out, err = run('exec', args.target, '--', *echo(args.target, 'baseline'))
     if code or 'baseline' not in out or 'ENV not applied' in err:
         raise RuntimeError('the baseline command did not run cleanly: ' + err[:160])
     sh(args.inject)
     injected = None
     try:
         time.sleep(args.wait)
-        code, out, err = run('exec', args.target, '--', 'sh', '-c', 'echo injected')
+        code, out, err = run('exec', args.target, '--', *echo(args.target, 'injected'))
         injected = (code, out, err)
     finally:
         sh(args.clear)
@@ -59,7 +66,7 @@ def main():
         raise RuntimeError('the command did not run while delivery was failing (managed ENV must never stop a launch): ' + err[:160])
     if not all(word in err for word in FAILED):
         raise RuntimeError('the failed delivery was not named: ' + err[:200])
-    code, out, err = run('exec', args.target, '--', 'sh', '-c', 'echo cleared')
+    code, out, err = run('exec', args.target, '--', *echo(args.target, 'cleared'))
     if code or 'cleared' not in out or 'ENV not applied' in err:
         raise RuntimeError('the command after clearing did not run cleanly: ' + err[:160])
     print(json.dumps({'check': 'env-undeliverable', 'target': args.target, 'status': 'PASS',

@@ -24,6 +24,8 @@ import subprocess
 import sys
 import uuid
 
+import winhost
+
 
 class Failure(Exception):
     pass
@@ -38,11 +40,14 @@ def main():
     results = {}
 
     def pb(command, *arguments, timeout=180, stdin=None):
-        argv = shlex.split(command)
-        if stdin is not None and 'exec' in argv:
-            argv.insert(argv.index('exec') + 1, '-i')  # docker passes stdin only with -i
-        done = subprocess.run(argv + list(arguments), input=stdin, capture_output=True, text=True, timeout=timeout,
-                              **({} if stdin is not None else {'stdin': subprocess.DEVNULL}))
+        if winhost.is_side(command):  # pb.exe on the Windows device (`windows`, `windows-teammate`); its files live there
+            done = winhost.side_run(command, arguments, input=stdin, timeout=timeout)
+        else:
+            argv = shlex.split(command)
+            if stdin is not None and 'exec' in argv:
+                argv.insert(argv.index('exec') + 1, '-i')  # docker passes stdin only with -i
+            done = subprocess.run(argv + list(arguments), input=stdin, capture_output=True, text=True, timeout=timeout,
+                                  **({} if stdin is not None else {'stdin': subprocess.DEVNULL}))
         try:
             body = json.loads(done.stdout) if done.stdout.strip() else {}
         except ValueError:

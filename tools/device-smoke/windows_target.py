@@ -123,6 +123,46 @@ def print_script(text):
     return "[Console]::Out.Write('%s')" % text.replace("'", "''")
 
 
+# ---- the small sh commands the ENV, team and policy checks run on their target --------------------------------
+
+def target_argv(binary, target, unix_argv, script):
+    """unix_argv for a Unix target, the PowerShell script in its place for a Windows one."""
+    return ps_argv(script) if is_windows(binary, target) else unix_argv
+
+
+def true_argv(binary, target):
+    return ['cmd', '/c', 'exit', '0'] if is_windows(binary, target) else ['true']
+
+
+def _env_name(name):
+    assert re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', name), name
+    return name
+
+
+def printenv_script(name):
+    """printenv NAME: the value and a newline, or exit 1 when it is unset."""
+    return ("$v=[Environment]::GetEnvironmentVariable('%s')\nif($null -eq $v){exit 1}\n"
+            '[Console]::Out.Write($v+"`n")' % _env_name(name))
+
+
+def bracket_env_script(name):
+    """sh -c 'echo "[$NAME]"'."""
+    return "[Console]::Out.Write('['+[Environment]::GetEnvironmentVariable('%s')+\"]`n\")" % _env_name(name)
+
+
+def diagnostics_scan_script(values):
+    """grep -rlF over the daemon's diagnostics directory: prints the files that contain one of the values."""
+    return ("$d=Join-Path (Join-Path (Join-Path $env:LOCALAPPDATA 'Paperboat') 'state') 'diagnostics'\n"
+            "Get-ChildItem -LiteralPath $d -Recurse -File -ErrorAction SilentlyContinue|ForEach-Object{\n"
+            "$f=[IO.File]::Open($_.FullName,'Open','Read','ReadWrite');$t=(New-Object IO.StreamReader($f)).ReadToEnd();$f.Close()\n"
+            "foreach($v in @(%s)){if($t.Contains($v)){[Console]::Out.Write($_.FullName+\"`n\");break}}}" % _names(values))
+
+
+def env_marker_line(marker, name):
+    """Typed at the cmd.exe prompt of a session: prints <marker><<value of NAME>> and ends the shell."""
+    return typed_marker(marker, "+'<'+$env:%s+'>'" % _env_name(name)) + ' & exit'
+
+
 # ---- scripts for exec_cancel ----------------------------------------------------------------------------------
 
 def sleeper_script():

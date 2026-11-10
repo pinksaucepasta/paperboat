@@ -15,6 +15,9 @@ preview_lifecycle/preview_protocols/session replay and cross checks. ssh-tools r
 rsync). terminal-matrix skips the rows that cut the network (it would cut this controller's SSH) and the echo
 latency row. access-machine, private-address and private-https run with the device as the client only (the origin on a
 Unix peer through pb exec); private_access_permission drives two Unix hosts over ssh. ssh-long holds a session for SMOKE_SSH_LONG_SECONDS (3601 for the real check; pass --timeout above it).
+ENV: env-scopes, env-messages, env-delivery and env-revoke-rotation need the device account's own unlocked vault
+(--vault-password-file: delivery reaches that account's machines); env-team-scopes has the device account as owner and
+the second profile as member; env-undeliverable needs no vault, only a disposable target and the commands that cut it.
 """
 import argparse
 import contextlib
@@ -96,6 +99,21 @@ def checks(args):
                              '--owner-pb', args.owner_pb, '--member-cmd', 'windows'],
                             ['--team', '--owner_cmd', '--owner_machine_id', '--owner_machine_name'])
     table['env-vault-lifecycle'] = (['env_vault_lifecycle.py', '{vault_password}', '{vault_recovery}', '--teammate'], [])
+    # ENV delivery reaches the machines of the device's own account, so these use its vault (--vault-password-file, an
+    # owner-only file on the device); env-vault-lifecycle and the member side of env-team-scopes use the second profile.
+    vault, peer = args.vault_password_file or '', args.peer
+    table['env-scopes'] = (['env_scopes.py', peer, '--password-file', vault, '--rotate'], ['--peer', '--vault_password_file'])
+    table['env-messages'] = (['env_messages.py', peer, args.readonly_team or ''], ['--peer', '--readonly_team'])
+    table['env-delivery'] = (['env_delivery.py', peer, '--expect', args.env_expect or ''], ['--peer', '--env_expect'])
+    table['env-undeliverable'] = (['env_undeliverable.py', args.disposable_target or '', '--inject', args.inject or '',
+                                   '--clear', args.clear or ''], ['--disposable_target', '--inject', '--clear'])
+    table['env-revoke-rotation'] = (['env_revoke_rotation.py', peer, '--revoke', args.revoke_machine_id or '',
+                                     '--password-file', vault], ['--peer', '--revoke_machine_id', '--vault_password_file'])
+    table['env-team-scopes'] = (['env_team_scopes.py', '--team', team, '--owner-cmd', winhost.WINDOWS,
+                                 '--owner-password-file', vault, '--member-cmd', winhost.WINDOWS_TEAMMATE,
+                                 '--member-password-file', args.teammate_vault_password_file or '',
+                                 '--member-account', '{teammate_account}', '--member-email', '{teammate_email}'],
+                                ['--team', '--vault_password_file', '--teammate_vault_password_file'])
     return table
 
 
@@ -160,6 +178,9 @@ def run_check(check, argv, args, device):
             (scratch / 'fixtures-token').chmod(0o600)
             replacements.update({'{token}': str(scratch / 'fixtures-token'), '{output}': str(scratch / 'rows.json'),
                                  '{run}': 'win' + secrets.token_hex(4)})
+        if '{teammate_account}' in argv:  # the second signed-in profile of the device
+            account = json.loads(winhost.side_run(winhost.WINDOWS_TEAMMATE, ['auth', 'status', '--json'], timeout=60).stdout)['account']
+            replacements.update({'{teammate_account}': account['id'], '{teammate_email}': account['email']})
         if '{server}' in argv:
             replacements.update({
                 '{server}': json.loads((device.runtime_dir() / 'machine-registration.json').read_text())['server_url'],
@@ -178,7 +199,7 @@ def run_check(check, argv, args, device):
     return outcome, round(time.monotonic() - started), detail
 
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--install-json', type=Path, help='saved `pb install --json` output of the Windows device')
     parser.add_argument('--machine', help="the device's own machine name (command-rows)")
@@ -190,9 +211,22 @@ def main():
     parser.add_argument('--owner-machine-id', help='policy-team: the owner machine shared into the team')
     parser.add_argument('--owner-machine-name')
     parser.add_argument('--owner-pb', default='.local/bin/pb')
+    parser.add_argument('--vault-password-file', help="owner-only file on the device: the device account's ENV vault password")
+    parser.add_argument('--teammate-vault-password-file', help="the same for the device's second account profile")
+    parser.add_argument('--readonly-team', help='env-messages: a team the device account is a read-only member of')
+    parser.add_argument('--env-expect', help='env-delivery: the delivery state the caller made (empty, applied, pending, undeliverable)')
+    parser.add_argument('--revoke-machine-id', help='env-revoke-rotation: a throwaway machine of the device account, revoked')
+    parser.add_argument('--disposable-target', help='env-undeliverable: a machine of the account that is safe to disturb')
+    parser.add_argument('--inject', help="env-undeliverable: controller command that cuts the target's control plane")
+    parser.add_argument('--clear', help='env-undeliverable: controller command that undoes --inject')
     parser.add_argument('--only', default='', help='comma list of check ids')
     parser.add_argument('--timeout', type=int, default=1800)
     parser.add_argument('--list', action='store_true')
+    return parser
+
+
+def main():
+    parser = build_parser()
     args = parser.parse_args()
     table = checks(args)
     if args.list:
@@ -216,7 +250,7 @@ def main():
         else:
             try:
                 outcome = run_check(check, argv, args, device)
-            except (subprocess.TimeoutExpired, winhost.DeviceError, OSError) as error:
+            except (subprocess.TimeoutExpired, winhost.DeviceError, OSError, ValueError, KeyError) as error:
                 outcome = ('FAIL', 0, str(error)[:300])
         results.append({'id': check + ':victus', 'status': outcome[0], 'seconds': outcome[1], 'detail': outcome[2]})
         print('%-34s %-5s %5ss  %s' % (check + ':victus', outcome[0], outcome[1], outcome[2][:100]), flush=True)

@@ -121,7 +121,7 @@ EXCHANGE = ("$c=New-Object Net.Sockets.TcpClient\ntry{$c.Connect($req.address,[i
             "while($m.Length -le 4096){$n=$s.Read($r,0,4096);if($n -le 0){break};$m.Write($r,0,$n)}\n"
             "$c.Close();[Convert]::ToBase64String($m.ToArray())")
 # How often $req.text occurs in the files of $req.dir matching $req.filter; a file the daemon is writing is shared.
-COUNT = ("$n=0;Get-ChildItem -LiteralPath $req.dir -Filter $req.filter -File -ErrorAction SilentlyContinue|ForEach-Object{"
+COUNT = ("$n=0;Get-ChildItem -LiteralPath $req.dir -Filter $req.filter -File -Recurse:([bool]$req.recurse) -ErrorAction SilentlyContinue|ForEach-Object{"
          "$f=[IO.File]::Open($_.FullName,'Open','Read','ReadWrite');$t=(New-Object IO.StreamReader($f)).ReadToEnd();$f.Close();"
          "$n+=[regex]::Matches($t,[regex]::Escape($req.text)).Count};$n")
 # Every file under $req.path as [{p: relative path with /, h: sha256}], base64 of UTF-8 JSON: Windows PowerShell
@@ -303,8 +303,9 @@ class WindowsDevice:
             self._environment[name] = self.ps('environment ' + name, ENV, name=name)[1]
         return self._environment[name]
 
-    def count_in_files(self, directory, pattern, text):
-        return int(self.ps('count in %s' % directory, COUNT, dir=str(directory), filter=pattern, text=text)[1])
+    def count_in_files(self, directory, pattern, text, recurse=False):
+        return int(self.ps('count in %s' % directory, COUNT, dir=str(directory), filter=pattern, text=text,
+                           recurse=recurse)[1])
 
     def services(self, pattern='Paperboat*'):
         return self._list('services ' + pattern, SERVICES, pattern=pattern)
@@ -656,6 +657,32 @@ def run_pb(binary, arguments, timeout):
     if hasattr(binary, 'run_remote'):
         return binary.run_remote(arguments, timeout=timeout, text=False)
     return subprocess.run([str(binary), *arguments], capture_output=True, timeout=timeout)
+
+
+def pb_text(binary, arguments, input=None, timeout=None, env=None):
+    """pb to completion like subprocess.run(..., capture_output=True, text=True), here or on the device (where env
+    is an overlay on the device's own environment)."""
+    if hasattr(binary, 'run_remote'):
+        return binary.run_remote(arguments, input=input, env=env, timeout=timeout or 180)
+    return subprocess.run([str(binary), *arguments], input=input, capture_output=True, text=True, timeout=timeout, env=env)
+
+
+WINDOWS, WINDOWS_TEAMMATE = 'windows', 'windows-teammate'
+
+
+def is_side(command):
+    """Whether a check's --owner-cmd/--member-cmd names the Windows device instead of a Unix command line:
+    `windows` is pb.exe as the device's own account, `windows-teammate` as its second signed-in profile."""
+    return command in (WINDOWS, WINDOWS_TEAMMATE)
+
+
+def side_run(command, arguments, input=None, timeout=180):
+    """Run pb.exe on the device for is_side(command), with no shell quoting; a text CompletedProcess."""
+    prefix, env = [], None
+    if command == WINDOWS_TEAMMATE:
+        from teammate_profile import environment, profile_root
+        prefix, env = ['--config', str(profile_root() / 'config.json')], environment(profile_root())
+    return pb_path().run_remote([*prefix, *arguments], input=input, env=env, timeout=timeout)
 
 
 @contextlib.contextmanager
