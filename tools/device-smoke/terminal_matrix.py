@@ -113,8 +113,18 @@ class Client(Terminal):
         if win():  # cmd.exe announces no bracketed paste and has no stty; its console always echoes
             token = 'PB_READY_' + uuid.uuid4().hex
             self.send(windows_target.typed_marker(token) + '\r')
-            self.expect(token, timeout)
-            return
+            # A new ConPTY session is silent for about 12 s on a hosted runner and the Enter typed into it can be
+            # lost while the typed text stays at the prompt: press Enter again until the marker comes back (an
+            # extra Enter at a prompt only runs an empty line).
+            deadline = time.monotonic() + timeout
+            while True:
+                try:
+                    self.expect(token, min(5, max(1, deadline - time.monotonic())))
+                    return
+                except RuntimeError as error:
+                    if 'closed' in str(error) or time.monotonic() >= deadline:
+                        raise
+                    self.send('\r')
         # Keys typed before the shell enables bracketed paste are lost by its line editor.
         self.expect(b'\x1b[?2004h', timeout)
         self.expect(self.marker('READY', 'stty -echo; '), timeout)
