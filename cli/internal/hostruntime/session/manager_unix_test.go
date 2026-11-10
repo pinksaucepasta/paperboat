@@ -1019,3 +1019,38 @@ func TestAWindowWithoutASizePacesAndTypingMovesPacingAtOnce(t *testing.T) {
 		t.Fatalf("right after the second window typed, %q paces; want the second", got)
 	}
 }
+
+// F3-11: Ctrl-C drops the output already queued for a viewer, as a tty flushes its output on VINTR.
+func TestCtrlCDiscardsOutputQueuedForAViewer(t *testing.T) {
+	manager, root, shell := realManager(t)
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "discard", Command: shellCommand(shell, root, "head -c 300000 /dev/zero | tr '\\0' x; exec sleep 30")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background(), created.ID)
+	if _, err := manager.Attach(created.ID, "att_discard", 0); err != nil {
+		t.Fatal(err)
+	}
+	queued := func() uint64 {
+		_, bytes, _ := manager.AttachmentStatus(created.ID, "att_discard")
+		return bytes
+	}
+	var last uint64
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(200 * time.Millisecond) {
+		if now := queued(); now >= 300000 && now == last {
+			break
+		} else {
+			last = now
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("flood never queued: %d bytes", last)
+		}
+	}
+	key := InputKey{ClientID: "cli", AttachmentID: "att_discard", Generation: created.Generation, InputSequence: 1}
+	if !manager.Interrupt(created.ID, key, 3) {
+		t.Fatal("Ctrl-C was not taken as the terminal's interrupt")
+	}
+	if got := queued(); got != 0 {
+		t.Fatalf("%d bytes of flood still queued after Ctrl-C", got)
+	}
+}
