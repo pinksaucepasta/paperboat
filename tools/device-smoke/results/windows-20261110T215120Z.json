@@ -1,0 +1,1 @@
+{"at": "20261110T215120Z", "results": [{"id": "tunnel-manage:victus", "status": "PASS", "seconds": 115, "detail": "{\"check\": \"tunnel-manage\", \"status\": \"PASS\", \"create_show_list_delete\": true, \"route_add_update_remove\": true, \"rename\": true, \"enrollment_preserved\": true}"}]}

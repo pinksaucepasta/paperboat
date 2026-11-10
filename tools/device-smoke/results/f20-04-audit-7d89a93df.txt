@@ -1,0 +1,23 @@
+# F20-04 whole-build audit of origin/main 7d89a93df (2026-11-10T21:40Z)
+# 1. files the Windows build compiles (cli, shared, relay modules):
+$ cd cli && GOOS=windows GOARCH=amd64 go list -deps -f '{{if .Module}}{{range .GoFiles}}{{$.Module.Path}} {{$.Dir}}/{{.}}{{"\n"}}{{end}}{{end}}' ./cmd/pb | grep "^github.com/pinksaucepasta/paperboat" | awk "{print \$2}" | sort -u
+# compiled files: 1340 (1262 cli, 62 shared, 16 relay)
+# 2. old per-tunnel connector stack names in those files (expected: only the live PreviewCarrierAttachmentKind):
+$ grep -niE "tunnelenrollment|connectorrotation|preview_lease_carrier_attachments|preview_carrier_attachment_outbox|per-preview carrier|per-tunnel carrier|connector_rotation|enrollment_exchange|ConnectorEnrollment|connector enrollment|PreviewCarrierAttachment" <files>
+cli/internal/hostruntime/preview/attachment_types.go:18:	PreviewCarrierAttachmentKind = "preview_carrier_attachment"
+cli/internal/hostruntime/preview/attachment_types.go:152:	if a.Schema != PreviewTunnelSchemaV1 || a.Kind != PreviewCarrierAttachmentKind {
+# 3. deleted connectorprotocol identifiers still referenced in cli/ (expected: none):
+$ grep -rnE "connectorprotocol\.(ClientSession|Hello|Welcome|Snapshot|Delta|Frame|ReadFrame|WriteFrame|CredentialRotation[A-Za-z]*|RotationTarget|Capability[A-Za-z]*|CodeOf|ReasonOf|ErrNotReady|ErrCanceled|ErrLeaseExpired|ErrStaleGeneration|ErrSessionConflict)" --include=*.go cli
+# 4. files left in cli/internal/connectorprotocol:
+access_stream.go
+access_stream_test.go
+carrier_identity.go
+carrier_identity_test.go
+data_stream.go
+data_stream_test.go
+identity.go
+ingress.go
+ingress_contract_test.go
+ingress_test.go
+protocol_errors.go
+strict_json.go
