@@ -22,8 +22,8 @@ func TestFailureDetailNamesEveryFailedStepWithoutPaths(t *testing.T) {
 	got := FailureDetail(err)
 	want := "remove Windows runtime services and slots: remove: " + syscall.EACCES.Error() +
 		"; remove shared Paperboat directories and logs: " + ErrInvalidRequest.Error() +
-		"; guard uninstall: task is busy" +
-		"; *errors.errorString" +
+		"; *errors.errorString" + // free text is never formatted: both unnamed causes are stood for by their type, once
+
 		"; remove Paperboat account payload: " + fs.ErrPermission.Error()
 	if got != want {
 		t.Fatalf("detail:\n got %q\nwant %q", got, want)
@@ -44,8 +44,25 @@ func TestFailureDetailIsBoundedAndSurvivesBrokenErrors(t *testing.T) {
 	if got := FailureDetail(wide); len(got) == 0 || len(got) > MaxFailureDetail {
 		t.Fatalf("detail length %d, want 1..%d", len(got), MaxFailureDetail)
 	}
-	if got := FailureDetail(panickingError{}); got != "" {
+	if got := FailureDetail(panickingError{}); got != "hostinstall.panickingError" {
 		t.Fatalf("broken error: %q", got)
+	}
+}
+
+type privateCause struct{ formatted *int }
+
+func (e privateCause) Error() string { *e.formatted++; return "PRIVATE payload" }
+
+// A cause this program did not write may hold private text; the detail never formats it, wherever it sits.
+func TestFailureDetailNeverFormatsAnUnknownCause(t *testing.T) {
+	formatted := 0
+	private := privateCause{formatted: &formatted}
+	got := FailureDetail(errors.Join(private, hostInstallFailure("remove Paperboat account payload", &fs.PathError{Op: "walk", Path: "payload", Err: private}, fs.ErrPermission)))
+	if formatted != 0 || strings.Contains(got, "PRIVATE") {
+		t.Fatalf("private cause formatted %d times: %q", formatted, got)
+	}
+	if want := "hostinstall.privateCause; remove Paperboat account payload: walk: hostinstall.privateCause; " + fs.ErrPermission.Error(); got != want {
+		t.Fatalf("detail:\n got %q\nwant %q", got, want)
 	}
 }
 

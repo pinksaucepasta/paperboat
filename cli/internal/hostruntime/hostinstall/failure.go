@@ -2,6 +2,7 @@ package hostinstall
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -185,10 +186,14 @@ func FailureMessage(err error) (string, bool) {
 // MaxFailureDetail bounds FailureDetail.
 const MaxFailureDetail = 1024
 
-// FailureDetail names every failed step of an error tree and its cause as one line without file paths, for a
-// status file or log the user reads after the command is gone. Curated step messages are kept, a file error
-// keeps its operation and native text but not its path, and any other text that holds a path separator is
-// replaced by what it wraps, or by its type.
+// FailureDetail names every failed step of an error tree and its cause as one line, for a status file or log the
+// user reads after the command is gone. Only text written in this program or by the operating system is kept:
+// curated step messages, a file error's operation and native error, and the well-known causes below. Any other
+// error may hold private text (a path, a command's payload), so it is never formatted: it is stood for by what
+// it wraps, or by its type.
+// knownFailureCauses are fixed public messages, safe to show as they are.
+var knownFailureCauses = []error{fs.ErrPermission, fs.ErrNotExist, fs.ErrExist, context.DeadlineExceeded, context.Canceled, ErrInvalidRequest, ErrNotPrivileged}
+
 func FailureDetail(err error) (detail string) {
 	// A broken Error or Unwrap must not interrupt the cleanup that reports it.
 	defer func() {
@@ -235,18 +240,16 @@ func failureDetail(err error, depth int, budget *int) string {
 		prefix = typed.Syscall
 	case interface{ Unwrap() []error }:
 		return below
+	case syscall.Errno:
+		return typed.Error()
 	default:
-		own := err.Error()
-		switch {
-		case strings.ContainsAny(own, `\/`):
-			if below == "" {
-				return reflect.TypeOf(err).String()
-			}
-			return below
-		case below == "" || strings.Contains(own, below):
-			return own
+		if slices.Contains(knownFailureCauses, err) {
+			return err.Error()
 		}
-		prefix = own
+		if below == "" {
+			return reflect.TypeOf(err).String()
+		}
+		return below
 	}
 	if below == "" {
 		return prefix
