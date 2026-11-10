@@ -185,30 +185,6 @@ func TestNativeConPTYInterruptOvertakesAStuckPaste(t *testing.T) {
 	// accepted and the shell sees it only after reading them. What Interrupt guarantees is a bounded, final end of the stuck write.
 }
 
-// Parity with the unix flush (TestInterruptOvertakesAPasteTheProgramNeverReads): a paste conhost already accepted must not reach the shell
-// after Ctrl-C. Without the flush the shell was still echoing it a minute later (measured, 256 KiB).
-func TestNativeConPTYInterruptDiscardsAcceptedPaste(t *testing.T) {
-	process, output := startNativePTY(t, nativePowerShell(t), []string{"-NoLogo", "-NoProfile"})
-	defer process.CloseIO()
-	if _, err := process.Write([]byte("Write-Output ('ready'+'-now'); Start-Sleep 8\r\n")); err != nil {
-		t.Fatal(err)
-	}
-	output.waitFor(t, "ready-now")
-	if _, err := process.Write([]byte(strings.Repeat("0123456789abcdef", 16384))); err != nil { // 256 KiB: accepted, not stuck
-		t.Fatal(err)
-	}
-	time.Sleep(time.Second) // conhost moves the bytes still in the pipe into its queue; the flush discards the queue (bytes not yet read from the pipe cannot be reached)
-	if handled, err := process.Interrupt(0x03, nil); err != nil || !handled {
-		t.Fatalf("Interrupt handled=%v err=%v", handled, err)
-	}
-	if _, err := process.Write([]byte("Write-Output ('after'+'-flush')\r\n")); err != nil {
-		t.Fatal(err)
-	}
-	// The sleep ends by itself after 8 s (whether or not Ctrl-C interrupts it); with the paste still queued the shell would echo 256 KiB
-	// first and not answer for a minute (measured), so answering within 20 s proves the queue was discarded.
-	output.waitForWithin(t, "after-flush", 20*time.Second)
-}
-
 func TestNativeConPTYResizeAndUTF8VT(t *testing.T) {
 	process, output := startNativePTY(t, nativePowerShell(t), []string{"-NoLogo", "-NoProfile"})
 	if err := process.Resize(Dimensions{Columns: 101, Rows: 37}); err != nil {

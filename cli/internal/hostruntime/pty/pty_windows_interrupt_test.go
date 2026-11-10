@@ -7,22 +7,9 @@ import (
 	"errors"
 	"io"
 	"os"
-	"slices"
 	"testing"
 	"time"
 )
-
-// Interrupt starts os.Executable() inside the pseudoconsole as `pb daemon __flush-console-input`; here that is the test binary.
-func TestMain(m *testing.M) {
-	if slices.Equal(os.Args[1:], FlushConsoleInputArgs) {
-		if err := FlushConsoleInput(); err != nil {
-			os.Stderr.WriteString(err.Error())
-			os.Exit(1)
-		}
-		os.Exit(0)
-	}
-	os.Exit(m.Run())
-}
 
 // Process over a plain pipe: nothing reads r, so a large write blocks like a paste into a program that never reads.
 func pipeProcess(t *testing.T) (*Process, *os.File) {

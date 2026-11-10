@@ -252,8 +252,8 @@ func (p *Process) WriteContext(ctx context.Context, data []byte) (int, error) {
 // the first cancel), the cut write ends in ErrInterrupted so the journal finalizes it instead of resending it, writeMu
 // frees, and ETX, which ConPTY turns into the foreground Ctrl-C event, goes next. accepted runs first so the caller
 // marks the input queued before key as discarded. Another key is written normally by the caller (false).
-// ConPTY gives its owner no input flush and drops GenerateConsoleCtrlEvent from a helper (measured), so the queued input is
-// discarded by a helper inside the pseudoconsole that flushes its CONIN$ (flushQueuedInput), then ETX is written.
+// Limit (measured): ConPTY has no input flush, so ETX still queues behind bytes conhost already accepted and the
+// shell sees it once it reads them; the cut write itself ends at once and is final.
 func (p *Process) Interrupt(key byte, accepted func()) (bool, error) {
 	if key != 0x03 {
 		return false, nil
@@ -285,16 +285,7 @@ func (p *Process) Interrupt(key byte, accepted func()) (bool, error) {
 		return false, err
 	}
 	defer p.writeMu.Unlock()
-	// Like the unix twin, discard what the shell was never going to read before the key: queued paste bytes would otherwise
-	// reach it after Ctrl-C. A failed flush must not cost the key.
-	var flushErr error
-	if p.console != 0 { // a Process without a pseudoconsole (unit tests over a pipe) has no queue to flush
-		flushErr = p.flushQueuedInput(2 * time.Second)
-	}
 	_, err = writeInput(p.input, []byte{key}, inputTimeout(context.Background()))
-	if err == nil && flushErr != nil {
-		return true, fmt.Errorf("Ctrl-C was sent, but queued input was not discarded: %w", flushErr)
-	}
 	return true, err
 }
 
@@ -329,7 +320,7 @@ func (p *Process) Signal(signal Signal) error {
 		// event an interactive console receives. Do not terminate the shell:
 		// the foreground command must be interrupted while the session remains
 		// usable for subsequent commands.
-		if _, err := p.WriteContext(context.Background(), []byte{0x03}); err != nil { // under writeMu: never races a write in progress
+		if _, err := p.WriteContext(context.Background(), []byte{0x03}); err != nil {  // under writeMu: never races a write in progress
 			return err
 		}
 		// Some inbox console applications on Windows 11 do not translate ETX
