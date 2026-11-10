@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 )
 
 // lifecycleRole is a native service as the lifecycle journal sees it.
@@ -53,7 +54,7 @@ type killedInstall struct {
 
 func newKilledInstall(t *testing.T) *killedInstall {
 	t.Helper()
-	root := t.TempDir()
+	root := shorttemp.Dir(t) // the lifecycle journal refuses a symlinked ancestor; macOS's TempDir is under /var -> /private/var
 	k := &killedInstall{version: filepath.Join(root, "version"), roles: []*lifecycleRole{{"hostd", true}, {"daemon", true}, {"updater", true}}}
 	record := filepath.Join(root, "install-candidate.json")
 	if err := os.WriteFile(k.version, []byte("previous"), 0o600); err != nil {
