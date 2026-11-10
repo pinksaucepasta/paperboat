@@ -52,18 +52,6 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 	if err := recordInstallBrowserDomain(browserDomain); err != nil {
 		return err
 	}
-	oldState, err := loadLoopbackState(DefaultStateDir)
-	if err != nil {
-		return err
-	}
-	if _, migrateErr := migrateLoopbackState(ctx, DefaultStateDir); migrateErr != nil {
-		return migrateErr
-	}
-	defer func() {
-		if resultErr != nil && !isTrustPending(resultErr) {
-			resultErr = errors.Join(resultErr, writeLoopbackState(DefaultStateDir, oldState))
-		}
-	}()
 	if err = ctx.Err(); err != nil {
 		return err
 	}
@@ -71,7 +59,7 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 	return installDarwin(ctx, executable, darwinInstallConfig{
 		HelperPath: darwinHelperPath, LaunchPath: darwinLaunchPath, NewsyslogPath: darwinNewsyslogPath,
 		Label: "io.paperboat.machineguard", Socket: DefaultSocket, Account: darwinBrokerAccount, StateDir: DefaultStateDir,
-		LaunchArguments: []string{"daemon", "machine-guard", "run"}, InstallAccount: true, RollbackState: &oldState, Undo: undo,
+		LaunchArguments: []string{"daemon", "machine-guard", "run"}, InstallAccount: true, Undo: undo,
 	})
 }
 
@@ -79,7 +67,6 @@ type darwinInstallConfig struct {
 	HelperPath, LaunchPath, Label, Socket, Account string
 	NewsyslogPath                                  string // set for the real install; tests leave it empty
 	StateDir                                       string
-	RollbackState                                  *loopbackState
 	// Undo receives the restore for the prior installation on success; nil discards it.
 	Undo            **Undo
 	LaunchArguments []string
@@ -139,11 +126,6 @@ func installDarwin(ctx context.Context, executable string, cfg darwinInstallConf
 	controller := service.LaunchdController{Runner: service.ExecRunner{}, UID: 0, Label: cfg.Label}
 	wasRunning := exec.CommandContext(ctx, "/bin/launchctl", "print", "system/"+cfg.Label).Run() == nil
 	defer finishGuardInstall(ctx, rollback, &resultErr, cfg.Undo, func(c context.Context) error { return controller.Stop(c, cfg.LaunchPath) }, func(c context.Context) error {
-		if cfg.RollbackState != nil {
-			if err := writeLoopbackState(cfg.StateDir, *cfg.RollbackState); err != nil {
-				return err
-			}
-		}
 		if wasRunning {
 			return controller.Start(c, cfg.LaunchPath)
 		}

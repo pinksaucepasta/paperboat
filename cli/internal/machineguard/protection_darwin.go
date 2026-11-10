@@ -39,7 +39,7 @@ func darwinLoadAliases(cfg Config) error {
 		return errors.New("invalid Paperboat alias journal")
 	}
 	for address := range darwinPlatform.aliases {
-		if !validOwnedLoopbackAddress(address, cfg) && address != splitdns.BrowserGatewayIP {
+		if !validOwnedLoopbackAddress(address) && address != splitdns.BrowserGatewayIP {
 			return errors.New("invalid protected alias journal address")
 		}
 	}
@@ -103,7 +103,7 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 	if err := darwinValidatePolicy(ctx); err != nil {
 		return err
 	}
-	rules, err := darwinRules(ctx, leases, protectedLoopbackCIDRs(cfg)...)
+	rules, err := darwinRules(ctx, leases, protectedLoopbackCIDRs()...)
 	if err != nil {
 		return err
 	}

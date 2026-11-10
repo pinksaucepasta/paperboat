@@ -164,10 +164,6 @@ func (c *Client) Status(ctx context.Context) (RuntimeStatus, error) {
 	c.claims.Store(slices.Contains(out.Status.Features, FeatureAddressClaims))
 	return *out.Status, nil
 }
-func (c *Client) PrepareRangeChange(ctx context.Context, cidr string) error {
-	_, err := c.exchange(ctx, request{Operation: "prepare_range", LoopbackCIDR: cidr})
-	return err
-}
 func (c *Client) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -259,13 +259,6 @@ func (c *Client) Status(ctx context.Context) (RuntimeStatus, error) {
 	c.gatewayRouting.Store(slices.Contains(out.Status.Features, FeatureGatewayRouting))
 	return *out.Status, nil
 }
-func (c *Client) PrepareRangeChange(ctx context.Context, cidr string) error {
-	_, file, err := c.exchange(ctx, request{Operation: "prepare_range", LoopbackCIDR: cidr})
-	if file != nil {
-		file.Close()
-	}
-	return err
-}
 func (c *Client) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

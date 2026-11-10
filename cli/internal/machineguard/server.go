@@ -45,50 +45,41 @@ type guardedLease struct {
 	listener     net.Listener
 }
 type guardServer struct {
-	mu               sync.Mutex
-	cfg              Config
-	reserved         reservations
-	claims           *claimBook
-	leases           map[string]*guardedLease
-	gateways         map[int]*sharedGateway
-	names            map[controlConn]map[string]string
-	aliases          map[controlConn]map[string]string
-	connections      map[controlConn]string
-	wg               sync.WaitGroup
-	closing          bool
-	failures         chan error
-	rangeChangeOwner controlConn
-	ca               *splitdns.CA
-	trustReady       bool
-	certificateGate  chan struct{}
-	certificates     map[controlConn]map[string]cachedCertificate
-	previewPAC       map[controlConn]string
+	mu              sync.Mutex
+	cfg             Config
+	reserved        reservations
+	claims          *claimBook
+	leases          map[string]*guardedLease
+	gateways        map[int]*sharedGateway
+	names           map[controlConn]map[string]string
+	aliases         map[controlConn]map[string]string
+	connections     map[controlConn]string
+	wg              sync.WaitGroup
+	closing         bool
+	failures        chan error
+	ca              *splitdns.CA
+	trustReady      bool
+	certificateGate chan struct{}
+	certificates    map[controlConn]map[string]cachedCertificate
+	previewPAC      map[controlConn]string
 }
 
 func Serve(ctx context.Context, cfg Config) (resultErr error) {
 	if cfg.StateDir == "" {
 		cfg.StateDir = DefaultStateDir
 	}
-	state, err := loadLoopbackState(cfg.StateDir)
-	if err != nil {
-		return fmt.Errorf("load protected loopback ranges: %w", err)
-	}
-	if state.Active != machineloopback.DefaultCIDR {
-		return errors.New("machine guard must use the fixed 127.100.0.0/16 range; retry installation to migrate the previous range")
-	}
 	activeCIDR := cfg.LoopbackCIDR
 	if strings.TrimSpace(activeCIDR) == "" {
-		activeCIDR = state.Active
+		activeCIDR = machineloopback.DefaultCIDR
 	}
 	prefix, err := machineloopback.Prefix(activeCIDR)
 	if err != nil {
 		return fmt.Errorf("machine loopback CIDR: %w", err)
 	}
 	if prefix.String() != machineloopback.DefaultCIDR {
-		return errors.New("machine guard uses the fixed 127.100.0.0/16 range; retry installation to migrate the previous range")
+		return errors.New("machine guard uses the fixed 127.100.0.0/16 range")
 	}
 	cfg.LoopbackCIDR = prefix.String()
-	cfg.ProtectedLoopbackCIDRs = append(append([]string(nil), state.Protected...), cfg.ProtectedLoopbackCIDRs...)
 	if err := requirePrivilege(); err != nil {
 		return err
 	}
@@ -166,210 +157,6 @@ func Serve(ctx context.Context, cfg Config) (resultErr error) {
 	return err
 }
 
-const loopbackCIDRFile = "loopback-cidr"
-const loopbackStateFile = "loopback-ranges.json"
-
-type loopbackState struct {
-	Active    string   `json:"active"`
-	Protected []string `json:"protected"`
-}
-
-func loadLoopbackState(stateDir string) (loopbackState, error) {
-	if stateDir == "" {
-		stateDir = DefaultStateDir
-	}
-	data, err := os.ReadFile(filepath.Join(stateDir, loopbackStateFile))
-	var state loopbackState
-	if err == nil {
-		if len(data) > 8192 || json.Unmarshal(data, &state) != nil {
-			return loopbackState{}, errors.New("invalid protected loopback range state")
-		}
-		if clean, cleanErr := machineloopback.NormalizeCIDR(state.Active); cleanErr == nil {
-			state.Active = clean
-			seen := map[string]bool{clean: true}
-			valid := []string{clean}
-			for _, value := range state.Protected {
-				value, cleanErr = machineloopback.NormalizeCIDR(value)
-				if cleanErr != nil {
-					return loopbackState{}, errors.New("invalid protected loopback range state")
-				}
-				if seen[value] {
-					continue
-				}
-				seen[value] = true
-				valid = append(valid, value)
-			}
-			state.Protected = valid
-			if len(valid) > 254 {
-				return loopbackState{}, errors.New("protected loopback range limit exceeded")
-			}
-			return state, nil
-		}
-		return loopbackState{}, errors.New("invalid protected loopback range state")
-	}
-	if !os.IsNotExist(err) {
-		return loopbackState{}, err
-	}
-	active, legacyErr := storedLoopbackCIDRLegacy(stateDir)
-	if legacyErr != nil {
-		return loopbackState{}, legacyErr
-	}
-	return loopbackState{Active: active, Protected: []string{active}}, nil
-}
-
-func storedLoopbackCIDRLegacy(stateDir string) (string, error) {
-	if stateDir == "" {
-		stateDir = DefaultStateDir
-	}
-	data, err := os.ReadFile(filepath.Join(stateDir, loopbackCIDRFile))
-	if err == nil {
-		if clean, cleanErr := machineloopback.NormalizeCIDR(strings.TrimSpace(string(data))); cleanErr == nil {
-			return clean, nil
-		}
-		return "", errors.New("invalid legacy protected loopback range state")
-	}
-	if !os.IsNotExist(err) {
-		return "", err
-	}
-	return machineloopback.DefaultCIDR, nil
-}
-
-func storeLoopbackCIDR(stateDir, cidr string) error {
-	clean, err := machineloopback.NormalizeCIDR(cidr)
-	if err != nil {
-		return err
-	}
-	if clean != machineloopback.DefaultCIDR {
-		return errors.New("machine loopback range is fixed at 127.100.0.0/16")
-	}
-	if stateDir == "" {
-		stateDir = DefaultStateDir
-	}
-	if err := protectedDirectory(stateDir, 0700); err != nil {
-		return err
-	}
-	old, err := loadLoopbackState(stateDir)
-	if err != nil {
-		return err
-	}
-	next, err := mergedLoopbackState(old, clean)
-	if err != nil {
-		return err
-	}
-	return writeLoopbackState(stateDir, next)
-}
-
-func mergedLoopbackState(old loopbackState, clean string) (loopbackState, error) {
-	seen := make(map[string]bool)
-	protected := []string{clean}
-	seen[clean] = true
-	for _, value := range append(old.Protected, old.Active) {
-		normalized, err := machineloopback.NormalizeCIDR(value)
-		if err != nil {
-			return loopbackState{}, err
-		}
-		if seen[normalized] {
-			continue
-		}
-		seen[normalized] = true
-		protected = append(protected, normalized)
-	}
-	if len(protected) > 254 {
-		return loopbackState{}, errors.New("machine loopback protected range limit reached")
-	}
-	return loopbackState{Active: clean, Protected: protected}, nil
-}
-
-func writeLoopbackState(stateDir string, state loopbackState) error {
-	if stateDir == "" {
-		stateDir = DefaultStateDir
-	}
-	data, err := json.Marshal(state)
-	if err != nil {
-		return err
-	}
-	file, err := os.CreateTemp(stateDir, ".loopback-ranges-")
-	if err != nil {
-		return err
-	}
-	name := file.Name()
-	defer os.Remove(name)
-	if err = file.Chmod(0600); err == nil {
-		_, err = file.Write(data)
-	}
-	if err == nil {
-		err = file.Sync()
-	}
-	err = errors.Join(err, file.Close())
-	if err != nil {
-		return err
-	}
-	if err = replaceStateFile(name, filepath.Join(stateDir, loopbackStateFile)); err != nil {
-		return err
-	}
-	return syncDirectory(stateDir)
-}
-
-func prepareLoopbackCIDRChange(ctx context.Context, cidr string) (string, *Client, error) {
-	if strings.TrimSpace(cidr) == "" {
-		state, err := loadLoopbackState(DefaultStateDir)
-		if err != nil {
-			return "", nil, err
-		}
-		cidr = state.Active
-	}
-	clean, err := machineloopback.NormalizeCIDR(cidr)
-	if err != nil {
-		return "", nil, err
-	}
-	if clean != machineloopback.DefaultCIDR {
-		return "", nil, errors.New("machine loopback range is fixed at 127.100.0.0/16")
-	}
-	client, err := Connect(ctx, DefaultSocket)
-	if err != nil {
-		return clean, nil, nil
-	}
-	status, err := client.Status(ctx)
-	if err != nil {
-		client.Close()
-		return "", nil, fmt.Errorf("inspect active machine guard before range change: %w", err)
-	}
-	if status.LoopbackCIDR != clean {
-		if err = client.PrepareRangeChange(ctx, clean); err != nil {
-			client.Close()
-			return "", nil, err
-		}
-	}
-	return clean, client, nil
-}
-
-// migrateLoopbackState makes the fixed range active while retaining every
-// previously configured range in the persistent deny set. Installers call it
-// before starting this version of the guard.
-func migrateLoopbackState(ctx context.Context, stateDir string) (loopbackState, error) {
-	state, err := loadLoopbackState(stateDir)
-	if err != nil {
-		return loopbackState{}, err
-	}
-	if state.Active == machineloopback.DefaultCIDR {
-		return state, nil
-	}
-	_, fence, err := prepareLoopbackCIDRChange(ctx, machineloopback.DefaultCIDR)
-	if err != nil {
-		return loopbackState{}, err
-	}
-	if fence != nil {
-		defer fence.Close()
-	}
-	next, err := mergedLoopbackState(state, machineloopback.DefaultCIDR)
-	if err != nil {
-		return loopbackState{}, err
-	}
-	if err := writeLoopbackState(stateDir, next); err != nil {
-		return loopbackState{}, err
-	}
-	return next, nil
-}
 func (g *guardServer) closeOwned() error {
 	g.mu.Lock()
 	g.closing = true
@@ -401,9 +188,6 @@ func (g *guardServer) serveConnection(ctx context.Context, conn controlConn) {
 		defer g.mu.Unlock()
 		g.withdraw(ctx, conn)
 		delete(g.connections, conn)
-		if g.rangeChangeOwner == conn {
-			g.rangeChangeOwner = nil
-		}
 	}()
 
 	g.mu.Lock()
@@ -466,10 +250,6 @@ func (g *guardServer) serveConnection(ctx context.Context, conn controlConn) {
 func (g *guardServer) runtimeStatus(owner ...string) *RuntimeStatus {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	owners := make(map[string]struct{})
-	for _, lease := range g.leases {
-		owners[lease.uid] = struct{}{}
-	}
 	trustReady := g.trustReady
 	renewal := g.ca != nil && !g.ca.ExpiresAt().After(time.Now().Add(localCARenewalWindow))
 	domains, err := loadBrowserDomains(g.cfg.StateDir)
@@ -496,7 +276,7 @@ func (g *guardServer) runtimeStatus(owner ...string) *RuntimeStatus {
 			}
 		}
 	}
-	return &RuntimeStatus{BrowserDomain: domain, DefaultBrowserDomain: domains.Default, RootRenewalRequired: renewal, TrustReady: trustReady, Version: buildinfo.Version, LoopbackCIDR: g.cfg.LoopbackCIDR, Ready: true, ActiveLeases: len(g.leases), ActiveOwners: len(owners), ProtectedLoopbackCIDRs: append([]string(nil), g.cfg.ProtectedLoopbackCIDRs...), Features: guardFeatures(), GatewayRefusals: gatewayRefusalSnapshot()}
+	return &RuntimeStatus{BrowserDomain: domain, DefaultBrowserDomain: domains.Default, RootRenewalRequired: renewal, TrustReady: trustReady, Version: buildinfo.Version, LoopbackCIDR: g.cfg.LoopbackCIDR, Ready: true, ActiveLeases: len(g.leases), Features: guardFeatures(), GatewayRefusals: gatewayRefusalSnapshot()}
 }
 
 // validName admits exactly one machine label beneath the owner's local access
@@ -533,20 +313,9 @@ func gatewayPortAllowed(port int) bool {
 	return port == 80 || port == 443 || port >= 1024 && port <= 65535
 }
 
-func protectedLoopbackCIDRs(cfg Config) []string {
-	// Earlier releases let users select a projection range. Keep those historical
-	// prefixes default-denied after migrating active forwarding to 127.100/16.
-	values := append([]string{cfg.LoopbackCIDR, machineloopback.DefaultCIDR}, cfg.ProtectedLoopbackCIDRs...)
-	seen := make(map[string]bool)
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if clean, err := machineloopback.NormalizeCIDR(value); err == nil && !seen[clean] {
-			seen[clean] = true
-			out = append(out, clean)
-		}
-	}
-	return out
-}
+// protectedLoopbackCIDRs is the set of prefixes the guard denies by default and serves leases from: the one fixed
+// machine range.
+func protectedLoopbackCIDRs() []string { return []string{machineloopback.DefaultCIDR} }
 
 func validAddressInCIDR(ip, cidr string) bool {
 	if strings.TrimSpace(cidr) == "" {
@@ -564,10 +333,9 @@ func validAddressInCIDR(ip, cidr string) bool {
 	return b[3] > 0 && b[3] < 255 && address != netip.MustParseAddr(splitdns.BrowserGatewayIP)
 }
 
-// validOwnedLoopbackAddress is used only to retire addresses recorded in the
-// guard's protected alias journal. It accepts retained historical ranges and
-// the old resolver's .1 address so cleanup can remove only recorded aliases.
-func validOwnedLoopbackAddress(ip string, cfg Config) bool {
+// validOwnedLoopbackAddress is used only to retire addresses recorded in the guard's protected alias journal, so
+// cleanup can remove only recorded aliases inside the machine range.
+func validOwnedLoopbackAddress(ip string) bool {
 	address, err := netip.ParseAddr(ip)
 	if err != nil || !address.Is4() {
 		return false
@@ -576,7 +344,7 @@ func validOwnedLoopbackAddress(ip string, cfg Config) bool {
 	if octets[3] == 0 || octets[3] == 255 {
 		return false
 	}
-	for _, value := range protectedLoopbackCIDRs(cfg) {
+	for _, value := range protectedLoopbackCIDRs() {
 		prefix, err := machineloopback.Prefix(value)
 		if err == nil && prefix.Contains(address) {
 			return true
@@ -587,32 +355,7 @@ func validOwnedLoopbackAddress(ip string, cfg Config) bool {
 func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, in request) (net.Listener, error) {
 	key := net.JoinHostPort(in.IP, strconv.Itoa(in.Port))
 	switch in.Operation {
-	case "prepare_range":
-		if !canReconfigureRange(conn, uid) {
-			return nil, errors.New("machine loopback range changes require administrator authorization")
-		}
-		clean, err := machineloopback.NormalizeCIDR(in.LoopbackCIDR)
-		if err != nil {
-			return nil, err
-		}
-		if clean != machineloopback.DefaultCIDR {
-			return nil, errors.New("machine loopback range is fixed at 127.100.0.0/16")
-		}
-		if clean == g.cfg.LoopbackCIDR {
-			return nil, nil
-		}
-		if g.rangeChangeOwner != nil && g.rangeChangeOwner != conn {
-			return nil, errors.New("another machine loopback range change is already pending")
-		}
-		if len(g.leases) > 0 || len(g.connections) > 1 {
-			return nil, fmt.Errorf("cannot change machine loopback CIDR while %d protected listeners or other local daemon connections are active", len(g.leases))
-		}
-		g.rangeChangeOwner = conn
-		return nil, nil
 	case "acquire":
-		if g.rangeChangeOwner != nil && g.rangeChangeOwner != conn {
-			return nil, errors.New("machine loopback range change is pending")
-		}
 		gateway := in.Hostname == splitdns.BrowserGatewayHostname && in.IP == splitdns.BrowserGatewayIP && gatewayPortAllowed(in.Port)
 		if gateway && gatewayRouting {
 			return g.acquireGatewayRoute(ctx, conn, uid, in)

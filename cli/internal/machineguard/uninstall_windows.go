@@ -79,18 +79,7 @@ func Uninstall(ctx context.Context) (result UninstallResult, err error) {
 		}
 	}
 	defer lock.Close()
-	state, stateErr := loadLoopbackState(DefaultStateDir)
-	if stateErr != nil {
-		return result, stateErr
-	}
-	state, stateErr = mergedLoopbackState(state, machineloopback.DefaultCIDR)
-	if stateErr != nil {
-		return result, stateErr
-	}
-	if stateErr = writeLoopbackState(DefaultStateDir, state); stateErr != nil {
-		return result, stateErr
-	}
-	cfg := Config{StateDir: DefaultStateDir, LoopbackCIDR: machineloopback.DefaultCIDR, ProtectedLoopbackCIDRs: state.Protected}
+	cfg := Config{StateDir: DefaultStateDir, LoopbackCIDR: machineloopback.DefaultCIDR}
 	if err = applyProtection(ctx, cfg, nil); err != nil {
 		return result, err
 	}

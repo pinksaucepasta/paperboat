@@ -26,18 +26,7 @@ import (
 // ServeDenyOnly retains the cached-address boundary without exposing machine
 // listeners, DNS, or a control socket. Its launch job survives uninstall/reboot.
 func ServeDenyOnly(ctx context.Context) error {
-	state, err := loadLoopbackState(DefaultStateDir)
-	if err != nil {
-		return err
-	}
-	state, err = mergedLoopbackState(state, machineloopback.DefaultCIDR)
-	if err != nil {
-		return err
-	}
-	if err = writeLoopbackState(DefaultStateDir, state); err != nil {
-		return err
-	}
-	return serveDenyOnly(ctx, Config{StateDir: DefaultStateDir, LoopbackCIDR: machineloopback.DefaultCIDR, ProtectedLoopbackCIDRs: state.Protected})
+	return serveDenyOnly(ctx, Config{StateDir: DefaultStateDir, LoopbackCIDR: machineloopback.DefaultCIDR})
 }
 func serveDenyOnly(ctx context.Context, cfg Config) error {
 	if err := requirePrivilege(); err != nil {
@@ -73,18 +62,7 @@ func Uninstall(ctx context.Context) (result UninstallResult, err error) {
 		return UninstallResult{}, lockErr
 	}
 	defer lifecycle.Close()
-	state, err := loadLoopbackState(DefaultStateDir)
-	if err != nil {
-		return result, err
-	}
-	state, err = mergedLoopbackState(state, machineloopback.DefaultCIDR)
-	if err != nil {
-		return result, err
-	}
-	if err = writeLoopbackState(DefaultStateDir, state); err != nil {
-		return result, err
-	}
-	return uninstallDarwin(ctx, darwinInstallConfig{HelperPath: darwinHelperPath, LaunchPath: darwinLaunchPath, Label: "io.paperboat.machineguard", Socket: DefaultSocket, Account: darwinBrokerAccount, LaunchArguments: []string{"daemon", "machine-guard", "run"}}, Config{StateDir: DefaultStateDir, LoopbackCIDR: machineloopback.DefaultCIDR, ProtectedLoopbackCIDRs: state.Protected}, []string{"daemon", "machine-guard", "deny-only"})
+	return uninstallDarwin(ctx, darwinInstallConfig{HelperPath: darwinHelperPath, LaunchPath: darwinLaunchPath, Label: "io.paperboat.machineguard", Socket: DefaultSocket, Account: darwinBrokerAccount, LaunchArguments: []string{"daemon", "machine-guard", "run"}}, Config{StateDir: DefaultStateDir, LoopbackCIDR: machineloopback.DefaultCIDR}, []string{"daemon", "machine-guard", "deny-only"})
 }
 func uninstallDarwin(ctx context.Context, cfg darwinInstallConfig, guardCfg Config, denyArguments []string) (result UninstallResult, err error) {
 	if err = requirePrivilege(); err != nil {

@@ -31,18 +31,6 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 	if err := recordInstallBrowserDomain(browserDomain); err != nil {
 		return err
 	}
-	oldState, err := loadLoopbackState(DefaultStateDir)
-	if err != nil {
-		return err
-	}
-	if _, migrateErr := migrateLoopbackState(ctx, DefaultStateDir); migrateErr != nil {
-		return migrateErr
-	}
-	defer func() {
-		if resultErr != nil && !isTrustPending(resultErr) {
-			resultErr = errors.Join(resultErr, writeLoopbackState(DefaultStateDir, oldState))
-		}
-	}()
 	if err = ctx.Err(); err != nil {
 		return err
 	}
@@ -77,9 +65,6 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 		}
 		return exec.CommandContext(c, "systemctl", "stop", "paperboat-machineguard.service").Run()
 	}, func(c context.Context) error {
-		if err := writeLoopbackState(DefaultStateDir, oldState); err != nil {
-			return err
-		}
 		if err := exec.CommandContext(c, "systemctl", "daemon-reload").Run(); err != nil {
 			return err
 		}

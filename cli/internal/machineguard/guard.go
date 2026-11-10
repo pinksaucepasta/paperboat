@@ -53,17 +53,15 @@ func responseError(out response) error {
 }
 
 type Config struct {
-	Socket, StateDir       string
-	LoopbackCIDR           string
-	ProtectedLoopbackCIDRs []string
+	Socket, StateDir string
+	LoopbackCIDR     string
 }
 type request struct {
-	Operation    string            `json:"operation"`
-	Hostname     string            `json:"hostname,omitempty"`
-	IP           string            `json:"ip,omitempty"`
-	Port         int               `json:"port,omitempty"`
-	Names        map[string]string `json:"names,omitempty"`
-	LoopbackCIDR string            `json:"loopback_cidr,omitempty"`
+	Operation string            `json:"operation"`
+	Hostname  string            `json:"hostname,omitempty"`
+	IP        string            `json:"ip,omitempty"`
+	Port      int               `json:"port,omitempty"`
+	Names     map[string]string `json:"names,omitempty"`
 	// Account and Machine name the claim a machine listener belongs to (PLAN 3b multi-account hosts); the guard
 	// answers with the address it assigned. Machines is the complete set of an account for the "claims" operation.
 	Account  string   `json:"account,omitempty"`
@@ -89,16 +87,14 @@ type response struct {
 // distinguish desired configuration from the firewall/resolver configuration
 // that is actually active.
 type RuntimeStatus struct {
-	BrowserDomain          string   `json:"browser_domain"`
-	DefaultBrowserDomain   string   `json:"default_browser_domain"`
-	RootRenewalRequired    bool     `json:"root_renewal_required"`
-	TrustReady             bool     `json:"trust_ready"`
-	Version                string   `json:"version"`
-	LoopbackCIDR           string   `json:"loopback_cidr"`
-	Ready                  bool     `json:"ready"`
-	ActiveLeases           int      `json:"active_leases"`
-	ActiveOwners           int      `json:"active_owners"`
-	ProtectedLoopbackCIDRs []string `json:"protected_loopback_cidrs,omitempty"`
+	BrowserDomain        string `json:"browser_domain"`
+	DefaultBrowserDomain string `json:"default_browser_domain"`
+	RootRenewalRequired  bool   `json:"root_renewal_required"`
+	TrustReady           bool   `json:"trust_ready"`
+	Version              string `json:"version"`
+	LoopbackCIDR         string `json:"loopback_cidr"`
+	Ready                bool   `json:"ready"`
+	ActiveLeases         int    `json:"active_leases"`
 	// GatewayRefusals counts gateway connections not handed to a daemon, by reason (a fixed set).
 	GatewayRefusals map[string]uint64 `json:"gateway_refusals,omitempty"`
 	// Features names the protocol additions this guard understands; a client sends a request field only when

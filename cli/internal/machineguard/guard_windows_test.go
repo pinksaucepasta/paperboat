@@ -196,11 +196,6 @@ func TestWindowsProtectedGuardPersistentDeny(t *testing.T) {
 		conn.Close()
 		t.Fatal("withdrawn protected address reached wildcard listener")
 	}
-	retained, err := net.DialTimeout("tcp4", net.JoinHostPort("127.123.254.230", "46392"), 500*time.Millisecond)
-	if err == nil {
-		retained.Close()
-		t.Fatal("retained previous range reached wildcard listener")
-	}
 }
 func TestWindowsRemoveOwnedGuardPolicy(t *testing.T) {
 	if os.Getenv("PAPERBOAT_WINDOWS_GUARD_CLEANUP") != "1" {

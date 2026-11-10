@@ -54,19 +54,19 @@ func TestMachineGuardValidationUsesFixedCIDR(t *testing.T) {
 	}
 }
 
-func TestRuntimeStatusReportsActiveOwnersForSafeRangeChange(t *testing.T) {
+func TestRuntimeStatusReportsLeasesAndTheFixedRange(t *testing.T) {
 	g := &guardServer{cfg: Config{LoopbackCIDR: "127.100.0.0/16"}, trustReady: true, leases: map[string]*guardedLease{
 		"first":  {uid: "1000"},
 		"second": {uid: "1001"},
 		"third":  {uid: "1001"},
 	}}
 	status := g.runtimeStatus()
-	if !status.Ready || !status.TrustReady || status.Version == "" || status.ActiveLeases != 3 || status.ActiveOwners != 2 || status.LoopbackCIDR != "127.100.0.0/16" {
+	if !status.Ready || !status.TrustReady || status.Version == "" || status.ActiveLeases != 3 || status.LoopbackCIDR != "127.100.0.0/16" {
 		t.Fatalf("status=%+v", status)
 	}
 }
 
-func TestLinuxProtectionRetainsPriorLoopbackRanges(t *testing.T) {
+func TestLinuxProtectionDeniesTheMachineRange(t *testing.T) {
 	dir := t.TempDir()
 	capture := filepath.Join(dir, "rules")
 	nft := filepath.Join(dir, "nft")
@@ -75,7 +75,7 @@ func TestLinuxProtectionRetainsPriorLoopbackRanges(t *testing.T) {
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("CAPTURE", capture)
-	cfg := Config{LoopbackCIDR: "127.100.0.0/16", ProtectedLoopbackCIDRs: []string{"127.212.0.0/16"}}
+	cfg := Config{LoopbackCIDR: "127.100.0.0/16"}
 	if err := applyProtection(context.Background(), cfg, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -83,10 +83,8 @@ func TestLinuxProtectionRetainsPriorLoopbackRanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, cidr := range append([]string{cfg.LoopbackCIDR}, cfg.ProtectedLoopbackCIDRs...) {
-		if !strings.Contains(string(data), cidr) {
-			t.Errorf("nft rules omit protected range %s", cidr)
-		}
+	if !strings.Contains(string(data), cfg.LoopbackCIDR) {
+		t.Errorf("nft rules omit protected range %s", cfg.LoopbackCIDR)
 	}
 	if strings.Contains(string(data), "53535") || strings.Contains(string(data), "dport 53 accept") {
 		t.Fatal("machine guard retained DNS allow rules")

@@ -79,11 +79,11 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 	// Replies can target the protected gateway address itself. Only a marked
 	// broker socket in an already admitted connection may bypass the UID check.
 	fmt.Fprintf(&script, "meta mark %d ct mark %d ct state established,related accept\n", guardMark, guardMark)
-	for _, cidr := range protectedLoopbackCIDRs(cfg) {
+	for _, cidr := range protectedLoopbackCIDRs() {
 		fmt.Fprintf(&script, "ip daddr %s reject\n", cidr)
 	}
 	script.WriteString("}\nchain input { type filter hook input priority -10; policy accept;\n")
-	for _, cidr := range protectedLoopbackCIDRs(cfg) {
+	for _, cidr := range protectedLoopbackCIDRs() {
 		fmt.Fprintf(&script, "iifname != \"lo\" ip daddr %s reject\n", cidr)
 	}
 	for _, l := range leases {
@@ -92,7 +92,7 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 	}
 	// Return traffic inherits the connection mark installed on an owned SYN.
 	fmt.Fprintf(&script, "ct mark %d ct state established,related accept\n", guardMark)
-	for _, cidr := range protectedLoopbackCIDRs(cfg) {
+	for _, cidr := range protectedLoopbackCIDRs() {
 		fmt.Fprintf(&script, "ip daddr %s reject\n", cidr)
 	}
 	script.WriteString("}\n}\n")
@@ -130,9 +130,5 @@ func RestoreDeny(ctx context.Context) error {
 	if err := requirePrivilege(); err != nil {
 		return err
 	}
-	state, err := loadLoopbackState(DefaultStateDir)
-	if err != nil {
-		return err
-	}
-	return applyProtection(ctx, Config{LoopbackCIDR: machineloopback.DefaultCIDR, ProtectedLoopbackCIDRs: state.Protected}, nil)
+	return applyProtection(ctx, Config{LoopbackCIDR: machineloopback.DefaultCIDR}, nil)
 }

@@ -224,7 +224,7 @@ func TestDarwinGuardKernel(t *testing.T) {
 	defer retainedWildcard.Close()
 	if connection, err := net.DialTimeout("tcp4", "127.100.253.67:54371", 250*time.Millisecond); err == nil {
 		connection.Close()
-		t.Fatal("retained previous range reached wildcard listener")
+		t.Fatal("retired lease address reached wildcard listener")
 	}
 	if err = client.ReplaceNames(ctx, nil); err != nil {
 		t.Fatal(err)

@@ -20,7 +20,6 @@ func (*Client) AcquireMachine(context.Context, string, string, string, netip.Add
 func (*Client) ReplaceClaims(context.Context, string, []string) error     { return ErrUnsupported }
 func (*Client) ReplaceNames(context.Context, map[string]netip.Addr) error { return ErrUnsupported }
 func (*Client) Status(context.Context) (RuntimeStatus, error)             { return RuntimeStatus{}, ErrUnsupported }
-func (*Client) PrepareRangeChange(context.Context, string) error          { return ErrUnsupported }
 func (*Client) Close() error                                              { return nil }
 func Serve(context.Context, Config) error                                 { return ErrUnsupported }
 func Install(context.Context, string, string) (*Undo, error)              { return nil, ErrUnsupported }
