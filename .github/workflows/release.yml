@@ -317,7 +317,6 @@ jobs:
       contents: read
     env:
       DEFAULT_SERVER_URL: ${{ needs.release-authority.outputs.server_url }}
-      DEFAULT_RELEASE_URL: ${{ needs.release-authority.outputs.release_url }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -338,7 +337,7 @@ jobs:
           $env:GOOS = 'windows'
           $env:GOARCH = 'amd64'
           if ($env:SENTRY_DSN -cnotmatch '\Ahttps://[A-Za-z0-9]+@[A-Za-z0-9.-]+(:[0-9]+)?/[0-9]+\z') { throw 'Official candidate requires a valid HTTPS SENTRY_DSN.' }
-          $ldflags = "-s -w -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryDSN=$env:SENTRY_DSN -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryRelease=paperboat:$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Distribution=official -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=$env:GITHUB_SHA -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=$env:DEFAULT_SERVER_URL -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=$env:DEFAULT_RELEASE_URL"
+          $ldflags = "-s -w -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryDSN=$env:SENTRY_DSN -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryRelease=paperboat:$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Distribution=official -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=$env:GITHUB_SHA -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=$env:DEFAULT_SERVER_URL -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=$env:DEFAULT_SERVER_URL"
           & go build -buildvcs=false -trimpath -ldflags $ldflags -o $output ./cmd/pb
           if ($LASTEXITCODE -ne 0) { throw 'Unified Windows candidate build failed.' }
       # Release 2026.11.09.7: the published installer confirmed `pb reset` with a host name pb rejected.
@@ -361,6 +360,15 @@ jobs:
           if ($versionMatches.Count -ne 1 -or $versionMatches[0].Value -ne $expectedVersionLine) {
             throw "Windows candidate reported an unexpected version (want $env:RELEASE_VERSION): $versionOutput"
           }
+      # 2026.11.10.0 baked a release URL its own code could not use: pairing and `pb update bundle` got 404.
+      - name: Candidate saves the published release from its built-in release repository
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $candidate = Join-Path $env:GITHUB_WORKSPACE 'cli\dist\pb-windows-amd64.exe'
+          $bundle = Join-Path $env:RUNNER_TEMP 'published-amd64.pb-update'
+          & $candidate update bundle --output $bundle
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $bundle -PathType Leaf)) { throw 'The Windows candidate could not save the published release from its built-in release repository.' }
       - name: Record native Windows qualification handoff
         shell: powershell
         run: |
@@ -404,7 +412,6 @@ jobs:
       contents: read
     env:
       DEFAULT_SERVER_URL: ${{ needs.release-authority.outputs.server_url }}
-      DEFAULT_RELEASE_URL: ${{ needs.release-authority.outputs.release_url }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -425,7 +432,7 @@ jobs:
           $env:GOOS = 'windows'
           $env:GOARCH = 'arm64'
           if ($env:SENTRY_DSN -cnotmatch '\Ahttps://[A-Za-z0-9]+@[A-Za-z0-9.-]+(:[0-9]+)?/[0-9]+\z') { throw 'Official candidate requires a valid HTTPS SENTRY_DSN.' }
-          $ldflags = "-s -w -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryDSN=$env:SENTRY_DSN -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryRelease=paperboat:$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Distribution=official -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=$env:GITHUB_SHA -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=$env:DEFAULT_SERVER_URL -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=$env:DEFAULT_RELEASE_URL"
+          $ldflags = "-s -w -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryDSN=$env:SENTRY_DSN -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryRelease=paperboat:$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Distribution=official -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=$env:GITHUB_SHA -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=$env:DEFAULT_SERVER_URL -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=$env:DEFAULT_SERVER_URL"
           & go build -buildvcs=false -trimpath -ldflags $ldflags -o $output ./cmd/pb
           if ($LASTEXITCODE -ne 0) { throw 'Unified Windows candidate build failed.' }
       # Release 2026.11.09.7: the published installer confirmed `pb reset` with a host name pb rejected.
@@ -448,6 +455,15 @@ jobs:
           if ($versionMatches.Count -ne 1 -or $versionMatches[0].Value -ne $expectedVersionLine) {
             throw "Windows candidate reported an unexpected version (want $env:RELEASE_VERSION): $versionOutput"
           }
+      # 2026.11.10.0 baked a release URL its own code could not use: pairing and `pb update bundle` got 404.
+      - name: Candidate saves the published release from its built-in release repository
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $candidate = Join-Path $env:GITHUB_WORKSPACE 'cli\dist\pb-windows-arm64.exe'
+          $bundle = Join-Path $env:RUNNER_TEMP 'published-arm64.pb-update'
+          & $candidate update bundle --output $bundle
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $bundle -PathType Leaf)) { throw 'The Windows candidate could not save the published release from its built-in release repository.' }
       - name: Record native Windows qualification handoff
         shell: powershell
         run: |

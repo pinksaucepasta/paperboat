@@ -155,6 +155,12 @@ class TUFWorkflowSignerTest(unittest.TestCase):
             self.assertTrue(any("windows-" + architecture + "-native-qualification.json" in str(step.get("with", {}).get("path", "")) for step in job["steps"]))
             self.assertIn("windows-" + architecture, workflow["jobs"]["release-publication"]["needs"])
             self.assertTrue(any("TestInstallPowerShellConfirmsTheResetWithTheHostNamePbReads" in str(step.get("run", "")) for step in job["steps"]))
+            # 2026.11.10.0: the Windows builds baked in the /tuf URL, the code appends /tuf itself (as for the Unix builds,
+            # which bake in the server origin): pairing asked https://<host>/tuf/tuf/metadata and got 404.
+            self.assertTrue(any("buildinfo.DefaultReleaseURL=$env:DEFAULT_SERVER_URL" in str(step.get("run", "")) for step in job["steps"]))
+            self.assertNotIn("DEFAULT_RELEASE_URL", str(job))
+            self.assertTrue(any("update bundle --output" in str(step.get("run", "")) for step in job["steps"]))
+        self.assertIn('release_url="$server_url"', (ROOT / "cli/tools/build-release-asset.sh").read_text())
 
     # 2026-11-10: release.yml published five targets and the refresh still demanded three ("invalid release identity").
     def test_refresh_expects_the_number_of_targets_the_release_publishes(self):
