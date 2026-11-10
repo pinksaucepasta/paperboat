@@ -54,3 +54,18 @@ func ReadSystemOwnerSnapshot(ctx context.Context, socketPath, ownerSID string, t
 	defer client.http.CloseIdleConnections()
 	return client.Snapshot(ctx)
 }
+
+// ReadSystemOwnerConnections is the privileged updater's read-only count of the SSH streams and access forwards the
+// enrolled user's daemon carries now (the same answer the CLI's update guard reads).
+func ReadSystemOwnerConnections(ctx context.Context, socketPath, ownerSID string, timeout time.Duration) (OpenConnections, error) {
+	if ctx == nil || !validPipePath(socketPath) || timeout <= 0 || timeout > time.Minute {
+		return OpenConnections{}, ErrInvalidConfig
+	}
+	client := newClientWithDial(socketPath, timeout, func(callCtx context.Context) (net.Conn, error) {
+		dialCtx, cancel := context.WithTimeout(callCtx, timeout)
+		defer cancel()
+		return pipeauth.DialSystemOwner(dialCtx, socketPath, ownerSID)
+	})
+	defer client.http.CloseIdleConnections()
+	return client.OpenConnections(ctx)
+}

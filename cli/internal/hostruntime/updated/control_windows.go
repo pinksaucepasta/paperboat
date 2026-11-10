@@ -474,6 +474,11 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 		if err = backend.AuthorizeRecovery(ctx, journal); err != nil {
 			return response, err
 		}
+		if automatic {
+			if err = c.refuseWhileConnectionsAreOpen(ctx, release.Version); err != nil {
+				return response, err
+			}
+		}
 		journal.ApprovedCandidateID = candidate.ID
 		journal.ManualApproval = !automatic
 		journal.Force = !automatic && request.Force
