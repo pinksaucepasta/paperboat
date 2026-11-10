@@ -68,6 +68,10 @@ class WindowsDeviceTest(unittest.TestCase):
         self.assertEqual(b'partial', caught.exception.output)
         self.assertEqual(2, caught.exception.timeout)
 
+    def test_console_escapes_before_the_output_are_dropped(self):
+        with patch('subprocess.run', FakeSsh((0, b'\x1b[?1h\x1b[?1l' + envelope(0, b'out', b'')))):
+            self.assertEqual('out', self.device().run([EXE, 'x']).stdout)
+
     def test_failures_name_the_step(self):
         with patch('subprocess.run', FakeSsh((1, b''))):
             with self.assertRaisesRegex(winhost.DeviceError, 'run pb.exe failed on the device'):

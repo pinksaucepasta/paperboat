@@ -19,6 +19,7 @@ import json
 import os
 import pathlib
 import random
+import re
 import shutil
 import signal
 import subprocess
@@ -299,7 +300,8 @@ class WindowsDevice:
         except subprocess.TimeoutExpired as error:
             raise DeviceError('%s: the device did not answer within %ss; check that victus is reachable' %
                               (step, timeout)) from error
-        return done.returncode, done.stdout, done.stderr
+        # PowerShell reading its script from stdin can print console-mode escapes (ESC[?1h) ahead of the output.
+        return done.returncode, re.sub(rb'\x1b\[[0-9;?]*[a-zA-Z]', b'', done.stdout), done.stderr
 
     def ps(self, step, script, timeout=60, ok=(0,), **payload):
         if script in READ_ONLY:  # a session that never answers (seen on victus for a tiny read) is tried once more
