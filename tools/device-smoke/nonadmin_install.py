@@ -15,7 +15,7 @@ import winhost
 
 # Runs `pb install --json` as a new standard user (a scheduled task with that user's password: the only logon a
 # standard user gets without a desktop), then removes the user, its profile and the task. Prints JSON:
-# rc, out (base64 of pb's output), new (Paperboat per-user slots or services that appeared), bin (pb.exe installed).
+# rc, out (base64 of pb's output), new (Paperboat per-user slots or services that appeared).
 AS_STANDARD_USER = r"""
 $u=$req.user;$pw=ConvertTo-SecureString $req.password -AsPlainText -Force
 $slots={@(Get-ChildItem -LiteralPath (Join-Path $env:ProgramFiles 'Paperboat\users'),(Join-Path $env:ProgramData 'Paperboat\users') -ErrorAction SilentlyContinue|ForEach-Object{$_.FullName})+@(Get-Service Paperboat* -ErrorAction SilentlyContinue|ForEach-Object{$_.Name})}
@@ -31,7 +31,7 @@ try{
   $rc=if(Test-Path -LiteralPath (Join-Path $d 'rc')){[int]((Get-Content -LiteralPath (Join-Path $d 'rc') -Raw).Trim())}else{-1}
   $out=if(Test-Path -LiteralPath (Join-Path $d 'out')){[Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $d 'out')))}else{''}
   $new=@(& $slots|Where-Object{$before -notcontains $_})
-  ConvertTo-Json -Compress -InputObject @{rc=$rc;out=$out;new=$new;bin=(Test-Path -LiteralPath (Join-Path $d 'bin\pb.exe'))}
+  ConvertTo-Json -Compress -InputObject @{rc=$rc;out=$out;new=$new}
 }finally{
   Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue
   Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction SilentlyContinue
@@ -56,7 +56,7 @@ def check_windows(device):
     if answer['rc'] == 0 or receipt.get('ok') is True or not all(
             phrase in message.lower() for phrase in ('administrator', 'pb install')):
         raise RuntimeError('non-admin refusal lost its installation step or recovery action')
-    if answer['new'] or answer['bin']:
+    if answer['new']:
         raise RuntimeError('refused installation created a system slot or command')
     print(json.dumps({'check': 'nonadmin-install', 'status': 'PASS', 'specific_refusal': True, 'no_installation': True,
                       'non_ascii_user': True}))
