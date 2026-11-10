@@ -22,6 +22,6 @@
     "fixed_command": "TestMachineGuardInstallDiscoversMissingDomain PASS",
     "temporary_state": "TestGuardDomainDiscoveryRestoresLocalAccessAfterUninstall PASS",
     "vet": "daemoncmd, machineguard, hostinstall PASS",
-    "race": "pbvm3 build failed: disk full; same focused race rerun on pbvm2 pending at push, coordinator explicitly requested push on passing local/device checks"
+    "race": "PASS on anvit, committed d2ec621ac: -race -run TestMachineGuardInstallDiscoversMissingDomain|TestGuardDomainDiscoveryRestoresLocalAccessAfterUninstall|TestGuardInstall ./internal/daemoncmd ./internal/machineguard ./internal/hostruntime/hostinstall; daemoncmd 1.160s, machineguard 1.082s, hostinstall 1.237s. Earlier pbvm3 disk full; pbvm2 run stopped because full swap blocked compilers."
   }
 }
