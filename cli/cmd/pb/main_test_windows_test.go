@@ -28,6 +28,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
 
 func TestWindowsUninstallPlanIsProtectedBoundedAndHelperIsNonRecursive(t *testing.T) {
@@ -306,28 +307,83 @@ func TestWindowsUninstallRequiresConfirmedDaemonStopBeforeProductRemoval(t *test
 	}
 }
 
-func TestWindowsUninstallSchedulesCompleteHelperDirectoryDeletion(t *testing.T) {
-	previous := moveWindowsFileAtReboot
-	var deleted []string
-	moveWindowsFileAtReboot = func(path *uint16) error {
-		deleted = append(deleted, windows.UTF16PtrToString(path))
-		return nil
+// Security review, 2026-11-10: the elevated helper registered its directory, which the user can swap for a
+// junction, for deletion at restart; Windows deletes those paths as LocalSystem. The removal is now a command in
+// the user's own registry that runs as the user at the next sign-in, and nothing is left for the restart.
+func TestWindowsUninstallHelperDirectoryRemovalIsTheUsersNotARestartDelete(t *testing.T) {
+	previous := windowsUninstallRunOnceKey
+	windowsUninstallRunOnceKey = `Software\Paperboat Test\RunOnce ` + strconv.Itoa(os.Getpid())
+	t.Cleanup(func() {
+		_ = registry.DeleteKey(registry.CURRENT_USER, windowsUninstallRunOnceKey)
+		windowsUninstallRunOnceKey = previous
+	})
+	scheduled := func() map[string]string {
+		t.Helper()
+		values := map[string]string{}
+		key, err := registry.OpenKey(registry.CURRENT_USER, windowsUninstallRunOnceKey, registry.QUERY_VALUE)
+		if errors.Is(err, registry.ErrNotExist) {
+			return values
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer key.Close()
+		names, err := key.ReadValueNames(-1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range names {
+			value, _, err := key.GetStringValue(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			values[name] = value
+		}
+		return values
 	}
-	t.Cleanup(func() { moveWindowsFileAtReboot = previous })
-	scheduleWindowsUninstallDirectoryDeletionObserved(t.Context(), `C:\unrelated`)
-	if len(deleted) != 0 {
-		t.Fatalf("unsafe helper directory scheduled deletions: %v", deleted)
+	// Not t.TempDir: it carries the test's name, and Windows ignores a RunOnce command longer than 260 characters.
+	temporary, err := os.MkdirTemp("", "pb")
+	if err != nil {
+		t.Fatal(err)
 	}
-	directory := filepath.Join(os.TempDir(), "Paperboat Uninstall", "0123456789abcdef0123456789abcdef")
-	scheduleWindowsUninstallDirectoryDeletionObserved(t.Context(), directory)
-	want := []string{
-		filepath.Join(directory, "plan.json"),
-		filepath.Join(directory, "status.json"),
-		filepath.Join(directory, "paperboat-uninstall-helper.exe"),
-		directory,
+	t.Cleanup(func() { _ = os.RemoveAll(temporary) })
+	root := filepath.Join(temporary, "Paperboat Uninstall")
+	for _, directory := range []string{`C:\unrelated`, filepath.Join(root, "not-an-identifier"), filepath.Join(temporary, "100%TEMP%", "Paperboat Uninstall", "0123456789abcdef0123456789abcdef")} {
+		if err := scheduleWindowsUninstallDirectoryRemoval(directory); err == nil {
+			t.Fatalf("removal of %s was scheduled", directory)
+		}
 	}
-	if !reflect.DeepEqual(deleted, want) {
-		t.Fatalf("scheduled helper deletions=%v want=%v", deleted, want)
+	if values := scheduled(); len(values) != 0 {
+		t.Fatalf("scheduled for a directory pb did not create: %v", values)
+	}
+
+	directory := filepath.Join(root, "0123456789abcdef0123456789abcdef")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	scheduleWindowsUninstallDirectoryRemovalObserved(t.Context(), directory)
+	system, err := windows.GetSystemDirectory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"Paperboat Uninstall 0123456789abcdef0123456789abcdef": filepath.Join(system, "cmd.exe") + ` /d /c rd /s /q "` + directory + `"`}
+	if values := scheduled(); !reflect.DeepEqual(values, want) {
+		t.Fatalf("scheduled at the next sign-in:\n got %v\nwant %v", values, want)
+	}
+	// Nothing below the helper root may be among the paths Windows deletes at restart.
+	session, err := registry.OpenKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Control\Session Manager`, registry.QUERY_VALUE)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	pending, _, err := session.GetStringsValue("PendingFileRenameOperations")
+	if err != nil && !errors.Is(err, registry.ErrNotExist) {
+		t.Fatal(err)
+	}
+	for _, path := range pending {
+		if strings.Contains(strings.ToLower(path), strings.ToLower(root)) {
+			t.Fatalf("registered for deletion at restart: %s", path)
+		}
 	}
 }
 

@@ -28,6 +28,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 	"github.com/spf13/cobra"
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
 
 const (
@@ -40,7 +41,6 @@ var errUnrecoverableWindowsHelperRecord = errors.New("unrecoverable prior Window
 var (
 	purgeWindowsHostRuntime    = hostinstall.Purge
 	windowsUninstallExecutable = os.Executable
-	moveWindowsFileAtReboot    = func(path *uint16) error { return windows.MoveFileEx(path, nil, windows.MOVEFILE_DELAY_UNTIL_REBOOT) }
 	windowsProcessIsRunning    = isWindowsProcessRunning
 	windowsHelperIsRunning     = windowsExecutableIsRunning
 	windowsUninstallRoot       = func() string { return filepath.Join(os.TempDir(), "Paperboat Uninstall") }
@@ -532,9 +532,7 @@ func runWindowsUninstallHelper(ctx context.Context, planPath string) (result err
 	}
 	ctx = supportref.WithContext(ctx, plan.SupportReference)
 	defer func() { result = windowsUninstallLocalFailure(plan.SupportReference, result) }()
-	helperDirectory := filepath.Dir(planPath)
-	defer scheduleWindowsUninstallDirectoryDeletionObserved(ctx, helperDirectory)
-	scheduleWindowsUninstallHelperDeletionObserved(ctx)
+	scheduleWindowsUninstallDirectoryRemovalObserved(ctx, filepath.Dir(planPath))
 	status := func(state string, statusErr error) error {
 		return writeWindowsUninstallStatus(plan.StatusPath, windowsUninstallStatusValue(ctx, state, statusErr))
 	}
@@ -854,34 +852,40 @@ func copyWindowsUninstallHelper(source, destination string) (result error) {
 	return nil
 }
 
-func scheduleWindowsUninstallHelperDeletionObserved(ctx context.Context) {
-	executable, err := windowsUninstallExecutable()
-	if err == nil {
-		var pointer *uint16
-		pointer, err = windows.UTF16PtrFromString(executable)
-		if err == nil {
-			err = moveWindowsFileAtReboot(pointer)
-		}
-	}
-	if err != nil {
+// windowsUninstallRunOnceKey is the user's own list of commands Windows runs once at that user's next sign-in.
+var windowsUninstallRunOnceKey = `Software\Microsoft\Windows\CurrentVersion\RunOnce`
+
+// scheduleWindowsUninstallDirectoryRemovalObserved leaves the removal of the helper directory to the user's next
+// sign-in. The helper cannot delete its own running image, and the status file must stay readable after it
+// exits. Nothing is registered for deletion at restart: Windows does that as LocalSystem by path, and the
+// directory is the user's to swap for a link.
+func scheduleWindowsUninstallDirectoryRemovalObserved(ctx context.Context, directory string) {
+	if err := asWindowsUninstallUser(func() error { return scheduleWindowsUninstallDirectoryRemoval(directory) }); err != nil {
 		errorreport.Current().ObserveFailure(ctx, "paperboat-cli", "lifecycle", "component_shutdown", "service_failed", err)
 	}
 }
-func scheduleWindowsUninstallDirectoryDeletionObserved(ctx context.Context, directory string) {
-	if !filepath.IsAbs(directory) || !strings.EqualFold(filepath.Base(filepath.Dir(directory)), "Paperboat Uninstall") {
-		return
+
+// scheduleWindowsUninstallDirectoryRemoval writes the command into the user's registry; callers run it as the
+// user. The command runs as the user too, so it can remove only what the user could remove anyway.
+func scheduleWindowsUninstallDirectoryRemoval(directory string) (result error) {
+	// cmd expands %NAME% even inside quotes; the identifier is hexadecimal and a path holds no quote.
+	if !filepath.IsAbs(directory) || !strings.EqualFold(filepath.Base(filepath.Dir(directory)), "Paperboat Uninstall") || !isWindowsUninstallIdentifier(filepath.Base(directory)) || strings.Contains(directory, "%") {
+		return errors.New("the Windows uninstall helper directory is not one pb created; its removal was not scheduled")
 	}
-	var result error
-	for _, path := range []string{filepath.Join(directory, "plan.json"), filepath.Join(directory, "status.json"), filepath.Join(directory, "paperboat-uninstall-helper.exe"), directory} {
-		pointer, err := windows.UTF16PtrFromString(path)
-		if err == nil {
-			err = moveWindowsFileAtReboot(pointer)
-		}
-		result = errors.Join(result, err)
+	system, err := windows.GetSystemDirectory()
+	if err != nil {
+		return err
 	}
-	if result != nil {
-		errorreport.Current().ObserveFailure(ctx, "paperboat-cli", "lifecycle", "component_shutdown", "service_failed", result)
+	command := filepath.Join(system, "cmd.exe") + ` /d /c rd /s /q "` + directory + `"`
+	if len(command) > 260 { // Windows ignores a longer RunOnce command
+		return errors.New("the Windows uninstall helper directory path is too long to schedule its removal")
 	}
+	key, _, err := registry.CreateKey(registry.CURRENT_USER, windowsUninstallRunOnceKey, registry.SET_VALUE)
+	if err != nil {
+		return err
+	}
+	defer func() { result = errors.Join(result, key.Close()) }()
+	return key.SetStringValue("Paperboat Uninstall "+filepath.Base(directory), command)
 }
 
 // asWindowsUninstallUser runs operation as the user without elevation (windowssecurity.WithUnelevatedToken).
