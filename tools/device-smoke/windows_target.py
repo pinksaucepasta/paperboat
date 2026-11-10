@@ -315,3 +315,8 @@ def foreground_line(token, seconds):
     """A foreground program that prints token, then sleeps."""
     assert re.fullmatch(r'[A-Za-z0-9_]{4,}', token), token
     return typed_line("Write-Output ('%s'+'%s');Start-Sleep %d" % (token[:3], token[3:], seconds))
+
+
+def leaf(path):
+    """The last component of a Windows path (the unique directory name a run created)."""
+    return re.split(r'[\\/]', str(path).rstrip('\\/'))[-1]

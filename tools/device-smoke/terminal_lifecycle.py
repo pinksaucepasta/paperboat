@@ -301,7 +301,7 @@ def unix_phases(terminal, check, monitor, entry, cwd, status_bar):
     return phases + ['ctrl_d']
 
 
-def windows_phases(terminal, check, status_bar):
+def windows_phases(terminal, check, status_bar, cwd_leaf=None):
     """The phases that exist for a Windows target, whose shell is cmd.exe under ConPTY: each step is one PowerShell
     line typed there. Left out: Ctrl-Z (no job control), the 8 KiB paste and typing (a cmd.exe line holds 8191
     characters), vim, less and htop (not on Windows) and Ctrl-D (cmd.exe ends with exit)."""
@@ -316,6 +316,9 @@ def windows_phases(terminal, check, status_bar):
     if status_bar == 'on':
         terminal.expect(STATUS_BAR_DRAWN)
     terminal.expect(say('READY'))
+    if cwd_leaf is not None:  # pb new: the terminal starts in the directory pb was run from (the leaf name is unique to this run)
+        terminal.send(windows_target.typed_marker('PB_LOCALCWD_', "+((Split-Path -Leaf (Get-Location).Path) -eq '%s')" % cwd_leaf) + '\r')
+        terminal.expect('PB_LOCALCWD_True')
     terminal.send(windows_target.typed_marker('PB_ARITH_', '+(6*7)') + '\r')
     terminal.expect('PB_ARITH_42')
     terminal.send(windows_target.typed_marker('PB_UNICODE_', "+'λ船'") + '\r')
@@ -358,9 +361,11 @@ def qualify(pb, target, check, monitor, entry='connect', cwd=None, status_bar='o
             arguments = ['new']
         else:
             arguments = [target] if entry == 'root' else ['connect', target]
-        terminal = Terminal(winhost.terminal_argv(pb, [*arguments, '--name', name, '--status-bar', status_bar]), cwd=cwd, env=winhost.terminal_env(pb))
-        if entry != 'new' and windows_target.is_windows(pb, target):
-            phases = windows_phases(terminal, check, status_bar)
+        on_device = entry == 'new' and winhost.device() is not None
+        device_cwd, local_cwd = (cwd, None) if on_device else (None, cwd)
+        terminal = Terminal(winhost.terminal_argv(pb, [*arguments, '--name', name, '--status-bar', status_bar], device_cwd), cwd=local_cwd, env=winhost.terminal_env(pb))
+        if windows_target.is_windows(pb, target):
+            phases = windows_phases(terminal, check, status_bar, windows_target.leaf(cwd) if on_device else None)
         else:
             phases = unix_phases(terminal, check, monitor, entry, cwd, status_bar)
         result = {'check': 'terminal-' + check, 'entry': entry, 'status_bar': status_bar, 'target': target, 'status': 'PASS',
@@ -389,8 +394,9 @@ def main():
     args = parser.parse_args()
     pb = winhost.pb_path()
     if args.entry == 'new' and winhost.device():
-        parser.error('--entry new starts in a directory of the device; the ssh -tt harness cannot choose one')
-    if args.entry == 'new':
+        with winhost.device().temp_dir('pb-new') as directory:  # a directory of the device: the terminal must start in it
+            qualify(pb, args.target, args.check, args.monitor_path, args.entry, str(directory))
+    elif args.entry == 'new':
         with tempfile.TemporaryDirectory(prefix='.paperboat-terminal-cwd-', dir=args.cwd_root) as directory:
             qualify(pb, args.target, args.check, args.monitor_path, args.entry, directory)
     else:

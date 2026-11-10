@@ -543,6 +543,9 @@ class SessionFamily(unittest.TestCase):
         self.assertNotIn('secret', ' '.join(argv))
         command = argv[-1]
         self.assertIn("& 'C:\\Program Files\\Paperboat\\bin\\pb.exe' 'connect' 'my box' '--name' 'it''s'", command)
+        with patch.dict(os.environ, {}, clear=True):
+            started_in = winhost.terminal_argv(winhost.WindowsPb(device), ['new'], r"C:\Temp\pb-new-1'x")[-1]
+        self.assertIn("Set-Location -LiteralPath 'C:\\Temp\\pb-new-1''x'; & 'C:\\Program Files\\Paperboat\\bin\\pb.exe' 'new'", started_in)
 
     def test_every_terminal_argv_harness_gets_the_password_environment(self):
         # Without SSHPASS the pty child is sshpass printing its usage: the terminal closes before any output.

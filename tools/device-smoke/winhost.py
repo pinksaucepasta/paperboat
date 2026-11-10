@@ -829,8 +829,8 @@ def job(binary, arguments):
     return LocalJob([str(binary), *arguments])
 
 
-def terminal_argv(binary, arguments):
-    """argv for a local pty harness (terminal_lifecycle.Terminal) to run `pb <arguments>` interactively.
+def terminal_argv(binary, arguments, cwd=None):
+    """argv for a local pty harness (terminal_lifecycle.Terminal) to run `pb <arguments>` interactively (cwd: a directory of the device).
 
     On the device it is `ssh -tt`, so Windows OpenSSH gives pb.exe a ConPTY and the harness drives that console.
     sshpass reads the password from SSHPASS: pass terminal_env(binary) to that child only."""
@@ -838,6 +838,8 @@ def terminal_argv(binary, arguments):
         return [str(binary), *arguments]
     target = binary.device
     command = "& %s %s" % (ps_quote(binary), ' '.join(ps_quote(word) for word in arguments))
+    if cwd is not None:  # the device directory pb starts in (pb new opens its terminal there)
+        command = "Set-Location -LiteralPath %s; %s" % (ps_quote(cwd), command)
     return target.ssh_prefix('-tt', target.target, 'powershell -NoProfile -NonInteractive -Command ' + subprocess.list2cmdline([command]))
 
 
