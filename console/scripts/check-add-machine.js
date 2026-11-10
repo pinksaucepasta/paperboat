@@ -1,5 +1,5 @@
 // Browser check for F1-12 (Add machine dialog: the right command, live update when the machine
-// connects). Paste into the console of a signed-in tab on /machines (Personal workspace). Opens the
+// connects). Run on / (the machines list; there is no /machines page), signed in, Personal workspace. Opens the
 // Add machine dialog, checks the pairing command against what the server publishes
 // (GET /v1/machines/overview bootstrap_command) and against the enrollment it created
 // (GET /v1/machine-enrollments/{id}, waiting), switches to "Approve in browser instead" (the same
