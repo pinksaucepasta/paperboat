@@ -114,6 +114,13 @@ def checks(args):
                                  '--member-password-file', args.teammate_vault_password_file or '',
                                  '--member-account', '{teammate_account}', '--member-email', '{teammate_email}'],
                                 ['--team', '--vault_password_file', '--teammate_vault_password_file'])
+    # policy-cli is policy_cli.sh's 13 steps with pb alone. policy-token: the device creates the tokens and edits the
+    # policy; the token holder is a Unix throwaway of the account (signing in with a token replaces the CLI session and
+    # ends signed out, which must not happen to the device).
+    table['policy-cli'] = (['policy_cli.py', peer], ['--peer'])
+    table['policy-token'] = (['policy_token.py', '--allowed', args.token_allowed or '', '--other', args.token_other or '',
+                              '--owner-cmd', winhost.WINDOWS, '--token-cmd', args.token_cmd or '', '--pb', args.token_pb],
+                             ['--token_cmd', '--token_allowed', '--token_other'])
     return table
 
 
@@ -219,6 +226,11 @@ def build_parser():
     parser.add_argument('--disposable-target', help='env-undeliverable: a machine of the account that is safe to disturb')
     parser.add_argument('--inject', help="env-undeliverable: controller command that cuts the target's control plane")
     parser.add_argument('--clear', help='env-undeliverable: controller command that undoes --inject')
+    parser.add_argument('--token-cmd', help='policy-token: ssh/docker prefix of a Unix throwaway machine of the device account; '
+                        'its CLI session is replaced by the token')
+    parser.add_argument('--token-allowed', help='policy-token: the machine name the token may exec on')
+    parser.add_argument('--token-other', help='policy-token: another machine name of the account')
+    parser.add_argument('--token-pb', default='/home/pbt/.local/bin/pb', help='policy-token: pb on the --token-cmd side')
     parser.add_argument('--only', default='', help='comma list of check ids')
     parser.add_argument('--timeout', type=int, default=1800)
     parser.add_argument('--list', action='store_true')

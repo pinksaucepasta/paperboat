@@ -26,10 +26,15 @@ import sys
 import time
 
 from remote_timeout import timeout_words
+import winhost
 
 
 def sh(prefix, pb, args, timeout=150, stdin=None):
-    """Runs pb on one side: prefix is the ssh/docker command line, quoted once for its remote shell."""
+    """Runs pb on one side: prefix is the ssh/docker command line, quoted once for its remote shell, or `windows` /
+    `windows-teammate` for pb.exe on the Windows device (winhost.side_run)."""
+    if winhost.is_side(prefix):
+        done = winhost.side_run(prefix, args, input=stdin, timeout=timeout)
+        return done.returncode, done.stdout, done.stderr
     remote = ' '.join(shlex.quote(x) for x in timeout_words(prefix) + [pb] + list(args))
     done = subprocess.run(shlex.split(prefix) + [remote], capture_output=True, text=True, timeout=timeout, input=stdin)
     return done.returncode, done.stdout, done.stderr

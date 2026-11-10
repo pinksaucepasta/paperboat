@@ -1277,3 +1277,88 @@ class EnvFamilyPlumbing(unittest.TestCase):
         for check in ('env-messages', 'env-delivery', 'env-undeliverable', 'env-revoke-rotation'):
             self.assertTrue(windows_checks.missing(table[check][1], WindowsChecksRunner().args()), check)
 
+
+class PolicyFamily(unittest.TestCase):
+    """policy_cli.py against a scripted pb: the 13 steps of policy_cli.sh, their order and their cleanup."""
+
+    def replies(self, **overrides):
+        version = {'data': {'version': 7, 'can_edit': True}}
+        table = {
+            'auth status': (0, json.dumps({'account': {'email': 'me@example.test'}})),
+            'policy schema': (0, json.dumps({'title': 'Paperboat workspace policy'})),
+            'policy get --json': (0, json.dumps(version)),
+            'policy get': (0, '{\n  // F18 device check: x\n  "tags": {"tag:smoke-ci": []}\n}'),
+            'policy versions': (0, json.dumps({'data': {'versions': [{'kind': 'restored'}, {'kind': 'saved'}]}})),
+            'policy test good': (0, 'ok'),
+            'policy test bad': (1, 'error /rules/0/dst/0: unknown_machine'),
+            'policy set': (0, 'saved'),
+            'policy explain': (0, json.dumps({'decision': {'allowed': True, 'reason': 'owner'}})),
+            'policy restore': (0, 'restored'),
+            'api-token create': (0, json.dumps({'data': {'secret': 'pbat_SECRETVALUE', 'api_token': {'name': 'smoke-ci'}}})),
+            'api-token list': (0, 'smoke-ci  exec'),
+            'api-token revoke': (0, 'Revoked API token smoke-ci'),
+        }
+        table.update(overrides)
+        return table
+
+    def run_check(self, table):
+        import contextlib
+        import io
+        import policy_cli
+        calls = []
+
+        def pb_text(binary, arguments, **options):
+            key = ' '.join(arguments[:2])
+            if key == 'policy get' and '--json' in arguments:
+                key += ' --json'
+            if key == 'policy test':
+                key += ' bad' if arguments[-1].endswith('lkbad.json') else ' good'
+                self.assertTrue(pathlib.Path(arguments[-1]).exists())  # the draft is there while pb reads it
+            calls.append(key)
+            code, out = table[key]
+            return subprocess.CompletedProcess(arguments, code, out, '')
+
+        printed = io.StringIO()
+        with patch.object(winhost, 'pb_text', pb_text), patch.object(sys, 'argv', ['policy_cli.py', 'hp']), \
+                contextlib.redirect_stdout(printed):
+            code = policy_cli.main()
+        return code, printed.getvalue(), calls
+
+    def test_all_steps_pass_and_the_runner_reads_the_result(self):
+        import windows_checks
+        code, printed, calls = self.run_check(self.replies())
+        self.assertEqual(0, code, printed)
+        self.assertEqual(13, printed.count('PASS '))
+        self.assertEqual('PASS', windows_checks.verdict(code, printed))
+        self.assertEqual(['policy restore', 'policy versions', 'api-token create', 'api-token list', 'api-token revoke'], calls[-5:])
+        self.assertIn('"dst": "machine:hp"', __import__('policy_cli').policy_file('me@example.test', 'hp'))
+
+    def test_a_failed_step_still_restores_the_policy_revokes_the_token_and_hides_the_secret(self):
+        import windows_checks
+        code, printed, calls = self.run_check(self.replies(**{
+            'policy explain': (1, 'denied'), 'api-token list': (0, 'smoke-ci pbat_SECRETVALUE')}))
+        self.assertEqual(1, code)
+        self.assertIn('RESULT FAIL C247-explain-owner,C252-list', printed)
+        self.assertNotIn('SECRETVALUE', printed)
+        self.assertIn('policy restore', calls)
+        self.assertEqual('api-token revoke', calls[-1])
+        self.assertEqual('FAIL', windows_checks.verdict(code, printed))
+        code, printed, calls = self.run_check(self.replies(**{'policy set': (1, 'refused')}))
+        self.assertNotIn('policy restore', calls)  # nothing was saved, so nothing is restored
+
+    def test_policy_token_runs_the_windows_side_without_a_shell(self):
+        import policy_token
+        import windows_checks
+        done = subprocess.CompletedProcess([], 3, 'out', 'err')
+        with patch.object(winhost, 'side_run', return_value=done) as side:
+            self.assertEqual((3, 'out', 'err'), policy_token.sh('windows', '/unused/pb', ('api-token', 'create', 'n'), stdin='s'))
+        side.assert_called_once_with('windows', ('api-token', 'create', 'n'), input='s', timeout=150)
+        with patch('subprocess.run', return_value=done) as local, patch.object(policy_token, 'timeout_words', lambda prefix: []):
+            policy_token.sh('ssh host', '/home/pbt/.local/bin/pb', ('exec', 'a b'))
+        self.assertEqual(['ssh', 'host'], local.call_args[0][0][:2])
+        self.assertTrue(local.call_args[0][0][2].endswith("/home/pbt/.local/bin/pb exec 'a b'"))
+        table = windows_checks.checks(WindowsChecksRunner().args())
+        self.assertEqual(['--token_cmd', '--token_allowed', '--token_other'],
+                         windows_checks.missing(table['policy-token'][1], WindowsChecksRunner().args()))
+        self.assertEqual([], windows_checks.missing(table['policy-cli'][1], WindowsChecksRunner().args()))
+
