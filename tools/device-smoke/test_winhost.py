@@ -1798,8 +1798,16 @@ class TeamFamily(unittest.TestCase):
         self.assertEqual([], windows_checks.missing(table['team-business'][1], args))
         self.assertNotIn('--identity-commands', table['team-business'][0])
         self.assertNotIn('--streaming', table['team-business'][0])
-        row = windows_checks.checks(WindowsChecksRunner().args(f19_peer_cmd='ssh x', f19_s3_origin='h:1', f19_s3_list_cmd='ls'))['team-business'][0]
-        self.assertEqual(['--alias', 'm', '--peer-alias', 'p', '--peer-cmd', 'ssh x', '--streaming', '--s3-origin', 'h:1', '--s3-list-cmd', 'ls'], row[row.index('--alias'):])
+        configured = WindowsChecksRunner().args(
+            f19_peer_cmd='ssh x', token_pb='/fixture/f19-peer/pb',
+            f19_s3_origin='h:1', f19_s3_list_cmd='ls')
+        row = windows_checks.checks(configured)['team-business'][0]
+        for flag, value in {'--alias': 'm', '--peer-alias': 'p', '--peer-cmd': 'ssh x',
+                            '--pb': '/fixture/f19-peer/pb', '--s3-origin': 'h:1',
+                            '--s3-list-cmd': 'ls'}.items():
+            self.assertIn(flag, row)
+            self.assertEqual(value, row[row.index(flag) + 1])
+        self.assertIn('--streaming', row)
 
 
 @unittest.skipUnless(PWSH, 'set PB_TEST_PWSH to a pwsh binary to run the completion and listing snippets for real')

@@ -186,7 +186,8 @@ def checks(args):
     # Only pb runs on the device; the token helper, receivers and S3 client run on this controller (team_business.local_helper).
     # F19-07 access steps need a Unix peer (--f19-peer-cmd), F19-10 streaming a controller-reachable store (--f19-s3-origin).
     business = ['team_business.py', '--cmd', winhost.WINDOWS, '--api', '{server}', '--team']
-    f19 = (['--alias', args.machine, '--peer-alias', args.peer, '--peer-cmd', args.f19_peer_cmd] if args.f19_peer_cmd else []) + (
+    f19 = (['--alias', args.machine, '--peer-alias', args.peer, '--peer-cmd', args.f19_peer_cmd,
+            '--pb', args.token_pb] if args.f19_peer_cmd else []) + (
         ['--streaming', '--s3-origin', args.f19_s3_origin, '--s3-list-cmd', args.f19_s3_list_cmd or ''] if args.f19_s3_origin else [])
     table['team-business'] = (business + [team, '--member', '{teammate_account}'] + f19, ['--team'])
     table['team-identity-commands'] = (business + [args.sso_team or '', '--identity-commands'], ['--sso_team'])
@@ -406,7 +407,8 @@ def build_parser():
                         'its CLI session is replaced by the token')
     parser.add_argument('--token-allowed', help='policy-token: the machine name the token may exec on')
     parser.add_argument('--token-other', help='policy-token: another machine name of the account')
-    parser.add_argument('--token-pb', default='/home/pbt/.local/bin/pb', help='policy-token: pb on the --token-cmd side')
+    parser.add_argument('--token-pb', default='/home/pbt/.local/bin/pb',
+                        help='pb on the Unix API-token peer for policy-token and team-business')
     parser.add_argument('--member-cmd', help='team-two-account: ssh/docker prefix of a machine of the second account (enables approval and transfer)')
     parser.add_argument('--member-machine', help="team-two-account: that machine's id")
     parser.add_argument('--suspend-cmd', help='team-suspension: controller command that runs SQL from stdin on the server database')
