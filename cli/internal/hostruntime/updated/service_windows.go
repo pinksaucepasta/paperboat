@@ -251,7 +251,15 @@ func applyWindowsPrivilegedACL(path string, directory bool) error {
 	if err != nil {
 		return err
 	}
-	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil)
+	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
+	if err != nil {
+		return err
+	}
+	// LocalSystem owns updater state whoever created it: the elevated installer makes the directory first when it
+	// checks an official installation, and the release eligibility store refuses a directory another principal owns.
+	return windowssecurity.WithRestorePrivilege(func() error {
+		return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, system, nil, dacl, nil)
+	})
 }
 func recoverWindowsSlots(ctx context.Context, config WindowsConfig) error {
 	verify := config.VerifyExecutable
