@@ -1,0 +1,48 @@
+# console/scripts/check-preview-console.mjs dadape:18977 winpool-w11-7b:18977 on the live console, 2026-11-10 23:48Z
+# console build: live tree (before c038e88ef); machines dadape dev-8cef4cb5 (linux), winpool-w11-7b dev-57c0d5614 (windows); origin python http.server on 127.0.0.1:18977
+PASS  dadape: New preview dialog opens
+PASS  dadape: the preview's machine is the chosen one  (dadape)
+PASS  dadape: dialog reports the preview live with its address  (brave-forest-haven-8696.pprbt.app)
+PASS  dadape: server has one new ready preview
+PASS  dadape: list shows the address, forwards-to and an end time  (brave-forest-haven-8696.pprbt.app dadape localhost:18977 in 1 hour Live)
+PASS  dadape: the address answers
+PASS  dadape: status becomes Live
+PASS  dadape: page connects or shows a clear state  (Capture is off)
+PASS  dadape: capture turns on
+PASS  dadape: bodies turn on
+PASS  dadape: requests reach the preview
+PASS  dadape: requests arrive live
+PASS  dadape: no duplicate rows after several polls  (2 rows)
+PASS  dadape: path filter narrows the list  (GET /pbcheck-1794352698104/b?x=1 404 1 ms 04:48:18)
+PASS  dadape: status filter hides 2xx rows
+PASS  dadape: detail shows request and response headers  (row found: GET /pbcheck-1794352698104/b?x=1 404 1 ms 04:48:18 | GET /pbcheck-1794352698104/a 404 2 ms 04:48:18)
+PASS  dadape: header values are shown in full
+PASS  dadape: replay appears in the list marked Replay
+PASS  dadape: pause stops updates  (3 -> 3: GET /pbcheck-1794352698104/aReplay 404 1 ms 04:48:23 | GET /pbcheck-1794352698104/b?x=1 404 1 ms 04:48:18 | GET /pbcheck-1794352698104/a 404 2 ms 04:48:18)
+PASS  dadape: resume brings in the paused request
+PASS  dadape: clear empties the list
+PASS  dadape: the check's preview is stopped  (preview_45b50f0c-0825-4588-8673-ebc61f10c565)
+PASS  winpool-w11-7b: New preview dialog opens
+PASS  winpool-w11-7b: the preview's machine is the chosen one  (winpool-w11-7b)
+PASS  winpool-w11-7b: dialog reports the preview live with its address  (brave-emerald-garden-0850.pprbt.app)
+PASS  winpool-w11-7b: server has one new ready preview
+PASS  winpool-w11-7b: list shows the address, forwards-to and an end time  (brave-emerald-garden-0850.pprbt.app winpool-w11-7b localhost:18977 in 1 hour Live)
+PASS  winpool-w11-7b: the address answers
+PASS  winpool-w11-7b: status becomes Live
+PASS  winpool-w11-7b: page connects or shows a clear state  (Capture is off)
+PASS  winpool-w11-7b: capture turns on
+PASS  winpool-w11-7b: bodies turn on
+PASS  winpool-w11-7b: requests reach the preview
+PASS  winpool-w11-7b: requests arrive live
+PASS  winpool-w11-7b: no duplicate rows after several polls  (2 rows)
+PASS  winpool-w11-7b: path filter narrows the list  (GET /pbcheck-1794352731288/b?x=1 404 2 ms 04:48:51)
+PASS  winpool-w11-7b: status filter hides 2xx rows
+PASS  winpool-w11-7b: detail shows request and response headers  (row found: GET /pbcheck-1794352731288/b?x=1 404 2 ms 04:48:51 | GET /pbcheck-1794352731288/a 404 2 ms 04:48:51)
+PASS  winpool-w11-7b: header values are shown in full
+PASS  winpool-w11-7b: replay appears in the list marked Replay
+PASS  winpool-w11-7b: pause stops updates  (3 -> 3: GET /pbcheck-1794352731288/aReplay 404 2 ms 04:48:57 | GET /pbcheck-1794352731288/b?x=1 404 2 ms 04:48:51 | GET /pbcheck-1794352731288/a 404 2 ms 04:48:51)
+PASS  winpool-w11-7b: resume brings in the paused request
+PASS  winpool-w11-7b: clear empties the list
+PASS  winpool-w11-7b: the check's preview is stopped  (preview_bbb712fd-1ec2-443b-87f6-6c862946ba5c)
+44/44 passed
+rc=0

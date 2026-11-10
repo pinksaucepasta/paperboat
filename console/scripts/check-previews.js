@@ -10,6 +10,9 @@
   // Which machine's preview to create (its name); without it the dialog's default machine is used.
   const wantedMachine = window.__machine
   delete window.__machine
+  // `window.__keep = true` leaves the live preview running (its id in `window.__previewId`) for a following check.
+  const keep = window.__keep
+  delete window.__keep
   const steps = []
   const pass = (step, ok, detail = "") => steps.push({ step, ok, detail })
   // Steps so far, readable while a long check runs or if it throws: window.__checkSteps.
@@ -80,6 +83,8 @@
     )
   pass("the address answers", Boolean(await until(reach, 30000)))
   pass("status becomes Live", Boolean(await until(() => /Live/.test(row?.innerText ?? ""), 30000)))
+  window.__previewId = created?.id
+  if (keep) return steps
 
   const actions = [...main().querySelectorAll("button")].find(
     (b) => b.getAttribute("aria-label") === `Actions for ${live}`,
