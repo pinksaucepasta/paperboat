@@ -13,7 +13,7 @@
 set -euo pipefail
 
 JUMP=${WINPOOL_JUMP:-ubuntu@anvit}
-SLOTS=(1 2 3 4 5 6 7 8 9 10 11 12)
+SLOTS=(1 2 3 4 5 6 7 8 9 10 11 12 13 14)
 CONF=$HOME/.ssh/winpool.conf
 KNOWN=$HOME/.ssh/winpool_known_hosts
 CLAIMS=$HOME/.ssh/winpool-claims # N: who started machine N
@@ -37,22 +37,22 @@ configure() {
 up() { # machine numbers whose tunnel port listens on the jump host
   local listening
   listening=$(ssh -o BatchMode=yes -o ConnectTimeout=15 "$JUMP" 'ss -ltnH') || die "cannot reach the jump host $JUMP"
-  grep -oE '127\.0\.0\.1:222(0[1-9]|1[0-2]) ' <<<"$listening" | sed -E 's/.*:222([0-9]{2}) /\1/; s/^0//' | sort -n || true
+  grep -oE '127\.0\.0\.1:222(0[1-9]|1[0-4]) ' <<<"$listening" | sed -E 's/.*:222([0-9]{2}) /\1/; s/^0//' | sort -n || true
 }
 
 answers() { ssh -o BatchMode=yes -o ConnectTimeout=15 "winpool-$1" 'cmd /c exit 0' 2>/dev/null </dev/null; }
 
-slot() { [[ ${1:-} =~ ^([1-9]|1[0-2])$ ]] || die "machine number must be 1-12"; }
+slot() { [[ ${1:-} =~ ^([1-9]|1[0-4])$ ]] || die "machine number must be 1-14"; }
 
 start() {
   local count=${1:-} hours=${2:-2} busy free=() n deadline
-  [[ $count =~ ^([1-9]|1[0-2])$ ]] || die "usage: winpool.sh start N [HOURS] (N 1-12)"
+  [[ $count =~ ^([1-9]|1[0-4])$ ]] || die "usage: winpool.sh start N [HOURS] (N 1-14)"
   [[ $hours =~ ^[1-5]$ ]] || die "HOURS must be 1-5"
   # One start at a time on this controller, and a machine that was just started is taken before its tunnel is up:
   # two lanes starting seconds apart otherwise pick the same numbers.
   mkdir -p "$CLAIMS"
   exec 9>"$CLAIMS/lock"; flock 9
-  busy=$(up; find "$CLAIMS" -regextype posix-extended -regex '.*/([1-9]|1[0-2])' -mmin -15 -printf '%f\n')
+  busy=$(up; find "$CLAIMS" -regextype posix-extended -regex '.*/([1-9]|1[0-4])' -mmin -15 -printf '%f\n')
   for n in "${SLOTS[@]}"; do grep -qx "$n" <<<"$busy" || free+=("$n"); done
   [ "${#free[@]}" -ge "$count" ] || die "only ${#free[@]} of ${#SLOTS[@]} machines are free (winpool.sh list)"
   free=("${free[@]:0:count}")
