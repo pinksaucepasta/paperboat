@@ -26,7 +26,8 @@ class FakeSsh:
         self.replies, self.calls = list(replies), []
 
     def __call__(self, argv, input, capture_output, timeout, env):
-        script, payload = input.decode().split('\n')[:2]
+        script, *chunks = input.decode().split('\n')
+        payload = ''.join(chunks[:chunks.index('.')])
         self.calls.append({'argv': argv, 'script': base64.b64decode(script).decode(),
                            'payload': json.loads(base64.b64decode(payload)), 'env': env})
         rc, out = self.replies.pop(0)
@@ -42,7 +43,7 @@ class WindowsDeviceTest(unittest.TestCase):
         self.assertEqual(['sshpass', '-e', 'ssh'], argv[:3])
         self.assertNotIn('secret', ' '.join(argv))
         command = argv[-1]
-        self.assertLess(len(command), 1000)
+        self.assertLess(len(command), 2000)  # cmd.exe allows 8191
         encoded = command.rsplit(' ', 1)[1]
         self.assertEqual(winhost.BOOTSTRAP, base64.b64decode(encoded).decode('utf-16-le'))
         self.assertEqual(['ssh', '-o', 'BatchMode=yes'], self.device(password=None).ssh_command()[:3])

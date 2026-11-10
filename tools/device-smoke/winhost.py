@@ -30,10 +30,13 @@ DEFAULT_TARGET = 'pujan@victus'
 MISSING = 3  # exit code of a snippet whose file does not exist
 REFUSED = 4  # exit code of EXCHANGE when nothing accepts the connection
 
-# Reads "<base64 script>\n<base64 JSON payload>" from stdin, then runs the script with $req set.
-BOOTSTRAP = ("$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';$a=[Console]::In.ReadToEnd().Split(\"`n\");"
+# Reads "<base64 script>\n<base64 JSON payload in lines>" from stdin, then runs the script with $req set.
+BOOTSTRAP = ("$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';"
+             # Lines up to a single "." and never end-of-input: Windows OpenSSH sometimes does not deliver EOF on a
+             # session's stdin (an identical 3 KB write answered once and hung the next time on victus).
+             "$a=@();while(($l=[Console]::In.ReadLine()) -ne $null -and $l.Trim() -ne '.'){$a+=$l};"
              "$s=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($a[0].Trim()));"
-             "$req=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($a[1].Trim()))|ConvertFrom-Json;"
+             "$req=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String((($a[1..($a.Length-1)]|ForEach-Object{$_.Trim()}) -join '')))|ConvertFrom-Json;"
              "Invoke-Expression $s")
 
 RUN = r"""
@@ -47,7 +50,7 @@ $p=[Diagnostics.Process]::Start($i)
 $om=New-Object IO.MemoryStream;$em=New-Object IO.MemoryStream
 if($req.delay_ms -gt 0){Start-Sleep -Milliseconds $req.delay_ms}
 $ot=$p.StandardOutput.BaseStream.CopyToAsync($om);$et=$p.StandardError.BaseStream.CopyToAsync($em)
-try{$b=[Convert]::FromBase64String($req.input);$p.StandardInput.BaseStream.Write($b,0,$b.Length)}catch{}
+try{$b=$(if($req.input_file){[IO.File]::ReadAllBytes($req.input_file)}else{[Convert]::FromBase64String($req.input)});$p.StandardInput.BaseStream.Write($b,0,$b.Length)}catch{}
 try{$p.StandardInput.Close()}catch{}
 $t=-not $p.WaitForExit([int]$req.timeout_ms)
 if($t){& cmd.exe /c "taskkill /T /F /PID $($p.Id) >nul 2>&1";[void]$p.WaitForExit(10000)}
@@ -62,7 +65,11 @@ READ = ("if(-not(Test-Path -LiteralPath $req.path -PathType Leaf)){exit 3}\n"
         "$f=New-Object IO.FileStream($req.path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)\n"
         "$m=New-Object IO.MemoryStream;$f.CopyTo($m);$f.Close();[Convert]::ToBase64String($m.ToArray())")
 WRITE = ("$d=Split-Path -Parent $req.path;if($d){[void](New-Item -ItemType Directory -Force -Path $d)}\n"
-         "[IO.File]::WriteAllBytes($req.path,[Convert]::FromBase64String($req.data))")
+         "$f=New-Object IO.FileStream($req.path,$(if($req.append){[IO.FileMode]::Append}else{[IO.FileMode]::Create}))\n"
+         "$b=[Convert]::FromBase64String($req.data);$f.Write($b,0,$b.Length);$f.Close()")
+# Windows OpenSSH stalls when more than a few KB arrive on a session's stdin (a 40 KB write never answered on victus),
+# so anything larger travels in pieces of this many bytes.
+CHUNK = 3000
 EXISTS = "if(Test-Path -LiteralPath $req.path){'yes'}else{'no'}"
 COPY = "Copy-Item -LiteralPath $req.source -Destination $req.target -Force"
 UNLINK = "Remove-Item -LiteralPath $req.path -Recurse -Force -ErrorAction SilentlyContinue"
@@ -199,7 +206,10 @@ class WindowsDevice:
 
     def snippet(self, step, script, timeout=60, **payload):
         """Run script on the device with $req = payload; return (rc, stdout bytes, stderr bytes)."""
-        stdin = _b64(script.encode()) + '\n' + _b64(json.dumps(payload).encode()) + '\n'
+        # The payload goes in short lines: Windows PowerShell 5.1 stalls reading one very long line from an SSH stdin
+        # (a 36 KB file write never answered on victus).
+        body = _b64(json.dumps(payload).encode())
+        stdin = _b64(script.encode()) + '\n' + '\n'.join(body[i:i + 4000] for i in range(0, len(body), 4000)) + '\n.\n'
         try:
             done = subprocess.run(self.ssh_command(), input=stdin.encode(), capture_output=True, timeout=timeout,
                                   env=self.ssh_environment())
@@ -219,9 +229,15 @@ class WindowsDevice:
 
         read_delay seconds pass before anything reads its output: a slow consumer, so the child's pipe backs up."""
         data = input.encode() if isinstance(input, str) else (input or b'')
-        rc, out, err = self.snippet('run ' + pathlib.PureWindowsPath(argv[0]).name, RUN, timeout + 30,
+        with contextlib.ExitStack() as stack:
+            staged = ''
+            if len(data) > CHUNK:  # too much for the session's stdin: the device reads it from a file
+                staged = stack.enter_context(self.temp_dir('pb-input')) / 'stdin'
+                staged.write_bytes(data)
+                data = b''
+            rc, out, err = self.snippet('run ' + pathlib.PureWindowsPath(argv[0]).name, RUN, timeout + 30,
                                     exe=argv[0], args=subprocess.list2cmdline(list(argv[1:])), env=env or {},
-                                    cwd=cwd or '', input=_b64(data), timeout_ms=int(timeout * 1000),
+                                    cwd=cwd or '', input=_b64(data), input_file=str(staged), timeout_ms=int(timeout * 1000),
                                     delay_ms=int(read_delay * 1000))
         if rc:
             raise DeviceError('run %s failed on the device (exit %s): %s' %
@@ -244,7 +260,8 @@ class WindowsDevice:
         return base64.b64decode(out)
 
     def write_bytes(self, path, data):
-        self.ps('write %s' % path, WRITE, path=str(path), data=_b64(data))
+        for start in range(0, max(len(data), 1), CHUNK):
+            self.ps('write %s' % path, WRITE, path=str(path), data=_b64(data[start:start + CHUNK]), append=start > 0)
 
     def exists(self, path):
         return self.ps('exists %s' % path, EXISTS, path=str(path))[1] == 'yes'
