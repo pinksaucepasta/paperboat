@@ -83,11 +83,42 @@ func resetBridge(t *testing.T, order string) error {
 		close(reset)
 	}()
 	var stream io.ReadWriteCloser = bridgeSide
-	if order == "noisy" {
+	switch order {
+	case "noisy":
 		stream = noisyCloseWriteConn{bridgeSide}
+	case "abort":
+		stream = abortedStream{bridgeSide}
 	}
 	_, err = BridgeSSH(t.Context(), stream, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second)
 	return err
+}
+
+// abortedStream reports a client abort the way a native QUIC stream does: a typed stream error, never a TCP reset. A
+// TCP RST on Windows arrives as WSAECONNRESET, which closeResets lists as a forgivable reset: the production client
+// streams are QUIC and have no such value, so the tests model the abort with one that is not a reset on any OS.
+// It holds the connection in a field, not embedded: embedding would promote TCPConn's WriteTo and io.Copy would use it
+// and bypass Read, so the abort would never be reported as this error.
+type abortedStream struct{ conn *net.TCPConn }
+
+var errStreamAborted = errors.New("peer aborted the stream")
+
+func (a abortedStream) Read(b []byte) (int, error) {
+	n, err := a.conn.Read(b)
+	if err != nil && !errors.Is(err, io.EOF) {
+		err = errStreamAborted
+	}
+	return n, err
+}
+
+func (a abortedStream) Close() error      { return a.conn.Close() }
+func (a abortedStream) CloseWrite() error { return a.conn.CloseWrite() }
+
+func (a abortedStream) Write(b []byte) (int, error) {
+	n, err := a.conn.Write(b)
+	if err != nil {
+		err = errStreamAborted
+	}
+	return n, err
 }
 
 // noisyCloseWriteConn fails CloseWrite with a closed-socket error that is a fresh value, as a native stream does once
@@ -176,7 +207,7 @@ func TestClientAbortWhileSSHDIsStillRunningIsAFailure(t *testing.T) {
 		_ = clientSide.SetLinger(0)
 		_ = clientSide.Close() // the abort
 	}()
-	if _, err := BridgeSSH(t.Context(), bridgeSide, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second); err == nil {
+	if _, err := BridgeSSH(t.Context(), abortedStream{bridgeSide}, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second); err == nil {
 		t.Fatal("a client that aborted mid-upload, sshd still running, was recorded as a clean end")
 	}
 }
@@ -368,7 +399,7 @@ func TestMidUploadAbortStaysFailedEvenWhenSSHDExitsPromptly(t *testing.T) {
 			_ = clientSide.SetLinger(0)
 			_ = clientSide.Close() // the abort
 		}()
-		_, err = BridgeSSH(t.Context(), bridgeSide, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second)
+		_, err = BridgeSSH(t.Context(), abortedStream{bridgeSide}, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second)
 		resetGrace, closeResets = previous, saved
 		_ = listener.Close()
 		if err == nil {
@@ -410,7 +441,7 @@ func TestMidDownloadClientAbortIsFailedOnEveryOS(t *testing.T) {
 			_ = clientSide.SetLinger(0)
 			_ = clientSide.Close() // the abort
 		}()
-		_, err = BridgeSSH(t.Context(), bridgeSide, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second)
+		_, err = BridgeSSH(t.Context(), abortedStream{bridgeSide}, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second)
 		resetGrace, closeResets = previous, saved
 		_ = listener.Close()
 		if err == nil {
