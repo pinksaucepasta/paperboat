@@ -7,9 +7,12 @@ user reaches it. Prints one PASS/FAIL line per check id and exits non-zero on an
 
   python3 local_access.py --controller pb@pbvm2 --target hp [--only ID,ID]
 
+--controller windows uses winhost on the Windows device.
 --controller local runs the controller's commands on this machine (the final re-check runs it inside container A).
 """
 import argparse
+import contextlib
+import hashlib
 import os
 import base64
 import json
@@ -18,6 +21,9 @@ import subprocess
 import sys
 import time
 import uuid
+
+import winhost
+from private_access import device_curl, listener, ping_paths
 
 ORIGIN = r'''
 import hashlib, http.server, json, socketserver, sys, threading, time
@@ -100,8 +106,7 @@ def explicit():
 
 def https(form):
     shown = json.loads(subprocess.check_output(['pb', 'config', 'local-access', 'show', '--json']))['data']
-    # The effective domain comes from the machine guard; older builds kept it under local_access.
-    domain = shown.get('domain') or shown['local_access']['domain']
+    domain = shown['domain']
     host = f'{port}.{alias}.{domain}' if form == 'port-host' else f'{alias}.{domain}:{port}'
     result = subprocess.run(['curl', '-sS', '--fail', '--noproxy', '*', '--connect-timeout', '15', '--max-time', '30',
                              'https://' + host + '/'], capture_output=True, timeout=40)
@@ -144,7 +149,9 @@ def ssh(controller, command, timeout=120, **kwargs):
 
 
 def pb_json(controller, *arguments):
-    result = ssh(controller, ' '.join(shlex.quote(a) for a in ('pb', *arguments, '--json')))
+    result = (winhost.pb_text(winhost.pb_path(), [*arguments, '--json'], timeout=120)
+              if controller == 'windows' else
+              ssh(controller, ' '.join(shlex.quote(a) for a in ('pb', *arguments, '--json'))))
     assert result.returncode == 0, result.stderr[-300:]
     receipt = json.loads(result.stdout)
     return receipt.get('data', receipt)
@@ -157,9 +164,31 @@ def is_mac(controller):
 class Origin:
     def __init__(self, controller, target, seconds=900):
         self.controller, self.target, self.marker = controller, target, 'PB_LA_' + uuid.uuid4().hex
-        self.log = f'/tmp/local-access-{uuid.uuid4().hex[:8]}'
+        self.job = None
         script = base64.b64encode(ORIGIN.encode()).decode()
         remote = f'import base64;exec(base64.b64decode("{script}").decode())'
+        if controller == 'windows':
+            try:
+                self.job = winhost.job(winhost.pb_path(), ['exec', target, '--timeout', f'{seconds + 60}s',
+                                      '--', 'python3', '-c', remote, self.marker, str(seconds)])
+                deadline = time.monotonic() + 60
+                while time.monotonic() < deadline:
+                    output = self.job.stdout(65537)
+                    assert len(output) <= 65536, 'target origin output exceeded its bound'
+                    if b'\n' in output:
+                        self.ports = json.loads(output.split(b'\n', 1)[0])
+                        return
+                    if self.job.poll() is not None:
+                        break
+                    time.sleep(1)
+                raise RuntimeError('target origin did not publish its ports')
+            except BaseException as error:
+                try:
+                    self.close()
+                except Exception as cleanup_error:
+                    error.add_note('origin cleanup also failed: ' + str(cleanup_error))
+                raise
+        self.log = f'/tmp/local-access-{uuid.uuid4().hex[:8]}'
         detach = '' if is_mac(controller) else 'setsid '  # macOS has no setsid
         command = (f'{detach}nohup pb exec {shlex.quote(target)} --timeout {seconds + 60}s -- python3 -c {shlex.quote(remote)} '
                    f'{self.marker} {seconds} > {self.log}.out 2>&1 < /dev/null & echo $! > {self.log}.pid')
@@ -173,6 +202,13 @@ class Origin:
         raise RuntimeError('target origin did not start: ' + out[-200:])
 
     def close(self):
+        if self.controller == 'windows':
+            if self.job is not None:
+                try:
+                    self.job.kill()
+                finally:
+                    self.job.close()
+            return
         ssh(self.controller, f'kill $(cat {self.log}.pid) 2>/dev/null; rm -f {self.log}.out {self.log}.pid')
 
 
@@ -216,12 +252,75 @@ def unblock_udp(controller):
     ssh(controller, 'for t in iptables ip6tables; do sudo -n $t -D %s 2>/dev/null; done; true' % BLOCK)
 
 
+def windows_probe(name, machine, port, marker):
+    """Run the same six assertions on the device, without a Python installation there."""
+    device, binary = winhost.device(), winhost.pb_path()
+    block = 'private TCP λ船\n'.encode() + bytes(range(256))
+    expected = marker.encode() + hashlib.sha256(block * 1024).digest()
+
+    def exchange(address):
+        _, output = device.ps('private TCP exchange', winhost.EXCHANGE, timeout=90,
+                              address=address[0], port=int(address[1]),
+                              block=base64.b64encode(block).decode(), repeat=1024)
+        assert base64.b64decode(output) == expected, 'private TCP changed bytes or lost half-close delivery'
+
+    def explicit():
+        job = winhost.job(binary, ['access', 'machine', machine['id'], '--port', str(port),
+                                  '--listen', '127.0.0.1:0', '--json'])
+        try:
+            deadline = time.monotonic() + 40
+            while True:
+                output = job.stdout(65537)
+                assert len(output) <= 65536, 'machine access exceeded its receipt bound'
+                if b'\n' in output:
+                    break
+                assert job.poll() is None and time.monotonic() < deadline, 'machine access did not publish its listener'
+                time.sleep(.2)
+            exchange(listener(output, {'machine_id': machine['id'], 'port': port}))
+            assert job.poll() is None, 'machine access ended while its foreground owner was live'
+        finally:
+            try:
+                job.kill()
+            finally:
+                job.close()
+
+    def probe():
+        if name == 'explicit-listen':
+            explicit()
+        elif name.startswith('https-'):
+            domain = pb_json('windows', 'config', 'local-access', 'show')['domain']
+            alias = machine['alias']
+            host = f'{port}.{alias}.{domain}' if name == 'https-port-host' else f'{alias}.{domain}:{port}'
+            result = device_curl(['-sS', '--fail', '--noproxy', '*', '--connect-timeout', '15',
+                                  '--max-time', '30', 'https://' + host + '/'])
+            assert result.returncode == 0 and result.stdout == expected, 'trusted private HTTPS changed bytes or failed'
+        else:
+            if name.startswith('path-'):
+                ping_paths(binary, machine['alias'], name[5:])
+            exchange((machine['assigned_ip'], port))
+            if name.startswith('path-'):
+                ping_paths(binary, machine['alias'], name[5:])
+
+    with device.udp_blocked() if name == 'path-relay' else contextlib.nullcontext():
+        deadline = time.monotonic() + 60
+        while True:
+            try:
+                probe()
+                return
+            except (OSError, AssertionError, winhost.DeviceError):
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(.5)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--controller', required=True)
     parser.add_argument('--target', required=True, help='machine alias as `pb machine list` shows it')
     parser.add_argument('--only', default='')
     args = parser.parse_args()
+    if args.controller == 'windows' and winhost.device() is None:
+        parser.error('the windows controller needs PB_SMOKE_WINDOWS_PB and SMOKE_WINDOWS_SSH')
     only = set(filter(None, args.only.split(',')))
     machines = pb_json(args.controller, 'machine', 'list')['machines']
     found = [m for m in machines if m['alias'] == args.target and m.get('network_approved')]
@@ -235,6 +334,15 @@ def main():
                 continue
             started = time.time()
             port = origin.ports[kind]
+            if args.controller == 'windows':
+                try:
+                    windows_probe(name, machine, port, origin.marker)
+                    print(f'PASS local-access:{name}:windows->{args.target} {time.time() - started:.1f}s  {title}', flush=True)
+                except Exception as error:
+                    failed += 1
+                    detail = (str(error).strip().splitlines() or [type(error).__name__])[-1][:200]
+                    print(f'FAIL local-access:{name}:windows->{args.target} {detail}', flush=True)
+                continue
             if name == 'path-relay':
                 block_udp(args.controller)
             command = ['python3', '-I', '-c', PROBE, name, machine['assigned_ip'], str(port), machine['alias'], machine['id'], origin.marker]

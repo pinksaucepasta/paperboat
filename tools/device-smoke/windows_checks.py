@@ -92,6 +92,7 @@ def checks(args):
     for name in ('lifecycle', 'tools_lifecycle', 'doctor_lifecycle', 'alias_lifecycle'):
         table['ssh-' + name.split('_')[0].replace('lifecycle', 'main')] = (['ssh_%s.py' % name, args.peer], ['--peer'])
     table['ssh-rsync'] = (['ssh_tools_lifecycle.py', args.peer, '--tools', 'rsync'], ['--peer'])
+    table['local-access'] = (['local_access.py', '--controller', 'windows', '--target', args.peer], ['--peer'])
     table['cli-budget'] = (['perf_dataplane.py', '--cli-only'], [])
     table['terminal-vt'] = (['terminal_vt_input.py', args.peer], ['--peer'])
     table['ctrlc-interactive'] = (['ctrlc_interactive.py', args.peer], ['--peer'])  # a real console Ctrl-C key (ETX through ConPTY) stops pb.exe: the other interrupts are CTRL_BREAK
