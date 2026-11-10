@@ -667,6 +667,30 @@ def daemon_restart_typing(a, sessions):
         c1.close()
 
 
+class YesWatcher:
+    """Sees on the target when the flood's `yes` ends, in a background `pb exec` (its own path, not the terminal under test): the target's
+    clock at that moment (0.1 s resolution), so the stop time does not depend on how slowly a Windows client's ssh -tt hop draws the buffered
+    output. It compares the target's clock with this machine's: both are NTP-synchronised hosts; an offset of a second would show in other rows."""
+
+    def __init__(self, target, baseline):
+        import threading
+        self.end = None
+        script = 'while [ "$(pgrep -x -c yes)" -gt %d ]; do sleep 0.1; done; python3 -c "import time;print(time.time())"' % baseline
+        self.thread = threading.Thread(target=self._run, args=(target, script), daemon=True)
+        self.thread.start()
+
+    def _run(self, target, script):
+        try:
+            out = winhost.run_pb(PB, ['exec', target, '--', 'sh', '-c', script], 90).stdout.decode(errors='replace').strip()
+            self.end = float(out.splitlines()[-1])
+        except (ValueError, IndexError, RuntimeError, OSError, subprocess.SubprocessError):
+            self.end = None
+
+    def gone_at(self, timeout):
+        self.thread.join(timeout)
+        return self.end
+
+
 def host_yes(target):
     """How many `yes` processes run on the target (a Windows client's view of whether the flood producer is gone)."""
     result = winhost.run_pb(PB, ['exec', target, '--', 'sh', '-c', 'pgrep -x -c yes || true'], 60)
@@ -698,13 +722,16 @@ def fast_output(a, sessions):
         time.sleep(3)
         flooding = host_yes(a.target) > yes_before if host_side else len(c1.pending) > 0
         row('N6 the flood is running before Ctrl-C', flooding, 'yes on the target' if host_side else 'output arriving')
+        watcher = YesWatcher(a.target, yes_before) if host_side else None
         c1.send(('x' * 1023 + '\n') * 256)
         c1.send('\x03')
-        t0 = time.monotonic()
+        sent = time.time()
         if host_side:  # the producer must stop promptly; what the hop already buffered may take longer to reach the screen
-            while time.monotonic() - t0 < 5 and host_yes(a.target) > yes_before:
-                time.sleep(0.5)
-            row('N6 Ctrl-C stops yes promptly', host_yes(a.target) <= yes_before, f'yes on the target gone {time.monotonic() - t0:.1f} s after Ctrl-C')
+            gone = watcher.gone_at(60)
+            if gone is None:
+                row('N6 Ctrl-C stops yes promptly', False, 'yes still running on the target 60 s after Ctrl-C')
+            else:
+                row('N6 Ctrl-C stops yes promptly', gone - sent < 5, f'yes on the target ended {gone - sent:.1f} s after Ctrl-C (target clock)')
         # The tty discards input typed before the interrupt lands, so wait for yes to stop
         # (output goes quiet) before typing the next command.
         stopped = c1.quiet_after(1.0, 60 if host_side else 30)
