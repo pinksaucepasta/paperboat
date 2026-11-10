@@ -84,8 +84,15 @@ func TestConnectionResetIsCleanOnlyWhenTheClientHadItsFullReply(t *testing.T) {
 			t.Fatalf("reset after a complete reply (%s): %v, want a clean end", order, err)
 		}
 	}
-	if err := resetBridge(t, "never"); err == nil {
+	err := resetBridge(t, "never")
+	if err == nil {
 		t.Fatal("a reset while the client still waited for data was reported as a clean end")
+	}
+	// The failure names the direction and that the reset rule ran, for the diagnostics (types only are recorded).
+	var from *fromSSHDError
+	var unexcused *resetNotExcusedError
+	if !errors.As(err, &from) || !errors.As(err, &unexcused) {
+		t.Fatalf("the failure does not say which copier and rule it came from: %v", err)
 	}
 }
 

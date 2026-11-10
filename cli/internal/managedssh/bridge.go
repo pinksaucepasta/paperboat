@@ -157,7 +157,7 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 		if copyErr != nil {
 			_ = finish()
 		}
-		results <- copyResult{direction: "to_sshd", bytes: count, err: copyErr}
+		results <- copyResult{direction: "to_sshd", bytes: count, err: labelStep(copyErr, func(err error) error { return &toSSHDError{err} })}
 	}()
 	go func() {
 		count, copyErr := io.Copy(stream, sshd)
@@ -185,7 +185,7 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 			sshdDone.Store(true)
 		}
 		_ = finish()
-		results <- copyResult{direction: "from_sshd", bytes: count, err: copyErr}
+		results <- copyResult{direction: "from_sshd", bytes: count, err: labelStep(copyErr, func(err error) error { return &fromSSHDError{err} })}
 	}()
 	var result BridgeResult
 	var resultErr error
@@ -206,6 +206,24 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 		return result, managedSSHBoundary("command", errors.Join(ctx.Err(), context.Cause(ctx), resultErr, cleanupErr))
 	}
 	return result, managedSSHBoundary("command", errors.Join(resultErr, cleanupErr))
+}
+
+// toSSHDError and fromSSHDError name the direction an error came from. The diagnostics record error types only (the
+// texts of network errors are redacted), so without them a failed Windows session shows leaves but not which
+// copier produced them. They wrap, never replace: leaf matching sees through them.
+type toSSHDError struct{ err error }
+type fromSSHDError struct{ err error }
+
+func (e *toSSHDError) Error() string   { return "client to sshd: " + e.err.Error() }
+func (e *toSSHDError) Unwrap() error   { return e.err }
+func (e *fromSSHDError) Error() string { return "sshd to client: " + e.err.Error() }
+func (e *fromSSHDError) Unwrap() error { return e.err }
+
+func labelStep(err error, wrap func(error) error) error {
+	if err == nil {
+		return nil
+	}
+	return wrap(err)
 }
 
 // closeWriteFailure is what a failed CloseWrite (the FIN to sshd) counts as. It is ignored only when the bridge had
@@ -281,7 +299,14 @@ func excuseReset(ctx context.Context, err error, otherEOF <-chan struct{}) error
 	case <-otherEOF:
 		return nil
 	case <-timer.C:
+		err = errors.Join(err, &resetNotExcusedError{reason: "the other direction did not end in time"})
 	case <-ctx.Done():
 	}
 	return err
 }
+
+// resetNotExcusedError is added to a connection reset that was not excused, so the diagnostics show that the rule ran
+// and why it did not excuse the reset (the other direction never ended within resetGrace).
+type resetNotExcusedError struct{ reason string }
+
+func (e *resetNotExcusedError) Error() string { return "connection reset not excused: " + e.reason }
