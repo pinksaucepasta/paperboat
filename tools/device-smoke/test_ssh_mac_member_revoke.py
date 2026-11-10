@@ -70,5 +70,22 @@ class MemberRevoke(unittest.TestCase):
         self.assertFalse(any('--active=false' in c for c in calls))
 
 
+class WindowsTargetScripts(unittest.TestCase):
+    def test_the_member_scripts_use_the_target_commands_and_survive_crlf_and_case(self):
+        import subprocess
+        for script in (r.ACCESS, r.HOLD):
+            self.assertIn('HOLD_PB=', script)  # the target's own hold/no-op commands come from the prologue
+        self.assertIn('"$HOLD_PB"', r.HOLD)
+        self.assertIn('"$HOLD_PLAIN"', r.HOLD)
+        self.assertNotIn('echo session-up; sleep 300', r.HOLD.split('HOLD_PB')[-1])
+        # a Windows sshd answers "ok\r\n" and the managed config names the machine in lower case
+        probe = subprocess.run(['bash', '-c', 'A=W6-Win5-X; D=ppr.boats; N=$(tr A-Z a-z <<<"$A.$D"); echo $N; '
+                                'printf "ok\\r\\n" | tr -d "\\r" | tr "\\n" " " | grep -qE "(^| )ok $" && echo matched'],
+                               capture_output=True, text=True)
+        self.assertEqual(['w6-win5-x.ppr.boats', 'matched'], probe.stdout.split())
+        self.assertIn('N=$(tr A-Z a-z <<<"$A.$D")', r.ACCESS)
+        self.assertIn("tr -d '\\r'", r.ACCESS)
+
+
 if __name__ == '__main__':
     unittest.main()

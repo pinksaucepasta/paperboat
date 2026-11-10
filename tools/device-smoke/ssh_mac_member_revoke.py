@@ -2,7 +2,9 @@
 """F5-10 grant|team on a Mac target (twin of ssh_live_revoke.sh grant|team): a team MEMBER's open ssh sessions to the Mac end
 within 15 s of the owner withdrawing the grant (grant) or removing the member (team), and pb says access was revoked.
 
-Usage: MODE=grant|team ssh_mac_member_revoke.py APPLE_MACHINE_ID
+Usage: MODE=grant|team ssh_mac_member_revoke.py [--windows] APPLE_MACHINE_ID
+--windows: the TARGET is the paired Windows machine (ssh_windows_target.py; set SMOKE_WINDOWS_SSH and PB_SMOKE_WINDOWS_PB as for ssh_mac_rows.py
+--windows); B's commands on it use the Windows shell forms (cmd.exe, no sh/sleep) and MAC_USER defaults to its login user.
 Env (wrappers take ONE shell-string argument, as in ssh_mac_rows.py):
   CLIENT_CMD         runs it on the OWNER's signed-in client (the Mac's account A), e.g. the macl-c container
   REVOKE_CLIENT_CMD  runs it on a FRESH container with pb installed and nobody signed in: it becomes the member B
@@ -28,17 +30,21 @@ import ssh_mac_rows as m
 HERE = os.path.dirname(os.path.abspath(__file__))
 MODE = os.environ.get('MODE', 'grant')
 ALIAS = os.environ.get('ALIAS', 'apple')
-USER = os.environ.get('MAC_USER', 'admin')
+WINDOWS = '--windows' in sys.argv
+if WINDOWS:
+    import ssh_windows_target
+    m.WIN = ssh_windows_target.Target()
+USER = os.environ.get('MAC_USER') or (m.WIN.user() if m.WIN else 'admin')
 TEAM = os.environ['TEAM']
 GATE_MAX = float(os.environ.get('GATE_MAX', '30'))  # setup bound: grant -> member's first working session (coordinator decision; the measured latency is recorded in the detail)
 
-PROLOGUE = ('PB=~/.local/bin/pb; A=%s; D=; for i in $(seq 1 60); do D=$(grep -o "Host \\*\\.[^ ]*" ~/.ssh/paperboat_config 2>/dev/null | head -1 | sed "s/Host \\*\\.//"); '
-            '[ -n "$D" ] && break; sleep 2; done; N=$A.$D; H=%s@$N; PBW="--workspace %s"; ' % (ALIAS, USER, TEAM))
+PROLOGUE = (''.join('%s=%s; ' % (k, shlex.quote(v)) for k, v in (m.WIN.remote() if m.WIN else m.REMOTE).items()) + 'PB=~/.local/bin/pb; A=%s; D=; for i in $(seq 1 60); do D=$(grep -o "Host \\*\\.[^ ]*" ~/.ssh/paperboat_config 2>/dev/null | head -1 | sed "s/Host \\*\\.//"); '
+            '[ -n "$D" ] && break; sleep 2; done; N=$(tr A-Z a-z <<<"$A.$D"); H=%s@$N; PBW="--workspace %s"; ' % (ALIAS, USER, TEAM))
 
 ACCESS = PROLOGUE + r'''t0=$(date +%s.%N); okp=; okpl=
 while [ -z "$okp" ] || [ -z "$okpl" ]; do
-  [ -n "$okpl" ] || { lerr=$(ssh -o ConnectTimeout=4 $H echo ok </dev/null 2>&1 | tr '\n' ' '); grep -qE '(^| )ok $' <<<"$lerr" && okpl=$(date +%s.%N); }
-  [ -n "$okp" ] || { perr=$(timeout 20 $PB $PBW ssh $A -- echo ok </dev/null 2>&1 | tr '\n' ' '); grep -qE '(^| )ok $' <<<"$perr" && okp=$(date +%s.%N); }
+  [ -n "$okpl" ] || { lerr=$(ssh -o ConnectTimeout=4 $H echo ok </dev/null 2>&1 | tr -d '\r' | tr '\n' ' '); grep -qE '(^| )ok $' <<<"$lerr" && okpl=$(date +%s.%N); }
+  [ -n "$okp" ] || { perr=$(timeout 20 $PB $PBW ssh $A -- echo ok </dev/null 2>&1 | tr -d '\r' | tr '\n' ' '); grep -qE '(^| )ok $' <<<"$perr" && okp=$(date +%s.%N); }
   [ "$(python3 -c "import time;print(int(time.time()-$t0>40))")" = 0 ] || break; sleep 1
 done
 block=$(grep -c "^Host $N\$" ~/.ssh/paperboat_config); kh=$(grep -c "^$N " /run/user/$(id -u)/paperboat/ssh_known_hosts 2>/dev/null)
@@ -63,8 +69,8 @@ for l in sys.stdin:
     d=json.loads(l); f=d.get('fields',{})
     if f.get('state') in ('started','ready') and d['code']=='redial_step': continue
     print(d['at'][11:23], d['code'], json.dumps({k:v for k,v in f.items() if k not in ('attempt_id','connection_id','step_id','source_line')}, sort_keys=True), end=' ;; ')" | cut -c1-2600)]"
-$PB $PBW ssh $A -- 'echo session-up; sleep 300' > ~/slr.out 2> ~/slr.err < /dev/null & pid=$!
-ssh $H 'echo plain-up; sleep 300' > ~/slrp.out 2> ~/slrp.err < /dev/null & ppid=$!
+$PB $PBW ssh $A -- "$HOLD_PB" > ~/slr.out 2> ~/slr.err < /dev/null & pid=$!
+ssh $H "$HOLD_PLAIN" > ~/slrp.out 2> ~/slrp.err < /dev/null & ppid=$!
 for i in $(seq 1 60); do grep -q session-up ~/slr.out && grep -q plain-up ~/slrp.out && break; sleep 1; done
 grep -q session-up ~/slr.out && grep -q plain-up ~/slrp.out || { echo "RESULT no-session pb=$(tr '\n' ' ' < ~/slr.err | cut -c1-160) plain=$(tr '\n' ' ' < ~/slrp.err | cut -c1-160)"; exit 0; }
 rm -f ~/go; echo HOLDING
@@ -113,9 +119,10 @@ def sign_in_member():
 
 
 def main():
-    if MODE not in ('grant', 'team') or len(sys.argv) != 2:
+    args = [a for a in sys.argv[1:] if a != '--windows']
+    if MODE not in ('grant', 'team') or len(args) != 1:
         raise SystemExit('usage: MODE=grant|team ssh_mac_member_revoke.py APPLE_MACHINE_ID')
-    tid, bid, status, detail = sys.argv[1], '', 'FAIL', ''
+    tid, bid, status, detail = args[0], '', 'FAIL', ''
     try:
         bid, email = sign_in_member()
         inv = owner('$PB team invite "$TEAM" %s --generation $(gen) --json' % shlex.quote(email))[1]
