@@ -4,11 +4,13 @@
 Measures `pb exec true` latency, pb send / managed scp throughput of a 50 MiB file,
 managed rsync of many small files, the selected path, and how fast `pb --version` and
 `pb status` answer locally, then compares each number with the budget for that path. Prints
-one JSON receipt (numbers only; no file or command contents). Usage: perf_dataplane.py <target> [--no-budget]
+one JSON receipt (numbers only; no file or command contents). Usage: perf_dataplane.py <target> [--no-budget].
+`perf_dataplane.py --cli-only` measures the local binary/daemon without a peer, including on Windows via winhost.
 """
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import statistics
@@ -19,10 +21,33 @@ import uuid
 
 from install_lifecycle import registration
 from perf_budgets import BUDGETS
+import winhost
 
-PB = Path.home() / '.local/bin/pb'
+PB = winhost.pb_path()
 LARGE_BYTES = 50 << 20
 SMALL_FILES, SMALL_BYTES = 500, 4096
+
+# Timing lives on the device: controller SSH/PowerShell startup is not CLI latency.
+CLI_TIMINGS = r'''
+$samples=@()
+for($i=0;$i -le [int]$req.runs;$i++){
+$p=New-Object Diagnostics.Process;$started=$false
+$p.StartInfo.FileName=$req.exe;$p.StartInfo.Arguments=$req.args
+$p.StartInfo.UseShellExecute=$false;$p.StartInfo.CreateNoWindow=$true
+$p.StartInfo.RedirectStandardOutput=$true;$p.StartInfo.RedirectStandardError=$true
+try{
+$watch=[Diagnostics.Stopwatch]::StartNew();[void]$p.Start();$started=$true
+$out=$p.StandardOutput.BaseStream.CopyToAsync([IO.Stream]::Null)
+$err=$p.StandardError.BaseStream.CopyToAsync([IO.Stream]::Null)
+if(-not $p.WaitForExit(5000)){$p.Kill();[void]$p.WaitForExit(5000);throw 'local pb command exceeded 5 seconds'}
+$watch.Stop()
+if(-not $out.Wait(1000) -or -not $err.Wait(1000)){throw 'local pb command did not close its output'}
+if($p.ExitCode -ne 0){throw 'local pb command failed'}
+if($i -gt 0){$samples+= $watch.Elapsed.TotalMilliseconds}
+}finally{try{if($started -and -not $p.HasExited){$p.Kill();[void]$p.WaitForExit(5000)}}finally{$p.Dispose()}}
+}
+ConvertTo-Json -Compress -InputObject $samples
+'''
 
 
 def pb(*arguments, timeout=600):
@@ -56,6 +81,14 @@ def selected_path(target):
 
 def local_command_ms(*arguments, runs=7):
     """Median wall time of a local pb command that must not wait on the network."""
+    if hasattr(PB, 'device'):
+        _, output = PB.device.ps('measure local pb latency', CLI_TIMINGS, timeout=120,
+                                 exe=str(PB), args=subprocess.list2cmdline(arguments), runs=runs)
+        samples = json.loads(output)
+        if not isinstance(samples, list) or len(samples) != runs or any(
+                type(value) not in (int, float) or not math.isfinite(value) or value < 0 for value in samples):
+            raise RuntimeError('the device did not return every local pb timing sample')
+        return round(statistics.median(samples))
     pb(*arguments, timeout=60)  # page the binary in
     return round(statistics.median(pb(*arguments, timeout=60) for _ in range(runs)) * 1000)
 
@@ -76,13 +109,25 @@ def find_and_hash(target, name):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('target')
+    parser.add_argument('target', nargs='?')
+    parser.add_argument('--cli-only', action='store_true', help='measure local CLI budgets without a peer')
     parser.add_argument('--no-budget', action='store_true', help='measure only')
     args = parser.parse_args()
+    if not args.target and not args.cli_only:
+        parser.error('target is required unless --cli-only is selected')
     before = registration()
     run = 'perf-' + uuid.uuid4().hex[:12]
     # Local commands first: right after network work the daemon is still busy with that session.
     metrics = {'cli_start_ms': local_command_ms('--version'), 'status_ms': local_command_ms('status')}
+    if args.cli_only:
+        failures = [] if args.no_budget else [
+            name for name, (kind, bound) in BUDGETS['cli'].items()
+            if name in metrics and (metrics[name] > bound if kind == 'max' else metrics[name] < bound)]
+        if registration() != before:
+            raise RuntimeError('local CLI budget check changed the enrolled identity')
+        print(json.dumps({'status': 'FAIL' if failures else 'PASS', 'check': 'cli-budget',
+                          'metrics': metrics, 'budget_failures': failures, 'enrollment_unchanged': True}))
+        return 1 if failures else 0
     metrics['path'] = selected_path(args.target)
     metrics['exec_true_median_ms'], metrics['exec_true_max_ms'] = exec_latency(args.target)
     with tempfile.TemporaryDirectory(prefix=run) as directory:
@@ -130,4 +175,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

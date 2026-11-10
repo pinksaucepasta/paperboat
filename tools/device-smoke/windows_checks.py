@@ -91,6 +91,7 @@ def checks(args):
     table['session-sharing-owner'] = (['session_sharing_lifecycle.py', args.peer, '--team', team], ['--peer', '--team'])
     for name in ('lifecycle', 'tools_lifecycle', 'doctor_lifecycle', 'alias_lifecycle'):
         table['ssh-' + name.split('_')[0].replace('lifecycle', 'main')] = (['ssh_%s.py' % name, args.peer], ['--peer'])
+    table['cli-budget'] = (['perf_dataplane.py', '--cli-only'], [])
     table['terminal-vt'] = (['terminal_vt_input.py', args.peer], ['--peer'])
     table['terminal-new'] = (['terminal_lifecycle.py', args.machine, '--check', 'main', '--entry', 'new'], ['--machine'])  # C045: pb new on this device, in a directory the check chose
     for name in ('main', 'paste', 'typing'):  # paste and typing need a Unix peer (sh)
