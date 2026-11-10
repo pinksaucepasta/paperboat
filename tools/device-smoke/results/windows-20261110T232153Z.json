@@ -1,0 +1,1 @@
+{"at": "20261110T232153Z", "results": [{"id": "terminal-entry:victus", "status": "PASS", "seconds": 83, "detail": "{\"check\": \"terminal-entry\", \"target\": \"hp\", \"status\": \"PASS\", \"root_menu\": true, \"session_catalog\": true, \"root_attach\": true}"}]}

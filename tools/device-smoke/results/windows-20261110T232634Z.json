@@ -1,0 +1,1 @@
+{"at": "20261110T232634Z", "results": [{"id": "network-drop:victus", "status": "PASS", "seconds": 131, "detail": "{\"check\": \"network-drop\", \"target\": \"hp\", \"status\": \"PASS\", \"drop_seconds\": 20, \"same_shell\": true, \"input_exactly_once\": true}"}]}

@@ -1,0 +1,3 @@
+{"check": "network-drop", "target": "hp", "status": "PASS", "drop_seconds": 20, "same_shell": true, "input_exactly_once": true}
+
+--- stderr ---

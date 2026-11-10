@@ -1,0 +1,4 @@
+{"check": "terminal-main", "entry": "connect", "status_bar": "on", "target": "hp", "status": "PASS", "seconds": 23.0, "phases": ["input_output", "unicode", "resize", "colour", "ctrl_c", "ctrl_z", "vim", "less", "ctrl_d", "exact_session_cleanup"]}
+{"check": "status-bar", "target": "hp", "status": "PASS", "preferences_persist": true, "preview": true, "reset": true, "live_reserved_row": true}
+
+--- stderr ---

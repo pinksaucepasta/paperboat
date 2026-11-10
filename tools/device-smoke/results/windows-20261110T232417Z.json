@@ -1,0 +1,1 @@
+{"at": "20261110T232417Z", "results": [{"id": "status-bar:victus", "status": "PASS", "seconds": 126, "detail": "{\"check\": \"status-bar\", \"target\": \"hp\", \"status\": \"PASS\", \"preferences_persist\": true, \"preview\": true, \"reset\": true, \"live_reserved_row\": true}"}]}

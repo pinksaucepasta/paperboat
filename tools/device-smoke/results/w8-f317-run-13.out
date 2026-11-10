@@ -1,0 +1,16 @@
+PASS N1 two windows: output typed in one shows in the other
+PASS N1 two windows: the size is the window that typed last (window 2): (24, 80)
+PASS N1 two windows: typing moves the size to that window (window 1): (30, 100)
+PASS N1 two windows: the other window resizing does not change it: (30, 100)
+PASS N1 two windows: the active window resizing does: (40, 120)
+PASS N15 a reconnecting window never takes control: (30, 100) -> (30, 100)
+RESULT PASS
+RUN1_EXIT=0
+PASS N1 two windows: output typed in one shows in the other
+PASS N1 two windows: the size is the window that typed last (window 2): (24, 80)
+PASS N1 two windows: typing moves the size to that window (window 1): (30, 100)
+PASS N1 two windows: the other window resizing does not change it: (30, 100)
+PASS N1 two windows: the active window resizing does: (40, 120)
+PASS N15 a reconnecting window never takes control: (30, 100) -> (30, 100)
+RESULT PASS
+RUN2_EXIT=0

@@ -1,0 +1,4 @@
+{"check": "command-row", "row": "C221", "command": "pb update status", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C186", "command": "pb config sync path", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C236", "command": "pb config path", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C182", "command": "pb config status", "status": "PASS", "failures": []}
