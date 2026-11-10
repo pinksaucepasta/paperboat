@@ -56,7 +56,6 @@ type Config struct {
 	Socket, StateDir       string
 	LoopbackCIDR           string
 	ProtectedLoopbackCIDRs []string
-	legacyDNSInterfacePath string
 }
 type request struct {
 	Operation    string            `json:"operation"`

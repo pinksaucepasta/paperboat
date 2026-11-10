@@ -39,17 +39,13 @@ func TestDarwinUninstallOwnedLifecycle(t *testing.T) {
 	id := strconv.Itoa(os.Getpid())
 	label := "io.paperboat.machineguard.uninstall-review." + id
 	anchor := "com.apple/000.000-paperboat-uninstall-review-" + id
-	priorAnchor, priorPrefix, priorIdentity, priorResolver := darwinAnchor, darwinPrefix, darwinBrokerIdentity, darwinResolverDirectory
+	priorAnchor, priorPrefix, priorIdentity := darwinAnchor, darwinPrefix, darwinBrokerIdentity
 	darwinAnchor = anchor
 	darwinPrefix = "127.100.253.71"
 	darwinBrokerIdentity = func(context.Context) (uint32, uint32, error) { return 70, 70, nil }
 	root := t.TempDir()
 	state := filepath.Join(root, "state")
-	darwinResolverDirectory = filepath.Join(root, "resolver")
 	if err := os.Mkdir(state, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(darwinResolverDirectory, 0755); err != nil {
 		t.Fatal(err)
 	}
 	ownedRoot := createOwnedRootFixture(t, state, "local.example.test")
@@ -91,7 +87,7 @@ func TestDarwinUninstallOwnedLifecycle(t *testing.T) {
 		if e != nil || string(before) != string(after) {
 			t.Error("root PF policy changed", e)
 		}
-		darwinAnchor, darwinPrefix, darwinBrokerIdentity, darwinResolverDirectory = priorAnchor, priorPrefix, priorIdentity, priorResolver
+		darwinAnchor, darwinPrefix, darwinBrokerIdentity = priorAnchor, priorPrefix, priorIdentity
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()

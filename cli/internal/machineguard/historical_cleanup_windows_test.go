@@ -3,16 +3,13 @@
 package machineguard
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
-
-	"golang.org/x/sys/windows/registry"
 )
 
 // This fixture uses its own state, registry branch and exact certificate. It
-// never installs/stops a guard or changes the real NRPT/hosts configuration.
+// never installs/stops a guard.
 func TestWindowsHistoricalCleanupIsScoped(t *testing.T) {
 	if os.Getenv("PAPERBOAT_WINDOWS_HISTORICAL_CLEANUP") != "1" {
 		t.Skip("explicit LocalSystem scoped cleanup acceptance")
@@ -51,44 +48,5 @@ func TestWindowsHistoricalCleanupIsScoped(t *testing.T) {
 	}
 	if err := cleanupHistoricalTrust(t.Context(), Config{StateDir: state}); err != nil {
 		t.Fatal("cleanup retry", err)
-	}
-
-	prior := nrptRoot
-	nrptRoot = fmt.Sprintf(`SOFTWARE\PaperboatCleanupFixture-%d`, os.Getpid())
-	t.Cleanup(func() {
-		_ = registry.DeleteKey(registry.LOCAL_MACHINE, nrptRoot+`\Paperboat-Owned`)
-		_ = registry.DeleteKey(registry.LOCAL_MACHINE, nrptRoot+`\Foreign`)
-		_ = registry.DeleteKey(registry.LOCAL_MACHINE, nrptRoot)
-		nrptRoot = prior
-	})
-	key, _, err := registry.CreateKey(registry.LOCAL_MACHINE, nrptRoot+`\Paperboat-Owned`, registry.ALL_ACCESS)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := key.SetStringValue("PaperboatOwner", nrptOwner); err != nil {
-		key.Close()
-		t.Fatal(err)
-	}
-	key.Close()
-	foreign, _, err := registry.CreateKey(registry.LOCAL_MACHINE, nrptRoot+`\Foreign`, registry.ALL_ACCESS)
-	if err != nil {
-		t.Fatal(err)
-	}
-	foreign.Close()
-	cfg := Config{StateDir: state}
-	if err := cleanupHistoricalLocalNames(t.Context(), cfg); err != nil {
-		t.Fatal(err)
-	}
-	if key, err := registry.OpenKey(registry.LOCAL_MACHINE, nrptRoot+`\Paperboat-Owned`, registry.READ); err == nil {
-		key.Close()
-		t.Fatal("owned NRPT entry survived")
-	}
-	if key, err := registry.OpenKey(registry.LOCAL_MACHINE, nrptRoot+`\Foreign`, registry.READ); err != nil {
-		t.Fatal("foreign registry entry removed", err)
-	} else {
-		key.Close()
-	}
-	if err := cleanupHistoricalLocalNames(t.Context(), cfg); err != nil {
-		t.Fatal("name cleanup retry", err)
 	}
 }

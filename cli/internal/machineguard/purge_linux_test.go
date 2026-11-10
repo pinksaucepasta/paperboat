@@ -21,7 +21,6 @@ type linuxPurgeFixture struct {
 	runErrs      map[string]error
 	calls        []string
 	uninstalls   int
-	localNames   int
 }
 
 func newLinuxPurgeFixture(t *testing.T) *linuxPurgeFixture {
@@ -61,10 +60,6 @@ func (f *linuxPurgeFixture) purge(ctx context.Context) error {
 		Uninstall: func(context.Context) error {
 			f.uninstalls++
 			return f.uninstallErr
-		},
-		LocalNames: func(context.Context) error {
-			f.localNames++
-			return nil
 		},
 	})
 }
@@ -158,8 +153,8 @@ func TestPurgeLinuxRemovesEveryGuardArtifact(t *testing.T) {
 	if f.count("update-ca-certificates --fresh") != 1 {
 		t.Fatalf("update-ca-certificates calls = %d, want 1", f.count("update-ca-certificates --fresh"))
 	}
-	if f.uninstalls != 1 || f.localNames != 1 {
-		t.Fatalf("uninstall calls=%d localNames calls=%d, want 1 and 1", f.uninstalls, f.localNames)
+	if f.uninstalls != 1 {
+		t.Fatalf("uninstall calls=%d, want 1", f.uninstalls)
 	}
 	if f.count("systemctl disable --now paperboat-machineguard.service") != 1 {
 		t.Fatalf("service was not stopped; calls=%v", f.calls)
@@ -179,9 +174,6 @@ func TestPurgeLinuxSkipsNFTAndTrustUpdateWhenNothingExists(t *testing.T) {
 	}
 	if f.uninstalls != 0 {
 		t.Fatalf("guard uninstall ran without state")
-	}
-	if f.localNames != 1 {
-		t.Fatalf("local name cleanup must run even when the guard was never installed")
 	}
 }
 
@@ -214,9 +206,6 @@ func TestPurgeLinuxRetainsStateAndKeepsErrorsWhenTrustUpdateFails(t *testing.T) 
 	}
 	linuxAbsent(t, trustFile)
 	linuxPresent(t, f.paths.StateDir)
-	if f.localNames != 1 {
-		t.Fatalf("local name cleanup did not run after earlier failures")
-	}
 	if !strings.Contains(err.Error(), "retained") {
 		t.Fatalf("purge error %q does not say that state was retained", err)
 	}

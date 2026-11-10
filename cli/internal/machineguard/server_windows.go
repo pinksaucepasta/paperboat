@@ -20,15 +20,10 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/machineguard/wfp"
 	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
 	"golang.org/x/sys/windows"
-	"golang.org/x/sys/windows/registry"
 )
 
 const DefaultSocket = `\\.\pipe\PaperboatMachineGuard`
 const DefaultStateDir = `C:\ProgramData\Paperboat\MachineGuard`
-
-var nrptRoot = `SYSTEM\CurrentControlSet\Services\Dnscache\Parameters\DnsPolicyConfig`
-
-const nrptOwner = "Paperboat machine guard v1"
 
 func requirePrivilege() error {
 	token, err := windows.OpenCurrentProcessToken()
@@ -318,45 +313,5 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 	}
 	return wfp.Apply(values, known, cfg.LoopbackCIDR, protectedLoopbackCIDRs(cfg)...)
 }
-func cleanupHistoricalLocalNames(ctx context.Context, cfg Config) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	root, err := registry.OpenKey(registry.LOCAL_MACHINE, nrptRoot, registry.ENUMERATE_SUB_KEYS|registry.QUERY_VALUE)
-	if err != nil && !errors.Is(err, registry.ErrNotExist) {
-		return err
-	}
-	if err == nil {
-		names, readErr := root.ReadSubKeyNames(-1)
-		root.Close()
-		if readErr != nil {
-			return readErr
-		}
-		for _, name := range names {
-			if !strings.HasPrefix(name, "Paperboat-") {
-				continue
-			}
-			path := nrptRoot + `\` + name
-			key, e := registry.OpenKey(registry.LOCAL_MACHINE, path, registry.QUERY_VALUE)
-			if e != nil {
-				continue
-			}
-			owner, _, e := key.GetStringValue("PaperboatOwner")
-			key.Close()
-			if e != nil || owner != nrptOwner {
-				return errors.New("machine guard NRPT ownership changed")
-			}
-			if e = registry.DeleteKey(registry.LOCAL_MACHINE, path); e != nil {
-				return e
-			}
-		}
-	}
-	flushDNS()
-	return ctx.Err()
-}
-
-var dnsFlush = windows.NewLazySystemDLL("dnsapi.dll").NewProc("DnsFlushResolverCache")
-
-func flushDNS()             { _, _, _ = dnsFlush.Call() }
 func notifyReady() error    { return nil }
 func retirePlatform(Config) {}

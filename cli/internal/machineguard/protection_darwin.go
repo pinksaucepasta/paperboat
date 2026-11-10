@@ -159,44 +159,6 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 	return darwinSaveAliases()
 }
 
-const darwinResolverMarker = "# Managed by Paperboat machine guard\n"
-
-var darwinResolverDirectory = "/etc/resolver"
-
-// cleanupHistoricalLocalNames removes only marker-owned resolver files. New local DNS/resolver projections are gone.
-func cleanupHistoricalLocalNames(ctx context.Context, cfg Config) error {
-	entries, err := os.ReadDir(darwinResolverDirectory)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		path := filepath.Join(darwinResolverDirectory, entry.Name())
-		info, e := os.Lstat(path)
-		if e != nil {
-			return e
-		}
-		if !info.Mode().IsRegular() {
-			continue
-		}
-		data, e := os.ReadFile(path)
-		if e != nil {
-			return e
-		}
-		if strings.HasPrefix(string(data), darwinResolverMarker) {
-			if e = os.Remove(path); e != nil {
-				return e
-			}
-		}
-	}
-	return ctx.Err()
-}
-
 func retirePlatform(cfg Config) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

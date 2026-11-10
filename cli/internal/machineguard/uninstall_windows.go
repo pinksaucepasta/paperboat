@@ -99,10 +99,7 @@ func Uninstall(ctx context.Context) (result UninstallResult, err error) {
 	if err != nil {
 		return result, err
 	}
-	if err = cleanupHistoricalLocalNames(ctx, cfg); err != nil {
-		return result, err
-	}
-	result.Removed = append(result.Removed, "machine listeners and owned local name configuration")
+	result.Removed = append(result.Removed, "machine listeners")
 	if err = cleanupWindowsOwnedTrust(ctx, roots); err != nil {
 		return result, err
 	}

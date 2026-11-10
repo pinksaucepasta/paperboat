@@ -152,10 +152,7 @@ func uninstallDarwin(ctx context.Context, cfg darwinInstallConfig, guardCfg Conf
 	if err != nil {
 		return result, err
 	}
-	if err = cleanupHistoricalLocalNames(ctx, guardCfg); err != nil {
-		return result, err
-	}
-	result.Removed = append(result.Removed, "machine listeners and owned local name configuration")
+	result.Removed = append(result.Removed, "machine listeners")
 	if err = cleanupDarwinOwnedTrust(ctx, guardCfg, roots); err != nil {
 		return result, err
 	}

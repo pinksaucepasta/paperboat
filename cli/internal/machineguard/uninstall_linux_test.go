@@ -43,7 +43,6 @@ func TestUninstallLinuxRetainsDenyAndRetriesTrustRemoval(t *testing.T) {
 	}
 	failTrust := true
 	var actions []string
-	denies := 0
 	run := func(_ context.Context, name string, args ...string) ([]byte, error) {
 		actions = append(actions, name+" "+strings.Join(args, " "))
 		if name == "update-ca-certificates" && failTrust {
@@ -51,14 +50,8 @@ func TestUninstallLinuxRetainsDenyAndRetriesTrustRemoval(t *testing.T) {
 		}
 		return nil, nil
 	}
-	deny := func(context.Context) error { denies++; return nil }
-	cleanupNames := func(context.Context, Config) error {
-		if denies == 0 {
-			t.Fatal("local name configuration removed before deny")
-		}
-		return nil
-	}
-	result, err := uninstallLinux(t.Context(), units, state, trust, run, deny, cleanupNames)
+	deny := func(context.Context) error { return nil }
+	result, err := uninstallLinux(t.Context(), units, state, trust, run, deny)
 	if err == nil || !strings.Contains(err.Error(), "retry pb daemon machine-guard uninstall") {
 		t.Fatalf("partial failure=%v", err)
 	}
@@ -72,7 +65,7 @@ func TestUninstallLinuxRetainsDenyAndRetriesTrustRemoval(t *testing.T) {
 		t.Fatal("recovery ownership record removed before completion")
 	}
 	failTrust = false
-	result, err = uninstallLinux(t.Context(), units, state, trust, run, deny, cleanupNames)
+	result, err = uninstallLinux(t.Context(), units, state, trust, run, deny)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +88,7 @@ func TestUninstallLinuxRetainsDenyAndRetriesTrustRemoval(t *testing.T) {
 	if _, err = os.Stat(filepath.Join(state, "certificates")); !os.IsNotExist(err) {
 		t.Fatal("empty retired certificate state directory remains")
 	}
-	if _, err = uninstallLinux(t.Context(), units, state, trust, run, deny, cleanupNames); err != nil {
+	if _, err = uninstallLinux(t.Context(), units, state, trust, run, deny); err != nil {
 		t.Fatalf("repeat uninstall: %v", err)
 	}
 	for _, action := range actions {
@@ -114,7 +107,7 @@ func TestUninstallLinuxRefusesForeignUnitBeforeMutation(t *testing.T) {
 	}
 	called := false
 	run := func(context.Context, string, ...string) ([]byte, error) { called = true; return nil, nil }
-	_, err := uninstallLinux(t.Context(), root, filepath.Join(root, "state"), root, run, func(context.Context) error { called = true; return nil }, func(context.Context, Config) error { called = true; return nil })
+	_, err := uninstallLinux(t.Context(), root, filepath.Join(root, "state"), root, run, func(context.Context) error { called = true; return nil })
 	if err == nil || called {
 		t.Fatalf("foreign ownership err=%v mutation=%v", err, called)
 	}
@@ -139,14 +132,7 @@ func TestUninstallLinuxCleansOwnedArtifactsWithoutUnits(t *testing.T) {
 	if err := os.WriteFile(trustPath, owned.pem, 0644); err != nil {
 		t.Fatal(err)
 	}
-	cleanedNames, updatedTrust := false, false
-	cleanupNames := func(_ context.Context, cfg Config) error {
-		if cfg.LoopbackCIDR != "127.100.0.0/16" {
-			t.Fatalf("cleanup range = %q", cfg.LoopbackCIDR)
-		}
-		cleanedNames = true
-		return nil
-	}
+	updatedTrust := false
 	run := func(_ context.Context, name string, _ ...string) ([]byte, error) {
 		if name == "update-ca-certificates" {
 			updatedTrust = true
@@ -156,11 +142,11 @@ func TestUninstallLinuxCleansOwnedArtifactsWithoutUnits(t *testing.T) {
 	result, err := uninstallLinux(context.Background(), units, state, trust, run, func(context.Context) error {
 		t.Fatal("deny setup is unnecessary without installed services")
 		return nil
-	}, cleanupNames)
-	if err != nil || !cleanedNames || !updatedTrust {
-		t.Fatalf("uninstall=%+v names=%v trust=%v err=%v", result, cleanedNames, updatedTrust, err)
+	})
+	if err != nil || !updatedTrust {
+		t.Fatalf("uninstall=%+v trust=%v err=%v", result, updatedTrust, err)
 	}
-	if len(result.Removed) != 2 {
+	if len(result.Removed) != 1 {
 		t.Fatalf("removed artifacts = %v", result.Removed)
 	}
 	if _, err = os.Stat(trustPath); !os.IsNotExist(err) {
@@ -233,7 +219,6 @@ func TestUninstallLinuxSystemdLifecycle(t *testing.T) {
 		}
 		return nil
 	}
-	cleanupNames := func(context.Context, Config) error { return nil }
 	original, err := os.ReadFile(paths[0])
 	if err != nil {
 		t.Fatal(err)
@@ -241,7 +226,7 @@ func TestUninstallLinuxSystemdLifecycle(t *testing.T) {
 	if err = os.WriteFile(paths[0], []byte("foreign"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = uninstallLinuxUnits(ctx, cfg, run, deny, cleanupNames); err == nil {
+	if _, err = uninstallLinuxUnits(ctx, cfg, run, deny); err == nil {
 		t.Fatal("foreign unit accepted")
 	}
 	if err = exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", cfg.ServiceName).Run(); err != nil {
@@ -254,7 +239,7 @@ func TestUninstallLinuxSystemdLifecycle(t *testing.T) {
 	if err = os.MkdirAll(invalid, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = uninstallLinuxUnits(ctx, cfg, run, deny, cleanupNames); err == nil {
+	if _, err = uninstallLinuxUnits(ctx, cfg, run, deny); err == nil {
 		t.Fatal("invalid CA metadata should interrupt cleanup")
 	}
 	if err = exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", cfg.DenyName).Run(); err != nil {
@@ -264,7 +249,7 @@ func TestUninstallLinuxSystemdLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 2; i++ {
-		result, e := uninstallLinuxUnits(ctx, cfg, run, deny, cleanupNames)
+		result, e := uninstallLinuxUnits(ctx, cfg, run, deny)
 		if e != nil || len(result.Retained) == 0 {
 			t.Fatalf("uninstall%d=%+v %v", i, result, e)
 		}

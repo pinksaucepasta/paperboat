@@ -127,9 +127,6 @@ func Serve(ctx context.Context, cfg Config) (resultErr error) {
 	if err = g.applyRules(ctx); err != nil {
 		return err
 	}
-	if err = cleanupHistoricalLocalNames(ctx, cfg); err != nil {
-		return fmt.Errorf("remove historical local name integration: %w", err)
-	}
 	trustCtx, trustCancel := context.WithTimeout(ctx, 2*time.Minute)
 	err = g.prepareLocalCA(trustCtx)
 	trustCancel()

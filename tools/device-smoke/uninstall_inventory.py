@@ -113,27 +113,8 @@ def configuration_bytes(path):
     with path.open('rb') as file:
         data = file.read((1 << 20) + 1)
     if len(data) > 1 << 20:
-        raise RuntimeError('system DNS configuration exceeds the inventory size bound')
+        raise RuntimeError('configuration file exceeds the inventory size bound')
     return data
-
-
-def owned_dns_configuration(linux):
-    count = 0
-    hosts = Path('/etc/hosts')
-    if hosts.exists():
-        if not hosts.is_file():
-            raise RuntimeError('system hosts configuration is not a regular file')
-        markers = (b'# PaperboatHostsSectionStart', b'# PaperboatHostsSectionEnd')
-        count += sum(line.strip() in markers for line in configuration_bytes(hosts).splitlines())
-    resolver = Path('/etc/resolver')
-    if not linux and resolver.exists():
-        entries = bounded_entries(resolver)
-        for entry in entries:
-            if entry.is_symlink() or not entry.is_file():
-                continue
-            count += configuration_bytes(entry).startswith(b'# Managed by Paperboat machine guard\n')
-    return count
-
 
 def systemd_service_count(command):
     # A filtered list exits1 when no units match; enumerate successfully, then count.
@@ -257,8 +238,6 @@ def inventory(account, inbox):
     def add(category, count):
         if count:
             categories[category] = categories.get(category, 0) + count
-
-    add('dns_configuration', owned_dns_configuration(linux))
 
     inspect = linux_os_inventory if linux else darwin_os_inventory
     paths, patterns, users = inspect(account, home, add)

@@ -12,8 +12,6 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
-
-	"github.com/pinksaucepasta/paperboat/internal/machineloopback"
 )
 
 func Uninstall(ctx context.Context) (UninstallResult, error) {
@@ -29,15 +27,15 @@ func Uninstall(ctx context.Context) (UninstallResult, error) {
 	defer lifecycle.Close()
 	return uninstallLinux(ctx, "/etc/systemd/system", DefaultStateDir, "/usr/local/share/ca-certificates", func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		return exec.CommandContext(ctx, name, args...).CombinedOutput()
-	}, RestoreDeny, cleanupHistoricalLocalNames)
+	}, RestoreDeny)
 }
 
 type linuxUninstallConfig struct{ UnitDir, StateDir, TrustDir, ServiceName, DenyName, DenyUnit string }
 
-func uninstallLinux(ctx context.Context, units, state, trust string, run func(context.Context, string, ...string) ([]byte, error), deny func(context.Context) error, cleanupNames func(context.Context, Config) error) (result UninstallResult, err error) {
-	return uninstallLinuxUnits(ctx, linuxUninstallConfig{units, state, trust, "paperboat-machineguard.service", "paperboat-machineguard-deny.service", guardDenyUnit}, run, deny, cleanupNames)
+func uninstallLinux(ctx context.Context, units, state, trust string, run func(context.Context, string, ...string) ([]byte, error), deny func(context.Context) error) (result UninstallResult, err error) {
+	return uninstallLinuxUnits(ctx, linuxUninstallConfig{units, state, trust, "paperboat-machineguard.service", "paperboat-machineguard-deny.service", guardDenyUnit}, run, deny)
 }
-func uninstallLinuxUnits(ctx context.Context, cfg linuxUninstallConfig, run func(context.Context, string, ...string) ([]byte, error), deny func(context.Context) error, cleanupNames func(context.Context, Config) error) (result UninstallResult, err error) {
+func uninstallLinuxUnits(ctx context.Context, cfg linuxUninstallConfig, run func(context.Context, string, ...string) ([]byte, error), deny func(context.Context) error) (result UninstallResult, err error) {
 	units, state, trust := cfg.UnitDir, cfg.StateDir, cfg.TrustDir
 
 	if err = requirePrivilege(); err != nil {
@@ -61,12 +59,6 @@ func uninstallLinuxUnits(ctx context.Context, cfg linuxUninstallConfig, run func
 		roots, rootsErr := uninstallRoots(state)
 		if rootsErr != nil {
 			return result, rootsErr
-		}
-		if cleanupNames != nil {
-			if err = cleanupNames(ctx, Config{StateDir: state, LoopbackCIDR: machineloopback.DefaultCIDR}); err != nil {
-				return result, err
-			}
-			result.Removed = append(result.Removed, "historical owned local name integration")
 		}
 		if err = removeLinuxOwnedTrust(ctx, roots, trust, run); err != nil {
 			return result, err
@@ -117,10 +109,7 @@ func uninstallLinuxUnits(ctx context.Context, cfg linuxUninstallConfig, run func
 	if err != nil {
 		return result, err
 	}
-	if err = cleanupNames(ctx, Config{StateDir: state, LoopbackCIDR: machineloopback.DefaultCIDR}); err != nil {
-		return result, err
-	}
-	result.Removed = append(result.Removed, "machine listeners and owned local name configuration")
+	result.Removed = append(result.Removed, "machine listeners")
 	if err = removeLinuxOwnedTrust(ctx, roots, trust, run); err != nil {
 		return result, err
 	}

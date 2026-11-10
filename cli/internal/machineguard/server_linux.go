@@ -12,7 +12,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -104,49 +103,6 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 	}
 	return nil
 }
-func cleanupHistoricalLocalNames(ctx context.Context, cfg Config) error {
-	linkPath := cfg.legacyDNSInterfacePath
-	if linkPath == "" {
-		linkPath = "/sys/class/net/paperboat-dns"
-	}
-	return cleanupLinuxLegacyDNSLink(ctx, linkPath, func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		return exec.CommandContext(ctx, name, args...).CombinedOutput()
-	})
-}
-
-func cleanupLinuxLegacyDNSLink(ctx context.Context, linkPath string, run func(context.Context, string, ...string) ([]byte, error)) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if _, err := os.Stat(linkPath); os.IsNotExist(err) {
-		return nil
-	} else if err != nil {
-		return err
-	}
-	alias, err := os.ReadFile(filepath.Join(linkPath, "ifalias"))
-	if err != nil {
-		return linuxLegacyDNSCleanupError{message: "cannot inspect Paperboat DNS ownership", cause: err}
-	}
-	if strings.TrimSpace(string(alias)) != "paperboat-machineguard-v1" {
-		return errors.New("paperboat-dns link exists without Paperboat ownership")
-	}
-	if _, err := run(ctx, "resolvectl", "revert", "paperboat-dns"); err != nil {
-		return linuxLegacyDNSCleanupError{message: "could not retire Paperboat DNS resolver", cause: err}
-	}
-	if _, err := run(ctx, "ip", "link", "delete", "paperboat-dns"); err != nil {
-		return linuxLegacyDNSCleanupError{message: "could not delete Paperboat DNS link", cause: err}
-	}
-	return nil
-}
-
-type linuxLegacyDNSCleanupError struct {
-	message string
-	cause   error
-}
-
-func (e linuxLegacyDNSCleanupError) Error() string { return e.message }
-func (e linuxLegacyDNSCleanupError) Unwrap() error { return e.cause }
-
 func shutdownListener(listener net.Listener) error {
 	if route, ok := listener.(*gatewayRoute); ok {
 		return route.release()

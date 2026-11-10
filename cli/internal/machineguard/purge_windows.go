@@ -53,7 +53,6 @@ func Purge(ctx context.Context) error {
 	result = errors.Join(result, cleanupFailure(CleanupTaskRemove, removeGuardScheduledTask(ctx, installed)))
 	result = errors.Join(result, cleanupFailure(CleanupProcessStop, terminateGuardProcesses(installed)))
 	result = errors.Join(result, cleanupFailure(CleanupWFPRemove, wfp.Remove(ctx)))
-	result = errors.Join(result, cleanupFailure(CleanupHostsCleanup, cleanupHistoricalLocalNames(ctx, Config{StateDir: DefaultStateDir})))
 	result = errors.Join(result, cleanupFailure(CleanupCertificatesCleanup, removeGuardRoots(ctx, stateExists)))
 	result = errors.Join(result, cleanupFailure(CleanupPayloadRemove, removeOwnedPath(installDir)))
 	// The retained state holds the lease journal and root records that the steps

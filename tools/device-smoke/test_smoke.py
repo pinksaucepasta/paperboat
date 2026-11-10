@@ -127,34 +127,6 @@ class PFFirewallInventory(unittest.TestCase):
 
 
 class UninstallInventoryPreservation(unittest.TestCase):
-    def test_inventory_detects_owned_hosts_and_resolvers_among_clean_os_metadata(self):
-        cases = [('Linux', 'hosts'), ('Darwin', 'hosts'), ('Darwin', 'resolver'),
-                 ('Linux', 'none'), ('Darwin', 'none')]
-        for platform, kind in cases:
-            with self.subTest(platform=platform, kind=kind), tempfile.TemporaryDirectory() as directory:
-                root = pathlib.Path(directory)
-                hosts = root / 'hosts'
-                hosts.write_text('127.0.0.1 localhost\n# PaperboatHostsSectionStartSuffix\n' +
-                                 ('# PaperboatHostsSectionStart\n127.100.1.2 fixture.example.test\n'
-                                  '# PaperboatHostsSectionEnd\n' if kind == 'hosts' else ''))
-                resolver = root / 'resolver'
-                resolver.mkdir()
-                if kind == 'resolver':
-                    (resolver / 'owned.example.test').write_text(
-                        '# Managed by Paperboat machine guard\nnameserver 127.0.0.1\n')
-                (resolver / 'unowned.example.test').write_text(
-                    'nameserver 192.0.2.1\n# Managed by Paperboat machine guard\n')
-                before = {item: item.read_bytes() for item in [hosts, *resolver.iterdir()]}
-                account = SimpleNamespace(pw_dir=str(root / 'home'), pw_uid=65432, pw_name='fixture')
-                leftovers = self.inventory_with_other_os_state_clean(
-                    account, {'/etc/hosts': hosts, '/etc/resolver': resolver}, platform)
-                if kind == 'none':
-                    self.assertEqual(leftovers, {})
-                else:
-                    self.assertTrue(leftovers, 'inventory missed owned DNS configuration')
-                for item, contents in before.items():
-                    self.assertEqual(item.read_bytes(), contents, 'inventory changed system configuration')
-
     @staticmethod
     def inventory_with_other_os_state_clean(account, paths, platform='Linux'):
         # Only unrelated OS metadata is simulated. Ownership checks read actual

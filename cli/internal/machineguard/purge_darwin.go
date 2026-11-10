@@ -47,10 +47,7 @@ func Purge(ctx context.Context) error {
 			LegacyStateDir:   "/Library/Application Support/Paperboat/deviceguard",
 			LegacySocketDir:  "/Library/Application Support/Paperboat/deviceguard-control",
 		},
-		Run: runDarwinTrustRemoval,
-		LocalNames: func(ctx context.Context) error {
-			return cleanupHistoricalLocalNames(ctx, Config{StateDir: DefaultStateDir})
-		},
+		Run:          runDarwinTrustRemoval,
 		RestoreProxy: func(ctx context.Context) error { return removePreviewProxy(ctx, DefaultStateDir) },
 	})
 }
@@ -66,9 +63,8 @@ type darwinPurgePaths struct {
 // darwinPurge carries every external effect so the purge order can be tested
 // without launchd, pf, dscl or the System keychain.
 type darwinPurge struct {
-	Paths      darwinPurgePaths
-	Run        func(context.Context, string, ...string) ([]byte, error)
-	LocalNames func(context.Context) error
+	Paths darwinPurgePaths
+	Run   func(context.Context, string, ...string) ([]byte, error)
 	// RestoreProxy puts back the system auto-proxy setting the guard replaced.
 	RestoreProxy func(context.Context) error
 }
@@ -175,7 +171,6 @@ func purgeDarwin(ctx context.Context, p darwinPurge) (resultErr error) {
 	// were already removed by an interrupted historical cleanup. Namespace
 	// retirement still uses its exact retained root records above.
 	result = errors.Join(result, purgeDarwinOrphanTrust(ctx, p.Run))
-	result = errors.Join(result, p.LocalNames(ctx))
 	// Flushing the owned child anchor removes every retained deny rule.
 	if _, err := p.Run(ctx, "/sbin/pfctl", "-a", paths.Anchor, "-F", "all"); err != nil {
 		result = errors.Join(result, fmt.Errorf("flush machine guard PF anchor: %w", err))

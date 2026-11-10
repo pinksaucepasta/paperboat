@@ -38,9 +38,6 @@ func Purge(ctx context.Context) error {
 			_, err := Uninstall(ctx)
 			return err
 		},
-		LocalNames: func(ctx context.Context) error {
-			return cleanupHistoricalLocalNames(ctx, Config{StateDir: DefaultStateDir})
-		},
 	})
 }
 
@@ -56,10 +53,9 @@ type linuxPurgePaths struct {
 // linuxPurge carries every external effect so the purge order can be tested
 // against temporary roots and fake commands.
 type linuxPurge struct {
-	Paths      linuxPurgePaths
-	Run        func(context.Context, string, ...string) error
-	Uninstall  func(context.Context) error
-	LocalNames func(context.Context) error
+	Paths     linuxPurgePaths
+	Run       func(context.Context, string, ...string) error
+	Uninstall func(context.Context) error
 }
 
 func purgeLinux(ctx context.Context, p linuxPurge) error {
@@ -105,9 +101,6 @@ func purgeLinux(ctx context.Context, p linuxPurge) error {
 	if trustChanged {
 		result = errors.Join(result, p.Run(ctx, "update-ca-certificates", "--fresh"))
 	}
-	// Local names are not recorded in state, so this runs even when the guard
-	// uninstall above was skipped or failed; a retry must still reach them.
-	result = errors.Join(result, p.LocalNames(ctx))
 	for _, path := range paths.Libexec {
 		result = errors.Join(result, removeOwnedPath(path))
 	}

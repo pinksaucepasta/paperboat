@@ -8,20 +8,19 @@ const (
 	CleanupTaskRemove          = "guard_task_remove"
 	CleanupProcessStop         = "guard_process_stop"
 	CleanupWFPRemove           = "guard_wfp_remove"
-	CleanupHostsCleanup        = "guard_hosts_cleanup"
 	CleanupCertificatesCleanup = "guard_certificates_cleanup"
 	CleanupPayloadRemove       = "guard_payload_remove"
 	CleanupStateRemove         = "guard_state_remove"
 	CleanupPayloadParentRemove = "guard_payload_parent_remove"
 	CleanupStateParentRemove   = "guard_state_parent_remove"
 
-	MaxCleanupOperations = 12
+	MaxCleanupOperations = 11
 )
 
 // ValidCleanupOperation rejects identifiers outside the owning cleanup contract.
 func ValidCleanupOperation(operation string) bool {
 	switch operation {
-	case CleanupPrecondition, CleanupStateInspect, CleanupUninstall, CleanupTaskRemove, CleanupProcessStop, CleanupWFPRemove, CleanupHostsCleanup, CleanupCertificatesCleanup, CleanupPayloadRemove, CleanupStateRemove, CleanupPayloadParentRemove, CleanupStateParentRemove:
+	case CleanupPrecondition, CleanupStateInspect, CleanupUninstall, CleanupTaskRemove, CleanupProcessStop, CleanupWFPRemove, CleanupCertificatesCleanup, CleanupPayloadRemove, CleanupStateRemove, CleanupPayloadParentRemove, CleanupStateParentRemove:
 		return true
 	default:
 		return false
