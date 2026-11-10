@@ -131,7 +131,10 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 		}
 		copyErr = normalizeBridgeError(copyErr)
 		if tcp, ok := sshd.(*net.TCPConn); ok {
-			copyErr = errors.Join(copyErr, normalizeBridgeError(tcp.CloseWrite()))
+			// Like from_sshd: once the session ended cleanly, CloseWrite racing finish's Close is not a failure.
+			if closeErr := normalizeBridgeError(tcp.CloseWrite()); copyErr != nil {
+				copyErr = errors.Join(copyErr, closeErr)
+			}
 		}
 		if copyErr != nil {
 			_ = finish()
