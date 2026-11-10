@@ -16,8 +16,7 @@ on:
         options: ["1", "2", "3", "4", "5"]
         default: "2"
 
-permissions:
-  contents: read
+permissions: {} # no checkout, no token use
 
 jobs:
   machine:
@@ -50,13 +49,21 @@ jobs:
             Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 | Out-Null
           }
           Start-Service sshd # the first start writes the default sshd_config
-          # Loopback only (reached through the tunnel alone) and keys only; first value wins, so these go on top.
+          # Loopback only (reached through the tunnel alone) and keys only. On top: the first value of a setting wins.
           $config = "$env:ProgramData\ssh\sshd_config"
-          Set-Content $config (@('ListenAddress 127.0.0.1', 'PasswordAuthentication no') + (Get-Content $config))
+          Set-Content $config (@('ListenAddress 127.0.0.1', 'PasswordAuthentication no', 'KbdInteractiveAuthentication no') + (Get-Content $config))
           $keys = "$env:ProgramData\ssh\administrators_authorized_keys"
           Set-Content -Encoding ascii $keys $env:CONTROLLER_PUBKEY
           icacls $keys /inheritance:r /grant '*S-1-5-32-544:F' '*S-1-5-18:F' | Out-Null
           Restart-Service sshd
+          # ListenAddress adds to any other one in the file, so check what sshd really uses.
+          $effective = @(& "$env:SystemRoot\System32\OpenSSH\sshd.exe" -T)
+          $listen = @($effective -match '^listenaddress ')
+          if ($listen.Count -ne 1 -or $listen[0] -ne 'listenaddress 127.0.0.1:22' -or
+              $effective -notcontains 'passwordauthentication no' -or $effective -notcontains 'kbdinteractiveauthentication no') {
+            Stop-Service sshd
+            throw "sshd would listen beyond loopback or accept passwords: $listen"
+          }
 
           $dir = "$env:USERPROFILE\.ssh"
           New-Item -ItemType Directory -Force $dir | Out-Null

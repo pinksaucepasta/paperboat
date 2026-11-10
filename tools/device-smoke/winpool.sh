@@ -2,20 +2,22 @@
 # Temporary Windows test machines on GitHub-hosted runners (.github/workflows/winpool.yml), see README.md.
 #
 #   winpool.sh start N [HOURS]   start N machines (HOURS 1-5, default 2), wait until SSH answers, print their targets
-#   winpool.sh list              machines whose tunnel is up
+#   winpool.sh list              machines whose tunnel is up, and who started them
 #   winpool.sh ssh N [COMMAND]   SSH into machine N
-#   winpool.sh stop [N...]       stop the given machines (default: all)
+#   winpool.sh stop [N...]       stop machines you started (default: all of yours)
 #
 # Machine N is the SSH host winpool-N: administrator runneradmin, reached through the jump host's loopback port
 # 22200+N with the key ~/.ssh/winpool_controller. Point the Windows checks at it with SMOKE_WINDOWS_SSH=winpool-N
-# (and no VICTUS_PASS).
+# (and no VICTUS_PASS). "You" is your worktree (or WINPOOL_OWNER): every lane starts its machines from this one
+# controller, which is where the start lock and the owner records live.
 set -euo pipefail
 
 JUMP=${WINPOOL_JUMP:-ubuntu@anvit}
 SLOTS=(1 2 3 4 5 6)
 CONF=$HOME/.ssh/winpool.conf
 KNOWN=$HOME/.ssh/winpool_known_hosts
-CLAIMS=$HOME/.ssh/winpool-claims
+CLAIMS=$HOME/.ssh/winpool-claims # N: who started machine N
+OWNER=${WINPOOL_OWNER:-$(git -C "$(dirname "$0")" rev-parse --show-toplevel)}
 
 die() { echo "winpool: $*" >&2; exit 1; }
 
@@ -56,7 +58,7 @@ start() {
   free=("${free[@]:0:count}")
   for n in "${free[@]}"; do ssh-keygen -q -R "[127.0.0.1]:$((22200 + n))" -f "$KNOWN" >/dev/null 2>&1 || true; done
   gh workflow run winpool.yml -f slots="$(IFS=,; echo "${free[*]}")" -f hours="$hours" >/dev/null
-  for n in "${free[@]}"; do touch "$CLAIMS/$n"; done
+  for n in "${free[@]}"; do echo "$OWNER" > "$CLAIMS/$n"; done
   flock -u 9
   echo "started machines ${free[*]} for ${hours} h; waiting for SSH (about 2 minutes)" >&2
   deadline=$((SECONDS + 900))
@@ -69,25 +71,27 @@ start() {
   done
 }
 
-stop() {
+owner() { cat "$CLAIMS/$1" 2>/dev/null || true; }
+
+stop() { # only machines this caller started: another lane's checks are running on the others
   local n targets=("$@")
-  [ $# -gt 0 ] || mapfile -t targets < <(up)
+  [ $# -gt 0 ] || for n in $(up); do [ "$(owner "$n")" != "$OWNER" ] || targets+=("$n"); done
   for n in "${targets[@]}"; do
     slot "$n"
-    ssh -o BatchMode=yes -o ConnectTimeout=15 "winpool-$n" 'cmd /c "echo stop>C:\winpool-stop"' </dev/null && echo "winpool-$n stopping" ||
-      echo "winpool-$n did not answer" >&2
+    [ "$(owner "$n")" = "$OWNER" ] || die "winpool-$n was not started by you ($OWNER) but by: $(owner "$n")"
+    ssh -o BatchMode=yes -o ConnectTimeout=15 "winpool-$n" 'cmd /c "echo stop>C:\winpool-stop"' </dev/null ||
+      die "winpool-$n did not answer; it ends by itself after its hours"
+    rm -f "$CLAIMS/$n"
+    echo "winpool-$n stopping"
   done
-  # Without arguments also cancel runs that are still starting or did not answer.
-  [ $# -gt 0 ] || { sleep 30; gh run list --workflow winpool.yml --json databaseId,status \
-    --jq '.[]|select(.status!="completed")|.databaseId' | xargs -r -n1 gh run cancel >/dev/null 2>&1 || true; }
 }
 
 command=${1:-}
 [ $# -gt 0 ] && shift
 case "$command" in
   start) configure; start "$@" ;;
-  list) configure; for n in $(up); do echo "winpool-$n"; done ;;
+  list) configure; for n in $(up); do echo "winpool-$n  $(owner "$n")"; done ;;
   ssh) configure; slot "${1:-}"; n=$1; shift; exec ssh "winpool-$n" "$@" ;;
   stop) configure; stop "$@" ;;
-  *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

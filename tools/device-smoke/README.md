@@ -12,7 +12,7 @@ export SMOKE_WINDOWS_SSH=winpool-1; unset VICTUS_PASS
 python3 tools/device-smoke/windows_lifecycle.py --expect-version $V --windows-install-json /tmp/winpool-1.json \
   --machine winpool-<lane>-1 --build 'C:\Users\runneradmin\pb-new.exe' install-pair doctor status
 python3 tools/device-smoke/windows_checks.py --install-json /tmp/winpool-1.json --machine winpool-<lane>-1 --peer hp --only exec-main
-tools/device-smoke/winpool.sh stop 1        # or: stop (all); then remove the machine records:
+tools/device-smoke/winpool.sh stop 1        # or: stop (all of yours); then remove the machine records:
 tools/device-smoke/cleanup_test_account.py --prefix winpool- --stale '5 minutes'   # dry run, then --apply
 ```
 
@@ -20,6 +20,8 @@ tools/device-smoke/cleanup_test_account.py --prefix winpool- --stale '5 minutes'
   `winpool.sh` writes `~/.ssh/winpool.conf` and includes it from `~/.ssh/config`.
 - Name the Paperboat machine `winpool-…` so the cleanup finds it. `install-pair` mints its token on hp; nothing
   of Paperboat is stored in GitHub.
+- Start and stop only from this controller (oracle): the start lock and the record of who started which machine
+  are local to it. `stop` acts only on machines started from your worktree; never stop another lane's.
 - A machine is gone after its hours, at `stop`, or when its run is cancelled; nothing on it survives.
 - Evidence for a row ticked from a runner says so (`winpool, Windows Server 2025`); the final pass is on victus.
 
