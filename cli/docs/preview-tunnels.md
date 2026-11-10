@@ -17,9 +17,12 @@ pb preview ./dist
 pb tunnel --ephemeral 3000
 ```
 
-Human output shows preparation immediately. The command checks the local origin
-before publishing a preview; if it cannot connect, start the app and check its
-listening address and port, then retry. It waits for authenticated origin and edge
+Human output shows preparation immediately. The preview is published even when
+nothing answers on the port yet, as from the console: the command prints
+"Nothing answers on port N yet; the preview shows 'App not responding' until your
+app starts", the address answers "App not responding", and it serves the app
+within seconds of the app starting. Only invalid input (a bad port or target, a
+preview the account may not create) is refused. It waits for authenticated edge
 readiness before printing the managed URL. A readiness timeout includes the last
 observed allocation, edge, and origin states. `--json` omits progress messages.
 Keep it running in the foreground. Ctrl+C stops the owner session and

@@ -24,7 +24,6 @@ import (
 var (
 	// These sentinels let callers and tests branch on a stable failure class
 	// without depending on the human-readable detail appended to the error.
-	ErrPreviewOriginUnavailable       = errors.New("preview origin unavailable")
 	ErrPreviewInvalidTarget           = errors.New("invalid preview target")
 	ErrPreviewInvalidDuration         = errors.New("invalid preview duration")
 	ErrPreviewCarrierUnavailable      = errors.New("preview carrier unavailable")

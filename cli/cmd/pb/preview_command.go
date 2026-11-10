@@ -280,11 +280,20 @@ func runPreviewWithDomains(command *cobra.Command, target preview.LeaseTarget, p
 			CheckOrigin(context.Context, preview.LeaseTarget) error
 		}); ok {
 			if err := checker.CheckOrigin(foregroundCtx, target); err != nil {
-				failure := error(commandRejection{reason: commandRejectPreviewOrigin})
 				if foregroundCtx.Err() != nil {
-					failure = previewFailure("preview origin check was interrupted", foregroundCtx.Err(), err)
+					return closePreviewCarrier(command.Context(), carrier, previewFailure("preview origin check was interrupted", foregroundCtx.Err(), err))
 				}
-				return closePreviewCarrier(command.Context(), carrier, failure)
+				// As ngrok does, an app that is not running yet does not hold the preview back (the console
+				// publishes it the same way): the address answers "App not responding" until the app starts.
+				if !jsonOutput {
+					where := target.Address
+					if _, port, splitErr := net.SplitHostPort(where); splitErr == nil {
+						where = "port " + port
+					}
+					if _, err := fmt.Fprintf(command.ErrOrStderr(), "Nothing answers on %s yet; the preview shows 'App not responding' until your app starts.\n", where); err != nil {
+						return closePreviewCarrier(command.Context(), carrier, previewFailure("preview output failed", err))
+					}
+				}
 			}
 		}
 	} else {

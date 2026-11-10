@@ -470,10 +470,18 @@ func TestPreviewBackgroundStartupFailureCancelsAndReleasesDaemonOwnership(t *tes
 	}
 }
 
-func TestPreviewOriginFailureReleasesOwnerWithoutPublishing(t *testing.T) {
-	apiServer := newPreviewCommandServer(t, func(r *http.Request, _ map[string]any) (any, string, int) {
-		t.Errorf("origin failure published a resource: %s %s", r.Method, r.URL.Path)
-		return nil, "", http.StatusInternalServerError
+// An app that is not running yet does not stop pb preview, as the console publishes the same
+// preview: the CLI says so in one line and publishes, and the daemon keeps the preview.
+func TestPreviewWithoutARunningAppPublishesAndSaysSo(t *testing.T) {
+	apiServer := newPreviewCommandServer(t, func(r *http.Request, body map[string]any) (any, string, int) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/previews" {
+			t.Fatalf("unexpected API request %s %s", r.Method, r.URL.Path)
+		}
+		owner, _ := body["owner_session_id"].(string)
+		expires, _ := body["expires_at"].(string)
+		value := previewCommandLease("prv_no_app_1", "machine_cli", owner, "local_lease", "http", "127.0.0.1:3000", "connecting")
+		value["lease_deadline"], value["user_deadline"] = expires, expires
+		return value, `"ptv1:preview_lease:cHJ2X25vX2FwcF8x:1"`, http.StatusOK
 	})
 	defer apiServer.Close()
 	runtimeDone := make(chan struct{})
@@ -494,7 +502,7 @@ func TestPreviewOriginFailureReleasesOwnerWithoutPublishing(t *testing.T) {
 		t.Fatal(err)
 	}
 	apiClient := api.New(apiServer.URL, config.Credential{AccessToken: "test-token"}, apiServer.Client())
-	carrier := &productionOwnerLeaseCarrier{ready: make(chan struct{}), owner: make(chan string, 1), originErr: errors.New("connection refused")}
+	carrier := &backgroundOwnerLeaseCarrier{productionOwnerLeaseCarrier: productionOwnerLeaseCarrier{ready: make(chan struct{}), owner: make(chan string, 1), originErr: errors.New("connection refused")}}
 	previousClient := previewClientForCommand
 	previousMachine := previewMachineID
 	previousCarrier := newPreviewCarrier
@@ -517,13 +525,13 @@ func TestPreviewOriginFailureReleasesOwnerWithoutPublishing(t *testing.T) {
 	var progress bytes.Buffer
 	command.SetErr(&progress)
 	command.SetArgs([]string{"3000", "--background", "--ttl", "30m"})
-	if err := command.ExecuteContext(context.Background()); !errors.Is(err, ErrPreviewOriginUnavailable) || !strings.Contains(err.Error(), "No preview was published") {
-		t.Fatalf("origin error = %v", err)
+	if err := command.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("preview without a running app = %v", err)
 	}
-	if !strings.Contains(progress.String(), "Preparing preview") {
-		t.Fatalf("missing startup progress: %q", progress.String())
+	if !strings.Contains(progress.String(), "Nothing answers on port 3000 yet; the preview shows 'App not responding' until your app starts.") {
+		t.Fatalf("missing the no-app line: %q", progress.String())
 	}
-	if ownerHandler.count(http.MethodPost) != 1 || ownerHandler.count(http.MethodDelete) != 1 {
+	if ownerHandler.count(http.MethodPost) != 1 || ownerHandler.count(http.MethodDelete) != 0 {
 		t.Fatalf("local owner lease calls = %v", ownerHandler.methods())
 	}
 }

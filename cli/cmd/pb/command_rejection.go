@@ -25,7 +25,6 @@ const (
 	commandRejectLegacyCarrierRunning
 	commandRejectActivationPending
 	commandRejectInboxDeclined
-	commandRejectPreviewOrigin
 	commandRejectPreviewExpired
 	commandRejectPreviewTimeout
 	commandRejectPreviewDomainTimeout
@@ -68,8 +67,6 @@ func (e commandRejection) valid() bool {
 }
 func (e commandRejection) Error() string {
 	switch e.reason {
-	case commandRejectPreviewOrigin:
-		return "Cannot connect to the preview origin. Start your app and check its listening address and port, then retry. No preview was published."
 	case commandRejectPreviewExpired:
 		return "The preview's time limit ended before it was ready. Retry with a longer --ttl; publishing can take up to a minute."
 	case commandRejectPreviewTimeout:
@@ -164,8 +161,6 @@ func (e commandRejection) Unwrap() error { return e.cause }
 // Is lets callers branch on the preview sentinel a preview refusal stands for.
 func (e commandRejection) Is(target error) bool {
 	switch e.reason {
-	case commandRejectPreviewOrigin:
-		return target == ErrPreviewOriginUnavailable
 	case commandRejectPreviewExpired:
 		return target == preview.ErrLeaseExpired
 	case commandRejectPreviewTimeout, commandRejectPreviewDomainTimeout:
