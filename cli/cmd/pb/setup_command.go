@@ -306,13 +306,17 @@ func setupCommand() *cobra.Command {
 				registration.AccountID = previousRegistration.AccountID
 				registration.SSHUser, registration.SSHPort = previousRegistration.SSHUser, previousRegistration.SSHPort
 				if runtime.GOOS == "windows" {
-					// Neither SetupMachine's answer nor GetUserMachine's carries the SSH target (winpool-2 debug run:
-					// ssh nil, setup 409 with HOST\\user and the default port); the inventory list does.
-					machines, listErr := client.ListUserMachinesFiltered(command.Context(), url.Values{"q": {machine.Alias}})
-					if listErr != nil {
-						return setupFailure(fmt.Errorf("read the registered SSH target: %w", listErr))
+					// SetupMachine's answer carries no SSH target and neither does GetUserMachine's for a personal
+					// machine (winpool-2 debug run: ssh nil, setup 409 with HOST\\user and the default port); the
+					// inventory list does, but it is personal-only: a team-enrolled machine is read by id.
+					registered, lookupErr := resolveRegisteredSSHTarget(machine.ID, machine.InstallationGeneration,
+						func() ([]api.UserMachine, error) {
+							return client.ListUserMachinesFiltered(command.Context(), url.Values{"q": {machine.Alias}})
+						},
+						func(id string) (api.UserMachine, error) { return client.GetUserMachine(command.Context(), id) })
+					if lookupErr != nil {
+						return setupFailure(fmt.Errorf("read the registered SSH target: %w", lookupErr))
 					}
-					registered := registeredSSHTargetIn(machines, machine.ID, machine.InstallationGeneration)
 					keptUser, keptPort := keptWindowsSSHTarget(registered, sshUser, sshPortValue)
 					if keptUser != sshUser && !sameWindowsAccount(keptUser, sshUser) {
 						fmt.Fprintf(command.ErrOrStderr(), "Managed SSH stays registered for the account %s, not %s. Re-enroll this machine to change it.\n", keptUser, sshUser)
@@ -520,14 +524,32 @@ func sameWindowsAccount(registered, current string) bool {
 	return strings.EqualFold(registered, current)
 }
 
-// registeredSSHTargetIn finds the machine in the inventory list and returns its registered target.
-func registeredSSHTargetIn(machines []api.UserMachine, id string, generation int64) api.MachineSSH {
+// registeredSSHTargetIn finds the machine in the inventory list and returns its registered target; found says
+// whether the machine was listed at all (the list is personal-only).
+func registeredSSHTargetIn(machines []api.UserMachine, id string, generation int64) (api.MachineSSH, bool) {
 	for _, listed := range machines {
 		if listed.ID == id {
-			return registeredSSHTarget(listed, generation)
+			return registeredSSHTarget(listed, generation), true
 		}
 	}
-	return api.MachineSSH{}
+	return api.MachineSSH{}, false
+}
+
+// resolveRegisteredSSHTarget is the target the server holds for this installation: from the personal inventory list,
+// else, for a machine the list does not carry (team-enrolled), from the by-id read that covers every workspace.
+func resolveRegisteredSSHTarget(id string, generation int64, list func() ([]api.UserMachine, error), get func(string) (api.UserMachine, error)) (api.MachineSSH, error) {
+	machines, err := list()
+	if err != nil {
+		return api.MachineSSH{}, err
+	}
+	if target, found := registeredSSHTargetIn(machines, id, generation); found {
+		return target, nil
+	}
+	listed, err := get(id)
+	if err != nil {
+		return api.MachineSSH{}, err
+	}
+	return registeredSSHTarget(listed, generation), nil
 }
 
 // registeredSSHTarget is the SSH target the server holds for this installation generation, or none: a target of
