@@ -94,6 +94,30 @@ func TestWindowsActivationJournalRejectsCrossInstanceTargets(t *testing.T) {
 	}
 }
 
+func TestStageableWindowsSSHTargetAllowsNoLegacyWrapperButNotAHalfOne(t *testing.T) {
+	valid := windowsServiceTarget{Executable: `C:\\Program Files\\Paperboat\\pb.exe`, Arguments: []string{"daemon", "__windows-sshd-service", "--instance", "u0123456789abcdef01234567"}}
+	for name, test := range map[string]struct {
+		target windowsServiceTarget
+		want   bool
+	}{
+		"absent (generation-scoped SSH only)": {windowsServiceTarget{}, true},
+		"complete":                            {valid, true},
+		"executable without arguments":        {windowsServiceTarget{Executable: valid.Executable}, false},
+		"arguments without executable":        {windowsServiceTarget{Arguments: valid.Arguments}, false},
+		"foreign arguments":                   {windowsServiceTarget{Executable: valid.Executable, Arguments: []string{"daemon", "__runtime-hostd", "--instance", "u0123456789abcdef01234567"}}, false},
+	} {
+		if got := stageableWindowsSSHTarget(test.target); got != test.want {
+			t.Errorf("%s: got %v, want %v", name, got, test.want)
+		}
+	}
+	// A journal staged without any SSH target must also validate, or stage and validator would disagree again.
+	journal := testWindowsActivationJournal()
+	journal.OldSSH, journal.NewSSH = windowsServiceTarget{}, windowsServiceTarget{}
+	if !validWindowsActivationJournal(journal) {
+		t.Fatal("a journal without an SSH wrapper target is invalid")
+	}
+}
+
 func TestWindowsSSHInstanceServiceRecoverySelection(t *testing.T) {
 	for _, test := range []struct {
 		name string

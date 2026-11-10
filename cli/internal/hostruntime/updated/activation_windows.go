@@ -186,10 +186,7 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 		if err != nil {
 			return windowsActivationJournal{}, err
 		}
-		if !validWindowsSSHTarget(oldSSH) {
-			return windowsActivationJournal{}, errInvalidWindowsActivation
-		}
-		if !validWindowsSSHArguments(oldSSH.Arguments) {
+		if !stageableWindowsSSHTarget(oldSSH) {
 			return windowsActivationJournal{}, errInvalidWindowsActivation
 		}
 	}
