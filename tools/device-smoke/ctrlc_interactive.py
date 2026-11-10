@@ -26,28 +26,28 @@ def main():
     terminal = Terminal(device.ssh_prefix('-tt', device.target, 'powershell -NoProfile -NoLogo'), env=winhost.terminal_env(pb))
     code = took = None
     try:
+        terminal.expect(b'PS ', timeout=60)  # the prompt: a line typed earlier reaches a still-cooked pty and PSReadLine takes its LF as a continuation
         terminal.send("Write-Output ('PB_PROM'+'PT_%s')\r" % token)
         terminal.expect('PB_PROMPT_' + token, timeout=60)
-        # the remote command prints a marker the typed text does not contain, then sleeps; the exit code is printed after pb returns
+        # the remote command prints a marker the typed text does not contain, then sleeps
         remote = "printf 'PB_START%%s\\n' ED_%s; sleep 60" % token
-        command = "& '%s' exec %s -- sh -c \"%s\"; Write-Output ('PB_RC'+'_'+$LASTEXITCODE)" % (pb, args.target, remote)
-        terminal.send(command + '\r')
+        terminal.send("& '%s' exec %s -- sh -c \"%s\"\r" % (pb, args.target, remote))
         terminal.expect('PB_STARTED_' + token, timeout=90)
         started = time.monotonic()
         terminal.send(b'\x03')  # the Ctrl-C key as a console receives it through ConPTY
-        deadline = started + args.seconds
-        while time.monotonic() < deadline and code is None:
-            try:
-                terminal.expect(b'PB_RC_', timeout=1)
-            except RuntimeError:
-                continue
-            match = re.search(rb'PB_RC_(-?\d+)', bytes(terminal.output))
-            code = int(match.group(1)) if match else None
+        try:
+            terminal.expect(b'canceled', timeout=args.seconds)  # pb: Remote execution was canceled.
+            terminal.expect(b'PS ', timeout=args.seconds)  # and the prompt is back (PSReadLine drops the rest of a typed line on Ctrl-C, so the code is read by a new line)
+        except RuntimeError as error:
+            raise RuntimeError('Ctrl-C in an interactive console did not stop pb.exe within %d s' % args.seconds) from error
         took = time.monotonic() - started
-        if code is None:
-            raise RuntimeError('Ctrl-C in an interactive console did not stop pb.exe within %d s' % args.seconds)
-        if code == 0:
-            raise RuntimeError('pb.exe exited 0 after Ctrl-C (it finished or ignored the interrupt)')
+        terminal.send("Write-Output ('PB_RC'+'_'+$LASTEXITCODE)\r")
+        terminal.expect(b'PB_RC_', timeout=30)
+        terminal.settle(0.7)  # the digits follow the marker
+        found = re.findall(rb'PB_RC_(-?\d+)', bytes(terminal.output))
+        code = int(found[-1]) if found else None
+        if code in (None, 0):
+            raise RuntimeError('pb.exe exit code after Ctrl-C was %r (want non-zero: it finished or ignored the interrupt)' % (code,))
     finally:
         terminal.close()
     print(json.dumps({'check': 'ctrlc-interactive', 'target': args.target, 'status': 'PASS', 'exit_code': code, 'seconds': round(took, 1),
