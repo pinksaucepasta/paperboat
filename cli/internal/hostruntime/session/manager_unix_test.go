@@ -1035,17 +1035,7 @@ func TestCtrlCDiscardsOutputQueuedForAViewer(t *testing.T) {
 		_, bytes, _ := manager.AttachmentStatus(created.ID, "att_discard")
 		return bytes
 	}
-	var last uint64
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(200 * time.Millisecond) {
-		if now := queued(); now >= 300000 && now == last {
-			break
-		} else {
-			last = now
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("flood never queued: %d bytes", last)
-		}
-	}
+	waitCond(t, manager, created.ID, "att_discard", "the flood queued", func() bool { return queued() >= 300000 })
 	key := InputKey{ClientID: "cli", AttachmentID: "att_discard", Generation: created.Generation, InputSequence: 1}
 	if !manager.Interrupt(created.ID, key, 3) {
 		t.Fatal("Ctrl-C was not taken as the terminal's interrupt")
@@ -1072,14 +1062,10 @@ func TestCtrlCResyncScreenHoldsTheAnswer(t *testing.T) {
 	if _, err := manager.AttachParticipantAtGeneration(created.ID, viewer, 0, created.Generation); err != nil {
 		t.Fatal(err)
 	}
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(100 * time.Millisecond) {
-		if _, queued, _ := manager.AttachmentStatus(created.ID, "att_prompt"); queued >= 300000 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("flood never queued")
-		}
-	}
+	waitCond(t, manager, created.ID, "att_prompt", "the flood queued", func() bool {
+		_, queued, _ := manager.AttachmentStatus(created.ID, "att_prompt")
+		return queued >= 300000
+	})
 	key := InputKey{ClientID: "cli", AttachmentID: "att_prompt", Generation: created.Generation, InputSequence: 1}
 	if !manager.Interrupt(created.ID, key, 3) {
 		t.Fatal("Ctrl-C was not taken as the terminal's interrupt")
@@ -1089,15 +1075,10 @@ func TestCtrlCResyncScreenHoldsTheAnswer(t *testing.T) {
 	if _, err := manager.WaitNext(ctx, created.ID, "att_prompt", 0); !errors.Is(err, ErrAttachmentLagged) {
 		t.Fatalf("after Ctrl-C over a flood the viewer got %v, want ErrAttachmentLagged", err)
 	}
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+	waitCond(t, manager, created.ID, "att_prompt", "the resync screen holding the answer to Ctrl-C", func() bool {
 		checkpoint, _, err := manager.BrowserScreenAttachment(created.ID, "att_prompt", "acct", "cli", created.Generation)
-		if err == nil && bytes.Contains(checkpoint, []byte("ANSWER")) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the resync screen never held the answer to Ctrl-C (err=%v)", err)
-		}
-	}
+		return err == nil && bytes.Contains(checkpoint, []byte("ANSWER"))
+	})
 }
 
 // F3-11: a lone Ctrl-C is always answered with the cut the host made for it, whatever the terminal mode, so the
@@ -1132,15 +1113,11 @@ func TestLoneCtrlCIsAnsweredWithTheCut(t *testing.T) {
 			if _, err := manager.Attach(created.ID, "att_answer", 0); err != nil {
 				t.Fatal(err)
 			}
-			for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(100 * time.Millisecond) {
-				if _, queued, _ := manager.AttachmentStatus(created.ID, "att_answer"); queued >= c.queued {
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatal("output never queued")
-				}
-			}
-			time.Sleep(300 * time.Millisecond) // the whole of it is published
+			// The scripts print exactly c.queued bytes, so the output is complete once that much is queued.
+			waitCond(t, manager, created.ID, "att_answer", "the output queued", func() bool {
+				_, queued, _ := manager.AttachmentStatus(created.ID, "att_answer")
+				return queued >= c.queued
+			})
 			key := InputKey{ClientID: "cli", AttachmentID: "att_answer", Generation: created.Generation, InputSequence: 1}
 			if c.overtake {
 				handled := manager.Interrupt(created.ID, key, 3)
@@ -1183,16 +1160,11 @@ func TestTwoViewersPressingCtrlCTogetherAreBothAnswered(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+	waitCond(t, manager, created.ID, "att_a", "the flood queued for both viewers", func() bool {
 		_, a, _ := manager.AttachmentStatus(created.ID, "att_a")
 		_, b, _ := manager.AttachmentStatus(created.ID, "att_b")
-		if a >= 300000 && b >= 300000 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("flood never queued for both viewers")
-		}
-	}
+		return a >= 300000 && b >= 300000
+	})
 	keyA := InputKey{ClientID: "cli_a", AttachmentID: "att_a", Generation: created.Generation, InputSequence: 1}
 	keyB := InputKey{ClientID: "cli_b", AttachmentID: "att_b", Generation: created.Generation, InputSequence: 1}
 	if !manager.Interrupt(created.ID, keyA, 3) || !manager.Interrupt(created.ID, keyB, 3) {
@@ -1225,14 +1197,10 @@ func TestInterruptRecordIsDroppedWhenTheAttachmentDetaches(t *testing.T) {
 	if _, err := manager.Attach(created.ID, "att_rec", 0); err != nil {
 		t.Fatal(err)
 	}
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(100 * time.Millisecond) {
-		if _, queued, _ := manager.AttachmentStatus(created.ID, "att_rec"); queued >= 300000 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("output never queued")
-		}
-	}
+	waitCond(t, manager, created.ID, "att_rec", "the flood queued", func() bool {
+		_, queued, _ := manager.AttachmentStatus(created.ID, "att_rec")
+		return queued >= 300000
+	})
 	key := InputKey{ClientID: "cli", AttachmentID: "att_rec", Generation: created.Generation, InputSequence: 1}
 	if !manager.Interrupt(created.ID, key, 3) {
 		t.Fatal("Ctrl-C was not taken as the interrupt")
@@ -1260,5 +1228,29 @@ func TestInterruptRecordIsDroppedWhenTheAttachmentDetaches(t *testing.T) {
 	}
 	if decision.InterruptDiscarded {
 		t.Fatal("the reattached viewer was handed the old attachment's discarded answer")
+	}
+}
+
+// waitCond blocks until cond holds, woken by the attachment's own output notification, not by a timer: the tests that
+// wait for a flood to be queued no longer depend on how slow the host is (-race on a shared runner).
+func waitCond(t *testing.T, manager *Manager, sessionID, attachmentID, what string, cond func() bool) {
+	t.Helper()
+	session, err := manager.get(sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.fanout.mu.Lock()
+	cursor := session.fanout.attachments[attachmentID]
+	session.fanout.mu.Unlock()
+	if cursor == nil {
+		t.Fatalf("%s: attachment %s is unknown", what, attachmentID)
+	}
+	timeout := time.After(60 * time.Second) // only a bound against a hang, never a pace
+	for !cond() {
+		select {
+		case <-cursor.notify:
+		case <-timeout:
+			t.Fatalf("%s: timed out", what)
+		}
 	}
 }
