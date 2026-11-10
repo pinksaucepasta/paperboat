@@ -84,7 +84,14 @@ func prepareStateFromResult(ctx context.Context, config Config, result Result) (
 	} else if err != nil {
 		return SetupResult{}, err
 	}
-	configPath, err := WriteServiceConfig(ServiceConfig{StateRoot: config.StateRoot, SSHDPath: result.SSHDPath, SFTPPath: result.SFTPPath, AuthorizedKeys: authorized, Port: result.Port})
+	managedUser, err := managedUserForSID(config.OwnerSID)
+	if err != nil {
+		return SetupResult{}, err
+	}
+	configPath, err := WriteServiceConfig(ServiceConfig{
+		StateRoot: config.StateRoot, SSHDPath: result.SSHDPath, SFTPPath: result.SFTPPath,
+		AuthorizedKeys: authorized, ManagedUser: managedUser, Port: result.Port,
+	})
 	if err != nil {
 		return SetupResult{}, err
 	}

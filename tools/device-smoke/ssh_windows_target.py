@@ -23,7 +23,9 @@ if($p.Count -ne 1){throw "expected one Paperboat-managed sshd, found $($p.Count)
 [void]($p[0].CommandLine -match ' -f "?([^"]+sshd_config)"?\s*$');$c=$Matches[1]
 $s=@(Get-CimInstance Win32_Service|Where-Object{$_.ProcessId -eq $p[0].ParentProcessId -and $_.Name -like 'PaperboatSshd-*'})
 if($s.Count -ne 1){throw 'the managed sshd is not run by a PaperboatSshd service'}
-$v=@{};foreach($l in [IO.File]::ReadAllLines($c)){$k,$r=$l.Trim() -split '\s+',2;if($k -and $k[0] -ne '#'){$v[$k]=@($v[$k])+@($r.Trim('"'))|Where-Object{$_}}}
+$effective=& ($p[0].ExecutablePath) -T -f $c -C ('user='+$env:USERNAME+',host=example.test,addr=127.0.0.1')
+if($LASTEXITCODE -ne 0){throw 'could not resolve the managed sshd configuration for its setup user'}
+$v=@{};foreach($l in $effective){$k,$r=$l.Trim() -split '\s+',2;if($k -and $r){$v[$k]=@($v[$k])+@($r.Trim('"'))}}
 @{service=$s[0].Name;port=[int]@($v['Port'])[0];authorized_keys=@($v['AuthorizedKeysFile']);host_key=@($v['HostKey'])[0]}|ConvertTo-Json -Compress
 """
 COUNT = "@([IO.File]::ReadAllLines($req.path)|Where-Object{$_.Contains($req.text)}).Count"
@@ -34,6 +36,38 @@ try{& (Join-Path $env:ProgramFiles 'OpenSSH\ssh-keygen.exe') -q -t ed25519 -N '"
 if($LASTEXITCODE -ne 0){throw 'ssh-keygen failed'}
 [IO.File]::WriteAllBytes($req.key,[IO.File]::ReadAllBytes((Join-Path $d 'k')))
 [IO.File]::WriteAllBytes($req.key+'.pub',[IO.File]::ReadAllBytes((Join-Path $d 'k.pub')))}finally{Remove-Item -Recurse -Force $d}
+"""
+OTHER_USER = r"""
+$u=New-LocalUser -Name $req.name -Password (ConvertTo-SecureString $req.password -AsPlainText -Force) -AccountNeverExpires -PasswordNeverExpires
+try{
+$users=New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-545'
+if(-not @(Get-LocalGroupMember -SID $users|Where-Object{$_.SID -eq $u.SID}).Count){Add-LocalGroupMember -SID $users -Member $u}
+Add-Type -Namespace PbSmoke -Name Profile -MemberDefinition '[DllImport("userenv.dll", CharSet=CharSet.Unicode)] public static extern int CreateProfile(string sid,string user,System.Text.StringBuilder path,uint size);'
+$b=New-Object Text.StringBuilder 32768
+$hr=[PbSmoke.Profile]::CreateProfile($u.SID.Value,$req.name,$b,$b.Capacity)
+if($hr -ne 0){throw 'could not create the throwaway SSH user profile'}
+$dir=Join-Path $b.ToString() '.ssh';[void](New-Item -ItemType Directory -Path $dir)
+$key=Join-Path $dir 'authorized_keys';[IO.File]::WriteAllText($key,$req.key+"`n",[Text.Encoding]::ASCII)
+$acl=New-Object Security.AccessControl.FileSecurity;$acl.SetOwner($u.SID);$acl.SetAccessRuleProtection($true,$false)
+foreach($id in @($u.SID.Value,'S-1-5-18','S-1-5-32-544')){
+$sid=New-Object Security.Principal.SecurityIdentifier $id
+$acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid,'FullControl','Allow')))}
+Set-Acl -LiteralPath $key -AclObject $acl
+$u.SID.Value
+}catch{
+$primary=$_
+try{Get-CimInstance Win32_UserProfile|Where-Object{$_.SID -eq $u.SID.Value}|Remove-CimInstance -ErrorAction Stop}catch{Write-Warning 'could not remove the failed SSH fixture profile'}
+try{Remove-LocalUser -SID $u.SID -ErrorAction Stop}catch{Write-Warning 'could not remove the failed SSH fixture account'}
+throw $primary
+}
+"""
+REMOVE_OTHER_USER = r"""
+$sid=New-Object Security.Principal.SecurityIdentifier $req.sid
+Remove-LocalUser -SID $sid -ErrorAction Stop
+"""
+REMOVE_OTHER_PROFILE = r"""
+$p=Get-CimInstance Win32_UserProfile|Where-Object{$_.SID -eq $req.sid}
+if($p){$p|Remove-CimInstance -ErrorAction Stop}
 """
 BLOCK = "[void](New-NetFirewallRule -DisplayName $req.name -Direction Outbound -Action Block -RemoteAddress $req.addresses)"
 UNBLOCK = "Remove-NetFirewallRule -DisplayName $req.name -ErrorAction SilentlyContinue"
@@ -50,6 +84,16 @@ class Target:
 
     def user(self):
         return self.device.env('USERNAME')
+
+    def create_other_user(self, name, password, key):
+        return self.device.ps('create the throwaway SSH account', OTHER_USER,
+                              name=name, password=password, key=key)[1].strip()
+
+    def remove_other_user(self, sid):
+        self.device.ps('remove the throwaway SSH account', REMOVE_OTHER_USER, sid=sid)
+        # End any SSH logon token before asking Windows to unload its profile.
+        self.device.service('restart', self.sshd['service'])
+        self.device.ps('remove the throwaway SSH profile', REMOVE_OTHER_PROFILE, sid=sid)
 
     def remote(self):
         """The commands a client runs ON the target through ssh: cmd.exe is the shell there, so no sh, sleep or true."""

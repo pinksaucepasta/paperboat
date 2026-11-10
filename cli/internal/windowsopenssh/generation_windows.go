@@ -495,7 +495,15 @@ func PrepareGeneration(ctx context.Context, request GenerationRequest) (result G
 		if err := verifyHostKeyFiles(hostkey); err != nil {
 			return GenerationDescriptor{}, err
 		}
-		path, err := WriteServiceConfig(ServiceConfig{StateRoot: root, HostKey: hostkey, SSHDPath: result.SSHDPath, SFTPPath: result.SFTPPath, AuthorizedKeys: filepath.Join(base, "authorized_keys", "paperboat"), Port: d.Port})
+		managedUser, err := managedUserForSID(d.OwnerSID)
+		if err != nil {
+			return GenerationDescriptor{}, err
+		}
+		path, err := WriteServiceConfig(ServiceConfig{
+			StateRoot: root, HostKey: hostkey, SSHDPath: result.SSHDPath, SFTPPath: result.SFTPPath,
+			AuthorizedKeys: filepath.Join(base, "authorized_keys", "paperboat"),
+			ManagedUser:    managedUser, Port: d.Port,
+		})
 		if err != nil {
 			return GenerationDescriptor{}, err
 		}

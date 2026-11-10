@@ -165,10 +165,33 @@ class WindowsTarget(unittest.TestCase):
         self.assertEqual('FAIL', ssh_mac_rows.RESULTS[-1]['status'])
         self.assertIn('exactly one authorized keys file', ssh_mac_rows.RESULTS[-1]['detail'])
 
-    def test_otheruser_is_not_passed_without_a_windows_target(self):
+    def test_otheruser_cannot_pass_without_creating_its_key(self):
         with mock.patch.object(ssh_mac_rows, 'cl', lambda s, timeout=300: 'warm-ok'):
             ssh_mac_rows.otheruser()
         self.assertEqual('FAIL', ssh_mac_rows.RESULTS[-1]['status'])
+
+    def test_otheruser_requires_the_offered_managed_key_to_be_refused(self):
+        good = ('RESULT ok:[ setup-user-pb setup-user-plain bob-key-plain bob-agent-pb bob-agent-plain '
+                'bob-password-plain bob-password-pb bob-wrong-password-is-sshd ] fail:[ ] skip:[ ]')
+        for verdict, expected in [('refused', 'PASS'), ('not-refused', 'FAIL')]:
+            with self.subTest(verdict=verdict):
+                ssh_mac_rows.RESULTS.clear()
+
+                def client(script, timeout=300, input=None):
+                    if 'ssh-keygen' in script:
+                        return 'ssh-ed25519 synthetic-fixture'
+                    if 'MANAGED_OTHER_USER=' in script:
+                        return 'MANAGED_OTHER_USER=' + verdict
+                    if 'check setup-user-pb' in script:
+                        return good
+                    return 'warm-ok'
+
+                with mock.patch.object(ssh_mac_rows, 'cl', client), \
+                        mock.patch.object(self.target, 'create_other_user', return_value='S-1-5-21-test'), \
+                        mock.patch.object(self.target, 'remove_other_user') as remove:
+                    ssh_mac_rows.otheruser()
+                self.assertEqual(expected, ssh_mac_rows.RESULTS[-1]['status'])
+                remove.assert_called_once_with('S-1-5-21-test')
 
 
 if __name__ == '__main__':

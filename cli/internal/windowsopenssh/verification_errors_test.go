@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -178,7 +179,12 @@ func TestSetupHostKeyGenerationKeepsCauseWithoutTranscript(t *testing.T) {
 		{output: []byte(privateTranscript), err: cause},
 	}}
 	config := Config{InstallRoot: install, StateRoot: filepath.Join(root, "state"), Port: 38222, Runner: runner}
-	_, err := setupFromResult(context.Background(), config, resultForConfig(config))
+	owner, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.OwnerSID = owner.Uid
+	_, err = setupFromResult(context.Background(), config, resultForConfig(config))
 	if !errors.Is(err, ErrInstallFailed) || !errors.Is(err, cause) {
 		t.Fatalf("setup error = %v, want install classification and runner cause", err)
 	}

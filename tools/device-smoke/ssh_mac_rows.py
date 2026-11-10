@@ -9,7 +9,7 @@ Usage: MAC_CMD=... CLIENT_CMD=... ssh_mac_rows.py [--only setup,outage,refusals,
 Steps with no safe Mac equivalent print SKIP <reason>. The Mac's sshd is only ever stopped by a detached root script
 that restarts it on a timer; the pf block and the daemon SIGSTOP likewise have a timed failsafe.
 --windows: TARGET is the paired Windows machine instead (ssh_windows_target.py; set SMOKE_WINDOWS_SSH and
-PB_SMOKE_WINDOWS_PB, no MAC_CMD). otheruser has no Windows target: the managed sshd there reads one key file and no passwords.
+PB_SMOKE_WINDOWS_PB, no MAC_CMD). otheruser uses a throwaway local Windows account with its own key and password.
 Prints one JSON line; exit 1 on any FAIL.
 """
 import argparse, json, os, re, secrets, shlex, subprocess, sys, time
@@ -24,10 +24,11 @@ REMOTE = {'NOP': 'true', 'HOLD_PB': 'echo session-up; sleep 300', 'HOLD_PLAIN': 
           'SSHD_PORT': '22', 'AGENT_LIST': 'ssh-add -l', 'SHOW_DISPLAY': 'echo "display=<$DISPLAY>"'}
 
 
-def run(env, script, timeout=300):
+def run(env, script, timeout=300, input=None):
     cmd = shlex.split(os.environ[env]) + ['bash -c ' + shlex.quote(script)]
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                           **({'input': input} if input is not None else {'stdin': subprocess.DEVNULL}))
     except subprocess.TimeoutExpired:
         return 124, 'timeout after %ds' % timeout
     return p.returncode, p.stdout + p.stderr
@@ -46,8 +47,8 @@ def daemon_pids():
     return [match.group(1)] if match else []
 
 
-def cl(script, timeout=300):
-    return run('CLIENT_CMD', script, timeout)[1]
+def cl(script, timeout=300, input=None):
+    return run('CLIENT_CMD', script, timeout, input=input)[1]
 
 
 def msudo(script, bg=False, timeout=120):
@@ -315,31 +316,50 @@ echo "RESULT ok:[$ok ] fail:[$fail ] skip:[$skip ]"'''
 
 def otheruser():
     row = 'F5-11 otheruser'
-    if WIN:
-        return report(row, 'FAIL', 'no Windows target: the managed sshd reads only the managed key file and no passwords')
     if not check_warm(row):
         return
-    bob = 'pbbob' + secrets.token_hex(3)
-    pw = secrets.token_hex(10)  # throwaway account, deleted below; visible in process lists while it exists
-    out = ''
+    bob = ('w6ssh' if WIN else 'pbbob') + secrets.token_hex(3)
+    pw = secrets.token_urlsafe(24) + 'Aa1!' if WIN else secrets.token_hex(10)
+    out, sid = '', None
     try:
         pub = cl('umask 077; rm -f ~/bob_key ~/bob_key.pub; ssh-keygen -q -t ed25519 -N "" -f ~/bob_key && cat ~/bob_key.pub && rm -f ~/bob_key.pub').strip()
         if not pub.startswith('ssh-ed25519'):
             return report(row, 'FAIL', "could not make bob's key on the client")
-        cl('umask 077; printf %%s %s > ~/bob_pw' % pw)
-        msudo('sysadminctl -addUser {b} -fullName {b} -password {p} -home /Users/{b} && (createhomedir -c -u {b} >/dev/null 2>&1; mkdir -p /Users/{b}; chown {b}:staff /Users/{b}; chmod 750 /Users/{b}); '
+        cl('umask 077; cat > ~/bob_pw', input=pw)
+        if WIN:
+            sid = WIN.create_other_user(bob, pw, pub)
+        else:
+            msudo('sysadminctl -addUser {b} -fullName {b} -password {p} -home /Users/{b} && (createhomedir -c -u {b} >/dev/null 2>&1; mkdir -p /Users/{b}; chown {b}:staff /Users/{b}; chmod 750 /Users/{b}); '
               '(dscl . -read /Groups/com.apple.access_ssh >/dev/null 2>&1 && dseditgroup -o edit -a {b} -t user com.apple.access_ssh); '
               'install -d -m 700 -o {b} /Users/{b}/.ssh && printf "%s\\n" {k} > /Users/{b}/.ssh/authorized_keys '
               '&& chown {b} /Users/{b}/.ssh/authorized_keys && chmod 600 /Users/{b}/.ssh/authorized_keys'.format(b=bob, p=pw, k=shlex.quote(pub)))
         out = cl(prelude() + OTHER_USER % (bob, ARGS.mac_user), 600)
+        if WIN:
+            # The same key worked for the setup user above. Force its agent and
+            # public selector so a client-side user filter cannot hide a server bug.
+            out += cl(prelude(False) + 'B=' + shlex.quote(bob) + r''';
+agent=$(ssh -G "$H" 2>/dev/null | sed -n 's/^identityagent //p' | head -1)
+key=$(ssh -G "$H" 2>/dev/null | sed -n 's/^identityfile //p' | grep 'paperboat-managed-ssh.pub$' | head -1)
+if [ -z "$agent" ] || [ -z "$key" ]; then echo MANAGED_OTHER_USER=missing-identity; exit 1; fi
+o=$(ssh -v -o BatchMode=yes -o IdentitiesOnly=yes -o "IdentityAgent=$agent" -i "$key" "$B@$HN" whoami 2>&1 </dev/null); rc=$?
+if [ "$rc" != 0 ] && grep -q 'Permission denied' <<<"$o" && grep -q 'Offering public key' <<<"$o" && ! grep -q 'agent refused operation' <<<"$o"; then
+echo MANAGED_OTHER_USER=refused
+else echo MANAGED_OTHER_USER=not-refused; fi
+''')
     finally:
         cl('rm -f ~/bob_key ~/bob_pw')
-        msudo('sysadminctl -deleteUser {b} >/dev/null 2>&1; dscl . -delete /Users/{b} 2>/dev/null; rm -rf /Users/{b}'.format(b=bob))
+        if WIN:
+            if sid:
+                WIN.remove_other_user(sid)
+        else:
+            msudo('sysadminctl -deleteUser {b} >/dev/null 2>&1; dscl . -delete /Users/{b} 2>/dev/null; rm -rf /Users/{b}'.format(b=bob))
     m = re.search(r'RESULT ok:\[([^\]]*)\] fail:\[([^\]]*)\] skip:\[([^\]]*)\]', out)
     need = {'setup-user-pb', 'setup-user-plain', 'bob-key-plain', 'bob-agent-pb', 'bob-agent-plain'}
     if m and not m[3].strip():
         need |= {'bob-password-plain', 'bob-password-pb', 'bob-wrong-password-is-sshd'}
     ok = m and not m[2].strip() and need <= set(m[1].split())
+    if WIN:
+        ok = ok and 'MANAGED_OTHER_USER=refused' in out
     if m and m[3].strip():
         report(row + ' password', 'SKIP', m[3].strip())
     report(row, 'PASS' if ok else 'FAIL', m[0] if m else out[-300:].replace('\n', ' '))

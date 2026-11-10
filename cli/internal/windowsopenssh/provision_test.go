@@ -158,9 +158,9 @@ func TestUnobtainableNeverCoversTrustOrOwnershipFailures(t *testing.T) {
 	}
 }
 
-func TestWriteServiceConfigIsLoopbackOnlyAndKeyOnly(t *testing.T) {
+func TestWriteServiceConfigScopesManagedKeysToTheSetupUser(t *testing.T) {
 	root := t.TempDir()
-	path, err := WriteServiceConfig(ServiceConfig{StateRoot: root, SSHDPath: filepath.Join(root, "sshd.exe"), SFTPPath: filepath.Join(root, "sftp-server.exe"), AuthorizedKeys: filepath.Join(root, "authorized_keys", "paperboat"), Port: 38222})
+	path, err := WriteServiceConfig(ServiceConfig{StateRoot: root, SSHDPath: filepath.Join(root, "sshd.exe"), SFTPPath: filepath.Join(root, "sftp-server.exe"), AuthorizedKeys: filepath.Join(root, "authorized_keys", "paperboat"), ManagedUser: "Alice", Port: 38222})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,10 +169,20 @@ func TestWriteServiceConfigIsLoopbackOnlyAndKeyOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(body)
-	for _, required := range []string{"ListenAddress 127.0.0.1", "ListenAddress ::1", "PasswordAuthentication no", "KbdInteractiveAuthentication no", "PubkeyAuthentication yes", "X11Forwarding no"} {
+	for _, required := range []string{"ListenAddress 127.0.0.1", "ListenAddress ::1", "PasswordAuthentication yes", "KbdInteractiveAuthentication no", "PubkeyAuthentication yes", "X11Forwarding no"} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("config missing %q:\n%s", required, text)
 		}
+	}
+	global, matches, found := strings.Cut(text, "Match User \"alice\"\n")
+	if !found || strings.Contains(global, "paperboat\"") ||
+		!strings.Contains(global, "AuthorizedKeysFile .ssh/authorized_keys\n") {
+		t.Fatal("managed keys must not be a global authorization file")
+	}
+	owner, administrators, found := strings.Cut(matches, "Match Group administrators\n")
+	if !found || strings.TrimSpace(owner) != `AuthorizedKeysFile "`+filepath.Join(root, "authorized_keys", "paperboat")+`"` ||
+		strings.TrimSpace(administrators) != "AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys" {
+		t.Fatal("setup user must match before the stock administrator key rule, without granting that file to other accounts")
 	}
 	// One forwarding policy on every platform: OpenSSH's own defaults decide port and agent forwarding.
 	for _, rule := range []string{"AllowTcpForwarding", "AllowAgentForwarding"} {
@@ -183,7 +193,7 @@ func TestWriteServiceConfigIsLoopbackOnlyAndKeyOnly(t *testing.T) {
 
 	generationRoot := filepath.Join(root, "generations", "new")
 	originalHostKey := filepath.Join(root, "hostkeys", "ssh_host_ed25519_key")
-	generationPath, err := WriteServiceConfig(ServiceConfig{StateRoot: generationRoot, HostKey: originalHostKey, SSHDPath: filepath.Join(root, "sshd.exe"), SFTPPath: filepath.Join(root, "sftp-server.exe"), AuthorizedKeys: filepath.Join(root, "authorized_keys", "paperboat"), Port: 40001})
+	generationPath, err := WriteServiceConfig(ServiceConfig{StateRoot: generationRoot, HostKey: originalHostKey, SSHDPath: filepath.Join(root, "sshd.exe"), SFTPPath: filepath.Join(root, "sftp-server.exe"), AuthorizedKeys: filepath.Join(root, "authorized_keys", "paperboat"), ManagedUser: "Alice", Port: 40001})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +215,7 @@ func TestWriteServiceConfigIsLoopbackOnlyAndKeyOnly(t *testing.T) {
 	privateRoot := filepath.Join(privateParent, "state")
 	_, err = WriteServiceConfig(ServiceConfig{
 		StateRoot: privateRoot, SSHDPath: filepath.Join(root, "sshd.exe"),
-		SFTPPath: filepath.Join(root, "sftp-server.exe"), AuthorizedKeys: filepath.Join(root, "authorized_keys", "paperboat"), Port: 38222,
+		SFTPPath: filepath.Join(root, "sftp-server.exe"), AuthorizedKeys: filepath.Join(root, "authorized_keys", "paperboat"), ManagedUser: "Alice", Port: 38222,
 	})
 	if err == nil {
 		t.Fatal("WriteServiceConfig succeeded through a non-directory parent")
