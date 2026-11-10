@@ -19,9 +19,8 @@ ENV: env-scopes, env-messages, env-delivery and env-revoke-rotation need the dev
 (--vault-password-file: delivery reaches that account's machines); env-team-scopes has the device account as owner and
 the second profile as member; env-undeliverable needs no vault, only a disposable target and the commands that cut it.
 Narrowed on Windows: policy-token (the device creates the tokens, a Unix throwaway holds them), team-two-account (no
-member-machine approval/transfer), team-business (no F19-07 token steps, no streaming), bugreport (the DPAPI-protected
-CLI tokens are not searched for; no support lookup), completion (the PowerShell script only). cli_credential.py is not
-ported: the token it reads is a DPAPI-protected file on Windows.
+member-machine approval/transfer), team-business (no F19-07 token steps, no streaming), completion (the PowerShell
+script only). cli_credential.py is not ported; winhost.cli_secrets reads the DPAPI-protected tokens (bugreport uses it).
 """
 import argparse
 import contextlib

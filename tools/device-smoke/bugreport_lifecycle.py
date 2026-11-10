@@ -5,12 +5,12 @@ Every credential, private key and ENV value on this device is gathered in memory
 bugreport is uploaded, and neither the bundle nor the diagnostics directory may contain any
 of those values. The printed receipt never includes a secret.
 
-On the Windows device (PB_SMOKE_WINDOWS_PB, see winhost.py) the CLI tokens are DPAPI-protected files this check cannot
-open, so they are not searched for and the support lookup (which needs the access token) is not run; the ENV value,
-the exec output, the stored secret files as they are on disk and the machine credentials are.
+On the Windows device (PB_SMOKE_WINDOWS_PB, see winhost.py) the CLI tokens are DPAPI-protected files: they are
+decrypted on the device as its user (winhost.cli_secrets) and held in memory here like the Unix secret files.
 """
 import argparse
 import base64
+import hashlib
 import io
 import json
 import os
@@ -91,6 +91,11 @@ def secrets():
     found = {MARKER: 'env-value'}
     if DARWIN and not DEVICE:
         found.update({value: label for label, value in keychain_tokens().items()})
+    if DEVICE:
+        stored = DEVICE.cli_secrets()
+        if not stored:
+            raise RuntimeError('no CLI credential could be read on the device; sign in with pb login first')
+        found.update({value: 'dpapi-' + name[:8] for name, value in stored.items()})
     for name, text in secret_files():
         label = re.sub(r'[0-9a-f]{16,}', '*', name)
         text = text.strip()
@@ -115,6 +120,13 @@ def leaked(blob, values):
 
 
 def access_token():
+    if DEVICE:  # the DPAPI file of a secret is named by the sha256 of its reference
+        stored = DEVICE.cli_secrets()
+        for name in DEVICE.files(CONFIG / 'credentials/profiles', '*.json'):
+            ref = json.loads((CONFIG / 'credentials/profiles' / name).read_text())['access_secret_ref']
+            if hashlib.sha256(ref.encode()).hexdigest() in stored:
+                return stored[hashlib.sha256(ref.encode()).hexdigest()]
+        raise RuntimeError('no CLI access credential to resolve the support reference')
     for path in (CONFIG / 'credentials/secrets').glob('profile-*-access.secret'):
         return path.read_text().strip()
     for label, value in keychain_tokens().items() if DARWIN else ():
@@ -124,7 +136,11 @@ def access_token():
 
 
 def lookup_reference(reference):
-    server = json.loads((CONFIG / 'config.json').read_text())['server_url']
+    if DEVICE:  # no config.json until a setting changes
+        shown = json.loads(run('config', 'show', '--json')[1])
+        server = shown.get('data', shown)['server_url']
+    else:
+        server = json.loads((CONFIG / 'config.json').read_text())['server_url']
     request = urllib.request.Request(server + '/v1/support/' + reference,
                                      headers={'Authorization': 'Bearer ' + access_token()})
     with urllib.request.urlopen(request, timeout=30) as response:
@@ -159,8 +175,8 @@ def main():
         bundle = winhost.device_path(report['bundle_path'])
         with zipfile.ZipFile(io.BytesIO(bundle.read_bytes()) if DEVICE else bundle) as archive:
             blob = b''.join(archive.read(name) for name in archive.namelist())
-        # On Windows the bundle is private by the ACL its directory under the profile gives it; only Unix has a mode.
-        if not DEVICE and oct(bundle.stat().st_mode & 0o077) != '0o0':
+        # Windows has no mode: the ACL must let in nobody but the user, SYSTEM and Administrators.
+        if DEVICE.other_access(bundle) if DEVICE else oct(bundle.stat().st_mode & 0o077) != '0o0':
             raise RuntimeError('bundle is readable by other users')
         if leaked(blob, values):
             raise RuntimeError('bugreport bundle contains secret material from: ' + ', '.join(leaked(blob, values)))
@@ -176,7 +192,7 @@ def main():
                 raise RuntimeError('no local diagnostics were written')
             if leaked(diagnostics, values):
                 raise RuntimeError('local diagnostics contain secret material from: ' + ', '.join(leaked(diagnostics, values)))
-        if not args.no_lookup and not DEVICE:
+        if not args.no_lookup:
             lookup_reference(reference)
     finally:
         if set_env:
@@ -186,7 +202,7 @@ def main():
                 run('env', 'unset', 'PB_SMOKE_BUGREPORT', '--json', '--confirm', token)
     print(json.dumps({'check': 'bugreport-lifecycle', 'target': args.target, 'status': 'PASS',
                       'bundle_secret_free': True, 'diagnostics_secret_free': True,
-                      'secrets_checked': len(values), 'reference_resolves': not args.no_lookup and not DEVICE}), flush=True)
+                      'secrets_checked': len(values), 'reference_resolves': not args.no_lookup}), flush=True)
 
 
 if __name__ == '__main__':

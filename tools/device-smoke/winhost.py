@@ -179,6 +179,22 @@ while($true){$c=$l.AcceptTcpClient();try{$c.ReceiveTimeout=2000;$s=$c.GetStream(
 [void]$s.Read($r,0,8192);$s.Write($h,0,$h.Length);$s.Write($b,0,$b.Length);$s.Flush()}catch{}finally{$c.Close()}}
 """
 
+# The plaintext of the CLI's credentials (config.KeyringStore on Windows: one DPAPI file per secret, named by the
+# sha256 of its reference) as {file name: base64 value}. Layout: 'PBKR' 2 1 sha256(ref), then the DPAPI blob of
+# 'PBKI' 2 1 sha256(ref) uint32-length value, with entropy "paperboat/windows-keyring/v2\0machine\0" + sha256(ref).
+DPAPI_SECRETS = ("Add-Type -AssemblyName System.Security;$o=@{}\n"
+                 "Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'Paperboat\\credentials') -Filter *.dpapi -File -ErrorAction SilentlyContinue|ForEach-Object{\n"
+                 "$b=[IO.File]::ReadAllBytes($_.FullName);if($b.Length -le 38 -or [Text.Encoding]::ASCII.GetString($b,0,4) -cne 'PBKR'){return}\n"
+                 "$e=[Text.Encoding]::ASCII.GetBytes(\"paperboat/windows-keyring/v2`0machine`0\")+$b[6..37]\n"
+                 "$p=[Security.Cryptography.ProtectedData]::Unprotect([byte[]]$b[38..($b.Length-1)],[byte[]]$e,'CurrentUser')\n"
+                 "$o[$_.BaseName]=[Convert]::ToBase64String([byte[]]$p[42..($p.Length-1)])}\n"
+                 "ConvertTo-Json -Compress -InputObject $o")
+# Who besides the current user, SYSTEM and Administrators may access $req.path (SIDs, one per line).
+OTHER_ACCESS = ("$me=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value\n"
+                "(Get-Acl -LiteralPath $req.path).Access|Where-Object{$_.AccessControlType -eq 'Allow'}|ForEach-Object{"
+                "$_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value}|"
+                "Where-Object{$_ -notin $me,'S-1-5-18','S-1-5-32-544'}|Sort-Object -Unique")
+
 # Snippets that change nothing on the device: safe to send again when a session did not answer.
 READ_ONLY = (READ, EXISTS, SHA256, SIZE, ENV, SERVICES, PROCESSES, TASKS, SERVICE_PATHS, LISTENING, ALIVE)
 
@@ -328,6 +344,15 @@ class WindowsDevice:
         """What PowerShell offers for line after loading the completion script file (a path on the device)."""
         out = self.ps('powershell completion', COMPLETE, timeout=120, exe=self.pb_exe, path=str(script), line=line)[1]
         return [word for word in out.splitlines()[-1].split(',') if word] if out else []
+
+    def cli_secrets(self):
+        """{sha256 hex of the secret's reference: value} of every stored CLI credential; kept in memory only."""
+        stored = json.loads(self.ps('read the CLI credentials', DPAPI_SECRETS)[1] or '{}')
+        return {name: base64.b64decode(value).decode(errors='replace') for name, value in stored.items()}
+
+    def other_access(self, path):
+        """SIDs other than the user, SYSTEM and Administrators that the file's ACL lets in (empty: owner-only)."""
+        return self.ps('acl %s' % path, OTHER_ACCESS, path=str(path))[1].split()
 
     def services(self, pattern='Paperboat*'):
         return self._list('services ' + pattern, SERVICES, pattern=pattern)
