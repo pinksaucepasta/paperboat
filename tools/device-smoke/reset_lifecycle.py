@@ -16,9 +16,12 @@ import tempfile
 import time
 
 import pairing_lifecycle as p
+import winhost
 
-PB = Path.home() / '.local/bin/pb'
+PB = winhost.pb_path()
 STATE = Path(tempfile.gettempdir()) / ('pb-reset-state-%d' % os.getuid())
+# The token file is read by pb, so on the Windows device it lives there; the phase state stays on this controller.
+TOKENS = winhost.device().home() / 'pb-reset-state' if winhost.device() else STATE
 
 
 def machines():
@@ -32,7 +35,7 @@ def reset_phase(password):
     alias = original['alias']
     if not original.get('assigned_ip'):
         raise RuntimeError('the old record has no assigned_ip: the check cannot prove the local address is kept')
-    inbox = Path(before['inbox_path'])
+    inbox = winhost.device_path(before['inbox_path'])
     sentinel = inbox / ('.paperboat-f1-reset-' + os.urandom(6).hex())
     inbox.mkdir(parents=True, exist_ok=True)
     sentinel.write_bytes(os.urandom(32))
@@ -45,7 +48,10 @@ def reset_phase(password):
         had_env = False
     shutil.rmtree(STATE, ignore_errors=True)
     STATE.mkdir(mode=0o700)
-    token = p.enrollment_file(PB, alias, STATE)
+    if winhost.device():
+        TOKENS.unlink()
+        TOKENS.mkdir()
+    token = p.enrollment_file(PB, alias, TOKENS)
     # Confirmation is exact, and a wrong hostname must be refused without changing anything.
     wrong = p.command_result(PB, 'reset', '--enrollment-token-file', str(token), '--confirmation',
                              'RESET PAPERBOAT', '--hostname', 'not-this-host', '--json',
@@ -55,7 +61,7 @@ def reset_phase(password):
     if json.loads((root / 'machine-registration.json').read_text())['machine_id'] != before['machine_id']:
         raise RuntimeError('refused reset still changed the enrollment')
     reset = p.invoke(PB, 'reset', '--enrollment-token-file', str(token), '--confirmation',
-                     'RESET PAPERBOAT', '--hostname', os.uname().nodename, '--json',
+                     'RESET PAPERBOAT', '--hostname', p.hostname(PB), '--json',
                      raw=True, terminal=True, password=password)
     if '"reset":true' not in reset.replace(' ', ''):
         raise RuntimeError('reset did not report reset')
@@ -76,9 +82,9 @@ def pair_phase(password):
     root = p.runtime_root()
     state = json.loads((STATE / 'state.json').read_text())
     before, original, had_env = state['before'], state['original'], state['had_env']
-    alias, sentinel = original['alias'], Path(state['sentinel'])
+    alias, sentinel = original['alias'], winhost.device_path(state['sentinel'])
     try:
-        token = STATE / 'enrollment-token'
+        token = TOKENS / 'enrollment-token'
         paired = p.pair(PB, ['pair', '--server', before['server_url'], '--enrollment-token-file', str(token),
                              '--name', alias], root, 'none', before['server_url'], password)
         failures = []
@@ -102,7 +108,7 @@ def pair_phase(password):
         if new.get('assigned_ip') != original['assigned_ip']:
             failures.append('local address changed from %s to %s' % (original['assigned_ip'], new.get('assigned_ip')))
         deadline = time.monotonic() + 120
-        while time.monotonic() < deadline and p.command_result(PB, 'exec', alias, '--', 'true').returncode:
+        while time.monotonic() < deadline and p.command_result(PB, 'exec', alias, '--', *winhost.true_argv()).returncode:
             time.sleep(4)
         if p.invoke(PB, 'doctor', '--json', timeout=60)['overall'] != 'healthy':
             raise RuntimeError('machine is not healthy after reset + pair')
@@ -111,6 +117,8 @@ def pair_phase(password):
     finally:
         sentinel.unlink(missing_ok=True)
         shutil.rmtree(STATE, ignore_errors=True)
+        if winhost.device():
+            TOKENS.unlink()
     if failures:
         print(json.dumps({'check': 'reset-lifecycle', 'status': 'FAIL', 'failures': failures, 'old_machine_id': before['machine_id'], 'pair_env_lines': [l.strip() for l in paired.splitlines() if 'nvironment' in l or 'ENV' in l][:3], 'new_machine_id': after['machine_id']}), flush=True)
         raise SystemExit(1)
@@ -123,7 +131,7 @@ def main():
     phases = {'reset': reset_phase, 'pair': pair_phase}
     if len(sys.argv) != 2 or sys.argv[1] not in phases:
         raise SystemExit('usage: reset_lifecycle.py reset|pair')
-    phases[sys.argv[1]](sys.stdin.readline().rstrip('\n'))
+    phases[sys.argv[1]](None if winhost.device() else sys.stdin.readline().rstrip('\n'))
 
 
 if __name__ == '__main__':

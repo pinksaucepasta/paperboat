@@ -22,6 +22,8 @@ import subprocess
 import time
 import uuid
 
+import winhost
+
 API = 'https://api.staging.example.test:8443'
 CURL = ('curl -sS --cacert ~/stg/ca/ca.pem --resolve api.staging.example.test:8443:127.0.0.1 '
         '-b {jar} -c {jar}')
@@ -85,6 +87,17 @@ class Box:
         command = 'sudo docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 %s /home/pbt/.local/bin/pb %s' % (
             self.name, ' '.join(args))
         result = self.runner(['ssh', self.host, command], capture_output=True, text=True, timeout=timeout)
+        return result.returncode, result.stdout, result.stderr
+
+
+class DeviceBox:
+    """The official build on the Windows device (PB_SMOKE_WINDOWS_PB, see winhost.py) in place of a container."""
+
+    def __init__(self, name):
+        self.name, self.binary = name, winhost.pb_path()
+
+    def pb(self, *args, timeout=90):
+        result = self.binary.run_remote(args, timeout=timeout)
         return result.returncode, result.stdout, result.stderr
 
 
@@ -173,14 +186,15 @@ def main():
     parser.add_argument('--docker-host', default='pbvm3')
     parser.add_argument('--operator-host', default='pbvm4')
     parser.add_argument('--cred', required=True)
-    parser.add_argument('--official', required=True, help='container name of the official build')
+    parser.add_argument('--official', required=True, help='container name of the official build; with PB_SMOKE_WINDOWS_PB set, the machine name of the Windows device, which is then the official build')
     parser.add_argument('--custom', required=True, help='container name of the dev build')
     parser.add_argument('--floor', default='', help='the minimum version to set (a release staging has published); default: the newest release `pb update check` reports')
     args = parser.parse_args()
     operator = Operator(args.operator_host, args.cred)
     operator.login()
     try:
-        result = check(operator, Box(args.docker_host, args.official), Box(args.docker_host, args.custom), args.floor)
+        official = DeviceBox(args.official) if winhost.device() else Box(args.docker_host, args.official)
+        result = check(operator, official, Box(args.docker_host, args.custom), args.floor)
     finally:
         operator.close()
     print(json.dumps(result), flush=True)

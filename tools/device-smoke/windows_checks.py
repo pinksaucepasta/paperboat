@@ -196,6 +196,7 @@ def checks(args):
     table['config-sync-pair'] = (['config_sync_pair.py', args.pair_repo_shell or '', args.pair_repo_addr or '', winhost.WINDOWS,
                                   args.machine or '', args.pair_peer_shell or '', args.pair_peer_alias or '', '--machine-sections'],
                                  ['--machine', '--pair_repo_shell', '--pair_repo_addr', '--pair_peer_shell', '--pair_peer_alias'])
+    table['nonadmin-install'] = (['nonadmin_install.py'], [])  # creates and removes a standard user on the device
     for name in ('reinstall', 'pair-refusal', 'service', 'crash-service', 'setup'):  # the daemon service stops and comes back
         table['install-' + name] = (['install_lifecycle.py', name], [])
     for fault in ('sigint', 'network'):
