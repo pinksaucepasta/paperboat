@@ -1,4 +1,4 @@
-//go:build !darwin && !linux
+//go:build !darwin && !linux && !windows
 
 package main
 
@@ -8,7 +8,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
 )
 
-// The Windows updater does not yet count open connections.
+// Only Linux, macOS and Windows count open connections.
 func openConnectionsForUpdate(context.Context) (liveconnections.Counts, error) {
 	return liveconnections.Counts{}, nil
 }

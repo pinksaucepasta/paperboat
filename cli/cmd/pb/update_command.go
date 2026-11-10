@@ -374,6 +374,9 @@ func actionUpdate(command *cobra.Command, _ []string) error {
 		}
 		approvalID = response.Candidate.ID
 	}
+	if refusal := refuseSignedUpdateWhileConnectionsOpen(ctx, runtime.GOOS, force); refusal != nil {
+		return refusal
+	}
 	response, err := updateWithProgress(command, ctx, func(ctx context.Context) (updated.ControlResponse, error) {
 		return client.Install(ctx, approvalID, force)
 	})
@@ -387,6 +390,20 @@ func actionUpdate(command *cobra.Command, _ []string) error {
 		}
 	}
 	return writeUpdateResult(command, updateCommandResult(buildinfo.Version, response, snapshot), response.Version)
+}
+
+// refuseSignedUpdateWhileConnectionsOpen is the Windows counterpart of the Unix updater's own refusal: replacing the
+// daemon ends open `pb ssh` connections and access forwards, so a manual update says so first and --force overrides.
+// Unix refuses inside the updater service, which the Windows service (a different account) cannot ask for the user's
+// connections; an automatic Windows update is not covered by this CLI-side check.
+func refuseSignedUpdateWhileConnectionsOpen(ctx context.Context, goos string, force bool) error {
+	if goos != "windows" || force {
+		return nil
+	}
+	if refusal := updateOpenConnectionsFromFile(ctx); refusal != nil {
+		return refusal
+	}
+	return nil
 }
 
 func updateCommandResult(previousVersion string, response updated.ControlResponse, snapshot *localapi.Snapshot) updateResult {
