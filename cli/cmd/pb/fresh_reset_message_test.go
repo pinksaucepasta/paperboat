@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -84,6 +86,20 @@ func TestFailedResetSaysCredentialsWereRetainedOnlyWhenServiceTerminationFailed(
 		}
 		if got := strings.Contains(message, "retained"); got != tc.retained {
 			t.Errorf("%s: mentions retained credentials = %v, want %v: %q", tc.name, got, tc.retained, message)
+		}
+	}
+}
+
+// A reset or uninstall that cannot delete a file says which one and why (a sharing violation on Windows named only
+// "remove user Paperboat state" and left the user nothing to act on).
+func TestFailedUserStateRemovalNamesTheFileThatCouldNotBeRemoved(t *testing.T) {
+	ok := func() error { return nil }
+	locked := &fs.PathError{Op: "unlinkat", Path: filepath.Join(string(filepath.Separator), "users", "u", "paperboat", "elevation"), Err: errors.New("in use by another process")}
+	err := performFreshEnrollmentCleanup(nil, ok, ok, ok, ok, ok, func() error { return errors.Join(locked) })
+	message := commandFailureMessage(err, classifyCommandFailure(err))
+	for _, want := range []string{"remove user Paperboat state", "Could not remove " + locked.Path, "in use by another process"} {
+		if !strings.Contains(message, want) {
+			t.Errorf("message lacks %q: %q", want, message)
 		}
 	}
 }

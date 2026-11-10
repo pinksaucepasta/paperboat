@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"reflect"
 	"strings"
 
@@ -90,13 +91,19 @@ func (e uninstallCleanupError) Error() string {
 }
 
 // purgeIncompleteDetail names the privileged cleanup's failed stages and what it
-// found still present, so a failed removal says exactly what is left.
+// found still present, and the file a local removal could not delete, so a failed
+// removal says exactly what is left and why.
 func purgeIncompleteDetail(err error) string {
+	detail := ""
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) && pathErr.Path != "" {
+		detail += " Could not remove " + pathErr.Path + ": " + pathErr.Err.Error() + "."
+	}
 	var incomplete hostruntimecmd.PurgeIncomplete
 	if !errors.As(err, &incomplete) {
-		return ""
+		return detail
 	}
-	detail := " System cleanup stages that failed: " + strings.Join(incomplete.Stages, ", ") + "."
+	detail += " System cleanup stages that failed: " + strings.Join(incomplete.Stages, ", ") + "."
 	if len(incomplete.Remaining) > 0 {
 		detail += " Still present: " + strings.Join(incomplete.Remaining, ", ") + "."
 	}
