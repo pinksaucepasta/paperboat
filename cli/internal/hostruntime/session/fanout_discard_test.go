@@ -67,3 +67,39 @@ func TestDiscardPendingOutputLeavesASmallBacklog(t *testing.T) {
 		t.Fatalf("small backlog: %d bytes, %v; want it delivered whole", len(event.Data), err)
 	}
 }
+
+// A resize queued behind the flood is not skipped: the resync screen would not tell that viewer its new size.
+func TestDiscardPendingOutputKeepsAViewerWithAQueuedResizeWhole(t *testing.T) {
+	f := NewFanout()
+	if err := f.Attach("live", 1<<20); err != nil {
+		t.Fatal(err)
+	}
+	var next uint64
+	publishText(t, f, &next, strings.Repeat("x", interruptDiscardThreshold))
+	resize := history.Event{Channel: 2, StartSequence: next, EndSequence: next + 4, Data: []byte("size")}
+	next = resize.EndSequence
+	if _, err := f.Publish(resize); err != nil {
+		t.Fatal(err)
+	}
+	publishText(t, f, &next, strings.Repeat("y", 100))
+	f.DiscardPendingOutput(f.PublishedEnd())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var got int
+	for from := uint64(0); from < next; {
+		event, err := f.WaitNextFrom(ctx, "live", from)
+		if err != nil {
+			t.Fatalf("after %d bytes: %v (the backlog was cut or the viewer resynced)", got, err)
+		}
+		if event.Channel == 2 {
+			got = -1
+		}
+		from = event.EndSequence
+		if got >= 0 {
+			got += len(event.Data)
+		}
+	}
+	if got != -1 {
+		t.Fatal("the queued resize never reached the viewer")
+	}
+}

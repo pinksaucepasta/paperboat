@@ -248,7 +248,9 @@ const interruptDiscardThreshold = 64 << 10
 // whose backlog reaches interruptDiscardThreshold jumps to through and is marked lagged, the state a free runner gets
 // when it falls behind a flood: its stream then sends it the current screen in-band (dispatcher ErrAttachmentLagged),
 // which already holds everything the program printed after the interrupt, the shell's prompt above all, so the
-// emulator is never left mid-escape-sequence by the gap. History keeps the flood for replay.
+// emulator is never left mid-escape-sequence by the gap. History keeps the flood for replay. A viewer with a resize
+// (control event) among its pending output keeps its whole backlog: the screen resync carries no size change, and
+// skipping the event would leave that viewer at the wrong size.
 func (f *Fanout) DiscardPendingOutput(through uint64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -257,7 +259,7 @@ func (f *Fanout) DiscardPendingOutput(through uint64) {
 			continue
 		}
 		target := min(through, cursor.enqueuedEnd)
-		if target <= cursor.cursor || target-cursor.cursor < interruptDiscardThreshold {
+		if target <= cursor.cursor || target-cursor.cursor < interruptDiscardThreshold || f.hasControlLocked(cursor.cursor, target) {
 			continue
 		}
 		cursor.cursor, cursor.queuedBytes, cursor.lagged = target, cursor.enqueuedEnd-target, true
@@ -265,6 +267,16 @@ func (f *Fanout) DiscardPendingOutput(through uint64) {
 	}
 	f.compactLocked()
 	notify(f.room)
+}
+
+// hasControlLocked reports a non-terminal-output (resize) event queued in [from, to).
+func (f *Fanout) hasControlLocked(from, to uint64) bool {
+	for _, event := range f.ring {
+		if event.Channel != 1 && event.StartSequence >= from && event.StartSequence < to {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *Fanout) Publish(event history.Event) ([]Eviction, error) {
