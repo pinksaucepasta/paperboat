@@ -136,11 +136,15 @@ func (c *NativeTransactionalComponent) Stop(ctx context.Context) error {
 // loaded unit stopped; on launchd the plist is removed, then the job booted out by label. Tailscale's uninstall
 // (~/ref/tailscale/cmd/tailscaled/install_darwin.go uninstallSystemDaemonDarwin) stops, then removes the plist, from
 // outside the daemon; run from inside the service the removal comes first, so the stop that kills the caller is last.
+// On Windows the service manager does it in one step (WindowsController.RemoveSelf).
 func (c *NativeTransactionalComponent) RemoveSelf(ctx context.Context) error {
 	if c == nil || ctx == nil {
 		return ErrLifecycleInvalid
 	}
 	path := c.installer.definitionPath
+	if remover, ok := c.controller.(nativeSelfRemover); ok {
+		return remover.RemoveSelf(ctx, path)
+	}
 	if c.installer.config.Platform != "darwin" {
 		if err := c.controller.Disable(ctx, path); err != nil {
 			return err
@@ -153,6 +157,11 @@ func (c *NativeTransactionalComponent) RemoveSelf(ctx context.Context) error {
 		return err
 	}
 	return c.controller.Stop(ctx, path)
+}
+
+// nativeSelfRemover is a service manager with its own way to remove a running service from inside that service.
+type nativeSelfRemover interface {
+	RemoveSelf(ctx context.Context, definitionPath string) error
 }
 
 func (c *NativeTransactionalComponent) Uninstall(ctx context.Context) error {

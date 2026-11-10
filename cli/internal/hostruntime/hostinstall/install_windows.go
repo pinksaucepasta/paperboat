@@ -2705,7 +2705,7 @@ func windowsLifecycleManagerWithState(layout service.Layout, hostd, daemon, upda
 	if err != nil {
 		return nil, err
 	}
-	components := []service.TransactionalComponent{carrierComponent, hostdComponent, daemonComponent, updaterComponent}
+	components := []service.TransactionalComponent{windowsCarrierComponent{carrierComponent, carrierConfigPath(layout.Instance)}, hostdComponent, daemonComponent, updaterComponent}
 	coldRoles, err := windowsColdRoleInstallers(layout)
 	if err != nil {
 		return nil, err

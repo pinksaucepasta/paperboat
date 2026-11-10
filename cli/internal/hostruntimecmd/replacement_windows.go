@@ -72,13 +72,7 @@ func (s suppliedWindowsInstallation) AuthorizeRecovery(ctx context.Context, data
 	if len(data) > 128<<10 {
 		return hostinstall.ErrInvalidRequest
 	}
-	var marker struct {
-		CandidateID string `json:"prepared_candidate_id"`
-	}
-	if json.Unmarshal(data, &marker) != nil {
-		return hostinstall.ErrInvalidRequest
-	}
-	if marker.CandidateID != "" {
+	if nativeWindowsSnapshot(data) {
 		state, err := hostinstall.WindowsInstallationState(s.ownerSID, nil)
 		if err != nil {
 			return err
@@ -98,9 +92,29 @@ func (s suppliedWindowsInstallation) AuthorizeRecovery(ctx context.Context, data
 	return state.(service.NativeInstallationRecoveryAuthorizer).AuthorizeRecovery(ctx, snapshot.Installation)
 }
 
+// nativeWindowsSnapshot reports whether a journal holds hostinstall's own snapshot instead of this wrapper: a
+// signed helper's (prepared_candidate_id, which only that helper may recover) or the one hostinstall.Install
+// journals for a first enrollment and for an installation without a carrier. The second kind was refused here as
+// malformed, so neither the next install nor pb doctor --repair nor the carrier's watch could undo such an
+// install once it was killed; hostinstall's own state authorizes and restores it, as hostinstall.Repair does.
+func nativeWindowsSnapshot(data []byte) bool {
+	var marker struct {
+		CandidateID  string          `json:"prepared_candidate_id"`
+		Installation json.RawMessage `json:"installation"`
+	}
+	return json.Unmarshal(data, &marker) == nil && (marker.CandidateID != "" || len(marker.Installation) == 0)
+}
+
 func (s suppliedWindowsInstallation) Restore(ctx context.Context, data []byte) error {
 	if err := s.AuthorizeRecovery(ctx, data); err != nil {
 		return err
+	}
+	if nativeWindowsSnapshot(data) {
+		state, err := hostinstall.WindowsInstallationState(s.ownerSID, nil)
+		if err != nil {
+			return err
+		}
+		return state.Restore(ctx, data)
 	}
 	var snapshot suppliedWindowsSnapshot
 	if len(data) == 0 || len(data) > 128<<10 {
@@ -136,17 +150,24 @@ func (s suppliedWindowsInstallation) Restore(ctx context.Context, data []byte) e
 	return updated.RestoreWindowsNativeInstallationJournal(ctx, s.ownerSID, snapshot.Identity, snapshot.Journal)
 }
 func recoverSuppliedWindowsInstallation(ctx context.Context, ownerSID string, offline bool) error {
+	// Only the carrier's own service process is handed a last step, and it calls the function below.
+	_, err := recoverSuppliedWindowsInstallationWithin(ctx, ownerSID, offline)
+	return err
+}
+
+// recoverSuppliedWindowsInstallationWithin also returns hostinstall.RecoverWindowsInstallation's finishSelf.
+func recoverSuppliedWindowsInstallationWithin(ctx context.Context, ownerSID string, offline bool) (func(context.Context) error, error) {
 	instance, err := hostinstall.WindowsInstanceForSID(ownerSID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	installed, err := hostinstall.LoadWindowsRuntimeConfigForInstance(instance)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	layout, err := service.WindowsUserLayout(ownerSID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// The approved signed helper owns its native receipt and deployment gates.
 	// Do not hold the publication mutex while starting or waiting for that owner.
@@ -156,7 +177,7 @@ func recoverSuppliedWindowsInstallation(ctx context.Context, ownerSID string, of
 		recoverSigned = updated.CheckOfflineWindowsNativeInstall
 	}
 	if err := recoverSigned(ctx, config); err != nil {
-		return err
+		return nil, err
 	}
 	return hostinstall.RecoverWindowsInstallation(ctx, ownerSID, suppliedWindowsInstallation{ownerSID: ownerSID})
 }

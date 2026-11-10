@@ -16,6 +16,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/carriercontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/svc"
+	"golang.org/x/sys/windows/svc/mgr"
 	"time"
 )
 
@@ -361,11 +363,58 @@ func restoreWindowsCarrierSnapshot(ctx context.Context, layout service.Layout, b
 		}
 		return nil
 	}
+	// The recovery of a killed install that created this carrier runs in the carrier's own service process
+	// (hostruntimecmd windowsDeadInstaller): removing it here would end the recovery before any other service is
+	// restored. The lifecycle keeps it for the caller's last step (windowsCarrierComponent.RemoveSelf).
+	if own, err := windowsCarrierIsThisProcess(layout.Instance); err != nil || own {
+		return err
+	}
 	if err := stopAndRemoveWindowsCarrier(ctx, current); err != nil {
 		return err
 	}
 	// Capability and lifetime-lock inodes remain unchanged for a bounded retry.
 	return os.Remove(carrierConfigPath(layout.Instance))
+}
+
+// windowsCarrierIsThisProcess reports whether the caller is the carrier's running service process.
+func windowsCarrierIsThisProcess(instance string) (own bool, resultErr error) {
+	name, err := service.WindowsCarrierName(instance)
+	if err != nil {
+		return false, err
+	}
+	manager, err := mgr.Connect()
+	if err != nil {
+		return false, err
+	}
+	defer func() { resultErr = errors.Join(resultErr, manager.Disconnect()) }()
+	carrier, err := manager.OpenService(name)
+	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer func() { resultErr = errors.Join(resultErr, carrier.Close()) }()
+	status, err := carrier.Query()
+	if err != nil {
+		return false, err
+	}
+	return status.State != svc.Stopped && status.ProcessId == uint32(os.Getpid()), nil
+}
+
+// windowsCarrierComponent is the carrier in the lifecycle. Removing itself, the carrier's service process also
+// removes the carrier's configuration, as restoreWindowsCarrierSnapshot does for every other caller; it goes
+// before the service removal, whose stop ends the caller.
+type windowsCarrierComponent struct {
+	*service.NativeTransactionalComponent
+	config string
+}
+
+func (c windowsCarrierComponent) RemoveSelf(ctx context.Context) error {
+	if err := removeInstallFile(c.config); err != nil {
+		return err
+	}
+	return c.NativeTransactionalComponent.RemoveSelf(ctx)
 }
 
 func sameWindowsCarrierAccount(a, b CarrierConfig) bool {

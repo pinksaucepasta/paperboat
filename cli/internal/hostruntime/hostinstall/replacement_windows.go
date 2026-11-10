@@ -583,43 +583,55 @@ func requireWindowsNativeRecoveryOwner(ctx context.Context, layout service.Layou
 }
 
 // RecoverWindowsInstallation restores a crash-interrupted native replacement
-// before admission relies on an old hostd endpoint.
-func RecoverWindowsInstallation(ctx context.Context, ownerSID string, state service.NativeInstallationState) (resultErr error) {
+// before admission relies on an old hostd endpoint. A non-nil finishSelf is returned only to the carrier's own
+// service process (its recovery watch) and is what is left of the recovery for that service: the caller runs it
+// as its very last step, after its locks, and it ends the caller (service.LifecycleManager.RecoverWithin).
+func RecoverWindowsInstallation(ctx context.Context, ownerSID string, state service.NativeInstallationState) (finishSelf func(context.Context) error, resultErr error) {
 	unlock, err := LockWindowsNativePublication(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { resultErr = errors.Join(resultErr, unlock()) }()
 	return recoverWindowsInstallationLocked(ctx, ownerSID, state)
 }
 
-func recoverWindowsInstallationLocked(ctx context.Context, ownerSID string, state service.NativeInstallationState) error {
+func recoverWindowsInstallationLocked(ctx context.Context, ownerSID string, state service.NativeInstallationState) (func(context.Context) error, error) {
 	layout, err := service.WindowsUserLayout(ownerSID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Recovery must probe dependency readiness before starting Updated. Its
 	// startup may otherwise attempt LocalDaemon migration and re-enter this
 	// lifecycle journal while recovery still holds the journal lock.
 	config, err := LoadWindowsRuntimeConfigForInstance(layout.Instance)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	request := windowsRepairRequest(config)
 	manager, err := newWindowsLifecycleManager(request, layout, true)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if state != nil {
 		manager, err = newWindowsLifecycleWithState(request, layout, state)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
-	if err := manager.Recover(ctx); err != nil {
-		return err
+	// Linux's updater recovers with itself kept for last (RecoverInterrupted, self = the updater); here the
+	// recovering service is the carrier, the only one a killed install leaves running.
+	self := ""
+	if own, err := windowsCarrierIsThisProcess(layout.Instance); err != nil {
+		return nil, err
+	} else if own {
+		self = service.CarrierKind
 	}
-	return withdrawRecordedWindowsCandidate(ctx, ownerSID)
+	finishSelf, err := manager.RecoverWithin(ctx, self)
+	if err != nil {
+		return nil, err
+	}
+	// The services are restored: the caller's own last step stays owed even when the candidate cannot be withdrawn.
+	return finishSelf, withdrawRecordedWindowsCandidate(ctx, ownerSID)
 }
 
 // PrepareWindowsReplacement pins both the protected prior image and candidate

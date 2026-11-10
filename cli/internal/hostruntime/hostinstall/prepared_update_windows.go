@@ -45,7 +45,7 @@ func ActivatePreparedWindowsUpdate(ctx context.Context, ownerSID, executable str
 	defer func() { resultErr = errors.Join(resultErr, unlock()) }()
 	// A crash can publish the committed candidate before the lifecycle receipt
 	// disappears. Recover its authenticated captured baseline before projection.
-	if err := recoverWindowsInstallationLocked(ctx, ownerSID, state); err != nil {
+	if _, err := recoverWindowsInstallationLocked(ctx, ownerSID, state); err != nil {
 		return err
 	}
 	previous, err := LoadWindowsRuntimeConfigForInstance(layout.Instance)

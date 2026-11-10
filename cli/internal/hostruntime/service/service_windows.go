@@ -850,6 +850,50 @@ func (WindowsController) Remove(ctx context.Context, definitionPath string) (res
 	return errors.Join(disconnectErr, waitWindowsServiceDeletion(deleteCtx, definition.Name))
 }
 
+// RemoveSelf removes the service whose own process calls it. Remove stops first and deletes after, which the
+// caller would not live to do. DeleteService only marks a running service and the service manager removes it
+// once its process has ended, so the mark and the declaration go first and the stop, which ends the caller, is
+// sent last and not waited for. A stop the service was asked for starts no failure action.
+func (WindowsController) RemoveSelf(ctx context.Context, definitionPath string) (resultErr error) {
+	if ctx == nil {
+		return ErrLifecycleInvalid
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	definition, err := readWindowsServiceDefinitionForRemoval(definitionPath)
+	if err != nil {
+		return err
+	}
+	manager, err := mgr.Connect()
+	if err != nil {
+		return err
+	}
+	defer func() { resultErr = errors.Join(resultErr, manager.Disconnect()) }()
+	service, err := manager.OpenService(definition.Name)
+	if err != nil {
+		return err
+	}
+	defer func() { resultErr = errors.Join(resultErr, service.Close()) }()
+	config, err := service.Config()
+	if err != nil {
+		return err
+	}
+	if !windowsServiceConfigurationOwnsDefinition(config, definition) {
+		return ErrInvalidDefinition
+	}
+	if err := service.Delete(); err != nil && !errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
+		return err
+	}
+	if err := os.Remove(definitionPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if _, err := service.Control(svc.Stop); err != nil && !errors.Is(err, windows.ERROR_SERVICE_NOT_ACTIVE) {
+		return err
+	}
+	return nil
+}
+
 func readWindowsServiceDefinition(path string) (windowsServiceDefinition, error) {
 	return readWindowsServiceDefinitionWithExecutablePolicy(path, false)
 }

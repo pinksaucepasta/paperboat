@@ -5,6 +5,7 @@ package hostruntimecmd
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -93,28 +94,33 @@ func windowsDeadInstaller(ownerSID string) deadInstaller {
 			}
 			return unlock, publication()
 		},
-		recover: func(ctx context.Context) error {
+		recover: func(ctx context.Context) (func(context.Context) error, error) {
 			ctx, cancel := context.WithTimeout(ctx, elevation.RuntimeActivationDuration)
 			defer cancel()
 			// What pb doctor --repair runs first: the previous version's files and services, then the candidate.
-			if err := recoverSuppliedWindowsInstallation(ctx, ownerSID, false); err != nil {
-				return err
+			// finishSelf is this service's own stop or removal (the killed install had created or started it).
+			finishSelf, err := recoverSuppliedWindowsInstallationWithin(ctx, ownerSID, false)
+			if err != nil {
+				return finishSelf, err
 			}
 			// The killed installer had moved the machine guard to its version (Linux: the updater's start heals it).
 			instance, err := hostinstall.WindowsInstanceForSID(ownerSID)
 			if err != nil {
-				return err
+				return finishSelf, err
 			}
 			installed, err := hostinstall.LoadWindowsRuntimeConfigForInstance(instance)
+			if runtimeCausesOnly(err, os.ErrNotExist, hostinstall.ErrNotInstalled) {
+				return finishSelf, nil // the killed install was the first one: no installation is left to heal for
+			}
 			if err != nil {
-				return err
+				return finishSelf, err
 			}
 			layout, err := service.WindowsUserLayout(ownerSID)
 			if err != nil {
-				return err
+				return finishSelf, err
 			}
 			_, err = hostinstall.HealMachineGuard(ctx, installed.Source, layout.Binary)
-			return err
+			return finishSelf, err
 		},
 	}
 }

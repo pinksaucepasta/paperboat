@@ -77,6 +77,27 @@ func TestRemoveSelfDeletesTheDeclarationBeforeTheStopThatEndsTheCaller(t *testin
 	}
 }
 
+type selfRemovingController struct {
+	killingController
+	removedSelf string
+}
+
+func (c *selfRemovingController) RemoveSelf(_ context.Context, definitionPath string) error {
+	c.removedSelf = definitionPath
+	return nil
+}
+
+// Windows removes a running service from inside it in one service-manager step (mark for deletion, declaration,
+// stop): the component hands the whole removal to a manager that has one, and disables or stops nothing itself.
+func TestRemoveSelfUsesTheServiceManagersOwnSelfRemoval(t *testing.T) {
+	definition := filepath.Join(t.TempDir(), "PaperboatCarrier-u1.json")
+	controller := &selfRemovingController{}
+	component := &NativeTransactionalComponent{installer: &Installer{config: Config{Platform: "windows"}, definitionPath: definition}, controller: controller, id: CarrierKind}
+	if err := component.RemoveSelf(context.Background()); err != nil || controller.removedSelf != definition || len(controller.calls) != 0 {
+		t.Fatalf("err=%v removedSelf=%q calls=%v", err, controller.removedSelf, controller.calls)
+	}
+}
+
 type selfRemovingFake struct {
 	*fakeTransactionalComponent
 	removed bool

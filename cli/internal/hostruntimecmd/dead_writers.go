@@ -65,10 +65,13 @@ var errInstallerLive = errors.New("an installation is running")
 type deadInstaller struct {
 	pending func() (bool, error)                        // the candidate record of a replacement is left
 	tryLock func(context.Context) (func() error, error) // errInstallerLive when a running installer holds a lock; else the install lock, held
-	recover func(context.Context) error                 // restore the previous installation, withdraw the candidate
+	// recover restores the previous installation and withdraws the candidate. A non-nil finishSelf is what the
+	// recovery left for the service this process runs as (its stop or removal, which ends this process).
+	recover func(context.Context) (finishSelf func(context.Context) error, err error)
 }
 
-// check reports whether it recovered something. A live installer holds the locks for its whole run and is left alone.
+// check reports whether it recovered something. A live installer holds the locks for its whole run and is left
+// alone. The service this process runs as is kept for last, as Linux keeps the updater (RecoverInterrupted).
 func (d deadInstaller) check(ctx context.Context) (bool, error) {
 	if pending, err := d.pending(); err != nil || !pending {
 		return false, err
@@ -84,10 +87,14 @@ func (d deadInstaller) check(ctx context.Context) (bool, error) {
 	if pending, err := d.pending(); err != nil || !pending {
 		return false, errors.Join(err, unlock())
 	}
-	if err := d.recover(ctx); err != nil {
-		return false, errors.Join(err, unlock())
+	finishSelf, err := d.recover(ctx)
+	err = errors.Join(err, unlock())
+	if finishSelf != nil {
+		// Owed once the other services are back, whatever cleanup failed after them: skipped, a carrier the killed
+		// install created would stay with nothing left to recover. Last, after the locks: it ends this process.
+		err = errors.Join(err, finishSelf(ctx))
 	}
-	return true, unlock()
+	return err == nil, err
 }
 
 // watch runs check at once and then on the dead-writer schedule until ctx ends: every poll, a failing recovery
