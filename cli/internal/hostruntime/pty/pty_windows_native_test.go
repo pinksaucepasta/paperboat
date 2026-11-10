@@ -317,6 +317,22 @@ func TestNativeConPTYInterruptAtAnIdlePromptLeavesBackgroundWorkAlone(t *testing
 	}
 }
 
+// interruptAsTheCallerDoes sends a Ctrl-C the way session.Manager.Interrupt does: PSReadLine clears ENABLE_PROCESSED_INPUT at the
+// prompt, so there the key is data (Interrupt reports false, nothing is cut or discarded) and the caller writes it normally,
+// which cancels the line; a console in cooked mode makes it the interrupt.
+func interruptAsTheCallerDoes(t *testing.T, process *Process) {
+	t.Helper()
+	handled, err := process.Interrupt(0x03, nil)
+	if err != nil {
+		t.Fatalf("Interrupt err=%v", err)
+	}
+	if !handled {
+		if _, err := process.Write([]byte{0x03}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // Another shell than cmd.exe: nothing is ever terminated by a Ctrl-C (no positive foreground evidence there), whatever the shell has started.
 func TestNativeConPTYInterruptWithAPowerShellShellTerminatesNothing(t *testing.T) {
 	process, output := startNativePTY(t, nativePowerShell(t), []string{"-NoLogo", "-NoProfile"})
@@ -326,9 +342,7 @@ func TestNativeConPTYInterruptWithAPowerShellShellTerminatesNothing(t *testing.T
 	}
 	output.waitFor(t, "paperboat-ps-started")
 	time.Sleep(time.Second)
-	if handled, err := process.Interrupt(0x03, nil); err != nil || !handled {
-		t.Fatalf("Interrupt handled=%v err=%v", handled, err)
-	}
+	interruptAsTheCallerDoes(t, process)
 	time.Sleep(time.Second)
 	if _, err := process.Write([]byte("'paperboat-ps-count-' + @(Get-Process ping -ErrorAction SilentlyContinue).Count\r\n")); err != nil {
 		t.Fatalf("shell did not survive: %v", err)
@@ -372,9 +386,7 @@ func TestNativeConPTYInterruptLeavesPowerShellJobsAlone(t *testing.T) {
 				time.Sleep(2 * time.Second)
 				ready = strings.Contains(output.String(), "paperboat-job-up-1")
 			}
-			if handled, err := process.Interrupt(0x03, nil); err != nil || !handled {
-				t.Fatalf("Interrupt handled=%v err=%v", handled, err)
-			}
+			interruptAsTheCallerDoes(t, process)
 			time.Sleep(time.Second)
 			if _, err := process.Write([]byte("'paperboat-job-count-' + @(Get-Process ping -ErrorAction SilentlyContinue).Count\r\n")); err != nil {
 				t.Fatalf("shell did not survive: %v", err)
