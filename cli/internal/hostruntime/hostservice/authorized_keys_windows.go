@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -25,7 +26,7 @@ type WindowsAuthorizedKeys struct {
 	stateRoot, instance string
 	// terminate ends the open managed SSH sessions of the removed keys (fingerprints; all of them for
 	// windowsopenssh.AllSessions); a test replaces it.
-	terminate func(instance, stateRoot string, removed []string) error
+	terminate func(instance, stateRoot string, removed []string) (windowsopenssh.TerminateResult, error)
 }
 
 func NewWindowsAuthorizedKeys(instance string) (*WindowsAuthorizedKeys, error) {
@@ -72,7 +73,11 @@ func (r *WindowsAuthorizedKeys) ReconcileAuthorizedKeys(ctx context.Context, key
 	if len(owed) == 0 {
 		return changed, nil
 	}
-	if err := r.terminate(r.instance, r.stateRoot, owed); err != nil {
+	result, err := r.terminate(r.instance, r.stateRoot, owed)
+	if result.Fallback != "" {
+		slog.Warn("managed SSH revoke ended every session, not only the removed keys' sessions", "reason", result.Fallback, "ended", result.Ended)
+	}
+	if err != nil {
 		return changed, fmt.Errorf("the key was removed but open SSH sessions could not all be ended (retried at the next refresh): %w", err)
 	}
 	return changed, os.Remove(marker)

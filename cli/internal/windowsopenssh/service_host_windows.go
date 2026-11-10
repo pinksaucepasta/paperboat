@@ -63,7 +63,7 @@ func (h *sshdServiceHandler) Execute(_ []string, requests <-chan svc.ChangeReque
 		return true, 1
 	}
 	logPath := filepath.Join(filepath.Dir(h.configPath), "logs", "service.log")
-	if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600); err == nil {
+	if logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0o600); err == nil {
 		if separator := strings.LastIndex(h.serviceName, "-"); separator >= 0 && validSSHGeneration(h.serviceName[separator+1:]) {
 			if err := protectHostKeyFileWithSDDL(logPath, "O:SYG:SY"+generationFileDACL(h.ownerSID)); err != nil {
 				logFile.Close()
@@ -72,8 +72,13 @@ func (h *sshdServiceHandler) Execute(_ []string, requests <-chan svc.ChangeReque
 			}
 		}
 		defer logFile.Close()
-		command.Stdout = logFile
-		command.Stderr = logFile
+		capped, err := newCappedLog(logFile)
+		if err != nil {
+			status <- svc.Status{State: svc.Stopped}
+			return true, 1
+		}
+		command.Stdout = capped
+		command.Stderr = capped
 	}
 	if err := command.Start(); err != nil {
 		status <- svc.Status{State: svc.Stopped}

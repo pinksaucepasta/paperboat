@@ -3,14 +3,17 @@
 package hostservice
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -50,9 +53,9 @@ func TestWindowsAuthorizedKeysEndsSessionsOnlyWhenAKeyLeaves(t *testing.T) {
 	}
 	var ended []string
 	reconciler.instance = "u-test"
-	reconciler.terminate = func(instance, _ string, removed []string) error {
+	reconciler.terminate = func(instance, _ string, removed []string) (windowsopenssh.TerminateResult, error) {
 		ended = append(ended, instance+":"+strings.Join(removed, ","))
-		return nil
+		return windowsopenssh.TerminateResult{}, nil
 	}
 	newKey := func() string {
 		public, _, _ := ed25519.GenerateKey(rand.Reader)
@@ -83,12 +86,12 @@ func TestWindowsAuthorizedKeysRetriesAFailedSessionEnd(t *testing.T) {
 	}
 	attempts, fail := 0, true
 	reconciler.instance = "u-test"
-	reconciler.terminate = func(string, string, []string) error {
+	reconciler.terminate = func(string, string, []string) (windowsopenssh.TerminateResult, error) {
 		attempts++
 		if fail {
-			return os.ErrPermission
+			return windowsopenssh.TerminateResult{}, os.ErrPermission
 		}
-		return nil
+		return windowsopenssh.TerminateResult{}, nil
 	}
 	public, _, _ := ed25519.GenerateKey(rand.Reader)
 	key, _ := ssh.NewPublicKey(public)
@@ -112,4 +115,29 @@ func TestWindowsAuthorizedKeysRetriesAFailedSessionEnd(t *testing.T) {
 func fingerprintOf(line string) string {
 	key, _, _, _, _ := ssh.ParseAuthorizedKey([]byte(line))
 	return ssh.FingerprintSHA256(key)
+}
+
+func TestWindowsAuthorizedKeysLogsTheEndAllFallback(t *testing.T) {
+	var logged bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	defer slog.SetDefault(previous)
+	reconciler, err := newWindowsAuthorizedKeys(filepath.Join(t.TempDir(), "ssh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reconciler.instance = "u-test"
+	reconciler.terminate = func(string, string, []string) (windowsopenssh.TerminateResult, error) {
+		return windowsopenssh.TerminateResult{Ended: 3, Fallback: "the SSH service log could not be read"}, nil
+	}
+	public, _, _ := ed25519.GenerateKey(rand.Reader)
+	key, _ := ssh.NewPublicKey(public)
+	for _, keys := range [][]string{{strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))}, nil} {
+		if _, err := reconciler.ReconcileAuthorizedKeys(context.Background(), keys); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !strings.Contains(logged.String(), "ended every session") || !strings.Contains(logged.String(), "service log could not be read") {
+		t.Fatalf("the fallback was not logged with its reason: %q", logged.String())
+	}
 }

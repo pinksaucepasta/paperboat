@@ -3,7 +3,9 @@ package windowsopenssh
 import (
 	"bufio"
 	"encoding/hex"
+	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -56,7 +58,7 @@ var acceptedKey = regexp.MustCompile(`^Accepted publickey for .* ssh2: [A-Z0-9-]
 // SHA256:<fp>" line before it. The two lines are only paired when exactly one Accepted line is waiting: with two in
 // flight (interleaved logins) the order is unknown, so neither pid is mapped and sessionPIDsForKeys ends both. A pid
 // logged again takes the newer key (the older process is dead).
-func parseSessionLog(log io.Reader) map[uint32]string {
+func parseSessionLog(log io.Reader) (map[uint32]string, error) {
 	pidKey := map[uint32]string{}
 	var pending []string
 	scanner := bufio.NewScanner(log)
@@ -74,7 +76,7 @@ func parseSessionLog(log io.Reader) map[uint32]string {
 			pending = nil
 		}
 	}
-	return pidKey
+	return pidKey, scanner.Err() // an over-long line stops the scan: the map is partial, so the caller must not trust it
 }
 
 // sessionPIDsForKeys narrows sessionPIDs to the sessions of the removed keys. Each logged pid names a session's
@@ -140,4 +142,56 @@ func managedGeneration(name, instance string) (string, bool) {
 		return "", false
 	}
 	return generation, true
+}
+
+// TerminateResult says what a revoke ended. Fallback is empty for a targeted revoke; otherwise it names why every managed
+// session was ended instead of only the removed keys'.
+type TerminateResult struct {
+	Ended    int
+	Fallback string
+}
+
+// sessionKeysFromLogs reads the pid-to-key map from the generations' service logs and the set of removed keys to end. A
+// missing or unreadable log, an unparsable one, no removed key or a key that could not be named gives endKeys == nil
+// (end everything) and the reason in fallback.
+func sessionKeysFromLogs(paths, removed []string) (endKeys map[string]bool, pidKey map[uint32]string, fallback string) {
+	endKeys, pidKey = map[string]bool{}, map[uint32]string{}
+	for _, key := range removed {
+		endKeys[key] = true
+	}
+	switch {
+	case len(removed) == 0:
+		fallback = "no removed key was named"
+	case endKeys[AllSessions]:
+		fallback = "a removed key could not be fingerprinted"
+	}
+	conflicts := map[uint32]bool{}
+	for _, path := range paths {
+		keys, err := readSessionLog(path)
+		if err != nil && fallback == "" {
+			fallback = fmt.Sprintf("the SSH service log could not be read: %v", err)
+		}
+		for pid, key := range keys {
+			if old, ok := pidKey[pid]; ok && old != key {
+				conflicts[pid] = true // two logs name one live pid differently: unknown, so it ends
+			}
+			pidKey[pid] = key
+		}
+	}
+	for pid := range conflicts {
+		delete(pidKey, pid)
+	}
+	if fallback != "" {
+		endKeys = nil
+	}
+	return endKeys, pidKey, fallback
+}
+
+func readSessionLog(path string) (map[uint32]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return parseSessionLog(io.LimitReader(file, serviceLogCap))
 }

@@ -98,8 +98,9 @@ Accepted publickey for X from X port 49974 ssh2: ED25519 ` + keyA + `
 User child is on pid 8572
 user: X: Starting session: command for X from X port 49974 id 0 [postauth]
 `
-	if got, want := parseSessionLog(strings.NewReader(real)), map[uint32]string{8572: keyA}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("got %v want %v", got, want)
+	got, err := parseSessionLog(strings.NewReader(real))
+	if want := map[uint32]string{8572: keyA}; err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v err=%v want %v", got, err, want)
 	}
 	cases := map[string]string{
 		"interleaved logins: neither pid is attributed":  "Accepted publickey for X from X port 1 ssh2: ED25519 " + keyA + "\nAccepted publickey for X from X port 3 ssh2: ED25519 " + keyB + "\nUser child is on pid 7\nUser child is on pid 8\n",
@@ -109,12 +110,12 @@ user: X: Starting session: command for X from X port 49974 id 0 [postauth]
 		"a pid reused by a newer unattributable session": "Accepted publickey for X from X port 1 ssh2: ED25519 " + keyA + "\nUser child is on pid 7\nAccepted publickey for X from X port 2 ssh2: ED25519 " + keyB + "\nAccepted publickey for X from X port 3 ssh2: ED25519 " + keyB + "\nUser child is on pid 7\n",
 	}
 	for name, log := range cases {
-		if got := parseSessionLog(strings.NewReader(log)); len(got) != 0 {
+		if got, _ := parseSessionLog(strings.NewReader(log)); len(got) != 0 {
 			t.Fatalf("%s: mapped %v", name, got)
 		}
 	}
 	reused := "Accepted publickey for X from X port 1 ssh2: ED25519 " + keyA + "\nUser child is on pid 7\nAccepted publickey for X from X port 2 ssh2: ED25519 " + keyB + "\nUser child is on pid 7\n"
-	if got := parseSessionLog(strings.NewReader(reused)); !reflect.DeepEqual(got, map[uint32]string{7: keyB}) {
+	if got, _ := parseSessionLog(strings.NewReader(reused)); !reflect.DeepEqual(got, map[uint32]string{7: keyB}) {
 		t.Fatalf("a reused pid takes the newer key: %v", got)
 	}
 }
@@ -177,5 +178,71 @@ func TestManagedGenerationMatchesTheWholeServiceName(t *testing.T) {
 		if got, ok := managedGeneration(name, "u-1"); ok != want || ok && got != generation {
 			t.Fatalf("%s: got (%q, %v), want %v", name, got, ok, want)
 		}
+	}
+}
+
+func TestUnreadableOrMissingLogFallsBackReportsItAndStillEndsTheRevokedSession(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "good.log")
+	if err := os.WriteFile(good, []byte("Accepted publickey for X from X port 1 ssh2: ED25519 "+keyA+"\nUser child is on pid 111\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	longLine := filepath.Join(dir, "long.log")
+	if err := os.WriteFile(longLine, []byte(strings.Repeat("x", 2<<20)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	table := []processEntry{{100, 4, "pb.exe"}, {101, 100, "sshd.exe"}, {110, 101, "sshd-session.exe"}, {111, 110, "sshd-session.exe"}, {120, 101, "sshd-session.exe"}, {121, 120, "sshd-session.exe"}}
+	for name, step := range map[string]struct {
+		paths   []string
+		removed []string
+	}{
+		"missing log":          {[]string{filepath.Join(dir, "absent.log"), good}, []string{keyA}},
+		"log that is a folder": {[]string{dir}, []string{keyA}},
+		"over-long line":       {[]string{longLine}, []string{keyA}},
+		"unnamed removed key":  {[]string{good}, []string{AllSessions}},
+		"no removed key":       {[]string{good}, nil},
+	} {
+		endKeys, pidKey, fallback := sessionKeysFromLogs(step.paths, step.removed)
+		if fallback == "" || endKeys != nil {
+			t.Fatalf("%s: fallback=%q endKeys=%v, want the reported end-all fallback", name, fallback, endKeys)
+		}
+		got := sessionPIDsForKeys(table, map[uint32]bool{100: true}, pidKey, endKeys)
+		slices.Sort(got)
+		if !slices.Equal(got, []uint32{110, 111, 120, 121}) { // the revoked session (110/111) ends, with every other
+			t.Fatalf("%s: ended %v", name, got)
+		}
+	}
+	endKeys, pidKey, fallback := sessionKeysFromLogs([]string{good}, []string{keyA})
+	if fallback != "" || !endKeys[keyA] || pidKey[111] != keyA {
+		t.Fatalf("a readable log must stay targeted: fallback=%q endKeys=%v pidKey=%v", fallback, endKeys, pidKey)
+	}
+}
+
+func TestCappedLogKeepsTheTailOfWholeLinesAtTheCap(t *testing.T) {
+	file, err := os.OpenFile(filepath.Join(t.TempDir(), "service.log"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	log, err := newCappedLog(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := strings.Repeat("a", 1023) + "\n"
+	for i := 0; i < serviceLogCap/len(line)+10; i++ {
+		if n, err := log.Write([]byte(line)); n != len(line) || err != nil {
+			t.Fatalf("write %d: n=%d err=%v", i, n, err)
+		}
+	}
+	if _, err := log.Write([]byte("last line\n")); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := file.Stat()
+	if info.Size() > serviceLogCap || info.Size() < serviceLogKeep/2 {
+		t.Fatalf("size %d after the cap %d", info.Size(), serviceLogCap)
+	}
+	body, _ := os.ReadFile(file.Name())
+	if !strings.HasPrefix(string(body), strings.Repeat("a", 1023)+"\n") || !strings.HasSuffix(string(body), "last line\n") {
+		t.Fatal("the kept tail does not start on a whole line and end on the last write")
 	}
 }
