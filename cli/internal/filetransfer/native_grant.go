@@ -221,6 +221,11 @@ func localDaemonRestarting(err error) bool {
 		(errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED)) {
 		return true
 	}
+	// Windows has no socket handover: the named pipe is gone while the services restart, and its dial error is no
+	// unix OpError. localapi wraps every dial failure (not a cancel or a permission refusal) as ErrTransportUnavailable.
+	if errors.Is(err, localapi.ErrTransportUnavailable) {
+		return true
+	}
 	var local *localapi.RemoteError
 	return errors.As(err, &local) && local.StatusCode == http.StatusServiceUnavailable &&
 		(local.Code == "file_transfer_unavailable" || local.Code == "file_transfer_stream_unavailable")
