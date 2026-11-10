@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -110,64 +109,6 @@ func TestOpenSSHConfigRemovesCreatedMainConfigOnUninstall(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(home, ".ssh", "config")); !os.IsNotExist(err) {
 		t.Fatalf("created main config remains: %v", err)
-	}
-}
-
-// previousOpenSSHFormat renders the fragment as the build before the per-user managed key wrote it: one
-// wildcard block that forces the managed key on every user.
-func previousOpenSSHFormat(config OpenSSHConfig) []byte {
-	var out strings.Builder
-	out.WriteString(openSSHBeginMarker + "\n")
-	for _, target := range config.Targets {
-		out.WriteString("Host " + target.Alias + "." + config.AliasDomain + "\n    Port " + strconv.Itoa(int(target.Port)) + "\n")
-	}
-	out.WriteString("Host *." + config.AliasDomain + "\n    ProxyCommand " + config.ProxyCommand + "\n    KnownHostsCommand " + config.KnownHostsCommand +
-		"\n    IdentityAgent \"" + config.AgentSocket + "\"\n    IdentityFile \"" + config.IdentityFile + "\"\n" +
-		"    IdentitiesOnly yes\n    BatchMode yes\n    PasswordAuthentication no\n    KbdInteractiveAuthentication no\n" +
-		ownedOpenSSHTransport + openSSHEndMarker + "\n")
-	return []byte(out.String())
-}
-
-func TestOpenSSHConfigAtomicallyUpgradesThePreviousManagedFragment(t *testing.T) {
-	home := openSSHTestHome(t)
-	config := openSSHTestConfig(home)
-	config.Targets = []OpenSSHAliasTarget{{Alias: "mac", User: "adam", Port: 22}}
-	if _, err := InstallOpenSSHConfig(config); err != nil {
-		t.Fatal(err)
-	}
-	directory := filepath.Join(home, ".ssh")
-	previous := previousOpenSSHFormat(config)
-	if !validPreviousOwnedOpenSSHContent(previous, config.AliasDomain) || validOwnedOpenSSHContent(previous, config.AliasDomain) {
-		t.Fatal("test previous-format fragment is not recognized as the previous format")
-	}
-	var record openSSHInstallRecord
-	recordPath := filepath.Join(directory, ".paperboat-config-install-v1.json")
-	if err := json.Unmarshal(readOpenSSHTestFile(t, recordPath), &record); err != nil {
-		t.Fatal(err)
-	}
-	record.OwnedHash = hashOpenSSHBytes(previous)
-	recordJSON, err := json.Marshal(record)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(directory, "paperboat_config"), previous, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(recordPath, append(recordJSON, '\n'), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if ValidateOpenSSHConfig(config) == nil {
-		t.Fatal("readiness accepted the previous format before the upgrade")
-	}
-	upgraded, err := InstallOpenSSHConfig(config)
-	if err != nil || !upgraded.Changed {
-		t.Fatalf("upgrade=%+v error=%v", upgraded, err)
-	}
-	if err := ValidateOpenSSHConfig(config); err != nil {
-		t.Fatalf("validate upgraded config: %v", err)
-	}
-	if validPreviousOwnedOpenSSHContent(readOpenSSHTestFile(t, filepath.Join(directory, "paperboat_config")), config.AliasDomain) {
-		t.Fatal("previous format remains after the upgrade")
 	}
 }
 

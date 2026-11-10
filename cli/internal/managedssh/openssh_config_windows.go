@@ -99,7 +99,7 @@ func InstallOpenSSHConfig(config OpenSSHConfig) (result OpenSSHConfigResult, res
 	var nextMain []byte
 	var includeChunk string
 	if recordSet {
-		if !ownedSet || record.Version != 1 || !validRecordedInclude(record.IncludeChunk, includeLine) || !validAliasSuffix(record.AliasSuffix) || (!validOwnedOpenSSHContent(existingOwned, record.AliasSuffix) && !validPreviousOwnedOpenSSHContent(existingOwned, record.AliasSuffix)) || record.OwnedHash != hashOpenSSHBytes(existingOwned) || bytes.Count(main, []byte(record.IncludeChunk)) != 1 {
+		if !ownedSet || record.Version != 1 || !validRecordedInclude(record.IncludeChunk, includeLine) || !validAliasSuffix(record.AliasSuffix) || !validOwnedOpenSSHContent(existingOwned, record.AliasSuffix) || record.OwnedHash != hashOpenSSHBytes(existingOwned) || bytes.Count(main, []byte(record.IncludeChunk)) != 1 {
 			return OpenSSHConfigResult{}, ErrOpenSSHConfigConflict
 		}
 		nextMain, includeChunk = main, record.IncludeChunk
@@ -219,7 +219,7 @@ func UninstallOpenSSHConfig(home string, _ uint32) (result OpenSSHConfigResult, 
 		return OpenSSHConfigResult{}, nil
 	}
 	line := "Include ~/.ssh/paperboat_config # " + openSSHIncludeMarker + "\n"
-	if !mainSet || !ownedSet || !validRecordedInclude(record.IncludeChunk, line) || (!validOwnedOpenSSHContent(owned, record.AliasSuffix) && !validPreviousOwnedOpenSSHContent(owned, record.AliasSuffix)) || record.OwnedHash != hashOpenSSHBytes(owned) || bytes.Count(main, []byte(record.IncludeChunk)) != 1 {
+	if !mainSet || !ownedSet || !validRecordedInclude(record.IncludeChunk, line) || !validOwnedOpenSSHContent(owned, record.AliasSuffix) || record.OwnedHash != hashOpenSSHBytes(owned) || bytes.Count(main, []byte(record.IncludeChunk)) != 1 {
 		return OpenSSHConfigResult{}, ErrOpenSSHConfigConflict
 	}
 	nextMain := bytes.Replace(main, []byte(record.IncludeChunk), nil, 1)
@@ -285,46 +285,6 @@ func validOwnedOpenSSHContent(value []byte, suffix string) bool {
 		return true
 	}
 	return validWindowsAgentPipe(owned.Agent) && filepath.IsAbs(owned.Identity) && strings.EqualFold(filepath.Base(owned.Identity), ManagedIdentityPublicKeyFilename) && strings.EqualFold(filepath.Base(filepath.Dir(owned.Identity)), ".ssh")
-}
-
-// validPreviousOwnedOpenSSHContent recognizes the immediately previous Paperboat-owned fragment (one
-// wildcard block carrying the managed key for every user) solely so InstallOpenSSHConfig can
-// atomically replace it with the current format. Readiness validation never accepts it.
-func validPreviousOwnedOpenSSHContent(value []byte, suffix string) bool {
-	lines := strings.Split(strings.TrimSuffix(string(value), "\n"), "\n")
-	wildcard := ownedWildcardLine(lines, suffix)
-	if wildcard < 1 || len(lines) != wildcard+15 || lines[0] != openSSHBeginMarker || lines[len(lines)-1] != openSSHEndMarker {
-		return false
-	}
-	for index := 1; index < wildcard; index += 2 {
-		if index+1 >= wildcard || !strings.HasPrefix(lines[index], "Host ") || !strings.HasSuffix(lines[index], "."+suffix) || !strings.HasPrefix(lines[index+1], "    Port ") {
-			return false
-		}
-	}
-	agent, agentValid := decodeWindowsOpenSSHOption(lines[wildcard+3], "    IdentityAgent ")
-	identity, identityValid := decodeWindowsOpenSSHOption(lines[wildcard+4], "    IdentityFile ")
-	return strings.HasPrefix(lines[wildcard+1], "    ProxyCommand ") && strings.HasPrefix(lines[wildcard+2], "    KnownHostsCommand ") && agentValid && validWindowsAgentPipe(agent) && identityValid && filepath.IsAbs(identity) && strings.EqualFold(filepath.Base(identity), ManagedIdentityPublicKeyFilename) && strings.EqualFold(filepath.Base(filepath.Dir(identity)), ".ssh") && lines[wildcard+5] == "    IdentitiesOnly yes" && lines[wildcard+6] == "    BatchMode yes" && lines[wildcard+7] == "    PasswordAuthentication no" && lines[wildcard+8] == "    KbdInteractiveAuthentication no" && lines[wildcard+9] == "    StrictHostKeyChecking yes" && lines[wildcard+10] == "    CheckHostIP no" && lines[wildcard+11] == "    UserKnownHostsFile none" && lines[wildcard+12] == "    GlobalKnownHostsFile none" && lines[wildcard+13] == "    CanonicalizeHostname yes"
-}
-
-func decodeWindowsOpenSSHOption(line, prefix string) (string, bool) {
-	if !strings.HasPrefix(line, prefix+"\"") || !strings.HasSuffix(line, "\"") {
-		return "", false
-	}
-	encoded := strings.TrimSuffix(strings.TrimPrefix(line, prefix+"\""), "\"")
-	if encoded == "" || strings.ContainsRune(encoded, '"') {
-		return "", false
-	}
-	decoded := strings.ReplaceAll(encoded, `\\`, `\`)
-	return decoded, strings.ReplaceAll(decoded, `\`, `\\`) == encoded
-}
-
-func ownedWildcardLine(lines []string, suffix string) int {
-	for index, line := range lines {
-		if line == "Host *."+suffix && (index-1)%2 == 0 {
-			return index
-		}
-	}
-	return -1
 }
 
 func validOpenSSHCommand(value string) bool {
@@ -426,12 +386,6 @@ func openWindowsSSHDirectory(home string, create bool) (string, string, func(), 
 	unlock, err := lockWindowsSSHConfig(directory, sid)
 	if err != nil {
 		return "", "", func() {}, err
-	}
-	if create {
-		if err := migrateLegacyWindowsManagedSSHState(directory, sid); err != nil {
-			unlock()
-			return "", "", func() {}, err
-		}
 	}
 	return directory, sid, unlock, nil
 }
