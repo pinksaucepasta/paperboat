@@ -65,12 +65,13 @@ jobs:
         env:
           # A package list given by hand names cli packages.
           PACKAGES: ${{ (matrix.module == 'cli' && inputs.packages) || './...' }}
+          # A narrowed run is -v, so its log shows each test that ran (--- PASS).
           RUN: ${{ inputs.run }}
           COUNT: ${{ inputs.count || '1' }}
           RACE: ${{ matrix.os != 'windows-latest' && '-race' || '' }}
         run: |
           if [ "$RUNNER_OS" != Windows ]; then
-            go test $RACE -timeout 15m -count "$COUNT" ${RUN:+-run "$RUN"} $PACKAGES
+            go test $RACE -timeout 15m -count "$COUNT" ${RUN:+-v -run "$RUN"} $PACKAGES
             exit
           fi
           # The runner is an elevated administrator, so what a test creates is owned by Administrators, which the
@@ -80,7 +81,7 @@ jobs:
           (cd "$GITHUB_WORKSPACE/cli" && go build -o "$RUNNER_TEMP/win-test-exec.exe" ./tools/win-test-exec)
           ELEVATED=$(grep -v '^#' "$GITHUB_WORKSPACE/cli/tools/win-test-exec/elevated_tests.txt" | grep . | paste -sd'|')
           status=0
-          go test -exec "$RUNNER_TEMP/win-test-exec.exe" -skip "^($ELEVATED)\$" -timeout 15m -count "$COUNT" ${RUN:+-run "$RUN"} $PACKAGES || status=1
+          go test -exec "$RUNNER_TEMP/win-test-exec.exe" -skip "^($ELEVATED)\$" -timeout 15m -count "$COUNT" ${RUN:+-v -run "$RUN"} $PACKAGES || status=1
           go test -exec "$RUNNER_TEMP/win-test-exec.exe -elevated" -run "^($ELEVATED)\$" -timeout 15m -count "$COUNT" $PACKAGES || status=1
           exit $status
 
