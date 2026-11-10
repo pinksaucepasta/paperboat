@@ -1,0 +1,18 @@
+{
+  "build": "9b7af9364",
+  "runner": "winpool-4",
+  "platform": "Windows amd64 hosted runner",
+  "checks": {
+    "C006": {
+      "result": "PASS",
+      "repeat_install": true,
+      "task_running": true,
+      "reinstall_exec": true
+    },
+    "C008": {
+      "result": "PASS",
+      "task_removed": true,
+      "persistent_wfp_retained": true
+    }
+  }
+}
