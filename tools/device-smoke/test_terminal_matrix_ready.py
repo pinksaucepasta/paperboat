@@ -45,5 +45,22 @@ class Ready(unittest.TestCase):
         self.assertEqual(1, client.waits)
 
 
+class SessionSize(unittest.TestCase):
+    """session_size reads the live PTY size through the real session inventory call (F3-17)."""
+
+    def test_the_size_comes_from_the_catalog_as_rows_then_columns(self):
+        catalog = [{'id': 'other', 'columns': 1, 'rows': 1}, {'id': 'sid', 'columns': 100, 'rows': 30}]
+        with mock.patch.object(matrix, 'inventory', return_value=('env', catalog)) as inventory:
+            self.assertEqual((30, 100), matrix.session_size('target', 'sid'))
+            self.assertEqual((30, 100), matrix.session_size('target', 'sid', (30, 100)))
+        self.assertEqual(matrix.PB, inventory.call_args.args[0])
+
+    def test_an_unobserved_size_is_none_and_waiting_for_a_size_stops_at_the_deadline(self):
+        catalog = [{'id': 'sid'}]
+        with mock.patch.object(matrix, 'inventory', return_value=('env', catalog)):
+            self.assertIsNone(matrix.session_size('target', 'sid'))
+            self.assertIsNone(matrix.session_size('target', 'sid', (30, 100), seconds=0))
+
+
 if __name__ == '__main__':
     unittest.main()

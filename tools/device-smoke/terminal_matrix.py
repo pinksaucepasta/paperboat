@@ -28,7 +28,7 @@ import time
 import uuid
 
 sys.path.insert(0, Path(__file__).resolve().parent.as_posix())
-from session_cleanup import cleanup  # noqa: E402
+from session_cleanup import cleanup, inventory  # noqa: E402
 from session_lifecycle import selected  # noqa: E402
 from terminal_lifecycle import Terminal  # noqa: E402
 from network_drop import pf_block, pf_release  # noqa: E402
