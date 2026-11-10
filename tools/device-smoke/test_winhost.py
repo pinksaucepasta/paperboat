@@ -1028,9 +1028,9 @@ class TerminalFamilyPlumbing(unittest.TestCase):
             self.assertRegex(sent[0], r'^set "PB_RESTART_MARK=m" & powershell -NoProfile -Command ".*"\r$')
             self.assertRegex(sent[1], r'^powershell -NoProfile -Command ".*"\r$')
             self.assertFalse(matrix.target_darwin('victus'))  # without running uname there
-            matrix.reconnect_keeps_control(SimpleNamespace(target='victus'), [])
+            # reconnect_keeps_control no longer skips on a Windows target: the size is read from `pb session list --json`
             matrix.large_paste(SimpleNamespace(target='victus'), [])
-            self.assertEqual(['SKIP', 'SKIP'], [state for _, state in matrix.RESULTS])
+            self.assertEqual(['SKIP'], [state for _, state in matrix.RESULTS])
 
     def test_device_clients_are_found_by_their_command_line_and_firewall_rows_use_the_device(self):
         import terminal_matrix as matrix

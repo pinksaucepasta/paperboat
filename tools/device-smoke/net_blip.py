@@ -42,8 +42,7 @@ def doctor_overall():
 def attach(target, name, deadline):
     """A native terminal to target answers a marker before the monotonic deadline (RuntimeError otherwise)."""
     start = time.monotonic()
-    terminal = Terminal(winhost.terminal_argv(PB, ['connect', target, '--name', name, '--status-bar', 'off']),
-                        env=winhost.terminal_env(PB))
+    terminal = Terminal(winhost.terminal_argv(PB, ['connect', target, '--name', name, '--status-bar', 'off']), env=winhost.terminal_env(PB))
     try:
         terminal.expect(terminal.marker('BLIP', 'stty -echo; '), timeout=max(1, deadline - start))
     finally:
