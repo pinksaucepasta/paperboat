@@ -172,8 +172,9 @@ def main():
             try:
                 code = sender.wait(600)
             except subprocess.TimeoutExpired:
+                text = (sender.stdout() + sender.stderr()).decode(errors='replace')[-2000:]  # read before the kill removes the job
                 sender.kill()
-                raise RuntimeError('the transfer did not finish within 10 minutes of the update')
+                raise RuntimeError('the transfer did not finish within 10 minutes of the update; sender output: %s' % (text or 'none'))
             if code != 0:
                 raise RuntimeError('the transfer failed after the update (rc %s): %s' % (code, (sender.stdout() + sender.stderr()).decode()[-2000:]))
             listing = peer(args.peer, 'cd ~/Paperboat/Inbox && sha256sum %s-*.bin' % prefix, 120).stdout
