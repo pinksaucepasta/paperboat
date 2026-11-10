@@ -89,7 +89,7 @@ def main():
         deadline = time.monotonic() + 180
         while True:
             from pairing_lifecycle import invoke
-            machines = invoke(pb, 'machine', 'list', '--json')['machines']
+            machines = invoke(pb, 'machine', 'list', '--all', '--json')['machines']  # the default page is 50 machines
             if any(m['id'] == before['machine_id'] and m.get('online') for m in machines):
                 break
             if time.monotonic() > deadline:
