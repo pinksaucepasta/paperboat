@@ -79,10 +79,10 @@ class WindowsTargetScripts(unittest.TestCase):
         self.assertIn('"$HOLD_PLAIN"', r.HOLD)
         self.assertNotIn('echo session-up; sleep 300', r.HOLD.split('HOLD_PB')[-1])
         # a Windows sshd answers "ok\r\n" and the managed config names the machine in lower case
-        probe = subprocess.run(['bash', '-c', 'A=W6-Win5-X; D=ppr.boats; N=$(tr A-Z a-z <<<"$A.$D"); echo $N; '
+        probe = subprocess.run(['bash', '-c', 'A=W6-Win5-X; D=example.test; N=$(tr A-Z a-z <<<"$A.$D"); echo $N; '
                                 'printf "ok\\r\\n" | tr -d "\\r" | tr "\\n" " " | grep -qE "(^| )ok $" && echo matched'],
                                capture_output=True, text=True)
-        self.assertEqual(['w6-win5-x.ppr.boats', 'matched'], probe.stdout.split())
+        self.assertEqual(['w6-win5-x.example.test', 'matched'], probe.stdout.split())
         self.assertIn('N=$(tr A-Z a-z <<<"$A.$D")', r.ACCESS)
         self.assertIn("tr -d '\\r'", r.ACCESS)
 
