@@ -32,12 +32,11 @@ worked on until the user records a decision here.
 No Intel macOS. "Every platform" in checklists means **L** (hp), **M** (apple), **W** (victus);
 ARM builds must compile, pass unit tests and be included in every release.
 
-**Launch is Linux and macOS only (user decision 2026-10-15).** Windows ships in the first update
-after launch. Until then: W cells are not part of the launch gate (a feature is done when L and M
-are `[x]`); the release publishes no Windows binaries or installer and needs no Windows signing
-certificate; the console and installers offer only macOS/Linux; device smoke and the regression
-gate skip victus. Windows code stays, must keep compiling and passing its unit tests, and nobody
-works on Windows-only failures until after launch.
+**Windows parity is active (user decision 2026-11-10, lifting the 2026-10-15 launch deferral).** Windows is built,
+released and tested like Linux and macOS: the release publishes `pb-windows-amd64.exe` and `pb-windows-arm64.exe`
+and the PowerShell installer, the Windows installs are unsigned (the Authenticode certificate stays a separate
+decision), device smoke runs on victus, and the Windows job of Cross-platform is required. W cells count again.
+Linux and macOS must not regress.
 
 ### 1.2 Domains
 

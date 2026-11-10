@@ -40,8 +40,8 @@ def build(args):
                        check=True, stdout=subprocess.DEVNULL)
         artifacts = {}
         try:
-            for platform, architecture in [('linux', 'amd64'), ('linux', 'arm64'), ('darwin', 'arm64')]:
-                name = 'pb-' + platform + '-' + architecture
+            for platform, architecture in [('linux', 'amd64'), ('linux', 'arm64'), ('darwin', 'arm64'), ('windows', 'amd64')]:
+                name = 'pb-' + platform + '-' + architecture + ('.exe' if platform == 'windows' else '')
                 binary = destination / name
                 subprocess.run(['go', 'build', '-trimpath', '-ldflags', flags, '-o', str(binary), './cmd/pb'],
                                cwd=source / 'cli', check=True,
