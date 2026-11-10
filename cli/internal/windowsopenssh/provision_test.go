@@ -174,15 +174,25 @@ func TestWriteServiceConfigScopesManagedKeysToTheSetupUser(t *testing.T) {
 			t.Fatalf("config missing %q:\n%s", required, text)
 		}
 	}
-	global, matches, found := strings.Cut(text, "Match User \"alice\"\n")
-	if !found || strings.Contains(global, "paperboat\"") ||
-		!strings.Contains(global, "AuthorizedKeysFile .ssh/authorized_keys\n") {
+	if strings.Contains(strings.Split(text, "\nMatch ")[0], "paperboat") {
 		t.Fatal("managed keys must not be a global authorization file")
 	}
-	owner, administrators, found := strings.Cut(matches, "Match Group administrators\n")
-	if !found || strings.TrimSpace(owner) != `AuthorizedKeysFile "`+filepath.Join(root, "authorized_keys", "paperboat")+`"` ||
-		strings.TrimSpace(administrators) != "AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys" {
-		t.Fatal("setup user must match before the stock administrator key rule, without granting that file to other accounts")
+	managed := `"` + filepath.Join(root, "authorized_keys", "paperboat") + `"`
+	const admins = "__PROGRAMDATA__/ssh/administrators_authorized_keys"
+	for _, test := range []struct {
+		user           string
+		administrator  bool
+		keys, password string
+	}{
+		{"alice", false, managed + " .ssh/authorized_keys", "no"},
+		{"alice", true, managed + " " + admins, "no"},
+		{"bob", false, ".ssh/authorized_keys", "yes"},
+		{"bob", true, admins, "yes"},
+	} {
+		got := effectiveSSHD(text, test.user, test.administrator)
+		if got["authorizedkeysfile"] != test.keys || got["passwordauthentication"] != test.password {
+			t.Fatalf("%s (administrator %v) got %q, want keys %q and password %q", test.user, test.administrator, got, test.keys, test.password)
+		}
 	}
 	// One forwarding policy on every platform: OpenSSH's own defaults decide port and agent forwarding.
 	for _, rule := range []string{"AllowTcpForwarding", "AllowAgentForwarding"} {

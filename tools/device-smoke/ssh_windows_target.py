@@ -2,14 +2,15 @@
 """The Windows target of the managed-SSH checks: what ssh_mac_rows.py and ssh_trust_host.sh do on the target machine,
 for a paired Windows machine reached with winhost (SMOKE_WINDOWS_SSH, PB_SMOKE_WINDOWS_PB; the login is an administrator's).
 
-The managed sshd is Paperboat's own (services PaperboatSshd-*, loopback only): its sshd_config names the port, the one
-authorized keys file and the host key, so everything here is read from the config of the sshd that is running.
+The managed sshd is Paperboat's own (services PaperboatSshd-*, loopback only): its sshd_config names the port, the
+setup user's authorized keys files (Paperboat's and the stock one) and the host key, so everything here is read from the config of the sshd that is running.
 Every change is undone by a process on the machine itself after a fixed time, whatever happens to the controller.
 
   ssh_windows_target.py rotate-host-key    a new ed25519 host key for the managed sshd (F5-04, ROTATE_CMD of ssh_trust_host.sh)
 """
 import base64
 import json
+import re
 import sys
 import time
 
@@ -25,7 +26,7 @@ $s=@(Get-CimInstance Win32_Service|Where-Object{$_.ProcessId -eq $p[0].ParentPro
 if($s.Count -ne 1){throw 'the managed sshd is not run by a PaperboatSshd service'}
 $effective=& ($p[0].ExecutablePath) -T -f $c -C ('user='+$env:USERNAME+',host=example.test,addr=127.0.0.1')
 if($LASTEXITCODE -ne 0){throw 'could not resolve the managed sshd configuration for its setup user'}
-$v=@{};foreach($l in $effective){$k,$r=$l.Trim() -split '\s+',2;if($k -and $r){$v[$k]=@($v[$k])+@($r.Trim('"'))}}
+$v=@{};foreach($l in $effective){$k,$r=$l.Trim() -split '\s+',2;if($k -and $r){if($k -eq 'authorizedkeysfile'){$r=$r -split '\s+'};$v[$k]=@($v[$k])+@($r|ForEach-Object{$_.Trim('"')})}}
 @{service=$s[0].Name;port=[int]@($v['Port'])[0];authorized_keys=@($v['AuthorizedKeysFile']);host_key=@($v['HostKey'])[0]}|ConvertTo-Json -Compress
 """
 COUNT = "@([IO.File]::ReadAllLines($req.path)|Where-Object{$_.Contains($req.text)}).Count"
@@ -103,8 +104,10 @@ class Target:
                 'SHOW_DISPLAY': ssh_command("'display=<'+$env:DISPLAY+'>'")}
 
     def keys_file(self):
-        """The one file the managed sshd reads keys from, or None when its config names more or fewer."""
-        files = self.sshd['authorized_keys']
+        """Paperboat's key file: the one absolute AuthorizedKeysFile for the setup user (the others are the stock
+        Windows files that user keeps: .ssh/authorized_keys or __PROGRAMDATA__ administrators_authorized_keys),
+        or None when the config names more or fewer."""
+        files = [f for f in self.sshd['authorized_keys'] if re.match(r'[A-Za-z]:[\\/]', f)]
         return files[0] if len(files) == 1 else None
 
     def listed(self, blob):

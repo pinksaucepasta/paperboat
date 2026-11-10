@@ -123,7 +123,7 @@ def outage():
         return
     if WIN:
         if not WIN.keys_file():
-            return report(row, 'FAIL', 'the managed sshd does not read exactly one authorized keys file: %s' % WIN.sshd['authorized_keys'])
+            return report(row, 'FAIL', 'the managed sshd does not name exactly one Paperboat key file: %s' % WIN.sshd['authorized_keys'])
     else:
         sshd = msudo("sshd -T -C user=%s,host=localhost,addr=127.0.0.1 | grep -i '^authorizedkeysfile'" % ARGS.mac_user)
         if '.ssh/authorized_keys' not in sshd:

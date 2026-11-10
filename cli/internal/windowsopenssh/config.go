@@ -44,12 +44,18 @@ func WriteServiceConfig(config ServiceConfig) (string, error) {
 		return "", operationFailure("could not create the managed OpenSSH log directory", nil, err)
 	}
 	quote := func(value string) string { return `"` + value + `"` }
+	// Win32-OpenSSH matches lowercase names, domain accounts as domain\user;
+	// OpenSSH keeps a backslash before a letter literally, quoted or not.
+	user, managed := quote(strings.ToLower(config.ManagedUser)), quote(config.AuthorizedKeys)
+	const administratorKeys = "__PROGRAMDATA__/ssh/administrators_authorized_keys"
 	lines := []string{
 		"# Managed by Paperboat. Manual changes are replaced.",
 		"Port " + strconv.Itoa(int(config.Port)),
 		"ListenAddress 127.0.0.1",
 		"ListenAddress ::1",
 		"Protocol 2",
+		// Stock Windows OpenSSH policy for every other account, as their own sshd on
+		// Linux and macOS: their keys and passwords (F5-11).
 		"PasswordAuthentication yes",
 		"KbdInteractiveAuthentication no",
 		"PermitEmptyPasswords no",
@@ -62,12 +68,18 @@ func WriteServiceConfig(config ServiceConfig) (string, error) {
 		"X11Forwarding no",
 		"Subsystem sftp " + quote(config.SFTPPath),
 		"LogLevel VERBOSE",
-		// First matching value wins. Scope Paperboat's key before the stock
-		// Windows administrator rule; neither key file belongs to other users.
-		"Match User " + quote(strings.ToLower(config.ManagedUser)),
-		"    AuthorizedKeysFile " + quote(config.AuthorizedKeys),
+		// The first Match that sets a keyword wins (sshd_config(5)). Only the setup
+		// account reads Paperboat's key file, next to the file stock Windows OpenSSH
+		// gives it (administrators_authorized_keys for an administrator), and keeps
+		// the key-only policy it had. Other accounts keep the stock rules below.
+		"Match User " + user + " Group administrators",
+		"    AuthorizedKeysFile " + managed + " " + administratorKeys,
+		"    PasswordAuthentication no",
+		"Match User " + user,
+		"    AuthorizedKeysFile " + managed + " .ssh/authorized_keys",
+		"    PasswordAuthentication no",
 		"Match Group administrators",
-		"    AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys",
+		"    AuthorizedKeysFile " + administratorKeys,
 	}
 	path := filepath.Join(config.StateRoot, "sshd_config")
 	if err := atomicfile.Write(path, []byte(strings.Join(lines, "\n")+"\n"), atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1}); err != nil {

@@ -156,14 +156,18 @@ class WindowsTarget(unittest.TestCase):
         self.assertEqual('Start-Sleep 240;Remove-NetFirewallRule -DisplayName ' + name, later)
         self.assertEqual({'name': name, 'addresses': ['192.0.2.1', '2001:db8::1']}, payload)
 
-    def test_an_sshd_reading_a_second_key_file_fails_the_outage_check(self):
-        self.target.sshd['authorized_keys'].append('.ssh/authorized_keys')
+    def test_the_setup_users_stock_key_files_sit_next_to_the_paperboat_file(self):
+        self.target.sshd['authorized_keys'] += ['.ssh/authorized_keys', '__PROGRAMDATA__/ssh/administrators_authorized_keys']
+        self.assertEqual('C:\\ssh\\authorized_keys\\paperboat', self.target.keys_file())
+
+    def test_an_sshd_reading_a_second_paperboat_key_file_fails_the_outage_check(self):
+        self.target.sshd['authorized_keys'].append('C:\\other\\paperboat')
         answer = lambda s, timeout=300: 'sudo-ok warm-ok'
         with mock.patch.dict('os.environ', {'REVOKE_CLIENT_CMD': 'x'}), mock.patch.object(ssh_mac_rows, 'cl', answer), \
                 mock.patch.object(ssh_mac_rows, 'rcl', answer):
             ssh_mac_rows.outage()
         self.assertEqual('FAIL', ssh_mac_rows.RESULTS[-1]['status'])
-        self.assertIn('exactly one authorized keys file', ssh_mac_rows.RESULTS[-1]['detail'])
+        self.assertIn('exactly one Paperboat key file', ssh_mac_rows.RESULTS[-1]['detail'])
 
     def test_otheruser_cannot_pass_without_creating_its_key(self):
         with mock.patch.object(ssh_mac_rows, 'cl', lambda s, timeout=300: 'warm-ok'):
