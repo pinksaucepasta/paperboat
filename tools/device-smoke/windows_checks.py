@@ -82,6 +82,9 @@ def checks(args):
     table['transfer-resume'] = (['transfer_resume.py', args.peer], ['--peer'])
     table['transfer-errors'] = (['transfer_errors.py', args.peer], ['--peer'])
     table['session-manage'] = (['session_lifecycle.py', args.peer, '--check', 'manage'], ['--peer'])
+    # F3-02's replay half from the Windows device as client (winhost ssh -tt/ConPTY, no Unix pty on the device). The cross half
+    # needs a second DEVICE signed in to the account; a second attach from this same device would not prove it, so it is not wired.
+    table['session-replay'] = (['session_lifecycle.py', args.peer, '--check', 'replay'], ['--peer'])
     table['session-sharing-owner'] = (['session_sharing_lifecycle.py', args.peer, '--team', team], ['--peer', '--team'])
     for name in ('lifecycle', 'tools_lifecycle', 'doctor_lifecycle', 'alias_lifecycle'):
         table['ssh-' + name.split('_')[0].replace('lifecycle', 'main')] = (['ssh_%s.py' % name, args.peer], ['--peer'])
