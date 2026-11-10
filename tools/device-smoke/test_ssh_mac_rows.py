@@ -97,7 +97,8 @@ class FakeDevice:
 def windows_target(keys=('C:\\ssh\\authorized_keys\\paperboat',)):
     target = ssh_windows_target.Target.__new__(ssh_windows_target.Target)
     target.device = FakeDevice()
-    target.sshd = {'service': 'PaperboatSshd-u1-g1', 'port': 40001, 'authorized_keys': list(keys), 'host_key': 'C:\\ssh\\hostkeys\\k'}
+    target.sshd = {'service': 'PaperboatSshd-u1-g1', 'port': 40001, 'authorized_keys': list(keys), 'host_key': 'C:\\ssh\\hostkeys\\k',
+                   'domain_scope': 'exact'}
     return target
 
 
@@ -177,9 +178,11 @@ class WindowsTarget(unittest.TestCase):
     def test_otheruser_requires_the_offered_managed_key_to_be_refused(self):
         good = ('RESULT ok:[ setup-user-pb setup-user-plain bob-key-plain bob-agent-pb bob-agent-plain '
                 'bob-password-plain bob-password-pb bob-wrong-password-is-sshd ] fail:[ ] skip:[ ]')
-        for verdict, expected in [('refused', 'PASS'), ('not-refused', 'FAIL')]:
-            with self.subTest(verdict=verdict):
+        for verdict, domain, expected in [('refused', 'exact', 'PASS'), ('not-refused', 'exact', 'FAIL'),
+                                          ('refused', 'qualified=0 unqualified=1', 'FAIL')]:
+            with self.subTest(verdict=verdict, domain=domain):
                 ssh_mac_rows.RESULTS.clear()
+                self.target.sshd['domain_scope'] = domain
 
                 def client(script, timeout=300, input=None):
                     if 'ssh-keygen' in script:

@@ -6,8 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"time"
-
-	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 )
 
 type SetupResult struct {
@@ -72,25 +70,19 @@ func setupFromResult(ctx context.Context, config Config, result Result) (SetupRe
 }
 
 func prepareStateFromResult(ctx context.Context, config Config, result Result) (SetupResult, error) {
-	authorizedRoot := filepath.Join(config.StateRoot, "authorized_keys")
-	if err := os.MkdirAll(authorizedRoot, 0o700); err != nil {
-		return SetupResult{}, err
-	}
-	authorized := filepath.Join(authorizedRoot, "paperboat")
-	if _, err := os.Lstat(authorized); errors.Is(err, os.ErrNotExist) {
-		if err := atomicfile.Write(authorized, nil, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1}); err != nil {
-			return SetupResult{}, err
-		}
-	} else if err != nil {
-		return SetupResult{}, err
-	}
+	// Fail closed before writing anything: without the owner there is no account
+	// to scope Paperboat's key to, and no name or global fallback.
 	managedUser, err := managedUserForSID(config.OwnerSID)
 	if err != nil {
 		return SetupResult{}, err
 	}
+	if err := protectManagedKeys(ctx, config.StateRoot); err != nil {
+		return SetupResult{}, err
+	}
 	configPath, err := WriteServiceConfig(ServiceConfig{
 		StateRoot: config.StateRoot, SSHDPath: result.SSHDPath, SFTPPath: result.SFTPPath,
-		AuthorizedKeys: authorized, ManagedUser: managedUser, Port: result.Port,
+		AuthorizedKeys: filepath.Join(config.StateRoot, "authorized_keys", "paperboat"),
+		ManagedUser:    managedUser, OwnerSID: config.OwnerSID, Port: result.Port,
 	})
 	if err != nil {
 		return SetupResult{}, err

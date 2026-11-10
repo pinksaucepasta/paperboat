@@ -20,6 +20,7 @@ type ServiceConfig struct {
 	SFTPPath       string
 	AuthorizedKeys string
 	ManagedUser    string
+	OwnerSID       string
 	Port           uint16
 }
 
@@ -27,7 +28,7 @@ func WriteServiceConfig(config ServiceConfig) (string, error) {
 	if config.HostKey == "" {
 		config.HostKey = filepath.Join(config.StateRoot, "hostkeys", "ssh_host_ed25519_key")
 	}
-	if config.Port == 0 || !validManagedUser(config.ManagedUser) {
+	if config.Port == 0 || !validOwnerSID(config.OwnerSID) || !validManagedUser(config.ManagedUser) {
 		return "", ErrInvalidConfig
 	}
 	for _, path := range []string{config.StateRoot, config.SSHDPath, config.SFTPPath, config.AuthorizedKeys, config.HostKey} {
@@ -54,9 +55,9 @@ func WriteServiceConfig(config ServiceConfig) (string, error) {
 		"ListenAddress 127.0.0.1",
 		"ListenAddress ::1",
 		"Protocol 2",
-		// Stock Windows OpenSSH policy for every other account, as their own sshd on
-		// Linux and macOS: their keys and passwords (F5-11).
-		"PasswordAuthentication yes",
+		// No global PasswordAuthentication: stock Windows OpenSSH leaves it commented,
+		// so OpenSSH's default (yes) lets every other account keep its password, as
+		// its own sshd does on Linux and macOS (F5-11). The setup account is key-only below.
 		"KbdInteractiveAuthentication no",
 		"PermitEmptyPasswords no",
 		"PubkeyAuthentication yes",
@@ -82,7 +83,7 @@ func WriteServiceConfig(config ServiceConfig) (string, error) {
 		"    AuthorizedKeysFile " + administratorKeys,
 	}
 	path := filepath.Join(config.StateRoot, "sshd_config")
-	if err := atomicfile.Write(path, []byte(strings.Join(lines, "\n")+"\n"), atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1}); err != nil {
+	if err := atomicfile.Write(path, []byte(strings.Join(lines, "\n")+"\n"), serviceConfigFileOptions(config.OwnerSID)); err != nil {
 		return "", operationFailure("could not write the managed OpenSSH server configuration", nil, err)
 	}
 	return path, nil

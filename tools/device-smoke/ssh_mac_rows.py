@@ -320,7 +320,7 @@ def otheruser():
         return
     bob = ('w6ssh' if WIN else 'pbbob') + secrets.token_hex(3)
     pw = secrets.token_urlsafe(24) + 'Aa1!' if WIN else secrets.token_hex(10)
-    out, sid = '', None
+    out, sid, cleanup = '', None, ''
     try:
         pub = cl('umask 077; rm -f ~/bob_key ~/bob_key.pub; ssh-keygen -q -t ed25519 -N "" -f ~/bob_key && cat ~/bob_key.pub && rm -f ~/bob_key.pub').strip()
         if not pub.startswith('ssh-ed25519'):
@@ -350,7 +350,10 @@ else echo MANAGED_OTHER_USER=not-refused; fi
         cl('rm -f ~/bob_key ~/bob_pw')
         if WIN:
             if sid:
-                WIN.remove_other_user(sid)
+                try:  # a cleanup failure is reported next to the verdict, never instead of it
+                    WIN.remove_other_user(sid)
+                except Exception as e:
+                    cleanup = ' cleanup failed: %r' % e
         else:
             msudo('sysadminctl -deleteUser {b} >/dev/null 2>&1; dscl . -delete /Users/{b} 2>/dev/null; rm -rf /Users/{b}'.format(b=bob))
     m = re.search(r'RESULT ok:\[([^\]]*)\] fail:\[([^\]]*)\] skip:\[([^\]]*)\]', out)
@@ -359,10 +362,14 @@ else echo MANAGED_OTHER_USER=not-refused; fi
         need |= {'bob-password-plain', 'bob-password-pb', 'bob-wrong-password-is-sshd'}
     ok = m and not m[2].strip() and need <= set(m[1].split())
     if WIN:
-        ok = ok and 'MANAGED_OTHER_USER=refused' in out
+        # sshd -T -C on the target: Paperboat's key file goes to domain\user exactly (ssh_windows_target.py)
+        ok = ok and 'MANAGED_OTHER_USER=refused' in out and WIN.sshd.get('domain_scope') == 'exact'
     if m and m[3].strip():
         report(row + ' password', 'SKIP', m[3].strip())
-    report(row, 'PASS' if ok else 'FAIL', m[0] if m else out[-300:].replace('\n', ' '))
+    detail = m[0] if m else out[-300:].replace('\n', ' ')
+    if WIN:
+        detail += ' domain_scope=%s%s' % (WIN.sshd.get('domain_scope'), cleanup)
+    report(row, 'PASS' if ok else 'FAIL', detail)
 
 
 def find_machine_id(node):

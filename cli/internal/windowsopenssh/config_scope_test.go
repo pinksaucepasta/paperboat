@@ -1,6 +1,7 @@
 package windowsopenssh
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -20,7 +21,7 @@ func TestWriteServiceConfigRefusesManagedUserPatterns(t *testing.T) {
 			_, err := WriteServiceConfig(ServiceConfig{
 				StateRoot: root, SSHDPath: filepath.Join(root, "sshd.exe"),
 				SFTPPath:       filepath.Join(root, "sftp-server.exe"),
-				AuthorizedKeys: filepath.Join(root, "managed"), ManagedUser: identity, Port: 40001,
+				AuthorizedKeys: filepath.Join(root, "managed"), ManagedUser: identity, OwnerSID: testOwnerSID, Port: 40001,
 			})
 			if !errors.Is(err, ErrInvalidConfig) {
 				t.Fatalf("unsafe managed user accepted: %v", err)
@@ -39,7 +40,7 @@ func TestWriteServiceConfigKeepsAnExactWindowsUserName(t *testing.T) {
 			path, err := WriteServiceConfig(ServiceConfig{
 				StateRoot: root, SSHDPath: filepath.Join(root, "sshd.exe"),
 				SFTPPath:       filepath.Join(root, "sftp-server.exe"),
-				AuthorizedKeys: filepath.Join(root, "managed"), ManagedUser: identity, Port: 40001,
+				AuthorizedKeys: filepath.Join(root, "managed"), ManagedUser: identity, OwnerSID: testOwnerSID, Port: 40001,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -64,6 +65,36 @@ func TestWriteServiceConfigKeepsAnExactWindowsUserName(t *testing.T) {
 	}
 }
 
+const testOwnerSID = "S-1-5-21-1-2-3-1001"
+
+var forgedOwnerSIDs = []string{""}
+
+func TestWriteServiceConfigRefusesAMissingOwner(t *testing.T) {
+	for _, owner := range forgedOwnerSIDs {
+		root := t.TempDir()
+		_, err := WriteServiceConfig(ServiceConfig{
+			StateRoot: root, SSHDPath: filepath.Join(root, "sshd.exe"), SFTPPath: filepath.Join(root, "sftp-server.exe"),
+			AuthorizedKeys: filepath.Join(root, "managed"), ManagedUser: "alice", OwnerSID: owner, Port: 40001,
+		})
+		if !errors.Is(err, ErrInvalidConfig) {
+			t.Fatalf("owner %q: configuration written: %v", owner, err)
+		}
+	}
+}
+
+// An owner SID that no longer resolves (deleted account, foreign SID) must stop
+// setup before anything is written: no key file, no configuration naming it.
+func TestSetupWithAnUnresolvableOwnerWritesNothing(t *testing.T) {
+	root := t.TempDir()
+	config := Config{InstallRoot: filepath.Join(root, "install"), StateRoot: filepath.Join(root, "state"), Port: 38222, OwnerSID: "S-1-5-21-1-2-3-424242"}
+	if _, err := prepareStateFromResult(context.Background(), config, resultForConfig(config)); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("setup with an unresolvable owner = %v, want ErrInvalidConfig", err)
+	}
+	if _, err := os.Stat(config.StateRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("setup wrote state for an unresolvable owner: %v", err)
+	}
+}
+
 func TestManagedUserForSIDNeverFallsBackToTheServiceAccount(t *testing.T) {
 	if _, err := managedUserForSID("S-1-5-21-not-an-account"); !errors.Is(err, ErrInvalidConfig) {
 		t.Fatalf("an unresolved owner must not become the current service account: %v", err)
@@ -80,7 +111,7 @@ func TestWriteServiceConfigReplacesAGlobalManagedKeyFile(t *testing.T) {
 	}
 	path, err := WriteServiceConfig(ServiceConfig{
 		StateRoot: root, SSHDPath: filepath.Join(root, "sshd.exe"), SFTPPath: filepath.Join(root, "sftp-server.exe"),
-		AuthorizedKeys: managed, ManagedUser: "alice", Port: 40001,
+		AuthorizedKeys: managed, ManagedUser: "alice", OwnerSID: testOwnerSID, Port: 40001,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -138,6 +169,9 @@ func effectiveSSHD(config, user string, administrator bool) map[string]string {
 	}
 	for key, value := range matched {
 		global[key] = value
+	}
+	if _, set := global["passwordauthentication"]; !set {
+		global["passwordauthentication"] = "yes" // OpenSSH's default
 	}
 	return global
 }

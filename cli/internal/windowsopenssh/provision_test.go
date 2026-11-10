@@ -160,7 +160,7 @@ func TestUnobtainableNeverCoversTrustOrOwnershipFailures(t *testing.T) {
 
 func TestWriteServiceConfigScopesManagedKeysToTheSetupUser(t *testing.T) {
 	root := t.TempDir()
-	path, err := WriteServiceConfig(ServiceConfig{StateRoot: root, SSHDPath: filepath.Join(root, "sshd.exe"), SFTPPath: filepath.Join(root, "sftp-server.exe"), AuthorizedKeys: filepath.Join(root, "authorized_keys", "paperboat"), ManagedUser: "Alice", Port: 38222})
+	path, err := WriteServiceConfig(ServiceConfig{StateRoot: root, SSHDPath: filepath.Join(root, "sshd.exe"), SFTPPath: filepath.Join(root, "sftp-server.exe"), AuthorizedKeys: filepath.Join(root, "authorized_keys", "paperboat"), ManagedUser: "Alice", OwnerSID: testOwnerSID, Port: 38222})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,13 +169,18 @@ func TestWriteServiceConfigScopesManagedKeysToTheSetupUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(body)
-	for _, required := range []string{"ListenAddress 127.0.0.1", "ListenAddress ::1", "PasswordAuthentication yes", "KbdInteractiveAuthentication no", "PubkeyAuthentication yes", "X11Forwarding no"} {
+	for _, required := range []string{"ListenAddress 127.0.0.1", "ListenAddress ::1", "KbdInteractiveAuthentication no", "PubkeyAuthentication yes", "X11Forwarding no"} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("config missing %q:\n%s", required, text)
 		}
 	}
-	if strings.Contains(strings.Split(text, "\nMatch ")[0], "paperboat") {
+	global := strings.Split(text, "\nMatch ")[0]
+	if strings.Contains(global, "paperboat") {
 		t.Fatal("managed keys must not be a global authorization file")
+	}
+	// Stock Windows OpenSSH leaves PasswordAuthentication commented out.
+	if strings.Contains(global, "PasswordAuthentication") {
+		t.Fatalf("the global section must keep the stock password policy:\n%s", global)
 	}
 	managed := `"` + filepath.Join(root, "authorized_keys", "paperboat") + `"`
 	const admins = "__PROGRAMDATA__/ssh/administrators_authorized_keys"
@@ -203,7 +208,7 @@ func TestWriteServiceConfigScopesManagedKeysToTheSetupUser(t *testing.T) {
 
 	generationRoot := filepath.Join(root, "generations", "new")
 	originalHostKey := filepath.Join(root, "hostkeys", "ssh_host_ed25519_key")
-	generationPath, err := WriteServiceConfig(ServiceConfig{StateRoot: generationRoot, HostKey: originalHostKey, SSHDPath: filepath.Join(root, "sshd.exe"), SFTPPath: filepath.Join(root, "sftp-server.exe"), AuthorizedKeys: filepath.Join(root, "authorized_keys", "paperboat"), ManagedUser: "Alice", Port: 40001})
+	generationPath, err := WriteServiceConfig(ServiceConfig{StateRoot: generationRoot, HostKey: originalHostKey, SSHDPath: filepath.Join(root, "sshd.exe"), SFTPPath: filepath.Join(root, "sftp-server.exe"), AuthorizedKeys: filepath.Join(root, "authorized_keys", "paperboat"), ManagedUser: "Alice", OwnerSID: testOwnerSID, Port: 40001})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +230,7 @@ func TestWriteServiceConfigScopesManagedKeysToTheSetupUser(t *testing.T) {
 	privateRoot := filepath.Join(privateParent, "state")
 	_, err = WriteServiceConfig(ServiceConfig{
 		StateRoot: privateRoot, SSHDPath: filepath.Join(root, "sshd.exe"),
-		SFTPPath: filepath.Join(root, "sftp-server.exe"), AuthorizedKeys: filepath.Join(root, "authorized_keys", "paperboat"), ManagedUser: "Alice", Port: 38222,
+		SFTPPath: filepath.Join(root, "sftp-server.exe"), AuthorizedKeys: filepath.Join(root, "authorized_keys", "paperboat"), ManagedUser: "Alice", OwnerSID: testOwnerSID, Port: 38222,
 	})
 	if err == nil {
 		t.Fatal("WriteServiceConfig succeeded through a non-directory parent")

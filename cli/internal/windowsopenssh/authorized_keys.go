@@ -65,8 +65,36 @@ func ReconcileAuthorizedKeysContext(ctx context.Context, stateRoot string, publi
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	if err := atomicfile.Write(path, body, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1}); err != nil {
+	if err := atomicfile.Write(path, body, managedKeysFileOptions()); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// protectManagedKeys gives Paperboat's key file its fixed owner and DACL at
+// every setup and every sshd start, creating it empty when missing. An existing
+// file keeps its keys: only its security is set, in place, so a concurrent
+// reconcile from another session cannot be overwritten.
+func protectManagedKeys(ctx context.Context, stateRoot string) error {
+	unlock, err := lockAuthorizedKeys(ctx, stateRoot)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	directory := filepath.Join(stateRoot, "authorized_keys")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return err
+	}
+	path := filepath.Join(directory, "paperboat")
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return atomicfile.Write(path, nil, managedKeysFileOptions())
+	}
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return ErrServiceOwnership
+	}
+	return setManagedKeysSecurity(path)
 }

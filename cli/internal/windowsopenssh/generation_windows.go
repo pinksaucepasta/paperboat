@@ -454,6 +454,11 @@ func PrepareGeneration(ctx context.Context, request GenerationRequest) (result G
 		if err != nil {
 			return GenerationDescriptor{}, err
 		}
+		// Fail closed before creating anything: no owner, no account to scope to.
+		managedUser, err := managedUserForSID(d.OwnerSID)
+		if err != nil {
+			return GenerationDescriptor{}, err
+		}
 		// The installed instance is the trusted parent; reject linked SSH state.
 		parent := filepath.Dir(base)
 		if err := checkGenerationPath(parent, generationDirectoryDACL(d.OwnerSID), true); err != nil {
@@ -495,29 +500,18 @@ func PrepareGeneration(ctx context.Context, request GenerationRequest) (result G
 		if err := verifyHostKeyFiles(hostkey); err != nil {
 			return GenerationDescriptor{}, err
 		}
-		managedUser, err := managedUserForSID(d.OwnerSID)
-		if err != nil {
-			return GenerationDescriptor{}, err
-		}
 		path, err := WriteServiceConfig(ServiceConfig{
 			StateRoot: root, HostKey: hostkey, SSHDPath: result.SSHDPath, SFTPPath: result.SFTPPath,
 			AuthorizedKeys: filepath.Join(base, "authorized_keys", "paperboat"),
-			ManagedUser:    managedUser, Port: d.Port,
+			ManagedUser:    managedUser, OwnerSID: d.OwnerSID, Port: d.Port,
 		})
 		if err != nil {
-			return GenerationDescriptor{}, err
-		}
-		body, err := os.ReadFile(path)
-		if err != nil {
-			return GenerationDescriptor{}, err
-		}
-		if err := atomicfile.Write(path, body, atomicfile.Options{Mode: 0600, OwnerUID: -1, OwnerGID: -1, SecurityDescriptor: "O:SY" + generationFileDACL(d.OwnerSID)}); err != nil {
 			return GenerationDescriptor{}, err
 		}
 		if err := ValidateServiceConfig(config.Runner, result.SSHDPath, path); err != nil {
 			return GenerationDescriptor{}, err
 		}
-		body, err = json.Marshal(d)
+		body, err := json.Marshal(d)
 		if err != nil {
 			return GenerationDescriptor{}, err
 		}
@@ -613,6 +607,13 @@ func RunGenerationServiceForInstance(ctx context.Context, instance, generation s
 	}
 	_, result, err := generationConfig(d)
 	if err != nil {
+		return err
+	}
+	base, _, err := generationPaths(d.OwnerSID, d.Generation)
+	if err != nil {
+		return err
+	}
+	if err := protectManagedKeys(ctx, base); err != nil {
 		return err
 	}
 	return RunServiceHost(d.ServiceName(), result.SSHDPath, result.ConfigPath, d.OwnerSID)

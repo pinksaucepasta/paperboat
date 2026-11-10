@@ -27,7 +27,19 @@ if($s.Count -ne 1){throw 'the managed sshd is not run by a PaperboatSshd service
 $effective=& ($p[0].ExecutablePath) -T -f $c -C ('user='+$env:USERNAME+',host=example.test,addr=127.0.0.1')
 if($LASTEXITCODE -ne 0){throw 'could not resolve the managed sshd configuration for its setup user'}
 $v=@{};foreach($l in $effective){$k,$r=$l.Trim() -split '\s+',2;if($k -and $r){if($k -eq 'authorizedkeysfile'){$r=$r -split '\s+'};$v[$k]=@($v[$k])+@($r|ForEach-Object{$_.Trim('"')})}}
-@{service=$s[0].Name;port=[int]@($v['Port'])[0];authorized_keys=@($v['AuthorizedKeysFile']);host_key=@($v['HostKey'])[0]}|ConvertTo-Json -Compress
+$managed=@($v['AuthorizedKeysFile']|Where-Object{$_ -match '^[A-Za-z]:[\\/]'})
+# A domain setup account is matched as domain\user. The same config with the setup user renamed to pbsmoke\<user>
+# must give Paperboat's file to exactly that name, not to the name with the backslash dropped. The setup user's
+# administrators block is left out: its Group criterion would look up an account that does not exist here.
+$domain='unset'
+if($managed.Count -eq 1){
+$u=([IO.File]::ReadAllLines($c)|Where-Object{$_ -match '^Match User "([^"]+)"$'}|ForEach-Object{$Matches[1]}|Select-Object -First 1)
+$keep=$true;$lines=foreach($l in [IO.File]::ReadAllLines($c)){if($l -match '^Match '){$keep=$l -notmatch '^Match User .* Group administrators$'};if($keep){$l}}
+$t=Join-Path $env:TEMP ('pbsmoke-'+[guid]::NewGuid().ToString('N')+'.conf')
+try{[IO.File]::WriteAllLines($t,($lines|ForEach-Object{$_.Replace('Match User "'+$u+'"','Match User "pbsmoke\'+$u+'"')}))
+$grant=foreach($n in @('pbsmoke\'+$u),('pbsmoke'+$u)){@(& ($p[0].ExecutablePath) -T -f $t -C ('user='+$n+',host=example.test,addr=127.0.0.1')|Where-Object{$_ -match '^authorizedkeysfile ' -and $_.Contains($managed[0])}).Count}
+$domain=if($grant[0] -eq 1 -and $grant[1] -eq 0){'exact'}else{'qualified='+$grant[0]+' unqualified='+$grant[1]}}finally{Remove-Item -Force $t -ErrorAction SilentlyContinue}}
+@{service=$s[0].Name;port=[int]@($v['Port'])[0];authorized_keys=@($v['AuthorizedKeysFile']);host_key=@($v['HostKey'])[0];domain_scope=$domain}|ConvertTo-Json -Compress
 """
 COUNT = "@([IO.File]::ReadAllLines($req.path)|Where-Object{$_.Contains($req.text)}).Count"
 # A new key pair written INTO the existing files: they keep the owner and ACL sshd and Paperboat require.
@@ -44,7 +56,8 @@ try{
 $users=New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-545'
 if(-not @(Get-LocalGroupMember -SID $users|Where-Object{$_.SID -eq $u.SID}).Count){Add-LocalGroupMember -SID $users -Member $u}
 Add-Type -Namespace PbSmoke -Name Profile -MemberDefinition '[DllImport("userenv.dll", CharSet=CharSet.Unicode)] public static extern int CreateProfile(string sid,string user,System.Text.StringBuilder path,uint size);'
-$b=New-Object Text.StringBuilder 32768
+# 260 (MAX_PATH): a 32768-character buffer fails with RPC_X_BAD_STUB_DATA on Windows Server 2025
+$b=New-Object Text.StringBuilder 260
 $hr=[PbSmoke.Profile]::CreateProfile($u.SID.Value,$req.name,$b,$b.Capacity)
 if($hr -ne 0){throw 'could not create the throwaway SSH user profile'}
 $dir=Join-Path $b.ToString() '.ssh';[void](New-Item -ItemType Directory -Path $dir)
@@ -66,9 +79,13 @@ REMOVE_OTHER_USER = r"""
 $sid=New-Object Security.Principal.SecurityIdentifier $req.sid
 Remove-LocalUser -SID $sid -ErrorAction Stop
 """
+# A password logon leaves the profile loaded for a while after the session ends: retry, then leave it with a warning
+# (the account is already gone) rather than fail the check on Windows' unload timing.
 REMOVE_OTHER_PROFILE = r"""
-$p=Get-CimInstance Win32_UserProfile|Where-Object{$_.SID -eq $req.sid}
-if($p){$p|Remove-CimInstance -ErrorAction Stop}
+$deadline=(Get-Date).AddSeconds(60);$e=$null
+do{$p=Get-CimInstance Win32_UserProfile|Where-Object{$_.SID -eq $req.sid};if(-not $p){return}
+try{$p|Remove-CimInstance -ErrorAction Stop;return}catch{$e=$_};Start-Sleep 5}while((Get-Date) -lt $deadline)
+Write-Warning ('the throwaway SSH profile is still loaded; left in place: '+$e.Exception.Message)
 """
 BLOCK = "[void](New-NetFirewallRule -DisplayName $req.name -Direction Outbound -Action Block -RemoteAddress $req.addresses)"
 UNBLOCK = "Remove-NetFirewallRule -DisplayName $req.name -ErrorAction SilentlyContinue"
@@ -94,7 +111,7 @@ class Target:
         self.device.ps('remove the throwaway SSH account', REMOVE_OTHER_USER, sid=sid)
         # End any SSH logon token before asking Windows to unload its profile.
         self.device.service('restart', self.sshd['service'])
-        self.device.ps('remove the throwaway SSH profile', REMOVE_OTHER_PROFILE, sid=sid)
+        self.device.ps('remove the throwaway SSH profile', REMOVE_OTHER_PROFILE, timeout=120, sid=sid)
 
     def remote(self):
         """The commands a client runs ON the target through ssh: cmd.exe is the shell there, so no sh, sleep or true."""
