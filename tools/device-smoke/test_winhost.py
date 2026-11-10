@@ -4,6 +4,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -296,6 +297,22 @@ class WindowsChecksRunner(unittest.TestCase):
         self.assertEqual('FAIL', windows_checks.verdict(0, 'RESULT FAIL a,b\n'))
         done = windows_checks.run_streaming([sys.executable, '-c', 'import sys;print(\'{"state": "x"}\');print(1);sys.stderr.write("e")'], None, 10)
         self.assertEqual((0, '{"state": "x"}\n1\n', 'e'), (done.returncode, done.stdout, done.stderr))
+
+    def test_protocol_gate_releases_the_gate_the_probe_result_names(self):
+        import windows_checks
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            for code, gate in ((0, 'verified'), (1, 'failed')):
+                probe = root / ('probe%d' % code)
+                probe.write_text('#!/bin/sh\necho "$2 $4"\nexit %d\n' % code)
+                probe.chmod(0o700)
+                line = json.dumps({'state': 'preview_protocol_required', 'url': 'https://u.example.test', 'marker': 'M',
+                                   'gate': str(root / 'verified'), 'failure_gate': str(root / 'failed')})
+                self.assertEqual('https://u.example.test M\n', windows_checks.protocol_gate(probe)(line))
+                self.assertEqual([gate], sorted(item.name for item in root.iterdir() if not item.name.startswith('probe')))
+                (root / gate).unlink()
+            self.assertEqual('', windows_checks.protocol_gate(probe)('{"state": "approval_required"}'))
+            self.assertEqual([], [item.name for item in root.iterdir() if not item.name.startswith('probe')])
 
     def test_every_check_names_a_script_and_missing_fixtures_are_reported(self):
         import windows_checks

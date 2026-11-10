@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Read active-workspace edge and verified native relay inventories."""
 import json
-from pathlib import Path
 
 from install_lifecycle import registration
 from pairing_lifecycle import invoke

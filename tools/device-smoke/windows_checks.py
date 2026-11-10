@@ -10,8 +10,10 @@ results/windows-<UTC>.json. Checks that need a fixture the run was not given are
 
 Not ported (they need Git, systemd/launchd, sudo or a signal on the device, or a gate an external driver releases):
 install_lifecycle, pairing_lifecycle's uninstall flows, the ssh_*.sh and ssh_mac_* checks,
-preview_survival/tunnel_survival, config_sync/config_sync_lifecycle and config_commands' repository rows, and the gated
-preview_lifecycle/preview_protocols/session replay and cross checks. ssh-tools runs scp and sftp only (Windows has no
+config_sync/config_sync_lifecycle and config_commands' repository rows, and the gated
+preview_lifecycle/session replay and cross checks. preview-protocols and tunnel-protocols are probed from this
+controller (preview_protocol_client.go, as smoke.sh does). The origins of the survival, failure and protocol checks
+run here and are reached from the device through an ssh -R forward; the host service is PaperboatHostd-<instance>. ssh-tools runs scp and sftp only (Windows has no
 rsync). terminal-matrix skips the rows that cut the network (it would cut this controller's SSH) and the echo
 latency row. access-machine, private-address and private-https run with the device as the client only (the origin on a
 Unix peer through pb exec); private_access_permission drives two Unix hosts over ssh. ssh-long holds a session for SMOKE_SSH_LONG_SECONDS (3601 for the real check; pass --timeout above it).
@@ -76,6 +78,7 @@ def checks(args):
         table['ssh-' + name.split('_')[0].replace('lifecycle', 'main')] = (['ssh_%s.py' % name, args.peer], ['--peer'])
     for name in ('main', 'paste', 'typing'):  # paste and typing need a Unix peer (sh)
         table['terminal-' + name] = (['terminal_lifecycle.py', args.peer, '--check', name], ['--peer'])
+    table['status-bar'] = (['status_bar_lifecycle.py', args.peer], ['--peer'])
     table['terminal-matrix'] = (['terminal_matrix.py', args.peer], ['--peer'])  # about 25 min: pass --timeout 3600
     for name in ('access-machine', 'private-address', 'private-https'):  # the device is the client; the origin runs on the peer
         table[name] = (['private_access.py', 'pair', '--target', args.peer, '--check', name], ['--peer'])
@@ -86,6 +89,10 @@ def checks(args):
     table['tunnel-manage'] = (['tunnel_manage.py'], [])
     table['tunnel-lifecycle'] = (['tunnel_lifecycle.py'], [])
     table['tunnel-public-protocols'] = (['tunnel_public_protocols.py'], [])
+    table['preview-protocols'] = (['preview_protocols.py', 'victus'], [])
+    table['tunnel-protocols'] = (['preview_protocols.py', 'victus', '--tunnel'], [])
+    for name in ('preview_survival', 'tunnel_survival', 'tunnel_failures', 'network_inventory'):
+        table[name.replace('_', '-')] = ([name + '.py'], [])
     for name in ('manage', 'inspect', 'access'):
         table['preview-' + name] = (['preview_%s.py' % name, 'victus'], [])
     for name in ('rename', 'settings', 'availability', 'capabilities'):
@@ -175,8 +182,28 @@ def verdict(returncode, stdout):
     return 'PASS' if returncode == 0 and statuses and set(statuses) == {'PASS'} else 'FAIL'
 
 
-def run_streaming(command, environment, timeout):
-    """subprocess.run with captured output, echoing each `state` line (an approval link, a gate) to stderr as it comes."""
+def protocol_gate(probe):
+    """The external half of preview_protocols.py: probe its URL from here and release the gate it waits on.
+
+    Returns the probe's output, which joins the check's own (its PASS line counts in the verdict)."""
+    def release(line):
+        try:
+            phase = json.loads(line)
+        except ValueError:
+            return ''
+        if not isinstance(phase, dict) or phase.get('state') != 'preview_protocol_required':
+            return ''
+        done = subprocess.run([str(probe), '--url', phase['url'], '--marker', phase['marker']], capture_output=True,
+                              text=True, timeout=170, stdin=subprocess.DEVNULL)
+        Path(phase['gate' if done.returncode == 0 else 'failure_gate']).touch(mode=0o600)
+        return done.stdout + done.stderr
+    return release
+
+
+def run_streaming(command, environment, timeout, on_state=None):
+    """subprocess.run with captured output, echoing each `state` line (an approval link, a gate) to stderr as it comes.
+
+    on_state(line) may act on such a line (release a gate); what it returns is added to the output."""
     with tempfile.TemporaryFile('w+') as errors, subprocess.Popen(
             command, cwd=HERE, env=environment, stdout=subprocess.PIPE, stderr=errors, text=True,
             stdin=subprocess.DEVNULL) as process:
@@ -188,6 +215,8 @@ def run_streaming(command, environment, timeout):
                 lines.append(line)
                 if line.startswith('{"state"') or '"state": "approval_required"' in line:
                     print(line.rstrip(), file=sys.stderr, flush=True)
+                    if on_state:
+                        lines.append(on_state(line))
             process.wait()
         finally:
             killer.cancel()
@@ -222,9 +251,15 @@ def run_check(check, argv, args, device):
             replacements.update({
                 '{server}': json.loads((device.runtime_dir() / 'machine-registration.json').read_text())['server_url'],
                 '{version}': device.run([device.pb_exe, '--version']).stdout.strip().splitlines()[0]})
+        on_state = None
+        if argv[0] == 'preview_protocols.py':  # built before the check starts: its gate waits only 180 s
+            probe = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix='pb-protocol-probe-'))) / 'client'
+            subprocess.run(['go', 'build', '-o', str(probe), str(HERE / 'preview_protocol_client.go')], cwd=HERE.parent.parent,
+                           check=True, capture_output=True, timeout=900, env=dict(os.environ, GOMAXPROCS='2', GOFLAGS='-p=2'))
+            on_state = protocol_gate(probe)
         command = [sys.executable, str(HERE / argv[0])] + [replacements.get(word, word) for word in argv[1:]]
         started = time.monotonic()
-        done = run_streaming(command, environment, args.timeout)
+        done = run_streaming(command, environment, args.timeout, on_state)
     # The whole output is kept beside the result file (owner-only): per-row receipts and failure causes live there.
     output = HERE / 'results' / 'windows-output' / ('%s-%s.out' % (time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()), check))
     output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -296,7 +331,7 @@ def main():
         else:
             try:
                 outcome = run_check(check, argv, args, device)
-            except (subprocess.TimeoutExpired, winhost.DeviceError, OSError, ValueError, KeyError) as error:
+            except (subprocess.SubprocessError, winhost.DeviceError, OSError, ValueError, KeyError) as error:
                 outcome = ('FAIL', 0, str(error)[:300])
         results.append({'id': check + ':victus', 'status': outcome[0], 'seconds': outcome[1], 'detail': outcome[2]})
         print('%-34s %-5s %5ss  %s' % (check + ':victus', outcome[0], outcome[1], outcome[2][:100]), flush=True)

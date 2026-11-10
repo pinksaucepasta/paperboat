@@ -4,6 +4,7 @@
 Owner machine OWNER_HOST (ssh alias) is signed in as account A and shares a live terminal with team TEAM;
 PEER_HOST (ssh alias) is an enrolled machine signed in as account B, a member of TEAM, which joins it.
 Usage: session_share_cross.py OWNER_HOST OWNER_TARGET PEER_HOST TEAM
+Either host may be the Windows device: name it as SMOKE_WINDOWS_SSH does and set PB_SMOKE_WINDOWS_PB (winhost.py).
 """
 import argparse
 import json
@@ -14,6 +15,7 @@ import uuid
 
 sys.path.insert(0, __import__('pathlib').Path(__file__).resolve().parent.as_posix())
 from terminal_lifecycle import Terminal  # noqa: E402
+import winhost  # noqa: E402
 
 PB = '~/.local/bin/pb'
 
@@ -24,8 +26,27 @@ def ssh(host, command, timeout=90):
     return result.returncode, result.stdout, result.stderr
 
 
+def windows(host):
+    """The Windows device when host names it, else None (a Unix machine reached by ssh)."""
+    device = winhost.device()
+    return device if device and device.target == host else None
+
+
 def pb(host, *arguments, timeout=90):
+    device = windows(host)
+    if device:
+        done = device.run([device.pb_exe, *arguments], timeout=timeout)
+        return done.returncode, done.stdout, done.stderr
     return ssh(host, PB + ' ' + ' '.join(arguments), timeout)
+
+
+def terminal(host, *arguments):
+    """An interactive `pb <arguments>` on host, driven from a pty here."""
+    device = windows(host)
+    if device:
+        binary = winhost.WindowsPb(device)
+        return Terminal(winhost.terminal_argv(binary, arguments), env=winhost.terminal_env(binary))
+    return Terminal(['ssh', '-tt', host, PB + ' ' + ' '.join(arguments)])
 
 
 def data(host, *arguments):
@@ -59,7 +80,7 @@ def main():
     failure = None
     try:
         stage('owner terminal start')
-        owner = Terminal(['ssh', '-tt', args.owner_host, PB + ' connect %s --name %s --status-bar off' % (args.owner_target, name)])
+        owner = terminal(args.owner_host, 'connect', args.owner_target, '--name', name, '--status-bar', 'off')
         owner.expect(b'\x1b[?2004h', timeout=90)
         owner.expect(owner.marker('READY', 'stty -echo; '))
         stage('owner ready')
@@ -79,7 +100,7 @@ def main():
         if not data(args.owner_host, 'session', 'participants', identifier)['can_manage']:
             raise RuntimeError('owner cannot manage participants')
         stage('peer join start')
-        joined = Terminal(['ssh', '-tt', args.peer_host, PB + ' --workspace %s session join %s' % (args.team, identifier)])
+        joined = terminal(args.peer_host, '--workspace', args.team, 'session', 'join', identifier)
         joined.expect('PB_OLD_' + old, timeout=90)
         stage('peer joined and saw recent output')
         blocked = uuid.uuid4().hex

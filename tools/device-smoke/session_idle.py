@@ -13,8 +13,13 @@ import uuid
 from session_cleanup import cleanup
 from session_lifecycle import selected
 from terminal_lifecycle import Terminal
+import winhost
 
-PB = Path.home() / '.local/bin/pb'
+PB = winhost.pb_path()  # the client: this machine, or the Windows device (the state file stays here)
+
+
+def attach(arguments):
+    return Terminal(winhost.terminal_argv(PB, arguments), env=winhost.terminal_env(PB))
 
 
 def main():
@@ -27,7 +32,7 @@ def main():
     if args.phase == 'start':
         name = 'smoke-idle-' + uuid.uuid4().hex[:10]
         nonce = uuid.uuid4().hex
-        terminal = Terminal([PB, 'connect', args.target, '--name', name, '--status-bar', 'off'])
+        terminal = attach(['connect', args.target, '--name', name, '--status-bar', 'off'])
         try:
             terminal.expect(b'\x1b[?2004h')
             terminal.expect(terminal.marker('READY', 'stty -echo; '))
@@ -46,7 +51,7 @@ def main():
     idle = (time.time() - record['started']) / 3600
     if idle < args.hours:
         raise RuntimeError('only %.2f hours idle; need %.1f' % (idle, args.hours))
-    terminal = Terminal([PB, 'session', 'attach', args.target, record['id'], '--status-bar', 'off'])
+    terminal = attach(['session', 'attach', args.target, record['id'], '--status-bar', 'off'])
     try:
         terminal.expect(b'\x1b[?2004h', timeout=90)
         terminal.send("printf '\\nPB_BACK_%s_%s\\n' \"$PB_IDLE\" \"$$\"\r")
@@ -55,7 +60,7 @@ def main():
             raise RuntimeError('idle session came back in a different shell')
     finally:
         terminal.close()
-        cleanup(str(PB), args.target, record['name'])
+        cleanup(PB, args.target, record['name'])
         args.state.unlink(missing_ok=True)
     print(json.dumps({'check': 'session-idle', 'phase': 'verify', 'status': 'PASS', 'idle_hours': round(idle, 2),
                       'same_shell_and_variable': True}), flush=True)
