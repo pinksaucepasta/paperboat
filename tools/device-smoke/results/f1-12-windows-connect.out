@@ -1,0 +1,21 @@
+check-add-machine.js with window.__connect (the dialog's Windows command run on the fresh hosted runner winpool-8 by a Spark), live console serving server 2026.11.10.37 b701fff83, 2026-11-10T17:54:39Z
+PASS  the server publishes an install address
+PASS  Add machine is on the page
+PASS  the dialog shows a pairing command
+PASS  the command is the published install address with the token, piped to bash
+PASS  the server has the enrollment waiting for a machine  (awaiting_bootstrap)
+PASS  the dialog says it is waiting for the machine
+PASS  Windows shows a PowerShell command
+PASS  it is the PowerShell installer address with a token, run by PowerShell
+PASS  it carries the same token
+PASS  choosing Windows neither replaces nor revokes the enrollment  (awaiting_bootstrap)
+PASS  switching back shows a macOS and Linux command
+PASS  the browser-approval command has no token
+PASS  it says what happens next
+PASS  switching back shows the pairing command
+PASS  the command went to the loopback sink
+PASS  the dialog turns into Machine connected when the machine pairs
+PASS  Open machine links to the new machine
+PASS  the machine exists on the server  (runnervmm7ud1-2)
+PASS  it is in the Personal workspace
+19/19 passed
