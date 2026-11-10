@@ -37,10 +37,11 @@ import (
 )
 
 const (
-	windowsActivatorService = "PaperboatUpdateActivator"
-	windowsHostdService     = "PaperboatHostd"
-	windowsUpdaterService   = "PaperboatUpdated"
-	windowsSSHService       = "PaperboatSshd"
+	windowsActivatorService   = "PaperboatUpdateActivator"
+	windowsHostdService       = "PaperboatHostd"
+	windowsUpdaterService     = "PaperboatUpdated"
+	windowsLocalDaemonService = "PaperboatLocalDaemon"
+	windowsSSHService         = "PaperboatSshd"
 )
 
 type windowsActivationFailure struct {
@@ -575,6 +576,8 @@ func parseWindowsRuntimeServiceTarget(name, role, command string) (windowsServic
 		base = windowsHostdService
 	case "__runtime-updated":
 		base = windowsUpdaterService
+	case "__runtime-local-daemon":
+		base = windowsLocalDaemonService
 	default:
 		return windowsServiceTarget{}, errInvalidWindowsActivation
 	}

@@ -427,7 +427,7 @@ func verifyWindowsTerminalNativeState(ctx context.Context, config WindowsConfig,
 		return err
 	}
 	target := workerupdate.ComponentTarget{SHA256: installed.Source.SHA256, Length: installed.Source.Length, Platform: "windows", Architecture: installed.Source.Architecture}
-	for _, role := range []struct{ name, argument string }{{windowsHostdService + "-" + layout.Instance, "__runtime-hostd"}, {windowsUpdaterService + "-" + layout.Instance, "__runtime-updated"}, {"PaperboatLocalDaemon-" + layout.Instance, "__runtime-local-daemon"}} {
+	for _, role := range []struct{ name, argument string }{{windowsHostdService + "-" + layout.Instance, "__runtime-hostd"}, {windowsUpdaterService + "-" + layout.Instance, "__runtime-updated"}, {windowsLocalDaemonService + "-" + layout.Instance, "__runtime-local-daemon"}} {
 		actual, err := queryWindowsServiceTarget(role.name, role.argument)
 		if err != nil {
 			return err

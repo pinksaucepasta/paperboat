@@ -251,7 +251,7 @@ func TestWindowsActivationPathsAcceptRollbackUpdaterDuringRecovery(t *testing.T)
 func TestWindowsRuntimeServiceTargetPreservesExactInstance(t *testing.T) {
 	const instance = "u0123456789abcdef01234567"
 	executable := `C:\Program Files\Paperboat\users\` + instance + `\bin\pb.exe`
-	for _, role := range []struct{ name, command string }{{windowsHostdService, "__runtime-hostd"}, {windowsUpdaterService, "__runtime-updated"}} {
+	for _, role := range []struct{ name, command string }{{windowsHostdService, "__runtime-hostd"}, {windowsUpdaterService, "__runtime-updated"}, {windowsLocalDaemonService, "__runtime-local-daemon"}} {
 		args := []string{executable, "daemon", role.command, "--instance", instance}
 		name := role.name + "-" + instance
 		target, err := parseWindowsRuntimeServiceTarget(name, role.command, windows.ComposeCommandLine(args))
