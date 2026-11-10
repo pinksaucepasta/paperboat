@@ -345,8 +345,8 @@ func TestAuthenticatedMachineInstallationIsBoundIdempotentAndGenerationFenced(t 
 	if err := store.SQL().QueryRowContext(ctx, `SELECT keep_awake FROM paperboat.user_machine_pairings WHERE authenticated_setup_cli_session_id=$1 AND authenticated_setup_operation_id=$2`, clientSessionID, request.OperationID).Scan(&pairingKeepAwake); err != nil || !pairingKeepAwake {
 		t.Fatalf("authenticated pairing keep_awake=%t err=%v", pairingKeepAwake, err)
 	}
-	if _, err := service.ConsumeInstallation(ctx, verifier); !errors.Is(err, ErrInstallationUnavailable) {
-		t.Fatalf("authenticated Host material accepted a legacy identity-less consume: %v", err)
+	if _, err := service.ConsumeInstallationForIdentity(ctx, verifier, ""); !errors.Is(err, ErrInstallationUnavailable) {
+		t.Fatalf("Host material was released without an identity binding: %v", err)
 	}
 	material, err := service.ConsumeInstallationForIdentity(ctx, verifier, publicKey)
 	if err != nil {
@@ -2002,13 +2002,13 @@ func TestEnrollmentDenialAndImmediateApprovalOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ConsumeInstallation(ctx, verifier); !errors.Is(err, ErrInstallationPending) {
+	if _, err := service.ConsumeInstallationForIdentity(ctx, verifier, integrationPublicIdentityKey); !errors.Is(err, ErrInstallationPending) {
 		t.Fatalf("pending installation material error = %v", err)
 	}
 	if err := service.Deny(ctx, userID, pairing.UserCode); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ConsumeInstallation(ctx, verifier); !errors.Is(err, ErrInstallationDenied) {
+	if _, err := service.ConsumeInstallationForIdentity(ctx, verifier, integrationPublicIdentityKey); !errors.Is(err, ErrInstallationDenied) {
 		t.Fatalf("denied installation material error = %v", err)
 	}
 	var pairingState string
@@ -2130,15 +2130,15 @@ func TestInstallationMaterialIsSingleUseAndExpiryBound(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_pairings SET installation_state='material_issued' WHERE id=$1`, start.ID); err != nil {
 		t.Fatal(err)
 	}
-	material, err := service.ConsumeInstallation(ctx, verifier)
+	material, err := service.ConsumeInstallationForIdentity(ctx, verifier, integrationPublicIdentityKey)
 	if err != nil || string(material) != `{"bootstrap":"ok"}` {
 		t.Fatalf("material=%s err=%v", material, err)
 	}
-	replayed, err := service.ConsumeInstallation(ctx, verifier)
+	replayed, err := service.ConsumeInstallationForIdentity(ctx, verifier, integrationPublicIdentityKey)
 	if err != nil || string(replayed) != string(material) {
 		t.Fatalf("same-verifier recovery material=%s err=%v", replayed, err)
 	}
-	if _, err := service.ConsumeInstallation(ctx, verifier+"-wrong"); !errors.Is(err, ErrInstallationUnavailable) {
+	if _, err := service.ConsumeInstallationForIdentity(ctx, verifier+"-wrong", integrationPublicIdentityKey); !errors.Is(err, ErrInstallationUnavailable) {
 		t.Fatalf("different-verifier replay error=%v", err)
 	}
 	var enrollmentState string
@@ -2151,7 +2151,7 @@ func TestInstallationMaterialIsSingleUseAndExpiryBound(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_pairings SET installation_state='ready' WHERE id=$1`, start.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ConsumeInstallation(ctx, verifier); !errors.Is(err, ErrInstallationUnavailable) {
+	if _, err := service.ConsumeInstallationForIdentity(ctx, verifier, integrationPublicIdentityKey); !errors.Is(err, ErrInstallationUnavailable) {
 		t.Fatalf("completed enrollment replay error=%v", err)
 	}
 
@@ -2175,7 +2175,7 @@ func TestInstallationMaterialIsSingleUseAndExpiryBound(t *testing.T) {
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_pairings SET installation_state='material_issued' WHERE id=$1`, second.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ConsumeInstallation(ctx, expiredVerifier); !errors.Is(err, ErrInstallationExpired) {
+	if _, err := service.ConsumeInstallationForIdentity(ctx, expiredVerifier, integrationPublicIdentityKey); !errors.Is(err, ErrInstallationExpired) {
 		t.Fatalf("expired material error=%v", err)
 	}
 }
@@ -2573,7 +2573,7 @@ func TestInstallationFailureRevokesIdentityReleasesSeatAndRetryIssuesNewIdentity
 	if recoveredMachine.ID != userMachineID || recoveredMachine.EnvironmentID != environmentID || grantCalls != 1 {
 		t.Fatalf("machine=%+v helper_grant_calls=%d", recoveredMachine, grantCalls)
 	}
-	material, err := service.ConsumeInstallation(ctx, retryVerifier)
+	material, err := service.ConsumeInstallationForIdentity(ctx, retryVerifier, integrationPublicIdentityKey)
 	if err != nil {
 		t.Fatal(err)
 	}

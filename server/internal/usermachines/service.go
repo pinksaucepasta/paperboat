@@ -100,10 +100,6 @@ type SeatAuthorizer interface {
 	ReserveUserMachineSeat(context.Context, *db.Tx, string) error
 }
 
-func (s *Service) ConsumeInstallation(ctx context.Context, verifier string) (json.RawMessage, error) {
-	return s.consumeInstallation(ctx, verifier, "", false)
-}
-
 // ConsumeInstallationForIdentity is the current bootstrap exchange. The
 // identity is checked before consuming or replaying material and is also the
 // binding used by the post-expiry recovery path.
@@ -124,7 +120,7 @@ func (s *Service) consumeInstallation(ctx context.Context, verifier, publicIdent
 			material, err = s.runtimeRecoveryMaterial(ctx, verifier, publicIdentityKey, material)
 		}
 	}()
-	if strings.TrimSpace(verifier) == "" || strings.TrimSpace(s.encryptionKey) == "" {
+	if strings.TrimSpace(verifier) == "" || publicIdentityKey == "" || strings.TrimSpace(s.encryptionKey) == "" {
 		return nil, ErrInstallationUnavailable
 	}
 	hash := sha256.Sum256([]byte(verifier))
@@ -138,8 +134,7 @@ func (s *Service) consumeInstallation(ctx context.Context, verifier, publicIdent
 			// A successful response can be lost after the database transaction
 			// commits but before the installer persists its local resume state.
 			// Permit the same verifier to recover the encrypted material while
-			// its enrollment is still installing. The identity binding is
-			// optional only for legacy clients during the original expiry window.
+			// its enrollment is still installing; the identity binding is required.
 			value, replayErr := tx.Queries().GetUserMachineInstallationConfigForReplay(ctx, dbsqlc.GetUserMachineInstallationConfigForReplayParams{VerifierHash: hash[:], PublicIdentityKey: publicIdentityKey, Now: now})
 			if replayErr == nil {
 				ciphertext = value

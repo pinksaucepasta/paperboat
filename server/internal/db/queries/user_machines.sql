@@ -792,14 +792,8 @@ WITH consumed AS (
   SET state = 'consumed', installation_state='installing', installation_config_consumed_at = now(), updated_at = now()
   WHERE verifier_hash = sqlc.arg(verifier_hash)
     AND state = 'approved'
-    AND (
-      (authenticated_setup_cli_session_id IS NULL
-        AND (sqlc.arg(public_identity_key) = '' OR public_identity_key = sqlc.arg(public_identity_key)))
-      OR
-      (authenticated_setup_cli_session_id IS NOT NULL
-        AND sqlc.arg(public_identity_key) <> ''
-        AND public_identity_key = sqlc.arg(public_identity_key))
-    )
+    AND sqlc.arg(public_identity_key) <> ''
+    AND public_identity_key = sqlc.arg(public_identity_key)
     AND installation_config_ciphertext IS NOT NULL
     AND installation_config_consumed_at IS NULL
     AND expires_at > now()
@@ -811,14 +805,8 @@ SELECT installation_config_ciphertext FROM consumed;
 SELECT pairing.installation_config_ciphertext
 FROM user_machine_pairings AS pairing
 WHERE pairing.verifier_hash = sqlc.arg(verifier_hash)
-  AND (
-    (pairing.authenticated_setup_cli_session_id IS NULL
-      AND (sqlc.arg(public_identity_key) = '' OR pairing.public_identity_key = sqlc.arg(public_identity_key)))
-    OR
-    (pairing.authenticated_setup_cli_session_id IS NOT NULL
-      AND sqlc.arg(public_identity_key) <> ''
-      AND pairing.public_identity_key = sqlc.arg(public_identity_key))
-  )
+  AND sqlc.arg(public_identity_key) <> ''
+  AND pairing.public_identity_key = sqlc.arg(public_identity_key)
   AND pairing.state = 'consumed'
   AND pairing.installation_config_ciphertext IS NOT NULL
   AND pairing.installation_config_consumed_at IS NOT NULL

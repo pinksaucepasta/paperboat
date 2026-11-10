@@ -547,14 +547,8 @@ WITH consumed AS (
   SET state = 'consumed', installation_state='installing', installation_config_consumed_at = now(), updated_at = now()
   WHERE verifier_hash = $1
     AND state = 'approved'
-    AND (
-      (authenticated_setup_cli_session_id IS NULL
-        AND ($2 = '' OR public_identity_key = $2))
-      OR
-      (authenticated_setup_cli_session_id IS NOT NULL
-        AND $2 <> ''
-        AND public_identity_key = $2)
-    )
+    AND $2 <> ''
+    AND public_identity_key = $2
     AND installation_config_ciphertext IS NOT NULL
     AND installation_config_consumed_at IS NULL
     AND expires_at > now()
@@ -3103,14 +3097,8 @@ const getUserMachineInstallationConfigForReplay = `-- name: GetUserMachineInstal
 SELECT pairing.installation_config_ciphertext
 FROM user_machine_pairings AS pairing
 WHERE pairing.verifier_hash = $1
-  AND (
-    (pairing.authenticated_setup_cli_session_id IS NULL
-      AND ($2 = '' OR pairing.public_identity_key = $2))
-    OR
-    (pairing.authenticated_setup_cli_session_id IS NOT NULL
-      AND $2 <> ''
-      AND pairing.public_identity_key = $2)
-  )
+  AND $2 <> ''
+  AND pairing.public_identity_key = $2
   AND pairing.state = 'consumed'
   AND pairing.installation_config_ciphertext IS NOT NULL
   AND pairing.installation_config_consumed_at IS NOT NULL
