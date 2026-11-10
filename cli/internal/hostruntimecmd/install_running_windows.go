@@ -19,6 +19,11 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 )
 
+// A standard user needs the Windows administrator prompt, which a non-interactive logon (scheduled task, service) cannot show.
+const nonInteractiveInstallRefusal = "installing the supplied Paperboat executable needs administrator access, and this session cannot show the Windows approval prompt; run `pb install` from a signed-in desktop session and approve it"
+
+var consentPromptAvailable = func() bool { return elevation.IsCurrentProcessElevated() || elevation.ConsentPromptAvailable() }
+
 // InstallRunningBinary stages caller-supplied bytes into Windows' fixed,
 // per-user machine-wide slot. Account enrollment remains a separate action.
 func InstallRunningBinary(ctx context.Context, sourcePath string, source installsource.Source, installDir, controlURL string) (string, error) {
@@ -28,6 +33,9 @@ func InstallUpdateSource(ctx context.Context, sourcePath string, source installs
 	return installUpdateSource(ctx, sourcePath, source, bundlePath, force, installDir, true, controlURL)
 }
 func installUpdateSource(ctx context.Context, sourcePath string, source installsource.Source, bundlePath string, force bool, installDir string, explicitUpdate bool, controlURL string) (installedPath string, resultErr error) {
+	if !consentPromptAvailable() {
+		return "", runtimeFailure(nonInteractiveInstallRefusal)
+	}
 	if ctx == nil || bundlePath == "" && (!filepath.IsAbs(sourcePath) || filepath.Clean(sourcePath) != sourcePath) || installDir != "" {
 		return "", errors.New("invalid Windows installation source")
 	}
