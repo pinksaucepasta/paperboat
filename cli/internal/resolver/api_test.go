@@ -137,7 +137,7 @@ func readyUserMachineResponse(term *api.Terminal) api.ConnectionDescriptor {
 }
 
 func readyFileTransfer(expires time.Time) *api.FileTransfer {
-	return &api.FileTransfer{Endpoint: "https://edge.paperboat.test/v1/file-transfers", Auth: api.AuthMaterial{Method: "bearer", Token: "file-token", ExpiresAt: expires.Add(-time.Minute), Scopes: []string{"file:transfer"}}, Policy: api.FileTransferPolicy{Revision: "file-transfer-v1", MaxFileBytes: 50 << 20, MaxBatchFiles: 10, MaxBatchBytes: 500 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: 1 << 30}}
+	return &api.FileTransfer{Endpoint: "https://edge.paperboat.test/v1/file-transfers", Auth: api.AuthMaterial{Method: "bearer", Token: "file-token", ExpiresAt: expires.Add(-time.Minute), Scopes: []string{"file:transfer"}}, Policy: api.FileTransferPolicy{Revision: "file-transfer-v1", AutomaticMaxBatchBytes: api.AutomaticTransferLimit, MaxBatchFiles: 10, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: api.AutomaticTransferLimit}}
 }
 
 func TestValidateFileTransferRequiresExactRouteScopeAndPolicy(t *testing.T) {
@@ -145,7 +145,7 @@ func TestValidateFileTransferRequiresExactRouteScopeAndPolicy(t *testing.T) {
 	transfer := &api.FileTransfer{
 		Endpoint: "https://edge.paperboat.test/v1/file-transfers",
 		Auth:     api.AuthMaterial{Method: "bearer", Token: "transfer-token", ExpiresAt: expires.Add(-time.Minute), Scopes: []string{"file:transfer"}},
-		Policy:   api.FileTransferPolicy{Revision: "file-transfer-v1", MaxFileBytes: 50 << 20, MaxBatchFiles: 10, MaxBatchBytes: 500 << 20, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: 1 << 30},
+		Policy:   api.FileTransferPolicy{Revision: "file-transfer-v1", AutomaticMaxBatchBytes: api.AutomaticTransferLimit, MaxBatchFiles: 10, MaxConcurrentTransfers: 2, RetentionSeconds: 604800, DeliveryTimeoutSeconds: 600, MaxPendingSpoolBytes: api.AutomaticTransferLimit},
 	}
 	terminalURL, _ := secureEndpoint("wss://edge.paperboat.test/v1/runtime", "wss")
 	r := newTestResolver(&fakeClient{})

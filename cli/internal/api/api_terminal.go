@@ -127,9 +127,7 @@ type TerminalEndpoints struct {
 
 type FileTransferPolicy struct {
 	Revision               string `json:"revision"`
-	MaxFileBytes           int64  `json:"max_file_bytes"`
 	MaxBatchFiles          int    `json:"max_batch_files"`
-	MaxBatchBytes          int64  `json:"max_batch_bytes"`
 	MaxConcurrentTransfers int    `json:"max_concurrent_transfers"`
 	RetentionSeconds       int64  `json:"retention_seconds"`
 	DeliveryTimeoutSeconds int64  `json:"delivery_timeout_seconds"`
@@ -140,13 +138,10 @@ type FileTransferPolicy struct {
 // AutomaticTransferLimit is the largest Automatic transfer: 2,000,000,000 bytes (PLAN 3b, File transfer modes).
 const AutomaticTransferLimit = int64(2_000_000_000)
 
-// Bounds is the per-file and per-batch byte bound: the Automatic batch bound for both when the server sends it,
-// otherwise the earlier separate fields (accepted until the server stops sending them).
+// Bounds is the per-file and per-batch byte bound: the server publishes one Automatic batch bound, which
+// limits every file as well as the batch.
 func (p FileTransferPolicy) Bounds() (file, batch int64) {
-	if p.AutomaticMaxBatchBytes > 0 {
-		return p.AutomaticMaxBatchBytes, p.AutomaticMaxBatchBytes
-	}
-	return p.MaxFileBytes, p.MaxBatchBytes
+	return p.AutomaticMaxBatchBytes, p.AutomaticMaxBatchBytes
 }
 
 func (p FileTransferPolicy) ValidBounds() bool {

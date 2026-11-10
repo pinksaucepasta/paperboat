@@ -47,14 +47,14 @@ func asLimit(err error, target **filetransfer.LimitError) bool {
 	return ok
 }
 
-// Round 32: the daemon's stream lease was sized from the 50 MiB policy cap, so an Automatic send of
-// 500 MB to 2 GB was cut by the sender's own daemon although the server and destination accepted it.
+// Round 32: the daemon's stream lease was sized from the policy cap, so an Automatic send of
+// more than that cap was cut by the sender's own daemon although the server and destination accepted it.
 func TestTransferLeaseCoversTheDeclaredTotal(t *testing.T) {
-	policy := api.FileTransferPolicy{MaxFileBytes: 50 << 20, MaxBatchBytes: 500 << 20}
+	policy := api.FileTransferPolicy{AutomaticMaxBatchBytes: 100 << 20}
 	if got := fileTransferLeaseRequest("m", "e", 1, "o", "t", "s", time.Time{}, policy, api.TransferDeclaration{Mode: "automatic", Bytes: 1_500_000_000}).MaximumBytes; got < 1_500_000_000 {
 		t.Fatalf("lease %d bytes for a 1.5 GB declared send", got)
 	}
-	if got := fileTransferLeaseRequest("m", "e", 1, "o", "t", "s", time.Time{}, policy, api.TransferDeclaration{}).MaximumBytes; got < 50<<20 || got > 51<<20 {
+	if got := fileTransferLeaseRequest("m", "e", 1, "o", "t", "s", time.Time{}, policy, api.TransferDeclaration{}).MaximumBytes; got < 100<<20 || got > 101<<20 {
 		t.Fatalf("lease %d bytes for an undeclared send, want the policy cap", got)
 	}
 }

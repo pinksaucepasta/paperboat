@@ -93,10 +93,6 @@ func apiErrorMessageFor(code string, status int, details map[string]any) string 
 		if kind == "machine" && limit >= 1 && used == float64(int64(used)) && limit == float64(int64(limit)) {
 			return fmt.Sprintf("Team machine limit reached (%d of %d). Remove a machine from the team or upgrade.", int64(used), int64(limit))
 		}
-	case "destination_update_required":
-		if message := destinationUpdateMessage(details); message != "" {
-			return message
-		}
 	case "transfer_too_large":
 		total, _ := details["total_bytes"].(float64)
 		limit, _ := details["max_bytes"].(float64)
@@ -105,35 +101,6 @@ func apiErrorMessageFor(code string, status int, details map[string]any) string 
 		}
 	}
 	return apiErrorMessage(code, status)
-}
-
-// destinationUpdateMessage renders 409 destination_update_required (PLAN 3b File transfer modes step 1): the
-// receiving machine runs a pb that cannot accept this transfer.
-func destinationUpdateMessage(details map[string]any) string {
-	alias, _ := details["machine"].(string)
-	version, _ := details["minimum_version"].(string)
-	limit, _ := details["max_bytes"].(float64)
-	if !safeDetailLabel(alias) || limit <= 0 || version != "" && !safeDetailLabel(version) {
-		return ""
-	}
-	size := transferBytes(int64(limit))
-	if version == "" {
-		return alias + " cannot receive files over " + size + " or unlimited yet. Update pb on " + alias + " (pb update), or send less than " + size + "."
-	}
-	return alias + " needs pb " + version + " or later to receive files over " + size + " (or unlimited). Update pb on " + alias + " (pb update), or send less than " + size + "."
-}
-
-// safeDetailLabel accepts a machine name or version from the server's details, never free text.
-func safeDetailLabel(value string) bool {
-	if value == "" || len(value) > 64 {
-		return false
-	}
-	for _, r := range value {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '.' || r == '_') {
-			return false
-		}
-	}
-	return true
 }
 
 // transferBytes is a size for a person: whole MB for the binary caps (500 MB = 524,288,000 bytes), else GB.

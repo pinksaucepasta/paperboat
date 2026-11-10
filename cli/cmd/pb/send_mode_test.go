@@ -31,7 +31,7 @@ func TestSendUnlimitedDeclaresItsModeAndRefusalReadsAsAdvice(t *testing.T) {
 			declared = string(body)
 			writer.Header().Set("Content-Type", "application/json")
 			writer.WriteHeader(http.StatusConflict)
-			_, _ = writer.Write([]byte(`{"error":{"code":"destination_update_required","message":"x","details":{"machine":"hn","max_bytes":524288000}}}`))
+			_, _ = writer.Write([]byte(`{"error":{"code":"transfer_too_large","message":"x","details":{"total_bytes":3400000000,"max_bytes":2000000000}}}`))
 		default:
 			http.NotFound(writer, request)
 		}
@@ -78,7 +78,7 @@ func TestSendUnlimitedDeclaresItsModeAndRefusalReadsAsAdvice(t *testing.T) {
 	if err == nil || !strings.Contains(declared, `"transfer_mode":"unlimited"`) {
 		t.Fatalf("err=%v descriptor request=%q", err, declared)
 	}
-	if got := err.Error(); !strings.Contains(got, "hn cannot receive files over 500 MB or unlimited yet") {
+	if got := err.Error(); !strings.Contains(got, "This transfer is 3.4 GB. Automatic sends up to 2 GB") {
 		t.Fatalf("refusal text=%q", got)
 	}
 }

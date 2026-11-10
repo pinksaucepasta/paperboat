@@ -35,8 +35,8 @@ type Policy struct {
 // AutomaticTransferLimit is the largest Automatic transfer: 2,000,000,000 bytes (PLAN 3b, File transfer modes).
 const AutomaticTransferLimit = int64(2_000_000_000)
 
-// Bounds is the per-file and per-batch byte bound: the Automatic batch bound for both when the server sends it,
-// otherwise the earlier separate fields (accepted until the server stops sending them).
+// Bounds is the per-file and per-batch byte bound: the Automatic batch bound for both when a server policy sets it,
+// otherwise the policy's own MaxFileBytes and MaxBatchBytes (DefaultPolicy, in force until the server's policy arrives).
 func (p Policy) Bounds() (file, batch int64) {
 	if p.AutomaticMaxBatchBytes > 0 {
 		return p.AutomaticMaxBatchBytes, p.AutomaticMaxBatchBytes

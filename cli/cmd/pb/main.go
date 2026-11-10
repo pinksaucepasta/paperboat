@@ -860,7 +860,7 @@ func descriptorFileTransferPolicy(target *resolver.FileTransferTarget) filetrans
 		return filetransfer.Policy{}
 	}
 	policy := target.Policy
-	return filetransfer.Policy{Revision: policy.Revision, MaxFileBytes: policy.MaxFileBytes, MaxBatchFiles: policy.MaxBatchFiles, MaxBatchBytes: policy.MaxBatchBytes, MaxConcurrentTransfers: policy.MaxConcurrentTransfers, RetentionSeconds: policy.RetentionSeconds, DeliveryTimeoutSeconds: policy.DeliveryTimeoutSeconds, MaxPendingSpoolBytes: policy.MaxPendingSpoolBytes}
+	return filetransfer.Policy{Revision: policy.Revision, MaxBatchFiles: policy.MaxBatchFiles, MaxConcurrentTransfers: policy.MaxConcurrentTransfers, RetentionSeconds: policy.RetentionSeconds, DeliveryTimeoutSeconds: policy.DeliveryTimeoutSeconds, MaxPendingSpoolBytes: policy.MaxPendingSpoolBytes}
 }
 
 // subcommandOwnsVersionFlag reports whether the invoked subcommand defines its own --version
