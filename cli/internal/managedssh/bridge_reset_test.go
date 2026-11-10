@@ -227,3 +227,21 @@ func TestBridgeSSHOwnCloseRacingCloseWriteIsClean(t *testing.T) {
 		}
 	}
 }
+
+// What a real closed TCP socket reports from CloseWrite is what resultOfOwnClose must name: measured on Windows 11 for a
+// plain close, a close after the peer's FIN or RST, and a CloseWrite racing Close: always an *net.OpError (Op "close") around
+// net.ErrClosed, never a WSA errno. A live socket whose peer reset reports nothing.
+func TestResultOfOwnCloseNamesWhatARealClosedSocketReports(t *testing.T) {
+	bridgeSide, clientSide := tcpPair(t)
+	defer clientSide.Close()
+	if err := bridgeSide.Close(); err != nil {
+		t.Fatal(err)
+	}
+	err := bridgeSide.CloseWrite()
+	if err == nil {
+		t.Fatal("CloseWrite on a closed socket reported nothing")
+	}
+	if !resultOfOwnClose(err) {
+		t.Fatalf("CloseWrite after our own Close = %T %v (is ErrClosed: %v), not named as the result of our own close", err, err, errors.Is(err, net.ErrClosed))
+	}
+}
