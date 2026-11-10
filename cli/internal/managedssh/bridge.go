@@ -180,7 +180,7 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 }
 
 func normalizeBridgeError(err error) error {
-	if err == nil || managedSSHLeavesMatch(err, io.EOF, io.ErrClosedPipe, net.ErrClosed) {
+	if err == nil || managedSSHLeavesMatch(err, append([]error{io.EOF, io.ErrClosedPipe, net.ErrClosed}, closeResets...)...) {
 		return nil
 	}
 	return err
