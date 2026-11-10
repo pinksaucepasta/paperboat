@@ -27,8 +27,9 @@ class FakeSsh:
         self.replies, self.calls = list(replies), []
 
     def __call__(self, argv, input, capture_output, timeout, env):
-        script, *chunks = input.decode().split('\n')
-        payload = ''.join(chunks[:chunks.index('.')])
+        opening, script, *chunks = input.decode().split('\n')
+        assert opening == "$a=@'", opening
+        payload = ''.join(chunks[:chunks.index("'@ -split \"`r?`n\"")])
         self.calls.append({'argv': argv, 'script': base64.b64decode(script).decode(),
                            'payload': json.loads(base64.b64decode(payload)), 'env': env})
         rc, out = self.replies.pop(0)
@@ -39,14 +40,11 @@ class WindowsDeviceTest(unittest.TestCase):
     def device(self, password='secret'):
         return winhost.WindowsDevice(target='user@host', pb_exe=EXE, password=password)
 
-    def test_command_line_is_one_short_encoded_bootstrap_and_carries_no_secret(self):
+    def test_command_line_reads_the_script_from_stdin_and_carries_no_secret(self):
         argv = self.device().ssh_command()
         self.assertEqual(['sshpass', '-e', 'ssh'], argv[:3])
         self.assertNotIn('secret', ' '.join(argv))
-        command = argv[-1]
-        self.assertLess(len(command), 2000)  # cmd.exe allows 8191
-        encoded = command.rsplit(' ', 1)[1]
-        self.assertEqual(winhost.BOOTSTRAP, base64.b64decode(encoded).decode('utf-16-le'))
+        self.assertTrue(argv[-1].endswith(' -Command -'), argv[-1])  # nothing but PowerShell reads the session's stdin
         self.assertEqual(['ssh', '-o', 'BatchMode=yes'], self.device(password=None).ssh_command()[:3])
 
     def test_run_sends_exact_argv_input_env_and_returns_text_result(self):
@@ -162,7 +160,7 @@ class LocalDevice(winhost.WindowsDevice):
     path_flavor = pathlib.PurePosixPath
 
     def ssh_command(self):
-        return [PWSH, '-NoProfile', '-NonInteractive', '-Command', winhost.BOOTSTRAP]
+        return [PWSH, '-NoProfile', '-NonInteractive', '-Command', '-']
 
 
 @unittest.skipUnless(PWSH, 'set PB_TEST_PWSH to a pwsh binary to run the snippets for real')

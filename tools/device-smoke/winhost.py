@@ -30,16 +30,11 @@ DEFAULT_TARGET = 'pujan@victus'
 MISSING = 3  # exit code of a snippet whose file does not exist
 REFUSED = 4  # exit code of EXCHANGE when nothing accepts the connection
 
-# Reads "<base64 script>\n<base64 JSON payload in lines>" from stdin, then runs the script with $req set.
+# Runs after stdin has set $a to "<base64 script>", "<base64 JSON payload in lines>": the script runs with $req set.
 BOOTSTRAP = ("$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';"
-             # Lines up to a single "." and never end-of-input: Windows OpenSSH sometimes does not deliver EOF on a
-             # session's stdin (an identical 3 KB write answered once and hung the next time on victus).
-             # A reader on the raw stream: [Console]::In.ReadLine() never returns on a hosted Windows Server runner.
-             "$i=New-Object IO.StreamReader([Console]::OpenStandardInput());"
-             "$a=@();while(($l=$i.ReadLine()) -ne $null -and $l.Trim() -ne '.'){$a+=$l};"
              "$s=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($a[0].Trim()));"
              "$req=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String((($a[1..($a.Length-1)]|ForEach-Object{$_.Trim()}) -join '')))|ConvertFrom-Json;"
-             "Invoke-Expression $s")
+             "try{Invoke-Expression $s}catch{[Console]::Error.WriteLine($_);exit 1};exit 0")
 
 RUN = r"""
 $ErrorActionPreference='Stop'
@@ -268,8 +263,10 @@ class WindowsDevice:
         return ['sshpass', '-e'] + ssh if self.password else ['ssh', '-o', 'BatchMode=yes'] + ssh[1:]
 
     def ssh_command(self):
-        return self.ssh_prefix(self.target, 'powershell -NoProfile -NonInteractive -InputFormat Text -OutputFormat Text '
-                               '-EncodedCommand ' + _b64(BOOTSTRAP.encode('utf-16-le')))
+        # PowerShell reads its script from stdin and nothing else does. A script given on the command line that reads
+        # stdin itself races PowerShell 5.1, which takes a redirected stdin as pipeline input: whoever loses waits for
+        # an end-of-input that Windows OpenSSH does not always deliver (every call hung on some hosted runners).
+        return self.ssh_prefix(self.target, 'powershell -NoProfile -NonInteractive -OutputFormat Text -Command -')
 
     def ssh_environment(self):
         return dict(os.environ, SSHPASS=self.password) if self.password else None
@@ -279,7 +276,9 @@ class WindowsDevice:
         # The payload goes in short lines: Windows PowerShell 5.1 stalls reading one very long line from an SSH stdin
         # (a 36 KB file write never answered on victus).
         body = _b64(json.dumps(payload).encode())
-        stdin = _b64(script.encode()) + '\n' + '\n'.join(body[i:i + 4000] for i in range(0, len(body), 4000)) + '\n.\n'
+        # A blank line ends each statement PowerShell reads from stdin.
+        stdin = ("$a=@'\n" + _b64(script.encode()) + '\n' + '\n'.join(body[i:i + 4000] for i in range(0, len(body), 4000))
+                 + "\n'@ -split \"`r?`n\"\n\n" + BOOTSTRAP + '\n\n')
         try:
             done = subprocess.run(self.ssh_command(), input=stdin.encode(), capture_output=True, timeout=timeout,
                                   env=self.ssh_environment())
