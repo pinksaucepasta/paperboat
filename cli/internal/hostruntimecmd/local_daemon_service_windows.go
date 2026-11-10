@@ -11,7 +11,7 @@ import (
 )
 
 func runLocalDaemonService(_ context.Context, args []string, _ io.Writer, _ io.Writer) error {
-	instance, err := resolveWindowsRuntimeInstance(args)
+	instance, err := resolveWindowsServiceInstance("PaperboatLocalDaemon", args)
 	if err != nil {
 		return err
 	}

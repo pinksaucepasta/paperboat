@@ -39,7 +39,7 @@ const windowsOwnerWorkloadEnvironment = "PAPERBOAT_WINDOWS_OWNER_WORKLOAD"
 // runHostd owns Windows workloads for the service lifetime and starts the
 // replaceable worker only through the authenticated named-pipe fence.
 func runHostd(ctx context.Context, args []string, output io.Writer) (err error) {
-	instance, err := resolveWindowsRuntimeInstance(args)
+	instance, err := resolveWindowsServiceInstance("PaperboatHostd", args)
 	if err != nil {
 		return err
 	}

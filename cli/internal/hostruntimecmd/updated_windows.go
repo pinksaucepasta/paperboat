@@ -15,7 +15,7 @@ import (
 )
 
 func runUpdated(ctx context.Context, args []string, _ io.Writer, stderr io.Writer) error {
-	instance, err := resolveWindowsRuntimeInstance(args)
+	instance, err := resolveWindowsServiceInstance("PaperboatUpdated", args)
 	if err != nil {
 		return err
 	}
@@ -59,7 +59,7 @@ func sweepRetiredImages(ctx context.Context, layout service.Layout) {
 }
 
 func runActivator(_ context.Context, args []string, _ io.Writer, _ io.Writer) error {
-	instance, err := resolveWindowsRuntimeInstance(args)
+	instance, err := resolveWindowsServiceInstance("PaperboatUpdateActivator", args)
 	if err != nil {
 		return err
 	}
