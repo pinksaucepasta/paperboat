@@ -51,6 +51,9 @@ var consoleInput struct {
 // (measured through ssh -tt/ConPTY on Windows 11; ReadConsoleW with a zero wakeup mask delivers 0x1a intact). Anything that
 // is not a console (a pipe, a file) keeps ReadFile.
 func readHandle(handle windows.Handle, file *os.File, p []byte) (int, error) {
+	if len(p) == 0 { // nothing to fill: the read loop below would drain the console forever
+		return 0, nil
+	}
 	var mode uint32
 	if windows.GetConsoleMode(handle, &mode) != nil {
 		return file.Read(p)
