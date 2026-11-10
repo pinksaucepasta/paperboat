@@ -495,6 +495,9 @@ func contextError(parent, bounded context.Context) error {
 }
 
 func classifyLaunchError(err error) error {
+	if errors.Is(err, ErrElevationRestrictedJob) {
+		return err
+	}
 	if errors.Is(err, windows.ERROR_CANCELLED) || errors.Is(err, windows.ERROR_ACCESS_DENIED) || errors.Is(err, windows.ERROR_ELEVATION_REQUIRED) {
 		return fmt.Errorf("%w: %v", ErrElevationDenied, err)
 	}
@@ -1448,6 +1451,10 @@ func createProcessForRun(executable, parameters, directory string) (windows.Hand
 	flags := createProcessFlagsForRun()
 	// hidden: flags above set CREATE_NO_WINDOW and STARTF_USESHOWWINDOW/SW_HIDE.
 	if err := windows.CreateProcess(nil, commandLine, nil, nil, false, flags, nil, workingDirectory, &startup, &process); err != nil {
+		if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+			// Access denied on a launch that asks to leave the caller's job: that job forbids breakaway.
+			return 0, fmt.Errorf("%w: %v", ErrElevationRestrictedJob, err)
+		}
 		return 0, err
 	}
 	_ = windows.CloseHandle(process.Thread)

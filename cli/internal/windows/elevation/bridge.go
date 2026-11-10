@@ -71,6 +71,9 @@ var (
 	// ErrElevationDenied means that Windows did not start the elevated helper,
 	// normally because the user denied or canceled the UAC prompt.
 	ErrElevationDenied = errors.New("Windows administrator approval was denied")
+	// ErrElevationRestrictedJob means the caller runs inside a job object that forbids breakaway (some IDE and CI
+	// terminals), so Windows refused to start the helper outside it; this is not a refused UAC prompt.
+	ErrElevationRestrictedJob = errors.New("This terminal runs inside a restricted job (common in IDEs and CI) that can't start the administrator helper. Open a normal PowerShell window and run the command again.")
 	// ErrElevationCanceled means the caller canceled before the helper finished.
 	ErrElevationCanceled = errors.New("elevated Windows operation canceled")
 	// ErrElevationTimedOut means the bounded elevation operation exceeded its

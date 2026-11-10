@@ -622,3 +622,17 @@ func TestProtectedBridgeRejectsPrivateFaultMetadata(t *testing.T) {
 		}
 	}
 }
+
+func TestClassifyLaunchErrorSeparatesARestrictedJobFromARefusedPrompt(t *testing.T) {
+	job := classifyLaunchError(fmt.Errorf("%w: CreateProcess: Access is denied.", ErrElevationRestrictedJob))
+	if !errors.Is(job, ErrElevationRestrictedJob) || errors.Is(job, ErrElevationDenied) {
+		t.Fatalf("a job that forbids breakaway = %v, want ErrElevationRestrictedJob only", job)
+	}
+	refused := classifyLaunchError(windows.ERROR_CANCELLED)
+	if !errors.Is(refused, ErrElevationDenied) || errors.Is(refused, ErrElevationRestrictedJob) {
+		t.Fatalf("a refused UAC prompt = %v, want ErrElevationDenied only", refused)
+	}
+	if !errors.Is(classifyLaunchError(windows.ERROR_ACCESS_DENIED), ErrElevationDenied) {
+		t.Fatal("a plain access-denied launch (ShellExecute, no job) stopped being a refusal")
+	}
+}

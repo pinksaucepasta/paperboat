@@ -190,6 +190,8 @@ func runtimeFailureMessage(err error) string {
 		}
 	}
 	switch {
+	case errors.Is(err, elevation.ErrElevationRestrictedJob):
+		return elevation.ErrElevationRestrictedJob.Error()
 	case errors.Is(err, bootstrap.ErrEnrollmentTokenExpired):
 		return "The enrollment token expired. Create a new enrollment with Add machine and retry."
 	case errors.Is(err, bootstrap.ErrEnrollmentTokenUsed):
