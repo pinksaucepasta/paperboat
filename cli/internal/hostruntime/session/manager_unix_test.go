@@ -1050,20 +1050,26 @@ func TestCtrlCDiscardsOutputQueuedForAViewer(t *testing.T) {
 	if !manager.Interrupt(created.ID, key, 3) {
 		t.Fatal("Ctrl-C was not taken as the terminal's interrupt")
 	}
-	if got := queued(); got != 0 {
+	if got := queued(); got > 4096 {
 		t.Fatalf("%d bytes of flood still queued after Ctrl-C", got)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := manager.WaitNext(ctx, created.ID, "att_discard", 0); !errors.Is(err, ErrAttachmentLagged) {
+		t.Fatalf("after Ctrl-C over a flood the viewer got %v, want ErrAttachmentLagged (a fresh screen)", err)
 	}
 }
 
-// F3-11: what the shell prints in answer to Ctrl-C is not discarded with the flood.
-func TestCtrlCKeepsTheOutputThatFollowsIt(t *testing.T) {
+// F3-11: the screen a viewer is resynced to after Ctrl-C already holds what the shell printed in answer to it.
+func TestCtrlCResyncScreenHoldsTheAnswer(t *testing.T) {
 	manager, root, shell := realManager(t)
-	created, err := manager.Create(context.Background(), CreateRequest{Name: "prompt", Command: shellCommand(shell, root, "trap 'echo ANSWER; exit 0' INT; head -c 300000 /dev/zero | tr '\\0' x; while :; do sleep 0.1; done")})
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "prompt", Command: shellCommand(shell, root, "trap 'echo ANSWER' INT; head -c 300000 /dev/zero | tr '\\0' x; while :; do sleep 0.1; done")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer manager.Close(context.Background(), created.ID)
-	if _, err := manager.Attach(created.ID, "att_prompt", 0); err != nil {
+	viewer := Participant{AttachmentID: "att_prompt", AccountID: "acct", ClientID: "cli", Role: "owner", ConnectedAt: time.Now(), Dimensions: pty.Dimensions{Columns: 80, Rows: 24}}
+	if _, err := manager.AttachParticipantAtGeneration(created.ID, viewer, 0, created.Generation); err != nil {
 		t.Fatal(err)
 	}
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(100 * time.Millisecond) {
@@ -1080,12 +1086,16 @@ func TestCtrlCKeepsTheOutputThatFollowsIt(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	var seen []byte
-	for from := uint64(0); !bytes.Contains(seen, []byte("ANSWER")); {
-		event, err := manager.WaitNext(ctx, created.ID, "att_prompt", from)
-		if err != nil {
-			t.Fatalf("no answer to Ctrl-C after the discard (%d bytes seen): %v", len(seen), err)
+	if _, err := manager.WaitNext(ctx, created.ID, "att_prompt", 0); !errors.Is(err, ErrAttachmentLagged) {
+		t.Fatalf("after Ctrl-C over a flood the viewer got %v, want ErrAttachmentLagged", err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+		checkpoint, _, err := manager.BrowserScreenAttachment(created.ID, "att_prompt", "acct", "cli", created.Generation)
+		if err == nil && bytes.Contains(checkpoint, []byte("ANSWER")) {
+			return
 		}
-		seen, from = append(seen, event.Data...), event.EndSequence
+		if time.Now().After(deadline) {
+			t.Fatalf("the resync screen never held the answer to Ctrl-C (err=%v)", err)
+		}
 	}
 }

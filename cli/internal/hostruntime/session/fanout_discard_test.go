@@ -2,14 +2,26 @@ package session
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
 )
 
-// Ctrl-C drops the flood queued for every viewer, keeps a queued resize, and delivers later output.
-func TestDiscardPendingOutputKeepsControlAndLaterOutput(t *testing.T) {
+func publishText(t *testing.T, f *Fanout, next *uint64, data string) {
+	t.Helper()
+	event := history.Event{Channel: 1, StartSequence: *next, EndSequence: *next + uint64(len(data)), Data: []byte(data)}
+	*next = event.EndSequence
+	if _, err := f.Publish(event); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Ctrl-C over a flood sends a stalled or live viewer to a fresh screen (lagged) and keeps what came after it queued;
+// a viewer with only a prompt-sized backlog is left alone.
+func TestDiscardPendingOutputResyncsViewersWithAFloodBacklog(t *testing.T) {
 	f := NewFanout()
 	for _, id := range []string{"live", "stalled"} {
 		if err := f.Attach(id, 1<<20); err != nil {
@@ -17,63 +29,41 @@ func TestDiscardPendingOutputKeepsControlAndLaterOutput(t *testing.T) {
 		}
 	}
 	var next uint64
-	publish := func(channel byte, data string) {
-		event := history.Event{Channel: channel, StartSequence: next, EndSequence: next + uint64(len(data)), Data: []byte(data)}
-		next = event.EndSequence
-		if _, err := f.Publish(event); err != nil {
-			t.Fatal(err)
-		}
+	publishText(t, f, &next, strings.Repeat("x", interruptDiscardThreshold))
+	if err := f.Attach("late", 1<<20); err != nil { // attached after the flood: nothing queued
+		t.Fatal(err)
 	}
-	publish(1, "flood1")
-	publish(1, "flood2")
-	publish(2, "resize")
-	publish(1, "flood3")
 	through := f.PublishedEnd()
-	publish(1, "prompt") // printed after the interrupt, before the discard ran
+	publishText(t, f, &next, "^C\r\n$ ") // the shell's answer, printed before the discard ran
 	f.DiscardPendingOutput(through)
-	for _, id := range []string{"live", "stalled"} {
-		if _, queued, _ := f.Status(id); queued != uint64(len("resize")+len("flood3")+len("prompt")) {
-			t.Fatalf("%s queued=%d", id, queued)
-		}
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	var got []string
-	for range 3 {
-		event, err := f.WaitNext(ctx, "live")
-		if err != nil {
-			t.Fatal(err)
+	for _, id := range []string{"live", "stalled"} {
+		if _, queued, _ := f.Status(id); queued != uint64(len("^C\r\n$ ")) {
+			t.Fatalf("%s queued=%d, want only the output after the interrupt", id, queued)
 		}
-		got = append(got, string(event.Data))
-		_, _ = f.WaitNextFrom(ctx, "live", event.EndSequence)
+		if _, err := f.WaitNext(ctx, id); !errors.Is(err, ErrAttachmentLagged) {
+			t.Fatalf("%s: err=%v, want ErrAttachmentLagged (the screen resync)", id, err)
+		}
 	}
-	if got[0] != "resize" || got[1] != "flood3" || got[2] != "prompt" {
-		t.Fatalf("got %q", got)
+	event, err := f.WaitNext(ctx, "late")
+	if err != nil || string(event.Data) != "^C\r\n$ " {
+		t.Fatalf("a viewer with no backlog got %q, %v; want the prompt untouched", event.Data, err)
 	}
 }
 
-// The prompt that arrives between the interrupt and the discard is the first thing the viewer must see.
-func TestDiscardPendingOutputKeepsAPromptPublishedInTheWindow(t *testing.T) {
+// A backlog under the threshold drains by itself: no resync, nothing dropped.
+func TestDiscardPendingOutputLeavesASmallBacklog(t *testing.T) {
 	f := NewFanout()
 	if err := f.Attach("live", 1<<20); err != nil {
 		t.Fatal(err)
 	}
 	var next uint64
-	publish := func(data string) {
-		event := history.Event{Channel: 1, StartSequence: next, EndSequence: next + uint64(len(data)), Data: []byte(data)}
-		next = event.EndSequence
-		if _, err := f.Publish(event); err != nil {
-			t.Fatal(err)
-		}
-	}
-	publish("flood")
-	through := f.PublishedEnd()
-	publish("^C\r\n$ ")
-	f.DiscardPendingOutput(through)
+	publishText(t, f, &next, strings.Repeat("x", interruptDiscardThreshold-1))
+	f.DiscardPendingOutput(f.PublishedEnd())
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	event, err := f.WaitNext(ctx, "live")
-	if err != nil || string(event.Data) != "^C\r\n$ " {
-		t.Fatalf("first output after the discard = %q, %v; want the prompt", event.Data, err)
+	if event, err := f.WaitNext(ctx, "live"); err != nil || len(event.Data) != interruptDiscardThreshold-1 {
+		t.Fatalf("small backlog: %d bytes, %v; want it delivered whole", len(event.Data), err)
 	}
 }

@@ -238,29 +238,29 @@ func (f *Fanout) PublishedEnd() uint64 {
 	return f.published
 }
 
-// DiscardPendingOutput drops terminal output (channel 1) queued for every attached viewer up to through, the
-// PublishedEnd taken when the interrupt arrived: the userspace counterpart of a tty flushing its output queue on
-// VINTR (EternalTerminal drops droppable output on interrupt the same way). Whatever the program printed after the
-// interrupt, the shell's next prompt above all, stays queued. History keeps all of it for replay. Each cursor stops
-// before the first control event (resize) it has not delivered, so those still arrive; the viewer sees a sequence
-// gap, as after a lagged skip.
+// interruptDiscardThreshold is the backlog below which Ctrl-C leaves a viewer's queue alone: a prompt-sized tail
+// drains at once, only a flood is worth a resync (EternalTerminal flushes on interrupt from 64 KiB,
+// WriteBuffer.hpp FLUSH_THRESHOLD).
+const interruptDiscardThreshold = 64 << 10
+
+// DiscardPendingOutput drops the terminal output queued for every attached viewer up to through, the PublishedEnd
+// taken when the interrupt arrived: the userspace counterpart of a tty flushing its output queue on VINTR. A viewer
+// whose backlog reaches interruptDiscardThreshold jumps to through and is marked lagged, the state a free runner gets
+// when it falls behind a flood: its stream then sends it the current screen in-band (dispatcher ErrAttachmentLagged),
+// which already holds everything the program printed after the interrupt, the shell's prompt above all, so the
+// emulator is never left mid-escape-sequence by the gap. History keeps the flood for replay.
 func (f *Fanout) DiscardPendingOutput(through uint64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, cursor := range f.attachments {
-		if cursor.state != Attached || !cursor.receiveOutput || !cursor.hasCursor || cursor.cursor >= cursor.enqueuedEnd {
+		if cursor.state != Attached || !cursor.receiveOutput || !cursor.hasCursor {
 			continue
 		}
 		target := min(through, cursor.enqueuedEnd)
-		for _, event := range f.ring {
-			if event.Channel != 1 && event.StartSequence >= cursor.cursor && event.StartSequence < target {
-				target = event.StartSequence
-			}
-		}
-		if target <= cursor.cursor {
+		if target <= cursor.cursor || target-cursor.cursor < interruptDiscardThreshold {
 			continue
 		}
-		cursor.cursor, cursor.queuedBytes = target, cursor.enqueuedEnd-target
+		cursor.cursor, cursor.queuedBytes, cursor.lagged = target, cursor.enqueuedEnd-target, true
 		notify(cursor.notify)
 	}
 	f.compactLocked()
