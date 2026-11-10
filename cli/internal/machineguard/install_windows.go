@@ -88,27 +88,16 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 	if err != nil {
 		return err
 	}
-	var priorTaskPath string
+	// The Undo outlives this call, so the prior task is kept in memory: as a file removed on return, the
+	// restore after a failed update had nothing to register the prior guard from ("exit status 1").
+	var priorTask string
 	if existing {
 		priorXML, queryErr := exec.CommandContext(ctx, "schtasks.exe", "/Query", "/TN", windowsGuardTask, "/XML").Output()
 		if queryErr != nil {
 			rollback.cleanup()
 			return queryErr
 		}
-		priorTask, createErr := os.CreateTemp(DefaultStateDir, ".prior-task-*.xml")
-		if createErr != nil {
-			rollback.cleanup()
-			return createErr
-		}
-		priorTaskPath = priorTask.Name()
-		_, writeErr := priorTask.Write(priorXML)
-		writeErr = errors.Join(writeErr, priorTask.Close())
-		if writeErr != nil {
-			os.Remove(priorTaskPath)
-			rollback.cleanup()
-			return writeErr
-		}
-		defer os.Remove(priorTaskPath)
+		priorTask = decodeTaskXML(priorXML)
 	}
 	candidateStarted := false
 	candidateTaskCreated := false
@@ -127,10 +116,17 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 			}
 			return nil
 		}
-		if err := exec.CommandContext(c, "schtasks.exe", "/Create", "/TN", windowsGuardTask, "/XML", priorTaskPath, "/F").Run(); err != nil {
+		priorTaskPath, err := writeGuardTaskFile(DefaultStateDir, priorTask)
+		if err != nil {
 			return err
 		}
-		return exec.CommandContext(c, "schtasks.exe", "/Run", "/TN", windowsGuardTask).Run()
+		defer os.Remove(priorTaskPath)
+		for _, args := range [][]string{{"/Create", "/TN", windowsGuardTask, "/XML", priorTaskPath, "/F"}, {"/Run", "/TN", windowsGuardTask}} {
+			if output, err := exec.CommandContext(c, "schtasks.exe", args...).CombinedOutput(); err != nil {
+				return fmt.Errorf("restore the prior machine guard scheduled task: %w: %s", err, bytes.TrimSpace(output))
+			}
+		}
+		return nil
 	})
 	if existing {
 		output, stopErr := exec.CommandContext(ctx, "schtasks.exe", "/End", "/TN", windowsGuardTask).CombinedOutput()
@@ -147,21 +143,10 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 	if trustErr != nil && !isTrustPending(trustErr) {
 		return trustErr
 	}
-	replaceDeadline := time.Now().Add(5 * time.Second)
-	for {
-		err = replaceStateFile(temporary, installed)
-		rollback.record(installed)
-		if err == nil {
-			break
-		}
-		if !existing || time.Now().After(replaceDeadline) {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(100 * time.Millisecond):
-		}
+	err = replaceGuardFile(temporary, installed)
+	rollback.record(installed)
+	if err != nil {
+		return err
 	}
 	if err = protectedDirectory(directory, 0755); err != nil {
 		return err
@@ -169,23 +154,11 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 	if err = protectedDirectory(DefaultStateDir, 0700); err != nil {
 		return err
 	}
-	taskFile, err := os.CreateTemp(DefaultStateDir, ".task-*.xml")
+	taskPath, err := writeGuardTaskFile(DefaultStateDir, taskXML(installed))
 	if err != nil {
 		return err
 	}
-	taskPath := taskFile.Name()
 	defer os.Remove(taskPath)
-	xmlBody := utf16.Encode([]rune(taskXML(installed)))
-	encoded := make([]byte, 2+len(xmlBody)*2)
-	encoded[0], encoded[1] = 0xff, 0xfe
-	for index, value := range xmlBody {
-		encoded[2+index*2], encoded[3+index*2] = byte(value), byte(value>>8)
-	}
-	_, writeErr := taskFile.Write(encoded)
-	err = errors.Join(writeErr, taskFile.Close())
-	if err != nil {
-		return err
-	}
 	for _, args := range [][]string{{"/Create", "/TN", windowsGuardTask, "/XML", taskPath, "/F"}, {"/Run", "/TN", windowsGuardTask}} {
 		if args[0] == "/Run" {
 			candidateStarted = true
@@ -255,14 +228,7 @@ func ownedScheduledTask(ctx context.Context, installed string) (bool, error) {
 			} `xml:"Exec"`
 		} `xml:"Actions"`
 	}
-	if len(output) >= 2 && output[0] == 0xff && output[1] == 0xfe {
-		words := make([]uint16, (len(output)-2)/2)
-		for index := range words {
-			words[index] = binary.LittleEndian.Uint16(output[2+index*2:])
-		}
-		output = []byte(string(utf16.Decode(words)))
-	}
-	output = bytes.Replace(output, []byte(`encoding="UTF-16"`), []byte(`encoding="UTF-8"`), 1)
+	output = bytes.Replace([]byte(decodeTaskXML(output)), []byte(`encoding="UTF-16"`), []byte(`encoding="UTF-8"`), 1)
 	if err = xml.Unmarshal(output, &task); err != nil {
 		return false, fmt.Errorf("parse existing machine guard task: %w", err)
 	}
@@ -270,6 +236,39 @@ func ownedScheduledTask(ctx context.Context, installed string) (bool, error) {
 		return false, errors.New("existing machine guard task is not owned by Paperboat")
 	}
 	return true, nil
+}
+
+// decodeTaskXML reads what `schtasks /Query /XML` printed: UTF-16 with a byte order mark, or plain bytes.
+func decodeTaskXML(output []byte) string {
+	if len(output) < 2 || output[0] != 0xff || output[1] != 0xfe {
+		return string(output)
+	}
+	words := make([]uint16, (len(output)-2)/2)
+	for index := range words {
+		words[index] = binary.LittleEndian.Uint16(output[2+index*2:])
+	}
+	return string(utf16.Decode(words))
+}
+
+// writeGuardTaskFile writes a task definition as `schtasks /Create /XML` reads it (UTF-16 with a byte order
+// mark) into directory and returns the file; the caller removes it.
+func writeGuardTaskFile(directory, definition string) (string, error) {
+	file, err := os.CreateTemp(directory, ".task-*.xml")
+	if err != nil {
+		return "", err
+	}
+	words := utf16.Encode([]rune(definition))
+	encoded := make([]byte, 2+len(words)*2)
+	encoded[0], encoded[1] = 0xff, 0xfe
+	for index, value := range words {
+		encoded[2+index*2], encoded[3+index*2] = byte(value), byte(value>>8)
+	}
+	_, err = file.Write(encoded)
+	if err = errors.Join(err, file.Close()); err != nil {
+		os.Remove(file.Name())
+		return "", err
+	}
+	return file.Name(), nil
 }
 func taskXML(executable string) string {
 	var escaped bytes.Buffer

@@ -111,7 +111,7 @@ func (r *guardFileRollback) restore() error {
 			if current != nil && os.SameFile(current, item.original) {
 				continue
 			}
-			if err := replaceStateFile(item.backup, item.path); err != nil {
+			if err := replaceGuardFile(item.backup, item.path); err != nil {
 				return fmt.Errorf("restore prior guard installation from %s: %w", item.backup, err)
 			}
 			item.backup = ""
@@ -135,28 +135,29 @@ func finishGuardInstallation(ctx context.Context, r *guardFileRollback, result *
 		r.cleanup()
 		return
 	}
+	*result = errors.Join(*result, restoreGuardInstallation(ctx, r, stop, restore))
+}
+
+// restoreGuardInstallation stops the installed guard, puts the prior files back and starts the prior guard.
+func restoreGuardInstallation(ctx context.Context, r *guardFileRollback, stop, restore func(context.Context) error) error {
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	if stop != nil {
 		if err := stop(cleanup); err != nil {
-			*result = errors.Join(*result, fmt.Errorf("stop failed guard candidate before restoring installation: %w", err))
-			return
+			return fmt.Errorf("stop failed guard candidate before restoring installation: %w", err)
 		}
 	}
-	if err := r.restore(); err != nil {
-		// The files changed under us (another installer put a guard in place); keep the copy, but never
-		// leave the guard stopped: start whatever is installed (ubuntu24, 2026-10-26: a failed update's
-		// undo stopped the guard the updater had just healed and left the host without one).
-		*result = errors.Join(*result, err)
-		if restore != nil {
-			*result = errors.Join(*result, restore(cleanup))
-		}
-		return
+	err := r.restore()
+	if err == nil {
+		r.cleanup()
 	}
-	r.cleanup()
+	// When the files changed under us (another installer put a guard in place) the copy is kept, but the
+	// guard is never left stopped: start whatever is installed (ubuntu24, 2026-10-26: a failed update's
+	// undo stopped the guard the updater had just healed and left the host without one).
 	if restore != nil {
-		*result = errors.Join(*result, restore(cleanup))
+		err = errors.Join(err, restore(cleanup))
 	}
+	return err
 }
 
 // Undo restores the guard installation that an Install replaced: its executable and service files, then
@@ -172,12 +173,7 @@ func (u *Undo) Restore(ctx context.Context) error {
 	if u == nil {
 		return nil
 	}
-	err := errRestoreRequested
-	finishGuardInstallation(ctx, u.rollback, &err, u.stop, u.restore)
-	if errors.Is(err, errRestoreRequested) && len(unwrapJoined(err)) == 1 {
-		return nil
-	}
-	return errors.Join(unwrapJoinedExcept(err, errRestoreRequested)...)
+	return restoreGuardInstallation(ctx, u.rollback, u.stop, u.restore)
 }
 
 // Discard keeps the installed guard and drops the copies of the prior one.
@@ -185,25 +181,6 @@ func (u *Undo) Discard() {
 	if u != nil {
 		u.rollback.cleanup()
 	}
-}
-
-var errRestoreRequested = errors.New("guard restore requested")
-
-func unwrapJoined(err error) []error {
-	if joined, ok := err.(interface{ Unwrap() []error }); ok {
-		return joined.Unwrap()
-	}
-	return []error{err}
-}
-
-func unwrapJoinedExcept(err, skip error) []error {
-	var kept []error
-	for _, item := range unwrapJoined(err) {
-		if item != skip {
-			kept = append(kept, item)
-		}
-	}
-	return kept
 }
 
 // Install installs and starts the guard from executable. On success (trust may still be pending) it

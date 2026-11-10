@@ -192,6 +192,9 @@ func listenControl(path string) (controlListener, error) {
 }
 
 func replaceStateFile(source, target string) error { return os.Rename(source, target) }
+
+// replaceGuardFile puts an installed guard file in place; only Windows cannot replace a running executable.
+func replaceGuardFile(source, target string) error { return os.Rename(source, target) }
 func syncDirectory(path string) error {
 	directory, err := os.Open(path)
 	if err != nil {

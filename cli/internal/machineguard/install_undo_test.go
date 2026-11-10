@@ -5,8 +5,10 @@ package machineguard
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -50,5 +52,37 @@ func TestUndoRestoresTheExactPriorGuard(t *testing.T) {
 	}
 	if (*Undo)(nil).Restore(context.Background()) != nil {
 		t.Fatal("a nil Undo restores nothing")
+	}
+}
+
+// A restore whose files cannot be put back still starts the installed guard, and reports both failures: the
+// guard is never left stopped, and the cause of the failed restore is not hidden by the restart's.
+func TestUndoRestoreStartsTheGuardAndReportsEveryFailure(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pb")
+	if err := os.WriteFile(path, []byte("guard 2026.10.23.6"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rollback, err := snapshotGuardFilesValidated(func(string, string, os.FileInfo) error { return nil }, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Never recorded: the installed file is not the one this installation put there.
+	foreign := filepath.Join(dir, ".foreign")
+	if err := os.WriteFile(foreign, []byte("another installer's guard"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaceStateFile(foreign, path); err != nil {
+		t.Fatal(err)
+	}
+	restartFailed := errors.New("restart failed")
+	restarted := 0
+	undo := &Undo{rollback: rollback, restore: func(context.Context) error { restarted++; return restartFailed }}
+	err = undo.Restore(context.Background())
+	if restarted != 1 || !errors.Is(err, restartFailed) || !strings.Contains(err.Error(), "changed externally") {
+		t.Fatalf("restarted=%d, err=%v; want one restart and both failures", restarted, err)
+	}
+	if strings.Contains(err.Error(), "restore requested") {
+		t.Fatalf("the restore's own marker is reported as a failure: %v", err)
 	}
 }

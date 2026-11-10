@@ -35,6 +35,14 @@ func TestProtectedDirectoryIsCreatedFromATokenWithRestoreDisabled(t *testing.T) 
 // elevated console holds disabled; a token that does not hold them (not elevated) skips the test.
 func setRestorePrivilege(t *testing.T, enabled bool) {
 	t.Helper()
+	if !adjustRestorePrivilege(t, enabled) {
+		t.Skip("the process token does not hold SeRestorePrivilege and SeBackupPrivilege (not elevated)")
+	}
+}
+
+// adjustRestorePrivilege is setRestorePrivilege without the skip: it reports whether the token holds both.
+func adjustRestorePrivilege(t *testing.T, enabled bool) bool {
+	t.Helper()
 	var token windows.Token
 	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_ADJUST_PRIVILEGES|windows.TOKEN_QUERY, &token); err != nil {
 		t.Fatal(err)
@@ -55,7 +63,8 @@ func setRestorePrivilege(t *testing.T, enabled bool) {
 			t.Fatal(err)
 		}
 		if windows.GetLastError() == windows.ERROR_NOT_ALL_ASSIGNED {
-			t.Skip("the process token does not hold " + privilege + " (not elevated)")
+			return false
 		}
 	}
+	return true
 }

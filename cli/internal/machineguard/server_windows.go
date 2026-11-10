@@ -11,8 +11,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/pinksaucepasta/paperboat/internal/machineguard/wfp"
@@ -182,6 +184,43 @@ func replaceStateFile(source, target string) error {
 		return err
 	}
 	return windows.MoveFileEx(from, to, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
+}
+
+const guardRetiredSuffix = ".retired-"
+
+var deleteGuardFileAtRestart = func(path *uint16) error {
+	return windows.MoveFileEx(path, nil, windows.MOVEFILE_DELAY_UNTIL_REBOOT)
+}
+
+// replaceGuardFile puts source in place of the guard executable. `schtasks /End` returns before the guard's
+// process has exited, and Windows refuses to replace a running image ("Access is denied"), so the replacement
+// waits out that bounded shutdown (Windows Sandbox, 2026-11-10: the rollback of a failed update replaced it at
+// once and left the new guard in place). An image that still runs then is moved aside (a running image can be
+// renamed), as hostinstall's removeWindowsFileWithRetry does, and removed by the next call or the restart.
+func replaceGuardFile(source, target string) error {
+	if stale, err := filepath.Glob(target + guardRetiredSuffix + "*"); err == nil {
+		for _, retired := range stale {
+			_ = os.Remove(retired) // still running: stays for the next call or the restart
+		}
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err := replaceStateFile(source, target)
+		if err == nil || !errors.Is(err, windows.ERROR_ACCESS_DENIED) && !errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
+			return err
+		}
+		if time.Now().After(deadline) {
+			retired := target + guardRetiredSuffix + strconv.FormatInt(time.Now().UnixNano(), 36)
+			if moveErr := os.Rename(target, retired); moveErr != nil {
+				return errors.Join(err, fmt.Errorf("move the running machine guard executable aside: %w", moveErr))
+			}
+			if pointer, pointerErr := windows.UTF16PtrFromString(retired); pointerErr == nil {
+				_ = deleteGuardFileAtRestart(pointer) // last resort; the sweep above normally removes it first
+			}
+			return replaceStateFile(source, target)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 func protectedMachineDirectory(path string, system *windows.SID) bool {
 	descriptor, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
