@@ -477,6 +477,7 @@ def stream_https(c, team, member):
 
 def stream_s3(c, team, member):
     """F19-10 S3: gzip NDJSON objects under prefix/workspace/date, signed with SigV4, checked by a real S3 server."""
+    prefix = 'f19-' + os.urandom(8).hex()
     c.run(['bash', '-c', 'nohup python3 .f19helper.py forward 8097 %s >/dev/null 2>&1 &' % shlex.quote(c.a.s3_origin)])
     time.sleep(1)
     c.api('DELETE', '/v1/teams/%s/audit-streams/s3' % team)
@@ -490,20 +491,20 @@ def stream_s3(c, team, member):
             if not path.is_file() or path.stat().st_mode & 0o077:
                 raise RuntimeError('the controller S3 fixture key ' + path.name + ' must exist with mode 0600')
     r = c.api('PUT', '/v1/teams/%s/audit-streams/s3' % team, {'url': url, 'region': c.a.s3_region, 'bucket': c.a.s3_bucket,
-              'prefix': 'f19', 'access_key_id': '@' + keys[0], 'secret_access_key': '@' + keys[1]})
+              'prefix': prefix, 'access_key_id': '@' + keys[0], 'secret_access_key': '@' + keys[1]})
     c.step('configure the S3 stream', r['status'] == 200, r)
     r = c.api('POST', '/v1/teams/%s/audit-streams/s3/test' % team)
     c.step('the S3 test upload is accepted (SigV4 verified by the store)', r['status'] in (200, 204), r)
     touch_role(c, member)
 
     def objects():
-        done = subprocess.run(shlex.split(c.a.s3_list_cmd) + ['sh -c ' + shlex.quote('cd %s/%s && find f19 -name "*.ndjson.gz" -exec sh -c \'echo "== $1"; gunzip -c "$1"\' _ {} \\;' % (c.a.s3_root, c.a.s3_bucket))],
+        done = subprocess.run(shlex.split(c.a.s3_list_cmd) + ['sh -c ' + shlex.quote('cd %s/%s && find %s -name "*.ndjson.gz" -exec sh -c \'echo "== $1"; gunzip -c "$1"\' _ {} \\;' % (c.a.s3_root, c.a.s3_bucket, prefix))],
                               capture_output=True, text=True, timeout=60)
         return done.stdout if 'team.role' in done.stdout else None
     out = wait(objects, 120)
     key = (out or '').split('\n', 1)[0]
-    c.step('events land as gzip NDJSON at f19/team-<team>/YYYY/MM/DD/<first>-<last>.ndjson.gz',
-           out and key.startswith('== f19/team-%s/' % team) and key.endswith('.ndjson.gz'), (out or '')[:300])
+    c.step('events land as gzip NDJSON at the current prefix/team-<team>/YYYY/MM/DD/<first>-<last>.ndjson.gz',
+           out and key.startswith('== %s/team-%s/' % (prefix, team)) and key.endswith('.ndjson.gz'), key)
     r = c.api('DELETE', '/v1/teams/%s/audit-streams/s3' % team)
     c.step('stop the S3 stream', r['status'] in (200, 204), r)
     return tid
