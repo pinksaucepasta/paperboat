@@ -643,6 +643,30 @@ func TestReconnectingConnStalledLinkSurvivesANonRevocationRefusalDuringAnOutage(
 	}
 }
 
+// The probe of a stalled link can connect just after the supervisor replaced that link itself. Such a probe is closed,
+// not adopted when the replacement ends: adopted, it brought an ended terminal back and replayed its output
+// ("resumedresumed", Cross-platform run 42737697330 on macOS).
+func TestReconnectingConnDropsAProbeMadeForAnEarlierLink(t *testing.T) {
+	first := &blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}
+	stale := &blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}
+	c := NewReconnectingConn(context.Background(), first, 2, 0, func(context.Context) (Conn, error) {
+		return nil, errors.New("must not redial")
+	})
+	defer c.Close()
+	c.probed.Store(&probedLink{stalled: &reconnectTestConn{}, conn: stale}) // made for a link already replaced
+	_ = first.Close()                                                       // the current link ends cleanly
+	ended := make(chan int, 1)
+	go func() { code, _ := c.Wait(); ended <- code }()
+	select {
+	case code := <-ended:
+		if code != 0 || !stale.once.Load() {
+			t.Fatalf("code=%d stale probe closed=%t", code, stale.once.Load())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the terminal moved to a probe made for an earlier link instead of ending")
+	}
+}
+
 // F3-15 N4 (1 run in 16): the daemon tore down both silent links at once and each reported a clean end (code 0, no error),
 // which ended the terminal as if the shell had exited, 46 s into a 45 s outage. A shell exit is heard before it is
 // reported, and hearing the host clears the stall; a clean end of a link still flagged silent is a local teardown, so the

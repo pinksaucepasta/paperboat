@@ -137,7 +137,7 @@ type ReconnectingConn struct {
 	current     Conn
 	available   chan struct{}
 	redial      atomic.Bool
-	probed      atomic.Pointer[Conn] // a fresh link dialed while the current one was stalled
+	probed      atomic.Pointer[probedLink] // a fresh link dialed while the current one was stalled
 	probing     atomic.Bool
 	linkStalled atomic.Bool
 	// refused is a permanent refusal the stalled-link probe met (access revoked); supervise ends with it.
@@ -284,13 +284,21 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 			c.done <- reconnectResult{1, *refused}
 			return
 		}
-		if next := c.probed.Swap(nil); next != nil {
+		next := c.probed.Swap(nil)
+		if next != nil && next.stalled != conn {
+			// The probe connected after this supervisor had replaced the link it was made for. Adopting it now
+			// attached a second time when the replacement ended: an exited terminal came back and replayed its output.
+			c.recordOldLink(connection, "supervise", "probe_discarded", nil)
+			_ = next.conn.Close()
+			next = nil
+		}
+		if next != nil {
 			c.recordOldLink(connection, "supervise", "probe_adopted", nil)
 			c.redial.Store(false)
 			c.linkStalled.Store(false)
 			c.setUnavailable(conn)
 			c.reason.Store("no reply from the machine")
-			conn = *next
+			conn = next.conn
 			attachedAt = time.Now()
 			c.setCurrent(conn)
 			c.notify(ReconnectRecovered)
@@ -576,6 +584,9 @@ func (c *ReconnectingConn) Redial() {
 	_ = conn.Close()
 }
 
+// probedLink is a fresh link and the stalled link it was dialed to replace.
+type probedLink struct{ stalled, conn Conn }
+
 // probeStalled dials, with backoff, while a link is silent, keeping the silent link: a machine whose carrier restarted
 // leaves it dead until TCP gives up (~2 min), while a network that comes back resumes it. A fresh link replaces
 // it; the daemon carries unanswered input to it by input owner. ET does the same on keepalive loss
@@ -618,7 +629,15 @@ func (c *ReconnectingConn) probeStalled(stalled Conn, connection string) {
 				return
 			}
 			c.recordOldLink(connection, "probeStalled", "probe_selected", nil)
-			c.probed.Store(&next)
+			link := &probedLink{stalled: stalled, conn: next}
+			c.probed.Store(link)
+			if !current() && c.probed.CompareAndSwap(link, nil) {
+				// The supervisor left the stalled link between the check above and the store, and is redialing
+				// itself: nobody would adopt this link, and the terminal must not hold two.
+				c.recordOldLink(connection, "probeStalled", "probe_discarded", nil)
+				_ = next.Close()
+				return
+			}
 			_ = stalled.Close()
 			return
 		}
