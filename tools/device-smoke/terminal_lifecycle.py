@@ -50,9 +50,29 @@ class Terminal:
         while data:
             if time.monotonic() >= deadline:
                 raise RuntimeError('terminal input exceeded its delivery bound')
-            if select.select([], [self.fd], [], 0.1)[1]:
+            readable, writable, _ = select.select([self.fd], [self.fd], [], 0.1)
+            if readable:
+                self.drain()  # an ssh -tt hop stops reading our input once nobody reads its output
+            if writable:
                 count = os.write(self.fd, data[:1024])
                 data = data[count:]
+
+    def drain(self):
+        """Read what the terminal printed while a send waits, keeping the tail when a flood outgrows the bounds."""
+        try:
+            chunk = os.read(self.fd, 65536)
+        except OSError as error:
+            if error.errno != errno.EIO:
+                raise
+            chunk = b''
+        if not chunk:
+            raise RuntimeError('terminal closed while its input was being delivered')
+        self.answer_queries(chunk)
+        self.pending.extend(chunk)
+        self.output.extend(chunk)
+        if len(self.output) > 4 << 20:
+            del self.output[:-(1 << 20)]
+            del self.pending[:-(1 << 20)]
 
     def answer_queries(self, chunk):
         # This fixture's virtual terminal starts at home with white on black.
