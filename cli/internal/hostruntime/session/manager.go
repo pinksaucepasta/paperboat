@@ -93,9 +93,10 @@ type managedSession struct {
 	persistMu   sync.Mutex
 	liveProcess atomic.Pointer[liveProcess]
 	interrupt   atomic.Pointer[InputKey] // the interrupt key Interrupt delivered ahead of stuck input
-	// lastInterrupt is what Interrupt did for the key (interruptMu): WriteContext reports it back to the sender.
+	// interrupts is what Interrupt did for each attachment's last Ctrl-C (interruptMu): WriteContext reports it back to
+	// that sender. One record per attachment, so two viewers pressing Ctrl-C together each get their own answer.
 	interruptMu      sync.Mutex
-	lastInterrupt    interruptRecord
+	interrupts       map[string]interruptRecord
 	id               string
 	name             string
 	supportReference atomic.Pointer[string]

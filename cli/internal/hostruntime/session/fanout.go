@@ -271,6 +271,14 @@ func (f *Fanout) DiscardPendingOutput(through uint64) (resynced []string) {
 	return resynced
 }
 
+// Lagged reports an attachment whose backlog was dropped and whose screen has not been sent yet.
+func (f *Fanout) Lagged(attachmentID string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cursor, ok := f.attachments[attachmentID]
+	return ok && cursor.lagged
+}
+
 // hasControlLocked reports a non-terminal-output (resize) event queued in [from, to).
 func (f *Fanout) hasControlLocked(from, to uint64) bool {
 	for _, event := range f.ring {

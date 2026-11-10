@@ -128,9 +128,14 @@ func (m *Manager) Interrupt(sessionID string, key InputKey, data byte) bool {
 		for _, id := range session.fanout.DiscardPendingOutput(through) {
 			discarded = discarded || id == key.AttachmentID
 		}
+		// A viewer another Ctrl-C resynced a moment ago, whose screen has not been sent yet, is resynced for this key too.
+		discarded = discarded || session.fanout.Lagged(key.AttachmentID)
 	}
 	session.interruptMu.Lock()
-	session.lastInterrupt = interruptRecord{key: key, through: through, discarded: discarded}
+	if session.interrupts == nil {
+		session.interrupts = map[string]interruptRecord{}
+	}
+	session.interrupts[key.AttachmentID] = interruptRecord{key: key, through: through, discarded: discarded}
 	session.interruptMu.Unlock()
 	return handled
 }
@@ -146,10 +151,10 @@ type interruptRecord struct {
 // was written normally: an idle unix shell, raw mode) nothing was discarded and the cut is the current end of output.
 func (s *managedSession) answerInterrupt(key InputKey, decision *InputDecision) {
 	s.interruptMu.Lock()
-	record := s.lastInterrupt
-	matches := record.key.InputSequence != 0 && sameInputCursor(record.key, key) && record.key.InputSequence == key.InputSequence
+	record, found := s.interrupts[key.AttachmentID]
+	matches := found && record.key.InputSequence != 0 && sameInputCursor(record.key, key) && record.key.InputSequence == key.InputSequence
 	if matches {
-		s.lastInterrupt = interruptRecord{}
+		delete(s.interrupts, key.AttachmentID)
 	}
 	s.interruptMu.Unlock()
 	if matches {

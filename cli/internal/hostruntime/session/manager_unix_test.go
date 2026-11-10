@@ -1165,3 +1165,43 @@ func TestLoneCtrlCIsAnsweredWithTheCut(t *testing.T) {
 		})
 	}
 }
+
+// Two viewers pressing Ctrl-C almost together each get their own answer: the second Interrupt must not replace the
+// first's record, and the viewer the first resynced is resynced for the second key too (its screen is still pending).
+func TestTwoViewersPressingCtrlCTogetherAreBothAnswered(t *testing.T) {
+	manager, root, shell := realManager(t)
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "two", Command: shellCommand(shell, root, "head -c 300000 /dev/zero | tr '\\0' x; exec sleep 30")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background(), created.ID)
+	for _, id := range []string{"att_a", "att_b"} {
+		if _, err := manager.Attach(created.ID, id, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+		_, a, _ := manager.AttachmentStatus(created.ID, "att_a")
+		_, b, _ := manager.AttachmentStatus(created.ID, "att_b")
+		if a >= 300000 && b >= 300000 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("flood never queued for both viewers")
+		}
+	}
+	keyA := InputKey{ClientID: "cli_a", AttachmentID: "att_a", Generation: created.Generation, InputSequence: 1}
+	keyB := InputKey{ClientID: "cli_b", AttachmentID: "att_b", Generation: created.Generation, InputSequence: 1}
+	if !manager.Interrupt(created.ID, keyA, 3) || !manager.Interrupt(created.ID, keyB, 3) {
+		t.Fatal("a Ctrl-C was not taken as the interrupt")
+	}
+	for _, key := range []InputKey{keyA, keyB} {
+		decision, err := manager.WriteContext(context.Background(), created.ID, key, []byte{3})
+		if err != nil || decision.Status != InputAccepted {
+			t.Fatalf("%s: write %#v, %v", key.AttachmentID, decision, err)
+		}
+		if !decision.InterruptDiscarded || decision.InterruptThrough == 0 {
+			t.Fatalf("%s: answered discarded=%v through=%d, want its own discarded answer", key.AttachmentID, decision.InterruptDiscarded, decision.InterruptThrough)
+		}
+	}
+}
