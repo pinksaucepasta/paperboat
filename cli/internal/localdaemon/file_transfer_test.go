@@ -172,8 +172,21 @@ func TestFileTransferBrokerOutlivesCredentialAndKeepsPeerAndCapacityBounds(t *te
 	if err := broker.ReleaseFileTransfer(peer, first); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := broker.OpenFileTransferStream(context.Background(), peer, first); !errors.Is(err, localapi.ErrPermission) {
+	// A released (or never held, or lost in a restart) handle is unknown, which the sender answers with a new lease; a
+	// handle held by another peer stays a permission failure.
+	if _, err := broker.OpenFileTransferStream(context.Background(), peer, first); !errors.As(err, new(localapi.TransferLeaseUnknownError)) {
 		t.Fatal("released lease remained usable", err)
+	}
+	request.OperationID = "operation_again"
+	request.Deadline = now.Add(3 * time.Hour) // the broker clock was moved two hours ahead above
+	again, err := broker.PrepareFileTransfer(context.Background(), peer, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := peer
+	other.PID++
+	if _, err := broker.OpenFileTransferStream(context.Background(), other, again.Handle); !errors.Is(err, localapi.ErrPermission) {
+		t.Fatal("another peer opened a held lease", err)
 	}
 }
 

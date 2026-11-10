@@ -28,3 +28,17 @@ func TestLocalDaemonRestartingRecognisesAMissingWindowsPipe(t *testing.T) {
 		}
 	}
 }
+
+// An unknown lease handle is not a restarting daemon: waiting on the same handle never helps.
+func TestUnknownLeaseHandleIsNotARestartingDaemon(t *testing.T) {
+	unknown := &localapi.RemoteError{StatusCode: 404, Code: localapi.FileTransferUnknownHandleCode}
+	if localDaemonRestarting(unknown) || !transferLeaseUnknown(fmt.Errorf("stream: %w", unknown)) {
+		t.Fatal("an unknown handle was classified as a restarting daemon")
+	}
+	if transferLeaseUnknown(&localapi.RemoteError{StatusCode: 404, Code: "other"}) || transferLeaseUnknown(&localapi.RemoteError{StatusCode: 503, Code: localapi.FileTransferUnknownHandleCode}) {
+		t.Fatal("only a 404 with the unknown-handle code is a lost lease")
+	}
+	if !retryableTransferFailure(&transferLeaseLost{unknown}) {
+		t.Fatal("a lost lease is not retried with a new lease")
+	}
+}

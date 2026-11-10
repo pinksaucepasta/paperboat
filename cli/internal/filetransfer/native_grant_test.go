@@ -56,9 +56,11 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 	// restarting: the renewal first finds the local daemon's socket gone, as while an update restarts
 	// it (F14-02: two 50 MiB sends in flight across pb update failed instead of resuming).
 	// stopping: the old daemon, shutting down for the update, answers the stream with 503 first.
+	// lease-lost: the restarted daemon is up but its in-memory lease table is empty (F14-02 on Windows, where an update
+	// replaces the user daemon): the stream open says the handle is unknown and the sender prepares a new lease once.
 	// waiting: an Unlimited transfer's daemon refuses the stream while only a hosted relay reaches the
 	// destination (no_eligible_path); the upload waits, says so, and resumes at the committed offset.
-	for _, mode := range []string{"allowed", "denied", "restarting", "stopping", "waiting"} {
+	for _, mode := range []string{"allowed", "denied", "restarting", "stopping", "waiting", "lease-lost"} {
 		t.Run(mode, func(t *testing.T) {
 			denied := mode == "denied"
 			daemonDown := 0
@@ -66,6 +68,10 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 			var downErr error = &net.OpError{Op: "dial", Net: "unix", Err: os.NewSyscallError("connect", syscall.ENOENT)}
 			if mode == "stopping" {
 				downErr = &localapi.RemoteError{StatusCode: http.StatusServiceUnavailable, Code: "file_transfer_stream_unavailable", Message: "file transfer stream could not open"}
+			}
+			if mode == "lease-lost" {
+				// the daemon came back (the renewal works at once) but holds no lease for the old handle: it must be replaced
+				downErr = &localapi.RemoteError{StatusCode: http.StatusNotFound, Code: localapi.FileTransferUnknownHandleCode, Message: "lease unknown"}
 			}
 			if mode == "waiting" {
 				downErr = &localapi.RemoteError{StatusCode: http.StatusServiceUnavailable, Code: localapi.NoEligiblePathCode, Message: "Waiting for a direct connection or your relay: only a Paperboat relay reaches this machine now"}
@@ -132,7 +138,7 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 						oldExpired = true
 						// Commit the chunk, then lose the response and original carrier.
 						first.closed.Store(true)
-						restarting.Store(mode == "restarting" || mode == "stopping")
+						restarting.Store(mode == "restarting" || mode == "stopping" || mode == "lease-lost")
 						connection, _, hijackErr := w.(http.Hijacker).Hijack()
 						if hijackErr != nil {
 							t.Error(hijackErr)

@@ -201,7 +201,7 @@ func retryableTransferFailure(err error) bool {
 		switch err.(type) {
 		case *nativeAuthorizationFailure, *nativeSourceFailure:
 			return false
-		case *localDaemonUnavailable, *PathWaitingError:
+		case *localDaemonUnavailable, *transferLeaseLost, *PathWaitingError:
 			return true
 		}
 		if remote, ok := err.(*Error); ok && !transientHTTPStatus(remote.StatusCode) {

@@ -131,11 +131,11 @@ func (b *FileTransferBroker) PrepareFileTransfer(ctx context.Context, peer local
 func (b *FileTransferBroker) OpenFileTransferStream(ctx context.Context, peer localapi.Peer, handle string) (net.Conn, error) {
 	b.mu.Lock()
 	lease, ok := b.leases[handle]
-	if ok && !samePeer(lease.peer, peer) {
-		ok = false
-	}
 	b.mu.Unlock()
 	if !ok {
+		return nil, localapi.TransferLeaseUnknownError{}
+	}
+	if !samePeer(lease.peer, peer) {
 		return nil, localapi.ErrPermission
 	}
 	if !lease.unlimited {

@@ -434,6 +434,11 @@ func (s *Server) fileTransferStream(writer http.ResponseWriter, request *http.Re
 		return
 	}
 	stream, err := s.config.FileTransfers.OpenFileTransferStream(request.Context(), peer, handle)
+	var unknown TransferLeaseUnknownError
+	if errors.As(err, &unknown) {
+		writeError(writer, http.StatusNotFound, requestID, unknown.LocalAPICode(), "file transfer lease is unknown; prepare a new lease and resume")
+		return
+	}
 	if err != nil || stream == nil {
 		if err == nil {
 			err = ErrInvalidResponse

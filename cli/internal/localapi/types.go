@@ -43,6 +43,19 @@ type ResumeUnavailableError struct{}
 func (ResumeUnavailableError) Error() string        { return "no resume secret is held for this terminal" }
 func (ResumeUnavailableError) LocalAPICode() string { return "resume_unavailable" }
 
+// FileTransferUnknownHandleCode is the local API code for a file transfer stream whose lease handle this daemon does not
+// hold: leases live in the daemon's memory, so a restarted daemon (Windows replaces it in an update) knows none. The
+// sender then prepares a new lease and resumes at the receiver's committed offset instead of retrying the dead handle.
+const FileTransferUnknownHandleCode = "file_transfer_unknown_handle"
+
+// TransferLeaseUnknownError: no lease is held for the handle a stream request names.
+type TransferLeaseUnknownError struct{}
+
+func (TransferLeaseUnknownError) Error() string {
+	return "no file transfer lease is held for this handle"
+}
+func (TransferLeaseUnknownError) LocalAPICode() string { return FileTransferUnknownHandleCode }
+
 type FileTransferRequest struct {
 	Schema            string    `json:"schema"`
 	MachineID         string    `json:"machine_id"`

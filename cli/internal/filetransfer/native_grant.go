@@ -133,6 +133,8 @@ func (o *nativeGrantOwner) RoundTrip(request *http.Request) (*http.Response, err
 		if localDaemonRestarting(err) {
 			// The lease's stream goes through the local daemon, which is restarting.
 			err = &localDaemonUnavailable{err}
+		} else if transferLeaseUnknown(err) {
+			err = &transferLeaseLost{err}
 		} else if waiting := waitingForPath(err); waiting != nil {
 			err = waiting
 		}
@@ -211,6 +213,20 @@ func (e *localDaemonUnavailable) Error() string {
 	return "the local Paperboat daemon is restarting: " + e.cause.Error()
 }
 func (e *localDaemonUnavailable) Unwrap() error { return e.cause }
+
+// transferLeaseLost is a stream the daemon refused because it holds no lease for the handle (it restarted and its leases
+// were in memory). Unlike a restarting daemon, retrying the same handle never works: the renewal prepares a new lease.
+type transferLeaseLost struct{ cause error }
+
+func (e *transferLeaseLost) Error() string {
+	return "the local Paperboat daemon lost the transfer lease: " + e.cause.Error()
+}
+func (e *transferLeaseLost) Unwrap() error { return e.cause }
+
+func transferLeaseUnknown(err error) bool {
+	var local *localapi.RemoteError
+	return errors.As(err, &local) && local.StatusCode == http.StatusNotFound && local.Code == localapi.FileTransferUnknownHandleCode
+}
 
 // localDaemonRestarting reports whether a renewal or stream failed only because the local daemon is
 // restarting: its socket is missing or not accepting yet, or the old daemon, shutting down for an
