@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -102,5 +103,12 @@ func TestDoctorNamesTheClockOffset(t *testing.T) {
 		if got := describeClockOffset(offset); got != want {
 			t.Errorf("%v: %q, want %q", offset, got, want)
 		}
+	}
+}
+
+func TestClockUnreadableSummaryNamesASlowConnection(t *testing.T) {
+	got := clockUnreadableSummary(fmt.Errorf("probe: %w", serverclock.ErrSlowRoundTrip))
+	if want := "The connection to the Paperboat server was too slow to compare clocks accurately."; got != want {
+		t.Fatalf("%q, want %q", got, want)
 	}
 }

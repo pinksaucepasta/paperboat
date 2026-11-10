@@ -53,8 +53,10 @@ func clockUnreadableSummary(err error) string {
 	switch {
 	case errors.Is(err, serverclock.ErrNoDate):
 		return "The Paperboat server's reply carries no time, so its clock could not be compared."
-	case errors.Is(err, serverclock.ErrBadDate), errors.Is(err, serverclock.ErrSlowRoundTrip):
+	case errors.Is(err, serverclock.ErrBadDate):
 		return "The Paperboat server's reply has a time that could not be read, so its clock could not be compared."
+	case errors.Is(err, serverclock.ErrSlowRoundTrip):
+		return "The connection to the Paperboat server was too slow to compare clocks accurately."
 	case isTimeout(err):
 		return "The Paperboat server did not answer in time, so its clock could not be read."
 	}
