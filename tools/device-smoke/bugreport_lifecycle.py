@@ -4,9 +4,14 @@
 Every credential, private key and ENV value on this device is gathered in memory, a
 bugreport is uploaded, and neither the bundle nor the diagnostics directory may contain any
 of those values. The printed receipt never includes a secret.
+
+On the Windows device (PB_SMOKE_WINDOWS_PB, see winhost.py) the CLI tokens are DPAPI-protected files this check cannot
+open, so they are not searched for and the support lookup (which needs the access token) is not run; the ENV value,
+the exec output, the stored secret files as they are on disk and the machine credentials are.
 """
 import argparse
 import base64
+import io
 import json
 import os
 from pathlib import Path
@@ -15,10 +20,17 @@ import subprocess
 import urllib.request
 import zipfile
 
+import windows_target
+import winhost
+
 HOME = Path.home()
-PB = HOME / '.local/bin/pb'
+PB = winhost.pb_path()
+DEVICE = winhost.device()
 DARWIN = os.uname().sysname == 'Darwin'
-if DARWIN:
+if DEVICE:  # xdg config and the daemon state root are both under %LOCALAPPDATA% on Windows
+    LOCAL = winhost.RemotePath(DEVICE, DEVICE.env('LOCALAPPDATA'))
+    CONFIG, STATE, RUNTIME = LOCAL / 'paperboat', LOCAL / 'Paperboat' / 'state', DEVICE.runtime_dir()
+elif DARWIN:
     SUPPORT = HOME / 'Library/Application Support'
     CONFIG, STATE, RUNTIME = SUPPORT / 'paperboat', SUPPORT / 'Paperboat/state', SUPPORT / 'Paperboat/runtime'
 else:
@@ -28,8 +40,7 @@ MARKER = 'pbsmoke-env-' + os.urandom(8).hex()
 
 
 def run(*args, stdin=None):
-    result = subprocess.run([str(PB), *args], input=stdin, capture_output=True, text=True,
-                            timeout=120)
+    result = winhost.pb_text(PB, args, input=stdin, timeout=120)
     return result.returncode, result.stdout
 
 
@@ -67,17 +78,25 @@ def keychain_tokens():
     return tokens
 
 
+def secret_files():
+    """(file name, text) of every file-stored CLI secret."""
+    directory = CONFIG / 'credentials/secrets'
+    if DEVICE:
+        return [(name, (directory / name).read_bytes().decode(errors='replace')) for name in DEVICE.files(directory, '*.secret')]
+    return [(path.name, path.read_text(errors='replace')) for path in directory.glob('*.secret')]
+
+
 def secrets():
     """Credential material that must never appear: tokens, private keys, ENV marker."""
     found = {MARKER: 'env-value'}
-    if DARWIN:
+    if DARWIN and not DEVICE:
         found.update({value: label for label, value in keychain_tokens().items()})
-    for path in (CONFIG / 'credentials/secrets').glob('*.secret'):
-        label = re.sub(r'[0-9a-f]{16,}', '*', path.name)
-        text = path.read_text(errors='replace').strip()
+    for name, text in secret_files():
+        label = re.sub(r'[0-9a-f]{16,}', '*', name)
+        text = text.strip()
         try:
             for key, value in leaves(json.loads(text)):
-                if len(value) >= 24 and 'public' not in path.name:
+                if len(value) >= 24 and 'public' not in name:
                     found[value] = label + key
         except ValueError:
             found[text] = label
@@ -125,7 +144,8 @@ def main():
     try:
         # Terminal-like output must not reach diagnostics either.
         output_marker = 'pbsmoke-output-' + os.urandom(8).hex()
-        if output_marker not in run('exec', args.target, '--', 'sh', '-c', 'echo ' + output_marker)[1]:
+        if output_marker not in run('exec', args.target, '--', *windows_target.target_argv(
+                PB, args.target, ['sh', '-c', 'echo ' + output_marker], windows_target.print_script(output_marker)))[1]:
             raise RuntimeError('exec output marker was not returned')
         code, out = run('bugreport', '--upload', '--json')
         report = json.loads(out)
@@ -136,19 +156,27 @@ def main():
             raise RuntimeError('uploaded report reference differs from the local one')
         values = secrets()
         values[output_marker] = 'exec-output'
-        bundle = Path(report['bundle_path'])
-        with zipfile.ZipFile(bundle) as archive:
+        bundle = winhost.device_path(report['bundle_path'])
+        with zipfile.ZipFile(io.BytesIO(bundle.read_bytes()) if DEVICE else bundle) as archive:
             blob = b''.join(archive.read(name) for name in archive.namelist())
-        if oct(bundle.stat().st_mode & 0o077) != '0o0':
+        # On Windows the bundle is private by the ACL its directory under the profile gives it; only Unix has a mode.
+        if not DEVICE and oct(bundle.stat().st_mode & 0o077) != '0o0':
             raise RuntimeError('bundle is readable by other users')
         if leaked(blob, values):
             raise RuntimeError('bugreport bundle contains secret material from: ' + ', '.join(leaked(blob, values)))
-        diagnostics = b''.join(p.read_bytes() for p in (STATE / 'diagnostics').glob('*') if p.is_file())
-        if not diagnostics:
-            raise RuntimeError('no local diagnostics were written')
-        if leaked(diagnostics, values):
-            raise RuntimeError('local diagnostics contain secret material from: ' + ', '.join(leaked(diagnostics, values)))
-        if not args.no_lookup:
+        if DEVICE:  # searched on the device: the event files are large and stay there
+            if not DEVICE.files(STATE / 'diagnostics'):
+                raise RuntimeError('no local diagnostics were written')
+            found = sorted({label for value, label in values.items() if DEVICE.count_in_files(STATE / 'diagnostics', '*', value)})
+            if found:
+                raise RuntimeError('local diagnostics contain secret material from: ' + ', '.join(found))
+        else:
+            diagnostics = b''.join(p.read_bytes() for p in (STATE / 'diagnostics').glob('*') if p.is_file())
+            if not diagnostics:
+                raise RuntimeError('no local diagnostics were written')
+            if leaked(diagnostics, values):
+                raise RuntimeError('local diagnostics contain secret material from: ' + ', '.join(leaked(diagnostics, values)))
+        if not args.no_lookup and not DEVICE:
             lookup_reference(reference)
     finally:
         if set_env:
@@ -158,7 +186,7 @@ def main():
                 run('env', 'unset', 'PB_SMOKE_BUGREPORT', '--json', '--confirm', token)
     print(json.dumps({'check': 'bugreport-lifecycle', 'target': args.target, 'status': 'PASS',
                       'bundle_secret_free': True, 'diagnostics_secret_free': True,
-                      'secrets_checked': len(values), 'reference_resolves': not args.no_lookup}), flush=True)
+                      'secrets_checked': len(values), 'reference_resolves': not args.no_lookup and not DEVICE}), flush=True)
 
 
 if __name__ == '__main__':

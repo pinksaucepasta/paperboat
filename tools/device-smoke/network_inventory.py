@@ -5,11 +5,12 @@ from pathlib import Path
 
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
+import winhost
 
 
 def main():
     before = registration()
-    binary = Path.home() / '.local/bin/pb'
+    binary = winhost.pb_path()
     for kind, collection, identity in [('edge', 'edges', 'id'), ('relay', 'relays', 'relay_id')]:
         receipt = invoke(binary, kind, 'list', '--json', timeout=60)
         assert receipt['schema'] == 'paperboat.' + kind + '-list/v1'

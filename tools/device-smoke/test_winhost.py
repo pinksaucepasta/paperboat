@@ -1220,6 +1220,8 @@ class EnvFamilyPlumbing(unittest.TestCase):
     def test_sides_run_pb_on_the_device_as_its_account_or_its_second_profile(self):
         self.assertTrue(winhost.is_side('windows') and winhost.is_side('windows-teammate'))
         self.assertFalse(winhost.is_side('sudo docker exec ct pb'))
+        with patch.dict(os.environ, {}, clear=True), self.assertRaisesRegex(RuntimeError, 'PB_SMOKE_WINDOWS_PB'):
+            winhost.side_run('windows', ['env', 'list'])
         fake = FakeSsh((0, envelope(out=b'{}')), (0, rb'C:\Users\u'), (0, envelope(out=b'{}')))
         with patch.dict(os.environ, {'PB_SMOKE_WINDOWS_PB': EXE, 'VICTUS_PASS': 'p'}), patch('subprocess.run', fake):
             winhost._device.cache_clear()
@@ -1506,4 +1508,243 @@ class TeamFamily(unittest.TestCase):
         self.assertEqual(['--sso_team'], windows_checks.missing(table['team-identity-commands'][1], args))
         self.assertEqual([], windows_checks.missing(table['team-business'][1], args))
         self.assertNotIn('--identity-commands', table['team-business'][0])
+
+
+@unittest.skipUnless(PWSH, 'set PB_TEST_PWSH to a pwsh binary to run the completion and listing snippets for real')
+class RemainingFamilyInPowerShell(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        SnippetsInPowerShell.setUpClass()
+        cls.device = SnippetsInPowerShell.device
+
+    def test_files_lists_matching_names_and_a_missing_directory_is_empty(self):
+        with self.device.temp_dir('pb-test') as directory:
+            self.assertEqual([], self.device.files(directory / 'missing'))
+            self.assertEqual([], self.device.files(directory))
+            (directory / 'profile-1-access.secret').write_text('a')
+            self.assertEqual(['profile-1-access.secret'], self.device.files(directory, '*.secret'))
+            (directory / 'profile-1-refresh.secret').write_text('b')
+            (directory / 'other.json').write_text('{}')
+            (directory / 'nested' / 'deep.secret').write_text('c')
+            self.assertEqual(['profile-1-access.secret', 'profile-1-refresh.secret'], sorted(self.device.files(directory, '*.secret')))
+            self.assertEqual(3, len(self.device.files(directory)))
+
+    def test_completions_load_the_script_from_its_text_with_pb_first_on_path(self):
+        bin_directory = str(pathlib.PurePosixPath(self.device.pb_exe).parent)
+        # Stands in for cobra's script: a completer for `pb` that answers only when pb's directory leads PATH.
+        script = ("Register-ArgumentCompleter -Native -CommandName 'pb' -ScriptBlock {param($w,$ast,$c)\n"
+                  "if(-not $env:PATH.StartsWith('%s')){return}\n"
+                  "'exec','exit','doctor'|Where-Object{$_ -like \"$w*\"}|ForEach-Object{[Management.Automation.CompletionResult]::new($_+' ')}}\n"
+                  % bin_directory)
+        with self.device.temp_dir('pb-test') as directory:
+            (directory / 'pb.ps1').write_text(script)
+            self.assertEqual(['exec', 'exit'], self.device.completions(directory / 'pb.ps1', 'pb ex'))
+            (directory / 'empty.ps1').write_text('$x=1\n')
+            self.assertNotIn('exec', self.device.completions(directory / 'empty.ps1', 'pb ex'))
+            (directory / 'broken.ps1').write_text('throw "bad script"\n')
+            with self.assertRaises(winhost.DeviceError):
+                self.device.completions(directory / 'broken.ps1', 'pb ex')
+
+    def test_send_self_reads_the_inbox_and_cleans_up_on_the_device(self):
+        import contextlib
+        import io
+        import send_self
+        with self.device.temp_dir('pb-test') as inbox:
+            record = {'machine_id': 'machine_1', 'inbox_path': str(inbox)}
+            sent = []
+
+            def invoke(binary, *arguments, **options):
+                if arguments[-2:] == ('list', '--json'):
+                    return {'machines': [{'id': 'machine_1', 'alias': 'victus'}]}
+                source = winhost.RemotePath(self.device, arguments[1])
+                target = inbox / source.name
+                self.device.copy(source, target)  # the transfer: a local copy into the Inbox
+                sent.append(target)
+                return {'transfers': [{'state': 'delivered', 'receipt_path': str(target), 'transfer_id': 't1'}]}
+
+            printed = io.StringIO()
+            with patch.object(winhost, 'device', lambda: self.device), patch.object(send_self, 'invoke', invoke), \
+                    patch.object(send_self, 'registration', lambda: record), patch.object(sys, 'argv', ['send_self.py', 'victus']), \
+                    contextlib.redirect_stdout(printed):
+                send_self.main()
+            self.assertEqual('PASS', json.loads(printed.getvalue())['status'])
+            self.assertEqual(1, len(sent))
+            self.assertFalse(sent[0].exists())  # the delivered file was removed again
+            self.assertEqual([], self.device.files(inbox))
+
+
+class RemainingFamilyPlumbing(unittest.TestCase):
+    PORTED = ('status_bar_lifecycle', 'completion_lifecycle', 'config_customize', 'workspace_lifecycle', 'auth_lifecycle',
+              'bugreport_lifecycle', 'cli_paging', 'network_inventory', 'inventory_freshness', 'update_observation',
+              'send_self', 'approve_refusals', 'session_limit', 'doctor_lifecycle')
+
+    def test_ported_scripts_take_pb_from_winhost_and_the_runner_names_them(self):
+        import windows_checks
+        for name in self.PORTED + ('config_team_default',):
+            source = (pathlib.Path(__file__).parent / (name + '.py')).read_text()
+            self.assertNotIn(".local/bin/pb'", source, name)
+            self.assertNotIn('subprocess.run([str(PB)', source, name)
+            self.assertIn('winhost.pb_path()', source, name)
+        args = WindowsChecksRunner().args()
+        table = windows_checks.checks(args)
+        scripts = {argv[0] for argv, _ in table.values()}
+        for name in self.PORTED + ('config_team_default',):
+            self.assertTrue(name + '.py' in scripts or name == 'auth_lifecycle', name)
+        self.assertEqual('auth_lifecycle_approved.py', table['auth-lifecycle'][0][0])
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(['STATE', 'PW_CHROMIUM'], windows_checks.missing(table['auth-lifecycle'][1], args))
+        self.assertEqual(['--empty_team'], windows_checks.missing(table['workspace-switch'][1], args))
+        self.assertEqual(['--config_repository'], windows_checks.missing(table['config-team-default'][1], args))
+        for check in ('status-bar', 'completion', 'bugreport', 'inventory-freshness', 'session-limit', 'doctor', 'send-self',
+                      'config-customize', 'cli-paging', 'network-inventory', 'update-observation', 'approve-refusals'):
+            self.assertEqual([], windows_checks.missing(table[check][1], args), check)
+        self.assertEqual('PASS', windows_checks.verdict(0, 'PASS F11-04 team-default-set - version 3\n{"x": {"ok": true}}\n'))
+        self.assertEqual('FAIL', windows_checks.verdict(0, 'PASS a - b\nFAIL c - d\n'))
+
+    def test_pb_text_keeps_the_stdin_of_the_local_call(self):
+        done = winhost.pb_text(sys.executable, ['-c', 'import sys;print(len(sys.stdin.read()))'], timeout=30, stdin=subprocess.DEVNULL)
+        self.assertEqual('0\n', done.stdout)
+        remote = SimpleNamespace(run_remote=lambda arguments, **options: options)
+        self.assertEqual({'input': None, 'env': None, 'timeout': 30}, winhost.pb_text(remote, ['x'], timeout=30, stdin=subprocess.DEVNULL))
+
+    def completion(self, device):
+        import contextlib
+        import io
+        import completion_lifecycle
+        replies = {'completion': 'pb ' + 'x' * 600, '__complete': 'exec\ndoctor\nmachine\nhp\n'}
+        printed = io.StringIO()
+        with patch.object(winhost, 'device', lambda: device), patch.object(sys, 'argv', ['completion_lifecycle.py', 'hp']), \
+                patch.object(completion_lifecycle, 'run', lambda *arguments, **options: (0, replies[arguments[0]])), \
+                contextlib.redirect_stdout(printed):
+            completion_lifecycle.main()
+        return json.loads(printed.getvalue())
+
+    def test_completion_checks_powershell_on_the_device_and_bash_here(self):
+        class Directory:
+            def __enter__(self):
+                return winhost.RemotePath(device, r'C:\Temp\pb-completion-1')
+
+            def __exit__(self, *error):
+                pass
+
+        loaded = []
+        device = SimpleNamespace(path_flavor=pathlib.PureWindowsPath, temp_dir=lambda prefix: Directory(),
+                                 write_bytes=lambda path, data: loaded.append(str(path)),
+                                 completions=lambda script, line: ['exec', 'exit'] if line == 'pb ex' else [])
+        receipt = self.completion(device)
+        self.assertTrue(receipt['powershell_registered'])
+        self.assertNotIn('bash_registered', receipt)
+        self.assertEqual([r'C:\Temp\pb-completion-1\pb.ps1'], loaded)
+        device.completions = lambda script, line: []
+        with self.assertRaisesRegex(RuntimeError, 'PowerShell did not register'):
+            self.completion(device)
+        import completion_lifecycle
+        with patch.object(completion_lifecycle, 'unix_shells_accept', lambda scripts: None):
+            receipt = self.completion(None)
+        self.assertEqual(['bash_registered', 'check', 'commands_complete', 'machine', 'machine_names_complete', 'scripts', 'status'],
+                         sorted(receipt))
+
+    def test_device_login_writes_the_link_waits_and_always_ends_the_job(self):
+        import tempfile
+        import auth_lifecycle
+
+        class Directory:
+            def __enter__(self):
+                return 'dir'
+
+            def __exit__(self, *error):
+                pass
+
+        def job(stdout, code):
+            return SimpleNamespace(stdout=lambda: stdout, stderr=lambda: b'', returncode=lambda: None, killed=[],
+                                   wait=lambda timeout: code, kill=lambda: jobs[-1].killed.append(True))
+
+        jobs = []
+        device = SimpleNamespace(temp_dir=lambda prefix: Directory(), spawn=lambda argv, directory: jobs[-1])
+        link = json.dumps({'data': {'state': 'approval_required', 'approval_url': 'https://console.example.test/approve'}}).encode() + b'\n'
+        with tempfile.TemporaryDirectory() as directory, patch.object(auth_lifecycle, 'PB', SimpleNamespace(device=device)):
+            url = pathlib.Path(directory) / 'url'
+            jobs.append(job(link, 0))
+            auth_lifecycle.device_login(url)
+            self.assertEqual('https://console.example.test/approve\n', url.read_text())
+            self.assertEqual([True], jobs[-1].killed)
+            jobs.append(job(link, 3))
+            with self.assertRaisesRegex(RuntimeError, 'login exited 3'):
+                auth_lifecycle.device_login(url)
+            self.assertEqual([True], jobs[-1].killed)
+            jobs.append(job(b'{"data": {"state": "signed_in"}}\n', 0))
+            with self.assertRaisesRegex(RuntimeError, 'approval link'):
+                auth_lifecycle.device_login(url)
+
+    def test_inventory_alias_probe_uses_the_device_ssh_client(self):
+        import inventory_freshness
+        calls = []
+
+        def run_remote(arguments, timeout):
+            calls.append(arguments)
+            if 'slow.example.test' in arguments:
+                raise subprocess.TimeoutExpired(arguments, timeout)
+            return subprocess.CompletedProcess(arguments, 0, '', '')
+
+        with patch.object(winhost, 'device', lambda: object()), patch.object(winhost, 'which', lambda name: SimpleNamespace(run_remote=run_remote)):
+            self.assertTrue(inventory_freshness.resolves('hp.example.test'))
+            self.assertFalse(inventory_freshness.resolves('slow.example.test'))
+        self.assertEqual(['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'hp.example.test', 'true'], calls[0])
+        done = subprocess.CompletedProcess([], 0, b'', b'')
+        with patch.object(winhost, 'device', lambda: None), patch('subprocess.run', return_value=done) as local:
+            self.assertTrue(inventory_freshness.resolves('hp.example.test'))
+        self.assertEqual(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'hp.example.test', 'true'], local.call_args[0][0])
+
+    def test_terminal_checks_type_a_powershell_marker_at_a_windows_target(self):
+        import doctor_lifecycle
+        import session_limit
+        import windows_target
+
+        class Fake:
+            def __init__(self, arguments, env=None):
+                self.sent, self.expected, self.output = [], [], bytearray()
+
+            def send(self, data):
+                self.sent.append(data)
+
+            def expect(self, token, timeout=45):
+                self.expected.append(token)
+
+            def marker(self, label, prefix=''):
+                return 'PB_UNIX_MARKER'
+
+            def wait_exit(self, timeout=15):
+                return 0
+
+            def close(self):
+                made.append(self)
+
+        made = []
+        for windows in (True, False):
+            with patch.object(session_limit, 'Terminal', Fake), patch.object(windows_target, 'is_windows', lambda binary, target: windows):
+                self.assertEqual((0, ''), session_limit.new('smoke-limit-1', 'target'))
+            with patch('terminal_lifecycle.Terminal', Fake), patch('session_cleanup.cleanup', lambda *a: None), \
+                    patch.object(windows_target, 'is_windows', lambda binary, target: windows):
+                self.assertTrue(doctor_lifecycle.terminal_works('target'))
+        limit_windows, doctor_windows, limit_unix, doctor_unix = made
+        self.assertEqual([b'\x1b[?2004h', 'PB_UNIX_MARKER'], limit_unix.expected)
+        self.assertEqual([b'\x04'], doctor_unix.sent)
+        self.assertEqual(1, len(limit_windows.expected))
+        self.assertTrue(limit_windows.sent[0].startswith('powershell -NoProfile -Command'))
+        self.assertNotIn(limit_windows.expected[0], limit_windows.sent[0])  # the echo of the typed line is not the marker
+        self.assertEqual('exit\r', doctor_windows.sent[-1])
+
+    def test_bugreport_reads_stored_secret_files_from_the_device(self):
+        import bugreport_lifecycle
+        files = {'profile-0123456789abcdef-access.secret': b'\xff\xfeopaque-dpapi-blob-of-the-device', 'machine-public.secret': b'{"k": "v"}'}
+        device = SimpleNamespace(path_flavor=pathlib.PureWindowsPath, files=lambda directory, pattern: sorted(files),
+                                 read_bytes=lambda path: files[path.name])
+        config = winhost.RemotePath(device, r'C:\Users\u\AppData\Local\paperboat')
+        with patch.object(bugreport_lifecycle, 'DEVICE', device), patch.object(bugreport_lifecycle, 'CONFIG', config), \
+                patch.object(bugreport_lifecycle, 'RUNTIME', config / 'missing'), patch.object(bugreport_lifecycle, 'DARWIN', False):
+            device.read_bytes = lambda path: files[path.name] if path.name in files else (_ for _ in ()).throw(FileNotFoundError(path))
+            found = bugreport_lifecycle.secrets()
+        self.assertIn('profile-*-access.secret', found.values())
+        self.assertIn('env-value', found.values())
+        self.assertEqual(2, len(found))
 

@@ -10,7 +10,10 @@ from pathlib import Path
 import subprocess
 import time
 
-PB = Path.home() / '.local/bin/pb'
+import windows_target
+import winhost
+
+PB = winhost.pb_path()
 SIGNED_OUT_COMMANDS = [('machine', 'list'), ('env', 'list'), ('exec', 'TARGET', '--', 'true'),
                        ('session', 'list', 'TARGET'), ('team', 'list')]
 # Local-only commands keep working signed out (the Inbox path is this computer's setting).
@@ -18,9 +21,53 @@ SIGNED_OUT_LOCAL = [('inbox', 'path')]
 
 
 def run(*args, timeout=60):
-    result = subprocess.run([str(PB), *args], capture_output=True, text=True, timeout=timeout,
-                            stdin=subprocess.DEVNULL)
+    result = winhost.pb_text(PB, args, timeout=timeout, stdin=subprocess.DEVNULL)
     return result.returncode, result.stdout + result.stderr
+
+
+def device_login(url_file):
+    """The login step with pb.exe detached on the Windows device, its output read from files there."""
+    with PB.device.temp_dir('pb-login') as directory:
+        login = PB.device.spawn([str(PB), 'login', '--no-browser', '--json'], directory)
+        try:
+            deadline = time.monotonic() + 45
+            while b'\n' not in login.stdout():
+                if time.monotonic() > deadline or login.returncode() is not None:
+                    raise RuntimeError('login did not produce an approval link')
+                time.sleep(1)
+            link = json.loads(login.stdout().split(b'\n', 1)[0])['data']
+            if link.get('state') != 'approval_required' or not link['approval_url'].startswith('https://'):
+                raise RuntimeError('login did not produce an approval link')
+            url_file.write_text(link['approval_url'] + '\n')
+            try:
+                code = login.wait(480)
+            except subprocess.TimeoutExpired:
+                raise RuntimeError('login was not approved in time') from None
+            if code != 0:
+                raise RuntimeError('login exited %s: %s' % (code, (login.stdout() + login.stderr()).decode(errors='replace')[-900:]))
+        finally:
+            login.kill()
+
+
+def local_login(url_file):
+    login = subprocess.Popen([str(PB), 'login', '--no-browser', '--json'], stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True, stdin=subprocess.DEVNULL)
+    try:
+        link = json.loads(login.stdout.readline())['data']
+        if link.get('state') != 'approval_required' or not link['approval_url'].startswith('https://'):
+            raise RuntimeError('login did not produce an approval link')
+        url_file.write_text(link['approval_url'] + '\n')
+        deadline = time.monotonic() + 480
+        while login.poll() is None and time.monotonic() < deadline:
+            time.sleep(2)
+        if login.poll() is None:
+            raise RuntimeError('login was not approved in time')
+        if login.returncode != 0:
+            raise RuntimeError('login exited %s: %s' % (login.returncode, login.stdout.read()[-900:]))
+    finally:
+        if login.poll() is None:
+            login.kill()
+        login.wait()
 
 
 def main():
@@ -31,6 +78,7 @@ def main():
     code, out = run('auth', 'status', '--json')
     if json.loads(out).get('signed_in') is not True:
         raise RuntimeError('must start signed in')
+    true = windows_target.true_argv(PB, args.target)  # read while signed in: a Windows target has no `true`
     code, out = run('logout', '--json')
     receipt = json.loads(out)
     if code or not receipt['data']['signed_out'] or receipt['data']['server_revocation'] != 'complete':
@@ -47,31 +95,14 @@ def main():
     for command in SIGNED_OUT_LOCAL:
         if run(*command)[0] != 0:
             unclear.append(' '.join(command) + ' (local, must work signed out)')
-    login = subprocess.Popen([str(PB), 'login', '--no-browser', '--json'], stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT, text=True, stdin=subprocess.DEVNULL)
-    try:
-        link = json.loads(login.stdout.readline())['data']
-        if link.get('state') != 'approval_required' or not link['approval_url'].startswith('https://'):
-            raise RuntimeError('login did not produce an approval link')
-        args.url_file.write_text(link['approval_url'] + '\n')
-        deadline = time.monotonic() + 480
-        while login.poll() is None and time.monotonic() < deadline:
-            time.sleep(2)
-        if login.poll() is None:
-            raise RuntimeError('login was not approved in time')
-        if login.returncode != 0:
-            raise RuntimeError('login exited %s: %s' % (login.returncode, login.stdout.read()[-900:]))
-    finally:
-        if login.poll() is None:
-            login.kill()
-        login.wait()
+    (device_login if winhost.device() else local_login)(args.url_file)
     restored = json.loads(run('auth', 'status', '--json')[1])
     if restored.get('signed_in') is not True:
         raise RuntimeError('login completed but status is signed out')
     deadline = time.monotonic() + 120
-    while time.monotonic() < deadline and run('exec', args.target, '--', 'true')[0] != 0:
+    while time.monotonic() < deadline and run('exec', args.target, '--', *true)[0] != 0:
         time.sleep(4)
-    if run('exec', args.target, '--', 'true')[0] != 0:
+    if run('exec', args.target, '--', *true)[0] != 0:
         raise RuntimeError('exec did not work after login')
     if unclear:
         raise RuntimeError('signed-out commands without a pb login hint: ' + ', '.join(unclear))

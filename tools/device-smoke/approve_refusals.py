@@ -11,13 +11,13 @@ from pathlib import Path
 import subprocess
 
 from install_lifecycle import registration
+import winhost
 
-PB = Path.home() / '.local/bin/pb'
+PB = winhost.pb_path()
 
 
 def approve(machine):
-    result = subprocess.run([str(PB), 'approve', machine, '--json'], capture_output=True, text=True,
-                            timeout=60, stdin=subprocess.DEVNULL)
+    result = winhost.pb_text(PB, ['approve', machine, '--json'], timeout=60, stdin=subprocess.DEVNULL)
     try:
         error = json.loads(result.stdout).get('error', {})
     except ValueError:

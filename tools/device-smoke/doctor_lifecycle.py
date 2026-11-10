@@ -5,13 +5,16 @@ import json
 from pathlib import Path
 import subprocess
 import time
+import uuid
 
-PB = Path.home() / '.local/bin/pb'
+import windows_target
+import winhost
+
+PB = winhost.pb_path()
 
 
 def run(*args, timeout=90):
-    result = subprocess.run([str(PB), *args], capture_output=True, text=True, timeout=timeout,
-                            stdin=subprocess.DEVNULL)
+    result = winhost.pb_text(PB, args, timeout=timeout, stdin=subprocess.DEVNULL)
     return result.returncode, result.stdout, result.stderr
 
 
@@ -21,7 +24,7 @@ def doctor(*flags):
 
 
 def exec_works(target):
-    return run('exec', target, '--', 'true', timeout=60)[0] == 0
+    return run('exec', target, '--', *windows_target.true_argv(PB, target), timeout=60)[0] == 0
 
 
 def terminal_works(target):
@@ -29,18 +32,24 @@ def terminal_works(target):
     from terminal_lifecycle import Terminal
     from session_cleanup import cleanup
     name = 'smoke-doctor-' + str(int(time.time()))
-    terminal = Terminal([str(PB), 'connect', target, '--name', name, '--status-bar', 'off'])
+    terminal = Terminal(winhost.terminal_argv(PB, ['connect', target, '--name', name, '--status-bar', 'off']), env=winhost.terminal_env(PB))
     try:
-        terminal.expect(b'\x1b[?2004h', timeout=60)
-        terminal.expect(terminal.marker('READY', 'stty -echo; '), timeout=30)
-        terminal.send(b'\x04')
+        if windows_target.is_windows(PB, target):  # cmd.exe under ConPTY: no bracketed paste, no stty, exit ends it
+            token = 'PB_READY_' + uuid.uuid4().hex
+            terminal.send(windows_target.typed_marker(token) + '\r')
+            terminal.expect(token, timeout=60)
+            terminal.send('exit\r')
+        else:
+            terminal.expect(b'\x1b[?2004h', timeout=60)
+            terminal.expect(terminal.marker('READY', 'stty -echo; '), timeout=30)
+            terminal.send(b'\x04')
         return terminal.wait_exit(15) == 0
     except Exception:
         return False
     finally:
         terminal.close()
         try:
-            cleanup(str(PB), target, name)
+            cleanup(PB if winhost.device() else str(PB), target, name)
         except Exception:
             pass
 

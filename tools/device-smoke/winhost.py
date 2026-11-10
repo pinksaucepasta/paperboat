@@ -124,6 +124,15 @@ EXCHANGE = ("$c=New-Object Net.Sockets.TcpClient\ntry{$c.Connect($req.address,[i
 COUNT = ("$n=0;Get-ChildItem -LiteralPath $req.dir -Filter $req.filter -File -Recurse:([bool]$req.recurse) -ErrorAction SilentlyContinue|ForEach-Object{"
          "$f=[IO.File]::Open($_.FullName,'Open','Read','ReadWrite');$t=(New-Object IO.StreamReader($f)).ReadToEnd();$f.Close();"
          "$n+=[regex]::Matches($t,[regex]::Escape($req.text)).Count};$n")
+FILES = ("@(Get-ChildItem -LiteralPath $req.dir -Filter $req.filter -File -ErrorAction SilentlyContinue|"
+         "ForEach-Object{$_.Name})|ConvertTo-Json -Compress")
+# What PowerShell's tab completion offers for $req.line once the completion script in $req.path is loaded, with the
+# directory of $req.exe first on PATH (the script calls `pb __complete`). The script is loaded from its text: the
+# execution policy of the device may refuse a .ps1 file.
+COMPLETE = ("$env:PATH=(Split-Path -Parent $req.exe)+[IO.Path]::PathSeparator+$env:PATH\n"
+            ". ([scriptblock]::Create([IO.File]::ReadAllText($req.path)))\n"
+            "$r=TabExpansion2 $req.line $req.line.Length\n"
+            "[Console]::Out.Write((@($r.CompletionMatches|ForEach-Object{$_.CompletionText.Trim()}) -join ','))")
 # Every file under $req.path as [{p: relative path with /, h: sha256}], base64 of UTF-8 JSON: Windows PowerShell
 # writes stdout in the OEM code page, which would change a Unicode file name.
 TREE = ("$r=(Get-Item -LiteralPath $req.path).FullName;$s=[Security.Cryptography.SHA256]::Create()\n"
@@ -306,6 +315,17 @@ class WindowsDevice:
     def count_in_files(self, directory, pattern, text, recurse=False):
         return int(self.ps('count in %s' % directory, COUNT, dir=str(directory), filter=pattern, text=text,
                            recurse=recurse)[1])
+
+    def files(self, directory, pattern='*'):
+        """Names of the files in directory that match the wildcard (not recursive); [] when it does not exist."""
+        out = self.ps('list %s' % directory, FILES, dir=str(directory), filter=pattern)[1]
+        value = json.loads(out) if out else []
+        return [value] if isinstance(value, str) else value
+
+    def completions(self, script, line):
+        """What PowerShell offers for line after loading the completion script file (a path on the device)."""
+        out = self.ps('powershell completion', COMPLETE, timeout=120, exe=self.pb_exe, path=str(script), line=line)[1]
+        return [word for word in out.splitlines()[-1].split(',') if word] if out else []
 
     def services(self, pattern='Paperboat*'):
         return self._list('services ' + pattern, SERVICES, pattern=pattern)
@@ -659,12 +679,13 @@ def run_pb(binary, arguments, timeout):
     return subprocess.run([str(binary), *arguments], capture_output=True, timeout=timeout)
 
 
-def pb_text(binary, arguments, input=None, timeout=None, env=None):
+def pb_text(binary, arguments, input=None, timeout=None, env=None, stdin=None):
     """pb to completion like subprocess.run(..., capture_output=True, text=True), here or on the device (where env
-    is an overlay on the device's own environment)."""
+    is an overlay on the device's own environment and stdin is always what `input` holds, then end of input)."""
     if hasattr(binary, 'run_remote'):
         return binary.run_remote(arguments, input=input, env=env, timeout=timeout or 180)
-    return subprocess.run([str(binary), *arguments], input=input, capture_output=True, text=True, timeout=timeout, env=env)
+    return subprocess.run([str(binary), *arguments], input=input, stdin=stdin, capture_output=True, text=True,
+                          timeout=timeout, env=env)
 
 
 WINDOWS, WINDOWS_TEAMMATE = 'windows', 'windows-teammate'
@@ -679,6 +700,8 @@ def is_side(command):
 def side_run(command, arguments, input=None, timeout=180):
     """Run pb.exe on the device for is_side(command), with no shell quoting; a text CompletedProcess."""
     prefix, env = [], None
+    if not device():
+        raise RuntimeError('the side `%s` is the Windows device: set PB_SMOKE_WINDOWS_PB to its pb.exe' % command)
     if command == WINDOWS_TEAMMATE:
         from teammate_profile import environment, profile_root
         prefix, env = ['--config', str(profile_root() / 'config.json')], environment(profile_root())

@@ -13,18 +13,20 @@ from pathlib import Path
 import subprocess
 import sys
 
-PB = str(Path.home() / '.local/bin/pb')
+import winhost
+
+PB = winhost.pb_path()
 
 
 def pb(*args):
-    done = subprocess.run([PB, *args], capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL)
+    done = winhost.pb_text(PB, args, timeout=120, stdin=subprocess.DEVNULL)
     if done.returncode:
         raise RuntimeError('pb %s failed: %s' % (' '.join(args), done.stderr[:160]))
     return done.stdout + done.stderr  # the "Showing N of M" note may go to either stream
 
 
 def data(*args):
-    out = json.loads(subprocess.run([PB, *args, '--json'], capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL).stdout)
+    out = json.loads(winhost.pb_text(PB, [*args, '--json'], timeout=120, stdin=subprocess.DEVNULL).stdout)
     return out.get('data', out)
 
 

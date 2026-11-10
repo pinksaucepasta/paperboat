@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""F15-05 on Unix: bash, zsh and fish completion scripts install, and completion offers commands and machine names."""
+"""F15-05: bash, zsh and fish completion scripts install on Unix, the PowerShell one on Windows (pb.exe on the device,
+see winhost.py), and completion offers commands and machine names."""
 import argparse
 import json
 from pathlib import Path
@@ -8,12 +9,13 @@ import subprocess
 import sys
 import tempfile
 
-PB = Path.home() / '.local/bin/pb'
+import winhost
+
+PB = winhost.pb_path()
 
 
 def run(*args, timeout=60):
-    result = subprocess.run([str(PB), *args], capture_output=True, text=True, timeout=timeout,
-                            stdin=subprocess.DEVNULL)
+    result = winhost.pb_text(PB, args, timeout=timeout, stdin=subprocess.DEVNULL)
     return result.returncode, result.stdout
 
 
@@ -27,6 +29,33 @@ def main():
         if code or len(text) < 500 or 'pb' not in text:
             raise RuntimeError(shell + ' completion script was not generated')
         scripts[shell] = text
+    if winhost.device():
+        powershell_registers(scripts['powershell'])
+    else:
+        unix_shells_accept(scripts)
+    commands = run('__complete', '')[1]
+    if not all(name in commands for name in ('exec', 'doctor', 'machine')):
+        raise RuntimeError('root completion does not offer the main commands')
+    missing = [name for name in ('exec', 'connect', 'ssh', 'ping', 'machine revoke')
+               if args.machine not in run('__complete', *name.split(), '')[1]]
+    if missing:
+        raise RuntimeError('machine names are not completed for: ' + ', '.join(missing))
+    registered = 'powershell_registered' if winhost.device() else 'bash_registered'
+    print(json.dumps({'check': 'completion-lifecycle', 'status': 'PASS', 'machine': args.machine,
+                      'scripts': sorted(scripts), registered: True, 'commands_complete': True,
+                      'machine_names_complete': True}), flush=True)
+
+
+def powershell_registers(script):
+    """Loading the script in the device's PowerShell registers a completer that offers `exec` for `pb ex`."""
+    device = winhost.device()
+    with device.temp_dir('pb-completion') as directory:
+        (directory / 'pb.ps1').write_text(script)
+        if 'exec' not in device.completions(directory / 'pb.ps1', 'pb ex'):
+            raise RuntimeError('PowerShell did not register the pb completion')
+
+
+def unix_shells_accept(scripts):
     with tempfile.TemporaryDirectory(prefix='paperboat-completion-') as directory:
         bash = Path(directory) / 'pb.bash'
         bash.write_text(scripts['bash'])
@@ -49,16 +78,6 @@ def main():
                 raise RuntimeError('zsh rejected the completion script')
         else:
             print('SKIP zsh syntax check: zsh is not installed', file=sys.stderr)
-    commands = run('__complete', '')[1]
-    if not all(name in commands for name in ('exec', 'doctor', 'machine')):
-        raise RuntimeError('root completion does not offer the main commands')
-    missing = [name for name in ('exec', 'connect', 'ssh', 'ping', 'machine revoke')
-               if args.machine not in run('__complete', *name.split(), '')[1]]
-    if missing:
-        raise RuntimeError('machine names are not completed for: ' + ', '.join(missing))
-    print(json.dumps({'check': 'completion-lifecycle', 'status': 'PASS', 'machine': args.machine,
-                      'scripts': sorted(scripts), 'bash_registered': True, 'commands_complete': True,
-                      'machine_names_complete': True}), flush=True)
 
 
 if __name__ == '__main__':

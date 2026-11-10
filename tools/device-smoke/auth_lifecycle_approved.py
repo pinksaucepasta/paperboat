@@ -4,18 +4,47 @@
 auth_lifecycle.py writes the browser approval link to a file and waits; this controller reads the link and approves it in
 headless Chromium with the account's stored console session (STATE, mode 600, never printed).
 Usage: auth_lifecycle_approved.py HOST CONTAINER USER [UID=1001] [MACHINE=CONTAINER]   env: STATE, PW_CHROMIUM, [PW_MODULE]
+       auth_lifecycle_approved.py windows MACHINE   auth_lifecycle.py runs here against the Windows device (PB_SMOKE_WINDOWS_PB)
 """
 import os
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 
 
+def approve(link):
+    subprocess.run(['node', str(HERE / 'approve_cli_login.mjs'), link], check=True, timeout=180, env=os.environ)
+
+
+def windows(machine):
+    with tempfile.TemporaryDirectory(prefix='pb-auth-') as directory:
+        url = Path(directory) / 'auth-url'
+        job = subprocess.Popen([sys.executable, str(HERE / 'auth_lifecycle.py'), machine, str(url)],
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        link = ''
+        deadline = time.monotonic() + 240
+        while time.monotonic() < deadline and job.poll() is None and not link.startswith('https://'):
+            time.sleep(3)
+            link = url.read_text().strip() if url.exists() else ''
+        try:
+            if link.startswith('https://'):
+                approve(link)
+        finally:
+            if not link.startswith('https://'):
+                job.kill()
+            out = job.communicate(timeout=600)[0]
+    print(out.strip()[-600:])
+    return job.returncode
+
+
 def main():
+    if sys.argv[1] == 'windows':
+        return windows(sys.argv[2])
     host, container, user = sys.argv[1:4]
     uid = sys.argv[4] if len(sys.argv) > 4 else '1001'
     machine = sys.argv[5] if len(sys.argv) > 5 else container  # the machine name exec dials

@@ -18,16 +18,18 @@ import tempfile
 import termios
 import time
 
-PB = str(Path.home() / '.local/bin/pb')
+import winhost
+
+PB = winhost.pb_path()  # pb.exe on the Windows device when PB_SMOKE_WINDOWS_PB is set; its files live there
 SHORTCUT = 'smokeuptime'
 
 
 def main():
-    with tempfile.TemporaryDirectory(prefix='pb-customize-') as directory:
-        root = ['--config', str(Path(directory) / 'config.json')]
+    with winhost.workdir('pb-customize-') as directory:
+        root = ['--config', str(directory / 'config.json')]
 
         def run(*args):
-            r = subprocess.run([PB, *root, *args], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+            r = winhost.pb_text(PB, [*root, *args], timeout=60, stdin=subprocess.DEVNULL)
             return r.returncode, r.stdout + r.stderr
 
         def data(*args):
@@ -38,13 +40,17 @@ def main():
             return receipt['data']
 
         result = {'check': 'config-customize', 'status': 'PASS'}
-        path = Path(data('config', 'customize', 'path')['path'])
-        assert path.parent == Path(directory).resolve() or path.parent == Path(directory), path
+        if winhost.device():
+            path = winhost.RemotePath(winhost.device(), data('config', 'customize', 'path')['path'])
+            assert path.parent == directory, path
+        else:
+            path = Path(data('config', 'customize', 'path')['path'])
+            assert path.parent == Path(directory).resolve() or path.parent == Path(directory), path
         default = data('config', 'customize', 'show')['preferences']
 
         document = dict(default, shortcuts={SHORTCUT: {'command': ['exec'], 'args': ['{1}', '--', 'uptime']}},
                         defaults={'exec': {'timeout': '45s'}})
-        candidate, bad = Path(directory) / 'in.json', Path(directory) / 'bad.json'
+        candidate, bad = directory / 'in.json', directory / 'bad.json'
         candidate.write_text(json.dumps(document))
         bad.write_text(json.dumps(dict(document, shortcuts={'x': {'command': ['no-such-command']}})))
         assert run('config', 'customize', 'import', str(bad), '--json')[0] != 0, 'an invalid document was imported'
@@ -75,9 +81,10 @@ def main():
 
 def editor(root):
     """Drive the real editor: type to filter, Enter to pick, at each screen."""
+    argv = winhost.terminal_argv(PB, [*root, 'config', 'customize'])  # on the device: its console through ssh -tt
     pid, fd = pty.fork()
     if pid == 0:
-        os.execv(PB, [PB, *root, 'config', 'customize'])
+        os.execvpe(argv[0], argv, dict(os.environ, **winhost.terminal_env(PB)))
     termios.tcsetwinsize(fd, (40, 120))
     seen, deadline = b'', time.monotonic() + 60
     steps = [(b'Make Paperboat yours', 'Appearance'), (b'Accent color', 'Theme'), (b'Current selection', 'mono'),

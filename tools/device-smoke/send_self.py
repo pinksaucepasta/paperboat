@@ -9,13 +9,15 @@ import uuid
 
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
+import winhost
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
     args = parser.parse_args()
-    binary = Path.home() / '.local/bin/pb'
+    binary = winhost.pb_path()
+    device = winhost.device()  # the Windows device: the source file and the Inbox are there
     before = registration()
     machines = invoke(binary, '--workspace', 'personal', 'machine', 'list', '--json')
     machines = machines.get('machines', machines.get('items', []))
@@ -23,21 +25,23 @@ def main():
     if len(own) != 1:
         raise RuntimeError('this computer is not in the account machine list exactly once')
     prefix = 'paperboat-smoke-self-' + uuid.uuid4().hex
-    content = ('λ船 ' + prefix + '\n').encode() * 5000
-    inbox = Path(before['inbox_path']).expanduser()
+    line = ('λ船 ' + prefix + '\n').encode()
+    content = line * 5000
+    inbox = winhost.RemotePath(device, before['inbox_path']) if device else Path(before['inbox_path']).expanduser()
     delivered = inbox / (prefix + '.txt')
     failure = None
-    with tempfile.TemporaryDirectory(prefix='paperboat-send-self-') as directory:
-        source = Path(directory) / (prefix + '.txt')
-        source.write_bytes(content)
+    with winhost.workdir('paperboat-send-self-') as directory:
+        source = directory / (prefix + '.txt')
+        winhost.write_pattern(source, line, 5000)
         try:
             batch = invoke(binary, 'send', str(source), '--to', own[0]['alias'], '--json', timeout=120)
             if len(batch['transfers']) != 1:
                 raise RuntimeError('send to this computer did not report exactly one transfer')
-            if not delivered.is_file() or hashlib.sha256(delivered.read_bytes()).hexdigest() != hashlib.sha256(content).hexdigest():
+            arrived = (delivered.exists() and delivered.sha256()) if device else (delivered.is_file() and hashlib.sha256(delivered.read_bytes()).hexdigest())
+            if arrived != hashlib.sha256(content).hexdigest():
                 raise RuntimeError('the file is not in the local Inbox, byte-identical')
             transfer = batch['transfers'][0]
-            if transfer.get('state') != 'delivered' or Path(transfer.get('receipt_path', '')) != delivered:
+            if transfer.get('state') != 'delivered' or winhost.device_path(transfer.get('receipt_path', '')) != delivered:
                 raise RuntimeError('the receipt does not name the delivered Inbox file')
             if not transfer.get('transfer_id'):
                 raise RuntimeError('the delivery has no transfer identity, so it has no activity record to list or download')

@@ -14,10 +14,11 @@ from pathlib import Path
 
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
+import winhost
 
 
 def installed_version(binary):
-    out = subprocess.run([str(binary), 'version'], capture_output=True, text=True, timeout=30).stdout
+    out = winhost.pb_text(binary, ['version'], timeout=30).stdout
     for line in out.splitlines():
         if 'Version ' in line:
             return line.split('Version ', 1)[1].strip()
@@ -25,7 +26,7 @@ def installed_version(binary):
 
 
 def main():
-    binary = Path.home() / '.local/bin/pb'
+    binary = winhost.pb_path()
     machine_id = registration()['machine_id']
     version = installed_version(binary)
     request = json.dumps({'action': 'machine.update-status', 'payload': {'machine_id': machine_id}})

@@ -17,17 +17,26 @@ import uuid
 from terminal_lifecycle import Terminal
 
 from session_cleanup import cleanup
+import windows_target
+import winhost
 
-PB = Path.home() / '.local/bin/pb'
+PB = winhost.pb_path()
+# session_cleanup takes a path string, or pb.exe on the Windows device as it is
+CLEANUP_PB = PB if winhost.device() else str(PB)
 OPEN = 25  # more than the removed 20-session limit
 CLOSE = 5
 
 
 def new(name, target):
-    terminal = Terminal([str(PB), 'connect', target, '--name', name, '--status-bar', 'off'])
+    terminal = Terminal(winhost.terminal_argv(PB, ['connect', target, '--name', name, '--status-bar', 'off']), env=winhost.terminal_env(PB))
     try:
-        terminal.expect(b'\x1b[?2004h', timeout=60)
-        terminal.expect(terminal.marker('READY', 'stty -echo; '), timeout=30)
+        if windows_target.is_windows(PB, target):  # cmd.exe under ConPTY: no bracketed paste, no stty
+            token = 'PB_READY_' + uuid.uuid4().hex
+            terminal.send(windows_target.typed_marker(token) + '\r')
+            terminal.expect(token, timeout=60)
+        else:
+            terminal.expect(b'\x1b[?2004h', timeout=60)
+            terminal.expect(terminal.marker('READY', 'stty -echo; '), timeout=30)
         return 0, ''
     except RuntimeError:
         try:
@@ -41,6 +50,8 @@ def new(name, target):
 
 def diagnostics_tail(count=12):
     events = []
+    if winhost.device():  # failure detail only; the device's event files stay there (pb bugreport collects them)
+        return events
     for path in sorted((Path.home() / '.local/state/paperboat/diagnostics').glob('*.ndjson'))[-2:]:
         for line in path.read_text(errors='replace').splitlines()[-4000:]:
             try:
@@ -55,7 +66,7 @@ def diagnostics_tail(count=12):
 
 
 def names(target):
-    out = subprocess.run([str(PB), 'session', 'list', target, '--all', '--json'], capture_output=True, text=True, timeout=60).stdout
+    out = winhost.pb_text(PB, ['session', 'list', target, '--all', '--json'], timeout=60).stdout
     return {s['name']: s for s in json.loads(out)['sessions']}
 
 
@@ -85,7 +96,7 @@ def main():
             raise RuntimeError('%d of %d created terminals are listed as live' % (len(live), OPEN))
         # Closed sessions never count: close some and open the same number again at once.
         for name in created[:CLOSE]:
-            cleanup(str(PB), args.target, name)
+            cleanup(CLEANUP_PB, args.target, name)
         del created[:CLOSE]
         for index in range(CLOSE):
             name = prefix + 'again-' + str(index)
@@ -98,7 +109,7 @@ def main():
     finally:
         for name in created:
             try:
-                cleanup(str(PB), args.target, name)
+                cleanup(CLEANUP_PB, args.target, name)
             except Exception:
                 pass
             time.sleep(0.5)

@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 import tempfile
 
+import winhost
+
 from pairing_lifecycle import invoke
 from terminal_lifecycle import qualify
 
@@ -13,9 +15,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
     args = parser.parse_args()
-    binary = Path.home() / '.local/bin/pb'
-    with tempfile.TemporaryDirectory(prefix='paperboat-status-bar-') as directory:
-        config = str(Path(directory) / 'config.json')
+    binary = winhost.pb_path()
+    with winhost.workdir('paperboat-status-bar-') as directory:
+        config = str(directory / 'config.json')
         prefix = ('--config', config, 'config', 'status-bar')
         invoke(binary, *prefix, raw=True)
         original = invoke(binary, *prefix, 'show', '--json')

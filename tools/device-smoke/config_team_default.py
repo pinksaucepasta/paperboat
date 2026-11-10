@@ -15,11 +15,14 @@ import json
 import subprocess
 import sys
 
+import winhost
+
+PB = winhost.pb_path() if winhost.device() else 'pb'  # pb from PATH on the machine itself
 results = {}
 
 
 def pb(*args):
-    out = subprocess.run(['pb', 'config', *args, '--json'], capture_output=True, text=True, timeout=180)
+    out = winhost.pb_text(PB, ['config', *args, '--json'], timeout=180)
     try:
         return json.loads(out.stdout)
     except ValueError:

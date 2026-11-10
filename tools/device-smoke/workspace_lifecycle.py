@@ -8,10 +8,11 @@ import uuid
 
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
+import winhost
 
 
 def main():
-    pb = Path.home() / '.local/bin/pb'
+    pb = winhost.pb_path()
     enrolled = registration()
     retained = os.environ.get('PAPERBOAT_SMOKE_TEAM', '')
     team = retained or 'smoke-f2-' + uuid.uuid4().hex[:12]

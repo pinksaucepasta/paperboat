@@ -18,6 +18,10 @@ Unix peer through pb exec); private_access_permission drives two Unix hosts over
 ENV: env-scopes, env-messages, env-delivery and env-revoke-rotation need the device account's own unlocked vault
 (--vault-password-file: delivery reaches that account's machines); env-team-scopes has the device account as owner and
 the second profile as member; env-undeliverable needs no vault, only a disposable target and the commands that cut it.
+Narrowed on Windows: policy-token (the device creates the tokens, a Unix throwaway holds them), team-two-account (no
+member-machine approval/transfer), team-business (no F19-07 token steps, no streaming), bugreport (the DPAPI-protected
+CLI tokens are not searched for; no support lookup), completion (the PowerShell script only). cli_credential.py is not
+ported: the token it reads is a DPAPI-protected file on Windows.
 """
 import argparse
 import contextlib
@@ -132,6 +136,16 @@ def checks(args):
     business = ['team_business.py', '--cmd', winhost.WINDOWS, '--api', '{server}', '--team']
     table['team-business'] = (business + [team, '--member', '{teammate_account}'], ['--team'])
     table['team-identity-commands'] = (business + [args.sso_team or '', '--identity-commands'], ['--sso_team'])
+    for name in ('status_bar_lifecycle', 'completion_lifecycle', 'bugreport_lifecycle', 'inventory_freshness',
+                 'session_limit', 'doctor_lifecycle'):  # inventory-freshness renames the peer and back
+        table[name.replace('_lifecycle', '').replace('_', '-')] = ([name + '.py', peer], ['--peer'])
+    for name in ('config_customize', 'cli_paging', 'network_inventory', 'update_observation', 'approve_refusals'):
+        table[name.replace('_', '-')] = ([name + '.py'], [])
+    table['send-self'] = (['send_self.py', args.machine], ['--machine'])
+    table['workspace-switch'] = (['workspace_lifecycle.py'], ['--empty_team'])  # PAPERBOAT_SMOKE_TEAM = --empty-team
+    table['config-team-default'] = (['config_team_default.py', team, args.config_repository or ''], ['--team', '--config_repository'])
+    # Logs the device out and in again; the link is approved here in headless Chromium with the stored console session.
+    table['auth-lifecycle'] = (['auth_lifecycle_approved.py', 'windows', peer], ['--peer', 'STATE', 'PW_CHROMIUM'])
     return table
 
 
@@ -157,7 +171,8 @@ def verdict(returncode, stdout):
         if isinstance(record, dict) and 'status' in record:
             statuses.append(record['status'])
     statuses += [line.split()[1] for line in stdout.splitlines() if line.startswith('RESULT ')]  # policy_team.py
-    statuses += [line[:4] for line in stdout.splitlines() if line.startswith(('PASS  ', 'FAIL  '))]  # team_two_account.py
+    # team_two_account.py, config_team_default.py and the policy checks print one `PASS name` / `FAIL name` line a step
+    statuses += [line[:4] for line in stdout.splitlines() if line.startswith(('PASS ', 'FAIL '))]
     return 'PASS' if returncode == 0 and statuses and set(statuses) == {'PASS'} else 'FAIL'
 
 
@@ -183,6 +198,8 @@ def run_streaming(command, environment, timeout):
 
 def run_check(check, argv, args, device):
     environment = dict(os.environ, PB_SMOKE_WINDOWS_PB=device.pb_exe)
+    if check == 'workspace-switch':
+        environment['PAPERBOAT_SMOKE_TEAM'] = args.empty_team
     replacements = {}
     with contextlib.ExitStack() as stack:
         if check == 'env-vault-lifecycle':  # a fresh vault on a fresh account; its secret files stay on the device
@@ -247,6 +264,8 @@ def build_parser():
     parser.add_argument('--token-pb', default='/home/pbt/.local/bin/pb', help='policy-token: pb on the --token-cmd side')
     parser.add_argument('--suspend-cmd', help='team-suspension: controller command that runs SQL from stdin on the server database')
     parser.add_argument('--sso-team', help='team-identity-commands: a team the device account owns, with SSO and a directory group')
+    parser.add_argument('--empty-team', help='workspace-switch: a team of the device account without machines')
+    parser.add_argument('--config-repository', help='config-team-default: a GitHub config repository connected to the account')
     parser.add_argument('--only', default='', help='comma list of check ids')
     parser.add_argument('--timeout', type=int, default=1800)
     parser.add_argument('--list', action='store_true')

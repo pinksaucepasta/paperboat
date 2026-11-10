@@ -11,13 +11,16 @@ import uuid
 
 from install_lifecycle import registration
 from pairing_lifecycle import runtime_root
+import windows_target
+import winhost
 
-PB = Path.home() / '.local/bin/pb'
+PB = winhost.pb_path()
+TRUE = ['true']  # what plain ssh runs on the target; cmd.exe on a Windows target has no `true`
 BUDGET = 30.0
 
 
 def pb(*args, timeout=90):
-    return subprocess.run([str(PB), *args], capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+    return winhost.pb_text(PB, args, timeout=timeout, stdin=subprocess.DEVNULL)
 
 
 def completes(name):
@@ -29,8 +32,11 @@ def resolves(host):
     """Every name under the local access domain resolves to the local proxy, so the alias counts only
     when plain OpenSSH reaches the machine through it."""
     try:
-        result = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', host, 'true'],
-                                capture_output=True, timeout=20, stdin=subprocess.DEVNULL)
+        if winhost.device():  # the device's own OpenSSH client
+            result = winhost.which('ssh').run_remote(['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', host, *TRUE], timeout=20)
+        else:
+            result = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', host, *TRUE],
+                                    capture_output=True, timeout=20, stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         return False
     return result.returncode == 0
@@ -56,6 +62,8 @@ def main():
     parser.add_argument('target')
     args = parser.parse_args()
     before = registration()
+    if windows_target.is_windows(PB, args.target):
+        TRUE[:] = ['exit', '0']
     binding = json.loads((runtime_root() / 'machine-registration.json').read_text())
     with urllib.request.urlopen(binding['server_url'].rstrip('/') + '/v1/client-configuration', timeout=15) as response:
         domain = json.load(response)['data']['local_access_base_domain']
