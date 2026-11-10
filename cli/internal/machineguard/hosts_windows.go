@@ -59,12 +59,30 @@ func replaceHostsFile(ctx context.Context, path string, info os.FileInfo, origin
 	if err = errors.Join(writeErr, syncErr, closeErr); err != nil {
 		return err
 	}
-	flags := windows.SECURITY_INFORMATION(hostsSecurity) | windows.UNPROTECTED_DACL_SECURITY_INFORMATION
-	if control&windows.SE_DACL_PROTECTED != 0 {
-		flags = windows.SECURITY_INFORMATION(hostsSecurity) | windows.PROTECTED_DACL_SECURITY_INFORMATION
+	// The staged file already inherits the parent's rules, as the original does. Give it the original's owner and group,
+	// and its DACL only when it has explicit rules or blocks inheritance: passing the full DACL back (inherited
+	// rules included) would add every inherited rule a second time as an explicit one.
+	flags := windows.SECURITY_INFORMATION(windows.OWNER_SECURITY_INFORMATION | windows.GROUP_SECURITY_INFORMATION)
+	var explicitDACL *windows.ACL
+	protected := control&windows.SE_DACL_PROTECTED != 0
+	explicit, err := explicitACEs(dacl)
+	if err != nil {
+		return err
+	}
+	if protected && len(explicit) == 0 {
+		return errors.New("hosts file blocks inheritance without access rules; left unchanged")
+	}
+	if protected || len(explicit) > 0 {
+		if explicitDACL, err = windows.ACLFromEntries(explicit, nil); err != nil {
+			return err
+		}
+		flags |= windows.DACL_SECURITY_INFORMATION | windows.UNPROTECTED_DACL_SECURITY_INFORMATION
+		if protected {
+			flags = flags&^windows.UNPROTECTED_DACL_SECURITY_INFORMATION | windows.PROTECTED_DACL_SECURITY_INFORMATION
+		}
 	}
 	if err = windowssecurity.WithRestorePrivilege(func() error {
-		return windows.SetNamedSecurityInfo(staged, windows.SE_FILE_OBJECT, flags, owner, group, dacl, nil)
+		return windows.SetNamedSecurityInfo(staged, windows.SE_FILE_OBJECT, flags, owner, group, explicitDACL, nil)
 	}); err != nil {
 		return err
 	}
@@ -125,7 +143,7 @@ func replaceHostsFile(ctx context.Context, path string, info os.FileInfo, origin
 	if !bytes.Equal(installed, next) {
 		failed = append(failed, "the installed file differs from the update")
 	}
-	if installedSD.String() != security.String() {
+	if !sameFileSecurity(installedSD, security) {
 		failed = append(failed, "the installed file's security differs from the original's")
 	}
 	if len(failed) > 0 {
