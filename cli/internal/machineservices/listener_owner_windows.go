@@ -41,6 +41,9 @@ func listenerOwner(port uint16) (string, int, bool) {
 }
 
 func processBaseName(pid uint32) string {
+	if pid == 4 { // the System process: HTTP.sys listens for IIS and other http.sys servers, and cannot be opened
+		return "Windows HTTP service (HTTP.sys, for example IIS)"
+	}
 	process, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
 	if err != nil {
 		return ""
