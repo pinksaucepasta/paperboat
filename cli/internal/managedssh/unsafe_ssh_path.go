@@ -2,7 +2,7 @@ package managedssh
 
 import "fmt"
 
-// UnsafeSSHPathError: the user's .ssh folder has an owner or a write permission Windows OpenSSH would not trust,
+// UnsafeSSHPathError: the user's .ssh folder or a file in it (config, authorized_keys) has an owner or a write permission Windows OpenSSH would not trust,
 // so Paperboat does not write its managed SSH files there.
 type UnsafeSSHPathError struct {
 	Path    string

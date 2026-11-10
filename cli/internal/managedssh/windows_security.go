@@ -183,6 +183,17 @@ func verifyCurrentUserOwnedPath(path, sid string, requireDirectory bool) error {
 		return ErrOpenSSHConfigConflict
 	}
 	descriptor, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	return sshDescriptorError(descriptor, err, path, sid)
+}
+
+// verifySecureSSHHandle applies the same Win32-OpenSSH rule to an open file the user owns the content of
+// (~/.ssh/config, authorized_keys); path names it in the refusal.
+func verifySecureSSHHandle(handle windows.Handle, path, sid string) error {
+	descriptor, err := windows.GetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	return sshDescriptorError(descriptor, err, path, sid)
+}
+
+func sshDescriptorError(descriptor *windows.SECURITY_DESCRIPTOR, err error, path, sid string) error {
 	if err != nil || descriptor == nil {
 		return ErrOpenSSHConfigConflict
 	}

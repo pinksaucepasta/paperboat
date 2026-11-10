@@ -471,8 +471,8 @@ func readWindowsSSHFile(directory, name, sid string, owned bool) ([]byte, bool, 
 		if !windowssecurity.HandleOwnerMatchesSID(opened.handle, userSID) || !windowssecurity.ProtectedHandleDACLMatches(opened.handle, managedSSHSDDL(sid)) {
 			return nil, false, ErrOpenSSHConfigConflict
 		}
-	} else if !windowssecurity.HandleOwnerMatchesSID(opened.handle, userSID) {
-		return nil, false, ErrOpenSSHConfigConflict
+	} else if err := verifySecureSSHHandle(opened.handle, filepath.Join(directory, name), sid); err != nil {
+		return nil, false, err
 	}
 	return append([]byte(nil), opened.value...), true, nil
 }
@@ -678,13 +678,13 @@ func removeWindowsUserSSHConfig(directory, sid string) error {
 	}
 	return os.Remove(path)
 }
+
+// copyWindowsFileSecurity keeps the replaced file's group and access list. The owner is not copied: the
+// replacement is created owned by the user, which OpenSSH trusts as it trusts an Administrators or SYSTEM owner,
+// and a process that is not elevated cannot set an Administrators owner.
 func copyWindowsFileSecurity(source, destination string) error {
-	descriptor, err := windows.GetNamedSecurityInfo(source, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.GROUP_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	descriptor, err := windows.GetNamedSecurityInfo(source, windows.SE_FILE_OBJECT, windows.GROUP_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
 	if err != nil || descriptor == nil {
-		return err
-	}
-	owner, _, err := descriptor.Owner()
-	if err != nil {
 		return err
 	}
 	group, _, err := descriptor.Group()
@@ -699,5 +699,5 @@ func copyWindowsFileSecurity(source, destination string) error {
 	if err != nil {
 		return err
 	}
-	return windows.SetNamedSecurityInfo(destination, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.GROUP_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION, owner, group, dacl, nil)
+	return windows.SetNamedSecurityInfo(destination, windows.SE_FILE_OBJECT, windows.GROUP_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION, nil, group, dacl, nil)
 }

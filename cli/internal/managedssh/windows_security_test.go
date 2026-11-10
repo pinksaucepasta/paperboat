@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
 	"golang.org/x/sys/windows"
 )
 
@@ -90,22 +91,7 @@ func TestVerifyCurrentUserOwnedPathAcceptsAdministratorsOwnedSSHFolder(t *testin
 	if err := os.Mkdir(directory, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	set := func(sddl string) {
-		t.Helper()
-		descriptor, err := windows.SecurityDescriptorFromString(sddl)
-		if err != nil {
-			t.Fatal(err)
-		}
-		owner, _, _ := descriptor.Owner()
-		dacl, _, _ := descriptor.DACL()
-		err = windows.SetNamedSecurityInfo(directory, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, owner, nil, dacl, nil)
-		if errors.Is(err, windows.ERROR_INVALID_OWNER) || errors.Is(err, windows.ERROR_ACCESS_DENIED) {
-			t.Skip("setting an Administrators owner needs an elevated test process")
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
+	set := func(sddl string) { setTestSecurity(t, directory, sddl) }
 	protected := "(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;" + sid + ")"
 	set("O:BAD:P" + protected)
 	if err := verifyCurrentUserOwnedPath(directory, sid, true); err != nil {
@@ -115,5 +101,53 @@ func TestVerifyCurrentUserOwnedPathAcceptsAdministratorsOwnedSSHFolder(t *testin
 	var unsafePath *UnsafeSSHPathError
 	if err := verifyCurrentUserOwnedPath(directory, sid, true); !errors.As(err, &unsafePath) || unsafePath.Path != directory || !strings.Contains(err.Error(), "can change it") || !errors.Is(err, ErrOpenSSHConfigConflict) {
 		t.Fatalf("writable .ssh error = %v", err)
+	}
+}
+
+func setTestSecurity(t *testing.T, path, sddl string) {
+	t.Helper()
+	descriptor, err := windows.SecurityDescriptorFromString(sddl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, _, _ := descriptor.Owner()
+	dacl, _, _ := descriptor.DACL()
+	err = windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, owner, nil, dacl, nil)
+	if errors.Is(err, windows.ERROR_INVALID_OWNER) || errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+		t.Skip("setting an Administrators owner needs an elevated test process")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A ~/.ssh/config made from an elevated shell (owner Administrators) is read, as Windows OpenSSH reads it, and
+// Paperboat can still rewrite it from an unelevated process; one another user can write is refused by name.
+func TestUserSSHConfigOwnedByAdministratorsIsReadAndRewritten(t *testing.T) {
+	sid, err := currentManagedSSHSID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	path := filepath.Join(directory, "config")
+	if err := os.WriteFile(path, []byte("Host example\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	protected := "(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;" + sid + ")"
+	setTestSecurity(t, path, "O:BAD:P"+protected)
+	if value, exists, err := readWindowsSSHFile(directory, "config", sid, false); err != nil || !exists || string(value) != "Host example\n" {
+		t.Fatalf("Administrators-owned config: value=%q exists=%v err=%v", value, exists, err)
+	}
+	next := []byte("Host example\nInclude ~/.ssh/paperboat_config\n")
+	if err := windowssecurity.WithUnelevatedToken(func() error { return replaceWindowsUserSSHFile(directory, path, sid, next) }); err != nil {
+		t.Fatalf("unelevated rewrite of an Administrators-owned config: %v", err)
+	}
+	if value, _, err := readWindowsSSHFile(directory, "config", sid, false); err != nil || string(value) != string(next) {
+		t.Fatalf("rewritten config: value=%q err=%v", value, err)
+	}
+	setTestSecurity(t, path, "O:BAD:P"+protected+"(A;;FW;;;WD)")
+	var unsafePath *UnsafeSSHPathError
+	if _, _, err := readWindowsSSHFile(directory, "config", sid, false); !errors.As(err, &unsafePath) || unsafePath.Path != path || !strings.Contains(err.Error(), "can change it") {
+		t.Fatalf("writable config error = %v", err)
 	}
 }
