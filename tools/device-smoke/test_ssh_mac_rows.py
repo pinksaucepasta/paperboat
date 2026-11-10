@@ -123,7 +123,7 @@ class WindowsTarget(unittest.TestCase):
     def test_windows_forwarding_asserts_the_limit_message_the_cli_prints_and_never_passes_on_noise(self):
         windows, unix = ssh_mac_rows.forwarding_script(True), ssh_mac_rows.forwarding_script(False)
         self.assertEqual(ssh_mac_rows.FORWARDING, unix)
-        source = (pathlib.Path(__file__).parents[2] / 'cli/cmd/pb/ssh_command.go').read_text()
+        source = (pathlib.Path(__file__).resolve().parents[2] / 'cli/cmd/pb/ssh_command.go').read_text()
         self.assertIn('const sshWindowsAgentForwardingMessage = "%s"' % ssh_mac_rows.WINDOWS_AGENT_LIMIT, source)
         for script in (windows,):
             self.assertNotIn('ED25519', script)
