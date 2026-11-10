@@ -630,8 +630,9 @@ func TestCommandUsesTestSafeLocalDaemonInstaller(t *testing.T) {
 		if !strings.HasSuffix(strings.ToLower(executable), ".test") && !strings.HasSuffix(strings.ToLower(executable), ".test.exe") {
 			t.Fatalf("expected test executable, got %q", executable)
 		}
-		// A command's own snapshot recovery passes its config and server on every platform (localDaemonSnapshot).
-		if gotConfigPath != configPath || server != "https://api.paperboat.test" {
+		// What every command passes when it starts the daemon service: nothing on Windows (0b79c3982).
+		wantConfig, wantServer := localDaemonServiceArguments(runtime.GOOS, configPath, "https://api.paperboat.test")
+		if gotConfigPath != wantConfig || server != wantServer {
 			t.Fatalf("config=%q server=%q", gotConfigPath, server)
 		}
 		return errors.New("test installer sentinel")
