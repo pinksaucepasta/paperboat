@@ -1,0 +1,84 @@
+# Temporary Windows test machines: each job is a hosted runner whose sshd the device-smoke controller reaches through a
+# reverse SSH tunnel to our jump host's loopback (tools/device-smoke/winpool.sh starts, lists and stops them).
+# Manual dispatch only, so a fork or pull request can never run it with the tunnel key.
+name: winpool
+
+on:
+  workflow_dispatch:
+    inputs:
+      slots:
+        description: Machine numbers 1-6, comma separated (winpool.sh start picks free ones)
+        required: true
+        default: "1"
+      hours:
+        description: Lifetime in hours
+        type: choice
+        options: ["1", "2", "3", "4", "5"]
+        default: "2"
+
+permissions:
+  contents: read
+
+jobs:
+  machine:
+    name: winpool-${{ matrix.slot }}
+    runs-on: windows-latest
+    timeout-minutes: ${{ fromJSON('{"1":75,"2":135,"3":195,"4":255,"5":315}')[inputs.hours] }} # hours + 15 min
+    concurrency: winpool-${{ matrix.slot }} # one machine per tunnel port
+    strategy:
+      fail-fast: false
+      matrix:
+        slot: ${{ fromJSON(format('[{0}]', inputs.slots)) }}
+    steps:
+      - name: sshd behind a reverse tunnel
+        shell: pwsh
+        env:
+          SLOT: ${{ matrix.slot }}
+          HOURS: ${{ inputs.hours }}
+          CONTROLLER_PUBKEY: ${{ vars.WINPOOL_CONTROLLER_PUBKEY }}
+          TUNNEL_KEY: ${{ secrets.WINPOOL_TUNNEL_KEY }}
+          TUNNEL_HOST: ${{ secrets.WINPOOL_TUNNEL_HOST }}
+          TUNNEL_KNOWN_HOSTS: ${{ secrets.WINPOOL_TUNNEL_KNOWN_HOSTS }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $slot = [int]$env:SLOT
+          if ($slot -lt 1 -or $slot -gt 6) { throw 'slot must be 1-6' }
+          if (-not $env:CONTROLLER_PUBKEY -or -not $env:TUNNEL_KEY) { throw 'WINPOOL_CONTROLLER_PUBKEY or WINPOOL_TUNNEL_KEY is not set' }
+          $port = 22200 + $slot
+
+          if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) {
+            Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 | Out-Null
+          }
+          Start-Service sshd # the first start writes the default sshd_config
+          # Loopback only (reached through the tunnel alone) and keys only; first value wins, so these go on top.
+          $config = "$env:ProgramData\ssh\sshd_config"
+          Set-Content $config (@('ListenAddress 127.0.0.1', 'PasswordAuthentication no') + (Get-Content $config))
+          $keys = "$env:ProgramData\ssh\administrators_authorized_keys"
+          Set-Content -Encoding ascii $keys $env:CONTROLLER_PUBKEY
+          icacls $keys /inheritance:r /grant '*S-1-5-32-544:F' '*S-1-5-18:F' | Out-Null
+          Restart-Service sshd
+
+          $dir = "$env:USERPROFILE\.ssh"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $key = "$dir\winpool_tunnel"; $known = "$dir\winpool_known_hosts"
+          [IO.File]::WriteAllText($key, ($env:TUNNEL_KEY -replace "`r", '').Trim() + "`n")
+          icacls $key /inheritance:r /grant:r "$($env:USERNAME):R" | Out-Null
+          Set-Content -Encoding ascii $known $env:TUNNEL_KNOWN_HOSTS
+
+          $stop = 'C:\winpool-stop' # winpool.sh stop creates it
+          $deadline = (Get-Date).AddHours([int]$env:HOURS)
+          function Running { (Get-Date) -lt $deadline -and -not (Test-Path $stop) }
+          try {
+            while (Running) {
+              $tunnel = Start-Process ssh.exe -NoNewWindow -PassThru -ArgumentList @(
+                '-N', '-T', '-i', $key, '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=yes',
+                '-o', "UserKnownHostsFile=$known", '-o', 'ExitOnForwardFailure=yes', '-o', 'ConnectTimeout=20',
+                '-o', 'ServerAliveInterval=30', '-o', 'ServerAliveCountMax=3',
+                '-R', "127.0.0.1:${port}:127.0.0.1:22", "winpool@$env:TUNNEL_HOST")
+              Write-Host "winpool-$slot is up"
+              while ((Running) -and -not $tunnel.HasExited) { Start-Sleep 5 }
+              if ($tunnel.HasExited) { Write-Host 'tunnel closed; again in 10 s'; Start-Sleep 10 } else { $tunnel.Kill() }
+            }
+          } finally {
+            Remove-Item -Force $key -ErrorAction SilentlyContinue
+          }
