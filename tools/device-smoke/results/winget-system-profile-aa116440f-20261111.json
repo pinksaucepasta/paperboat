@@ -1,0 +1,20 @@
+{
+  "purpose": "evidence for aa116440f (winget under LocalSystem with no settings file left no managed sshd): the product path, without the winpool seed",
+  "host": "winpool-10 (hosted runner; its job started before winpool.yml began seeding the SYSTEM profile)",
+  "build": "dev-5c1d4bc43 (main, contains aa116440f)",
+  "precondition": {"system_profile_winget_settings_json_exists": false,
+                   "note": "absent on this runner already (job older than the seed), so there was nothing to delete; the runneradmin-profile file does exist (fe616e6bb)"},
+  "install": {"ok": true},
+  "pair": {"ok": true, "seconds": 53, "machine": "w12flash-3"},
+  "result": "PASS",
+  "evidence": [
+    "PaperboatSshd-<instance>-<generation> service Running (with Carrier, Hostd, LocalDaemon, SessionOwner, Updated)",
+    "pb status: the machine entry carries ssh_user runneradmin, ssh_port 58965 and 1 published ssh_host_key (a host key generation exists)",
+    "C:\\Program Files\\OpenSSH\\sshd.exe present"
+  ],
+  "not_checked": [
+    "the literal ssh.host_key_generation counter (not found in any command output; the published host key and the running sshd stand in for it)",
+    "ssh_readiness reported 'degraded' (health ssh_target_not_ready) for the machine in pb status; not investigated here"
+  ],
+  "cleanup": "pb uninstall exit 0, services gone; machine w12flash-3 revoked by exact id; files removed"
+}
