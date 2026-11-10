@@ -149,7 +149,7 @@ def outage():
         return report(row, 'FAIL', 'could not resolve the control plane address on the client')
     rule = 'block drop out quick proto { tcp udp } to { %s }' % ' '.join(addrs)
     token, c_out, r_out = None, '', ''
-    probe = prelude(False) + r"""plain=$(timeout 40 ssh -o BatchMode=yes -o ConnectTimeout=20 $H echo outage-plain-ok </dev/null 2>&1 | tr '\n' ' '); pbo=$(timeout 40 $PB ssh $A -- echo outage-pb-ok </dev/null 2>&1 | tr '\n' ' ')
+    probe = prelude(False) + r"""plain=$(timeout 40 ssh -o BatchMode=yes -o ConnectTimeout=20 $H echo outage-plain-ok </dev/null 2>&1 | tr '\r\n' '  '); pbo=$(timeout 40 $PB ssh $A -- echo outage-pb-ok </dev/null 2>&1 | tr '\r\n' '  ')
 api=$(curl -s -m 5 -o /dev/null -w '%%{http_code}' https://%s/ || true); echo "RESULT api=$api plain=[$plain] pb=[$pbo]"
 """ % api
     try:
