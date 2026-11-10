@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode/utf16"
@@ -212,6 +213,7 @@ func (a *Adapter) Start(command Command) (*Process, error) {
 
 type Process struct {
 	writeMu     sync.Mutex
+	interrupts  atomic.Int64 // bumped by every Interrupt: a write cut by it ends in ErrInterrupted, like the unix twin
 	input       *os.File
 	output      *os.File
 	console     windows.Handle
@@ -225,6 +227,7 @@ type Process struct {
 	consoleOnce sync.Once
 	closeOnce   sync.Once
 	closeErr    error
+	inputClosed bool // set under mu by CloseIO before the input handle closes
 }
 
 func (p *Process) Read(buffer []byte) (int, error) { return p.output.Read(buffer) }
@@ -234,15 +237,23 @@ func (p *Process) WriteContext(ctx context.Context, data []byte) (int, error) {
 		return 0, err
 	}
 	defer p.writeMu.Unlock()
-	return writeInput(p.input, data, inputTimeout(ctx))
+	start := p.interrupts.Load()
+	n, err := writeInput(p.input, data, inputTimeout(ctx))
+	if err != nil && p.interrupts.Load() != start {
+		return n, ErrInterrupted
+	}
+	return n, err
 }
 
 // Interrupt delivers a lone Ctrl-C (ETX) ahead of input stuck in a full ConPTY input pipe: a paste the foreground
 // program never reads (a flood such as `yes`) blocks WriteFile, and the key would wait behind it for the 20 s input
 // timeout, holding writeMu (the unix twin aborts the pending write by deadline, pty_unix.go Interrupt). CancelIoEx
-// cancels the pending write from this thread, writeMu frees, and ETX, which ConPTY turns into the foreground Ctrl-C
-// event, goes next. accepted runs first so the caller marks the input queued before key as discarded. Another key
-// is written normally by the caller (false).
+// cancels the pending write from this thread (again every 50 ms while writeMu is taken, for a write that starts after
+// the first cancel), the cut write ends in ErrInterrupted so the journal finalizes it instead of resending it, writeMu
+// frees, and ETX, which ConPTY turns into the foreground Ctrl-C event, goes next. accepted runs first so the caller
+// marks the input queued before key as discarded. Another key is written normally by the caller (false).
+// Limit (measured): ConPTY has no input flush, so ETX still queues behind bytes conhost already accepted and the
+// shell sees it once it reads them; the cut write itself ends at once and is final.
 func (p *Process) Interrupt(key byte, accepted func()) (bool, error) {
 	if key != 0x03 {
 		return false, nil
@@ -250,15 +261,42 @@ func (p *Process) Interrupt(key byte, accepted func()) (bool, error) {
 	if accepted != nil {
 		accepted()
 	}
-	_ = windows.CancelIoEx(windows.Handle(p.input.Fd()), nil)
+	p.interrupts.Add(1)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := LockInput(ctx, &p.writeMu); err != nil {
-		return true, err
+	stop, stopped := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(50 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			p.cancelInput()
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	err := LockInput(ctx, &p.writeMu)
+	close(stop)
+	<-stopped // no cancel may land on the key written below
+	if err != nil {
+		return false, err
 	}
 	defer p.writeMu.Unlock()
-	_, err := writeInput(p.input, []byte{key}, inputTimeout(ctx))
+	_, err = writeInput(p.input, []byte{key}, inputTimeout(context.Background()))
 	return true, err
+}
+
+// cancelInput cancels the pending write on the input pipe; a closed pipe has nothing to cancel.
+func (p *Process) cancelInput() {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if p.inputClosed {
+		return
+	}
+	_ = windows.CancelIoEx(windows.Handle(p.input.Fd()), nil)
 }
 
 func (p *Process) Resize(dimensions Dimensions) error {
@@ -356,6 +394,9 @@ func (p *Process) Wait(ctx context.Context) (ExitResult, error) {
 }
 func (p *Process) CloseIO() error {
 	p.closeOnce.Do(func() {
+		p.mu.Lock()
+		p.inputClosed = true
+		p.mu.Unlock()
 		p.closeErr = errors.Join(p.input.Close(), p.output.Close())
 		p.closeConsole()
 		var processErr, jobErr error
