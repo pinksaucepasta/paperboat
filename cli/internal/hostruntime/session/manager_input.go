@@ -119,6 +119,9 @@ func (m *Manager) Interrupt(sessionID string, key InputKey, data byte) bool {
 	if err != nil {
 		observeSessionFailure(session, "input", classifySessionFailure("input", err))
 	}
+	if handled {
+		session.fanout.DiscardPendingOutput()
+	}
 	return handled
 }
 

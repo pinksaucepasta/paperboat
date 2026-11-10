@@ -229,6 +229,30 @@ func (f *Fanout) SkipTo(attachmentID string, nextSequence uint64) error {
 	return nil
 }
 
+// DiscardPendingOutput drops terminal output (channel 1) already queued for every attached viewer, the userspace
+// counterpart of a tty flushing its output queue on VINTR (EternalTerminal drops droppable output on interrupt the
+// same way). History keeps it for replay. Each cursor stops before the first control event (resize) it has not
+// delivered, so those still arrive; the viewer sees a sequence gap, as after a lagged skip.
+func (f *Fanout) DiscardPendingOutput() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, cursor := range f.attachments {
+		if cursor.state != Attached || !cursor.receiveOutput || !cursor.hasCursor || cursor.cursor >= cursor.enqueuedEnd {
+			continue
+		}
+		target := cursor.enqueuedEnd
+		for _, event := range f.ring {
+			if event.Channel != 1 && event.StartSequence >= cursor.cursor && event.StartSequence < target {
+				target = event.StartSequence
+			}
+		}
+		cursor.cursor, cursor.queuedBytes = target, cursor.enqueuedEnd-target
+		notify(cursor.notify)
+	}
+	f.compactLocked()
+	notify(f.room)
+}
+
 func (f *Fanout) Publish(event history.Event) ([]Eviction, error) {
 	event.Data = append([]byte(nil), event.Data...)
 	return f.PublishOwned(event)
