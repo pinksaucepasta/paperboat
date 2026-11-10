@@ -317,20 +317,20 @@ func TestNativeConPTYInterruptAtAnIdlePromptLeavesBackgroundWorkAlone(t *testing
 	}
 }
 
-// interruptAsTheCallerDoes sends a Ctrl-C the way session.Manager.Interrupt does: PSReadLine clears ENABLE_PROCESSED_INPUT at the
-// prompt, so there the key is data (Interrupt reports false, nothing is cut or discarded) and the caller writes it normally,
-// which cancels the line; a console in cooked mode makes it the interrupt.
-func interruptAsTheCallerDoes(t *testing.T, process *Process) {
+// interruptAtThePowerShellPrompt sends a Ctrl-C at an idle PowerShell prompt the way session.Manager.Interrupt's caller does.
+// PSReadLine clears ENABLE_PROCESSED_INPUT while it reads a line, so there the key is data: Interrupt must report false (nothing
+// cut or discarded) and the caller writes it, which PSReadLine answers with ^C and a fresh prompt. That ^C is the proof the byte
+// reached PowerShell's input; a dropped Ctrl-C shows none.
+func interruptAtThePowerShellPrompt(t *testing.T, process *Process, output *nativeOutput) {
 	t.Helper()
 	handled, err := process.Interrupt(0x03, nil)
-	if err != nil {
-		t.Fatalf("Interrupt err=%v", err)
+	if err != nil || handled {
+		t.Fatalf("Interrupt at a PowerShell prompt = %v, %v; want false (PSReadLine has the console in raw mode)", handled, err)
 	}
-	if !handled {
-		if _, err := process.Write([]byte{0x03}); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := process.Write([]byte{0x03}); err != nil {
+		t.Fatal(err)
 	}
+	output.waitFor(t, "^C")
 }
 
 // Another shell than cmd.exe: nothing is ever terminated by a Ctrl-C (no positive foreground evidence there), whatever the shell has started.
@@ -342,12 +342,34 @@ func TestNativeConPTYInterruptWithAPowerShellShellTerminatesNothing(t *testing.T
 	}
 	output.waitFor(t, "paperboat-ps-started")
 	time.Sleep(time.Second)
-	interruptAsTheCallerDoes(t, process)
+	interruptAtThePowerShellPrompt(t, process, output)
 	time.Sleep(time.Second)
 	if _, err := process.Write([]byte("'paperboat-ps-count-' + @(Get-Process ping -ErrorAction SilentlyContinue).Count\r\n")); err != nil {
 		t.Fatalf("shell did not survive: %v", err)
 	}
 	output.waitForWithin(t, "paperboat-ps-count-1", 10*time.Second)
+}
+
+// A command PowerShell is running has the console back in cooked mode (PSReadLine restores it around the command), so Ctrl-C
+// is the interrupt there: Interrupt reports true and the running ping stops (it prints Control-C), with the shell alive. This is
+// the proof the raw-mode check did not break interrupting a running command in PowerShell.
+func TestNativeConPTYInterruptStopsAPingRunInPowerShell(t *testing.T) {
+	process, output := startNativePTY(t, nativePowerShell(t), []string{"-NoLogo", "-NoProfile"})
+	defer process.CloseIO()
+	if _, err := process.Write([]byte("ping -t 127.0.0.1\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	output.waitFor(t, "Reply from")
+	handled, err := process.Interrupt(0x03, nil)
+	if err != nil || !handled {
+		t.Fatalf("Interrupt during a running ping = %v, %v; want true (the console is cooked while a command runs)", handled, err)
+	}
+	output.waitForWithin(t, "Control-C", 10*time.Second)
+	time.Sleep(time.Second)
+	if _, err := process.Write([]byte("'paperboat-ping-count-' + @(Get-Process ping -ErrorAction SilentlyContinue).Count\r\n")); err != nil {
+		t.Fatalf("shell did not survive: %v", err)
+	}
+	output.waitForWithin(t, "paperboat-ping-count-0", 10*time.Second)
 }
 
 // PowerShell jobs run in a worker child the shell holds a handle to while idle (the reason a handle rule is only used for cmd.exe): a Ctrl-C at
@@ -386,7 +408,7 @@ func TestNativeConPTYInterruptLeavesPowerShellJobsAlone(t *testing.T) {
 				time.Sleep(2 * time.Second)
 				ready = strings.Contains(output.String(), "paperboat-job-up-1")
 			}
-			interruptAsTheCallerDoes(t, process)
+			interruptAtThePowerShellPrompt(t, process, output)
 			time.Sleep(time.Second)
 			if _, err := process.Write([]byte("'paperboat-job-count-' + @(Get-Process ping -ErrorAction SilentlyContinue).Count\r\n")); err != nil {
 				t.Fatalf("shell did not survive: %v", err)
