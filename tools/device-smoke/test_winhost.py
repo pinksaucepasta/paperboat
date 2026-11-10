@@ -2332,8 +2332,13 @@ class ConfigSyncPlumbing(unittest.TestCase):
         self.assertIn("D:P(A;;FA;;;SY)(A;;FA;;;BA)", winhost.PRIVATE)  # configsync currentPrivateFileDescriptor
         self.assertEqual((winhost.SERVICE, {'action': 'stop', 'pattern': 'PaperboatRuntimeConfig*'}),
                          (fake.calls[1]['script'], fake.calls[1]['payload']))
+        restarted = FakeSsh((0, b''))
+        with patch('subprocess.run', restarted):
+            device.service('restart', 'PaperboatHostd-x')
+        self.assertEqual((winhost.SERVICE, {'action': 'restart', 'pattern': 'PaperboatHostd-x'}),
+                         (restarted.calls[0]['script'], restarted.calls[0]['payload']))  # one snippet stops, then starts
         with self.assertRaises(AssertionError):
-            device.service('restart', 'x')
+            device.service('pause', 'x')
         started = []
 
         class Tunnel:

@@ -77,11 +77,11 @@ PRIVATE = ("$u=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value\n"
            "$s=New-Object Security.AccessControl.FileSecurity\n"
            "$s.SetSecurityDescriptorSddlForm($d,[Security.AccessControl.AccessControlSections]::Access)\n"
            "Set-Acl -LiteralPath $req.path -AclObject $s")
-# Stop or start the one service whose name matches $req.pattern and wait until it is there (systemctl stop/start).
+# Stop, start or restart the one service whose name matches $req.pattern and wait until it is there (systemctl stop/start/restart).
 SERVICE = ("$s=@(Get-Service -Name $req.pattern -ErrorAction SilentlyContinue)\n"
            "if($s.Count -ne 1){throw ('expected one service '+$req.pattern+', found '+$s.Count)}\n"
-           "if($req.action -eq 'stop'){Stop-Service -InputObject $s[0] -Force;$s[0].WaitForStatus('Stopped','00:00:30')}\n"
-           "else{Start-Service -InputObject $s[0];$s[0].WaitForStatus('Running','00:00:30')}")
+           "if($req.action -ne 'start'){Stop-Service -InputObject $s[0] -Force;$s[0].WaitForStatus('Stopped','00:01:00')}\n"
+           "if($req.action -ne 'stop'){Start-Service -InputObject $s[0];$s[0].WaitForStatus('Running','00:01:00')}")
 COPY = "Copy-Item -LiteralPath $req.source -Destination $req.target -Force"
 UNLINK = "Remove-Item -LiteralPath $req.path -Recurse -Force -ErrorAction SilentlyContinue"
 MKDIR = "[void](New-Item -ItemType Directory -Force -Path $req.path)"
@@ -118,10 +118,6 @@ TASKS = ("@(Get-ScheduledTask -TaskPath $req.path -ErrorAction SilentlyContinue|
          "Select-Object TaskName,@{n='State';e={[string]$_.State}})|ConvertTo-Json -Compress")
 SERVICE_PATHS = ("@(Get-CimInstance Win32_Service|Where-Object{$_.Name -like $req.pattern}|"
                  "Select-Object Name,PathName)|ConvertTo-Json -Compress")
-# stop, start or restart one service by exact name, waiting for the state it asked for.
-SERVICE = ("$s=Get-Service -Name $req.name\n"
-           "if($req.action -ne 'start'){Stop-Service -InputObject $s -Force;$s.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(60))}\n"
-           "if($req.action -ne 'stop'){Start-Service -InputObject $s;$s.WaitForStatus('Running',[TimeSpan]::FromSeconds(60))}")
 # Outgoing UDP except DNS is dropped while the rule exists (the iptables/pf rule of the Unix checks): pb falls back
 # to relays. TCP, and with it the controller's SSH, is untouched. A rule on a disabled firewall would do nothing.
 UDP_BLOCK = ("if($req.action -eq 'remove'){Remove-NetFirewallRule -DisplayName $req.name -ErrorAction SilentlyContinue;exit 0}\n"
@@ -424,20 +420,16 @@ class WindowsDevice:
     def services(self, pattern='Paperboat*'):
         return self._list('services ' + pattern, SERVICES, pattern=pattern)
 
-    def service(self, action, name):
-        """stop, start or restart the service with this exact name (the session is an administrator's)."""
-        assert action in ('stop', 'start', 'restart'), action
-        self.ps('%s service %s' % (action, name), SERVICE, timeout=180, name=name, action=action)
-
     def _list(self, step, script, **payload):
         out = self.ps(step, script, **payload)[1]
         value = json.loads(out) if out else []
         return [value] if isinstance(value, dict) else value
 
     def service(self, action, pattern):
-        """`stop` or `start` the one service matching the wildcard and wait for it (needs an elevated session)."""
-        assert action in ('stop', 'start'), action
-        self.ps('%s service %s' % (action, pattern), SERVICE, timeout=90, action=action, pattern=pattern)
+        """`stop`, `start` or `restart` the one service matching the wildcard (an exact name matches itself) and wait for it
+        (needs an elevated session)."""
+        assert action in ('stop', 'start', 'restart'), action
+        self.ps('%s service %s' % (action, pattern), SERVICE, timeout=180, action=action, pattern=pattern)
 
     def processes(self, pattern):
         """Processes whose command line matches the regex (pgrep -f). The snippet's own command line is only a
