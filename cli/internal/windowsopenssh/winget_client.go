@@ -11,6 +11,11 @@ import (
 
 const approvedWinGetModuleVersion = "1.9.25190"
 
+const wingetQuietSettings = "$wingetState=Join-Path $env:LOCALAPPDATA 'Packages\\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe\\LocalState';" +
+	"$wingetSettings=Join-Path $wingetState 'settings.json';" +
+	"if(-not (Test-Path -LiteralPath $wingetSettings)){New-Item -ItemType Directory -Force -Path $wingetState|Out-Null;" +
+	"Set-Content -Encoding ascii -LiteralPath $wingetSettings -Value '{\"visual\":{\"progressBar\":\"disabled\"}}'}"
+
 func powershell7Command() string {
 	if configured := strings.TrimSpace(os.Getenv("PAPERBOAT_PWSH_PATH")); configured != "" {
 		if _, err := os.Stat(configured); err == nil {
@@ -77,6 +82,10 @@ func installWithSystemWinget(ctx context.Context, config Config, force bool) err
 	}
 	script := strings.Join([]string{
 		"$ErrorActionPreference='Stop'",
+		// LocalSystem has no winget settings of its own; without this, Add-WinGetSource below never returns on a
+		// headless machine while winget draws its progress bar into the module's pipe (setup then skips OpenSSH).
+		// shortcut: written only when absent so an operator's own settings win, merge them if that ever matters.
+		wingetQuietSettings,
 		"Import-Module Microsoft.WinGet.Client -RequiredVersion " + approvedWinGetModuleVersion + " -Force",
 		"Remove-WinGetSource -Name winget -ErrorAction SilentlyContinue|Out-Null;Add-WinGetSource -Name winget -Argument 'https://cdn.winget.microsoft.com/cache' -Type Microsoft.PreIndexed.Package -TrustLevel Trusted -ErrorAction Stop|Out-Null",
 		"$result=Install-WinGetPackage -Id '" + PackageID + "' -MatchOption Equals -Version '" + config.ApprovedVersion + "' -Source winget -Scope System -Mode Silent" + forceArgument + " -Confirm:$false -ErrorAction Stop",

@@ -208,3 +208,30 @@ func commandExitFailure(t *testing.T, code int) error {
 	}
 	return err
 }
+
+type scriptCapture struct{ scripts []string }
+
+func (c *scriptCapture) Run(_ context.Context, _ string, arguments ...string) ([]byte, error) {
+	c.scripts = append(c.scripts, arguments[len(arguments)-1])
+	if len(c.scripts) == 1 {
+		return []byte(approvedWinGetModuleVersion), nil
+	}
+	return []byte(`{}`), nil
+}
+
+// The SYSTEM-context package install must turn winget's progress bar off before it adds the source, or the add
+// hangs on a headless machine (winpool-4 paired without managed SSH for this reason).
+func TestSystemWingetInstallDisablesTheProgressBarBeforeAddingTheSource(t *testing.T) {
+	runner := &scriptCapture{}
+	if err := installWithSystemWinget(context.Background(), Config{Runner: runner, ApprovedVersion: ApprovedVersion}, false); err != nil {
+		t.Fatal(err)
+	}
+	install := runner.scripts[len(runner.scripts)-1]
+	seed, add := strings.Index(install, `"progressBar":"disabled"`), strings.Index(install, "Add-WinGetSource")
+	if seed < 0 || add < 0 || seed > add {
+		t.Fatalf("install script must write the quiet winget settings before Add-WinGetSource (seed=%d add=%d)", seed, add)
+	}
+	if !strings.Contains(install, "if(-not (Test-Path -LiteralPath $wingetSettings))") {
+		t.Fatal("existing winget settings must not be overwritten")
+	}
+}

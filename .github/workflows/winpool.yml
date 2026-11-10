@@ -70,6 +70,11 @@ jobs:
           $winget = "$env:LOCALAPPDATA\Packages\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe\LocalState"
           New-Item -ItemType Directory -Force $winget | Out-Null
           Set-Content -Encoding ascii "$winget\settings.json" '{"visual":{"progressBar":"disabled"}}'
+          # The machine runs pb's OpenSSH install as LocalSystem, which has its own profile (winpool-4 paired without a
+          # managed sshd for want of this file); builds before the product seeds it itself still need it here.
+          $system = "$env:SystemRoot\System32\config\systemprofile\AppData\Local\Packages\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe\LocalState"
+          New-Item -ItemType Directory -Force $system | Out-Null
+          Set-Content -Encoding ascii "$system\settings.json" '{"visual":{"progressBar":"disabled"}}'
 
           $dir = "$env:USERPROFILE\.ssh"
           New-Item -ItemType Directory -Force $dir | Out-Null
