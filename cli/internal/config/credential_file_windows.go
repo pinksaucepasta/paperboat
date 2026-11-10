@@ -124,36 +124,6 @@ func unprotectWindowsFileSecretV2(path string, protected []byte) ([]byte, error)
 	return append([]byte(nil), value...), nil
 }
 
-func windowsFileSecretLegacyMigrationAllowed() bool {
-	var sessionID uint32
-	// Since Windows Vista, interactive console and RDP users run outside
-	// Session 0. SCM, S4U, scheduled service, and OpenSSH network workloads run
-	// in Session 0 and must never attempt user-scope DPAPI migration.
-	return windows.ProcessIdToSessionId(uint32(os.Getpid()), &sessionID) == nil && sessionID != 0 && sessionID != ^uint32(0)
-}
-
-func migrateLegacyWindowsFileSecret(path string, protected []byte, allowed bool) ([]byte, error) {
-	if !allowed {
-		return nil, errors.Join(ErrCredentialStoreUnavailable, ErrCredentialRequiresInteractiveLogin, errors.New("legacy user-scope file secret requires an interactive Windows session for migration"))
-	}
-	plain, err := dpapiTransform(protected, false)
-	if err != nil {
-		clear(plain)
-		return nil, credentialStoreFailure("legacy user-scope file secret could not be decrypted; interactive login is required", errors.Join(ErrCredentialRequiresInteractiveLogin, err))
-	}
-	if len(plain) == 0 || plain[0] != 1 || len(plain)-1 > windowsCredentialBlobMaxBytes {
-		clear(plain)
-		return nil, fmt.Errorf("%w: invalid legacy user-scope file-secret envelope", ErrCredentialStoreUnavailable)
-	}
-	result := append([]byte(nil), plain[1:]...)
-	clear(plain)
-	if err := writeCredentialFile(path, result); err != nil {
-		clear(result)
-		return nil, credentialStoreFailure("legacy user-scope file secret could not be migrated", errors.Join(ErrCredentialRequiresInteractiveLogin, err))
-	}
-	return result, nil
-}
-
 func validateCredentialDirectory(path string) error {
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -237,7 +207,7 @@ func readCredentialFile(path string) ([]byte, error) {
 	if bytes.HasPrefix(protected, windowsFileSecretV2Magic) {
 		return unprotectWindowsFileSecretV2(path, protected)
 	}
-	return migrateLegacyWindowsFileSecret(path, protected, windowsFileSecretLegacyMigrationAllowed())
+	return nil, fmt.Errorf("%w: unsupported credential file format", ErrCredentialStoreUnavailable)
 }
 
 func credentialFilePrivate(path string) bool {

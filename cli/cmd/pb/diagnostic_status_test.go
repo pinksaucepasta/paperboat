@@ -47,7 +47,6 @@ func TestDiagnosticCredentialReadFailureIsNotLogout(t *testing.T) {
 	}{
 		{config.ErrNoCredentials, "no saved sign-in found in this user profile"},
 		{fmt.Errorf("read: %w", config.ErrCredentialStoreUnavailable), "saved sign-in unavailable · credential store access failed"},
-		{config.ErrCredentialRequiresInteractiveLogin, "saved sign-in needs migration from an interactive session"},
 		{errors.New("refresh failure"), "saved sign-in unavailable · credential read or refresh failed"},
 	} {
 		if got := diagnosticCredentialFailure(tc.err); got != tc.want {

@@ -1,7 +1,6 @@
 package config
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 )
@@ -56,7 +55,7 @@ func (s FileSecretStore) Get(ref string) (string, error) {
 		return "", ErrSecretNotFound
 	}
 	if err != nil {
-		if errors.Is(err, ErrCredentialRequiresInteractiveLogin) || isSafeConfigError(err) {
+		if isSafeConfigError(err) {
 			return "", err
 		}
 		return "", safeConfigCause("credential file could not be read", err)

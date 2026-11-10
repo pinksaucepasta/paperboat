@@ -22,7 +22,6 @@ const ProfileVersion = 1
 const keyringService = "paperboat"
 
 var ErrCredentialStoreUnavailable = errors.New("OS credential store unavailable")
-var ErrCredentialRequiresInteractiveLogin = errors.New("credential requires an interactive login to migrate")
 
 var (
 	ErrNoCredentials  = errors.New("not signed in to Paperboat")

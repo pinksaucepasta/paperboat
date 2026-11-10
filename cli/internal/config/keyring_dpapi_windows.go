@@ -27,12 +27,8 @@ const (
 )
 
 var keyringDPAPIV2Magic = []byte{'P', 'B', 'K', 'R'}
-var keyringDPAPITombstoneMagic = []byte{'P', 'B', 'K', 'D'}
-
-var errDPAPISecretDeleted = errors.New("DPAPI credential was deleted")
 
 const keyringDPAPIV2FixedHeaderSize = 4 + 1 + 1 + sha256.Size
-const keyringDPAPITombstoneSize = 4 + 1 + sha256.Size
 
 func dpapiSecretPath(ref string) (string, string, error) {
 	if ref == "" || len(ref) > 1024 || strings.ContainsAny(ref, "\x00\r\n") {
@@ -595,10 +591,6 @@ func dpapiTransformBounded(value, entropyBytes []byte, protect bool, protectFlag
 	return result, nil
 }
 
-func dpapiTransform(value []byte, protect bool) ([]byte, error) {
-	return dpapiTransformWithEntropy(value, []byte("paperboat/windows-keyring/v1"), protect, 0)
-}
-
 func keyringDPAPIV2Entropy(ref string) []byte {
 	return append([]byte("paperboat/windows-keyring/v2\x00machine\x00"), keyringDPAPIV2RefHash(ref)...)
 }
@@ -606,14 +598,6 @@ func keyringDPAPIV2Entropy(ref string) []byte {
 func keyringDPAPIV2RefHash(ref string) []byte {
 	digest := sha256.Sum256([]byte(ref))
 	return digest[:]
-}
-
-func keyringDPAPITombstone(ref string) []byte {
-	marker := make([]byte, 0, keyringDPAPITombstoneSize)
-	marker = append(marker, keyringDPAPITombstoneMagic...)
-	marker = append(marker, 1) // tombstone schema v1
-	marker = append(marker, keyringDPAPIV2RefHash(ref)...)
-	return marker
 }
 
 func keyringDPAPIV2Header(ref string, inner bool) []byte {
@@ -676,24 +660,24 @@ func unprotectKeyringDPAPIV2(ref string, protected []byte) (string, error) {
 	return string(value), nil
 }
 
-func setDPAPISecret(ref, value string, credentialErr error) error {
+func setDPAPISecret(ref, value string) error {
 	path, directory, err := dpapiSecretPath(ref)
 	if err != nil {
-		return errors.Join(windowsCredentialError("write", credentialErr), err)
+		return errors.Join(ErrCredentialStoreUnavailable, err)
 	}
 	sddl, err := currentUserCredentialSDDL()
 	if err != nil {
-		return errors.Join(windowsCredentialError("write", credentialErr), err)
+		return errors.Join(ErrCredentialStoreUnavailable, err)
 	}
 	if err := ensureDPAPIDirectory(filepath.Dir(directory), sddl); err != nil {
-		return errors.Join(windowsCredentialError("write", credentialErr), err)
+		return errors.Join(ErrCredentialStoreUnavailable, err)
 	}
 	if err := ensureDPAPIDirectory(directory, sddl); err != nil {
-		return errors.Join(windowsCredentialError("write", credentialErr), err)
+		return errors.Join(ErrCredentialStoreUnavailable, err)
 	}
 	protected, err := protectKeyringDPAPIV2(ref, value)
 	if err != nil {
-		return errors.Join(windowsCredentialError("write", credentialErr), err)
+		return errors.Join(ErrCredentialStoreUnavailable, err)
 	}
 	defer clear(protected)
 	if err := atomicfile.Write(path, protected, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1, SecurityDescriptor: sddl}); err != nil {
@@ -712,43 +696,7 @@ func setDPAPISecret(ref, value string, credentialErr error) error {
 	return nil
 }
 
-// setDPAPISecretTombstone atomically replaces any authoritative secret with a
-// ref-bound, non-secret marker. The marker prevents a later interactive logon
-// from reviving a stale Credential Manager migration source when that legacy
-// store is unavailable to the current S4U or network logon.
-func setDPAPISecretTombstone(ref string) error {
-	path, directory, err := dpapiSecretPath(ref)
-	if err != nil {
-		return errors.Join(ErrCredentialStoreUnavailable, err)
-	}
-	sddl, err := currentUserCredentialSDDL()
-	if err != nil {
-		return err
-	}
-	if err := ensureDPAPIDirectory(filepath.Dir(directory), sddl); err != nil {
-		return errors.Join(ErrCredentialStoreUnavailable, err)
-	}
-	if err := ensureDPAPIDirectory(directory, sddl); err != nil {
-		return errors.Join(ErrCredentialStoreUnavailable, err)
-	}
-	marker := keyringDPAPITombstone(ref)
-	if err := atomicfile.Write(path, marker, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1, SecurityDescriptor: sddl}); err != nil {
-		return fmt.Errorf("%w: write DPAPI credential tombstone: %v", ErrCredentialStoreUnavailable, err)
-	}
-	ownerSID, err := currentUserSID()
-	if err != nil {
-		return err
-	}
-	if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, ownerSID, nil, nil, nil); err != nil {
-		return fmt.Errorf("%w: set DPAPI credential tombstone owner: %v", ErrCredentialStoreUnavailable, err)
-	}
-	if !credentialFilePrivate(path) {
-		return fmt.Errorf("%w: written DPAPI credential tombstone owner or ACL is invalid", ErrCredentialStoreUnavailable)
-	}
-	return nil
-}
-
-func getDPAPISecret(ref string, credentialErr error) (string, error) {
+func getDPAPISecret(ref string) (string, error) {
 	path, directory, err := dpapiSecretPath(ref)
 	if err != nil {
 		return "", err
@@ -762,10 +710,9 @@ func getDPAPISecret(ref string, credentialErr error) (string, error) {
 	if err := validateCredentialDirectory(filepath.Dir(directory)); err != nil {
 		return "", errors.Join(ErrCredentialStoreUnavailable, err)
 	}
-	// v1 protected only the credentials directory. On upgrade, an ordinary
-	// owner-owned, non-reparse Paperboat root can be hardened in place before
-	// decrypting the legacy blob. ensureDPAPIDirectory checks ownership before
-	// changing the DACL, so foreign-owned roots remain untouched and rejected.
+	// An ordinary owner-owned, non-reparse Paperboat root is repaired to the exact owner and DACL before the
+	// secret is read. ensureDPAPIDirectory checks ownership before changing the DACL, so foreign-owned roots
+	// remain untouched and rejected.
 	sddl, err := currentUserCredentialSDDL()
 	if err != nil {
 		return "", err
@@ -807,60 +754,16 @@ func getDPAPISecret(ref string, credentialErr error) (string, error) {
 		return "", fmt.Errorf("%w: read DPAPI credential: %v", ErrCredentialStoreUnavailable, err)
 	}
 	defer clear(protected)
-	if bytes.Equal(protected, keyringDPAPITombstone(ref)) {
-		return "", errDPAPISecretDeleted
+	if !bytes.HasPrefix(protected, keyringDPAPIV2Magic) {
+		return "", fmt.Errorf("%w: unsupported DPAPI credential format", ErrCredentialStoreUnavailable)
 	}
-	if bytes.HasPrefix(protected, []byte{'P', 'B', 'K', 'R'}) {
-		return unprotectKeyringDPAPIV2(ref, protected)
-	}
-	if windowsSecretMaxBytes(ref) == passwordVaultRecordBytes {
-		return "", ErrCredentialStoreUnavailable
-	}
-	plain, err := dpapiTransform(protected, false)
-	if err != nil {
-		return "", errors.Join(ErrCredentialStoreUnavailable, ErrCredentialRequiresInteractiveLogin, fmt.Errorf("decrypt legacy user-scope DPAPI credential: %w", err))
-	}
-	defer clear(plain)
-	if len(plain) <= 1 || plain[0] != 1 || len(plain)-1 > windowsCredentialBlobMaxBytes {
-		return "", fmt.Errorf("%w: invalid legacy user-scope DPAPI credential envelope", ErrCredentialStoreUnavailable)
-	}
-	value := string(plain[1:])
-	if err := setDPAPISecret(ref, value, credentialErr); err != nil {
-		return "", errors.Join(ErrCredentialStoreUnavailable, fmt.Errorf("migrate legacy user-scope DPAPI credential: %w", err))
-	}
-	return value, nil
+	return unprotectKeyringDPAPIV2(ref, protected)
 }
 
 func deleteDPAPISecret(ref string) error {
 	path, _, err := dpapiSecretPath(ref)
 	if err != nil {
 		return err
-	}
-	err = os.Remove(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	return err
-}
-
-// deleteDPAPISecretTombstone removes only the marker written for this exact
-// reference. If a concurrent Set already replaced it, preserve that new value
-// and report the conflict instead of deleting it.
-func deleteDPAPISecretTombstone(ref string) error {
-	path, _, err := dpapiSecretPath(ref)
-	if err != nil {
-		return err
-	}
-	body, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	defer clear(body)
-	if !bytes.Equal(body, keyringDPAPITombstone(ref)) {
-		return fmt.Errorf("%w: DPAPI credential changed during deletion", ErrCredentialStoreUnavailable)
 	}
 	err = os.Remove(path)
 	if errors.Is(err, os.ErrNotExist) {

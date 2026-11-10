@@ -42,12 +42,5 @@ func windowsTestLongPath(path string) string {
 }
 
 func writeTestCredential(path, value string) error {
-	plain := append([]byte{1}, []byte(value)...)
-	protected, err := dpapiTransform(plain, true)
-	clear(plain)
-	if err != nil {
-		return err
-	}
-	defer clear(protected)
-	return os.WriteFile(path, protected, 0o644)
+	return os.WriteFile(path, []byte(value), 0o644)
 }

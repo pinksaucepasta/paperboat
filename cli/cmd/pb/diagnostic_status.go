@@ -12,8 +12,6 @@ func diagnosticCredentialFailure(err error) string {
 	switch {
 	case errors.Is(err, config.ErrNoCredentials):
 		return "no saved sign-in found in this user profile"
-	case errors.Is(err, config.ErrCredentialRequiresInteractiveLogin):
-		return "saved sign-in needs migration from an interactive session"
 	case errors.Is(err, config.ErrCredentialStoreUnavailable):
 		return "saved sign-in unavailable · credential store access failed"
 	default:

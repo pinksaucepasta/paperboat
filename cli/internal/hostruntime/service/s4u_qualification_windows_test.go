@@ -36,7 +36,6 @@ const s4uServiceNameEnvironment = "PAPERBOAT_WINDOWS_E2E_S4U_SERVICE_NAME"
 const s4uOwnerAccountEnvironment = "PAPERBOAT_WINDOWS_E2E_S4U_OWNER_ACCOUNT"
 
 var (
-	qualificationCredWrite = windows.NewLazySystemDLL("advapi32.dll").NewProc("CredWriteW")
 	qualificationLogonUser = windows.NewLazySystemDLL("advapi32.dll").NewProc("LogonUserW")
 )
 
@@ -46,42 +45,6 @@ const (
 	qualificationPasswordLimit        = int64(512)
 )
 
-type qualificationWindowsCredential struct {
-	Flags              uint32
-	Type               uint32
-	TargetName         *uint16
-	Comment            *uint16
-	LastWritten        windows.Filetime
-	CredentialBlobSize uint32
-	CredentialBlob     *byte
-	Persist            uint32
-	AttributeCount     uint32
-	Attributes         unsafe.Pointer
-	TargetAlias        *uint16
-	UserName           *uint16
-}
-
-func writeLegacyCredentialManagerFixture(t *testing.T, ref, value string) {
-	t.Helper()
-	target, err := windows.UTF16PtrFromString("paperboat:" + ref)
-	if err != nil {
-		t.Fatal(err)
-	}
-	username, err := windows.UTF16PtrFromString("paperboat")
-	if err != nil {
-		t.Fatal(err)
-	}
-	blob := []byte(value)
-	defer clear(blob)
-	credential := qualificationWindowsCredential{Type: 1, TargetName: target, CredentialBlobSize: uint32(len(blob)), Persist: 2, UserName: username}
-	if len(blob) > 0 {
-		credential.CredentialBlob = &blob[0]
-	}
-	if result, _, callErr := qualificationCredWrite.Call(uintptr(unsafe.Pointer(&credential)), 0); result == 0 {
-		t.Fatalf("write legacy Credential Manager fixture: %v", callErr)
-	}
-}
-
 func prepareProductionKeyringFixtures(t *testing.T, reportPath string, cleanup bool) {
 	t.Helper()
 	keyring := config.KeyringStore{}
@@ -89,9 +52,8 @@ func prepareProductionKeyringFixtures(t *testing.T, reportPath string, cleanup b
 		t.Fatalf("create owner Paperboat KeyringStore fixture: %v", err)
 	}
 	migratedRef := reportPath + "-migrated"
-	writeLegacyCredentialManagerFixture(t, migratedRef, "paperboat-s4u-migrated-v1")
-	if value, err := keyring.Get(migratedRef); err != nil || value != "paperboat-s4u-migrated-v1" {
-		t.Fatalf("migrate owner Credential Manager fixture into Paperboat KeyringStore: value=%q err=%v", value, err)
+	if err := keyring.Set(migratedRef, "paperboat-s4u-migrated-v1"); err != nil {
+		t.Fatalf("create second owner Paperboat KeyringStore fixture: %v", err)
 	}
 	if cleanup {
 		t.Cleanup(func() {
@@ -534,8 +496,8 @@ func assertS4UDPAPIReport(t *testing.T, record s4uQualificationReport, ownerSID 
 	if record.Limitations.DPAPI.Status != "pass" || strings.TrimSpace(record.Limitations.DPAPI.Reason) == "" {
 		t.Fatalf("logged-out S4U must decrypt the owner DPAPI credential: %+v", record.Limitations.DPAPI)
 	}
-	if record.Limitations.DPAPIMigration.Status != "pass" || strings.TrimSpace(record.Limitations.DPAPIMigration.Reason) == "" {
-		t.Fatalf("logged-out S4U must read the owner-migrated Credential Manager credential through KeyringStore: %+v", record.Limitations.DPAPIMigration)
+	if record.Limitations.SecondDPAPI.Status != "pass" || strings.TrimSpace(record.Limitations.SecondDPAPI.Reason) == "" {
+		t.Fatalf("logged-out S4U must read the second owner DPAPI credential through KeyringStore: %+v", record.Limitations.SecondDPAPI)
 	}
 	if record.Limitations.FileSecretStore.Status != "pass" || strings.TrimSpace(record.Limitations.FileSecretStore.Reason) == "" {
 		t.Fatalf("logged-out S4U must write and read a fresh FileSecretStore credential: %+v", record.Limitations.FileSecretStore)
@@ -582,10 +544,10 @@ type s4uQualificationReport struct {
 			Status string `json:"status"`
 			Reason string `json:"reason"`
 		} `json:"dpapi"`
-		DPAPIMigration struct {
+		SecondDPAPI struct {
 			Status string `json:"status"`
 			Reason string `json:"reason"`
-		} `json:"dpapi_credential_manager_migration"`
+		} `json:"dpapi_second_credential"`
 		FileSecretStore struct {
 			Status string `json:"status"`
 			Reason string `json:"reason"`
@@ -858,8 +820,8 @@ func assertS4UReport(t *testing.T, record s4uQualificationReport, ownerSID strin
 	if record.Limitations.DPAPI.Status != "pass" || strings.TrimSpace(record.Limitations.DPAPI.Reason) == "" {
 		t.Fatalf("logged-out S4U must decrypt the owner DPAPI credential: %+v", record.Limitations.DPAPI)
 	}
-	if record.Limitations.DPAPIMigration.Status != "pass" || strings.TrimSpace(record.Limitations.DPAPIMigration.Reason) == "" {
-		t.Fatalf("logged-out S4U must read the owner-migrated Credential Manager credential through KeyringStore: %+v", record.Limitations.DPAPIMigration)
+	if record.Limitations.SecondDPAPI.Status != "pass" || strings.TrimSpace(record.Limitations.SecondDPAPI.Reason) == "" {
+		t.Fatalf("logged-out S4U must read the second owner DPAPI credential through KeyringStore: %+v", record.Limitations.SecondDPAPI)
 	}
 	if record.Limitations.FileSecretStore.Status != "pass" || strings.TrimSpace(record.Limitations.FileSecretStore.Reason) == "" {
 		t.Fatalf("logged-out S4U must write and read a fresh FileSecretStore credential: %+v", record.Limitations.FileSecretStore)

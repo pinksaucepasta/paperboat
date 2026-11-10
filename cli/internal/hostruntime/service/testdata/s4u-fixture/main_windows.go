@@ -67,7 +67,7 @@ type environment struct {
 type limitations struct {
 	SMB                         limitation `json:"smb"`
 	DPAPI                       limitation `json:"dpapi"`
-	DPAPIMigration              limitation `json:"dpapi_credential_manager_migration"`
+	SecondDPAPI                 limitation `json:"dpapi_second_credential"`
 	FileSecretStore             limitation `json:"file_secret_store"`
 	EFS                         limitation `json:"efs"`
 	Git                         limitation `json:"git"`
@@ -255,13 +255,13 @@ func writeChildReport(ownerSID, reportPath string) error {
 	} else {
 		dpapi = limitation{Status: "pass", Reason: "logged-out S4U read the owner-created Paperboat KeyringStore credential from the production owner LocalAppData DPAPI store"}
 	}
-	dpapiMigration := limitation{Status: "fail", Reason: "logged-out S4U could not read the owner-migrated Credential Manager credential from Paperboat KeyringStore"}
+	secondDPAPI := limitation{Status: "fail", Reason: "logged-out S4U could not read the second owner DPAPI credential from Paperboat KeyringStore"}
 	if cleartext, readErr := (config.KeyringStore{}).Get(reportPath + "-migrated"); readErr != nil {
-		dpapiMigration.Reason += ": " + readErr.Error()
+		secondDPAPI.Reason += ": " + readErr.Error()
 	} else if cleartext != "paperboat-s4u-migrated-v1" {
-		dpapiMigration.Reason += ": credential value did not match"
+		secondDPAPI.Reason += ": credential value did not match"
 	} else {
-		dpapiMigration = limitation{Status: "pass", Reason: "logged-out S4U read the Credential Manager credential after owner migration to the production LocalAppData DPAPI store"}
+		secondDPAPI = limitation{Status: "pass", Reason: "logged-out S4U read the second owner DPAPI credential through the production LocalAppData DPAPI store"}
 	}
 	fileSecretStore := limitation{Status: "fail", Reason: "logged-out S4U could not write and read a fresh Paperboat FileSecretStore credential"}
 	fileSecretDirectory := reportPath + ".file-secret-store"
@@ -329,7 +329,7 @@ func writeChildReport(ownerSID, reportPath string) error {
 		Limitations: limitations{
 			SMB:                         limitation{Status: "not_qualified", Reason: "S4U does not retain reusable user network credentials; credentialed SMB requires a separate native qualification."},
 			DPAPI:                       dpapi,
-			DPAPIMigration:              dpapiMigration,
+			SecondDPAPI:                 secondDPAPI,
 			FileSecretStore:             fileSecretStore,
 			EFS:                         efs,
 			Git:                         git,
