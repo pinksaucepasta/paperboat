@@ -4,6 +4,9 @@ import argparse
 import base64
 import hashlib
 import json
+import os
+import re
+import select
 import socket
 import time
 
@@ -55,9 +58,47 @@ def listener_closed(host, port):
         return probe.connect_ex((host, port)) != 0
 
 
+class ConsoleJob:
+    """pb.exe on a console (ssh -tt gives it a ConPTY): the job whose Ctrl-C reaches the command, so its listener
+    is released as on Unix. taskkill would skip that release and the daemon would keep the listener."""
+
+    def __init__(self, pb, argv):
+        from terminal_lifecycle import Terminal  # a Windows device only; the Unix fixture tarball has no pty harness
+        self.terminal = Terminal(winhost.terminal_argv(pb, argv), env=winhost.terminal_env(pb))
+
+    def stdout(self, limit=(1 << 20) + 1):
+        while select.select([self.terminal.fd], [], [], 0)[0]:
+            try:
+                self.terminal.drain()
+            except RuntimeError:
+                break
+        text = re.sub(rb'\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07|\r', b'', bytes(self.terminal.output))
+        return text.lstrip()[:limit]
+
+    def stderr(self):
+        return b''
+
+    def poll(self):
+        if self.terminal.status is None:
+            done, status = os.waitpid(self.terminal.pid, os.WNOHANG)
+            if done:
+                self.terminal.status = os.waitstatus_to_exitcode(status)
+        return self.terminal.status
+
+    def terminate(self):
+        self.terminal.send(b'\x03')
+        self.terminal.wait_exit(20)
+
+    def kill(self):
+        self.terminal.close()
+
+    def close(self):
+        self.terminal.close()
+
+
 def one_session(pb, selector, tunnel, route, nonce):
     argv = ['access', 'tunnel', selector, '--listen', '127.0.0.1:0', '--json']
-    job = winhost.job(pb, argv)
+    job = ConsoleJob(pb, argv) if winhost.device() else winhost.job(pb, argv)
     result = {'argv': [str(pb), *argv]}
     try:
         session = None
