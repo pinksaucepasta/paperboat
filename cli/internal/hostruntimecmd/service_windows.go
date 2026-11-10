@@ -408,6 +408,7 @@ func installWindowsRuntimeFromSuppliedBytesWithCommit(ctx context.Context, reque
 	}
 	// Recovery has its own signed-policy budget; local slot/SCM changes and
 	// the final enrollment commit/readiness keep their previous short budget.
+	outer := ctx
 	ctx, cancel := context.WithTimeout(ctx, elevation.RuntimeActivationDuration)
 	defer cancel()
 	if nativeReplacement {
@@ -436,7 +437,7 @@ func installWindowsRuntimeFromSuppliedBytesWithCommit(ctx context.Context, reque
 				return errors.Join(err, restoreJournal())
 			}
 			step = "install_readiness"
-			if err := hostinstall.EnsureCommittedWindowsHostdReady(ctx, request); err != nil {
+			if err := ensureReadyWithinTail(outer, request); err != nil {
 				return errors.Join(fmt.Errorf("Paperboat host service did not become ready after installation: %w", err), restoreJournal())
 			}
 			return nil
@@ -488,7 +489,7 @@ func installWindowsRuntimeFromSuppliedBytesWithCommit(ctx context.Context, reque
 		}
 		// Durable commit precedes the exact enrolled owner's readiness probe.
 		step = "install_readiness"
-		if err := hostinstall.EnsureCommittedWindowsHostdReady(ctx, request); err != nil {
+		if err := ensureReadyWithinTail(outer, request); err != nil {
 			return fmt.Errorf("Paperboat host service did not become ready after installation: %w", err)
 		}
 	}
@@ -575,4 +576,16 @@ func uninstallPersistedWindowsRuntime(ctx context.Context, ownerSID string) erro
 
 func uninstallWindowsRuntime(ctx context.Context, request hostinstall.Request) error {
 	return hostinstall.Uninstall(ctx, request)
+}
+
+// ensureReadyWithinTail runs the readiness probe on the operation's own expiry, not on what the install phases
+// left of their activation budget.
+func ensureReadyWithinTail(operation context.Context, request hostinstall.Request) error {
+	ctx, cancel := readinessContext(operation)
+	defer cancel()
+	return hostinstall.EnsureCommittedWindowsHostdReady(ctx, request)
+}
+
+func readinessContext(operation context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(operation, elevation.ReadinessTail)
 }

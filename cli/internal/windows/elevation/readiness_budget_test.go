@@ -16,3 +16,17 @@ func TestReadinessWindowsFitTheActivationBudget(t *testing.T) {
 		t.Fatalf("%v + %v + %v + %v exceed the activation budget %v", ReadinessHostdWindow, ReadinessDaemonBudget, otherWork, margin, RuntimeActivationDuration)
 	}
 }
+
+// The readiness probe does not share the install phases' budget (victus used all of it before readiness began):
+// it has its own tail, at least both windows, and a commit's bridge expiry covers the activation budget plus it.
+func TestReadinessHasItsOwnTailAfterTheInstallPhases(t *testing.T) {
+	if ReadinessTail < ReadinessHostdWindow+ReadinessDaemonBudget {
+		t.Fatalf("readiness tail %v is shorter than its two windows %v + %v", ReadinessTail, ReadinessHostdWindow, ReadinessDaemonBudget)
+	}
+	if got := operationDuration(OperationRuntimeService, ActionCommit); got < RuntimeActivationDuration+ReadinessTail {
+		t.Fatalf("commit expiry %v cannot hold the activation budget plus the readiness tail %v", got, RuntimeActivationDuration+ReadinessTail)
+	}
+	if got := operationDuration(OperationRuntimeService, ActionInstallCommit); got < RuntimeActivationDuration+ReadinessTail {
+		t.Fatalf("install-commit expiry %v cannot hold the activation budget plus the readiness tail", got)
+	}
+}
