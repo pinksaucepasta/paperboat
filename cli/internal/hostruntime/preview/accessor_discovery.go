@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"github.com/pinksaucepasta/paperboat/internal/privatepreviewproxy"
 	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 )
@@ -149,19 +148,11 @@ type accessorDiscoveryClient struct {
 	last    []accessorAdmission
 	lastErr error
 	now     func() time.Time
-	// events, when it is healthy, replaces the 1 s refetch: the cached snapshot stays valid until the
-	// private_routes topic moves (a nil or unhealthy subscription keeps the 1 s refetch).
-	events *machineevents.Subscription
 }
 
 // accessorSnapshotReuse is how long one routes snapshot answers every caller: the sessions' 1 s
 // revocation check, so sharing it adds no delay to a withdrawn route ending.
 const accessorSnapshotReuse = time.Second
-
-// accessorSnapshotSafetyRefetch is the longest a snapshot is trusted while the machine-events wait loop is
-// healthy: a missed event costs at most this, never a per-second poll (Tailscale's map long-poll has the
-// same shape: a push, with a slow safety refresh).
-const accessorSnapshotSafetyRefetch = machineevents.DefaultFallbackInterval
 
 func newAccessorDiscoveryClient(controlURL string, auth privateAccessMachineAuth, transport http.RoundTripper) (*accessorDiscoveryClient, error) {
 	u, err := url.Parse(strings.TrimSpace(controlURL))
@@ -182,20 +173,8 @@ func (c *accessorDiscoveryClient) snapshot(ctx context.Context) ([]accessorAdmis
 	if c.now != nil {
 		now = c.now
 	}
-	moved := false
-	if c.events != nil { // taken before the fetch: a move during it stays pending for the next call
-		select {
-		case <-c.events.Changed():
-			moved = true
-		default:
-		}
-	}
-	if !c.fetched.IsZero() && !moved {
-		age := now().Sub(c.fetched)
-		pushed := c.events.Healthy() && c.lastErr == nil // an error is retried at the 1 s cadence
-		if age < accessorSnapshotReuse || pushed && age < accessorSnapshotSafetyRefetch {
-			return slices.Clone(c.last), c.lastErr
-		}
+	if !c.fetched.IsZero() && now().Sub(c.fetched) < accessorSnapshotReuse {
+		return slices.Clone(c.last), c.lastErr
 	}
 	c.last, c.lastErr = c.fetchSnapshot(ctx)
 	if ctx.Err() == nil {

@@ -42,9 +42,6 @@ const (
 	TopicTunnels       Topic = "tunnels"
 	TopicConfig        Topic = "config"
 	TopicInventory     Topic = "inventory"
-	// TopicPrivateRoutes moves when the private routes a machine may use change (a route or grant added,
-	// withdrawn or revoked); a time-only refresh publishes nothing.
-	TopicPrivateRoutes Topic = "private_routes"
 	// TopicMachineServices moves when a machine in this machine's audience publishes a changed
 	// service snapshot (ports).
 	TopicMachineServices Topic = "machine_services"
