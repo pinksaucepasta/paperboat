@@ -31,7 +31,7 @@ from pairing_lifecycle import command_result, invoke
 from preview_lifecycle import QuietHandler
 from preview_receipt import PREVIEW_COMMAND_TIMEOUT, receipt_value
 from session_cleanup import cleanup
-from terminal_lifecycle import Terminal
+from terminal_lifecycle import Terminal, wait_windows_shell
 from update_continuity import SHELL_PID, windows_pid
 import windows_target
 import winhost
@@ -129,8 +129,8 @@ def main():
                 if not windows:
                     held.expect(b'\x1b[?2004h')
                     held.expect(held.marker('READY', 'stty -echo; '))
-                else:  # no READY marker under cmd.exe: typed bytes sent before pb connect attaches are swallowed
-                    held.settle(3.0)
+                else:  # no bracketed paste under cmd.exe: wait for a printed marker, not for a quiet pty (typed bytes before attach are swallowed)
+                    wait_windows_shell(held)
                 shell_pid = shell_identity('SHELL')
                 if not shell_pid.isdigit():
                     raise RuntimeError('could not read the held shell identity')

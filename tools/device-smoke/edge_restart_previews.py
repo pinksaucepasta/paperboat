@@ -13,7 +13,8 @@ from pathlib import Path
 
 from pairing_lifecycle import invoke
 from preview_receipt import PREVIEW_COMMAND_TIMEOUT, receipt_value
-from preview_survival import PB, body, serve, wait_for
+from preview_lifecycle import stoppable_origin
+from preview_survival import PB, body, wait_for
 
 
 def main():
@@ -25,12 +26,12 @@ def main():
     created, failures = [], []
     with tempfile.TemporaryDirectory(prefix='paperboat-edge-restart-') as directory:
         (Path(directory) / 'index.html').write_text('<p>' + marker + '</p>')
-        server = serve(directory)
+        port, stop_origin = stoppable_origin(directory, '<p>' + marker + '</p>')
         try:
             for attempt in range(args.count):
                 started = time.monotonic()
                 try:
-                    lease = invoke(PB, 'preview', str(server.server_port), '--background', '--ttl', '10m', '--json', timeout=PREVIEW_COMMAND_TIMEOUT)
+                    lease = invoke(PB, 'preview', str(port), '--background', '--ttl', '10m', '--json', timeout=PREVIEW_COMMAND_TIMEOUT)
                     created.append(lease['id'])
                     endpoint = receipt_value(lease, 'endpoint')
                     wait_for(lambda: marker in body(endpoint), 'preview %d to serve' % attempt)
@@ -43,7 +44,7 @@ def main():
                     invoke(PB, 'preview', 'stop', identifier, '--json', timeout=60)
                 except Exception:
                     pass
-            server.shutdown()
+            stop_origin()
     print(json.dumps({'check': 'edge-restart-previews', 'count': args.count, 'created': len(created), 'failures': failures,
                       'status': 'PASS' if not failures and len(created) == args.count else 'FAIL'}))
     return 0 if not failures else 1

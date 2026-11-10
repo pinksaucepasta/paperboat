@@ -25,6 +25,24 @@ import windows_target
 import winhost
 
 
+def wait_windows_shell(terminal, timeout=180):
+    """A held terminal on a Windows target is ready only when its shell answers.
+
+    Typed bytes sent before `pb connect` attaches are swallowed, and a quiet local pty (what settle() waits for) also
+    happens while the remote side has not attached yet, so one blind settle plus one typed line still races. Re-send a
+    marker the shell must print until it answers or the budget is spent."""
+    deadline = time.monotonic() + timeout
+    while True:
+        token = 'PB_READY_' + uuid.uuid4().hex
+        terminal.send(windows_target.typed_marker(token) + '\r')
+        try:
+            terminal.expect(token, timeout=min(30, max(1.0, deadline - time.monotonic())))
+            return
+        except RuntimeError:
+            if time.monotonic() >= deadline:
+                raise
+
+
 class Terminal:
     def __init__(self, arguments, cwd=None, env=None):
         self.arguments = list(map(str, arguments))

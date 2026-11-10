@@ -17,7 +17,7 @@ import time
 
 import pairing_lifecycle as p
 from session_cleanup import cleanup
-from terminal_lifecycle import Terminal
+from terminal_lifecycle import Terminal, wait_windows_shell
 import windows_target
 import winhost
 
@@ -122,8 +122,8 @@ def main():
         if not windows:
             terminal.expect(b'\x1b[?2004h')
             terminal.expect(terminal.marker('READY', 'stty -echo; '))
-        else:  # no READY marker under cmd.exe: typed bytes sent before pb connect attaches are swallowed
-            terminal.settle(3.0)
+        else:  # no bracketed paste under cmd.exe: wait for a printed marker, not for a quiet pty (typed bytes before attach are swallowed)
+            wait_windows_shell(terminal)
         held_pid = shell_identity('SHELL')
         if not held_pid.isdigit():
             raise RuntimeError('could not read the held shell identity')

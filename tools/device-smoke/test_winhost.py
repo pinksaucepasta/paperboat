@@ -2044,6 +2044,38 @@ class RemainingFamilyPlumbing(unittest.TestCase):
         with patch.object(winhost, 'device', lambda: None):  # Linux/macOS stay strict
             self.assertFalse(p.doctor_healthy(report(owner)))
 
+    def test_wait_windows_shell_resends_a_line_the_attach_swallowed(self):
+        import terminal_lifecycle
+
+        class Swallowing:
+            """The first typed line is swallowed (sent before pb connect attached); the retry answers."""
+            def __init__(self):
+                self.sent, self.attempts = [], 0
+
+            def send(self, data):
+                self.sent.append(data)
+
+            def expect(self, token, timeout=45):
+                self.attempts += 1
+                if self.attempts == 1:
+                    raise RuntimeError('terminal did not produce the expected fixture output')
+                return token
+
+        held = Swallowing()
+        terminal_lifecycle.wait_windows_shell(held, timeout=60)
+        self.assertEqual((2, 2), (held.attempts, len(held.sent)))
+        self.assertNotEqual(held.sent[0], held.sent[1])  # a fresh marker each time: a late echo of the lost line cannot answer the retry
+
+        class Silent(Swallowing):
+            def expect(self, token, timeout=45):
+                raise RuntimeError('terminal did not produce the expected fixture output')
+        with self.assertRaises(RuntimeError):
+            terminal_lifecycle.wait_windows_shell(Silent(), timeout=1)
+
+    def test_edge_restart_previews_imports_its_origin_from_preview_lifecycle(self):
+        import edge_restart_previews  # the module's imports resolve (serve() left preview_survival in 91440c787)
+        self.assertTrue(callable(edge_restart_previews.stoppable_origin))
+
     def test_pb_text_keeps_the_stdin_of_the_local_call(self):
         done = winhost.pb_text(sys.executable, ['-c', 'import sys;print(len(sys.stdin.read()))'], timeout=30, stdin=subprocess.DEVNULL)
         self.assertEqual('0\n', done.stdout)
