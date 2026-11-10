@@ -54,7 +54,12 @@ type InputDecision struct {
 	InputSequence uint64      `json:"input_sequence"`
 	BytesWritten  int         `json:"bytes_written"`
 	WriteError    string      `json:"write_error,omitempty"`
-	hash          [sha256.Size]byte
+	// InterruptThrough and InterruptDiscarded answer a lone Ctrl-C (always, whatever the terminal mode): everything
+	// published up to InterruptThrough predates it, and Discarded says the sender's queued output up to there was
+	// dropped and replaced by a screen. The client holds output from sending the key until this arrives (F3-11).
+	InterruptThrough   uint64 `json:"interrupt_through,omitempty"`
+	InterruptDiscarded bool   `json:"interrupt_discarded,omitempty"`
+	hash               [sha256.Size]byte
 }
 
 type InputWriter interface{ Write([]byte) (int, error) }

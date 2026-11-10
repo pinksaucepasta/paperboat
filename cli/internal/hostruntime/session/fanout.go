@@ -250,11 +250,11 @@ const interruptDiscardThreshold = 64 << 10
 // which already holds everything the program printed after the interrupt, the shell's prompt above all, so the
 // emulator is never left mid-escape-sequence by the gap. History keeps the flood for replay. A viewer with a resize
 // (control event) among its pending output keeps its whole backlog: the screen resync carries no size change, and
-// skipping the event would leave that viewer at the wrong size.
-func (f *Fanout) DiscardPendingOutput(through uint64) {
+// skipping the event would leave that viewer at the wrong size. It returns the attachments it resynced.
+func (f *Fanout) DiscardPendingOutput(through uint64) (resynced []string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	for _, cursor := range f.attachments {
+	for id, cursor := range f.attachments {
 		if cursor.state != Attached || !cursor.receiveOutput || !cursor.hasCursor {
 			continue
 		}
@@ -264,9 +264,11 @@ func (f *Fanout) DiscardPendingOutput(through uint64) {
 		}
 		cursor.cursor, cursor.queuedBytes, cursor.lagged = target, cursor.enqueuedEnd-target, true
 		notify(cursor.notify)
+		resynced = append(resynced, id)
 	}
 	f.compactLocked()
 	notify(f.room)
+	return resynced
 }
 
 // hasControlLocked reports a non-terminal-output (resize) event queued in [from, to).

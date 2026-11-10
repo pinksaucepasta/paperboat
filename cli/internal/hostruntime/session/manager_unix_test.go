@@ -1099,3 +1099,69 @@ func TestCtrlCResyncScreenHoldsTheAnswer(t *testing.T) {
 		}
 	}
 }
+
+// F3-11: a lone Ctrl-C is always answered with the cut the host made for it, whatever the terminal mode, so the
+// client's hold ends on it: through is the end of the output that predates the key, discarded says the sender's
+// queued output up to there was dropped for a screen.
+func TestLoneCtrlCIsAnsweredWithTheCut(t *testing.T) {
+	flood := "head -c 300000 /dev/zero | tr '\\0' x; exec sleep 30"
+	cases := []struct {
+		name          string
+		script        string
+		queued        uint64 // wait for this much queued for the sender before the key
+		overtake      bool   // Interrupt first (the read-loop path), else the key is only written
+		wantDiscarded bool
+		wantThrough   bool
+	}{
+		{"flood, overtaken", flood, 300000, true, true, true},
+		{"small backlog, overtaken", "printf small; exec sleep 30", 5, true, false, true},
+		{"idle, written without the overtake", "printf prompt; exec sleep 30", 6, false, false, true},
+		{"raw mode: the key is data", "stty -isig; printf raw; exec sleep 30", 3, true, false, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			manager, root, shell := realManager(t)
+			created, err := manager.Create(context.Background(), CreateRequest{Name: "answer", Command: shellCommand(shell, root, c.script)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer manager.Close(context.Background(), created.ID)
+			if _, err := manager.Attach(created.ID, "att_answer", 0); err != nil {
+				t.Fatal(err)
+			}
+			for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+				if _, queued, _ := manager.AttachmentStatus(created.ID, "att_answer"); queued >= c.queued {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("output never queued")
+				}
+			}
+			time.Sleep(300 * time.Millisecond) // the whole of it is published
+			key := InputKey{ClientID: "cli", AttachmentID: "att_answer", Generation: created.Generation, InputSequence: 1}
+			if c.overtake {
+				handled := manager.Interrupt(created.ID, key, 3)
+				if handled != (c.name != "raw mode: the key is data") {
+					t.Fatalf("Interrupt handled=%v", handled)
+				}
+			}
+			decision, err := manager.WriteContext(context.Background(), created.ID, key, []byte{3})
+			if err != nil || decision.Status != InputAccepted {
+				t.Fatalf("Write of the key: %#v, %v", decision, err)
+			}
+			if decision.InterruptDiscarded != c.wantDiscarded {
+				t.Fatalf("discarded=%v, want %v", decision.InterruptDiscarded, c.wantDiscarded)
+			}
+			if c.wantThrough && decision.InterruptThrough == 0 {
+				t.Fatal("the answer carries no cut")
+			}
+			// Another key is not answered as an interrupt.
+			next := key
+			next.InputSequence = 2
+			other, err := manager.WriteContext(context.Background(), created.ID, next, []byte("x"))
+			if err != nil || other.InterruptThrough != 0 || other.InterruptDiscarded {
+				t.Fatalf("an ordinary key was answered as an interrupt: %#v, %v", other, err)
+			}
+		})
+	}
+}

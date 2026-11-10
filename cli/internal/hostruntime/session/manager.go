@@ -85,14 +85,17 @@ type Manager struct {
 }
 
 type managedSession struct {
-	opMu             sync.Mutex // in-memory state only; never held across PTY or store I/O
-	operationMu      sync.Mutex // lifecycle and durable metadata ordering
-	resizeMu         sync.Mutex // PTY resize ordering, independent of lifecycle
-	outputMu         sync.Mutex // capture and clear boundaries
-	inputMu          sync.Mutex
-	persistMu        sync.Mutex
-	liveProcess      atomic.Pointer[liveProcess]
-	interrupt        atomic.Pointer[InputKey] // the interrupt key Interrupt delivered ahead of stuck input
+	opMu        sync.Mutex // in-memory state only; never held across PTY or store I/O
+	operationMu sync.Mutex // lifecycle and durable metadata ordering
+	resizeMu    sync.Mutex // PTY resize ordering, independent of lifecycle
+	outputMu    sync.Mutex // capture and clear boundaries
+	inputMu     sync.Mutex
+	persistMu   sync.Mutex
+	liveProcess atomic.Pointer[liveProcess]
+	interrupt   atomic.Pointer[InputKey] // the interrupt key Interrupt delivered ahead of stuck input
+	// lastInterrupt is what Interrupt did for the key (interruptMu): WriteContext reports it back to the sender.
+	interruptMu      sync.Mutex
+	lastInterrupt    interruptRecord
 	id               string
 	name             string
 	supportReference atomic.Pointer[string]

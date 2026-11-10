@@ -261,6 +261,9 @@ type terminalInputResult struct {
 	Status       session.InputStatus `json:"status"`
 	BytesWritten int                 `json:"bytes_written"`
 	ErrorCode    string              `json:"error_code,omitempty"`
+	// InterruptThrough/InterruptDiscarded answer a lone Ctrl-C (session.InputDecision): the client's hold ends on them.
+	InterruptThrough   uint64 `json:"interrupt_through,omitempty"`
+	InterruptDiscarded bool   `json:"interrupt_discarded,omitempty"`
 }
 
 func inputDecisionForError(err error, sequence uint64) session.InputDecision {
@@ -289,7 +292,7 @@ func writeTerminalInputResult(writer *lockedWriter, streamID uint32, decision se
 	if errorCode == "" && inputErr != nil {
 		errorCode = "input_rejected"
 	}
-	payload, err := json.Marshal(terminalInputResult{Event: "terminal_input_result", StreamID: streamID, Sequence: decision.InputSequence, Status: decision.Status, BytesWritten: decision.BytesWritten, ErrorCode: errorCode})
+	payload, err := json.Marshal(terminalInputResult{Event: "terminal_input_result", StreamID: streamID, Sequence: decision.InputSequence, Status: decision.Status, BytesWritten: decision.BytesWritten, ErrorCode: errorCode, InterruptThrough: decision.InterruptThrough, InterruptDiscarded: decision.InterruptDiscarded})
 	if err != nil {
 		return err
 	}

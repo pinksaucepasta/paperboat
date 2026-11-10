@@ -79,6 +79,9 @@ func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputK
 	if decision.Status != InputUncertain && decision.BytesWritten > 0 {
 		session.sizes.noteInput(key.AttachmentID, time.Now().UTC())
 	}
+	if len(data) == 1 && data[0] == 0x03 && decision.Status == InputAccepted {
+		session.answerInterrupt(key, &decision)
+	}
 	if m.config.Store != nil {
 		// The outcome joins the next group commit instead of a second fsync per key (N11: 2 000 keys 10 ms apart
 		// backed up 5 s on a disk that takes ~5 ms per fsync).
@@ -120,10 +123,40 @@ func (m *Manager) Interrupt(sessionID string, key InputKey, data byte) bool {
 	if err != nil {
 		observeSessionFailure(session, "input", classifySessionFailure("input", err))
 	}
+	discarded := false
 	if handled {
-		session.fanout.DiscardPendingOutput(through)
+		for _, id := range session.fanout.DiscardPendingOutput(through) {
+			discarded = discarded || id == key.AttachmentID
+		}
 	}
+	session.interruptMu.Lock()
+	session.lastInterrupt = interruptRecord{key: key, through: through, discarded: discarded}
+	session.interruptMu.Unlock()
 	return handled
+}
+
+// interruptRecord is what Interrupt did for one key, so the answer to that key says it.
+type interruptRecord struct {
+	key       InputKey
+	through   uint64
+	discarded bool
+}
+
+// answerInterrupt fills a lone Ctrl-C's decision with the cut Interrupt made for it. With no record (a Ctrl-C that
+// was written normally: an idle unix shell, raw mode) nothing was discarded and the cut is the current end of output.
+func (s *managedSession) answerInterrupt(key InputKey, decision *InputDecision) {
+	s.interruptMu.Lock()
+	record := s.lastInterrupt
+	matches := record.key.InputSequence != 0 && sameInputCursor(record.key, key) && record.key.InputSequence == key.InputSequence
+	if matches {
+		s.lastInterrupt = interruptRecord{}
+	}
+	s.interruptMu.Unlock()
+	if matches {
+		decision.InterruptThrough, decision.InterruptDiscarded = record.through, record.discarded
+		return
+	}
+	decision.InterruptThrough = s.fanout.PublishedEnd()
 }
 
 func sameInputCursor(a, b InputKey) bool {
