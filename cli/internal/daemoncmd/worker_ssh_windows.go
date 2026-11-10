@@ -5,10 +5,10 @@ package daemoncmd
 import (
 	"context"
 	"os"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
+	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 )
 
@@ -42,7 +42,7 @@ func workerOpenSSH(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	defer clear(token)
-	client, err := hostdproto.NewClient(layout.HostdSocket, token, 5*time.Second)
+	client, err := hostdproto.NewClient(layout.HostdSocket, token, localapi.WorkerOpenSSHTimeout)
 	if err != nil {
 		return 0, err
 	}

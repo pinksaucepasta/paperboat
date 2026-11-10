@@ -789,7 +789,10 @@ func (s *Server) openConnections(writer http.ResponseWriter, request *http.Reque
 	}
 	current := liveconnections.Current()
 	if s.config.WorkerOpenSSH != nil {
-		if worker, err := s.config.WorkerOpenSSH(request.Context()); err == nil && worker > 0 {
+		workerCtx, cancel := context.WithTimeout(request.Context(), WorkerOpenSSHTimeout)
+		worker, err := s.config.WorkerOpenSSH(workerCtx)
+		cancel()
+		if err == nil && worker > 0 {
 			current.SSH += worker
 		}
 	}

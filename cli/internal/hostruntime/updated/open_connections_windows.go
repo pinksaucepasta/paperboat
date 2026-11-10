@@ -4,7 +4,6 @@ package updated
 
 import (
 	"context"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
 	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
@@ -38,6 +37,6 @@ func readWindowsOpenConnections(ctx context.Context, config WindowsConfig) (live
 	if err != nil {
 		return liveconnections.Counts{}, err
 	}
-	open, err := localapi.ReadSystemOwnerConnections(ctx, paths.SocketPath, config.OwnerSID, 2*time.Second)
+	open, err := localapi.ReadSystemOwnerConnections(ctx, paths.SocketPath, config.OwnerSID, localapi.OpenConnectionsTimeout)
 	return liveconnections.Counts{SSH: open.SSH, Forwards: open.Forwards}, err
 }

@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
@@ -24,7 +23,7 @@ func openConnectionsForUpdate(ctx context.Context) (liveconnections.Counts, erro
 
 // openConnectionsOver asks the daemon listening on the pipe. A daemon that is not running (no pipe to dial) carries none.
 func openConnectionsOver(ctx context.Context, socketPath string) (liveconnections.Counts, error) {
-	client, err := localapi.NewClient(socketPath, 2*time.Second)
+	client, err := localapi.NewClient(socketPath, localapi.OpenConnectionsTimeout)
 	if err != nil {
 		return liveconnections.Counts{}, err
 	}

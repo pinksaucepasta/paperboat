@@ -160,6 +160,15 @@ type PeerProbeResult struct {
 
 const RelayInventorySchemaV1 = "paperboat.relay-inventory/v1"
 
+// WorkerOpenSSHTimeout is how long the daemon waits for the hostd worker's SSH count; OpenConnectionsTimeout is how
+// long an update guard waits for the daemon's whole /v1/connections answer, which includes that wait. The guard must
+// outlast the worker query: a slow but alive worker would otherwise be counted as zero and the update would end its
+// sessions.
+const (
+	WorkerOpenSSHTimeout   = 5 * time.Second
+	OpenConnectionsTimeout = WorkerOpenSSHTimeout + 3*time.Second
+)
+
 // OpenConnectionsSchemaV1 versions the answer to GET /v1/connections.
 const OpenConnectionsSchemaV1 = "paperboat.open-connections/v1"
 
