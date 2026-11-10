@@ -93,8 +93,7 @@ def main():
     windows = windows_target.is_windows(PB, args.target)
     name = 'smoke-update-' + str(int(time.time()))
     before_version = p.invoke(PB, '--version', raw=True)
-    terminal = Terminal(winhost.terminal_argv(PB, ['connect', args.target, '--name', name, '--status-bar', 'off']),
-                        env=winhost.terminal_env(PB))
+    terminal = Terminal(winhost.terminal_argv(PB, ['connect', args.target, '--name', name, '--status-bar', 'off']), env=winhost.terminal_env(PB))
     exec_process = None
 
     def shell_identity(label):
