@@ -86,6 +86,14 @@ func machineEndpointRequest(service machineEndpointRequester, verifier machineEn
 				status, code = http.StatusBadRequest, "invalid_request"
 			case expectedHTTPErrorOnly(err, peeridentity.ErrConflict):
 				status, code = http.StatusConflict, "operation_conflict"
+			// The certificate the machine sent does not match its account, endpoint, generation, time window or own
+			// signature: the client's request, so a 400 like endpointCertificateRegister (peer_identity_handlers.go:246-251)
+			// and the E2EE bootstrap (:114-119), not a retryable 503. ErrUnavailable stays 503: it also means the
+			// machine row of a pairing that is still completing, which the runtime retries (transientNativePeerStart).
+			case expectedHTTPErrorOnly(err, wire.ErrNotCurrent):
+				status, code = http.StatusBadRequest, "certificate_expired"
+			case expectedHTTPErrorOnly(err, wire.ErrIdentity, wire.ErrSignature):
+				status, code = http.StatusBadRequest, "invalid_certificate"
 			}
 			logIdentityRejection(r, status, err)
 			writeError(w, r, status, code, "Machine endpoint request could not be created.", err)

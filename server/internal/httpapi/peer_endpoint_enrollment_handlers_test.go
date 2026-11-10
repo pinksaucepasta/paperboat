@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"log/slog"
 	"net/http"
@@ -38,6 +39,45 @@ func TestMachineEndpointRequestClassifiesUnexpectedRepositoryFailure(t *testing.
 	var envelope ErrorResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil || response.Code != http.StatusServiceUnavailable || envelope.Error.Code != "temporarily_unavailable" {
 		t.Fatalf("status=%d body=%s err=%v", response.Code, response.Body.String(), err)
+	}
+}
+
+// The registration's failures are answered by kind: the client's certificate problems are 400s and a conflicting replay a
+// 409, so a machine that sent a bad certificate is told so instead of retrying a "temporarily unavailable" forever; a
+// missing machine row (a pairing still completing) and anything unexpected stay retryable 503s.
+func TestMachineEndpointRequestMapsEachRegistrationFailureToItsStatus(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{"invalid", wire.ErrInvalid, http.StatusBadRequest, "invalid_request"},
+		{"conflict", peeridentity.ErrConflict, http.StatusConflict, "operation_conflict"},
+		{"not current", wire.ErrNotCurrent, http.StatusBadRequest, "certificate_expired"},
+		{"identity", wire.ErrIdentity, http.StatusBadRequest, "invalid_certificate"},
+		{"signature", wire.ErrSignature, http.StatusBadRequest, "invalid_certificate"},
+		{"wrapped signature", fmt.Errorf("verify: %w", wire.ErrSignature), http.StatusBadRequest, "invalid_certificate"},
+		{"no machine row", peeridentity.ErrUnavailable, http.StatusServiceUnavailable, "temporarily_unavailable"},
+		{"unexpected", errors.New("database unavailable"), http.StatusServiceUnavailable, "temporarily_unavailable"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body := `{"operation_id":"operation_machine_01","generation":1,"certificate":"AQ"}`
+			request := httptest.NewRequest(http.MethodPost, "/v1/machine-peer-identity", strings.NewReader(body))
+			request.Header.Set("Authorization", "Bearer token")
+			request.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString([]byte("proof")))
+			verifier := machineProofVerifierFunc(func(context.Context, string, []byte, string, string, []byte) (controlplane.MachineRequestClaims, error) {
+				return controlplane.MachineRequestClaims{UserID: "account_01", MachineID: "machine_01", InstallationGeneration: 1, OperationID: "operation_machine_01"}, nil
+			})
+			response := httptest.NewRecorder()
+			machineEndpointRequest(machineEndpointRequesterFunc(func(context.Context, peeridentity.MachineRegistrationRequest) (wire.Certificate, error) {
+				return wire.Certificate{}, test.err
+			}), verifier).ServeHTTP(response, request)
+			var envelope ErrorResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil || response.Code != test.status || envelope.Error.Code != test.code {
+				t.Fatalf("status=%d body=%s err=%v, want %d %s", response.Code, response.Body.String(), err, test.status, test.code)
+			}
+		})
 	}
 }
 
