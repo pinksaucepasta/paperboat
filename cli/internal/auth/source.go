@@ -76,6 +76,7 @@ func (s *Source) Refresh() (config.Credential, error) {
 func (s *Source) credential(refreshWindow time.Duration) (result config.Credential, resultErr error) {
 	var credential config.Credential
 	var err error
+	refreshAttempted := false
 	if s.lifetime != nil && s.lifetime.Err() != nil {
 		return credential, accountCredentialFailure(s.lifetime.Err())
 	}
@@ -99,6 +100,12 @@ func (s *Source) credential(refreshWindow time.Duration) (result config.Credenti
 				s.retry.failure, s.retry.delay, s.retry.signedOut = nil, 0, false
 				return
 			}
+			if !refreshAttempted {
+				// A failure of the local credential store never reached Paperboat, so there is nothing to back off from.
+				// Remembering it gave one lost lock race to every peer operation of the daemon for 15 s to 5 min
+				// (victus 2026-11-10: pb ping and pb exec to every machine failed until the service restarted).
+				return
+			}
 			failure := accountCredentialFailure(err)
 			s.retry.signedOut = permanentRefreshRejection(err)
 			if s.retry.signedOut {
@@ -112,6 +119,7 @@ func (s *Source) credential(refreshWindow time.Duration) (result config.Credenti
 	}
 	for range 2 {
 		credential, err = s.Store.CredentialWithRefresh(s.Issuer, refreshWindow, func(current config.Credential, attemptID string) (config.Credential, string, error) {
+			refreshAttempted = true
 			parent := s.lifetime
 			if parent == nil {
 				parent = context.Background()

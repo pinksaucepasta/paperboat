@@ -31,6 +31,13 @@ type sharedLock struct {
 
 var sharedLockMu sync.Map
 
+// sharedLockInspectGrace is how long a waiter keeps polling a lock directory it cannot validate: a release races the
+// inspection for milliseconds, a directory with a foreign owner or ACL stays invalid.
+const sharedLockInspectGrace = 2 * time.Second
+
+// inspectSharedLock validates another process's lock directory; a variable so a test can release it mid-inspection.
+var inspectSharedLock = validateSharedLockDirectory
+
 func newSharedLock(path string) *sharedLock {
 	key := path + ".d"
 	local, _ := sharedLockMu.LoadOrStore(key, &sync.Mutex{})
@@ -59,6 +66,7 @@ func (l *sharedLock) Lock() error {
 	}
 	deadline := time.Now().Add(30 * time.Second)
 	var lastOwnerErr error
+	var invalidSince time.Time // since when every inspection of the other process's lock directory failed
 	for {
 		if err := createSharedLockDirectory(l.path); err == nil {
 			if err := writeSharedLockOwner(filepath.Join(l.path, "owner.json"), append(encoded, '\n')); err != nil {
@@ -73,9 +81,22 @@ func (l *sharedLock) Lock() error {
 		} else if !os.IsExist(err) {
 			return safeConfigCause("shared credential lock could not be acquired", err)
 		}
-		if err := validateSharedLockDirectory(l.path); err != nil {
-			return safeConfigCause("shared credential lock could not be validated", err)
+		// The directory is another process's lock, and that process may release it while it is inspected. On Windows it
+		// then vanishes before the open (ERROR_FILE_NOT_FOUND) or under the open handle (its final path no longer
+		// resolves): "not acquired yet", not a failure. Ten parallel pb.exe and the daemon failed their credential reads
+		// on it (victus 2026-11-10). Only a directory that stays invalid is refused.
+		if err := inspectSharedLock(l.path); err != nil {
+			if invalidSince.IsZero() {
+				invalidSince = time.Now()
+			}
+			if time.Since(invalidSince) > sharedLockInspectGrace {
+				return safeConfigCause("shared credential lock could not be validated", err)
+			}
+			//paperboat:allow-source-policy sleep owner=runtime-auth reason=bounded-cross-process-lock-poll
+			time.Sleep(25 * time.Millisecond)
+			continue
 		}
+		invalidSince = time.Time{}
 		_, ownerErr := os.Lstat(filepath.Join(l.path, "owner.json"))
 		stale, err := sharedLockIsStale(l.path, hostname)
 		lastOwnerErr = err

@@ -11,6 +11,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/causetext"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
@@ -179,7 +180,10 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) (runErr error) {
 		RelayInventory:       config.RelayInventory,
 		FileTransfers:        config.FileTransfers,
 		VaultCustody:         vaultCustody,
-		Stale:                lock,
+		RecordCause: func(operation, supportReference string, causeErr error) {
+			_ = causetext.Record(filepath.Join(config.Paths.StateRoot, "diagnostics"), "last-daemon-failure.txt", operation, supportReference, causeErr)
+		},
+		Stale: lock,
 	})
 	if err != nil {
 		return err
