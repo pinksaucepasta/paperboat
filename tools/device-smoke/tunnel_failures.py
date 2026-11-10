@@ -16,7 +16,7 @@ import uuid
 from install_lifecycle import registration
 from pairing_lifecycle import command_result
 from preview_lifecycle import stoppable_origin
-from tunnel_survival import PB, confirmed, host_service, run, status_code, wait_status
+from tunnel_survival import PB, confirmed, host_service, run, wait_status
 import winhost
 
 CAUSE_SECONDS = 150

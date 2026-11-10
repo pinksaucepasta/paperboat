@@ -2,7 +2,6 @@
 """Exercise the normal root and session menus without acting on other sessions."""
 import argparse
 import json
-import sys
 
 from pairing_lifecycle import command_diagnostic
 from terminal_lifecycle import Terminal, qualify
