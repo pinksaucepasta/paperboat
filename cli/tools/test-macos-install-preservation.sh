@@ -87,7 +87,7 @@ printf '%s\n' "$*" >> "$PAPERBOAT_TEST_RM_LOG"
 protected=false
 for argument do
   case "$argument" in
-    /Library/LaunchDaemons/com.pinksaucepasta.paperboat.hostd.plist|/Library/LaunchDaemons/com.pinksaucepasta.paperboat.updated.plist|/Library/PrivilegedHelperTools/Paperboat|/Library/Application\ Support/Paperboat|/usr/local/bin/pb|/usr/local/libexec/paperboat/pb|/var/run/paperboat-hostd/hostd.sock|/var/run/paperboat-updated/control.sock)
+    /Library/LaunchDaemons/com.pinksaucepasta.paperboat.hostd.plist|/Library/LaunchDaemons/com.pinksaucepasta.paperboat.updated.plist|/Library/PrivilegedHelperTools/Paperboat|/Library/Application\ Support/Paperboat|/usr/local/bin/pb|/var/run/paperboat-hostd/hostd.sock|/var/run/paperboat-updated/control.sock)
       protected=true
       ;;
   esac
@@ -100,7 +100,6 @@ if [ "$protected" = true ]; then
       /Library/PrivilegedHelperTools/Paperboat) /bin/rm -rf "$PAPERBOAT_TEST_STATE/helper" ;;
       /Library/Application\ Support/Paperboat) /bin/rm -rf "$PAPERBOAT_TEST_STATE/application-support" ;;
       /usr/local/bin/pb) /bin/rm -f "$PAPERBOAT_TEST_STATE/cli" ;;
-      /usr/local/libexec/paperboat/pb) /bin/rm -f "$PAPERBOAT_TEST_STATE/legacy-helper" ;;
       /var/run/paperboat-hostd/hostd.sock) /bin/rm -f "$PAPERBOAT_TEST_STATE/hostd.sock" ;;
       /var/run/paperboat-updated/control.sock) /bin/rm -f "$PAPERBOAT_TEST_STATE/updated.sock" ;;
     esac
@@ -137,7 +136,7 @@ seed_managed_state() {
   mkdir -p "$PAPERBOAT_TEST_STATE/helper/bin" "$PAPERBOAT_TEST_STATE/application-support"
   touch "$PAPERBOAT_TEST_STATE/hostd.plist" "$PAPERBOAT_TEST_STATE/updated.plist" \
     "$PAPERBOAT_TEST_STATE/helper/bin/pb" "$PAPERBOAT_TEST_STATE/application-support/config" \
-    "$PAPERBOAT_TEST_STATE/cli" "$PAPERBOAT_TEST_STATE/legacy-helper" \
+    "$PAPERBOAT_TEST_STATE/cli" \
     "$PAPERBOAT_TEST_STATE/hostd.sock" "$PAPERBOAT_TEST_STATE/updated.sock"
 }
 
@@ -169,7 +168,7 @@ assert_rejected_product() {
   grep -q "$expected_error" "$temporary/$mode-error"
   test ! -s "$temporary/$mode-pkgutil.log" || { echo "$mode product reached package extraction" >&2; exit 1; }
   test ! -e "$PAPERBOAT_TEST_PB_LOG" || { echo "$mode product was executed before verification" >&2; exit 1; }
-  for marker in hostd.plist updated.plist cli legacy-helper hostd.sock updated.sock; do
+  for marker in hostd.plist updated.plist cli hostd.sock updated.sock; do
     test -e "$PAPERBOAT_TEST_STATE/$marker" || { echo "$mode product removed $marker" >&2; exit 1; }
   done
 }
@@ -179,7 +178,7 @@ if run_installer install-only; then
   echo 'install-only test expected the supplied installer to fail' >&2
   exit 1
 fi
-for marker in hostd.plist updated.plist cli legacy-helper hostd.sock updated.sock; do
+for marker in hostd.plist updated.plist cli hostd.sock updated.sock; do
   test -e "$PAPERBOAT_TEST_STATE/$marker" || { echo "install-only removed $marker" >&2; exit 1; }
 done
 test -d "$PAPERBOAT_TEST_STATE/helper"
@@ -200,7 +199,7 @@ if run_installer explicit-setup --setup; then
   exit 1
 fi
 grep -q '^install --json$' "$PAPERBOAT_TEST_PB_LOG"
-for marker in hostd.plist updated.plist cli legacy-helper hostd.sock updated.sock; do
+for marker in hostd.plist updated.plist cli hostd.sock updated.sock; do
   test -e "$PAPERBOAT_TEST_STATE/$marker" || { echo "failed install removed $marker" >&2; exit 1; }
 done
 
