@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 )
@@ -37,9 +38,11 @@ func cygpathUnder(dir string) func(string) (string, error) {
 		if _, err := os.Stat(tool); err != nil {
 			return value, nil
 		}
-		out, err := exec.Command(tool, "-u", value).Output()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, tool, "-u", value).Output()
 		if err != nil {
-			return "", fmt.Errorf("convert %q for rsync with cygpath: %w", value, err)
+			return "", fmt.Errorf("convert local path %q for rsync with cygpath (is the MSYS2/Cygwin install intact?): %w", value, err)
 		}
 		return strings.TrimSpace(string(out)), nil
 	}
