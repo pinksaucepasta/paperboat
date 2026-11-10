@@ -124,9 +124,8 @@ def main():
                 wait_for(lambda: marker in body(preview_url), 'the preview to serve', 120)
                 wait_for(lambda: marker in body(tunnel_url), 'the tunnel to serve', 120)
             if args.terminal:
-                # the official build being updated from may predate --status-bar
-                quiet = ['--status-bar', 'off'] if '--status-bar' in command_result(PB, 'connect', '--help', timeout=60).stdout else []
-                held = Terminal(winhost.terminal_argv(PB, ['connect', args.target, '--name', session_name, *quiet]), env=winhost.terminal_env(PB))
+                terminal_args = ['connect', args.target, '--name', session_name, '--status-bar', 'off']
+                held = Terminal(winhost.terminal_argv(PB, terminal_args), env=winhost.terminal_env(PB))
                 if not windows:
                     held.expect(b'\x1b[?2004h')
                     held.expect(held.marker('READY', 'stty -echo; '))
