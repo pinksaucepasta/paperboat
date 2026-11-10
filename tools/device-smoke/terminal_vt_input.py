@@ -25,7 +25,6 @@ KEYS = [
     ('bracketed multi-line paste', b'\x1b[200~line1\nline2\nline3\x1b[201~', b'^[[200~line1\r\nline2\r\nline3^[[201~'),
     ('emoji', '😀'.encode(), b'M-pM-^_M-^XM-^@'),
 ]
-EMOJI_CAT = b'M-pM-^_M-^XM-^@'
 
 
 def drain(terminal, quiet=0.8, limit=30):
@@ -69,8 +68,11 @@ def main():
                 failures.append('%s: sent %r, the remote showed %r' % (label, data, got[-120:]))
         flood = ('a' * 975 + '😀' * 50 + 'b' * 975).encode()  # surrogate pairs split across console reads
         got = send_and_read(terminal, flood)
-        if got.count(EMOJI_CAT) != 50 or b'M-pM-^_M-^XM-^@M-pM-^_M-^XM-^@' not in got:
-            failures.append('50 emoji in a row: the remote showed %d whole emoji (want 50)' % got.count(EMOJI_CAT))
+        # Every emoji is F0 9F 98 80, shown by cat -v as M-p M-^_ M-^X M-^@. The ConPTY of the device repaints at a line wrap and can cut a
+        # rendering in two, so count the lead byte (50 emoji, none corrupted to U+FFFD = EF BF BD = M-oM-?M-=) instead of whole renderings.
+        if got.count(b'M-p') != 50 or b'M-oM-?M-=' in got:
+            failures.append('50 emoji in a row: the remote showed %d emoji lead bytes (want 50) and %d replacement characters (want 0)'
+                            % (got.count(b'M-p'), got.count(b'M-oM-?M-=')))
         got = send_and_read(terminal, b'\x1a')
         if b'^Z' not in got:  # ReadFile ended the stream here and the session closed
             failures.append('Ctrl-Z: the remote showed %r' % got[-120:])
