@@ -337,3 +337,42 @@ func TestResultOfOwnCloseNamesWhatARealClosedSocketReports(t *testing.T) {
 		t.Fatalf("CloseWrite after our own Close = %T %v (is ErrClosed: %v), not named as the result of our own close", err, err, errors.Is(err, net.ErrClosed))
 	}
 }
+
+// The mid-upload abort the coordinator named: the client aborts a push (scp/rsync), sshd then sees the end of its input
+// and exits within the grace period. It stays failed on every OS (82e5c6ac7 turned it into closed everywhere; this is
+// the test that would have caught it), with and without the Windows reset listed.
+func TestMidUploadAbortStaysFailedEvenWhenSSHDExitsPromptly(t *testing.T) {
+	for _, windows := range []bool{false, true} {
+		saved := closeResets
+		if windows {
+			closeResets = []error{syscall.ECONNRESET}
+		} else {
+			closeResets = nil
+		}
+		previous := resetGrace
+		resetGrace = 500 * time.Millisecond
+		listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		go func() {
+			if connection, acceptErr := listener.AcceptTCP(); acceptErr == nil {
+				_, _ = io.Copy(io.Discard, connection) // reads the upload until its input ends
+				_ = connection.Close()                 // then exits cleanly (FIN)
+			}
+		}()
+		bridgeSide, clientSide := tcpPair(t)
+		go func() {
+			_, _ = clientSide.Write([]byte("part of an upload"))
+			time.Sleep(100 * time.Millisecond)
+			_ = clientSide.SetLinger(0)
+			_ = clientSide.Close() // the abort
+		}()
+		_, err = BridgeSSH(t.Context(), bridgeSide, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second)
+		resetGrace, closeResets = previous, saved
+		_ = listener.Close()
+		if err == nil {
+			t.Fatalf("a mid-upload client abort, sshd exiting at once, was recorded closed (windows reset listed: %v)", windows)
+		}
+	}
+}
