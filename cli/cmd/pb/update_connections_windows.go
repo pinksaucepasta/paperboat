@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"errors"
-	"net/http"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
@@ -14,20 +13,23 @@ import (
 )
 
 // openConnectionsForUpdate counts the SSH streams and access forwards the user's daemon carries now, over its local API
-// pipe like the Unix probe. A daemon that is not running (no pipe) or too old to know the question carries none: the
-// answer never blocks an update that no connection can be shown to be blocking.
+// pipe like the Unix probe.
 func openConnectionsForUpdate(ctx context.Context) (liveconnections.Counts, error) {
 	paths, err := localdaemon.CurrentUserPaths()
 	if err != nil {
 		return liveconnections.Counts{}, err
 	}
-	client, err := localapi.NewClient(paths.SocketPath, 2*time.Second)
+	return openConnectionsOver(ctx, paths.SocketPath)
+}
+
+// openConnectionsOver asks the daemon listening on the pipe. A daemon that is not running (no pipe to dial) carries none.
+func openConnectionsOver(ctx context.Context, socketPath string) (liveconnections.Counts, error) {
+	client, err := localapi.NewClient(socketPath, 2*time.Second)
 	if err != nil {
 		return liveconnections.Counts{}, err
 	}
 	open, err := client.OpenConnections(ctx)
-	var remote *localapi.RemoteError
-	if errors.As(err, &remote) && remote.StatusCode == http.StatusNotFound {
+	if errors.Is(err, localapi.ErrTransportUnavailable) {
 		return liveconnections.Counts{}, nil
 	}
 	return liveconnections.Counts{SSH: open.SSH, Forwards: open.Forwards}, err

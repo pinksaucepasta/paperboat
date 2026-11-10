@@ -400,10 +400,7 @@ func refuseSignedUpdateWhileConnectionsOpen(ctx context.Context, goos string, fo
 	if goos != "windows" || force {
 		return nil
 	}
-	if refusal := updateOpenConnectionsFromFile(ctx); refusal != nil {
-		return refusal
-	}
-	return nil
+	return updateOpenConnectionsFromFile(ctx)
 }
 
 func updateCommandResult(previousVersion string, response updated.ControlResponse, snapshot *localapi.Snapshot) updateResult {
