@@ -55,12 +55,6 @@ const (
 	wtFwpmSublayer0_providerData_Offset = 48
 	wtFwpmSublayer0_weight_Offset       = 64
 
-	wtFwpProvider0_Size                = 64
-	wtFwpProvider0_displayData_Offset  = 16
-	wtFwpProvider0_flags_Offset        = 32
-	wtFwpProvider0_providerData_Offset = 40
-	wtFwpProvider0_serviceName_Offset  = 56
-
 	wtFwpValue0_Size         = 16
 	wtFwpValue0_value_Offset = 8
 )

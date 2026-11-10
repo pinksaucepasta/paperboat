@@ -22,7 +22,6 @@ type Lease struct{ IP, SID string }
 type wfpObjectInstaller func(uintptr) error
 
 var sublayerKey = windows.GUID{Data1: 0x70617065, Data2: 0x7262, Data3: 0x4f61, Data4: [8]byte{0xb4, 0x2d, 0x77, 0x66, 0x70, 0x2d, 0x30, 0x32}}
-var legacySublayerKey = windows.GUID{Data1: 0x70617065, Data2: 0x7262, Data3: 0x6f61, Data4: [8]byte{0x74, 0x2d, 0x77, 0x66, 0x70, 0x2d, 0x30, 0x32}}
 
 const alreadyExists windows.Errno = 0x80320009
 
@@ -56,10 +55,6 @@ func Apply(leases, known []Lease, loopbackCIDR string, protectedValues ...string
 		}
 		if err := deleteRuleKeys(engine, baseNames, known); err != nil {
 			return err
-		}
-		result, _, _ := sublayerDeleteProc.Call(engine, uintptr(unsafe.Pointer(&legacySublayerKey)))
-		if result != 0 && !notFound(result) {
-			return windows.Errno(result)
 		}
 		if err := ensureBase(engine); err != nil {
 			return fmt.Errorf("base objects: %w", err)
@@ -134,13 +129,12 @@ func Apply(leases, known []Lease, loopbackCIDR string, protectedValues ...string
 }
 
 func deleteRuleKeys(engine uintptr, names []string, leases []Lease) error {
-	keys := make([]windows.GUID, 0, len(names)*2+len(leases)*2)
+	keys := make([]windows.GUID, 0, len(names)+len(leases))
 	for _, name := range names {
-		keys = append(keys, guidFor(name), legacyGUIDFor(name))
+		keys = append(keys, guidFor(name))
 	}
 	for _, lease := range leases {
-		material := lease.IP + "\x00" + lease.SID
-		keys = append(keys, guidFor(material), legacyGUIDFor("paperboat-user-"+material))
+		keys = append(keys, guidFor(lease.IP+"\x00"+lease.SID))
 	}
 	for i := range keys {
 		result, _, _ := filterDeleteProc.Call(engine, uintptr(unsafe.Pointer(&keys[i])))
@@ -187,10 +181,6 @@ func guidFor(value string) windows.GUID {
 	sum[8] = sum[8]&0x3f | 0x80
 	return windows.GUID{Data1: binary.LittleEndian.Uint32(sum[0:4]), Data2: binary.LittleEndian.Uint16(sum[4:6]), Data3: binary.LittleEndian.Uint16(sum[6:8]), Data4: [8]byte(sum[8:16])}
 }
-func legacyGUIDFor(value string) windows.GUID {
-	sum := sha256.Sum256([]byte(value))
-	return windows.GUID{Data1: binary.LittleEndian.Uint32(sum[0:4]), Data2: binary.LittleEndian.Uint16(sum[4:6]), Data3: binary.LittleEndian.Uint16(sum[6:8]), Data4: [8]byte(sum[8:16])}
-}
 func protocol() wtFwpmFilterCondition0 {
 	return uint8Condition(cFWPM_CONDITION_IP_PROTOCOL, uint8(cIPPROTO_TCP))
 }
@@ -229,7 +219,7 @@ var (
 	sublayerDeleteProc = windows.NewLazySystemDLL("fwpuclnt.dll").NewProc("FwpmSubLayerDeleteByKey0")
 )
 
-// Remove retires every filter in the two exact Paperboat sublayers, including
+// Remove retires every filter in the exact Paperboat sublayer, including
 // interrupted leases whose reservation journal was lost. No foreign sublayer
 // is changed. Enumeration and deletion share one WFP transaction.
 func Remove(ctx context.Context) (resultErr error) {
@@ -239,16 +229,14 @@ func Remove(ctx context.Context) (resultErr error) {
 	}
 	defer func() { resultErr = errors.Join(resultErr, fwpmEngineClose0(engine)) }()
 	return runTransaction(engine, func(engine uintptr) error {
-		if err := removeSublayerFilters(ctx, engine, []windows.GUID{sublayerKey, legacySublayerKey}); err != nil {
+		if err := removeSublayerFilters(ctx, engine, []windows.GUID{sublayerKey}); err != nil {
 			return err
 		}
-		for _, key := range []windows.GUID{sublayerKey, legacySublayerKey} {
-			result, _, _ := sublayerDeleteProc.Call(engine, uintptr(unsafe.Pointer(&key)))
-			if result != 0 && !notFound(result) {
-				return windows.Errno(result)
-			}
+		result, _, _ := sublayerDeleteProc.Call(engine, uintptr(unsafe.Pointer(&sublayerKey)))
+		if result != 0 && !notFound(result) {
+			return windows.Errno(result)
 		}
-		return removeLegacyProvider(engine)
+		return nil
 	})
 }
 

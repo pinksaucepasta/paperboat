@@ -333,16 +333,6 @@ type wtFwpmFilterCondition0 struct {
 	conditionValue wtFwpConditionValue0
 }
 
-// FWPM_PROVIDER0 defined in fwpmtypes.h
-// (https://docs.microsoft.com/en-us/windows/desktop/api/fwpmtypes/ns-fwpmtypes-fwpm_provider0_)
-type wtFwpProvider0 struct {
-	providerKey  windows.GUID // Windows type: GUID
-	displayData  wtFwpmDisplayData0
-	flags        uint32
-	providerData wtFwpByteBlob
-	serviceName  *uint16 // Windows type: *wchar_t
-}
-
 type wtFwpmSessionFlagsValue uint32
 
 const (
@@ -387,16 +377,6 @@ const (
 	cRPC_C_AUTHN_WINNT   wtRpcCAuthN = 10
 	cRPC_C_AUTHN_DEFAULT wtRpcCAuthN = 0xFFFFFFFF
 )
-
-// FWPM_PROVIDER0 defined in fwpmtypes.h
-// (https://docs.microsoft.com/sv-se/windows/desktop/api/fwpmtypes/ns-fwpmtypes-fwpm_provider0).
-type wtFwpmProvider0 struct {
-	providerKey  windows.GUID
-	displayData  wtFwpmDisplayData0
-	flags        uint32
-	providerData wtFwpByteBlob
-	serviceName  *uint16
-}
 
 type wtIPProto uint32
 

@@ -45,7 +45,6 @@ var (
 	procFwpmFilterAdd0            = modfwpuclnt.NewProc("FwpmFilterAdd0")
 	procFwpmFreeMemory0           = modfwpuclnt.NewProc("FwpmFreeMemory0")
 	procFwpmGetAppIdFromFileName0 = modfwpuclnt.NewProc("FwpmGetAppIdFromFileName0")
-	procFwpmProviderAdd0          = modfwpuclnt.NewProc("FwpmProviderAdd0")
 	procFwpmSubLayerAdd0          = modfwpuclnt.NewProc("FwpmSubLayerAdd0")
 	procFwpmTransactionAbort0     = modfwpuclnt.NewProc("FwpmTransactionAbort0")
 	procFwpmTransactionBegin0     = modfwpuclnt.NewProc("FwpmTransactionBegin0")
@@ -83,14 +82,6 @@ func fwpmFreeMemory0(p unsafe.Pointer) {
 
 func fwpmGetAppIdFromFileName0(fileName *uint16, appID unsafe.Pointer) (err error) {
 	r1, _, _ := syscall.Syscall(procFwpmGetAppIdFromFileName0.Addr(), 2, uintptr(unsafe.Pointer(fileName)), uintptr(appID), 0)
-	if r1 != 0 {
-		err = syscall.Errno(r1)
-	}
-	return
-}
-
-func fwpmProviderAdd0(engineHandle uintptr, provider *wtFwpmProvider0, sd uintptr) (err error) {
-	r1, _, _ := syscall.Syscall(procFwpmProviderAdd0.Addr(), 3, uintptr(engineHandle), uintptr(unsafe.Pointer(provider)), uintptr(sd))
 	if r1 != 0 {
 		err = syscall.Errno(r1)
 	}
