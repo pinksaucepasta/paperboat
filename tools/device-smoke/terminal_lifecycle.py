@@ -178,7 +178,8 @@ class Terminal:
 
 def applications(terminal, monitor=None):
     suffix = uuid.uuid4().hex
-    prompt = 'PB_APP_PROMPT_' + suffix + '> '
+    # ConPTY repaints a trailing space as ESC[1C, so a Windows client matches the prompt without it
+    prompt = 'PB_APP_PROMPT_' + suffix + ('>' if winhost.device() else '> ')
     terminal.send("PS1=$(printf 'PB_APP_PROMPT_%s> ' '" + suffix + "')\r")
     terminal.expect(prompt)
     editor = "vim -Nu NONE -n -i NONE -c " + shlex.quote("call setline(1, 'PB_VIM_'.'" + suffix + "')")
