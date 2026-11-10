@@ -208,3 +208,19 @@ func TestUnreachableIsOnlyNoAnswerOrA503(t *testing.T) {
 		}
 	}
 }
+
+// A server 426 update_required names the floor (the CLI's policy cache can be an hour stale): the floor check wants
+// 'Update required: Paperboat <floor> or newer', 'no longer supported' and `pb update`.
+func TestUpdateRequiredNamesTheFloorFromTheServersDetails(t *testing.T) {
+	message := apiErrorMessageFor("update_required", http.StatusUpgradeRequired, map[string]any{"minimum_version": "2026.11.20.0", "reason": "ignored"})
+	for _, want := range []string{"Update required: Paperboat 2026.11.20.0 or newer", "no longer supported", "`pb update`"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("the message lacks %q: %q", want, message)
+		}
+	}
+	for _, bad := range []any{nil, "", "dev-abc", "2026.11.20.0\nrun this", "2026.11.20", 7} {
+		if got := apiErrorMessageFor("update_required", http.StatusUpgradeRequired, map[string]any{"minimum_version": bad}); got != publicAPIMessages["update_required"] {
+			t.Fatalf("a floor %v that is not a version leaked into the message: %q", bad, got)
+		}
+	}
+}

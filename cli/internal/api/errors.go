@@ -5,6 +5,7 @@ import (
 	hostconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -64,6 +65,8 @@ func apiErrorMessage(code string, status int) string {
 
 // apiErrorMessageFor is apiErrorMessage plus the one server-provided detail a recovery message
 // may carry: the plan limit and the console Billing page for the plan-limit refusals.
+var updateFloorVersion = regexp.MustCompile(`^[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}\.[0-9]{1,6}$`)
+
 func apiErrorMessageFor(code string, status int, details map[string]any) string {
 	billing := billingURL(details)
 	switch code {
@@ -73,6 +76,12 @@ func apiErrorMessageFor(code string, status int, details map[string]any) string 
 		}
 	case "machine_limit_reached", "preview_limit_reached", "browser_terminal_limit_reached", "public_tcp_limit_reached":
 		return planLimitMessage(code, details, billing)
+	case "update_required":
+		// The server's own refusal names the floor like the CLI's cached-policy check does (cmd/pb/update_policy.go):
+		// the cached policy can be an hour stale, and until then the server's 426 is the only thing the user sees.
+		if minimum, _ := details["minimum_version"].(string); updateFloorVersion.MatchString(minimum) {
+			return "Update required: Paperboat " + minimum + " or newer. " + apiErrorMessage(code, status)
+		}
 	case "account_deletion_console_only":
 		if console := consoleURL(details); console != "" {
 			return "Deleting an account is done in the Paperboat console: " + console
