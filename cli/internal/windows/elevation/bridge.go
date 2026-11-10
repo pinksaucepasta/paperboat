@@ -50,7 +50,16 @@ const (
 	// from stopping the services to all of the new ones running (each fresh
 	// 99 MB executable is scanned on first start), then up to 60 s of readiness
 	// checks; 90 s expired in the final health check and rolled a good update back.
-	RuntimeActivationDuration = 3 * time.Minute
+	//
+	// A first pair on a fresh machine then waits for the host service and the per-user daemon to settle (a
+	// first scan of the new executable, the first server refresh, certificate and guard reconcile): victus and
+	// every fresh hosted runner ran past the former 25 s + 30 s windows after ~100 s and needed a second attempt.
+	// The two readiness windows below, the work before them (~50 s measured) and a margin must fit this budget.
+	RuntimeActivationDuration = 4 * time.Minute
+	// ReadinessHostdWindow is how long the host service gets to hold /healthz for the 5 s stability proof.
+	ReadinessHostdWindow = 60 * time.Second
+	// ReadinessDaemonBudget is how long the per-user daemon gets to report the installed version and state ready.
+	ReadinessDaemonBudget = 90 * time.Second
 	// Install may first wait for an already-approved signed update's bounded
 	// recovery, then has the usual local activation budget. Other operations
 	// retain their shorter deadlines.
@@ -140,7 +149,7 @@ func RuntimeInstallFailureMessage(code string) string {
 	case "install_commit":
 		return "Windows installation failed while committing runtime state."
 	case "install_readiness":
-		return "Windows installation failed while waiting for runtime readiness."
+		return "Paperboat installed its background service but it is still starting (a first start on a new machine can take a few minutes)."
 	}
 	return ""
 }

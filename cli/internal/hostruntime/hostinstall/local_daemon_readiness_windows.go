@@ -10,6 +10,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"golang.org/x/sys/windows"
@@ -143,7 +144,7 @@ func readWindowsLocalDaemonSnapshot(ctx context.Context, ownerSID, stateRoot str
 }
 
 func waitWindowsLocalDaemonVersion(ctx context.Context, request Request) error {
-	bounded, cancel := context.WithTimeout(ctx, 30*time.Second)
+	bounded, cancel := context.WithTimeout(ctx, elevation.ReadinessDaemonBudget)
 	defer cancel()
 	tick := time.NewTicker(200 * time.Millisecond)
 	defer tick.Stop()

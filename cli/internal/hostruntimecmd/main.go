@@ -181,6 +181,14 @@ func runtimeFailureMessage(err error) string {
 			return message + " Run pb doctor, then retry."
 		}
 	}
+	// A step that failed in this (unelevated) process, such as the readiness wait of a first pair, names itself too:
+	// without this the user saw only the generic string below (winpool-7, victus: first pair after ~100 s).
+	var named interface{ ElevationFailureCode() string }
+	if errors.As(err, &named) {
+		if message := elevation.RuntimeInstallFailureMessage(named.ElevationFailureCode()); message != "" {
+			return message + " Run pb doctor, then run the same command again."
+		}
+	}
 	switch {
 	case errors.Is(err, bootstrap.ErrEnrollmentTokenExpired):
 		return "The enrollment token expired. Create a new enrollment with Add machine and retry."

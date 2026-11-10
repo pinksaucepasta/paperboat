@@ -35,6 +35,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseindex"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
@@ -1541,7 +1542,7 @@ func EnsureCommittedWindowsHostdReady(ctx context.Context, request Request) erro
 		return err
 	}
 	controller := service.WindowsController{}
-	readyCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	readyCtx, cancel := context.WithTimeout(ctx, elevation.ReadinessHostdWindow)
 	defer cancel()
 	var healthySince time.Time
 	restarted := false
