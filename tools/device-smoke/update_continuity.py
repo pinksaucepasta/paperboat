@@ -108,6 +108,8 @@ def main():
         if not windows:
             terminal.expect(b'\x1b[?2004h')
             terminal.expect(terminal.marker('READY', 'stty -echo; '))
+        else:  # no READY marker under cmd.exe: typed bytes sent before pb connect attaches are swallowed
+            terminal.settle(3.0)
         held_pid = shell_identity('SHELL')
         if not held_pid.isdigit():
             raise RuntimeError('could not read the held shell identity')
