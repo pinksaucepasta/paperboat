@@ -11,8 +11,6 @@ the preview URL and the tunnel URL are unchanged and serve their marker again (a
 """
 import argparse
 import contextlib
-import functools
-import http.server
 import json
 import os
 from pathlib import Path
@@ -20,7 +18,6 @@ import re
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import urllib.error
 import urllib.request
@@ -28,7 +25,7 @@ import uuid
 
 from install_lifecycle import registration
 from pairing_lifecycle import command_result, invoke
-from preview_lifecycle import QuietHandler
+from preview_lifecycle import stoppable_origin
 from preview_receipt import PREVIEW_COMMAND_TIMEOUT, receipt_value
 from session_cleanup import cleanup
 from terminal_lifecycle import Terminal, wait_windows_shell
@@ -109,13 +106,11 @@ def main():
     with tempfile.TemporaryDirectory(prefix='paperboat-update-survive-') as directory, \
             winhost.workdir('paperboat-update-survive-') as files, contextlib.ExitStack() as stack:
         (Path(directory) / 'index.html').write_text('<p>' + marker + '</p>')
-        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(QuietHandler, directory=directory))
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        port = server.server_port
+        # On the Windows device the origin runs there: an ssh -R forward from this controller would depend on the device's
+        # OpenSSH transport, which the update churns (the line-166 failure on winpool-11), and is not what is being judged.
+        port, stop_origin = stoppable_origin(directory, '<p>' + marker + '</p>')
         sender = None
         try:
-            if winhost.device() and not args.transfer_only:  # the origin stays here; pb on the device dials the forward
-                port = stack.enter_context(winhost.device().forward(port))
             if not args.transfer_only:
                 lease = invoke(PB, 'preview', str(port), '--background', '--ttl', '40m', '--json', timeout=PREVIEW_COMMAND_TIMEOUT)
                 preview_id, preview_url = lease['id'], receipt_value(lease, 'endpoint')
@@ -224,8 +219,7 @@ def main():
                 if sender.poll() is None:
                     sender.kill()
                 sender.close()
-            server.shutdown()
-            server.server_close()
+            stop_origin()
     assert registration() == before, 'enrollment changed'
     result['status'] = 'PASS'
     print(json.dumps(result), flush=True)
