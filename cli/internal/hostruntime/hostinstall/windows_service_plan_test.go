@@ -3,6 +3,7 @@ package hostinstall
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -431,29 +432,48 @@ func TestWindowsServiceCleanupRetainsFirstFailureWithoutRepeatingMutation(t *tes
 }
 
 // winpool-3: a machine where OpenSSH is only reachable through the PowerShell Gallery spent the whole 3 min of the
-// bridge in that step and the pair rolled back. The step has its own budget and its expiry skips managed SSH.
-func TestWindowsSSHPreparationOutOfTimeSkipsManagedSSHButTheCallersExpiryAborts(t *testing.T) {
-	previous := windowsSSHPreparationBudget
-	t.Cleanup(func() { windowsSSHPreparationBudget = previous })
+// bridge in that step and the pair rolled back. The step has its own budget; its expiry is announced and skips managed
+// SSH, but a trust failure never is, whether it comes before or after the budget.
+func TestWindowsSSHPreparationOutOfTimeIsAnnouncedAndTrustFailuresStillAbort(t *testing.T) {
+	previous, previousNotice := windowsSSHPreparationBudget, windowsSSHTimeoutNotice
+	t.Cleanup(func() { windowsSSHPreparationBudget, windowsSSHTimeoutNotice = previous, previousNotice })
 	windowsSSHPreparationBudget = 30 * time.Millisecond
+	var announced []error
+	windowsSSHTimeoutNotice = func(err error) { announced = append(announced, err) }
 
 	started := time.Now()
 	err := prepareWindowsSSHWithin(context.Background(), func(ctx context.Context) error {
 		<-ctx.Done()
 		return ctx.Err()
 	})
-	if err != nil || time.Since(started) > 5*time.Second {
-		t.Fatalf("a step out of its budget: err=%v after %v", err, time.Since(started))
+	if err != nil || len(announced) != 1 || !errors.Is(announced[0], context.DeadlineExceeded) || time.Since(started) > 5*time.Second {
+		t.Fatalf("a step out of its budget: err=%v announced=%v after %v", err, announced, time.Since(started))
+	}
+
+	// the package manager was killed at the budget: its failure is unobtainable, not a trust failure
+	killed := fmt.Errorf("%w: signal: killed", windowsopenssh.ErrInstallFailed)
+	if err := prepareWindowsSSHWithin(context.Background(), func(ctx context.Context) error {
+		<-ctx.Done()
+		return killed
+	}); err != nil || len(announced) != 2 {
+		t.Fatalf("a killed package manager: err=%v announced=%d", err, len(announced))
+	}
+
+	refusal := windowsopenssh.ErrUntrustedBinary
+	if err := prepareWindowsSSHWithin(context.Background(), func(context.Context) error { return refusal }); !errors.Is(err, refusal) {
+		t.Fatalf("a trust failure was skipped: %v", err)
+	}
+	// the race the review found: the refusal arrives after the budget expired
+	if err := prepareWindowsSSHWithin(context.Background(), func(ctx context.Context) error {
+		<-ctx.Done()
+		return refusal
+	}); !errors.Is(err, refusal) || len(announced) != 2 {
+		t.Fatalf("a trust failure after the budget was skipped: err=%v announced=%d", err, len(announced))
 	}
 
 	parent, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := prepareWindowsSSHWithin(parent, func(ctx context.Context) error { return ctx.Err() }); err == nil {
 		t.Fatal("the caller's own cancellation was skipped")
-	}
-
-	refusal := windowsopenssh.ErrUntrustedBinary
-	if err := prepareWindowsSSHWithin(context.Background(), func(context.Context) error { return refusal }); !errors.Is(err, refusal) {
-		t.Fatalf("a trust failure was skipped: %v", err)
 	}
 }

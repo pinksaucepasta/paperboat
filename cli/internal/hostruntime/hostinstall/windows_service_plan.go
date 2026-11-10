@@ -3,6 +3,7 @@ package hostinstall
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -28,14 +29,22 @@ func skipUnobtainableWindowsSSH(ctx context.Context, err error) error {
 // bridge allows the whole operation (winpool-3, 2026-11-10: three minutes of silence, then a rollback).
 var windowsSSHPreparationBudget = 75 * time.Second
 
-// prepareWindowsSSHWithin runs one OpenSSH preparation step under its own budget. Its expiry is the machine not
-// being able to supply OpenSSH in time, so the install continues without managed SSH like any other unobtainable
-// case; an expiry of the caller's own context still aborts.
+// windowsSSHTimeoutNotice tells the user, once per expiry, that managed SSH was skipped and how to get it later.
+var windowsSSHTimeoutNotice = func(err error) {
+	fmt.Fprintf(os.Stderr, "Managed SSH was not prepared within %s (%v); installation continues without it. Run `pb doctor --repair` to prepare it.\n", windowsSSHPreparationBudget, err)
+}
+
+// prepareWindowsSSHWithin runs one OpenSSH preparation step under its own budget. When the budget expires the machine
+// could not supply OpenSSH in time: that is announced (windowsSSHTimeoutNotice) and the install continues without managed
+// SSH like any other unobtainable case. Only the expiry itself or an unobtainable package is skipped: a trust or ownership
+// refusal that arrives after the budget still aborts, as does an expiry of the caller's own context.
 func prepareWindowsSSHWithin(ctx context.Context, step func(context.Context) error) error {
 	bounded, cancel := context.WithTimeout(ctx, windowsSSHPreparationBudget)
 	defer cancel()
 	err := step(bounded)
-	if err != nil && ctx.Err() == nil && bounded.Err() != nil {
+	if err != nil && ctx.Err() == nil && bounded.Err() != nil &&
+		(errors.Is(err, context.DeadlineExceeded) || windowsopenssh.Unobtainable(err)) {
+		windowsSSHTimeoutNotice(err)
 		return nil
 	}
 	return skipUnobtainableWindowsSSH(ctx, err)

@@ -69,7 +69,17 @@ func (CommandRunner) Run(ctx context.Context, name string, arguments ...string) 
 	command.Stdin = bytes.NewReader(nil)
 	command.Stdout = &stdout
 	command.Stderr = &stderr
-	err := command.Run()
+	if err := command.Start(); err != nil {
+		return nil, err
+	}
+	release, err := containProcessTree(command)
+	if err != nil {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		return nil, err
+	}
+	defer release()
+	err = command.Wait()
 	output := append([]byte(nil), stdout.Bytes()...)
 	output = append(output, stderr.Bytes()...)
 	return output, err
