@@ -20,6 +20,7 @@ import hashlib
 import os
 from pathlib import Path
 import re
+import select
 import shlex
 import signal
 import subprocess
@@ -746,7 +747,9 @@ def fast_output(a, sessions):
         host_side = bool(DEVICE) and not win()  # a Windows client's ssh -tt + ConPTY hop buffers seconds of flood: see host_yes
         yes_before = host_yes(a.target) if host_side else 0
         c1.send((windows_target.flood_line() if win() else 'yes') + '\r')
-        time.sleep(3)
+        for _ in range(30):  # read the screen so `pending` shows the flood arriving (sleeping alone reads nothing)
+            if select.select([c1.fd], [], [], 0.1)[0]:
+                c1.drain()
         flooding = host_yes(a.target) > yes_before if host_side else len(c1.pending) > 0
         row('N6 the flood is running before Ctrl-C', flooding, 'yes on the target' if host_side else 'output arriving')
         watcher = YesWatcher(a.target, yes_before) if host_side else None
