@@ -124,8 +124,13 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 	results := make(chan copyResult, 2)
 	// sshdDone is set once sshd's output is drained and the bridge closes both sides itself.
 	var sshdDone atomic.Bool
+	// clientEOF / sshdEOF close when that direction's copy ended with a plain EOF: the peer finished sending.
+	clientEOF, sshdEOF := make(chan struct{}), make(chan struct{})
 	go func() {
 		count, copyErr := io.Copy(sshd, stream)
+		if copyErr == nil {
+			close(clientEOF)
+		}
 		if sshdDone.Load() {
 			copyErr = nil // the read failed because the bridge closed the stream after sshd's end
 		}
@@ -136,6 +141,7 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 				copyErr = errors.Join(copyErr, closeErr)
 			}
 		}
+		copyErr = excuseReset(ctx, copyErr, sshdEOF)
 		if copyErr != nil {
 			_ = finish()
 		}
@@ -143,6 +149,9 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 	}()
 	go func() {
 		count, copyErr := io.Copy(stream, sshd)
+		if copyErr == nil {
+			close(sshdEOF)
+		}
 		copyErr = normalizeBridgeError(copyErr)
 		if half, ok := stream.(interface{ CloseWrite() error }); ok {
 			// After sshd's clean end the client may already have torn its side down; that is its normal exit.
@@ -150,6 +159,7 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 				copyErr = errors.Join(copyErr, closeErr)
 			}
 		}
+		copyErr = excuseReset(ctx, copyErr, clientEOF)
 		// Target EOF is terminal for an SSH connection. Some OpenSSH clients
 		// keep ProxyCommand input open until the proxy exits, so waiting for the
 		// opposite copier here deadlocks after a remote command has completed.
@@ -182,9 +192,30 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 	return result, managedSSHBoundary("command", errors.Join(resultErr, cleanupErr))
 }
 
+// resetGrace bounds how long a connection reset waits for the other direction to show a plain EOF.
+var resetGrace = 2 * time.Second
+
 func normalizeBridgeError(err error) error {
-	if err == nil || managedSSHLeavesMatch(err, append([]error{io.EOF, io.ErrClosedPipe, net.ErrClosed}, closeResets...)...) {
+	if err == nil || managedSSHLeavesMatch(err, io.EOF, io.ErrClosedPipe, net.ErrClosed) {
 		return nil
+	}
+	return err
+}
+
+// excuseReset turns a connection reset (Windows OpenSSH RST-closes after a normal end, see closeResets) into a clean
+// end only when the other direction already ended with EOF, i.e. the peer had finished sending: a reset in the middle
+// of a transfer, with the other side still waiting for data, stays a failure and is audited as one.
+func excuseReset(ctx context.Context, err error, otherEOF <-chan struct{}) error {
+	if err == nil || len(closeResets) == 0 || !managedSSHLeavesMatch(err, closeResets...) {
+		return err
+	}
+	timer := time.NewTimer(resetGrace)
+	defer timer.Stop()
+	select {
+	case <-otherEOF:
+		return nil
+	case <-timer.C:
+	case <-ctx.Done():
 	}
 	return err
 }
