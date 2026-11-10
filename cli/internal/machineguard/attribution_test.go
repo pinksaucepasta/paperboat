@@ -2,8 +2,11 @@ package machineguard
 
 import (
 	"errors"
+	"io"
+	"net"
 	"net/netip"
 	"testing"
+	"time"
 )
 
 // A client that sent its request and half-closed before the proxy looked is no longer ESTABLISHED but still names
@@ -26,5 +29,28 @@ func TestLiveAttributionAcceptsAHalfClosedClientOnly(t *testing.T) {
 		if _, err := attribute(tuple, timeWait); !errors.Is(err, errAttributionNotFound) {
 			t.Fatalf("%s: a TIME_WAIT socket (uid 0) must be refused: %v", name, err)
 		}
+	}
+}
+
+func acceptWithin(listener net.Listener, wait time.Duration) (net.Conn, error) {
+	type result struct {
+		conn net.Conn
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		conn, err := listener.Accept()
+		done <- result{conn, err}
+	}()
+	select {
+	case r := <-done:
+		return r.conn, r.err
+	case <-time.After(wait):
+		go func() {
+			if r := <-done; r.conn != nil {
+				r.conn.Close()
+			}
+		}()
+		return nil, io.ErrNoProgress
 	}
 }

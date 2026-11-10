@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/Microsoft/go-winio"
+
+	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 )
 
 type Client struct {
@@ -96,7 +98,9 @@ func (c *Client) exchange(ctx context.Context, in request) (response, error) {
 	return out, nil
 }
 func (c *Client) Acquire(ctx context.Context, hostname string, ip netip.Addr, port int) (net.Listener, error) {
-	listener, _, err := c.acquire(ctx, request{Operation: "acquire", Hostname: hostname, IP: ip.String(), Port: port})
+	// The gateway is one listener for every OS user; the guard hands this user's connections to this listener.
+	in := request{Operation: "acquire", Hostname: hostname, IP: ip.String(), Port: port, Handoff: hostname == splitdns.BrowserGatewayHostname}
+	listener, _, err := c.acquire(ctx, in)
 	return listener, err
 }
 

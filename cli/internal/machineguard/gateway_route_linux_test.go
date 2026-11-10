@@ -119,29 +119,6 @@ func TestGatewayRoutesEachConnectionToItsUsersDaemon(t *testing.T) {
 	}
 }
 
-func acceptWithin(listener net.Listener, wait time.Duration) (net.Conn, error) {
-	type result struct {
-		conn net.Conn
-		err  error
-	}
-	done := make(chan result, 1)
-	go func() {
-		conn, err := listener.Accept()
-		done <- result{conn, err}
-	}()
-	select {
-	case r := <-done:
-		return r.conn, r.err
-	case <-time.After(wait):
-		go func() {
-			if r := <-done; r.conn != nil {
-				r.conn.Close()
-			}
-		}()
-		return nil, io.ErrNoProgress
-	}
-}
-
 // F23-01 on a device: as root with PB_TWO_USER_UIDS=<a>,<b> (the pbvm2 two-user container), each OS user's own
 // process connects to one shared gateway listener on 127.100.0.1 and the kernel-attributed handoff must reach
 // only that user's daemon end, 20 rounds each.

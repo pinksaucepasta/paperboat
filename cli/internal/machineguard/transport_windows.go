@@ -407,10 +407,16 @@ func shutdownListener(l net.Listener) error {
 	b := brokerRegistry.byListener[l]
 	delete(brokerRegistry.byListener, l)
 	brokerRegistry.Unlock()
+	var err error
 	if b != nil {
-		return b.close()
+		err = b.close()
+	} else {
+		err = l.Close()
 	}
-	return l.Close()
+	if route, ok := l.(*gatewayRoute); ok {
+		route.gateway.closeIfUnused()
+	}
+	return err
 }
 
 type windowsProxyListener struct {
