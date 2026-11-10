@@ -20,14 +20,9 @@ var identifierPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`
 type Code string
 
 const (
-	CodeInvalidInput    Code = "invalid_input"
-	CodeMalformedFrame  Code = "malformed_frame"
-	CodeFrameTooLarge   Code = "frame_too_large"
-	CodeSessionConflict Code = "session_conflict"
-	CodeLeaseExpired    Code = "lease_expired"
-	CodeStaleGeneration Code = "stale_generation"
-	CodeNotReady        Code = "not_ready"
-	CodeCanceled        Code = "canceled"
+	CodeInvalidInput   Code = "invalid_input"
+	CodeMalformedFrame Code = "malformed_frame"
+	CodeFrameTooLarge  Code = "frame_too_large"
 )
 
 // DisconnectReason is deliberately finite. User-visible diagnostics can map
@@ -68,14 +63,9 @@ func (e *Error) Is(target error) bool {
 func (e *Error) Temporary() bool { return e != nil && e.Retryable }
 
 var (
-	ErrInvalidInput    = &Error{Code: CodeInvalidInput}
-	ErrMalformedFrame  = &Error{Code: CodeMalformedFrame}
-	ErrFrameTooLarge   = &Error{Code: CodeFrameTooLarge}
-	ErrSessionConflict = &Error{Code: CodeSessionConflict}
-	ErrLeaseExpired    = &Error{Code: CodeLeaseExpired}
-	ErrStaleGeneration = &Error{Code: CodeStaleGeneration}
-	ErrNotReady        = &Error{Code: CodeNotReady}
-	ErrCanceled        = &Error{Code: CodeCanceled}
+	ErrInvalidInput   = &Error{Code: CodeInvalidInput}
+	ErrMalformedFrame = &Error{Code: CodeMalformedFrame}
+	ErrFrameTooLarge  = &Error{Code: CodeFrameTooLarge}
 )
 
 func codeError(base *Error, reason DisconnectReason, retryable bool, cause error) error {
