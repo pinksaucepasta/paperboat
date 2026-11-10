@@ -1837,3 +1837,221 @@ class RemainingFamilyPlumbing(unittest.TestCase):
         self.assertIn('env-value', found.values())
         self.assertEqual(2, len(found))
 
+
+
+# Stands in for `ssh [options] HOST <command>`: the command's `powershell` is PB_TEST_PWSH on this machine.
+FAKE_SSH = r"""
+import os, shlex, sys
+words = shlex.split(sys.argv[-1])
+assert words[0] == 'powershell' and sys.argv[-2] == 'device', sys.argv
+os.execv(sys.argv[1], [sys.argv[1]] + words[1:])
+"""
+
+
+@unittest.skipUnless(PWSH, 'set PB_TEST_PWSH to a pwsh binary to run the ENV hook shells for real')
+class EnvHookInPowerShell(unittest.TestCase):
+    """env_ssh_hook's Windows shells against a real PowerShell whose profile stands in for the installed hook."""
+
+    def setUp(self):
+        import tempfile
+        self.home = tempfile.TemporaryDirectory()
+        self.addCleanup(self.home.cleanup)
+        ssh = pathlib.Path(self.home.name) / 'ssh.py'
+        ssh.write_text(FAKE_SSH)
+        self.profile = pathlib.Path(self.home.name) / 'powershell' / 'profile.ps1'  # pwsh on Linux: $XDG_CONFIG_HOME/powershell
+        self.profile.parent.mkdir()
+        self.profile.write_text("$env:PB_ENV_HOOK_PROBE='from-profile'\nfunction pb { if ($args.Count -eq 2 -and "
+                                "$args[1] -eq 'load') { $env:PB_ENV_HOOK_PROBE='from-load' } }\n")
+        patcher = patch.dict(os.environ, {'XDG_CONFIG_HOME': self.home.name})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop('PB_ENV_HOOK_PROBE', None)
+        self.device = SimpleNamespace(ssh_prefix=lambda *options: [sys.executable, str(ssh), PWSH, *options],
+                                      ssh_environment=lambda: None, password='')
+
+    def sha(self, value):
+        import hashlib
+        return hashlib.sha256(value.encode()).hexdigest()
+
+    def test_a_plain_ssh_command_and_an_interactive_shell_load_the_profile_and_show_only_the_hash(self):
+        import env_ssh_hook
+        self.assertNotIn('PROBE ', env_ssh_hook.PS_SHOW)  # a console echoes the typed line
+        done = env_ssh_hook.windows_shell(self.device, 'device', env_ssh_hook.PS_SHOW)
+        self.assertEqual((0, self.sha('from-profile')), (done.returncode, env_ssh_hook.probe_hash(done.stdout)))
+        self.assertNotIn('from-profile', done.stdout + done.stderr)
+        shown = env_ssh_hook.windows_typed(self.device, 'device', env_ssh_hook.PS_SHOW)
+        self.assertEqual(self.sha('from-profile'), env_ssh_hook.probe_hash(shown))
+        self.assertNotIn('from-profile', shown)
+        loaded = env_ssh_hook.windows_typed(
+            self.device, 'device', 'Remove-Item Env:PB_ENV_HOOK_PROBE; pb env load *>$null; ' + env_ssh_hook.PS_SHOW)
+        self.assertEqual(self.sha('from-load'), env_ssh_hook.probe_hash(loaded))
+
+    def test_a_shell_without_the_hook_shows_the_hash_of_nothing(self):
+        import env_ssh_hook
+        self.profile.unlink()
+        done = env_ssh_hook.windows_shell(self.device, 'device', env_ssh_hook.PS_SHOW)
+        self.assertEqual(self.sha(''), env_ssh_hook.probe_hash(done.stdout))
+        self.assertIsNone(env_ssh_hook.probe_hash("typed: WriteLine('PRO'+'BE '+$h)"))
+
+    def test_emit_timing_counts_stdout_and_stderr_of_the_quiet_paths_on_the_device(self):
+        import env_ssh_hook
+        SnippetsInPowerShell.setUpClass()
+        device = SnippetsInPowerShell.device
+        fake = pathlib.Path(self.home.name) / 'pb.exe'
+        fake.write_text('#!/bin/sh\n[ "$*" = "env hook --emit powershell" ] || exit 9\n'
+                        '[ -n "$PAPERBOAT_RUNTIME_STATE_ROOT" ] && exit 0\n'
+                        '[ "$PAPERBOAT_CONFIG" = "$HOME/missing/config.json" ] && { echo notice >&2; exit 0; }\n'
+                        'sleep 0.2; echo "\\$env:A = \'v\'"\n')
+        fake.chmod(0o755)
+        with patch.dict(os.environ, {'HOME': self.home.name}):
+            out = device.ps('time the hook', env_ssh_hook.EMIT_TIMING, exe=str(fake), missing=self.home.name + '/missing')[1]
+        cached, no_runtime, no_login, quiet_ms = map(int, out.split())
+        self.assertEqual((0, len('notice\n')), (no_runtime, no_login))
+        self.assertTrue(200 <= cached < 2000 and quiet_ms < 2000, out)
+
+
+class ScriptedHookDevice:
+    """pb.exe and the two profile files of a Windows device, as far as the ENV hook checks use them."""
+
+    MARKED = b"if (Test-Path -LiteralPath 'C:\\pb.exe') { } # paperboat-env-hook\n"
+
+    def __init__(self, test, uninstall_keeps=b''):
+        self.test, self.value, self.names_on, self.calls, self.uninstall_keeps = test, None, True, [], uninstall_keeps
+        self.was_set = None
+        self.files = {r'C:\Users\u\Documents\WindowsPowerShell\profile.ps1': b'Set-Alias ll dir\r\n'}  # the other is missing
+        self.before = dict(self.files)
+        self.target, self.pb_exe, self.password, self.path_flavor = 'device', EXE, '', pathlib.PureWindowsPath
+
+    def read_bytes(self, path):
+        if str(path) not in self.files:
+            raise FileNotFoundError(path)
+        return self.files[str(path)]
+
+    def env(self, name):
+        return {'TEMP': r'C:\Temp', 'USERPROFILE': r'C:\Users\u'}[name]
+
+    def ps(self, step, script, **payload):
+        import env_ssh_hook
+        if script == env_ssh_hook.DOCUMENTS:
+            return 0, r'C:\Users\u\Documents'
+        self.test.assertEqual(env_ssh_hook.EMIT_TIMING, script)
+        self.test.assertTrue(payload['missing'].startswith('C:\\Temp\\pb-smoke-missing-'))
+        return 0, '41 0 0 120'
+
+    def sha(self):
+        import hashlib
+        return 'PROBE %s\n' % hashlib.sha256((self.value or '').encode()).hexdigest()
+
+    def pb(self, *arguments, stdin=None):
+        self.calls.append(arguments)
+        done = lambda rc=0, out='', err='': subprocess.CompletedProcess(arguments, rc, out, err)
+        if arguments[:2] == ('env', 'set'):
+            self.value = self.was_set = stdin
+        elif arguments[:2] == ('env', 'unset'):
+            if '--confirm' in arguments:
+                self.value = None
+            return done(1, json.dumps({'data': {'confirmation_token': 'c-1'}}))
+        elif arguments == ('env', 'hook', 'powershell', '--install'):
+            for name in ('WindowsPowerShell', 'PowerShell'):
+                path = r'C:\Users\u\Documents\%s\profile.ps1' % name
+                kept = self.files.get(path, b'').replace(self.MARKED, b'')
+                self.files[path] = (kept or b'\xef\xbb\xbf') + self.MARKED
+        elif arguments == ('env', 'hook', '--uninstall'):
+            self.files = {path: data.replace(b'\xef\xbb\xbf' + self.MARKED, b'').replace(self.MARKED, self.uninstall_keeps)
+                          for path, data in self.files.items()}
+        elif arguments[:3] == ('env', 'names', 'access'):
+            self.names_on = arguments[3] == 'on'
+        elif arguments[:2] == ('env', 'names'):
+            if not self.names_on:
+                return done(1, '', 'Listing ENV names is turned off for this workspace.\n')
+            if '--json' in arguments:
+                return done(0, json.dumps({'data': {'names': [{'name': 'PB_ENV_HOOK_PROBE', 'scope': 'personal'}]}}))
+            return done(0, 'PB_ENV_HOOK_PROBE\n')
+        elif arguments[:3] == ('env', 'run', '--'):
+            if arguments[3] == 'cmd':
+                return done(7)
+            self.test.assertEqual(('powershell', '-NoProfile'), arguments[3:5])  # the child cannot get it from the hook
+            return done(0, self.sha())
+        return done()
+
+    def hooked(self):
+        return any(self.MARKED in data for data in self.files.values())
+
+    def shell(self, device, host, script, timeout=120):
+        self.test.assertEqual('device', host)
+        return subprocess.CompletedProcess([], 0, self.sha() if self.hooked() else 'PROBE %s\n' % ('0' * 64), '')
+
+    def typed(self, device, host, line):
+        return 'PS C:\\> typed\r\n' + self.shell(device, host, line).stdout
+
+    def patches(self, module):
+        import env_ssh_hook
+        return [patch.object(winhost, 'device', lambda: self), patch.object(module, 'windows_pb', self.pb),
+                patch.object(env_ssh_hook, 'windows_pb', self.pb), patch.object(module, 'windows_shell', self.shell),
+                patch.object(env_ssh_hook, 'windows_typed', self.typed)]
+
+
+def run_hook_check(module, device, argv):
+    """module.main() against the scripted device: (exit code, report), or (the check's own error, {})."""
+    import contextlib
+    import io
+    out = io.StringIO()
+    with contextlib.ExitStack() as stack:
+        for item in device.patches(module):
+            stack.enter_context(item)
+        stack.enter_context(patch.object(sys, 'argv', argv))
+        stack.enter_context(contextlib.redirect_stdout(out))
+        try:
+            code = module.main()
+        except Exception as error:
+            return error, {}
+    return code, json.loads(out.getvalue())
+
+
+class EnvHookPlumbing(unittest.TestCase):
+    def test_env_ssh_hook_on_the_device_runs_every_step_and_restores_both_profiles(self):
+        import env_ssh_hook
+        import windows_checks
+        device = ScriptedHookDevice(self)
+        code, report = run_hook_check(env_ssh_hook, device, ['env_ssh_hook.py', 'device', '--password-file', r'C:\v\pw'])
+        self.assertEqual((0, True, 'PASS', [1, 1]), (code, report['ok'], report['status'], report['hook_lines']))
+        self.assertEqual('PASS', windows_checks.verdict(code, json.dumps(report)))
+        self.assertEqual({'cached_ms': 41, 'quiet_ms': 120, 'quiet_output_bytes': 0},
+                         {key: report[key] for key in ('cached_ms', 'quiet_ms', 'quiet_output_bytes')})
+        self.assertEqual(('env', 'vault', 'unlock', '--password-file', r'C:\v\pw', '--json'), device.calls[0])
+        self.assertEqual(2, device.calls.count(('env', 'hook', 'powershell', '--install')))
+        self.assertEqual(device.before, {path: data for path, data in device.files.items() if data})
+        self.assertEqual((None, True), (device.value, device.names_on))  # the probe is unset, the setting is back on
+        self.assertNotIn(device.was_set, json.dumps(report))
+
+    def test_env_ssh_hook_fails_when_uninstall_leaves_a_byte_behind_and_cleans_up_after_an_error(self):
+        import env_ssh_hook
+        import windows_checks
+        device = ScriptedHookDevice(self, uninstall_keeps=b'\n')
+        code, report = run_hook_check(env_ssh_hook, device, ['env_ssh_hook.py', 'device'])
+        self.assertEqual((1, False, 'FAIL', False), (code, report['ok'], report['status'], report['uninstall_restores_rc']))
+        self.assertEqual('FAIL', windows_checks.verdict(code, json.dumps(report)))
+        broken = ScriptedHookDevice(self)
+        broken.typed = lambda device, host, line: (_ for _ in ()).throw(RuntimeError('terminal closed'))
+        error, _ = run_hook_check(env_ssh_hook, broken, ['env_ssh_hook.py', 'device'])
+        self.assertEqual('terminal closed', str(error))
+        self.assertEqual((None, False), (broken.value, broken.hooked()))  # unset and uninstalled all the same
+
+    def test_env_ssh_hook_arguments_and_the_unix_path(self):
+        import env_ssh_hook
+        import windows_checks
+        with patch.object(winhost, 'device', lambda: ScriptedHookDevice(self)), \
+                patch.object(sys, 'argv', ['env_ssh_hook.py', 'another-host']), \
+                patch.object(sys, 'stderr', __import__('io').StringIO()), self.assertRaises(SystemExit):
+            env_ssh_hook.arguments()
+        seen = []
+        with patch.object(winhost, 'device', lambda: None), patch.object(sys, 'argv', ['env_ssh_hook.py', 'selfssh']), \
+                patch.object(env_ssh_hook, 'ssh', lambda host, command, **options: seen.append((host, command)) or
+                             subprocess.CompletedProcess([], 1, '', '')), self.assertRaisesRegex(RuntimeError, 'detect the host OS'):
+            env_ssh_hook.main()
+        self.assertEqual([('selfssh', 'uname -s')], seen)  # a Unix host is driven as before
+        args = WindowsChecksRunner().args
+        with patch.dict(os.environ, {'SMOKE_WINDOWS_SSH': 'me@winbox'}):
+            table = windows_checks.checks(args(vault_password_file=r'C:\v\pw'))
+        self.assertEqual(['env_ssh_hook.py', 'me@winbox', '--password-file', r'C:\v\pw'], table['env-ssh-hook'][0])
+        self.assertEqual(['--vault_password_file'], windows_checks.missing(table['env-ssh-hook'][1], args()))
