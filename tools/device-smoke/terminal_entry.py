@@ -2,15 +2,15 @@
 """Exercise the normal root and session menus without acting on other sessions."""
 import argparse
 import json
-from pathlib import Path
 import sys
 
 from pairing_lifecycle import command_diagnostic
 from terminal_lifecycle import Terminal, qualify
+import winhost
 
 
 def menu(binary, session_menu):
-    terminal = Terminal([binary, 'session'] if session_menu else [binary])
+    terminal = Terminal(winhost.terminal_argv(binary, ['session'] if session_menu else []), env=winhost.terminal_env(binary))
     try:
         if session_menu:
             terminal.expect('Machine sessions')
@@ -36,7 +36,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
     args = parser.parse_args()
-    binary = Path.home() / '.local/bin/pb'
+    binary = winhost.pb_path()  # this machine's pb, or pb.exe on the Windows device (a Unix target: htop, stty)
     menu(binary, False)
     menu(binary, True)
     qualify(binary, args.target, 'main', 'htop', entry='root')
