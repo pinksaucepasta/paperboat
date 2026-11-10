@@ -89,6 +89,19 @@ def failures_since(moment):
     return count
 
 
+def cut(seconds):
+    """Drop this client's outbound traffic for at most `seconds` (a root failsafe or a timer on the device lifts it
+    whatever happens to this process); returns (block, failsafe) for release() and failsafe.terminate()."""
+    if DEVICE:
+        return DEVICE.cut_network(seconds), None
+    if DARWIN:
+        return pf_block(PF_RULE, seconds), None
+    failsafe = subprocess.Popen(['sudo', '-n', 'sh', '-c', 'sleep %d; iptables -D %s' % (seconds, ' '.join(RULE))],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    sudo('iptables', '-I', *RULE)
+    return None, failsafe
+
+
 def release(block):
     if DEVICE:
         block.release()
@@ -124,17 +137,8 @@ def main():
         for number in (1, 2, 3):
             type_line(number)
             terminal.expect('PB_ACK_%d' % number)
-        # Root failsafe removes the rule even if this process dies.
-        if not DARWIN and not DEVICE:
-            failsafe = subprocess.Popen(['sudo', '-n', 'sh', '-c', 'sleep %d; iptables -D %s' % (args.drop_seconds + 60, ' '.join(RULE))],
-                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         started = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
-        if DEVICE:
-            block = DEVICE.cut_network(args.drop_seconds + 60)
-        elif DARWIN:
-            block = pf_block(PF_RULE, args.drop_seconds + 60)
-        else:
-            sudo('iptables', '-I', *RULE)
+        block, failsafe = cut(args.drop_seconds + 60)
         blocked = True
         time.sleep(4)
         for number in (4, 5, 6):  # typed while the network is down

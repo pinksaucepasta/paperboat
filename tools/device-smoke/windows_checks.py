@@ -125,6 +125,7 @@ def checks(args):
     table['tunnel-protocols'] = (['preview_protocols.py', 'victus', '--tunnel'], [])
     table['terminal-entry'] = (['terminal_entry.py', args.peer], ['--peer'])  # C038, C046
     table['network-drop'] = (['network_drop.py', args.peer], ['--peer'])
+    table['net-blip'] = (['net_blip.py', args.peer], ['--peer'])  # F21-48: a 5 min block of pb.exe's traffic, about 7 min
     table['transfer-modes'] = (['transfer_modes_windows.py', args.peer], ['--peer', 'TARGET_CMD'])  # F22-01; TARGET_CMD: see its docstring
     table['usage-categories'] = (['usage_categories.py', args.peer], ['--peer', 'PB_SMOKE_API_CMD'])  # F13-02; see its docstring
     table['path-display'] = (['path_display.py', args.peer], ['--peer'])
