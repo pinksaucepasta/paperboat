@@ -21,6 +21,7 @@ const (
 // LoopbackOpenSSHExecutor runs Windows OpenSSH against a one-shot owner-bound
 // loopback TCP proxy. This avoids the native ProxyCommand pipe shutdown cycle,
 // while retaining OpenSSH's inherited console and exact exit status.
+// user-console: terminal-only like OpenSSHExecutor; the interactive ssh needs the inherited console.
 type LoopbackOpenSSHExecutor struct{}
 
 func (LoopbackOpenSSHExecutor) Execute(ctx context.Context, executable string, arguments func(port uint16) []string, environment []string, stream LoopbackSSHStream) error {

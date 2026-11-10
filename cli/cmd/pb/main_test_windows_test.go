@@ -366,7 +366,7 @@ func TestWindowsUninstallHelperDirectoryRemovalIsTheUsersNotARestartDelete(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"Paperboat Uninstall 0123456789abcdef0123456789abcdef": filepath.Join(system, "cmd.exe") + ` /d /c rd /s /q "` + directory + `"`}
+	want := map[string]string{"Paperboat Uninstall 0123456789abcdef0123456789abcdef": filepath.Join(system, "conhost.exe") + ` --headless ` + filepath.Join(system, "cmd.exe") + ` /d /c rd /s /q "` + directory + `"`}
 	if values := scheduled(); !reflect.DeepEqual(values, want) {
 		t.Fatalf("scheduled at the next sign-in:\n got %v\nwant %v", values, want)
 	}

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"unsafe"
@@ -78,7 +77,7 @@ func removeGuardScheduledTask(ctx context.Context, installed string) error {
 	if !owned {
 		return nil
 	}
-	if output, err := exec.CommandContext(ctx, "schtasks.exe", "/Delete", "/TN", windowsGuardTask, "/F").CombinedOutput(); err != nil {
+	if output, err := schtasksCommand(ctx, "/Delete", "/TN", windowsGuardTask, "/F").CombinedOutput(); err != nil {
 		return fmt.Errorf("remove machine guard task: %w: %s", err, output)
 	}
 	return nil

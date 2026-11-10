@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 	"unsafe"
@@ -56,7 +55,7 @@ func Uninstall(ctx context.Context) (result UninstallResult, err error) {
 		// Disabling first prevents a reboot/restart trigger from restoring access
 		// between stop and durable empty WFP projection.
 		for _, args := range [][]string{{"/Change", "/TN", windowsGuardTask, "/DISABLE"}, {"/End", "/TN", windowsGuardTask}} {
-			output, e := exec.CommandContext(ctx, "schtasks.exe", args...).CombinedOutput()
+			output, e := schtasksCommand(ctx, args...).CombinedOutput()
 			if e != nil {
 				return result, fmt.Errorf("stop owned machine guard task: %w: %s", e, output)
 			}
@@ -97,7 +96,7 @@ func Uninstall(ctx context.Context) (result UninstallResult, err error) {
 	}
 	result.Removed = append(result.Removed, "owned private HTTPS LocalMachine trust and CA state")
 	if owned {
-		if output, e := exec.CommandContext(ctx, "schtasks.exe", "/Delete", "/TN", windowsGuardTask, "/F").CombinedOutput(); e != nil {
+		if output, e := schtasksCommand(ctx, "/Delete", "/TN", windowsGuardTask, "/F").CombinedOutput(); e != nil {
 			return result, fmt.Errorf("remove owned machine guard task: %w: %s", e, output)
 		}
 	}

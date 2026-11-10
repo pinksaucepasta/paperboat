@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"unsafe"
 
+	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
 	"golang.org/x/sys/windows"
 )
 
@@ -16,7 +17,7 @@ import (
 // holding the output pipes open. That makes exec.Cmd.Wait appear to ignore a
 // context deadline. The job bounds the complete native process tree.
 func runOpenSSHProbeCommand(ctx context.Context, command *exec.Cmd) error {
-	command.SysProcAttr = &windows.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW | windows.CREATE_NEW_PROCESS_GROUP, HideWindow: true}
+	processlaunch.ConfigureBackground(command)
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
 		return err

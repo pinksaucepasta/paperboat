@@ -853,6 +853,7 @@ func localConfigServiceState() string {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if runtime.GOOS == "linux" {
+		// user-console: Linux only.
 		query := exec.CommandContext(ctx, "systemctl", "--user", "is-active", service.ConfigUnit)
 		prepareConfigServiceQuery(query)
 		output, err := query.Output()

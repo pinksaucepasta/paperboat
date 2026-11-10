@@ -895,7 +895,8 @@ func scheduleWindowsUninstallDirectoryRemoval(directory string) (result error) {
 	if err != nil {
 		return err
 	}
-	command := filepath.Join(system, "cmd.exe") + ` /d /c rd /s /q "` + directory + `"`
+	// RunOnce starts in the user's session, where a bare cmd.exe would open a console; conhost --headless gives it none.
+	command := filepath.Join(system, "conhost.exe") + ` --headless ` + filepath.Join(system, "cmd.exe") + ` /d /c rd /s /q "` + directory + `"`
 	if len(command) > 260 { // Windows ignores a longer RunOnce command
 		return errors.New("the Windows uninstall helper directory path is too long to schedule its removal")
 	}

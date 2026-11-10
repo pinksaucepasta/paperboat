@@ -12,6 +12,8 @@ import (
 
 var ErrOpenSSHExecution = errors.New("OpenSSH execution request is invalid")
 
+// user-console: OpenSSHExecutor is for the user's own terminal (pb ssh) and keeps the inherited console;
+// a background caller needs its own hidden constructor.
 type OpenSSHExecutor struct{}
 
 // Execute runs the native OpenSSH client with inherited standard streams and

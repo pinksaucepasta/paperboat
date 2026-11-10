@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 )
 
@@ -80,7 +81,7 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 	// restore after a failed update had nothing to register the prior guard from ("exit status 1").
 	var priorTask string
 	if existing {
-		priorXML, queryErr := exec.CommandContext(ctx, "schtasks.exe", "/Query", "/TN", windowsGuardTask, "/XML").Output()
+		priorXML, queryErr := schtasksCommand(ctx, "/Query", "/TN", windowsGuardTask, "/XML").Output()
 		if queryErr != nil {
 			rollback.cleanup()
 			return queryErr
@@ -93,11 +94,11 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 		if !candidateStarted {
 			return nil
 		}
-		return exec.CommandContext(c, "schtasks.exe", "/End", "/TN", windowsGuardTask).Run()
+		return schtasksCommand(c, "/End", "/TN", windowsGuardTask).Run()
 	}, func(c context.Context) error {
 		if !existing {
 			if candidateTaskCreated {
-				return exec.CommandContext(c, "schtasks.exe", "/Delete", "/TN", windowsGuardTask, "/F").Run()
+				return schtasksCommand(c, "/Delete", "/TN", windowsGuardTask, "/F").Run()
 			}
 			return nil
 		}
@@ -107,14 +108,14 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 		}
 		defer os.Remove(priorTaskPath)
 		for _, args := range [][]string{{"/Create", "/TN", windowsGuardTask, "/XML", priorTaskPath, "/F"}, {"/Run", "/TN", windowsGuardTask}} {
-			if output, err := exec.CommandContext(c, "schtasks.exe", args...).CombinedOutput(); err != nil {
+			if output, err := schtasksCommand(c, args...).CombinedOutput(); err != nil {
 				return fmt.Errorf("restore the prior machine guard scheduled task: %w: %s", err, bytes.TrimSpace(output))
 			}
 		}
 		return nil
 	})
 	if existing {
-		output, stopErr := exec.CommandContext(ctx, "schtasks.exe", "/End", "/TN", windowsGuardTask).CombinedOutput()
+		output, stopErr := schtasksCommand(ctx, "/End", "/TN", windowsGuardTask).CombinedOutput()
 		if stopErr != nil {
 			return fmt.Errorf("stop existing machine guard task: %w: %s", stopErr, bytes.TrimSpace(output))
 		}
@@ -149,7 +150,7 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 		if args[0] == "/Run" {
 			candidateStarted = true
 		}
-		output, runErr := exec.CommandContext(ctx, "schtasks.exe", args...).CombinedOutput()
+		output, runErr := schtasksCommand(ctx, args...).CombinedOutput()
 		if runErr != nil {
 			return fmt.Errorf("machine guard scheduled task: %w: %s", runErr, bytes.TrimSpace(output))
 		}
@@ -170,9 +171,9 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 	}, func(restartCtx context.Context) error {
 		// Not running (it already exited) is fine for /End; wait until the task has left Running so /Run starts a
 		// new process instead of being ignored (IgnoreNew), then /Run must work.
-		_ = exec.CommandContext(restartCtx, "schtasks.exe", "/End", "/TN", windowsGuardTask).Run()
+		_ = schtasksCommand(restartCtx, "/End", "/TN", windowsGuardTask).Run()
 		waitGuardTaskStopped(restartCtx)
-		if output, err := exec.CommandContext(restartCtx, "schtasks.exe", "/Run", "/TN", windowsGuardTask).CombinedOutput(); err != nil {
+		if output, err := schtasksCommand(restartCtx, "/Run", "/TN", windowsGuardTask).CombinedOutput(); err != nil {
 			return fmt.Errorf("%w: %s", err, bytes.TrimSpace(output))
 		}
 		return nil
@@ -193,7 +194,7 @@ func ownedScheduledTask(ctx context.Context, installed string) (bool, error) {
 		}
 		return false, fmt.Errorf("inspect machine guard task file: %w", err)
 	}
-	output, err := exec.CommandContext(ctx, "schtasks.exe", "/Query", "/TN", windowsGuardTask, "/XML").CombinedOutput()
+	output, err := schtasksCommand(ctx, "/Query", "/TN", windowsGuardTask, "/XML").CombinedOutput()
 	if err != nil {
 		return false, fmt.Errorf("inspect existing machine guard task: %w: %s", err, bytes.TrimSpace(output))
 	}
@@ -267,7 +268,7 @@ func taskXML(executable string) string {
 func waitGuardTaskStopped(ctx context.Context) {
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) && ctx.Err() == nil {
-		output, err := exec.CommandContext(ctx, "schtasks.exe", "/Query", "/TN", windowsGuardTask, "/FO", "LIST").CombinedOutput()
+		output, err := schtasksCommand(ctx, "/Query", "/TN", windowsGuardTask, "/FO", "LIST").CombinedOutput()
 		if err == nil && !bytes.Contains(output, []byte("Running")) {
 			return
 		}
@@ -285,4 +286,12 @@ func warmGuardImage(path string) {
 	}
 	defer file.Close()
 	_, _ = io.Copy(io.Discard, file)
+}
+
+// schtasksCommand builds a schtasks.exe call that never shows a console window (it runs from background install,
+// update and repair paths).
+func schtasksCommand(ctx context.Context, args ...string) *exec.Cmd {
+	command := exec.CommandContext(ctx, "schtasks.exe", args...)
+	processlaunch.ConfigureBackground(command)
+	return command
 }

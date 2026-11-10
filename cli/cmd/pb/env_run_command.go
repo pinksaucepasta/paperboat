@@ -58,6 +58,7 @@ func runEnvironmentCommand(command *cobra.Command, args []string) error {
 }
 
 func runWithEnvironment(command *cobra.Command, args, values []string) error {
+	// user-console: the child of the user's own `pb env run`.
 	child := exec.Command(args[0], args[1:]...)
 	child.Env = append(os.Environ(), values...) // the last duplicate wins
 	child.Stdin, child.Stdout, child.Stderr = command.InOrStdin(), command.OutOrStdout(), command.ErrOrStderr()

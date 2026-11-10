@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
+	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
 )
 
 func executeManagedSSHTool(ctx context.Context, tool string, arguments, environment []string) error {
@@ -40,7 +41,9 @@ func cygpathUnder(dir string) func(string) (string, error) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		out, err := exec.CommandContext(ctx, tool, "-u", value).Output()
+		command := exec.CommandContext(ctx, tool, "-u", value)
+		processlaunch.ConfigureBackground(command)
+		out, err := command.Output()
 		if err != nil {
 			return "", fmt.Errorf("convert local path %q for rsync with cygpath (is the MSYS2/Cygwin install intact?): %w", value, err)
 		}

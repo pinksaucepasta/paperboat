@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
 	"io"
 	"net/http"
 	"net/url"
@@ -177,6 +178,7 @@ func InspectCandidate(ctx context.Context, path string) (Source, error) {
 	command.Stdin = strings.NewReader("")
 	command.Stdout = &output
 	command.Stderr = io.Discard
+	processlaunch.ConfigureBackground(command)
 	command.WaitDelay = inputProbeWaitDelay
 	if err := command.Run(); err != nil {
 		if output.overflow {
