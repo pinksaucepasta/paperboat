@@ -110,7 +110,7 @@ def pair_phase(password):
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline and p.command_result(PB, 'exec', alias, '--', *winhost.true_argv()).returncode:
             time.sleep(4)
-        if not p.doctor_healthy(p.invoke(PB, 'doctor', '--json', timeout=60)):
+        if not p.doctor_healthy(p.doctor_report(PB, 60)):
             raise RuntimeError('machine is not healthy after reset + pair')
         if not sentinel.exists():
             raise RuntimeError('reset removed an Inbox file')

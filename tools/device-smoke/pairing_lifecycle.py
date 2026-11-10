@@ -399,6 +399,16 @@ def http_sys_port_warning(check):
             and HTTP_SYS_PORT_WARNING in check.get('summary', ''))
 
 
+def doctor_report(binary, timeout=60):
+    """`pb doctor --json` exits 1 whenever overall is not healthy; the report is still on stdout and doctor_healthy judges it."""
+    result = command_result(binary, 'doctor', '--json', timeout=timeout)
+    try:
+        report = json.loads(result.stdout)
+    except ValueError:
+        raise CommandFailed(command_diagnostic([str(binary), 'doctor', '--json'], result.stdout, result.stderr)) from None
+    return report.get('data', report)
+
+
 def doctor_healthy(report):
     """overall healthy; on a Windows device also degraded when only the HTTP.sys busy-port warning keeps it from healthy."""
     if report.get('overall') == 'healthy':
@@ -506,7 +516,7 @@ def qualify(expected, check, fault, script, password, revoke_first=False, extern
                 raise RuntimeError('restoration lost its exact alias or account')
             if any(item['id'] == before['machine_id'] for item in machines):
                 raise RuntimeError('disposed test resource still appears active')
-            if not doctor_healthy(invoke(binary, 'doctor', '--json', timeout=45)):
+            if not doctor_healthy(doctor_report(binary, 45)):
                 raise RuntimeError('restored machine is not healthy')
             if hashlib.sha256(sentinel.read_bytes()).digest() != digest:
                 raise RuntimeError('uninstall or restore changed the preserved Inbox fixture')

@@ -2057,6 +2057,11 @@ class RemainingFamilyPlumbing(unittest.TestCase):
                 {'category': 'local', 'code': 'daemon', 'status': 'warning', 'summary': 'The local daemon is ready. ' + busy + '.'},
                 {'category': 'daemon', 'code': 'daemon:browser_urls_unavailable', 'status': 'warning', 'summary': busy}, *extra]}
 
+        class Doctor:  # exits 1 like a degraded `pb doctor --json`; its report is still on stdout
+            def run_remote(self, arguments, **_):
+                return subprocess.CompletedProcess(arguments, 1, json.dumps(report(owner)), '')
+        with patch.object(winhost, 'device', lambda: object()), contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(p.doctor_healthy(p.doctor_report(Doctor())))
         failing = {'category': 'local', 'code': 'peer_paths', 'status': 'fail', 'summary': 'no path'}
         self.assertTrue(p.doctor_healthy({'overall': 'healthy', 'checks': []}))
         with patch.object(winhost, 'device', lambda: object()):

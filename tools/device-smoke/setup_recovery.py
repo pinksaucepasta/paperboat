@@ -11,7 +11,7 @@ import time
 from urllib.parse import urlparse
 
 from pairing_fault import PairingFaultProxy
-from pairing_lifecycle import FaultAbsorbed, doctor_healthy, interrupt_pair, invoke, runtime_root
+from pairing_lifecycle import FaultAbsorbed, doctor_healthy, doctor_report, interrupt_pair, invoke, runtime_root
 import winhost
 
 
@@ -105,7 +105,7 @@ def main():
         raise RuntimeError('recovery changed original enrollment or Inbox')
     if (root / 'bootstrap-resume.json').exists():
         raise RuntimeError('completed recovery retained unfinished journal')
-    if not doctor_healthy(invoke(binary, 'doctor', '--json')):
+    if not doctor_healthy(doctor_report(binary)):
         raise RuntimeError('recovered machine is not healthy')
     print(json.dumps({'check': 'setup-recovery-' + args.fault, 'status': 'PASS',
                       'same_identity': True, 'seconds': round(time.monotonic()-started, 2)}))
