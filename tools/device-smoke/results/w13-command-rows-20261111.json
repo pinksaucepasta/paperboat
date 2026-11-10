@@ -1,0 +1,25 @@
+{
+  "build": "9b7af9364",
+  "platform": "Windows amd64 hosted runner",
+  "runner": "winpool-4",
+  "checks": {
+    "C220": {
+      "result": "PASS",
+      "settings_keys": [
+        "automatic_updates",
+        "local_time",
+        "time_zone"
+      ],
+      "cli_version": "dev-9b7af9364",
+      "runtime_version": "dev-9b7af9364"
+    },
+    "C031": {
+      "result": "PASS",
+      "commands": [
+        "linux_macos_command",
+        "windows_command"
+      ],
+      "token_omitted": true
+    }
+  }
+}
