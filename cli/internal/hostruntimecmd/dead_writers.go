@@ -64,7 +64,7 @@ var errInstallerLive = errors.New("an installation is running")
 // carrier's service process, which every install leaves running, does it.
 type deadInstaller struct {
 	pending func() (bool, error)                        // the candidate record of a replacement is left
-	tryLock func(context.Context) (func() error, error) // every install lock without waiting; errInstallerLive when held
+	tryLock func(context.Context) (func() error, error) // errInstallerLive when a running installer holds a lock; else the install lock, held
 	recover func(context.Context) error                 // restore the previous installation, withdraw the candidate
 }
 

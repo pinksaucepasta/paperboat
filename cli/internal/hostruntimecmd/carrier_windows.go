@@ -85,7 +85,8 @@ func windowsDeadInstaller(ownerSID string) deadInstaller {
 			if err != nil {
 				return nil, err
 			}
-			// A signed update's activation holds only the publication lock. Recovery takes it again itself.
+			// A signed update's activation holds only the publication lock: it is tried and released, because the
+			// recovery takes it again itself. Only the install lock stays held for the recovery.
 			publication, err := try(ctx, hostinstall.LockWindowsNativePublication)
 			if err != nil {
 				return nil, errors.Join(err, unlock())
