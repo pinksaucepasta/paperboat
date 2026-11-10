@@ -493,6 +493,19 @@ class WindowsTargetPlumbing(unittest.TestCase):
         # ConPTY sometimes ends the line with cursor moves and the prompt; the digits arrive in two reads
         self.assertEqual('8456', update_continuity.windows_pid(Held(b'84', b'56\x1b]2;\x07\x1b[8;1HC:\\>')))
 
+    def test_transfer_modes_target_script_reaches_the_target_as_one_word_for_ssh(self):
+        import importlib
+        import shlex
+        env = {'TARGET_CMD': 'ssh host sudo -n docker exec -i box bash -c', 'PB_SMOKE_WINDOWS_PB': 'x'}
+        with patch.dict(os.environ, env), patch.object(winhost, 'device', lambda: object()), \
+                patch.object(winhost, 'pb_path', lambda: 'pb'):
+            import transfer_modes_windows
+            importlib.reload(transfer_modes_windows)
+            script = 'sha256sum ~/Paperboat/Inbox/a.bin 2>/dev/null | cut -d" " -f1; echo $HOME'
+            argv = transfer_modes_windows.target_argv(script)
+        sys.modules.pop('transfer_modes_windows', None)
+        self.assertEqual(script, shlex.split(' '.join(argv))[-1])  # what the remote shell hands to bash -c
+
     def test_is_windows_reads_the_machine_platform_once(self):
         import windows_target
         windows_target._platforms.clear()

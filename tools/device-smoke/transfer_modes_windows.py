@@ -2,7 +2,7 @@
 """F22-01 with the Windows device as the sender (Windows twin of transfer_modes.sh / transfer_modes_mac.sh).
 
 The device (PB_SMOKE_WINDOWS_PB, SMOKE_WINDOWS_SSH: winhost.py) sends to ALIAS, a paired Unix machine of the same
-account; TARGET_CMD takes ONE shell-string argument and runs it on that machine as its pb user (for example
+account; TARGET_CMD ends before ONE shell-string argument (quoted here for ssh's remote shell) and runs it on that machine as its pb user (for example
 `ssh host sudo -n docker exec -u pbt -e HOME=/home/pbt CONTAINER bash -c`). Same steps and pass conditions as the Unix
 twins: automatic 120 MiB + a 600 MiB batch arrive byte-identical, 2.2 GB is refused before data moves; unlimited 300 MiB
 with the device's UDP blocked (a firewall rule, winhost.udp_blocked) waits, then resumes byte-identical; losing the path
@@ -28,9 +28,14 @@ R = []
 TRACE = []
 
 
+def target_argv(script):
+    # ssh joins its arguments and the remote shell splits them again: an unquoted script lost everything after its first word
+    # (`sha256sum f | cut` ran as `bash -c sha256sum` piped on the host, so every arrival check hashed empty input).
+    return shlex.split(os.environ['TARGET_CMD']) + [shlex.quote(script)]
+
+
 def target(script, timeout=300):
-    done = subprocess.run(shlex.split(os.environ['TARGET_CMD']) + [script], capture_output=True, text=True, timeout=timeout,
-                          stdin=subprocess.DEVNULL)
+    done = subprocess.run(target_argv(script), capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
     return done.stdout.strip()
 
 
