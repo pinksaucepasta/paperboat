@@ -32,6 +32,8 @@ def receipts(directory):
     for path in sorted(directory.glob('*.json')):
         try:
             receipt = json.loads(path.read_text())
+            if not isinstance(receipt, dict):  # a result directory also holds list-shaped files
+                continue
             yield timestamp(path, receipt), path, receipt
         except (ValueError, TypeError, OSError):
             continue

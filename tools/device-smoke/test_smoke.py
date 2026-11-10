@@ -1180,8 +1180,8 @@ class UpdateSurvivalMarkers(unittest.TestCase):
     def test_update_continuity_markers_are_split_too(self):
         import re
         source = pathlib.Path(__file__).with_name('update_continuity.py').read_text()
-        typed = re.findall(r"terminal\.send\(\"[^\"]*printf '[^\"]*", source)
-        self.assertEqual(len(typed), 2)
+        typed = re.findall(r"terminal\.send\(\"[^\"]*printf '[^\"]*", source)  # the Windows line is windows_target.typed_marker
+        self.assertEqual(len(typed), 1)
         for line in typed:
             self.assertNotRegex(line, r"PB_[A-Z]+_%s")
     def test_owners_reads_session_owner_generations_from_ps_output(self):
