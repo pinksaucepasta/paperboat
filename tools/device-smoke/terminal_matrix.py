@@ -695,6 +695,8 @@ def fast_output(a, sessions):
         yes_before = host_yes(a.target) if host_side else 0
         c1.send((windows_target.flood_line() if win() else 'yes') + '\r')
         time.sleep(3)
+        flooding = host_yes(a.target) > yes_before if host_side else len(c1.pending) > 0
+        row('N6 the flood is running before Ctrl-C', flooding, 'yes on the target' if host_side else 'output arriving')
         c1.send(('x' * 1023 + '\n') * 256)
         c1.send('\x03')
         t0 = time.monotonic()
@@ -709,7 +711,7 @@ def fast_output(a, sessions):
         if stopped is None:
             row(label, False, 'output still flowing after Ctrl-C')
         else:  # the 5 s bound is the unix client's; a Windows client's screen only has to go quiet (the producer's stop is the row above)
-            row(label, host_side or stopped < 5, f'output stopped {stopped:.1f} s after Ctrl-C')
+            row(label, True if host_side else stopped < 5, f'output stopped {stopped:.1f} s after Ctrl-C')
         try:
             c1.run_discarding(noop(), 15)
             row('N6 the shell answers after Ctrl-C', True)
