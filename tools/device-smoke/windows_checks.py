@@ -91,6 +91,7 @@ def checks(args):
     table['session-sharing-owner'] = (['session_sharing_lifecycle.py', args.peer, '--team', team], ['--peer', '--team'])
     for name in ('lifecycle', 'tools_lifecycle', 'doctor_lifecycle', 'alias_lifecycle'):
         table['ssh-' + name.split('_')[0].replace('lifecycle', 'main')] = (['ssh_%s.py' % name, args.peer], ['--peer'])
+    table['terminal-vt'] = (['terminal_vt_input.py', args.peer], ['--peer'])
     for name in ('main', 'paste', 'typing'):  # paste and typing need a Unix peer (sh)
         table['terminal-' + name] = (['terminal_lifecycle.py', args.peer, '--check', name], ['--peer'])
     # about 25 min: pass --timeout 3600. N14/N12 restart the peer's host runtime (--restart-target-cmd, a shell command

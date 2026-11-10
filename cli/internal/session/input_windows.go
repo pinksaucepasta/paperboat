@@ -5,7 +5,6 @@ package session
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
 	"sync"
 	"unsafe"
@@ -51,35 +50,19 @@ var consoleInput struct {
 // (measured through ssh -tt/ConPTY on Windows 11; ReadConsoleW with a zero wakeup mask delivers 0x1a intact). Anything that
 // is not a console (a pipe, a file) keeps ReadFile.
 func readHandle(handle windows.Handle, file *os.File, p []byte) (int, error) {
-	if len(p) == 0 { // nothing to fill: the read loop below would drain the console forever
-		return 0, nil
-	}
 	var mode uint32
 	if windows.GetConsoleMode(handle, &mode) != nil {
 		return file.Read(p)
 	}
-	consoleInput.Lock()
-	if consoleInput.decoder.pending() {
-		n := consoleInput.decoder.decode(p, nil)
-		consoleInput.Unlock()
-		return n, nil
-	}
-	consoleInput.Unlock()
 	buffer := make([]uint16, min(max(len(p)/3, 1), 10922))
 	control := struct{ length, initial, mask, state uint32 }{length: 16}
-	for {
+	consoleInput.Lock()
+	defer consoleInput.Unlock()
+	return consoleInput.decoder.fill(p, func() ([]uint16, error) {
 		var read uint32
 		if err := windows.ReadConsole(handle, &buffer[0], uint32(len(buffer)), &read, (*byte)(unsafe.Pointer(&control))); err != nil {
-			return 0, err
+			return nil, err
 		}
-		if read == 0 {
-			return 0, io.EOF
-		}
-		consoleInput.Lock()
-		n := consoleInput.decoder.decode(p, buffer[:read])
-		consoleInput.Unlock()
-		if n > 0 { // a lone high surrogate yields nothing yet: read its other half
-			return n, nil
-		}
-	}
+		return buffer[:read], nil
+	})
 }

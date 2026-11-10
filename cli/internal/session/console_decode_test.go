@@ -2,6 +2,7 @@ package session
 
 import (
 	"bytes"
+	"io"
 	"testing"
 	"unicode/utf16"
 )
@@ -40,5 +41,36 @@ func TestConsoleDecoderPassesControlBytesAndVTUntouched(t *testing.T) {
 	n := decoder.decode(buffer, utf16.Encode([]rune(input)))
 	if string(buffer[:n]) != input {
 		t.Fatalf("got %q", buffer[:n])
+	}
+}
+
+func TestConsoleFillReturnsAtOnceForAnEmptyBufferAndNeverReads(t *testing.T) {
+	var decoder consoleDecoder
+	reads := 0
+	n, err := decoder.fill(nil, func() ([]uint16, error) { reads++; return []uint16{'a'}, nil })
+	if n != 0 || err != nil || reads != 0 {
+		t.Fatalf("fill(empty)=%d,%v after %d reads, want 0,nil,0", n, err, reads)
+	}
+}
+
+func TestConsoleFillReadsAgainForTheSecondHalfOfAnEmoji(t *testing.T) {
+	pair := utf16.Encode([]rune("😀"))
+	reads := [][]uint16{{pair[0]}, {pair[1]}}
+	var decoder consoleDecoder
+	buffer := make([]byte, 16)
+	n, err := decoder.fill(buffer, func() ([]uint16, error) {
+		next := reads[0]
+		reads = reads[1:]
+		return next, nil
+	})
+	if err != nil || string(buffer[:n]) != "😀" || len(reads) != 0 {
+		t.Fatalf("fill=%q,%v with %d reads left", buffer[:n], err, len(reads))
+	}
+}
+
+func TestConsoleFillEndsAtAnEmptyRead(t *testing.T) {
+	var decoder consoleDecoder
+	if _, err := decoder.fill(make([]byte, 4), func() ([]uint16, error) { return nil, nil }); err != io.EOF {
+		t.Fatalf("err=%v, want EOF", err)
 	}
 }

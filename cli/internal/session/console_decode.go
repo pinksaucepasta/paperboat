@@ -1,6 +1,9 @@
 package session
 
-import "unicode/utf16"
+import (
+	"io"
+	"unicode/utf16"
+)
 
 // consoleDecoder turns the UTF-16 units a Windows console read returns into the UTF-8 bytes the remote shell gets. It carries
 // what a read leaves behind: the high half of a surrogate pair whose low half is in the next read (an emoji split at a
@@ -31,4 +34,28 @@ func (d *consoleDecoder) decode(p []byte, units []uint16) int {
 	n := copy(p, d.rest)
 	d.rest = d.rest[n:]
 	return n
+}
+
+// fill reads console units with read until it has bytes for p. It returns (0, nil) for an empty p without reading (a read loop that can
+// never produce a byte would drain the console forever), serves leftovers first, and reads again when a read only produced half an emoji.
+// read returning no units is the end of the stream.
+func (d *consoleDecoder) fill(p []byte, read func() ([]uint16, error)) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	for {
+		if d.pending() {
+			return d.decode(p, nil), nil
+		}
+		units, err := read()
+		if err != nil {
+			return 0, err
+		}
+		if len(units) == 0 {
+			return 0, io.EOF
+		}
+		if n := d.decode(p, units); n > 0 {
+			return n, nil
+		}
+	}
 }
