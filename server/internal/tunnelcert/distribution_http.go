@@ -386,9 +386,11 @@ func (h *DistributionHub) enqueue(ctx context.Context, action string, request Di
 	if err := h.store.Purge(ctx, now); err != nil {
 		return DistributionMessage{}, distributionOperationFailure{cause: err}
 	}
-	if action != "stage" {
-		// Activate/retire/revoke are meaningful only for the exact staged certificate target. Never queue an
-		// action an edge could accept without a corresponding stage record after a restart or ledger expiry.
+	if action == "activate" {
+		// Activation is meaningful only for the exact staged certificate target. Never queue one an edge could
+		// accept without a corresponding stage record after a restart or ledger expiry. Retire and revoke carry
+		// no such fence: the stage result is purged after distributionResultRetention while the edge copy lives
+		// on, and an edge that no longer holds the certificate acknowledges the removal as done.
 		stage, staged, err := h.store.Get(ctx, distributionStoreKey(distributionKey("stage", request)))
 		if err != nil {
 			return DistributionMessage{}, distributionOperationFailure{cause: err}

@@ -536,6 +536,12 @@ func TestDistributionHubRejectsActionsWithoutExactStageAndCloseWakesWaiters(t *t
 	if _, err := hub.enqueue(context.Background(), "activate", request); !errors.Is(err, ErrDistributionTransportStale) {
 		t.Fatalf("unstaged action error = %v", err)
 	}
+	// Removal must outlive the purged stage result, or a certificate revoked later stays on its edges.
+	for _, action := range []string{"retire", "revoke"} {
+		if _, err := hub.enqueue(context.Background(), action, request); err != nil {
+			t.Fatalf("%s without a stage record = %v, want queued", action, err)
+		}
+	}
 	if _, err := hub.enqueue(context.Background(), "stage", request); err != nil {
 		t.Fatal(err)
 	}

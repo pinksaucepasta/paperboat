@@ -1,8 +1,10 @@
 package tunnelcert
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
@@ -150,6 +152,104 @@ func TestSQLCertificateDistributionCleanupFencesReplacedProcesses(t *testing.T) 
 	revoked := transport.revokedActions()
 	if len(revoked) != 1 || revoked[0].certificateID != certificates[3].ID || revoked[0].epoch != newEpoch || revoked[0].state != string(StateActive) {
 		t.Fatalf("revoke transport actions = %#v, want current failed target with active transport metadata", revoked)
+	}
+}
+
+// TestSQLCertificateCleanupReachesCurrentEdgeAfterStageLedgerExpiry runs
+// cleanup through the real hub with an empty action ledger, as production has
+// it one hour after staging: the revoked, failed and superseded certificates
+// must still be removed from the current edge process.
+func TestSQLCertificateCleanupReachesCurrentEdgeAfterStageLedgerExpiry(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("PAPERBOAT_TEST_DATABASE_DSN"))
+	if dsn == "" {
+		t.Skip("set PAPERBOAT_TEST_DATABASE_DSN to run TLS PostgreSQL cleanup acceptance")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	database, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := db.Migrate(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+	fixture := sqlCertificateFixture{suffix: fmt.Sprintf("%d", time.Now().UnixNano())}
+	fixture.insert(t, database)
+	t.Cleanup(func() {
+		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, fixture.accountID)
+		_, _ = database.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, fixture.edgeID)
+	})
+	store, err := NewSQLStore(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	want := map[string]string{}
+	for generation, state := range []string{"revoked", "failed", "superseded"} {
+		certificate := fixture.certificate(uint64(generation+1), now)
+		certificate.TargetKind, certificate.RouteID = TargetDurableRoute, fixture.routeID
+		if err := store.PutStaged(ctx, certificate); err != nil {
+			t.Fatal(err)
+		}
+		params := stageParams(certificate, fixture, now)
+		if _, err := database.Queries().StageTunnelCertificateEdgeV1(ctx, params); err != nil {
+			t.Fatal(err)
+		}
+		switch state {
+		case "revoked":
+			_, err = store.Revoke(ctx, certificate.ID, "operator_requested", now)
+			want[certificate.ID] = "revoked"
+		case "failed":
+			err = store.MarkFailed(ctx, certificate.ID, "issuer_timeout", now)
+			want[certificate.ID] = "revoked"
+		default:
+			_, err = database.SQL().ExecContext(ctx, `UPDATE paperboat.tunnel_certificate_records SET state='superseded', updated_at=$2 WHERE id=$1`, certificate.ID, now)
+			want[certificate.ID] = "retired"
+		}
+		if err != nil {
+			t.Fatalf("make certificate %s: %v", state, err)
+		}
+	}
+
+	actions := NewMemoryDistributionActionStore()
+	hub, err := NewDistributionHub(DistributionHubConfig{Store: actions, Keys: testSecretSource{value: bytes.Repeat([]byte{7}, 32)}, KeyReference: "distribution-test",
+		Credential: []byte("distribution-credential-012345678901234567890123456789"),
+		Identity: DistributionNodeIdentityResolverFunc(func(context.Context, *http.Request) (DistributionNodeIdentity, error) {
+			return DistributionNodeIdentity{NodeID: fixture.edgeID, ProcessEpoch: fixture.epoch}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hub.Close()
+	// The edge: it holds none of these certificates and acknowledges each removal as done.
+	go func() {
+		for ctx.Err() == nil {
+			pending, _ := actions.Pending(ctx, fixture.edgeID, fixture.epoch, "", 10, time.Now().UTC())
+			for _, action := range pending {
+				status := map[string]string{"retire": "retired", "revoke": "revoked"}[action.Message.Action]
+				_, _ = actions.Complete(ctx, action.Key, status, "", time.Now().UTC())
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+	distributor, err := NewSQLDistributor(database, hub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleaned, err := distributor.ReconcileCertificateDistributionCleanup(ctx, 10)
+	if err != nil || cleaned != len(want) {
+		t.Fatalf("cleanup = %d, %v; want %d certificates cleaned", cleaned, err, len(want))
+	}
+	for id, state := range want {
+		rows, err := database.Queries().ListTunnelCertificateEdgesV1(ctx, id)
+		if err != nil || len(rows) != 1 || rows[0].State != state {
+			t.Fatalf("certificate %s edge rows = %#v, %v; want one %s row", id, rows, err, state)
+		}
 	}
 }
 
