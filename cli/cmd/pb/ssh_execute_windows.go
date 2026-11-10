@@ -116,9 +116,15 @@ func executeManagedSSH(cobraCommand *cobra.Command, ctx *command.Context, machin
 		_ = connection.Close()
 		return err
 	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		_ = connection.Close()
+		return commandPreparationFailure{step: prepareMachineUser, cause: err}
+	}
 	defer connection.Close()
+	identityArguments := managedssh.ManagedIdentityArguments(managedssh.InstalledAgentSocket(""), managedssh.ManagedIdentityPublicKeyPath(home))
 	return (managedssh.LoopbackOpenSSHExecutor{}).Execute(cobraCommand.Context(), "ssh", func(port uint16) []string {
-		return windowsLoopbackOpenSSHArguments(destination, port, executable, passthrough, includePassthrough)
+		return windowsLoopbackOpenSSHArguments(destination, port, executable, identityArguments, passthrough, includePassthrough)
 	}, environment, stream)
 }
 
@@ -199,25 +205,4 @@ func windowsManagedSSHDependencies(ctx *command.Context) (*deps, error) {
 		return nil, fmt.Errorf("prepare local peer transport: %w", err)
 	}
 	return d, nil
-}
-
-func windowsLoopbackOpenSSHArguments(destination managedssh.Destination, port uint16, executable string, passthrough []string, includePassthrough bool) []string {
-	knownHostsCommand := quoteWindowsOpenSSHCommand(executable) + " __ssh-known-hosts --host " + destination.Host + " --port " + strconv.Itoa(int(destination.Port))
-	arguments := openSSHSecurityArguments(destination)
-	arguments = append(arguments,
-		"-o", "ProxyCommand=none",
-		"-o", "Hostname=127.0.0.1",
-		"-o", "HostKeyAlias="+destination.Host,
-		"-o", "KnownHostsCommand="+knownHostsCommand,
-		"-p", strconv.Itoa(int(port)),
-		destination.User+"@"+destination.Host,
-	)
-	if includePassthrough {
-		arguments = append(arguments, passthrough...)
-	}
-	return arguments
-}
-
-func quoteWindowsOpenSSHCommand(value string) string {
-	return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
 }

@@ -55,6 +55,13 @@ func unquoteOpenSSHPath(line, prefix string) (string, bool) {
 	return decoded, strings.ReplaceAll(decoded, `\`, `\\`) == encoded
 }
 
+// ManagedIdentityArguments are the fragment's managed-key options as OpenSSH command-line options. A connection
+// that overrides Hostname needs them there: `Match host` compares the overridden name (ssh_config(5)), so the
+// fragment's Match group, which offers the managed key, never applies to it.
+func ManagedIdentityArguments(agent, identity string) []string {
+	return []string{"-o", "IdentityAgent=" + quoteOpenSSHPath(agent), "-o", "IdentityFile=" + quoteOpenSSHPath(identity)}
+}
+
 // formatOwnedOpenSSH renders the fragment. Callers validate the inputs first.
 func formatOwnedOpenSSH(domain string, owned ownedOpenSSH) ([]byte, error) {
 	var out strings.Builder

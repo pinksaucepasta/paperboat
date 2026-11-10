@@ -176,6 +176,33 @@ func openSSHSecurityArguments(destination managedssh.Destination) []string {
 	}
 }
 
+// windowsLoopbackOpenSSHArguments are ssh.exe's arguments for the Windows loopback connection (pb ssh without a
+// command). It overrides Hostname with 127.0.0.1, so the managed fragment's `Match host` group does not apply and
+// the managed identity is passed here instead (identity: managedssh.ManagedIdentityArguments).
+func windowsLoopbackOpenSSHArguments(destination managedssh.Destination, port uint16, executable string, identity, passthrough []string, includePassthrough bool) []string {
+	knownHostsCommand := quoteWindowsOpenSSHCommand(executable) + " __ssh-known-hosts --host " + destination.Host + " --port " + strconv.Itoa(int(destination.Port))
+	arguments := openSSHSecurityArguments(destination)
+	if destination.Managed {
+		arguments = append(arguments, identity...)
+	}
+	arguments = append(arguments,
+		"-o", "ProxyCommand=none",
+		"-o", "Hostname=127.0.0.1",
+		"-o", "HostKeyAlias="+destination.Host,
+		"-o", "KnownHostsCommand="+knownHostsCommand,
+		"-p", strconv.Itoa(int(port)),
+		destination.User+"@"+destination.Host,
+	)
+	if includePassthrough {
+		arguments = append(arguments, passthrough...)
+	}
+	return arguments
+}
+
+func quoteWindowsOpenSSHCommand(value string) string {
+	return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
+}
+
 func actionSSHProxy(command *cobra.Command, _ []string) error {
 	if err := processlifetime.ArmParentDeath(command.Context()); err != nil {
 		return err
