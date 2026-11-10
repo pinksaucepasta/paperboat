@@ -2002,6 +2002,18 @@ class RemainingFamilyPlumbing(unittest.TestCase):
         source = (pathlib.Path(__file__).parent / 'pairing_lifecycle.py').read_text()
         self.assertNotIn("'list', '--json')['machines']", source)  # the default machine page is 50 of 74
 
+    def test_doctor_gate_accepts_only_the_hosts_environment_warnings_on_a_windows_device(self):
+        import pairing_lifecycle as p
+        degraded = {'overall': 'degraded', 'checks': [{'code': 'auth', 'status': 'pass'}, {'code': 'browser_urls_unavailable', 'status': 'warning'}]}
+        failing = {'overall': 'degraded', 'checks': [{'code': 'auth', 'status': 'pass'}, {'code': 'peer_reachability', 'status': 'fail'}]}
+        self.assertTrue(p.doctor_healthy({'overall': 'healthy', 'checks': []}))
+        with patch.object(winhost, 'device', lambda: object()):
+            self.assertTrue(p.doctor_healthy(degraded))
+            self.assertFalse(p.doctor_healthy(failing))
+            self.assertFalse(p.doctor_healthy({'overall': 'unhealthy', 'checks': []}))
+        with patch.object(winhost, 'device', lambda: None):  # Linux/macOS stay strict
+            self.assertFalse(p.doctor_healthy(degraded))
+
     def test_pb_text_keeps_the_stdin_of_the_local_call(self):
         done = winhost.pb_text(sys.executable, ['-c', 'import sys;print(len(sys.stdin.read()))'], timeout=30, stdin=subprocess.DEVNULL)
         self.assertEqual('0\n', done.stdout)

@@ -387,6 +387,20 @@ def pair(binary, arguments, root, fault, server, password=None):
             proxy.close()
 
 
+# Warnings of the HOST environment, not of Paperboat's state: browser-facing local access needs ports 80/443, and a hosted
+# Windows runner's own HTTP.sys holds them (PID 4), so doctor reads 'degraded' there before and after every operation.
+ENVIRONMENT_WARNINGS = {'browser_urls_unavailable'}
+
+
+def doctor_healthy(report):
+    """overall healthy; on a Windows device also degraded when only ENVIRONMENT_WARNINGS keep it from healthy."""
+    if report.get('overall') == 'healthy':
+        return True
+    if report.get('overall') != 'degraded' or not winhost.device():
+        return False
+    return all(check.get('status') == 'pass' or check.get('code') in ENVIRONMENT_WARNINGS for check in report.get('checks', []))
+
+
 def await_windows_uninstall(receipt, seconds=360):
     """Windows uninstall ends in a helper that finishes after the command returned (state pending): wait for its status.json
     to read completed before anything is installed over it (an install that raced the helper died with local_io on
@@ -481,7 +495,7 @@ def qualify(expected, check, fault, script, password, revoke_first=False, extern
                 raise RuntimeError('restoration lost its exact alias or account')
             if any(item['id'] == before['machine_id'] for item in machines):
                 raise RuntimeError('disposed test resource still appears active')
-            if invoke(binary, 'doctor', '--json', timeout=45).get('overall') != 'healthy':
+            if not doctor_healthy(invoke(binary, 'doctor', '--json', timeout=45)):
                 raise RuntimeError('restored machine is not healthy')
             if hashlib.sha256(sentinel.read_bytes()).digest() != digest:
                 raise RuntimeError('uninstall or restore changed the preserved Inbox fixture')
