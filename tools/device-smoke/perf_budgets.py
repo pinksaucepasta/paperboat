@@ -54,3 +54,12 @@ BUDGETS = {
         'rsync_small_files_s': ('min', 35),
     },
 }
+
+# Windows starts pb.exe slower than the 50 ms Linux/macOS bound: measured 107-125 ms warm on winpool-5 (2026-11-10, idle runner,
+# Defender off): ~15 ms process creation, ~86 ms package init (mostly third-party), no cold/warm split. Top init costs, for a later
+# lazy-init change: BurntSushi/toml/internal 43 ms, adrg/xdg 13 ms, paperboat hoststate 2.8 ms. 200 ms = measured + margin.
+WINDOWS_CLI = {'cli_start_ms': ('max', 200)}
+
+
+def cli_budget(windows):
+    return BUDGETS['cli'] | WINDOWS_CLI if windows else BUDGETS['cli']

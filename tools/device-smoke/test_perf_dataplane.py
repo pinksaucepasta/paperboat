@@ -39,6 +39,18 @@ class LocalCLIBudget(unittest.TestCase):
                 self.assertEqual(['status_ms'] if too_slow else [], receipt['budget_failures'])
                 self.assertTrue(receipt['enrollment_unchanged'])
 
+    def test_windows_has_its_own_start_bound_and_unix_keeps_50(self):
+        for windows, start, expected in ((False, 51, ['cli_start_ms']), (True, 51, []), (True, 201, ['cli_start_ms']), (True, 199, [])):
+            with self.subTest(windows=windows, start=start):
+                output = io.StringIO()
+                pb = SimpleNamespace(device=object()) if windows else SimpleNamespace()
+                with patch('sys.argv', ['perf_dataplane.py', '--cli-only']), patch.object(perf, 'PB', pb), \
+                        patch.object(perf, 'registration', return_value=1), \
+                        patch.object(perf, 'local_command_ms', side_effect=[start, 100]), \
+                        contextlib.redirect_stdout(output):
+                    perf.main()
+                self.assertEqual(expected, json.loads(output.getvalue())['budget_failures'])
+
 
 if __name__ == '__main__':
     unittest.main()

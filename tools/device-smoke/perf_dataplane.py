@@ -20,7 +20,7 @@ import time
 import uuid
 
 from install_lifecycle import registration
-from perf_budgets import BUDGETS
+from perf_budgets import BUDGETS, cli_budget
 import winhost
 
 PB = winhost.pb_path()
@@ -121,7 +121,7 @@ def main():
     metrics = {'cli_start_ms': local_command_ms('--version'), 'status_ms': local_command_ms('status')}
     if args.cli_only:
         failures = [] if args.no_budget else [
-            name for name, (kind, bound) in BUDGETS['cli'].items()
+            name for name, (kind, bound) in cli_budget(hasattr(PB, 'device')).items()
             if name in metrics and (metrics[name] > bound if kind == 'max' else metrics[name] < bound)]
         if registration() != before:
             raise RuntimeError('local CLI budget check changed the enrolled identity')
@@ -165,7 +165,7 @@ def main():
                 'd.parent.name=="Paperboat" and shutil.rmtree(d,ignore_errors=True)\n'))
     budget = BUDGETS.get(metrics['path'], {})
     failures = [] if args.no_budget else [
-        name for name, (kind, bound) in (budget | BUDGETS['cli']).items()
+        name for name, (kind, bound) in (budget | cli_budget(hasattr(PB, 'device'))).items()
         if name in metrics and (metrics[name] > bound if kind == 'max' else metrics[name] < bound)]
     if not budget and not args.no_budget:
         failures = [f'no budget for path {metrics["path"]}']
