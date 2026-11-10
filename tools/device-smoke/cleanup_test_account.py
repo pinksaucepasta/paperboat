@@ -18,7 +18,7 @@ import subprocess
 import sys
 
 DEFAULT_ACCOUNTS = ["user_5ae46801-d921-4983-be1c-db50ad886304"]
-THROWAWAY = r"^(lane[a-z0-9]*-|luf14)"
+THROWAWAY = r"^(lane[a-z0-9]*-|luf14|winpool-)"
 PROTECTED = r"(ubuntu24|pbvm|dadape|^hp|apple|victus)"
 
 SELECT = """

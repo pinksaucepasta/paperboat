@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Windows lifecycle checks on victus, driven from a Linux host over SSH (PowerShell), with hp as the peer client.
+"""Windows lifecycle checks on the Windows device, driven from a Linux host over SSH (PowerShell), with hp as the peer
+client. The device is SMOKE_WINDOWS_SSH (default pujan@victus, password VICTUS_PASS; any other target logs in by key).
 
   VICTUS_PASS=... windows_lifecycle.py --expect-version V --windows-install-json FILE CHECK...
   CHECK: install-pair update update-failures version doctor status service crash availability exec exec-self reset-pair uninstall
@@ -19,19 +20,24 @@ import subprocess
 import sys
 import time
 
+import winhost
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 SSH = ['-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=20', '-o', 'StrictHostKeyChecking=accept-new']
+DEVICE = winhost.WindowsDevice()
 PB_HP = '$HOME/.local/bin/pb'
-TOKEN_FILE = r'C:\Users\pujan\pbtok.txt'  # owner-only token file the pairing commands read (removed after use)
+
+
+def home(name):
+    return str(DEVICE.home() / name)
 
 
 def victus(script, timeout=180):
     """Run PowerShell on victus; return (returncode, text)."""
     script = "$ProgressPreference='SilentlyContinue'; " + script
     encoded = base64.b64encode(script.encode('utf-16-le')).decode()
-    env = dict(os.environ, SSHPASS=os.environ['VICTUS_PASS'])
-    result = subprocess.run(['sshpass', '-e', 'ssh', *SSH, 'pujan@victus', f'powershell -NoProfile -NonInteractive -EncodedCommand {encoded}'],
-                            capture_output=True, text=True, timeout=timeout, env=env, stdin=subprocess.DEVNULL)
+    result = subprocess.run([*DEVICE.ssh_prefix(), DEVICE.target, f'powershell -NoProfile -NonInteractive -EncodedCommand {encoded}'],
+                            capture_output=True, text=True, timeout=timeout, env=DEVICE.ssh_environment(), stdin=subprocess.DEVNULL)
     text = '\n'.join(line for line in (result.stdout + result.stderr).splitlines() if not line.startswith(('#< CLIXML', '<Objs')))
     return result.returncode, text
 
@@ -84,7 +90,8 @@ def mint_token(host, alias):
     token = re.search(r"p=([^'\"&]+)", command).group(1)[-26:]
     code, _ = victus(
         f"Set-Content -NoNewline -Path '{TOKEN_FILE}' -Value '{token}'; "
-        f"icacls '{TOKEN_FILE}' /setowner pujan | Out-Null; icacls '{TOKEN_FILE}' /inheritance:r /grant:r 'pujan:F' 'SYSTEM:F' | Out-Null; "
+        f"icacls '{TOKEN_FILE}' /setowner $env:USERNAME | Out-Null; "
+        f"icacls '{TOKEN_FILE}' /inheritance:r /grant:r \"$($env:USERNAME):F\" 'SYSTEM:F' | Out-Null; "
         f"icacls '{TOKEN_FILE}' /remove Administrators | Out-Null")
     if code:
         raise RuntimeError('could not stage the enrollment token on victus')
@@ -134,7 +141,7 @@ def check_update_failures(win, args):
     assert args.build and args.wrong_platform, 'update-failures needs --build <good pb.exe> and --wrong-platform <non-Windows pb> on victus'
     original = installed_version(win)
     good_version = installed_version(Windows(args.build))
-    work = 'C:\\Users\\pujan\\pb-update-fail'
+    work = home('pb-update-fail')
 
     def healthy(seconds):
         wait_for(lambda: 'doctor: healthy' in win.run('doctor')[1], seconds, 'doctor healthy')
@@ -290,11 +297,10 @@ def check_uninstall(win, args):
 
 def inventory(args):
     script = open(os.path.join(HERE, 'uninstall_inventory_windows.ps1')).read()
-    env = dict(os.environ, SSHPASS=os.environ['VICTUS_PASS'])
-    subprocess.run(['sshpass', '-e', 'scp', '-q', *SSH, os.path.join(HERE, 'uninstall_inventory_windows.ps1'), r'pujan@victus:C:/Users/pujan/pb-inventory.ps1'],
-                   check=True, env=env)
-    code, out = victus(r'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\pujan\pb-inventory.ps1; exit $LASTEXITCODE', 300)
-    victus(r"Remove-Item -Force C:\Users\pujan\pb-inventory.ps1 -ErrorAction SilentlyContinue")
+    path = DEVICE.home() / 'pb-inventory.ps1'
+    path.write_text(script)
+    code, out = victus(f"powershell -NoProfile -ExecutionPolicy Bypass -File '{path}'; exit $LASTEXITCODE", 300)
+    path.unlink()
     assert code == 0 and 'inventory: clean' in out, 'leftovers: ' + ' | '.join(l for l in out.splitlines() if l.startswith('leftover'))[:400]
 
 
@@ -312,8 +318,10 @@ def main():
     parser.add_argument('--wrong-platform', help='path on victus of a pb built for another OS (update-failures)')
     parser.add_argument('checks', nargs='+', choices=sorted(CHECKS))
     args = parser.parse_args()
-    if not os.environ.get('VICTUS_PASS'):
+    if DEVICE.target == winhost.DEFAULT_TARGET and not DEVICE.password:
         sys.exit('export VICTUS_PASS (see REMOTE_TESTING.md)')
+    global TOKEN_FILE  # owner-only token file the pairing commands read (removed after use)
+    TOKEN_FILE = home('pbtok.txt')
     from install_path import windows_executable
     win = Windows(None if args.checks[0] == 'install-pair' else windows_executable(json.load(open(args.windows_install_json))))
     failed, rows = False, []
@@ -329,7 +337,7 @@ def main():
     os.makedirs(os.path.join(HERE, 'results'), exist_ok=True)
     result = os.path.join(HERE, 'results', time.strftime('windows-lifecycle-%Y%m%dT%H%M%SZ.json', time.gmtime()))
     with open(result, 'w') as saved:
-        json.dump({'version': args.expect_version, 'device': 'victus', 'results': rows}, saved, indent=1)
+        json.dump({'version': args.expect_version, 'device': DEVICE.target, 'results': rows}, saved, indent=1)
     print('results:', os.path.relpath(result, os.path.dirname(HERE)))
     sys.exit(1 if failed else 0)
 
