@@ -166,9 +166,12 @@
     pass("the new token is listed", Boolean(row))
     const created = (await all("active")).find((t) => t.name === name)
     pass("the server has it, scoped", Boolean(created) && created.scope?.length === 1)
-    button(row, (t) => t === "Revoke")?.click()
-    await until(() => dialog())
-    button(dialog(), (t) => t === "Revoke token")?.click()
+    // The list may have re-rendered since the row was found: click the current row's button.
+    button(document.querySelector(`[data-token="${name}"]`), (t) => t === "Revoke")?.click()
+    const confirm = await until(() => dialog() && button(dialog(), (t) => t === "Revoke token"))
+    pass("revoking asks for confirmation", Boolean(confirm))
+    if (!confirm) return steps
+    confirm.click()
     // A revoked token leaves Active for the folded "Revoked and expired" list.
     const gone = await until(() => !document.querySelector(`[data-token="${name}"]`))
     ;(await until(() => button(document, (t) => t.startsWith("Revoked and expired")))).click()
