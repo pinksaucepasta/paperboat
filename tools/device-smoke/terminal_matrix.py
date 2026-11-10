@@ -763,8 +763,11 @@ def keystrokes(a, sessions):
     import glob
 
     def opens():
-        if DEVICE:  # the daemon's state directory holds runtime and diagnostics side by side
-            return DEVICE.count_in_files(DEVICE.runtime_dir().parent / 'diagnostics', 'events-*.ndjson', 'peer_stream_opened')
+        if DEVICE:  # %LOCALAPPDATA%\Paperboat holds runtime/ and state/diagnostics/; an empty count would pass vacuously
+            where = DEVICE.runtime_dir().parent / 'state' / 'diagnostics'
+            if not DEVICE.files(where, 'events-*.ndjson'):
+                raise RuntimeError('no daemon diagnostics on the device at %s: the reopen count would be meaningless' % where)
+            return DEVICE.count_in_files(where, 'events-*.ndjson', 'peer_stream_opened')
         files = glob.glob(str(DIAGNOSTICS / 'events-*.ndjson'))
         return sum(open(f).read().count('peer_stream_opened') for f in files)
 

@@ -72,7 +72,7 @@ def shell_pid(raw):
 def diagnostic_lines():
     """Every line of the daemon's diagnostic event files (on the device for a Windows client)."""
     if DEVICE:
-        return DEVICE.matching_lines(DEVICE.runtime_dir().parent / 'diagnostics', '*.ndjson', '"severity":"(error|warning)"')
+        return DEVICE.matching_lines(DEVICE.runtime_dir().parent / 'state' / 'diagnostics', '*.ndjson', '"severity":"(error|warning)"')
     return (line for path in glob.glob(str(DIAGNOSTICS / '*.ndjson')) for line in open(path, errors='replace'))
 
 
