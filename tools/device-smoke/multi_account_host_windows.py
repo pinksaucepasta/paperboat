@@ -92,7 +92,7 @@ def main():
     # User B is a throwaway local administrator (an SSH session is elevated, as pb install needs) with a random
     # password; it and its profile are removed on every exit path.
     password = secrets.token_urlsafe(18) + 'aA1!'
-    user_a, user_b = User(windows), User('%s@%s' % (USER_B, windows), password)
+    user_a, user_b = User(windows), User('%s@%s' % (USER_B, windows), password if os.environ.get('VICTUS_PASS') else '')
     shared = r'C:\Users\Public\pb-mah.exe'
     ids_a, ids_b, detail, status = [], [], '', 'FAIL'
     try:
