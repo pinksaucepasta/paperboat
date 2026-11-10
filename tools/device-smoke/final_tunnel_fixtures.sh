@@ -52,7 +52,7 @@ private-tcp)
   start_http "$CT_B"; start_echo "$CT_B"; sleep 1
   create_tunnel "$CT_B" "final-ptcp-$STAMP" --private || { echo "FAIL private tunnel create"; exit 1; }
   route=$(in_ct "$CT_B" ".local/bin/pb tunnel route add $TUNNEL_ID --name echo --protocol tcp_private --to tcp://127.0.0.1:$ECHO_PORT --wait --timeout 90s --json" | json_field 'd["route"]["id"]') || { echo "FAIL tcp_private route add"; exit 1; }
-  tar czf - -C "$HERE" tunnel_private_access.py pairing_lifecycle.py | ssh "$HOST" "sudo -n docker exec -i -u pbt $CT_A bash -c 'mkdir -p ~/ds && tar xzf - -C ~/ds'"
+  tar czf - -C "$HERE" tunnel_private_access.py pairing_lifecycle.py winhost.py pairing_fault.py terminal_command.py failure_triage.py | ssh "$HOST" "sudo -n docker exec -i -u pbt $CT_A bash -c 'mkdir -p ~/ds && tar xzf - -C ~/ds'"
   in_ct "$CT_A" "cd ~/ds && python3 tunnel_private_access.py --tunnel $TUNNEL_ID --route $route --nonce final-$STAMP"
   ;;
 console-tunnels)

@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 """C126: access one private TCP route by route/tunnel ID, exchange bytes, close the listener."""
 import argparse
+import base64
 import hashlib
 import json
-import os
-from pathlib import Path
-import signal
 import socket
-import subprocess
-import tempfile
 import time
 
+import winhost
 from pairing_lifecycle import command_result
 
 
@@ -31,61 +28,72 @@ def error_case(pb, words):
     return record
 
 
+def echo(host, port, payload):
+    """Send payload to the private listener and return what came back, from the device when pb runs there."""
+    if winhost.device():
+        require(len(payload) <= 8192, 'payload exceeds the EXCHANGE reply ceiling (winhost.py)')
+        rc, out = winhost.device().ps('tunnel echo with %s:%s' % (host, port), winhost.EXCHANGE, timeout=90,
+                                      address=host, port=port, block=base64.b64encode(payload).decode(), repeat=1)
+        return base64.b64decode(out)
+    with socket.create_connection((host, port), timeout=20) as connection:
+        connection.settimeout(20)
+        connection.sendall(payload)
+        answer = bytearray()
+        while len(answer) < len(payload):
+            chunk = connection.recv(min(4096, len(payload) - len(answer)))
+            require(chunk, 'TCP echo closed early')
+            answer.extend(chunk)
+        return bytes(answer)
+
+
+def listener_closed(host, port):
+    if winhost.device():
+        rc, _ = winhost.device().ps('tunnel listener closed', winhost.EXCHANGE, timeout=60, ok=(0, winhost.REFUSED),
+                                    address=host, port=port, block='AA==', repeat=1)
+        return rc == winhost.REFUSED
+    with socket.socket() as probe:
+        probe.settimeout(2)
+        return probe.connect_ex((host, port)) != 0
+
+
 def one_session(pb, selector, tunnel, route, nonce):
-    argv = [str(pb), 'access', 'tunnel', selector, '--listen', '127.0.0.1:0', '--json']
-    with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
-        process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=output, stderr=errors)
-        result = {'argv': argv}
+    argv = ['access', 'tunnel', selector, '--listen', '127.0.0.1:0', '--json']
+    job = winhost.job(pb, argv)
+    result = {'argv': [str(pb), *argv]}
+    try:
         session = None
-        try:
-            end = time.monotonic() + 60
-            while time.monotonic() < end:
-                raw = os.pread(output.fileno(), (16 << 10) + 1, 0)
-                require(len(raw) <= 16 << 10, 'access receipt exceeded bound')
-                if b'\n' in raw:
-                    receipt = json.loads(raw.split(b'\n', 1)[0])
-                    require(receipt.get('ok') is not False, 'access was refused')
-                    session = receipt.get('data', receipt)
-                    break
-                require(process.poll() is None, 'access command exited before its receipt')
-                time.sleep(.1)
-            require(session is not None, 'access command did not publish its listener')
-            require(session['tunnel_id'] == tunnel and session['route_id'] == route, 'wrong access resource')
-            host, port = session['listen_address'].rsplit(':', 1)
-            require(host == '127.0.0.1' and int(port) > 0, 'listener is not literal loopback')
-            require(process.poll() is None, 'access command did not retain its session')
-            payload = nonce.encode() + b'\x00' + bytes(range(256)) * 16
-            with socket.create_connection((host, int(port)), timeout=20) as connection:
-                connection.settimeout(20)
-                connection.sendall(payload)
-                answer = bytearray()
-                while len(answer) < len(payload):
-                    chunk = connection.recv(min(4096, len(payload) - len(answer)))
-                    require(chunk, 'TCP echo closed early')
-                    answer.extend(chunk)
-                require(bytes(answer) == payload, 'TCP echo changed bytes')
-            require(process.poll() is None, 'access exited during echo')
-            process.send_signal(signal.SIGTERM)
-            process.wait(timeout=15)
-            with socket.socket() as probe:
-                probe.settimeout(2)
-                require(probe.connect_ex((host, int(port))) != 0, 'listener remained open after command exit')
-            result.update(status='PASS', payload_bytes=len(payload),
-                          payload_sha256=hashlib.sha256(payload).hexdigest(),
-                          listener_closed=True, shutdown_exit=process.returncode)
-        except Exception as error:
-            result.update(status='FAIL', reason=str(error),
-                          stdout=os.pread(output.fileno(), 64 << 10, 0).decode(errors='replace'),
-                          stderr=os.pread(errors.fileno(), 64 << 10, 0).decode(errors='replace'))
-        finally:
-            if process.poll() is None:
-                process.send_signal(signal.SIGTERM)
-                try:
-                    process.wait(timeout=15)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=5)
-        return result
+        end = time.monotonic() + 60
+        while time.monotonic() < end:
+            raw = job.stdout((16 << 10) + 1)
+            require(len(raw) <= 16 << 10, 'access receipt exceeded bound')
+            if b'\n' in raw:
+                receipt = json.loads(raw.split(b'\n', 1)[0])
+                require(receipt.get('ok') is not False, 'access was refused')
+                session = receipt.get('data', receipt)
+                break
+            require(job.poll() is None, 'access command exited before its receipt')
+            time.sleep(.5 if winhost.device() else .1)
+        require(session is not None, 'access command did not publish its listener')
+        require(session['tunnel_id'] == tunnel and session['route_id'] == route, 'wrong access resource')
+        host, port = session['listen_address'].rsplit(':', 1)
+        port = int(port)
+        require(host == '127.0.0.1' and port > 0, 'listener is not literal loopback')
+        require(job.poll() is None, 'access command did not retain its session')
+        payload = nonce.encode() + b'\x00' + bytes(range(256)) * 16
+        require(echo(host, port, payload) == payload, 'TCP echo changed bytes')
+        require(job.poll() is None, 'access exited during echo')
+        job.terminate()
+        require(listener_closed(host, port), 'listener remained open after command exit')
+        result.update(status='PASS', payload_bytes=len(payload), payload_sha256=hashlib.sha256(payload).hexdigest(),
+                      listener_closed=True, shutdown_exit=job.poll())
+    except Exception as error:
+        result.update(status='FAIL', reason=str(error), stdout=job.stdout(64 << 10).decode(errors='replace'),
+                      stderr=job.stderr().decode(errors='replace'))
+    finally:
+        if job.poll() is None:
+            job.kill()
+        job.close()
+    return result
 
 
 def main():
@@ -94,7 +102,7 @@ def main():
     parser.add_argument('--route', required=True)
     parser.add_argument('--nonce', required=True)
     args = parser.parse_args()
-    pb = Path.home() / '.local/bin/pb'
+    pb = winhost.pb_path()
     errors = [error_case(pb, ['access', 'tunnel', '--json']),
               error_case(pb, ['access', 'tunnel', args.route, '--listen', '0.0.0.0:0', '--json']),
               error_case(pb, ['access', 'tunnel', 'missing-' + args.nonce, '--json'])]
