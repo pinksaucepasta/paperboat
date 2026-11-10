@@ -10,6 +10,7 @@ Afterwards: the sender exits 0 and both files in PEER's Inbox match the sender's
 the preview URL and the tunnel URL are unchanged and serve their marker again (a gap while the runtime restarts is allowed).
 """
 import argparse
+import contextlib
 import functools
 import hashlib
 import http.server
@@ -33,8 +34,11 @@ from preview_receipt import PREVIEW_COMMAND_TIMEOUT, receipt_value
 import terminal_command
 from session_cleanup import cleanup
 from terminal_lifecycle import Terminal
+from update_continuity import SHELL_PID
+import windows_target
+import winhost
 
-PB = Path.home() / '.local/bin/pb'
+PB = winhost.pb_path()
 FILES = 2
 FILE_SIZE = 40 << 20  # default; --mib overrides
 GAP_SECONDS = 240
@@ -83,7 +87,8 @@ def main():
     args = parser.parse_args()
     global FILE_SIZE
     FILE_SIZE = args.mib << 20
-    password = sys.stdin.readline().rstrip('\n')
+    password = None if winhost.device() else sys.stdin.readline().rstrip('\n')
+    windows = windows_target.is_windows(PB, args.target)
     before = registration()
     marker = 'PB_UPDATE_SURVIVE_' + uuid.uuid4().hex
     name = 'smoke-usurvive-' + uuid.uuid4().hex[:8]
@@ -94,12 +99,25 @@ def main():
     session_name = 'smoke-usurvive-term-' + uuid.uuid4().hex[:8]
     result = {'check': 'update-survival', 'target': args.target, 'peer': args.peer}
     error = None
-    with tempfile.TemporaryDirectory(prefix='paperboat-update-survive-') as directory:
+
+    def shell_identity(label):
+        """Ask the held shell for its process id: $$ in sh; under cmd.exe the parent of a PowerShell typed there."""
+        if windows:
+            held.send(windows_target.typed_marker('PB_' + label + '_', SHELL_PID) + '\r')
+        else:
+            held.send("printf '\\nPB_" + label + "''_%s\\n' \"$$\"\r")  # the typed echo must not contain the marker
+        held.expect('PB_' + label + '_', timeout=180)
+        return held.expect('\n', timeout=10).decode().strip()
+    with tempfile.TemporaryDirectory(prefix='paperboat-update-survive-') as directory, \
+            winhost.workdir('paperboat-update-survive-') as files, contextlib.ExitStack() as stack:
         (Path(directory) / 'index.html').write_text('<p>' + marker + '</p>')
         server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(QuietHandler, directory=directory))
         threading.Thread(target=server.serve_forever, daemon=True).start()
         port = server.server_port
+        sender = None
         try:
+            if winhost.device() and not args.transfer_only:  # the origin stays here; pb on the device dials the forward
+                port = stack.enter_context(winhost.device().forward(port))
             if not args.transfer_only:
                 lease = invoke(PB, 'preview', str(port), '--background', '--ttl', '40m', '--json', timeout=PREVIEW_COMMAND_TIMEOUT)
                 preview_id, preview_url = lease['id'], receipt_value(lease, 'endpoint')
@@ -110,48 +128,39 @@ def main():
             if args.terminal:
                 # the official build being updated from may predate --status-bar
                 quiet = ['--status-bar', 'off'] if '--status-bar' in command_result(PB, 'connect', '--help', timeout=60).stdout else []
-                held = Terminal([str(PB), 'connect', args.target, '--name', session_name, *quiet])
-                held.expect(b'\x1b[?2004h')
-                held.expect(held.marker('READY', 'stty -echo; '))
-                held.send("printf '\\nPB_SHELL''_%s\\n' \"$$\"\r")  # the typed echo must not contain the marker
-                held.expect('PB_SHELL_')
-                shell_pid = held.expect('\n').decode().strip()
+                held = Terminal(winhost.terminal_argv(PB, ['connect', args.target, '--name', session_name, *quiet]),
+                                env=winhost.terminal_env(PB))
+                if not windows:
+                    held.expect(b'\x1b[?2004h')
+                    held.expect(held.marker('READY', 'stty -echo; '))
+                shell_pid = shell_identity('SHELL')
                 if not shell_pid.isdigit():
                     raise RuntimeError('could not read the held shell identity')
             # TARGET creates two random files and starts sending them to PEER; the update restarts TARGET's runtime meanwhile.
             hashes = {}
             send_files = []
             for number in range(FILES):
-                path = Path(directory) / ('%s-%d.bin' % (prefix, number))
-                digest = hashlib.sha256()
-                with path.open('wb') as handle:
-                    for _ in range(FILE_SIZE >> 20):
-                        block = os.urandom(1 << 20)
-                        digest.update(block)
-                        handle.write(block)
-                hashes[path.name] = digest.hexdigest()
+                path = files / ('%s-%d.bin' % (prefix, number))
+                hashes[path.name] = winhost.write_random(path, FILE_SIZE)
                 send_files.append(str(path))
-            sender = subprocess.Popen([str(PB), 'send', *send_files, '--to', args.peer, '--json'],
-                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            sender = winhost.job(PB, ['send', *send_files, '--to', args.peer, '--json'])
             time.sleep(10)
             if sender.poll() is not None:
-                raise RuntimeError('the transfer ended before the update started: ' + sender.communicate()[0].decode()[-200:])
+                raise RuntimeError('the transfer ended before the update started: ' + sender.stdout().decode()[-200:])
             if args.approve:
                 status = json.loads(command_result(PB, 'update', 'status', '--json', timeout=60).stdout)['data']
                 candidate = status['candidate']['id']
-                update = [str(PB), 'update', '--approve', candidate, '--force', '--json']
+                update = ['update', '--approve', candidate, '--force', '--json']
             else:
-                update = [str(PB), 'update', '--from', args.source, '--force', '--json']
-            update_result = terminal_command.run(update, password=password, timeout=900)
+                update = ['update', '--from', args.source, '--force', '--json']
+            update_result = command_result(PB, *update, terminal=True, password=password, timeout=900)
             text = re.sub(r'\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x1b]*\x1b\\', '', update_result.stdout)
             if update_result.returncode:
                 raise RuntimeError('update failed rc=%s: %s' % (update_result.returncode, text[-400:]))
             result['update_started'] = True
             if held is not None:
-                held.send("printf '\\nPB_AGAIN''_%s\\n' \"$$\"\r")  # the typed echo must not contain the marker
-                held.expect('PB_AGAIN_', timeout=180)
                 # judged with the rest: a lost shell must not hide whether the preview, tunnel and transfer survived
-                if held.expect('\n', timeout=10).decode().strip() == shell_pid:
+                if shell_identity('AGAIN') == shell_pid:
                     result['same_shell_after_update'] = True
                 else:
                     terminal_error = 'the held terminal reconnected to a different shell after the update'
@@ -168,12 +177,12 @@ def main():
                 wait_for(lambda: ready_endpoint() == preview_url, 'the preview lease to report ready on the same URL')
                 wait_for(lambda: tunnel('status', tunnel_id).get('overall_code') == 'ready', 'the tunnel to report ready (same stable URL already served)')
             try:
-                out, errs = sender.communicate(timeout=600)
+                code = sender.wait(600)
             except subprocess.TimeoutExpired:
                 sender.kill()
                 raise RuntimeError('the transfer did not finish within 10 minutes of the update')
-            if sender.returncode != 0:
-                raise RuntimeError('the transfer failed after the update (rc %s): %s' % (sender.returncode, (out + errs).decode()[-300:]))
+            if code != 0:
+                raise RuntimeError('the transfer failed after the update (rc %s): %s' % (code, (sender.stdout() + sender.stderr()).decode()[-300:]))
             listing = peer(args.peer, 'cd ~/Paperboat/Inbox && sha256sum %s-*.bin' % prefix, 120).stdout
             received = {line.split()[1].lstrip('*'): line.split()[0] for line in listing.splitlines() if len(line.split()) == 2}
             if received != hashes:
@@ -210,9 +219,13 @@ def main():
                     pass
                 held.close()
                 try:
-                    cleanup(str(PB), args.target, session_name)
+                    cleanup(PB, args.target, session_name)
                 except BaseException:
                     pass
+            if sender is not None:
+                if sender.poll() is None:
+                    sender.kill()
+                sender.close()
             server.shutdown()
             server.server_close()
     assert registration() == before, 'enrollment changed'
