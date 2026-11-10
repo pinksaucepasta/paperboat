@@ -180,7 +180,7 @@ def main():
                 sender.kill()
                 raise RuntimeError('the transfer did not finish within 10 minutes of the update')
             if code != 0:
-                raise RuntimeError('the transfer failed after the update (rc %s): %s' % (code, (sender.stdout() + sender.stderr()).decode()[-300:]))
+                raise RuntimeError('the transfer failed after the update (rc %s): %s' % (code, (sender.stdout() + sender.stderr()).decode()[-2000:]))
             listing = peer(args.peer, 'cd ~/Paperboat/Inbox && sha256sum %s-*.bin' % prefix, 120).stdout
             received = {line.split()[1].lstrip('*'): line.split()[0] for line in listing.splitlines() if len(line.split()) == 2}
             if received != hashes:
