@@ -129,8 +129,7 @@ def linux_os_inventory(account, home, add):
     uid = account.pw_uid
     paths = ['/usr/local/libexec/paperboat', '/var/lib/paperboat',
              '/var/lib/paperboat-installer', '/var/lib/paperboat-machineguard',
-             '/usr/local/libexec/paperboat-machineguard',
-             '/usr/local/libexec/paperboat-deviceguard']
+             '/usr/local/libexec/paperboat-machineguard']
     patterns = ['/etc/systemd/system/*paperboat*',
                 '/etc/systemd/system/*/*paperboat*', '/run/paperboat*',
                 '/var/lib/paperboat-*', '/var/cache/paperboat*',
@@ -196,8 +195,7 @@ def darwin_os_inventory(account, home, add):
     uid = account.pw_uid
     paths = ['/Library/PrivilegedHelperTools/Paperboat',
              '/Library/Application Support/Paperboat',
-             '/Library/PrivilegedHelperTools/io.paperboat.machineguard',
-             '/Library/PrivilegedHelperTools/io.paperboat.deviceguard']
+             '/Library/PrivilegedHelperTools/io.paperboat.machineguard']
     patterns = ['/Library/LaunchDaemons/*paperboat*',
                 '/private/var/log/com.pinksaucepasta.paperboat*',
                 '/var/run/paperboat*']

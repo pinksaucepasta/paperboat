@@ -31,7 +31,7 @@ func newLinuxPurgeFixture(t *testing.T) *linuxPurgeFixture {
 			UnitDir:    filepath.Join(root, "units"),
 			StateDir:   filepath.Join(root, "state"),
 			RuntimeDir: filepath.Join(root, "run"),
-			Libexec:    []string{filepath.Join(root, "libexec", "paperboat-machineguard"), filepath.Join(root, "libexec", "paperboat-deviceguard")},
+			Libexec:    []string{filepath.Join(root, "libexec", "paperboat-machineguard")},
 			TrustDirs:  []string{filepath.Join(root, "ca-certificates"), filepath.Join(root, "ssl-certs")},
 		},
 		runErrs: map[string]error{},
@@ -122,9 +122,7 @@ func TestPurgeLinuxRemovesEveryGuardArtifact(t *testing.T) {
 	unrelatedUnit := filepath.Join(units, "paperboat-console.service")
 	writeLinuxFile(t, unrelatedUnit, "[Service]\n")
 
-	for _, executable := range []string{filepath.Join(f.paths.Libexec[0], "pb"), filepath.Join(f.paths.Libexec[1], "tool")} {
-		writeLinuxFile(t, executable, "binary")
-	}
+	writeLinuxFile(t, filepath.Join(f.paths.Libexec[0], "pb"), "binary")
 	writeLinuxFile(t, filepath.Join(f.paths.StateDir, "reservations.json"), `{"ips":{}}`)
 	writeLinuxFile(t, filepath.Join(f.paths.StateDir, "lock"), "")
 
@@ -142,7 +140,7 @@ func TestPurgeLinuxRemovesEveryGuardArtifact(t *testing.T) {
 		t.Fatalf("purge: %v", err)
 	}
 
-	for _, path := range []string{service, deny, filepath.Join(wantsDirectory, "paperboat-machineguard.service"), filepath.Join(requiresDirectory, "paperboat-machineguard-deny.service"), trustFile, filepath.Join(f.paths.TrustDirs[1], trustName), f.paths.StateDir, f.paths.Libexec[0], f.paths.Libexec[1]} {
+	for _, path := range []string{service, deny, filepath.Join(wantsDirectory, "paperboat-machineguard.service"), filepath.Join(requiresDirectory, "paperboat-machineguard-deny.service"), trustFile, filepath.Join(f.paths.TrustDirs[1], trustName), f.paths.StateDir, f.paths.Libexec[0]} {
 		linuxAbsent(t, path)
 	}
 	linuxPresent(t, unrelatedUnit)

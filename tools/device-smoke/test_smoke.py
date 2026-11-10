@@ -103,9 +103,9 @@ class PairingNetworkFault(unittest.TestCase):
 
 class PFFirewallInventory(unittest.TestCase):
     def test_empty_anchor_names_are_not_rules_and_query_errors_fail(self):
-        anchors = '000.paperboat-machineguard\n000.paperboat-deviceguard\nforeign\n'
+        anchors = '000.paperboat-machineguard\n000.paperboat-second\nforeign\n'
         responses = {}
-        for name in ['000.paperboat-machineguard', '000.paperboat-deviceguard']:
+        for name in ['000.paperboat-machineguard', '000.paperboat-second']:
             for kind in ['rules', 'nat']:
                 responses[(name, kind)] = ''
 
@@ -119,9 +119,9 @@ class PFFirewallInventory(unittest.TestCase):
         with patch.object(uninstall_inventory, 'run', run):
             self.assertEqual(uninstall_inventory.darwin_pf_rule_count(), 0)
             responses[('000.paperboat-machineguard', 'rules')] = 'block drop quick on lo0 all\n'
-            responses[('000.paperboat-deviceguard', 'nat')] = 'rdr pass on lo0 inet proto tcp to any -> 127.0.0.1\n'
+            responses[('000.paperboat-second', 'nat')] = 'rdr pass on lo0 inet proto tcp to any -> 127.0.0.1\n'
             self.assertEqual(uninstall_inventory.darwin_pf_rule_count(), 2)
-            responses[('000.paperboat-deviceguard', 'nat')] = None
+            responses[('000.paperboat-second', 'nat')] = None
             with self.assertRaises(RuntimeError):
                 uninstall_inventory.darwin_pf_rule_count()
 

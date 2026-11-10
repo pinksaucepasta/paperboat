@@ -217,94 +217,6 @@ func TestPurgeDarwinPreservesResourcesUntilStoppedGuardCustody(t *testing.T) {
 	}
 }
 
-func TestPurgeDarwinRetiresOwnedLegacyStateWithoutRemovingForeignState(t *testing.T) {
-	for _, kind := range []string{"owned", "empty", "foreign-state", "bad-ranges", "state-symlink", "held-state", "foreign-control", "bad-certificate"} {
-		t.Run(kind, func(t *testing.T) {
-			f := newDarwinPurgeFixture(t)
-			f.paths.LegacyStateDir = filepath.Join(filepath.Dir(f.paths.StateDir), "deviceguard")
-			f.paths.LegacySocketDir = filepath.Join(filepath.Dir(f.paths.StateDir), "deviceguard-control")
-			if err := os.MkdirAll(f.paths.LegacyStateDir, 0700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.MkdirAll(f.paths.LegacySocketDir, 0700); err != nil {
-				t.Fatal(err)
-			}
-			if kind != "empty" {
-				if err := writeLoopbackState(f.paths.LegacyStateDir, loopbackState{Active: "127.100.0.0/16", Protected: []string{"127.100.0.0/16"}}); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(filepath.Join(f.paths.LegacyStateDir, "aliases.json"), []byte("{}"), 0600); err != nil {
-					t.Fatal(err)
-				}
-				for _, name := range []string{"certificates", "trusted-ca"} {
-					if err := os.Mkdir(filepath.Join(f.paths.LegacyStateDir, name), 0700); err != nil {
-						t.Fatal(err)
-					}
-				}
-			}
-			switch kind {
-			case "foreign-state":
-				if err := os.WriteFile(filepath.Join(f.paths.LegacyStateDir, "foreign"), []byte("preserve"), 0600); err != nil {
-					t.Fatal(err)
-				}
-			case "bad-ranges":
-				if err := os.WriteFile(filepath.Join(f.paths.LegacyStateDir, "loopback-ranges.json"), []byte("invalid"), 0600); err != nil {
-					t.Fatal(err)
-				}
-			case "state-symlink":
-				if err := os.Rename(f.paths.LegacyStateDir, f.paths.LegacyStateDir+".foreign"); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.Symlink(f.paths.LegacyStateDir+".foreign", f.paths.LegacyStateDir); err != nil {
-					t.Fatal(err)
-				}
-			case "held-state":
-				lock, err := lockState(filepath.Join(f.paths.LegacyStateDir, "lock"))
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer lock.Close()
-			case "foreign-control":
-				if err := os.WriteFile(filepath.Join(f.paths.LegacySocketDir, "foreign"), []byte("preserve"), 0600); err != nil {
-					t.Fatal(err)
-				}
-			case "bad-certificate":
-				dir := filepath.Join(f.paths.LegacyStateDir, "certificates", "local.example.test")
-				if err := os.Mkdir(dir, 0700); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(filepath.Join(dir, "rootCA.pem"), []byte("foreign"), 0644); err != nil {
-					t.Fatal(err)
-				}
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-			err := f.purge(ctx)
-			if kind == "owned" || kind == "empty" {
-				if err != nil {
-					t.Fatal(err)
-				}
-				for _, path := range []string{f.paths.LegacyStateDir, f.paths.LegacySocketDir} {
-					if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
-						t.Fatal("legacy namespace remains", err)
-					}
-				}
-				return
-			}
-			if err == nil {
-				t.Fatal("foreign or unsafe legacy state accepted")
-			}
-			path := f.paths.LegacyStateDir
-			if kind == "foreign-control" {
-				path = filepath.Join(f.paths.LegacySocketDir, "foreign")
-			}
-			if _, err := os.Lstat(path); err != nil {
-				t.Fatal("foreign or unsafe state removed", err)
-			}
-		})
-	}
-}
-
 func (f *darwinPurgeFixture) called(command string) bool {
 	for _, call := range f.calls {
 		if call == command {
@@ -316,20 +228,11 @@ func (f *darwinPurgeFixture) called(command string) bool {
 
 func TestPurgeDarwinRemovesStateSocketAndOwnedAccount(t *testing.T) {
 	f := newDarwinPurgeFixture(t)
-	f.paths.LegacyLaunchPath = filepath.Join(filepath.Dir(f.paths.LaunchPath), "io.paperboat.deviceguard.plist")
-	f.paths.LegacyHelperPath = filepath.Join(filepath.Dir(f.paths.HelperPath), "io.paperboat.deviceguard")
-	f.paths.LegacyAnchor = "com.apple/000.paperboat-deviceguard"
-	for _, path := range []string{f.paths.LegacyLaunchPath, f.paths.LegacyHelperPath, f.paths.NewsyslogPath} {
-		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-			t.Fatal(err)
-		}
-		body := []byte("helper")
-		if path == f.paths.LegacyLaunchPath {
-			body = []byte("<!-- Managed by Paperboat device guard -->")
-		}
-		if err := os.WriteFile(path, body, 0644); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.MkdirAll(filepath.Dir(f.paths.NewsyslogPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f.paths.NewsyslogPath, []byte("helper"), 0644); err != nil {
+		t.Fatal(err)
 	}
 	if err := os.MkdirAll(f.paths.StateDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -343,7 +246,7 @@ func TestPurgeDarwinRemovesStateSocketAndOwnedAccount(t *testing.T) {
 		t.Fatalf("purge: %v", err)
 	}
 	// The log rotation installed with the guard is removed with it.
-	for _, path := range []string{f.paths.StateDir, f.paths.SocketDir, f.paths.LegacyLaunchPath, f.paths.LegacyHelperPath, f.paths.NewsyslogPath} {
+	for _, path := range []string{f.paths.StateDir, f.paths.SocketDir, f.paths.NewsyslogPath} {
 		if _, err := os.Lstat(path); !os.IsNotExist(err) {
 			t.Fatalf("%s still exists (err=%v)", path, err)
 		}
@@ -353,9 +256,6 @@ func TestPurgeDarwinRemovesStateSocketAndOwnedAccount(t *testing.T) {
 	}
 	if !f.called("/sbin/pfctl -a com.apple/000.paperboat-machineguard -F all") {
 		t.Fatalf("PF anchor was not flushed; calls=%v", f.calls)
-	}
-	if !f.called("/sbin/pfctl -a com.apple/000.paperboat-deviceguard -F all") || !f.called("/bin/launchctl bootout system/io.paperboat.deviceguard") {
-		t.Fatalf("legacy device guard was not retired; calls=%v", f.calls)
 	}
 }
 

@@ -79,7 +79,6 @@ type darwinInstallConfig struct {
 	HelperPath, LaunchPath, Label, Socket, Account string
 	NewsyslogPath                                  string // set for the real install; tests leave it empty
 	StateDir                                       string
-	LaunchMarker                                   string
 	RollbackState                                  *loopbackState
 	// Undo receives the restore for the prior installation on success; nil discards it.
 	Undo            **Undo
@@ -216,10 +215,7 @@ func installDarwin(ctx context.Context, executable string, cfg darwinInstallConf
 }
 
 func darwinCheckInstallOwnership(cfg darwinInstallConfig) error {
-	marker := cfg.LaunchMarker
-	if marker == "" {
-		marker = darwinLaunchMarker
-	}
+	marker := darwinLaunchMarker
 	ownedUnit := false
 	for _, path := range []string{cfg.LaunchPath, cfg.HelperPath} {
 		info, err := os.Lstat(path)

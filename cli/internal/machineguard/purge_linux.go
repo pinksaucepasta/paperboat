@@ -24,7 +24,7 @@ func Purge(ctx context.Context) error {
 			UnitDir:    "/etc/systemd/system",
 			StateDir:   DefaultStateDir,
 			RuntimeDir: "/run/paperboat-machineguard",
-			Libexec:    []string{"/usr/local/libexec/paperboat-machineguard", "/usr/local/libexec/paperboat-deviceguard"},
+			Libexec:    []string{"/usr/local/libexec/paperboat-machineguard"},
 			TrustDirs:  []string{"/usr/local/share/ca-certificates", "/etc/ssl/certs"},
 		},
 		Run: func(ctx context.Context, name string, args ...string) error {

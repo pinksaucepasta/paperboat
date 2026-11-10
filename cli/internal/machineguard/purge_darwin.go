@@ -35,17 +35,12 @@ func Purge(ctx context.Context) error {
 	}
 	return purgeDarwin(ctx, darwinPurge{
 		Paths: darwinPurgePaths{
-			LaunchPath:       darwinLaunchPath,
-			HelperPath:       darwinHelperPath,
-			NewsyslogPath:    darwinNewsyslogPath,
-			StateDir:         DefaultStateDir,
-			SocketDir:        filepath.Dir(DefaultSocket),
-			Anchor:           darwinAnchor,
-			LegacyLaunchPath: "/Library/LaunchDaemons/io.paperboat.deviceguard.plist",
-			LegacyHelperPath: "/Library/PrivilegedHelperTools/io.paperboat.deviceguard",
-			LegacyAnchor:     "com.apple/000.paperboat-deviceguard",
-			LegacyStateDir:   "/Library/Application Support/Paperboat/deviceguard",
-			LegacySocketDir:  "/Library/Application Support/Paperboat/deviceguard-control",
+			LaunchPath:    darwinLaunchPath,
+			HelperPath:    darwinHelperPath,
+			NewsyslogPath: darwinNewsyslogPath,
+			StateDir:      DefaultStateDir,
+			SocketDir:     filepath.Dir(DefaultSocket),
+			Anchor:        darwinAnchor,
 		},
 		Run:          runDarwinTrustRemoval,
 		RestoreProxy: func(ctx context.Context) error { return removePreviewProxy(ctx, DefaultStateDir) },
@@ -53,11 +48,9 @@ func Purge(ctx context.Context) error {
 }
 
 type darwinPurgePaths struct {
-	LaunchPath, HelperPath, NewsyslogPath            string
-	StateDir, SocketDir                              string
-	Anchor                                           string
-	LegacyLaunchPath, LegacyHelperPath, LegacyAnchor string
-	LegacyStateDir, LegacySocketDir                  string
+	LaunchPath, HelperPath, NewsyslogPath string
+	StateDir, SocketDir                   string
+	Anchor                                string
 }
 
 // darwinPurge carries every external effect so the purge order can be tested
@@ -94,27 +87,11 @@ func purgeDarwin(ctx context.Context, p darwinPurge) (resultErr error) {
 		return err
 	}
 	defer func() { resultErr = errors.Join(resultErr, lifecycle.Close()) }()
-	legacyExists, err := legacyDarwinStateExists(paths.LegacyStateDir)
-	if err != nil {
-		return err
-	}
-	if legacyExists {
-		legacyLifecycle, err := lockGuardLifecycle(paths.LegacyStateDir)
-		if err != nil {
-			return err
-		}
-		defer func() { resultErr = errors.Join(resultErr, legacyLifecycle.Close()) }()
-	}
 
 	// Launch files are removed only when they are Paperboat's own, following the
 	// ownership rule install and uninstall enforce.
 	if err := darwinCheckInstallOwnership(darwinInstallConfig{HelperPath: paths.HelperPath, LaunchPath: paths.LaunchPath}); err != nil {
 		return fmt.Errorf("machine guard launch service preserved: %w", err)
-	}
-	if paths.LegacyLaunchPath != "" {
-		if err := darwinCheckInstallOwnership(darwinInstallConfig{LaunchPath: paths.LegacyLaunchPath, HelperPath: paths.LegacyHelperPath, LaunchMarker: "<!-- Managed by Paperboat device guard -->"}); err != nil {
-			return fmt.Errorf("legacy device guard preserved: %w", err)
-		}
 	}
 	// Full purge stops the owned guard directly. Standalone Uninstall retains
 	// denial and therefore copies/restarts a helper; that transition is neither
@@ -122,33 +99,13 @@ func purgeDarwin(ctx context.Context, p darwinPurge) (resultErr error) {
 	if err := stopDarwinPurgeJob(ctx, p.Run, "system/"+darwinGuardLabel); err != nil {
 		return err
 	}
-	if paths.LegacyLaunchPath != "" {
-		if err := stopDarwinPurgeJob(ctx, p.Run, "system/io.paperboat.deviceguard"); err != nil {
-			return err
-		}
-	}
 	lock, err := lockStoppedGuard(ctx, paths.StateDir)
 	if err != nil {
 		return err
 	}
 	defer func() { resultErr = errors.Join(resultErr, lock.Close()) }()
-	if legacyExists {
-		legacyLock, err := lockStoppedGuard(ctx, paths.LegacyStateDir)
-		if err != nil {
-			return err
-		}
-		defer func() { resultErr = errors.Join(resultErr, legacyLock.Close()) }()
-	}
 
 	result = errors.Join(result, removeOwnedPath(paths.LaunchPath), removeOwnedPath(paths.HelperPath), removeOwnedPath(paths.NewsyslogPath))
-	if paths.LegacyLaunchPath != "" {
-		result = errors.Join(result, removeOwnedPath(paths.LegacyLaunchPath), removeOwnedPath(paths.LegacyHelperPath))
-	}
-	if paths.LegacyAnchor != "" {
-		if _, err := p.Run(ctx, "/sbin/pfctl", "-a", paths.LegacyAnchor, "-F", "all"); err != nil {
-			result = errors.Join(result, fmt.Errorf("flush legacy device guard PF anchor: %w", err))
-		}
-	}
 
 	// Trust removal needs the retained root records, so the state directory is
 	// kept whenever it fails.
@@ -163,9 +120,6 @@ func purgeDarwin(ctx context.Context, p darwinPurge) (resultErr error) {
 		result = errors.Join(result, cleanupDarwinTrustEntriesWithRunner(ctx, Config{StateDir: paths.StateDir}, roots, roots, true, p.Run))
 	}
 	result = errors.Join(result, removeBrowserDomainSelection(paths.StateDir))
-	if legacyExists {
-		result = errors.Join(result, retireLegacyDarwinState(ctx, paths.LegacyStateDir, p.Run))
-	}
 
 	// Full purge also retires orphaned owned roots whose protected manifests
 	// were already removed by an interrupted historical cleanup. Namespace
@@ -176,11 +130,8 @@ func purgeDarwin(ctx context.Context, p darwinPurge) (resultErr error) {
 		result = errors.Join(result, fmt.Errorf("flush machine guard PF anchor: %w", err))
 	}
 
-	for _, account := range []string{darwinBrokerAccount, "_paperboat_deviceguard"} {
-		result = errors.Join(result, purgeDarwinAccount(ctx, p.Run, account))
-	}
+	result = errors.Join(result, purgeDarwinAccount(ctx, p.Run, darwinBrokerAccount))
 	result = errors.Join(result, removeOwnedPath(paths.SocketDir))
-	result = errors.Join(result, removeEmptyLegacyDarwinControl(paths.LegacySocketDir))
 	if result == nil {
 		result = errors.Join(result, removeOwnedPath(paths.StateDir))
 	} else {
