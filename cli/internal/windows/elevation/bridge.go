@@ -65,8 +65,6 @@ const (
 	// minutes in the install phases and left nothing for the two readiness windows, so a first pair failed with
 	// install_readiness while everything converged minutes later (2026-11-11).
 	ReadinessTail = ReadinessHostdWindow + ReadinessDaemonBudget + 30*time.Second
-	// RuntimeCommitDuration is the bridge expiry of a commit: the activation budget plus the readiness tail.
-	RuntimeCommitDuration = RuntimeActivationDuration + ReadinessTail
 	// Install may first wait for an already-approved signed update's bounded
 	// recovery, then has the usual local activation budget. Other operations
 	// retain their shorter deadlines.
@@ -188,10 +186,7 @@ func operationDuration(operation, action string) time.Duration {
 		return RuntimeInstallDuration
 	}
 
-	if operation == OperationRuntimeService && action == ActionCommit {
-		return RuntimeCommitDuration
-	}
-	if operation == OperationRuntimeService && (action == ActionUninstall || action == ActionStop || action == ActionConfigInstall || action == ActionConfigRemove || action == ActionDaemonInstall || action == ActionDaemonRemove || action == ActionBrowserDomain) {
+	if operation == OperationRuntimeService && (action == ActionCommit || action == ActionUninstall || action == ActionStop || action == ActionConfigInstall || action == ActionConfigRemove || action == ActionDaemonInstall || action == ActionDaemonRemove || action == ActionBrowserDomain) {
 		return RuntimeActivationDuration
 	}
 	return MaxOperationDuration
