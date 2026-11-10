@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -154,25 +156,74 @@ func TestBridgeSSHFailedFINToTheClientIsAFailureUnlessItLeft(t *testing.T) {
 	}
 }
 
-// A failed CloseWrite (the FIN to sshd) is a failure, except once the bridge's own finish() has closed the socket.
+// A failed CloseWrite (the FIN to sshd) is ignored only when the bridge had already closed the sshd socket and the
+// error is what a closed socket reports.
 func TestCloseWriteFailureIsIgnoredOnlyAfterTheBridgeClosed(t *testing.T) {
-	// On Windows the closed-socket error is a fresh error value, not net.ErrClosed.
+	// On Windows the closed-socket error is a net.OpError around a fresh error value, not net.ErrClosed.
 	closedByUs := &net.OpError{Op: "close", Net: "tcp", Err: errors.New("use of closed network connection")}
-	refused := &net.OpError{Op: "close", Net: "tcp", Err: syscall.ECONNREFUSED}
+	refused := &net.OpError{Op: "close", Net: "tcp", Err: os.NewSyscallError("shutdown", syscall.ECONNREFUSED)}
 	for _, c := range []struct {
-		name     string
-		err      error
-		finished bool
-		want     bool // reported as a failure
+		name         string
+		err          error
+		closedBefore bool
+		want         bool // reported as a failure
 	}{
 		{"no error", nil, false, false},
 		{"closed by the bridge, typed", net.ErrClosed, true, false},
-		{"closed by the bridge, fresh error", closedByUs, true, false},
-		{"failure before the bridge closed", refused, false, true},
-		{"closed error before the bridge closed", closedByUs, false, true},
+		{"closed by the bridge, fresh closed-socket error", closedByUs, true, false},
+		{"refused after the bridge closed: a real failure", refused, true, true},
+		{"unknown error after the bridge closed", errors.New("fin lost"), true, true},
+		{"refused while sshd was open", refused, false, true},
+		{"closed-socket error while sshd was still open (racing close)", closedByUs, false, true},
+		{"fin lost while sshd was open", errors.New("fin lost"), false, true},
 	} {
-		if got := closeWriteFailure(c.err, c.finished) != nil; got != c.want {
+		if got := closeWriteFailure(c.err, c.closedBefore) != nil; got != c.want {
 			t.Errorf("%s: failure=%v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// closedAwareConn reports a closed-socket CloseWrite error only once Close has run, as a real socket does.
+type closedAwareConn struct {
+	net.Conn
+	closed atomic.Bool
+}
+
+func (c *closedAwareConn) Close() error { err := c.Conn.Close(); c.closed.Store(true); return err }
+func (c *closedAwareConn) CloseWrite() error {
+	if c.closed.Load() {
+		return &net.OpError{Op: "close", Net: "tcp", Err: errors.New("use of closed network connection")}
+	}
+	return nil
+}
+
+// sshd ends first, the bridge closes sshd and then the stream, and to_sshd's CloseWrite meets the closed socket: that
+// is the bridge's own close, a clean session (the ordering the closed flag has to get right).
+func TestBridgeSSHOwnCloseRacingCloseWriteIsClean(t *testing.T) {
+	previous := dialSSHD
+	dialSSHD = func(ctx context.Context, address string) (net.Conn, error) {
+		connection, dialErr := previous(ctx, address)
+		return &closedAwareConn{Conn: connection}, dialErr
+	}
+	defer func() { dialSSHD = previous }()
+	for range 50 { // the order of the two closes against the copier's wake-up is a race: repeat
+		listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		go func() {
+			if connection, acceptErr := listener.AcceptTCP(); acceptErr == nil {
+				_, _ = connection.Write([]byte("done"))
+				_ = connection.Close()
+			}
+		}()
+		bridgeSide, clientSide := tcpPair(t)
+		go func() { _, _ = io.Copy(io.Discard, clientSide) }()
+		_, err = BridgeSSH(t.Context(), bridgeSide, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second)
+		_ = clientSide.Close()
+		_ = listener.Close()
+		if err != nil {
+			t.Fatalf("a session sshd ended, closed by the bridge, reported %v", err)
 		}
 	}
 }

@@ -5,9 +5,11 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -112,11 +114,14 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 	}
 	var closeOnce sync.Once
 	var closeErr error
-	var finished atomic.Bool // the bridge itself has closed both sides
+	// sshdClosed is set only after sshd.Close() has returned, and before the stream is closed: the to_sshd copier
+	// wakes up on that stream close, so by then a CloseWrite failure on the closed sshd socket is our own doing.
+	var sshdClosed atomic.Bool
 	finish := func() error {
 		closeOnce.Do(func() {
-			finished.Store(true)
-			closeErr = errors.Join(sshd.Close(), stream.Close())
+			sshdErr := sshd.Close()
+			sshdClosed.Store(true)
+			closeErr = errors.Join(sshdErr, stream.Close())
 		})
 		return closeErr
 	}
@@ -145,7 +150,8 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 		}
 		copyErr = normalizeBridgeError(copyErr)
 		if half, ok := sshd.(interface{ CloseWrite() error }); ok {
-			copyErr = errors.Join(copyErr, closeWriteFailure(half.CloseWrite(), finished.Load()))
+			closedBefore := sshdClosed.Load() // read before the call: a close that races it is not assumed ours
+			copyErr = errors.Join(copyErr, closeWriteFailure(half.CloseWrite(), closedBefore))
 		}
 		copyErr = excuseReset(ctx, copyErr, sshdEOF)
 		if copyErr != nil {
@@ -202,15 +208,34 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 	return result, managedSSHBoundary("command", errors.Join(resultErr, cleanupErr))
 }
 
-// closeWriteFailure is what a failed CloseWrite (the FIN to sshd) counts as. Once the bridge's own finish() has closed
-// the socket the session is over and the FIN is moot, whatever error the closed socket reports (on Windows it is a
-// fresh error, not net.ErrClosed, so no typed match can name it). Before that, a failure means the FIN may never
+// closeWriteFailure is what a failed CloseWrite (the FIN to sshd) counts as. It is ignored only when the bridge had
+// already closed the sshd socket before the call and the error is what a closed socket reports (resultOfOwnClose):
+// the session is over and the FIN is moot. Any other failure, or one with sshd still open, means the FIN may never
 // have landed and is kept.
-func closeWriteFailure(err error, finished bool) error {
-	if finished {
+func closeWriteFailure(err error, closedBefore bool) error {
+	if closedBefore && resultOfOwnClose(err) {
 		return nil
 	}
 	return err
+}
+
+// resultOfOwnClose reports an error that a closed socket gives and nothing else: net.ErrClosed, or the net.OpError
+// Go wraps around a plain closed-socket value (on Windows a fresh error, not net.ErrClosed, so identity cannot name
+// it). An operating-system error inside it (refused, reset, aborted) is a real network failure.
+func resultOfOwnClose(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, net.ErrClosed) {
+		return true
+	}
+	var op *net.OpError
+	if !errors.As(err, &op) || op.Op != "close" {
+		return false
+	}
+	var errno syscall.Errno
+	var system *os.SyscallError
+	return !errors.As(err, &errno) && !errors.As(err, &system)
 }
 
 // waitClientLeft keeps err (a failed CloseWrite towards the client) only if the client does not show its EOF.
