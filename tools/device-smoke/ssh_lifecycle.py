@@ -21,7 +21,7 @@ def shell_ready(terminal):
     deadline = time.monotonic() + 60
     last_output = time.monotonic()
     while True:
-        visible = re.sub(rb'\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]', b'', terminal.output)
+        visible = re.sub(rb'\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]', b'', terminal.output)
         # A shell prompt is a settled, unterminated line; its glyphs are a user
         # preference. The following computed marker proves this is a real shell.
         if visible.rsplit(b'\n', 1)[-1].strip() and time.monotonic() - last_output >= .2:
