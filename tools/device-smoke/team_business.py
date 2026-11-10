@@ -12,8 +12,8 @@ end. Secrets (token, signing secret, S3 keys) stay on the machine and are never 
 
 --cmd windows runs pb.exe on the Windows device (winhost.py). With --alias/--peer-alias/--peer-cmd the
 token-actor audit also runs, using a private controller-side Python helper. --streaming runs the same HTTPS/S3
-checks with the receiver on the controller, forwarded through the device. S3 fixture keys then live in the
-controller's ~/.f19-s3ak and ~/.f19-s3sk, copied into its private helper directory for the run.
+checks with the receiver on the controller, forwarded through the device. S3 fixture keys are read by path
+from the controller's ~/.f19-s3ak and ~/.f19-s3sk; they are never copied into the helper directory.
 
 Usage: team_business.py --team paperboat-smoke-paid \
          --cmd 'ssh hp docker exec -i -u tester -e XDG_RUNTIME_DIR=/run/user/1001 -w /home/tester lanes-f19' \
@@ -143,13 +143,6 @@ class Check:
             for name, value in (('.f19helper.py', HELPER), ('.f19api', self.a.api)):
                 with os.fdopen(os.open(home / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as output:
                     output.write(value)
-            if self.a.streaming and self.a.s3_origin:
-                for name in ('.f19-s3ak', '.f19-s3sk'):
-                    source = Path.home() / name
-                    if not source.is_file() or source.stat().st_mode & 0o077:
-                        raise RuntimeError('stage the S3 fixture key ' + name + ' in the controller home with mode 0600')
-                    with os.fdopen(os.open(home / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'wb') as output:
-                        output.write(source.read_bytes())
         home = Path(self.helper_home.name)
         if args[:3] == ['python3', '.f19helper.py', 'token']:
             extra = ['--scope', args[7]] if len(args) > 7 else []
@@ -490,8 +483,14 @@ def stream_s3(c, team, member):
     url, tid = tunnel(c, '8097')
     if not c.step('publish the S3 store with pb tunnel', url.startswith('https://'), url):
         return tid
+    keys = ['.f19-s3ak', '.f19-s3sk']
+    if c.windows:
+        keys = [str(Path.home() / name) for name in keys]
+        for path in map(Path, keys):
+            if not path.is_file() or path.stat().st_mode & 0o077:
+                raise RuntimeError('the controller S3 fixture key ' + path.name + ' must exist with mode 0600')
     r = c.api('PUT', '/v1/teams/%s/audit-streams/s3' % team, {'url': url, 'region': c.a.s3_region, 'bucket': c.a.s3_bucket,
-              'prefix': 'f19', 'access_key_id': '@.f19-s3ak', 'secret_access_key': '@.f19-s3sk'})
+              'prefix': 'f19', 'access_key_id': '@' + keys[0], 'secret_access_key': '@' + keys[1]})
     c.step('configure the S3 stream', r['status'] == 200, r)
     r = c.api('POST', '/v1/teams/%s/audit-streams/s3/test' % team)
     c.step('the S3 test upload is accepted (SigV4 verified by the store)', r['status'] in (200, 204), r)
