@@ -698,6 +698,14 @@ class LocalJob:
     def wait(self, timeout):
         return self.process.wait(timeout=timeout)
 
+    def terminate(self):
+        """SIGTERM, so pb ends its own children (pb ssh's ssh client); killed after 15 s."""
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            self.kill()
+
     def kill(self):
         self.process.kill()
         self.process.wait()
@@ -740,6 +748,8 @@ class RemoteJob:
 
     def kill(self):
         self.process.kill()
+
+    terminate = kill  # taskkill /T ends the whole tree
 
     def close(self):
         self.scratch.__exit__(None, None, None)

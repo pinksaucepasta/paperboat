@@ -17,11 +17,19 @@ import time
 import pairing_lifecycle as p
 from session_cleanup import cleanup
 from terminal_lifecycle import Terminal
+import windows_target
+import winhost
 
-PB = Path.home() / '.local/bin/pb'
+PB = winhost.pb_path()
+
+
+# PowerShell appended to a typed marker: the id of the cmd.exe this line was typed into.
+SHELL_PID = "+(Get-CimInstance Win32_Process -Filter ('ProcessId='+$PID)).ParentProcessId"
 
 
 def owners():
+    if winhost.device():  # each generation's session owner is a Windows service named after it
+        return {s['Name']: [s['Name']] for s in winhost.device().services('PaperboatSessionOwner-*') if s['Status'] == 'Running'}
     # ps, not pgrep -af (macOS pgrep prints no arguments with -a); only this user's owners: another account
     # on the host keeps its own owner running for good
     out = subprocess.run(['ps', '-U', str(os.getuid()), '-o', 'pid=,args='], capture_output=True, text=True).stdout
@@ -51,16 +59,15 @@ def ssh_blocks_update(target, candidate, password):
     import select
     version = p.invoke(PB, '--version', raw=True)
     # OpenSSH joins remote arguments with spaces, so the remote command is one string.
-    ssh = subprocess.Popen([str(PB), 'ssh', target, '--', 'echo PB_SSH_UP; sleep 600'],
-                           stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    # A Windows target's sshd hands the command to cmd.exe: ping is its sleep.
+    held = 'echo PB_SSH_UP& ping -n 600 127.0.0.1 >nul' if windows_target.is_windows(PB, target) else 'echo PB_SSH_UP; sleep 600'
+    ssh = winhost.job(PB, ['ssh', target, '--', held])
     try:
         deadline = time.monotonic() + 90
-        up = ''
-        while 'PB_SSH_UP' not in up:
+        while b'PB_SSH_UP' not in ssh.stdout():
             if time.monotonic() > deadline or ssh.poll() is not None:
                 raise RuntimeError('the held pb ssh connection did not come up')
-            if select.select([ssh.stdout], [], [], 1)[0]:
-                up += ssh.stdout.readline()
+            time.sleep(1)
         refused = p.command_result(PB, 'update', '--from', candidate, '--json', timeout=120,
                                    terminal=True, password=password)
         text = re.sub(r'\x1b\[[0-9;?]*[a-zA-Z]', '', refused.stdout)
@@ -72,11 +79,7 @@ def ssh_blocks_update(target, candidate, password):
             raise RuntimeError('the refused update ended the pb ssh connection')
     finally:
         ssh.terminate()
-        try:
-            ssh.wait(timeout=15)
-        except subprocess.TimeoutExpired:
-            ssh.kill()
-            ssh.wait(timeout=5)
+        ssh.close()
 
 
 def main():
@@ -86,27 +89,36 @@ def main():
     parser.add_argument('--hold', choices=['both', 'terminal', 'exec'], default='both')
     parser.add_argument('--exec-seconds', type=int, default=45)
     args = parser.parse_args()
-    password = sys.stdin.readline().rstrip('\n')
+    password = None if winhost.device() else sys.stdin.readline().rstrip('\n')
+    windows = windows_target.is_windows(PB, args.target)
     name = 'smoke-update-' + str(int(time.time()))
     before_version = p.invoke(PB, '--version', raw=True)
-    terminal = Terminal([str(PB), 'connect', args.target, '--name', name, '--status-bar', 'off'])
+    terminal = Terminal(winhost.terminal_argv(PB, ['connect', args.target, '--name', name, '--status-bar', 'off']),
+                        env=winhost.terminal_env(PB))
     exec_process = None
+
+    def shell_identity(label):
+        """Ask the held shell for its process id: $$ in sh; under cmd.exe the parent of a PowerShell typed there."""
+        if windows:
+            terminal.send(windows_target.typed_marker('PB_' + label + '_', SHELL_PID) + '\r')
+        else:
+            terminal.send("printf '\\nPB_" + label + "''_%s\\n' \"$$\"\r")
+        terminal.expect('PB_' + label + '_', timeout=180)
+        return terminal.expect('\n', timeout=10).decode().strip()
     try:
-        terminal.expect(b'\x1b[?2004h')
-        terminal.expect(terminal.marker('READY', 'stty -echo; '))
-        terminal.send("pb_hold=$$; printf '\\nPB_SHELL''_%s\\n' \"$pb_hold\"\r")
-        terminal.expect('PB_SHELL_')
-        pid_line = terminal.expect('\n').decode().strip()
-        held_pid = pid_line
+        if not windows:
+            terminal.expect(b'\x1b[?2004h')
+            terminal.expect(terminal.marker('READY', 'stty -echo; '))
+        held_pid = shell_identity('SHELL')
         if not held_pid.isdigit():
             raise RuntimeError('could not read the held shell identity')
         held = set(owners())
         if not held:
             raise RuntimeError('no session owner is running for the held terminal')
         if args.hold != 'terminal':
-            exec_process = subprocess.Popen([str(PB), 'exec', args.target, '--', 'sh', '-c',
-                                             'sleep %d; echo EXEC_FINISHED' % args.exec_seconds], stdout=subprocess.PIPE,
-                                            stderr=subprocess.PIPE, text=True)
+            exec_process = winhost.job(PB, ['exec', args.target, '--', *(windows_target.ps_argv(
+                "Start-Sleep %d;[Console]::Out.Write('EXEC_FINISHED')" % args.exec_seconds) if windows else
+                ['sh', '-c', 'sleep %d; echo EXEC_FINISHED' % args.exec_seconds])])
         ssh_blocks_update(args.target, args.candidate, password)
         time.sleep(5)
         for attempts in (1, 2, 3):  # the closed pb ssh connection may still be winding down; the attempt count is reported
@@ -122,29 +134,30 @@ def main():
         if after_version == before_version:
             raise RuntimeError('candidate must be a different build')
         # Without any user action the same shell answers.
-        terminal.send("printf '\\nPB_AGAIN''_%s\\n' \"$$\"\r")
-        terminal.expect('PB_AGAIN_', timeout=180)
-        again_pid = terminal.expect('\n', timeout=10).decode().strip()
+        again_pid = shell_identity('AGAIN')
         if again_pid != held_pid:
             raise RuntimeError('terminal reconnected to a different shell')
         if exec_process is not None:
-            out, err = exec_process.communicate(timeout=180)
-            if exec_process.returncode != 0 or 'EXEC_FINISHED' not in out:
-                raise RuntimeError('running exec did not finish normally across the update: rc=%s stdout=%r stderr=%r' % (exec_process.returncode, out[-120:], err[-300:]))
+            code = exec_process.wait(180)
+            out, err = exec_process.stdout().decode(errors='replace'), exec_process.stderr().decode(errors='replace')
+            if code != 0 or 'EXEC_FINISHED' not in out:
+                raise RuntimeError('running exec did not finish normally across the update: rc=%s stdout=%r stderr=%r' % (code, out[-120:], err[-300:]))
+            exec_process.close()
             exec_process = None
         current = owners()
         if not held & set(current):
             raise RuntimeError('old session owner vanished while its session was still open')
         terminal.send('exit\r')
         terminal.wait_exit(30)
-        cleanup(str(PB), args.target, name)
+        cleanup(PB, args.target, name)
         wait(lambda: not held & set(owners()), 180, 'old session owner retirement')
     finally:
         if exec_process is not None:
             exec_process.kill()
+            exec_process.close()
         terminal.close()
         try:
-            cleanup(str(PB), args.target, name)
+            cleanup(PB, args.target, name)
         except Exception:
             pass
     print(json.dumps({'check': 'update-continuity', 'target': args.target, 'status': 'PASS', 'update_attempts': attempts,
