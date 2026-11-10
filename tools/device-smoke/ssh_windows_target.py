@@ -26,7 +26,7 @@ $s=@(Get-CimInstance Win32_Service|Where-Object{$_.ProcessId -eq $p[0].ParentPro
 if($s.Count -ne 1){throw 'the managed sshd is not run by a PaperboatSshd service'}
 $effective=& ($p[0].ExecutablePath) -T -f $c -C ('user='+$env:USERNAME+',host=example.test,addr=127.0.0.1')
 if($LASTEXITCODE -ne 0){throw 'could not resolve the managed sshd configuration for its setup user'}
-$v=@{};foreach($l in $effective){$k,$r=$l.Trim() -split '\s+',2;if($k -and $r){if($k -eq 'authorizedkeysfile'){$r=$r -split '\s+'};$v[$k]=@($v[$k])+@($r|ForEach-Object{$_.Trim('"')})}}
+$v=@{};foreach($l in $effective){$k,$r=$l.Trim() -split '\s+',2;if($k -and $r){if($k -eq 'authorizedkeysfile'){$r=$r -split '\s+'};$v[$k]=@($v[$k]|Where-Object{$null -ne $_})+@($r|ForEach-Object{$_.Trim('"')})}}
 $managed=@($v['AuthorizedKeysFile']|Where-Object{$_ -match '^[A-Za-z]:[\\/]'})
 # A domain setup account is matched as domain\user. The same config with the setup user renamed to pbsmoke\<user>
 # must give Paperboat's file to exactly that name, not to the name with the backslash dropped. The setup user's
