@@ -3715,7 +3715,7 @@ export interface paths {
         put?: never;
         /**
          * Create an exact cross-account Team Inbox request
-         * @description Manifest file count, each declared file size and aggregate bytes must fit the configured transfer policy. Over-limit requests return 413 file_transfer_limit_exceeded with error.details.max_file_bytes, max_batch_files and max_batch_bytes; reduce the number or size of files and retry. No approval or payload stream is admitted for an over-limit manifest.
+         * @description Manifest file count must fit the configured transfer policy; sizes are bounded by transfer mode when the descriptor is issued. Over-limit requests return 413 file_transfer_limit_exceeded with error.details.max_batch_files; reduce the number of files and retry. No approval or payload stream is admitted for an over-limit manifest.
          */
         post: operations["create_team_inbox_request"];
         delete?: never;
@@ -8859,9 +8859,12 @@ export interface components {
         };
         FileTransferPolicy: {
             revision: string;
-            max_file_bytes: number;
             max_batch_files: number;
-            max_batch_bytes: number;
+            /**
+             * Format: int64
+             * @description The most one Automatic transfer may carry (every file summed, so also any one file). Unlimited has no Paperboat bound but never uses a Paperboat-hosted relay.
+             */
+            automatic_max_batch_bytes: number;
             max_concurrent_transfers: number;
             retention_seconds: number;
             delivery_timeout_seconds: number;

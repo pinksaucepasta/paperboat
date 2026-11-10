@@ -4615,9 +4615,8 @@
         "additionalProperties": false,
         "required": [
           "revision",
-          "max_file_bytes",
           "max_batch_files",
-          "max_batch_bytes",
+          "automatic_max_batch_bytes",
           "max_concurrent_transfers",
           "retention_seconds",
           "delivery_timeout_seconds",
@@ -4628,20 +4627,16 @@
             "type": "string",
             "minLength": 1
           },
-          "max_file_bytes": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 52428800
-          },
           "max_batch_files": {
             "type": "integer",
             "minimum": 1,
             "maximum": 10
           },
-          "max_batch_bytes": {
+          "automatic_max_batch_bytes": {
             "type": "integer",
+            "format": "int64",
             "minimum": 1,
-            "maximum": 524288000
+            "description": "The most one Automatic transfer may carry (every file summed, so also any one file). Unlimited has no Paperboat bound but never uses a Paperboat-hosted relay."
           },
           "max_concurrent_transfers": {
             "type": "integer",
@@ -31325,7 +31320,7 @@
       "post": {
         "operationId": "create_team_inbox_request",
         "summary": "Create an exact cross-account Team Inbox request",
-        "description": "Manifest file count, each declared file size and aggregate bytes must fit the configured transfer policy. Over-limit requests return 413 file_transfer_limit_exceeded with error.details.max_file_bytes, max_batch_files and max_batch_bytes; reduce the number or size of files and retry. No approval or payload stream is admitted for an over-limit manifest.",
+        "description": "Manifest file count must fit the configured transfer policy; sizes are bounded by transfer mode when the descriptor is issued. Over-limit requests return 413 file_transfer_limit_exceeded with error.details.max_batch_files; reduce the number of files and retry. No approval or payload stream is admitted for an over-limit manifest.",
         "requestBody": {
           "required": true,
           "content": {

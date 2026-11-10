@@ -1,18 +1,17 @@
 import type { BrowserTerminalAPI } from "./browser-terminal-wasm"
 
 export const FILE_TRANSFER_CHUNK_BYTES = 32 * 1024
-export const FILE_TRANSFER_MAX_FILE_BYTES = 50 * 1024 * 1024
 export const FILE_TRANSFER_MAX_BATCH_FILES = 10
-export const FILE_TRANSFER_MAX_BATCH_BYTES = 500 * 1024 * 1024
 const FILE_TRANSFER_RECONNECT_MS = 30_000
 const FILE_TRANSFER_CLEANUP_MS = 12_000
 const FILE_TRANSFER_MAX_RECOVERY_MS = 600_000
 const FILE_TRANSFER_MAX_RETRIES = 2
 
+// The machine's published policy. A browser terminal always goes through Paperboat's hosted edge, so the one
+// Automatic bound applies to every file and to the whole paste; Unlimited (direct paths only) never applies here.
 export type FilePastePolicy = {
-  max_file_bytes: number
   max_batch_files: number
-  max_batch_bytes: number
+  automatic_max_batch_bytes: number
   retention_seconds?: number
   delivery_timeout_seconds?: number
 }
@@ -104,25 +103,21 @@ function manifest(value: unknown): TransferManifest {
   return item as unknown as TransferManifest
 }
 
-function parsePolicy(value: unknown): FilePastePolicy {
+export function parsePolicy(value: unknown): FilePastePolicy {
   const container = record(value)
   const policy = record(container?.policy)
   if (
     !policy ||
-    !Number.isSafeInteger(policy.max_file_bytes) ||
-    (policy.max_file_bytes as number) < 1 ||
     !Number.isSafeInteger(policy.max_batch_files) ||
     (policy.max_batch_files as number) < 1 ||
-    !Number.isSafeInteger(policy.max_batch_bytes) ||
-    (policy.max_batch_bytes as number) < 1 ||
-    (policy.max_batch_bytes as number) < (policy.max_file_bytes as number)
+    !Number.isSafeInteger(policy.automatic_max_batch_bytes) ||
+    (policy.automatic_max_batch_bytes as number) < 1
   ) {
     throw new FilePasteError("invalid_policy")
   }
   return {
-    max_file_bytes: Math.min(policy.max_file_bytes as number, FILE_TRANSFER_MAX_FILE_BYTES),
     max_batch_files: Math.min(policy.max_batch_files as number, FILE_TRANSFER_MAX_BATCH_FILES),
-    max_batch_bytes: Math.min(policy.max_batch_bytes as number, FILE_TRANSFER_MAX_BATCH_BYTES),
+    automatic_max_batch_bytes: policy.automatic_max_batch_bytes as number,
     retention_seconds: Number.isSafeInteger(policy.retention_seconds)
       ? (policy.retention_seconds as number)
       : undefined,
@@ -663,20 +658,13 @@ export class FilePasteUploader {
   }
 }
 
-function validateBatch(files: File[], policy: FilePastePolicy): void {
-  if (
-    !Number.isSafeInteger(policy.max_file_bytes) ||
-    !Number.isSafeInteger(policy.max_batch_bytes) ||
-    !Number.isSafeInteger(policy.max_batch_files) ||
-    files.length > policy.max_batch_files
-  ) {
-    throw new FilePasteError("batch_limit")
-  }
+export function validateBatch(files: File[], policy: FilePastePolicy): void {
+  if (files.length > policy.max_batch_files) throw new FilePasteError("batch_limit")
   let total = 0
   for (const file of files) {
-    if (!Number.isSafeInteger(file.size) || file.size < 0 || file.size > policy.max_file_bytes)
+    if (!Number.isSafeInteger(file.size) || file.size < 0 || file.size > policy.automatic_max_batch_bytes)
       throw new FilePasteError("invalid_size")
     total += file.size
-    if (!Number.isSafeInteger(total) || total > policy.max_batch_bytes) throw new FilePasteError("batch_limit")
+    if (!Number.isSafeInteger(total) || total > policy.automatic_max_batch_bytes) throw new FilePasteError("batch_limit")
   }
 }
