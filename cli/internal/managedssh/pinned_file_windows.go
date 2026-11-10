@@ -30,7 +30,7 @@ func (f *pinnedWindowsSSHFile) Close() error {
 // openPinnedWindowsSSHFile opens one ordinary file without delete sharing,
 // verifies the final handle path and file identity, and keeps that exact object
 // pinned until Close. FILE_FLAG_OPEN_REPARSE_POINT prevents a final-component
-// reparse point from being followed during legacy-owner inspection.
+// reparse point from being followed while the file is opened.
 func openPinnedWindowsSSHFile(path string, extraAccess uint32) (*pinnedWindowsSSHFile, bool, error) {
 	path = filepath.Clean(path)
 	if !filepath.IsAbs(path) || filepath.Base(path) == "." || filepath.Base(path) == ".." {
