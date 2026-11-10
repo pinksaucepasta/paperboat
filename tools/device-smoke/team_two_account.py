@@ -8,6 +8,8 @@ paid, and have both accounts as active members. Everything this check creates it
 Usage: team_two_account.py --team TEAM --owner-ssh pbvm1 --machine MACHINE_ID \
          --member-cmd 'sudo docker exec -u pb -e HOME=/home/pb -e XDG_RUNTIME_DIR=/run/user/1001 lane-b-pujan' \
          --member-machine MEMBER_MACHINE_ID --suspend-cmd 'ssh root@coolify ...'
+--owner-ssh or --member-cmd may be `windows` (pb.exe on the Windows device as its own account) or `windows-teammate`
+(its second signed-in profile, which has no machine: skip approval and transfer); see winhost.py.
 """
 import argparse
 import json
@@ -16,11 +18,18 @@ import subprocess
 import sys
 import time
 
+import winhost
+
 PB = '~/.local/bin/pb'
 
 
 class Failure(Exception):
     pass
+
+
+def side(command, arguments, timeout):
+    done = winhost.side_run(command, arguments, timeout=timeout)
+    return done.returncode, done.stdout, done.stderr
 
 
 def run(argv, timeout=120):
@@ -44,9 +53,13 @@ def main():
     results = []
 
     def owner_raw(*arguments, timeout=120):
+        if winhost.is_side(args.owner_ssh):
+            return side(args.owner_ssh, arguments, timeout)
         return run(['ssh', args.owner_ssh, ' '.join([PB] + [shlex.quote(a) for a in arguments])], timeout)
 
     def member_raw(*arguments, timeout=120):
+        if winhost.is_side(args.member_cmd):
+            return side(args.member_cmd, arguments, timeout)
         command = ' '.join([PB] + [shlex.quote(a) for a in arguments])
         # ssh joins its arguments into one remote shell line, so the bash -lc script must be quoted for it.
         script = shlex.quote(command) if member_prefix[0] == 'ssh' else command
@@ -202,10 +215,16 @@ def main():
         owner('team', 'attach', team, 'tunnel', tunnel, '--active=false', '--generation', generation())
 
     def preview_resource():
-        run(['ssh', args.owner_ssh, 'nohup python3 -m http.server 8124 --bind 127.0.0.1 >/dev/null 2>&1 &'])
+        port = '8124'
+        if winhost.is_side(args.owner_ssh):  # no python3 there: a PowerShell origin on the device's loopback
+            origin = winhost.device().origin('team-two-account')
+            port = str(origin.__enter__())
+            cleanup.append(lambda: origin.__exit__(None, None, None))
+        else:
+            run(['ssh', args.owner_ssh, 'nohup python3 -m http.server 8124 --bind 127.0.0.1 >/dev/null 2>&1 &'])
+            cleanup.append(lambda: run(['ssh', args.owner_ssh, 'pkill -f "http.server 8124"; true']))
         preview = None
-        cleanup.append(lambda: run(['ssh', args.owner_ssh, 'pkill -f "http.server 8124"; true']))
-        code, value = parse(*owner_raw('preview', '8124', '--background', '--private', '--ttl', '15m', '--json', timeout=180))
+        code, value = parse(*owner_raw('preview', port, '--background', '--private', '--ttl', '15m', '--json', timeout=180))
         if isinstance(value, dict):
             preview = value.get('id') or (value.get('preview') or {}).get('id')
         if not preview:

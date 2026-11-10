@@ -1362,3 +1362,148 @@ class PolicyFamily(unittest.TestCase):
                          windows_checks.missing(table['policy-token'][1], WindowsChecksRunner().args()))
         self.assertEqual([], windows_checks.missing(table['policy-cli'][1], WindowsChecksRunner().args()))
 
+
+class TeamFamily(unittest.TestCase):
+    def business(self, **values):
+        import team_business
+        defaults = dict(cmd='windows', pb='/home/tester/.local/bin/pb', team='t', member='', identity_commands=False)
+        with patch.object(winhost, 'device', lambda: SimpleNamespace(env=lambda name: r'C:\Temp', path_flavor=pathlib.PureWindowsPath)):
+            return team_business.Check(SimpleNamespace(**dict(defaults, **values)))
+
+    def test_business_check_runs_only_pb_on_the_device_and_keeps_its_files_there(self):
+        check = self.business()
+        self.assertTrue(check.windows)
+        files = {r'C:\Temp\f19.csv': b'id,action\n'}
+
+        def read_bytes(path):
+            if str(path) not in files:
+                raise FileNotFoundError(path)
+            return files[str(path)]
+
+        device = SimpleNamespace(path_flavor=pathlib.PureWindowsPath, read_bytes=read_bytes, unlink=lambda path: files.pop(str(path), None))
+        done = subprocess.CompletedProcess([], 0, '{"data": {"generation": 4}}', '')
+        with patch.object(winhost, 'device', lambda: device), patch.object(winhost, 'side_run', return_value=done) as side:
+            self.assertEqual(r'C:\Temp\f19.csv', check.file('f19.csv'))
+            self.assertEqual({'generation': 4}, check.pbj('team', 'get', 't'))
+            side.assert_called_once_with('windows', ['team', 'get', 't', '--json'], input=None, timeout=180)
+            with self.assertRaisesRegex(RuntimeError, 'only pb runs on the Windows device'):
+                check.run(['python3', '.f19helper.py', 'api'])
+            self.assertEqual((0, 'id,action\n', ''), check.read(check.file('f19.csv')))
+            check.remove(check.file('f19.csv'))
+            self.assertEqual(1, check.read(check.file('f19.csv'))[0])
+        self.assertEqual({}, files)
+
+    def test_business_check_on_unix_keeps_cat_rm_and_relative_names(self):
+        import team_business
+        check = team_business.Check(SimpleNamespace(cmd='ssh hp', pb='pb', team='t'))
+        self.assertFalse(check.windows)
+        self.assertEqual('f19.csv', check.file('f19.csv'))
+        seen = []
+        check.run = lambda args, **options: seen.append(args) or (0, '', '')
+        check.read('f19.csv')
+        check.remove('f19.csv', 'f19.json')
+        self.assertEqual([['cat', 'f19.csv'], ['rm', '-f', 'f19.csv', 'f19.json']], seen)
+
+    def test_windows_main_runs_the_pb_only_sections(self):
+        import contextlib
+        import io
+        import team_business
+        ran = []
+        check = self.business()
+        names = ('roles', 'identity', 'identity_commands', 'search', 'export', 'machine_access', 'stream_https', 'stream_s3')
+        with contextlib.ExitStack() as stack:
+            for name in names:
+                stack.enter_context(patch.object(team_business, name, lambda *a, name=name: ran.append(name) or 'member_1'))
+            stack.enter_context(patch.object(check, 'pbj', lambda *a: {'owner_account': 'account_1'}))
+            stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+            self.assertEqual(0, team_business.windows_main(check, SimpleNamespace(team='t', identity_commands=True, member='')))
+        self.assertEqual(['roles', 'identity', 'identity_commands', 'search', 'export'], ran)
+
+    def two_account(self, replies, *arguments):
+        """Runs team_two_account.main() with both sides on the device; replies maps a command prefix to (rc, data)."""
+        import contextlib
+        import io
+        import team_two_account
+        calls = []
+
+        def side_run(command, arguments, input=None, timeout=180):
+            words = [word for word in arguments if word != '--json']
+            calls.append((command, words))
+            for prefix, reply in replies:
+                if words[:len(prefix)] == prefix:
+                    rc, value = reply(command, words) if callable(reply) else reply
+                    return subprocess.CompletedProcess(arguments, rc, json.dumps(value), '')
+            return subprocess.CompletedProcess(arguments, 0, '{}', '')
+
+        printed = io.StringIO()
+        argv = ['team_two_account.py', '--team', 't', '--owner-ssh', 'windows', '--machine', 'machine_1',
+                '--member-cmd', 'windows-teammate', *arguments]
+        with patch.object(winhost, 'side_run', side_run), patch.object(sys, 'argv', argv), contextlib.redirect_stdout(printed):
+            code = team_two_account.main()
+        return code, printed.getvalue(), calls
+
+    def test_two_account_sides_are_the_device_account_and_its_second_profile(self):
+        import windows_checks
+        shared = []
+
+        def machine_list(command, words):
+            if command == 'windows':
+                return 0, {'machines': [{'id': 'machine_1', 'ownership': 'personal'}]}
+            return 0, {'machines': [{'id': 'machine_1', 'permissions': list(shared[-1])}] if shared and shared[-1] else []}
+
+        def grant(command, words):
+            active = '--active=false' not in words
+            now = set(shared[-1]) if shared else set()
+            wanted = set(words[words.index('--capability') + 1].split(','))
+            shared.append(now | wanted if active else now - wanted)
+            return 0, {}
+
+        replies = [
+            (['auth', 'status'], lambda command, words: (0, {'account': {'id': 'owner_1' if command == 'windows' else 'member_1'}})),
+            (['team', 'get'], (0, {'generation': 3, 'members': [{'account_id': 'member_1', 'active': True}]})),
+            (['team', 'machine', 'grant'], grant),
+            (['--workspace', 't', 'machine', 'list'], machine_list),
+            (['machine', 'list'], machine_list),
+            (['team', 'activity'], lambda command, words: (0, {'items': [{'action': 'team.machine_' + kind} for kind in ('share', 'grant', 'unshare')]})
+             if command == 'windows' else (1, {'error': {'code': 'forbidden'}})),
+        ]
+        code, printed, calls = self.two_account(replies, '--skip', 'approval,resources,suspension,transfer')
+        self.assertEqual(0, code, printed)
+        self.assertEqual({'windows', 'windows-teammate'}, {command for command, _ in calls})
+        self.assertEqual(2, printed.count('PASS  '))
+        self.assertEqual('PASS', windows_checks.verdict(code, printed))
+        self.assertEqual('FAIL', windows_checks.verdict(1, printed.replace('PASS  F12-05', 'FAIL  F12-05')))
+
+    def test_two_account_preview_origin_is_a_device_listener_that_is_always_stopped(self):
+        events = []
+
+        class Origin:
+            def __enter__(self):
+                events.append('start')
+                return 41234
+
+            def __exit__(self, *error):
+                events.append('stop')
+
+        replies = [
+            (['auth', 'status'], lambda command, words: (0, {'account': {'id': command}})),
+            (['team', 'get'], (0, {'generation': 3, 'members': [{'account_id': 'windows-teammate', 'active': True}]})),
+            (['tunnel', 'create'], (1, {'error': {'code': 'refused'}})),
+            (['preview', '41234'], lambda command, words: (events.append('preview') or 1, {'error': {'code': 'refused'}})),
+        ]
+        with patch.object(winhost, 'device', lambda: SimpleNamespace(origin=lambda body: Origin())):
+            code, printed, calls = self.two_account(replies, '--skip', 'share,approval,suspension,transfer')
+        self.assertEqual(1, code)
+        self.assertEqual(['start', 'preview', 'stop'], events)
+        self.assertIn('FAIL  F12-05 attach preview', printed)
+
+    def test_runner_rows_and_fixtures(self):
+        import windows_checks
+        args = WindowsChecksRunner().args()
+        table = windows_checks.checks(args)
+        self.assertIn('approval,suspension,transfer', table['team-two-account'][0])
+        self.assertEqual(['--suspend_cmd'], windows_checks.missing(table['team-suspension'][1], args))
+        self.assertEqual(['--sso_team'], windows_checks.missing(table['team-identity-commands'][1], args))
+        self.assertEqual([], windows_checks.missing(table['team-business'][1], args))
+        self.assertNotIn('--identity-commands', table['team-business'][0])
+

@@ -10,6 +10,9 @@ S3-compatible store (--s3-origin, e.g. versitygw, keys in ~/.f19-s3ak and ~/.f19
 gets gzip NDJSON objects through SigV4. Stream setup uses a one-day API token that is revoked at the
 end. Secrets (token, signing secret, S3 keys) stay on the machine and are never printed.
 
+--cmd windows runs pb.exe on the Windows device (winhost.py), which has no python3 or bash for the helper: roles,
+SSO/directory status and commands, search and export run there; the F19-07 token steps and streaming do not.
+
 Usage: team_business.py --team paperboat-smoke-paid \
          --cmd 'ssh hp docker exec -i -u tester -e XDG_RUNTIME_DIR=/run/user/1001 -w /home/tester lanes-f19' \
          --s3-origin 10.0.0.12:7070 --s3-list-cmd 'ssh hp docker exec -i lanes-s3'
@@ -24,6 +27,8 @@ import shlex
 import subprocess
 import sys
 import time
+
+import winhost
 
 # Runs on the machine: the API client (token from ~/.f19tok), the receiver and the secret handling.
 HELPER = r'''
@@ -113,8 +118,33 @@ CSV_COLUMNS = ['id', 'occurred_at', 'workspace', 'action', 'result', 'reason', '
 class Check:
     def __init__(self, a):
         self.a, self.fails = a, []
+        self.windows = winhost.is_side(a.cmd)  # pb.exe on the Windows device: only pb runs there
+        self.temp = winhost.device().env('TEMP') if self.windows else ''
+
+    def file(self, name):
+        """A scratch file of this check on the machine: in its working directory, or the device's temp directory."""
+        return str(winhost.RemotePath(winhost.device(), self.temp) / name) if self.windows else name
+
+    def read(self, path):
+        if not self.windows:
+            return self.run(['cat', path])
+        try:
+            return 0, winhost.RemotePath(winhost.device(), path).read_text(), ''
+        except FileNotFoundError:
+            return 1, '', 'no such file'
+
+    def remove(self, *paths):
+        if not self.windows:
+            return self.run(['rm', '-f', *paths])
+        for path in paths:
+            winhost.RemotePath(winhost.device(), path).unlink()
 
     def run(self, args, timeout=180, stdin=None):
+        if self.windows:
+            if args[0] != self.a.pb:
+                raise RuntimeError('only pb runs on the Windows device, not ' + args[0])
+            done = winhost.side_run(self.a.cmd, args[1:], input=stdin, timeout=timeout)
+            return done.returncode, done.stdout, done.stderr
         remote = ' '.join(shlex.quote(x) for x in args)
         # CMD goes through ssh, whose remote shell splits the line once more: quote the command for it.
         done = subprocess.run(shlex.split(self.a.cmd) + ['bash -lc ' + shlex.quote(remote)], capture_output=True, text=True,
@@ -313,19 +343,19 @@ def search(c, start, owner):
 
 def export(c, start):
     """F19-09: CSV and JSON exports carry the documented columns and the filtered events; each export is recorded."""
-    rc, out, err = c.pb('team', 'activity', 'export', c.a.team, '--format', 'csv', '--action', 'team.role', '--since', start, '-o', 'f19.csv')
-    rc2, body, _ = c.run(['cat', 'f19.csv'])
+    rc, out, err = c.pb('team', 'activity', 'export', c.a.team, '--format', 'csv', '--action', 'team.role', '--since', start, '-o', c.file('f19.csv'))
+    rc2, body, _ = c.read(c.file('f19.csv'))
     rows = list(csv.reader(io.StringIO(body)))
     c.step('CSV export has the documented columns and the role changes', rc == 0 and rows and rows[0] == CSV_COLUMNS
            and len(rows) >= 4 and all(r[3] == 'team.role' for r in rows[1:]), (out + err + body)[:400])
-    rc, out, err = c.pb('team', 'activity', 'export', c.a.team, '--format', 'json', '--since', start, '-o', 'f19.json')
-    rc2, body, _ = c.run(['cat', 'f19.json'])
+    rc, out, err = c.pb('team', 'activity', 'export', c.a.team, '--format', 'json', '--since', start, '-o', c.file('f19.json'))
+    rc2, body, _ = c.read(c.file('f19.json'))
     try:
         events = json.loads(body)
     except ValueError:
         events = None
     c.step('JSON export is one array of events', rc == 0 and isinstance(events, list) and any(e['action'] == 'team.role' for e in events), out + err)
-    c.run(['rm', '-f', 'f19.csv', 'f19.json'])
+    c.remove(c.file('f19.csv'), c.file('f19.json'))
     items, raw = c.activity('--action', 'team.activity_exported', '--since', start)
     c.step('both exports are recorded', len(items) >= 2, raw)
 
@@ -431,6 +461,22 @@ def stream_s3(c, team, member):
     return tid
 
 
+def windows_main(c, a):
+    """The steps that need only pb: roles (F19-01), SSO/directory status and commands (F19-14, C254-C260), search
+    (F19-07/08) and export (F19-09, C261). The machine_access token steps and streaming (F19-10) need the Python
+    helper on the machine and are not run."""
+    owner = c.pbj('team', 'get', a.team).get('owner_account')
+    start = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() - 5))
+    member = roles(c, a.team)
+    identity(c, a.team)
+    if a.identity_commands:
+        identity_commands(c, a.team, member or a.member)
+    search(c, start, owner)
+    export(c, start)
+    print('RESULT', 'PASS' if not c.fails else 'FAIL ' + ','.join(c.fails))
+    return 1 if c.fails else 0
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--team', required=True)
@@ -449,6 +495,8 @@ def main():
     p.add_argument('--s3-bucket', default='audit')
     a = p.parse_args()
     c = Check(a)
+    if c.windows:
+        return windows_main(c, a)
     c.run(['bash', '-c', 'umask 077; cat > .f19helper.py; printf %s ' + shlex.quote(a.api) + ' > .f19api'], stdin=HELPER)
     owner = c.pbj('team', 'get', a.team).get('owner_account')
     start = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() - 5))

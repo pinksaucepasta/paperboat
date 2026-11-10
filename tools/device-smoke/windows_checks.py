@@ -121,6 +121,17 @@ def checks(args):
     table['policy-token'] = (['policy_token.py', '--allowed', args.token_allowed or '', '--other', args.token_other or '',
                               '--owner-cmd', winhost.WINDOWS, '--token-cmd', args.token_cmd or '', '--pb', args.token_pb],
                              ['--token_cmd', '--token_allowed', '--token_other'])
+    # The device account owns the team and the second profile is its other member. The second profile has no machine,
+    # and transfer-to-team then remove would end the device's enrollment, so approval and transfer are skipped.
+    two = ['team_two_account.py', '--team', team, '--owner-ssh', winhost.WINDOWS, '--machine', '{machine_id}',
+           '--member-cmd', winhost.WINDOWS_TEAMMATE]
+    table['team-two-account'] = (two + ['--skip', 'approval,suspension,transfer'], ['--team'])
+    table['team-suspension'] = (two + ['--skip', 'share,approval,resources,transfer', '--suspend-cmd', args.suspend_cmd or ''],
+                                ['--team', '--suspend_cmd'])
+    # Only pb runs on the device: no F19-07 token steps and no streaming (their helper is Python on the machine).
+    business = ['team_business.py', '--cmd', winhost.WINDOWS, '--api', '{server}', '--team']
+    table['team-business'] = (business + [team, '--member', '{teammate_account}'], ['--team'])
+    table['team-identity-commands'] = (business + [args.sso_team or '', '--identity-commands'], ['--sso_team'])
     return table
 
 
@@ -146,6 +157,7 @@ def verdict(returncode, stdout):
         if isinstance(record, dict) and 'status' in record:
             statuses.append(record['status'])
     statuses += [line.split()[1] for line in stdout.splitlines() if line.startswith('RESULT ')]  # policy_team.py
+    statuses += [line[:4] for line in stdout.splitlines() if line.startswith(('PASS  ', 'FAIL  '))]  # team_two_account.py
     return 'PASS' if returncode == 0 and statuses and set(statuses) == {'PASS'} else 'FAIL'
 
 
@@ -188,6 +200,8 @@ def run_check(check, argv, args, device):
         if '{teammate_account}' in argv:  # the second signed-in profile of the device
             account = json.loads(winhost.side_run(winhost.WINDOWS_TEAMMATE, ['auth', 'status', '--json'], timeout=60).stdout)['account']
             replacements.update({'{teammate_account}': account['id'], '{teammate_email}': account['email']})
+        if '{machine_id}' in argv:
+            replacements['{machine_id}'] = json.loads((device.runtime_dir() / 'machine-registration.json').read_text())['machine_id']
         if '{server}' in argv:
             replacements.update({
                 '{server}': json.loads((device.runtime_dir() / 'machine-registration.json').read_text())['server_url'],
@@ -231,6 +245,8 @@ def build_parser():
     parser.add_argument('--token-allowed', help='policy-token: the machine name the token may exec on')
     parser.add_argument('--token-other', help='policy-token: another machine name of the account')
     parser.add_argument('--token-pb', default='/home/pbt/.local/bin/pb', help='policy-token: pb on the --token-cmd side')
+    parser.add_argument('--suspend-cmd', help='team-suspension: controller command that runs SQL from stdin on the server database')
+    parser.add_argument('--sso-team', help='team-identity-commands: a team the device account owns, with SSO and a directory group')
     parser.add_argument('--only', default='', help='comma list of check ids')
     parser.add_argument('--timeout', type=int, default=1800)
     parser.add_argument('--list', action='store_true')
