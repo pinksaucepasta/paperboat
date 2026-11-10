@@ -1934,14 +1934,14 @@ class ScriptedHookDevice:
     def __init__(self, test, uninstall_keeps=b''):
         self.test, self.value, self.names_on, self.calls, self.uninstall_keeps = test, None, True, [], uninstall_keeps
         self.was_set = None
-        self.files = {r'C:\Users\u\Documents\WindowsPowerShell\profile.ps1': b'Set-Alias ll dir\r\n'}  # the other is missing
-        self.before = dict(self.files)
+        self.disk = {r'C:\Users\u\Documents\WindowsPowerShell\profile.ps1': b'Set-Alias ll dir\r\n'}  # the other is missing
+        self.before = dict(self.disk)
         self.target, self.pb_exe, self.password, self.path_flavor = 'device', EXE, '', pathlib.PureWindowsPath
 
     def read_bytes(self, path):
-        if str(path) not in self.files:
+        if str(path) not in self.disk:
             raise FileNotFoundError(path)
-        return self.files[str(path)]
+        return self.disk[str(path)]
 
     def env(self, name):
         return {'TEMP': r'C:\Temp', 'USERPROFILE': r'C:\Users\u'}[name]
@@ -1970,11 +1970,11 @@ class ScriptedHookDevice:
         elif arguments == ('env', 'hook', 'powershell', '--install'):
             for name in ('WindowsPowerShell', 'PowerShell'):
                 path = r'C:\Users\u\Documents\%s\profile.ps1' % name
-                kept = self.files.get(path, b'').replace(self.MARKED, b'')
-                self.files[path] = (kept or b'\xef\xbb\xbf') + self.MARKED
+                kept = self.disk.get(path, b'').replace(self.MARKED, b'')
+                self.disk[path] = (kept or b'\xef\xbb\xbf') + self.MARKED
         elif arguments == ('env', 'hook', '--uninstall'):
-            self.files = {path: data.replace(b'\xef\xbb\xbf' + self.MARKED, b'').replace(self.MARKED, self.uninstall_keeps)
-                          for path, data in self.files.items()}
+            self.disk = {path: data.replace(b'\xef\xbb\xbf' + self.MARKED, b'').replace(self.MARKED, self.uninstall_keeps)
+                          for path, data in self.disk.items()}
         elif arguments[:3] == ('env', 'names', 'access'):
             self.names_on = arguments[3] == 'on'
         elif arguments[:2] == ('env', 'names'):
@@ -1991,7 +1991,7 @@ class ScriptedHookDevice:
         return done()
 
     def hooked(self):
-        return any(self.MARKED in data for data in self.files.values())
+        return any(self.MARKED in data for data in self.disk.values())
 
     def shell(self, device, host, script, timeout=120):
         self.test.assertEqual('device', host)
@@ -2036,7 +2036,7 @@ class EnvHookPlumbing(unittest.TestCase):
                          {key: report[key] for key in ('cached_ms', 'quiet_ms', 'quiet_output_bytes')})
         self.assertEqual(('env', 'vault', 'unlock', '--password-file', r'C:\v\pw', '--json'), device.calls[0])
         self.assertEqual(2, device.calls.count(('env', 'hook', 'powershell', '--install')))
-        self.assertEqual(device.before, {path: data for path, data in device.files.items() if data})
+        self.assertEqual(device.before, {path: data for path, data in device.disk.items() if data})
         self.assertEqual((None, True), (device.value, device.names_on))  # the probe is unset, the setting is back on
         self.assertNotIn(device.was_set, json.dumps(report))
 
@@ -2255,3 +2255,122 @@ class ConfigSyncPlumbing(unittest.TestCase):
         table = windows_checks.checks(WindowsChecksRunner().args())
         self.assertEqual((['config_sync_lifecycle.py', 'm'], ['--machine']), table['config-sync-lifecycle'])
         self.assertEqual(['--machine'], windows_checks.missing(['--machine'], WindowsChecksRunner().args(machine='')))
+
+
+class ScriptedServerDevice(ScriptedHookDevice):
+    """The same device with the VS Code server on it: each start keeps the environment its PowerShell had then."""
+
+    DIR = r'C:\Users\u\.lanej-vscode-server'
+
+    def __init__(self, test, fresh_sees_hook=True, reported_by_server=True):
+        super().__init__(test)
+        self.running, self.fetched, self.last = set(), None, 4000
+        self.fresh_sees_hook, self.reported_by_server = fresh_sees_hook, reported_by_server
+
+    def home(self):
+        return winhost.RemotePath(self, r'C:\Users\u')
+
+    def ps(self, step, script, **payload):
+        import env_vscode_remote
+        if script != env_vscode_remote.FETCH:
+            return super().ps(step, script, **payload)
+        self.fetched = payload
+        return 0, ''
+
+    def write_bytes(self, path, data):
+        self.disk[str(path)] = data
+
+    def unlink(self, path):
+        self.disk = {name: data for name, data in self.disk.items() if not name.startswith(str(path))}
+
+    def files(self, directory, pattern='*'):
+        import fnmatch
+        names = [name[len(str(directory)) + 1:] for name in self.disk if name.startswith(str(directory) + '\\')]
+        return fnmatch.filter(names, pattern)
+
+    def count_in_files(self, directory, pattern, text, recurse=False):
+        self.test.assertEqual((self.DIR, 'server.log', 'Extension host agent'), (str(directory), pattern, text))
+        return len(self.running)
+
+    def processes(self, pattern):
+        return [{'ProcessId': pid + (0 if self.reported_by_server else 1), 'Name': 'node.exe'} for pid in self.running]
+
+    def stop(self, pid):
+        self.running.discard(pid)
+
+    def start(self, device, host):
+        self.test.assertIn(self.DIR + r'\pb-env-probe.cjs', self.disk)  # the preload is there before the launch
+        self.last += 1
+        self.running.add(self.last)
+        sees = self.hooked() and (self.fresh_sees_hook or self.last == 4001)
+        self.disk[r'%s\env-%d.txt' % (self.DIR, self.last)] = self.sha().split()[1].encode() if sees else b'absent'
+        return SimpleNamespace(poll=lambda: None, terminate=lambda: None, wait=lambda timeout: 0)
+
+    def patches(self, module):
+        return super().patches(module) + [patch.object(module, 'start_server_windows', self.start)]
+
+
+class EnvVscodeRemote(unittest.TestCase):
+    def test_the_server_started_before_the_hook_lacks_the_value_and_the_one_after_the_reload_has_it(self):
+        import env_vscode_remote
+        import windows_checks
+        device = ScriptedServerDevice(self)
+        code, report = run_hook_check(env_vscode_remote, device, ['env_vscode_remote.py', 'device', '--password-file', r'C:\v\pw'])
+        self.assertEqual({'host': 'device', 'ok': True, 'status': 'PASS', 'server_started_before_hook_has_probe': False,
+                          'server_after_reload_has_probe': True}, report)
+        self.assertEqual('PASS', windows_checks.verdict(code, json.dumps(report)))
+        self.assertEqual((device.DIR, 'server-win32-x64'), (device.fetched['dir'], device.fetched['url'].split('/')[-2]))
+        self.assertEqual(('env', 'vault', 'unlock', '--password-file', r'C:\v\pw', '--json'), device.calls[0])
+        # both servers are stopped, their folder and the hook are gone, the probe is unset
+        self.assertEqual((set(), device.before, None), (device.running, {p: d for p, d in device.disk.items() if d}, device.value))
+
+    def test_it_fails_when_the_reloaded_server_lacks_the_value_or_another_process_reported(self):
+        import env_vscode_remote
+        device = ScriptedServerDevice(self, fresh_sees_hook=False)
+        code, report = run_hook_check(env_vscode_remote, device, ['env_vscode_remote.py', 'device'])
+        self.assertEqual((1, 'FAIL', False), (code, report['status'], report['server_after_reload_has_probe']))
+        device = ScriptedServerDevice(self, reported_by_server=False)
+        error, _ = run_hook_check(env_vscode_remote, device, ['env_vscode_remote.py', 'device'])
+        self.assertRegex(str(error), 'not reported by the one running server process')
+        self.assertEqual((False, None), (device.hooked(), device.value))
+        ended = SimpleNamespace(poll=lambda: 1)
+        with self.assertRaisesRegex(RuntimeError, 'ended before it was listening'):
+            env_vscode_remote.server_probe_windows(ScriptedServerDevice(self), winhost.RemotePath(device, device.DIR), ended)
+
+    def test_runner_entry_and_the_unix_launch_are_as_before(self):
+        import env_vscode_remote
+        import windows_checks
+        args = WindowsChecksRunner().args
+        with patch.dict(os.environ, {'SMOKE_WINDOWS_SSH': 'me@winbox'}):
+            table = windows_checks.checks(args(vault_password_file=r'C:\v\pw'))
+        self.assertEqual(['env_vscode_remote.py', 'me@winbox', '--password-file', r'C:\v\pw'], table['env-vscode-remote'][0])
+        self.assertEqual(['--vault_password_file'], windows_checks.missing(table['env-vscode-remote'][1], args()))
+        self.assertIn("curl -fsSL 'https://update.code.visualstudio.com/latest/server-linux-x64/stable' | tar -xz",
+                      env_vscode_remote.LAUNCH)
+        self.assertIn('/proc/$pid/environ', env_vscode_remote.READ)
+
+    @unittest.skipUnless(PWSH, 'set PB_TEST_PWSH to a pwsh binary to run the server launch for real')
+    def test_the_launch_runs_the_server_in_the_hooked_shell_with_the_preload_and_a_log(self):
+        import env_vscode_remote
+        import tempfile
+        with tempfile.TemporaryDirectory() as home:
+            root = pathlib.Path(home) / '.lanej-vscode-server'
+            (root / 'bin').mkdir(parents=True)
+            server = root / 'bin' / 'code-server.cmd'  # stands in for the launcher: records what it was given
+            server.write_text('#!/bin/sh\nprintf "%s|%s|%s" "$NODE_OPTIONS" "$PB_ENV_HOOK_PROBE" "$*" > "$(dirname "$0")/../seen"\n'
+                              'echo "Extension host agent listening on 1"\n')
+            server.chmod(0o755)
+            profile = pathlib.Path(home) / 'powershell' / 'profile.ps1'
+            profile.parent.mkdir()
+            profile.write_text("$env:PB_ENV_HOOK_PROBE='from-profile'\n")
+            ssh = pathlib.Path(home) / 'ssh.py'
+            ssh.write_text(FAKE_SSH)
+            device = SimpleNamespace(ssh_prefix=lambda *options: [sys.executable, str(ssh), PWSH, *options],
+                                     ssh_environment=lambda: dict(os.environ, XDG_CONFIG_HOME=home, USERPROFILE=home))
+            self.assertEqual(0, env_vscode_remote.start_server_windows(device, 'device').wait(timeout=60))
+            options, probe, arguments = (root / 'seen').read_text().split('|')
+            self.assertEqual('--require "%s/pb-env-probe.cjs"' % root, options)
+            self.assertEqual('from-profile', probe)  # the server's shell loaded the profile
+            self.assertEqual('--start-server --host=127.0.0.1 --port=0 --without-connection-token '
+                             '--accept-server-license-terms --telemetry-level off', arguments)
+            self.assertIn('Extension host agent', (root / 'server.log').read_text())

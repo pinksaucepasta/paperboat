@@ -13,7 +13,17 @@ SHA-256, never printed. Cleans up the probe, the hook, the server and its files 
 A macOS host is detected over ssh (`uname -s`). It has no /proc, so the server's environment is read with
 `ps eww`; its login shell is zsh, so the hook is the zsh one (~/.zshenv); the server is the darwin-arm64
 build; hashes use shasum. Over ssh the host's login keychain must already be unlocked for the ENV vault.
+
+  env_vscode_remote.py SSH_HOST [--password-file FILE_ON_THE_DEVICE]     with PB_SMOKE_WINDOWS_PB set (winhost.py)
+
+On a Windows device the hook is PowerShell's, so the stand-in is Remote-SSH on a host whose shell is PowerShell: the
+real win32-x64 server (a zip) is started by `ssh HOST powershell ...` with the profile loaded, and that ssh session
+stays open while the server runs (Windows OpenSSH ends a session's processes with it). Windows has no /proc and no
+tool that shows another process's environment, so the server reports its own: NODE_OPTIONS preloads a few lines into
+the server's node process, which writes the SHA-256 of the probe in its process.env to a file named by its pid; the
+check then confirms that pid is the running server-main.js process.
 """
+import contextlib
 import hashlib
 import json
 import secrets
@@ -21,7 +31,8 @@ import subprocess
 import sys
 import time
 
-from env_ssh_hook import UNSET_MAC, account, host_is_mac
+from env_ssh_hook import (PS_SHOW, UNSET_MAC, account, arguments, host_is_mac, probe_hash, windows_cleanup, windows_pb,
+                          windows_shell, windows_unlock, windows_unset)
 
 PB = '$HOME/.local/bin/pb'
 PROBE = 'PB_ENV_HOOK_PROBE'
@@ -97,8 +108,111 @@ def stop_server(host, pid):
     ssh(host, f'kill {pid} 2>/dev/null; pkill -f "{DIR}" 2>/dev/null; true')
 
 
+# ---- a Windows device ---------------------------------------------------------------------------------------------
+
+SERVER_URL_WINDOWS = SERVER_URL.replace('server-linux-x64', 'server-win32-x64')  # a zip
+WINDOWS_DIR = '.lanej-vscode-server'  # in the user's profile folder, as DIR
+PRELOAD_NAME = 'pb-env-probe.cjs'  # .cjs: the server's package.json makes .js an ES module
+# Runs first in every node process the launch starts; only the server itself (server-main.js) writes its answer.
+PRELOAD = """const fs = require('fs'), path = require('path'), crypto = require('crypto');
+if (process.argv.some((a) => /server-main\\.js$/.test(a))) {
+  const v = process.env.%s;
+  fs.writeFileSync(path.join(__dirname, 'env-' + process.pid + '.txt'),
+    v ? crypto.createHash('sha256').update(v).digest('hex') : 'absent');
+}
+""" % PROBE
+# What Remote-SSH does on the host: fetch the server once. tar.exe (bsdtar, part of Windows) unpacks the zip.
+FETCH = ("if(Test-Path -LiteralPath (Join-Path $req.dir 'node.exe')){exit 0}\n"
+         "[void](New-Item -ItemType Directory -Force -Path $req.dir);$z=Join-Path $req.dir 'server.zip'\n"
+         "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12\n"
+         "Invoke-WebRequest -UseBasicParsing -Uri $req.url -OutFile $z\n"
+         "& tar.exe -xf $z -C $req.dir --strip-components 1\n"
+         "if($LASTEXITCODE -ne 0){throw 'unpacking the VS Code server failed'}\n"
+         "Remove-Item -LiteralPath $z -Force")
+# Typed by nobody: the command of the hooked PowerShell that keeps the server in its foreground. NODE_OPTIONS takes
+# the preload path in double quotes with forward slashes (a backslash is an escape there).
+LAUNCH_WINDOWS = ("$d=Join-Path $env:USERPROFILE '%s'\n"
+                  "$env:NODE_OPTIONS='--require \"'+((Join-Path $d '%s') -replace '\\\\','/')+'\"'\n"
+                  "& (Join-Path (Join-Path $d 'bin') 'code-server.cmd') --start-server --host=127.0.0.1 --port=0 "
+                  "--without-connection-token --accept-server-license-terms --telemetry-level off "
+                  "*> (Join-Path $d 'server.log')" % (WINDOWS_DIR, PRELOAD_NAME))
+
+
+def start_server_windows(device, host):
+    """The ssh session of a hooked PowerShell with the server in its foreground."""
+    import base64
+    command = ('powershell -NonInteractive -OutputFormat Text -EncodedCommand '
+               + base64.b64encode(LAUNCH_WINDOWS.encode('utf-16-le')).decode())
+    return subprocess.Popen(device.ssh_prefix(host, command), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, env=device.ssh_environment())
+
+
+def server_probe_windows(device, directory, session, seconds=180):
+    """Hash of the probe in the running server's own environment (or "absent")."""
+    end = time.monotonic() + seconds
+    while True:
+        names = device.files(directory, 'env-*.txt')
+        if names and device.count_in_files(directory, 'server.log', 'Extension host agent'):
+            break
+        if session.poll() is not None:
+            raise RuntimeError('the VS Code server ended before it was listening')
+        if time.monotonic() > end:
+            raise RuntimeError('the VS Code server was not listening within %d s' % seconds)
+        time.sleep(2)
+    pid = int(names[0][len('env-'):-len('.txt')])
+    if len(names) != 1 or pid not in [int(found['ProcessId']) for found in device.processes(r'server-main\.js')]:
+        raise RuntimeError('the environment was not reported by the one running server process')
+    return (directory / names[0]).read_text().strip()
+
+
+def stop_server_windows(device, directory, session):
+    if session is not None and session.poll() is None:
+        session.terminate()
+        session.wait(timeout=30)
+    for found in device.processes(WINDOWS_DIR.replace('.', r'\.')):
+        with contextlib.suppress(Exception):  # a child may be gone with its parent's tree
+            device.stop(found['ProcessId'])
+    for name in device.files(directory, 'env-*.txt'):
+        (directory / name).unlink()
+
+
+def main_windows(host, device, password_file):
+    value = secrets.token_urlsafe(24)
+    want = hashlib.sha256(value.encode()).hexdigest()
+    report = {'host': host}
+    directory = device.home() / WINDOWS_DIR
+    sessions = []
+    windows_unlock(password_file)
+    try:
+        must(windows_pb('env', 'set', PROBE, '--value-stdin', stdin=value), 'env set')
+        device.ps('fetch the VS Code server', FETCH, timeout=900, dir=str(directory), url=SERVER_URL_WINDOWS)
+        (directory / PRELOAD_NAME).write_text(PRELOAD)
+        sessions.append(start_server_windows(device, host))
+        must(windows_pb('env', 'hook', 'powershell', '--install'), 'hook install')
+        end = time.monotonic() + 90  # the runtime serves a shell's ENV from a 60 s cache
+        while probe_hash(must(windows_shell(device, host, PS_SHOW), 'read probe in a new shell')) != want:
+            assert time.monotonic() < end, 'new shells did not load the probe within the hook cache time'
+            time.sleep(3)
+        stale = server_probe_windows(device, directory, sessions[-1])
+        report['server_started_before_hook_has_probe'] = stale == want
+        stop_server_windows(device, directory, sessions[-1])  # the documented reload step
+        sessions.append(start_server_windows(device, host))
+        report['server_after_reload_has_probe'] = server_probe_windows(device, directory, sessions[-1]) == want
+        stop_server_windows(device, directory, sessions[-1])
+        report['ok'] = report['server_after_reload_has_probe'] and not report['server_started_before_hook_has_probe']
+    finally:
+        windows_cleanup(*[lambda session=session: stop_server_windows(device, directory, session) for session in sessions],
+                        lambda: stop_server_windows(device, directory, None), directory.unlink,
+                        lambda: windows_pb('env', 'hook', '--uninstall'), windows_unset)
+    report['status'] = 'PASS' if report.get('ok') else 'FAIL'  # what windows_checks.py reads
+    print(json.dumps(report, sort_keys=True))
+    return 0 if report.get('ok') else 1
+
+
 def main():
-    host = sys.argv[1]
+    host, device, password_file = arguments()
+    if device:
+        return main_windows(host, device, password_file)
     value = secrets.token_urlsafe(24)
     want = hashlib.sha256(value.encode()).hexdigest()
     report = {'host': host}

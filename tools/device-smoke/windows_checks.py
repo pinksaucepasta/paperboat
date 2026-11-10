@@ -20,9 +20,10 @@ run here and are reached from the device through an ssh -R forward; the host ser
 rsync). terminal-matrix skips the rows that cut the network (it would cut this controller's SSH) and the echo
 latency row. access-machine, private-address and private-https run with the device as the client only (the origin on a
 Unix peer through pb exec); private_access_permission drives two Unix hosts over ssh. ssh-long holds a session for SMOKE_SSH_LONG_SECONDS (3601 for the real check; pass --timeout above it).
-ENV: env-scopes, env-messages, env-delivery, env-revoke-rotation and env-ssh-hook need the device account's own
-unlocked vault (--vault-password-file: delivery reaches that account's machines); env-ssh-hook drives the device's own
-PowerShell over plain ssh (the hook's only Windows shell; the device must let its profile.ps1 run); env-team-scopes has the device account as owner and
+ENV: env-scopes, env-messages, env-delivery, env-revoke-rotation, env-ssh-hook and env-vscode-remote need the device
+account's own unlocked vault (--vault-password-file: delivery reaches that account's machines); the last two drive the
+device's own PowerShell over plain ssh (the hook's only Windows shell; the device must let its profile.ps1 run), and
+env-vscode-remote downloads the win32-x64 VS Code server there; env-team-scopes has the device account as owner and
 the second profile as member; env-undeliverable needs no vault, only a disposable target and the commands that cut it.
 Narrowed on Windows: policy-token (the device creates the tokens, a Unix throwaway holds them), team-two-account (no
 member-machine approval/transfer), team-business (no F19-07 token steps, no streaming), completion (the PowerShell
@@ -120,6 +121,7 @@ def checks(args):
     # The plain ssh shells of the device itself (PowerShell with its profile); they unlock the same vault first.
     hooked = [os.environ.get('SMOKE_WINDOWS_SSH', winhost.DEFAULT_TARGET), '--password-file', vault]
     table['env-ssh-hook'] = (['env_ssh_hook.py'] + hooked, ['--vault_password_file'])
+    table['env-vscode-remote'] = (['env_vscode_remote.py'] + hooked, ['--vault_password_file'])  # fetches the server
     table['env-messages'] = (['env_messages.py', peer, args.readonly_team or ''], ['--peer', '--readonly_team'])
     table['env-delivery'] = (['env_delivery.py', peer, '--expect', args.env_expect or ''], ['--peer', '--env_expect'])
     table['env-undeliverable'] = (['env_undeliverable.py', args.disposable_target or '', '--inject', args.inject or '',
