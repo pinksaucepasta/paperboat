@@ -236,7 +236,11 @@ def unix_phases(terminal, check, monitor, entry, cwd, status_bar):
                     raise RuntimeError('terminal size did not follow the local resize within 5 s')
         terminal.send("printf '\\033[31mPB_COLOUR\\033[0m\\n'\r")
         # A Windows client's console (ConPTY) writes the reset in its own form, as it does for a Windows target.
-        terminal.expect(b'\x1b[31mPB_COLOUR' if winhost.device() else b'\x1b[31mPB_COLOUR\x1b[0m')
+        if winhost.device():  # ConPTY repaints the frame and splits SGR from text (seen: ESC[31m CRLF PB_COLOUR): red first, then the text, in order
+            terminal.expect(b'\x1b[31m')
+            terminal.expect('PB_COLOUR')
+        else:
+            terminal.expect(b'\x1b[31mPB_COLOUR\x1b[0m')
         for control, label in [(b'\x03', 'INTERRUPTED'), (b'\x1a', 'STOPPED')]:
             suffix = uuid.uuid4().hex
             ready = 'PB_FOREGROUND_' + suffix
