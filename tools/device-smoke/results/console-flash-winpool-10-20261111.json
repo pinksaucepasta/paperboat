@@ -1,0 +1,24 @@
+{
+  "check": "windows_console_flash (VIA_EXPLORER=1: detector started by Explorer, outside the Task Scheduler job)",
+  "host": "winpool-10 (hosted Windows Server runner, runneradmin console session 2 Active, ConsentPromptBehaviorAdmin=0)",
+  "build": "dev-6deb7a1e3 (install, pair, service); dev-w12b built from the same commit (update target)",
+  "utc": "21:09-21:47",
+  "control": "plain cmd.exe started with no console opened a visible window before every case (detector not blind)",
+  "cases": {
+    "install --json":      {"result": "PASS", "exit": 0, "detail": "no visible console window for 30 s"},
+    "pair":                {"result": "PASS", "exit": 0, "detail": "no window for 30 s; machine revoked by exact id afterwards"},
+    "service stop":        {"result": "PASS", "exit": 0},
+    "service start":       {"result": "PASS", "exit": 0},
+    "service restart":     {"result": "PASS", "exit": 0},
+    "update --from":       {"result": "PASS", "exit": 0, "detail": "dev-6deb7a1e3 -> dev-w12b"},
+    "uninstall":           {"result": "PASS", "exit": 0, "detail": "no window for 120 s after exit (elevated cleanup helper keeps running); no services or program files left"}
+  },
+  "not_run": {
+    "rsync": "no rsync.exe on the runner; only the cygpath call (now hidden) is covered by the unit policy test",
+    "sign-out/sign-in after uninstall (RunOnce at logon)": "logoff would end the runner's only desktop session; needs victus or a sacrificial runner slot"
+  },
+  "finding": {
+    "install/pair as a Task Scheduler task failed with local_io 'Windows administrator approval was denied' (support_a085e6d6..., support_d940cafb...)": "harness artifact: the task job forbids CREATE_BREAKAWAY_FROM_JOB, which the elevation bridge needs (bridge_windows.go:1457-1459): CreateProcessW fails with error 5, classifyLaunchError (bridge_windows.go:497-500) reports it as ErrElevationDenied, json_output.go:117-118 as local_io. Probe: in a task job CreateProcess with breakaway = error 5, without = ok; from an Explorer-launched PowerShell in_job=False and `pb install --json` succeeds.",
+    "product nit": "a user whose shell sits in a job that forbids breakaway (some IDE/CI shells) gets 'administrator approval was denied' mapped to local_io, which hides the cause"
+  }
+}
