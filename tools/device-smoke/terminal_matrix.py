@@ -217,7 +217,11 @@ def fresh_name():
 
 def lines(out, prefix):
     # Control sequences are not text: a resize report (CSI 8 t) can start the line that follows it.
-    out = re.sub(rb'\x1b\[[0-9;?]*[A-Za-z]', b'', out)
+    # A Windows client's ConPTY repaints around a burst and can glue sequences of any kind before or after a line: CSI with any final byte
+    # (also ~), OSC, two-byte ESC sequences, and bare CRs. Strip those, then keep the strict one-line-per-number match (no substring search:
+    # that would hide a lost or doubled line).
+    out = re.sub(rb'\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[78=>DEHMNOPVWXZ\\^_c]|\x1b[ -/]+[0-~]', b'', out)
+    out = re.sub(rb'\r+(?!\n)', b'', out).replace(b'\r\r\n', b'\r\n')
     return re.findall(rb'(?m)^' + re.escape(prefix) + rb'(\d+)\r?$', out)
 
 
