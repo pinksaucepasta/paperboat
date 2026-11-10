@@ -220,6 +220,11 @@ func runWithReporter(ctx context.Context, args []string, stdout, stderr io.Write
 	if executed != nil && jsonOutputRequested(executed) {
 		jsonOutput = true
 	}
+	if executed != nil {
+		if cachePath, _, _, ok := cliUpdatePolicyCacheFor(executed); ok {
+			forgetUpdatePolicyAfterRefusal(cachePath, err)
+		}
+	}
 	if failure.presented {
 		return presentedCommandExitCode(failure)
 	}

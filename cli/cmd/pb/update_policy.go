@@ -44,6 +44,34 @@ func updatePolicyRecoveryCommand(command *cobra.Command) bool {
 	return false
 }
 
+// cliUpdatePolicyCacheFor is the cache file of the server and configuration a command talks to.
+func cliUpdatePolicyCacheFor(command *cobra.Command) (cachePath string, cfg *config.Config, issuer string, ok bool) {
+	cfg, err := config.Load(commandFlagString(command, "config"))
+	if err != nil {
+		return "", nil, "", false // The owning action reports configuration errors.
+	}
+	issuer = cfg.ServerURL
+	if override := commandFlagString(command, "server"); override != "" {
+		issuer = override
+	}
+	issuer, err = config.NormalizeServerURL(issuer)
+	if err != nil {
+		return "", nil, "", false
+	}
+	return cliUpdatePolicyCachePath(issuer, cfg.Path()), cfg, issuer, true
+}
+
+// forgetUpdatePolicyAfterRefusal drops the cached policy when the server refused a request as update_required: the
+// cache can hold an empty policy for up to an hour, a floor set after it was fetched is invisible to the pre-command
+// gate until then, and the commands that follow a server refusal ran to the peer and failed natively (F14-07 on
+// the staging fixture: `pb exec` said 'reached but did not open the connection' after `pb machine list` was refused).
+func forgetUpdatePolicyAfterRefusal(cachePath string, err error) {
+	var refusal *api.APIError
+	if cachePath != "" && errors.As(err, &refusal) && refusal.Status == http.StatusUpgradeRequired && refusal.Code == "update_required" {
+		_ = os.Remove(cachePath)
+	}
+}
+
 func checkCLIUpdatePolicy(command *cobra.Command) error {
 	if buildinfo.Distribution != "official" {
 		return nil
@@ -51,19 +79,10 @@ func checkCLIUpdatePolicy(command *cobra.Command) error {
 	if updatePolicyRecoveryCommand(command) {
 		return nil
 	}
-	cfg, err := config.Load(commandFlagString(command, "config"))
-	if err != nil {
-		return nil
-	} // The owning action reports configuration errors.
-	issuer := cfg.ServerURL
-	if override := commandFlagString(command, "server"); override != "" {
-		issuer = override
-	}
-	issuer, err = config.NormalizeServerURL(issuer)
-	if err != nil {
+	cachePath, _, issuer, ok := cliUpdatePolicyCacheFor(command)
+	if !ok {
 		return nil
 	}
-	cachePath := cliUpdatePolicyCachePath(issuer, cfg.Path())
 	policy, err := freshCLIUpdatePolicy(cachePath)
 	if err != nil {
 		ctx, cancel := context.WithTimeout(command.Context(), time.Second)
