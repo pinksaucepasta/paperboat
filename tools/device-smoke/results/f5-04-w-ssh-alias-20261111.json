@@ -1,0 +1,1 @@
+{"check": "ssh-alias", "target": "winpool-2-w3f504", "status": "PASS", "server_domain": true, "plain_openssh": true, "explicit_target_user": true, "enrollment_unchanged": true}

@@ -1,0 +1,1 @@
+{"check": "ssh-trust-host", "target": "winpool-8-w8trust", "status": "PASS", "pending_named": true, "wrong_fingerprint_refused": true, "trusted_then_connected": true}
