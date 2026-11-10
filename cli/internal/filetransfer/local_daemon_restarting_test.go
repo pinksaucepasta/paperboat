@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"testing"
 
@@ -17,11 +18,15 @@ func TestLocalDaemonRestartingRecognisesAMissingWindowsPipe(t *testing.T) {
 		err  error
 		want bool
 	}{
-		"missing pipe":      {pipe, true},
-		"wrapped renewal":   {fmt.Errorf("file transfer authorization renewal failed: %w", pipe), true},
-		"permission":        {os.ErrPermission, false},
-		"cancelled":         {context.Canceled, false},
-		"other local error": {errors.New("disk full"), false},
+		"missing pipe":    {pipe, true},
+		"wrapped renewal": {fmt.Errorf("file transfer authorization renewal failed: %w", pipe), true},
+		// The Windows pipe dial error as localapi types it (localDialFailure joins ErrTransportUnavailable): restarting.
+		"typed missing pipe":  {errors.Join(localapi.ErrTransportUnavailable, &fs.PathError{Op: "open", Path: `\\.\pipe\paperboat-local-api-x`, Err: fs.ErrNotExist}), true},
+		"missing source file": {&fs.PathError{Op: "open", Path: `C:\Users\x\file.bin`, Err: fs.ErrNotExist}, false},
+		"pipe access refused": {&fs.PathError{Op: "open", Path: `\\.\pipe\paperboat-local-api-x`, Err: fs.ErrPermission}, false},
+		"permission":          {os.ErrPermission, false},
+		"cancelled":           {context.Canceled, false},
+		"other local error":   {errors.New("disk full"), false},
 	} {
 		if got := localDaemonRestarting(test.err); got != test.want {
 			t.Fatalf("%s: localDaemonRestarting = %v, want %v", name, got, test.want)
