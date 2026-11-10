@@ -14,21 +14,26 @@ import argparse
 import json
 import os
 from pathlib import Path
-import subprocess
 import time
 
-PB = Path.home() / '.local/bin/pb'
+from pairing_lifecycle import command_result
+import winhost
+
+PB = winhost.pb_path()
 SIGNED_OUT = 'no longer valid'
 DIAGNOSTICS = Path.home() / ('Library/Application Support/Paperboat/state/diagnostics' if os.uname().sysname == 'Darwin'
                              else '.local/state/paperboat/diagnostics')
 
 
 def run(*args, timeout=60):
-    result = subprocess.run([str(PB), *args], capture_output=True, text=True, timeout=timeout)
+    result = command_result(PB, *args, timeout=timeout)
     return result.returncode, result.stdout, result.stderr
 
 
 def events():
+    device = winhost.device()
+    if device:  # the daemon's state root is beside its runtime directory
+        return device.count_in_files(device.runtime_dir().parent / 'state' / 'diagnostics', 'events-*.ndjson', '\n')
     total = 0
     for path in DIAGNOSTICS.glob('events-*.ndjson'):
         total += sum(1 for _ in path.open('rb'))

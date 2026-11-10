@@ -216,6 +216,23 @@ OTHER_ACCESS = ("$me=[Security.Principal.WindowsIdentity]::GetCurrent().User.Val
                 "$_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value}|"
                 "Where-Object{$_ -notin $me,'S-1-5-18','S-1-5-32-544'}|Sort-Object -Unique")
 
+# Ctrl-C at a chosen moment: starts $req.exe in a console of its own, evaluates the PowerShell expression $req.when
+# every 5 ms and, the first time it is true, sends CTRL_C to that console (the only signal a Windows console program
+# gets from a user). Prints "<fired 0|1> <exit code, or -1 when it had to be killed>".
+INTERRUPT = ("Add-Type -Namespace Pb -Name Con -MemberDefinition '[DllImport(\"kernel32.dll\")] public static extern bool FreeConsole(); "
+             "[DllImport(\"kernel32.dll\")] public static extern bool AttachConsole(uint p); "
+             "[DllImport(\"kernel32.dll\")] public static extern bool SetConsoleCtrlHandler(IntPtr h, bool add); "
+             "[DllImport(\"kernel32.dll\")] public static extern bool GenerateConsoleCtrlEvent(uint e, uint g);'\n"
+             "$w=[scriptblock]::Create($req.when);$o=@{FilePath=$req.exe;PassThru=$true;WindowStyle='Hidden'}\n"
+             "if($req.args){$o.ArgumentList=$req.args}\n"
+             "$p=Start-Process @o;$null=$p.Handle;$fired=0;$d=(Get-Date).AddSeconds($req.seconds)\n"
+             "while(-not $p.HasExited -and (Get-Date) -lt $d){if(& $w){\n"
+             "[void][Pb.Con]::FreeConsole();if(-not [Pb.Con]::AttachConsole($p.Id)){break}\n"
+             "[void][Pb.Con]::SetConsoleCtrlHandler([IntPtr]::Zero,$true);$fired=[int][Pb.Con]::GenerateConsoleCtrlEvent(0,0);break}\n"
+             "Start-Sleep -Milliseconds 5}\n"
+             "if($p.WaitForExit([int]$req.exit_ms)){$rc=$p.ExitCode}else{& cmd.exe /c \"taskkill /T /F /PID $($p.Id) >nul 2>&1\";$rc=-1}\n"
+             "[Console]::Out.Write(\"$fired $rc\")")
+
 # Snippets that change nothing on the device: safe to send again when a session did not answer.
 READ_ONLY = (READ, EXISTS, SHA256, SIZE, ENV, SERVICES, PROCESSES, TASKS, SERVICE_PATHS, LISTENING, ALIVE)
 
@@ -375,6 +392,14 @@ class WindowsDevice:
         """SIDs other than the user, SYSTEM and Administrators that the file's ACL lets in (empty: owner-only)."""
         return self.ps('acl %s' % path, OTHER_ACCESS, path=str(path))[1].split()
 
+    def interrupt_when(self, argv, when, seconds=30, exit_seconds=90):
+        """Run argv in its own console and send it Ctrl-C the first time the PowerShell expression `when` is true
+        (polled every 5 ms for `seconds`); returns (whether Ctrl-C was sent, exit code or -1 if it was killed)."""
+        out = self.ps('interrupt ' + pathlib.PureWindowsPath(argv[0]).name, INTERRUPT, timeout=seconds + exit_seconds + 60,
+                      exe=argv[0], args=subprocess.list2cmdline(list(argv[1:])), when=when, seconds=seconds,
+                      exit_ms=exit_seconds * 1000)[1].split()
+        return out[-2] == '1', int(out[-1])
+
     def services(self, pattern='Paperboat*'):
         return self._list('services ' + pattern, SERVICES, pattern=pattern)
 
@@ -423,11 +448,12 @@ class WindowsDevice:
     def alive(self, pid):
         return self.ps('alive %s' % pid, ALIVE, pid=int(pid))[1] == 'yes'
 
-    def spawn(self, argv, directory):
+    def spawn(self, argv, directory, env=None):
         """Start argv detached with output in directory/{out,err} and its exit code in directory/rc."""
         directory = RemotePath(self, directory)
         args = subprocess.list2cmdline(list(argv[1:]))
-        wrapper = _b64(('$req=@{exe=%s;args=%s;inp=%s;out=%s;err=%s;rc=%s;child=%s};' % tuple(map(ps_quote, (
+        overlay = ''.join('$env:%s=%s;' % (name, ps_quote(value)) for name, value in (env or {}).items())
+        wrapper = _b64((overlay + '$req=@{exe=%s;args=%s;inp=%s;out=%s;err=%s;rc=%s;child=%s};' % tuple(map(ps_quote, (
             argv[0], args, directory / 'start.in', directory / 'out', directory / 'err', directory / 'rc',
             directory / 'child'))) + SPAWN
         ).encode('utf-16-le'))
@@ -685,9 +711,9 @@ class LocalJob:
 class RemoteJob:
     """pb.exe on the Windows device with output read from files there. A hidden Windows process gets no Ctrl-C."""
 
-    def __init__(self, device, argv):
+    def __init__(self, device, argv, env=None):
         self.device, self.scratch = device, device.temp_dir('pb-job')
-        self.process = device.spawn(argv, self.scratch.__enter__())
+        self.process = device.spawn(argv, self.scratch.__enter__(), env)
 
     def stdout(self, limit=(1 << 20) + 1):
         return self.process.stdout()[:limit]
@@ -851,6 +877,13 @@ def device():
 @functools.lru_cache(maxsize=None)
 def _device(exe):  # one object per exe so its environment lookups are cached
     return WindowsDevice(pb_exe=exe)
+
+
+def journal_when(path, on, off=()):
+    """interrupt_when expression: the JSON file at path has every key of `on` true and every key of `off` not true."""
+    tests = ['$j.%s' % key for key in on] + ['-not $j.%s' % key for key in off]
+    return ("$j=try{Get-Content -Raw -LiteralPath %s -ErrorAction Stop|ConvertFrom-Json}catch{$null};$j -and %s"
+            % (ps_quote(path), ' -and '.join(tests)))
 
 
 def true_argv():

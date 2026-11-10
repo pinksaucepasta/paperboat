@@ -157,7 +157,90 @@ def await_external_revoke(directory, before, original):
                            'alias': original['alias']})
 
 
+def inventory_on_device(device, inbox, installed):
+    """The Windows uninstall inventory (uninstall_inventory_windows.ps1) on the device: leftovers while installed,
+    none after an uninstall. The uninstall hands the removal to a helper that outlives the command, so a clean
+    inventory is awaited for up to four minutes."""
+    with device.temp_dir('pb-inventory') as directory:
+        script = directory / 'inventory.ps1'
+        script.write_text((Path(__file__).resolve().parent / 'uninstall_inventory_windows.ps1').read_text())
+        deadline = time.monotonic() + 240
+        while True:
+            result = device.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(script),
+                                 '-Inbox', str(inbox)], timeout=300)
+            clean = result.returncode == 0 and 'inventory: clean' in result.stdout
+            if installed:
+                if clean:
+                    raise RuntimeError('inventory did not detect the installed positive control')
+                return
+            if clean:
+                return
+            if time.monotonic() > deadline:
+                print(json.dumps({'check': 'uninstall-inventory', 'status': 'FAIL', 'leftovers':
+                                  [line for line in result.stdout.splitlines() if line.startswith('leftover')][:40]}), flush=True)
+                raise RuntimeError('uninstall inventory did not reach zero leftovers')
+            time.sleep(10)
+
+
+def hostname(binary):
+    if hasattr(binary, 'device'):
+        return binary.device.run(['hostname.exe']).stdout.strip()
+    return os.uname().nodename
+
+
+def published_fixture(binary, alias):
+    """What published_install.py and official_update.py need before they uninstall: a kept directory, a copy of the
+    installed pb in it, the account's published install command for this platform and its token in a private file."""
+    receipt = invoke(binary, '--workspace', 'personal', 'machine', 'add', '--name', alias, '--json')
+    if hasattr(binary, 'device'):
+        directory = binary.device.home() / ('pb-published-proof-' + uuid.uuid4().hex[:12])
+        directory.mkdir()
+        staged = directory / 'pb.exe'
+        binary.device.copy(str(binary), staged)
+        staged = winhost.WindowsPb(binary.device, str(staged))
+        command = receipt['windows_command']
+        address = next(word.strip('\'"()') for word in command.split() if 'https://' in word)
+        address = address[address.index('https://'):]
+    else:
+        directory = Path(tempfile.mkdtemp(prefix='pb-published-proof-'))
+        staged = directory / 'pb'
+        shutil.copyfile(binary, staged)
+        staged.chmod(0o700)
+        command = receipt['linux_macos_command']
+        address = next(word for word in shlex.split(command) if word.startswith('https://'))
+    token = parse_qs(urlparse(address).query)['p'][0][-26:]
+    assert len(token) == 26 and token.isalnum() and token.upper() == token
+    tokenfile = directory / 'enrollment-token'
+    if not hasattr(binary, 'device'):
+        tokenfile.touch(mode=0o600)
+    tokenfile.write_text(token)
+    tokenfile.chmod(0o600)
+    return directory, staged, command, tokenfile
+
+
+def run_published(binary, command, directory, password):
+    """Run the published one-liner as a user would: /bin/sh here, a cmd.exe line on the Windows device."""
+    if hasattr(binary, 'device'):
+        script = directory / 'published.cmd'
+        script.write_text('@' + command + '\r\n')
+        try:
+            result = binary.device.run(['cmd.exe', '/c', str(script)], timeout=900)
+        finally:
+            script.unlink()
+    else:
+        result = terminal_command.run(['/bin/sh', '-c', command], password=password, timeout=600)
+    if result.returncode:
+        diagnostic = command_diagnostic(['published install command'], result.stdout, result.stderr)
+        raise RuntimeError('published installer failed; private diagnostics: ' + str(diagnostic))
+
+
+def remove_tree(directory):
+    directory.unlink() if isinstance(directory, winhost.RemotePath) else shutil.rmtree(directory)
+
+
 def inventory(script, inbox, installed, password):
+    if winhost.device():
+        return inventory_on_device(winhost.device(), inbox, installed)
     sudo = ['sudo', '-n'] if password is None else ['sudo', '-S', '-p', '']
     result = subprocess.run(sudo + [sys.executable, '-I', str(script),
                              '--user', pwd.getpwuid(os.getuid()).pw_name,
@@ -188,6 +271,10 @@ def enrollment_file(binary, alias, directory):
     if len(token) != 26 or any(character not in '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ' for character in token):
         raise RuntimeError('enrollment command has invalid token shape')
     path = directory / 'enrollment-token'
+    if hasattr(binary, 'device'):
+        path.write_text(token)
+        path.chmod(0o600)
+        return path
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, 'w') as output:
         output.write(token)
@@ -202,7 +289,45 @@ class FaultAbsorbed(Exception):
         self.output = output
 
 
+def interrupt_pair_on_device(binary, arguments, root, mode, proxy):
+    """interrupt_pair for pb.exe on the Windows device: Ctrl-C through pb's console, or the controller's fault proxy
+    reached through an SSH forward. The rerun goes direct (the forward ends here), so no environment is returned."""
+    device, journal = binary.device, root / 'bootstrap-resume.json'
+    if mode == 'sigint':
+        fired, code = device.interrupt_when([str(binary), *arguments], winhost.journal_when(journal, ['pairing_started']),
+                                            exit_seconds=40)
+        if not fired:
+            raise RuntimeError('actual pairing handoff was not observed before fault injection')
+        if code == 0:
+            raise RuntimeError('fault did not stop pending pairing')
+        return None
+    with device.forward(proxy.address[1]) as port:
+        address = 'http://127.0.0.1:%d' % port
+        job = winhost.RemoteJob(device, [str(binary), *arguments],
+                                {'HTTPS_PROXY': address, 'https_proxy': address, 'NO_PROXY': '', 'no_proxy': ''})
+        try:
+            deadline = time.monotonic() + 60  # each look at the device takes seconds
+            while job.poll() is None and time.monotonic() < deadline:
+                try:
+                    started = json.loads(journal.read_text()).get('pairing_started')
+                except (FileNotFoundError, ValueError):
+                    started = False
+                if started and proxy.live_count():
+                    if proxy.cut() < 1:
+                        raise RuntimeError('network fault did not cut an actual connection')
+                    if job.wait(60) == 0:
+                        raise FaultAbsorbed((job.stdout() + job.stderr()).decode(errors='replace'))
+                    return None
+            raise RuntimeError('actual pairing handoff was not observed before fault injection')
+        finally:
+            if job.poll() is None:
+                job.kill()
+            job.close()
+
+
 def interrupt_pair(binary, arguments, root, mode, proxy):
+    if hasattr(binary, 'device'):
+        return interrupt_pair_on_device(binary, arguments, root, mode, proxy)
     environment = dict(os.environ)
     if proxy is not None:
         address = 'http://127.0.0.1:' + str(proxy.address[1])
@@ -266,16 +391,16 @@ def uninstall(binary, identifier, check, inbox, script, password):
     if check == 'broken':
         invoke(binary, 'service', 'uninstall', '--json')
     if check == 'prompts':
-        invoke(binary, 'uninstall', input='UNINSTALL PAPERBOAT\n' + os.uname().nodename + '\n', raw=True)
+        invoke(binary, 'uninstall', input='UNINSTALL PAPERBOAT\n' + hostname(binary) + '\n', raw=True)
     else:
         invoke(binary, 'uninstall', '--confirmation', 'UNINSTALL PAPERBOAT',
-               '--hostname', os.uname().nodename, '--json')
+               '--hostname', hostname(binary), '--json')
     inventory(script, inbox, installed=False, password=password)
 
 
 def qualify(expected, check, fault, script, password, revoke_first=False, external_revoke=False):
-    binary = Path.home() / '.local/bin/pb'
-    version = subprocess.run([str(binary), '--version'], capture_output=True, text=True, timeout=10)
+    binary = winhost.pb_path()
+    version = command_result(binary, '--version', timeout=30)
     if version.returncode or expected not in version.stdout:
         raise RuntimeError('installed executable does not match the exact candidate')
     root = runtime_root()
@@ -286,7 +411,7 @@ def qualify(expected, check, fault, script, password, revoke_first=False, extern
         raise RuntimeError('current account does not own the exact installed machine')
     if revoke_first or external_revoke:
         invoke(binary, 'exec', original['alias'], '--', 'true', raw=True, timeout=45)
-    inbox = Path(before['inbox_path'])
+    inbox = winhost.device_path(before['inbox_path'])
     inventory(script, inbox, installed=True, password=password)
     inbox.mkdir(parents=True, exist_ok=True)
     sentinel = inbox / ('.paperboat-f1-' + uuid.uuid4().hex)
@@ -295,11 +420,11 @@ def qualify(expected, check, fault, script, password, revoke_first=False, extern
     digest = hashlib.sha256(sentinel.read_bytes()).digest()
     started = time.monotonic()
     try:
-        with tempfile.TemporaryDirectory(prefix='pb-pair-lifecycle-') as directory:
-            temporary = Path(directory)
-            staged = temporary / 'pb'
-            shutil.copyfile(binary, staged)
-            staged.chmod(0o700)
+        with winhost.workdir('pb-pair-lifecycle-') as temporary:
+            staged = temporary / ('pb.exe' if winhost.device() else 'pb')
+            winhost.copy_file(str(binary), staged)
+            if winhost.device():
+                staged = winhost.WindowsPb(winhost.device(), str(staged))
             token = enrollment_file(binary, original['alias'], temporary)
             pending_error = None
             if revoke_first or external_revoke:

@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 from pairing_fault import PairingFaultProxy
 from pairing_lifecycle import FaultAbsorbed, interrupt_pair, invoke, runtime_root
+import winhost
 
 
 def binding(record):
@@ -21,6 +22,14 @@ def binding(record):
 
 
 def interrupt_admitted(binary, arguments, root):
+    if hasattr(binary, 'device'):  # the same checkpoint, watched on the device; Ctrl-C through pb's console
+        fired, code = binary.device.interrupt_when([str(binary), *arguments], winhost.journal_when(
+            root / 'bootstrap-resume.json', ['runtime_enrolled'], ['runtime_ready']))
+        if not fired:
+            raise RuntimeError('admitted setup checkpoint was not observed')
+        if code == 0:
+            raise RuntimeError('Ctrl-C did not interrupt admitted setup')
+        return
     process = subprocess.Popen([str(binary), *arguments], stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
                                start_new_session=True)
@@ -52,7 +61,7 @@ def main():
     args = parser.parse_args()
     password = sys.stdin.readline().rstrip('\n') if args.password_stdin else None
     os.umask(0o077)
-    binary = Path.home() / '.local/bin/pb'
+    binary = winhost.pb_path()
     root = runtime_root()
     registration = root / 'machine-registration.json'
     before = json.loads(registration.read_text())

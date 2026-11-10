@@ -17,17 +17,23 @@ import argparse
 import datetime
 import json
 import os
-from pathlib import Path
 import time
 
 import pairing_lifecycle as p
+import winhost
 
-PB = Path.home() / '.local/bin/pb'
+PB = winhost.pb_path()
 
 
 class Clock:
     """The machine's local clock; tests replace it so no minute is really waited."""
     def now(self):
+        device = winhost.device()
+        if device:  # the schedule is in the device's own local time and zone, not this controller's
+            if not hasattr(self, 'ahead'):
+                there = datetime.datetime.fromisoformat(device.ps('device clock', "(Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz')")[1])
+                self.ahead, self.zone = there - datetime.datetime.now(datetime.timezone.utc), there.tzinfo
+            return (datetime.datetime.now(datetime.timezone.utc) + self.ahead).astimezone(self.zone)
         return datetime.datetime.now().astimezone()
 
     def sleep(self, seconds):

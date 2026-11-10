@@ -166,6 +166,8 @@ def checks(args):
     table['config-sync-pair'] = (['config_sync_pair.py', args.pair_repo_shell or '', args.pair_repo_addr or '', winhost.WINDOWS,
                                   args.machine or '', args.pair_peer_shell or '', args.pair_peer_alias or '', '--machine-sections'],
                                  ['--machine', '--pair_repo_shell', '--pair_repo_addr', '--pair_peer_shell', '--pair_peer_alias'])
+    for name in ('reinstall', 'pair-refusal', 'service', 'crash-service', 'setup'):  # the daemon service stops and comes back
+        table['install-' + name] = (['install_lifecycle.py', name], [])
     table['send-self'] = (['send_self.py', args.machine], ['--machine'])
     table['workspace-switch'] = (['workspace_lifecycle.py'], ['--empty_team'])  # PAPERBOAT_SMOKE_TEAM = --empty-team
     table['config-sync-lifecycle'] = (['config_sync_lifecycle.py', args.machine], ['--machine'])  # about 15 min

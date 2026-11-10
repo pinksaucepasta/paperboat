@@ -6,8 +6,14 @@ import re, os, json, shutil, tempfile, time, hashlib, shlex
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 import pairing_lifecycle as p
+import winhost
 import terminal_command
 import argparse, sys
+
+
+TAMPER = ("Copy-Item -LiteralPath $req.source -Destination $req.target -Force\n"
+          "$f=[IO.File]::Open($req.target,'Open','ReadWrite');$f.Position=[long]($f.Length/2);$b=$f.ReadByte()\n"
+          "$f.Position=$f.Position-1;$f.WriteByte($b -bxor 0xFF);$f.Close()")
 
 
 def update_checks(binary, password, directory):
@@ -29,11 +35,15 @@ def update_checks(binary, password, directory):
     assert 'automatic_updates' in settings, 'update settings missing'
     bundle = directory / 'official.pb-update'
     p.invoke(binary, 'update', 'bundle', '--output', str(bundle), raw=True, timeout=300)
-    assert bundle.stat().st_size > 1000, 'bundle is empty'
     tampered = directory / 'tampered.pb-update'
-    raw = bytearray(bundle.read_bytes())
-    raw[len(raw) // 2] ^= 0xFF
-    tampered.write_bytes(raw)
+    if winhost.device():  # the bundle is too large to carry over SSH: one byte is flipped in a copy on the device
+        assert bundle.size() > 1000, 'bundle is empty'
+        winhost.device().ps('tamper with the bundle', TAMPER, timeout=300, source=str(bundle), target=str(tampered))
+    else:
+        assert bundle.stat().st_size > 1000, 'bundle is empty'
+        raw = bytearray(bundle.read_bytes())
+        raw[len(raw) // 2] ^= 0xFF
+        tampered.write_bytes(raw)
     bad = result('update', '--from', str(tampered), '--json')
     assert bad.returncode != 0, 'tampered bundle was accepted'
     assert version() == official and p.invoke(binary, 'doctor', '--json', timeout=60)['overall'] == 'healthy', 'tampered bundle disturbed the install'
@@ -47,27 +57,16 @@ def main():
     parser = argparse.ArgumentParser(description='Verify the published one-liner and restore the installed candidate.')
     parser.add_argument('--expect-release', required=True)
     args = parser.parse_args()
-    password = sys.stdin.readline().rstrip('\n')
-    if not password:
+    binary = winhost.pb_path()
+    password = None if winhost.device() else sys.stdin.readline().rstrip('\n')  # Windows asks through UAC, not sudo
+    if not password and not winhost.device():
         raise RuntimeError('sudo credential required on stdin')
-    binary = Path.home() / '.local/bin/pb'
     root = p.runtime_root()
     before = json.loads((root / 'machine-registration.json').read_text())
     machines = p.invoke(binary, '--workspace', 'personal', 'machine', 'list', '--json')['machines']
     original = next((x for x in machines if x['id'] == before['machine_id']))
-    directory = Path(tempfile.mkdtemp(prefix='pb-published-proof-'))
-    staged = directory / 'pb'
-    shutil.copyfile(binary, staged)
-    staged.chmod(0o700)
-    receipt = p.invoke(binary, '--workspace', 'personal', 'machine', 'add', '--name', original['alias'], '--json')
-    command = receipt['linux_macos_command']
-    address = next((w for w in shlex.split(command) if w.startswith('https://')))
-    token = parse_qs(urlparse(address).query)['p'][0][-26:]
-    assert len(token) == 26 and token.isalnum() and (token.upper() == token)
-    tokenfile = directory / 'enrollment-token'
-    tokenfile.touch(mode=0o600)
-    tokenfile.write_text(token)
-    inbox = Path(before['inbox_path'])
+    directory, staged, command, tokenfile = p.published_fixture(binary, original['alias'])
+    inbox = winhost.device_path(before['inbox_path'])
     sentinel = inbox / ('.pb-install-proof-' + directory.name)
     sentinel.write_bytes(os.urandom(64))
     sentinel.chmod(0o600)
@@ -79,11 +78,10 @@ def main():
     try:
         p.invoke(staged, '--workspace', 'personal', '__desktop', 'request', input=json.dumps({'action': 'machine.remove', 'payload': {'machine_id': before['machine_id']}}))
         removed = True
-        p.invoke(staged, 'uninstall', '--confirmation', 'UNINSTALL PAPERBOAT', '--hostname', os.uname().nodename, '--json')
-        result = terminal_command.run(['/bin/sh', '-c', command], password=password, timeout=600)
-        if result.returncode:
-            diagnostic = p.command_diagnostic(['/bin/sh', '-c', command], result.stdout, result.stderr)
-            raise RuntimeError('published installer failed; private diagnostics: ' + str(diagnostic))
+        p.invoke(staged, 'uninstall', '--confirmation', 'UNINSTALL PAPERBOAT', '--hostname', p.hostname(binary), '--json')
+        if winhost.device():  # the removal finishes after the command returns
+            p.inventory(None, inbox, installed=False, password=None)
+        p.run_published(binary, command, directory, password)
         version = p.invoke(binary, '--version', raw=True)
         assert args.expect_release in version, 'published version mismatch'
         after = json.loads((root / 'machine-registration.json').read_text())
@@ -110,7 +108,7 @@ def main():
                 raise SystemExit(1)
         sentinel.unlink(missing_ok=True)
         if error is None:
-            shutil.rmtree(directory)
+            p.remove_tree(directory)
     if error:
         print(json.dumps({'check': 'official-update', 'status': 'FAIL', 'error': str(error), 'recovery_directory': str(directory)}), flush=True)
         raise SystemExit(1)
