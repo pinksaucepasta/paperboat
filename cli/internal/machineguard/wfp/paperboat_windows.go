@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/netip"
 	"runtime"
+	"slices"
 	"syscall"
 	"unsafe"
 
@@ -25,7 +26,11 @@ var sublayerKey = windows.GUID{Data1: 0x70617065, Data2: 0x7262, Data3: 0x4f61, 
 
 const alreadyExists windows.Errno = 0x80320009
 
-func Apply(leases, known []Lease, loopbackCIDR string, protectedValues ...string) error {
+// Apply makes the leases, protected ranges and browser gateway the whole installed policy: in one WFP transaction
+// it retires every filter in the Paperboat sublayer, then installs the desired ones, so a lease that is no longer
+// in leases leaves no filter behind (the nft table of server_linux.go and the PF anchor of protection_darwin.go
+// are replaced the same way).
+func Apply(leases []Lease, loopbackCIDR string, protectedValues ...string) error {
 	parsedPrefix, parseErr := netip.ParsePrefix(loopbackCIDR)
 	protectedPrefixes := []netip.Prefix{}
 	seenProtected := make(map[netip.Prefix]bool)
@@ -48,13 +53,8 @@ func Apply(leases, known []Lease, loopbackCIDR string, protectedValues ...string
 	}
 	defer fwpmEngineClose0(engine)
 	return runTransaction(engine, func(engine uintptr) error {
-		baseNames := []string{"paperboat-dns-permit-tcp", "paperboat-dns-permit-udp", "paperboat-in-permit", "paperboat-browser-in-permit-80", "paperboat-browser-in-permit-443", "paperboat-in-block", "paperboat-out-block"}
-		for _, protectedPrefix := range protectedPrefixes {
-			second := int(protectedPrefix.Addr().As4()[1])
-			baseNames = append(baseNames, fmt.Sprintf("paperboat-in-block-%d", second), fmt.Sprintf("paperboat-out-block-%d", second))
-		}
-		if err := deleteRuleKeys(engine, baseNames, known); err != nil {
-			return err
+		if err := removeSublayerFilters(context.Background(), engine, []windows.GUID{sublayerKey}); err != nil {
+			return fmt.Errorf("retire installed filters: %w", err)
 		}
 		if err := ensureBase(engine); err != nil {
 			return fmt.Errorf("base objects: %w", err)
@@ -128,22 +128,6 @@ func Apply(leases, known []Lease, loopbackCIDR string, protectedValues ...string
 	})
 }
 
-func deleteRuleKeys(engine uintptr, names []string, leases []Lease) error {
-	keys := make([]windows.GUID, 0, len(names)+len(leases))
-	for _, name := range names {
-		keys = append(keys, guidFor(name))
-	}
-	for _, lease := range leases {
-		keys = append(keys, guidFor(lease.IP+"\x00"+lease.SID))
-	}
-	for i := range keys {
-		result, _, _ := filterDeleteProc.Call(engine, uintptr(unsafe.Pointer(&keys[i])))
-		if result != 0 && !notFound(result) {
-			return windows.Errno(result)
-		}
-	}
-	return nil
-}
 func ensureBase(engine uintptr) error {
 	name, _ := createWtFwpmDisplayData0("Paperboat machine guard", "Persistent protected machine-name policy")
 	sub := wtFwpmSublayer0{subLayerKey: sublayerKey, displayData: *name, flags: cFWPM_SUBLAYER_FLAG_PERSISTENT, weight: 0xffff}
@@ -243,11 +227,11 @@ func Remove(ctx context.Context) (resultErr error) {
 // WFP snapshots return at most 128 pointers per page. The scan limit permits
 // the guard's bounded lease/range filters plus ordinary system firewall state;
 // larger inventories fail closed instead of allowing unbounded teardown.
-func removeSublayerFilters(ctx context.Context, engine uintptr, owned []windows.GUID) (resultErr error) {
+func sublayerFilterKeys(ctx context.Context, engine uintptr, owned []windows.GUID) (keys []windows.GUID, resultErr error) {
 	var handle uintptr
 	result, _, _ := filterCreateEnumProc.Call(engine, 0, uintptr(unsafe.Pointer(&handle)))
 	if result != 0 {
-		return windows.Errno(result)
+		return nil, windows.Errno(result)
 	}
 	defer func() {
 		result, _, _ := filterDestroyEnumProc.Call(engine, handle)
@@ -259,7 +243,7 @@ func removeSublayerFilters(ctx context.Context, engine uintptr, owned []windows.
 	const maximumFilters = 65536
 	for scanned := uint32(0); ; {
 		if err := ctx.Err(); err != nil {
-			return err
+			return nil, err
 		}
 		var entries **wtFwpmFilter0
 		var count uint32
@@ -278,27 +262,35 @@ func removeSublayerFilters(ctx context.Context, engine uintptr, owned []windows.
 				if filter == nil {
 					return errors.New("invalid WFP filter inventory")
 				}
-				for _, key := range owned {
-					if filter.subLayerKey != key {
-						continue
-					}
-					result, _, _ := filterDeleteProc.Call(engine, uintptr(unsafe.Pointer(&filter.filterKey)))
-					if result != 0 && !notFound(result) {
-						return windows.Errno(result)
-					}
-					break
+				if slices.Contains(owned, filter.subLayerKey) {
+					keys = append(keys, filter.filterKey)
 				}
 			}
 			return nil
 		}()
 		if pageErr != nil {
-			return pageErr
+			return nil, pageErr
 		}
 		scanned += count
 		if count < pageSize {
-			return nil
+			return keys, nil
 		}
 	}
+}
+
+// removeSublayerFilters deletes every filter of the owned sublayers in the caller's transaction.
+func removeSublayerFilters(ctx context.Context, engine uintptr, owned []windows.GUID) error {
+	keys, err := sublayerFilterKeys(ctx, engine, owned)
+	if err != nil {
+		return err
+	}
+	for i := range keys {
+		result, _, _ := filterDeleteProc.Call(engine, uintptr(unsafe.Pointer(&keys[i])))
+		if result != 0 && !notFound(result) {
+			return windows.Errno(result)
+		}
+	}
+	return nil
 }
 
 var (

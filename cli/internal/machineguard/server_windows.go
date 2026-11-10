@@ -296,7 +296,7 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 	for _, lease := range leases {
 		values = append(values, wfp.Lease{IP: lease.ip, SID: lease.uid})
 	}
-	return wfp.Apply(values, nil, cfg.LoopbackCIDR, protectedLoopbackCIDRs()...)
+	return wfp.Apply(values, cfg.LoopbackCIDR, protectedLoopbackCIDRs()...)
 }
 func notifyReady() error    { return nil }
 func retirePlatform(Config) {}

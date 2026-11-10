@@ -5,9 +5,15 @@ package wfp
 import (
 	"context"
 	"errors"
-	"golang.org/x/sys/windows"
+	"fmt"
+	"net"
+	"os"
+	"slices"
 	"testing"
+	"time"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 // Real WFP objects with unique sublayers and a single unused loopback address.
@@ -93,4 +99,84 @@ func TestScopedRemovalHandlesLostJournalAndPreservesForeignFilters(t *testing.T)
 	if exists(filters[0]) || !exists(filters[1]) {
 		t.Fatal("owned filter retained or foreign filter removed")
 	}
+}
+
+// Apply replaces the whole policy of the sublayer: a lease that is no longer in the desired set leaves no filter
+// behind, so access ends with the lease. Uses its own sublayer, so an installed guard is not touched.
+func TestApplyRetiresTheFiltersOfAWithdrawnLease(t *testing.T) {
+	token := windows.GetCurrentProcessToken()
+	if !token.IsElevated() {
+		t.Skip("requires elevated native WFP access")
+	}
+	user, err := token.GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior := sublayerKey
+	sublayerKey = guidFor(fmt.Sprintf("paperboat-apply-test-%d", os.Getpid()))
+	t.Cleanup(func() {
+		if err := Remove(context.Background()); err != nil {
+			t.Error(err)
+		}
+		sublayerKey = prior
+	})
+	sid := user.User.Sid.String()
+	first, second := Lease{IP: "127.100.254.71", SID: sid}, Lease{IP: "127.100.254.72", SID: sid}
+	keyOf := func(l Lease) windows.GUID { return guidFor(l.IP + "\x00" + l.SID) }
+	installed := func() []windows.GUID { return installedIn(t, sublayerKey) }
+	// With no guard installed, a lease's permit is also visible as traffic: a connect to its address is let
+	// through to the (empty) address and refused there, while a connect to an address without a permit is
+	// blocked by the range's outbound block before it gets that far.
+	probe := func(l Lease) bool {
+		conn, err := net.DialTimeout("tcp4", net.JoinHostPort(l.IP, "46399"), 2*time.Second)
+		if err == nil {
+			conn.Close()
+			return false
+		}
+		return errors.Is(err, windows.WSAECONNREFUSED)
+	}
+	probing := len(installedIn(t, prior)) == 0
+	apply := func(leases ...Lease) {
+		t.Helper()
+		if err := Apply(leases, "127.100.0.0/16"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	apply(first, second)
+	if keys := installed(); !slices.Contains(keys, keyOf(first)) || !slices.Contains(keys, keyOf(second)) {
+		t.Fatalf("granted leases have no filter: %d filters installed", len(keys))
+	}
+	if probing && (!probe(first) || !probe(second)) {
+		t.Fatal("a granted lease's address is not reachable for its user")
+	}
+	apply(second)
+	if keys := installed(); slices.Contains(keys, keyOf(first)) || !slices.Contains(keys, keyOf(second)) {
+		t.Fatalf("after withdrawing the first lease: first present=%v second present=%v", slices.Contains(keys, keyOf(first)), slices.Contains(keys, keyOf(second)))
+	}
+	if probing && (probe(first) || !probe(second)) {
+		t.Fatalf("after withdrawing the first lease: first reachable=%v second reachable=%v", probe(first), probe(second))
+	}
+	apply()
+	if keys := installed(); slices.Contains(keys, keyOf(first)) || slices.Contains(keys, keyOf(second)) {
+		t.Fatal("a withdrawn lease left its filter installed")
+	}
+	if probing && (probe(first) || probe(second)) {
+		t.Fatal("a withdrawn lease's address is still reachable for its user")
+	}
+}
+
+// installedIn lists the filter keys installed in one sublayer.
+func installedIn(t *testing.T, sublayer windows.GUID) []windows.GUID {
+	t.Helper()
+	var engine uintptr
+	if err := fwpmEngineOpen0(nil, cRPC_C_AUTHN_WINNT, nil, nil, unsafe.Pointer(&engine)); err != nil {
+		t.Fatal(err)
+	}
+	defer fwpmEngineClose0(engine)
+	keys, err := sublayerFilterKeys(context.Background(), engine, []windows.GUID{sublayer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return keys
 }
