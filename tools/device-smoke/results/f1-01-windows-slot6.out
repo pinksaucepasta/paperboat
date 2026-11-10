@@ -1,9 +1,0 @@
-rc=0 secs=97.5
----stdout---
-Installed pb to C:\Program Files\Paperboat\users\ue655ce475da61ffc2e916d1d\bin\pb.exe
-Paperboat Windows machine runtime is installed. It will resume after reboot.
-
----stderr---
-Completing one-shot machine enrollment...
-Requesting administrator approval to install Paperboat Windows services...
-
