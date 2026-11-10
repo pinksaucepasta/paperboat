@@ -1596,7 +1596,8 @@ class PolicyFamily(unittest.TestCase):
 class TeamFamily(unittest.TestCase):
     def business(self, **values):
         import team_business
-        defaults = dict(cmd='windows', pb='/home/tester/.local/bin/pb', team='t', member='', identity_commands=False)
+        defaults = dict(cmd='windows', pb='/home/tester/.local/bin/pb', team='t', member='',
+                        identity_commands=False, api='https://example.test', alias='', peer_cmd='')
         with patch.object(winhost, 'device', lambda: SimpleNamespace(env=lambda name: r'C:\Temp', path_flavor=pathlib.PureWindowsPath)):
             return team_business.Check(SimpleNamespace(**dict(defaults, **values)))
 
@@ -1616,12 +1617,32 @@ class TeamFamily(unittest.TestCase):
             self.assertEqual(r'C:\Temp\f19.csv', check.file('f19.csv'))
             self.assertEqual({'generation': 4}, check.pbj('team', 'get', 't'))
             side.assert_called_once_with('windows', ['team', 'get', 't', '--json'], input=None, timeout=180)
-            with self.assertRaisesRegex(RuntimeError, 'only pb runs on the Windows device'):
-                check.run(['python3', '.f19helper.py', 'api'])
             self.assertEqual((0, 'id,action\n', ''), check.read(check.file('f19.csv')))
             check.remove(check.file('f19.csv'))
             self.assertEqual(1, check.read(check.file('f19.csv'))[0])
         self.assertEqual({}, files)
+
+    def test_business_token_helper_keeps_scope_and_secrets_private_on_the_controller(self):
+        check = self.business()
+        scope = json.dumps([{'dst': ['machine:peer'], 'allow': ['exec']}])
+        done = subprocess.CompletedProcess([], 0, json.dumps({'data': {
+            'secret': 'synthetic-token', 'api_token': {'id': 'token_1'}}}), '')
+        try:
+            with patch.object(winhost, 'side_run', return_value=done) as side:
+                rc, out, err = check.run(['python3', '.f19helper.py', 'token', check.a.pb,
+                                          'audit-scope', 'personal', '.f19stok', scope])
+            self.assertEqual((0, 'token_1', ''), (rc, out, err))
+            self.assertEqual(['api-token', 'create', 'audit-scope', '--expires', '1d',
+                              '--workspace', 'personal', '--json', '--scope', scope], side.call_args.args[1])
+            saved = pathlib.Path(check.helper_home.name) / '.f19stok'
+            self.assertEqual('synthetic-token', saved.read_text())
+            self.assertEqual(0o600, saved.stat().st_mode & 0o777)
+            self.assertEqual((0, 'synthetic-token', ''), check.run(['cat', '.f19stok']))
+            check.run(['rm', '-f', '.f19stok'])
+            self.assertFalse(saved.exists())
+        finally:
+            if check.helper_home is not None:
+                check.helper_home.cleanup()
 
     def test_business_check_on_unix_keeps_cat_rm_and_relative_names(self):
         import team_business
@@ -1646,7 +1667,8 @@ class TeamFamily(unittest.TestCase):
                 stack.enter_context(patch.object(team_business, name, lambda *a, name=name: ran.append(name) or 'member_1'))
             stack.enter_context(patch.object(check, 'pbj', lambda *a: {'owner_account': 'account_1'}))
             stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
-            self.assertEqual(0, team_business.windows_main(check, SimpleNamespace(team='t', identity_commands=True, member='')))
+            self.assertEqual(0, team_business.windows_main(check, SimpleNamespace(
+                team='t', identity_commands=True, member='', alias='', peer_cmd='')))
         self.assertEqual(['roles', 'identity', 'identity_commands', 'search', 'export'], ran)
 
     def two_account(self, replies, *arguments):

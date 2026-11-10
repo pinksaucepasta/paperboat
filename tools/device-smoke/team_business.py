@@ -10,8 +10,8 @@ S3-compatible store (--s3-origin, e.g. versitygw, keys in ~/.f19-s3ak and ~/.f19
 gets gzip NDJSON objects through SigV4. Stream setup uses a one-day API token that is revoked at the
 end. Secrets (token, signing secret, S3 keys) stay on the machine and are never printed.
 
---cmd windows runs pb.exe on the Windows device (winhost.py), which has no python3 or bash for the helper: roles,
-SSO/directory status and commands, search and export run there; the F19-07 token steps and streaming do not.
+--cmd windows runs pb.exe on the Windows device (winhost.py). With --alias/--peer-alias/--peer-cmd the
+token-actor audit also runs, using a private controller-side Python helper; streaming is not yet run there.
 
 Usage: team_business.py --team paperboat-smoke-paid \
          --cmd 'ssh hp docker exec -i -u tester -e XDG_RUNTIME_DIR=/run/user/1001 -w /home/tester lanes-f19' \
@@ -19,6 +19,7 @@ Usage: team_business.py --team paperboat-smoke-paid \
 """
 import argparse
 import os
+from pathlib import Path
 import csv
 import io
 import json
@@ -26,6 +27,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 
 import winhost
@@ -120,6 +122,33 @@ class Check:
         self.a, self.fails = a, []
         self.windows = winhost.is_side(a.cmd)  # pb.exe on the Windows device: only pb runs there
         self.temp = winhost.device().env('TEMP') if self.windows else ''
+        self.helper_home = None
+
+    def local_helper(self, args, timeout, stdin):
+        """Python fixtures stay on the controller; all authenticated pb commands stay on the device."""
+        if self.helper_home is None:
+            self.helper_home = tempfile.TemporaryDirectory(prefix='pb-team-business-')
+            home = Path(self.helper_home.name)
+            for name, value in (('.f19helper.py', HELPER), ('.f19api', self.a.api)):
+                with os.fdopen(os.open(home / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as output:
+                    output.write(value)
+        home = Path(self.helper_home.name)
+        if args[:3] == ['python3', '.f19helper.py', 'token']:
+            extra = ['--scope', args[7]] if len(args) > 7 else []
+            rc, out, err = self.pb('api-token', 'create', args[4], '--expires', '1d',
+                                   '--workspace', args[5], '--json', *extra)
+            if rc:
+                return rc, '', err
+            data = json.loads(out)
+            data = data.get('data', data)
+            for name, value in ((args[6] if len(args) > 6 else '.f19tok', data['secret']),
+                                ('.f19hdr', os.urandom(16).hex())):
+                with os.fdopen(os.open(home / name, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as output:
+                    output.write(value)
+            return 0, data['api_token']['id'], ''
+        done = subprocess.run(args, cwd=home, env={**os.environ, 'HOME': str(home)},
+                              capture_output=True, text=True, timeout=timeout, input=stdin)
+        return done.returncode, done.stdout, done.stderr
 
     def file(self, name):
         """A scratch file of this check on the machine: in its working directory, or the device's temp directory."""
@@ -142,7 +171,7 @@ class Check:
     def run(self, args, timeout=180, stdin=None):
         if self.windows:
             if args[0] != self.a.pb:
-                raise RuntimeError('only pb runs on the Windows device, not ' + args[0])
+                return self.local_helper(args, timeout, stdin)
             done = winhost.side_run(self.a.cmd, args[1:], input=stdin, timeout=timeout)
             return done.returncode, done.stdout, done.stderr
         remote = ' '.join(shlex.quote(x) for x in args)
@@ -462,15 +491,19 @@ def stream_s3(c, team, member):
 
 
 def windows_main(c, a):
-    """The steps that need only pb: roles (F19-01), SSO/directory status and commands (F19-14, C254-C260), search
-    (F19-07/08) and export (F19-09, C261). The machine_access token steps and streaming (F19-10) need the Python
-    helper on the machine and are not run."""
+    """Roles, identity, search and export; token-actor audit when the throwaway peer fixture is supplied."""
     owner = c.pbj('team', 'get', a.team).get('owner_account')
     start = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() - 5))
     member = roles(c, a.team)
     identity(c, a.team)
     if a.identity_commands:
         identity_commands(c, a.team, member or a.member)
+    if a.alias and a.peer_cmd:
+        try:
+            machine_access(c, start)
+        finally:
+            if c.helper_home is not None:
+                c.helper_home.cleanup()
     search(c, start, owner)
     export(c, start)
     print('RESULT', 'PASS' if not c.fails else 'FAIL ' + ','.join(c.fails))
