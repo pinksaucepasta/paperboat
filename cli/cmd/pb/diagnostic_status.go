@@ -22,7 +22,7 @@ func diagnosticCredentialFailure(err error) string {
 }
 
 func configAssignmentEnabled(a api.ConfigAssignment) bool {
-	return a.RepositoryID != nil && *a.RepositoryID != "" || a.PullRepositoryID != nil && *a.PullRepositoryID != "" || a.PushRepositoryID != nil && *a.PushRepositoryID != ""
+	return a.PullRepositoryID != nil && *a.PullRepositoryID != "" || a.PushRepositoryID != nil && *a.PushRepositoryID != ""
 }
 
 func diagnosticConfigSync(service string, assignment *api.ConfigAssignment, err error) string {

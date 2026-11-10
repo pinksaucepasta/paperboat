@@ -19,7 +19,6 @@ pb preview <port|url|path> [flags]
 ```
       --background           transfer ownership to paperboatd and return after readiness
       --domain stringArray   attach a verified custom domain (repeatable)
-      --duration duration    maximum preview lifetime (deprecated: use --ttl)
   -h, --help                 help for preview
       --json                 print the canonical preview resource as JSON
       --private              limit the preview to this account

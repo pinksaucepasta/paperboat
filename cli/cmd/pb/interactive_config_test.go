@@ -30,7 +30,6 @@ func TestConfigSyncMenuFollowsAuthoritativeAssignment(t *testing.T) {
 		{"disabled", api.ConfigAssignment{}, "Enable sync", false},
 		{"pull", api.ConfigAssignment{PullRepositoryID: &repo, Mode: "pull_only"}, "Configure sync", true},
 		{"push", api.ConfigAssignment{PushRepositoryID: &repo, Mode: "push_only"}, "Configure sync", true},
-		{"legacy repository field", api.ConfigAssignment{RepositoryID: &repo, Mode: "bidirectional"}, "Configure sync", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			items := configSyncMenuItems(tc.assignment)

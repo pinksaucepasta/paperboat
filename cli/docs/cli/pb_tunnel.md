@@ -19,7 +19,6 @@ pb tunnel [--ephemeral] [<port|url|path>] [flags]
 ```
       --background           transfer ownership to paperboatd and return after readiness
       --domain stringArray   attach a verified custom domain (repeatable)
-      --duration duration    maximum preview lifetime (deprecated: use --ttl)
       --ephemeral            use the temporary preview lifecycle
   -h, --help                 help for tunnel
       --json                 print the canonical preview resource as JSON

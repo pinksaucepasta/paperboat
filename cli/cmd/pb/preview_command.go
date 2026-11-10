@@ -78,7 +78,6 @@ func configureEphemeralLaunchFlags(command *cobra.Command) {
 	command.Flags().Bool("team", false, "require an explicit team grant for browser access")
 	command.MarkFlagsMutuallyExclusive("private", "team")
 	command.Flags().Duration("ttl", 0, "bounded preview lifetime (maximum 24h)")
-	command.Flags().Duration("duration", 0, "maximum preview lifetime (deprecated: use --ttl)")
 	command.Flags().Bool("background", false, "transfer ownership to paperboatd and return after readiness")
 	command.Flags().StringArray("domain", nil, "attach a verified custom domain (repeatable)")
 	command.Flags().Bool("json", false, "print the canonical preview resource as JSON")
@@ -107,13 +106,6 @@ func runPreviewCobra(command *cobra.Command, args []string) error {
 	ttl, err := command.Flags().GetDuration("ttl")
 	if err != nil || ttl < 0 {
 		return fmt.Errorf("%w: ttl must be zero or a positive duration", ErrPreviewInvalidDuration)
-	}
-	legacyDuration, _ := command.Flags().GetDuration("duration")
-	if command.Flags().Changed("ttl") && command.Flags().Changed("duration") {
-		return fmt.Errorf("%w: use only --ttl", ErrPreviewInvalidDuration)
-	}
-	if command.Flags().Changed("duration") {
-		ttl = legacyDuration
 	}
 	background, _ := command.Flags().GetBool("background")
 	if background && ttl == 0 {

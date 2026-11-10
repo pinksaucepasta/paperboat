@@ -22,7 +22,6 @@ type configAssignmentResponse struct {
 	ID                    string                                 `json:"id"`
 	MachineID             string                                 `json:"machine_id"`
 	EnvironmentID         string                                 `json:"environment_id"`
-	RepositoryID          *string                                `json:"repository_id,omitempty"`
 	PullRepositoryID      *string                                `json:"pull_repository_id,omitempty"`
 	PushRepositoryID      *string                                `json:"push_repository_id,omitempty"`
 	AutomaticUpdates      bool                                   `json:"automatic_updates"`
@@ -57,7 +56,7 @@ func assignmentResponse(item dbsqlc.ControlConfigAssignment) configAssignmentRes
 		value := item.PushRepositoryID.String
 		push = &value
 	}
-	return configAssignmentResponse{ID: item.ID, MachineID: item.MachineID, EnvironmentID: item.EnvironmentID, RepositoryID: repo, PullRepositoryID: pull, PushRepositoryID: push, AutomaticUpdates: item.AutomaticUpdates, Mode: item.Mode, ConsentState: item.ConsentState, WarningRevision: warning, Version: item.Version, ConfigurationRevision: item.ConfigurationRevision, PathRules: controlplane.ConfigAssignmentRules(item.PathRules), RepositoryBindings: controlplane.ConfigAssignmentBindings(item.RepositoryBindings)}
+	return configAssignmentResponse{ID: item.ID, MachineID: item.MachineID, EnvironmentID: item.EnvironmentID, PullRepositoryID: pull, PushRepositoryID: push, AutomaticUpdates: item.AutomaticUpdates, Mode: item.Mode, ConsentState: item.ConsentState, WarningRevision: warning, Version: item.Version, ConfigurationRevision: item.ConfigurationRevision, PathRules: controlplane.ConfigAssignmentRules(item.PathRules), RepositoryBindings: controlplane.ConfigAssignmentBindings(item.RepositoryBindings)}
 }
 
 func writeConfigAssignmentFailure(w http.ResponseWriter, r *http.Request, err error, message string) bool {

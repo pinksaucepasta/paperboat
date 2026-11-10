@@ -278,7 +278,7 @@ func TestConfigAssignmentRequestsUseBearerAndSnakeCase(t *testing.T) {
 		case "GET /v1/config-repositories":
 			writeData(w, http.StatusOK, map[string]any{"items": []map[string]any{{"id": "cfgrepo_1", "provider": "github", "external_ref": "acme/config", "display_name": "Config"}}, "pagination": Pagination{Limit: 200, Total: 1}})
 		case "GET /v1/machines/mch_1/config-assignment":
-			writeData(w, http.StatusOK, map[string]any{"id": "cfgasn_1", "environment_id": "mch_1", "repository_id": "cfgrepo_1", "consent_state": "pending", "version": 2})
+			writeData(w, http.StatusOK, map[string]any{"id": "cfgasn_1", "environment_id": "mch_1", "pull_repository_id": "cfgrepo_1", "consent_state": "pending", "version": 2})
 		case "PUT /v1/machines/mch_1/config-assignment":
 			var body map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -301,7 +301,7 @@ func TestConfigAssignmentRequestsUseBearerAndSnakeCase(t *testing.T) {
 		t.Fatalf("repos=%v err=%v", repos, err)
 	}
 	assignment, err := c.ConfigAssignment(context.Background(), "mch_1")
-	if err != nil || assignment.Version != 2 || assignment.RepositoryID == nil {
+	if err != nil || assignment.Version != 2 || assignment.PullRepositoryID == nil {
 		t.Fatalf("assignment=%+v err=%v", assignment, err)
 	}
 	if _, err := c.ConfigureConfigProjection(context.Background(), "mch_1", "", "cfgrepo_1", "push_only", false, 2, nil, nil, strings.Repeat("a", 64)); err != nil {

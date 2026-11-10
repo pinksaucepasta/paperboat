@@ -257,7 +257,7 @@ func configureSyncInteractive(command *cobra.Command, client *api.Client, machin
 	if choice.ID == "instructions" {
 		return showHomeText(command, "Config sync files", "Edit "+path+" for machine overrides. Optional repository defaults belong in .paperboat/config-sync.json. Shared defaults may include explicit OS destinations. An empty machine file inherits applicable defaults. Run pb config sync validate to review, then pb config sync apply to approve.")
 	}
-	repository, err := chooseConfigRepositoryInteractive(command, client, "Configuration repository", current.RepositoryID)
+	repository, err := chooseConfigRepositoryInteractive(command, client, "Configuration repository", current.PullRepositoryID)
 	if err != nil {
 		return err
 	}

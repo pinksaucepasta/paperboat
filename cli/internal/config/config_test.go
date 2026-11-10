@@ -113,9 +113,9 @@ func TestRemovedNetworkOverridesAreNotLoadedOrSaved(t *testing.T) {
 	}
 }
 
-func TestLocalAccessCanonicalizesAliasesAndIgnoresAnOldDomainKey(t *testing.T) {
+func TestLocalAccessCanonicalizesAliases(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"local_access":{"domain":" DEV.Example.COM ","service_aliases":[{"machine_alias":" HP ","name":"JellyFin","port":8989}]}}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"local_access":{"service_aliases":[{"machine_alias":" HP ","name":"JellyFin","port":8989}]}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := Load(path)
@@ -135,10 +135,6 @@ func TestLocalAccessCanonicalizesAliasesAndIgnoresAnOldDomainKey(t *testing.T) {
 	reloaded, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
-	}
-	saved, err := os.ReadFile(path)
-	if err != nil || strings.Contains(string(saved), "dev.example.com") {
-		t.Fatalf("the machine guard owns the local access domain, but the config file keeps it: %s (%v)", saved, err)
 	}
 	if got := reloaded.LocalAccess.ServiceAliases; len(got) != 1 || got[0] != want {
 		t.Fatalf("reloaded aliases = %+v, want %+v", got, want)

@@ -87,7 +87,7 @@ func TestPreviewCommandSurfaceAndHelp(t *testing.T) {
 			t.Fatalf("removed command %q is discoverable: command=%v remaining=%v err=%v", removed, entry, remaining, err)
 		}
 	}
-	for _, flagName := range []string{"private", "team", "ttl", "duration", "background", "domain", "json"} {
+	for _, flagName := range []string{"private", "team", "ttl", "background", "domain", "json"} {
 		if previewCommand.Flags().Lookup(flagName) == nil {
 			t.Fatalf("preview missing --%s", flagName)
 		}
@@ -107,7 +107,7 @@ func TestPreviewCommandSurfaceAndHelp(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := help.String()
-	for _, want := range []string{"pb preview <port|url|path>", "--private", "--team", "--ttl", "--duration", "--background", "--domain", "--json", "list", "status", "stop", "delete"} {
+	for _, want := range []string{"pb preview <port|url|path>", "--private", "--team", "--ttl", "--background", "--domain", "--json", "list", "status", "stop", "delete"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("help missing %q: %s", want, text)
 		}

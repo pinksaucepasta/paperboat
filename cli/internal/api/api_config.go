@@ -56,7 +56,6 @@ type ConfigAssignment struct {
 	ID                    string                    `json:"id"`
 	MachineID             string                    `json:"machine_id"`
 	EnvironmentID         string                    `json:"environment_id"`
-	RepositoryID          *string                   `json:"repository_id"`
 	PullRepositoryID      *string                   `json:"pull_repository_id"`
 	PushRepositoryID      *string                   `json:"push_repository_id"`
 	AutomaticUpdates      bool                      `json:"automatic_updates"`

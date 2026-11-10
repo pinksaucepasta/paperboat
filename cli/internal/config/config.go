@@ -52,8 +52,7 @@ const (
 )
 
 // LocalAccessConfig controls this user's named service URLs. The local access
-// domain is not configuration: the machine guard owns it (an old config file's
-// "domain" key is ignored). It does not grant access to ports; runtime
+// domain is not configuration: the machine guard owns it. It does not grant access to ports; runtime
 // publication remains limited to ports already authorized for the machine.
 type LocalAccessConfig struct {
 	ServiceAliases []LocalServiceAlias `json:"service_aliases,omitempty"`
