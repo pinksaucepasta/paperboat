@@ -303,6 +303,9 @@ func setupCommand() *cobra.Command {
 			if hadPreviousRegistration {
 				registration.AccountID = previousRegistration.AccountID
 				registration.SSHUser, registration.SSHPort = previousRegistration.SSHUser, previousRegistration.SSHPort
+				if runtime.GOOS == "windows" {
+					sshPortValue = keptWindowsSSHPort(previousRegistration, account.Username, sshPortValue)
+				}
 			}
 
 			if err := identityStore.SaveRegistration(registration); err != nil {
@@ -482,4 +485,14 @@ func exportSetupRecoveryKey(command *cobra.Command) error {
 		fmt.Fprintf(command.OutOrStdout(), "Recovery key written to %s\n", output)
 	}
 	return nil
+}
+
+// keptWindowsSSHPort is the SSH port a re-run of setup registers on Windows. The managed port is not the user's choice
+// there, and pair already registered one for this user and generation: sending another one is refused by the server
+// as a conflicting target (HTTP 409 at RegisterManagedSSHTarget), so the registered port stays.
+func keptWindowsSSHPort(previous identity.Registration, user string, port uint) uint {
+	if previous.SSHPort != 0 && previous.SSHUser == user {
+		return uint(previous.SSHPort)
+	}
+	return port
 }
