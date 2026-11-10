@@ -7,6 +7,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 )
@@ -24,7 +25,8 @@ type sharedGateway struct {
 	routes   map[string]*gatewayRoute // by user SID
 	slots    chan struct{}
 	owner    func(net.Conn) (string, error)
-	release  func(*sharedGateway) // called once the last route is closed, under the guard lock
+	crl      func(path string) []byte // the CA's revocation list for its CRL path, answered by the guard on port 80
+	release  func(*sharedGateway)     // called once the last route is closed, under the guard lock
 }
 
 // gatewayRoute is one user's registration on a gateway port: the listener of its lease.
@@ -44,7 +46,7 @@ func (g *guardServer) routeGateway(ctx context.Context, sid string, port int) (*
 		if err != nil {
 			return nil, err
 		}
-		gateway = &sharedGateway{port: port, listener: listener, routes: map[string]*gatewayRoute{}, slots: make(chan struct{}, maxGatewayAttributions), owner: connectionOwnerSID, release: func(s *sharedGateway) {
+		gateway = &sharedGateway{port: port, listener: listener, routes: map[string]*gatewayRoute{}, slots: make(chan struct{}, maxGatewayAttributions), owner: connectionOwnerSID, crl: g.gatewayRevocationList, release: func(s *sharedGateway) {
 			if g.gateways[s.port] == s {
 				delete(g.gateways, s.port)
 			}
@@ -78,6 +80,12 @@ func (s *sharedGateway) closeIfUnused() {
 
 // handoff attributes one accepted connection and queues it for its user's daemon; anything else is refused.
 func (s *sharedGateway) handoff(accepted net.Conn) {
+	if s.port == 80 && s.crl != nil {
+		var served bool
+		if accepted, served = serveGatewayCRL(accepted, s.crl); served {
+			return
+		}
+	}
 	sid, err := s.owner(accepted)
 	if err == nil {
 		s.mu.Lock()
@@ -145,4 +153,20 @@ func (r *gatewayRoute) Close() error {
 
 func (r *gatewayRoute) Addr() net.Addr {
 	return &net.TCPAddr{IP: net.ParseIP(splitdns.BrowserGatewayIP), Port: r.gateway.port}
+}
+
+// gatewayRevocationList is the CA's revocation list when path is its CRL path, else nil (an unknown path falls through
+// to attribution like any other request). The list is public; it is renewed here as certificate issuance renews it.
+func (g *guardServer) gatewayRevocationList(path string) []byte {
+	g.mu.Lock()
+	ca := g.ca
+	g.mu.Unlock()
+	if ca == nil || ca.CRLPath() != path {
+		return nil
+	}
+	der, err := ca.RevocationList(time.Now())
+	if err != nil {
+		return nil
+	}
+	return der
 }

@@ -316,4 +316,7 @@ func readCAFile(path string, limit int64) ([]byte, error) {
 	return data, err
 }
 
+// CRLPath is the distribution-point path of this CA's revocation list (CRLPath of its root).
+func (c *CA) CRLPath() string { c.mu.RLock(); defer c.mu.RUnlock(); return CRLPath(c.caCert.Raw) }
+
 func (c *CA) ExpiresAt() time.Time { c.mu.RLock(); defer c.mu.RUnlock(); return c.caCert.NotAfter }
