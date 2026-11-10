@@ -1,0 +1,3 @@
+HOST:runnervmm7ud1
+{"schema_version":"1.0","ok":true,"data":{"completion_status_path":"C:\\Users\\runneradmin\\AppData\\Local\\Temp\\Paperboat Uninstall\\d4d5e923603466d329048a529ade0b17\\status.json","hostname":"runnervmm7ud1","inbox_preserved":true,"state":"pending","uninstalled":false}}
+

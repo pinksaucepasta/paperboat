@@ -1,0 +1,12 @@
+--- where pb.exe ---
+--- Get-Service Paperboat* ---
+0
+
+--- ProgramFiles Paperboat exists? ---
+False
+--- ProgramData Paperboat exists? ---
+False
+--- ProgramFiles listing ---
+
+--- ProgramData listing ---
+

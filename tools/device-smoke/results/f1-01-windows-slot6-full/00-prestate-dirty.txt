@@ -1,0 +1,90 @@
+--- where pb.exe ---
+C:\Program Files\Paperboat\users\ue655ce475da61ffc2e916d1d\bin\pb.exe
+--- Get-Service Paperboat* ---
+
+Name                                                                              Status StartType
+----                                                                              ------ ---------
+PaperboatCarrier-ue655ce475da61ffc2e916d1d                                       Running Automatic
+PaperboatHostd-ue655ce475da61ffc2e916d1d                                         Running Automatic
+PaperboatLocalDaemon-ue655ce475da61ffc2e916d1d                                   Running Automatic
+PaperboatSessionOwner-ue655ce475da61ffc2e916d1d-474236a5436ec7e8d8cf7b05c3a3df67 Running Automatic
+PaperboatSshd-ue655ce475da61ffc2e916d1d-474236a5436ec7e8d8cf7b05c3a3df67         Running Automatic
+PaperboatUpdated-ue655ce475da61ffc2e916d1d                                       Running Automatic
+
+
+
+--- C:\\Program Files\\Paperboat ---
+
+FullName                                                                                                               
+--------                                                                                                               
+C:\Program Files\Paperboat\MachineGuard                                                                                
+C:\Program Files\Paperboat\users                                                                                       
+C:\Program Files\Paperboat\MachineGuard\pb.exe                                                                         
+C:\Program Files\Paperboat\users\ue655ce475da61ffc2e916d1d                                                             
+C:\Program Files\Paperboat\users\ue655ce475da61ffc2e916d1d\bin                                                         
+C:\Program Files\Paperboat\users\ue655ce475da61ffc2e916d1d\releases                                                    
+C:\Program Files\Paperboat\users\ue655ce475da61ffc2e916d1d\bin\pb.exe                                                  
+C:\Program Files\Paperboat\users\ue655ce475da61ffc2e916d1d\releases\versions                                           
+C:\Program Files\Paperboat\users\ue655ce475da61ffc2e916d1d\releases\versions\custom-474236a5436ec7e8d8cf7b05c3a3df67...
+C:\Program Files\Paperboat\users\ue655ce475da61ffc2e916d1d\releases\versions\custom-474236a5436ec7e8d8cf7b05c3a3df67...
+
+
+
+--- C:\\ProgramData\\Paperboat ---
+
+FullName                                                                                                               
+--------                                                                                                               
+C:\ProgramData\Paperboat\MachineGuard                                                                                  
+C:\ProgramData\Paperboat\services                                                                                      
+C:\ProgramData\Paperboat\updated                                                                                       
+C:\ProgramData\Paperboat\users                                                                                         
+C:\ProgramData\Paperboat\PaperboatInstall-ue655ce475da61ffc2e916d1d-startup-error.log                                  
+C:\ProgramData\Paperboat\MachineGuard\certificates                                                                     
+C:\ProgramData\Paperboat\MachineGuard\diagnostics                                                                      
+C:\ProgramData\Paperboat\MachineGuard\browser-domains.json                                                             
+C:\ProgramData\Paperboat\MachineGuard\lifecycle.lock                                                                   
+C:\ProgramData\Paperboat\MachineGuard\lock                                                                             
+C:\ProgramData\Paperboat\MachineGuard\reservations.json                                                                
+C:\ProgramData\Paperboat\MachineGuard\certificates\ppr.boats                                                           
+C:\ProgramData\Paperboat\MachineGuard\certificates\ppr.boats\rootCA-key.pem                                            
+C:\ProgramData\Paperboat\MachineGuard\certificates\ppr.boats\rootCA.crl                                                
+C:\ProgramData\Paperboat\MachineGuard\certificates\ppr.boats\rootCA.pem                                                
+C:\ProgramData\Paperboat\MachineGuard\diagnostics\writer.lock                                                          
+C:\ProgramData\Paperboat\services\PaperboatCarrier-ue655ce475da61ffc2e916d1d.json                                      
+C:\ProgramData\Paperboat\services\PaperboatHostd-ue655ce475da61ffc2e916d1d.json                                        
+C:\ProgramData\Paperboat\services\PaperboatLocalDaemon-ue655ce475da61ffc2e916d1d.json                                  
+C:\ProgramData\Paperboat\services\PaperboatSessionOwner-ue655ce475da61ffc2e916d1d-474236a5436ec7e8d8cf7b05c3a3df67.json
+C:\ProgramData\Paperboat\services\PaperboatUpdated-ue655ce475da61ffc2e916d1d.json                                      
+C:\ProgramData\Paperboat\updated\users                                                                                 
+C:\ProgramData\Paperboat\updated\users\ue655ce475da61ffc2e916d1d                                                       
+C:\ProgramData\Paperboat\updated\users\ue655ce475da61ffc2e916d1d\service-state.json                                    
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d                                                               
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\carrier                                                       
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\service-lifecycle                                             
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\session-owners                                                
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\ssh                                                           
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\availability-policy.json                                      
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\hostd.token                                                   
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\runtime-install.json                                          
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\carrier\config.json                                           
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\carrier\dispatch.cap                                          
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\carrier\owner.lock                                            
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\service-lifecycle\service-lifecycle.lock                      
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\session-owners\474236a5436ec7e8d8cf7b05c3a3df67.json          
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\ssh\authorized_keys                                           
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\ssh\generations                                               
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\ssh\hostkeys                                                  
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\ssh\logs                                                      
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\ssh\firewall-state.json                                       
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\ssh\sshd_config                                               
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\ssh\authorized_keys\paperboat                                 
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\ssh\generations\474236a5436ec7e8d8cf7b05c3a3df67              
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\ssh\generations\474236a5436ec7e8d8cf7b05c3a3df67\logs         
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\ssh\generations\474236a5436ec7e8d8cf7b05c3a3df67\descriptor...
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\ssh\generations\474236a5436ec7e8d8cf7b05c3a3df67\sshd_config  
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\ssh\generations\474236a5436ec7e8d8cf7b05c3a3df67\logs\servi...
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\ssh\hostkeys\ssh_host_ed25519_key                             
+C:\ProgramData\Paperboat\users\ue655ce475da61ffc2e916d1d\ssh\hostkeys\ssh_host_ed25519_key.pub                         
+
+
+

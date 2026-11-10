@@ -1,0 +1,1 @@
+pb: The local Paperboat service could not complete the request (step: exec_start_uncertain). Check `pb status` for the local service and the target, then retry; run `pb doctor` if this continues. Support reference: support_dd502b38-b48f-4267-88bf-bba48a5a605c. Run `pb bugreport --upload` to send the details.

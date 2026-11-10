@@ -1,0 +1,4 @@
+{"machine":{"alias":"slot6-f102","id":"machine_aee91b72-3814-4693-9d61-c580b4bb62de","state":"disconnected"},"outcome":"confirmed","retry":"not_required","version":"1"}
+RC=0
+
+---STDERR---

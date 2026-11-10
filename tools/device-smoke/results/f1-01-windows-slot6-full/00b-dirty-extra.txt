@@ -1,0 +1,25 @@
+      ▄█▄       Paperboat
+  ▄▄▝▀▀▀▀▀▘▄▄   Version dev-5ed26ede9
+   ▀███████▀
+
+---BOOT---
+
+LastBootUpTime       
+--------------       
+11/10/2026 5:22:07 PM
+
+
+
+
+Tuesday, November 10, 2026 6:10:14 PM
+
+
+
+---STARTUPERR---
+
+FullName                                                                              Length LastWriteTime        
+--------                                                                              ------ -------------        
+C:\ProgramData\Paperboat\PaperboatInstall-ue655ce475da61ffc2e916d1d-startup-error.log    353 11/10/2026 5:57:56 PM
+
+
+
