@@ -1327,6 +1327,16 @@ class ConfigCommandsRepositoryRows(unittest.TestCase):
             self.assertIn('C169', config_commands.Suite(SimpleNamespace(rows=None)).selected)
 
 
+class ExecCancelWatch(unittest.TestCase):
+    def test_the_watch_reads_the_stream_pb_still_has_open_with_sharing(self):
+        # a Windows device run (winpool-1) crashed here: [IO.File]::ReadLines opens without FileShare while pb.exe holds the file for writing
+        import exec_cancel
+        when = exec_cancel.nonce_published('abc123')
+        self.assertNotIn('ReadLines', when)
+        self.assertIn('[IO.FileShare]::ReadWrite', when)
+        self.assertIn("-match 'abc123 [0-9]+'", when)
+
+
 if __name__ == '__main__':
     unittest.main()
 

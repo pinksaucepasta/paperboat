@@ -39,17 +39,24 @@ def process_identity(output, nonce):
     return None
 
 
+def nonce_published(nonce):
+    """interrupt_when expression: exec's JSON stdout stream (a file pb.exe still holds open for writing, so it is read with FileShare
+    ReadWrite: [IO.File]::ReadLines opens without sharing and crashed the watch snippet) has printed `<nonce> <pid>`."""
+    return ("$text='';if(Test-Path -LiteralPath $req.stdout){"
+            "$f=New-Object IO.FileStream($req.stdout,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite);"
+            "$r=New-Object IO.StreamReader($f);while($null -ne ($line=$r.ReadLine())){try{"
+            "$e=$line|ConvertFrom-Json;if($e.stream -eq 'stdout'){"
+            "$text += [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($e.data))}"
+            "}catch{}};$r.Close()};$text -match '" + nonce + " [0-9]+'")
+
+
 def windows_interrupt(binary, arguments, nonce):
     """Send real console Ctrl-C only after exec has published the remote process identity."""
     device = binary.device
     with device.temp_dir('pb-exec-cancel') as directory:
         output = winhost.RemotePath(device, directory) / 'stdout'
         errors = winhost.RemotePath(device, directory) / 'stderr'
-        when = ("$text='';if(Test-Path -LiteralPath $req.stdout){"
-                "foreach($line in [IO.File]::ReadLines($req.stdout)){try{"
-                "$e=$line|ConvertFrom-Json;if($e.stream -eq 'stdout'){"
-                "$text += [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($e.data))}"
-                "}catch{}}};$text -match '" + nonce + " [0-9]+'")
+        when = nonce_published(nonce)
         fired, status = device.interrupt_when(arguments, when, seconds=35, exit_seconds=35,
                                               stdout=output, stderr=errors)
         stdout, stderr = output.read_bytes(), errors.read_bytes()
