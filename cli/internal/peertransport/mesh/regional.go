@@ -12,6 +12,8 @@ import (
 	"time"
 
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
+	"tailscale.com/net/netmon"
+	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/tailcfg"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=upstream-engine-assembly
 	"tailscale.com/types/key"
@@ -152,6 +154,19 @@ func (s *Server) EnsureRelayPeer(peer key.NodePublic, disco key.DiscoPublic) err
 		return errors.New("mesh: peer is not admitted")
 	}
 	return nil
+}
+
+// OnNetworkChange calls f on every network change (interface, address or default route) the engine's monitor
+// reports, until the returned function runs. A server that is not started reports none.
+func (s *Server) OnNetworkChange(f func()) func() {
+	if s.lb == nil {
+		return func() {}
+	}
+	monitor, ok := s.lb.sys.NetMon.GetOK()
+	if !ok {
+		return func() {}
+	}
+	return monitor.RegisterChangeCallback(func(*netmon.ChangeDelta) { f() })
 }
 
 // PrepareRelay proves that the selected region's owned carrier can connect and ping.

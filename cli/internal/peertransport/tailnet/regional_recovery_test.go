@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -130,6 +131,7 @@ func (*failingRegionalEngine) RelayTransport(tailcfg.DERPRegionID) string  { ret
 func (e *failingRegionalEngine) PrepareRelay(context.Context, tailcfg.DERPRegionID) error {
 	return e.cause
 }
+func (*failingRegionalEngine) OnNetworkChange(func()) func() { return func() {} }
 func (*failingRegionalEngine) SetPeerRelayRegion(key.NodePublic, tailcfg.DERPRegionID) error {
 	return nil
 }
@@ -269,24 +271,162 @@ func TestDirectPeerDoesNotWaitForRegionalRendezvous(t *testing.T) {
 	}
 }
 
-// Relays refused for a grant stay unprobed only until a newer grant or regionalDeniedReprobe, so an outage that
-// left every relay refused cannot hold the relay path until the daemon restarts.
-func TestDeniedFenceLiftsOnANewGrantOrAfterTheReprobeInterval(t *testing.T) {
-	at := time.Unix(1000, 0)
-	for _, tc := range []struct {
-		name          string
-		denied, lease uint64
-		now           time.Duration
-		holds         bool
-	}{
-		{"never denied", 0, 5, 0, false},
-		{"same grant, just denied", 5, 5, time.Second, true},
-		{"older grant, just denied", 5, 4, 59 * time.Second, true},
-		{"same grant, a minute later", 5, 5, regionalDeniedReprobe, false},
-		{"newer grant at once", 5, 6, time.Second, false},
-	} {
-		if got := deniedFenceHolds(tc.denied, at, tc.lease, at.Add(tc.now)); got != tc.holds {
-			t.Errorf("%s: holds=%v, want %v", tc.name, got, tc.holds)
+func TestDeniedFenceBacksOffToTheCapLogsOnceAndClearsOnRecovery(t *testing.T) {
+	var f deniedFence
+	now := time.Unix(1000, 0)
+	if f.holds(5, now) {
+		t.Fatal("a fence that never denied holds")
+	}
+	for n := 1; n <= 12; n++ {
+		if began := f.deny(5, now); began != (n == 1) {
+			t.Fatalf("denial %d reported began=%v: the refused state must be announced once", n, began)
+		}
+		wait := f.next.Sub(now)
+		if wait >= deniedBackoffCap*3/2 || wait < deniedBackoffBase/2 {
+			t.Fatalf("denial %d waits %v: outside the jittered 0.5 s to 5 s cap", n, wait)
+		}
+		if n > 6 && wait < deniedBackoffCap/2 {
+			t.Fatalf("denial %d waits %v: the backoff never reached its cap", n, wait)
 		}
 	}
+	if !f.holds(5, now) || !f.holds(4, now) {
+		t.Fatal("the fence does not hold the refused grant right after a denial")
+	}
+	if f.holds(6, now) {
+		t.Fatal("a newer grant must lift the fence at once")
+	}
+	if f.holds(5, now.Add(deniedBackoffCap*2)) {
+		t.Fatal("the fence outlived its backoff cap")
+	}
+	since, was := f.clear()
+	if !was || !since.Equal(now) {
+		t.Fatalf("recovery reported was=%v since=%v", was, since)
+	}
+	if _, again := f.clear(); again {
+		t.Fatal("recovery was reported twice")
+	}
+	if f.holds(5, now) {
+		t.Fatal("a cleared fence still holds")
+	}
+}
+
+func TestDeniedFenceLiftsOnANetworkChangeAndRestartsItsBackoff(t *testing.T) {
+	var f deniedFence
+	now := time.Unix(1000, 0)
+	for i := 0; i < 10; i++ {
+		f.deny(5, now)
+	}
+	f.networkChanged()
+	if f.holds(5, now) {
+		t.Fatal("a network change did not lift the wait")
+	}
+	if began := f.deny(5, now); began {
+		t.Fatal("a network change ended the refused state; only a relay that prepares may")
+	}
+	if wait := f.next.Sub(now); wait >= deniedBackoffBase*3/2*2 {
+		t.Fatalf("backoff after a network change is %v: it did not restart", wait)
+	}
+	var idle deniedFence
+	idle.networkChanged() // nothing refused: nothing to reset
+	if idle.failures != 0 {
+		t.Fatal("a network change invented a refusal")
+	}
+}
+
+type fatalRefusal struct{}
+
+func (fatalRefusal) Error() string { return "relay refused admission" }
+func (fatalRefusal) Fatal() bool   { return true }
+
+// scriptedRegionalEngine refuses admission (fatally) until allow is set, counts the attempts and keeps the
+// network-change callback the recovery loop registered.
+type scriptedRegionalEngine struct {
+	failingRegionalEngine
+	mu         sync.Mutex
+	allow      bool
+	attempts   int
+	callback   func()
+	registered int
+	released   int
+}
+
+func (e *scriptedRegionalEngine) PrepareRelay(context.Context, tailcfg.DERPRegionID) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.attempts++
+	if e.allow {
+		return nil
+	}
+	return fatalRefusal{}
+}
+
+func (e *scriptedRegionalEngine) OnNetworkChange(f func()) func() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.callback, e.registered = f, e.registered+1
+	return func() { e.mu.Lock(); e.released++; e.mu.Unlock() }
+}
+
+func (e *scriptedRegionalEngine) state() (attempts int, registered, released int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.attempts, e.registered, e.released
+}
+
+// After every relay refused admission, the loop tries them again on its own (no new grant, no restart): the
+// 22-minute wedge of F21-48 on Windows held the relay path until a daemon restart.
+func TestRegionalRecoveryTriesRefusedRelaysAgainWithoutANewGrant(t *testing.T) {
+	a, configuration, signer, _ := networkTestAuthority(t)
+	if err := a.Apply(t.Context(), networkToken(t, signer, configuration)); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	node := RegionalNode{
+		NodeID: "relay_test", NodeGeneration: 1, ProcessEpoch: "epoch_test", Region: "test", FailureDomain: "domain_test",
+		Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: 443,
+		State: "ready", ObservedAt: now, ExpiresAt: now + 600, CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now,
+	}
+	a.regional = &RegionalCandidates{IssuedAt: now, ExpiresAt: now + 600, Nodes: []RegionalNode{node}}
+	a.relay.mu.Lock()
+	a.relay.grants = map[string]derpquic.Grant{node.NodeID: {NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, ExpiresAt: now + 600}}
+	engine := &scriptedRegionalEngine{}
+	r := &regionalRecovery{
+		authority: a, control: newRegionalControl(a.private, time.Now), engine: engine, wake: make(chan struct{}, 1),
+		peerID: "machine_test", done: make(chan struct{}), ready: make(chan struct{}), inbox: make(chan regionalInbound, 64),
+	}
+	a.relay.recovery = r
+	a.relay.mu.Unlock()
+	ctx, cancel := context.WithCancel(t.Context())
+	go r.run(ctx)
+	defer cancel()
+	waitFor := func(what string, limit time.Duration, ok func() bool) {
+		t.Helper()
+		for deadline := time.Now().Add(limit); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+			if ok() {
+				return
+			}
+		}
+		t.Fatalf("%s did not happen within %v", what, limit)
+	}
+	denied := func() bool { r.mu.Lock(); defer r.mu.Unlock(); return r.status.Reason == "regional_admission_denied" }
+	waitFor("the refusal", 5*time.Second, denied)
+	if _, registered, _ := engine.state(); registered != 1 {
+		t.Fatalf("the loop registered %d network-change callbacks, want 1", registered)
+	}
+	engine.mu.Lock()
+	engine.allow = true
+	engine.mu.Unlock()
+	waitFor("the relay being tried again with the same grant", 15*time.Second, func() bool { return !denied() })
+	cancel()
+	select {
+	case <-r.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("recovery did not stop")
+	}
+	if _, _, released := engine.state(); released != 1 {
+		t.Fatalf("the network-change callback was released %d times, want 1", released)
+	}
+	// the registered callback only signals; it never blocks the network monitor
+	engine.callback()
+	engine.callback()
 }

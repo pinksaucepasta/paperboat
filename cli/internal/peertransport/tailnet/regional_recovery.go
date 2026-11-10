@@ -59,6 +59,8 @@ type relayEngine interface {
 	PrepareRelay(context.Context, tailcfg.DERPRegionID) error
 	SetPeerRelayRegion(key.NodePublic, tailcfg.DERPRegionID) error
 	SendRelayControl(key.NodePublic, tailcfg.DERPRegionID, []byte) error
+	// OnNetworkChange calls f on every network change the engine's monitor sees, until the returned function runs.
+	OnNetworkChange(f func()) func()
 }
 type regionalInbound struct {
 	region tailcfg.DERPRegionID
@@ -67,6 +69,7 @@ type regionalInbound struct {
 }
 type regionalRecovery struct {
 	authority *Authority
+	wake      chan struct{} // the engine's network monitor reports a change; nil never wakes
 	control   *regionalControl
 	mu        sync.Mutex
 	engine    relayEngine
@@ -90,7 +93,7 @@ type regionalRecovery struct {
 // newRegionalRecoveryLocked returns recovery state bound to the current node
 // private key. Callers hold both Authority.mu and relay.mu.
 func (a *Authority) newRegionalRecoveryLocked() *regionalRecovery {
-	return &regionalRecovery{authority: a, control: newRegionalControl(a.private, time.Now), done: make(chan struct{}), ready: make(chan struct{}), inbox: make(chan regionalInbound, 64)}
+	return &regionalRecovery{authority: a, wake: make(chan struct{}, 1), control: newRegionalControl(a.private, time.Now), done: make(chan struct{}), ready: make(chan struct{}), inbox: make(chan regionalInbound, 64)}
 }
 
 func (a *Authority) regionalRecoveryLocked() (*regionalRecovery, bool) {
@@ -563,9 +566,14 @@ func (r *regionalRecovery) run(ctx context.Context) {
 	receiveDone := make(chan struct{})
 	go func() { defer close(receiveDone); r.receive(receiveCtx) }()
 	defer func() { cancel(); <-receiveDone }()
+	defer r.engine.OnNetworkChange(func() {
+		select {
+		case r.wake <- struct{}{}:
+		default:
+		}
+	})()
 	var selection regionalSelection
-	var deniedGeneration uint64
-	var deniedAt time.Time
+	var fence deniedFence
 	cursor := 0
 	backupID := ""
 	retries := make(map[string]regionalRetry)
@@ -579,6 +587,8 @@ func (r *regionalRecovery) run(ctx context.Context) {
 		case <-r.authority.done:
 			return
 		case <-timer.C:
+		case <-r.wake: // a new network: refused relays get a fresh try now, as Tailscale re-dials DERP on a link change
+			fence.networkChanged()
 		}
 		nodes, peers, generation, err := r.snapshot()
 		if err != nil || len(nodes) == 0 {
@@ -607,12 +617,9 @@ func (r *regionalRecovery) run(ctx context.Context) {
 			leaseGeneration = r.authority.current.Generation
 		}
 		r.authority.mu.Unlock()
-		if deniedFenceHolds(deniedGeneration, deniedAt, leaseGeneration, time.Now()) {
+		if fence.holds(leaseGeneration, time.Now()) {
 			timer.Reset(regionalProbeDelay())
 			continue
-		}
-		if deniedGeneration != 0 && leaseGeneration <= deniedGeneration {
-			diagnosticlog.TryInfo("relays were refused for this grant; trying them again", "generation", leaseGeneration, "after", time.Since(deniedAt).Round(time.Second).String())
 		}
 		// A stable bounded shortlist is refreshed in the background, not per stream.
 		// Retain the selected node while rotating other candidates after failures.
@@ -698,7 +705,6 @@ func (r *regionalRecovery) run(ctx context.Context) {
 					var fatal interface{ Fatal() bool }
 					if errors.As(probeErr, &fatal) && fatal.Fatal() {
 						refused.Add(1)
-						diagnosticlog.TryWarn("a relay refused admission", "node", n.NodeID, "error", probeErr)
 					}
 					fail(n.NodeID, "prepare_failed")
 					return
@@ -729,14 +735,20 @@ func (r *regionalRecovery) run(ctx context.Context) {
 			}
 		}
 		if refused.Load() > 0 && prepared.Load() == 0 {
-			deniedGeneration, deniedAt = leaseGeneration, time.Now()
-			diagnosticlog.TryWarn("every relay refused admission; they are tried again with a new grant or after a minute", "generation", leaseGeneration, "failures", fmt.Sprint(failures))
+			if fence.deny(leaseGeneration, time.Now()) { // logged when the state begins, not at every sweep
+				diagnosticlog.TryWarn("every relay refused admission; they are tried again with backoff, at once on a network change or a new grant", "generation", leaseGeneration, "failures", fmt.Sprint(failures))
+			}
 			_ = r.engine.SetRelayRegions(nil)
 			r.mu.Lock()
 			r.status = RegionalStatus{Redundancy: RedundancyNone, Reason: "regional_admission_denied", ProbeFailures: failures}
 			r.mu.Unlock()
 			timer.Reset(regionalProbeDelay())
 			continue
+		}
+		if prepared.Load() > 0 {
+			if since, was := fence.clear(); was {
+				diagnosticlog.TryInfo("relays accept this machine again", "refused_for", time.Since(since).Round(time.Second).String())
+			}
 		}
 		if r.pair() == "" {
 			timer.Reset(regionalProbeDelay())
@@ -822,14 +834,50 @@ func (r *regionalRecovery) run(ctx context.Context) {
 	}
 }
 
-// regionalDeniedReprobe bounds the fence a refusal puts on the current grant: Tailscale's DERP client redials
-// after every failure with a capped backoff and has no fence at all, so an outage that left every relay
-// refused (a latched carrier, a grant not yet reissued) must not hold the relay path until a new grant.
-const regionalDeniedReprobe = time.Minute
+// deniedFence is what a sweep in which every prepared relay refused admission puts on the current grant: the
+// relays are not tried again until a newer grant, a network change, or a jittered backoff that doubles from
+// 0.5 s to a 5 s cap (Tailscale's DERP client re-dials after every failure the same way, wgengine/magicsock/derp.go
+// runDerpReader, and has no fence at all). It is cleared when a relay prepares again.
+type deniedFence struct {
+	generation uint64
+	failures   int
+	next       time.Time
+	since      time.Time
+}
 
-// deniedFenceHolds is whether relays refused for grant generation denied (at time at) stay unprobed.
-func deniedFenceHolds(denied uint64, at time.Time, lease uint64, now time.Time) bool {
-	return denied != 0 && lease <= denied && now.Sub(at) < regionalDeniedReprobe
+const (
+	deniedBackoffBase = 500 * time.Millisecond
+	deniedBackoffCap  = 5 * time.Second
+)
+
+// holds is whether the relays refused for generation stay unprobed at now.
+func (f *deniedFence) holds(lease uint64, now time.Time) bool {
+	return f.failures > 0 && lease <= f.generation && now.Before(f.next)
+}
+
+// deny records a sweep in which every relay refused; it reports whether the refused state just began.
+func (f *deniedFence) deny(lease uint64, now time.Time) bool {
+	began := f.failures == 0
+	if began {
+		f.since = now
+	}
+	f.generation, f.failures = lease, f.failures+1
+	f.next = now.Add(backoff.Retry(f.failures, deniedBackoffBase, deniedBackoffCap))
+	return began
+}
+
+// networkChanged lifts the wait and restarts its backoff; the refused state itself stays until a relay prepares.
+func (f *deniedFence) networkChanged() {
+	if f.failures > 0 {
+		f.failures, f.next = 1, time.Time{}
+	}
+}
+
+// clear ends the refused state, reporting when it began.
+func (f *deniedFence) clear() (time.Time, bool) {
+	since, was := f.since, f.failures > 0
+	*f = deniedFence{}
+	return since, was
 }
 
 func regionalProbeDelay() time.Duration {
