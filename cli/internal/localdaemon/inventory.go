@@ -542,6 +542,10 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 				status.Health[0].Title = "This computer cannot use managed SSH: the account's signed-in computer limit is reached"
 				status.Health[0].Recovery = "Sign out on a computer you no longer use (pb logout there) or remove it, then retry"
 			}
+			if code == managedSSHUnsafeDirectoryCode {
+				status.Health[0].Title = "This computer cannot use managed SSH: its .ssh folder is owned by another account or writable by other users"
+				status.Health[0].Recovery = "Run pb ssh doctor <machine>: it names the folder, the account at fault and the icacls commands that fix it"
+			}
 		} else if generation > 0 && machine.SSHAuthority.TargetGeneration != generation {
 			status.Health = []localapi.HealthItem{{Code: "ssh_target_not_ready", Severity: "warning", Title: "SSH target is not ready", Recovery: "Ensure the machine's existing SSH service is listening on loopback", ETag: "ssh_target_not_ready"}}
 			if machine.Platform == "windows" {

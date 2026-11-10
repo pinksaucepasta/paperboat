@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 )
 
@@ -29,5 +30,17 @@ func TestSharedSessionAuthorityMismatchIsExplained(t *testing.T) {
 	message := commandFailureMessage(err, failure)
 	if failure.kind != commandRejected || !strings.Contains(message, "shared session") || !strings.Contains(message, "Update Paperboat") {
 		t.Fatalf("kind=%v message=%q", failure.kind, message)
+	}
+}
+
+// pb ssh doctor names the .ssh folder OpenSSH would not trust, why, and the fix, instead of "could not finish the
+// command" (winpool-4 2026-11-11).
+func TestUnsafeSSHFolderIsExplained(t *testing.T) {
+	err := fmt.Errorf("managed OpenSSH configuration is not ready; rerun `pb login`: %w", &managedssh.UnsafeSSHPathError{Path: `C:\Users\me\.ssh`, Problem: `BUILTIN\Users can change it`})
+	message := commandFailureMessage(err, classifyCommandFailure(err))
+	for _, want := range []string{`C:\Users\me\.ssh`, `BUILTIN\Users can change it`, "icacls", "/setowner"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message %q lacks %q", message, want)
+		}
 	}
 }

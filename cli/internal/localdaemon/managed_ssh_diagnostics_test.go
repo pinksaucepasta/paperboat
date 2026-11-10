@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 )
 
 func TestManagedSSHAuthorityFailurePreservesCauseWithoutErrorText(t *testing.T) {
@@ -80,6 +81,20 @@ func TestManagedSSHClientKeyCapacityIsNamed(t *testing.T) {
 	machine := api.UserMachine{ID: "machine_1", Alias: "studio", Online: true, InstallationGeneration: 1, SSHLocalCode: "ssh_client_key_capacity"}
 	item := mapMachines([]api.UserMachine{machine})[0].Health[0]
 	if item.Code != "ssh_client_key_capacity" || !strings.Contains(item.Title, "limit") || !strings.Contains(item.Recovery, "pb logout") {
+		t.Fatalf("health = %+v", item)
+	}
+}
+
+// A .ssh folder Windows OpenSSH would not trust is its own health item pointing at the doctor, not "SSH target is
+// not ready" on every peer (winpool-4 2026-11-11: the Windows client refused SSH to a healthy Linux machine).
+func TestManagedSSHUnsafeDirectoryIsNamed(t *testing.T) {
+	startup := fmt.Errorf("install config: %w", &managedssh.UnsafeSSHPathError{Path: `C:\Users\me\.ssh`, Problem: "Everyone can change it"})
+	if code := managedSSHHealthCode(startup); code != "ssh_directory_unsafe" {
+		t.Fatalf("code=%q", code)
+	}
+	machine := api.UserMachine{ID: "machine_1", Alias: "studio", Online: true, InstallationGeneration: 1, SSHLocalCode: "ssh_directory_unsafe"}
+	item := mapMachines([]api.UserMachine{machine})[0].Health[0]
+	if item.Code != "ssh_directory_unsafe" || !strings.Contains(item.Title, ".ssh folder") || !strings.Contains(item.Recovery, "pb ssh doctor") {
 		t.Fatalf("health = %+v", item)
 	}
 }

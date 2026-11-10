@@ -6,6 +6,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 )
 
 type managedSSHAuthorityFailure struct{ cause error }
@@ -40,16 +41,26 @@ func managedSSHHealthCode(err error) string {
 	if hasAPIErrorCode(err, "managed_ssh_client_key_capacity") {
 		return managedSSHClientKeyCapacityCode
 	}
+	if hasCause(err, func(current error) bool { _, ok := current.(*managedssh.UnsafeSSHPathError); return ok }) {
+		return managedSSHUnsafeDirectoryCode
+	}
 	return "ssh_target_not_ready"
 }
 
 // hasAPIErrorCode walks at most 16 causes (errors.As would loop on a cyclic chain, see BoundsCyclicCause).
 func hasAPIErrorCode(err error, code string) bool {
+	return hasCause(err, func(current error) bool {
+		response, ok := current.(*api.APIError)
+		return ok && response != nil && response.Code == code
+	})
+}
+
+func hasCause(err error, match func(error) bool) bool {
 	pending := []error{err}
 	for visited := 0; len(pending) > 0 && visited < 16; visited++ {
 		current := pending[0]
 		pending = pending[1:]
-		if response, ok := current.(*api.APIError); ok && response != nil && response.Code == code {
+		if match(current) {
 			return true
 		}
 		switch wrapped := current.(type) {
@@ -61,6 +72,9 @@ func hasAPIErrorCode(err error, code string) bool {
 	}
 	return false
 }
+
+// managedSSHUnsafeDirectoryCode: this computer's .ssh folder has an owner or write access OpenSSH would not trust.
+const managedSSHUnsafeDirectoryCode = "ssh_directory_unsafe"
 
 // managedSSHClientKeyCapacityCode: the account already has the most signed-in computers using managed SSH, so this
 // computer's key was refused. Retrying cannot help until one is signed out (pb logout) or removed.

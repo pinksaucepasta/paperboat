@@ -393,6 +393,10 @@ func sshFailureMessage(err error) string {
 	if soleCommandOwner(err) == managedssh.ErrSSHServerClosed {
 		return managedssh.ErrSSHServerClosed.Error()
 	}
+	var unsafePath *managedssh.UnsafeSSHPathError
+	if boundedErrorWalk(err, func(e error) bool { found, ok := e.(*managedssh.UnsafeSSHPathError); unsafePath = found; return ok }) {
+		return unsafePath.Error()
+	}
 	// Windows runs ssh.exe against a local connection pb opens for it; each step that can fail there is named.
 	for step, text := range map[error]string{
 		managedssh.ErrSSHLoopbackAccept:        "the OpenSSH client did not connect to it in time",

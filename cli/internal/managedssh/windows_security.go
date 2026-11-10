@@ -170,6 +170,10 @@ func ensureManagedSSHDirectory(path, sid string) error {
 	return verifyManagedSSHACL(path, sid)
 }
 
+// verifyCurrentUserOwnedPath applies Win32-OpenSSH's own rule for ~/.ssh (check_secure_file_permission in
+// PowerShell/openssh-portable contrib/win32/win32compat/w32-sshfileperm.c): the owner is the user, SYSTEM,
+// Administrators or TrustedInstaller, and no other principal holds a write-class right. An elevated shell makes
+// Administrators the owner of a folder it creates, so the user's own ~/.ssh is often owned that way.
 func verifyCurrentUserOwnedPath(path, sid string, requireDirectory bool) error {
 	if err := rejectWindowsReparseAncestors(path); err != nil {
 		return err
@@ -178,15 +182,79 @@ func verifyCurrentUserOwnedPath(path, sid string, requireDirectory bool) error {
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || (requireDirectory && !info.IsDir()) || (!requireDirectory && !info.Mode().IsRegular()) || windowsReparsePoint(path) {
 		return ErrOpenSSHConfigConflict
 	}
-	descriptor, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
+	descriptor, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
 	if err != nil || descriptor == nil {
 		return ErrOpenSSHConfigConflict
 	}
 	owner, _, err := descriptor.Owner()
-	if err != nil || owner == nil || owner.String() != sid {
+	if err != nil || owner == nil {
 		return ErrOpenSSHConfigConflict
 	}
+	dacl, _, err := descriptor.DACL()
+	if err != nil {
+		return ErrOpenSSHConfigConflict
+	}
+	if problem := sshPathSecurityProblem(owner, dacl, sid); problem != "" {
+		return &UnsafeSSHPathError{Path: path, Problem: problem}
+	}
 	return nil
+}
+
+const (
+	windowsAdministratorsSID  = "S-1-5-32-544"
+	windowsTrustedInstallerID = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
+	// Win32-OpenSSH's SSH_SECURE_WRITE_MASK, plus FILE_DELETE_CHILD (another principal could delete files in
+	// the folder) and the generic write rights an inheritable rule may still hold unmapped.
+	windowsFileDeleteChild = 0x40 // FILE_DELETE_CHILD, not defined in x/sys/windows
+	sshPathWriteMask       = windows.FILE_WRITE_DATA | windows.FILE_APPEND_DATA | windows.FILE_WRITE_EA | windowsFileDeleteChild |
+		windows.FILE_WRITE_ATTRIBUTES | windows.DELETE | windows.WRITE_DAC | windows.WRITE_OWNER | windows.GENERIC_WRITE | windows.GENERIC_ALL
+)
+
+func trustedSSHPathPrincipal(sid *windows.SID, userSID string) bool {
+	switch sid.String() {
+	case userSID, windowsSystemSID, windowsAdministratorsSID, windowsTrustedInstallerID:
+		return true
+	}
+	return false
+}
+
+// sshPathSecurityProblem says in words why OpenSSH must not trust a path with this owner and DACL, or "" when it may.
+func sshPathSecurityProblem(owner *windows.SID, dacl *windows.ACL, userSID string) string {
+	if !trustedSSHPathPrincipal(owner, userSID) {
+		return "it is owned by " + windowsAccountName(owner) + ", not by you, SYSTEM or Administrators"
+	}
+	if dacl == nil {
+		return "it has no access list, so every user can change it"
+	}
+	for index := uint32(0); index < uint32(dacl.AceCount); index++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if windows.GetAce(dacl, index, &ace) != nil || ace == nil {
+			return "its access list cannot be read"
+		}
+		switch ace.Header.AceType {
+		case windows.ACCESS_DENIED_ACE_TYPE:
+			continue
+		case windows.ACCESS_ALLOWED_ACE_TYPE:
+		default:
+			// Object and conditional rules are not plain user rights; refuse rather than guess what they grant.
+			return "it has an access rule Paperboat cannot check"
+		}
+		trustee := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		if ace.Mask&sshPathWriteMask != 0 && !trustedSSHPathPrincipal(trustee, userSID) {
+			return windowsAccountName(trustee) + " can change it"
+		}
+	}
+	return ""
+}
+
+func windowsAccountName(sid *windows.SID) string {
+	if account, domain, _, err := sid.LookupAccount(""); err == nil && account != "" {
+		if domain != "" {
+			return domain + `\` + account
+		}
+		return account
+	}
+	return sid.String()
 }
 
 // verifyCurrentUserProfileRoot accepts SYSTEM ownership only for the existing
