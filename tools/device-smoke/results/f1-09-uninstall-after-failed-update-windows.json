@@ -1,0 +1,12 @@
+{
+ "version": "dev-413be407c",
+ "device": "pujan@victus",
+ "results": [
+  {
+   "id": "windows:uninstall-after-failed-update",
+   "status": "PASS",
+   "seconds": 97,
+   "detail": ""
+  }
+ ]
+}
