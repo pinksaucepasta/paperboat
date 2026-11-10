@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -11,7 +12,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/fstest"
 	"time"
+
+	"github.com/pressly/goose/v3"
 )
 
 func openStore(t testing.TB, hook func(string) error) (*Store, string) {
@@ -817,46 +821,36 @@ func TestInputDecisionsArePrunedToTheWindow(t *testing.T) {
 	}
 }
 
-// PLAN 3b File transfer modes, release N of two: the store a later release migrates to (the per-file 50 MiB
-// CHECK lifted) must open here, or rolling back from that release would find the store "corrupt".
-func TestStoreOpensTheMigratedUnboundedFileTransferTable(t *testing.T) {
+// A store created by a build before the migration (the 50 MiB per-file CHECK on file_transfers, goose at version 1)
+// opens on this build, keeps every row and accepts a file larger than the old limit.
+func TestStoreMigratesTheOldFileTransferTable(t *testing.T) {
 	root := t.TempDir()
 	state, err := Open(context.Background(), Config{Root: root})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var table string
-	if err := state.db.QueryRow(`SELECT sql FROM sqlite_master WHERE name='file_transfers'`).Scan(&table); err != nil {
+	initial, err := migrationsFS.ReadFile("migrations/00001_initial.sql")
+	if err != nil {
 		t.Fatal(err)
 	}
+	var oldTable string
+	for _, line := range strings.Split(string(initial), "\n") {
+		if strings.HasPrefix(line, "CREATE TABLE file_transfers(") {
+			oldTable = strings.TrimSuffix(line, ";")
+		}
+	}
+	if !strings.Contains(oldTable, "52428800") {
+		t.Fatal("the initial migration no longer carries the old per-file limit")
+	}
 	for _, statement := range []string{
-		`ALTER TABLE file_transfers RENAME TO file_transfers_old`,
-		strings.Replace(table, "CHECK(size BETWEEN 0 AND 52428800)", "CHECK(size >= 0)", 1),
-		`INSERT INTO file_transfers SELECT * FROM file_transfers_old`,
-		`DROP TABLE file_transfers_old`,
+		`DROP TABLE file_transfers`, oldTable,
 		`CREATE INDEX file_transfers_pending ON file_transfers(delivery_client_id,session_id,created_at) WHERE state='pending'`,
 		`CREATE INDEX file_transfers_expiry ON file_transfers(expires_at)`,
+		`DELETE FROM goose_db_version WHERE version_id=2`,
 	} {
 		if _, err := state.db.Exec(statement); err != nil {
 			t.Fatalf("%s: %v", statement, err)
 		}
-	}
-	if err := state.Close(); err != nil {
-		t.Fatal(err)
-	}
-	reopened, err := Open(context.Background(), Config{Root: root})
-	if err != nil {
-		t.Fatalf("the migrated store did not open: %v", err)
-	}
-	_ = reopened.Close()
-}
-
-// PLAN 3b File transfer modes: the 50 MiB per-file CHECK is lifted on demand, keeping every row, once.
-func TestLiftFileTransferSizeLimitKeepsRowsAndRunsOnce(t *testing.T) {
-	root := t.TempDir()
-	state, err := Open(context.Background(), Config{Root: root})
-	if err != nil {
-		t.Fatal(err)
 	}
 	now := time.Now()
 	row := func(id string, size int64) FileTransfer {
@@ -866,27 +860,58 @@ func TestLiftFileTransferSizeLimitKeepsRowsAndRunsOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := state.CreateFileTransfersWithinLimits(context.Background(), []FileTransfer{row("big", 1_500_000_000)}, 0, 0); err == nil {
-		t.Fatal("the original table accepted a 1.5 GB file")
-	}
-	for range 2 {
-		if err := state.LiftFileTransferSizeLimit(context.Background()); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := state.CreateFileTransfersWithinLimits(context.Background(), []FileTransfer{row("big", 1_500_000_000)}, 0, 0); err != nil {
-		t.Fatalf("a 1.5 GB file after the lift: %v", err)
-	}
-	if _, err := state.FileTransfer(context.Background(), "small"); err != nil {
-		t.Fatalf("the existing row was lost: %v", err)
+		t.Fatal("the old table accepted a 1.5 GB file")
 	}
 	if err := state.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := Open(context.Background(), Config{Root: root})
+	migrated, err := Open(context.Background(), Config{Root: root})
 	if err != nil {
-		t.Fatalf("the lifted store did not reopen: %v", err)
+		t.Fatalf("the old store did not open and migrate: %v", err)
 	}
-	_ = reopened.Close()
+	defer migrated.Close()
+	if _, err := migrated.FileTransfer(context.Background(), "small"); err != nil {
+		t.Fatalf("the existing row was lost: %v", err)
+	}
+	if err := migrated.CreateFileTransfersWithinLimits(context.Background(), []FileTransfer{row("big", 1_500_000_000)}, 0, 0); err != nil {
+		t.Fatalf("a 1.5 GB file after the migration: %v", err)
+	}
+	var version int
+	if err := migrated.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != CurrentVersion {
+		t.Fatalf("user_version = %d (err %v), want %d", version, err, CurrentVersion)
+	}
+}
+
+// A failed update rolls back to a runtime that knows only the initial migration: it still opens the migrated store.
+func TestMigratedStoreStillOpensForTheInitialMigrationOnly(t *testing.T) {
+	root := t.TempDir()
+	state, err := Open(context.Background(), Config{Root: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Close(); err != nil {
+		t.Fatal(err)
+	}
+	initial, err := migrationsFS.ReadFile("migrations/00001_initial.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(root, "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	migrationMu.Lock()
+	defer migrationMu.Unlock()
+	goose.SetBaseFS(fstest.MapFS{"migrations/00001_initial.sql": {Data: initial}})
+	defer goose.SetBaseFS(migrationsFS)
+	goose.SetTableName("goose_db_version")
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpContext(context.Background(), db, "migrations"); err != nil {
+		t.Fatalf("a runtime with only the initial migration cannot start on the migrated store: %v", err)
+	}
 }
 
 // N11: a burst of typing records its outcomes in one transaction; a row already pruned from the journal is skipped.

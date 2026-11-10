@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"embed"
-	"strings"
 
 	"sync"
 
@@ -49,16 +48,8 @@ func migrateDatabase(ctx context.Context, database *sql.DB, hook func(string) er
 	return nil
 }
 
-// unboundedFileTransferSchema is the canonical schema with the per-file 50 MiB CHECK lifted, the table a later
-// release migrates to for 2 GB and unlimited transfers (PLAN 3b File transfer modes). Accepting it now keeps a
-// rollback from that release working: this runtime starts on the migrated store instead of calling it corrupt.
-var unboundedFileTransferSchema = strings.Replace(canonicalSchema, "CHECK(size BETWEEN 0 AND 52428800)", "CHECK(size >= 0)", 1)
-
 func validateDatabaseSchema(ctx context.Context, database *sql.DB) error {
 	options := &squibble.DigestOptions{IgnoreTables: []string{"goose_db_version"}}
-	if squibble.Validate(ctx, database, unboundedFileTransferSchema, options) == nil {
-		return nil
-	}
 	if err := squibble.Validate(ctx, database, canonicalSchema, options); err != nil {
 		if _, mismatch := err.(squibble.ValidationError); mismatch {
 			return storeFailure("runtime state schema is invalid", ErrCorrupt, err)

@@ -198,11 +198,6 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) ([]store.Fi
 			return nil, err
 		}
 	}
-	if largestFile(transfers) > legacyMaxFileBytes {
-		if err := s.config.Store.LiftFileTransferSizeLimit(ctx); err != nil {
-			return nil, storageFailure(err)
-		}
-	}
 	if err := s.config.Store.CreateFileTransfersWithinLimits(ctx, transfers, spool, policy.MaxConcurrentTransfers); err != nil {
 		if errors.Is(err, store.ErrConflict) {
 			return nil, &Error{Code: ResourceLimit, Cause: err}
@@ -650,15 +645,4 @@ func (s *Service) requireRoom(needed uint64) error {
 		}
 	}
 	return nil
-}
-
-// legacyMaxFileBytes is the per-file size the original store table accepts; a larger file lifts it first.
-const legacyMaxFileBytes = int64(52428800)
-
-func largestFile(transfers []store.FileTransfer) int64 {
-	var largest int64
-	for _, transfer := range transfers {
-		largest = max(largest, transfer.Size)
-	}
-	return largest
 }
