@@ -141,7 +141,7 @@ func TestErrorPageTitleReferenceAndDarkMode(t *testing.T) {
 		504: "Paperboat couldn't finish this request",
 	}
 	actions := map[int]string{401: "Sign in", 409: "Try again", 429: "Try again", 502: "Try again", 503: "Try again", 504: "Try again"}
-	reference := regexp.MustCompile(`^[0-9a-f]{12}$`)
+	reference := regexp.MustCompile(`^support_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 	// Other tests share the package's 4xx sampler; this one needs every line.
 	sampler := fourxxSample
 	fourxxSample = &sampledLog{limit: 1 << 20}
@@ -238,7 +238,9 @@ func TestEdgeHTTP4xxLogIsSampledAnd5xxIsNot(t *testing.T) {
 	}
 }
 
-// A failing random source never gives an all-zero or repeated reference.
+var supportReference = regexp.MustCompile(`^support_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+
+// A failing random source still gives a valid support_<uuid> reference and never a repeated one.
 func TestNewReferenceFallsBackWhenRandomFails(t *testing.T) {
 	previous := readRandom
 	readRandom = func([]byte) (int, error) { return 0, errors.New("no entropy") }
@@ -246,7 +248,7 @@ func TestNewReferenceFallsBackWhenRandomFails(t *testing.T) {
 	seen := map[string]bool{}
 	for i := 0; i < 1000; i++ {
 		ref := newReference()
-		if len(ref) != 12 || ref == "000000000000" || seen[ref] {
+		if !supportReference.MatchString(ref) || seen[ref] {
 			t.Fatalf("reference %q (repeat %v) from the fallback", ref, seen[ref])
 		}
 		seen[ref] = true

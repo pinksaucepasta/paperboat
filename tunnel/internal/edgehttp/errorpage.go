@@ -114,17 +114,22 @@ var readRandom = rand.Read
 
 var referenceCounter atomic.Uint64
 
-// newReference is 12 hex characters: short enough to read out, URL-safe, and unique enough for a log search. If the
-// system random source fails, the id is the clock mixed with a counter, never the same bytes twice.
+// newReference is the support reference every Paperboat surface shows: support_ and a version 4 UUID, the format the
+// server and the CLI mint (server/internal/supportreport NewReference), so one search finds it anywhere. If the system
+// random source fails, the bytes are the clock mixed with a counter, never the same twice.
 func newReference() string {
-	var b [6]byte
+	var b [16]byte
 	if _, err := readRandom(b[:]); err != nil {
-		v := uint64(time.Now().UnixNano()) ^ referenceCounter.Add(1)*0x9e3779b97f4a7c15
-		for i := range b {
-			b[i] = byte(v >> (8 * i))
+		for half := 0; half < 2; half++ {
+			v := uint64(time.Now().UnixNano()) ^ referenceCounter.Add(1)*0x9e3779b97f4a7c15
+			for i := 0; i < 8; i++ {
+				b[half*8+i] = byte(v >> (8 * i))
+			}
 		}
 	}
-	return hex.EncodeToString(b[:])
+	b[6], b[8] = b[6]&0x0f|0x40, b[8]&0x3f|0x80
+	h := hex.EncodeToString(b[:])
+	return "support_" + h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
 }
 
 // sampledLog lets through at most limit lines per second and tells the first line of the next second how many it
