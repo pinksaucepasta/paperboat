@@ -61,7 +61,7 @@ func TestWindowsUserStateRemovalNeverFollowsAPlantedJunction(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(state, "credentials.json"), []byte("{}"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := retryWindowsRemoval(ctx, profile, state, nil); err != nil {
+		if err := retryWindowsRemoval(ctx, profile, state, nil, nil); err != nil {
 			t.Fatalf("remove a state root that holds a junction: %v", err)
 		}
 		if _, err := os.Lstat(state); !errors.Is(err, os.ErrNotExist) {
@@ -80,7 +80,7 @@ func TestWindowsUserStateRemovalNeverFollowsAPlantedJunction(t *testing.T) {
 			t.Fatal(err)
 		}
 		plantJunction(t, filepath.Join(state, "link"), outside)
-		if err := retryWindowsRemoval(ctx, profile, state, []string{inbox}); err != nil {
+		if err := retryWindowsRemoval(ctx, profile, state, []string{inbox}, nil); err != nil {
 			t.Fatalf("remove a state root that holds the Inbox and a junction: %v", err)
 		}
 		if _, err := os.Lstat(filepath.Join(state, "link")); !errors.Is(err, os.ErrNotExist) {
@@ -101,7 +101,7 @@ func TestWindowsUserStateRemovalNeverFollowsAPlantedJunction(t *testing.T) {
 				link = filepath.Dir(path)
 			}
 			plantJunction(t, link, outside)
-			if err := retryWindowsRemoval(ctx, profile, path, nil); !errors.Is(err, errWindowsUserStateRefused) {
+			if err := retryWindowsRemoval(ctx, profile, path, nil, nil); !errors.Is(err, errWindowsUserStateRefused) {
 				t.Fatalf("a path through a junction: %v, want the refusal", err)
 			}
 			if _, err := os.Lstat(link); err != nil {
@@ -112,7 +112,7 @@ func TestWindowsUserStateRemovalNeverFollowsAPlantedJunction(t *testing.T) {
 	}
 	t.Run("outside the profile is refused", func(t *testing.T) {
 		for _, path := range []string{filepath.Dir(sentinel), profile, filepath.Dir(profile)} {
-			if err := retryWindowsRemoval(ctx, profile, path, nil); !errors.Is(err, errWindowsUserStateRefused) {
+			if err := retryWindowsRemoval(ctx, profile, path, nil, nil); !errors.Is(err, errWindowsUserStateRefused) {
 				t.Fatalf("%s: %v, want the refusal", path, err)
 			}
 		}
@@ -196,7 +196,7 @@ func TestWindowsUserStateRemovalAfterAPlantedJunctionHasOnlyTheUsersRights(t *te
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	err = retryWindowsRemoval(ctx, profile, state, nil)
+	err = retryWindowsRemoval(ctx, profile, state, nil, nil)
 	if !planted {
 		t.Fatal("fixture: the junction was never planted")
 	}
@@ -278,7 +278,7 @@ func TestWindowsUserStateOwnedByTheUserIsRemovedWithTheUsersRights(t *testing.T)
 	elevated := countElevatedRemovals(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if err := retryWindowsRemoval(ctx, profile, state, nil); err != nil {
+	if err := retryWindowsRemoval(ctx, profile, state, nil, nil); err != nil {
 		t.Fatalf("remove user-owned state: %v", err)
 	}
 	if _, err := os.Lstat(state); !errors.Is(err, os.ErrNotExist) {
@@ -318,7 +318,7 @@ func TestWindowsUserStateOwnedByAdministratorsIsRemoved(t *testing.T) {
 		t.Helper()
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		if err := retryWindowsRemoval(ctx, profile, state, preserved); err != nil {
+		if err := retryWindowsRemoval(ctx, profile, state, preserved, nil); err != nil {
 			t.Fatalf("remove Administrators-owned state: %v", err)
 		}
 	}
@@ -397,7 +397,7 @@ func TestWindowsUserStateOwnedByAdministratorsIsRemoved(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		// The owner is read from the open directory right before it would be emptied, not from the plan.
-		if err := retryWindowsRemoval(ctx, profile, state, nil); !errors.Is(err, errWindowsUserStateRefused) {
+		if err := retryWindowsRemoval(ctx, profile, state, nil, nil); !errors.Is(err, errWindowsUserStateRefused) {
 			t.Fatalf("a directory of another account: %v, want the refusal", err)
 		}
 		survived(t, kept)

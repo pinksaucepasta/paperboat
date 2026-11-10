@@ -58,8 +58,10 @@ var removeWindowsStateElevated = removeWindowsStateByHandle
 // can appear at any moment, also between the check and the removal. The removal therefore runs as the user
 // without the helper's elevation (what MSI and Chromium's installer do for per-user data): whatever a planted
 // link points at, only what the user could delete anyway can be deleted. Only what the user's rights were
-// refused is then removed with the helper's elevation, by handle (removeWindowsStateByHandle).
-func retryWindowsRemoval(ctx context.Context, profile, path string, preserved []string) error {
+// refused is then removed with the helper's elevation, by handle (removeWindowsStateByHandle). An empty request
+// directory that another process holds open is not retried for five minutes: it is returned in leftovers and
+// reported in the status (lockedBridgeLeftover).
+func retryWindowsRemoval(ctx context.Context, profile, path string, preserved []string, leftovers *[]string) error {
 	for {
 		checked := false
 		last := windowssecurity.WithUnelevatedToken(func() error {
@@ -76,6 +78,10 @@ func retryWindowsRemoval(ctx context.Context, profile, path string, preserved []
 		}
 		if last == nil || errors.Is(last, errWindowsUserStateRefused) {
 			return last
+		}
+		if leftover, ok := lockedBridgeLeftover(last); ok && leftovers != nil {
+			*leftovers = append(*leftovers, leftover)
+			return nil
 		}
 		select {
 		case <-ctx.Done():

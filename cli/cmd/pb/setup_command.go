@@ -305,7 +305,12 @@ func setupCommand() *cobra.Command {
 				registration.AccountID = previousRegistration.AccountID
 				registration.SSHUser, registration.SSHPort = previousRegistration.SSHUser, previousRegistration.SSHPort
 				if runtime.GOOS == "windows" {
-					sshUser, sshPortValue = keptWindowsSSHTarget(previousRegistration, sshUser, sshPortValue)
+					registered, _ := machine.CurrentSSH()
+					keptUser, keptPort := keptWindowsSSHTarget(registered, sshUser, sshPortValue)
+					if keptUser != sshUser && !sameWindowsAccount(keptUser, sshUser) {
+						fmt.Fprintf(command.ErrOrStderr(), "Managed SSH stays registered for the account %s, not %s. Re-enroll this machine to change it.\n", keptUser, sshUser)
+					}
+					sshUser, sshPortValue = keptUser, keptPort
 				}
 			}
 
@@ -488,12 +493,22 @@ func exportSetupRecoveryKey(command *cobra.Command) error {
 	return nil
 }
 
-// keptWindowsSSHTarget is the SSH user and port a re-run of setup registers on Windows. The managed port is not the
-// user's choice there and pair already registered a target (a bare user name, not user.Current()'s HOST\\user): the server
-// refuses a different user or port for a registered generation (HTTP 409 at RegisterManagedSSHTarget), so it stays.
-func keptWindowsSSHTarget(previous identity.Registration, user string, port uint) (string, uint) {
-	if previous.SSHPort != 0 && previous.SSHUser != "" {
-		return previous.SSHUser, uint(previous.SSHPort)
+// keptWindowsSSHTarget is the SSH user and port a re-run of setup registers on Windows: the target the SERVER holds for
+// this machine's current installation (machine.CurrentSSH, never the local registration file, which a restored image or
+// another process of the user can make stale). The managed port is not the user's choice there, and the server refuses
+// a different user or port for a registered generation (HTTP 409 at RegisterManagedSSHTarget); pair registers the bare
+// user name where user.Current() gives HOST\\user. Without a registered target the caller's values stand.
+func keptWindowsSSHTarget(registered api.MachineSSH, user string, port uint) (string, uint) {
+	if registered.OSUser != "" && registered.Port != 0 {
+		return registered.OSUser, uint(registered.Port)
 	}
 	return user, port
+}
+
+// sameWindowsAccount compares a registered bare user name with user.Current()'s HOST\\user form.
+func sameWindowsAccount(registered, current string) bool {
+	if i := strings.LastIndex(current, `\`); i >= 0 {
+		current = current[i+1:]
+	}
+	return strings.EqualFold(registered, current)
 }

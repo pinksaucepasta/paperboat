@@ -215,7 +215,11 @@ func purgeUserPaperboatState(command *cobra.Command, preserved []string) error {
 	paths, pathErr := userPaperboatRemovalPaths(command)
 	result := errors.Join(config.PurgeCredentialStore(), pathErr)
 	for _, path := range paths {
-		if err := removePathPreserving(path, preserved); err != nil && !leftoverLockedBridgeDirectory(err) {
+		if err := removePathPreserving(path, preserved); err != nil {
+			if leftover, ok := lockedBridgeLeftover(err); ok {
+				fmt.Fprintf(command.ErrOrStderr(), "Paperboat left the empty directory %s in place: another process holds it open. Delete it once that process ends.\n", leftover)
+				continue
+			}
 			result = errors.Join(result, err)
 		}
 	}

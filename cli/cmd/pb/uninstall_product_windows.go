@@ -65,10 +65,12 @@ type windowsUninstallStatus struct {
 	State  string `json:"state"`
 	// RemovalAtRestart qualifies "completed": files that were still in use are registered with Windows for
 	// deletion at the next restart; everything else is gone.
-	RemovalAtRestart bool                             `json:"removal_at_restart,omitempty"`
-	Failure          *windowsUninstallFailureMetadata `json:"failure,omitempty"`
-	UpdatedAt        time.Time                        `json:"updated_at"`
-	CompletedAt      time.Time                        `json:"completed_at,omitempty"`
+	RemovalAtRestart bool `json:"removal_at_restart,omitempty"`
+	// Leftover lists empty directories another process held open, so they were left in place; only with "completed".
+	Leftover    []string                         `json:"leftover,omitempty"`
+	Failure     *windowsUninstallFailureMetadata `json:"failure,omitempty"`
+	UpdatedAt   time.Time                        `json:"updated_at"`
+	CompletedAt time.Time                        `json:"completed_at,omitempty"`
 }
 
 // Only producer-owned fault metadata crosses the process boundary. Native
@@ -556,6 +558,7 @@ func runWindowsUninstallHelper(ctx context.Context, planPath string) (result err
 	defer cancel()
 	// The helper owns cleanup until its context-aware operations finish. Do not
 	// detach a worker on deadline and discard its eventual original failure.
+	var leftovers []string
 	result = performWindowsSystemUninstall(cleanupCtx, plan.OwnerSID, plan.InboxPaths)
 	// The exact sentinel only: joined with any failure it is a failure.
 	atRestart := result == hostinstall.ErrRemovalAtRestart
@@ -566,7 +569,7 @@ func runWindowsUninstallHelper(ctx context.Context, planPath string) (result err
 		// The credential directory is user-writable like the state paths: removed as the user, never as an administrator.
 		result = windowssecurity.WithUnelevatedToken(config.PurgeCredentialStore)
 		for _, path := range plan.UserStatePaths {
-			result = errors.Join(result, retryWindowsRemoval(cleanupCtx, plan.OwnerProfile, path, plan.InboxPaths))
+			result = errors.Join(result, retryWindowsRemoval(cleanupCtx, plan.OwnerProfile, path, plan.InboxPaths, &leftovers))
 		}
 	}
 	if cleanupCtx.Err() != nil {
@@ -582,6 +585,7 @@ func runWindowsUninstallHelper(ctx context.Context, planPath string) (result err
 	}
 	completed := windowsUninstallStatusValue(ctx, "completed", nil)
 	completed.RemovalAtRestart = atRestart
+	completed.Leftover = leftovers
 	if err := writeWindowsUninstallStatus(plan.StatusPath, completed); err != nil {
 		return err
 	}
@@ -747,7 +751,7 @@ func readWindowsUninstallStatus(statusPath string) (windowsUninstallStatus, erro
 	if err := decoder.Decode(&extra); err != io.EOF {
 		return windowsUninstallStatus{}, windowsUninstallLocalFailure("", errors.New(message), err)
 	}
-	if status.Schema != windowsUninstallStatusSchema || status.UpdatedAt.IsZero() || status.RemovalAtRestart && status.State != "completed" {
+	if status.Schema != windowsUninstallStatusSchema || status.UpdatedAt.IsZero() || status.RemovalAtRestart && status.State != "completed" || !validWindowsUninstallLeftover(status) {
 		return windowsUninstallStatus{}, errors.New(message)
 	}
 	if failure := status.Failure; failure != nil {
@@ -973,4 +977,20 @@ func waitForWindowsProcess(ctx context.Context, processID uint32, deadline time.
 			return fmt.Errorf("wait for uninstall parent %d returned %d", processID, result)
 		}
 	}
+}
+
+// validWindowsUninstallLeftover accepts the leftover list only on a completed status and only as a few clean absolute paths.
+func validWindowsUninstallLeftover(status windowsUninstallStatus) bool {
+	if len(status.Leftover) == 0 {
+		return true
+	}
+	if status.State != "completed" || len(status.Leftover) > 8 {
+		return false
+	}
+	for _, path := range status.Leftover {
+		if !filepath.IsAbs(path) || filepath.Clean(path) != path || len(path) > 520 {
+			return false
+		}
+	}
+	return true
 }

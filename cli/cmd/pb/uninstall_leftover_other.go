@@ -2,4 +2,4 @@
 
 package main
 
-func leftoverLockedBridgeDirectory(error) bool { return false }
+func lockedBridgeLeftover(error) (string, bool) { return "", false }

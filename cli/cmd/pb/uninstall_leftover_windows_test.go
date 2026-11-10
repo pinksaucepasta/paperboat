@@ -5,13 +5,18 @@ package main
 import (
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
 	"golang.org/x/sys/windows"
 )
 
-func TestOnlyAnEmptyLockedBridgeRequestDirectoryIsTolerated(t *testing.T) {
+func lockedFailure(path string) error {
+	return &fs.PathError{Op: "unlinkat", Path: path, Err: windows.ERROR_SHARING_VIOLATION}
+}
+
+func TestLockedBridgeLeftoverIsOnlyAnEmptyOwnDirectoryNamedByTheHandle(t *testing.T) {
 	base := filepath.Join(t.TempDir(), "elevation")
 	empty := filepath.Join(base, "request-0123abcd")
 	full := filepath.Join(base, "request-4567ef01")
@@ -23,18 +28,57 @@ func TestOnlyAnEmptyLockedBridgeRequestDirectoryIsTolerated(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(full, "request.json"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	locked := func(path string) error { return &fs.PathError{Op: "unlinkat", Path: path, Err: windows.ERROR_SHARING_VIOLATION} }
-	if !leftoverLockedBridgeDirectory(locked(empty)) {
-		t.Fatal("an empty locked request directory failed the removal")
+	if path, ok := lockedBridgeLeftover(lockedFailure(empty)); !ok || path != empty {
+		t.Fatalf("an empty locked request directory failed the removal: %q %v", path, ok)
 	}
-	if leftoverLockedBridgeDirectory(locked(full)) {
+	if _, ok := lockedBridgeLeftover(lockedFailure(full)); ok {
 		t.Fatal("a locked request directory with content was tolerated")
 	}
-	if leftoverLockedBridgeDirectory(locked(filepath.Join(base, "other"))) {
+	if _, ok := lockedBridgeLeftover(lockedFailure(filepath.Join(base, "other"))); ok {
 		t.Fatal("a locked directory that is not a request directory was tolerated")
 	}
+	if _, ok := lockedBridgeLeftover(lockedFailure(filepath.Join(base, "request-missing"))); ok {
+		t.Fatal("a directory that does not exist was tolerated")
+	}
 	denied := &fs.PathError{Op: "unlinkat", Path: empty, Err: windows.ERROR_ACCESS_DENIED}
-	if leftoverLockedBridgeDirectory(denied) {
+	if _, ok := lockedBridgeLeftover(denied); ok {
 		t.Fatal("a refusal other than a sharing violation was tolerated")
+	}
+}
+
+// The review's symlink/junction finding: a request-* entry that is a link to an empty directory elsewhere must not
+// be reported as a leftover (the old check followed it with ReadDir).
+func TestLockedBridgeLeftoverRefusesAJunction(t *testing.T) {
+	root := t.TempDir()
+	elsewhere := filepath.Join(root, "elsewhere")
+	base := filepath.Join(root, "elevation")
+	link := filepath.Join(base, "request-evil")
+	for _, directory := range []string{elsewhere, base} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if output, err := exec.Command("cmd", "/c", "mklink", "/J", link, elsewhere).CombinedOutput(); err != nil {
+		t.Skipf("no junction on this machine: %v: %s", err, output)
+	}
+	if _, ok := lockedBridgeLeftover(lockedFailure(link)); ok {
+		t.Fatal("a junction to an empty directory was reported as a leftover")
+	}
+}
+
+func TestUninstallStatusLeftoverIsAcceptedOnlyOnCompletedAndAsCleanPaths(t *testing.T) {
+	good := windowsUninstallStatus{State: "completed", Leftover: []string{`C:\Users\u\AppData\Local\paperboat\elevation\request-1`}}
+	if !validWindowsUninstallLeftover(good) {
+		t.Fatal("a completed status with a clean leftover was refused")
+	}
+	for name, bad := range map[string]windowsUninstallStatus{
+		"failed":   {State: "failed", Leftover: good.Leftover},
+		"relative": {State: "completed", Leftover: []string{`elevation\request-1`}},
+		"unclean":  {State: "completed", Leftover: []string{`C:\Users\u\..\x`}},
+		"many":     {State: "completed", Leftover: []string{`C:\a`, `C:\b`, `C:\c`, `C:\d`, `C:\e`, `C:\f`, `C:\g`, `C:\h`, `C:\i`}},
+	} {
+		if validWindowsUninstallLeftover(bad) {
+			t.Errorf("%s leftover list was accepted", name)
+		}
 	}
 }
