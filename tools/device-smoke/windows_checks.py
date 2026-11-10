@@ -104,6 +104,7 @@ def checks(args):
     table['tunnel-manage'] = (['tunnel_manage.py'], [])
     table['tunnel-lifecycle'] = (['tunnel_lifecycle.py'], [])
     table['tunnel-public-protocols'] = (['tunnel_public_protocols.py'], [])
+    table['tunnel-private-access'] = (['tunnel_private_access_windows.py', args.peer], ['--peer'])
     for mode in ('foreground', 'background'):
         table['preview-' + mode] = (['preview_lifecycle.py', '--mode', mode], [])
     table['preview-protocols'] = (['preview_protocols.py', 'victus'], [])
