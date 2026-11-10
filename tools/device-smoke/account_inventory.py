@@ -13,8 +13,8 @@ def main():
     auth = invoke(pb, 'auth', 'status', '--json')
     if not auth['signed_in'] or auth['account']['id'] != enrolled['account_id']:
         raise RuntimeError('active account differs from this machine enrollment')
-    catalog = invoke(pb, 'machine', 'list', '--json')['machines']
-    environments = invoke(pb, 'environments', '--json')['machines']
+    catalog = invoke(pb, 'machine', 'list', '--json', '--all')['machines']
+    environments = invoke(pb, 'environments', '--json', '--all')['machines']
     identities = {machine['id'] for machine in catalog}
     if identities != {machine['id'] for machine in environments}:
         raise RuntimeError('machine list and environments disagree')
