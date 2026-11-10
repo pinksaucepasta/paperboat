@@ -72,7 +72,7 @@ def main():
     started = time.monotonic()
     if args.check == 'setup':
         from pairing_lifecycle import invoke
-        machines = invoke(pb, 'machine', 'list', '--json')['machines']
+        machines = invoke(pb, 'machine', 'list', '--all', '--json')['machines']  # the default page is 50 machines
         machine = next(item for item in machines if item['id'] == before['machine_id'])
         invoke(pb, 'setup', '--name', machine['alias'], raw=True,
                terminal=True, password=password)
