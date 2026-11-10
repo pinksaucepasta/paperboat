@@ -17,6 +17,8 @@ import (
 //   - "after": the client got the whole reply, then left (EOF), then sshd reset: how a Windows session ends
 //   - "stdin-first": the client half-closed its sending side first (`ssh host cmd < file`: all input sent), then
 //     got the whole reply, then sshd reset: also a complete session
+//   - "abort": the client got the whole reply and then aborted its connection (RST) instead of a clean close
+//   - "noisy": as "after", but the bridge's CloseWrite towards the client reports an unrelated closed-socket error
 //   - "never": the client stays, waiting for the rest: an upload or download cut short
 func resetBridge(t *testing.T, order string) error {
 	t.Helper()
@@ -64,6 +66,15 @@ func resetBridge(t *testing.T, order string) error {
 			_ = clientSide.CloseWrite()
 			close(sendReply)
 			<-got
+		case "abort":
+			close(sendReply)
+			<-got
+			_ = clientSide.SetLinger(0)
+			_ = clientSide.Close()
+		case "noisy":
+			close(sendReply)
+			<-got
+			_ = clientSide.CloseWrite()
 		default:
 			close(sendReply)
 			<-got
@@ -71,15 +82,27 @@ func resetBridge(t *testing.T, order string) error {
 		time.Sleep(50 * time.Millisecond)
 		close(reset)
 	}()
-	_, err = BridgeSSH(t.Context(), bridgeSide, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second)
+	var stream io.ReadWriteCloser = bridgeSide
+	if order == "noisy" {
+		stream = noisyCloseWriteConn{bridgeSide}
+	}
+	_, err = BridgeSSH(t.Context(), stream, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second)
 	return err
+}
+
+// noisyCloseWriteConn fails CloseWrite with a closed-socket error that is a fresh value, as a native stream does once
+// the client has gone; measured beside the reset on a Windows carrier.
+type noisyCloseWriteConn struct{ *net.TCPConn }
+
+func (noisyCloseWriteConn) CloseWrite() error {
+	return &net.OpError{Op: "close", Net: "tcp", Err: errors.New("use of closed network connection")}
 }
 
 // A connection reset after the client had everything is how Windows OpenSSH ends a session, whether the client
 // half-closed its input first or left afterwards; the same reset while the client still waits for data is a
 // truncated session and must be audited as a failure.
 func TestConnectionResetIsCleanOnlyWhenTheClientHadItsFullReply(t *testing.T) {
-	for _, order := range []string{"after", "stdin-first"} {
+	for _, order := range []string{"after", "stdin-first", "abort", "noisy"} {
 		if err := resetBridge(t, order); err != nil {
 			t.Fatalf("reset after a complete reply (%s): %v, want a clean end", order, err)
 		}

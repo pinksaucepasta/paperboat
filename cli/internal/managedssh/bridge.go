@@ -138,17 +138,22 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 	results := make(chan copyResult, 2)
 	// sshdDone is set once sshd's output is drained and the bridge closes both sides itself.
 	var sshdDone atomic.Bool
-	// clientEOF / sshdEOF close when that direction's copy ended with a plain EOF: the peer finished sending.
-	clientEOF, sshdEOF := make(chan struct{}), make(chan struct{})
+	// streamEnded closes when the client's side of the stream ends in any way (its EOF, or an abort the native stream
+	// reports as an error): the client has left. sshdEOF closes when sshd's output ended with a plain EOF.
+	streamEnded, sshdEOF := make(chan struct{}), make(chan struct{})
+	// sshdEnded closes when sshd's output ended in any way (EOF or reset).
+	sshdEnded := make(chan struct{})
+	var streamEndOnce sync.Once
 	go func() {
-		count, copyErr := io.Copy(sshd, stream)
-		if copyErr == nil {
-			close(clientEOF)
-		}
+		count, copyErr := io.Copy(sshd, endNotifier{stream, func() { streamEndOnce.Do(func() { close(streamEnded) }) }})
 		if sshdDone.Load() {
 			copyErr = nil // the read failed because the bridge closed the stream after sshd's end
 		}
 		copyErr = normalizeBridgeError(copyErr)
+		// A client that aborts its stream as the session ends (a read error here) while sshd ends too is how a normal
+		// end looks; sshd's own direction is judged by its copier. sshd still running after resetGrace means the client
+		// cut the session short: that stays a failure.
+		copyErr = waitSSHDEnded(ctx, copyErr, sshdEnded)
 		if half, ok := sshd.(interface{ CloseWrite() error }); ok {
 			closedBefore := sshdClosed.Load() // read before the call: a close that races it is not assumed ours
 			copyErr = errors.Join(copyErr, closeWriteFailure(half.CloseWrite(), closedBefore))
@@ -161,21 +166,24 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 	}()
 	go func() {
 		count, copyErr := io.Copy(stream, sshd)
+		close(sshdEnded)
 		if copyErr == nil {
 			close(sshdEOF)
 		}
 		copyErr = normalizeBridgeError(copyErr)
+		// The reset is judged on its own: the stream's CloseWrite noise below must not sit beside it (a leaf that is not
+		// a reset keeps the rule from excusing it: measured on a fresh Windows carrier, F5-12).
+		copyErr = excuseReset(ctx, copyErr, streamEnded)
 		if half, ok := stream.(interface{ CloseWrite() error }); ok {
 			closeErr := normalizeBridgeError(half.CloseWrite())
 			if copyErr != nil {
 				copyErr = errors.Join(copyErr, closeErr)
 			} else {
-				// After sshd's clean end the client may already have torn its side down, which is its normal exit:
-				// that shows as its EOF. A failed FIN to a client that never left is a failure.
-				copyErr = waitClientLeft(ctx, closeErr, clientEOF)
+				// After sshd's end the client may already have torn its side down, which is its normal exit: that
+				// shows as its stream ending. A failed FIN to a client that never left is a failure.
+				copyErr = waitClientLeft(ctx, closeErr, streamEnded)
 			}
 		}
-		copyErr = excuseReset(ctx, copyErr, clientEOF)
 		// Target EOF is terminal for an SSH connection. Some OpenSSH clients
 		// keep ProxyCommand input open until the proxy exits, so waiting for the
 		// opposite copier here deadlocks after a remote command has completed.
@@ -206,6 +214,20 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 		return result, managedSSHBoundary("command", errors.Join(ctx.Err(), context.Cause(ctx), resultErr, cleanupErr))
 	}
 	return result, managedSSHBoundary("command", errors.Join(resultErr, cleanupErr))
+}
+
+// endNotifier calls onEnd the first time a Read returns an error of any kind, EOF included.
+type endNotifier struct {
+	io.Reader
+	onEnd func()
+}
+
+func (e endNotifier) Read(p []byte) (int, error) {
+	n, err := e.Reader.Read(p)
+	if err != nil {
+		e.onEnd()
+	}
+	return n, err
 }
 
 // toSSHDError and fromSSHDError name the direction an error came from. The diagnostics record error types only (the
@@ -256,15 +278,31 @@ func resultOfOwnClose(err error) bool {
 	return !errors.As(err, &errno) && !errors.As(err, &system)
 }
 
-// waitClientLeft keeps err (a failed CloseWrite towards the client) only if the client does not show its EOF.
-func waitClientLeft(ctx context.Context, err error, clientEOF <-chan struct{}) error {
+// waitSSHDEnded forgives err (a client-to-sshd copy error) when sshd's output ends within resetGrace.
+func waitSSHDEnded(ctx context.Context, err error, sshdEnded <-chan struct{}) error {
 	if err == nil {
 		return nil
 	}
 	timer := time.NewTimer(resetGrace)
 	defer timer.Stop()
 	select {
-	case <-clientEOF:
+	case <-sshdEnded:
+		return nil
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+	return err
+}
+
+// waitClientLeft keeps err (a failed CloseWrite towards the client) only if the client's stream does not end.
+func waitClientLeft(ctx context.Context, err error, clientLeft <-chan struct{}) error {
+	if err == nil {
+		return nil
+	}
+	timer := time.NewTimer(resetGrace)
+	defer timer.Stop()
+	select {
+	case <-clientLeft:
 		return nil
 	case <-timer.C:
 	case <-ctx.Done():
