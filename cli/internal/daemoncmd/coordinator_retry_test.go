@@ -110,3 +110,61 @@ func TestCoordinatorKeepsLocalAccessWhenTheGuardRefusesANameAndRetries(t *testin
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+// A per-port browser listener the guard cannot bind (a port in a Windows excluded range, a refused bind) costs
+// only https://<machine>:<port>: native access stays, doctor's pending step is browser_port_listener instead of
+// a silent skip, and the retry serves the port once the guard can bind it.
+func TestCoordinatorNamesAFailedBrowserPortListenerAndRetries(t *testing.T) {
+	restoreBase, restoreMax := reconcileRetryBase, reconcileRetryMax
+	reconcileRetryBase, reconcileRetryMax = 10*time.Millisecond, 50*time.Millisecond
+	t.Cleanup(func() { reconcileRetryBase, reconcileRetryMax = restoreBase, restoreMax })
+	ca, err := testcert.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := &coordinatorNameClient{failGatewayPorts: 1}
+	c, err := NewCoordinator(CoordinatorConfig{
+		NameClient:  names,
+		DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unexpected dial") },
+		IssueCertificate: func(_ context.Context, name, _ string, _ int) (tls.Certificate, error) {
+			cert, key, err := ca.IssueCertificate([]string{name})
+			if err != nil {
+				return tls.Certificate{}, err
+			}
+			return tls.X509KeyPair(cert, key)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.mu.Lock()
+	c.ctx, c.running = t.Context(), true
+	c.mu.Unlock()
+	t.Cleanup(c.resetReconcileRetry)
+	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "hp", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
+	if err := c.reconcileSnapshot(t.Context(), []*daemonrpc.PeerUpdate{peer}, 1); err != nil {
+		t.Fatalf("a failed browser port listener must not fail local access: %v", err)
+	}
+	c.mu.Lock()
+	routes, web := len(c.routes), len(c.webRoutes)
+	c.mu.Unlock()
+	if routes != 1 || web != 1 {
+		t.Fatalf("routes=%d webRoutes=%d: want native access and the browser gateway kept", routes, web)
+	}
+	if step := c.PendingLocalAccessStep(); step != "browser_port_listener" {
+		t.Fatalf("pending step=%q, want browser_port_listener", step)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for c.PendingLocalAccessStep() != "" {
+		if time.Now().After(deadline) {
+			t.Fatal("the failed browser port listener was not retried")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	names.mu.Lock()
+	served := names.gateway[8080]
+	names.mu.Unlock()
+	if served == "" {
+		t.Fatal("the retry did not acquire the port listener")
+	}
+}

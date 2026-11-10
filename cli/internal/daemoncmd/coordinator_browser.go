@@ -25,6 +25,8 @@ func (c *Coordinator) prepareBrowserGatewayLocked(ctx context.Context, client gu
 	base := splitdns.BrowserGatewayHostname
 	if old, ok := c.webRoutes[base]; ok {
 		if maps.Equal(old.browserRoutes, routes) {
+			// A per-port listener that could not start is tried again on every reconciliation, like a native port.
+			c.addBrowserPortListeners(ctx, client, netip.MustParseAddr(splitdns.BrowserGatewayIP), routes, old.proxy, old.ports)
 			return old, nil
 		}
 		return c.updateBrowserGatewayLocked(ctx, client, old, routes, aliases)
@@ -215,9 +217,6 @@ func (c *Coordinator) observeBrowserTrustFailure(ctx context.Context, err error)
 	diagnosticlog.TryInfo("browser URLs are unavailable: the local browser certificate could not be installed; machine access is unaffected")
 }
 
-// addBrowserPortListeners makes https://<machine>.<domain>:<port> work for every published port
-// of a machine by serving the gateway address on that port. A port that cannot be served (in use,
-// or an older machine guard) is reported and skipped; it never degrades the other browser URLs.
 // browserListenerPorts are the machine ports that get a per-port listener: https://<machine>:<port>.
 func browserListenerPorts(routes map[string]splitdns.BrowserRoute) map[int]bool {
 	ports := make(map[int]bool)
@@ -230,7 +229,10 @@ func browserListenerPorts(routes map[string]splitdns.BrowserRoute) map[int]bool 
 	return ports
 }
 
-// addBrowserPortListeners starts a per-port listener for every routed port not in served, and records it.
+// addBrowserPortListeners makes https://<machine>.<domain>:<port> work for every routed port not in served, by
+// serving the gateway address on that port, and records it. A port that cannot be served never degrades the
+// other browser URLs: it is logged with its cause, pb doctor names the step (browser_port_listener) and the
+// reconcile retry tries it again.
 func (c *Coordinator) addBrowserPortListeners(ctx context.Context, client guardedNameClient, ip netip.Addr, routes map[string]splitdns.BrowserRoute, proxy *splitdns.Proxy, served map[int]bool) {
 	privileged := 0
 	for name, route := range routes {
@@ -247,13 +249,15 @@ func (c *Coordinator) addBrowserPortListeners(ctx context.Context, client guarde
 		}
 		listener, err := client.Acquire(ctx, splitdns.BrowserGatewayHostname, ip, port)
 		if err != nil {
-			diagnosticlog.TryInfo("browser port URL unavailable for a machine port", "port", port, "port_in_use", errors.Is(err, machineguard.ErrPortInUse))
+			c.browserPortsPending = true
+			diagnosticlog.TryWarn("browser port URL unavailable: the machine guard could not bind the port", "port", port, "port_in_use", errors.Is(err, machineguard.ErrPortInUse), "error", err)
 			continue
 		}
 		limited := &limitedListener{Listener: listener, permits: c.connections, ctx: context.WithoutCancel(ctx)}
 		if err := proxy.AddPortListener(port, limited); err != nil {
 			_ = limited.Close()
-			diagnosticlog.TryInfo("browser port URL could not start for a machine port", "port", port)
+			c.browserPortsPending = true
+			diagnosticlog.TryWarn("browser port URL unavailable: its listener could not start", "port", port, "error", err)
 			continue
 		}
 		served[port] = true

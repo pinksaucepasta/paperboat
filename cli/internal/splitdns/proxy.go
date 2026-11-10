@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -60,7 +61,7 @@ type Proxy struct {
 	httpsListener    net.Listener
 	portServers      []*http.Server
 	portListeners    []net.Listener
-	servedPorts      map[int]int // local listener port -> published machine port
+	portNumbers      []int // published machine port of each per-port server, same order as portServers
 	started          bool
 	stopErr          error
 }
@@ -171,20 +172,15 @@ func (p *Proxy) SetRoutes(explicit map[string]BrowserRoute, deniedHosts map[stri
 func (p *Proxy) RemovePortListener(port int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for index, listener := range p.portListeners {
-		local, ok := listener.Addr().(*net.TCPAddr)
-		if !ok || local.Port != port {
-			continue
-		}
-		p.certCacheMu.Lock()
-		delete(p.servedPorts, port)
-		p.certCacheMu.Unlock()
-		err := p.portServers[index].Close()
-		p.portServers = append(p.portServers[:index], p.portServers[index+1:]...)
-		p.portListeners = append(p.portListeners[:index], p.portListeners[index+1:]...)
-		return err
+	index := slices.Index(p.portNumbers, port)
+	if index < 0 {
+		return nil
 	}
-	return nil
+	err := p.portServers[index].Close()
+	p.portServers = slices.Delete(p.portServers, index, index+1)
+	p.portListeners = slices.Delete(p.portListeners, index, index+1)
+	p.portNumbers = slices.Delete(p.portNumbers, index, index+1)
+	return err
 }
 
 // ServeHTTP implements http.Handler to dynamically reverse-proxy to target port.
@@ -357,19 +353,12 @@ func (p *Proxy) knownMachinePort(name string) bool {
 	return known
 }
 
-// servedLocalPort reports the local port of a request that arrived on one of the per-port TLS listeners.
+// servedPortKey carries a per-port server's published machine port in its request contexts.
+type servedPortKey struct{}
+
+// servedLocalPort reports the published port of a request that arrived on one of the per-port TLS listeners.
 func (p *Proxy) servedLocalPort(r *http.Request) (int, bool) {
-	address, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
-	if !ok {
-		return 0, false
-	}
-	tcp, ok := address.(*net.TCPAddr)
-	if !ok {
-		return 0, false
-	}
-	p.certCacheMu.RLock()
-	defer p.certCacheMu.RUnlock()
-	port, served := p.servedPorts[tcp.Port]
+	port, served := r.Context().Value(servedPortKey{}).(int)
 	return port, served
 }
 
@@ -381,27 +370,23 @@ func (p *Proxy) AddPortListener(port int, listener net.Listener) error {
 	if !p.started || p.httpsServer == nil {
 		return errors.New("splitdns proxy: port listeners need a started HTTPS proxy")
 	}
-	local, ok := listener.Addr().(*net.TCPAddr)
-	if !ok || port < 1024 || port > 65535 {
+	if port < 1024 || port > 65535 {
 		return errors.New("splitdns proxy: invalid port listener")
 	}
-	p.certCacheMu.Lock()
-	if _, exists := p.servedPorts[local.Port]; exists {
-		p.certCacheMu.Unlock()
+	if slices.Contains(p.portNumbers, port) {
 		return errors.New("splitdns proxy: duplicate port listener")
 	}
-	if p.servedPorts == nil {
-		p.servedPorts = map[int]int{}
-	}
-	// The protected listener is bound to the published port itself; the lookup is keyed by the
-	// listener's own port so a request can never select a port other than the one it arrived on.
-	p.servedPorts[local.Port] = port
-	p.certCacheMu.Unlock()
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: p.GetCertificate}
 	bound := tls.NewListener(listener, tlsConfig)
-	server := &http.Server{Handler: p, TLSConfig: tlsConfig, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10}
+	// The port comes from the server the request arrived on, never from the request or from the listener's
+	// address: on Windows the machine guard hands over a named pipe, whose address has no port (that refused
+	// every per-port listener there), and a request can never select a port other than its listener's.
+	served := context.WithValue(context.Background(), servedPortKey{}, port)
+	server := &http.Server{Handler: p, TLSConfig: tlsConfig, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 << 10,
+		BaseContext: func(net.Listener) context.Context { return served }}
 	p.portServers = append(p.portServers, server)
 	p.portListeners = append(p.portListeners, bound)
+	p.portNumbers = append(p.portNumbers, port)
 	go func() { _ = server.Serve(bound) }()
 	return nil
 }
@@ -548,10 +533,7 @@ func (p *Proxy) Stop(ctx context.Context) error {
 	for _, listener := range p.portListeners {
 		record(listener.Close())
 	}
-	p.portServers, p.portListeners = nil, nil
-	p.certCacheMu.Lock()
-	p.servedPorts = nil
-	p.certCacheMu.Unlock()
+	p.portServers, p.portListeners, p.portNumbers = nil, nil, nil
 	p.transport.CloseIdleConnections()
 	p.started = false
 	if err := errors.Join(errs...); err != nil {

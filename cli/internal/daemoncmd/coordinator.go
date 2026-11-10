@@ -58,6 +58,9 @@ type Coordinator struct {
 	browserPending bool
 	// namesRefused is set while the guard refused some machine names of the last reconciliation (guarded by mu).
 	namesRefused bool
+	// browserPortsPending is set while a per-port browser listener of the last reconciliation could not be
+	// bound or started (guarded by mu).
+	browserPortsPending bool
 	// retry re-applies the latest snapshot after a failed or incomplete reconciliation (guarded by retryMu).
 	retryMu       sync.Mutex
 	retryTimer    *time.Timer
@@ -379,7 +382,7 @@ func (c *Coordinator) reconcileSnapshot(ctx context.Context, peers []*daemonrpc.
 		c.reportMu.Unlock()
 	}
 	c.mu.Lock()
-	incomplete := err != nil || c.browserPending || c.namesRefused
+	incomplete := err != nil || c.browserPending || c.namesRefused || c.browserPortsPending
 	c.mu.Unlock()
 	if incomplete {
 		c.scheduleReconcileRetry(peers, revision)
@@ -429,6 +432,9 @@ func (c *Coordinator) PendingLocalAccessStep() string {
 	}
 	if c.browserPending {
 		return "browser_certificate"
+	}
+	if c.browserPortsPending {
+		return "browser_port_listener"
 	}
 	return ""
 }

@@ -700,8 +700,11 @@ func localAccessTitle(title string, err error) string { return title + ": " + Lo
 // pendingStepTitle says what a retrying local access step leaves unavailable.
 func pendingStepTitle(step string) string {
 	what := "Some machine names are unavailable"
-	if step == "browser_certificate" {
+	switch step {
+	case "browser_certificate":
 		what = "Browser URLs are unavailable"
+	case "browser_port_listener":
+		what = "Some https://<machine>:<port> URLs are unavailable (https://<port>.<machine> works)"
 	}
 	return what + ": the " + strings.ReplaceAll(step, "_", " ") + " step failed and is retrying"
 }

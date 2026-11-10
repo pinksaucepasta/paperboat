@@ -238,6 +238,7 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 	if conflictedPorts > 0 {
 		diagnosticlog.TryInfo("protected machine ports remain blocked by local listener conflicts", "count", conflictedPorts, "first_port", firstConflictedPort)
 	}
+	c.browserPortsPending = false // set again below by every per-port listener that cannot start
 	if len(browserRoutes) > 0 {
 		web, err := c.prepareBrowserGatewayLocked(ctx, nameClient, browserRoutes, aliases)
 		switch {

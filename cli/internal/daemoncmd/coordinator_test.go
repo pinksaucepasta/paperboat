@@ -539,6 +539,10 @@ type coordinatorNameClient struct {
 	gatewayPorts  []int          // every gateway acquisition attempted, in order
 	failReplace   bool
 	refuseNames   int // ReplaceNames answers ErrNamesRefused this many times
+	// failGatewayPorts fails this many acquisitions of a per-port gateway listener (not :80/:443).
+	failGatewayPorts int
+	// pipeListeners hands out listeners whose addresses have no port, like the Windows guard's named pipes.
+	pipeListeners bool
 	closed        bool
 	// aliasesReplaced is set by ReplaceAliases: like the real guard, names are known only after it.
 	aliasesReplaced atomic.Bool
@@ -551,6 +555,10 @@ func (c *coordinatorNameClient) Acquire(ctx context.Context, hostname string, _ 
 		c.gatewayPorts = append(c.gatewayPorts, requestedPort)
 	}
 	fail := c.failAcquire
+	if fail == nil && hostname == splitdns.BrowserGatewayHostname && requestedPort >= 1024 && c.failGatewayPorts > 0 {
+		c.failGatewayPorts--
+		fail = errors.New("create protected listener: bind refused")
+	}
 	conflict := c.conflictPorts[requestedPort]
 	block := c.blockAcquire
 	c.mu.Unlock()
@@ -580,9 +588,33 @@ func (c *coordinatorNameClient) Acquire(ctx context.Context, hostname string, _ 
 			c.addresses[requestedPort] = listener.Addr().String()
 		}
 		c.mu.Unlock()
+		if c.pipeListeners {
+			return pipeAddressListener{listener}, nil
+		}
 	}
 	return listener, err
 }
+
+type pipeAddress struct{}
+
+func (pipeAddress) Network() string { return "pipe" }
+func (pipeAddress) String() string  { return `\\.\pipe\test` }
+
+type pipeAddressListener struct{ net.Listener }
+
+func (pipeAddressListener) Addr() net.Addr { return pipeAddress{} }
+func (l pipeAddressListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return pipeAddressConn{conn}, nil
+}
+
+type pipeAddressConn struct{ net.Conn }
+
+func (pipeAddressConn) LocalAddr() net.Addr { return pipeAddress{} }
+
 func (c *coordinatorNameClient) AcquireMachine(ctx context.Context, _, _, hostname string, ip netip.Addr, port int) (net.Listener, netip.Addr, error) {
 	listener, err := c.Acquire(ctx, hostname, ip, port)
 	return listener, ip, err
@@ -731,13 +763,23 @@ func (l *generationListener) Close() error {
 }
 
 func TestCoordinatorServesMachineHostOnPublishedPorts(t *testing.T) {
+	testCoordinatorServesMachineHostOnPublishedPorts(t, &coordinatorNameClient{})
+}
+
+// On Windows the guard's listeners are named pipes: their address and their connections' local address carry
+// no port. https://<machine>.<domain>:<port> was refused there (victus, 2026-11-10: the per-port listener was
+// acquired, rejected for its address and closed again), while https://<port>.<machine>.<domain> worked.
+func TestCoordinatorServesMachineHostOnPublishedPortsOverPipeListeners(t *testing.T) {
+	testCoordinatorServesMachineHostOnPublishedPorts(t, &coordinatorNameClient{pipeListeners: true})
+}
+
+func testCoordinatorServesMachineHostOnPublishedPorts(t *testing.T, names *coordinatorNameClient) {
 	ca, err := testcert.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "app on "+r.Host) }))
 	defer origin.Close()
-	names := &coordinatorNameClient{}
 	domain := testBrowserDomain
 	c, err := NewCoordinator(CoordinatorConfig{NameClient: names, DialMachine: func(ctx context.Context, _ string, port int) (net.Conn, error) {
 		if port != 6767 {
@@ -781,6 +823,9 @@ func TestCoordinatorServesMachineHostOnPublishedPorts(t *testing.T) {
 	response.Body.Close()
 	if response.StatusCode != http.StatusOK || !strings.HasPrefix(string(body), "app on ") {
 		t.Fatalf("https://%s:6767 answered %d %q", host, response.StatusCode, body)
+	}
+	if step := c.PendingLocalAccessStep(); step != "" {
+		t.Fatalf("pending step=%q with every port served", step)
 	}
 }
 

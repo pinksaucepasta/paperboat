@@ -36,6 +36,7 @@ func TestInventoryNamesTheFailingLocalAccessStep(t *testing.T) {
 		err                               error
 	}{
 		{"pending", "ready", "browser_urls_unavailable", "warning", "browser certificate", LocalAccessPendingError{Step: "browser_certificate"}},
+		{"pending port", "ready", "browser_urls_unavailable", "warning", "browser port listener", LocalAccessPendingError{Step: "browser_port_listener"}},
 		{"failed", "degraded", "local_access_unavailable", "error", "machine names", stepFailure{step: "machine_names"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
