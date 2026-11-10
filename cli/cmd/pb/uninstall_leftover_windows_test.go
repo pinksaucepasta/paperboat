@@ -3,6 +3,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -80,5 +82,27 @@ func TestUninstallStatusLeftoverIsAcceptedOnlyOnCompletedAndAsCleanPaths(t *test
 		if validWindowsUninstallLeftover(bad) {
 			t.Errorf("%s leftover list was accepted", name)
 		}
+	}
+}
+
+// A helper that is alive but slow to acknowledge is a pending uninstall, not a failed one.
+func TestSlowButRunningUninstallHelperIsPendingNotFailure(t *testing.T) {
+	previous := windowsHelperIsRunning
+	t.Cleanup(func() { windowsHelperIsRunning = previous })
+	timedOut := windowsUninstallLocalFailure("", context.DeadlineExceeded)
+	windowsHelperIsRunning = func(string) (bool, error) { return true, nil }
+	if !pendingWindowsUninstallHandoff(timedOut, "helper.exe") {
+		t.Fatal("a running helper that was slow to acknowledge failed the uninstall")
+	}
+	if pendingWindowsUninstallHandoff(errors.New("invalid protected Windows uninstall status"), "helper.exe") {
+		t.Fatal("another handoff failure was treated as pending")
+	}
+	windowsHelperIsRunning = func(string) (bool, error) { return false, nil }
+	if pendingWindowsUninstallHandoff(timedOut, "helper.exe") {
+		t.Fatal("a helper that is gone was treated as pending")
+	}
+	windowsHelperIsRunning = func(string) (bool, error) { return true, errors.New("query failed") }
+	if pendingWindowsUninstallHandoff(timedOut, "helper.exe") {
+		t.Fatal("a failed process query was treated as pending")
 	}
 }

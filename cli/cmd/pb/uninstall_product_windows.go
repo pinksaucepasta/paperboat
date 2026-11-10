@@ -253,9 +253,24 @@ func launchWindowsUninstallHelper(ctx context.Context, inboxPaths, userStatePath
 	}
 	keepDirectory = true
 	if err := waitForWindowsUninstallHandoff(ctx, statusPath); err != nil {
+		if pendingWindowsUninstallHandoff(err, helperPath) {
+			return statusPath, nil // started, only slow to acknowledge: the pending contract below
+		}
 		return "", err
 	}
 	return statusPath, nil
+}
+
+// pendingWindowsUninstallHandoff reports a handoff that ran out of time while its helper is alive. Windows certifies
+// the start of the cleanup, not its completion ("Windows cleanup was started..."); a helper that is slow to write its
+// acknowledgement (UAC consent, a loaded machine) goes on and completes, and the CLI had exited 1 for it although
+// status.json later read completed (winpool-9, winpool-5/6). A helper that is gone, or any other failure, stays one.
+func pendingWindowsUninstallHandoff(waitErr error, helperPath string) bool {
+	if !errors.Is(waitErr, context.DeadlineExceeded) {
+		return false
+	}
+	running, err := windowsHelperIsRunning(helperPath)
+	return err == nil && running
 }
 
 func recoverExpiredWindowsUninstallHelpers() error {
