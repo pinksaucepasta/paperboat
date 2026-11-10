@@ -24,7 +24,7 @@ import (
 
 const (
 	websocketWriteTimeout         = 10 * time.Second
-	terminalOutputQueueChunks     = 256
+	terminalOutputQueueChunks     = 64
 	helperProtocolVersion         = "1.0"
 	helperMaxFrame                = 256 << 10
 	helperInputChunkBytes         = 32 << 10

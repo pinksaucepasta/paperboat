@@ -536,7 +536,7 @@ func newLocalPeerConn(connection net.Conn, exec, expectMetadata bool, sequenceSi
 	if connection == nil {
 		return nil, ErrPeerTerminalInvalid
 	}
-	value := &localPeerConn{connection: connection, writer: &localPeerWriter{writer: connection}, data: make(chan localPeerOutput, 16), result: make(chan localPeerWaitResult, 1), done: make(chan struct{}), closed: make(chan struct{}), cancelAck: make(chan struct{}), stop: make(chan struct{}), events: make(chan ExecEvent, 256), exec: exec, sequenceSink: sequenceSink, replayGapSink: replayGapSink}
+	value := &localPeerConn{connection: connection, writer: &localPeerWriter{writer: connection}, data: make(chan localPeerOutput, 8), result: make(chan localPeerWaitResult, 1), done: make(chan struct{}), closed: make(chan struct{}), cancelAck: make(chan struct{}), stop: make(chan struct{}), events: make(chan ExecEvent, 256), exec: exec, sequenceSink: sequenceSink, replayGapSink: replayGapSink}
 	if len(launchWarningSink) > 0 {
 		value.launchWarningSink = launchWarningSink[0]
 	}
