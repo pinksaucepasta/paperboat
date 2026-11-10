@@ -550,7 +550,11 @@ func (p *Proxy) serveCRL(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if r.TLS != nil || r.URL.RawQuery != "" || r.Host != BrowserGatewayIP || len(r.URL.Path) != len(CRLPathPrefix)+64+4 || p.revocationList == nil {
+	host := r.Host // Windows' revocation fetch may send Host with the default port, as ServeHTTP's routes accept
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if r.TLS != nil || r.URL.RawQuery != "" || host != BrowserGatewayIP || len(r.URL.Path) != len(CRLPathPrefix)+64+4 || p.revocationList == nil {
 		http.NotFound(w, r)
 		return
 	}

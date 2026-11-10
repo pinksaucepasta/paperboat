@@ -125,6 +125,14 @@ func TestLocalCRLEndpointNeverForwards(t *testing.T) {
 			t.Fatal("HEAD leaked body")
 		}
 	}
+	for host, status := range map[string]int{"127.100.0.1:80": 200, "127.100.0.1:8080": 200, "localhost:80": 404, "127.100.0.2": 404} {
+		req := httptest.NewRequest("GET", "http://"+host+path, nil)
+		rec := httptest.NewRecorder()
+		p.ServeHTTP(rec, req)
+		if rec.Code != status {
+			t.Fatalf("Host %s: status %d, want %d", host, rec.Code, status)
+		}
+	}
 	if forwarded {
 		t.Fatal("certificate status request reached remote application")
 	}
