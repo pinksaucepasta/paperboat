@@ -12,7 +12,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"io"
 	"os"
-	"os/signal"
 	"sync"
 	"time"
 
@@ -292,11 +291,11 @@ func Run(ctx context.Context, conn tunnel.Conn, stdinSink io.WriteCloser, opts .
 }
 
 // watchResize sends the current terminal size to conn immediately and on every
-// SIGWINCH, returning a stop function.
+// local resize (SIGWINCH; a size poll on Windows), returning a stop function.
 func watchResize(conn tunnel.Conn, remoteSize func() (uint16, uint16)) (stop func()) {
 	pushSize(conn, remoteSize)
 	ch := make(chan os.Signal, 1)
-	notifyWinch(ch)
+	stopWinch := notifyWinch(ch)
 	done := make(chan struct{})
 	go func() {
 		for {
@@ -309,7 +308,7 @@ func watchResize(conn tunnel.Conn, remoteSize func() (uint16, uint16)) (stop fun
 		}
 	}()
 	return func() {
-		signal.Stop(ch)
+		stopWinch()
 		close(done)
 	}
 }
