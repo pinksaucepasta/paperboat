@@ -226,6 +226,23 @@ func elevatedOpenSSHConfig(ownerSID string) (windowsopenssh.Config, error) {
 	return windowsOpenSSHBootstrapConfig(config, instance), nil
 }
 
+// validateSuppliedWindowsRequest checks the request and that its identity matches its bytes. A bundle request names
+// no executable until the bundle is resolved (hostinstall.ResolveUpdateBundle): it is checked right after that, as
+// supplied_unix.go does.
+func validateSuppliedWindowsRequest(request hostinstall.Request) error {
+	if request.UpdateBundle != "" {
+		return nil
+	}
+	// A fresh install precedes pairing and has no machine identity yet;
+	// hostinstall.Install validates pending requests with their own contract.
+	if !request.EnrollmentPending {
+		if err := hostinstall.Validate(request, 0); err != nil {
+			return err
+		}
+	}
+	return request.Source.Verify(request.Executable)
+}
+
 func installWindowsRuntimeFromSuppliedBytes(ctx context.Context, request hostinstall.Request) error {
 	return installWindowsRuntimeFromSuppliedBytesWithCommit(ctx, request, false)
 }
@@ -252,14 +269,7 @@ func installWindowsRuntimeFromSuppliedBytesWithCommit(ctx context.Context, reque
 			resultErr = &windowsInstallationStepError{step: step, cause: resultErr}
 		}
 	}()
-	// A fresh install precedes pairing and has no machine identity yet;
-	// hostinstall.Install validates pending requests with their own contract.
-	if !request.EnrollmentPending {
-		if err := hostinstall.Validate(request, 0); err != nil {
-			return err
-		}
-	}
-	if err := request.Source.Verify(request.Executable); err != nil {
+	if err := validateSuppliedWindowsRequest(request); err != nil {
 		return err
 	}
 	instance, err := hostinstall.WindowsInstanceForSID(request.OwnerSID)
@@ -325,6 +335,9 @@ func installWindowsRuntimeFromSuppliedBytesWithCommit(ctx context.Context, reque
 		}
 		defer cleanup()
 		request = resolved
+		if err := validateSuppliedWindowsRequest(request); err != nil {
+			return err
+		}
 	}
 	var snapshot suppliedWindowsInstallation
 	if loadErr == nil && !previous.EnrollmentPending {
