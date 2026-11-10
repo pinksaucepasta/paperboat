@@ -15,6 +15,7 @@ JUMP=${WINPOOL_JUMP:-ubuntu@anvit}
 SLOTS=(1 2 3 4 5 6)
 CONF=$HOME/.ssh/winpool.conf
 KNOWN=$HOME/.ssh/winpool_known_hosts
+CLAIMS=$HOME/.ssh/winpool-claims
 
 die() { echo "winpool: $*" >&2; exit 1; }
 
@@ -45,13 +46,19 @@ start() {
   local count=${1:-} hours=${2:-2} busy free=() n deadline
   [[ $count =~ ^[1-6]$ ]] || die "usage: winpool.sh start N [HOURS] (N 1-6)"
   [[ $hours =~ ^[1-5]$ ]] || die "HOURS must be 1-5"
-  busy=$(up)
+  # One start at a time on this controller, and a machine that was just started is taken before its tunnel is up:
+  # two lanes starting seconds apart otherwise pick the same numbers.
+  mkdir -p "$CLAIMS"
+  exec 9>"$CLAIMS/lock"; flock 9
+  busy=$(up; find "$CLAIMS" -name '[1-6]' -mmin -15 -printf '%f\n')
   for n in "${SLOTS[@]}"; do grep -qx "$n" <<<"$busy" || free+=("$n"); done
   [ "${#free[@]}" -ge "$count" ] || die "only ${#free[@]} of 6 machines are free (winpool.sh list)"
   free=("${free[@]:0:count}")
   for n in "${free[@]}"; do ssh-keygen -q -R "[127.0.0.1]:$((22200 + n))" -f "$KNOWN" >/dev/null 2>&1 || true; done
   gh workflow run winpool.yml -f slots="$(IFS=,; echo "${free[*]}")" -f hours="$hours" >/dev/null
-  echo "started winpool-${free[*]} for ${hours} h; waiting for SSH (about 2 minutes)" >&2
+  for n in "${free[@]}"; do touch "$CLAIMS/$n"; done
+  flock -u 9
+  echo "started machines ${free[*]} for ${hours} h; waiting for SSH (about 2 minutes)" >&2
   deadline=$((SECONDS + 900))
   for n in "${free[@]}"; do
     until answers "$n"; do
