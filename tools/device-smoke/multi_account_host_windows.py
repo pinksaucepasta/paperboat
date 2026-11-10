@@ -83,7 +83,7 @@ class User:
     def health(self):
         data = self.json('status')
         data = data.get('data', data)
-        return ' '.join([str(data.get('daemon_state'))] + [str(item.get('code')) for item in data.get('health', [])])
+        return ' '.join([str(data.get('daemon_state'))] + [str(item.get('code')) for item in data.get('health') or []])
 
     def uninstall(self):
         if self.pb:
