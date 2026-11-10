@@ -1,0 +1,1 @@
+{"check": "update-survival", "target": "winpool-k-b160f4", "peer": "hp", "update_started": true, "same_shell_after_update": true, "preview_same_url": true, "tunnel_same_url": true, "transfer_byte_identical": true, "status": "PASS"}

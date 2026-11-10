@@ -1,0 +1,1 @@
+{"at": "20261110T202626Z", "results": [{"id": "tunnel-lifecycle:victus", "status": "PASS", "seconds": 160, "detail": "{\"check\": \"tunnel-lifecycle\", \"status\": \"PASS\", \"status_doctor_logs\": true, \"capture_replay\": true, \"pause_resume\": true, \"port_policy\": true, \"enrollment_preserved\": true}"}]}
