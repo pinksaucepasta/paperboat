@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""F11 on one Linux or macOS machine: repositories, credentials, sync, approval, conflicts, force, unassign.
+"""F11 on one Linux, macOS or Windows machine: repositories, credentials, sync, approval, conflicts, force, unassign.
 
 Runs ON the paired machine (copy tools/device-smoke there, `python3 config_sync_lifecycle.py ALIAS`).
 Everything it creates lives under ~/.cache/pb-cfg-lifecycle and is removed at the end; the machine's own
 config-sync.toml is saved and restored. Three repositories are connected and used: a local bare repository,
 an HTTP repository served by a small Git smart-HTTP server on 127.0.0.1 with a token profile, and an SSH
 repository on this machine's own sshd with a throwaway key (skipped with a note when sshd is unavailable).
+
+Windows (PB_SMOKE_WINDOWS_PB set): runs on the controller; pb needs no Git on the machine (go-git), so Git stays
+here. The local repository is built here and copied file by file to ~/.cache/pb-cfg-lifecycle on the
+device (and read back the same way); the HTTP server and the SSH repository (this controller's sshd, the throwaway
+key in this user's authorized_keys) are reached by the device through `ssh -R` loopback ports. The config worker
+is the PaperboatRuntimeConfig service, stopped and started from the SSH session (which must be elevated).
 
 Checks (one PASS/FAIL line each, JSON summary at the end):
   F11-01 connect + list for local/http/ssh, credentials set (private file), remove (validation says so), set again
@@ -16,7 +22,9 @@ Checks (one PASS/FAIL line each, JSON summary at the end):
          refusal for a custom repository
 """
 import base64
+import contextlib
 import getpass
+import hashlib
 import json
 import os
 import platform
@@ -32,6 +40,8 @@ import urllib.request
 import glob
 from pathlib import Path
 
+import winhost
+
 HOME = Path.home()
 ROOT = HOME / '.cache' / 'pb-cfg-lifecycle'
 CONFIG_DIR = HOME / '.config' / 'paperboat'
@@ -40,17 +50,25 @@ RUNTIME_ROOT = HOME / '.local/state/paperboat/runtime'
 UNIT = 'paperboat-runtime-config.service'
 DARWIN = platform.system() == 'Darwin'
 LAUNCHD_LABEL = 'com.pinksaucepasta.paperboat.runtime-config'  # cli/internal/hostruntime/service ConfigLabel, a LaunchAgent
+WINDOWS_SERVICE = 'PaperboatRuntimeConfig*'  # service.windowsServiceName(ConfigKind, <instance of the user's SID>)
+DEVICE = winhost.device()  # the Windows device when PB_SMOKE_WINDOWS_PB is set; pb and the machine's files are there
+PB = winhost.pb_path() if DEVICE else 'pb'  # pb from PATH on the machine itself
+MIRRORS = {}  # bare repository here -> its copy on the Windows device
 SYNC_WAIT = 240
 results = {}
 
 
 def pb(*args, stdin=None, timeout=180):
-    return subprocess.run(['pb', *args], capture_output=True, text=True, timeout=timeout, input=stdin)
+    return winhost.pb_text(PB, list(args), input=stdin, timeout=timeout)
 
 
 def use_platform_paths():
-    """macOS keeps pb's config, machine file and runtime state elsewhere; ask pb for them. Linux keeps the defaults above."""
+    """macOS and Windows keep pb's config, machine file and runtime state elsewhere; ask pb for them. Linux keeps the defaults above."""
     global CONFIG_DIR, MACHINE_FILE, RUNTIME_ROOT
+    if DEVICE:
+        MACHINE_FILE = winhost.RemotePath(DEVICE, pb('config', 'sync', 'path').stdout.strip())
+        RUNTIME_ROOT = DEVICE.runtime_dir()
+        return
     if not DARWIN:
         return
     os.environ['PATH'] = str(HOME / '.local/bin') + os.pathsep + os.environ['PATH']
@@ -93,9 +111,49 @@ def wait(what, check, seconds=SYNC_WAIT, every=4):
 
 def read(path):
     try:
-        return Path(path).read_text()
+        return path.read_text() if DEVICE else Path(path).read_text()
     except OSError:
         return None
+
+
+def private(path):
+    """Owner-only: mode 0600, or on Windows the ACL pb gives its own private files."""
+    if DEVICE:
+        path.private()
+    else:
+        path.chmod(0o600)
+
+
+def tree(bare):
+    return {path.relative_to(bare).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in bare.rglob('*') if path.is_file() and path.parent.name != 'hooks'}
+
+
+def to_device(bare):
+    """Copy what the device's copy of this bare repository lacks; objects before the references that name them.
+
+    shortcut: overwrites the device's branch like a forced push, fine while the worker is idle or stopped as it is at
+    every edit here; upgrade to a compare of the device's reference if an edit ever races a publish."""
+    theirs = MIRRORS[bare].tree_hashes() if MIRRORS[bare].exists() else {}
+    changed = [name for name, digest in tree(bare).items() if theirs.get(name) != digest]
+    for name in sorted(changed, key=lambda name: (name.startswith('refs/'), name)):
+        (MIRRORS[bare] / name).write_bytes((bare / name).read_bytes())
+
+
+def from_device(bare):
+    """Fetch what pb on the device wrote to its copy (a publish: objects, then the branch)."""
+    mine = tree(bare)
+    for name, digest in sorted(MIRRORS[bare].tree_hashes().items(), key=lambda item: (item[0].startswith('refs/'), item[0])):
+        if mine.get(name) != digest:
+            (bare / name).parent.mkdir(parents=True, exist_ok=True)
+            (bare / name).write_bytes((MIRRORS[bare] / name).read_bytes())
+
+
+def on_device(bare, root):
+    """The Windows device has no Git: this bare repository is mirrored to root on the device; returns that path."""
+    MIRRORS[bare] = root / bare.name
+    to_device(bare)
+    return MIRRORS[bare]
 
 
 def check(name, action):
@@ -128,6 +186,8 @@ def new_bare(name, content):
 
 def edit_repository(bare, content):
     """Commit `content` as the file `cfg/value.txt` through a scratch clone."""
+    if bare in MIRRORS:
+        from_device(bare)
     work = Path(tempfile.mkdtemp(dir=ROOT))
     try:
         subprocess.run(['git', 'clone', '-q', str(bare), str(work)], check=True, capture_output=True)
@@ -139,9 +199,13 @@ def edit_repository(bare, content):
         git('push', '-q', 'origin', 'main', cwd=work)
     finally:
         shutil.rmtree(work, ignore_errors=True)
+    if bare in MIRRORS:
+        to_device(bare)
 
 
 def repository_value(bare):
+    if bare in MIRRORS:
+        from_device(bare)
     result = subprocess.run(['git', '--git-dir', str(bare), 'show', 'main:cfg/value.txt'], capture_output=True, text=True)
     return result.stdout if result.returncode == 0 else None
 
@@ -191,6 +255,7 @@ class Fixture:
 
     def __init__(self):
         self.processes = []
+        self.forwards = contextlib.ExitStack()
         self.authorized_marker = None
         self.password = base64.b32encode(os.urandom(15)).decode().lower()
 
@@ -198,9 +263,14 @@ class Fixture:
         process = subprocess.Popen(['python3', '-c', HTTP_SERVER, str(bare_parent), 'cfguser', self.password],
                                    stdout=subprocess.PIPE, text=True, start_new_session=True)
         self.processes.append(process)
-        return int(process.stdout.readline())
+        return self.reach(int(process.stdout.readline()))
 
-    def enable_ssh(self):
+    def reach(self, port):
+        """The loopback port at which the machine reaches this host's 127.0.0.1:port: the same, or an ssh -R forward."""
+        return self.forwards.enter_context(DEVICE.forward(port)) if DEVICE else port
+
+    def enable_ssh(self, machine_root):
+        """A throwaway key for this host's sshd; returns the key, known_hosts and host[:port] as the machine uses them."""
         key = ROOT / 'ssh_key'
         subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(key), '-C', 'pb-cfg-lifecycle'], check=True)
         authorized = HOME / '.ssh' / 'authorized_keys'
@@ -217,9 +287,16 @@ class Fixture:
                                 '-o', 'IdentitiesOnly=yes', getpass.getuser() + '@127.0.0.1', 'git --version'], capture_output=True, text=True, timeout=30)
         if probe.returncode != 0:
             raise RuntimeError('ssh to this machine failed: ' + probe.stderr.strip()[-150:])
-        return key, ROOT / 'known_hosts'
+        if not DEVICE:
+            return key, ROOT / 'known_hosts', '127.0.0.1'
+        port = self.reach(22)  # the port ssh-keyscan and the probe above used
+        for name, text in (('ssh_key', key.read_text()), ('known_hosts', scanned.replace('127.0.0.1 ', '[127.0.0.1]:%d ' % port))):
+            (machine_root / name).write_text(text)
+            (machine_root / name).private()  # the runtime refuses a credential file with any other ACL
+        return machine_root / 'ssh_key', machine_root / 'known_hosts', '127.0.0.1:%d' % port
 
     def close(self):
+        self.forwards.close()
         for process in self.processes:
             try:
                 os.killpg(process.pid, 15)
@@ -233,12 +310,16 @@ class Fixture:
 
 def api_token_request(path, method='GET'):
     secrets = glob.glob(str(CONFIG_DIR / 'credentials/secrets/profile-*-access.secret'))
-    if secrets:
+    if DEVICE:  # DPAPI files, and no config.json until a setting changes
+        from bugreport_lifecycle import access_token
+        token, server = access_token(), pb_json('config', 'show')['server_url']
+    elif secrets:
         token = Path(secrets[0]).read_text().strip()
     else:  # macOS keeps the token in the login keychain
         from bugreport_lifecycle import keychain_tokens
         token = next(v for k, v in keychain_tokens().items() if k.startswith('keychain-access'))
-    server = json.loads((CONFIG_DIR / 'config.json').read_text())['server_url']
+    if not DEVICE:
+        server = json.loads((CONFIG_DIR / 'config.json').read_text())['server_url']
     request = urllib.request.Request(server + path, method=method, headers={'Authorization': 'Bearer ' + token, 'X-Paperboat-Workspace': 'personal'})
     with urllib.request.urlopen(request, timeout=30) as response:
         return response.status
@@ -248,8 +329,10 @@ def write_machine_file(repository_id, local, automatic='true', extra=''):
     MACHINE_FILE.parent.mkdir(parents=True, exist_ok=True)
     MACHINE_FILE.write_text('version = 1\nenabled = true\nautomatic_updates = %s\nmode = "bidirectional"\n%s'
                             '[pull]\nrepository_id = "%s"\n[push]\nrepository_id = "%s"\n'
-                            '[paths."cfg/value.txt"]\nlocal_path = "%s"\nkind = "file"\n' % (automatic, extra, repository_id, repository_id, local))
-    MACHINE_FILE.chmod(0o600)
+                            '[paths."cfg/value.txt"]\nlocal_path = "%s"\nkind = "file"\n'
+                            # a Windows path: its backslashes are escapes in a TOML basic string
+                            % (automatic, extra, repository_id, repository_id, str(local).replace('\\', '\\\\')))
+    private(MACHINE_FILE)
 
 
 def apply_configuration():
@@ -263,6 +346,9 @@ def my_status(alias):
 
 
 def systemctl(*args):
+    if DEVICE:  # stop/start of the config worker's Windows service; a failure raises with the step
+        DEVICE.service(args[0], WINDOWS_SERVICE)
+        return subprocess.CompletedProcess(args, 0, '', '')
     if DARWIN:
         return launchctl(*args)
     return subprocess.run(['systemctl', '--user', *args], capture_output=True, text=True)
@@ -292,7 +378,18 @@ def launchctl(action, unit):
     raise ValueError('unsupported verb ' + action)
 
 
+def credentials_private():
+    directory = RUNTIME_ROOT / 'config-sync/repository-credentials'
+    if DEVICE:  # nobody but the user, SYSTEM and Administrators in the ACL: what pb calls private on Windows
+        names = DEVICE.files(directory)
+        return bool(names) and not any(DEVICE.other_access(directory / name) for name in names)
+    files = glob.glob(str(directory / '*'))
+    return files and all(stat.S_IMODE(os.stat(f).st_mode) == 0o600 for f in files)
+
+
 def worker_gone():
+    if DEVICE:
+        return not [s for s in DEVICE.services(WINDOWS_SERVICE) if s['Status'] == 'Running']
     if DARWIN:
         return subprocess.run(['launchctl', 'print', 'gui/%d/%s' % (os.getuid(), LAUNCHD_LABEL)], capture_output=True).returncode != 0
     return systemctl('is-enabled', UNIT).returncode != 0 or systemctl('is-active', UNIT).stdout.strip() != 'active'
@@ -306,24 +403,30 @@ def main():
     backup = MACHINE_FILE.read_text() if MACHINE_FILE.exists() else None
     fixture = Fixture()
     repositories = {}
-    managed = ROOT / 'managed.txt'
+    machine_root = ROOT  # where the machine's own files of this check live
+    if DEVICE:
+        machine_root = DEVICE.home() / '.cache' / 'pb-cfg-lifecycle'
+        machine_root.unlink()
+        machine_root.mkdir()
+    managed = machine_root / 'managed.txt'
     try:
         # ---- F11-01: connect, list, credentials ----
         local_bare = new_bare('local', 'seed local\n')
+        local_url = str(on_device(local_bare, machine_root) if DEVICE else local_bare)
         http_port = fixture.start_http(ROOT)
         http_bare = new_bare('http', 'seed http\n')
         http_url = 'http://127.0.0.1:%d/http.git' % http_port
         profile = json.dumps({'transport': 'http', 'auth': 'token', 'username': 'cfguser', 'password': fixture.password, 'allow_insecure_http': True})
         ssh_error = None
         try:
-            ssh_key, known_hosts = fixture.enable_ssh()
+            ssh_key, known_hosts, ssh_host = fixture.enable_ssh(machine_root)
             ssh_bare = new_bare('ssh', 'seed ssh\n')
-            ssh_url = 'ssh://%s@127.0.0.1%s' % (getpass.getuser(), ssh_bare)
+            ssh_url = 'ssh://%s@%s%s' % (getpass.getuser(), ssh_host, ssh_bare)
         except Exception as error:  # noqa: BLE001
             ssh_error = str(error)
 
         def connect_all():
-            for name, url in (('local', str(local_bare)), ('http', http_url)) + ((('ssh', ssh_url),) if ssh_error is None else ()):
+            for name, url in (('local', local_url), ('http', http_url)) + ((('ssh', ssh_url),) if ssh_error is None else ()):
                 data = pb_json('config', 'repository', 'connect', url, '--name', 'lifecycle-' + name)
                 repositories[name] = data['repository']['id']
                 assert data['repository']['external_ref'] == url, data
@@ -336,8 +439,7 @@ def main():
         def credentials():
             saved = pb_json('config', 'repository', 'credentials', 'set', repositories['http'], '--file', '-', stdin=profile)
             assert saved['state'] == 'saved', saved
-            files = glob.glob(str(RUNTIME_ROOT / 'config-sync/repository-credentials/*'))
-            assert files and all(stat.S_IMODE(os.stat(f).st_mode) == 0o600 for f in files), 'credential profile files are not owner-only'
+            assert credentials_private(), 'credential profile files are not owner-only'
             assert fixture.password not in json.dumps(saved) and fixture.password not in pb('config', 'repository', 'list').stdout
             if ssh_error is None:
                 ssh_profile = json.dumps({'transport': 'ssh', 'auth': 'ssh', 'ssh_key_file': str(ssh_key), 'known_hosts_file': str(known_hosts), 'username': getpass.getuser()})
@@ -485,13 +587,15 @@ def main():
             MACHINE_FILE.unlink(missing_ok=True)
         else:
             MACHINE_FILE.write_text(backup)
-            MACHINE_FILE.chmod(0o600)
+            private(MACHINE_FILE)
         for repository_id in repositories.values():
             try:
                 api_token_request('/v1/config-repositories/' + repository_id, 'DELETE')
             except Exception:  # noqa: BLE001
                 pass
         shutil.rmtree(ROOT, ignore_errors=True)
+        if DEVICE:
+            machine_root.unlink()
     failed = [name for name, outcome in results.items() if outcome == 'FAIL']
     print(json.dumps({'check': 'config-sync-lifecycle', 'status': 'FAIL' if failed else 'PASS', 'results': results}), flush=True)
     sys.exit(1 if failed else 0)

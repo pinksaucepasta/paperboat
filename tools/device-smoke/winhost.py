@@ -75,6 +75,18 @@ CHUNK = 3000
 EXISTS = "if(Test-Path -LiteralPath $req.path){'yes'}else{'no'}"
 OWNER_ONLY = ('& icacls.exe $req.path /inheritance:r /grant:r "$([Security.Principal.WindowsIdentity]::GetCurrent().Name):(F)" | Out-Null\n'
               "if($LASTEXITCODE -ne 0){throw 'icacls failed'}")
+# pb's own private file ACL (configsync currentPrivateFileDescriptor): protected, full control for SYSTEM,
+# Administrators and the user, in that order. pb compares the DACL text, so icacls (which orders entries itself) won't do.
+PRIVATE = ("$u=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value\n"
+           "$d='D:P(A;;FA;;;SY)(A;;FA;;;BA)';if($u -ne 'S-1-5-18'){$d+=\"(A;;FA;;;$u)\"}\n"
+           "$s=New-Object Security.AccessControl.FileSecurity\n"
+           "$s.SetSecurityDescriptorSddlForm($d,[Security.AccessControl.AccessControlSections]::Access)\n"
+           "Set-Acl -LiteralPath $req.path -AclObject $s")
+# Stop or start the one service whose name matches $req.pattern and wait until it is there (systemctl stop/start).
+SERVICE = ("$s=@(Get-Service -Name $req.pattern -ErrorAction SilentlyContinue)\n"
+           "if($s.Count -ne 1){throw ('expected one service '+$req.pattern+', found '+$s.Count)}\n"
+           "if($req.action -eq 'stop'){Stop-Service -InputObject $s[0] -Force;$s[0].WaitForStatus('Stopped','00:00:30')}\n"
+           "else{Start-Service -InputObject $s[0];$s[0].WaitForStatus('Running','00:00:30')}")
 COPY = "Copy-Item -LiteralPath $req.source -Destination $req.target -Force"
 UNLINK = "Remove-Item -LiteralPath $req.path -Recurse -Force -ErrorAction SilentlyContinue"
 MKDIR = "[void](New-Item -ItemType Directory -Force -Path $req.path)"
@@ -376,6 +388,11 @@ class WindowsDevice:
         value = json.loads(out) if out else []
         return [value] if isinstance(value, dict) else value
 
+    def service(self, action, pattern):
+        """`stop` or `start` the one service matching the wildcard and wait for it (needs an elevated session)."""
+        assert action in ('stop', 'start'), action
+        self.ps('%s service %s' % (action, pattern), SERVICE, timeout=90, action=action, pattern=pattern)
+
     def processes(self, pattern):
         """Processes whose command line matches the regex (pgrep -f). The snippet's own command line is only a
         base64 bootstrap, so it never matches."""
@@ -449,15 +466,16 @@ class WindowsDevice:
         return self.ps('listening %s' % port, LISTENING, port=int(port))[1] == 'yes'
 
     @contextlib.contextmanager
-    def forward(self, local_port):
-        """Reach the controller's 127.0.0.1:local_port at 127.0.0.1:<port> on the device (ssh -R); yields that port.
+    def forward(self, local_port, host='127.0.0.1'):
+        """Reach host:local_port, as the controller reaches it, at 127.0.0.1:<port> on the device (ssh -R); yields
+        that port.
 
         For origins that cannot be a PowerShell listener (recording, WebSocket, TLS, raw TCP): the check keeps
         its own Python server here and pb on the device dials the forwarded port."""
         for _ in range(5):
             port = random.randrange(20000, 60000)
             tunnel = subprocess.Popen(self.ssh_prefix('-N', '-o', 'ExitOnForwardFailure=yes', '-R',
-                                                      '127.0.0.1:%d:127.0.0.1:%d' % (port, local_port), self.target),
+                                                      '127.0.0.1:%d:%s:%d' % (port, host, local_port), self.target),
                                       env=self.ssh_environment(), stdin=subprocess.DEVNULL,
                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             try:
@@ -596,6 +614,10 @@ class RemotePath:
         owner-only file checks require on Windows. Other modes change nothing."""
         if mode & 0o077 == 0:
             self.device.ps('owner-only %s' % self, OWNER_ONLY, path=str(self))
+
+    def private(self):
+        """The ACL pb gives its own private files and requires of a credential reference (a key, known_hosts)."""
+        self.device.ps('private %s' % self, PRIVATE, path=str(self))
 
     def sha256(self):
         return self.device.sha256(self)

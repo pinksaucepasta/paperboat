@@ -2055,3 +2055,187 @@ class EnvHookPlumbing(unittest.TestCase):
             table = windows_checks.checks(args(vault_password_file=r'C:\v\pw'))
         self.assertEqual(['env_ssh_hook.py', 'me@winbox', '--password-file', r'C:\v\pw'], table['env-ssh-hook'][0])
         self.assertEqual(['--vault_password_file'], windows_checks.missing(table['env-ssh-hook'][1], args()))
+
+class FolderDevice:
+    """A device whose files are a local directory: the RemotePath calls the config checks make, without PowerShell."""
+
+    path_flavor = pathlib.PurePosixPath
+
+    def __init__(self):
+        self.calls = []
+
+    def read_bytes(self, path):
+        return pathlib.Path(str(path)).read_bytes()
+
+    def write_bytes(self, path, data):
+        pathlib.Path(str(path)).parent.mkdir(parents=True, exist_ok=True)
+        pathlib.Path(str(path)).write_bytes(data)
+
+    def exists(self, path):
+        return pathlib.Path(str(path)).exists()
+
+    def ps(self, step, script, **payload):
+        self.calls.append((script, payload))
+        if script != winhost.TREE:
+            return 0, ''
+        root = pathlib.Path(payload['path'])
+        listed = [{'p': p.relative_to(root).as_posix(), 'h': __import__('hashlib').sha256(p.read_bytes()).hexdigest()}
+                  for p in root.rglob('*') if p.is_file()]
+        return 0, base64.b64encode(json.dumps(listed).encode()).decode()
+
+
+class ConfigSyncPlumbing(unittest.TestCase):
+    def setUp(self):
+        import config_sync_lifecycle
+        self.sync = config_sync_lifecycle
+
+    @unittest.skipUnless(__import__('shutil').which('git'), 'needs git')
+    def test_local_repository_is_mirrored_to_the_device_and_back_without_git_there(self):
+        import tempfile
+        sync, device = self.sync, FolderDevice()
+        with tempfile.TemporaryDirectory() as here, tempfile.TemporaryDirectory() as there, \
+                patch.object(sync, 'ROOT', pathlib.Path(here)), patch.object(sync, 'DEVICE', device), \
+                patch.object(sync, 'MIRRORS', {}):
+            bare = sync.new_bare('local', 'seed\n')
+            copy = sync.on_device(bare, winhost.RemotePath(device, there))
+            self.assertEqual(there + '/local.git', str(copy))
+            self.assertFalse(list(pathlib.Path(str(copy)).glob('hooks/*')))
+
+            def device_value(name='cfg/value.txt'):
+                return subprocess.run(['git', '--git-dir', str(copy), 'show', 'main:' + name], capture_output=True,
+                                      text=True).stdout
+            self.assertEqual('seed\n', device_value())
+            sync.edit_repository(bare, 'edited here\n')
+            self.assertEqual('edited here\n', device_value())
+            # pb on the device publishes into its copy: the next read and the next edit here start from it
+            work = pathlib.Path(here) / 'machine'
+            subprocess.run(['git', 'clone', '-q', str(copy), str(work)], check=True, capture_output=True)
+            (work / 'cfg/value.txt').write_text('from machine\n')
+            sync.git('commit', '-q', '-am', 'machine', cwd=work)
+            sync.git('push', '-q', 'origin', 'main', cwd=work)
+            self.assertEqual('from machine\n', sync.repository_value(bare))
+            (work / 'other.txt').write_text('kept\n')
+            sync.git('add', '-A', cwd=work)
+            sync.git('commit', '-q', '-m', 'machine again', cwd=work)
+            sync.git('push', '-q', 'origin', 'main', cwd=work)
+            sync.edit_repository(bare, 'edited again\n')
+            self.assertEqual(('edited again\n', 'kept\n'), (device_value(), device_value('other.txt')))
+
+    def test_windows_steps_replace_chmod_systemctl_and_the_mode_check(self):
+        import tomllib
+        sync, calls = self.sync, []
+        services = [{'Name': 'PaperboatRuntimeConfig-ab12', 'Status': 'Running', 'StartType': 'Automatic'}]
+        device = SimpleNamespace(path_flavor=pathlib.PureWindowsPath, mkdir=lambda path: None,
+                                 write_bytes=lambda path, data: calls.append(('write', str(path), data)),
+                                 ps=lambda step, script, **payload: calls.append((script, payload)) or (0, ''),
+                                 service=lambda action, pattern: calls.append((action, pattern)),
+                                 services=lambda pattern: services, files=lambda directory: ['repository-1.json'],
+                                 other_access=lambda path: calls.append(('acl', str(path))) or [])
+        machine_file = winhost.RemotePath(device, r'C:\Users\u\AppData\Roaming\Paperboat\config-sync.toml')
+        runtime = winhost.RemotePath(device, r'C:\Users\u\AppData\Local\Paperboat\runtime')
+        managed = r'C:\Users\u\.cache\pb-cfg-lifecycle\managed.txt'
+        with patch.object(sync, 'DEVICE', device), patch.object(sync, 'MACHINE_FILE', machine_file), \
+                patch.object(sync, 'RUNTIME_ROOT', runtime):
+            sync.write_machine_file('repo1', winhost.RemotePath(device, managed))
+            self.assertEqual(0, sync.systemctl('stop', sync.UNIT).returncode)
+            sync.systemctl('start', sync.UNIT)
+            self.assertFalse(sync.worker_gone())
+            services[0]['Status'] = 'Stopped'
+            self.assertTrue(sync.worker_gone())
+            del services[:]
+            self.assertTrue(sync.worker_gone())
+            self.assertTrue(sync.credentials_private())
+            device.other_access = lambda path: ['S-1-1-0']
+            self.assertFalse(sync.credentials_private())
+            device.files = lambda directory: []
+            self.assertFalse(sync.credentials_private())
+        self.assertEqual(('write', str(machine_file)), calls[0][:2])
+        parsed = tomllib.loads(calls[0][2].decode())
+        self.assertEqual((managed, 'repo1'), (parsed['paths']['cfg/value.txt']['local_path'], parsed['pull']['repository_id']))
+        self.assertEqual((winhost.PRIVATE, {'path': str(machine_file)}), calls[1])
+        self.assertEqual([('stop', 'PaperboatRuntimeConfig*'), ('start', 'PaperboatRuntimeConfig*')], calls[2:4])
+        self.assertEqual(('acl', str(runtime) + r'\config-sync\repository-credentials\repository-1.json'), calls[4])
+
+    def test_unix_keeps_its_commands(self):
+        import tempfile
+        sync, ran = self.sync, []
+
+        def run(argv, **options):
+            ran.append((argv, options))
+            return subprocess.CompletedProcess(argv, 0, 'active\n', '')
+        self.assertIsNone(sync.DEVICE)
+        with tempfile.TemporaryDirectory() as directory, patch('subprocess.run', run), \
+                patch.object(sync, 'MACHINE_FILE', pathlib.Path(directory) / 'config-sync.toml'):
+            sync.pb('config', 'status', '--json', stdin='x')
+            sync.systemctl('stop', sync.UNIT)
+            sync.write_machine_file('repo1', pathlib.Path('/home/u/.cache/pb-cfg-lifecycle/managed.txt'))
+            self.assertEqual(0o600, sync.MACHINE_FILE.stat().st_mode & 0o777)
+            self.assertIn('local_path = "/home/u/.cache/pb-cfg-lifecycle/managed.txt"', sync.MACHINE_FILE.read_text())
+            self.assertEqual(8022, sync.Fixture().reach(8022))
+        self.assertEqual(['pb', 'config', 'status', '--json'], ran[0][0])
+        self.assertEqual({'input': 'x', 'stdin': None, 'capture_output': True, 'text': True, 'timeout': 180, 'env': None}, ran[0][1])
+        self.assertEqual(['systemctl', '--user', 'stop', 'paperboat-runtime-config.service'], ran[1][0])
+
+    def test_device_ssh_repository_is_this_hosts_sshd_through_a_forward(self):
+        import contextlib
+        import tempfile
+        sync, calls, written = self.sync, [], {}
+
+        @contextlib.contextmanager
+        def forward(port):
+            calls.append(port)
+            yield 40022
+        device = SimpleNamespace(path_flavor=pathlib.PureWindowsPath, forward=forward,
+                                 write_bytes=lambda path, data: written.update({str(path): data}),
+                                 ps=lambda step, script, **payload: calls.append((script, payload['path'])) or (0, ''))
+
+        def run(argv, **options):
+            if argv[0] == 'ssh-keygen':
+                pathlib.Path(argv[argv.index('-f') + 1]).write_text('PRIVATE KEY\n')
+                pathlib.Path(argv[argv.index('-f') + 1] + '.pub').write_text('ssh-ed25519 AAAA pb-cfg-lifecycle\n')
+            return subprocess.CompletedProcess(argv, 0, '127.0.0.1 ssh-ed25519 HOSTKEY\n', '')
+        root = r'C:\Users\u\.cache\pb-cfg-lifecycle'
+        with tempfile.TemporaryDirectory() as here, patch.object(sync, 'ROOT', pathlib.Path(here) / 'root'), \
+                patch.object(sync, 'HOME', pathlib.Path(here)), patch.object(sync, 'DEVICE', device), patch('subprocess.run', run):
+            sync.ROOT.mkdir()
+            fixture = sync.Fixture()
+            key, known_hosts, host = fixture.enable_ssh(winhost.RemotePath(device, root))
+            self.assertIn('pb-cfg-lifecycle', (pathlib.Path(here) / '.ssh/authorized_keys').read_text())
+            fixture.close()
+            self.assertEqual('', (pathlib.Path(here) / '.ssh/authorized_keys').read_text())
+        self.assertEqual((root + r'\ssh_key', root + r'\known_hosts', '127.0.0.1:40022'), (str(key), str(known_hosts), host))
+        self.assertEqual({str(key): b'PRIVATE KEY\n', str(known_hosts): b'[127.0.0.1]:40022 ssh-ed25519 HOSTKEY\n'}, written)
+        self.assertEqual([22, (winhost.PRIVATE, str(key)), (winhost.PRIVATE, str(known_hosts))], calls)
+
+    def test_device_helpers_send_the_private_acl_the_service_verb_and_the_forward_target(self):
+        fake = FakeSsh((0, b''), (0, b''))
+        device = winhost.WindowsDevice(target='user@host', pb_exe=EXE, password='secret')
+        with patch('subprocess.run', fake):
+            winhost.RemotePath(device, r'C:\x\key').private()
+            device.service('stop', 'PaperboatRuntimeConfig*')
+        self.assertEqual((winhost.PRIVATE, {'path': r'C:\x\key'}), (fake.calls[0]['script'], fake.calls[0]['payload']))
+        self.assertIn("D:P(A;;FA;;;SY)(A;;FA;;;BA)", winhost.PRIVATE)  # configsync currentPrivateFileDescriptor
+        self.assertEqual((winhost.SERVICE, {'action': 'stop', 'pattern': 'PaperboatRuntimeConfig*'}),
+                         (fake.calls[1]['script'], fake.calls[1]['payload']))
+        with self.assertRaises(AssertionError):
+            device.service('restart', 'x')
+        started = []
+
+        class Tunnel:
+            def poll(self):
+                return None
+
+            def terminate(self):
+                pass
+
+            def wait(self, timeout):
+                pass
+        with patch('subprocess.Popen', lambda argv, **kwargs: started.append(argv) or Tunnel()), \
+                patch.object(device, 'listening', lambda port: True), device.forward(8000, '10.0.0.7') as port:
+            self.assertIn('127.0.0.1:%d:10.0.0.7:8000' % port, started[0])
+
+    def test_runner_names_the_config_sync_lifecycle_check(self):
+        import windows_checks
+        table = windows_checks.checks(WindowsChecksRunner().args())
+        self.assertEqual((['config_sync_lifecycle.py', 'm'], ['--machine']), table['config-sync-lifecycle'])
+        self.assertEqual(['--machine'], windows_checks.missing(['--machine'], WindowsChecksRunner().args(machine='')))

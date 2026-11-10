@@ -10,8 +10,11 @@ results/windows-<UTC>.json. Checks that need a fixture the run was not given are
 
 Not ported (they need Git, systemd/launchd, sudo or a signal on the device, or a gate an external driver releases):
 install_lifecycle, pairing_lifecycle's uninstall flows, the ssh_*.sh and ssh_mac_* checks,
-config_sync/config_sync_lifecycle and config_commands' repository rows, and the gated
-preview_lifecycle/session replay and cross checks. preview-protocols and tunnel-protocols are probed from this
+config_sync and config_commands' repository rows, and the gated
+preview_lifecycle/session replay and cross checks. config-sync-lifecycle keeps Git on this
+controller (pb itself needs none): it needs git, python3 and, for its SSH repository row, an sshd on this
+controller's 127.0.0.1:22, TCP forwarding (ssh -R) on the device and an elevated SSH session there (it stops and
+starts the config worker's service). preview-protocols and tunnel-protocols are probed from this
 controller (preview_protocol_client.go, as smoke.sh does). The origins of the survival, failure and protocol checks
 run here and are reached from the device through an ssh -R forward; the host service is PaperboatHostd-<instance>. ssh-tools runs scp and sftp only (Windows has no
 rsync). terminal-matrix skips the rows that cut the network (it would cut this controller's SSH) and the echo
@@ -155,6 +158,7 @@ def checks(args):
     table['free-plan'] = (['free_plan.py', args.machine], ['--machine'])  # the device account must be a Free account
     table['send-self'] = (['send_self.py', args.machine], ['--machine'])
     table['workspace-switch'] = (['workspace_lifecycle.py'], ['--empty_team'])  # PAPERBOAT_SMOKE_TEAM = --empty-team
+    table['config-sync-lifecycle'] = (['config_sync_lifecycle.py', args.machine], ['--machine'])  # about 15 min
     table['config-team-default'] = (['config_team_default.py', team, args.config_repository or ''], ['--team', '--config_repository'])
     # Logs the device out and in again; the link is approved here in headless Chromium with the stored console session.
     table['auth-lifecycle'] = (['auth_lifecycle_approved.py', 'windows', peer], ['--peer', 'STATE', 'PW_CHROMIUM'])
