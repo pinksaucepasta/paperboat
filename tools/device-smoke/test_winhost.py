@@ -1876,6 +1876,30 @@ class RemainingFamilyPlumbing(unittest.TestCase):
     def test_completion_snippet_does_not_stop_on_cobras_stderr_directive_line(self):
         self.assertLess(winhost.COMPLETE.index("$ErrorActionPreference='Continue'"), winhost.COMPLETE.index('TabExpansion2'))
 
+    def test_interrupt_answer_goes_through_a_file_not_the_attached_console(self):
+        # After AttachConsole the snippet's stdout is the target's console: setup_recovery lost 'fired rc' (IndexError).
+        self.assertNotIn('[Console]::Out', winhost.INTERRUPT)
+        self.assertIn('Set-Content -LiteralPath $req.result', winhost.INTERRUPT)
+        import contextlib
+        sent = {}
+
+        class Result:
+            def read_text(self):
+                return '1 -1'
+
+        class Directory:
+            def __truediv__(self, name):
+                return Result()
+
+        @contextlib.contextmanager
+        def temp_dir(prefix):
+            yield Directory()
+
+        fake = SimpleNamespace(temp_dir=temp_dir, ps=lambda step, script, **payload: sent.update(payload))
+        self.assertEqual((True, -1), winhost.WindowsDevice.interrupt_when(fake, [r'C:\pb.exe', 'setup'], 'x', seconds=150, exit_seconds=180))
+        self.assertIn('result', sent)
+        self.assertEqual(150, sent['seconds'])
+
     def test_pb_text_keeps_the_stdin_of_the_local_call(self):
         done = winhost.pb_text(sys.executable, ['-c', 'import sys;print(len(sys.stdin.read()))'], timeout=30, stdin=subprocess.DEVNULL)
         self.assertEqual('0\n', done.stdout)

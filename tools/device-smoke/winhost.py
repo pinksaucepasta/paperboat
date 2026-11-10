@@ -249,7 +249,7 @@ INTERRUPT = ("Add-Type -Namespace Pb -Name Con -MemberDefinition '[DllImport(\"k
              "[void][Pb.Con]::SetConsoleCtrlHandler([IntPtr]::Zero,$true);$fired=[int][Pb.Con]::GenerateConsoleCtrlEvent(0,0);break}\n"
              "Start-Sleep -Milliseconds 5}\n"
              "if($p.WaitForExit([int]$req.exit_ms)){$rc=$p.ExitCode}else{& cmd.exe /c \"taskkill /T /F /PID $($p.Id) >nul 2>&1\";$rc=-1}\n"
-             "[Console]::Out.Write(\"$fired $rc\")")
+             "Set-Content -LiteralPath $req.result -Value \"$fired $rc\" -NoNewline")  # after AttachConsole stdout is the target's console
 
 # Snippets that change nothing on the device: safe to send again when a session did not answer.
 READ_ONLY = (READ, EXISTS, SHA256, SIZE, ENV, SERVICES, PROCESSES, TASKS, SERVICE_PATHS, LISTENING, ALIVE)
@@ -417,12 +417,17 @@ class WindowsDevice:
 
     def interrupt_when(self, argv, when, seconds=30, exit_seconds=90, stdout=None, stderr=None):
         """Run argv in its own console and send it Ctrl-C the first time the PowerShell expression `when` is true
-        (polled every 5 ms for `seconds`); returns (whether Ctrl-C was sent, exit code or -1 if it was killed)."""
-        out = self.ps('interrupt ' + pathlib.PureWindowsPath(argv[0]).name, INTERRUPT, timeout=seconds + exit_seconds + 60,
-                      exe=argv[0], args=subprocess.list2cmdline(list(argv[1:])), when=when, seconds=seconds,
-                      exit_ms=exit_seconds * 1000, stdout=str(stdout) if stdout else None,
-                      stderr=str(stderr) if stderr else None)[1].split()
-        return out[-2] == '1', int(out[-1])
+        (polled every 5 ms for `seconds`); returns (whether Ctrl-C was sent, exit code or -1 if it was killed).
+        The answer goes through a file: once Ctrl-C is sent the snippet stays attached to the target's console, so its
+        own stdout no longer reaches the controller."""
+        with self.temp_dir('pb-interrupt') as directory:
+            result = directory / 'result.txt'
+            self.ps('interrupt ' + pathlib.PureWindowsPath(argv[0]).name, INTERRUPT, timeout=seconds + exit_seconds + 60,
+                    exe=argv[0], args=subprocess.list2cmdline(list(argv[1:])), when=when, seconds=seconds,
+                    exit_ms=exit_seconds * 1000, stdout=str(stdout) if stdout else None,
+                    stderr=str(stderr) if stderr else None, result=str(result))
+            fired, code = result.read_text().split()
+        return fired == '1', int(code)
 
     def matching_lines(self, directory, filter_, pattern):
         """The lines of the files of directory matching the glob filter_ that match the regex pattern (grep)."""

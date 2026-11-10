@@ -23,8 +23,10 @@ def binding(record):
 
 def interrupt_admitted(binary, arguments, root):
     if hasattr(binary, 'device'):  # the same checkpoint, watched on the device; Ctrl-C through pb's console
+        # The Windows journal appears ~54 s into a 76 s setup (OpenSSH elevation and enrollment come first): the watch
+        # must outlast that.
         fired, code = binary.device.interrupt_when([str(binary), *arguments], winhost.journal_when(
-            root / 'bootstrap-resume.json', ['runtime_enrolled'], ['runtime_ready']))
+            root / 'bootstrap-resume.json', ['runtime_enrolled'], ['runtime_ready']), seconds=150, exit_seconds=180)
         if not fired:
             raise RuntimeError('admitted setup checkpoint was not observed')
         if code == 0:

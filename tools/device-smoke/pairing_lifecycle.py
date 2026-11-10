@@ -306,7 +306,7 @@ def interrupt_pair_on_device(binary, arguments, root, mode, proxy):
         job = winhost.RemoteJob(device, [str(binary), *arguments],
                                 {'HTTPS_PROXY': address, 'https_proxy': address, 'NO_PROXY': '', 'no_proxy': ''})
         try:
-            deadline = time.monotonic() + 60  # each look at the device takes seconds
+            deadline = time.monotonic() + 150  # each look at the device takes seconds; a Windows setup's journal appears ~54 s in
             while job.poll() is None and time.monotonic() < deadline:
                 try:
                     started = json.loads(journal.read_text()).get('pairing_started')
