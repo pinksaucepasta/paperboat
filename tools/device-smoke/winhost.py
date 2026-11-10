@@ -72,9 +72,13 @@ EXISTS = "if(Test-Path -LiteralPath $req.path){'yes'}else{'no'}"
 OWNER_ONLY = ('& icacls.exe $req.path /inheritance:r /grant:r "$([Security.Principal.WindowsIdentity]::GetCurrent().Name):(F)" | Out-Null\n'
               "if($LASTEXITCODE -ne 0){throw 'icacls failed'}")
 # The enrollment token file ACL pb's pair requires (bootstrap token_file_windows.go): exactly SYSTEM and the current user,
-# full control, nothing inherited (OWNER_ONLY's user alone is refused: 1 ACE instead of 2).
-TOKEN_FILE = ('& icacls.exe $req.path /inheritance:r /grant:r "$([Security.Principal.WindowsIdentity]::GetCurrent().Name):(F)" "*S-1-5-18:(F)" | Out-Null\n'
-              "if($LASTEXITCODE -ne 0){throw 'icacls failed'}")
+# full control, nothing inherited, owned by the user (OWNER_ONLY's user alone is refused: 1 ACE instead of 2; a file
+# created over ssh is owned by Administrators and carries their ACE).
+TOKEN_FILE = ('$u=[Security.Principal.WindowsIdentity]::GetCurrent().Name\n'
+              '& icacls.exe $req.path /setowner $u | Out-Null;if($LASTEXITCODE -ne 0){throw "icacls setowner failed"}\n'
+              '& icacls.exe $req.path /inheritance:r /grant:r "${u}:(F)" "*S-1-5-18:(F)" | Out-Null;if($LASTEXITCODE -ne 0){throw "icacls grant failed"}\n'
+              '& icacls.exe $req.path /remove "*S-1-5-32-544" | Out-Null\n'
+              "if($LASTEXITCODE -ne 0){throw 'icacls remove failed'}")  # a file made over ssh is owned by Administrators
 # pb's own private file ACL (configsync currentPrivateFileDescriptor): protected, full control for SYSTEM,
 # Administrators and the user, in that order. pb compares the DACL text, so icacls (which orders entries itself) won't do.
 PRIVATE = ("$u=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value\n"

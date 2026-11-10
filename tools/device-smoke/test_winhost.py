@@ -1911,6 +1911,8 @@ class RemainingFamilyPlumbing(unittest.TestCase):
         # pb pair refuses a token file with one ACE (the user): token_file_windows.go wants SYSTEM and the user.
         self.assertIn('*S-1-5-18:(F)', winhost.TOKEN_FILE)
         self.assertIn('/inheritance:r', winhost.TOKEN_FILE)
+        self.assertIn('/setowner', winhost.TOKEN_FILE)  # owner == the user, not Administrators
+        self.assertIn('/remove "*S-1-5-32-544"', winhost.TOKEN_FILE)
         calls = []
         path = winhost.RemotePath(SimpleNamespace(path_flavor=pathlib.PureWindowsPath, ps=lambda step, script, **payload: calls.append((script, payload))), r'C:\Temp\token')
         path.enrollment_token_file()
