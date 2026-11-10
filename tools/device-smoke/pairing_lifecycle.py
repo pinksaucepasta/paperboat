@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import pwd
+import re
 import shlex
 import shutil
 import signal
@@ -265,9 +266,12 @@ def inventory(script, inbox, installed, password):
 def enrollment_file(binary, alias, directory):
     receipt = invoke(binary, '--workspace', 'personal', 'machine', 'add',
                      '--name', alias, '--json')
-    address = next(word for word in shlex.split(receipt['linux_macos_command'])
-                   if word.startswith('https://'))
-    token = parse_qs(urlparse(address).query)['p'][0][-26:]
+    if hasattr(binary, 'device'):  # tokens are per OS: the Windows enrollment, not the Linux/macOS one
+        token = re.search(r"p=([^'\"&]+)", receipt['windows_command']).group(1)[-26:]
+    else:
+        address = next(word for word in shlex.split(receipt['linux_macos_command'])
+                       if word.startswith('https://'))
+        token = parse_qs(urlparse(address).query)['p'][0][-26:]
     if len(token) != 26 or any(character not in '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ' for character in token):
         raise RuntimeError('enrollment command has invalid token shape')
     path = directory / 'enrollment-token'

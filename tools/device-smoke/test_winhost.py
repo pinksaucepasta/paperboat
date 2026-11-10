@@ -1918,6 +1918,28 @@ class RemainingFamilyPlumbing(unittest.TestCase):
         path.enrollment_token_file()
         self.assertEqual([(winhost.TOKEN_FILE, {'path': r'C:\Temp\token'})], calls)
 
+    def test_enrollment_file_takes_the_windows_token_for_a_device(self):
+        # Tokens are per OS: the Linux one is refused by pb pair on Windows (hostruntimecmd/main.go, bootstrap.go).
+        import pairing_lifecycle
+        receipt = {'windows_command': "powershell -c \"iex (irm 'https://x.test/install.ps1?p=name-0123456789ABCDEFGHIJKLMNOP')\"",
+                   'linux_macos_command': "curl 'https://x.test/i?p=ZZZZZZZZZZZZZZZZZZZZZZZZZZ'"}
+        written = []
+
+        class File:
+            def write_text(self, text):
+                written.append(text)
+
+            def enrollment_token_file(self):
+                written.append('acl')
+
+        class Directory:
+            def __truediv__(self, name):
+                return File()
+
+        with patch.object(pairing_lifecycle, 'invoke', return_value=receipt):
+            pairing_lifecycle.enrollment_file(SimpleNamespace(device=object()), 'alias', Directory())
+        self.assertEqual(['0123456789ABCDEFGHIJKLMNOP', 'acl'], written)
+
     def test_pb_text_keeps_the_stdin_of_the_local_call(self):
         done = winhost.pb_text(sys.executable, ['-c', 'import sys;print(len(sys.stdin.read()))'], timeout=30, stdin=subprocess.DEVNULL)
         self.assertEqual('0\n', done.stdout)
