@@ -90,7 +90,7 @@ Write-Warning ('the throwaway SSH profile is still loaded; left in place: '+$e.E
 BLOCK = "[void](New-NetFirewallRule -DisplayName $req.name -Direction Outbound -Action Block -RemoteAddress $req.addresses)"
 UNBLOCK = "Remove-NetFirewallRule -DisplayName $req.name -ErrorAction SilentlyContinue"
 PIDS = ("$all=@(Get-CimInstance Win32_Process);"
-        "$ids=@(Get-CimInstance Win32_Service|Where-Object{$_.Name -like 'Paperboat*' -and $_.State -eq 'Running' -and $_.ProcessId}|"
+        "$ids=@(Get-CimInstance Win32_Service|Where-Object{$_.Name -like 'PaperboatCarrier-*' -and $_.State -eq 'Running' -and $_.ProcessId}|"
         "ForEach-Object{[int]$_.ProcessId});$seen=@{};$queue=[Collections.Queue]::new($ids)\n"
         "while($queue.Count){$x=$queue.Dequeue();if($seen[$x]){continue};$seen[$x]=1;"
         "foreach($c in $all|Where-Object{$_.ParentProcessId -eq $x}){$queue.Enqueue([int]$c.ProcessId)}}\n"
@@ -159,7 +159,7 @@ class Target:
         return any(s['Status'] == 'Running' for s in self.device.services(self.sshd['service']))
 
     def daemon_pids(self):
-        """The running Paperboat services and every process under them (carrier, hostd and sshd children): what `docker pause` freezes on a Linux target."""
+        """The running carrier service (the peer data path) and its worker: what `docker pause` or SIGSTOP of the daemon freezes elsewhere. Freezing every Paperboat service left the carrier holding its lock after resume (restarts failed with ERROR_LOCK_VIOLATION for minutes)."""
         return [str(pid) for pid in json.loads(self.device.ps('Paperboat service processes', PIDS)[1] or '[]')]
 
     def pause(self, pids, seconds=50):
@@ -169,8 +169,12 @@ class Target:
             self.device.suspend(pid)
 
     def resume(self, pids):
+        """Best effort: pause()'s timer resumes them too, and this call can ride the connection the pause froze."""
         for pid in pids:
-            self.device.resume(pid)
+            try:
+                self.device.resume(pid)
+            except winhost.DeviceError:
+                pass
 
     def rotate_host_key(self):
         hostd = [s['Name'] for s in self.device.services('PaperboatHostd-*') if s['Status'] == 'Running']
