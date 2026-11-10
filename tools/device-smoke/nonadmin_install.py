@@ -20,7 +20,27 @@ AS_STANDARD_USER = r"""
 $u=$req.user;$pw=ConvertTo-SecureString $req.password -AsPlainText -Force
 $slots={@(Get-ChildItem -LiteralPath (Join-Path $env:ProgramFiles 'Paperboat\users'),(Join-Path $env:ProgramData 'Paperboat\users') -ErrorAction SilentlyContinue|ForEach-Object{$_.FullName})+@(Get-Service Paperboat* -ErrorAction SilentlyContinue|ForEach-Object{$_.Name})}
 $before=& $slots;$d=Join-Path $env:PUBLIC ('pb-refusal-'+[guid]::NewGuid().ToString('N').Substring(0,12));$t='pb-refusal-'+$u
+# A password logon task needs the batch-logon right, which a fresh standard user lacks (granted here, revoked below).
+$lsaRights=@'
+using System;
+using System.Runtime.InteropServices;
+public class LsaRights {
+  [StructLayout(LayoutKind.Sequential)] public struct U { public ushort Length; public ushort MaximumLength; public IntPtr Buffer; }
+  [StructLayout(LayoutKind.Sequential)] public struct A { public int Length; public IntPtr RootDirectory; public IntPtr ObjectName; public uint Attributes; public IntPtr SecurityDescriptor; public IntPtr SecurityQualityOfService; }
+  [DllImport("advapi32.dll")] static extern uint LsaOpenPolicy(ref U n, ref A a, int acc, out IntPtr h);
+  [DllImport("advapi32.dll")] static extern uint LsaAddAccountRights(IntPtr h, byte[] sid, U[] r, int c);
+  [DllImport("advapi32.dll")] static extern uint LsaRemoveAccountRights(IntPtr h, byte[] sid, bool all, U[] r, int c);
+  [DllImport("advapi32.dll")] static extern uint LsaClose(IntPtr h);
+  static U S(string s){ var u=new U(); u.Buffer=Marshal.StringToHGlobalUni(s); u.Length=(ushort)(s.Length*2); u.MaximumLength=(ushort)((s.Length+1)*2); return u; }
+  static IntPtr Open(){ var n=new U(); var a=new A(); a.Length=Marshal.SizeOf(typeof(A)); IntPtr h; if(LsaOpenPolicy(ref n, ref a, 0x10|0x800, out h)!=0) throw new Exception("LsaOpenPolicy"); return h; }
+  public static void Grant(byte[] sid,string r){ IntPtr h=Open(); try{ if(LsaAddAccountRights(h,sid,new U[]{S(r)},1)!=0) throw new Exception("grant"); } finally{ LsaClose(h); } }
+  public static void Revoke(byte[] sid,string r){ IntPtr h=Open(); try{ if(LsaRemoveAccountRights(h,sid,false,new U[]{S(r)},1)!=0) throw new Exception("revoke"); } finally{ LsaClose(h); } }
+}
+'@
+Add-Type -TypeDefinition $lsaRights -Language CSharp
 $account=New-LocalUser -Name $u -Password $pw -PasswordNeverExpires
+$sidBytes=New-Object byte[] $account.SID.BinaryLength;$account.SID.GetBinaryForm($sidBytes,0)
+[LsaRights]::Grant($sidBytes,'SeBatchLogonRight')
 try{
   [void](New-Item -ItemType Directory -Path $d);Copy-Item -LiteralPath $req.exe -Destination (Join-Path $d 'pb.exe')
   & icacls.exe $d /grant "${u}:(OI)(CI)M" | Out-Null
@@ -35,8 +55,9 @@ try{
 }finally{
   Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue
   Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction SilentlyContinue
+  try{[LsaRights]::Revoke($sidBytes,'SeBatchLogonRight')}catch{}
   $sid=$account.SID.Value
-  Get-CimInstance Win32_UserProfile -Filter "SID='$sid'" -ErrorAction SilentlyContinue|Remove-CimInstance -ErrorAction SilentlyContinue
+  for($i=0;$i -lt 5;$i++){Get-CimInstance Win32_UserProfile -Filter "SID='$sid'" -ErrorAction SilentlyContinue|Remove-CimInstance -ErrorAction SilentlyContinue;if(-not (Get-CimInstance Win32_UserProfile -Filter "SID='$sid'" -ErrorAction SilentlyContinue)){break};Start-Sleep 3}
   Remove-LocalUser -Name $u -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue
 }
