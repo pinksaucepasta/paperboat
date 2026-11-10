@@ -2,9 +2,9 @@
 # console build: live tree (before c038e88ef); machines dadape dev-8cef4cb5 (linux), winpool-w11-7b dev-57c0d5614 (windows); origin python http.server on 127.0.0.1:18977
 PASS  dadape: New preview dialog opens
 PASS  dadape: the preview's machine is the chosen one  (dadape)
-PASS  dadape: dialog reports the preview live with its address  (brave-forest-haven-8696.pprbt.app)
+PASS  dadape: dialog reports the preview live with its address  (brave-forest-haven-8696.example.test)
 PASS  dadape: server has one new ready preview
-PASS  dadape: list shows the address, forwards-to and an end time  (brave-forest-haven-8696.pprbt.app dadape localhost:18977 in 1 hour Live)
+PASS  dadape: list shows the address, forwards-to and an end time  (brave-forest-haven-8696.example.test dadape localhost:18977 in 1 hour Live)
 PASS  dadape: the address answers
 PASS  dadape: status becomes Live
 PASS  dadape: page connects or shows a clear state  (Capture is off)
@@ -24,9 +24,9 @@ PASS  dadape: clear empties the list
 PASS  dadape: the check's preview is stopped  (preview_45b50f0c-0825-4588-8673-ebc61f10c565)
 PASS  winpool-w11-7b: New preview dialog opens
 PASS  winpool-w11-7b: the preview's machine is the chosen one  (winpool-w11-7b)
-PASS  winpool-w11-7b: dialog reports the preview live with its address  (brave-emerald-garden-0850.pprbt.app)
+PASS  winpool-w11-7b: dialog reports the preview live with its address  (brave-emerald-garden-0850.example.test)
 PASS  winpool-w11-7b: server has one new ready preview
-PASS  winpool-w11-7b: list shows the address, forwards-to and an end time  (brave-emerald-garden-0850.pprbt.app winpool-w11-7b localhost:18977 in 1 hour Live)
+PASS  winpool-w11-7b: list shows the address, forwards-to and an end time  (brave-emerald-garden-0850.example.test winpool-w11-7b localhost:18977 in 1 hour Live)
 PASS  winpool-w11-7b: the address answers
 PASS  winpool-w11-7b: status becomes Live
 PASS  winpool-w11-7b: page connects or shows a clear state  (Capture is off)
