@@ -42,3 +42,66 @@ func TestWindowsAuthorizedKeysOwnsFixedDedicatedFile(t *testing.T) {
 		t.Fatalf("unexpected user SSH path: %v", err)
 	}
 }
+
+func TestWindowsAuthorizedKeysEndsSessionsOnlyWhenAKeyLeaves(t *testing.T) {
+	reconciler, err := newWindowsAuthorizedKeys(filepath.Join(t.TempDir(), "ssh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ended []string
+	reconciler.instance = "u-test"
+	reconciler.terminate = func(instance string) error { ended = append(ended, instance); return nil }
+	newKey := func() string {
+		public, _, _ := ed25519.GenerateKey(rand.Reader)
+		key, _ := ssh.NewPublicKey(public)
+		return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
+	}
+	a, b := newKey(), newKey()
+	for _, step := range []struct {
+		keys []string
+		want int // total terminations so far
+	}{{[]string{a}, 0}, {[]string{a, b}, 0}, {[]string{a, b}, 0}, {[]string{b}, 1}, {nil, 2}} {
+		if _, err := reconciler.ReconcileAuthorizedKeys(context.Background(), step.keys); err != nil {
+			t.Fatal(err)
+		}
+		if len(ended) != step.want {
+			t.Fatalf("after %d keys ended=%v, want %d", len(step.keys), ended, step.want)
+		}
+	}
+	if ended[0] != "u-test" {
+		t.Fatalf("ended instance %q", ended[0])
+	}
+}
+
+func TestWindowsAuthorizedKeysRetriesAFailedSessionEnd(t *testing.T) {
+	reconciler, err := newWindowsAuthorizedKeys(filepath.Join(t.TempDir(), "ssh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempts, fail := 0, true
+	reconciler.instance = "u-test"
+	reconciler.terminate = func(string) error {
+		attempts++
+		if fail {
+			return os.ErrPermission
+		}
+		return nil
+	}
+	public, _, _ := ed25519.GenerateKey(rand.Reader)
+	key, _ := ssh.NewPublicKey(public)
+	line := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
+	for _, keys := range [][]string{{line}, nil} {
+		reconciler.ReconcileAuthorizedKeys(context.Background(), keys)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts after the revoke = %d", attempts)
+	}
+	fail = false
+	if _, err := reconciler.ReconcileAuthorizedKeys(context.Background(), nil); err != nil || attempts != 2 {
+		t.Fatalf("the unchanged refresh did not retry: attempts=%d err=%v", attempts, err)
+	}
+	reconciler.ReconcileAuthorizedKeys(context.Background(), nil)
+	if attempts != 2 {
+		t.Fatalf("a finished duty ran again: %d", attempts)
+	}
+}

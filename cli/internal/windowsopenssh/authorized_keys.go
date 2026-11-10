@@ -20,15 +20,22 @@ func ReconcileAuthorizedKeys(stateRoot string, publicKeys []string) (bool, error
 }
 
 func ReconcileAuthorizedKeysContext(ctx context.Context, stateRoot string, publicKeys []string) (bool, error) {
+	changed, _, err := ReconcileAuthorizedKeysRevoking(ctx, stateRoot, publicKeys)
+	return changed, err
+}
+
+// ReconcileAuthorizedKeysRevoking is ReconcileAuthorizedKeysContext that also reports whether a key left the file,
+// the one change after which open sessions must end (sshd checks keys only at login).
+func ReconcileAuthorizedKeysRevoking(ctx context.Context, stateRoot string, publicKeys []string) (changed, removed bool, err error) {
 	if ctx == nil || !filepath.IsAbs(stateRoot) || filepath.Clean(stateRoot) != stateRoot || len(publicKeys) > 256 {
-		return false, ErrInvalidConfig
+		return false, false, ErrInvalidConfig
 	}
 	if err := ctx.Err(); err != nil {
-		return false, err
+		return false, false, err
 	}
 	unlock, err := lockAuthorizedKeys(ctx, stateRoot)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	defer unlock()
 	lines := make([]string, 0, len(publicKeys))
@@ -36,7 +43,7 @@ func ReconcileAuthorizedKeysContext(ctx context.Context, stateRoot string, publi
 	for _, value := range publicKeys {
 		key, comment, options, rest, err := ssh.ParseAuthorizedKey([]byte(strings.TrimSpace(value)))
 		if err != nil || key == nil || key.Type() != ssh.KeyAlgoED25519 || len(options) != 0 || len(bytes.TrimSpace(rest)) != 0 || strings.ContainsAny(comment, "\x00\r\n") {
-			return false, ErrQualificationEnrollment
+			return false, false, ErrQualificationEnrollment
 		}
 		line := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
 		if seen[line] {
@@ -52,23 +59,33 @@ func ReconcileAuthorizedKeysContext(ctx context.Context, stateRoot string, publi
 	}
 	directory := filepath.Join(stateRoot, "authorized_keys")
 	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return false, err
+		return false, false, err
 	}
 	path := filepath.Join(directory, "paperboat")
 	existing, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return false, err
+		return false, false, err
 	}
 	if bytes.Equal(existing, body) {
-		return false, nil
+		return false, false, nil
 	}
 	if err := ctx.Err(); err != nil {
-		return false, err
+		return false, false, err
 	}
 	if err := atomicfile.Write(path, body, managedKeysFileOptions()); err != nil {
-		return false, err
+		return false, false, err
 	}
-	return true, nil
+	return true, keyLeft(existing, seen), nil
+}
+
+// keyLeft reports whether the old file held a key that the new set (normalized lines) does not.
+func keyLeft(existing []byte, kept map[string]bool) bool {
+	for _, line := range strings.Split(string(existing), "\n") {
+		if line = strings.TrimSpace(line); line != "" && !kept[line] {
+			return true
+		}
+	}
+	return false
 }
 
 // protectManagedKeys gives Paperboat's key file its fixed owner and DACL at
