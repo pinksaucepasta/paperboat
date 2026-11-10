@@ -4,10 +4,13 @@
 origin and probe are the two halves smoke.sh runs on two machines. With PB_SMOKE_WINDOWS_PB set the half runs for the
 Windows device from this controller: the origin stays here behind an ssh -R forward to the device's loopback, and the
 probe's client is pb.exe, a PowerShell socket and curl.exe on the device. `pair` runs both halves for the device as
-the client: the origin is started on the Unix machine --target with `pb exec` from the device.
+the client: the origin is started on the Unix machine --target with `pb exec` from the device. Its path-direct and
+path-relay checks (F9-05) send the same bytes to the private address while `pb ping` reports only direct samples, and
+only relayed ones with outgoing UDP blocked on the device (a firewall rule, removed on every exit path).
 """
 import argparse
 import base64
+import contextlib
 import errno
 import hashlib
 import http.server
@@ -265,6 +268,35 @@ def device_curl(arguments, wait=45, pause=1):
         time.sleep(pause)
 
 
+def ping_paths(binary, alias, expected):
+    """`pb ping` names the carrier of each sample: wait until every delivered one is direct, or none is."""
+    deadline = time.monotonic() + 120
+    while True:
+        samples = invoke(binary, 'ping', alias, '--json', timeout=90)['samples']
+        seen = {sample['path'] for sample in samples if not sample['lost']}
+        if seen and (seen == {'direct'} if expected == 'direct' else 'direct' not in seen):
+            return
+        assert time.monotonic() < deadline, 'ping paths %s, wanted only %s' % (sorted(seen), expected)
+        time.sleep(2)
+
+
+def address_exchange(binary, machine, phase):
+    address = ipaddress.ip_address(machine['assigned_ip'])
+    assert address in ipaddress.ip_network('127.100.0.0/16'), 'machine has no assigned private loopback address'
+    deadline = time.monotonic() + 45
+    while True:
+        try:
+            exchange((str(address), phase['port']), phase)
+            break
+        except OSError as error:
+            if error.errno not in (errno.ECONNREFUSED, errno.EADDRNOTAVAIL) or time.monotonic() >= deadline:
+                raise
+            time.sleep(.25)
+        except ExchangeMismatch as error:
+            path = failure_diagnostic(binary, ['exchange', str(address), str(phase['port'])], b'', b'', error)
+            raise RuntimeError('private address exchange failed; private diagnostics: ' + str(path)) from error
+
+
 def probe(args):
     phase = json.loads(args.phase)
     assert phase['state'] == 'private_access_required' and phase['check'] == args.check
@@ -296,20 +328,14 @@ def probe(args):
         machines = invoke(binary, 'machine', 'list', '--json')['machines']
         matches = [m for m in machines if m['id'] == phase['machine_id']]
         assert len(matches) == 1 and matches[0]['network_approved'], 'private target is not approved in inventory'
-        address = ipaddress.ip_address(matches[0]['assigned_ip'])
-        assert address in ipaddress.ip_network('127.100.0.0/16'), 'machine has no assigned private loopback address'
-        deadline = time.monotonic() + 45
-        while True:
-            try:
-                exchange((str(address), phase['port']), phase)
-                break
-            except OSError as error:
-                if error.errno not in (errno.ECONNREFUSED, errno.EADDRNOTAVAIL) or time.monotonic() >= deadline:
-                    raise
-                time.sleep(.25)
-            except ExchangeMismatch as error:
-                path = failure_diagnostic(binary, ['exchange', str(address), str(phase['port'])], b'', b'', error)
-                raise RuntimeError('private address exchange failed; private diagnostics: ' + str(path)) from error
+        if args.check.startswith('path-'):  # pair only: the UDP block is the Windows device's firewall rule
+            expected = args.check[5:]
+            with winhost.device().udp_blocked() if expected == 'relay' else contextlib.nullcontext():
+                ping_paths(binary, matches[0]['alias'], expected)
+                address_exchange(binary, matches[0], phase)
+                ping_paths(binary, matches[0]['alias'], expected)
+        else:
+            address_exchange(binary, matches[0], phase)
     assert registration() == before
     print(json.dumps({'check': args.check, 'target': phase['target'], 'status': 'PASS',
                       'exact_bytes': True, 'half_close': args.check != 'private-https',
@@ -345,8 +371,10 @@ def main():
     parser.add_argument('action', choices=['origin', 'probe', 'pair'])
     parser.add_argument('--target')
     parser.add_argument('--phase')
-    parser.add_argument('--check', choices=['access-machine', 'private-address', 'private-https'], required=True)
+    parser.add_argument('--check', choices=['access-machine', 'private-address', 'private-https', 'path-direct', 'path-relay'], required=True)
     args = parser.parse_args()
+    if args.check.startswith('path-') and args.action != 'pair':
+        parser.error('the path checks run with pair; on Unix pairs local_access.py checks them')
     {'origin': origin, 'probe': probe, 'pair': pair}[args.action](args)
 
 

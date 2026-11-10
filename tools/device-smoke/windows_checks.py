@@ -80,7 +80,7 @@ def checks(args):
         table['terminal-' + name] = (['terminal_lifecycle.py', args.peer, '--check', name], ['--peer'])
     table['status-bar'] = (['status_bar_lifecycle.py', args.peer], ['--peer'])
     table['terminal-matrix'] = (['terminal_matrix.py', args.peer], ['--peer'])  # about 25 min: pass --timeout 3600
-    for name in ('access-machine', 'private-address', 'private-https'):  # the device is the client; the origin runs on the peer
+    for name in ('access-machine', 'private-address', 'private-https', 'path-direct', 'path-relay'):  # the device is the client; the origin runs on the peer
         table[name] = (['private_access.py', 'pair', '--target', args.peer, '--check', name], ['--peer'])
     table['ssh-long'] = (['ssh_long.py', args.peer, '--seconds', os.environ.get('SMOKE_SSH_LONG_SECONDS', '')],
                          ['--peer', 'SMOKE_SSH_LONG_SECONDS'])
@@ -91,7 +91,8 @@ def checks(args):
     table['tunnel-public-protocols'] = (['tunnel_public_protocols.py'], [])
     table['preview-protocols'] = (['preview_protocols.py', 'victus'], [])
     table['tunnel-protocols'] = (['preview_protocols.py', 'victus', '--tunnel'], [])
-    for name in ('preview_survival', 'tunnel_survival', 'tunnel_failures', 'network_inventory'):
+    table['path-display'] = (['path_display.py', args.peer], ['--peer'])
+    for name in ('preview_survival', 'tunnel_survival', 'tunnel_failures', 'tunnel_transfer', 'network_inventory'):
         table[name.replace('_', '-')] = ([name + '.py'], [])
     for name in ('manage', 'inspect', 'access'):
         table['preview-' + name] = (['preview_%s.py' % name, 'victus'], [])

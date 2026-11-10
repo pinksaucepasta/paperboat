@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """F8-06: 16 MiB upload and download through a durable tunnel arrive byte-exact."""
+import contextlib
 import hashlib
 import http.server
 import sys
@@ -11,6 +12,7 @@ import urllib.request
 import uuid
 
 from install_lifecycle import registration
+from preview_lifecycle import exposed
 from tunnel_lifecycle import confirmed, run, wait
 
 SIZE = 16 << 20
@@ -56,8 +58,10 @@ def main():
     identifier = None
     server = QuietServer(('127.0.0.1', 0), Origin)
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    stack = contextlib.ExitStack()  # holds the ssh -R forward on Windows
     try:
-        created = run('tunnel', 'create', name, '--port', str(server.server_port), '--duration', '30m',
+        port = stack.enter_context(exposed(server.server_port))
+        created = run('tunnel', 'create', name, '--port', str(port), '--duration', '30m',
                       '--wait', '--timeout', '90s')
         identifier = created['tunnel']['id']
         endpoint = created['tunnel']['stable_endpoint']
@@ -75,6 +79,7 @@ def main():
             if identifier is not None:
                 confirmed('tunnel', 'delete', identifier)
         finally:
+            stack.close()
             server.shutdown()
             server.server_close()
     assert registration() == before

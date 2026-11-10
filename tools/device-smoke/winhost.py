@@ -115,6 +115,11 @@ SERVICE_PATHS = ("@(Get-CimInstance Win32_Service|Where-Object{$_.Name -like $re
 SERVICE = ("$s=Get-Service -Name $req.name\n"
            "if($req.action -ne 'start'){Stop-Service -InputObject $s -Force;$s.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(60))}\n"
            "if($req.action -ne 'stop'){Start-Service -InputObject $s;$s.WaitForStatus('Running',[TimeSpan]::FromSeconds(60))}")
+# Outgoing UDP except DNS is dropped while the rule exists (the iptables/pf rule of the Unix checks): pb falls back
+# to relays. TCP, and with it the controller's SSH, is untouched. A rule on a disabled firewall would do nothing.
+UDP_BLOCK = ("if($req.action -eq 'remove'){Remove-NetFirewallRule -DisplayName $req.name -ErrorAction SilentlyContinue;exit 0}\n"
+             "if(@(Get-NetFirewallProfile|Where-Object{-not $_.Enabled}).Count){throw 'Windows Firewall is off for a profile: a block rule would not be enforced'}\n"
+             "[void](New-NetFirewallRule -DisplayName $req.name -Direction Outbound -Action Block -Protocol UDP -RemotePort @('1-52','54-65535'))")
 LISTENING = ("try{$c=New-Object Net.Sockets.TcpClient('127.0.0.1',[int]$req.port);$c.Close();'yes'}catch{'no'}")
 ALIVE = "if(Get-Process -Id $req.pid -ErrorAction SilentlyContinue){'yes'}else{'no'}"
 WHICH = "(Get-Command $req.name -CommandType Application -ErrorAction SilentlyContinue|Select-Object -First 1).Source"
@@ -429,6 +434,16 @@ class WindowsDevice:
                 yield int(port_file.read_text().strip())
             finally:
                 self.stop(pid)
+
+    @contextlib.contextmanager
+    def udp_blocked(self):
+        """Outgoing UDP except DNS dropped on the device for the duration; removed on every exit path."""
+        name = 'PaperboatSmoke-udp-' + uuid.uuid4().hex[:12]
+        try:
+            self.ps('block outgoing UDP', UDP_BLOCK, action='add', name=name)
+            yield
+        finally:
+            self.ps('unblock outgoing UDP', UDP_BLOCK, action='remove', name=name)
 
     def listening(self, port):
         return self.ps('listening %s' % port, LISTENING, port=int(port))[1] == 'yes'

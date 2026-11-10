@@ -17,15 +17,22 @@ includes private_access AND the team setting allow_private_access is on. Phases,
   4 setting turned off                  -> the held flow ends; a new attempt is denied (turned off)
   5 setting on again, flow held, then the grant is revoked -> the flow ends; denied (permission)
 The setting and the sharing are restored at the end whatever happened.
+
+With PB_SMOKE_WINDOWS_PB set the shared machine --owner-alias is the Windows device (winhost.py): its origin runs
+here behind an ssh -R forward to the device's loopback, and --owner is any Unix machine signed in to the same account.
 """
 import argparse
 import base64
+import contextlib
 import json
 import shlex
 import subprocess
 import sys
 import time
 import uuid
+
+from preview_lifecycle import exposed
+import winhost
 
 ORIGIN = r'''
 import socketserver, threading, time, sys
@@ -246,10 +253,17 @@ def main():
 
     original = None
     script = encoded(ORIGIN)
-    detach = '' if ssh(owner, 'uname -s').stdout.strip() == 'Darwin' else 'setsid '  # macOS has no setsid
-    ssh(owner, f'({detach}nohup python3 -c {shlex.quote("import base64,sys;exec(base64.b64decode(%r).decode())" % script)} 1500 > {log}.out 2>&1 < /dev/null & echo $! > {log}.pid)')
+    local_origin, forward = None, contextlib.ExitStack()
+    if winhost.device():
+        local_origin = subprocess.Popen([sys.executable, '-c', ORIGIN, '1500'], stdout=subprocess.PIPE, text=True)
+    else:
+        detach = '' if ssh(owner, 'uname -s').stdout.strip() == 'Darwin' else 'setsid '  # macOS has no setsid
+        ssh(owner, f'({detach}nohup python3 -c {shlex.quote("import base64,sys;exec(base64.b64decode(%r).decode())" % script)} 1500 > {log}.out 2>&1 < /dev/null & echo $! > {log}.pid)')
     try:
-        port = str(json.loads(eventually('origin', lambda: ssh(owner, f'head -1 {log}.out').stdout.strip() or None, 30)))
+        if local_origin:
+            port = str(forward.enter_context(exposed(int(local_origin.stdout.readline()))))
+        else:
+            port = str(json.loads(eventually('origin', lambda: ssh(owner, f'head -1 {log}.out').stdout.strip() or None, 30)))
         original = json.loads(ssh(owner, exec_script(owner, SETTING, team, 'show')).stdout.strip().splitlines()[-1])['allow_private_access']
         pb_json(owner, 'team', 'machine', 'share', team, machine['id'], '--generation', generation())
 
@@ -290,7 +304,12 @@ def main():
                 pb(owner, 'team', 'machine', 'unshare', team, machine['id'], '--generation', generation())
             finally:
                 ssh(accessor, f'kill $(cat {log}.hold.pid) 2>/dev/null; rm -f {log}.hold {log}.hold.pid {log}.holder')
-                ssh(owner, f'kill $(cat {log}.pid) 2>/dev/null; rm -f {log}.out {log}.pid')
+                forward.close()
+                if local_origin:
+                    local_origin.kill()
+                    local_origin.wait()
+                else:
+                    ssh(owner, f'kill $(cat {log}.pid) 2>/dev/null; rm -f {log}.out {log}.pid')
     ok = (results.get('setting_off') and results.get('no_private_access') and results.get('allowed') and
           results.get('denied_after_setting_off') and results.get('denied_after_revoke') and
           results.get('flow_ended_after_setting_off_seconds', 999) <= 60 and
