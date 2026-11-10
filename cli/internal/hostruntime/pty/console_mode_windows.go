@@ -70,6 +70,7 @@ func (p *Process) inputIsProcessed(timeout time.Duration) (bool, error) {
 	startup.ProcThreadAttributeList = attributes.List()
 	var info windows.ProcessInformation
 	flags := uint32(windows.CREATE_UNICODE_ENVIRONMENT | windows.EXTENDED_STARTUPINFO_PRESENT)
+	// hidden: attached to the session's pseudoconsole through the attribute above, so it never gets a console window.
 	if err := windows.CreateProcess(nil, &commandLine[0], nil, nil, false, flags, nil, nil, &startup.StartupInfo, &info); err != nil {
 		return false, fmt.Errorf("start console mode query: %w", err)
 	}
