@@ -1,0 +1,29 @@
+# F19-10 windows evidence
+# Automated checks: team_business.stream_s3; Windows HTTPS assertions from team_business.stream_https.
+# Fresh-prefix fix: 2c6b8397e. Assertions and object metadata come from actual runs.
+# Build: dev-8a481a57e
+# S3 source sha256: 0e1485151ff5f940a55c8645715cbcd517d8724032348ebbac24fcb6684118a0
+
+PASS create a one-day API token for stream setup
+PASS publish the S3 store with pb tunnel
+PASS configure the S3 stream
+PASS the S3 test upload is accepted (SigV4 verified by the store)
+PASS events land as gzip NDJSON at the current prefix/team-<team>/YYYY/MM/DD/<first>-<last>.ndjson.gz
+PASS stop the S3 stream
+OBSERVED_PREFIX f19-45bc9d8a0c279ba9
+POSTVERIFY prefix=f19-45bc9d8a0c279ba9 key=f19-45bc9d8a0c279ba9/team-paperboat-smoke-8746b4df68b7/2026/11/10/316109-316109.ndjson.gz team.role_count=1 mtime=2026-11-10 13:31:42 now=2026-11-10T13:31:49Z build=dev-8a481a57e shape_ok=True
+
+# HTTPS assertions from the earlier full Windows run on the same dev-8a481a57e build.
+# Its stale-object S3 result is excluded and replaced by the fresh-prefix proof above.
+# HTTPS source sha256: cf085e6768cd9399df313275e8ebffdfd043302b2c808efc2243c9055feaf6fe
+PASS publish the receiver with pb tunnel
+PASS configure the HTTPS stream (signing secret returned once)
+PASS send a test event: signed, custom header, NDJSON
+PASS new events arrive signed, within 90 s
+PASS events arrive in order without gaps from the stream start
+PASS a refused batch shows the error and pending events
+PASS it is retried and delivered once the receiver is back
+PASS stop the HTTPS stream
+WINDOWS_FINISH_UTC 2026-11-10T13:32:02Z
+
+RESULT PASS

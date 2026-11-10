@@ -1,0 +1,16 @@
+# F19-10 linux evidence
+# Automated checks: team_business.stream_s3; Windows HTTPS assertions from team_business.stream_https.
+# Fresh-prefix fix: 2c6b8397e. Assertions and object metadata come from actual runs.
+# Build: dev-780664b94
+# S3 source sha256: 8be6c129601a5ed33ecf8da15e815a01969a7425db63ebe69786e87352a9dfd6
+
+PASS create a one-day API token for stream setup
+PASS publish the S3 store with pb tunnel
+PASS configure the S3 stream
+PASS the S3 test upload is accepted (SigV4 verified by the store)
+PASS events land as gzip NDJSON at the current prefix/team-<team>/YYYY/MM/DD/<first>-<last>.ndjson.gz
+PASS stop the S3 stream
+OBSERVED_PREFIX f19-9f8dd03b3accc285
+POSTVERIFY prefix=f19-9f8dd03b3accc285 key=f19-9f8dd03b3accc285/team-paperboat-smoke-8746b4df68b7/2026/11/10/1794317282-0.ndjson.gz team.role_count=1 mtime=2026-11-10 13:28:02 now=2026-11-10T13:28:56Z build=dev-780664b94 shape_ok=True
+
+RESULT PASS
