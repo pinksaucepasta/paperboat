@@ -33,6 +33,9 @@ func platformInstallCommand() *cobra.Command {
 			directory, _ := c.Flags().GetString("install-dir")
 			ctx, cancel := context.WithTimeout(c.Context(), suppliedInstallTimeout(runtime.GOOS))
 			defer cancel()
+			if err := windowsUninstallInFlight(); err != nil {
+				return err
+			}
 			installed, err := installSuppliedExecutable(ctx, executable, source, directory, selectedInstallServer(c))
 			if err != nil {
 				return err
