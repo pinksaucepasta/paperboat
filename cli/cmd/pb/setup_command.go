@@ -305,7 +305,12 @@ func setupCommand() *cobra.Command {
 				registration.AccountID = previousRegistration.AccountID
 				registration.SSHUser, registration.SSHPort = previousRegistration.SSHUser, previousRegistration.SSHPort
 				if runtime.GOOS == "windows" {
-					registered, _ := machine.CurrentSSH()
+					// SetupMachine's answer carries no SSH target (winpool-7: setup 409 three times): ask the server.
+					listed, getErr := client.GetUserMachine(command.Context(), machine.ID)
+					if getErr != nil {
+						return setupFailure(fmt.Errorf("read the registered SSH target: %w", getErr))
+					}
+					registered := registeredSSHTarget(listed, machine.InstallationGeneration)
 					keptUser, keptPort := keptWindowsSSHTarget(registered, sshUser, sshPortValue)
 					if keptUser != sshUser && !sameWindowsAccount(keptUser, sshUser) {
 						fmt.Fprintf(command.ErrOrStderr(), "Managed SSH stays registered for the account %s, not %s. Re-enroll this machine to change it.\n", keptUser, sshUser)
@@ -511,4 +516,13 @@ func sameWindowsAccount(registered, current string) bool {
 		current = current[i+1:]
 	}
 	return strings.EqualFold(registered, current)
+}
+
+// registeredSSHTarget is the SSH target the server holds for this installation generation, or none: a target of
+// another generation is replaced by the registration setup makes, a target of this one is kept.
+func registeredSSHTarget(machine api.UserMachine, generation int64) api.MachineSSH {
+	if machine.SSH != nil && generation >= 1 && machine.SSH.TargetGeneration == uint64(generation) {
+		return *machine.SSH
+	}
+	return api.MachineSSH{}
 }

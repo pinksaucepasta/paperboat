@@ -31,3 +31,16 @@ func TestSameWindowsAccountComparesTheBareNameOfTheDomainForm(t *testing.T) {
 		t.Fatal("another account was reported as the same")
 	}
 }
+
+func TestRegisteredSSHTargetIsTheServersTargetOfThisGenerationOnly(t *testing.T) {
+	listed := api.UserMachine{SSH: &api.MachineSSH{OSUser: "runneradmin", Port: 58965, TargetGeneration: 1}}
+	if got := registeredSSHTarget(listed, 1); got.OSUser != "runneradmin" || got.Port != 58965 {
+		t.Fatalf("the server's target of this generation was not used: %+v", got)
+	}
+	if got := registeredSSHTarget(listed, 2); got.OSUser != "" || got.Port != 0 {
+		t.Fatalf("a target of an older generation was kept: %+v", got)
+	}
+	if got := registeredSSHTarget(api.UserMachine{}, 1); got.OSUser != "" || got.Port != 0 {
+		t.Fatalf("a machine without a target gave one: %+v", got)
+	}
+}
