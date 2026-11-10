@@ -12,6 +12,11 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// queryHelperFlags: the helper runs 10-40 ms inside the session's console, which can receive a real Ctrl+C now that
+// session shells no longer inherit the host's ignore flag (ctrlc_windows.go). CREATE_NEW_PROCESS_GROUP makes the helper
+// ignore it, so a Ctrl+C typed meanwhile cannot kill it and read as a failed probe.
+const queryHelperFlags = uint32(windows.CREATE_UNICODE_ENVIRONMENT | windows.EXTENDED_STARTUPINFO_PRESENT | windows.CREATE_NEW_PROCESS_GROUP)
+
 // QueryConsoleModeArgs is the command line of the helper Interrupt starts inside the pseudoconsole (pb daemon
 // __query-console-mode, daemoncmd). Only a process attached to the console can open its CONIN$, and the mode it reads
 // is the one conhost itself uses to decide whether a 0x03 is a Ctrl-C signal or data (measured on Windows 11).
@@ -69,7 +74,7 @@ func (p *Process) inputIsProcessed(timeout time.Duration) (bool, error) {
 	startup.Flags = windows.STARTF_USESTDHANDLES
 	startup.ProcThreadAttributeList = attributes.List()
 	var info windows.ProcessInformation
-	flags := uint32(windows.CREATE_UNICODE_ENVIRONMENT | windows.EXTENDED_STARTUPINFO_PRESENT)
+	flags := queryHelperFlags
 	// hidden: attached to the session's pseudoconsole through the attribute above, so it never gets a console window.
 	if err := windows.CreateProcess(nil, &commandLine[0], nil, nil, false, flags, nil, nil, &startup.StartupInfo, &info); err != nil {
 		return false, fmt.Errorf("start console mode query: %w", err)

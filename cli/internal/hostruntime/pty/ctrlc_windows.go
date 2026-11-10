@@ -10,6 +10,9 @@ import (
 
 var setConsoleCtrlHandlerProc = windows.NewLazySystemDLL("kernel32.dll").NewProc("SetConsoleCtrlHandler")
 
+// Invariant: the host has no console and ignores Ctrl+C (its own process group); a session's shell must not inherit that,
+// so Adapter.Start clears the flag before CreateProcess, and short helpers started in the session's console opt back out.
+//
 // setIgnoreCtrlC sets (true) or clears (false) this process's "ignore Ctrl+C" flag, which child processes inherit.
 // SetConsoleCtrlHandler(NULL, FALSE) restores normal Ctrl+C handling; it works from a console-less service too.
 func setIgnoreCtrlC(ignore bool) error {
