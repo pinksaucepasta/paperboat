@@ -79,7 +79,11 @@ func prepareWindowsNativeInstall(ctx context.Context, ownerSID string, retire, o
 		if err := config.Source.Verify(layout.Binary); err == nil {
 			signed := config.Source.Distribution == installsource.Official
 			if signed {
-				policy := workerupdate.TUFSource{RepositoryURL: config.Artifact.RepositoryURL, StateRoot: filepath.Join(layout.UpdateStateRoot, "tuf")}
+				repository, err := recoveryRepository(config.Artifact.RepositoryURL, config.EnrollmentPending)
+				if err != nil {
+					return nil, nil, err
+				}
+				policy := workerupdate.TUFSource{RepositoryURL: repository, StateRoot: filepath.Join(layout.UpdateStateRoot, "tuf")}
 				if err := authorizeWindowsNativeRecovery(ctx, policy, config.Source, offline); err != nil {
 					return nil, nil, err
 				}
