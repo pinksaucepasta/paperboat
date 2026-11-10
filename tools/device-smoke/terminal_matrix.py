@@ -186,7 +186,9 @@ class Client(Terminal):
             found = re.findall(rb'PB_SIZE (\d+) (\d+)', self.run(windows_target.size_line()))
             return tuple(map(int, found[-1])) if found else None
         out = self.run('stty size')
-        found = re.findall(rb'(\d+) (\d+)\r?\n', out)
+        # ConPTY (a Windows client) repaints: the answer can end the output with a cursor move instead of a newline
+        out = re.sub(rb'\x1b\[[0-9;?]*[A-Za-z]', b'', out)
+        found = re.findall(rb'(?m)(\d+) (\d+)\r?$', out)
         return tuple(map(int, found[-1])) if found else None
 
 
