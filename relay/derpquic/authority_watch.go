@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+// errAuthorizeTransport marks a re-authentication that failed in the network, as opposed to one the relay refused
+// or a grant that could not be encoded.
+var errAuthorizeTransport = errors.New("re-authentication was not delivered")
+
 // The carrier has already authenticated. Refresh publishes policy changes; a
 // credential's TTL or a failed refresh cannot revoke its admitted lifetime.
 // Only a changed grant is sent: the relay verifies each one (Ed25519 and X.509
@@ -30,7 +34,15 @@ func watchCarrierAuthority(ctx context.Context, credential func(context.Context)
 		}
 		sent = token
 		if err := send(token); err != nil {
-			return admission.ErrRevoked
+			if errors.Is(err, errAuthorizeTransport) {
+				// The grant did not reach the relay: a network failure, not a refusal. Closing the connection
+				// with ErrAdmission here latched the whole carrier fatal until a restart, so the grant is
+				// sent again on the poll's own backoff and a dead connection ends by itself, redialled
+				// without a latch.
+				sent = ""
+				return err
+			}
+			return admission.ErrRevoked // a grant this client cannot even encode
 		}
 		return nil
 	})

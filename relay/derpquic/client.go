@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net/netip"
 	"sync"
 	"sync/atomic"
@@ -377,5 +378,8 @@ func (cc *clientConn) authorize(token string) error {
 	cc.writeMu.Lock()
 	defer cc.writeMu.Unlock()
 	cc.stream.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	return writeAuthRequest(cc.stream, parts, cc.namespace, cc.generationDisco)
+	if err := writeAuthRequest(cc.stream, parts, cc.namespace, cc.generationDisco); err != nil {
+		return fmt.Errorf("%w: %v", errAuthorizeTransport, err)
+	}
+	return nil
 }
