@@ -49,12 +49,13 @@ try{
   Start-ScheduledTask -TaskName $t
   for($i=0;$i -lt 90 -and -not (Test-Path -LiteralPath (Join-Path $d 'rc'));$i++){Start-Sleep 1}
   $rc=if(Test-Path -LiteralPath (Join-Path $d 'rc')){[int]((Get-Content -LiteralPath (Join-Path $d 'rc') -Raw).Trim())}else{-1}
-  $out=if(Test-Path -LiteralPath (Join-Path $d 'out')){[Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $d 'out')))}else{''}
+  $out=if(Test-Path -LiteralPath (Join-Path $d 'out')){$fs=[IO.File]::Open((Join-Path $d 'out'),'Open','Read','ReadWrite');try{$m=New-Object IO.MemoryStream;$fs.CopyTo($m);[Convert]::ToBase64String($m.ToArray())}finally{$fs.Dispose()}}else{''}
   $new=@(& $slots|Where-Object{$before -notcontains $_})
   ConvertTo-Json -Compress -InputObject @{rc=$rc;out=$out;new=$new}
 }finally{
   Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue
   Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction SilentlyContinue
+  Get-Process -IncludeUserName -ErrorAction SilentlyContinue|Where-Object{$_.UserName -like "*\$u"}|Stop-Process -Force -ErrorAction SilentlyContinue # a child that outlives pb keeps the profile loaded
   try{[LsaRights]::Revoke($sidBytes,'SeBatchLogonRight')}catch{}
   $sid=$account.SID.Value
   for($i=0;$i -lt 5;$i++){Get-CimInstance Win32_UserProfile -Filter "SID='$sid'" -ErrorAction SilentlyContinue|Remove-CimInstance -ErrorAction SilentlyContinue;if(-not (Get-CimInstance Win32_UserProfile -Filter "SID='$sid'" -ErrorAction SilentlyContinue)){break};Start-Sleep 3}
