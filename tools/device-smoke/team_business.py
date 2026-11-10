@@ -267,7 +267,7 @@ def machine_access(c, start):
     is refused exec on this machine and that is recorded as machine.access_denied with reason
     outside_token_scope and the token. Both are read back from the personal audit log. The peer's
     CLI session is replaced by the token and ends when it is revoked."""
-    d = c.pbj('machine', 'list')
+    d = c.pbj('machine', 'list', '--all')
     machines = d if isinstance(d, list) else (d.get('machines') or d.get('items') or []) if isinstance(d, dict) else []
     ids = {m.get('alias'): m['id'] for m in machines}
     me, peer = ids.get(c.a.alias), ids.get(c.a.peer_alias)
