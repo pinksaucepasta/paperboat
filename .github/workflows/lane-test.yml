@@ -196,6 +196,27 @@ jobs:
           set -o pipefail
           run=(); v=(); [ -z "$RUN" ] || { run=(-run "$RUN"); v=(--verbose); }
           ../tools/cli-root-tests.sh -json "${run[@]}" | python3 ../tools/gotest-json.py --save "$GOTEST_EVENTS/root.jsonl" "${v[@]}"
+      # The browser terminal drain check needs the machine side as a compiled test binary (built in cli, a separate
+      # module); it skipped in every step here before. terminal-drain.yml runs the same pair on its own trigger.
+      - name: browser terminal drain across updates (edge + machine)
+        if: matrix.module == 'tunnel' && !cancelled() && (inputs.run == '' || contains(inputs.run, 'Drain'))
+        env:
+          PAPERBOAT_DRAIN_MACHINE_TEST_BINARY: ${{ runner.temp }}/drain-machine.test
+        run: |
+          set -o pipefail
+          (cd ../cli && go test -c -o "$PAPERBOAT_DRAIN_MACHINE_TEST_BINARY" ./cmd/browserterminal-wasm)
+          go test -json -race -count=1 -timeout 10m -run '^TestBrowserTerminalDrainAcrossUpdates$' ./internal/runtime |
+            python3 ../tools/gotest-json.py --save "$GOTEST_EVENTS/drain.jsonl" --verbose
+      # The Docker tunnel handover test builds its serving and replacement images from any local /bin/sh image.
+      - name: docker tunnel handover (local fixture image)
+        if: matrix.module == 'helper' && !cancelled() && (inputs.run == '' || contains(inputs.run, 'DockerTunnelInstall'))
+        env:
+          PAPERBOAT_TEST_DOCKER_BASE_IMAGE: alpine:3.21
+        run: |
+          set -o pipefail
+          docker pull "$PAPERBOAT_TEST_DOCKER_BASE_IMAGE"
+          go test -json -race -count=1 -timeout 10m -run '^TestDockerTunnelInstallHandsOverWithoutStoppingTheServingContainer$' ./internal/containers |
+            python3 ../tools/gotest-json.py --save "$GOTEST_EVENTS/docker-handover.jsonl" --verbose
       - name: migration tests (each on its own empty database)
         if: matrix.module == 'server' && !cancelled()
         run: |

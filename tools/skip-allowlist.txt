@@ -5,3 +5,6 @@
 TestLiveTunnelEdgeProtocols\b	deploy check on a live published tunnel (S1-09: PAPERBOAT_LIVE_EDGE_URL, run per edge)
 server/internal/app TestE2E(Serve|Proxy)\b	e2e.yml End-to-end job (tools/e2e/run.sh: TestE2EServe every stage, TestE2EProxy in the multi stage; pull requests and r21-e2e* pushes)
 internal/hostruntime/preview TestPrivateTCPAccessOwnerHelper\b	child process: TestPrivateTCPAccessListenerClosesWhenItsOwnerProcessIsKilled re-execs the test binary to run it (go cli job)
+TestBrowserTerminalDrainMachine: .*run by tunnel/internal/runtime	lane-test.yml go tunnel drain step (child binary of TestBrowserTerminalDrainAcrossUpdates)
+TestActivationHelperTailChild: .*helper process only	lane-test.yml go cli root step (re-exec child of TestActivationHelperHoldsTheLockThroughTheActivationTail)
+TestEdgeHandoverHelperProcess: .*helper process for	lane-test.yml go tunnel (re-exec child of TestEdgeHandoverKeepsThePreviewAndTheHostCarrierUp)
