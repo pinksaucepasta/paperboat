@@ -24,6 +24,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	previewruntime "github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimeentry"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
@@ -78,6 +79,7 @@ func NewCommand() *cobra.Command {
 	root.AddCommand(localDaemonRuntimeCommand())
 	root.AddCommand(windowsSSHDServiceCommand())
 	root.AddCommand(windowsSSHGenerationCommand())
+	root.AddCommand(consoleModeQueryCommand())
 	root.AddCommand(privilegedHostServiceCommand())
 	root.AddCommand(configRuntimeCommand())
 	root.AddCommand(runDaemonCommand())
@@ -224,6 +226,23 @@ func windowsSSHDServiceCommand() *cobra.Command {
 	command.Flags().String("instance", "", "enrolled OS-user instance")
 	_ = command.MarkFlagRequired("instance")
 	return command
+}
+
+// consoleModeQueryCommand is started by pty.Process.Interrupt inside a session's pseudoconsole to read whether Ctrl-C
+// is a signal there; it reports through its exit code (pty.ExitInputProcessed / ExitInputRaw) and prints nothing.
+func consoleModeQueryCommand() *cobra.Command {
+	return &cobra.Command{Use: "__query-console-mode", Hidden: true, Args: commandArgs(cobra.NoArgs), SilenceUsage: true, SilenceErrors: true,
+		RunE: func(*cobra.Command, []string) error {
+			processed, err := pty.QueryConsoleInputProcessed()
+			if err != nil {
+				return err
+			}
+			if processed {
+				os.Exit(pty.ExitInputProcessed)
+			}
+			os.Exit(pty.ExitInputRaw)
+			return nil
+		}}
 }
 
 func localDaemonCommand() *cobra.Command {

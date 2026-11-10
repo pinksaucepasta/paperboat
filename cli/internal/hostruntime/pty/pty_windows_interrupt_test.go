@@ -7,9 +7,25 @@ import (
 	"errors"
 	"io"
 	"os"
+	"slices"
 	"testing"
 	"time"
 )
+
+// Interrupt starts os.Executable() inside the pseudoconsole as `pb daemon __query-console-mode`; here that is the test binary.
+func TestMain(m *testing.M) {
+	if slices.Equal(os.Args[1:], QueryConsoleModeArgs) {
+		processed, err := QueryConsoleInputProcessed()
+		switch {
+		case err != nil:
+			os.Exit(1)
+		case processed:
+			os.Exit(ExitInputProcessed)
+		}
+		os.Exit(ExitInputRaw)
+	}
+	os.Exit(m.Run())
+}
 
 // Process over a plain pipe: nothing reads r, so a large write blocks like a paste into a program that never reads.
 func pipeProcess(t *testing.T) (*Process, *os.File) {

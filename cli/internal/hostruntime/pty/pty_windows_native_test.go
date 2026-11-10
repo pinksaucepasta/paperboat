@@ -499,3 +499,21 @@ func TestNativeConPTYTerminateRetainsCleanupFailureAndRecovers(t *testing.T) {
 		t.Fatal("fresh healthy cleanup did not recover")
 	}
 }
+
+// F3-11 finding 5: a program that cleared ENABLE_PROCESSED_INPUT gets 0x03 as data, as on unix without ISIG: Interrupt
+// reports false (nothing cut or discarded), and the byte the caller then writes arrives as the key.
+func TestNativeConPTYInterruptInRawModeIsData(t *testing.T) {
+	script := "[Console]::TreatControlCAsInput=$true; Write-Output 'raw-ready'; $k=[Console]::ReadKey($true); Write-Output ('KEY:'+[int]$k.KeyChar)"
+	process, output := startNativePTY(t, nativePowerShell(t), []string{"-NoProfile", "-NonInteractive", "-Command", script})
+	defer process.CloseIO()
+	output.waitFor(t, "raw-ready")
+	time.Sleep(500 * time.Millisecond) // the program is in ReadKey with the mode cleared
+	handled, err := process.Interrupt(0x03, nil)
+	if err != nil || handled {
+		t.Fatalf("Interrupt in raw mode = %v, %v; want false (the byte is data)", handled, err)
+	}
+	if _, err := process.Write([]byte{0x03}); err != nil {
+		t.Fatal(err)
+	}
+	output.waitFor(t, "KEY:3")
+}

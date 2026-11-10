@@ -259,6 +259,14 @@ func (p *Process) Interrupt(key byte, accepted func()) (bool, error) {
 	if key != 0x03 {
 		return false, nil
 	}
+	// Like the unix twin (ISIG + VINTR): a program that put the console in raw mode (ENABLE_PROCESSED_INPUT clear: a
+	// vim-like editor, PSReadLine mid-edit) gets 0x03 as data, so nothing is cut or discarded and the caller writes it
+	// normally. Unknown (no console, helper failed or timed out) keeps the key an interrupt, as before.
+	if p.console != 0 {
+		if processed, err := p.inputIsProcessed(time.Second); err == nil && !processed {
+			return false, nil
+		}
+	}
 	if accepted != nil {
 		accepted()
 	}
