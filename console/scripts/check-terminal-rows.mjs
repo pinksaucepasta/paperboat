@@ -140,7 +140,13 @@ async function w15() {
 const screenText = (p) => p.evaluate(() => document.querySelector(".terminal-host")?.innerText ?? "")
 const sttyCols = async (p) => {
   const m = marker("size")
-  await type(p, `printf '${m}%s\\n' "$(stty size)"`)
+  // `stty size` prints "rows cols"; PowerShell has no stty, so it prints the same shape from its window size.
+  await type(
+    p,
+    process.env.MACHINE_SHELL === "powershell"
+      ? `$w=$Host.UI.RawUI.WindowSize; "${m}$($w.Height) $($w.Width)"`
+      : `printf '${m}%s\\n' "$(stty size)"`,
+  )
   const answer = new RegExp(`${m}(\\d+)[ \\u00a0](\\d+)`, "g")
   // The typed command contains the marker too: wait for the answer itself.
   for (let i = 0; i < 50; i++) {
