@@ -1,0 +1,2 @@
+doctor gate: tolerated the busy-port warning (the Windows HTTP service, HTTP.sys PID 4, owns port 80/443 on this runner: browser URLs are off by the host, not by Paperboat)
+{"check": "uninstall-pair", "status": "PASS", "seconds": 164.2, "mode": "flags", "pair_fault": "none", "zero_leftovers": true, "inbox_preserved": true, "alias_preserved": true, "no_env_assigned": true, "env_pending_explained": false}
