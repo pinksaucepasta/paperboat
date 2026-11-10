@@ -14,7 +14,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 	"unicode/utf16"
 
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
@@ -171,33 +170,20 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 			candidateTaskCreated = true
 		}
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		probeCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	if err := waitGuardReady(ctx, guardReadyTimeout, func(probeCtx context.Context) error {
 		client, connectErr := Connect(probeCtx, DefaultSocket)
-		if connectErr == nil {
-			readyErr := client.ReplaceNames(probeCtx, nil)
-			closeErr := client.Close()
-			cancel()
-			if readyErr == nil {
-				if closeErr != nil {
-					return closeErr
-				}
-				return trustErr
-			}
-			connectErr = readyErr
-		} else {
-			cancel()
+		if connectErr != nil {
+			return connectErr
 		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("machine guard did not become ready: %w", connectErr)
+		readyErr := client.ReplaceNames(probeCtx, nil)
+		if closeErr := client.Close(); readyErr == nil {
+			return closeErr
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(100 * time.Millisecond):
-		}
+		return readyErr
+	}); err != nil {
+		return err
 	}
+	return trustErr
 }
 
 func ownedScheduledTask(ctx context.Context, installed string) (bool, error) {
