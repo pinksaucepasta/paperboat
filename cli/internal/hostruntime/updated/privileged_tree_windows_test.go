@@ -4,6 +4,7 @@ package updated
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,7 +17,7 @@ import (
 // Clean Windows Sandbox, official build: `pb update check` failed with "release deferral is unavailable: release
 // eligibility directory could not be inspected". The elevated installer had created the updater's state directory
 // (owner Administrators) before the service first ran; the service fixed its ACL but not its owner, and the
-// eligibility store accepts only a directory LocalSystem owns. Needs an administrator, as the service is.
+// eligibility store accepts only a directory LocalSystem owns.
 func TestUpdaterStateIsOwnedByLocalSystemWhoeverCreatedIt(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "updated") // created by this test's account, as the installer creates it
 	if err := os.MkdirAll(filepath.Join(root, "tuf", "index"), 0o700); err != nil {
@@ -25,7 +26,11 @@ func TestUpdaterStateIsOwnedByLocalSystemWhoeverCreatedIt(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "tuf", "index", "root.json"), []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := secureWindowsPrivilegedTree(root); err != nil {
+	if err := secureWindowsPrivilegedTree(root); errors.Is(err, windows.ERROR_INVALID_OWNER) {
+		// The service is LocalSystem and may always name itself owner. An administrator may only where its restore
+		// privilege is honoured for this call (victus over SSH: yes; a hosted CI runner: no).
+		t.Skipf("this account may not make LocalSystem the owner; run as LocalSystem: %v", err)
+	} else if err != nil {
 		t.Fatal(err)
 	}
 	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
