@@ -47,7 +47,7 @@ while [ -z "$okp" ] || [ -z "$okpl" ]; do
   [ -n "$okp" ] || { perr=$(timeout 20 $PB $PBW ssh $A -- echo ok </dev/null 2>&1 | tr -d '\r' | tr '\n' ' '); grep -qE '(^| )ok $' <<<"$perr" && okp=$(date +%s.%N); }
   [ "$(python3 -c "import time;print(int(time.time()-$t0>40))")" = 0 ] || break; sleep 1
 done
-block=$(grep -c "^Host $N\$" ~/.ssh/paperboat_config); kh=$(grep -c "^$N " /run/user/$(id -u)/paperboat/ssh_known_hosts 2>/dev/null)
+block=$(grep -c "^Host $N\$" ~/.ssh/paperboat_config); kh=$(awk -v n="$N" '$1==n || index($1,"["n"]:")==1' /run/user/$(id -u)/paperboat/ssh_known_hosts 2>/dev/null | wc -l)
 echo "RESULT access plain_s=$([ -n "$okpl" ] && python3 -c "print(round($okpl-$t0,1))" || echo none) pb_s=$([ -n "$okp" ] && python3 -c "print(round($okp-$t0,1))" || echo none) config_block=$block known_hosts_lines=$kh last_plain=[$([ -n "$okpl" ] || cut -c1-200 <<<"$lerr")] last_pb=[$([ -n "$okp" ] || cut -c1-200 <<<"$perr")]"'''
 
 HOLD = PROLOGUE + r'''perr=$($PB $PBW ssh $A -- 'exit 0' </dev/null 2>&1 >/dev/null | tr '\n' ' '); lerr=$(ssh $H 'exit 0' </dev/null 2>&1 >/dev/null | tr '\n' ' ')
@@ -131,7 +131,7 @@ def main():
         owner('$PB team machine share "$TEAM" %s --generation $(gen) --json >/dev/null' % shlex.quote(tid))
         owner('$PB team machine grant "$TEAM" %s --generation $(gen) --member %s --capability managed_ssh --capability exec --json >/dev/null' % (shlex.quote(tid), shlex.quote(bid)))
         access = ' '.join(l for l in member(ACCESS, 120)[1].splitlines() if l.startswith('RESULT access'))
-        paths = member('timeout 30 ~/.local/bin/pb status --json 2>&1 | python3 -c "import sys,json;d=json.load(sys.stdin);d=d.get(\'data\',d);print([(m.get(\'alias\'),m.get(\'selected_path\')) for m in d.get(\'machines\',[]) if m.get(\'selected_path\') not in (None,\'none\')])" 2>&1 | tail -1 | cut -c1-300')[1].strip()
+        paths = member('timeout 30 ~/.local/bin/pb --workspace @@TEAM@@ status --json 2>&1 | python3 -c "import sys,json;d=json.load(sys.stdin);d=d.get(\'data\',d);print([(m.get(\'alias\'),m.get(\'selected_path\')) for m in d.get(\'machines\',[]) if m.get(\'selected_path\') not in (None,\'none\')])" 2>&1 | tail -1 | cut -c1-300'.replace('@@TEAM@@', shlex.quote(TEAM)))[1].strip()
         p, q = re.search(r'plain_s=(\S+)', access), re.search(r'pb_s=(\S+)', access)
         if not (p and q and 'none' not in (p[1], q[1]) and float(p[1]) <= GATE_MAX and float(q[1]) <= GATE_MAX and 'config_block=1' in access
                 and not re.search(r'known_hosts_lines=0\b', access)):

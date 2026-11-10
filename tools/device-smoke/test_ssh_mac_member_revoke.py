@@ -84,6 +84,11 @@ class WindowsTargetScripts(unittest.TestCase):
                                capture_output=True, text=True)
         self.assertEqual(['w6-win5-x.example.test', 'matched'], probe.stdout.split())
         self.assertIn('N=$(tr A-Z a-z <<<"$A.$D")', r.ACCESS)
+        # the Windows sshd listens on its own port: known_hosts names it '[host]:port', the Mac's names 'host'
+        counted = subprocess.run(['bash', '-c', 'N=w6-x.ppr.boats; printf "[w6-x.ppr.boats]:44249 ssh-ed25519 K\\nw6-x.ppr.boats ssh-ed25519 K\\n'
+                                  'other.ppr.boats ssh-ed25519 K\\n[w6-x.ppr.boats.evil]:1 ssh-ed25519 K\\n" | '
+                                  + r.ACCESS.split('kh=$(')[1].split(' /run/user')[0] + ' | wc -l'], capture_output=True, text=True)
+        self.assertEqual('2', counted.stdout.strip())
         self.assertIn("tr -d '\\r'", r.ACCESS)
 
 
