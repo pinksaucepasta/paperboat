@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf16"
 
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
@@ -147,6 +148,7 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 	if err != nil {
 		return err
 	}
+	warmGuardImage(installed)
 	if err = protectedDirectory(directory, 0755); err != nil {
 		return err
 	}
@@ -181,8 +183,10 @@ func installGuard(ctx context.Context, executable, browserDomain string, undo **
 		}
 		return readyErr
 	}, func(restartCtx context.Context) error {
-		// Not running (it already exited) is fine for /End; the /Run must work.
+		// Not running (it already exited) is fine for /End; wait until the task has left Running so /Run starts a
+		// new process instead of being ignored (IgnoreNew), then /Run must work.
 		_ = exec.CommandContext(restartCtx, "schtasks.exe", "/End", "/TN", windowsGuardTask).Run()
+		waitGuardTaskStopped(restartCtx)
 		if output, err := exec.CommandContext(restartCtx, "schtasks.exe", "/Run", "/TN", windowsGuardTask).CombinedOutput(); err != nil {
 			return fmt.Errorf("%w: %s", err, bytes.TrimSpace(output))
 		}
@@ -270,6 +274,30 @@ func taskXML(executable string) string {
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
 <Triggers><BootTrigger><Enabled>true</Enabled></BootTrigger></Triggers>
 <Principals><Principal id="System"><UserId>S-1-5-18</UserId><RunLevel>HighestAvailable</RunLevel></Principal></Principals>
-<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><StartWhenAvailable>true</StartWhenAvailable><RestartOnFailure><Interval>PT1M</Interval><Count>999</Count></RestartOnFailure><ExecutionTimeLimit>PT0S</ExecutionTimeLimit></Settings>
+<Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><StartWhenAvailable>true</StartWhenAvailable><RestartOnFailure><Interval>PT1M</Interval><Count>999</Count></RestartOnFailure><ExecutionTimeLimit>PT0S</ExecutionTimeLimit><Priority>5</Priority></Settings>
 <Actions Context="System"><Exec><Command>` + escaped.String() + `</Command><Arguments>daemon machine-guard run</Arguments></Exec></Actions></Task>`
+}
+
+// waitGuardTaskStopped waits up to 10 s for the guard task to leave the Running state after /End.
+func waitGuardTaskStopped(ctx context.Context) {
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) && ctx.Err() == nil {
+		output, err := exec.CommandContext(ctx, "schtasks.exe", "/Query", "/TN", windowsGuardTask, "/FO", "LIST").CombinedOutput()
+		if err == nil && !bytes.Contains(output, []byte("Running")) {
+			return
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+// warmGuardImage reads the installed guard image once so it is in the page cache when the task starts it: on a
+// machine whose cores are all busy the cold loader's page faults, not the guard's own work, took over a minute
+// (winpool-6, spark/guard-blocked-diag.md). Best effort: a failed read changes nothing but the start-up time.
+func warmGuardImage(path string) {
+	file, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	_, _ = io.Copy(io.Discard, file)
 }

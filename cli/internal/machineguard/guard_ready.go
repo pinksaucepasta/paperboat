@@ -15,10 +15,13 @@ import (
 // the first start of the guard can get no CPU at all (winpool-6, one spinner per core: 5 of 5 fresh installs, the
 // process existed for 56 s at 0 CPU and the pipe never appeared, then 'open \\.\pipe\PaperboatMachineGuard: The
 // system cannot find the file specified' and a rollback that failed on the guard's image), while a restart under the same
-// load answered in 2 s. An unloaded install needs about 13 s before the guard even starts, hence 20 s per attempt.
+// load answered in 2 s once its image was warm. The cause (spark/guard-blocked-diag.md): the BelowNormal cold loader
+// crawls through page faults of the 99 MB image, and a 20 s attempt with an /End killed each start before it finished.
+// So the task runs at Normal priority, the image is read once before it is registered (warmGuardImage), and one
+// attempt gets a minute; a second attempt follows only when the first still shows no pipe.
 var (
-	guardAttemptTimeout = 20 * time.Second
-	guardStartAttempts  = 3
+	guardAttemptTimeout = time.Minute
+	guardStartAttempts  = 2
 )
 
 // startGuardWithRetry waits for the guard and restarts it between attempts; the last failure is returned.

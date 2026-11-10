@@ -37,7 +37,7 @@ func TestWaitGuardReadyOutlastsALateStartAndNamesATimeout(t *testing.T) {
 func TestStartGuardWithRetryRestartsAStarvedStart(t *testing.T) {
 	previous, previousAttempts := guardAttemptTimeout, guardStartAttempts
 	t.Cleanup(func() { guardAttemptTimeout, guardStartAttempts = previous, previousAttempts })
-	guardAttemptTimeout, guardStartAttempts = 150*time.Millisecond, 3
+	guardAttemptTimeout, guardStartAttempts = 150*time.Millisecond, 3  // the test's own budget; production values are asserted below
 	restarts := 0
 	probe := func(context.Context) error {
 		if restarts == 0 {
@@ -59,7 +59,7 @@ func TestStartGuardWithRetryRestartsAStarvedStart(t *testing.T) {
 	if err := startGuardWithRetry(context.Background(), never, failing); err == nil || !strings.Contains(err.Error(), "schtasks refused") || !strings.Contains(err.Error(), "pipe not found") {
 		t.Fatalf("a failed restart hid a cause: %v", err)
 	}
-	if previousAttempts*int(previous/time.Second) < 60 {
+	if previous < 45*time.Second || previousAttempts < 2 { // one cold start under load needs a long uninterrupted attempt
 		t.Fatalf("the total guard start budget fell under a minute: %d x %v", previousAttempts, previous)
 	}
 }
