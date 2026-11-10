@@ -2,7 +2,7 @@
 // drives visible, so this talks raw CDP to a Chromium it starts itself (headful under xvfb-run, with a
 // window manager running: `xvfb-run -a sh -c 'openbox & sleep 1; node check-terminal-hidden.mjs'`).
 //   STATE=<storage state> CHROME=<Chromium> CONSOLE_ORIGIN=<console origin> MACHINE=<machine id>
-//   [HIDDEN_MS=<time hidden, default 125000>] node check-terminal-hidden.mjs
+//   [HIDDEN_MS=<time hidden, default 125000>] [MACHINE_SHELL=powershell] node check-terminal-hidden.mjs
 // Rows: the tab is hidden (visibilityState), output far above the worker's window made meanwhile is on
 // screen within 2 s of return, 200 tab switches, and data-terminal-reconnects/-replays never move.
 // FREEZE=<command> THAW=<command> adds the dead-path row: the machine stops answering without closing anything
@@ -83,8 +83,12 @@ try {
   }, 250)
   console.log("flood typed at", stamp())
   const flooded = marker("hidden")
-  const ticker = ticks ? `; for i in $(seq 1 ${ticks}); do echo WH$i; sleep ${tickSeconds}; done` : ""
-  await typeLine(page, `sleep 5; yes 0123456789 | head -c 4000000 | tr -d '\\n'; echo; echo ${flooded}${ticker}`)
+  // MACHINE_SHELL=powershell (a Windows machine): the same flood and ticker without the Unix tools.
+  const powershell = process.env.MACHINE_SHELL === "powershell"
+  const loop = powershell ? `; 1..${ticks} | % { echo "WH$_"; sleep ${tickSeconds} }` : `; for i in $(seq 1 ${ticks}); do echo WH$i; sleep ${tickSeconds}; done`
+  const ticker = ticks ? loop : ""
+  const line = powershell ? "[Console]::Out.Write('0123456789'*400000); echo ''" : "yes 0123456789 | head -c 4000000 | tr -d '\\n'; echo"
+  await typeLine(page, `sleep 5; ${line}; echo ${flooded}${ticker}`)
   const other = (await send("Target.createTarget", { url: "about:blank" })).targetId
   await sleep(1500)
   log((await evaluate(page, "document.visibilityState")) === "hidden", "the terminal tab is hidden", await evaluate(page, "document.visibilityState"))

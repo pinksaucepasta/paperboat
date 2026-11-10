@@ -1,7 +1,7 @@
 // Headless checks for the browser terminal rows F3-13 (hidden tab), F3-14 (two windows) and F3-19
 // (truthful errors) on a Linux machine. Run with playwright-core installed:
 //   STATE=<storage state> CHROME=<Chromium> CONSOLE_ORIGIN=<console origin> MACHINE=<machine id>
-//   ROW=<f307|f308|f313|f314|f319|w15>  (f308 also needs MEMBER_STATE and MEMBER_EMAIL: a second console account) [CHROME_ARG=<one extra Chromium flag>] [HIDDEN_MS=<frozen time, default 125000>] node check-terminal-rows.mjs
+//   ROW=<f307|f308|f313|f314|f319|w15> [MACHINE_SHELL=powershell]  (f308 also needs MEMBER_STATE and MEMBER_EMAIL: a second console account) [CHROME_ARG=<one extra Chromium flag>] [HIDDEN_MS=<frozen time, default 125000>] node check-terminal-rows.mjs
 // A row passes only when data-terminal-phase is "attached" and an echoed marker shows on screen.
 // Screenshots: /tmp/terminal-rows-<row>-*.png. The terminal it opens is closed at the end.
 import { chromium } from "playwright-core"
@@ -57,7 +57,11 @@ async function live(p, name) {
   return echoed
 }
 
-const flood = (m) => `yes 0123456789 | head -c 4000000 | tr -d '\\n'; echo; echo ${m}`
+// MACHINE_SHELL=powershell (a Windows machine): the same 4 MB line without the Unix tools.
+const flood = (m) =>
+  process.env.MACHINE_SHELL === "powershell"
+    ? `[Console]::Out.Write('0123456789'*400000); echo ''; echo ${m}`
+    : `yes 0123456789 | head -c 4000000 | tr -d '\\n'; echo; echo ${m}`
 const stamp = () => new Date().toISOString().slice(11, 19) + "Z"
 
 // 200 tab and window switches cost no reconnect and no replay; only a real freeze (Page Lifecycle) may

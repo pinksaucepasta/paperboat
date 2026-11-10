@@ -80,8 +80,9 @@
 
   // Tunnel page.
   row.click()
-  const opened = await until(() => (text().includes("Danger zone") ? text() : null))
-  pass("tunnel page opens", Boolean(opened) && opened.startsWith(name))
+  // The page draws its sections before its heading has the tunnel's name: wait for both.
+  const opened = await until(() => (text().includes("Danger zone") && text().startsWith(name) ? text() : null))
+  pass("tunnel page opens", Boolean(opened))
   const healthy = await until(() => /Healthy/.test(text()), 30000)
   pass("status is Healthy", Boolean(healthy))
   pass(

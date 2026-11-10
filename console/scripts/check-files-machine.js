@@ -1,8 +1,8 @@
 // Browser check for Files, one machine at a time. Run in a signed-in tab (e.g. a headless
 // Chromium). window.__online: an online machine id whose Inbox holds window.__file (sent with
 // `pb send --to <machine>`); window.__offline: an offline machine id. Checks: /files without a
-// machine asks to choose one and offers no "All machines"; ?machine=<online> lists the file (read
-// from GET /v1/machines/{id}/inbox); ?machine=<offline> says "machine offline, Inbox unavailable"
+// machine lists the machines to choose from; ?machine=<online> lists the file (read
+// from GET /v1/machines/{id}/inbox); ?machine=<offline> says "<name> is offline"
 // and lists nothing; no request goes to /v1/inbox. Prints the steps.
 // With window.__content (the file's exact text) the file's download link must return exactly that; with window.__delete
 // the file is then removed through its row menu and its confirm dialog, and must be gone from the list and the machine's
@@ -33,13 +33,13 @@
   }
   try {
     window.next.router.push("/files")
-    pass("without a machine it asks to choose one", Boolean(await until(() => /Choose a machine/.test(text()))))
+    pass("without a machine it lists the machines to choose from", Boolean(await until(() => main().querySelector(`a[href*="machine=${online}"]`))))
     window.next.router.push(`/files?machine=${online}`)
     const row = await until(() => [...main().querySelectorAll("tbody tr")].find((tr) => tr.innerText.includes(name)))
     pass("an online machine's Inbox lists its file", Boolean(row), row?.innerText.replace(/\s+/g, " ").slice(0, 100))
     pass("it is read from that machine's Inbox", asked.some((path) => path === `/api/v1/machines/${online}/inbox`))
     window.next.router.push(`/files?machine=${offline}`)
-    const off = await until(() => /machine offline, Inbox unavailable/.test(text()))
+    const off = await until(() => main().querySelector("[data-inbox-offline]") && / is offline/.test(text()))
     pass("an offline machine says so and lists nothing", Boolean(off) && !main().querySelector("tbody tr"), text().slice(0, 120))
     pass("no workspace-wide Inbox request", !asked.includes("/api/v1/inbox"))
     if (window.__content) {
