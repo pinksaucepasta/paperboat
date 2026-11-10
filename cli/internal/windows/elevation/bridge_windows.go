@@ -39,6 +39,7 @@ const (
 var (
 	shell32                        = windows.NewLazySystemDLL("shell32.dll")
 	procShellExecuteExW            = shell32.NewProc("ShellExecuteExW")
+	procIsProcessInJob             = windows.NewLazySystemDLL("kernel32.dll").NewProc("IsProcessInJob")
 	shellExecuteExForRun           = shellExecuteEx
 	isCurrentProcessElevatedForRun = IsCurrentProcessElevated
 	waitForProcess                 = waitForProcessExit
@@ -1451,11 +1452,7 @@ func createProcessForRun(executable, parameters, directory string) (windows.Hand
 	flags := createProcessFlagsForRun()
 	// hidden: flags above set CREATE_NO_WINDOW and STARTF_USESHOWWINDOW/SW_HIDE.
 	if err := windows.CreateProcess(nil, commandLine, nil, nil, false, flags, nil, workingDirectory, &startup, &process); err != nil {
-		if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
-			// Access denied on a launch that asks to leave the caller's job: that job forbids breakaway.
-			return 0, fmt.Errorf("%w: %v", ErrElevationRestrictedJob, err)
-		}
-		return 0, err
+		return 0, launchDeniedError(err, currentProcessInJob)
 	}
 	_ = windows.CloseHandle(process.Thread)
 	return process.Process, nil
@@ -1606,3 +1603,18 @@ func sanitizeMessage(value string, limit int) string {
 // Keep the package's test seams scoped to Windows. They are reset by tests and
 // are deliberately not exposed to production callers.
 var bridgeTestMutex sync.Mutex
+
+// launchDeniedError labels an access-denied launch that asked to leave the caller's job as a restricted job, but
+// only when this process is in a job; otherwise the denial has another cause (an ACL, AppLocker) and stays as is.
+func launchDeniedError(err error, inJob func() bool) error {
+	if errors.Is(err, windows.ERROR_ACCESS_DENIED) && inJob() {
+		return fmt.Errorf("%w: %v", ErrElevationRestrictedJob, err)
+	}
+	return err
+}
+
+func currentProcessInJob() bool {
+	var in int32
+	status, _, _ := procIsProcessInJob.Call(uintptr(windows.CurrentProcess()), 0, uintptr(unsafe.Pointer(&in)))
+	return status != 0 && in != 0
+}

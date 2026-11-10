@@ -636,3 +636,17 @@ func TestClassifyLaunchErrorSeparatesARestrictedJobFromARefusedPrompt(t *testing
 		t.Fatal("a plain access-denied launch (ShellExecute, no job) stopped being a refusal")
 	}
 }
+
+func TestLaunchDeniedErrorNamesAJobOnlyWhenTheProcessIsInOne(t *testing.T) {
+	denied := windows.ERROR_ACCESS_DENIED
+	if err := launchDeniedError(denied, func() bool { return true }); !errors.Is(err, ErrElevationRestrictedJob) {
+		t.Fatalf("access denied inside a job = %v, want ErrElevationRestrictedJob", err)
+	}
+	if err := launchDeniedError(denied, func() bool { return false }); errors.Is(err, ErrElevationRestrictedJob) || !errors.Is(classifyLaunchError(err), ErrElevationDenied) {
+		t.Fatalf("access denied outside a job = %v, want the generic denial", err)
+	}
+	other := windows.ERROR_FILE_NOT_FOUND
+	if err := launchDeniedError(other, func() bool { return true }); !errors.Is(err, other) || errors.Is(err, ErrElevationRestrictedJob) {
+		t.Fatalf("another launch error = %v, want it unchanged", err)
+	}
+}

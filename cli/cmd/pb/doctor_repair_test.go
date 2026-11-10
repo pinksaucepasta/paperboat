@@ -48,8 +48,9 @@ func TestDoctorRepairOnAPairedComputerRepairsOnceThenPrintsTheReport(t *testing.
 // administrator prompt or the repair itself) and never the private cause.
 func TestDoctorRepairFailureNamesTheStepAndNoReportFollows(t *testing.T) {
 	for step, cause := range map[string]error{
-		"administrator approval was not given": fmt.Errorf("%w: private detail", elevation.ErrElevationDenied),
-		"the repair did not finish":            errors.New("private detail"),
+		"administrator approval was not given":       fmt.Errorf("%w: private detail", elevation.ErrElevationDenied),
+		"the repair did not finish":                  errors.New("private detail"),
+		"this terminal runs inside a restricted job": fmt.Errorf("%w: private detail", elevation.ErrElevationRestrictedJob),
 	} {
 		withDoctorRepair(t, true, func(context.Context) error { return cause })
 		code, stdout, stderr := doctorWithoutADaemon(t, "windows", "doctor", "--repair")

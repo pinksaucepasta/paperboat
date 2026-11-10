@@ -449,11 +449,7 @@ func verifyWindowsTerminalNativeState(ctx context.Context, config WindowsConfig,
 	live := config
 	live.Binary, live.TokenFile, live.RuntimeStateRoot = layout.Binary, installed.TokenFile, installed.StateRoot
 	live.ActiveVersion, live.Source, live.Pending = installed.Source.Version, installed.Source, false
-	status, err := newWindowsSCMActivationBackend(live).activeHostdStatus(ctx)
-	if err != nil || !validWindowsRuntimeStatus(status, installed.Source.Version) {
-		return errors.Join(errInvalidWindowsActivation, err)
-	}
-	return nil
+	return waitWindowsRuntimeStatus(ctx, newWindowsSCMActivationBackend(live).activeHostdStatus, installed.Source.Version, 0, 0, windowsTerminalReadyTimeout, windowsFeatureReadyInterval)
 }
 
 func validateWindowsNativeInstallJournalBinding(config WindowsConfig, j windowsActivationJournal) error {

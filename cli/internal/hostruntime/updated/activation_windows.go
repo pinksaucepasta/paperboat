@@ -1531,10 +1531,6 @@ func verifyWindowsPreparedCandidate(ctx context.Context, j windowsActivationJour
 	return nil
 }
 
-func validWindowsRuntimeStatus(status hostdproto.Status, version string) bool {
-	return status.State == hostdproto.StateActive && status.WorkerID == "runtime-"+strings.ReplaceAll(version, " ", "-") && status.Epoch > 0 && status.APIVersion > 0 && status.LastHeartbeatUnixMilli > 0 && time.Since(time.UnixMilli(status.LastHeartbeatUnixMilli)) <= 15*time.Second
-}
-
 func (b *windowsSCMActivationBackend) ownerControlClient() (*hostdproto.Client, error) {
 	token, err := os.ReadFile(b.config.TokenFile)
 	if err != nil {
@@ -1577,45 +1573,12 @@ func (b *windowsSCMActivationBackend) featureGate(ctx context.Context, j windows
 	return client.UpdateGate(ctx, r)
 }
 
-// windowsFeatureReadyTimeout bounds how long the activator waits for the new hostd's first healthy status: the
-// worker's first heartbeat lands after its own health checks, so a single read right after the cutover rolled a
-// slow healthy start back (slot 6 .5 to .6, 2026-11-10).
-const (
-	windowsFeatureReadyTimeout  = 90 * time.Second
-	windowsFeatureReadyInterval = 500 * time.Millisecond
-)
-
 func (b *windowsSCMActivationBackend) VerifyFeature(ctx context.Context, j windowsActivationJournal) error {
-	if err := waitWindowsRuntimeStatus(ctx, b.activeHostdStatus, j, windowsFeatureReadyTimeout, windowsFeatureReadyInterval); err != nil {
+	if err := waitWindowsRuntimeStatus(ctx, b.activeHostdStatus, j.Version, j.Release.HostdAPIMin, j.Release.HostdAPIMax, windowsFeatureReadyTimeout, windowsFeatureReadyInterval); err != nil {
 		return err
 	}
 	_, err := b.featureGate(ctx, j, hostdproto.UpdateGateStability)
 	return err
-}
-
-// waitWindowsRuntimeStatus polls the new runtime's status until it is the journal's version, active and in the API
-// range. The error that ends the wait names what was last observed, so a rollback says why.
-func waitWindowsRuntimeStatus(ctx context.Context, read func(context.Context) (hostdproto.Status, error), j windowsActivationJournal, timeout, interval time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	var last string
-	for {
-		status, err := read(ctx)
-		switch {
-		case err != nil:
-			last = "status read failed: " + err.Error()
-		case !validWindowsRuntimeStatus(status, j.Version) || status.APIVersion < j.Release.HostdAPIMin || status.APIVersion > j.Release.HostdAPIMax:
-			last = fmt.Sprintf("state=%s worker=%s epoch=%d api=%d heartbeat_age=%s", status.State, status.WorkerID, status.Epoch, status.APIVersion, time.Since(time.UnixMilli(status.LastHeartbeatUnixMilli)).Round(time.Millisecond))
-		default:
-			return nil
-		}
-		if time.Now().Add(interval).After(deadline) || ctx.Err() != nil {
-			return fmt.Errorf("%w: the new runtime was not ready within %s (last seen: %s)", errInvalidWindowsActivation, timeout, last)
-		}
-		select {
-		case <-ctx.Done():
-		case <-time.After(interval):
-		}
-	}
 }
 
 func windowsPinnedServiceExecutable(layout service.Layout, path string) bool {

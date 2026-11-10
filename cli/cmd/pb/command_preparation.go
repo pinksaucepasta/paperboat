@@ -50,6 +50,9 @@ func (e commandPreparationFailure) Error() string {
 	case prepareOpenSSH:
 		return "A supported OpenSSH client is unavailable. Install OpenSSH or repair its PATH entry, then retry `pb ssh doctor`."
 	case prepareDoctorRepair:
+		if errors.Is(e.cause, elevation.ErrElevationRestrictedJob) {
+			return "Paperboat could not repair the installation: this terminal runs inside a restricted job (common in IDEs and CI) that can't start the administrator helper. Open a normal PowerShell window and run `pb doctor --repair` again."
+		}
 		if errors.Is(e.cause, elevation.ErrElevationDenied) {
 			return "Paperboat could not repair the installation: administrator approval was not given. Run `pb doctor --repair` again and approve the Windows prompt."
 		}
