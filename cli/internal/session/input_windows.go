@@ -5,7 +5,10 @@ package session
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
+	"unicode/utf16"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -29,10 +32,40 @@ func readLocalInput(ctx context.Context, file *os.File, p []byte) (int, error) {
 		// usable.
 		_ = windows.CancelIoEx(handle, nil)
 	})
-	n, err := file.Read(p)
+	n, err := readHandle(handle, file, p)
 	stop()
 	if cause := context.Cause(ctx); cause != nil && (err == nil || errors.Is(err, windows.ERROR_OPERATION_ABORTED)) {
 		return n, cause
 	}
 	return n, err
+}
+
+// readHandle reads a console with ReadConsoleW: ReadFile on a console handle ends the stream at Ctrl-Z (0x1a) even in raw
+// VT mode and swallows the bytes after it, so job control from a Windows client never reached the remote shell
+// (measured through ssh -tt/ConPTY on Windows 11; ReadConsoleW with a zero wakeup mask delivers 0x1a intact). Anything that
+// is not a console (a pipe, a file) keeps ReadFile.
+func readHandle(handle windows.Handle, file *os.File, p []byte) (int, error) {
+	var mode uint32
+	if windows.GetConsoleMode(handle, &mode) != nil {
+		return file.Read(p)
+	}
+	// ReadConsoleW fills UTF-16 units; a UTF-8 byte string of at most 3 bytes per unit fits p, with room for the low half of a
+	// surrogate pair that the first read may leave behind.
+	units := min(max(len(p)/3-1, 1), 10922)
+	buffer := make([]uint16, units+1)
+	control := struct{ length, initial, mask, state uint32 }{length: 16}
+	var read uint32
+	if err := windows.ReadConsole(handle, &buffer[0], uint32(units), &read, (*byte)(unsafe.Pointer(&control))); err != nil {
+		return 0, err
+	}
+	if read == 0 {
+		return 0, io.EOF
+	}
+	if last := buffer[read-1]; last >= 0xd800 && last < 0xdc00 {
+		var more uint32
+		if err := windows.ReadConsole(handle, &buffer[read], 1, &more, (*byte)(unsafe.Pointer(&control))); err == nil {
+			read += more
+		}
+	}
+	return copy(p, string(utf16.Decode(buffer[:read]))), nil
 }
