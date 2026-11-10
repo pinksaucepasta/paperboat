@@ -1896,7 +1896,7 @@ class RemainingFamilyInPowerShell(unittest.TestCase):
             sent = []
 
             def invoke(binary, *arguments, **options):
-                if arguments[-2:] == ('list', '--json'):
+                if arguments[-3:] == ('list', '--all', '--json'):  # one page of the account's machines hid the record
                     return {'machines': [{'id': 'machine_1', 'alias': 'victus'}]}
                 source = winhost.RemotePath(self.device, arguments[1])
                 target = inbox / source.name
