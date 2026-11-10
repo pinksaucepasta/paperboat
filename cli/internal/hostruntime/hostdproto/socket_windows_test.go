@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -213,5 +214,28 @@ func windowsNativeSocketConfig(t *testing.T) SocketConfig {
 		APIMin:         1,
 		APIMax:         1,
 		RequestTimeout: 3 * time.Second,
+	}
+}
+
+// An update asks the worker for the managed SSH connections it bridges itself (the daemon adds them to its count).
+func TestWindowsSocketReportsWorkerOpenSSHConnections(t *testing.T) {
+	config := windowsNativeSocketConfig(t)
+	var open atomic.Int64
+	open.Store(2)
+	config.OpenSSH = func(context.Context) (int, error) { return int(open.Load()), nil }
+	running := startWindowsNativeServer(t, config)
+	if got, err := running.client.OpenSSH(context.Background()); err != nil || got != 2 {
+		t.Fatalf("open SSH = %d, %v", got, err)
+	}
+	open.Store(0)
+	if got, err := running.client.OpenSSH(context.Background()); err != nil || got != 0 {
+		t.Fatalf("idle open SSH = %d, %v", got, err)
+	}
+}
+
+func TestWindowsSocketWithoutOpenSSHCountRefusesTheQuery(t *testing.T) {
+	running := startWindowsNativeServer(t, windowsNativeSocketConfig(t))
+	if _, err := running.client.OpenSSH(context.Background()); err == nil {
+		t.Fatal("a worker without the count answered")
 	}
 }

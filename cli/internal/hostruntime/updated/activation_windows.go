@@ -751,11 +751,20 @@ func (b *windowsSCMActivationBackend) WriteJournal(j windowsActivationJournal) e
 	return applyWindowsReleaseACL(path, "D:P(A;;FA;;;SY)(A;;FA;;;BA)")
 }
 
-func windowsLocalDaemonLockPath(runtimeStateRoot string) (string, error) {
+// windowsLocalAPIStateDir is the user daemon's state directory, the sibling of the runtime state root.
+func windowsLocalAPIStateDir(runtimeStateRoot string) (string, error) {
 	if !filepath.IsAbs(runtimeStateRoot) || filepath.Clean(runtimeStateRoot) != runtimeStateRoot {
 		return "", errInvalidWindowsActivation
 	}
-	return filepath.Join(filepath.Dir(runtimeStateRoot), "state", "daemon.lock"), nil
+	return filepath.Join(filepath.Dir(runtimeStateRoot), "state"), nil
+}
+
+func windowsLocalDaemonLockPath(runtimeStateRoot string) (string, error) {
+	dir, err := windowsLocalAPIStateDir(runtimeStateRoot)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "daemon.lock"), nil
 }
 
 func windowsStableBinaryDACL(ownerSID string) string {

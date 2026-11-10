@@ -53,8 +53,11 @@ type SocketConfig struct {
 	RequestTimeout time.Duration
 	MaxConcurrent  int
 	Workloads      func() WorkloadStatus
-	WorkerControl  WorkerControlHandler
-	UpdateGate     UpdateGateHandler
+	// OpenSSH counts the managed SSH connections the worker bridges itself; the user daemon adds it to the open
+	// connections an update asks about.
+	OpenSSH       func(context.Context) (int, error)
+	WorkerControl WorkerControlHandler
+	UpdateGate    UpdateGateHandler
 }
 
 type Server struct {
@@ -255,6 +258,14 @@ func (s *Server) serveOne(ctx context.Context, connection net.Conn) (result erro
 		cancel()
 		stopWatching()
 		response, err = &WorkerControlResponse{Status: &status, Completed: true}, preparationErr
+	} else if control, ok := request.(*WorkerControlRequest); ok && control.Operation == "open_ssh" {
+		if s.config.OpenSSH == nil {
+			return errors.Join(ErrNotReady, s.writeError(ctx, connection, ErrNotReady))
+		}
+		openCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		open, openErr := s.config.OpenSSH(openCtx)
+		cancel()
+		response, err = &WorkerControlResponse{Completed: true, OpenSSH: &open}, openErr
 	} else if control, ok := request.(*WorkerControlRequest); ok && control.Operation == "abort_maintenance" {
 		s.controller.AbortMaintenance()
 		response = &WorkerControlResponse{Completed: true}
@@ -421,6 +432,19 @@ func (c *Client) Active(ctx context.Context) (Status, error) {
 		return Status{}, ErrInvalidFrame
 	}
 	return *status, nil
+}
+
+// OpenSSH is the number of managed SSH connections the worker bridges now.
+func (c *Client) OpenSSH(ctx context.Context) (int, error) {
+	response, err := c.Request(ctx, WorkerControlRequest{Operation: "open_ssh"})
+	if err != nil {
+		return 0, err
+	}
+	value, ok := response.(*WorkerControlResponse)
+	if !ok || value.validate() != nil || value.OpenSSH == nil {
+		return 0, ErrInvalidFrame
+	}
+	return *value.OpenSSH, nil
 }
 
 func (c *Client) UpdateGate(ctx context.Context, request UpdateGateRequest) (UpdateGateResponse, error) {

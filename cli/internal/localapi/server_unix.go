@@ -112,6 +112,10 @@ type ServerConfig struct {
 	// RecordCause keeps the cause text of a failed peer request locally (owner-only, never uploaded): the
 	// diagnostic event carries only the error's type chain. Optional.
 	RecordCause func(operation, supportReference string, err error)
+	// WorkerOpenSSH counts the managed SSH connections a separate worker process bridges. The Windows daemon sets it so
+	// /v1/connections also reports them (an update ends those too); the Unix updater service asks the worker itself. A
+	// worker that cannot answer adds zero. Optional.
+	WorkerOpenSSH func(context.Context) (int, error)
 }
 
 type Server struct {
@@ -779,6 +783,11 @@ func (s *Server) openConnections(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	current := liveconnections.Current()
+	if s.config.WorkerOpenSSH != nil {
+		if worker, err := s.config.WorkerOpenSSH(request.Context()); err == nil && worker > 0 {
+			current.SSH += worker
+		}
+	}
 	writer.Header().Set("Content-Type", "application/json")
 	writer.Header().Set("X-Paperboat-Protocol", ProtocolV1)
 	_ = json.NewEncoder(writer).Encode(OpenConnections{Schema: OpenConnectionsSchemaV1, SSH: current.SSH, Forwards: current.Forwards})

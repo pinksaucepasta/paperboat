@@ -178,6 +178,7 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) (runErr error) {
 		PeerProbes:           peerProbeBroker{probe: config.ProbePeer},
 		InspectorRequests:    inspectorBroker(config.InspectorRequest),
 		RelayInventory:       config.RelayInventory,
+		WorkerOpenSSH:        config.WorkerOpenSSH,
 		FileTransfers:        config.FileTransfers,
 		VaultCustody:         vaultCustody,
 		RecordCause: func(operation, supportReference string, causeErr error) {

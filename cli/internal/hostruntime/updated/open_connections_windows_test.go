@@ -40,9 +40,14 @@ func TestWindowsAutomaticUpdateStaysPendingWhileConnectionsAreOpen(t *testing.T)
 	}
 }
 
-func TestWindowsLocalAPIStateRootIsTheRuntimeRootsSibling(t *testing.T) {
+func TestWindowsLocalAPIStateDirIsTheRuntimeRootsSiblingAndOneRuleForTheLockPath(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "runtime")
-	if got := windowsLocalAPIStateRoot(root); got != filepath.Join(filepath.Dir(root), "state") {
-		t.Fatalf("state root %q", got)
+	dir, err := windowsLocalAPIStateDir(root)
+	lock, lockErr := windowsLocalDaemonLockPath(root)
+	if err != nil || lockErr != nil || dir != filepath.Join(filepath.Dir(root), "state") || lock != filepath.Join(dir, "daemon.lock") {
+		t.Fatalf("dir=%q err=%v lock=%q err=%v", dir, err, lock, lockErr)
+	}
+	if _, err := windowsLocalAPIStateDir("relative"); err == nil {
+		t.Fatal("a relative runtime root was accepted")
 	}
 }

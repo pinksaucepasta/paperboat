@@ -397,7 +397,7 @@ func localDaemonCommand() *cobra.Command {
 				}
 				go refreshMachineServices(ctx, steps, coordinator, machineServicesFetcher(cfg.ServerURL, authSource, controlTransport), servicesEvents.Changed(), coordinator.ServicesNudge())
 				teamShared := &teamSharedMachines{}
-				return localdaemon.Run(ctx, localdaemon.DaemonConfig{
+				return runLocalDaemon(ctx, localdaemon.DaemonConfig{
 					InventoryEvents: inventoryEvents, AccessEvents: accessEvents, Steps: steps,
 					CredentialsEnded: func() bool {
 						_, err := authSource.Credential()

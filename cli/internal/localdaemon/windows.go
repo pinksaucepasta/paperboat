@@ -42,6 +42,8 @@ type DaemonConfig struct {
 	InspectorRequest func(context.Context, localapi.Peer, localapi.InspectorRequest) (localapi.InspectorResult, error)
 	RelayInventory   func(context.Context) (localapi.RelayInventory, error)
 	RelayDenial      func() *api.APIError
+	// WorkerOpenSSH counts the managed SSH connections the hostd worker bridges (reported with the open connections).
+	WorkerOpenSSH func(context.Context) (int, error)
 	// NativeTransport reports the native runtime's paths and relay status for pb status (F21-06).
 	NativeTransport         func() tunnel.NativeTransport
 	InvalidatePeerAuthority func(string)
