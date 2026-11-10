@@ -26,7 +26,7 @@ device's own PowerShell over plain ssh (the hook's only Windows shell; the devic
 env-vscode-remote downloads the win32-x64 VS Code server there; env-team-scopes has the device account as owner and
 the second profile as member; env-undeliverable needs no vault, only a disposable target and the commands that cut it.
 Narrowed on Windows: policy-token (the device creates the tokens, a Unix throwaway holds them), team-two-account (no
-member-machine approval/transfer), team-business (no F19-07 token steps, no streaming), completion (the PowerShell
+member-machine approval/transfer), team-business (F19-07 access and F19-10 streaming only with --f19-peer-cmd / --f19-s3-origin), completion (the PowerShell
 script only). cli_credential.py is not ported; winhost.cli_secrets reads the DPAPI-protected tokens (bugreport uses it).
 The ssh-setup-time … ssh-forwarding checks have the device as the TARGET (ssh_mac_rows.py --windows): CLIENT_CMD runs one shell
 string on a paired Linux client, REVOKE_CLIENT_CMD on a fresh throwaway one that signs out. ssh-trust-host is ssh_trust_host.sh with ROTATE_CMD.
@@ -182,9 +182,12 @@ def checks(args):
         table['team-two-account'] = (two + ['--skip', 'approval,suspension,transfer'], ['--team'])
     table['team-suspension'] = (two + ['--skip', 'share,approval,resources,transfer', '--suspend-cmd', args.suspend_cmd or ''],
                                 ['--team', '--suspend_cmd'])
-    # Only pb runs on the device: no F19-07 token steps and no streaming (their helper is Python on the machine).
+    # Only pb runs on the device; the token helper, receivers and S3 client run on this controller (team_business.local_helper).
+    # F19-07 access steps need a Unix peer (--f19-peer-cmd), F19-10 streaming a controller-reachable store (--f19-s3-origin).
     business = ['team_business.py', '--cmd', winhost.WINDOWS, '--api', '{server}', '--team']
-    table['team-business'] = (business + [team, '--member', '{teammate_account}'], ['--team'])
+    f19 = (['--alias', args.machine, '--peer-alias', args.peer, '--peer-cmd', args.f19_peer_cmd] if args.f19_peer_cmd else []) + (
+        ['--streaming', '--s3-origin', args.f19_s3_origin, '--s3-list-cmd', args.f19_s3_list_cmd or ''] if args.f19_s3_origin else [])
+    table['team-business'] = (business + [team, '--member', '{teammate_account}'] + f19, ['--team'])
     table['team-identity-commands'] = (business + [args.sso_team or '', '--identity-commands'], ['--sso_team'])
     for name in ('status_bar_lifecycle', 'completion_lifecycle', 'bugreport_lifecycle', 'inventory_freshness',
                  'session_limit', 'doctor_lifecycle'):  # inventory-freshness renames the peer and back
@@ -413,6 +416,9 @@ def build_parser():
     parser.add_argument('--pair-repo-addr', help='config-sync-pair: that host as the controller and the peer reach it')
     parser.add_argument('--pair-peer-shell', help='config-sync-pair: shell prefix of the Unix peer')
     parser.add_argument('--pair-peer-alias', help="config-sync-pair: the peer's machine name")
+    parser.add_argument('--f19-peer-cmd', help='team-business: shell prefix of a Unix throwaway machine of the account (--peer is its name); enables the F19-07 access steps')
+    parser.add_argument('--f19-s3-origin', help='team-business: host:port of an S3-compatible store reachable from this controller; enables F19-10 streaming')
+    parser.add_argument('--f19-s3-list-cmd', help='team-business: controller command listing that store')
     parser.add_argument('--only', default='', help='comma list of check ids')
     parser.add_argument('--timeout', type=int, default=1800)
     parser.add_argument('--list', action='store_true')

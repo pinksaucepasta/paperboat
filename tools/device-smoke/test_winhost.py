@@ -1797,6 +1797,9 @@ class TeamFamily(unittest.TestCase):
         self.assertEqual(['--sso_team'], windows_checks.missing(table['team-identity-commands'][1], args))
         self.assertEqual([], windows_checks.missing(table['team-business'][1], args))
         self.assertNotIn('--identity-commands', table['team-business'][0])
+        self.assertNotIn('--streaming', table['team-business'][0])
+        row = windows_checks.checks(WindowsChecksRunner().args(f19_peer_cmd='ssh x', f19_s3_origin='h:1', f19_s3_list_cmd='ls'))['team-business'][0]
+        self.assertEqual(['--alias', 'm', '--peer-alias', 'p', '--peer-cmd', 'ssh x', '--streaming', '--s3-origin', 'h:1', '--s3-list-cmd', 'ls'], row[row.index('--alias'):])
 
 
 @unittest.skipUnless(PWSH, 'set PB_TEST_PWSH to a pwsh binary to run the completion and listing snippets for real')
