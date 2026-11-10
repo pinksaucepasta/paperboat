@@ -268,3 +268,25 @@ func TestDirectPeerDoesNotWaitForRegionalRendezvous(t *testing.T) {
 		t.Fatal("authorized direct peer waited for regional rendezvous", err)
 	}
 }
+
+// Relays refused for a grant stay unprobed only until a newer grant or regionalDeniedReprobe, so an outage that
+// left every relay refused cannot hold the relay path until the daemon restarts.
+func TestDeniedFenceLiftsOnANewGrantOrAfterTheReprobeInterval(t *testing.T) {
+	at := time.Unix(1000, 0)
+	for _, tc := range []struct {
+		name          string
+		denied, lease uint64
+		now           time.Duration
+		holds         bool
+	}{
+		{"never denied", 0, 5, 0, false},
+		{"same grant, just denied", 5, 5, time.Second, true},
+		{"older grant, just denied", 5, 4, 59 * time.Second, true},
+		{"same grant, a minute later", 5, 5, regionalDeniedReprobe, false},
+		{"newer grant at once", 5, 6, time.Second, false},
+	} {
+		if got := deniedFenceHolds(tc.denied, at, tc.lease, at.Add(tc.now)); got != tc.holds {
+			t.Errorf("%s: holds=%v, want %v", tc.name, got, tc.holds)
+		}
+	}
+}

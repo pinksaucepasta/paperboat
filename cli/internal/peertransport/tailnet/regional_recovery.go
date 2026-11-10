@@ -16,6 +16,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/shared/backoff"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=regional-recovery
 	"tailscale.com/tailcfg"
@@ -564,6 +565,7 @@ func (r *regionalRecovery) run(ctx context.Context) {
 	defer func() { cancel(); <-receiveDone }()
 	var selection regionalSelection
 	var deniedGeneration uint64
+	var deniedAt time.Time
 	cursor := 0
 	backupID := ""
 	retries := make(map[string]regionalRetry)
@@ -605,9 +607,12 @@ func (r *regionalRecovery) run(ctx context.Context) {
 			leaseGeneration = r.authority.current.Generation
 		}
 		r.authority.mu.Unlock()
-		if deniedGeneration != 0 && leaseGeneration <= deniedGeneration {
+		if deniedFenceHolds(deniedGeneration, deniedAt, leaseGeneration, time.Now()) {
 			timer.Reset(regionalProbeDelay())
 			continue
+		}
+		if deniedGeneration != 0 && leaseGeneration <= deniedGeneration {
+			diagnosticlog.TryInfo("relays were refused for this grant; trying them again", "generation", leaseGeneration, "after", time.Since(deniedAt).Round(time.Second).String())
 		}
 		// A stable bounded shortlist is refreshed in the background, not per stream.
 		// Retain the selected node while rotating other candidates after failures.
@@ -693,6 +698,7 @@ func (r *regionalRecovery) run(ctx context.Context) {
 					var fatal interface{ Fatal() bool }
 					if errors.As(probeErr, &fatal) && fatal.Fatal() {
 						refused.Add(1)
+						diagnosticlog.TryWarn("a relay refused admission", "node", n.NodeID, "error", probeErr)
 					}
 					fail(n.NodeID, "prepare_failed")
 					return
@@ -723,7 +729,8 @@ func (r *regionalRecovery) run(ctx context.Context) {
 			}
 		}
 		if refused.Load() > 0 && prepared.Load() == 0 {
-			deniedGeneration = leaseGeneration
+			deniedGeneration, deniedAt = leaseGeneration, time.Now()
+			diagnosticlog.TryWarn("every relay refused admission; they are tried again with a new grant or after a minute", "generation", leaseGeneration, "failures", fmt.Sprint(failures))
 			_ = r.engine.SetRelayRegions(nil)
 			r.mu.Lock()
 			r.status = RegionalStatus{Redundancy: RedundancyNone, Reason: "regional_admission_denied", ProbeFailures: failures}
@@ -813,6 +820,16 @@ func (r *regionalRecovery) run(ctx context.Context) {
 		r.readyOnce.Do(func() { close(r.ready) })
 		timer.Reset(regionalProbeDelay())
 	}
+}
+
+// regionalDeniedReprobe bounds the fence a refusal puts on the current grant: Tailscale's DERP client redials
+// after every failure with a capped backoff and has no fence at all, so an outage that left every relay
+// refused (a latched carrier, a grant not yet reissued) must not hold the relay path until a new grant.
+const regionalDeniedReprobe = time.Minute
+
+// deniedFenceHolds is whether relays refused for grant generation denied (at time at) stay unprobed.
+func deniedFenceHolds(denied uint64, at time.Time, lease uint64, now time.Time) bool {
+	return denied != 0 && lease <= denied && now.Sub(at) < regionalDeniedReprobe
 }
 
 func regionalProbeDelay() time.Duration {
