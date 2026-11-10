@@ -196,7 +196,7 @@ def main():
         previous = os.umask(0o077)
         try:
             # The system's own PATH only: the install must not depend on pb's directory being on it.
-            receipt = command(pb, 'install', '--json', timeout=180,
+            receipt = command(pb, 'install', '--json', timeout=600 if device else 180,  # a slow hosted runner took 194 s once
                               env={'PATH': system_path(device)} if device
                               else dict(os.environ, PATH='/usr/bin:/bin:/usr/sbin:/sbin'))
         finally:
