@@ -185,10 +185,11 @@ class Client(Terminal):
         if win():  # read by typing in this window, which also makes it the active one
             found = re.findall(rb'PB_SIZE (\d+) (\d+)', self.run(windows_target.size_line()))
             return tuple(map(int, found[-1])) if found else None
-        out = self.run('stty size')
-        # ConPTY (a Windows client) repaints: the answer can end the output with a cursor move instead of a newline
-        out = re.sub(rb'\x1b\[[0-9;?]*[A-Za-z]', b'', out)
-        found = re.findall(rb'(?m)(\d+) (\d+)\r?$', out)
+        # marker-delimited, as terminal_lifecycle.unix_phases reads the size: a Windows client's ConPTY reflows the screen after a resize storm
+        # (the answer can be split or overwritten by repaint sequences), so the pair is read behind its own marker, not at a line end
+        out = self.run("printf '\\nPB_SIZE_'; stty size")
+        out = re.sub(rb'\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[78=>DEHMNOPVWXZ\\^_c]|\x1b[ -/]+[0-~]', b'', out)
+        found = re.findall(rb'PB_SIZE_(\d+) (\d+)', out)
         return tuple(map(int, found[-1])) if found else None
 
 
