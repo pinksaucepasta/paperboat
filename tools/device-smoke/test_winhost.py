@@ -117,6 +117,23 @@ class WindowsDeviceTest(unittest.TestCase):
             self.assertEqual(pathlib.Path.home() / '.local/bin/pb', winhost.pb_path())
             self.assertIsNone(winhost.device())
 
+    def test_a_read_only_snippet_is_sent_again_when_the_session_does_not_answer_but_a_write_is_not(self):
+        calls = []
+
+        def stalls_once(argv, input, capture_output, timeout, env):
+            calls.append(timeout)
+            if len(calls) == 1:
+                raise subprocess.TimeoutExpired(argv, timeout)
+            return subprocess.CompletedProcess(argv, 0, b'yes', b'')
+
+        with patch('subprocess.run', stalls_once):
+            self.assertTrue(self.device().exists(r'C:\x'))
+        self.assertEqual([30, 60], calls)
+        with patch('subprocess.run', side_effect=subprocess.TimeoutExpired('ssh', 60)) as run:
+            with self.assertRaises(winhost.DeviceError):
+                self.device().write_bytes(r'C:\x', b'data')
+        self.assertEqual(1, run.call_count)
+
     def test_pb_exe_must_be_an_absolute_windows_path(self):
         for bad in ('pb.exe', r'C:\x\other.exe', '/usr/bin/pb.exe'):
             with patch.dict(os.environ, {'PB_SMOKE_WINDOWS_PB': bad}):

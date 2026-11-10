@@ -168,6 +168,9 @@ while($true){$c=$l.AcceptTcpClient();try{$c.ReceiveTimeout=2000;$s=$c.GetStream(
 [void]$s.Read($r,0,8192);$s.Write($h,0,$h.Length);$s.Write($b,0,$b.Length);$s.Flush()}catch{}finally{$c.Close()}}
 """
 
+# Snippets that change nothing on the device: safe to send again when a session did not answer.
+READ_ONLY = (READ, EXISTS, SHA256, SIZE, ENV, SERVICES, PROCESSES, TASKS, SERVICE_PATHS, LISTENING, ALIVE)
+
 
 def _b64(value):
     return base64.b64encode(value).decode('ascii')
@@ -221,7 +224,13 @@ class WindowsDevice:
         return done.returncode, done.stdout, done.stderr
 
     def ps(self, step, script, timeout=60, ok=(0,), **payload):
-        rc, out, err = self.snippet(step, script, timeout, **payload)
+        if script in READ_ONLY:  # a session that never answers (seen on victus for a tiny read) is tried once more
+            try:
+                rc, out, err = self.snippet(step, script, min(timeout, 30), **payload)
+            except DeviceError:
+                rc, out, err = self.snippet(step, script, timeout, **payload)
+        else:
+            rc, out, err = self.snippet(step, script, timeout, **payload)
         if rc not in ok:
             raise DeviceError('%s failed on the device (exit %s): %s' % (step, rc, _text(err).strip()[-300:]))
         return rc, _text(out).strip()
