@@ -82,9 +82,12 @@ def checks(args):
     table['transfer-resume'] = (['transfer_resume.py', args.peer], ['--peer'])
     table['transfer-errors'] = (['transfer_errors.py', args.peer], ['--peer'])
     table['session-manage'] = (['session_lifecycle.py', args.peer, '--check', 'manage'], ['--peer'])
-    # F3-02's replay half from the Windows device as client (winhost ssh -tt/ConPTY, no Unix pty on the device). The cross half
-    # needs a second DEVICE signed in to the account; a second attach from this same device would not prove it, so it is not wired.
+    # F3-02 from the Windows device as client (winhost ssh -tt/ConPTY, no Unix pty on the device). replay is the detach/reattach half. cross
+    # is the other-device half: the second client must be a second DEVICE signed in to the same account (a second attach from the same device
+    # would not prove it), so it needs SMOKE_CROSS_WINDOWS_SSH (its ssh login) and SMOKE_CROSS_WINDOWS_PB (its pb.exe path); terminal_gate
+    # runs the check's `resume` step there when the check asks for the other device.
     table['session-replay'] = (['session_lifecycle.py', args.peer, '--check', 'replay'], ['--peer'])
+    table['session-cross'] = (['session_lifecycle.py', args.peer, '--check', 'cross'], ['--peer', 'SMOKE_CROSS_WINDOWS_SSH', 'SMOKE_CROSS_WINDOWS_PB'])
     table['session-sharing-owner'] = (['session_sharing_lifecycle.py', args.peer, '--team', team], ['--peer', '--team'])
     for name in ('lifecycle', 'tools_lifecycle', 'doctor_lifecycle', 'alias_lifecycle'):
         table['ssh-' + name.split('_')[0].replace('lifecycle', 'main')] = (['ssh_%s.py' % name, args.peer], ['--peer'])
@@ -241,7 +244,7 @@ def protocol_gate(probe):
         done = subprocess.run([str(probe), '--url', phase['url'], '--marker', phase['marker']], capture_output=True,
                               text=True, timeout=170, stdin=subprocess.DEVNULL)
         Path(phase['gate' if done.returncode == 0 else 'failure_gate']).touch(mode=0o600)
-        return done.stdout + done.stderr
+        return done.stdout
     return release
 
 
@@ -265,6 +268,27 @@ def browser_gate(line):
     return ''
 
 
+def terminal_gate(environment):
+    """The second client of session_lifecycle.py --check cross: run its --check resume on the other device, then release its gate."""
+    other = dict(environment, SMOKE_WINDOWS_SSH=os.environ['SMOKE_CROSS_WINDOWS_SSH'], PB_SMOKE_WINDOWS_PB=os.environ['SMOKE_CROSS_WINDOWS_PB'])
+
+    def release(line):
+        try:
+            phase = json.loads(line)
+        except ValueError:
+            return ''
+        if not isinstance(phase, dict) or phase.get('state') != 'terminal_attach_required':
+            return ''
+        command = [sys.executable, str(HERE / 'session_lifecycle.py'), phase['target'], '--check', 'resume',
+                   '--session-id', phase['session_id'], '--expected-state', phase['expected_state'],
+                   '--expected-account', phase['expected_account']]
+        done = subprocess.run(command, cwd=HERE, capture_output=True, text=True, timeout=300, env=other, stdin=subprocess.DEVNULL)
+        ok = done.returncode == 0 and '"status": "PASS"' in done.stdout
+        Path(phase['gate' if ok else 'failure_gate']).touch(mode=0o600)
+        return done.stdout + done.stderr
+    return release
+
+
 def run_streaming(command, environment, timeout, on_state=None):
     """subprocess.run with captured output, echoing each `state` line (an approval link, a gate) to stderr as it comes.
 
@@ -278,7 +302,7 @@ def run_streaming(command, environment, timeout, on_state=None):
             lines = []
             for line in process.stdout:
                 lines.append(line)
-                if line.startswith('{"state"') or '"state": "approval_required"' in line:
+                if line.startswith('{"state"') or '"state": "approval_required"' in line or '"state": "terminal_attach_required"' in line:
                     print(line.rstrip(), file=sys.stderr, flush=True)
                     if on_state:
                         lines.append(on_state(line))
@@ -329,6 +353,8 @@ def run_check(check, argv, args, device):
             on_state = protocol_gate(probe)
         if argv[0] == 'preview_lifecycle.py':
             on_state = browser_gate
+        if argv[0] == 'session_lifecycle.py' and 'cross' in argv:
+            on_state = terminal_gate(environment)
         command = [sys.executable, str(HERE / argv[0])] + [replacements.get(word, word) for word in argv[1:]]
         started = time.monotonic()
         done = run_streaming(command, environment, args.timeout, on_state)
