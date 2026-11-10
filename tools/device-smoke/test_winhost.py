@@ -1597,7 +1597,8 @@ class TeamFamily(unittest.TestCase):
     def business(self, **values):
         import team_business
         defaults = dict(cmd='windows', pb='/home/tester/.local/bin/pb', team='t', member='',
-                        identity_commands=False, api='https://example.test', alias='', peer_cmd='')
+                        identity_commands=False, api='https://example.test', alias='', peer_cmd='',
+                        streaming=False, s3_origin='')
         with patch.object(winhost, 'device', lambda: SimpleNamespace(env=lambda name: r'C:\Temp', path_flavor=pathlib.PureWindowsPath)):
             return team_business.Check(SimpleNamespace(**dict(defaults, **values)))
 
@@ -1654,6 +1655,27 @@ class TeamFamily(unittest.TestCase):
         check.read('f19.csv')
         check.remove('f19.csv', 'f19.json')
         self.assertEqual([['cat', 'f19.csv'], ['rm', '-f', 'f19.csv', 'f19.json']], seen)
+
+    def test_business_stream_publishes_the_device_forward_and_keeps_it_until_cleanup(self):
+        import contextlib
+        import team_business
+        check = self.business(streaming=True)
+        events = []
+
+        @contextlib.contextmanager
+        def forward(port):
+            events.append(('open', port))
+            try:
+                yield 18099
+            finally:
+                events.append(('closed', port))
+
+        check.pbj = lambda *args: events.append(args) or {'endpoint': 'https://audit.example.test', 'id': 'tunnel_1'}
+        with patch.object(winhost, 'device', lambda: SimpleNamespace(forward=forward)):
+            self.assertEqual(('https://audit.example.test', 'tunnel_1'), team_business.tunnel(check, '8099'))
+            self.assertEqual([('open', 8099), ('tunnel', '--ephemeral', '18099', '--background')], events)
+            check.close()
+        self.assertEqual(('closed', 8099), events[-1])
 
     def test_windows_main_runs_the_pb_only_sections(self):
         import contextlib

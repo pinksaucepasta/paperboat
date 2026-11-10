@@ -11,13 +11,16 @@ gets gzip NDJSON objects through SigV4. Stream setup uses a one-day API token th
 end. Secrets (token, signing secret, S3 keys) stay on the machine and are never printed.
 
 --cmd windows runs pb.exe on the Windows device (winhost.py). With --alias/--peer-alias/--peer-cmd the
-token-actor audit also runs, using a private controller-side Python helper; streaming is not yet run there.
+token-actor audit also runs, using a private controller-side Python helper. --streaming runs the same HTTPS/S3
+checks with the receiver on the controller, forwarded through the device. S3 fixture keys then live in the
+controller's ~/.f19-s3ak and ~/.f19-s3sk, copied into its private helper directory for the run.
 
 Usage: team_business.py --team paperboat-smoke-paid \
          --cmd 'ssh hp docker exec -i -u tester -e XDG_RUNTIME_DIR=/run/user/1001 -w /home/tester lanes-f19' \
          --s3-origin 10.0.0.12:7070 --s3-list-cmd 'ssh hp docker exec -i lanes-s3'
 """
 import argparse
+import contextlib
 import os
 from pathlib import Path
 import csv
@@ -123,6 +126,14 @@ class Check:
         self.windows = winhost.is_side(a.cmd)  # pb.exe on the Windows device: only pb runs there
         self.temp = winhost.device().env('TEMP') if self.windows else ''
         self.helper_home = None
+        self.forwards = contextlib.ExitStack()
+
+    def close(self):
+        try:
+            self.forwards.close()
+        finally:
+            if self.helper_home is not None:
+                self.helper_home.cleanup()
 
     def local_helper(self, args, timeout, stdin):
         """Python fixtures stay on the controller; all authenticated pb commands stay on the device."""
@@ -132,6 +143,13 @@ class Check:
             for name, value in (('.f19helper.py', HELPER), ('.f19api', self.a.api)):
                 with os.fdopen(os.open(home / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as output:
                     output.write(value)
+            if self.a.streaming and self.a.s3_origin:
+                for name in ('.f19-s3ak', '.f19-s3sk'):
+                    source = Path.home() / name
+                    if not source.is_file() or source.stat().st_mode & 0o077:
+                        raise RuntimeError('stage the S3 fixture key ' + name + ' in the controller home with mode 0600')
+                    with os.fdopen(os.open(home / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'wb') as output:
+                        output.write(source.read_bytes())
         home = Path(self.helper_home.name)
         if args[:3] == ['python3', '.f19helper.py', 'token']:
             extra = ['--scope', args[7]] if len(args) > 7 else []
@@ -419,6 +437,8 @@ def streams(c, team):
 
 
 def tunnel(c, target):
+    if c.windows:
+        target = str(c.forwards.enter_context(winhost.device().forward(int(target))))
     d = c.pbj('tunnel', '--ephemeral', target, '--background')
     return d.get('endpoint', ''), d.get('id', '')
 
@@ -499,11 +519,7 @@ def windows_main(c, a):
     if a.identity_commands:
         identity_commands(c, a.team, member or a.member)
     if a.alias and a.peer_cmd:
-        try:
-            machine_access(c, start)
-        finally:
-            if c.helper_home is not None:
-                c.helper_home.cleanup()
+        machine_access(c, start)
     search(c, start, owner)
     export(c, start)
     print('RESULT', 'PASS' if not c.fails else 'FAIL ' + ','.join(c.fails))
@@ -519,6 +535,7 @@ def main():
     p.add_argument('--api', default=os.environ.get('PB_API'), required='PB_API' not in os.environ, help='the API origin, e.g. https://api.example.test (or PB_API)')
     p.add_argument('--member', default='', help='the member whose role changes (not directory-managed)')
     p.add_argument('--identity-commands', action='store_true', help='also run sso setup/enforce/exempt and scim setup/map (C255-C260); only on a team the check owns')
+    p.add_argument('--streaming', action='store_true', help='on Windows also run HTTPS/S3 streaming with controller-side receivers')
     p.add_argument('--alias', default='', help='this machine\'s name, for the F19-07 access steps')
     p.add_argument('--peer-alias', default='', help='a second throwaway machine of the account (F19-07)')
     p.add_argument('--peer-cmd', default='', help='runs commands on the peer; its CLI session is replaced')
@@ -528,7 +545,14 @@ def main():
     p.add_argument('--s3-bucket', default='audit')
     a = p.parse_args()
     c = Check(a)
-    if c.windows:
+    try:
+        return run_business(c, a)
+    finally:
+        c.close()
+
+
+def run_business(c, a):
+    if c.windows and not a.streaming:
         return windows_main(c, a)
     c.run(['bash', '-c', 'umask 077; cat > .f19helper.py; printf %s ' + shlex.quote(a.api) + ' > .f19api'], stdin=HELPER)
     owner = c.pbj('team', 'get', a.team).get('owner_account')
