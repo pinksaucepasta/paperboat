@@ -9,7 +9,7 @@ PB_SMOKE_WINDOWS_PB set to the pb.exe path of the saved `pb install --json` rece
 results/windows-<UTC>.json. Checks that need a fixture the run was not given are SKIP, never PASS.
 
 Not ported (they need Git, systemd/launchd, sudo or a signal on the device, or a gate an external driver releases):
-install_lifecycle, pairing_lifecycle's uninstall flows, the ssh_*.sh and ssh_mac_* checks,
+install_lifecycle, pairing_lifecycle's uninstall flows, ssh-other-user (the managed sshd reads one key file, no passwords),
 config_sync and config_commands' repository rows, and the gated
 preview_lifecycle/session replay and cross checks. config-sync-lifecycle keeps Git on this
 controller (pb itself needs none): it needs git, python3 and, for its SSH repository row, an sshd on this
@@ -28,6 +28,8 @@ the second profile as member; env-undeliverable needs no vault, only a disposabl
 Narrowed on Windows: policy-token (the device creates the tokens, a Unix throwaway holds them), team-two-account (no
 member-machine approval/transfer), team-business (no F19-07 token steps, no streaming), completion (the PowerShell
 script only). cli_credential.py is not ported; winhost.cli_secrets reads the DPAPI-protected tokens (bugreport uses it).
+The ssh-setup-time … ssh-forwarding checks have the device as the TARGET (ssh_mac_rows.py --windows): CLIENT_CMD runs one shell
+string on a paired Linux client, REVOKE_CLIENT_CMD on a fresh throwaway one that signs out. ssh-trust-host is ssh_trust_host.sh with ROTATE_CMD.
 """
 import argparse
 import contextlib
@@ -89,6 +91,10 @@ def checks(args):
         table[name] = (['private_access.py', 'pair', '--target', args.peer, '--check', name], ['--peer'])
     table['ssh-long'] = (['ssh_long.py', args.peer, '--seconds', os.environ.get('SMOKE_SSH_LONG_SECONDS', '')],
                          ['--peer', 'SMOKE_SSH_LONG_SECONDS'])
+    for name, step, needs in (('ssh-setup-time', 'setup', []), ('ssh-control-outage', 'outage', ['REVOKE_CLIENT_CMD']),
+                              ('ssh-refusals', 'refusals', []), ('ssh-live-revoke', 'revoke', ['REVOKE_CLIENT_CMD']),
+                              ('ssh-session-audit', 'audit', []), ('ssh-forwarding', 'forwarding', [])):
+        table[name] = (['ssh_mac_rows.py', '--windows', '--alias', args.machine, '--only', step], ['--machine', 'CLIENT_CMD'] + needs)
     table['config-commands'] = (['config_commands.py'], [])
     table['config-survival'] = (['config_survival.py'], [])
     table['tunnel-manage'] = (['tunnel_manage.py'], [])

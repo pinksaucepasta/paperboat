@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""F5-07..F5-13 managed-SSH checks with a Mac target and a Linux client (macOS twins of tools/device-smoke/ssh_*.sh).
+"""F5-07..F5-13 managed-SSH checks with a Mac or Windows target and a Linux client (twins of tools/device-smoke/ssh_*.sh).
 
 TARGET is the paired Mac (alias --alias, default apple, setup user --mac-user, default admin); CLIENT is a paired Linux
 machine (a container) where `pb ssh <alias>` runs. Both are reached through wrappers that take ONE shell-string argument:
@@ -8,6 +8,8 @@ machine (a container) where `pb ssh <alias>` runs. Both are reached through wrap
 Usage: MAC_CMD=... CLIENT_CMD=... ssh_mac_rows.py [--only setup,outage,refusals,revoke,otheruser,audit,forwarding]
 Steps with no safe Mac equivalent print SKIP <reason>. The Mac's sshd is only ever stopped by a detached root script
 that restarts it on a timer; the pf block and the daemon SIGSTOP likewise have a timed failsafe.
+--windows: TARGET is the paired Windows machine instead (ssh_windows_target.py; set SMOKE_WINDOWS_SSH and
+PB_SMOKE_WINDOWS_PB, no MAC_CMD). otheruser has no Windows target: the managed sshd there reads one key file and no passwords.
 Prints one JSON line; exit 1 on any FAIL.
 """
 import argparse, json, os, re, secrets, shlex, subprocess, sys, time
@@ -15,7 +17,11 @@ import argparse, json, os, re, secrets, shlex, subprocess, sys, time
 ANCHOR = 'com.apple/pbsmoke'
 SSHD_PLIST = '/System/Library/LaunchDaemons/ssh.plist'
 ARGS = None
+WIN = None  # ssh_windows_target.Target with --windows
 RESULTS = []
+# What a client runs ON the target through ssh; the Windows target has its own (cmd.exe is its shell).
+REMOTE = {'NOP': 'true', 'HOLD_PB': 'echo session-up; sleep 300', 'HOLD_PLAIN': 'echo plain-up; sleep 300', 'HOLD_FWD': 'sleep 40',
+          'SSHD_PORT': '22', 'AGENT_LIST': 'ssh-add -l', 'SHOW_DISPLAY': 'echo "display=<$DISPLAY>"'}
 
 
 def run(env, script, timeout=300):
@@ -34,6 +40,8 @@ def mac(script, timeout=120):
 def daemon_pids():
     """The Mac daemon's pid to pause: launchd's job for its label, never a name match, which also
     finds the user's own `pb daemon ...` commands."""
+    if WIN:
+        return WIN.daemon_pids()
     match = re.search(r'^\s*pid = (\d+)$', mac('launchctl print gui/$(id -u)/com.pinksaucepasta.paperboatd'), re.MULTILINE)
     return [match.group(1)] if match else []
 
@@ -49,13 +57,14 @@ def msudo(script, bg=False, timeout=120):
 
 
 def prelude(wait_ssh=True):
-    s = ('PB=~/.local/bin/pb; A=%s; D=; for i in $(seq 1 60); do D=$(grep -o "Host \\*\\.[^ ]*" ~/.ssh/paperboat_config 2>/dev/null'
+    s = ''.join('%s=%s; ' % (k, shlex.quote(v)) for k, v in (WIN.remote() if WIN else REMOTE).items())
+    s += ('PB=~/.local/bin/pb; A=%s; D=; for i in $(seq 1 60); do D=$(grep -o "Host \\*\\.[^ ]*" ~/.ssh/paperboat_config 2>/dev/null'
          ' | head -1 | sed "s/Host \\*\\.//"); [ -n "$D" ] && break; sleep 2; done; HN=$A.$D; H=%s@$HN; echo domain=$D; '
          # the client's unix user (pbt) is not an account on the Mac: plain ssh logs in as the Mac setup user
          % (shlex.quote(ARGS.alias), shlex.quote(ARGS.mac_user)))
     if wait_ssh:
         s += ('for i in $(seq 1 60); do $PB machine list 2>/dev/null | grep -q "$A " && break; sleep 2; done; '
-              'for i in $(seq 1 30); do ssh -o BatchMode=yes $H true </dev/null >/dev/null 2>&1 && break; sleep 2; done; ')
+              'for i in $(seq 1 30); do ssh -o BatchMode=yes $H $NOP </dev/null >/dev/null 2>&1 && break; sleep 2; done; ')
     return s
 
 
@@ -76,7 +85,7 @@ def setup():
     if not check_warm('F5-07 setup'):
         return
     out = cl(prelude() + r'''ms() { s=$(date +%s%N); timeout 30 "$@" </dev/null >/dev/null 2>&1 || { echo -1; return; }; e=$(date +%s%N); echo $(( (e-s)/1000000 )); }
-plain=; pb=; for i in 1 2 3 4 5 6 7; do a=$(ms ssh $H true); b=$(ms $PB ssh $A -- true); echo "RUN $i plain=$a pb=$b"; plain="$plain $a"; pb="$pb $b"; done
+plain=; pb=; for i in 1 2 3 4 5 6 7; do a=$(ms ssh $H $NOP); b=$(ms $PB ssh $A -- $NOP); echo "RUN $i plain=$a pb=$b"; plain="$plain $a"; pb="$pb $b"; done
 p50() { tr ' ' '\n' | grep -v '^$' | sort -n | sed -n 4p; }
 echo "RESULT plain_p50=$(echo $plain | p50) pb_p50=$(echo $pb | p50) plain=[$plain ] pb=[$pb ]"''', 600)
     m = re.search(r'RESULT plain_p50=(-?\d+) pb_p50=(-?\d+) plain=\[([^\]]*)\] pb=\[([^\]]*)\]', out)
@@ -94,6 +103,8 @@ def key_blob(call):
 
 def listed(blob):
     """Is this managed key in the Mac's authorized_keys (the file sshd reads, asserted in outage())?"""
+    if WIN:
+        return WIN.listed(blob)
     return mac('grep -cF %s "$HOME/.ssh/authorized_keys"' % shlex.quote(blob)).strip().splitlines()[-1:] == ['1']
 
 
@@ -109,9 +120,13 @@ def outage():
             return report(row, 'SKIP', 'client %s has no passwordless sudo/ip to blackhole the control plane' % who)
     if not check_warm(row):
         return
-    sshd = msudo("sshd -T -C user=%s,host=localhost,addr=127.0.0.1 | grep -i '^authorizedkeysfile'" % ARGS.mac_user)
-    if '.ssh/authorized_keys' not in sshd:
-        return report(row, 'FAIL', "sshd does not read ~/.ssh/authorized_keys: " + sshd.strip()[-120:])
+    if WIN:
+        if not WIN.keys_file():
+            return report(row, 'FAIL', 'the managed sshd does not read exactly one authorized keys file: %s' % WIN.sshd['authorized_keys'])
+    else:
+        sshd = msudo("sshd -T -C user=%s,host=localhost,addr=127.0.0.1 | grep -i '^authorizedkeysfile'" % ARGS.mac_user)
+        if '.ssh/authorized_keys' not in sshd:
+            return report(row, 'FAIL', "sshd does not read ~/.ssh/authorized_keys: " + sshd.strip()[-120:])
     base = rcl(prelude() + 'ssh $H echo warm-ok </dev/null 2>&1; $PB ssh $A -- echo warm-pb-ok </dev/null 2>&1')
     if 'warm-ok' not in base or 'warm-pb-ok' not in base:
         return report(row, 'FAIL', 'R had no session before it signed out: ' + base[-200:].replace('\n', ' '))
@@ -137,18 +152,25 @@ def outage():
 api=$(curl -s -m 5 -o /dev/null -w '%%{http_code}' https://%s/ || true); echo "RESULT api=$api plain=[$plain] pb=[$pbo]"
 """ % api
     try:
-        msudo('sleep 240; /sbin/pfctl -a %s -F all' % ANCHOR, bg=True)  # root failsafe on the Mac
+        if not WIN:
+            msudo('sleep 240; /sbin/pfctl -a %s -F all' % ANCHOR, bg=True)  # root failsafe on the Mac
         for call in (cl, rcl):
             for a in addrs:
                 call('sudo -n ip route add blackhole %s 2>/dev/null || sudo -n ip -6 route add blackhole %s' % (a, a))
-        out = msudo('printf "%%s\\n" %s | /sbin/pfctl -a %s -f - 2>&1; /sbin/pfctl -E 2>&1; /sbin/pfctl -F states 2>&1' % (shlex.quote(rule), ANCHOR))
-        t = re.search(r'Token : (\d+)', out)
-        token = t[1] if t else None
+        if WIN:
+            token = WIN.block(addrs)
+        else:
+            out = msudo('printf "%%s\\n" %s | /sbin/pfctl -a %s -f - 2>&1; /sbin/pfctl -E 2>&1; /sbin/pfctl -F states 2>&1' % (shlex.quote(rule), ANCHOR))
+            t = re.search(r'Token : (\d+)', out)
+            token = t[1] if t else None
         time.sleep(45)
         during = (listed(kc), listed(kr))
         c_out, r_out = cl(probe, 400), rcl(probe, 400)
     finally:
-        msudo('/sbin/pfctl -a %s -F all%s' % (ANCHOR, '; /sbin/pfctl -X %s' % token if token else ''))
+        if not WIN:
+            msudo('/sbin/pfctl -a %s -F all%s' % (ANCHOR, '; /sbin/pfctl -X %s' % token if token else ''))
+        elif token:
+            WIN.unblock(token)
         for call in (cl, rcl):
             for a in addrs:
                 call('sudo -n ip route del blackhole %s 2>/dev/null || sudo -n ip -6 route del blackhole %s' % (a, a))
@@ -163,14 +185,14 @@ api=$(curl -s -m 5 -o /dev/null -w '%%{http_code}' https://%s/ || true); echo "R
 
 def wait_sshd():
     for _ in range(30):
-        if 'up' in mac('echo up'):
+        if WIN.sshd_running() if WIN else 'up' in mac('echo up'):
             return True
         time.sleep(5)
     return False
 
 
 def case(name):
-    return cl(prelude(False) + 'echo "CASE %s [$(timeout 90 ssh $H true </dev/null 2>&1 | tr "\\n" " " | cut -c1-300)]"' % name, 150)
+    return cl(prelude(False) + 'echo "CASE %s [$(timeout 90 ssh $H $NOP </dev/null 2>&1 | tr "\\n" " " | cut -c1-300)]"' % name, 150)
 
 
 def refusals():
@@ -179,7 +201,10 @@ def refusals():
         return
     res = ''
     try:  # one detached root script stops sshd, waits, and starts it again, whatever happens to us
-        msudo('launchctl bootout system/com.openssh.sshd; sleep 40; launchctl bootstrap system %s' % SSHD_PLIST, bg=True)
+        if WIN:
+            WIN.stop_sshd()
+        else:
+            msudo('launchctl bootout system/com.openssh.sshd; sleep 40; launchctl bootstrap system %s' % SSHD_PLIST, bg=True)
         time.sleep(4)
         res += case('sshd_stopped')
     finally:
@@ -188,7 +213,13 @@ def refusals():
         return report(row, 'FAIL', 'sshd did not come back; the root timer should have restarted it')
     time.sleep(5)
     pids = daemon_pids()
-    if pids:  # SIGSTOP the Mac's daemon (docker pause equivalent), SIGCONT on a timer
+    if pids and WIN:  # the same on Windows: every Paperboat service process suspended, resumed on a timer
+        try:
+            WIN.pause(pids)
+            res += case('machine_offline')
+        finally:
+            WIN.resume(pids)
+    elif pids:  # SIGSTOP the Mac's daemon (docker pause equivalent), SIGCONT on a timer
         mac('nohup sh -c "sleep 50; kill -CONT %s" >/dev/null 2>&1 &' % ' '.join(pids))
         try:
             mac('kill -STOP %s' % ' '.join(pids))
@@ -217,8 +248,8 @@ def refusals():
 REVOKE = r'''# normal exits print nothing
 perr=$(timeout 60 $PB ssh $A -- 'exit 0' </dev/null 2>&1 >/dev/null | tr '\n' ' '); lerr=$(timeout 60 ssh $H 'exit 0' </dev/null 2>&1 >/dev/null | tr '\n' ' ')
 echo "RESULT normal pb_stderr=[$perr] plain_stderr=[$lerr]"
-$PB ssh $A -- 'echo session-up; sleep 300' > ~/slr.out 2> ~/slr.err < /dev/null & pid=$!
-ssh $H 'echo plain-up; sleep 300' > ~/slrp.out 2> ~/slrp.err < /dev/null & ppid=$!
+$PB ssh $A -- "$HOLD_PB" > ~/slr.out 2> ~/slr.err < /dev/null & pid=$!
+ssh $H "$HOLD_PLAIN" > ~/slrp.out 2> ~/slrp.err < /dev/null & ppid=$!
 for i in $(seq 1 60); do grep -q session-up ~/slr.out && grep -q plain-up ~/slrp.out && break; sleep 1; done
 grep -q session-up ~/slr.out && grep -q plain-up ~/slrp.out || { echo "RESULT no-session pb=$(tr '\n' ' ' < ~/slr.err | cut -c1-160) plain=$(tr '\n' ' ' < ~/slrp.err | cut -c1-160)"; exit 0; }
 start=$(date +%s.%N); $PB logout >/dev/null 2>&1
@@ -284,6 +315,8 @@ echo "RESULT ok:[$ok ] fail:[$fail ] skip:[$skip ]"'''
 
 def otheruser():
     row = 'F5-11 otheruser'
+    if WIN:
+        return report(row, 'FAIL', 'no Windows target: the managed sshd reads only the managed key file and no passwords')
     if not check_warm(row):
         return
     bob = 'pbbob' + secrets.token_hex(3)
@@ -365,12 +398,12 @@ def audit():
 FORWARDING = r'''fail=; ok=
 check() { n=$1; w=$2; shift 2; o=$("$@" 2>&1 </dev/null); if grep -q -- "$w" <<<"$o"; then ok="$ok $n"; else fail="$fail $n($(tr '\n' ' ' <<<"$o" | cut -c1-160))"; fi; }
 banner() { for i in $(seq 1 30); do timeout 5 bash -c "exec 3<>/dev/tcp/127.0.0.1/$1; head -c 7 <&3" 2>/dev/null && return; sleep 1; done; echo "no listener on $1"; }
-ssh -o ExitOnForwardFailure=yes -L 127.0.0.1:12222:127.0.0.1:22 $H sleep 40 </dev/null >/dev/null 2>&1 &
+ssh -o ExitOnForwardFailure=yes -L 127.0.0.1:12222:127.0.0.1:$SSHD_PORT $H "$HOLD_FWD" </dev/null >/dev/null 2>&1 &
 check port-forward-plain SSH-2.0 banner 12222
 kill %1 2>/dev/null; wait
-check agent-forward-plain ED25519 ssh -A $H ssh-add -l
-check no-x11-plain "display=<>" env DISPLAY=:0 ssh $H 'echo "display=<$DISPLAY>"'
-check no-x11-pb "display=<>" env DISPLAY=:0 $PB ssh $A -- 'echo "display=<$DISPLAY>"'
+check agent-forward-plain ED25519 ssh -A $H "$AGENT_LIST"
+check no-x11-plain "display=<>" env DISPLAY=:0 ssh $H "$SHOW_DISPLAY"
+check no-x11-pb "display=<>" env DISPLAY=:0 $PB ssh $A -- "$SHOW_DISPLAY"
 echo "RESULT ok:[$ok ] fail:[$fail ]"'''
 
 
@@ -387,15 +420,20 @@ STEPS = {'setup': setup, 'outage': outage, 'refusals': refusals, 'revoke': revok
 
 
 def main():
-    global ARGS
+    global ARGS, WIN
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument('--only', default=','.join(STEPS))
     p.add_argument('--alias', default='apple')
-    p.add_argument('--mac-user', default='admin')
+    p.add_argument('--mac-user', '--user', help='the setup user on the target (default: admin; with --windows, the login user there)')
+    p.add_argument('--windows', action='store_true')
     ARGS = p.parse_args()
+    if ARGS.windows:
+        import ssh_windows_target
+        WIN = ssh_windows_target.Target()
+    ARGS.mac_user = ARGS.mac_user or (WIN.user() if WIN else 'admin')
     names = ARGS.only.split(',')
     unknown = [n for n in names if n not in STEPS]
-    if unknown or not all(os.environ.get(v) for v in ('MAC_CMD', 'CLIENT_CMD')):
+    if unknown or not all(os.environ.get(v) for v in ('CLIENT_CMD',) + (() if WIN else ('MAC_CMD',))):
         sys.exit('unknown step %s or MAC_CMD/CLIENT_CMD unset' % unknown)
     for n in names:
         try:

@@ -1,7 +1,10 @@
+import base64
+import subprocess
 import unittest
 from unittest import mock
 
 import ssh_mac_rows
+import ssh_windows_target
 
 
 # The Mac answers both ways a harness could pick the daemon: a name match also
@@ -63,6 +66,109 @@ class RevokeVerdict(unittest.TestCase):
 
     def test_a_noisy_normal_exit_fails(self):
         self.assertFalse(ssh_mac_rows.revoke_verdict(self.ok.replace('pb_stderr=[]', 'pb_stderr=[oops]'))[0])
+
+
+class FakeDevice:
+    """Records what the Windows target would run on the device."""
+
+    def __init__(self):
+        self.calls = []
+
+    def start(self, argv, directory):
+        self.calls.append(('later', base64.b64decode(argv[-1]).decode('utf-16-le')))
+
+    def temp_dir(self, prefix):
+        return mock.MagicMock()
+
+    def suspend(self, pid):
+        self.calls.append(('suspend', pid))
+
+    def resume(self, pid):
+        self.calls.append(('resume', pid))
+
+    def ps(self, step, script, **payload):
+        self.calls.append((step, payload))
+        return 0, ''
+
+    def services(self, pattern):
+        return [{'Name': pattern, 'Status': 'Running'}]
+
+
+def windows_target(keys=('C:\\ssh\\authorized_keys\\paperboat',)):
+    target = ssh_windows_target.Target.__new__(ssh_windows_target.Target)
+    target.device = FakeDevice()
+    target.sshd = {'service': 'PaperboatSshd-u1-g1', 'port': 40001, 'authorized_keys': list(keys), 'host_key': 'C:\\ssh\\hostkeys\\k'}
+    return target
+
+
+class WindowsTarget(unittest.TestCase):
+    def setUp(self):
+        ssh_mac_rows.ARGS = mock.Mock(alias='winbox', mac_user='runneradmin')
+        ssh_mac_rows.RESULTS.clear()
+        self.target = windows_target()
+        patch = mock.patch.object(ssh_mac_rows, 'WIN', self.target)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_every_client_script_is_valid_bash_for_both_targets(self):
+        scripts = (ssh_mac_rows.REVOKE, ssh_mac_rows.FORWARDING, 'ssh $H $NOP')
+        for win in (self.target, None):
+            with mock.patch.object(ssh_mac_rows, 'WIN', win):
+                for script in scripts:
+                    done = subprocess.run(['bash', '-n'], input=ssh_mac_rows.prelude() + script, capture_output=True, text=True)
+                    self.assertEqual('', done.stderr)
+
+    def test_the_mac_target_keeps_its_commands(self):
+        with mock.patch.object(ssh_mac_rows, 'WIN', None):
+            prelude = ssh_mac_rows.prelude()
+        self.assertIn("NOP=true; HOLD_PB='echo session-up; sleep 300'; ", prelude)
+        self.assertIn("SSHD_PORT=22; AGENT_LIST='ssh-add -l'; SHOW_DISPLAY='echo \"display=<$DISPLAY>\"'; ", prelude)
+
+    def test_the_windows_commands_run_in_powershell_and_forward_to_the_managed_port(self):
+        remote = self.target.remote()
+        script = base64.b64decode(remote['HOLD_PB'].split()[-1]).decode('utf-16-le')
+        self.assertTrue(script.endswith("'session-up';Start-Sleep 300"))
+        self.assertEqual(('exit 0', '40001'), (remote['NOP'], remote['SSHD_PORT']))
+        self.assertIn('H=runneradmin@$HN', ssh_mac_rows.prelude())
+
+    def test_refusals_stop_the_managed_sshd_and_pause_the_services_with_a_timed_undo(self):
+        answers = {'sshd_stopped': "pb: the machine's SSH server closed the connection", 'machine_offline': 'pb: Paperboat could not reach winbox',
+                   'service_stopped': 'pb: this computer\u2019s Paperboat service is not running'}
+
+        def client(script, timeout=300):
+            for name, text in answers.items():
+                if 'CASE ' + name in script:
+                    return 'CASE %s [%s]\n' % (name, text)
+            return 'warm-ok rc=0'
+
+        with mock.patch.object(ssh_mac_rows, 'cl', client), mock.patch.object(ssh_mac_rows.time, 'sleep', lambda s: None), \
+                mock.patch.object(self.target, 'daemon_pids', lambda: ['11', '12']):
+            ssh_mac_rows.refusals()
+        self.assertEqual('PASS', ssh_mac_rows.RESULTS[-1]['status'], ssh_mac_rows.RESULTS)
+        calls = self.target.device.calls
+        self.assertEqual("Start-Sleep 0;Stop-Service -Name 'PaperboatSshd-u1-g1' -Force;Start-Sleep 40;Start-Service -Name 'PaperboatSshd-u1-g1'", calls[0][1])
+        self.assertTrue(calls[1][1].startswith('Start-Sleep 50;') and 'NtResumeProcess' in calls[1][1] and '11,12' in calls[1][1])
+        self.assertEqual([('suspend', '11'), ('suspend', '12'), ('resume', '11'), ('resume', '12')], calls[2:])
+
+    def test_the_block_is_removed_on_the_machine_by_a_timer_set_before_it(self):
+        name = self.target.block(['192.0.2.1', '2001:db8::1'])
+        (_, later), (_, payload) = self.target.device.calls
+        self.assertEqual('Start-Sleep 240;Remove-NetFirewallRule -DisplayName ' + name, later)
+        self.assertEqual({'name': name, 'addresses': ['192.0.2.1', '2001:db8::1']}, payload)
+
+    def test_an_sshd_reading_a_second_key_file_fails_the_outage_check(self):
+        self.target.sshd['authorized_keys'].append('.ssh/authorized_keys')
+        answer = lambda s, timeout=300: 'sudo-ok warm-ok'
+        with mock.patch.dict('os.environ', {'REVOKE_CLIENT_CMD': 'x'}), mock.patch.object(ssh_mac_rows, 'cl', answer), \
+                mock.patch.object(ssh_mac_rows, 'rcl', answer):
+            ssh_mac_rows.outage()
+        self.assertEqual('FAIL', ssh_mac_rows.RESULTS[-1]['status'])
+        self.assertIn('exactly one authorized keys file', ssh_mac_rows.RESULTS[-1]['detail'])
+
+    def test_otheruser_is_not_passed_without_a_windows_target(self):
+        with mock.patch.object(ssh_mac_rows, 'cl', lambda s, timeout=300: 'warm-ok'):
+            ssh_mac_rows.otheruser()
+        self.assertEqual('FAIL', ssh_mac_rows.RESULTS[-1]['status'])
 
 
 if __name__ == '__main__':
