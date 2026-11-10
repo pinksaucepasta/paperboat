@@ -1,0 +1,1 @@
+{"check": "update-floor", "status": "PASS", "official_version": "2026.11.19.0", "floor": "2026.11.20.0", "seconds_to_refuse": 5.3, "refused": ["machine list", "session list", "exec"], "still_allowed": ["update status", "update check", "auth status"], "custom_unaffected": true, "seconds_to_restore": 5.9, "floor_cleared": true}
