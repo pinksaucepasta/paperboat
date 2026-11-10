@@ -49,20 +49,21 @@ func attributeSID(accepted net.Conn, lookup func(socketTuple) ([]tcpOwner, error
 	if err != nil {
 		return "", err
 	}
-	var rows []tcpOwner // the last answer: on success it is the single accepted row
+	var bound int64 // bind time of the row of the last answer; attributeOwner accepts only that answer
 	pid, err := attributeOwner(tuple, func(tuple socketTuple) ([]socketOwner, error) {
-		var err error
-		rows, err = lookup(tuple)
+		rows, err := lookup(tuple)
 		owners := make([]socketOwner, len(rows))
+		bound = 0
 		for i, row := range rows {
 			owners[i] = row.socketOwner
+			bound = row.bound
 		}
 		return owners, err
 	})
 	if err != nil {
 		return "", err
 	}
-	return user(pid, rows[0].bound)
+	return user(pid, bound)
 }
 
 func lookupTCPOwners(tuple socketTuple) ([]tcpOwner, error) {
