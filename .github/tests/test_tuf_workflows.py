@@ -154,6 +154,7 @@ class TUFWorkflowSignerTest(unittest.TestCase):
             self.assertIn(job["runs-on"], ("windows-2025", "windows-11-arm"))
             self.assertTrue(any("windows-" + architecture + "-native-qualification.json" in str(step.get("with", {}).get("path", "")) for step in job["steps"]))
             self.assertIn("windows-" + architecture, workflow["jobs"]["release-publication"]["needs"])
+            self.assertTrue(any("TestInstallPowerShellConfirmsTheResetWithTheHostNamePbReads" in str(step.get("run", "")) for step in job["steps"]))
 
     # 2026-11-10: release.yml published five targets and the refresh still demanded three ("invalid release identity").
     def test_refresh_expects_the_number_of_targets_the_release_publishes(self):

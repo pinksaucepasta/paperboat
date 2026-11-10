@@ -95,7 +95,8 @@ try {
 
   if ($null -ne $tokenFile) {
     Remove-Item Env:PAPERBOAT_ENROLLMENT_TOKEN -ErrorAction SilentlyContinue
-    $resetRaw = & $download 'reset' '--confirmation' 'RESET PAPERBOAT' '--hostname' ([Environment]::MachineName) '--enrollment-token-file' $tokenFile '--json'
+    # pb compares with the DNS host name (real case, full length), not the NetBIOS name (upper case, 15 characters).
+    $resetRaw = & $download 'reset' '--confirmation' 'RESET PAPERBOAT' '--hostname' ([System.Net.Dns]::GetHostName()) '--enrollment-token-file' $tokenFile '--json'
     if ($LASTEXITCODE -ne 0) { throw "Paperboat fresh enrollment reset failed with exit code $LASTEXITCODE." }
     try { $resetResult = ([string]::Join([Environment]::NewLine, [string[]]$resetRaw)) | ConvertFrom-Json } catch { throw 'Paperboat fresh enrollment reset returned invalid JSON.' }
     if ($resetResult.ok -ne $true -or $resetResult.data.resume -isnot [bool] -or $resetResult.data.executable -isnot [string]) { throw 'Paperboat fresh enrollment reset returned invalid JSON.' }

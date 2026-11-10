@@ -341,6 +341,12 @@ jobs:
           $ldflags = "-s -w -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryDSN=$env:SENTRY_DSN -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryRelease=paperboat:$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Distribution=official -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=$env:GITHUB_SHA -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=$env:DEFAULT_SERVER_URL -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=$env:DEFAULT_RELEASE_URL"
           & go build -buildvcs=false -trimpath -ldflags $ldflags -o $output ./cmd/pb
           if ($LASTEXITCODE -ne 0) { throw 'Unified Windows candidate build failed.' }
+      # Release 2026.11.09.7: the published installer confirmed `pb reset` with a host name pb rejected.
+      - name: Installer and pb agree on this machine's host name
+        shell: powershell
+        run: |
+          & go test ./tools -run TestInstallPowerShellConfirmsTheResetWithTheHostNamePbReads -count=1 -v
+          if ($LASTEXITCODE -ne 0) { throw 'The Windows installer would confirm the reset with a host name pb rejects.' }
       - name: Smoke test Windows package
         shell: powershell
         run: |
@@ -422,6 +428,12 @@ jobs:
           $ldflags = "-s -w -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryDSN=$env:SENTRY_DSN -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultSentryRelease=paperboat:$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Distribution=official -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Version=$env:RELEASE_VERSION -X github.com/pinksaucepasta/paperboat/internal/buildinfo.Commit=$env:GITHUB_SHA -X github.com/pinksaucepasta/paperboat/internal/buildinfo.ProtocolVersion=1 -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultServerURL=$env:DEFAULT_SERVER_URL -X github.com/pinksaucepasta/paperboat/internal/buildinfo.DefaultReleaseURL=$env:DEFAULT_RELEASE_URL"
           & go build -buildvcs=false -trimpath -ldflags $ldflags -o $output ./cmd/pb
           if ($LASTEXITCODE -ne 0) { throw 'Unified Windows candidate build failed.' }
+      # Release 2026.11.09.7: the published installer confirmed `pb reset` with a host name pb rejected.
+      - name: Installer and pb agree on this machine's host name
+        shell: powershell
+        run: |
+          & go test ./tools -run TestInstallPowerShellConfirmsTheResetWithTheHostNamePbReads -count=1 -v
+          if ($LASTEXITCODE -ne 0) { throw 'The Windows installer would confirm the reset with a host name pb rejects.' }
       - name: Smoke test Windows package
         shell: powershell
         run: |

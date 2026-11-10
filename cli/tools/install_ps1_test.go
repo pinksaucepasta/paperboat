@@ -189,3 +189,25 @@ func TestRenderingASignedWindowsTargetNeedsTheExpectedPublisher(t *testing.T) {
 		t.Fatalf("signed targets rendered without a publisher: %v %s", err, out)
 	}
 }
+
+// Release 2026.11.09.7, clean Windows Sandbox and victus: the one-liner stopped at "fresh enrollment reset failed with
+// exit code 2". The installer confirmed the reset with the NetBIOS name (VICTUS; 26D84BEC-68A9-4, cut at 15
+// characters) and pb compares with os.Hostname(), the DNS host name (Victus; 26d84bec-68a9-401c-b77e-65503ff3c2c5).
+func TestInstallPowerShellConfirmsTheResetWithTheHostNamePbReads(t *testing.T) {
+	const expression = "[System.Net.Dns]::GetHostName()"
+	script, err := os.ReadFile("install.ps1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(script), "'--hostname' ("+expression+")") || strings.Contains(string(script), "MachineName") {
+		t.Fatal("the installer does not confirm the reset with the DNS host name")
+	}
+	if runtime.GOOS != "windows" {
+		return // only Windows runs this installer; there the two names must be the same string
+	}
+	output, err := exec.Command("powershell", "-NoProfile", "-Command", expression).Output()
+	want, hostErr := os.Hostname()
+	if got := strings.TrimSpace(string(output)); err != nil || hostErr != nil || got != want {
+		t.Fatalf("installer host name %q (%v), pb host name %q (%v)", got, err, want, hostErr)
+	}
+}
