@@ -82,7 +82,10 @@ def one_session(pb, selector, tunnel, route, nonce):
         require(echo(host, port, payload) == payload, 'TCP echo changed bytes')
         require(job.poll() is None, 'access exited during echo')
         job.terminate()
-        require(listener_closed(host, port), 'listener remained open after command exit')
+        end = time.monotonic() + 15  # a killed Windows process closes its sockets a moment after taskkill returns
+        while not listener_closed(host, port):
+            require(time.monotonic() < end, 'listener remained open after command exit')
+            time.sleep(1)
         result.update(status='PASS', payload_bytes=len(payload), payload_sha256=hashlib.sha256(payload).hexdigest(),
                       listener_closed=True, shutdown_exit=job.poll())
     except Exception as error:
