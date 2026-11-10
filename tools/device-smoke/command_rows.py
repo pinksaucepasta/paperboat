@@ -182,9 +182,18 @@ def rows(args):
     out.append(r)
 
     r = Row('C216', 'update'); r.help()
-    s = Row('C216', 'update status'); v = s.json_ok(); r.failures += s.failures
-    r.expect(isinstance(v, dict) and 'cli_version' in v and 'settings' in v, 'update status lacks version/settings')
     r.invalid('--from', '/nonexistent/pb', hint='.')
+    out.append(r)
+
+    r = Row('C221', 'update status'); r.help()
+    v = r.json_ok()
+    installed = ''.join(line.split('Version ', 1)[1].strip() for line in run('version')[1].splitlines() if 'Version ' in line)
+    r.expect(isinstance(v, dict) and 'settings' in v and installed and v.get('cli_version') == installed,
+             'update status cli_version %r is not the installed version %r' % ((v or {}).get('cli_version'), installed))
+    r.expect(isinstance(v, dict) and (not v.get('runtime_version') or v['runtime_version'] == installed),
+             'update status runtime_version differs from the installed version')
+    r.expect(isinstance(v, dict) and (not v.get('runtime_available') or v.get('runtime_state') == 'ready'),
+             'update status says the runtime is available but not ready')
     out.append(r)
 
     r = Row('C217', 'update bundle'); r.help(); r.invalid(hint='output')
@@ -202,6 +211,11 @@ def rows(args):
             result = pb_run('config', 'sync', *extra, '--json', timeout=60, env=env)
             return result.returncode, (json.loads(result.stdout or '{}').get('data') or {}), result.stdout + result.stderr
         _, where, _ = init('path')
+        r186 = Row('C186', 'config sync path')
+        located = make_path(where.get('path', '/nonexistent'))
+        r186.expect(bool(where.get('path')) and str(located).startswith(home) and not located.exists(),
+                    'config sync path is not inside the sandbox home or created the file')
+        out.append(r186)
         code, made, _ = init('init')
         path = make_path(where.get('path', '/nonexistent'))
         r.expect(code == 0 and made.get('path') == str(path) and str(path).startswith(home), 'init did not create the file at its path')
@@ -231,8 +245,17 @@ def rows(args):
     v = Row('C228', 'config show').json_ok()
     absolute = (PureWindowsPath if DEVICE else Path)((v or {}).get('path', '')).is_absolute()  # the device's own path form
     r.expect(isinstance(v, dict) and v.get('server_url') and absolute, 'config show lacks server_url/path')
-    r.expect(run('config', 'path')[1].strip() == (v or {}).get('path'), 'config path and show disagree')
-    r.expect(Row('C228', 'config status').json_ok() is not None, 'config status --json invalid')
+    out.append(r)
+
+    r = Row('C236', 'config path'); r.help()
+    shown = run('config', 'path')[1].strip()
+    r.expect(shown == (v or {}).get('path') and (PureWindowsPath if DEVICE else Path)(shown).is_absolute(),
+             'config path is not the absolute path config show reports')
+    out.append(r)
+
+    r = Row('C182', 'config status'); r.help()
+    d = r.json_ok()
+    r.expect(isinstance(d, dict) and d, 'config status --json is not a status object')
     out.append(r)
 
     r = Row('C022', 'auth'); r.help(); r.invalid('bogus')

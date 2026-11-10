@@ -61,6 +61,14 @@ def pf_release(block):
         failsafe.terminate()
 
 
+def shell_pid(raw):
+    """The shell's pid in the text after PB_PID_: a ConPTY client repaints escape sequences around it."""
+    found = re.search(rb'\d+', raw)
+    if not found:
+        raise RuntimeError('no shell pid in %r' % raw)
+    return found.group()
+
+
 def diagnostic_lines():
     """Every line of the daemon's diagnostic event files (on the device for a Windows client)."""
     if DEVICE:
@@ -108,7 +116,7 @@ def main():
         terminal.expect(terminal.marker('READY', 'stty -echo; '))
         terminal.send("pb_hold=$$; printf '\\nPB_PID_%s\\n' \"$$\"\r")
         terminal.expect('PB_PID_')
-        held = terminal.expect('\n').decode().strip()
+        held = shell_pid(terminal.expect('\n'))
 
         def type_line(number):
             terminal.send("echo IN_%d >> %s; printf '\\nPB_ACK_%d\\n'\r" % (number, log, number))
@@ -141,8 +149,9 @@ def main():
         terminal.expect('PB_ACK_7', timeout=60)
         terminal.send("printf '\\nPB_AGAIN_%s\\n' \"$$\"\r")
         terminal.expect('PB_AGAIN_', timeout=30)
-        if terminal.expect('\n').decode().strip() != held:
-            raise RuntimeError('terminal came back in a different shell')
+        again = shell_pid(terminal.expect('\n'))
+        if again != held:
+            raise RuntimeError('terminal came back in a different shell (%r, was %r)' % (again, held))
         if not failures_since(started):
             raise RuntimeError('the network block never produced a connection failure; the drop was not exercised')
         # the shell that wrote the log runs on the target: read it there
