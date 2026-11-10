@@ -1,0 +1,27 @@
+Windows Ctrl-C reaches the foreground program of a session shell (sanitized; winpool-2, GitHub-hosted Windows runner, test binaries built from 4810e5746 via cmd /c).
+Cause (spark/ctrlc-flag-product.md): the host starts in its own process group (service_entry_windows.go), which marks it as ignoring Ctrl+C; every child inherits it (flag 1 on session-owner, cmd, powershell, ping). Fix: pty.Adapter.Start clears the flag before CreateProcess (ctrlc_windows.go).
+
+TestNativeConPTYInterruptStopsAPingRunInPowerShell, host state emulated (ignore flag set before the adapter starts the shell):
+  without the fix, 3 runs: FAIL FAIL FAIL (about 10.4 s each: timed out waiting for "Control-C", ping keeps replying)
+  with the fix, 3 runs:    PASS PASS PASS (1.57 s, 1.57 s, 1.51 s; Interrupt true, Control-C printed, ping gone, shell alive)
+
+Whole group with the fix (cmd /c pty-fix.exe -test.run TestNativeConPTY -test.v), verbatim:
+--- PASS: TestNativeConPTYCtrlCInterruptsForegroundAndPreservesShell (0.42s)
+--- PASS: TestNativeConPTYInterruptOvertakesAStuckPaste (2.54s)
+--- PASS: TestNativeConPTYInterruptStopsAForegroundProgramThatIgnoresETX (0.13s)
+--- PASS: TestNativeConPTYInterruptLeavesBackgroundWorkAlone (1.22s)
+--- PASS: TestNativeConPTYInterruptAtAnIdlePromptKeepsTheShell (0.09s)
+--- PASS: TestNativeConPTYInterruptAtAnIdlePromptLeavesBackgroundWorkAlone (2.65s)
+--- PASS: TestNativeConPTYInterruptWithAPowerShellShellTerminatesNothing (2.51s)
+--- PASS: TestNativeConPTYInterruptStopsAPingRunInPowerShell (1.55s)
+--- PASS: TestNativeConPTYInterruptLeavesPowerShellJobsAlone (9.20s)
+    --- PASS: TestNativeConPTYInterruptLeavesPowerShellJobsAlone/Start-Job_in_powershell.exe (3.49s)
+    --- PASS: TestNativeConPTYInterruptLeavesPowerShellJobsAlone/background_operator_in_pwsh (5.70s)
+--- PASS: TestNativeConPTYResizeAndUTF8VT (0.81s)
+--- PASS: TestNativeConPTYJobCloseKillsDescendant (0.44s)
+--- PASS: TestNativeConPTYTerminateRetainsCleanupFailureAndRecovers (0.04s)
+--- PASS: TestNativeConPTYInterruptInRawModeIsData (0.84s)
+--- PASS: TestNativeConPTYSeparatesServiceNULHandles (0.51s)
+    --- PASS: TestNativeConPTYSeparatesServiceNULHandles/cmd.exe (0.04s)
+    --- PASS: TestNativeConPTYSeparatesServiceNULHandles/powershell.exe (0.47s)
+PASS

@@ -1,0 +1,4 @@
+F3-11 Windows client, TestDeviceClientCtrlCUnderFlood (sanitized; client winpool-2 dev-07288229b, host hp dev-07288229b, local ConPTY, no ssh hop; 256 KiB paste, yes flood on hp, stalled second viewer, lone Ctrl-C):
+  5 iterations, output quiet after Ctrl-C: 4.6 s, 2.1 s, 1.8 s, 1.7 s, 2.0 s (bound 5 s). History without the host answer and client hold: 7.5 s, 5.2 s singles, 4.8/4.5/1.6 runs, 8.8-10 s without the discard.
+  Idle prompt, lone Ctrl-C: 637 bytes after the key, no ESC[2J, ESC[3J or cursor-home repaint, prompt returns.
+  terminal_matrix.py hp --only fast (Windows client, ssh -tt hop in the harness): 5 PASS, "N6 Ctrl-C stops yes promptly: yes on the target ended 8.3 s after Ctrl-C" FAIL (informational, harness hop).
