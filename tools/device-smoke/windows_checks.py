@@ -147,6 +147,8 @@ def checks(args):
         table[name.replace('_lifecycle', '').replace('_', '-')] = ([name + '.py', peer], ['--peer'])
     for name in ('config_customize', 'cli_paging', 'network_inventory', 'update_observation', 'approve_refusals'):
         table[name.replace('_', '-')] = ([name + '.py'], [])
+    table['machine-tags'] = (['machine_tags.py', '--owner-cmd', winhost.WINDOWS, '--target', peer], ['--peer'])
+    table['free-plan'] = (['free_plan.py', args.machine], ['--machine'])  # the device account must be a Free account
     table['send-self'] = (['send_self.py', args.machine], ['--machine'])
     table['workspace-switch'] = (['workspace_lifecycle.py'], ['--empty_team'])  # PAPERBOAT_SMOKE_TEAM = --empty-team
     table['config-team-default'] = (['config_team_default.py', team, args.config_repository or ''], ['--team', '--config_repository'])

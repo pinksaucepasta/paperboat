@@ -3,7 +3,7 @@
 
 OWNER runs pb signed in on one machine of the account (OWNER_CMD, e.g.
 `ssh pbvm3 sudo docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 lanek-c`);
-TARGET is another machine of the account, by name. In the personal workspace the check adds,
+TARGET is another machine of the account, by name. OWNER_CMD `windows` is pb.exe on the Windows device. In the personal workspace the check adds,
 removes and sets TARGET's tags with pb machine tag, checks pb machine list (TAGS, --tag), pb status
 and the policy file, then clears the tags again.
 
@@ -17,9 +17,13 @@ import sys
 import time
 
 from remote_timeout import timeout_words
+import winhost
 
 
 def sh(prefix, pb, args, timeout=150):
+    if winhost.is_side(prefix):  # `windows`: pb.exe on the Windows device (winhost.side_run)
+        done = winhost.side_run(prefix, args, timeout=timeout)
+        return done.returncode, done.stdout, done.stderr
     remote = ' '.join(shlex.quote(x) for x in timeout_words(prefix) + [pb] + list(args))
     done = subprocess.run(shlex.split(prefix) + [remote], capture_output=True, text=True, timeout=timeout)
     return done.returncode, done.stdout, done.stderr

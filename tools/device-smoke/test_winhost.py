@@ -1109,6 +1109,62 @@ class PrivateAccessFamily(unittest.TestCase):
             private_access.pair(args)
 
 
+class FreePlanAndTagsOnTheDevice(unittest.TestCase):
+    """free_plan.py reads the plan with an API token it always revokes; machine_tags.py routes `windows` to the device."""
+
+    def test_the_plan_token_is_made_by_pb_on_the_device_and_revoked_even_when_the_check_fails(self):
+        import free_plan
+        import tempfile
+        calls = []
+
+        class Device:
+            def runtime_dir(self):
+                return pathlib.Path(self.directory)
+
+        def pb_text(binary, arguments, **options):
+            calls.append(list(arguments))
+            return subprocess.CompletedProcess(arguments, 0, json.dumps({'data': {'secret': 'pbat_SECRET'}}), '')
+
+        with tempfile.TemporaryDirectory() as directory:
+            device = Device()
+            device.directory = directory
+            (pathlib.Path(directory) / 'machine-registration.json').write_text(json.dumps({'server_url': 'https://api.example.test'}))
+            with patch('winhost.device', return_value=device), patch('winhost.pb_text', pb_text):
+                with self.assertRaises(RuntimeError):
+                    with free_plan.credential() as (token, server):
+                        self.assertEqual(('pbat_SECRET', 'https://api.example.test'), (token, server))
+                        raise RuntimeError('the check failed')
+        name = calls[0][2]
+        self.assertEqual(['api-token', 'create', name, '--workspace', 'personal', '--expires', '1d', '--json'], calls[0])
+        self.assertEqual(['api-token', 'revoke', name, '--workspace', 'personal', '--yes'], calls[-1])
+
+    def test_gate_events_are_counted_in_the_device_diagnostics(self):
+        import free_plan
+        asked = []
+
+        class Device:
+            path_flavor = pathlib.PureWindowsPath
+
+            def env(self, name):
+                return 'C:\\Users\\u\\AppData\\Local'
+
+            def count_in_files(self, directory, pattern, text):
+                asked.append((str(directory), pattern, text))
+                return 1 if text == 'subscription_required' else 0
+
+        with patch('winhost.device', return_value=Device()):
+            self.assertEqual(1, free_plan.gate_events())
+        self.assertEqual({'C:\\Users\\u\\AppData\\Local\\Paperboat\\state\\diagnostics'}, {a[0] for a in asked})
+        self.assertIn('"http_status": "402"', [a[2] for a in asked])
+
+    def test_machine_tags_runs_pb_on_the_device_for_the_windows_side(self):
+        import machine_tags
+        done = subprocess.CompletedProcess([], 0, 'out', 'err')
+        with patch('winhost.side_run', return_value=done) as side_run:
+            self.assertEqual((0, 'out', 'err'), machine_tags.sh('windows', '/unused/pb', ['machine', 'tag', 'x']))
+        side_run.assert_called_once_with('windows', ['machine', 'tag', 'x'], timeout=150)
+
+
 if __name__ == '__main__':
     unittest.main()
 
