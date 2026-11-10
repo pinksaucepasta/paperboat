@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -305,12 +306,13 @@ func setupCommand() *cobra.Command {
 				registration.AccountID = previousRegistration.AccountID
 				registration.SSHUser, registration.SSHPort = previousRegistration.SSHUser, previousRegistration.SSHPort
 				if runtime.GOOS == "windows" {
-					// SetupMachine's answer carries no SSH target (winpool-7: setup 409 three times): ask the server.
-					listed, getErr := client.GetUserMachine(command.Context(), machine.ID)
-					if getErr != nil {
-						return setupFailure(fmt.Errorf("read the registered SSH target: %w", getErr))
+					// Neither SetupMachine's answer nor GetUserMachine's carries the SSH target (winpool-2 debug run:
+					// ssh nil, setup 409 with HOST\\user and the default port); the inventory list does.
+					machines, listErr := client.ListUserMachinesFiltered(command.Context(), url.Values{"q": {machine.Alias}})
+					if listErr != nil {
+						return setupFailure(fmt.Errorf("read the registered SSH target: %w", listErr))
 					}
-					registered := registeredSSHTarget(listed, machine.InstallationGeneration)
+					registered := registeredSSHTargetIn(machines, machine.ID, machine.InstallationGeneration)
 					keptUser, keptPort := keptWindowsSSHTarget(registered, sshUser, sshPortValue)
 					if keptUser != sshUser && !sameWindowsAccount(keptUser, sshUser) {
 						fmt.Fprintf(command.ErrOrStderr(), "Managed SSH stays registered for the account %s, not %s. Re-enroll this machine to change it.\n", keptUser, sshUser)
@@ -516,6 +518,16 @@ func sameWindowsAccount(registered, current string) bool {
 		current = current[i+1:]
 	}
 	return strings.EqualFold(registered, current)
+}
+
+// registeredSSHTargetIn finds the machine in the inventory list and returns its registered target.
+func registeredSSHTargetIn(machines []api.UserMachine, id string, generation int64) api.MachineSSH {
+	for _, listed := range machines {
+		if listed.ID == id {
+			return registeredSSHTarget(listed, generation)
+		}
+	}
+	return api.MachineSSH{}
 }
 
 // registeredSSHTarget is the SSH target the server holds for this installation generation, or none: a target of

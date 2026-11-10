@@ -44,3 +44,16 @@ func TestRegisteredSSHTargetIsTheServersTargetOfThisGenerationOnly(t *testing.T)
 		t.Fatalf("a machine without a target gave one: %+v", got)
 	}
 }
+
+func TestRegisteredSSHTargetInFindsTheMachineInTheInventoryList(t *testing.T) {
+	machines := []api.UserMachine{
+		{ID: "machine_other", SSH: &api.MachineSSH{OSUser: "other", Port: 2222, TargetGeneration: 1}},
+		{ID: "machine_this", SSH: &api.MachineSSH{OSUser: "runneradmin", Port: 58965, TargetGeneration: 1}},
+	}
+	if got := registeredSSHTargetIn(machines, "machine_this", 1); got.OSUser != "runneradmin" || got.Port != 58965 {
+		t.Fatalf("the machine's own target was not found: %+v", got)
+	}
+	if got := registeredSSHTargetIn(machines, "machine_missing", 1); got.Port != 0 {
+		t.Fatalf("a machine that is not listed gave a target: %+v", got)
+	}
+}
