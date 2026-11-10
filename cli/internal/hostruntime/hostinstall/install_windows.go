@@ -1346,13 +1346,17 @@ func installWindowsSSHAfterActivation(ctx context.Context, request Request, layo
 		return err
 	}
 	config.ServiceExecutable = pinned
-	_, err = setupPaperboatSSH(ctx, config)
-	return skipUnobtainableWindowsSSH(ctx, err)
+	return prepareWindowsSSHWithin(ctx, func(bounded context.Context) error {
+		_, err := setupPaperboatSSH(bounded, config)
+		return err
+	})
 }
 
 func prepareWindowsSSHGenerationIfObtainable(ctx context.Context, request Request) error {
-	_, err := PrepareWindowsSSHGeneration(ctx, request)
-	return skipUnobtainableWindowsSSH(ctx, err)
+	return prepareWindowsSSHWithin(ctx, func(bounded context.Context) error {
+		_, err := PrepareWindowsSSHGeneration(bounded, request)
+		return err
+	})
 }
 
 // PrepareWindowsSSHGeneration prepares the verified candidate before feature

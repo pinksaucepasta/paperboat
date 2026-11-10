@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
@@ -426,5 +427,33 @@ func TestWindowsServiceCleanupRetainsFirstFailureWithoutRepeatingMutation(t *tes
 	}
 	if !reflect.DeepEqual(events, []string{"install:hostd", "uninstall:hostd"}) {
 		t.Fatal("cleanup repeated owned mutation")
+	}
+}
+
+// winpool-3: a machine where OpenSSH is only reachable through the PowerShell Gallery spent the whole 3 min of the
+// bridge in that step and the pair rolled back. The step has its own budget and its expiry skips managed SSH.
+func TestWindowsSSHPreparationOutOfTimeSkipsManagedSSHButTheCallersExpiryAborts(t *testing.T) {
+	previous := windowsSSHPreparationBudget
+	t.Cleanup(func() { windowsSSHPreparationBudget = previous })
+	windowsSSHPreparationBudget = 30 * time.Millisecond
+
+	started := time.Now()
+	err := prepareWindowsSSHWithin(context.Background(), func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	if err != nil || time.Since(started) > 5*time.Second {
+		t.Fatalf("a step out of its budget: err=%v after %v", err, time.Since(started))
+	}
+
+	parent, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := prepareWindowsSSHWithin(parent, func(ctx context.Context) error { return ctx.Err() }); err == nil {
+		t.Fatal("the caller's own cancellation was skipped")
+	}
+
+	refusal := windowsopenssh.ErrUntrustedBinary
+	if err := prepareWindowsSSHWithin(context.Background(), func(context.Context) error { return refusal }); !errors.Is(err, refusal) {
+		t.Fatalf("a trust failure was skipped: %v", err)
 	}
 }

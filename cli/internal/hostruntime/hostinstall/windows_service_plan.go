@@ -23,6 +23,24 @@ func skipUnobtainableWindowsSSH(ctx context.Context, err error) error {
 	return err
 }
 
+// windowsSSHPreparationBudget bounds the OpenSSH step of an install, pair or repair: obtaining the package may fall
+// back to the PowerShell Gallery (5 min) and Install-WinGetPackage (10 min), which exceed the 3 min the elevated
+// bridge allows the whole operation (winpool-3, 2026-11-10: three minutes of silence, then a rollback).
+var windowsSSHPreparationBudget = 75 * time.Second
+
+// prepareWindowsSSHWithin runs one OpenSSH preparation step under its own budget. Its expiry is the machine not
+// being able to supply OpenSSH in time, so the install continues without managed SSH like any other unobtainable
+// case; an expiry of the caller's own context still aborts.
+func prepareWindowsSSHWithin(ctx context.Context, step func(context.Context) error) error {
+	bounded, cancel := context.WithTimeout(ctx, windowsSSHPreparationBudget)
+	defer cancel()
+	err := step(bounded)
+	if err != nil && ctx.Err() == nil && bounded.Err() != nil {
+		return nil
+	}
+	return skipUnobtainableWindowsSSH(ctx, err)
+}
+
 var standaloneVersionPattern = regexp.MustCompile(`^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]+$`)
 
 type windowsRuntimeServiceDefinition struct {
