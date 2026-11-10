@@ -504,6 +504,7 @@ func TestBridgeSSHTargetEndIsNotAFailureOnANativeStream(t *testing.T) {
 	bridgeSide, clientSide := tcpPair(t)
 	defer clientSide.Close()
 	go func() { _, _ = io.Copy(io.Discard, clientSide) }()
+	_ = clientSide.CloseWrite() // the client tore its side down: why the FIN towards it fails
 	_, err = BridgeSSH(t.Context(), &closedReadConn{Conn: bridgeSide}, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second)
 	if err != nil {
 		t.Fatalf("a session sshd ended reported %v", err)

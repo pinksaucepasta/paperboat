@@ -1,6 +1,8 @@
 package managedssh
 
 import (
+	"context"
+	"errors"
 	"io"
 	"net"
 	"syscall"
@@ -101,6 +103,73 @@ func TestCloseWriteFailureIgnoresOnlyTheBridgesOwnClose(t *testing.T) {
 	} {
 		if got := closeWriteFailure(c.err, c.finished) != nil; got != c.want {
 			t.Errorf("%s: failure=%v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// finLostConn fails CloseWrite (the FIN) with an error that is not a closed-connection one.
+type finLostConn struct{ net.Conn }
+
+func (finLostConn) CloseWrite() error { return errors.New("fin lost") }
+
+// A FIN that never reached sshd leaves the command waiting for input that never ends: a failure, not a clean
+// session, unless the bridge's own close made it fail.
+func TestBridgeSSHFailedFINToSSHDIsAFailure(t *testing.T) {
+	listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		if connection, acceptErr := listener.AcceptTCP(); acceptErr == nil {
+			defer connection.Close()
+			_, _ = io.Copy(io.Discard, connection)
+		}
+	}()
+	previous := dialSSHD
+	dialSSHD = func(ctx context.Context, address string) (net.Conn, error) {
+		connection, dialErr := previous(ctx, address)
+		return finLostConn{connection}, dialErr
+	}
+	defer func() { dialSSHD = previous }()
+	bridgeSide, clientSide := tcpPair(t)
+	defer clientSide.Close()
+	_ = clientSide.CloseWrite() // a clean copy: the client finished sending
+	_, err = BridgeSSH(t.Context(), bridgeSide, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second)
+	if err == nil {
+		t.Fatal("a FIN that failed to reach sshd was reported as a clean session")
+	}
+}
+
+// A failed FIN towards the client is a failure unless the client had already left (its EOF).
+func TestBridgeSSHFailedFINToTheClientIsAFailureUnlessItLeft(t *testing.T) {
+	previous := resetGrace
+	resetGrace = 300 * time.Millisecond
+	defer func() { resetGrace = previous }()
+	for _, clientLeaves := range []bool{true, false} {
+		listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		go func() {
+			if connection, acceptErr := listener.AcceptTCP(); acceptErr == nil {
+				_, _ = connection.Write([]byte("done"))
+				_ = connection.Close()
+			}
+		}()
+		bridgeSide, clientSide := tcpPair(t)
+		go func() { _, _ = io.Copy(io.Discard, clientSide) }()
+		if clientLeaves {
+			_ = clientSide.CloseWrite()
+		}
+		_, err = BridgeSSH(t.Context(), finLostConn{bridgeSide}, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second)
+		_ = clientSide.Close()
+		_ = listener.Close()
+		if clientLeaves && err != nil {
+			t.Fatalf("client left, FIN to it failed: %v, want a clean session", err)
+		}
+		if !clientLeaves && err == nil {
+			t.Fatal("a FIN that failed towards a client that never left was reported as a clean session")
 		}
 	}
 }

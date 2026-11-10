@@ -89,6 +89,11 @@ func ProbeLoopbackSSH(ctx context.Context, port uint16, timeout time.Duration) (
 	return readiness, nil
 }
 
+// dialSSHD opens the connection to the loopback sshd; tests replace it to give the connection a failing CloseWrite.
+var dialSSHD = func(ctx context.Context, address string) (net.Conn, error) {
+	return (&net.Dialer{}).DialContext(ctx, "tcp", address)
+}
+
 func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTarget, dialTimeout time.Duration) (BridgeResult, error) {
 	if ctx == nil || stream == nil || dialTimeout <= 0 || dialTimeout > 30*time.Second {
 		return BridgeResult{}, ErrSSHTargetInvalid
@@ -97,7 +102,7 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 		return BridgeResult{}, err
 	}
 	dialCtx, cancelDial := context.WithTimeout(ctx, dialTimeout)
-	sshd, err := (&net.Dialer{}).DialContext(dialCtx, "tcp", net.JoinHostPort(target.Host, strconv.Itoa(int(target.Port))))
+	sshd, err := dialSSHD(dialCtx, net.JoinHostPort(target.Host, strconv.Itoa(int(target.Port))))
 	cancelDial()
 	if err != nil {
 		if ctx.Err() != nil {
@@ -144,8 +149,8 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 			copyErr = nil // the read failed because the bridge closed the stream after sshd's end
 		}
 		copyErr = normalizeBridgeError(copyErr)
-		if tcp, ok := sshd.(*net.TCPConn); ok {
-			copyErr = errors.Join(copyErr, closeWriteFailure(tcp.CloseWrite(), finished.Load()))
+		if half, ok := sshd.(interface{ CloseWrite() error }); ok {
+			copyErr = errors.Join(copyErr, closeWriteFailure(half.CloseWrite(), finished.Load()))
 		}
 		copyErr = excuseReset(ctx, copyErr, sshdEOF, func() bool { return true })
 		if copyErr != nil {
@@ -160,9 +165,13 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 		}
 		copyErr = normalizeBridgeError(copyErr)
 		if half, ok := stream.(interface{ CloseWrite() error }); ok {
-			// After sshd's clean end the client may already have torn its side down; that is its normal exit.
-			if closeErr := normalizeBridgeError(half.CloseWrite()); copyErr != nil {
+			closeErr := normalizeBridgeError(half.CloseWrite())
+			if copyErr != nil {
 				copyErr = errors.Join(copyErr, closeErr)
+			} else {
+				// After sshd's clean end the client may already have torn its side down, which is its normal exit:
+				// that shows as its EOF. A failed FIN to a client that never left is a failure.
+				copyErr = waitClientLeft(ctx, closeErr, clientEOF)
 			}
 		}
 		copyErr = excuseReset(ctx, copyErr, clientEOF, func() bool { return fromSSHD.Load() == clientLeftAt.Load() })
@@ -203,6 +212,22 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 func closeWriteFailure(err error, finished bool) error {
 	if finished && normalizeBridgeError(err) == nil {
 		return nil
+	}
+	return err
+}
+
+// waitClientLeft keeps err (a failed CloseWrite towards the client) only if the client does not show its EOF.
+func waitClientLeft(ctx context.Context, err error, clientEOF <-chan struct{}) error {
+	if err == nil {
+		return nil
+	}
+	timer := time.NewTimer(resetGrace)
+	defer timer.Stop()
+	select {
+	case <-clientEOF:
+		return nil
+	case <-timer.C:
+	case <-ctx.Done():
 	}
 	return err
 }
