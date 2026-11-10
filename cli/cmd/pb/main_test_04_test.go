@@ -199,6 +199,11 @@ func TestFailedUnifiedSetupPreservesMachineControlCapabilitiesAndRecovery(t *tes
 						return
 					}
 					_ = json.NewEncoder(w).Encode(map[string]any{"data": api.MachineCapabilityPolicy{Desired: test.expected, DesiredVersion: 4}})
+				case r.Method == http.MethodGet && r.URL.Path == "/v1/machines":
+					// Windows setup reads the registered SSH target back (a read, not a mutation).
+					_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"items": []api.UserMachine{}, "pagination": map[string]any{"limit": 200, "offset": 0, "total": 0, "next_offset": nil}}})
+				case r.Method == http.MethodGet && r.URL.Path == "/v1/machines/machine_preserved":
+					_ = json.NewEncoder(w).Encode(map[string]any{"data": api.UserMachine{ID: "machine_preserved", EnvironmentID: "machine_preserved", Alias: "studio", PublicIdentityKey: publicKey, InstallationGeneration: 5}})
 				default:
 					t.Errorf("unexpected recovery server mutation %s %s", r.Method, r.URL.Path)
 					http.NotFound(w, r)
