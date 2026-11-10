@@ -198,6 +198,8 @@ def checks(args):
                                  ['--machine', '--pair_repo_shell', '--pair_repo_addr', '--pair_peer_shell', '--pair_peer_alias'])
     for name in ('reinstall', 'pair-refusal', 'service', 'crash-service', 'setup'):  # the daemon service stops and comes back
         table['install-' + name] = (['install_lifecycle.py', name], [])
+    for fault in ('sigint', 'network'):
+        table['setup-recovery-' + fault] = (['setup_recovery.py', fault], [])
     table['send-self'] = (['send_self.py', args.machine], ['--machine'])
     table['workspace-switch'] = (['workspace_lifecycle.py'], ['--empty_team'])  # PAPERBOAT_SMOKE_TEAM = --empty-team
     table['config-sync-lifecycle'] = (['config_sync_lifecycle.py', args.machine], ['--machine'])  # about 15 min
