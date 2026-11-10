@@ -61,6 +61,11 @@ type Coordinator struct {
 	// browserPortsPending is set while a per-port browser listener of the last reconciliation could not be
 	// bound or started (guarded by mu).
 	browserPortsPending bool
+	// browserGatewayBusy is set while another program owns a browser gateway port (:80 or :443), so browser URLs
+	// are off; browserGatewayOwner names that program when the OS says (both guarded by mu). It is retried like
+	// a failed reconcile, so the URLs return by themselves once the port is free.
+	browserGatewayBusy  bool
+	browserGatewayOwner string
 	// retry re-applies the latest snapshot after a failed or incomplete reconciliation (guarded by retryMu).
 	retryMu       sync.Mutex
 	retryTimer    *time.Timer
@@ -382,7 +387,7 @@ func (c *Coordinator) reconcileSnapshot(ctx context.Context, peers []*daemonrpc.
 		c.reportMu.Unlock()
 	}
 	c.mu.Lock()
-	incomplete := err != nil || c.browserPending || c.namesRefused || c.browserPortsPending
+	incomplete := err != nil || c.browserPending || c.namesRefused || c.browserPortsPending || c.browserGatewayBusy
 	c.mu.Unlock()
 	if incomplete {
 		c.scheduleReconcileRetry(peers, revision)
@@ -430,11 +435,25 @@ func (c *Coordinator) PendingLocalAccessStep() string {
 	if c.namesRefused {
 		return "machine_names"
 	}
+	if c.browserGatewayBusy {
+		return "browser_gateway_port"
+	}
 	if c.browserPending {
 		return "browser_certificate"
 	}
 	if c.browserPortsPending {
 		return "browser_port_listener"
+	}
+	return ""
+}
+
+// PendingLocalAccessDetail is what the OS says about the pending step (the program that owns the gateway port),
+// or "" when it cannot tell.
+func (c *Coordinator) PendingLocalAccessDetail() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.browserGatewayBusy {
+		return c.browserGatewayOwner
 	}
 	return ""
 }

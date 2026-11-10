@@ -10,11 +10,14 @@ import (
 	"maps"
 	"net"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
+	"github.com/pinksaucepasta/paperboat/internal/machineservices"
 	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
@@ -341,4 +344,22 @@ func (c *Coordinator) issueBrowserCertificate(ctx context.Context, client guarde
 		return tls.Certificate{}, fmt.Errorf("install browser certificate trust: %w", err)
 	}
 	return cert, nil
+}
+
+// browserGatewayPortOwner names the program that owns a browser gateway port (:80 or :443) as "name, PID n" when
+// the OS can tell, else "" (macOS cannot name it cheaply). Our own guard is skipped: it may hold :80 when :443 is
+// the busy one. A var so tests can name one.
+var browserGatewayPortOwner = func() string {
+	self, _ := os.Executable()
+	for _, port := range []uint16{80, 443} {
+		name, pid, ok := machineservices.ListenerOwner(port)
+		if !ok || (name != "" && name == filepath.Base(self)) {
+			continue
+		}
+		if name == "" {
+			name = "unknown program"
+		}
+		return fmt.Sprintf("%s, PID %d", name, pid)
+	}
+	return ""
 }

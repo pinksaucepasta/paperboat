@@ -168,3 +168,67 @@ func TestCoordinatorNamesAFailedBrowserPortListenerAndRetries(t *testing.T) {
 		t.Fatal("the retry did not acquire the port listener")
 	}
 }
+
+// Another program on :80 turns the browser gateway off. Native access stays, doctor's pending step is
+// browser_gateway_port with the owner the OS named, and the retry brings the URLs back once the port is free.
+func TestCoordinatorNamesABusyGatewayPortAndRestoresBrowserURLsWhenItIsFree(t *testing.T) {
+	restoreBase, restoreMax := reconcileRetryBase, reconcileRetryMax
+	reconcileRetryBase, reconcileRetryMax = 10*time.Millisecond, 50*time.Millisecond
+	restoreOwner := browserGatewayPortOwner
+	browserGatewayPortOwner = func() string { return "nginx, PID 4242" }
+	t.Cleanup(func() {
+		reconcileRetryBase, reconcileRetryMax, browserGatewayPortOwner = restoreBase, restoreMax, restoreOwner
+	})
+	ca, err := testcert.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := &coordinatorNameClient{conflictPorts: map[int]bool{80: true}}
+	c, err := NewCoordinator(CoordinatorConfig{
+		NameClient:  names,
+		DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("unexpected dial") },
+		IssueCertificate: func(_ context.Context, name, _ string, _ int) (tls.Certificate, error) {
+			cert, key, err := ca.IssueCertificate([]string{name})
+			if err != nil {
+				return tls.Certificate{}, err
+			}
+			return tls.X509KeyPair(cert, key)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.mu.Lock()
+	c.ctx, c.running = t.Context(), true
+	c.mu.Unlock()
+	t.Cleanup(c.resetReconcileRetry)
+	peer := &daemonrpc.PeerUpdate{PeerId: "machine", Alias: "hp", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}}
+	if err := c.reconcileSnapshot(t.Context(), []*daemonrpc.PeerUpdate{peer}, 1); err != nil {
+		t.Fatalf("a busy gateway port must not fail local access: %v", err)
+	}
+	c.mu.Lock()
+	routes, web := len(c.routes), len(c.webRoutes)
+	c.mu.Unlock()
+	if routes != 1 || web != 0 {
+		t.Fatalf("routes=%d webRoutes=%d: want native access kept and the browser gateway off", routes, web)
+	}
+	if step, detail := c.PendingLocalAccessStep(), c.PendingLocalAccessDetail(); step != "browser_gateway_port" || detail != "nginx, PID 4242" {
+		t.Fatalf("pending step=%q detail=%q", step, detail)
+	}
+	names.mu.Lock()
+	delete(names.conflictPorts, 80) // the other program stopped
+	names.mu.Unlock()
+	deadline := time.Now().Add(5 * time.Second)
+	for c.PendingLocalAccessStep() != "" {
+		if time.Now().After(deadline) {
+			t.Fatal("browser URLs did not come back after the port was freed")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	c.mu.Lock()
+	web = len(c.webRoutes)
+	c.mu.Unlock()
+	if web != 1 {
+		t.Fatalf("webRoutes=%d after the retry, want the browser gateway back", web)
+	}
+}

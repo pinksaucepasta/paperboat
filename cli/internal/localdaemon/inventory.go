@@ -322,8 +322,8 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 				desired.Health = []localapi.HealthItem{healthSince(current, now, localapi.HealthItem{
 					Code:     "browser_urls_unavailable",
 					Severity: "warning",
-					Title:    pendingStepTitle(pending.Step),
-					Recovery: "The rest of local access works; Paperboat retries the step by itself",
+					Title:    pendingStepTitle(pending.Step, pending.Detail),
+					Recovery: pendingStepRecovery(pending.Step),
 				})}
 			}
 			if reconcileErr != nil {
@@ -664,7 +664,7 @@ func capabilityReadiness(online bool, capability api.MachineCapability) string {
 // LocalAccessPendingError reports a reconciliation that set up native access while one local access step
 // (Step, for example browser_certificate) failed and is being retried: the daemon stays ready and pb doctor
 // names the step.
-type LocalAccessPendingError struct{ Step string }
+type LocalAccessPendingError struct{ Step, Detail string }
 
 func (e LocalAccessPendingError) Error() string {
 	return "local access step " + e.Step + " is retrying"
@@ -697,10 +697,24 @@ func LocalAccessCause(err error) string {
 
 func localAccessTitle(title string, err error) string { return title + ": " + LocalAccessCause(err) }
 
+// pendingStepRecovery says what to do about a retrying local access step.
+func pendingStepRecovery(step string) string {
+	if step == "browser_gateway_port" {
+		return "Stop that program, and Paperboat turns browser URLs back on by itself."
+	}
+	return "The rest of local access works; Paperboat retries the step by itself"
+}
+
 // pendingStepTitle says what a retrying local access step leaves unavailable.
-func pendingStepTitle(step string) string {
+func pendingStepTitle(step, detail string) string {
 	what := "Some machine names are unavailable"
 	switch step {
+	case "browser_gateway_port":
+		title := "Browser URLs are off because another program is using port 80/443"
+		if detail != "" {
+			title += " (" + detail + ")"
+		}
+		return title
 	case "browser_certificate":
 		what = "Browser URLs are unavailable"
 	case "browser_port_listener":

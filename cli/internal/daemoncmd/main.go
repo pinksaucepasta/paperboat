@@ -433,7 +433,7 @@ func localDaemonCommand() *cobra.Command {
 							return err
 						}
 						if step := coordinator.PendingLocalAccessStep(); step != "" {
-							return localdaemon.LocalAccessPendingError{Step: step}
+							return localdaemon.LocalAccessPendingError{Step: step, Detail: coordinator.PendingLocalAccessDetail()}
 						}
 						return nil
 					},

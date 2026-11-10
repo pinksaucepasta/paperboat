@@ -37,6 +37,7 @@ func TestInventoryNamesTheFailingLocalAccessStep(t *testing.T) {
 	}{
 		{"pending", "ready", "browser_urls_unavailable", "warning", "browser certificate", LocalAccessPendingError{Step: "browser_certificate"}},
 		{"pending port", "ready", "browser_urls_unavailable", "warning", "browser port listener", LocalAccessPendingError{Step: "browser_port_listener"}},
+		{"busy gateway port", "ready", "browser_urls_unavailable", "warning", "another program is using port 80/443", LocalAccessPendingError{Step: "browser_gateway_port", Detail: "nginx, PID 4242"}},
 		{"failed", "degraded", "local_access_unavailable", "error", "machine names", stepFailure{step: "machine_names"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -71,6 +72,9 @@ func TestInventoryNamesTheFailingLocalAccessStep(t *testing.T) {
 			health := snapshot.Health[0]
 			if health.Code != c.code || health.Severity != c.severity || !strings.Contains(health.Title, c.step) {
 				t.Fatalf("health=%#v; want %s/%s naming %q", health, c.code, c.severity, c.step)
+			}
+			if c.name == "busy gateway port" && (!strings.Contains(health.Title, "nginx, PID 4242") || !strings.Contains(health.Recovery, "Stop that program, and Paperboat turns browser URLs back on by itself")) {
+				t.Fatalf("health=%#v; want the owner in the title and the plain recovery", health)
 			}
 		})
 	}

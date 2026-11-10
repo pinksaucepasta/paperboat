@@ -239,6 +239,7 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 		diagnosticlog.TryInfo("protected machine ports remain blocked by local listener conflicts", "count", conflictedPorts, "first_port", firstConflictedPort)
 	}
 	c.browserPortsPending = false // set again below by every per-port listener that cannot start
+	c.browserGatewayBusy, c.browserGatewayOwner = false, ""
 	if len(browserRoutes) > 0 {
 		web, err := c.prepareBrowserGatewayLocked(ctx, nameClient, browserRoutes, aliases)
 		switch {
@@ -246,7 +247,8 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 			// Another program (a web server on :80/:443) owns a gateway port.
 			// Machine names and native ports keep working; only browser URLs
 			// are withdrawn, so a busy port must not degrade the whole daemon.
-			diagnosticlog.TryInfo("browser gateway ports are in use by another program; browser URLs are unavailable")
+			c.browserGatewayBusy, c.browserGatewayOwner = true, browserGatewayPortOwner()
+			diagnosticlog.TryWarn("browser gateway ports are in use by another program; browser URLs are unavailable until it stops", "owner", c.browserGatewayOwner)
 			aliases = map[string]string{}
 		case browserCertificateFailure(err):
 			// Browser trust (for example NSS certutil on Linux) is a prerequisite of browser URLs
