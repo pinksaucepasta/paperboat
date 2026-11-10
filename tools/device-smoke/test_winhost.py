@@ -422,8 +422,14 @@ class WindowsTargetPlumbing(unittest.TestCase):
                     self.assertEqual('C:\\Temp\\pb-smoke-1.ps1', path)
                     raise KeyError
         self.assertEqual('exec', calls[0][0])
-        self.assertEqual(2, len(calls))
+        self.assertEqual(3, len(calls))  # one piece, decode, remove
         self.assertEqual(['powershell', '-NoProfile'], list(calls[1][5:7]))
+        calls.clear()
+        with patch('exec_lifecycle.run', run), windows_target.staged('pb', 'victus', windows_target.exec_script('a', 'b' * 64, 'u', 'e', 1)):
+            pass
+        self.assertGreater(len(calls), 3)  # at least two pieces
+        for call in calls:  # pb exec refuses a command of more than 4096 characters
+            self.assertLess(sum(len(word) + 1 for word in call), 4000)
 
     def test_exact_comparisons_are_case_sensitive(self):
         import windows_target

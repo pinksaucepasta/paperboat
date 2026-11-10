@@ -18,6 +18,7 @@ import winhost
 PREAMBLE = "$ProgressPreference='SilentlyContinue';$ErrorActionPreference='Stop';"
 INBOX = "(Join-Path (Join-Path $env:USERPROFILE 'Paperboat') 'Inbox')"
 _platforms = {}
+PIECE = 800  # base64 characters of a staged script per pb exec: keeps each command under pb's 4096-character limit
 
 
 def is_windows(binary, target):
@@ -53,10 +54,17 @@ def ps_argv(script):
 def staged(binary, target, script):
     """Write script to a .ps1 on the target (UTF-8 with BOM, so Windows PowerShell reads Unicode) and yield its path."""
     from exec_lifecycle import run
-    writer = ("$p=Join-Path $env:TEMP ('pb-smoke-'+[guid]::NewGuid().ToString('N')+'.ps1');"
-              "[IO.File]::WriteAllText($p,[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s')),"
-              "(New-Object Text.UTF8Encoding($true)));[Console]::Out.Write($p)" % b64(with_preamble(script)))
-    path = run(binary, 'exec', target, '--timeout', '60s', '--', *ps_argv(writer))[0].decode().strip()
+    # pb exec refuses a command of more than 4096 characters, and -EncodedCommand triples a script's length, so the
+    # script goes over as base64 pieces appended to a file and is decoded there.
+    name = 'pb-smoke-' + uuid.uuid4().hex
+    text = b64(with_preamble(script))
+    for start in range(0, len(text), PIECE):
+        run(binary, 'exec', target, '--timeout', '60s', '--', *ps_argv(
+            "Add-Content -LiteralPath (Join-Path $env:TEMP '%s.b64') -Value '%s' -Encoding ascii" % (name, text[start:start + PIECE])))
+    decode = ("$b=Join-Path $env:TEMP '%s.b64';$p=Join-Path $env:TEMP '%s.ps1';"
+              "[IO.File]::WriteAllText($p,[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String((Get-Content -LiteralPath $b -Raw))),"
+              "(New-Object Text.UTF8Encoding($true)));Remove-Item -LiteralPath $b -Force;[Console]::Out.Write($p)" % (name, name))
+    path = run(binary, 'exec', target, '--timeout', '60s', '--', *ps_argv(decode))[0].decode().strip()
     try:
         yield path
     finally:
