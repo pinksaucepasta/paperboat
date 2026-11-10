@@ -80,6 +80,18 @@ func (o *nativeOutput) waitForWithin(t *testing.T, text string, limit time.Durat
 	t.Fatalf("timed out waiting for %q in ConPTY output ending %q", text, tail)
 }
 
+var (
+	consoleCSI = regexp.MustCompile("\x1b\\[[0-9;?]*[A-Za-z]")
+	consoleOSC = regexp.MustCompile("\x1b\\][^\a]*\a")
+	countOne   = regexp.MustCompile(`(?m)^1\r?$`)
+)
+
+// countIsOne: the output holds a line that is just `1` (the `find /c` count) once ConPTY's cursor and title sequences are gone; they can
+// glue to the line start (cursor-show before it, a title bell) so a literal "\r\n1\r\n" is not reliable.
+func countIsOne(output string) bool {
+	return countOne.MatchString(consoleOSC.ReplaceAllString(consoleCSI.ReplaceAllString(output, ""), ""))
+}
+
 func nativeAdapter(t *testing.T) (*Adapter, string) {
 	t.Helper()
 	root := t.TempDir()
@@ -238,12 +250,89 @@ func TestNativeConPTYInterruptLeavesBackgroundWorkAlone(t *testing.T) {
 	}
 	output.waitForWithin(t, "paperboat-after-", 10*time.Second)
 	deadline := time.Now().Add(10 * time.Second)
-	for !strings.Contains(output.String(), "\r\n1\r\n") {
+	for !countIsOne(output.String()) {
 		if time.Now().After(deadline) {
 			t.Fatalf("expected exactly one PING.EXE left (the background one); output tail=%q", output.String()[max(0, len(output.String())-300):])
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+}
+
+// Ctrl-C at an idle prompt (no program running) leaves the shell alive and at a fresh prompt, like a console: the interrupt path the host now offers
+// while idle must not hurt the shell.
+func TestNativeConPTYInterruptAtAnIdlePromptKeepsTheShell(t *testing.T) {
+	commandShell := os.Getenv("ComSpec")
+	if commandShell == "" {
+		commandShell = filepath.Join(os.Getenv("WINDIR"), "System32", "cmd.exe")
+	}
+	process, output := startNativePTY(t, commandShell, []string{"/d", "/q"})
+	defer process.CloseIO()
+	if _, err := process.Write([]byte("echo paperboat-idle-ready\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	output.waitFor(t, "paperboat-idle-ready")
+	if handled, err := process.Interrupt(0x03, nil); err != nil || !handled {
+		t.Fatalf("Interrupt handled=%v err=%v", handled, err)
+	}
+	if _, err := process.Write([]byte("echo paperboat-idle-after\r\nexit /b 4\r\n")); err != nil {
+		t.Fatalf("the shell did not survive Ctrl-C at an idle prompt: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := process.Wait(ctx)
+	if err != nil || result.Code != 4 {
+		t.Fatalf("shell after an idle Ctrl-C: result=%+v err=%v", result, err)
+	}
+	output.waitFor(t, "paperboat-idle-after")
+}
+
+// At an idle cmd.exe prompt with only a background child, Ctrl-C must not end the background program (Unix: Ctrl-C at the prompt never touches background
+// jobs): the shell holds no process handle to a `start /b` child, so there is no foreground program.
+func TestNativeConPTYInterruptAtAnIdlePromptLeavesBackgroundWorkAlone(t *testing.T) {
+	commandShell := os.Getenv("ComSpec")
+	if commandShell == "" {
+		commandShell = filepath.Join(os.Getenv("WINDIR"), "System32", "cmd.exe")
+	}
+	process, output := startNativePTY(t, commandShell, []string{"/d", "/q"})
+	defer process.CloseIO()
+	if _, err := process.Write([]byte("start /b ping -n 300 127.0.0.2 >nul\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Second)
+	if handled, err := process.Interrupt(0x03, nil); err != nil || !handled {
+		t.Fatalf("Interrupt handled=%v err=%v", handled, err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	if _, err := process.Write([]byte("echo paperboat-bg-%ERRORLEVEL%-x\r\ntasklist /fi \"imagename eq PING.EXE\" /nh | find /c \"PING.EXE\"\r\n")); err != nil {
+		t.Fatalf("shell did not survive: %v", err)
+	}
+	output.waitForWithin(t, "paperboat-bg-", 10*time.Second)
+	deadline := time.Now().Add(10 * time.Second)
+	for !countIsOne(output.String()) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the background ping did not survive an idle Ctrl-C; output tail=%q", output.String()[max(0, len(output.String())-300):])
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// Another shell than cmd.exe: nothing is ever terminated by a Ctrl-C (no positive foreground evidence there), whatever the shell has started.
+func TestNativeConPTYInterruptWithAPowerShellShellTerminatesNothing(t *testing.T) {
+	process, output := startNativePTY(t, nativePowerShell(t), []string{"-NoLogo", "-NoProfile"})
+	defer process.CloseIO()
+	if _, err := process.Write([]byte("Start-Process -FilePath ping -ArgumentList '-n','300','127.0.0.2' -WindowStyle Hidden; 'paperboat-ps-started'\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	output.waitFor(t, "paperboat-ps-started")
+	time.Sleep(time.Second)
+	if handled, err := process.Interrupt(0x03, nil); err != nil || !handled {
+		t.Fatalf("Interrupt handled=%v err=%v", handled, err)
+	}
+	time.Sleep(time.Second)
+	if _, err := process.Write([]byte("'paperboat-ps-count-' + @(Get-Process ping -ErrorAction SilentlyContinue).Count\r\n")); err != nil {
+		t.Fatalf("shell did not survive: %v", err)
+	}
+	output.waitForWithin(t, "paperboat-ps-count-1", 10*time.Second)
 }
 
 func TestNativeConPTYResizeAndUTF8VT(t *testing.T) {

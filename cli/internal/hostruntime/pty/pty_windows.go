@@ -351,12 +351,18 @@ type processKey struct {
 	created int64
 }
 
-// foregroundTree is the program the shell is running for the user: the newest direct child of the shell in the job and everything under
-// it. While a foreground command runs the shell is waiting for it and starts nothing else, so the newest child is that command; older
-// children are background work (start /b, a build the shell launched earlier) and are left alone, like the unix twin which signals only the
-// foreground process group. Nothing is returned when the shell has no child.
+// foregroundTree is the program cmd.exe is running for the user, with positive evidence only: a direct child of the shell, in the job,
+// that the shell holds a process handle to (cmd waits on a foreground program; at an idle prompt and for `start /b` it holds none), the
+// newest such child, and everything under it. Windows has no foreground process group, so nothing weaker is used: with any other shell
+// (PowerShell keeps handles to job workers and background processes while idle), an unreadable handle table or no held child the result is
+// empty and a Ctrl-C terminates nothing (missing a cancel is better than killing background work), like Unix where Ctrl-C at an
+// idle prompt never touches background jobs.
 func (p *Process) foregroundTree() []processKey {
-	if p.job == 0 {
+	if p.job == 0 || !p.shellIsCommandInterpreter() {
+		return nil
+	}
+	held := processesHeldBy(p.processID) // positive evidence only: the shell waits on this child; unreadable table: no foreground
+	if held == nil {
 		return nil
 	}
 	members := map[uint32]bool{}
@@ -366,7 +372,7 @@ func (p *Process) foregroundTree() []processKey {
 	parents := processParents()
 	var newest processKey
 	for pid := range members {
-		if parents[pid] != p.processID || pid == p.processID {
+		if parents[pid] != p.processID || pid == p.processID || !held[pid] {
 			continue
 		}
 		if key, ok := processInstance(pid); ok && key.created > newest.created {
