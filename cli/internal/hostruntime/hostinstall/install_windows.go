@@ -1573,10 +1573,27 @@ func EnsureCommittedWindowsHostdReady(ctx context.Context, request Request) erro
 		select {
 		case <-readyCtx.Done():
 			timer.Stop()
-			return hostInstallFailure("Paperboat host service health check did not stabilize", errors.Join(readyCtx.Err(), context.Cause(readyCtx), lastErr))
+			return hostInstallFailure("Paperboat host service health check did not stabilize", errors.Join(readyCtx.Err(), context.Cause(readyCtx), lastErr, windowsHostdStartPhase(layout.HostdSocket, config.TokenFile)))
 		case <-timer.C:
 		}
 	}
+}
+
+// windowsHostdStartPhase asks the host service how far its start got (hostdStartPhase).
+func windowsHostdStartPhase(socket, tokenFile string) error {
+	token, err := os.ReadFile(tokenFile)
+	if err != nil {
+		return fmt.Errorf("host service start phase: its token could not be read: %w", err)
+	}
+	defer clear(token)
+	client, err := hostdproto.NewClient(socket, token, 3*time.Second)
+	if err != nil {
+		return fmt.Errorf("host service start phase: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	status, err := client.Active(ctx)
+	return hostdStartPhase(status, err, time.Now())
 }
 
 func windowsRuntimeServiceExists(instance string) (exists bool, resultErr error) {
