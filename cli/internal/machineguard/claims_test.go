@@ -82,23 +82,3 @@ func TestEmptyMachineSetReleasesNothing(t *testing.T) {
 		t.Fatal("a claim was released by an empty set")
 	}
 }
-
-// Lane X 2: legacy host-wide reservations are adopted entry by entry, by their own uid asking for that address.
-func TestLegacyReservationsAreAdoptedPerEntry(t *testing.T) {
-	book, now := newClaimBook(), time.Now()
-	book.adoptLegacy(map[string]string{"127.100.0.5": "1001", "127.100.0.6": "1001"}, now)
-	first, _ := book.assign(claimKey{UID: "1001", Account: "acct_a", Machine: "m5"}, netip.MustParseAddr("127.100.0.5"), now)
-	second, _ := book.assign(claimKey{UID: "1001", Account: "acct_b", Machine: "m6"}, netip.MustParseAddr("127.100.0.6"), now)
-	if first != "127.100.0.5" || second != "127.100.0.6" {
-		t.Fatalf("legacy addresses moved: %q %q", first, second)
-	}
-	stranger, _ := book.assign(claimKey{UID: "1002", Account: "acct_c", Machine: "m7"}, netip.MustParseAddr("127.100.0.6"), now)
-	if stranger == "127.100.0.6" {
-		t.Fatal("another uid took a legacy address")
-	}
-	book.adoptLegacy(map[string]string{"127.100.0.8": "1001"}, now)
-	late, _ := book.assign(claimKey{UID: "1003", Account: "acct_d", Machine: "m8"}, netip.MustParseAddr("127.100.0.8"), now.Add(claimHold))
-	if late != "127.100.0.8" {
-		t.Fatalf("an unadopted legacy entry was not released after the hold: %q", late)
-	}
-}

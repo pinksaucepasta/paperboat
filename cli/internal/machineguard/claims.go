@@ -21,16 +21,12 @@ const (
 
 var errClaimsExhausted = listenerRefusal{reason: "no free local machine address on this computer"}
 
-// claimKey names one machine of one account for one OS user incarnation. A legacy entry carried over from the
-// host-wide reservations has no account and machine; its address is in legacyIP.
+// claimKey names one machine of one account for one OS user incarnation.
 type claimKey struct {
-	UID, Account, Machine, legacyIP string
+	UID, Account, Machine string
 }
 
 func (k claimKey) String() string {
-	if k.legacyIP != "" {
-		return k.UID + "\x00\x00legacy:" + k.legacyIP
-	}
 	return k.UID + "\x00" + k.Account + "\x00" + k.Machine
 }
 
@@ -38,9 +34,6 @@ func parseClaimKey(value string) (claimKey, bool) {
 	parts := strings.Split(value, "\x00")
 	if len(parts) != 3 || parts[0] == "" {
 		return claimKey{}, false
-	}
-	if parts[1] == "" && strings.HasPrefix(parts[2], "legacy:") {
-		return claimKey{UID: parts[0], legacyIP: strings.TrimPrefix(parts[2], "legacy:")}, true
 	}
 	return claimKey{UID: parts[0], Account: parts[1], Machine: parts[2]}, parts[1] != "" && parts[2] != ""
 }
@@ -60,17 +53,6 @@ type claimBook struct {
 
 func newClaimBook() *claimBook { return &claimBook{Claims: map[string]claim{}} }
 
-// adoptLegacy carries today's host-wide reservations (address -> uid) over as legacy entries that their uid adopts
-// one by one, by asking for that exact address; entries nobody adopts are released after claimHold.
-func (b *claimBook) adoptLegacy(ips map[string]string, now time.Time) {
-	for ip, uid := range ips {
-		if uid == "" {
-			continue
-		}
-		b.Claims[claimKey{UID: uid, legacyIP: ip}.String()] = claim{IP: ip, HeldUntil: now.Add(claimHold)}
-	}
-}
-
 func (b *claimBook) holder(ip string) (string, bool) {
 	for key, value := range b.Claims {
 		if value.IP == ip {
@@ -80,8 +62,8 @@ func (b *claimBook) holder(ip string) (string, bool) {
 	return "", false
 }
 
-// assign returns the address of key: its existing claim (reactivated if held), else the legacy entry of the same uid
-// at the preferred address, else the preferred address if nobody holds it, else the lowest free address.
+// assign returns the address of key: its existing claim (reactivated if held), else the preferred address if
+// nobody holds it, else the lowest free address.
 func (b *claimBook) assign(key claimKey, preferred netip.Addr, now time.Time) (string, error) {
 	b.expire(now)
 	if existing, ok := b.Claims[key.String()]; ok {
@@ -99,13 +81,7 @@ func (b *claimBook) assign(key claimKey, preferred netip.Addr, now time.Time) (s
 		return "", errClaimsExhausted
 	}
 	want := preferred.String()
-	if holder, held := b.holder(want); held {
-		if other, ok := parseClaimKey(holder); ok && other.legacyIP == want && other.UID == key.UID {
-			delete(b.Claims, holder)
-			b.Claims[key.String()] = claim{IP: want}
-			return want, nil
-		}
-	} else if validClaimAddress(preferred) {
+	if _, held := b.holder(want); !held && validClaimAddress(preferred) {
 		b.Claims[key.String()] = claim{IP: want}
 		return want, nil
 	}

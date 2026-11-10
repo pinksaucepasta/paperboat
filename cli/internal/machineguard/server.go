@@ -34,8 +34,6 @@ type controlListener interface {
 	Close() error
 }
 type reservations struct {
-	// IPs is the host-wide address reservation of earlier guards; it is read once and adopted into Claims.
-	IPs    map[string]string `json:"ips,omitempty"`
 	Names  map[string]string `json:"names"`
 	Claims map[string]claim  `json:"claims"`
 }
@@ -105,7 +103,7 @@ func Serve(ctx context.Context, cfg Config) (resultErr error) {
 		return err
 	}
 	defer func() { resultErr = errors.Join(resultErr, lock.Close()) }()
-	g := &guardServer{cfg: cfg, reserved: reservations{IPs: map[string]string{}, Names: map[string]string{}}, leases: map[string]*guardedLease{}, names: map[controlConn]map[string]string{}, connections: map[controlConn]string{}, failures: make(chan error, 1)}
+	g := &guardServer{cfg: cfg, reserved: reservations{Names: map[string]string{}}, leases: map[string]*guardedLease{}, names: map[controlConn]map[string]string{}, connections: map[controlConn]string{}, failures: make(chan error, 1)}
 	if data, err := os.ReadFile(filepath.Join(cfg.StateDir, "reservations.json")); err == nil {
 		if len(data) > 8<<20 || json.Unmarshal(data, &g.reserved) != nil || g.reserved.Names == nil {
 			return errors.New("invalid machine guard reservation journal")
@@ -113,15 +111,10 @@ func Serve(ctx context.Context, cfg Config) (resultErr error) {
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	if gatewayRouting {
-		scopeNameReservations(g.reserved.Names)
-	}
 	if g.reserved.Claims == nil {
 		g.reserved.Claims = map[string]claim{}
 	}
 	g.claims = &claimBook{Claims: g.reserved.Claims}
-	g.claims.adoptLegacy(g.reserved.IPs, time.Now())
-	g.reserved.IPs = nil
 	defer retirePlatform(cfg)
 	defer g.startPreviewPAC(ctx)()
 	if err = g.applyRules(ctx); err != nil {
@@ -845,15 +838,10 @@ func (g *guardServer) assignClaim(uid string, in request) (request, error) {
 	if err != nil {
 		return in, errors.New("invalid preferred machine address")
 	}
-	key := claimKey{UID: uid, Account: in.Account, Machine: in.Machine}
 	if in.Account == "" || in.Machine == "" {
-		// A daemon older than address claims (another OS user's pb, or a rollback) asks for an exact address.
-		// It is kept as that uid's claim on that address, refused if another claim holds it.
-		key = claimKey{UID: uid, legacyIP: in.IP}
-		if holder, held := g.claims.holder(in.IP); held && holder != key.String() {
-			return in, listenerRefusal{reason: "machine name or address belongs to another OS user; choose a nonconflicting installation"}
-		}
+		return in, listenerRefusal{reason: "a machine address request needs an account and a machine"}
 	}
+	key := claimKey{UID: uid, Account: in.Account, Machine: in.Machine}
 	ip, err := g.claims.assign(key, preferred, time.Now())
 	if err != nil {
 		return in, err
@@ -903,16 +891,6 @@ func nameKey(uid, hostname string) string {
 		return uid + ":" + hostname
 	}
 	return hostname
-}
-
-// scopeNameReservations moves host-wide reservations of an earlier guard into their owner's namespace.
-func scopeNameReservations(names map[string]string) {
-	for name, owner := range names {
-		if !strings.Contains(name, ":") {
-			delete(names, name)
-			names[owner+":"+name] = owner
-		}
-	}
 }
 
 // sameNamespace reports whether names of conn's OS user can conflict with uid's names.

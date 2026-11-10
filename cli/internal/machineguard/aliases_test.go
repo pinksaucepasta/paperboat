@@ -19,7 +19,7 @@ func TestBrowserAliasesRequireOwnedHTTPSGatewayAndCanonicalShape(t *testing.T) {
 	other := &testControlConn{identity: "other"}
 	g := &guardServer{
 		cfg:      Config{StateDir: testStateDir(t), LoopbackCIDR: "127.100.0.0/16"},
-		reserved: reservations{IPs: map[string]string{}, Names: map[string]string{}},
+		reserved: reservations{Names: map[string]string{}},
 		leases:   map[string]*guardedLease{"gateway": {hostname: splitdns.BrowserGatewayHostname, ip: splitdns.BrowserGatewayIP, port: 443, owner: owner}},
 		aliases:  map[controlConn]map[string]string{},
 		names:    map[controlConn]map[string]string{},
@@ -70,7 +70,7 @@ func TestBrowserAliasesRequireOwnedHTTPSListenerAndReservationLimits(t *testing.
 	gateway := &guardedLease{hostname: splitdns.BrowserGatewayHostname, ip: splitdns.BrowserGatewayIP, port: 443, owner: owner}
 	g := &guardServer{
 		cfg:      Config{StateDir: testStateDir(t), LoopbackCIDR: "127.100.0.0/16"},
-		reserved: reservations{IPs: map[string]string{}, Names: map[string]string{}},
+		reserved: reservations{Names: map[string]string{}},
 		leases:   map[string]*guardedLease{"gateway": gateway},
 		aliases:  map[controlConn]map[string]string{},
 		names:    map[controlConn]map[string]string{},
@@ -127,7 +127,7 @@ func TestMachineProxyPatternRequiresOwnedNumericRouteAndWithdraws(t *testing.T) 
 	numeric := "80." + base
 	pattern := "*." + base
 	gateway := &guardedLease{hostname: splitdns.BrowserGatewayHostname, ip: splitdns.BrowserGatewayIP, port: 443, owner: owner, uid: "owner"}
-	g := &guardServer{cfg: Config{StateDir: testStateDir(t)}, reserved: reservations{IPs: map[string]string{}, Names: map[string]string{}}, leases: map[string]*guardedLease{"gateway": gateway}, aliases: map[controlConn]map[string]string{}, names: map[controlConn]map[string]string{}, connections: map[controlConn]string{owner: "owner"}}
+	g := &guardServer{cfg: Config{StateDir: testStateDir(t)}, reserved: reservations{Names: map[string]string{}}, leases: map[string]*guardedLease{"gateway": gateway}, aliases: map[controlConn]map[string]string{}, names: map[controlConn]map[string]string{}, connections: map[controlConn]string{owner: "owner"}}
 	for _, bad := range []map[string]string{{pattern: numeric}, {pattern: "80.other." + testBrowserDomain, numeric: splitdns.BrowserGatewayHostname}, {"*.*." + base: numeric, numeric: splitdns.BrowserGatewayHostname}} {
 		if err := g.replaceAliases(t.Context(), owner, "owner", bad); err == nil {
 			t.Fatal("invalid wildcard authorized")

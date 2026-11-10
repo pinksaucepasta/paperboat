@@ -4,7 +4,6 @@ package machineguard
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -297,21 +296,7 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 	for _, lease := range leases {
 		values = append(values, wfp.Lease{IP: lease.ip, SID: lease.uid})
 	}
-	var journal struct {
-		IPs map[string]string `json:"ips"`
-	}
-	data, err := os.ReadFile(filepath.Join(cfg.StateDir, "reservations.json"))
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if len(data) > 0 && json.Unmarshal(data, &journal) != nil {
-		return errors.New("invalid machine guard reservation journal")
-	}
-	known := make([]wfp.Lease, 0, len(journal.IPs))
-	for ip, sid := range journal.IPs {
-		known = append(known, wfp.Lease{IP: ip, SID: sid})
-	}
-	return wfp.Apply(values, known, cfg.LoopbackCIDR, protectedLoopbackCIDRs(cfg)...)
+	return wfp.Apply(values, nil, cfg.LoopbackCIDR, protectedLoopbackCIDRs(cfg)...)
 }
 func notifyReady() error    { return nil }
 func retirePlatform(Config) {}
