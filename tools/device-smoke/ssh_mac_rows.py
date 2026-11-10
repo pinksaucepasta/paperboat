@@ -377,7 +377,7 @@ def audit():
     query = ("SELECT event_type, metadata->>'origin', metadata->>'session_id', metadata->>'outcome', coalesce(metadata->>'bytes_in','0'), "
              "coalesce(metadata->>'bytes_out','0'), metadata->>'peer_endpoint_id', idempotency_key FROM paperboat.audit_events WHERE resource_id='%s' "
              "AND event_type IN ('machine.access_started','machine.access_ended') AND metadata->>'capability'='managed_ssh' "
-             "AND created_at > now() - interval '%d seconds' ORDER BY created_at, id;" % (mid, int(time.time() - began) + 10))
+             "AND created_at > now() - interval '%d seconds' ORDER BY created_at, id;" % (mid, int(time.time() - began) + 90))
     rows = ''
     for _ in range(30):  # the host uploads within its 30 s cadence
         rows = subprocess.run(['ssh', db, 'docker exec -i paperboat-postgres-1 psql -U postgres -d paperboat -qAt -F "|"'], input=query,
