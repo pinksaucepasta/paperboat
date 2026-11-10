@@ -44,12 +44,18 @@ func (h *originReportHub) report(leaseID string, event originhealth.Event) {
 type originReporter struct {
 	mu           sync.Mutex
 	reportedDown bool
+	last         time.Time
 	send         func(context.Context, bool) error
 }
 
 func (r *originReporter) handle(ctx context.Context, event originhealth.Event) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	// Events are handled on their own goroutines; an older one arriving late is stale.
+	if event.At.Before(r.last) {
+		return
+	}
+	r.last = event.At
 	up := event.State == originhealth.Up
 	if up && !r.reportedDown {
 		return

@@ -566,12 +566,14 @@ func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready 
 		}
 	}
 	cancelProbe()
-	if err != nil {
-		if lease.LazyLifecycle != nil {
-			return errors.Join(ErrDataCarrierPreviewOrigin, err)
-		}
-		return &RetryableCarrierError{Err: errors.Join(ErrDataCarrierPreviewOrigin, err)}
+	if err != nil && lease.LazyLifecycle != nil {
+		return errors.Join(ErrDataCarrierPreviewOrigin, err)
 	}
+	// An app that is not running yet does not hold the address back, as ngrok and cloudflared
+	// publish a tunnel before its origin answers: the preview goes ready and reports the origin
+	// down at once, and the origin health probe reports it up when the app starts. Waiting for the
+	// app left a preview started from the console at "Starting" with no reason (prod 2026-11-10).
+	originDown := err
 	observed := lease
 	observed.State, observed.AllocationState, observed.EdgeState, observed.OriginState = "ready", "ready", "ready", "ready"
 	// The route is registered and its origin answers: serve the edge's streams now and report
@@ -585,6 +587,9 @@ func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready 
 			readyFailure.Store(&err)
 			cancelRun()
 			return
+		}
+		if originDown != nil {
+			previewOriginReports.report(lease.ID, originhealth.Event{Key: "origin", State: originhealth.Down, Reason: originhealth.Classify(originDown), At: time.Now()})
 		}
 		c.startOriginHealth(runCtx, lease)
 		// Publish the lease's replay binding once the target is ready, so public

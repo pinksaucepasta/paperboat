@@ -7,7 +7,7 @@ import { toast } from "sonner"
 import { useApiQuery, useMachine } from "@/lib/api"
 import { useInspectorChannel, type ChannelPhase } from "@/lib/inspector/channel"
 import { useCaptureFeed, type Capture } from "@/lib/inspector/feed"
-import { hostOf, previewPoll, previewQuery, type Preview } from "@/lib/tunnels"
+import { hostOf, isRouting, previewPoll, previewQuery, type Preview } from "@/lib/tunnels"
 import { CaptureDetail, CaptureRow, pathOf } from "@/components/tunnels/inspector-detail"
 import { ConfirmAction, SearchField, ViewToggle } from "@/components/list-toolbar"
 import { Crumb, CrumbLink, PageHeader } from "@/components/page-header"
@@ -87,7 +87,7 @@ const phaseText = (machine: string): Record<Exclude<ChannelPhase, "ready">, [str
 function Inspector({ preview, onDenied }: { preview: Preview; onDenied: () => unknown }) {
   // The server grants inspection only while the preview routes. While it starts or its machine
   // reconnects, a refusal means 'wait', not 'not allowed'; the list collected so far stays.
-  const routing = preview.state === "ready"
+  const routing = isRouting(preview)
   const machine = useMachine(preview.owner_machine_id).data?.alias || "the machine"
   const phases = phaseText(machine)
   const waiting = `Reconnecting to ${machine}… Requests appear again when it’s back.`

@@ -74,6 +74,88 @@ func TestPreviewCarrierReportsAStoppedAndRestartedApp(t *testing.T) {
 	expect(originhealth.Up)
 }
 
+// A preview whose app is not running yet goes ready at once and reports the app down, then up
+// when it starts, instead of waiting for the app (a console preview sat at "Starting", prod
+// 2026-11-10).
+func TestPreviewCarrierGoesReadyBeforeItsAppStarts(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	identity := testPreviewCarrierIdentity(1)
+	pair := newPreviewCarrierPair(t, ctx, identity)
+	defer pair.close()
+	hub, err := NewDataCarrierPreviewHub(ctx, DataCarrierPreviewHubConfig{Active: pair.active, Identity: identity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hub.Close()
+	reserved, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := reserved.Addr().String()
+	_ = reserved.Close()
+	carrier, err := NewDataCarrierPreviewCarrier(DataCarrierPreviewCarrierConfig{
+		Hub: hub, Identity: identity, OriginProbeInterval: 30 * time.Millisecond, OriginDialTimeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := Lease{ID: "preview_origin_not_started", Target: LeaseTarget{Scheme: "http", Address: address}}
+	events := make(chan originhealth.Event, 16)
+	unregister := previewOriginReports.register(lease.ID, func(event originhealth.Event) { events <- event })
+	defer unregister()
+	ready := make(chan Lease, 1)
+	go func() {
+		_ = carrier.Run(ctx, lease, func(observed Lease) error { ready <- observed; return nil })
+	}()
+	select {
+	case observed := <-ready:
+		if observed.State != "ready" {
+			t.Fatalf("state %q, want ready", observed.State)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the preview waited for its app")
+	}
+	next := func() originhealth.Event {
+		t.Helper()
+		select {
+		case event := <-events:
+			return event
+		case <-time.After(10 * time.Second):
+			t.Fatal("no origin event")
+		}
+		return originhealth.Event{}
+	}
+	if event := next(); event.State != originhealth.Down || event.Reason != originhealth.ReasonRefused {
+		t.Fatalf("first event %+v, want down (refused)", event)
+	}
+	app, err := net.Listen("tcp", address)
+	if err != nil {
+		t.Skipf("port was taken: %v", err)
+	}
+	defer app.Close()
+	for event := next(); event.State != originhealth.Up; event = next() {
+	}
+}
+
+// A down report that reaches the reporter after a later up (each event runs on its own goroutine)
+// is stale and does not mark a running app down.
+func TestOriginReporterDropsAnEventOlderThanOneItHandled(t *testing.T) {
+	recorder := &originRecorder{}
+	reporter := &originReporter{send: func(ctx context.Context, up bool) error {
+		_, err := recorder.ObservePreviewOrigin(ctx, DispatchReadiness{}, Lease{}, up)
+		return err
+	}}
+	ctx := context.Background()
+	at := time.Now()
+	reporter.handle(ctx, originhealth.Event{State: originhealth.Down, At: at})
+	reporter.handle(ctx, originhealth.Event{State: originhealth.Up, At: at.Add(2 * time.Second)})
+	reporter.handle(ctx, originhealth.Event{State: originhealth.Down, At: at.Add(time.Second)})
+	if got := recorder.snapshot(); len(got) != 2 || got[0] || !got[1] {
+		t.Fatalf("reports %v, want [false true]", got)
+	}
+}
+
 type originRecorder struct {
 	mu    sync.Mutex
 	calls []bool

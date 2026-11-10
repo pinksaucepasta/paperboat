@@ -228,6 +228,7 @@
             "allocating",
             "connecting",
             "ready",
+            "origin_unavailable",
             "owner_disconnected",
             "expired",
             "stopped"

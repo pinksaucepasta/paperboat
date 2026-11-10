@@ -10,7 +10,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { useMachines, useWorkspace, type Machine } from "@/lib/api"
-import { createPreview, hostOf, previewPoll, previewQuery, type Preview } from "@/lib/tunnels"
+import { createPreview, hostOf, isRouting, previewPoll, previewQuery, type Preview } from "@/lib/tunnels"
 import { useNow } from "@/lib/use-now"
 import { CopyRow } from "@/components/copy-button"
 import { HostnameInput } from "@/components/domains/hostname-input"
@@ -219,7 +219,7 @@ export function Starting({
   const data = preview.data
   const failed = data && (data.state === "expired" || data.state === "stopped" || data.allocation_state === "failed")
 
-  if (data?.state === "ready") {
+  if (data && isRouting(data)) {
     return (
       <div className="flex flex-col items-center gap-3 py-4 text-center">
         <CheckCircleIcon weight="fill" className="size-10 text-success" />

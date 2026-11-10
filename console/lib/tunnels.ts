@@ -167,6 +167,9 @@ export const previewQuery = (id: string) =>
     queryFn: ({ signal }) => api<Preview>(previewPath(id), { signal }),
   })
 
+/** Whether a preview's address routes: ready, or ready while its app does not answer yet. */
+export const isRouting = (preview: Preview) => preview.state === "ready" || preview.state === "origin_unavailable"
+
 /**
  * How often to re-read a preview that may still change: `false` once it ended (expired, stopped,
  * failed) and, with `untilReady`, once it is ready. A page that is not shown never polls: the
@@ -180,7 +183,7 @@ export const previewPoll =
       data &&
       (["expired", "stopped"].includes(data.state) ||
         data.allocation_state === "failed" ||
-        (untilReady && data.state === "ready"))
+        (untilReady && isRouting(data)))
     return settled ? false : ms
   }
 

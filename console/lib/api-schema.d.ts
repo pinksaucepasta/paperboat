@@ -8515,7 +8515,7 @@ export interface components {
             lease_deadline: string;
             user_deadline?: string | null;
             /** @enum {string} */
-            state: "allocating" | "connecting" | "ready" | "owner_disconnected" | "expired" | "stopped";
+            state: "allocating" | "connecting" | "ready" | "origin_unavailable" | "owner_disconnected" | "expired" | "stopped";
             /** @enum {string} */
             allocation_state: "pending" | "ready" | "failed" | "released";
             /** @enum {string} */

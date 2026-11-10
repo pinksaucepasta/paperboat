@@ -61,12 +61,12 @@ function PreviewStatus({ preview }: { preview: Preview }) {
   const [online, label] =
     preview.state === "owner_disconnected"
       ? [false, "Machine disconnected"]
-      : preview.state !== "ready"
-        ? [false, "Starting"]
-        : preview.edge_state === "down" || preview.edge_state === "degraded"
-          ? [false, "Edge trouble"]
-          : preview.origin_state === "unavailable"
-            ? [false, "App not responding"]
+      : preview.state === "origin_unavailable"
+        ? [false, "App not responding"]
+        : preview.state !== "ready"
+          ? [false, "Starting"]
+          : preview.edge_state === "down" || preview.edge_state === "degraded"
+            ? [false, "Edge trouble"]
             : [true, "Live"]
   return (
     <span className="flex items-center gap-2">
