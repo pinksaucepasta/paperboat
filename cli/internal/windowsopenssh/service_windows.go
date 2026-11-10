@@ -59,7 +59,7 @@ func InstallService(ctx context.Context, serviceName, serviceExecutable, sshdPat
 			return configErr
 		}
 		expectedCommand := windows.ComposeCommandLine(append([]string{serviceExecutable}, arguments...))
-		if !samePaperboatServiceCommand(current.BinaryPathName, serviceName, sshdPath, configPath) && !sameLegacyServiceCommand(current.BinaryPathName, sshdPath, configPath) {
+		if !samePaperboatServiceCommand(current.BinaryPathName, serviceName, sshdPath, configPath) {
 			service.Close()
 			return ErrServiceOwnership
 		}
@@ -154,12 +154,6 @@ func samePaperboatServiceCommand(command, serviceName, sshdPath, configPath stri
 	return err == nil && len(arguments) == 5 && arguments[1] == "daemon" && arguments[2] == "__windows-sshd-service" && arguments[3] == "--instance" && arguments[4] == instance
 }
 
-func sameLegacyServiceCommand(command, sshdPath, configPath string) bool {
-	arguments, err := windows.DecomposeCommandLine(command)
-	return err == nil && len(arguments) == 4 && sameWindowsPath(arguments[0], sshdPath) && strings.EqualFold(arguments[1], "-D") &&
-		strings.EqualFold(arguments[2], "-f") && sameWindowsPath(arguments[3], configPath)
-}
-
 func sameWindowsPath(first, second string) bool {
 	return strings.EqualFold(filepath.Clean(first), filepath.Clean(second))
 }
@@ -216,5 +210,5 @@ func RemoveServiceOwned(ctx context.Context, config Config) error {
 func sameOwnedServiceCommand(command, serviceExecutable string, config Config) bool {
 	sshdPath := filepath.Join(config.InstallRoot, "sshd.exe")
 	configPath := filepath.Join(config.StateRoot, "sshd_config")
-	return sameServiceCommand(command, config.ServiceName, serviceExecutable, sshdPath, configPath) || sameLegacyServiceCommand(command, sshdPath, configPath)
+	return sameServiceCommand(command, config.ServiceName, serviceExecutable, sshdPath, configPath)
 }
