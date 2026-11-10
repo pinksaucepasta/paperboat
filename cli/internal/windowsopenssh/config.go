@@ -49,8 +49,7 @@ func WriteServiceConfig(config ServiceConfig) (string, error) {
 		"PubkeyAuthentication yes",
 		"AuthorizedKeysFile " + quote(config.AuthorizedKeys),
 		"HostKey " + quote(config.HostKey),
-		"AllowAgentForwarding no",
-		"AllowTcpForwarding no",
+		// Port and agent forwarding follow OpenSSH's defaults, as on Linux and macOS; X11 stays off.
 		"GatewayPorts no",
 		"PermitTunnel no",
 		"X11Forwarding no",

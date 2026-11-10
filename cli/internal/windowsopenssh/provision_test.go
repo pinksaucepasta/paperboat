@@ -169,9 +169,15 @@ func TestWriteServiceConfigIsLoopbackOnlyAndKeyOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(body)
-	for _, required := range []string{"ListenAddress 127.0.0.1", "ListenAddress ::1", "PasswordAuthentication no", "KbdInteractiveAuthentication no", "PubkeyAuthentication yes", "AllowTcpForwarding no"} {
+	for _, required := range []string{"ListenAddress 127.0.0.1", "ListenAddress ::1", "PasswordAuthentication no", "KbdInteractiveAuthentication no", "PubkeyAuthentication yes", "X11Forwarding no"} {
 		if !strings.Contains(text, required) {
 			t.Fatalf("config missing %q:\n%s", required, text)
+		}
+	}
+	// One forwarding policy on every platform: OpenSSH's own defaults decide port and agent forwarding.
+	for _, rule := range []string{"AllowTcpForwarding", "AllowAgentForwarding"} {
+		if strings.Contains(text, rule) {
+			t.Fatalf("config sets %s, a forwarding rule of Paperboat's own:\n%s", rule, text)
 		}
 	}
 
