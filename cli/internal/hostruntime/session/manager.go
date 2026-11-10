@@ -397,6 +397,9 @@ func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, 
 func (s *managedSession) removeParticipantLocked(attachmentID string) {
 	delete(s.participants, attachmentID)
 	delete(s.resumes, attachmentID)
+	s.interruptMu.Lock()
+	delete(s.interrupts, attachmentID) // a Ctrl-C answer waits for its key only while the attachment lives
+	s.interruptMu.Unlock()
 	s.sizes.detach(attachmentID, time.Now())
 	if s.history != nil {
 		s.history.Forget(attachmentID)

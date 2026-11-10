@@ -1205,3 +1205,57 @@ func TestTwoViewersPressingCtrlCTogetherAreBothAnswered(t *testing.T) {
 		}
 	}
 }
+
+// An attachment's Ctrl-C record goes with the attachment: it does not pile up per session, and a viewer that attaches
+// again under the same ids and starts its input numbering over is not handed the old cut.
+func TestInterruptRecordIsDroppedWhenTheAttachmentDetaches(t *testing.T) {
+	manager, root, shell := realManager(t)
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "record", Command: shellCommand(shell, root, "head -c 300000 /dev/zero | tr '\\0' x; exec sleep 30")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background(), created.ID)
+	session, err := manager.get(created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Attach(created.ID, "att_rec", 0); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+		if _, queued, _ := manager.AttachmentStatus(created.ID, "att_rec"); queued >= 300000 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("output never queued")
+		}
+	}
+	key := InputKey{ClientID: "cli", AttachmentID: "att_rec", Generation: created.Generation, InputSequence: 1}
+	if !manager.Interrupt(created.ID, key, 3) {
+		t.Fatal("Ctrl-C was not taken as the interrupt")
+	}
+	count := func() int {
+		session.interruptMu.Lock()
+		defer session.interruptMu.Unlock()
+		return len(session.interrupts)
+	}
+	if count() != 1 {
+		t.Fatalf("%d records after the interrupt, want 1", count())
+	}
+	if err := manager.Detach(created.ID, "att_rec"); err != nil {
+		t.Fatal(err)
+	}
+	if count() != 0 {
+		t.Fatalf("%d records after the detach, want 0", count())
+	}
+	if _, err := manager.Attach(created.ID, "att_rec", 0); err != nil {
+		t.Fatal(err)
+	}
+	decision, err := manager.WriteContext(context.Background(), created.ID, key, []byte{3}) // same ids, numbering over
+	if err != nil || decision.Status != InputAccepted {
+		t.Fatalf("write: %#v, %v", decision, err)
+	}
+	if decision.InterruptDiscarded {
+		t.Fatal("the reattached viewer was handed the old attachment's discarded answer")
+	}
+}
