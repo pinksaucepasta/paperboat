@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
@@ -48,7 +50,10 @@ func (e commandPreparationFailure) Error() string {
 	case prepareOpenSSH:
 		return "A supported OpenSSH client is unavailable. Install OpenSSH or repair its PATH entry, then retry `pb ssh doctor`."
 	case prepareDoctorRepair:
-		return "Paperboat could not repair the installation: administrator approval was not given or the repair did not finish. Run `pb doctor` to see the current state, then retry `pb doctor --repair`."
+		if errors.Is(e.cause, elevation.ErrElevationDenied) {
+			return "Paperboat could not repair the installation: administrator approval was not given. Run `pb doctor --repair` again and approve the Windows prompt."
+		}
+		return "Paperboat could not repair the installation: the repair did not finish. Run `pb doctor` to see the current state, then retry `pb doctor --repair`."
 	case prepareSelectedFile:
 		return "A selected file or folder is unavailable. Check that it exists and is readable, then select it again."
 	default:

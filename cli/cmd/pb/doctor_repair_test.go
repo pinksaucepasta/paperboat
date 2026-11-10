@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 )
 
 // withDoctorRepair runs --repair as Windows does: the privileged repair only for a paired installation.
@@ -40,13 +43,19 @@ func TestDoctorRepairOnAPairedComputerRepairsOnceThenPrintsTheReport(t *testing.
 	}
 }
 
-// A repair that did not finish is the command's failure, named, as a failed daemon restart is on Linux: no report
-// is printed over an installation the repair may have left half restored.
-func TestDoctorRepairFailureIsNamedAndNoReportFollows(t *testing.T) {
-	withDoctorRepair(t, true, func(context.Context) error { return errors.New("the administrator prompt was declined") })
-	code, stdout, stderr := doctorWithoutADaemon(t, "windows", "doctor", "--repair")
-	if code == 0 || stdout != "" || !strings.Contains(stderr, "could not repair the installation") || !strings.Contains(stderr, "`pb doctor --repair`") ||
-		strings.Contains(stderr, "could not finish the command") || strings.Contains(stderr, "declined") {
-		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+// A repair that did not finish is the command's failure, as a failed daemon restart is on Linux: no report is
+// printed over an installation the repair may have left half restored. The message names which step failed (the
+// administrator prompt or the repair itself) and never the private cause.
+func TestDoctorRepairFailureNamesTheStepAndNoReportFollows(t *testing.T) {
+	for step, cause := range map[string]error{
+		"administrator approval was not given": fmt.Errorf("%w: private detail", elevation.ErrElevationDenied),
+		"the repair did not finish":            errors.New("private detail"),
+	} {
+		withDoctorRepair(t, true, func(context.Context) error { return cause })
+		code, stdout, stderr := doctorWithoutADaemon(t, "windows", "doctor", "--repair")
+		if code == 0 || stdout != "" || !strings.Contains(stderr, "could not repair the installation: "+step) || !strings.Contains(stderr, "`pb doctor --repair`") ||
+			strings.Contains(stderr, "could not finish the command") || strings.Contains(stderr, "private detail") {
+			t.Fatalf("%s: code=%d stdout=%q stderr=%q", step, code, stdout, stderr)
+		}
 	}
 }
