@@ -1,6 +1,7 @@
 package serverclock
 
 import (
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -24,5 +25,22 @@ func TestOffsetAppliesFromAMinute(t *testing.T) {
 	Observe(sent.Add(time.Hour).UTC().Format(http.TimeFormat), sent, sent.Add(time.Minute))
 	if Offset() != 0 {
 		t.Fatalf("an unusable observation changed the offset: %v", Offset())
+	}
+}
+
+func TestMeasureNamesWhyItCannot(t *testing.T) {
+	now := time.Now()
+	if _, err := Measure("", now, now); !errors.Is(err, ErrNoDate) {
+		t.Fatalf("empty: %v", err)
+	}
+	if _, err := Measure("nonsense", now, now); !errors.Is(err, ErrBadDate) {
+		t.Fatalf("garbage: %v", err)
+	}
+	if _, err := Measure(now.UTC().Format(http.TimeFormat), now, now.Add(time.Minute)); !errors.Is(err, ErrSlowRoundTrip) {
+		t.Fatalf("slow: %v", err)
+	}
+	delta, err := Measure(now.Add(time.Hour).UTC().Format(http.TimeFormat), now, now)
+	if err != nil || delta < 59*time.Minute || delta > 61*time.Minute {
+		t.Fatalf("hour ahead: %v %v", delta, err)
 	}
 }

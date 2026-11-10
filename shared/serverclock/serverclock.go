@@ -8,6 +8,7 @@
 package serverclock
 
 import (
+	"errors"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -22,20 +23,42 @@ const maxRoundTrip = 10 * time.Second
 
 var offset atomic.Int64
 
-// Observe records the server's clock from a response Date header, for a request sent at sent and
-// answered at received (both local clock).
-func Observe(date string, sent, received time.Time) {
+// Why a response could not place the server's clock.
+var (
+	ErrNoDate        = errors.New("the response has no Date header")
+	ErrBadDate       = errors.New("the response Date header cannot be read")
+	ErrSlowRoundTrip = errors.New("the request took too long to place the server's time")
+)
+
+// Measure is how far the server's clock is ahead of this machine's (negative: behind), or 0 below
+// Threshold, from a response Date header for a request sent at sent and answered at received (both
+// local clock). The errors say why no measurement was possible.
+func Measure(date string, sent, received time.Time) (time.Duration, error) {
+	if date == "" {
+		return 0, ErrNoDate
+	}
 	server, err := http.ParseTime(date)
+	if err != nil {
+		return 0, ErrBadDate
+	}
 	elapsed := received.Sub(sent)
-	if date == "" || err != nil || elapsed < 0 || elapsed > maxRoundTrip {
-		return
+	if elapsed < 0 || elapsed > maxRoundTrip {
+		return 0, ErrSlowRoundTrip
 	}
 	// Date truncates to the second: the server's time was within the half second after it.
 	delta := server.Add(500 * time.Millisecond).Sub(sent.Add(elapsed / 2))
 	if delta.Abs() < Threshold {
 		delta = 0
 	}
-	offset.Store(int64(delta))
+	return delta, nil
+}
+
+// Observe records the server's clock from a response Date header, for a request sent at sent and
+// answered at received (both local clock).
+func Observe(date string, sent, received time.Time) {
+	if delta, err := Measure(date, sent, received); err == nil {
+		offset.Store(int64(delta))
+	}
 }
 
 // Offset is how far the server's clock is ahead of this machine's (negative: behind), or 0 below

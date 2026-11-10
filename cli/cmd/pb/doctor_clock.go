@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -14,8 +16,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// doctorClockTimeout bounds the one unauthenticated server request that reads the server's clock.
-const doctorClockTimeout = 5 * time.Second
+// doctorClockTimeout bounds each of the (at most two) unauthenticated server requests that read the
+// server's clock; both and the pause between them stay inside the probe's 10 s deadline.
+var doctorClockTimeout = 4 * time.Second
+
+const doctorClockRetryPause = 250 * time.Millisecond
 
 // probeDoctorClock compares this machine's clock with the Paperboat server's. Paperboat corrects for
 // an offset itself, but a clock that is far off also breaks TLS and other software, so it is named.
@@ -30,7 +35,7 @@ func probeDoctorClock(ctx context.Context, command *cobra.Command) doctorpkg.Che
 	}
 	offset, err := measureServerClock(ctx, serverURL)
 	if err != nil {
-		check.Status, check.Summary = doctorpkg.StatusWarning, "The server's clock could not be read."
+		check.Status, check.Summary = doctorpkg.StatusWarning, clockUnreadableSummary(err)
 		check.Recovery = "Check the connection to Paperboat and run `pb doctor` again."
 		return check
 	}
@@ -42,11 +47,46 @@ func probeDoctorClock(ctx context.Context, command *cobra.Command) doctorpkg.Che
 	return check
 }
 
+// clockUnreadableSummary names why the server's clock could not be compared: a slow network, a
+// reply without a time, or a time this machine cannot read are different problems.
+func clockUnreadableSummary(err error) string {
+	switch {
+	case errors.Is(err, serverclock.ErrNoDate):
+		return "The Paperboat server's reply carries no time, so its clock could not be compared."
+	case errors.Is(err, serverclock.ErrBadDate), errors.Is(err, serverclock.ErrSlowRoundTrip):
+		return "The Paperboat server's reply has a time that could not be read, so its clock could not be compared."
+	case isTimeout(err):
+		return "The Paperboat server did not answer in time, so its clock could not be read."
+	}
+	return "The Paperboat server could not be reached to read its clock."
+}
+
+func isTimeout(err error) bool {
+	var network net.Error
+	return errors.Is(err, context.DeadlineExceeded) || errors.As(err, &network) && network.Timeout()
+}
+
+// measureServerClock reads how far the server's clock is ahead from this request's own Date header.
+// A failed request is tried once more (a cold first connection often needs it); a reply without a
+// usable Date is not, it would fail the same way.
 func measureServerClock(ctx context.Context, serverURL string) (time.Duration, error) {
 	normalized, err := config.NormalizeServerURL(serverURL)
 	if err != nil {
 		return 0, err
 	}
+	offset, err := requestServerClock(ctx, normalized)
+	if err == nil || errors.Is(err, serverclock.ErrNoDate) || errors.Is(err, serverclock.ErrBadDate) || errors.Is(err, serverclock.ErrSlowRoundTrip) {
+		return offset, err
+	}
+	select {
+	case <-ctx.Done():
+		return 0, err
+	case <-time.After(doctorClockRetryPause):
+	}
+	return requestServerClock(ctx, normalized)
+}
+
+func requestServerClock(ctx context.Context, normalized string) (time.Duration, error) {
 	ctx, cancel := context.WithTimeout(ctx, doctorClockTimeout)
 	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, normalized+"/v1/server-version", nil)
@@ -54,15 +94,14 @@ func measureServerClock(ctx context.Context, serverURL string) (time.Duration, e
 		return 0, err
 	}
 	client := &http.Client{Transport: errorreport.Transport(nil, normalized), Timeout: doctorClockTimeout}
+	sent := time.Now()
 	response, err := client.Do(request)
 	if err != nil {
 		return 0, err
 	}
+	received := time.Now()
 	_ = response.Body.Close()
-	if response.Header.Get("Date") == "" {
-		return 0, fmt.Errorf("server response has no Date")
-	}
-	return serverclock.Offset(), nil
+	return serverclock.Measure(response.Header.Get("Date"), sent, received)
 }
 
 // describeClockOffset says how far and which way: "12 minutes ahead".
