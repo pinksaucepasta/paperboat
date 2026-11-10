@@ -451,17 +451,20 @@ func (c *streamConn) Write(value []byte) (int, error) {
 func (c *streamConn) LocalAddr() net.Addr  { return c.local }
 func (c *streamConn) RemoteAddr() net.Addr { return c.remote }
 
-// CloseWrite sends the FIN. When the peer already stopped reading (its STOP_SENDING cancels our send side), quic-go's
+// closeSendSide sends the FIN. When the peer already stopped reading (its STOP_SENDING cancels our send side), quic-go's
 // Close fails with a plain error ("close called for canceled stream", send_stream.go): the peer has what it wanted and
 // the FIN is moot, so that is the stream already being closed (net.ErrClosed), which the SSH bridge treats as the
-// client's read side being done. A Close that fails with the send side still open stays an error.
-func (c *streamConn) CloseWrite() error {
-	err := c.Stream.Close()
-	if err != nil && c.Stream.Context().Err() != nil {
+// client's read side being done. A Close that fails with the send side still open stays an error. Both conn kinds use
+// it: streamConn (the dial path) and routedConn (the accept path, which Host.Serve audits through).
+func closeSendSide(stream *quic.Stream) error {
+	err := stream.Close()
+	if err != nil && stream.Context().Err() != nil {
 		return fmt.Errorf("stream send side already closed: %w", net.ErrClosed)
 	}
 	return err
 }
+
+func (c *streamConn) CloseWrite() error { return closeSendSide(c.Stream) }
 
 type routedConn struct {
 	*peerquic.RoutedStream
@@ -552,7 +555,7 @@ func (c *limitedConn) CloseWrite() error {
 
 func (c *routedConn) LocalAddr() net.Addr  { return c.local }
 func (c *routedConn) RemoteAddr() net.Addr { return c.remote }
-func (c *routedConn) CloseWrite() error    { return c.RoutedStream.Close() }
+func (c *routedConn) CloseWrite() error    { return closeSendSide(c.RoutedStream.Stream) }
 
 var _ net.Conn = (*streamConn)(nil)
 var _ net.Conn = (*routedConn)(nil)

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/quic-go/quic-go"
 )
 
@@ -34,6 +35,13 @@ func selfSignedTLS(t *testing.T) *tls.Config {
 // side the peer canceled, and streamConn.CloseWrite names it net.ErrClosed so the SSH bridge sees the client's read side
 // as done.
 func TestCloseWriteAfterThePeerStoppedReadingIsClosed(t *testing.T) {
+	for _, accept := range []bool{false, true} {
+		name := map[bool]string{false: "dial path (streamConn)", true: "accept path (routedConn)"}[accept]
+		t.Run(name, func(t *testing.T) { closeWriteAfterThePeerStoppedReading(t, accept) })
+	}
+}
+
+func closeWriteAfterThePeerStoppedReading(t *testing.T, accept bool) {
 	config := selfSignedTLS(t)
 	listener, err := quic.ListenAddr("127.0.0.1:0", config, nil)
 	if err != nil {
@@ -72,7 +80,10 @@ func TestCloseWriteAfterThePeerStoppedReadingIsClosed(t *testing.T) {
 	if server.err != nil {
 		t.Fatal(server.err)
 	}
-	conn := &streamConn{Stream: server.stream, local: directAddr("local"), remote: directAddr("peer")}
+	var conn interface{ CloseWrite() error } = &streamConn{Stream: server.stream, local: directAddr("local"), remote: directAddr("peer")}
+	if accept {
+		conn = &routedConn{RoutedStream: &peerquic.RoutedStream{Stream: server.stream}, local: directAddr("local"), remote: directAddr("peer")}
+	}
 	// The client stops reading: STOP_SENDING cancels the server's send side.
 	clientStream.CancelRead(0)
 	for deadline := time.Now().Add(5 * time.Second); server.stream.Context().Err() == nil; time.Sleep(10 * time.Millisecond) {
