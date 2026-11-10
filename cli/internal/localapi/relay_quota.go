@@ -15,6 +15,9 @@ const RelayQuotaCode = "bandwidth_quota_exhausted"
 // the CLI session's API token scope does not cover the target (F18-06).
 const TokenScopeCode = "outside_token_scope"
 
+// UpdateRequiredCode is the control plane's refusal of a client below the minimum supported version (HTTP 426).
+const UpdateRequiredCode = "update_required"
+
 // NoEligiblePathCode is the local API code for an Unlimited file transfer stream that was not opened (or was
 // closed) because the only path to the machine is a Paperboat-hosted relay or there is none. The sender waits
 // and resumes when a direct connection or the account's own relay returns.
@@ -35,7 +38,9 @@ func (e *NoEligiblePathError) Error() string {
 // AuthenticationRequiredCode answers a request the daemon cannot serve because this machine is signed out.
 const AuthenticationRequiredCode = "authentication_required"
 
-func Refusal(code string) bool { return code == RelayQuotaCode || code == TokenScopeCode }
+func Refusal(code string) bool {
+	return code == RelayQuotaCode || code == TokenScopeCode || code == UpdateRequiredCode
+}
 
 // writeServerRefusal answers a failed peer operation with the refusal its error carries (the
 // relay plan limit, or an API token scope that does not cover the target), so the caller can name
@@ -55,6 +60,12 @@ func writeServerRefusal(writer http.ResponseWriter, requestID string, err error)
 		message = coded.LocalAPIMessage()
 	case errors.As(err, &refused) && refused.Code == TokenScopeCode:
 		writeError(writer, http.StatusForbidden, requestID, TokenScopeCode, api.PublicMessage(TokenScopeCode))
+		return true
+	case errors.As(err, &refused) && refused.Code == UpdateRequiredCode && safeText(refused.Message):
+		// A below-floor client: the daemon answered exec, ssh and probe with the generic 'peer stream unavailable' while
+		// the control plane had said 'update required' (F14-07 on Windows: the 1 s policy fetch of the command lost to the
+		// round trip and failed open). The message already names the floor (api.apiErrorMessageFor).
+		writeError(writer, http.StatusUpgradeRequired, requestID, UpdateRequiredCode, refused.Message)
 		return true
 	case errors.As(err, new(*NoEligiblePathError)):
 		var waiting *NoEligiblePathError
