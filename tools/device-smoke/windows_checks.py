@@ -110,6 +110,7 @@ def checks(args):
     table['tunnel-protocols'] = (['preview_protocols.py', 'victus', '--tunnel'], [])
     table['network-drop'] = (['network_drop.py', args.peer], ['--peer'])
     table['transfer-modes'] = (['transfer_modes_windows.py', args.peer], ['--peer', 'TARGET_CMD'])  # F22-01; TARGET_CMD: see its docstring
+    table['usage-categories'] = (['usage_categories.py', args.peer], ['--peer', 'PB_SMOKE_API_CMD'])  # F13-02; see its docstring
     table['path-display'] = (['path_display.py', args.peer], ['--peer'])
     for name in ('preview_survival', 'tunnel_survival', 'tunnel_failures', 'tunnel_transfer', 'network_inventory'):
         table[name.replace('_', '-')] = ([name + '.py'], [])

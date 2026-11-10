@@ -9,14 +9,22 @@ usage and billing API (the CLI credential is read in memory, never printed) and 
   * billing usage_bytes grew by exactly the managed-relay plus edge growth of the same window
     (direct and relay bytes of an unidentified node are recorded, never debited).
 Usage: usage_categories.py TARGET
+
+With PB_SMOKE_WINDOWS_PB set the controller is the Windows device (winhost.py; TARGET is a Unix machine of the same
+account): its UDP is blocked by a firewall rule, pb.exe drives every category (no rsync on Windows: scp and sftp stand
+for the ssh category), and the account's API credential, which Windows keeps under DPAPI where this controller cannot
+read it, comes from PB_SMOKE_API_CMD: a command that prints the access token and the server URL on two lines (for
+example ssh to a Unix machine signed in to the same account).
 """
 import argparse
+import contextlib
 import glob
 import json
 import shlex
 
 import cli_credential
 import os
+import winhost
 from pathlib import Path
 import pty
 import select
@@ -28,6 +36,8 @@ import urllib.parse
 import urllib.request
 
 HOME = Path.home()
+DEVICE = winhost.device()
+PB = winhost.pb_path()
 BLOCK = 'OUTPUT ! -o lo -p udp ! --dport 53 -j REJECT'
 SIZE = 1024 * 1024
 CHARGED = {('relay', 'managed')}
@@ -39,19 +49,30 @@ def sh(command):
 
 
 def pb(*arguments, timeout=150):
+    if DEVICE:
+        return DEVICE.run([DEVICE.pb_exe, *arguments], timeout=timeout)
     return subprocess.run(['pb', *arguments], capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+
+
+def credential():
+    """(access token, server URL) of the account: this machine's CLI credential, or PB_SMOKE_API_CMD for the device."""
+    if DEVICE:
+        lines = subprocess.run(shlex.split(os.environ['PB_SMOKE_API_CMD']), capture_output=True, text=True, timeout=60,
+                               stdin=subprocess.DEVNULL).stdout.split()
+        assert len(lines) == 2, 'PB_SMOKE_API_CMD must print the access token and the server URL'
+        return lines[0], lines[1]
+    return cli_credential.access_token(), cli_credential.server_url()
 
 
 class Api:
     def __init__(self):
-        self.token = self.read_token()
-        self.server = cli_credential.server_url()
+        self.token, self.server = self.read_token(), credential()[1]
 
     @staticmethod
     def read_token():
         # Any pb command that reaches the server renews the saved access credential first.
         pb('machine', 'list', '--json')
-        return cli_credential.access_token()
+        return credential()[0]
 
     def get(self, path):
         for attempt in range(2):
@@ -108,7 +129,10 @@ def mac_sudo(command):
     return "sudo -S -p '' sh -c %s < %s" % (shlex.quote(command), shlex.quote(os.environ['SUDO_PW_FILE']))
 
 
-def block_udp():
+def block_udp(stack):
+    if DEVICE:
+        stack.enter_context(DEVICE.udp_blocked())
+        return
     if cli_credential.DARWIN:
         sh(mac_sudo('printf "block drop out quick proto udp from any to any port != 53\\n" | pfctl -a %s -f - 2>/dev/null; '
                     'pfctl -E >/dev/null 2>&1; pfctl -F states >/dev/null 2>&1; (sleep 600; pfctl -a %s -F all) >/dev/null 2>&1 &'
@@ -117,7 +141,10 @@ def block_udp():
     sh('for t in iptables ip6tables; do sudo -n $t -I %s; done; (sleep 600; for t in iptables ip6tables; do sudo -n $t -D %s; done) >/dev/null 2>&1 &' % (BLOCK, BLOCK))
 
 
-def unblock_udp():
+def unblock_udp(stack):
+    if DEVICE:
+        stack.close()
+        return
     if cli_credential.DARWIN:
         sh(mac_sudo('pfctl -a %s -F all >/dev/null 2>&1; true' % PF_ANCHOR))
         return
@@ -140,7 +167,8 @@ def terminal(target, name):
     marker = 'DONE_$((1+1))'
     child, descriptor = pty.fork()
     if child == 0:
-        os.execvp('pb', ['pb', 'connect', target, 'new', '--name', name])
+        argv = winhost.terminal_argv(PB, ['connect', target, 'new', '--name', name])
+        os.execvpe(argv[0], argv, dict(os.environ, **winhost.terminal_env(PB)))
     output = bytearray()
 
     def read_until(condition, seconds):
@@ -163,18 +191,23 @@ def terminal(target, name):
 
 def drive(target, work):
     data = work / 'data.bin'
-    data.write_bytes(os.urandom(SIZE))
+    if DEVICE:
+        data.write_random(SIZE)
+    else:
+        data.write_bytes(os.urandom(SIZE))
     remote = '/tmp/usage-categories-' + str(os.getpid())
     steps = {
         'exec': lambda: pb('exec', target, '--timeout', '90s', '--', 'sh', '-c', 'head -c %d /dev/urandom | base64' % (SIZE // 2)),
         'ssh': lambda: pb('ssh', target, '--', 'sh -c "head -c %d /dev/urandom | base64"' % SIZE),
         'scp': lambda: pb('scp', str(data), target + ':' + remote + '.scp'),
-        'rsync': lambda: pb('rsync', '-a', str(data), target + ':' + remote + '.rsync'),
+        'rsync': lambda: pb('rsync', '-a', str(data), target + ':' + remote + '.rsync'),  # not on Windows
         'sftp': lambda: pb('sftp', '-b', str(work / 'sftp.batch'), target),
         'send': lambda: pb('send', str(data), '--to', target, '--json'),
     }
     (work / 'sftp.batch').write_text('put %s %s.sftp\nrm %s.sftp\n' % (data, remote, remote))
     for name, step in steps.items():
+        if DEVICE and name == 'rsync':
+            continue
         result = step()
         if result.returncode != 0:
             raise RuntimeError('%s failed over the relay: %s' % (name, result.stderr.strip()[-160:]))
@@ -188,17 +221,18 @@ def main():
     target = parser.parse_args().target
     api = Api()
     start = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() - 3600))
-    work = Path('/tmp/usage-categories-%d' % os.getpid())
-    work.mkdir()
+    scratch = winhost.workdir('usage-categories-')  # on the device for a Windows controller
+    work = scratch.__enter__()
     ok, detail = False, {}
+    blocked = contextlib.ExitStack()
     try:
         before = api.quiet_snapshot(start)
-        block_udp()
+        block_udp(blocked)
         try:
             wait_for_relay(target)
             drive(target, work)
         finally:
-            unblock_udp()
+            unblock_udp(blocked)
         try:
             after = api.quiet_snapshot(start, before)
         except RuntimeError:
@@ -211,7 +245,7 @@ def main():
         if missing:
             detail['categories_below_driven'] = missing
     finally:
-        sh('rm -rf %s' % work)
+        scratch.__exit__(None, None, None)
     print(json.dumps({'check': 'usage-categories', 'target': target, 'status': 'PASS' if ok else 'FAIL', **detail}), flush=True)
     sys.exit(0 if ok else 1)
 
