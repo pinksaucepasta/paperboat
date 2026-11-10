@@ -111,6 +111,10 @@ TASKS = ("@(Get-ScheduledTask -TaskPath $req.path -ErrorAction SilentlyContinue|
          "Select-Object TaskName,@{n='State';e={[string]$_.State}})|ConvertTo-Json -Compress")
 SERVICE_PATHS = ("@(Get-CimInstance Win32_Service|Where-Object{$_.Name -like $req.pattern}|"
                  "Select-Object Name,PathName)|ConvertTo-Json -Compress")
+# stop, start or restart one service by exact name, waiting for the state it asked for.
+SERVICE = ("$s=Get-Service -Name $req.name\n"
+           "if($req.action -ne 'start'){Stop-Service -InputObject $s -Force;$s.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(60))}\n"
+           "if($req.action -ne 'stop'){Start-Service -InputObject $s;$s.WaitForStatus('Running',[TimeSpan]::FromSeconds(60))}")
 LISTENING = ("try{$c=New-Object Net.Sockets.TcpClient('127.0.0.1',[int]$req.port);$c.Close();'yes'}catch{'no'}")
 ALIVE = "if(Get-Process -Id $req.pid -ErrorAction SilentlyContinue){'yes'}else{'no'}"
 WHICH = "(Get-Command $req.name -CommandType Application -ErrorAction SilentlyContinue|Select-Object -First 1).Source"
@@ -356,6 +360,11 @@ class WindowsDevice:
 
     def services(self, pattern='Paperboat*'):
         return self._list('services ' + pattern, SERVICES, pattern=pattern)
+
+    def service(self, action, name):
+        """stop, start or restart the service with this exact name (the session is an administrator's)."""
+        assert action in ('stop', 'start', 'restart'), action
+        self.ps('%s service %s' % (action, name), SERVICE, timeout=180, name=name, action=action)
 
     def _list(self, step, script, **payload):
         out = self.ps(step, script, **payload)[1]

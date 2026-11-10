@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """F8-03: a durable tunnel keeps serving through pause/resume, a daemon restart, an update and a host-service restart."""
+import contextlib
 import functools
 import http.server
 import json
@@ -18,9 +19,10 @@ import uuid
 
 from install_lifecycle import registration
 from pairing_lifecycle import command_result
-from preview_lifecycle import QuietHandler
+from preview_lifecycle import QuietHandler, exposed
+import winhost
 
-PB = Path.home() / '.local/bin/pb'
+PB = winhost.pb_path()
 
 
 def run(*args, expect_ok=True):
@@ -80,6 +82,53 @@ def hostd_unit():
     return units[0]
 
 
+def host_service(action, name=None):
+    """stop, start or restart this user's host service; returns its name, to start again what was stopped.
+
+    Linux: the systemd unit; macOS: launchctl kickstart (restart only); Windows: the PaperboatHostd-<instance> service."""
+    device = winhost.device()
+    if device:
+        if name is None:
+            names = [item['Name'] for item in device.services('PaperboatHostd-*') if item['Status'] == 'Running']
+            if len(names) != 1:
+                raise RuntimeError('expected exactly one running host service, found %r' % names)
+            name = names[0]
+        device.service(action, name)
+    elif platform.system() == 'Darwin':
+        assert action == 'restart', action
+        name = hostd_label()
+        sudo('launchctl', 'kickstart', '-k', 'system/' + name)
+    else:
+        name = name or hostd_unit()
+        sudo('systemctl', action, name)
+    return name
+
+
+@contextlib.contextmanager
+def binary_copy():
+    """A copy of the installed pb in a private directory of the device under test, for `pb update --from`."""
+    device = winhost.device()
+    if device:
+        with device.temp_dir('pb-survive') as directory:
+            device.copy(PB, directory / 'pb.exe')
+            yield directory / 'pb.exe'
+        return
+    installed = Path(tempfile.mkdtemp(prefix='pb-survive-', dir=Path.home()))
+    try:
+        os.chmod(installed, 0o700)
+        shutil.copy2(PB, installed / 'pb')
+        os.chmod(installed / 'pb', 0o700)
+        yield installed / 'pb'
+    finally:
+        shutil.rmtree(installed, ignore_errors=True)
+
+
+def update_from(copy):
+    result = command_result(PB, 'update', '--from', str(copy), timeout=300)
+    if result.returncode:
+        raise RuntimeError('pb update --from failed: ' + (result.stderr or result.stdout)[-300:])
+
+
 def survive(endpoint, identifier, what, action):
     action()
     time.sleep(3)
@@ -97,14 +146,15 @@ def main():
     name = 'smoke-tunnel-survive-' + uuid.uuid4().hex[:10]
     identifier = None
     primary_error = None
-    with tempfile.TemporaryDirectory(prefix='paperboat-tunnel-survive-') as directory:
+    with tempfile.TemporaryDirectory(prefix='paperboat-tunnel-survive-') as directory, contextlib.ExitStack() as stack:
         (Path(directory) / 'index.html').write_text('synthetic tunnel origin')
         server = http.server.ThreadingHTTPServer(('127.0.0.1', 0),
                     functools.partial(QuietHandler, directory=directory))
         worker = threading.Thread(target=server.serve_forever, daemon=True)
         worker.start()
         try:
-            created = run('tunnel', 'create', name, '--port', str(server.server_port), '--duration', '30m',
+            port = stack.enter_context(exposed(server.server_port))  # Windows: the device's port that reaches this origin
+            created = run('tunnel', 'create', name, '--port', str(port), '--duration', '30m',
                           '--wait', '--timeout', '90s')
             identifier = created['tunnel']['id']
             endpoint = created['tunnel']['stable_endpoint']
@@ -114,21 +164,9 @@ def main():
             run('tunnel', 'resume', identifier, '--wait')
             wait_status(endpoint, 200, 'after resume')
             survive(endpoint, identifier, 'a daemon restart', lambda: run('service', 'restart'))
-            installed = Path(tempfile.mkdtemp(prefix='pb-survive-', dir=Path.home()))
-            try:
-                os.chmod(installed, 0o700)
-                copy = installed / 'pb'
-                shutil.copy2(PB, copy)
-                os.chmod(copy, 0o700)
-                survive(endpoint, identifier, 'an update', lambda: subprocess.run(
-                    [str(PB), 'update', '--from', str(copy)], check=True, timeout=300, capture_output=True))
-            finally:
-                shutil.rmtree(installed, ignore_errors=True)
-            if platform.system() == 'Darwin':
-                restart_host = lambda: sudo('launchctl', 'kickstart', '-k', 'system/' + hostd_label())
-            else:
-                restart_host = lambda: sudo('systemctl', 'restart', hostd_unit())
-            survive(endpoint, identifier, 'a host-service restart', restart_host)
+            with binary_copy() as copy:
+                survive(endpoint, identifier, 'an update', lambda: update_from(copy))
+            survive(endpoint, identifier, 'a host-service restart', lambda: host_service('restart'))
         except BaseException as error:
             primary_error = error
             raise

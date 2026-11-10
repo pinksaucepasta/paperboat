@@ -6,9 +6,10 @@
   3. the local app stops: the lease becomes origin_unavailable and the URL stops serving it
   4. the app returns on the same port: the lease is ready again and the URL serves the marker
   5. `preview stop` ends it: state stopped and the URL no longer serves
-  6. Linux: a second background preview survives a restart of the host service (an update
+  6. Linux, Windows: a second background preview survives a restart of the host service (an update
      restarts it): the same URL serves again and the lease stays ready; `preview stop` ends it
 """
+import contextlib
 import functools
 import http.server
 import json
@@ -24,11 +25,12 @@ import uuid
 
 from install_lifecycle import registration
 from pairing_lifecycle import invoke
-from preview_lifecycle import QuietHandler
+from preview_lifecycle import QuietHandler, exposed
 from preview_receipt import PREVIEW_COMMAND_TIMEOUT, receipt_value
-from tunnel_survival import hostd_unit, sudo
+from tunnel_survival import host_service
+import winhost
 
-PB = Path.home() / '.local/bin/pb'
+PB = winhost.pb_path()
 WAIT_SECONDS = 150
 
 
@@ -66,11 +68,12 @@ def main():
     identifier = None
     primary_error = None
     result = {'check': 'preview-survival', 'status': 'PASS'}
-    with tempfile.TemporaryDirectory(prefix='paperboat-preview-survive-') as directory:
+    with tempfile.TemporaryDirectory(prefix='paperboat-preview-survive-') as directory, contextlib.ExitStack() as stack:
         (Path(directory) / 'index.html').write_text('<p>' + marker + '</p>')
         server = serve(directory)
-        port = server.server_port
+        local_port = server.server_port
         try:
+            port = stack.enter_context(exposed(local_port))  # Windows: the device's port that reaches this origin
             lease = invoke(PB, 'preview', str(port), '--background', '--ttl', '15m', '--json', timeout=PREVIEW_COMMAND_TIMEOUT)
             endpoint = receipt_value(lease, 'endpoint')
             identifier = lease['id']
@@ -87,7 +90,7 @@ def main():
             assert marker not in body(endpoint), 'the preview kept serving a stopped app'
             result['origin_unavailable'] = True
 
-            server = serve(directory, port)
+            server = serve(directory, local_port)
             wait_for(lambda: state(identifier) == 'ready' and marker in body(endpoint), 'ready again after the app returned')
             result['origin_recovers'] = True
 
@@ -98,11 +101,11 @@ def main():
             wait_for(lambda: marker not in body(endpoint), 'the stopped preview to stop serving')
             result['stop_ends'] = True
             result['host_restart'] = 'not_run'
-            if platform.system() == 'Linux':
+            if winhost.device() or platform.system() == 'Linux':
                 lease = invoke(PB, 'preview', str(port), '--background', '--ttl', '15m', '--json', timeout=PREVIEW_COMMAND_TIMEOUT)
                 identifier, endpoint = lease['id'], receipt_value(lease, 'endpoint')
                 wait_for(lambda: marker in body(endpoint), 'the second preview to serve')
-                sudo('systemctl', 'restart', hostd_unit())
+                host_service('restart')
                 time.sleep(5)
                 wait_for(lambda: marker in body(endpoint) and state(identifier) == 'ready', 'the same URL after a host-service restart')
                 result['host_restart'] = 'survived'

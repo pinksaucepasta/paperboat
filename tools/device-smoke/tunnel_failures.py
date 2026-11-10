@@ -4,30 +4,32 @@
 Induces two real failures on a working durable tunnel and checks that each is named, with what to
 do, in all three commands, and that the tunnel returns to ready by itself once the cause is fixed:
   1. the local app stops           -> origin_unreachable, log tunnel_origin_unreachable
-  2. the Paperboat host stops (Linux only) -> connector_offline
+  2. the Paperboat host service stops (Linux, Windows) -> connector_offline
 """
+import contextlib
 import functools
 import http.server
 import json
 import os
 from pathlib import Path
 import platform
-import subprocess
 import tempfile
 import threading
 import time
 import uuid
 
 from install_lifecycle import registration
-from preview_lifecycle import QuietHandler
-from tunnel_survival import PB, confirmed, hostd_unit, run, status_code, sudo, wait_status
+from pairing_lifecycle import command_result
+from preview_lifecycle import QuietHandler, exposed
+from tunnel_survival import PB, confirmed, host_service, run, status_code, wait_status
+import winhost
 
 CAUSE_SECONDS = 150
 RECOVER_SECONDS = 150
 
 
 def human(*args):
-    result = subprocess.run([str(PB), *args], capture_output=True, text=True, timeout=120)
+    result = command_result(PB, *args, timeout=120)
     if result.returncode:
         raise RuntimeError('command failed: ' + ' '.join(args))
     return result.stdout
@@ -72,11 +74,12 @@ def main():
     stopped_host = None
     primary_error = None
     result = {'check': 'tunnel-failures', 'status': 'PASS'}
-    with tempfile.TemporaryDirectory(prefix='paperboat-tunnel-explain-') as directory:
+    with tempfile.TemporaryDirectory(prefix='paperboat-tunnel-explain-') as directory, contextlib.ExitStack() as stack:
         (Path(directory) / 'index.html').write_text('synthetic tunnel origin')
         server = serve(directory)
-        port = server.server_port
+        local_port = server.server_port
         try:
+            port = stack.enter_context(exposed(local_port))  # Windows: the device's port that reaches this origin
             created = run('tunnel', 'create', name, '--port', str(port), '--duration', '30m', '--wait', '--timeout', '90s')
             identifier = created['tunnel']['id']
             endpoint = created['tunnel']['stable_endpoint']
@@ -90,19 +93,17 @@ def main():
             assert 'tunnel_origin_unreachable' in logs, 'tunnel logs do not record the local app going down'
             origin = run('tunnel', 'status', identifier)['dimensions']['origin']['code']
             assert origin.startswith('origin_'), 'origin dimension does not carry the reason: ' + origin
-            server = serve(directory, port)
+            server = serve(directory, local_port)
             wait_code(identifier, 'ready', RECOVER_SECONDS, 'restarting the local app')
             wait_status(endpoint, 200, 'after the local app returned')
             assert 'tunnel_origin_recovered' in human('tunnel', 'logs', identifier), 'tunnel logs do not record the recovery'
             result['origin_stopped'] = origin
 
-            if platform.system() == 'Linux':
-                unit = hostd_unit()
-                sudo('systemctl', 'stop', unit)
-                stopped_host = unit
+            if winhost.device() or platform.system() == 'Linux':
+                stopped_host = host_service('stop')
                 wait_code(identifier, 'connector_offline', CAUSE_SECONDS, 'stopping the host service')
                 explained(identifier, 'connector_offline')
-                sudo('systemctl', 'start', unit)
+                host_service('start', stopped_host)
                 stopped_host = None
                 wait_code(identifier, 'ready', RECOVER_SECONDS, 'starting the host service')
                 wait_status(endpoint, 200, 'after the host service returned')
@@ -115,7 +116,7 @@ def main():
         finally:
             try:
                 if stopped_host:
-                    sudo('systemctl', 'start', stopped_host)
+                    host_service('start', stopped_host)
                 if identifier is not None:
                     confirmed('tunnel', 'delete', identifier)
             except BaseException:
