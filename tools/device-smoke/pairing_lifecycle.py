@@ -387,18 +387,29 @@ def pair(binary, arguments, root, fault, server, password=None):
             proxy.close()
 
 
-# Warnings of the HOST environment, not of Paperboat's state: browser-facing local access needs ports 80/443, and a hosted
-# Windows runner's own HTTP.sys holds them (PID 4), so doctor reads 'degraded' there before and after every operation.
-ENVIRONMENT_WARNINGS = {'browser_urls_unavailable'}
+# A hosted Windows runner's own HTTP.sys (PID 4) holds ports 80/443, so doctor reads 'degraded' there before and after every
+# operation: the busy-port warning (daemon:browser_urls_unavailable, repeated in the daemon check's summary) names that owner.
+# Only that exact warning is tolerated; any other owner, any other warning or failing check still fails the gate.
+HTTP_SYS_PORT_WARNING = ('Browser URLs are off because another program is using port 80/443 '
+                         '(Windows HTTP service (HTTP.sys, for example IIS), PID 4)')
+
+
+def http_sys_port_warning(check):
+    return (check.get('code') in ('daemon', 'daemon:browser_urls_unavailable') and check.get('status') == 'warning'
+            and HTTP_SYS_PORT_WARNING in check.get('summary', ''))
 
 
 def doctor_healthy(report):
-    """overall healthy; on a Windows device also degraded when only ENVIRONMENT_WARNINGS keep it from healthy."""
+    """overall healthy; on a Windows device also degraded when only the HTTP.sys busy-port warning keeps it from healthy."""
     if report.get('overall') == 'healthy':
         return True
     if report.get('overall') != 'degraded' or not winhost.device():
         return False
-    return all(check.get('status') == 'pass' or check.get('code') in ENVIRONMENT_WARNINGS for check in report.get('checks', []))
+    if not all(check.get('status') == 'pass' or http_sys_port_warning(check) for check in report.get('checks', [])):
+        return False
+    print('doctor gate: tolerated the busy-port warning (the Windows HTTP service, HTTP.sys PID 4, owns port 80/443 on this '
+          'runner: browser URLs are off by the host, not by Paperboat)', flush=True)
+    return True
 
 
 def await_windows_uninstall(receipt, seconds=360):

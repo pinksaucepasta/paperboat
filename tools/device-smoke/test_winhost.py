@@ -2002,17 +2002,34 @@ class RemainingFamilyPlumbing(unittest.TestCase):
         source = (pathlib.Path(__file__).parent / 'pairing_lifecycle.py').read_text()
         self.assertNotIn("'list', '--json')['machines']", source)  # the default machine page is 50 of 74
 
-    def test_doctor_gate_accepts_only_the_hosts_environment_warnings_on_a_windows_device(self):
+    def test_doctor_gate_accepts_only_the_http_sys_busy_port_warning_on_a_windows_device(self):
+        import contextlib
+        import io
         import pairing_lifecycle as p
-        degraded = {'overall': 'degraded', 'checks': [{'code': 'auth', 'status': 'pass'}, {'code': 'browser_urls_unavailable', 'status': 'warning'}]}
-        failing = {'overall': 'degraded', 'checks': [{'code': 'auth', 'status': 'pass'}, {'code': 'peer_reachability', 'status': 'fail'}]}
+        owner = 'Windows HTTP service (HTTP.sys, for example IIS), PID 4'
+
+        def report(owner_text, extra=()):  # the real shape of `pb doctor --json` with the busy-port warning
+            busy = 'Browser URLs are off because another program is using port 80/443 (%s)' % owner_text
+            return {'overall': 'degraded', 'checks': [
+                {'category': 'control', 'code': 'authentication', 'status': 'pass', 'summary': 'ok'},
+                {'category': 'local', 'code': 'daemon', 'status': 'warning', 'summary': 'The local daemon is ready. ' + busy + '.'},
+                {'category': 'daemon', 'code': 'daemon:browser_urls_unavailable', 'status': 'warning', 'summary': busy}, *extra]}
+
+        failing = {'category': 'local', 'code': 'peer_paths', 'status': 'fail', 'summary': 'no path'}
         self.assertTrue(p.doctor_healthy({'overall': 'healthy', 'checks': []}))
         with patch.object(winhost, 'device', lambda: object()):
-            self.assertTrue(p.doctor_healthy(degraded))
-            self.assertFalse(p.doctor_healthy(failing))
+            printed = io.StringIO()
+            with contextlib.redirect_stdout(printed):
+                self.assertTrue(p.doctor_healthy(report(owner)))
+            self.assertIn('tolerated the busy-port warning', printed.getvalue())
+            self.assertIn('HTTP.sys PID 4', printed.getvalue())
+            self.assertFalse(p.doctor_healthy(report('nginx, PID 4242')))  # any other owner fails the gate
+            self.assertFalse(p.doctor_healthy(report('unknown program, PID 4')))
+            self.assertFalse(p.doctor_healthy(report(owner, [failing])))
+            self.assertFalse(p.doctor_healthy(report(owner, [{'code': 'clock', 'status': 'warning', 'summary': 'skewed'}])))
             self.assertFalse(p.doctor_healthy({'overall': 'unhealthy', 'checks': []}))
         with patch.object(winhost, 'device', lambda: None):  # Linux/macOS stay strict
-            self.assertFalse(p.doctor_healthy(degraded))
+            self.assertFalse(p.doctor_healthy(report(owner)))
 
     def test_pb_text_keeps_the_stdin_of_the_local_call(self):
         done = winhost.pb_text(sys.executable, ['-c', 'import sys;print(len(sys.stdin.read()))'], timeout=30, stdin=subprocess.DEVNULL)
