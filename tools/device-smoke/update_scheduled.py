@@ -94,12 +94,17 @@ def disabled_phase(before):
     return text
 
 
+def utc_stamp(stamp):
+    """The device reports its own offset (victus is +05:30); compare in UTC like utc_minute."""
+    return datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00')).astimezone(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M')
+
+
 def scheduled_phase(lead, before, latest):
     target, text = at_minute(lead)
     run('update', 'settings', '--auto=true', '--time', text)
     current = settings()
     assert current['automatic_updates'] is True and current['local_time'] == text, 'enable did not persist: %r' % current
-    assert current['next_maintenance_at'].startswith(utc_minute(target)), \
+    assert utc_stamp(current['next_maintenance_at']).startswith(utc_minute(target)), \
         'next maintenance is %r, expected %s' % (current['next_maintenance_at'], text)
     if clock.now() < target - datetime.timedelta(seconds=20):
         assert version() == before, 'the machine updated before its maintenance time'
@@ -122,7 +127,7 @@ def scheduled_phase(lead, before, latest):
                 and report.get('overall') == 'healthy' and (not guard or guard[0].get('status') == 'pass'))
     wait_until(clock.now() + datetime.timedelta(seconds=ACTIVATION_SECONDS), settled, 'doctor healthy, activation done and the guard on %s' % latest)
     next_run = status()['next_maintenance_at']
-    assert next_run[:16] > utc_minute(target + datetime.timedelta(hours=1)), \
+    assert utc_stamp(next_run)[:16] > utc_minute(target + datetime.timedelta(hours=1)), \
         'next maintenance did not move to the next day: %r' % next_run
     return text, round((updated_at - target).total_seconds(), 1), next_run
 

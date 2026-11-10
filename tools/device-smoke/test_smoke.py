@@ -613,6 +613,11 @@ TLIST=($DEVICES)
             self.assertNotIn('env-scopes', out)
             self.assertEqual(calls, '')
 
+    def test_scheduled_update_compares_a_device_offset_stamp_in_utc(self):
+        import update_scheduled
+        self.assertEqual(update_scheduled.utc_stamp('2026-11-11T04:00:00+05:30'), '2026-11-10T22:30')
+        self.assertEqual(update_scheduled.utc_stamp('2026-11-10T22:30:00Z'), '2026-11-10T22:30')
+
     def test_update_scheduled_runs_only_when_asked_and_reports_where_the_machine_went(self):
         good = json.dumps({'check': 'update-scheduled', 'status': 'PASS', 'from': '2026.10.25.1', 'to': '2026.10.26.0',
                            'disabled_stayed_put': True, 'settings_restored': True})
