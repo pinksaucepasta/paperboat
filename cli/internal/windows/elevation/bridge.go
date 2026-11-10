@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+// CodeOpenSSHUnobtainable is the RemoteError code of an OpenSSH operation that failed only because this machine cannot
+// supply the package (no App Installer): the typed error does not cross the elevation boundary, this code does.
+const CodeOpenSSHUnobtainable = "openssh_unobtainable"
+
 const (
 	SchemaV1 = "paperboat.windows-elevation/v1"
 

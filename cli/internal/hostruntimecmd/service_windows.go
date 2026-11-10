@@ -121,6 +121,10 @@ func dispatchElevatedOperation(ctx context.Context, request elevation.Request) (
 			resultErr = &elevation.RemoteError{Code: "activation_pending", Message: hostinstall.ErrSignedUpdatePending.Error()}
 			return
 		}
+		if request.Operation == elevation.OperationOpenSSH && windowsopenssh.Unobtainable(resultErr) {
+			resultErr = &elevation.RemoteError{Code: elevation.CodeOpenSSHUnobtainable, Message: "this machine cannot supply OpenSSH (no App Installer or package source)"}
+			return
+		}
 		if runtimeCausesOnly(resultErr, hostinstall.ErrLegacyCarrierRunning) {
 			resultErr = &elevation.RemoteError{Code: "legacy_carrier_running", Message: hostinstall.ErrLegacyCarrierRunning.Error()}
 		}
