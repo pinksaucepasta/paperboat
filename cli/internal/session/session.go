@@ -137,18 +137,19 @@ func Run(ctx context.Context, conn tunnel.Conn, stdinSink io.WriteCloser, opts .
 		defer close(outputDone)
 		buf := make([]byte, options.outputBufferBytes)
 		var outputOffset uint64
-		var resizes resizeFilter // a ConPTY obeys the host's in-band resize broadcast: see resizeFilter
+		var sink io.Writer = options.output
+		if runtime.GOOS == "windows" { // a ConPTY obeys the host's in-band resize broadcast: see resizeFilter
+			resizes := &resizeWriter{out: options.output}
+			defer resizes.Flush()
+			sink = resizes
+		}
 		for {
 			n, err := conn.Read(buf)
 			if n > 0 {
 				diagnostics.TerminalHop("client_terminal_read", "local", outputOffset, outputOffset+uint64(n), time.Now())
 				diagnostics.TerminalHop("client_terminal_write_start", "local", outputOffset, outputOffset+uint64(n), time.Now())
 				started := time.Now()
-				shown := buf[:n]
-				if runtime.GOOS == "windows" {
-					shown = resizes.strip(shown)
-				}
-				if _, writeErr := options.output.Write(shown); writeErr != nil {
+				if _, writeErr := sink.Write(buf[:n]); writeErr != nil {
 					streamErr <- fmt.Errorf("write terminal output: %w", writeErr)
 					return
 				}

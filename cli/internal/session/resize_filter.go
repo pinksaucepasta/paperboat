@@ -1,17 +1,18 @@
 package session
 
-import "bytes"
+import (
+	"bytes"
+	"io"
+	"sync"
+	"time"
+)
 
 // resizeFilter removes the in-band window resize request ESC [ 8 ; rows ; cols t from remote output. The host broadcasts it to every
 // attached client when a resize is applied (hostruntime/session/manager_input.go); a Unix terminal ignores it, but a ConPTY obeys it by
 // resizing itself for real, which pb's own size poll then reports back as the client's size: the last typer's size sticks and every other
-// window shrinks to it for good (F3-14, N1/N15 on a Windows client). Chunks may split a request, so a possible start at the end of a chunk
-// is held for the next one.
-// shortcut: only ESC [ 8 is held back at a chunk end (a split between ESC and [ or inside a request that does not start like one passes through
-// unfiltered); upgrade if a remote ever splits at those two bytes.
+// window shrinks to it for good (F3-14, N1/N15 on a Windows client). A chunk may end inside a request, so a tail that could still become
+// one is held for the next chunk; the caller flushes what stays held (take) when the stream goes quiet or ends.
 type resizeFilter struct{ held []byte }
-
-var resizePrefix = []byte("\x1b[8;")
 
 // strip returns chunk without resize requests. The result may alias chunk.
 func (f *resizeFilter) strip(chunk []byte) []byte {
@@ -20,38 +21,53 @@ func (f *resizeFilter) strip(chunk []byte) []byte {
 		data = append(f.held, chunk...)
 		f.held = nil
 	}
-	if !bytes.Contains(data, resizePrefix[:3]) {
+	if bytes.IndexByte(data, 0x1b) < 0 {
 		return data
 	}
 	var out []byte
 	for {
-		start := bytes.Index(data, resizePrefix[:3])
+		start := bytes.IndexByte(data, 0x1b)
 		if start < 0 {
 			return append(out, data...)
 		}
 		out = append(out, data[:start]...)
 		data = data[start:]
-		if end := resizeRequestEnd(data); end > 0 {
+		switch end := resizeRequestEnd(data); {
+		case end > 0:
 			data = data[end:]
-			continue
-		} else if end < 0 { // may still become a request: wait for more bytes
+		case end < 0: // may still become a request: wait for more bytes
 			f.held = append([]byte(nil), data...)
 			return out
+		default:
+			out = append(out, data[0])
+			data = data[1:]
 		}
-		out = append(out, data[:1]...)
-		data = data[1:]
 	}
 }
 
-// resizeRequestEnd returns the length of a complete ESC [ 8 ; digits ; digits t at the start of data (which starts with ESC [ 8), -1 if
-// data is a proper prefix of one, 0 if it is not a request. A request is at most 24 bytes.
+// take returns the bytes held back and forgets them.
+func (f *resizeFilter) take() []byte {
+	held := f.held
+	f.held = nil
+	return held
+}
+
+// resizeRequestEnd returns the length of a complete ESC [ 8 ; digits ; digits t at the start of data (which starts with ESC), -1 if data is
+// a proper prefix of one, 0 if it is not a request. A request is at most 24 bytes.
 func resizeRequestEnd(data []byte) int {
-	digits := 0 // digits seen in the current number
-	numbers := 0
-	for i := 3; i < len(data); i++ {
+	const head = "\x1b[8;"
+	for i := 0; i < len(head); i++ {
+		if i >= len(data) {
+			return -1
+		}
+		if data[i] != head[i] {
+			return 0
+		}
+	}
+	digits, numbers := 0, 0
+	for i := len(head); i < len(data); i++ {
 		switch c := data[i]; {
-		case i == 3 && c == ';':
-		case c >= '0' && c <= '9' && i > 3:
+		case c >= '0' && c <= '9':
 			digits++
 		case c == ';' && digits > 0 && numbers == 0:
 			numbers, digits = 1, 0
@@ -65,4 +81,45 @@ func resizeRequestEnd(data []byte) int {
 		}
 	}
 	return -1
+}
+
+// resizeWriter writes remote output to out without resize requests. A tail held back by the filter is written after quiet (a prefix that
+// never completes must not be swallowed) and by Flush when the stream ends.
+type resizeWriter struct {
+	mu     sync.Mutex
+	filter resizeFilter
+	out    io.Writer
+	timer  *time.Timer
+}
+
+const resizeHoldLimit = 100 * time.Millisecond
+
+func (w *resizeWriter) Write(chunk []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.timer != nil {
+		w.timer.Stop()
+		w.timer = nil
+	}
+	shown := w.filter.strip(chunk)
+	if len(w.filter.held) > 0 {
+		w.timer = time.AfterFunc(resizeHoldLimit, func() { _ = w.Flush() })
+	}
+	if len(shown) > 0 {
+		if _, err := w.out.Write(shown); err != nil {
+			return 0, err
+		}
+	}
+	return len(chunk), nil
+}
+
+// Flush writes what the filter still holds.
+func (w *resizeWriter) Flush() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if held := w.filter.take(); len(held) > 0 {
+		_, err := w.out.Write(held)
+		return err
+	}
+	return nil
 }
