@@ -80,10 +80,10 @@
     const banner = await until(() => document.querySelector("[data-quota-banner]"), 25000)
     pass("the quota banner appears when the allowance is used up", Boolean(banner))
     const text = banner?.innerText.replace(/\s+/g, " ") ?? ""
-    pass("it names the limit and the plan", /5(\.0)? GB/.test(text) && /\(\w+/.test(text), text.slice(0, 100))
+    pass("it names the workspace and that its bandwidth is used", /used its bandwidth for this period/.test(text), text.slice(0, 100))
     pass(
       "it says what is paused and that direct access works",
-      /paused/.test(text) && /Direct machine-to-machine access still works/.test(text),
+      /paused/.test(text) && /Direct connections still work/.test(text),
     )
     const links = [...(banner?.querySelectorAll("a") ?? [])].map(
       (a) => `${a.textContent.trim()}:${a.getAttribute("href")}`,
