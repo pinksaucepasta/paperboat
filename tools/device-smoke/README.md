@@ -2,7 +2,7 @@
 
 ## Extra Windows machines (winpool)
 
-`winpool.sh` turns up to six GitHub-hosted `windows-latest` runners into temporary Windows test machines, so
+`winpool.sh` turns up to twelve GitHub-hosted `windows-latest` runners into temporary Windows test machines, so
 several lanes can run Windows checks at once instead of queueing on victus.
 
 ```sh
@@ -37,5 +37,5 @@ Send these to victus, they cannot run on a runner:
 How it is wired: the runner starts sshd on loopback with the controller's public key (repository variable
 `WINPOOL_CONTROLLER_PUBKEY`) and holds `ssh -N -R 127.0.0.1:2220N:127.0.0.1:22` to the jump host as user `winpool`
 (secrets `WINPOOL_TUNNEL_KEY`, `WINPOOL_TUNNEL_HOST`, `WINPOOL_TUNNEL_KNOWN_HOSTS`). On the jump host that user has
-no shell and `/etc/ssh/sshd_config.d/70-winpool.conf` allows it only those six loopback listeners. The controller
+no shell and `/etc/ssh/sshd_config.d/70-winpool.conf` allows it only those twelve loopback listeners. The controller
 reaches a machine with `ProxyJump` through its own login on the jump host (`WINPOOL_JUMP`, default `ubuntu@anvit`).

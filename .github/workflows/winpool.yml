@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       slots:
-        description: Machine numbers 1-6, comma separated (winpool.sh start picks free ones)
+        description: Machine numbers 1-12, comma separated (winpool.sh start picks free ones)
         required: true
         default: "1"
       hours:
@@ -41,7 +41,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $slot = [int]$env:SLOT
-          if ($slot -lt 1 -or $slot -gt 6) { throw 'slot must be 1-6' }
+          if ($slot -lt 1 -or $slot -gt 12) { throw 'slot must be 1-12' }
           if (-not $env:CONTROLLER_PUBKEY -or -not $env:TUNNEL_KEY) { throw 'WINPOOL_CONTROLLER_PUBKEY or WINPOOL_TUNNEL_KEY is not set' }
           $port = 22200 + $slot
 
