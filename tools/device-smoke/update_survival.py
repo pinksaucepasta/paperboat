@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """F14-02: during an update, a running file transfer finishes byte-identical and a preview and a tunnel come back on the same URL.
 
-Usage: update_survival.py TARGET PEER (--approve | --from FILE) [--terminal] (sudo password on stdin).
+Usage: update_survival.py TARGET PEER (--approve | --from FILE) [--terminal] --mib 600 (sudo password on stdin).
 With --terminal a shell is also held open in a real PTY (`pb connect`) and, after the update, the SAME shell must answer.
-Runs on TARGET (the machine that is updated). PEER is another machine of the same account that receives;
-TARGET sends two 40 MiB files to PEER. While the transfer runs, the update is started
+Runs on TARGET (the machine that is updated). PEER is a Unix machine of the same account that receives;
+TARGET sends two files to PEER. Use --mib 600 so the transfer is still running when the update starts
 (`pb update --approve <downloaded candidate> --force`, or `pb update --from FILE --force`).
 Afterwards: the sender exits 0 and both files in PEER's Inbox match the sender's SHA-256 digests;
 the preview URL and the tunnel URL are unchanged and serve their marker again (a gap while the runtime restarts is allowed).
@@ -12,7 +12,6 @@ the preview URL and the tunnel URL are unchanged and serve their marker again (a
 import argparse
 import contextlib
 import functools
-import hashlib
 import http.server
 import json
 import os
@@ -31,7 +30,6 @@ from install_lifecycle import registration
 from pairing_lifecycle import command_result, invoke
 from preview_lifecycle import QuietHandler
 from preview_receipt import PREVIEW_COMMAND_TIMEOUT, receipt_value
-import terminal_command
 from session_cleanup import cleanup
 from terminal_lifecycle import Terminal
 from update_continuity import SHELL_PID

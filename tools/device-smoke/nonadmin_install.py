@@ -20,11 +20,11 @@ AS_STANDARD_USER = r"""
 $u=$req.user;$pw=ConvertTo-SecureString $req.password -AsPlainText -Force
 $slots={@(Get-ChildItem -LiteralPath (Join-Path $env:ProgramFiles 'Paperboat\users'),(Join-Path $env:ProgramData 'Paperboat\users') -ErrorAction SilentlyContinue|ForEach-Object{$_.FullName})+@(Get-Service Paperboat* -ErrorAction SilentlyContinue|ForEach-Object{$_.Name})}
 $before=& $slots;$d=Join-Path $env:PUBLIC ('pb-refusal-'+[guid]::NewGuid().ToString('N').Substring(0,12));$t='pb-refusal-'+$u
-[void](New-LocalUser -Name $u -Password $pw -PasswordNeverExpires)
+$account=New-LocalUser -Name $u -Password $pw -PasswordNeverExpires
 try{
   [void](New-Item -ItemType Directory -Path $d);Copy-Item -LiteralPath $req.exe -Destination (Join-Path $d 'pb.exe')
   & icacls.exe $d /grant "${u}:(OI)(CI)M" | Out-Null
-  $line='/c ""'+(Join-Path $d 'pb.exe')+'" install --json --install-dir "'+(Join-Path $d 'bin')+'" > "'+(Join-Path $d 'out')+'" 2>&1 & call echo %^errorlevel% > "'+(Join-Path $d 'rc')+'""'
+  $line='/c ""'+(Join-Path $d 'pb.exe')+'" install --json > "'+(Join-Path $d 'out')+'" 2>&1 & call echo %^errorlevel% > "'+(Join-Path $d 'rc')+'""'
   [void](Register-ScheduledTask -TaskName $t -Action (New-ScheduledTaskAction -Execute 'cmd.exe' -Argument $line) -User $u -Password $req.password -RunLevel Limited)
   Start-ScheduledTask -TaskName $t
   for($i=0;$i -lt 90 -and -not (Test-Path -LiteralPath (Join-Path $d 'rc'));$i++){Start-Sleep 1}
@@ -33,8 +33,9 @@ try{
   $new=@(& $slots|Where-Object{$before -notcontains $_})
   ConvertTo-Json -Compress -InputObject @{rc=$rc;out=$out;new=$new;bin=(Test-Path -LiteralPath (Join-Path $d 'bin\pb.exe'))}
 }finally{
+  Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue
   Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction SilentlyContinue
-  $sid=(Get-LocalUser -Name $u).SID.Value
+  $sid=$account.SID.Value
   Get-CimInstance Win32_UserProfile -Filter "SID='$sid'" -ErrorAction SilentlyContinue|Remove-CimInstance -ErrorAction SilentlyContinue
   Remove-LocalUser -Name $u -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue
