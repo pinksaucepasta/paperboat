@@ -10,6 +10,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
@@ -64,6 +65,11 @@ func NewRenewableNativeClient(initial NativeGrant, renew func(context.Context) (
 			// The local daemon is restarting (an update): the transfer waits for it and renews then,
 			// inside the native recovery window, instead of failing as refused.
 			return Auth{}, &localDaemonUnavailable{err}
+		}
+		if err != nil && machineOffline(err) {
+			// The server calls a machine of this transfer offline (its path blipped, its runtime restarts): the
+			// transfer waits for it inside the native recovery window and resumes from the committed offset.
+			return Auth{}, &machineUnavailable{err}
 		}
 		if err != nil {
 			return Auth{}, &nativeAuthorizationFailure{err}
@@ -213,6 +219,19 @@ func (e *localDaemonUnavailable) Error() string {
 	return "the local Paperboat daemon is restarting: " + e.cause.Error()
 }
 func (e *localDaemonUnavailable) Unwrap() error { return e.cause }
+
+// machineUnavailable is a renewal the server refused because a machine of the transfer is offline; it is retried.
+type machineUnavailable struct{ cause error }
+
+func (e *machineUnavailable) Error() string {
+	return "waiting for the machine to come back online: " + e.cause.Error()
+}
+func (e *machineUnavailable) Unwrap() error { return e.cause }
+
+func machineOffline(err error) bool {
+	var remote *api.APIError
+	return errors.As(err, &remote) && remote.Code == "machine_offline"
+}
 
 // transferLeaseLost is a stream the daemon refused because it holds no lease for the handle (it restarted and its leases
 // were in memory). Unlike a restarting daemon, retrying the same handle never works: the renewal prepares a new lease.

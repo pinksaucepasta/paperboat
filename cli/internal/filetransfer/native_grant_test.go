@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"io"
 	"net"
 	"net/http"
@@ -60,7 +61,9 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 	// replaces the user daemon): the stream open says the handle is unknown and the sender prepares a new lease once.
 	// waiting: an Unlimited transfer's daemon refuses the stream while only a hosted relay reaches the
 	// destination (no_eligible_path); the upload waits, says so, and resumes at the committed offset.
-	for _, mode := range []string{"allowed", "denied", "restarting", "stopping", "waiting", "lease-lost"} {
+	// offline: after the carrier is lost the server answers the renewal machine_offline twice (the destination's path
+	// blipped; F14-02 on winpool-12 failed the send here); the transfer waits and resumes instead of failing.
+	for _, mode := range []string{"allowed", "denied", "restarting", "stopping", "waiting", "lease-lost", "offline"} {
 		t.Run(mode, func(t *testing.T) {
 			denied := mode == "denied"
 			daemonDown := 0
@@ -166,6 +169,10 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 			initial := NativeGrant{Endpoint: server.URL + "/v1/file-transfers", Auth: Auth{Token: "original", ExpiresAt: first.expires}, Binding: testBinding(), Policy: policy, Lease: first}
 			var err error
 			client, err = NewRenewableNativeClient(initial, func(ctx context.Context) (NativeGrant, error) {
+				if mode == "offline" && daemonDown < 2 {
+					daemonDown++
+					return NativeGrant{}, fmt.Errorf("renew file transfer grant: %w", &api.APIError{Status: http.StatusConflict, Code: "machine_offline"})
+				}
 				if (mode == "restarting" || mode == "stopping") && daemonDown < 3 {
 					daemonDown++
 					restarting.Store(daemonDown < 3)
@@ -220,6 +227,9 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 			}
 			if (mode == "restarting" || mode == "stopping") && daemonDown != 3 {
 				t.Fatal("renewal did not wait for the restarting daemon", daemonDown)
+			}
+			if mode == "offline" && daemonDown != 2 {
+				t.Fatal("renewal did not wait for the offline machine", daemonDown)
 			}
 			if !denied && maintenanceResponses != 6 {
 				t.Fatal("transfer did not recover beyond the former four-failure limit")
