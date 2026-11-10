@@ -42,7 +42,7 @@ func TestProofNonceIsUsedOnce(t *testing.T) {
 		t.Fatalf("malformed nonce: %v", err)
 	}
 	for _, method := range []string{http.MethodPost, http.MethodGet} {
-		if err := s.reserveProofNonce(db.WithResendableRequest(ctx), signer, "", method, expires); !errors.Is(err, ErrHelperProof) {
+		if err := s.reserveProofNonce(db.WithResendableRequest(ctx), signer, "", method, expires); ProofRejectionReason(err) != "proof_nonce_missing" || !errors.Is(err, ErrHelperProof) {
 			t.Fatalf("%s proof without a nonce: %v", method, err)
 		}
 	}

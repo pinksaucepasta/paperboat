@@ -160,6 +160,9 @@ func (s *Service) RenewMachineControl(ctx context.Context, credential string, pr
 // machine-proof verifier shares). The replay path does not reserve: a retry of a committed renewal carries
 // the same proof by design and is bound to its operation instead.
 func (s *Service) reserveMachineProofNonce(ctx context.Context, machineID string, claims MachineProofClaims, method string) error {
+	if claims.Nonce == "" {
+		return controlRejected("proof_nonce_missing")
+	}
 	ok, err := s.db.ReserveProofNonce(ctx, "machine:"+machineID, claims.Nonce, method, claims.ExpiresAt)
 	if err != nil {
 		return err
