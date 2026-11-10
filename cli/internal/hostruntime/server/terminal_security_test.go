@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"runtime"
 	"sync/atomic"
 	"testing"
 
@@ -190,13 +189,23 @@ func TestBusyStreamOffersALoneByteAsAnInterrupt(t *testing.T) {
 	}
 }
 
-// A lone Ctrl-C is offered as an interrupt while the worker is idle only where a pipe ETX does not interrupt the foreground program
-// (Windows); elsewhere the tty's own line discipline handles it and the journal answers the frame as before.
-func TestIdleStreamOffersAnInterruptOnlyOnWindows(t *testing.T) {
-	if !offersInterrupt(true) {
-		t.Fatal("a busy worker must always offer the interrupt")
-	}
-	if got, want := offersInterrupt(false), runtime.GOOS == "windows"; got != want {
-		t.Fatalf("offersInterrupt(idle) on %s = %v, want %v", runtime.GOOS, got, want)
+// A lone Ctrl-C reaches the interrupt handler while the worker is idle only on a host that needs it (Windows, where a pipe ETX does
+// not interrupt the running program); on other hosts the tty's own line discipline handles it. Before the change an idle worker never offered it.
+func TestIdleWorkerOffersALoneCtrlCOnlyWhereTheHostNeedsIt(t *testing.T) {
+	ctrlC, _ := protocol.EncodeTerminalInput(protocol.TerminalInputFrame{StreamID: 7, Sequence: 5, Data: []byte{3}}, nil)
+	defer func(previous bool) { interruptWhenIdle = previous }(interruptWhenIdle)
+	for _, test := range []struct {
+		idleHost, busy bool
+		want           int
+	}{{false, true, 1}, {false, false, 0}, {true, false, 1}, {true, true, 1}} {
+		interruptWhenIdle = test.idleHost
+		handler := &interruptRecorder{}
+		server := &Server{config: Config{Handler: handler}}
+		state := boundTerminalState(7)
+		state.streams[7].inputSequence = 4
+		server.offerInterrupt(context.Background(), ctrlC, state, test.busy)
+		if len(handler.keys) != test.want {
+			t.Errorf("idle-host=%v busy=%v: interrupts offered %d, want %d", test.idleHost, test.busy, len(handler.keys), test.want)
+		}
 	}
 }

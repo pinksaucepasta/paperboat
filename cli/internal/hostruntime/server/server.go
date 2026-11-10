@@ -200,9 +200,7 @@ func (s *Server) ServeAuthenticated(conn Connection, authorizer Authorizer) (ser
 				}
 				continue
 			}
-			if len(result.binary) != 0 && offersInterrupt(busy.Load()) {
-				s.interruptTerminalInput(connectionCtx, result.binary, terminalState)
-			}
+			s.offerInterrupt(connectionCtx, result.binary, terminalState, busy.Load())
 			select {
 			case work <- result:
 			case err := <-failed:
@@ -217,9 +215,20 @@ func (s *Server) ServeAuthenticated(conn Connection, authorizer Authorizer) (ser
 // offersInterrupt says whether the read loop offers a lone control byte as an interrupt now. A busy worker needs it everywhere (a paste
 // stuck in a program that never reads). On Windows it is also needed when idle: a pipe ETX written into the ConPTY does not become a console
 // Ctrl-C for the program running in the foreground (measured on Windows 11: cmd.exe running ping, powershell Start-Sleep), so only
-// pty.Process.Interrupt (ETX plus the fallback that ends the foreground program) makes Ctrl-C work. Limit: at an idle prompt with an
-// older background child, Windows has no foreground group, so the newest direct child of the shell is taken for the foreground.
-func offersInterrupt(busy bool) bool { return busy || runtime.GOOS == "windows" }
+// pty.Process.Interrupt (ETX plus the fallback that ends the foreground program) makes Ctrl-C work; the fallback only ends a program it has
+// positive evidence for (pty.Process.foregroundTree), so an idle prompt and background jobs are never touched.
+func offersInterrupt(busy bool) bool { return busy || interruptWhenIdle }
+
+// interruptWhenIdle is a variable so a test can exercise both hosts.
+var interruptWhenIdle = runtime.GOOS == "windows"
+
+// offerInterrupt is the read loop's decision for one binary frame: offer it to the terminal's interrupt handler when the worker is busy, or when
+// the host needs the interrupt while idle (interruptWhenIdle).
+func (s *Server) offerInterrupt(ctx context.Context, message []byte, state *terminalConnectionState, busy bool) {
+	if len(message) != 0 && offersInterrupt(busy) {
+		s.interruptTerminalInput(ctx, message, state)
+	}
+}
 
 // connectionWorkQueue holds more frames than a client leaves unanswered (256 input chunks), so only a client that
 // ignores its own window fills it; the read loop then waits for the worker, as it always did.
