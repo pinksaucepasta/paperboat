@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"github.com/spf13/cobra"
 	"os"
@@ -21,6 +22,16 @@ func AddMachineGuardCommand(root *cobra.Command) {
 			return err
 		}
 		domain, _ := cmd.Flags().GetString("browser-domain")
+		if strings.TrimSpace(domain) == "" {
+			cfg, err := loadDaemonConfig(cmd)
+			if err != nil {
+				return err
+			}
+			domain, err = hostinstall.MachineGuardBrowserDomain(cmd.Context(), cfg.ServerURL)
+			if err != nil {
+				return err
+			}
+		}
 		undo, err := machineguard.Install(cmd.Context(), executable, domain)
 		if err != nil {
 			return err
