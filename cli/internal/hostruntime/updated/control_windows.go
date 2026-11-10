@@ -328,29 +328,35 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 		if err != nil {
 			return response, err
 		}
-		if request.ApprovalID != journal.Candidate.ID || journal.ApprovedCandidateID != request.ApprovalID {
-			return response, workerupdate.ErrApprovalRequired
-		}
-		// The activator can already hold this journal in memory. Without its
-		// cross-process ownership, this controller cannot change its grant.
-		if request.Force && !automatic && !journal.Force {
-			return response, ErrWindowsActivationUnavailable
-		}
-		blocked, blockErr = c.activationBlockedContext(ctx)
-		if blockErr != nil {
-			return response, blockErr
-		}
-		if blocked {
-			// Recovery has acknowledged the existing activator. Return the
-			// pending handoff to run so this controller also releases its pipe.
-			response.Pending = true
-			response.Transaction = windowsTransactionState(journal)
-			response.Transaction.ActiveVersion = response.Version
-			response.Transaction.ActiveDigest = committedSource.SHA256
-			response.Transaction.ActiveLength = committedSource.Length
-			candidate := journal.Candidate
-			response.Candidate = &candidate
-			return response, nil
+		// The first approval of a staged candidate reaches the install path below, which records it; the
+		// fence there would otherwise reject every request while the candidate waits (victus 2026-11-10).
+		if windowsFirstApproval(journal, request.ApprovalID) {
+			blocked = false
+		} else {
+			if request.ApprovalID != journal.Candidate.ID || journal.ApprovedCandidateID != request.ApprovalID {
+				return response, workerupdate.ErrApprovalRequired
+			}
+			// The activator can already hold this journal in memory. Without its
+			// cross-process ownership, this controller cannot change its grant.
+			if request.Force && !automatic && !journal.Force {
+				return response, ErrWindowsActivationUnavailable
+			}
+			blocked, blockErr = c.activationBlockedContext(ctx)
+			if blockErr != nil {
+				return response, blockErr
+			}
+			if blocked {
+				// Recovery has acknowledged the existing activator. Return the
+				// pending handoff to run so this controller also releases its pipe.
+				response.Pending = true
+				response.Transaction = windowsTransactionState(journal)
+				response.Transaction.ActiveVersion = response.Version
+				response.Transaction.ActiveDigest = committedSource.SHA256
+				response.Transaction.ActiveLength = committedSource.Length
+				candidate := journal.Candidate
+				response.Candidate = &candidate
+				return response, nil
+			}
 		}
 	}
 	if blocked && request.Operation != "status" {
@@ -644,4 +650,11 @@ func compareWindowsInstalledVersion(candidate, active string, source installsour
 		return 1, nil
 	}
 	return selfupdate.CompareVersions(candidate, active)
+}
+
+// windowsFirstApproval reports whether the request approves, for the first time, the candidate waiting in the
+// journal: nothing has been approved yet, so no activator can hold the journal.
+func windowsFirstApproval(journal windowsActivationJournal, approvalID string) bool {
+	return journal.Stage == windowsActivationAwaitingApproval && journal.ApprovedCandidateID == "" &&
+		approvalID != "" && approvalID == journal.Candidate.ID
 }
