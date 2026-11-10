@@ -19,7 +19,7 @@ controller (preview_protocol_client.go, as smoke.sh does). The origins of the su
 run here and are reached from the device through an ssh -R forward; the host service is PaperboatHostd-<instance>. ssh-tools runs scp and sftp only (Windows has no
 rsync). terminal-matrix skips the rows that cut the network (it would cut this controller's SSH) and the echo
 latency row. access-machine, private-address and private-https run with the device as the client only (the origin on a
-Unix peer through pb exec); private_access_permission drives two Unix hosts over ssh. ssh-long holds a session for SMOKE_SSH_LONG_SECONDS (3601 for the real check; pass --timeout above it).
+Unix peer through pb exec); private_access_permission drives two Unix hosts over ssh. ssh-long holds a session for SMOKE_SSH_LONG_SECONDS (3601 for the real check; pass --timeout above it); exec-long holds one pb exec for SMOKE_EXEC_LONG_SECONDS (1801).
 ENV: env-scopes, env-messages, env-delivery, env-revoke-rotation, env-ssh-hook and env-vscode-remote need the device
 account's own unlocked vault (--vault-password-file: delivery reaches that account's machines); the last two drive the
 device's own PowerShell over plain ssh (the hook's only Windows shell; the device must let its profile.ps1 run), and
@@ -93,6 +93,8 @@ def checks(args):
                                 (['--restart-target-cmd', args.restart_target_cmd] if args.restart_target_cmd else []), ['--peer'])
     for name in ('access-machine', 'private-address', 'private-https', 'path-direct', 'path-relay'):  # the device is the client; the origin runs on the peer
         table[name] = (['private_access.py', 'pair', '--target', args.peer, '--check', name], ['--peer'])
+    table['exec-long'] = (['exec_long.py', args.peer, '--seconds', os.environ.get('SMOKE_EXEC_LONG_SECONDS', '')],
+                           ['--peer', 'SMOKE_EXEC_LONG_SECONDS'])
     table['ssh-long'] = (['ssh_long.py', args.peer, '--seconds', os.environ.get('SMOKE_SSH_LONG_SECONDS', '')],
                          ['--peer', 'SMOKE_SSH_LONG_SECONDS'])
     for name, step, needs in (('ssh-setup-time', 'setup', []), ('ssh-control-outage', 'outage', ['REVOKE_CLIENT_CMD']),
