@@ -42,6 +42,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.request
 
 import install_path
 import winhost
@@ -93,6 +94,8 @@ def checks(args):
     table['tunnel-manage'] = (['tunnel_manage.py'], [])
     table['tunnel-lifecycle'] = (['tunnel_lifecycle.py'], [])
     table['tunnel-public-protocols'] = (['tunnel_public_protocols.py'], [])
+    for mode in ('foreground', 'background'):
+        table['preview-' + mode] = (['preview_lifecycle.py', '--mode', mode], [])
     table['preview-protocols'] = (['preview_protocols.py', 'victus'], [])
     table['tunnel-protocols'] = (['preview_protocols.py', 'victus', '--tunnel'], [])
     table['path-display'] = (['path_display.py', args.peer], ['--peer'])
@@ -222,6 +225,26 @@ def protocol_gate(probe):
     return release
 
 
+def browser_gate(line):
+    """The independent browser of preview_lifecycle.py: fetch its URL from here, release the gate only if the page
+    holds the marker. Returns '' (nothing to add to the check's output)."""
+    try:
+        state = json.loads(line)
+    except ValueError:
+        return ''
+    if not isinstance(state, dict) or state.get('state') != 'browser_required':
+        return ''
+    ok, deadline = False, time.monotonic() + 120
+    while time.monotonic() < deadline and not ok:  # the public name takes a moment to resolve
+        try:
+            with urllib.request.urlopen(state['url'], timeout=20) as reply:
+                ok = reply.status == 200 and state['marker'] in reply.read().decode(errors='replace')
+        except OSError:
+            time.sleep(3)
+    Path(state['gate' if ok else 'failure_gate']).touch(mode=0o600)
+    return ''
+
+
 def run_streaming(command, environment, timeout, on_state=None):
     """subprocess.run with captured output, echoing each `state` line (an approval link, a gate) to stderr as it comes.
 
@@ -279,6 +302,8 @@ def run_check(check, argv, args, device):
             subprocess.run(['go', 'build', '-o', str(probe), str(HERE / 'preview_protocol_client.go')], cwd=HERE.parent.parent,
                            check=True, capture_output=True, timeout=900, env=dict(os.environ, GOMAXPROCS='2', GOFLAGS='-p=2'))
             on_state = protocol_gate(probe)
+        if argv[0] == 'preview_lifecycle.py':
+            on_state = browser_gate
         command = [sys.executable, str(HERE / argv[0])] + [replacements.get(word, word) for word in argv[1:]]
         started = time.monotonic()
         done = run_streaming(command, environment, args.timeout, on_state)

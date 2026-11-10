@@ -324,6 +324,37 @@ class WindowsChecksRunner(unittest.TestCase):
             self.assertEqual([], windows_checks.missing(table['account-inventory'][1], self.args()))
 
 
+class GateRelease(unittest.TestCase):
+    def test_browser_gate_is_released_only_when_the_page_holds_the_marker(self):
+        import http.server
+        import tempfile
+        import threading
+        import windows_checks
+
+        class Page(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200); self.end_headers(); self.wfile.write(b'<p>MARK-1</p>')
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(('127.0.0.1', 0), Page)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                base = {'state': 'browser_required', 'url': 'http://127.0.0.1:%d/' % server.server_port,
+                        'gate': directory + '/ok', 'failure_gate': directory + '/bad'}
+                windows_checks.browser_gate(json.dumps(dict(base, marker='MARK-1')))
+                self.assertTrue(os.path.exists(directory + '/ok') and not os.path.exists(directory + '/bad'))
+                os.unlink(directory + '/ok')
+                with patch('time.monotonic', side_effect=[0, 0, 200]):
+                    windows_checks.browser_gate(json.dumps(dict(base, marker='OTHER')))
+                self.assertTrue(os.path.exists(directory + '/bad') and not os.path.exists(directory + '/ok'))
+                windows_checks.browser_gate(json.dumps({'state': 'approval_required'}))  # not ours: nothing happens
+        finally:
+            server.shutdown()
+
+
 class PortedScriptsRouteToTheDevice(unittest.TestCase):
     """The ported checks reach pb.exe and the runtime directory only through winhost when PB_SMOKE_WINDOWS_PB is set."""
 
