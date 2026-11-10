@@ -101,7 +101,7 @@
     if (!typed) return steps
     window.__removedAt = new Date().toISOString() // when the revoke was sent, for a device that watches for it
     confirm.click()
-    const gone = await until(async () => (await get(`machines/${id}`)).status === 404, 20000)
+    const gone = await until(async () => [404, 410].includes((await get(`machines/${id}`)).status), 20000) // 410 user_machine_removed once revoked
     pass("the server no longer has the machine", Boolean(gone))
     const list = (await get("machines?workspace=personal")).data
     pass("the machine list no longer shows it", !(list?.items ?? []).some((m) => m.id === id))
