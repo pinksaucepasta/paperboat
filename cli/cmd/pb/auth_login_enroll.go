@@ -88,7 +88,7 @@ func pairLoginEnrollment(c *command.Context, server string, enrollment *config.L
 	}
 	defer os.RemoveAll(dir)
 	tokenFile := filepath.Join(dir, "enrollment-token")
-	if err = os.WriteFile(tokenFile, []byte(enrollment.BootstrapToken), 0o600); err != nil {
+	if err = writeLoginEnrollmentToken(tokenFile, enrollment.BootstrapToken); err != nil {
 		return fmt.Errorf("prepare pairing: %w", err)
 	}
 	arguments := []string{"bootstrap", "--server", server, "--enrollment-token-file", tokenFile}
