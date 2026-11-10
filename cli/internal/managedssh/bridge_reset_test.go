@@ -153,3 +153,26 @@ func TestBridgeSSHFailedFINToTheClientIsAFailureUnlessItLeft(t *testing.T) {
 		}
 	}
 }
+
+// A failed CloseWrite (the FIN to sshd) is a failure, except once the bridge's own finish() has closed the socket.
+func TestCloseWriteFailureIsIgnoredOnlyAfterTheBridgeClosed(t *testing.T) {
+	// On Windows the closed-socket error is a fresh error value, not net.ErrClosed.
+	closedByUs := &net.OpError{Op: "close", Net: "tcp", Err: errors.New("use of closed network connection")}
+	refused := &net.OpError{Op: "close", Net: "tcp", Err: syscall.ECONNREFUSED}
+	for _, c := range []struct {
+		name     string
+		err      error
+		finished bool
+		want     bool // reported as a failure
+	}{
+		{"no error", nil, false, false},
+		{"closed by the bridge, typed", net.ErrClosed, true, false},
+		{"closed by the bridge, fresh error", closedByUs, true, false},
+		{"failure before the bridge closed", refused, false, true},
+		{"closed error before the bridge closed", closedByUs, false, true},
+	} {
+		if got := closeWriteFailure(c.err, c.finished) != nil; got != c.want {
+			t.Errorf("%s: failure=%v, want %v", c.name, got, c.want)
+		}
+	}
+}
