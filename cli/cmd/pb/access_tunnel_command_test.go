@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 )
 
 type fakeAccessTunnelRuntime struct {
@@ -366,5 +367,11 @@ func TestLocalAccessTunnelClientHeartbeatMapsOKAndGone(t *testing.T) {
 	status = http.StatusServiceUnavailable
 	if err := client.Heartbeat(context.Background(), session); !errors.Is(err, ErrAccessTunnelUnavailable) {
 		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestAccessTunnelHeartbeatIntervalLeavesTwoMissedBeatsBeforeTheTTL(t *testing.T) {
+	if 3*preview.PrivateTCPAccessHeartbeatInterval > preview.PrivateTCPAccessHeartbeatTTL {
+		t.Fatalf("interval %v and TTL %v: a live command could be reaped after one missed beat", preview.PrivateTCPAccessHeartbeatInterval, preview.PrivateTCPAccessHeartbeatTTL)
 	}
 }

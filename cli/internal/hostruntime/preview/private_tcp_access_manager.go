@@ -25,9 +25,11 @@ const (
 	PrivateTCPAccessSchema       = "paperboat.private-tcp-access/v1"
 	privateTCPAccessBodyLimit    = 4 << 10
 	defaultPrivateTCPAccessLimit = 64
-	// defaultPrivateTCPAccessHeartbeatTTL bounds how long a listener outlives a CLI that died without Release
-	// (kill -9, taskkill /F); the CLI beats at a third of it.
-	defaultPrivateTCPAccessHeartbeatTTL = 15 * time.Second
+	// PrivateTCPAccessHeartbeatTTL bounds how long a listener outlives a CLI that died without Release
+	// (kill -9, taskkill /F). The CLI beats every PrivateTCPAccessHeartbeatInterval, so a live owner can miss
+	// two beats in a row and keep its listener; this is the one owner of both numbers.
+	PrivateTCPAccessHeartbeatTTL      = 15 * time.Second
+	PrivateTCPAccessHeartbeatInterval = PrivateTCPAccessHeartbeatTTL / 3
 )
 
 var (
@@ -115,7 +117,7 @@ func NewPrivateTCPAccessManager(config PrivateTCPAccessManagerConfig) (*PrivateT
 		return nil, ErrPrivateTCPAccessInvalid
 	}
 	if config.HeartbeatTTL == 0 {
-		config.HeartbeatTTL = defaultPrivateTCPAccessHeartbeatTTL
+		config.HeartbeatTTL = PrivateTCPAccessHeartbeatTTL
 	}
 	if config.HeartbeatTTL < 0 {
 		return nil, ErrPrivateTCPAccessInvalid

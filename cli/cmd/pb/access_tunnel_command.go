@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/spf13/cobra"
 )
 
@@ -23,9 +24,9 @@ const (
 	accessTunnelResponseLimit = 16 << 10
 )
 
-// The daemon closes the listener of a session that has not beaten for its TTL (15 s: a CLI killed without Release);
-// beating at a third of it keeps a live command far from that line. A var so tests can shrink it.
-var accessTunnelHeartbeatInterval = 5 * time.Second
+// hostd closes the listener of a session that has not beaten within its TTL (a CLI killed without Release); both
+// numbers live in preview. A var so tests can shrink it.
+var accessTunnelHeartbeatInterval = preview.PrivateTCPAccessHeartbeatInterval
 
 var (
 	ErrAccessTunnelInvalid               = errors.New("invalid private tunnel access request")
