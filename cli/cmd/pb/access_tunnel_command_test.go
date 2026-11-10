@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
 )
@@ -23,6 +25,9 @@ type fakeAccessTunnelRuntime struct {
 	released int
 	session  accessTunnelSession
 	startErr error
+
+	heartbeats   int
+	heartbeatErr error
 }
 
 type accessTunnelRoundTripper func(*http.Request) (*http.Response, error)
@@ -68,6 +73,12 @@ func (f *fakeAccessTunnelRuntime) Start(_ context.Context, selector, listen stri
 		out = accessTunnelSession{Schema: accessTunnelSchema, Kind: "private_tcp_access", ID: "access_1", TunnelID: "tun_1", RouteID: "route_tcp_1", ListenAddress: "127.0.0.1:24000"}
 	}
 	return out, nil
+}
+func (f *fakeAccessTunnelRuntime) Heartbeat(context.Context, accessTunnelSession) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.heartbeats++
+	return f.heartbeatErr
 }
 func (f *fakeAccessTunnelRuntime) Release(context.Context, accessTunnelSession) error {
 	f.mu.Lock()
@@ -288,5 +299,72 @@ func TestAccessTunnelHumanOutputIsCanonicalSafeEndpoint(t *testing.T) {
 	_ = command.Execute()
 	if got := output.String(); got != "Private access for route route_tcp_1 is listening on 127.0.0.1:24000\n" {
 		t.Fatalf("output=%q", got)
+	}
+}
+
+func shortAccessTunnelHeartbeat(t *testing.T) {
+	t.Helper()
+	old := accessTunnelHeartbeatInterval
+	accessTunnelHeartbeatInterval = 5 * time.Millisecond
+	t.Cleanup(func() { accessTunnelHeartbeatInterval = old })
+}
+
+func TestAccessTunnelCommandBeatsWhileAliveThenReleases(t *testing.T) {
+	shortAccessTunnelHeartbeat(t)
+	runtime := &fakeAccessTunnelRuntime{}
+	withAccessTunnelRuntime(t, runtime)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	command := accessTunnelCobraCommandV1()
+	command.SetContext(ctx)
+	command.SetOut(&bytes.Buffer{})
+	command.SetArgs([]string{"tun_1", "--json"})
+	if err := command.Execute(); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("error=%v", err)
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.heartbeats < 2 || runtime.released != 1 {
+		t.Fatalf("heartbeats=%d released=%d", runtime.heartbeats, runtime.released)
+	}
+}
+
+func TestAccessTunnelCommandEndsWhenHostdForgotTheSession(t *testing.T) {
+	shortAccessTunnelHeartbeat(t)
+	runtime := &fakeAccessTunnelRuntime{heartbeatErr: ErrAccessTunnelGone}
+	withAccessTunnelRuntime(t, runtime)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	command := accessTunnelCobraCommandV1()
+	command.SetContext(ctx)
+	command.SetOut(&bytes.Buffer{})
+	command.SetArgs([]string{"tun_1", "--json"})
+	if err := command.Execute(); !errors.Is(err, ErrAccessTunnelGone) {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestLocalAccessTunnelClientHeartbeatMapsOKAndGone(t *testing.T) {
+	status := http.StatusOK
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/v1/private-tcp-access/access_1/heartbeat" || r.Header.Get("Authorization") != "Bearer local-token" {
+			t.Fatalf("request=%s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(status)
+	}))
+	defer server.Close()
+	base, _ := url.Parse(server.URL)
+	client := &localAccessTunnelClient{base: base, token: "local-token", client: server.Client()}
+	session := accessTunnelSession{Schema: accessTunnelSchema, Kind: "private_tcp_access", ID: "access_1", TunnelID: "tun_1", RouteID: "route_tcp_1", ListenAddress: "127.0.0.1:24000"}
+	if err := client.Heartbeat(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	status = http.StatusNotFound
+	if err := client.Heartbeat(context.Background(), session); !errors.Is(err, ErrAccessTunnelGone) {
+		t.Fatalf("error=%v", err)
+	}
+	status = http.StatusServiceUnavailable
+	if err := client.Heartbeat(context.Background(), session); !errors.Is(err, ErrAccessTunnelUnavailable) {
+		t.Fatalf("error=%v", err)
 	}
 }

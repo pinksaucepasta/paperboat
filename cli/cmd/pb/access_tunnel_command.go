@@ -23,12 +23,18 @@ const (
 	accessTunnelResponseLimit = 16 << 10
 )
 
+// The daemon closes the listener of a session that has not beaten for its TTL (15 s: a CLI killed without Release);
+// beating at a third of it keeps a live command far from that line. A var so tests can shrink it.
+var accessTunnelHeartbeatInterval = 5 * time.Second
+
 var (
 	ErrAccessTunnelInvalid               = errors.New("invalid private tunnel access request")
 	ErrAccessTunnelAuthentication        = errors.New("Paperboat authentication is required")
 	ErrAccessTunnelForbidden             = errors.New("Paperboat private access is not allowed")
 	ErrAccessTunnelUnavailable           = errors.New("Paperboat private access is temporarily unavailable")
 	ErrAccessTunnelRuntimeRPCUnavailable = errors.New("installed hostd does not expose private TCP access")
+	// ErrAccessTunnelGone: hostd no longer knows the session, so its listener is closed (missed heartbeats or revoked route).
+	ErrAccessTunnelGone = errors.New("private TCP access session is gone")
 )
 
 type accessTunnelSession struct {
@@ -73,6 +79,7 @@ func (e accessTunnelHTTPStatus) DiagnosticStatus() int { return e.status }
 
 type accessTunnelRuntime interface {
 	Start(context.Context, string, string) (accessTunnelSession, error)
+	Heartbeat(context.Context, accessTunnelSession) error
 	Release(context.Context, accessTunnelSession) error
 }
 
@@ -105,7 +112,31 @@ func runAccessTunnel(command *cobra.Command, args []string) error {
 		defer cancel()
 		return errors.Join(err, runtime.Release(cleanupCtx, session))
 	}
-	<-command.Context().Done()
+	// Keep the listener alive only while this process is: hostd owns it and reaps it once the beats stop.
+	gone := make(chan struct{})
+	beatCtx, stopBeats := context.WithCancel(command.Context())
+	defer stopBeats()
+	go func() {
+		ticker := time.NewTicker(accessTunnelHeartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-beatCtx.Done():
+				return
+			case <-ticker.C:
+				// Other failures retry on the next beat: hostd keeps the listener for a bounded outage.
+				if errors.Is(runtime.Heartbeat(beatCtx, session), ErrAccessTunnelGone) {
+					close(gone)
+					return
+				}
+			}
+		}
+	}()
+	select {
+	case <-command.Context().Done():
+	case <-gone:
+		return ErrAccessTunnelGone
+	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(command.Context()), 5*time.Second)
 	defer cancel()
 	if releaseErr := runtime.Release(cleanupCtx, session); releaseErr != nil {
@@ -217,6 +248,23 @@ func (c *localAccessTunnelClient) Start(ctx context.Context, selector, listen st
 		return accessTunnelSession{}, ErrAccessTunnelInvalid
 	}
 	return out, nil
+}
+
+func (c *localAccessTunnelClient) Heartbeat(ctx context.Context, session accessTunnelSession) error {
+	if c == nil || ctx == nil || !validAccessTunnelSession(session, session.ListenAddress) {
+		return ErrAccessTunnelInvalid
+	}
+	response, _, err := c.do(ctx, http.MethodPut, "/v1/private-tcp-access/"+url.PathEscape(session.ID)+"/heartbeat", nil)
+	if err != nil {
+		return err
+	}
+	switch response.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusNotFound, http.StatusGone:
+		return accessTunnelFailure(ErrAccessTunnelGone, accessTunnelHTTPStatus{status: response.StatusCode})
+	}
+	return accessTunnelHTTPError(response.StatusCode)
 }
 
 func (c *localAccessTunnelClient) Release(ctx context.Context, session accessTunnelSession) error {

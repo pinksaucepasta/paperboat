@@ -395,3 +395,103 @@ func TestResolvePrivateTCPAdmissionRejectsNameCollidingWithAnotherRouteID(t *tes
 		t.Fatalf("duplicate tunnel name error=%v", err)
 	}
 }
+
+type privateTCPAccessTestClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func (c *privateTCPAccessTestClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *privateTCPAccessTestClock) Advance(d time.Duration) time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(d)
+	return c.now
+}
+
+// heartbeatTestSession starts one session on a manager with a fake clock and a 15 s heartbeat TTL.
+func heartbeatTestSession(t *testing.T, proxy *privateTCPAccessTestProxy) (*PrivateTCPAccessManager, *privateTCPAccessTestClock, string) {
+	t.Helper()
+	clock := &privateTCPAccessTestClock{now: time.Now()}
+	ctx, cancel := context.WithCancel(context.Background())
+	manager, err := NewPrivateTCPAccessManager(PrivateTCPAccessManagerConfig{ControlToken: "local-token", RunContext: ctx, HeartbeatTTL: 15 * time.Second, Now: clock.Now,
+		resolve: func(context.Context, string) (string, string, error) { return "route_tcp_1", "tun_1", nil },
+		start:   func(context.Context, PrivateTCPAccessRequest) (privateTCPAccessProxy, error) { return proxy, nil },
+		newID:   func() (string, error) { return "hb", nil }})
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cancel(); _ = manager.Close() })
+	response := privateTCPAccessRequest(t, manager, http.MethodPost, "/v1/private-tcp-access", "local-token", validPrivateTCPAccessBody("tun_1"))
+	var session privateTCPAccessResponseDocument
+	if response.Code != http.StatusCreated || json.Unmarshal(response.Body.Bytes(), &session) != nil {
+		t.Fatalf("create=%d %s", response.Code, response.Body.String())
+	}
+	return manager, clock, session.ID
+}
+
+func privateTCPAccessProxyClosed(proxy *privateTCPAccessTestProxy) int {
+	proxy.mu.Lock()
+	defer proxy.mu.Unlock()
+	return proxy.closed
+}
+
+func TestPrivateTCPAccessManagerClosesTheListenerOfAnOwnerThatStoppedBeating(t *testing.T) {
+	proxy := &privateTCPAccessTestProxy{rawURL: "http://127.0.0.1:24001"}
+	manager, clock, id := heartbeatTestSession(t, proxy)
+	manager.Sweep(clock.Advance(14 * time.Second))
+	if privateTCPAccessProxyClosed(proxy) != 0 {
+		t.Fatal("listener closed before the heartbeat TTL")
+	}
+	manager.Sweep(clock.Advance(2 * time.Second))
+	if privateTCPAccessProxyClosed(proxy) != 1 {
+		t.Fatal("listener of an owner that never beat survived its TTL")
+	}
+	if response := privateTCPAccessRequest(t, manager, http.MethodPut, "/v1/private-tcp-access/"+id+"/heartbeat", "local-token", ""); response.Code != http.StatusNotFound {
+		t.Fatalf("heartbeat of a reaped session=%d", response.Code)
+	}
+}
+
+func TestPrivateTCPAccessManagerHeartbeatKeepsALiveOwnerAndReleaseStaysReplaySafe(t *testing.T) {
+	proxy := &privateTCPAccessTestProxy{rawURL: "http://127.0.0.1:24001"}
+	manager, clock, id := heartbeatTestSession(t, proxy)
+	for i := 0; i < 4; i++ { // 40 s of beats every 10 s: far past one TTL
+		clock.Advance(10 * time.Second)
+		if response := privateTCPAccessRequest(t, manager, http.MethodPut, "/v1/private-tcp-access/"+id+"/heartbeat", "local-token", ""); response.Code != http.StatusOK {
+			t.Fatalf("heartbeat %d=%d %s", i, response.Code, response.Body.String())
+		}
+	}
+	if privateTCPAccessProxyClosed(proxy) != 0 {
+		t.Fatal("a beating owner lost its listener")
+	}
+	for i := 0; i < 2; i++ {
+		if deleted := privateTCPAccessRequest(t, manager, http.MethodDelete, "/v1/private-tcp-access/"+id, "local-token", ""); deleted.Code != http.StatusNoContent {
+			t.Fatalf("delete %d=%d", i, deleted.Code)
+		}
+	}
+	if privateTCPAccessProxyClosed(proxy) != 1 {
+		t.Fatalf("closed=%d", privateTCPAccessProxyClosed(proxy))
+	}
+}
+
+func TestPrivateTCPAccessManagerHeartbeatRejectsBadAuthenticationBodyAndUnknownSession(t *testing.T) {
+	manager, _, id := heartbeatTestSession(t, &privateTCPAccessTestProxy{rawURL: "http://127.0.0.1:24001"})
+	for _, test := range []struct {
+		path, token, body string
+		want              int
+	}{
+		{"/v1/private-tcp-access/" + id + "/heartbeat", "wrong", "", http.StatusUnauthorized},
+		{"/v1/private-tcp-access/" + id + "/heartbeat", "local-token", "{}", http.StatusBadRequest},
+		{"/v1/private-tcp-access/access_missing/heartbeat", "local-token", "", http.StatusNotFound},
+	} {
+		if response := privateTCPAccessRequest(t, manager, http.MethodPut, test.path, test.token, test.body); response.Code != test.want {
+			t.Fatalf("%s token=%q body=%q status=%d want %d", test.path, test.token, test.body, response.Code, test.want)
+		}
+	}
+}

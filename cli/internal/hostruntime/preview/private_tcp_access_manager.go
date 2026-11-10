@@ -25,6 +25,9 @@ const (
 	PrivateTCPAccessSchema       = "paperboat.private-tcp-access/v1"
 	privateTCPAccessBodyLimit    = 4 << 10
 	defaultPrivateTCPAccessLimit = 64
+	// defaultPrivateTCPAccessHeartbeatTTL bounds how long a listener outlives a CLI that died without Release
+	// (kill -9, taskkill /F); the CLI beats at a third of it.
+	defaultPrivateTCPAccessHeartbeatTTL = 15 * time.Second
 )
 
 var (
@@ -41,6 +44,8 @@ type PrivateTCPAccessManagerConfig struct {
 	ControlToken  string
 	RunContext    context.Context
 	MaximumActive int
+	HeartbeatTTL  time.Duration
+	Now           func() time.Time
 	resolve       func(context.Context, string) (string, string, error)
 	start         func(context.Context, PrivateTCPAccessRequest) (privateTCPAccessProxy, error)
 	validate      func(context.Context, string, string) (time.Time, error)
@@ -57,26 +62,29 @@ func (p machinePrivateTCPProxy) Close() error      { return p.proxy.Close() }
 func (p machinePrivateTCPProxy) AccessURL() string { return p.proxy.URL }
 
 type PrivateTCPAccessManager struct {
-	token      string
-	runContext context.Context
-	maximum    int
-	resolve    func(context.Context, string) (string, string, error)
-	start      func(context.Context, PrivateTCPAccessRequest) (privateTCPAccessProxy, error)
-	validate   func(context.Context, string, string) (time.Time, error)
-	newID      func() (string, error)
-	lifetime   *admission.Lease
-	mu         sync.Mutex
-	closed     bool
-	closeDone  chan struct{}
-	closeErr   error
-	pending    int
-	active     map[string]*privateTCPAccessSession
+	token        string
+	runContext   context.Context
+	maximum      int
+	heartbeatTTL time.Duration
+	now          func() time.Time
+	resolve      func(context.Context, string) (string, string, error)
+	start        func(context.Context, PrivateTCPAccessRequest) (privateTCPAccessProxy, error)
+	validate     func(context.Context, string, string) (time.Time, error)
+	newID        func() (string, error)
+	lifetime     *admission.Lease
+	mu           sync.Mutex
+	closed       bool
+	closeDone    chan struct{}
+	closeErr     error
+	pending      int
+	active       map[string]*privateTCPAccessSession
 }
 
 type privateTCPAccessSession struct {
 	ID, TunnelID, RouteID, ListenAddress string
 	proxy                                privateTCPAccessProxy
 	lifetime                             *admission.Lease
+	lastHeartbeat                        time.Time // guarded by the manager's mu
 	closeOnce                            sync.Once
 	onClosed                             func()
 	closeErr                             error
@@ -106,6 +114,15 @@ func NewPrivateTCPAccessManager(config PrivateTCPAccessManagerConfig) (*PrivateT
 	if config.MaximumActive < 1 || config.MaximumActive > 1024 {
 		return nil, ErrPrivateTCPAccessInvalid
 	}
+	if config.HeartbeatTTL == 0 {
+		config.HeartbeatTTL = defaultPrivateTCPAccessHeartbeatTTL
+	}
+	if config.HeartbeatTTL < 0 {
+		return nil, ErrPrivateTCPAccessInvalid
+	}
+	if config.Now == nil {
+		config.Now = time.Now
+	}
 	resolve, start := config.resolve, config.start
 	validate := config.validate
 
@@ -133,7 +150,7 @@ func NewPrivateTCPAccessManager(config PrivateTCPAccessManagerConfig) (*PrivateT
 	if newID == nil {
 		newID = newPrivateAccessIdentifier
 	}
-	manager := &PrivateTCPAccessManager{token: strings.TrimSpace(config.ControlToken), runContext: config.RunContext, maximum: config.MaximumActive, resolve: resolve, start: start, validate: validate, newID: newID, active: make(map[string]*privateTCPAccessSession), closeDone: make(chan struct{})}
+	manager := &PrivateTCPAccessManager{token: strings.TrimSpace(config.ControlToken), runContext: config.RunContext, maximum: config.MaximumActive, heartbeatTTL: config.HeartbeatTTL, now: config.Now, resolve: resolve, start: start, validate: validate, newID: newID, active: make(map[string]*privateTCPAccessSession), closeDone: make(chan struct{})}
 	owner, err := admission.Admit(config.RunContext, time.Time{}, nil)
 	if err != nil {
 		return nil, err
@@ -141,7 +158,44 @@ func NewPrivateTCPAccessManager(config PrivateTCPAccessManagerConfig) (*PrivateT
 	manager.lifetime = owner
 	manager.runContext = owner.Context()
 	go func() { <-owner.Context().Done(); _ = manager.Close() }()
+	go manager.watchHeartbeats()
 	return manager, nil
+}
+
+// watchHeartbeats closes the listeners of CLIs that stopped beating, as OwnerSessionLeaseManager does for owner leases.
+func (m *PrivateTCPAccessManager) watchHeartbeats() {
+	interval := m.heartbeatTTL / 3
+	if interval < 100*time.Millisecond {
+		interval = 100 * time.Millisecond
+	} else if interval > time.Second {
+		interval = time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.runContext.Done():
+			return
+		case <-ticker.C:
+			m.Sweep(m.now())
+		}
+	}
+}
+
+// Sweep closes the sessions whose owner has not beaten within the TTL.
+func (m *PrivateTCPAccessManager) Sweep(now time.Time) {
+	m.mu.Lock()
+	var expired []*privateTCPAccessSession
+	for id, session := range m.active {
+		if !session.lastHeartbeat.Add(m.heartbeatTTL).After(now) {
+			delete(m.active, id)
+			expired = append(expired, session)
+		}
+	}
+	m.mu.Unlock()
+	for _, session := range expired {
+		_ = session.Close()
+	}
 }
 
 func (r *MachinePreviewRuntime) lookupPrivateTCPAdmission(ctx context.Context, selector string) (accessorAdmission, error) {
@@ -238,6 +292,8 @@ func (m *PrivateTCPAccessManager) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		m.handleStart(w, r)
 	case r.Method == http.MethodDelete && strings.HasPrefix(path, "/") && len(path) > 1:
 		m.handleDelete(w, strings.TrimPrefix(path, "/"))
+	case r.Method == http.MethodPut && strings.HasSuffix(path, "/heartbeat") && len(path) > len("/heartbeat")+1:
+		m.handleHeartbeat(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "/"), "/heartbeat"))
 	default:
 		writePrivateTCPAccessError(w, http.StatusNotFound, "not_found", "Private TCP access endpoint was not found.")
 	}
@@ -329,7 +385,7 @@ func (m *PrivateTCPAccessManager) handleStart(w http.ResponseWriter, r *http.Req
 		writePrivateTCPAccessError(w, http.StatusServiceUnavailable, "runtime_unavailable", "The access session could not be created.")
 		return
 	}
-	session := &privateTCPAccessSession{ID: "access_" + id, TunnelID: tunnelID, RouteID: routeID, ListenAddress: listenAddress, proxy: proxy, lifetime: lease}
+	session := &privateTCPAccessSession{ID: "access_" + id, TunnelID: tunnelID, RouteID: routeID, ListenAddress: listenAddress, proxy: proxy, lifetime: lease, lastHeartbeat: m.now()}
 	m.mu.Lock()
 	m.pending--
 	reserved = false
@@ -361,6 +417,34 @@ func (m *PrivateTCPAccessManager) handleStart(w http.ResponseWriter, r *http.Req
 	}
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(privateTCPAccessResponseDocument{Schema: PrivateTCPAccessSchema, Kind: "private_tcp_access", ID: session.ID, TunnelID: tunnelID, RouteID: routeID, ListenAddress: listenAddress})
+}
+
+type privateTCPAccessHeartbeatDocument struct {
+	Schema    string    `json:"schema"`
+	Kind      string    `json:"kind"`
+	ID        string    `json:"id"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// handleHeartbeat renews a session; an unknown id is 404 (unlike DELETE) so a beating CLI learns its listener is gone.
+func (m *PrivateTCPAccessManager) handleHeartbeat(w http.ResponseWriter, r *http.Request, id string) {
+	if !validPrivateTCPSelector(id) || !emptyOwnerSessionLeaseBody(r.Body) {
+		writePrivateTCPAccessError(w, http.StatusBadRequest, "invalid_request", "The private TCP access heartbeat is invalid.")
+		return
+	}
+	now := m.now()
+	m.Sweep(now)
+	m.mu.Lock()
+	session := m.active[id]
+	if session != nil {
+		session.lastHeartbeat = now
+	}
+	m.mu.Unlock()
+	if session == nil {
+		writePrivateTCPAccessError(w, http.StatusNotFound, "not_found", "Private TCP access session was not found.")
+		return
+	}
+	_ = json.NewEncoder(w).Encode(privateTCPAccessHeartbeatDocument{Schema: PrivateTCPAccessSchema, Kind: "private_tcp_access_heartbeat", ID: id, ExpiresAt: now.Add(m.heartbeatTTL)})
 }
 
 func (m *PrivateTCPAccessManager) handleDelete(w http.ResponseWriter, id string) {
