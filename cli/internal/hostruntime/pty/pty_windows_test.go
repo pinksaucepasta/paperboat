@@ -12,6 +12,11 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// The session manager overtakes stuck input only through this method; without it Ctrl-C waits behind a flood.
+var _ interface {
+	Interrupt(byte, func()) (bool, error)
+} = (*Process)(nil)
+
 var getHandleInformation = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetHandleInformation")
 
 func TestAnonymousPipeKeepsOnlyConPTYEndpointInheritable(t *testing.T) {

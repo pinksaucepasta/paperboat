@@ -134,6 +134,41 @@ func TestNativeConPTYCtrlCInterruptsForegroundAndPreservesShell(t *testing.T) {
 	}
 }
 
+// A paste into a flood the program never reads fills the ConPTY input pipe; Ctrl-C must still overtake it (the unix twin
+// is TestInterruptOvertakesAPasteTheProgramNeverReads).
+func TestNativeConPTYInterruptOvertakesAStuckPaste(t *testing.T) {
+	process, output := startNativePTY(t, nativePowerShell(t), []string{"-NoLogo", "-NoProfile"})
+	defer process.CloseIO()
+	flood := "while(1){[Console]::Out.WriteLine('y')}\r\n"
+	if _, err := process.Write([]byte(flood)); err != nil {
+		t.Fatal(err)
+	}
+	output.waitFor(t, "y\r\ny\r\n")
+	stuck := make(chan error, 1)
+	go func() {
+		_, err := process.Write([]byte(strings.Repeat("0123456789abcdef", 16384))) // 256 KiB nobody reads
+		stuck <- err
+	}()
+	time.Sleep(2 * time.Second) // the pipe is full and the write is blocked
+	started := time.Now()
+	handled, err := process.Interrupt(0x03, nil)
+	if err != nil || !handled {
+		t.Fatalf("Interrupt handled=%v err=%v", handled, err)
+	}
+	select {
+	case <-stuck:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stuck paste was not cancelled")
+	}
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("Ctrl-C took %v behind a stuck paste", elapsed)
+	}
+	if _, err := process.Write([]byte("Write-Output ('after'+'-ctrl-c')\r\n")); err != nil {
+		t.Fatalf("shell did not survive: %v", err)
+	}
+	output.waitFor(t, "after-ctrl-c")
+}
+
 func TestNativeConPTYResizeAndUTF8VT(t *testing.T) {
 	process, output := startNativePTY(t, nativePowerShell(t), []string{"-NoLogo", "-NoProfile"})
 	if err := process.Resize(Dimensions{Columns: 101, Rows: 37}); err != nil {

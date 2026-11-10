@@ -237,6 +237,30 @@ func (p *Process) WriteContext(ctx context.Context, data []byte) (int, error) {
 	return writeInput(p.input, data, inputTimeout(ctx))
 }
 
+// Interrupt delivers a lone Ctrl-C (ETX) ahead of input stuck in a full ConPTY input pipe: a paste the foreground
+// program never reads (a flood such as `yes`) blocks WriteFile, and the key would wait behind it for the 20 s input
+// timeout, holding writeMu (the unix twin aborts the pending write by deadline, pty_unix.go Interrupt). CancelIoEx
+// cancels the pending write from this thread, writeMu frees, and ETX, which ConPTY turns into the foreground Ctrl-C
+// event, goes next. accepted runs first so the caller marks the input queued before key as discarded. Another key
+// is written normally by the caller (false).
+func (p *Process) Interrupt(key byte, accepted func()) (bool, error) {
+	if key != 0x03 {
+		return false, nil
+	}
+	if accepted != nil {
+		accepted()
+	}
+	_ = windows.CancelIoEx(windows.Handle(p.input.Fd()), nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := LockInput(ctx, &p.writeMu); err != nil {
+		return true, err
+	}
+	defer p.writeMu.Unlock()
+	_, err := writeInput(p.input, []byte{key}, inputTimeout(ctx))
+	return true, err
+}
+
 func (p *Process) Resize(dimensions Dimensions) error {
 	if !validDimensions(dimensions) {
 		return ErrInvalidDimensions
@@ -258,7 +282,7 @@ func (p *Process) Signal(signal Signal) error {
 		// event an interactive console receives. Do not terminate the shell:
 		// the foreground command must be interrupted while the session remains
 		// usable for subsequent commands.
-		if _, err := p.input.Write([]byte{0x03}); err != nil {
+		if _, err := p.WriteContext(context.Background(), []byte{0x03}); err != nil {  // under writeMu: never races a write in progress
 			return err
 		}
 		// Some inbox console applications on Windows 11 do not translate ETX
