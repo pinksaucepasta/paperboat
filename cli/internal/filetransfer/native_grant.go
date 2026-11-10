@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"io/fs"
 	"net"
 	"net/http"
 	"strings"
@@ -241,12 +240,6 @@ func localDaemonRestarting(err error) bool {
 	// Windows has no socket handover: the named pipe is gone while the services restart, and its dial error is no
 	// unix OpError. localapi wraps every dial failure (not a cancel or a permission refusal) as ErrTransportUnavailable.
 	if errors.Is(err, localapi.ErrTransportUnavailable) {
-		return true
-	}
-	// A pipe dial that fails past that wrapper (a deadline-flavoured dial returns its error unwrapped; seen in an update
-	// on winpool-11) is still the pipe of the restarting daemon being absent: open \\.\pipe\...: file not found.
-	var missing *fs.PathError
-	if errors.As(err, &missing) && strings.HasPrefix(missing.Path, `\\.\pipe\`) && errors.Is(missing.Err, fs.ErrNotExist) {
 		return true
 	}
 	var local *localapi.RemoteError
