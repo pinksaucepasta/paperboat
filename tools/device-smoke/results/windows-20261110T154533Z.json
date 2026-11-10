@@ -1,0 +1,1 @@
+{"at": "20261110T154533Z", "results": [{"id": "tunnel-public-protocols:victus", "status": "PASS", "seconds": 106, "detail": "{\"check\": \"tunnel-public-protocols\", \"status\": \"PASS\", \"public_tcp_echo\": true, \"tls_passthrough_origin_certificate\": true, \"enrollment_preserved\": true}"}]}

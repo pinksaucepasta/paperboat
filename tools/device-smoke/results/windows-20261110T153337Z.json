@@ -1,0 +1,1 @@
+{"at": "20261110T153337Z", "results": [{"id": "preview-survival:victus", "status": "PASS", "seconds": 148, "detail": "{\"check\": \"preview-survival\", \"status\": \"PASS\", \"daemon_restart\": true, \"origin_unavailable\": true, \"origin_recovers\": true, \"stop_ends\": true, \"host_restart\": \"survived\", \"enrollment_preserved\": true}"}]}
