@@ -964,6 +964,14 @@ class PrivateAccessFamily(unittest.TestCase):
                 private_access.exchange(('127.0.0.1', free), {'marker': 'x'})
             self.assertEqual(__import__('errno').ECONNREFUSED, refused.exception.errno)  # the probe retries on this
 
+    def test_device_curl_waits_for_the_port_listener_and_never_hides_another_failure(self):
+        import private_access
+        for codes, wait, want in [([7, 7, 0], 45, 0), ([7, 7], 0, 7), ([60, 0], 45, 60)]:
+            left = list(codes)
+            run = lambda *_: SimpleNamespace(returncode=left.pop(0))
+            with patch.object(winhost, 'which', lambda name: name), patch.object(winhost, 'run_pb', run):
+                self.assertEqual(want, private_access.device_curl(['https://x.example.test/'], wait, 0).returncode)
+
     def test_peer_origin_answers_the_unix_exchange_and_the_https_get(self):
         import hashlib
         import urllib.request

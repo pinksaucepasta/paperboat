@@ -253,6 +253,18 @@ def local_access_domain(binary):
     return invoke(binary, 'config', 'local-access', 'show', '--json')['domain']
 
 
+def device_curl(arguments, wait=45, pause=1):
+    """curl.exe on the Windows device (it ships with Windows and trusts the system store, as curl does on Unix).
+    Exit 7 (nothing listens yet) is retried for `wait` s: the machine guard opens the listener of a newly published
+    port after its route, the same bound the private address gets below."""
+    curl, deadline = winhost.which('curl'), time.monotonic() + wait
+    while True:
+        result = winhost.run_pb(curl, arguments, 35)
+        if result.returncode != 7 or time.monotonic() >= deadline:
+            return result
+        time.sleep(pause)
+
+
 def probe(args):
     phase = json.loads(args.phase)
     assert phase['state'] == 'private_access_required' and phase['check'] == args.check
@@ -273,8 +285,8 @@ def probe(args):
         for host in hosts:
             command = ['curl', '--silent', '--show-error', '--fail', '--noproxy', '*',
                        '--connect-timeout', '15', '--max-time', '30', 'https://' + host + '/']
-            if winhost.device():  # curl.exe ships with Windows and trusts the system store, as curl does on Unix
-                result = winhost.run_pb(winhost.which('curl'), command[1:], 35)
+            if winhost.device():
+                result = device_curl(command[1:])
             else:
                 result = subprocess.run(command, capture_output=True, timeout=35)
             if result.returncode or result.stdout != expected:
