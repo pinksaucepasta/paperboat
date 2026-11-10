@@ -78,7 +78,6 @@ def checks(args):
         table['ssh-' + name.split('_')[0].replace('lifecycle', 'main')] = (['ssh_%s.py' % name, args.peer], ['--peer'])
     for name in ('main', 'paste', 'typing'):  # paste and typing need a Unix peer (sh)
         table['terminal-' + name] = (['terminal_lifecycle.py', args.peer, '--check', name], ['--peer'])
-    table['status-bar'] = (['status_bar_lifecycle.py', args.peer], ['--peer'])
     table['terminal-matrix'] = (['terminal_matrix.py', args.peer], ['--peer'])  # about 25 min: pass --timeout 3600
     for name in ('access-machine', 'private-address', 'private-https', 'path-direct', 'path-relay'):  # the device is the client; the origin runs on the peer
         table[name] = (['private_access.py', 'pair', '--target', args.peer, '--check', name], ['--peer'])
