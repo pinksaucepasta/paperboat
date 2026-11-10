@@ -25,6 +25,7 @@ PB = winhost.pb_path()
 MIB = 1 << 20
 TX = ("(Get-NetAdapterStatistics|Where-Object{$_.Name -notmatch 'Loopback'}|Measure-Object -Property SentBytes -Sum).Sum")
 R = []
+TRACE = []
 
 
 def target(script, timeout=300):
@@ -34,7 +35,9 @@ def target(script, timeout=300):
 
 
 def arrived(name, sha):
-    return target('sha256sum ~/Paperboat/Inbox/%s 2>/dev/null | cut -d" " -f1' % shlex.quote(name)) == sha
+    got = target('sha256sum ~/Paperboat/Inbox/%s 2>/dev/null | cut -d" " -f1' % shlex.quote(name))
+    TRACE.append('%s arrived=%s want=%s' % (name, got[:12] or 'none', sha[:12]))
+    return got == sha
 
 
 def tx():
@@ -42,7 +45,15 @@ def tx():
 
 
 def send(alias, paths, *flags, timeout=900):
-    return DEVICE.run([DEVICE.pb_exe, 'send', *map(str, paths), '--to', alias, *flags], timeout=timeout)
+    # A FAIL names the exit code, seconds and stderr of every send: "failed" alone cannot tell a stall from a refusal.
+    start, name = time.monotonic(), os.path.basename(str(paths[0]).replace('\\', '/'))
+    try:
+        done = DEVICE.run([DEVICE.pb_exe, 'send', *map(str, paths), '--to', alias, *flags], timeout=timeout)
+    except subprocess.TimeoutExpired:
+        TRACE.append('send %s timeout after %ds' % (name, time.monotonic() - start))
+        raise
+    TRACE.append('send %s rc=%s %ds err=%s' % (name, done.returncode, time.monotonic() - start, (done.stderr or '')[-160:].strip()))
+    return done
 
 
 def main():
@@ -125,7 +136,7 @@ def main():
             target('cd ~/Paperboat/Inbox && rm -f x-auto.bin b?.bin x-unl.bin x-huge.bin')
         with contextlib.suppress(Exception):
             work.__exit__(None, None, None)
-    print(json.dumps({'check': 'transfer-modes-windows', 'status': status, 'steps': R, 'detail': detail}), flush=True)
+    print(json.dumps({'check': 'transfer-modes-windows', 'status': status, 'steps': R, 'detail': detail, 'trace': TRACE}), flush=True)
     sys.exit(0 if status == 'PASS' else 1)
 
 
