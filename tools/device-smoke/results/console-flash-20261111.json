@@ -1,0 +1,15 @@
+{
+  "check": "windows_console_flash",
+  "build": "dev-6deb7a1e3 (main, pb-windows-amd64.exe)",
+  "runs": [
+    {"host": "winpool-7 (Windows Server, runneradmin console session)", "case": "runonce", "utc": "20:43-20:45", "result": "PASS",
+     "detail": "control cmd.exe opened a visible window; conhost --headless cmd /d /c rd opened none for 10 s, exit 0, helper dir removed"},
+    {"host": "victus (Windows 11, RDP session 2)", "case": "runonce", "utc": "20:48-20:52", "result": "PASS",
+     "detail": "same: control visible, RunOnce command no window for 10 s, exit 0"},
+    {"host": "victus (Windows 11, RDP session 2)", "case": "exec install --json (administrator task, no console)", "utc": "20:54-20:58",
+     "result": "INCONCLUSIVE",
+     "detail": "no console window seen for 60 s, but pb install ran longer than the 60 s the harness waits (exit -1 = still running) and ended with no services installed; its own outcome was not captured"}
+  ],
+  "not_run": ["update", "daemon start", "pair", "rsync", "uninstall then sign-out/sign-in"],
+  "fixed_in_harness": "task launcher runs under conhost --headless; stray launcher window of an interrupted run was the one the user saw at 02:15 local"
+}
