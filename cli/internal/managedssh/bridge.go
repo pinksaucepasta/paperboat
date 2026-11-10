@@ -202,10 +202,12 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 	return result, managedSSHBoundary("command", errors.Join(resultErr, cleanupErr))
 }
 
-// closeWriteFailure is what a failed CloseWrite (the FIN to sshd) counts as. The one benign case is the bridge's own
-// finish() having already closed the socket after sshd's end; any other failure means the FIN may never have landed.
+// closeWriteFailure is what a failed CloseWrite (the FIN to sshd) counts as. Once the bridge's own finish() has closed
+// the socket the session is over and the FIN is moot, whatever error the closed socket reports (on Windows it is a
+// fresh error, not net.ErrClosed, so no typed match can name it). Before that, a failure means the FIN may never
+// have landed and is kept.
 func closeWriteFailure(err error, finished bool) error {
-	if finished && normalizeBridgeError(err) == nil {
+	if finished {
 		return nil
 	}
 	return err
