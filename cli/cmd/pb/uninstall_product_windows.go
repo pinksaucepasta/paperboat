@@ -18,6 +18,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
@@ -192,9 +193,6 @@ func launchWindowsUninstallHelper(ctx context.Context, inboxPaths, userStatePath
 			}
 		}
 	}()
-	if err := recoverWindowsUninstall(); err != nil {
-		return "", err
-	}
 	executable, err := windowsUninstallExecutable()
 	if err != nil {
 		return "", err
@@ -203,25 +201,8 @@ func launchWindowsUninstallHelper(ctx context.Context, inboxPaths, userStatePath
 	if _, err := io.ReadFull(rand.Reader, identifierBytes); err != nil {
 		return "", err
 	}
-	identifier := hex.EncodeToString(identifierBytes)
-	directory := filepath.Join(windowsUninstallRoot(), identifier)
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return "", err
-	}
-	keepDirectory := false
-	defer func() {
-		if !keepDirectory {
-			result = errors.Join(result, os.RemoveAll(directory))
-		}
-	}()
-	if err := protectWindowsUninstallPath(directory, true); err != nil {
-		return "", err
-	}
+	directory := filepath.Join(windowsUninstallRoot(), hex.EncodeToString(identifierBytes))
 	helperPath := filepath.Join(directory, "paperboat-uninstall-helper.exe")
-	if err := copyWindowsUninstallHelper(executable, helperPath); err != nil {
-		return "", err
-	}
-	statusPath = filepath.Join(directory, "status.json")
 	planPath := filepath.Join(directory, "plan.json")
 	processIDs := []uint32{uint32(os.Getpid())}
 	if parent := installedWindowsParentPID(); parent != 0 {
@@ -236,15 +217,36 @@ func launchWindowsUninstallHelper(ctx context.Context, inboxPaths, userStatePath
 	if err != nil {
 		return "", err
 	}
+	statusPath = filepath.Join(directory, "status.json")
 	plan := windowsUninstallPlan{Schema: windowsUninstallPlanSchema, SupportReference: reference, ProcessIDs: processIDs, StatusPath: statusPath, InboxPaths: append([]string(nil), inboxPaths...), OwnerSID: user.User.Sid.String(), OwnerProfile: profile, UserStatePaths: userStatePaths, CreatedAt: now, ExpiresAt: now.Add(5 * time.Minute)}
-	if err := writeProtectedWindowsUninstallJSON(planPath, plan); err != nil {
-		return "", err
-	}
-	if err := writeProtectedWindowsUninstallJSON(statusPath, windowsUninstallStatus{Schema: windowsUninstallStatusSchema, State: "scheduled", UpdatedAt: now}); err != nil {
+	keepDirectory := false
+	defer func() {
+		if !keepDirectory {
+			result = errors.Join(result, asWindowsUninstallUser(func() error { return os.RemoveAll(directory) }))
+		}
+	}()
+	if err := asWindowsUninstallUser(func() error {
+		if err := recoverWindowsUninstall(); err != nil {
+			return err
+		}
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			return err
+		}
+		if err := protectWindowsUninstallPath(directory, true); err != nil {
+			return err
+		}
+		if err := copyWindowsUninstallHelper(executable, helperPath); err != nil {
+			return err
+		}
+		if err := writeProtectedWindowsUninstallJSON(planPath, plan); err != nil {
+			return err
+		}
+		return writeProtectedWindowsUninstallJSON(statusPath, windowsUninstallStatus{Schema: windowsUninstallStatusSchema, State: "scheduled", UpdatedAt: now})
+	}); err != nil {
 		return "", err
 	}
 	if err := elevation.LaunchDetached(ctx, helperPath, []string{"__complete-uninstall", "--plan", planPath}); err != nil {
-		statusErr := writeProtectedWindowsUninstallJSON(statusPath, windowsUninstallStatusValue(ctx, "failed", err))
+		statusErr := writeWindowsUninstallStatus(statusPath, windowsUninstallStatusValue(ctx, "failed", err))
 		return "", errors.Join(err, statusErr)
 	}
 	keepDirectory = true
@@ -534,7 +536,7 @@ func runWindowsUninstallHelper(ctx context.Context, planPath string) (result err
 	defer scheduleWindowsUninstallDirectoryDeletionObserved(ctx, helperDirectory)
 	scheduleWindowsUninstallHelperDeletionObserved(ctx)
 	status := func(state string, statusErr error) error {
-		return writeProtectedWindowsUninstallJSON(plan.StatusPath, windowsUninstallStatusValue(ctx, state, statusErr))
+		return writeWindowsUninstallStatus(plan.StatusPath, windowsUninstallStatusValue(ctx, state, statusErr))
 	}
 	if err := status("waiting_for_parent", nil); err != nil {
 		return err
@@ -582,10 +584,10 @@ func runWindowsUninstallHelper(ctx context.Context, planPath string) (result err
 	}
 	completed := windowsUninstallStatusValue(ctx, "completed", nil)
 	completed.RemovalAtRestart = atRestart
-	if err := writeProtectedWindowsUninstallJSON(plan.StatusPath, completed); err != nil {
+	if err := writeWindowsUninstallStatus(plan.StatusPath, completed); err != nil {
 		return err
 	}
-	return os.Remove(planPath)
+	return asWindowsUninstallUser(func() error { return os.Remove(planPath) })
 }
 
 func performWindowsSystemUninstall(ctx context.Context, ownerSID string, _ []string) error {
@@ -611,8 +613,11 @@ func readWindowsUninstallPlan(planPath string) (windowsUninstallPlan, error) {
 	if !filepath.IsAbs(planPath) || !strings.EqualFold(filepath.Base(planPath), "plan.json") || !strings.EqualFold(filepath.Dir(planPath), filepath.Dir(helperPath)) {
 		return plan, errors.New("invalid protected Windows uninstall plan")
 	}
-	encoded, err := readProtectedWindowsUninstallFile(planPath, "invalid protected Windows uninstall plan")
-	if err != nil {
+	var encoded []byte
+	if err := asWindowsUninstallUser(func() (err error) {
+		encoded, err = readProtectedWindowsUninstallFile(planPath, "invalid protected Windows uninstall plan")
+		return err
+	}); err != nil {
 		return plan, err
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(encoded)))
@@ -762,10 +767,6 @@ func readProtectedWindowsUninstallFile(path, message string) (encoded []byte, re
 	if err != nil {
 		return nil, windowsUninstallLocalFailure("", err)
 	}
-	matches, err := windowssecurity.CheckProtectedDACLMatches(path, sddl)
-	if err != nil || !matches {
-		return nil, windowsUninstallLocalFailure("", errors.New(message), err)
-	}
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, windowsUninstallLocalFailure("", err)
@@ -776,6 +777,11 @@ func readProtectedWindowsUninstallFile(path, message string) (encoded []byte, re
 			encoded = nil
 		}
 	}()
+	// On the open file: a path that was checked first can name another file by the time it is opened.
+	matches, err := windowssecurity.CheckProtectedHandleDACLMatches(windows.Handle(file.Fd()), sddl)
+	if err != nil || !matches {
+		return nil, windowsUninstallLocalFailure("", errors.New(message), err)
+	}
 	encoded, err = io.ReadAll(io.LimitReader(file, (64<<10)+1))
 	if err != nil || len(encoded) > 64<<10 {
 		return nil, windowsUninstallLocalFailure("", errors.New(message), err)
@@ -878,38 +884,33 @@ func scheduleWindowsUninstallDirectoryDeletionObserved(ctx context.Context, dire
 	}
 }
 
-func writeProtectedWindowsUninstallJSON(path string, value any) (result error) {
+// asWindowsUninstallUser runs operation as the user without elevation (windowssecurity.WithUnelevatedToken).
+// The helper directory is in the user's temporary files: the user, or anything that runs as the user, can plant
+// a link in it at any moment, and no check can close that. So everything pb does there (its files, the helper
+// copy, removing them) runs as the user, also in the elevated helper and in a pb uninstall that was started
+// elevated: a planted link then reaches only what the user could reach anyway.
+func asWindowsUninstallUser(operation func() error) error {
+	return windowssecurity.WithUnelevatedToken(operation)
+}
+
+// writeWindowsUninstallStatus writes the status file for a process that may be elevated.
+func writeWindowsUninstallStatus(path string, status windowsUninstallStatus) error {
+	return asWindowsUninstallUser(func() error { return writeProtectedWindowsUninstallJSON(path, status) })
+}
+
+// writeProtectedWindowsUninstallJSON replaces a file of the helper directory. Callers run it as the user
+// (asWindowsUninstallUser). atomicfile creates the temporary file under a random name with its final access
+// list and never follows a link at the destination.
+func writeProtectedWindowsUninstallJSON(path string, value any) error {
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	temporary := path + ".new"
-	if err := os.Remove(temporary); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return windowsUninstallLocalFailure("", err)
-	}
-	defer func() {
-		if err := os.Remove(temporary); err != nil && !errors.Is(err, os.ErrNotExist) {
-			result = windowsUninstallLocalFailure("", result, err)
-		}
-	}()
-	if err := os.WriteFile(temporary, encoded, 0o600); err != nil {
+	sddl, err := uninstallWindowsSDDLDetailed()
+	if err != nil {
 		return err
 	}
-	if err := protectWindowsUninstallPath(temporary, false); err != nil {
-		return err
-	}
-	//paperboat:allow-source-policy atomic-replacement owner=windows-uninstall reason=same-directory-protected-status-staging
-	if err := os.Rename(temporary, path); err != nil {
-		from, fromErr := windows.UTF16PtrFromString(temporary)
-		to, toErr := windows.UTF16PtrFromString(path)
-		if fromErr != nil || toErr != nil {
-			return errors.Join(err, fromErr, toErr)
-		}
-		if replaceErr := windows.MoveFileEx(from, to, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH); replaceErr != nil {
-			return errors.Join(err, replaceErr)
-		}
-	}
-	return protectWindowsUninstallPath(path, false)
+	return atomicfile.Write(path, encoded, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1, SecurityDescriptor: sddl})
 }
 
 func installedWindowsParentPID() uint32 {

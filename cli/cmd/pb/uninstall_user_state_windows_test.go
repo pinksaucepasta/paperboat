@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -385,5 +386,88 @@ func TestWindowsUserStateOwnedByAdministratorsIsRemoved(t *testing.T) {
 			t.Fatalf("a path through a junction: %v, want the refusal", err)
 		}
 		survived(t, sentinel)
+	})
+}
+
+// Security review, 2026-11-10: the elevated helper wrote its status file by path in a directory the user can
+// write; a link planted there made it an administrator's write to whatever the link named. The helper's files
+// are written and read as the user now.
+func TestWindowsUninstallHelperFilesAreWrittenWithTheUsersRights(t *testing.T) {
+	if !elevation.IsCurrentProcessElevated() {
+		t.Skip("requires an elevated administrator: only then does the process hold rights its user lacks")
+	}
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	protected := filepath.Join(base, "administrators")
+	administratorsOnly(t, protected)
+	sentinel := filepath.Join(protected, "sentinel.txt")
+	writeTestFile(t, sentinel)
+	if err := os.Mkdir(filepath.Join(protected, "helper"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	untouched := func(t *testing.T) {
+		t.Helper()
+		if body, err := os.ReadFile(sentinel); err != nil || string(body) != "kept" {
+			t.Fatalf("the administrators' file behind the link was written: %q, %v", body, err)
+		}
+	}
+	status := windowsUninstallStatus{Schema: windowsUninstallStatusSchema, State: "removing", UpdatedAt: time.Now().UTC()}
+	helperDirectory := func(t *testing.T) string {
+		t.Helper()
+		directory := filepath.Join(base, t.Name())
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := protectWindowsUninstallPath(directory, true); err != nil {
+			t.Fatal(err)
+		}
+		return directory
+	}
+
+	t.Run("a helper directory swapped for a junction", func(t *testing.T) {
+		// The junction is above the directory, so the directory itself looks real to every path check.
+		linked := filepath.Join(base, "linked")
+		plantJunction(t, linked, protected)
+		if err := writeWindowsUninstallStatus(filepath.Join(linked, "helper", "status.json"), status); err == nil {
+			t.Fatal("the status was written into a directory only Administrators can write")
+		}
+		if entries, err := os.ReadDir(filepath.Join(protected, "helper")); err != nil || len(entries) != 0 {
+			t.Fatalf("written into the Administrators' directory: %v, %v", entries, err)
+		}
+	})
+	for _, name := range []string{"status.json.new", "status.json"} {
+		t.Run("a link planted at "+name, func(t *testing.T) {
+			directory := helperDirectory(t)
+			statusPath := filepath.Join(directory, "status.json")
+			if err := os.Symlink(sentinel, filepath.Join(directory, name)); err != nil {
+				t.Fatalf("fixture: plant the link: %v", err)
+			}
+			// Either the link is refused or the status goes to a real file of the directory; never through the link.
+			if err := writeWindowsUninstallStatus(statusPath, status); err == nil {
+				info, statErr := os.Lstat(statusPath)
+				if statErr != nil || !info.Mode().IsRegular() {
+					t.Fatalf("the status file is not a regular file: %v, %v", info, statErr)
+				}
+				if read, readErr := readWindowsUninstallStatus(statusPath); readErr != nil || read.State != "removing" {
+					t.Fatalf("read the status back: %+v, %v", read, readErr)
+				}
+			}
+			untouched(t)
+		})
+	}
+	t.Run("a plan that is a link to an Administrators' file is not read", func(t *testing.T) {
+		directory := helperDirectory(t)
+		previous := windowsUninstallExecutable
+		windowsUninstallExecutable = func() (string, error) { return filepath.Join(directory, "paperboat-uninstall-helper.exe"), nil }
+		t.Cleanup(func() { windowsUninstallExecutable = previous })
+		planPath := filepath.Join(directory, "plan.json")
+		if err := os.Symlink(sentinel, planPath); err != nil {
+			t.Fatalf("fixture: plant the link: %v", err)
+		}
+		if _, err := readWindowsUninstallPlan(planPath); !errors.Is(err, fs.ErrPermission) {
+			t.Fatalf("a plan behind a link to an Administrators' file: %v, want access denied as the user", err)
+		}
 	})
 }
