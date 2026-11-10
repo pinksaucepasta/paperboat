@@ -40,10 +40,12 @@ function Sample($base) {
   }
 }
 $base = @{}; foreach ($w in [Win]::Visible()) { $base[($w -split '\|')[0]] = 1 }
+Write-Output "baseline windows: $($base.Count)"
 $cmd = '"' + $Exe + '" ' + $ArgumentLine
 $pidOut = [uint32]0; $code = $null; $job = $null
 $job = [powerShell]::Create().AddScript({ param($c, $ms) $p = [uint32]0; [Win]::RunDetached($c, $ms, [ref]$p) }).AddArgument($cmd).AddArgument([uint32]($Seconds * 1000))
 $handle = $job.BeginInvoke()
+Write-Output "started: $cmd"
 $end = $null
 while ($true) {
   Sample $base
@@ -51,7 +53,9 @@ while ($true) {
   if ($end -and (Get-Date) -gt $end) { break }
   Start-Sleep -Milliseconds 25
 }
+Write-Output "finished, windows seen: $($seen.Count)"
 $code = $job.EndInvoke($handle)
+if ($job.Streams.Error.Count) { Write-Output ('runspace error: ' + $job.Streams.Error[0]) }
 $flashes = @($seen.Values | Where-Object { $suspect -contains $_.class -or $names -contains $_.process })
 $result = [ordered]@{ command = $cmd; exit = ($code | Select-Object -First 1); control = [bool]$Control; flashes = $flashes }
 $result | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 -Path $Out

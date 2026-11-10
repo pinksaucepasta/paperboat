@@ -28,16 +28,17 @@ def run_in_session(device, name, exe, argument_line, seconds, control=False):
         arguments.append('-Control')
     line = 'powershell.exe ' + ' '.join('"%s"' % a.replace('"', '\\"') for a in arguments)
     launcher = work + '\\run.cmd'  # a path without quotes keeps schtasks /TR free of nested quoting
-    device.write_bytes(launcher, ('@echo off\r\n' + line + '\r\n').encode())
+    device.write_bytes(launcher, ('@echo off\r\n' + line + ' > "' + work + '\\log.txt" 2>&1\r\n').encode())
     device.ps('register ' + name, "$u=[Security.Principal.WindowsIdentity]::GetCurrent().Name;"
               "schtasks /Create /TN $req.t /SC ONCE /ST 00:00 /RU $u /IT /RL LIMITED /F /TR $req.c | Out-Null;"
               "if($LASTEXITCODE){throw 'schtasks /Create failed'};schtasks /Run /TN $req.t | Out-Null", t=TASK, c=launcher)
-    deadline = time.time() + seconds * 3 + 60
+    deadline = time.time() + seconds * 3 + 240
     while time.time() < deadline and not device.exists(out):
         time.sleep(2)
     device.ps('unregister', "schtasks /Delete /TN $req.t /F | Out-Null", t=TASK, ok=(0, 1))
     if not device.exists(out):
-        sys.exit('FAIL %s: the desktop detector produced no result (is a user signed in on the device?)' % name)
+        log = device.read_bytes(work + '\\log.txt').decode(errors='replace')[-400:] if device.exists(work + '\\log.txt') else 'no log'
+        sys.exit('FAIL %s: the desktop detector produced no result (is a user signed in on the device?): %s' % (name, log))
     result = json.loads(device.read_bytes(out).decode('utf-8-sig'))
     device.ps('cleanup', 'Remove-Item -Recurse -Force $req.d', d=work)
     return result
