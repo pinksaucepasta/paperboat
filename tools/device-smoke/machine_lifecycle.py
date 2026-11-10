@@ -29,7 +29,7 @@ def restore_all(primary, *actions):
 
 
 def machine(pb, machine_id, timeout=COMMAND_TIMEOUT):
-    catalog = invoke(pb, '--workspace', 'personal', 'machine', 'list', '--json', timeout=timeout)
+    catalog = invoke(pb, '--workspace', 'personal', 'machine', 'list', '--all', '--json', timeout=timeout)  # the default page is 50
     return next(item for item in catalog['machines'] if item['id'] == machine_id)
 
 

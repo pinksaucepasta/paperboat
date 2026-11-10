@@ -130,7 +130,7 @@ def check_machine_revoked(binary, identifier, *, perform):
     # Since server 2026.10.23.48 the default machine list omits revoked and disconnected machines.
     if any(item['id'] == identifier for item in machines):
         raise RuntimeError('revoked machine remains in the server catalog')
-    event = denied_exec(binary, identifier, {'machine_resolution_failed', 'runtime_unavailable',
+    event = denied_exec(binary, identifier, {'machine_not_found', 'machine_resolution_failed', 'runtime_unavailable',
                         'source_identity_unavailable', 'local_transport_unavailable',
                         'transport_unavailable', 'environment_unavailable'})
     print(json.dumps({'check': 'machine-revoke', 'status': 'PASS',
