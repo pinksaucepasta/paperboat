@@ -89,8 +89,12 @@ Write-Warning ('the throwaway SSH profile is still loaded; left in place: '+$e.E
 """
 BLOCK = "[void](New-NetFirewallRule -DisplayName $req.name -Direction Outbound -Action Block -RemoteAddress $req.addresses)"
 UNBLOCK = "Remove-NetFirewallRule -DisplayName $req.name -ErrorAction SilentlyContinue"
-PIDS = ("@(Get-CimInstance Win32_Service|Where-Object{$_.Name -like 'Paperboat*' -and $_.State -eq 'Running' -and $_.ProcessId}|"
-        "ForEach-Object{$_.ProcessId})|ConvertTo-Json -Compress")
+PIDS = ("$all=@(Get-CimInstance Win32_Process);"
+        "$ids=@(Get-CimInstance Win32_Service|Where-Object{$_.Name -like 'Paperboat*' -and $_.State -eq 'Running' -and $_.ProcessId}|"
+        "ForEach-Object{[int]$_.ProcessId});$seen=@{};$queue=[Collections.Queue]::new($ids)\n"
+        "while($queue.Count){$x=$queue.Dequeue();if($seen[$x]){continue};$seen[$x]=1;"
+        "foreach($c in $all|Where-Object{$_.ParentProcessId -eq $x}){$queue.Enqueue([int]$c.ProcessId)}}\n"
+        "@($seen.Keys)|ConvertTo-Json -Compress")
 NT = ("Add-Type -Namespace Pb -Name Ps -MemberDefinition '[DllImport(\"ntdll.dll\")] public static extern int NtSuspendProcess(IntPtr h); "
       "[DllImport(\"ntdll.dll\")] public static extern int NtResumeProcess(IntPtr h);';")
 
@@ -155,7 +159,7 @@ class Target:
         return any(s['Status'] == 'Running' for s in self.device.services(self.sshd['service']))
 
     def daemon_pids(self):
-        """The processes of the running Paperboat services: what `docker pause` freezes on a Linux target."""
+        """The running Paperboat services and every process under them (carrier, hostd and sshd children): what `docker pause` freezes on a Linux target."""
         return [str(pid) for pid in json.loads(self.device.ps('Paperboat service processes', PIDS)[1] or '[]')]
 
     def pause(self, pids, seconds=50):
