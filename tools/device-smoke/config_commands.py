@@ -30,6 +30,14 @@ SETTINGS = {'C129', 'C130', 'C131', 'C133', 'C134', 'C136', 'C137', 'C138'}
 REPOSITORIES = {'C169', 'C172', 'C177', 'C179', 'C180', 'C181'}
 
 
+def owner_only(path):
+    """The saved credential profile exists and nobody else can read it: mode 0600, or on Windows no ACL entry besides
+    the user, SYSTEM and Administrators."""
+    if winhost.device():
+        return path.exists() and not winhost.device().other_access(path)
+    return path.is_file() and stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
 def require(condition, message):
     if not condition:
         raise RuntimeError(message)
@@ -39,8 +47,7 @@ class Suite:
     def __init__(self, args):
         self.args = args
         self.pb = winhost.pb_path()
-        # Repository rows need Git and the config worker's service on the device itself (Unix-only fixtures for now).
-        self.selected = args.rows or ([r for r in ROWS if r not in REPOSITORIES] if winhost.device() else ROWS)
+        self.selected = args.rows or ROWS
         self.before = registration()
         self.machine = self.before['machine_id']
         self.rows = {row: {'main': False, 'error': False, 'failures': []} for row in ROWS}
@@ -128,13 +135,17 @@ class Suite:
     def credentials(self, repository, path):
         profile = json.dumps({'transport': 'local', 'auth': 'anonymous'})
         source = path.parent.parent.parent / ('config-commands-' + uuid.uuid4().hex + '.json')
-        with os.fdopen(os.open(source, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as output:
-            output.write(profile)
+        if winhost.device():
+            source.write_text(profile)
+            source.chmod(0o600)  # the ACL pb calls private on Windows
+        else:
+            with os.fdopen(os.open(source, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as output:
+                output.write(profile)
         try:
             for filename, stdin in [(str(source), ''), ('-', profile)]:
                 saved = self.call('repository', 'credentials', 'set', repository, '--file', filename, stdin=stdin)
                 require(saved['repository_id'] == repository and saved['state'] == 'saved', 'wrong saved credential receipt')
-                require(path.is_file() and stat.S_IMODE(path.stat().st_mode) == 0o600, 'credential profile is not owner-only')
+                require(owner_only(path), 'credential profile is not owner-only')
                 require(json.loads(path.read_text()) == json.loads(profile), 'saved profile differs from input')
         finally:
             source.unlink()
@@ -186,13 +197,19 @@ class Suite:
             raise RuntimeError('requires a signed-in pb account with repository cleanup permission') from None
         old_root = sync.ROOT
         sync.ROOT = root
-        bare = name = None
+        bare = name = url = None
+        device = winhost.device()
+        machine_root = winhost.RemotePath(device, device.env('TEMP')) / ('pb-config-commands-' + uuid.uuid4().hex[:12]) if device else root
         try:
             bare = sync.new_bare('local', 'synthetic seed\n')
+            url = str(bare)
+            if winhost.device():  # pb needs no Git on the device: it gets a mirror of this repository (see config_sync_lifecycle)
+                machine_root.mkdir()
+                url = str(sync.on_device(bare, machine_root))
             name = 'config-commands-' + uuid.uuid4().hex[:12]
-            connected = self.call('repository', 'connect', str(bare), '--name', name)
+            connected = self.call('repository', 'connect', url, '--name', name)
             repository = connected['repository']['id']
-            require(connected['repository']['external_ref'] == str(bare)
+            require(connected['repository']['external_ref'] == url
                     and connected['repository']['provider'] == 'git', 'connected repository differs from fixture')
             self.rows['C177']['main'] = True
             listed = self.call('repository', 'list', '--q', name)['repositories']
@@ -202,15 +219,15 @@ class Suite:
                        / ('repository-' + hashlib.sha256(repository.encode()).hexdigest() + '.json'))
             self.credentials(repository, profile)
             applied = True
-            self.approval(repository, bare, root / 'managed.txt')
-            self.populated_conflicts(repository, bare, root / 'managed.txt')
+            self.approval(repository, bare, machine_root / 'managed.txt')
+            self.populated_conflicts(repository, bare, machine_root / 'managed.txt')
         finally:
             failure_command = self.last if sys.exc_info()[0] else None
             clean = True
             if repository is None and name is not None:
                 try:
                     matches = [item for item in self.call('repository', 'list', '--q', name)['repositories']
-                               if item['display_name'] == name and item['external_ref'] == str(bare)]
+                               if item['display_name'] == name and item['external_ref'] == url]
                     require(len(matches) <= 1, 'ambiguous exact fixture repository')
                     repository = matches[0]['id'] if matches else None
                 except Exception as error:
@@ -233,6 +250,8 @@ class Suite:
                     self.cleanup_errors.append('repository cleanup: ' + str(error))
             if clean:
                 sync.MACHINE_FILE.unlink(missing_ok=True)
+                if device:
+                    machine_root.unlink()
             sync.ROOT = old_root
             if failure_command is not None:
                 self.last = failure_command

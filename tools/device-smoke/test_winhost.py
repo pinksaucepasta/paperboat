@@ -1295,6 +1295,27 @@ class FreePlanUnixPath(unittest.TestCase):
         self.assertEqual('PASS', self.run_main(exec_codes=(1, 1, 0))['status'])
 
 
+class ConfigCommandsRepositoryRows(unittest.TestCase):
+    def test_every_row_is_selected_on_the_device_and_credentials_are_owner_only_by_acl(self):
+        import config_commands
+        device = SimpleNamespace(other_access=lambda path: ['S-1-1-0'] if str(path).endswith('open.json') else [])
+        class P:
+            def __init__(self, name):
+                self.name = name
+            def exists(self):
+                return True
+            def __str__(self):
+                return self.name
+        with patch('winhost.device', return_value=device):
+            self.assertTrue(config_commands.owner_only(P('private.json')))
+            self.assertFalse(config_commands.owner_only(P('open.json')))
+        with patch('winhost.device', return_value=None), patch('config_commands.registration', return_value={'machine_id': 'm'}):
+            self.assertEqual(config_commands.ROWS, config_commands.Suite(SimpleNamespace(rows=None)).selected)
+        with patch('winhost.device', return_value=device), patch('config_commands.registration', return_value={'machine_id': 'm'}), \
+                patch('winhost.pb_path', return_value='pb.exe'):
+            self.assertIn('C169', config_commands.Suite(SimpleNamespace(rows=None)).selected)
+
+
 if __name__ == '__main__':
     unittest.main()
 

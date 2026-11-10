@@ -10,8 +10,8 @@ results/windows-<UTC>.json. Checks that need a fixture the run was not given are
 
 Not ported (they need Git, systemd/launchd, sudo or a signal on the device, or a gate an external driver releases):
 install_lifecycle, pairing_lifecycle's uninstall flows, ssh-other-user (the managed sshd reads one key file, no passwords),
-config_sync and config_commands' repository rows, and the gated
-preview_lifecycle/session replay and cross checks. config-sync-lifecycle keeps Git on this
+config_sync, and the gated
+preview_lifecycle/session replay and cross checks. config-sync-lifecycle and config-commands' repository rows keep Git on this
 controller (pb itself needs none): it needs git, python3 and, for its SSH repository row, an sshd on this
 controller's 127.0.0.1:22, TCP forwarding (ssh -R) on the device and an elevated SSH session there (it stops and
 starts the config worker's service). preview-protocols and tunnel-protocols are probed from this
