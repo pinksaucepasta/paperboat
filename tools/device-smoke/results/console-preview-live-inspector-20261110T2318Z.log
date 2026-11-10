@@ -1,4 +1,4 @@
-# console/scripts/check-preview-console.mjs dadape:18977 winpool-w11-7b:18977 on the live console, 2026-11-10 23:48Z
+# console/scripts/check-preview-console.mjs dadape:18977 winpool-w11-7b:18977 on the live console, 2026-11-10 23:18Z
 # console build: live tree (before c038e88ef); machines dadape dev-8cef4cb5 (linux), winpool-w11-7b dev-57c0d5614 (windows); origin python http.server on 127.0.0.1:18977
 PASS  dadape: New preview dialog opens
 PASS  dadape: the preview's machine is the chosen one  (dadape)
