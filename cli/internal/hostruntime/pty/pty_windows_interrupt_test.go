@@ -109,5 +109,8 @@ func TestNoJobMeansNoDescendantsToTerminate(t *testing.T) {
 		t.Fatalf("jobProcessIDs(0)=%v, want none", ids)
 	}
 	p, _ := pipeProcess(t)
-	p.terminateForegroundDescendants() // must neither panic nor touch any process
+	if tree := p.foregroundTree(); len(tree) != 0 {
+		t.Fatalf("foregroundTree without a job = %v", tree)
+	}
+	p.terminateIfStillRunning(nil) // must neither panic nor touch any process
 }

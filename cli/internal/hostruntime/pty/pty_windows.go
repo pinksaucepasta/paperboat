@@ -262,6 +262,7 @@ func (p *Process) Interrupt(key byte, accepted func()) (bool, error) {
 		accepted()
 	}
 	p.interrupts.Add(1)
+	foreground := p.foregroundTree() // taken before the key, so a program the shell starts after it is never in the set
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	stop, stopped := make(chan struct{}), make(chan struct{})
@@ -284,11 +285,12 @@ func (p *Process) Interrupt(key byte, accepted func()) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer p.writeMu.Unlock()
-	if _, err = writeInput(p.input, []byte{key}, inputTimeout(context.Background())); err != nil {
+	_, err = writeInput(p.input, []byte{key}, inputTimeout(context.Background()))
+	p.writeMu.Unlock() // the grace wait below must not hold up other writers
+	if err != nil {
 		return true, err
 	}
-	p.terminateForegroundDescendants() // like Signal(Interrupt): the ETX alone does not stop every foreground program
+	p.terminateIfStillRunning(foreground) // like Signal(Interrupt): the ETX alone does not stop every foreground program
 	return true, nil
 }
 
@@ -323,10 +325,11 @@ func (p *Process) Signal(signal Signal) error {
 		// event an interactive console receives. Do not terminate the shell:
 		// the foreground command must be interrupted while the session remains
 		// usable for subsequent commands.
+		foreground := p.foregroundTree()
 		if _, err := p.WriteContext(context.Background(), []byte{0x03}); err != nil { // under writeMu: never races a write in progress
 			return err
 		}
-		p.terminateForegroundDescendants()
+		p.terminateIfStillRunning(foreground)
 		return nil
 	}
 	code := uint32(1)
@@ -342,26 +345,126 @@ func (p *Process) Signal(signal Signal) error {
 	return nil
 }
 
-// terminateForegroundDescendants is the fallback after an ETX: a pipe ETX does not signal every console program (measured on
-// Windows 11: cmd.exe running ping -t ignores it, with or without queued input), so after a short opportunity for native
-// handling it terminates the foreground descendants. The shell remains alive and all processes stay bounded by the same Job Object.
-func (p *Process) terminateForegroundDescendants() {
+// processKey names one process instance: a pid alone could be reused after the process ends.
+type processKey struct {
+	pid     uint32
+	created int64
+}
+
+// foregroundTree is the program the shell is running for the user: the newest direct child of the shell in the job and everything under
+// it. While a foreground command runs the shell is waiting for it and starts nothing else, so the newest child is that command; older
+// children are background work (start /b, a build the shell launched earlier) and are left alone, like the unix twin which signals only the
+// foreground process group. Nothing is returned when the shell has no child.
+func (p *Process) foregroundTree() []processKey {
 	if p.job == 0 {
-		return
+		return nil
 	}
-	//paperboat:allow-source-policy sleep owner=windows-conpty reason=bounded-native-ctrl-c-grace-before-descendant-fallback
-	time.Sleep(100 * time.Millisecond)
+	members := map[uint32]bool{}
 	for _, pid := range jobProcessIDs(p.job) {
-		if pid == p.processID {
+		members[pid] = true
+	}
+	parents := processParents()
+	var newest processKey
+	for pid := range members {
+		if parents[pid] != p.processID || pid == p.processID {
 			continue
 		}
-		handle, err := windows.OpenProcess(windows.PROCESS_TERMINATE, false, pid)
+		if key, ok := processInstance(pid); ok && key.created > newest.created {
+			newest = key
+		}
+	}
+	if newest.pid == 0 {
+		return nil
+	}
+	tree := []processKey{newest}
+	in := map[uint32]bool{newest.pid: true}
+	for grew := true; grew; {
+		grew = false
+		for pid := range members {
+			if !in[pid] && in[parents[pid]] {
+				if key, ok := processInstance(pid); ok {
+					tree, in[pid], grew = append(tree, key), true, true
+				}
+			}
+		}
+	}
+	return tree
+}
+
+// terminateIfStillRunning is the fallback after an ETX: a pipe ETX does not signal every console program (measured on Windows 11:
+// cmd.exe running ping -t ignores it, with or without queued input). It waits up to 100 ms for native handling, returning at once when the
+// foreground tree has ended, then terminates what of it is still the same running process. The shell survives and the job bounds everything.
+func (p *Process) terminateIfStillRunning(tree []processKey) {
+	if len(tree) == 0 {
+		return
+	}
+	for waited := 0; waited < 10; waited++ {
+		if !anyRunning(tree) {
+			return
+		}
+		//paperboat:allow-source-policy sleep owner=windows-conpty reason=bounded-native-ctrl-c-grace-before-descendant-fallback
+		time.Sleep(10 * time.Millisecond)
+	}
+	for _, key := range tree {
+		handle, err := windows.OpenProcess(windows.PROCESS_TERMINATE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, key.pid)
 		if err != nil {
 			continue
 		}
-		_ = windows.TerminateProcess(handle, 130)
+		if current, ok := processTimes(handle); ok && current == key.created {
+			_ = windows.TerminateProcess(handle, 130)
+		}
 		windows.CloseHandle(handle)
 	}
+}
+
+func anyRunning(tree []processKey) bool {
+	for _, key := range tree {
+		handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, key.pid)
+		if err != nil {
+			continue
+		}
+		var code uint32
+		running := windows.GetExitCodeProcess(handle, &code) == nil && code == 259 // STILL_ACTIVE
+		current, ok := processTimes(handle)
+		windows.CloseHandle(handle)
+		if running && ok && current == key.created {
+			return true
+		}
+	}
+	return false
+}
+
+func processInstance(pid uint32) (processKey, bool) {
+	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return processKey{}, false
+	}
+	defer windows.CloseHandle(handle)
+	created, ok := processTimes(handle)
+	return processKey{pid: pid, created: created}, ok
+}
+
+func processTimes(handle windows.Handle) (int64, bool) {
+	var created, exited, kernel, user windows.Filetime
+	if err := windows.GetProcessTimes(handle, &created, &exited, &kernel, &user); err != nil {
+		return 0, false
+	}
+	return created.Nanoseconds(), true
+}
+
+// processParents maps every process id to its parent's id.
+func processParents() map[uint32]uint32 {
+	snapshot, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return nil
+	}
+	defer windows.CloseHandle(snapshot)
+	parents := map[uint32]uint32{}
+	entry := windows.ProcessEntry32{Size: uint32(unsafe.Sizeof(windows.ProcessEntry32{}))}
+	for err := windows.Process32First(snapshot, &entry); err == nil; err = windows.Process32Next(snapshot, &entry) {
+		parents[entry.ProcessID] = entry.ParentProcessID
+	}
+	return parents
 }
 
 func jobProcessIDs(job windows.Handle) []uint32 {

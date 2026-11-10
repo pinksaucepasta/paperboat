@@ -212,6 +212,40 @@ func TestNativeConPTYInterruptStopsAForegroundProgramThatIgnoresETX(t *testing.T
 	}
 }
 
+// Ctrl-C ends the foreground program only: a program the shell started earlier in the background keeps running, like the unix twin that
+// signals the foreground process group. (cmd: `start /b` background ping, then a foreground ping that ignores the pipe ETX.)
+func TestNativeConPTYInterruptLeavesBackgroundWorkAlone(t *testing.T) {
+	commandShell := os.Getenv("ComSpec")
+	if commandShell == "" {
+		commandShell = filepath.Join(os.Getenv("WINDIR"), "System32", "cmd.exe")
+	}
+	process, output := startNativePTY(t, commandShell, []string{"/d", "/q"})
+	defer process.CloseIO()
+	if _, err := process.Write([]byte("start /b ping -n 300 127.0.0.2 >nul\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Second)
+	if _, err := process.Write([]byte("ping -t 127.0.0.1\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	output.waitFor(t, "Reply from")
+	if handled, err := process.Interrupt(0x03, nil); err != nil || !handled {
+		t.Fatalf("Interrupt handled=%v err=%v", handled, err)
+	}
+	// the shell answers again (the foreground ping is gone) and the background ping is still there
+	if _, err := process.Write([]byte("echo paperboat-after-%ERRORLEVEL%-x\r\ntasklist /fi \"imagename eq PING.EXE\" /nh | find /c \"PING.EXE\"\r\n")); err != nil {
+		t.Fatalf("shell did not survive: %v", err)
+	}
+	output.waitForWithin(t, "paperboat-after-", 10*time.Second)
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(output.String(), "\r\n1\r\n") {
+		if time.Now().After(deadline) {
+			t.Fatalf("expected exactly one PING.EXE left (the background one); output tail=%q", output.String()[max(0, len(output.String())-300):])
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 func TestNativeConPTYResizeAndUTF8VT(t *testing.T) {
 	process, output := startNativePTY(t, nativePowerShell(t), []string{"-NoLogo", "-NoProfile"})
 	if err := process.Resize(Dimensions{Columns: 101, Rows: 37}); err != nil {
