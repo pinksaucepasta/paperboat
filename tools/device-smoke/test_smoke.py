@@ -1172,8 +1172,8 @@ class UpdateSurvivalMarkers(unittest.TestCase):
     def test_typed_shell_markers_are_split_so_the_echo_cannot_match(self):
         import re
         source = pathlib.Path(__file__).with_name('update_survival.py').read_text()
-        typed = re.findall(r"held\.send\(\"printf '[^\"]*", source)
-        self.assertEqual(len(typed), 2)
+        typed = re.findall(r"held\.send\(\"printf '[^\"]*", source)  # the Windows line is windows_target.typed_marker
+        self.assertEqual(len(typed), 1)
         for line in typed:
             self.assertNotRegex(line, r"PB_[A-Z]+_%s")
 

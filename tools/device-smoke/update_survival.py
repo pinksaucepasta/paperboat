@@ -128,8 +128,7 @@ def main():
             if args.terminal:
                 # the official build being updated from may predate --status-bar
                 quiet = ['--status-bar', 'off'] if '--status-bar' in command_result(PB, 'connect', '--help', timeout=60).stdout else []
-                held = Terminal(winhost.terminal_argv(PB, ['connect', args.target, '--name', session_name, *quiet]),
-                                env=winhost.terminal_env(PB))
+                held = Terminal(winhost.terminal_argv(PB, ['connect', args.target, '--name', session_name, *quiet]), env=winhost.terminal_env(PB))
                 if not windows:
                     held.expect(b'\x1b[?2004h')
                     held.expect(held.marker('READY', 'stty -echo; '))
