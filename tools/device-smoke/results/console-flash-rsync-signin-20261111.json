@@ -1,0 +1,17 @@
+{
+  "check": "windows_console_flash, remaining cases",
+  "rsync": {
+    "host": "winpool-10 (hosted runner, runneradmin console session Active), rsync from MSYS2 (pacman rsync + cygpath in C:\\msys64\\usr\\bin on PATH)",
+    "detached (no console, FLASH_INHERIT unset)": {"result": "windows opened", "windows": ["OpenConsole PseudoConsoleWindow", "WindowsTerminal Terminal"],
+      "meaning": "expected for any console program started with no console: pb rsync is a user-typed command, not background work; a detached start is not a supported path"},
+    "from the user's console (FLASH_INHERIT=1)": {"result": "PASS", "detail": "pb -> cygpath, rsync.exe, ssh.exe spawned; no new console window for 30 s; control still opened one"},
+    "transfer": "did not complete: ssh to the target machine returned 'Permission denied' (rsync exit 12). Not a console-window matter; the transfer itself is not covered by this result"
+  },
+  "sign_in_after_uninstall": {
+    "host": "winpool-3 (hosted runner, autologon configured: AutoAdminLogon=1, runneradmin)",
+    "result": "NOT TESTABLE on a runner",
+    "detail": "the exact RunOnce entry (conhost --headless cmd /d /c rd /s /q <helper dir>) was planted and `logoff 2` run at 21:59Z; the runner's ssh tunnel lives in that session and died with it; nothing restarted it, ssh stayed down for 4.5 minutes, so the sign-in could not be observed",
+    "needed": "victus (its sshd is independent of the desktop session): sign out and back in over RDP with the entry planted, then confirm no window and the helper directory removed"
+  },
+  "cleanup": "winpool-10: pb uninstalled, my machine w12flash-2 revoked by exact id, files removed"
+}

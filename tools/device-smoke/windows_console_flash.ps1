@@ -1,7 +1,7 @@
 # Runs in the signed-in desktop session (windows_console_flash.py starts it through an interactive scheduled task).
-# Starts -Exe DETACHED (no console, like a service, the updater or a RunOnce entry) and watches the desktop for
+# Starts -Exe DETACHED (-Inherit: with this script's console, like a command the user types in their terminal) (no console, like a service, the updater or a RunOnce entry) and watches the desktop for
 # new visible console windows until -Seconds after it exits. Writes JSON to -Out. Exit 1 on a flash.
-param([string]$Exe, [string]$ArgumentLine = '', [int]$Seconds = 30, [int]$Timeout = 0, [string]$Log = '', [string]$Out, [switch]$Control)
+param([string]$Exe, [string]$ArgumentLine = '', [int]$Seconds = 30, [int]$Timeout = 0, [string]$Log = '', [string]$PathPrepend = '', [switch]$Inherit, [string]$Out, [switch]$Control)
 Add-Type -TypeDefinition @'
 using System; using System.Collections.Generic; using System.Runtime.InteropServices; using System.Text;
 public static class Win {
@@ -26,12 +26,12 @@ public static class Win {
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr CreateFileW(string f, uint access, uint share, ref SA sa, uint disp, uint attr, IntPtr t);
   [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
   // log: the child's stdout and stderr go to this file (inherited handles; still no console); empty: none.
-  public static int RunDetached(string cmd, uint timeoutMs, string log, out uint pid) {
+  public static int RunDetached(string cmd, uint timeoutMs, string log, bool inherit_console, out uint pid) {
     var si = new SI(); si.cb = System.Runtime.InteropServices.Marshal.SizeOf(si); PI pi; IntPtr file = IntPtr.Zero; bool inherit = false;
     if (!string.IsNullOrEmpty(log)) { var sa = new SA(); sa.n = System.Runtime.InteropServices.Marshal.SizeOf(sa); sa.inh = true;
       file = CreateFileW(log, 0x40000000, 3, ref sa, 2, 0x80, IntPtr.Zero); if (file == new IntPtr(-1)) throw new System.ComponentModel.Win32Exception();
       si.flags = 0x100; si.o = file; si.e = file; inherit = true; }
-    bool ok = CreateProcessW(null, new StringBuilder(cmd), IntPtr.Zero, IntPtr.Zero, inherit, 0x00000008, IntPtr.Zero, null, ref si, out pi);
+    bool ok = CreateProcessW(null, new StringBuilder(cmd), IntPtr.Zero, IntPtr.Zero, inherit, inherit_console ? 0u : 0x00000008u, IntPtr.Zero, null, ref si, out pi);
     if (file != IntPtr.Zero) CloseHandle(file);
     if (!ok) throw new System.ComponentModel.Win32Exception();
     pid = pi.pid; if (WaitForSingleObject(pi.hp, timeoutMs) != 0) return -1; uint code; GetExitCodeProcess(pi.hp, out code); return (int)code; }
@@ -50,9 +50,10 @@ function Sample($base) {
 }
 $base = @{}; foreach ($w in [Win]::Visible()) { $base[($w -split '\|')[0]] = 1 }
 Write-Output "baseline windows: $($base.Count)"
+if ($PathPrepend) { $env:PATH = $PathPrepend + ';' + $env:PATH }  # the child inherits it
 $cmd = '"' + $Exe + '" ' + $ArgumentLine
 $pidOut = [uint32]0; $code = $null; $job = $null
-$job = [powerShell]::Create().AddScript({ param($c, $ms, $l) $p = [uint32]0; [Win]::RunDetached($c, $ms, $l, [ref]$p) }).AddArgument($cmd).AddArgument([uint32](($(if ($Timeout) { $Timeout } else { $Seconds })) * 1000)).AddArgument($Log)
+$job = [powerShell]::Create().AddScript({ param($c, $ms, $l, $i) $p = [uint32]0; [Win]::RunDetached($c, $ms, $l, $i, [ref]$p) }).AddArgument($cmd).AddArgument([uint32](($(if ($Timeout) { $Timeout } else { $Seconds })) * 1000)).AddArgument($Log).AddArgument([bool]$Inherit)
 $handle = $job.BeginInvoke()
 Write-Output "started: $cmd"
 $end = $null

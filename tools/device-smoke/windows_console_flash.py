@@ -24,7 +24,7 @@ def run_in_session(device, name, exe, argument_line, seconds, control=False, ele
     script, out, done = work + '\\detect.ps1', work + '\\out.json', work + '\\done.txt'
     device.write_bytes(script, open(__file__.replace('.py', '.ps1'), 'rb').read())
     arguments = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, '-Exe', exe, '-ArgumentLine', argument_line,
-                 '-Seconds', str(seconds), '-Timeout', str(timeout), '-Log', work + '\\child.txt', '-Out', out]
+                 '-Seconds', str(seconds), '-Timeout', str(timeout), '-Log', work + '\\child.txt', '-PathPrepend', os.environ.get('FLASH_PATH', '')] + (['-Inherit'] if os.environ.get('FLASH_INHERIT') and not control else []) + [ '-Out', out]
     if control:
         arguments.append('-Control')
     line = 'powershell.exe ' + ' '.join('"%s"' % a.replace('"', '\\"') for a in arguments)
