@@ -666,6 +666,12 @@ def daemon_restart_typing(a, sessions):
         c1.close()
 
 
+def host_yes(target):
+    """How many `yes` processes run on the target (a Windows client's view of whether the flood producer is gone)."""
+    result = winhost.run_pb(PB, ['exec', target, '--', 'sh', '-c', 'pgrep -x -c yes || true'], 60)
+    return int(result.stdout.decode(errors='replace').strip().splitlines()[-1] or 0)
+
+
 def fast_output(a, sessions):
     """W9: 50 MB of output with a stalled second window; the first stays live, Ctrl-C works."""
     name = fresh_name(); sessions.append(name)
@@ -685,18 +691,25 @@ def fast_output(a, sessions):
         # The hardest real case at once: the foreground job floods output (yes) and never reads the
         # 256 KiB paste, which fills the tty queue, and the second viewer (c2) is stalled. The host
         # delivers Ctrl-C ahead of the stuck paste and discards what is left of it (F3-11).
+        host_side = bool(DEVICE) and not win()  # a Windows client's ssh -tt + ConPTY hop buffers seconds of flood: see host_yes
+        yes_before = host_yes(a.target) if host_side else 0
         c1.send((windows_target.flood_line() if win() else 'yes') + '\r')
         time.sleep(3)
         c1.send(('x' * 1023 + '\n') * 256)
         c1.send('\x03')
+        t0 = time.monotonic()
+        if host_side:  # the producer must stop promptly; what the hop already buffered may take longer to reach the screen
+            while time.monotonic() - t0 < 5 and host_yes(a.target) > yes_before:
+                time.sleep(0.5)
+            row('N6 Ctrl-C stops yes promptly', host_yes(a.target) <= yes_before, f'yes on the target gone {time.monotonic() - t0:.1f} s after Ctrl-C')
         # The tty discards input typed before the interrupt lands, so wait for yes to stop
         # (output goes quiet) before typing the next command.
-        t0 = time.monotonic()
-        stopped = c1.quiet_after(1.0, 30)
+        stopped = c1.quiet_after(1.0, 60 if host_side else 30)
+        label = 'N6 the output stops after Ctrl-C' if host_side else 'N6 Ctrl-C stops yes promptly'
         if stopped is None:
-            row('N6 Ctrl-C stops yes promptly', False, 'output still flowing 30 s after Ctrl-C')
-        else:
-            row('N6 Ctrl-C stops yes promptly', stopped < 5, f'output stopped {stopped:.1f} s after Ctrl-C')
+            row(label, False, 'output still flowing after Ctrl-C')
+        else:  # the 5 s bound is the unix client's; a Windows client's screen only has to go quiet (the producer's stop is the row above)
+            row(label, host_side or stopped < 5, f'output stopped {stopped:.1f} s after Ctrl-C')
         try:
             c1.run_discarding(noop(), 15)
             row('N6 the shell answers after Ctrl-C', True)
