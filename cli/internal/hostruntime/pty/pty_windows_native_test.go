@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -333,6 +334,54 @@ func TestNativeConPTYInterruptWithAPowerShellShellTerminatesNothing(t *testing.T
 		t.Fatalf("shell did not survive: %v", err)
 	}
 	output.waitForWithin(t, "paperboat-ps-count-1", 10*time.Second)
+}
+
+// PowerShell jobs run in a worker child the shell holds a handle to while idle (the reason a handle rule is only used for cmd.exe): a Ctrl-C at
+// the prompt must leave a Start-Job (powershell.exe 5.1) and a background `&` job (pwsh 7, skipped when not installed) running.
+func TestNativeConPTYInterruptLeavesPowerShellJobsAlone(t *testing.T) {
+	cases := []struct {
+		name, shell, start string
+	}{
+		{"Start-Job in powershell.exe", "", "Start-Job { ping -n 300 127.0.0.2 } | Out-Null"},
+		{"background operator in pwsh", "pwsh", "ping -n 300 127.0.0.2 > $null &"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			shell := test.shell
+			if shell == "" {
+				shell = nativePowerShell(t)
+			} else if found, err := exec.LookPath(shell); err != nil {
+				t.Skipf("%s is not installed", shell)
+			} else {
+				shell = found
+			}
+			process, output := startNativePTY(t, shell, []string{"-NoLogo", "-NoProfile"})
+			defer process.CloseIO()
+			if _, err := process.Write([]byte(test.start + "; 'paperboat-job-started'\r\n")); err != nil {
+				t.Fatal(err)
+			}
+			output.waitFor(t, "paperboat-job-started")
+			// the job's worker is up and its ping runs: a cold first Start-Job takes up to 15 s, so ask until the ping is there
+			for ready, deadline := false, time.Now().Add(40*time.Second); !ready; {
+				if time.Now().After(deadline) {
+					t.Fatalf("the job's ping never started; output tail=%q", output.String()[max(0, len(output.String())-200):])
+				}
+				if _, err := process.Write([]byte("'paperboat-job-up-' + @(Get-Process ping -ErrorAction SilentlyContinue).Count\r\n")); err != nil {
+					t.Fatal(err)
+				}
+				time.Sleep(2 * time.Second)
+				ready = strings.Contains(output.String(), "paperboat-job-up-1")
+			}
+			if handled, err := process.Interrupt(0x03, nil); err != nil || !handled {
+				t.Fatalf("Interrupt handled=%v err=%v", handled, err)
+			}
+			time.Sleep(time.Second)
+			if _, err := process.Write([]byte("'paperboat-job-count-' + @(Get-Process ping -ErrorAction SilentlyContinue).Count\r\n")); err != nil {
+				t.Fatalf("shell did not survive: %v", err)
+			}
+			output.waitForWithin(t, "paperboat-job-count-1", 10*time.Second)
+		})
+	}
 }
 
 func TestNativeConPTYResizeAndUTF8VT(t *testing.T) {
