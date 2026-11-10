@@ -26,11 +26,7 @@ func secureDirectory(path string) error {
 	if err != nil || user == nil || user.User.Sid == nil || !user.User.Sid.IsValid() {
 		return ErrArtifactTarget
 	}
-	sddl := "D:P(A;OICI;FA;;;SY)"
-	if user.User.Sid.String() != "S-1-5-18" {
-		sddl += "(A;OICI;FA;;;" + user.User.Sid.String() + ")"
-	}
-	want, err := windows.SecurityDescriptorFromString(sddl)
+	want, err := windows.SecurityDescriptorFromString(artifactDirectorySDDL(user.User.Sid.String()))
 	if err != nil {
 		return err
 	}
@@ -55,6 +51,16 @@ func secureDirectory(path string) error {
 		return ErrArtifactTarget
 	}
 	return nil
+}
+
+// artifactDirectorySDDL is the access to a signed-metadata state directory secured by user. LocalSystem's is the
+// updater's machine state, which the elevated installer reads too (it asks whether the installed official version
+// may still be used): Administrators keep access, as on the rest of that state. An account's own is its alone.
+func artifactDirectorySDDL(user string) string {
+	if user == "S-1-5-18" {
+		return "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
+	}
+	return "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;" + user + ")"
 }
 
 func secureArtifactFile(path string) error {
