@@ -24,7 +24,8 @@ def main():
         command = windows_target.ssh_command(windows_target.long_script(args.seconds, marker))
     result = winhost.run_pb(binary, ['ssh', args.target, '--', command], args.seconds + 300)
     if result.returncode != 0 or not result.stdout.decode(errors='replace').rstrip().endswith(marker):
-        raise RuntimeError(f'the long SSH session ended with exit {result.returncode} before its final marker')
+        raise RuntimeError(f'the long SSH session ended with exit {result.returncode} before its final marker: '
+                           + result.stderr.decode(errors='replace')[-300:])
     if registration() != before:
         raise RuntimeError('SSH changed the enrolled identity')
     print(json.dumps({'check': 'ssh-long', 'target': args.target, 'status': 'PASS', 'seconds': args.seconds,
