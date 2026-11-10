@@ -6,15 +6,15 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 )
 
-func TestKeptWindowsSSHPortKeepsTheRegisteredPortOfTheSameUser(t *testing.T) {
-	registered := identity.Registration{SSHUser: "alice", SSHPort: 58965}
-	if got := keptWindowsSSHPort(registered, "alice", 38222); got != 58965 {
-		t.Fatalf("the registered port was replaced by the default: %d", got)
+func TestKeptWindowsSSHTargetKeepsTheRegisteredUserAndPort(t *testing.T) {
+	registered := identity.Registration{SSHUser: "runneradmin", SSHPort: 58965}
+	if user, port := keptWindowsSSHTarget(registered, `HOST\runneradmin`, 38222); user != "runneradmin" || port != 58965 {
+		t.Fatalf("the registered target was replaced: %q %d", user, port)
 	}
-	if got := keptWindowsSSHPort(registered, "bob", 38222); got != 38222 {
-		t.Fatalf("another user's port was kept: %d", got)
+	if user, port := keptWindowsSSHTarget(identity.Registration{SSHUser: "alice"}, "bob", 38222); user != "bob" || port != 38222 {
+		t.Fatalf("a registration without a port replaced the defaults: %q %d", user, port)
 	}
-	if got := keptWindowsSSHPort(identity.Registration{SSHUser: "alice"}, "alice", 38222); got != 38222 {
-		t.Fatalf("a registration without a port replaced the default: %d", got)
+	if user, port := keptWindowsSSHTarget(identity.Registration{SSHPort: 58965}, "bob", 38222); user != "bob" || port != 38222 {
+		t.Fatalf("a registration without a user replaced the defaults: %q %d", user, port)
 	}
 }

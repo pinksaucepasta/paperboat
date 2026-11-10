@@ -19,7 +19,7 @@ def main():
         raise RuntimeError('sudo credential required on stdin')
     root = p.runtime_root()
     before = json.loads((root / 'machine-registration.json').read_text())
-    machines = p.invoke(binary, '--workspace', 'personal', 'machine', 'list', '--json')['machines']
+    machines = p.invoke(binary, '--workspace', 'personal', 'machine', 'list', '--all', '--json')['machines']
     original = next((x for x in machines if x['id'] == before['machine_id']))
     directory, staged, command, tokenfile = p.published_fixture(binary, original['alias'])
     inbox = winhost.device_path(before['inbox_path'])
@@ -42,7 +42,7 @@ def main():
         assert args.expect_release in version, 'published version mismatch'
         after = json.loads((root / 'machine-registration.json').read_text())
         assert after['account_id'] == before['account_id'], 'account changed'
-        current = p.invoke(binary, '--workspace', 'personal', 'machine', 'list', '--json')['machines']
+        current = p.invoke(binary, '--workspace', 'personal', 'machine', 'list', '--all', '--json')['machines']
         assert next((x for x in current if x['id'] == after['machine_id']))['alias'] == original['alias'], 'alias changed'
         assert not any((x['id'] == before['machine_id'] for x in current)), 'disposed record remains'
         deadline = time.monotonic() + 120  # the new runtime needs a moment after install

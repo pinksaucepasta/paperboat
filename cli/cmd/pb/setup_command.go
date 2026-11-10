@@ -214,6 +214,7 @@ func setupCommand() *cobra.Command {
 			if err != nil || strings.TrimSpace(account.Username) == "" {
 				return commandPreparationFailure{step: prepareMachineUser, cause: err}
 			}
+			sshUser := account.Username
 			ctx := actionContext(command, nil)
 			client, err := setupBackendClient(ctx)
 			if err != nil {
@@ -304,7 +305,7 @@ func setupCommand() *cobra.Command {
 				registration.AccountID = previousRegistration.AccountID
 				registration.SSHUser, registration.SSHPort = previousRegistration.SSHUser, previousRegistration.SSHPort
 				if runtime.GOOS == "windows" {
-					sshPortValue = keptWindowsSSHPort(previousRegistration, account.Username, sshPortValue)
+					sshUser, sshPortValue = keptWindowsSSHTarget(previousRegistration, sshUser, sshPortValue)
 				}
 			}
 
@@ -334,10 +335,10 @@ func setupCommand() *cobra.Command {
 			if err := verifySetupInstallSource(); err != nil {
 				return setupFailure(fmt.Errorf("verify supplied installation executable: %w", err))
 			}
-			if _, err := client.RegisterManagedSSHTarget(command.Context(), machine.ID, uint64(machine.InstallationGeneration), account.Username, uint16(sshPortValue), newIdempotencyKey()); err != nil {
+			if _, err := client.RegisterManagedSSHTarget(command.Context(), machine.ID, uint64(machine.InstallationGeneration), sshUser, uint16(sshPortValue), newIdempotencyKey()); err != nil {
 				return setupFailure(fmt.Errorf("register SSH target: %w", err))
 			}
-			registration.SSHUser, registration.SSHPort = account.Username, uint16(sshPortValue)
+			registration.SSHUser, registration.SSHPort = sshUser, uint16(sshPortValue)
 			if err := identityStore.SaveRegistration(registration); err != nil {
 				return setupFailure(fmt.Errorf("save registered SSH target: %w", err))
 			}
@@ -352,7 +353,7 @@ func setupCommand() *cobra.Command {
 			prepared, err := client.PrepareAuthenticatedMachineInstallation(command.Context(), machine.ID, resume.SetupOperationID, api.AuthenticatedMachineInstallationInput{
 				Verifier: resume.Verifier, PublicIdentityKey: publicIdentityKey,
 				InstallationGeneration: machine.InstallationGeneration,
-				SSHUser:                account.Username, SSHPort: uint16(sshPortValue),
+				SSHUser:                sshUser, SSHPort: uint16(sshPortValue),
 				CanReuseRuntimeIdentity: reusableIdentityErr == nil && reusableIdentity.MachineID == machine.ID && reusableIdentity.EnvironmentID == machine.ID,
 			})
 			if err != nil {
@@ -487,12 +488,12 @@ func exportSetupRecoveryKey(command *cobra.Command) error {
 	return nil
 }
 
-// keptWindowsSSHPort is the SSH port a re-run of setup registers on Windows. The managed port is not the user's choice
-// there, and pair already registered one for this user and generation: sending another one is refused by the server
-// as a conflicting target (HTTP 409 at RegisterManagedSSHTarget), so the registered port stays.
-func keptWindowsSSHPort(previous identity.Registration, user string, port uint) uint {
-	if previous.SSHPort != 0 && previous.SSHUser == user {
-		return uint(previous.SSHPort)
+// keptWindowsSSHTarget is the SSH user and port a re-run of setup registers on Windows. The managed port is not the
+// user's choice there and pair already registered a target (a bare user name, not user.Current()'s HOST\\user): the server
+// refuses a different user or port for a registered generation (HTTP 409 at RegisterManagedSSHTarget), so it stays.
+func keptWindowsSSHTarget(previous identity.Registration, user string, port uint) (string, uint) {
+	if previous.SSHPort != 0 && previous.SSHUser != "" {
+		return previous.SSHUser, uint(previous.SSHPort)
 	}
-	return port
+	return user, port
 }

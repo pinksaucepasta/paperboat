@@ -65,7 +65,7 @@ def main():
     root = runtime_root()
     registration = root / 'machine-registration.json'
     before = json.loads(registration.read_text())
-    catalog = invoke(binary, 'machine', 'list', '--json')
+    catalog = invoke(binary, 'machine', 'list', '--all', '--json')
     machine = next(item for item in catalog['machines'] if item['id'] == before['machine_id'])
     arguments = ['setup', '--name', machine['alias'], '--json']
     proxy = None
