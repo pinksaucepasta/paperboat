@@ -1,0 +1,18 @@
+# F19-07 linux evidence
+# Automated checks: team_business.machine_access; Windows admin metadata from team_business.search/export.
+# Pagination fix: 5fbb51155. Source assertions are copied verbatim from actual check output.
+# Access source sha256: 0634acceea4d58da8eed71d751663ba98bd301234c71ce56058259d0e855c096
+# Build (fresh, via pb version on DUT): dev-780664b94 commit 780664b94d4a02129d50cd2e89fe3635f3406c6e (original 37 PASS used dev-ada20d26c per spark/w7-f19-linux.md)
+# utc_start: 2026-11-10T13:19:04Z
+# recount: count=55 total=55 has_own=True has_peer=True
+# utc_end: 2026-11-10T13:19:49Z
+
+PASS find this machine and the peer
+PASS exec on the peer works
+PASS create a reader token and a token that may only exec on the peer
+PASS the peer signs in with the scoped token
+PASS the peer is refused exec here (outside the token scope)
+PASS the access start is in the personal log (machine target, capability, actor)
+PASS the refusal is in the personal log with reason and token
+
+RESULT PASS

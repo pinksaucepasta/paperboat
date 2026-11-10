@@ -1,0 +1,28 @@
+# F19-07 windows evidence
+# Automated checks: team_business.machine_access; Windows admin metadata from team_business.search/export.
+# Pagination fix: 5fbb51155. Source assertions are copied verbatim from actual check output.
+# Access source sha256: 5f88b4456e30ba12f9b5674d3f75604974cc2327602a0cec54abd7349284b672
+# Build (fresh, via pb version on device): dev-8a481a57e commit 8a481a57e4a09a83e73804f88c8a5022e8f43fbe, exe sha256 32fc890a…1904 per receipt
+# utc_start: 2026-11-10T13:19:56Z
+# recount: count=55 total=55 has_own=True has_peer=True
+# utc_end: 2026-11-10T13:20:43Z
+
+PASS find this machine and the peer
+PASS exec on the peer works
+PASS create a reader token and a token that may only exec on the peer
+PASS the peer signs in with the scoped token
+PASS the peer is refused exec here (outside the token scope)
+PASS the access start is in the personal log (machine target, capability, actor)
+PASS the refusal is in the personal log with reason and token
+
+# Admin-event assertions from the earlier full Windows run on the same dev-8a481a57e build.
+# That full run failed machine selection; the repaired access phase above replaces that failure.
+# The old S3 result is excluded from this F19-07 evidence.
+# Admin source sha256: cf085e6768cd9399df313275e8ebffdfd043302b2c808efc2243c9055feaf6fe
+PASS filter by action finds the 3 role changes
+PASS an event has actor email, IP, user agent, request ID and result
+PASS filter by actor email
+PASS filter by result
+PASS both exports are recorded
+
+RESULT PASS
