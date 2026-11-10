@@ -1913,7 +1913,11 @@ class RemainingFamilyPlumbing(unittest.TestCase):
 
             stopped.clear()
             fake = SimpleNamespace(temp_dir=temp_dir, ps=lambda step, script, **payload: sent.update(payload), stop=stopped.append)
-            fired, code = winhost.WindowsDevice.interrupt_when(fake, [r'C:\pb.exe', 'setup'], 'x', seconds=150, exit_seconds=180)
+            import io
+            said = io.StringIO()
+            with contextlib.redirect_stderr(said):
+                fired, code = winhost.WindowsDevice.interrupt_when(fake, [r'C:\pb.exe', 'setup'], 'x', seconds=150, exit_seconds=180)
+            self.assertIn('interrupt via CTRL_BREAK', said.getvalue())
             self.assertEqual((True, int(text.split()[2])), (fired, code))
             self.assertEqual([4242] if want_stop else [], stopped)
         self.assertIn('result', sent)

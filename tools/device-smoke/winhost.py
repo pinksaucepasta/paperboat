@@ -23,6 +23,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -443,6 +444,8 @@ class WindowsDevice:
         PowerShell expression `when` is true (polled every 5 ms for `seconds`); returns (whether it was sent, exit code
         or -1 if the program had to be killed). The answer goes through a file and a target that outlived the wait is
         stopped from here, a fresh session: see INTERRUPT."""
+        # said honestly in the check's output: this is not a Ctrl-C key press (CTRL_C_EVENT never reached pb.exe from this harness, 0 of 9; spark/ctrlc-delivery.md)
+        print('interrupt via CTRL_BREAK (a console Ctrl-C key is proven by the terminal Ctrl-C check)', file=sys.stderr, flush=True)
         with self.temp_dir('pb-interrupt') as directory:
             result = directory / 'result.txt'
             self.ps('interrupt ' + pathlib.PureWindowsPath(argv[0]).name, INTERRUPT, timeout=seconds + exit_seconds + 60,
