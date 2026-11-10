@@ -244,12 +244,6 @@ func (d IngressDecision) authorize(authority IngressDecision, open StreamOpen, e
 	return nil
 }
 
-// ValidateNativeAuthorization binds the signed accessor authority to the exact
-// durable publisher assignment. Publisher identity is independently projected.
-func (d IngressDecision) ValidateNativeAuthorization(now time.Time) error {
-	return d.validateNativeAuthorization(now, false)
-}
-
 func (d IngressDecision) validateNativeAuthorization(now time.Time, admitted bool) error {
 	a := d.NativeAuthorization
 	validationTime := now

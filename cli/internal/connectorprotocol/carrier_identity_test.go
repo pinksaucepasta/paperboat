@@ -1,6 +1,7 @@
 package connectorprotocol
 
 import (
+	"crypto/ed25519"
 	"errors"
 	"net/url"
 	"testing"
@@ -85,5 +86,22 @@ func TestCarrierIdentityURNBindsSharedMachineCarrier(t *testing.T) {
 	binding.SessionID = "session_11234567-89ab-4cde-8fab-0123456789ab"
 	if err := MatchCarrierIdentityURN([]*url.URL{uri}, binding); !errors.Is(err, ErrCarrierIdentityBinding) {
 		t.Fatalf("replacement session matched signed URI: %v", err)
+	}
+}
+
+func TestIdentityThumbprintIsStableDistinctAndRejectsAShortKey(t *testing.T) {
+	first := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize)).Public().(ed25519.PublicKey)
+	other := ed25519.NewKeyFromSeed([]byte("0123456789abcdef0123456789abcdef")).Public().(ed25519.PublicKey)
+	one, err := IdentityThumbprint(first)
+	if err != nil || len(one) != 43 { // base64url of a SHA-256 digest
+		t.Fatalf("thumbprint=%q err=%v", one, err)
+	}
+	again, _ := IdentityThumbprint(first)
+	two, _ := IdentityThumbprint(other)
+	if one != again || one == two {
+		t.Fatalf("thumbprints must be stable and distinct: %q %q %q", one, again, two)
+	}
+	if _, err := IdentityThumbprint(first[:ed25519.PublicKeySize-1]); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("short public key error=%v", err)
 	}
 }
