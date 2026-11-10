@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"runtime"
 	"sync/atomic"
 	"testing"
 
@@ -186,5 +187,16 @@ func TestBusyStreamOffersALoneByteAsAnInterrupt(t *testing.T) {
 	server.interruptTerminalInput(context.Background(), resize, state)
 	if len(handler.keys) != 1 || handler.keys[0] != 5 {
 		t.Fatalf("interrupts offered: %v", handler.keys)
+	}
+}
+
+// A lone Ctrl-C is offered as an interrupt while the worker is idle only where a pipe ETX does not interrupt the foreground program
+// (Windows); elsewhere the tty's own line discipline handles it and the journal answers the frame as before.
+func TestIdleStreamOffersAnInterruptOnlyOnWindows(t *testing.T) {
+	if !offersInterrupt(true) {
+		t.Fatal("a busy worker must always offer the interrupt")
+	}
+	if got, want := offersInterrupt(false), runtime.GOOS == "windows"; got != want {
+		t.Fatalf("offersInterrupt(idle) on %s = %v, want %v", runtime.GOOS, got, want)
 	}
 }

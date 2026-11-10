@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -199,7 +200,7 @@ func (s *Server) ServeAuthenticated(conn Connection, authorizer Authorizer) (ser
 				}
 				continue
 			}
-			if len(result.binary) != 0 && busy.Load() {
+			if len(result.binary) != 0 && offersInterrupt(busy.Load()) {
 				s.interruptTerminalInput(connectionCtx, result.binary, terminalState)
 			}
 			select {
@@ -212,6 +213,13 @@ func (s *Server) ServeAuthenticated(conn Connection, authorizer Authorizer) (ser
 		}
 	}
 }
+
+// offersInterrupt says whether the read loop offers a lone control byte as an interrupt now. A busy worker needs it everywhere (a paste
+// stuck in a program that never reads). On Windows it is also needed when idle: a pipe ETX written into the ConPTY does not become a console
+// Ctrl-C for the program running in the foreground (measured on Windows 11: cmd.exe running ping, powershell Start-Sleep), so only
+// pty.Process.Interrupt (ETX plus the fallback that ends the foreground program) makes Ctrl-C work. Limit: at an idle prompt with an
+// older background child, Windows has no foreground group, so the newest direct child of the shell is taken for the foreground.
+func offersInterrupt(busy bool) bool { return busy || runtime.GOOS == "windows" }
 
 // connectionWorkQueue holds more frames than a client leaves unanswered (256 input chunks), so only a client that
 // ignores its own window fills it; the read loop then waits for the worker, as it always did.
