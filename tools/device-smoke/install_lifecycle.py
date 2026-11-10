@@ -33,7 +33,10 @@ SERVICE_PID = ("(Get-CimInstance Win32_Service|Where-Object{$_.Name -like 'Paper
 BOOT_TIME = "(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')"
 
 
-INSTALLER_RUNNING = "[bool](Get-Process -Name '.pb-elevated-*' -ErrorAction SilentlyContinue)"
+# The elevated half of pb install is the bridge helper (elevation/bridge_windows.go: <request dir>\\helper.exe
+# __runtime-service bridge); ".pb-elevated-*" names a temporary copy that never ran during the watch on winpool-9.
+INSTALLER_RUNNING = ("[bool](Get-CimInstance Win32_Process -Filter \"Name = 'helper.exe'\" -ErrorAction SilentlyContinue | "
+                     "Where-Object { $_.CommandLine -match '__runtime-service' })")
 
 
 def system_path(device):

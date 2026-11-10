@@ -127,7 +127,7 @@ def check_machine_revoked(binary, identifier, *, perform):
         result = confirmed_command(binary, 'machine', 'revoke', identifier)
         if result['outcome'] != 'confirmed' or result['machine']['id'] != identifier:
             raise RuntimeError('revoke receipt did not identify the exact machine')
-    machines = invoke(binary, '--workspace', 'personal', 'machine', 'list', '--json')['machines']
+    machines = invoke(binary, '--workspace', 'personal', 'machine', 'list', '--all', '--json')['machines']
     # Since server 2026.10.23.48 the default machine list omits revoked and disconnected machines.
     if any(item['id'] == identifier for item in machines):
         raise RuntimeError('revoked machine remains in the server catalog')
@@ -432,7 +432,7 @@ def qualify(expected, check, fault, script, password, revoke_first=False, extern
         raise RuntimeError('installed executable does not match the exact candidate')
     root = runtime_root()
     before = json.loads((root / 'machine-registration.json').read_text())
-    machines = invoke(binary, '--workspace', 'personal', 'machine', 'list', '--json')['machines']
+    machines = invoke(binary, '--workspace', 'personal', 'machine', 'list', '--all', '--json')['machines']
     original = next((item for item in machines if item['id'] == before['machine_id']), None)
     if original is None or original['owner_account'] != before['account_id'] or original['public_identity_key'] != before['public_identity_key']:
         raise RuntimeError('current account does not own the exact installed machine')
@@ -475,7 +475,7 @@ def qualify(expected, check, fault, script, password, revoke_first=False, extern
                          '--enrollment-token-file', str(token), '--name', original['alias']]
             output = pair(staged, arguments, root, fault, before['server_url'], password)
             after = json.loads((root / 'machine-registration.json').read_text())
-            machines = invoke(binary, '--workspace', 'personal', 'machine', 'list', '--json')['machines']
+            machines = invoke(binary, '--workspace', 'personal', 'machine', 'list', '--all', '--json')['machines']
             current = next((item for item in machines if item['id'] == after['machine_id']), None)
             if current is None or current['alias'] != original['alias'] or after['account_id'] != before['account_id']:
                 raise RuntimeError('restoration lost its exact alias or account')

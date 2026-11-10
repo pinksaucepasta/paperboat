@@ -25,7 +25,7 @@ TOKENS = winhost.device().home() / 'pb-reset-state' if winhost.device() else STA
 
 
 def machines():
-    return p.invoke(PB, '--workspace', 'personal', 'machine', 'list', '--json')['machines']
+    return p.invoke(PB, '--workspace', 'personal', 'machine', 'list', '--all', '--json')['machines']
 
 
 def reset_phase(password):

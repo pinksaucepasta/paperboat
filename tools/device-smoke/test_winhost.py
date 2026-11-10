@@ -1986,6 +1986,14 @@ class RemainingFamilyPlumbing(unittest.TestCase):
                 pairing_lifecycle.await_windows_uninstall({'completion_status_path': r'C:\\Temp\\status.json'})
         pairing_lifecycle.await_windows_uninstall({'data': {}})  # no status path (Unix): nothing to wait for
 
+    def test_install_interrupt_watches_the_elevation_bridge_helper_not_a_temp_copy(self):
+        import install_lifecycle
+        self.assertIn("helper.exe", install_lifecycle.INSTALLER_RUNNING)
+        self.assertIn("__runtime-service", install_lifecycle.INSTALLER_RUNNING)
+        self.assertNotIn("pb-elevated", install_lifecycle.INSTALLER_RUNNING)
+        source = (pathlib.Path(__file__).parent / 'pairing_lifecycle.py').read_text()
+        self.assertNotIn("'list', '--json')['machines']", source)  # the default machine page is 50 of 74
+
     def test_pb_text_keeps_the_stdin_of_the_local_call(self):
         done = winhost.pb_text(sys.executable, ['-c', 'import sys;print(len(sys.stdin.read()))'], timeout=30, stdin=subprocess.DEVNULL)
         self.assertEqual('0\n', done.stdout)
