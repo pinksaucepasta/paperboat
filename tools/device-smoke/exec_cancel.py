@@ -30,13 +30,32 @@ def events(data):
 
 
 def process_identity(output, nonce):
-    data = b''.join(base64.b64decode(event['data']) for event in events(output.stdout())
+    data = b''.join(base64.b64decode(event['data']) for event in events(output)
                     if event.get('stream') == 'stdout')
     for line in data.splitlines():
         parts = line.decode().split()
         if len(parts) == 2 and parts[0] == nonce:
             return int(parts[1])
     return None
+
+
+def windows_interrupt(binary, arguments, nonce):
+    """Send real console Ctrl-C only after exec has published the remote process identity."""
+    device = binary.device
+    with device.temp_dir('pb-exec-cancel') as directory:
+        output = winhost.RemotePath(device, directory) / 'stdout'
+        errors = winhost.RemotePath(device, directory) / 'stderr'
+        when = ("$text='';if(Test-Path -LiteralPath $req.stdout){"
+                "foreach($line in [IO.File]::ReadLines($req.stdout)){try{"
+                "$e=$line|ConvertFrom-Json;if($e.stream -eq 'stdout'){"
+                "$text += [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($e.data))}"
+                "}catch{}}};$text -match '" + nonce + " [0-9]+'")
+        fired, status = device.interrupt_when(arguments, when, seconds=35, exit_seconds=35,
+                                              stdout=output, stderr=errors)
+        stdout, stderr = output.read_bytes(), errors.read_bytes()
+        if not fired:
+            raise FixtureCommandFailure(command_diagnostic(arguments, stdout, stderr))
+        return status, stdout, stderr
 
 
 def verify_stopped(binary, target, pid, nonce):
@@ -62,6 +81,7 @@ def one(binary, target, mode):
     pid = None
     failure = None
     process = None
+    output, errors = b'', b''
     try:
         # Everything that can fail before the child runs is inside this try, so every startup failure keeps its
         # private diagnostic (the platform lookup and the staging run pb too).
@@ -74,27 +94,33 @@ def one(binary, target, mode):
             fixture = ['python3', '-c', code, nonce]
         arguments = [str(binary), 'exec', target, '--timeout', '15s' if mode == 'timeout' else '2m',
                      '--json', '--', *fixture]
-        process = winhost.job(binary, arguments[1:])
-        deadline = time.monotonic() + 35
-        while pid is None and time.monotonic() < deadline:
-            pid = process_identity(process, nonce)
-            if pid is None and process.poll() is not None:
-                break
-            time.sleep(.1)
+        if mode == 'interrupt' and hasattr(binary, 'device'):
+            status, output, errors = windows_interrupt(binary, arguments, nonce)
+            pid = process_identity(output, nonce)
+        else:
+            process = winhost.job(binary, arguments[1:])
+            deadline = time.monotonic() + 35
+            while pid is None and time.monotonic() < deadline:
+                pid = process_identity(process.stdout(), nonce)
+                if pid is None and process.poll() is not None:
+                    break
+                time.sleep(.1)
+            if mode == 'interrupt':
+                process.interrupt()
+            status = process.wait(35)
+            output = process.stdout()
         if pid is None:
             raise RuntimeError('exec cancellation fixture did not establish its remote process')
-        if mode == 'interrupt':
-            process.interrupt()
-        status = process.wait(35)
         expected = 124 if mode == 'timeout' else 130
-        terminal = [event for event in events(process.stdout()) if event.get('state') == 'canceled']
+        terminal = [event for event in events(output) if event.get('state') == 'canceled']
         wanted = 'exec_timeout' if mode == 'timeout' else 'exec_canceled'
         if status != expected or len(terminal) != 1 or terminal[0].get('error_code') != wanted:
             raise RuntimeError('cancellation lost its known outcome')
         verify_stopped(binary, target, pid, nonce)
     except Exception as error:
         diagnostic = getattr(error, 'diagnostic_path', None) or command_diagnostic(
-            arguments, process.stdout(1 << 20) if process else b'', process.stderr() if process else str(error))
+            arguments, process.stdout(1 << 20) if process else output,
+            process.stderr() if process else errors + str(error).encode())
         failure = FixtureCommandFailure(diagnostic)
         raise failure from error
     finally:
@@ -132,7 +158,7 @@ def main():
     args = parser.parse_args()
     before = registration()
     binary = winhost.pb_path()
-    modes = ['timeout'] if winhost.device() else ['timeout', 'interrupt']  # no Ctrl-C reaches a hidden Windows process
+    modes = ['timeout', 'interrupt']
     for mode in modes:
         one(binary, args.target, mode)
     if registration() != before:

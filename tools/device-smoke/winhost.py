@@ -242,6 +242,7 @@ INTERRUPT = ("Add-Type -Namespace Pb -Name Con -MemberDefinition '[DllImport(\"k
              "[DllImport(\"kernel32.dll\")] public static extern bool GenerateConsoleCtrlEvent(uint e, uint g);'\n"
              "$w=[scriptblock]::Create($req.when);$o=@{FilePath=$req.exe;PassThru=$true;WindowStyle='Hidden'}\n"
              "if($req.args){$o.ArgumentList=$req.args}\n"
+             "if($req.stdout){$o.RedirectStandardOutput=$req.stdout;$o.RedirectStandardError=$req.stderr}\n"
              "$p=Start-Process @o;$null=$p.Handle;$fired=0;$d=(Get-Date).AddSeconds($req.seconds)\n"
              "while(-not $p.HasExited -and (Get-Date) -lt $d){if(& $w){\n"
              "[void][Pb.Con]::FreeConsole();if(-not [Pb.Con]::AttachConsole($p.Id)){break}\n"
@@ -414,12 +415,13 @@ class WindowsDevice:
         """SIDs other than the user, SYSTEM and Administrators that the file's ACL lets in (empty: owner-only)."""
         return self.ps('acl %s' % path, OTHER_ACCESS, path=str(path))[1].split()
 
-    def interrupt_when(self, argv, when, seconds=30, exit_seconds=90):
+    def interrupt_when(self, argv, when, seconds=30, exit_seconds=90, stdout=None, stderr=None):
         """Run argv in its own console and send it Ctrl-C the first time the PowerShell expression `when` is true
         (polled every 5 ms for `seconds`); returns (whether Ctrl-C was sent, exit code or -1 if it was killed)."""
         out = self.ps('interrupt ' + pathlib.PureWindowsPath(argv[0]).name, INTERRUPT, timeout=seconds + exit_seconds + 60,
                       exe=argv[0], args=subprocess.list2cmdline(list(argv[1:])), when=when, seconds=seconds,
-                      exit_ms=exit_seconds * 1000)[1].split()
+                      exit_ms=exit_seconds * 1000, stdout=str(stdout) if stdout else None,
+                      stderr=str(stderr) if stderr else None)[1].split()
         return out[-2] == '1', int(out[-1])
 
     def matching_lines(self, directory, filter_, pattern):
