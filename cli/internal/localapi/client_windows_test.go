@@ -40,6 +40,13 @@ func TestMissingPipeIsTransportUnavailableForEveryRequest(t *testing.T) {
 	if _, err := client.Snapshot(ctx); !errors.Is(err, ErrTransportUnavailable) {
 		t.Fatalf("snapshot over a missing pipe: %v, want ErrTransportUnavailable", err)
 	}
+	// The call pb send's renewal makes (send_command.go: grantForDescriptor -> peerLocal.PrepareFileTransfer).
+	if lease, err := client.PrepareFileTransfer(ctx, FileTransferRequest{Schema: FileTransferSchemaV1, MachineID: "machine_test", EnvironmentID: "environment_test", MachineGeneration: 1, OperationID: "operation_test", Credential: "credential_test", AccessSessionID: "access_test", Deadline: time.Now().Add(time.Minute), MaximumBytes: 1024}); !errors.Is(err, ErrTransportUnavailable) {
+		if lease != nil {
+			_ = lease.Close()
+		}
+		t.Fatalf("prepare file transfer over a missing pipe: %v, want ErrTransportUnavailable", err)
+	}
 	if _, err := client.OpenFileTransferStream(ctx, "handle-1"); !errors.Is(err, ErrTransportUnavailable) {
 		t.Fatalf("file transfer stream over a missing pipe: %v, want ErrTransportUnavailable", err)
 	}
