@@ -1,4 +1,5 @@
 import base64
+import pathlib
 import subprocess
 import unittest
 from unittest import mock
@@ -118,6 +119,23 @@ class WindowsTarget(unittest.TestCase):
                 for script in scripts:
                     done = subprocess.run(['bash', '-n'], input=ssh_mac_rows.prelude() + script, capture_output=True, text=True)
                     self.assertEqual('', done.stderr)
+
+    def test_windows_forwarding_asserts_the_limit_message_the_cli_prints_and_never_passes_on_noise(self):
+        windows, unix = ssh_mac_rows.forwarding_script(True), ssh_mac_rows.forwarding_script(False)
+        self.assertEqual(ssh_mac_rows.FORWARDING, unix)
+        source = (pathlib.Path(__file__).parents[2] / 'cli/cmd/pb/ssh_command.go').read_text()
+        self.assertIn('const sshWindowsAgentForwardingMessage = "%s"' % ssh_mac_rows.WINDOWS_AGENT_LIMIT, source)
+        for script in (windows,):
+            self.assertNotIn('ED25519', script)
+            self.assertNotIn('ssh -v', script)
+            self.assertNotIn('agent-forward-plain', script)
+            self.assertIn('check agent-limit-message "$WINDOWS_AGENT_LIMIT" $PB ssh $A -- -A', script)
+        self.assertIn('port-forward-plain', windows)
+        self.assertIn('no-x11-plain', windows)
+        for win in (self.target,):
+            with mock.patch.object(ssh_mac_rows, 'WIN', win):
+                done = subprocess.run(['bash', '-n'], input=ssh_mac_rows.prelude() + windows, capture_output=True, text=True)
+            self.assertEqual('', done.stderr)
 
     def test_the_mac_target_keeps_its_commands(self):
         with mock.patch.object(ssh_mac_rows, 'WIN', None):

@@ -434,12 +434,32 @@ check no-x11-pb "display=<>" env DISPLAY=:0 $PB ssh $A -- "$SHOW_DISPLAY"
 echo "RESULT ok:[$ok ] fail:[$fail ]"'''
 
 
+# Agent forwarding INTO a Windows machine is a documented limit (Win32-OpenSSH #1461, #1865: Microsoft's sshd hardcodes /tmp/ssh-XXX and
+# refuses the AF_UNIX server bind; spark/w6-f513-limit-proof.md). On a Windows target `pb ssh -A` must say so, in exactly this line
+# (cli/cmd/pb/ssh_command.go sshWindowsAgentForwardingMessage), and the session must go on. Port forwarding and X11-off stay exact.
+WINDOWS_AGENT_LIMIT = "Agent forwarding isn't available on Windows machines (Microsoft OpenSSH limitation); port forwarding works."
+WINDOWS_AGENT_CHECKS = (
+    'check agent-limit-message "$WINDOWS_AGENT_LIMIT" $PB ssh $A -- -A "echo agent-session-ran"\n'
+    'check agent-session-continues agent-session-ran $PB ssh $A -- -A "echo agent-session-ran"\n'
+    'check agent-plain-session-continues agent-session-ran ssh -A $H "echo agent-session-ran"\n')
+
+
+def forwarding_script(windows):
+    old = 'check agent-forward-plain ED25519 ssh -A $H "$AGENT_LIST"\n'
+    assert old in FORWARDING + '\n'
+    if not windows:
+        return FORWARDING
+    return ('WINDOWS_AGENT_LIMIT=%s\n' % shlex.quote(WINDOWS_AGENT_LIMIT)) + FORWARDING.replace(old, WINDOWS_AGENT_CHECKS)
+
+
 def forwarding():
     row = 'F5-13 forwarding'
     if not check_warm(row):
         return
-    out = cl(prelude() + FORWARDING, 600)
+    out = cl(prelude() + forwarding_script(WIN is not None), 600)
     want = 'RESULT ok:[ port-forward-plain agent-forward-plain no-x11-plain no-x11-pb ] fail:[ ]'
+    if WIN is not None:
+        want = 'RESULT ok:[ port-forward-plain agent-limit-message agent-session-continues agent-plain-session-continues no-x11-plain no-x11-pb ] fail:[ ]'
     report(row, 'PASS' if want in out else 'FAIL', ' '.join(l for l in out.splitlines() if l.startswith('RESULT')) or out[-300:].replace('\n', ' '))
 
 

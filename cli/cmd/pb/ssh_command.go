@@ -61,6 +61,9 @@ func actionSSH(command *cobra.Command, args []string) error {
 		return err
 	}
 	environment = pbSSHEnvironment(environment)
+	if notice := agentForwardingNotice(machine.Platform, args[1:]); notice != "" {
+		fmt.Fprintln(command.ErrOrStderr(), notice)
+	}
 	err = executeManagedSSH(command, ctx, machine, destination, args[1:], dash == 1, environment)
 	explainSSHFailure(command, machine, err, func() (*api.Client, error) { return sshClientFor(ctx, client) })
 	return err
@@ -582,4 +585,51 @@ func configuredManagedSSHDomain(ctx *command.Context) (string, error) {
 		return "", err
 	}
 	return managedSSHDomain(ctx.Context, client)
+}
+
+// sshWindowsAgentForwardingMessage is printed when `pb ssh -A` targets a Windows machine. Microsoft's sshd cannot forward an
+// agent (Win32-OpenSSH #1461, #1865: session.c hardcodes /tmp/ssh-XXX and the AF_UNIX server bind is refused), so the session
+// goes on without one. tools/device-smoke/ssh_mac_rows.py asserts this exact line.
+const sshWindowsAgentForwardingMessage = "Agent forwarding isn't available on Windows machines (Microsoft OpenSSH limitation); port forwarding works."
+
+// agentForwardingNotice is the line to print before the session starts: only a Windows machine asked to forward an agent.
+func agentForwardingNotice(platform string, args []string) string {
+	if strings.EqualFold(platform, "windows") && requestsAgentForwarding(args) {
+		return sshWindowsAgentForwardingMessage
+	}
+	return ""
+}
+
+// requestsAgentForwarding reports whether OpenSSH arguments ask for agent forwarding: -A (alone or inside a flag cluster)
+// or -o ForwardAgent=yes, before the remote command starts. A later -a turns it off again.
+func requestsAgentForwarding(args []string) bool {
+	const withValue = "BbcDEeFIiJLlmOopQRSWw" // OpenSSH flags whose value is the rest of the word or the next one
+	forwarding := false
+	for index := 0; index < len(args); index++ {
+		argument := args[index]
+		if argument == "--" || !strings.HasPrefix(argument, "-") || argument == "-" {
+			break
+		}
+		for position := 1; position < len(argument); position++ {
+			flag := argument[position]
+			if flag == 'A' {
+				forwarding = true
+			} else if flag == 'a' {
+				forwarding = false
+			} else if strings.IndexByte(withValue, flag) >= 0 {
+				value := argument[position+1:]
+				if value == "" && index+1 < len(args) {
+					index++
+					value = args[index]
+				}
+				if flag == 'o' {
+					if name, setting, ok := strings.Cut(strings.NewReplacer("=", " ").Replace(value), " "); ok && strings.EqualFold(name, "ForwardAgent") {
+						forwarding = strings.EqualFold(strings.TrimSpace(setting), "yes")
+					}
+				}
+				break
+			}
+		}
+	}
+	return forwarding
 }
