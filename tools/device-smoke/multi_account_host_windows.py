@@ -3,6 +3,7 @@
 
 multi_account_host.sh with the two-user host being a Windows machine instead of a container: its host side runs
 inside one container shell on HOST, a Windows machine is driven from here over SSH, so this is its own file.
+WINDOWS must have no pb installed or enrolled for its login user (uninstall it first; the run leaves it uninstalled).
 Two OS users on WINDOWS (the SSH host; user A is its login, user B a throwaway local administrator the script creates and removes), each paired to its own account, use machines of the same name at the same time. HOST is the Docker
 host of fresh_pair_lib.sh (its pb is account A), BINARY the Linux build on this machine, PB_EXE the Windows build
 on this machine, MINT_B a command on HOST that runs `pb` signed in to a second account.
@@ -54,6 +55,13 @@ class User:
         token_file = self.device.home() / 'pb-mah.token'
         token_file.write_text(token)
         try:
+            # pb pair accepts a token file only when SYSTEM and its owner alone may read it (token_file_windows.go);
+            # a file made over ssh inherits the profile ACL and an Administrators owner.
+            user, path = self.device.env('USERNAME'), str(token_file)
+            for arguments in ([path, '/setowner', user], [path, '/inheritance:r', '/grant:r', user + ':F', 'SYSTEM:F'],
+                              [path, '/remove', 'Administrators']):
+                done = self.device.run(['icacls.exe', *arguments])
+                assert done.returncode == 0, 'icacls on the token file failed: ' + (done.stdout + done.stderr)[-200:]
             receipt = self.json('pair', '--enrollment-token-file', str(token_file), '--name', name)
         finally:
             token_file.unlink()
