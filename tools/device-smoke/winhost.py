@@ -244,20 +244,35 @@ OTHER_ACCESS = ("$me=[Security.Principal.WindowsIdentity]::GetCurrent().User.Val
 # Ctrl-C at a chosen moment: starts $req.exe in a console of its own, evaluates the PowerShell expression $req.when
 # every 5 ms and, the first time it is true, sends CTRL_C to that console (the only signal a Windows console program
 # gets from a user). Prints "<fired 0|1> <exit code, or -1 when it had to be killed>".
-INTERRUPT = ("Add-Type -Namespace Pb -Name Con -MemberDefinition '[DllImport(\"kernel32.dll\")] public static extern bool FreeConsole(); "
-             "[DllImport(\"kernel32.dll\")] public static extern bool AttachConsole(uint p); "
-             "[DllImport(\"kernel32.dll\")] public static extern bool SetConsoleCtrlHandler(IntPtr h, bool add); "
-             "[DllImport(\"kernel32.dll\")] public static extern bool GenerateConsoleCtrlEvent(uint e, uint g);'\n"
-             "$w=[scriptblock]::Create($req.when);$o=@{FilePath=$req.exe;PassThru=$true;WindowStyle='Hidden'}\n"
-             "if($req.args){$o.ArgumentList=$req.args}\n"
-             "if($req.stdout){$o.RedirectStandardOutput=$req.stdout;$o.RedirectStandardError=$req.stderr}\n"
-             "$p=Start-Process @o;$null=$p.Handle;$fired=0;$d=(Get-Date).AddSeconds($req.seconds)\n"
-             "while(-not $p.HasExited -and (Get-Date) -lt $d){if(& $w){\n"
-             "[void][Pb.Con]::FreeConsole();if(-not [Pb.Con]::AttachConsole($p.Id)){break}\n"
-             "[void][Pb.Con]::SetConsoleCtrlHandler([IntPtr]::Zero,$true);$fired=[int][Pb.Con]::GenerateConsoleCtrlEvent(0,0);break}\n"
-             "Start-Sleep -Milliseconds 5}\n"
-             "if($p.WaitForExit([int]$req.exit_ms)){$rc=$p.ExitCode}else{& cmd.exe /c \"taskkill /T /F /PID $($p.Id) >nul 2>&1\";$rc=-1}\n"
-             "Set-Content -LiteralPath $req.result -Value \"$fired $rc\" -NoNewline")  # after AttachConsole stdout is the target's console
+# Ctrl-BREAK to the target's own console (spark/ctrlc-delivery.md, winpool-1: Ctrl-C reached Go's pb.exe 0 of 9 times in
+# every delivery, Ctrl-BREAK 6 of 6). The target runs in a real console (no Hidden window). The caller attaches to it,
+# arms a swallow handler AFTER attaching (armed before, the BREAK kills the caller too: rc 58), sends the event to group
+# 0 and detaches at once; its own stdout is unusable after AttachConsole, so the answer is a file: "fired seconds rc pid"
+# (rc -1: the target is still running; the controller reaps it from a fresh session, never from this attached one:
+# taskkill here tears the console down and the snippet exits 1 with an empty stderr).
+INTERRUPT = r'''Add-Type -Namespace Pb -Name Con -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool FreeConsole(); [DllImport("kernel32.dll")] public static extern bool AttachConsole(uint p); [DllImport("kernel32.dll")] public static extern bool GenerateConsoleCtrlEvent(uint e, uint g);'
+Add-Type -TypeDefinition @"
+using System; using System.Runtime.InteropServices;
+public static class Swallow {
+  public delegate bool HR(int t);
+  [DllImport("kernel32.dll")] public static extern bool SetConsoleCtrlHandler(HR h, bool a);
+  public static bool Eat(int t){ return true; }
+  public static HR keep;
+  public static void Arm(){ keep = new HR(Eat); SetConsoleCtrlHandler(keep, true); }
+}
+"@
+$w=[scriptblock]::Create($req.when);$o=@{FilePath=$req.exe;PassThru=$true}
+if($req.args){$o.ArgumentList=$req.args}
+if($req.stdout){$o.RedirectStandardOutput=$req.stdout;$o.RedirectStandardError=$req.stderr}
+$p=Start-Process @o;$null=$p.Handle;$fired=0;$d=(Get-Date).AddSeconds($req.seconds)
+while(-not $p.HasExited -and (Get-Date) -lt $d){if(& $w){
+[void][Pb.Con]::FreeConsole();if(-not [Pb.Con]::AttachConsole($p.Id)){break}
+[void][Swallow]::Arm()
+$fired=[int][Pb.Con]::GenerateConsoleCtrlEvent(1,0);[void][Pb.Con]::FreeConsole();break}
+Start-Sleep -Milliseconds 5}
+$t1=Get-Date;while(-not $p.HasExited -and ((Get-Date)-$t1).TotalMilliseconds -lt [int]$req.exit_ms){Start-Sleep -Milliseconds 200}
+$dt=[math]::Round(((Get-Date)-$t1).TotalSeconds,1);if($p.HasExited){$rc=$p.ExitCode}else{$rc=-1}
+Set-Content -LiteralPath $req.result -Value "$fired $dt $rc $($p.Id)" -NoNewline'''
 
 # Snippets that change nothing on the device: safe to send again when a session did not answer.
 READ_ONLY = (READ, EXISTS, SHA256, SIZE, ENV, SERVICES, PROCESSES, TASKS, SERVICE_PATHS, LISTENING, ALIVE)
@@ -424,17 +439,19 @@ class WindowsDevice:
         return self.ps('acl %s' % path, OTHER_ACCESS, path=str(path))[1].split()
 
     def interrupt_when(self, argv, when, seconds=30, exit_seconds=90, stdout=None, stderr=None):
-        """Run argv in its own console and send it Ctrl-C the first time the PowerShell expression `when` is true
-        (polled every 5 ms for `seconds`); returns (whether Ctrl-C was sent, exit code or -1 if it was killed).
-        The answer goes through a file: once Ctrl-C is sent the snippet stays attached to the target's console, so its
-        own stdout no longer reaches the controller."""
+        """Run argv in its own console and send it Ctrl-BREAK (what interrupts a Go program there) the first time the
+        PowerShell expression `when` is true (polled every 5 ms for `seconds`); returns (whether it was sent, exit code
+        or -1 if the program had to be killed). The answer goes through a file and a target that outlived the wait is
+        stopped from here, a fresh session: see INTERRUPT."""
         with self.temp_dir('pb-interrupt') as directory:
             result = directory / 'result.txt'
             self.ps('interrupt ' + pathlib.PureWindowsPath(argv[0]).name, INTERRUPT, timeout=seconds + exit_seconds + 60,
                     exe=argv[0], args=subprocess.list2cmdline(list(argv[1:])), when=when, seconds=seconds,
                     exit_ms=exit_seconds * 1000, stdout=str(stdout) if stdout else None,
                     stderr=str(stderr) if stderr else None, result=str(result))
-            fired, code = result.read_text().split()
+            fired, _, code, pid = result.read_text().split()
+        if int(code) == -1:
+            self.stop(int(pid))
         return fired == '1', int(code)
 
     def matching_lines(self, directory, filter_, pattern):

@@ -1883,27 +1883,39 @@ class RemainingFamilyPlumbing(unittest.TestCase):
     def test_completion_snippet_does_not_stop_on_cobras_stderr_directive_line(self):
         self.assertLess(winhost.COMPLETE.index("$ErrorActionPreference='Continue'"), winhost.COMPLETE.index('TabExpansion2'))
 
-    def test_interrupt_answer_goes_through_a_file_not_the_attached_console(self):
-        # After AttachConsole the snippet's stdout is the target's console: setup_recovery lost 'fired rc' (IndexError).
+    def test_interrupt_sends_break_from_a_detached_swallowing_caller_and_reaps_from_here(self):
+        # spark/ctrlc-delivery.md: Ctrl-C never reached pb.exe (0/9), Ctrl-BREAK did (6/6); the BREAK needs a swallow
+        # handler armed after AttachConsole; the answer is a file; a survivor is reaped by the controller.
         self.assertNotIn('[Console]::Out', winhost.INTERRUPT)
+        self.assertNotIn('taskkill', winhost.INTERRUPT)
+        self.assertNotIn("WindowStyle='Hidden'", winhost.INTERRUPT)
+        self.assertLess(winhost.INTERRUPT.index('AttachConsole($p.Id)'), winhost.INTERRUPT.index('[Swallow]::Arm()'))
+        self.assertIn('GenerateConsoleCtrlEvent(1,0)', winhost.INTERRUPT)
         self.assertIn('Set-Content -LiteralPath $req.result', winhost.INTERRUPT)
         import contextlib
-        sent = {}
+        sent, stopped = {}, []
 
         class Result:
+            def __init__(self, text):
+                self.text = text
+
             def read_text(self):
-                return '1 -1'
+                return self.text
 
-        class Directory:
-            def __truediv__(self, name):
-                return Result()
+        for text, want_stop in (('1 0.4 1 4242', False), ('1 90.0 -1 4242', True)):
+            class Directory:
+                def __truediv__(self, name):
+                    return Result(text)
 
-        @contextlib.contextmanager
-        def temp_dir(prefix):
-            yield Directory()
+            @contextlib.contextmanager
+            def temp_dir(prefix):
+                yield Directory()
 
-        fake = SimpleNamespace(temp_dir=temp_dir, ps=lambda step, script, **payload: sent.update(payload))
-        self.assertEqual((True, -1), winhost.WindowsDevice.interrupt_when(fake, [r'C:\pb.exe', 'setup'], 'x', seconds=150, exit_seconds=180))
+            stopped.clear()
+            fake = SimpleNamespace(temp_dir=temp_dir, ps=lambda step, script, **payload: sent.update(payload), stop=stopped.append)
+            fired, code = winhost.WindowsDevice.interrupt_when(fake, [r'C:\pb.exe', 'setup'], 'x', seconds=150, exit_seconds=180)
+            self.assertEqual((True, int(text.split()[2])), (fired, code))
+            self.assertEqual([4242] if want_stop else [], stopped)
         self.assertIn('result', sent)
         self.assertEqual(150, sent['seconds'])
 
