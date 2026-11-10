@@ -1,0 +1,1 @@
+{"check": "usage-categories", "target": "w7-f19-peer-20261110t121807z", "status": "PASS", "relay_bytes_by_category": {"exec": 715251, "ssh": 3549239, "terminal": 1103618, "file_transfer": 1053335}, "billing_delta": 6420519, "charged_path_delta": 6420519}
