@@ -114,11 +114,13 @@ func runAccessTunnel(command *cobra.Command, args []string) error {
 		return errors.Join(err, runtime.Release(cleanupCtx, session))
 	}
 	// Keep the listener alive only while this process is: hostd owns it and reaps it once the beats stop.
-	gone := make(chan struct{})
+	gone, beating := make(chan struct{}), make(chan struct{})
 	beatCtx, stopBeats := context.WithCancel(command.Context())
-	defer stopBeats()
+	interval := accessTunnelHeartbeatInterval // read once, here: tests change the variable between commands
+	defer func() { stopBeats(); <-beating }() // no heartbeat goroutine outlives the command
 	go func() {
-		ticker := time.NewTicker(accessTunnelHeartbeatInterval)
+		defer close(beating)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {
