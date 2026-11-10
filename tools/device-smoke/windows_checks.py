@@ -156,6 +156,10 @@ def checks(args):
         table[name.replace('_', '-')] = ([name + '.py'], [])
     table['machine-tags'] = (['machine_tags.py', '--owner-cmd', winhost.WINDOWS, '--target', peer], ['--peer'])
     table['free-plan'] = (['free_plan.py', args.machine], ['--machine'])  # the device account must be a Free account
+    # F11 across two machines: the device and a Unix peer of the account share one repository served on --pair-repo-shell's host.
+    table['config-sync-pair'] = (['config_sync_pair.py', args.pair_repo_shell or '', args.pair_repo_addr or '', winhost.WINDOWS,
+                                  args.machine or '', args.pair_peer_shell or '', args.pair_peer_alias or '', '--machine-sections'],
+                                 ['--machine', '--pair_repo_shell', '--pair_repo_addr', '--pair_peer_shell', '--pair_peer_alias'])
     table['send-self'] = (['send_self.py', args.machine], ['--machine'])
     table['workspace-switch'] = (['workspace_lifecycle.py'], ['--empty_team'])  # PAPERBOAT_SMOKE_TEAM = --empty-team
     table['config-sync-lifecycle'] = (['config_sync_lifecycle.py', args.machine], ['--machine'])  # about 15 min
@@ -310,6 +314,10 @@ def build_parser():
     parser.add_argument('--sso-team', help='team-identity-commands: a team the device account owns, with SSO and a directory group')
     parser.add_argument('--empty-team', help='workspace-switch: a team of the device account without machines')
     parser.add_argument('--config-repository', help='config-team-default: a GitHub config repository connected to the account')
+    parser.add_argument('--pair-repo-shell', help='config-sync-pair: shell prefix of the host that serves the repository')
+    parser.add_argument('--pair-repo-addr', help='config-sync-pair: that host as the controller and the peer reach it')
+    parser.add_argument('--pair-peer-shell', help='config-sync-pair: shell prefix of the Unix peer')
+    parser.add_argument('--pair-peer-alias', help="config-sync-pair: the peer's machine name")
     parser.add_argument('--only', default='', help='comma list of check ids')
     parser.add_argument('--timeout', type=int, default=1800)
     parser.add_argument('--list', action='store_true')

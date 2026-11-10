@@ -1181,6 +1181,21 @@ class FreePlanAndTagsOnTheDevice(unittest.TestCase):
         side_run.assert_called_once_with('windows', ['machine', 'tag', 'x'], timeout=150)
 
 
+class ConfigSyncPairOnTheDevice(unittest.TestCase):
+    def test_the_windows_side_gets_its_own_repository_endpoint_in_the_machine_file(self):
+        import config_sync_pair
+        self.assertIn('[pull]\nrepository_id = "r1"\nurl = "http://127.0.0.1:9/p.git"\n[push]\nrepository_id = "r1"\nurl = "http://127.0.0.1:9/p.git"\n',
+                      config_sync_pair.machine_file('r1', url='http://127.0.0.1:9/p.git'))
+        self.assertNotIn('url =', config_sync_pair.machine_file('r1'))
+
+    def test_the_side_windows_is_the_device_and_anything_else_a_shell(self):
+        import config_sync_pair
+        device = winhost.WindowsDevice(target='winpool-9', pb_exe='C:\\\\pb.exe', password='')
+        with patch('winhost.device', return_value=device), patch.object(winhost.WindowsDevice, 'env', return_value='C:\\\\Users\\\\u'):
+            self.assertEqual('windows', config_sync_pair.machine('windows', 'w').os)
+        self.assertEqual(['ssh', 'x'], config_sync_pair.machine('ssh x', 'u').prefix)
+
+
 if __name__ == '__main__':
     unittest.main()
 
@@ -1827,7 +1842,7 @@ class RemainingFamilyPlumbing(unittest.TestCase):
         import bugreport_lifecycle
         files = {'profile-0123456789abcdef-access.secret': b'\xff\xfeopaque-dpapi-blob-of-the-device', 'machine-public.secret': b'{"k": "v"}'}
         device = SimpleNamespace(path_flavor=pathlib.PureWindowsPath, files=lambda directory, pattern: sorted(files),
-                                 read_bytes=lambda path: files[path.name])
+                                 read_bytes=lambda path: files[path.name], cli_secrets=lambda: {'0123456789abcdef': 'dpapi-secret-value-of-the-device'})
         config = winhost.RemotePath(device, r'C:\Users\u\AppData\Local\paperboat')
         with patch.object(bugreport_lifecycle, 'DEVICE', device), patch.object(bugreport_lifecycle, 'CONFIG', config), \
                 patch.object(bugreport_lifecycle, 'RUNTIME', config / 'missing'), patch.object(bugreport_lifecycle, 'DARWIN', False):
@@ -1835,7 +1850,8 @@ class RemainingFamilyPlumbing(unittest.TestCase):
             found = bugreport_lifecycle.secrets()
         self.assertIn('profile-*-access.secret', found.values())
         self.assertIn('env-value', found.values())
-        self.assertEqual(2, len(found))
+        self.assertIn('dpapi-01234567', found.values())
+        self.assertEqual(3, len(found))
 
 
 

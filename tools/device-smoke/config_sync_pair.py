@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""F11 across two paired Linux or macOS machines that share one config repository.
+"""F11 across two paired Linux, macOS or Windows machines that share one config repository.
 
 Runs on the controller:
-  config_sync_pair.py REPO_SHELL REPO_ADDR SHELL_A ALIAS_A SHELL_B ALIAS_B [--machine-sections]
+  config_sync_pair.py REPO_SHELL REPO_ADDR SHELL_A ALIAS_A SHELL_B ALIAS_B [--machine-sections] [--repo-from-controller=ADDR]
 REPO_SHELL runs a shell on the host that serves the repository ("ssh pbvm3"); REPO_ADDR is that host's
 address as both machines reach it (172.17.0.1 for containers on it). SHELL_X runs a shell on machine X
 ("ssh pbvm3 sudo -n docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 lanel-a").
 On a Mac use its own ssh ("ssh admin@mac"); the pb machine file, config and os.<platform> section are found per machine.
+SHELL_X `windows` is the Windows device (PB_SMOKE_WINDOWS_PB, winhost): only pb.exe and PowerShell snippets run
+there. It reaches the repository through an ssh -R loopback port to ADDR (the repository host as this controller
+reaches it, default REPO_ADDR) and binds the one registered repository to that endpoint in its machine file
+(`url` under [pull]/[push]); the other machine keeps the registered URL.
 
 A Git smart-HTTP server with a token on the repository host serves one bare repository, so the account
 registers it once and both machines use the same URL. Checks:
@@ -19,6 +23,7 @@ registers it once and both machines use the same URL. Checks:
 Everything is removed at the end: assignments, machine files, files, credentials, repository, server.
 """
 import base64
+import contextlib
 import json
 import os
 import shlex
@@ -29,7 +34,8 @@ from functools import cached_property
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from config_sync_lifecycle import HTTP_SERVER  # noqa: E402
+import winhost  # noqa: E402
+from config_sync_lifecycle import HTTP_SERVER, api_token_request  # noqa: E402
 
 DIR = '.cache/pb-cfg-pair'
 REPO_ROOT = '/tmp/pb-cfg-pair-repo'
@@ -65,12 +71,17 @@ class Shell:
 
 
 class Machine(Shell):
+    own_url = None  # this machine's own endpoint for the shared repository, when it cannot use the registered URL
+
     def __init__(self, prefix, alias):
         super().__init__(prefix)
         self.alias = alias
 
+    def pb_run(self, args, stdin=None):
+        return self.sh('pb ' + ' '.join(shlex.quote(a) for a in args), stdin=stdin)
+
     def pb(self, *args, stdin=None, ok=True):
-        result = self.sh('pb ' + ' '.join(shlex.quote(a) for a in args) + ' --json', stdin=stdin)
+        result = self.pb_run([*args, '--json'], stdin=stdin)
         try:
             value = json.loads(result.stdout)
         except ValueError:
@@ -97,12 +108,75 @@ class Machine(Shell):
         """Shell expression for this machine's config-sync.toml."""
         return '"$(pb config sync path)"' if self.os == 'darwin' else '~/.config/paperboat/config-sync.toml'
 
+    def write_sync_file(self, text):
+        if self.os == 'darwin':
+            script = 'mkdir -p "$(dirname {0})" && cat > {0} && chmod 600 {0}'.format(self.sync_file)
+        else:
+            script = 'mkdir -p ~/.config/paperboat && cat > ~/.config/paperboat/config-sync.toml && chmod 600 ~/.config/paperboat/config-sync.toml'
+        self.sh(script, stdin=text, check=True)
+
+    def outputs(self):
+        """What the repository list and the status print (must never hold the credential)."""
+        return self.sh('pb config repository list --json; pb config status --json').stdout
+
+    def delete_repository(self, repository_id):
+        self.sh('python3 - ' + shlex.quote(repository_id), stdin=DELETE_REPOSITORY)
+
+    def remove_files(self):
+        self.sh('rm -f %s; rm -rf "$HOME/%s"' % (self.sync_file, DIR))
+
     def apply(self):
         preview = self.pb('config', 'sync', 'apply', ok=False)
         return self.pb('config', 'sync', 'apply', '--confirm', preview['confirmation_token'])
 
     def state(self):
         return next(e for e in self.pb('config', 'status')['environments'] if e['alias'] == self.alias)
+
+
+class WindowsMachine(Machine):
+    """The Windows device: the same steps with pb.exe and file snippets through winhost, no shell on the device."""
+
+    os = 'windows'
+
+    def __init__(self, alias):
+        self.alias, self.device = alias, winhost.device()
+        if not self.device:
+            raise RuntimeError('the side `windows` is the Windows device: set PB_SMOKE_WINDOWS_PB to its pb.exe')
+        self.root = self.device.home() / DIR
+
+    def pb_run(self, args, stdin=None):
+        return winhost.side_run(winhost.WINDOWS, list(args), input=stdin, timeout=200)
+
+    def read(self, name):
+        try:
+            return (self.root / name).read_text()
+        except FileNotFoundError:
+            return None
+
+    def write(self, name, text):
+        (self.root / name).write_text(text)
+
+    @cached_property
+    def sync_file(self):
+        return winhost.RemotePath(self.device, self.pb_run(['config', 'sync', 'path']).stdout.strip())
+
+    def write_sync_file(self, text):
+        self.sync_file.write_text(text)
+        self.sync_file.private()
+
+    def outputs(self):
+        return self.pb_run(['config', 'repository', 'list', '--json']).stdout + self.pb_run(['config', 'status', '--json']).stdout
+
+    def delete_repository(self, repository_id):
+        api_token_request('/v1/config-repositories/' + repository_id, 'DELETE')
+
+    def remove_files(self):
+        self.sync_file.unlink()
+        self.root.unlink()
+
+
+def machine(prefix, alias):
+    return WindowsMachine(alias) if winhost.is_side(prefix) else Machine(prefix, alias)
 
 
 class Repository(Shell):
@@ -165,17 +239,10 @@ def shared_file(a_alias, sections, platforms=('linux',)):
     return text
 
 
-def machine_file(repository_id, extra=''):
+def machine_file(repository_id, extra='', url=None):
+    target = 'repository_id = "%s"\n' % repository_id + ('url = "%s"\n' % url if url else '')
     return ('version = 1\nenabled = true\nautomatic_updates = true\nmode = "bidirectional"\n'
-            '[pull]\nrepository_id = "%s"\n[push]\nrepository_id = "%s"\n%s' % (repository_id, repository_id, extra))
-
-
-def write_machine_file(machine, text):
-    if machine.os == 'darwin':
-        script = 'mkdir -p "$(dirname {0})" && cat > {0} && chmod 600 {0}'.format(machine.sync_file)
-    else:
-        script = 'mkdir -p ~/.config/paperboat && cat > ~/.config/paperboat/config-sync.toml && chmod 600 ~/.config/paperboat/config-sync.toml'
-    machine.sh(script, stdin=text, check=True)
+            '[pull]\n%s[push]\n%s%s' % (target, target, extra))
 
 
 def run_checks(repo, a, b, url, profile, password, sections, repository):
@@ -184,18 +251,18 @@ def run_checks(repo, a, b, url, profile, password, sections, repository):
 
     def connect():
         for stale in [r for r in a.pb('config', 'repository', 'list')['repositories'] if r['display_name'] == NAME]:
-            a.sh('python3 - ' + shlex.quote(stale['id']), stdin=DELETE_REPOSITORY)
+            a.delete_repository(stale['id'])
         repository['id'] = a.pb('config', 'repository', 'connect', url, '--name', NAME)['repository']['id']
         for machine in (a, b):
             saved = machine.pb('config', 'repository', 'credentials', 'set', repository['id'], '--file', '-', stdin=profile)
             assert saved['state'] == 'saved', saved
-            assert password not in machine.sh('pb config repository list --json; pb config status --json').stdout
+            assert password not in machine.outputs()
         return repository['id']
     check('pair-connect', connect)
 
     def assign():
         for machine, name in ((a, a_name), (b, b_name)):
-            write_machine_file(machine, machine_file(repository['id']))
+            machine.write_sync_file(machine_file(repository['id'], url=machine.own_url))
             projection = machine.pb('config', 'sync', 'validate')
             paths = [r['local_path'] for r in projection['path_rules']]
             assert paths == ['~/%s/%s' % (DIR, name)], '%s resolved %s' % (machine.alias, paths)
@@ -218,7 +285,7 @@ def run_checks(repo, a, b, url, profile, password, sections, repository):
     if sections:
         def local_wins():
             extra = '[paths."cfg/value.txt"]\nlocal_path = "~/%s/value-own.txt"\n' % DIR
-            write_machine_file(a, machine_file(repository['id'], extra))
+            a.write_sync_file(machine_file(repository['id'], extra, a.own_url))
             rules = [(r['local_path'], r['source']) for r in a.pb('config', 'sync', 'validate')['path_rules']]
             assert rules == [('~/%s/value-own.txt' % DIR, 'machine')], rules
             a.apply()
@@ -236,20 +303,26 @@ def cleanup(machine, repository):
             machine.pb('config', 'repository', 'credentials', 'remove', repository['id'], ok=False)
     except Exception as error:  # noqa: BLE001
         print('cleanup %s: %s' % (machine.alias, error), flush=True)
-    machine.sh('rm -f %s; rm -rf "$HOME/%s"' % (machine.sync_file, DIR))
+    machine.remove_files()
 
 
 def main():
     args = [arg for arg in sys.argv[1:] if not arg.startswith('--')]
     sections = '--machine-sections' in sys.argv
+    reach = next((arg.split('=', 1)[1] for arg in sys.argv if arg.startswith('--repo-from-controller=')), args[1])
     repo = Repository(args[0])
-    a, b = Machine(args[2], args[3]), Machine(args[4], args[5])
+    a, b = machine(args[2], args[3]), machine(args[4], args[5])
+    forwards = contextlib.ExitStack()
     password = base64.b32encode(os.urandom(15)).decode().lower()
     profile = json.dumps({'transport': 'http', 'auth': 'token', 'username': 'cfguser', 'password': password, 'allow_insecure_http': True})
     repository = {}
     try:
         repo.seed({'.paperboat/config-sync.toml': shared_file(a.alias, sections, sorted({a.os, b.os})), 'cfg/value.txt': 'seed\n'})
-        url = 'http://%s:%d/pair.git' % (args[1], repo.serve(password))
+        port = repo.serve(password)
+        url = 'http://%s:%d/pair.git' % (args[1], port)
+        for side in (a, b):
+            if side.os == 'windows':
+                side.own_url = 'http://127.0.0.1:%d/pair.git' % forwards.enter_context(side.device.forward(port, reach))
         run_checks(repo, a, b, url, profile, password, sections, repository)
     except Exception:  # noqa: BLE001
         pass
@@ -257,7 +330,8 @@ def main():
         for machine in (a, b):
             cleanup(machine, repository)
         if repository.get('id'):
-            a.sh('python3 - ' + shlex.quote(repository['id']), stdin=DELETE_REPOSITORY)
+            a.delete_repository(repository['id'])
+        forwards.close()
         repo.close()
     failed = [name for name, outcome in results.items() if outcome == 'FAIL']
     status = 'FAIL' if failed or not results else 'PASS'
