@@ -1,0 +1,2 @@
+interrupt via CTRL_BREAK (a console Ctrl-C key is proven by the terminal Ctrl-C check)
+{"check": "setup-recovery-sigint", "status": "PASS", "same_identity": true, "seconds": 168.87}

@@ -1,0 +1,1 @@
+{"check": "uninstall-pair", "status": "PASS", "seconds": 205.0, "mode": "flags", "pair_fault": "network", "zero_leftovers": true, "inbox_preserved": true, "alias_preserved": true, "no_env_assigned": true, "env_pending_explained": false}

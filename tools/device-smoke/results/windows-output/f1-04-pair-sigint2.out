@@ -1,0 +1,2 @@
+interrupt via CTRL_BREAK (a console Ctrl-C key is proven by the terminal Ctrl-C check)
+{"check": "uninstall-pair", "status": "PASS", "seconds": 176.0, "mode": "flags", "pair_fault": "sigint", "zero_leftovers": true, "inbox_preserved": true, "alias_preserved": true, "no_env_assigned": true, "env_pending_explained": false}
