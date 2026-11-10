@@ -54,3 +54,23 @@ func TestConnectionResetIsCleanOnlyAfterTheClientFinished(t *testing.T) {
 		t.Fatal("a reset while the client was still waiting for data was reported as a clean end")
 	}
 }
+
+func TestCloseWriteFailureIgnoresOnlyTheBridgesOwnClose(t *testing.T) {
+	refused := &net.OpError{Op: "close", Net: "tcp", Err: syscall.ECONNREFUSED}
+	for _, c := range []struct {
+		name     string
+		err      error
+		finished bool
+		want     bool // reported as a failure
+	}{
+		{"no error", nil, false, false},
+		{"closed after finish", net.ErrClosed, true, false},
+		{"closed, bridge had not finished", net.ErrClosed, false, true},
+		{"real failure after finish", refused, true, true},
+		{"real failure", refused, false, true},
+	} {
+		if got := closeWriteFailure(c.err, c.finished) != nil; got != c.want {
+			t.Errorf("%s: failure=%v, want %v", c.name, got, c.want)
+		}
+	}
+}

@@ -107,8 +107,12 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 	}
 	var closeOnce sync.Once
 	var closeErr error
+	var finished atomic.Bool // the bridge itself has closed both sides
 	finish := func() error {
-		closeOnce.Do(func() { closeErr = errors.Join(sshd.Close(), stream.Close()) })
+		closeOnce.Do(func() {
+			finished.Store(true)
+			closeErr = errors.Join(sshd.Close(), stream.Close())
+		})
 		return closeErr
 	}
 	stop := context.AfterFunc(ctx, func() {
@@ -136,10 +140,7 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 		}
 		copyErr = normalizeBridgeError(copyErr)
 		if tcp, ok := sshd.(*net.TCPConn); ok {
-			// Like from_sshd: once the session ended cleanly, CloseWrite racing finish's Close is not a failure.
-			if closeErr := normalizeBridgeError(tcp.CloseWrite()); copyErr != nil {
-				copyErr = errors.Join(copyErr, closeErr)
-			}
+			copyErr = errors.Join(copyErr, closeWriteFailure(tcp.CloseWrite(), finished.Load()))
 		}
 		copyErr = excuseReset(ctx, copyErr, sshdEOF)
 		if copyErr != nil {
@@ -190,6 +191,15 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 		return result, managedSSHBoundary("command", errors.Join(ctx.Err(), context.Cause(ctx), resultErr, cleanupErr))
 	}
 	return result, managedSSHBoundary("command", errors.Join(resultErr, cleanupErr))
+}
+
+// closeWriteFailure is what a failed CloseWrite (the FIN to sshd) counts as. The one benign case is the bridge's own
+// finish() having already closed the socket after sshd's end; any other failure means the FIN may never have landed.
+func closeWriteFailure(err error, finished bool) error {
+	if finished && normalizeBridgeError(err) == nil {
+		return nil
+	}
+	return err
 }
 
 // resetGrace bounds how long a connection reset waits for the other direction to show a plain EOF.
