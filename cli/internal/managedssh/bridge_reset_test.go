@@ -8,9 +8,12 @@ import (
 	"time"
 )
 
-// resetBridge runs BridgeSSH against an sshd that sends part of a reply and then RST-closes. clientEOF makes the
-// client finish sending first (a normal exit); otherwise it stays open, still waiting for the rest of the reply.
-func resetBridge(t *testing.T, clientEOF bool) error {
+// resetBridge runs BridgeSSH against an sshd that sends "reply" and then RST-closes. order says when the client
+// finishes sending relative to the reply:
+//   - "after": the client got the whole reply, then left (EOF), then sshd reset: how a Windows session ends
+//   - "before": the client left first, sshd still sent and was cut: a download cut short
+//   - "never": the client stays, waiting for the rest: an upload or download cut short
+func resetBridge(t *testing.T, order string) error {
 	t.Helper()
 	if len(closeResets) == 0 { // the Windows reset error is already listed; a Unix host lists none
 		closeResets = []error{syscall.ECONNRESET}
@@ -24,34 +27,61 @@ func resetBridge(t *testing.T, clientEOF bool) error {
 		t.Fatal(err)
 	}
 	defer listener.Close()
+	sendReply, reset := make(chan struct{}), make(chan struct{})
 	go func() {
 		connection, acceptErr := listener.AcceptTCP()
 		if acceptErr != nil {
 			return
 		}
-		_, _ = connection.Write([]byte("partial reply"))
-		time.Sleep(100 * time.Millisecond) // the client's EOF, when there is one, lands first
-		_ = connection.SetLinger(0)        // close sends RST
+		<-sendReply
+		_, _ = connection.Write([]byte("reply"))
+		<-reset
+		_ = connection.SetLinger(0) // close sends RST
 		_ = connection.Close()
 	}()
 	bridgeSide, clientSide := tcpPair(t)
 	defer clientSide.Close()
-	go func() { _, _ = io.Copy(io.Discard, clientSide) }()
-	if clientEOF {
-		_ = clientSide.CloseWrite()
-	}
+	got := make(chan struct{})
+	go func() {
+		buffer := make([]byte, 5)
+		if _, readErr := io.ReadFull(clientSide, buffer); readErr == nil {
+			close(got)
+		}
+		_, _ = io.Copy(io.Discard, clientSide)
+	}()
+	go func() {
+		switch order {
+		case "after":
+			close(sendReply)
+			<-got
+			_ = clientSide.CloseWrite()
+			time.Sleep(50 * time.Millisecond)
+		case "before":
+			_ = clientSide.CloseWrite()
+			time.Sleep(50 * time.Millisecond)
+			close(sendReply)
+			<-got
+		default:
+			close(sendReply)
+			<-got
+		}
+		close(reset)
+	}()
 	_, err = BridgeSSH(t.Context(), bridgeSide, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second)
 	return err
 }
 
-// A connection reset after the client finished sending is how Windows OpenSSH ends a session; the same reset
-// while the client still waits for data is a truncated session and must be audited as a failure.
-func TestConnectionResetIsCleanOnlyAfterTheClientFinished(t *testing.T) {
-	if err := resetBridge(t, true); err != nil {
-		t.Fatalf("reset after the client's EOF: %v, want a clean end", err)
+// A connection reset after the client had everything and left is how Windows OpenSSH ends a session; the same reset
+// while the client still waits for data, or after a client that left while sshd was still sending (a download
+// cut short), is a truncated session and must be audited as a failure.
+func TestConnectionResetIsCleanOnlyWhenBothDirectionsFinished(t *testing.T) {
+	if err := resetBridge(t, "after"); err != nil {
+		t.Fatalf("reset after the client had the reply and left: %v, want a clean end", err)
 	}
-	if err := resetBridge(t, false); err == nil {
-		t.Fatal("a reset while the client was still waiting for data was reported as a clean end")
+	for _, order := range []string{"before", "never"} {
+		if err := resetBridge(t, order); err == nil {
+			t.Fatalf("a reset (%s) was reported as a clean end", order)
+		}
 	}
 }
 
