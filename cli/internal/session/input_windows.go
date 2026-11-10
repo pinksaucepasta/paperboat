@@ -7,7 +7,7 @@ import (
 	"errors"
 	"io"
 	"os"
-	"unicode/utf16"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -40,6 +40,12 @@ func readLocalInput(ctx context.Context, file *os.File, p []byte) (int, error) {
 	return n, err
 }
 
+// consoleInput carries what a console read leaves behind between calls (a split surrogate pair, bytes that did not fit).
+var consoleInput struct {
+	sync.Mutex
+	decoder consoleDecoder
+}
+
 // readHandle reads a console with ReadConsoleW: ReadFile on a console handle ends the stream at Ctrl-Z (0x1a) even in raw
 // VT mode and swallows the bytes after it, so job control from a Windows client never reached the remote shell
 // (measured through ssh -tt/ConPTY on Windows 11; ReadConsoleW with a zero wakeup mask delivers 0x1a intact). Anything that
@@ -49,23 +55,28 @@ func readHandle(handle windows.Handle, file *os.File, p []byte) (int, error) {
 	if windows.GetConsoleMode(handle, &mode) != nil {
 		return file.Read(p)
 	}
-	// ReadConsoleW fills UTF-16 units; a UTF-8 byte string of at most 3 bytes per unit fits p, with room for the low half of a
-	// surrogate pair that the first read may leave behind.
-	units := min(max(len(p)/3-1, 1), 10922)
-	buffer := make([]uint16, units+1)
+	consoleInput.Lock()
+	if consoleInput.decoder.pending() {
+		n := consoleInput.decoder.decode(p, nil)
+		consoleInput.Unlock()
+		return n, nil
+	}
+	consoleInput.Unlock()
+	buffer := make([]uint16, min(max(len(p)/3, 1), 10922))
 	control := struct{ length, initial, mask, state uint32 }{length: 16}
-	var read uint32
-	if err := windows.ReadConsole(handle, &buffer[0], uint32(units), &read, (*byte)(unsafe.Pointer(&control))); err != nil {
-		return 0, err
-	}
-	if read == 0 {
-		return 0, io.EOF
-	}
-	if last := buffer[read-1]; last >= 0xd800 && last < 0xdc00 {
-		var more uint32
-		if err := windows.ReadConsole(handle, &buffer[read], 1, &more, (*byte)(unsafe.Pointer(&control))); err == nil {
-			read += more
+	for {
+		var read uint32
+		if err := windows.ReadConsole(handle, &buffer[0], uint32(len(buffer)), &read, (*byte)(unsafe.Pointer(&control))); err != nil {
+			return 0, err
+		}
+		if read == 0 {
+			return 0, io.EOF
+		}
+		consoleInput.Lock()
+		n := consoleInput.decoder.decode(p, buffer[:read])
+		consoleInput.Unlock()
+		if n > 0 { // a lone high surrogate yields nothing yet: read its other half
+			return n, nil
 		}
 	}
-	return copy(p, string(utf16.Decode(buffer[:read]))), nil
 }
