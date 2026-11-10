@@ -115,12 +115,13 @@ func (m *Manager) Interrupt(sessionID string, key InputKey, data byte) bool {
 	if !ok {
 		return false
 	}
+	through := session.fanout.PublishedEnd() // what is queued now predates the interrupt; the prompt after it does not
 	handled, err := process.Interrupt(data, func() { session.interrupt.Store(&key) })
 	if err != nil {
 		observeSessionFailure(session, "input", classifySessionFailure("input", err))
 	}
 	if handled {
-		session.fanout.DiscardPendingOutput()
+		session.fanout.DiscardPendingOutput(through)
 	}
 	return handled
 }

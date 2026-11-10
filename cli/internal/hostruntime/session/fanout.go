@@ -56,6 +56,8 @@ type Fanout struct {
 	attachments map[string]*attachmentCursor
 	// ringEnd is the largest EndSequence of the retained ring (0 when empty).
 	ringEnd uint64
+	// published is the end of the last event published, never reset: the boundary an interrupt cuts to.
+	published uint64
 	// minimum, haveMinimum and atMinimum are the attached cursors' minimum at the last compaction and how
 	// many attached cursors were on it.
 	minimum     uint64
@@ -229,22 +231,34 @@ func (f *Fanout) SkipTo(attachmentID string, nextSequence uint64) error {
 	return nil
 }
 
-// DiscardPendingOutput drops terminal output (channel 1) already queued for every attached viewer, the userspace
-// counterpart of a tty flushing its output queue on VINTR (EternalTerminal drops droppable output on interrupt the
-// same way). History keeps it for replay. Each cursor stops before the first control event (resize) it has not
-// delivered, so those still arrive; the viewer sees a sequence gap, as after a lagged skip.
-func (f *Fanout) DiscardPendingOutput() {
+// PublishedEnd is the end of the last output published: what an interrupt handled now has already been queued.
+func (f *Fanout) PublishedEnd() uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.published
+}
+
+// DiscardPendingOutput drops terminal output (channel 1) queued for every attached viewer up to through, the
+// PublishedEnd taken when the interrupt arrived: the userspace counterpart of a tty flushing its output queue on
+// VINTR (EternalTerminal drops droppable output on interrupt the same way). Whatever the program printed after the
+// interrupt, the shell's next prompt above all, stays queued. History keeps all of it for replay. Each cursor stops
+// before the first control event (resize) it has not delivered, so those still arrive; the viewer sees a sequence
+// gap, as after a lagged skip.
+func (f *Fanout) DiscardPendingOutput(through uint64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, cursor := range f.attachments {
 		if cursor.state != Attached || !cursor.receiveOutput || !cursor.hasCursor || cursor.cursor >= cursor.enqueuedEnd {
 			continue
 		}
-		target := cursor.enqueuedEnd
+		target := min(through, cursor.enqueuedEnd)
 		for _, event := range f.ring {
 			if event.Channel != 1 && event.StartSequence >= cursor.cursor && event.StartSequence < target {
 				target = event.StartSequence
 			}
+		}
+		if target <= cursor.cursor {
+			continue
 		}
 		cursor.cursor, cursor.queuedBytes = target, cursor.enqueuedEnd-target
 		notify(cursor.notify)
@@ -270,6 +284,7 @@ func (f *Fanout) PublishOwned(event history.Event) ([]Eviction, error) {
 		}
 	}
 	f.insertEventLocked(event)
+	f.published = event.EndSequence
 	var evictions []Eviction
 	for id, cursor := range f.attachments {
 		if cursor.state != Attached || !cursor.receiveOutput {

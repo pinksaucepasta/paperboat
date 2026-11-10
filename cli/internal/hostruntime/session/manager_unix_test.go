@@ -1054,3 +1054,38 @@ func TestCtrlCDiscardsOutputQueuedForAViewer(t *testing.T) {
 		t.Fatalf("%d bytes of flood still queued after Ctrl-C", got)
 	}
 }
+
+// F3-11: what the shell prints in answer to Ctrl-C is not discarded with the flood.
+func TestCtrlCKeepsTheOutputThatFollowsIt(t *testing.T) {
+	manager, root, shell := realManager(t)
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "prompt", Command: shellCommand(shell, root, "trap 'echo ANSWER; exit 0' INT; head -c 300000 /dev/zero | tr '\\0' x; while :; do sleep 0.1; done")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background(), created.ID)
+	if _, err := manager.Attach(created.ID, "att_prompt", 0); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+		if _, queued, _ := manager.AttachmentStatus(created.ID, "att_prompt"); queued >= 300000 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("flood never queued")
+		}
+	}
+	key := InputKey{ClientID: "cli", AttachmentID: "att_prompt", Generation: created.Generation, InputSequence: 1}
+	if !manager.Interrupt(created.ID, key, 3) {
+		t.Fatal("Ctrl-C was not taken as the terminal's interrupt")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var seen []byte
+	for from := uint64(0); !bytes.Contains(seen, []byte("ANSWER")); {
+		event, err := manager.WaitNext(ctx, created.ID, "att_prompt", from)
+		if err != nil {
+			t.Fatalf("no answer to Ctrl-C after the discard (%d bytes seen): %v", len(seen), err)
+		}
+		seen, from = append(seen, event.Data...), event.EndSequence
+	}
+}
