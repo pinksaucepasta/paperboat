@@ -301,6 +301,32 @@ func TestRunOneShotSSHLoopbackBridgeFailureKillsAndReaps(t *testing.T) {
 	assertLoopbackProcessStopped(t, process)
 }
 
+// victus 2026-11-10: ssh.exe failed, reset its socket and exited; the bridge's "connection reset" was returned in place
+// of the exit status, so pb printed its generic failure text. OpenSSH's own exit is the result, and it is not killed.
+func TestRunOneShotSSHLoopbackReturnsTheProcessExitWhenItResetsItsSocket(t *testing.T) {
+	exited := errors.New("ssh exited 255")
+	process := newLoopbackTestProcess()
+	err := runOneShotSSHLoopback(t.Context(), newLoopbackTestStream(), time.Second, time.Second, func(port uint16) (loopbackSSHProcess, error) {
+		connection, dialErr := net.DialTCP("tcp4", nil, &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: int(port)})
+		if dialErr != nil {
+			return nil, dialErr
+		}
+		go func() {
+			_, _ = io.WriteString(connection, "SSH-2.0-test\r\n")
+			_ = connection.SetLinger(0) // close with a reset, as an exiting process with unread input does
+			_ = connection.Close()
+			process.complete(exited)
+		}()
+		return process, nil
+	}, allowLoopbackTestOwner)
+	if !errors.Is(err, exited) {
+		t.Fatalf("error=%v, want the process exit", err)
+	}
+	if process.waitCalls.Load() != 1 || process.killCalls.Load() != 0 {
+		t.Fatalf("wait calls=%d kill calls=%d", process.waitCalls.Load(), process.killCalls.Load())
+	}
+}
+
 func assertLoopbackProcessStopped(t *testing.T, process *loopbackTestProcess) {
 	t.Helper()
 	if process.waitCalls.Load() != 1 || process.killCalls.Load() != 1 {

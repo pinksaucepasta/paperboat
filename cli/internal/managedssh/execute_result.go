@@ -1,5 +1,10 @@
 package managedssh
 
+import (
+	"errors"
+	"os/exec"
+)
+
 // NativeExitError retains the native process status without incorporating its
 // stderr or arguments into diagnostic text. Expected exits are not SDK faults.
 type NativeExitError struct {
@@ -17,3 +22,12 @@ type NativeLaunchError struct{ Err error }
 
 func (e NativeLaunchError) Error() string { return "native SSH tool could not start" }
 func (e NativeLaunchError) Unwrap() error { return e.Err }
+
+// nativeProcessResult types a finished native tool's own exit status as a NativeExitError.
+func nativeProcessResult(err error) error {
+	var exited *exec.ExitError
+	if errors.As(err, &exited) {
+		return NativeExitError{Code: exited.ExitCode(), Err: err}
+	}
+	return err
+}

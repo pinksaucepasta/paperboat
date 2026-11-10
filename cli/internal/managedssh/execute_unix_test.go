@@ -395,3 +395,14 @@ func TestOpenSSHExecutorForwardsDirectedAndGroupSignals(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeProcessResultTypesAnExitStatus(t *testing.T) {
+	err := nativeProcessResult(errors.Join(exec.Command("sh", "-c", "exit 7").Run(), errors.New("bridge")))
+	var exit NativeExitError
+	if !errors.As(err, &exit) || exit.Code != 7 {
+		t.Fatalf("result=%v, want NativeExitError 7", err)
+	}
+	if plain := errors.New("no exit"); nativeProcessResult(plain) != plain {
+		t.Fatal("an error without an exit status was changed")
+	}
+}

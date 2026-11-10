@@ -152,10 +152,15 @@ func runOneShotSSHLoopback(ctx context.Context, stream LoopbackSSHStream, accept
 		case bridgeErr = <-bridgeDone:
 			bridgeOK = true
 			if bridgeErr != nil {
+				// OpenSSH's own exit is the result, as on Unix: it resets its socket when it fails (authentication, host
+				// key, a remote status) and ends by itself once its transport is closed here. Only a process that has
+				// to be stopped leaves the bridge failure as the result.
 				closeResources(connection)
 				if !processOK {
-					_ = stopAndWaitSSHProcess(process, processDone)
-					processOK = true
+					processErr = waitOrStopSSHProcess(process, processDone, processExitTimeout)
+				}
+				if processErr != nil {
+					return processErr
 				}
 				return bridgeErr
 			}
@@ -191,6 +196,20 @@ func runOneShotSSHLoopback(ctx context.Context, stream LoopbackSSHStream, accept
 	}
 	closeResources(connection)
 	return errors.Join(processErr, bridgeErr)
+}
+
+// waitOrStopSSHProcess returns the process's own exit result when it ends within timeout; a process stopped here has
+// none.
+func waitOrStopSSHProcess(process loopbackSSHProcess, done <-chan error, timeout time.Duration) error {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-timer.C:
+		_ = stopAndWaitSSHProcess(process, done)
+		return nil
+	}
 }
 
 func stopAndWaitSSHProcess(process loopbackSSHProcess, done <-chan error) error {

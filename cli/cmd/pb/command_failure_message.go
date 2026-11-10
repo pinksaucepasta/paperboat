@@ -393,5 +393,16 @@ func sshFailureMessage(err error) string {
 	if soleCommandOwner(err) == managedssh.ErrSSHServerClosed {
 		return managedssh.ErrSSHServerClosed.Error()
 	}
+	// Windows runs ssh.exe against a local connection pb opens for it; each step that can fail there is named.
+	for step, text := range map[error]string{
+		managedssh.ErrSSHLoopbackAccept:        "the OpenSSH client did not connect to it in time",
+		managedssh.ErrSSHLoopbackProcessExited: "the OpenSSH client exited before connecting to it",
+		managedssh.ErrSSHLoopbackOwner:         "another program connected to it instead of the OpenSSH client",
+		managedssh.ErrSSHLoopbackShutdown:      "the OpenSSH client did not exit after the session ended and was stopped",
+	} {
+		if boundedErrorWalk(err, func(e error) bool { return e == step }) {
+			return "Paperboat opened a local connection for the OpenSSH client (ssh.exe), but " + text + ". Retry; run `pb ssh doctor <machine>` if this continues."
+		}
+	}
 	return ""
 }

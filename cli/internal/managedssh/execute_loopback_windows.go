@@ -24,14 +24,18 @@ const (
 type LoopbackOpenSSHExecutor struct{}
 
 func (LoopbackOpenSSHExecutor) Execute(ctx context.Context, executable string, arguments func(port uint16) []string, environment []string, stream LoopbackSSHStream) error {
-	path, err := resolveOpenSSHExecutable(executable)
-	if err != nil || ctx == nil || arguments == nil || stream == nil || !validEnvironment(environment) {
+	if ctx == nil || arguments == nil || stream == nil || !validEnvironment(environment) {
 		if stream != nil {
 			_ = stream.Close()
 		}
 		return ErrOpenSSHExecution
 	}
-	return runOneShotSSHLoopback(ctx, stream, openSSHLoopbackAcceptTimeout, openSSHLoopbackExitTimeout, func(port uint16) (loopbackSSHProcess, error) {
+	path, err := resolveOpenSSHExecutable(executable)
+	if err != nil {
+		_ = stream.Close()
+		return NativeLaunchError{Err: errors.Join(ErrOpenSSHExecution, err)}
+	}
+	return nativeProcessResult(runOneShotSSHLoopback(ctx, stream, openSSHLoopbackAcceptTimeout, openSSHLoopbackExitTimeout, func(port uint16) (loopbackSSHProcess, error) {
 		values := arguments(port)
 		if !validProcessValues(values) {
 			return nil, ErrOpenSSHExecution
@@ -42,8 +46,12 @@ func (LoopbackOpenSSHExecutor) Execute(ctx context.Context, executable string, a
 		if environment != nil {
 			command.Env = append([]string(nil), environment...)
 		}
-		return startOpenSSHLoopbackProcess(command)
-	}, verifyWindowsSSHLoopbackOwner)
+		process, startErr := startOpenSSHLoopbackProcess(command)
+		if startErr != nil {
+			return nil, NativeLaunchError{Err: startErr}
+		}
+		return process, nil
+	}, verifyWindowsSSHLoopbackOwner))
 }
 
 type openSSHLoopbackProcess struct {
