@@ -20,6 +20,7 @@ import (
 
 type diagnosticRepositoryStub struct {
 	intent      diagnosticuploads.Intent
+	references  []string // the failure references of the last reservation
 	reserveErr  error
 	getErr      error
 	completeErr error
@@ -36,6 +37,7 @@ func (s *diagnosticRepositoryStub) Reserve(_ context.Context, request diagnostic
 	if request.UserID != "usr_test" || request.CLIClientSessionID != "cli_test" {
 		return diagnosticuploads.Intent{}, diagnosticuploads.ErrNotFound
 	}
+	s.references = request.FailureReferences
 	if s.intent.ID == "" {
 		s.intent = proposed
 	}
@@ -82,6 +84,37 @@ func (s *diagnosticObjectsStub) AuthorizePut(_ context.Context, _ string, _ int6
 }
 func (s *diagnosticObjectsStub) Stat(_ context.Context, _ string) (diagnosticuploads.ObjectMetadata, error) {
 	return s.metadata, s.statErr
+}
+
+// A bundle that carries the most failure references (the client sends them, cli/internal/bugreport/workflow.go) was
+// refused as invalid_request: the field was not allowed and the body outgrew 2048 bytes.
+func TestDiagnosticUploadIntentAcceptsTheMaximumFailureReferences(t *testing.T) {
+	repository, objects := &diagnosticRepositoryStub{}, &diagnosticObjectsStub{}
+	service, err := diagnosticuploads.New(repository, objects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	references := make([]string, diagnosticuploads.MaximumFailureReferences)
+	for i := range references {
+		references[i] = fmt.Sprintf("support_01234567-89ab-4def-8123-%012d", i+1)
+	}
+	body, err := json.Marshal(map[string]any{"schema": "paperboat.diagnostic-upload-intent-request/v1",
+		"correlation_id": "support_01234567-89ab-4def-8123-456789abcdef", "bytes": 1024,
+		"sha256":     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		"categories": []string{"manifest", "recent_events", "redacted_events", "status"}, "failure_references": references})
+	if err != nil || len(body) <= 2048 {
+		t.Fatalf("the test body must exceed the old cap: %d bytes, err=%v", len(body), err)
+	}
+	request := authenticatedDiagnosticRequest(http.MethodPost, "/v1/diagnostic-upload-intents", body)
+	request.Header.Set("Idempotency-Key", "diagnostic-operation-refs-1")
+	response := httptest.NewRecorder()
+	diagnosticUploadIntentCreate(service).ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+	}
+	if len(repository.references) != diagnosticuploads.MaximumFailureReferences {
+		t.Fatalf("stored %d references", len(repository.references))
+	}
 }
 
 func TestDiagnosticUploadHandlerLifecycle(t *testing.T) {

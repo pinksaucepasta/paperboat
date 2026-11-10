@@ -9,7 +9,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/diagnosticuploads"
 )
 
-const maximumDiagnosticIntentRequestBytes = 2048
+// The body lists up to diagnosticuploads.MaximumFailureReferences references of about 50 bytes each besides the fixed fields.
+const maximumDiagnosticIntentRequestBytes = 8192
 
 type diagnosticUploadIntentResponse struct {
 	Schema        string            `json:"schema"`
@@ -45,7 +46,7 @@ func diagnosticUploadIntentCreate(service *diagnosticuploads.Service) http.Handl
 		}
 		var body request
 		if !decodeStrictDiagnosticJSON(w, r, &body, maximumDiagnosticIntentRequestBytes,
-			"schema", "correlation_id", "bytes", "sha256", "categories") {
+			"schema", "correlation_id", "bytes", "sha256", "categories", "failure_references") {
 			return
 		}
 		if body.Schema != "paperboat.diagnostic-upload-intent-request/v1" {
