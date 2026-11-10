@@ -1,0 +1,2 @@
+{"check": "update-continuity", "target": "w7-winpool3c-2252", "status": "PASS", "update_attempts": 1, "same_shell_after_update": true, "exec_finished": true, "old_owner_retired": true, "busy_while_ssh_open": true}
+EXIT=0
