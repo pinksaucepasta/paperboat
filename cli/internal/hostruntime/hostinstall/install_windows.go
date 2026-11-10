@@ -937,7 +937,10 @@ func installUnboundWindowsBinary(ctx context.Context, request Request) (resultEr
 	if err := ensureWindowsTokenAt(tokenPath, request.OwnerSID); err != nil {
 		return err
 	}
-	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: instance, OwnerSID: request.OwnerSID, User: request.User, StateRoot: request.StateRoot, Workspace: request.WorkspaceRoot, ControlURL: request.ControlURL, ListenAddress: runtimeport.Primary, EnrollmentPending: true, TokenFile: tokenPath, InstalledAt: time.Now().UTC(), Source: request.Source, RollbackSource: rollbackSource}
+	// The artifact descriptor is what signed recovery authorizes against: without it a failed first install
+	// cannot restore anything (victus 2026-11-10: TUF target descriptor invalid).
+	request.Artifact.Version = request.Source.Version
+	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: instance, OwnerSID: request.OwnerSID, User: request.User, StateRoot: request.StateRoot, Workspace: request.WorkspaceRoot, ControlURL: request.ControlURL, ListenAddress: runtimeport.Primary, EnrollmentPending: true, TokenFile: tokenPath, InstalledAt: time.Now().UTC(), Artifact: request.Artifact, Source: request.Source, RollbackSource: rollbackSource}
 	if err := writeWindowsConfigAt(config, instanceRoot); err != nil {
 		return err
 	}

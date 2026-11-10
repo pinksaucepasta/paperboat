@@ -82,3 +82,24 @@ func TestFirewallDisableFailureKeepsOwnershipClassificationAndCause(t *testing.T
 		t.Fatalf("ownership persistence error exposed command output: %v", err)
 	}
 }
+
+type flakyFirewallRunner struct{ failures, calls int }
+
+func (r *flakyFirewallRunner) Run(context.Context, string, ...string) ([]byte, error) {
+	r.calls++
+	if r.calls <= r.failures {
+		return nil, errors.New("exit status 1")
+	}
+	return []byte(`{"captured_at":"2026-08-20T00:00:00Z","system_sshd":false,"profiles":[],"openssh_inbound":[]}`), nil
+}
+
+func TestFirewallSnapshotRetriesATransientFailure(t *testing.T) {
+	runner := &flakyFirewallRunner{failures: 2}
+	if _, err := snapshotFirewall(context.Background(), Config{Runner: runner}); err != nil || runner.calls != 3 {
+		t.Fatalf("two transient failures: err=%v calls=%d", err, runner.calls)
+	}
+	runner = &flakyFirewallRunner{failures: 99}
+	if _, err := snapshotFirewall(context.Background(), Config{Runner: runner}); !errors.Is(err, ErrFirewallSnapshot) || runner.calls != firewallSnapshotAttempts {
+		t.Fatalf("persistent failure: err=%v calls=%d", err, runner.calls)
+	}
+}

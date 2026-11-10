@@ -66,6 +66,10 @@ func PreparePendingWindowsDaemonReplacement(ctx context.Context, ownerSID string
 		}
 		recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), windowsServicePlanRollbackTimeout)
 		defer cancel()
+		// A failed install may have disabled the daemon before it stopped; the resume must not leave it so.
+		if err := controller.Enable(recovery, installer.DefinitionPath()); err != nil {
+			return err
+		}
 		if err := controller.Start(recovery, installer.DefinitionPath()); err != nil {
 			return err
 		}

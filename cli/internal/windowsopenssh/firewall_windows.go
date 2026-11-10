@@ -10,7 +10,25 @@ import (
 	"time"
 )
 
-func snapshotFirewall(ctx context.Context, config Config) (FirewallSnapshot, error) {
+// firewallSnapshotAttempts bounds the retries of one transient ActiveStore read failure (victus 2026-11-10: a
+// single powershell exit 1 failed a whole install).
+const firewallSnapshotAttempts = 3
+
+func snapshotFirewall(ctx context.Context, config Config) (snapshot FirewallSnapshot, err error) {
+	for attempt := 1; attempt <= firewallSnapshotAttempts; attempt++ {
+		if snapshot, err = snapshotFirewallOnce(ctx, config); err == nil || attempt == firewallSnapshotAttempts {
+			return snapshot, err
+		}
+		select {
+		case <-ctx.Done():
+			return snapshot, err
+		case <-time.After(time.Duration(attempt) * 500 * time.Millisecond):
+		}
+	}
+	return snapshot, err
+}
+
+func snapshotFirewallOnce(ctx context.Context, config Config) (FirewallSnapshot, error) {
 	timed, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	script := strings.Join([]string{
