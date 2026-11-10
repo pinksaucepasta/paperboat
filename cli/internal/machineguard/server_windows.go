@@ -319,9 +319,6 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 	return wfp.Apply(values, known, cfg.LoopbackCIDR, protectedLoopbackCIDRs(cfg)...)
 }
 func cleanupHistoricalLocalNames(ctx context.Context, cfg Config) error {
-	if err := clearMachineHosts(ctx, cfg); err != nil {
-		return err
-	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}

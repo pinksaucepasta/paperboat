@@ -163,12 +163,8 @@ const darwinResolverMarker = "# Managed by Paperboat machine guard\n"
 
 var darwinResolverDirectory = "/etc/resolver"
 
-// cleanupHistoricalLocalNames removes only marker-owned resolver files and
-// Paperboat's marked hosts block. New local DNS/resolver projections are gone.
+// cleanupHistoricalLocalNames removes only marker-owned resolver files. New local DNS/resolver projections are gone.
 func cleanupHistoricalLocalNames(ctx context.Context, cfg Config) error {
-	if err := clearMachineHosts(ctx, cfg); err != nil {
-		return err
-	}
 	entries, err := os.ReadDir(darwinResolverDirectory)
 	if os.IsNotExist(err) {
 		return nil
@@ -198,7 +194,6 @@ func cleanupHistoricalLocalNames(ctx context.Context, cfg Config) error {
 			}
 		}
 	}
-	flushHostsCache()
 	return ctx.Err()
 }
 

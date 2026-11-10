@@ -67,7 +67,7 @@ func TestDarwinUninstallOwnedLifecycle(t *testing.T) {
 	}
 	cfg := darwinInstallConfig{HelperPath: filepath.Join("/Library/PrivilegedHelperTools", label), LaunchPath: filepath.Join("/Library/LaunchDaemons", label+".plist"), Label: label, Socket: filepath.Join("/var/run", label+".sock"), Account: "_unused_fixture", LaunchArguments: []string{"-test.run=TestDarwinInstallerReadinessChild", "--", "readiness-child", filepath.Join("/var/run", label+".sock")}}
 	denyArgs := []string{"-test.run=TestDarwinUninstallDenyChild", "--", "uninstall-deny-child", state, anchor}
-	guardCfg := Config{StateDir: state, hostsPath: testHostsFile(t)}
+	guardCfg := Config{StateDir: state}
 	before, err := exec.Command("/sbin/pfctl", "-sr").Output()
 	if err != nil {
 		t.Fatal(err)

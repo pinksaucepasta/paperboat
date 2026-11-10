@@ -132,7 +132,7 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 	root := t.TempDir()
 	os.Chmod(filepath.Dir(root), 0755)
 	os.Chmod(root, 0755)
-	cfg := Config{StateDir: filepath.Join(root, "state"), Socket: filepath.Join(root, "run", "control.sock"), hostsPath: testHostsFile(t), legacyDNSInterfacePath: filepath.Join(root, "no-paperboat-dns")}
+	cfg := Config{StateDir: filepath.Join(root, "state"), Socket: filepath.Join(root, "run", "control.sock"), legacyDNSInterfacePath: filepath.Join(root, "no-paperboat-dns")}
 	start := func() (*Client, context.CancelFunc, <-chan error) {
 		t.Helper()
 		ctx, cancel := context.WithCancel(context.Background())

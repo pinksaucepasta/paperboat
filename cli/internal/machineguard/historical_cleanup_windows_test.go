@@ -3,7 +3,6 @@
 package machineguard
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -76,13 +75,7 @@ func TestWindowsHistoricalCleanupIsScoped(t *testing.T) {
 		t.Fatal(err)
 	}
 	foreign.Close()
-	hosts := filepath.Join(root, "hosts")
-	outside := []byte("# foreign\r\n127.0.0.1 localhost\r\n")
-	initial := append([]byte(hostsStart+"\n127.100.0.4 hp.pprbt\n"+hostsEnd+"\n"), outside...)
-	if err := os.WriteFile(hosts, initial, 0644); err != nil {
-		t.Fatal(err)
-	}
-	cfg := Config{StateDir: state, hostsPath: hosts}
+	cfg := Config{StateDir: state}
 	if err := cleanupHistoricalLocalNames(t.Context(), cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -94,10 +87,6 @@ func TestWindowsHistoricalCleanupIsScoped(t *testing.T) {
 		t.Fatal("foreign registry entry removed", err)
 	} else {
 		key.Close()
-	}
-	data, err := os.ReadFile(hosts)
-	if err != nil || !bytes.Equal(data, outside) {
-		t.Fatal("foreign hosts bytes changed", err)
 	}
 	if err := cleanupHistoricalLocalNames(t.Context(), cfg); err != nil {
 		t.Fatal("name cleanup retry", err)

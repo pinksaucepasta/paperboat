@@ -1887,7 +1887,7 @@ answer carries one change; a 5k-machine team survives a server restart (snapshot
 
 **Fact that shapes it.** Local names are not in a hosts file or local DNS: the local access domain is a public wildcard,
 so every `<machine>.<domain>` and `<port>.<machine>.<domain>` resolves to 127.100.0.1, the browser gateway, which routes
-by Host/SNI (checked with dig; hosts/resolver files are only cleaned up, `machineguard/hosts.go`, `server_darwin.go:166`).
+by Host/SNI (checked with dig; resolver files are only cleaned up, `server_darwin.go:166`).
 So names never collide in DNS; the one host-wide bottleneck is the gateway's 127.100.0.1:80/443 (+ its 1024-65535 ports).
 **Goal.** Any number of OS users, each with any account, simultaneously, with no platform-wide cap; one user's
 conflict degrades only that item (done: 5080a29b, `listener_refused`). Per-host ceiling: 127.100/16 = 65,533 machine

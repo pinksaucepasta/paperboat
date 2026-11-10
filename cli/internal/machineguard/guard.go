@@ -56,7 +56,6 @@ type Config struct {
 	Socket, StateDir       string
 	LoopbackCIDR           string
 	ProtectedLoopbackCIDRs []string
-	hostsPath              string
 	legacyDNSInterfacePath string
 }
 type request struct {

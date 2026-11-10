@@ -237,7 +237,7 @@ func TestWindowsGuardServerProcess(t *testing.T) {
 			time.Sleep(20 * time.Millisecond)
 		}
 	}()
-	if err := Serve(ctx, Config{LoopbackCIDR: "127.100.0.0/16", hostsPath: testHostsFile(t)}); err != nil && !errors.Is(err, context.Canceled) {
+	if err := Serve(ctx, Config{LoopbackCIDR: "127.100.0.0/16"}); err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 }

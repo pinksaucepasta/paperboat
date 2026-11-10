@@ -105,9 +105,6 @@ func applyProtection(ctx context.Context, cfg Config, leases []*guardedLease) er
 	return nil
 }
 func cleanupHistoricalLocalNames(ctx context.Context, cfg Config) error {
-	if err := clearMachineHosts(ctx, cfg); err != nil {
-		return err
-	}
 	linkPath := cfg.legacyDNSInterfacePath
 	if linkPath == "" {
 		linkPath = "/sys/class/net/paperboat-dns"

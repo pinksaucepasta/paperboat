@@ -109,7 +109,7 @@ func TestDarwinGuardKernel(t *testing.T) {
 	if err = os.Chmod(root, 0755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{StateDir: filepath.Join(root, "state"), Socket: filepath.Join(root, "control.sock"), LoopbackCIDR: "127.100.0.0/16", hostsPath: testHostsFile(t)}
+	cfg := Config{StateDir: filepath.Join(root, "state"), Socket: filepath.Join(root, "control.sock"), LoopbackCIDR: "127.100.0.0/16"}
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
