@@ -1969,6 +1969,23 @@ class RemainingFamilyPlumbing(unittest.TestCase):
             pairing_lifecycle.enrollment_file(SimpleNamespace(device=object()), 'alias', Directory())
         self.assertEqual(['0123456789ABCDEFGHIJKLMNOP', 'acl'], written)
 
+    def test_a_windows_uninstall_is_awaited_until_its_helper_status_reads_completed(self):
+        import pairing_lifecycle
+        states = iter(['pending', 'removing', 'completed'])
+
+        class Status:
+            def read_text(self):
+                return json.dumps({'state': next(states)})
+
+        with patch.object(winhost, 'device', lambda: object()), patch.object(winhost, 'device_path', lambda path: Status()), \
+                patch.object(pairing_lifecycle.time, 'sleep', lambda seconds: None):
+            pairing_lifecycle.await_windows_uninstall({'data': {'completion_status_path': r'C:\\Temp\\status.json'}})
+            self.assertEqual([], list(states))  # read three times, no more
+            states = iter(['failed'])
+            with self.assertRaisesRegex(RuntimeError, 'ended failed'):
+                pairing_lifecycle.await_windows_uninstall({'completion_status_path': r'C:\\Temp\\status.json'})
+        pairing_lifecycle.await_windows_uninstall({'data': {}})  # no status path (Unix): nothing to wait for
+
     def test_pb_text_keeps_the_stdin_of_the_local_call(self):
         done = winhost.pb_text(sys.executable, ['-c', 'import sys;print(len(sys.stdin.read()))'], timeout=30, stdin=subprocess.DEVNULL)
         self.assertEqual('0\n', done.stdout)

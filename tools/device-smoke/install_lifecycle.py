@@ -157,7 +157,8 @@ def main():
             command(pb, 'service', 'start', '--json')
     elif args.check == 'interrupt-install' and device:
         try:  # Ctrl-C through pb's console while its elevated installer is at work
-            fired, code = device.interrupt_when([str(pb), 'install', '--json'], INSTALLER_RUNNING, seconds=15)
+            # a reinstall hashes and copies ~99 MB before its elevated part starts (120 s+ on a hosted runner)
+            fired, code = device.interrupt_when([str(pb), 'install', '--json'], INSTALLER_RUNNING, seconds=180, exit_seconds=120)
             if not fired or code == 0:
                 raise RuntimeError('did not interrupt a running installation transaction')
         finally:

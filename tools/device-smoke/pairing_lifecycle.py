@@ -387,6 +387,28 @@ def pair(binary, arguments, root, fault, server, password=None):
             proxy.close()
 
 
+def await_windows_uninstall(receipt, seconds=360):
+    """Windows uninstall ends in a helper that finishes after the command returned (state pending): wait for its status.json
+    to read completed before anything is installed over it (an install that raced the helper died with local_io on
+    winpool-9). Elsewhere the receipt has no status path and nothing waits."""
+    path = (receipt.get('data') or receipt).get('completion_status_path') if isinstance(receipt, dict) else None
+    if not path or not winhost.device():
+        return
+    status = winhost.device_path(path)
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            state = json.loads(status.read_text()).get('state')
+        except (OSError, ValueError):
+            state = None
+        if state == 'completed':
+            return
+        if state in ('failed', 'timed_out'):
+            raise RuntimeError('the Windows uninstall helper ended ' + state)
+        time.sleep(3)
+    raise RuntimeError('the Windows uninstall helper did not complete in %d s' % seconds)
+
+
 def uninstall(binary, identifier, check, inbox, script, password):
     # This is disposal of this check's exact enrolled resource, not a claim that
     # reset works. Mint restoration authority before deletion revokes its CLI.
@@ -397,8 +419,9 @@ def uninstall(binary, identifier, check, inbox, script, password):
     if check == 'prompts':
         invoke(binary, 'uninstall', input='UNINSTALL PAPERBOAT\n' + hostname(binary) + '\n', raw=True)
     else:
-        invoke(binary, 'uninstall', '--confirmation', 'UNINSTALL PAPERBOAT',
-               '--hostname', hostname(binary), '--json')
+        receipt = invoke(binary, 'uninstall', '--confirmation', 'UNINSTALL PAPERBOAT',
+                         '--hostname', hostname(binary), '--json')
+        await_windows_uninstall(receipt)
     inventory(script, inbox, installed=False, password=password)
 
 
