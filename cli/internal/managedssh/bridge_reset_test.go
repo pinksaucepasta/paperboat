@@ -376,3 +376,45 @@ func TestMidUploadAbortStaysFailedEvenWhenSSHDExitsPromptly(t *testing.T) {
 		}
 	}
 }
+
+// A client that aborts mid-download (sshd is still sending) is a cut session on every OS: the write towards the
+// aborted client fails, which is a write error, never sshd's end of output (only a reset READ from sshd is that).
+func TestMidDownloadClientAbortIsFailedOnEveryOS(t *testing.T) {
+	for _, windows := range []bool{false, true} {
+		saved := closeResets
+		if windows {
+			closeResets = []error{syscall.ECONNRESET}
+		} else {
+			closeResets = nil
+		}
+		previous := resetGrace
+		resetGrace = 200 * time.Millisecond
+		listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		go func() {
+			if connection, acceptErr := listener.AcceptTCP(); acceptErr == nil {
+				defer connection.Close()
+				chunk := make([]byte, 64<<10)
+				for { // sshd keeps sending the download until the connection goes
+					if _, writeErr := connection.Write(chunk); writeErr != nil {
+						return
+					}
+				}
+			}
+		}()
+		bridgeSide, clientSide := tcpPair(t)
+		go func() {
+			_, _ = io.ReadFull(clientSide, make([]byte, 128<<10)) // some of the download arrives
+			_ = clientSide.SetLinger(0)
+			_ = clientSide.Close() // the abort
+		}()
+		_, err = BridgeSSH(t.Context(), bridgeSide, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second)
+		resetGrace, closeResets = previous, saved
+		_ = listener.Close()
+		if err == nil {
+			t.Fatalf("a client abort mid-download was recorded closed (windows reset listed: %v)", windows)
+		}
+	}
+}
