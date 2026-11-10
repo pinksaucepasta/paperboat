@@ -98,7 +98,18 @@ func awaitWindowsMetadata(t *testing.T, manager *session.Manager, id string, rea
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatal("shell did not publish expected terminal metadata")
+	snap, _ := manager.Snapshot(id)
+	var output []byte // what the shell wrote, so a failure shows whether its prompt ran
+	if _, err := manager.Attach(id, "ident_failure_output", 0); err == nil {
+		for len(output) < 4096 {
+			event, ok, err := manager.Next(id, "ident_failure_output")
+			if err != nil || !ok {
+				break
+			}
+			output = append(output, event.Data...)
+		}
+	}
+	t.Fatalf("shell did not publish expected terminal metadata: directory=%q title=%q state=%v exit=%+v output=%q", snap.CurrentDirectory, snap.Title, snap.State, snap.Exit, output)
 }
 
 // Exercise a console-less parent with null handles, restoring the SSH test

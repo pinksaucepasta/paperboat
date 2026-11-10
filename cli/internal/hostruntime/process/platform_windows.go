@@ -38,6 +38,9 @@ var windowsEnvironmentKeys = map[string]bool{
 	"HOMEDRIVE": true, "HOMEPATH": true, "USERNAME": true, "USERDOMAIN": true,
 	"SYSTEMROOT": true, "WINDIR": true, "COMSPEC": true, "TEMP": true, "TMP": true,
 	"PROMPT": true, "PATHEXT": true, "PROGRAMDATA": true, "ALLUSERSPROFILE": true,
+	// Where a machine keeps PowerShell's module analysis cache. Without it PowerShell analyses every installed
+	// module before its first prompt when the per-user cache is cold (18-28 s on a CI image).
+	"PSMODULEANALYSISCACHEPATH": true,
 }
 
 func platformEnvironmentKey(key string) bool { return windowsEnvironmentKeys[key] }
