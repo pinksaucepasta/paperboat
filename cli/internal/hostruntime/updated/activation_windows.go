@@ -723,7 +723,7 @@ func installWindowsActivatorService(executable, ownerSID string) error {
 }
 
 func configureWindowsRecovery(item *mgr.Service) error {
-	if err := item.SetRecoveryActions([]mgr.RecoveryAction{{Type: mgr.ServiceRestart, Delay: 5 * time.Second}, {Type: mgr.ServiceRestart, Delay: 15 * time.Second}, {Type: mgr.ServiceRestart, Delay: time.Minute}}, 24*60*60); err != nil {
+	if err := item.SetRecoveryActions([]mgr.RecoveryAction{{Type: mgr.ServiceRestart, Delay: 5 * time.Second}, {Type: mgr.ServiceRestart, Delay: 15 * time.Second}, {Type: mgr.ServiceRestart, Delay: time.Minute}}, service.WindowsRecoveryResetSeconds); err != nil {
 		return err
 	}
 	return item.SetRecoveryActionsOnNonCrashFailures(true)
