@@ -6,10 +6,12 @@ import (
 	"crypto/rand"
 	"fmt"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
@@ -51,7 +53,10 @@ func TestRecordingReplayAdmissionReachesBothEndpointsOnPostgres(t *testing.T) {
 	execute(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, environment, account)
 	execute(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation,owner_team_id) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1,$4)`, machine, account, environment, team)
 	execute(`INSERT INTO paperboat.workspace_policies(team_id,version,source,digest) VALUES($1,1,'{}','test')`, team)
-	execute(`INSERT INTO paperboat.workspace_policy_rules(policy_id,rule,deny,subject_kind,subject_id,target_kind,target_id,action,ports) SELECT id,0,false,'account',$2,'machine',$3,'recording_view','[1,65536)' FROM paperboat.workspace_policies WHERE team_id=$1`, team, account, machine)
+	allow := func() {
+		execute(`INSERT INTO paperboat.workspace_policy_rules(policy_id,rule,deny,subject_kind,subject_id,target_kind,target_id,action,ports) SELECT id,0,false,'account',$2,'machine',$3,'recording_view','[1,65536)' FROM paperboat.workspace_policies WHERE team_id=$1`, team, account, machine)
+	}
+	allow()
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -107,6 +112,17 @@ func TestRecordingReplayAdmissionReachesBothEndpointsOnPostgres(t *testing.T) {
 			t.Fatalf("recording scopes = %d, want one per recording", scopes)
 		}
 	}
+	// The host's revocation feed names a replay ticket only once its viewer may no longer replay there.
+	edge := controlplane.NewEdgeService(store, "")
+	jtis := []string{"token_rec_" + suffix, "token_rec_" + suffix + "-2"}
+	revoked := func(step string, watched []string, want ...string) {
+		t.Helper()
+		got, err := edge.OperationRevocations(ctx, environment, watched)
+		if err != nil || !slices.Equal(got, want) {
+			t.Fatalf("%s: revocations = %v, %v, want %v", step, got, err, want)
+		}
+	}
+	revoked("allowed", jtis)
 	// Past the ticket's expiry a replay the endpoint still runs keeps its scope; one it does not run loses it.
 	execute(`UPDATE paperboat.recording_native_admissions SET expires_at=$2 WHERE recording_id=$1`, admissionID, now.Add(-time.Minute))
 	for _, endpoint := range []string{cli, machine} {
@@ -129,4 +145,15 @@ func TestRecordingReplayAdmissionReachesBothEndpointsOnPostgres(t *testing.T) {
 		}
 		assertNoNetworkScope(t, result.Configuration, "recording", admissionID, "recording")
 	}
+	// Expired tickets stay in the feed while the host still watches them (a running replay), not after.
+	revoked("rule removed", jtis, jtis...)
+	revoked("rule removed, nothing running", []string{})
+	allow()
+	revoked("rule restored", jtis)
+	execute(`UPDATE paperboat.team_members SET active=false WHERE team_id=$1 AND account_id=$2`, team, account)
+	revoked("member removed", jtis, jtis...)
+	execute(`UPDATE paperboat.team_members SET active=true WHERE team_id=$1 AND account_id=$2`, team, account)
+	revoked("member back", jtis)
+	execute(`UPDATE paperboat.user_machines SET revoked_at=$2 WHERE id=$1`, machine, now) // last: revocation is final
+	revoked("machine revoked", jtis, jtis...)
 }

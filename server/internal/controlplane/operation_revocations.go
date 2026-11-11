@@ -26,7 +26,19 @@ func (s *EdgeService) OperationRevocations(ctx context.Context, environment stri
  UNION
  SELECT m.helper_file_session_id FROM paperboat.user_machine_access_sessions m
  WHERE m.environment_id=$1 AND m.revoked_at IS NOT NULL AND m.helper_file_session_id IS NOT NULL
- AND (m.expires_at>$3 OR m.helper_file_session_id=ANY($2::text[]))) revoked ORDER BY jti LIMIT $4`, environment, live, s.clock().UTC(), operationrevocation.MaxLiveJTIs+1)
+ AND (m.expires_at>$3 OR m.helper_file_session_id=ANY($2::text[]))
+ UNION
+ -- A CLI recording replay ticket whose viewer may no longer replay there (recording_view, team membership, CLI
+ -- session, account or machine): the host ends the running stream, which the ticket's expiry no longer bounds.
+ SELECT a.id FROM paperboat.recording_native_admissions a
+ JOIN paperboat.user_machines m ON m.id=a.machine_id
+ WHERE m.environment_id=$1 AND (a.expires_at>$3 OR a.id=ANY($2::text[]))
+ AND NOT EXISTS(SELECT 1 FROM paperboat.cli_client_sessions c
+  JOIN paperboat.users u ON u.id=c.user_id AND u.status='active'
+  JOIN paperboat.teams t ON t.team_id=m.owner_team_id AND t.deleted_at IS NULL AND NOT t.suspended
+  WHERE c.id=a.native_cli_session_id AND c.user_id=a.account_id AND c.state='active' AND c.revoked_at IS NULL
+  AND m.revoked_at IS NULL AND m.deleted_at IS NULL
+  AND NOT isempty(paperboat.workspace_policy_rule_ports(a.account_id, t.team_id, a.machine_id, 'recording_view')))) revoked ORDER BY jti LIMIT $4`, environment, live, s.clock().UTC(), operationrevocation.MaxLiveJTIs+1)
 	if err != nil {
 		return nil, err
 	}
