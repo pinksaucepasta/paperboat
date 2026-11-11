@@ -306,6 +306,31 @@ func TestOpenSSHExecutorInheritsForegroundTTYAndRestoresTerminal(t *testing.T) {
 	waitOutput("shell prompt after stopped job", func(output string) bool {
 		return strings.Contains(output, "Stopped") && strings.LastIndex(output, "PB_PROMPT>") > strings.LastIndex(output, "Stopped")
 	})
+	// bash prints its prompt before it finishes resetting the terminal after the stopped job, and that reset discards input
+	// typed in between ("fg" arrived as "g"). A builtin that answers proves the reset is over: type it until it does.
+	for synced := false; !synced; {
+		if _, err := terminal.Write([]byte("echo PB_SYNC_$((6*7))\n")); err != nil {
+			t.Fatal(err)
+		}
+		retry := time.After(200 * time.Millisecond)
+		for wait := true; wait; {
+			if strings.Contains(strings.ReplaceAll(lastOutput, "echo PB_SYNC_$((6*7))", ""), "PB_SYNC_42") {
+				synced, wait = true, false
+				continue
+			}
+			select {
+			case output, ok := <-updates:
+				if !ok {
+					t.Fatalf("PTY closed before bash answered")
+				}
+				lastOutput = output
+			case <-retry:
+				wait = false
+			case <-ctx.Done():
+				t.Fatalf("PTY timed out before bash answered: %s", lastOutput)
+			}
+		}
+	}
 	if _, err := terminal.Write([]byte("fg\n")); err != nil {
 		t.Fatal(err)
 	}
@@ -331,14 +356,15 @@ func TestOpenSSHExecutorInheritsForegroundTTYAndRestoresTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitText("TTY_RESTORED")
-	if _, err := terminal.Write([]byte("exit\n")); err != nil {
+	// Not a bare exit: that returns the status of an earlier retried (garbled) sync line.
+	if _, err := terminal.Write([]byte("exit 0\n")); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case err := <-done:
 		finished = true
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("%v: %s", err, lastOutput)
 		}
 	case <-ctx.Done():
 		t.Fatal("PTY shell did not exit")
