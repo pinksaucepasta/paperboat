@@ -1,8 +1,8 @@
 [Unit]
-Description=Run the Paperboat account probe every 10 minutes
+Description=Run the Paperboat account probe every hour
 
 [Timer]
-OnCalendar=*:0/10
+OnCalendar=hourly
 AccuracySec=5s
 
 [Install]
