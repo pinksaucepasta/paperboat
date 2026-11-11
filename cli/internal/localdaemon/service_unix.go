@@ -56,6 +56,9 @@ func ReplaceCurrentUserService(ctx context.Context, executable, configPath, serv
 		return nil, err
 	}
 	config.Executable, config.ConfigPath, config.ServerURL = resolved, configPath, serverURL
+	if err := refuseOtherProfile(config); err != nil {
+		return nil, err
+	}
 	installer, err := newServiceInstaller(config)
 	if err != nil {
 		return nil, err
@@ -139,6 +142,9 @@ func currentUserServiceConfig(executable string) (serviceConfig, error) {
 func installService(ctx context.Context, config serviceConfig) error {
 	if ctx == nil || !filepath.IsAbs(config.Home) || !filepath.IsAbs(config.Executable) || config.Username == "" || config.Group == "" || config.UID < 0 || config.Runner == nil || config.ConfigPath != "" && !filepath.IsAbs(config.ConfigPath) {
 		return ErrInvalidInventoryConfig
+	}
+	if err := refuseOtherProfile(config); err != nil {
+		return err
 	}
 	installer, err := newServiceInstaller(config)
 	if err != nil {
