@@ -10,6 +10,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/recording"
 )
 
+var errInvalidReplay = errors.New("paperboat-server returned an invalid replay answer")
+
 // ListRecordings is one page of a team's recordings this account may see (GET /v1/teams/{team}/recordings).
 func (c *Client) ListRecordings(ctx context.Context, teamID, machineID string, limit, offset int) (recording.List, error) {
 	query := url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}}
@@ -36,7 +38,7 @@ func (c *Client) ReplayRecording(ctx context.Context, recordingID, cliClientSess
 		return recording.Replay{}, err
 	}
 	if out.Ticket == "" || out.MachineID == "" || out.TeamID == "" || out.KeyGeneration < 1 || out.ViewerKey.Generation < out.KeyGeneration || !recording.ValidSealed(out.ViewerKey.Sealed) {
-		return recording.Replay{}, errors.New("paperboat-server returned an invalid replay ticket")
+		return recording.Replay{}, errInvalidReplay
 	}
 	return out, nil
 }
