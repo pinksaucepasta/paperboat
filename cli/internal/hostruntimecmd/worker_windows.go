@@ -587,7 +587,7 @@ func runWorkerWith(ctx context.Context, args []string, input io.Reader, output, 
 			// Drained after a handover (nil), or a handover step failed.
 			return err
 		case <-ticker.C:
-			if err := feature.Health(ctx); err != nil {
+			if err := workerFeatureHealthy(ctx, feature); err != nil {
 				return err
 			}
 			if err := candidate.Heartbeat(ctx); err != nil {
