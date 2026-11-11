@@ -34,7 +34,7 @@ if [ -z "$url" ]; then
     --body "Lane batch ending at $head. Required CI checks gate the rebase merge; individual fix commits are preserved.")
 fi
 printf 'push: PR %s\n' "$url"
-gh pr merge "$url" --repo "$repo" --auto --rebase --delete-branch --match-head-commit "$head"
+gh pr merge "$url" --repo "$repo" --auto --rebase --match-head-commit "$head"
 # Keep the lock until merged: the next lane rebases on the landed batch.
 # A timeout leaves the PR intact for inspection, and never reports a pending PR as success.
 end=$(( $(date +%s) + 3600 ))
