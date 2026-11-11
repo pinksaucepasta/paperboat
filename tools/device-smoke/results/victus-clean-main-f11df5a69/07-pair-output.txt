@@ -1,0 +1,3 @@
+{"schema_version":"1.0","ok":true,"data":{"environment_id":"machine_5a014f31-fda5-4f9b-89f0-0f5ad7f8e93f","installation_generation":1,"machine_id":"machine_5a014f31-fda5-4f9b-89f0-0f5ad7f8e93f","server_url":"https://api.example.test"}}
+
+PAIR_SECONDS=134.3026493

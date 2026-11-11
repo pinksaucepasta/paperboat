@@ -1,0 +1,12 @@
+C:\ProgramData\Paperboat NT AUTHORITY\SYSTEM:(OI)(CI)(F)
+                         BUILTIN\Administrators:(OI)(CI)(F)
+                         BUILTIN\Users:(OI)(CI)(RX)
+
+Successfully processed 1 files; Failed processing 0 files
+---SERVICES---
+C:\ProgramData\Paperboat\services NT AUTHORITY\SYSTEM:(OI)(CI)(F)
+                                  BUILTIN\Administrators:(OI)(CI)(F)
+
+Successfully processed 1 files; Failed processing 0 files
+---OWNER---
+NT AUTHORITY\SYSTEM

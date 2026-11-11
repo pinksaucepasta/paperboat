@@ -1,0 +1,13 @@
+
+TcpTestSucceeded RemoteAddress RemotePort
+---------------- ------------- ----------
+            True 127.100.0.1        38080
+            True 127.100.0.30       59304
+            True 127.100.0.1        59304
+---RESERVATIONS---
+1
+1
+---RESERV-KEYS---
+2
+
+

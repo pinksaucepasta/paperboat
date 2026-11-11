@@ -1,0 +1,17 @@
+PRE-INSTALL STATE (captured before pb install, 2026-11-11):
+- Product services: 0. `sc query` for paperboat returns only the GitHub runner
+  (actions.runner.pinksaucepasta-paperboat-cli.victus-windows-11-iot-ltsc);
+  `Get-Service Paperboat*` empty (see services-prestate.txt, 0 bytes).
+- Dirs: C:\ProgramData\Paperboat absent (False), C:\Program Files\Paperboat absent
+  (False); only %APPDATA%\Paperboat\replaces-machine.json present, naming revoked
+  machine_233d02bc (see replaces-machine.json, left alone by design).
+- `where.exe pb.exe`: not found. Installed pb version: none.
+- Free space C:: 45848616960 bytes (~42.7 GiB).
+- icacls C:\ProgramData (parent only):
+  C:\ProgramData NT AUTHORITY\SYSTEM:(OI)(CI)(F)
+                 BUILTIN\Administrators:(OI)(CI)(F)
+                 CREATOR OWNER:(OI)(CI)(IO)(F)
+                 BUILTIN\Users:(OI)(CI)(RX)
+                 BUILTIN\Users:(CI)(WD,AD,WEA,WA)
+- Elevation: whoami /groups shows Mandatory Label\High Mandatory Level (S-1-16-12288);
+  session runs elevated as VICTUS\Pujan (Administrator).

@@ -1,0 +1,36 @@
+---PRODUCT-SERVICES---
+
+Status   Name               DisplayName                           
+------   ----               -----------                           
+Running  PaperboatCarrie... PaperboatCarrier-uba6bceb9290ebd807...
+Running  PaperboatHostd-... PaperboatHostd-uba6bceb9290ebd807a3...
+Running  PaperboatLocalD... PaperboatLocalDaemon-uba6bceb9290eb...
+Running  PaperboatSessio... PaperboatSessionOwner-uba6bceb9290e...
+Running  PaperboatSshd-u... Paperboat OpenSSH generation          
+Running  PaperboatUpdate... PaperboatUpdated-uba6bceb9290ebd807...
+---DIRS---
+True
+True
+---FREESPACE---
+43588734976
+---ICACLS-PARENT---
+C:\ProgramData NT AUTHORITY\SYSTEM:(OI)(CI)(F)
+               BUILTIN\Administrators:(OI)(CI)(F)
+               CREATOR OWNER:(OI)(CI)(IO)(F)
+               BUILTIN\Users:(OI)(CI)(RX)
+               BUILTIN\Users:(CI)(WD,AD,WEA,WA)
+
+Successfully processed 1 files; Failed processing 0 files
+---ELEV---
+Everyone                                                      Well-known group S-1-1-0      Mandatory group, Enabled by default, Enabled group             
+NT AUTHORITY\Local account and member of Administrators group Well-known group S-1-5-114    Mandatory group, Enabled by default, Enabled group             
+BUILTIN\Administrators                                        Alias            S-1-5-32-544 Mandatory group, Enabled by default, Enabled group, Group owner
+BUILTIN\Users                                                 Alias            S-1-5-32-545 Mandatory group, Enabled by default, Enabled group             
+NT AUTHORITY\NETWORK                                          Well-known group S-1-5-2      Mandatory group, Enabled by default, Enabled group             
+NT AUTHORITY\Authenticated Users                              Well-known group S-1-5-11     Mandatory group, Enabled by default, Enabled group             
+NT AUTHORITY\This Organization                                Well-known group S-1-5-15     Mandatory group, Enabled by default, Enabled group             
+NT AUTHORITY\Local account                                    Well-known group S-1-5-113    Mandatory group, Enabled by default, Enabled group             
+NT AUTHORITY\NTLM Authentication                              Well-known group S-1-5-64-10  Mandatory group, Enabled by default, Enabled group             
+Mandatory Label\High Mandatory Level                          Label            S-1-16-12288                                                                
+
+

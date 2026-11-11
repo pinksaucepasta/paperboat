@@ -1,0 +1,5 @@
+47ec2bf961d5839973e06af09105daabffa65fb37466ddd267ee299d7dd92b54  /tmp/pb-f11df5a69-windows-amd64.exe
+1ecdc9145ef9cd88807ab283fd275d5583afe7f7136cd0cee50f983fb99f6736  /tmp/pb-f11df5a69-linux-amd64
+/tmp/pb-f11df5a69-windows-amd64.exe: PE32+ executable (console) x86-64, for MS Windows
+/tmp/pb-f11df5a69-linux-amd64: ELF 64-bit LSB executable, x86-64, statically linked (GOOS=linux GOARCH=amd64, CGO_ENABLED=0)
+victus sha256 verified via Get-FileHash: 47EC2BF961D5839973E06AF09105DAABFFA65FB37466DDD267EE299D7DD92B54 (matches build)
