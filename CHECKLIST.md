@@ -1119,10 +1119,14 @@ Go SDK rows below are planned acceptance checks; named checks to add are not pas
 |---|---|---|---|---|---|---|
 | C273 | `pb recordings` | List and replay team terminal recordings | [ ] | [ ] | [ ] | 6eb0b3477; waits for key setup, then device check. |
 | C274 | `pb recordings list` | List the recordings you may see | [ ] | [ ] | [ ] | 6eb0b3477; waits for key setup, then device check. |
-| C275 | `pb recordings play` | Replay a recording in this terminal | [ ] | [ ] | [ ] | 6eb0b3477, 2777bd8e3; waits for key setup, then device check. |
-| C276 | `pb recordings export` | Write a recording as an asciicast v2 file | [ ] | [ ] | [ ] | 6eb0b3477, 2777bd8e3; waits for key setup, then device check. |
+| C275 | `pb recordings play` | Replay a recording in this terminal | [ ] | [ ] | [ ] | 6eb0b3477, 2777bd8e3; waits for key setup, then device check. 2026-11-12: --archive reads the team bucket copy (readArchive, TestDownloadSegmentChecksStatusAndSize); team-machine lookup fixed (b208f261e). |
+| C276 | `pb recordings export` | Write a recording as an asciicast v2 file | [ ] | [ ] | [ ] | 6eb0b3477, 2777bd8e3; waits for key setup, then device check. 2026-11-12: --archive reads the team bucket copy (readArchive, TestDownloadSegmentChecksStatusAndSize); team-machine lookup fixed (b208f261e). |
 | C277 | `pb recordings start` | Start recording the terminal session you are attached to | [ ] | [ ] | [ ] | 6eb0b3477; waits for key setup, then device check. |
 | C278 | `pb recordings stop` | Stop the recording of the terminal session you are attached to | [ ] | [ ] | [ ] | 6eb0b3477; waits for key setup, then device check. |
+| C294 | `pb team bucket` | Connect the team's own S3-compatible bucket and choose what it is for (group command) | [ ] | [ ] | [ ] | Built 2026-11-12, not deployed. Flags: cli/docs/cli/pb_team_bucket.md. Device check to write with F25-06. |
+| C295 | `pb team bucket get` | Show the team's bucket and its uses | [ ] | [ ] | [ ] | Built 2026-11-12 (TestPrintBucketNeverCarriesASecret). Flags: cli/docs/cli/pb_team_bucket_get.md. |
+| C296 | `pb team bucket set` | Connect or change the team's bucket; the save names a failing check step | [ ] | [ ] | [ ] | Built 2026-11-12 (TestBucketInputTakesTheSecretFromStandardInputAndChecksTheRest; server probe tests). Flags: cli/docs/cli/pb_team_bucket_set.md. |
+| C297 | `pb team bucket remove` | Disconnect the team's bucket | [ ] | [ ] | [ ] | Built 2026-11-12. Flags: cli/docs/cli/pb_team_bucket_remove.md. |
 
 ## P. Performance (PLAN 3b)
 
