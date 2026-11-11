@@ -18,6 +18,10 @@ func windowsConfiguredServiceName(config Config) string {
 		name, _ := WindowsSessionOwnerName(config.Instance, config.Generation)
 		return name
 	}
+	if config.Kind == CarrierKind {
+		name, _ := WindowsCarrierName(config.Instance, config.Generation)
+		return name
+	}
 	return windowsServiceName(config.Kind, config.Instance)
 }
 

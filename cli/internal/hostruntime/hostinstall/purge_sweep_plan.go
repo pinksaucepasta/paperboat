@@ -25,7 +25,7 @@ func windowsAccountServiceOwned(name, instance string) bool {
 		return false
 	}
 	marker := "-" + instance
-	return strings.HasSuffix(lower, marker) || strings.HasPrefix(lower, "paperboatsessionowner"+marker+"-")
+	return strings.HasSuffix(lower, marker) || strings.HasPrefix(lower, "paperboatsessionowner"+marker+"-") || strings.HasPrefix(lower, "paperboatcarrier"+marker+"-")
 }
 
 // windowsAccountServices filters SCM service names down to the account's own.

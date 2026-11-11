@@ -3,16 +3,17 @@ package service
 import (
 	"context"
 	"strconv"
+	"strings"
 )
 
-// generationalUnit reports the roles that run one native unit per installed generation on Linux and
-// macOS, like session owners. An update starts and readies the new generation's units before the old
+// generationalUnit reports the roles that run one native unit or service per installed generation, like session
+// owners: the carrier everywhere, hostd on Linux and macOS. An update starts and readies the new generation's units before the old
 // generation retires, so nothing is refused or paused (make-before-break). Prior art: Teleport graceful
 // restart (lib/service/signals.go: the new process serves before the old one shuts down and drains its
 // connections) and nginx binary upgrade (~/ref/nginx/src/os/unix/ngx_process_cycle.c: old workers
 // finish their connections). Separate units mean the service manager never kills the old process.
 func generationalUnit(config Config) bool {
-	return (config.Kind == CarrierKind || config.Kind == HostdKind) && config.Platform != "windows"
+	return config.Kind == CarrierKind || config.Kind == HostdKind && config.Platform != "windows"
 }
 
 // RetiredGenerationLogPath is where launchd writes a generation's unit output (renderLaunchd's StandardOutPath).
@@ -31,9 +32,8 @@ func validateCarrierConfig(config Config) error {
 			return ErrInvalidDefinition
 		}
 		want = append(want, "--instance", config.Instance)
-	} else {
-		want = append(want, "--generation", config.Generation)
 	}
+	want = append(want, "--generation", config.Generation)
 	if len(config.Arguments) != len(want) {
 		return ErrInvalidDefinition
 	}
@@ -48,7 +48,7 @@ func validateCarrierConfig(config Config) error {
 // CarrierController addresses one native carrier generation of the enrolled account. On Linux and
 // macOS each generation has its own unit, so a new carrier serves before the old one retires.
 func CarrierController(platform, instance, generation string, enrolledUID int, runner Runner) (Controller, error) {
-	if !safeInstance(instance) || enrolledUID < 0 || platform != "windows" && !validSessionOwnerGeneration(generation) {
+	if !safeInstance(instance) || enrolledUID < 0 || !validSessionOwnerGeneration(generation) {
 		return nil, ErrInvalidDefinition
 	}
 	switch platform {
@@ -63,7 +63,7 @@ func CarrierController(platform, instance, generation string, enrolledUID int, r
 		}
 		return LaunchdController{Runner: runner, UID: enrolledUID, Label: CarrierLabel + "." + instance + "." + generation}, nil
 	case "windows":
-		if !validWindowsSessionOwnerInstance(instance) || generation != "" {
+		if !validWindowsSessionOwnerInstance(instance) {
 			return nil, ErrInvalidDefinition
 		}
 		return windowsSessionOwnerController()
@@ -107,10 +107,25 @@ func QuitCarrier(ctx context.Context, controller Controller) error {
 	}
 }
 
-// WindowsCarrierName is the single SCM identity for an enrolled account.
-func WindowsCarrierName(instance string) (string, error) {
-	if !validWindowsSessionOwnerInstance(instance) {
+// WindowsCarrierName is the SCM identity of one carrier generation of an enrolled account, like the session
+// owner's: an update's candidate runs beside the serving generation.
+func WindowsCarrierName(instance, generation string) (string, error) {
+	if !validWindowsSessionOwnerInstance(instance) || !validSessionOwnerGeneration(generation) {
 		return "", ErrInvalidDefinition
 	}
-	return "PaperboatCarrier-" + instance, nil
+	return "PaperboatCarrier-" + instance + "-" + generation, nil
+}
+
+// windowsCarrierNameParts splits a carrier generation's SCM name (WindowsCarrierName).
+func windowsCarrierNameParts(name string) (instance, generation string, valid bool) {
+	const prefix = "PaperboatCarrier-"
+	if len(name) < len(prefix) || !strings.EqualFold(name[:len(prefix)], prefix) {
+		return "", "", false
+	}
+	suffix := name[len(prefix):]
+	if len(suffix) < 34 || suffix[len(suffix)-33] != '-' {
+		return "", "", false
+	}
+	instance, generation = suffix[:len(suffix)-33], suffix[len(suffix)-32:]
+	return instance, generation, validWindowsSessionOwnerInstance(instance) && validSessionOwnerGeneration(generation)
 }

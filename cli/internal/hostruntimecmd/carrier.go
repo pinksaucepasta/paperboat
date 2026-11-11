@@ -27,7 +27,7 @@ func runCarrier(ctx context.Context, args []string, _ io.Writer, stderr io.Write
 	flags.SetOutput(stderr)
 	instanceFlag := flags.String("instance", "", "enrolled account instance")
 	generationFlag := flags.String("generation", "", "carrier generation")
-	if flags.Parse(args) != nil || flags.NArg() != 0 || (runtime.GOOS == "windows") != (*instanceFlag != "") || (runtime.GOOS == "windows") == (*generationFlag != "") {
+	if flags.Parse(args) != nil || flags.NArg() != 0 || (runtime.GOOS == "windows") != (*instanceFlag != "") || *generationFlag == "" {
 		return hostinstall.ErrInvalidRequest
 	}
 	instance, err := carrierInstance(*instanceFlag)

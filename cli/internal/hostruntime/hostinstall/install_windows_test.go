@@ -516,16 +516,16 @@ func TestWindowsActivationOrder(t *testing.T) {
 				order = append(order, fmt.Sprintf("ssh/%d", attempts))
 				return nil
 			},
-			prestage: record("prestage"), cutover: cutover, stop: record("stop"), stage: record("stage"), carrier: record("carrier"), start: record("start"),
+			prestage: record("prestage"), stageCarrier: record("stage-carrier"), cutover: cutover, stop: record("stop"), stage: record("stage"), carrier: record("carrier"), start: record("start"), network: record("network"),
 		}
 	}
 	for _, test := range []struct {
 		carrier bool
 		want    string
 	}{
-		{true, "owner,ssh/2,prestage,cutover,stop,stage,carrier,start"},
+		{true, "owner,ssh/2,prestage,stage-carrier,cutover,stop,stage,carrier,start,network"},
 		// A cold machine has nothing serving to keep and no carrier for the generation until it creates one.
-		{false, "owner,prestage,cutover,stop,stage,carrier,ssh/1,start"},
+		{false, "owner,prestage,stage-carrier,cutover,stop,stage,carrier,ssh/1,start,network"},
 	} {
 		order = nil
 		if err := activation(test.carrier, record("cutover")).run(context.Background()); err != nil || strings.Join(order, ",") != test.want {
@@ -535,7 +535,7 @@ func TestWindowsActivationOrder(t *testing.T) {
 	order = nil
 	busy := errors.New("protected work")
 	err := activation(true, func(context.Context) error { order = append(order, "cutover"); return busy }).run(context.Background())
-	if !errors.Is(err, busy) || strings.Join(order, ",") != "owner,ssh/2,prestage,cutover" {
+	if !errors.Is(err, busy) || strings.Join(order, ",") != "owner,ssh/2,prestage,stage-carrier,cutover" {
 		t.Fatalf("refused cutover: order %v err %v, want nothing stopped", order, err)
 	}
 }
@@ -588,8 +588,9 @@ func TestStopWindowsUpdaterStopsOnlyTheUpdater(t *testing.T) {
 
 // Review of eb50ca8f8: TestWindowsActivationOrder pins windowsActivation.run, not what installWindows wires into
 // it. This builds the activation with newWindowsActivation, as installWindows does, over recording ops: the steps
-// are the real ones in the real order (publish, token, pin, carrier with that pin, config, roles), and finish
-// discards the staged file and restores the config worker.
+// are the real ones in the real order (the carrier staged as a standby before the cutover is the one made active
+// in the outage and given the network after the roles start), and finish discards the staged runtime file and
+// restores the config worker.
 func TestWindowsActivationWiring(t *testing.T) {
 	restore := windowsActivationOps
 	t.Cleanup(func() { windowsActivationOps = restore })
@@ -612,7 +613,16 @@ func TestWindowsActivationWiring(t *testing.T) {
 		note("pin")
 		return `C:\pins\candidate\pb.exe`, nil
 	}
-	ops.carrier = func(_ context.Context, _ Request, _ service.Layout, pinned string) error { note("carrier:" + pinned); return nil }
+	staged := &carrierUpgrade{}
+	ops.stageCarrier = func(context.Context, Request) (*carrierUpgrade, error) { note("stage-carrier"); return staged, nil }
+	ops.carrier = func(_ context.Context, _ Request, _ service.Layout, upgrade *carrierUpgrade) error {
+		note(fmt.Sprintf("carrier:staged=%v", upgrade == staged))
+		return nil
+	}
+	ops.switchCarrier = func(_ context.Context, upgrade *carrierUpgrade) error {
+		note(fmt.Sprintf("network:staged=%v", upgrade == staged))
+		return nil
+	}
 	ops.writeConfig = func(config WindowsRuntimeConfig, _ string) error { note("config:" + config.TokenFile); return nil }
 	ops.startRoles = func(context.Context, Request, service.Layout, string) error { note("roles"); return nil }
 
@@ -628,7 +638,7 @@ func TestWindowsActivationWiring(t *testing.T) {
 	if err := finish(); err != nil {
 		t.Fatal(err)
 	}
-	want := `owner,carrier-present,ssh,prestage,cutover,stop,publish,token:C:\root\token,pin,carrier:C:\pins\candidate\pb.exe,config:C:\root\token,roles,discard,restore-config-worker`
+	want := `owner,carrier-present,ssh,prestage,stage-carrier,cutover,stop,publish,token:C:\root\token,pin,carrier:staged=true,config:C:\root\token,roles,network:staged=true,discard,restore-config-worker`
 	if got := strings.Join(order, ","); got != want {
 		t.Fatalf("activation wiring:\n got %s\nwant %s", got, want)
 	}

@@ -726,7 +726,9 @@ var windowsActivationOps = struct {
 	stop           func(context.Context, Request, service.Layout) (func() error, error)
 	token          func(path, ownerSID string) error
 	pin            func(context.Context, service.Layout, installsource.Source, string) (string, error)
-	carrier        func(ctx context.Context, request Request, layout service.Layout, pinned string) error
+	stageCarrier   func(context.Context, Request) (*carrierUpgrade, error)
+	carrier        func(ctx context.Context, request Request, layout service.Layout, upgrade *carrierUpgrade) error
+	switchCarrier  func(context.Context, *carrierUpgrade) error
 	writeConfig    func(WindowsRuntimeConfig, string) error
 	startRoles     func(ctx context.Context, request Request, layout service.Layout, upgradeMode string) error
 }{
@@ -740,7 +742,9 @@ var windowsActivationOps = struct {
 	stop:        stopWindowsRuntimeForActivation,
 	token:       ensureWindowsTokenAt,
 	pin:         ensureWindowsPinnedRuntime,
-	carrier:     activateWindowsCarrier,
+	stageCarrier:  stageWindowsCarrierUpgrade,
+	carrier:       activateWindowsCarrier,
+	switchCarrier: switchWindowsCarrier,
 	writeConfig: writeWindowsConfigAt,
 	startRoles:  installWindowsRoleServices,
 }
@@ -749,10 +753,13 @@ var windowsActivationOps = struct {
 // was not published and starts a config worker the activation stopped again.
 func newWindowsActivation(request Request, layout service.Layout, instanceRoot, tokenPath string, rollbackSource *installsource.Source, cutover func(context.Context) error) (windowsActivation, func() error) {
 	ops := windowsActivationOps
-	var pinned string
+	var upgrade *carrierUpgrade
 	var publishRuntime func(context.Context) error
 	var discardRuntime, restoreConfigWorker func() error
 	finish := func() error {
+		if upgrade != nil {
+			clear(upgrade.capability)
+		}
 		var err error
 		if discardRuntime != nil {
 			err = discardRuntime()
@@ -777,6 +784,12 @@ func newWindowsActivation(request Request, layout service.Layout, instanceRoot, 
 				return err
 			})
 		},
+		stageCarrier: func(ctx context.Context) error {
+			return runWindowsInstallPhase(ctx, "start the new carrier as a standby", func() (err error) {
+				upgrade, err = ops.stageCarrier(ctx, request)
+				return err
+			})
+		},
 		cutover: cutover,
 		stop: func(ctx context.Context) (err error) {
 			restoreConfigWorker, err = ops.stop(ctx, request, layout)
@@ -789,12 +802,17 @@ func newWindowsActivation(request Request, layout service.Layout, instanceRoot, 
 			if err := runWindowsInstallPhase(ctx, "prepare Paperboat host token", func() error { return ops.token(tokenPath, request.OwnerSID) }); err != nil {
 				return err
 			}
-			var err error
-			pinned, err = ops.pin(ctx, layout, request.Source, request.OwnerSID)
+			_, err := ops.pin(ctx, layout, request.Source, request.OwnerSID)
 			return err
 		},
 		carrier: func(ctx context.Context) error {
-			return runWindowsInstallPhase(ctx, "activate Paperboat carrier", func() error { return ops.carrier(ctx, request, layout, pinned) })
+			return runWindowsInstallPhase(ctx, "activate Paperboat carrier", func() error { return ops.carrier(ctx, request, layout, upgrade) })
+		},
+		network: func(ctx context.Context) error {
+			if upgrade == nil {
+				return nil
+			}
+			return runWindowsInstallPhase(ctx, "move the network to the new carrier", func() error { return ops.switchCarrier(ctx, upgrade) })
 		},
 		start: func(ctx context.Context) error {
 			request.Artifact.Version = request.Source.Version
@@ -826,11 +844,13 @@ type windowsActivation struct {
 	carrierPresent func(context.Context) (bool, error)
 	prepareSSH     func(ctx context.Context, attempts int) error
 	prestage       func(context.Context) error // writes and verifies the runtime beside its slot
+	stageCarrier   func(context.Context) error // starts the new carrier generation as a standby
 	cutover        func(context.Context) error // nil: nothing serves that needs a drain
 	stop           func(context.Context) error
 	stage          func(context.Context) error
 	carrier        func(context.Context) error
 	start          func(context.Context) error
+	network        func(context.Context) error // the new carrier takes the network once the roles run
 }
 
 // windowsSSHPreparationAttempts bounds the OpenSSH preparation that runs while hostd still serves: a budget expiry
@@ -864,6 +884,9 @@ func (a windowsActivation) run(ctx context.Context) error {
 	if err := step("prestage", a.prestage); err != nil {
 		return err
 	}
+	if err := step("stage_carrier", a.stageCarrier); err != nil {
+		return err
+	}
 	if a.cutover != nil {
 		if err := step("cutover", a.cutover); err != nil {
 			return err
@@ -882,7 +905,10 @@ func (a windowsActivation) run(ctx context.Context) error {
 			return err
 		}
 	}
-	return step("start", a.start)
+	if err := step("start", a.start); err != nil {
+		return err
+	}
+	return step("network", a.network)
 }
 
 // stopWindowsRuntimeForActivation stops what runs the installed slot. The returned restore starts a config worker
@@ -937,12 +963,15 @@ func stopWindowsRuntimeForActivation(ctx context.Context, request Request, layou
 	return restore, runWindowsInstallPhase(ctx, "terminate stale Paperboat runtime processes", func() error { return terminateStaleWindowsRuntimeProcesses(ctx, layout.Binary) })
 }
 
-// activateWindowsCarrier makes the carrier run the activated source. A cold machine gets its first carrier, with
-// the original role declarations disabled first: a reboot during publication must not launch a second peer
-// identity owner. An existing carrier of another source is replaced here, while the activation has the runtime
-// stopped, so an update costs one outage; one that still holds SSH connections stays, and the updater's reconcile
-// replaces it once idle.
-func activateWindowsCarrier(ctx context.Context, request Request, layout service.Layout, pinned string) error {
+// activateWindowsCarrier makes the carrier run the activated source while the runtime is stopped. upgrade, staged
+// before the cutover (stageWindowsCarrierUpgrade), becomes the active generation here and takes the network once
+// the roles run (switchWindowsCarrier). Without one, a cold machine gets its first carrier, with the original role
+// declarations disabled first (a reboot during publication must not launch a second peer identity owner), and an
+// existing carrier must already run the activated source.
+func activateWindowsCarrier(ctx context.Context, request Request, layout service.Layout, upgrade *carrierUpgrade) error {
+	if upgrade != nil {
+		return upgrade.activate()
+	}
 	carrier, err := readCarrierConfigFile(ctx, layout.Instance)
 	if installNotExistOnly(err) {
 		roles, err := windowsColdRoleInstallers(layout)
@@ -959,25 +988,19 @@ func activateWindowsCarrier(ctx context.Context, request Request, layout service
 	if err != nil {
 		return err
 	}
-	if err := EnsureExistingCarrier(ctx, carrier); err != nil {
-		return err
+	if carrier.Source.SHA256 != request.Source.SHA256 || carrier.Source.Length != request.Source.Length {
+		return hostInstallFailure("the carrier of another version was not staged before the cutover", ErrInvalidRequest)
 	}
-	desired, replace, err := windowsCarrierFor(carrier, request.Source, pinned)
-	if err != nil || !replace {
-		return err
-	}
-	_, err = replaceWindowsCarrier(ctx, carrier, desired)
-	return err
+	return EnsureExistingCarrier(ctx, carrier)
 }
 
-// windowsCarrierFor is retained moved to source, run from its pin; replace is false when it already runs source.
-func windowsCarrierFor(retained CarrierConfig, source installsource.Source, pinned string) (CarrierConfig, bool, error) {
-	if retained.Source.SHA256 == source.SHA256 && retained.Source.Length == source.Length {
-		return retained, false, nil
+// switchWindowsCarrier hands the machine's network to upgrade's carrier once the new roles run, and fails the
+// activation unless it serves: the previous version can still be restored then.
+func switchWindowsCarrier(ctx context.Context, upgrade *carrierUpgrade) error {
+	if err := upgrade.switchNetwork(ctx); err != nil {
+		return err
 	}
-	desired := retained
-	desired.Source, desired.Executable = source, pinned
-	return desired, true, desired.Validate()
+	return upgrade.confirmServing(ctx, carrierServingWait)
 }
 
 // installUnboundWindowsBinary installs only the administrator-approved bytes
@@ -1578,25 +1601,16 @@ func windowsCarrierPresentForSSH(ctx context.Context, instance string) (bool, er
 	if !installNotExistOnly(err) {
 		return false, err
 	}
-	// A missing descriptor is legacy absence only when SCM independently proves
-	// that the stable carrier is absent too. A damaged current carrier fails closed.
-	name, nameErr := service.WindowsCarrierName(instance)
-	if nameErr != nil {
-		return false, nameErr
+	// No active descriptor is absence only when no carrier generation is left either. A damaged current carrier
+	// fails closed.
+	generations, err := filepath.Glob(carrierGenerationPath(instance, "*"))
+	if err != nil {
+		return false, err
 	}
-	manager, managerErr := mgr.Connect()
-	if managerErr != nil {
-		return false, managerErr
+	if len(generations) != 0 {
+		return false, ErrInvalidRequest
 	}
-	item, openErr := manager.OpenService(name)
-	if openErr == nil {
-		return false, errors.Join(ErrInvalidRequest, item.Close(), manager.Disconnect())
-	}
-	closeErr := manager.Disconnect()
-	if !errors.Is(openErr, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
-		return false, errors.Join(openErr, closeErr)
-	}
-	return false, closeErr
+	return false, nil
 }
 
 // cleanupWindowsSSHAfterRuntimeFailure rolls back only the service registration
@@ -2435,11 +2449,11 @@ func uninstallWindowsKeepingCLI(ctx context.Context, layout service.Layout, purg
 	// A purge is a recovery boundary: a step that fails is reported under its name and the later steps still run,
 	// so a half-upgraded installation loses everything that can be removed in one run. Uninstall stops at once.
 	var result error
-	if err := removeWindowsRuntimeGenerations(ctx, layout, ownerSID); err != nil {
+	if err := removeWindowsRuntimeGenerations(ctx, layout, ownerSID, purge); err != nil {
 		if !purge {
 			return err
 		}
-		result = hostInstallFailure("remove session owner and SSH generations", err)
+		result = hostInstallFailure("remove session owner, carrier and SSH generations", err)
 	}
 	// Optional configuration sync is owned by the same enrolled instance.
 	// Stop/remove it before removing its protected executable and metadata.
@@ -2460,7 +2474,7 @@ func uninstallWindowsKeepingCLI(ctx context.Context, layout service.Layout, purg
 	if purge {
 		// Explicit removal does not restore an interrupted installation. Protected
 		// declarations plus exact SCM ownership suffice even after slots vanished.
-		for _, base := range []string{"PaperboatHost", "PaperboatCarrier", "PaperboatHostd", "PaperboatLocalDaemon", "PaperboatUpdated"} {
+		for _, base := range []string{"PaperboatHost", "PaperboatHostd", "PaperboatLocalDaemon", "PaperboatUpdated"} {
 			path := filepath.Join(`C:\ProgramData\Paperboat\services`, base+"-"+layout.Instance+".json")
 			if err := (service.WindowsController{}).Remove(ctx, path); err != nil {
 				result = errors.Join(result, hostInstallFailure("remove Windows service "+base, err))
@@ -2868,7 +2882,7 @@ func windowsLifecycleManagerWithState(layout service.Layout, hostd, daemon, upda
 	if err != nil {
 		return nil, err
 	}
-	carrierInstaller, carrierProbe, err := windowsCarrierLifecycleInstaller(context.Background(), layout, request)
+	carrierInstaller, carrierProbe, carrierGeneration, err := windowsCarrierLifecycleInstaller(context.Background(), layout, request)
 	if err != nil {
 		return nil, err
 	}
@@ -2876,11 +2890,12 @@ func windowsLifecycleManagerWithState(layout service.Layout, hostd, daemon, upda
 	if err != nil {
 		return nil, err
 	}
+	components := []service.TransactionalComponent{windowsCarrierComponent{carrierComponent, carrierConfigPath(layout.Instance), carrierGeneration}}
 	instanceRoot, err := WindowsInstanceRoot(layout.Instance)
 	if err != nil {
 		return nil, err
 	}
-	components := []service.TransactionalComponent{windowsCarrierComponent{carrierComponent, carrierConfigPath(layout.Instance)}, hostdComponent, daemonComponent, updaterComponent}
+	components = append(components, hostdComponent, daemonComponent, updaterComponent)
 	coldRoles, err := windowsColdRoleInstallers(layout)
 	if err != nil {
 		return nil, err

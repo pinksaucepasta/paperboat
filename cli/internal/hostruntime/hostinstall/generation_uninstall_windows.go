@@ -20,7 +20,9 @@ import (
 // Explicit uninstall owns every generation, including stopped declarations whose
 // old executable has disappeared. Removal authenticates declarations and SCM
 // targets; it never launches the old image or requires an owner RPC.
-func removeWindowsRuntimeGenerations(ctx context.Context, layout service.Layout, ownerSID string) error {
+// removeWindowsRuntimeGenerations removes the account's per-generation services: session owners, carriers and
+// OpenSSH. Without purge the active carrier stays for the lifecycle's own uninstall.
+func removeWindowsRuntimeGenerations(ctx context.Context, layout service.Layout, ownerSID string, purge bool) error {
 	instance, err := WindowsInstanceForSID(ownerSID)
 	if err != nil || instance != layout.Instance {
 		return errors.Join(ErrInvalidRequest, err)
@@ -29,8 +31,19 @@ func removeWindowsRuntimeGenerations(ctx context.Context, layout service.Layout,
 	if err != nil {
 		return err
 	}
+	keep := ""
+	if !purge {
+		if active, err := readCarrierConfigFile(ctx, instance); err == nil {
+			keep, _ = service.WindowsCarrierName(instance, active.Generation)
+		} else if !installNotExistOnly(err) {
+			return err
+		}
+	}
 	var result error
 	for _, name := range owners {
+		if keep != "" && strings.EqualFold(name, keep) {
+			continue
+		}
 		path := filepath.Join(`C:\ProgramData\Paperboat\services`, name+".json")
 		if err := (service.WindowsController{}).Remove(ctx, path); err != nil {
 			result = errors.Join(result, err)
@@ -38,8 +51,33 @@ func removeWindowsRuntimeGenerations(ctx context.Context, layout service.Layout,
 			result = errors.Join(result, removeInstallFile(path))
 		}
 	}
+	if purge {
+		// Every carrier generation's descriptor and lock, and the active descriptor; the shared capability goes
+		// with the account root.
+		for _, pattern := range []string{carrierGenerationPath(instance, "*"), filepath.Join(filepath.Dir(carrierConfigPath(instance)), "owner-*.lock"), carrierConfigPath(instance)} {
+			paths, err := filepath.Glob(pattern)
+			result = errors.Join(result, err)
+			for _, path := range paths {
+				result = errors.Join(result, removeInstallFile(path))
+			}
+		}
+	}
 	result = errors.Join(result, windowsopenssh.RemoveGenerations(ctx, ownerSID))
 	return result
+}
+
+// windowsGenerationName is the canonical SCM name of one account-owned generation service (session owner or
+// carrier) from its lower-case name, or "" for any other service.
+func windowsGenerationName(instance, lower string) (string, error) {
+	for _, generational := range []struct {
+		prefix string
+		name   func(string, string) (string, error)
+	}{{"paperboatsessionowner-" + instance + "-", service.WindowsSessionOwnerName}, {"paperboatcarrier-" + instance + "-", service.WindowsCarrierName}} {
+		if strings.HasPrefix(lower, generational.prefix) {
+			return generational.name(instance, strings.TrimPrefix(lower, generational.prefix))
+		}
+	}
+	return "", nil
 }
 
 // Unknown account-owned generation registrations prevent deletion of their
@@ -65,22 +103,18 @@ func windowsGenerationRemovalInventory(ctx context.Context, instance string) ([]
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		name := strings.ToLower(windows.UTF16PtrToString(entry.ServiceName))
-		if !strings.HasPrefix(name, "paperboatsessionowner-"+instance+"-") {
+		canonical, err := windowsGenerationName(instance, strings.ToLower(windows.UTF16PtrToString(entry.ServiceName)))
+		if err != nil {
+			return nil, err
+		}
+		if canonical == "" {
 			continue
 		}
 		owned++
 		if owned > 2*config.DefaultResources.MaxSessions+4 {
 			return nil, ErrInvalidRequest
 		}
-		if strings.HasPrefix(name, "paperboatsessionowner-"+instance+"-") {
-			generation := strings.TrimPrefix(name, "paperboatsessionowner-"+instance+"-")
-			canonical, e := service.WindowsSessionOwnerName(instance, generation)
-			if e != nil {
-				return nil, e
-			}
-			owners = append(owners, canonical)
-		}
+		owners = append(owners, canonical)
 	}
 	runtime.KeepAlive(buffer)
 	declarations, err := windowsAccountDeclarationInventory(ctx, instance)
@@ -88,16 +122,12 @@ func windowsGenerationRemovalInventory(ctx context.Context, instance string) ([]
 		return nil, err
 	}
 	for _, path := range declarations {
-		name := strings.TrimSuffix(filepath.Base(path), ".json")
-		lower := strings.ToLower(name)
-		prefix := "paperboatsessionowner-" + instance + "-"
-		if !strings.HasPrefix(lower, prefix) {
-			continue
-		}
-		generation := strings.TrimPrefix(lower, prefix)
-		canonical, err := service.WindowsSessionOwnerName(instance, generation)
+		canonical, err := windowsGenerationName(instance, strings.ToLower(strings.TrimSuffix(filepath.Base(path), ".json")))
 		if err != nil {
 			return nil, err
+		}
+		if canonical == "" {
+			continue
 		}
 		found := false
 		for _, existing := range owners {

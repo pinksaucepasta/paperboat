@@ -105,7 +105,7 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 	// The guard is a separate system component: the update keeps the replaced one restorable and puts
 	// it back if any later step fails, so a failed update leaves no component on the new version.
 	var guardRestore guardUndo
-	var carrierUpgrade *unixCarrierUpgrade
+	var carrierUpgrade *carrierUpgrade
 	var candidateOwner candidateSessionOwner
 	resultErr = lifecycle.Replace(ctx, func(ctx context.Context) error {
 		if err := publishUnixControlLifetime(ctx, paths, hostd, coldCarrier); err != nil {

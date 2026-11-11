@@ -25,8 +25,8 @@ type CarrierConfig struct {
 	Schema   string               `json:"schema"`
 	Instance string               `json:"instance"`
 	Source   installsource.Source `json:"source"`
-	// Generation names this carrier's own native unit, lock and control socket on
-	// Linux and macOS (the source SHA-256 prefix, like session owners); empty on Windows.
+	// Generation names this carrier's own native unit or service, lock and control
+	// socket (the source SHA-256 prefix, like session owners).
 	Generation             string            `json:"generation,omitempty"`
 	Executable             string            `json:"executable"`
 	UID                    int               `json:"uid"`
@@ -60,7 +60,7 @@ func (c CarrierConfig) Validate() error {
 			return ErrInvalidRequest
 		}
 	}
-	if (runtime.GOOS == "windows") != (c.Generation == "") || c.Generation != "" && c.Generation != c.Source.SHA256[:32] || c.ControlEndpoint != carrierControlEndpoint(c.HostdEndpoint, c.Generation) {
+	if c.Generation != c.Source.SHA256[:32] || c.ControlEndpoint != carrierControlEndpoint(c.HostdEndpoint, c.Generation) {
 		return ErrInvalidRequest
 	}
 	return validateCarrierPaths(c)
@@ -78,9 +78,6 @@ func sourceGeneration(s installsource.Source) (string, error) {
 // carrierControlEndpoint is the account-private control socket of one carrier
 // generation (from sourceGeneration); two generations serve side by side during an update.
 func carrierControlEndpoint(hostdEndpoint, generation string) string {
-	if generation == "" {
-		return hostdEndpoint + ".carrier"
-	}
 	// A short generation suffix: macOS sun_path holds 104 bytes, and the full
 	// 32-hex name made bind fail with EINVAL under /Library/Application Support
 	// (pbmac: "initial carrier did not become ready"). 16 hex stay unique
@@ -101,7 +98,7 @@ func carrierInstallerWithPending(c CarrierConfig, pending bool) (*service.Instal
 	}
 	args := []string{"daemon", "__runtime-carrier", "--generation", c.Generation}
 	if runtime.GOOS == "windows" {
-		args = []string{"daemon", "__runtime-carrier", "--instance", c.Instance}
+		args = []string{"daemon", "__runtime-carrier", "--instance", c.Instance, "--generation", c.Generation}
 	}
 	config := service.Config{Platform: c.Source.Platform, Kind: service.CarrierKind, Instance: c.Instance, Generation: c.Generation, ConfigRoot: carrierServiceRoot(c), Executable: c.Executable, ExecutableSHA256: c.Source.SHA256, ExecutableLength: c.Source.Length, User: c.User, Group: c.Group, Arguments: args, Environment: c.Environment, UpgradeMode: service.UpgradeReload, Controller: controller, AccountReadableDefinition: c.Source.Platform != "windows"}
 	if pending {

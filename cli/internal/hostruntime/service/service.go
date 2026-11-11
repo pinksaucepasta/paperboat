@@ -206,7 +206,9 @@ func newInstaller(config Config, allowMissingExecutable bool) (*Installer, error
 			path = filepath.Join(config.ConfigRoot, "etc", "systemd", "system", unit)
 		}
 	case "windows":
-		if config.Kind == SessionOwnerKind && !validWindowsSessionOwnerInstance(config.Instance) || config.Kind != SessionOwnerKind && !safeWindowsServiceKind(config.Kind, config.Instance) {
+		// Session owners and carriers name one service per generation (instance + generation).
+		generational := config.Kind == SessionOwnerKind || config.Kind == CarrierKind
+		if generational && !validWindowsSessionOwnerInstance(config.Instance) || !generational && !safeWindowsServiceKind(config.Kind, config.Instance) {
 			return nil, ErrInvalidDefinition
 		}
 		// The SCM owns the executable registration. This file is a durable,

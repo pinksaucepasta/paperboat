@@ -8,5 +8,8 @@ func windowsConfiguredServiceName(config Config) string {
 	if config.Kind == SessionOwnerKind {
 		return "PaperboatSessionOwner-" + config.Instance + "-" + config.Generation
 	}
+	if config.Kind == CarrierKind && config.Platform == "windows" {
+		return "PaperboatCarrier-" + config.Instance + "-" + config.Generation
+	}
 	return windowsServiceName(config.Kind, config.Instance)
 }

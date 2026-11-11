@@ -16,7 +16,7 @@ func TestWindowsAccountServicesMatchOnlyThisAccount(t *testing.T) {
 	names := []string{
 		"PaperboatHostd-" + instance,
 		"PaperboatUpdated-" + instance,
-		"PaperboatCarrier-" + instance,
+		"PaperboatCarrier-" + instance + "-g1",
 		"PaperboatSshd-" + instance,
 		"PaperboatLocalDaemon-" + instance,
 		"PaperboatUpdateActivator-" + instance,
@@ -24,6 +24,7 @@ func TestWindowsAccountServicesMatchOnlyThisAccount(t *testing.T) {
 		"paperboathostd-" + strings.ToUpper(instance),
 		"PaperboatUpdateActivator",
 		"PaperboatHostd-" + other,
+		"PaperboatCarrier-" + other + "-g1",
 		"PaperboatSessionOwner-" + other + "-g1",
 		"PaperboatSshd",
 		"PaperboatHostd-" + instance + "x",
@@ -35,7 +36,7 @@ func TestWindowsAccountServicesMatchOnlyThisAccount(t *testing.T) {
 	want := []string{
 		"PaperboatHostd-" + instance,
 		"PaperboatUpdated-" + instance,
-		"PaperboatCarrier-" + instance,
+		"PaperboatCarrier-" + instance + "-g1",
 		"PaperboatSshd-" + instance,
 		"PaperboatLocalDaemon-" + instance,
 		"PaperboatUpdateActivator-" + instance,

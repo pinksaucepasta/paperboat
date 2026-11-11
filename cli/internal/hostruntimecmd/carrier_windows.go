@@ -40,14 +40,14 @@ func runNativeCarrier(ctx context.Context, config hostinstall.CarrierConfig) err
 	if sid != "S-1-5-18" {
 		return hostinstall.ErrInvalidRequest
 	}
-	if _, err := service.OwnedWindowsRoleExecutable(service.CarrierKind, config.Instance); err != nil {
+	if _, err := service.OwnedWindowsRoleExecutable(service.CarrierKind, config.Instance+"-"+config.Generation); err != nil {
 		return err
 	}
-	name, err := service.WindowsCarrierName(config.Instance)
+	name, err := service.WindowsCarrierName(config.Instance, config.Generation)
 	if err != nil {
 		return err
 	}
-	return service.RunWindowsService(service.ServiceEntryConfig{Name: name, Executable: config.Executable, EnrolledSID: config.OwnerSID, Arguments: []string{"daemon", "__runtime-carrier", "--instance", config.Instance}, Environment: config.Environment,
+	return service.RunWindowsService(service.ServiceEntryConfig{Name: name, Executable: config.Executable, EnrolledSID: config.OwnerSID, Arguments: []string{"daemon", "__runtime-carrier", "--instance", config.Instance, "--generation", config.Generation}, Environment: config.Environment,
 		LaunchFailure: func(err error) { recordWindowsServiceLaunchFailure(name, err) },
 		// The installer stops hostd, the local daemon and the updater and leaves this service running, so this is
 		// the process that notices an installer that died after the stop. It also runs at boot: the service is

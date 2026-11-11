@@ -84,6 +84,16 @@ func pruneWindowsRuntimePins(ctx context.Context, installed WindowsRuntimeConfig
 	if err := add(carrier.Executable); err != nil {
 		return err
 	}
+	// Every carrier generation still present keeps its pin (the sweep runs before this; one it deferred is kept).
+	carriers, err := windowsCarrierGenerations(ctx, layout.Instance)
+	if err != nil {
+		return err
+	}
+	for _, c := range carriers {
+		if err := add(c.Executable); err != nil {
+			return err
+		}
+	}
 	for _, path := range activation {
 		if err := add(path); err != nil {
 			return err
@@ -98,9 +108,16 @@ func pruneWindowsRuntimePins(ctx context.Context, installed WindowsRuntimeConfig
 		return err
 	}
 	names := make(map[string]string)
-	for _, kind := range []string{service.HostKind, service.ConfigKind, service.HostdKind, service.DaemonKind, service.UpdaterKind, service.CarrierKind} {
-		base := map[string]string{service.HostKind: "PaperboatHost", service.ConfigKind: "PaperboatRuntimeConfig", service.HostdKind: "PaperboatHostd", service.DaemonKind: "PaperboatLocalDaemon", service.UpdaterKind: "PaperboatUpdated", service.CarrierKind: "PaperboatCarrier"}[kind]
+	for _, kind := range []string{service.HostKind, service.ConfigKind, service.HostdKind, service.DaemonKind, service.UpdaterKind} {
+		base := map[string]string{service.HostKind: "PaperboatHost", service.ConfigKind: "PaperboatRuntimeConfig", service.HostdKind: "PaperboatHostd", service.DaemonKind: "PaperboatLocalDaemon", service.UpdaterKind: "PaperboatUpdated"}[kind]
 		name := base + "-" + layout.Instance
+		names[strings.ToLower(name)] = filepath.Join(`C:\ProgramData\Paperboat\services`, name+".json")
+	}
+	for _, c := range carriers {
+		name, err := service.WindowsCarrierName(layout.Instance, c.Generation)
+		if err != nil {
+			return err
+		}
 		names[strings.ToLower(name)] = filepath.Join(`C:\ProgramData\Paperboat\services`, name+".json")
 	}
 	for _, d := range descriptors {

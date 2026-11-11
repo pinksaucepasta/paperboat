@@ -621,7 +621,7 @@ func recoverWindowsInstallationLocked(ctx context.Context, ownerSID string, stat
 	// Linux's updater recovers with itself kept for last (RecoverInterrupted, self = the updater); here the
 	// recovering service is the carrier, the only one a killed install leaves running.
 	self := ""
-	if own, err := windowsCarrierIsThisProcess(layout.Instance); err != nil {
+	if own, err := windowsCarrierIsThisProcess(ctx, layout.Instance); err != nil {
 		return nil, err
 	} else if own {
 		self = service.CarrierKind

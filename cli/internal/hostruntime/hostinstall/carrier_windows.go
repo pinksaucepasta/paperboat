@@ -13,20 +13,29 @@ import (
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/carriercontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
-	"time"
 )
 
-// Windows keeps one carrier per account; it has no generation descriptors.
+// readCarrierGenerationFile reads one generation's own descriptor, active or not (an update's standby candidate).
 func readCarrierGenerationFile(ctx context.Context, instance, generation string) (CarrierConfig, error) {
-	if generation != "" {
+	if !sessionowner.ValidGeneration(generation) {
 		return CarrierConfig{}, ErrInvalidRequest
 	}
-	return readCarrierConfigFile(ctx, instance)
+	c, err := readWindowsCarrierFile(ctx, instance, carrierGenerationPath(instance, generation))
+	if err == nil && c.Generation != generation {
+		return c, ErrInvalidRequest
+	}
+	return c, err
+}
+
+// carrierGenerationPath is one generation's own descriptor, which its carrier process reads. config.json is a copy
+// of the active generation's descriptor, as on Linux and macOS (carrier_unix.go).
+func carrierGenerationPath(instance, generation string) string {
+	return filepath.Join(filepath.Dir(carrierConfigPath(instance)), "generation-"+generation+".json")
 }
 
 func carrierConfigPath(instance string) string {
@@ -55,7 +64,7 @@ func validateCarrierPaths(c CarrierConfig) error {
 	}
 	root := filepath.Dir(carrierConfigPath(instance))
 	token, _ := WindowsInstanceTokenPath(instance)
-	if !strings.EqualFold(c.Executable, pin) || c.HostdEndpoint != layout.HostdSocket || c.HostdTokenFile != token || c.DispatchCapabilityFile != filepath.Join(root, "dispatch.cap") || c.LockPath != filepath.Join(root, "owner.lock") {
+	if !strings.EqualFold(c.Executable, pin) || c.HostdEndpoint != layout.HostdSocket || c.HostdTokenFile != token || c.DispatchCapabilityFile != filepath.Join(root, "dispatch.cap") || c.LockPath != filepath.Join(root, "owner-"+c.Generation+".lock") {
 		return ErrInvalidRequest
 	}
 	return nil
@@ -99,18 +108,26 @@ func deriveWindowsCarrierConfig(r Request, layout service.Layout, pin string) (C
 		environment["PATH"] = r.Path
 	}
 
-	c := CarrierConfig{Schema: carrierSchema, Instance: layout.Instance, Source: r.Source, Executable: pin, UID: r.UID, GID: r.GID, OwnerSID: r.OwnerSID, User: "Paperboat", Group: "Paperboat", RuntimeRoot: r.StateRoot, Environment: environment, WorkerAddress: r.HelperListenAddress, HostdEndpoint: layout.HostdSocket, ControlEndpoint: layout.HostdSocket + ".carrier", HostdTokenFile: token, DispatchCapabilityFile: filepath.Join(root, "dispatch.cap"), LockPath: filepath.Join(root, "owner.lock")}
+	generation, err := sourceGeneration(r.Source)
+	if err != nil {
+		return CarrierConfig{}, err
+	}
+	c := CarrierConfig{Schema: carrierSchema, Instance: layout.Instance, Source: r.Source, Generation: generation, Executable: pin, UID: r.UID, GID: r.GID, OwnerSID: r.OwnerSID, User: "Paperboat", Group: "Paperboat", RuntimeRoot: r.StateRoot, Environment: environment, WorkerAddress: r.HelperListenAddress, HostdEndpoint: layout.HostdSocket, ControlEndpoint: carrierControlEndpoint(layout.HostdSocket, generation), HostdTokenFile: token, DispatchCapabilityFile: filepath.Join(root, "dispatch.cap"), LockPath: filepath.Join(root, "owner-"+generation+".lock")}
 	return c, c.Validate()
 }
+// readCarrierConfigFile reads the active generation's descriptor.
 func readCarrierConfigFile(ctx context.Context, instance string) (CarrierConfig, error) {
+	return readWindowsCarrierFile(ctx, instance, carrierConfigPath(instance))
+}
+
+func readWindowsCarrierFile(ctx context.Context, instance, path string) (CarrierConfig, error) {
 	if ctx == nil {
 		return CarrierConfig{}, ErrInvalidRequest
 	}
 	if err := ctx.Err(); err != nil {
 		return CarrierConfig{}, err
 	}
-	path := carrierConfigPath(instance)
-	if path == "" {
+	if path == "" || carrierConfigPath(instance) == "" {
 		return CarrierConfig{}, ErrInvalidRequest
 	}
 	// The parent is protected before JSON is used as account custody input.
@@ -198,7 +215,7 @@ func openCarrierProtectedFile(c CarrierConfig, path string, writable bool) (*os.
 	return f, nil
 }
 func publishCarrierFiles(c CarrierConfig, path string, capability []byte) error {
-	if err := ensureWindowsProtectedMachineDirectory(filepath.Dir(path), c.OwnerSID, windowsRuntimeCurrentRootDACL(c.OwnerSID)); err != nil {
+	if err := ensureWindowsProtectedMachineDirectory(filepath.Dir(carrierConfigPath(c.Instance)), c.OwnerSID, windowsRuntimeCurrentRootDACL(c.OwnerSID)); err != nil {
 		return err
 	}
 	for _, item := range []struct {
@@ -226,11 +243,28 @@ func publishCarrierFiles(c CarrierConfig, path string, capability []byte) error 
 			return err
 		}
 	}
+	if path == "" {
+		return writeWindowsCarrierDescriptors(c, false)
+	}
+	if path != carrierConfigPath(c.Instance) {
+		return ErrInvalidRequest
+	}
+	return writeWindowsCarrierDescriptors(c, true)
+}
+
+// publishCarrierDescriptor marks a generation active: config.json becomes its descriptor.
+func publishCarrierDescriptor(c CarrierConfig) error { return writeWindowsCarrierDescriptors(c, true) }
+
+func writeWindowsCarrierDescriptors(c CarrierConfig, active bool) error {
 	body, err := jsonCarrier(c)
 	if err != nil {
 		return err
 	}
-	return atomicfile.Write(path, body, atomicfile.Options{Mode: 0600, OwnerUID: -1, OwnerGID: -1, SecurityDescriptor: "O:SY" + windowsRuntimeCurrentFileDACL(c.OwnerSID)})
+	options := atomicfile.Options{Mode: 0600, OwnerUID: -1, OwnerGID: -1, SecurityDescriptor: "O:SY" + windowsRuntimeCurrentFileDACL(c.OwnerSID)}
+	if err := atomicfile.Write(carrierGenerationPath(c.Instance, c.Generation), body, options); err != nil || !active {
+		return err
+	}
+	return atomicfile.Write(carrierConfigPath(c.Instance), body, options)
 }
 func verifyCarrierNative(c CarrierConfig, i *service.Installer) error {
 	token, err := windows.OpenCurrentProcessToken()
@@ -249,7 +283,7 @@ func verifyCarrierNative(c CarrierConfig, i *service.Installer) error {
 		return ErrInvalidRequest
 	}
 
-	identity, err := service.VerifyOwnedWindowsRoleExecutable(service.CarrierKind, c.Instance, c.Executable)
+	identity, err := service.VerifyOwnedWindowsRoleExecutable(service.CarrierKind, c.Instance+"-"+c.Generation, c.Executable)
 	if err != nil {
 		return err
 	}
@@ -300,165 +334,144 @@ func carrierPublicationLock(ctx context.Context, r Request) (io.Closer, error) {
 	return carrierUnlock(unlock), nil
 }
 
-// windowsCarrierLifecycleInstaller never publishes while constructing a journal.
-func windowsCarrierLifecycleInstaller(ctx context.Context, layout service.Layout, request *Request) (*service.Installer, func(context.Context) error, error) {
+// absentCarrierGeneration names the lifecycle's carrier component when no carrier exists and no source says which
+// one would: no source has this SHA-256 prefix, so its service is never registered.
+const absentCarrierGeneration = "00000000000000000000000000000000"
+
+// windowsCarrierLifecycleInstaller never publishes while constructing a journal. It addresses the active carrier
+// generation, or with none yet the one request would create; generationFile is that generation's own descriptor.
+func windowsCarrierLifecycleInstaller(ctx context.Context, layout service.Layout, request *Request) (installer *service.Installer, probe func(context.Context) error, generationFile string, resultErr error) {
 	c, err := readCarrierConfigFile(ctx, layout.Instance)
 	if err == nil {
 		i, err := carrierInstallerPending(c)
-		return i, func(ctx context.Context) error { return waitCarrierReady(ctx, c) }, err
+		return i, func(ctx context.Context) error { return waitCarrierReady(ctx, c) }, carrierGenerationPath(c.Instance, c.Generation), err
 	}
 	if !installNotExistOnly(err) {
-		return nil, nil, err
+		return nil, nil, "", err
+	}
+	// No carrier yet: the generation request would create, or for a caller without a source (recovery, repair,
+	// uninstall) one that is never installed. Either stands for "no carrier registered" in the journal; restore
+	// removes whatever generation the interrupted attempt created (restoreWindowsCarrierSnapshot).
+	generation := absentCarrierGeneration
+	if request != nil {
+		if g, err := sourceGeneration(request.Source); err == nil {
+			generation = g
+		}
 	}
 	root, err := WindowsInstanceRoot(layout.Instance)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 	// The cold declaration is path-only pending input. Candidate identity is
 	// bound when PrepareCarrier publishes the source-verified declaration.
-	i, err := service.NewPending(service.Config{Platform: "windows", Kind: service.CarrierKind, Instance: layout.Instance, ConfigRoot: root, Executable: layout.Binary, User: "Paperboat", Group: "Paperboat", Arguments: []string{"daemon", "__runtime-carrier", "--instance", layout.Instance}, Controller: service.WindowsController{}})
-	return i, nil, err
+	i, err := service.NewPending(service.Config{Platform: "windows", Kind: service.CarrierKind, Instance: layout.Instance, Generation: generation, ConfigRoot: root, Executable: layout.Binary, User: "Paperboat", Group: "Paperboat", Arguments: []string{"daemon", "__runtime-carrier", "--instance", layout.Instance, "--generation", generation}, Controller: service.WindowsController{}})
+	return i, nil, carrierGenerationPath(layout.Instance, generation), err
 }
 
+// restoreWindowsCarrierSnapshot puts the baseline's carrier back: every other generation is the attempt's
+// candidate and is removed, the baseline becomes the active generation again and serves (it may have released the
+// network to the candidate and exited). Linux and macOS: unixCarrierInstallation.Restore. A generation whose
+// service process runs this recovery (hostruntimecmd windowsDeadInstaller) is left for the lifecycle's last step
+// (windowsCarrierComponent.RemoveSelf) or, a non-active one, for the updater's sweep.
 func restoreWindowsCarrierSnapshot(ctx context.Context, layout service.Layout, baseline *CarrierConfig) error {
+	if baseline != nil && (baseline.Instance != layout.Instance || baseline.Validate() != nil) {
+		return ErrInvalidRequest
+	}
+	own, ownErr := windowsCarrierOfThisProcess(ctx, layout.Instance)
+	if ownErr != nil {
+		return ownErr
+	}
+	generations, err := windowsCarrierGenerations(ctx, layout.Instance)
+	if err != nil {
+		return err
+	}
+	for _, c := range generations {
+		if baseline != nil && c.Generation == baseline.Generation || own != nil && c.Generation == own.Generation {
+			continue
+		}
+		if err := removeWindowsCarrierGeneration(ctx, c); err != nil {
+			return err
+		}
+	}
+	if baseline == nil {
+		if own != nil {
+			return nil // windowsCarrierComponent.RemoveSelf removes it and the active descriptor last
+		}
+		return removeInstallFile(carrierConfigPath(layout.Instance))
+	}
+	if err := verifyWindowsSource(ctx, baseline.Executable, baseline.Source, baseline.OwnerSID); err != nil {
+		return err
+	}
 	current, err := readCarrierConfigFile(ctx, layout.Instance)
 	if err != nil && !installNotExistOnly(err) {
 		return err
 	}
-	if baseline != nil {
-		if baseline.Instance != layout.Instance || baseline.Validate() != nil {
-			return ErrInvalidRequest
-		}
-		if err != nil {
-			return ErrInvalidRequest
-		}
-		want, _ := jsonCarrier(*baseline)
-		have, _ := jsonCarrier(current)
-		if string(want) != string(have) {
-			if !sameWindowsCarrierAccount(current, *baseline) {
-				return ErrInvalidRequest
-			}
-			if err := stopAndRemoveWindowsCarrier(ctx, current); err != nil {
-				return err
-			}
-			if err := verifyWindowsSource(ctx, baseline.Executable, baseline.Source, baseline.OwnerSID); err != nil {
-				return err
-			}
-			return writeWindowsCarrierConfig(*baseline)
-		}
-		// Ordinary worker rollback leaves the carrier and accepted SSH alone.
-		return EnsureExistingCarrier(ctx, current)
-	}
-	if installNotExistOnly(err) {
-		i, _, err := windowsCarrierLifecycleInstaller(ctx, layout, nil)
-		if err != nil {
+	want, _ := jsonCarrier(*baseline)
+	have, _ := jsonCarrier(current)
+	if err != nil || string(want) != string(have) {
+		if err := publishCarrierDescriptor(*baseline); err != nil {
 			return err
 		}
-		status, err := (service.WindowsController{}).Inspect(ctx, i.DefinitionPath())
-		if err != nil {
-			return err
-		}
-		if status.Registered || status.Running {
-			return ErrInvalidRequest
-		}
-		return nil
 	}
-	// The recovery of a killed install that created this carrier runs in the carrier's own service process
-	// (hostruntimecmd windowsDeadInstaller): removing it here would end the recovery before any other service is
-	// restored. The lifecycle keeps it for the caller's last step (windowsCarrierComponent.RemoveSelf).
-	if own, err := windowsCarrierIsThisProcess(layout.Instance); err != nil || own {
-		return err
-	}
-	if err := stopAndRemoveWindowsCarrier(ctx, current); err != nil {
-		return err
-	}
-	// Capability and lifetime-lock inodes remain unchanged for a bounded retry.
-	return os.Remove(carrierConfigPath(layout.Instance))
+	return EnsureExistingCarrier(ctx, *baseline)
 }
 
-// windowsCarrierIsThisProcess reports whether the caller is the carrier's running service process.
-func windowsCarrierIsThisProcess(instance string) (own bool, resultErr error) {
-	name, err := service.WindowsCarrierName(instance)
+// windowsCarrierOfThisProcess is the carrier generation whose running service process is the caller, or nil.
+func windowsCarrierOfThisProcess(ctx context.Context, instance string) (own *CarrierConfig, resultErr error) {
+	generations, err := windowsCarrierGenerations(ctx, instance)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	manager, err := mgr.Connect()
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	defer func() { resultErr = errors.Join(resultErr, manager.Disconnect()) }()
-	carrier, err := manager.OpenService(name)
-	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
-		return false, nil
+	for _, c := range generations {
+		name, err := service.WindowsCarrierName(instance, c.Generation)
+		if err != nil {
+			return nil, err
+		}
+		carrier, err := manager.OpenService(name)
+		if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		status, err := carrier.Query()
+		closeErr := carrier.Close()
+		if err = errors.Join(err, closeErr); err != nil {
+			return nil, err
+		}
+		if status.State != svc.Stopped && status.ProcessId == uint32(os.Getpid()) {
+			return &c, nil
+		}
 	}
-	if err != nil {
-		return false, err
-	}
-	defer func() { resultErr = errors.Join(resultErr, carrier.Close()) }()
-	status, err := carrier.Query()
-	if err != nil {
-		return false, err
-	}
-	return status.State != svc.Stopped && status.ProcessId == uint32(os.Getpid()), nil
+	return nil, nil
+}
+
+// windowsCarrierIsThisProcess reports whether the caller is the service process of one of the account's carriers.
+func windowsCarrierIsThisProcess(ctx context.Context, instance string) (bool, error) {
+	own, err := windowsCarrierOfThisProcess(ctx, instance)
+	return own != nil, err
 }
 
 // windowsCarrierComponent is the carrier in the lifecycle. Removing itself, the carrier's service process also
-// removes the carrier's configuration, as restoreWindowsCarrierSnapshot does for every other caller; it goes
-// before the service removal, whose stop ends the caller.
+// removes the active descriptor and its generation's own one, as restoreWindowsCarrierSnapshot does for every other
+// caller; they go before the service removal, whose stop ends the caller.
 type windowsCarrierComponent struct {
 	*service.NativeTransactionalComponent
-	config string
+	config, generation string
 }
 
 func (c windowsCarrierComponent) RemoveSelf(ctx context.Context) error {
-	if err := removeInstallFile(c.config); err != nil {
-		return err
+	for _, path := range []string{c.config, c.generation} {
+		if err := removeInstallFile(path); err != nil {
+			return err
+		}
 	}
 	return c.NativeTransactionalComponent.RemoveSelf(ctx)
-}
-
-func sameWindowsCarrierAccount(a, b CarrierConfig) bool {
-	a.Source, a.Executable = b.Source, b.Executable
-	x, _ := jsonCarrier(a)
-	y, _ := jsonCarrier(b)
-	return string(x) == string(y)
-}
-func writeWindowsCarrierConfig(c CarrierConfig) error {
-	body, err := jsonCarrier(c)
-	if err != nil {
-		return err
-	}
-	return atomicfile.Write(carrierConfigPath(c.Instance), body, atomicfile.Options{Mode: 0600, OwnerUID: -1, OwnerGID: -1, SecurityDescriptor: "O:SY" + windowsRuntimeCurrentFileDACL(c.OwnerSID)})
-}
-func stopAndRemoveWindowsCarrier(ctx context.Context, c CarrierConfig) error {
-	if err := verifyWindowsSource(ctx, c.Executable, c.Source, c.OwnerSID); err != nil {
-		return err
-	}
-	i, err := carrierInstaller(c)
-	if err != nil {
-		return err
-	}
-	native := service.WindowsController{}
-	status, err := native.Inspect(ctx, i.DefinitionPath())
-	if err != nil {
-		return err
-	}
-	if status.Registered || status.Running {
-		if err := verifyCarrierNative(c, i); err != nil {
-			return err
-		}
-		if err := i.Uninstall(ctx); err != nil {
-			return err
-		}
-	}
-	status, err = native.Inspect(ctx, i.DefinitionPath())
-	if err != nil {
-		return err
-	}
-	if status.Registered || status.Running {
-		return ErrInvalidRequest
-	}
-	return nil
 }
 
 func reconcileInstalledCarrier(ctx context.Context, instance string, pinReferences ...func(context.Context, string) ([]string, error)) (resultErr error) {
@@ -502,6 +515,10 @@ func reconcileInstalledCarrier(ctx context.Context, instance string, pinReferenc
 	if err := pruneWindowsSSHGenerations(ctx, retained, config.Source); err != nil {
 		return err
 	}
+	// Generations an update retired (exited after releasing the network) or a failed one left standing.
+	if err := sweepWindowsCarrierGenerations(ctx, instance, retained.Generation); err != nil {
+		return err
+	}
 	if len(pinReferences) == 1 {
 		activation, err := pinReferences[0](ctx, instance)
 		if err != nil {
@@ -514,37 +531,8 @@ func reconcileInstalledCarrier(ctx context.Context, instance string, pinReferenc
 	if retained.Source.SHA256 == config.Source.SHA256 && retained.Source.Length == config.Source.Length {
 		return nil
 	}
-	desired := retained
-	desired.Source = config.Source
-	desired.Executable, err = ensureWindowsPinnedRuntimeFrom(ctx, layout, config.Source, config.OwnerSID, layout.Binary)
-	if err != nil {
-		return err
-	}
-	if err := desired.Validate(); err != nil {
-		return err
-	}
-	capability, err := ReadCarrierCapability(ctx, retained)
-	if err != nil {
-		return err
-	}
-	defer clear(capability)
-	client, err := carriercontrol.NewClient(retained.ControlEndpoint, capability, retained.Source.SHA256)
-	if err != nil {
-		return err
-	}
-	if err := client.RetireSSH(ctx); errors.Is(err, carriercontrol.ErrBusy) {
-		return nil
-	} else if err != nil {
-		return err
-	}
-	mutated := false
-	defer func() {
-		if !mutated {
-			resume, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			defer cancel()
-			resultErr = errors.Join(resultErr, client.ResumeSSH(resume))
-		}
-	}()
+	// The activation moves the carrier with the runtime; a carrier still on another source moves the same way,
+	// standby first and the network last, under maintenance and the lifecycle journal.
 	abort, err := PrepareSuppliedMaintenance(ctx, layout.HostdSocket, config.TokenFile, false)
 	if err != nil {
 		return err
@@ -554,56 +542,20 @@ func reconcileInstalledCarrier(ctx context.Context, instance string, pinReferenc
 	if err != nil {
 		return err
 	}
-	return manager.Replace(ctx, func(ctx context.Context) error {
-		if err := stopAndRemoveWindowsCarrier(ctx, retained); err != nil {
+	var upgrade *carrierUpgrade
+	err = manager.Replace(ctx, func(ctx context.Context) error {
+		if upgrade, err = stageWindowsCarrierUpgrade(ctx, request); err != nil {
 			return err
 		}
-		mutated = true
-		if err := startWindowsCarrier(ctx, desired); err != nil {
+		if err := upgrade.activate(); err != nil {
 			return err
 		}
-		return prepareWindowsSSHGenerationIfObtainable(ctx, request)
+		if err := upgrade.switchNetwork(ctx); err != nil {
+			return err
+		}
+		return upgrade.confirmServing(ctx, carrierServingWait)
 	})
-}
-
-// replaceWindowsCarrier replaces retained by desired inside an activation that holds maintenance and the lifecycle
-// journal restoring retained on failure. While retained still holds SSH connections it stays, admitting SSH
-// again, and replaced is false.
-func replaceWindowsCarrier(ctx context.Context, retained, desired CarrierConfig) (replaced bool, resultErr error) {
-	capability, err := ReadCarrierCapability(ctx, retained)
-	if err != nil {
-		return false, err
-	}
-	defer clear(capability)
-	client, err := carriercontrol.NewClient(retained.ControlEndpoint, capability, retained.Source.SHA256)
-	if err != nil {
-		return false, err
-	}
-	if err := client.RetireSSH(ctx); errors.Is(err, carriercontrol.ErrBusy) {
-		return false, nil
-	} else if err != nil {
-		return false, err
-	}
-	if err := stopAndRemoveWindowsCarrier(ctx, retained); err != nil {
-		resume, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		return false, errors.Join(err, client.ResumeSSH(resume))
-	}
-	return true, startWindowsCarrier(ctx, desired)
-}
-
-func startWindowsCarrier(ctx context.Context, desired CarrierConfig) error {
-	if err := writeWindowsCarrierConfig(desired); err != nil {
-		return err
-	}
-	i, err := carrierInstaller(desired)
-	if err != nil {
-		return err
-	}
-	if err := i.Install(ctx); err != nil {
-		return err
-	}
-	return waitCarrierReady(ctx, desired)
+	return errors.Join(err, upgrade.finish(ctx, err != nil))
 }
 
 func windowsCarrierInstallRequest(ctx context.Context, c WindowsRuntimeConfig) (Request, error) {

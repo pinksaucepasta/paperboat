@@ -56,7 +56,7 @@ func TestSwitchNetworkReleasesBeforeStartingAndStopsOnFailure(t *testing.T) {
 		name := map[bool]string{false: "ok", true: "bad"}[releaseFails]
 		oldEndpoint := switchServer(t, root, name+"-old", oldSHA, token, release, nil)
 		newEndpoint := switchServer(t, root, name+"-new", newSHA, token, nil, start)
-		u := &unixCarrierUpgrade{previous: CarrierConfig{ControlEndpoint: oldEndpoint, Source: installsource.Source{SHA256: oldSHA}}, candidate: CarrierConfig{ControlEndpoint: newEndpoint, Source: installsource.Source{SHA256: newSHA}}, capability: append([]byte(nil), token...)}
+		u := &carrierUpgrade{previous: CarrierConfig{ControlEndpoint: oldEndpoint, Source: installsource.Source{SHA256: oldSHA}}, candidate: CarrierConfig{ControlEndpoint: newEndpoint, Source: installsource.Source{SHA256: newSHA}}, capability: append([]byte(nil), token...)}
 		err := u.switchNetwork(t.Context())
 		want := "release,start"
 		if releaseFails {
@@ -93,7 +93,7 @@ func TestConfirmServingFailsWhenTheNewCarrierIsGone(t *testing.T) {
 	if err := <-server.Ready; err != nil {
 		t.Fatal(err)
 	}
-	u := &unixCarrierUpgrade{candidate: CarrierConfig{ControlEndpoint: server.Endpoint, Source: installsource.Source{SHA256: sha}}, capability: append([]byte(nil), token...)}
+	u := &carrierUpgrade{candidate: CarrierConfig{ControlEndpoint: server.Endpoint, Source: installsource.Source{SHA256: sha}}, capability: append([]byte(nil), token...)}
 	if err := u.confirmServing(t.Context(), time.Second); err != nil {
 		t.Fatalf("a serving carrier was refused: %v", err)
 	}
