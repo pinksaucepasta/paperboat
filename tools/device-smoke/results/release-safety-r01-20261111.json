@@ -1,0 +1,20 @@
+{
+  "base": "236475df6c9c84f96d5f5043cb4518a3b962e2a2",
+  "probe": "490fd4cf5e2024d0a08cc9c9f03e07ed8478a767",
+  "same_tree": true,
+  "admins": true,
+  "strict": false,
+  "required_checks": [
+    "Targeted Go checks",
+    "Repository policy checks",
+    "Console lint and types",
+    "End-to-end core",
+    "Go format and vet"
+  ],
+  "queue_active": true,
+  "direct_push_exit": 1,
+  "refusal_codes": [
+    "GH013"
+  ],
+  "ok": true
+}
