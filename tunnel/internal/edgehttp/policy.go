@@ -27,6 +27,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/route"
 	edgetelemetry "github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
 	"github.com/realclientip/realclientip-go"
+	"golang.org/x/net/http/httpguts"
 )
 
 // RouteMatcher is the live edge route boundary. Implementations must return
@@ -1122,7 +1123,16 @@ func headerBytes(headers http.Header) int64 {
 	return size
 }
 
+// stripHopByHop drops the connection-scoped and edge-owned headers. "TE: trailers" is the exception: it is how a
+// gRPC client says it reads trailers, and strict servers (grpc-java, Envoy) refuse a request without it, so it
+// is kept on the hop to the origin like net/http/httputil.ReverseProxy does.
 func stripHopByHop(headers http.Header) {
+	trailers := httpguts.HeaderValuesContainsToken(headers["Te"], "trailers")
+	defer func() {
+		if trailers {
+			headers.Set("Te", "trailers")
+		}
+	}()
 	for _, value := range headers.Values("Connection") {
 		for _, name := range strings.Split(value, ",") {
 			headers.Del(strings.TrimSpace(name))
