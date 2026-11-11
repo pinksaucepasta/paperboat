@@ -284,7 +284,8 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	readyCtx, readyCancel := context.WithTimeout(ctx, 90*time.Second)
 	defer readyCancel()
 	healthClient := &http.Client{Timeout: 2 * time.Second}
-	var lastReadinessErr error
+	var firstReadinessErr, lastReadinessErr error
+	failedProbes := 0
 	for {
 		request, requestErr := http.NewRequestWithContext(readyCtx, http.MethodGet, "http://"+material.HelperListenAddress+"/healthz", nil)
 		var response *http.Response
@@ -294,6 +295,11 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		ready, probeErr := checkBootstrapWorkerReady(readyCtx, response, *stateRoot, source.Version, minimumGeneration, readinessStarted, true)
 		updaterReady, updaterErr := checkBootstrapUpdaterReady(readyCtx, source.Version, uid)
 		lastReadinessErr = runtimeFailureIfAny("runtime readiness is not confirmed", requestErr, probeErr, updaterErr)
+		if lastReadinessErr != nil {
+			if failedProbes++; failedProbes == 1 {
+				firstReadinessErr = lastReadinessErr
+			}
+		}
 		if requestErr == nil && ready && updaterReady {
 			resume.RuntimeReady = true
 			if err := bootstrap.SaveResume(*stateRoot, resume); err != nil {
@@ -323,9 +329,9 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		select {
 		case <-readyCtx.Done():
 			if resumingWorker {
-				return &installationStageError{Stage: "service_readiness", Cause: runtimeFailure("existing installation retained; retry enrollment after restoring runtime readiness", runtimeContextFailure(readyCtx), lastReadinessErr)}
+				return &installationStageError{Stage: "service_readiness", Cause: runtimeFailure("existing installation retained; retry enrollment after restoring runtime readiness", runtimeContextFailure(readyCtx), readinessFailures(firstReadinessErr, lastReadinessErr, failedProbes))}
 			}
-			failureErr := errors.Join(runtimeFailure("host service did not become ready", runtimeContextFailure(readyCtx), lastReadinessErr), authorizeServiceOperation(ctx, executable, "uninstall", installRequest, stdout, stderr), workerCommand.Rollback())
+			failureErr := errors.Join(runtimeFailure("host service did not become ready", runtimeContextFailure(readyCtx), readinessFailures(firstReadinessErr, lastReadinessErr, failedProbes)), authorizeServiceOperation(ctx, executable, "uninstall", installRequest, stdout, stderr), workerCommand.Rollback())
 			return failBootstrapInstallation(ctx, failureErr, material, *stateRoot, "service_readiness")
 		case <-time.After(time.Second):
 		}
