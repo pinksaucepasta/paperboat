@@ -66,6 +66,24 @@ func TestNativePrivateGrantBurstSucceedsPostgres(t *testing.T) {
 	const burst = 64
 	errs := make([]error, burst)
 	var wg sync.WaitGroup
+	// The machine's own heartbeats rewrite the rows the grants read while they run.
+	stop := make(chan struct{})
+	var writers sync.WaitGroup
+	for range 4 {
+		writers.Add(1)
+		go func() {
+			defer writers.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				store.SQL().ExecContext(ctx, `UPDATE paperboat.machine_service_snapshots SET expires_at=expires_at+interval '1 millisecond' WHERE machine_id=$1`, machine)
+				store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET online=true WHERE id=$1`, machine)
+			}
+		}()
+	}
 	for i := range burst {
 		wg.Add(1)
 		go func() {
@@ -74,6 +92,8 @@ func TestNativePrivateGrantBurstSucceedsPostgres(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+	close(stop)
+	writers.Wait()
 	for i, e := range errs {
 		if e != nil {
 			t.Fatalf("grant %d of %d failed: %v", i, burst, e)
