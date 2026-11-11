@@ -76,3 +76,39 @@ func TestWithholdBlockedRemovesTakenDownNames(t *testing.T) {
 		t.Fatalf("blocked=%v", blocked)
 	}
 }
+
+// The snapshot carries a tunnel's rules for every hostname of its decisions and a preview's rules keyed
+// on the lease; hostnames without rules get none.
+func TestOwnerIPRulesFollowTheirResource(t *testing.T) {
+	store := openControlPlaneTestDB(t)
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	tunnel, preview := "tun_rules_"+suffix, "prv_rules_"+suffix
+	t.Cleanup(func() {
+		_, _ = store.SQL().ExecContext(ctx, `DELETE FROM paperboat.access_ip_rules WHERE resource_id = ANY($1)`, []string{tunnel, preview})
+	})
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.access_ip_rules(resource_kind,resource_id,allow_cidrs,deny_cidrs,updated_by) VALUES('tunnel',$1,'{198.51.100.0/24}','{}','test'),('preview',$2,'{}','{203.0.113.0/24}','test')`, tunnel, preview); err != nil {
+		t.Fatal(err)
+	}
+	decision := func(host, tunnelID, publication, lifecycle string) wire.IngressDecision {
+		var d wire.IngressDecision
+		d.Binding.Hostname, d.Binding.TunnelID, d.Binding.PublicationID, d.Binding.Lifecycle = host, tunnelID, publication, lifecycle
+		return d
+	}
+	rules, err := ownerIPRules(ctx, store, []wire.IngressDecision{
+		decision("a.example.test", tunnel, "route_a", wire.TunnelDurable),
+		decision("b.example.test", tunnel, "route_b", wire.TunnelDurable),
+		decision("p.example.test", "tun_preview", preview, wire.TunnelEphemeral),
+		decision("other.example.test", "tun_other_"+suffix, "route_x", wire.TunnelDurable),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]wire.IngressIPRule{}
+	for _, r := range rules {
+		got[r.Hostname] = r
+	}
+	if len(got) != 3 || len(got["a.example.test"].Allow) != 1 || len(got["b.example.test"].Allow) != 1 || len(got["p.example.test"].Deny) != 1 || got["p.example.test"].Deny[0] != "203.0.113.0/24" {
+		t.Fatalf("rules = %+v", rules)
+	}
+}

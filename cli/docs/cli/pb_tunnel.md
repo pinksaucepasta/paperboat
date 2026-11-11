@@ -44,6 +44,7 @@ pb tunnel [--ephemeral] [<port|url|path>] [flags]
 * [pb tunnel doctor](pb_tunnel_doctor.md)	 - Diagnose tunnel health
 * [pb tunnel domain](pb_tunnel_domain.md)	 - Serve a tunnel at hostnames under your workspace's domains
 * [pb tunnel inspect](pb_tunnel_inspect.md)	 - Show daemon-local HTTP captures
+* [pb tunnel ip-rules](pb_tunnel_ip-rules.md)	 - Show or set which client addresses may open this tunnel
 * [pb tunnel list](pb_tunnel_list.md)	 - List durable tunnels
 * [pb tunnel logs](pb_tunnel_logs.md)	 - Show tunnel logs
 * [pb tunnel pause](pb_tunnel_pause.md)	 - Pause new traffic while preserving tunnel identity and configuration

@@ -1200,3 +1200,31 @@ func TestOriginFailureFromTheAgentNamesTheCause(t *testing.T) {
 		}
 	}
 }
+
+// Edge abuse plan 3.5: an address the owner's IP lists refuse gets 403 ip_restricted before anything
+// reaches the origin; other addresses pass.
+func TestOwnerIPRulesRefuseBeforeTheOrigin(t *testing.T) {
+	reached := 0
+	policy, err := New(Config{PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 4096, MaxBodyBytes: 1024,
+		Readiness: readinessFunc(func(string) (string, string, bool) { return "ready", "", true }),
+		AddressAllowed: func(host, address string) bool {
+			return host == "app.preview.example.test" && address == "198.51.100.7"
+		},
+	}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached++ }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	serve := func(address string) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.Host, request.RemoteAddr = "app.preview.example.test", address+":5555"
+		policy.ServeHTTP(recorder, request)
+		return recorder
+	}
+	if refused := serve("203.0.113.9"); refused.Code != http.StatusForbidden || refused.Header().Get("X-Paperboat-Error") != "ip_restricted" || reached != 0 {
+		t.Fatalf("refused address: %d %q reached=%d", refused.Code, refused.Header().Get("X-Paperboat-Error"), reached)
+	}
+	if allowed := serve("198.51.100.7"); allowed.Code == http.StatusForbidden || reached != 1 {
+		t.Fatalf("allowed address: %d reached=%d", allowed.Code, reached)
+	}
+}

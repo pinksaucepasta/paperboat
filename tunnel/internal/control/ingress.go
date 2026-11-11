@@ -16,6 +16,7 @@ type IngressSnapshot struct {
 	Decisions   []connectorprotocol.IngressDecision
 	QuotaDenied []connectorprotocol.IngressQuotaDenial
 	Blocked     []connectorprotocol.IngressBlock
+	IPRules     []connectorprotocol.IngressIPRule
 	HTTP01      []connectorprotocol.HTTP01Response
 	// Version identifies this answer. Unchanged marks an answer to a request that carried the
 	// current version: it holds only IssuedAt and Expiries (one per kept decision, in order).
@@ -45,6 +46,7 @@ func (c *HTTPClient) IngressDecisions(ctx context.Context, nodeID, epoch, versio
 		Decisions       []connectorprotocol.IngressDecision    `json:"decisions"`
 		QuotaDenied     []connectorprotocol.IngressQuotaDenial `json:"quota_denied"`
 		Blocked         []connectorprotocol.IngressBlock       `json:"blocked"`
+		IPRules         []connectorprotocol.IngressIPRule      `json:"ip_rules"`
 		HTTP01Responses []connectorprotocol.HTTP01Response     `json:"http01_responses"`
 	}
 	if err := c.postNodeWithMaximumAndIdentity(ctx, "/v1/edge/ingress/desired-state", nodeID, epoch, input, &output, 16<<20); err != nil {
@@ -56,7 +58,7 @@ func (c *HTTPClient) IngressDecisions(ctx context.Context, nodeID, epoch, versio
 		}
 		return IngressSnapshot{Version: version, Unchanged: true, IssuedAt: output.IssuedAt, Expiries: output.Expiries}, nil
 	}
-	if !output.Complete || len(output.Decisions) > maximumIngressDecisions || len(output.QuotaDenied) > maximumIngressDecisions || len(output.Blocked) > maximumIngressDecisions || len(output.HTTP01Responses) > connectorprotocol.MaxHTTP01Responses {
+	if !output.Complete || len(output.Decisions) > maximumIngressDecisions || len(output.QuotaDenied) > maximumIngressDecisions || len(output.Blocked) > maximumIngressDecisions || len(output.IPRules) > maximumIngressDecisions || len(output.HTTP01Responses) > connectorprotocol.MaxHTTP01Responses {
 		return IngressSnapshot{}, ErrControlUnavailable
 	}
 	now := time.Now().UTC()
@@ -70,5 +72,5 @@ func (c *HTTPClient) IngressDecisions(ctx context.Context, nodeID, epoch, versio
 			return IngressSnapshot{}, ErrControlUnavailable
 		}
 	}
-	return IngressSnapshot{Decisions: output.Decisions, QuotaDenied: output.QuotaDenied, Blocked: output.Blocked, HTTP01: output.HTTP01Responses, Version: output.Version}, nil
+	return IngressSnapshot{Decisions: output.Decisions, QuotaDenied: output.QuotaDenied, Blocked: output.Blocked, IPRules: output.IPRules, HTTP01: output.HTTP01Responses, Version: output.Version}, nil
 }

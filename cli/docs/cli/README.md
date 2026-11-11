@@ -163,6 +163,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb preview](pb_preview.md) | Expose a local target through a temporary preview |
 | [pb preview delete](pb_preview_delete.md) | Delete a temporary preview |
 | [pb preview inspect](pb_preview_inspect.md) | Show daemon-local HTTP captures |
+| [pb preview ip-rules](pb_preview_ip-rules.md) | Show or set which client addresses may open this preview |
 | [pb preview list](pb_preview_list.md) | List temporary previews |
 | [pb preview replay](pb_preview_replay.md) | Deliberately replay one retained HTTP request to the same origin |
 | [pb preview status](pb_preview_status.md) | Show temporary preview status |
@@ -259,6 +260,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb tunnel domain list](pb_tunnel_domain_list.md) | List tunnel domains |
 | [pb tunnel domain remove](pb_tunnel_domain_remove.md) | Stop serving a tunnel at a hostname |
 | [pb tunnel inspect](pb_tunnel_inspect.md) | Show daemon-local HTTP captures |
+| [pb tunnel ip-rules](pb_tunnel_ip-rules.md) | Show or set which client addresses may open this tunnel |
 | [pb tunnel list](pb_tunnel_list.md) | List durable tunnels |
 | [pb tunnel logs](pb_tunnel_logs.md) | Show tunnel logs |
 | [pb tunnel pause](pb_tunnel_pause.md) | Pause new traffic while preserving tunnel identity and configuration |

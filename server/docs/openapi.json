@@ -11531,6 +11531,32 @@
           }
         }
       },
+      "IPRules": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "allow",
+          "deny"
+        ],
+        "properties": {
+          "allow": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "deny": {
+            "type": "array",
+            "maxItems": 256,
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            }
+          }
+        }
+      },
       "OperatorActionInput": {
         "type": "object",
         "additionalProperties": false,
@@ -22579,6 +22605,370 @@
           }
         },
         "operationId": "post_v1_tunnels_tunnel_id_resume"
+      }
+    },
+    "/v1/tunnels/{tunnel_id}/ip-rules": {
+      "get": {
+        "operationId": "get_v1_tunnels_tunnel_id_ip_rules",
+        "summary": "Get tunnel IP rules",
+        "description": "The owner's IP allow and deny lists for this tunnel (CIDRs or single addresses, at most 256 each). Edges refuse an address a deny entry matches, or that no allow entry matches when allow is not empty, with 403 ip_restricted before the origin. ",
+        "parameters": [
+          {
+            "name": "tunnel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The rules.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/IPRules"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "An entry is not an address or CIDR, or a list is too long.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential lacks the scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or not manageable by this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable; retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_v1_tunnels_tunnel_id_ip_rules",
+        "summary": "Replace tunnel IP rules",
+        "description": "The owner's IP allow and deny lists for this tunnel (CIDRs or single addresses, at most 256 each). Edges refuse an address a deny entry matches, or that no allow entry matches when allow is not empty, with 403 ip_restricted before the origin. Empty lists remove the rules. Entries come back normalized (masked prefixes, sorted, no duplicates).",
+        "parameters": [
+          {
+            "name": "tunnel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The rules.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/IPRules"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "An entry is not an address or CIDR, or a list is too long.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential lacks the scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or not manageable by this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable; retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IPRules"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/previews/{preview_id}/ip-rules": {
+      "get": {
+        "operationId": "get_v1_previews_preview_id_ip_rules",
+        "summary": "Get preview IP rules",
+        "description": "The owner's IP allow and deny lists for this preview (CIDRs or single addresses, at most 256 each). Edges refuse an address a deny entry matches, or that no allow entry matches when allow is not empty, with 403 ip_restricted before the origin. ",
+        "parameters": [
+          {
+            "name": "preview_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The rules.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/IPRules"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "An entry is not an address or CIDR, or a list is too long.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential lacks the scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or not manageable by this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable; retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_v1_previews_preview_id_ip_rules",
+        "summary": "Replace preview IP rules",
+        "description": "The owner's IP allow and deny lists for this preview (CIDRs or single addresses, at most 256 each). Edges refuse an address a deny entry matches, or that no allow entry matches when allow is not empty, with 403 ip_restricted before the origin. Empty lists remove the rules. Entries come back normalized (masked prefixes, sorted, no duplicates).",
+        "parameters": [
+          {
+            "name": "preview_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The rules.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/IPRules"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "An entry is not an address or CIDR, or a list is too long.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The credential lacks the scope.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, or not manageable by this account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Unavailable; retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IPRules"
+              }
+            }
+          }
+        }
       }
     },
     "/v1/tunnels/{tunnel_id}/status": {

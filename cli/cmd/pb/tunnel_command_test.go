@@ -87,7 +87,7 @@ func TestTunnelCommandSurfaceIsExplicitAndSecretSafe(t *testing.T) {
 			t.Fatalf("missing %v", path)
 		}
 	}
-	wantRoot := []string{"create", "delete", "doctor", "domain", "inspect", "list", "logs", "pause", "policy", "rename", "replay", "resume", "route", "show", "status", "stop"}
+	wantRoot := []string{"create", "delete", "doctor", "domain", "inspect", "ip-rules", "list", "logs", "pause", "policy", "rename", "replay", "resume", "route", "show", "status", "stop"}
 	var gotRoot []string
 	for _, child := range root.Commands() {
 		if !child.Hidden {

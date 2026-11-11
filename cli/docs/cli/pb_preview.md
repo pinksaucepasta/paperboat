@@ -40,6 +40,7 @@ pb preview <port|url|path> [flags]
 * [pb](pb.md)	 - Open Paperboat or connect to an environment terminal
 * [pb preview delete](pb_preview_delete.md)	 - Delete a temporary preview
 * [pb preview inspect](pb_preview_inspect.md)	 - Show daemon-local HTTP captures
+* [pb preview ip-rules](pb_preview_ip-rules.md)	 - Show or set which client addresses may open this preview
 * [pb preview list](pb_preview_list.md)	 - List temporary previews
 * [pb preview replay](pb_preview_replay.md)	 - Deliberately replay one retained HTTP request to the same origin
 * [pb preview status](pb_preview_status.md)	 - Show temporary preview status

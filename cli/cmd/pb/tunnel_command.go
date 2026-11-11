@@ -36,7 +36,7 @@ func tunnelCobraCommandV1() *cobra.Command {
 		root.AddCommand(tunnelStateCommand(action))
 	}
 	root.AddCommand(tunnelRouteCommand(), tunnelDomainCommand())
-	root.AddCommand(tunnelPolicyCommand())
+	root.AddCommand(tunnelPolicyCommand(), ipRulesCommand("tunnel"))
 	stop := &cobra.Command{Use: "stop <preview>", Short: "Stop an ephemeral tunnel", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(command *cobra.Command, args []string) error {
 		if strings.HasPrefix(args[0], "tunnel_") {
 			return localArgumentError("`pb tunnel stop` stops a preview; use `pb tunnel pause` or `pb tunnel delete` for a durable tunnel")

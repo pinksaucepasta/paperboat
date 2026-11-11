@@ -79,6 +79,8 @@ type Config struct {
 		Revoked(context.Context, admission.Claims) (bool, error)
 	}
 	RevocationCheckInterval time.Duration
+	// AddressAllowed, when set, applies the owner's IP allow/deny lists for a host to the client address.
+	AddressAllowed func(host, address string) bool
 }
 
 type routeMatchContextKey struct{}
@@ -442,6 +444,12 @@ const (
 	edgeRateLimitedMessage = busyMessage
 )
 
+// writeIPRestricted answers a client address the owner's IP lists refuse; the visitor is not told
+// which list or entry matched.
+func writeIPRestricted(w http.ResponseWriter, r *http.Request) {
+	writeRefusal(w, r, http.StatusForbidden, "ip_restricted", "Access restricted", "Access to this link is restricted.", 0)
+}
+
 // writeBlockedRefusal answers a hostname an operator took down: the fixed page, never the origin. A
 // legal takedown is 451 (RFC 7725), any other 403.
 func writeBlockedRefusal(w http.ResponseWriter, r *http.Request, legal bool) {
@@ -644,6 +652,10 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if headerBytes(r.Header) > p.config.MaxHeaderBytes {
 		w.Header().Set("X-Paperboat-Error", "request_headers_too_large")
 		writeErrorPage(w, http.StatusRequestHeaderFieldsTooLarge, "")
+		return
+	}
+	if p.config.AddressAllowed != nil && !p.config.AddressAllowed(host, p.clientIP(r)) {
+		writeIPRestricted(w, r)
 		return
 	}
 	if r.ContentLength > p.config.MaxBodyBytes {

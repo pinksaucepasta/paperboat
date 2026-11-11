@@ -22,6 +22,15 @@ type AbuseReport struct {
 	CreatedAt     time.Time
 }
 
+type AccessIpRule struct {
+	ResourceKind string
+	ResourceID   string
+	AllowCidrs   []string
+	DenyCidrs    []string
+	UpdatedBy    string
+	UpdatedAt    time.Time
+}
+
 type AccountDeletionJob struct {
 	ID            string
 	UserID        string

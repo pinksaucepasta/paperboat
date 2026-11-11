@@ -43,6 +43,7 @@ var (
 // select it by the complete connector/session/process/config identity tuple.
 // It never stores or accepts a host-local origin address.
 type DataCarrierRouteRegistry struct {
+	addressAllowed   func(host, address string) bool
 	ingressAuthority func(context.Context, route.RouteRule) (connectorprotocol.IngressDecision, error)
 	ingressLimits    *IngressLimits
 	usage            IngressUsage
@@ -103,6 +104,8 @@ type DataCarrierRouteRegistryConfig struct {
 	// PublicTCPIdleTimeout closes a public TCP or TLS stream after this long without traffic in
 	// either direction; zero keeps idle streams open.
 	PublicTCPIdleTimeout time.Duration
+	// AddressAllowed, when set, applies the owner's IP allow/deny lists to public TCP and TLS streams.
+	AddressAllowed func(host, address string) bool
 }
 
 func NewDataCarrierRouteRegistry(config DataCarrierRouteRegistryConfig) (*DataCarrierRouteRegistry, error) {
@@ -116,7 +119,7 @@ func NewDataCarrierRouteRegistry(config DataCarrierRouteRegistryConfig) (*DataCa
 	if err != nil {
 		return nil, ErrDataCarrierRouteInvalid
 	}
-	return &DataCarrierRouteRegistry{ingressAuthority: config.IngressAuthority, ingressLimits: limits, usage: config.Usage, maximum: config.MaximumRoutes, publicTCPIdle: config.PublicTCPIdleTimeout, done: make(chan struct{}), byKey: make(map[string]*dataCarrierRouteEntry), connected: make(chan struct{}, 1)}, nil
+	return &DataCarrierRouteRegistry{ingressAuthority: config.IngressAuthority, ingressLimits: limits, usage: config.Usage, maximum: config.MaximumRoutes, publicTCPIdle: config.PublicTCPIdleTimeout, addressAllowed: config.AddressAllowed, done: make(chan struct{}), byKey: make(map[string]*dataCarrierRouteEntry), connected: make(chan struct{}, 1)}, nil
 }
 
 // Attach registers one already-authenticated server. The Server identity is

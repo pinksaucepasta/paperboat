@@ -1,0 +1,58 @@
+.nh
+.TH "PB-PREVIEW-IP-RULES" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-preview-ip-rules - Show or set which client addresses may open this preview
+
+
+.SH SYNOPSIS
+\fBpb preview ip-rules <preview> [flags]\fP
+
+
+.SH DESCRIPTION
+Without flags, show the preview's IP allow and deny lists. --allow and --deny take an address or CIDR and repeat; each replaces that whole list. An address a deny entry matches is refused, and when the allow list is not empty only its addresses get in. Refused visitors see 403 "Access to this link is restricted".
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--allow\fP=[]
+	address or CIDR allowed in (repeatable; replaces the allow list)
+
+.PP
+\fB--clear\fP[=false]
+	remove both lists
+
+.PP
+\fB--deny\fP=[]
+	address or CIDR refused (repeatable; replaces the deny list)
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for ip-rules
+
+.PP
+\fB--json\fP[=false]
+	print the lists as JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-preview(1)\fP

@@ -129,3 +129,43 @@ func TestIngressAuthorityRefusesBlockedHostname(t *testing.T) {
 		t.Fatalf("non-legal takedown: %v", err)
 	}
 }
+
+// The owner's IP lists from the snapshot: deny wins, a non-empty allow list admits only its entries,
+// IPv4-mapped addresses match IPv4 entries, and a hostname without lists admits everyone.
+func TestIngressAuthorityAppliesOwnerIPRules(t *testing.T) {
+	decision := ingressAuthorityTestDecision(time.Now().UTC())
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": []connectorprotocol.IngressDecision{decision},
+			"ip_rules": []connectorprotocol.IngressIPRule{
+				{Hostname: "office.customer.test", Allow: []string{"198.51.100.0/24", "2001:db8::/32"}, Deny: []string{"198.51.100.66/32"}},
+				{Hostname: "open.customer.test", Deny: []string{"203.0.113.0/24"}},
+			}})
+	}))
+	defer server.Close()
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := &IngressAuthority{Client: client, NodeID: decision.EdgeNodeID, ProcessEpoch: decision.EdgeProcessEpoch}
+	if _, err := authority.Snapshot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		host, address string
+		want          bool
+	}{
+		{"office.customer.test", "198.51.100.7", true},
+		{"office.customer.test", "::ffff:198.51.100.7", true},
+		{"office.customer.test", "2001:db8::5", true},
+		{"office.customer.test", "198.51.100.66", false},
+		{"office.customer.test", "192.0.2.1", false},
+		{"office.customer.test", "not-an-address", false},
+		{"open.customer.test", "203.0.113.4", false},
+		{"open.customer.test", "192.0.2.1", true},
+		{"unlisted.customer.test", "203.0.113.4", true},
+	} {
+		if got := authority.AddressAllowed(c.host, c.address); got != c.want {
+			t.Errorf("%s from %s = %v, want %v", c.host, c.address, got, c.want)
+		}
+	}
+}

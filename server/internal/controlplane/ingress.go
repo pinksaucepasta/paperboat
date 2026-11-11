@@ -59,6 +59,11 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 		writeEdgeError(w, r, http.StatusServiceUnavailable, "control_unavailable", true, 1000, err)
 		return
 	}
+	ipRules, err := ownerIPRules(r.Context(), s.store, decisions)
+	if err != nil {
+		writeEdgeError(w, r, http.StatusServiceUnavailable, "control_unavailable", true, 1000, err)
+		return
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	if len(denied) > 4096 {
 		denied = denied[:4096]
@@ -68,7 +73,7 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 	if s.http01 != nil {
 		responses = s.http01.ForEdge(input.NodeID)
 	}
-	version := wire.IngressVersion(decisions, denied, blocked, responses)
+	version := wire.IngressVersion(decisions, denied, blocked, ipRules, responses)
 	if input.Version == version {
 		expires := make([]time.Time, len(decisions))
 		for i, d := range decisions {
@@ -77,7 +82,7 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 		writeEdgeJSON(w, http.StatusOK, map[string]any{"complete": true, "unchanged": true, "version": version, "issued_at": latestIssuedAt(decisions), "expires_at": expires})
 		return
 	}
-	snapshotBody := map[string]any{"complete": true, "version": version, "decisions": decisions, "quota_denied": denied, "blocked": blocked}
+	snapshotBody := map[string]any{"complete": true, "version": version, "decisions": decisions, "quota_denied": denied, "blocked": blocked, "ip_rules": ipRules}
 	if s.http01 != nil {
 		snapshotBody["http01_responses"] = responses
 	}
@@ -155,4 +160,57 @@ func withholdBlocked(ctx context.Context, store *db.DB, decisions *[]wire.Ingres
 	*decisions = slices.DeleteFunc(*decisions, func(d wire.IngressDecision) bool { return taken[d.Binding.Hostname] })
 	*denied = slices.DeleteFunc(*denied, func(d wire.IngressQuotaDenial) bool { return taken[d.Hostname] })
 	return blocked, nil
+}
+
+// ownerIPRules lists the owner's IP allow and deny lists (access_ip_rules) for the hostnames of this
+// edge's decisions: a preview's rules key on its lease (the publication), a tunnel's on the tunnel.
+func ownerIPRules(ctx context.Context, store *db.DB, decisions []wire.IngressDecision) ([]wire.IngressIPRule, error) {
+	key := func(d wire.IngressDecision) (string, string) {
+		if d.Binding.Lifecycle == wire.TunnelEphemeral {
+			return "preview", d.Binding.PublicationID
+		}
+		return "tunnel", d.Binding.TunnelID
+	}
+	var tunnels, previews []string
+	for _, d := range decisions {
+		if kind, id := key(d); kind == "preview" {
+			previews = append(previews, id)
+		} else {
+			tunnels = append(tunnels, id)
+		}
+	}
+	rules := []wire.IngressIPRule{}
+	if len(decisions) == 0 {
+		return rules, nil
+	}
+	rows, err := store.Pool().Query(ctx, `SELECT resource_kind,resource_id,allow_cidrs,deny_cidrs FROM access_ip_rules
+WHERE (resource_kind='tunnel' AND resource_id = ANY($1::text[])) OR (resource_kind='preview' AND resource_id = ANY($2::text[]))`, tunnels, previews)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	type lists struct{ allow, deny []string }
+	byResource := map[[2]string]lists{}
+	for rows.Next() {
+		var kind, id string
+		var l lists
+		if err := rows.Scan(&kind, &id, &l.allow, &l.deny); err != nil {
+			return nil, err
+		}
+		byResource[[2]string{kind, id}] = l
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	for _, d := range decisions {
+		kind, id := key(d)
+		l, ok := byResource[[2]string{kind, id}]
+		if !ok || seen[d.Binding.Hostname] {
+			continue
+		}
+		seen[d.Binding.Hostname] = true
+		rules = append(rules, wire.IngressIPRule{Hostname: d.Binding.Hostname, Allow: l.allow, Deny: l.deny})
+	}
+	return rules, nil
 }

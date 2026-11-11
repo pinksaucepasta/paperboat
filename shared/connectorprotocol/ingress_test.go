@@ -185,14 +185,14 @@ func TestIngressVersionIgnoresPerAnswerValuesAndOrder(t *testing.T) {
 	a, b := IngressDecision{DecisionID: "decision_1", PolicyGeneration: 1}, IngressDecision{DecisionID: "decision_2", PolicyGeneration: 2}
 	a.IssuedAt, a.ExpiresAt = now, now.Add(time.Second)
 	one := []IngressDecision{a, b}
-	version := IngressVersion(one, nil, nil, nil)
+	version := IngressVersion(one, nil, nil, nil, nil)
 	a.DecisionID, a.IssuedAt, a.ExpiresAt = "decision_9", now.Add(time.Minute), now.Add(2*time.Minute)
 	two := []IngressDecision{b, a}
-	if again := IngressVersion(two, nil, nil, nil); again != version || two[0].PolicyGeneration != one[0].PolicyGeneration {
+	if again := IngressVersion(two, nil, nil, nil, nil); again != version || two[0].PolicyGeneration != one[0].PolicyGeneration {
 		t.Fatal("version depends on decision id, times or order")
 	}
 	a.PolicyGeneration = 3
-	if IngressVersion([]IngressDecision{a, b}, nil, nil, nil) == version {
+	if IngressVersion([]IngressDecision{a, b}, nil, nil, nil, nil) == version {
 		t.Fatal("version ignores a changed decision")
 	}
 }

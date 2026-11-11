@@ -12,6 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/workspacedomain"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/abusereports"
+	"github.com/pinksaucepasta/paperboat/server/internal/accessrules"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountdeletion"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountprefs"
 	"github.com/pinksaucepasta/paperboat/server/internal/activity"
@@ -80,6 +81,7 @@ type Options struct {
 	OperatorHealth           *telemetry.HealthTracker
 	OperatorActions          *operatoractions.Service
 	AbuseReports             *abusereports.Service
+	IPRules                  *accessrules.Store
 	OperatorBilling          *billing.OperatorService
 	Operator                 *operator.Service
 	OperatorAuth             *operatorauth.Service
@@ -238,6 +240,10 @@ func NewRouter(opts Options) http.Handler {
 			mux.Handle("DELETE /v1/previews/{preview_id}", previewMutation(previewLeaseStop(opts.PreviewLeases, opts.RuntimeIdentity)))
 			mux.Handle("POST /v1/previews/{preview_id}/lease/renew", previewMutation(previewLeaseRenew(opts.PreviewLeases, opts.RuntimeIdentity)))
 			mux.Handle("GET /v1/previews/{preview_id}/events", previewRead(previewTunnelEvents(opts.PreviewTunnelAPI, "preview_lease", "preview_id")))
+			if opts.IPRules != nil {
+				mux.Handle("GET /v1/previews/{preview_id}/ip-rules", previewRead(ipRules(opts.IPRules, "preview", "preview_id", false)))
+				mux.Handle("PUT /v1/previews/{preview_id}/ip-rules", previewWrite(ipRules(opts.IPRules, "preview", "preview_id", true)))
+			}
 			if opts.PreviewLogs != nil {
 				mux.Handle("GET /v1/previews/{preview_id}/logs", previewRead(tunnelResourcePreviewLogs(opts.PreviewLogs)))
 			}
@@ -296,6 +302,10 @@ func NewRouter(opts Options) http.Handler {
 			mux.Handle("POST /v1/tunnels/{tunnel_id}/pause", tunnelWrite(tunnelPause(opts.Tunnels)))
 			mux.Handle("POST /v1/tunnels/{tunnel_id}/resume", tunnelWrite(tunnelResume(opts.Tunnels)))
 			mux.Handle("GET /v1/tunnels/{tunnel_id}/status", tunnelRead(tunnelStatus(opts.Tunnels)))
+			if opts.IPRules != nil {
+				mux.Handle("GET /v1/tunnels/{tunnel_id}/ip-rules", tunnelRead(ipRules(opts.IPRules, "tunnel", "tunnel_id", false)))
+				mux.Handle("PUT /v1/tunnels/{tunnel_id}/ip-rules", tunnelWrite(ipRules(opts.IPRules, "tunnel", "tunnel_id", true)))
+			}
 			mux.Handle("GET /v1/tunnels/{tunnel_id}/events", tunnelRead(previewTunnelEvents(opts.PreviewTunnelAPI, "tunnel", "tunnel_id")))
 			if opts.TunnelResources != nil {
 				mux.Handle("POST /v1/tunnels/{tunnel_id}/routes", tunnelWrite(tunnelResourceRouteCreate(opts.TunnelResources)))

@@ -14,6 +14,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/abusereports"
 	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
+	"github.com/pinksaucepasta/paperboat/server/internal/accessrules"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountdeletion"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountprefs"
 	"github.com/pinksaucepasta/paperboat/server/internal/activity"
@@ -740,6 +741,7 @@ func New(opts Options) (*App, error) {
 		OperatorHealth:           telemetryHealth,
 		OperatorActions:          operatorActions,
 		AbuseReports:             abuseReports,
+		IPRules:                  accessrules.New(store),
 		OperatorBilling:          billing.NewOperatorService(store, priceReader),
 		OperatorAudit:            auditWriter,
 		Selfhost:                 &httpapi.SelfhostHandlers{Service: selfhostService},

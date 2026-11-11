@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"math/rand/v2"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -29,6 +30,7 @@ type IngressAuthority struct {
 	decisions     []connectorprotocol.IngressDecision
 	quotaDenied   map[string]time.Time                        // hostnames withheld only for bandwidth quota (to their reset time), from the same fetch
 	blocked       map[string]bool                             // hostnames taken down by an operator (to whether the takedown is legal), from the same fetch
+	ipRules       map[string]addressRule                      // owner IP allow/deny lists per hostname, from the same fetch
 	http01        map[string]connectorprotocol.HTTP01Response // by token, from the same fetch
 	fetched       time.Time
 	invalidated   bool
@@ -287,6 +289,10 @@ func (a *IngressAuthority) recordLocked(now time.Time, snapshot IngressSnapshot,
 	for _, b := range snapshot.Blocked {
 		a.blocked[b.Hostname] = b.Legal
 	}
+	a.ipRules = make(map[string]addressRule, len(snapshot.IPRules))
+	for _, r := range snapshot.IPRules {
+		a.ipRules[r.Hostname] = compileAddressRule(r)
+	}
 	a.http01 = make(map[string]connectorprotocol.HTTP01Response, len(snapshot.HTTP01))
 	for _, r := range snapshot.HTTP01 {
 		a.http01[r.Token] = r
@@ -528,4 +534,63 @@ func (a *IngressAuthority) ResolvePreview(ctx context.Context, publication, host
 		return connectorprotocol.IngressDecision{}, err
 	}
 	return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
+}
+
+// addressRule is one hostname's owner IP lists, parsed.
+type addressRule struct{ allow, deny []netip.Prefix }
+
+// compileAddressRule parses the lists; an entry that does not parse matches nothing in allow (so an
+// allow list never widens) and everything in deny (so a deny list never narrows).
+func compileAddressRule(r connectorprotocol.IngressIPRule) addressRule {
+	var rule addressRule
+	for _, entry := range r.Allow {
+		if prefix, err := netip.ParsePrefix(entry); err == nil {
+			rule.allow = append(rule.allow, prefix)
+		} else if len(rule.allow) == 0 {
+			rule.allow = append(rule.allow, netip.Prefix{}) // keeps the list non-empty: nothing is allowed by it
+		}
+	}
+	for _, entry := range r.Deny {
+		prefix, err := netip.ParsePrefix(entry)
+		if err != nil {
+			prefix = netip.MustParsePrefix("::/0")
+			rule.deny = append(rule.deny, netip.MustParsePrefix("0.0.0.0/0"))
+		}
+		rule.deny = append(rule.deny, prefix)
+	}
+	return rule
+}
+
+// AddressAllowed reports whether the owner's IP lists for hostname let address in: no deny entry
+// matches it, and an allow entry does when the allow list is not empty. A hostname without lists
+// lets every address in; an address that does not parse is refused only when lists exist.
+func (a *IngressAuthority) AddressAllowed(hostname, address string) bool {
+	if a == nil {
+		return true
+	}
+	a.mu.Lock()
+	rule, ok := a.ipRules[hostname]
+	a.mu.Unlock()
+	if !ok {
+		return true
+	}
+	addr, err := netip.ParseAddr(address)
+	if err != nil {
+		return false
+	}
+	addr = addr.Unmap().WithZone("")
+	for _, prefix := range rule.deny {
+		if prefix.Contains(addr) {
+			return false
+		}
+	}
+	if len(rule.allow) == 0 {
+		return true
+	}
+	for _, prefix := range rule.allow {
+		if prefix.IsValid() && prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }

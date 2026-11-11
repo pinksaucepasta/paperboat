@@ -90,6 +90,15 @@ type IngressBlock struct {
 	Legal    bool   `json:"legal,omitempty"`
 }
 
+// IngressIPRule is the owner's IP allow and deny lists (CIDRs) for one hostname. The edge refuses a
+// client address a deny entry matches, or that no allow entry matches when allow is not empty, before
+// opening the origin. It grants no authority.
+type IngressIPRule struct {
+	Hostname string   `json:"hostname"`
+	Allow    []string `json:"allow,omitempty"`
+	Deny     []string `json:"deny,omitempty"`
+}
+
 // ErrPublicationBlocked is the typed reason an edge refuses a taken-down hostname.
 var ErrPublicationBlocked = errors.New("publication taken down for violating the acceptable use policy")
 
@@ -348,7 +357,7 @@ func sameNativeAuthorization(a, b *PrivateAccessOpen) bool {
 // decision id and its issue and expiry times are per-answer values) and returns a version of the
 // whole answer. An edge that sends the version it holds gets only fresh times when nothing else
 // changed (F21-38). Prior art: cloudflared applies remote config only on a version change.
-func IngressVersion(decisions []IngressDecision, denied []IngressQuotaDenial, blocked []IngressBlock, http01 []HTTP01Response) string {
+func IngressVersion(decisions []IngressDecision, denied []IngressQuotaDenial, blocked []IngressBlock, ipRules []IngressIPRule, http01 []HTTP01Response) string {
 	stable := make([][]byte, len(decisions))
 	order := make([]int, len(decisions))
 	for i, d := range decisions {
@@ -369,8 +378,9 @@ func IngressVersion(decisions []IngressDecision, denied []IngressQuotaDenial, bl
 		return denied[a].RouteID+" "+denied[a].Hostname < denied[b].RouteID+" "+denied[b].Hostname
 	})
 	sort.Slice(blocked, func(a, b int) bool { return blocked[a].Hostname < blocked[b].Hostname })
+	sort.Slice(ipRules, func(a, b int) bool { return ipRules[a].Hostname < ipRules[b].Hostname })
 	sort.Slice(http01, func(a, b int) bool { return http01[a].Token < http01[b].Token })
-	rest, _ := json.Marshal([]any{denied, blocked, http01})
+	rest, _ := json.Marshal([]any{denied, blocked, ipRules, http01})
 	hash.Write(rest)
 	return hex.EncodeToString(hash.Sum(nil))
 }

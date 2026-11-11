@@ -18,6 +18,9 @@ import (
 // ForwardPublicTCP forwards one connection already accepted by the listener
 // named in a current server decision. Listener allocation and lifecycle remain
 // with the caller. This method takes ownership of connection and closes it on return.
+// ErrAddressRestricted reports a client address the owner's IP lists refuse; the stream is closed.
+var ErrAddressRestricted = errors.New("client address refused by the owner's IP rules")
+
 func (r *DataCarrierRouteRegistry) ForwardPublicTCP(ctx context.Context, connection net.Conn, decision connectorprotocol.IngressDecision, currentAuthority func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)) error {
 	if connection != nil {
 		defer connection.Close()
@@ -25,6 +28,11 @@ func (r *DataCarrierRouteRegistry) ForwardPublicTCP(ctx context.Context, connect
 	now := time.Now().UTC()
 	if r == nil || ctx == nil || connection == nil || currentAuthority == nil || decision.Validate(now) != nil || (decision.Binding.Protocol != "tcp" && decision.Binding.Protocol != "tls") || decision.Binding.Audience != "public" || decision.Binding.ListenerID == "" || decision.Binding.PublicPort == 0 {
 		return ErrDataCarrierRouteInvalid
+	}
+	if r.addressAllowed != nil {
+		if address, _, err := net.SplitHostPort(connection.RemoteAddr().String()); err != nil || !r.addressAllowed(decision.Binding.Hostname, address) {
+			return ErrAddressRestricted
+		}
 	}
 	if decision.Binding.Protocol == "tls" {
 		inspected, ok := connection.(*replayTLSConn)

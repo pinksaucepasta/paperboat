@@ -69,7 +69,7 @@ func ephemeralTunnelCommand(use, short string) *cobra.Command {
 	// implementation: the alias exposes the same controls, not a second path.
 	inspect := previewInspectCommand()
 	replay := previewReplayCommand()
-	command.AddCommand(list, status, stop, deleteCommand, inspect, replay)
+	command.AddCommand(list, status, stop, deleteCommand, inspect, replay, ipRulesCommand("preview"))
 	return command
 }
 
