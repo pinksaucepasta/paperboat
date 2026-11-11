@@ -80,13 +80,9 @@ func checkCarrierRoleLock(handle windows.Handle, user *windows.SID, descriptor s
 	if err := windows.GetFileInformationByHandle(handle, &info); err != nil || info.FileAttributes&(windows.FILE_ATTRIBUTE_REPARSE_POINT|windows.FILE_ATTRIBUTE_DIRECTORY) != 0 || info.NumberOfLinks != 1 {
 		return errors.Join(ErrProductionInvalid, err)
 	}
-	trusted := []*windows.SID{user}
-	for _, known := range []windows.WELL_KNOWN_SID_TYPE{windows.WinLocalSystemSid, windows.WinBuiltinAdministratorsSid} {
-		sid, err := windows.CreateWellKnownSid(known)
-		if err != nil {
-			return err
-		}
-		trusted = append(trusted, sid)
+	trusted, err := carrierLockTrustedOwners(user)
+	if err != nil {
+		return err
 	}
 	owned := false
 	for _, sid := range trusted {
@@ -104,4 +100,23 @@ func checkCarrierRoleLock(handle windows.Handle, user *windows.SID, descriptor s
 		return errors.Join(ErrProductionInvalid, errors.New("the carrier role lock is not this account's file with its protected DACL"))
 	}
 	return nil
+}
+
+// carrierLockTrustedOwners are the owners a role lock may have: the account the carrier runs as, exactly (Unix: uid
+// must be self). SYSTEM creates its files owned by Administrators, so a carrier running as SYSTEM also trusts that
+// owner; a user's carrier does not trust a SYSTEM- or Administrators-owned file, it replaces it.
+func carrierLockTrustedOwners(user *windows.SID) ([]*windows.SID, error) {
+	trusted := []*windows.SID{user}
+	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
+	if err != nil {
+		return nil, err
+	}
+	if user.Equals(system) {
+		administrators, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+		if err != nil {
+			return nil, err
+		}
+		trusted = append(trusted, administrators)
+	}
+	return trusted, nil
 }
