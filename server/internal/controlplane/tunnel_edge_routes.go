@@ -13,6 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 )
 
 func (s *EdgeService) ListTunnelEdgeRouteAssignmentsForNodeV1(ctx context.Context, nodeID, processEpoch string) ([]dbsqlc.ListTunnelEdgeRouteAssignmentsForNodeV1Row, error) {
@@ -126,6 +127,7 @@ func tunnelEdgeRouteJSON(row dbsqlc.ListTunnelEdgeRouteAssignmentsForNodeV1Row) 
 		"origin_scheme":                row.OriginScheme,
 		"preserve_host":                row.PreserveHost,
 		"host_override":                nullableTunnelEdgeText(row.HostOverride),
+		"rewrite_rules":                json.RawMessage(rewriteRulesForEdge(row.RewriteRules)),
 		"domain_bindings":              json.RawMessage([]byte(row.DomainBindings)),
 		"state":                        row.State,
 		"desired_state":                row.RouteDesiredState,
@@ -154,6 +156,20 @@ func tunnelEdgeRouteJSON(row dbsqlc.ListTunnelEdgeRouteAssignmentsForNodeV1Row) 
 		}
 	}
 	return value
+}
+
+// rewriteRulesForEdge is the route's stored rules in canonical form for the edge; a document that no longer
+// validates is sent as none rather than failing the whole snapshot.
+func rewriteRulesForEdge(raw []byte) []byte {
+	rules, err := tunnelrouterules.Decode(raw)
+	if err != nil {
+		return []byte("{}")
+	}
+	canonical, err := tunnelrouterules.Canonical(rules)
+	if err != nil {
+		return []byte("{}")
+	}
+	return canonical
 }
 
 func nullableTunnelEdgeText(value sql.NullString) any {
