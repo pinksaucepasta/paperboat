@@ -113,7 +113,8 @@ def checks(args):
                                      ['--peer', 'SMOKE_SSH_LONG_SECONDS'])  # F5-02 with a held pty shell, then exit 0
     for name, step, needs in (('ssh-setup-time', 'setup', []), ('ssh-control-outage', 'outage', ['REVOKE_CLIENT_CMD']),
                               ('ssh-refusals', 'refusals', []), ('ssh-live-revoke', 'revoke', ['REVOKE_CLIENT_CMD']),
-                              ('ssh-session-audit', 'audit', []), ('ssh-forwarding', 'forwarding', [])):
+                              ('ssh-session-audit', 'audit', []), ('ssh-offline-audit', 'offline_audit', []),
+                              ('ssh-forwarding', 'forwarding', [])):
         table[name] = (['ssh_mac_rows.py', '--windows', '--alias', args.machine, '--only', step], ['--machine', 'CLIENT_CMD'] + needs)
     table['config-commands'] = (['config_commands.py'], [])
     table['config-survival'] = (['config_survival.py'], [])

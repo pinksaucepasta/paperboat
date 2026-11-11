@@ -1,0 +1,6 @@
+F5-12 offline-origin audit, Windows host, 2026-11-11 (sanitized): tools/device-smoke/ssh_mac_rows.py --windows --only offline_audit (check id ssh-offline-audit)
+Target: a Windows runner, fresh install and pair of origin/main 32396cd1f (dev-32396cd1f); client hp. The control plane's address is blocked on the TARGET only (outbound firewall rule, undone by a device-side timer and in finally), 150 s past the signed network's 2 min refresh hint, one `pb ssh` runs in the window, then the block is lifted.
+Run 1 PASS  outage 174 s: three offline start/end pairs, every end names its start's session id, outcome closed, bytes in/out 3846..3882 / 3451
+Run 2 PASS  outage 174 s: three offline start/end pairs, closed, bytes 3846..3882 / 3451
+Database re-read by Claude (W3) after the runs: this machine holds 13 origin-offline start/end pairs, all outcome closed, and its online pairs are separate.
+Harness notes: dials inside the outage are retried (relayed dials flap while the target is blocked); only an offline-origin pair passes, and the audit read is scoped to the block's window so a previous run cannot pass this one.

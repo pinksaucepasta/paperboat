@@ -422,6 +422,117 @@ def audit():
     report(row, 'PASS' if ok else 'FAIL', detail[:600])
 
 
+OFFLINE_OUTAGE_SECS = 150  # longer than the signed network's 2 min refresh hint (tailnet/authority.go OutOfSync)
+
+
+def target_block_control_plane(addrs, seconds=OFFLINE_OUTAGE_SECS + 90):
+    """Block the target's control plane until target_unblock_control_plane() or `seconds` on the device.
+
+    Windows: a firewall rule dropping all outbound to those addresses (ssh_windows_target.Target.block,
+    the same call outage() uses); the rule is address-scoped, so the controller's SSH stays up. macOS:
+    the same pf anchor rule outage() uses. The timed undo is armed before the block lands, so the
+    outage cannot survive this controller on any exit path. Small target-specific functions so the
+    macOS target can reuse offline_audit() later."""
+    if WIN:
+        return WIN.block(addrs, seconds=seconds)
+    rule = 'block drop out quick proto { tcp udp } to { %s }' % ' '.join(addrs)
+    msudo('sleep %d; /sbin/pfctl -a %s -F all' % (seconds, ANCHOR), bg=True)  # root failsafe on the Mac
+    out = msudo('printf "%%s\\n" %s | /sbin/pfctl -a %s -f - 2>&1; /sbin/pfctl -E 2>&1; /sbin/pfctl -F states 2>&1'
+                % (shlex.quote(rule), ANCHOR))
+    t = re.search(r'Token : (\d+)', out)
+    return t[1] if t else None
+
+
+def target_unblock_control_plane(token):
+    """Undo target_block_control_plane() on every exit path (the device-side timer is the backstop)."""
+    if WIN:
+        if token:
+            WIN.unblock(token)
+        return
+    msudo('/sbin/pfctl -a %s -F all%s' % (ANCHOR, '; /sbin/pfctl -X %s' % token if token else ''))
+
+
+def offline_audit():
+    """F5-12 offline half (twin of tools/device-smoke/ssh_offline_audit.sh): the host records origin 'offline'
+    for a managed SSH session only when the client sent the offline header (pb ssh always does) and its
+    signed network config is past its refresh hint (OutOfSync, 2 min). The control plane is therefore
+    blocked on the TARGET for OFFLINE_OUTAGE_SECS, one real `pb ssh <alias> -- echo <marker>` runs in that
+    window, the block is lifted, and the host's upload (30 s cadence) must file machine.access_started and
+    machine.access_ended with origin offline, the end naming the start's session id, outcome closed and
+    bytes_in/out > 0. The client is left alone: only the host's OutOfSync decides the origin."""
+    row = 'F5-12 offline-audit'
+    if not check_warm(row):
+        return
+    try:
+        mid = find_machine_id(json.loads(cl('~/.local/bin/pb machine list --json 2>/dev/null')))
+    except ValueError:
+        mid = None
+    if not mid:
+        return report(row, 'SKIP', 'could not read the target machine id from `pb machine list --json` on the client')
+    api = cl(r"""sed -n 's/.*"server_url": *"https:\/\/\([^"\/]*\).*/\1/p' ~/.config/paperboat/config.json""").strip()
+    addrs = sorted(set(cl("getent ahosts %s | awk '{print $1}'" % shlex.quote(api)).split())) if api else []
+    if not addrs:
+        return report(row, 'FAIL', 'could not resolve the control plane address on the client')
+    began = time.time()
+    base_out = cl('~/.local/bin/pb ssh %s -- echo ssh-offline-baseline-%d </dev/null 2>&1' % (shlex.quote(ARGS.alias), began), 300)
+    if 'ssh-offline-baseline-%d' % began not in base_out:
+        return report(row, 'FAIL', 'pb ssh did not run before the outage: %s' % base_out[-200:].replace('\n', ' '))
+    marker = 'ssh-offline-%d' % began
+    token, blackholed_at, off_out = None, None, ''
+    try:
+        token = target_block_control_plane(addrs)
+        blackholed_at = time.time()
+        # While still blocked: the client always sends the offline header, the host records origin offline
+        # once it is past its refresh hint (OutOfSync, 2 min). Dial from early in the outage and accept the first
+        # success past the hint: relayed dials flap (direct one minute, regional_relay the next), so one wobble
+        # must not fail the check. An early success is online and ignored by the verdict; only an offline-origin
+        # pair in the window passes. The block's device-side timer (OFFLINE_OUTAGE_SECS + 90) covers the loop.
+        deadline = blackholed_at + OFFLINE_OUTAGE_SECS + 80
+        ever = False
+        while True:
+            off_out = cl('~/.local/bin/pb ssh %s -- echo %s </dev/null 2>&1' % (shlex.quote(ARGS.alias), marker), 90)
+            ever = ever or marker in off_out
+            el = time.time() - blackholed_at
+            if (marker in off_out and el >= OFFLINE_OUTAGE_SECS) or time.time() >= deadline:
+                break
+            time.sleep(20)
+        if not ever:
+            return report(row, 'FAIL', 'pb ssh did not run during the %ds outage: %s'
+                          % (OFFLINE_OUTAGE_SECS, off_out[-200:].replace('\n', ' ')))
+    finally:
+        target_unblock_control_plane(token)  # also runs when the session above failed
+    reconnected_at = time.time()
+    db = os.environ.get('PB_AUDIT_DB_HOST', 'root@coolify')
+    # Scope the read to this run: sessions start at or after the block went up (the baseline is online and
+    # filtered by origin anyway). A began-anchored window would re-read a previous run's offline rows when runs
+    # follow within minutes and PASS on stale data.
+    query = ("SELECT event_type, metadata->>'origin', metadata->>'session_id', metadata->>'outcome', coalesce(metadata->>'bytes_in','0'), "
+             "coalesce(metadata->>'bytes_out','0'), metadata->>'peer_endpoint_id', idempotency_key FROM paperboat.audit_events WHERE resource_id='%s' "
+             "AND event_type IN ('machine.access_started','machine.access_ended') AND metadata->>'capability'='managed_ssh' "
+             "AND created_at > now() - interval '%d seconds' ORDER BY created_at, id;" % (mid, int(time.time() - blackholed_at) + 30))
+    rows = ''
+    for _ in range(30):  # the host uploads within its 30 s cadence
+        rows = subprocess.run(['ssh', db, 'docker exec -i paperboat-postgres-1 psql -U postgres -d paperboat -qAt -F "|"'], input=query,
+                              capture_output=True, text=True).stdout
+        if re.search(r'^machine.access_ended\|offline\|', rows, re.M):
+            break
+        time.sleep(5)
+    recs = [r.split('|') for r in rows.splitlines() if r]
+    # An end names its start: the start's host event id, which the server files as idempotency key "offline:<id>".
+    off = [r for r in recs if r[1] == 'offline']
+    starts = [r for r in off if r[0] == 'machine.access_started']
+    ends = [r for r in off if r[0] == 'machine.access_ended']
+    start_ids = {s[7].removeprefix('offline:') for s in starts}
+    ok = bool(starts) and bool(ends)
+    for e in ends:
+        ok = ok and e[3] == 'closed' and int(e[4]) > 0 and int(e[5]) > 0 and e[2] in start_ids
+    for s in starts:
+        ok = ok and s[6].startswith('session_')
+    wall = int(reconnected_at - blackholed_at) if blackholed_at else OFFLINE_OUTAGE_SECS
+    detail = 'outage %ss ' % wall + ' '.join('%s:%s:%s:%s:%s' % (r[0][8:], r[2][:8], r[3], r[4], r[5]) for r in off)
+    report(row, 'PASS' if ok else 'FAIL', detail[:600])
+
+
 FORWARDING = r'''fail=; ok=
 check() { n=$1; w=$2; shift 2; o=$("$@" 2>&1 </dev/null); if grep -q -- "$w" <<<"$o"; then ok="$ok $n"; else fail="$fail $n($(tr '\n' ' ' <<<"$o" | cut -c1-160))"; fi; }
 banner() { for i in $(seq 1 30); do timeout 5 bash -c "exec 3<>/dev/tcp/127.0.0.1/$1; head -c 7 <&3" 2>/dev/null && return; sleep 1; done; echo "no listener on $1"; }
@@ -463,7 +574,7 @@ def forwarding():
     report(row, 'PASS' if want in out else 'FAIL', ' '.join(l for l in out.splitlines() if l.startswith('RESULT')) or out[-300:].replace('\n', ' '))
 
 
-STEPS = {'setup': setup, 'outage': outage, 'refusals': refusals, 'revoke': revoke, 'otheruser': otheruser, 'audit': audit, 'forwarding': forwarding}
+STEPS = {'setup': setup, 'outage': outage, 'refusals': refusals, 'revoke': revoke, 'otheruser': otheruser, 'audit': audit, 'offline_audit': offline_audit, 'forwarding': forwarding}
 
 
 def main():
