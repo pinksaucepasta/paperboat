@@ -716,3 +716,22 @@ func TestDetachedExecLingersForReattachThenIsCanceled(t *testing.T) {
 		t.Fatalf("abandoned command: %+v %v", snapshot, err)
 	}
 }
+
+// A producer parked on a full replay buffer is released when no client is attached: the linger abandons the command
+// and its wait ends, so a command nobody reads cannot sit on its pipe forever (audit C #30).
+func TestDetachedProducerOnAFullBufferIsAbandonedAndReleased(t *testing.T) {
+	const linger = 200 * time.Millisecond
+	root := t.TempDir()
+	manager := testManager(t, root, func(c *Config) { c.DetachedLinger = linger })
+	defer manager.Shutdown(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	execution, _, err := manager.Start(ctx, Request{OperationID: "operation_full", Argv: []string{"/usr/bin/yes"}, CWD: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := execution.Wait(ctx)
+	if err != nil || snapshot.State != StateCanceled || snapshot.ErrorCode != "exec_canceled" {
+		t.Fatalf("a command nobody reads: %+v %v", snapshot, err)
+	}
+}
