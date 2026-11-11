@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/shared/reattach"
 )
 
 // F14-02 on a hosted Windows runner: the update cut the connection once, the send recovered and kept committing at
@@ -75,5 +76,57 @@ func TestASlowTransferThatKeepsCommittingOutlivesTheRecoveryWindow(t *testing.T)
 	defer cancel()
 	if _, err := client.SendBatch(ctx, manifest.BatchID, "", []Source{item}); err != nil || !bytes.Equal(content, data) {
 		t.Fatalf("a slow transfer that kept committing failed after the recovery window: %v (%d of %d bytes)", err, len(content), len(data))
+	}
+}
+
+// The opposite case: a send that never commits a chunk ends one window after its FIRST failure; the many retries in
+// between must not keep extending the deadline.
+func TestASendWithoutProgressEndsOneWindowAfterItsFirstFailure(t *testing.T) {
+	saved := nativeRecoveryWindow
+	nativeRecoveryWindow = 300 * time.Millisecond
+	defer func() { nativeRecoveryWindow = saved }()
+	item := source(bytes.Repeat([]byte("stuck"), protocol.FileTransferChunkBytes/5))
+	manifest := Manifest{TransferID: "ft_stuck", BatchID: "batch_stuck", SourceMachineID: "machine_source", DestinationMachineID: "machine_destination", InitiatingUserID: "user_1", Basename: item.Basename, Size: item.Size, SHA256: hex.EncodeToString(item.SHA256[:])}
+	var mu sync.Mutex
+	var cuts int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/file-transfers":
+			_ = json.NewEncoder(w).Encode(Batch{BatchID: manifest.BatchID, Transfers: []Manifest{manifest}})
+		case r.Method == http.MethodHead:
+			w.Header().Set("Upload-Offset", "0")
+			w.WriteHeader(204)
+		case r.Method == http.MethodPatch: // every chunk's connection is cut before it commits
+			cuts++
+			connection, _, _ := w.(http.Hijacker).Hijack()
+			connection.Close()
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer server.Close()
+	lease := &nativeTestLease{address: server.Listener.Addr().String(), expires: time.Now().Add(time.Minute)}
+	client, err := NewNativeClient(server.URL+"/v1/file-transfers", Auth{Token: "t", ExpiresAt: lease.expires}, testBinding(), lease.OpenTransferStream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.retryWait = func(ctx context.Context, _ int) error { return reattach.Wait(ctx, 20*time.Millisecond) }
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	started := time.Now()
+	_, err = client.SendBatch(ctx, manifest.BatchID, "", []Source{item})
+	elapsed := time.Since(started)
+	mu.Lock()
+	defer mu.Unlock()
+	if err == nil || ctx.Err() != nil {
+		t.Fatalf("a send without progress did not fail on its own: %v (caller context: %v)", err, ctx.Err())
+	}
+	if cuts < 3 {
+		t.Fatalf("only %d failed attempts: the retries the window must bound did not happen", cuts)
+	}
+	if elapsed < nativeRecoveryWindow || elapsed > 4*nativeRecoveryWindow {
+		t.Fatalf("send ended %v after its first failure, want about the %v window", elapsed, nativeRecoveryWindow)
 	}
 }
