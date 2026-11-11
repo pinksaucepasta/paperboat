@@ -3,13 +3,15 @@ package derpquic
 import (
 	"context"
 	"crypto/tls"
+	"strings"
 	"testing"
 
 	"tailscale.com/types/key"
 )
 
 // An endpoint with more peers than one grant may name (64) sends one grant per chunk of peers; the
-// relay adds them up on its connection, so a peer named only in a later chunk is reachable.
+// relay adds them up on its connection, so the last peer of a 1,000-machine
+// account is reachable even when it is named only in the final chunk.
 func TestGrantsOfOneGenerationAddUpBeyondSixtyFourPeers(t *testing.T) {
 	for _, chunked := range []bool{true, false} {
 		f := newFixture(t)
@@ -20,16 +22,21 @@ func TestGrantsOfOneGenerationAddUpBeyondSixtyFourPeers(t *testing.T) {
 		pairScopes(&ga, &gb)
 		toB := ga.Peers[0]
 		var others []Peer
-		for i := 0; i < 69; i++ {
+		for i := 0; i < 998; i++ {
 			others = append(others, Peer{WireGuardPublicKey: KeyString(key.NewNode().Public()), Scopes: toB.Scopes})
 		}
-		first, second := ga, ga
-		first.Peers = others[:64]
-		second.Peers = append(append([]Peer(nil), others[64:]...), toB)
-		credential := f.token(first) + "\n" + f.token(second)
-		if !chunked {
-			credential = f.token(first)
+		all := append(others, toB)
+		var parts []string
+		for start := 0; start < len(all); start += MaxGrantPeers {
+			chunk := ga
+			chunk.Peers = all[start:min(start+MaxGrantPeers, len(all))]
+			parts = append(parts, f.token(chunk))
 		}
+		credential := strings.Join(parts, "\n")
+		if !chunked {
+			credential = parts[0]
+		}
+
 		a := NewClient(ClientConfig{Address: address, TLS: &tls.Config{RootCAs: f.roots, ServerName: "localhost", Certificates: []tls.Certificate{ca}}, Credential: func(context.Context) (string, error) { return credential, nil }})
 		t.Cleanup(func() { a.Close() })
 		b := f.client(address, cb, gb)
@@ -39,6 +46,7 @@ func TestGrantsOfOneGenerationAddUpBeyondSixtyFourPeers(t *testing.T) {
 			t.Fatal(err)
 		}
 		if chunked {
+			receive(t, b, ka, []byte("beyond-64"))
 			eventually(t, func() bool { return s.Snapshot().Forwarded > 0 })
 		} else {
 			eventually(t, func() bool { return s.Snapshot().Dropped > 0 })
