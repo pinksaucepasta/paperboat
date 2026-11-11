@@ -51,6 +51,7 @@ type Server struct {
 	connections                          map[*quic.Conn]struct{}
 	wssConnections                       map[*peerConn]struct{}
 	draining                             bool
+	drainTimer                           *time.Timer
 	deadline                             time.Time
 	listener                             *quic.Listener
 	transport                            *quic.Transport
@@ -256,21 +257,6 @@ func (s *Server) servePeer(p *peerConn) {
 	defer lease.Close()
 	stop := lease.Bind(p)
 	defer stop()
-	stopWatch := lease.Poll(func(context.Context) error {
-		s.mu.Lock()
-		current := s.peers[routeKey(p.key, p.namespace)] == p
-		drained := s.draining && !time.Now().Before(s.deadline)
-		s.mu.Unlock()
-		if drained {
-			s.reject(p, ErrOverload)
-			return admission.ErrRevoked
-		}
-		if !current {
-			return admission.ErrRevoked
-		}
-		return nil
-	})
-	defer stopWatch()
 	defer func() { p.close(0, "relay closed"); wg.Wait() }()
 	for {
 		kind, b, err = readFrame(stream)
@@ -633,11 +619,33 @@ func (s *Server) Revoke(account, endpoint string, minGeneration uint64) error {
 }
 func (s *Server) Drain(deadline time.Time) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if !s.draining || deadline.Before(s.deadline) {
 		s.deadline = deadline
 	}
 	s.draining = true
-	s.mu.Unlock()
+	// One timer for every connection, not a poll per connection under this lock (PLAN 3b R3). Revocation and
+	// supersede close their connections where they happen (Revoke, admit).
+	if s.drainTimer != nil {
+		s.drainTimer.Stop()
+	}
+	s.drainTimer = time.AfterFunc(time.Until(s.deadline), s.closeDrained)
+}
+
+// closeDrained ends every admitted connection once the drain deadline has passed.
+func (s *Server) closeDrained() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.draining {
+		return
+	}
+	if wait := time.Until(s.deadline); wait > 0 {
+		s.drainTimer = time.AfterFunc(wait, s.closeDrained)
+		return
+	}
+	for _, p := range s.peers {
+		s.reject(p, ErrOverload)
+	}
 }
 func (s *Server) Snapshot() Stats {
 	s.mu.Lock()
@@ -648,6 +656,9 @@ func (s *Server) Close() error {
 	s.mu.Lock()
 	s.draining = true
 	s.deadline = time.Now()
+	if s.drainTimer != nil {
+		s.drainTimer.Stop()
+	}
 	ln, tr := s.listener, s.transport
 	for c := range s.connections {
 		c.CloseWithError(0, "relay stopped")
