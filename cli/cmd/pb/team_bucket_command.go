@@ -48,7 +48,7 @@ func teamBucketCommand() *cobra.Command {
 	set.Flags().Bool("path-style", false, "address the bucket in the URL path (MinIO and some other services)")
 	set.Flags().Bool("secret-access-key-stdin", false, "read the secret access key from standard input")
 	set.Flags().Bool("json", false, "print JSON")
-	remove := &cobra.Command{Use: "remove <team>", Short: "Disconnect the team's bucket", Long: "Disconnect the bucket. What it already holds stays there, and recordings stay on their machines.", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(c *cobra.Command, args []string) error {
+	remove := &cobra.Command{Use: "remove <team>", Short: "Disconnect the team's bucket", Long: "Disconnect the team's bucket. Paperboat forgets the stored access key and stops giving machines and browsers links to it. What the bucket already holds stays there for the team to manage, and terminal recordings stay on their machines, where they can still be replayed while the machine is online.", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(c *cobra.Command, args []string) error {
 		client, err := backendForCommand(c)
 		if err != nil {
 			return err
