@@ -36,7 +36,7 @@ func TestWindowsAwaitingEnrollmentConfigRequiresSuppliedSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: instance, OwnerSID: ownerSID, User: "tester", StateRoot: `C:\State`, Workspace: `C:\Users\tester`, ListenAddress: "127.0.0.1:8080", EnrollmentPending: true, TokenFile: tokenPath, Source: source}
+	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: instance, OwnerSID: ownerSID, User: "tester", StateRoot: `C:\State`, Workspace: `C:\Users\tester`, ListenAddress: "127.0.0.1:8080", EnrollmentPending: true, TokenFile: tokenPath, Source: source, HostdSocket: testWindowsHostdSocket(t, instance, source)}
 	if !validWindowsConfig(config) {
 		t.Fatal("valid awaiting-enrollment declaration was rejected")
 	}
@@ -117,6 +117,13 @@ func TestStaleWindowsRuntimeProcessScriptIncludesEveryInstalledRuntimeRole(t *te
 			}
 		})
 	}
+	handover := regexp.MustCompile(staleWindowsHandoverProcessPattern)
+	for _, test := range tests {
+		keep := test.name == "hostd" || test.name == "worker"
+		if got := handover.MatchString(test.line); got != (test.want && !keep) {
+			t.Fatalf("handover sweep match=%t for %q; the serving hostd and worker must stay", got, test.line)
+		}
+	}
 	if !strings.Contains(staleWindowsRuntimeProcessScript, staleWindowsRuntimeProcessPattern) {
 		t.Fatal("stale runtime process script does not use the bounded runtime-role pattern")
 	}
@@ -140,7 +147,7 @@ func TestWindowsSSHServiceSetPreservesUnifiedInstallation(t *testing.T) {
 	}
 	ownerSID := "S-1-5-21-1-2-3-4"
 	source := installsource.Source{Version: "fixture", Platform: "windows", Architecture: runtime.GOARCH, SHA256: strings.Repeat("0", 64), Length: 1, Distribution: installsource.Custom}
-	declaration := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: layout.Instance, OwnerSID: ownerSID, User: "fixture", StateRoot: filepath.Join(root, "state"), Workspace: filepath.Join(root, "workspace"), ListenAddress: "127.0.0.1:8080", EnrollmentPending: true, TokenFile: tokenPath, Source: source}
+	declaration := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: layout.Instance, OwnerSID: ownerSID, User: "fixture", StateRoot: filepath.Join(root, "state"), Workspace: filepath.Join(root, "workspace"), ListenAddress: "127.0.0.1:8080", EnrollmentPending: true, TokenFile: tokenPath, Source: source, HostdSocket: testWindowsHostdSocket(t, layout.Instance, source)}
 	if err := os.MkdirAll(filepath.Dir(root), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +396,7 @@ func TestWindowsRollbackProvenanceCannotComeFromClientJSON(t *testing.T) {
 	instance, _ := WindowsInstanceForSID(ownerSID)
 	token, _ := WindowsInstanceTokenPath(instance)
 	source := installsource.Source{Version: "dev", Platform: "windows", Architecture: runtime.GOARCH, SHA256: strings.Repeat("0", 64), Length: 1, Distribution: installsource.Custom}
-	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: instance, OwnerSID: ownerSID, User: "tester", StateRoot: `C:\State`, Workspace: `C:\Users\tester`, ListenAddress: "127.0.0.1:8080", EnrollmentPending: true, TokenFile: token, Source: source, RollbackSigned: true}
+	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: instance, OwnerSID: ownerSID, User: "tester", StateRoot: `C:\State`, Workspace: `C:\Users\tester`, ListenAddress: "127.0.0.1:8080", EnrollmentPending: true, TokenFile: token, Source: source, RollbackSigned: true, HostdSocket: testWindowsHostdSocket(t, instance, source)}
 	if validWindowsConfig(config) {
 		t.Fatal("signed provenance without identity accepted")
 	}

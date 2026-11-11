@@ -222,3 +222,47 @@ func TestHTTPServiceShutdownWaitsForAConnectionAcceptedBeforeIt(t *testing.T) {
 		t.Fatal("shutdown did not return")
 	}
 }
+
+// A Windows hostd handover: the new worker binds the address the old one is about to close (Start waits for it),
+// and a handover that does not complete gives the address back to the old one (ResumeAccepting).
+func TestHTTPServiceWaitsForABusyAddressAndResumesAccepting(t *testing.T) {
+	occupier, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := occupier.Addr().String()
+	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok") })
+	service, err := NewHTTPService(HTTPConfig{Address: address, Handler: ok})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.AfterFunc(200*time.Millisecond, func() { _ = occupier.Close() })
+	if err := service.Start(context.Background()); err != nil {
+		t.Fatalf("Start did not wait for the address to come free: %v", err)
+	}
+	defer service.Shutdown(context.Background())
+	get := func() error {
+		client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}, Timeout: 2 * time.Second}
+		response, err := client.Get("http://" + address + "/")
+		if err == nil {
+			response.Body.Close()
+		}
+		return err
+	}
+	if err := get(); err != nil {
+		t.Fatal(err)
+	}
+	service.StopAccepting()
+	if err := get(); err == nil {
+		t.Fatal("a request was accepted after StopAccepting")
+	}
+	if err := service.ResumeAccepting(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := get(); err != nil {
+		t.Fatalf("no request was accepted after ResumeAccepting: %v", err)
+	}
+	if err := service.ResumeAccepting(context.Background()); !errors.Is(err, ErrHTTPState) {
+		t.Fatalf("ResumeAccepting while serving: %v", err)
+	}
+}

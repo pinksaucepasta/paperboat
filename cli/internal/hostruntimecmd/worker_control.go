@@ -202,3 +202,34 @@ func (o *ownedWorkers) watchExit(id string, worker *ownedWorker, watcher exitWat
 }
 
 var errWorkerExited = errors.New("runtime worker exited")
+
+// listenerHandover is a worker that can give its loopback listener up and take it back (Windows, which cannot
+// pass the listener to the next generation's worker).
+type listenerHandover interface {
+	StopAccepting(context.Context) error
+	ResumeAccepting(context.Context) error
+}
+
+// stopAccepting closes the active worker's loopback listener for the next hostd generation's worker.
+func (o *ownedWorkers) stopAccepting(ctx context.Context) error {
+	return o.withActiveListener(func(worker listenerHandover) error { return worker.StopAccepting(ctx) })
+}
+
+// resumeAccepting gives the listener back to the active worker after a handover that did not complete.
+func (o *ownedWorkers) resumeAccepting(ctx context.Context) error {
+	return o.withActiveListener(func(worker listenerHandover) error { return worker.ResumeAccepting(ctx) })
+}
+
+func (o *ownedWorkers) withActiveListener(step func(listenerHandover) error) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	active := o.workers[o.active]
+	if active == nil {
+		return errors.New("hostd has no active runtime worker to hand over")
+	}
+	worker, ok := active.process.(listenerHandover)
+	if !ok {
+		return errors.New("the active runtime worker cannot hand its listener over")
+	}
+	return step(worker)
+}

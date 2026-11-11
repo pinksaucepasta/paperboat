@@ -68,21 +68,50 @@ func (s *HTTPService) Start(ctx context.Context) error {
 	if s.running || s.stopped {
 		return ErrHTTPState
 	}
+	listener, err := s.listen(ctx)
+	if err != nil {
+		return err
+	}
+	s.server = &http.Server{Handler: s.config.Handler, ReadHeaderTimeout: s.config.ReadHeaderTimeout, IdleTimeout: s.config.IdleTimeout, MaxHeaderBytes: s.config.MaxHeaderBytes, ConnState: s.trackConnection}
+	s.serveLocked(listener)
+	return nil
+}
+
+// listenBusyWait bounds how long Start and ResumeAccepting wait for the address to come free: in a Windows hostd
+// handover the previous generation's worker closes it a few milliseconds before this one binds.
+const listenBusyWait = 2 * time.Second
+
+func (s *HTTPService) listen(ctx context.Context) (net.Listener, error) {
 	var listener net.Listener
 	var err error
 	if s.config.Listener != nil {
 		listener, err = s.config.Listener()
 	} else {
-		listener, err = net.Listen("tcp", s.config.Address)
+		deadline := time.Now().Add(listenBusyWait)
+		for {
+			listener, err = net.Listen("tcp", s.config.Address)
+			if err == nil || !addressBusy(err) || time.Now().After(deadline) {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return nil, errors.Join(err, ctx.Err())
+			case <-time.After(20 * time.Millisecond):
+			}
+		}
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if s.config.NativeHandler != nil {
 		listener = &protocolListener{Listener: listener, native: s.config.NativeHandler, timeout: s.config.ReadHeaderTimeout}
 	}
-	server := &http.Server{Handler: s.config.Handler, ReadHeaderTimeout: s.config.ReadHeaderTimeout, IdleTimeout: s.config.IdleTimeout, MaxHeaderBytes: s.config.MaxHeaderBytes, ConnState: s.trackConnection}
-	s.server, s.listener, s.done, s.running = server, listener, make(chan struct{}), true
+	return listener, nil
+}
+
+func (s *HTTPService) serveLocked(listener net.Listener) {
+	server, done := s.server, make(chan struct{})
+	s.listener, s.done, s.running = listener, done, true
 	go func() {
 		err := server.Serve(listener)
 		s.mu.Lock()
@@ -90,9 +119,36 @@ func (s *HTTPService) Start(ctx context.Context) error {
 			s.serveErr = err
 		}
 		s.running = false
-		close(s.done)
+		close(done)
 		s.mu.Unlock()
 	}()
+}
+
+// ResumeAccepting binds the address again after StopAccepting, on the same server: a Windows hostd handover that
+// did not complete leaves this generation serving.
+func (s *HTTPService) ResumeAccepting(ctx context.Context) error {
+	s.mu.Lock()
+	done, retiring, stopped := s.done, s.retiring, s.stopped
+	s.mu.Unlock()
+	if !retiring || stopped || done == nil {
+		return ErrHTTPState
+	}
+	select {
+	case <-done:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	listener, err := s.listen(ctx)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped || !s.retiring {
+		return errors.Join(ErrHTTPState, listener.Close())
+	}
+	s.retiring = false
+	s.serveLocked(listener)
 	return nil
 }
 

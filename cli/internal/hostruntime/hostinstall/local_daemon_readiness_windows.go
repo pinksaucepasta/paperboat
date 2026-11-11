@@ -242,7 +242,11 @@ func prepareWindowsLoadedLocalDaemonRepair(ctx context.Context, request Request,
 	if err != nil {
 		return nil, err
 	}
-	abort, err := PrepareSuppliedMaintenance(ctx, layout.HostdSocket, filepath.Join(root, "hostd.token"), false, request.OwnerSID)
+	installed, err := LoadWindowsRuntimeConfigForInstance(layout.Instance)
+	if err != nil {
+		return nil, err
+	}
+	abort, err := PrepareSuppliedMaintenance(ctx, installed.HostdSocket, filepath.Join(root, "hostd.token"), false, request.OwnerSID)
 	if err != nil {
 		return nil, err
 	}

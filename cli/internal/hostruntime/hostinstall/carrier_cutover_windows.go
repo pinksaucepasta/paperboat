@@ -47,14 +47,8 @@ func stageWindowsCarrierUpgrade(ctx context.Context, request Request) (*carrierU
 	if err != nil {
 		return nil, err
 	}
-	// Endpoint and account custody cannot change during a source upgrade.
 	candidate.Environment = retained.Environment
-	stable := candidate
-	stable.Source, stable.Generation, stable.Executable = retained.Source, retained.Generation, retained.Executable
-	stable.ControlEndpoint, stable.LockPath = retained.ControlEndpoint, retained.LockPath
-	want, _ := json.Marshal(stable)
-	have, _ := json.Marshal(retained)
-	if !bytes.Equal(want, have) {
+	if !carrierCustodyUnchanged(candidate, retained) {
 		return nil, ErrInvalidRequest
 	}
 	// Failures past this point are undone by the lifecycle rollback, which removes every generation but the
@@ -129,6 +123,18 @@ func removeWindowsCarrierGeneration(ctx context.Context, c CarrierConfig) error 
 	return nil
 }
 
+// carrierCustodyUnchanged reports whether candidate keeps retained's account custody and endpoints across a source
+// upgrade: only what belongs to a generation may differ (its source and executable, its control and hostd pipes,
+// since each carrier generation pairs with the hostd generation of its source, and its lock).
+func carrierCustodyUnchanged(candidate, retained CarrierConfig) bool {
+	stable := candidate
+	stable.Source, stable.Generation, stable.Executable = retained.Source, retained.Generation, retained.Executable
+	stable.ControlEndpoint, stable.HostdEndpoint, stable.LockPath = retained.ControlEndpoint, retained.HostdEndpoint, retained.LockPath
+	want, _ := json.Marshal(stable)
+	have, _ := json.Marshal(retained)
+	return bytes.Equal(want, have)
+}
+
 // windowsCarrierGenerations reads every carrier generation's own descriptor of the account.
 func windowsCarrierGenerations(ctx context.Context, instance string) ([]CarrierConfig, error) {
 	paths, err := filepath.Glob(carrierGenerationPath(instance, "*"))
@@ -172,7 +178,7 @@ func sweepWindowsCarrierGenerations(ctx context.Context, instance, active string
 // removeOrphanWindowsCarrierServices removes the account's carrier services the descriptors above did not name: a
 // registration left without its generation descriptor (a crash between the two) is otherwise never swept.
 func removeOrphanWindowsCarrierServices(ctx context.Context, instance string, handled []string) error {
-	names, err := windowsCarrierServiceInventory(ctx, instance)
+	names, err := windowsGenerationServiceInventory(ctx, instance)
 	if err != nil {
 		return err
 	}
@@ -191,14 +197,18 @@ func removeOrphanWindowsCarrierServices(ctx context.Context, instance string, ha
 	return result
 }
 
-// The SCM inventory and the service removal are what TestWindowsCarrierSweepRemovesOrphanServices replaces.
+// The SCM inventory and service operations are what the sweep tests replace (TestWindowsCarrierSweepRemovesOrphanServices,
+// TestWindowsHostdSweepDisablesARunningReplacedGeneration).
 var (
-	windowsCarrierServiceInventory  = windowsGenerationRemovalInventory
-	removeWindowsServiceDeclaration = service.WindowsController{}.Remove
+	windowsGenerationServiceInventory = windowsGenerationRemovalInventory
+	inspectWindowsServiceDeclaration  = service.WindowsController{}.Inspect
+	removeWindowsServiceDeclaration   = service.WindowsController{}.Remove
+	disableWindowsServiceDeclaration  = service.WindowsController{}.Disable
 )
 
 // removeWindowsHostdGenerations removes the account's hostd generation services other than keep (registered or only
-// declared). With onlyStopped a running generation stays: it is still serving or finishing work.
+// declared). With onlyStopped a running generation stays, disabled so it does not start at boot: it is still
+// serving or finishing work, and the next sweep removes it once it has exited.
 func removeWindowsHostdGenerations(ctx context.Context, instance, keep string, onlyStopped bool) error {
 	names, err := windowsHostdGenerationNames(ctx, instance)
 	if err != nil {
@@ -215,16 +225,19 @@ func removeWindowsHostdGenerations(ctx context.Context, instance, keep string, o
 		}
 		definition := filepath.Join(WindowsProgramDataRoot(), "services", name+".json")
 		if onlyStopped {
-			status, err := (service.WindowsController{}).Inspect(ctx, definition)
+			status, err := inspectWindowsServiceDeclaration(ctx, definition)
 			if err != nil {
 				result = errors.Join(result, err)
 				continue
 			}
 			if status.Running {
+				// A replaced generation drains its accepted work and exits by itself; until then it must not
+				// start again at boot beside the installed one.
+				result = errors.Join(result, disableWindowsServiceDeclaration(ctx, definition))
 				continue
 			}
 		}
-		if err := (service.WindowsController{}).Remove(ctx, definition); err != nil {
+		if err := removeWindowsServiceDeclaration(ctx, definition); err != nil {
 			result = errors.Join(result, err)
 			continue
 		}

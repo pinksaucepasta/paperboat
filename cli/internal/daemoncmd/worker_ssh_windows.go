@@ -29,7 +29,7 @@ func workerOpenSSH(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	layout, err := hostinstall.WindowsLayoutForInstance(instance)
+	installed, err := hostinstall.LoadWindowsRuntimeConfigForInstance(instance)
 	if err != nil {
 		return 0, err
 	}
@@ -42,7 +42,7 @@ func workerOpenSSH(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	defer clear(token)
-	client, err := hostdproto.NewClient(layout.HostdSocket, token, localapi.WorkerOpenSSHTimeout, sid)
+	client, err := hostdproto.NewClient(installed.HostdSocket, token, localapi.WorkerOpenSSHTimeout, sid)
 	if err != nil {
 		return 0, err
 	}

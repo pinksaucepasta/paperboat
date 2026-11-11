@@ -174,7 +174,7 @@ func TestNativeWindowsPinPublisherProtectsBoundAccountNamespace(t *testing.T) {
 				t.Fatal(err)
 			}
 			if scenario != "unbound" {
-				config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: layout.Instance, OwnerSID: sid, User: "custody-fixture", StateRoot: root, Workspace: root, ListenAddress: "127.0.0.1:8080", MachineID: "custody-fixture", TokenFile: token, Source: source, Artifact: bootstrap.ArtifactTarget{Schema: bootstrap.ArtifactTargetSchemaV1, Kind: bootstrap.ArtifactKindPB, Version: source.Version, Platform: "windows", Architecture: runtime.GOARCH, RepositoryURL: "https://fixture.invalid", TargetPath: "pb-windows-amd64.exe"}}
+				config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: layout.Instance, OwnerSID: sid, User: "custody-fixture", StateRoot: root, Workspace: root, ListenAddress: "127.0.0.1:8080", MachineID: "custody-fixture", TokenFile: token, Source: source, HostdSocket: testWindowsHostdSocket(t, layout.Instance, source), Artifact: bootstrap.ArtifactTarget{Schema: bootstrap.ArtifactTargetSchemaV1, Kind: bootstrap.ArtifactKindPB, Version: source.Version, Platform: "windows", Architecture: runtime.GOARCH, RepositoryURL: "https://fixture.invalid", TargetPath: "pb-windows-amd64.exe"}}
 				if err := writeWindowsConfigAt(config, root); err != nil {
 					t.Fatal(err)
 				}
@@ -303,7 +303,7 @@ func TestNativeWindowsSnapshotRestoresPromotedBytesBeforeMetadata(t *testing.T) 
 	if err := os.MkdirAll(filepath.Dir(root), 0700); err != nil {
 		t.Fatal(err)
 	}
-	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: layout.Instance, OwnerSID: sid, User: "snapshot-fixture", StateRoot: root, Workspace: root, ListenAddress: "127.0.0.1:8080", MachineID: "snapshot-fixture", TokenFile: token, Source: source, Artifact: bootstrap.ArtifactTarget{Schema: bootstrap.ArtifactTargetSchemaV1, Kind: bootstrap.ArtifactKindPB, Version: source.Version, Platform: "windows", Architecture: runtime.GOARCH, RepositoryURL: "https://fixture.invalid", TargetPath: "pb-windows-amd64.exe"}}
+	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: layout.Instance, OwnerSID: sid, User: "snapshot-fixture", StateRoot: root, Workspace: root, ListenAddress: "127.0.0.1:8080", MachineID: "snapshot-fixture", TokenFile: token, Source: source, HostdSocket: testWindowsHostdSocket(t, layout.Instance, source), Artifact: bootstrap.ArtifactTarget{Schema: bootstrap.ArtifactTargetSchemaV1, Kind: bootstrap.ArtifactKindPB, Version: source.Version, Platform: "windows", Architecture: runtime.GOARCH, RepositoryURL: "https://fixture.invalid", TargetPath: "pb-windows-amd64.exe"}}
 	if err := writeWindowsConfigAt(config, root); err != nil {
 		t.Fatal(err)
 	}

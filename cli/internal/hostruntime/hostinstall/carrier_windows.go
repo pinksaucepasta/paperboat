@@ -64,7 +64,11 @@ func validateCarrierPaths(c CarrierConfig) error {
 	}
 	root := filepath.Dir(carrierConfigPath(instance))
 	token, _ := WindowsInstanceTokenPath(instance)
-	if !strings.EqualFold(c.Executable, pin) || c.HostdEndpoint != layout.HostdSocket || c.HostdTokenFile != token || c.DispatchCapabilityFile != filepath.Join(root, "dispatch.cap") || c.LockPath != filepath.Join(root, "owner-"+c.Generation+".lock") {
+	hostd, err := windowsHostdSocket(instance, c.Generation)
+	if err != nil {
+		return err
+	}
+	if !strings.EqualFold(c.Executable, pin) || c.HostdEndpoint != hostd || c.HostdTokenFile != token || c.DispatchCapabilityFile != filepath.Join(root, "dispatch.cap") || c.LockPath != filepath.Join(root, "owner-"+c.Generation+".lock") {
 		return ErrInvalidRequest
 	}
 	return nil
@@ -112,7 +116,13 @@ func deriveWindowsCarrierConfig(r Request, layout service.Layout, pin string) (C
 	if err != nil {
 		return CarrierConfig{}, err
 	}
-	c := CarrierConfig{Schema: carrierSchema, Instance: layout.Instance, Source: r.Source, Generation: generation, Executable: pin, UID: r.UID, GID: r.GID, OwnerSID: r.OwnerSID, User: "Paperboat", Group: "Paperboat", RuntimeRoot: r.StateRoot, Environment: environment, WorkerAddress: r.HelperListenAddress, HostdEndpoint: layout.HostdSocket, ControlEndpoint: carrierControlEndpoint(layout.HostdSocket, generation), HostdTokenFile: token, DispatchCapabilityFile: filepath.Join(root, "dispatch.cap"), LockPath: filepath.Join(root, "owner-"+generation+".lock")}
+	// The carrier generation pairs with the hostd generation of the same source: an update's standby carrier
+	// talks to the new hostd while the serving one keeps talking to the old.
+	hostd, err := windowsHostdSocket(layout.Instance, generation)
+	if err != nil {
+		return CarrierConfig{}, err
+	}
+	c := CarrierConfig{Schema: carrierSchema, Instance: layout.Instance, Source: r.Source, Generation: generation, Executable: pin, UID: r.UID, GID: r.GID, OwnerSID: r.OwnerSID, User: "Paperboat", Group: "Paperboat", RuntimeRoot: r.StateRoot, Environment: environment, WorkerAddress: r.HelperListenAddress, HostdEndpoint: hostd, ControlEndpoint: carrierControlEndpoint(hostd, generation), HostdTokenFile: token, DispatchCapabilityFile: filepath.Join(root, "dispatch.cap"), LockPath: filepath.Join(root, "owner-"+generation+".lock")}
 	return c, c.Validate()
 }
 // readCarrierConfigFile reads the active generation's descriptor.
@@ -536,7 +546,7 @@ func reconcileInstalledCarrier(ctx context.Context, instance string, pinReferenc
 	}
 	// The activation moves the carrier with the runtime; a carrier still on another source moves the same way,
 	// standby first and the network last, under maintenance and the lifecycle journal.
-	abort, err := PrepareSuppliedMaintenance(ctx, layout.HostdSocket, config.TokenFile, false, config.OwnerSID)
+	abort, err := PrepareSuppliedMaintenance(ctx, config.HostdSocket, config.TokenFile, false, config.OwnerSID)
 	if err != nil {
 		return err
 	}
