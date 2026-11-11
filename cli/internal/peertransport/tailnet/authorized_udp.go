@@ -251,6 +251,21 @@ func (a *Authority) Listen(region *tailcfg.DERPRegion) (*UDPServer, error) {
 	}
 	peers, admitted := a.peersLocked()
 	server := &mesh.Server{OnRelayControl: a.relayControl, DERPCarrierFactory: a.relay.factory, PeerRelayNodes: a.relay.peerNodes, RelayControlPeers: a.relay.controlPeers, TestOnlyPacketListener: a.options.TestOnlyPacketListener, Key: a.private, LocalAddr: netip.MustParseAddr(a.current.Self.VirtualAddress), AllowedPeers: peers, PeerContacts: a.peerContactsLocked(), OnLocalEndpoints: a.endpointsChanged, Region: region, ServedUDPPorts: []filter.PortRange{{First: NetworkPort, Last: NetworkPort}}, Logf: func(string, ...any) {}}
+	// A listener advertises one home but must know the full authorized inventory
+	// before it parks regional recovery. Dial-side rendezvous can then reach it
+	// through another relay without waiting for a background sweep to publish it.
+	a.relay.mu.Lock()
+	var nodes []RegionalNode
+	for _, node := range a.relay.nodes {
+		nodes = append(nodes, node)
+	}
+	a.relay.mu.Unlock()
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].NodeID < nodes[j].NodeID })
+	if len(nodes) > 0 {
+		if err := server.SetRelayRegions(relayRegionsSelectedFirst(nodes, a.relay.node.NodeID)); err != nil {
+			return nil, err
+		}
+	}
 	var err error
 	a.server, err = listenUDP(server, NetworkPort, admitted, a.peerAdmissionExpiriesLocked(), &a.expiresAt)
 	return a.server, err

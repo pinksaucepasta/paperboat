@@ -35,7 +35,7 @@ func TestRegionalRenewalFollowsTheEarliestObservation(t *testing.T) {
 	}
 }
 
-// On pbvm2 an idle machine withdrew every relay region, and with it every relay connection, about every 17 s:
+// On pbvm2 a machine in regional recovery withdrew every relay region, and with it every relay connection, about every 17 s:
 // the refresh scheduled the regional renewal before the relays' observations ended, but the configuration it
 // had just applied woke the loop again, and that wake re-armed the timer at the 24-36 s cadence. A renewal
 // must come before the observations end, whichever path armed the timer.
@@ -51,6 +51,7 @@ func TestRegionalRecoveryRenewalSurvivesTheAppliedConfigurationWake(t *testing.T
 	a.mu.Lock()
 	a.relay.mu.Lock()
 	a.relay.recovery = a.newRegionalRecoveryLocked()
+	a.relay.recovery.peerID = c.Peers[0].Identity.EndpointID
 	a.relay.mu.Unlock()
 	a.mu.Unlock()
 	refreshed := make(chan struct{}, 8)
@@ -135,6 +136,7 @@ func TestRenewalsBackOffWhileNoRelayIsUsable(t *testing.T) {
 	a.mu.Lock()
 	a.relay.mu.Lock()
 	a.relay.recovery = a.newRegionalRecoveryLocked()
+	a.relay.recovery.peerID = c.Peers[0].Identity.EndpointID
 	a.relay.mu.Unlock()
 	a.mu.Unlock()
 	for range 50 {
