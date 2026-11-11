@@ -169,3 +169,45 @@ func TestIngressAuthorityAppliesOwnerIPRules(t *testing.T) {
 		}
 	}
 }
+
+// 2026-11-11 anvit: one decision the edge cannot accept (a file-origin preview on an older edge) made it
+// reject the whole snapshot, so every name created afterwards 404ed. Now only that decision is dropped,
+// the others serve, and the edge does not hold the server's version while it drops one, so the next
+// refresh is a full fetch instead of an "unchanged" answer whose expiries would pair with the wrong set.
+func TestIngressSnapshotDropsOnlyTheDecisionItCannotAccept(t *testing.T) {
+	good := ingressAuthorityTestDecision(time.Now().UTC())
+	bad := good
+	bad.DecisionID = "decision_bad"
+	bad.Binding.RouteID, bad.Binding.Hostname = "route_bad", "bad.customer.test"
+	bad.Binding.OriginScheme = "gopher"
+	var versions []string
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var input struct {
+			Version string `json:"version"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&input)
+		versions = append(versions, input.Version)
+		json.NewEncoder(w).Encode(map[string]any{"complete": true, "version": "v1", "decisions": []connectorprotocol.IngressDecision{bad, good}})
+	}))
+	defer server.Close()
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := client.IngressDecisions(context.Background(), good.EdgeNodeID, good.EdgeProcessEpoch, "")
+	if err != nil || len(snapshot.Decisions) != 1 || snapshot.Decisions[0].Binding.Hostname != good.Binding.Hostname || snapshot.Version != "" {
+		t.Fatalf("snapshot = %+v, %v; want only the good decision and no held version", snapshot, err)
+	}
+	authority := &IngressAuthority{Client: client, NodeID: good.EdgeNodeID, ProcessEpoch: good.EdgeProcessEpoch}
+	rule := route.RouteRule{RouteID: good.Binding.RouteID, TunnelID: good.Binding.TunnelID, AccountID: good.Binding.AccountID, ConnectorID: good.ConnectorID, ConnectorSessionID: good.SessionID, ConnectorProcessGeneration: good.ProcessGeneration, ConfigGeneration: good.ConfigGeneration, AssignmentGeneration: good.AssignmentGeneration, RouteGeneration: good.Binding.RouteGeneration, AccessMode: good.Binding.Audience, ViewerPolicyGeneration: good.PolicyGeneration, Hostname: good.Binding.Hostname}
+	if _, err := authority.Resolve(context.Background(), rule); err != nil {
+		t.Fatalf("the good name is not served next to a bad decision: %v", err)
+	}
+	authority.Invalidate()
+	if _, err := authority.Snapshot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if last := versions[len(versions)-1]; last != "" {
+		t.Fatalf("refresh sent held version %q while a decision was dropped", last)
+	}
+}
