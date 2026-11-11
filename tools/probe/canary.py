@@ -41,7 +41,7 @@ def parse(stdout, rc):
             steps.append(item)
     if not steps:
         steps = [{"step": "probe", "ok": False, "seconds": 0, "error": f"probe printed no result (exit {rc})"}]
-    elif rc != 0 and all(s["ok"] for s in steps):
+    elif rc != 0 and (rc != 1 or all(s["ok"] for s in steps)):
         steps.append({"step": "probe", "ok": False, "seconds": 0, "error": f"probe exited {rc} after passing steps"})
     return steps
 
@@ -51,7 +51,12 @@ def advance(status, run):
     counts = dict(status.get("consecutive_failures", {}))
     alerted = set(status.get("alerted", []))
     lines = []
-    for s in run["steps"]:
+    runner = "account" if run.get("group") == "account" else "probe"
+    steps = run["steps"]
+    # A completed run recovers its unit's synthetic runner failure. Other units cannot clear it.
+    if runner not in {step["step"] for step in steps}:
+        steps = [{"step": runner, "ok": True}] + steps
+    for s in steps:
         name = s["step"]
         if s["ok"]:
             counts.pop(name, None)
@@ -141,8 +146,9 @@ def account_steps():
         out = error.stdout or ""
         stdout, rc = out.decode(errors="replace") if isinstance(out, bytes) else out, 124
     steps = parse(stdout, rc)
-    if len(steps) == 1 and steps[0]["step"] == "probe":  # the runner itself broke: name it for the account probe
-        steps[0]["step"] = "account"
+    for step in steps:  # timeout/runner failures belong to this unit even after partial output
+        if step["step"] == "probe":
+            step["step"] = "account"
     return steps
 
 

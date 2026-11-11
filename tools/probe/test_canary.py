@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Tests for canary.py: result parsing, bounded history, and alert-once / recover-once per step."""
 import json, multiprocessing, os, sys, tempfile, unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -27,6 +29,8 @@ class Parse(unittest.TestCase):
 
     def test_nonzero_exit_with_only_passes_is_a_failure(self):
         self.assertFalse(run([OK], 2)["ok"])
+        timed_out = canary.parse(BAD, 124)
+        self.assertEqual([step["step"] for step in timed_out], ["exec_a_to_b", "probe"])
 
     def test_wrong_types_are_ignored(self):
         self.assertEqual(canary.parse('{"step":"x","ok":"true"}', 0)[0]["step"], "probe")
@@ -39,6 +43,11 @@ class Account(unittest.TestCase):
         self.assertEqual(len(first), 1)
         _, none = canary.advance({}, step_run("exec_a_to_b", False))
         self.assertEqual(none, [])
+
+    def test_partial_timeout_belongs_to_the_account_unit(self):
+        result = SimpleNamespace(stdout='{"step":"signin","ok":false}', returncode=124)
+        with patch.object(canary.subprocess, 'run', return_value=result):
+            self.assertEqual([step['step'] for step in canary.account_steps()], ['signin','account'])
 
 
 class Record(unittest.TestCase):
@@ -100,6 +109,21 @@ class Record(unittest.TestCase):
                 self.assertEqual(status['last'], access)
                 self.assertEqual(len((canary.STATE / 'history.jsonl').read_text().splitlines()), 1)
                 self.assertEqual(len((canary.STATE / 'account-history.jsonl').read_text().splitlines()), 1)
+
+    def test_only_the_matching_unit_can_recover_its_runner_failure(self):
+        for group, runner, own_step, other_step in [('access','probe','exec_a_to_b','signin'),
+                                                     ('account','account','signin','exec_a_to_b')]:
+            with self.subTest(group=group):
+                canary.STATE = Path(self.dir.name) / group
+                bad = run([json.dumps({'step':runner,'ok':False})],1)
+                bad['group'] = group
+                canary.record(bad,self.sent.append)
+                other = run([json.dumps({'step':other_step,'ok':True})],0)
+                other['group'] = 'account' if group == 'access' else 'access'
+                self.assertTrue(canary.record(other,self.sent.append)['red'])
+                good = run([json.dumps({'step':own_step,'ok':True})],0)
+                good['group'] = group
+                self.assertFalse(canary.record(good,self.sent.append)['red'])
 
     def test_parallel_units_keep_both_histories_and_failure_counts(self):
         context = multiprocessing.get_context('fork')
