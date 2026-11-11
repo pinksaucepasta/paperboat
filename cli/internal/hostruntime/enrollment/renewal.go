@@ -215,7 +215,7 @@ func (s *RenewingTokenSource) token(ctx context.Context, force bool) (token stri
 	if err := writeIdentity(s.config.StateRoot, renewed); err != nil {
 		return "", unavailableEnrollment(err)
 	}
-	retry.succeed()
+	retry.succeed(s.config.StateRoot)
 	return renewed.Credential, nil
 }
 
