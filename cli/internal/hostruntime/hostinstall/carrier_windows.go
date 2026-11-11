@@ -283,16 +283,16 @@ func writeWindowsCarrierDescriptors(c CarrierConfig, active bool) error {
 	return atomicfile.Write(carrierConfigPath(c.Instance), body, options)
 }
 
-// carrierCallerVerifies decides what a caller of verifyCarrierNative does. The account's own carrier cannot read the
-// SYSTEM/Administrators-only definition and pin, and verifying its own image proves nothing to itself: nothing to
-// verify. SYSTEM and an elevated administrator (both can read them) verify the pin and the definition. Every other
-// account is refused.
+// carrierCallerVerifies decides what a caller of verifyCarrierNative does. Whoever can read the SYSTEM/Administrators-
+// only definition and pin verifies them and the executable: SYSTEM and any elevated token, the enrolled owner's
+// included (an owner who is an administrator running elevated must not skip the check). The owner's unelevated
+// carrier cannot read them, so it has nothing to verify. Every other account is refused.
 func carrierCallerVerifies(callerSID, ownerSID string, elevated bool) (bool, error) {
-	if callerSID == ownerSID {
-		return false, nil
-	}
 	if callerSID == "S-1-5-18" || elevated {
 		return true, nil
+	}
+	if callerSID == ownerSID {
+		return false, nil
 	}
 	return false, ErrInvalidRequest
 }
