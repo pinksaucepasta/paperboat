@@ -28,8 +28,8 @@ type peerNetworkRegisterBody struct {
 	QUICCertificateFingerprint string `json:"quic_certificate_fingerprint"`
 }
 type peerNetworkConfigBody struct {
-	OperationID          string                             `json:"operation_id"`
-	AdmittedScopes       []peersessions.AdmittedScope       `json:"admitted_scopes,omitempty"`
+	OperationID    string                       `json:"operation_id"`
+	AdmittedScopes []peersessions.AdmittedScope `json:"admitted_scopes,omitempty"`
 	// Endpoints are the engine's own candidate endpoints (ip:port, at most 8; PLAN 3b N5), sent from the first request.
 	Endpoints []string `json:"endpoints,omitempty"`
 	// Authority names the peer-state semantics the daemon understands: "" (every scope expires with the document)
