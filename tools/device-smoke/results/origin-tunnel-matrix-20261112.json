@@ -226,5 +226,84 @@
    "result": "failed",
    "detail": "\"StatusCode.UNAVAILABLE Received http2 header with status: 502\""
   }
- ]
+ ],
+ "windows": {
+  "platform": "W: winpool-3 (Windows Server 2025 hosted runner), pb dev-36f2a7735; the app cells only (the agent dialer and upload path differ per OS; the Docker proxies do not run on Windows)",
+  "tunnel": [
+   {
+    "server": "app",
+    "mode": "direct-http/C1-forwarded",
+    "result": "ok",
+    "detail": "status 200 host=tunnel-host.example.test xfp=https xfh=tunnel-host.example.test xff=198.51.100.7"
+   },
+   {
+    "server": "app",
+    "mode": "direct-http/F-force-ssl",
+    "result": "ok",
+    "detail": "status 200"
+   },
+   {
+    "server": "app",
+    "mode": "direct-http/C8-sse",
+    "result": "ok",
+    "detail": "first event after 247 ms"
+   },
+   {
+    "server": "app",
+    "mode": "direct-http/C12-range",
+    "result": "ok",
+    "detail": "status 206, 100 bytes"
+   },
+   {
+    "server": "app",
+    "mode": "direct-http/C13-expect",
+    "result": "ok",
+    "detail": "status 200"
+   },
+   {
+    "server": "app",
+    "mode": "direct-http/C11-slow",
+    "result": "ok",
+    "detail": "status 200 after 45 s"
+   }
+  ],
+  "preview": [
+   {
+    "server": "app",
+    "mode": "direct-http/C1-forwarded",
+    "result": "ok",
+    "detail": "status 200 host=tunnel-host.example.test xfp=https xfh=tunnel-host.example.test xff=198.51.100.7"
+   },
+   {
+    "server": "app",
+    "mode": "direct-http/F-force-ssl",
+    "result": "ok",
+    "detail": "status 200"
+   },
+   {
+    "server": "app",
+    "mode": "direct-http/C8-sse",
+    "result": "ok",
+    "detail": "first event after 246 ms"
+   },
+   {
+    "server": "app",
+    "mode": "direct-http/C12-range",
+    "result": "ok",
+    "detail": "status 206, 100 bytes"
+   },
+   {
+    "server": "app",
+    "mode": "direct-http/C13-expect",
+    "result": "ok",
+    "detail": "status 200"
+   },
+   {
+    "server": "app",
+    "mode": "direct-http/C11-slow",
+    "result": "ok",
+    "detail": "status 200 after 45 s"
+   }
+  ]
+ }
 }

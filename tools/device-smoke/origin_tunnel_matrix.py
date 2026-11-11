@@ -26,6 +26,8 @@ import sys
 import time
 import http.client
 
+import winhost
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 MATRIX = os.path.join(HERE, 'origin_proxy_matrix')
 GRPC_SERVER = r'''
@@ -92,7 +94,10 @@ class Lab:
         return self.on_host(prefix + shlex.join(argv), timeout, check)
 
     def pb(self, *argv, timeout=300):
-        done = self.inside(self.args.pb, *argv, '--json', timeout=timeout, check=False)
+        if self.args.windows:  # pb.exe on the Windows device (PB_SMOKE_WINDOWS_PB and SMOKE_WINDOWS_SSH select it)
+            done = winhost.pb_path().run_remote([*argv, '--json'], timeout=timeout)
+        else:
+            done = self.inside(self.args.pb, *argv, '--json', timeout=timeout, check=False)
         try:
             value = json.loads(done.stdout)
         except ValueError:
@@ -171,7 +176,23 @@ class Lab:
         self.cell(server, mode + '/C13-expect', 'ok' if done.stdout == b'200' else 'app_refuses', 'status %s' % done.stdout.decode())
 
     # --- setup ----------------------------------------------------------------------------------------------
+    def stage_windows(self):
+        """The app of origin_proxy_matrix on the device itself (127.0.0.1:9000): the agent's dialer and upload path are the
+        parts that differ per OS, so Windows runs the app cells, not the Docker proxies."""
+        device = winhost.device()
+        path = 'C:\\Users\\Public\\small-app.py'
+        with open(os.path.join(MATRIX, 'app.py'), 'rb') as app:
+            device.write_bytes(path, app.read())
+        device.ps('start app', "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*small-app.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }\n"
+                  "$py=(Get-Command python).Source\n"
+                  # created by WMI, outside the SSH session, which ends its own processes when it closes (see winhost.START)
+                  "$r=Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=('\"'+$py+'\" '+$req.path)}\n"
+                  "if($r.ReturnValue -ne 0){throw ('process create failed: '+$r.ReturnValue)}", path=path)
+        time.sleep(3)
+
     def stage(self):
+        if self.args.windows:
+            return self.stage_windows()
         self.on_host('rm -rf ~/small-matrix && mkdir -p ~/small-matrix')
         subprocess.run(['scp', '-q', '-r', '-o', 'BatchMode=yes', MATRIX, '%s:small-matrix/' % self.args.host], check=True)
         self.docker('rm', '-f', 'small-app', check=False)
@@ -250,9 +271,10 @@ class Lab:
             response.read()
             conn.close()
             self.cell('app', 'direct-http/C11-slow', 'ok' if response.status == 200 else 'wrong', 'status %s after %d s' % (response.status, time.time() - started))
-        for proxy in self.args.only:
+        for proxy in ([] if self.args.windows else self.args.only):
             self.proxy_cells(proxy, base)
-        self.grpc_cells()
+        if not (self.args.windows or self.args.no_grpc):
+            self.grpc_cells()
 
     def proxy_cells(self, proxy, base):
         name = 'small-%s-%s' % (self.suffix, proxy)
@@ -319,6 +341,11 @@ class Lab:
     def cleanup(self):
         for name in self.tunnels:
             try:
+                if self.args.windows:
+                    preview = winhost.pb_path().run_remote(['tunnel', 'delete', name, '--json'], timeout=120)
+                    token = json.loads(preview.stdout)['data']['confirmation_token']
+                    winhost.pb_path().run_remote(['tunnel', 'delete', name, '--json', '--confirm', token], timeout=120)
+                    continue
                 preview = self.inside(self.args.pb, 'tunnel', 'delete', name, '--json', check=False)
                 token = json.loads(preview.stdout)['data']['confirmation_token']
                 self.inside(self.args.pb, 'tunnel', 'delete', name, '--json', '--confirm', token, check=False)
@@ -329,6 +356,9 @@ class Lab:
                 self.inside(self.args.pb, 'preview', 'stop', identity, '--json', check=False, timeout=120)
             except Exception as exc:
                 print('cleanup: preview %s not stopped: %s' % (identity, exc), file=sys.stderr)
+        if self.args.windows:
+            winhost.device().ps('stop app', "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*small-app.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }")
+            return
         for name in self.containers:
             self.docker('rm', '-f', name, check=False)
 
@@ -344,8 +374,10 @@ def table(cells):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--host', required=True, help='ssh alias of the Docker host that runs the machine container')
-    parser.add_argument('--container', required=True, help='the paired machine container (prefix small-)')
+    parser.add_argument('--windows', action='store_true', help='drive the Windows device selected by SMOKE_WINDOWS_SSH and PB_SMOKE_WINDOWS_PB: the app cells only')
+    parser.add_argument('--no-grpc', action='store_true')
+    parser.add_argument('--host', default='', help='ssh alias of the Docker host that runs the machine container (not with --windows)')
+    parser.add_argument('--container', default='', help='the paired machine container (prefix small-; not with --windows)')
     parser.add_argument('--pb', default='/home/pbt/.local/bin/pb', help='pb inside the machine container')
     parser.add_argument('--only', nargs='*', default=['caddy-certs', 'caddy-internal', 'traefik', 'nginx', 'httpd'])
     parser.add_argument('--slow', type=int, default=45, help='seconds of first-byte delay for the C11 cell (0 skips)')
@@ -353,6 +385,8 @@ def main():
     parser.add_argument('--out', required=True)
     parser.add_argument('--keep', action='store_true')
     args = parser.parse_args()
+    if not args.windows and not (args.host and args.container):
+        parser.error('--host and --container are required unless --windows')
     lab = Lab(args)
     try:
         lab.run()
