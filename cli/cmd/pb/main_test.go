@@ -249,6 +249,30 @@ func TestUpdateWithProgressHonorsCancellation(t *testing.T) {
 	}
 }
 
+// A control call that ignores its context must not hold `pb update` past the command's deadline.
+func TestUpdateWithProgressReturnsAtTheDeadlineWhenTheCallIgnoresIt(t *testing.T) {
+	command, _, err := newRootCommand().Find([]string{"update"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command.SetErr(io.Discard)
+	original := updateCancelGrace
+	updateCancelGrace = 50 * time.Millisecond
+	t.Cleanup(func() { updateCancelGrace = original })
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	release := make(chan struct{})
+	defer close(release)
+	began := time.Now()
+	_, err = updateWithProgress(command, ctx, func(context.Context) (updated.ControlResponse, error) {
+		<-release
+		return updated.ControlResponse{}, nil
+	})
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(began) > 5*time.Second {
+		t.Fatalf("error = %v after %v, want the deadline within the grace", err, time.Since(began))
+	}
+}
+
 func TestUpdateReturnsStagedResultSoCanonicalCallerCanExit(t *testing.T) {
 	response := updated.ControlResponse{Version: "2026.08.27.50", Pending: true}
 	result := updateCommandResult("2026.08.27.46", response, nil)

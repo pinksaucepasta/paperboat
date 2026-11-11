@@ -411,6 +411,9 @@ func updateCommandResult(previousVersion string, response updated.ControlRespons
 
 var updateProgressInterval = 5 * time.Second
 
+// updateCancelGrace is how long a canceled or expired update waits for the control call to report its own cause.
+var updateCancelGrace = 2 * time.Second
+
 // updateWithProgress keeps the control protocol single-response and bounded,
 // while making the deliberately long health-monitoring hold visible to human
 // users. JSON mode remains machine-clean: progress is omitted entirely.
@@ -443,8 +446,14 @@ func updateWithProgress(command *cobra.Command, ctx context.Context, update func
 		case result := <-resultCh:
 			return result.response, result.err
 		case <-ctx.Done():
-			finished := <-resultCh
-			return finished.response, errors.Join(finished.err, ctx.Err())
+			// The control client closes its connection on cancellation, so its result follows at once; a call
+			// that does not is abandoned after the grace instead of holding the CLI past its deadline.
+			select {
+			case finished := <-resultCh:
+				return finished.response, errors.Join(finished.err, ctx.Err())
+			case <-time.After(updateCancelGrace):
+				return updated.ControlResponse{}, ctx.Err()
+			}
 		case <-ticker.C:
 			fmt.Fprintf(command.ErrOrStderr(), "Update is still in progress (%s)...\n", time.Since(started).Round(time.Second))
 		}
