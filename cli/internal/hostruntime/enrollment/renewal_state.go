@@ -17,8 +17,8 @@ import (
 
 // A renewal the server refuses with 401 will be refused again: the machine was removed or its credential revoked
 // (prod 2026-11-11: six orphan daemons retried every ~65 s for hours). The refusal is recorded against the identity
-// it was for, and no renewal is attempted for that identity again; a new enrollment writes a new credential and
-// clears it by itself. Transient failures back off, doubling with jitter to a cap (tailscaled util/backoff; the
+// it was for, and this process attempts no renewal for that identity again; a new enrollment writes a new credential
+// and clears it by itself, and a restarted daemon makes one new attempt (see renewalRefused). Transient failures back off, doubling with jitter to a cap (tailscaled util/backoff; the
 // shared schedule in shared/backoff), so a down control plane is not hit by every consumer on every call.
 const (
 	renewalRefusedFile    = "renewal-refused.json"
@@ -55,30 +55,37 @@ func recordRenewalRefusal(root string, identity RuntimeIdentity, now time.Time) 
 	}
 }
 
-// renewalRefused reports whether the control plane already refused a renewal for exactly this identity.
+// renewalRefused reports whether this process was already refused a renewal for exactly this identity. Only the
+// process remembers it: a 401 can also come from a proof the server judged expired (a wrong clock), which a daemon
+// restart (or the clock being fixed) must be able to recover from, so the next process makes one new attempt.
 func renewalRefused(root string, identity RuntimeIdentity) bool {
-	want := refusalFor(identity)
-	if recorded, ok := refusals.Load(root); ok {
-		got := recorded.(renewalRefusal)
-		return got.HelperID == want.HelperID && got.CredentialSHA256 == want.CredentialSHA256
+	recorded, ok := refusals.Load(root)
+	if !ok {
+		return false
+	}
+	want, got := refusalFor(identity), recorded.(renewalRefusal)
+	return got.HelperID == want.HelperID && got.CredentialSHA256 == want.CredentialSHA256
+}
+
+func clearRenewalRefusal(root string) {
+	refusals.Delete(root)
+	_ = os.Remove(filepath.Join(root, renewalRefusedFile))
+}
+
+// RenewalRefused is what pb doctor asks (from another process, so it reads the file): the control plane refused this
+// machine's renewal and the daemon stopped trying, so the machine must be enrolled again.
+func RenewalRefused(root string, now time.Time) bool {
+	identity, err := LoadRuntimeIdentityForRenewal(root, now)
+	if err != nil {
+		return false
 	}
 	body, err := os.ReadFile(filepath.Join(root, renewalRefusedFile))
 	if err != nil || len(body) > 4096 {
 		return false
 	}
 	var got renewalRefusal
-	if json.Unmarshal(body, &got) != nil {
-		return false
-	}
-	refusals.Store(root, got)
-	return got.HelperID == want.HelperID && got.CredentialSHA256 == want.CredentialSHA256
-}
-
-// RenewalRefused is what pb doctor asks: the control plane refused this machine's renewal and the daemon stopped
-// trying, so the machine must be enrolled again.
-func RenewalRefused(root string, now time.Time) bool {
-	identity, err := LoadRuntimeIdentityForRenewal(root, now)
-	return err == nil && renewalRefused(root, identity)
+	want := refusalFor(identity)
+	return json.Unmarshal(body, &got) == nil && got.HelperID == want.HelperID && got.CredentialSHA256 == want.CredentialSHA256
 }
 
 // refusedRenewalError is the observed 401, returned without a request so callers classify it as before (a removed
@@ -120,7 +127,8 @@ func (b *renewalBackoff) fail(err error) {
 	}
 }
 
-func (b *renewalBackoff) succeed() {
+func (b *renewalBackoff) succeed(root string) {
+	clearRenewalRefusal(root)
 	b.mu.Lock()
 	b.failures, b.last, b.retryAt = 0, nil, time.Time{}
 	b.mu.Unlock()
