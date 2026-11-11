@@ -27,7 +27,10 @@ func productionRecordingControl(controlURL *url.URL, stateRoot string, transport
 		fetcher := &recordingcontrol.Fetcher{ServerURL: strings.TrimSuffix(controlURL.String(), "/"),
 			Client: &http.Client{Transport: errorreport.TransportOperation(transport, controlURL.String(), "recording_policy"), CheckRedirect: rejectRuntimePolicyRedirect},
 			Tokens: tokens, Proofs: enrollment.ProofSource{StateRoot: stateRoot}, OperationID: operationID}
+		// Segments go to the team's own bucket, a host the control transport does not speak to.
+		bucket := &http.Client{Transport: http.DefaultTransport, CheckRedirect: rejectRuntimePolicyRedirect}
 		return recordingcontrol.New(recordingcontrol.Config{Sessions: sessions, Policies: policies, Fetch: fetcher.Fetch,
+			Archive: fetcher, Put: recordingcontrol.PutObject(bucket),
 			Events: events.Subscribe(machineevents.TopicRecordingPolicy), Audit: audit,
 			LedgerPath: filepath.Join(stateRoot, "runtime", "recording-reports.json")})
 	}
