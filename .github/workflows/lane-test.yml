@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       modules:
-        description: 'Modules to test: shared cli relay tunnel helper server console sdk/go smoke (empty = all)'
+        description: 'Modules to test: shared cli relay tunnel helper server console sdk/go smoke e2e (empty = all)'
         default: ''
       run:
         description: 'go test -run pattern (empty = all tests)'
@@ -39,22 +39,24 @@ jobs:
       go: ${{ steps.plan.outputs.go }}
       console: ${{ steps.plan.outputs.console }}
       smoke: ${{ steps.plan.outputs.smoke }}
+      e2e: ${{ steps.plan.outputs.e2e }}
     steps:
       - id: plan
         env:
           MODULES: ${{ inputs.modules }}
         run: |
-          all="shared cli relay tunnel helper server console sdk/go smoke"
+          all="shared cli relay tunnel helper server console sdk/go smoke e2e"
           want="${MODULES:-$all}"
           for m in $want; do
             case " $all " in *" $m "*) ;; *) echo "unknown module '$m' (modules: $all)" >&2; exit 1 ;; esac
           done
           # server and tunnel also run their PostgreSQL suites (a service container below).
-          go=$(for m in $want; do [ "$m" = console ] || [ "$m" = smoke ] || echo "$m"; done |
+          go=$(for m in $want; do [ "$m" = console ] || [ "$m" = smoke ] || [ "$m" = e2e ] || echo "$m"; done |
             jq -R '{module: ., pg: (. == "server" or . == "tunnel")}' | jq -sc .)
           echo "go=$go" >> "$GITHUB_OUTPUT"
           case " $want " in *" console "*) echo "console=true" ;; *) echo "console=false" ;; esac >> "$GITHUB_OUTPUT"
           case " $want " in *" smoke "*) echo "smoke=true" ;; *) echo "smoke=false" ;; esac >> "$GITHUB_OUTPUT"
+          case " $want " in *" e2e "*) echo "e2e=true" ;; *) echo "e2e=false" ;; esac >> "$GITHUB_OUTPUT"
 
   go:
     name: go ${{ matrix.module }}
@@ -277,6 +279,15 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: python3 -m unittest discover -s tools/device-smoke -p 'test_*.py' -v
       - run: python3 -m unittest discover -s tools/quick-update -p 'test_*.py' -v
+
+  # The core end-to-end (e2e.yml core job): real server, two real pb daemons, a server restart.
+  e2e:
+    name: e2e
+    needs: plan
+    if: needs.plan.outputs.e2e == 'true'
+    uses: ./.github/workflows/e2e.yml
+    with:
+      core_only: true
 
   sdk-macos:
     name: SDK macOS

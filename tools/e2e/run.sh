@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# CI end-to-end (R-02): the real server services (server/internal/httpapi TestE2EServe, identity provider
-# faked) on PostgreSQL, two systemd containers each running a real `pb` that pairs, then the stages in
-# E2E_STAGES (pair exec send preview multi; multi = 3 server instances behind TestE2EProxy, one SIGKILLed). Any failing step fails the run.
+# CI end-to-end, 3 server instances (e2e.yml multi): the real server services (server/internal/app TestE2EServe,
+# identity provider faked) on PostgreSQL, systemd containers each running a real `pb` that pairs, then the stages in
+# E2E_STAGES (pair exec multi; multi = 3 server instances behind TestE2EProxy, one SIGKILLed). Any failing step fails
+# the run. Every other core path is TestE2ECore (e2e.yml core).
 #   PAPERBOAT_TEST_DATABASE_DSN  isolated *_test database (CI service container)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -40,7 +41,7 @@ instance() { # n [extra env]: one server process; instance 1 seeds the account a
 }
 if has multi; then
   key=e2e:$(head -c32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=')
-  multi=(PAPERBOAT_E2E_MINT_KEY=$key)
+  multi=(PAPERBOAT_E2E_MINT_KEY=$key PAPERBOAT_E2E_INSTANCES=3)
   instance 1 "${multi[@]}" PAPERBOAT_E2E_INTERNAL=127.0.0.1:18081
 else
   instance 1 PAPERBOAT_E2E_LISTEN=0.0.0.0:$port PAPERBOAT_E2E_TLS_CERT=$work/tls.pem PAPERBOAT_E2E_TLS_KEY=$work/tls.key
@@ -70,8 +71,7 @@ for name in "${machines[@]}"; do
   docker exec $c bash -c 'chown pbt:pbt /home/pbt/pb; chmod 755 /home/pbt/pb'
   X="docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 -w /home/pbt $c"
   $X ./pb install >/dev/null
-  { if [ -n "${E2E_BREAK:-}" ]; then printf bad-token; else
-      python3 -c 'import json,sys;sys.stdout.write(json.load(open(sys.argv[1]))["e2e-"+sys.argv[2]])' "$work/tokens.json" $name; fi; } |
+  python3 -c 'import json,sys;sys.stdout.write(json.load(open(sys.argv[1]))["e2e-"+sys.argv[2]])' "$work/tokens.json" $name |
     ${X/docker exec/docker exec -i} bash -c 'umask 077; cat >token'
   for try in 1 2 3 4 5 6; do
     out=$($X .local/bin/pb pair --enrollment-token-file /home/pbt/token --name e2e-$name --json || true)
@@ -89,20 +89,6 @@ if has exec; then
   step "exec"
   [ "$(pbx e2e-a exec e2e-b -- echo e2e-ok)" = e2e-ok ]
   echo "stage exec: PASS"
-fi
-if has send; then
-  step "send"
-  docker exec -u pbt e2e-a bash -c 'echo e2e-file >/home/pbt/e2e.txt'
-  # The receiver reports its capabilities a few seconds after pairing; send refuses until then.
-  for try in $(seq 12); do pbx e2e-a send /home/pbt/e2e.txt --to e2e-b && break; [ $try -lt 12 ] || exit 1; sleep 5; done
-  inbox=$(pbx e2e-b inbox path)
-  for _ in $(seq 20); do docker exec -u pbt e2e-b grep -rq e2e-file "$inbox" && break; sleep 1; done
-  docker exec -u pbt e2e-b grep -rq e2e-file "$inbox"
-  echo "stage send: PASS"
-fi
-if has preview; then
-  step "preview"
-  echo "preview stage not implemented" >&2; exit 1
 fi
 if has multi; then
   step "multi"

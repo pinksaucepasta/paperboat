@@ -3,7 +3,7 @@
 # Keep it short and reviewed: a new line needs the job that really executes the test, not "later".
 \b(windows|darwin|macOS)\b.*\b(only|required|requires)\b|\bonly on (windows|darwin|macOS)\b	cross-platform.yml (windows-latest, macos-latest)
 TestLiveTunnelEdgeProtocols\b	deploy check on a live published tunnel (S1-09: PAPERBOAT_LIVE_EDGE_URL, run per edge)
-server/internal/app TestE2E(Serve|Proxy)\b	e2e.yml End-to-end job (tools/e2e/run.sh: TestE2EServe every stage, TestE2EProxy in the multi stage; pull requests and r21-e2e* pushes)
+server/internal/app TestE2E(Serve|Proxy|Core)\b|relay/selfhost TestE2ESelfhostNode\b	e2e.yml (End-to-end core: TestE2ECore, which runs TestE2EServe and TestE2ESelfhostNode; multi job: tools/e2e/run.sh with TestE2EServe and TestE2EProxy)
 internal/hostruntime/preview TestPrivateTCPAccessOwnerHelper\b	child process: TestPrivateTCPAccessListenerClosesWhenItsOwnerProcessIsKilled re-execs the test binary to run it (go cli job)
 TestBrowserTerminalDrainMachine: .*run by tunnel/internal/runtime	lane-test.yml go tunnel drain step (child binary of TestBrowserTerminalDrainAcrossUpdates)
 TestActivationHelperTailChild: .*helper process only	lane-test.yml go cli root step (re-exec child of TestActivationHelperHoldsTheLockThroughTheActivationTail)
