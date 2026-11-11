@@ -1,0 +1,5 @@
+{"data":{"automatic_updates":true,"local_time":"04:00","time_zone":"UTC","next_maintenance_at":"2026-11-12T04:00:00Z"},"ok":true,"schema_version":"1.0"}
+---STATUS---
+{"data":{"settings":{"schema":"paperboat.update-settings/v1","enabled":true,"local_time":"04:00"},"next_maintenance_at":"2026-11-12T04:00:00Z","latest_version":"2026.11.10.9","update_available":false,"cli_version":"2026.11.10.9","runtime_version":"2026.11.10.9","runtime_available":true,"runtime_state":"ready","activation_pending":false,"last_check":"2026-11-11T07:23:03.413643Z","next_check":"2026-11-11T13:49:42.654699778Z"},"ok":true,"schema_version":"1.0"}
+---CHECK---
+{"data":{"installed_version":"2026.11.10.9","latest_version":"2026.11.10.10","update_available":true,"verified":true},"ok":true,"schema_version":"1.0"}

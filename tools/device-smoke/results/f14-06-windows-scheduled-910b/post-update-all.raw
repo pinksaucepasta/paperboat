@@ -1,0 +1,7 @@
+{"data":{"automatic_updates":true,"local_time":"04:00","time_zone":"UTC","next_maintenance_at":"2026-11-12T04:00:00Z"},"ok":true,"schema_version":"1.0"}
+---STATUS---
+{"data":{"settings":{"schema":"paperboat.update-settings/v1","enabled":true,"local_time":"04:00"},"next_maintenance_at":"2026-11-12T04:00:00Z","latest_version":"2026.11.10.10","update_available":false,"cli_version":"2026.11.10.10","runtime_version":"2026.11.10.10","runtime_available":true,"runtime_state":"ready","activation_pending":false,"last_check":"2026-11-11T07:41:08.3854438Z","next_check":"2026-11-11T12:10:37.082431145Z"},"ok":true,"schema_version":"1.0"}
+---CHECK---
+{"data":{"installed_version":"2026.11.10.10","latest_version":"2026.11.10.10","update_available":false,"verified":true},"ok":true,"schema_version":"1.0"}
+---DOWNLOAD---
+{"data":{"schema":"paperboat.updated/v1","status":"ok","version":"2026.11.10.10","updated":false,"observation":{"CheckedAt":"2026-11-11T07:41:23.3472089Z","NextCheckAt":"2026-11-11T16:14:27.488256374Z","Version":"2026.11.10.10","Updated":false,"Failure":"","Failures":0},"transaction":{"updated_at":"0001-01-01T00:00:00Z","health_deadline":"0001-01-01T00:00:00Z"},"settings":{"schema":"paperboat.update-settings/v1","enabled":true,"local_time":"04:00"},"next_maintenance_at":"2026-11-12T04:00:00Z"},"ok":true,"schema_version":"1.0"}

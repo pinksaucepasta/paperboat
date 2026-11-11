@@ -1,0 +1,2 @@
+doctor gate: tolerated the busy-port warning (the Windows HTTP service, HTTP.sys PID 4, owns port 80/443 on this runner: browser URLs are off by the host, not by Paperboat)
+{"check": "update-scheduled", "status": "PASS", "from": "2026.11.10.9", "to": "2026.11.10.10", "disabled_stayed_put": true, "configured_time": "07:30", "disabled_time": "07:26", "seconds_after_configured_time": 33.1, "next_maintenance_at": "2026-11-12T07:30:00Z", "settings_restored": true, "enrollment_preserved": true}

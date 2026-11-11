@@ -1,0 +1,2 @@
+PB_SMOKE_WINDOWS_PB=C:\Program Files\Paperboat\users\ue655ce475da61ffc2e916d1d\bin\pb.exe SMOKE_WINDOWS_SSH=winpool-6
+-rw-rw-r-- 1 ubuntu ubuntu 8197 Nov 11 12:44 /tmp/opencode/hop910b-main/tools/device-smoke/update_scheduled.py

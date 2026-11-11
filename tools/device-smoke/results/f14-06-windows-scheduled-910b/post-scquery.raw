@@ -1,0 +1,41 @@
+SERVICE_NAME: PaperboatLocalDaemon-ue655ce475da61ffc2e916d1d
+DISPLAY_NAME: PaperboatLocalDaemon-ue655ce475da61ffc2e916d1d
+        TYPE               : 10  WIN32_OWN_PROCESS  
+        STATE              : 4  RUNNING 
+                                (STOPPABLE, NOT_PAUSABLE, ACCEPTS_SHUTDOWN)
+        WIN32_EXIT_CODE    : 0  (0x0)
+--
+SERVICE_NAME: PaperboatCarrier-ue655ce475da61ffc2e916d1d
+DISPLAY_NAME: PaperboatCarrier-ue655ce475da61ffc2e916d1d
+        TYPE               : 10  WIN32_OWN_PROCESS  
+        STATE              : 4  RUNNING 
+                                (STOPPABLE, NOT_PAUSABLE, ACCEPTS_SHUTDOWN)
+        WIN32_EXIT_CODE    : 0  (0x0)
+--
+SERVICE_NAME: PaperboatHostd-ue655ce475da61ffc2e916d1d
+DISPLAY_NAME: PaperboatHostd-ue655ce475da61ffc2e916d1d
+        TYPE               : 10  WIN32_OWN_PROCESS  
+        STATE              : 4  RUNNING 
+                                (STOPPABLE, NOT_PAUSABLE, ACCEPTS_SHUTDOWN)
+        WIN32_EXIT_CODE    : 0  (0x0)
+--
+SERVICE_NAME: PaperboatUpdated-ue655ce475da61ffc2e916d1d
+DISPLAY_NAME: PaperboatUpdated-ue655ce475da61ffc2e916d1d
+        TYPE               : 10  WIN32_OWN_PROCESS  
+        STATE              : 4  RUNNING 
+                                (STOPPABLE, NOT_PAUSABLE, ACCEPTS_SHUTDOWN)
+        WIN32_EXIT_CODE    : 0  (0x0)
+--
+SERVICE_NAME: PaperboatSessionOwner-ue655ce475da61ffc2e916d1d-23fd6e8971453b3d3f53a4b9d9475b05
+DISPLAY_NAME: PaperboatSessionOwner-ue655ce475da61ffc2e916d1d-23fd6e8971453b3d3f53a4b9d9475b05
+        TYPE               : 10  WIN32_OWN_PROCESS  
+        STATE              : 4  RUNNING 
+                                (STOPPABLE, NOT_PAUSABLE, ACCEPTS_SHUTDOWN)
+        WIN32_EXIT_CODE    : 0  (0x0)
+--
+SERVICE_NAME: PaperboatSshd-ue655ce475da61ffc2e916d1d-23fd6e8971453b3d3f53a4b9d9475b05
+DISPLAY_NAME: Paperboat OpenSSH generation
+        TYPE               : 10  WIN32_OWN_PROCESS  
+        STATE              : 4  RUNNING 
+                                (STOPPABLE, NOT_PAUSABLE, ACCEPTS_SHUTDOWN)
+        WIN32_EXIT_CODE    : 0  (0x0)
