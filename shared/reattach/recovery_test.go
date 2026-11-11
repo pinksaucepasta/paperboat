@@ -60,3 +60,32 @@ func TestBackoffCapsWithoutOverflow(t *testing.T) {
 		t.Fatalf("backoff overflowed: %v", got)
 	}
 }
+
+// A committed chunk after recovery ends the window: the next request has no deadline, and a later failure starts a
+// new one. Without progress the first window stays (repeated failures cannot restart it).
+func TestProgressedEndsTheRecoveryWindow(t *testing.T) {
+	r := New(Policy{Window: time.Hour})
+	first, cancel := r.AfterFailure(t.Context())
+	firstDeadline, ok := first.Deadline()
+	cancel()
+	if !ok {
+		t.Fatal("a failure did not start the window")
+	}
+	again, cancel := r.AfterFailure(t.Context())
+	if deadline, _ := again.Deadline(); !deadline.Equal(firstDeadline) {
+		t.Fatal("a repeated failure restarted the window")
+	}
+	cancel()
+	r.Progressed()
+	healthy, cancel := r.RequestContext(t.Context())
+	if _, ok := healthy.Deadline(); ok {
+		t.Fatal("progress after recovery left the old deadline on healthy requests")
+	}
+	cancel()
+	time.Sleep(time.Millisecond)
+	next, cancel := r.AfterFailure(t.Context())
+	defer cancel()
+	if deadline, ok := next.Deadline(); !ok || !deadline.After(firstDeadline) {
+		t.Fatal("a failure after progress did not start a new window")
+	}
+}

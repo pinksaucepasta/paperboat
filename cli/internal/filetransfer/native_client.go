@@ -71,6 +71,7 @@ func (c *Client) uploadNative(ctx context.Context, manifest Manifest, source Sou
 			committed, err = c.patchNative(requestCtx, manifest.TransferID, offset, source)
 			if err == nil {
 				requestCancel()
+				state.recovery.Progressed()
 				previous = offset
 				if c.Committed != nil {
 					c.Committed(manifest.TransferID, committed)
@@ -161,8 +162,10 @@ func (c *Client) failedBatch(ctx context.Context, batch Batch, err error) (Batch
 
 // Thirty minutes of signed stability plus the bounded two-minute drain is the
 // longest planned maintenance interruption. The same deadline spans batch RPCs;
-// progress and repeated failures never restart it. Credential expiry is separate.
-const nativeRecoveryWindow = 32 * time.Minute
+// repeated failures never restart it, and a committed chunk ends it: a 1 GiB send at
+// 0.5 MiB/s (a hosted runner, F14-02) outlives any window started by one update.
+// Credential expiry is separate. A var only so tests can shorten it.
+var nativeRecoveryWindow = 32 * time.Minute
 
 type nativeRecoveryKey struct{}
 type nativeRecovery struct {

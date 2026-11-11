@@ -20,7 +20,8 @@ type Policy struct {
 }
 
 // Recovery is owned by one command or connection manager. Successful recovery
-// does not replenish its budget; repeated disconnects cannot restart it.
+// does not replenish its budget; repeated disconnects cannot restart it. Only
+// application progress after recovery (Progressed) ends the window.
 type Recovery struct {
 	mu              sync.Mutex
 	deadline        time.Time
@@ -68,6 +69,16 @@ func (r *Recovery) AfterFailure(ctx context.Context) (context.Context, context.C
 	}
 	r.mu.Unlock()
 	return r.RequestContext(ctx)
+}
+
+// Progressed ends the current window once the connection carried application progress again (a chunk committed): a
+// later failure starts a new window, so a slow but healthy operation is not cut at the first failure plus Window. A
+// connection that keeps failing without progress stays bounded by its first window (prior art: tailscale
+// util/backoff resets on success).
+func (r *Recovery) Progressed() {
+	r.mu.Lock()
+	r.deadline = time.Time{}
+	r.mu.Unlock()
 }
 
 // RequestContext applies an already-started recovery budget. Before transport
