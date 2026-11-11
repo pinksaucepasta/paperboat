@@ -3,6 +3,7 @@ package edgehttp
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -69,6 +70,17 @@ func TestDurableCarrierWebSocketUpgradeTraversesGatewayDuplex(t *testing.T) {
 			connectorDone <- ErrDataCarrierRouteInvalid
 			return
 		}
+		// The upgrade carries the edge's forwarded headers too, one value each, the visitor's claims gone.
+		for name, want := range map[string]string{"X-Forwarded-Proto": "https", "X-Forwarded-Host": "socket.customer.test", "X-Forwarded-Port": "443"} {
+			if got := request.Header.Values(name); len(got) != 1 || got[0] != want {
+				connectorDone <- fmt.Errorf("upgrade %s = %q, want %q", name, got, want)
+				return
+			}
+		}
+		if request.Header.Get("X-Real-IP") != request.Header.Get("X-Forwarded-For") || request.Header.Get("X-Real-IP") == "203.0.113.9" || !strings.HasPrefix(request.Header.Get("Forwarded"), "for=") {
+			connectorDone <- fmt.Errorf("upgrade client address headers = %v", request.Header)
+			return
+		}
 		if _, readErr = io.WriteString(stream, "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\nearly"); readErr != nil {
 			connectorDone <- readErr
 			return
@@ -87,7 +99,7 @@ func TestDurableCarrierWebSocketUpgradeTraversesGatewayDuplex(t *testing.T) {
 	}
 	defer client.Close()
 	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
-	if _, err := io.WriteString(client, "GET /socket HTTP/1.1\r\nHost: socket.customer.test\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: MDEyMzQ1Njc4OWFiY2RlZg==\r\n\r\n"); err != nil {
+	if _, err := io.WriteString(client, "GET /socket HTTP/1.1\r\nHost: socket.customer.test\r\nX-Forwarded-Host: evil.example.test\r\nX-Forwarded-For: 203.0.113.9\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: MDEyMzQ1Njc4OWFiY2RlZg==\r\n\r\n"); err != nil {
 		t.Fatal(err)
 	}
 	reader := bufio.NewReader(client)

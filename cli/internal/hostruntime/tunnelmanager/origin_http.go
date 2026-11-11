@@ -248,7 +248,8 @@ func sanitizeOriginRequestHeaders(header http.Header, preserveWebSocketUpgrade, 
 		if control && keepControlPlane {
 			continue
 		}
-		if control || strings.HasPrefix(lower, "paperboat-") && lower != "paperboat-visitor-assertion" || strings.HasPrefix(lower, "x-forwarded-") && !edgeForwardedHeaders[lower] {
+		forwarded := strings.HasPrefix(lower, "x-forwarded-") || lower == "forwarded" || lower == "x-real-ip"
+		if control || strings.HasPrefix(lower, "paperboat-") && lower != "paperboat-visitor-assertion" || forwarded && !edgeForwardedHeaders[lower] {
 			header.Del(name)
 		}
 	}
@@ -259,10 +260,10 @@ func sanitizeOriginRequestHeaders(header http.Header, preserveWebSocketUpgrade, 
 	}
 }
 
-// edgeForwardedHeaders (with Forwarded and X-Real-IP) are set by the edge from its own connection,
-// replacing whatever the visitor sent. Only the authenticated edge carrier feeds this transport, so
-// they cross the final trust boundary; the rest of X-Forwarded-* (server, prefix) never does.
-var edgeForwardedHeaders = map[string]bool{"x-forwarded-for": true, "x-forwarded-host": true, "x-forwarded-proto": true, "x-forwarded-port": true}
+// edgeForwardedHeaders are the forwarding headers the edge sets from its own connection, replacing
+// whatever the visitor sent. Only the authenticated edge carrier feeds this transport, so exactly these
+// cross the final trust boundary; any other X-Forwarded-* name (server, prefix) is dropped.
+var edgeForwardedHeaders = map[string]bool{"forwarded": true, "x-forwarded-for": true, "x-forwarded-host": true, "x-forwarded-proto": true, "x-forwarded-port": true, "x-real-ip": true}
 
 func sanitizeOriginResponseHeaders(header http.Header, preserveWebSocketUpgrade, keepControlPlane bool) {
 	if header == nil {

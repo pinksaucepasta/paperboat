@@ -89,6 +89,8 @@ func TestGatewayRoutesAttachedPreviewToCarrierTransport(t *testing.T) {
 	request.Header.Set("X-Forwarded-Proto", "http") // a visitor's own claim must not survive
 	request.Header.Set("X-Forwarded-For", "203.0.113.9")
 	request.Header.Set("X-Real-IP", "203.0.113.9")
+	request.Header.Set("X-Forwarded-Host", "evil.example.test")
+	request.Header.Set("Forwarded", "for=203.0.113.9;proto=http;host=evil.example.test")
 	request.Header.Set("X-Forwarded-Port", "8080")
 	response := httptest.NewRecorder()
 	gateway.ServeHTTP(response, request)

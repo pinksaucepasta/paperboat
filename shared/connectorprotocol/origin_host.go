@@ -15,7 +15,8 @@ func OriginHost(address string) string {
 }
 
 // OriginHostIsLoopback reports whether the origin is on this machine: localhost or a loopback IP.
-// Certificate verification guards nothing on such a connection, so only these origins may turn it off.
+// Certificate verification guards little on such a connection, so a route that turns it off for any
+// other origin is allowed only by explicit choice and shows a warning (CLI and tunnel status).
 func OriginHostIsLoopback(address string) bool {
 	host := OriginHost(address)
 	ip := net.ParseIP(host)
