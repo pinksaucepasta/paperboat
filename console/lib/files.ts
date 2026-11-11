@@ -14,7 +14,7 @@ import { resourceId, type OperationOrResource } from "@/lib/tunnels"
  */
 
 /** Which Inbox endpoints the deployed server answers. Flip one when its deploy is logged. */
-export const inboxLive = { content: true, remove: true, send: false, share: false } as const
+export const inboxLive = { content: true, remove: true, send: false } as const
 
 export type InboxFile = {
   id: string

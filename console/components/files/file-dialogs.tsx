@@ -6,13 +6,11 @@ import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { useMachines, useWorkspace, type Machine } from "@/lib/api"
 import { InboxUploadFailed, uploadToInbox } from "@/lib/terminal/inbox-upload"
-import { fileKeys, sendToMachine, shareInboxFile, type InboxFile } from "@/lib/files"
+import { fileKeys, sendToMachine, type InboxFile } from "@/lib/files"
 import { formatBytes } from "@/lib/format"
-import { opensInBrowser } from "@/lib/tunnels"
 import { cn } from "@/lib/utils"
 import { canHostTerminal } from "@/components/terminal/new-terminal"
-import { Starting } from "@/components/tunnels/new-preview"
-import { Choice } from "@/components/tunnels/share-file"
+import { Choice } from "@/components/choice"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -317,83 +315,6 @@ export function SendFilesDialog({
                 void start(chosenFiles)
               }}
             />
-          </>
-        )}
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-const lifetimes = [
-  { hours: 1, label: "1 hour" },
-  { hours: 8, label: "8 hours" },
-  { hours: 24, label: "24 hours" },
-]
-const audiences = { public: "Anyone with the link", private: "Only you" } as const
-
-/** "Share link…" on an Inbox file: the machine serves it at a preview link, nothing re-uploaded. */
-export function ShareInboxFileDialog({
-  machine,
-  file,
-  onClose,
-}: {
-  machine: Pick<Machine, "id" | "alias">
-  file: InboxFile
-  onClose: () => void
-}) {
-  const queryClient = useQueryClient()
-  const [access, setAccess] = useState<keyof typeof audiences>("public")
-  const [hours, setHours] = useState(24)
-  const share = useMutation({
-    mutationFn: () => shareInboxFile(machine.id, file.id, { access, hours }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["previews"] }),
-  })
-  const opens = opensInBrowser({ name: file.name, type: "" })
-  return (
-    <Dialog open onOpenChange={(next) => !next && !share.isPending && onClose()}>
-      <DialogContent className="gap-4 sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Share {file.name}</DialogTitle>
-        </DialogHeader>
-        {share.data ? (
-          <Starting
-            id={share.data}
-            machineName={machine.alias}
-            label={file.name}
-            note={opens ? "Opens in the browser." : "Downloads when opened."}
-            onDone={onClose}
-          />
-        ) : (
-          <>
-            <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-muted-foreground">
-              <span>From {machine.alias} ·</span>
-              <Choice
-                label={audiences[access]}
-                value={access}
-                options={Object.entries(audiences).map(([value, label]) => ({ value, label }))}
-                onChange={(value) => setAccess(value as keyof typeof audiences)}
-              />
-              <span aria-hidden>·</span>
-              <Choice
-                label={lifetimes.find((entry) => entry.hours === hours)!.label}
-                value={String(hours)}
-                options={lifetimes.map((entry) => ({ value: String(entry.hours), label: entry.label }))}
-                onChange={(value) => setHours(Number(value))}
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {opens ? "It opens in the browser." : "It downloads when opened."} {machine.alias} serves it while the
-              link lasts.
-            </p>
-            {share.isError && <p className="text-sm text-destructive">{share.error.message}</p>}
-            <DialogFooter>
-              <Button variant="secondary" size="lg" onClick={onClose} disabled={share.isPending}>
-                Cancel
-              </Button>
-              <Button size="lg" onClick={() => share.mutate()} disabled={share.isPending}>
-                {share.isPending ? "Creating…" : "Create link"}
-              </Button>
-            </DialogFooter>
           </>
         )}
       </DialogContent>

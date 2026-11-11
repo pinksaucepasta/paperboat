@@ -310,15 +310,17 @@ inspects, changes and stops them (`lib/tunnels.ts`, `components/tunnels/`). Gaps
   `console_<random>` session ID).
 - **Tunnel address is not editable.** The server patches only `name`, `access_mode` and `expires_at`
   (`TunnelPatchRequest`); the address is generated, so the console renames the tunnel only.
-- **Share a file (drop.new-style) is UI-only for now.** Previews has "Share a file" and a page-wide
-  drop target. The browser sends `POST /v1/previews/files?workspace=&machine=&name=&access_mode=&expires_at=`
-  with the raw file as the body (streamed through the relay, Idempotency-Key) and expects a
-  `PreviewLease` or operation like `POST /v1/previews`, then polls the preview until `ready`.
-  Needed: the server streams the body to the machine's Paperboat Inbox without storing it (no
-  store-and-forward); the daemon serves that one file as a preview with target
-  `{ scheme: "file", address: <inbox path> }`, inline for HTML, Markdown (rendered), PDF, images and
-  text, `Content-Disposition: attachment` for everything else; the file is deleted from the Inbox
-  when the preview ends; a size limit per workspace. The console labels `file` targets by file name.
+- **Share a file (drop.new-style) is UI-only for now, and lives on the Files page.** Files has "Share a file" next
+  to Send files and "Share link…" in each Inbox row's menu (`components/files/share-dialog.tsx`, one dialog for both);
+  the links are previews, so Previews keeps listing them. Two calls have no server route yet: a new file is sent with
+  `POST /v1/previews/files?workspace=&machine=&name=&access_mode=&expires_at=` (raw body, Idempotency-Key; answers a
+  `PreviewLease` or operation like `POST /v1/previews`), an Inbox file with
+  `POST /v1/machines/{id}/inbox/{file_id}/share` (`access_mode`, `expires_at`). Both need the machine to serve one
+  file as a preview (target `{ scheme: "file", address: <inbox path> }`: inline for HTML, Markdown (rendered), PDF,
+  images and text, `Content-Disposition: attachment` for the rest; deleted from the Inbox when the preview ends), a
+  `file` origin scheme in the preview schema (today `http | https | h2c | unix | tcp`) and a size limit per
+  workspace. Where a new file is hosted is `Destination` in the share dialog: machines now, "Team storage" later as
+  one more kind.
 - **Public hostnames** are the console's name for a route plus, for your own domain, its domain
   binding; adding/removing one does both calls. Removing a domain then a route is two requests,
   so a failure in between leaves the route; the row stays and can be removed again.
@@ -352,8 +354,8 @@ credential per call, bound to the machine, the operation and the file):
   413 `file_too_large`, 503 `machine_unreachable`.
 
 Download and Delete are behind `inboxLive` in `lib/files.ts` until verified against a real machine
-after the server and daemon deploys. Sending files from the console (`SendFilesDialog`, several machines at once) goes over the terminal's encrypted browser connection, not the server: `lib/inbox-upload.ts` opens a shell session per machine only to carry it (no terminal shown, nothing typed), uploads through the terminal's `FilePasteUploader`, and closes the session. It counts toward the plan's browser-terminal limit. Not in the contract (so off):
-Send to another machine, and Share link. Machines record no sender, so there is no From column.
+after the server and daemon deploys. Sending files from the console (`SendFilesDialog`, several machines at once) goes over the terminal's encrypted browser connection, not the server: `lib/inbox-upload.ts` opens a shell session per machine only to carry it (no terminal shown, nothing typed), uploads through the terminal's `FilePasteUploader`, and closes the session. It counts toward the plan's browser-terminal limit. Not in the contract (so off): Send to another machine (`inboxLive.send`).
+Machines record no sender, so there is no From column.
 Team Inbox requests use the existing `GET /v1/team-inbox/requests` and `POST …/{id}/approve|decline`
 (`expected_generation`); they carry account IDs only, so a request reads "A teammate wants to send…".
 

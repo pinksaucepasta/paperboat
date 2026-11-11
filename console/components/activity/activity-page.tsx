@@ -24,7 +24,7 @@ import {
 import { AuditStreams } from "@/components/activity/audit-streams"
 import { SearchField, useListScope, ViewToggle } from "@/components/list-toolbar"
 import { useCurrentMachine } from "@/components/machine-shell"
-import { Choice } from "@/components/tunnels/share-file"
+import { Choice } from "@/components/choice"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"

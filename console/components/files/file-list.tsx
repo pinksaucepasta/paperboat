@@ -22,9 +22,9 @@ import {
   SendFilesButton,
   SendFilesDialog,
   SendToMachineDialog,
-  ShareInboxFileDialog,
 } from "@/components/files/file-dialogs"
 import { DropOverlay, usePageFileDrop } from "@/components/file-drop"
+import { ShareDialog, ShareFileButton } from "@/components/files/share-dialog"
 import { Transfers } from "@/components/files/transfers"
 import { ConfirmAction, SearchField, useListScope } from "@/components/list-toolbar"
 import { MachineChooser } from "@/components/machine-chooser"
@@ -71,7 +71,12 @@ function ChooseMachine() {
     <>
       {drop.over && !drop.files.length && <DropOverlay title="Drop to send" detail="Then choose the machines" />}
       {drop.files.length > 0 && <SendFilesDialog choose files={drop.files} onClose={drop.clear} />}
-      <MachineChooser href={filesOf} action={<SendFilesButton choose />} />
+      <MachineChooser href={filesOf} action={
+          <>
+            <ShareFileButton />
+            <SendFilesButton choose />
+          </>
+        } />
     </>
   )
 }
@@ -142,7 +147,8 @@ function MachineInbox({ machineId }: { machineId: string }) {
             </EmptyMedia>
             <EmptyTitle>{machine ? `${machine.alias}’s Inbox is empty` : "The Inbox is empty"}</EmptyTitle>
           </EmptyHeader>
-          <EmptyContent>
+          <EmptyContent className="flex-row justify-center">
+            <ShareFileButton machine={machine} />
             <SendFilesButton machine={machine} />
           </EmptyContent>
         </Empty>
@@ -162,6 +168,7 @@ function MachineInbox({ machineId }: { machineId: string }) {
                   Delete {selectedRows.length}
                 </Button>
               )}
+              <ShareFileButton machine={machine} />
               <SendFilesButton machine={machine} />
             </div>
           </div>
@@ -270,17 +277,15 @@ function FileRow({
 
   // Each action is answered live by the machine; it appears when its endpoint is deployed.
   const entries: Entry[] = [
-    ...(inboxLive.share
-      ? ([{ kind: "item", label: "Share link…", icon: LinkIcon, onSelect: () => setDialog("share") }] satisfies Entry[])
-      : []),
+    { kind: "item", label: "Share link…", icon: LinkIcon, onSelect: () => setDialog("share") },
     ...(inboxLive.send
       ? ([
           { kind: "item", label: "Send to…", icon: PaperPlaneTiltIcon, onSelect: () => setDialog("send") },
         ] satisfies Entry[])
       : []),
-    ...((inboxLive.share || inboxLive.send) && inboxLive.remove ? ([{ kind: "separator" }] satisfies Entry[]) : []),
     ...(inboxLive.remove
       ? ([
+          { kind: "separator" },
           { kind: "item", label: "Delete", icon: TrashIcon, destructive: true, onSelect: () => setDialog("delete") },
         ] satisfies Entry[])
       : []),
@@ -335,7 +340,7 @@ function FileRow({
       row={rowOf}
       dialogs={
         <>
-          {dialog === "share" && <ShareInboxFileDialog machine={machine} file={file} onClose={() => setDialog(null)} />}
+          {dialog === "share" && <ShareDialog source={{ kind: "inbox", machine, file }} onClose={() => setDialog(null)} />}
           {dialog === "send" && <SendToMachineDialog machine={machine} file={file} onClose={() => setDialog(null)} />}
           <ConfirmAction
             open={dialog === "delete"}

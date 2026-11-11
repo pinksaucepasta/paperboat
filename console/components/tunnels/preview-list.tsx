@@ -12,8 +12,6 @@ import { ListPager } from "@/components/list-pager"
 import { formatRelative } from "@/lib/format"
 import { useNow } from "@/lib/use-now"
 import { NewPreviewButton } from "@/components/tunnels/new-preview"
-import { DropOverlay, usePageFileDrop } from "@/components/file-drop"
-import { ShareFileButton, ShareFileDialog } from "@/components/tunnels/share-file"
 import { ConfirmAction, SearchField, useListScope, ViewToggle } from "@/components/list-toolbar"
 import { useCurrentMachine } from "@/components/machine-shell"
 import { StatusDot } from "@/components/machine-status"
@@ -99,15 +97,6 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
     ...previewsPageQuery({ workspace: ws, ended: view === "ended", q, page: pages.page, machine: scope ?? undefined }),
     enabled: Boolean(workspace),
   })
-  // Dropping a file anywhere on the page shares it (like drop.new).
-  const drop = usePageFileDrop()
-  const dropped = (
-    <>
-      {drop.over && !drop.files.length && <DropOverlay title="Drop to share" detail="You get a link right away." />}
-      {drop.files[0] && <ShareFileDialog machine={machine} file={drop.files[0]} onClose={drop.clear} />}
-    </>
-  )
-
   const shown = query.data?.items ?? []
   // The cookie's workspace: known in the browser before the session is (the prerendered shell).
   const workspaceId = useWorkspaceId()
@@ -126,14 +115,12 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
         </EmptyMedia>
         <EmptyTitle>No previews yet</EmptyTitle>
         <EmptyDescription>
-          Share a file or a dev server on {machine ? machine.alias : "a machine"} at a temporary address.
+          Share a dev server on {machine ? machine.alias : "a machine"} at a temporary address.
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent className="flex-row justify-center">
-        <ShareFileButton machine={machine} />
         <NewPreviewButton machine={machine} />
       </EmptyContent>
-      {dropped}
     </Empty>
   )
   if ((counts.data ? counts.data.live + counts.data.ended === 0 : lastEmpty === 1) && !q) return empty
@@ -141,7 +128,6 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
 
   const list = (
     <section className="flex flex-col gap-3">
-      {dropped}
       {/* On a phone the search takes its own line, so the toggle and buttons keep their size. */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="w-full sm:w-auto sm:max-w-sm sm:flex-1">
@@ -156,7 +142,6 @@ export function PreviewList({ machine: tabMachine }: { machine?: Machine }) {
           ]}
         />
         <div className="ml-auto flex gap-2">
-          <ShareFileButton machine={machine} />
           <NewPreviewButton machine={machine} />
         </div>
       </div>
