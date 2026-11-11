@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	hostservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
@@ -75,7 +76,7 @@ func InstallService(ctx context.Context, serviceName, serviceExecutable, sshdPat
 		return err
 	}
 	defer service.Close()
-	if err := service.SetRecoveryActions(paperboatServiceRecovery, 24*60*60); err != nil {
+	if err := service.SetRecoveryActions(paperboatServiceRecovery, hostservice.WindowsRecoveryResetSeconds); err != nil {
 		return err
 	}
 	if err := service.SetRecoveryActionsOnNonCrashFailures(true); err != nil {
