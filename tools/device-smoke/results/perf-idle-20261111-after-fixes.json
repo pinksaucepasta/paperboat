@@ -1,0 +1,12 @@
+{
+ "check": "perf-idle (PR-03 client half), after the idle CPU fixes",
+ "date": "2026-11-11",
+ "machine": "staging container rel-sco-b (arm64, systemd, 3 paired machines in the account), pb dev-5fdbf3981, idle 600 s starting 5 minutes after the install",
+ "command": "perf_idle.py --seconds 600 --no-budget (run inside the container)",
+ "before": {"cpu_percent": 1.29, "wakeups_per_s": 134.8, "tls_mb_per_hour": 0.0, "see": "perf-idle-20261111.json"},
+ "result": {"status": "PASS", "cpu_percent": 0.47, "wakeups_per_s": 133.5, "tls_mb_per_hour": 0.0, "pb_processes": 8, "seconds": 600},
+ "budget": {"cpu_percent_max": 1, "wakeups_per_s_max": 600, "tls_mb_per_hour_max": 5},
+ "profile": "5-minute pprof of every pb process before the fixes (local profiling build): worker 0.47% (85% reading /proc/net/tcp in the 2 s port watch), carrier 0.31% (80% re-validating peer keys), updater 0.11%, daemon 0.06%",
+ "fixes": ["machineservices: listeners through NETLINK_SOCK_DIAG (21.2 ms -> 51 us per poll with ~4,000 sockets)", "tailnet: remember validated peer keys (317 us -> 33 ns)"],
+ "not_measured": "the server half (<= 0.1 API requests/s per machine) needs a staging stack with exactly one active machine"
+}
