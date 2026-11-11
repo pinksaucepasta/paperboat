@@ -43,7 +43,11 @@ func TestMachineInventoryListsAHundredMachinesWithoutPerRowQueriesOnPostgres(t *
 	if _, err := store.SQL().ExecContext(ctx, `SELECT paperboat.ensure_machine_address_leases($1, ARRAY(SELECT id FROM paperboat.user_machines WHERE user_id=$1))`, owner); err != nil {
 		t.Fatal(err)
 	}
-	list()
+	first, firstElapsed := list()
+	if firstElapsed >= time.Second {
+		t.Fatalf("first inventory of a fresh 100-machine account took %v, want under 1s", firstElapsed)
+	}
+	t.Logf("first list: %d machines in %v", len(first), firstElapsed)
 	items, elapsed := list()
 	if elapsed > 300*time.Millisecond {
 		t.Fatalf("listing 100 machines took %v, want under 300ms", elapsed)
