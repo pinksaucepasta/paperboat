@@ -150,7 +150,10 @@ type Source struct {
 	config   Config
 	endpoint *url.URL
 	client   *http.Client
-	mu       sync.Mutex
+	// renewal admits one renewal or mint at a time (the "Locked" functions run in it); callers wait for it only
+	// as long as their context allows, and a credential still valid serves them meanwhile.
+	renewal chan struct{}
+	mu      sync.Mutex // guards rejected and the recovery backoff below
 	// A credential the control plane no longer accepts is replaced through the
 	// enrolled machine identity; failures back off so a revoked machine does
 	// not hammer the control plane.
@@ -197,19 +200,46 @@ func NewSource(config Config) (*Source, error) {
 	if config.OperationID == nil {
 		config.OperationID = randomOperationID
 	}
-	return &Source{config: config, endpoint: endpoint, client: &http.Client{Transport: errorreport.TransportOperation(config.Transport, endpoint.String(), "machine_control"), Timeout: config.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return errControlRedirect }}}, nil
+	return &Source{config: config, endpoint: endpoint, client: &http.Client{Transport: errorreport.TransportOperation(config.Transport, endpoint.String(), "machine_control"), Timeout: config.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return errControlRedirect }}, renewal: make(chan struct{}, 1)}, nil
 }
 
 func (s *Source) Token(ctx context.Context) (string, error) {
 	if s == nil || ctx == nil {
 		return "", ErrInvalid
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	store, err := identity.Open(identity.Config{StateRoot: s.config.StateRoot})
 	if err != nil {
 		return "", unavailable(err)
 	}
+	now := s.config.Clock().UTC()
+	current, err := store.MachineControl(now, 0)
+	s.mu.Lock()
+	usable := err == nil && current.Credential != s.rejected && current.ExpiresAt.After(now)
+	s.mu.Unlock()
+	if usable && current.ExpiresAt.After(now.Add(s.config.RenewBefore)) {
+		return current.Credential, nil
+	}
+	// One renewal at a time. A slow renewal used to hold every caller, even one with a valid credential, for up to
+	// the request timeout, beyond its context (audit A P2-8).
+	select {
+	case s.renewal <- struct{}{}:
+	default:
+		if usable {
+			return current.Credential, nil
+		}
+		select {
+		case s.renewal <- struct{}{}:
+		case <-ctx.Done():
+			return "", unavailable(ctx.Err())
+		}
+	}
+	defer func() { <-s.renewal }()
+	return s.tokenLocked(ctx, store)
+}
+
+// tokenLocked renews or recovers the credential in the renewal slot, from the state on disk now: a renewal that
+// finished while this caller waited has already saved its credential.
+func (s *Source) tokenLocked(ctx context.Context, store *identity.Store) (string, error) {
 	now := s.config.Clock().UTC()
 	// Renewal must authenticate with a credential that is valid now. The
 	// renewal window is applied below; an expiry grace period here could send
@@ -221,7 +251,10 @@ func (s *Source) Token(ctx context.Context) (string, error) {
 		}
 		return "", unavailable(err)
 	}
-	if current.Credential == s.rejected {
+	s.mu.Lock()
+	rejected := current.Credential == s.rejected
+	s.mu.Unlock()
+	if rejected {
 		return s.recoverLocked(ctx, store)
 	}
 	if current.ExpiresAt.After(now.Add(s.config.RenewBefore)) {
@@ -314,8 +347,12 @@ func (s *Source) EnsureInitial(ctx context.Context) (string, error) {
 	if s == nil || ctx == nil {
 		return "", ErrInvalid
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	select {
+	case s.renewal <- struct{}{}:
+	case <-ctx.Done():
+		return "", unavailable(ctx.Err())
+	}
+	defer func() { <-s.renewal }()
 	store, err := identity.Open(identity.Config{StateRoot: s.config.StateRoot})
 	if err != nil {
 		return "", unavailable(err)
@@ -333,10 +370,15 @@ func (s *Source) EnsureInitial(ctx context.Context) (string, error) {
 // a failed or backed-off recovery reports ErrInvalid.
 func (s *Source) recoverLocked(ctx context.Context, store *identity.Store) (string, error) {
 	now := s.config.Clock().UTC()
-	if now.Before(s.recoverAfter) {
+	s.mu.Lock()
+	backingOff := now.Before(s.recoverAfter)
+	s.mu.Unlock()
+	if backingOff {
 		return "", ErrInvalid
 	}
 	token, err := s.mintInitialLocked(ctx, store, true)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err != nil {
 		if s.recoverDelay = 2 * s.recoverDelay; s.recoverDelay < recoveryBackoffStart {
 			s.recoverDelay = recoveryBackoffStart

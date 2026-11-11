@@ -2,6 +2,7 @@ package machinecontrol
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -640,5 +641,50 @@ func TestRefusedCredentialRecoversAtOnceThroughProofRenewal(t *testing.T) {
 	}
 	if again, err := f.source.Token(t.Context()); err != nil || again != token || *f.initial != 2 {
 		t.Fatalf("the recovered credential was not kept: err=%v mints=%d", err, *f.initial)
+	}
+}
+
+// One slow renewal must not hold every caller (audit A P2-8): while it runs, a caller is served the credential that
+// is still valid, and none waits past its own context.
+func TestSlowRenewalDoesNotHoldOtherCallers(t *testing.T) {
+	now := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	root := filepath.Join(t.TempDir(), "runtime")
+	store, err := identity.Open(identity.Config{StateRoot: root, Random: bytes.NewReader(bytes.Repeat([]byte{5}, 32))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := store.Current()
+	if err := store.SaveRegistration(identity.Registration{ServerURL: "https://unused.test", MachineID: "mch_1", EnvironmentID: "env_1", PublicKeyID: key.ID, PublicIdentityKey: base64.RawURLEncoding.EncodeToString(key.Public()), InboxPath: filepath.Join(root, "inbox"), InstallationGeneration: 2, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	oldToken := strings.Repeat("o", 40)
+	if err := store.SaveMachineControl(identity.MachineControl{MachineID: "mch_1", EnvironmentID: "env_1", InstallationGeneration: 2, Credential: oldToken, ExpiresAt: now.Add(time.Minute), KeyID: key.ID}); err != nil {
+		t.Fatal(err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(entered)
+		<-release
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	defer close(release)
+	source, err := NewSource(Config{ControlURL: server.URL, StateRoot: root, Transport: server.Client().Transport, Clock: func() time.Time { return now }, OperationID: func() (string, error) { return "operation-renew-1", nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _, _ = source.Token(context.Background()) }()
+	<-entered
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if token, err := source.Token(ctx); err != nil || token != oldToken {
+		t.Fatalf("a caller waited behind the renewal: %v", err)
+	}
+	source.CredentialRejected(oldToken) // no usable credential now: only the renewal can help, bounded by ctx
+	short, cancelShort := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancelShort()
+	started := time.Now()
+	if _, err := source.Token(short); err == nil || time.Since(started) > time.Second {
+		t.Fatalf("a caller without a usable credential waited past its context: %v after %s", err, time.Since(started))
 	}
 }
