@@ -86,6 +86,12 @@ func TestRenewalRefusedWith401IsAttemptedOnceUntilReEnrollment(t *testing.T) {
 	if !RenewalRefused(root, now) {
 		t.Fatal("doctor cannot see that the machine was refused")
 	}
+	refusals.Delete(root) // a restarted daemon: one new attempt (a wrong clock must be able to recover), then stopped again
+	_, _ = source.Token(context.Background())
+	_, _ = source.Token(context.Background())
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("%d requests after a restart, want 2", got)
+	}
 	reenrolled, err := LoadRuntimeIdentityForRenewal(root, now)
 	if err != nil {
 		t.Fatal(err)
@@ -98,8 +104,8 @@ func TestRenewalRefusedWith401IsAttemptedOnceUntilReEnrollment(t *testing.T) {
 		t.Fatal("a new enrollment is still reported as refused")
 	}
 	_, _ = source.Token(context.Background())
-	if got := requests.Load(); got != 2 {
-		t.Fatalf("%d requests after re-enrollment, want 2", got)
+	if got := requests.Load(); got != 3 {
+		t.Fatalf("%d requests after re-enrollment, want 3", got)
 	}
 }
 
