@@ -32,6 +32,7 @@ func (s *Service) refuseWhileConnectionsAreOpen(ctx context.Context, version str
 	}
 	open, err := s.config.Participants.OpenConnections(ctx)
 	if err != nil {
+		liveconnections.RecordUnconfirmed("updater", err)
 		open = liveconnections.Counts{}
 	}
 	if worker, workerErr := s.workerOpenSSH(ctx); workerErr == nil {

@@ -16,6 +16,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
+	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
 	"github.com/spf13/cobra"
 )
 
@@ -52,7 +53,11 @@ var openConnectionsFromDaemon = openConnectionsForUpdate
 // A daemon that cannot answer never blocks the install (the updater must work when the app is broken).
 func updateOpenConnectionsFromFile(ctx context.Context) error {
 	open, err := openConnectionsFromDaemon(ctx)
-	if err != nil || open.Total() == 0 {
+	if err != nil {
+		liveconnections.RecordUnconfirmed("pb update", err)
+		return nil
+	}
+	if open.Total() == 0 {
 		return nil
 	}
 	return updateOpenConnectionsRefusal{message: (&autoupdate.ActiveTerminalSessionsError{SSH: open.SSH, Forwards: open.Forwards}).Error()}
