@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -51,12 +52,14 @@ type Input struct {
 	EnforceAt        *time.Time `json:"enforce_at"`
 }
 type Service struct {
-	db        *db.DB
-	audit     *audit.Writer
-	ceiling   func() (string, error)
-	cacheMu   sync.Mutex
-	cached    *Policy
-	checkedAt time.Time
+	db         *db.DB
+	audit      *audit.Writer
+	ceiling    func() (string, error)
+	cacheMu    sync.Mutex
+	coldMu     sync.Mutex // serializes the first read, when nothing is cached
+	refreshing atomic.Bool
+	cached     *Policy
+	checkedAt  time.Time
 }
 
 func New(store *db.DB, writer *audit.Writer, directory string) *Service {
@@ -176,23 +179,59 @@ func scanPolicy(row pgx.Row) (Policy, error) {
 	e := row.Scan(&p.Revision, &p.MinimumVersion, &p.Reason, &p.EnforceAt)
 	return p, e
 }
+
+// Get answers from a cache of the last good policy. A stale cache is served at once while one background read
+// refreshes it, so a slow or failed database never stalls the gate; only the first read (nothing cached) waits,
+// and concurrent first reads coalesce into one. Another instance's Put reaches this one within
+// PolicyRefreshInterval.
 func (s *Service) Get(ctx context.Context) (Policy, error) {
+	if p, fresh, ok := s.cachedPolicy(); ok {
+		if !fresh && s.refreshing.CompareAndSwap(false, true) {
+			go s.refresh()
+		}
+		return p, nil
+	}
+	s.coldMu.Lock()
+	defer s.coldMu.Unlock()
+	if p, _, ok := s.cachedPolicy(); ok {
+		return p, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return Policy{}, err
+	}
+	return s.read(ctx)
+}
+
+func (s *Service) cachedPolicy() (p Policy, fresh, ok bool) {
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
-	if s.cached != nil && time.Since(s.checkedAt) < policyRefreshInterval {
-		return clonePolicy(*s.cached), nil
+	if s.cached == nil {
+		return Policy{}, false, false
 	}
+	return clonePolicy(*s.cached), time.Since(s.checkedAt) < PolicyRefreshInterval, true
+}
+
+func (s *Service) refresh() {
+	defer s.refreshing.Store(false)
+	// Failed refreshes back off too: an outage must not turn every request into another database read, and a
+	// known floor stays enforced indefinitely.
+	if _, err := s.read(context.Background()); err != nil {
+		s.cacheMu.Lock()
+		s.checkedAt = time.Now()
+		s.cacheMu.Unlock()
+	}
+}
+
+func (s *Service) read(ctx context.Context) (Policy, error) {
 	read, cancel := context.WithTimeout(ctx, policyReadTimeout)
 	defer cancel()
 	p, err := scanPolicy(s.db.Pool().QueryRow(read, selectPolicy))
-	if err == nil {
-		s.rememberPolicy(p)
-	} else if s.cached == nil {
+	if err != nil {
 		return Policy{}, err
 	}
-	// Back off failed refreshes too: an outage must not turn every request
-	// into another database read. A known floor remains enforced indefinitely.
-	s.checkedAt = time.Now()
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	s.rememberPolicy(p)
 	return clonePolicy(*s.cached), nil
 }
 func (s *Service) Put(ctx context.Context, actor, key, evidence string, in Input) (Policy, error) {

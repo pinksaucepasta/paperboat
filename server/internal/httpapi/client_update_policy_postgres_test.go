@@ -228,7 +228,7 @@ func TestClientVersionGateKeepsLastGoodPolicyDuringDatabaseOutagePostgres(t *tes
 	request(guard, "2026.11.11.1", http.StatusNoContent)
 	store.Pool().Close()
 	// Exercise a failed refresh, rather than only a still-fresh cache hit.
-	time.Sleep(6 * time.Second)
+	time.Sleep(clientupdate.PolicyRefreshInterval + time.Second)
 	request(guard, "2026.11.11.1", http.StatusNoContent)
 	request(guard, "2026.11.10.1", http.StatusUpgradeRequired)
 	request(clientUpdatePolicyGuard(clientupdate.New(store, nil, ""), time.Now, next), "2026.11.11.1", http.StatusServiceUnavailable)
