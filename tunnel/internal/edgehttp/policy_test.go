@@ -1284,3 +1284,34 @@ func TestAdmittedPreviewWithoutItsCarrierIsReconnectingNotNotFound(t *testing.T)
 		t.Fatalf("after the carrier is back: status %d, reached %d", back.Code, reached.Load())
 	}
 }
+
+// The production wiring has a route matcher: a preview whose carrier is gone fails the route lookup itself, so the
+// admitted answer has to come from there too, not only from the readiness check after a successful lookup.
+func TestAdmittedPreviewWithNoRouteMatchIsReconnectingNotNotFound(t *testing.T) {
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "runtime.example.test", ProcessEpoch: "edge_epoch_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	policy, err := New(Config{PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test",
+		MaxHeaderBytes: 4096, MaxBodyBytes: 1024, Routes: NewPreviewCarrierRouteMatcher(registry),
+		PreviewAdmitted: func(host string) bool { return host == "app.preview.example.test" },
+	}, http.NotFoundHandler())
+	if err != nil {
+		t.Fatal(err)
+	}
+	serve := func(host string) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.Host = host
+		policy.ServeHTTP(recorder, request)
+		return recorder
+	}
+	got := serve("app.preview.example.test")
+	if got.Code != http.StatusServiceUnavailable || got.Header().Get("X-Paperboat-Error") != "preview_reconnecting" || got.Header().Get("Retry-After") != "2" {
+		t.Fatalf("admitted preview with no carrier: status %d %q Retry-After %q", got.Code, got.Header().Get("X-Paperboat-Error"), got.Header().Get("Retry-After"))
+	}
+	if unknown := serve("gone.preview.example.test"); unknown.Code != http.StatusNotFound {
+		t.Fatalf("a name the snapshot does not admit: status %d", unknown.Code)
+	}
+}

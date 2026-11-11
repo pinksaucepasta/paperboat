@@ -632,6 +632,14 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				p.config.BrowserAccess.begin(w, r, candidateHost)
 				return
 			}
+			// The held ingress snapshot still admits this preview but its carrier is gone: an app that is
+			// reconnecting, not a name that does not exist (ngrok-go reconnecting.go answers ErrSessionNotReady).
+			if errors.Is(acquireErr, route.ErrNoMatch) && p.config.PreviewAdmitted != nil && p.config.PreviewAdmitted(candidateHost) {
+				w.Header().Set("X-Paperboat-Error", "preview_reconnecting")
+				w.Header().Set("Retry-After", "2")
+				writeErrorPage(w, http.StatusServiceUnavailable, previewReconnectingMessage)
+				return
+			}
 			if p.config.RouteUnavailable != nil && p.config.RouteUnavailable(candidateHost) {
 				w.Header().Set("X-Paperboat-Error", "upstream_unavailable")
 				writeErrorPage(w, http.StatusBadGateway, upstreamUnavailableMessage)
