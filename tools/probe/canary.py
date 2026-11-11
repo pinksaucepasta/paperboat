@@ -16,6 +16,10 @@ HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("CANARY_STATE", Path.home() / ".local/state/paperboat-canary"))
 HISTORY_MAX = 1440
 ALERT_AFTER = 2
+# The account probe (sign-in, pair, device login, cleanup, sign-out) is `canary.py --account`, run by its own timer every 10 minutes
+# (deploy/paperboat-canary-account.timer): WorkOS rate-limits sign-ins and mails new-device alerts, and a 2-minute run must not delay the
+# one-minute probes. It runs once per interval, so its steps alert on the first failure.
+ACCOUNT_STEPS = {"signin", "pair", "login", "cleanup", "signout", "account"}
 
 
 def now():
@@ -54,7 +58,7 @@ def advance(status, run):
                 lines.append(f"canary RECOVERED: {name} passes again ({run['started']})")
         else:
             counts[name] = counts.get(name, 0) + 1
-            if counts[name] >= ALERT_AFTER and name not in alerted:
+            if counts[name] >= (1 if name in ACCOUNT_STEPS else ALERT_AFTER) and name not in alerted:
                 alerted.add(name)
                 lines.append(f"canary RED: {name} failed {counts[name]} runs in a row "
                              f"(last {run['started']}): {s.get('error', '')[:200]}")
@@ -101,16 +105,32 @@ def send_alert(message):
         pass
 
 
-def main():
-    started = now()
-    clock = time.monotonic()
+def account_steps():
     try:
-        done = subprocess.run([str(HERE / "probe.sh")], capture_output=True, text=True, timeout=330)
+        done = subprocess.run([sys.executable, str(HERE / "account.py")], capture_output=True, text=True, timeout=420)
         stdout, rc = done.stdout, done.returncode
-    except subprocess.TimeoutExpired as error:  # its stdout may be bytes even with text=True
+    except subprocess.TimeoutExpired as error:
         out = error.stdout or ""
         stdout, rc = out.decode(errors="replace") if isinstance(out, bytes) else out, 124
     steps = parse(stdout, rc)
+    if len(steps) == 1 and steps[0]["step"] == "probe":  # the runner itself broke: name it for the account probe
+        steps[0]["step"] = "account"
+    return steps
+
+
+def main():
+    started = now()
+    clock = time.monotonic()
+    if "--account" in sys.argv[1:]:
+        steps = account_steps()
+    else:
+        try:
+            done = subprocess.run([str(HERE / "probe.sh")], capture_output=True, text=True, timeout=330)
+            stdout, rc = done.stdout, done.returncode
+        except subprocess.TimeoutExpired as error:  # its stdout may be bytes even with text=True
+            out = error.stdout or ""
+            stdout, rc = out.decode(errors="replace") if isinstance(out, bytes) else out, 124
+        steps = parse(stdout, rc)
     run = {"started": started, "finished": now(), "seconds": round(time.monotonic() - clock, 1),
            "ok": all(s["ok"] for s in steps), "steps": steps}
     record(run, send_alert)

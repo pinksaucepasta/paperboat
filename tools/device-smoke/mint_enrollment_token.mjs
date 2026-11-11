@@ -6,7 +6,7 @@ const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM 
 const context = await browser.newContext({ storageState: process.env.STATE })
 const response = await context.request.post(`${origin}/api/v1/machine-enrollments`, {
   headers: { origin, "content-type": "application/json", "idempotency-key": crypto.randomUUID() },
-  data: { shell: "posix" },
+  data: {},
 })
 const body = await response.json()
 await browser.close()

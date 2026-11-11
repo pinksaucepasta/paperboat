@@ -1,0 +1,10 @@
+[Unit]
+Description=Paperboat production account probe (WorkOS sign-in, enrollment, device login, revocation, sign-out)
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/paperboat-canary.env
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 %h/paperboat/tools/probe/canary.py --account
+TimeoutStartSec=480
+Nice=10
