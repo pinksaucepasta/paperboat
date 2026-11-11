@@ -1185,3 +1185,18 @@ func TestAppResponseHeadersRespectPublicApps(t *testing.T) {
 		t.Fatalf("X-Frame-Options overrode the app's frame-ancestors: %v", embeddable)
 	}
 }
+
+// The agent names why the origin failed; the visitor sees that failure, not one generic 502.
+func TestOriginFailureFromTheAgentNamesTheCause(t *testing.T) {
+	for code, want := range map[string]int{"refused": http.StatusBadGateway, "timeout": http.StatusGatewayTimeout, "tls": http.StatusBadGateway, "certificate_changed": http.StatusBadGateway} {
+		proxy := &httputil.ReverseProxy{Rewrite: rewriteToCarrier, Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			return nil, originFailure(code)
+		})}
+		configureProxyDiagnostics(proxy, nil)
+		recorder := httptest.NewRecorder()
+		proxy.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "https://app.example.test/", nil))
+		if recorder.Code != want || recorder.Header().Get("X-Paperboat-Error") != "origin_"+code {
+			t.Errorf("%s: status=%d error=%q", code, recorder.Code, recorder.Header().Get("X-Paperboat-Error"))
+		}
+	}
+}

@@ -74,6 +74,9 @@ func testGatewayDispatchesDurableRoute(t *testing.T, host string) {
 		if request.Header.Get("X-Forwarded-Host") != host || request.Header.Get("X-Forwarded-Proto") != "https" || request.Header.Get("X-Forwarded-Port") != "443" {
 			return nil, errors.New("edge forwarded headers did not reach the carrier")
 		}
+		if request.URL.Path == "/down" { // the agent's answer when nothing listens on the app's port
+			return &http.Response{StatusCode: http.StatusBadGateway, Header: http.Header{"X-Paperboat-Origin-Failure": {"refused"}}, Body: http.NoBody, Request: request}, nil
+		}
 		if request.URL.Path == "/loop" { // Caddy's port-80 redirect: back to the URL the visitor asked for
 			return &http.Response{StatusCode: http.StatusPermanentRedirect, Header: http.Header{"Location": {"https://" + host + "/loop?x=1"}}, Body: http.NoBody, Request: request}, nil
 		}
@@ -110,6 +113,13 @@ func testGatewayDispatchesDurableRoute(t *testing.T, host string) {
 	policy.ServeHTTP(recorder, loop)
 	if recorder.Code != http.StatusBadGateway || recorder.Header().Get("X-Paperboat-Error") != "origin_redirect_loop" || recorder.Header().Get("Location") != "" || !strings.Contains(recorder.Body.String(), "redirects to HTTPS") {
 		t.Fatalf("self-redirect reached the visitor: status=%d error=%q location=%q", recorder.Code, recorder.Header().Get("X-Paperboat-Error"), recorder.Header().Get("Location"))
+	}
+	down := httptest.NewRequest(http.MethodGet, "https://"+host+"/down", nil)
+	down.Host = host
+	recorder = httptest.NewRecorder()
+	policy.ServeHTTP(recorder, down)
+	if recorder.Code != http.StatusBadGateway || recorder.Header().Get("X-Paperboat-Error") != "origin_refused" || recorder.Header().Get("X-Paperboat-Origin-Failure") != "" || !strings.Contains(recorder.Body.String(), "Nothing is listening") {
+		t.Fatalf("agent origin failure: status=%d error=%q", recorder.Code, recorder.Header().Get("X-Paperboat-Error"))
 	}
 	cookies := httptest.NewRequest(http.MethodGet, "https://"+host+"/normal", nil)
 	cookies.Host = host

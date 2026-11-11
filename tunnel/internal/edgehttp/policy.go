@@ -170,6 +170,9 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 		if request != nil && connectorprotocol.IsSelfRedirect(request.Method, request.Header.Get("X-Forwarded-Host"), request.URL.RequestURI(), response) {
 			return errOriginRedirectLoop
 		}
+		if code := response.Header.Get("X-Paperboat-Origin-Failure"); code != "" {
+			return originFailure(code)
+		}
 		return legacy.ModifyResponse(response)
 	}
 	var canonical http.Handler
@@ -344,6 +347,13 @@ func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(contex
 			writeErrorPage(writer, http.StatusGatewayTimeout, originTimeoutMessage)
 			return
 		}
+		var failure originFailure
+		if errors.As(err, &failure) {
+			status, message := failure.page()
+			writer.Header().Set("X-Paperboat-Error", "origin_"+string(failure))
+			writeErrorPage(writer, status, message)
+			return
+		}
 		if errors.Is(err, errOriginRedirectLoop) {
 			writer.Header().Set("X-Paperboat-Error", "origin_redirect_loop")
 			writeErrorPage(writer, http.StatusBadGateway, originRedirectLoopMessage)
@@ -357,6 +367,26 @@ func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(contex
 }
 
 const originTimeoutMessage = "The app took longer than 100 seconds to start answering, so Paperboat ended the request. A slow page should stream its response or report progress."
+
+// originFailure is the agent's origin-health code for an origin it could not reach (the
+// X-Paperboat-Origin-Failure header of its 502), so the visitor learns which failure it is.
+type originFailure string
+
+func (f originFailure) Error() string { return "origin failed: " + string(f) }
+
+func (f originFailure) page() (int, string) {
+	switch f {
+	case "refused":
+		return http.StatusBadGateway, "Nothing is listening on this app's port on its machine. Its owner can start the app or fix the route's port."
+	case "timeout":
+		return http.StatusGatewayTimeout, "The app's machine could not connect to it in time. Its owner can check that the app is healthy."
+	case "tls":
+		return http.StatusBadGateway, "The app's TLS certificate was not accepted. Its owner can pin it (pb tunnel route update <tunnel> <route> --tls-verification pinned), give its CA, or point the route at http://."
+	case "certificate_changed":
+		return http.StatusBadGateway, "The app presented a different certificate from the one pinned for it, so Paperboat refused the connection. If its owner replaced it, they can re-pin the route."
+	}
+	return http.StatusBadGateway, "The app's machine cannot reach the app's address. Its owner can check the route's origin."
+}
 
 // errOriginRedirectLoop: the origin sent the visitor back to the URL it asked for (IsSelfRedirect).
 var errOriginRedirectLoop = errors.New("origin redirects to the URL it was asked for")

@@ -18,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/originhealth"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
 )
 
@@ -278,7 +279,7 @@ func (f OriginStreamForwarder) roundTripAndRespond(ctx context.Context, stream i
 		response, err := transport.RoundTrip(ctx, route, request)
 		if err != nil {
 			logOriginStreamFailure(ctx, "origin_roundtrip", err)
-			return err
+			return writeOriginFailure(stream, err)
 		}
 		defer response.Body.Close()
 		err = writeOriginResponse(ctx, stream, reader, request, response)
@@ -328,7 +329,7 @@ func (f OriginStreamForwarder) exchange(ctx context.Context, stream io.ReadWrite
 	response, err := transport.RoundTrip(ctx, route, request)
 	if err != nil {
 		capture.finishError(request, err)
-		return err
+		return writeOriginFailure(stream, err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusSwitchingProtocols {
@@ -631,6 +632,19 @@ func buildRawRequest(request *http.Request, body []byte) []byte {
 		}
 	}
 	return raw.Bytes()
+}
+
+// OriginFailureHeader carries why the origin could not be reached (an origin-health code) to the edge,
+// which shows the matching page. The agent sets it after stripping every X-Paperboat-* header the
+// origin sent, so the edge can trust it.
+const OriginFailureHeader = "X-Paperboat-Origin-Failure"
+
+// writeOriginFailure answers a request whose origin failed before any response byte with a 502 naming
+// the cause, instead of closing the stream and leaving the edge to guess. The original error is kept.
+func writeOriginFailure(stream io.Writer, err error) error {
+	code := originHealthCode(originhealth.Classify(err), err)
+	_, _ = io.WriteString(stream, "HTTP/1.1 502 Bad Gateway\r\n"+OriginFailureHeader+": "+code+"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+	return err
 }
 
 func writeOriginResponse(ctx context.Context, stream io.ReadWriteCloser, reader *bufio.Reader, request *http.Request, response *http.Response) error {
