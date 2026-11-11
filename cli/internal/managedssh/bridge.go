@@ -109,13 +109,14 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 	}
 	var closeOnce sync.Once
 	var closeErr error
-	// sshdClosed is set only after sshd.Close() has returned, and before the stream is closed: the to_sshd copier
-	// wakes up on that stream close, so by then a CloseWrite failure on the closed sshd socket is our own doing.
-	var sshdClosed atomic.Bool
+	// sshdClosing is set before sshd.Close() is called. A socket reports "closed" only after a local Close, and this
+	// bridge is the only closer, so a closed-socket CloseWrite failure with sshdClosing set (read after the call) is
+	// our own doing, however the two raced.
+	var sshdClosing atomic.Bool
 	finish := func() error {
 		closeOnce.Do(func() {
+			sshdClosing.Store(true)
 			sshdErr := sshd.Close()
-			sshdClosed.Store(true)
 			closeErr = errors.Join(sshdErr, stream.Close())
 		})
 		return closeErr
@@ -146,8 +147,8 @@ func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTa
 		}
 		copyErr = normalizeBridgeError(copyErr)
 		if half, ok := sshd.(interface{ CloseWrite() error }); ok {
-			closedBefore := sshdClosed.Load() // read before the call: a close that races it is not assumed ours
-			copyErr = errors.Join(copyErr, closeWriteFailure(half.CloseWrite(), closedBefore))
+			closeErr := half.CloseWrite()
+			copyErr = errors.Join(copyErr, closeWriteFailure(closeErr, sshdClosing.Load()))
 		}
 		copyErr = excuseReset(ctx, copyErr, sshdEOF)
 		if copyErr != nil {
@@ -229,12 +230,12 @@ func labelStep(err error, wrap func(error) error) error {
 	return wrap(err)
 }
 
-// closeWriteFailure is what a failed CloseWrite (the FIN to sshd) counts as. It is ignored only when the bridge had
-// already closed the sshd socket before the call and the error is what a closed socket reports (resultOfOwnClose):
+// closeWriteFailure is what a failed CloseWrite (the FIN to sshd) counts as. It is ignored only when the bridge has
+// started closing the sshd socket and the error is what a closed socket reports (resultOfOwnClose):
 // the session is over and the FIN is moot. Any other failure, or one with sshd still open, means the FIN may never
 // have landed and is kept.
-func closeWriteFailure(err error, closedBefore bool) error {
-	if closedBefore && resultOfOwnClose(err) {
+func closeWriteFailure(err error, closing bool) error {
+	if closing && resultOfOwnClose(err) {
 		return nil
 	}
 	return err

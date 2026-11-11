@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -274,10 +275,10 @@ func TestCloseWriteFailureIsIgnoredOnlyAfterTheBridgeClosed(t *testing.T) {
 	closedByUs := &net.OpError{Op: "close", Net: "tcp", Err: errors.New("use of closed network connection")}
 	refused := &net.OpError{Op: "close", Net: "tcp", Err: os.NewSyscallError("shutdown", syscall.ECONNREFUSED)}
 	for _, c := range []struct {
-		name         string
-		err          error
-		closedBefore bool
-		want         bool // reported as a failure
+		name    string
+		err     error
+		closing bool
+		want    bool // reported as a failure
 	}{
 		{"no error", nil, false, false},
 		{"closed by the bridge, typed", net.ErrClosed, true, false},
@@ -288,7 +289,7 @@ func TestCloseWriteFailureIsIgnoredOnlyAfterTheBridgeClosed(t *testing.T) {
 		{"closed-socket error while sshd was still open (racing close)", closedByUs, false, true},
 		{"fin lost while sshd was open", errors.New("fin lost"), false, true},
 	} {
-		if got := closeWriteFailure(c.err, c.closedBefore) != nil; got != c.want {
+		if got := closeWriteFailure(c.err, c.closing) != nil; got != c.want {
 			t.Errorf("%s: failure=%v, want %v", c.name, got, c.want)
 		}
 	}
@@ -364,7 +365,7 @@ func TestMidUploadAbortStaysFailedEvenWhenSSHDExitsPromptly(t *testing.T) {
 		if windows {
 			resets = []error{syscall.ECONNRESET}
 		}
-		restoreResets, restoreGrace := overrideCloseResets(resets), overrideResetGrace(500 * time.Millisecond)
+		restoreResets, restoreGrace := overrideCloseResets(resets), overrideResetGrace(500*time.Millisecond)
 		listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
 		if err != nil {
 			t.Fatal(err)
@@ -400,7 +401,7 @@ func TestMidDownloadClientAbortIsFailedOnEveryOS(t *testing.T) {
 		if windows {
 			resets = []error{syscall.ECONNRESET}
 		}
-		restoreResets, restoreGrace := overrideCloseResets(resets), overrideResetGrace(200 * time.Millisecond)
+		restoreResets, restoreGrace := overrideCloseResets(resets), overrideResetGrace(200*time.Millisecond)
 		listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
 		if err != nil {
 			t.Fatal(err)
@@ -429,5 +430,48 @@ func TestMidDownloadClientAbortIsFailedOnEveryOS(t *testing.T) {
 		if err == nil {
 			t.Fatalf("a client abort mid-download was recorded closed (windows reset listed: %v)", windows)
 		}
+	}
+}
+
+// closeGatedConn holds CloseWrite until Close has run, then reports a closed socket: the client's EOF and sshd's end
+// arrive together and the bridge's own close lands inside to_sshd's CloseWrite.
+type closeGatedConn struct {
+	net.Conn
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (c *closeGatedConn) Close() error {
+	err := c.Conn.Close()
+	c.once.Do(func() { close(c.closed) })
+	return err
+}
+func (c *closeGatedConn) CloseWrite() error {
+	<-c.closed
+	return &net.OpError{Op: "close", Net: "tcp", Err: errors.New("use of closed network connection")}
+}
+
+// A client that leaves just as sshd ends makes the bridge's own sshd close meet to_sshd's CloseWrite in flight. That is
+// a clean session, not a failed FIN (it failed about 4% of runs when the bridge only trusted a flag read before the call).
+func TestBridgeSSHOwnCloseInsideCloseWriteIsClean(t *testing.T) {
+	defer overrideDialSSHD(func(ctx context.Context, address string) (net.Conn, error) {
+		connection, dialErr := (&net.Dialer{}).DialContext(ctx, "tcp", address)
+		return &closeGatedConn{Conn: connection, closed: make(chan struct{})}, dialErr
+	})()
+	listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		if connection, acceptErr := listener.AcceptTCP(); acceptErr == nil {
+			_, _ = connection.Write([]byte("done"))
+			_ = connection.Close()
+		}
+	}()
+	bridgeSide, clientSide := tcpPair(t)
+	_ = clientSide.Close() // the client's EOF, so to_sshd reaches CloseWrite while sshd's end is still coming
+	if _, err := BridgeSSH(t.Context(), bridgeSide, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second); err != nil {
+		t.Fatalf("a session whose own close landed inside CloseWrite reported %v", err)
 	}
 }
