@@ -5,8 +5,8 @@ package hostdproto
 import (
 	"context"
 	"github.com/Microsoft/go-winio"
-	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
 	"github.com/pinksaucepasta/paperboat/internal/winpipe"
+	"golang.org/x/sys/windows"
 	"net"
 )
 
@@ -14,7 +14,7 @@ func ListenWorkloads(path string) (net.Listener, error) {
 	if !validPipePath(path) {
 		return nil, ErrSocketConfig
 	}
-	token, err := windowssecurity.OpenEffectiveToken()
+	token, err := windows.OpenCurrentProcessToken()
 	if err != nil {
 		return nil, err
 	}
