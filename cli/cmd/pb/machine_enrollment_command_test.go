@@ -72,3 +72,30 @@ func TestMachineAddUnavailableDiscoveryCreatesNoEnrollment(t *testing.T) {
 		t.Fatalf("unconfigured installer created enrollment: exit=%d creates=%d", code, creates)
 	}
 }
+
+func TestMachineAddWorkspaceFlagMakesTheTokenForThatWorkspace(t *testing.T) {
+	var got map[string]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/client-configuration":
+			writeAPIData(t, w, map[string]string{"version": "1", "machines_url": "https://console.example.test/machines", "installer_base_url": "https://install.example.test"})
+		case "/v1/machine-enrollments":
+			got = map[string]string{}
+			_ = json.NewDecoder(r.Body).Decode(&got)
+			writeAPIData(t, w, map[string]string{"id": "ume_team", "bootstrap_token": "ABCDEFGHIJKLMNOPQRSTUVWXYZ"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeTestProfile(t, dir, path, server.URL)
+	var output bytes.Buffer
+	if code := run(context.Background(), []string{"--config", path, "--workspace", "myteam", "machine", "add", "--json"}, &output, &output); code != 0 {
+		t.Fatalf("exit=%d output=%q", code, output.String())
+	}
+	if got["workspace"] != "myteam" {
+		t.Fatalf("enrollment body = %v, want workspace myteam", got)
+	}
+}

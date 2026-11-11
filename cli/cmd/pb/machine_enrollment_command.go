@@ -22,6 +22,14 @@ func machineEnrollmentCommand() *cobra.Command {
 				return invocationError(fmt.Errorf("invalid machine name: %w", err))
 			}
 		}
+		// machine add is workspace-independent, so the flag is read here: the token is for the workspace the user named.
+		workspace := ""
+		if explicitWorkspaceSelection(command) {
+			var err error
+			if workspace, err = resolveWorkspaceInvocation(command); err != nil {
+				return err
+			}
+		}
 		client, err := backendClient(ctx)
 		if err != nil {
 			return err
@@ -34,7 +42,7 @@ func machineEnrollmentCommand() *cobra.Command {
 		if err != nil || base.Scheme != "https" || base.Hostname() == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
 			return errors.New("server discovery does not provide a valid installer URL; ask the server operator to configure installation")
 		}
-		enrollment, err := client.StartMachineEnrollment(ctx.Context, newIdempotencyKey())
+		enrollment, err := client.StartMachineEnrollmentIn(ctx.Context, newIdempotencyKey(), workspace)
 		if err != nil {
 			return friendlyCommandError(err)
 		}
