@@ -74,6 +74,14 @@ func (b *locoBackend) setRelayRegions(regions []*tailcfg.DERPRegion) {
 	defer b.policyMu.Unlock()
 	dm := derpMapOf(regions)
 	b.mu.Lock()
+	home := tailcfg.DERPRegionID(0)
+	if len(regions) != 0 {
+		home = regions[0].RegionID
+	}
+	if b.homeDERP == home && reflect.DeepEqual(b.dm, dm) {
+		b.mu.Unlock()
+		return
+	}
 	redefined := redefinedPinnedRegions(b.dm, dm, b.clients)
 	b.dm = dm
 	b.homeDERP = 0
@@ -124,9 +132,14 @@ func (b *locoBackend) replacePeerRelayNodes(nodes []*tailcfg.Node, filterFor fun
 	b.policyMu.Lock()
 	defer b.policyMu.Unlock()
 	b.mu.Lock()
+	previous := b.peerRelayNodes
 	if err := b.setPeerRelayNodes(nodes); err != nil {
 		b.mu.Unlock()
 		return err
+	}
+	if slices.EqualFunc(previous, b.peerRelayNodes, func(a, b *tailcfg.Node) bool { return a.Equal(b) }) {
+		b.mu.Unlock()
+		return nil
 	}
 	if b.nm != nil {
 		kept := b.nm.Peers[:0]

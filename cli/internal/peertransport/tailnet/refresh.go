@@ -361,12 +361,12 @@ const (
 func (a *Authority) nextRefresh(err error, failures, unusable int) time.Duration {
 	delay := regionalRefreshDelay()
 	a.relay.mu.Lock()
-	recovering := a.relay.recovery != nil
+	recovery := a.relay.recovery
 	a.relay.mu.Unlock()
 	// Signed health observations expire regionalObservationMaxAge after they were
 	// made, not after they were issued. Active regional recovery renews before the
 	// earliest one ends, so its relays are not withdrawn between renewals.
-	if recovering {
+	if recovery != nil && recovery.pair() != "" {
 		delay = backoff.Retry(unusable, regionalUnusableRetry, regionalUnusableRetryMaximum)
 		if due, ok := a.regionalRenewalDelay(serverclock.Now()); ok {
 			delay = due

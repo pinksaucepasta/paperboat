@@ -59,6 +59,7 @@ func TestNewRelayGrantWakesSleepingRecoverySweep(t *testing.T) {
 	a.relay.mu.Lock()
 	r := a.newRegionalRecoveryLocked()
 	r.engine = engine
+	r.peerID = cfg.Peers[0].Identity.EndpointID
 	a.relay.recovery = r
 	a.relay.mu.Unlock()
 	a.mu.Unlock()

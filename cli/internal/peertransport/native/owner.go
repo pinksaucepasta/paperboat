@@ -439,6 +439,9 @@ func (o *Owner) Listen(ctx context.Context, region *tailcfg.DERPRegion, serve fu
 				_ = session.Close()
 				return
 			}
+			if !o.authority.PeerIsLocal(peer.EndpointID) {
+				o.authority.BindRegionalPeer(peer.EndpointID)
+			}
 			defer session.Close()
 			o.emit(Event{Kind: "accepted", PeerID: peer.EndpointID})
 			if serveErr := serve(o.ctx, session); !normalPeerServeTermination(serveErr) {

@@ -199,6 +199,10 @@ func (a *Authority) PrepareRegional(ctx context.Context, peerID string) error {
 		a.recoveryWorkers.Add(1)
 		go func() { defer a.recoveryWorkers.Done(); r.run(lifetime) }()
 	}
+	if peerID != "" {
+		r.peerID = peerID
+		r.poke()
+	}
 	ready := r.ready
 	r.mu.Unlock()
 	// Direct UDP discovery belongs to magicsock; relay rendezvous must not
@@ -396,8 +400,17 @@ func (a *Authority) BindRegionalPeer(peerID string) {
 	r.mu.Lock()
 	if r.engine != nil {
 		r.peerID = peerID
+		r.poke()
 	}
 	r.mu.Unlock()
+}
+
+// poke wakes demand without treating it as a network change (which lifts refusal fences).
+func (r *regionalRecovery) poke() {
+	select {
+	case r.grantWake <- struct{}{}:
+	default:
+	}
 }
 
 // regionalWarningDelay is how long an unusable relay state lasts before RegionalStatus reports it.
@@ -594,6 +607,13 @@ func (r *regionalRecovery) run(ctx context.Context) {
 			clear(retries)
 		case <-r.wake: // a new network: refused relays get a fresh try now, as Tailscale re-dials DERP on a link change
 			fence.networkChanged()
+		}
+		// Tailscale's endpoint.heartbeat stops after sessionActiveTimeout
+		// (wgengine/magicsock/endpoint.go). With no pair, park before probes
+		// and map publications. receive still answers inbound relay control.
+		if r.pair() == "" {
+			timer.Stop()
+			continue
 		}
 		nodes, peers, generation, err := r.snapshot()
 		if err != nil || len(nodes) == 0 {

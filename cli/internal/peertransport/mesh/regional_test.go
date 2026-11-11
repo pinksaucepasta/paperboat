@@ -6,6 +6,7 @@ import (
 	"tailscale.com/tailcfg"
 	"tailscale.com/types/key"
 	"tailscale.com/types/netmap"
+	"tailscale.com/wgengine/filter"
 )
 
 func TestCloneRelayRegionsValidationAndOwnership(t *testing.T) {
@@ -80,5 +81,21 @@ func TestRedefinedPinnedRegionsReconnectsOnlyMovedPinnedRelays(t *testing.T) {
 	}
 	if got := redefinedPinnedRegions(nil, next, clients); len(got) != 0 {
 		t.Fatalf("first inventory reconnected %v", got)
+	}
+}
+
+// Repeated authority observations must not publish the same relay map or rebuild
+// the filter. No engine is needed when both inventories are unchanged.
+func TestUnchangedRelayInventoryDoesNotPublish(t *testing.T) {
+	region := &tailcfg.DERPRegion{RegionID: 1, RegionCode: "one"}
+	b := &locoBackend{homeDERP: 1, dm: derpMapOf([]*tailcfg.DERPRegion{region})}
+	for range 100 {
+		b.setRelayRegions([]*tailcfg.DERPRegion{region.Clone()})
+		if err := b.replacePeerRelayNodes(nil, func() *filter.Filter {
+			t.Fatal("unchanged services rebuilt filter")
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
