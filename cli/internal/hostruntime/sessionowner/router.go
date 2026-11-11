@@ -175,6 +175,14 @@ func (r *Router) Call(ctx context.Context, op string, body json.RawMessage) (jso
 		return json.Marshal(struct{ V0 map[string]uint64 }{image.counts})
 	case "Create":
 		return r.create(ctx, body)
+	case "Recordings", "RecordingSegment", "PruneRecordings", "CloseInterruptedRecording":
+		// Every generation of this account records into one directory; the active owner reads it.
+		active, _, _ := r.catalogSnapshot()
+		owner, err := r.ensureForGeneration(ctx, active)
+		if err != nil {
+			return nil, err
+		}
+		return owner.Call(ctx, op, body)
 	case "Delete", "DeleteAtGeneration", "Restart", "RestartAtGeneration", "RestartContext", "RestartAtGenerationContext":
 		r.admission.Lock()
 		defer r.admission.Unlock()
@@ -185,7 +193,7 @@ func (r *Router) Call(ctx context.Context, op string, body json.RawMessage) (jso
 		return r.attach(ctx, op, body)
 	case "Snapshot", "SnapshotAtGeneration":
 		return r.snapshot(ctx, op, body)
-	case "ActiveWriters", "DetachAttachment", "WaitNextAttachment", "IssueResume", "ResumeAttachment", "BrowserScreenAttachment", "Detach", "DetachParticipantAtGeneration", "AttachmentOwnedBy", "Next", "WaitNext", "Acknowledge", "AcknowledgeAtGeneration", "AttachmentStatus", "Write", "Interrupt", "InputSequence", "WriteStream", "QueryInput", "Resize", "ResizeParticipantAtGeneration", "ActivateParticipantAtGeneration", "Signal", "Clear", "ClearAtGeneration", "Close", "CloseAtGeneration":
+	case "ActiveWriters", "DetachAttachment", "WaitNextAttachment", "IssueResume", "ResumeAttachment", "BrowserScreenAttachment", "Detach", "DetachParticipantAtGeneration", "AttachmentOwnedBy", "Next", "WaitNext", "Acknowledge", "AcknowledgeAtGeneration", "AttachmentStatus", "Write", "Interrupt", "InputSequence", "WriteStream", "QueryInput", "Resize", "ResizeParticipantAtGeneration", "ActivateParticipantAtGeneration", "Signal", "Clear", "ClearAtGeneration", "Close", "CloseAtGeneration", "StartRecording", "StopRecording":
 		return r.forwardBySession(ctx, op, body)
 	default:
 		return nil, session.ErrInvalidSession

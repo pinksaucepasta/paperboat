@@ -529,7 +529,7 @@ func mutates(kind, op string) bool {
 	}
 	if kind == "session" {
 		switch op {
-		case "ActiveWriters", "ResourceCounts", "Snapshot", "SnapshotAtGeneration", "List", "AttachmentOwnedBy", "Next", "WaitNext", "WaitNextAttachment", "InputSequence", "QueryInput", "AttachmentStatus":
+		case "ActiveWriters", "ResourceCounts", "Snapshot", "SnapshotAtGeneration", "List", "AttachmentOwnedBy", "Next", "WaitNext", "WaitNextAttachment", "InputSequence", "QueryInput", "AttachmentStatus", "Recordings", "RecordingSegment":
 			return false
 		default:
 			return true

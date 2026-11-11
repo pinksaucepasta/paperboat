@@ -214,3 +214,7 @@ func ensureDirectory(path string) error {
 	}
 	return secureStoreDirectory(path)
 }
+
+// EnsurePrivateDirectory creates path if needed and gives it the store's owner-only custody: 0700 on
+// Unix, a protected DACL for the owner, SYSTEM and Administrators that files inside inherit on Windows.
+func EnsurePrivateDirectory(path string) error { return ensureDirectory(path) }

@@ -335,6 +335,9 @@ func (m *Manager) applyWindowSizeLocked(session *managedSession) error {
 	if session.screen != nil {
 		session.screen.Resize(int(dimensions.Columns), int(dimensions.Rows))
 	}
+	if session.recordings != nil {
+		session.recordings.Resize(session.id, time.Now(), dimensions.Columns, dimensions.Rows)
+	}
 	resizeOutput := []byte(fmt.Sprintf("\x1b[8;%d;%dt", dimensions.Rows, dimensions.Columns))
 	event, err := session.history.Append(2, resizeOutput)
 	if err != nil {

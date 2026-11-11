@@ -59,6 +59,9 @@ func (m *Manager) attachParticipantLocked(session *managedSession, participant P
 		}
 		session.participants[participant.AttachmentID] = participant
 		m.registerWindowLocked(session, participant)
+		if session.recordings != nil {
+			session.recordings.Join(session.id, participant.AccountID)
+		}
 		result.Snapshot = session.snapshotLocked()
 	}
 	return result, err

@@ -16,6 +16,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/recordings"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
@@ -26,6 +27,7 @@ import (
 // The account's terminal store and PTYs have exactly one process owner.
 type IndependentSessionOwner struct {
 	sessions     *session.Manager
+	recordings   *recordings.Service
 	executions   *execprocess.Manager
 	durable      *store.Store
 	unlock       func() error
@@ -75,6 +77,12 @@ func NewIndependentSessionOwner(ctx context.Context, d sessionowner.Descriptor, 
 	if err != nil {
 		return nil, err
 	}
+	// Every generation of this account's owner records into one directory, so an update never
+	// strands a recording; each records only its own sessions.
+	recorder, err := recordings.Open(recordings.Config{Root: filepath.Join(d.RuntimeRoot, "recordings")})
+	if err != nil {
+		return nil, err
+	}
 	r := runtimeconfig.DefaultResources
 	archiveReader, err := sessionowner.NewArchiveReader(catalogRoot, d, r.MaxSessions)
 	if err != nil {
@@ -93,7 +101,7 @@ func NewIndependentSessionOwner(ctx context.Context, d sessionowner.Descriptor, 
 		AttachmentBytes: runtimeconfig.DefaultLimits.PendingOutputBytes,
 		MaxSessions:     r.MaxSessions, MaxAttachments: r.MaxAttachments, MaxInputDecisions: r.MaxInputDecisions,
 		TerminationTimeout: 10 * time.Second, TerminationGrace: 2 * time.Second,
-		Store: durable, PreserveStoppedHistory: true,
+		Store: durable, PreserveStoppedHistory: true, Recordings: recorder,
 	})
 	if err != nil {
 		return nil, err
@@ -104,7 +112,7 @@ func NewIndependentSessionOwner(ctx context.Context, d sessionowner.Descriptor, 
 	if err != nil {
 		return nil, errors.Join(err, manager.Shutdown(ctx))
 	}
-	owner := &IndependentSessionOwner{sessions: manager, executions: executions, durable: durable, unlock: unlock, descriptor: d, lifetime: ctx, catalogRoot: catalogRoot}
+	owner := &IndependentSessionOwner{recordings: recorder, sessions: manager, executions: executions, durable: durable, unlock: unlock, descriptor: d, lifetime: ctx, catalogRoot: catalogRoot}
 	owner.bridge = &workloadbridge.Server{
 		ArchiveMetadata: archiveReader,
 		Endpoint:        d.Endpoint, Token: token, Sessions: manager, SessionOnly: true,
@@ -141,7 +149,9 @@ func (o *IndependentSessionOwner) Run(ctx context.Context) error { return o.brid
 // confirms quiescence over authenticated IPC; explicit uninstall can terminate
 // the service's remaining shells as part of removing Paperboat.
 func (o *IndependentSessionOwner) Close(ctx context.Context) error {
-	if err := errors.Join(o.sessions.Shutdown(ctx), o.executions.Shutdown(ctx), o.durable.Close(), o.unlock()); err != nil {
+	err := errors.Join(o.sessions.Shutdown(ctx), o.executions.Shutdown(ctx))
+	o.recordings.Shutdown() // after the sessions: their recordings end with them
+	if err := errors.Join(err, o.durable.Close(), o.unlock()); err != nil {
 		return err
 	}
 	if !o.discardEmpty.Load() {

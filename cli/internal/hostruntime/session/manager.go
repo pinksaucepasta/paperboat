@@ -13,6 +13,7 @@ import (
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/recordings"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
@@ -64,7 +65,9 @@ type ManagerConfig struct {
 	// confirmed that the store is being handed to a replacement owner. Ordinary
 	// recovery keeps the existing stopped-output cleanup behavior.
 	PreserveStoppedHistory bool
-	Metrics                interface {
+	// Recordings records sessions on request (team recordings); nil on hosts that cannot record.
+	Recordings *recordings.Service
+	Metrics    interface {
 		Record(string, float64, map[string]string) error
 	}
 }
@@ -122,6 +125,7 @@ type managedSession struct {
 	screen          *xterm.Terminal
 	continuation    screenContinuation
 	participants    map[string]Participant
+	recordings      *recordings.Service
 	resumes         map[string]*attachmentResume // in memory only, guarded by opMu
 }
 
@@ -153,6 +157,8 @@ type Snapshot struct {
 	Exit              *pty.ExitResult `json:"exit,omitempty"`
 	TerminalModes     TerminalModes   `json:"terminal_modes"`
 	Participants      []Participant   `json:"participants,omitempty"`
+	// Recording is set while the session is recorded: every attached client shows REC.
+	Recording *recordings.State `json:"recording,omitempty"`
 }
 
 type Participant struct {
@@ -345,7 +351,7 @@ func (m *Manager) Create(ctx context.Context, request CreateRequest) (Snapshot, 
 		m.mu.Unlock()
 	}()
 	retained, _ := history.New(m.config.HistoryBytes)
-	session := &managedSession{id: id, name: request.Name, command: request.Command, lifecycle: NewLifecycle(), persistedState: Creating, history: retained, fanout: NewFanout(), participants: make(map[string]Participant), sizes: newWindowSizes(), screen: xterm.New(xterm.WithCols(int(request.Command.Dimensions.Columns)), xterm.WithRows(int(request.Command.Dimensions.Rows)), xterm.WithScrollback(browserScreenScrollbackLines))}
+	session := &managedSession{id: id, name: request.Name, command: request.Command, lifecycle: NewLifecycle(), persistedState: Creating, history: retained, fanout: NewFanout(), participants: make(map[string]Participant), recordings: m.config.Recordings, sizes: newWindowSizes(), screen: xterm.New(xterm.WithCols(int(request.Command.Dimensions.Columns)), xterm.WithRows(int(request.Command.Dimensions.Rows)), xterm.WithScrollback(browserScreenScrollbackLines))}
 	// This session remains private until launch and persistence succeed.
 	session.opMu.Lock()
 	defer session.opMu.Unlock()

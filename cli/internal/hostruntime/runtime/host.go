@@ -37,6 +37,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/process"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/recordings"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
@@ -224,7 +225,12 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	}()
 	sessions := dependencies.Sessions
 	if sessions == nil {
+		recorder, recordingsErr := recordings.Open(recordings.Config{Root: filepath.Join(config.Runtime.StateRoot, "recordings")})
+		if recordingsErr != nil {
+			return nil, recordingsErr
+		}
 		sessions, err = session.NewManager(session.ManagerConfig{
+			Recordings: recorder,
 			LaunchContext: func(launchCtx context.Context, command pty.Command) (session.PTYProcess, error) {
 				command, environmentErr := commandWithManagedEnvironmentContext(launchCtx, command, dependencies.ManagedEnvironment)
 				if environmentErr != nil {

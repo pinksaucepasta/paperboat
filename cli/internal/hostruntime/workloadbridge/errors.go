@@ -6,6 +6,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/recordings"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
 	"io"
@@ -66,6 +67,12 @@ var errorCodes = map[string]error{
 	"store.ErrNotFound":                store.ErrNotFound,
 	"store.ErrReplayGap":               store.ErrReplayGap,
 	"store.ErrResultTooLarge":          store.ErrResultTooLarge,
+	"session.ErrRecordingUnavailable":  session.ErrRecordingUnavailable,
+	"recordings.ErrRecording":          recordings.ErrRecording,
+	"recordings.ErrNotRecording":       recordings.ErrNotRecording,
+	"recordings.ErrInvalid":            recordings.ErrInvalid,
+	"recordings.ErrStopped":            recordings.ErrStopped,
+	"recordings.ErrNotFound":           recordings.ErrNotFound,
 }
 
 // Only a complete, consistent cause tree may become a wire rejection.

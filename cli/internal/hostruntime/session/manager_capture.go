@@ -8,6 +8,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/recordings"
 )
 
 // ownerStallBound is how long the PTY waits for an owner that drains nothing before treating its link as gone.
@@ -41,6 +42,9 @@ func (m *Manager) capture(session *managedSession, process PTYProcess) {
 					if session.screen != nil {
 						_, _ = session.screen.Write(buffer[:n])
 						session.continuation.feed(buffer[:n])
+					}
+					if session.recordings != nil {
+						session.recordings.Output(session.id, readAt, buffer[:n]) // copies; never blocks
 					}
 					_, deliveryErr = session.fanout.PublishOwned(event)
 					m.queueOutputPersistence(session, event)
@@ -77,6 +81,9 @@ func (m *Manager) capture(session *managedSession, process PTYProcess) {
 	observeSessionFailure(session, "delivery", classifySessionFailure("delivery", readErr))
 	observeSessionFailure(session, "command", classifySessionFailure("command", waitErr))
 	m.finishCapture(session, process, result, errors.Join(terminateErr, closeErr), deliveryErr, terminateErr)
+	if session.recordings != nil {
+		_, _ = session.recordings.Stop(session.id, "", recordings.ReasonSessionEnded)
+	}
 }
 
 func (m *Manager) finishCapture(

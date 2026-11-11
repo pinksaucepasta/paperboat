@@ -96,6 +96,9 @@ func (s *managedSession) snapshotLocked() Snapshot {
 		exit := *s.exit
 		snapshot.Exit = &exit
 	}
+	if s.recordings != nil {
+		snapshot.Recording = s.recordings.State(s.id)
+	}
 	return snapshot
 }
 

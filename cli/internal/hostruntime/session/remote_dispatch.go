@@ -27,6 +27,8 @@ func ServeRemoteCall(ctx context.Context, m Service, op string, body json.RawMes
 			return nil, err
 		}
 		return json.Marshal(struct{ V0 []ActiveWriter }{writers})
+	case "StartRecording", "StopRecording", "Recordings", "RecordingSegment", "PruneRecordings", "CloseInterruptedRecording":
+		return serveRecording(m, op, body)
 	case "DetachAttachment", "WaitNextAttachment":
 		return serveAttachmentLease(ctx, m, op, body)
 	case "IssueResume", "ResumeAttachment":

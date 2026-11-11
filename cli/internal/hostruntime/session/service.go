@@ -4,6 +4,8 @@ import (
 	"context"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/history"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/recordings"
+	"time"
 )
 
 // Service is the terminal boundary shared by the process owner and feature runtime.
@@ -55,6 +57,12 @@ type Service interface {
 	Snapshot(sessionID string) (Snapshot, error)
 	SnapshotAtGeneration(sessionID string, expectedGeneration uint64) (Snapshot, error)
 	List() []Snapshot
+	StartRecording(sessionID string, request recordings.StartRequest) (recordings.State, error)
+	StopRecording(sessionID, actorAccountID, reason string) (recordings.Meta, error)
+	Recordings() ([]recordings.Meta, error)
+	RecordingSegment(recordingID string, index uint32) ([]byte, error)
+	PruneRecordings(retention time.Duration, quotaBytes int64) ([]recordings.Meta, error)
+	CloseInterruptedRecording(recordingID string) (recordings.Meta, error)
 	Shutdown(ctx context.Context) error
 	ShutdownForRecovery(ctx context.Context) error
 }
