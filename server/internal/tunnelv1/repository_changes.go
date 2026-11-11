@@ -218,19 +218,17 @@ func translate(err error) error {
 	if ok && pgErr != nil {
 		switch pgErr.Code {
 		case "23505":
-			if pgErr.ConstraintName == "tunnels_stable_endpoint_key" || pgErr.ConstraintName == "managed_hostname_reserved" {
+			// Exact names: a substring would misclassify any future constraint that merely contains one of them.
+			switch pgErr.ConstraintName {
+			case "tunnels_stable_endpoint_key", "managed_hostname_reserved":
 				return ErrEndpointConflict
-			}
-			if pgErr.ConstraintName == "shared_443_hostname_mode_conflict" {
+			case "shared_443_hostname_mode_conflict":
 				return fmt.Errorf("%w: %w", ErrRouteConflict, ErrHostnameModeConflict)
-			}
-			if strings.Contains(pgErr.ConstraintName, "tunnels_account_id_name") {
+			case "tunnels_account_id_name_personal", "tunnels_account_id_name_team":
 				return fmt.Errorf("%w: %s", ErrNameConflict, pgErr.ConstraintName)
-			}
-			if strings.Contains(pgErr.ConstraintName, "tunnel_routes_tunnel_id_name") || strings.Contains(pgErr.ConstraintName, "tunnel_routes_id_tunnel") {
+			case "tunnel_routes_tunnel_id_name_key", "tunnel_routes_id_tunnel_unique":
 				return fmt.Errorf("%w: %s", ErrRouteConflict, pgErr.ConstraintName)
-			}
-			if strings.Contains(pgErr.ConstraintName, "tunnel_domains_hostname") {
+			case "tunnel_domains_live_hostname_unique":
 				return fmt.Errorf("%w: %s", ErrDomainConflict, pgErr.ConstraintName)
 			}
 			return fmt.Errorf("%w: %s", ErrConflict, pgErr.ConstraintName)
