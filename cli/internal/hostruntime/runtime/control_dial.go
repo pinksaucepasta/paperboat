@@ -113,9 +113,10 @@ func (c *controlDialer) remembered(host string) []string {
 	if c.cache == "" {
 		return nil
 	}
-	// Only a regular file is read: a link could point the control host at addresses nobody here wrote. TLS still
-	// verifies the hostname, so a stale entry can only fail to connect.
-	if info, err := os.Lstat(c.cache); err != nil || !info.Mode().IsRegular() {
+	// Only a regular file this account owns and nobody else can touch is read: a link, or a file another account
+	// dropped there, could point the control host at addresses nobody here wrote. TLS still verifies the hostname,
+	// so a stale entry can only fail to connect.
+	if info, err := os.Lstat(c.cache); err != nil || !info.Mode().IsRegular() || !cacheFileTrusted(info) {
 		return nil
 	}
 	body, err := os.ReadFile(c.cache)
