@@ -226,7 +226,7 @@ func (g *Gate) Lookup(ctx context.Context, key string, at time.Time) (bool, erro
  SELECT 'personal:'||$1::text AS id
  UNION
  SELECT 'team:'||m.team_id FROM team_members m JOIN teams t ON t.team_id=m.team_id
- WHERE m.account_id=$1 AND m.active AND t.deleted_at IS NULL
+ WHERE m.account_id=$1 AND m.active AND t.deleted_at IS NULL AND NOT t.suspended
 )`
 	if strings.HasPrefix(key, "personal:") || strings.HasPrefix(key, "team:") {
 		workspaces = `WITH ws AS (SELECT $1::text AS id)`

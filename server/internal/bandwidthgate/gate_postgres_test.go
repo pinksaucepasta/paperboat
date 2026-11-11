@@ -378,3 +378,19 @@ func TestGateKeepsARecentDenialWhenALookupFails(t *testing.T) {
 		t.Fatal("an account never answered denied was withheld by a failing lookup")
 	}
 }
+
+// A suspended team is not a workspace the account can use, so its unused allowance must not keep the account
+// from being denied when the personal workspace and every active team are exhausted.
+func TestGateIgnoresSuspendedTeamsPostgres(t *testing.T) {
+	store := gateStore(t)
+	f := newGateFixture(t, store)
+	gate := New(store)
+	f.period(f.personal, 100, 100, false)
+	if denied, err := gate.Lookup(context.Background(), f.user, time.Now().UTC()); err != nil || denied {
+		t.Fatalf("denied=%v err=%v while the active team has no usage period", denied, err)
+	}
+	f.exec(`UPDATE paperboat.teams SET suspended=true,suspended_at=now(),suspended_by=$2 WHERE team_id=$1`, f.team, f.user)
+	if denied, err := gate.Lookup(context.Background(), f.user, time.Now().UTC()); err != nil || !denied {
+		t.Fatalf("denied=%v err=%v: a suspended team's allowance kept the account admitted", denied, err)
+	}
+}
