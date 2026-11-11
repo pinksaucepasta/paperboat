@@ -6,10 +6,14 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
+	"regexp"
 	"strings"
 )
 
 const originCABlockStart = "-----BEGIN CERTIFICATE-----"
+
+// originTLSPinPattern is the form of a pinned route's certificate pin: sha256:<hex>.
+var originTLSPinPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 // MaximumOriginCABytes bounds the CA a route trusts for its https origin (a root plus intermediates).
 const MaximumOriginCABytes = 16 << 10
