@@ -2,6 +2,11 @@ name: PR checks
 on:
   pull_request:
   merge_group:
+  # A push to main warms the Go build and module cache: PR and queue runs read caches saved on main only,
+  # and a job that is cancelled never saves its own, so every run started cold (2026-11-11).
+  push:
+    branches: [main]
+    paths-ignore: ['CHECKLIST.md', 'PLAN.md', 'WHITEBOARD.md', 'docs/**/*.md', '**/README.md']
 permissions:
   contents: read
 concurrency:
@@ -10,8 +15,10 @@ concurrency:
 jobs:
   targeted:
     name: Targeted Go checks
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # A cold cache compiles every importer with -race: PRs #3 and #5 were cut off at 5 minutes while still compiling.
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:17
@@ -32,3 +39,20 @@ jobs:
           go-version-file: cli/go.mod
           cache-dependency-path: '**/go.sum'
       - run: python3 tools/pr-checks.py '${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha }}'
+
+  warm:
+    name: Warm Go caches
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: '**/go.sum'
+      # Compile what the targeted job compiles (vet, and the -race test binaries) without running a test.
+      - run: |
+          for module in shared server cli relay tunnel helper sdk/go; do
+            (cd "$module" && go vet ./... && go test -race -count=1 -run '^$' ./...)
+          done
