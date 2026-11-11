@@ -125,6 +125,10 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 	if err != nil {
 		return windowsActivationJournal{}, err
 	}
+	superseded := ""
+	if prior, loadErr := loadWindowsActivationJournal(config); loadErr == nil && prior.Stage == windowsActivationAwaitingApproval && prior.Candidate.ID != candidate.ID {
+		superseded = prior.Version // an unapproved older candidate this staging replaces
+	}
 	if prior, loadErr := loadWindowsActivationJournal(config); loadErr == nil && prior.Stage == windowsActivationAwaitingApproval && prior.Candidate.ID == candidate.ID {
 		if err := verifyWindowsPreparedCandidate(ctx, prior); err != nil {
 			return windowsActivationJournal{}, err
@@ -307,7 +311,25 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 	if err := backend.WriteJournal(journal); err != nil {
 		return windowsActivationJournal{}, err
 	}
+	// The journal now names the new candidate: the superseded one can never be approved, so it is not left behind.
+	if err := removeSupersededWindowsCandidate(layout, superseded, config.ActiveVersion, release.Version); err != nil {
+		return windowsActivationJournal{}, err
+	}
 	return journal, nil
+}
+
+// removeSupersededWindowsCandidate deletes the version directory of an unapproved candidate that a newer staging
+// replaced. It never touches the active version or the candidate just staged; the directory name is validated as
+// one release version under releases/versions.
+func removeSupersededWindowsCandidate(layout service.Layout, superseded, active, staged string) error {
+	if superseded == "" || superseded == active || superseded == staged {
+		return nil
+	}
+	paths, err := canonicalWindowsRelease(layout, superseded)
+	if err != nil {
+		return err
+	}
+	return os.RemoveAll(paths.Root)
 }
 
 func activeWindowsServiceTargetsMatch(layout service.Layout, version string, hostd, updater, ssh windowsServiceTarget, sources ...installsource.Source) bool {
