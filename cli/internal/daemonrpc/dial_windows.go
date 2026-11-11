@@ -29,6 +29,8 @@ func Dial(ctx context.Context, addr string) (*grpc.ClientConn, error) {
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancel := context.WithTimeout(ctx, dialTimeout)
+	defer cancel()
 	return grpc.DialContext(
 		ctx,
 		"passthrough:///"+addr,

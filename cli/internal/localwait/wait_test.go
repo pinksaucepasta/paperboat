@@ -80,7 +80,7 @@ func TestWaitReadinessProgressionAndBoundMachineIdentity(t *testing.T) {
 		{"ssh", []watchBatch{{snapshots: []localapi.Snapshot{runtimeReady, transportReady, sshReady}, err: io.EOF}}, 4},
 	} {
 		client := &fakeClient{initial: initial, batches: test.batches}
-		result, err := Wait(context.Background(), client, machine.ID, test.condition)
+		result, err := Wait(testDeadline(t), client, machine.ID, test.condition)
 		if err != nil || result.Schema != ResultSchemaV1 || result.Outcome != "ready" || result.Condition != test.condition || result.SnapshotGeneration != test.wantGen || result.Machine.ID != machine.ID {
 			t.Fatalf("condition=%s result=%#v err=%v", test.condition, result, err)
 		}
@@ -103,7 +103,7 @@ func TestWaitReturnsTypedTerminalAndRemovalResults(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			client := &fakeClient{initial: initial, batches: []watchBatch{{snapshots: []localapi.Snapshot{test.next}, err: io.EOF}}}
-			result, err := Wait(context.Background(), client, machine.ID, "runtime")
+			result, err := Wait(testDeadline(t), client, machine.ID, "runtime")
 			if err != nil || result.Outcome != "failed" || result.Code != test.code || result.Machine.ID != machine.ID {
 				t.Fatalf("result=%#v err=%v", result, err)
 			}
@@ -122,7 +122,7 @@ func TestWaitReturnsTimeoutAndCancellationWithoutPolling(t *testing.T) {
 			return context.WithTimeout(context.Background(), 10*time.Millisecond)
 		}, "timeout", "wait_timeout"},
 		{"canceled", func() (context.Context, context.CancelFunc) {
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			cancel()
 			return ctx, cancel
 		}, "canceled", "wait_canceled"},
@@ -205,13 +205,13 @@ func TestWatchTerminationRequiresCompleteOwnedCleanup(t *testing.T) {
 }
 
 func TestWaitRejectsInvalidInputAndPropagatesWatchFailure(t *testing.T) {
-	if _, err := Wait(context.Background(), nil, "machine_1", "runtime"); err == nil {
+	if _, err := Wait(testDeadline(t), nil, "machine_1", "runtime"); err == nil {
 		t.Fatal("nil client was accepted")
 	}
 	machine := waitMachine()
 	watchErr := errors.New("watch failed")
 	client := &fakeClient{initial: waitSnapshot(1, machine), batches: []watchBatch{{err: watchErr}}}
-	if _, err := Wait(context.Background(), client, machine.ID, "runtime"); !errors.Is(err, watchErr) {
+	if _, err := Wait(testDeadline(t), client, machine.ID, "runtime"); !errors.Is(err, watchErr) {
 		t.Fatalf("watch err=%v", err)
 	}
 }
@@ -240,5 +240,22 @@ func TestWaitResultContractFixtures(t *testing.T) {
 		if !seen[outcome] {
 			t.Fatalf("missing %s fixture", outcome)
 		}
+	}
+}
+
+func testDeadline(t *testing.T) context.Context {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
+
+func TestWaitRequiresADeadline(t *testing.T) {
+	machine := waitMachine()
+	client := &fakeClient{initial: waitSnapshot(1, machine)}
+	if _, err := Wait(context.Background(), client, machine.ID, "runtime"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("an unbounded wait = %v, want ErrInvalid", err)
+	}
+	if _, err := WaitTargetFromSnapshot(context.Background(), client, client.initial, machine.ID, "runtime"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("an unbounded target wait = %v, want ErrInvalid", err)
 	}
 }

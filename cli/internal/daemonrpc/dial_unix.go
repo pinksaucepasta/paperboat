@@ -21,6 +21,8 @@ func Dial(ctx context.Context, addr string) (*grpc.ClientConn, error) {
 	if _, err := os.Stat(sockPath); err != nil {
 		return nil, fmt.Errorf("socket %s: %w", sockPath, err)
 	}
+	ctx, cancel := context.WithTimeout(ctx, dialTimeout)
+	defer cancel()
 	return grpc.DialContext(
 		ctx,
 		sockPath,

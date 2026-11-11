@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestExplicitCleanupRetiresClosedListenerLockWithoutRemovingForeignFiles(t *testing.T) {
@@ -164,5 +165,36 @@ func TestDaemonSocketPeerCheckAcceptsThisUser(t *testing.T) {
 	}
 	if err := <-accepted; err != nil {
 		t.Fatalf("server refused this user: %v", err)
+	}
+}
+
+// A daemon socket that accepts but never answers (a wedged daemon) fails Dial within dialTimeout even when the
+// caller's context has no deadline.
+func TestDialIsBoundedWithoutACallerDeadline(t *testing.T) {
+	original := dialTimeout
+	dialTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { dialTimeout = original })
+	path := filepath.Join(shorttemp.Dir(t), "daemon.sock")
+	listener, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+		}
+	}()
+	began := time.Now()
+	if conn, err := Dial(context.Background(), path); err == nil {
+		_ = conn.Close()
+		t.Fatal("Dial reached a server that never answers")
+	}
+	if elapsed := time.Since(began); elapsed > 5*time.Second {
+		t.Fatalf("Dial took %v", elapsed)
 	}
 }

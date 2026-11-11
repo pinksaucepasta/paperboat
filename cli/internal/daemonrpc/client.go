@@ -2,6 +2,7 @@ package daemonrpc
 
 import (
 	"context"
+	"time"
 
 	pb "github.com/pinksaucepasta/paperboat/internal/daemonrpc/proto"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
@@ -28,6 +29,10 @@ func rpcContext(ctx context.Context) context.Context {
 	}
 	return metadata.AppendToOutgoingContext(ctx, supportReferenceMetadata, reference)
 }
+
+// dialTimeout bounds a blocking Dial whatever context the caller passes: a socket that exists but never accepts
+// (a wedged daemon) fails the command instead of hanging it. Prior art: tailscale safesocket.ConnectContext (20 s).
+var dialTimeout = 5 * time.Second
 
 type daemonDialError struct{ cause error }
 

@@ -86,8 +86,9 @@ func ResolveMachine(machines []localapi.MachineStatus, target string) (localapi.
 	return *match, nil
 }
 
+// Wait and WaitTargetFromSnapshot wait for as long as ctx allows, so ctx must carry a deadline (pb wait --timeout).
 func Wait(ctx context.Context, client Client, machineID, condition string) (Result, error) {
-	if ctx == nil || client == nil || strings.TrimSpace(machineID) == "" || !validCondition(condition) {
+	if !bounded(ctx) || client == nil || strings.TrimSpace(machineID) == "" || !validCondition(condition) {
 		return Result{}, ErrInvalid
 	}
 	snapshot, err := client.Snapshot(ctx)
@@ -98,7 +99,7 @@ func Wait(ctx context.Context, client Client, machineID, condition string) (Resu
 }
 
 func WaitTargetFromSnapshot(ctx context.Context, client Client, snapshot localapi.Snapshot, target, condition string) (Result, error) {
-	if ctx == nil || client == nil || snapshot.Validate() != nil || strings.TrimSpace(target) == "" || !validCondition(condition) {
+	if !bounded(ctx) || client == nil || snapshot.Validate() != nil || strings.TrimSpace(target) == "" || !validCondition(condition) {
 		return Result{}, ErrInvalid
 	}
 	machine, err := ResolveMachine(snapshot.Machines, target)
@@ -106,6 +107,14 @@ func WaitTargetFromSnapshot(ctx context.Context, client Client, snapshot localap
 		return Result{}, err
 	}
 	return waitFromSnapshot(ctx, client, snapshot, machine.ID, condition)
+}
+
+func bounded(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	_, ok := ctx.Deadline()
+	return ok
 }
 
 func waitFromSnapshot(ctx context.Context, client Client, snapshot localapi.Snapshot, machineID, condition string) (Result, error) {
