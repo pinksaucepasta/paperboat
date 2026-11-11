@@ -19,16 +19,25 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	identitystore "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
-	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/identitybootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/trustedkeys"
+	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 )
 
 // StatusError is a refused peer identity request. It is ErrInvalid; Transient lets the runtime retry
 // a server hiccup instead of failing the start.
-type StatusError struct{ Status int }
+type StatusError struct {
+	Status int
+	// Code is the server's short reason (invalid_certificate, certificate_expired, ...), empty when it sent none.
+	Code string
+}
 
-func (e *StatusError) Error() string { return fmt.Sprintf("HTTP %d: %v", e.Status, ErrInvalid) }
+func (e *StatusError) Error() string {
+	if e.Code != "" {
+		return fmt.Sprintf("HTTP %d (%s): %v", e.Status, e.Code, ErrInvalid)
+	}
+	return fmt.Sprintf("HTTP %d: %v", e.Status, ErrInvalid)
+}
 func (e *StatusError) Unwrap() error { return ErrInvalid }
 
 // Transient reports a status that a later attempt can succeed past (408, 429, 5xx).
@@ -239,8 +248,7 @@ func (c *Client) post(ctx context.Context, path, operationID string, body []byte
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusAccepted && response.StatusCode != http.StatusCreated {
-		_, _ = io.CopyN(io.Discard, response.Body, 32<<10)
-		return response.StatusCode, &StatusError{Status: response.StatusCode}
+		return response.StatusCode, &StatusError{Status: response.StatusCode, Code: serverErrorCode(io.LimitReader(response.Body, 32<<10))}
 	}
 	var envelope struct {
 		Data json.RawMessage `json:"data"`
@@ -262,4 +270,28 @@ func operationID(prefix, endpointID string, generation uint64, first, second []b
 	h.Write(first)
 	h.Write(second)
 	return prefix + hex.EncodeToString(h.Sum(nil)[:16])
+}
+
+// serverErrorCode reads the reason code of the server's error body ({"error":{"code":"..."}}); anything that is not
+// a short lowercase slug is dropped, so a hostile or garbled body never reaches an error message.
+func serverErrorCode(body io.Reader) string {
+	var document struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	data, err := io.ReadAll(body)
+	if err != nil || json.Unmarshal(data, &document) != nil {
+		return ""
+	}
+	code := document.Error.Code
+	if code == "" || len(code) > 64 {
+		return ""
+	}
+	for _, r := range code {
+		if (r < 'a' || r > 'z') && r != '_' {
+			return ""
+		}
+	}
+	return code
 }
