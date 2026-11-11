@@ -87,3 +87,26 @@ func TestGrantPartsCanAddTheirFirstPeerOrControlEntry(t *testing.T) {
 		}
 	}
 }
+
+// A merge never changes the grant it extends: a connection's grant, its fence and pair leases still hold it, and an
+// in-place append or refreshed entry moved their scopes under them (audit A P2-4).
+func TestMergeGrantsLeavesTheCurrentGrantUnchanged(t *testing.T) {
+	scope := func(id string) Scope {
+		return Scope{ResourceKind: "machine_access", ResourceID: id, ResourceGeneration: 1, Capability: "terminal", Direction: "dial", Port: peernetwork.NetworkPort, ExpiresAt: time.Now().Add(time.Hour).Unix()}
+	}
+	current := Grant{RelayGrant: peernetwork.RelayGrant{Generation: 3, Peers: make([]Peer, 0, 8), RelayControlPeers: make([]string, 0, 8)}}
+	current.Peers = append(current.Peers, Peer{WireGuardPublicKey: "peer-a", Scopes: []Scope{scope("old")}})
+	current.RelayControlPeers = append(current.RelayControlPeers, "control-a")
+	current = current.withIndex()
+	next := Grant{RelayGrant: peernetwork.RelayGrant{Generation: 3, Peers: []Peer{{WireGuardPublicKey: "peer-a", Scopes: []Scope{scope("new")}}, {WireGuardPublicKey: "peer-b", Scopes: []Scope{scope("b")}}}, RelayControlPeers: []string{"control-b"}}}
+	merged, err := mergeGrants(current, next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(merged.Peers) != 2 || merged.Peers[0].Scopes[0].ResourceID != "new" || len(merged.RelayControlPeers) != 2 {
+		t.Fatalf("merged %+v", merged.Peers)
+	}
+	if current.Peers[0].Scopes[0].ResourceID != "old" || len(current.Peers[:cap(current.Peers)][:2][1].Scopes) != 0 || len(current.index.peers) != 1 || current.index.control["control-b"] {
+		t.Fatal("merging changed the grant it extended")
+	}
+}
