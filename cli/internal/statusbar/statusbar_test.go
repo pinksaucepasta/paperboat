@@ -706,3 +706,21 @@ func TestRecordingMarkLeadsAndSurvivesNarrowWidths(t *testing.T) {
 		t.Fatalf("REC still shown: %q", line)
 	}
 }
+
+// REC is painted when it is set, ahead of any output that follows, not at the next 60 Hz redraw.
+func TestRecordingMarkIsPaintedWhenSet(t *testing.T) {
+	bar, _ := newTestBar(t, ModeAuto, "xterm-256color", 80, 24, true, time.Second)
+	bar.SetIdentity("demo", "default")
+	bar.SetConnection("connected")
+	time.Sleep(100 * time.Millisecond) // the first paint of the bar settles
+	bar.mu.Lock()
+	bar.redrawPending = false
+	bar.mu.Unlock()
+	bar.SetRecording(true)
+	bar.mu.Lock()
+	pending := bar.redrawPending
+	bar.mu.Unlock()
+	if pending {
+		t.Fatal("REC waits for the coalesced redraw")
+	}
+}

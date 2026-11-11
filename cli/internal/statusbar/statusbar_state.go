@@ -103,7 +103,9 @@ func (b *Bar) SetRecording(recording bool) {
 	b.mu.Lock()
 	b.recording = recording
 	b.updateTitleLocked()
-	b.drawLocked()
+	// Painted now, not at the next coalesced redraw: the host sends REC ahead of the session's first output, and the
+	// mark must not land after the history that follows.
+	b.drawNowLocked()
 	b.mu.Unlock()
 }
 
