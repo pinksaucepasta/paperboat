@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
 )
 
@@ -21,5 +22,21 @@ func TestADestinationAtItsTransferLimitSaysHowToClearIt(t *testing.T) {
 	}
 	if other := errors.New("other"); destinationBusy("m", other) != other {
 		t.Fatal("an unrelated error changed")
+	}
+}
+
+// A running send whose destination is removed or revoked (the renewal answers 404 user_machine_not_found) stops at
+// once and says why, instead of waiting for a machine that never comes back (F14-02 review of 1f6c7685f).
+func TestARemovedDestinationStopsTheSendAndSaysSo(t *testing.T) {
+	cause := fmt.Errorf("file transfer authorization renewal failed: %w", &api.APIError{Status: 404, Code: "user_machine_not_found"})
+	err := destinationBusy("macl", destinationStorageFull("macl", destinationGone("macl", cause)))
+	message := commandFailureMessage(err, classifyCommandFailure(err))
+	result := classifyCLIJSONError(err)
+	if message != "macl was removed or revoked, so the transfer stopped; nothing more is sent to it." || result.Code != "destination_removed" || result.Retryable {
+		t.Fatalf("message=%q code=%q retryable=%v", message, result.Code, result.Retryable)
+	}
+	offline := &api.APIError{Status: 409, Code: "machine_offline"}
+	if destinationGone("macl", offline) != error(offline) {
+		t.Fatal("an offline machine was reported as removed")
 	}
 }

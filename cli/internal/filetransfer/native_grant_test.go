@@ -63,9 +63,10 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 	// destination (no_eligible_path); the upload waits, says so, and resumes at the committed offset.
 	// offline: after the carrier is lost the server answers the renewal machine_offline twice (the destination's path
 	// blipped; F14-02 on winpool-12 failed the send here); the transfer waits and resumes instead of failing.
-	for _, mode := range []string{"allowed", "denied", "restarting", "stopping", "waiting", "lease-lost", "offline"} {
+	// gone: the server says the destination was removed or revoked (404 user_machine_not_found): the send stops at once.
+	for _, mode := range []string{"allowed", "denied", "restarting", "stopping", "waiting", "lease-lost", "offline", "gone"} {
 		t.Run(mode, func(t *testing.T) {
-			denied := mode == "denied"
+			denied := mode == "denied" || mode == "gone"
 			daemonDown := 0
 			var restarting atomic.Bool
 			var downErr error = &net.OpError{Op: "dial", Net: "unix", Err: os.NewSyscallError("connect", syscall.ENOENT)}
@@ -169,6 +170,10 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 			initial := NativeGrant{Endpoint: server.URL + "/v1/file-transfers", Auth: Auth{Token: "original", ExpiresAt: first.expires}, Binding: testBinding(), Policy: policy, Lease: first}
 			var err error
 			client, err = NewRenewableNativeClient(initial, func(ctx context.Context) (NativeGrant, error) {
+				if mode == "gone" {
+					daemonDown++
+					return NativeGrant{}, fmt.Errorf("renew file transfer grant: %w", &api.APIError{Status: http.StatusNotFound, Code: "user_machine_not_found"})
+				}
 				if mode == "offline" && daemonDown < 2 {
 					daemonDown++
 					return NativeGrant{}, fmt.Errorf("renew file transfer grant: %w", &api.APIError{Status: http.StatusConflict, Code: "machine_offline"})
@@ -208,6 +213,7 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 			client.retryWait = func(ctx context.Context, _ int) error { return ctx.Err() }
 			var waits []string
 			client.Waiting = func(message string) { waits = append(waits, message) }
+			client.DestinationName = "macl"
 			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 			defer cancel()
 			batch, err := client.SendBatch(ctx, manifest.BatchID, "", []Source{item})
@@ -219,6 +225,13 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 			} else if err != nil || batch.BatchID != manifest.BatchID || !bytes.Equal(content, data) {
 				t.Fatal("fresh grant did not complete the original batch", err)
 			}
+			if mode == "gone" {
+				var removed *api.APIError
+				if !errors.As(err, &removed) || removed.Code != "user_machine_not_found" || daemonDown != 1 || len(waits) != 0 {
+					t.Fatalf("a removed destination was retried or lost its reason: renewals=%d waits=%q err=%v", daemonDown, waits, err)
+				}
+				renewals++ // the refusal came from the renew closure, not the fixture's /authorize
+			}
 			if creates != 1 || renewals != 1 {
 				t.Fatal("recovery created a new batch or repeatedly probed authorization")
 			}
@@ -228,8 +241,8 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 			if (mode == "restarting" || mode == "stopping") && daemonDown != 3 {
 				t.Fatal("renewal did not wait for the restarting daemon", daemonDown)
 			}
-			if mode == "offline" && daemonDown != 2 {
-				t.Fatal("renewal did not wait for the offline machine", daemonDown)
+			if mode == "offline" && (daemonDown != 2 || len(waits) == 0 || waits[0] != "Waiting for macl to come back online (up to 32 min)") {
+				t.Fatalf("renewal did not wait for the offline machine, or did not say so: %d %q", daemonDown, waits)
 			}
 			if !denied && maintenanceResponses != 6 {
 				t.Fatal("transfer did not recover beyond the former four-failure limit")

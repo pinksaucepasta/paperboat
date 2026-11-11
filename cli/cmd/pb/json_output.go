@@ -236,6 +236,10 @@ func classifyCLIJSONFailure(err error, failure commandFailure) cliJSONError {
 	case destinationBusyError:
 		result.Code, result.Category, result.StateChanged, result.Retryable = "destination_busy", "conflict", false, true
 		result.Recovery = "Let the destination's unfinished transfers finish or cancel them (`pb send list --on <machine>`, `pb send cancel <transfer-id> --on <machine>`), then send again."
+	case destinationGoneError:
+		// The server says the destination no longer exists for this account; waiting would never help.
+		result.Code, result.Category, result.StateChanged, result.Retryable = "destination_removed", "conflict", false, false
+		result.Recovery = "Check `pb machine list`; send to a machine that is still on the account."
 	case destinationStorageFullError:
 		// Nothing was delivered; the partial upload is discarded by the receiver.
 		result.Code, result.Category, result.StateChanged, result.Retryable = "destination_storage_full", "conflict", false, false

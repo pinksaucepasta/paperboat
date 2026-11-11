@@ -141,8 +141,10 @@ type Client struct {
 	RefreshAuth     func(context.Context) (Auth, error)
 	MaxConcurrent   int
 	DeliveryTimeout time.Duration
-	// Waiting is told when an Unlimited transfer pauses for a direct connection or the account's own relay.
-	Waiting func(message string)
+	// Waiting is told when a transfer pauses: an Unlimited one for a direct connection or the account's own relay,
+	// any one for a machine the server calls offline (DestinationName names it in the message).
+	Waiting         func(message string)
+	DestinationName string
 	// Committed is told each file's committed offset as the receiver confirms it.
 	Committed func(transferID string, offset int64)
 	retryWait func(context.Context, int) error
@@ -875,10 +877,19 @@ func (c *Client) refreshRequestAdmission(ctx context.Context) error {
 	return nil
 }
 
-// noteWaiting tells the caller once per failure that an Unlimited transfer is paused for a path.
+// noteWaiting tells the caller once per failure that the transfer is paused: for a path, or for an offline machine.
 func (c *Client) noteWaiting(err error) {
 	var waiting *PathWaitingError
-	if c.Waiting != nil && errors.As(err, &waiting) {
+	var offline *machineUnavailable
+	switch {
+	case c.Waiting == nil:
+	case errors.As(err, &waiting):
 		c.Waiting(waiting.Message)
+	case errors.As(err, &offline):
+		name := c.DestinationName
+		if name == "" {
+			name = "the destination machine"
+		}
+		c.Waiting(fmt.Sprintf("Waiting for %s to come back online (up to %d min)", name, int(nativeRecoveryWindow/time.Minute)))
 	}
 }

@@ -36,6 +36,29 @@ func destinationStorageFull(machine string, err error) error {
 	return destinationStorageFullError{machine: machine, needed: remote.NeededBytes, free: remote.FreeBytes, cause: err}
 }
 
+// destinationGoneError is a running send whose destination the server reports removed or revoked: unlike an offline
+// machine (the send waits for it), it never comes back, so the send stops at once.
+type destinationGoneError struct {
+	machine string
+	cause   error
+}
+
+func (e destinationGoneError) Error() string {
+	return fmt.Sprintf("%s was removed or revoked, so the transfer stopped; nothing more is sent to it.", e.machine)
+}
+
+func (e destinationGoneError) Unwrap() error { return e.cause }
+
+// destinationGone turns the server's user_machine_not_found during a send into destinationGoneError; any other error
+// is returned unchanged.
+func destinationGone(machine string, err error) error {
+	var remote *api.APIError
+	if err == nil || !errors.As(err, &remote) || remote.Code != "user_machine_not_found" {
+		return err
+	}
+	return destinationGoneError{machine: machine, cause: err}
+}
+
 // destinationBusyError is a send the receiving computer refused because it already holds as many
 // unfinished transfers as it accepts (its resource_limit, HTTP 429). Nothing new was delivered.
 type destinationBusyError struct {

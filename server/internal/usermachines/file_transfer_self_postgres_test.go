@@ -49,6 +49,10 @@ WHERE id IN(SELECT edge_node_id FROM paperboat.control_connector_generations WHE
 		{"offline", `UPDATE paperboat.user_machines SET online=false WHERE id=$1`, `UPDATE paperboat.user_machines SET online=true WHERE id=$1`, ErrMachineOffline},
 		{"released seat", `UPDATE paperboat.user_machines SET seat_state='released' WHERE id=$1`, `UPDATE paperboat.user_machines SET seat_state='occupied' WHERE id=$1`, ErrMachineOffline},
 		{"revoked", `UPDATE paperboat.user_machines SET revoked_at=now(),state='revoked' WHERE id=$1`, `UPDATE paperboat.user_machines SET revoked_at=NULL,state='online' WHERE id=$1`, ErrNotFound},
+		// gone for good wins over offline: a running send retries machine_offline but must stop for these (F14-02)
+		{"revoked while offline", `UPDATE paperboat.user_machines SET revoked_at=now(),state='revoked',online=false WHERE id=$1`, `UPDATE paperboat.user_machines SET revoked_at=NULL,state='online',online=true WHERE id=$1`, ErrNotFound},
+		{"disconnected while offline", `UPDATE paperboat.user_machines SET state='disconnected',online=false WHERE id=$1`, `UPDATE paperboat.user_machines SET state='online',online=true WHERE id=$1`, ErrNotFound},
+		{"deleted while offline", `UPDATE paperboat.user_machines SET state='deleted',online=false WHERE id=$1`, `UPDATE paperboat.user_machines SET state='online',online=true WHERE id=$1`, ErrNotFound},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			exec(test.change)
