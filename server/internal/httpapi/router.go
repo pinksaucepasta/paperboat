@@ -518,7 +518,7 @@ func NewRouter(opts Options) http.Handler {
 					registerAuditStreamRoutes(mux, opts.AuditStreams, func(h http.Handler) http.Handler { return secure("machines:read", h) }, func(h http.Handler) http.Handler { return secure("machines:connect", requireCSRF(opts.Auth, h)) })
 				}
 				if opts.Recordings != nil {
-					registerRecordingRoutes(mux, opts.Recordings, func(h http.Handler) http.Handler { return secure("machines:read", h) }, func(h http.Handler) http.Handler { return secure("machines:connect", requireCSRF(opts.Auth, h)) })
+					registerRecordingRoutes(mux, opts.Recordings, opts.BrowserTerminal, func(h http.Handler) http.Handler { return secure("machines:read", h) }, func(h http.Handler) http.Handler { return secure("machines:connect", requireCSRF(opts.Auth, h)) })
 				}
 				if opts.TeamIdentity != nil {
 					registerTeamIdentityRoutes(mux, opts.TeamIdentity, func(h http.Handler) http.Handler { return secure("machines:read", h) }, func(h http.Handler) http.Handler { return secure("machines:connect", requireCSRF(opts.Auth, h)) })

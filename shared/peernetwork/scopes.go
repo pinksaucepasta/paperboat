@@ -8,6 +8,7 @@ var scopeCapabilities = map[string][]string{
 	"machine_access": {"terminal", "exec", "managed_ssh", "file_transfer", "private_access", "inspector"},
 	"inspector":      {"inspector"},
 	"config_compare": {"config_compare"},
+	"recording":      {"recording"}, // a CLI session recording replay (shared/recording NativeConsumer)
 	"codex_session":  {"codex"},
 }
 

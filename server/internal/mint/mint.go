@@ -853,13 +853,15 @@ func (p *Provider) SignCredential(input CredentialInput) (string, error) {
 		claims["machine_id"], claims["user_id"], claims["account_id"] = input.MachineID, input.UserID, input.AccountID
 		claims["browser_attachment_id"], claims["browser_public_key_sha256"] = input.BrowserAttachmentID, input.BrowserPublicKeySHA256
 	case recording.CredentialClass:
-		if !validRecordingReplay(input.MachineID, input.UserID, input.AccountID, input.WorkspaceID, input.ResourceKind, input.ResourceID, input.BrowserAttachmentID, input.BrowserPublicKeySHA256) || input.SessionID != "" || input.CLIClientSessionID != "" || input.SourceMachineID != "" {
+		if !validRecordingReplay(input.MachineID, input.UserID, input.AccountID, input.WorkspaceID, input.ResourceKind, input.ResourceID, input.CLIClientSessionID, input.BrowserAttachmentID, input.BrowserPublicKeySHA256) || input.SessionID != "" || input.SourceMachineID != "" {
 			return "", errors.New("recording replay bindings are required")
 		}
 		claims["machine_id"], claims["user_id"], claims["account_id"], claims["workspace_id"] = input.MachineID, input.UserID, input.AccountID, input.WorkspaceID
 		claims["resource_kind"], claims["resource_id"] = input.ResourceKind, input.ResourceID
 		if input.BrowserAttachmentID != "" {
 			claims["browser_attachment_id"], claims["browser_public_key_sha256"] = input.BrowserAttachmentID, input.BrowserPublicKeySHA256
+		} else {
+			claims["cli_client_session_id"] = input.CLIClientSessionID
 		}
 	case "exec_operation":
 		if input.MachineID == "" || input.UserID == "" || input.CLIClientSessionID == "" || !ValidOperationID(input.OperationID) {
@@ -1089,7 +1091,7 @@ func (p *Provider) verifyCredential(token, expectedIssuer, expectedClass string,
 			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
 		}
 	case recording.CredentialClass:
-		if !validRecordingReplay(claims.MachineID, claims.UserID, claims.AccountID, claims.WorkspaceID, claims.ResourceKind, claims.ResourceID, claims.BrowserAttachmentID, claims.BrowserPublicKeySHA256) || claims.SessionID != "" || claims.CLIClientSessionID != "" || claims.SourceMachineID != "" {
+		if !validRecordingReplay(claims.MachineID, claims.UserID, claims.AccountID, claims.WorkspaceID, claims.ResourceKind, claims.ResourceID, claims.CLIClientSessionID, claims.BrowserAttachmentID, claims.BrowserPublicKeySHA256) || claims.SessionID != "" || claims.SourceMachineID != "" {
 			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
 		}
 	case "exec_operation":
@@ -1565,11 +1567,12 @@ func validPreviewOwnerSessionKind(kind string) bool {
 	return kind == "local_lease" || kind == "foreground" || kind == "lazy_runtime"
 }
 
-// validRecordingReplay: a replay ticket names one recording on one machine for one account of its team; the browser
-// form also binds the E2E attachment and key, the native form neither.
-func validRecordingReplay(machine, user, account, workspace, kind, resource, attachment, keyDigest string) bool {
-	return machine != "" && user != "" && account == user && workspace != "" && kind == recording.ResourceKind && recording.ValidRecordingID(resource) &&
-		(attachment == "") == (keyDigest == "") && (keyDigest == "" || validBrowserKeyDigest(keyDigest))
+// validRecordingReplay: a replay ticket names one recording on one machine for one account of its team, and binds
+// either the CLI client session (native) or the browser E2E attachment and key.
+func validRecordingReplay(machine, user, account, workspace, kind, resource, cli, attachment, keyDigest string) bool {
+	native := cli != "" && attachment == "" && keyDigest == ""
+	browser := cli == "" && attachment != "" && validBrowserKeyDigest(keyDigest)
+	return machine != "" && user != "" && account == user && workspace != "" && kind == recording.ResourceKind && recording.ValidRecordingID(resource) && (native || browser)
 }
 
 func processCredentialClass(class string) bool {

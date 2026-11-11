@@ -67,8 +67,12 @@ const (
 
 // Bounds shared by producer and consumer.
 const (
-	MaxAccounts    = 64
-	MaxSealedBytes = 4096
+	MaxAccounts = 64
+	// SealedBytes is the size of a sealed key bundle (cli/internal/recording bundle.go): HPKE base mode, DHKEM
+	// X25519 + HKDF-SHA256 + AES-256-GCM, enc (32) || ciphertext of X25519 private (32) || Ed25519 private (64)
+	// plus the tag (16); info "paperboat recording key bundle v1", aad team_id "\x00" decimal generation of the
+	// sealed bundle.
+	SealedBytes = 32 + 32 + 64 + 16
 	// MaxReportAge is how old a Report may be when it reaches the server (the audit backlog bound).
 	MaxReportAge = 7 * 24 * time.Hour
 )
@@ -100,6 +104,30 @@ type Policy struct {
 	RetentionDays  int      `json:"retention_days"`
 	DiskQuotaMB    int      `json:"disk_quota_mb"`
 }
+
+// ValidManualStart reports whether v is a manual-start setting.
+func ValidManualStart(v string) bool { return v == ManualStartAnyone || v == ManualStartAdmins }
+
+// ValidSealed bounds a sealed key blob (a viewer's copy or a rotation's previous key).
+func ValidSealed(b []byte) bool { return len(b) == SealedBytes }
+
+// Valid checks a policy a machine received before it acts on it: the settings, the bounds, and a key chain of
+// valid, consecutive generations from 1 (each rotation's signature is checked against the pinned key with
+// VerifyRotation).
+func (p Policy) Valid() bool {
+	if !ValidManualStart(p.ManualStart) || p.RetentionDays < 1 || p.DiskQuotaMB < 1 || len(p.RecordAccounts) > maxPolicyAccounts || len(p.AdminAccounts) > maxPolicyAccounts {
+		return false
+	}
+	for i, k := range p.Keys {
+		if !k.ValidKey() || k.Generation != int64(i)+1 {
+			return false
+		}
+	}
+	return !p.Enabled || p.TeamID != ""
+}
+
+// maxPolicyAccounts bounds a policy's account lists (team size is bounded well below it).
+const maxPolicyAccounts = 100_000
 
 // Report is the recording part of an audit backlog event (kinds KindStarted, KindStopped,
 // KindDeleted).
@@ -201,16 +229,24 @@ type ChainLink struct {
 	SealedPrevious []byte `json:"sealed_previous"`
 }
 
-// ReplayRequest is POST /v1/recordings/{id}/replay. A browser sends its E2E public key hash and
-// gets a browser ticket (role "recording") instead of a machine ticket.
+// ReplayRequest is POST /v1/recordings/{id}/replay with exactly one of the two fields. The CLI names
+// its client session: the peer network then admits it to the machine for the consumer NativeConsumer
+// until the ticket expires, and the ticket is bound to it. A browser sends its E2E public key hash
+// and gets a browser ticket (role "recording") and a stream URL instead of a machine ticket.
 type ReplayRequest struct {
+	CLIClientSessionID     string `json:"cli_client_session_id,omitempty"`
 	BrowserPublicKeySHA256 string `json:"browser_public_key_sha256,omitempty"`
 }
+
+// NativeConsumer is the peer stream consumer and network capability of a CLI replay.
+const NativeConsumer = "recording"
 
 // Replay answers ReplayRequest. The server wrote the replay audit event before answering.
 type Replay struct {
 	Ticket        string      `json:"ticket"`
+	StreamURL     string      `json:"stream_url,omitempty"` // browser form only
 	MachineID     string      `json:"machine_id"`
+	TeamID        string      `json:"team_id"`        // the aad of the viewer's copy and the chain
 	KeyGeneration int64       `json:"key_generation"` // the recording's
 	ViewerKey     SealedKey   `json:"viewer_key"`
 	Chain         []ChainLink `json:"chain"` // from ViewerKey.Generation down to KeyGeneration+1
@@ -254,6 +290,47 @@ type GrantsPut struct {
 // Settings is PUT /v1/teams/{team}/recording-settings.
 type Settings struct {
 	ManualStart string `json:"manual_start"`
+}
+
+// Live recording state and control on a terminal attachment (terminal.v1, browser E2E or native). The actor of a
+// control request is the attachment's account; the host decides with Policy (start: Enabled, a key, and anyone or
+// an admin per ManualStart; stop: a manual recording by its starter or an admin, a rule recording only by an admin).
+const (
+	ActionStart    = "record-start" // request {"action":ActionStart,"session_id"}; answers {"recording":State}
+	ActionStop     = "record-stop"  // request {"action":ActionStop,"session_id"}; answers {}
+	EventRecording = "recording"    // stream event {"event":EventRecording,"session_id","recording":State|null}
+)
+
+// Replay stream on the machine (browser E2E or native consumer NativeConsumer): request {"action":ReadAction,
+// "recording_id"} on Capability, then binary frames each carrying one segment file behind a 4-byte big-endian
+// length, then the event {"event":EventStreamEnd,"segments":n}.
+const (
+	Capability     = "recording.v1"
+	ReadAction     = "read"
+	EventStreamEnd = "recording_stream_end"
+)
+
+// Control refusals (terminal error codes); not_found_or_forbidden is the terminal's own.
+const (
+	ErrorUnavailable = "recording_unavailable" // not enabled, no key, or the recorder cannot start
+	ErrorActive      = "recording_active"      // start while already recording
+	ErrorInactive    = "recording_inactive"    // stop while not recording
+)
+
+// State is a session's live recording: in the attach snapshot (Snapshot.recording) before any output frame, absent
+// when not recording, and in every EventRecording event (null when it stopped). Every attached client shows REC
+// while it is present.
+type State struct {
+	ID        string    `json:"id"`
+	Trigger   string    `json:"trigger"`
+	StartedBy string    `json:"started_by,omitempty"` // manual recordings
+	StartedAt time.Time `json:"started_at"`
+}
+
+// Valid checks a State a client received.
+func (s State) Valid() bool {
+	return ValidRecordingID(s.ID) && !s.StartedAt.IsZero() &&
+		(s.Trigger == TriggerRule && s.StartedBy == "" || s.Trigger == TriggerManual && idPattern.MatchString(s.StartedBy))
 }
 
 // Typed error codes.

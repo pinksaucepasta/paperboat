@@ -45,6 +45,7 @@ type Decision struct {
 	WorkspaceID           string
 	TerminalSessionID     string
 	InspectorCredentialID string
+	RecordingID           string
 	MachineID             string
 	EnvironmentID         string
 	HostWSSURL            string
@@ -115,23 +116,23 @@ func (g *Gateway) issue(ctx context.Context, in Ticket) (Ticket, string, Decisio
 		switch {
 		case errors.Is(err, usermachines.ErrTerminalBrowserSessionClosed):
 			return Ticket{}, "", Decision{}, ErrSessionClosed
-		case errors.Is(err, usermachines.ErrMachineCapabilityUnavailable) && in.Role != RoleInspector:
+		case errors.Is(err, usermachines.ErrMachineCapabilityUnavailable) && !in.terminalLess():
 			return Ticket{}, "", Decision{}, ErrMachineEdgeUnavailable
 		case expectedTerminalRejection(err):
 			return Ticket{}, "", Decision{}, ErrForbidden
 		}
 		return Ticket{}, "", Decision{}, unavailableCause(err)
 	}
-	if !validDecision(decision, userID, terminalSessionID) || decision.InspectorCredentialID != in.InspectorCredentialID {
+	if !validDecision(decision, userID, terminalSessionID) || decision.InspectorCredentialID != in.InspectorCredentialID || decision.RecordingID != in.RecordingID {
 		return Ticket{}, "", Decision{}, ErrForbidden
 	}
 	if decision.HostWSSURL == "" {
-		if in.Role == RoleInspector {
+		if in.terminalLess() {
 			return Ticket{}, "", Decision{}, ErrHostUnavailable
 		}
 		return Ticket{}, "", Decision{}, ErrMachineEdgeUnavailable
 	}
-	if checker, ok := g.Authorizer.(BandwidthChecker); ok && in.Role != RoleInspector {
+	if checker, ok := g.Authorizer.(BandwidthChecker); ok && !in.terminalLess() {
 		if err := checker.CheckBandwidth(ctx, decision); err != nil {
 			if errors.Is(err, usermachines.ErrBandwidthQuotaExhausted) {
 				return Ticket{}, "", Decision{}, err
@@ -139,7 +140,7 @@ func (g *Gateway) issue(ctx context.Context, in Ticket) (Ticket, string, Decisio
 			return Ticket{}, "", Decision{}, unavailableCause(err)
 		}
 	}
-	if checker, ok := g.Authorizer.(LimitChecker); ok && in.Role != RoleInspector {
+	if checker, ok := g.Authorizer.(LimitChecker); ok && !in.terminalLess() {
 		if err := checker.CheckBrowserTerminalLimit(ctx, decision); err != nil {
 			if errors.Is(err, planlimits.ErrLimitReached) {
 				return Ticket{}, "", Decision{}, err
@@ -155,7 +156,7 @@ func (g *Gateway) issue(ctx context.Context, in Ticket) (Ticket, string, Decisio
 		return Ticket{}, "", Decision{}, ErrHostUnavailable
 	}
 	streamURL := (&url.URL{Scheme: "wss", Host: decision.EdgeEndpointHost, Path: "/v1/browser-terminal/" + runtimeURL.Hostname()}).String()
-	ticket, err := g.Tickets.Issue(ctx, Ticket{GuestSessionID: in.GuestSessionID, UserID: in.UserID, BrowserSessionID: in.BrowserSessionID, TerminalSessionID: terminalSessionID, InspectorCredentialID: in.InspectorCredentialID, Origin: origin, Role: decision.Role, PolicyGeneration: decision.PolicyGeneration, TeamGeneration: decision.TeamGeneration, MembershipGeneration: decision.MembershipGeneration, BindingGeneration: decision.BindingGeneration, BrowserPublicKeySHA256: browserPublicKeySHA256})
+	ticket, err := g.Tickets.Issue(ctx, Ticket{GuestSessionID: in.GuestSessionID, UserID: in.UserID, BrowserSessionID: in.BrowserSessionID, TerminalSessionID: terminalSessionID, InspectorCredentialID: in.InspectorCredentialID, RecordingID: in.RecordingID, Origin: origin, Role: decision.Role, PolicyGeneration: decision.PolicyGeneration, TeamGeneration: decision.TeamGeneration, MembershipGeneration: decision.MembershipGeneration, BindingGeneration: decision.BindingGeneration, BrowserPublicKeySHA256: browserPublicKeySHA256})
 	return ticket, streamURL, decision, err
 }
 
@@ -174,7 +175,7 @@ func sameDecision(a, b Decision) bool {
 // as Teleport's connection monitor ends a session for a lock or an expired certificate, never a proxy change
 // (lib/srv/monitor.go).
 func sameAccess(a, b Decision) bool {
-	return validDecision(b, a.UserID, a.TerminalSessionID) && a.GuestSessionID == b.GuestSessionID && a.Role == b.Role && a.PolicyGeneration == b.PolicyGeneration && a.TeamGeneration == b.TeamGeneration && a.MembershipGeneration == b.MembershipGeneration && a.BindingGeneration == b.BindingGeneration && a.MachineID == b.MachineID && a.InspectorCredentialID == b.InspectorCredentialID && a.EnvironmentID == b.EnvironmentID && a.OwnerAccountID == b.OwnerAccountID && a.WorkspaceID == b.WorkspaceID
+	return validDecision(b, a.UserID, a.TerminalSessionID) && a.GuestSessionID == b.GuestSessionID && a.Role == b.Role && a.PolicyGeneration == b.PolicyGeneration && a.TeamGeneration == b.TeamGeneration && a.MembershipGeneration == b.MembershipGeneration && a.BindingGeneration == b.BindingGeneration && a.MachineID == b.MachineID && a.InspectorCredentialID == b.InspectorCredentialID && a.RecordingID == b.RecordingID && a.EnvironmentID == b.EnvironmentID && a.OwnerAccountID == b.OwnerAccountID && a.WorkspaceID == b.WorkspaceID
 }
 
 func scopeForRole(role string) string {
@@ -231,6 +232,20 @@ type GuestSessionAuthority interface {
 }
 
 func (g *Gateway) resolveTicketRole(ctx context.Context, ticket Ticket) (Decision, error) {
+	if ticket.Role == RoleRecording {
+		a, ok := g.Authorizer.(RecordingAuthorizer)
+		if !ok || ticket.GuestSessionID != "" {
+			return Decision{}, ErrForbidden
+		}
+		d, err := a.ResolveRecording(ctx, ticket.UserID, ticket.RecordingID)
+		if err != nil {
+			return d, err
+		}
+		if d.Role != RoleRecording || d.RecordingID != ticket.RecordingID {
+			return Decision{}, ErrForbidden
+		}
+		return d, nil
+	}
 	if ticket.Role == RoleInspector {
 		a, ok := g.Authorizer.(InspectorAuthorizer)
 		if !ok || ticket.GuestSessionID != "" {

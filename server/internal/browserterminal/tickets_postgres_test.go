@@ -280,3 +280,50 @@ func TestEdgeTicketResumesItsAttachmentAndIsKeptWhileAttachedPostgres(t *testing
 		t.Fatalf("tickets kept after their attachment ended: %d, %v", kept, err)
 	}
 }
+
+// A recording replay ticket stores its recording, never opens a terminal, and is consumed once at the edge.
+func TestBrowserRecordingTicketIsBoundToItsRecordingPostgres(t *testing.T) {
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("set PAPERBOAT_TEST_DATABASE_DSN")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := db.Migrate(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	userID, browserSessionID := "usr_brt_"+suffix, "ses_brt_"+suffix
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO users (id,workos_subject,primary_email,status) VALUES ($1,$1,$1||'@example.test','active')`, userID); err != nil {
+		t.Fatal(err)
+	}
+	defer store.SQL().ExecContext(ctx, `DELETE FROM users WHERE id=$1`, userID)
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO sessions (id,user_id,session_hash,csrf_hash,expires_at) VALUES ($1,$2,$3,$4,now()+interval '1 hour')`, browserSessionID, userID, "session_hash_"+suffix, "csrf_hash_"+suffix); err != nil {
+		t.Fatal(err)
+	}
+	tickets := TicketStore{DB: store}
+	issued, err := tickets.Issue(ctx, Ticket{UserID: userID, BrowserSessionID: browserSessionID, RecordingID: testRecordingID, Origin: "https://dashboard.example.test", Role: RoleRecording, PolicyGeneration: 1, BrowserPublicKeySHA256: testBrowserKeyDigest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tickets.Consume(ctx, issued.Value, issued.Origin, "term_any"); !errors.Is(err, ErrTicketInvalid) {
+		t.Fatalf("recording ticket redeemed for a terminal: %v", err)
+	}
+	used, err := tickets.ConsumeEdge(ctx, issued.Value, issued.Origin, "attachment_rec")
+	if err != nil || used.Role != RoleRecording || used.RecordingID != testRecordingID || used.TerminalSessionID != "" || used.InspectorCredentialID != "" {
+		t.Fatalf("consumed recording ticket = %#v, %v", used, err)
+	}
+	if _, err := tickets.ConsumeEdge(ctx, issued.Value, issued.Origin, "attachment_rec2"); !errors.Is(err, ErrTicketInvalid) {
+		t.Fatalf("recording ticket consumed twice: %v", err)
+	}
+	if _, err := tickets.Issue(ctx, Ticket{UserID: userID, BrowserSessionID: browserSessionID, Origin: "https://dashboard.example.test", Role: RoleRecording, PolicyGeneration: 1, BrowserPublicKeySHA256: testBrowserKeyDigest}); !errors.Is(err, ErrTicketInvalid) {
+		t.Fatalf("recording ticket without a recording: %v", err)
+	}
+}

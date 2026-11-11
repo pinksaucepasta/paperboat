@@ -10,8 +10,9 @@ import (
 )
 
 type MachineAuthorizer struct {
-	Service   *usermachines.Service
-	Inspector *inspectaccess.Service
+	Service    *usermachines.Service
+	Inspector  *inspectaccess.Service
+	Recordings RecordingReplays
 }
 
 func (a MachineAuthorizer) ResolveRole(ctx context.Context, userID, terminalSessionID string) (Decision, error) {

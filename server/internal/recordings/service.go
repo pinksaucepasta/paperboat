@@ -29,6 +29,7 @@ var (
 	ErrKeyConflict    = errors.New("the recording key changed or the rotation is not signed by the current key")
 	ErrDeleted        = errors.New("the recording was deleted from its machine")
 	ErrMachineGone    = errors.New("the machine identity is no longer current")
+	ErrTooMany        = errors.New("too many replays at once; wait a few minutes")
 )
 
 type Service struct {

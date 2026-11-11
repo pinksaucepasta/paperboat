@@ -40,6 +40,9 @@ func batchOf(table, candidates string) string {
 
 // policies run in this order: a parent whose foreign keys do not cascade comes after the children that hold it.
 var policies = []policy{
+	// A CLI recording replay's peer network admission, after its ticket expired.
+	{"recording_native_admissions", batchOf("recording_native_admissions", `expires_at < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.ExpiredCredentials })},
 	// A recording's index row (the bytes live, and are deleted, on its machine).
 	{"session_recordings", batchOf("session_recordings", `started_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.Recordings })},

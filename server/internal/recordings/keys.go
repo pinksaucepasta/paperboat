@@ -113,8 +113,8 @@ func (s *Service) KeyState(ctx context.Context, account, team string) (recording
 // for at least one viewer, so the key is never created with nobody holding it.
 func (s *Service) CreateKey(ctx context.Context, account, team string, in recording.KeyCreate) (recording.Key, error) {
 	k := in.Key
-	if !k.ValidKey() || k.Generation > s.cfg.MaxKeyGenerations || len(in.Grants) == 0 || (k.Generation == 1) != (len(in.SealedPrevious) == 0) ||
-		len(in.SealedPrevious) > recording.MaxSealedBytes {
+	if !k.ValidKey() || k.Generation > s.cfg.MaxKeyGenerations || len(in.Grants) == 0 || len(in.Grants) > 1000 ||
+		(k.Generation == 1) != (len(in.SealedPrevious) == 0) || (k.Generation > 1 && !recording.ValidSealed(in.SealedPrevious)) {
 		return recording.Key{}, ErrInvalid
 	}
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -198,7 +198,7 @@ func (s *Service) grantTx(ctx context.Context, tx *db.Tx, account, team string, 
 	}
 	seen := map[string]bool{}
 	for _, g := range grants {
-		if seen[g.AccountID] || !slices.Contains(viewers, g.AccountID) || len(g.Sealed) == 0 || len(g.Sealed) > recording.MaxSealedBytes {
+		if seen[g.AccountID] || !slices.Contains(viewers, g.AccountID) || !recording.ValidSealed(g.Sealed) {
 			return ErrInvalid
 		}
 		seen[g.AccountID] = true
@@ -224,7 +224,7 @@ func (s *Service) grantTx(ctx context.Context, tx *db.Tx, account, team string, 
 
 // PutSettings is PUT /v1/teams/{team}/recording-settings (settings admins).
 func (s *Service) PutSettings(ctx context.Context, account, team string, in recording.Settings) error {
-	if in.ManualStart != recording.ManualStartAnyone && in.ManualStart != recording.ManualStartAdmins {
+	if !recording.ValidManualStart(in.ManualStart) {
 		return ErrInvalid
 	}
 	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {

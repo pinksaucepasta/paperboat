@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
@@ -69,80 +71,143 @@ func (s *Service) List(ctx context.Context, account, team string, f Filter) (rec
 	return out, err
 }
 
-// Replay is POST /v1/recordings/{id}/replay. In one transaction: the recording, the account's replay permission on
-// its machine (an explicit recording_view rule), the viewer's sealed copy, then the replay audit event, and only
-// then the ticket. Without the audit event there is no ticket; a ticket the transaction did not commit is never
-// returned.
-func (s *Service) Replay(ctx context.Context, account, id string, in recording.ReplayRequest) (recording.Replay, error) {
+// target is a recording a viewer may replay now.
+type target struct {
+	team, machine, session, environment string
+	keyGeneration                       int64
+}
+
+// authorizeTx checks, in order: the recording exists, the account is a member of its team on the Teams plan, an
+// explicit recording_view rule covers its machine, it is not deleted and its machine still exists.
+func authorizeTx(ctx context.Context, tx *db.Tx, account, id string) (target, error) {
+	var t target
+	var state string
 	if !recording.ValidRecordingID(id) {
-		return recording.Replay{}, ErrNotFound
+		return t, ErrNotFound
 	}
-	if in.BrowserPublicKeySHA256 != "" {
-		// shortcut: the browser ticket (role "recording" on the browser transport) lands in the next change.
+	err := tx.QueryRow(ctx, `SELECT team_id, machine_id, session_id, key_generation, state FROM session_recordings WHERE id = $1`, id).Scan(&t.team, &t.machine, &t.session, &t.keyGeneration, &state)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return t, ErrNotFound
+	}
+	if err != nil {
+		return t, err
+	}
+	if _, err := memberTx(ctx, tx, account, t.team, teams.PermissionTeamRead); err != nil {
+		if errors.Is(err, ErrForbidden) {
+			return t, ErrNotFound
+		}
+		return t, err
+	}
+	var allowed bool
+	if err := tx.QueryRow(ctx, `SELECT NOT isempty(paperboat.workspace_policy_rule_ports($1, $2, $3, 'recording_view'))`, account, t.team, t.machine).Scan(&allowed); err != nil {
+		return t, err
+	}
+	if !allowed {
+		return t, ErrForbidden
+	}
+	if state == recording.StateDeleted {
+		return t, ErrDeleted
+	}
+	err = tx.QueryRow(ctx, `SELECT environment_id FROM user_machines WHERE id = $1 AND deleted_at IS NULL AND revoked_at IS NULL`, t.machine).Scan(&t.environment)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return t, ErrDeleted // the machine, and the recording with it, is gone
+	}
+	return t, err
+}
+
+// ResolveReplay re-checks a browser replay channel at its admission (browserterminal.RecordingReplays).
+func (s *Service) ResolveReplay(ctx context.Context, account, id string) (string, string, error) {
+	var t target
+	err := s.db.InReadOnlySnapshot(ctx, func(ctx context.Context, tx *db.Tx) (err error) {
+		t, err = authorizeTx(ctx, tx, account, id)
+		return err
+	})
+	return t.team, t.machine, err
+}
+
+// Replay is POST /v1/recordings/{id}/replay. In one transaction: authorizeTx, the viewer's sealed copy, the replay
+// audit event, and only then the ticket. Without the audit event there is no ticket; a ticket the transaction did
+// not commit is never returned. The native form also admits the CLI endpoint to the machine for the ticket's
+// lifetime. The browser form returns no ticket: the caller then issues the browser ticket (the audit event is
+// already committed), and the host credential is minted at edge admission.
+func (s *Service) Replay(ctx context.Context, account, id string, in recording.ReplayRequest) (recording.Replay, error) {
+	if (in.CLIClientSessionID == "") == (in.BrowserPublicKeySHA256 == "") || len(in.CLIClientSessionID) > 128 {
 		return recording.Replay{}, ErrInvalid
 	}
 	var out recording.Replay
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		var team, machine, session, state string
-		err := tx.QueryRow(ctx, `SELECT team_id, machine_id, session_id, key_generation, state FROM session_recordings WHERE id = $1`, id).Scan(&team, &machine, &session, &out.KeyGeneration, &state)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrNotFound
-		}
+		t, err := authorizeTx(ctx, tx, account, id)
 		if err != nil {
 			return err
 		}
-		if _, err := memberTx(ctx, tx, account, team, teams.PermissionTeamRead); err != nil {
-			if errors.Is(err, ErrForbidden) {
-				return ErrNotFound
-			}
+		out.MachineID, out.TeamID, out.KeyGeneration = t.machine, t.team, t.keyGeneration
+		if out.ViewerKey, err = s.viewerKeyTx(ctx, tx, account, t.team, t.keyGeneration); err != nil {
 			return err
 		}
-		var allowed bool
-		if err := tx.QueryRow(ctx, `SELECT NOT isempty(paperboat.workspace_policy_rule_ports($1, $2, $3, 'recording_view'))`, account, team, machine).Scan(&allowed); err != nil {
-			return err
-		}
-		if !allowed {
-			return ErrForbidden
-		}
-		if state == recording.StateDeleted {
-			return ErrDeleted
-		}
-		var environmentID string
-		err = tx.QueryRow(ctx, `SELECT environment_id FROM user_machines WHERE id = $1 AND deleted_at IS NULL AND revoked_at IS NULL`, machine).Scan(&environmentID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrDeleted // the machine, and the recording with it, is gone
-		}
-		if err != nil {
-			return err
-		}
-		if out.ViewerKey, err = s.viewerKeyTx(ctx, tx, account, team, out.KeyGeneration); err != nil {
-			return err
-		}
-		if out.Chain, err = chainTx(ctx, tx, team, out.KeyGeneration, out.ViewerKey.Generation); err != nil {
+		if out.Chain, err = chainTx(ctx, tx, t.team, t.keyGeneration, out.ViewerKey.Generation); err != nil {
 			return err
 		}
 		jti := "token_" + uuid.NewString()
-		if err := teams.AuditTx(ctx, tx, account, team, "recording_replayed", jti, map[string]any{"recording_id": id, "machine_id": machine, "session_id": session, "generation": out.KeyGeneration}); err != nil {
+		if err := teams.AuditTx(ctx, tx, account, t.team, "recording_replayed", jti, map[string]any{"recording_id": id, "machine_id": t.machine, "session_id": t.session, "generation": t.keyGeneration}); err != nil {
+			return err
+		}
+		if in.CLIClientSessionID == "" {
+			return nil
+		}
+		now := s.now().UTC()
+		expires := now.Add(recording.TicketLifetime)
+		if err := admitNativeTx(ctx, tx, jti, id, account, in.CLIClientSessionID, t.machine, expires); err != nil {
 			return err
 		}
 		issuer, err := admission.New(s.signer, recording.TicketLifetime)
 		if err != nil {
 			return err
 		}
-		now := s.now().UTC()
-		credential, err := issuer.Issue(mint.CredentialInput{Issuer: s.issuer, Audience: "paperboat-machine", Subject: account, JTI: jti, IssuedAt: now, ExpiresAt: now.Add(recording.TicketLifetime),
-			CredentialClass: recording.CredentialClass, Scopes: []string{recording.Scope}, EnvironmentID: environmentID, AccountID: account, UserID: account, WorkspaceID: team,
-			MachineID: machine, ResourceKind: recording.ResourceKind, ResourceID: id})
+		credential, err := issuer.Issue(mint.CredentialInput{Issuer: s.issuer, Audience: "paperboat-machine", Subject: account, JTI: jti, IssuedAt: now, ExpiresAt: expires,
+			CredentialClass: recording.CredentialClass, Scopes: []string{recording.Scope}, EnvironmentID: t.environment, AccountID: account, UserID: account, WorkspaceID: t.team,
+			MachineID: t.machine, ResourceKind: recording.ResourceKind, ResourceID: id, CLIClientSessionID: in.CLIClientSessionID})
 		if err != nil {
 			return err
 		}
-		out.Ticket, out.MachineID = credential.Token, machine
+		out.Ticket = credential.Token
 		return nil
 	})
 	if err != nil {
 		return recording.Replay{}, err
 	}
 	return out, nil
+}
+
+// maxNativeAdmissions bounds one account's live replay admissions (each one peer network scope).
+const maxNativeAdmissions = 32
+
+// admitNativeTx lets the account's CLI endpoint reach the machine for capability recording until expires
+// (peersessions reads recording_native_admissions), and moves both endpoints' peer network so they pick it up now.
+func admitNativeTx(ctx context.Context, tx *db.Tx, jti, id, account, cli, machine string, expires time.Time) error {
+	var active bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM cli_client_sessions WHERE id = $1 AND user_id = $2 AND state = 'active' AND revoked_at IS NULL)`, cli, account).Scan(&active); err != nil {
+		return err
+	}
+	if !active {
+		return ErrInvalid
+	}
+	var live int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM recording_native_admissions WHERE account_id = $1 AND expires_at > now()`, account).Scan(&live); err != nil {
+		return err
+	}
+	if live >= maxNativeAdmissions {
+		return ErrTooMany
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO recording_native_admissions(id, recording_id, account_id, native_cli_session_id, machine_id, expires_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+		jti, id, account, cli, machine, expires); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE peer_network_identities n SET config_generation = config_generation + 1, updated_at = now()
+ WHERE (n.user_id = $1 AND n.endpoint_id = $2) OR (n.endpoint_id = $3 AND n.user_id = (SELECT user_id FROM user_machines WHERE id = $3))`, account, cli, machine); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `SELECT paperboat.publish_machine_topic(ARRAY[$1::text], 'peer_network')`, machine)
+	return err
 }
 
 // viewerKeyTx is account's sealed copy, still sealed to their current vault and new enough to open a recording of

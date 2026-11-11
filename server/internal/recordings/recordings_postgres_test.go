@@ -67,6 +67,9 @@ func newFixture(t *testing.T) *fixture {
 	}
 	f.exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) SELECT u,u,u||'@example.test','active' FROM unnest($1::text[]) u`, users)
 	f.exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, f.team, f.owner)
+	for _, u := range users {
+		f.exec(`INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES($1,$2,$1,'recordings test','desktop','linux',ARRAY['machines:connect'],'active',now(),now())`, "cli_"+u, u)
+	}
 	f.exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true),($1,$3,1,'admin',true),($1,$4,1,'member',true),($1,$5,1,'member',true)`, f.team, f.owner, f.admin, f.member, f.bo)
 	for _, m := range [][2]string{{f.prod, "prod"}, {f.dev, "dev"}} {
 		f.exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,owner_team_id) VALUES($1,$2,$1,$3,'linux','amd64','/w','online','occupied',true,$4)`, m[0], f.owner, m[1], f.team)
@@ -78,6 +81,7 @@ func newFixture(t *testing.T) *fixture {
 		_, _ = store.SQL().ExecContext(c, `DELETE FROM paperboat.team_resource_bindings WHERE team_id=$1`, f.team)
 		_, _ = store.SQL().ExecContext(c, `DELETE FROM paperboat.user_machines WHERE id=ANY($1)`, []string{f.prod, f.dev})
 		_, _ = store.SQL().ExecContext(c, `DELETE FROM paperboat.teams WHERE team_id=$1`, f.team)
+		_, _ = store.SQL().ExecContext(c, `DELETE FROM paperboat.cli_client_sessions WHERE user_id=ANY($1)`, users)
 		_, _ = store.SQL().ExecContext(c, `DELETE FROM paperboat.users WHERE id=ANY($1)`, users)
 	})
 	return f
@@ -145,8 +149,13 @@ func newKey(t *testing.T, team string, gen int64, previous ed25519.PrivateKey) (
 	return k, priv
 }
 
+// native is a CLI replay request from the member's client session.
+func (f *fixture) native() recording.ReplayRequest {
+	return recording.ReplayRequest{CLIClientSessionID: "cli_" + f.member}
+}
+
 func (f *fixture) grant(account string) recording.Grant {
-	return recording.Grant{AccountID: account, SharingPublicKey: f.sharing[account], Sealed: []byte("sealed-for-" + account)}
+	return recording.Grant{AccountID: account, SharingPublicKey: f.sharing[account], Sealed: sealed(account)}
 }
 
 const recID = "rec_01234567-89ab-cdef-0123-456789abcdef"
@@ -177,6 +186,9 @@ func TestPostgresRecordingsEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := f.machinePolicy(f.prod)
+	if !p.Valid() {
+		t.Fatalf("server policy fails the client check: %+v", p)
+	}
 	// role:member covers every member; bo's deny exempts them.
 	if want := []string{f.admin, f.member, f.owner}; !p.Enabled || p.TeamID != f.team || !slices.Equal(p.RecordAccounts, sorted(want)) || len(p.Keys) != 0 {
 		t.Fatalf("policy = %+v, want record %v", p, want)
@@ -209,11 +221,11 @@ func TestPostgresRecordingsEndToEnd(t *testing.T) {
 	// A rotation not signed by the current key is refused; a signed one is accepted with the previous key sealed.
 	forged, _ := newKey(t, f.team, 2, nil)
 	forged.RotationSignature = random(t, 64)
-	if _, err := f.s.CreateKey(f.ctx, f.owner, f.team, recording.KeyCreate{Key: forged, SealedPrevious: []byte("p"), Grants: []recording.Grant{f.grant(f.member)}}); !errors.Is(err, ErrKeyConflict) {
+	if _, err := f.s.CreateKey(f.ctx, f.owner, f.team, recording.KeyCreate{Key: forged, SealedPrevious: sealed("p"), Grants: []recording.Grant{f.grant(f.member)}}); !errors.Is(err, ErrKeyConflict) {
 		t.Fatalf("forged rotation = %v", err)
 	}
 	k2, _ := newKey(t, f.team, 2, s1)
-	if _, err := f.s.CreateKey(f.ctx, f.owner, f.team, recording.KeyCreate{Key: k2, SealedPrevious: []byte("gen1-sealed-to-gen2"), Grants: []recording.Grant{f.grant(f.member)}}); err != nil {
+	if _, err := f.s.CreateKey(f.ctx, f.owner, f.team, recording.KeyCreate{Key: k2, SealedPrevious: sealed("gen1-sealed-to-gen2"), Grants: []recording.Grant{f.grant(f.member)}}); err != nil {
 		t.Fatal(err)
 	}
 	if keys := f.machinePolicy(f.prod).Keys; len(keys) != 2 || !recording.VerifyRotation(f.team, keys[0], keys[1]) {
@@ -253,25 +265,26 @@ func TestPostgresRecordingsEndToEnd(t *testing.T) {
 	}
 
 	// Replay: only with recording_view (owner and admins too), only with a copy sealed to the current vault.
-	if _, err := f.s.Replay(f.ctx, f.admin, recID, recording.ReplayRequest{}); !errors.Is(err, ErrForbidden) {
+	if _, err := f.s.Replay(f.ctx, f.admin, recID, f.native()); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("admin without a rule replays: %v", err)
 	}
 	f.sharing[f.member] = random(t, 32) // the member reset their vault: the old copy no longer opens
-	if _, err := f.s.Replay(f.ctx, f.member, recID, recording.ReplayRequest{}); !errors.Is(err, ErrKeyPending) {
+	if _, err := f.s.Replay(f.ctx, f.member, recID, f.native()); !errors.Is(err, ErrKeyPending) {
 		t.Fatalf("stale copy = %v", err)
 	}
 	if err := f.s.PutGrants(f.ctx, f.member, f.team, recording.GrantsPut{Generation: 2, Grants: []recording.Grant{f.grant(f.member)}}); err != nil {
 		t.Fatal(err)
 	}
-	out, err := f.s.Replay(f.ctx, f.member, recID, recording.ReplayRequest{})
+	out, err := f.s.Replay(f.ctx, f.member, recID, f.native())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.MachineID != f.prod || out.KeyGeneration != 1 || out.ViewerKey.Generation != 2 || len(out.Chain) != 1 || string(out.Chain[0].SealedPrevious) != "gen1-sealed-to-gen2" {
+	if out.MachineID != f.prod || out.KeyGeneration != 1 || out.ViewerKey.Generation != 2 || len(out.Chain) != 1 || string(out.Chain[0].SealedPrevious) != string(sealed("gen1-sealed-to-gen2")) || out.TeamID != f.team {
 		t.Fatalf("replay = %+v", out)
 	}
 	claims, err := f.signer.VerifyCredential(out.Ticket, testIssuer, recording.CredentialClass, time.Now())
-	if err != nil || claims.MachineID != f.prod || claims.AccountID != f.member || claims.WorkspaceID != f.team || claims.ResourceID != recID || claims.ResourceKind != recording.ResourceKind {
+	if err != nil || claims.MachineID != f.prod || claims.AccountID != f.member || claims.WorkspaceID != f.team || claims.ResourceID != recID || claims.ResourceKind != recording.ResourceKind ||
+		claims.CLIClientSessionID != "cli_"+f.member {
 		t.Fatalf("ticket claims = %+v, %v", claims, err)
 	}
 	var audited int
@@ -279,6 +292,29 @@ func TestPostgresRecordingsEndToEnd(t *testing.T) {
 		t.Fatalf("replay audit events = %d, %v", audited, err)
 	}
 
+	// The CLI endpoint is admitted to the machine for the ticket's lifetime under the ticket's jti.
+	var admitted int
+	if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT count(*) FROM paperboat.recording_native_admissions WHERE id=$1 AND native_cli_session_id=$2 AND machine_id=$3 AND expires_at>now()`, claims.JTI, "cli_"+f.member, f.prod).Scan(&admitted); err != nil || admitted != 1 {
+		t.Fatalf("native admissions = %d, %v", admitted, err)
+	}
+	if _, err := f.s.Replay(f.ctx, f.member, recID, recording.ReplayRequest{CLIClientSessionID: "cli_" + f.bo}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("replay through another account's client = %v", err)
+	}
+	if _, err := f.s.Replay(f.ctx, f.member, recID, recording.ReplayRequest{CLIClientSessionID: "cli_" + f.member, BrowserPublicKeySHA256: "x"}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("both forms at once = %v", err)
+	}
+	// The browser form returns the key material without a machine ticket (the browser ticket comes from the gateway),
+	// after its own audit event.
+	browser, err := f.s.Replay(f.ctx, f.member, recID, recording.ReplayRequest{BrowserPublicKeySHA256: "browser-key-digest"})
+	if err != nil || browser.Ticket != "" || browser.ViewerKey.Generation != 2 {
+		t.Fatalf("browser replay = %+v, %v", browser, err)
+	}
+	if team, machine, err := f.s.ResolveReplay(f.ctx, f.member, recID); err != nil || team != f.team || machine != f.prod {
+		t.Fatalf("ResolveReplay = %q %q %v", team, machine, err)
+	}
+	if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT count(*) FROM paperboat.audit_events WHERE event_type='team.recording_replayed' AND resource_id=$1 AND actor_user_id=$2`, f.team, f.member).Scan(&audited); err != nil || audited != 2 {
+		t.Fatalf("replay audit events = %d, %v", audited, err)
+	}
 	// Losing recording_view removes the copy (history is not re-encrypted); deletion on the machine ends replay.
 	if err := f.policy(`{"rules": [{"src": ["role:member"], "dst": ["machine:*"], "allow": ["record"]}]}`); err != nil {
 		t.Fatal(err)
@@ -287,7 +323,7 @@ func TestPostgresRecordingsEndToEnd(t *testing.T) {
 	if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT count(*) FROM paperboat.recording_key_grants WHERE team_id=$1`, f.team).Scan(&grants); err != nil || grants != 0 {
 		t.Fatalf("grants after losing recording_view = %d, %v", grants, err)
 	}
-	if _, err := f.s.Replay(f.ctx, f.member, recID, recording.ReplayRequest{}); !errors.Is(err, ErrForbidden) {
+	if _, err := f.s.Replay(f.ctx, f.member, recID, f.native()); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("replay after losing the rule = %v", err)
 	}
 	apply(f.prod, recording.KindDeleted, recording.Report{RecordingID: recID, Reason: recording.ReasonRetention})
@@ -308,6 +344,13 @@ func TestPostgresRecordingsEndToEnd(t *testing.T) {
 	if f.topic(f.prod) <= before || !slices.Contains(f.machinePolicy(f.prod).AdminAccounts, f.bo) {
 		t.Fatal("a role change did not reach the machines")
 	}
+}
+
+// sealed is a stand-in sealed bundle of the real size, marked with who it is for.
+func sealed(mark string) []byte {
+	out := make([]byte, recording.SealedBytes)
+	copy(out, mark)
+	return out
 }
 
 func sorted(s []string) []string {

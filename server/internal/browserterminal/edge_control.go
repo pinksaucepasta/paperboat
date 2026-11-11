@@ -97,8 +97,12 @@ func (g *Gateway) admitEdge(ctx context.Context, input EdgeControlRequest, nodeI
 		release()
 		return edgeAdmission{}, nil, refused(terminalend.NoAccess, ErrForbidden)
 	}
-	if ticket.Role == RoleInspector {
-		admitted, err := g.admitInspectorEdge(ticket, decision, attachmentID)
+	if ticket.terminalLess() {
+		admit := g.admitInspectorEdge
+		if ticket.Role == RoleRecording {
+			admit = g.admitRecordingEdge
+		}
+		admitted, err := admit(ticket, decision, attachmentID)
 		if err != nil {
 			release()
 			return edgeAdmission{}, nil, err
@@ -180,7 +184,7 @@ func (g *Gateway) resumeEdge(ctx context.Context, input EdgeControlRequest, node
 		}
 		return edgeAdmission{}, nil, unavailableCause(err)
 	}
-	if ticket.Role == RoleInspector {
+	if ticket.terminalLess() {
 		return edgeAdmission{}, nil, refused(terminalend.Expired, ErrForbidden)
 	}
 	if !g.acquire(ticket.principalSessionID()) {
@@ -419,7 +423,7 @@ func edgeAdmissionReason(err error) string {
 // session, or the attachment itself for an inspector channel (nothing is
 // broadcast to it).
 func edgeHubKey(a edgeAdmission) string {
-	if a.Ticket.Role == RoleInspector {
+	if a.Ticket.terminalLess() {
 		return a.AttachmentID
 	}
 	return a.Ticket.TerminalSessionID

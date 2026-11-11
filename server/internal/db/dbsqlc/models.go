@@ -431,6 +431,7 @@ type BrowserTerminalTicket struct {
 	GuestSessionID         sql.NullString
 	InspectorCredentialID  sql.NullString
 	EdgeAttachmentID       sql.NullString
+	RecordingID            sql.NullString
 }
 
 type BrowserViewerPolicy struct {
@@ -2166,6 +2167,16 @@ type RecordingKeyGrant struct {
 	Sealed                 []byte
 	GrantedBy              string
 	CreatedAt              time.Time
+}
+
+type RecordingNativeAdmission struct {
+	ID                 string
+	RecordingID        string
+	AccountID          string
+	NativeCLISessionID string
+	MachineID          string
+	ExpiresAt          time.Time
+	CreatedAt          time.Time
 }
 
 type RelaySubjectSet struct {

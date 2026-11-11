@@ -678,6 +678,7 @@ func New(opts Options) (*App, error) {
 	}
 	resourceUsageService := resourceusage.New(store)
 	resourceUsageService.Debiter = workspaceBilling
+	recordingService := recordings.New(store, opts.Config.Recordings, mintKeys, config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL))
 	browserTerminalGateway := &browserterminal.Gateway{
 		AdmissionLifetime: opts.Config.CLIAuth.MintProofLifetime,
 		RecordUsageAdmission: func(ctx context.Context, attachment, machine, terminal, node, actor string, expires time.Time) error {
@@ -696,7 +697,7 @@ func New(opts Options) (*App, error) {
 		},
 		RecordUsageDetached: resourceUsageService.RecordBrowserDetached,
 		Tickets:             browserterminal.TicketStore{DB: store},
-		Authorizer:          browserterminal.MachineAuthorizer{Service: userMachineService, Inspector: inspectorHandlers.Access},
+		Authorizer:          browserterminal.MachineAuthorizer{Service: userMachineService, Inspector: inspectorHandlers.Access, Recordings: recordingService},
 		Signer:              mintKeys,
 		Issuer:              normalizeHelperIssuer(opts.Config.HTTP.PublicBaseURL),
 		AllowedOrigins:      append([]string(nil), opts.Config.HTTP.AllowedOrigins...),
@@ -781,7 +782,7 @@ func New(opts Options) (*App, error) {
 		Activity:                 activityLog,
 		TeamIdentity:             teamIdentity,
 		AuditStreams:             auditStreams,
-		Recordings:               recordings.New(store, opts.Config.Recordings, mintKeys, config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL)),
+		Recordings:               recordingService,
 		NativePrivateAccess:      nativePrivateService,
 		ManagedSSH:               managedSSHService,
 		DiagnosticUploads:        diagnosticUploadService,

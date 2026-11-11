@@ -463,6 +463,15 @@ func TestRecordingActionsNeedAnExplicitTeamRule(t *testing.T) {
 	if d := c.Decide("cy", machine("m-runner"), ActionRecord, 0); d.Allowed {
 		t.Fatalf("* must not include record: %+v", d)
 	}
+	for _, who := range []string{"ana", "bo", "cy"} { // owner, admin, member: all covered by the * rule
+		if d := c.Decide(who, machine("m-runner"), ActionRecordingView, 0); d.Allowed {
+			t.Fatalf("* must not let %s replay: %+v", who, d)
+		}
+	}
+	admins := mustCompile(t, `{"rules": [{"src": ["role:admin"], "dst": ["machine:*"], "allow": ["*"]}, {"src": ["*"], "dst": ["machine:*"], "deny": ["*"]}]}`, team())
+	if d := admins.Decide("bo", machine("m-db1"), ActionRecordingView, 0); d.Allowed || d.Reason != "no_rule" {
+		t.Fatalf("role:admin with * must not replay: %+v", d)
+	}
 	if d := c.Decide("ana", machine("m-db1"), ActionRecordingView, 0); d.Allowed {
 		t.Fatalf("the owner needs a rule to replay: %+v", d)
 	}

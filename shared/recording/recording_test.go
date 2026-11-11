@@ -85,3 +85,35 @@ func TestReportValidatesPerKind(t *testing.T) {
 		}
 	}
 }
+
+func TestStateAndPolicyValidate(t *testing.T) {
+	now := time.Now()
+	id := "rec_01234567-89ab-cdef-0123-456789abcdef"
+	if !(State{ID: id, Trigger: TriggerRule, StartedAt: now}).Valid() || !(State{ID: id, Trigger: TriggerManual, StartedBy: "user_1", StartedAt: now}).Valid() {
+		t.Fatal("valid state refused")
+	}
+	for _, s := range []State{{ID: id, Trigger: TriggerManual, StartedAt: now}, {ID: id, Trigger: TriggerRule, StartedBy: "user_1", StartedAt: now}, {ID: id, Trigger: TriggerRule}, {ID: "x", Trigger: TriggerRule, StartedAt: now}} {
+		if s.Valid() {
+			t.Errorf("invalid state accepted: %+v", s)
+		}
+	}
+	k1, s1 := key(t, 1, nil, "team_a")
+	k2, _ := key(t, 2, s1, "team_a")
+	p := Policy{Enabled: true, TeamID: "team_a", Keys: []Key{k1, k2}, ManualStart: ManualStartAdmins, RetentionDays: 30, DiskQuotaMB: 2048}
+	if !p.Valid() {
+		t.Fatal("valid policy refused")
+	}
+	for name, bad := range map[string]func(Policy) Policy{
+		"manual start": func(p Policy) Policy { p.ManualStart = "everyone"; return p },
+		"retention":    func(p Policy) Policy { p.RetentionDays = 0; return p },
+		"key gap":      func(p Policy) Policy { p.Keys = []Key{k2}; return p },
+		"no team":      func(p Policy) Policy { p.TeamID = ""; return p },
+	} {
+		if bad(p).Valid() {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	if ValidSealed(nil) || ValidSealed(make([]byte, SealedBytes+1)) || !ValidSealed(make([]byte, SealedBytes)) {
+		t.Fatal("ValidSealed bounds")
+	}
+}

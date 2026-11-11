@@ -447,6 +447,37 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
+	// A session recording replay from the CLI (recordings.admitNativeTx): the viewer's endpoint reaches the machine
+	// for capability recording until its latest ticket for the recording expires, while the account may still replay
+	// there. The scope's resource is the recording (the ticket's resource_id), as config_compare's is its assignment.
+	recordingRows, err := tx.QueryContext(ctx, `SELECT DISTINCT ON (a.recording_id, a.native_cli_session_id, a.machine_id) a.recording_id, a.native_cli_session_id, a.machine_id, a.account_id, m.user_id, a.expires_at
+ FROM recording_native_admissions a
+ JOIN cli_client_sessions c ON c.id = a.native_cli_session_id AND c.user_id = a.account_id AND c.state = 'active' AND c.revoked_at IS NULL
+ JOIN users u ON u.id = a.account_id AND u.status = 'active'
+ JOIN user_machines m ON m.id = a.machine_id AND m.revoked_at IS NULL AND m.deleted_at IS NULL
+ JOIN teams t ON t.team_id = m.owner_team_id AND t.deleted_at IS NULL AND NOT t.suspended
+ WHERE ((a.native_cli_session_id = $1 AND a.account_id = $2) OR (a.machine_id = $1 AND m.user_id = $2))
+ AND (a.expires_at > $3 OR a.recording_id = ANY($4::text[]))
+ AND NOT isempty(paperboat.workspace_policy_rule_ports(a.account_id, t.team_id, a.machine_id, 'recording_view'))
+ ORDER BY a.recording_id, a.native_cli_session_id, a.machine_id, a.expires_at DESC LIMIT 129`, in.EndpointID, in.UserID, now, live["recording"])
+	if err != nil {
+		return NetworkConfigResult{}, err
+	}
+	for recordingRows.Next() {
+		var g grantRow
+		if err = recordingRows.Scan(&g.id, &g.cli, &g.machine, &g.cliAccount, &g.machineAccount, &g.expiry); err != nil {
+			recordingRows.Close()
+			return NetworkConfigResult{}, err
+		}
+		g.kind = "recording"
+		g.capabilities = []string{"recording"}
+		grants = append(grants, g)
+	}
+	err = recordingRows.Err()
+	recordingRows.Close()
+	if err != nil {
+		return NetworkConfigResult{}, err
+	}
 	// Work the endpoint already runs leads, so the grant and scope bounds drop the newest grants, never a running
 	// stream (pbvm4: ~3 exec grants/s pushed a held exec or terminal out after ~45 s and its scope lease closed it).
 	slices.SortStableFunc(grants, func(a, b grantRow) int {

@@ -10,7 +10,7 @@ import (
 // emitted (machine_access, inspector) host rules the client did not know, and every such host rejected its
 // whole renewal until the rollback (2026-10-27).
 func TestEveryEmittedScopeIsOneTheClientAccepts(t *testing.T) {
-	emitted := [][2]string{{"inspector", "inspector"}, {"config_compare", "config_compare"}}
+	emitted := [][2]string{{"inspector", "inspector"}, {"config_compare", "config_compare"}, {"recording", "recording"}}
 	// network.go's grant projection of stored machine capabilities (terminal, exec, managed_ssh,
 	// private_access as is; files as file_transfer).
 	for _, capability := range []string{"terminal", "exec", "managed_ssh", "private_access", "file_transfer"} {

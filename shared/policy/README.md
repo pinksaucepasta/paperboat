@@ -83,7 +83,7 @@ are all machines/tags, all previews/tunnels, or `env:team`.
 | `replay` | machines, previews, tunnels | replay a captured request; `inspect` does not imply it |
 | `record` | machines (team, Teams plan) | the subject's Paperboat terminal sessions there are recorded (not ssh, scp, sftp or exec); not part of `*` |
 | `recording_view` | machines (team, Teams plan) | replay recordings made there; not part of `*`, and owner and admins need a rule too |
-| `*` | machines | every machine action above except `record` and `recording_view` |
+| `*` | machines | every machine action above except `record` and `recording_view`, in allow and in deny rules alike (`deny ["*"]` does not stop recording; deny `record` or `recording_view` by name) |
 | `env_read`, `env_write` | `env:team` | receive or change the team ENV |
 
 ## Error codes
@@ -115,7 +115,7 @@ are sorted by path, so the same file always gives the same list.
 | `unknown_preview`, `unknown_tunnel` | no preview / tunnel with that name in this workspace |
 | `unknown_env_scope` | the ENV target is `env:team` |
 | `not_allowed_in_tag` | a tag lists something other than `machine:<alias>` |
-| `team_only` | `allow_private_access` or `env:team` in a personal workspace |
+| `team_only` | `allow_private_access`, `env:team`, `record` or `recording_view` in a personal workspace |
 | `mixed_targets` | one rule mixes machines, previews/tunnels and `env:team` |
 | `unknown_action` | not an action |
 | `action_not_for_target` | the action does not apply to the rule's targets |

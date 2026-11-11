@@ -38,6 +38,7 @@ type Ticket struct {
 	BrowserSessionID       string
 	TerminalSessionID      string
 	InspectorCredentialID  string
+	RecordingID            string
 	Origin                 string
 	Role                   string
 	PolicyGeneration       int64
@@ -121,8 +122,8 @@ func (s TicketStore) Issue(ctx context.Context, in Ticket) (result Ticket, resul
 	if pending >= maxPendingTickets {
 		return Ticket{}, TooManyPendingTicketsError{RetryAfter: max(time.Second, time.Duration(math.Ceil(retryAfterSeconds))*time.Second)}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO browser_terminal_tickets (token_hash,user_id,browser_session_id,terminal_session_id,origin,role,policy_generation,team_generation,membership_generation,binding_generation,browser_public_key_sha256,expires_at,guest_session_id,inspector_credential_id)
-		VALUES ($1,nullif($2,''),nullif($3,''),nullif($4,''),$5,$6,$7,$8,$9,$10,$11,$12,nullif($13,''),nullif($14,''))`, hash[:], in.UserID, in.BrowserSessionID, in.TerminalSessionID, in.Origin, in.Role, in.PolicyGeneration, in.TeamGeneration, in.MembershipGeneration, in.BindingGeneration, in.BrowserPublicKeySHA256, in.ExpiresAt, in.GuestSessionID, in.InspectorCredentialID); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO browser_terminal_tickets (token_hash,user_id,browser_session_id,terminal_session_id,origin,role,policy_generation,team_generation,membership_generation,binding_generation,browser_public_key_sha256,expires_at,guest_session_id,inspector_credential_id,recording_id)
+		VALUES ($1,nullif($2,''),nullif($3,''),nullif($4,''),$5,$6,$7,$8,$9,$10,$11,$12,nullif($13,''),nullif($14,''),nullif($15,''))`, hash[:], in.UserID, in.BrowserSessionID, in.TerminalSessionID, in.Origin, in.Role, in.PolicyGeneration, in.TeamGeneration, in.MembershipGeneration, in.BindingGeneration, in.BrowserPublicKeySHA256, in.ExpiresAt, in.GuestSessionID, in.InspectorCredentialID, in.RecordingID); err != nil {
 		return Ticket{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -191,10 +192,10 @@ const ticketPrincipalActive = `((ticket.guest_session_id IS NULL AND EXISTS(
     WHERE g.id=ticket.guest_session_id AND g.terminal_session_id=ticket.terminal_session_id AND g.expires_at>now()
     AND c.enabled AND c.expires_at>now() AND c.generation=g.code_generation AND c.generation=ticket.policy_generation AND c.role=ticket.role)))`
 
-const ticketColumns = `coalesce(ticket.user_id,''),coalesce(ticket.browser_session_id,''),coalesce(ticket.terminal_session_id,''),coalesce(ticket.inspector_credential_id,''),ticket.origin,ticket.role,ticket.policy_generation,ticket.team_generation,ticket.membership_generation,ticket.binding_generation,ticket.browser_public_key_sha256,ticket.expires_at,coalesce(ticket.guest_session_id,'')`
+const ticketColumns = `coalesce(ticket.user_id,''),coalesce(ticket.browser_session_id,''),coalesce(ticket.terminal_session_id,''),coalesce(ticket.inspector_credential_id,''),ticket.origin,ticket.role,ticket.policy_generation,ticket.team_generation,ticket.membership_generation,ticket.binding_generation,ticket.browser_public_key_sha256,ticket.expires_at,coalesce(ticket.guest_session_id,''),coalesce(ticket.recording_id,'')`
 
 func (t *Ticket) scanTargets() []any {
-	return []any{&t.UserID, &t.BrowserSessionID, &t.TerminalSessionID, &t.InspectorCredentialID, &t.Origin, &t.Role, &t.PolicyGeneration, &t.TeamGeneration, &t.MembershipGeneration, &t.BindingGeneration, &t.BrowserPublicKeySHA256, &t.ExpiresAt, &t.GuestSessionID}
+	return []any{&t.UserID, &t.BrowserSessionID, &t.TerminalSessionID, &t.InspectorCredentialID, &t.Origin, &t.Role, &t.PolicyGeneration, &t.TeamGeneration, &t.MembershipGeneration, &t.BindingGeneration, &t.BrowserPublicKeySHA256, &t.ExpiresAt, &t.GuestSessionID, &t.RecordingID}
 }
 
 func (s TicketStore) consume(ctx context.Context, value, origin, terminalSessionID, attachmentID string) (Ticket, error) {
@@ -250,17 +251,24 @@ func (s TicketStore) SessionActive(ctx context.Context, userID, browserSessionID
 }
 
 func validRole(role string) bool {
-	return role == "owner" || role == "viewer" || role == "interactive" || role == RoleInspector
+	return role == "owner" || role == "viewer" || role == "interactive" || role == RoleInspector || role == RoleRecording
 }
 
 // validResource: a terminal ticket names its terminal session; an inspector
-// ticket names one inspector credential and has an account principal.
+// ticket names one inspector credential and a recording ticket one recording,
+// both with an account principal.
 func (t Ticket) validResource() bool {
-	if t.Role == RoleInspector {
-		return t.TerminalSessionID == "" && t.InspectorCredentialID != "" && t.GuestSessionID == ""
+	switch t.Role {
+	case RoleInspector:
+		return t.TerminalSessionID == "" && t.InspectorCredentialID != "" && t.GuestSessionID == "" && t.RecordingID == ""
+	case RoleRecording:
+		return t.TerminalSessionID == "" && t.InspectorCredentialID == "" && t.GuestSessionID == "" && t.RecordingID != ""
 	}
-	return t.TerminalSessionID != "" && t.InspectorCredentialID == ""
+	return t.TerminalSessionID != "" && t.InspectorCredentialID == "" && t.RecordingID == ""
 }
+
+// terminalLess reports whether a ticket's channel has no terminal session (inspector or recording replay).
+func (t Ticket) terminalLess() bool { return t.Role == RoleInspector || t.Role == RoleRecording }
 
 func validPublicKeySHA256(value string) bool {
 	decoded, err := base64.RawURLEncoding.Strict().DecodeString(value)
