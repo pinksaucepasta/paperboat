@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -181,9 +182,14 @@ func (e *e2eCore) awaitEdgeReady() error {
 	})
 }
 
+// edgeServesWithin bounds how long a restarted edge may take to complete a TLS handshake after it reports ready. It
+// serves the certificates its previous process persisted (tunnel/internal/tlscert/persist.go) while the server
+// stages the new epoch's, so a deploy is not a TLS outage (it was 18 to 109 s when certificates were memory-only,
+// run 43078027365). The server's preview dispatch gives a handshake 10 s.
+const edgeServesWithin = 5 * time.Second
+
 // awaitEdgeServes waits until the edge completes a TLS handshake for a runtime name, which needs the platform
-// wildcard certificate the server distributes to a new edge process (held in memory only). "Ready" alone says
-// the node reported in, not that it can serve; the server's dispatch gives a handshake 10 s. Tailscale's
+// wildcard certificate. "Ready" alone says the node reported in, not that it can serve. Tailscale's
 // tstest/integration AwaitRunning gates on the data path the same way.
 func (e *e2eCore) awaitEdgeServes() error {
 	raw, err := os.ReadFile(filepath.Join(e.work, "pebble-roots.pem"))
@@ -193,9 +199,9 @@ func (e *e2eCore) awaitEdgeServes() error {
 	roots := x509.NewCertPool()
 	roots.AppendCertsFromPEM(raw)
 	started := time.Now()
-	err = waitFor(2*time.Minute, func() error {
-		dialer := &tls.Dialer{NetDialer: &net.Dialer{Timeout: 3 * time.Second}, Config: &tls.Config{RootCAs: roots, ServerName: "probe.runtime.example.test"}}
-		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	err = waitFor(edgeServesWithin, func() error {
+		dialer := &tls.Dialer{NetDialer: &net.Dialer{Timeout: time.Second}, Config: &tls.Config{RootCAs: roots, ServerName: "probe.runtime.example.test"}}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(e.gateway, "443"))
 		if err == nil {
@@ -204,7 +210,29 @@ func (e *e2eCore) awaitEdgeServes() error {
 		return err
 	})
 	e.t.Logf("edge served a TLS handshake %s after it was ready (err=%v)", time.Since(started).Round(time.Millisecond), err)
-	return err
+	if err != nil {
+		return fmt.Errorf("the restarted edge served no TLS within %s of being ready: %w", edgeServesWithin, err)
+	}
+	return nil
+}
+
+var restoredCertificates = regexp.MustCompile(`persisted certificates restored=(\d+)`)
+
+// requireRestoredCertificates checks the restarted edge served from the files its previous process wrote, not from a
+// fast redelivery by the server: the last restore line of the edge's log must count at least one certificate.
+func (e *e2eCore) requireRestoredCertificates() error {
+	raw, err := os.ReadFile(filepath.Join(e.work, "edge.log"))
+	if err != nil {
+		return err
+	}
+	matches := restoredCertificates.FindAllStringSubmatch(string(raw), -1)
+	if len(matches) < 2 { // the first start restores nothing; the restart must have logged its own line
+		return fmt.Errorf("the restarted edge logged no certificate restore (%d lines)", len(matches))
+	}
+	if last := matches[len(matches)-1][1]; last == "0" {
+		return errors.New("the restarted edge restored no persisted certificate")
+	}
+	return nil
 }
 
 // operator calls the server as the seeded operator through the TLS front; a write confirms its target, as the
