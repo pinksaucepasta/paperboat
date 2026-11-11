@@ -14,7 +14,7 @@ import (
 func tunnelRouteRuleFlags(command *cobra.Command, update bool) {
 	command.Flags().StringArray("request-header", nil, "request header rule op:Name=value (op add or set) or remove:Name, sent to the app (repeatable, at most 8)")
 	command.Flags().StringArray("response-header", nil, "response header rule op:Name=value (op add or set) or remove:Name, sent to the visitor (repeatable, at most 8)")
-	command.Flags().String("rewrite-path", "", "rewrite a path prefix before the app sees it: '/from -> /to'")
+	command.Flags().StringArray("rewrite-path", nil, "rewrite a path prefix before the app sees it: '/from -> /to'")
 	command.Flags().StringArray("redirect", nil, "redirect a path prefix: '/from -> [301|302|307|308:]/to-or-https-URL' (repeatable, at most 4)")
 	if update {
 		command.Flags().Bool("clear-request-headers", false, "remove every request header rule")
@@ -41,9 +41,17 @@ func applyTunnelRouteRuleFlags(command *cobra.Command, base *tunnelrouterules.Ru
 		rules = *base
 	}
 	flags := command.Flags()
+	// cleared: the flag was given (and, for a --clear-* switch, not as =false)
 	cleared := func(name string) bool {
 		flag := flags.Lookup(name)
-		return flag != nil && flag.Changed
+		if flag == nil || !flag.Changed {
+			return false
+		}
+		if flag.Value.Type() == "bool" {
+			on, _ := flags.GetBool(name)
+			return on
+		}
+		return true
 	}
 	for _, list := range []struct{ set, clear string }{{"request-header", "clear-request-headers"}, {"response-header", "clear-response-headers"}, {"rewrite-path", "clear-rewrite-path"}, {"redirect", "clear-redirects"}} {
 		if cleared(list.set) && cleared(list.clear) {
@@ -67,8 +75,11 @@ func applyTunnelRouteRuleFlags(command *cobra.Command, base *tunnelrouterules.Ru
 		rules.ResponseHeaders = parsed
 	}
 	if cleared("rewrite-path") {
-		value, _ := flags.GetString("rewrite-path")
-		parsed, err := tunnelrouterules.ParsePathRewrite(value)
+		values, _ := flags.GetStringArray("rewrite-path")
+		if len(values) != 1 {
+			return rules, errors.New("--rewrite-path takes one '/from -> /to' rule")
+		}
+		parsed, err := tunnelrouterules.ParsePathRewrite(values[0])
 		if err != nil {
 			return rules, fmt.Errorf("--rewrite-path: %w", err)
 		}
@@ -99,7 +110,7 @@ func applyTunnelRouteRuleFlags(command *cobra.Command, base *tunnelrouterules.Ru
 	}
 	normalized, err := tunnelrouterules.Normalize(rules)
 	if err != nil {
-		return rules, errors.New(err.Error())
+		return rules, err
 	}
 	return normalized, nil
 }

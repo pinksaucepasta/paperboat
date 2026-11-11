@@ -21,6 +21,8 @@ import (
 	"path"
 	"strconv"
 	"strings"
+
+	"golang.org/x/net/http/httpguts"
 )
 
 // Bounds, one place: a route carries at most these many rules, in at most MaximumBytes of canonical JSON.
@@ -79,6 +81,8 @@ var (
 		"Authorization": true, "Paperboat-Visitor-Assertion": true, "Alt-Svc": true, "Strict-Transport-Security": true,
 		"Content-Security-Policy": true, "X-Content-Type-Options": true, "X-Frame-Options": true, "Referrer-Policy": true,
 		"X-Robots-Tag": true, "Location": true,
+		// the bare names of the prefix families below: an origin matching on a prefix would take them for Paperboat's
+		"X-Forwarded": true, "X-Paperboat": true, "Paperboat": true, "Sec-Websocket": true,
 	}
 	blockedPrefix = []string{"X-Forwarded-", "X-Paperboat-", "Paperboat-", "Sec-Websocket-"}
 )
@@ -131,8 +135,8 @@ func normalizeHeaderRules(list []HeaderRule, which string) ([]HeaderRule, error)
 			if rule.Value != "" {
 				return nil, invalid("%s header rule %d: remove takes no value", which, i+1)
 			}
-		} else if len(rule.Value) > MaximumHeaderValue || strings.ContainsAny(rule.Value, "\r\n\x00") {
-			return nil, invalid("%s header rule %d: the value must be at most %d bytes with no line breaks", which, i+1, MaximumHeaderValue)
+		} else if len(rule.Value) > MaximumHeaderValue || !httpguts.ValidHeaderFieldValue(rule.Value) {
+			return nil, invalid("%s header rule %d: the value must be at most %d bytes with no line breaks or control characters", which, i+1, MaximumHeaderValue)
 		}
 		out = append(out, rule)
 	}
@@ -218,6 +222,12 @@ func Normalize(rules Rules) (Rules, error) {
 		to, err := normalizeRedirectTarget(redirect.To)
 		if err != nil {
 			return Rules{}, err
+		}
+		if to[0] == '/' {
+			// a target at or under its own prefix matches again: /a -> /a loops, /a -> /a/b grows /a/x into /a/b/b/x...
+			if _, again := remainder(strings.SplitN(strings.SplitN(to, "?", 2)[0], "#", 2)[0], from); again {
+				return Rules{}, invalid("redirect %d: %q sends %q to itself or to a path under it, which would redirect again; send it elsewhere", i+1, to, from)
+			}
 		}
 		out.Redirects = append(out.Redirects, Redirect{From: from, Code: redirect.Code, To: to})
 	}

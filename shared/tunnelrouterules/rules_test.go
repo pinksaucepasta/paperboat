@@ -40,30 +40,38 @@ func TestNormalizeRefusesWhatTheEdgeOwnsAndWhatIsMalformed(t *testing.T) {
 		tooMany = append(tooMany, HeaderRule{Op: "set", Name: "X-A", Value: "1"})
 	}
 	for name, rules := range map[string]Rules{
-		"forwarded":            {RequestHeaders: []HeaderRule{{Op: "set", Name: "X-Forwarded-For", Value: "1.2.3.4"}}},
-		"forwarded lower case": {RequestHeaders: []HeaderRule{{Op: "set", Name: "x-forwarded-proto", Value: "http"}}},
-		"real ip":              {RequestHeaders: []HeaderRule{{Op: "set", Name: "X-Real-IP", Value: "1.2.3.4"}}},
-		"visitor assertion":    {RequestHeaders: []HeaderRule{{Op: "remove", Name: "paperboat-visitor-assertion"}}},
-		"paperboat family":     {RequestHeaders: []HeaderRule{{Op: "set", Name: "X-Paperboat-Grant", Value: "x"}}},
-		"cookie":               {RequestHeaders: []HeaderRule{{Op: "set", Name: "Cookie", Value: "a=b"}}},
-		"set-cookie":           {ResponseHeaders: []HeaderRule{{Op: "add", Name: "Set-Cookie", Value: "a=b"}}},
-		"security header":      {ResponseHeaders: []HeaderRule{{Op: "set", Name: "Strict-Transport-Security", Value: "max-age=0"}}},
-		"framing":              {RequestHeaders: []HeaderRule{{Op: "set", Name: "Transfer-Encoding", Value: "chunked"}}},
-		"host":                 {RequestHeaders: []HeaderRule{{Op: "set", Name: "Host", Value: "evil.test"}}},
-		"bad op":               {RequestHeaders: []HeaderRule{{Op: "replace", Name: "X-A", Value: "1"}}},
-		"bad name":             {RequestHeaders: []HeaderRule{{Op: "set", Name: "X A", Value: "1"}}},
-		"line break":           {RequestHeaders: []HeaderRule{{Op: "set", Name: "X-A", Value: "1\r\nX-B: 2"}}},
-		"remove with value":    {RequestHeaders: []HeaderRule{{Op: "remove", Name: "X-A", Value: "1"}}},
-		"huge value":           {RequestHeaders: []HeaderRule{{Op: "set", Name: "X-A", Value: long}}},
-		"too many headers":     {RequestHeaders: tooMany},
-		"relative from":        {PathRewrite: &PathRewrite{From: "api", To: "/"}},
-		"dot segments":         {PathRewrite: &PathRewrite{From: "/a/../b", To: "/"}},
-		"scheme-relative":      {Redirects: []Redirect{{From: "/a", Code: 301, To: "//evil.test/x"}}},
-		"http target":          {Redirects: []Redirect{{From: "/a", Code: 301, To: "http://example.test/x"}}},
-		"credentials in url":   {Redirects: []Redirect{{From: "/a", Code: 301, To: "https://user:pw@example.test/x"}}},
-		"bad status":           {Redirects: []Redirect{{From: "/a", Code: 303, To: "/x"}}},
-		"duplicate redirect":   {Redirects: []Redirect{{From: "/a", Code: 301, To: "/x"}, {From: "/a/", Code: 302, To: "/y"}}},
-		"too many redirects":   {Redirects: []Redirect{{From: "/1", Code: 301, To: "/x"}, {From: "/2", Code: 301, To: "/x"}, {From: "/3", Code: 301, To: "/x"}, {From: "/4", Code: 301, To: "/x"}, {From: "/5", Code: 301, To: "/x"}}},
+		"forwarded":             {RequestHeaders: []HeaderRule{{Op: "set", Name: "X-Forwarded-For", Value: "1.2.3.4"}}},
+		"forwarded lower case":  {RequestHeaders: []HeaderRule{{Op: "set", Name: "x-forwarded-proto", Value: "http"}}},
+		"real ip":               {RequestHeaders: []HeaderRule{{Op: "set", Name: "X-Real-IP", Value: "1.2.3.4"}}},
+		"visitor assertion":     {RequestHeaders: []HeaderRule{{Op: "remove", Name: "paperboat-visitor-assertion"}}},
+		"paperboat family":      {RequestHeaders: []HeaderRule{{Op: "set", Name: "X-Paperboat-Grant", Value: "x"}}},
+		"cookie":                {RequestHeaders: []HeaderRule{{Op: "set", Name: "Cookie", Value: "a=b"}}},
+		"set-cookie":            {ResponseHeaders: []HeaderRule{{Op: "add", Name: "Set-Cookie", Value: "a=b"}}},
+		"security header":       {ResponseHeaders: []HeaderRule{{Op: "set", Name: "Strict-Transport-Security", Value: "max-age=0"}}},
+		"framing":               {RequestHeaders: []HeaderRule{{Op: "set", Name: "Transfer-Encoding", Value: "chunked"}}},
+		"host":                  {RequestHeaders: []HeaderRule{{Op: "set", Name: "Host", Value: "evil.test"}}},
+		"bare forwarded":        {RequestHeaders: []HeaderRule{{Op: "set", Name: "X-Forwarded", Value: "x"}}},
+		"bare paperboat":        {RequestHeaders: []HeaderRule{{Op: "set", Name: "Paperboat", Value: "x"}}},
+		"bare x-paperboat":      {RequestHeaders: []HeaderRule{{Op: "set", Name: "X-Paperboat", Value: "x"}}},
+		"bare websocket":        {RequestHeaders: []HeaderRule{{Op: "set", Name: "Sec-WebSocket", Value: "x"}}},
+		"control character":     {RequestHeaders: []HeaderRule{{Op: "set", Name: "X-A", Value: "a\x01b"}}},
+		"redirect to itself":    {Redirects: []Redirect{{From: "/a", Code: 308, To: "/a"}}},
+		"redirect under itself": {Redirects: []Redirect{{From: "/a", Code: 308, To: "/a/b?x=1"}}},
+		"redirect root":         {Redirects: []Redirect{{From: "/", Code: 302, To: "/home"}}},
+		"bad op":                {RequestHeaders: []HeaderRule{{Op: "replace", Name: "X-A", Value: "1"}}},
+		"bad name":              {RequestHeaders: []HeaderRule{{Op: "set", Name: "X A", Value: "1"}}},
+		"line break":            {RequestHeaders: []HeaderRule{{Op: "set", Name: "X-A", Value: "1\r\nX-B: 2"}}},
+		"remove with value":     {RequestHeaders: []HeaderRule{{Op: "remove", Name: "X-A", Value: "1"}}},
+		"huge value":            {RequestHeaders: []HeaderRule{{Op: "set", Name: "X-A", Value: long}}},
+		"too many headers":      {RequestHeaders: tooMany},
+		"relative from":         {PathRewrite: &PathRewrite{From: "api", To: "/"}},
+		"dot segments":          {PathRewrite: &PathRewrite{From: "/a/../b", To: "/"}},
+		"scheme-relative":       {Redirects: []Redirect{{From: "/a", Code: 301, To: "//evil.test/x"}}},
+		"http target":           {Redirects: []Redirect{{From: "/a", Code: 301, To: "http://example.test/x"}}},
+		"credentials in url":    {Redirects: []Redirect{{From: "/a", Code: 301, To: "https://user:pw@example.test/x"}}},
+		"bad status":            {Redirects: []Redirect{{From: "/a", Code: 303, To: "/x"}}},
+		"duplicate redirect":    {Redirects: []Redirect{{From: "/a", Code: 301, To: "/x"}, {From: "/a/", Code: 302, To: "/y"}}},
+		"too many redirects":    {Redirects: []Redirect{{From: "/1", Code: 301, To: "/x"}, {From: "/2", Code: 301, To: "/x"}, {From: "/3", Code: 301, To: "/x"}, {From: "/4", Code: 301, To: "/x"}, {From: "/5", Code: 301, To: "/x"}}},
 	} {
 		if _, err := Normalize(rules); !errors.Is(err, ErrInvalid) {
 			t.Errorf("%s: accepted (err=%v)", name, err)
@@ -142,5 +150,19 @@ func TestRewritePathRedirectAndHeaders(t *testing.T) {
 		{Op: "set", Name: "X-Forwarded-For", Value: "spoof"}, {Op: "remove", Name: "X-Forwarded-For"}})
 	if got := header.Values("X-Keep"); len(got) != 2 || got[0] != "2" || got[1] != "3" || header.Get("X-Drop") != "" || header.Get("X-Forwarded-For") != "198.51.100.7" {
 		t.Fatalf("headers after the rules = %v", header)
+	}
+}
+
+// The query a visitor sent goes before the target's #fragment, which stays last: after it, the query would become part of the fragment.
+func TestRedirectKeepsTheQueryBeforeTheFragment(t *testing.T) {
+	rules, err := Normalize(Rules{Redirects: []Redirect{{From: "/old", Code: 308, To: "/new#frag"}, {From: "/q", Code: 308, To: "/x?a=1#f"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{"/old?b=2": "/new?b=2#frag", "/q?b=2": "/x?a=1&b=2#f", "/old": "/new#frag"} {
+		p, query, _ := strings.Cut(path, "?")
+		if got, _, ok := rules.MatchRedirect(p, query); !ok || got != want {
+			t.Errorf("%s -> %q (%v), want %q", path, got, ok, want)
+		}
 	}
 }

@@ -31,6 +31,7 @@ const BLOCKED_NAMES = new Set([
   "proxy-authorization", "keep-alive", "te", "trailer", "transfer-encoding", "upgrade", "content-length", "cookie",
   "set-cookie", "authorization", "paperboat-visitor-assertion", "alt-svc", "strict-transport-security",
   "content-security-policy", "x-content-type-options", "x-frame-options", "referrer-policy", "x-robots-tag", "location",
+  "x-forwarded", "x-paperboat", "paperboat", "sec-websocket",
 ])
 const BLOCKED_PREFIXES = ["x-forwarded-", "x-paperboat-", "paperboat-", "sec-websocket-"]
 
@@ -42,18 +43,25 @@ function headerProblem(rule: RouteHeaderRule) {
   if (BLOCKED_NAMES.has(lower) || BLOCKED_PREFIXES.some((prefix) => lower.startsWith(prefix))) {
     return `${name} belongs to Paperboat or the browser and can’t be changed.`
   }
-  if (rule.op !== "remove" && /[\r\n]/.test(rule.value ?? "")) return "A value can’t contain line breaks."
+  if (rule.op !== "remove" && /[\u0000-\u0008\u000a-\u001f\u007f]/.test(rule.value ?? "")) return "A value can’t contain line breaks or control characters."
   return undefined
 }
 
 const pathProblem = (value: string) =>
-  !/^\/(?!\/)[^?#\\\s]*$/.test(value.trim()) ? "Start with a single / and leave out ? and #." : undefined
+  !/^\/(?!\/)[^?#\\\s]*$/.test(value) || value.split("/").some((part) => part === "." || part === "..")
+    ? "Start with a single /, with no spaces, ? or # and no . or .. parts."
+    : undefined
 
 function redirectProblem(rule: RouteRedirect) {
   const from = pathProblem(rule.from)
   if (from) return from
-  const to = rule.to.trim()
-  if (!/^\/(?!\/)\S*$/.test(to) && !/^https:\/\/[^\s/@]+\S*$/.test(to)) return "Send to a path like /new or an https:// address."
+  const to = rule.to
+  if (!/^\/(?!\/)[^\s\\]*$/.test(to) && !/^https:\/\/[^\s/@\\]+[^\s\\]*$/.test(to)) return "Send to a path like /new or an https:// address."
+  const target = to.split(/[?#]/)[0]
+  const prefix = from.replace(/\/+$/, "")
+  if (to.startsWith("/") && (target === prefix || target.startsWith(`${prefix}/`) || prefix === "")) {
+    return "That sends the path to itself or below it, so it would redirect again."
+  }
   return undefined
 }
 
@@ -105,7 +113,7 @@ function HeaderRows({
                 aria-label={`${label} name`}
                 placeholder="X-Name"
                 value={rule.name}
-                onChange={(event) => update(index, { name: event.target.value.replace(/\s/g, "") })}
+                onChange={(event) => update(index, { name: event.target.value })}
                 aria-invalid={Boolean(problem)}
                 className="min-w-0 flex-1 font-mono"
                 autoComplete="off"
@@ -199,7 +207,7 @@ export function RouteRulesDialog({ tunnel, route, onClose }: { tunnel: Tunnel; r
                 aria-label="Path to replace"
                 placeholder="/api"
                 value={from}
-                onChange={(event) => setFrom(event.target.value.replace(/\s/g, ""))}
+                onChange={(event) => setFrom(event.target.value)}
                 className="min-w-0 flex-1 font-mono"
                 autoComplete="off"
                 spellCheck={false}
@@ -209,7 +217,7 @@ export function RouteRulesDialog({ tunnel, route, onClose }: { tunnel: Tunnel; r
                 aria-label="Path to use instead"
                 placeholder="/v1"
                 value={to}
-                onChange={(event) => setTo(event.target.value.replace(/\s/g, ""))}
+                onChange={(event) => setTo(event.target.value)}
                 className="min-w-0 flex-1 font-mono"
                 autoComplete="off"
                 spellCheck={false}
@@ -247,7 +255,7 @@ export function RouteRulesDialog({ tunnel, route, onClose }: { tunnel: Tunnel; r
                       aria-label="Redirect from"
                       placeholder="/old"
                       value={redirect.from}
-                      onChange={(event) => update({ from: event.target.value.replace(/\s/g, "") })}
+                      onChange={(event) => update({ from: event.target.value })}
                       className="min-w-0 flex-1 font-mono"
                       autoComplete="off"
                       spellCheck={false}
@@ -268,7 +276,7 @@ export function RouteRulesDialog({ tunnel, route, onClose }: { tunnel: Tunnel; r
                       aria-label="Redirect to"
                       placeholder="/new"
                       value={redirect.to}
-                      onChange={(event) => update({ to: event.target.value.replace(/\s/g, "") })}
+                      onChange={(event) => update({ to: event.target.value })}
                       className="min-w-0 flex-1 font-mono"
                       autoComplete="off"
                       spellCheck={false}

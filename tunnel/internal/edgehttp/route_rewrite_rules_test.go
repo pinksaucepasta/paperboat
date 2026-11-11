@@ -84,6 +84,14 @@ func TestTunnelRouteRulesRedirectRewriteAndHeadersAtTheEdge(t *testing.T) {
 	if serve(http.MethodGet, "/apix", nil); seen.URL.Path != "/apix" {
 		t.Fatalf("/apix became %q", seen.URL.Path)
 	}
+	// what the visitor encoded stays encoded: %2F is not a path separator for the app, a redirect keeps the escaped rest
+	serve(http.MethodGet, "/api/files/a%2Fb", nil)
+	if seen.URL.EscapedPath() != "/v1/files/a%2Fb" || seen.URL.Path != "/v1/files/a/b" {
+		t.Fatalf("encoded slash after the rewrite: escaped %q decoded %q", seen.URL.EscapedPath(), seen.URL.Path)
+	}
+	if got := serve(http.MethodGet, "/old/a%20b", nil); got.Header().Get("Location") != "/new/a%20b" {
+		t.Fatalf("redirect of an escaped path: %q", got.Header().Get("Location"))
+	}
 	// a WebSocket handshake keeps its path (and is not redirected), but still gets the header rules
 	serve(http.MethodGet, "/api/ws", func(r *http.Request) {
 		r.Header.Set("Connection", "Upgrade")
