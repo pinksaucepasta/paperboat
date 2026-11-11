@@ -4,8 +4,11 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -177,3 +180,28 @@ func TestCarrierSSHSessionsAreQueuedInTheCarrierBacklog(t *testing.T) {
 }
 
 func offlineHost() bool { return false }
+
+// Audit fails closed (F21-11): with the backlog full, a start the signed scopes allow is refused, because its record
+// could not be kept; nothing is dropped.
+func TestOfflineAdmissionRefusesAScopedStartWhenTheBacklogIsFull(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "offline-audit.json")
+	events := make([]offlineaudit.Event, offlineaudit.MaxEvents)
+	for i := range events {
+		events[i] = offlineaudit.Event{EventID: "event", Kind: offlineaudit.KindStarted, OccurredAt: time.Now()}
+	}
+	body, err := json.Marshal(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	queue, err := offlineaudit.Open(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := native.OfflineAdmission{Peer: tailnet.NetworkBinding{AccountID: "acct", EndpointID: "cli_1"}, Header: streamauth.Header{OperationID: "op_full"}, Capability: "exec", Allowed: true}
+	if err := offlineAdmission(queue, offlineHost)(context.Background(), request); !errors.Is(err, offlineaudit.ErrFull) {
+		t.Fatalf("a scoped offline start with a full backlog: %v, want it refused with ErrFull", err)
+	}
+}
