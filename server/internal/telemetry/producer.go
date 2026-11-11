@@ -70,19 +70,6 @@ func NewProducer(options ProducerOptions) *Producer {
 	return producer
 }
 
-// Close releases sinks created by NewProducer. Caller-owned sinks are left
-// open so one producer cannot unexpectedly terminate another component's
-// telemetry stream.
-func (p *Producer) Close() error {
-	if p == nil {
-		return nil
-	}
-	if p.ownedEvents && p.Events != nil {
-		return p.Events.Close()
-	}
-	return nil
-}
-
 func (p *Producer) now() time.Time {
 	if p == nil {
 		return normalizeTime(time.Now())
@@ -440,10 +427,6 @@ func (p *Producer) RecordDNSVerification(input DNSVerificationInput) error {
 	return p.recordEvent(identity, "dns_verification", code, dnsEventOutcome(outcome), dnsSeverity(outcome), dnsMessage(outcome), retry, next)
 }
 
-func (p *Producer) DNSVerification(input DNSVerificationInput) error {
-	return p.RecordDNSVerification(input)
-}
-
 func normalizeDNSFailure(value DNSFailureClass) DNSFailureClass {
 	switch value {
 	case DNSFailureNXDomain, DNSFailureTimeout, DNSFailureConflict, DNSFailureProvider, DNSFailureUnauthorized, DNSFailureInvalid, DNSFailureUnknown:
@@ -577,10 +560,6 @@ func (p *Producer) RecordCertificateLifecycle(input CertificateLifecycleInput) e
 	return p.recordEvent(identity, "certificate_lifecycle", code, certificateEventOutcome(outcome), certificateSeverity(outcome), certificateMessage(operation, outcome), retry, next)
 }
 
-func (p *Producer) CertificateLifecycle(input CertificateLifecycleInput) error {
-	return p.RecordCertificateLifecycle(input)
-}
-
 func normalizeCertificateOperation(value CertificateOperation) CertificateOperation {
 	switch value {
 	case CertificateIssue, CertificateRenew, CertificateReplace, CertificateRevoke:
@@ -661,10 +640,6 @@ func (p *Producer) RecordCertificateExpiry(input CertificateExpiryInput) error {
 		return err
 	}
 	return p.recordEvent(identity, "certificate_expiry", code, certificateExpiryOutcome(horizon), certificateExpirySeverity(horizon), certificateExpiryMessage(horizon), RetryNone, time.Time{})
-}
-
-func (p *Producer) CertificateExpiry(input CertificateExpiryInput) error {
-	return p.RecordCertificateExpiry(input)
 }
 
 func normalizeCertificateHorizon(value CertificateExpiryHorizon) CertificateExpiryHorizon {
@@ -770,10 +745,6 @@ func (p *Producer) RecordPreviewAllocation(input PreviewAllocationInput) error {
 	return p.recordEvent(identity, "preview_allocation", code, previewEventOutcome(string(outcome)), previewSeverity(string(outcome)), previewMessage("allocation", string(outcome)), retry, next)
 }
 
-func (p *Producer) PreviewAllocation(input PreviewAllocationInput) error {
-	return p.RecordPreviewAllocation(input)
-}
-
 func normalizePreviewAllocationOutcome(value PreviewAllocationOutcome) PreviewAllocationOutcome {
 	switch value {
 	case PreviewAllocationSucceeded, PreviewAllocationFailed, PreviewAllocationRejected, PreviewAllocationCanceled:
@@ -797,10 +768,6 @@ func (p *Producer) RecordPreviewCleanup(input PreviewCleanupInput) error {
 		return err
 	}
 	return p.recordEvent(identity, "preview_cleanup", code, previewEventOutcome(string(outcome)), previewSeverity(string(outcome)), previewMessage("cleanup", string(outcome)), retry, next)
-}
-
-func (p *Producer) PreviewCleanup(input PreviewCleanupInput) error {
-	return p.RecordPreviewCleanup(input)
 }
 
 func normalizePreviewCleanupOutcome(value PreviewCleanupOutcome) PreviewCleanupOutcome {
@@ -1018,10 +985,6 @@ func (p *Producer) RecordConfigApply(input ConfigApplyInput) error {
 	return p.recordEventWithGenerations(identity, "config_apply", code, configEventOutcome(state), configSeverity(state), configMessage(state), retry, next, generations)
 }
 
-func (p *Producer) ConfigApply(input ConfigApplyInput) error {
-	return p.RecordConfigApply(input)
-}
-
 func configHealth(state ConfigGenerationState, retry RetryDecision, next time.Time, p *Producer) (HealthStatus, string, string, string, RetryDecision, time.Time) {
 	if state == ConfigGenerationApplied {
 		return StatusReady, "config_applied", "The desired configuration is applied.", "No action is required.", RetryNone, time.Time{}
@@ -1089,10 +1052,6 @@ func (p *Producer) RecordRouteError(input RouteErrorInput) error {
 		return err
 	}
 	return p.recordEvent(identity, "route_error", code, outcome, severity, message, retry, next)
-}
-
-func (p *Producer) RouteError(input RouteErrorInput) error {
-	return p.RecordRouteError(input)
 }
 
 func normalizeRouteErrorClass(value RouteErrorClass) RouteErrorClass {
@@ -1173,10 +1132,6 @@ func (p *Producer) RecordRouteLatency(input RouteLatencyInput) error {
 	return p.recordEvent(identity, "route_latency", "route_latency_observed", OutcomeSuccess, SeverityInfo, "Route latency observed.", RetryNone, time.Time{})
 }
 
-func (p *Producer) RouteLatency(input RouteLatencyInput) error {
-	return p.RecordRouteLatency(input)
-}
-
 func normalizeRouteProtocol(value RouteProtocol) RouteProtocol {
 	switch value {
 	case RouteProtocolHTTP, RouteProtocolHTTPS, RouteProtocolH2C, RouteProtocolTCP, RouteProtocolWebsocket:
@@ -1247,10 +1202,6 @@ func (p *Producer) RecordServiceLifecycle(input ServiceLifecycleInput) error {
 	return p.recordEvent(identity, "service_lifecycle", code, serviceEventOutcome(state), serviceSeverity(state), "Service state is "+string(state)+".", retry, next)
 }
 
-func (p *Producer) ServiceLifecycle(input ServiceLifecycleInput) error {
-	return p.RecordServiceLifecycle(input)
-}
-
 func (p *Producer) RecordServiceRestart(input ServiceRestartInput) error {
 	outcome := input.Outcome
 	if outcome != ServiceRestartSucceeded && outcome != ServiceRestartFailed {
@@ -1268,10 +1219,6 @@ func (p *Producer) RecordServiceRestart(input ServiceRestartInput) error {
 		return err
 	}
 	return p.recordEvent(identity, "service_lifecycle", code, serviceRestartEventOutcome(outcome), serviceRestartSeverity(outcome), "Service restart "+string(outcome)+".", retry, next)
-}
-
-func (p *Producer) ServiceRestart(input ServiceRestartInput) error {
-	return p.RecordServiceRestart(input)
 }
 
 func serviceRestartHealth(outcome ServiceRestartOutcome, p *Producer) (HealthStatus, string, string, string, RetryDecision, time.Time) {
@@ -1362,8 +1309,6 @@ func (p *Producer) RecordWatchdog(input WatchdogInput) error {
 	return p.recordEvent(identity, "service_watchdog", code, watchdogEventOutcome(outcome), watchdogSeverity(outcome), "Service watchdog "+string(outcome)+".", retry, next)
 }
 
-func (p *Producer) Watchdog(input WatchdogInput) error { return p.RecordWatchdog(input) }
-
 func normalizeWatchdogOutcome(value WatchdogOutcome) WatchdogOutcome {
 	switch value {
 	case WatchdogHealthy, WatchdogFailed, WatchdogRestarted:
@@ -1432,8 +1377,6 @@ func (p *Producer) RecordCrashLoop(input CrashLoopInput) error {
 	}
 	return p.recordEvent(identity, "service_crash_loop", code, crashLoopEventOutcome(state), crashLoopSeverity(state), "Service crash-loop state updated.", retry, next)
 }
-
-func (p *Producer) CrashLoop(input CrashLoopInput) error { return p.RecordCrashLoop(input) }
 
 func crashLoopHealth(state CrashLoopState, p *Producer) (HealthStatus, string, string, string, RetryDecision, time.Time) {
 	if state == CrashLoopClear {

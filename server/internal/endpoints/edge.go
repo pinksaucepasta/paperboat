@@ -181,10 +181,3 @@ SELECT EXISTS(SELECT 1 FROM assignment)`,
 // accept one up to 2 minutes old next to the edge's heartbeat and epoch (preview_routes, migration 188; tunnelv1
 // health projection).
 const ObservationRefresh = time.Minute
-
-// IsRouteTx reports whether a route id names an endpoint route (as opposed to a runtime route).
-func IsRouteTx(ctx context.Context, tx *db.Tx, routeID string) (bool, error) {
-	var found bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM endpoint_routes WHERE id=$1)`, routeID).Scan(&found)
-	return found, err
-}

@@ -40,12 +40,6 @@ type DistributionNodePublicKeyLookup interface {
 	LookupDistributionNodePublicKey(context.Context, string, string) (ed25519.PublicKey, error)
 }
 
-type DistributionNodePublicKeyLookupFunc func(context.Context, string, string) (ed25519.PublicKey, error)
-
-func (f DistributionNodePublicKeyLookupFunc) LookupDistributionNodePublicKey(ctx context.Context, nodeID, processEpoch string) (ed25519.PublicKey, error) {
-	return f(ctx, nodeID, processEpoch)
-}
-
 // SignedDistributionNodeIdentityResolver verifies the exact HTTP method,
 // path, raw body digest, node, process epoch, timestamp, and single-use nonce.
 // The request body is restored after verification so the distribution

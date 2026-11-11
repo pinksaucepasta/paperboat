@@ -47,18 +47,6 @@ func (w *CertificateWorker) SetTelemetryObserver(observer func(context.Context, 
 	return nil
 }
 
-// LastError exposes the most recent retryable authority/cleanup failure to
-// health and diagnostics without making the worker itself exit and abandon
-// unrelated certificate domains.
-func (w *CertificateWorker) LastError() error {
-	if w == nil {
-		return ErrInvalidInput
-	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.lastErr
-}
-
 func NewCertificateWorker(database *db.DB, coordinator *tunnelcert.Coordinator, renewBefore time.Duration, now func() time.Time, issuerName ...string) (*CertificateWorker, error) {
 	if database == nil || coordinator == nil {
 		return nil, fmt.Errorf("%w: certificate database and coordinator are required", ErrInvalidInput)

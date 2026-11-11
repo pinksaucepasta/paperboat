@@ -137,8 +137,7 @@ calling CLI client-session family. Browser logout also tears down active downstr
 sessions, but it does not revoke independent CLI installations. Account suspension and
 administrative account revocation revoke every CLI client-session family. Refresh replay
 and explicit client deletion revoke the affected Paperboat family and mark its linked local
-access-session records revoked immediately. The server's `DownstreamSessionRevoker`
-hook has no production implementation, so revocation is the database state change above.
+access-session records revoked immediately.
 
 `GET /v1/auth/cli-client-sessions` accepts `limit` (1-200, default 50), `offset` (default 0), and an
 optional `state=active|revoked`. Its `data` contains `items` and `pagination`. Every item

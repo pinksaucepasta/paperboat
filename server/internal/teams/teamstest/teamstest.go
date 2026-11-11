@@ -32,15 +32,6 @@ func SetPrivateAccess(t testing.TB, store *db.DB, team string, on bool) {
 	})
 }
 
-// SetENVAccess sets a member's team ENV permission (read, write, or "" for none), as
-// `pb team grant <team> <account> env <team> <permission>` does.
-func SetENVAccess(t testing.TB, store *db.DB, team, account, permission string) {
-	t.Helper()
-	run(t, store, func(ctx context.Context, tx *db.Tx) error {
-		return teams.ApplyENVAccessTx(ctx, tx, config.Default().WorkspacePolicy, team, "", account, permission)
-	})
-}
-
 // SetResourceAccess gives (active) or takes a member's inspect or replay on a preview or tunnel
 // bound to team, as `pb team grant <team> <account> preview|tunnel <id> inspect|replay` does.
 func SetResourceAccess(t testing.TB, store *db.DB, team, account, kind, id, permission string, active bool) {

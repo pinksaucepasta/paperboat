@@ -262,13 +262,6 @@ type CertificateRevocationStore interface {
 
 var ErrCertificateRevocationUnavailable = errors.New("certificate authority revocation is unavailable")
 
-// CleanupPendingError lets the long-running certificate worker retry a
-// transient edge cleanup on its next tick without stopping unrelated issuance.
-type CleanupPendingError struct{ Err error }
-
-func (e *CleanupPendingError) Error() string { return "certificate distribution cleanup is pending" }
-func (e *CleanupPendingError) Unwrap() error { return e.Err }
-
 // CertificateDistributionRollback removes a newly activated edge copy when
 // a later target or durable store step fails. Production transports implement
 // this as terminal revocation; test transports may use their equivalent
@@ -515,20 +508,6 @@ func (c *Coordinator) CommitPreviewDomainCertificateReady(ctx context.Context, a
 		return fmt.Errorf("%w: atomic preview certificate commit is unavailable", ErrCertificateNotReady)
 	}
 	return committer.CommitPreviewDomainCertificateReady(ctx, accountID, domainID, previewID, previewGeneration, expectedDomainGeneration, certificate, now)
-}
-
-// PreviewCertificateReady checks the exact preview/edge tuple before an alias
-// is published. The store remains authoritative for lease and certificate
-// generation fences.
-func (c *Coordinator) PreviewCertificateReady(ctx context.Context, accountID, domainID, previewID, hostname string, previewGeneration, domainGeneration, certificateGeneration uint64, edge DistributionTarget, now time.Time) (bool, error) {
-	if c == nil || c.config.Store == nil || !validIdentifier(accountID) || !validIdentifier(domainID) || !validIdentifier(previewID) || previewGeneration == 0 || domainGeneration == 0 || certificateGeneration == 0 {
-		return false, ErrInvalid
-	}
-	readiness, ok := c.config.Store.(PreviewCertificateReadiness)
-	if !ok {
-		return false, fmt.Errorf("%w: preview certificate readiness is unavailable", ErrCertificateNotReady)
-	}
-	return readiness.PreviewCertificateReady(ctx, accountID, domainID, previewID, hostname, previewGeneration, domainGeneration, certificateGeneration, edge, now)
 }
 
 // ReconcileDistributionCleanup performs one bounded durable edge cleanup pass.
@@ -1206,32 +1185,6 @@ func (c *Coordinator) Revoke(ctx context.Context, domainID, reason string) (Cert
 		return CertificateView{}, err
 	}
 	if !found {
-		return CertificateView{}, ErrCertificateNotReady
-	}
-	return c.revokeCurrent(ctx, current, reason)
-}
-
-// RevokeHostname revokes one exact leaf in the hostname namespace of a
-// wildcard binding. It deliberately resolves the leaf before revocation, so
-// the wildcard parent's current projection and generation are never cleared
-// by an exact-leaf operation.
-func (c *Coordinator) RevokeHostname(ctx context.Context, domainID, hostname, reason string) (CertificateView, error) {
-	if c == nil || !validIdentifier(domainID) {
-		return CertificateView{}, ErrInvalid
-	}
-	host, wildcard, err := normalizeHostname(hostname)
-	if err != nil || wildcard || host != hostname {
-		return CertificateView{}, ErrInvalid
-	}
-	store, ok := c.config.Store.(HostnameCertificateStore)
-	if !ok {
-		return CertificateView{}, fmt.Errorf("%w: exact leaf store is unavailable", ErrDistributionUnavailable)
-	}
-	current, found, err := store.CurrentForHostname(ctx, domainID, host)
-	if err != nil {
-		return CertificateView{}, err
-	}
-	if !found || current.LeafHostname != host {
 		return CertificateView{}, ErrCertificateNotReady
 	}
 	return c.revokeCurrent(ctx, current, reason)
@@ -1916,6 +1869,3 @@ func (o *MemoryOperations) CompleteDomainCreate(_ context.Context, accountID, do
 	o.Completed = append(o.Completed, fmt.Sprintf("%s:%s:%d", accountID, domainID, generation))
 	return nil
 }
-
-// EnsureTargetOrder is exposed for integration tests and diagnostic snapshots.
-func EnsureTargetOrder(targets []EdgeTarget) []EdgeTarget { return SortEdgeTargets(targets) }

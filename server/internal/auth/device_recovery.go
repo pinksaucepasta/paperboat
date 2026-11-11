@@ -102,13 +102,7 @@ func (s *DeviceService) Cancel(ctx context.Context, in DeviceTokenInput) error {
 		_, err = tx.Exec(ctx, `DELETE FROM device_token_redemptions WHERE grant_id=$1`, grant.ID)
 		return err
 	})
-	if err != nil {
-		return err
-	}
-	if sid != "" && s.downstream != nil {
-		return s.downstream.RevokeClientSessions(ctx, sid, "login_cancelled")
-	}
-	return nil
+	return err
 }
 
 func minTime(a, b time.Time) time.Time {

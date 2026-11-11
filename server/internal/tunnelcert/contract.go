@@ -326,14 +326,6 @@ func PlatformDNSChallengeTargetForDomain(domain Domain) (string, error) {
 	return target, nil
 }
 
-// NormalizeChallengeZone validates and normalizes the server-owned DNS zone
-// used for delegated challenge targets. The bool result is always false for
-// the accepted non-wildcard zone and is kept to make wildcard rejection
-// explicit to callers building DNS instructions.
-func NormalizeChallengeZone(raw string) (string, bool, error) {
-	return normalizeHostname(raw)
-}
-
 // NormalizeHostname returns the canonical DNS wire-form hostname used by
 // certificate policy and issuance boundaries. The bool reports a leading
 // wildcard and callers handling SNI must reject it.

@@ -144,13 +144,8 @@ type DeviceService struct {
 	audit                      *audit.Writer
 	cfg                        config.CLIAuth
 	keys                       [][]byte
-	downstream                 DownstreamSessionRevoker
 	enroller                   DeviceEnroller
 	now                        func() time.Time
-}
-
-type DownstreamSessionRevoker interface {
-	RevokeClientSessions(context.Context, string, string) error
 }
 
 func NewDeviceService(store *db.DB, auditWriter *audit.Writer, cfg config.CLIAuth, hashKeys []string) *DeviceService {
@@ -164,10 +159,6 @@ func NewDeviceService(store *db.DB, auditWriter *audit.Writer, cfg config.CLIAut
 }
 
 func (s *DeviceService) SetEnroller(enroller DeviceEnroller) { s.enroller = enroller }
-
-func (s *DeviceService) SetDownstreamRevoker(revoker DownstreamSessionRevoker) {
-	s.downstream = revoker
-}
 
 func (s *DeviceService) Authorize(ctx context.Context, in DeviceAuthorizationInput) (DeviceAuthorization, error) {
 	if in.ClientID != s.cfg.ClientID {
@@ -544,7 +535,6 @@ func (s *DeviceService) Refresh(ctx context.Context, token, attemptID string) (T
 	}
 	var out TokenSet
 	var replay bool
-	var replaySID string
 	err := s.inTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		q := tx.Queries()
 		stored, err := q.GetClientRefreshTokenForUpdate(ctx, s.hashList(token))
@@ -569,7 +559,6 @@ func (s *DeviceService) Refresh(ctx context.Context, token, attemptID string) (T
 				return err
 			}
 			replay = true
-			replaySID = stored.CLIClientSessionID
 			return s.revokeTx(ctx, tx, stored.CLIClientSessionID, "refresh_replay")
 		}
 		if !s.now().Before(stored.ExpiresAt) {
@@ -590,11 +579,6 @@ func (s *DeviceService) Refresh(ctx context.Context, token, attemptID string) (T
 		return TokenSet{}, err
 	}
 	if replay {
-		if s.downstream != nil {
-			if err := s.downstream.RevokeClientSessions(ctx, replaySID, "refresh_replay"); err != nil {
-				return TokenSet{}, err
-			}
-		}
 		return TokenSet{}, ErrUnauthenticated
 	}
 	return out, nil
@@ -613,13 +597,7 @@ func (s *DeviceService) RevokeToken(ctx context.Context, token, reason string) e
 		}
 		return s.revokeTx(ctx, tx, sid, reason)
 	})
-	if err != nil {
-		return err
-	}
-	if sid != "" && s.downstream != nil {
-		return s.downstream.RevokeClientSessions(ctx, sid, reason)
-	}
-	return nil
+	return err
 }
 
 func (s *DeviceService) revokeTx(ctx context.Context, tx *db.Tx, sid, reason string) error {
@@ -674,13 +652,7 @@ func (s *DeviceService) RevokeClient(ctx context.Context, userID, sid, reason st
 		}
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-	if s.downstream != nil {
-		return s.downstream.RevokeClientSessions(ctx, sid, reason)
-	}
-	return nil
+	return err
 }
 
 func (s *DeviceService) ListClients(ctx context.Context, userID, state, current string, limit, offset int) (ClientSessionPage, error) {

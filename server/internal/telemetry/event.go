@@ -334,21 +334,6 @@ func (l *EventLog) Record(input EventInput) (Event, error) {
 	return event, nil
 }
 
-// TryRecord is the explicit nonblocking form used by request and lifecycle
-// paths. Validation still runs synchronously, while queue contention and
-// shutdown are represented by stored=false instead of backpressure.
-func (l *EventLog) TryRecord(input EventInput) (Event, bool, error) {
-	event, err := NewEvent(input)
-	if err != nil {
-		return Event{}, false, err
-	}
-	if l == nil {
-		return event, true, nil
-	}
-	_, accepted := l.tryEnqueue(event)
-	return event, accepted, nil
-}
-
 func (l *EventLog) tryEnqueue(event Event) (Event, bool) {
 	if !l.gate.TryRLock() {
 		l.dropped.Add(1)
@@ -413,12 +398,6 @@ func (l *EventLog) DroppedEvents() uint64 {
 	}
 	return l.dropped.Load()
 }
-
-// DropCount is a concise alias for integrations exposing generic counters.
-func (l *EventLog) DropCount() uint64 { return l.DroppedEvents() }
-
-// Dropped is the short name used by the edge-compatible telemetry API.
-func (l *EventLog) Dropped() uint64 { return l.DroppedEvents() }
 
 func (l *EventLog) Close() error {
 	if l == nil {

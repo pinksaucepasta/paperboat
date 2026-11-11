@@ -278,28 +278,6 @@ func requireAdmin(ctx context.Context, tx *db.Tx, actor string) error {
 	}
 	return nil
 }
-func (s *Service) ListRequests(ctx context.Context) ([]Request, error) {
-	rows, err := s.db.Queries().ListReleaseAuthorityRequests(ctx, dbsqlc.ListReleaseAuthorityRequestsParams{PageLimit: 100})
-	if err != nil {
-		return nil, err
-	}
-	result := make([]Request, 0, len(rows))
-	for _, row := range rows {
-		result = append(result, mapRequest(row))
-	}
-	return result, nil
-}
-func (s *Service) List(ctx context.Context) ([]Record, error) {
-	rows, err := s.db.Queries().ListReleaseAuthorityBundles(ctx, dbsqlc.ListReleaseAuthorityBundlesParams{PageLimit: 100})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]Record, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, mapRecord(row))
-	}
-	return out, nil
-}
 func (s *Service) RequestInventory(ctx context.Context, limit, offset int) ([]Request, int, error) {
 	if limit < 1 || limit > 200 || offset < 0 {
 		return nil, 0, ErrInvalid

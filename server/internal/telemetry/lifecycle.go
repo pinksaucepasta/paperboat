@@ -504,32 +504,6 @@ func (l *LifecycleEventLog) Record(input LifecycleEventInput) (LifecycleEvent, e
 	return event, nil
 }
 
-func (l *LifecycleEventLog) TryRecord(input LifecycleEventInput) (LifecycleEvent, bool, error) {
-	event, err := NewLifecycleEvent(input)
-	if err != nil {
-		return LifecycleEvent{}, false, err
-	}
-	if l == nil || l.closed.Load() || !l.mu.TryLock() {
-		if l != nil {
-			l.dropped.Add(1)
-		}
-		return event, false, nil
-	}
-	defer l.mu.Unlock()
-	if l.closed.Load() {
-		l.dropped.Add(1)
-		return event, false, nil
-	}
-	if len(l.events) == l.capacity {
-		copy(l.events, l.events[1:])
-		l.events[len(l.events)-1] = cloneLifecycleEvent(event)
-		l.dropped.Add(1)
-	} else {
-		l.events = append(l.events, cloneLifecycleEvent(event))
-	}
-	return event, true, nil
-}
-
 func (l *LifecycleEventLog) Snapshot() []LifecycleEvent {
 	if l == nil {
 		return nil
@@ -599,32 +573,6 @@ func (l *LifecycleLog) Record(input LogRecordInput) (LogRecord, error) {
 		l.entries = append(l.entries, cloneLogRecord(record))
 	}
 	return record, nil
-}
-
-func (l *LifecycleLog) TryRecord(input LogRecordInput) (LogRecord, bool, error) {
-	record, err := NewLogRecord(input)
-	if err != nil {
-		return LogRecord{}, false, err
-	}
-	if l == nil || l.closed.Load() || !l.mu.TryLock() {
-		if l != nil {
-			l.dropped.Add(1)
-		}
-		return record, false, nil
-	}
-	defer l.mu.Unlock()
-	if l.closed.Load() {
-		l.dropped.Add(1)
-		return record, false, nil
-	}
-	if len(l.entries) == l.capacity {
-		copy(l.entries, l.entries[1:])
-		l.entries[len(l.entries)-1] = cloneLogRecord(record)
-		l.dropped.Add(1)
-	} else {
-		l.entries = append(l.entries, cloneLogRecord(record))
-	}
-	return record, true, nil
 }
 
 func (l *LifecycleLog) Snapshot() []LogRecord {
