@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-// httpDoer sends one request; publicClient in production.
+// httpDoer sends one request; PublicClient in production.
 type httpDoer interface {
 	Do(*http.Request) (*http.Response, error)
 }
@@ -28,9 +28,9 @@ type httpDoer interface {
 // network (no SSRF into the platform).
 var ErrPrivateAddress = errors.New("the destination must be a public internet address")
 
-// publicClient refuses, at connect time, any address that is not a public unicast address, so a
+// PublicClient refuses, at connect time, any address that is not a public unicast address, so a
 // DNS answer cannot steer delivery into private networks. Redirects are not followed.
-func publicClient(timeout time.Duration) *http.Client {
+func PublicClient(timeout time.Duration) *http.Client {
 	dialer := &net.Dialer{Timeout: 10 * time.Second, Control: func(_, address string, _ syscall.RawConn) error {
 		host, _, err := net.SplitHostPort(address)
 		if err != nil {

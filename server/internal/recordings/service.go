@@ -42,6 +42,7 @@ type Service struct {
 	// sharingKeys maps each account to its current vault sharing public key; an account without a vault is absent
 	// (vaultSharingKeys; tests stub it).
 	sharingKeys func(context.Context, *db.Tx, []string) (map[string][]byte, error)
+	buckets     Buckets
 }
 
 func New(store *db.DB, cfg config.Recordings, signer admission.Signer, issuer string) *Service {

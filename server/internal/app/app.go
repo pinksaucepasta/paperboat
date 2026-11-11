@@ -75,6 +75,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/selfhost"
 	"github.com/pinksaucepasta/paperboat/server/internal/servernodes"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/server/internal/teambucket"
 	"github.com/pinksaucepasta/paperboat/server/internal/teamidentity"
 	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
@@ -685,6 +686,8 @@ func New(opts Options) (*App, error) {
 	resourceUsageService := resourceusage.New(store)
 	resourceUsageService.Debiter = workspaceBilling
 	recordingService := recordings.New(store, opts.Config.Recordings, mintKeys, config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL))
+	teamBuckets := teambucket.New(store, opts.Config.Secrets.EncryptionKey)
+	recordingService.SetBuckets(teamBuckets)
 	browserTerminalGateway := &browserterminal.Gateway{
 		AdmissionLifetime: opts.Config.CLIAuth.MintProofLifetime,
 		RecordUsageAdmission: func(ctx context.Context, attachment, machine, terminal, node, actor string, expires time.Time) error {
@@ -791,6 +794,7 @@ func New(opts Options) (*App, error) {
 		TeamIdentity:             teamIdentity,
 		AuditStreams:             auditStreams,
 		Recordings:               recordingService,
+		TeamBuckets:              teamBuckets,
 		NativePrivateAccess:      nativePrivateService,
 		ManagedSSH:               managedSSHService,
 		DiagnosticUploads:        diagnosticUploadService,
@@ -858,7 +862,7 @@ func New(opts Options) (*App, error) {
 		}
 		_, retentionErr := retention.Run(pruneContext, store, opts.Config.Retention)
 		// Secrets held for API token create retries never outlive their window (F21-12).
-		err = errors.Join(err, retentionErr, apiTokens.PruneCreateRequests(pruneContext), enrollmentService.PruneProofNonces(pruneContext), privateaccess.PurgeIdempotency(pruneContext, store))
+		err = errors.Join(err, retentionErr, recordingService.PruneArchive(pruneContext), apiTokens.PruneCreateRequests(pruneContext), enrollmentService.PruneProofNonces(pruneContext), privateaccess.PurgeIdempotency(pruneContext, store))
 		workers.IterationFailure(ctx, "team_retention_cleanup", "team_retention_failed", err)
 		outcome := "success"
 		if err != nil {

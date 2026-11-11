@@ -9,6 +9,9 @@ import (
 type Recordings struct {
 	// MachineRetentionDays: a machine deletes a recording this many days after it started.
 	MachineRetentionDays int `json:"machine_retention_days"`
+	// BucketRetentionDays: Paperboat deletes a recording's segments from the team bucket this many days after it
+	// started (the machine's own copy follows MachineRetentionDays).
+	BucketRetentionDays int `json:"bucket_retention_days"`
 	// DiskQuotaMB: the most disk a machine's recordings may use; the oldest are deleted first.
 	DiskQuotaMB int `json:"disk_quota_mb"`
 	// MaxKeyGenerations bounds rotations of one team's recording key (one row each).
@@ -16,16 +19,18 @@ type Recordings struct {
 }
 
 func defaultRecordings() Recordings {
-	return Recordings{MachineRetentionDays: 30, DiskQuotaMB: 2048, MaxKeyGenerations: 100}
+	return Recordings{MachineRetentionDays: 30, BucketRetentionDays: 60, DiskQuotaMB: 2048, MaxKeyGenerations: 100}
 }
 
 func (r Recordings) validate(index time.Duration) error {
 	switch {
-	case r.MachineRetentionDays < 1 || r.MachineRetentionDays > 3650, r.DiskQuotaMB < 256 || r.DiskQuotaMB > 65536,
+	case r.MachineRetentionDays < 1 || r.MachineRetentionDays > 3650, r.BucketRetentionDays < 1 || r.BucketRetentionDays > 3650, r.DiskQuotaMB < 256 || r.DiskQuotaMB > 65536,
 		r.MaxKeyGenerations < 2 || r.MaxKeyGenerations > 10_000:
-		return fmt.Errorf("recordings: machine_retention_days 1-3650, disk_quota_mb 256-65536, max_key_generations 2-10000")
+		return fmt.Errorf("recordings: machine_retention_days and bucket_retention_days 1-3650, disk_quota_mb 256-65536, max_key_generations 2-10000")
 	case index < time.Duration(r.MachineRetentionDays)*day:
 		return fmt.Errorf("retention.recordings must be at least recordings.machine_retention_days")
+	case index < time.Duration(r.BucketRetentionDays)*day:
+		return fmt.Errorf("retention.recordings must be at least recordings.bucket_retention_days: the index row outlives the archive it points to")
 	}
 	return nil
 }
