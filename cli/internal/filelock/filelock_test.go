@@ -24,6 +24,9 @@ func TestLockExcludesAndIsBoundedByTheContext(t *testing.T) {
 	if err := release(); err != nil {
 		t.Fatal(err)
 	}
+	if err := release(); err != nil {
+		t.Fatalf("a second release must be a no-op, not touch a reused descriptor: %v", err)
+	}
 	again, err := Lock(context.Background(), path)
 	if err != nil {
 		t.Fatalf("lock not free after release: %v", err)

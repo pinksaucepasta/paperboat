@@ -34,3 +34,33 @@ func TestStaleRepositoryLockIsClearedAndALiveOneIsNot(t *testing.T) {
 		t.Fatalf("the retaken lock is not a new empty file: %v %v", info, err)
 	}
 }
+
+// A lock whose holder is still working keeps its modification time fresh, so a slow publish is not reclaimed.
+func TestHeldRepositoryLockStaysFreshWhileItsHolderWorks(t *testing.T) {
+	lockPath := filepath.Join(t.TempDir(), "master.lock")
+	lock, err := openRepositoryLock(lockPath, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	old := time.Now().Add(-2 * staleRepositoryLock)
+	if err := os.Chtimes(lockPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+	stop := keepLockFresh(lockPath, 10*time.Millisecond)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		info, err := os.Stat(lockPath)
+		if err == nil && time.Since(info.ModTime()) < staleRepositoryLock {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the heartbeat did not renew the lock")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	stop()
+	if _, err := openRepositoryLock(lockPath, 0o644); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("a heartbeated lock was reclaimed: %v", err)
+	}
+}
