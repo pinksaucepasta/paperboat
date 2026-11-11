@@ -414,6 +414,18 @@ func (a *Authority) BindRegionalPeer(peerID string) {
 	r.mu.Unlock()
 }
 
+// relaysMoved makes a running listener with no pair publish and connect a relay set that gained a relay process: it
+// parks while idle and would keep advertising only the relays it reached at start (Tailscale re-STUNs and
+// reconnects on every DERP map change, wgengine/magicsock/derp.go setDERPMap). A bound pair's sweep already sees it.
+func (r *regionalRecovery) relaysMoved() {
+	r.mu.Lock()
+	listener := r.engine != nil && r.peerID == ""
+	r.mu.Unlock()
+	if listener && r.repair.CompareAndSwap(false, true) {
+		r.poke()
+	}
+}
+
 // poke wakes demand without treating it as a network change (which lifts refusal fences).
 func (r *regionalRecovery) poke() {
 	select {
