@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -40,5 +44,30 @@ func TestRetrySerializableReplaysOnlyConflictsAndIsBounded(t *testing.T) {
 	calls = 0
 	if err := RetrySerializable(canceled, func() error { calls++; return conflict }); !errors.Is(err, context.Canceled) || calls != 1 {
 		t.Fatalf("canceled: err=%v calls=%d", err, calls)
+	}
+}
+
+// F21-157: a serializable transaction that manages its own database/sql transaction replays after 40001
+// only inside RetrySerializable, so no production file may call BeginSerializable without it.
+func TestEveryBeginSerializableCallerRetries(t *testing.T) {
+	var offenders []string
+	err := filepath.WalkDir("..", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || filepath.Base(path) == "db.go" {
+			return err
+		}
+		source, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(source), "BeginSerializable(") && !strings.Contains(string(source), "RetrySerializable(") {
+			offenders = append(offenders, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(offenders) != 0 {
+		t.Fatalf("BeginSerializable without RetrySerializable in: %v", offenders)
 	}
 }
