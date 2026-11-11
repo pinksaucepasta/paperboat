@@ -17,7 +17,7 @@ func secureResumeFile(path string, info os.FileInfo, maximum int64) bool {
 	if err != nil || attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		return false
 	}
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return false
 	}

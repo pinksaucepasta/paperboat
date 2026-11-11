@@ -22,7 +22,7 @@ func secureDirectory(path string) error {
 	if err != nil || attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		return ErrArtifactTarget
 	}
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil || !user.User.Sid.IsValid() {
 		return ErrArtifactTarget
 	}
@@ -72,7 +72,7 @@ func secureArtifactFile(path string) error {
 	if err != nil || attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		return ErrArtifactTarget
 	}
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return err
 	}

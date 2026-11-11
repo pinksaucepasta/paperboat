@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
 	"io"
 	"os"
 	"path/filepath"
@@ -277,8 +278,9 @@ func writeWindowsCarrierDescriptors(c CarrierConfig, active bool) error {
 	}
 	return atomicfile.Write(carrierConfigPath(c.Instance), body, options)
 }
+
 func verifyCarrierNative(c CarrierConfig, i *service.Installer) error {
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return err
 	}
@@ -307,7 +309,7 @@ func LockCarrier(c CarrierConfig) (io.Closer, error) {
 	if c.Validate() != nil {
 		return nil, ErrInvalidRequest
 	}
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return nil, err
 	}

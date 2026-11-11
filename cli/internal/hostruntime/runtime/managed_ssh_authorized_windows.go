@@ -19,7 +19,7 @@ type windowsAuthorizedKeysClient interface {
 }
 
 var newWindowsAuthorizedKeysClient = func(timeout time.Duration) (windowsAuthorizedKeysClient, error) {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil {
 		return nil, ErrProductionInvalid
 	}
@@ -35,7 +35,7 @@ var newWindowsAuthorizedKeysClient = func(timeout time.Duration) (windowsAuthori
 }
 
 func reconcilePlatformAuthorizedKeys(stateRoot string, _ uint32, keys []string) (bool, error) {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil {
 		return false, ErrProductionInvalid
 	}

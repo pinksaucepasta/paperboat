@@ -25,7 +25,7 @@ func lockCarrierFile(path string) (func() error, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil {
 		return nil, err
 	}

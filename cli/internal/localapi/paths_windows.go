@@ -32,7 +32,7 @@ func CurrentPaths(uid int) (Paths, error) {
 	if !filepath.IsAbs(base) || filepath.Clean(base) != base {
 		return Paths{}, ErrInvalidConfig
 	}
-	tokenUser, err := windows.GetCurrentProcessToken().GetTokenUser()
+	tokenUser, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil {
 		return Paths{}, errors.Join(ErrInvalidConfig, err)
 	}

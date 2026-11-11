@@ -143,7 +143,7 @@ func checkWindowsStateDirectory(directory *os.Root, path string) (result error) 
 	if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 || elevation.VerifyHandleFinalPath(handle, path) != nil {
 		return errWindowsUserStateRefused
 	}
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil {
 		return err
 	}

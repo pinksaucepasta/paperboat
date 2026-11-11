@@ -15,7 +15,7 @@ import (
 
 // manageWindowsConfigService uses the same protected elevation bridge as install.
 func manageWindowsConfigService(ctx context.Context, stateRoot string, install bool) (bool, error) {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil {
 		return true, err
 	}
@@ -47,7 +47,7 @@ func ownerSIDMatches(ownerSID string) bool {
 	if err != nil || want == nil || !want.IsValid() {
 		return false
 	}
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	return err == nil && user != nil && user.User.Sid != nil && user.User.Sid.Equals(want)
 }
 
@@ -60,7 +60,7 @@ func windowsConfigServiceStatus() string {
 	}
 	manager := &mgr.Mgr{Handle: handle}
 	defer manager.Disconnect()
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil {
 		return "unavailable"
 	}

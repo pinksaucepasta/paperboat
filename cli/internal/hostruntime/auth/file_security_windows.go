@@ -20,7 +20,7 @@ func secureJWKSFile(path string, info os.FileInfo) bool {
 }
 
 func currentJWKSDescriptor() (*windows.SECURITY_DESCRIPTOR, error) {
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return nil, err
 	}
