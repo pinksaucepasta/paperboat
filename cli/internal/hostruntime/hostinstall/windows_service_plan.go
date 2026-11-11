@@ -64,8 +64,8 @@ func prepareWindowsSSHWithinAttempts(ctx context.Context, attempts int, step fun
 var standaloneVersionPattern = regexp.MustCompile(`^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]+$`)
 
 type windowsRuntimeServiceDefinition struct {
-	kind, executable string
-	arguments        []string
+	kind, executable, generation string
+	arguments                    []string
 }
 
 // windowsServicePlanStep is the small lifecycle surface needed by the
@@ -182,7 +182,9 @@ func executeWindowsServiceStepsWithHook(
 	return rollback, nil
 }
 
-func windowsRuntimeServiceDefinitions(layout service.Layout, pinned ...string) []windowsRuntimeServiceDefinition {
+// windowsRuntimeServiceDefinitions are the runtime roles of one installed source: hostd runs as that source's own
+// generation service (service.WindowsHostdName), the local daemon and the updater as the account's fixed ones.
+func windowsRuntimeServiceDefinitions(layout service.Layout, generation string, pinned ...string) []windowsRuntimeServiceDefinition {
 	executable := layout.Binary
 	if len(pinned) == 1 {
 		executable = pinned[0]
@@ -192,7 +194,7 @@ func windowsRuntimeServiceDefinitions(layout service.Layout, pinned ...string) [
 		instanceArgs = []string{"--instance", layout.Instance}
 	}
 	return []windowsRuntimeServiceDefinition{
-		{kind: service.HostdKind, executable: executable, arguments: append([]string{"daemon", "__runtime-hostd"}, instanceArgs...)},
+		{kind: service.HostdKind, executable: executable, generation: generation, arguments: append([]string{"daemon", "__runtime-hostd"}, append(instanceArgs, "--generation", generation)...)},
 		{kind: service.DaemonKind, executable: executable, arguments: append([]string{"daemon", "__runtime-local-daemon"}, instanceArgs...)},
 		{kind: service.UpdaterKind, executable: executable, arguments: append([]string{"daemon", "__runtime-updated"}, instanceArgs...)},
 	}

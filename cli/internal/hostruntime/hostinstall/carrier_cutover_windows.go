@@ -166,3 +166,39 @@ func sweepWindowsCarrierGenerations(ctx context.Context, instance, active string
 	}
 	return result
 }
+
+// removeWindowsHostdGenerations removes the account's hostd generation services other than keep (registered or only
+// declared). With onlyStopped a running generation stays: it is still serving or finishing work.
+func removeWindowsHostdGenerations(ctx context.Context, instance, keep string, onlyStopped bool) error {
+	names, err := windowsHostdGenerationNames(ctx, instance)
+	if err != nil {
+		return err
+	}
+	kept, err := service.WindowsHostdName(instance, keep)
+	if err != nil {
+		return err
+	}
+	var result error
+	for _, name := range names {
+		if strings.EqualFold(name, kept) {
+			continue
+		}
+		definition := filepath.Join(WindowsProgramDataRoot(), "services", name+".json")
+		if onlyStopped {
+			status, err := (service.WindowsController{}).Inspect(ctx, definition)
+			if err != nil {
+				result = errors.Join(result, err)
+				continue
+			}
+			if status.Running {
+				continue
+			}
+		}
+		if err := (service.WindowsController{}).Remove(ctx, definition); err != nil {
+			result = errors.Join(result, err)
+			continue
+		}
+		result = errors.Join(result, removeInstallFile(definition))
+	}
+	return result
+}

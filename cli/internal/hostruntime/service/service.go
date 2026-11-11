@@ -207,7 +207,7 @@ func newInstaller(config Config, allowMissingExecutable bool) (*Installer, error
 		}
 	case "windows":
 		// Session owners and carriers name one service per generation (instance + generation).
-		generational := config.Kind == SessionOwnerKind || config.Kind == CarrierKind
+		generational := config.Kind == SessionOwnerKind || config.Kind == CarrierKind || config.Kind == HostdKind
 		if generational && !validWindowsSessionOwnerInstance(config.Instance) || !generational && !safeWindowsServiceKind(config.Kind, config.Instance) {
 			return nil, ErrInvalidDefinition
 		}

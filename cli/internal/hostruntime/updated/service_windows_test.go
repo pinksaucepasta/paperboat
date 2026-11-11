@@ -129,7 +129,11 @@ func TestPrivilegedWindowsServiceIdentityContract(t *testing.T) {
 }
 
 func TestWindowsRecoveryPolicyIsServiceSpecific(t *testing.T) {
-	_, hostdName, updaterName, sshName, _, err := windowsInstanceNames("S-1-5-21-1-2-3-1001")
+	_, updaterName, sshName, _, err := windowsInstanceNames("S-1-5-21-1-2-3-1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, hostdName, err := windowsHostdServiceName("S-1-5-21-1-2-3-1001", installsource.Source{Version: "1", Platform: "windows", Architecture: "amd64", SHA256: strings.Repeat("a", 64), Length: 1, Distribution: installsource.Custom})
 	if err != nil {
 		t.Fatal(err)
 	}

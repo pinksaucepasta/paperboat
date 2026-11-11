@@ -130,7 +130,12 @@ func windowsRoleRuntime(layout service.Layout, kind string) (string, error) {
 	case service.DaemonKind:
 		role = "__runtime-local-daemon"
 	}
-	pending, err := service.NewPending(service.Config{Platform: "windows", Kind: kind, Instance: layout.Instance, ConfigRoot: root, Executable: layout.Binary, User: "Paperboat", Group: "Paperboat", Arguments: []string{"daemon", role, "--instance", layout.Instance}, Controller: service.WindowsController{}})
+	config := service.Config{Platform: "windows", Kind: kind, Instance: layout.Instance, ConfigRoot: root, Executable: layout.Binary, User: "Paperboat", Group: "Paperboat", Arguments: []string{"daemon", role, "--instance", layout.Instance}, Controller: service.WindowsController{}}
+	if kind == service.HostdKind {
+		config.Generation = installedWindowsHostdGeneration(layout.Instance)
+		config.Arguments = append(config.Arguments, "--generation", config.Generation)
+	}
+	pending, err := service.NewPending(config)
 	if err != nil {
 		return "", err
 	}

@@ -39,9 +39,18 @@ const windowsOwnerWorkloadEnvironment = "PAPERBOAT_WINDOWS_OWNER_WORKLOAD"
 // runHostd owns Windows workloads for the service lifetime and starts the
 // replaceable worker only through the authenticated named-pipe fence.
 func runHostd(ctx context.Context, args []string, output io.Writer) (err error) {
-	instance, err := resolveWindowsServiceInstance("PaperboatHostd", args)
+	// Each hostd generation is its own service: --instance <instance> --generation <generation>.
+	if len(args) != 4 || args[2] != "--generation" {
+		return errors.New("Paperboat Windows hostd requires --instance and --generation")
+	}
+	generation := args[3]
+	instance, err := resolveWindowsServiceInstance("PaperboatHostd", args[:2])
 	if err != nil {
 		return err
+	}
+	// Only the installed generation serves; a rollback restores the configuration and its generation together.
+	if generation != instance.config.SessionOwnerGeneration {
+		return errors.New("this Paperboat hostd generation is not the installed one")
 	}
 	defer func() {
 		if err != nil {
@@ -52,7 +61,7 @@ func runHostd(ctx context.Context, args []string, output io.Writer) (err error) 
 			}
 		}
 	}()
-	return runHostdInner(ctx, output, instance)
+	return runHostdInner(ctx, output, instance, generation)
 }
 
 func recordWindowsOwnerLaunchFailure(stateRoot string, err error) {
@@ -62,7 +71,7 @@ func recordWindowsOwnerLaunchFailure(stateRoot string, err error) {
 	recordWindowsLaunchFailure(filepath.Join(stateRoot, "hostd-startup-error.log"), err)
 }
 
-func runHostdInner(ctx context.Context, output io.Writer, instance windowsRuntimeInstance) error {
+func runHostdInner(ctx context.Context, output io.Writer, instance windowsRuntimeInstance, generation string) error {
 	install := instance.config
 	// The SCM parent launches the owner workload with CreateProcessAsUser.
 	// That child is deliberately not an SCM service process. Relying solely on
@@ -79,7 +88,7 @@ func runHostdInner(ctx context.Context, output io.Writer, instance windowsRuntim
 		if sid, sidErr := currentWindowsSID(); sidErr == nil && sid == install.OwnerSID {
 			return runOwnerHostd(ctx, output, install)
 		}
-		return runWindowsHostdService(install, instance)
+		return runWindowsHostdService(install, instance, generation)
 	}
 	if sid, sidErr := currentWindowsSID(); sidErr != nil || sid != install.OwnerSID {
 		return errors.New("Paperboat Windows hostd workload is not running as the enrolled owner")
@@ -126,13 +135,17 @@ func windowsHostdWorkerEnvironment(install hostinstall.WindowsRuntimeConfig, lay
 // runWindowsHostdService is the only SCM-facing hostd path. The child marker
 // is generated here, not accepted from the installed service definition, so a
 // LocalSystem process cannot accidentally run the workload itself.
-func runWindowsHostdService(install hostinstall.WindowsRuntimeConfig, instance windowsRuntimeInstance) error {
+func runWindowsHostdService(install hostinstall.WindowsRuntimeConfig, instance windowsRuntimeInstance, generation string) error {
 	layout := instance.layout
 	hostdExecutable, executableErr := os.Executable()
 	if executableErr != nil {
 		return executableErr
 	}
-	if _, err := service.VerifyOwnedWindowsRoleExecutable(service.HostdKind, layout.Instance, hostdExecutable); err != nil {
+	if _, err := service.VerifyOwnedWindowsRoleExecutable(service.HostdKind, layout.Instance+"-"+generation, hostdExecutable); err != nil {
+		return err
+	}
+	serviceName, err := service.WindowsHostdName(layout.Instance, generation)
+	if err != nil {
 		return err
 	}
 	runtimeExecutable := layout.Binary
@@ -168,13 +181,13 @@ func runWindowsHostdService(install hostinstall.WindowsRuntimeConfig, instance w
 	environment["PAPERBOAT_FEATURE_LENGTH"] = strconv.FormatInt(identity.Length, 10)
 
 	return service.RunWindowsService(service.ServiceEntryConfig{
-		Name:        windowsInstanceServiceName("PaperboatHostd", instance.name),
+		Name:        serviceName,
 		Executable:  hostdExecutable,
-		Arguments:   []string{"daemon", "__runtime-hostd", "--instance", instance.name},
+		Arguments:   []string{"daemon", "__runtime-hostd", "--instance", instance.name, "--generation", generation},
 		EnrolledSID: install.OwnerSID,
 		Environment: environment,
 		LaunchFailure: func(err error) {
-			recordWindowsServiceLaunchFailure(windowsInstanceServiceName("PaperboatHostd", instance.name), err)
+			recordWindowsServiceLaunchFailure(serviceName, err)
 		},
 		StartPrivilegedSidecar: func(ctx context.Context) (service.PrivilegedSidecar, error) {
 			sidecarCtx, cancelSidecars := context.WithCancel(ctx)

@@ -64,20 +64,34 @@ func (e windowsActivationFailure) Unwrap() []error {
 	return []error{errInvalidWindowsActivation, e.cause}
 }
 
-func windowsInstanceServiceNames(ownerSID string) (hostd, updater string, err error) {
+// windowsUpdaterServiceName is the account's updater service.
+func windowsUpdaterServiceName(ownerSID string) (string, error) {
 	instance, err := service.WindowsUserInstance(ownerSID)
+	if err != nil {
+		return "", err
+	}
+	return windowsUpdaterService + "-" + instance, nil
+}
+
+// windowsHostdServiceName is the hostd generation service of source (service.WindowsHostdName).
+func windowsHostdServiceName(ownerSID string, source installsource.Source) (instance, name string, err error) {
+	instance, err = service.WindowsUserInstance(ownerSID)
 	if err != nil {
 		return "", "", err
 	}
-	return windowsHostdService + "-" + instance, windowsUpdaterService + "-" + instance, nil
+	if source.Validate() != nil {
+		return "", "", errInvalidWindowsActivation
+	}
+	name, err = service.WindowsHostdName(instance, source.SHA256[:32])
+	return instance, name, err
 }
 
-func windowsInstanceNames(ownerSID string) (instance, hostd, updater, ssh, activator string, err error) {
+func windowsInstanceNames(ownerSID string) (instance, updater, ssh, activator string, err error) {
 	instance, err = service.WindowsUserInstance(ownerSID)
 	if err != nil {
-		return "", "", "", "", "", err
+		return "", "", "", "", err
 	}
-	return instance, windowsHostdService + "-" + instance, windowsUpdaterService + "-" + instance, windowsSSHService + "-" + instance, windowsActivatorService + "-" + instance, nil
+	return instance, windowsUpdaterService + "-" + instance, windowsSSHService + "-" + instance, windowsActivatorService + "-" + instance, nil
 }
 
 // windowsReleasePaths is retained only as an internal transaction view while
@@ -158,7 +172,11 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 	}
 	// Resolve and validate every mutable SCM dependency before downloading any
 	// release bytes. An inconsistent installation fails cheaply and unchanged.
-	hostdName, updaterName, err := windowsInstanceServiceNames(config.OwnerSID)
+	_, hostdName, err := windowsHostdServiceName(config.OwnerSID, config.Source)
+	if err != nil {
+		return windowsActivationJournal{}, err
+	}
+	updaterName, err := windowsUpdaterServiceName(config.OwnerSID)
 	if err != nil {
 		return windowsActivationJournal{}, err
 	}
@@ -170,7 +188,7 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 	if err != nil {
 		return windowsActivationJournal{}, err
 	}
-	instance, _, _, sshName, _, err := windowsInstanceNames(config.OwnerSID)
+	instance, _, sshName, _, err := windowsInstanceNames(config.OwnerSID)
 	if err != nil {
 		return windowsActivationJournal{}, err
 	}
@@ -178,7 +196,11 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 		kind   string
 		target *windowsServiceTarget
 	}{{service.HostdKind, &oldHostd}, {service.UpdaterKind, &oldUpdater}} {
-		identity, identityErr := service.VerifyOwnedWindowsRoleExecutable(role.kind, instance, role.target.Executable)
+		owned := instance
+		if role.kind == service.HostdKind {
+			owned = instance + "-" + config.Source.SHA256[:32]
+		}
+		identity, identityErr := service.VerifyOwnedWindowsRoleExecutable(role.kind, owned, role.target.Executable)
 		if identityErr != nil {
 			return windowsActivationJournal{}, fmt.Errorf("native runtime declaration requires initial maintenance installation: %w", identityErr)
 		}
@@ -604,7 +626,17 @@ func parseWindowsRuntimeServiceTarget(name, role, command string) (windowsServic
 		return windowsServiceTarget{}, errInvalidWindowsActivation
 	}
 	args, err := windows.DecomposeCommandLine(command)
-	if err != nil || len(args) != 5 || !filepath.IsAbs(args[0]) || args[1] != "daemon" || args[2] != role || args[3] != "--instance" || len(args[4]) != 25 || args[4][0] != 'u' || !lowerHex(args[4][1:]) || name != base+"-"+args[4] {
+	if role == "__runtime-hostd" {
+		// A hostd generation: daemon __runtime-hostd --instance <instance> --generation <generation>.
+		if err != nil || len(args) != 7 || args[5] != "--generation" {
+			return windowsServiceTarget{}, errInvalidWindowsActivation
+		}
+		if expected, nameErr := service.WindowsHostdName(args[4], args[6]); nameErr != nil || name != expected {
+			return windowsServiceTarget{}, errInvalidWindowsActivation
+		}
+		args = args[:5]
+	}
+	if err != nil || len(args) != 5 || !filepath.IsAbs(args[0]) || args[1] != "daemon" || args[2] != role || args[3] != "--instance" || len(args[4]) != 25 || args[4][0] != 'u' || !lowerHex(args[4][1:]) || role != "__runtime-hostd" && name != base+"-"+args[4] {
 		return windowsServiceTarget{}, errInvalidWindowsActivation
 	}
 	return windowsServiceTarget{Executable: filepath.Clean(args[0]), Arguments: append([]string(nil), args[1:]...)}, nil
@@ -644,7 +676,7 @@ func validPrivilegedWindowsServiceConfig(config mgr.Config, startType, errorCont
 }
 
 func installWindowsActivatorService(executable, ownerSID string) error {
-	instance, _, _, _, name, err := windowsInstanceNames(ownerSID)
+	instance, _, _, name, err := windowsInstanceNames(ownerSID)
 	if err != nil {
 		return err
 	}
@@ -737,7 +769,7 @@ func windowsRecoveryActionsMatch(actual, expected []mgr.RecoveryAction) bool {
 }
 
 func startWindowsActivatorService(ownerSID string) error {
-	_, _, _, _, name, err := windowsInstanceNames(ownerSID)
+	_, _, _, name, err := windowsInstanceNames(ownerSID)
 	if err != nil {
 		return err
 	}
@@ -1374,7 +1406,7 @@ func startVerifiedWindowsActivation(ctx context.Context, config WindowsConfig, j
 }
 
 func windowsActivatorOwnsTransaction(ownerSID string) (bool, error) {
-	_, _, _, _, name, err := windowsInstanceNames(ownerSID)
+	_, _, _, name, err := windowsInstanceNames(ownerSID)
 	if err != nil {
 		return false, err
 	}

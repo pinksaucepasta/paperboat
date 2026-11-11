@@ -322,6 +322,10 @@ func (s windowsInstallationState) Restore(ctx context.Context, snapshot []byte) 
 	if err := stopWindowsRuntimeServices(ctx, s.layout.Instance); err != nil {
 		return err
 	}
+	// The attempt's hostd generation goes; the lifecycle starts the baseline's again.
+	if err := removeWindowsHostdGenerations(ctx, s.layout.Instance, sourceGenerationOrAbsent(*state.Source), false); err != nil {
+		return err
+	}
 	if err := terminateStaleWindowsRuntimeProcesses(ctx, s.layout.Binary); err != nil {
 		return err
 	}

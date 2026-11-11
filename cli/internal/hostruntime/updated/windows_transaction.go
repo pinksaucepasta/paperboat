@@ -184,24 +184,6 @@ func lowerHex(value string) bool {
 	return true
 }
 
-func windowsActivationServiceNames(instance string) []string {
-	return []string{"PaperboatSshd-" + instance, "PaperboatHostd-" + instance, "PaperboatUpdated-" + instance}
-}
-
-func windowsActivationServiceStartNames(instance string, hostd, updater, ssh bool) []string {
-	names := make([]string, 0, 3)
-	if ssh {
-		names = append(names, "PaperboatSshd-"+instance)
-	}
-	if hostd {
-		names = append(names, "PaperboatHostd-"+instance)
-	}
-	if updater {
-		names = append(names, "PaperboatUpdated-"+instance)
-	}
-	return names
-}
-
 func validWindowsSSHTarget(target windowsServiceTarget) bool {
 	return target.Executable != ""
 }

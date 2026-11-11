@@ -38,7 +38,11 @@ func TestNativeWindowsPrepareInstallRejectsRunningUpdaterWithoutHandleLeak(t *te
 	if err != nil || layout.Instance != instance {
 		t.Fatal("owner layout mismatch")
 	}
-	hostdName, updaterName, err := windowsInstanceServiceNames(config.OwnerSID)
+	_, hostdName, err := windowsHostdServiceName(config.OwnerSID, config.Source)
+	if err != nil {
+		t.Fatal("owner hostd identity unavailable")
+	}
+	updaterName, err := windowsUpdaterServiceName(config.OwnerSID)
 	if err != nil {
 		t.Fatal("owner service identity unavailable")
 	}

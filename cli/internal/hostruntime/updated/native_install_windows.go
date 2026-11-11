@@ -224,7 +224,7 @@ func RecoverWindowsNativeInstall(ctx context.Context, config WindowsConfig) erro
 			return windowsNativeInstallActivatorState(config, j)
 		},
 		stopUpdater: func(ctx context.Context) error {
-			_, name, err := windowsInstanceServiceNames(config.OwnerSID)
+			name, err := windowsUpdaterServiceName(config.OwnerSID)
 			if err != nil {
 				return err
 			}
@@ -253,7 +253,7 @@ func RecoverWindowsNativeInstall(ctx context.Context, config WindowsConfig) erro
 }
 
 func windowsNativeInstallActivatorState(config WindowsConfig, j windowsActivationJournal) (registered, running bool, resultErr error) {
-	instance, _, _, _, name, err := windowsInstanceNames(config.OwnerSID)
+	instance, _, _, name, err := windowsInstanceNames(config.OwnerSID)
 	if err != nil {
 		return false, false, err
 	}
@@ -308,7 +308,7 @@ func windowsActivatorRunning(item *mgr.Service, definition mgr.Config, instance 
 // Delete only the exact approved registered service. The installer requires a
 // stopped owner; the activator itself uses the same check while it is running.
 func retireWindowsActivatorService(config WindowsConfig, j windowsActivationJournal, requireStopped bool) (resultErr error) {
-	instance, _, _, _, name, err := windowsInstanceNames(config.OwnerSID)
+	instance, _, _, name, err := windowsInstanceNames(config.OwnerSID)
 	if err != nil {
 		return err
 	}
@@ -352,12 +352,27 @@ func verifyWindowsNativeInstallRolePins(ctx context.Context, config WindowsConfi
 	}
 	candidate := installsource.Source{Version: j.Version, Platform: "windows", Architecture: j.Architecture, SHA256: j.Runtime.SHA256, Length: j.Runtime.Length, Distribution: installsource.Official, AutomaticUpdates: j.PreviousSource.AutomaticUpdates}
 	sources := []installsource.Source{*j.PreviousSource, candidate}
-	for _, role := range []struct{ name, kind, argument string }{{windowsHostdService + "-" + layout.Instance, service.HostdKind, "__runtime-hostd"}, {windowsUpdaterService + "-" + layout.Instance, service.UpdaterKind, "__runtime-updated"}} {
+	// hostd runs as the previous or the candidate source's generation, whichever is registered.
+	hostdName, hostdOwned := "", ""
+	for _, source := range sources {
+		_, name, err := windowsHostdServiceName(config.OwnerSID, source)
+		if err != nil {
+			return err
+		}
+		if _, err := queryWindowsServiceTarget(name, "__runtime-hostd"); err == nil {
+			hostdName, hostdOwned = name, layout.Instance+"-"+source.SHA256[:32]
+			break
+		}
+	}
+	if hostdName == "" {
+		return errInvalidWindowsActivation
+	}
+	for _, role := range []struct{ name, kind, argument, owned string }{{hostdName, service.HostdKind, "__runtime-hostd", hostdOwned}, {windowsUpdaterService + "-" + layout.Instance, service.UpdaterKind, "__runtime-updated", layout.Instance}} {
 		actual, err := queryWindowsServiceTarget(role.name, role.argument)
 		if err != nil {
 			return err
 		}
-		identity, err := service.VerifyOwnedWindowsRoleExecutable(role.kind, layout.Instance, actual.Executable)
+		identity, err := service.VerifyOwnedWindowsRoleExecutable(role.kind, role.owned, actual.Executable)
 		if err != nil {
 			return err
 		}
@@ -427,7 +442,11 @@ func verifyWindowsTerminalNativeState(ctx context.Context, config WindowsConfig,
 		return err
 	}
 	target := workerupdate.ComponentTarget{SHA256: installed.Source.SHA256, Length: installed.Source.Length, Platform: "windows", Architecture: installed.Source.Architecture}
-	for _, role := range []struct{ name, argument string }{{windowsHostdService + "-" + layout.Instance, "__runtime-hostd"}, {windowsUpdaterService + "-" + layout.Instance, "__runtime-updated"}, {windowsLocalDaemonService + "-" + layout.Instance, "__runtime-local-daemon"}} {
+	_, hostdName, err := windowsHostdServiceName(config.OwnerSID, installed.Source)
+	if err != nil {
+		return err
+	}
+	for _, role := range []struct{ name, argument string }{{hostdName, "__runtime-hostd"}, {windowsUpdaterService + "-" + layout.Instance, "__runtime-updated"}, {windowsLocalDaemonService + "-" + layout.Instance, "__runtime-local-daemon"}} {
 		actual, err := queryWindowsServiceTarget(role.name, role.argument)
 		if err != nil {
 			return err

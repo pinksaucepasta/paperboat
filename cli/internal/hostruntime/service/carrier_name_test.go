@@ -41,3 +41,29 @@ func TestWindowsCarrierGenerationInstallerPath(t *testing.T) {
 		t.Fatalf("definition %q, want one named %q", installer.DefinitionPath(), want)
 	}
 }
+
+// W21 Part B: hostd runs one service per generation on Windows, so an update's hostd starts beside the serving one.
+func TestWindowsHostdGenerationNames(t *testing.T) {
+	instance, generation := "u0123456789abcdef01234567", "0123456789abcdef0123456789abcdef"
+	name, err := WindowsHostdName(instance, generation)
+	if err != nil || name != "PaperboatHostd-"+instance+"-"+generation {
+		t.Fatalf("name %q err %v", name, err)
+	}
+	if gotInstance, gotGeneration, valid := windowsHostdNameParts(name); !valid || gotInstance != instance || gotGeneration != generation {
+		t.Fatalf("parts %q %q %v", gotInstance, gotGeneration, valid)
+	}
+	for _, bad := range []string{"PaperboatHostd-" + instance, "PaperboatCarrier-" + instance + "-" + generation, "PaperboatHostd-u1-" + generation} {
+		if _, _, valid := windowsHostdNameParts(bad); valid {
+			t.Fatalf("%q accepted as a hostd generation", bad)
+		}
+	}
+	installer, err := NewPending(Config{Platform: "windows", Kind: HostdKind, Instance: instance, Generation: generation, ConfigRoot: t.TempDir(), Executable: filepath.Join(t.TempDir(), "pb.exe"), User: "Paperboat", Group: "Paperboat",
+		Arguments: []string{"daemon", "__runtime-hostd", "--instance", instance, "--generation", generation}, Controller: WindowsController{}})
+	if err != nil || !strings.HasSuffix(installer.DefinitionPath(), name+".json") {
+		t.Fatalf("installer %v err %v", installer, err)
+	}
+	if _, err := NewPending(Config{Platform: "windows", Kind: HostdKind, Instance: instance, ConfigRoot: t.TempDir(), Executable: filepath.Join(t.TempDir(), "pb.exe"), User: "Paperboat", Group: "Paperboat",
+		Arguments: []string{"daemon", "__runtime-hostd", "--instance", instance}, Controller: WindowsController{}}); err == nil {
+		t.Fatal("a Windows hostd without a generation was declared")
+	}
+}

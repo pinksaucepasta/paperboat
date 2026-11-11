@@ -334,9 +334,9 @@ func carrierPublicationLock(ctx context.Context, r Request) (io.Closer, error) {
 	return carrierUnlock(unlock), nil
 }
 
-// absentCarrierGeneration names the lifecycle's carrier component when no carrier exists and no source says which
+// absentGeneration names a lifecycle component (carrier, hostd) when no generation exists and no source says which
 // one would: no source has this SHA-256 prefix, so its service is never registered.
-const absentCarrierGeneration = "00000000000000000000000000000000"
+const absentGeneration = "00000000000000000000000000000000"
 
 // windowsCarrierLifecycleInstaller never publishes while constructing a journal. It addresses the active carrier
 // generation, or with none yet the one request would create; generationFile is that generation's own descriptor.
@@ -352,7 +352,7 @@ func windowsCarrierLifecycleInstaller(ctx context.Context, layout service.Layout
 	// No carrier yet: the generation request would create, or for a caller without a source (recovery, repair,
 	// uninstall) one that is never installed. Either stands for "no carrier registered" in the journal; restore
 	// removes whatever generation the interrupted attempt created (restoreWindowsCarrierSnapshot).
-	generation := absentCarrierGeneration
+	generation := absentGeneration
 	if request != nil {
 		if g, err := sourceGeneration(request.Source); err == nil {
 			generation = g
@@ -517,6 +517,9 @@ func reconcileInstalledCarrier(ctx context.Context, instance string, pinReferenc
 	}
 	// Generations an update retired (exited after releasing the network) or a failed one left standing.
 	if err := sweepWindowsCarrierGenerations(ctx, instance, retained.Generation); err != nil {
+		return err
+	}
+	if err := removeWindowsHostdGenerations(ctx, instance, sourceGenerationOrAbsent(config.Source), true); err != nil {
 		return err
 	}
 	if len(pinReferences) == 1 {

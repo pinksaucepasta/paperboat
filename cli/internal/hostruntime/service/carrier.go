@@ -7,13 +7,13 @@ import (
 )
 
 // generationalUnit reports the roles that run one native unit or service per installed generation, like session
-// owners: the carrier everywhere, hostd on Linux and macOS. An update starts and readies the new generation's units before the old
+// owners: the carrier and hostd. An update starts and readies the new generation's units before the old
 // generation retires, so nothing is refused or paused (make-before-break). Prior art: Teleport graceful
 // restart (lib/service/signals.go: the new process serves before the old one shuts down and drains its
 // connections) and nginx binary upgrade (~/ref/nginx/src/os/unix/ngx_process_cycle.c: old workers
 // finish their connections). Separate units mean the service manager never kills the old process.
 func generationalUnit(config Config) bool {
-	return config.Kind == CarrierKind || config.Kind == HostdKind && config.Platform != "windows"
+	return config.Kind == CarrierKind || config.Kind == HostdKind
 }
 
 // RetiredGenerationLogPath is where launchd writes a generation's unit output (renderLaunchd's StandardOutPath).
@@ -116,9 +116,26 @@ func WindowsCarrierName(instance, generation string) (string, error) {
 	return "PaperboatCarrier-" + instance + "-" + generation, nil
 }
 
+// WindowsHostdName is the SCM identity of one hostd generation of an enrolled account: an update's new hostd runs
+// beside the serving one and takes its listeners over (W21 Part B).
+func WindowsHostdName(instance, generation string) (string, error) {
+	if !validWindowsSessionOwnerInstance(instance) || !validSessionOwnerGeneration(generation) {
+		return "", ErrInvalidDefinition
+	}
+	return "PaperboatHostd-" + instance + "-" + generation, nil
+}
+
 // windowsCarrierNameParts splits a carrier generation's SCM name (WindowsCarrierName).
 func windowsCarrierNameParts(name string) (instance, generation string, valid bool) {
-	const prefix = "PaperboatCarrier-"
+	return windowsGenerationNameParts("PaperboatCarrier-", name)
+}
+
+// windowsHostdNameParts splits a hostd generation's SCM name (WindowsHostdName).
+func windowsHostdNameParts(name string) (instance, generation string, valid bool) {
+	return windowsGenerationNameParts("PaperboatHostd-", name)
+}
+
+func windowsGenerationNameParts(prefix, name string) (instance, generation string, valid bool) {
 	if len(name) < len(prefix) || !strings.EqualFold(name[:len(prefix)], prefix) {
 		return "", "", false
 	}

@@ -118,9 +118,16 @@ func pruneWindowsRuntimePins(ctx context.Context, installed WindowsRuntimeConfig
 		return err
 	}
 	names := make(map[string]string)
-	for _, kind := range []string{service.HostKind, service.ConfigKind, service.HostdKind, service.DaemonKind, service.UpdaterKind} {
-		base := map[string]string{service.HostKind: "PaperboatHost", service.ConfigKind: "PaperboatRuntimeConfig", service.HostdKind: "PaperboatHostd", service.DaemonKind: "PaperboatLocalDaemon", service.UpdaterKind: "PaperboatUpdated"}[kind]
+	for _, base := range []string{"PaperboatHost", "PaperboatRuntimeConfig", "PaperboatLocalDaemon", "PaperboatUpdated"} {
 		name := base + "-" + layout.Instance
+		names[strings.ToLower(name)] = filepath.Join(`C:\ProgramData\Paperboat\services`, name+".json")
+	}
+	// Every hostd generation still present keeps the pin its declaration names.
+	hostds, err := windowsHostdGenerationNames(ctx, layout.Instance)
+	if err != nil {
+		return err
+	}
+	for _, name := range hostds {
 		names[strings.ToLower(name)] = filepath.Join(`C:\ProgramData\Paperboat\services`, name+".json")
 	}
 	for _, c := range carriers {

@@ -28,7 +28,7 @@ type windowsActivatorControl struct {
 }
 
 func waitWindowsUpdaterStopped(ctx context.Context, ownerSID string) error {
-	_, name, err := windowsInstanceServiceNames(ownerSID)
+	name, err := windowsUpdaterServiceName(ownerSID)
 	if err != nil {
 		return err
 	}

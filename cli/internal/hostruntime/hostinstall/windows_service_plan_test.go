@@ -197,7 +197,7 @@ func TestWindowsRuntimeServicesUseCanonicalDaemon(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	definitions := windowsRuntimeServiceDefinitions(layout)
+	definitions := windowsRuntimeServiceDefinitions(layout, "0123456789abcdef0123456789abcdef")
 	if len(definitions) != 3 {
 		t.Fatalf("definitions=%+v", definitions)
 	}
@@ -209,7 +209,7 @@ func TestWindowsRuntimeServicesUseCanonicalDaemon(t *testing.T) {
 			t.Fatalf("service %q executable=%q want=%q", definition.kind, definition.executable, layout.Binary)
 		}
 	}
-	if !reflect.DeepEqual(definitions[0].arguments, []string{"daemon", "__runtime-hostd"}) || !reflect.DeepEqual(definitions[1].arguments, []string{"daemon", "__runtime-local-daemon"}) || !reflect.DeepEqual(definitions[2].arguments, []string{"daemon", "__runtime-updated"}) {
+	if !reflect.DeepEqual(definitions[0].arguments, []string{"daemon", "__runtime-hostd", "--generation", "0123456789abcdef0123456789abcdef"}) || !reflect.DeepEqual(definitions[1].arguments, []string{"daemon", "__runtime-local-daemon"}) || !reflect.DeepEqual(definitions[2].arguments, []string{"daemon", "__runtime-updated"}) {
 		t.Fatalf("definitions=%+v", definitions)
 	}
 }

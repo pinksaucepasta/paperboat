@@ -82,6 +82,10 @@ func safeWindowsServiceKind(kind, instance string) bool {
 		_, _, valid := windowsCarrierNameParts("PaperboatCarrier-" + instance)
 		return valid
 	}
+	if kind == HostdKind {
+		_, _, valid := windowsHostdNameParts("PaperboatHostd-" + instance)
+		return valid
+	}
 	if kind == SessionOwnerKind {
 		_, _, valid := sessionOwnerNameParts("PaperboatSessionOwner-" + instance)
 		return valid
@@ -270,7 +274,7 @@ func validateWindowsExecutable(path string, allowMissing bool) error {
 
 func renderWindowsService(config Config) ([]byte, error) {
 	name := windowsConfiguredServiceName(config)
-	if validateCarrierConfig(config) != nil || validateSessionOwnerConfig(config) != nil || name == "" || config.Kind != SessionOwnerKind && config.Kind != CarrierKind && !safeWindowsServiceKind(config.Kind, config.Instance) {
+	if validateCarrierConfig(config) != nil || validateSessionOwnerConfig(config) != nil || name == "" || config.Kind != SessionOwnerKind && config.Kind != CarrierKind && config.Kind != HostdKind && !safeWindowsServiceKind(config.Kind, config.Instance) {
 		return nil, ErrInvalidDefinition
 	}
 	description := "Paperboat host runtime"
@@ -482,6 +486,9 @@ func windowsServiceInstanceFromName(name string) string {
 		return instance
 	}
 	if instance, _, valid := windowsCarrierNameParts(name); valid {
+		return instance
+	}
+	if instance, _, valid := windowsHostdNameParts(name); valid {
 		return instance
 	}
 	base := windowsServiceBaseNameFromName(name)
@@ -1101,6 +1108,9 @@ func windowsServiceArgumentsMatch(name string, arguments []string) bool {
 		want = []string{"daemon", role, "--generation", generation, "--instance", instance}
 	}
 	if _, generation, valid := windowsCarrierNameParts(name); valid {
+		want = []string{"daemon", role, "--instance", instance, "--generation", generation}
+	}
+	if _, generation, valid := windowsHostdNameParts(name); valid {
 		want = []string{"daemon", role, "--instance", instance, "--generation", generation}
 	}
 	if role == "" || len(arguments) != len(want) {

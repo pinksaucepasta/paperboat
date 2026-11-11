@@ -11,5 +11,8 @@ func windowsConfiguredServiceName(config Config) string {
 	if config.Kind == CarrierKind && config.Platform == "windows" {
 		return "PaperboatCarrier-" + config.Instance + "-" + config.Generation
 	}
+	if config.Kind == HostdKind && config.Platform == "windows" {
+		return "PaperboatHostd-" + config.Instance + "-" + config.Generation
+	}
 	return windowsServiceName(config.Kind, config.Instance)
 }

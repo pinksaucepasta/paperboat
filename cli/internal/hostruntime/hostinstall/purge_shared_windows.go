@@ -44,6 +44,12 @@ func purgeWindowsSharedResidue(ctx context.Context, shared service.Layout, progr
 			path := filepath.Join(programData, base+"-"+instance+"-startup-error.log")
 			// The base name is the service, never a path: it tells which log a failed uninstall could not remove.
 			resultErr = errors.Join(resultErr, hostInstallFailure("remove the "+base+" startup log", retireWindowsSharedObject(ctx, path, false, ownerSID)))
+			// Per-generation services (carrier, hostd) log under their own generation name, still this account's.
+			generations, err := filepath.Glob(filepath.Join(programData, base+"-"+instance+"-*-startup-error.log"))
+			resultErr = errors.Join(resultErr, err)
+			for _, path := range generations {
+				resultErr = errors.Join(resultErr, hostInstallFailure("remove the "+base+" startup log", retireWindowsSharedObject(ctx, path, false, ownerSID)))
+			}
 		}
 		for _, path := range []string{filepath.Join(programData, "services"), filepath.Join(programData, "users"), filepath.Join(shared.UpdateStateRoot, "users"), shared.UpdateStateRoot} {
 			resultErr = errors.Join(resultErr, retireWindowsSharedObject(ctx, path, true, ""))

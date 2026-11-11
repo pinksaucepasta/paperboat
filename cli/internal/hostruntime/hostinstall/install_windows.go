@@ -1484,8 +1484,12 @@ func preflightWindowsCarrierCutover(ctx context.Context, instance, ownerSID, sta
 		return err
 	}
 	defer manager.Disconnect()
-	for _, base := range []string{"PaperboatHostd", "PaperboatUpdated", "PaperboatLocalDaemon", "PaperboatRuntimeConfig", "PaperboatHost"} {
-		current, err := manager.OpenService(base + "-" + instance)
+	hostds, err := windowsHostdGenerationNames(ctx, instance)
+	if err != nil {
+		return err
+	}
+	for _, name := range append(hostds, "PaperboatUpdated-"+instance, "PaperboatLocalDaemon-"+instance, "PaperboatRuntimeConfig-"+instance, "PaperboatHost-"+instance) {
+		current, err := manager.OpenService(name)
 		if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 			continue
 		}
@@ -1789,7 +1793,11 @@ func windowsRuntimeServiceExists(instance string) (exists bool, resultErr error)
 	defer func() {
 		resultErr = withCleanup("Windows runtime service probe cleanup failed", resultErr, manager.Disconnect())
 	}()
-	for _, name := range []string{"PaperboatHostd-" + instance, "PaperboatUpdated-" + instance, "PaperboatLocalDaemon-" + instance} {
+	hostds, err := windowsHostdGenerationNames(context.Background(), instance)
+	if err != nil {
+		return false, err
+	}
+	for _, name := range append(hostds, "PaperboatUpdated-"+instance, "PaperboatLocalDaemon-"+instance) {
 		current, err := manager.OpenService(name)
 		if err == nil {
 			return true, current.Close()
@@ -1801,14 +1809,63 @@ func windowsRuntimeServiceExists(instance string) (exists bool, resultErr error)
 	return false, nil
 }
 
+// stopWindowsRuntimeServices stops every hostd generation, the updater and the local daemon of the account.
 func stopWindowsRuntimeServices(ctx context.Context, instance string) error {
-	return stopWindowsServices(ctx, instance, "PaperboatHostd", "PaperboatUpdated", "PaperboatLocalDaemon")
-}
-
-func stopWindowsServices(ctx context.Context, instance string, bases ...string) (resultErr error) {
 	if !validWindowsInstance(instance) {
 		return ErrInvalidRequest
 	}
+	hostds, err := windowsHostdGenerationNames(ctx, instance)
+	if err != nil {
+		return err
+	}
+	return stopWindowsServiceNames(ctx, append(hostds, "PaperboatUpdated-"+instance, "PaperboatLocalDaemon-"+instance))
+}
+
+// installedWindowsHostdGeneration is the installed source's hostd generation, or absentGeneration with none.
+func installedWindowsHostdGeneration(instance string) string {
+	config, err := LoadWindowsRuntimeConfigForInstance(instance)
+	if err != nil {
+		return absentGeneration
+	}
+	return sourceGenerationOrAbsent(config.Source)
+}
+
+func sourceGenerationOrAbsent(source installsource.Source) string {
+	generation, err := sourceGeneration(source)
+	if err != nil {
+		return absentGeneration
+	}
+	return generation
+}
+
+// windowsHostdGenerationNames lists the account's hostd generation services (registered or declared).
+func windowsHostdGenerationNames(ctx context.Context, instance string) ([]string, error) {
+	inventory, err := windowsGenerationRemovalInventory(ctx, instance)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, name := range inventory {
+		if strings.HasPrefix(strings.ToLower(name), "paperboathostd-") {
+			names = append(names, name)
+		}
+	}
+	return names, nil
+}
+
+func stopWindowsServices(ctx context.Context, instance string, bases ...string) error {
+	if !validWindowsInstance(instance) {
+		return ErrInvalidRequest
+	}
+	names := make([]string, 0, len(bases))
+	for _, base := range bases {
+		names = append(names, base+"-"+instance)
+	}
+	return stopWindowsServiceNames(ctx, names)
+}
+
+// stopWindowsServiceNames stops each named service that exists and waits until it has stopped.
+func stopWindowsServiceNames(ctx context.Context, names []string) (resultErr error) {
 	manager, err := mgr.Connect()
 	if err != nil {
 		return err
@@ -1816,8 +1873,7 @@ func stopWindowsServices(ctx context.Context, instance string, bases ...string) 
 	defer func() {
 		resultErr = withCleanup("Windows installation cleanup failed", resultErr, manager.Disconnect())
 	}()
-	for _, base := range bases {
-		name := base + "-" + instance
+	for _, name := range names {
 		current, openErr := manager.OpenService(name)
 		if errors.Is(openErr, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 			continue
@@ -2210,7 +2266,11 @@ func reconcileWindowsRepairVersion(ctx context.Context, config WindowsRuntimeCon
 	defer func() {
 		resultErr = withCleanup("Windows installation cleanup failed", resultErr, manager.Disconnect())
 	}()
-	for _, item := range []struct{ name, argument string }{{"PaperboatHostd-" + config.Instance, "__runtime-hostd"}, {"PaperboatUpdated-" + config.Instance, "__runtime-updated"}, {"PaperboatLocalDaemon-" + config.Instance, "__runtime-local-daemon"}} {
+	hostdName, err := service.WindowsHostdName(config.Instance, sourceGenerationOrAbsent(config.Source))
+	if err != nil {
+		return config, err
+	}
+	for _, item := range []struct{ name, argument string }{{hostdName, "__runtime-hostd"}, {"PaperboatUpdated-" + config.Instance, "__runtime-updated"}, {"PaperboatLocalDaemon-" + config.Instance, "__runtime-local-daemon"}} {
 		registered, err := manager.OpenService(item.name)
 		if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 			return config, nil
@@ -2474,7 +2534,7 @@ func uninstallWindowsKeepingCLI(ctx context.Context, layout service.Layout, purg
 	if purge {
 		// Explicit removal does not restore an interrupted installation. Protected
 		// declarations plus exact SCM ownership suffice even after slots vanished.
-		for _, base := range []string{"PaperboatHost", "PaperboatHostd", "PaperboatLocalDaemon", "PaperboatUpdated"} {
+		for _, base := range []string{"PaperboatHost", "PaperboatLocalDaemon", "PaperboatUpdated"} {
 			path := filepath.Join(`C:\ProgramData\Paperboat\services`, base+"-"+layout.Instance+".json")
 			if err := (service.WindowsController{}).Remove(ctx, path); err != nil {
 				result = errors.Join(result, hostInstallFailure("remove Windows service "+base, err))
@@ -2680,9 +2740,9 @@ func installWindowsServicesWithRollback(ctx context.Context, request Request, la
 	if err != nil {
 		return nil, err
 	}
-	return executeWindowsServiceStepsWithHook(ctx, windowsRuntimeServiceDefinitions(layout, pinned), func(item windowsRuntimeServiceDefinition) (windowsServicePlanStep, error) {
+	return executeWindowsServiceStepsWithHook(ctx, windowsRuntimeServiceDefinitions(layout, sourceGenerationOrAbsent(request.Source), pinned), func(item windowsRuntimeServiceDefinition) (windowsServicePlanStep, error) {
 		installer, err := service.New(service.Config{
-			Platform: "windows", Kind: item.kind, Instance: layout.Instance, ConfigRoot: configRoot,
+			Platform: "windows", Kind: item.kind, Instance: layout.Instance, Generation: item.generation, ConfigRoot: configRoot,
 			Executable: item.executable, User: "Paperboat", Group: "Paperboat",
 			Arguments: item.arguments, Controller: service.WindowsController{}, UpgradeMode: upgradeMode,
 		})
@@ -2735,7 +2795,7 @@ func repairWindowsServicesWithRollback(ctx context.Context, layout service.Layou
 	if err != nil {
 		return nil, err
 	}
-	for _, item := range windowsRuntimeServiceDefinitions(layout, pinned) {
+	for _, item := range windowsRuntimeServiceDefinitions(layout, installedWindowsHostdGeneration(layout.Instance), pinned) {
 		image, imageErr := windowsRoleRuntime(layout, item.kind)
 		if imageErr != nil {
 			return nil, imageErr
@@ -2751,7 +2811,7 @@ func repairWindowsServicesWithRollback(ctx context.Context, layout service.Layou
 	}
 	return executeWindowsServiceSteps(ctx, definitions, func(item windowsRuntimeServiceDefinition) (windowsServicePlanStep, error) {
 		installer, err := service.New(service.Config{
-			Platform: "windows", Kind: item.kind, Instance: layout.Instance, ConfigRoot: configRoot,
+			Platform: "windows", Kind: item.kind, Instance: layout.Instance, Generation: item.generation, ConfigRoot: configRoot,
 			Executable: item.executable, User: "Paperboat", Group: "Paperboat",
 			Arguments: item.arguments, Controller: service.WindowsController{}, UpgradeMode: service.UpgradeReload,
 		})
@@ -2807,7 +2867,7 @@ func windowsRoleInstallers(layout service.Layout, allowMissingExecutable bool) (
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	newInstaller := func(kind string, arguments []string) (*service.Installer, error) {
+	newInstaller := func(kind string, arguments []string, generation ...string) (*service.Installer, error) {
 		image, imageErr := windowsRoleRuntime(layout, kind)
 		if imageErr != nil {
 			if !allowMissingExecutable || !installNotExistOnly(imageErr) {
@@ -2816,13 +2876,17 @@ func windowsRoleInstallers(layout service.Layout, allowMissingExecutable bool) (
 			image = runtimeCurrent
 		}
 		config := service.Config{Platform: "windows", Kind: kind, Instance: layout.Instance, ConfigRoot: configRoot, Executable: image, User: "Paperboat", Group: "Paperboat", Arguments: arguments, Controller: service.WindowsController{}}
+		if len(generation) == 1 {
+			config.Generation = generation[0]
+		}
 		if allowMissingExecutable {
 			return service.NewPending(config)
 		}
 		return service.New(config)
 	}
 	instanceArgs := []string{"--instance", layout.Instance}
-	hostd, err := newInstaller(service.HostdKind, append([]string{"daemon", "__runtime-hostd"}, instanceArgs...))
+	generation := installedWindowsHostdGeneration(layout.Instance)
+	hostd, err := newInstaller(service.HostdKind, append([]string{"daemon", "__runtime-hostd"}, append(instanceArgs, "--generation", generation)...), generation)
 	if err != nil {
 		return nil, nil, nil, err
 	}

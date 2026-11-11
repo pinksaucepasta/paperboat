@@ -7,6 +7,7 @@ import (
 	"errors"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"unsafe"
 
@@ -20,8 +21,8 @@ import (
 // Explicit uninstall owns every generation, including stopped declarations whose
 // old executable has disappeared. Removal authenticates declarations and SCM
 // targets; it never launches the old image or requires an owner RPC.
-// removeWindowsRuntimeGenerations removes the account's per-generation services: session owners, carriers and
-// OpenSSH. Without purge the active carrier stays for the lifecycle's own uninstall.
+// removeWindowsRuntimeGenerations removes the account's per-generation services: session owners, carriers, hostd
+// and OpenSSH. Without purge the active carrier and the installed hostd stay for the lifecycle's own uninstall.
 func removeWindowsRuntimeGenerations(ctx context.Context, layout service.Layout, ownerSID string, purge bool) error {
 	instance, err := WindowsInstanceForSID(ownerSID)
 	if err != nil || instance != layout.Instance {
@@ -31,17 +32,21 @@ func removeWindowsRuntimeGenerations(ctx context.Context, layout service.Layout,
 	if err != nil {
 		return err
 	}
-	keep := ""
+	var keep []string
 	if !purge {
 		if active, err := readCarrierConfigFile(ctx, instance); err == nil {
-			keep, _ = service.WindowsCarrierName(instance, active.Generation)
+			name, _ := service.WindowsCarrierName(instance, active.Generation)
+			keep = append(keep, name)
 		} else if !installNotExistOnly(err) {
 			return err
 		}
+		// The installed hostd generation is the lifecycle's hostd component, uninstalled by the lifecycle.
+		name, _ := service.WindowsHostdName(instance, installedWindowsHostdGeneration(instance))
+		keep = append(keep, name)
 	}
 	var result error
 	for _, name := range owners {
-		if keep != "" && strings.EqualFold(name, keep) {
+		if slices.ContainsFunc(keep, func(kept string) bool { return strings.EqualFold(name, kept) }) {
 			continue
 		}
 		path := filepath.Join(`C:\ProgramData\Paperboat\services`, name+".json")
@@ -72,7 +77,7 @@ func windowsGenerationName(instance, lower string) (string, error) {
 	for _, generational := range []struct {
 		prefix string
 		name   func(string, string) (string, error)
-	}{{"paperboatsessionowner-" + instance + "-", service.WindowsSessionOwnerName}, {"paperboatcarrier-" + instance + "-", service.WindowsCarrierName}} {
+	}{{"paperboatsessionowner-" + instance + "-", service.WindowsSessionOwnerName}, {"paperboatcarrier-" + instance + "-", service.WindowsCarrierName}, {"paperboathostd-" + instance + "-", service.WindowsHostdName}} {
 		if strings.HasPrefix(lower, generational.prefix) {
 			return generational.name(instance, strings.TrimPrefix(lower, generational.prefix))
 		}
