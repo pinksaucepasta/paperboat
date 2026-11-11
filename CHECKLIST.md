@@ -1047,6 +1047,7 @@ and the open review lows; Windows-only and macOS-only findings have `n/a` on the
 | F21-169 | A shared terminal's participants arrive by event, not by every viewer's tab polling every 4 s (12.5 req/s for 50 viewers). | [ ] | n/a | n/a | PLAN 3b scale matrix: Lane Q/N participants event, Lane C poll at 60 s or more afterwards. Not built. |
 | F21-170 | ENV, config sync, teams and audit hold their bounds under load (ENV 128 records per batch and 256 KiB live; config sync 5 MiB per file; team members 128; audit export 1M rows) with no storm and no slow neighbor. | [ ] | [ ] | [ ] | PLAN 3b scale matrix: bounds are listed, load tests not run (?). Audit export paging: F21-41; teams: F21-42. |
 | F21-171 | The first machine list of a fresh 100-machine account takes under 1 s: address leases are allocated at enrollment, not inside the list query under a table lock. | [ ] | n/a | n/a | PLAN 3b scale matrix: measured 29-33 s on staging, owner Lane Q. Verify whether the fix landed before ticking; needs a PostgreSQL test with 100 machines and a time bound. |
+| F21-172 | A timed-out preview dispatch records the create operation as dispatch/uncertain instead of failing the operation-state write. | [x] | n/a | n/a | W28: ca6306d23, migrations 291/292. Server-only contract; TestPreviewDispatchUncertainWritesOnPostgres PASS on fresh PostgreSQL at 099fdd9b2; evidence tools/device-smoke/results/w28-dispatch-postgres.json. |
 
 ## F22. File transfer modes (PLAN 3b)
 
