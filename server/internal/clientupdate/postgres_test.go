@@ -5,6 +5,8 @@ import (
 	"errors"
 	"github.com/google/uuid"
 	"os"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
@@ -62,6 +64,38 @@ func TestClientUpdatePolicyPostgres(t *testing.T) {
 	}
 	if created.Revision != original.Revision+1 {
 		t.Fatal(created)
+	}
+
+	// A committed write is immediately visible without querying. Concurrent
+	// reads of a cold service coalesce into one read instead of a stampede.
+	for _, tc := range []struct {
+		name        string
+		service     *Service
+		wantQueries int64
+	}{
+		{"after_write", s, 0}, {"cold", New(store, nil, ""), 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var queries atomic.Int64
+			store.SetQueryObserver(func(ctx context.Context) (context.Context, func(string)) {
+				queries.Add(1)
+				return ctx, func(string) {}
+			})
+			defer store.SetQueryObserver(nil)
+			var readers sync.WaitGroup
+			for range 64 {
+				readers.Go(func() {
+					got, err := tc.service.Get(ctx)
+					if err != nil || got.Revision != created.Revision || got.MinimumVersion != created.MinimumVersion {
+						t.Errorf("cached committed policy=%+v err=%v", got, err)
+					}
+				})
+			}
+			readers.Wait()
+			if got := queries.Load(); got != tc.wantQueries {
+				t.Fatalf("64 reads made %d queries, want %d", got, tc.wantQueries)
+			}
+		})
 	}
 	// Replay must survive a release-origin outage and preserve original revision.
 	s.ceiling = func() (string, error) { return "", errors.New("origin down") }
@@ -121,6 +155,16 @@ func TestClientUpdatePolicyPostgres(t *testing.T) {
 	cleared, e := s.Put(ctx, actor, "clear-test-key", "test_reference", Input{ExpectedRevision: created.Revision + 1})
 	if e != nil || cleared.MinimumVersion != "" {
 		t.Fatal(cleared, e)
+	}
+	// Retrying an old successful write returns its original receipt, but must
+	// not resurrect that floor in the gate after a newer clear committed.
+	old, err := s.Put(ctx, actor, "set-test-key", "test_reference", Input{ExpectedRevision: original.Revision, MinimumVersion: "2026.10.8.2", Reason: "Support test"})
+	if err != nil || old.Revision != created.Revision {
+		t.Fatalf("old receipt=%+v err=%v", old, err)
+	}
+	latest, err := s.Get(ctx)
+	if err != nil || latest.Revision != cleared.Revision || latest.MinimumVersion != "" {
+		t.Fatalf("old replay rolled gate back: %+v err=%v", latest, err)
 	}
 	var count int
 	if e = store.Pool().QueryRow(ctx, `SELECT count(*) FROM paperboat.audit_events WHERE actor_user_id=$1 AND event_type='client_update_policy.changed'`, actor).Scan(&count); e != nil || count != 3 {
