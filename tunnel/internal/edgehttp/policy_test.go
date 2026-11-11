@@ -1242,3 +1242,45 @@ func TestOriginFailurePageForEveryHostCode(t *testing.T) {
 		}
 	}
 }
+
+// A preview whose live carrier dropped (its host restarted, its network blinked) while the held ingress snapshot still
+// admits the name is an app that is reconnecting: the request waits, then gets a retryable 503 (never a 404), and is
+// served again once the carrier is back. A name the snapshot never admitted is still an immediate 404.
+func TestAdmittedPreviewWithoutItsCarrierIsReconnectingNotNotFound(t *testing.T) {
+	var attached atomic.Bool
+	var reached atomic.Int32
+	policy, err := New(Config{PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 4096, MaxBodyBytes: 1024,
+		Readiness: readinessFunc(func(host string) (string, string, bool) {
+			if host == "app.preview.example.test" && attached.Load() {
+				return "ready", "", true
+			}
+			return "", "", false
+		}),
+		PreviewAdmitted: func(host string) bool { return host == "app.preview.example.test" },
+	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { reached.Add(1); w.WriteHeader(http.StatusNoContent) }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	serve := func(host string) (*httptest.ResponseRecorder, time.Duration) {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.Host = host
+		started := time.Now()
+		policy.ServeHTTP(recorder, request)
+		return recorder, time.Since(started)
+	}
+	got, took := serve("app.preview.example.test")
+	if got.Code != http.StatusServiceUnavailable || got.Header().Get("X-Paperboat-Error") != "preview_reconnecting" || got.Header().Get("Retry-After") != "2" || took < previewStartingWait || reached.Load() != 0 {
+		t.Fatalf("admitted preview without a carrier: status %d %q Retry-After %q after %s", got.Code, got.Header().Get("X-Paperboat-Error"), got.Header().Get("Retry-After"), took)
+	}
+	if !strings.Contains(got.Body.String(), "reconnecting") {
+		t.Fatalf("the page does not say the app is reconnecting: %s", got.Body.String())
+	}
+	if unknown, took := serve("gone.preview.example.test"); unknown.Code != http.StatusNotFound || took > 100*time.Millisecond {
+		t.Fatalf("a name the snapshot does not admit: status %d after %s", unknown.Code, took)
+	}
+	time.AfterFunc(200*time.Millisecond, func() { attached.Store(true) })
+	if back, _ := serve("app.preview.example.test"); back.Code != http.StatusNoContent || reached.Load() != 1 {
+		t.Fatalf("after the carrier is back: status %d, reached %d", back.Code, reached.Load())
+	}
+}

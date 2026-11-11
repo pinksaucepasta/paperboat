@@ -66,6 +66,9 @@ type Config struct {
 	// PreviewPending, when set, reports a preview host the server has admitted on this edge but
 	// whose carrier route is not attached yet; its requests wait for it instead of a 404.
 	PreviewPending func(host string) bool
+	// PreviewAdmitted, when set, reports a preview host the edge's held ingress snapshot still admits. Without its
+	// carrier the request waits like a pending one and then gets 503 preview_reconnecting (never a 404).
+	PreviewAdmitted func(host string) bool
 	// RouteUnavailable, when set, reports a host whose route is known but failed its probe: it gets the
 	// "could not reach the app" page (502) instead of a 404.
 	RouteUnavailable func(host string) bool
@@ -412,6 +415,7 @@ const originRedirectLoopMessage = "This app redirects to HTTPS, but Paperboat al
 	"Its owner can point the route at the app's HTTPS port (for example https://localhost:443) or turn off the app's own HTTP-to-HTTPS redirect."
 
 const previewStartingMessage = "This preview is starting. Retry in a moment."
+const previewReconnectingMessage = "This app lost its connection to Paperboat for a moment and is reconnecting. Retry in a few seconds."
 const requestBodyIdleMessage = "The upload stopped sending data, so Paperboat ended the request. Check your connection and try again."
 
 // previewStartingWait bounds how long a request to an admitted preview waits for its route.
@@ -747,8 +751,17 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			kind, state, reason, found = string(matched.Rule.Kind), matched.Rule.ObservedState, matched.Rule.Reason, true
 		} else if p.config.Readiness != nil {
 			kind, state, reason, found = p.config.Readiness.RouteState(host)
-			if !found && p.config.PreviewPending != nil && p.config.PreviewPending(host) {
+			// A name the server's held ingress snapshot still admits is an app that lost its carrier for a moment (its
+			// host restarted or its network blinked), not a name that is gone: wait for it, then a retryable 503.
+			admitted := p.config.PreviewAdmitted != nil && p.config.PreviewAdmitted(host)
+			if !found && (admitted || p.config.PreviewPending != nil && p.config.PreviewPending(host)) {
 				if kind, state, reason, found = p.awaitPreviewRoute(r.Context(), host); !found {
+					if admitted {
+						w.Header().Set("X-Paperboat-Error", "preview_reconnecting")
+						w.Header().Set("Retry-After", "2")
+						writeErrorPage(w, http.StatusServiceUnavailable, previewReconnectingMessage)
+						return
+					}
 					w.Header().Set("X-Paperboat-Error", "preview_starting")
 					w.Header().Set("Retry-After", "1")
 					writeErrorPage(w, http.StatusServiceUnavailable, previewStartingMessage)
