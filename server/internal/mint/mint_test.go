@@ -7,12 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 
 	"github.com/pinksaucepasta/paperboat/shared/jwks"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
@@ -54,42 +55,45 @@ func TestSignPublishesFrozenClaims(t *testing.T) {
 	}
 }
 
+// testRawKey is a nonzero 32-byte public key as the server encodes it.
+func testRawKey(seed byte) string {
+	return base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{seed}, 32))
+}
+
 func TestSignRelayGrantPublishesFrozenTypeAndRejectsLongLifetime(t *testing.T) {
 	provider, err := New([]Key{{ID: "relay-key", PrivateKey: testKey(31)}}, "relay-key", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims := peernetwork.RelayGrant{Version: 1, Issuer: "https://api.example.test", Audience: "paperboat-relay", IssuedAt: 1_700_000_000, ExpiresAt: 1_700_000_060, Generation: 4,
-		AccountID: "account_1", EndpointID: "endpoint_1", WireGuardPublicKey: strings.Repeat("A", 43), CertificateFingerprint: strings.Repeat("0", 64), NodeID: "node_1", NodeGeneration: 3,
-		ProcessEpoch: "epoch_1", Peers: []peernetwork.RelayPeer{}}
-	token, err := provider.SignRelayGrant(claims)
+	g := peernetwork.RelayGrant{Version: 1, Issuer: "https://api.example.test", Audience: peernetwork.RelayGrantAudience, IssuedAt: 1_700_000_000, ExpiresAt: 1_700_000_060, Generation: 4, AccountID: "account_1", EndpointID: "endpoint_1", WireGuardPublicKey: testRawKey(1), CertificateFingerprint: strings.Repeat("0", 64), QUICPublicKey: testRawKey(2), NodeID: "node_1", NodeGeneration: 3, ProcessEpoch: "epoch_1", Peers: []peernetwork.RelayPeer{}}
+	token, err := provider.SignRelayGrant(g)
 	if err != nil {
 		t.Fatal(err)
 	}
 	parts := strings.Split(token, ".")
 	var header map[string]any
 	decodeJSONPart(t, parts[0], &header)
-	if header["alg"] != "EdDSA" || header["typ"] != RelayGrantType || header["kid"] != "relay-key" {
+	if header["alg"] != "EdDSA" || header["typ"] != peernetwork.RelayGrantType || header["kid"] != "relay-key" {
 		t.Fatalf("header = %#v", header)
 	}
-	claims.ExpiresAt = 1_700_000_000 + int64(relaylimits.MaxGrantLifetime/time.Second) + 1
-	if _, err := provider.SignRelayGrant(claims); err == nil {
+	long := g
+	long.ExpiresAt = g.IssuedAt + int64(relaylimits.MaxGrantLifetime/time.Second) + 1
+	if _, err := provider.SignRelayGrant(long); err == nil {
 		t.Fatal("accepted relay grant longer than relaylimits.MaxGrantLifetime")
 	}
-	claims.ExpiresAt = 1_700_000_060
-	claims.PeerRelay = &peernetwork.RelayDescriptor{WireGuardPublicKey: strings.Repeat("A", 43), DiscoPublicKey: strings.Repeat("A", 43), VirtualAddress: "fd7a:115c:a1e0::9"}
-	if _, err := provider.SignRelayGrant(claims); err == nil {
+	g.PeerRelay = &peernetwork.RelayDescriptor{WireGuardPublicKey: testRawKey(3), DiscoPublicKey: testRawKey(4), VirtualAddress: "fd7a:115c:a1e0::9"}
+	if _, err := provider.SignRelayGrant(g); err == nil {
 		t.Fatal("accepted peer relay descriptor without endpoint discovery identity")
 	}
-	claims.DiscoPublicKey = strings.Repeat("A", 43)
-	if _, err := provider.SignRelayGrant(claims); err != nil {
+	g.DiscoPublicKey = testRawKey(5)
+	if _, err := provider.SignRelayGrant(g); err != nil {
 		t.Fatalf("valid peer relay descriptor: %v", err)
 	}
 	scope := peernetwork.Scope{ResourceKind: "machine_access", ResourceID: "access_1", ResourceGeneration: 1, Capability: "file_transfer", Direction: "dial", Port: 443, ExpiresAt: 1_700_000_005}
 	withScope := func(s peernetwork.Scope) peernetwork.RelayGrant {
-		c := claims
-		c.Peers = []peernetwork.RelayPeer{{WireGuardPublicKey: strings.Repeat("A", 43), DiscoPublicKey: strings.Repeat("A", 43), Scopes: []peernetwork.Scope{s}}}
-		return c
+		out := g
+		out.Peers = []peernetwork.RelayPeer{{WireGuardPublicKey: testRawKey(6), DiscoPublicKey: testRawKey(7), Scopes: []peernetwork.Scope{s}}}
+		return out
 	}
 	token, err = provider.SignRelayGrant(withScope(scope))
 	if err != nil {
@@ -99,42 +103,37 @@ func TestSignRelayGrantPublishesFrozenTypeAndRejectsLongLifetime(t *testing.T) {
 	if !ed25519.Verify(testKey(31).Public().(ed25519.PublicKey), []byte(parts[0]+"."+parts[1]), mustDecode(t, parts[2])) {
 		t.Fatal("invalid relay signature")
 	}
-	var body map[string]any
-	decodeJSONPart(t, parts[1], &body)
-	if body["exp"].(float64) != 1_700_000_060 || body["peers"].([]any)[0].(map[string]any)["scopes"].([]any)[0].(map[string]any)["expires_at"].(float64) != 1_700_000_005 {
-		t.Fatal("relay or application lifetime changed")
-	}
-	// The signed payload is exactly the shared claim set the relay decodes strictly: no claim beyond it.
-	var decoded peernetwork.RelayGrant
-	decoder := json.NewDecoder(bytes.NewReader(mustDecode(t, parts[1])))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&decoded); err != nil {
-		t.Fatalf("signed relay grant is not the shared claim set: %v", err)
+	// The signed body is the shared type exactly: relays and CLIs decode it with DecodeSigned.
+	var body peernetwork.RelayGrant
+	if err := peernetwork.DecodeSigned(mustDecode(t, parts[1]), &body); err != nil || body.ExpiresAt != 1_700_000_060 || body.Peers[0].Scopes[0].ExpiresAt != 1_700_000_005 {
+		t.Fatalf("signed body = %+v, %v", body, err)
 	}
 	for _, expiry := range []int64{1_700_000_000, 1_699_999_999} {
-		s := scope
-		s.ExpiresAt = expiry
-		if _, err := provider.SignRelayGrant(withScope(s)); err != nil {
+		scope.ExpiresAt = expiry
+		if _, err := provider.SignRelayGrant(withScope(scope)); err != nil {
 			t.Fatal("expired admission scope must remain signed for live revocation", err)
 		}
 	}
-	bad := scope
-	bad.ExpiresAt = 0
-	if _, err := provider.SignRelayGrant(withScope(bad)); err == nil {
+	scope.ExpiresAt = 0
+	if _, err := provider.SignRelayGrant(withScope(scope)); err == nil {
 		t.Fatal("malformed scope expiry signed")
 	}
 	// Mint signs exactly what relays accept (peernetwork.ValidGrantScope): a recording scope, never an unknown one.
-	recording := scope
-	recording.ResourceKind, recording.Capability = "recording", "recording"
-	if _, err := provider.SignRelayGrant(withScope(recording)); err != nil {
+	scope.ExpiresAt, scope.ResourceKind, scope.Capability = 1_700_000_005, "recording", "recording"
+	if _, err := provider.SignRelayGrant(withScope(scope)); err != nil {
 		t.Fatalf("recording scope refused: %v", err)
 	}
 	unknown, port := scope, scope
 	unknown.Capability, port.Port = "unknown", 22
-	for _, s := range []peernetwork.Scope{unknown, port} {
-		if _, err := provider.SignRelayGrant(withScope(s)); err == nil {
-			t.Fatalf("a scope relays refuse was signed: %+v", s)
+	for _, bad := range []peernetwork.Scope{unknown, port} {
+		if _, err := provider.SignRelayGrant(withScope(bad)); err == nil {
+			t.Fatalf("a scope relays refuse was signed: %+v", bad)
 		}
+	}
+	zero := g
+	zero.WireGuardPublicKey = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	if _, err := provider.SignRelayGrant(zero); err == nil {
+		t.Fatal("an all-zero endpoint key relays refuse was signed")
 	}
 }
 

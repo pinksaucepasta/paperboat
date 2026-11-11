@@ -8,16 +8,14 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"go4.org/mem"
 	"hash/maphash"
-	"io"
-	"net/netip"
 	"slices"
 	"strings"
 	"time"
+
+	"go4.org/mem"
 
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
@@ -25,7 +23,7 @@ import (
 )
 
 // MaxClockSkew tolerates issuer clock drift without extending signed expiry.
-const MaxClockSkew = time.Minute
+const MaxClockSkew = peernetwork.MaxClockSkew
 
 // MaxGrantLifetime bounds a signed grant's exp - iat.
 const MaxGrantLifetime = relaylimits.MaxGrantLifetime
@@ -129,14 +127,6 @@ type Verifier struct {
 	Keys                         map[string]ed25519.PublicKey
 }
 
-func strictJSON(b []byte, out any) error {
-	d := json.NewDecoder(bytes.NewReader(b))
-	d.DisallowUnknownFields()
-	if d.Decode(out) != nil || d.Decode(new(any)) != io.EOF {
-		return ErrProtocol
-	}
-	return nil
-}
 func ParseKey(s string) (key.NodePublic, error) {
 	var k key.NodePublic
 	b, e := base64.RawURLEncoding.Strict().DecodeString(s)
@@ -169,89 +159,35 @@ func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time)
 		Type      string `json:"typ"`
 		KeyID     string `json:"kid"`
 	}
-	if e1 != nil || e2 != nil || e3 != nil || len(h) > 1024 || strictJSON(h, &header) != nil || header.Algorithm != "EdDSA" || header.Type != peernetwork.RelayGrantType {
+	if e1 != nil || e2 != nil || e3 != nil || len(h) > 1024 || peernetwork.DecodeSigned(h, &header) != nil || header.Algorithm != "EdDSA" || header.Type != peernetwork.RelayGrantType {
 		return g, ErrAdmission
 	}
 	pub := v.Keys[header.KeyID]
 	if len(pub) != 32 {
 		return Grant{}, fmt.Errorf("%w: %w", ErrAdmission, errUnknownKey)
 	}
-	if !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sig) || strictJSON(b, &g.RelayGrant) != nil {
+	if !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sig) || peernetwork.DecodeSigned(b, &g.RelayGrant) != nil {
 		return Grant{}, ErrAdmission
 	}
+	g.DropUnknownScopes()
+	if err := g.Check(now); err != nil {
+		return Grant{}, fmt.Errorf("%w: %w", err, ErrAdmission)
+	}
 	leaf := state.PeerCertificates[0]
-	fingerprint, fingerprintErr := hex.DecodeString(g.CertificateFingerprint)
-	quicPublic, publicErr := base64.RawURLEncoding.Strict().DecodeString(g.QUICPublicKey)
+	quicPublic, _ := base64.RawURLEncoding.Strict().DecodeString(g.QUICPublicKey)
 	presented, isEd25519 := leaf.PublicKey.(ed25519.PublicKey)
 	// Each refusal names its check (never the grant's content) for the relay log.
 	switch {
-	case g.Version != peernetwork.RelayGrantVersion || g.Issuer != v.Issuer || g.Audience != peernetwork.RelayGrantAudience:
+	case g.Issuer != v.Issuer:
 		return Grant{}, fmt.Errorf("grant issuer: %w", ErrAdmission)
 	case g.NodeID != v.NodeID || g.NodeGeneration != v.NodeGeneration:
 		return Grant{}, fmt.Errorf("grant relay node: %w", ErrAdmission)
 	case g.ProcessEpoch != v.ProcessEpoch:
 		return Grant{}, fmt.Errorf("grant relay process epoch: %w", ErrAdmission)
-	case fingerprintErr != nil || len(fingerprint) != 32 || hex.EncodeToString(fingerprint) != g.CertificateFingerprint || publicErr != nil || len(quicPublic) != ed25519.PublicKeySize || base64.RawURLEncoding.EncodeToString(quicPublic) != g.QUICPublicKey:
-		return Grant{}, fmt.Errorf("grant key encoding: %w", ErrAdmission)
 	case !isEd25519 || !bytes.Equal(presented, quicPublic):
 		return Grant{}, fmt.Errorf("client certificate key differs from grant: %w", ErrAdmission)
 	case now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) || leaf.NotAfter.Sub(leaf.NotBefore) > 24*time.Hour+time.Minute || leaf.CheckSignature(leaf.SignatureAlgorithm, leaf.RawTBSCertificate, leaf.Signature) != nil:
 		return Grant{}, fmt.Errorf("client certificate validity: %w", ErrAdmission)
-	case g.IssuedAt > now.Add(MaxClockSkew).Unix() || g.ExpiresAt <= g.IssuedAt || g.ExpiresAt-g.IssuedAt > int64(MaxGrantLifetime/time.Second):
-		return Grant{}, fmt.Errorf("grant lifetime: %w", ErrAdmission)
-	case g.Generation == 0 || g.AccountID == "" || g.EndpointID == "" || len(g.AccountID) > 256 || len(g.EndpointID) > 256 || len(g.Peers) > MaxGrantPeers || len(g.RelayControlPeers) > MaxGrantPeers:
-		return Grant{}, fmt.Errorf("grant identity: %w", ErrAdmission)
-	}
-	if _, err := ParseKey(g.WireGuardPublicKey); err != nil {
-		return Grant{}, err
-	}
-	if g.DiscoPublicKey != "" {
-		if _, err := ParseDiscoKey(g.DiscoPublicKey); err != nil {
-			return Grant{}, err
-		}
-	}
-	if g.PeerRelay != nil {
-		if !ValidDescriptor(*g.PeerRelay) || g.DiscoPublicKey == "" || g.PeerRelay.WireGuardPublicKey == g.WireGuardPublicKey {
-			return Grant{}, ErrAdmission
-		}
-	}
-	seen := map[string]bool{}
-	for _, peer := range g.RelayControlPeers {
-		if _, err := ParseKey(peer); err != nil || peer == g.WireGuardPublicKey || seen[peer] {
-			return Grant{}, ErrAdmission
-		}
-		seen[peer] = true
-	}
-	clear(seen)
-	scopes := 0
-	for _, p := range g.Peers {
-		if _, err := ParseKey(p.WireGuardPublicKey); err != nil || seen[p.WireGuardPublicKey] || p.WireGuardPublicKey == g.WireGuardPublicKey {
-			return Grant{}, ErrAdmission
-		}
-		seen[p.WireGuardPublicKey] = true
-		if p.DiscoPublicKey != "" {
-			if _, err := ParseDiscoKey(p.DiscoPublicKey); err != nil {
-				return Grant{}, err
-			}
-		}
-		if g.PeerRelay != nil && p.DiscoPublicKey == "" {
-			return Grant{}, ErrAdmission
-		}
-		if g.PeerRelay != nil && p.WireGuardPublicKey == g.PeerRelay.WireGuardPublicKey && p.DiscoPublicKey != g.PeerRelay.DiscoPublicKey {
-			return Grant{}, ErrAdmission
-		}
-		if len(p.Scopes) == 0 {
-			return Grant{}, ErrAdmission
-		}
-		for _, s := range p.Scopes {
-			scopes++
-			if scopes > peernetwork.MaxGrantScopes || !validScope(s) {
-				return Grant{}, ErrAdmission
-			}
-		}
-	}
-	if !validMemberships(g) {
-		return Grant{}, ErrAdmission
 	}
 	if g.ExpiresAt <= now.Unix() {
 		return Grant{}, ErrExpired
@@ -442,14 +378,6 @@ func ParseDiscoKey(value string) (key.DiscoPublic, error) {
 }
 func DiscoKeyString(k key.DiscoPublic) string {
 	return base64.RawURLEncoding.EncodeToString(k.AppendTo(nil))
-}
-
-// ValidDescriptor reports whether d names a peer relay service: its keys and an address in the peer network.
-func ValidDescriptor(d ServiceDescriptor) bool {
-	_, e1 := ParseKey(d.WireGuardPublicKey)
-	_, e2 := ParseDiscoKey(d.DiscoPublicKey)
-	address, e3 := netip.ParseAddr(d.VirtualAddress)
-	return e1 == nil && e2 == nil && e3 == nil && address.String() == d.VirtualAddress && netip.MustParsePrefix("fd7a:115c:a1e0::/48").Contains(address)
 }
 
 // classifiedFailure preserves a transport or credential cause alongside the

@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
+
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
@@ -94,7 +96,7 @@ func teamStandingOverRelay(t *testing.T, paired bool) {
 	port := relaySocket.LocalAddr().(*net.UDPAddr).Port
 	node := tailnet.RegionalNode{NodeID: nodeID, NodeGeneration: 1, ProcessEpoch: processEpoch, Region: "test", FailureDomain: "test-a", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(port), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now.Unix()}
 	// The grant states each standing scope with the grant's expiry; the unpaired variant names no peer at all.
-	grantShape := func(g *derpquic.Grant) {
+	grantShape := func(g *peernetwork.RelayGrant) {
 		if !paired {
 			g.Peers = nil
 			return

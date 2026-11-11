@@ -790,23 +790,15 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 			slog.Warn("peer network authority unavailable", "site", "network.go:620")
 			return nil, ErrUnavailable
 		}
-		// One grant per chunk of at most maximumRelayGrantPeers peers, all with
-		// identical identity, iat, exp and generation; the relay and the CLI merge
-		// them. Relay control and the peer relay ride in the first chunk only.
-		for i, chunk := range chunks {
-			first := i == 0
-			// The relay authenticates the client certificate's key, so a same-key renewal's admitted certificates
-			// (AdmittedCertificateFingerprints) mean nothing to it and are not claims of the grant.
-			claims := peernetwork.RelayGrant{Version: peernetwork.RelayGrantVersion, Issuer: s.issuer, Audience: peernetwork.RelayGrantAudience, IssuedAt: now.Unix(), ExpiresAt: expires.Unix(),
-				Generation: uint64(generation), AccountID: self.AccountID, EndpointID: self.EndpointID, WireGuardPublicKey: self.WireGuardPublicKey, DiscoPublicKey: self.DiscoPublicKey,
-				CertificateFingerprint: self.QUICCertificateFingerprint, QUICPublicKey: self.QUICPublicKey, NodeID: nodeID, NodeGeneration: uint64(nodeGeneration), ProcessEpoch: processEpoch, Peers: chunk.peers}
-			if peerRelayReady && len(chunk.control) != 0 {
-				claims.RelayControlPeers = chunk.control
-			}
-			if first && peerRelayReady {
-				claims.PeerRelay = &peernetwork.RelayDescriptor{WireGuardPublicKey: base64.RawURLEncoding.EncodeToString(peerRelayWG),
-					DiscoPublicKey: base64.RawURLEncoding.EncodeToString(peerRelayDisco), VirtualAddress: peerRelayAddress.String}
-			}
+		var peerRelay *peernetwork.RelayDescriptor
+		if peerRelayReady {
+			peerRelay = &peernetwork.RelayDescriptor{WireGuardPublicKey: base64.RawURLEncoding.EncodeToString(peerRelayWG),
+				DiscoPublicKey: base64.RawURLEncoding.EncodeToString(peerRelayDisco), VirtualAddress: peerRelayAddress.String}
+		}
+		base := peernetwork.RelayGrant{Version: peernetwork.RelayGrantVersion, Issuer: s.issuer, Audience: peernetwork.RelayGrantAudience, IssuedAt: now.Unix(), ExpiresAt: expires.Unix(),
+			Generation: uint64(generation), AccountID: self.AccountID, EndpointID: self.EndpointID, WireGuardPublicKey: self.WireGuardPublicKey, DiscoPublicKey: self.DiscoPublicKey,
+			CertificateFingerprint: self.QUICCertificateFingerprint, QUICPublicKey: self.QUICPublicKey, NodeID: nodeID, NodeGeneration: uint64(nodeGeneration), ProcessEpoch: processEpoch}
+		for _, claims := range relayGrantParts(base, chunks, peerRelay) {
 			grant, err := s.signer.SignRelayGrant(claims)
 			if err != nil {
 				return nil, err
@@ -822,6 +814,25 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 		return nil, err
 	}
 	return grants, nil
+}
+
+// relayGrantParts is one grant per chunk of base's endpoint, each with base's identity, iat, exp and generation;
+// the relay and the CLI merge them. Relay control rides in each chunk for its own peers while the peer relay (nil
+// when not ready) is offered, and the peer relay in the first chunk only.
+func relayGrantParts(base peernetwork.RelayGrant, chunks []relayGrantChunk, peerRelay *peernetwork.RelayDescriptor) []peernetwork.RelayGrant {
+	parts := make([]peernetwork.RelayGrant, 0, len(chunks))
+	for i, chunk := range chunks {
+		g := base
+		g.Peers = chunk.peers
+		if peerRelay != nil && len(chunk.control) != 0 {
+			g.RelayControlPeers = chunk.control
+		}
+		if i == 0 {
+			g.PeerRelay = peerRelay
+		}
+		parts = append(parts, g)
+	}
+	return parts
 }
 
 // maximumRelayGrantPeers and maximumRelayGrantScopes are the relay's bounds on one grant (relay derpquic

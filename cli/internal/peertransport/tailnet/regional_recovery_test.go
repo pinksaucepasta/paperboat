@@ -8,8 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
+
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
-	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=regional-recovery-test
 	"tailscale.com/tailcfg"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=regional-recovery-test
@@ -152,7 +153,7 @@ func TestRegionalStatusDoesNotExposePreparationErrorText(t *testing.T) {
 	}
 	a.regional = &RegionalCandidates{IssuedAt: now, ExpiresAt: now + 60, Nodes: []RegionalNode{node}}
 	a.relay.mu.Lock()
-	a.relay.grants = map[string]derpquic.Grant{node.NodeID: {NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, ExpiresAt: now + 60}}
+	a.relay.grants = map[string]peernetwork.RelayGrant{node.NodeID: {NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, ExpiresAt: now + 60}}
 	r := &regionalRecovery{
 		authority: a, control: newRegionalControl(a.private, time.Now), engine: &failingRegionalEngine{cause: errors.New("private relay hostname and token")},
 		peerID: "machine_test", done: make(chan struct{}), ready: make(chan struct{}), inbox: make(chan regionalInbound, 64),
@@ -388,7 +389,7 @@ func TestRegionalRecoveryTriesRefusedRelaysAgainWithoutANewGrant(t *testing.T) {
 	}
 	a.regional = &RegionalCandidates{IssuedAt: now, ExpiresAt: now + 600, Nodes: []RegionalNode{node}}
 	a.relay.mu.Lock()
-	a.relay.grants = map[string]derpquic.Grant{node.NodeID: {NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, ExpiresAt: now + 600}}
+	a.relay.grants = map[string]peernetwork.RelayGrant{node.NodeID: {NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, ExpiresAt: now + 600}}
 	engine := &scriptedRegionalEngine{}
 	r := &regionalRecovery{
 		authority: a, control: newRegionalControl(a.private, time.Now), engine: engine, wake: make(chan struct{}, 1),

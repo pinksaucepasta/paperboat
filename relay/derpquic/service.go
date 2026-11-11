@@ -26,7 +26,7 @@ type ControlRequest struct {
 }
 
 func (s *Server) SetControlService(identity ServiceDescriptor, handler ControlHandler) error {
-	if !ValidDescriptor(identity) || handler == nil {
+	if !identity.Valid() || handler == nil {
 		return ErrAdmission
 	}
 	k, _ := ParseKey(identity.WireGuardPublicKey)

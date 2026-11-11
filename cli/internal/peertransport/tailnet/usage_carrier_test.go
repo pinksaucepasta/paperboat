@@ -3,10 +3,12 @@ package tailnet
 import (
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"io"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
+
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=peer-path-accounting-test
 	"tailscale.com/derp"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=peer-path-accounting-test
@@ -32,7 +34,7 @@ func (f *usageFakeCarrier) RecvDetail() (derp.ReceivedMessage, int, error) { ret
 func TestUsageCarrierActualNodeAndDirection(t *testing.T) {
 	peer := key.NewNode().Public()
 	node := RegionalNode{NodeID: "actual-reverse-route", NodeGeneration: 2, ProcessEpoch: "boot"}
-	r := relayAuthority{usagePeers: map[key.NodePublic]*relayUsageObservation{peer: {}}, nodes: map[tailcfg.DERPRegionID]RegionalNode{regionalID(node.NodeID): node}, grants: map[string]derpquic.Grant{node.NodeID: {NodeID: node.NodeID, NodeGeneration: 2, ProcessEpoch: "boot", ExpiresAt: time.Now().Add(time.Minute).Unix()}}}
+	r := relayAuthority{usagePeers: map[key.NodePublic]*relayUsageObservation{peer: {}}, nodes: map[tailcfg.DERPRegionID]RegionalNode{regionalID(node.NodeID): node}, grants: map[string]peernetwork.RelayGrant{node.NodeID: {NodeID: node.NodeID, NodeGeneration: 2, ProcessEpoch: "boot", ExpiresAt: time.Now().Add(time.Minute).Unix()}}}
 	data := []byte{4, 0, 0, 0, 1}
 	fake := &usageFakeCarrier{packet: derp.ReceivedPacket{Source: peer, Data: data}}
 	c := &usageObservedCarrier{DERPCarrier: fake, authority: &r, node: node}

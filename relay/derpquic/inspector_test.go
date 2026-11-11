@@ -27,9 +27,11 @@ func TestInspectorOnlyRelayAuthority(t *testing.T) {
 	if !allowed(a, b, time.Now()) {
 		t.Fatal("cross-account inspector grant denied")
 	}
+	// (inspector, terminal) is no scope of the shared list: it authorizes nothing (dropped like a newer
+	// server's scope) and never fails the rest of the grant.
 	a.Peers[0].Scopes[0].Capability = "terminal"
-	if _, err := f.verifier.Verify(f.token(a), state, time.Now()); err == nil {
-		t.Fatal("inspector resource admitted terminal capability")
+	if got, err := f.verifier.Verify(f.token(a), state, time.Now()); err != nil || len(got.Peers) != 0 {
+		t.Fatalf("inspector resource kept a terminal capability: %+v, %v", got.Peers, err)
 	}
 	if allowed(a, b, time.Now()) {
 		t.Fatal("different capability matched inspector peer")

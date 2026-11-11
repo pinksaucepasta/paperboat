@@ -15,7 +15,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/netip"
 	"slices"
 	"sort"
 	"strconv"
@@ -91,78 +90,19 @@ func (p *Provider) SignNetworkConfiguration(claims map[string]any) (string, erro
 // network configuration or the regional discovery projection. The claims are the
 // shared peernetwork.RelayGrant the relay decodes strictly.
 func (p *Provider) SignRelayGrant(g peernetwork.RelayGrant) (string, error) {
-	wgKey, wgErr := base64.RawURLEncoding.DecodeString(g.WireGuardPublicKey)
-	fingerprint, fingerprintErr := hex.DecodeString(g.CertificateFingerprint)
-	peerRelayOK := g.PeerRelay == nil || validRelayDescriptor(*g.PeerRelay) && g.DiscoPublicKey != "" && relayPeersHaveDisco(g.Peers)
-	if p == nil || g.Version != peernetwork.RelayGrantVersion || g.Audience != peernetwork.RelayGrantAudience || strings.TrimSpace(g.Issuer) == "" ||
-		g.AccountID == "" || g.EndpointID == "" ||
-		wgErr != nil || len(wgKey) != 32 || base64.RawURLEncoding.EncodeToString(wgKey) != g.WireGuardPublicKey ||
-		fingerprintErr != nil || len(fingerprint) != 32 || hex.EncodeToString(fingerprint) != g.CertificateFingerprint ||
-		g.NodeID == "" || g.ProcessEpoch == "" || !optionalRawKey(optionalString(g.DiscoPublicKey)) || !peerRelayOK || !relayPeersClaim(g.Peers) ||
-		g.ExpiresAt <= g.IssuedAt || g.ExpiresAt-g.IssuedAt > int64(relaylimits.MaxGrantLifetime/time.Second) || g.Generation < 1 || g.NodeGeneration < 1 {
-		return "", errors.New("relay grant claims are invalid")
+	if p == nil {
+		return "", errors.New("relay grant signer is not configured")
+	}
+	// Relays and CLIs apply this same Check; the grant's own iat is its issuing clock (the caller's, which tests move).
+	if err := g.Check(time.Unix(g.IssuedAt, 0)); err != nil {
+		return "", fmt.Errorf("relay grant claims are invalid: %w", err)
 	}
 	return p.signClaims(peernetwork.RelayGrantType, g)
-}
-
-func optionalRawKey(value any) bool {
-	if value == nil {
-		return true
-	}
-	key, ok := value.(string)
-	decoded, err := base64.RawURLEncoding.DecodeString(key)
-	return ok && err == nil && len(decoded) == 32 && base64.RawURLEncoding.EncodeToString(decoded) == key
 }
 
 func validBrowserKeyDigest(value string) bool {
 	decoded, err := base64.RawURLEncoding.Strict().DecodeString(value)
 	return err == nil && len(decoded) == sha256.Size && base64.RawURLEncoding.EncodeToString(decoded) == value
-}
-
-// optionalString is nil for an absent (empty) optional claim.
-func optionalString(v string) any {
-	if v == "" {
-		return nil
-	}
-	return v
-}
-
-func relayPeersHaveDisco(peers []peernetwork.RelayPeer) bool {
-	for _, peer := range peers {
-		if peer.DiscoPublicKey == "" || !optionalRawKey(peer.DiscoPublicKey) {
-			return false
-		}
-	}
-	return true
-}
-
-func validRelayDescriptor(d peernetwork.RelayDescriptor) bool {
-	if !optionalRawKey(d.WireGuardPublicKey) || !optionalRawKey(d.DiscoPublicKey) || d.WireGuardPublicKey == "" || d.DiscoPublicKey == "" {
-		return false
-	}
-	address, err := netip.ParseAddr(d.VirtualAddress)
-	return err == nil && netip.MustParsePrefix("fd7a:115c:a1e0::/48").Contains(address)
-}
-
-func relayPeersClaim(peers []peernetwork.RelayPeer) bool {
-	if peers == nil || len(peers) > peernetwork.MaxGrantPeers {
-		return false
-	}
-	scopes := 0
-	for _, peer := range peers {
-		scopes += len(peer.Scopes)
-		decoded, err := base64.RawURLEncoding.DecodeString(peer.WireGuardPublicKey)
-		if err != nil || len(decoded) != 32 || base64.RawURLEncoding.EncodeToString(decoded) != peer.WireGuardPublicKey ||
-			!optionalRawKey(optionalString(peer.DiscoPublicKey)) || len(peer.Scopes) == 0 || scopes > peernetwork.MaxGrantScopes {
-			return false
-		}
-		for _, scope := range peer.Scopes {
-			if !peernetwork.ValidGrantScope(scope) { // the relay refuses the whole grant otherwise
-				return false
-			}
-		}
-	}
-	return true
 }
 
 // SignRegionalCandidates signs the endpoint-bound registry projection, which lives as long as the relay grants it

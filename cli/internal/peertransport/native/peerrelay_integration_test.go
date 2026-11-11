@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
+
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
@@ -208,7 +210,7 @@ func testAutomaticPeerRelay(t *testing.T) {
 
 	serviceDisco := key.NewDisco()
 	serviceNode := key.NewNode()
-	service := derpquic.ServiceDescriptor{WireGuardPublicKey: derpquic.KeyString(serviceNode.Public()), DiscoPublicKey: derpquic.DiscoKeyString(serviceDisco.Public()), VirtualAddress: "fd7a:115c:a1e0::30"}
+	service := peernetwork.RelayDescriptor{WireGuardPublicKey: derpquic.KeyString(serviceNode.Public()), DiscoPublicKey: derpquic.DiscoKeyString(serviceDisco.Public()), VirtualAddress: "fd7a:115c:a1e0::30"}
 	peerRelayConfig := peerrelay.Config{Service: service, DiscoPrivate: serviceDisco, Port: relayPort, Addresses: []netip.AddrPort{netip.AddrPortFrom(netip.MustParseAddr("127.0.0.1"), relayPort)}}
 	udp, err := peerrelay.New(peerRelayConfig)
 	if err != nil {
@@ -264,8 +266,8 @@ func testAutomaticPeerRelay(t *testing.T) {
 	}
 	defer shutdownRelay()
 	node := tailnet.RegionalNode{NodeID: nodeID, NodeGeneration: 1, ProcessEpoch: epoch, Region: "test", FailureDomain: "test-a", Roles: []string{"relay", "peer_relay"}, Transports: []string{"derp_quic", "peer_relay_udp"}, EndpointHost: "127.0.0.1", EndpointQUICPort: uint16(relaySocket.LocalAddr().(*net.UDPAddr).Port), State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now.Unix()}
-	grant := func(selfDisco, peerDisco string) func(*derpquic.Grant) {
-		return func(g *derpquic.Grant) {
+	grant := func(selfDisco, peerDisco string) func(*peernetwork.RelayGrant) {
+		return func(g *peernetwork.RelayGrant) {
 			g.DiscoPublicKey = selfDisco
 			g.Peers[0].DiscoPublicKey = peerDisco
 			g.PeerRelay = &service

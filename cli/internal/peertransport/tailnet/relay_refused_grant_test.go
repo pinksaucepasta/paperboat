@@ -7,10 +7,13 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 )
@@ -40,20 +43,21 @@ func TestARefusedRelayGrantLeavesDirectAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	grant := func(n RegionalNode, scopes int) string {
-		g := derpquic.Grant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: n.NodeID, NodeGeneration: n.NodeGeneration, ProcessEpoch: n.ProcessEpoch}
-		p := derpquic.Peer{WireGuardPublicKey: cfg.Peers[0].Identity.WireGuardPublicKey}
+		g := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: n.NodeID, NodeGeneration: n.NodeGeneration, ProcessEpoch: n.ProcessEpoch}
+		p := peernetwork.RelayPeer{WireGuardPublicKey: cfg.Peers[0].Identity.WireGuardPublicKey}
 		for _, s := range cfg.Peers[0].Scopes[:scopes] {
 			p.Scopes = append(p.Scopes, derpquic.Scope{ResourceKind: s.ResourceKind, ResourceID: s.ResourceID, ResourceGeneration: s.ResourceGeneration, Capability: s.Capability, Direction: s.Direction, Port: s.Port, ExpiresAt: s.ExpiresAt})
 		}
-		g.Peers = []derpquic.Peer{p}
+		g.Peers = []peernetwork.RelayPeer{p}
 		header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-relay-grant+jwt", "kid": "network_test"})
 		body, _ := json.Marshal(g)
 		signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)
 		return signed + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(signer, []byte(signed)))
 	}
 	all := len(cfg.Peers[0].Scopes)
-	if err := a.ApplyRelayGrants(t.Context(), []string{grant(first, all)}); err != nil {
-		t.Fatalf("the grants were refused before relay verification: %v", err)
+	// The shared grant check (the relay's own) already refuses it: no grant applies, the call says so.
+	if err := a.ApplyRelayGrants(t.Context(), []string{grant(first, all)}); !errors.Is(err, ErrAuthority) {
+		t.Fatalf("a grant relays refuse was applied: %v", err)
 	}
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

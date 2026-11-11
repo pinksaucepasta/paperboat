@@ -191,7 +191,7 @@ func (c *Client) post(ctx context.Context, path string, in any) (out Lease, resu
 	if out.ExpiresAt <= now.Unix() || out.ExpiresAt > now.Add(leaseLimit).Unix() {
 		return Lease{}, ErrFenced
 	}
-	if out.PeerRelay != nil && !derpquic.ValidDescriptor(*out.PeerRelay) {
+	if out.PeerRelay != nil && !out.PeerRelay.Valid() {
 		return Lease{}, ErrFenced
 	}
 	return out, nil

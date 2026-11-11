@@ -15,7 +15,7 @@ import (
 // of 10,000 peers. A grant uses memberships or per-peer lists, not both.
 
 // MaxGrantMemberships bounds the memberships one grant carries.
-const MaxGrantMemberships = 256
+const MaxGrantMemberships = peernetwork.MaxGrantMemberships
 
 type membershipKey struct {
 	kind, id, capability string
@@ -25,29 +25,6 @@ type membershipKey struct {
 
 func keyOf(s Scope) membershipKey {
 	return membershipKey{kind: s.ResourceKind, id: s.ResourceID, capability: s.Capability, generation: s.ResourceGeneration, port: s.Port}
-}
-
-// validScope is the shape every grant scope, per-peer or membership, must have (the shared rule the server's mint and
-// contract tests use too).
-func validScope(s Scope) bool { return peernetwork.ValidGrantScope(s) }
-
-// validMemberships checks a grant's memberships: valid scopes, bounded, no duplicate, and no per-peer list
-// beside them.
-func validMemberships(g Grant) bool {
-	if len(g.Memberships) == 0 {
-		return true
-	}
-	if len(g.Memberships) > MaxGrantMemberships || len(g.Peers) != 0 || len(g.RelayControlPeers) != 0 {
-		return false
-	}
-	seen := make(map[Scope]bool, len(g.Memberships))
-	for _, m := range g.Memberships {
-		if !validScope(m) || seen[m] {
-			return false
-		}
-		seen[m] = true
-	}
-	return true
 }
 
 // membershipIndex is a grant's memberships ordered by the hash of their resource key: 12 bytes per

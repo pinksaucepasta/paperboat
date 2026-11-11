@@ -20,15 +20,16 @@ import (
 	"sync"
 	"time"
 
+	"net/netip"
+
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/relay/nodetls"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
-	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
-	"net/netip"
+
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-derp-carrier
 	"tailscale.com/tailcfg"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-derp-carrier
@@ -40,7 +41,7 @@ import (
 type relayAuthority struct {
 	mu     sync.Mutex
 	tokens map[string]string
-	grants map[string]derpquic.Grant
+	grants map[string]peernetwork.RelayGrant
 	// retained is the previous grant set, still presented to the relay while a configuration that only withdrew peers
 	// is within its withdrawal grace (withdrawal.go): the narrowed grant would make the relay drop the withdrawn pair at
 	// once and eat the closes of its sessions, which the grace keeps the path open for. Cleared when the last withdrawn
@@ -68,7 +69,8 @@ type relayAuthority struct {
 }
 
 // ApplyRelayGrants consumes only signed grants from the same network refresh.
-// Invalid or absent grants remove cached relay authority; they cannot extend a lease.
+// Invalid or absent grants remove cached relay authority; they cannot extend a lease. A grant relays would refuse
+// is left out and the others apply; when none applies it returns ErrAuthority.
 func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resultErr error) {
 	a.mu.Lock()
 	if a.current == nil || !a.usableLocked() {
@@ -79,7 +81,7 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 	regional := a.regional
 	a.mu.Unlock()
 	next := map[string]string{}
-	grants := map[string]derpquic.Grant{}
+	grants := map[string]peernetwork.RelayGrant{}
 	controlSet := map[key.NodePublic]bool{}
 	defer func() {
 		a.mu.Lock()
@@ -143,8 +145,8 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 			return ErrAuthority
 		}
 		body, err := base64.RawURLEncoding.Strict().DecodeString(parts[1])
-		var g derpquic.Grant
-		if err != nil || json.Unmarshal(body, &g) != nil {
+		var g peernetwork.RelayGrant
+		if err != nil || peernetwork.DecodeSigned(body, &g) != nil {
 			next = nil
 			grants = nil
 			return ErrAuthority
@@ -180,10 +182,16 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 			Type      string `json:"typ"`
 			KeyID     string `json:"kid"`
 		}
-		if strictDecode(header, &fullHeader) != nil || fullHeader.Algorithm != "EdDSA" || fullHeader.Type != "paperboat-relay-grant+jwt" || strictDecode(body, &g) != nil || g.Version != 1 || g.Issuer != a.options.Issuer || g.Audience != "paperboat-relay" || g.AccountID != cfg.Self.AccountID || g.EndpointID != cfg.Self.EndpointID || g.WireGuardPublicKey != cfg.Self.WireGuardPublicKey || g.CertificateFingerprint != cfg.Self.QUICCertificateFingerprint || g.QUICPublicKey != cfg.Self.QUICPublicKey || g.Generation != cfg.Generation || g.NodeGeneration != node.NodeGeneration || g.ProcessEpoch != node.ProcessEpoch || g.IssuedAt > serverclock.Now().Add(derpquic.MaxClockSkew).Unix() || g.ExpiresAt <= serverclock.Now().Unix() || g.ExpiresAt-g.IssuedAt > int64(relaylimits.MaxGrantLifetime/time.Second) {
+		g.DropUnknownScopes()
+		if peernetwork.DecodeSigned(header, &fullHeader) != nil || fullHeader.Algorithm != "EdDSA" || fullHeader.Type != peernetwork.RelayGrantType || g.Issuer != a.options.Issuer || g.AccountID != cfg.Self.AccountID || g.EndpointID != cfg.Self.EndpointID || g.WireGuardPublicKey != cfg.Self.WireGuardPublicKey || g.CertificateFingerprint != cfg.Self.QUICCertificateFingerprint || g.QUICPublicKey != cfg.Self.QUICPublicKey || g.Generation != cfg.Generation || g.NodeGeneration != node.NodeGeneration || g.ProcessEpoch != node.ProcessEpoch || g.ExpiresAt <= serverclock.Now().Unix() {
 			next = nil
 			grants = nil
 			return ErrAuthority
+		}
+		// A grant relays would refuse makes only its relay unusable; the others still apply.
+		if err := g.Check(serverclock.Now()); err != nil {
+			diagnosticlog.TryWarn("a relay grant relays would refuse is not used", "node", g.NodeID, "error", err)
+			continue
 		}
 		// A grant names at most a bounded subset of this endpoint's peers (the relay's per-grant
 		// bound); every peer it names must be a configured peer with exactly its configured scopes.
@@ -192,16 +200,13 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 			grants = nil
 			return ErrAuthority
 		}
-		if len(g.RelayControlPeers) > derpquic.MaxGrantPeers {
-			return ErrAuthority
-		}
-		seenControl := map[string]bool{}
 		for _, peerKey := range g.RelayControlPeers {
 			peer, err := publicKey(peerKey)
-			if err != nil || peerKey == g.WireGuardPublicKey || seenControl[peerKey] {
+			if err != nil {
+				next = nil
+				grants = nil
 				return ErrAuthority
 			}
-			seenControl[peerKey] = true
 			controlSet[peer] = true
 		}
 		// A membership grant names no peers: each membership must be a scope this configuration gives the
@@ -274,7 +279,7 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 		}
 		if chunk {
 			merged := earlier
-			merged.Peers = append(append([]derpquic.Peer(nil), earlier.Peers...), g.Peers...)
+			merged.Peers = append(append([]peernetwork.RelayPeer(nil), earlier.Peers...), g.Peers...)
 			merged.RelayControlPeers = append(append([]string(nil), earlier.RelayControlPeers...), g.RelayControlPeers...)
 			merged.Memberships = append(append([]derpquic.Scope(nil), earlier.Memberships...), g.Memberships...)
 			if merged.PeerRelay == nil {
@@ -286,6 +291,9 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 		}
 		next[g.NodeID] = token
 		grants[g.NodeID] = g
+	}
+	if len(tokens) > 0 && len(grants) == 0 {
+		return ErrAuthority // every grant was refused; the empty set is still installed
 	}
 	return nil
 }
@@ -414,12 +422,12 @@ func (a *Authority) configureRegionalRelays(config *tls.Config, only string) ([]
 
 // relayServiceLocked adapts a signed discovery service without granting it
 // application access. a.mu is held by callers.
-func (a *Authority) relayServiceLocked(node RegionalNode, g derpquic.Grant) (*tailcfg.Node, error) {
+func (a *Authority) relayServiceLocked(node RegionalNode, g peernetwork.RelayGrant) (*tailcfg.Node, error) {
 	if g.PeerRelay == nil {
 		return nil, nil
 	}
 	ownDisco := mesh.DiscoPublicForNode(a.private).DiscoPublic
-	if g.DiscoPublicKey != derpquic.DiscoKeyString(ownDisco) || !derpquic.ValidDescriptor(*g.PeerRelay) {
+	if g.DiscoPublicKey != derpquic.DiscoKeyString(ownDisco) || !g.PeerRelay.Valid() {
 		return nil, ErrAuthority
 	}
 	relayKey, e := derpquic.ParseKey(g.PeerRelay.WireGuardPublicKey)
@@ -561,13 +569,13 @@ func (a *Authority) relayToken(node RegionalNode) (string, error) {
 
 type retainedRelayGrants struct {
 	tokens map[string]string
-	grants map[string]derpquic.Grant
+	grants map[string]peernetwork.RelayGrant
 }
 
 // relayGrantDiff reports whether next drops some peer scope of previous and whether it adds one; a renewal of the same
 // scopes is neither.
-func relayGrantDiff(previous, next map[string]derpquic.Grant) (removed, added bool) {
-	scopes := func(grants map[string]derpquic.Grant) map[string]bool {
+func relayGrantDiff(previous, next map[string]peernetwork.RelayGrant) (removed, added bool) {
+	scopes := func(grants map[string]peernetwork.RelayGrant) map[string]bool {
 		set := map[string]bool{}
 		for node, g := range grants {
 			for _, peer := range g.Peers {

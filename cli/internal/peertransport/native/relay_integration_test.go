@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
+
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
@@ -234,7 +236,7 @@ func startRelayEchoServer(t *testing.T, owner *native.Owner, authority *tailnet.
 	return server.Address()
 }
 
-func applyRelayAuthority(t *testing.T, authority *tailnet.Authority, signer ed25519.PrivateKey, config tailnet.NetworkConfiguration, endpointTLS *tls.Config, node tailnet.RegionalNode, mutate ...func(*derpquic.Grant)) {
+func applyRelayAuthority(t *testing.T, authority *tailnet.Authority, signer ed25519.PrivateKey, config tailnet.NetworkConfiguration, endpointTLS *tls.Config, node tailnet.RegionalNode, mutate ...func(*peernetwork.RelayGrant)) {
 	t.Helper()
 	now := time.Now().Unix()
 	expires := min(now+60, node.ExpiresAt, config.ExpiresAt)
@@ -247,7 +249,7 @@ func applyRelayAuthority(t *testing.T, authority *tailnet.Authority, signer ed25
 		scopes[i] = derpquic.Scope{ResourceKind: scope.ResourceKind, ResourceID: scope.ResourceID, ResourceGeneration: scope.ResourceGeneration, Capability: scope.Capability, Direction: scope.Direction, Port: scope.Port, ExpiresAt: scope.ExpiresAt}
 	}
 	fingerprint := sha256.Sum256(endpointTLS.Certificates[0].Certificate[0])
-	grant := derpquic.Grant{Version: 1, Issuer: config.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: expires, Generation: config.Generation, AccountID: config.Self.AccountID, EndpointID: config.Self.EndpointID, WireGuardPublicKey: config.Self.WireGuardPublicKey, CertificateFingerprint: base16(fingerprint[:]), QUICPublicKey: config.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Peers: []derpquic.Peer{{WireGuardPublicKey: config.Peers[0].Identity.WireGuardPublicKey, Scopes: scopes}}}
+	grant := peernetwork.RelayGrant{Version: 1, Issuer: config.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: expires, Generation: config.Generation, AccountID: config.Self.AccountID, EndpointID: config.Self.EndpointID, WireGuardPublicKey: config.Self.WireGuardPublicKey, CertificateFingerprint: base16(fingerprint[:]), QUICPublicKey: config.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Peers: []peernetwork.RelayPeer{{WireGuardPublicKey: config.Peers[0].Identity.WireGuardPublicKey, Scopes: scopes}}}
 	if len(mutate) > 0 {
 		mutate[0](&grant)
 	}

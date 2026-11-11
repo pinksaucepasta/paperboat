@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
+
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 )
 
@@ -27,16 +29,16 @@ func TestRelayGrantNamingASubsetOfThePeersIsAccepted(t *testing.T) {
 	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, candidates)); err != nil {
 		t.Fatal(err)
 	}
-	sign := func(peers []derpquic.Peer) string {
-		grant := derpquic.Grant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Peers: peers}
+	sign := func(peers []peernetwork.RelayPeer) string {
+		grant := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Peers: peers}
 		header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-relay-grant+jwt", "kid": "network_test"})
 		body, _ := json.Marshal(grant)
 		signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)
 		return signed + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(signer, []byte(signed)))
 	}
-	configured := func(i int) derpquic.Peer {
+	configured := func(i int) peernetwork.RelayPeer {
 		peer := cfg.Peers[i]
-		p := derpquic.Peer{WireGuardPublicKey: peer.Identity.WireGuardPublicKey}
+		p := peernetwork.RelayPeer{WireGuardPublicKey: peer.Identity.WireGuardPublicKey}
 		for _, s := range peer.Scopes {
 			p.Scopes = append(p.Scopes, derpquic.Scope{ResourceKind: s.ResourceKind, ResourceID: s.ResourceID, ResourceGeneration: s.ResourceGeneration, Capability: s.Capability, Direction: s.Direction, Port: s.Port, ExpiresAt: s.ExpiresAt})
 		}
@@ -49,14 +51,14 @@ func TestRelayGrantNamingASubsetOfThePeersIsAccepted(t *testing.T) {
 	if err := a.ApplyRelayGrants(t.Context(), []string{sign(nil)}); err != nil {
 		t.Fatalf("subset grant refused: %v", err)
 	}
-	if err := a.ApplyRelayGrants(t.Context(), []string{sign([]derpquic.Peer{configured(0)})}); err != nil {
+	if err := a.ApplyRelayGrants(t.Context(), []string{sign([]peernetwork.RelayPeer{configured(0)})}); err != nil {
 		t.Fatalf("grant naming a configured peer refused: %v", err)
 	}
 	unknown := configured(0)
 	unknown.WireGuardPublicKey = cfg.Self.WireGuardPublicKey
 	changed := configured(0)
 	changed.Scopes = append(changed.Scopes, changed.Scopes...)
-	for name, peers := range map[string][]derpquic.Peer{
+	for name, peers := range map[string][]peernetwork.RelayPeer{
 		"unknown peer": {unknown},
 		"peer twice":   {configured(0), configured(0)},
 		"other scopes": {changed},
@@ -66,7 +68,7 @@ func TestRelayGrantNamingASubsetOfThePeersIsAccepted(t *testing.T) {
 		}
 	}
 	// Chunks: one grant per chunk of peers for the same node add up and are sent together.
-	if err := a.ApplyRelayGrants(t.Context(), []string{sign(nil), sign([]derpquic.Peer{configured(0)})}); err != nil {
+	if err := a.ApplyRelayGrants(t.Context(), []string{sign(nil), sign([]peernetwork.RelayPeer{configured(0)})}); err != nil {
 		t.Fatalf("chunked grants refused: %v", err)
 	}
 	a.relay.mu.Lock()
@@ -75,7 +77,7 @@ func TestRelayGrantNamingASubsetOfThePeersIsAccepted(t *testing.T) {
 	if strings.Count(joined, "\n") != 1 || len(merged.Peers) != 1 {
 		t.Fatalf("chunks not combined: %d parts, %d peers", strings.Count(joined, "\n")+1, len(merged.Peers))
 	}
-	if err := a.ApplyRelayGrants(t.Context(), []string{sign([]derpquic.Peer{configured(0)}), sign([]derpquic.Peer{configured(0)})}); !errors.Is(err, ErrAuthority) {
+	if err := a.ApplyRelayGrants(t.Context(), []string{sign([]peernetwork.RelayPeer{configured(0)}), sign([]peernetwork.RelayPeer{configured(0)})}); !errors.Is(err, ErrAuthority) {
 		t.Fatalf("a peer named in two chunks: err = %v", err)
 	}
 }

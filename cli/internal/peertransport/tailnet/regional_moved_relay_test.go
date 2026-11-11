@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
 // CI run 42002892817: a refresh's candidates moved relay b to a new port before its grants arrived. A
@@ -30,7 +30,7 @@ func TestMovedRelayKeepsItsAddressUntilItsGrantFromTheSameRefresh(t *testing.T) 
 		a.regional = &RegionalCandidates{AuthorizationGeneration: generation, IssuedAt: now, ExpiresAt: now + 60, Nodes: []RegionalNode{candidate}}
 		a.mu.Unlock()
 		a.relay.mu.Lock()
-		a.relay.grants = map[string]derpquic.Grant{node.NodeID: {NodeID: node.NodeID, NodeGeneration: 1, ProcessEpoch: "epoch_test", Generation: grantGeneration, ExpiresAt: now + 60}}
+		a.relay.grants = map[string]peernetwork.RelayGrant{node.NodeID: {NodeID: node.NodeID, NodeGeneration: 1, ProcessEpoch: "epoch_test", Generation: grantGeneration, ExpiresAt: now + 60}}
 		a.relay.mu.Unlock()
 		nodes, _, _, err := r.snapshot()
 		if err != nil || len(nodes) != 1 {

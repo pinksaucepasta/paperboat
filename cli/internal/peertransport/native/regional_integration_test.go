@@ -7,14 +7,16 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
-	"go.uber.org/goleak"
 	"io"
 	"net"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
+	"go.uber.org/goleak"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
@@ -292,7 +294,7 @@ func applyRegionalAuthority(t *testing.T, authority *tailnet.Authority, signer e
 	fingerprint := sha256.Sum256(endpointTLS.Certificates[0].Certificate[0])
 	tokens := make([]string, 0, len(nodes))
 	for _, n := range nodes {
-		g := derpquic.Grant{Version: 1, Issuer: config.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: expires, Generation: config.Generation, AccountID: config.Self.AccountID, EndpointID: config.Self.EndpointID, WireGuardPublicKey: config.Self.WireGuardPublicKey, DiscoPublicKey: selfDisco, CertificateFingerprint: base16(fingerprint[:]), QUICPublicKey: config.Self.QUICPublicKey, NodeID: n.NodeID, NodeGeneration: n.NodeGeneration, ProcessEpoch: n.ProcessEpoch, Peers: []derpquic.Peer{{WireGuardPublicKey: config.Peers[0].Identity.WireGuardPublicKey, DiscoPublicKey: peerDisco, Scopes: scopes}}}
+		g := peernetwork.RelayGrant{Version: 1, Issuer: config.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: expires, Generation: config.Generation, AccountID: config.Self.AccountID, EndpointID: config.Self.EndpointID, WireGuardPublicKey: config.Self.WireGuardPublicKey, DiscoPublicKey: selfDisco, CertificateFingerprint: base16(fingerprint[:]), QUICPublicKey: config.Self.QUICPublicKey, NodeID: n.NodeID, NodeGeneration: n.NodeGeneration, ProcessEpoch: n.ProcessEpoch, Peers: []peernetwork.RelayPeer{{WireGuardPublicKey: config.Peers[0].Identity.WireGuardPublicKey, DiscoPublicKey: peerDisco, Scopes: scopes}}}
 		tokens = append(tokens, signedRelayTestJWT(t, signer, "paperboat-relay-grant+jwt", g))
 	}
 	if err := authority.ApplyRelayGrants(t.Context(), tokens); err != nil {

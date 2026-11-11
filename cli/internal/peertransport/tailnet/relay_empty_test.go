@@ -8,10 +8,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"math/big"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
 func TestEmptyRegionalRegistryPreservesDirectAdmissionAndLaterRelayRecovery(t *testing.T) {
@@ -72,9 +74,9 @@ func TestEmptyRegionalRegistryPreservesDirectAdmissionAndLaterRelayRecovery(t *t
 	if err != nil || len(nodes) != 0 {
 		t.Fatal("registry without grant admitted relay", err)
 	}
-	grant := derpquic.Grant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch}
+	grant := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch}
 	for _, peer := range cfg.Peers {
-		p := derpquic.Peer{WireGuardPublicKey: peer.Identity.WireGuardPublicKey}
+		p := peernetwork.RelayPeer{WireGuardPublicKey: peer.Identity.WireGuardPublicKey}
 		for _, s := range peer.Scopes {
 			p.Scopes = append(p.Scopes, derpquic.Scope{ResourceKind: s.ResourceKind, ResourceID: s.ResourceID, ResourceGeneration: s.ResourceGeneration, Capability: s.Capability, Direction: s.Direction, Port: s.Port, ExpiresAt: s.ExpiresAt})
 		}

@@ -6,8 +6,11 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
+
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
+
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=relay-credential-test
 	"tailscale.com/tailcfg"
 )
@@ -20,7 +23,7 @@ func TestExpiredRelayGrantIsRefetchedAndRetriedNotLatched(t *testing.T) {
 	node := RegionalNode{NodeID: "regional-expired", NodeGeneration: 1, ProcessEpoch: "epoch-expired"}
 	a.relay.mu.Lock()
 	a.relay.nodes = map[tailcfg.DERPRegionID]RegionalNode{regionalID(node.NodeID): node}
-	a.relay.grants = map[string]derpquic.Grant{node.NodeID: {NodeID: node.NodeID, NodeGeneration: 1, ProcessEpoch: "epoch-expired", Generation: 1, ExpiresAt: serverclock.Now().Unix() - 1}}
+	a.relay.grants = map[string]peernetwork.RelayGrant{node.NodeID: {NodeID: node.NodeID, NodeGeneration: 1, ProcessEpoch: "epoch-expired", Generation: 1, ExpiresAt: serverclock.Now().Unix() - 1}}
 	a.relay.tokens = map[string]string{node.NodeID: "grant-expired"}
 	a.relay.mu.Unlock()
 	credential := a.relayCredential(node)

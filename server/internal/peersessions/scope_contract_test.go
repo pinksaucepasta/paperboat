@@ -1,8 +1,15 @@
 package peersessions
 
 import (
+	"bytes"
+	"crypto/ed25519"
+	"encoding/base64"
+	"fmt"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
@@ -54,6 +61,102 @@ func TestEveryEmittedScopeIsAcceptedByTheClientAndTheRelay(t *testing.T) {
 			if !peernetwork.ValidGrantScope(s) {
 				t.Errorf("relays reject the granted scope %+v (mesh %v)", s, mesh)
 			}
+		}
+	}
+}
+
+func contractKey(seed int) string {
+	return base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{byte(seed%250 + 1), byte(seed / 250)}, 16))
+}
+
+// Every relay grant the server builds, signed by the real mint, is one relays and CLIs accept: they decode it with
+// peernetwork.DecodeSigned (exact claims) and check it with peernetwork.Grant.Check, the rule this runs, and none of
+// its scopes is one they would drop. It covers every shared scope, timed and standing, account mesh and team peers,
+// peer relay on and off, and enough peers to need several chunks.
+func TestEveryRelayGrantTheServerBuildsIsAcceptedByRelaysAndClients(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	expires := now.Add(time.Hour)
+	self := networkBinding{AccountID: "account", EndpointID: "host", Role: "machine", WireGuardPublicKey: contractKey(0), DiscoPublicKey: contractKey(1), QUICCertificateFingerprint: strings.Repeat("ab", 32), QUICPublicKey: contractKey(2)}
+	var peers []networkPeer
+	n := 0
+	peernetwork.Scopes(func(kind, capability string) bool {
+		for _, standing := range []bool{false, true} {
+			for _, team := range []bool{false, true} {
+				n++
+				account := "account"
+				if team {
+					account = "other"
+				}
+				peer := networkBinding{AccountID: account, EndpointID: fmt.Sprint("peer_", n), Role: "cli", WireGuardPublicKey: contractKey(n + 10), DiscoPublicKey: contractKey(n + 500)}
+				s := networkScope{ResourceKind: kind, ResourceID: "resource_1", ResourceGeneration: 1, Capability: capability, Direction: "accept", Port: peernetwork.NetworkPort, ExpiresAt: now.Add(time.Minute).Unix()}
+				if kind == "machine_network" {
+					s = personalNetworkScope(self, peer, s.ExpiresAt)
+				}
+				if standing {
+					s.ExpiresAt = 0
+				}
+				peers = append(peers, networkPeer{Identity: peer, Scopes: []networkScope{s}})
+			}
+		}
+		return true
+	})
+	for i := range 3 * peernetwork.MaxGrantPeers { // several chunks
+		peer := networkBinding{AccountID: "account", EndpointID: fmt.Sprint("mesh_", i), Role: "cli", WireGuardPublicKey: contractKey(i + 1000), DiscoPublicKey: contractKey(i + 2000)}
+		peers = append(peers, networkPeer{Identity: peer, Scopes: []networkScope{personalNetworkScope(self, peer, 0)}})
+	}
+	_, private, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := mint.New([]mint.Key{{ID: "contract", PrivateKey: private}}, "contract", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := peernetwork.RelayGrant{Version: 1, Issuer: "https://api.example.test", Audience: peernetwork.RelayGrantAudience, IssuedAt: now.Unix(), ExpiresAt: expires.Unix(), Generation: 9, AccountID: self.AccountID, EndpointID: self.EndpointID, WireGuardPublicKey: self.WireGuardPublicKey, DiscoPublicKey: self.DiscoPublicKey, CertificateFingerprint: self.QUICCertificateFingerprint, QUICPublicKey: self.QUICPublicKey, NodeID: "node", NodeGeneration: 1, ProcessEpoch: "epoch"}
+	peerRelay := &peernetwork.RelayDescriptor{WireGuardPublicKey: contractKey(3), DiscoPublicKey: contractKey(4), VirtualAddress: "fd7a:115c:a1e0::9"}
+	for _, relay := range []*peernetwork.RelayDescriptor{nil, peerRelay} {
+		size := maximumRelayGrantPeers
+		if relay != nil {
+			size = maximumRelayControlPeers
+		}
+		chunks := relayGrantChunks(self, peers, size, expires.Unix())
+		if len(chunks) < 2 || len(chunks) > peernetwork.MaxGrantParts {
+			t.Fatalf("%d chunks", len(chunks))
+		}
+		named := 0
+		for _, g := range relayGrantParts(base, chunks, relay) {
+			token, err := signer.SignRelayGrant(g)
+			if err != nil {
+				t.Fatalf("mint refused a grant the server built: %v", err)
+			}
+			if len(token) > peernetwork.MaxGrantBytes {
+				t.Fatalf("grant part of %d bytes", len(token))
+			}
+			body, err := base64.RawURLEncoding.DecodeString(strings.Split(token, ".")[1])
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got peernetwork.RelayGrant
+			if err := peernetwork.DecodeSigned(body, &got); err != nil {
+				t.Fatalf("receivers refuse the signed claims: %v", err)
+			}
+			before := fmt.Sprint(got.Peers, got.Memberships)
+			if got.DropUnknownScopes(); fmt.Sprint(got.Peers, got.Memberships) != before {
+				t.Fatal("receivers drop a scope the server emits")
+			}
+			if err := got.Check(now); err != nil {
+				t.Fatalf("receivers refuse the grant: %v", err)
+			}
+			named += len(got.Peers)
+		}
+		relayable := 0
+		for _, p := range peers {
+			if len(relayGrantScopes(p.Scopes, expires.Unix())) > 0 {
+				relayable++
+			}
+		}
+		if named != relayable || relayable < len(peers)/2 {
+			t.Fatalf("grants name %d of %d relayable peers (%d peers)", named, relayable, len(peers))
 		}
 	}
 }

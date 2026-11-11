@@ -2,10 +2,11 @@ package derpquic
 
 import (
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 
 	"tailscale.com/types/key"
 )
@@ -67,24 +68,12 @@ func TestMembershipGrantsAuthorizeExactlyTheReciprocalPairs(t *testing.T) {
 	}
 }
 
-func TestMembershipShapeIsBoundedAndExclusive(t *testing.T) {
+// The membership shape itself is peernetwork.RelayGrant.Check (TestGrantCheckRefusesEachBrokenRule).
+func TestMergedMembershipsStayBounded(t *testing.T) {
 	later := time.Now().Add(time.Minute).Unix()
-	m := scope("machine_network", "network_a", "connect", "dial", later)
-	if !validMemberships(Grant{RelayGrant: peernetwork.RelayGrant{Memberships: []Scope{m}}}) {
-		t.Fatal("a valid membership was refused")
-	}
-	if validMemberships(Grant{RelayGrant: peernetwork.RelayGrant{Memberships: []Scope{m, m}}}) {
-		t.Fatal("a duplicate membership was accepted")
-	}
-	if validMemberships(Grant{RelayGrant: peernetwork.RelayGrant{Memberships: []Scope{m}, Peers: []Peer{{}}}}) {
-		t.Fatal("memberships beside a per-peer list were accepted")
-	}
 	many := make([]Scope, MaxGrantMemberships+1)
 	for i := range many {
 		many[i] = scope("machine_access", fmt.Sprintf("access_%d", i), "terminal", "dial", later)
-	}
-	if validMemberships(Grant{RelayGrant: peernetwork.RelayGrant{Memberships: many}}) {
-		t.Fatal("more than MaxGrantMemberships memberships were accepted")
 	}
 	if _, err := mergeGrants(Grant{RelayGrant: peernetwork.RelayGrant{Memberships: many[:MaxGrantMemberships]}}.withIndex(), Grant{RelayGrant: peernetwork.RelayGrant{Memberships: many[MaxGrantMemberships:]}}); err == nil {
 		t.Fatal("merging past MaxGrantMemberships was accepted")

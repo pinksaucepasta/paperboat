@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/quic-go/quic-go"
 	"go4.org/mem"
 	"tailscale.com/types/key"
@@ -214,7 +215,7 @@ func (b *budget) allow(now time.Time, size int) bool {
 
 // MaxGrantParts bounds the grants one credential carries: an endpoint whose peers do not fit one grant
 // gets one grant per chunk of peers (with at most 64 peers each), joined by newlines.
-const MaxGrantParts = 32
+const MaxGrantParts = peernetwork.MaxGrantParts
 
 // grantParts splits a bounded relay credential into its independently signed parts.
 func grantParts(credential string) ([]string, error) {

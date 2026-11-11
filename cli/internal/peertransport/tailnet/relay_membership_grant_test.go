@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
+
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"tailscale.com/types/key"
 )
@@ -27,8 +29,8 @@ func TestRelayMembershipGrantsMustMatchTheConfiguration(t *testing.T) {
 	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, candidates)); err != nil {
 		t.Fatal(err)
 	}
-	sign := func(memberships []derpquic.Scope, peers []derpquic.Peer) string {
-		grant := derpquic.Grant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Memberships: memberships, Peers: peers}
+	sign := func(memberships []derpquic.Scope, peers []peernetwork.RelayPeer) string {
+		grant := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Memberships: memberships, Peers: peers}
 		header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-relay-grant+jwt", "kid": "network_test"})
 		body, _ := json.Marshal(grant)
 		signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)
@@ -46,7 +48,7 @@ func TestRelayMembershipGrantsMustMatchTheConfiguration(t *testing.T) {
 	for name, grant := range map[string]string{
 		"other direction":      sign([]derpquic.Scope{otherDirection}, nil),
 		"unconfigured":         sign([]derpquic.Scope{otherResource}, nil),
-		"beside per-peer list": sign([]derpquic.Scope{member}, []derpquic.Peer{{WireGuardPublicKey: cfg.Peers[0].Identity.WireGuardPublicKey, Scopes: []derpquic.Scope{member}}}),
+		"beside per-peer list": sign([]derpquic.Scope{member}, []peernetwork.RelayPeer{{WireGuardPublicKey: cfg.Peers[0].Identity.WireGuardPublicKey, Scopes: []derpquic.Scope{member}}}),
 	} {
 		if err := a.ApplyRelayGrants(t.Context(), []string{grant}); !errors.Is(err, ErrAuthority) {
 			t.Errorf("%s: err = %v", name, err)
@@ -76,7 +78,7 @@ func TestRelayGrantPeerScopeWithoutExpiryTakesTheGrantExpiry(t *testing.T) {
 	}
 	grantExpiry := now + 60
 	signScopes := func(scopes ...derpquic.Scope) string {
-		grant := derpquic.Grant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: grantExpiry, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Peers: []derpquic.Peer{{WireGuardPublicKey: cfg.Peers[0].Identity.WireGuardPublicKey, Scopes: scopes}}}
+		grant := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: grantExpiry, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch, Peers: []peernetwork.RelayPeer{{WireGuardPublicKey: cfg.Peers[0].Identity.WireGuardPublicKey, Scopes: scopes}}}
 		header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-relay-grant+jwt", "kid": "network_test"})
 		body, _ := json.Marshal(grant)
 		signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)

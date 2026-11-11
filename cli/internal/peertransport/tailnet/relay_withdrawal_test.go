@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
+
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=relay-credential-test
 	"tailscale.com/tailcfg"
@@ -31,9 +33,9 @@ func TestNarrowedRelayGrantWaitsForTheWithdrawalGrace(t *testing.T) {
 		if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, candidates)); err != nil {
 			t.Fatal(err)
 		}
-		g := derpquic.Grant{Version: 1, Issuer: c.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: c.Generation, AccountID: c.Self.AccountID, EndpointID: c.Self.EndpointID, WireGuardPublicKey: c.Self.WireGuardPublicKey, CertificateFingerprint: c.Self.QUICCertificateFingerprint, QUICPublicKey: c.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch}
+		g := peernetwork.RelayGrant{Version: 1, Issuer: c.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: c.Generation, AccountID: c.Self.AccountID, EndpointID: c.Self.EndpointID, WireGuardPublicKey: c.Self.WireGuardPublicKey, CertificateFingerprint: c.Self.QUICCertificateFingerprint, QUICPublicKey: c.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch}
 		if withPeer {
-			g.Peers = []derpquic.Peer{{WireGuardPublicKey: peerKey, Scopes: []derpquic.Scope{scope}}}
+			g.Peers = []peernetwork.RelayPeer{{WireGuardPublicKey: peerKey, Scopes: []derpquic.Scope{scope}}}
 		}
 		header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-relay-grant+jwt", "kid": "network_test"})
 		body, _ := json.Marshal(g)
