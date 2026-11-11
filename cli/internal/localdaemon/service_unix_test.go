@@ -4,6 +4,7 @@ package localdaemon
 
 import (
 	"context"
+	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
 	"os"
 	"path/filepath"
@@ -203,6 +204,53 @@ func TestRemoveServiceRemovesTheConfigSyncService(t *testing.T) {
 			}
 			if calls := strings.Join(runner.calls, "\n"); !strings.Contains(calls, want) {
 				t.Fatalf("config sync service not stopped: %s", calls)
+			}
+		})
+	}
+}
+
+// A second profile (another --config) on the same OS user never rewrites the service the first profile runs: it is
+// refused with the existing profile named, the definition is untouched and the service manager is not asked to do
+// anything; the same profile may reinstall, and after an explicit uninstall the other profile can take the service.
+func TestInstallServiceRefusesToRewriteAnotherProfilesService(t *testing.T) {
+	for _, platform := range []string{"darwin", "linux"} {
+		t.Run(platform, func(t *testing.T) {
+			home := t.TempDir()
+			first := filepath.Join(home, "profile-a", "config.json")
+			second := filepath.Join(home, "profile-b", "config.json")
+			runner := &serviceRunner{}
+			config := serviceConfig{Platform: platform, Home: home, Executable: serviceExecutable(t), ConfigPath: first, ServerURL: "https://api.paperboat.test", Username: "test", Group: "staff", UID: 501, Environment: map[string]string{"HOME": home}, Runner: runner}
+			if err := installService(context.Background(), config); err != nil {
+				t.Fatal(err)
+			}
+			definition := filepath.Join(home, ".config", "systemd", "user", "paperboatd.service")
+			if platform == "darwin" {
+				definition = filepath.Join(home, "Library", "LaunchAgents", hostservice.DaemonLabel+".plist")
+			}
+			before, _ := os.ReadFile(definition)
+			calls := len(runner.calls)
+
+			other := config
+			other.ConfigPath = second
+			err := installService(context.Background(), other)
+			var refused *OtherProfileError
+			if !errors.As(err, &refused) || refused.Existing != first || refused.Requested != second {
+				t.Fatalf("second profile install err=%v, want OtherProfileError naming %s", err, first)
+			}
+			if after, _ := os.ReadFile(definition); string(after) != string(before) || len(runner.calls) != calls {
+				t.Fatal("the refused install changed the first profile's service")
+			}
+			if profile, err := declaredConfigAt(platform, definition); err != nil || profile != first {
+				t.Fatalf("service profile %q %v, want %q", profile, err, first)
+			}
+			if err := installService(context.Background(), config); err != nil {
+				t.Fatalf("the same profile could not reinstall: %v", err)
+			}
+			if err := removeService(context.Background(), config); err != nil {
+				t.Fatal(err)
+			}
+			if err := installService(context.Background(), other); err != nil {
+				t.Fatalf("the second profile could not take the service after the uninstall: %v", err)
 			}
 		})
 	}

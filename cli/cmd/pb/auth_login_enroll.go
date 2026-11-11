@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/internal/selector"
 	"github.com/pinksaucepasta/paperboat/shared/machinename"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
@@ -305,6 +306,11 @@ func readdRemovedComputer(c *command.Context, cfg *config.Config, store config.P
 		return nil
 	}
 	account := firstNonEmpty(profile.Account.Email, profile.Account.DisplayName, profile.Account.ID)
+	// A computer set up for another profile is not "removed": this profile's account never owned it, and resetting
+	// would replace that profile's daemon.
+	if other := otherProfileServes(cfg); other != nil {
+		return browserLoginFailure{message: "Signed in as " + account + ", but this computer's Paperboat is set up for another profile, so nothing was reset. " + other.Error(), cause: other}
+	}
 	// The approval authorized signing in, not resetting this computer's setup: that needs its own yes, and a
 	// script or --json caller never gets to wipe.
 	declined := browserLoginFailure{message: "Signed in as " + account + ", but this computer was removed from the account. Run pb login --fresh to add it again; that resets its local Paperboat setup (your Inbox is kept).", cause: &computerRemovedError{}}
@@ -341,4 +347,26 @@ func readdRemovedComputer(c *command.Context, cfg *config.Config, store config.P
 	resume.Profile = &config.Profile{Issuer: issuer, Account: profile.Account, CLIClientSessionID: profile.CLIClientSessionID, AccessExpiresAt: credential.ExpiresAt}
 	resume.Enrollment = &config.LoginEnrollment{BootstrapToken: enrollment.BootstrapToken, WorkspaceID: workspace, ExpiresAt: enrollment.ExpiresAt}
 	return &machineRemovedError{account: account, resume: resume}
+}
+
+// serviceProfile is the config the installed local daemon service runs for; tests replace it.
+var serviceProfile = func() (string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return localdaemon.ServiceProfile(executable)
+}
+
+// otherProfileServes names the profile the local daemon service already runs for when it is not cfg's own.
+func otherProfileServes(cfg *config.Config) *localdaemon.OtherProfileError {
+	existing, err := serviceProfile()
+	if err != nil || existing == "" || cfg.Path() == "" {
+		return nil
+	}
+	requested, err := filepath.Abs(cfg.Path())
+	if err != nil || filepath.Clean(existing) == filepath.Clean(requested) {
+		return nil
+	}
+	return &localdaemon.OtherProfileError{Existing: existing, Requested: filepath.Clean(requested)}
 }
