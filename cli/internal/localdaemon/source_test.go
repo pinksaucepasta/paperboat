@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -334,5 +335,27 @@ func TestIssuePeerStreamSendsSSHToTheHostRulesWithoutARequest(t *testing.T) {
 	result, err := source.IssuePeerStream(context.Background(), request)
 	if err != nil || !result.Offline || result.Credential != "" || result.Validate(time.Now().UTC()) != nil {
 		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
+type failingAuthSource struct{ err error }
+
+func (s failingAuthSource) Credential() (config.Credential, error) { return config.Credential{}, s.err }
+
+// F21-01 (no time limit): the access token runs out during an outage and its refresh cannot reach Paperboat either.
+// The exec still opens offline for the host to admit from its signed scopes (the probe on staging failed every new
+// exec with authentication_unavailable from minute 12 of an outage); a credential that failed for any other reason
+// (signed out, a rejected refresh) stays final.
+func TestIssuePeerStreamGoesOfflineWhenTheAccessTokenCannotBeRefreshedBecausePaperboatIsUnreachable(t *testing.T) {
+	request := localapi.PeerStreamRequest{Workspace: "personal", Schema: localapi.PeerStreamSchemaV1, Consumer: "exec", MachineID: "machine_1", EnvironmentID: "environment_1", MachineGeneration: 1, OperationID: "operation_1", Deadline: time.Now().UTC().Add(time.Minute), MaximumBytes: 1024, Payload: json.RawMessage(`{"operation_id":"operation_1"}`)}
+	unreachable := fmt.Errorf("Paperboat account credentials are unavailable: %w", fmt.Errorf("refresh Paperboat session: %w", &url.Error{Op: "Post", URL: "https://api.example.test/v1/auth/refresh", Err: errors.New("network is unreachable")}))
+	source := AuthenticatedMachineSource{ServerURL: "https://api.example.test", Auth: failingAuthSource{unreachable}, SourceMachineID: "source_1"}
+	result, err := source.IssuePeerStream(context.Background(), request)
+	if err != nil || !result.Offline || result.Credential != "" || result.Validate(time.Now().UTC()) != nil {
+		t.Fatalf("an unrefreshable token with Paperboat unreachable: result=%+v err=%v", result, err)
+	}
+	source.Auth = failingAuthSource{errors.New("signed out")}
+	if result, err := source.IssuePeerStream(context.Background(), request); err == nil || result.Offline {
+		t.Fatalf("a credential failure that is not a network failure went offline: %+v", result)
 	}
 }

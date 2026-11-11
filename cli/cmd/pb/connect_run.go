@@ -145,7 +145,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		return commandRejection{reason: commandRejectMissingServer}
 	}
 	cred, err := d.auth.Credential()
-	if err != nil {
+	if err != nil && !api.Unreachable(err) { // an expired token that cannot be refreshed offline still opens a new session offline
 		return err
 	}
 	backend, err := newWorkspaceAPIClient(c, d.cfg.ServerURL, d.auth)

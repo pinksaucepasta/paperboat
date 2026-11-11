@@ -48,6 +48,11 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		return fail(255, "local_configuration", false, false, err)
 	}
 	_, err = d.auth.Credential()
+	if api.Unreachable(err) {
+		// The access token ran out during an outage and its refresh cannot reach Paperboat: the daemon opens this exec
+		// offline, for the host to admit from its own signed scopes (F21-01, no time limit).
+		err = nil
+	}
 	if onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return leaf == config.ErrNoCredentials }) {
 		err = fmt.Errorf("authentication required: %w", err)
 		return fail(255, "authentication_required", false, false, err)

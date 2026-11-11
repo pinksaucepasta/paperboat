@@ -76,6 +76,11 @@ func (s AuthenticatedMachineSource) IssuePeerStream(ctx context.Context, request
 	for attempt := 0; attempt < 2; attempt++ {
 		credential, err := s.Auth.Credential()
 		if err != nil {
+			if api.Unreachable(err) {
+				// The access token ran out during an outage and its refresh cannot reach Paperboat either: the host admits
+				// the exec from its own signed scopes, as it does when the descriptor request itself gets no answer.
+				return hostRulesPeerStream(request)
+			}
 			return request, err
 		}
 		client := api.New(s.ServerURL, credential, s.HTTPClient)
