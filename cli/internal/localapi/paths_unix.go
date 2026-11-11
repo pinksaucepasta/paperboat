@@ -3,10 +3,13 @@
 package localapi
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
+
+	"github.com/pinksaucepasta/paperboat/internal/ownerpath"
 )
 
 type Paths struct {
@@ -106,6 +109,9 @@ func ensureOwnerDirectory(path string, uid int) error {
 			return err
 		}
 		return ErrUnsafeSocket
+	}
+	if err := ownerpath.CheckAncestors(path, uid); err != nil {
+		return errors.Join(ErrUnsafeSocket, err)
 	}
 	return nil
 }

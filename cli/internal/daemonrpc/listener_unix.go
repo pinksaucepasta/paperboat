@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/ospeer"
+	"github.com/pinksaucepasta/paperboat/internal/ownerpath"
 )
 
 // A process lock fences both stale-socket cleanup and the entire listener
@@ -34,6 +35,9 @@ func Listen(addr string) (net.Listener, error) {
 	st, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || !info.IsDir() || info.Mode().Perm()&0022 != 0 || int(st.Uid) != os.Geteuid() {
 		return nil, fmt.Errorf("daemon socket directory must be owned by user %d and not writable by others (mode %s, stat type %T)", os.Geteuid(), info.Mode(), info.Sys())
+	}
+	if err := ownerpath.CheckAncestors(dir, os.Geteuid()); err != nil {
+		return nil, fmt.Errorf("daemon socket directory: %w", err)
 	}
 	lockPath := path + ".lock"
 	fd, err := syscall.Open(lockPath, syscall.O_CREAT|syscall.O_RDWR|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0600)

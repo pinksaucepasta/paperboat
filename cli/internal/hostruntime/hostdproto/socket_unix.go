@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/ownerpath"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
@@ -428,6 +429,9 @@ func secureSocketDirectory(path string, ownerUID int) error {
 	}
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o700 || fileOwnerUID(info) != ownerUID {
 		return ErrSocketConfig
+	}
+	if err := ownerpath.CheckAncestors(filepath.Clean(path), ownerUID); err != nil {
+		return causedFailure{message: "hostd lifecycle socket directory has an ancestor another account can change", cause: err}
 	}
 	return nil
 }
