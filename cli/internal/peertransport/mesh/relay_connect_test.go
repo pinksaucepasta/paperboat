@@ -2,6 +2,7 @@ package mesh
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/netip"
 	"sync"
@@ -214,5 +215,33 @@ func TestHandshakeAnswerRacingAContactChangeDoesNotDeadlock(t *testing.T) {
 	case <-answered:
 	case <-time.After(3 * time.Second):
 		t.Fatal("the handshake answer did not finish after the contact change")
+	}
+}
+
+// Review of b6eb2018c, P4: a failed nonce source was ignored and the handshake went out with a zero nonce. It now
+// fails the handshake before anything is sent, and leaves no waiter behind.
+func TestHandshakeFailsWhenTheNonceSourceFails(t *testing.T) {
+	regions := integration.RunDERPAndSTUN(t, logger.Discard, "127.0.0.1")
+	peer := key.NewNode().Public()
+	s := &Server{Key: key.NewNode(), LocalAddr: netip.MustParseAddr("fd7a:115c:a1e0::80"), Region: regions.Regions[1],
+		AllowedPeers: map[key.NodePublic]netip.Addr{peer: netip.MustParseAddr("fd7a:115c:a1e0::81")}}
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	failed := errors.New("entropy unavailable")
+	old := meowNonceRead
+	meowNonceRead = func([]byte) (int, error) { return 0, failed }
+	t.Cleanup(func() { meowNonceRead = old })
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	if err := s.awaitMeow(ctx, peer); !errors.Is(err, failed) {
+		t.Fatalf("handshake with a failed nonce source: %v", err)
+	}
+	s.peerReadyMu.Lock()
+	_, left := s.peerReady[peer]
+	s.peerReadyMu.Unlock()
+	if left {
+		t.Fatal("a failed handshake left a waiter with a zero nonce")
 	}
 }

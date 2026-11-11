@@ -344,6 +344,9 @@ func (s *Server) meowed(src key.NodePublic, regionID tailcfg.DERPRegionID, nonce
 	}
 }
 
+// meowNonceRead fills a handshake nonce; tests replace it to fail.
+var meowNonceRead = rand.Read
+
 // meowFanout reports whether an unanswered handshake also asks on the other relays at this attempt: on attempts 1,
 // 2, 4, 8 and 16 (a per-peer exponential backoff), so a long dial to an unreachable peer probes five times, not
 // once a second.
@@ -358,7 +361,11 @@ func (s *Server) awaitMeow(ctx context.Context, peer key.NodePublic) error {
 	w := s.peerReady[peer]
 	if w == nil {
 		w = &meowWait{ready: make(chan struct{})}
-		_, _ = rand.Read(w.nonce[:])
+		if _, err := meowNonceRead(w.nonce[:]); err != nil {
+			// No handshake without a nonce: a zero one would let any stale answer complete it.
+			s.peerReadyMu.Unlock()
+			return fmt.Errorf("mesh: handshake nonce: %w", err)
+		}
 		s.peerReady[peer] = w
 	}
 	s.peerReadyMu.Unlock()
