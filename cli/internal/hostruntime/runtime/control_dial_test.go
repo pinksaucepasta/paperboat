@@ -65,3 +65,12 @@ func TestControlDialSurvivesOneDNSTimeoutAndReusesAddresses(t *testing.T) {
 		t.Fatalf("not-found host: calls=%d err=%v", calls, err)
 	}
 }
+
+func TestRememberedControlAddressesExpireAfterADay(t *testing.T) {
+	if controlAddressStale(time.Now().Add(-23 * time.Hour).Unix()) {
+		t.Fatal("an address remembered 23 hours ago is stale")
+	}
+	if !controlAddressStale(time.Now().Add(-25 * time.Hour).Unix()) {
+		t.Fatal("an address remembered 25 hours ago is still used")
+	}
+}
