@@ -1,0 +1,49 @@
+Origin reverse-proxy matrix (tools/device-smoke/origin_proxy_matrix.sh), 2026-11-11
+Build: cli tunnelmanager test binary of main + the TE: trailers commits (182b69b36; main 36f2a7735). Host: pbvm4 (Docker), linux/amd64.
+Exit code 0 (no promised cell failed).
+
+Reading the table:
+- "a http origin = loop-page" is the intended result: the origin force-redirects http to https, the edge shows its redirect-loop
+  page with the fix (use an https origin). It is not a failure.
+- caddy-acme (Caddy automatic HTTPS without a certificate): tls-alert on every https cell. Expected: ACME cannot validate behind a tunnel;
+  the docs say to use `tls internal` with --tls-ca, or an http origin.
+- nginx SSE "buffered": nginx buffers proxied responses by default (first event after 2105 ms); the app/proxy config (proxy_buffering off)
+  fixes it, Paperboat does not buffer.
+- httpd XFH "app.example.test, app.example.test": Apache mod_proxy appends its own X-Forwarded-Host to the edge's single value.
+- X-Forwarded-For differs per proxy (caddy/traefik replace it for an untrusted client, nginx/httpd pass or append): the edge sends one value.
+
+server         a http origin   b https origin  c https+SNI     SSE             Range           Expect          force-ssl app   
+caddy          loop-page       ok              ok              ok              ok              ok              ok              
+caddy-internal loop-page       ok              ok              ok              ok              ok              ok              
+caddy-acme     loop-page       tls-alert       tls-alert       tls-alert       tls-alert       tls-alert       tls-alert       
+traefik        loop-page       ok              ok              ok              ok              ok              ok              
+nginx          loop-page       ok              ok              buffered        ok              ok              ok              
+httpd          loop-page       ok              ok              ok              ok              ok              ok              
+
+what the app saw through mode c (X-Forwarded-* the edge sent are: proto=https host=public for=client):
+  caddy           host=app.example.test xfp=https xfh=app.example.test xff=172.18.0.1
+  caddy-internal  host=app.example.test xfp=https xfh=app.example.test xff=172.18.0.1
+  traefik         host=app.example.test xfp=https xfh=app.example.test xff=172.18.0.1
+  nginx           host=app.example.test xfp=https xfh=app.example.test xff=198.51.100.7
+  httpd           host=app.example.test xfp=https xfh=app.example.test, app.example.test xff=198.51.100.7, 172.18.0.1
+
+  caddy / a-http: loop_page the edge shows the redirect-loop page
+  caddy-internal / a-http: loop_page the edge shows the redirect-loop page
+  caddy-acme / a-http: loop_page the edge shows the redirect-loop page
+  caddy-acme / b-https: origin_error tunnel origin unavailable
+remote error: tls: internal error
+  caddy-acme / c-https-sni: origin_error tunnel origin unavailable
+remote error: tls: internal error
+  caddy-acme / F-force-ssl: origin_error tunnel origin unavailable
+remote error: tls: internal error
+  caddy-acme / C8-sse: origin_error tunnel origin unavailable
+remote error: tls: internal error
+  caddy-acme / C12-range: origin_error tunnel origin unavailable
+remote error: tls: internal error
+  caddy-acme / C13-expect: origin_error tunnel origin unavailable
+remote error: tls: internal error
+  traefik / a-http: loop_page the edge shows the redirect-loop page
+  nginx / a-http: loop_page the edge shows the redirect-loop page
+  nginx / C8-sse: buffered first event after 2105ms
+  httpd / a-http: loop_page the edge shows the redirect-loop page
+rc=0
