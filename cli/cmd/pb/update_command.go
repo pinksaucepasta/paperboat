@@ -395,7 +395,8 @@ func actionUpdate(command *cobra.Command, _ []string) error {
 // refuseSignedUpdateWhileConnectionsOpen is the Windows counterpart of the Unix updater's own refusal: replacing the
 // daemon ends open `pb ssh` connections and access forwards, so a manual update says so first and --force overrides.
 // Unix refuses inside the updater service, which the Windows service (a different account) cannot ask for the user's
-// connections; an automatic Windows update is not covered by this CLI-side check.
+// connections; an automatic Windows update is checked by the updater service itself (updated.refuseWhileConnectionsAreOpen),
+// and a probe that cannot answer proceeds in both and is recorded (liveconnections.RecordUnconfirmed).
 func refuseSignedUpdateWhileConnectionsOpen(ctx context.Context, goos string, force bool) error {
 	if goos != "windows" || force {
 		return nil
