@@ -95,8 +95,8 @@ func TestSubmitListAndRetentionOnPostgres(t *testing.T) {
 }
 
 func TestAlertMessageEscapesReporterText(t *testing.T) {
-	m := alertMessage(config.TransactionalMail{From: "n@example.test", AbuseMailbox: "abuse@mail.example.test"}, Report{ID: "abuse_x", Hostname: "a.example.test", URL: "https://a.example.test/<script>", Reason: "phishing", Details: "<b>hi</b>", ReporterEmail: "r@example.test"})
-	if strings.Contains(m.HTML, "<script>") || strings.Contains(m.HTML, "<b>hi") || m.To[0] != "abuse@mail.example.test" || !strings.Contains(m.Subject, "a.example.test") {
+	m := alertMessage(config.TransactionalMail{From: "n@example.test", AbuseMailbox: "abuse@mail.example.test"}, Report{ID: "abuse_x", Hostname: "a.example.test", URL: "https://a.example.test/<script>", Reason: "<i>phishing</i>", Details: "<b>hi</b>", ReporterEmail: "r@example.test"})
+	if strings.Contains(m.HTML, "<script>") || strings.Contains(m.HTML, "<b>hi") || strings.Contains(m.HTML, "<i>") || m.To[0] != "abuse@mail.example.test" || !strings.Contains(m.Subject, "a.example.test") {
 		t.Fatalf("alert = %+v", m)
 	}
 }

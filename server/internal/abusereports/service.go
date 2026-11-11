@@ -160,6 +160,6 @@ func alertMessage(policy config.TransactionalMail, r Report) transactionalmail.M
 		From: policy.From, To: []string{policy.AbuseMailbox},
 		Subject: "Abuse report (" + r.Reason + "): " + r.Hostname,
 		HTML: fmt.Sprintf("<p>Report %s, %s UTC.</p><p>Link: %s<br>Reason: %s<br>Reporter: %s</p><pre>%s</pre><p>Take it down: POST /v1/admin/publications/%s/block with Operator-Reason %s.</p>",
-			r.ID, r.CreatedAt.Format("2006-01-02 15:04"), html.EscapeString(r.URL), r.Reason, reporter, html.EscapeString(r.Details), html.EscapeString(r.Hostname), r.ID),
+			r.ID, r.CreatedAt.Format("2006-01-02 15:04"), html.EscapeString(r.URL), html.EscapeString(r.Reason), reporter, html.EscapeString(r.Details), html.EscapeString(r.Hostname), r.ID),
 	}
 }
