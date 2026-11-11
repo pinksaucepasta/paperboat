@@ -22,6 +22,9 @@ with open(os.environ["FAKE_LOG"], "a") as log:
     log.write("gh " + " ".join(args) + "\n")
 def value(flag):
     return args[args.index(flag) + 1] if flag in args else ""
+if args[0] == "api":  # commits/<sha>: the sha is the branch name, its age comes from the fake remote
+    print(state["commit_times"][args[1].split("/commits/")[1]])
+    sys.exit(0)
 if args[:2] == ["workflow", "run"]:
     sys.exit(0)
 if args[:2] == ["run", "list"] and "databaseId" in value("--json"):
@@ -53,9 +56,7 @@ case "$1" in
   status) ;;
   commit-tree) echo deadbeef ;;
   push) exit 0 ;;
-  fetch) ;;
-  for-each-ref) cat "$FAKE_REMOTE" ;;
-  update-ref) ;;
+  ls-remote) cat "$FAKE_REMOTE" ;;
   *) exit 1 ;;
 esac
 '''
@@ -71,9 +72,10 @@ class CITestScript(unittest.TestCase):
         shutil.copy2(SCRIPT, root / "tools/ci-test.sh")
         state = root / "state.json"
         state.write_text(json.dumps({"lookups": 0, "appear_after": appear_after, "active_default": active_default,
-                                     "active": active or {}}))
+                                     "active": active or {},
+                                     "commit_times": {name: when for name, when in remote_branches}}))
         remote = root / "remote"
-        remote.write_text("".join(f"{when} refs/ci-sweep/{name[3:]}\n" for name, when in remote_branches))
+        remote.write_text("".join(f"{name} refs/heads/{name}\n" for name, _ in remote_branches))
         log, sleeps = root / "calls.log", root / "sleeps.log"
         log.write_text("")
         sleeps.write_text("")
@@ -124,6 +126,8 @@ class CITestScript(unittest.TestCase):
             self.assertNotIn(kept, removed)
         self.assertFalse(any(young in call for call in calls if call.startswith("gh run list")), "a young branch was queried")
         self.assertEqual(len(removed), 2, calls)  # the old one and this invocation's own
+        # --depth made the shared repo shallow for every lane: the script may only list refs, never fetch
+        self.assertFalse(any("--depth" in call or call.startswith("git fetch") for call in calls), calls)
 
 if __name__ == "__main__":
     unittest.main()

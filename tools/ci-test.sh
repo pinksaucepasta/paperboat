@@ -61,12 +61,12 @@ trap 'remove_branch "$branch"' EXIT
 # Branches of runs killed before their trap ran (reboot, SIGKILL) are never swept by name or pid: delete a
 # ci/* branch of any lane only when its last commit is older than 24 h and no run on it is queued or in progress.
 sweep_old_branches() {
-  local cutoff=$(($(date +%s) - 86400)) when ref
-  git fetch -q --no-tags --depth=1 --no-write-fetch-head origin '+refs/heads/ci/*:refs/ci-sweep/*' 2>/dev/null || return 0
-  while read -r when ref; do
-    [ "$when" -lt "$cutoff" ] && remove_branch "ci/${ref#refs/ci-sweep/}"
-    git update-ref -d "$ref" || true
-  done < <(git for-each-ref --format='%(committerdate:unix) %(refname)' refs/ci-sweep)
+  local cutoff=$(($(date +%s) - 86400)) sha ref when
+  # Never fetch the branches: --depth made the shared repo shallow for every lane (2026-11-11). ls-remote + API only.
+  while read -r sha ref; do
+    when=$(gh api "repos/{owner}/{repo}/commits/$sha" --jq '.commit.committer.date | fromdate' 2>/dev/null) || continue
+    [ "$when" -lt "$cutoff" ] && remove_branch "${ref#refs/heads/}"
+  done < <(git ls-remote origin 'refs/heads/ci/*')
 }
 sweep_old_branches || true
 
