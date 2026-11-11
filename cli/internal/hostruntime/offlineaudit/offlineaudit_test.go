@@ -95,7 +95,7 @@ func TestUploaderSendsBatchesAndKeepsEventsOnFailure(t *testing.T) {
 			return
 		}
 		batches = append(batches, len(request.Events))
-		_ = json.NewEncoder(w).Encode(map[string]int{"accepted": len(request.Events) - 1, "duplicates": 1})
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]int{"accepted": len(request.Events) - 1, "duplicates": 1}})
 	}))
 	defer server.Close()
 	q, err := Open(filepath.Join(t.TempDir(), "offline-audit.json"), nil)
@@ -149,7 +149,7 @@ func TestSSHEventsKeepTheirIDsAndUploadAtMostOncePerInterval(t *testing.T) {
 		if first {
 			<-release
 		}
-		_ = json.NewEncoder(w).Encode(map[string]int{"accepted": len(request.Events)})
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]int{"accepted": len(request.Events)}})
 	}))
 	defer server.Close()
 	q, err := Open(filepath.Join(t.TempDir(), "offline-audit.json"), nil)
