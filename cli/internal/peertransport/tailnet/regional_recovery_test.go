@@ -133,6 +133,7 @@ func (e *failingRegionalEngine) PrepareRelay(context.Context, tailcfg.DERPRegion
 	return e.cause
 }
 func (*failingRegionalEngine) OnNetworkChange(func()) func() { return func() {} }
+func (*failingRegionalEngine) ReSTUN(string)                 {}
 func (*failingRegionalEngine) SetPeerRelayRegion(key.NodePublic, tailcfg.DERPRegionID) error {
 	return nil
 }

@@ -59,6 +59,8 @@ type relayEngine interface {
 	PrepareRelay(context.Context, tailcfg.DERPRegionID) error
 	SetPeerRelayRegion(key.NodePublic, tailcfg.DERPRegionID) error
 	SendRelayControl(key.NodePublic, tailcfg.DERPRegionID, []byte) error
+	// ReSTUN re-learns and re-reports this engine's endpoints.
+	ReSTUN(why string)
 	// OnNetworkChange calls f on every network change the engine's monitor sees, until the returned function runs.
 	OnNetworkChange(f func()) func()
 }
@@ -778,7 +780,10 @@ func (r *regionalRecovery) run(ctx context.Context) {
 			continue
 		}
 		if prepared.Load() > 0 {
-			r.repair.Store(false)
+			if r.repair.CompareAndSwap(true, false) {
+				// STUN ran when the relays did not answer; re-learn the public endpoint now that one does.
+				r.engine.ReSTUN("relay-recovered")
+			}
 			if since, was := fence.clear(); was {
 				diagnosticlog.TryInfo("relays accept this machine again", "refused_for", time.Since(since).Round(time.Second).String())
 			}

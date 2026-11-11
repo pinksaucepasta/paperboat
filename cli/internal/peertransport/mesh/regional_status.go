@@ -159,3 +159,10 @@ func (s *Server) RelayTransport(id tailcfg.DERPRegionID) string {
 	}
 	return s.lb.sys.MagicSock.Get().RelayTransport(id)
 }
+
+// ReSTUN re-learns this engine's endpoints (magicsock netcheck) and reports any change.
+func (s *Server) ReSTUN(why string) {
+	if s.lb != nil {
+		s.lb.sys.MagicSock.Get().ReSTUN(why)
+	}
+}
