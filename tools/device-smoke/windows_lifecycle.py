@@ -129,6 +129,10 @@ def check_install_pair(win, args):
     finally:
         victus(f"Remove-Item -Force '{TOKEN_FILE}' -ErrorAction SilentlyContinue")
     paired, machine_id = time.time(), receipt['data']['machine_id']
+    # Audit C #26: pair returns only once the local daemon serves (the elevated install waits for it), so the first
+    # status right after it, with no polling, already says ready.
+    status = win.run('status')
+    assert status[0] == 0 and 'Daemon: ready' in status[1], 'the daemon was not ready when pair returned: ' + ' '.join(status[1].split())[:100]
     wait_for(lambda: re.search(rf'\sonline\s.*{re.escape(machine_id)}', hp(f'{PB_HP} machine list --all')[1]), 30, 'the machine online in the account within 30 s of pairing')
     wait_for(lambda: doctor_ok(win.run('doctor')[1]), max(1, 60 - (time.time() - paired)), 'doctor healthy within 60 s of pairing')
     args.machine = machine_named(machine_id)  # the pair may suffix a taken name
