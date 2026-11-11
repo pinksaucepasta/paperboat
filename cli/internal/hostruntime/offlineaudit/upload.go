@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -47,6 +49,20 @@ type Uploader struct {
 // UploadInterval is the host's cadence for the audit backlog (F5-12).
 const UploadInterval = 30 * time.Second
 
+// unreachableRetry is the wait after an upload that never opened a connection to the server (DNS, route or connect
+// failed). Such a retry costs the server nothing, and the backlog of sessions started while Paperboat was unreachable
+// must go up within seconds of the network coming back, not after a backoff measured for a failing server (measured:
+// up to 5 min). The runtime observation uses the same split (runtimeObservationReconnectRetry). A variable so a test can
+// shorten it.
+var unreachableRetry = 2 * time.Second
+
+// neverReachedServer reports whether err happened before any connection to the server existed.
+func neverReachedServer(err error) bool {
+	var dns *net.DNSError
+	var network *net.OpError
+	return errors.As(err, &dns) || errors.As(err, &network) && network.Op == "dial"
+}
+
 // Run uploads whenever events are queued, retrying failures with doubling waits.
 func (u *Uploader) Run(ctx context.Context) {
 	retry := firstRetry
@@ -68,16 +84,22 @@ func (u *Uploader) Run(ctx context.Context) {
 			}
 		}
 		err := u.Flush(ctx)
-		last = time.Now()
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
 			diagnosticlog.TryWarn("could not upload the offline session audit events; the next attempt follows", "error", err, "queued", u.Queue.Len())
+			if neverReachedServer(err) {
+				wait = time.After(backoff.Jitter(unreachableRetry)) // MinInterval spaces uploads that reached the server only
+				retry = firstRetry
+				continue
+			}
+			last = time.Now()
 			wait = time.After(backoff.Jitter(retry))
 			retry = min(retry*2, maximumRetry)
 			continue
 		}
+		last = time.Now()
 		retry = firstRetry
 	}
 }
