@@ -3510,48 +3510,42 @@ func prepareStagedWindowsBinary(ctx context.Context, source, current, rollback s
 			return nil, nil, hostInstallFailure("staged runtime bytes do not match signed metadata", ErrInvalidRequest)
 		}
 	}
+	return stageWindowsRuntimeFile(ctx, body, current, rollback, installSource, ownerSID)
+}
+
+// stageWindowsRuntimeFile writes body beside current and verifies it. Every failure removes the staged file. publish
+// verifies the staged file again right before it rotates the slot, because it waited across the cutover: bytes
+// swapped since staging are refused before anything is renamed (review of 5356e280a).
+func stageWindowsRuntimeFile(ctx context.Context, body []byte, current, rollback string, installSource installsource.Source, ownerSID string) (publish func(context.Context) error, discard func() error, resultErr error) {
 	var suffix [16]byte
 	if _, err := rand.Read(suffix[:]); err != nil {
 		return nil, nil, err
 	}
 	//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=same-directory-verified-runtime-staging
 	temporaryPath := filepath.Join(filepath.Dir(current), ".paperboat-runtime-"+hex.EncodeToString(suffix[:])+".exe")
-	discard = func() error { return removeInstallFile(temporaryPath) }
+	remove := func() error { return removeInstallFile(temporaryPath) }
 	defer func() {
 		if resultErr != nil {
-			resultErr = withCleanup("staged Windows runtime cleanup failed", resultErr, discard())
+			resultErr = withCleanup("staged Windows runtime cleanup failed", resultErr, remove())
 		}
 	}()
 	publicDACL := "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)"
 	if ownerSID != "" {
 		publicDACL = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;" + ownerSID + ")"
 	}
-	if err := windowssecurity.WithRestorePrivilege(func() error {
-		return atomicfile.Write(temporaryPath, body, atomicfile.Options{Mode: 0o755, OwnerUID: -1, OwnerGID: -1, SecurityDescriptor: "O:SY" + publicDACL})
-	}); err != nil {
+	if err := writeStagedWindowsRuntime(temporaryPath, body, "O:SY"+publicDACL); err != nil {
 		return nil, nil, err
 	}
-	if err := binarytarget.Validate(temporaryPath, "windows", installSource.Architecture); err != nil {
-		return nil, nil, hostInstallFailure("staged runtime executable format", ErrInvalidRequest, err)
+	verify := func(ctx context.Context) error {
+		return verifyStagedWindowsRuntime(ctx, temporaryPath, installSource, publicDACL)
 	}
-	if err := installSource.Verify(temporaryPath); err != nil {
-		return nil, nil, hostInstallFailure("staged runtime bytes changed", ErrInvalidRequest, err)
-	}
-	if installSource.Distribution == installsource.Official {
-		verifyCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-		if err := nativesignature.New(nil).Verify(verifyCtx, temporaryPath, "windows", installSource.Architecture); err != nil {
-			return nil, nil, hostInstallFailure("staged runtime Authenticode", ErrInvalidRequest, err)
-		}
-	}
-	trustedOwner, err := windowsRuntimeTrustedOwner()
-	if err != nil {
-		return nil, nil, err
-	}
-	if err := validateWindowsRuntimeSecurity(temporaryPath, trustedOwner, publicDACL, "staged executable"); err != nil {
+	if err := verify(ctx); err != nil {
 		return nil, nil, err
 	}
 	return func(ctx context.Context) error {
+		if err := verify(ctx); err != nil {
+			return err
+		}
 		if err := removeWindowsFileWithRetry(ctx, rollback); err != nil {
 			return err
 		}
@@ -3569,7 +3563,63 @@ func prepareStagedWindowsBinary(ctx context.Context, source, current, rollback s
 			return hostInstallFailure("runtime publication and rollback failed", err, os.Rename(rollback, current))
 		}
 		return nil
-	}, discard, nil
+	}, remove, nil
+}
+
+// writeStagedWindowsRuntime and the checks are the steps tests replace (TestWindowsStagedRuntime*): writing a
+// SYSTEM-owned file needs the restore privilege the test process lacks.
+var writeStagedWindowsRuntime = func(path string, body []byte, securityDescriptor string) error {
+	return windowssecurity.WithRestorePrivilege(func() error {
+		return atomicfile.Write(path, body, atomicfile.Options{Mode: 0o755, OwnerUID: -1, OwnerGID: -1, SecurityDescriptor: securityDescriptor})
+	})
+}
+
+var stagedWindowsRuntimeCheck = func(_ string, check func() error) error { return check() }
+
+// verifyStagedWindowsRuntime proves a staged runtime is the verified source, signed when official, and still the
+// SYSTEM-owned file with its exact ACL.
+func verifyStagedWindowsRuntime(ctx context.Context, path string, installSource installsource.Source, dacl string) error {
+	checks := []struct {
+		name  string
+		check func() error
+	}{
+		{"format", func() error {
+			if err := binarytarget.Validate(path, "windows", installSource.Architecture); err != nil {
+				return hostInstallFailure("staged runtime executable format", ErrInvalidRequest, err)
+			}
+			return nil
+		}},
+		{"bytes", func() error {
+			if err := installSource.Verify(path); err != nil {
+				return hostInstallFailure("staged runtime bytes changed", ErrInvalidRequest, err)
+			}
+			return nil
+		}},
+		{"authenticode", func() error {
+			if installSource.Distribution != installsource.Official {
+				return nil
+			}
+			verifyCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			if err := nativesignature.New(nil).Verify(verifyCtx, path, "windows", installSource.Architecture); err != nil {
+				return hostInstallFailure("staged runtime Authenticode", ErrInvalidRequest, err)
+			}
+			return nil
+		}},
+		{"owner", func() error {
+			trustedOwner, err := windowsRuntimeTrustedOwner()
+			if err != nil {
+				return err
+			}
+			return validateWindowsRuntimeSecurity(path, trustedOwner, dacl, "staged executable")
+		}},
+	}
+	for _, c := range checks {
+		if err := stagedWindowsRuntimeCheck(c.name, c.check); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // removeWindowsFileWithRetry frees a slot. A file that another process still holds open is retried with a bounded
