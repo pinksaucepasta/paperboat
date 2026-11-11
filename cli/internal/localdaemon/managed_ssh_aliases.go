@@ -2,6 +2,7 @@ package localdaemon
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
@@ -16,7 +17,7 @@ func managedSSHAliasTargets(machines []api.UserMachine) []managedssh.OpenSSHAlia
 			continue
 		}
 		if ssh, ok := machine.CurrentSSH(); ok {
-			targets = append(targets, managedssh.OpenSSHAliasTarget{Alias: machine.Alias, User: ssh.OSUser, Port: ssh.Port})
+			targets = append(targets, managedssh.OpenSSHAliasTarget{Alias: machine.Alias, User: ssh.OSUser, Port: ssh.Port, AnyCaseUser: strings.EqualFold(machine.Platform, "windows")})
 		}
 	}
 	sort.Slice(targets, func(i, j int) bool { return targets[i].Alias < targets[j].Alias })

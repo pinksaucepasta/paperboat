@@ -2,6 +2,7 @@ package managedssh
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -62,6 +63,22 @@ func ManagedIdentityArguments(agent, identity string) []string {
 	return []string{"-o", "IdentityAgent=" + quoteOpenSSHPath(agent), "-o", "IdentityFile=" + quoteOpenSSHPath(identity)}
 }
 
+// matchUserPattern is the `Match user` pattern list for a registered account: the account as registered and, for an
+// AnyCaseUser target, its lowercase, uppercase and capitalized spellings (the ones people type). shortcut: a mixed
+// spelling such as "PuJan" is not covered; OpenSSH has no case-insensitive pattern, upgrade only if one appears.
+func matchUserPattern(target OpenSSHAliasTarget) string {
+	patterns := []string{target.User}
+	if target.AnyCaseUser {
+		lower := strings.ToLower(target.User)
+		for _, spelling := range []string{lower, strings.ToUpper(target.User), strings.ToUpper(lower[:1]) + lower[1:]} {
+			if !slices.Contains(patterns, spelling) {
+				patterns = append(patterns, spelling)
+			}
+		}
+	}
+	return strings.Join(patterns, ",")
+}
+
 // formatOwnedOpenSSH renders the fragment. Callers validate the inputs first.
 func formatOwnedOpenSSH(domain string, owned ownedOpenSSH) ([]byte, error) {
 	var out strings.Builder
@@ -76,7 +93,7 @@ func formatOwnedOpenSSH(domain string, owned ownedOpenSSH) ([]byte, error) {
 			return nil, ErrOpenSSHConfigConflict
 		}
 		seen[host] = struct{}{}
-		fmt.Fprintf(&out, "Host %s\n    Port %d\nMatch host %s user \"%s\"\n", host, target.Port, host, target.User)
+		fmt.Fprintf(&out, "Host %s\n    Port %d\nMatch host %s user \"%s\"\n", host, target.Port, host, matchUserPattern(target))
 		out.WriteString("    IdentityAgent " + quoteOpenSSHPath(owned.Agent) + "\n")
 		out.WriteString("    IdentityFile " + quoteOpenSSHPath(owned.Identity) + "\n")
 		out.WriteString(ownedOpenSSHManagedAuth)
@@ -103,7 +120,7 @@ func parseOwnedOpenSSH(value []byte, domain string) (ownedOpenSSH, bool) {
 		if err != nil || portErr != nil || !strings.HasPrefix(lines[index+1], "    Port ") || !strings.HasPrefix(lines[index+2], prefix) || !strings.HasSuffix(lines[index+2], "\"") {
 			return ownedOpenSSH{}, false
 		}
-		user := strings.TrimSuffix(strings.TrimPrefix(lines[index+2], prefix), "\"")
+		user, _, anyCase := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(lines[index+2], prefix), "\""), ",")
 		agent, agentOK := unquoteOpenSSHPath(lines[index+3], "    IdentityAgent ")
 		identity, identityOK := unquoteOpenSSHPath(lines[index+4], "    IdentityFile ")
 		if !agentOK || !identityOK {
@@ -112,7 +129,7 @@ func parseOwnedOpenSSH(value []byte, domain string) (ownedOpenSSH, bool) {
 		if len(owned.Targets) == 0 {
 			owned.Agent, owned.Identity = agent, identity
 		}
-		owned.Targets = append(owned.Targets, OpenSSHAliasTarget{Alias: alias, User: user, Port: uint16(port)})
+		owned.Targets = append(owned.Targets, OpenSSHAliasTarget{Alias: alias, User: user, Port: uint16(port), AnyCaseUser: anyCase})
 		index += 9
 	}
 	if index+3 >= len(lines) || lines[index] != "Host *."+domain || !strings.HasPrefix(lines[index+1], "    ProxyCommand ") || !strings.HasPrefix(lines[index+2], "    KnownHostsCommand ") {

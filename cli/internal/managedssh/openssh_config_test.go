@@ -382,3 +382,37 @@ func readOpenSSHTestFile(t *testing.T, path string) []byte {
 	}
 	return value
 }
+
+func TestOwnedOpenSSHListsTheSpellingsOfAWindowsUserAndKeepsOthersExact(t *testing.T) {
+	owned := ownedOpenSSH{
+		Agent: `/run/pb/agent.sock`, Identity: `/home/u/.ssh/pb.pub`, ProxyCommand: "pb __ssh-proxy %h", KnownHostsCommand: "pb __known-hosts %H",
+		Targets: []OpenSSHAliasTarget{
+			{Alias: "victus", User: "Pujan", Port: 47723, AnyCaseUser: true},
+			{Alias: "runner", User: "runneradmin", Port: 40925, AnyCaseUser: true},
+			{Alias: "linux", User: "Deploy", Port: 22},
+		},
+	}
+	rendered, err := formatOwnedOpenSSH("machines.example.test", owned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(rendered)
+	// OpenSSH users are case-sensitive and ssh_config(5) patterns have only * ? and !: a Windows target lists the registered
+	// spelling and the lowercase, uppercase and capitalized ones; a Linux or macOS user stays exactly as registered.
+	for _, want := range []string{
+		`Match host victus.machines.example.test user "Pujan,pujan,PUJAN"` + "\n",
+		`Match host runner.machines.example.test user "runneradmin,RUNNERADMIN,Runneradmin"` + "\n",
+		`Match host linux.machines.example.test user "Deploy"` + "\n",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("fragment lacks %q:\n%s", want, text)
+		}
+	}
+	parsed, ok := parseOwnedOpenSSH(rendered, "machines.example.test")
+	if !ok || len(parsed.Targets) != 3 || parsed.Targets[0].User != "Pujan" || !parsed.Targets[0].AnyCaseUser || !parsed.Targets[1].AnyCaseUser || parsed.Targets[2].User != "Deploy" || parsed.Targets[2].AnyCaseUser {
+		t.Fatalf("the fragment must parse back to the registered users and their case rules: ok=%v %+v", ok, parsed.Targets)
+	}
+	if _, ok := parseOwnedOpenSSH([]byte(strings.Replace(text, `"Pujan,pujan,PUJAN"`, `"Pujan,pujan,PUJAN,PuJan"`, 1)), "machines.example.test"); ok {
+		t.Fatal("a spelling list other than ours must not parse as ours")
+	}
+}
