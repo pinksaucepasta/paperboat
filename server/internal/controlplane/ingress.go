@@ -163,28 +163,28 @@ func withholdBlocked(ctx context.Context, store *db.DB, decisions *[]wire.Ingres
 }
 
 // ownerIPRules lists the owner's IP allow and deny lists (access_ip_rules) for the hostnames of this
-// edge's decisions: a preview's rules key on its lease (the publication), a tunnel's on the tunnel.
+// edge's decisions: a preview's rules key on its lease (the publication), a tunnel's on the tunnel. A durable
+// decision's Binding.TunnelID is the runtime carrier's identity, not the tunnel's, so the tunnel is found
+// through the route the decision names.
 func ownerIPRules(ctx context.Context, store *db.DB, decisions []wire.IngressDecision) ([]wire.IngressIPRule, error) {
-	key := func(d wire.IngressDecision) (string, string) {
-		if d.Binding.Lifecycle == wire.TunnelEphemeral {
-			return "preview", d.Binding.PublicationID
-		}
-		return "tunnel", d.Binding.TunnelID
-	}
-	var tunnels, previews []string
-	for _, d := range decisions {
-		if kind, id := key(d); kind == "preview" {
-			previews = append(previews, id)
-		} else {
-			tunnels = append(tunnels, id)
-		}
-	}
 	rules := []wire.IngressIPRule{}
 	if len(decisions) == 0 {
 		return rules, nil
 	}
-	rows, err := store.Pool().Query(ctx, `SELECT resource_kind,resource_id,allow_cidrs,deny_cidrs FROM access_ip_rules
-WHERE (resource_kind='tunnel' AND resource_id = ANY($1::text[])) OR (resource_kind='preview' AND resource_id = ANY($2::text[]))`, tunnels, previews)
+	var previews, routes []string
+	for _, d := range decisions {
+		if d.Binding.Lifecycle == wire.TunnelEphemeral {
+			previews = append(previews, d.Binding.PublicationID)
+		} else {
+			routes = append(routes, d.Binding.RouteID)
+		}
+	}
+	rows, err := store.Pool().Query(ctx, `SELECT 'preview', resource_id, allow_cidrs, deny_cidrs FROM access_ip_rules
+WHERE resource_kind='preview' AND resource_id = ANY($1::text[])
+UNION ALL
+SELECT 'route', r.id, a.allow_cidrs, a.deny_cidrs FROM tunnel_routes r
+JOIN access_ip_rules a ON a.resource_kind='tunnel' AND a.resource_id=r.tunnel_id
+WHERE r.id = ANY($2::text[])`, previews, routes)
 	if err != nil {
 		return nil, err
 	}
@@ -204,8 +204,11 @@ WHERE (resource_kind='tunnel' AND resource_id = ANY($1::text[])) OR (resource_ki
 	}
 	seen := map[string]bool{}
 	for _, d := range decisions {
-		kind, id := key(d)
-		l, ok := byResource[[2]string{kind, id}]
+		key := [2]string{"route", d.Binding.RouteID}
+		if d.Binding.Lifecycle == wire.TunnelEphemeral {
+			key = [2]string{"preview", d.Binding.PublicationID}
+		}
+		l, ok := byResource[key]
 		if !ok || seen[d.Binding.Hostname] {
 			continue
 		}
