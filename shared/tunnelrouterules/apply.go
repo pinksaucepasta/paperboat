@@ -40,7 +40,8 @@ func (r Rules) RewritePath(p string) string {
 	return p
 }
 
-// MatchRedirect is the redirect for request path p (the longest matching prefix; Normalize orders them): the status
+// MatchRedirect is the redirect for request path p, as the request carried it (escaped; the rest after the prefix goes
+// into the Location as it came) (the longest matching prefix; Normalize orders them): the status
 // and the Location, with what followed the prefix appended to the target's path and the query kept.
 func (r Rules) MatchRedirect(p, rawQuery string) (location string, code int, ok bool) {
 	for _, redirect := range r.Redirects {
@@ -56,11 +57,17 @@ func (r Rules) MatchRedirect(p, rawQuery string) (location string, code int, ok 
 			target = parsed.String()
 		}
 		if rawQuery != "" {
+			// the query goes before any #fragment, which a browser keeps to itself
+			target, fragment, hasFragment := strings.Cut(target, "#")
 			if strings.Contains(target, "?") {
 				target += "&" + rawQuery
 			} else {
 				target += "?" + rawQuery
 			}
+			if hasFragment {
+				target += "#" + fragment
+			}
+			return target, redirect.Code, true
 		}
 		return target, redirect.Code, true
 	}

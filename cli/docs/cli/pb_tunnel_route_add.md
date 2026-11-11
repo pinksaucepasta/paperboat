@@ -40,7 +40,7 @@ pb tunnel route add <tunnel> [flags]
       --redirect stringArray                 redirect a path prefix: '/from -> [301|302|307|308:]/to-or-https-URL' (repeatable, at most 4)
       --request-header stringArray           request header rule op:Name=value (op add or set) or remove:Name, sent to the app (repeatable, at most 8)
       --response-header stringArray          response header rule op:Name=value (op add or set) or remove:Name, sent to the visitor (repeatable, at most 8)
-      --rewrite-path string                  rewrite a path prefix before the app sees it: '/from -> /to'
+      --rewrite-path stringArray             rewrite a path prefix before the app sees it: '/from -> /to'
       --timeout duration                     maximum time to wait for operation completion (default 2m0s)
       --tls-pin string                       pin the origin certificate by its fingerprint (sha256:<hex>), without connecting
       --tls-server-name string               explicit origin TLS server name

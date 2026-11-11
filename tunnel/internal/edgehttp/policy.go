@@ -719,13 +719,19 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// The route's own rules, after every access check and before the edge's own headers are set, so the edge's
 		// headers always win. A redirect never reaches the carrier; a WebSocket handshake keeps its path.
 		if !websocket {
-			if location, code, redirected := rules.MatchRedirect(r.URL.Path, r.URL.RawQuery); redirected {
+			if location, code, redirected := rules.MatchRedirect(r.URL.EscapedPath(), r.URL.RawQuery); redirected {
 				w.Header().Set("X-Content-Type-Options", "nosniff")
 				http.Redirect(w, r, location, code)
 				return
 			}
 			if rewritten := rules.RewritePath(r.URL.Path); rewritten != r.URL.Path {
-				r.URL.Path, r.URL.RawPath = rewritten, ""
+				// RawPath keeps what the visitor encoded (%2F stays one segment); net/url ignores it if it no longer
+				// matches Path.
+				raw := ""
+				if r.URL.RawPath != "" {
+					raw = rules.RewritePath(r.URL.RawPath)
+				}
+				r.URL.Path, r.URL.RawPath = rewritten, raw
 			}
 		}
 		tunnelrouterules.ApplyHeaders(r.Header, rules.RequestHeaders)

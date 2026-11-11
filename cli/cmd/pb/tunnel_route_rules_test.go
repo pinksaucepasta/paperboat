@@ -92,6 +92,8 @@ func TestTunnelRouteRuleFlagsAreRefusedBeforeTheServerSeesThem(t *testing.T) {
 		"a bad redirect status":   {"route", "add", "tun_1", "--name", "web", "--to", "http://127.0.0.1:3000", "--redirect", "/a -> 303:/b"},
 		"a tcp route":             {"route", "add", "tun_1", "--name", "db", "--protocol", "tcp_private", "--to", "tcp://127.0.0.1:5432", "--rewrite-path", "/a -> /b"},
 		"a flag and its clear":    {"route", "update", "tun_1", "route_r1", "--redirect", "/a -> /b", "--clear-redirects"},
+		"two path rewrites":       {"route", "add", "tun_1", "--name", "web", "--to", "http://127.0.0.1:3000", "--rewrite-path", "/a -> /b", "--rewrite-path", "/c -> /d"},
+		"a redirect loop":         {"route", "add", "tun_1", "--name", "web", "--to", "http://127.0.0.1:3000", "--redirect", "/a -> /a/b"},
 	} {
 		command := tunnelCobraCommandV1()
 		command.SetArgs(args)
@@ -100,5 +102,31 @@ func TestTunnelRouteRuleFlagsAreRefusedBeforeTheServerSeesThem(t *testing.T) {
 		if err := command.Execute(); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// --clear-redirects=false is "do not clear", not a clear: a script that passes the flag off must keep the route's rules.
+func TestTunnelRouteUpdateClearFlagSetToFalseClearsNothing(t *testing.T) {
+	current := validCommandRoute("route_r1", "web")
+	current.RewriteRules = &tunnelrouterules.Rules{Redirects: []tunnelrouterules.Redirect{{From: "/old", Code: 301, To: "/new"}}}
+	var sent map[string]any
+	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelRoutePage{Items: []api.TunnelRoute{current}}})
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelRouteMutation{Route: current, Operation: validCommandOperation("route", current.ID), Changed: true}})
+	})
+	command := tunnelCobraCommandV1()
+	command.SetArgs([]string{"route", "update", "tun_1", "route_r1", "--response-header", "set:X-New=1", "--clear-redirects=false", "--json"})
+	if err := command.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	rules, _ := sent["rewrite_rules"].(map[string]any)
+	if rules == nil || rules["redirects"] == nil || rules["response_headers"] == nil {
+		t.Fatalf("--clear-redirects=false changed the redirects: %#v", sent["rewrite_rules"])
 	}
 }
