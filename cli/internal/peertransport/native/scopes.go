@@ -1,6 +1,8 @@
 package native
 
 import (
+	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -31,9 +33,17 @@ func (c *scopeConn) Write(p []byte) (int, error) {
 	}
 	return c.Conn.Write(p)
 }
+// CloseWrite sends the FIN. A lease that ended because access was revoked is an admission failure; one that ended
+// because the client's connection ended (the lease lives under the QUIC connection) or the lease was closed means the
+// client is already gone: the FIN is moot, the stream is already closed (net.ErrClosed). Measured on a fresh Windows
+// carrier (F5-12): the late Windows sshd end let the client leave first, and this returned a plain admission error
+// that audited the finished session as failed.
 func (c *scopeConn) CloseWrite() error {
-	if c.lease.Check() != nil {
-		return tailnet.ErrAdmission
+	if cause := c.lease.Check(); cause != nil {
+		if errors.Is(cause, admission.ErrRevoked) {
+			return tailnet.ErrAdmission
+		}
+		return fmt.Errorf("the client's connection ended: %w", net.ErrClosed)
 	}
 	if half, ok := c.Conn.(interface{ CloseWrite() error }); ok {
 		return half.CloseWrite()
