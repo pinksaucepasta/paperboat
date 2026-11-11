@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { convertBytes, editRecordingRules, formatClock, formatDuration, parseCast, recordingRules, SegmentFramer } from "@/lib/recordings"
+import { convertBytes, editRecordingRules, formatClock, formatDuration, parseCast, recordingRules, SegmentFramer, toBase64 } from "@/lib/recordings"
 
 const policy = `{
   "tags": { "tag:prod": [] },
@@ -77,6 +77,7 @@ test("the segment framer splits length-prefixed files across frames and refuses 
   expect(done.map((f) => Array.from(f))).toEqual([[1, 1, 1], [2, 2, 2, 2, 2]])
   expect(framer.pending).toBe(false)
   expect(() => framer.push(0, stream)).toThrow()
+  expect(toBase64(new Uint8Array([255, 0, 1]))).toBe("/wAB")
 })
 
 test("byte fields convert between the server's base64 and the vault's base64url, other strings untouched", () => {

@@ -11,7 +11,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "check": "next typegen && tsc --noEmit && eslint && bun test lib && next build",
+    "check": "next typegen && tsc --noEmit && eslint && bun run terminal:wasm && bun run vault:wasm && bun test lib && next build",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "api:types": "openapi-typescript ../server/docs/openapi.json -o lib/api-schema.d.ts",

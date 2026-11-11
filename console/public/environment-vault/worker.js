@@ -16,10 +16,7 @@ const ready = (async () => {
 self.onmessage = async ({ data }) => {
   try {
     await ready
-    // recording-segment sends the segment file as bytes beside the JSON.
-    const reply = data.bytes
-      ? await self.paperboatEnvironmentVault(data.request, data.bytes)
-      : await self.paperboatEnvironmentVault(data.request)
+    const reply = await self.paperboatEnvironmentVault(data.request)
     postMessage({ id: data.id, reply: reply ?? JSON.stringify({ error: "Invalid ENV operation." }) })
   } catch (error) {
     postMessage({

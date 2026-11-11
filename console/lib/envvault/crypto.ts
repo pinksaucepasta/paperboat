@@ -60,17 +60,13 @@ function start(): Worker {
   return next
 }
 
-/**
- * One vault operation, with `bytes` (a recording segment) moved to the worker beside the JSON. Any use restarts
- * the idle timer; unlocking marks the vault open.
- */
-export async function vaultCrypto<T>(request: { action: string } & Record<string, unknown>, bytes?: Uint8Array): Promise<T> {
+/** One vault operation. Any use restarts the idle timer; unlocking marks the vault open. */
+export async function vaultCrypto<T>(request: { action: string } & Record<string, unknown>): Promise<T> {
   const target = start()
   const id = ++sequence
   const reply = await new Promise<Reply>((resolve, reject) => {
     waiting.set(id, { resolve, reject })
-    if (bytes) target.postMessage({ id, request: JSON.stringify(request), bytes }, [bytes.buffer])
-    else target.postMessage({ id, request: JSON.stringify(request) })
+    target.postMessage({ id, request: JSON.stringify(request) })
   })
   if (reply.error || reply.data === undefined) throw new Error(reply.error ?? "The ENV operation failed.")
   if (request.action === "unlock") {
