@@ -41,6 +41,10 @@ func (t LocalPeerTunnel) request(info resolver.ConnectInfo, consumer, operationI
 	if info.Terminal.Resume {
 		// The daemon re-attaches with the secret it holds: no credential, no grant from Paperboat.
 		request = localapi.PeerStreamRequest{Workspace: "personal", Schema: localapi.PeerStreamSchemaV1, MachineID: info.MachineID, EnvironmentID: info.Terminal.EnvironmentID, MachineGeneration: info.MachineGeneration, Consumer: consumer, OperationID: operationID, Deadline: serverclock.Now().Add(time.Minute).UTC(), MaximumBytes: 1 << 40, Payload: encoded, Resume: true}
+	} else if info.Terminal.Auth.Offline {
+		// Paperboat was unreachable when the terminal was resolved: the host admits this one new session from its own
+		// signed scopes (F21-11), so the stream carries no credential for the daemon to obtain.
+		request = localapi.PeerStreamRequest{Workspace: "personal", Schema: localapi.PeerStreamSchemaV1, MachineID: info.MachineID, EnvironmentID: info.Terminal.EnvironmentID, MachineGeneration: info.MachineGeneration, Consumer: consumer, OperationID: operationID, Deadline: deadline.UTC(), MaximumBytes: 1 << 40, Payload: encoded, Offline: true}
 	} else if info.Terminal.Auth.Token == "" {
 		request, err = localapi.NewPendingPeerStreamRequest(info.MachineID, info.Terminal.EnvironmentID, info.MachineGeneration, consumer, operationID, deadline, 1<<40, encoded)
 	} else {
@@ -53,7 +57,7 @@ func (t LocalPeerTunnel) request(info resolver.ConnectInfo, consumer, operationI
 		request.Workspace = info.Workspace
 	}
 	request.AccessSessionID = info.Terminal.Auth.ResourceID
-	if request.Credential == "" && !request.Resume {
+	if request.Credential == "" && !request.Resume && !request.Offline {
 		if validationErr := request.ValidatePending(serverclock.Now().UTC()); validationErr != nil {
 			return request, fmt.Errorf("%w: pending peer request: %w", ErrPeerTerminalInvalid, validationErr)
 		}
