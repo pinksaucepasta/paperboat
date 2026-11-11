@@ -4249,7 +4249,11 @@ func applyWindowsDACL(path, access string) (resultErr error) {
 	return nil
 }
 
-func repairWindowsTreeACL(root, ownerSID string) error {
+// repairWindowsTreeACL gives the enrolled owner a user-writable state tree. The privileged rewrite works on
+// handles only: the root is pinned (no reparse point, final path checked), and each entry is opened without
+// following reparse points, must resolve under the pinned root and, if a file, have one link before its DACL and
+// owner are set through that handle, so swapping an entry for a link never redirects the chown.
+func repairWindowsTreeACL(root, ownerSID string) (resultErr error) {
 	if !safeAbsolute(root) || !validSID(ownerSID) {
 		return ErrInvalidRequest
 	}
@@ -4257,24 +4261,21 @@ func repairWindowsTreeACL(root, ownerSID string) error {
 	if err != nil {
 		return ErrInvalidRequest
 	}
-	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		attributes, err := windows.GetFileAttributes(windows.StringToUTF16Ptr(path))
-		if err != nil {
-			return hostInstallFailure("inspecting installation state failed", ErrInvalidRequest, err)
-		}
-		if attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-			return ErrInvalidRequest
-		}
-		if err := applyWindowsACL(path, ownerSID, entry.IsDir()); err != nil {
-			return err
-		}
-		return windowssecurity.WithRestorePrivilege(func() error {
-			return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, owner, nil, nil, nil)
-		})
-	})
+	handle, err := openWindowsLocalDaemonStateObject(root, true)
+	if err != nil {
+		return hostInstallFailure("inspecting installation state failed", ErrInvalidRequest, err)
+	}
+	defer func() {
+		resultErr = withCleanup("Windows installation cleanup failed", resultErr, windows.CloseHandle(handle))
+	}()
+	rootFinal, err := windowsFinalPath(handle)
+	if err != nil || !strings.EqualFold(rootFinal, windowsExpectedFinalPath(root)) {
+		return errors.Join(err, ErrInvalidRequest)
+	}
+	if err := applyWindowsHandleOwnedDACL(handle, owner, windowssecurity.OwnerFullControlDirectoryDACL(ownerSID)); err != nil {
+		return err
+	}
+	return repairWindowsLocalDaemonTreeChildren(root, handle, owner)
 }
 func isAdministrator() bool { allowed, err := checkAdministrator(); return err == nil && allowed }
 func checkAdministrator() (allowed bool, resultErr error) {
