@@ -30,9 +30,11 @@ func (s *EdgeService) OperationRevocations(ctx context.Context, environment stri
  UNION
  -- A CLI recording replay ticket whose viewer may no longer replay there (recording_view, team membership, CLI
  -- session, account or machine): the host ends the running stream, which the ticket's expiry no longer bounds.
+ -- Every host polls this: the machine is resolved once (environment_id is unique) so the admissions are read
+ -- through their machine_id index, never a scan of every machine's admissions.
  SELECT a.id FROM paperboat.recording_native_admissions a
  JOIN paperboat.user_machines m ON m.id=a.machine_id
- WHERE m.environment_id=$1 AND (a.expires_at>$3 OR a.id=ANY($2::text[]))
+ WHERE a.machine_id=(SELECT id FROM paperboat.user_machines WHERE environment_id=$1) AND (a.expires_at>$3 OR a.id=ANY($2::text[]))
  AND NOT EXISTS(SELECT 1 FROM paperboat.cli_client_sessions c
   JOIN paperboat.users u ON u.id=c.user_id AND u.status='active'
   JOIN paperboat.teams t ON t.team_id=m.owner_team_id AND t.deleted_at IS NULL AND NOT t.suspended
