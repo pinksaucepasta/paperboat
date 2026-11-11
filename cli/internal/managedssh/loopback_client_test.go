@@ -327,6 +327,34 @@ func TestRunOneShotSSHLoopbackReturnsTheProcessExitWhenItResetsItsSocket(t *test
 	}
 }
 
+// winpool-4 2026-11-11: an interactive session ended with `exit`, ssh.exe exited 0 and reset its socket; the
+// bridge's reset was returned in place of that clean exit, so pb printed its generic failure after every session.
+func TestRunOneShotSSHLoopbackCleanExitWithASocketResetSucceeds(t *testing.T) {
+	process := newLoopbackTestProcess()
+	accepted := make(chan struct{})
+	ownerChecked := func(context.Context, *net.TCPConn, uint32) error { close(accepted); return nil }
+	err := runOneShotSSHLoopback(t.Context(), newLoopbackTestStream(), time.Second, time.Second, func(port uint16) (loopbackSSHProcess, error) {
+		connection, dialErr := net.DialTCP("tcp4", nil, &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: int(port)})
+		if dialErr != nil {
+			return nil, dialErr
+		}
+		go func() {
+			<-accepted // the session is bridged: an exit before it is "exited before connecting"
+			_, _ = io.WriteString(connection, "SSH-2.0-test\r\n")
+			_ = connection.SetLinger(0)
+			_ = connection.Close()
+			process.complete(nil)
+		}()
+		return process, nil
+	}, ownerChecked)
+	if err != nil {
+		t.Fatalf("error=%v, want OpenSSH's clean exit", err)
+	}
+	if process.waitCalls.Load() != 1 || process.killCalls.Load() != 0 {
+		t.Fatalf("wait calls=%d kill calls=%d", process.waitCalls.Load(), process.killCalls.Load())
+	}
+}
+
 func assertLoopbackProcessStopped(t *testing.T, process *loopbackTestProcess) {
 	t.Helper()
 	if process.waitCalls.Load() != 1 || process.killCalls.Load() != 1 {
