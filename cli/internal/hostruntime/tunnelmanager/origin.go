@@ -75,7 +75,7 @@ func NewOriginRuntime(secrets OriginSecretResolver) (NetworkOriginProber, *Origi
 	return prober, &OriginStreamForwarder{Transport: transport}, nil
 }
 
-// ReferenceOriginTLSProvider resolves custom roots and mTLS identities without
+// ReferenceOriginTLSProvider resolves mTLS client identities (a route's CA is stored with the route) without
 // putting PEM material in route state. A client identity is stored as one
 // bounded JSON document with certificate_pem and private_key_pem fields.
 type ReferenceOriginTLSProvider struct {

@@ -152,7 +152,7 @@ pb tunnel route list api
 ```
 
 HTTP routes preserve the public `Host` by default. Origin host-header rewrite,
-TLS server name, verification mode, CA reference, client credential reference,
+TLS server name, verification mode, trusted CA, client credential reference,
 timeouts, priority, and stream limits are independent route settings.
 
 `--tls-ca <file>` trusts one CA for the route (the PEM file is checked and
