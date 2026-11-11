@@ -103,3 +103,35 @@ func testPeerMovedRelay(t *testing.T, one, two *tailcfg.DERPRegion, within time.
 		t.Fatalf("reached the moved peer after %v, want within %v", took, within)
 	}
 }
+
+// F21-161 (PLAN 3b gap 14): the home region a machine advertises to its peers is the first region of the
+// inventory it was given (the selected relay), not the lowest region id, and promoting the other relay
+// moves it. Real relay regions, a started engine, the self node the peers are told about.
+func TestAdvertisedHomeIsTheSelectedRegionNotTheLowestID(t *testing.T) {
+	one := integration.RunDERPAndSTUN(t, logger.Discard, "127.0.0.1").Regions[1]
+	two := relayRegionCopy(integration.RunDERPAndSTUN(t, logger.Discard, "127.0.0.1").Regions[1], 2)
+	local := key.NewNode()
+	s := &Server{Key: local, LocalAddr: netip.MustParseAddr("fd7a:115c:a1e0::50"), AllowedPeers: map[key.NodePublic]netip.Addr{key.NewNode().Public(): netip.MustParseAddr("fd7a:115c:a1e0::51")}}
+	// Region 2 is selected although region 1 has the lower id.
+	if err := s.SetRelayRegions([]*tailcfg.DERPRegion{two, one}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	advertised := func() tailcfg.DERPRegionID {
+		s.lb.mu.Lock()
+		defer s.lb.mu.Unlock()
+		return s.lb.nm.SelfNode.HomeDERP()
+	}
+	if got := advertised(); got != 2 {
+		t.Fatalf("advertised home = %d, want the selected region 2", got)
+	}
+	if err := s.SetRelayRegions([]*tailcfg.DERPRegion{one, two}); err != nil {
+		t.Fatal(err)
+	}
+	if got := advertised(); got != 1 {
+		t.Fatalf("after promoting region 1 the advertised home = %d", got)
+	}
+}
