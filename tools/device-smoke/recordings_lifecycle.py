@@ -111,7 +111,7 @@ def recording_control(action, session_id):
 
 def new_recording(team, target, before):
     return wait_for('the recording to be listed',
-                    lambda: next((r for r in listing(team) if r['id'] not in before and r['machine_name'] == target), None))
+                    lambda: next((r for r in listing(team) if r['id'] not in before and r['machine_name'] == target), None), timeout=180, interval=3)
 
 
 def finished(team, recording_id):
