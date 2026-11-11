@@ -47,8 +47,15 @@ def windows_marker(terminal, token, nonce, timeout):
 def establish(terminal, nonce, windows):
     """Sets the session's shell variable and returns the shell's pid."""
     if windows:
-        terminal.send(windows_target.typed_marker('PB_READY') + '\r')
-        terminal.expect('PB_READY', 120)
+        deadline = time.monotonic() + 120
+        while True:  # a new ConPTY session is silent at first and the first typed line can be lost: type it again
+            terminal.send(windows_target.typed_marker('PB_READY') + '\r')
+            try:
+                terminal.expect('PB_READY', 10)
+                break
+            except RuntimeError as error:
+                if 'closed' in str(error) or time.monotonic() >= deadline:
+                    raise
         terminal.send('set PB_IDLE=%s\r' % nonce)
         return windows_marker(terminal, 'PB_SET', nonce, 60)
     terminal.expect(b'\x1b[?2004h')
