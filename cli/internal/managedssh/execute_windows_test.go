@@ -72,6 +72,7 @@ func TestValidEnvironmentAcceptsWindowsDriveCurrentDirectory(t *testing.T) {
 		{"Path=C:\\Windows\\System32"},
 		{"=C:=C:\\Users\\Pujan", "Path=C:\\Windows\\System32"},
 		{"=z:=Z:/workspace"},
+		{"=C:=C:\\Users\\Pujan", "=ExitCode=00000001", "=ExitCodeAscii=\x01", "Path=C:\\Windows"},
 	} {
 		if !validEnvironment(values) {
 			t.Fatalf("validEnvironment(%q) = false", values)

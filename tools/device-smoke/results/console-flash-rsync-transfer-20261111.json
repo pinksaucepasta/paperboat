@@ -1,0 +1,14 @@
+{
+  "check": "windows_console_flash exec, pb rsync from the user's console (FLASH_INHERIT=1, VIA_EXPLORER=1)",
+  "host": "winpool-12 (hosted runner, runneradmin console session Active), MSYS2 rsync + cygpath + bash in C:\\msys64\\usr\\bin",
+  "build": "dev-fix4 on origin/main 0f3b5c513 plus the working-tree fix of this commit",
+  "causes": [
+    "MSYS2 hands native ssh.exe HOME=C:\\msys64\\home\\<user>; its Include ~/.ssh/paperboat_config matched nothing, so ssh dialled the loopback alias directly: Permission denied",
+    "rsync talks to its remote shell over a Cygwin socketpair that native ssh.exe cannot read (target got 0 bytes): the shell is now bash -c with cat pipes",
+    "a cmd window that ran any earlier command hands children =ExitCode=/=ExitCodeAscii= variables; the executor refused them (OpenSSH execution request is invalid)"
+  ],
+  "result": "PASS",
+  "detail": "pb rsync -av C:\\rs\\src\\ <throwaway linux machine>:/tmp/rs-destf4/ exit 0, hello.txt sent (154 bytes), no new console window for 30 s (bash and cat watched too); the control still opened one",
+  "unit": "TestValidEnvironmentAcceptsWindowsDriveCurrentDirectory (ExitCode case) PASS on the runner; TestRsyncRemoteShellArgumentAndDefaultEnvironment, TestWithEnvironmentReplacesAnyCaseEntry PASS",
+  "cleanup": "winpool-12: pb uninstalled, throwaway machines revoked by exact id, C:\\rs removed"
+}

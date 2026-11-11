@@ -46,10 +46,11 @@ func TestRsyncRemoteShellChosen(t *testing.T) {
 }
 
 func TestRsyncRemoteShellArgumentAndDefaultEnvironment(t *testing.T) {
-	if got := rsyncRemoteShellArgument("/c/Program Files/OpenSSH/ssh.exe"); got != "--rsh='/c/Program Files/OpenSSH/ssh.exe'" {
+	const pipes = ` -c 'set -o pipefail; "$0" "$@" < <(cat) | cat' `
+	if got := rsyncRemoteShellArgument("/usr/bin/bash", "/c/Program Files/OpenSSH/ssh.exe"); got != "--rsh='/usr/bin/bash'"+pipes+"'/c/Program Files/OpenSSH/ssh.exe'" {
 		t.Fatalf("rsh = %q", got)
 	}
-	if got := rsyncRemoteShellArgument("/c/it's/ssh"); got != "--rsh='/c/it''s/ssh'" {
+	if got := rsyncRemoteShellArgument("/usr/bin/bash", "/c/it's/ssh"); got != "--rsh='/usr/bin/bash'"+pipes+"'/c/it''s/ssh'" {
 		t.Fatalf("quoted rsh = %q", got)
 	}
 	got := withDefaultEnvironment([]string{"PATH=x"}, "MSYS2_ARG_CONV_EXCL", "*")
@@ -59,5 +60,13 @@ func TestRsyncRemoteShellArgumentAndDefaultEnvironment(t *testing.T) {
 	kept := []string{"msys2_arg_conv_excl=/x"}
 	if got := withDefaultEnvironment(kept, "MSYS2_ARG_CONV_EXCL", "*"); !reflect.DeepEqual(got, kept) {
 		t.Fatalf("user value replaced: %q", got)
+	}
+}
+
+func TestWithEnvironmentReplacesAnyCaseEntry(t *testing.T) {
+	got := withEnvironment([]string{"PATH=x", "Home=C:\\msys64\\home\\u", "HOME=/home/u"}, "HOME", `C:\Users\u`)
+	want := []string{"PATH=x", `HOME=C:\Users\u`}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
 	}
 }

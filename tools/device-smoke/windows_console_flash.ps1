@@ -38,7 +38,7 @@ public static class Win {
 }
 '@
 $suspect = 'ConsoleWindowClass', 'CASCADIA_HOSTING_WINDOW_CLASS', 'PseudoConsoleWindow'
-$names = 'pb', 'schtasks', 'powershell', 'pwsh', 'cmd', 'conhost', 'ssh', 'sshd', 'winget', 'msiexec', 'icacls', 'netsh', 'sc', 'taskkill', 'tasklist', 'cygpath', 'rsync'
+$names = 'pb', 'schtasks', 'powershell', 'pwsh', 'cmd', 'conhost', 'ssh', 'sshd', 'winget', 'msiexec', 'icacls', 'netsh', 'sc', 'taskkill', 'tasklist', 'cygpath', 'rsync', 'bash', 'cat'
 $seen = @{}
 function Sample($base) {
   foreach ($w in [Win]::Visible()) {

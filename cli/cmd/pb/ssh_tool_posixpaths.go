@@ -69,10 +69,15 @@ func rsyncRemoteShellChosen(args, environment []string) bool {
 	return false
 }
 
-// rsyncRemoteShellArgument names OpenSSH for rsync's -e: rsync splits the command on spaces and keeps a quoted
-// argument whole, a quote inside doubled.
-func rsyncRemoteShellArgument(ssh string) string {
-	return "--rsh='" + strings.ReplaceAll(ssh, "'", "''") + "'"
+// rsyncRemoteShellArgument names OpenSSH for rsync's -e through the MSYS2/Cygwin bash beside rsync: rsync talks to its
+// remote shell over a Cygwin socketpair, which the native Windows ssh.exe cannot read (the target got 0 bytes and
+// rsync died with "connection unexpectedly closed"). Two cats turn the sockets into pipes ssh.exe can use; pipefail
+// keeps ssh's exit status. The input cat is a process substitution so the wrapper ends when ssh.exe does: rsync keeps
+// its end of the socket open until the shell exits, and a waited-for cat would never see EOF.
+// rsync splits the command on spaces and keeps a quoted argument whole, a quote inside doubled.
+func rsyncRemoteShellArgument(bash, ssh string) string {
+	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
+	return "--rsh=" + quote(bash) + ` -c 'set -o pipefail; "$0" "$@" < <(cat) | cat' ` + quote(ssh)
 }
 
 // withDefaultEnvironment adds key=value unless the environment already sets key (any case, as on Windows).
@@ -83,4 +88,16 @@ func withDefaultEnvironment(environment []string, key, value string) []string {
 		}
 	}
 	return append(append([]string(nil), environment...), key+"="+value)
+}
+
+// withEnvironment sets key=value, replacing any entry for key (any case, as on Windows).
+func withEnvironment(environment []string, key, value string) []string {
+	result := make([]string, 0, len(environment)+1)
+	for _, entry := range environment {
+		if name, _, ok := strings.Cut(entry, "="); ok && strings.EqualFold(name, key) {
+			continue
+		}
+		result = append(result, entry)
+	}
+	return append(result, key+"="+value)
 }

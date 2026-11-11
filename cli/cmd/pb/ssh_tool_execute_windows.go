@@ -42,7 +42,22 @@ func executeManagedSSHTool(ctx context.Context, tool string, arguments, environm
 			if err != nil {
 				return managedssh.NativeLaunchError{Err: err}
 			}
-			arguments = append([]string{rsyncRemoteShellArgument(shell)}, arguments...)
+			bash := filepath.Join(filepath.Dir(path), "bash.exe")
+			if _, err := os.Stat(bash); err != nil {
+				return managedssh.NativeLaunchError{Err: fmt.Errorf("rsync needs the bash.exe beside it (%s) to reach OpenSSH (is the MSYS2/Cygwin install intact?): %w", bash, err)}
+			}
+			if bash, err = convert(filepath.ToSlash(bash)); err != nil {
+				return managedssh.NativeLaunchError{Err: err}
+			}
+			arguments = append([]string{rsyncRemoteShellArgument(bash, shell)}, arguments...)
+			// MSYS2 hands its child HOME=C:\msys64\home\<user>, and native OpenSSH expands the "~" of Paperboat's
+			// "Include ~/.ssh/paperboat_config" from HOME: the include matches nothing, ssh dials the loopback alias
+			// directly ("Permission denied") and never reaches the managed proxy and key. Name the Windows profile.
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return managedssh.NativeLaunchError{Err: err}
+			}
+			environment = withEnvironment(environment, "HOME", home)
 		}
 		// MSYS2 rewrites POSIX-looking arguments when it starts a native program: the remote "rsync --server ... /tmp/x"
 		// rsync hands to ssh.exe would reach the target as "C:/msys64/tmp/x". Cygwin does not rewrite.
