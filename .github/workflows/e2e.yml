@@ -3,9 +3,9 @@ name: End-to-end
 # Core end-to-end (server/internal/app TestE2ECore): the real server on PostgreSQL, the real edge and relay, and two
 # real pb daemons in systemd containers: exec both ways, managed SSH, a file send, a preview and a tunnel through the
 # edge; a server restart and an edge restart like deploys, all of it again each time; exec through the relay only.
-# Required in the merge queue (merge_group, tools/branch-protection.json) and run on pushes to main that touch a core
-# path; before a push: tools/ci-test.sh e2e. Not on every pull_request: two 30-minute jobs per PR filled the hosted
-# runners and queued the required checks for 10+ minutes (2026-11-12). The multi job (tools/e2e/run.sh) is not required
+# Required check `End-to-end core` (tools/branch-protection.json): it runs in the merge queue (merge_group) and on pushes to main
+# that touch a core path; before a push: tools/ci-test.sh e2e. On pull_request its jobs are skipped (reported as passed): two
+# 30-minute jobs per PR filled the hosted runners and queued the required checks for 10+ minutes (2026-11-12). The multi job (tools/e2e/run.sh) is not required
 # and runs only on r21-e2e* pushes and dispatch.
 on:
   push:
@@ -22,6 +22,9 @@ on:
       - 'tools/e2e/**'
       - '.github/workflows/e2e.yml'
   merge_group:
+  # The queue's required check is reported on pull requests too, or every PR would wait for it forever: on a pull request the
+  # workflow starts and its jobs are skipped (a skipped job counts as passed and uses no runner).
+  pull_request:
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -36,6 +39,7 @@ permissions:
 jobs:
   core:
     name: End-to-end core
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     services:
@@ -75,7 +79,7 @@ jobs:
   # not on main pushes or tools/ci-test.sh e2e.
   multi:
     name: End-to-end, 3 server instances
-    if: ${{ !inputs.core_only && github.event_name != 'merge_group' && github.ref != 'refs/heads/main' }}
+    if: ${{ !inputs.core_only && github.event_name != 'merge_group' && github.event_name != 'pull_request' && github.ref != 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:

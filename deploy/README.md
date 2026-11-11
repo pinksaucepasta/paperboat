@@ -381,7 +381,7 @@ Required PR checks are `Targeted Go checks`, `Repository policy checks`, and `Co
 and types`. Targeted Go checks select changed packages, embedded-data owners, and transitive
 workspace importers (including test imports); module/workspace dependency changes expand the
 selection. PostgreSQL and race checks run on GitHub, never on oracle. Full-module health CI
-continues on main. The End-to-end check is added after W28 proves all its core stages green.
+continues on main. `End-to-end core` (the real server, edge, relay and two daemons: exec, ssh, send, preview, tunnel, restarts; green three times in a row before it was made required, 2026-11-12) is the fourth required check: it runs in the merge queue and its jobs are skipped on pull requests, which GitHub counts as passed, so a pull request is not held for a six-minute job it would not run.
 
 Prior art: GitHub's [auto-merge requirements](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-auto-merge-for-pull-requests-in-your-repository)
 and [protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches):
