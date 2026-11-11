@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/internal/recording"
 )
 
 type vaultState struct {
@@ -63,6 +64,17 @@ type request struct {
 	Inventory      []scopeState `json:"inventory"`
 	KeyEpoch       uint64       `json:"key_epoch"`
 	EnableRecovery bool         `json:"enable_recovery"`
+
+	TeamID        string            `json:"team_id"`
+	Viewers       []recordingViewer `json:"viewers"`
+	Generation    int64             `json:"generation"`
+	Sealed        string            `json:"sealed"`
+	RecordingID   string            `json:"recording_id"`
+	KeyGeneration int64             `json:"key_generation"`
+	ViewerKey     *recordingSealed  `json:"viewer_key"`
+	Chain         []recordingLink   `json:"chain"`
+	Handle        string            `json:"handle"`
+	file          []byte            // recording-segment: the segment file, passed as bytes beside the JSON
 }
 type engine struct {
 	mu          sync.Mutex
@@ -72,6 +84,7 @@ type engine struct {
 	pendingRaw  []byte
 	pendingHead env.VaultHead
 	pendingKeys *env.VaultKeys
+	recordings  map[string]*recording.Reader
 }
 
 func decode(s string) ([]byte, error) { return base64.RawURLEncoding.Strict().DecodeString(s) }
@@ -89,6 +102,7 @@ func (s vaultState) verified() (env.VaultHead, []byte, error) {
 	return head, raw, nil
 }
 func (e *engine) clear() {
+	e.closeRecordings()
 	e.keys.Clear()
 	clear(e.raw)
 	clear(e.pendingRaw)
@@ -332,6 +346,8 @@ func (e *engine) run(ctx context.Context, r request) (any, error) {
 		return e.hostLayer(ctx, r)
 	case "team-create", "team-grant", "team-accept", "team-rotate":
 		return e.teamOperation(ctx, r)
+	case "recording-key-create", "recording-key-grant", "recording-open", "recording-segment", "recording-close":
+		return e.recordingOperation(r)
 
 	}
 	return nil, env.ErrInvalid

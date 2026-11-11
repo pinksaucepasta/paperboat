@@ -46,5 +46,5 @@ func (r *Reader) Open(file []byte) ([]byte, error) {
 // Final reports whether the last segment opened was the recording's final one.
 func (r *Reader) Final() bool { return r.final }
 
-// Close clears the data key.
-func (r *Reader) Close() { clear(r.dataKey) }
+// Close clears the data key and the team key.
+func (r *Reader) Close() { clear(r.dataKey); clear(r.teamPrivate) }
