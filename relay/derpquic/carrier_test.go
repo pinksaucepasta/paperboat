@@ -721,3 +721,29 @@ func TestStaleRelayProcessGrantDoesNotLatchCarrier(t *testing.T) {
 	token = f.token(g)
 	connect(t, c)
 }
+
+// A revocation floor closes a live carrier as refused. The refusal holds for the grant it answered, and the next
+// grant above the floor connects on the same carrier; it used to latch the carrier, and magicsock the region,
+// until a restart (audit A P1-8).
+func TestRefusedCarrierConnectsWithTheNextGrant(t *testing.T) {
+	f := newFixture(t)
+	server, address, _ := f.start("127.0.0.1:0")
+	cert := certificate(t)
+	g := f.grant(key.NewNode().Public(), cert, "revoked")
+	c := f.client(address, cert, g)
+	token := f.token(g)
+	c.config.Credential = func(context.Context) (string, error) { return token, nil }
+	connect(t, c)
+	if err := server.Revoke("account", "revoked", 2); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, func() bool { return !errors.Is(c.Connect(t.Context()), nil) })
+	for range 3 {
+		if err := c.Connect(t.Context()); !errors.Is(err, ErrAdmission) {
+			t.Fatalf("the refused grant was not kept refused: %v", err)
+		}
+	}
+	g.Generation = 2
+	token = f.token(g)
+	connect(t, c)
+}

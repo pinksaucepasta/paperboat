@@ -51,6 +51,27 @@ func NewFallbackCarrier(preferred, fallback Carrier, recovery time.Duration) *Fa
 	return &FallbackCarrier{preferred: preferred, fallback: fallback, recovery: recovery, ctx: ctx, cancel: cancel, connectGate: make(chan struct{}, 1)}
 }
 
+// refused is the latched refusal *fatal unless the credential changed since it was given: a refusal holds for the
+// grant it answered, and a fresh grant (a renewal above a revocation floor, a key rotation) gets one new attempt,
+// latching again if refused. Tailscale's DERP client redials after every failure; this keeps a refused grant from
+// being redialed while letting a new one through, so a refusal is not dead until restart (audit A P1-8).
+func refused(ctx context.Context, credential func(context.Context) (string, error), fatal *error, token *string) error {
+	if *fatal == nil {
+		return nil
+	}
+	if credential == nil {
+		return *fatal
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	next, err := credential(ctx)
+	if err != nil || next == *token {
+		return *fatal
+	}
+	*fatal, *token = nil, ""
+	return nil
+}
+
 func fatalCarrier(err error) bool {
 	var f interface{ Fatal() bool }
 	return errors.As(err, &f) && f.Fatal()
@@ -67,9 +88,8 @@ func (c *FallbackCarrier) Connect(ctx context.Context) error {
 		return ErrClosed
 	}
 	if c.fatal != nil {
-		err := c.fatal
-		c.mu.Unlock()
-		return err
+		// Each child keeps a refusal for the grant it answered (refused): ask them again, a fresh grant gets through.
+		c.fatal, c.active = nil, nil
 	}
 	if c.active != nil {
 		c.mu.Unlock()

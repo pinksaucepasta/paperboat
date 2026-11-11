@@ -110,7 +110,9 @@ func TestCarrierCredentialExpiryDoesNotLatchPermanentDenial(t *testing.T) {
 			if err := c.Connect(t.Context()); !errors.Is(err, ErrAdmission) || calls != 2 {
 				t.Fatalf("fresh lookup denial=%v calls=%d", err, calls)
 			}
-			if err := c.Connect(t.Context()); !errors.Is(err, ErrAdmission) || calls != 2 {
+			// A latched denial looks the credential up again (a local call: a fresh grant gets one new attempt), and a
+			// lookup that still refuses keeps the denial without dialing.
+			if err := c.Connect(t.Context()); !errors.Is(err, ErrAdmission) || calls != 3 {
 				t.Fatalf("permanent denial was retried: %v calls=%d", err, calls)
 			}
 		})

@@ -32,6 +32,7 @@ type Client struct {
 	observed    atomic.Pointer[clientConn]
 	generation  int
 	fatal       error
+	fatalToken  string // the credential fatal answered (refusal)
 }
 type clientConn struct {
 	conn            *quic.Conn
@@ -42,6 +43,7 @@ type clientConn struct {
 	generation      int
 	namespace       [32]byte
 	generationDisco key.DiscoPublic
+	token           string // the credential this connection was admitted with
 	pingMu          sync.Mutex
 	pings           map[[8]byte]chan struct{}
 	workers         sync.WaitGroup
@@ -83,8 +85,8 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 	if c.ctx.Err() != nil {
 		return nil, ErrClosed
 	}
-	if c.fatal != nil {
-		return nil, c.fatal
+	if err := refused(ctx, c.config.Credential, &c.fatal, &c.fatalToken); err != nil {
+		return nil, err
 	}
 	if old := c.current; old != nil {
 		if old.conn.Context().Err() == nil {
@@ -92,13 +94,13 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 		}
 		err := classify(context.Cause(old.conn.Context()))
 		var fatal interface{ Fatal() bool }
-		if errors.As(err, &fatal) && fatal.Fatal() {
-			c.fatal = err
-			return nil, err
-		}
 		old.workers.Wait()
 		c.current = nil
 		c.observed.Store(nil)
+		if errors.As(err, &fatal) && fatal.Fatal() {
+			c.fatal, c.fatalToken = err, old.token
+			return nil, err
+		}
 	}
 	if c.config.TLS == nil || c.config.TLS.InsecureSkipVerify && c.config.TLS.VerifyConnection == nil && c.config.TLS.VerifyPeerCertificate == nil || len(c.config.TLS.Certificates) != 1 || c.config.Credential == nil || c.config.Address == "" {
 		c.fatal = ErrAdmission
@@ -116,7 +118,7 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 		if errors.Is(err, ErrExpired) {
 			return nil, retainDecision(ErrExpired, err)
 		}
-		c.fatal = retainDecision(ErrAdmission, err)
+		c.fatal, c.fatalToken = retainDecision(ErrAdmission, err), ""
 		return nil, c.fatal
 	}
 	parts, err := grantParts(token)
@@ -131,7 +133,7 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 		err = classify(err)
 		var fatal interface{ Fatal() bool }
 		if errors.As(err, &fatal) && fatal.Fatal() {
-			c.fatal = err
+			c.fatal, c.fatalToken = err, token
 		}
 		return nil, err
 	}
@@ -140,7 +142,7 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 		err = classify(err)
 		var fatal interface{ Fatal() bool }
 		if errors.As(err, &fatal) && fatal.Fatal() {
-			c.fatal = err
+			c.fatal, c.fatalToken = err, token
 		}
 		return nil, err
 	}
@@ -162,7 +164,7 @@ func (c *Client) ensure(ctx context.Context) (*clientConn, error) {
 
 	stream.SetDeadline(time.Time{})
 	c.generation++
-	cc := &clientConn{namespace: c.config.Namespace, generationDisco: c.config.GenerationDisco, conn: conn, stream: stream, receive: make(chan packet, queueDepth), generation: c.generation, pings: make(map[[8]byte]chan struct{})}
+	cc := &clientConn{token: token, namespace: c.config.Namespace, generationDisco: c.config.GenerationDisco, conn: conn, stream: stream, receive: make(chan packet, queueDepth), generation: c.generation, pings: make(map[[8]byte]chan struct{})}
 	c.current = cc
 	c.observed.Store(cc)
 	cc.workers.Add(3)

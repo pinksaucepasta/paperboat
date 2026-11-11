@@ -2,6 +2,7 @@ package tailnet
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"time"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=peer-path-accounting
@@ -107,10 +108,26 @@ func (c *usageObservedCarrier) SendControl(peer key.NodePublic, data []byte) err
 	}
 	return c.DERPCarrier.Send(peer, data)
 }
+
+// relayRefusedRead is a relay refusal seen while reading. magicsock stops a region's reader for good on a fatal error
+// and then refuses to prepare that region again, so a grant refused once (a revocation floor the next grant is
+// above) left the relay dead until a restart. The carrier keeps the refusal for the grant it answered and lets a
+// fresh grant through (derpquic refused); magicsock retries with its own backoff meanwhile. No Unwrap: magicsock
+// must not see the fatal cause.
+type relayRefusedRead struct{ cause error }
+
+func (e relayRefusedRead) Error() string {
+	return "the relay refused this machine's grant; waiting for a fresh grant: " + e.cause.Error()
+}
+
 func (c *usageObservedCarrier) RecvDetail() (derp.ReceivedMessage, int, error) {
 	message, generation, err := c.DERPCarrier.RecvDetail()
 	if err != nil {
 		c.lostPath()
+		var fatal interface{ Fatal() bool }
+		if errors.As(err, &fatal) && fatal.Fatal() {
+			err = relayRefusedRead{cause: err}
+		}
 	}
 	if packet, ok := message.(derp.ReceivedPacket); err == nil && ok && wireGuardData(packet.Data) {
 		c.record(packet.Source, true, time.Now())
