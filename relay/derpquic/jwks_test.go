@@ -108,8 +108,8 @@ func TestUnknownKeyRefreshesOnceAndIsRateLimited(t *testing.T) {
 	}
 	_, other, _ := ed25519.GenerateKey(rand.Reader)
 	for range 3 {
-		if _, err = server.verify(f.tokenFor(g, "forged", other), state, time.Now()); !errors.Is(err, ErrAdmission) {
-			t.Fatalf("forged key id admitted: %v", err)
+		if _, err = server.verify(f.tokenFor(g, "forged", other), state, time.Now()); !errors.Is(err, ErrExpired) {
+			t.Fatalf("rate-limited unknown key should require fresh authority: %v", err)
 		}
 	}
 	if calls != 1 {
@@ -119,5 +119,36 @@ func TestUnknownKeyRefreshesOnceAndIsRateLimited(t *testing.T) {
 	_, _ = server.verify(f.tokenFor(g, "forged", other), state, time.Now())
 	if calls != 2 {
 		t.Fatalf("refresh did not run again after the interval: %d calls", calls)
+	}
+}
+
+func TestSigningKeyRefreshFailureDoesNotLatchAdmission(t *testing.T) {
+	f := newFixture(t)
+	pub, private, _ := ed25519.GenerateKey(rand.Reader)
+	server, err := NewServer(f.verifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert := f.tls.Certificates[0]
+	state := tls.ConnectionState{PeerCertificates: []*x509.Certificate{cert.Leaf}}
+	token := f.tokenFor(f.grant(key.NewNode().Public(), cert, "rotating"), "new", private)
+	calls := 0
+	server.SetKeyRefresher(func() error { calls++; return errors.New("offline") })
+	for range 2 {
+		if _, err := server.verify(token, state, time.Now()); !errors.Is(err, ErrExpired) {
+			t.Fatalf("refresh outage became permanent: %v", err)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("refresh calls = %d, want one bounded attempt", calls)
+	}
+	server.keysRefreshedAt.Store(0)
+	server.SetKeyRefresher(func() error { return server.SetKeys(map[string]ed25519.PublicKey{"new": pub}) })
+	if _, err := server.verify(token, state, time.Now()); err != nil {
+		t.Fatalf("valid new key did not recover: %v", err)
+	}
+	server.keysRefreshedAt.Store(0)
+	if _, err := server.verify(f.tokenFor(f.grant(key.NewNode().Public(), cert, "unknown"), "forged", private), state, time.Now()); !errors.Is(err, ErrAdmission) {
+		t.Fatalf("refreshed key set did not permanently refuse unknown key: %v", err)
 	}
 }

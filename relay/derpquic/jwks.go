@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"time"
@@ -50,8 +51,14 @@ func (s *Server) verify(token string, state tls.ConnectionState, now time.Time) 
 		return grant, err
 	}
 	refresh := s.refresher.Load()
-	if refresh == nil || !s.refreshGate(now) || (*refresh)() != nil {
+	if refresh == nil {
 		return grant, err
+	}
+	if !s.refreshGate(now) {
+		return Grant{}, ErrExpired
+	}
+	if err := (*refresh)(); err != nil {
+		return Grant{}, fmt.Errorf("refresh grant signing keys: %w", errors.Join(ErrExpired, err))
 	}
 	v.Keys = *s.keys.Load()
 	return v.Verify(token, state, now)
