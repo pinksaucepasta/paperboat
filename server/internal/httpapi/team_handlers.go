@@ -14,7 +14,6 @@ type teamAPI interface {
 	Activity(context.Context, string, string, string, int) (teams.ActivityPage, error)
 	Machine(context.Context, string, string, teams.MachineRequest) (teams.Team, error)
 	GrantMachine(context.Context, string, string, teams.MachineGrantRequest) (teams.Team, error)
-	GrantTerminalSession(context.Context, string, string, teams.TerminalSessionGrantRequest) (teams.Team, error)
 	List(context.Context, string) ([]teams.Team, error)
 	Get(context.Context, string, string) (teams.Team, error)
 	Members(context.Context, string, string, string, int) (teams.Page[teams.Member], error)
