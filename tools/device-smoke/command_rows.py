@@ -111,6 +111,39 @@ def daemon_unit_text():
     return sh('systemctl', '--user', 'cat', 'paperboatd')[1]
 
 
+def mcp_handshake():
+    """initialize + tools/list against `pb mcp` over stdio, then EOF must end it cleanly (what an MCP client does)."""
+    messages = [
+        {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-06-18', 'capabilities': {}, 'clientInfo': {'name': 'smoke', 'version': '0'}}},
+        {'jsonrpc': '2.0', 'method': 'notifications/initialized'},
+        {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list'},
+    ]
+    if DEVICE:  # one stdin delivery: the server answers what it read before EOF
+        result = PB.run_remote(('mcp',), input=''.join(json.dumps(m) + '\n' for m in messages), timeout=60)
+        lines = [line for line in result.stdout.splitlines() if line.strip().startswith('{')]
+    else:
+        process = subprocess.Popen([str(PB), 'mcp'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        lines = []
+        try:
+            for message in messages:
+                process.stdin.write(json.dumps(message) + '\n')
+                process.stdin.flush()
+                if 'id' in message:
+                    lines.append(process.stdout.readline())
+            process.stdin.close()
+            if process.wait(timeout=15) != 0:
+                return {'ok': False, 'error': 'pb mcp exited %s after stdin closed' % process.returncode}
+        except Exception as error:
+            process.kill()
+            return {'ok': False, 'error': repr(error)}
+    try:
+        replies = [json.loads(line) for line in lines if line.strip()]
+        listing = next(reply for reply in replies if reply.get('id') == 2)
+        return {'ok': True, 'tools': [tool['name'] for tool in listing['result']['tools']]}
+    except (StopIteration, KeyError, ValueError) as error:
+        return {'ok': False, 'error': 'no tools/list reply: %r' % error}
+
+
 class Row:
     def __init__(self, ident, command):
         self.ident, self.command, self.failures = ident, command.split(), []
@@ -232,6 +265,57 @@ def rows(args):
     r.expect(isinstance(d, dict) and str(d.get('console_url', '')).endswith('/settings/account'), 'account delete --json lacks console_url')
     r.expect(run('auth', 'status', '--json')[0] == 0, 'the account is no longer signed in after account delete')
     out.append(r)
+    r = Row('C286', 'env names access'); r.help(); r.invalid('maybe', hint='on\\|off|use:')
+    shown = r.json_ok()
+    original = bool((shown or {}).get('names_listable', True)) if isinstance(shown, dict) else True
+    r.expect(isinstance(shown, dict) and isinstance(shown.get('names_listable'), bool) and shown.get('workspace_id'), 'names access --json lacks names_listable and workspace_id')
+    try:
+        for state, word in ((not original, 'on' if not original else 'off'), (original, 'on' if original else 'off')):
+            code, o, e = run('env', 'names', 'access', word, '--json')
+            r.expect(code == 0 and json.loads(o or '{}').get('data', {}).get('names_listable') is state, 'names access %s did not set the state' % word)
+            now = Row('C286', 'env names access').json_ok()
+            r.expect(isinstance(now, dict) and now.get('names_listable') is state, 'names access does not show the state after %s' % word)
+            names = run('env', 'names', '--json')
+            if state:
+                r.expect(names[0] == 0, 'env names failed while listing is allowed')
+            else:
+                r.expect(names[0] != 0 and 'turned off' in names[1] + names[2] and not BAD.search(names[1] + names[2]), 'env names was not refused with the turned-off message while access is off')
+    finally:
+        run('env', 'names', 'access', 'on' if original else 'off', '--json')  # leave the workspace as it was
+    out.append(r)
+
+    r = Row('C287', 'version'); r.help()
+    code, o, e = run('version')
+    code2, short, _ = run('--version')
+    r.expect(code == 0 and code2 == 0 and o.strip() == short.strip() and 'Version ' in o, 'pb version differs from pb --version or prints no version')
+    d = r.json_ok()
+    r.expect(isinstance(d, dict) and d.get('version') and re.fullmatch(r'[0-9a-f]{40}', d.get('commit', '')) is not None
+             and d['version'] in o, 'version --json lacks the version and 40-hex source commit that the text shows')
+    r.invalid('bogus')
+    out.append(r)
+
+    for ident, name, wanted in (
+        ('C288', 'account', ('delete',)),
+        ('C289', 'api-token', ('create', 'list', 'revoke')),
+        ('C290', 'policy', ('get', 'set', 'test', 'explain', 'versions', 'restore', 'schema')),
+        ('C291', 'team scim', ('status', 'setup', 'map')),
+        ('C292', 'team sso', ('status', 'setup', 'enforce', 'exempt')),
+    ):
+        r = Row(ident, name); r.help(); r.invalid('bogus', hint='invalid|unknown|usage|Usage')
+        d = r.json_ok()
+        listed = {c.get('command') for c in (d or {}).get('commands', [])} if isinstance(d, dict) else set()
+        r.expect(listed >= {'pb %s %s' % (name, sub) for sub in wanted}, '%s --json misses subcommands %s' % (name, sorted(set('pb %s %s' % (name, sub) for sub in wanted) - listed)))
+        r.expect(run('auth', 'status', '--json')[0] == 0, 'no longer signed in after %s' % name)
+        out.append(r)
+
+    r = Row('C293', 'mcp'); r.help()
+    code, o, e = run('mcp', '--json')
+    r.expect(code != 0 and 'JSON' in o + e and not BAD.search(o + e), 'mcp --json was not refused before it started')
+    handshake = mcp_handshake()
+    r.expect(handshake.get('ok'), 'mcp handshake failed: %s' % handshake.get('error'))
+    r.expect(handshake.get('ok') and {'list_machines', 'exec', 'send_file'} <= set(handshake['tools']), 'mcp tools/list lacks list_machines, exec or send_file: %s' % handshake.get('tools'))
+    out.append(r)
+
     for ident, name in (('C218', 'update check'), ('C219', 'update download')):
         r = Row(ident, name); r.help()
         custom = run(*r.command, '--json')

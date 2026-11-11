@@ -33,7 +33,7 @@ def redacted(value):
 
 # C102 (tunnel domain instructions) and C105 (tunnel domain verify) are gone: hostnames inherit their
 # workspace domain's verification.
-ROWS = [f'C{i:03d}' for i in range(98, 124) if i not in (102, 105)] + ['C242']
+ROWS = [f'C{i:03d}' for i in range(98, 124) if i not in (102, 105)] + ['C242', 'C279']
 
 
 class Suite:
@@ -129,9 +129,13 @@ class Suite:
             'C121': ['show', self.missing], 'C122': ['status', self.missing],
             'C123': ['stop', 'preview_' + self.args.run],
             'C242': ['rename', self.missing, self.name + '-renamed'],
+            'C279': ['create', 'bad name!', '--port', '3000'],
         }
         for row, words in cases.items():
             self.check(row, 'error', lambda words=words: self.command(*words, expect_error=True))
+        # C279 also refuses a create with no origin and one with a malformed --from.
+        self.check('C279', 'error', lambda: self.command('create', self.name + '-noorigin', expect_error=True))
+        self.check('C279', 'error', lambda: self.command('create', self.name + '-badfrom', '--from', 'ftp://127.0.0.1:1', expect_error=True))
         for row, group in [('C100', 'domain'), ('C110', 'policy'), ('C116', 'route')]:
             self.check(row, 'main', lambda group=group: self.command(group, json_output=False))
 
@@ -257,6 +261,17 @@ class Suite:
             require(self.zone_dns.exists(record), 'delete changed user DNS')
         self.tunnel = None
 
+    def created_tunnel(self, created):
+        """C279 main path: the create receipt names the tunnel and its endpoint, and --from with --private creates a private one."""
+        tunnel = created['tunnel']
+        require(tunnel['name'] == self.name and tunnel['id'] and tunnel['stable_endpoint'].startswith('https://'), 'create receipt lacks the tunnel name, id or https endpoint')
+        require(tunnel.get('access_mode', 'public') == 'public', 'a plain create was not public')
+        second = self.command('create', self.name + '-from', '--from', 'http://127.0.0.1:' + self.port, '--private', '--duration', '30m', '--wait', '--timeout', '90s', timeout=150)['tunnel']
+        try:
+            require(second['access_mode'] == 'private', '--private did not create a private tunnel')
+        finally:
+            confirmed_command(self.pb, 'tunnel', 'delete', second['id'])
+
     def main(self):
         self.errors()
         with serving(BODY) as port:
@@ -265,6 +280,7 @@ class Suite:
                 try:
                     created = self.command('create', self.name, '--port', self.port, '--duration', '30m', '--wait', '--timeout', '90s', timeout=150)
                     self.tunnel = created['tunnel']['id']; self.endpoint = created['tunnel']['stable_endpoint']
+                    self.check('C279', 'main', lambda: self.created_tunnel(created))
                     self.lifecycle(); self.domains(); self.check('C098', 'main', self.delete)
                 except Exception as error:
                     self.rows['C098']['failures'].append({'mode': 'prerequisite', 'reason': str(error), 'command': self.last})
@@ -276,7 +292,7 @@ class Suite:
                 # Recover exact-name creates even if the response was lost.
                 try:
                     for item in self.command('list', '--q', self.name)['items']:
-                        if item['name'] in (self.name, self.name + '-renamed') and item['account_id'] == self.before['account_id'] and item['desired_state'] != 'deleted':
+                        if item['name'] in (self.name, self.name + '-renamed', self.name + '-from') and item['account_id'] == self.before['account_id'] and item['desired_state'] != 'deleted':
                             confirmed_command(self.pb, 'tunnel', 'delete', item['id'])
                 except Exception as error:
                     self.rows['C098']['failures'].append({'mode': 'cleanup', 'reason': str(error)})
