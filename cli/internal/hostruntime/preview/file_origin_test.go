@@ -114,8 +114,8 @@ func TestSharedFileOnlyAtRootAndOnlyRead(t *testing.T) {
 
 func TestSharedFileGoneOrUnknown(t *testing.T) {
 	files := sharedFileRoot(t, map[string]string{"a.txt": "a"})
-	if _, err := dialFileOrigin(files, inbox.FileID("other.txt")); !errors.Is(err, ErrSharedFileUnavailable) {
-		t.Fatalf("unknown id: %v", err)
+	if response := fileRequest(t, files, inbox.FileID("other.txt"), "GET / HTTP/1.1\r\nHost: x\r\n\r\n"); response.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown id: %d", response.StatusCode)
 	}
 	if _, err := dialFileOrigin(nil, inbox.FileID("a.txt")); !errors.Is(err, ErrSharedFileUnavailable) {
 		t.Fatalf("no inbox: %v", err)
@@ -157,5 +157,23 @@ func TestSharedFileThroughOriginTransport(t *testing.T) {
 	}
 	if _, err := (&tunnelmanager.OriginHTTPTransport{}).RoundTrip(context.Background(), hoststate.TunnelConfigRoute{ID: "r", Protocol: "http", OriginScheme: "file", OriginAddress: target.Address, TLSVerification: "not_applicable", ConnectTimeoutMs: 1000, IdleTimeoutMs: 1000, DesiredState: "active"}, request); err == nil {
 		t.Fatal("a file origin without the carrier's dialer must not dial anything")
+	}
+}
+
+// A file gone before the visit must reach the browser as 404, not as a transport failure (edge 502).
+func TestSharedFileMissingThroughOriginTransportIs404(t *testing.T) {
+	carrier := &DataCarrierPreviewCarrier{inboxPath: sharedFileRoot(t, nil)}
+	target := LeaseTarget{Scheme: "file", Address: inbox.FileID("gone.txt")}
+	transport := carrier.previewHTTPTransport(target)
+	defer transport.CloseIdleConnections()
+	route := carrier.previewHTTPRoute("route_1", target, "not_applicable", time.Second)
+	request, _ := http.NewRequest(http.MethodGet, "https://share.example.test/", nil)
+	response, err := transport.RoundTrip(context.Background(), route, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("status %d", response.StatusCode)
 	}
 }

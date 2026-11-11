@@ -42,9 +42,7 @@ func dialFileOrigin(inboxPath func() (string, error), id string) (net.Conn, erro
 	if err != nil || root == "" {
 		return nil, errors.Join(ErrSharedFileUnavailable, err)
 	}
-	if _, err := inbox.Find(root, id); err != nil {
-		return nil, errors.Join(ErrSharedFileUnavailable, err)
-	}
+	// A missing file is not a dial failure: the edge would answer 502; sharedFileHandler answers 404.
 	client, server := net.Pipe()
 	listener := &pipeListener{conn: &closeNotifyConn{Conn: server, closed: make(chan struct{})}}
 	go func() {
