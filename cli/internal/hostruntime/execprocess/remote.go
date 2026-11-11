@@ -149,6 +149,10 @@ func (e *remoteExecution) OpenReader(from uint64) (ReaderService, error) {
 	}
 	return &remoteReader{execution: e, id: out.ReaderID}, nil
 }
+
+// Write is deliberately not bounded like the other context-free calls: it is the flow-controlled stdin path and returns
+// only when the process has taken the bytes, which can legitimately take long. Callers that need a bound use
+// WriteContext.
 func (e *remoteExecution) Write(data []byte) (int, error) {
 	return e.WriteContext(context.Background(), data)
 }
