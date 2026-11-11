@@ -22,6 +22,10 @@ func TestInputValidate(t *testing.T) {
 		"prefix escapes":     func(in *Input) { in.Prefix = "../x" },
 		"prefix empty part":  func(in *Input) { in.Prefix = "a//b" },
 		"bad access key":     func(in *Input) { in.AccessKeyID = "has space" },
+		"localhost":          func(in *Input) { in.Endpoint = "https://localhost" },
+		"private address":    func(in *Input) { in.Endpoint = "https://10.0.0.5" },
+		"metadata address":   func(in *Input) { in.Endpoint = "https://169.254.169.254" },
+		"one-label host":     func(in *Input) { in.Endpoint = "https://minio" },
 		"no use":             func(in *Input) { in.UseRecordings, in.UseFiles = false, false },
 	} {
 		in := valid()
