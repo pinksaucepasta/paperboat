@@ -31,4 +31,7 @@ grep -q '"step":"exec_b_to_a","ok":false' <<<"$out"
 # Every configured edge is fetched directly; one that does not answer fails the edges step only.
 out=$(CANARY_EDGES="127.0.0.1" "$here/probe.sh") || { echo "edges run failed: $out"; exit 1; }
 grep -q '"step":"edges","ok":true' <<<"$out" || { echo "edges step missing: $out"; exit 1; }
+# A step list runs only those steps, and the tunnel URL is not needed when the tunnel step is not wanted.
+out=$(PROBE_STEPS="exec_a_to_b exec_b_to_a" CANARY_TUNNEL_URL= "$here/probe.sh") || { echo "step list run failed: $out"; exit 1; }
+[ "$(grep -c '"ok":true' <<<"$out")" = 2 ] && [ "$(grep -c '"step"' <<<"$out")" = 2 ] || { echo "step list: $out"; exit 1; }
 echo "probe self-check ok"

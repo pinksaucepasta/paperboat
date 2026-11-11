@@ -8,10 +8,12 @@
 #   CANARY_PORT          origin port on A serving ~/canary-www (default 18099)
 #   PB                   pb path on the machines (default .local/bin/pb, relative to the user's home)
 #   PROBE_STEP_TIMEOUT   seconds per step (default 45)
+#   PROBE_STEPS          only these steps, space separated (default: all); staging has no edge, so it runs
+#                        exec_a_to_b exec_b_to_a ssh_a_to_b (deploy/staging-canary.sh)
 #   CANARY_EDGES         every managed edge address (space separated); each must serve the canary tunnel
 #                        directly, so an edge that dropped out of DNS or was null-routed still fails a step
 set -uo pipefail
-a=${CANARY_A:?} b=${CANARY_B:?} tunnel=${CANARY_TUNNEL_URL:?} port=${CANARY_PORT:-18099}
+a=${CANARY_A:?} b=${CANARY_B:?} tunnel=${CANARY_TUNNEL_URL:-} port=${CANARY_PORT:-18099}
 pb=${PB:-.local/bin/pb} limit=${PROBE_STEP_TIMEOUT:-45}
 : "${RUN_A:?}" "${RUN_B:?}"
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
@@ -23,6 +25,7 @@ on() { local run=$RUN_A; [ "$1" = B ] && run=$RUN_B; printf 'cd; %s\n' "$2" | ti
 
 step() { # name function: the function's stdout/stderr land in $tmp/out, $tmp/err
   local name=$1 start=$SECONDS; shift
+  [ -z "${PROBE_STEPS:-}" ] || [[ " $PROBE_STEPS " == *" $name "* ]] || return 0
   if "$@" >"$tmp/out" 2>"$tmp/err"; then
     printf '{"step":"%s","ok":true,"seconds":%d}\n' "$name" $((SECONDS - start))
   else
@@ -65,7 +68,7 @@ preview() { # a new preview of A's origin, fetched from here without credentials
   on A "$pb preview stop $id --json" >/dev/null 2>&1
   [ $rc = 0 ] || { cat "$tmp/fetch" >&2; return 1; }
 }
-tunnel() { fetch_all "$tunnel"; }
+tunnel() { [ -n "$tunnel" ] || { echo 'CANARY_TUNNEL_URL is not set' >&2; return 1; }; fetch_all "$tunnel"; }
 edges() { # fetch_all only sees the addresses in DNS; a dead edge leaves DNS within its TTL and would pass
   local host=${tunnel#*://} ip bad=; host=${host%%/*}; host=${host%%:*}
   for ip in ${CANARY_EDGES:?}; do
