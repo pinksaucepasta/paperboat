@@ -15,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/teaminbox"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"net/url"
 	"slices"
 	"strings"
@@ -348,7 +349,7 @@ func (s *Service) ConnectSharedTerminalSession(ctx context.Context, userID, sour
 	// and the CLI refuses a shared descriptor that claims more than the terminal.
 	response.Capabilities = []string{accessdescriptor.CapabilityTerminal}
 	auth := map[string]any{"method": "bearer", "token": token, "expires_at": expires, "scopes": []string{scope}, "access_session_id": accessID}
-	response.Terminal = map[string]any{"protocol": "paperboat.terminal.v1", "endpoints": machineTerminalEndpoints(runtimeWebsocketBase(httpIngressURL)), "session_id": sessionID, "cwd": cwd, "role": decision.Role, "auth": auth}
+	response.Terminal = map[string]any{"protocol": terminalprotocol.TerminalSubprotocol, "endpoints": machineTerminalEndpoints(runtimeWebsocketBase(httpIngressURL)), "session_id": sessionID, "cwd": cwd, "role": decision.Role, "auth": auth}
 	return response, nil
 }
 
@@ -507,7 +508,7 @@ func (s *Service) ConnectTerminalSession(ctx context.Context, userID, sourceMach
 	}
 	response.Connectable, response.Status, response.Reason, response.RetryAfterSeconds = true, "ready", "ready", 0
 	setCanonicalMachineIdentity(&response, row)
-	response.Terminal = map[string]any{"protocol": "paperboat.terminal.v1", "endpoints": machineTerminalEndpoints(websocketBaseURL), "session_id": terminalSession.ID, "cwd": terminalSession.LaunchCwd, "auth": credentials.TerminalAuth}
+	response.Terminal = map[string]any{"protocol": terminalprotocol.TerminalSubprotocol, "endpoints": machineTerminalEndpoints(websocketBaseURL), "session_id": terminalSession.ID, "cwd": terminalSession.LaunchCwd, "auth": credentials.TerminalAuth}
 	if credentials.FileTransferAuth != nil {
 		response.FileTransfer = map[string]any{"endpoint": httpBaseURL + "/v1/file-transfers", "source_machine_id": sourceMachineID, "destination_machine_id": row.ID, "initiating_user_id": userID, "policy": s.fileTransferPolicy, "auth": credentials.FileTransferAuth}
 	}

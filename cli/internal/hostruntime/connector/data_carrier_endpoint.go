@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/neterr"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"io"
 	"net"
 	"strings"
@@ -18,7 +19,7 @@ import (
 // DataCarrierALPN identifies the authenticated connector-v1 carrier
 // handshake. TLS verification remains the caller's trust boundary; this
 // package rejects an unverified or non-mutual configuration before dialing.
-const DataCarrierALPN = "paperboat.connector.v1"
+const DataCarrierALPN = connectorprotocol.CarrierALPN
 
 // DataCarrierPeerBinding maps the verified peer certificate to the exact
 // connector-v1 control-session identity expected by the caller. A trusted

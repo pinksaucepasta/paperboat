@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"net/http"
 	"strconv"
 	"time"
@@ -67,7 +68,7 @@ func writeTerminalBrowserTicket(w http.ResponseWriter, r *http.Request, signer b
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, http.StatusOK, SuccessResponse{Data: map[string]any{"stream_url": streamURL, "subprotocols": []string{browserterminal.Subprotocol, "pb-ticket." + ticket.Value}, "expires_at": ticket.ExpiresAt, "role": ticket.Role, "machine_id": decision.MachineID, "edge_node_id": decision.EdgeNodeID, "owner_account_id": decision.OwnerAccountID, "root_key_id": machineKey.KeyID, "root_public_key": base64.RawURLEncoding.EncodeToString(machineKey.PublicKey), "root_fingerprint": hex.EncodeToString(machineKey.Fingerprint[:])}})
+		writeJSON(w, http.StatusOK, SuccessResponse{Data: map[string]any{"stream_url": streamURL, "subprotocols": []string{browserterminal.Subprotocol, terminalprotocol.BrowserTicketPrefix + ticket.Value}, "expires_at": ticket.ExpiresAt, "role": ticket.Role, "machine_id": decision.MachineID, "edge_node_id": decision.EdgeNodeID, "owner_account_id": decision.OwnerAccountID, "root_key_id": machineKey.KeyID, "root_public_key": base64.RawURLEncoding.EncodeToString(machineKey.PublicKey), "root_fingerprint": hex.EncodeToString(machineKey.Fingerprint[:])}})
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"net/http"
 	"net/url"
 	"strings"
@@ -206,7 +207,7 @@ func (r *ConnectionDescriptor) NormalizeConnectionDescriptor() error {
 		return errors.New("paperboat-server returned an invalid environment kind")
 	}
 	if r.Terminal != nil {
-		if r.Terminal.Protocol != "paperboat.terminal.v1" {
+		if r.Terminal.Protocol != terminalprotocol.TerminalSubprotocol {
 			return errors.New("invalid canonical terminal protocol")
 		}
 	}

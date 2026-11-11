@@ -3,6 +3,7 @@ package connector
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"io"
 	"net/http"
 	"sync"
@@ -14,7 +15,7 @@ import (
 
 var ErrHTTP3Unavailable = errors.New("HTTP/3 connector establishment timed out")
 
-const httpCarrierPath = "/_paperboat/connector-v1"
+const httpCarrierPath = connectorprotocol.CarrierHTTPPath
 
 // HTTPCarrierFailure retains the finite HTTP establishment boundary without
 // exposing a peer response body or transport error text.

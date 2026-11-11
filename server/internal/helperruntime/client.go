@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 
 	"encoding/json"
 	"errors"
@@ -18,7 +19,7 @@ import (
 
 const (
 	protocolVersion = "1.0"
-	subprotocol     = "paperboat.terminal.v1"
+	subprotocol     = terminalprotocol.TerminalSubprotocol
 	maxFrameBytes   = 64 << 10
 )
 

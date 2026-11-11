@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"io"
 	"math/big"
 	"time"
@@ -26,8 +27,8 @@ import (
 )
 
 const (
-	websocketSubprotocol = "paperboat.browser-terminal.e2ee.v1"
-	innerALPN            = "paperboat.browser-terminal.e2ee.v1"
+	websocketSubprotocol = terminalprotocol.BrowserSubprotocol
+	innerALPN            = terminalprotocol.BrowserSubprotocol
 
 	identityEnvelopeMax = 8 << 10
 	appStructuredMax    = protocol.MaxBrowserResponseFrame

@@ -88,3 +88,7 @@ func MatchCarrierIdentityURN(uris []*url.URL, binding CarrierIdentityBinding) er
 	}
 	return nil
 }
+
+// CarrierALPN and CarrierHTTPPath identify the authenticated connector data carrier.
+const CarrierALPN = "paperboat.connector.v1"
+const CarrierHTTPPath = "/_paperboat/connector-v1"

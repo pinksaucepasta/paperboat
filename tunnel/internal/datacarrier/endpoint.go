@@ -18,7 +18,7 @@ import (
 // certificate and peer-identity validation remains the caller's trust
 // boundary, but this package rejects configurations that do not authenticate
 // both sides.
-const DataCarrierALPN = "paperboat.connector.v1"
+const DataCarrierALPN = connectorprotocol.CarrierALPN
 
 var (
 	ErrInvalidEndpoint = errors.New("invalid data carrier endpoint configuration")

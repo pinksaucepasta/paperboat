@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"net/http"
 	"net/url"
 	"slices"
@@ -393,7 +394,7 @@ func (r *APIResolver) validateDescriptor(resp api.ConnectionDescriptor, target t
 	if !completeTerminalDescriptor(resp.Terminal) {
 		return api.ConnectionDescriptor{}, errors.New("server returned an incomplete terminal descriptor")
 	}
-	if resp.Terminal.Protocol != "paperboat.terminal.v1" || resp.Environment == nil || strings.TrimSpace(resp.Environment.EnvironmentID) == "" || !environmentMatchesTarget(resp.Environment, target) {
+	if resp.Terminal.Protocol != terminalprotocol.TerminalSubprotocol || resp.Environment == nil || strings.TrimSpace(resp.Environment.EnvironmentID) == "" || !environmentMatchesTarget(resp.Environment, target) {
 		return api.ConnectionDescriptor{}, errors.New("server returned an invalid environment descriptor")
 	}
 	if strings.TrimSpace(resp.Environment.ProjectRoot) == "" || strings.TrimSpace(resp.Terminal.SessionID) == "" || strings.TrimSpace(resp.Terminal.CWD) == "" {

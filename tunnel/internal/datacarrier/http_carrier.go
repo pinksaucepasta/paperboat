@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"io"
 	"log"
 	"log/slog"
@@ -23,7 +24,7 @@ var ErrCarrierHTTPPanic = errors.New("data carrier HTTP handler panicked")
 var errCarrierHTTPDiagnostic = errors.New("data carrier HTTP server reported an internal diagnostic")
 var errCarrierListener = errors.New("data carrier listener failed")
 
-const httpCarrierPath = "/_paperboat/connector-v1"
+const httpCarrierPath = connectorprotocol.CarrierHTTPPath
 
 // HTTPService serves authenticated, full-duplex CONNECT carriers over real
 // HTTP/2 and HTTP/3 listeners.

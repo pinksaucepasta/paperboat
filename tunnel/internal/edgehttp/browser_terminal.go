@@ -2,12 +2,13 @@ package edgehttp
 
 import (
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"net/http"
 	"strings"
 )
 
-const browserTerminalSubprotocol = "paperboat.browser-terminal.e2ee.v1"
-const browserTerminalTicketPrefix = "pb-ticket."
+const browserTerminalSubprotocol = terminalprotocol.BrowserSubprotocol
+const browserTerminalTicketPrefix = terminalprotocol.BrowserTicketPrefix
 
 const (
 	browserTerminalTLSDiscriminator          byte = 0x00

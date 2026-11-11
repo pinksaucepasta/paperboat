@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"io"
 	"net/http"
 	"strings"
@@ -15,7 +16,7 @@ import (
 )
 
 const (
-	DefaultWebSocketSubprotocol = "paperboat.terminal.v1"
+	DefaultWebSocketSubprotocol = terminalprotocol.TerminalSubprotocol
 	DefaultMaxWebSocketMessage  = 1 << 20
 )
 

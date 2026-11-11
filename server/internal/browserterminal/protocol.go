@@ -1,3 +1,5 @@
 package browserterminal
 
-const Subprotocol = "paperboat.browser-terminal.e2ee.v1"
+import "github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
+
+const Subprotocol = terminalprotocol.BrowserSubprotocol

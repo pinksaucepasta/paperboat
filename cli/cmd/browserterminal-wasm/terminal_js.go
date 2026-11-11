@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"io"
 	"net"
 	"net/url"
@@ -77,10 +78,10 @@ func parseTerminalConfig(value js.Value) (terminalConfig, error) {
 	if err != nil || parsedURL.Host == "" || parsedURL.User != nil || parsedURL.Fragment != "" || parsedURL.RawQuery != "" || parsedURL.Path == "" || parsedURL.Scheme != "wss" {
 		return terminalConfig{}, errors.New("invalid browser stream URL")
 	}
-	if len(config.Subprotocols) != 2 || config.Subprotocols[0] != websocketSubprotocol || !strings.HasPrefix(config.Subprotocols[1], "pb-ticket.") || len(config.Subprotocols[1]) > 128 {
+	if len(config.Subprotocols) != 2 || config.Subprotocols[0] != websocketSubprotocol || !strings.HasPrefix(config.Subprotocols[1], terminalprotocol.BrowserTicketPrefix) || len(config.Subprotocols[1]) > 128 {
 		return terminalConfig{}, errors.New("invalid browser stream subprotocols")
 	}
-	ticket := strings.TrimPrefix(config.Subprotocols[1], "pb-ticket.")
+	ticket := strings.TrimPrefix(config.Subprotocols[1], terminalprotocol.BrowserTicketPrefix)
 	ticketBytes, err := base64.RawURLEncoding.Strict().DecodeString(ticket)
 	if err != nil || len(ticketBytes) != 32 || base64.RawURLEncoding.EncodeToString(ticketBytes) != ticket {
 		return terminalConfig{}, errors.New("invalid browser stream ticket")

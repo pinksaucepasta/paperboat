@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"net/http"
 	"strings"
 	"time"
@@ -67,7 +68,7 @@ func recordingReplay(s *recordings.Service, gateway *browserterminal.Gateway, si
 		var pending browserterminal.TooManyPendingTicketsError
 		switch {
 		case err == nil:
-			out.Ticket, out.StreamURL, out.Subprotocols, out.ExpiresAt = ticket.Value, streamURL, []string{browserterminal.Subprotocol, "pb-ticket." + ticket.Value}, ticket.ExpiresAt
+			out.Ticket, out.StreamURL, out.Subprotocols, out.ExpiresAt = ticket.Value, streamURL, []string{browserterminal.Subprotocol, terminalprotocol.BrowserTicketPrefix + ticket.Value}, ticket.ExpiresAt
 			out.Role, out.EdgeNodeID, out.OwnerAccountID = ticket.Role, decision.EdgeNodeID, decision.OwnerAccountID
 			out.RootKeyID, out.RootPublicKey, out.RootFingerprint = root.KeyID, base64.RawURLEncoding.EncodeToString(root.PublicKey), hex.EncodeToString(root.Fingerprint[:])
 			writeJSON(w, http.StatusOK, SuccessResponse{Data: out})

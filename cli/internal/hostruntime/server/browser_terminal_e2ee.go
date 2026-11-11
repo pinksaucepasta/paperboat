@@ -13,6 +13,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"io"
 	"net"
 	"net/http"
@@ -30,8 +31,8 @@ import (
 )
 
 const (
-	BrowserTerminalWebSocketSubprotocol = "paperboat.browser-terminal.e2ee.v1"
-	BrowserTerminalTLSALPN              = "paperboat.browser-terminal.e2ee.v1"
+	BrowserTerminalWebSocketSubprotocol = terminalprotocol.BrowserSubprotocol
+	BrowserTerminalTLSALPN              = terminalprotocol.BrowserSubprotocol
 	defaultBrowserTerminalMaxMessage    = 1 << 20
 	maxBrowserTerminalMaxMessage        = 4 << 20
 	browserTerminalHandshakeTimeout     = 10 * time.Second
