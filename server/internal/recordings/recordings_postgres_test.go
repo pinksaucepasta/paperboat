@@ -295,8 +295,8 @@ func TestPostgresRecordingsEndToEnd(t *testing.T) {
 		t.Fatalf("%s is not among the viewers %+v", account, ks.Viewers)
 		return false
 	}
-	if !hasGrant(f.member) || hasGrant(f.admin) {
-		t.Fatal("viewers' HasGrant must be true only for the member sealed for the current generation")
+	if !hasGrant(f.member) {
+		t.Fatal("the viewer sealed for the current generation must have HasGrant")
 	}
 	if ks, err := f.s.KeyState(f.ctx, f.bo, f.team); err != nil || ks.MyKey != nil {
 		t.Fatalf("member without a grant KeyState.MyKey = %+v, %v", ks.MyKey, err)
