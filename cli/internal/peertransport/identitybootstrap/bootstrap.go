@@ -18,7 +18,11 @@ import (
 )
 
 const (
-	CertificateLifetime    = 90 * 24 * time.Hour
+	// The server accepts an endpoint certificate that expires at most 90 days after ITS clock. Expiry is anchored
+	// to the client's clock, so a client whose clock is ahead of the server by even a second would be refused
+	// (HTTP 400 invalid_certificate; victus, 2026-11-11, about 2 s ahead): the lifetime keeps twice the clock-skew
+	// allowance (serverclock only corrects offsets of a minute and more) below that cap.
+	CertificateLifetime    = 90*24*time.Hour - 2*CertificateClockSkew
 	CertificateRenewBefore = 7 * 24 * time.Hour
 	// New endpoint certificates are backdated by the contract's bounded clock
 	// skew so a client whose wall clock is slightly ahead of the control plane
