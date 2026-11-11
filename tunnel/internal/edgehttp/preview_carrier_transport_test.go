@@ -766,6 +766,58 @@ func TestDataCarrierPreviewTransportHeaderTimeoutStartsAfterUpload(t *testing.T)
 	}
 }
 
+// The response-header budget ends when the headers arrive: a body (SSE, a download) that keeps streaming
+// for several times the budget is never cut by it.
+func TestDataCarrierPreviewTransportBodyOutlivesTheHeaderBudget(t *testing.T) {
+	identity := testEdgePreviewIdentity(1, 1)
+	server, client := testEdgePreviewCarrierPair(t, identity)
+	defer client.Close()
+	defer server.Close()
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	if err := registry.Attach(DataCarrierPreviewRoute{RouteID: "preview_01", Hostname: "app.preview.example.test", Kind: dataCarrierPreviewRouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, Server: server}); err != nil {
+		t.Fatal(err)
+	}
+	transport, err := NewDataCarrierPreviewTransport(DataCarrierPreviewTransportConfig{Registry: registry, StreamOpenTimeout: time.Second, ResponseHeaderTimeout: 250 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveDone := make(chan error, 1)
+	go func() {
+		stream, _, acceptErr := client.AcceptStream(context.Background())
+		if acceptErr != nil {
+			serveDone <- acceptErr
+			return
+		}
+		serveDone <- datacarrier.ServeHTTPStream(context.Background(), stream, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			writer.WriteHeader(http.StatusOK)
+			flusher := writer.(http.Flusher)
+			for _, part := range []string{"one;", "two;", "three"} {
+				_, _ = io.WriteString(writer, part)
+				flusher.Flush()
+				time.Sleep(350 * time.Millisecond) // 1.05 s in all, four times the 250 ms budget
+			}
+		}), 4096, 5*time.Second)
+	}()
+	request := httptest.NewRequest(http.MethodGet, "https://app.preview.example.test/stream", nil)
+	request.Host = "app.preview.example.test"
+	response, err := transport.RoundTrip(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(response.Body)
+	if err != nil || string(body) != "one;two;three" {
+		t.Fatalf("body=%q err=%v: the header budget cut a live body", body, err)
+	}
+	_ = response.Body.Close()
+	if err := <-serveDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A WebSocket upgrade must cross the preview data carrier: the 101 response
 // carries a writable body that bridges the upgraded connection.
 func TestDataCarrierPreviewTransportPreservesUpgrade(t *testing.T) {
