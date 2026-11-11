@@ -12,6 +12,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 func TestApprovedEndpointCertificateVector(t *testing.T) {
@@ -146,5 +148,13 @@ func TestEnrollmentWindowAcceptsAClientAheadAndRefusesPastTheLimits(t *testing.T
 	}
 	if !EnrollmentWindowAccepts(server.Add(-IssuedAtMaxAge), server.Add(MaxCertificateLifetime), server) {
 		t.Fatal("the inclusive limits (issued exactly at the age limit, expiring exactly at the cap) were refused")
+	}
+}
+
+// serverclock corrects clock offsets of this size and more, and the enrollment skew allowance is the offset a
+// client may still carry uncorrected: one number.
+func TestClockSkewAllowanceIsServerclocksThreshold(t *testing.T) {
+	if ClockSkewAllowance != serverclock.Threshold {
+		t.Fatalf("ClockSkewAllowance %v != serverclock.Threshold %v", ClockSkewAllowance, serverclock.Threshold)
 	}
 }

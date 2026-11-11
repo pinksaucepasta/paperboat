@@ -560,6 +560,10 @@ func TestNetworkAuthorityPartitionKeepsVerifiedStatePastRefreshHint(t *testing.T
 	}
 }
 
+// storageWaitBudget is how long the waits on the stalled-storage goroutine may take before the test calls it hung:
+// a loaded CI runner missed one second (run 42947015214); a real stall never returns, so a longer budget still fails it.
+const storageWaitBudget = 5 * time.Second
+
 func TestNetworkAuthorityExpiryDoesNotWaitForStorage(t *testing.T) {
 	a, c, signer, store := networkTestAuthority(t)
 	c.ExpiresAt = time.Now().Unix() + 1
@@ -582,7 +586,7 @@ func TestNetworkAuthorityExpiryDoesNotWaitForStorage(t *testing.T) {
 	go func() { finished <- a.Apply(t.Context(), token) }()
 	select {
 	case <-started:
-	case <-time.After(time.Second):
+	case <-time.After(storageWaitBudget):
 		t.Fatal("storage mutation not started")
 	}
 	time.Sleep(time.Until(time.Unix(c.ExpiresAt, 0)) + 20*time.Millisecond)
@@ -593,7 +597,7 @@ func TestNetworkAuthorityExpiryDoesNotWaitForStorage(t *testing.T) {
 		if allowed {
 			t.Fatal("stalled storage extended authority")
 		}
-	case <-time.After(time.Second):
+	case <-time.After(storageWaitBudget):
 		t.Fatal("expiry blocked behind storage")
 	}
 	close(release)
@@ -602,7 +606,7 @@ func TestNetworkAuthorityExpiryDoesNotWaitForStorage(t *testing.T) {
 		if !errors.Is(err, ErrExpiredAuthority) {
 			t.Fatal("expired late installation was not rejected", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(storageWaitBudget):
 		t.Fatal("storage completion did not release apply")
 	}
 }
