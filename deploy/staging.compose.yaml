@@ -1,0 +1,41 @@
+# R-04: isolated control plane. Never run this project with production volumes or host networking.
+name: ${PAPERBOAT_STAGING_PROJECT:?set PAPERBOAT_STAGING_PROJECT}
+services:
+  postgres:
+    image: ${PAPERBOAT_POSTGRES_IMAGE:?set PAPERBOAT_POSTGRES_IMAGE}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: paperboat_staging
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U postgres -d paperboat_staging"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+  migrate:
+    image: ${PAPERBOAT_SERVER_IMAGE:?set PAPERBOAT_SERVER_IMAGE}
+    env_file: [server.env]
+    volumes: [./secrets:/run/secrets:ro, ./releases:/srv/paperboat-releases:ro]
+    command: [paperboat-server, migrate]
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: "no"
+  server:
+    image: ${PAPERBOAT_SERVER_IMAGE:?set PAPERBOAT_SERVER_IMAGE}
+    env_file: [server.env]
+    volumes: [./secrets:/run/secrets:ro, ./releases:/srv/paperboat-releases:ro]
+    command: [paperboat-server, serve]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    # plain API on loopback for seeding and probes; the regional HTTPS name is served by the server itself
+    ports:
+      - "127.0.0.1:${PAPERBOAT_STAGING_API_PORT:?set PAPERBOAT_STAGING_API_PORT}:8080"
+      - "${PAPERBOAT_STAGING_HTTPS_PORT:?set PAPERBOAT_STAGING_HTTPS_PORT}:${PAPERBOAT_STAGING_HTTPS_PORT}"
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+secrets:
+  postgres_password: {file: ./secrets/postgres_password}
+volumes:
+  postgres_data:
