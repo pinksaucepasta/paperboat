@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/shared/peerconsumer"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/native"
@@ -108,7 +109,7 @@ func (g *tailnetTerminalStreams) OpenStream(ctx context.Context) (nativeStream, 
 	if err != nil {
 		return nil, err
 	}
-	capability := nativeCapability(g.consumer)
+	capability := peerconsumer.NetworkCapability(g.consumer)
 	connection, err := g.session.OpenAuthorized(ctx, header, g.resourceID, capability)
 	if err != nil {
 		return nil, err

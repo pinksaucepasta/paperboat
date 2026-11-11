@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/shared/peerconsumer"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"net"
 	"net/http"
@@ -295,7 +296,7 @@ func (g *cliNativeStreamGroup) OpenStream(ctx context.Context) (nativeStream, er
 		return g.session.OpenOffline(ctx, header)
 	}
 	streamEnd := diagnostics.ReconnectStep(ctx, "stream_authorize")
-	stream, err := g.session.OpenAuthorized(ctx, header, g.target.Auth.ResourceID, nativeCapability(g.consumer))
+	stream, err := g.session.OpenAuthorized(ctx, header, g.target.Auth.ResourceID, peerconsumer.NetworkCapability(g.consumer))
 	streamEnd(err)
 	if err != nil && g.consumer == "file_transfer" {
 		if ctx != nil && ctx.Err() != nil {
@@ -338,31 +339,8 @@ func (s *cliNativeAuthorizedStream) Close() error {
 	return s.err
 }
 
-func nativeCapability(consumer string) string {
-	switch consumer {
-	case "config_compare":
-		return "config_compare"
-	case "recording":
-		return "recording"
-	case "terminal":
-		return "terminal"
-	case "exec":
-		return "exec"
-	case "ssh":
-		return "managed_ssh"
-	case "codex":
-		return "codex"
-	case "file_transfer":
-		return "file_transfer"
-	case "private_tcp", "private_http":
-		return "private_access"
-	default:
-		return ""
-	}
-}
-
 func (r *cliNativeRuntime) openApplication(ctx context.Context, machineID, consumer string, application peerApplication, target *resolver.TerminalTarget, now func() time.Time) (Conn, error) {
-	if target == nil || target.Auth.ResourceID == "" && !target.Auth.Offline || nativeCapability(consumer) == "" {
+	if target == nil || target.Auth.ResourceID == "" && !target.Auth.Offline || peerconsumer.NetworkCapability(consumer) == "" {
 		return nil, ErrPeerTerminalInvalid
 	}
 	session, err := r.Dial(ctx, machineID, peerquic.ClassInteractive)
