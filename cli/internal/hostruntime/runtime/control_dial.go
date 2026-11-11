@@ -92,8 +92,10 @@ type rememberedAddresses struct {
 	At        int64    `json:"at"`
 }
 
-// rememberedAge bounds how stale a remembered control address may be.
-const rememberedAge = 7 * 24 * time.Hour
+// rememberedAge bounds how stale a remembered control address may be. The cache is only the fallback when DNS fails
+// (resolve always runs first, so a changed address is picked up as soon as DNS answers) and TLS verifies the hostname;
+// a day covers an outage, a week would pin a moved control plane's old address through a long one.
+const rememberedAge = 24 * time.Hour
 
 func (c *controlDialer) remember(host string, addrs []string) {
 	if c.cache == "" || len(addrs) > 16 {
@@ -121,7 +123,7 @@ func (c *controlDialer) remembered(host string) []string {
 		return nil
 	}
 	var r rememberedAddresses
-	if json.Unmarshal(body, &r) != nil || r.Host != host || time.Since(time.Unix(r.At, 0)) > rememberedAge {
+	if json.Unmarshal(body, &r) != nil || r.Host != host || controlAddressStale(r.At) {
 		return nil
 	}
 	var out []string
@@ -132,3 +134,5 @@ func (c *controlDialer) remembered(host string) []string {
 	}
 	return out
 }
+
+func controlAddressStale(at int64) bool { return time.Since(time.Unix(at, 0)) > rememberedAge }
