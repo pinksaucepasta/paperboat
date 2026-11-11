@@ -62,7 +62,7 @@ var removeWindowsStateElevated = removeWindowsStateByHandle
 // directory that another process holds open is not retried for five minutes: it is returned in leftovers and
 // reported in the status (lockedBridgeLeftover).
 func retryWindowsRemoval(ctx context.Context, profile, path string, preserved []string, leftovers *[]string) error {
-	for {
+	for attempt := 1; ; attempt++ {
 		checked := false
 		last := windowssecurity.WithUnelevatedToken(func() error {
 			// Before every attempt: the user can change these directories while the helper waits.
@@ -83,12 +83,26 @@ func retryWindowsRemoval(ctx context.Context, profile, path string, preserved []
 			*leftovers = appendLeftover(*leftovers, leftover)
 			return nil
 		}
+		// Only a file another process still holds is worth waiting for; any other failure is reported as itself.
+		if !retryableWindowsRemoval(last) && attempt >= maxWindowsRemovalAttempts {
+			return windowsUninstallLocalFailure("", last)
+		}
 		select {
 		case <-ctx.Done():
 			return windowsUninstallLocalFailure("", last, ctx.Err(), context.Cause(ctx))
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
+}
+
+// maxWindowsRemovalAttempts bounds the attempts at a removal that fails for a reason other than a held file.
+const maxWindowsRemovalAttempts = 3
+
+// retryableWindowsRemoval reports a failure that clears once another process (a stopping service, a scanner)
+// lets go of a file: a sharing or lock violation, a directory still listing an entry pending deletion, or the
+// access denial a delete-pending file returns.
+func retryableWindowsRemoval(err error) bool {
+	return errors.Is(err, windows.ERROR_SHARING_VIOLATION) || errors.Is(err, windows.ERROR_LOCK_VIOLATION) || errors.Is(err, windows.ERROR_DIR_NOT_EMPTY) || errors.Is(err, fs.ErrPermission)
 }
 
 // removeWindowsStateByHandle removes, with the helper's elevation, what is left of a user state path after the

@@ -495,3 +495,18 @@ func TestWindowsUninstallHelperFilesAreWrittenWithTheUsersRights(t *testing.T) {
 		}
 	})
 }
+
+// Only a held file is waited for; any other removal failure surfaces after a few attempts instead of the full
+// five-minute deadline joined with DeadlineExceeded.
+func TestWindowsRemovalRetriesOnlyHeldFiles(t *testing.T) {
+	for _, err := range []error{windows.ERROR_SHARING_VIOLATION, windows.ERROR_LOCK_VIOLATION, windows.ERROR_DIR_NOT_EMPTY, &fs.PathError{Op: "remove", Path: "x", Err: windows.ERROR_ACCESS_DENIED}} {
+		if !retryableWindowsRemoval(err) {
+			t.Errorf("%v is not retried", err)
+		}
+	}
+	for _, err := range []error{windows.ERROR_INVALID_NAME, windows.ERROR_DISK_FULL, errors.New("unexpected")} {
+		if retryableWindowsRemoval(err) {
+			t.Errorf("%v is retried until the deadline", err)
+		}
+	}
+}
