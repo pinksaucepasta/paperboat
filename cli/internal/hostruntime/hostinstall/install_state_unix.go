@@ -106,6 +106,16 @@ func LoadEnrolledOwner(uid int) (Request, error) {
 	return loadInstallMetadata(platformPaths(uid).metadata, uid)
 }
 
+// writeNewHostdToken creates the token with temp file + rename, so a crash or a full disk leaves either no
+// token or a complete one, never the empty file an in-place write leaves and a later install would keep.
+func writeNewHostdToken(path string) error {
+	token := make([]byte, 32)
+	if _, err := rand.Read(token); err != nil {
+		return err
+	}
+	return atomicfile.Write(path, token, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1})
+}
+
 func ensureHostdToken(paths installPaths, request Request) error {
 	// Hostd runs as the enrolled user, while the token directory is root-owned.
 	// Keep the directory non-writable to that user but traversable so hostd can
@@ -119,11 +129,7 @@ func ensureHostdToken(paths installPaths, request Request) error {
 	}
 	info, err := os.Lstat(paths.hostdToken)
 	if installNotExistOnly(err) {
-		token := make([]byte, 32)
-		if _, err := rand.Read(token); err != nil {
-			return err
-		}
-		if err := os.WriteFile(paths.hostdToken, token, 0o600); err != nil {
+		if err := writeNewHostdToken(paths.hostdToken); err != nil {
 			return err
 		}
 	} else if err != nil {
