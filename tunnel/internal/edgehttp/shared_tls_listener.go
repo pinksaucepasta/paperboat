@@ -95,6 +95,24 @@ func (h *holdSet) acquire(name string, known bool) (release func(), ok bool) {
 	}, true
 }
 
+// acquireWithin is acquire for a known name that waits up to wait for room.
+func (h *holdSet) acquireWithin(ctx context.Context, name string, wait time.Duration) (func(), bool) {
+	deadline := time.Now().Add(wait)
+	for {
+		if release, ok := h.acquire(name, true); ok {
+			return release, true
+		}
+		if !time.Now().Before(deadline) {
+			return nil, false
+		}
+		select {
+		case <-ctx.Done():
+			return nil, false
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
 // takeoverHoldMax, takeoverHoldPerName and takeoverHoldReserve size the TLS holds: 256 at once, at most 16 per
 // name, the last 64 for names the authority knows.
 const (
@@ -103,8 +121,15 @@ const (
 	takeoverHoldReserve = 64
 )
 
-// nameShare is the most connections one TLS name may hold of the listener's slots: a quarter.
-func nameShare(slots int) int { return max(1, slots/4) }
+// nameShare is the most connections one TLS name may hold of the listener's slots: a quarter, and
+// never fewer than two, so one open connection plus a reconnect always fit.
+func nameShare(slots int) int { return max(2, slots/4) }
+
+// nameShareWait is how long a connection to a name at its share waits for one of the name's
+// connections to end. A connection's share is given back only when the HTTP server notices the
+// client left, a moment after the client closed; a client that reconnects at once would otherwise be
+// refused while its old connection is still counted.
+const nameShareWait = 500 * time.Millisecond
 
 var errNameShareFull = errors.New("one name holds its full share of the edge's TLS slots")
 var errHandshakeRate = errors.New("client address over its TLS handshake rate")
@@ -176,7 +201,7 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 		l.observe("tls_dispatch", err)
 		return
 	}
-	releaseName, ok := l.names.acquire(host, true)
+	releaseName, ok := l.names.acquireWithin(l.ctx, host, nameShareWait)
 	if !ok {
 		l.observe("tls_name_share", errNameShareFull)
 		edgetelemetry.NoteRefusal(host)

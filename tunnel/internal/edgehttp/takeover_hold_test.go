@@ -193,23 +193,30 @@ func TestSharedTLSNameShareIsBounded(t *testing.T) {
 		_ = conn.SetReadDeadline(time.Time{})
 		return conn, nil
 	}
+	// Four slots: the share is two (one connection plus a reconnect).
 	first, err := dial()
 	if err != nil {
 		t.Fatalf("first connection: %v", err)
 	}
-	if second, err := dial(); err == nil {
-		second.Close()
-		t.Fatal("a second connection to the same name passed its 1-slot share")
+	second, err := dial()
+	if err != nil {
+		t.Fatalf("second connection inside the 2-slot share: %v", err)
 	}
+	started := time.Now()
+	if third, err := dial(); err == nil {
+		third.Close()
+		t.Fatal("a third connection to the same name passed its 2-slot share")
+	}
+	if waited := time.Since(started); waited < nameShareWait {
+		t.Fatalf("refused after %v, before the %v share wait", waited, nameShareWait)
+	}
+	// A reconnect right after a close is admitted: it waits for the closed connection's share to come
+	// back instead of being refused while the server has not yet noticed the close.
 	first.Close()
-	for deadline := time.Now().Add(2 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-		third, err := dial()
-		if err == nil {
-			third.Close()
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("share not given back after close: %v", err)
-		}
+	reconnect, err := dial()
+	if err != nil {
+		t.Fatalf("immediate reconnect after a close refused: %v", err)
 	}
+	reconnect.Close()
+	second.Close()
 }
