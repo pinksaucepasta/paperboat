@@ -1,0 +1,1 @@
+{"at": "20261110T232020Z", "results": [{"id": "cli-budget:victus", "status": "PASS", "seconds": 20, "detail": "{\"status\": \"PASS\", \"check\": \"cli-budget\", \"metrics\": {\"cli_start_ms\": 105, \"status_ms\": 192}, \"budget_failures\": [], \"enrollment_unchanged\": true}"}]}
