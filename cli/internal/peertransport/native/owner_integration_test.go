@@ -49,6 +49,10 @@ import (
 	"tailscale.com/types/nettype"
 )
 
+// A full terminal, exec and file-transfer sequence under the starved tests needs this long; it is the file
+// client's own timeout and the per-attempt budget of the recovery loops in peerrelay_integration_test.go.
+const transferAttemptTimeout = 5 * time.Second
+
 type testKeys map[string]ed25519.PublicKey
 
 func (k testKeys) Lookup(_ context.Context, keyID string) (ed25519.PublicKey, bool, error) {
@@ -599,7 +603,7 @@ func runRealTerminalAndFileProtocols(t *testing.T, clientOwner, serverOwner *nat
 	if err != nil {
 		t.Fatal(err)
 	}
-	fileClient := clienttransfer.NewClient("http://machine.slice/v1/file-transfers", clienttransfer.Auth{Token: "file-token", ExpiresAt: expires}, clienttransfer.Binding{SourceMachineID: "machine_slice", DestinationMachineID: "cli_slice", InitiatingUserID: "account_slice"}, &http.Client{Transport: transport, Timeout: 5 * time.Second})
+	fileClient := clienttransfer.NewClient("http://machine.slice/v1/file-transfers", clienttransfer.Auth{Token: "file-token", ExpiresAt: expires}, clienttransfer.Binding{SourceMachineID: "machine_slice", DestinationMachineID: "cli_slice", InitiatingUserID: "account_slice"}, &http.Client{Transport: transport, Timeout: transferAttemptTimeout})
 	manifest := clienttransfer.Manifest{TransferID: "transfer_slice", Size: int64(len(payload)), SHA256: hex.EncodeToString(digest[:])}
 	assertTransfer := func(ctx context.Context) error {
 		response, contentErr := fileClient.Content(ctx, manifest, 0)

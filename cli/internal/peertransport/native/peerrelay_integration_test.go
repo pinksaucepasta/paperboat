@@ -287,12 +287,15 @@ func testAutomaticPeerRelay(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer serverOwner.Close()
-	// The signed relay authority lasts 60s. A starved setup alone takes about that long (CI 41967595134: the
-	// relay stopped forwarding 60s in, so the delegated dial hung; 41989520217: exec died at QUIC idle timeout),
-	// and the outage and restart phases wait up to 55s together (the restarted relay denied an expired pair,
-	// Denied:4). Renew it before each phase, as the production refresh loop does; expiration must not
-	// masquerade as a transport recovery failure.
+	// The signed relay authority lasts 60s, but a starved setup alone takes about that long (CI 41967595134:
+	// the relay stopped forwarding 60s in; CI 42943969723: the warm dial outlived the grant, so every later
+	// AuthorizePair was denied, Denied:43). Renewing only after a dial or phase succeeds deadlocks on the
+	// expiry it must prevent, so renew on the wall clock as the production refresh loop (Authority.Run) does;
+	// expiration must not masquerade as a transport recovery failure.
+	var renewMu sync.Mutex
 	renewRelayAuthority := func() {
+		renewMu.Lock()
+		defer renewMu.Unlock()
 		refreshed := time.Now().UTC().Truncate(time.Second)
 		// The control plane advances the network generation on every refresh.
 		// Renewing timestamps at the old generation is a conflicting signed grant
@@ -305,6 +308,21 @@ func testAutomaticPeerRelay(t *testing.T) {
 		applyRelayAuthority(t, clientAuthority, signerPrivate, clientConfig, clientTLS, node, grant(clientDisco, serverDisco))
 		applyRelayAuthority(t, serverAuthority, signerPrivate, serverConfig, serverTLS, node, grant(serverDisco, clientDisco))
 	}
+	renewDone := make(chan struct{})
+	renewCtx, stopRenew := context.WithCancel(ctx)
+	go func() {
+		defer close(renewDone)
+		for ticker := time.NewTicker(15 * time.Second); ; {
+			select {
+			case <-renewCtx.Done():
+				ticker.Stop()
+				return
+			case <-ticker.C:
+				renewRelayAuthority()
+			}
+		}
+	}()
+	defer func() { stopRenew(); <-renewDone }()
 	var previousClient, previousServer uint64
 	repeatTransfer := runRealTerminalAndFileProtocols(t, clientOwner, serverOwner, serverAuthority, serverRegion, func(address mesh.Addr) {
 		readyCtx, cancelReady := context.WithTimeout(ctx, 8*time.Second)
@@ -326,17 +344,14 @@ func testAutomaticPeerRelay(t *testing.T) {
 			time.Sleep(20 * time.Millisecond)
 		}
 		previousClient, previousServer = clientFilter.relayData.Load(), serverFilter.relayData.Load()
-		renewRelayAuthority()
 	}, func(consumer string) {
 		sent, received := clientFilter.relayData.Load(), serverFilter.relayData.Load()
 		if sent <= previousClient || received <= previousServer {
 			t.Fatalf("%s did not traverse peer relay in both directions: before=%d/%d after=%d/%d", consumer, previousClient, previousServer, sent, received)
 		}
 		previousClient, previousServer = sent, received
-		renewRelayAuthority()
 	})
 
-	renewRelayAuthority()
 	clientFilter.allowDERP.Store(true)
 	serverFilter.allowDERP.Store(true)
 	oldUDP := udp
@@ -375,7 +390,7 @@ func testAutomaticPeerRelay(t *testing.T) {
 	var restartErr error
 	var recovered bool
 	for time.Now().Before(restartDeadline) {
-		attemptCtx, attemptCancel := context.WithTimeout(ctx, 750*time.Millisecond)
+		attemptCtx, attemptCancel := context.WithTimeout(ctx, transferAttemptTimeout)
 		beforeClient, beforeServer := clientFilter.relayData.Load(), serverFilter.relayData.Load()
 		restartErr = repeatTransfer(attemptCtx)
 		attemptCancel()
@@ -394,8 +409,6 @@ func testAutomaticPeerRelay(t *testing.T) {
 	if err := repeatTransfer(ctx); err != nil {
 		t.Fatalf("recovered peer relay transfer with DERP data disabled: %v", err)
 	}
-
-	renewRelayAuthority()
 
 	clientFilter.enabled.Store(true)
 	serverFilter.enabled.Store(true)
@@ -425,13 +438,17 @@ func testAutomaticPeerRelay(t *testing.T) {
 	if !directRecovered {
 		t.Fatalf("direct application path did not recover: data=%d/%d control=%d/%d relay=%+v err=%v", clientFilter.directData.Load(), serverFilter.directData.Load(), controlCalls.Load(), controlErrors.Load(), restartedUDP.Snapshot(), directErr)
 	}
+	// Direct loss rediscovers the relay while the reused session's timers are backed off; the product keeps DERP
+	// data on for that tail, and the loop below still requires relay data in both directions.
+	clientFilter.allowDERP.Store(true)
+	serverFilter.allowDERP.Store(true)
 	clientFilter.enabled.Store(false)
 	serverFilter.enabled.Store(false)
 	beforeClient, beforeServer := clientFilter.relayData.Load(), serverFilter.relayData.Load()
 	peerDeadline := time.Now().Add(35 * time.Second)
 	var peerErr error
 	for time.Now().Before(peerDeadline) {
-		attemptCtx, attemptCancel := context.WithTimeout(ctx, time.Second)
+		attemptCtx, attemptCancel := context.WithTimeout(ctx, transferAttemptTimeout)
 		peerErr = repeatTransfer(attemptCtx)
 		attemptCancel()
 		if peerErr == nil && clientFilter.relayData.Load() > beforeClient && serverFilter.relayData.Load() > beforeServer {
