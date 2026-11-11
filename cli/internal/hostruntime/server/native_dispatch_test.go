@@ -462,3 +462,62 @@ func TestNativeDispatchCarriesAnOfflineSessionsPeerToTheWorker(t *testing.T) {
 		t.Fatalf("an offline peer without an endpoint was admitted: %v", err)
 	}
 }
+
+// The offline forms the worker must refuse: no gate configured, a session a host never starts offline, both peer
+// envelopes at once, and a terminal that is allowed (its happy path reaches the worker like exec's).
+func TestNativeDispatchRefusesWhatMayNotStartOffline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	newClient := func(config NativeDispatchConfig) (*NativeDispatchClient, func()) {
+		config.Token, config.MaximumConcurrent, config.HandshakeTimeout = strings.Repeat("a", 43), 4, time.Second
+		config.Fence = func(context.Context) (func(), <-chan struct{}, error) { return func() {}, make(chan struct{}), nil }
+		config.Authorize = func(context.Context, streamauth.Header) (string, error) { return "", errors.New("credential check") }
+		handler, err := NewNativeDispatchHandler(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		worker := httptest.NewServer(handler)
+		client, err := NewNativeDispatchClient(NativeDispatchClientConfig{Address: strings.TrimPrefix(worker.URL, "http://"), Token: strings.Repeat("a", 43), DialTimeout: time.Second})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return client, func() { worker.Close(); _ = handler.Close(ctx) }
+	}
+	peer := NativeDispatchOfflinePeer{AccountID: "account", EndpointID: "endpoint"}
+	serve := func(_ context.Context, _ streamauth.Header, conn net.Conn) error {
+		_, err := io.Copy(io.Discard, conn)
+		return err
+	}
+
+	unset, closeUnset := newClient(NativeDispatchConfig{ServeStream: serve})
+	defer closeUnset()
+	exec, _ := streamauth.NewOffline("op-exec", "exec", "stream", time.Now().Add(2*time.Second), 1<<20)
+	if _, err := unset.OpenOffline(ctx, exec, peer); err == nil {
+		t.Fatal("an offline exec was admitted without an AuthorizeOffline gate")
+	}
+
+	served := make(chan string, 2)
+	gated, closeGated := newClient(NativeDispatchConfig{ServeStream: func(c context.Context, h streamauth.Header, conn net.Conn) error {
+		served <- h.Consumer
+		return serve(c, h, conn)
+	}, AuthorizeOffline: func(_ context.Context, h streamauth.Header) (string, error) { return h.OperationID, nil }})
+	defer closeGated()
+	ssh, _ := streamauth.NewOffline("op-ssh", "ssh", "stream", time.Now().Add(2*time.Second), 1<<20)
+	if _, err := gated.OpenOffline(ctx, ssh, peer); err == nil {
+		t.Fatal("an offline ssh stream was dispatched to the worker")
+	}
+	terminal, _ := streamauth.NewOffline("op-terminal", "terminal", "stream", time.Now().Add(2*time.Second), 1<<20)
+	connection, err := gated.OpenOffline(ctx, terminal, peer)
+	if err != nil {
+		t.Fatalf("an allowed offline terminal was refused: %v", err)
+	}
+	defer connection.Close()
+	select {
+	case consumer := <-served:
+		if consumer != "terminal" {
+			t.Fatalf("worker served %q", consumer)
+		}
+	case <-ctx.Done():
+		t.Fatal("offline terminal never reached the worker")
+	}
+}
