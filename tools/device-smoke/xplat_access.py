@@ -67,7 +67,7 @@ try:
     resolved = subprocess.run([pb, "resolve", machine, "--json"], capture_output=True, text=True, timeout=60)
     try:
         data = json.loads(resolved.stdout); data = data.get("data", data)
-        address = data.get("address") or (data.get("addresses") or [None])[0]
+        address = data.get("assigned_ip") or data.get("address")
     except Exception:
         address = None
     out["address"] = address

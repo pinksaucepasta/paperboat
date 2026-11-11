@@ -167,12 +167,14 @@ func (e *accessMachineStepError) Unwrap() error { return e.cause }
 func runAccessMachine(command *cobra.Command, args []string) error {
 	port, _ := command.Flags().GetInt("port")
 	if port < 1 || port > 65535 {
-		return fmt.Errorf("%w: --port must be between 1 and 65535", errAccessMachineInvalid)
+		return usageError{err: fmt.Errorf("%w: --port must be between 1 and 65535", errAccessMachineInvalid), publicMessage: "--port must be between 1 and 65535"}
 	}
 	listen, _ := command.Flags().GetString("listen")
 	listen, err := literalLoopbackAddress(listen)
 	if err != nil {
-		return fmt.Errorf("%w: --listen must be a literal loopback address", errAccessMachineInvalid)
+		// The refusal names its reason: a generic failure left users unable to tell which flag was wrong (X-19).
+		return usageError{err: fmt.Errorf("%w: --listen must be a literal loopback address", errAccessMachineInvalid),
+			publicMessage: "--listen must be a literal loopback address such as 127.0.0.1:8080 or [::1]:8080; other addresses are refused"}
 	}
 	runtime, machineID, err := accessMachineRuntimeForCommand(command, args[0])
 	if err != nil {

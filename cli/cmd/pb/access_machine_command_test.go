@@ -72,7 +72,7 @@ func TestAccessMachineRejectsUnsafeListenerAndPortBeforeAuthentication(t *testin
 	for _, args := range [][]string{{"machine", "--port", "0"}, {"machine", "--port", "70000"}, {"machine", "--port", "443", "--listen", "0.0.0.0:0"}, {"machine", "--port", "443", "--listen", "localhost:0"}} {
 		command := accessMachineCobraCommandV1()
 		command.SetArgs(args)
-		if err := command.Execute(); !errors.Is(err, errAccessMachineInvalid) {
+		if err := command.Execute(); !errors.Is(err, errAccessMachineInvalid) || !strings.Contains(err.Error(), "--") {
 			t.Fatalf("args=%v err=%v", args, err)
 		}
 	}
