@@ -18,8 +18,10 @@ type grantSigner struct{}
 func (grantSigner) SignNetworkConfiguration(peernetwork.Configuration) (string, error) {
 	return "config", nil
 }
-func (grantSigner) SignRegionalCandidates(map[string]any) (string, error) { return "candidates", nil }
-func (grantSigner) SignRelayGrant(peernetwork.RelayGrant) (string, error)      { return "grant", nil }
+func (grantSigner) SignRegionalCandidates(peernetwork.RegionalCandidates) (string, error) {
+	return "candidates", nil
+}
+func (grantSigner) SignRelayGrant(peernetwork.RelayGrant) (string, error) { return "grant", nil }
 
 // F13-03: hosted relays are granted per workspace: with the gate configured, a peer whose
 // connection's workspace is out of allowance gets no hosted relay, even when the account belongs

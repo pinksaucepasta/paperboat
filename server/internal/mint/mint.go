@@ -25,7 +25,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/jwks"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/pinksaucepasta/paperboat/shared/recording"
-	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 )
 
 const (
@@ -40,7 +39,6 @@ const (
 	MachineEventsType = "paperboat-machine-events+jwt"
 	// MachineEventsAnswerLifetime bounds one answer; a client checks it on the answer it just received.
 	MachineEventsAnswerLifetime = time.Minute
-	RegionalCandidatesType      = "paperboat-regional-candidates+jwt"
 	RelayGrantType              = peernetwork.RelayGrantType
 	// VisitorAssertionType is the typ of the signed visitor identity an app behind a gated (team or
 	// private) route receives in Paperboat-Visitor-Assertion (see SignVisitorAssertion).
@@ -98,35 +96,16 @@ func validBrowserKeyDigest(value string) bool {
 }
 
 // SignRegionalCandidates signs the endpoint-bound registry projection, which lives as long as the relay grants it
-// names (relaylimits.MaxGrantLifetime). It deliberately cannot be minted through operation credentials.
-func (p *Provider) SignRegionalCandidates(claims map[string]any) (string, error) {
-	if p == nil || claims == nil || claims["schema"] != "paperboat.regional-candidates.v1" || claims["aud"] != "paperboat-regional-candidates" {
-		return "", errors.New("regional candidate claims are invalid")
+// names (relaylimits.MaxGrantLifetime), and only one clients' own Check accepts. It deliberately cannot be minted
+// through operation credentials.
+func (p *Provider) SignRegionalCandidates(c peernetwork.RegionalCandidates) (string, error) {
+	if p == nil {
+		return "", errors.New("regional candidate signer is not configured")
 	}
-	issuedAt, issuedOK := integerClaim(claims["iat"])
-	expiresAt, expiresOK := integerClaim(claims["exp"])
-	generation, generationOK := integerClaim(claims["generation"])
-	if _, ok := claims["account_id"].(string); !ok || !issuedOK || !expiresOK || !generationOK || generation < 1 || expiresAt <= issuedAt || expiresAt-issuedAt > int64(relaylimits.MaxGrantLifetime/time.Second) {
-		return "", errors.New("regional candidate claims are invalid")
+	if err := c.Check(time.Unix(c.IssuedAt, 0)); err != nil {
+		return "", fmt.Errorf("regional candidate claims are invalid: %w", err)
 	}
-	if _, ok := claims["endpoint_id"].(string); !ok {
-		return "", errors.New("regional candidate endpoint is required")
-	}
-	if _, ok := claims["nodes"]; !ok {
-		return "", errors.New("regional candidate nodes are required")
-	}
-	return p.signClaims(RegionalCandidatesType, claims)
-}
-
-func integerClaim(value any) (int64, bool) {
-	switch value := value.(type) {
-	case int64:
-		return value, true
-	case int:
-		return int64(value), true
-	default:
-		return 0, false
-	}
+	return p.signClaims(peernetwork.RegionalCandidatesType, c)
 }
 
 type Key struct {

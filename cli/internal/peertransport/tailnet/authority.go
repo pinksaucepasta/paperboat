@@ -138,7 +138,7 @@ func (a *Authority) EligibleRegionalNodes(role, transport string, allowedRegions
 	if a.regional == nil || a.closed {
 		return nil, RedundancyNone, ErrRegionalAuthority
 	}
-	return a.regional.Eligible(role, transport, allowedRegions, now)
+	return eligible(a.regional, role, transport, allowedRegions, now)
 }
 
 // RequestRefresh asks Run to renew the signed configuration now, for example when a peer's

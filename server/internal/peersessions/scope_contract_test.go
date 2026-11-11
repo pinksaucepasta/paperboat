@@ -271,3 +271,39 @@ func TestAdmittedScopesTakeEverySharedKind(t *testing.T) {
 		t.Fatal("an empty id was accepted")
 	}
 }
+
+// Every regional candidate set the server builds (regionalCandidateSet), signed by the real mint, is one clients
+// accept: DecodeSigned and peernetwork.RegionalCandidates.Check, with managed and self-hosted, pinned and unpinned
+// relays, and the most nodes a set may name.
+func TestEveryRegionalCandidateSetTheServerBuildsIsAcceptedByClients(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	_, private, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := mint.New([]mint.Key{{ID: "contract", PrivateKey: private}}, "contract", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nodes []peernetwork.RegionalNode
+	for i := range peernetwork.MaxRegionalCandidates {
+		n := peernetwork.RegionalNode{NodeID: fmt.Sprint("node_", i), NodeGeneration: 1, ProcessEpoch: "epoch", Region: "region", FailureDomain: "domain", Roles: []string{"relay"}, Transports: []string{"derp_quic"},
+			EndpointHost: "relay.example.test", EndpointTCPPort: 443, EndpointQUICPort: 443, State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 100, CapacityObservedAt: now.Unix()}
+		if i%2 == 0 {
+			n.Hosting, n.TLSSPKISHA256 = peernetwork.HostingSelfHosted, contractKey(i)
+		}
+		nodes = append(nodes, n)
+	}
+	token, err := signer.SignRegionalCandidates(regionalCandidateSet("https://api.example.test", "account", "endpoint", 3, now, now.Add(time.Hour), nodes))
+	if err != nil {
+		t.Fatalf("mint refused a candidate set the server built: %v", err)
+	}
+	body, err := base64.RawURLEncoding.DecodeString(strings.Split(token, ".")[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got peernetwork.RegionalCandidates
+	if err := peernetwork.DecodeSigned(body, &got); err != nil || got.Check(now) != nil || len(got.Nodes) != len(nodes) {
+		t.Fatalf("clients refuse the candidate set: %v, %v", err, got.Check(now))
+	}
+}

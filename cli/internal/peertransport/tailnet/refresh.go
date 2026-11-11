@@ -407,7 +407,7 @@ func (a *Authority) regionalRenewalDelay(now time.Time) (time.Duration, bool) {
 	a.mu.Lock()
 	candidates := a.regional
 	a.mu.Unlock()
-	nodes, _, err := candidates.Eligible("relay", "derp_quic", nil, now)
+	nodes, _, err := eligible(candidates, "relay", "derp_quic", nil, now)
 	if err != nil || len(nodes) == 0 {
 		return 0, false
 	}

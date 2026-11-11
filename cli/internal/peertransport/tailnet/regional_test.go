@@ -58,11 +58,11 @@ func TestRegionalCandidatesEligibilityExpiryAndReducedRedundancy(t *testing.T) {
 	overloaded := node("overloaded", "hel", "hel-d", "ready", 90)
 	candidates := RegionalCandidates{IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), Nodes: []RegionalNode{excluded, draining, stale, overloaded, ready}}
 
-	got, redundancy, err := candidates.Eligible("relay", "derp_quic", map[string]bool{"hel": true}, now)
+	got, redundancy, err := eligible(&candidates, "relay", "derp_quic", map[string]bool{"hel": true}, now)
 	if err != nil || len(got) != 1 || got[0].NodeID != "ready" || redundancy != RedundancyReduced {
 		t.Fatalf("eligible = %#v, redundancy = %q, err = %v", got, redundancy, err)
 	}
-	if _, _, err := candidates.Eligible("relay", "derp_quic", nil, now.Add(61*time.Second)); !errors.Is(err, ErrRegionalAuthority) {
+	if _, _, err := eligible(&candidates, "relay", "derp_quic", nil, now.Add(61*time.Second)); !errors.Is(err, ErrRegionalAuthority) {
 		t.Fatalf("expired candidates error = %v", err)
 	}
 }
@@ -73,7 +73,7 @@ func TestRegionalCandidatesDifferentFailureDomainIsObservable(t *testing.T) {
 		return RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: "epoch", Region: "hel", FailureDomain: domain, Roles: []string{"edge"}, Transports: []string{"http3"}, EndpointHost: id + ".example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), CapacityLimit: 10, CapacityObservedAt: now.Unix()}
 	}
 	candidates := RegionalCandidates{IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), Nodes: []RegionalNode{node("a", "rack-a"), node("b", "rack-b")}}
-	got, redundancy, err := candidates.Eligible("edge", "http3", nil, now)
+	got, redundancy, err := eligible(&candidates, "edge", "http3", nil, now)
 	if err != nil || len(got) != 2 || redundancy != RedundancyAvailable {
 		t.Fatalf("eligible = %#v, redundancy = %q, err = %v", got, redundancy, err)
 	}
@@ -199,13 +199,13 @@ func TestRegionalCandidatesStaySelectableOfflineUntilTheSetExpires(t *testing.T)
 	}
 	candidates := RegionalCandidates{IssuedAt: issued.Unix(), ExpiresAt: issued.Add(12 * time.Hour).Unix(), Nodes: []RegionalNode{node("fresh", 5*time.Second), node("late", -time.Second), node("stale", 16*time.Second)}}
 	for _, outage := range []time.Duration{2 * time.Second, 61 * time.Second, 10 * time.Minute, 11 * time.Hour} {
-		got, _, err := candidates.Eligible("relay", "derp_quic", nil, issued.Add(outage))
+		got, _, err := eligible(&candidates, "relay", "derp_quic", nil, issued.Add(outage))
 		// "late" heartbeated a second after the set's issue time, as the control plane's rows can.
 		if err != nil || len(got) != 2 || got[0].NodeID != "fresh" && got[1].NodeID != "fresh" {
 			t.Fatalf("%s into an outage: eligible = %#v, err = %v; want the nodes fresh at signing, not the stale one", outage, got, err)
 		}
 	}
-	if _, _, err := candidates.Eligible("relay", "derp_quic", nil, issued.Add(12*time.Hour+time.Second)); !errors.Is(err, ErrRegionalAuthority) {
+	if _, _, err := eligible(&candidates, "relay", "derp_quic", nil, issued.Add(12*time.Hour+time.Second)); !errors.Is(err, ErrRegionalAuthority) {
 		t.Fatalf("expired set error = %v", err)
 	}
 }

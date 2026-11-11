@@ -9,16 +9,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/server/internal/admission"
-	"github.com/pinksaucepasta/paperboat/server/internal/bandwidthgate"
-	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
-	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"log/slog"
 	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/admission"
+	"github.com/pinksaucepasta/paperboat/server/internal/bandwidthgate"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
+	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -77,7 +78,7 @@ type NetworkService struct {
 	store          *db.DB
 	signer         interface {
 		SignNetworkConfiguration(peernetwork.Configuration) (string, error)
-		SignRegionalCandidates(map[string]any) (string, error)
+		SignRegionalCandidates(peernetwork.RegionalCandidates) (string, error)
 		SignRelayGrant(peernetwork.RelayGrant) (string, error)
 	}
 	issuer string
@@ -89,7 +90,7 @@ type NetworkService struct {
 
 func NewNetworkService(store *db.DB, signer interface {
 	SignNetworkConfiguration(peernetwork.Configuration) (string, error)
-	SignRegionalCandidates(map[string]any) (string, error)
+	SignRegionalCandidates(peernetwork.RegionalCandidates) (string, error)
 	SignRelayGrant(peernetwork.RelayGrant) (string, error)
 }, issuer string) (*NetworkService, error) {
 	if store == nil || signer == nil || issuer == "" {
@@ -903,90 +904,53 @@ func peersHaveDiscoKeys(peers []networkPeer) bool {
 	return true
 }
 
-// RegionalNode is one relay in the signed regional candidate set. Claims is the one place its
-// signed shape is built; released pb decodes it strictly (tools/compat checks the oldest one).
-type RegionalNode struct {
-	NodeID, ProcessEpoch, Region, FailureDomain string
-	NodeGeneration                              int64
-	Roles, Transports                           []string
-	EndpointHost                                string
-	EndpointTCPPort, EndpointQUICPort           int
-	State                                       string
-	ObservedAt, ExpiresAt, CapacityObservedAt   int64
-	CapacityLimit, CapacityUsed                 int64
-	DrainDeadline                               *int64
-	TLSPin                                      []byte
-	// SelfHosted: an account's or team's own pbh relay, the only relay an Unlimited transfer uses.
-	SelfHosted bool
-}
-
-func (n RegionalNode) Claims() (map[string]any, error) {
-	m := map[string]any{"node_id": n.NodeID, "node_generation": n.NodeGeneration, "process_epoch": n.ProcessEpoch, "region": n.Region, "failure_domain": n.FailureDomain, "roles": n.Roles, "transports": n.Transports, "endpoint_host": n.EndpointHost, "endpoint_tcp_port": n.EndpointTCPPort, "endpoint_quic_port": n.EndpointQUICPort, "state": n.State, "observed_at": n.ObservedAt, "expires_at": n.ExpiresAt, "capacity_limit": n.CapacityLimit, "capacity_used": n.CapacityUsed, "capacity_observed_at": n.CapacityObservedAt}
-	if len(n.TLSPin) > 0 {
-		if len(n.TLSPin) != sha256.Size {
-			return nil, ErrUnavailable
-		}
-		m["tls_spki_sha256"] = base64.RawURLEncoding.EncodeToString(n.TLSPin)
-	}
-	if n.DrainDeadline != nil {
-		m["drain_deadline"] = *n.DrainDeadline
-	}
-	if n.SelfHosted {
-		m["hosting"] = "self_hosted"
-	}
-	return m, nil
-}
-
 func (s *NetworkService) regionalCandidates(ctx context.Context, tx *sql.Tx, accountID, endpointID string, generation int64, now time.Time) (string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id,node_generation,process_epoch,region,failure_domain,array_to_json(roles),array_to_json(transports),coalesce(endpoint_host,''),coalesce(endpoint_tcp_port,0),coalesce(endpoint_quic_port,0),state,last_heartbeat_at,registry_expires_at,capacity_limit,capacity_used,capacity_observed_at,drain_deadline,tls_spki_sha256,EXISTS(SELECT 1 FROM paperboat.selfhost_installations i WHERE i.node_id=control_tunnel_nodes.id AND i.scope_kind IN ('account','team')) FROM paperboat.control_tunnel_nodes WHERE region IS NOT NULL AND paperboat.node_pool_eligible(id,$1,'relay') AND state='ready' AND ready AND last_heartbeat_at>$2::timestamptz-interval '15 seconds' AND registry_expires_at>$2::timestamptz AND capacity_observed_at>$2::timestamptz-interval '15 seconds' AND capacity_used<capacity_limit-capacity_limit/10 AND drain_deadline IS NULL ORDER BY region,id LIMIT 33`, accountID, now)
+	rows, err := tx.QueryContext(ctx, `SELECT id,node_generation,process_epoch,region,failure_domain,array_to_json(roles),array_to_json(transports),coalesce(endpoint_host,''),coalesce(endpoint_tcp_port,0),coalesce(endpoint_quic_port,0),state,last_heartbeat_at,registry_expires_at,capacity_limit,capacity_used,capacity_observed_at,drain_deadline,tls_spki_sha256,EXISTS(SELECT 1 FROM paperboat.selfhost_installations i WHERE i.node_id=control_tunnel_nodes.id AND i.scope_kind IN ('account','team')) FROM paperboat.control_tunnel_nodes WHERE region IS NOT NULL AND paperboat.node_pool_eligible(id,$1,'relay') AND state='ready' AND ready AND last_heartbeat_at>$2::timestamptz-interval '15 seconds' AND registry_expires_at>$2::timestamptz AND capacity_observed_at>$2::timestamptz-interval '15 seconds' AND capacity_used<capacity_limit-capacity_limit/10 AND drain_deadline IS NULL ORDER BY region,id LIMIT $3`, accountID, now, peernetwork.MaxRegionalCandidates)
 	if err != nil {
 		return "", err
 	}
 	defer rows.Close()
-	nodes := make([]map[string]any, 0, 32)
+	nodes := make([]peernetwork.RegionalNode, 0, peernetwork.MaxRegionalCandidates)
 	for rows.Next() {
-		var n RegionalNode
-		var roles, transports []byte
+		var n peernetwork.RegionalNode
+		var roles, transports, pin []byte
+		var tcpPort, quicPort int
 		var observed, expires, capacityAt time.Time
 		var drain sql.NullTime
-		if err := rows.Scan(&n.NodeID, &n.NodeGeneration, &n.ProcessEpoch, &n.Region, &n.FailureDomain, &roles, &transports, &n.EndpointHost, &n.EndpointTCPPort, &n.EndpointQUICPort, &n.State, &observed, &expires, &n.CapacityLimit, &n.CapacityUsed, &capacityAt, &drain, &n.TLSPin, &n.SelfHosted); err != nil {
+		var selfHosted bool
+		if err := rows.Scan(&n.NodeID, &n.NodeGeneration, &n.ProcessEpoch, &n.Region, &n.FailureDomain, &roles, &transports, &n.EndpointHost, &tcpPort, &quicPort, &n.State, &observed, &expires, &n.CapacityLimit, &n.CapacityUsed, &capacityAt, &drain, &pin, &selfHosted); err != nil {
 			return "", err
 		}
-		if err := json.Unmarshal(roles, &n.Roles); err != nil {
-			return "", unavailableWithCause(err)
+		// A node whose row clients would refuse is left out; it never withholds the other relays.
+		if json.Unmarshal(roles, &n.Roles) != nil || json.Unmarshal(transports, &n.Transports) != nil || tcpPort < 0 || tcpPort > 65535 || quicPort < 0 || quicPort > 65535 || len(pin) != 0 && len(pin) != sha256.Size {
+			slog.Warn("regional candidates omit a relay with an invalid registry row", "site", "network.go:regionalCandidates", "node", n.NodeID)
+			continue
 		}
-		if err := json.Unmarshal(transports, &n.Transports); err != nil {
-			return "", unavailableWithCause(err)
-		}
-		if len(nodes) == 32 {
-			return "", ErrResourceLimit
-		}
+		n.EndpointTCPPort, n.EndpointQUICPort = uint16(tcpPort), uint16(quicPort)
 		n.ObservedAt, n.ExpiresAt, n.CapacityObservedAt = observed.Unix(), expires.Unix(), capacityAt.Unix()
 		if drain.Valid {
 			deadline := drain.Time.Unix()
 			n.DrainDeadline = &deadline
 		}
-		m, err := n.Claims()
-		if err != nil {
-			slog.Warn("peer network authority unavailable", "site", "network.go:743")
-			return "", err
+		if len(pin) != 0 {
+			n.TLSSPKISHA256 = base64.RawURLEncoding.EncodeToString(pin)
 		}
-		nodes = append(nodes, m)
+		if selfHosted {
+			n.Hosting = peernetwork.HostingSelfHosted
+		}
+		nodes = append(nodes, n)
 	}
 	if err := rows.Err(); err != nil {
 		return "", err
 	}
 	expires := now.Add(relaylimits.MaxGrantLifetime) // as long as the grants of the relays it names
-	return s.signRegionalCandidates(RegionalCandidateSet(s.issuer, accountID, endpointID, generation, now, expires, nodes))
+	return s.signer.SignRegionalCandidates(regionalCandidateSet(s.issuer, accountID, endpointID, generation, now, expires, nodes))
 }
 
-// RegionalCandidateSet is the signed regional candidate set's claims (nodes from RegionalNode.Claims).
-func RegionalCandidateSet(issuer, accountID, endpointID string, generation int64, now, expires time.Time, nodes []map[string]any) map[string]any {
-	return map[string]any{"schema": "paperboat.regional-candidates.v1", "iss": issuer, "aud": "paperboat-regional-candidates", "account_id": accountID, "endpoint_id": endpointID, "authorization_generation": generation, "generation": generation, "iat": now.Unix(), "exp": expires.Unix(), "nodes": nodes}
-}
-
-func (s *NetworkService) signRegionalCandidates(claims map[string]any) (string, error) {
-	return s.signer.SignRegionalCandidates(claims)
+// regionalCandidateSet is the signed regional candidate set for one endpoint.
+func regionalCandidateSet(issuer, accountID, endpointID string, generation int64, now, expires time.Time, nodes []peernetwork.RegionalNode) peernetwork.RegionalCandidates {
+	return peernetwork.RegionalCandidates{Schema: peernetwork.RegionalCandidatesSchema, Issuer: issuer, Audience: peernetwork.RegionalCandidatesAudience, AccountID: accountID, EndpointID: endpointID,
+		AuthorizationGeneration: uint64(generation), Generation: uint64(generation), IssuedAt: now.Unix(), ExpiresAt: expires.Unix(), Nodes: nodes}
 }
 
 // maximumNetworkGrants bounds the access sessions one configuration carries. Past it the

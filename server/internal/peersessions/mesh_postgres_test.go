@@ -24,7 +24,7 @@ func (m meshTestSigner) SignNetworkConfiguration(claims peernetwork.Configuratio
 	}
 	return "config", nil
 }
-func (meshTestSigner) SignRegionalCandidates(map[string]any) (string, error) {
+func (meshTestSigner) SignRegionalCandidates(peernetwork.RegionalCandidates) (string, error) {
 	return "candidates", nil
 }
 func (meshTestSigner) SignRelayGrant(peernetwork.RelayGrant) (string, error) { return "grant", nil }

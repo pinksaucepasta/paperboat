@@ -9,14 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/relay/derpquic"
-	"github.com/pinksaucepasta/paperboat/relay/nodetls"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
-	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
-const MaxRegionalCandidates = 32
+const MaxRegionalCandidates = peernetwork.MaxRegionalCandidates
 
 var ErrRegionalAuthority = errors.New("regional candidate authority is invalid or expired")
 
@@ -28,45 +25,9 @@ const (
 	RedundancyAvailable Redundancy = "available"
 )
 
-type RegionalNode struct {
-	TLSSPKISHA256      string   `json:"tls_spki_sha256,omitempty"`
-	NodeID             string   `json:"node_id"`
-	NodeGeneration     uint64   `json:"node_generation"`
-	ProcessEpoch       string   `json:"process_epoch"`
-	Region             string   `json:"region"`
-	FailureDomain      string   `json:"failure_domain"`
-	Roles              []string `json:"roles"`
-	Transports         []string `json:"transports"`
-	EndpointHost       string   `json:"endpoint_host"`
-	EndpointTCPPort    uint16   `json:"endpoint_tcp_port"`
-	EndpointQUICPort   uint16   `json:"endpoint_quic_port"`
-	State              string   `json:"state"`
-	ObservedAt         int64    `json:"observed_at"`
-	ExpiresAt          int64    `json:"expires_at"`
-	CapacityLimit      uint64   `json:"capacity_limit"`
-	CapacityUsed       uint64   `json:"capacity_used"`
-	CapacityObservedAt int64    `json:"capacity_observed_at"`
-	DrainDeadline      *int64   `json:"drain_deadline,omitempty"`
-	// Hosting says who runs the relay: "self_hosted" for the account's own (pbh), "managed" or absent for
-	// Paperboat's. Unlimited file transfers may use only self-hosted relays.
-	Hosting string `json:"hosting,omitempty"`
-}
-
-// SelfHosted reports whether the account runs this relay itself. A node that does not say is managed.
-func (n RegionalNode) SelfHosted() bool { return n.Hosting == "self_hosted" }
-
-type RegionalCandidates struct {
-	Schema                  string         `json:"schema"`
-	Issuer                  string         `json:"iss"`
-	Audience                string         `json:"aud"`
-	AccountID               string         `json:"account_id"`
-	EndpointID              string         `json:"endpoint_id"`
-	AuthorizationGeneration uint64         `json:"authorization_generation"`
-	Generation              uint64         `json:"generation"`
-	IssuedAt                int64          `json:"iat"`
-	ExpiresAt               int64          `json:"exp"`
-	Nodes                   []RegionalNode `json:"nodes"`
-}
+// RegionalNode and RegionalCandidates are the shared signed candidate set types (shared/peernetwork).
+type RegionalNode = peernetwork.RegionalNode
+type RegionalCandidates = peernetwork.RegionalCandidates
 
 func (a *Authority) ApplyRegionalCandidates(ctx context.Context, token string) error {
 	parts := strings.Split(token, ".")
@@ -89,7 +50,7 @@ func (a *Authority) ApplyRegionalCandidates(ctx context.Context, token string) e
 		KeyID     string `json:"kid"`
 	}
 	var c RegionalCandidates
-	if e1 != nil || e2 != nil || e3 != nil || peernetwork.DecodeSigned(header, &h) != nil || h.Algorithm != "EdDSA" || h.Type != "paperboat-regional-candidates+jwt" || !peernetwork.ValidID(h.KeyID) || peernetwork.DecodeSigned(body, &c) != nil {
+	if e1 != nil || e2 != nil || e3 != nil || peernetwork.DecodeSigned(header, &h) != nil || h.Algorithm != "EdDSA" || h.Type != peernetwork.RegionalCandidatesType || !peernetwork.ValidID(h.KeyID) || peernetwork.DecodeSigned(body, &c) != nil {
 		return ErrRegionalAuthority
 	}
 	pub, found, err := a.options.Keys.Lookup(ctx, h.KeyID)
@@ -102,21 +63,11 @@ func (a *Authority) ApplyRegionalCandidates(ctx context.Context, token string) e
 	if a.current == nil || c.AuthorizationGeneration != a.current.Generation {
 		return ErrRegionalAuthority
 	}
-	if c.Schema != "paperboat.regional-candidates.v1" || c.Issuer != a.options.Issuer || c.Audience != "paperboat-regional-candidates" || c.AccountID != a.options.Self.AccountID || c.EndpointID != a.options.Self.EndpointID || c.Generation == 0 || c.IssuedAt > now.Add(derpquic.MaxClockSkew).Unix() || c.ExpiresAt <= now.Unix() || c.ExpiresAt-c.IssuedAt > int64(relaylimits.MaxGrantLifetime/time.Second) || len(c.Nodes) > MaxRegionalCandidates {
+	if c.Check(now) != nil || c.Issuer != a.options.Issuer || c.AccountID != a.options.Self.AccountID || c.EndpointID != a.options.Self.EndpointID || c.ExpiresAt <= now.Unix() {
 		return ErrRegionalAuthority
 	}
 	if a.regional != nil && c.Generation < a.regional.Generation {
 		return ErrStaleAuthority
-	}
-	for _, node := range c.Nodes {
-		if node.Hosting != "" && node.Hosting != "managed" && node.Hosting != "self_hosted" {
-			return ErrRegionalAuthority
-		}
-		if node.TLSSPKISHA256 != "" {
-			if _, err := nodetls.ParsePin(node.TLSSPKISHA256); err != nil {
-				return ErrRegionalAuthority
-			}
-		}
 	}
 	a.regional = &c
 	return nil
@@ -160,7 +111,7 @@ func (a *Authority) RegionalNodes(now time.Time) ([]RegionalNode, error) {
 // A relay that failed since is not selected by the next renewal, which only lists relays that heartbeat.
 const regionalObservationMaxAge = 15 * time.Second
 
-func (c *RegionalCandidates) Eligible(role, transport string, regions map[string]bool, now time.Time) ([]RegionalNode, Redundancy, error) {
+func eligible(c *RegionalCandidates, role, transport string, regions map[string]bool, now time.Time) ([]RegionalNode, Redundancy, error) {
 	if c == nil || c.ExpiresAt <= now.Unix() {
 		return nil, RedundancyNone, ErrRegionalAuthority
 	}

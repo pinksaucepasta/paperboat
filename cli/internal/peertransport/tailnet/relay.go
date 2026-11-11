@@ -124,7 +124,7 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 	if len(tokens) > MaxRegionalCandidates || regional == nil {
 		return ErrRegionalAuthority
 	}
-	nodes, _, err := regional.Eligible("relay", "derp_quic", nil, serverclock.Now())
+	nodes, _, err := eligible(regional, "relay", "derp_quic", nil, serverclock.Now())
 	if err != nil {
 		return err
 	}
@@ -342,7 +342,7 @@ func (a *Authority) configureRegionalRelays(config *tls.Config, only string) ([]
 	// No regional node is usable until signed candidates and grants arrive.
 	var nodes []RegionalNode
 	if a.regional != nil {
-		nodes, _, err = a.regional.Eligible("relay", "derp_quic", nil, serverclock.Now())
+		nodes, _, err = eligible(a.regional, "relay", "derp_quic", nil, serverclock.Now())
 		if err != nil {
 			return nil, err
 		}

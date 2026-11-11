@@ -440,7 +440,7 @@ func (r *regionalRecovery) snapshot() ([]RegionalNode, map[key.NodePublic]Networ
 	if a.current == nil || a.closed {
 		return nil, nil, 0, ErrExpiredAuthority
 	}
-	nodes, _, err := a.regional.Eligible("relay", "derp_quic", nil, serverclock.Now())
+	nodes, _, err := eligible(a.regional, "relay", "derp_quic", nil, serverclock.Now())
 	if err != nil {
 		return nil, nil, 0, err
 	}
