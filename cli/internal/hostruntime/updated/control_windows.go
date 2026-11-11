@@ -602,7 +602,7 @@ func (c *windowsController) activationBlockedContext(ctx context.Context) (bool,
 		return true, ErrWindowsActivationUnavailable
 	}
 	if ctx == nil {
-		ctx = context.Background()
+		return true, ErrWindowsActivationUnavailable
 	}
 	c.activationMu.Lock()
 	defer c.activationMu.Unlock()
