@@ -180,10 +180,10 @@ func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time)
 	switch {
 	case g.Issuer != v.Issuer:
 		return Grant{}, fmt.Errorf("grant issuer: %w", ErrAdmission)
-	case g.NodeID != v.NodeID || g.NodeGeneration != v.NodeGeneration:
+	case g.NodeID != v.NodeID:
 		return Grant{}, fmt.Errorf("grant relay node: %w", ErrAdmission)
-	case g.ProcessEpoch != v.ProcessEpoch:
-		return Grant{}, fmt.Errorf("grant relay process epoch: %w", ErrAdmission)
+	case g.NodeGeneration != v.NodeGeneration || g.ProcessEpoch != v.ProcessEpoch:
+		return Grant{}, fmt.Errorf("grant relay process changed; refresh authority: %w", ErrExpired)
 	case !isEd25519 || !bytes.Equal(presented, quicPublic):
 		return Grant{}, fmt.Errorf("client certificate key differs from grant: %w", ErrAdmission)
 	case now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) || leaf.NotAfter.Sub(leaf.NotBefore) > 24*time.Hour+time.Minute || leaf.CheckSignature(leaf.SignatureAlgorithm, leaf.RawTBSCertificate, leaf.Signature) != nil:

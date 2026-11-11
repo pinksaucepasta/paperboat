@@ -310,7 +310,7 @@ func TestAdmissionFailures(t *testing.T) {
 			tc.edit(&g)
 			c := f.client(address, cert, g)
 			want := ErrAdmission
-			if tc.name == "expired" {
+			if tc.name == "expired" || tc.name == "node_generation" || tc.name == "process_epoch" {
 				want = ErrExpired
 			}
 			if err := c.Connect(context.Background()); !errors.Is(err, want) {
@@ -703,4 +703,21 @@ func TestOneAccountRegistersAThousandMachinesOnOneNode(t *testing.T) {
 	runtime.GC()
 	runtime.ReadMemStats(&after)
 	t.Logf("%d registrations of one account; heap %.1f KiB per connection (relay and in-process clients together)", machines, float64(after.HeapInuse-before.HeapInuse)/machines/1024)
+}
+
+func TestStaleRelayProcessGrantDoesNotLatchCarrier(t *testing.T) {
+	f := newFixture(t)
+	_, address, _ := f.start("127.0.0.1:0")
+	cert := certificate(t)
+	g := f.grant(key.NewNode().Public(), cert, "restarted")
+	stale := g
+	stale.ProcessEpoch = "previous_process"
+	c := f.client(address, cert, stale)
+	token := f.token(stale)
+	c.config.Credential = func(context.Context) (string, error) { return token, nil }
+	if err := c.Connect(t.Context()); !errors.Is(err, ErrExpired) {
+		t.Fatalf("stale epoch became permanent: %v", err)
+	}
+	token = f.token(g)
+	connect(t, c)
 }
