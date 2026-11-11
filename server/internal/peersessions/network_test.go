@@ -52,7 +52,7 @@ func TestRelayGrantsCarryEveryPeerAndItsControlKeyInChunksOfTheRelayBound(t *tes
 		peers = append(peers, networkPeer{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: account, EndpointID: fmt.Sprintf("peer_%03d", i), WireGuardPublicKey: fmt.Sprintf("key_%03d", (i*37)%1000)}},
 			Scopes: []networkScope{{ResourceKind: "machine_network", ResourceID: fmt.Sprintf("network_%03d", i), ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: 1}}})
 	}
-	for _, size := range []int{maximumRelayControlPeers, maximumRelayGrantPeers} {
+	for _, size := range []int{peernetwork.MaxGrantPeers, maximumRelayGrantPeers} {
 		chunks := relayGrantChunks(self, peers, size, 1)
 		if want := (len(peers) + size - 1) / size; len(chunks) != want {
 			t.Fatalf("size %d: chunks = %d, want %d", size, len(chunks), want)

@@ -77,6 +77,18 @@ func TestRelayGrantNamingASubsetOfThePeersIsAccepted(t *testing.T) {
 	if strings.Count(joined, "\n") != 1 || len(merged.Peers) != 1 {
 		t.Fatalf("chunks not combined: %d parts, %d peers", strings.Count(joined, "\n")+1, len(merged.Peers))
 	}
+	// Exactly the relay's part limit is accepted; the check counts already installed parts.
+	parts := make([]string, peernetwork.MaxGrantParts)
+	for i := range parts {
+		parts[i] = sign(nil)
+	}
+	if err := a.ApplyRelayGrants(t.Context(), parts); err != nil {
+		t.Fatalf("maximum parts refused: %v", err)
+	}
+	if err := a.ApplyRelayGrants(t.Context(), append(parts, sign(nil))); !errors.Is(err, ErrAuthority) {
+		t.Fatalf("excess part accepted: %v", err)
+	}
+
 	if err := a.ApplyRelayGrants(t.Context(), []string{sign([]peernetwork.RelayPeer{configured(0)}), sign([]peernetwork.RelayPeer{configured(0)})}); !errors.Is(err, ErrAuthority) {
 		t.Fatalf("a peer named in two chunks: err = %v", err)
 	}

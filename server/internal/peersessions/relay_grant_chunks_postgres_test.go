@@ -86,8 +86,8 @@ func TestRelayGrantsNameEveryPeerOfAHundredPeerAccountOnPostgres(t *testing.T) {
 			mine = append(mine, claims)
 		}
 	}
-	if len(mine) != 7 {
-		t.Fatalf("grants for the node = %d, want 7 chunks of at most %d", len(mine), maximumRelayControlPeers)
+	if len(mine) != (len(peers)+peernetwork.MaxGrantPeers-1)/peernetwork.MaxGrantPeers {
+		t.Fatalf("grants for the node = %d, want bounded chunks of at most %d", len(mine), peernetwork.MaxGrantPeers)
 	}
 	named, control := map[string]bool{}, map[string]bool{}
 	for _, claims := range mine {
@@ -103,8 +103,8 @@ func TestRelayGrantsNameEveryPeerOfAHundredPeerAccountOnPostgres(t *testing.T) {
 			named[k], inGrant[k] = true, true
 		}
 		keys, _ := claims["relay_control_peers"].([]any)
-		if len(keys) > maximumRelayControlPeers {
-			t.Fatalf("grant names %d control peers; released relays and CLIs refuse more than %d", len(keys), maximumRelayControlPeers)
+		if len(keys) > peernetwork.MaxGrantPeers {
+			t.Fatalf("grant names %d control peers; the shared contract refuses more than %d", len(keys), peernetwork.MaxGrantPeers)
 		}
 		for _, k := range keys {
 			if !inGrant[k.(string)] || control[k.(string)] {

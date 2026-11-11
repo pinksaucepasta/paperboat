@@ -22,8 +22,9 @@ const (
 	MaxClockSkew = time.Minute
 	// MaxGrantMemberships bounds the memberships one grant carries.
 	MaxGrantMemberships = 256
-	// MaxGrantParts bounds the grants (chunks of MaxGrantPeers peers) one relay credential joins.
-	MaxGrantParts = 32
+	// MaxGrantParts covers peer-full chunks plus scope-full chunks. Each pair of
+	// adjacent scope-limited chunks contains more than MaxGrantScopes scopes.
+	MaxGrantParts = (MaxEndpoints+MaxGrantPeers-1)/MaxGrantPeers + 2*((MaxScopes+MaxGrantScopes-1)/MaxGrantScopes)
 	// MaxGrantIDBytes bounds a grant's account and endpoint ids.
 	MaxGrantIDBytes = 256
 )

@@ -766,18 +766,13 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 		if len(nodePeers) == 0 && len(peers) > 0 {
 			continue
 		}
-		// Relay control rides in every chunk for its own peers. Released relays and CLIs refuse more than
-		// maximumRelayControlPeers per grant, so chunks carrying control stay within it.
+		// Relay control rides in every chunk for its own peers, under the shared per-part bound.
 		peerRelayReady := peerRelayEnabled && self.DiscoPublicKey != "" && peersHaveDiscoKeys(nodePeers)
-		size := maximumRelayGrantPeers
-		if peerRelayReady {
-			size = maximumRelayControlPeers
-		}
 		// Not capped by the configuration's refresh hint or the relay's registry lease: a grant is bound to this
 		// configuration's generation and to the relay's process epoch, and is withdrawn by a relay fence, not by
 		// running out (relaylimits.MaxGrantLifetime).
 		expires := now.Add(relaylimits.MaxGrantLifetime)
-		chunks := relayGrantChunks(self, nodePeers, size, expires.Unix())
+		chunks := relayGrantChunks(self, nodePeers, peernetwork.MaxGrantPeers, expires.Unix())
 		if peerRelayEnabled && (len(peerRelayWG) != 32 || len(peerRelayDisco) != 32 || !peerRelayAddress.Valid) {
 			slog.Warn("peer network authority unavailable", "site", "network.go:620")
 			return nil, ErrUnavailable
@@ -844,7 +839,7 @@ type relayGrantChunk struct {
 
 // relayGrantChunks splits every peer into grants of at most size peers and maximumRelayGrantScopes scopes, sorted by key. Each chunk carries the
 // control keys of its own peers, so the chunks are disjoint (the mesh refuses a duplicate control peer). A grant lives
-// at most a minute, so a scope held until revoked (expires_at 0, AuthorityUntilRevoked) ends with the grant there
+// at most relaylimits.MaxGrantLifetime, so a scope held until revoked (expires_at 0, AuthorityUntilRevoked) ends with the grant there
 // (grantExpiry); relays and mint refuse a scope without an expiry. A peer without a WireGuard key cannot be relayed
 // and is left out: one such peer never fails the grants of every other.
 func relayGrantChunks(self networkBinding, peers []networkPeer, size int, grantExpiry int64) []relayGrantChunk {
@@ -954,15 +949,6 @@ func regionalCandidateSet(issuer, accountID, endpointID string, generation int64
 	return peernetwork.RegionalCandidates{Schema: peernetwork.RegionalCandidatesSchema, Issuer: issuer, Audience: peernetwork.RegionalCandidatesAudience, AccountID: accountID, EndpointID: endpointID,
 		AuthorizationGeneration: uint64(generation), Generation: uint64(generation), IssuedAt: now.Unix(), ExpiresAt: expires.Unix(), Nodes: nodes}
 }
-
-// maximumNetworkGrants bounds the access sessions one configuration carries. Past it the
-// oldest are dropped, not the whole configuration: clients keep naming sessions that ended
-// long ago as admitted, and one account's accumulated sessions must not stop its peers from
-// refreshing their network. Live (unexpired) sessions are ordered first by the query.
-// maximumRelayControlPeers bounds relay_control_peers per grant: released relays (derpquic authority) and CLIs
-// refuse more. Chunks are this size while peer relay is on; it rises to maximumRelayGrantPeers once no
-// released relay or CLI predates Lane R's bd757e6b.
-const maximumRelayControlPeers = 16
 
 const maximumNetworkGrants = 128
 

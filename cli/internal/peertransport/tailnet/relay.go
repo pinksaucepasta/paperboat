@@ -121,7 +121,7 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 			_ = a.clientEngine.SetRelayControlPeers(controlPeers)
 		}
 	}()
-	if len(tokens) > MaxRegionalCandidates || regional == nil {
+	if len(tokens) > peernetwork.MaxRegionalCandidates*peernetwork.MaxGrantParts || regional == nil {
 		return ErrRegionalAuthority
 	}
 	nodes, _, err := eligible(regional, "relay", "derp_quic", nil, serverclock.Now())

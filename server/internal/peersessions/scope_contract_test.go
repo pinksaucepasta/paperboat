@@ -100,10 +100,20 @@ func TestEveryRelayGrantTheServerBuildsIsAcceptedByRelaysAndClients(t *testing.T
 		}
 		return true
 	})
-	for i := range 3 * peernetwork.MaxGrantPeers { // several chunks
+	for i := range peernetwork.MaxEndpoints - len(peers) { // the complete endpoint bound
 		peer := networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: fmt.Sprint("mesh_", i), Role: "cli", WireGuardPublicKey: contractKey(i + 1000), DiscoPublicKey: contractKey(i + 2000)}}
 		peers = append(peers, networkPeer{Identity: peer, Scopes: []networkScope{personalNetworkScope(self, peer, 0)}})
 	}
+	// Mix scope-limited and peer-limited chunks. Thirty-two peer-only chunks are
+	// insufficient even though this configuration stays below the shared total.
+	for i := range 31 {
+		s := peers[len(peers)-1-i].Scopes[0]
+		for j := range 64 {
+			s.ResourceID = fmt.Sprintf("scope_%d_%d", i, j)
+			peers[len(peers)-1-i].Scopes = append(peers[len(peers)-1-i].Scopes, s)
+		}
+	}
+
 	_, private, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -115,11 +125,7 @@ func TestEveryRelayGrantTheServerBuildsIsAcceptedByRelaysAndClients(t *testing.T
 	base := peernetwork.RelayGrant{Version: 1, Issuer: "https://api.example.test", Audience: peernetwork.RelayGrantAudience, IssuedAt: now.Unix(), ExpiresAt: expires.Unix(), Generation: 9, AccountID: self.AccountID, EndpointID: self.EndpointID, WireGuardPublicKey: self.WireGuardPublicKey, DiscoPublicKey: self.DiscoPublicKey, CertificateFingerprint: self.QUICCertificateFingerprint, QUICPublicKey: self.QUICPublicKey, NodeID: "node", NodeGeneration: 1, ProcessEpoch: "epoch"}
 	peerRelay := &peernetwork.RelayDescriptor{WireGuardPublicKey: contractKey(3), DiscoPublicKey: contractKey(4), VirtualAddress: "fd7a:115c:a1e0::9"}
 	for _, relay := range []*peernetwork.RelayDescriptor{nil, peerRelay} {
-		size := maximumRelayGrantPeers
-		if relay != nil {
-			size = maximumRelayControlPeers
-		}
-		chunks := relayGrantChunks(self, peers, size, expires.Unix())
+		chunks := relayGrantChunks(self, peers, peernetwork.MaxGrantPeers, expires.Unix())
 		if len(chunks) < 2 || len(chunks) > peernetwork.MaxGrantParts {
 			t.Fatalf("%d chunks", len(chunks))
 		}
