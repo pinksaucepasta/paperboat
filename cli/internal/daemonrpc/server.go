@@ -64,7 +64,7 @@ func checkAPIVersion(ctx context.Context) error {
 	if len(values) == 1 && values[0] == APIVersion {
 		return nil
 	}
-	return status.Error(codes.FailedPrecondition, "this pb and the running Paperboat daemon use different local API versions; restart the daemon with `pb doctor --repair` or update pb")
+	return status.Error(codes.FailedPrecondition, "this pb and the running Paperboat daemon use different local API versions; run `pb install` to bring them back in step")
 }
 
 func supportUnaryInterceptor(ctx context.Context, request any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
