@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/reattach"
+	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/admission"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
@@ -184,6 +185,12 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 		}
 		if code := response.Header.Get(connectorprotocol.OriginFailureHeader); code != "" {
 			return originFailure(code)
+		}
+		if request != nil {
+			// the route's response-header rules; the edge's own headers are set after, in ModifyResponse
+			if match, ok := RouteMatchFromContext(request.Context()); ok && match.Rule.RewriteRules != nil && match.Rule.Kind == route.TunnelHTTPSWSS {
+				tunnelrouterules.ApplyHeaders(response.Header, match.Rule.RewriteRules.ResponseHeaders)
+			}
 		}
 		return legacy.ModifyResponse(response)
 	}
@@ -725,6 +732,21 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if ingress, ok := p.config.PrivateAccessConnections.ingress(r.Context(), r.RemoteAddr, matched); ok {
 			r = r.WithContext(context.WithValue(r.Context(), privateIngressDecisionKey{}, ingress))
 		}
+	}
+	if rules := matched.Rule.RewriteRules; rules != nil && expectedKind == string(route.TunnelHTTPSWSS) {
+		// The route's own rules, after every access check and before the edge's own headers are set, so the edge's
+		// headers always win. A redirect never reaches the carrier; a WebSocket handshake keeps its path.
+		if !websocket {
+			if location, code, redirected := rules.MatchRedirect(r.URL.Path, r.URL.RawQuery); redirected {
+				w.Header().Set("X-Content-Type-Options", "nosniff")
+				http.Redirect(w, r, location, code)
+				return
+			}
+			if rewritten := rules.RewritePath(r.URL.Path); rewritten != r.URL.Path {
+				r.URL.Path, r.URL.RawPath = rewritten, ""
+			}
+		}
+		tunnelrouterules.ApplyHeaders(r.Header, rules.RequestHeaders)
 	}
 	stripPrivate(r.Header, expectedKind)
 	setVisitorAssertion(r)

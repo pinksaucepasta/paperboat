@@ -22,6 +22,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/reporting"
+	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgehttp"
@@ -1013,7 +1014,7 @@ func CanonicalRouteRules(assignments []control.RouteAssignment) []route.RouteRul
 			WildcardSuffix: assignment.WildcardSuffix, PathPrefix: assignment.PathPrefix, Priority: assignment.Priority,
 			Target: assignment.RouteID, Protocol: assignment.Protocol, OriginScheme: assignment.OriginScheme,
 			AccessMode:   assignment.AccessMode,
-			PreserveHost: assignment.PreserveHost, HostOverride: assignment.HostOverride,
+			PreserveHost: assignment.PreserveHost, HostOverride: assignment.HostOverride, RewriteRules: edgeRewriteRules(assignment),
 			DesiredState: assignment.DesiredState, ObservedState: observedState, Reason: assignment.PreviewReason,
 		}
 		rules = append(rules, base)
@@ -1787,4 +1788,17 @@ func (w *RouteWorker) Shutdown(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// edgeRewriteRules are an http route's rules, validated again here: a document that no longer validates is ignored (the
+// route is served without rules) rather than failing the snapshot, and other protocols never carry rules.
+func edgeRewriteRules(assignment control.RouteAssignment) *tunnelrouterules.Rules {
+	if assignment.RewriteRules == nil || assignment.Protocol != "http" {
+		return nil
+	}
+	rules, err := tunnelrouterules.Normalize(*assignment.RewriteRules)
+	if err != nil || rules.Empty() {
+		return nil
+	}
+	return &rules
 }

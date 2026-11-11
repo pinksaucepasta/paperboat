@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 )
 
 const (
@@ -91,9 +93,11 @@ type RouteRule struct {
 	AccessMode                 string
 	PreserveHost               bool
 	HostOverride               string
-	DesiredState               string
-	ObservedState              string
-	Reason                     string
+	// RewriteRules are the route's validated header, path and redirect rules; nil for none.
+	RewriteRules  *tunnelrouterules.Rules
+	DesiredState  string
+	ObservedState string
+	Reason        string
 }
 
 type RouteMatch struct {
