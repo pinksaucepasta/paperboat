@@ -140,3 +140,37 @@ func BenchmarkPortWatchWithManyConnections(b *testing.B) {
 		}
 	})
 }
+
+func netlinkMessage(kind, flags uint16, body []byte) []byte {
+	message := make([]byte, nlHeaderBytes+len(body))
+	binary.NativeEndian.PutUint32(message[0:], uint32(len(message)))
+	binary.NativeEndian.PutUint16(message[4:], kind)
+	binary.NativeEndian.PutUint16(message[6:], flags)
+	copy(message[nlHeaderBytes:], body)
+	return message
+}
+
+// A dump the kernel flagged as interrupted by a concurrent change may be partial: it is an error, so the port watch
+// reads /proc instead of announcing a port gone. An unflagged dump returns its listeners.
+func TestReadDiagDumpRefusesAnInterruptedDump(t *testing.T) {
+	for name, test := range map[string]struct {
+		flags uint16
+		fails bool
+	}{"complete": {0, false}, "interrupted": {nlmDumpInterrupted, true}} {
+		fds, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_DGRAM, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		listener := netlinkMessage(sockDiagByFamily, 0, diagMessage(unix.AF_INET, diagListenState, 8080, []byte{127, 0, 0, 1}, 1000))
+		done := netlinkMessage(unix.NLMSG_DONE, test.flags, make([]byte, 4))
+		if err := unix.Send(fds[1], append(listener, done...), 0); err != nil {
+			t.Fatal(err)
+		}
+		services, err := readDiagDump(context.Background(), fds[0], make([]byte, 64<<10), unix.AF_INET, 1000)
+		unix.Close(fds[0])
+		unix.Close(fds[1])
+		if (err != nil) != test.fails || !test.fails && (len(services) != 1 || services[0].Port != 8080) {
+			t.Errorf("%s dump: services %+v, err %v", name, services, err)
+		}
+	}
+}
