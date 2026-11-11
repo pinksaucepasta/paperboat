@@ -65,7 +65,7 @@ func TestWireOperationAndErrorMatchSharedSchema(t *testing.T) {
 		Message: "The resource changed.", Outcome: "unchanged", Retryable: false,
 		RepairAction: "refresh", RequestID: "req_1", CorrelationID: "corr_1",
 	}
-	schema := gojsonschema.NewReferenceLoader("file://" + mustAbs(t, "../../testdata/contracts/preview-tunnel-v1/schemas/resources.schema.json"))
+	schema := gojsonschema.NewReferenceLoader("file://" + mustAbs(t, "../../../shared/testdata/contracts/preview-tunnel-v1/schemas/resources.schema.json"))
 	for _, value := range []any{operation, apiError} {
 		raw, err := json.Marshal(value)
 		if err != nil {

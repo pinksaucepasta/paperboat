@@ -11,7 +11,7 @@ import (
 )
 
 func TestCredentialContractVector(t *testing.T) {
-	b, err := os.ReadFile("../../testdata/contracts/fixtures/credentials/terminal-operation.ed25519.json")
+	b, err := os.ReadFile("../../../shared/testdata/contracts/fixtures/credentials/terminal-operation.ed25519.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestCredentialContractVector(t *testing.T) {
 }
 
 func TestCredentialRejectionCoverage(t *testing.T) {
-	f, err := os.Open("../../testdata/contracts/fixtures/credentials/negative.ndjson")
+	f, err := os.Open("../../../shared/testdata/contracts/fixtures/credentials/negative.ndjson")
 	if err != nil {
 		t.Fatal(err)
 	}

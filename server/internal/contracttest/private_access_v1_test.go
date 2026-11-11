@@ -13,7 +13,7 @@ import (
 // TestPrivateAccessV1SchemaVectors exercises the local grant, authorize,
 // decision, and safe-error fixture envelopes.
 func TestPrivateAccessV1SchemaVectors(t *testing.T) {
-	familyRoot := filepath.Join("..", "..", "testdata", "contracts", "preview-tunnel-v1")
+	familyRoot := filepath.Join("..", "..", "..", "shared", "testdata", "contracts", "preview-tunnel-v1")
 	schemaBytes, err := os.ReadFile(filepath.Join(familyRoot, "schemas", "private_access.schema.json"))
 	if err != nil {
 		t.Fatal(err)

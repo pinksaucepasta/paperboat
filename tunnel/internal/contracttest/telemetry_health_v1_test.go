@@ -16,7 +16,7 @@ func TestTelemetryHealthV1EdgeSnapshotContract(t *testing.T) {
 		t.Fatalf("implementation schema = %q", telemetry.HealthSchemaV1)
 	}
 
-	file, err := os.Open("../../testdata/contracts/telemetry-v1/fixtures/health.ndjson")
+	file, err := os.Open("../../../shared/testdata/contracts/telemetry-v1/fixtures/health.ndjson")
 	if err != nil {
 		t.Fatal(err)
 	}

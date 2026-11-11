@@ -14,7 +14,7 @@ import (
 )
 
 func TestSharedVectorInterop(t *testing.T) {
-	raw, err := os.ReadFile("../../testdata/contracts/environment-e2ee-v1/vectors.json")
+	raw, err := os.ReadFile("../../../shared/testdata/contracts/environment-e2ee-v1/vectors.json")
 	if err != nil {
 		t.Fatal(err)
 	}

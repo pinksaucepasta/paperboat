@@ -8,7 +8,7 @@ import (
 
 func TestConfigSyncLifecycleVectorsFailClosed(t *testing.T) {
 	t.Parallel()
-	data, err := os.ReadFile("../../testdata/contracts/fixtures/config-sync/lifecycle.json")
+	data, err := os.ReadFile("../../../shared/testdata/contracts/fixtures/config-sync/lifecycle.json")
 	if err != nil {
 		t.Fatal(err)
 	}

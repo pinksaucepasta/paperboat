@@ -12,7 +12,7 @@ import (
 )
 
 func TestProductionFrameValidationMatchesCopiedVectors(t *testing.T) {
-	file, err := os.Open("../../../testdata/contracts/fixtures/helper/frames.ndjson")
+	file, err := os.Open("../../../../shared/testdata/contracts/fixtures/helper/frames.ndjson")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestProductionFrameValidationMatchesCopiedVectors(t *testing.T) {
 }
 
 func TestProductionDecodersMatchCopiedTransportVectors(t *testing.T) {
-	data, err := os.ReadFile("../../../testdata/contracts/fixtures/helper/terminal-v1.json")
+	data, err := os.ReadFile("../../../../shared/testdata/contracts/fixtures/helper/terminal-v1.json")
 	if err != nil {
 		t.Fatal(err)
 	}

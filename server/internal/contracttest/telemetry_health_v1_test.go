@@ -26,7 +26,7 @@ type telemetryHealthVector struct {
 func TestTelemetryHealthV1SchemaVectors(t *testing.T) {
 	familyRoot := os.Getenv("PAPERBOAT_TELEMETRY_CONTRACT_ROOT")
 	if familyRoot == "" {
-		familyRoot = filepath.Join("..", "..", "testdata", "contracts", "telemetry-v1")
+		familyRoot = filepath.Join("..", "..", "..", "shared", "testdata", "contracts", "telemetry-v1")
 	}
 	schemaBytes, err := os.ReadFile(filepath.Join(familyRoot, "schemas", "health.schema.json"))
 	if err != nil {
