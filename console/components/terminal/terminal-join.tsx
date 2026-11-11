@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { ApiError, type Me } from "@/lib/api"
-import { browserSessionQuery, guestApi, type BrowserSession } from "@/lib/terminal/queries"
+import { browserSessionQuery, guestApi, participantsPollMs, type BrowserSession } from "@/lib/terminal/queries"
 import { Frame, TerminalRoom, TopBar } from "@/components/terminal/terminal-page"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
@@ -19,9 +19,10 @@ import { Input } from "@/components/ui/input"
 export function TerminalJoin({ id, withCode }: { id: string; withCode: boolean }) {
   const router = useRouter()
   // Joined guests keep the session fresh here (they can't read the account-only endpoints).
+  const [pushed, setPushed] = useState(false)
   const access = useQuery({
     ...browserSessionQuery(id),
-    refetchInterval: (query) => (query.state.data ? 4_000 : false),
+    refetchInterval: (query) => (query.state.data ? participantsPollMs(pushed) : false),
   })
   const account = access.data?.access_method === "account"
 
@@ -38,7 +39,7 @@ export function TerminalJoin({ id, withCode }: { id: string; withCode: boolean }
   })
   const [askCode, setAskCode] = useState(withCode)
 
-  if (access.data?.access_method === "code") return <TerminalRoom session={access.data.session} guest />
+  if (access.data?.access_method === "code") return <TerminalRoom session={access.data.session} guest onPushed={setPushed} />
   if (access.isPending || account || me.isPending) {
     return (
       <Frame>
