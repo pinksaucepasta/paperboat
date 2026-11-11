@@ -716,13 +716,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	}
 	trackedCarrier := &trackedCarrierComponent{Component: carrierComponent}
 	carrierComponent = trackedCarrier
-	redirectHandler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		host := request.Host
-		if name, _, splitErr := net.SplitHostPort(host); splitErr == nil {
-			host = name
-		}
-		http.Redirect(writer, request, "https://"+host+request.URL.RequestURI(), http.StatusPermanentRedirect)
-	})
+	redirectHandler := portEightyHandler()
 	publicTLS, err := infrastructureTLS(deployment, certificateSelector.TLSConfig())
 	if err != nil {
 		return nil, err
@@ -1314,4 +1308,23 @@ func (p componentPair) Start(ctx context.Context) error {
 
 func (p componentPair) Shutdown(ctx context.Context) error {
 	return errors.Join(p.second.Shutdown(ctx), p.first.Shutdown(ctx))
+}
+
+// portEightyHandler answers what the edge's own HTTP-01 handler did not: an ACME validation for a
+// name the edge serves comes from a server behind the tunnel (Caddy, Traefik, Coolify) trying to get
+// a certificate it does not need. It gets a 404 whose text its ACME client logs, never a redirect that
+// would let it obtain a certificate for the edge's name. Everything else goes to HTTPS.
+func portEightyHandler() http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		host := request.Host
+		if name, _, splitErr := net.SplitHostPort(host); splitErr == nil {
+			host = name
+		}
+		if strings.HasPrefix(request.URL.Path, "/.well-known/acme-challenge/") {
+			writer.Header().Set("X-Paperboat-Error", "acme_behind_tunnel")
+			http.Error(writer, "Paperboat serves HTTPS for this name and holds its certificate; the server behind it needs none. Serve http:// to Paperboat, or use tls internal or a DNS-01 challenge.", http.StatusNotFound)
+			return
+		}
+		http.Redirect(writer, request, "https://"+host+request.URL.RequestURI(), http.StatusPermanentRedirect)
+	})
 }

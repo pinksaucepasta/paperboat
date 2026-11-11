@@ -230,3 +230,19 @@ func TestLiveCarrierCompositionCarriesClientBytesAfterUpgrade(t *testing.T) {
 	}
 	_ = response.Body.Close()
 }
+
+// A Caddy/Traefik origin behind a tunnel retries ACME HTTP-01 forever; the edge answers its validation
+// with a 404 its client logs, instead of redirecting it into the tunnel. Other port-80 requests go to HTTPS.
+func TestPortEightyAnswersOriginACMEInsteadOfRedirecting(t *testing.T) {
+	handler := portEightyHandler()
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "http://app.example.test/.well-known/acme-challenge/token123", nil))
+	if recorder.Code != http.StatusNotFound || recorder.Header().Get("X-Paperboat-Error") != "acme_behind_tunnel" || recorder.Header().Get("Location") != "" || !strings.Contains(recorder.Body.String(), "needs none") {
+		t.Fatalf("ACME validation answer = %d %q location=%q", recorder.Code, recorder.Body.String(), recorder.Header().Get("Location"))
+	}
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "http://app.example.test:80/login?next=/", nil))
+	if recorder.Code != http.StatusPermanentRedirect || recorder.Header().Get("Location") != "https://app.example.test/login?next=/" {
+		t.Fatalf("redirect = %d %q", recorder.Code, recorder.Header().Get("Location"))
+	}
+}
