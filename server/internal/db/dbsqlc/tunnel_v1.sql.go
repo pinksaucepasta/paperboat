@@ -66,6 +66,29 @@ func (q *Queries) GetOwnedActivePreviewTunnelHostV1(ctx context.Context, arg Get
 	return id, err
 }
 
+const getTeamOwnerOfHostV1 = `-- name: GetTeamOwnerOfHostV1 :one
+SELECT owner_team_id::text AS team_id
+FROM user_machines
+WHERE id = $1
+  AND user_id = $2
+  AND owner_team_id IS NOT NULL
+  AND deleted_at IS NULL
+  AND revoked_at IS NULL
+`
+
+type GetTeamOwnerOfHostV1Params struct {
+	HostID    string
+	AccountID string
+}
+
+// The team that owns one of the account's live machines: a team machine gets tunnel access only from its team's grants.
+func (q *Queries) GetTeamOwnerOfHostV1(ctx context.Context, arg GetTeamOwnerOfHostV1Params) (string, error) {
+	row := q.db.QueryRow(ctx, getTeamOwnerOfHostV1, arg.HostID, arg.AccountID)
+	var team_id string
+	err := row.Scan(&team_id)
+	return team_id, err
+}
+
 const hasActivePrivateTCPRouteV1 = `-- name: HasActivePrivateTCPRouteV1 :one
 SELECT EXISTS (
   SELECT 1
