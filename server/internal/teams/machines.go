@@ -272,6 +272,8 @@ func (s *Service) Machine(ctx context.Context, account, team string, r MachineRe
 				return ErrMachineAliasConflict
 			}
 			return err
+		case "transfer_to_personal":
+			return transferToPersonalTx(ctx, tx, t, team, owner, ownerTeam, actor, r)
 		case "remove":
 			if ownerTeam != team || !Allowed(actor.Role, PermissionSettingsManage) {
 				return ErrForbidden
@@ -287,6 +289,54 @@ func (s *Service) Machine(ctx context.Context, account, team string, r MachineRe
 			return ErrInvalid
 		}
 	})
+}
+
+// transferToPersonalTx is the mirror of transfer_to_team: the team-owned machine goes back to the
+// account that enrolled it (its credentials, ENV scopes and terminal sessions belong to that account,
+// so no other account can take it without enrolling again). Id, node key and history stay; the team's
+// binding, grants and requests for it end, and the new owner sees what a personal machine shows.
+func transferToPersonalTx(ctx context.Context, tx *db.Tx, t Team, team, owner, ownerTeam string, actor Member, r MachineRequest) error {
+	if ownerTeam != team || !Allowed(actor.Role, PermissionSettingsManage) {
+		return ErrForbidden
+	}
+	if r.Confirmation != r.MachineID {
+		return ErrInvalid
+	}
+	if _, ok := member(t, owner); !ok {
+		return ErrMachineOwnerLeft
+	}
+	// Team-owned previews and tunnels served by this machine would be left belonging to the team.
+	var served bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM preview_leases WHERE owner_machine_id=$1 AND owner_team_id=$2 AND terminal_state='active') OR EXISTS(SELECT 1 FROM tunnels WHERE created_by_host_id=$1 AND owner_team_id=$2 AND deleted_at IS NULL)`, r.MachineID, team).Scan(&served); err != nil {
+		return err
+	}
+	if served {
+		return ErrMachineTeamResources
+	}
+	if err := planlimits.CheckTx(ctx, tx, planlimits.Scope{Account: owner}, planlimits.Machines); err != nil {
+		return err
+	}
+	// The owner change comes first so the inventory topic still reaches the team's members.
+	_, err := tx.Exec(ctx, `UPDATE user_machines SET owner_team_id=NULL,version=version+1,updated_at=now() WHERE id=$1`, r.MachineID)
+	var conflict *pgconn.PgError
+	if errors.As(err, &conflict) && conflict.Code == "23505" && conflict.ConstraintName == "user_machines_owner_alias" {
+		return ErrMachineAliasConflict
+	}
+	if err != nil {
+		return err
+	}
+	// The owner's own terminal sessions follow the machine into Personal; other members' sessions and the
+	// team's shares of sessions on it end with the team's grants.
+	if _, err = tx.Exec(ctx, `UPDATE user_machine_terminal_sessions SET owner_team_id=NULL WHERE user_machine_id=$1 AND owner_account=$2 AND owner_team_id=$3`, r.MachineID, owner, team); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE team_resource_bindings b SET active=false,generation=b.generation+1 FROM user_machine_terminal_sessions s WHERE b.team_id=$2 AND b.resource_kind='terminal_session' AND b.resource_id=s.id AND s.user_machine_id=$1 AND b.active`, r.MachineID, team); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM team_machine_requests WHERE team_id=$1 AND machine_id=$2`, team, r.MachineID); err != nil {
+		return err
+	}
+	return unbindMachineTx(ctx, tx, team, r.MachineID)
 }
 
 // ShareEnrolledMachineTx puts a machine its owner just enrolled into one of the owner's teams, the

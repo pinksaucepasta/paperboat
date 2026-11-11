@@ -135,6 +135,10 @@ func registerTeamRoutes(mux *http.ServeMux, service teamAPI, read, write func(ht
 				writeError(w, r, http.StatusConflict, "machine_name_conflict", teams.ErrMachineAliasConflict.Error())
 			case expectedHTTPErrorOnly(err, teams.ErrMachinePublication):
 				writeError(w, r, http.StatusConflict, "machine_publication_active", teams.ErrMachinePublication.Error())
+			case expectedHTTPErrorOnly(err, teams.ErrMachineTeamResources):
+				writeError(w, r, http.StatusConflict, "machine_team_resources_active", teams.ErrMachineTeamResources.Error())
+			case expectedHTTPErrorOnly(err, teams.ErrMachineOwnerLeft):
+				writeError(w, r, http.StatusConflict, "machine_owner_not_member", teams.ErrMachineOwnerLeft.Error())
 			case expectedHTTPErrorOnly(err, teams.ErrConflict):
 				writeError(w, r, http.StatusConflict, "team_changed", "Team changed. Refresh its current state before retrying.")
 			case expectedHTTPErrorOnly(err, teams.ErrExpired):
