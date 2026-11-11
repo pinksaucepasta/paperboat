@@ -269,21 +269,34 @@ func writeWindowsCarrierDescriptors(c CarrierConfig, active bool) error {
 	return atomicfile.Write(carrierConfigPath(c.Instance), body, options)
 }
 
+// carrierCallerVerifies decides what a caller of verifyCarrierNative does. The account's own carrier cannot read the
+// SYSTEM/Administrators-only definition and pin, and verifying its own image proves nothing to itself: nothing to
+// verify. SYSTEM and an elevated administrator (both can read them) verify the pin and the definition. Every other
+// account is refused.
+func carrierCallerVerifies(callerSID, ownerSID string, elevated bool) (bool, error) {
+	if callerSID == ownerSID {
+		return false, nil
+	}
+	if callerSID == "S-1-5-18" || elevated {
+		return true, nil
+	}
+	return false, ErrInvalidRequest
+}
+
 func verifyCarrierNative(c CarrierConfig, i *service.Installer) error {
 	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return err
 	}
 	account, err := token.GetTokenUser()
+	elevated := token.IsElevated()
 	err = errors.Join(err, token.Close())
 	if err != nil {
 		return err
 	}
-	if account.User.Sid.String() == c.OwnerSID {
-		return nil
-	}
-	if account.User.Sid.String() != "S-1-5-18" {
-		return ErrInvalidRequest
+	verify, err := carrierCallerVerifies(account.User.Sid.String(), c.OwnerSID, elevated)
+	if err != nil || !verify {
+		return err
 	}
 
 	identity, err := service.VerifyOwnedWindowsRoleExecutable(service.CarrierKind, c.Instance+"-"+c.Generation, c.Executable)
