@@ -154,13 +154,21 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 		stripBrowserResponseCredentials(response.Header)
 		return nil
 	}
+	// originResponse guards the routes whose origin is the user's app: a self-redirect becomes the
+	// loop page instead of reaching the browser.
+	originResponse := func(response *http.Response) error {
+		if request := response.Request; request != nil && connectorprotocol.IsSelfRedirect(request.Method, request.Header.Get("X-Forwarded-Host"), request.URL.RequestURI(), response) {
+			return errOriginRedirectLoop
+		}
+		return legacy.ModifyResponse(response)
+	}
 	var canonical http.Handler
 	if canonicalTransport != nil {
 		proxy := &httputil.ReverseProxy{
 			Transport:      canonicalTransport,
 			FlushInterval:  -1,
 			Rewrite:        rewriteToCarrier,
-			ModifyResponse: legacy.ModifyResponse,
+			ModifyResponse: originResponse,
 		}
 		configureProxyDiagnostics(proxy, config.OnFailure)
 		canonical = proxy
@@ -188,7 +196,7 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 				Transport:      retryPreviewTransport{next: previewTransport},
 				FlushInterval:  -1,
 				Rewrite:        rewriteToCarrier,
-				ModifyResponse: legacy.ModifyResponse,
+				ModifyResponse: originResponse,
 			}
 			configureProxyDiagnostics(proxy, config.OnFailure)
 			preview = proxy
@@ -272,6 +280,11 @@ func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(contex
 			writeErrorPage(writer, http.StatusRequestTimeout, requestBodyIdleMessage)
 			return
 		}
+		if errors.Is(err, errOriginRedirectLoop) {
+			writer.Header().Set("X-Paperboat-Error", "origin_redirect_loop")
+			writeErrorPage(writer, http.StatusBadGateway, originRedirectLoopMessage)
+			return
+		}
 		if errors.Is(err, ErrIngressLimitExceeded) {
 			// The edge's abuse limits (edgelimits): too many connections or opens right now.
 			writer.Header().Set("X-Paperboat-Error", "edge_rate_limited")
@@ -285,6 +298,12 @@ func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(contex
 		writeErrorPage(writer, http.StatusBadGateway, upstreamUnavailableMessage)
 	}
 }
+
+// errOriginRedirectLoop: the origin sent the visitor back to the URL it asked for (IsSelfRedirect).
+var errOriginRedirectLoop = errors.New("origin redirects to the URL it was asked for")
+
+const originRedirectLoopMessage = "This app redirects to HTTPS, but Paperboat already serves it over HTTPS, so the browser would loop forever. " +
+	"Its owner can point the route at the app's HTTPS port (for example https://localhost:443) or turn off the app's own HTTP-to-HTTPS redirect."
 
 const previewStartingMessage = "This preview is starting. Retry in a moment."
 const requestBodyIdleMessage = "The upload stopped sending data, so Paperboat ended the request. Check your connection and try again."

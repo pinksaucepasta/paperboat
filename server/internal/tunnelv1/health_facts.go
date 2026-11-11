@@ -126,7 +126,7 @@ func explainHealth(view HealthView, facts HealthFacts) HealthView {
 
 func originCode(reason string) string {
 	switch reason {
-	case "refused", "timeout", "unreachable", "tls":
+	case "refused", "timeout", "unreachable", "tls", "redirect_loop":
 		return "origin_" + reason
 	}
 	return "origin_unreachable"
@@ -142,6 +142,8 @@ func originSummary(reason string) string {
 		return "The tunnel is connected, but the host cannot reach the local app's address."
 	case "tls":
 		return "The tunnel is connected, but the local app's TLS certificate was not accepted."
+	case "redirect_loop":
+		return "The tunnel is connected, but the app redirects visitors to HTTPS on the address they already use, so browsers loop."
 	}
 	return "The tunnel is connected but its local app is not reachable."
 }
@@ -156,6 +158,8 @@ func originAction(reason string) string {
 		return "Check the route's origin address with `pb tunnel route list <tunnel>`; it must be reachable from the host."
 	case "tls":
 		return "Trust the app's certificate (route TLS settings: custom CA) or use an http origin for this route."
+	case "redirect_loop":
+		return "Point the route at the app's HTTPS port (`pb tunnel route update <tunnel> <route> --to https://localhost:443`) or turn off the app's own HTTP-to-HTTPS redirect."
 	}
 	return "The connector cannot reach the app behind this tunnel. Start it, then wait a few seconds."
 }

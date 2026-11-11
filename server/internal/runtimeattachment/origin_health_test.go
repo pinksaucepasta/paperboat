@@ -18,6 +18,7 @@ func TestOriginHealthReportsAcceptOnlyBoundedValidStates(t *testing.T) {
 	}{
 		"reachable":           {[]runtimewire.OriginHealthRoute{route("reachable", "")}, true},
 		"unreachable coded":   {[]runtimewire.OriginHealthRoute{route("unreachable", "refused")}, true},
+		"redirect loop":       {[]runtimewire.OriginHealthRoute{route("unreachable", "redirect_loop")}, true},
 		"empty":               {nil, false},
 		"reachable with code": {[]runtimewire.OriginHealthRoute{route("reachable", "refused")}, false},
 		"unreachable no code": {[]runtimewire.OriginHealthRoute{route("unreachable", "")}, false},

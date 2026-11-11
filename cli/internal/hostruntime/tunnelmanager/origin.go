@@ -159,6 +159,10 @@ type OriginProbeObservation struct {
 
 const OriginProbeInsecureDevelopment = "insecure_development_tls"
 
+// OriginRedirectLoop: live traffic saw the origin send a visitor back to the URL it asked for (the
+// edge shows the loop page). It is also the origin-health code the control plane accepts.
+const OriginRedirectLoop = "redirect_loop"
+
 func (p NetworkOriginProber) ProbeOrigin(ctx context.Context, route hoststate.TunnelConfigRoute) error {
 	if ctx == nil || route.DesiredState != "active" || route.ConnectTimeoutMs < 100 {
 		return ErrInvalidConfig

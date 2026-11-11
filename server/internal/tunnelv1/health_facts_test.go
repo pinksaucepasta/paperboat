@@ -20,7 +20,7 @@ func TestStatusNamesEachFailureModeAndWhatToDo(t *testing.T) {
 	wantDimension := map[string]string{
 		"host offline":     "connector_offline",
 		"edge unreachable": "edge_unavailable", "dns pending": "dns_pending", "certificate pending": "certificate_pending",
-		"origin refused": "origin_refused", "origin timeout": "origin_timeout", "origin tls": "origin_tls",
+		"origin refused": "origin_refused", "origin timeout": "origin_timeout", "origin tls": "origin_tls", "origin redirect loop": "origin_redirect_loop",
 		"route rejected": "route_rejected", "bandwidth exhausted": "bandwidth_exhausted",
 	}
 	for name, tc := range map[string]struct {
@@ -46,6 +46,8 @@ func TestStatusNamesEachFailureModeAndWhatToDo(t *testing.T) {
 			wantDimCode: func(v HealthView) string { return v.Dimensions.Origin.Code }, wantAction: "not responding", wantRetrying: true},
 		"origin tls": {summary: "origin_unreachable", facts: with(func(f *HealthFacts) { f.OriginReason = "tls" }), wantCode: "origin_unreachable",
 			wantDimCode: func(v HealthView) string { return v.Dimensions.Origin.Code }, wantAction: "certificate", wantRetrying: true},
+		"origin redirect loop": {summary: "origin_unreachable", facts: with(func(f *HealthFacts) { f.OriginReason = "redirect_loop" }), wantCode: "origin_unreachable",
+			wantDimCode: func(v HealthView) string { return v.Dimensions.Origin.Code }, wantAction: "--to https://localhost:443", wantRetrying: true},
 		"route rejected": {summary: "route_unavailable", facts: healthyConnector, wantCode: "route_unavailable",
 			wantDimCode: func(v HealthView) string { return v.Dimensions.Route.Code }, wantAction: "pb tunnel route update", wantRetrying: true},
 		"bandwidth exhausted": {summary: "ready", facts: healthyConnector, bandwidth: true, wantCode: "bandwidth_exhausted",

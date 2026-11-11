@@ -284,6 +284,80 @@ func TestEngineTunnelReportsAStoppedOriginAsUnreachable(t *testing.T) {
 	}
 }
 
+// An app that redirects to HTTPS behind a tunnel loops the browser; the edge shows the loop page and
+// the agent reports it as the route's origin health (rate-limited), so `pb tunnel status` names it.
+func TestEngineTunnelReportsAnOriginRedirectLoop(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	const host = "brave-blue-beacon-0421.tunnel.example.test"
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://"+r.Host+r.URL.RequestURI(), http.StatusPermanentRedirect)
+	}))
+	defer origin.Close()
+	const tunnelID, routeID = "tunnel_loop", "route_loop"
+	payload := fmt.Sprintf(`{"schema":"paperboat.preview-tunnel/v1","kind":"tunnel_config_snapshot","tunnel_id":%q,"generation":1,"name":"loop","desired_state":"active","access_mode":"public","stable_endpoint":"https://%s","stable_endpoint_id":"endpoint_123e4567-e89b-42d3-a456-426614174000","expires_at":null,"routes":[{"id":%q,"name":"default","protocol":"http","match_type":"catch_all","path_prefix":null,"origin_scheme":"http","origin_address":%q,"preserve_host":true,"host_override":null,"tls_verification":"not_applicable","tls_server_name":null,"ca_reference":null,"mtls_credential_reference":null,"connect_timeout_ms":1000,"idle_timeout_ms":90000,"max_concurrent_streams":16,"desired_state":"active"}]}`, tunnelID, host, routeID, origin.Listener.Addr().String())
+	snapshot, err := hoststate.NewConfigSnapshot(tunnelID, 1, []byte(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reports := make(chan runtimewire.OriginHealthRequest, 4)
+	server := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		switch request.URL.Path {
+		case runtimewire.HostTunnelsPath:
+			list := []runtimewire.EngineTunnel{{TunnelID: tunnelID, ConfigGeneration: 1, ConfigContentHash: snapshot.ContentHash, Snapshot: json.RawMessage(snapshot.Payload)}}
+			body, _ := json.Marshal(map[string]any{"data": map[string]any{"tunnels": list}})
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: request}, nil
+		case runtimewire.HostTunnelOriginHealthPath:
+			var report runtimewire.OriginHealthRequest
+			_ = json.NewDecoder(request.Body).Decode(&report)
+			reports <- report
+			return &http.Response{StatusCode: http.StatusNoContent, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: request}, nil
+		}
+		return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("{}")), Request: request}, nil
+	})
+	service, _ := startConnectedRuntimeCarrierWith(t, ctx, time.Now().Add(time.Hour), func() int { return http.StatusOK },
+		func(a *admission) { a.EndpointsServed, a.TunnelEndpointsServed = true, true }, server)
+	transport := &tunnelmanager.OriginHTTPTransport{}
+	engine := &EngineTunnels{Service: service, Forwarder: tunnelmanager.OriginStreamForwarder{Transport: transport}, Prober: tunnelmanager.NetworkOriginProber{}}
+	if err := engine.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Shutdown(context.Background())
+	for !engine.Served(tunnelID) {
+		select {
+		case <-ctx.Done():
+			t.Fatal("tunnel never served")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	var route hoststate.TunnelConfigRoute
+	if err := json.Unmarshal([]byte(payload[strings.Index(payload, `[{"id"`)+1:strings.LastIndex(payload, "]")]), &route); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 { // a looping browser: one report, not three
+		request := httptest.NewRequest(http.MethodGet, "http://"+host+"/admin", nil)
+		request.Header.Set("X-Forwarded-Host", host)
+		response, err := transport.RoundTrip(ctx, route, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+	}
+	select {
+	case report := <-reports:
+		if len(report.Routes) != 1 || report.Routes[0].TunnelID != tunnelID || report.Routes[0].RouteID != routeID || report.Routes[0].State != "unreachable" || report.Routes[0].Code != "redirect_loop" {
+			t.Fatalf("origin health report = %+v", report)
+		}
+	case <-ctx.Done():
+		t.Fatal("the redirect loop was never reported")
+	}
+	select {
+	case report := <-reports:
+		t.Fatalf("a looping browser sent a second report: %+v", report)
+	case <-time.After(300 * time.Millisecond):
+	}
+}
+
 // dev-099c1c94 (2026-10-26): the daemon built EngineTunnels without an origin transport, so every
 // engine route was refused and no tunnel was served; Start refuses that configuration.
 func TestEngineTunnelsRefuseToStartWithoutAnOriginTransport(t *testing.T) {

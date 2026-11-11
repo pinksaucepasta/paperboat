@@ -71,6 +71,12 @@ func testGatewayDispatchesDurableRoute(t *testing.T, host string) {
 		if request.URL.Host == rule.Target || request.URL.Scheme == rule.Target {
 			return nil, errors.New("opaque durable route target leaked into URL")
 		}
+		if request.Header.Get("X-Forwarded-Host") != host || request.Header.Get("X-Forwarded-Proto") != "https" || request.Header.Get("X-Forwarded-Port") != "443" {
+			return nil, errors.New("edge forwarded headers did not reach the carrier")
+		}
+		if request.URL.Path == "/loop" { // Caddy's port-80 redirect: back to the URL the visitor asked for
+			return &http.Response{StatusCode: http.StatusPermanentRedirect, Header: http.Header{"Location": {"https://" + host + "/loop?x=1"}}, Body: http.NoBody, Request: request}, nil
+		}
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("from-carrier")), Request: request}, nil
 	})
 	var previewCalls, legacyCalls int
@@ -97,6 +103,13 @@ func testGatewayDispatchesDurableRoute(t *testing.T, host string) {
 	}
 	if canonicalCalls != 1 || previewCalls != 0 || legacyCalls != 0 {
 		t.Fatalf("canonical=%d preview=%d legacy=%d", canonicalCalls, previewCalls, legacyCalls)
+	}
+	loop := httptest.NewRequest(http.MethodGet, "https://"+host+"/loop?x=1", nil)
+	loop.Host = host
+	recorder = httptest.NewRecorder()
+	policy.ServeHTTP(recorder, loop)
+	if recorder.Code != http.StatusBadGateway || recorder.Header().Get("X-Paperboat-Error") != "origin_redirect_loop" || recorder.Header().Get("Location") != "" || !strings.Contains(recorder.Body.String(), "redirects to HTTPS") {
+		t.Fatalf("self-redirect reached the visitor: status=%d error=%q location=%q", recorder.Code, recorder.Header().Get("X-Paperboat-Error"), recorder.Header().Get("Location"))
 	}
 }
 

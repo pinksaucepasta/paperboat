@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
+	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"golang.org/x/net/http2"
 )
 
@@ -79,6 +80,9 @@ func (t *OriginHTTPTransport) RoundTrip(ctx context.Context, route hoststate.Tun
 	response, err := transport.RoundTrip(out)
 	if err != nil {
 		return nil, errors.Join(ErrOriginUnavailable, err)
+	}
+	if t.Observe != nil && sharedprotocol.IsSelfRedirect(out.Method, out.Header.Get("X-Forwarded-Host"), out.URL.RequestURI(), response) {
+		t.Observe(OriginProbeObservation{RouteID: route.ID, Code: OriginRedirectLoop})
 	}
 	responseUpgrade := webSocketUpgrade && response.StatusCode == http.StatusSwitchingProtocols && headerHasToken(response.Header, "Connection", "upgrade") && strings.EqualFold(strings.TrimSpace(response.Header.Get("Upgrade")), "websocket")
 	sanitizeOriginResponseHeaders(response.Header, responseUpgrade, t.KeepControlPlaneHeaders)

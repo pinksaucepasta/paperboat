@@ -108,6 +108,8 @@ type EngineTunnels struct {
 	routes         map[engineRouteKey]*engineRoute
 	// origins probes each engine tunnel's route origins once (not per hub) and reports changes.
 	origins map[string]engineOrigins
+	// loopReported is when each route may report its next redirect loop (observeOrigin).
+	loopReported map[string]time.Time
 	// originInterval overrides the origin probe interval (tests); zero is the default.
 	originInterval time.Duration
 	cancel         context.CancelFunc
@@ -171,9 +173,46 @@ func (e *EngineTunnels) Start(ctx context.Context) error {
 	}
 	e.browserIngress = browserIngress
 	runCtx, cancel := context.WithCancel(ctx)
+	e.Forwarder.Transport.Observe = func(observation tunnelmanager.OriginProbeObservation) { e.observeOrigin(runCtx, observation) }
 	e.cancel, e.done = cancel, make(chan struct{})
 	go func() { defer close(e.done); e.run(runCtx) }()
 	return nil
+}
+
+// originLoopReportEvery bounds redirect-loop reports to one per route per period while visitors keep
+// looping; the control plane keeps the state for OriginHealthMaxAge (60 s) after the last one.
+const originLoopReportEvery = 30 * time.Second
+
+// observeOrigin reports a redirect loop seen on live traffic as the route's origin health, so
+// `pb tunnel status` and doctor name it and its fix.
+func (e *EngineTunnels) observeOrigin(ctx context.Context, observation tunnelmanager.OriginProbeObservation) {
+	if observation.Code != tunnelmanager.OriginRedirectLoop {
+		return
+	}
+	now := time.Now()
+	e.mu.Lock()
+	tunnelID := ""
+	for id, tunnel := range e.tunnels {
+		for _, route := range tunnel.routes {
+			if route.ID == observation.RouteID {
+				tunnelID = id
+			}
+		}
+	}
+	if tunnelID == "" || now.Before(e.loopReported[observation.RouteID]) {
+		e.mu.Unlock()
+		return
+	}
+	if e.loopReported == nil {
+		e.loopReported = map[string]time.Time{}
+	}
+	e.loopReported[observation.RouteID] = now.Add(originLoopReportEvery)
+	e.mu.Unlock()
+	go func() {
+		sendCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+		_ = e.Service.ReportOriginHealth(sendCtx, tunnelmanager.OriginHealthReport{TunnelID: tunnelID, Routes: []tunnelmanager.OriginHealthRoute{{RouteID: observation.RouteID, State: "unreachable", Code: tunnelmanager.OriginRedirectLoop}}})
+	}()
 }
 
 func (e *EngineTunnels) Shutdown(ctx context.Context) error {
