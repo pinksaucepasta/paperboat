@@ -29,7 +29,6 @@ const api = async (path) => {
   const body = await res.json()
   return body.data ?? body
 }
-const sent = []
 const inboxHas = async (machine, name) => {
   const list = await api(`machines/${machine.id}/inbox`)
   return (list.items ?? []).find((item) => item.name === name)
@@ -79,7 +78,6 @@ await dialog.getByText(new RegExp(`^Sent 1 of 1 to ${only.alias}’s Inbox\\.$`)
 log(await dialog.getByText(`Sent 1 of 1 to ${only.alias}’s Inbox.`).isVisible(), "one machine keeps today's status wording")
 log((await dialog.locator("h3").count()) === 0, "one machine shows no group heading")
 log(await inboxHasWithin(only, one), `the file is in ${only.alias}'s Inbox`)
-sent.push([only, one])
 await dialog.getByRole("button", { name: "Done" }).click()
 
 // 2. two machines
@@ -95,7 +93,6 @@ log((await dialog.locator("h3").allInnerTexts()).length === 2 && (await dialog.g
 await shot("desktop-sent")
 log(await inboxHasWithin(a, two), `the file is in ${a.alias}'s Inbox`)
 log(await inboxHasWithin(b, two), `the file is in ${b.alias}'s Inbox`)
-sent.push([a, two], [b, two])
 await dialog.getByRole("button", { name: "Done" }).click()
 
 // 3. removing a chip leaves the other, which then can't be removed
@@ -121,7 +118,6 @@ await shot("desktop-partial")
 await page.unroute(refuseB)
 log(await inboxHasWithin(a, partial), `${a.alias} still got the file`)
 log(!(await inboxHas(b, partial)), `${b.alias} did not get it`)
-sent.push([a, partial])
 await dialog.getByRole("button", { name: "Done" }).click()
 
 // Mobile and dark, for the screenshots.
@@ -132,7 +128,6 @@ if (shots) {
   await chooseFile(`multisend-mobile-${stamp}.txt`)
   await dialog.getByText(/^Sent 1 file to 2 machines/).waitFor({ timeout: 120000 }).catch(() => {})
   await shot("mobile-sent")
-  sent.push([a, `multisend-mobile-${stamp}.txt`], [b, `multisend-mobile-${stamp}.txt`])
   await dialog.getByRole("button", { name: "Done" }).click()
   await page.emulateMedia({ colorScheme: "dark" })
   await page.evaluate(() => document.documentElement.classList.add("dark"))
@@ -142,14 +137,17 @@ if (shots) {
   await page.keyboard.press("Escape")
 }
 
-// Clean up: delete the test files from the Inboxes.
-for (const [machine, name] of sent) {
-  const item = await inboxHas(machine, name)
-  if (!item) continue
-  const res = await ctx.request.delete(`${origin}/api/v1/machines/${machine.id}/inbox/${encodeURIComponent(item.id)}`, {
-    headers: { "idempotency-key": crypto.randomUUID() }, // the console proxy adds the CSRF token
-  })
-  if (!res.ok() && res.status() !== 204) console.log(`note: could not delete ${name} from ${machine.alias} (${res.status()})`)
+// Clean up: delete every multisend-* test file (also leftovers of earlier runs) from both Inboxes, through the page
+// so the request is same-origin like the console's own delete.
+for (const machine of new Set([a, b, only])) {
+  const items = ((await api(`machines/${machine.id}/inbox`)).items ?? []).filter((item) => item.name.startsWith("multisend-"))
+  for (const item of items) {
+    const status = await page.evaluate(
+      async ({ url, key }) => (await fetch(url, { method: "DELETE", credentials: "include", headers: { "idempotency-key": key } })).status,
+      { url: `/api/v1/machines/${machine.id}/inbox/${encodeURIComponent(item.id)}`, key: Math.random().toString(16).slice(2) },
+    )
+    if (status >= 300) console.log(`note: could not delete ${item.name} from ${machine.alias} (${status})`)
+  }
 }
 await browser.close()
 console.log(failed ? `${failed} failed` : "all passed")

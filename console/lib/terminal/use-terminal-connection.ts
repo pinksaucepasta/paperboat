@@ -9,7 +9,7 @@ import { api, ApiError, type Data } from "@/lib/api"
 import { loadGhosttyCores } from "@/lib/terminal/ghostty-core"
 import { guestApi } from "@/lib/terminal/queries"
 import type { RootPin } from "@/lib/terminal/browser-root-key"
-import { ticketConnectConfig, type Ticket, type TerminalRole } from "@/lib/terminal/browser-ticket"
+import { openBrowserConnection, type Ticket, type TerminalRole } from "@/lib/terminal/inbox-upload"
 import {
   loadBrowserTerminal,
   type BrowserTerminalAPI,
@@ -903,7 +903,6 @@ export function useTerminalConnection({
       busyRef.current = true
       setError("")
       setPhaseValue("connecting")
-      let identityID = ""
       const controller = new AbortController()
       ticketAbortRef.current = controller
       try {
@@ -913,51 +912,31 @@ export function useTerminalConnection({
           return
         }
         apiRef.current = browser
-        const identity = await browser.createIdentity()
-        if ("error" in identity) throw new Error(identity.message)
-        identityID = identity.id
-        if (disposedRef.current) {
-          browser.discardIdentity(identityID)
-          browser.dispose()
-          identityID = ""
-          return
-        }
         const ticketPath = `terminal-sessions/${encodeURIComponent(current.id)}/${accessMethod === "code" ? "guest-browser-ticket" : "browser-ticket"}`
-        const ticket = await (accessMethod === "code" ? guestApi<Ticket> : api<Ticket>)(ticketPath, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ browser_public_key_sha256: identity.public_key_sha256 }),
-          cache: "no-store",
-          signal: controller.signal,
+        const opened = await openBrowserConnection(browser, {
+          session: { id: current.id, ownerAccount: current.owner_account, machineId: current.target.machine_id },
+          fromSequence: ackSequenceRef.current,
+          canceled: () => disposedRef.current,
+          fetchTicket: (key) =>
+            (accessMethod === "code" ? guestApi<Ticket> : api<Ticket>)(ticketPath, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ browser_public_key_sha256: key }),
+              cache: "no-store",
+              signal: controller.signal,
+            }),
+          onTicket: (ticket) => {
+            setRole(ticket.role)
+            roleRef.current = ticket.role
+            ticketEdgeRef.current = ticket.edge_node_id
+            if (startedOnceRef.current) setReconnects((count) => count + 1)
+            startedOnceRef.current = true
+          },
+          onEvent: handleEvent,
         })
-        if (disposedRef.current) {
-          browser.discardIdentity(identityID)
-          identityID = ""
-          return
-        }
-        const { config, pin } = await ticketConnectConfig(
-          browser,
-          ticket,
-          { id: current.id, ownerAccount: current.owner_account, machineId: current.target.machine_id },
-          ackSequenceRef.current,
-        )
-        setRole(ticket.role)
-        roleRef.current = ticket.role
-        let startedID = ""
-        ticketEdgeRef.current = ticket.edge_node_id
-        if (startedOnceRef.current) setReconnects((count) => count + 1)
-        startedOnceRef.current = true
-        const started = await browser.connect(identity.id, config, (event) => handleEvent(startedID, pin, event))
-        if (!started.id) throw new Error(started.message || "The encrypted connection could not be started.")
-        startedID = started.id
-        if (disposedRef.current) {
-          browser.leave(startedID)
-          return
-        }
-        connectionIDRef.current = startedID
-        identityID = ""
+        if (!opened) return
+        connectionIDRef.current = opened.id
       } catch (reason) {
-        if (identityID) apiRef.current?.discardIdentity(identityID)
         if (disposedRef.current) return
         const code = ticketCloseCode(reason)
         const outcome = code && terminalCloseCodes[code]
