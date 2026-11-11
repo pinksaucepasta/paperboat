@@ -167,14 +167,19 @@ class Rollout:
         active = json.loads(self.run(['docker', 'inspect', before['active']]))[0]
         if active['Image'] == info['Id']:
             return 'Current server already runs this image.'
-        candidate = 'paperboat-server-' + info['Id'].split(':')[-1][:16]
-        # Additive migrations run while the current version is still serving.
+        # Migrations run while the current version is still serving (additive: the previous server keeps working on them).
         self.run(['docker', 'compose', 'run', '--rm', '--no-deps', 'migrate'],
                  image=image, timeout=300)
-        existing = self.run(['docker', 'container', 'ls', '-a', '--filter',
-                             'name=^/' + candidate + '$', '--format', '{{.Names}}'])
-        if existing.strip():
-            raise RolloutError('Replacement container name already exists; nothing was removed.')
+        # The name follows the image id, so rolling back to the image of a server that is still draining (it holds live
+        # connections and cannot be removed) meets its name: take the next free one (2026-11-12, the rollback of .12.1 failed on this).
+        base = 'paperboat-server-' + info['Id'].split(':')[-1][:16]
+        candidate = base
+        for attempt in range(2, 12):
+            if not self.run(['docker', 'container', 'ls', '-a', '--filter', 'name=^/' + candidate + '$', '--format', '{{.Names}}']).strip():
+                break
+            candidate = f'{base}-r{attempt}'
+        else:
+            raise RolloutError('Replacement container names are all taken; run --reap after the draining sessions finish. Nothing was removed.')
         try:
             self.run(['docker', 'compose', 'run', '-d', '--no-deps', '--name', candidate,
                       'server'], image=image)

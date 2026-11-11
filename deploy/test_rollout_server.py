@@ -67,6 +67,7 @@ class ServerRolloutTest(unittest.TestCase):
         self.live = False
         self.fail_reload = False
         self.routes = []
+        self.taken = set()  # container names that already exist
 
     def docker(self, args, image=None, timeout=120):
         self.operations.append(args)
@@ -81,6 +82,9 @@ class ServerRolloutTest(unittest.TestCase):
             if self.live:
                 text += ' 1: 0100007F:1F90 0100007F:ABCD 01\n'
             return text.encode()
+        if args[:4] == ['docker', 'container', 'ls', '-a']:
+            name = args[5].removeprefix('name=^/').removesuffix('$')
+            return (name + '\n').encode() if name in self.taken else b''
         if args[:7] == ['docker', 'compose', 'exec', '-T', 'proxy', 'caddy', 'reload']:
             self.routes.append((self.root / 'Caddyfile').read_text())
             if self.fail_reload:
@@ -105,6 +109,26 @@ class ServerRolloutTest(unittest.TestCase):
             self.rollout.reap(state)
         self.assertEqual(state['retired'], [])
         self.assertIn(['docker', 'stop', '--time', '30', 'paperboat-server-1'], self.operations)
+
+    def test_rollback_to_the_image_of_a_draining_server_takes_the_next_free_name(self):
+        # 2026-11-12: the rollback of .12.1 to .11.9 failed 'Replacement container name already exists': the .11.9 server was
+        # still draining (live connections, not removable) and container names follow the image id.
+        self.live = True
+        self.taken = {self.candidate}
+        with patch.object(self.rollout, 'run', side_effect=self.docker):
+            self.rollout.deploy('new-image')
+        state = json.loads(self.rollout.state_path.read_text())
+        self.assertEqual(state['active'], self.candidate + '-r2')
+        self.assertEqual(state['retired'], ['paperboat-server-1'])
+        self.assertIn(['docker', 'compose', 'run', '-d', '--no-deps', '--name', self.candidate + '-r2', 'server'], self.operations)
+        self.assertFalse(any(a[:2] in (['docker', 'stop'], ['docker', 'rm']) for a in self.operations))  # the draining one stays
+
+    def test_all_replacement_names_taken_fails_loudly_and_removes_nothing(self):
+        self.taken = {self.candidate} | {f'{self.candidate}-r{n}' for n in range(2, 12)}
+        with patch.object(self.rollout, 'run', side_effect=self.docker):
+            with self.assertRaisesRegex(module.RolloutError, 'names are all taken'):
+                self.rollout.deploy('new-image')
+        self.assertFalse(any(a[:2] in (['docker', 'stop'], ['docker', 'rm']) or 'reload' in a for a in self.operations))
 
     def test_switch_keeps_the_stream_close_delay_block(self):
         # The upstreams carry stream_close_delay so a reload does not cut long-lived edge streams.
