@@ -47,6 +47,11 @@ def database_dsn(dsn, name):
     return urlunsplit(parts._replace(path='/' + name))
 
 
+def database_name(index):
+    """The server's test guards refuse any database whose name does not end in _test (auth_integration_test.go, abusereports)."""
+    return f'paperboat_pr_{index}_test'
+
+
 def test_packages(module, names):
     """-race tests. Every package of a database module gets its own fresh database, as the lane-test workflow and
     tools/remote-test.sh do: packages sharing one database truncate each other's rows (deadlocks, foreign key errors)."""
@@ -56,7 +61,7 @@ def test_packages(module, names):
         subprocess.run(command + names, cwd=ROOT / module, check=True, timeout=1200)
         return
     for index, name in enumerate(names):
-        database = f'paperboat_pr_{index}'
+        database = database_name(index)
         subprocess.run(['psql', database_dsn(dsn, 'postgres').split('?')[0], '-qv', 'ON_ERROR_STOP=1',
                         '-c', f'drop database if exists "{database}" with (force)', '-c', f'create database "{database}"'], check=True, timeout=120)
         subprocess.run(command + [name], cwd=ROOT / module, check=True, timeout=1200,
