@@ -64,7 +64,8 @@ type guardServer struct {
 	previewPAC      map[controlConn]string
 	// policyPending marks leases acquired since the last installed policy: an acquire only binds, and the
 	// daemon's one "apply" per reconcile installs the policy of all of them in one transaction (one WFP Apply
-	// for N peers, not N). Until then the new addresses stay denied (fail closed).
+	// for N peers, not N). Until then the new addresses stay denied (fail closed). One flag for the whole guard:
+	// any connection's apply or release installs every pending lease, each already validated and bound.
 	policyPending bool
 }
 
