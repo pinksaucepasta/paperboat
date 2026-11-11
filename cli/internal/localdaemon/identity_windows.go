@@ -11,7 +11,7 @@ import (
 var errInvalidWindowsOwner = errors.New("invalid Windows daemon owner SID")
 
 func currentWindowsUserSID() (string, error) {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil || !user.User.Sid.IsValid() {
 		return "", errInvalidWindowsOwner
 	}

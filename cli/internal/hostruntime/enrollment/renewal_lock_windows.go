@@ -25,7 +25,7 @@ func openRuntimeIdentityRenewalLock(stateRoot string) (*runtimeIdentityRenewalLo
 	if !filepath.IsAbs(stateRoot) || filepath.Clean(stateRoot) != stateRoot {
 		return nil, ErrInvalid
 	}
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return nil, err
 	}

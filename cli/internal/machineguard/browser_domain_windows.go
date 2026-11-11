@@ -15,7 +15,7 @@ func validateBrowserDomainCaller(owner string) error {
 	if !validBrowserDomainOwner(owner) {
 		return errors.New("invalid browser domain owner SID")
 	}
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil {
 		return err
 	}

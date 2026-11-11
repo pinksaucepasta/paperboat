@@ -31,7 +31,7 @@ func secureStoreObject(path string, directory bool) error {
 	if attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		return ErrCorrupt
 	}
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil {
 		return storeFailure("runtime store owner SID is unavailable", err)
 	}

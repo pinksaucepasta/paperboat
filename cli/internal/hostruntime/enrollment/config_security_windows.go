@@ -5,7 +5,6 @@ package enrollment
 import (
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
-	"golang.org/x/sys/windows"
 	"os"
 )
 
@@ -22,7 +21,7 @@ func checkEnrollmentConfigFile(path string, info os.FileInfo, maximum int64) (ma
 	if err != nil || !single {
 		return false, err
 	}
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return false, err
 	}

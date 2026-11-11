@@ -10,7 +10,7 @@ import (
 )
 
 func currentAccount(d Descriptor) bool {
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return false
 	}

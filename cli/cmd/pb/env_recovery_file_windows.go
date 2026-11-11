@@ -32,7 +32,7 @@ func createEnvironmentRecoveryFile(path string) (*os.File, error) {
 	if info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY == 0 || info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		return nil, errors.New("ENV recovery output directory is invalid")
 	}
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return nil, err
 	}

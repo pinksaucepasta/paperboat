@@ -404,7 +404,7 @@ func ensureWindowsMachineControl(ctx context.Context, material bootstrap.Materia
 }
 
 func currentBootstrapSID() (string, error) {
-	token := windows.GetCurrentProcessToken()
+	token := windows.GetCurrentThreadEffectiveToken()
 	user, err := token.GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil || !user.User.Sid.IsValid() {
 		return "", runtimeFailure("could not resolve enrolled Windows SID", err)
