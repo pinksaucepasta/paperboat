@@ -3546,25 +3546,56 @@ func stageWindowsRuntimeFile(ctx context.Context, body []byte, current, rollback
 		if err := verify(ctx); err != nil {
 			return err
 		}
-		if err := removeWindowsFileWithRetry(ctx, rollback); err != nil {
-			return err
-		}
-		if _, err := os.Stat(current); err == nil {
-			//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=current-to-rollback-slot-transition
-			if err := os.Rename(current, rollback); err != nil {
-				return err
-			}
-		} else if !installNotExistOnly(err) {
-			return err
-		}
-		//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=verified-staged-runtime-activation
-		if err := os.Rename(temporaryPath, current); err != nil {
-			//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=restore-rollback-after-activation-failure
-			return hostInstallFailure("runtime publication and rollback failed", err, os.Rename(rollback, current))
-		}
-		return nil
+		return rotateWindowsRuntimeSlot(ctx, temporaryPath, current, rollback)
 	}, remove, nil
 }
+
+// rotateWindowsRuntimeSlot makes staged the current runtime and the current one the rollback. The previous rollback
+// image is only moved aside until current has taken its place, and is put back when a later rename fails: a double
+// failure must not lose the image a rollback needs (review of 5356e280a). It is deleted only after both renames.
+func rotateWindowsRuntimeSlot(ctx context.Context, staged, current, rollback string) error {
+	aside := rollback + ".aside"
+	if err := removeWindowsFileWithRetry(ctx, aside); err != nil {
+		return err
+	}
+	movedAside := false
+	if _, err := os.Stat(rollback); err == nil {
+		//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=previous-rollback-kept-aside-until-rotation
+		if err := renameWindowsRuntimeSlot(rollback, aside); err != nil {
+			return err
+		}
+		movedAside = true
+	} else if !installNotExistOnly(err) {
+		return err
+	}
+	restoreAside := func() error {
+		if !movedAside {
+			return nil
+		}
+		//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=restore-previous-rollback
+		return renameWindowsRuntimeSlot(aside, rollback)
+	}
+	if _, err := os.Stat(current); err == nil {
+		//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=current-to-rollback-slot-transition
+		if err := renameWindowsRuntimeSlot(current, rollback); err != nil {
+			return hostInstallFailure("runtime rollback slot rotation failed", err, restoreAside())
+		}
+	} else if !installNotExistOnly(err) {
+		return hostInstallFailure("inspect current runtime", err, restoreAside())
+	}
+	//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=verified-staged-runtime-activation
+	if err := renameWindowsRuntimeSlot(staged, current); err != nil {
+		//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=restore-rollback-after-activation-failure
+		return hostInstallFailure("runtime publication and rollback failed", err, renameWindowsRuntimeSlot(rollback, current), restoreAside())
+	}
+	if movedAside {
+		return removeWindowsFileWithRetry(ctx, aside)
+	}
+	return nil
+}
+
+// renameWindowsRuntimeSlot is the slot rename a test replaces to fail one step.
+var renameWindowsRuntimeSlot = os.Rename
 
 // writeStagedWindowsRuntime and the checks are the steps tests replace (TestWindowsStagedRuntime*): writing a
 // SYSTEM-owned file needs the restore privilege the test process lacks.
