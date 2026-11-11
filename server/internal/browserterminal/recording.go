@@ -7,6 +7,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/recordings"
 	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 	"github.com/pinksaucepasta/paperboat/shared/recording"
 )
@@ -36,12 +37,19 @@ func (g *Gateway) IssueRecording(ctx context.Context, userID, browserSessionID, 
 // has no generation to fence; its permission is checked again at every admission. OwnerAccountID is the machine's
 // account, whose transport root the browser pins, not the viewer's.
 func (a MachineAuthorizer) ResolveRecording(ctx context.Context, userID, recordingID string) (Decision, error) {
-	if a.Recordings == nil || a.Service == nil {
+	if a.Recordings == nil {
 		return Decision{}, ErrHostUnavailable
 	}
 	team, machine, owner, err := a.Recordings.ResolveReplay(ctx, userID, recordingID)
+	if refusedReplay(err) {
+		// An answered refusal ends an open replay channel at once; any other error is an outage the edge waits out.
+		return Decision{}, ErrForbidden
+	}
 	if err != nil {
 		return Decision{}, err
+	}
+	if a.Service == nil {
+		return Decision{}, ErrHostUnavailable
 	}
 	route, err := a.Service.ResolveMachineBrowserRoute(ctx, machine)
 	if err != nil {
@@ -52,6 +60,11 @@ func (a MachineAuthorizer) ResolveRecording(ctx context.Context, userID, recordi
 	}
 	return Decision{UserID: userID, OwnerAccountID: owner, WorkspaceID: team, RecordingID: recordingID, MachineID: route.MachineID, EnvironmentID: route.EnvironmentID,
 		HostWSSURL: route.HostWSSURL, EdgeNodeID: route.EdgeNodeID, EdgeProcessEpoch: route.EdgeProcessEpoch, EdgeEndpointHost: route.EdgeEndpointHost, Role: RoleRecording, PolicyGeneration: 1}, nil
+}
+
+// refusedReplay: the recording or its team is gone for this viewer, or their replay permission is.
+func refusedReplay(err error) bool {
+	return errors.Is(err, recordings.ErrForbidden) || errors.Is(err, recordings.ErrNotFound) || errors.Is(err, recordings.ErrDeleted) || errors.Is(err, recordings.ErrNeedsTeam)
 }
 
 // admitRecordingEdge mints the replay channel's host credential: the recording_replay class with the browser
