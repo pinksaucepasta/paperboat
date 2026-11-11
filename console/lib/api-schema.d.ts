@@ -12646,7 +12646,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Heartbeat recorded. The answer carries the ingress limits the edge enforces (T11). */
+            /** @description Heartbeat recorded. The answer carries the byte pacing the edge applies (T11). */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -12655,17 +12655,11 @@ export interface operations {
                     "application/json": {
                         ingress_limits: {
                             publication: {
-                                connections: number;
-                                opens_per_second: number;
-                                open_burst: number;
                                 /** Format: int64 */
                                 bytes_per_second: number;
                                 byte_burst: number;
                             };
                             account: {
-                                connections: number;
-                                opens_per_second: number;
-                                open_burst: number;
                                 /** Format: int64 */
                                 bytes_per_second: number;
                                 byte_burst: number;
