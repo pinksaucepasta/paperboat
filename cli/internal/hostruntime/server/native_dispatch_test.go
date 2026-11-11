@@ -351,3 +351,51 @@ func TestNativeDispatchResumeStreamCarriesTheCarrierProvenPeer(t *testing.T) {
 		t.Fatalf("a credentialed stream carried a resume peer: %v", err)
 	}
 }
+
+// The replay ticket's deadline bounds admission only: an admitted replay keeps streaming after it,
+// while a config comparison still ends at its header deadline.
+func TestNativeDispatchReplayOutlivesItsTicketDeadline(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ended := make(chan string, 2)
+	handler, err := NewNativeDispatchHandler(NativeDispatchConfig{Token: strings.Repeat("a", 43), MaximumConcurrent: 2, HandshakeTimeout: time.Second,
+		Fence: func(context.Context) (func(), <-chan struct{}, error) { return func() {}, nil, nil }, Authorize: func(context.Context, streamauth.Header) (string, error) { return "access", nil },
+		ServeStream: func(ctx context.Context, header streamauth.Header, _ net.Conn) error {
+			select {
+			case <-ctx.Done():
+				ended <- header.Consumer
+			case <-time.After(4 * time.Second):
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer handler.Close(ctx)
+	worker := httptest.NewServer(handler)
+	defer worker.Close()
+	client, _ := NewNativeDispatchClient(NativeDispatchClientConfig{Address: strings.TrimPrefix(worker.URL, "http://"), Token: strings.Repeat("a", 43), DialTimeout: time.Second})
+	deadline := time.Now().Add(2 * time.Second)
+	for _, consumer := range []string{"recording", "config_compare"} {
+		header, _ := streamauth.New("operation-"+consumer, consumer, "stream-"+consumer, "allowed", deadline, 1<<20)
+		conn, err := client.Open(ctx, header)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+	}
+	select {
+	case consumer := <-ended:
+		if consumer != "config_compare" {
+			t.Fatalf("%s ended at its header deadline", consumer)
+		}
+	case <-time.After(3500 * time.Millisecond):
+		t.Fatal("the comparison outlived its header deadline")
+	}
+	select {
+	case consumer := <-ended:
+		t.Fatalf("%s ended before its work finished", consumer)
+	case <-time.After(time.Second):
+	}
+}

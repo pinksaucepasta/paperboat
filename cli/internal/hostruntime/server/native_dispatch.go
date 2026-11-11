@@ -294,10 +294,11 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 				// deadline bounds admission, not accepted long-running work: the
 				// terminal server owns role expiry and revocation, an exec runs its
 				// single authorized operation to completion, and every transfer
-				// exchange carries its own refreshed authorization. Association
-				// teardown still closes all of them.
+				// exchange carries its own refreshed authorization, and a recording
+				// replay reads its one recording to the end however long that takes.
+				// Association teardown still closes all of them.
 				lifetime, cancel := context.WithCancel(r.Context())
-				if header.Consumer != "terminal" && header.Consumer != "exec" && header.Consumer != "file_transfer" {
+				if header.Consumer != "terminal" && header.Consumer != "exec" && header.Consumer != "file_transfer" && header.Consumer != "recording" {
 					cancel()
 					lifetime, cancel = context.WithTimeout(r.Context(), serverclock.Until(time.Unix(header.DeadlineUnix, 0)))
 				}

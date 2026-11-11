@@ -220,8 +220,7 @@ func readRecording(c *command.Context, id string, emit func([]byte) error) (resu
 		RecordingID string `json:"recording_id"`
 	}{id})
 	operationID := "op_" + uuid.NewString()
-	// shortcut: the stream must be admitted within the ticket's lifetime; a recording that takes longer
-	// than that to download is cut. Upgrade with ranged reads when recordings outgrow a few GB.
+	// The ticket bounds admission only; an admitted replay streams to the end.
 	request, err := localapi.NewPeerStreamRequest(replay.MachineID, environmentID, generation, wire.NativeConsumer, operationID, replay.Ticket, time.Now().Add(wire.TicketLifetime), tunnel.MaxRecordingReplayBytes+1<<20, payload)
 	if err != nil {
 		return err
