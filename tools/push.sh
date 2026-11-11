@@ -45,7 +45,8 @@ armed=$(gh api graphql -f query='query($o:String!,$n:String!,$p:Int!){repository
 # numbers between parallel PRs are caught by the policy job on the queue's merge commit.
 exec 9>&-
 # A timeout leaves the PR intact for inspection, and never reports a pending PR as success.
-end=$(( $(date +%s) + 3600 ))
+required=$(jq -c '[.required_status_checks.checks[].context]' "$(git rev-parse --show-toplevel)/tools/branch-protection.json")
+end=$(( $(date +%s) + 3600 )) lost=0
 while [ "$(date +%s)" -lt "$end" ]; do
   state=$(gh pr view "$url" --repo "$repo" --json state --jq .state)
   case "$state" in
@@ -56,14 +57,22 @@ while [ "$(date +%s)" -lt "$end" ]; do
       exit 0 ;;
     CLOSED) echo "push: PR closed without merging: $url" >&2; exit 1 ;;
   esac
-  failed=$(gh pr view "$url" --repo "$repo" --json statusCheckRollup --jq '
-    [.statusCheckRollup[] | (.conclusion // .state)] |
+  # Neither queued nor armed any more while still open: the queue ejected the PR (a failed merge-group check).
+  if [ "$state" = OPEN ]; then
+    armed=$(gh api graphql -f query='query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p){isInMergeQueue autoMergeRequest{enabledAt}}}}' \
+      -F o="${repo%%/*}" -F n="${repo#*/}" -F p="$number" --jq '.data.repository.pullRequest | .isInMergeQueue or .autoMergeRequest != null' || echo true)
+    if [ "$armed" = true ]; then lost=0; else lost=$((lost + 1)); fi
+    [ "$lost" -lt 3 ] || { echo "push: $url left the merge queue without merging (a queue check failed); fix it and resubmit" >&2; exit 1; }
+  fi
+  # Only the required checks decide: a failing optional job (Cross-platform, End-to-end) does not stop the merge.
+  failed=$(gh pr view "$url" --repo "$repo" --json statusCheckRollup | jq --argjson required "$required" '
+    [.statusCheckRollup[] | select(.name as $n | $required | index($n)) | (.conclusion // .state)] |
     any(. == "FAILURE" or . == "ERROR" or . == "CANCELLED" or . == "TIMED_OUT" or . == "ACTION_REQUIRED" or . == "STARTUP_FAILURE")')
   if [ "$failed" = true ]; then
     echo "push: CI failed for $url; fix the failing check before resubmitting" >&2
     exit 1
   fi
-  sleep 60
+  sleep "${PB_PUSH_POLL:-60}"
 done
 echo "push: timed out waiting for $url; inspect its checks before retrying" >&2
 exit 1
