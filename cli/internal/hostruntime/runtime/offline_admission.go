@@ -15,10 +15,9 @@ import (
 )
 
 // offlineAdmission records every offline session decision before the host acts on it (F21-11):
-// a start that cannot be recorded is refused, so audit fails closed. A multi-account host
-// dispatches streams to per-account workers that hold no peer state of their own here, so it
-// refuses offline sessions, except SSH: the carrier serves SSH itself under its own signed rules.
-func offlineAdmission(queue *offlineaudit.Queue, dispatching bool, online func() bool) func(context.Context, native.OfflineAdmission) error {
+// a start that cannot be recorded is refused, so audit fails closed. The decision is the carrier's own, from the
+// signed scopes it holds; a carrier that dispatches to a per-account worker forwards the admitted peer with the stream.
+func offlineAdmission(queue *offlineaudit.Queue, online func() bool) func(context.Context, native.OfflineAdmission) error {
 	if queue == nil {
 		return nil
 	}
@@ -28,10 +27,7 @@ func offlineAdmission(queue *offlineaudit.Queue, dispatching bool, online func()
 		}
 		event := offlineaudit.Event{Kind: offlineaudit.KindStarted, Capability: request.Capability, PeerEndpointID: request.Peer.EndpointID, PeerAccountID: request.Peer.AccountID, OperationID: request.Header.OperationID}
 		var refusal error
-		switch {
-		case dispatching:
-			refusal, event.Reason = errors.New("this host does not start offline sessions"), offlineaudit.ReasonPeerUnknown
-		case !request.Allowed:
+		if !request.Allowed {
 			refusal, event.Reason = errors.New("no signed scope allows this session"), offlineaudit.ReasonNoScope
 		}
 		if refusal != nil {
