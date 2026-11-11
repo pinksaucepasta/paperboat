@@ -90,7 +90,7 @@ func (s *capturedNativeApplicationSession) Close() error {
 }
 
 func TestCLINativeStreamGroupAuthorizesEveryApplicationStream(t *testing.T) {
-	for _, tc := range []struct{ consumer, capability string }{{"ssh", "managed_ssh"}, {"file_transfer_key", "file_transfer"}} {
+	for _, tc := range []struct{ consumer, capability string }{{"ssh", "managed_ssh"}, {"file_transfer", "file_transfer"}} {
 		t.Run(tc.consumer, func(t *testing.T) {
 			now := time.Now().UTC()
 			session := &capturedNativeApplicationSession{}

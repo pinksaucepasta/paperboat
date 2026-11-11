@@ -287,7 +287,7 @@ func (a peerApplication) authorizationHeader(target *resolver.TerminalTarget, co
 		header, err = streamauth.New(operationID, consumer, streamID, target.Auth.Token, deadline, maximum)
 	}
 	if err == nil {
-		header.Resumable = consumer != "config_compare" && consumer != "recording"
+		header.Resumable = peerconsumer.Resumable(consumer)
 		// A name the header cannot carry (Windows DOMAIN\user) is left out: the host then leaves the login to sshd.
 		if consumer == "ssh" && streamauth.ValidLoginUser(target.LoginUser) {
 			header.LoginUser = target.LoginUser

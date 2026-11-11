@@ -3,6 +3,7 @@ package localdaemon
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/peerconsumer"
 	"net/http"
 	"net/url"
 	"sort"
@@ -315,7 +316,7 @@ const offlineStreamLifetime = 12 * time.Hour
 // hostRulesPeerStream asks the host to admit the stream from its own signed scopes (F21-11): every SSH stream,
 // and exec or terminal streams while Paperboat is unreachable.
 func hostRulesPeerStream(request localapi.PeerStreamRequest) (localapi.PeerStreamRequest, error) {
-	if !localapi.OfflineConsumers[request.Consumer] {
+	if !peerconsumer.Offline(request.Consumer) {
 		return request, errors.New("this session needs Paperboat online")
 	}
 	request.Offline, request.Credential, request.AccessSessionID = true, "", ""

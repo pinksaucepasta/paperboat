@@ -338,6 +338,13 @@ func TestPendingPeerStreamRequestDefersCredentialValidation(t *testing.T) {
 	if request.Validate(time.Now().UTC()) == nil || request.ValidatePending(time.Now().UTC()) != nil {
 		t.Fatal("pending request was accepted as authorized or rejected as pending")
 	}
+	// Only a consumer the daemon can fill (IssuePeerStream: exec, ssh) may be pending; a pending terminal used to pass
+	// here and fail later inside the daemon with a generic error.
+	for _, consumer := range []string{"terminal", "config_compare", "recording", "health_probe"} {
+		if _, err := NewPendingPeerStreamRequest("machine_1", "environment_1", 2, consumer, "operation_1", time.Now().Add(time.Minute), 1024, nil); err == nil {
+			t.Fatalf("a pending %s request the daemon cannot fill was accepted", consumer)
+		}
+	}
 }
 
 func TestLocalAPIPeerStreamOutlivesHTTPTimeout(t *testing.T) {
@@ -1203,7 +1210,7 @@ func TestPeerStreamExplainsTheTerminalSessionLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request, err := NewPendingPeerStreamRequest("machine_1", "environment_1", 1, "terminal", "operation_limit", time.Now().Add(time.Minute), 1024, nil)
+	request, err := NewPeerStreamRequest("machine_1", "environment_1", 1, "terminal", "operation_limit", "credential", time.Now().Add(time.Minute), 1024, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

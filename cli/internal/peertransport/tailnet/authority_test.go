@@ -465,17 +465,6 @@ func TestReorderedNetworkAuthorityKeepsCurrentButConflictingGenerationFailsClose
 	}
 }
 
-func TestNetworkAuthorityAcceptsExactCodexSessionScope(t *testing.T) {
-	a, configuration, private, _ := networkTestAuthority(t)
-	configuration.Peers[0].Scopes[0] = NetworkScope{ResourceKind: "codex_session", ResourceID: "cdx_test", ResourceGeneration: 1, Capability: "codex", Direction: "dial", Port: NetworkPort, ExpiresAt: configuration.ExpiresAt}
-	if err := a.Apply(context.Background(), networkToken(t, private, configuration)); err != nil {
-		t.Fatal(err)
-	}
-	if !a.Allows("machine_test", "cdx_test", "codex", "dial") || a.Allows("machine_test", "cdx_test", "terminal", "dial") {
-		t.Fatal("Codex scope was not kept separate from terminal authority")
-	}
-}
-
 func TestNetworkAuthorityRotationReplayRestartAndFailedWrite(t *testing.T) {
 	a, c, priv, secrets := networkTestAuthority(t)
 	ctx := context.Background()
@@ -1321,11 +1310,11 @@ func TestSignedEndpointsBecomeDirectContacts(t *testing.T) {
 }
 
 // A native operation of any scope kind the configuration may carry can be tracked as admitted; the kinds come from
-// the shared list (shared/peernetwork), not a copy that had no codex_session.
+// the shared list (shared/peernetwork), not a copy.
 func TestEveryAcceptedScopeKindCanBeTrackedAsAdmitted(t *testing.T) {
 	a, c, signer, _ := networkTestAuthority(t)
 	base := c.Peers[0].Scopes[0]
-	kinds := map[string]string{"inspector": "inspector", "config_compare": "config_compare", "recording": "recording", "codex_session": "codex"}
+	kinds := map[string]string{"inspector": "inspector", "config_compare": "config_compare", "recording": "recording"}
 	for kind, capability := range kinds {
 		s := base
 		s.ResourceKind, s.ResourceID, s.Capability = kind, kind+"_1", capability
