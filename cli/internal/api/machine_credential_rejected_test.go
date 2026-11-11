@@ -14,7 +14,9 @@ type rejectingMachineAuth struct {
 	rejected []string
 }
 
-func (s *rejectingMachineAuth) CredentialRejected(token string) { s.rejected = append(s.rejected, token) }
+func (s *rejectingMachineAuth) CredentialRejected(token string) {
+	s.rejected = append(s.rejected, token)
+}
 
 // stg-m1: the server refused the machine credential on every machine-proof call, yet nothing told the source,
 // so it kept serving the refused credential. A 401 on a machine-authenticated request now reports it.

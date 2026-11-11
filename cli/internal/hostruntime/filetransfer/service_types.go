@@ -101,12 +101,12 @@ type CreateRequest struct {
 }
 
 type Config struct {
-	Root                     string
-	PublishRoot              func() (string, error)
+	Root        string
+	PublishRoot func() (string, error)
 	// EnsurePublishRoot creates and checks a directory files are published into (the Inbox, or a receipt's
 	// directory): the runtime passes inbox.EnsurePath, which on Windows also applies and checks the protected
 	// owner-only DACL. Default: an owner-only (0700) directory.
-	EnsurePublishRoot func(string) error
+	EnsurePublishRoot        func(string) error
 	LocalMachineID           string
 	Store                    *store.Store
 	Now                      func() time.Time

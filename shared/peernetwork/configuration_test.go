@@ -30,19 +30,23 @@ func TestConfigurationCheckRefusesEachBrokenRule(t *testing.T) {
 		t.Fatalf("valid configuration refused: %v", err)
 	}
 	for name, breakIt := range map[string]func(*Configuration){
-		"audience":           func(c *Configuration) { c.Audience = RelayGrantAudience },
-		"generation":         func(c *Configuration) { c.Generation = MaxSafeInteger + 1 },
-		"future":             func(c *Configuration) { c.IssuedAt = now.Add(2 * MaxClockSkew).Unix(); c.ExpiresAt = c.IssuedAt + 60 },
-		"self disco":         func(c *Configuration) { c.Self.DiscoPublicKey = "" },
-		"peer address":       func(c *Configuration) { c.Peers[0].Identity.VirtualAddress = c.Self.VirtualAddress },
-		"cli peer of cli":    func(c *Configuration) { c.Peers[0].Identity = testBinding("cli2", RoleCLI, 30) },
-		"peer endpoint":      func(c *Configuration) { c.Peers[0].Endpoints = []string{"127.0.0.1:1"} },
-		"scope direction":    func(c *Configuration) { c.Peers[0].Scopes[0].Direction = "accept" },
-		"scope port":         func(c *Configuration) { c.Peers[0].Scopes[0].Port = 80 },
-		"scope id":           func(c *Configuration) { c.Peers[0].Scopes[0].ResourceID = "bad id" },
-		"standing timed":     func(c *Configuration) { c.Peers[0].Scopes[0].ExpiresAt = 0 },
-		"duplicate scope":    func(c *Configuration) { c.Peers[0].Scopes = append(c.Peers[0].Scopes, c.Peers[0].Scopes[0]) },
-		"foreign mesh scope": func(c *Configuration) { c.Peers[0].Identity.AccountID = "other"; c.Peers[0].Scopes[0].ResourceKind = "machine_network"; c.Peers[0].Scopes[0].Capability = "connect" },
+		"audience":        func(c *Configuration) { c.Audience = RelayGrantAudience },
+		"generation":      func(c *Configuration) { c.Generation = MaxSafeInteger + 1 },
+		"future":          func(c *Configuration) { c.IssuedAt = now.Add(2 * MaxClockSkew).Unix(); c.ExpiresAt = c.IssuedAt + 60 },
+		"self disco":      func(c *Configuration) { c.Self.DiscoPublicKey = "" },
+		"peer address":    func(c *Configuration) { c.Peers[0].Identity.VirtualAddress = c.Self.VirtualAddress },
+		"cli peer of cli": func(c *Configuration) { c.Peers[0].Identity = testBinding("cli2", RoleCLI, 30) },
+		"peer endpoint":   func(c *Configuration) { c.Peers[0].Endpoints = []string{"127.0.0.1:1"} },
+		"scope direction": func(c *Configuration) { c.Peers[0].Scopes[0].Direction = "accept" },
+		"scope port":      func(c *Configuration) { c.Peers[0].Scopes[0].Port = 80 },
+		"scope id":        func(c *Configuration) { c.Peers[0].Scopes[0].ResourceID = "bad id" },
+		"standing timed":  func(c *Configuration) { c.Peers[0].Scopes[0].ExpiresAt = 0 },
+		"duplicate scope": func(c *Configuration) { c.Peers[0].Scopes = append(c.Peers[0].Scopes, c.Peers[0].Scopes[0]) },
+		"foreign mesh scope": func(c *Configuration) {
+			c.Peers[0].Identity.AccountID = "other"
+			c.Peers[0].Scopes[0].ResourceKind = "machine_network"
+			c.Peers[0].Scopes[0].Capability = "connect"
+		},
 	} {
 		c := validTestConfiguration(now)
 		breakIt(&c)

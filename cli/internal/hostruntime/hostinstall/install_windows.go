@@ -738,15 +738,15 @@ var windowsActivationOps = struct {
 		_, err := PrepareWindowsSSHGeneration(ctx, request)
 		return err
 	},
-	prestage:    prepareStagedWindowsBinary,
-	stop:        stopWindowsRuntimeForActivation,
-	token:       ensureWindowsTokenAt,
-	pin:         ensureWindowsPinnedRuntime,
+	prestage:      prepareStagedWindowsBinary,
+	stop:          stopWindowsRuntimeForActivation,
+	token:         ensureWindowsTokenAt,
+	pin:           ensureWindowsPinnedRuntime,
 	stageCarrier:  stageWindowsCarrierUpgrade,
 	carrier:       activateWindowsCarrier,
 	switchCarrier: switchWindowsCarrier,
-	writeConfig: writeWindowsConfigAt,
-	startRoles:  installWindowsRoleServices,
+	writeConfig:   writeWindowsConfigAt,
+	startRoles:    installWindowsRoleServices,
 }
 
 // newWindowsActivation builds installWindows' activation. finish, run on every exit, removes a staged runtime that

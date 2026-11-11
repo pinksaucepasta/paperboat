@@ -10,9 +10,9 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
-	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
+	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"golang.org/x/sys/windows"
 )
 
