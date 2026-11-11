@@ -234,7 +234,7 @@ type ChainLink struct {
 }
 
 // ReplayRequest is POST /v1/recordings/{id}/replay with exactly one of the two fields. The CLI names
-// its client session: the peer network then admits it to the machine for the consumer NativeConsumer
+// its client session: the peer network then admits it to the machine for the consumer peerconsumer.Recording
 // until the ticket expires, and the ticket is bound to it. A browser sends its E2E public key hash
 // and gets a browser ticket (role "recording") and a stream URL instead of a machine ticket.
 type ReplayRequest struct {
@@ -248,8 +248,9 @@ type ReplayRequest struct {
 // SourceBucket is ReplayRequest.Source and Replay.Source of an archive replay.
 const SourceBucket = "bucket"
 
-// NativeConsumer is the peer stream consumer and network capability of a CLI replay.
-const NativeConsumer = "recording"
+// TicketRole is the browser channel role of a console recording replay ticket: the server issues it, the
+// machine's credential check reads it.
+const TicketRole = "recording"
 
 // Replay answers ReplayRequest. The server wrote the replay audit event before answering.
 type Replay struct {
@@ -330,7 +331,7 @@ const (
 	EventRecording = "recording"    // stream event {"event":EventRecording,"session_id","recording":State|null}
 )
 
-// Replay stream on the machine (browser E2E or native consumer NativeConsumer): request {"action":ReadAction,
+// Replay stream on the machine (browser E2E or native consumer peerconsumer.Recording): request {"action":ReadAction,
 // "recording_id"} on Capability, then binary frames each carrying one segment file behind a 4-byte big-endian
 // length, then the event {"event":EventStreamEnd,"segments":n}.
 const (

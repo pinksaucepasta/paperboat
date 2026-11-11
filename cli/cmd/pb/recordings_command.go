@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/peerconsumer"
 	"io"
 	"net"
 	nethttp "net/http"
@@ -227,7 +228,7 @@ func readRecording(c *command.Context, id string, emit func([]byte) error) (resu
 	}{id})
 	operationID := "op_" + uuid.NewString()
 	// The ticket bounds admission only; an admitted replay streams to the end.
-	request, err := localapi.NewPeerStreamRequest(replay.MachineID, environmentID, generation, wire.NativeConsumer, operationID, replay.Ticket, time.Now().Add(wire.TicketLifetime), tunnel.MaxRecordingReplayBytes+1<<20, payload)
+	request, err := localapi.NewPeerStreamRequest(replay.MachineID, environmentID, generation, peerconsumer.Recording, operationID, replay.Ticket, time.Now().Add(wire.TicketLifetime), tunnel.MaxRecordingReplayBytes+1<<20, payload)
 	if err != nil {
 		return err
 	}

@@ -110,10 +110,10 @@ func (s *NetworkService) Register(ctx context.Context, in NetworkRegistration) (
 }
 
 func (s *NetworkService) registerAttempt(ctx context.Context, in NetworkRegistration) (NetworkRegistrationResult, error) {
-	if ctx == nil || !bounded(in.OperationID, 8, 128) || !bounded(in.UserID, 1, 256) || !bounded(in.EndpointID, 1, 128) || !validWireGuardPublicKey(in.WireGuardPublicKey) || !validWireGuardPublicKey(in.DiscoPublicKey) || len(in.QUICCertificateFingerprint) != 32 || in.ExpectedKeyGeneration < 0 || (in.Role != "cli" && in.Role != "machine") {
+	if ctx == nil || !bounded(in.OperationID, 8, 128) || !bounded(in.UserID, 1, 256) || !bounded(in.EndpointID, 1, 128) || !validWireGuardPublicKey(in.WireGuardPublicKey) || !validWireGuardPublicKey(in.DiscoPublicKey) || len(in.QUICCertificateFingerprint) != 32 || in.ExpectedKeyGeneration < 0 || (in.Role != peernetwork.RoleCLI && in.Role != peernetwork.RoleMachine) {
 		return NetworkRegistrationResult{}, ErrInvalid
 	}
-	if in.Role == "cli" && (in.MachineID != "" || in.MachineGeneration != 0) || in.Role == "machine" && (in.MachineID != in.EndpointID || in.MachineGeneration < 1) {
+	if in.Role == peernetwork.RoleCLI && (in.MachineID != "" || in.MachineGeneration != 0) || in.Role == peernetwork.RoleMachine && (in.MachineID != in.EndpointID || in.MachineGeneration < 1) {
 		return NetworkRegistrationResult{}, ErrInvalid
 	}
 	hash := sha256.Sum256([]byte(in.UserID + "\x00" + in.EndpointID + "\x00" + in.Role + "\x00" + fmt.Sprint(in.EndpointGeneration) + "\x00" + fmt.Sprint(in.MachineGeneration) + "\x00" + fmt.Sprint(in.ExpectedKeyGeneration) + "\x00" + base64.RawURLEncoding.EncodeToString(in.WireGuardPublicKey) + "\x00" + base64.RawURLEncoding.EncodeToString(in.DiscoPublicKey) + "\x00" + hex.EncodeToString(in.QUICCertificateFingerprint)))
@@ -132,7 +132,7 @@ func (s *NetworkService) registerAttempt(ctx context.Context, in NetworkRegistra
 	if err != nil {
 		return NetworkRegistrationResult{}, err
 	}
-	if in.Role == "cli" {
+	if in.Role == peernetwork.RoleCLI {
 		var active bool
 		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.cli_client_sessions c JOIN paperboat.users u ON u.id=c.user_id AND u.status='active' WHERE c.id=$1 AND c.user_id=$2 AND c.state='active' AND c.revoked_at IS NULL)`, in.EndpointID, in.UserID).Scan(&active)
 		if err != nil {
@@ -539,7 +539,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		p.Scopes = append(p.Scopes, personalNetworkScope(self, binding, meshExpiry))
 		scopes++
 	}
-	if untilRevoked && self.Role == "cli" {
+	if untilRevoked && self.Role == peernetwork.RoleCLI {
 		hosts, err := teamHostPeers(ctx, tx, self, now)
 		if err != nil {
 			return NetworkConfigResult{}, err
@@ -565,7 +565,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 			}
 		}
 	}
-	if untilRevoked && self.Role == "machine" {
+	if untilRevoked && self.Role == peernetwork.RoleMachine {
 		offline, err := offlineAccessPeers(ctx, tx, self, now)
 		if err != nil {
 			return NetworkConfigResult{}, err
@@ -654,14 +654,14 @@ func personalNetworkScopeID(self, peer networkBinding) string {
 // personalNetworkScope is a mesh scope ending at expiresAt (a Unix time; 0 means until revoked).
 func personalNetworkScope(self, peer networkBinding, expiresAt int64) networkScope {
 	direction := "dial"
-	if self.Role == "machine" && (peer.Role == "cli" || self.EndpointID > peer.EndpointID) {
+	if self.Role == peernetwork.RoleMachine && (peer.Role == peernetwork.RoleCLI || self.EndpointID > peer.EndpointID) {
 		direction = "accept"
 	}
 	return networkScope{ResourceKind: "machine_network", ResourceID: personalNetworkScopeID(self, peer), ResourceGeneration: 1, Capability: "connect", Direction: direction, Port: peernetwork.NetworkPort, ExpiresAt: expiresAt}
 }
 
 func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, now time.Time, expiry *time.Time, admittedPeers map[string]bool, admittedNetworks []string, meshSeq int64) ([]networkBinding, error) {
-	if self.Role == "machine" {
+	if self.Role == peernetwork.RoleMachine {
 		var personal bool
 		if err := tx.QueryRowContext(ctx, `SELECT owner_team_id IS NULL FROM paperboat.user_machines WHERE id=$1 AND user_id=$2`, self.EndpointID, self.AccountID).Scan(&personal); err != nil {
 			return nil, err
@@ -822,13 +822,6 @@ func relayGrantParts(base peernetwork.RelayGrant, chunks []relayGrantChunk, peer
 	return parts
 }
 
-// maximumRelayGrantPeers and maximumRelayGrantScopes are the relay's bounds on one grant (relay derpquic
-// authority and mint both refuse more); more peers are carried in more grants.
-const (
-	maximumRelayGrantPeers  = peernetwork.MaxGrantPeers
-	maximumRelayGrantScopes = peernetwork.MaxGrantScopes
-)
-
 // relayGrantChunk is one grant's share of the peers: their entries, and the keys of those among them that
 // may use this endpoint as a peer relay (same account).
 type relayGrantChunk struct {
@@ -837,7 +830,7 @@ type relayGrantChunk struct {
 	scopes  int
 }
 
-// relayGrantChunks splits every peer into grants of at most size peers and maximumRelayGrantScopes scopes, sorted by key. Each chunk carries the
+// relayGrantChunks splits every peer into grants of at most size peers and peernetwork.MaxGrantScopes scopes, sorted by key. Each chunk carries the
 // control keys of its own peers, so the chunks are disjoint (the mesh refuses a duplicate control peer). A grant lives
 // at most relaylimits.MaxGrantLifetime, so a scope held until revoked (expires_at 0, AuthorityUntilRevoked) ends with the grant there
 // (grantExpiry); relays and mint refuse a scope without an expiry. A peer without a WireGuard key cannot be relayed
@@ -858,7 +851,7 @@ func relayGrantChunks(self networkBinding, peers []networkPeer, size int, grantE
 			continue
 		}
 		last := &chunks[len(chunks)-1]
-		if len(last.peers) == size || len(last.peers) > 0 && last.scopes+len(scopes) > maximumRelayGrantScopes {
+		if len(last.peers) == size || len(last.peers) > 0 && last.scopes+len(scopes) > peernetwork.MaxGrantScopes {
 			chunks = append(chunks, relayGrantChunk{})
 			last = &chunks[len(chunks)-1]
 		}

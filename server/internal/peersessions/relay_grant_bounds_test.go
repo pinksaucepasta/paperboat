@@ -32,7 +32,7 @@ func TestTheLargestRelayGrantChunkFitsTheRelayTokenBound(t *testing.T) {
 		peers = append(peers, networkPeer{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: self.AccountID, EndpointID: fmt.Sprint(i), WireGuardPublicKey: key(i), DiscoPublicKey: key(i)}}, Scopes: scopes})
 	}
 	now := time.Now().Unix()
-	for _, chunk := range relayGrantChunks(self, peers, maximumRelayGrantPeers, now+60) {
+	for _, chunk := range relayGrantChunks(self, peers, peernetwork.MaxGrantPeers, now+60) {
 		grant := peernetwork.RelayGrant{Version: 1, Issuer: strings.Repeat("i", 256), Audience: peernetwork.RelayGrantAudience, IssuedAt: now, ExpiresAt: now + 60, Generation: 1 << 53,
 			AccountID: self.AccountID, EndpointID: self.EndpointID, WireGuardPublicKey: self.WireGuardPublicKey, DiscoPublicKey: key(0), CertificateFingerprint: strings.Repeat("f", 64),
 			QUICPublicKey: key(0), NodeID: strings.Repeat("n", 256), NodeGeneration: 1 << 53, ProcessEpoch: strings.Repeat("p", 256), Peers: chunk.peers, RelayControlPeers: chunk.control}

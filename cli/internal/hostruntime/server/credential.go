@@ -177,7 +177,7 @@ func (a *CredentialAuthorizer) verifiedClaims(ctx context.Context, policy auth.P
 const (
 	BrowserChannelTerminal  = "terminal"
 	BrowserChannelInspector = "inspector"
-	BrowserChannelRecording = "recording"
+	BrowserChannelRecording = recording.TicketRole
 )
 
 // BrowserTerminalPublicKeySHA256 verifies the browser terminal, inspector or recording replay
