@@ -190,7 +190,7 @@ When a reverse proxy sits in front of your app, it decides what the app sees:
 | nginx | `proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;` (not `$scheme`, which says `http`); `set_real_ip_from 127.0.0.1; real_ip_header X-Forwarded-For;` for the visitor's address; `proxy_buffering off;` so streamed responses (SSE, AI tokens) are not held back; `client_max_body_size` at least your upload size (nginx refuses bodies over 1 MiB by default) |
 | Caddy | `trusted_proxies static 127.0.0.1/32 ::1/128` in the global `servers` block; serve the site as `http://name` or use `auto_https disable_redirects` on the port the tunnel uses |
 | Traefik | `entryPoints.<name>.forwardedHeaders.trustedIPs=127.0.0.1/32,::1/128` (add the Docker bridge if Traefik runs in a container); put the HTTP-to-HTTPS redirect only on entrypoints the tunnel does not use |
-| Apache | `RemoteIPHeader X-Forwarded-For` with `RemoteIPInternalProxy 127.0.0.1`; `SetEnvIf X-Forwarded-Proto https HTTPS=on` and guard `RewriteCond %{HTTPS} off` redirects with it |
+| Apache | `RemoteIPHeader X-Forwarded-For` with `RemoteIPInternalProxy 127.0.0.1`; `SetEnvIf X-Forwarded-Proto https HTTPS=on` and guard `RewriteCond %{HTTPS} off` redirects with it; `Proxy100Continue Off` when the app behind it does not answer `Expect: 100-continue` (HTTP/1.0 servers), or uploads fail with 503 |
 
 On a team or private route the app also learns who is visiting:
 `Paperboat-Visitor-Assertion` carries a JWT (`typ` `paperboat-visitor+jwt`,

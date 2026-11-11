@@ -25,6 +25,8 @@ ServerName @HOST@
   SSLCertificateFile /certs/leaf.crt
   SSLCertificateKeyFile /certs/leaf.key
   ProxyPreserveHost On
+  # The app is an HTTP/1.0 server that never sends 100 Continue; let Apache answer it instead of waiting.
+  Proxy100Continue Off
   RequestHeader set X-Forwarded-Proto "https"
   ProxyPass / http://app:9000/
 </VirtualHost>
