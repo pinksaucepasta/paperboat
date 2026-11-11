@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import type { BrowserTerminalAPI, BrowserTerminalEvent } from "@/lib/terminal/browser-terminal-wasm"
-import { describeUploadFailure, openBrowserConnection, type Ticket } from "@/lib/terminal/inbox-upload"
+import { describeUploadFailure, openBrowserConnection, retryTransient, type Ticket } from "@/lib/terminal/inbox-upload"
 import { ApiError } from "@/lib/api"
 import { FilePasteError } from "@/lib/terminal/file-paste"
 
@@ -93,4 +93,33 @@ test("upload failures are put in words: file errors, plan limit, anything else",
   expect(describeUploadFailure(new Error("The machine did not answer in time."))).toBe("The machine did not answer in time.")
   expect(describeUploadFailure(new ApiError(403, "browser_terminal_limit_reached", "x"))).toMatch(/browser terminal limit/)
   expect(describeUploadFailure("odd")).toBe("The machine could not be reached.")
+})
+
+test("a close that heals on its own is retried after each delay; anything else ends at once", async () => {
+  const waited: number[] = []
+  const options = { delays: [1, 2, 3], wait: async (ms: number) => void waited.push(ms) }
+  let tries = 0
+  // The machine closing a connection ("machine_unavailable" is a reconnect outcome) is retried until it opens.
+  const result = await retryTransient(async () => {
+    if (++tries < 3) throw new ApiError(409, "machine_edge_unavailable", "down")
+    return "opened"
+  }, options)
+  expect([result, tries, waited]).toEqual(["opened", 3, [1, 2]])
+
+  // The plan limit and unknown failures are not retried; neither is anything once canceled.
+  for (const reason of [new ApiError(403, "browser_terminal_limit_reached", "limit"), new Error("boom")]) {
+    let attempts = 0
+    await expect(retryTransient(async () => (attempts++, Promise.reject(reason)), options)).rejects.toBe(reason)
+    expect(attempts).toBe(1)
+  }
+  let canceledTries = 0
+  await expect(
+    retryTransient(async () => (canceledTries++, Promise.reject(new ApiError(409, "machine_edge_unavailable", "down"))), { ...options, canceled: () => true }),
+  ).rejects.toBeInstanceOf(ApiError)
+  expect(canceledTries).toBe(1)
+
+  // After the delays are used up the last failure stands.
+  let exhausted = 0
+  await expect(retryTransient(async () => (exhausted++, Promise.reject(new ApiError(409, "machine_edge_unavailable", "down"))), options)).rejects.toBeInstanceOf(ApiError)
+  expect(exhausted).toBe(4)
 })

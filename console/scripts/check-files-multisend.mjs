@@ -51,6 +51,12 @@ if (!a || !b) throw new Error(`MACHINES=${process.env.MACHINES} must name two ma
 const stamp = Date.now()
 // "Send files" sits on a machine's Files page; the dialog starts with that machine.
 await page.goto(`${origin}/files?machine=${a.id}`, { waitUntil: "networkidle", timeout: 120000 })
+const tickets = []
+page.on("response", async (res) => {
+  if (!/terminal-sessions(\/[^/]+)?\/(browser-ticket|sharing)|terminal-sessions\?/.test(res.url()) && !/\/terminal-sessions\//.test(res.url())) return
+  const body = res.status() >= 400 ? await res.json().catch(() => ({})) : {}
+  tickets.push(`${new Date().toISOString().slice(14, 23)} ${res.request().method()} ${res.url().replace(/^https?:\/\/[^/]+\/api\/v1\//, "").replace(/\?.*/, "")} ${res.status()} ${body.error?.code ?? ""}`)
+})
 const dialog = page.getByRole("dialog")
 const shot = (name) => (shots ? page.screenshot({ path: `${shots}/${name}.png` }) : undefined)
 const openDialog = async (machines) => {
@@ -137,6 +143,7 @@ if (shots) {
   await page.keyboard.press("Escape")
 }
 
+if (failed && process.env.DEBUG_TICKETS) console.log(tickets.join("\n"))
 // Clean up: delete every multisend-* test file (also leftovers of earlier runs) from both Inboxes, through the page
 // so the request is same-origin like the console's own delete.
 for (const machine of new Set([a, b, only])) {

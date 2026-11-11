@@ -132,13 +132,39 @@ export function describeUploadFailure(reason: unknown): string {
   return reason instanceof Error && reason.message ? reason.message : "The machine could not be reached."
 }
 
-/** Closes that heal on their own, as the terminal page retries them. */
-const retryDelays = [2000, 5000]
+/** The machine ended the connection before the upload could start. */
+class ConnectionClosed extends Error {
+  constructor(
+    message: string,
+    readonly transient: boolean,
+  ) {
+    super(message)
+  }
+}
+
+/** Closes that heal on their own (a machine still ending its last shell, an edge restarting), which the terminal page reconnects through. */
+const retryDelays = [2000, 5000, 10_000]
 const isTransient = (reason: unknown) => {
+  if (reason instanceof ConnectionClosed) return reason.transient
   const closed = reason instanceof ApiError ? ticketCloseCode(reason) : null
   return closed !== null && terminalCloseCodes[closed].phase === "reconnect"
 }
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/** Runs `attempt` again after each delay while it fails with a close that heals on its own; any other failure ends it. */
+export async function retryTransient<T>(
+  attempt: () => Promise<T>,
+  options: { delays?: number[]; canceled?: () => boolean; wait?: (ms: number) => Promise<unknown> } = {},
+): Promise<T> {
+  const { delays = retryDelays, canceled = () => false, wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = options
+  for (let tried = 0; ; tried++) {
+    try {
+      return await attempt()
+    } catch (reason) {
+      if (canceled() || tried >= delays.length || !isTransient(reason)) throw reason
+      await wait(delays[tried])
+    }
+  }
+}
 
 /**
  * Puts files in a machine's Inbox the way the terminal's upload does, with no terminal shown and nothing
@@ -173,7 +199,7 @@ export function uploadToInbox(
         else if (event.type === "attached") attached.resolve()
         else if (event.type === "state" && ["reconnecting", "denied", "closed", "transport-error"].includes(event.state ?? "")) {
           const outcome = terminalCloseCodes[workerCloseCode(event) ?? "edge_unavailable"]
-          attached.reject(new Error(outcome.message || "The connection to the machine was interrupted."))
+          attached.reject(new ConnectionClosed(outcome.message || "The connection to the machine was interrupted.", outcome.phase === "reconnect"))
         }
       },
     })
@@ -185,26 +211,27 @@ export function uploadToInbox(
     try {
       browser = await loadBrowserTerminal()
       sessionID = (await startShell(machine.id, workspace)).id
-      for (let attempt = 0; ; attempt++) {
-        let ready!: { resolve: () => void; reject: (error: Error) => void }
-        const attached = new Promise<void>((resolve, reject) => (ready = { resolve, reject }))
-        const timer = setTimeout(() => ready.reject(new Error("The machine did not answer in time.")), 30_000)
-        try {
-          const opened = await connect(browser, sessionID, ready)
-          if (!opened) throw new FilePasteError("canceled")
-          connectionID = opened.id
-          await attached
-          break
-        } catch (reason) {
-          if (connectionID) browser.leave(connectionID)
-          connectionID = ""
-          if (canceled || attempt >= retryDelays.length || !isTransient(reason)) throw reason
-          await wait(retryDelays[attempt])
-        } finally {
-          clearTimeout(timer)
-          attached.catch(() => undefined)
-        }
-      }
+      await retryTransient(
+        async () => {
+          let ready!: { resolve: () => void; reject: (error: Error) => void }
+          const attached = new Promise<void>((resolve, reject) => (ready = { resolve, reject }))
+          const timer = setTimeout(() => ready.reject(new Error("The machine did not answer in time.")), 30_000)
+          try {
+            const opened = await connect(browser!, sessionID, ready)
+            if (!opened) throw new FilePasteError("canceled")
+            connectionID = opened.id
+            await attached
+          } catch (reason) {
+            if (connectionID) browser!.leave(connectionID)
+            connectionID = ""
+            throw reason
+          } finally {
+            clearTimeout(timer)
+            attached.catch(() => undefined)
+          }
+        },
+        { canceled: () => canceled },
+      )
       if (canceled) throw new FilePasteError("canceled")
       const runtime = browser
       const uploader = new FilePasteUploader(() => ({ api: runtime, connectionID }), (progress) => progress && onProgress(progress))
