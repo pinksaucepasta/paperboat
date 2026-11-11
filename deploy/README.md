@@ -402,3 +402,10 @@ The public organization repository supports GitHub's [merge queue](https://docs.
 collection wait. Required workflows run on both `pull_request` and `merge_group` (the heavy jobs skip on pull requests);
 full health jobs run on main. Queue checks have a 60-minute response timeout (hosted runners took up to 5 minutes to pick a job up on 2026-11-11, and a 5-minute timeout ejected the first PR from the queue); each job keeps its own short timeout. Bootstrap order: land tooling, broadcast
 the switch to every lane, then apply the rules. Never enable protection ahead of the tooling.
+
+Canary state has one serialized writer transaction shared by the access and account units.
+Each probe clears only its own failing steps; the deploy gate requires aggregate green and a
+new access run. Account results live in `account-history.jsonl` and `account_last`, preserving
+one-minute access history and the access timestamp used by the deploy gate. Prior art:
+Tailscale `ipn/store/stores.go` serializes read/modify/write with a lock and writes through
+`atomicfile/atomicfile.go`; the two Python processes use a bounded `flock` for the same ownership.

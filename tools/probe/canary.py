@@ -2,13 +2,15 @@
 """Production canary runner (R-06): runs probe.sh once, records the result, alerts on a repeated failure.
 
 State lives in CANARY_STATE (default ~/.local/state/paperboat-canary):
-  history.jsonl  one run per line, newest last, at most HISTORY_MAX runs (24 h at one run a minute)
+  history.jsonl  access runs only, newest last, at most HISTORY_MAX runs (24 h at one run a minute)
+  account-history.jsonl  independently bounded account runs; they never replace access deploy evidence
   status.json    the last run, consecutive failures per step, red/green, and the steps already alerted
   alerts.log     every alert and recovery line, also sent to the coordinator thread (CANARY_ALERT_THREAD)
 A step that fails in two runs in a row alerts once; its first pass afterwards sends one recovery line.
 The probe's environment (RUN_A, CANARY_A, ...) comes from the unit's EnvironmentFile.
 """
-import json, os, subprocess, sys, time
+import fcntl, json, os, subprocess, sys, time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -62,29 +64,55 @@ def advance(status, run):
                 alerted.add(name)
                 lines.append(f"canary RED: {name} failed {counts[name]} runs in a row "
                              f"(last {run['started']}): {s.get('error', '')[:200]}")
-    red = not run["ok"]
+    red = bool(counts)
     since = status.get("red_since") if red and status.get("red") else (run["started"] if red else None)
-    new = {"updated": run["finished"], "last": run, "red": red, "red_since": since,
+    account = run.get("group") == "account"
+    new = {"updated": status.get("updated") if account else run["finished"],
+           "last": status.get("last") if account else run,
+           "account_last": run if account else status.get("account_last"),
+           "red": red, "red_since": since,
            "consecutive_failures": counts, "alerted": sorted(alerted)}
     return new, lines
 
 
+@contextmanager
+def record_lock():
+    """Both systemd units update one aggregate state; hold a bounded inter-process lock."""
+    with (STATE / "record.lock").open("a") as lock:
+        end = time.monotonic() + 15
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= end:
+                    raise TimeoutError("canary state writer stayed locked for 15 seconds")
+                time.sleep(0.05)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
 def record(run, alert):
     STATE.mkdir(parents=True, exist_ok=True)
-    history = STATE / "history.jsonl"
-    lines = history.read_text().splitlines() if history.exists() else []
-    lines = (lines + [json.dumps(run)])[-HISTORY_MAX:]
-    write(history, "\n".join(lines) + "\n")
-    status_path = STATE / "status.json"
-    try:
-        status = json.loads(status_path.read_text())
-    except (OSError, ValueError):
-        status = {}
-    status, messages = advance(status, run)
-    write(status_path, json.dumps(status, indent=1) + "\n")
-    if messages:  # one message per run, however many steps crossed the threshold together
-        with open(STATE / "alerts.log", "a") as log:
-            log.write("".join(m + "\n" for m in messages))
+    with record_lock():
+        account = run.get("group") == "account"
+        history = STATE / ("account-history.jsonl" if account else "history.jsonl")
+        lines = history.read_text().splitlines() if history.exists() else []
+        lines = (lines + [json.dumps(run)])[-HISTORY_MAX:]
+        write(history, "\n".join(lines) + "\n")
+        status_path = STATE / "status.json"
+        try:
+            status = json.loads(status_path.read_text())
+        except (OSError, ValueError):
+            status = {}
+        status, messages = advance(status, run)
+        write(status_path, json.dumps(status, indent=1) + "\n")
+        if messages:
+            with open(STATE / "alerts.log", "a") as log:
+                log.write("".join(m + "\n" for m in messages))
+    if messages:  # network delivery cannot hold the state lock or delay the other unit
         alert("\n".join(messages))
     return status
 
@@ -132,7 +160,8 @@ def main():
             stdout, rc = out.decode(errors="replace") if isinstance(out, bytes) else out, 124
         steps = parse(stdout, rc)
     run = {"started": started, "finished": now(), "seconds": round(time.monotonic() - clock, 1),
-           "ok": all(s["ok"] for s in steps), "steps": steps}
+           "ok": all(s["ok"] for s in steps), "steps": steps,
+           "group": "account" if "--account" in sys.argv[1:] else "access"}
     record(run, send_alert)
     print(json.dumps(run))
     return 0 if run["ok"] else 1

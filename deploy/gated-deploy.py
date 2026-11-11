@@ -66,7 +66,7 @@ class Gate:
         while self.mono() < deadline:
             last = self.canary()
             run = (last or {}).get("last") or {}
-            if run.get("started", "") >= iso(after) and run.get("ok") is True:
+            if (last or {}).get("red") is False and run.get("started", "") >= iso(after) and run.get("ok") is True:
                 return True, run
         return False, (last or {}).get("last")
 

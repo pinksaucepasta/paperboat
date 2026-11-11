@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Tests for canary.py: result parsing, bounded history, and alert-once / recover-once per step."""
-import json, os, sys, tempfile, unittest
+import json, multiprocessing, os, sys, tempfile, unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -83,6 +83,52 @@ class Record(unittest.TestCase):
         for lines in ([BAD], [OK], [BAD], [OK]):
             self.record(lines, 0 if lines == [OK] else 1)
         self.assertEqual(self.sent, [])
+
+    def test_other_probe_cannot_clear_a_failure_or_replace_deploy_evidence(self):
+        for broken, healthy in [('exec_a_to_b', 'signin'), ('signin', 'exec_a_to_b')]:
+            with self.subTest(broken=broken):
+                canary.STATE = Path(self.dir.name) / broken
+                fail = run([json.dumps({'step': broken, 'ok': False})], 1)
+                good = run([json.dumps({'step': healthy, 'ok': True})], 0)
+                fail['group'] = 'account' if broken == 'signin' else 'access'
+                good['group'] = 'account' if healthy == 'signin' else 'access'
+                canary.record(fail, self.sent.append)
+                status = canary.record(good, self.sent.append)
+                self.assertTrue(status['red'])
+                self.assertIn(broken, status['consecutive_failures'])
+                access = fail if broken == 'exec_a_to_b' else good
+                self.assertEqual(status['last'], access)
+                self.assertEqual(len((canary.STATE / 'history.jsonl').read_text().splitlines()), 1)
+                self.assertEqual(len((canary.STATE / 'account-history.jsonl').read_text().splitlines()), 1)
+
+    def test_parallel_units_keep_both_histories_and_failure_counts(self):
+        context = multiprocessing.get_context('fork')
+        ready = context.Event()
+        def writer(group, step):
+            ready.wait(5)
+            for i in range(20):
+                item = run([json.dumps({'step': step, 'ok': False})], 1)
+                item['group'] = group
+                canary.record(item, lambda message: None)
+        processes = [context.Process(target=writer, args=args) for args in
+                     [('access', 'exec_a_to_b'), ('account', 'signin')]]
+        try:
+            for p in processes:
+                p.start()
+            ready.set()
+            for p in processes:
+                p.join(10)
+                self.assertEqual(p.exitcode, 0)
+            for name in ['history.jsonl', 'account-history.jsonl']:
+                self.assertEqual(len((canary.STATE / name).read_text().splitlines()), 20)
+            status = json.loads((canary.STATE / 'status.json').read_text())
+            self.assertEqual(status['consecutive_failures'], {'exec_a_to_b': 20, 'signin': 20})
+            self.assertTrue(status['red'])
+        finally:
+            for p in processes:
+                if p.is_alive():
+                    p.terminate()
+                    p.join(5)
 
     def test_history_is_bounded(self):
         canary.HISTORY_MAX = 3

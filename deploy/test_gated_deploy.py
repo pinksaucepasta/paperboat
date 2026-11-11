@@ -101,6 +101,18 @@ class GatedDeployTest(unittest.TestCase):
         self.assertIsNone(fake.lock)
         self.assertTrue(out[-1].startswith('kept'))
 
+    def test_access_pass_does_not_override_a_failed_account_probe(self):
+        fake = Fake([True] * 5)
+        def mixed_status():
+            result = fake.canary()
+            result['red'] = True
+            return result
+        args = SimpleNamespace(wait=300)
+        g = gated.Gate(args, fake.sh, fake.deploy, mixed_status,
+                       wall=lambda: fake.clock, mono=lambda: fake.clock)
+        green, _ = g.wait_green(T0)
+        self.assertFalse(green)
+
     def test_one_red_run_then_green_within_the_wait_keeps(self):
         fake = Fake([False, True])
         self.assertEqual(gate(fake, self.status)[0], 0)
