@@ -163,9 +163,15 @@ func TestAccountDeletionErasesPersonalData(t *testing.T) {
 	u := f.user("erase")
 	other := f.user("erase_other")
 	machine := f.seedPersonal(u)
+	// The account's personal layer inside a team workspace it does not own must be erased too.
+	f.exec(`INSERT INTO environment_vault_scopes(owner_kind,owner_id,machine_id,key_epoch,revision,document_id,envelope,writer_public,workspace_id)
+		VALUES('personal',$1,'',1,1,$2,'\x01',$3,'team_workspace')`, u.ID, "sha256:"+hex.EncodeToString(digest("teamdoc_"+u.ID)), digest("teamwriter_"+u.ID))
 	f.exec(`INSERT INTO user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$1,'other','linux','amd64','/workspace','online','occupied',true,1)`, "m2_"+u.ID, u.ID)
 	ownedAlone := f.seedTeam(u, "Solo team")
 	inOther := f.seedTeam(other, "Other team", u.ID)
+	if pv, err := f.svc.Preview(t.Context(), u, time.Now()); err != nil || pv.EnvVaults != 2 {
+		t.Fatalf("preview ENV scopes = %d (err %v), want the personal and the team-workspace layer", pv.EnvVaults, err)
+	}
 	if err := f.svc.Delete(t.Context(), u, time.Now(), u.PrimaryEmail); err != nil {
 		t.Fatal(err)
 	}

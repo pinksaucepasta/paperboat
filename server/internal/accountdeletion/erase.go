@@ -44,7 +44,8 @@ var eraseSteps = []struct{ name, query string }{
 	{"account E2EE keys", `DELETE FROM account_e2ee_keys WHERE user_id=$1`},
 	{"account E2EE roots", `DELETE FROM account_e2ee_roots WHERE user_id=$1`},
 
-	{"personal ENV scopes", `DELETE FROM environment_vault_scopes WHERE workspace_id='personal' AND owner_kind='personal' AND owner_id=$1`},
+	// Every workspace: a personal layer exists in each team workspace the account joined (vault_layers.go).
+	{"personal ENV scopes", `DELETE FROM environment_vault_scopes WHERE owner_kind='personal' AND owner_id=$1`},
 	{"personal ENV hosts", `DELETE FROM environment_vault_hosts WHERE account_id=$1`},
 	{"personal ENV rotations", `DELETE FROM environment_vault_personal_rotation_scopes WHERE account_id=$1`},
 	{"personal ENV rotations", `DELETE FROM environment_vault_personal_rotations WHERE account_id=$1`},

@@ -46,7 +46,7 @@ func (s *Service) Preview(ctx context.Context, user auth.User, signedInAt time.T
 		query string
 	}{
 		{&out.Machines, `SELECT count(*) FROM live_user_machines WHERE user_id=$1 AND owner_team_id IS NULL`},
-		{&out.EnvVaults, `SELECT count(*) FROM environment_vault_scopes WHERE workspace_id='personal' AND owner_kind='personal' AND owner_id=$1`},
+		{&out.EnvVaults, `SELECT count(*) FROM environment_vault_scopes WHERE owner_kind='personal' AND owner_id=$1`},
 		{&out.Previews, `SELECT count(*) FROM preview_leases WHERE account_id=$1 AND owner_team_id IS NULL AND terminal_state='active'`},
 		{&out.Tunnels, `SELECT count(*) FROM tunnels WHERE account_id=$1 AND owner_team_id IS NULL AND deleted_at IS NULL`},
 		{&out.InboxItems, `SELECT count(*) FROM team_inbox_requests WHERE (sender_account=$1 OR recipient_account=$1) AND status IN ('pending','approved','consumed')`},
