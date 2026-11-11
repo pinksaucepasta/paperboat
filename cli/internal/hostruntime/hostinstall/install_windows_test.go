@@ -637,7 +637,7 @@ func TestWindowsActivationWiring(t *testing.T) {
 		return nil
 	}
 	ops.startRoles = func(context.Context, Request, service.Layout, string) error { note("roles"); return nil }
-	ops.awaitHostd = func(_ context.Context, socket, tokenFile string) error {
+	ops.awaitHostd = func(_ context.Context, socket, tokenFile, _ string) error {
 		// the new generation's own pipe and token, not the handover source's
 		if socket == "" || socket != configuredSocket || tokenFile != `C:\root\token` {
 			t.Errorf("awaited socket %q token %q, want the configured socket %q and C:\\root\\token", socket, tokenFile, configuredSocket)
