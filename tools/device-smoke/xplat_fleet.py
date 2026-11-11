@@ -158,21 +158,28 @@ def mint_token(kind):
     """A one-shot enrollment token from the account's signed-in pb (on the Mac); `kind` is `unix` or `windows`."""
     script = ('import json,re,subprocess,sys\n'
               'name,kind=sys.argv[1:3]\n'
-              'out=subprocess.run(["/Users/admin/.local/bin/pb","machine","add","--name",name,"--json"],capture_output=True,text=True).stdout\n'
+              'out=subprocess.run([sys.argv[3],"machine","add","--name",name,"--json"],capture_output=True,text=True).stdout\n'
               'data=json.loads(out)["data"]\n'
               'cmd=data["windows_command" if kind=="windows" else "linux_macos_command"]\n'
               'url=re.search(r"\'(https?://[^\']+)\'",cmd).group(1)\n'
               'body=subprocess.run(["curl","-fsSL",url],capture_output=True,text=True).stdout\n'
               'print(re.search(r"ENROLLMENT_TOKEN\\W+([A-Za-z0-9]+)",body).group(1))\n')
     name = PREFIX + '-' + ('w' if kind == 'windows' else 'l')
-    done = mac().run(['python3', '-', name, kind], input=script.encode(), timeout=90)
+    ctl = controller()
+    done = ctl.run(['python3', '-', name, kind, ctl.pb_path], input=script.encode(), timeout=90)
     token = done.text.strip()
     assert done.rc == 0 and re.fullmatch(r'[A-Za-z0-9]+', token), 'no enrollment token: ' + done.errtext[-200:]
     return token
 
 
+def controller():
+    """The device whose own signed-in pb mints tokens and lists machines: the Mac (account of the fleet of the Mac VM) or, with
+    XPLAT_CONTROLLER=L, the Linux container (a fresh account that was signed in with an API token)."""
+    return linux() if os.environ.get('XPLAT_CONTROLLER') == 'L' else mac()
+
+
 def controller_pb(*args, timeout=90):
-    return mac().pb(*args, timeout=timeout)
+    return controller().pb(*args, timeout=timeout)
 
 
 def pair(dev, kind):

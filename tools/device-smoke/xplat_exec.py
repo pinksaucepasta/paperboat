@@ -146,23 +146,34 @@ def check(name, pair, action):
 
 
 def t_offline(devices):
-    """An offline target gives the documented message: stop L's service, exec from the others, start it again."""
+    """An offline target gives the documented message: the Linux container is frozen (docker pause) until the server shows it
+    offline, the others exec into it, then it is thawed and waited for."""
+    import subprocess
     target = devices['L']
-    target.pb('service', 'stop')
+    subprocess.run(['ssh', fleet.L_HOST, 'docker', 'pause', fleet.L_CT], check=True, capture_output=True, timeout=60)
     try:
         for key, src in devices.items():
             if key == 'L':
                 continue
-            time.sleep(1)
-            for _ in range(40):
+            for _ in range(60):
                 listed = fleet.json_pb(src, 'machine', 'list', '--q', target.alias)
                 if any(m['alias'] == target.alias and m['state'] != 'online' for m in listed['machines']):
                     break
-                time.sleep(3)
-            done = run(src, target, ['echo', 'hi'], timeout=90)
-            check('offline', '%s>L' % key, lambda: _offline_message(done))
+                time.sleep(5)
+            # the client's own inventory follows the server a few seconds later: the first attempt can still say 'reached'
+            for attempt in range(1, 7):
+                done = run(src, target, ['echo', 'hi'], timeout=90)
+                if done.rc != 0 and 'offline' in (done.text + done.errtext).lower():
+                    break
+                time.sleep(10)
+            check('offline', '%s>L' % key, lambda: _offline_message(done) + ' (attempt %d)' % attempt)
     finally:
-        target.pb('service', 'start')
+        subprocess.run(['ssh', fleet.L_HOST, 'docker', 'unpause', fleet.L_CT], capture_output=True, timeout=60)
+        for _ in range(60):
+            listed = fleet.json_pb(next(iter(devices.values())), 'machine', 'list', '--q', target.alias)
+            if any(m['alias'] == target.alias and m['state'] == 'online' for m in listed['machines']):
+                break
+            time.sleep(5)
 
 
 def _offline_message(done):

@@ -30,6 +30,11 @@ def native(dev, *parts):
     return base + ''.join(('\\' if dev.os == 'windows' else '/') + p for p in parts)
 
 
+def size(src, wanted):
+    """A Windows controller writes files 3 KB per call: its source files stay small."""
+    return min(wanted, 48 * 1024) if src.os == 'windows' else wanted
+
+
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 
@@ -50,7 +55,7 @@ def t_user(src, dst):
 
 
 def t_scp(src, dst):
-    data = os.urandom(512 * 1024) + b'\r\n\x00'
+    data = os.urandom(size(src, 512 * 1024)) + b'\r\n\x00'
     local, back = native(src, 'out.bin'), native(src, 'back.bin')
     src.write(local, data)
     done = src.pb('scp', local, '%s:%s' % (dst.alias, slash(dst, 'in.bin')), timeout=240)
@@ -78,12 +83,12 @@ def t_scp_backslash(src, dst):
 
 
 def t_sftp(src, dst):
-    data = os.urandom(200 * 1024)
+    data = os.urandom(size(src, 200 * 1024))
     local, back = native(src, 'sf.bin'), native(src, 'sf-back.bin')
     src.write(local, data)
     batch = native(src, 'batch.txt')
-    src.write(batch, ('put "%s" "%s"\nget "%s" "%s"\n' % (local.replace('\\', '/'), slash(dst, 'sf.bin'), slash(dst, 'sf.bin'),
-                                                        back.replace('\\', '/'))).encode())
+    remote = 'xplat-ssh/sf.bin'  # sftp paths on every target are relative to the login directory (a Windows drive path is not)
+    src.write(batch, ('put "%s" "%s"\nget "%s" "%s"\n' % (local.replace('\\', '/'), remote, remote, back.replace('\\', '/'))).encode())
     done = src.pb('sftp', '-b', batch, dst.alias, timeout=240)
     assert done.rc == 0 and src.sha256(back) == sha(data) and dst.sha256(native(dst, 'sf.bin')) == sha(data), \
         'sftp: %s %s' % (done.text[-150:], done.errtext[-250:])
@@ -91,7 +96,7 @@ def t_sftp(src, dst):
 
 
 def t_rsync(src, dst):
-    data = os.urandom(300 * 1024)
+    data = os.urandom(size(src, 300 * 1024))
     tree = native(src, 'rs')
     src.write(tree + ('\\' if src.os == 'windows' else '/') + 'f.bin', data)
     done = src.pb('rsync', '-a', tree.replace('\\', '/') + '/', '%s:%s/' % (dst.alias, slash(dst, 'rs-in')), timeout=240)
@@ -100,7 +105,7 @@ def t_rsync(src, dst):
         if done.rc == 0:
             assert dst.sha256(native(dst, 'rs-in', 'f.bin')) == sha(data)
             return 'rsync works with a Windows endpoint'
-        assert 'rsync' in message.lower() and any(w in message.lower() for w in ('not found', 'not installed', 'install', 'unavailable', 'missing')), \
+        assert 'rsync' in message.lower() and any(w in message.lower() for w in ('not found', 'not installed', 'install', 'unavailable', 'missing', 'not recognized')), \
             'rsync with a Windows endpoint failed without a clear message: %r' % message[-300:]
         return 'clear message: ' + message.splitlines()[-1][:130]
     assert done.rc == 0 and dst.sha256(native(dst, 'rs-in', 'f.bin')) == sha(data), 'rsync: %s %s' % (done.text[-150:], done.errtext[-250:])
