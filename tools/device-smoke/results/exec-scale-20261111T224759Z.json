@@ -1,0 +1,206 @@
+{
+ "check": "exec-scale",
+ "count": 32,
+ "sleep_s": 20,
+ "budget_s": 30.0,
+ "fastest_s": 20.75,
+ "median_s": 21.68,
+ "slowest_s": 21.99,
+ "failed": [],
+ "over_budget": 0,
+ "status": "PASS",
+ "rows": [
+  {
+   "i": 0,
+   "seconds": 21.43,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 1,
+   "seconds": 21.24,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 2,
+   "seconds": 20.97,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 3,
+   "seconds": 21.77,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 4,
+   "seconds": 21.75,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 5,
+   "seconds": 21.91,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 6,
+   "seconds": 21.76,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 7,
+   "seconds": 21.39,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 8,
+   "seconds": 21.68,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 9,
+   "seconds": 21.41,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 10,
+   "seconds": 21.96,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 11,
+   "seconds": 21.27,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 12,
+   "seconds": 20.94,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 13,
+   "seconds": 20.75,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 14,
+   "seconds": 21.08,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 15,
+   "seconds": 21.97,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 16,
+   "seconds": 21.85,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 17,
+   "seconds": 21.99,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 18,
+   "seconds": 21.96,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 19,
+   "seconds": 21.13,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 20,
+   "seconds": 21.71,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 21,
+   "seconds": 20.91,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 22,
+   "seconds": 21.88,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 23,
+   "seconds": 21.18,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 24,
+   "seconds": 21.2,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 25,
+   "seconds": 21.02,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 26,
+   "seconds": 21.91,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 27,
+   "seconds": 21.89,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 28,
+   "seconds": 21.38,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 29,
+   "seconds": 21.94,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 30,
+   "seconds": 21.31,
+   "rc": 0,
+   "tail": ""
+  },
+  {
+   "i": 31,
+   "seconds": 21.73,
+   "rc": 0,
+   "tail": ""
+  }
+ ]
+}
