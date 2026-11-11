@@ -21,6 +21,7 @@ import subprocess
 import sys
 import time
 
+import pairing_lifecycle
 import winhost
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -28,6 +29,14 @@ SSH = ['-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=20', '-o', 'StrictH
 DEVICE = winhost.WindowsDevice()
 PB_HP = '$HOME/.local/bin/pb'
 PEER = os.environ.get('SMOKE_PEER_SSH', 'anvit@hp')
+
+
+def doctor_ok(out):
+    """healthy, or degraded only by the hosted runner's own HTTP.sys holding port 80/443 (the same exact warning pairing_lifecycle tolerates)."""
+    if 'doctor: healthy' in out:
+        return True
+    problems = re.findall(r'^\S+: (?:fail|warning)[^\n]*', out, re.M)
+    return 'doctor: degraded' in out and bool(problems) and all(pairing_lifecycle.HTTP_SYS_PORT_WARNING in line for line in problems)
 
 
 def home(name):
@@ -121,7 +130,7 @@ def check_install_pair(win, args):
         victus(f"Remove-Item -Force '{TOKEN_FILE}' -ErrorAction SilentlyContinue")
     paired, machine_id = time.time(), receipt['data']['machine_id']
     wait_for(lambda: re.search(rf'\sonline\s.*{re.escape(machine_id)}', hp(f'{PB_HP} machine list --all')[1]), 30, 'the machine online in the account within 30 s of pairing')
-    wait_for(lambda: 'doctor: healthy' in win.run('doctor')[1], max(1, 60 - (time.time() - paired)), 'doctor healthy within 60 s of pairing')
+    wait_for(lambda: doctor_ok(win.run('doctor')[1]), max(1, 60 - (time.time() - paired)), 'doctor healthy within 60 s of pairing')
     args.machine = machine_named(machine_id)  # the pair may suffix a taken name
 
 
@@ -152,7 +161,7 @@ def check_pair_firewall_failure(win, args):
     assert code == 0 and receipt.get('ok'), 'the retry without a token failed: ' + json.dumps(receipt.get('error', {}))[:200]
     machine_id = receipt['data']['machine_id']
     wait_for(lambda: re.search(rf'\sonline\s.*{re.escape(machine_id)}', hp(f'{PB_HP} machine list --all')[1]), 60, 'the machine online after the retry')
-    wait_for(lambda: 'doctor: healthy' in win.run('doctor')[1], 90, 'doctor healthy after the retry')
+    wait_for(lambda: doctor_ok(win.run('doctor')[1]), 90, 'doctor healthy after the retry')
     args.machine = machine_named(machine_id)
 
 
@@ -164,7 +173,7 @@ def check_update(win, args):
     assert code == 0 and receipt.get('ok'), 'update failed: ' + json.dumps(receipt.get('error', {}))[:200]
     assert data.get('changed') is True and data.get('version') == args.expect_version, f"update reported {data.get('previous_version')} -> {data.get('version')}"
     check_version(win, args)
-    wait_for(lambda: 'doctor: healthy' in win.run('doctor')[1], 120, 'doctor healthy after the update')
+    wait_for(lambda: doctor_ok(win.run('doctor')[1]), 120, 'doctor healthy after the update')
     count = "(Get-Service | Where-Object { $_.Name -like 'PaperboatSessionOwner-*' -or $_.Name -like 'PaperboatSshd-*' } | Measure-Object).Count"
     wait_for(lambda: victus(count)[1].strip() == '2', 120, 'only the new session-owner and SSH generation left')
 
@@ -177,7 +186,7 @@ def check_update_failures(win, args):
     work = home('pb-update-fail')
 
     def healthy(seconds):
-        wait_for(lambda: 'doctor: healthy' in win.run('doctor')[1], seconds, 'doctor healthy')
+        wait_for(lambda: doctor_ok(win.run('doctor')[1]), seconds, 'doctor healthy')
         check_exec(win, args)
     victus(f"New-Item -ItemType Directory -Force '{work}' | Out-Null; "
            f"$b = New-Object byte[] 4096; (New-Object Random).NextBytes($b); [IO.File]::WriteAllBytes('{work}\\garbage.exe', $b); "
@@ -233,7 +242,7 @@ def check_version(win, args):
 
 def check_doctor(win, args):
     code, out = win.run('doctor')
-    assert 'doctor: healthy' in out, ' '.join(re.findall(r'^\w+: (?:fail|warning)[^\n]*', out, re.M))[:200]
+    assert doctor_ok(out), ' '.join(re.findall(r'^\w+: (?:fail|warning)[^\n]*', out, re.M))[:200]
 
 
 def check_status(win, args):
@@ -269,7 +278,7 @@ def check_crash(win, args):
     assert pid, 'daemon service has no process'
     victus(f'Stop-Process -Id {pid} -Force')
     wait_for(lambda: service_pid('PaperboatLocalDaemon')[1] not in (0, pid), 120, 'the daemon service to restart under a new process')
-    wait_for(lambda: 'doctor: healthy' in win.run('doctor')[1], 120, 'doctor healthy after the crash')
+    wait_for(lambda: doctor_ok(win.run('doctor')[1]), 120, 'doctor healthy after the crash')
 
 
 def check_availability(win, args):
@@ -316,7 +325,7 @@ def check_reset_pair(win, args):
     finally:
         victus(f"Remove-Item -Force '{TOKEN_FILE}' -ErrorAction SilentlyContinue")
     machine_id = receipt['data']['machine_id']
-    wait_for(lambda: 'doctor: healthy' in win.run('doctor')[1], 180, 'doctor healthy after re-pair')
+    wait_for(lambda: doctor_ok(win.run('doctor')[1]), 180, 'doctor healthy after re-pair')
     wait_for(lambda: re.search(rf'\sonline\s.*{re.escape(machine_id)}', hp(f'{PB_HP} machine list')[1]), 120, 'the new machine record online in the account')
     args.machine = machine_named(machine_id)  # the pair may suffix a taken name
     assert machine_id != old_id and machine_named(old_id) is None, 'the old machine record is still in the account after re-pair'
