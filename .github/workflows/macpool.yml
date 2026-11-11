@@ -1,0 +1,96 @@
+# Temporary macOS test machines: each job is a hosted runner whose sshd the device-smoke controller reaches through a
+# reverse SSH tunnel to our jump host's loopback (tools/device-smoke/macpool.sh starts, lists and stops them).
+# Same design as winpool.yml and the same tunnel secrets. Manual dispatch only, so a fork or pull request can never
+# run it with the tunnel key.
+name: macpool
+
+on:
+  workflow_dispatch:
+    inputs:
+      slots:
+        description: Machine numbers 1-8, comma separated (macpool.sh start picks free ones)
+        required: true
+        default: "1"
+      hours:
+        description: Lifetime in hours
+        type: choice
+        options: ["1", "2", "3", "4", "5"]
+        default: "2"
+
+permissions: {} # no checkout, no token use
+
+jobs:
+  machine:
+    name: macpool-${{ matrix.slot }}
+    runs-on: macos-latest
+    timeout-minutes: ${{ fromJSON('{"1":75,"2":135,"3":195,"4":255,"5":315}')[inputs.hours] }} # hours + 15 min
+    concurrency: macpool-${{ matrix.slot }} # one machine per tunnel port
+    strategy:
+      fail-fast: false
+      matrix:
+        slot: ${{ fromJSON(format('[{0}]', inputs.slots)) }}
+    steps:
+      - name: sshd behind a reverse tunnel
+        shell: bash
+        env:
+          SLOT: ${{ matrix.slot }}
+          HOURS: ${{ inputs.hours }}
+          CONTROLLER_PUBKEY: ${{ vars.WINPOOL_CONTROLLER_PUBKEY }}
+          TUNNEL_KEY: ${{ secrets.WINPOOL_TUNNEL_KEY }}
+          TUNNEL_HOST: ${{ secrets.WINPOOL_TUNNEL_HOST }}
+          TUNNEL_KNOWN_HOSTS: ${{ secrets.WINPOOL_TUNNEL_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          [[ $SLOT =~ ^[1-8]$ ]] || { echo 'slot must be 1-8'; exit 1; }
+          [ -n "$CONTROLLER_PUBKEY" ] && [ -n "$TUNNEL_KEY" ] || { echo 'WINPOOL_CONTROLLER_PUBKEY or WINPOOL_TUNNEL_KEY is not set'; exit 1; }
+          port=$((22300 + SLOT))
+
+          # Our own sshd, not the system's Remote Login: loopback only and keys only, whatever the image configures.
+          dir=$RUNNER_TEMP/macpool-sshd; mkdir -p "$dir"
+          ssh-keygen -q -t ed25519 -N '' -f "$dir/host_ed25519"
+          cat > "$dir/sshd_config" <<CONF
+          Port 2222
+          ListenAddress 127.0.0.1
+          HostKey $dir/host_ed25519
+          PidFile $dir/sshd.pid
+          AuthenticationMethods publickey
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          AllowUsers $USER
+          Subsystem sftp /usr/libexec/sftp-server
+          ForceCommand $dir/aqua.sh
+          CONF
+          # Every login (command, shell, sftp) runs in the runner user's GUI (Aqua) session. A session started by sshd is a
+          # Background one even with UsePAM, where the login keychain refuses ("User interaction is not allowed") and
+          # pb install/pair/vault fail.
+          cat > "$dir/aqua.sh" <<'AQUA'
+          #!/bin/bash
+          exec sudo -n launchctl asuser "$(id -u)" sudo -n -u "$USER" -H /bin/bash -c 'export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"; '"${SSH_ORIGINAL_COMMAND:-exec /bin/bash -l}"
+          AQUA
+          chmod 755 "$dir/aqua.sh"
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$CONTROLLER_PUBKEY" > ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
+          effective=$(sudo /usr/sbin/sshd -T -f "$dir/sshd_config" | tr A-Z a-z) # macOS prints mixed case
+          [ "$(grep -c '^listenaddress ' <<<"$effective")" = 1 ] && grep -qx 'listenaddress 127.0.0.1:2222' <<<"$effective" &&
+            grep -qx 'passwordauthentication no' <<<"$effective" && grep -qx 'kbdinteractiveauthentication no' <<<"$effective" ||
+            { echo "sshd would listen beyond loopback or accept passwords:"; echo "$effective" | grep -E "^(listenaddress|passwordauthentication|kbdinteractiveauthentication|port) "; exit 1; }
+          sudo /usr/sbin/sshd -f "$dir/sshd_config" # forks into the background
+
+          key=~/.ssh/macpool_tunnel; known=~/.ssh/macpool_known_hosts
+          (umask 077; printf '%s\n' "$TUNNEL_KEY" | tr -d '\r' > "$key")
+          printf '%s\n' "$TUNNEL_KNOWN_HOSTS" > "$known"
+          stop=/tmp/macpool-stop # macpool.sh stop creates it
+          deadline=$((SECONDS + HOURS * 3600))
+          running() { [ $SECONDS -lt $deadline ] && [ ! -e "$stop" ]; }
+          trap 'rm -f "$key"; sudo kill "$(cat "$dir/sshd.pid")" 2>/dev/null || true' EXIT
+          while running; do
+            ssh -N -T -i "$key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$known" -o ExitOnForwardFailure=yes -o ConnectTimeout=20 \
+              -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+              -R "127.0.0.1:${port}:127.0.0.1:2222" "winpool@$TUNNEL_HOST" &
+            tunnel=$!
+            echo "macpool-$SLOT is up"
+            while running && kill -0 "$tunnel" 2>/dev/null; do sleep 5; done
+            if kill -0 "$tunnel" 2>/dev/null; then kill "$tunnel"; else echo 'tunnel closed; again in 10 s'; sleep 10; fi
+            wait "$tunnel" 2>/dev/null || true
+          done
