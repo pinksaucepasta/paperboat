@@ -87,6 +87,22 @@ JSON output is supported with --json.
 	route protocol (http, tcp, tls passthrough, or tcp_private)
 
 .PP
+\fB--redirect\fP=[]
+	redirect a path prefix: '/from -> [301|302|307|308:]/to-or-https-URL' (repeatable, at most 4)
+
+.PP
+\fB--request-header\fP=[]
+	request header rule op:Name=value (op add or set) or remove:Name, sent to the app (repeatable, at most 8)
+
+.PP
+\fB--response-header\fP=[]
+	response header rule op:Name=value (op add or set) or remove:Name, sent to the visitor (repeatable, at most 8)
+
+.PP
+\fB--rewrite-path\fP=""
+	rewrite a path prefix before the app sees it: '/from -> /to'
+
+.PP
 \fB--timeout\fP=2m0s
 	maximum time to wait for operation completion
 

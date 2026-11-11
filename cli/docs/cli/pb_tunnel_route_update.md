@@ -22,6 +22,10 @@ pb tunnel route update <tunnel> <route> [flags]
       --clear-client-credential-reference    remove the origin mTLS credential reference
       --clear-host-header                    remove the origin Host override
       --clear-path                           remove the HTTP path prefix
+      --clear-redirects                      remove every redirect
+      --clear-request-headers                remove every request header rule
+      --clear-response-headers               remove every response header rule
+      --clear-rewrite-path                   remove the path rewrite
       --clear-tls-server-name                remove the explicit origin TLS server name
       --client-credential-reference string   protected origin mTLS credential reference
       --connect-timeout duration             new origin connect timeout
@@ -38,6 +42,10 @@ pb tunnel route update <tunnel> <route> [flags]
       --preserve-host                        preserve the incoming Host header (default true)
       --priority int32                       new route priority
       --protocol string                      new route protocol (http or tcp_private)
+      --redirect stringArray                 redirect a path prefix: '/from -> [301|302|307|308:]/to-or-https-URL' (repeatable, at most 4)
+      --request-header stringArray           request header rule op:Name=value (op add or set) or remove:Name, sent to the app (repeatable, at most 8)
+      --response-header stringArray          response header rule op:Name=value (op add or set) or remove:Name, sent to the visitor (repeatable, at most 8)
+      --rewrite-path string                  rewrite a path prefix before the app sees it: '/from -> /to'
       --timeout duration                     maximum time to wait for operation completion (default 2m0s)
       --tls-ca string                        trust this CA for the origin (PEM file, e.g. Caddy's tls internal root); sets custom_ca
       --tls-pin string                       pin the origin certificate by its fingerprint (sha256:<hex>), without connecting

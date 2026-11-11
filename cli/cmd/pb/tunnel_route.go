@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 	"github.com/spf13/cobra"
 )
 
@@ -142,6 +143,17 @@ func routeAddCommand() *cobra.Command {
 		if e != nil {
 			return e
 		}
+		var routeRules *tunnelrouterules.Rules
+		if tunnelRouteRuleFlagsChanged(command) {
+			if protocol != "http" {
+				return errors.New("rewrite rules (--request-header, --response-header, --rewrite-path, --redirect) apply to http routes only")
+			}
+			applied, ruleErr := applyTunnelRouteRuleFlags(command, nil)
+			if ruleErr != nil {
+				return ruleErr
+			}
+			routeRules = &applied
+		}
 		c, ctx, e := tunnelClient(command)
 		if e != nil {
 			return e
@@ -170,7 +182,7 @@ func routeAddCommand() *cobra.Command {
 			}
 		}
 		out, e := retryTunnelRead(ctx, func() (api.TunnelRouteMutation, error) {
-			return c.CreateTunnelRouteV1(ctx, tunnelID, key, api.TunnelRouteInput{Name: name, Protocol: protocol, HostMatch: hostMatch, PathPrefix: pathValue, Origin: originValue, Priority: priority, ConnectTimeoutMS: int32(connectTimeout / time.Millisecond), IdleTimeoutMS: int32(idleTimeout / time.Millisecond), MaxConcurrentStreams: maxStreams})
+			return c.CreateTunnelRouteV1(ctx, tunnelID, key, api.TunnelRouteInput{Name: name, Protocol: protocol, HostMatch: hostMatch, PathPrefix: pathValue, Origin: originValue, RewriteRules: routeRules, Priority: priority, ConnectTimeoutMS: int32(connectTimeout / time.Millisecond), IdleTimeoutMS: int32(idleTimeout / time.Millisecond), MaxConcurrentStreams: maxStreams})
 		})
 		if e != nil {
 			return e
@@ -189,6 +201,7 @@ func routeAddCommand() *cobra.Command {
 	command.Flags().String("path", "", "HTTP path prefix, optionally ending in *")
 	command.Flags().String("protocol", "http", "route protocol (http, tcp, tls passthrough, or tcp_private)")
 	tunnelRouteOriginFlags(command, true)
+	tunnelRouteRuleFlags(command, false)
 	command.Flags().Int32("priority", 0, "route priority")
 	command.Flags().Duration("connect-timeout", 10*time.Second, "origin connect timeout")
 	command.Flags().Duration("idle-timeout", 5*time.Minute, "stream idle timeout")
@@ -313,7 +326,7 @@ func routeUpdateCommand() *cobra.Command {
 			patch.DesiredState = &state
 			changed = true
 		}
-		if tunnelRouteOriginFlagsChanged(command) {
+		if tunnelRouteOriginFlagsChanged(command) || tunnelRouteRuleFlagsChanged(command) {
 			changed = true
 		}
 		if !changed {
@@ -341,6 +354,16 @@ func routeUpdateCommand() *cobra.Command {
 				return e
 			}
 			patch.Origin = &origin
+		}
+		if tunnelRouteRuleFlagsChanged(command) {
+			applied, ruleErr := applyTunnelRouteRuleFlags(command, current.RewriteRules)
+			if ruleErr != nil {
+				return ruleErr
+			}
+			if !applied.Empty() && current.Protocol != "http" && (patch.Protocol == nil || *patch.Protocol != "http") {
+				return errors.New("rewrite rules apply to http routes only")
+			}
+			patch.RewriteRules, patch.RewriteRulesSet = &applied, true
 		}
 		effectiveProtocol, effectiveOrigin, effectiveMatch, effectivePath := current.Protocol, current.Origin, current.HostMatch, current.PathPrefix
 		if patch.Protocol != nil {
@@ -400,6 +423,7 @@ func routeUpdateCommand() *cobra.Command {
 	command.Flags().Bool("enable", false, "enable the route")
 	command.Flags().Bool("disable", false, "disable the route")
 	tunnelRouteOriginFlags(command, true)
+	tunnelRouteRuleFlags(command, true)
 	tunnelMutationWaitFlags(command)
 	tunnelJSONFlag(command)
 	return command

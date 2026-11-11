@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 )
 
 func (c *Client) ListTunnelsV1(ctx context.Context, cursor string, limit int) (TunnelPage, error) {
@@ -239,7 +241,7 @@ func (c *Client) CreateTunnelRouteV1(ctx context.Context, tunnel, key string, in
 	return c.routeMutation(ctx, http.MethodPost, p, "", key, in)
 }
 func (c *Client) PatchTunnelRouteV1(ctx context.Context, tunnel, id, etag, key string, in TunnelRoutePatch) (TunnelRouteMutation, error) {
-	if in.Name == nil && in.Protocol == nil && in.HostMatch == nil && !in.PathPrefixSet && in.PathPrefix == nil && in.Origin == nil && in.Priority == nil && in.ConnectTimeoutMS == nil && in.IdleTimeoutMS == nil && in.MaxConcurrentStreams == nil && in.DesiredState == nil {
+	if in.Name == nil && in.Protocol == nil && in.HostMatch == nil && !in.PathPrefixSet && in.PathPrefix == nil && in.Origin == nil && in.Priority == nil && in.ConnectTimeoutMS == nil && in.IdleTimeoutMS == nil && in.MaxConcurrentStreams == nil && in.DesiredState == nil && !in.RewriteRulesSet {
 		return TunnelRouteMutation{}, errors.New("route patch must contain a field")
 	}
 	if in.Name != nil && !tunnelRouteNamePatternV1.MatchString(*in.Name) {
@@ -255,6 +257,11 @@ func (c *Client) PatchTunnelRouteV1(ctx context.Context, tunnel, id, etag, key s
 	}
 	if in.Origin != nil {
 		if err := validateRouteOrigin(*in.Origin); err != nil {
+			return TunnelRouteMutation{}, err
+		}
+	}
+	if in.RewriteRules != nil {
+		if _, err := tunnelrouterules.Normalize(*in.RewriteRules); err != nil {
 			return TunnelRouteMutation{}, err
 		}
 	}
