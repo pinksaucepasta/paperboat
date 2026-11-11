@@ -39,13 +39,14 @@ type Service struct {
 	// issuer signs replay tickets and names the password vaults viewers' copies are sealed to.
 	issuer string
 	now    func() time.Time
-	// sharingKey is an account's current vault sharing public key (vaultSharingKey; tests stub it).
-	sharingKey func(context.Context, *db.Tx, string) ([]byte, error)
+	// sharingKeys maps each account to its current vault sharing public key; an account without a vault is absent
+	// (vaultSharingKeys; tests stub it).
+	sharingKeys func(context.Context, *db.Tx, []string) (map[string][]byte, error)
 }
 
 func New(store *db.DB, cfg config.Recordings, signer admission.Signer, issuer string) *Service {
 	s := &Service{db: store, cfg: cfg, signer: signer, issuer: issuer, now: time.Now}
-	s.sharingKey = s.vaultSharingKey
+	s.sharingKeys = s.vaultSharingKeys
 	return s
 }
 

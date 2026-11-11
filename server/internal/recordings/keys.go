@@ -37,25 +37,32 @@ func memberTx(ctx context.Context, tx *db.Tx, account, team string, permission t
 }
 
 func (s *Service) sharingKeyTx(ctx context.Context, tx *db.Tx, account string) ([]byte, error) {
-	return s.sharingKey(ctx, tx, account)
+	keys, err := s.sharingKeys(ctx, tx, []string{account})
+	return keys[account], err
 }
 
-// vaultSharingKey is account's current vault sharing public key (what a sealed copy must be sealed to); nil without a
-// vault.
-func (s *Service) vaultSharingKey(ctx context.Context, tx *db.Tx, account string) ([]byte, error) {
-	var raw []byte
-	err := tx.QueryRow(ctx, `SELECT envelope FROM environment_password_vaults WHERE account_id = $1`, account).Scan(&raw)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
+// vaultSharingKeys is each account's current vault sharing public key (what a sealed copy must be sealed to) in one
+// query; accounts without a vault are left out.
+func (s *Service) vaultSharingKeys(ctx context.Context, tx *db.Tx, accounts []string) (map[string][]byte, error) {
+	rows, err := tx.Query(ctx, `SELECT account_id, envelope FROM environment_password_vaults WHERE account_id = ANY($1)`, accounts)
 	if err != nil {
 		return nil, err
 	}
-	metadata, err := environment.ParsePasswordVaultMetadata(raw, s.issuer, account)
-	if err != nil {
-		return nil, err
+	defer rows.Close()
+	out := make(map[string][]byte, len(accounts))
+	for rows.Next() {
+		var account string
+		var raw []byte
+		if err := rows.Scan(&account, &raw); err != nil {
+			return nil, err
+		}
+		metadata, err := environment.ParsePasswordVaultMetadata(raw, s.issuer, account)
+		if err != nil {
+			return nil, err
+		}
+		out[account] = metadata.SharingPublicKey[:]
 	}
-	return metadata.SharingPublicKey[:], nil
+	return out, rows.Err()
 }
 
 func currentKeyTx(ctx context.Context, tx *db.Tx, team string) (*recording.Key, error) {
@@ -89,18 +96,32 @@ func (s *Service) KeyState(ctx context.Context, account, team string) (recording
 		if err != nil {
 			return err
 		}
-		for _, v := range viewers {
-			sharing, err := s.sharingKeyTx(ctx, tx, v)
+		sharing, err := s.sharingKeys(ctx, tx, viewers)
+		if err != nil {
+			return err
+		}
+		held := map[string][]byte{} // the sharing key each viewer's current-generation copy is sealed to
+		if key != nil {
+			rows, err := tx.Query(ctx, `SELECT account_id, recipient_sharing_public FROM recording_key_grants WHERE team_id = $1 AND generation = $2`, team, key.Generation)
 			if err != nil {
 				return err
 			}
-			viewer := recording.Viewer{AccountID: v, SharingPublicKey: sharing}
-			if key != nil && sharing != nil {
-				if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM recording_key_grants WHERE team_id = $1 AND account_id = $2 AND generation = $3 AND recipient_sharing_public = $4)`,
-					team, v, key.Generation, sharing).Scan(&viewer.HasGrant); err != nil {
+			defer rows.Close()
+			for rows.Next() {
+				var account string
+				var to []byte
+				if err := rows.Scan(&account, &to); err != nil {
 					return err
 				}
+				held[account] = to
 			}
+			if err := rows.Err(); err != nil {
+				return err
+			}
+		}
+		for _, v := range viewers {
+			viewer := recording.Viewer{AccountID: v, SharingPublicKey: sharing[v]}
+			viewer.HasGrant = key != nil && sharing[v] != nil && bytes.Equal(held[v], sharing[v])
 			out.Viewers = append(out.Viewers, viewer)
 		}
 		if key == nil {

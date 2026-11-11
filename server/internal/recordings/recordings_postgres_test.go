@@ -61,7 +61,15 @@ func newFixture(t *testing.T) *fixture {
 		owner: "ro_" + x, admin: "ra_" + x, member: "rm_" + x, bo: "rb_" + x, prod: "mprod_" + x, dev: "mdev_" + x, sharing: map[string][]byte{}}
 	cfg := config.Recordings{MachineRetentionDays: 30, DiskQuotaMB: 2048, MaxKeyGenerations: 3}
 	f.s = New(store, cfg, signer, testIssuer)
-	f.s.sharingKey = func(_ context.Context, _ *db.Tx, account string) ([]byte, error) { return f.sharing[account], nil }
+	f.s.sharingKeys = func(_ context.Context, _ *db.Tx, accounts []string) (map[string][]byte, error) {
+		out := map[string][]byte{}
+		for _, a := range accounts {
+			if k := f.sharing[a]; k != nil {
+				out[a] = k
+			}
+		}
+		return out, nil
+	}
 	users := []string{f.owner, f.admin, f.member, f.bo}
 	for _, u := range users {
 		f.sharing[u] = random(t, 32)
@@ -273,6 +281,23 @@ func TestPostgresRecordingsEndToEnd(t *testing.T) {
 	if ks, err := f.s.KeyState(f.ctx, f.member, f.team); err != nil || ks.MyKey == nil || ks.MyKey.Generation != 2 || !bytes.Equal(ks.MyKey.Sealed, sealed(f.member)) {
 		t.Fatalf("holder KeyState.MyKey = %+v, %v", ks.MyKey, err)
 	}
+	hasGrant := func(account string) bool {
+		t.Helper()
+		ks, err := f.s.KeyState(f.ctx, f.owner, f.team)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, v := range ks.Viewers {
+			if v.AccountID == account {
+				return v.HasGrant
+			}
+		}
+		t.Fatalf("%s is not among the viewers %+v", account, ks.Viewers)
+		return false
+	}
+	if !hasGrant(f.member) || hasGrant(f.admin) {
+		t.Fatal("viewers' HasGrant must be true only for the member sealed for the current generation")
+	}
 	if ks, err := f.s.KeyState(f.ctx, f.bo, f.team); err != nil || ks.MyKey != nil {
 		t.Fatalf("member without a grant KeyState.MyKey = %+v, %v", ks.MyKey, err)
 	}
@@ -282,6 +307,9 @@ func TestPostgresRecordingsEndToEnd(t *testing.T) {
 	}
 	if ks, err := f.s.KeyState(f.ctx, f.member, f.team); err != nil || ks.MyKey != nil {
 		t.Fatalf("copy sealed to the old vault returned: %+v, %v", ks.MyKey, err)
+	}
+	if hasGrant(f.member) {
+		t.Fatal("a copy sealed to the old vault key still counts as granted")
 	}
 	if err := f.s.PutGrants(f.ctx, f.member, f.team, recording.GrantsPut{Generation: 2, Grants: []recording.Grant{f.grant(f.member)}}); err != nil {
 		t.Fatal(err)
