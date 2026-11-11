@@ -158,3 +158,29 @@ func openedServerStream(t *testing.T) (*quic.Stream, *quic.Stream, *quic.Conn) {
 	}
 	return server.stream, clientStream, connection
 }
+
+// A connection that is lost under the stream is not "the peer stopped reading": closeSendSide must not turn it into
+// net.ErrClosed. (quic-go's Close on a stream shut down by a lost connection returns nil, so there is no error to
+// keep; what must never happen is the typed mapping, which would claim the peer left deliberately.)
+func TestCloseWriteWithTheConnectionLostIsNeverMappedToTheClientHavingLeft(t *testing.T) {
+	for _, accept := range []bool{false, true} {
+		stream, _, connection := openedServerStream(t)
+		var conn interface{ CloseWrite() error } = &streamConn{Stream: stream, local: directAddr("local"), remote: directAddr("peer")}
+		if accept {
+			conn = &routedConn{RoutedStream: &peerquic.RoutedStream{Stream: stream}, local: directAddr("local"), remote: directAddr("peer")}
+		}
+		_ = connection.CloseWithError(42, "connection lost") // the client's connection goes: the server's streams are shut down
+		for deadline := time.Now().Add(5 * time.Second); stream.Context().Err() == nil; time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatal("the server stream was never shut down by the lost connection")
+			}
+		}
+		var cancelled *quic.StreamError
+		if errors.As(context.Cause(stream.Context()), &cancelled) {
+			t.Fatalf("the cause of a lost connection is a stream error: %v", context.Cause(stream.Context()))
+		}
+		if err := conn.CloseWrite(); err != nil && errors.Is(err, net.ErrClosed) {
+			t.Fatalf("CloseWrite with the connection lost = %v (accept path %v): mapped to 'the client has left'", err, accept)
+		}
+	}
+}
