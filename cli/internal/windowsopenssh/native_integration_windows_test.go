@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	hostservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc/mgr"
 )
@@ -267,6 +268,9 @@ func TestNativeSCMCrashRecovery(t *testing.T) {
 		if actions[index] != paperboatServiceRecovery[index] {
 			t.Fatalf("SCM recovery action %d=%+v, want %+v", index, actions[index], paperboatServiceRecovery[index])
 		}
+	}
+	if reset, err := service.ResetPeriod(); err != nil || reset != hostservice.WindowsRecoveryResetSeconds {
+		t.Fatalf("SCM recovery reset=%d error=%v, want %d", reset, err, hostservice.WindowsRecoveryResetSeconds)
 	}
 	if enabled, err := service.RecoveryActionsOnNonCrashFailures(); err != nil || !enabled {
 		t.Fatalf("SCM non-crash recovery disabled: enabled=%t error=%v", enabled, err)

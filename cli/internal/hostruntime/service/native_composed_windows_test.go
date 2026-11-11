@@ -1412,6 +1412,21 @@ func assertNativeWindowsServiceConfiguration(t *testing.T, name string, installe
 	if err != nil || len(actions) != 3 {
 		t.Fatalf("service %q recovery actions=%v err=%v", name, actions, err)
 	}
+	if reset, err := func() (uint32, error) {
+		manager, err := mgr.Connect()
+		if err != nil {
+			return 0, err
+		}
+		defer manager.Disconnect()
+		service, err := manager.OpenService(name)
+		if err != nil {
+			return 0, err
+		}
+		defer service.Close()
+		return service.ResetPeriod()
+	}(); err != nil || reset != WindowsRecoveryResetSeconds {
+		t.Fatalf("service %q recovery reset=%d err=%v, want %d", name, reset, err, WindowsRecoveryResetSeconds)
+	}
 	for index, action := range actions {
 		wantDelay := []time.Duration{5 * time.Second, 15 * time.Second, time.Minute}[index]
 		if action.Type != mgr.ServiceRestart || action.Delay != wantDelay {

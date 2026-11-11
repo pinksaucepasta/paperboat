@@ -679,11 +679,17 @@ func configureWindowsServiceRecovery(service *mgr.Service, name string) error {
 		{Type: mgr.ServiceRestart, Delay: 5 * time.Second},
 		{Type: mgr.ServiceRestart, Delay: 15 * time.Second},
 		{Type: mgr.ServiceRestart, Delay: time.Minute},
-	}, 24*60*60); err != nil {
+	}, WindowsRecoveryResetSeconds); err != nil {
 		return err
 	}
 	return service.SetRecoveryActionsOnNonCrashFailures(true)
 }
+
+// WindowsRecoveryResetSeconds is how long a Paperboat service must run without failing before SCM starts its
+// recovery actions from the first again. A day-long window made a few crashes spread over a day use up a policy
+// that ends in NoAction (OpenSSH), leaving the service stopped. Prior art: tailscale
+// cmd/tailscaled/install_windows.go resetPeriodSecs = 60.
+const WindowsRecoveryResetSeconds = 60
 
 func (WindowsController) Apply(ctx context.Context, definitionPath string, upgrading bool) (resultErr error) {
 	definition, err := readWindowsServiceDefinition(definitionPath)
@@ -752,20 +758,10 @@ func (WindowsController) Apply(ctx context.Context, definitionPath string, upgra
 			}
 		}
 	}
-	if windowsServiceUsesSID(definition.Name) {
-		// Owner-scoped workloads run behind a privileged token bridge. If the
-		// enrolled owner logs off or the child fails, SCM retries the bridge with
-		// bounded backoff instead of leaving a LocalSystem workload behind.
-		if err := service.SetRecoveryActions([]mgr.RecoveryAction{
-			{Type: mgr.ServiceRestart, Delay: 5 * time.Second},
-			{Type: mgr.ServiceRestart, Delay: 15 * time.Second},
-			{Type: mgr.ServiceRestart, Delay: time.Minute},
-		}, 24*60*60); err != nil {
-			return err
-		}
-		if err := service.SetRecoveryActionsOnNonCrashFailures(true); err != nil {
-			return err
-		}
+	// Owner-scoped workloads run behind a privileged token bridge. If the enrolled owner logs off or the child
+	// fails, SCM retries the bridge with bounded backoff instead of leaving a LocalSystem workload behind.
+	if err := configureWindowsServiceRecovery(service, definition.Name); err != nil {
+		return err
 	}
 	if windowsServiceUsesSID(definition.Name) {
 		installed, configErr := service.Config()

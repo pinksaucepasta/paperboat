@@ -326,7 +326,7 @@ func installGenerationService(ctx context.Context, d GenerationDescriptor) error
 	if err := grantServiceOwnerQuery(item.Handle, d.ServiceName(), d.OwnerSID); err != nil {
 		return err
 	}
-	if err := item.SetRecoveryActions(paperboatServiceRecovery, 24*60*60); err != nil {
+	if err := item.SetRecoveryActions(paperboatServiceRecovery, service.WindowsRecoveryResetSeconds); err != nil {
 		return err
 	}
 	if err := item.SetRecoveryActionsOnNonCrashFailures(true); err != nil {
