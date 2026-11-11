@@ -57,7 +57,7 @@ if has multi; then
 fi
 
 step "machines"
-docker build -q -t e2e-machine -f tools/device-smoke/ubuntu24-systemd.Dockerfile tools/device-smoke >/dev/null
+docker build -q -t e2e-machine -f tools/e2e/machine.Dockerfile tools/e2e >/dev/null # the image TestE2ECore builds too
 machines=(a b); has multi && machines+=(c)
 for name in "${machines[@]}"; do
   c=e2e-$name
