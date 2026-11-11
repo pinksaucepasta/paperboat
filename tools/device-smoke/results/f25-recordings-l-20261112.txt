@@ -1,0 +1,17 @@
+F25 team terminal recordings, Linux, 2026-11-12 (sanitized): tools/device-smoke/recordings_lifecycle.py
+Fixture: team paperboat-smoke-paid (Teams plan, recording key set up in the console, replay rule role:admin on every machine).
+Build: dev-5a7ad8d96 = rebased main + the recordings branch, on both ends; prod server 2026.11.12.1.
+
+Client hp (Linux, operator account, vault unlocked), target recorder-smoke-paid-2 (Linux container, team-owned): PASS in 211.6 s
+{"check": "recordings", "target": "recorder-smoke-paid-2", "status": "PASS", "phases": ["manual_start_stop", "rec_in_connect", "cli_list", "cli_export", "cli_play", "cli_export_long", "rec_on_attach", "rule_start", "rule_removed_stops_new_recordings"], "manual_recording": "rec_55d5eb6b-e027-4132-baa0-a10002f3b024", "long_recording": "rec_c2e86660-3fad-4d43-b0dc-68de429af550", "rule_recording": "rec_143bf0d9-e09c-4364-8309-905828e9aa45", "seconds": 211.6}
+
+What the phases assert (device, with the real server):
+- manual_start_stop: pb recordings start/stop from a pb connect (the attachment is found); the recording is listed (trigger manual, this session, live), stop ends it.
+- rec_in_connect: the connect client shows the REC mark after start and not before.
+- cli_list / cli_export / cli_play: --machine lists it; export is asciicast v2 with the output printed while REC was on and nothing printed after stop; play shows the recorded output.
+- cli_export_long: about 8 MB of terminal output, at least 4 segments, exported whole.
+- rec_on_attach: a client attaching to a recorded session shows REC before the session's earlier output.
+- rule_start / rule_removed_stops_new_recordings: a record rule (pb policy set) starts a rule recording when the account attaches; after the rule is removed a new session is not recorded; the running one ends with its session and exports.
+
+Other pairs the same day: client container, target hp (Linux, Wi-Fi host): manual_start_stop, rec_in_connect, cli_list, cli_export, cli_play and rec_on_attach passed on an earlier build; the 8 MB long phase times out over hp's Wi-Fi (600 s), so it is covered by the container pair.
+Bugs this check found and that are fixed on the branch (each with a test): pb recordings start/stop never found the attachment; the host read the policy without the server's data envelope; recording.v1 was never negotiated (export/play refused); export looked the machine up in the personal list; REC arrived after the first output (async paint, single observer); a changed policy with a lower digest was ignored (rule removal); replay failures hid their cause.

@@ -1,0 +1,10 @@
+F25 team terminal recordings, macOS, 2026-11-12 (sanitized): tools/device-smoke/recordings_lifecycle.py
+Fixture: team paperboat-smoke-paid; apple VM (macOS, arm64) on build dev-dca661dc9 installed over its default profile; prod server 2026.11.12.1.
+
+Client apple (default profile, a team admin member without an unlockable vault), target recorder-smoke-paid-2 (Linux container): PASS in 182.1 s, replay phases skipped (--no-replay: that account's vault password did not open its vault)
+{"check": "recordings", "target": "recorder-smoke-paid-2", "status": "PASS", "phases": ["manual_start_stop", "rec_in_connect", "cli_list", "rec_on_attach", "rule_start", "rule_removed_stops_new_recordings"], "manual_recording": "rec_175d4b30-3ed4-411a-ac5e-f3f94d8d34fe", "rule_recording": "rec_e4c88db7-a247-42cf-afc6-f8cd85f1122e", "seconds": 182.1}
+
+Client hp (Linux, operator), target apple (macOS host, transferred into the team for the run and back to personal afterwards): PASS in 293.3 s
+{"check": "recordings", "target": "apple", "status": "PASS", "phases": ["manual_start_stop", "rec_in_connect", "cli_list", "cli_export", "cli_play", "cli_export_long", "rec_on_attach", "rule_start", "rule_removed_stops_new_recordings"], "manual_recording": "rec_90b0153f-0497-4db4-b171-5e3ab7908ad2", "long_recording": "rec_6ca8f7bb-bc9d-42ca-b83c-52bc55da3622", "rule_recording": "rec_81770d99-9190-4967-a9fe-d1894d99c7e2", "seconds": 293.3}
+
+Not covered on macOS: pb recordings play and export run from the macOS client (no unlockable vault for that account); only the macOS host side of replay.

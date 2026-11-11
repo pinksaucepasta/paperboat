@@ -15,7 +15,7 @@ import (
 // teamBucketCommand declares `pb team bucket`: the team's own S3-compatible bucket and what it is used for.
 func teamBucketCommand() *cobra.Command {
 	root := &cobra.Command{Use: "bucket", Short: "The team's own S3-compatible bucket (owners and admins)", Long: "A team connects its own S3-compatible bucket and its machines copy closed terminal recordings there, so a recording replays when its machine is offline. Paperboat stores the access key encrypted and only signs short-lived links; everything in the bucket is encrypted before it leaves the machine, and the bucket's own security is the team's.", Args: commandArgs(cobra.NoArgs), RunE: func(c *cobra.Command, _ []string) error { return c.Help() }}
-	get := &cobra.Command{Use: "get <team>", Short: "Show the team's bucket and its uses", Long: "Show the bucket's endpoint, region, bucket, prefix, access key ID and when Paperboat last checked it. The secret key is never shown.", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(c *cobra.Command, args []string) error {
+	get := &cobra.Command{Use: "get <team>", Short: "Show the team's bucket and its uses", Long: "Show the team's bucket: its endpoint, region, bucket name, folder prefix, access key ID and when Paperboat last wrote, read and deleted a check object in it. The secret access key is stored encrypted and is never shown, by this command or anywhere else.", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(c *cobra.Command, args []string) error {
 		client, err := backendForCommand(c)
 		if err != nil {
 			return err

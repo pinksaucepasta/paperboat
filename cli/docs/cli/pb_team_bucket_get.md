@@ -4,7 +4,7 @@ Show the team's bucket and its uses
 
 ### Synopsis
 
-Show the bucket's endpoint, region, bucket, prefix, access key ID and when Paperboat last checked it. The secret key is never shown.
+Show the team's bucket: its endpoint, region, bucket name, folder prefix, access key ID and when Paperboat last wrote, read and deleted a check object in it. The secret access key is stored encrypted and is never shown, by this command or anywhere else.
 
 JSON output is supported with --json.
 
