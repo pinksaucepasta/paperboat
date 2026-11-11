@@ -204,8 +204,12 @@ func readRecording(c *command.Context, id string, emit func([]byte) error) (resu
 		return err
 	}
 	defer clear(teamKey)
-	// The recording's machine is a team machine, which the personal machine list does not carry.
-	machine, err := client.GetUserMachine(c.Context, replay.MachineID)
+	// The recording's machine is a team machine: only its team's workspace shows it.
+	teamClient, err := client.ForWorkspace(replay.TeamID)
+	if err != nil {
+		return err
+	}
+	machine, err := teamClient.GetUserMachine(c.Context, replay.MachineID)
 	if err != nil {
 		return err
 	}
