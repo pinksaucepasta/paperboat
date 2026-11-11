@@ -430,9 +430,9 @@ func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
 		// available; the same owner and endpoint keys must recover afterwards.
 		deadline = time.NewTimer(15 * time.Second)
 		ticker = time.NewTicker(10 * time.Millisecond)
-		// An idle receiver has no pair to probe or report. Revocation must still
-		// retire its actual carrier before a newer grant becomes available.
-		for relay.Snapshot().Connections != 0 {
+		// An idle receiver fails closed locally too: its lost carrier wakes recovery,
+		// which reports the refusal instead of looking healthy but unreachable.
+		for machineAuthority.RegionalStatus().Reason != "regional_admission_denied" || relay.Snapshot().Connections != 0 {
 			select {
 			case <-deadline.C:
 				t.Fatalf("receiver revocation did not retire the carrier: %+v; relay: %+v", machineAuthority.RegionalStatus(), relay.Snapshot())

@@ -490,9 +490,9 @@ func (r *regionalRecovery) receive(ctx context.Context) {
 		case in := <-r.inbox:
 			nodes, peers, generation, err := r.snapshot()
 			if err != nil || len(nodes) == 0 {
-				// Relay health observations are only valid for 15 seconds but an idle
-				// host renews every 30: renew now so the peer's next probe (it repeats
-				// every 250 ms) is answered instead of waiting for the next cycle.
+				// No usable relay grant or configuration (observations are judged as
+				// of signing, so idle time alone never lands here): renew now so the
+				// peer's next probe (it repeats every 250 ms) is answered.
 				r.authority.RequestRefresh()
 				continue
 			}
