@@ -3425,6 +3425,12 @@ The coolify format (S1) also removes the old dev deployment and its test backups
 
 ## 5. Log
 
+2026-11-12 | W28 PR50 queue regression: missing mandatory quota checker reproduced on head and base; fixture now uses initialized billing policy, unchanged route/handover assertions; runtimeattachment PostgreSQL -race PASS at cd98bdafb (25.694s).
+Result: tools/device-smoke/results/w28-queue-regression.json. Existing-PR updates preserve published ancestry as main advances; eight push-tool tests PASS, new ancestry check failed before fix.
+
+2026-11-12 | W28 F8-17/F21-172: certificate persistence and dispatch/uncertain constraint fixes; tunnel -race, 20-repeat cert race, server DB/preview-store PostgreSQL and affected vet PASS at 099fdd9b2.
+Local core e2e blocked before build by archive VCS metadata (two attempts); required merge-queue core check uses a full checkout. Lane test dispatch starts jobs again (43101233401). No deploy; coordinator needs server migrations 291/292 and tunnel/edge image.
+
 2026-11-11 | Windows uninstall leftover elevation\request-<id> | Holder found with handle64 on winpool-12: the winget COM server (WindowsPackageManagerServer) the elevated OpenSSH step starts inherits the helper's working directory (the request dir) and outlives it. The elevated bridge now leaves that directory before any work (TestLeaveRequestDirectoryReleasesWorkingDirectory); baseline holds the dir after `pb setup`, the fix does not, and install, setup, uninstall leaves %LOCALAPPDATA%\paperboat gone.
 2026-11-11 | W3 managedssh | TestOpenSSHExecutorInheritsForegroundTTYAndRestoresTerminal failed once in a loaded `-race -count=15` package run (execute_unix_test.go:321, typed input lost: "bash: g: command not found"); 50/50 alone, 15/15 package runs on base and HEAD pass. Rare PTY typing flake; fix after F3-11 and F5-12.
 

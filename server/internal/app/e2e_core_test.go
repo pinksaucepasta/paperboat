@@ -62,6 +62,7 @@ func TestE2ECore(t *testing.T) {
 	}
 	e := &e2eCore{t: t, root: root, work: t.TempDir(), host: "e2e-server.example.test", port: port,
 		internal: "127.0.0.1:" + internal, mintKey: "e2e:" + base64.RawURLEncoding.EncodeToString(seed), machines: []string{"e2e-a", "e2e-b"}}
+	e.ports = allocateE2EPorts(t, "127.0.0.1", port, internal)
 	t.Cleanup(e.cleanup)
 
 	e.step("host", e.checkHost)
@@ -102,7 +103,10 @@ func TestE2ECore(t *testing.T) {
 		if err := e.awaitEdgeReady(); err != nil {
 			return err
 		}
-		return e.awaitEdgeServes()
+		if err := e.awaitEdgeServes(); err != nil {
+			return err
+		}
+		return e.requireRestoredCertificates()
 	})
 	e.assertAll("after edge restart")
 	e.step("block the direct path between the machines", e.blockDirect)
@@ -134,6 +138,7 @@ type e2eCore struct {
 	host, port string
 	internal   string // the server's plain HTTP address behind the TLS front
 	mintKey    string // id:seed, kept across server restarts like production's
+	ports      e2ePorts
 	machines   []string
 	gateway    string // the docker bridge gateway: the host as the machines see it; the edge listens there
 	server     *exec.Cmd
@@ -289,7 +294,7 @@ func (e *e2eCore) startServer(first bool) error {
 	cmd := exec.Command(os.Args[0], "-test.run", "^TestE2EServe$", "-test.v", "-test.timeout", "30m")
 	cmd.Env = append(os.Environ(), "PAPERBOAT_E2E_DIR="+e.work, "PAPERBOAT_E2E_MINT_KEY="+e.mintKey, "PAPERBOAT_E2E_URL=https://"+e.host+":"+e.port,
 		"PAPERBOAT_E2E_LISTEN=0.0.0.0:"+e.port, "PAPERBOAT_E2E_INTERNAL="+e.internal, "PAPERBOAT_E2E_TLS_CERT="+filepath.Join(e.work, "tls.pem"), "PAPERBOAT_E2E_TLS_KEY="+filepath.Join(e.work, "tls.key"),
-		"PAPERBOAT_E2E_ACME_URL=https://localhost:14000/dir", "PAPERBOAT_E2E_EDGE_CREDENTIAL="+e.mintKey+"-edge-credential",
+		"PAPERBOAT_E2E_ACME_URL="+e.acmeDirectory(), "PAPERBOAT_E2E_EDGE_CREDENTIAL="+e.mintKey+"-edge-credential",
 		"PAPERBOAT_E2E_CAA_RESOLVER="+e.caaResolver, "SSL_CERT_FILE="+filepath.Join(e.work, "server-roots.pem"))
 	cmd.Stdout, cmd.Stderr = log, log
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM} // stops with this test even when it is killed

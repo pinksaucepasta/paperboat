@@ -1,0 +1,41 @@
+{
+  "commit": "099fdd9b2eee0150b2fbf3a90649aafdb597b432",
+  "row": "F8-17",
+  "tests": {
+    "tunnel_module_race": {
+      "command": "boat-test.sh tunnel -race ./...",
+      "exit_code": 0
+    },
+    "certificate_race_repeat": {
+      "count": 20,
+      "exit_code": 0,
+      "tests": [
+        "TestRegistryRestoresPersistedCertificatesBeforeTheServerRedelivers",
+        "TestStalePersistJobsNeverOverwriteANewerCertificate",
+        "TestLoadSkipsFifosAndSymlinksWithoutOpeningThem"
+      ]
+    },
+    "affected_package_vet": {
+      "exit_code": 0,
+      "packages": [
+        "tunnel/cmd/paperboat-tunnel",
+        "tunnel/internal/tlscert",
+        "server/internal/db",
+        "server/internal/previewtunnelstore",
+        "server/internal/app"
+      ]
+    },
+    "domain_check": {
+      "exit_code": 0
+    }
+  },
+  "core_e2e_local": {
+    "result": "not exercised",
+    "attempts": [
+      "archive lacks .git: git rev-parse HEAD fails",
+      "minimal git identity: Go VCS stamping requires tree metadata"
+    ],
+    "next": "required PR merge-queue End-to-end core job on full checkout"
+  },
+  "review": "read-only review and objection recheck: no verified launch-blocking defects"
+}

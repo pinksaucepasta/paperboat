@@ -1,0 +1,26 @@
+{
+  "queue_failure": {
+    "run": 43103134874,
+    "test": "TestTunnelsMoveOntoTheEngineOnlyWhenAgentAndEdgesServeThemOnPostgres",
+    "assertion": "engine ingress decision = <nil> (of 0)"
+  },
+  "reproduction": {
+    "head": "3e4fc1c71c97c0aa609810fe4f11809fa9f54956",
+    "base": "236475df6",
+    "both": "FAIL: accounting authority unavailable because Quota was nil"
+  },
+  "cause": "b2fc1aa0a requires an authoritative QuotaChecker; three test fixture projections omitted it",
+  "fix": "real billing checker and first-boot allowance policy in agentFixture; existing assertions retained",
+  "verification": {
+    "commit": "cd98bdafb",
+    "command": "remote-test.sh <postgres-test-host> server -race -count=1 ./internal/runtimeattachment",
+    "exit_code": 0,
+    "duration_seconds": 25.694,
+    "push_tests": {
+      "count": 8,
+      "exit_code": 0,
+      "regression": "existing-PR update preserves published ancestry when main advances; fails before fix"
+    }
+  },
+  "production_behavior_changed": false
+}

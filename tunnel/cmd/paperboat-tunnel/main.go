@@ -318,9 +318,25 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 			return nil, fmt.Errorf("create process epoch: %w", err)
 		}
 	}
-	certificateRegistry, err := tlscert.NewRegistry(tlscert.Config{})
+	// The active certificates survive a restart (tlscert/persist.go): the server sends each epoch its certificates
+	// once, so a restarted edge would otherwise serve no TLS until the server stages them again.
+	// A store that cannot be opened is reported and the edge runs memory-only, as before: not writing keys leaks
+	// nothing, and a permissions slip must not turn a working edge into one that never starts.
+	var certificatePersistence tlscert.Persistence
+	certificateStore, err := tlscert.NewDiskStore(filepath.Join(filepath.Dir(cfg.StatePath), "certificates"))
+	if err != nil {
+		reportCertificateStore(reporter, "open", err)
+	} else {
+		certificatePersistence = certificateStore
+	}
+	certificateRegistry, err := tlscert.NewRegistry(tlscert.Config{Persistence: certificatePersistence, OnPersistError: func(operation string, err error) {
+		reportCertificateStore(reporter, operation, err)
+	}})
 	if err != nil {
 		return nil, fmt.Errorf("create TLS certificate registry: %w", err)
+	}
+	if certificateStore != nil {
+		restoreCertificates(certificateRegistry, certificateStore, cfg.NodeID, reporter)
 	}
 	distributionAuthenticator, err := control.NewHMACDistributionAuthenticator(credential)
 	if err != nil {
@@ -1251,6 +1267,24 @@ func readCredential(path string) (string, error) {
 }
 
 // SDK drain is local completion of export attempts; receipt remains unconfirmed.
+func reportCertificateStore(reporter *reporting.Reporter, operation string, err error) {
+	if reporter != nil {
+		reporter.ObserveFailure(context.Background(), "certificate_distribution", fmt.Errorf("%s the persisted TLS certificates: %w", operation, err))
+	}
+}
+
+// restoreCertificates serves the previous process's certificates until the server delivers this epoch's. A store
+// that cannot be read is reported and the edge starts without them, as a first start does.
+func restoreCertificates(registry *tlscert.Registry, store *tlscert.DiskStore, nodeID string, reporter *reporting.Reporter) {
+	records, unsafe, err := store.Load()
+	if err != nil {
+		reportCertificateStore(reporter, "load", err)
+		return
+	}
+	report := registry.RestoreEncoded(context.Background(), nodeID, records)
+	fmt.Fprintf(os.Stderr, "persisted certificates restored=%d dropped=%v unsafe=%d\n", report.Imported, report.Dropped, unsafe)
+}
+
 func logReportingShutdown(ctx context.Context, reporter *reporting.Reporter) {
 	level := slog.LevelInfo
 	if reporter.FlushStatus() == "timed_out" || reporter.SDKSubmissionsDropped() != 0 || reporter.SDKHTTPFailures() != 0 {
