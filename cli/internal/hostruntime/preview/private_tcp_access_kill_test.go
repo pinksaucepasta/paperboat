@@ -1,8 +1,10 @@
 package preview
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +14,9 @@ import (
 	"testing"
 	"time"
 )
+
+// privateTCPAccessOwnerReady is printed once the helper process runs, so the test starts the session TTL after spawn.
+const privateTCPAccessOwnerReady = "private-tcp-access-owner-ready"
 
 type privateTCPAccessListenerProxy struct{ listener net.Listener }
 
@@ -26,6 +31,7 @@ func TestPrivateTCPAccessOwnerHelper(t *testing.T) {
 	if target == "" {
 		t.Skip("helper process of TestPrivateTCPAccessListenerClosesWhenItsOwnerProcessIsKilled")
 	}
+	fmt.Println(privateTCPAccessOwnerReady)
 	for {
 		request, _ := http.NewRequest(http.MethodPut, target, nil)
 		request.Header.Set("Authorization", "Bearer local-token")
@@ -63,6 +69,42 @@ func TestPrivateTCPAccessListenerClosesWhenItsOwnerProcessIsKilled(t *testing.T)
 	t.Cleanup(func() { cancel(); _ = manager.Close() })
 	server := httptest.NewServer(manager)
 	t.Cleanup(server.Close)
+	// Spawn the owner first: its beats get 404 until the session exists, and the TTL starts only once it runs.
+	owner := exec.Command(os.Args[0], "-test.run=^TestPrivateTCPAccessOwnerHelper$")
+	owner.Env = append(os.Environ(), "PB_TEST_ACCESS_HEARTBEAT_URL="+server.URL+"/v1/private-tcp-access/access_kill/heartbeat")
+	output, err := owner.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	killed := false
+	t.Cleanup(func() {
+		if !killed {
+			_ = owner.Process.Kill()
+		}
+		_ = owner.Wait()
+	})
+	ready := make(chan bool, 1) // the helper prints once, so nothing is left to drain
+	go func() {
+		scanner := bufio.NewScanner(output)
+		for scanner.Scan() {
+			if scanner.Text() == privateTCPAccessOwnerReady {
+				ready <- true
+				return
+			}
+		}
+		ready <- false
+	}()
+	select {
+	case ok := <-ready:
+		if !ok {
+			t.Fatal("owner helper exited before it was ready")
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("owner helper never became ready")
+	}
 	start, err := http.NewRequest(http.MethodPost, server.URL+"/v1/private-tcp-access", strings.NewReader(validPrivateTCPAccessBody("tun_1")))
 	if err != nil {
 		t.Fatal(err)
@@ -78,18 +120,6 @@ func TestPrivateTCPAccessListenerClosesWhenItsOwnerProcessIsKilled(t *testing.T)
 	if err != nil || response.StatusCode != http.StatusCreated {
 		t.Fatalf("start=%d %v", response.StatusCode, err)
 	}
-	owner := exec.Command(os.Args[0], "-test.run=^TestPrivateTCPAccessOwnerHelper$")
-	owner.Env = append(os.Environ(), "PB_TEST_ACCESS_HEARTBEAT_URL="+server.URL+"/v1/private-tcp-access/"+session.ID+"/heartbeat")
-	if err := owner.Start(); err != nil {
-		t.Fatal(err)
-	}
-	killed := false
-	t.Cleanup(func() {
-		if !killed {
-			_ = owner.Process.Kill()
-		}
-		_ = owner.Wait()
-	})
 	address := listener.Addr().String()
 	time.Sleep(1500 * time.Millisecond) // well past one TTL: only the live owner's beats keep the listener open
 	if !dialsPrivateTCPAccess(address) {

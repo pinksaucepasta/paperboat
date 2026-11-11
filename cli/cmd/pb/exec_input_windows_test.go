@@ -85,7 +85,6 @@ func TestExecInputPrivateConsoleBorrowedReadiness(t *testing.T) {
 		}
 		return count
 	}
-	baselineHandles := countHandles()
 	// Resize and modifier events alone do not prove a byte read can complete.
 	inject([]execConsoleEvent{{Kind: 4}, keyEvent(0x10, 0)})
 	assertCancel()
@@ -160,7 +159,22 @@ func TestExecInputPrivateConsoleBorrowedReadiness(t *testing.T) {
 	if _, err := file.Stat(); err != nil {
 		t.Fatal("borrowed console closed")
 	}
-	if count := countHandles(); count > baselineHandles {
-		t.Fatalf("borrowed console reader leaked handles: before=%d after=%d", baselineHandles, count)
+	// The runtime and Windows may add a few handles of their own between any two snapshots (+6 seen), so a leak
+	// is growth proportional to the reads: count across 50 more borrowed reads, with a small fixed tolerance.
+	const reads, tolerance = 50, 8
+	baselineHandles := countHandles()
+	for range reads {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		_, err := readExecInput(ctx, file, value[:])
+		cancel()
+		if !errors.Is(err, errExecInputLimit) {
+			t.Fatalf("repeated overbound read: err=%v", err)
+		}
+		if _, err := file.Stat(); err != nil {
+			t.Fatal("borrowed console closed")
+		}
+	}
+	if count := countHandles(); count > baselineHandles+tolerance {
+		t.Fatalf("borrowed console reader leaked handles over %d reads: before=%d after=%d", reads, baselineHandles, count)
 	}
 }
