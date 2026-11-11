@@ -3425,6 +3425,8 @@ The coolify format (S1) also removes the old dev deployment and its test backups
 
 ## 5. Log
 
+2026-11-11 | W3 managedssh | TestOpenSSHExecutorInheritsForegroundTTYAndRestoresTerminal failed once in a loaded `-race -count=15` package run (execute_unix_test.go:321, typed input lost: "bash: g: command not found"); 50/50 alone, 15/15 package runs on base and HEAD pass. Rare PTY typing flake; fix after F3-11 and F5-12.
+
 2026-11-11 | W13 C006/C008: standalone guard install rediscovers the domain removed by uninstall (482333906); Windows round trip + doctor healthy PASS, result w13-guard-fixed-20261111.json. C031/C220 proved c2113e3f8; C061/C066 wait for Lane W15: Administrators-owned SSH directory support; winpool-4 original owner restored, DACL untouched. Focused guard race tests PASS on anvit (daemoncmd, machineguard, hostinstall).
 
 2026-11-11 | W14 F19-03 | Windows SSO approval exposed an auto-enrollment token ACL bug; explicit owner + protected SYSTEM/user ACL fixes the writer. TestLoginEnrollmentTokenAcceptedByBootstrap red/green on hosted winpool-8; Linux focused login tests + vet pass. SSO/SCIM fixtures found; live verification waits for coordinated reboot.
