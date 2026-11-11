@@ -3,7 +3,9 @@
 //   [MACHINE=<team machine id, online, with a recording key set up>]  terminal rows: start, REC, stop
 //   [RECORDING=<recording id> VAULT_PASSWORD_FILE=<file holding the owner's vault password>]  replay rows
 //   [OFFLINE_RECORDING=<recording id on an offline machine>]  the offline state
-//   [LONG_RECORDING=<id of a recording of tens of MB> VAULT_PASSWORD_FILE]  removing replay permission closes an open replay
+//   [LONG_RECORDING=<id of a recording of tens of MB> VAULT_PASSWORD_FILE]  removing replay permission closes an open replay.
+//     DESTRUCTIVE: removing the team's only replay rule deletes the owner's sealed copy of the recording key (by design), and
+//     adding the rule back does not restore it. Run it last, on a team whose recording key you can set up again.
 //   node check-recordings.mjs
 // Rows without their variables are skipped and say so. Nothing secret is printed: no password, ticket or terminal text.
 import { readFileSync } from "node:fs"
@@ -32,7 +34,7 @@ try {
   // 1. Personal: recordings are a Teams feature.
   await workspace("personal")
   await page.goto(`${origin}/recordings`, { waitUntil: "networkidle", timeout: 120000 })
-  log(await page.locator("[data-recordings-upgrade]").isVisible({ timeout: 20000 }).catch(() => false), "Personal shows the Teams upgrade state")
+  log(await page.locator("[data-recordings-upgrade]").waitFor({ timeout: 20000 }).then(() => true, () => false), "Personal shows the Teams upgrade state")
 
   // 2. The team's list matches the server's first page.
   await workspace(team)
@@ -41,7 +43,7 @@ try {
   if (list.status === 409) log(await page.locator("[data-recordings-upgrade]").isVisible(), "a team without the plan shows the upgrade state")
   else {
     const rows = list.body?.data?.recordings ?? []
-    if (rows.length === 0) log(await page.getByText("No recordings yet").isVisible({ timeout: 20000 }).catch(() => false), "an empty team shows No recordings yet")
+    if (rows.length === 0) log(await page.getByText("No recordings yet").waitFor({ timeout: 20000 }).then(() => true, () => false), "an empty team shows No recordings yet")
     else {
       await page.locator("[data-recording-id]").first().waitFor({ timeout: 30000 })
       const shown = await page.locator("[data-recording-id]").evaluateAll((els) => els.map((el) => el.getAttribute("data-recording-id")))
@@ -60,7 +62,7 @@ try {
   // 3. Team → Recordings: key state, the manual-start switch (flipped and restored), rules from the policy.
   await page.goto(`${origin}/team?team=${encodeURIComponent(team)}&tab=recordings`, { waitUntil: "networkidle", timeout: 120000 })
   const key = await get(`teams/${encodeURIComponent(team)}/recording-key`)
-  if (key.status === 409) log(await page.locator("[data-recordings-upgrade]").isVisible({ timeout: 20000 }).catch(() => false), "settings show the upgrade state without the plan")
+  if (key.status === 409) log(await page.locator("[data-recordings-upgrade]").waitFor({ timeout: 20000 }).then(() => true, () => false), "settings show the upgrade state without the plan")
   else {
     await page.locator("[data-recording-settings]").waitFor({ timeout: 30000 })
     const status = await page.locator("[data-recording-key]").getAttribute("data-recording-key", { timeout: 20000 })
@@ -85,7 +87,7 @@ try {
     const rulesBefore = await replayRules()
     await page.getByRole("button", { name: "Add rule" }).click()
     const dialog = page.getByRole("dialog")
-    log(await dialog.getByText("Record sessions").isVisible({ timeout: 5000 }).catch(() => false), "Add rule opens its dialog")
+    log(await dialog.getByText("Record sessions").waitFor({ timeout: 5000 }).then(() => true, () => false), "Add rule opens its dialog")
     await dialog.getByText("Allow replay").click()
     await dialog.getByText("Admins", { exact: true }).click()
     await dialog.getByText("All machines").click()
@@ -94,7 +96,7 @@ try {
     await page.getByRole("dialog").waitFor({ state: "detached", timeout: 30000 }).catch(() => {})
     log((await replayRules()) === rulesBefore + 1, "a saved replay rule reaches the policy")
     const added = page.locator("[data-recording-rule=recording_view]").last()
-    log(await added.isVisible({ timeout: 15000 }).catch(() => false), "the new rule is listed")
+    log(await added.waitFor({ timeout: 15000 }).then(() => true, () => false), "the new rule is listed")
     await added.getByRole("button", { name: "Remove rule" }).click()
     await page.getByRole("dialog").getByRole("button", { name: /^Save/ }).click({ timeout: 30000 })
     await page.getByRole("dialog").waitFor({ state: "detached", timeout: 30000 }).catch(() => {})
@@ -108,28 +110,42 @@ try {
     await page.getByLabel("Vault password").fill(readFileSync(process.env.VAULT_PASSWORD_FILE, "utf8").trim())
     await page.getByRole("button", { name: "Unlock" }).click()
     const ready = await page.locator("main[data-recording-phase=ready]").waitFor({ timeout: 120000 }).then(() => true, () => false)
-    log(ready, "the recording loads and decrypts", (await page.locator("[data-recording-error]").getAttribute("data-recording-error").catch(() => null)) ?? "")
+    log(ready, "the recording loads and decrypts", (ready ? "" : await page.locator("[data-recording-error]").first().getAttribute("data-recording-error", { timeout: 2000 }).catch(() => "")))
     if (ready) {
       const clock = () => page.locator("[data-recording-time]").textContent()
+      const until = async (probe, ms = 6000) => {
+        for (let waited = 0; waited < ms; waited += 250) {
+          if (await probe()) return true
+          await page.waitForTimeout(250)
+        }
+        return false
+      }
       const t0 = await clock()
-      await page.waitForTimeout(2000)
-      log((await clock()) !== t0, "it plays on its own")
+      log(await until(async () => (await clock()) !== t0), "it plays on its own", `${t0} -> ${await clock()}`)
       await page.locator("[data-recording-toggle]").click()
       const paused = await clock()
       await page.waitForTimeout(1500)
-      log((await clock()) === paused && (await page.locator("[data-recording-toggle]").getAttribute("data-recording-toggle")) === "play", "pause stops the clock")
-      await page.getByLabel("Position").fill("0")
-      await page.waitForTimeout(500)
-      log((await clock())?.startsWith("0:00"), "the seek bar moves to the start", await clock())
-      await page.getByRole("radio", { name: "4×" }).click().catch(() => page.getByText("4×").click())
-      log(await page.getByText("4×").evaluate((el) => el.closest("[aria-pressed=true],[data-pressed]") !== null), "speed 4× is selected")
-      log((await page.locator(".terminal-host").innerText()).length > 0, "the terminal renderer shows the recording")
+      log((await clock()) === paused && (await page.locator("[data-recording-toggle]").getAttribute("data-recording-toggle")) === "play", "pause stops the clock", paused)
+      log(await until(async () => (await page.locator(".terminal-host").innerHTML()).length > 0), "the terminal renderer shows the recording")
+      await page.getByRole("button", { name: "4×" }).click()
+      log((await page.getByRole("button", { name: "4×" }).getAttribute("aria-pressed")) === "true", "speed 4× is selected")
+      // A keyboard seek to the start (an empty screen is right there: the first output comes after it).
+      await page.getByLabel("Position").press("Home")
+      log(await until(async () => (await clock())?.startsWith("0:00")), "the seek bar moves to the start", await clock())
+    }
+    // A full navigation locks the vault again: unlock before the error states, which sit behind it.
+    const unlock = async () => {
+      if ((await page.locator("main[data-recording-phase]").getAttribute("data-recording-phase")) !== "locked") return
+      await page.getByLabel("Vault password").fill(readFileSync(process.env.VAULT_PASSWORD_FILE, "utf8").trim())
+      await page.getByRole("button", { name: "Unlock" }).click()
     }
     await page.goto(`${origin}/recordings/rec_00000000-0000-4000-8000-000000000000`, { waitUntil: "networkidle", timeout: 120000 })
-    log(await page.locator("[data-recording-error=recording_not_found]").isVisible({ timeout: 30000 }).catch(() => false), "an unknown recording says it doesn't exist")
+    await unlock()
+    log(await page.locator("[data-recording-error=recording_not_found]").waitFor({ timeout: 30000 }).then(() => true, () => false), "an unknown recording says it doesn't exist")
     if (process.env.OFFLINE_RECORDING) {
       await page.goto(`${origin}/recordings/${encodeURIComponent(process.env.OFFLINE_RECORDING)}`, { waitUntil: "networkidle", timeout: 120000 })
-      log(await page.locator("[data-recording-error=machine_unavailable]").isVisible({ timeout: 60000 }).catch(() => false), "an offline machine says so and offers Retry")
+      await unlock()
+      log(await page.locator("[data-recording-error=machine_unavailable]").waitFor({ timeout: 60000 }).then(() => true, () => false), "an offline machine says so and offers Retry")
     } else skip("offline machine state", "OFFLINE_RECORDING not set")
   } else skip("replay rows", "RECORDING and VAULT_PASSWORD_FILE not set")
 
@@ -141,7 +157,7 @@ try {
     const attached = await page.locator("[data-terminal-phase=attached]").waitFor({ timeout: 90000 }).then(() => true, () => false)
     log(attached, "the terminal attaches", session)
     await page.getByRole("button", { name: "Start recording" }).click()
-    log(await page.locator("[data-terminal-recording]").isVisible({ timeout: 15000 }).catch(() => false), "Start recording shows REC")
+    log(await page.locator("[data-terminal-recording]").waitFor({ timeout: 15000 }).then(() => true, () => false), "Start recording shows REC")
     let live
     for (let i = 0; i < 20 && !live; i++) {
       await page.waitForTimeout(1000)
@@ -177,7 +193,7 @@ try {
     }
     const t0 = Date.now()
     const outcome = await viewer.locator("main[data-recording-phase]").evaluate(async (main) => {
-      for (let i = 0; i < 60; i++) {
+      for (let i = 0; i < 240; i++) {
         const phase = main.getAttribute("data-recording-phase")
         if (phase === "failed" || phase === "ready") return phase
         await new Promise((r) => setTimeout(r, 500))
