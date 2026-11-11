@@ -10,6 +10,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -50,9 +51,12 @@ type Input struct {
 	EnforceAt        *time.Time `json:"enforce_at"`
 }
 type Service struct {
-	db      *db.DB
-	audit   *audit.Writer
-	ceiling func() (string, error)
+	db        *db.DB
+	audit     *audit.Writer
+	ceiling   func() (string, error)
+	cacheMu   sync.Mutex
+	cached    *Policy
+	checkedAt time.Time
 }
 
 func New(store *db.DB, writer *audit.Writer, directory string) *Service {
@@ -173,7 +177,23 @@ func scanPolicy(row pgx.Row) (Policy, error) {
 	return p, e
 }
 func (s *Service) Get(ctx context.Context) (Policy, error) {
-	return scanPolicy(s.db.Pool().QueryRow(ctx, selectPolicy))
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	if s.cached != nil && time.Since(s.checkedAt) < policyRefreshInterval {
+		return clonePolicy(*s.cached), nil
+	}
+	read, cancel := context.WithTimeout(ctx, policyReadTimeout)
+	defer cancel()
+	p, err := scanPolicy(s.db.Pool().QueryRow(read, selectPolicy))
+	if err == nil {
+		s.rememberPolicy(p)
+	} else if s.cached == nil {
+		return Policy{}, err
+	}
+	// Back off failed refreshes too: an outage must not turn every request
+	// into another database read. A known floor remains enforced indefinitely.
+	s.checkedAt = time.Now()
+	return clonePolicy(*s.cached), nil
 }
 func (s *Service) Put(ctx context.Context, actor, key, evidence string, in Input) (Policy, error) {
 	if err := validate(in); err != nil {
@@ -247,5 +267,10 @@ func (s *Service) Put(ctx context.Context, actor, key, evidence string, in Input
 		_, e = tx.Exec(ctx, `INSERT INTO paperboat.client_update_policy_requests(actor_id,key_digest,request_digest,response,expires_at) VALUES($1,$2,$3,$4,now()+interval '7 days')`, actor, keyDigest, digest, response)
 		return e
 	})
+	if err == nil {
+		s.cacheMu.Lock()
+		s.rememberPolicy(out)
+		s.cacheMu.Unlock()
+	}
 	return out, err
 }
