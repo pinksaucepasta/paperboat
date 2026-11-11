@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react"
 import { api, ApiError } from "@/lib/api"
 import { vaultCrypto } from "@/lib/envvault/crypto"
-import { parseCast, recordingVault, SegmentFramer, toBase64, type Cast, type Replay } from "@/lib/recordings"
+import { parseCast, recordingVault, SegmentFramer, type Cast, type Replay } from "@/lib/recordings"
+import { currentVault } from "@/lib/envvault/vault"
 import { verifyTicketKey } from "@/lib/terminal/browser-root-key"
 import { loadBrowserTerminal, type BrowserTerminalEvent } from "@/lib/terminal/browser-terminal-wasm"
 
@@ -41,6 +42,7 @@ export function useRecordingReplay(id: string, attempt: number, enabled: boolean
       })
       const opened = await recordingVault<{ handle: string }>({
         action: "recording-open",
+        vault: await currentVault(),
         team_id: replay.team_id,
         recording_id: id,
         key_generation: replay.key_generation,
@@ -56,45 +58,50 @@ export function useRecordingReplay(id: string, attempt: number, enabled: boolean
         replay.root_key_id,
       )
       if (stopped) return
-      const framer = new SegmentFramer()
+      // The machine sends one segment per read (its receive queue stays bounded); the next is asked for after
+      // each stream end. Segments open strictly in order: the worker's reader checks each against the one before.
+      let framer = new SegmentFramer()
       const texts: string[] = []
       let opening = Promise.resolve()
-      let received = 0
+      let segment = 0
       let total = 0
       let connection = ""
       const fail = (error: unknown) => {
         leave()
         update({ phase: "failed", error })
       }
+      const read = () => {
+        framer = new SegmentFramer()
+        void runtime.recordingRead(connection, id, segment).then((answer) => {
+          if (!answer.result) return fail(new ApiError(0, answer.error ?? "recording_unavailable", answer.message ?? ""))
+          total = answer.result.total_segments
+          if (total === 0) return fail(new Error("This recording is empty."))
+          update({ phase: "loading", received: segment, total })
+        }, fail)
+      }
       const onEvent = (event: BrowserTerminalEvent) => {
         if (stopped) return
-        if (event.type === "state" && event.state === "connected")
-          void runtime.recordingRead(connection, id).then((read) => {
-            if (!read.result) return fail(new ApiError(0, read.error ?? "recording_unavailable", read.message ?? ""))
-            total = read.result.bytes
-            update({ phase: "loading", received, total })
-          }, fail)
+        if (event.type === "state" && event.state === "connected") read()
         else if (event.type === "output" && event.data && event.start_sequence) {
           try {
-            const files = framer.push(Number(event.start_sequence), event.data)
-            received += event.data.byteLength
-            update({ phase: "loading", received, total })
-            if (event.next_sequence) void runtime.ack(connection, event.next_sequence)
-            // Segments open strictly in order: the worker's reader checks each against the one before.
-            for (const file of files)
+            for (const file of framer.push(Number(event.start_sequence), event.data))
               opening = opening.then(async () => {
-                const opened = await recordingVault<{ text: string }>({ action: "recording-segment", handle, file: toBase64(file) })
+                const opened = await recordingVault<{ text: string }>({ action: "recording-segment", handle }, file)
                 texts.push(opened.text)
               })
           } catch (error) {
             fail(error)
           }
         } else if (event.type === "event" && (event.payload as { event?: string })?.event === "recording_stream_end")
-          void opening.then(() => {
-            if (framer.pending) throw new Error("The recording stream ended inside a segment.")
-            leave()
-            update({ phase: "ready", cast: parseCast(texts.join("")) })
-          }).catch(fail)
+          void opening
+            .then(() => {
+              if (framer.pending) throw new Error("The recording stream ended inside a segment.")
+              segment++
+              if (segment < total) return read()
+              leave()
+              update({ phase: "ready", cast: parseCast(texts.join("")) })
+            })
+            .catch(fail)
         else if (event.type === "state" && ["denied", "closed", "transport-error", "reconnecting"].includes(event.state ?? ""))
           fail(new ApiError(0, event.code ?? "connection_lost", event.message ?? "The connection to the machine was lost."))
       }

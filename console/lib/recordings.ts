@@ -3,6 +3,7 @@
 import { keepPreviousData, queryOptions } from "@tanstack/react-query"
 import { api, ApiError } from "@/lib/api"
 import { vaultCrypto } from "@/lib/envvault/crypto"
+import { currentVault } from "@/lib/envvault/vault"
 import { hasComments, parsePolicy, type PolicyRule } from "@/lib/policy"
 import type { components } from "@/lib/api-schema"
 
@@ -78,7 +79,7 @@ export function putManualStart(teamId: string, manual_start: ManualStart) {
 }
 
 // The server's JSON carries bytes as standard base64 (Go encoding/json); the vault worker speaks base64url.
-const byteFields = new Set(["sharing_public_key", "sealed", "sealed_previous", "public_key", "signing_public_key", "rotation_signature", "file"])
+const byteFields = new Set(["sharing_public_key", "sealed", "sealed_previous", "public_key", "signing_public_key", "rotation_signature"])
 
 /** Rewrites every byte field (by name, at any depth) between standard base64 and unpadded base64url. */
 export function convertBytes<T>(value: T, to: "url" | "std"): T {
@@ -97,9 +98,9 @@ export function convertBytes<T>(value: T, to: "url" | "std"): T {
   return walk(value) as T
 }
 
-/** One recording call to the vault worker, with bytes converted both ways. */
-export async function recordingVault<T>(request: { action: string } & Record<string, unknown>): Promise<T> {
-  return convertBytes(await vaultCrypto<T>(convertBytes(request, "url")), "std")
+/** One recording call to the vault worker, with byte fields converted both ways; `file` goes beside the JSON. */
+export async function recordingVault<T>(request: { action: string } & Record<string, unknown>, file?: Uint8Array): Promise<T> {
+  return convertBytes(await vaultCrypto<T>(convertBytes(request, "url"), file), "std")
 }
 
 /** Viewers a copy can be sealed for: they have a vault, and no copy of the current generation yet. */
@@ -129,6 +130,7 @@ export async function grantRecordingKey(teamId: string, state: RecordingKeyState
   const viewers = waitingViewers(state)
   const sealed = await recordingVault<{ grants: RecordingGrant[] }>({
     action: "recording-key-grant",
+    vault: await currentVault(),
     team_id: teamId,
     generation: state.my_key.generation,
     sealed: state.my_key.sealed,
@@ -267,10 +269,3 @@ export class SegmentFramer {
 
 /** cli/internal/recording MaxSegmentFile: 4 MiB of asciicast plus 64 KiB. */
 const maxSegmentFile = (4 << 20) + (64 << 10)
-
-/** Bytes as base64, for the vault worker's JSON calls. */
-export function toBase64(bytes: Uint8Array) {
-  let text = ""
-  for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
-  return btoa(text)
-}

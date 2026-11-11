@@ -59,11 +59,19 @@ export type BrowserTerminalAPI = {
     id: string,
     action: "record-start" | "record-stop",
   ): Promise<{ result?: unknown; error?: string; message?: string }>
-  /** Recording channels only (`mode: "recording"`): asks for the ticket's recording; segments follow as output. */
+  /**
+   * Recording channels only (`mode: "recording"`): asks for one segment of the ticket's recording. It follows as
+   * output (a 4-byte big-endian length, then the file), then the recording_stream_end event.
+   */
   recordingRead(
     id: string,
     recordingID: string,
-  ): Promise<{ result?: { recording_id: string; segments: number; bytes: number; final: boolean }; error?: string; message?: string }>
+    fromSegment: number,
+  ): Promise<{
+    result?: { recording_id: string; from_segment: number; segments: number; total_segments: number; bytes: number; final: boolean }
+    error?: string
+    message?: string
+  }>
   /** This window gained focus: the machine sizes the shell to the typing window that was last active. */
   activity(id: string): Promise<void | { error: string; message: string }>
   /** Asks the machine for a heartbeat reply, delivered as a `probe` event carrying the returned request id. */
@@ -255,7 +263,7 @@ async function startRuntime(): Promise<BrowserTerminalAPI> {
       return call("inspectorRequest", [id, payload], bytes)
     },
     recordingControl: (id, action) => call("recordingControl", [id, action]),
-    recordingRead: (id, recordingID) => call("recordingRead", [id, recordingID]),
+    recordingRead: (id, recordingID, fromSegment) => call("recordingRead", [id, recordingID, fromSegment]),
     leave: (id) => {
       const callbackID = connections.get(id)
       connections.delete(id)

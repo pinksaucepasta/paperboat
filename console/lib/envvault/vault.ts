@@ -98,7 +98,7 @@ export async function unlockVault(password: string): Promise<void> {
   await vaultCrypto({ action: "unlock", vault, password })
 }
 
-async function currentVault(signal?: AbortSignal): Promise<Vault> {
+export async function currentVault(signal?: AbortSignal): Promise<Vault> {
   const vault = await readVault(signal)
   if (!vault) throw new Error("No ENV vault exists for this account.")
   return vault

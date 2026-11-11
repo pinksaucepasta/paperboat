@@ -5,7 +5,6 @@ import { WTerm } from "@wterm/dom"
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { ApiError } from "@/lib/api"
 import { subscribeVaultLock, vaultUnlocked } from "@/lib/envvault/crypto"
-import { formatBytes } from "@/lib/format"
 import { formatClock, recordingMessage, type Cast } from "@/lib/recordings"
 import { useRecordingReplay } from "@/lib/recordings-replay"
 import { loadGhosttyCores } from "@/lib/terminal/ghostty-core"
@@ -39,7 +38,7 @@ export function RecordingPlayer({ id }: { id: string }) {
           <ReplayError error={load.error} retry={() => setAttempt(attempt + 1)} />
         ) : load.phase === "loading" ? (
           <p className="py-12 text-center text-sm text-muted-foreground" data-recording-loading>
-            {load.total ? `Loading the recording… ${formatBytes(load.received)} of ${formatBytes(load.total)}` : "Opening the recording…"}
+            {load.total ? `Loading the recording… ${Math.round((load.received / load.total) * 100)}%` : "Opening the recording…"}
           </p>
         ) : (
           <Player cast={load.cast} />
