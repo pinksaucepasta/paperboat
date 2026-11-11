@@ -14,21 +14,18 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
+	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/trustedkeys"
 )
 
 const (
-	// The server accepts an endpoint certificate that expires at most 90 days after ITS clock. Expiry is anchored
-	// to the client's clock, so a client whose clock is ahead of the server by even a second would be refused
-	// (HTTP 400 invalid_certificate; victus, 2026-11-11, about 2 s ahead): the lifetime keeps twice the clock-skew
-	// allowance (serverclock only corrects offsets of a minute and more) below that cap.
-	CertificateLifetime    = 90*24*time.Hour - 2*CertificateClockSkew
+	// The values live in shared/peeridentity, which the server's acceptance check uses too.
+	CertificateLifetime    = wire.CertificateLifetime
 	CertificateRenewBefore = 7 * 24 * time.Hour
-	// New endpoint certificates are backdated by the contract's bounded clock
-	// skew so a client whose wall clock is slightly ahead of the control plane
-	// can enroll. Expiry remains anchored to the observed client time and is
-	// still checked strictly by every verifier.
-	CertificateClockSkew = time.Minute
+	// New endpoint certificates are backdated by the contract's bounded clock skew so a client whose wall clock
+	// is slightly ahead of the control plane can enroll; expiry stays anchored to the client's time, with the
+	// matching margin under the server's cap (see wire.CertificateLifetime).
+	CertificateClockSkew = wire.ClockSkewAllowance
 )
 
 var ErrInvalid = errors.New("invalid E2EE identity bootstrap")

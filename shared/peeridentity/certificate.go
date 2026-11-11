@@ -206,3 +206,28 @@ func (c Certificate) MarshalBinary() ([]byte, error) {
 	return append([]byte(nil), c.Raw...), nil
 }
 func (c Certificate) FingerprintHex() string { return hex.EncodeToString(c.Fingerprint[:]) }
+
+// Endpoint certificate times for machine enrollment: the one owner of the numbers the client uses to issue a
+// certificate and the server uses to accept it.
+const (
+	// MaxCertificateLifetime is the longest the server accepts, counted from ITS clock.
+	MaxCertificateLifetime = 90 * 24 * time.Hour
+	// ClockSkewAllowance is how far a client clock may be ahead of the server's (and how far a new certificate is
+	// backdated). serverclock corrects offsets of this size and more.
+	ClockSkewAllowance = time.Minute
+	// IssuedAtMaxAge is how old a certificate's issue time may be when it arrives.
+	IssuedAtMaxAge = 2 * time.Minute
+	// MinimumRemainingLifetime is the least a new certificate must still have when it arrives.
+	MinimumRemainingLifetime = time.Hour
+	// CertificateLifetime is what a client asks for: its expiry is anchored to its own clock, so it keeps twice
+	// the skew allowance below the server's cap. A client exactly at the cap was refused (invalid_certificate)
+	// as soon as its clock was a second ahead (victus, 2026-11-11).
+	CertificateLifetime = MaxCertificateLifetime - 2*ClockSkewAllowance
+)
+
+// EnrollmentWindowAccepts reports whether a machine endpoint certificate issued at issuedAt and expiring at
+// expiresAt is acceptable to the server at its clock now.
+func EnrollmentWindowAccepts(issuedAt, expiresAt, now time.Time) bool {
+	return !issuedAt.Before(now.Add(-IssuedAtMaxAge)) && !issuedAt.After(now.Add(ClockSkewAllowance)) &&
+		!expiresAt.After(now.Add(MaxCertificateLifetime)) && !expiresAt.Before(now.Add(MinimumRemainingLifetime))
+}

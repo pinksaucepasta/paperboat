@@ -115,3 +115,36 @@ func TestSignMatchesCanonicalEndpointWireEncoding(t *testing.T) {
 		t.Fatal("signer fingerprint differs from encoded bytes")
 	}
 }
+
+// Both edges of what a client can send: one whose clock is 89 s ahead of the server is accepted, and a certificate
+// past the server's limits is still refused.
+func TestEnrollmentWindowAcceptsAClientAheadAndRefusesPastTheLimits(t *testing.T) {
+	server := time.Date(2026, 11, 11, 3, 0, 0, 0, time.UTC)
+	issue := func(clientAhead time.Duration) (time.Time, time.Time) {
+		client := server.Add(clientAhead)
+		return client.Add(-ClockSkewAllowance), client.Add(CertificateLifetime)
+	}
+	for _, ahead := range []time.Duration{0, time.Second, 30 * time.Second, 89 * time.Second, -time.Minute} {
+		if issuedAt, expiresAt := issue(ahead); !EnrollmentWindowAccepts(issuedAt, expiresAt, server) {
+			t.Fatalf("a client %v ahead of the server was refused", ahead)
+		}
+	}
+	// An expiry anchored at exactly 90 days (the old client) fails as soon as the client clock is ahead.
+	if EnrollmentWindowAccepts(server.Add(time.Second-ClockSkewAllowance), server.Add(time.Second+MaxCertificateLifetime), server) {
+		t.Fatal("an expiry past the server's 90-day cap was accepted")
+	}
+	issuedAt, expiresAt := issue(0)
+	for name, c := range map[string][2]time.Time{
+		"issued too long ago":     {server.Add(-IssuedAtMaxAge - time.Second), expiresAt},
+		"issued in the future":    {server.Add(ClockSkewAllowance + time.Second), expiresAt},
+		"expires past the cap":    {issuedAt, server.Add(MaxCertificateLifetime + time.Second)},
+		"expires within the hour": {issuedAt, server.Add(MinimumRemainingLifetime - time.Second)},
+	} {
+		if EnrollmentWindowAccepts(c[0], c[1], server) {
+			t.Fatalf("%s was accepted", name)
+		}
+	}
+	if !EnrollmentWindowAccepts(server.Add(-IssuedAtMaxAge), server.Add(MaxCertificateLifetime), server) {
+		t.Fatal("the inclusive limits (issued exactly at the age limit, expiring exactly at the cap) were refused")
+	}
+}

@@ -17,8 +17,8 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
-	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 type bootstrapClientFunc func(context.Context, string, api.E2EEBootstrapInput) (api.E2EEBootstrapResult, error)
@@ -505,15 +505,9 @@ func TestSameEndpointCertificateDocumentIgnoresCompatibilityOnlyRootFingerprint(
 	}
 }
 
-// The server refuses a certificate that expires more than 90 days after its own clock (server/internal/
-// peeridentity/service.go RegisterMachine). A client ahead of the server by less than the offset serverclock
-// corrects (one minute) must still enroll.
-func TestCertificateLifetimeToleratesAClientClockAheadOfTheServer(t *testing.T) {
-	const serverCap = 90 * 24 * time.Hour
-	if CertificateLifetime+serverclock.Threshold > serverCap {
-		t.Fatalf("a lifetime of %v leaves less than %v of clock-ahead tolerance under the server's %v cap", CertificateLifetime, serverclock.Threshold, serverCap)
-	}
-	if CertificateLifetime < serverCap-time.Hour {
-		t.Fatalf("lifetime %v shrank far below the contract's 90 days", CertificateLifetime)
+// The client's certificate times are the shared owner's (the server's acceptance check uses the same numbers).
+func TestCertificateTimesComeFromTheSharedOwner(t *testing.T) {
+	if CertificateLifetime != wire.CertificateLifetime || CertificateClockSkew != wire.ClockSkewAllowance {
+		t.Fatalf("client times drifted from shared/peeridentity: %v %v", CertificateLifetime, CertificateClockSkew)
 	}
 }

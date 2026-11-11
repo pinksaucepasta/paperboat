@@ -125,8 +125,7 @@ func (s *Service) RegisterMachine(ctx context.Context, request MachineRegistrati
 	}
 	if parsed.Role != wire.RoleMachine || parsed.AccountID != request.UserID || parsed.EndpointID != request.MachineID ||
 		parsed.Generation != request.Generation || parsed.Serial == 0 || parsed.Serial > wire.MaximumInteger ||
-		parsed.IssuedAt.Before(request.Now.Add(-2*time.Minute)) || parsed.IssuedAt.After(request.Now.Add(time.Minute)) ||
-		parsed.ExpiresAt.After(request.Now.Add(90*24*time.Hour)) || parsed.ExpiresAt.Before(request.Now.Add(time.Hour)) {
+		!wire.EnrollmentWindowAccepts(parsed.IssuedAt, parsed.ExpiresAt, request.Now) {
 		return wire.Certificate{}, wire.ErrIdentity
 	}
 	// The machine's existing, locally held QUIC key signs its own endpoint
