@@ -1,6 +1,6 @@
 "use client"
 
-import { ArrowsOutIcon, LockSimpleIcon, PowerIcon, UploadSimpleIcon, UsersIcon } from "@phosphor-icons/react"
+import { ArrowsOutIcon, LockSimpleIcon, PowerIcon, RecordIcon, StopIcon, UploadSimpleIcon, UsersIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -8,6 +8,7 @@ import { Children, Fragment, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { ApiError, meQuery, useApiQuery } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { recordingSentences } from "@/lib/recordings"
 import { closeTerminal, terminalKeys, terminalQuery } from "@/lib/terminal/queries"
 import {
   terminalCanAttach,
@@ -19,7 +20,7 @@ import {
 import { useTerminalTheme } from "@/lib/terminal/use-terminal-theme"
 import type { TerminalTheme } from "@/lib/terminal/themes"
 import { Logo } from "@/components/logo"
-import { TerminalSurface } from "@/components/terminal/terminal-surface"
+import { RecChip, TerminalSurface } from "@/components/terminal/terminal-surface"
 import { TerminalThemeMenu } from "@/components/terminal/terminal-theme-menu"
 import { TerminalShareDialog } from "@/components/terminal/terminal-share-dialog"
 import { UploadDialog } from "@/components/terminal/upload-dialog"
@@ -197,6 +198,21 @@ export function TerminalRoom({
       <TopBar
         actions={
           <div className="flex items-center gap-1">
+            {connection.recording && <RecChip className="mr-1" />}
+            {/* Recording by hand is for the owner of a team terminal; the machine applies the team's rules. */}
+            {isOwner && session.owner_team_id && (
+              <Action
+                label={connection.recording ? "Stop recording" : "Start recording"}
+                disabled={connection.phase !== "attached"}
+                onClick={() =>
+                  void connection
+                    .controlRecording(connection.recording ? "record-stop" : "record-start")
+                    .then((code) => code && toast.error(recordingSentences[code] ?? "Recording could not be changed. Try again."))
+                }
+              >
+                {connection.recording ? <StopIcon /> : <RecordIcon />}
+              </Action>
+            )}
             {/* Terminal tools, then who's here, then Share: the primary action sits last. */}
             {isOwner && (
               <Action

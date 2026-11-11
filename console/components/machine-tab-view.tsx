@@ -10,6 +10,7 @@ import { MachineFiles } from "@/components/files/file-list"
 import { MachineTerminals } from "@/components/terminal/terminal-list"
 import { MachinePreviews } from "@/components/tunnels/preview-list"
 import { MachineTunnels } from "@/components/tunnels/tunnel-list"
+import { MachineRecordings } from "@/components/recordings/recording-list"
 
 const views: Record<string, () => React.ReactNode> = {
   "": MachineOverview,
@@ -21,6 +22,7 @@ const views: Record<string, () => React.ReactNode> = {
   config: MachineConfigSync,
   usage: MachineUsage,
   activity: MachineActivity,
+  recordings: MachineRecordings,
 }
 
 /**

@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils"
 import { CopyButton } from "@/components/copy-button"
 import { InviteDialog } from "@/components/team/invite-dialog"
 import { TeamSecurity } from "@/components/team/team-security"
+import { RecordingSettings } from "@/components/recordings/recording-settings"
 import { RowMenus, type Entry } from "@/components/row-menus"
 import { ConfirmAction, SearchField, ViewToggle } from "@/components/list-toolbar"
 import { Time } from "@/components/time"
@@ -86,7 +87,8 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
   const [view, setView] = useState<"members" | "invitations">("members")
   const [search, setSearch] = useState("")
   const [inviting, setInviting] = useState(false)
-  const tab = useSearchParams().get("tab") === "security" ? "security" : "members"
+  const tabParam = useSearchParams().get("tab")
+  const tab = tabParam === "security" || tabParam === "recordings" ? tabParam : "members"
 
   if (team.isPending || me.isPending) return <TeamSkeleton />
   if (team.isError) return <p className="text-sm text-muted-foreground">{team.error.message}</p>
@@ -116,6 +118,12 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
   const name = team.data.display_name || team.data.team_id
   // Security (SSO, directory) is for the owner and admins to change and auditors to see.
   const securityTab = teamLive.security && ["owner", "admin", "auditor"].includes(actor)
+  // Recording settings: owners and admins change them, auditors see them.
+  const recordingsTab = ["owner", "admin", "auditor"].includes(actor)
+  const tabs = (["members", "security", "recordings"] as const).filter(
+    (value) => value === "members" || (value === "security" ? securityTab : recordingsTab),
+  )
+  const tabTitles = { members: "Members", security: "Security", recordings: "Recordings" }
 
   return (
     <div className="flex flex-col gap-10">
@@ -152,25 +160,27 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
 
       {team.data.suspended && <SuspendedNotice owner={actor === "owner"} />}
 
-      {securityTab && (
+      {tabs.length > 1 && (
         <nav className="-mb-4 flex gap-1 border-b border-divider" aria-label="Team">
-          {(["members", "security"] as const).map((value) => (
+          {tabs.map((value) => (
             <Link
               key={value}
-              href={value === "security" ? `/team?team=${encodeURIComponent(team.data.team_id)}&tab=security` : "/team"}
+              href={value === "members" ? "/team" : `/team?team=${encodeURIComponent(team.data.team_id)}&tab=${value}`}
               scroll={false}
               className={cn(
                 "-mb-px border-b-2 border-transparent px-2.5 pb-2.5 text-sm text-muted-foreground hover:text-foreground",
                 tab === value && "border-foreground text-foreground",
               )}
             >
-              {value === "security" ? "Security" : "Members"}
+              {tabTitles[value]}
             </Link>
           ))}
         </nav>
       )}
       {securityTab && tab === "security" ? (
         <TeamSecurity team={team.data} emails={emails} />
+      ) : recordingsTab && tab === "recordings" ? (
+        <RecordingSettings team={team.data} emails={emails} admin={admin} />
       ) : (
         <>
         <MachineRequests team={team.data} admin={admin} me={me.data} />

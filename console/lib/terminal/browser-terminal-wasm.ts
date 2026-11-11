@@ -24,6 +24,8 @@ export type BrowserTerminalEvent = {
   screen_sequence?: string
   capability?: string
   payload?: unknown
+  /** `attached` events: the session's live recording (shared/recording State), or null. */
+  recording?: unknown
   /** `probe` events: the request id `probe()` returned. */
   request_id?: string
 }
@@ -52,6 +54,16 @@ export type BrowserTerminalAPI = {
     id: string,
     payload: Record<string, unknown>,
   ): Promise<{ result?: unknown; error?: string; message?: string }>
+  /** Terminal channels: start or stop recording the attached session; the machine applies the team's rules. */
+  recordingControl(
+    id: string,
+    action: "record-start" | "record-stop",
+  ): Promise<{ result?: unknown; error?: string; message?: string }>
+  /** Recording channels only (`mode: "recording"`): asks for the ticket's recording; segments follow as output. */
+  recordingRead(
+    id: string,
+    recordingID: string,
+  ): Promise<{ result?: { recording_id: string; segments: number; bytes: number; final: boolean }; error?: string; message?: string }>
   /** This window gained focus: the machine sizes the shell to the typing window that was last active. */
   activity(id: string): Promise<void | { error: string; message: string }>
   /** Asks the machine for a heartbeat reply, delivered as a `probe` event carrying the returned request id. */
@@ -79,7 +91,7 @@ function nextTask(run: () => void) {
 }
 
 async function startRuntime(): Promise<BrowserTerminalAPI> {
-  const worker = new Worker(`/terminal/browser-terminal-worker.js?v=20261027-probe`, {
+  const worker = new Worker(`/terminal/browser-terminal-worker.js?v=20261111-recording`, {
     type: "module",
     name: "paperboat-terminal",
   })
@@ -242,6 +254,8 @@ async function startRuntime(): Promise<BrowserTerminalAPI> {
         return Promise.resolve({ error: "inspector_limit", message: "The inspector request is too large." })
       return call("inspectorRequest", [id, payload], bytes)
     },
+    recordingControl: (id, action) => call("recordingControl", [id, action]),
+    recordingRead: (id, recordingID) => call("recordingRead", [id, recordingID]),
     leave: (id) => {
       const callbackID = connections.get(id)
       connections.delete(id)

@@ -313,6 +313,8 @@ export const actionLabels: Record<string, string> = {
   replay: "Replay requests",
   env_read: "Read team ENV",
   env_write: "Change team ENV",
+  record: "Terminal sessions recorded",
+  recording_view: "Replay recordings",
 }
 
 export const reasonLabels: Record<string, string> = {

@@ -263,3 +263,18 @@ function uploadPercent(progress: NonNullable<TerminalConnection["upload"]["progr
   if (progress.totalBytes) return Math.min(100, Math.round((progress.transferredBytes / progress.totalBytes) * 100))
   return progress.phase === "finishing" ? 100 : 0
 }
+
+/** Shown to everyone in the terminal while it is recorded. */
+export function RecChip({ className }: { className?: string }) {
+  return (
+    <span
+      className={cn("flex h-6 items-center gap-1.5 rounded-md bg-destructive/10 px-2 text-xs font-medium text-destructive", className)}
+      data-terminal-recording
+      title="This terminal is being recorded"
+    >
+      <span className="size-1.5 rounded-full bg-destructive" aria-hidden />
+      REC
+    </span>
+  )
+}
+

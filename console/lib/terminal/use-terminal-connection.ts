@@ -9,6 +9,7 @@ import { api, ApiError, type Data } from "@/lib/api"
 import { loadGhosttyCores } from "@/lib/terminal/ghostty-core"
 import { guestApi } from "@/lib/terminal/queries"
 import type { RootPin } from "@/lib/terminal/browser-root-key"
+import type { components } from "@/lib/api-schema"
 import { openBrowserConnection, type Ticket, type TerminalRole } from "@/lib/terminal/inbox-upload"
 import {
   loadBrowserTerminal,
@@ -115,6 +116,14 @@ function apiErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "The terminal could not be opened."
 }
 
+type RecordingState = components["schemas"]["RecordingState"]
+
+/** A recording state the machine sent, or null when absent or malformed. */
+function validRecording(value: unknown): RecordingState | null {
+  const state = value as RecordingState | null | undefined
+  return state && typeof state.id === "string" && state.id.startsWith("rec_") && typeof state.started_at === "string" ? state : null
+}
+
 function checkResult(value: void | { error: string; message: string }): void {
   if (value && typeof value === "object" && "error" in value) throw new Error(value.message)
 }
@@ -174,6 +183,8 @@ export function useTerminalConnection({
   const [limit, setLimit] = useState<ApiError | null>(null)
   // Who is attached, pushed by the host (newer hosts only); null until the first such event.
   const [participants, setParticipants] = useState<HostParticipant[] | null>(null)
+  // The session's live recording (shared/recording State): from the attach, then every "recording" event.
+  const [recording, setRecording] = useState<RecordingState | null>(null)
   const [filePasteProgress, setFilePasteProgress] = useState<FilePasteProgress | null>(null)
   const [filePasteNotice, setFilePasteNotice] = useState("")
   const [fileDragOver, setFileDragOver] = useState(false)
@@ -723,6 +734,8 @@ export function useTerminalConnection({
         const payload = event.payload as { event?: string; session_id?: string; participants?: HostParticipant[] }
         if (payload?.event === "participants" && payload.session_id === sessionRef.current.id && Array.isArray(payload.participants))
           setParticipants(payload.participants)
+        if (payload?.event === "recording" && payload.session_id === sessionRef.current.id)
+          setRecording(validRecording((payload as { recording?: unknown }).recording))
         return
       }
       if (event.type === "probe") probeRef.current?.answered(event.request_id)
@@ -783,6 +796,7 @@ export function useTerminalConnection({
           apiRef.current?.leave(connectionID)
           return
         }
+        setRecording(validRecording(event.recording))
         const resync = attachedConnectionRef.current === connectionID
         if (resync) setResyncs((count) => count + 1)
         attachedConnectionRef.current = connectionID
@@ -1032,6 +1046,17 @@ export function useTerminalConnection({
 
   const focus = useCallback(() => terminalRef.current?.element.querySelector("textarea")?.focus(), [])
 
+  /** Starts or stops recording this session; resolves with a refusal code, or nothing when the machine agreed. */
+  const controlRecording = useCallback(async (action: "record-start" | "record-stop"): Promise<string | undefined> => {
+    const browser = apiRef.current
+    if (!browser || !connectionIDRef.current) return "connection_closed"
+    const reply = await browser.recordingControl(connectionIDRef.current, action).catch(() => ({ error: "recording_unavailable", result: undefined }))
+    if (reply.error) return reply.error
+    // The "recording" event follows for every attached client; start answers the state at once.
+    if (action === "record-start") setRecording(validRecording((reply.result as { recording?: unknown })?.recording))
+    else setRecording(null)
+  }, [])
+
   return {
     phase,
     role,
@@ -1045,6 +1070,8 @@ export function useTerminalConnection({
     title,
     limit,
     participants,
+    recording,
+    controlRecording,
     reconnect,
     fitToWindow,
     focus,

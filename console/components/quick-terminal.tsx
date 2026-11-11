@@ -17,7 +17,7 @@ import { closeTerminal, terminalQuery } from "@/lib/terminal/queries"
 import { useTerminalConnection, type TerminalSession } from "@/lib/terminal/use-terminal-connection"
 import { useTerminalTheme } from "@/lib/terminal/use-terminal-theme"
 import { canHostTerminal, useStartShell } from "@/components/terminal/new-terminal"
-import { TerminalSurface } from "@/components/terminal/terminal-surface"
+import { RecChip, TerminalSurface } from "@/components/terminal/terminal-surface"
 import { TerminalThemeMenu } from "@/components/terminal/terminal-theme-menu"
 import { StatusDot } from "@/components/machine-status"
 import { Button } from "@/components/ui/button"
@@ -182,13 +182,16 @@ function LiveTerminal({ session }: { session: TerminalSession }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const connection = useTerminalConnection({ session, theme, hostRef })
   return (
-    <TerminalSurface
-      connection={connection}
-      hostRef={hostRef}
-      theme={theme}
-      machineName={session.target.name}
-      className="min-h-0 flex-1"
-    />
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <TerminalSurface
+        connection={connection}
+        hostRef={hostRef}
+        theme={theme}
+        machineName={session.target.name}
+        className="min-h-0 flex-1"
+      />
+      {connection.recording && <RecChip className="absolute top-2 right-3" />}
+    </div>
   )
 }
 

@@ -9,6 +9,7 @@ import {
   LaptopIcon,
   LockKeyIcon,
   PlugsIcon,
+  RecordIcon,
   ShareNetworkIcon,
   ShieldCheckIcon,
   SwapIcon,
@@ -40,6 +41,7 @@ export const sections = {
   network: { href: "/network", title: "Network", icon: ShareNetworkIcon, machineScoped: false },
   usage: { href: "/usage", title: "Usage", icon: ChartBarIcon, machineScoped: true },
   activity: { href: "/activity", title: "Activity", icon: ClockCounterClockwiseIcon, machineScoped: true },
+  recordings: { href: "/recordings", title: "Recordings", icon: RecordIcon, machineScoped: true },
   access: { href: "/access", title: "Access", icon: ShieldCheckIcon, machineScoped: false },
   apiTokens: { href: "/settings/api-tokens", title: "API tokens", icon: LockKeyIcon, machineScoped: false },
   team: { href: "/team", title: "Team", icon: UsersThreeIcon, machineScoped: false },
@@ -54,7 +56,7 @@ export const navigationGroups: { label?: string; items: Section[] }[] = [
   { items: [machinesSection] },
   { label: "Connect", items: [sections.terminals, sections.previews, sections.tunnels, sections.files] },
   { label: "Configure", items: [sections.environment, sections.config, sections.domains, sections.network] },
-  { label: "Monitor", items: [sections.usage, sections.activity] },
+  { label: "Monitor", items: [sections.usage, sections.activity, sections.recordings] },
   { label: "Workspace", items: [sections.team, sections.access, sections.apiTokens, sections.billing] },
 ]
 
@@ -69,4 +71,5 @@ export const machineTabs: { slug: string; title: string }[] = [
   { slug: "config", title: "Config sync" },
   { slug: "usage", title: "Usage" },
   { slug: "activity", title: "Activity" },
+  { slug: "recordings", title: "Recordings" },
 ]

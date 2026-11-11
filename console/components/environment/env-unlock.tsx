@@ -13,7 +13,14 @@ import { Input } from "@/components/ui/input"
  * is cleared as soon as it is submitted. The rest of the page stays visible below it. `loading`: the
  * vault is still being read; typing works, unlocking waits.
  */
-export function EnvUnlock({ loading }: { loading?: boolean }) {
+export function EnvUnlock({
+  loading,
+  title = "Variables are encrypted. Unlock to see and edit them.",
+}: {
+  loading?: boolean
+  /** What unlocking is for, on pages other than ENV. */
+  title?: string
+}) {
   const [password, setPassword] = useState("")
   const client = useQueryClient()
   const unlock = useMutation({
@@ -26,7 +33,7 @@ export function EnvUnlock({ loading }: { loading?: boolean }) {
         <div className="flex min-w-0 flex-1 items-start gap-3">
           <LockSimpleIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <div className="flex flex-col gap-0.5">
-            <span>Variables are encrypted. Unlock to see and edit them.</span>
+            <span>{title}</span>
             <span className="text-muted-foreground">Your vault password never leaves this browser.</span>
           </div>
         </div>
