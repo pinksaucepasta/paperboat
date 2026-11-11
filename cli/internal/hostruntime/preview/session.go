@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/reattach"
 	"io"
 	"net"
@@ -44,6 +45,8 @@ var (
 type LeaseTarget struct {
 	Scheme  string `json:"scheme"`
 	Address string `json:"address"`
+	// HostHeader is the Host the origin receives instead of the public host (http, https and h2c targets).
+	HostHeader string `json:"host_header,omitempty"`
 }
 
 // Lease is the in-memory, safe projection of a canonical preview lease. The
@@ -285,6 +288,7 @@ func prepareSessionConfig(config SessionConfig) (SessionConfig, error) {
 	config.OwnerSessionID = strings.TrimSpace(config.OwnerSessionID)
 	config.Target.Scheme = strings.ToLower(strings.TrimSpace(config.Target.Scheme))
 	config.Target.Address = strings.TrimSpace(config.Target.Address)
+	config.Target.HostHeader = strings.ToLower(strings.TrimSpace(config.Target.HostHeader))
 	config.IdempotencyKey = strings.TrimSpace(config.IdempotencyKey)
 	config.StopIdempotencyKey = strings.TrimSpace(config.StopIdempotencyKey)
 	if config.AccessMode == "" {
@@ -384,6 +388,9 @@ func validateLeaseTarget(target LeaseTarget) error {
 	}
 	if strings.TrimSpace(target.Address) == "" || len(target.Address) > 512 || strings.ContainsAny(target.Address, "\r\n") {
 		return fmt.Errorf("%w: target address is invalid", ErrSessionInvalid)
+	}
+	if target.HostHeader != "" && (scheme != "http" && scheme != "https" && scheme != "h2c" || !connectorprotocol.ValidOriginHostName(target.HostHeader)) {
+		return fmt.Errorf("%w: target host header is invalid", ErrSessionInvalid)
 	}
 	return nil
 }

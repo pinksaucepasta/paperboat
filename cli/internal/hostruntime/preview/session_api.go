@@ -29,7 +29,7 @@ func (c *APILeaseClient) Create(ctx context.Context, request LeaseRequest) (Leas
 		OwnerMachineID: request.OwnerMachineID,
 		OwnerSessionID: request.OwnerSessionID, OwnerSessionKind: request.OwnerSessionKind,
 		Target: api.PreviewLeaseTarget{
-			Scheme: request.Target.Scheme, Address: request.Target.Address,
+			Scheme: request.Target.Scheme, Address: request.Target.Address, HostHeader: request.Target.HostHeader,
 		},
 		AccessMode: request.AccessMode,
 		ExpiresAt:  request.UserDeadline,
@@ -84,7 +84,7 @@ func leaseFromAPI(value api.PreviewLease) Lease {
 	lease := Lease{
 		Schema: value.Schema, Kind: value.Kind, ID: value.ID, AccountID: value.AccountID, ActorID: value.ActorID,
 		OwnerMachineID: value.OwnerMachineID, OwnerSessionID: value.OwnerSessionID, OwnerSessionKind: value.OwnerSessionKind,
-		Target: LeaseTarget{Scheme: value.Target.Scheme, Address: value.Target.Address}, AccessMode: value.AccessMode,
+		Target: LeaseTarget{Scheme: value.Target.Scheme, Address: value.Target.Address, HostHeader: value.Target.HostHeader}, AccessMode: value.AccessMode,
 		Persistent: value.Persistent, Endpoint: value.Endpoint, EndpointState: value.EndpointState, DomainCount: len(value.Domains), LeaseDeadline: value.LeaseDeadline,
 		UserDeadline: value.UserDeadline, State: value.State, AllocationState: value.AllocationState,
 		EdgeState: value.EdgeState, OriginState: value.OriginState, CreatedAt: value.CreatedAt,
@@ -98,7 +98,7 @@ func leaseToAPI(value Lease) api.PreviewLease {
 	return api.PreviewLease{
 		Schema: value.Schema, Kind: value.Kind, ID: value.ID, AccountID: value.AccountID, ActorID: value.ActorID,
 		OwnerMachineID: value.OwnerMachineID, OwnerSessionID: value.OwnerSessionID, OwnerSessionKind: value.OwnerSessionKind,
-		Target: api.PreviewLeaseTarget{Scheme: value.Target.Scheme, Address: value.Target.Address}, AccessMode: value.AccessMode,
+		Target: api.PreviewLeaseTarget{Scheme: value.Target.Scheme, Address: value.Target.Address, HostHeader: value.Target.HostHeader}, AccessMode: value.AccessMode,
 		Persistent: value.Persistent, Endpoint: value.Endpoint, EndpointState: value.EndpointState, LeaseDeadline: value.LeaseDeadline,
 		UserDeadline: value.UserDeadline, State: value.State, AllocationState: value.AllocationState,
 		EdgeState: value.EdgeState, OriginState: value.OriginState, CreatedAt: value.CreatedAt,

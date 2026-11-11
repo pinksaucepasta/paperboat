@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 func validateRequestedPreviewDomains(requested []string, lease PreviewLease) error {
@@ -326,6 +328,9 @@ func validatePreviewLeaseTarget(target PreviewLeaseTarget) error {
 	}
 	if strings.TrimSpace(target.Address) == "" || len(target.Address) > 512 || strings.ContainsAny(target.Address, "\r\n") {
 		return fmt.Errorf("%w: target address is invalid", ErrPreviewLeaseInvalid)
+	}
+	if target.HostHeader != "" && (scheme != "http" && scheme != "https" && scheme != "h2c" || !connectorprotocol.ValidOriginHostName(target.HostHeader)) {
+		return fmt.Errorf("%w: target host header is invalid", ErrPreviewLeaseInvalid)
 	}
 	return nil
 }

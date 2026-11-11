@@ -20,6 +20,7 @@ pb preview <port|url|path> [flags]
       --background           transfer ownership to paperboatd and return after readiness
       --domain stringArray   attach a verified custom domain (repeatable)
   -h, --help                 help for preview
+      --host-header string   send this Host to the origin instead of the public host (http, https, h2c targets; for dev servers with a host allow-list)
       --json                 print the canonical preview resource as JSON
       --private              limit the preview to this account
       --team                 require an explicit team grant for browser access

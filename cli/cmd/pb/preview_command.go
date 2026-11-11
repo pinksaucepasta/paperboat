@@ -19,6 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	servepkg "github.com/pinksaucepasta/paperboat/internal/serve"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/spf13/cobra"
 )
 
@@ -80,6 +81,7 @@ func configureEphemeralLaunchFlags(command *cobra.Command) {
 	command.Flags().Duration("ttl", 0, "bounded preview lifetime (maximum 24h)")
 	command.Flags().Bool("background", false, "transfer ownership to paperboatd and return after readiness")
 	command.Flags().StringArray("domain", nil, "attach a verified custom domain (repeatable)")
+	command.Flags().String("host-header", "", "send this Host to the origin instead of the public host (http, https, h2c targets; for dev servers with a host allow-list)")
 	command.Flags().Bool("json", false, "print the canonical preview resource as JSON")
 }
 
@@ -102,6 +104,16 @@ func runPreviewCobra(command *cobra.Command, args []string) error {
 	target, err := parsePreviewTarget(args[0])
 	if err != nil {
 		return err
+	}
+	hostHeader, err := command.Flags().GetString("host-header")
+	if err != nil {
+		return err
+	}
+	if hostHeader != "" {
+		if target.Scheme != "http" && target.Scheme != "https" && target.Scheme != "h2c" || !connectorprotocol.ValidOriginHostName(hostHeader) {
+			return fmt.Errorf("%w: --host-header must be a bare host name (no port) and the target an http, https or h2c address", ErrPreviewInvalidTarget)
+		}
+		target.HostHeader = strings.ToLower(hostHeader)
 	}
 	ttl, err := command.Flags().GetDuration("ttl")
 	if err != nil || ttl < 0 {
