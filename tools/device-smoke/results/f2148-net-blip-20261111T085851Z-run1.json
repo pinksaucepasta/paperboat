@@ -1,0 +1,17 @@
+{
+  "check": "net-blip",
+  "target": "f2148-peer",
+  "down_seconds": 300,
+  "started_at": "2026-11-11T08:59:01.7710677Z",
+  "forced_refusal": true,
+  "status": "FAIL",
+  "terminal_after_s": null,
+  "error": "resolve API on device failed on the device (exit 255): Connection timed out during banner exchange\r\nConnection to UNKNOWN port 65535 timed out",
+  "run": 1,
+  "exit_code": 1,
+  "build_commit": "9da1c23ce8b15d8cad06292c60f339ac5b4ba571",
+  "version": "dev-9da1c23ce",
+  "windows_runner": "windows-runner.example.test",
+  "windows_machine_id": "machine_4e51a938-dfe6-4a89-a318-1b1f2f148ada",
+  "linux_machine_id": "machine_7a2d1f08-2a26-4219-867c-5acdf8dab492"
+}

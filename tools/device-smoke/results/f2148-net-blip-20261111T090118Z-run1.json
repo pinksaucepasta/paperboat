@@ -1,0 +1,59 @@
+{
+  "check": "net-blip",
+  "target": "f2148-peer",
+  "down_seconds": 300,
+  "started_at": "2026-11-11T09:01:27.8479709Z",
+  "forced_refusal": true,
+  "status": "PASS",
+  "refusal_rotation": {
+    "config_generation_before_rotation": 26,
+    "custody_updated": true,
+    "endpoint_id": "session_404b63b4-419b-416b-afa3-2a1746a5f035",
+    "floor_after_identity_restore": 28,
+    "floor_after_rotation": 27,
+    "floor_evidence": "registration trigger: floor becomes prior config generation + 1; pb.exe remains blocked",
+    "floor_rollback": false,
+    "key_generation_before": 1,
+    "key_generation_restored": 3,
+    "key_generation_rotated": 2,
+    "original_disco_restored": true
+  },
+  "doctor_while_down": "unhealthy",
+  "exec_while_down": false,
+  "refused_fence_entries": 1,
+  "exec_after_s": 9.4,
+  "terminal_after_s": 20.6,
+  "refused_fence_clears": 1,
+  "refusal_fence_events": [
+    {
+      "at": "2026-11-11T09:06:48.3830104Z",
+      "source_file": "regional_recovery.go",
+      "source_line": "744",
+      "severity": "warning"
+    },
+    {
+      "at": "2026-11-11T09:06:59.0155189Z",
+      "source_file": "regional_recovery.go",
+      "source_line": "744",
+      "severity": "warning"
+    },
+    {
+      "at": "2026-11-11T09:07:08.5937313Z",
+      "source_file": "regional_recovery.go",
+      "source_line": "755",
+      "severity": "info"
+    }
+  ],
+  "recovered_registration": {
+    "config_generation": 38,
+    "endpoint_id": "session_404b63b4-419b-416b-afa3-2a1746a5f035",
+    "key_generation": 3
+  },
+  "run": 1,
+  "exit_code": 0,
+  "build_commit": "9da1c23ce8b15d8cad06292c60f339ac5b4ba571",
+  "version": "dev-9da1c23ce",
+  "windows_runner": "windows-runner.example.test",
+  "windows_machine_id": "machine_4e51a938-dfe6-4a89-a318-1b1f2f148ada",
+  "linux_machine_id": "machine_7a2d1f08-2a26-4219-867c-5acdf8dab492"
+}

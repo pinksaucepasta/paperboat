@@ -1,0 +1,71 @@
+{
+  "check": "net-blip",
+  "target": "f2148-peer",
+  "down_seconds": 300,
+  "started_at": "2026-11-11T09:29:01.6438650Z",
+  "forced_refusal": true,
+  "status": "PASS",
+  "refusal_rotation": {
+    "config_generation_before_rotation": 109,
+    "custody_updated": true,
+    "endpoint_id": "session_404b63b4-419b-416b-afa3-2a1746a5f035",
+    "floor_after_identity_restore": 111,
+    "floor_after_rotation": 110,
+    "floor_evidence": "registration trigger: floor becomes prior config generation + 1; pb.exe remains blocked",
+    "floor_rollback": false,
+    "key_generation_before": 9,
+    "key_generation_restored": 11,
+    "key_generation_rotated": 10,
+    "original_disco_restored": true
+  },
+  "doctor_while_down": "unhealthy",
+  "exec_while_down": false,
+  "refused_fence_entries": 1,
+  "exec_after_s": 9.1,
+  "terminal_after_s": 18.7,
+  "refused_fence_clears": 2,
+  "refusal_fence_events": [
+    {
+      "at": "2026-11-11T09:34:26.8967664Z",
+      "source_file": "regional_recovery.go",
+      "source_line": "744",
+      "severity": "warning"
+    },
+    {
+      "at": "2026-11-11T09:34:32.5644725Z",
+      "source_file": "regional_recovery.go",
+      "source_line": "744",
+      "severity": "warning"
+    },
+    {
+      "at": "2026-11-11T09:34:39.7871911Z",
+      "source_file": "regional_recovery.go",
+      "source_line": "755",
+      "severity": "info"
+    },
+    {
+      "at": "2026-11-11T09:34:42.9322337Z",
+      "source_file": "regional_recovery.go",
+      "source_line": "744",
+      "severity": "warning"
+    },
+    {
+      "at": "2026-11-11T09:34:48.0437861Z",
+      "source_file": "regional_recovery.go",
+      "source_line": "755",
+      "severity": "info"
+    }
+  ],
+  "recovered_registration": {
+    "config_generation": 120,
+    "endpoint_id": "session_404b63b4-419b-416b-afa3-2a1746a5f035",
+    "key_generation": 11
+  },
+  "run": 5,
+  "exit_code": 0,
+  "build_commit": "9da1c23ce8b15d8cad06292c60f339ac5b4ba571",
+  "version": "dev-9da1c23ce",
+  "windows_runner": "windows-runner.example.test",
+  "windows_machine_id": "machine_4e51a938-dfe6-4a89-a318-1b1f2f148ada",
+  "linux_machine_id": "machine_7a2d1f08-2a26-4219-867c-5acdf8dab492"
+}
