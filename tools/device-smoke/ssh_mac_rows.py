@@ -425,20 +425,134 @@ def audit():
 OFFLINE_OUTAGE_SECS = 150  # longer than the signed network's 2 min refresh hint (tailnet/authority.go OutOfSync)
 
 
+def discovery_hostnames(discovery):
+    """Every server-owned hostname in live discovery (GET /v1/client-configuration: cli/internal/api
+    ClientConfiguration, server/.../client_configuration_handlers.go): URL origins plus the tunnel, preview
+    and runtime base domains. The local-access alias domain is peer DNS, never blocked, so the direct peer
+    path stays open."""
+    try:
+        from urllib.parse import urlparse
+    except ImportError:
+        return []
+    data = discovery.get('data', discovery) if isinstance(discovery, dict) else {}
+    if not isinstance(data, dict):
+        return []
+    hosts = set()
+
+    def add_url(value):
+        if not isinstance(value, str):
+            return
+        try:
+            host = urlparse(value).hostname
+        except ValueError:
+            return
+        if host:
+            hosts.add(host.lower().rstrip('.'))
+
+    for key in ('issuer', 'installer_base_url', 'console_url', 'cli_verification_url', 'machines_url'):
+        add_url(data.get(key))
+    for region in data.get('control_regions') or []:
+        if isinstance(region, dict):
+            add_url(region.get('api_origin'))
+    for key in ('preview_base_domain', 'tunnel_base_domain', 'runtime_base_domain'):
+        value = data.get(key)
+        if isinstance(value, str) and value and '/' not in value and ' ' not in value:
+            hosts.add(value.lower().rstrip('.'))
+    return sorted(hosts)
+
+
+def target_resolve(hosts):
+    """A+AAAA for every hostname on the TARGET, unioned with the client's view (either DNS view alone may miss
+    an address the host still answers on: the macOS failure kept answering through an address only the target
+    saw). Returns (pairs, addrs): pairs are 'host|ip' resolved on the TARGET (what the verify checks), addrs
+    the flat union for the block, v4 first. Only literal IPs come back; the report sees counts only, never
+    the addresses."""
+    import ipaddress
+    quoted = ' '.join(shlex.quote(h) for h in hosts)
+    if WIN:
+        tout = WIN.device.ps('resolve Paperboat addresses',
+                             'foreach ($h in $req.hosts) { try { foreach ($a in [Net.Dns]::GetHostAddresses($h))'
+                             " { $h + '|' + $a.IPAddressToString } } catch {} }", hosts=list(hosts))[1]
+    else:
+        tout = mac('for h in %s; do dscacheutil -q host -a name "$h" 2>/dev/null | '
+                   "awk -v H=\"$h\" '/^(ip|ipv6)_address:/ {print H\"|\"$2}'; done" % quoted)
+    cout = cl('for h in %s; do getent ahosts "$h" 2>/dev/null | '
+              "awk '{print $1}'; done" % quoted)
+    pairs, seen, addrs = [], set(), set()
+    for line in tout.splitlines():
+        host, _, token = line.strip().rpartition('|')
+        if not host or not token:
+            continue
+        try:
+            ip = str(ipaddress.ip_address(token.strip()))
+        except ValueError:
+            continue
+        if (host, ip) not in seen:
+            seen.add((host, ip))
+            pairs.append(host + '|' + ip)
+        addrs.add(ip)
+    for token in cout.split():
+        try:
+            addrs.add(str(ipaddress.ip_address(token.strip())))
+        except ValueError:
+            pass
+    return pairs, sorted(addrs, key=lambda a: (ipaddress.ip_address(a).version, a))
+
+
+def target_verify_block(pairs):
+    """Every (hostname, address) pair the TARGET resolves must fail to connect from the TARGET before the
+    outage window. The SNI pins each check to its hostname: these frontends abort nameless TLS, so an IP-only
+    probe cannot tell blocked from open, while a TCP connect can (a block fails it at once; a timeout is the
+    same verdict). Returns (connected, total); the report prints counts only, never the addresses. None when
+    the target could not run the check at all."""
+    if WIN:
+        out = WIN.device.ps('verify the control-plane block',
+                            '$bad = 0; $total = 0; foreach ($p in $req.pairs) { '
+                            '$h, $a = $p.Split("|"); $total++; '
+                            '& curl.exe -s -o NUL -m 6 --connect-timeout 5 -k '
+                            '--resolve "${h}:443:${a}" "https://${h}/" >$null 2>&1; '
+                            'if ($LASTEXITCODE -eq 0) { $bad++ } }; '
+                            '"VERIFY bad=$bad total=$total"', pairs=list(pairs))[1]
+    else:
+        quoted = ' '.join(shlex.quote(p) for p in pairs)
+        out = mac('bad=0; total=0; for p in %s; do h=${p%%|*}; a=${p##*|}; total=$((total+1)); '
+                  'if curl -s -o /dev/null -m 6 --connect-timeout 5 -k '
+                  '--resolve "$h:443:$a" "https://$h/" 2>/dev/null; then bad=$((bad+1)); fi; done; '
+                  'echo "VERIFY bad=$bad total=$total"' % quoted)
+    m = re.search(r'VERIFY bad=(\d+) total=(\d+)', out)
+    if not m:
+        return None
+    return int(m[1]), int(m[2])
+
+
 def target_block_control_plane(addrs, seconds=OFFLINE_OUTAGE_SECS + 90):
     """Block the target's control plane until target_unblock_control_plane() or `seconds` on the device.
 
     Windows: a firewall rule dropping all outbound to those addresses (ssh_windows_target.Target.block,
     the same call outage() uses); the rule is address-scoped, so the controller's SSH stays up. macOS:
-    the same pf anchor rule outage() uses. The timed undo is armed before the block lands, so the
-    outage cannot survive this controller on any exit path. Small target-specific functions so the
-    macOS target can reuse offline_audit() later."""
+    the same pf anchor rule outage() uses, one address-scoped rule per family so the IPv4 and IPv6
+    destinations of the list are blocked and nothing else (the client's direct peer path stays open). The
+    timed undo is armed before the block lands, so the outage cannot survive this controller on any exit
+    path. Small target-specific functions so the macOS target can reuse offline_audit() later."""
     if WIN:
         return WIN.block(addrs, seconds=seconds)
-    rule = 'block drop out quick proto { tcp udp } to { %s }' % ' '.join(addrs)
+    import ipaddress
+    v4, v6 = [], []
+    for addr in addrs:
+        try:
+            (v4 if ipaddress.ip_address(addr).version == 4 else v6).append(addr)
+        except ValueError:
+            pass
+    rules = []
+    if v4:
+        rules.append('block drop out quick proto { tcp udp } from any to { %s }' % ' '.join(v4))
+    if v6:
+        rules.append('block drop out quick proto { tcp udp } from any to { %s }' % ' '.join(v6))
+    if not rules:
+        return None
     msudo('sleep %d; /sbin/pfctl -a %s -F all' % (seconds, ANCHOR), bg=True)  # root failsafe on the Mac
     out = msudo('printf "%%s\\n" %s | /sbin/pfctl -a %s -f - 2>&1; /sbin/pfctl -E 2>&1; /sbin/pfctl -F states 2>&1'
-                % (shlex.quote(rule), ANCHOR))
+                % (' '.join(shlex.quote(rule) for rule in rules), ANCHOR))
     t = re.search(r'Token : (\d+)', out)
     return t[1] if t else None
 
@@ -455,11 +569,14 @@ def target_unblock_control_plane(token):
 def offline_audit():
     """F5-12 offline half (twin of tools/device-smoke/ssh_offline_audit.sh): the host records origin 'offline'
     for a managed SSH session only when the client sent the offline header (pb ssh always does) and its
-    signed network config is past its refresh hint (OutOfSync, 2 min). The control plane is therefore
-    blocked on the TARGET for OFFLINE_OUTAGE_SECS, one real `pb ssh <alias> -- echo <marker>` runs in that
-    window, the block is lifted, and the host's upload (30 s cadence) must file machine.access_started and
-    machine.access_ended with origin offline, the end naming the start's session id, outcome closed and
-    bytes_in/out > 0. The client is left alone: only the host's OutOfSync decides the origin."""
+    signed network config is past its refresh hint (OutOfSync, 2 min). Every Paperboat address (the API, the
+    tunnel edges, the relays, IPv4 and IPv6: the target's own resolution of every server-owned hostname in
+    live discovery, unioned with the client's) is therefore blocked on the TARGET, one real
+    `pb ssh <alias> -- echo <marker>` runs past the hint, the block is lifted, and the host's upload (30 s
+    cadence) must file machine.access_started and machine.access_ended with origin offline, the end naming
+    the start's session id, outcome closed and bytes_in/out > 0. A verify step right after the block lands
+    (before the outage window) requires every address to time out from the target. The client is left alone:
+    only the host's OutOfSync decides the origin."""
     row = 'F5-12 offline-audit'
     if not check_warm(row):
         return
@@ -470,9 +587,16 @@ def offline_audit():
     if not mid:
         return report(row, 'SKIP', 'could not read the target machine id from `pb machine list --json` on the client')
     api = cl(r"""sed -n 's/.*"server_url": *"https:\/\/\([^"\/]*\).*/\1/p' ~/.config/paperboat/config.json""").strip()
-    addrs = sorted(set(cl("getent ahosts %s | awk '{print $1}'" % shlex.quote(api)).split())) if api else []
+    if not api:
+        return report(row, 'FAIL', 'could not read the control-plane hostname from the client')
+    try:
+        discovery = json.loads(cl('curl -fsS -m 10 https://%s/v1/client-configuration 2>/dev/null' % api))
+    except ValueError:
+        discovery = {}
+    hosts = sorted(set([api] + discovery_hostnames(discovery)))
+    pairs, addrs = target_resolve(hosts)
     if not addrs:
-        return report(row, 'FAIL', 'could not resolve the control plane address on the client')
+        return report(row, 'FAIL', 'could not resolve any Paperboat address on the target or the client')
     began = time.time()
     base_out = cl('~/.local/bin/pb ssh %s -- echo ssh-offline-baseline-%d </dev/null 2>&1' % (shlex.quote(ARGS.alias), began), 300)
     if 'ssh-offline-baseline-%d' % began not in base_out:
@@ -481,6 +605,14 @@ def offline_audit():
     token, blackholed_at, off_out = None, None, ''
     try:
         token = target_block_control_plane(addrs)
+        # The block must already hold before the outage window: every address times out from the target.
+        # Only a completed connect fails the check (counts only, never the addresses).
+        verified = target_verify_block(pairs)
+        if verified is None or verified[1] == 0:
+            return report(row, 'FAIL', 'could not verify the control-plane block from the target')
+        bad, total = verified
+        if bad:
+            return report(row, 'FAIL', 'control-plane verify failed: %d of %d addresses still connect' % (bad, total))
         blackholed_at = time.time()
         # While still blocked: the client always sends the offline header, the host records origin offline
         # once it is past its refresh hint (OutOfSync, 2 min). Dial from early in the outage and accept the first
@@ -529,7 +661,7 @@ def offline_audit():
     for s in starts:
         ok = ok and s[6].startswith('session_')
     wall = int(reconnected_at - blackholed_at) if blackholed_at else OFFLINE_OUTAGE_SECS
-    detail = 'outage %ss ' % wall + ' '.join('%s:%s:%s:%s:%s' % (r[0][8:], r[2][:8], r[3], r[4], r[5]) for r in off)
+    detail = 'outage %ss (%d addresses blocked) ' % (wall, len(addrs)) + ' '.join('%s:%s:%s:%s:%s' % (r[0][8:], r[2][:8], r[3], r[4], r[5]) for r in off)
     report(row, 'PASS' if ok else 'FAIL', detail[:600])
 
 
