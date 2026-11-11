@@ -10,6 +10,7 @@ import { fileKeys, sendToMachine, shareInboxFile, type InboxFile } from "@/lib/f
 import { formatBytes } from "@/lib/format"
 import { opensInBrowser } from "@/lib/tunnels"
 import { cn } from "@/lib/utils"
+import { canHostTerminal } from "@/components/terminal/new-terminal"
 import { Starting } from "@/components/tunnels/new-preview"
 import { Choice } from "@/components/tunnels/share-file"
 import { Badge } from "@/components/ui/badge"
@@ -141,7 +142,8 @@ export function SendFilesDialog({
   const queryClient = useQueryClient()
   const machines = useMachines()
   const workspace = useWorkspace()
-  const usable = (machines.data ?? []).filter(canReceive)
+  // The upload rides a terminal connection, so a machine must host terminals as well as receive files.
+  const usable = (machines.data ?? []).filter((entry) => canReceive(entry) && canHostTerminal(entry))
   // Until the person changes it, the destination is the page's machine, else the first usable one.
   const [picked, setPicked] = useState<string[]>()
   const fallback = usable.find((entry) => entry.id === machine?.id) ?? usable[0]
