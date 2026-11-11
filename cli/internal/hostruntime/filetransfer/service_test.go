@@ -1356,3 +1356,33 @@ func TestSpoolPublishedCollisionCopyIsRemovedAtExpiry(t *testing.T) {
 		}
 	}
 }
+
+// A Windows receiver admits only names Windows can store: a batch with one it cannot is refused whole with invalid_path
+// before any byte moves, instead of failing at publication (the sender used to wait for an Inbox that could never be written).
+func TestReceiverRefusesNamesItsOwnPlatformCannotStore(t *testing.T) {
+	data := []byte("x")
+	for _, test := range []struct {
+		platform, name string
+		refused        bool
+	}{{"windows", `q"u*?.txt`, true}, {"windows", "a:b.txt", true}, {"windows", "trail.", true}, {"windows", "sp ", true}, {"windows", "CON.txt", true},
+		{"windows", "ok.txt", false}, {"linux", "a:b.txt", false}, {"linux", "trail.", false}, {"darwin", "CON.txt", false}, {"linux", "a/b", true}} {
+		root := t.TempDir()
+		durable, err := store.Open(context.Background(), store.Config{Root: filepath.Join(root, "state")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = durable.Close() })
+		service, err := New(Config{Root: filepath.Join(root, "transfers"), Platform: test.platform, LocalMachineID: "machine_local", Store: durable})
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := requestFor(data)
+		request.BatchID = "fb_" + digest([]byte(test.platform + test.name))[:12]
+		request.Files[0].Basename = test.name
+		_, err = service.Create(context.Background(), request)
+		var failure *Error
+		if test.refused != (errors.As(err, &failure) && failure.Code == InvalidPath) || !test.refused && err != nil {
+			t.Errorf("%s receiver, name %q: err=%v, want refused=%v", test.platform, test.name, err, test.refused)
+		}
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/diskspace"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/internal/transfername"
 )
 
 func New(config Config) (*Service, error) {
@@ -31,6 +33,9 @@ func New(config Config) (*Service, error) {
 	}
 	if config.Policy == nil {
 		config.Policy = NewPolicyStore(DefaultPolicy)
+	}
+	if config.Platform == "" {
+		config.Platform = runtime.GOOS
 	}
 	if config.EnsurePublishRoot == nil {
 		config.EnsurePublishRoot = privateDirectory
@@ -180,8 +185,13 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) ([]store.Fi
 	case request.MaxBytes > 0:
 		maxFile, maxBatch, spool = request.MaxBytes, request.MaxBytes, max(spool, request.MaxBytes)
 	}
+	// Only the receiver knows which names it can store; a relayed batch is checked for the destination by the sender.
+	platform := "other"
+	if request.DestinationMachineID == s.config.LocalMachineID {
+		platform = s.config.Platform
+	}
 	for i, file := range request.Files {
-		if !validBasename(file.Basename) {
+		if !validBasename(platform, file.Basename) {
 			return nil, &Error{Code: InvalidPath}
 		}
 		if file.Size < 0 || file.Size > maxFile {
@@ -630,8 +640,9 @@ func validDigest(value string) bool {
 	decoded, err := hex.DecodeString(value)
 	return err == nil && len(decoded) == 32
 }
-func validBasename(value string) bool {
-	return value != "" && utf8.ValidString(value) && len(value) <= 255 && value == filepath.Base(value) && value != "." && value != ".." && !strings.ContainsAny(value, "/\\\x00")
+func validBasename(platform, value string) bool {
+	return value != "" && utf8.ValidString(value) && len(value) <= 255 && value == filepath.Base(value) && value != "." && value != ".." &&
+		!strings.ContainsAny(value, "/\\\x00") && transfername.Refusal(platform, value) == ""
 }
 
 type contextReader struct {

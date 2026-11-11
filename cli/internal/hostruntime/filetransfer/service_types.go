@@ -106,8 +106,10 @@ type Config struct {
 	// EnsurePublishRoot creates and checks a directory files are published into (the Inbox, or a receipt's
 	// directory): the runtime passes inbox.EnsurePath, which on Windows also applies and checks the protected
 	// owner-only DACL. Default: an owner-only (0700) directory.
-	EnsurePublishRoot        func(string) error
-	LocalMachineID           string
+	EnsurePublishRoot func(string) error
+	LocalMachineID    string
+	// Platform is the OS of this machine ("windows", "darwin", "linux"): the names it can store. Default: runtime.GOOS.
+	Platform                 string
 	Store                    *store.Store
 	Now                      func() time.Time
 	Random                   io.Reader

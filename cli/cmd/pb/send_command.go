@@ -142,6 +142,9 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 		return missingSendSource(err, preparedPaths)
 	}
 	defer prepared.Close()
+	if err := receiverNameRefusal(destination.Alias, destination.Platform, prepared.Sources); err != nil {
+		return err
+	}
 	batchID, err := filetransfer.NewBatchID()
 	if err != nil {
 		return err
