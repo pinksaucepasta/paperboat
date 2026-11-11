@@ -957,7 +957,7 @@ func isWindowsSystemAccount(value string) bool {
 
 func waitWindowsServiceDeletion(ctx context.Context, name string) error {
 	if ctx == nil {
-		ctx = context.Background()
+		return ErrLifecycleInvalid
 	}
 	return pollWindowsServiceDeletion(ctx, windowsServiceDeleteTimeout, windowsServiceDeleteDelay, func() (resultErr error) {
 		manager, err := mgr.Connect()
@@ -975,7 +975,7 @@ func waitWindowsServiceDeletion(ctx context.Context, name string) error {
 
 func pollWindowsServiceDeletion(ctx context.Context, timeout, delay time.Duration, probe func() error) error {
 	if ctx == nil {
-		ctx = context.Background()
+		return ErrLifecycleInvalid
 	}
 	if timeout <= 0 || delay <= 0 || probe == nil {
 		return ErrInvalidDefinition
@@ -1018,7 +1018,7 @@ func exactWindowsPath(left, right string) bool {
 
 func stopWindowsService(ctx context.Context, service *mgr.Service) error {
 	if ctx == nil {
-		ctx = context.Background()
+		return ErrLifecycleInvalid
 	}
 	operationCtx, cancel := context.WithTimeout(ctx, windowsServiceOperationTimeout)
 	defer cancel()
@@ -1053,7 +1053,7 @@ func stopWindowsService(ctx context.Context, service *mgr.Service) error {
 
 func waitWindowsService(ctx context.Context, service *mgr.Service, want svc.State) error {
 	if ctx == nil {
-		ctx = context.Background()
+		return ErrLifecycleInvalid
 	}
 	operationCtx, cancel := context.WithTimeout(ctx, windowsServiceOperationTimeout)
 	defer cancel()
