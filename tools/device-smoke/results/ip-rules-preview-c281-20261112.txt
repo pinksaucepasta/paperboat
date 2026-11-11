@@ -1,0 +1,61 @@
+ip_rules_rows.py --kind preview on L at the committed 15 s bound: machine small-t1 (pbvm4, dev-a31bef562), observers A = oracle, B = anvit (two different client addresses at the edge); prod server+edge. Longest PUT-to-answer-change: 3.3 s.
+2026-11-11T22:47:29Z
+{
+ "check": "ip-rules-rows",
+ "row": "C281",
+ "kind": "preview",
+ "status": "PASS",
+ "bound_seconds": 15,
+ "seconds_until_each_answer_changed": [
+  0.3,
+  0.2,
+  0.1,
+  0.3,
+  0.1,
+  0.2,
+  0.1,
+  0.0,
+  0.2,
+  3.3,
+  0.1,
+  0.2,
+  2.2
+ ],
+ "steps": [
+  {
+   "step": "baseline: both source addresses served, new resource has no rules",
+   "status": "PASS",
+   "seconds": 2.8
+  },
+  {
+   "step": "deny one address: it gets 403, the other 200",
+   "status": "PASS",
+   "seconds": 5.7
+  },
+  {
+   "step": "--allow replaces only the allow list",
+   "status": "PASS",
+   "seconds": 5.1
+  },
+  {
+   "step": "deny beats allow",
+   "status": "PASS",
+   "seconds": 5.6
+  },
+  {
+   "step": "allow list alone admits only its addresses (after --clear)",
+   "status": "PASS",
+   "seconds": 11.1
+  },
+  {
+   "step": "--allow /0 and a malformed address are refused, rules unchanged",
+   "status": "PASS",
+   "seconds": 6.6
+  },
+  {
+   "step": "a CIDR form, then --clear serves everyone",
+   "status": "PASS",
+   "seconds": 12.6
+  }
+ ]
+}

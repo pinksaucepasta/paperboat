@@ -1,0 +1,6 @@
+team_two_account.py C282-C285 on W: owner = pb.exe on winpool-3 (dev-36f2a7735, dev account, owner of team paperboat-smoke-paid), member = second test account machine laners-m1 (machine_d6e7a4c7-d30a-40a5-b40a-c4a305838fe0, pbvm4)
+2026-11-11T21:51:51Z
+PASS  C282 team machine approval on/off, refusals  72.1s  
+PASS  C285 team machine requests lists who asked   49.0s  
+PASS  C283 team machine approve, refusals          63.8s  
+PASS  C284 team machine decline, refusals          83.9s  
