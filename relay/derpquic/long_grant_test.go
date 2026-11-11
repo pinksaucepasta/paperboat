@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"testing"
 	"time"
 
@@ -67,10 +68,10 @@ func TestFullFenceTableEvictsOnlyIdleAdmissionFences(t *testing.T) {
 	s.mu.Lock()
 	for i := range MaxConnections {
 		id := fmt.Sprintf("account\x00endpoint-%d", i)
-		s.fences[id] = &grantFence{Grant{AccountID: "account", EndpointID: fmt.Sprintf("endpoint-%d", i), Generation: 1, ExpiresAt: soon + int64(i)}}
+		s.fences[id] = &grantFence{Grant{RelayGrant: peernetwork.RelayGrant{AccountID: "account", EndpointID: fmt.Sprintf("endpoint-%d", i), Generation: 1, ExpiresAt: soon + int64(i)}}}
 	}
 	revoked := "account\x00endpoint-0"
-	s.fences[revoked] = &grantFence{Grant{Generation: 5, ExpiresAt: soon}} // a revocation: no signed grant
+	s.fences[revoked] = &grantFence{Grant{RelayGrant: peernetwork.RelayGrant{Generation: 5, ExpiresAt: soon}}} // a revocation: no signed grant
 	if !s.evictIdleFenceLocked() {
 		t.Fatal("a full table with idle admission fences made no room")
 	}
@@ -81,7 +82,7 @@ func TestFullFenceTableEvictsOnlyIdleAdmissionFences(t *testing.T) {
 		t.Fatal("did not drop the admission fence that ends soonest")
 	}
 	for id, f := range s.fences {
-		s.fences[id] = &grantFence{Grant{Generation: 2, ExpiresAt: f.ExpiresAt}}
+		s.fences[id] = &grantFence{Grant{RelayGrant: peernetwork.RelayGrant{Generation: 2, ExpiresAt: f.ExpiresAt}}}
 	}
 	if s.evictIdleFenceLocked() {
 		t.Fatal("dropped a revocation fence")

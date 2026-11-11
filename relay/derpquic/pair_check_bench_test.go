@@ -2,6 +2,7 @@ package derpquic
 
 import (
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"testing"
 )
 
@@ -12,7 +13,7 @@ func BenchmarkPairCheckWithMergedPeers(b *testing.B) {
 		return []Scope{{ResourceKind: "machine_access", ResourceID: "grant", ResourceGeneration: 1, Capability: "terminal", Direction: direction, Port: 443, ExpiresAt: 1 << 40}}
 	}
 	grant := func(self, other string, direction string) Grant {
-		g := Grant{AccountID: "account", WireGuardPublicKey: self}
+		g := Grant{RelayGrant: peernetwork.RelayGrant{AccountID: "account", WireGuardPublicKey: self}}
 		for i := range MaxMergedPeers - 1 {
 			g.Peers = append(g.Peers, Peer{WireGuardPublicKey: fmt.Sprintf("peer-%04d", i), Scopes: scope(direction)})
 		}

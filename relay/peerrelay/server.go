@@ -91,7 +91,7 @@ type Stats struct {
 }
 
 func New(config Config) (*Server, error) {
-	if !config.Service.Valid() || config.DiscoPrivate.IsZero() || derpquic.DiscoKeyString(config.DiscoPrivate.Public()) != config.Service.DiscoPublicKey || config.Port == 0 || len(config.Addresses) == 0 || len(config.Addresses) > 4 {
+	if !derpquic.ValidDescriptor(config.Service) || config.DiscoPrivate.IsZero() || derpquic.DiscoKeyString(config.DiscoPrivate.Public()) != config.Service.DiscoPublicKey || config.Port == 0 || len(config.Addresses) == 0 || len(config.Addresses) > 4 {
 		return nil, derpquic.ErrAdmission
 	}
 	for _, a := range config.Addresses {

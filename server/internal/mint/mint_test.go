@@ -1,12 +1,13 @@
 package mint
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"net/http/httptest"
 	"slices"
 	"strings"
@@ -58,7 +59,9 @@ func TestSignRelayGrantPublishesFrozenTypeAndRejectsLongLifetime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claims := map[string]any{"version": 1, "iss": "https://api.example.test", "aud": "paperboat-relay", "iat": int64(1_700_000_000), "exp": int64(1_700_000_060), "generation": int64(4), "account_id": "account_1", "endpoint_id": "endpoint_1", "wireguard_public_key": strings.Repeat("A", 43), "quic_certificate_fingerprint": strings.Repeat("0", 64), "node_id": "node_1", "node_generation": int64(3), "process_epoch": "epoch_1", "peers": []any{}}
+	claims := peernetwork.RelayGrant{Version: 1, Issuer: "https://api.example.test", Audience: "paperboat-relay", IssuedAt: 1_700_000_000, ExpiresAt: 1_700_000_060, Generation: 4,
+		AccountID: "account_1", EndpointID: "endpoint_1", WireGuardPublicKey: strings.Repeat("A", 43), CertificateFingerprint: strings.Repeat("0", 64), NodeID: "node_1", NodeGeneration: 3,
+		ProcessEpoch: "epoch_1", Peers: []peernetwork.RelayPeer{}}
 	token, err := provider.SignRelayGrant(claims)
 	if err != nil {
 		t.Fatal(err)
@@ -69,22 +72,26 @@ func TestSignRelayGrantPublishesFrozenTypeAndRejectsLongLifetime(t *testing.T) {
 	if header["alg"] != "EdDSA" || header["typ"] != RelayGrantType || header["kid"] != "relay-key" {
 		t.Fatalf("header = %#v", header)
 	}
-	claims["exp"] = int64(1_700_000_000) + int64(relaylimits.MaxGrantLifetime/time.Second) + 1
+	claims.ExpiresAt = 1_700_000_000 + int64(relaylimits.MaxGrantLifetime/time.Second) + 1
 	if _, err := provider.SignRelayGrant(claims); err == nil {
 		t.Fatal("accepted relay grant longer than relaylimits.MaxGrantLifetime")
 	}
-	claims["exp"] = int64(1_700_000_060)
-	claims["peer_relay"] = map[string]any{"wireguard_public_key": strings.Repeat("A", 43), "disco_public_key": strings.Repeat("A", 43), "virtual_address": "fd7a:115c:a1e0::9"}
+	claims.ExpiresAt = 1_700_000_060
+	claims.PeerRelay = &peernetwork.RelayDescriptor{WireGuardPublicKey: strings.Repeat("A", 43), DiscoPublicKey: strings.Repeat("A", 43), VirtualAddress: "fd7a:115c:a1e0::9"}
 	if _, err := provider.SignRelayGrant(claims); err == nil {
 		t.Fatal("accepted peer relay descriptor without endpoint discovery identity")
 	}
-	claims["disco_public_key"] = strings.Repeat("A", 43)
+	claims.DiscoPublicKey = strings.Repeat("A", 43)
 	if _, err := provider.SignRelayGrant(claims); err != nil {
 		t.Fatalf("valid peer relay descriptor: %v", err)
 	}
-	scope := map[string]any{"resource_kind": "machine_access", "resource_id": "access_1", "resource_generation": 1, "capability": "file_transfer", "direction": "dial", "port": 443, "expires_at": int64(1_700_000_005)}
-	claims["peers"] = []any{map[string]any{"wireguard_public_key": strings.Repeat("A", 43), "disco_public_key": strings.Repeat("A", 43), "scopes": []any{scope}}}
-	token, err = provider.SignRelayGrant(claims)
+	scope := peernetwork.Scope{ResourceKind: "machine_access", ResourceID: "access_1", ResourceGeneration: 1, Capability: "file_transfer", Direction: "dial", Port: 443, ExpiresAt: 1_700_000_005}
+	withScope := func(s peernetwork.Scope) peernetwork.RelayGrant {
+		c := claims
+		c.Peers = []peernetwork.RelayPeer{{WireGuardPublicKey: strings.Repeat("A", 43), DiscoPublicKey: strings.Repeat("A", 43), Scopes: []peernetwork.Scope{s}}}
+		return c
+	}
+	token, err = provider.SignRelayGrant(withScope(scope))
 	if err != nil {
 		t.Fatalf("short live application scope rejected: %v", err)
 	}
@@ -97,27 +104,36 @@ func TestSignRelayGrantPublishesFrozenTypeAndRejectsLongLifetime(t *testing.T) {
 	if body["exp"].(float64) != 1_700_000_060 || body["peers"].([]any)[0].(map[string]any)["scopes"].([]any)[0].(map[string]any)["expires_at"].(float64) != 1_700_000_005 {
 		t.Fatal("relay or application lifetime changed")
 	}
+	// The signed payload is exactly the shared claim set the relay decodes strictly: no claim beyond it.
+	var decoded peernetwork.RelayGrant
+	decoder := json.NewDecoder(bytes.NewReader(mustDecode(t, parts[1])))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		t.Fatalf("signed relay grant is not the shared claim set: %v", err)
+	}
 	for _, expiry := range []int64{1_700_000_000, 1_699_999_999} {
-		scope["expires_at"] = expiry
-		if _, err := provider.SignRelayGrant(claims); err != nil {
+		s := scope
+		s.ExpiresAt = expiry
+		if _, err := provider.SignRelayGrant(withScope(s)); err != nil {
 			t.Fatal("expired admission scope must remain signed for live revocation", err)
 		}
 	}
-	scope["expires_at"] = int64(0)
-	if _, err := provider.SignRelayGrant(claims); err == nil {
+	bad := scope
+	bad.ExpiresAt = 0
+	if _, err := provider.SignRelayGrant(withScope(bad)); err == nil {
 		t.Fatal("malformed scope expiry signed")
 	}
 	// Mint signs exactly what relays accept (peernetwork.ValidGrantScope): a recording scope, never an unknown one.
-	scope["expires_at"], scope["resource_kind"], scope["capability"] = int64(1_700_000_005), "recording", "recording"
-	if _, err := provider.SignRelayGrant(claims); err != nil {
+	recording := scope
+	recording.ResourceKind, recording.Capability = "recording", "recording"
+	if _, err := provider.SignRelayGrant(withScope(recording)); err != nil {
 		t.Fatalf("recording scope refused: %v", err)
 	}
-	for field, value := range map[string]any{"capability": "unknown", "port": 22} {
-		bad := maps.Clone(scope)
-		bad[field] = value
-		claims["peers"] = []any{map[string]any{"wireguard_public_key": strings.Repeat("A", 43), "disco_public_key": strings.Repeat("A", 43), "scopes": []any{bad}}}
-		if _, err := provider.SignRelayGrant(claims); err == nil {
-			t.Fatalf("a scope with %s %v that relays refuse was signed", field, value)
+	unknown, port := scope, scope
+	unknown.Capability, port.Port = "unknown", 22
+	for _, s := range []peernetwork.Scope{unknown, port} {
+		if _, err := provider.SignRelayGrant(withScope(s)); err == nil {
+			t.Fatalf("a scope relays refuse was signed: %+v", s)
 		}
 	}
 }

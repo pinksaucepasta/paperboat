@@ -3,6 +3,7 @@ package derpquic
 import (
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"testing"
 	"time"
 )
@@ -11,7 +12,7 @@ import (
 // fixed 16 per grant (and in total on the CLI) left a 44-96 machine account with only 16 control peers.
 func TestGrantPartsMergeTheirRelayControlPeers(t *testing.T) {
 	part := func(from, n int) Grant {
-		g := Grant{Generation: 3}
+		g := Grant{RelayGrant: peernetwork.RelayGrant{Generation: 3}}
 		for i := from; i < from+n; i++ {
 			g.RelayControlPeers = append(g.RelayControlPeers, fmt.Sprintf("control-%04d", i))
 		}
@@ -34,7 +35,7 @@ func TestGrantPartsMergeTheirRelayControlPeers(t *testing.T) {
 // a re-named peer takes the newer scopes, and a refused merge leaves the admitted grant unchanged.
 func TestGrantPartsMergeInTheirOwnSize(t *testing.T) {
 	part := func(from, n int, resource string) Grant {
-		g := Grant{Generation: 3}
+		g := Grant{RelayGrant: peernetwork.RelayGrant{Generation: 3}}
 		for i := from; i < from+n; i++ {
 			key := fmt.Sprintf("peer-%05d", i)
 			g.Peers = append(g.Peers, Peer{WireGuardPublicKey: key, Scopes: []Scope{{ResourceID: resource}}})
@@ -72,8 +73,8 @@ func TestGrantPartsMergeInTheirOwnSize(t *testing.T) {
 
 func TestGrantPartsCanAddTheirFirstPeerOrControlEntry(t *testing.T) {
 	for _, controlFirst := range []bool{false, true} {
-		first := Grant{Generation: 3, Peers: []Peer{{WireGuardPublicKey: "peer", Scopes: []Scope{{ResourceID: "resource"}}}}}
-		next := Grant{Generation: 3, RelayControlPeers: []string{"control"}}
+		first := Grant{RelayGrant: peernetwork.RelayGrant{Generation: 3, Peers: []Peer{{WireGuardPublicKey: "peer", Scopes: []Scope{{ResourceID: "resource"}}}}}}
+		next := Grant{RelayGrant: peernetwork.RelayGrant{Generation: 3, RelayControlPeers: []string{"control"}}}
 		if controlFirst {
 			first, next = next, first
 		}

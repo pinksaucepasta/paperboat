@@ -177,7 +177,7 @@ func runContext(processCtx context.Context, reporters ...*reporting.Reporter) er
 			return errors.New("cannot read peer relay descriptor")
 		}
 		var descriptor derpquic.ServiceDescriptor
-		if json.Unmarshal(raw, &descriptor) != nil || !descriptor.Valid() {
+		if json.Unmarshal(raw, &descriptor) != nil || !derpquic.ValidDescriptor(descriptor) {
 			return errors.New("invalid peer relay descriptor")
 		}
 		encoded, e := os.ReadFile(*serviceKeyPath)

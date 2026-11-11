@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"math/big"
 	"net"
 	"runtime"
@@ -81,7 +82,7 @@ func (f *fixture) grant(k key.NodePublic, cert tls.Certificate, endpoint string)
 	fp := sha256.Sum256(cert.Certificate[0])
 	public := cert.PrivateKey.(ed25519.PrivateKey).Public().(ed25519.PublicKey)
 	now := time.Now().Unix()
-	return Grant{Version: 1, Issuer: f.verifier.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: 1, AccountID: "account", EndpointID: endpoint, WireGuardPublicKey: KeyString(k), CertificateFingerprint: hex.EncodeToString(fp[:]), QUICPublicKey: base64.RawURLEncoding.EncodeToString(public), NodeID: f.verifier.NodeID, NodeGeneration: f.verifier.NodeGeneration, ProcessEpoch: f.verifier.ProcessEpoch}
+	return Grant{RelayGrant: peernetwork.RelayGrant{Version: 1, Issuer: f.verifier.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: 1, AccountID: "account", EndpointID: endpoint, WireGuardPublicKey: KeyString(k), CertificateFingerprint: hex.EncodeToString(fp[:]), QUICPublicKey: base64.RawURLEncoding.EncodeToString(public), NodeID: f.verifier.NodeID, NodeGeneration: f.verifier.NodeGeneration, ProcessEpoch: f.verifier.ProcessEpoch}}
 }
 func pairScopes(a, b *Grant) {
 	scope := Scope{ResourceKind: "machine_access", ResourceID: "machine", ResourceGeneration: 1, Capability: "terminal", Direction: "dial", Port: 443, ExpiresAt: max(a.ExpiresAt, b.ExpiresAt)}

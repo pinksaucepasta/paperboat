@@ -78,7 +78,7 @@ type NetworkService struct {
 	signer         interface {
 		SignNetworkConfiguration(map[string]any) (string, error)
 		SignRegionalCandidates(map[string]any) (string, error)
-		SignRelayGrant(map[string]any) (string, error)
+		SignRelayGrant(peernetwork.RelayGrant) (string, error)
 	}
 	issuer string
 	now    func() time.Time
@@ -90,7 +90,7 @@ type NetworkService struct {
 func NewNetworkService(store *db.DB, signer interface {
 	SignNetworkConfiguration(map[string]any) (string, error)
 	SignRegionalCandidates(map[string]any) (string, error)
-	SignRelayGrant(map[string]any) (string, error)
+	SignRelayGrant(peernetwork.RelayGrant) (string, error)
 }, issuer string) (*NetworkService, error) {
 	if store == nil || signer == nil || issuer == "" {
 		return nil, ErrInvalid
@@ -802,22 +802,17 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 		// them. Relay control and the peer relay ride in the first chunk only.
 		for i, chunk := range chunks {
 			first := i == 0
-			claims := map[string]any{"version": 1, "iss": s.issuer, "aud": "paperboat-relay", "iat": now.Unix(), "exp": expires.Unix(), "generation": generation, "account_id": self.AccountID, "endpoint_id": self.EndpointID, "wireguard_public_key": self.WireGuardPublicKey, "quic_certificate_fingerprint": self.QUICCertificateFingerprint, "quic_public_key": self.QUICPublicKey, "node_id": nodeID, "node_generation": nodeGeneration, "process_epoch": processEpoch, "peers": chunk.peers}
-			if len(self.AdmittedCertificateFingerprints) > 0 {
-				claims["admitted_certificate_fingerprints"] = self.AdmittedCertificateFingerprints
-			}
-			if self.DiscoPublicKey != "" {
-				claims["disco_public_key"] = self.DiscoPublicKey
-			}
+			// The relay authenticates the client certificate's key, so a same-key renewal's admitted certificates
+			// (AdmittedCertificateFingerprints) mean nothing to it and are not claims of the grant.
+			claims := peernetwork.RelayGrant{Version: peernetwork.RelayGrantVersion, Issuer: s.issuer, Audience: peernetwork.RelayGrantAudience, IssuedAt: now.Unix(), ExpiresAt: expires.Unix(),
+				Generation: uint64(generation), AccountID: self.AccountID, EndpointID: self.EndpointID, WireGuardPublicKey: self.WireGuardPublicKey, DiscoPublicKey: self.DiscoPublicKey,
+				CertificateFingerprint: self.QUICCertificateFingerprint, QUICPublicKey: self.QUICPublicKey, NodeID: nodeID, NodeGeneration: uint64(nodeGeneration), ProcessEpoch: processEpoch, Peers: chunk.peers}
 			if peerRelayReady && len(chunk.control) != 0 {
-				claims["relay_control_peers"] = chunk.control
+				claims.RelayControlPeers = chunk.control
 			}
 			if first && peerRelayReady {
-				claims["peer_relay"] = map[string]any{
-					"wireguard_public_key": base64.RawURLEncoding.EncodeToString(peerRelayWG),
-					"disco_public_key":     base64.RawURLEncoding.EncodeToString(peerRelayDisco),
-					"virtual_address":      peerRelayAddress.String,
-				}
+				claims.PeerRelay = &peernetwork.RelayDescriptor{WireGuardPublicKey: base64.RawURLEncoding.EncodeToString(peerRelayWG),
+					DiscoPublicKey: base64.RawURLEncoding.EncodeToString(peerRelayDisco), VirtualAddress: peerRelayAddress.String}
 			}
 			grant, err := s.signer.SignRelayGrant(claims)
 			if err != nil {
@@ -846,7 +841,7 @@ const maximumRelayGrantScopes = 128
 // relayGrantChunk is one grant's share of the peers: their entries, and the keys of those among them that
 // may use this endpoint as a peer relay (same account).
 type relayGrantChunk struct {
-	peers   []map[string]any
+	peers   []peernetwork.RelayPeer
 	control []string
 	scopes  int
 }
@@ -861,7 +856,7 @@ func relayGrantChunks(self networkBinding, peers []networkPeer, size int, grantE
 	slices.SortStableFunc(ordered, func(a, b networkPeer) int {
 		return strings.Compare(a.Identity.WireGuardPublicKey, b.Identity.WireGuardPublicKey)
 	})
-	chunks := []relayGrantChunk{{peers: []map[string]any{}}}
+	chunks := []relayGrantChunk{{peers: []peernetwork.RelayPeer{}}}
 	for _, peer := range ordered {
 		if peer.Identity.WireGuardPublicKey == "" {
 			slog.Warn("relay grant omits a peer without a WireGuard key", "site", "network.go:relayGrantChunks")
@@ -876,11 +871,7 @@ func relayGrantChunks(self networkBinding, peers []networkPeer, size int, grantE
 			chunks = append(chunks, relayGrantChunk{})
 			last = &chunks[len(chunks)-1]
 		}
-		entry := map[string]any{"wireguard_public_key": peer.Identity.WireGuardPublicKey, "scopes": scopes}
-		if peer.Identity.DiscoPublicKey != "" {
-			entry["disco_public_key"] = peer.Identity.DiscoPublicKey
-		}
-		last.peers = append(last.peers, entry)
+		last.peers = append(last.peers, peernetwork.RelayPeer{WireGuardPublicKey: peer.Identity.WireGuardPublicKey, DiscoPublicKey: peer.Identity.DiscoPublicKey, Scopes: scopes})
 		last.scopes += len(scopes)
 		if peer.Identity.AccountID != self.AccountID || peer.Identity.EndpointID == self.EndpointID {
 			continue

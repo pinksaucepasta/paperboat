@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -26,7 +27,7 @@ func (m meshTestSigner) SignNetworkConfiguration(claims map[string]any) (string,
 func (meshTestSigner) SignRegionalCandidates(map[string]any) (string, error) {
 	return "candidates", nil
 }
-func (meshTestSigner) SignRelayGrant(map[string]any) (string, error) { return "grant", nil }
+func (meshTestSigner) SignRelayGrant(peernetwork.RelayGrant) (string, error) { return "grant", nil }
 
 // Every endpoint of an account rebuilt the whole personal mesh (3 queries per peer) on every change: N x N per
 // join. The shared mesh is built once per change: on a 1,000-machine account a join writes one log row, a refresh

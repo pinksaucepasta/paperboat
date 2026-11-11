@@ -16,6 +16,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"math/big"
 	"net"
 	"net/netip"
@@ -147,7 +148,7 @@ func newFixture(t *testing.T, mutate func(*derpquic.Grant, *derpquic.Grant)) *te
 	now := time.Now().Unix()
 	grant := func(k key.NodePublic, d key.DiscoPrivate, c tls.Certificate, id string) derpquic.Grant {
 		fp := sha256.Sum256(c.Certificate[0])
-		return derpquic.Grant{Version: 1, Issuer: "authority", Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: 1, AccountID: "account", EndpointID: id, WireGuardPublicKey: derpquic.KeyString(k), DiscoPublicKey: derpquic.DiscoKeyString(d.Public()), CertificateFingerprint: hex.EncodeToString(fp[:]), QUICPublicKey: base64.RawURLEncoding.EncodeToString(c.Leaf.PublicKey.(ed25519.PublicKey)), NodeID: "relay", NodeGeneration: 1, ProcessEpoch: "epoch", PeerRelay: &descriptor}
+		return derpquic.Grant{RelayGrant: peernetwork.RelayGrant{Version: 1, Issuer: "authority", Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: 1, AccountID: "account", EndpointID: id, WireGuardPublicKey: derpquic.KeyString(k), DiscoPublicKey: derpquic.DiscoKeyString(d.Public()), CertificateFingerprint: hex.EncodeToString(fp[:]), QUICPublicKey: base64.RawURLEncoding.EncodeToString(c.Leaf.PublicKey.(ed25519.PublicKey)), NodeID: "relay", NodeGeneration: 1, ProcessEpoch: "epoch", PeerRelay: &descriptor}}
 	}
 	f.ga, f.gb = grant(ka, f.da, ca, "a"), grant(kb, f.db, cb, "b")
 	scope := derpquic.Scope{ResourceKind: "machine_access", ResourceID: "machine", ResourceGeneration: 1, Capability: "terminal", Direction: "dial", Port: 443, ExpiresAt: now + 60}

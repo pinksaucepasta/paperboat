@@ -43,7 +43,7 @@ const (
 	MachineEventsAnswerLifetime = time.Minute
 	NetworkConfigurationType    = "paperboat-network-config+jwt"
 	RegionalCandidatesType      = "paperboat-regional-candidates+jwt"
-	RelayGrantType              = "paperboat-relay-grant+jwt"
+	RelayGrantType              = peernetwork.RelayGrantType
 	// VisitorAssertionType is the typ of the signed visitor identity an app behind a gated (team or
 	// private) route receives in Paperboat-Visitor-Assertion (see SignVisitorAssertion).
 	VisitorAssertionType = "paperboat-visitor+jwt"
@@ -88,54 +88,21 @@ func (p *Provider) SignNetworkConfiguration(claims map[string]any) (string, erro
 
 // SignRelayGrant signs an endpoint- and relay-process-bound routing grant.
 // Relay admission has its own token type so it cannot be confused with endpoint
-// network configuration or the regional discovery projection.
-func (p *Provider) SignRelayGrant(claims map[string]any) (string, error) {
-	if p == nil || claims == nil || claims["version"] != 1 || claims["aud"] != "paperboat-relay" {
+// network configuration or the regional discovery projection. The claims are the
+// shared peernetwork.RelayGrant the relay decodes strictly.
+func (p *Provider) SignRelayGrant(g peernetwork.RelayGrant) (string, error) {
+	wgKey, wgErr := base64.RawURLEncoding.DecodeString(g.WireGuardPublicKey)
+	fingerprint, fingerprintErr := hex.DecodeString(g.CertificateFingerprint)
+	peerRelayOK := g.PeerRelay == nil || validRelayDescriptor(*g.PeerRelay) && g.DiscoPublicKey != "" && relayPeersHaveDisco(g.Peers)
+	if p == nil || g.Version != peernetwork.RelayGrantVersion || g.Audience != peernetwork.RelayGrantAudience || strings.TrimSpace(g.Issuer) == "" ||
+		g.AccountID == "" || g.EndpointID == "" ||
+		wgErr != nil || len(wgKey) != 32 || base64.RawURLEncoding.EncodeToString(wgKey) != g.WireGuardPublicKey ||
+		fingerprintErr != nil || len(fingerprint) != 32 || hex.EncodeToString(fingerprint) != g.CertificateFingerprint ||
+		g.NodeID == "" || g.ProcessEpoch == "" || !optionalRawKey(optionalString(g.DiscoPublicKey)) || !peerRelayOK || !relayPeersClaim(g.Peers) ||
+		g.ExpiresAt <= g.IssuedAt || g.ExpiresAt-g.IssuedAt > int64(relaylimits.MaxGrantLifetime/time.Second) || g.Generation < 1 || g.NodeGeneration < 1 {
 		return "", errors.New("relay grant claims are invalid")
 	}
-	issuedAt, issuedOK := integerClaim(claims["iat"])
-	expiresAt, expiresOK := integerClaim(claims["exp"])
-	configGeneration, configGenerationOK := integerClaim(claims["generation"])
-	nodeGeneration, nodeGenerationOK := integerClaim(claims["node_generation"])
-	issuer, issuerOK := claims["iss"].(string)
-	accountID, accountOK := claims["account_id"].(string)
-	endpointID, endpointOK := claims["endpoint_id"].(string)
-	wgKey, wgOK := claims["wireguard_public_key"].(string)
-	certFingerprint, certOK := claims["quic_certificate_fingerprint"].(string)
-	nodeID, nodeOK := claims["node_id"].(string)
-	processEpoch, epochOK := claims["process_epoch"].(string)
-	peers, peersOK := claims["peers"]
-	decodedWGKey, wgDecodeErr := base64.RawURLEncoding.DecodeString(wgKey)
-	decodedFingerprint, fingerprintDecodeErr := hex.DecodeString(certFingerprint)
-	discoOK := optionalRawKey(claims["disco_public_key"])
-	peerRelayOK := relayDescriptorClaim(claims["peer_relay"])
-	if claims["peer_relay"] != nil && (claims["disco_public_key"] == nil || !relayPeersHaveDisco(peers)) {
-		peerRelayOK = false
-	}
-	if !issuerOK || strings.TrimSpace(issuer) == "" || !accountOK || accountID == "" || !endpointOK || endpointID == "" ||
-		!wgOK || wgDecodeErr != nil || len(decodedWGKey) != 32 || base64.RawURLEncoding.EncodeToString(decodedWGKey) != wgKey ||
-		!certOK || fingerprintDecodeErr != nil || len(decodedFingerprint) != 32 || hex.EncodeToString(decodedFingerprint) != certFingerprint ||
-		!nodeOK || nodeID == "" || !epochOK || processEpoch == "" || !discoOK || !peerRelayOK || !relayPeersClaim(peers) || !peersOK ||
-		!issuedOK || !expiresOK || expiresAt <= issuedAt || expiresAt-issuedAt > int64(relaylimits.MaxGrantLifetime/time.Second) || !configGenerationOK || configGeneration < 1 || !nodeGenerationOK || nodeGeneration < 1 {
-		return "", errors.New("relay grant claims are invalid")
-	}
-	return p.signClaims(RelayGrantType, claims)
-}
-
-func relayPeersHaveDisco(value any) bool {
-	raw, err := json.Marshal(value)
-	var peers []struct {
-		DiscoPublicKey string `json:"disco_public_key"`
-	}
-	if err != nil || json.Unmarshal(raw, &peers) != nil || peers == nil {
-		return false
-	}
-	for _, peer := range peers {
-		if peer.DiscoPublicKey == "" || !optionalRawKey(peer.DiscoPublicKey) {
-			return false
-		}
-	}
-	return true
+	return p.signClaims(peernetwork.RelayGrantType, g)
 }
 
 func optionalRawKey(value any) bool {
@@ -152,45 +119,39 @@ func validBrowserKeyDigest(value string) bool {
 	return err == nil && len(decoded) == sha256.Size && base64.RawURLEncoding.EncodeToString(decoded) == value
 }
 
-func relayDescriptorClaim(value any) bool {
-	if value == nil {
-		return true
+// optionalString is nil for an absent (empty) optional claim.
+func optionalString(v string) any {
+	if v == "" {
+		return nil
 	}
-	raw, err := json.Marshal(value)
-	var descriptor struct {
-		WireGuardPublicKey string `json:"wireguard_public_key"`
-		DiscoPublicKey     string `json:"disco_public_key"`
-		VirtualAddress     string `json:"virtual_address"`
-	}
-	if err != nil || json.Unmarshal(raw, &descriptor) != nil || !optionalRawKey(descriptor.WireGuardPublicKey) || !optionalRawKey(descriptor.DiscoPublicKey) || descriptor.WireGuardPublicKey == "" || descriptor.DiscoPublicKey == "" {
-		return false
-	}
-	address, err := netip.ParseAddr(descriptor.VirtualAddress)
-	prefix := netip.MustParsePrefix("fd7a:115c:a1e0::/48")
-	return err == nil && prefix.Contains(address)
+	return v
 }
 
-func relayPeersClaim(value any) bool {
-	raw, err := json.Marshal(value)
-	if err != nil {
+func relayPeersHaveDisco(peers []peernetwork.RelayPeer) bool {
+	for _, peer := range peers {
+		if peer.DiscoPublicKey == "" || !optionalRawKey(peer.DiscoPublicKey) {
+			return false
+		}
+	}
+	return true
+}
+
+func validRelayDescriptor(d peernetwork.RelayDescriptor) bool {
+	if !optionalRawKey(d.WireGuardPublicKey) || !optionalRawKey(d.DiscoPublicKey) || d.WireGuardPublicKey == "" || d.DiscoPublicKey == "" {
 		return false
 	}
-	var peers []struct {
-		WireGuardPublicKey string              `json:"wireguard_public_key"`
-		DiscoPublicKey     string              `json:"disco_public_key,omitempty"`
-		Scopes             []peernetwork.Scope `json:"scopes"`
-	}
-	if json.Unmarshal(raw, &peers) != nil || peers == nil || len(peers) > 64 {
+	address, err := netip.ParseAddr(d.VirtualAddress)
+	return err == nil && netip.MustParsePrefix("fd7a:115c:a1e0::/48").Contains(address)
+}
+
+func relayPeersClaim(peers []peernetwork.RelayPeer) bool {
+	if peers == nil || len(peers) > 64 {
 		return false
 	}
 	for _, peer := range peers {
 		decoded, err := base64.RawURLEncoding.DecodeString(peer.WireGuardPublicKey)
-		if err != nil || len(decoded) != 32 || base64.RawURLEncoding.EncodeToString(decoded) != peer.WireGuardPublicKey || !optionalRawKey(func() any {
-			if peer.DiscoPublicKey == "" {
-				return nil
-			}
-			return peer.DiscoPublicKey
-		}()) || len(peer.Scopes) == 0 || len(peer.Scopes) > 128 {
+		if err != nil || len(decoded) != 32 || base64.RawURLEncoding.EncodeToString(decoded) != peer.WireGuardPublicKey ||
+			!optionalRawKey(optionalString(peer.DiscoPublicKey)) || len(peer.Scopes) == 0 || len(peer.Scopes) > 128 {
 			return false
 		}
 		for _, scope := range peer.Scopes {
@@ -1471,7 +1432,7 @@ func strictCredentialJSON(data []byte, target any) error {
 	return nil
 }
 
-func (p *Provider) signClaims(proofType string, claims map[string]any) (string, error) {
+func (p *Provider) signClaims(proofType string, claims any) (string, error) {
 	p.mu.RLock()
 	id := p.activeID
 	privateKey := append(ed25519.PrivateKey(nil), p.keys[id]...)

@@ -60,7 +60,7 @@ func TestRelayGrantsCarryEveryPeerAndItsControlKeyInChunksOfTheRelayBound(t *tes
 			}
 			inChunk := map[string]bool{}
 			for _, entry := range chunk.peers {
-				key := entry["wireguard_public_key"].(string)
+				key := entry.WireGuardPublicKey
 				if named[key] {
 					t.Fatalf("peer %s in two chunks", key)
 				}
@@ -96,7 +96,7 @@ func TestRelayGrantsGiveUntilRevokedScopesTheGrantExpiryAndOmitKeylessPeers(t *t
 	if len(chunks) != 1 || len(chunks[0].peers) != 1 || len(chunks[0].control) != 1 || chunks[0].control[0] != "key_a" {
 		t.Fatalf("chunks %+v: want the keyed peer only", chunks)
 	}
-	scopes := chunks[0].peers[0]["scopes"].([]networkScope)
+	scopes := chunks[0].peers[0].Scopes
 	if len(scopes) != 1 || scopes[0].ExpiresAt != 1234 {
 		t.Fatalf("grant scopes %+v: want expires_at = grant expiry", scopes)
 	}
@@ -140,12 +140,12 @@ func TestRelayGrantsCarryStandingTeamScopesAndStayWithinTheRelayScopeBound(t *te
 	for _, chunk := range chunks {
 		total := 0
 		for _, entry := range chunk.peers {
-			key := entry["wireguard_public_key"].(string)
+			key := entry.WireGuardPublicKey
 			if named[key] {
 				t.Fatalf("peer %s named in two chunks", key)
 			}
 			named[key] = true
-			scopes := entry["scopes"].([]networkScope)
+			scopes := entry.Scopes
 			total += len(scopes)
 			if strings.HasPrefix(key, "member_") {
 				members++

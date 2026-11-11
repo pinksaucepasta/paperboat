@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"io"
 	"log/slog"
 	"net"
@@ -639,7 +640,7 @@ func (s *Server) Revoke(account, endpoint string, minGeneration uint64) error {
 	// A revoked grant stays valid on this relay until its exp, up to MaxGrantLifetime after issue on a
 	// clock up to MaxClockSkew behind the issuer's, so the fence outlives every such grant.
 	g.ExpiresAt = time.Now().Add(MaxGrantLifetime + MaxClockSkew).Unix()
-	s.fences[id] = &grantFence{Grant{Generation: g.Generation, ExpiresAt: g.ExpiresAt}}
+	s.fences[id] = &grantFence{Grant{RelayGrant: peernetwork.RelayGrant{Generation: g.Generation, ExpiresAt: g.ExpiresAt}}}
 	for k, p := range s.peers {
 		if p.grant.AccountID == account && p.grant.EndpointID == endpoint {
 			delete(s.peers, k)

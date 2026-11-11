@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"math/big"
 	"net"
 	"net/http"
@@ -138,7 +139,7 @@ func TestNativeRelayLifecycleRevokesConnectedCarrier(t *testing.T) {
 	cert := tls.Certificate{Certificate: [][]byte{clientDER}, PrivateKey: clientPrivate}
 	fingerprint := sha256.Sum256(cert.Certificate[0])
 	now := time.Now().Unix()
-	grant := derpquic.Grant{Version: 1, Issuer: "test", Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 10, Generation: subjectGeneration, AccountID: account, EndpointID: endpoint, WireGuardPublicKey: derpquic.KeyString(key.NewNode().Public()), CertificateFingerprint: hex.EncodeToString(fingerprint[:]), NodeID: cfg.NodeID, NodeGeneration: lease.Generation, ProcessEpoch: lease.ProcessEpoch}
+	grant := derpquic.Grant{RelayGrant: peernetwork.RelayGrant{Version: 1, Issuer: "test", Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 10, Generation: subjectGeneration, AccountID: account, EndpointID: endpoint, WireGuardPublicKey: derpquic.KeyString(key.NewNode().Public()), CertificateFingerprint: hex.EncodeToString(fingerprint[:]), NodeID: cfg.NodeID, NodeGeneration: lease.Generation, ProcessEpoch: lease.ProcessEpoch}}
 	grant.QUICPublicKey = base64.RawURLEncoding.EncodeToString(clientPublic)
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"paperboat-relay-grant+jwt","kid":"test"}`))
 	body, _ := json.Marshal(grant)

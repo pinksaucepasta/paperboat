@@ -54,39 +54,17 @@ func (e *Error) Fatal() bool   { return e.Code == 1 || e.Code == 2 }
 
 // Scope is the shared signed access scope (shared/peernetwork), as the server mints it.
 type Scope = peernetwork.Scope
-type ServiceDescriptor struct {
-	WireGuardPublicKey string `json:"wireguard_public_key"`
-	DiscoPublicKey     string `json:"disco_public_key"`
-	VirtualAddress     string `json:"virtual_address"`
-}
 
-type Peer struct {
-	WireGuardPublicKey string  `json:"wireguard_public_key"`
-	DiscoPublicKey     string  `json:"disco_public_key,omitempty"`
-	Scopes             []Scope `json:"scopes"`
-}
+// ServiceDescriptor names a peer relay service (shared/peernetwork).
+type ServiceDescriptor = peernetwork.RelayDescriptor
+
+// Peer is one peer a grant pairs its endpoint with (shared/peernetwork).
+type Peer = peernetwork.RelayPeer
+
+// Grant is a verified relay grant: the shared signed claim set (decoded strictly) and what the relay derives from it.
 type Grant struct {
-	signedHash             [sha256.Size]byte
-	Version                int                `json:"version"`
-	Issuer                 string             `json:"iss"`
-	Audience               string             `json:"aud"`
-	IssuedAt               int64              `json:"iat"`
-	ExpiresAt              int64              `json:"exp"`
-	Generation             uint64             `json:"generation"`
-	AccountID              string             `json:"account_id"`
-	EndpointID             string             `json:"endpoint_id"`
-	WireGuardPublicKey     string             `json:"wireguard_public_key"`
-	DiscoPublicKey         string             `json:"disco_public_key,omitempty"`
-	CertificateFingerprint string             `json:"quic_certificate_fingerprint"`
-	QUICPublicKey          string             `json:"quic_public_key"`
-	NodeID                 string             `json:"node_id"`
-	NodeGeneration         uint64             `json:"node_generation"`
-	ProcessEpoch           string             `json:"process_epoch"`
-	Peers                  []Peer             `json:"peers"`
-	PeerRelay              *ServiceDescriptor `json:"peer_relay,omitempty"`
-	RelayControlPeers      []string           `json:"relay_control_peers,omitempty"`
-	// Memberships authorize pairs without per-peer lists (membership.go); a grant has one or the other.
-	Memberships []Scope `json:"memberships,omitempty"`
+	peernetwork.RelayGrant
+	signedHash [sha256.Size]byte
 	// index finds one peer's entry and a control peer without scanning the lists; every datagram
 	// checks its pair, and a scan of both grants' peers made forwarding cost O(peers) per packet.
 	index *grantIndex
@@ -191,14 +169,14 @@ func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time)
 		Type      string `json:"typ"`
 		KeyID     string `json:"kid"`
 	}
-	if e1 != nil || e2 != nil || e3 != nil || len(h) > 1024 || strictJSON(h, &header) != nil || header.Algorithm != "EdDSA" || header.Type != "paperboat-relay-grant+jwt" {
+	if e1 != nil || e2 != nil || e3 != nil || len(h) > 1024 || strictJSON(h, &header) != nil || header.Algorithm != "EdDSA" || header.Type != peernetwork.RelayGrantType {
 		return g, ErrAdmission
 	}
 	pub := v.Keys[header.KeyID]
 	if len(pub) != 32 {
 		return Grant{}, fmt.Errorf("%w: %w", ErrAdmission, errUnknownKey)
 	}
-	if !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sig) || strictJSON(b, &g) != nil {
+	if !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sig) || strictJSON(b, &g.RelayGrant) != nil {
 		return Grant{}, ErrAdmission
 	}
 	leaf := state.PeerCertificates[0]
@@ -207,7 +185,7 @@ func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time)
 	presented, isEd25519 := leaf.PublicKey.(ed25519.PublicKey)
 	// Each refusal names its check (never the grant's content) for the relay log.
 	switch {
-	case g.Version != 1 || g.Issuer != v.Issuer || g.Audience != "paperboat-relay":
+	case g.Version != peernetwork.RelayGrantVersion || g.Issuer != v.Issuer || g.Audience != peernetwork.RelayGrantAudience:
 		return Grant{}, fmt.Errorf("grant issuer: %w", ErrAdmission)
 	case g.NodeID != v.NodeID || g.NodeGeneration != v.NodeGeneration:
 		return Grant{}, fmt.Errorf("grant relay node: %w", ErrAdmission)
@@ -233,7 +211,7 @@ func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time)
 		}
 	}
 	if g.PeerRelay != nil {
-		if !g.PeerRelay.Valid() || g.DiscoPublicKey == "" || g.PeerRelay.WireGuardPublicKey == g.WireGuardPublicKey {
+		if !ValidDescriptor(*g.PeerRelay) || g.DiscoPublicKey == "" || g.PeerRelay.WireGuardPublicKey == g.WireGuardPublicKey {
 			return Grant{}, ErrAdmission
 		}
 	}
@@ -465,7 +443,9 @@ func ParseDiscoKey(value string) (key.DiscoPublic, error) {
 func DiscoKeyString(k key.DiscoPublic) string {
 	return base64.RawURLEncoding.EncodeToString(k.AppendTo(nil))
 }
-func (d ServiceDescriptor) Valid() bool {
+
+// ValidDescriptor reports whether d names a peer relay service: its keys and an address in the peer network.
+func ValidDescriptor(d ServiceDescriptor) bool {
 	_, e1 := ParseKey(d.WireGuardPublicKey)
 	_, e2 := ParseDiscoKey(d.DiscoPublicKey)
 	address, e3 := netip.ParseAddr(d.VirtualAddress)

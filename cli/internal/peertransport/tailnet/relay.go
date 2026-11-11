@@ -419,7 +419,7 @@ func (a *Authority) relayServiceLocked(node RegionalNode, g derpquic.Grant) (*ta
 		return nil, nil
 	}
 	ownDisco := mesh.DiscoPublicForNode(a.private).DiscoPublic
-	if g.DiscoPublicKey != derpquic.DiscoKeyString(ownDisco) || !g.PeerRelay.Valid() {
+	if g.DiscoPublicKey != derpquic.DiscoKeyString(ownDisco) || !derpquic.ValidDescriptor(*g.PeerRelay) {
 		return nil, ErrAuthority
 	}
 	relayKey, e := derpquic.ParseKey(g.PeerRelay.WireGuardPublicKey)

@@ -2,6 +2,7 @@ package derpquic
 
 import (
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"runtime"
 	"testing"
 	"time"
@@ -10,7 +11,7 @@ import (
 )
 
 func membershipGrant(account, endpoint string, expires int64, memberships ...Scope) Grant {
-	g := Grant{AccountID: account, EndpointID: endpoint, WireGuardPublicKey: KeyString(key.NewNode().Public()), ExpiresAt: expires, Memberships: memberships}
+	g := Grant{RelayGrant: peernetwork.RelayGrant{AccountID: account, EndpointID: endpoint, WireGuardPublicKey: KeyString(key.NewNode().Public()), ExpiresAt: expires, Memberships: memberships}}
 	return g.withIndex()
 }
 
@@ -55,7 +56,7 @@ func TestMembershipGrantsAuthorizeExactlyTheReciprocalPairs(t *testing.T) {
 		t.Fatal("two viewers of one share were paired with each other")
 	}
 	// The per-peer shape on one side: the viewer names the machine with the same scope.
-	perPeer := Grant{AccountID: "account_a", EndpointID: "a_cli_old", WireGuardPublicKey: KeyString(key.NewNode().Public()), ExpiresAt: later, Peers: []Peer{{WireGuardPublicKey: shared.WireGuardPublicKey, Scopes: []Scope{scope("machine_access", "access_1", "terminal", "dial", later)}}}}.withIndex()
+	perPeer := Grant{RelayGrant: peernetwork.RelayGrant{AccountID: "account_a", EndpointID: "a_cli_old", WireGuardPublicKey: KeyString(key.NewNode().Public()), ExpiresAt: later, Peers: []Peer{{WireGuardPublicKey: shared.WireGuardPublicKey, Scopes: []Scope{scope("machine_access", "access_1", "terminal", "dial", later)}}}}}.withIndex()
 	if !allowed(perPeer, shared, now) || !allowed(shared, perPeer, now) {
 		t.Fatal("a per-peer grant and a membership grant with reciprocal scopes are not paired")
 	}
@@ -69,23 +70,23 @@ func TestMembershipGrantsAuthorizeExactlyTheReciprocalPairs(t *testing.T) {
 func TestMembershipShapeIsBoundedAndExclusive(t *testing.T) {
 	later := time.Now().Add(time.Minute).Unix()
 	m := scope("machine_network", "network_a", "connect", "dial", later)
-	if !validMemberships(Grant{Memberships: []Scope{m}}) {
+	if !validMemberships(Grant{RelayGrant: peernetwork.RelayGrant{Memberships: []Scope{m}}}) {
 		t.Fatal("a valid membership was refused")
 	}
-	if validMemberships(Grant{Memberships: []Scope{m, m}}) {
+	if validMemberships(Grant{RelayGrant: peernetwork.RelayGrant{Memberships: []Scope{m, m}}}) {
 		t.Fatal("a duplicate membership was accepted")
 	}
-	if validMemberships(Grant{Memberships: []Scope{m}, Peers: []Peer{{}}}) {
+	if validMemberships(Grant{RelayGrant: peernetwork.RelayGrant{Memberships: []Scope{m}, Peers: []Peer{{}}}}) {
 		t.Fatal("memberships beside a per-peer list were accepted")
 	}
 	many := make([]Scope, MaxGrantMemberships+1)
 	for i := range many {
 		many[i] = scope("machine_access", fmt.Sprintf("access_%d", i), "terminal", "dial", later)
 	}
-	if validMemberships(Grant{Memberships: many}) {
+	if validMemberships(Grant{RelayGrant: peernetwork.RelayGrant{Memberships: many}}) {
 		t.Fatal("more than MaxGrantMemberships memberships were accepted")
 	}
-	if _, err := mergeGrants(Grant{Memberships: many[:MaxGrantMemberships]}.withIndex(), Grant{Memberships: many[MaxGrantMemberships:]}); err == nil {
+	if _, err := mergeGrants(Grant{RelayGrant: peernetwork.RelayGrant{Memberships: many[:MaxGrantMemberships]}}.withIndex(), Grant{RelayGrant: peernetwork.RelayGrant{Memberships: many[MaxGrantMemberships:]}}); err == nil {
 		t.Fatal("merging past MaxGrantMemberships was accepted")
 	}
 }
@@ -178,9 +179,9 @@ func tenThousandMeshGrants() ([]key.NodePublic, []Grant, uint64) {
 	runtime.ReadMemStats(&before)
 	grants := make([]Grant, endpoints)
 	for i := range grants {
-		grants[i] = Grant{AccountID: "account_a", EndpointID: fmt.Sprintf("endpoint_%05d", i), WireGuardPublicKey: KeyString(keys[i]), ExpiresAt: later, Memberships: []Scope{
+		grants[i] = Grant{RelayGrant: peernetwork.RelayGrant{AccountID: "account_a", EndpointID: fmt.Sprintf("endpoint_%05d", i), WireGuardPublicKey: KeyString(keys[i]), ExpiresAt: later, Memberships: []Scope{
 			scope("machine_network", "network_account_a", "connect", "dial", later), scope("machine_network", "network_account_a", "connect", "accept", later),
-		}}.withIndex()
+		}}}.withIndex()
 		grants[i].signedHash[0], grants[i].signedHash[1] = byte(i), byte(i>>8)
 	}
 	runtime.ReadMemStats(&after)

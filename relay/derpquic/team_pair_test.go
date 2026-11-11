@@ -1,6 +1,7 @@
 package derpquic
 
 import (
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"testing"
 	"time"
 
@@ -16,7 +17,7 @@ func TestPerPeerTeamMachineAccessScopesPairAcrossAccounts(t *testing.T) {
 	later := now.Add(time.Minute).Unix()
 	member, host := KeyString(key.NewNode().Public()), KeyString(key.NewNode().Public())
 	grant := func(account, endpoint, self, peer string, scopes ...Scope) Grant {
-		return Grant{AccountID: account, EndpointID: endpoint, WireGuardPublicKey: self, ExpiresAt: later, Peers: []Peer{{WireGuardPublicKey: peer, Scopes: scopes}}}.withIndex()
+		return Grant{RelayGrant: peernetwork.RelayGrant{AccountID: account, EndpointID: endpoint, WireGuardPublicKey: self, ExpiresAt: later, Peers: []Peer{{WireGuardPublicKey: peer, Scopes: scopes}}}}.withIndex()
 	}
 	at := func(capability, direction string, generation uint64) Scope {
 		s := scope("machine_access", "host_endpoint", capability, direction, later)
