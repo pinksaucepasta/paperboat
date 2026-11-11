@@ -516,16 +516,16 @@ func TestWindowsActivationOrder(t *testing.T) {
 				order = append(order, fmt.Sprintf("ssh/%d", attempts))
 				return nil
 			},
-			cutover: cutover, stop: record("stop"), stage: record("stage"), carrier: record("carrier"), start: record("start"),
+			prestage: record("prestage"), cutover: cutover, stop: record("stop"), stage: record("stage"), carrier: record("carrier"), start: record("start"),
 		}
 	}
 	for _, test := range []struct {
 		carrier bool
 		want    string
 	}{
-		{true, "owner,ssh/2,cutover,stop,stage,carrier,start"},
+		{true, "owner,ssh/2,prestage,cutover,stop,stage,carrier,start"},
 		// A cold machine has nothing serving to keep and no carrier for the generation until it creates one.
-		{false, "owner,cutover,stop,stage,carrier,ssh/1,start"},
+		{false, "owner,prestage,cutover,stop,stage,carrier,ssh/1,start"},
 	} {
 		order = nil
 		if err := activation(test.carrier, record("cutover")).run(context.Background()); err != nil || strings.Join(order, ",") != test.want {
@@ -535,7 +535,7 @@ func TestWindowsActivationOrder(t *testing.T) {
 	order = nil
 	busy := errors.New("protected work")
 	err := activation(true, func(context.Context) error { order = append(order, "cutover"); return busy }).run(context.Background())
-	if !errors.Is(err, busy) || strings.Join(order, ",") != "owner,ssh/2,cutover" {
+	if !errors.Is(err, busy) || strings.Join(order, ",") != "owner,ssh/2,prestage,cutover" {
 		t.Fatalf("refused cutover: order %v err %v, want nothing stopped", order, err)
 	}
 }

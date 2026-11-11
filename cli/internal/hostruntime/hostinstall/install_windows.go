@@ -35,14 +35,14 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseindex"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
-	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
-	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
+	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	winenv "github.com/pinksaucepasta/paperboat/internal/windowsenvironment"
 	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
 	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
@@ -711,6 +711,7 @@ func installWindows(ctx context.Context, request Request, lifecycleOwned bool, c
 		return err
 	}
 	tokenPath, _ := WindowsInstanceTokenPath(instance)
+	var discardRuntime func() error
 	var restoreConfigWorker func() error
 	defer func() {
 		if restoreConfigWorker != nil {
@@ -720,6 +721,12 @@ func installWindows(ctx context.Context, request Request, lifecycleOwned bool, c
 		}
 	}()
 	var pinned string
+	var publishRuntime func(context.Context) error
+	defer func() {
+		if discardRuntime != nil {
+			resultErr = withCleanup("staged Windows runtime cleanup failed", resultErr, discardRuntime())
+		}
+	}()
 	activation := windowsActivation{
 		prepareOwner:   func(ctx context.Context) error { return prepareSessionOwner(ctx, request, layout) },
 		carrierPresent: func(ctx context.Context) (bool, error) { return windowsCarrierPresentForSSH(ctx, instance) },
@@ -729,16 +736,20 @@ func installWindows(ctx context.Context, request Request, lifecycleOwned bool, c
 				return err
 			})
 		},
+		prestage: func(ctx context.Context) (err error) {
+			runtimeCurrent, runtimeRollback, _ := windowsRuntimePaths(layout)
+			return runWindowsInstallPhase(ctx, "stage verified Paperboat runtime", func() (err error) {
+				publishRuntime, discardRuntime, err = prepareStagedWindowsBinary(ctx, request.Executable, runtimeCurrent, runtimeRollback, request.Source, request.OwnerSID, nil)
+				return err
+			})
+		},
 		cutover: cutover,
 		stop: func(ctx context.Context) (err error) {
 			restoreConfigWorker, err = stopWindowsRuntimeForActivation(ctx, request, layout)
 			return err
 		},
 		stage: func(ctx context.Context) error {
-			runtimeCurrent, runtimeRollback, _ := windowsRuntimePaths(layout)
-			if err := runWindowsInstallPhase(ctx, "stage verified Paperboat runtime", func() error {
-				return stageWindowsBinary(ctx, request.Executable, runtimeCurrent, runtimeRollback, request.Source, request.OwnerSID, nil)
-			}); err != nil {
+			if err := runWindowsInstallPhase(ctx, "publish staged Paperboat runtime", func() error { return publishRuntime(ctx) }); err != nil {
 				return err
 			}
 			if err := runWindowsInstallPhase(ctx, "prepare Paperboat host token", func() error { return ensureWindowsTokenAt(tokenPath, request.OwnerSID) }); err != nil {
@@ -781,6 +792,7 @@ type windowsActivation struct {
 	prepareOwner   func(context.Context) error
 	carrierPresent func(context.Context) (bool, error)
 	prepareSSH     func(ctx context.Context, attempts int) error
+	prestage       func(context.Context) error // writes and verifies the runtime beside its slot
 	cutover        func(context.Context) error // nil: nothing serves that needs a drain
 	stop           func(context.Context) error
 	stage          func(context.Context) error
@@ -815,6 +827,9 @@ func (a windowsActivation) run(ctx context.Context) error {
 		if err := step("ssh", ssh(windowsSSHPreparationAttempts)); err != nil {
 			return err
 		}
+	}
+	if err := step("prestage", a.prestage); err != nil {
+		return err
 	}
 	if a.cutover != nil {
 		if err := step("cutover", a.cutover); err != nil {
@@ -3394,23 +3409,36 @@ func windowsRuntimePaths(layout service.Layout) (current, rollback, staged strin
 }
 
 func stageWindowsBinary(ctx context.Context, source, current, rollback string, installSource installsource.Source, ownerSID string, expectedTarget *releaseindex.Target) (resultErr error) {
+	publish, discard, err := prepareStagedWindowsBinary(ctx, source, current, rollback, installSource, ownerSID, expectedTarget)
+	if err != nil {
+		return err
+	}
+	defer func() { resultErr = withCleanup("staged Windows runtime cleanup failed", resultErr, discard()) }()
+	return publish(ctx)
+}
+
+// prepareStagedWindowsBinary writes and verifies source next to current, without touching the slot, so an activation
+// can do it while the runtime still serves (t4 on winpool-4: 1.36 s inside the outage). publish then rotates the
+// slot: current to rollback, the staged file to current. discard removes a staged file that was not published.
+func prepareStagedWindowsBinary(ctx context.Context, source, current, rollback string, installSource installsource.Source, ownerSID string, expectedTarget *releaseindex.Target) (publish func(context.Context) error, discard func() error, resultErr error) {
+	none := func() error { return nil }
 	if err := ensureWindowsExecutableDirectory(filepath.Dir(current), ownerSID); err != nil {
-		return hostInstallFailure("prepare runtime slot", err)
+		return nil, nil, hostInstallFailure("prepare runtime slot", err)
 	}
 	if err := ensureWindowsExecutableDirectory(filepath.Dir(rollback), ownerSID); err != nil {
-		return hostInstallFailure("prepare runtime rollback slot", err)
+		return nil, nil, hostInstallFailure("prepare runtime rollback slot", err)
 	}
 	if err := secureWindowsFile(source, ""); err != nil {
-		return hostInstallFailure("validate downloaded runtime file", err)
+		return nil, nil, hostInstallFailure("validate downloaded runtime file", err)
 	}
 	if err := installSource.Verify(source); err != nil {
-		return suppliedRuntimeSourceFailure{cause: err}
+		return nil, nil, suppliedRuntimeSourceFailure{cause: err}
 	}
 	if installSource.Distribution == installsource.Official {
 		sourceVerifyCtx, cancelSourceVerify := context.WithTimeout(ctx, 30*time.Second)
 		defer cancelSourceVerify()
 		if err := nativesignature.New(nil).Verify(sourceVerifyCtx, source, "windows", installSource.Architecture); err != nil {
-			return hostInstallFailure("downloaded runtime Authenticode", ErrInvalidRequest, err)
+			return nil, nil, hostInstallFailure("downloaded runtime Authenticode", ErrInvalidRequest, err)
 		}
 	}
 	// The dashboard bootstrap may execute the verified binary directly from the
@@ -3419,29 +3447,32 @@ func stageWindowsBinary(ctx context.Context, source, current, rollback string, i
 	// image has already passed every integrity and signature check above; leave
 	// it in place and let service installation bind to the same executable.
 	if filepath.Clean(source) == filepath.Clean(current) {
-		return nil
+		return func(context.Context) error { return nil }, none, nil
 	}
 	body, err := readInstallFile(source, 256<<20)
 	if err != nil {
-		return hostInstallFailure("read staged runtime", ErrInvalidRequest, err)
+		return nil, nil, hostInstallFailure("read staged runtime", ErrInvalidRequest, err)
 	}
 	if len(body) < 1 || len(body) > 256<<20 {
-		return hostInstallFailure("read staged runtime", ErrInvalidRequest)
+		return nil, nil, hostInstallFailure("read staged runtime", ErrInvalidRequest)
 	}
 	if expectedTarget != nil {
 		digest := sha256.Sum256(body)
 		if int64(len(body)) != expectedTarget.Length || hex.EncodeToString(digest[:]) != expectedTarget.SHA256 {
-			return hostInstallFailure("staged runtime bytes do not match signed metadata", ErrInvalidRequest)
+			return nil, nil, hostInstallFailure("staged runtime bytes do not match signed metadata", ErrInvalidRequest)
 		}
 	}
 	var suffix [16]byte
 	if _, err := rand.Read(suffix[:]); err != nil {
-		return err
+		return nil, nil, err
 	}
 	//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=same-directory-verified-runtime-staging
 	temporaryPath := filepath.Join(filepath.Dir(current), ".paperboat-runtime-"+hex.EncodeToString(suffix[:])+".exe")
+	discard = func() error { return removeInstallFile(temporaryPath) }
 	defer func() {
-		resultErr = withCleanup("staged Windows runtime cleanup failed", resultErr, removeInstallFile(temporaryPath))
+		if resultErr != nil {
+			resultErr = withCleanup("staged Windows runtime cleanup failed", resultErr, discard())
+		}
 	}()
 	publicDACL := "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;BU)"
 	if ownerSID != "" {
@@ -3450,45 +3481,47 @@ func stageWindowsBinary(ctx context.Context, source, current, rollback string, i
 	if err := windowssecurity.WithRestorePrivilege(func() error {
 		return atomicfile.Write(temporaryPath, body, atomicfile.Options{Mode: 0o755, OwnerUID: -1, OwnerGID: -1, SecurityDescriptor: "O:SY" + publicDACL})
 	}); err != nil {
-		return err
+		return nil, nil, err
 	}
 	if err := binarytarget.Validate(temporaryPath, "windows", installSource.Architecture); err != nil {
-		return hostInstallFailure("staged runtime executable format", ErrInvalidRequest, err)
+		return nil, nil, hostInstallFailure("staged runtime executable format", ErrInvalidRequest, err)
 	}
 	if err := installSource.Verify(temporaryPath); err != nil {
-		return hostInstallFailure("staged runtime bytes changed", ErrInvalidRequest, err)
+		return nil, nil, hostInstallFailure("staged runtime bytes changed", ErrInvalidRequest, err)
 	}
 	if installSource.Distribution == installsource.Official {
 		verifyCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		if err := nativesignature.New(nil).Verify(verifyCtx, temporaryPath, "windows", installSource.Architecture); err != nil {
-			return hostInstallFailure("staged runtime Authenticode", ErrInvalidRequest, err)
+			return nil, nil, hostInstallFailure("staged runtime Authenticode", ErrInvalidRequest, err)
 		}
 	}
 	trustedOwner, err := windowsRuntimeTrustedOwner()
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	if err := validateWindowsRuntimeSecurity(temporaryPath, trustedOwner, publicDACL, "staged executable"); err != nil {
-		return err
+		return nil, nil, err
 	}
-	if err := removeWindowsFileWithRetry(ctx, rollback); err != nil {
-		return err
-	}
-	if _, err := os.Stat(current); err == nil {
-		//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=current-to-rollback-slot-transition
-		if err := os.Rename(current, rollback); err != nil {
+	return func(ctx context.Context) error {
+		if err := removeWindowsFileWithRetry(ctx, rollback); err != nil {
 			return err
 		}
-	} else if !installNotExistOnly(err) {
-		return err
-	}
-	//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=verified-staged-runtime-activation
-	if err := os.Rename(temporaryPath, current); err != nil {
-		//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=restore-rollback-after-activation-failure
-		return hostInstallFailure("runtime publication and rollback failed", err, os.Rename(rollback, current))
-	}
-	return nil
+		if _, err := os.Stat(current); err == nil {
+			//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=current-to-rollback-slot-transition
+			if err := os.Rename(current, rollback); err != nil {
+				return err
+			}
+		} else if !installNotExistOnly(err) {
+			return err
+		}
+		//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=verified-staged-runtime-activation
+		if err := os.Rename(temporaryPath, current); err != nil {
+			//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=restore-rollback-after-activation-failure
+			return hostInstallFailure("runtime publication and rollback failed", err, os.Rename(rollback, current))
+		}
+		return nil
+	}, discard, nil
 }
 
 // removeWindowsFileWithRetry frees a slot. A file that another process still holds open is retried with a bounded
