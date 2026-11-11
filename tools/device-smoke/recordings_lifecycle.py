@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import select
 import subprocess
 import sys
 import tempfile
@@ -145,7 +146,7 @@ def played_text(recording_id):
     return result.stdout
 
 
-def phase_manual(team, target, directory):
+def phase_manual(team, target, directory, replay=True):
     """F25-01 (CLI start and stop), F25-02 (REC in pb connect), F25-04 (list, play, export), C273-C278."""
     before = {r['id'] for r in listing(team)}
     name = 'smoke-rec-' + uuid.uuid4().hex[:10]
@@ -170,16 +171,51 @@ def phase_manual(team, target, directory):
         ended = finished(team, recording['id'])
         if ended['id'] != recording['id']:
             raise RuntimeError('another recording ended')
+        if replay:
+            text = export_text(recording['id'], directory)
+            if marker not in text or '"o"' not in text:
+                raise RuntimeError('the export does not hold the output recorded while REC was on')
+            if after in text:
+                raise RuntimeError('the recording holds output printed after it was stopped')
+            if played_text(recording['id']).count(marker) < 1:
+                raise RuntimeError('pb recordings play did not show the recorded output')
+            by_machine = listing(team, ended['machine_id'])
+            if recording['id'] not in {r['id'] for r in by_machine}:
+                raise RuntimeError('--machine did not list the recording')
+        return recording['id']
+    finally:
+        session.end()
+        cleanup(PB, target, name)
+
+
+def phase_long(team, target, directory):
+    """F25-04: a long recording (about 8 MB of terminal output, many segments) streams to the end and verifies."""
+    before = {r['id'] for r in listing(team)}
+    name = 'smoke-rec-' + uuid.uuid4().hex[:10]
+    session = Session(target, name)
+    try:
+        sid = session.session_id()
+        recording_control('start', sid)
+        wait_for('REC in this client', session.saw_rec, timeout=30, interval=0.3)
+        done = 'PB_LONGDONE_' + uuid.uuid4().hex
+        session.terminal.send("head -c 6000000 /dev/urandom | base64 | fold -w 120; printf 'PB_LONGDONE_%s\\n' " + done.split('_')[-1] + '\r')
+        tail = b''
+        deadline = time.monotonic() + 600
+        while done.encode() not in tail:
+            if time.monotonic() > deadline:
+                raise RuntimeError('the long output did not finish')
+            if select.select([session.terminal.fd], [], [], 1)[0]:
+                chunk = os.read(session.terminal.fd, 1 << 16)  # drained, not kept: the recording is the evidence
+                tail = (tail + chunk)[-256:]
+                session.terminal.answer_queries(chunk)
+        recording_control('stop', sid)
+        recording = new_recording(team, target, before)
+        ended = finished(team, recording['id'])
+        if ended['segments'] < 4:
+            raise RuntimeError('the long recording has only %d segments' % ended['segments'])
         text = export_text(recording['id'], directory)
-        if marker not in text or '"o"' not in text:
-            raise RuntimeError('the export does not hold the output recorded while REC was on')
-        if after in text:
-            raise RuntimeError('the recording holds output printed after it was stopped')
-        if played_text(recording['id']).count(marker) < 1:
-            raise RuntimeError('pb recordings play did not show the recorded output')
-        by_machine = listing(team, ended['machine_id'])
-        if recording['id'] not in {r['id'] for r in by_machine}:
-            raise RuntimeError('--machine did not list the recording')
+        if text.count('\n') < 2 or len(text) < 6_000_000:
+            raise RuntimeError('the export is shorter than the output it recorded (%d bytes)' % len(text))
         return recording['id']
     finally:
         session.end()
@@ -211,7 +247,7 @@ def phase_second_client(team, target):
         cleanup(PB, target, name)
 
 
-def phase_rule(team, target, directory):
+def phase_rule(team, target, directory, replay=True):
     """F25-03: a record rule starts a recording when a recorded account attaches; removing it stops every recording."""
     original = command_result(PB, 'policy', 'get', '--workspace', team, timeout=60)
     if original.returncode:
@@ -250,7 +286,7 @@ def phase_rule(team, target, directory):
         session.end()
         session = None
         ended = finished(team, recording['id'])
-        if marker not in export_text(ended['id'], directory):
+        if replay and marker not in export_text(ended['id'], directory):
             raise RuntimeError('the rule recording does not hold its output')
         return ended['id']
     finally:
@@ -267,22 +303,28 @@ def main():
     parser.add_argument('target')
     parser.add_argument('--team', required=True)
     parser.add_argument('--vault-password-file')
-    parser.add_argument('--only', default='manual,second,rule')
+    parser.add_argument('--only', default='manual,second,rule,long')
+    parser.add_argument('--no-replay', action='store_true', help='skip export and play: this account has no unlocked vault that opens the team recording key')
     args = parser.parse_args()
     os.environ['PB_SMOKE_WORKSPACE'] = args.team
     unlock(args.vault_password_file)
+    if command_result(PB, 'recordings', '--help', timeout=60).returncode:
+        raise RuntimeError('pb recordings --help failed')
     phases = args.only.split(',')
     started = time.monotonic()
     receipt = {'check': 'recordings', 'target': args.target, 'status': 'PASS', 'phases': []}
     with tempfile.TemporaryDirectory(prefix='paperboat-recordings-') as directory:
         if 'manual' in phases:
-            receipt['manual_recording'] = phase_manual(args.team, args.target, directory)
-            receipt['phases'] += ['manual_start_stop', 'rec_in_connect', 'cli_list', 'cli_export', 'cli_play']
+            receipt['manual_recording'] = phase_manual(args.team, args.target, directory, not args.no_replay)
+            receipt['phases'] += ['manual_start_stop', 'rec_in_connect', 'cli_list'] + ([] if args.no_replay else ['cli_export', 'cli_play'])
+        if 'long' in phases:
+            receipt['long_recording'] = phase_long(args.team, args.target, directory)
+            receipt['phases'].append('cli_export_long')
         if 'second' in phases:
             phase_second_client(args.team, args.target)
             receipt['phases'].append('rec_on_attach')
         if 'rule' in phases:
-            receipt['rule_recording'] = phase_rule(args.team, args.target, directory)
+            receipt['rule_recording'] = phase_rule(args.team, args.target, directory, not args.no_replay)
             receipt['phases'] += ['rule_start', 'rule_removed_stops_new_recordings']
     receipt['seconds'] = round(time.monotonic() - started, 1)
     print(json.dumps(receipt), flush=True)
