@@ -142,29 +142,24 @@ func readWindowsCarrierFile(ctx context.Context, instance, path string) (Carrier
 	if path == "" || carrierConfigPath(instance) == "" {
 		return CarrierConfig{}, ErrInvalidRequest
 	}
-	// The first read only selects whose protected DACL to demand below, so it must not follow a link or open a device:
-	// only a regular file is opened here, the authority comes from the pinned handle's bytes.
-	if info, err := os.Lstat(path); err != nil {
-		return CarrierConfig{}, err
-	} else if !info.Mode().IsRegular() {
-		return CarrierConfig{}, ErrInvalidRequest
-	}
-	// The parent is protected before JSON is used as account custody input.
+	// One handle decides everything: the descriptor is opened without following a link, refused unless it is a
+	// single-link regular file, and decoded from this same handle. The handle's owner and exact ACL are demanded
+	// after the decode (the owner SID that names the ACL comes from the bytes), so no second open can swap the file
+	// between what was read and what was checked.
 	root, _ := WindowsInstanceRoot(instance)
 	trusted, err := windowsRuntimeTrustedOwner()
 	if err != nil {
 		return CarrierConfig{}, err
 	}
-	// Decode is bounded and grants no authority until handle owner and exact ACL checks below.
-	file, err := os.Open(path)
+	f, err := openCarrierHandle(path, windows.GENERIC_READ)
 	if err != nil {
 		return CarrierConfig{}, err
 	}
-	body, err := io.ReadAll(io.LimitReader(file, (32<<10)+1))
-	err = errors.Join(err, file.Close())
+	body, err := io.ReadAll(io.LimitReader(f, (32<<10)+1))
 	if err != nil {
-		return CarrierConfig{}, err
+		return CarrierConfig{}, errors.Join(err, f.Close())
 	}
+	defer f.Close()
 	c, err := decodeCarrier(body)
 	if err != nil {
 		return c, err
@@ -175,17 +170,11 @@ func readWindowsCarrierFile(ctx context.Context, instance, path string) (Carrier
 	if err := validateWindowsRuntimeSecurity(root, trusted, windowsRuntimeCurrentRootDACL(c.OwnerSID), "carrier account root"); err != nil {
 		return c, err
 	}
-	f, err := openCarrierProtectedFile(c, path, false)
-	if err != nil {
+	if err := validateWindowsRuntimeSecurity(filepath.Dir(path), trusted, windowsRuntimeCurrentRootDACL(c.OwnerSID), "carrier root"); err != nil {
 		return c, err
 	}
-	verified, err := io.ReadAll(io.LimitReader(f, (32<<10)+1))
-	err = errors.Join(err, f.Close())
-	if err != nil {
+	if err := checkWindowsRuntimeHandleSecurity(windows.Handle(f.Fd()), trusted, windowsRuntimeCurrentFileDACL(c.OwnerSID)); err != nil {
 		return c, err
-	}
-	if string(verified) != string(body) {
-		return c, ErrInvalidRequest
 	}
 	return c, nil
 }
@@ -206,13 +195,27 @@ func openCarrierProtectedFile(c CarrierConfig, path string, writable bool) (*os.
 		access |= windows.GENERIC_WRITE
 		dacl = carrierLockDACL(c.OwnerSID)
 	}
+	f, err := openCarrierHandle(path, access)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkWindowsRuntimeHandleSecurity(windows.Handle(f.Fd()), trusted, dacl); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
+// openCarrierHandle opens an existing file without following a reparse point and refuses anything but a regular
+// single-link file, judged on the open handle (not on the path, which can change between a check and the open).
+func openCarrierHandle(path string, access uint32) (*os.File, error) {
 	name, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return nil, err
 	}
-	handle, err := windows.CreateFile(name, access, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	handle, err := windows.CreateFile(name, access, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OPEN_REPARSE_POINT|windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
 	if err != nil {
-		return nil, err
+		return nil, &os.PathError{Op: "open", Path: path, Err: err}
 	}
 	f := os.NewFile(uintptr(handle), path)
 	var st windows.ByHandleFileInformation
@@ -223,10 +226,6 @@ func openCarrierProtectedFile(c CarrierConfig, path string, writable bool) (*os.
 	if st.NumberOfLinks != 1 || st.FileAttributes&(windows.FILE_ATTRIBUTE_DIRECTORY|windows.FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
 		f.Close()
 		return nil, ErrInvalidRequest
-	}
-	if err := checkWindowsRuntimeHandleSecurity(handle, trusted, dacl); err != nil {
-		f.Close()
-		return nil, err
 	}
 	return f, nil
 }
