@@ -55,7 +55,7 @@ func TestCredentialStreamAuthorizerValidatesNativePrivateBindingBeforeDispatch(t
 func (a *streamCredentialAuthorizer) CloseAuthorization() { a.closed = true }
 
 func TestCredentialStreamAuthorizerUsesCanonicalApplicationPolicy(t *testing.T) {
-	for consumer, capability := range map[string]string{"config_compare": "config.compare.v1", "terminal": "terminal.v1", "exec": "exec.v1", "ssh": "ssh.v1", "file_transfer": "file-transfer.v1", "private_preview": "preview.launch.v1", "codex": "codex.connect.v1"} {
+	for consumer, capability := range map[string]string{"config_compare": "config.compare.v1", "terminal": "terminal.v1", "exec": "exec.v1", "ssh": "ssh.v1", "file_transfer": "file-transfer.v1", "recording": "recording.v1"} {
 		t.Run(consumer, func(t *testing.T) {
 			var created *streamCredentialAuthorizer
 			authorize := CredentialStreamAuthorizer(func(token string) (Authorizer, error) {

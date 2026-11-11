@@ -194,7 +194,7 @@ func emittedConfigurationScopes(self, peer networkBinding, expiry int64) []netwo
 	for _, capability := range []string{"terminal", "exec", "managed_ssh", "private_access", "file_transfer"} {
 		out = append(out, timed("machine_access", capability))
 	}
-	out = append(out, timed("inspector", "inspector"), timed("config_compare", "config_compare"), timed("recording", "recording"), timed("codex_session", "codex"))
+	out = append(out, timed("inspector", "inspector"), timed("config_compare", "config_compare"), timed("recording", "recording"))
 	host := self.EndpointID // offlineAccessPeers: the host's own resource
 	if self.Role == peernetwork.RoleCLI {
 		host = peer.EndpointID // teamHostPeers: the member's CLI names the host

@@ -96,7 +96,7 @@ func TunnelPeerStreamOpener(stopping context.Context, peerTunnel *tunnel.PeerTer
 			return nil, ErrInvalidInventoryConfig
 		}
 		var terminalPayload localapi.PeerTerminalPayload
-		if len(request.Payload) > 0 && request.Consumer != "config_compare" && request.Consumer != "exec" && request.Consumer != "private_preview" && request.Consumer != "recording" {
+		if len(request.Payload) > 0 && request.Consumer != "config_compare" && request.Consumer != "exec" && request.Consumer != "recording" {
 			if err := json.Unmarshal(request.Payload, &terminalPayload); err != nil {
 				return nil, err
 			}

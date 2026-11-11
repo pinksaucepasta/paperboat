@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/peerconsumer"
 	"strings"
 	"time"
 )
@@ -49,9 +50,6 @@ type Header struct {
 	LoginUser string `json:"login_user,omitempty"`
 }
 
-// OfflineConsumers are the sessions a host may start without Paperboat.
-var OfflineConsumers = map[string]bool{"terminal": true, "exec": true, "ssh": true}
-
 func NewOffline(operationID, consumer, streamID string, deadline time.Time, maximumBytes uint64) (Header, error) {
 	value := Header{Version: Version, OperationID: operationID, Consumer: consumer, StreamID: streamID, DeadlineUnix: deadline.UTC().Unix(), MaximumBytes: maximumBytes, Offline: true}
 	if value.Validate(time.Time{}) != nil {
@@ -90,7 +88,7 @@ func (h Header) Validate(now time.Time) error {
 		return ErrInvalid
 	}
 	resume := h.Resume != ""
-	if (h.Offline || resume) != (h.Credential == "") || h.Offline && !OfflineConsumers[h.Consumer] {
+	if (h.Offline || resume) != (h.Credential == "") || h.Offline && !peerconsumer.Offline(h.Consumer) {
 		return ErrInvalid
 	}
 	if resume && (h.Offline || h.Consumer != "terminal" || len(h.Resume) > 128) {

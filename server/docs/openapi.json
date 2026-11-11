@@ -7980,8 +7980,7 @@
                     "inspector",
                     "config_compare",
                     "machine_network",
-                    "recording",
-                    "codex_session"
+                    "recording"
                   ]
                 },
                 "resource_id": {
@@ -13696,12 +13695,12 @@
                     "terminal",
                     "exec",
                     "ssh",
-                    "file",
                     "file_transfer",
-                    "file_transfer_key",
                     "private_http",
                     "private_tcp",
-                    "inspector"
+                    "inspector",
+                    "config_compare",
+                    "recording"
                   ]
                 },
                 "mode": {
