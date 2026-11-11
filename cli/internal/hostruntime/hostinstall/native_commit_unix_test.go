@@ -121,3 +121,33 @@ func TestNativeCommitFinishesWithExistingUpdateState(t *testing.T) {
 		})
 	}
 }
+
+// A commit with no update state yet still takes the activation lock; the lock creates the state directory, so the
+// directory existing afterwards shows the commit did not run lock-free.
+func TestNativeCommitLocksEvenWithoutUpdateState(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("protected install transaction requires root")
+	}
+	root := t.TempDir()
+	paths := installPaths{worker: filepath.Join(root, "pb"), workerRollback: filepath.Join(root, "rollback"), workerNext: filepath.Join(root, "next"), metadata: filepath.Join(root, "metadata"), journal: filepath.Join(root, "journal"), updateState: filepath.Join(root, "updates")}
+	for path, body := range map[string]string{paths.worker: "new bytes", paths.metadata: "old metadata"} {
+		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	source := generationRequest("a").Source
+	journal, err := newInstallJournal(paths, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal.Stage = "services_started"
+	if err := writeJournal(paths.journal, journal); err != nil {
+		t.Fatal(err)
+	}
+	if err := commitPreparedInstallationLocked(context.Background(), Request{Schema: SchemaV1, Source: source}, paths, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(paths.updateState); err != nil {
+		t.Fatalf("the commit ran without the activation lock: %v", err)
+	}
+}
