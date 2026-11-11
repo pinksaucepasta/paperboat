@@ -169,17 +169,55 @@ func NewAuthority(options AuthorityOptions) (*Authority, error) {
 	return &Authority{options: options, done: make(chan struct{}), refreshSlot: make(chan struct{}, 1), refreshWake: make(chan struct{}, 1), refreshNow: make(chan struct{}, 1), refreshUrgent: make(chan struct{}, 1)}, nil
 }
 
+// publicKeyCacheLimit bounds the validated peer keys remembered: an account holds at most a thousand machines.
+const publicKeyCacheLimit = 8192
+
+var (
+	publicKeys = struct {
+		sync.Mutex
+		valid map[string]key.NodePublic
+	}{valid: make(map[string]key.NodePublic)}
+	// lowOrderProbe is a fixed private key: ECDH with it fails for a low-order point. Building it costs one X25519
+	// scalar multiplication, so it is built once.
+	lowOrderProbe = sync.OnceValue(func() *ecdh.PrivateKey {
+		var scalar [32]byte
+		scalar[0] = 1
+		probe, _ := ecdh.X25519().NewPrivateKey(scalar[:])
+		return probe
+	})
+)
+
+// publicKey parses and validates a peer's WireGuard public key. Validation is an X25519 scalar multiplication
+// and the recovery loop validates every peer on every pass (about a third of an idle carrier's CPU, profiled
+// 2026-11-11), so a validated key is remembered.
 func publicKey(value string) (key.NodePublic, error) {
+	publicKeys.Lock()
+	remembered, ok := publicKeys.valid[value]
+	publicKeys.Unlock()
+	if ok {
+		return remembered, nil
+	}
+	result, err := validatePublicKey(value)
+	if err != nil {
+		return result, err
+	}
+	publicKeys.Lock()
+	if len(publicKeys.valid) >= publicKeyCacheLimit {
+		clear(publicKeys.valid)
+	}
+	publicKeys.valid[value] = result
+	publicKeys.Unlock()
+	return result, nil
+}
+
+func validatePublicKey(value string) (key.NodePublic, error) {
 	var result key.NodePublic
 	raw, err := base64.RawURLEncoding.Strict().DecodeString(value)
 	if err != nil || len(raw) != 32 || base64.RawURLEncoding.EncodeToString(raw) != value {
 		return result, ErrAuthority
 	}
-	var scalar [32]byte
-	scalar[0] = 1
-	validation, _ := ecdh.X25519().NewPrivateKey(scalar[:])
 	pub, _ := ecdh.X25519().NewPublicKey(raw)
-	if _, err := validation.ECDH(pub); err != nil {
+	if _, err := lowOrderProbe().ECDH(pub); err != nil {
 		return result, ErrAuthority
 	}
 	if err := result.UnmarshalText([]byte("nodekey:" + hex.EncodeToString(raw))); err != nil || result.IsZero() {
