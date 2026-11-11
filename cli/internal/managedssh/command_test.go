@@ -3,6 +3,9 @@ package managedssh
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -353,5 +356,48 @@ func waitSSHCommandServer(t *testing.T, done <-chan sshCommandServerResult) sshC
 	case <-time.After(2 * time.Second):
 		t.Fatal("SSH command server goroutine leaked")
 		return sshCommandServerResult{}
+	}
+}
+
+// C066: the target's Ed25519 host key changed and its ECDSA key did not. OpenSSH negotiates Ed25519 first and
+// refuses; pb's own client (Windows `pb ssh -- <command>`, pb ssh doctor) must refuse the same way instead of
+// connecting on the unchanged ECDSA key.
+func TestRunSSHCommandChecksTheHostKeyOpenSSHWould(t *testing.T) {
+	clientSigner, _ := testKey(t)
+	oldEd25519, _ := testKey(t)
+	newEd25519, _ := testKey(t)
+	ecdsaKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ecdsaSigner, err := ssh.NewSignerFromKey(ecdsaKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, client := net.Pipe()
+	go func() {
+		config := &ssh.ServerConfig{NoClientAuth: true}
+		config.AddHostKey(ecdsaSigner)
+		config.AddHostKey(newEd25519)
+		if connection, _, _, err := ssh.NewServerConn(server, config); err == nil {
+			_ = connection.Close()
+		}
+		_ = server.Close()
+	}()
+	err = RunSSHCommand(t.Context(), client, SSHCommandConfig{
+		Address: "hn.machines.example.test:22", User: "root", Command: "true", Signer: clientSigner,
+		AuthorizedHostKeys: []string{authorizedSSHKey(ecdsaSigner), authorizedSSHKey(oldEd25519)},
+		Output:             io.Discard, ErrorOutput: io.Discard,
+	})
+	if !errors.Is(err, ErrKnownHosts) {
+		t.Fatalf("changed Ed25519 key: err = %v, want ErrKnownHosts", err)
+	}
+}
+
+func TestOpenSSHHostKeyAlgorithmsPutTrustedTypesFirstInOpenSSHOrder(t *testing.T) {
+	got := openSSHHostKeyAlgorithms([]HostPublicKey{{Algorithm: ssh.KeyAlgoRSA}, {Algorithm: ssh.KeyAlgoECDSA256}})
+	want := []string{ssh.KeyAlgoECDSA256, ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256, ssh.KeyAlgoED25519, ssh.KeyAlgoECDSA384, ssh.KeyAlgoECDSA521}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("order = %v, want %v", got, want)
 	}
 }

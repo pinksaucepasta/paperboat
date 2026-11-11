@@ -67,8 +67,9 @@ func RunSSHCommand(ctx context.Context, stream io.ReadWriteCloser, config SSHCom
 		allowed[key.Fingerprint] = key.Algorithm
 	}
 	clientConfig := &ssh.ClientConfig{
-		User: config.User,
-		Auth: []ssh.AuthMethod{ssh.PublicKeys(config.Signer)},
+		User:              config.User,
+		Auth:              []ssh.AuthMethod{ssh.PublicKeys(config.Signer)},
+		HostKeyAlgorithms: openSSHHostKeyAlgorithms(keys),
 		HostKeyCallback: func(_ string, _ net.Addr, actual ssh.PublicKey) error {
 			if actual == nil {
 				return ErrKnownHosts

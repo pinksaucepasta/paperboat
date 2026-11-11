@@ -98,6 +98,30 @@ func hostKeySetFingerprint(keys []HostPublicKey) [32]byte {
 	return result
 }
 
+// openSSHHostKeyAlgorithms is the host-key preference pb's own SSH client offers: OpenSSH's default order
+// (KEX_DEFAULT_PK_ALG in OpenSSH's myproposal.h) with the trusted keys' types first (order_hostkeyalgs in
+// sshconnect2.c). The Go default prefers ECDSA and RSA over Ed25519, so after an Ed25519 key changed pb would
+// still connect on the unchanged ECDSA key where OpenSSH refuses.
+func openSSHHostKeyAlgorithms(keys []HostPublicKey) []string {
+	order := []struct{ algorithm, keyType string }{
+		{ssh.KeyAlgoED25519, ssh.KeyAlgoED25519},
+		{ssh.KeyAlgoECDSA256, ssh.KeyAlgoECDSA256},
+		{ssh.KeyAlgoECDSA384, ssh.KeyAlgoECDSA384},
+		{ssh.KeyAlgoECDSA521, ssh.KeyAlgoECDSA521},
+		{ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSA},
+		{ssh.KeyAlgoRSASHA256, ssh.KeyAlgoRSA},
+	}
+	var known, rest []string
+	for _, candidate := range order {
+		if slices.ContainsFunc(keys, func(key HostPublicKey) bool { return key.Algorithm == candidate.keyType }) {
+			known = append(known, candidate.algorithm)
+		} else {
+			rest = append(rest, candidate.algorithm)
+		}
+	}
+	return append(known, rest...)
+}
+
 func validHostKeyAlgorithm(value string) bool {
 	switch value {
 	case ssh.KeyAlgoED25519, ssh.KeyAlgoECDSA256, ssh.KeyAlgoECDSA384, ssh.KeyAlgoECDSA521, ssh.KeyAlgoRSA:

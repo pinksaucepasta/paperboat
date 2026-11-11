@@ -43,8 +43,9 @@ func ProbeSSHAuthentication(ctx context.Context, stream io.ReadWriteCloser, addr
 		allowed[index] = hostKeys[index].Fingerprint
 	}
 	config := &ssh.ClientConfig{
-		User: user,
-		Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		User:              user,
+		Auth:              []ssh.AuthMethod{ssh.PublicKeys(signer)},
+		HostKeyAlgorithms: openSSHHostKeyAlgorithms(hostKeys),
 		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
 			if slices.Contains(allowed, sha256.Sum256(key.Marshal())) {
 				return nil
