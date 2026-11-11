@@ -80,3 +80,57 @@ func TestARefusedRelayGrantLeavesDirectAdmission(t *testing.T) {
 		t.Fatal("an explicit relay with a refused grant was configured")
 	}
 }
+
+// One grant that does not verify (another relay process, a wrong signature, an unlisted relay, a peer the
+// configuration does not name) drops only its own relay: the other relays' grants still apply. Each used to wipe
+// every relay's grant, leaving the machine direct-only until the next refresh (audit A P1-5).
+func TestOneBadRelayGrantDropsOnlyItsRelay(t *testing.T) {
+	a, cfg, signer, _ := networkTestAuthority(t)
+	now := time.Now().Unix()
+	node := func(id string) RegionalNode {
+		return RegionalNode{NodeID: id, NodeGeneration: 1, ProcessEpoch: "epoch_" + id, Region: "test", FailureDomain: "test", Roles: []string{"relay"}, Transports: []string{"derp_quic"}, EndpointHost: "relay.example.test", EndpointQUICPort: 443, State: "ready", ObservedAt: now, ExpiresAt: now + 60, CapacityLimit: 100, CapacityUsed: 1, CapacityObservedAt: now}
+	}
+	good, bad := node("relay_good"), node("relay_bad")
+	candidates := RegionalCandidates{Schema: "paperboat.regional-candidates.v1", Issuer: cfg.Issuer, Audience: "paperboat-regional-candidates", AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, AuthorizationGeneration: cfg.Generation, Generation: 1, IssuedAt: now, ExpiresAt: now + 60, Nodes: []RegionalNode{good, bad}}
+	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, candidates)); err != nil {
+		t.Fatal(err)
+	}
+	sign := func(g peernetwork.RelayGrant, key ed25519.PrivateKey) string {
+		header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-relay-grant+jwt", "kid": "network_test"})
+		body, _ := json.Marshal(g)
+		signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)
+		return signed + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(key, []byte(signed)))
+	}
+	grant := func(n RegionalNode) peernetwork.RelayGrant {
+		return peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: now + 60, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: n.NodeID, NodeGeneration: n.NodeGeneration, ProcessEpoch: n.ProcessEpoch}
+	}
+	_, stranger, _ := ed25519.GenerateKey(rand.Reader)
+	for name, badToken := range map[string]func() []string{
+		"other_process": func() []string { g := grant(bad); g.ProcessEpoch = "epoch_restarted"; return []string{sign(g, signer)} },
+		"signature":     func() []string { return []string{sign(grant(bad), stranger)} },
+		"unlisted":      func() []string { return []string{sign(grant(node("relay_unlisted")), signer)} },
+		"unknown_peer": func() []string {
+			g := grant(bad)
+			g.Peers = []peernetwork.RelayPeer{{WireGuardPublicKey: cfg.Self.WireGuardPublicKey, Scopes: []derpquic.Scope{cfg.Peers[0].Scopes[0]}}}
+			return []string{sign(g, signer)}
+		},
+		"malformed":  func() []string { return []string{"not.a.grant"} },
+		"bad_second": func() []string { g := grant(bad); return []string{sign(g, signer), sign(g, stranger)} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := a.ApplyRelayGrants(t.Context(), append(badToken(), sign(grant(good), signer))); err != nil {
+				t.Fatalf("the good relay's grant was refused with the bad one: %v", err)
+			}
+			a.relay.mu.Lock()
+			_, kept := a.relay.grants[good.NodeID]
+			_, used := a.relay.grants[bad.NodeID]
+			a.relay.mu.Unlock()
+			if !kept || used {
+				t.Fatalf("good relay kept=%v, bad relay used=%v", kept, used)
+			}
+		})
+	}
+}
