@@ -3,6 +3,7 @@ package ingressprojection
 import (
 	"context"
 	"errors"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -63,12 +64,12 @@ func TestIngressProjectionRejectsInvalidTargetAndExpiry(t *testing.T) {
 	d.Binding.OriginAddress = "[::1]:443"
 	d.Binding.OriginScheme = "https"
 	d.Binding.TLSVerification = "custom_ca"
-	d.Binding.CAReference = "origin-ca"
+	d.Binding.TLSCASHA256 = strings.Repeat("ab", 32)
 	d.Binding.TLSServerName = "origin.example.com"
 	if err := completeIngressProjection(&d, now); err != nil {
 		t.Fatal(err)
 	}
-	if d.Binding.CAReference != "origin-ca" || d.Binding.TLSServerName != "origin.example.com" {
+	if d.Binding.TLSCASHA256 != strings.Repeat("ab", 32) || d.Binding.TLSServerName != "origin.example.com" {
 		t.Fatal("TLS policy changed")
 	}
 }

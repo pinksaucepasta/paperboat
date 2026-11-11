@@ -19,8 +19,6 @@ pb tunnel route add <tunnel> [flags]
 ### Options
 
 ```
-      --ca-reference string                  protected custom CA reference
-      --clear-ca-reference                   remove the custom CA reference
       --clear-client-credential-reference    remove the origin mTLS credential reference
       --clear-host-header                    remove the origin Host override
       --clear-tls-server-name                remove the explicit origin TLS server name
@@ -38,6 +36,7 @@ pb tunnel route add <tunnel> [flags]
       --priority int32                       route priority
       --protocol string                      route protocol (http, tcp, tls passthrough, or tcp_private) (default "http")
       --timeout duration                     maximum time to wait for operation completion (default 2m0s)
+      --tls-ca string                        trust this CA for the origin (PEM file, e.g. Caddy's tls internal root); sets custom_ca
       --tls-pin string                       pin the origin certificate by its fingerprint (sha256:<hex>), without connecting
       --tls-server-name string               explicit origin TLS server name
       --tls-verification string              origin TLS verification: system, custom_ca, pinned (shows the origin certificate and pins it), or insecure

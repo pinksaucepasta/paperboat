@@ -510,7 +510,6 @@
         "origin_address",
         "tls_server_name",
         "tls_verification",
-        "ca_reference",
         "mtls_credential_reference",
         "publication_id",
         "publication_generation",
@@ -614,9 +613,13 @@
             "custom_ca"
           ]
         },
-        "ca_reference": {
+        "tls_ca_sha256": {
           "type": "string",
-          "maxLength": 4096
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "tls_pin": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
         },
         "mtls_credential_reference": {
           "type": "string",

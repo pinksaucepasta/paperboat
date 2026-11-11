@@ -8766,8 +8766,11 @@ export interface components {
             origin_address: string;
             tls_server_name: string;
             /** @enum {string} */
-            tls_verification: "not_applicable" | "system" | "custom_ca";
-            ca_reference: string;
+            tls_verification: "not_applicable" | "system" | "custom_ca" | "insecure" | "pinned";
+            /** @description Hex SHA-256 of the custom_ca route's CA PEM; present only for custom_ca. */
+            tls_ca_sha256?: string;
+            /** @description sha256:<hex> of the pinned certificate; present only for pinned. */
+            tls_pin?: string;
             mtls_credential_reference: string;
             publication_id: string;
             publication_generation: number;
@@ -8915,7 +8918,7 @@ export interface components {
             /** @constant */
             wildcard_labels?: 1;
         } & (unknown & unknown & unknown);
-        /** @description HTTPS verification policy. system is the secure default. custom_ca and optional mTLS values are opaque credential references, never PEM or private-key material. insecure skips certificate checks (audited, and shown as a warning for origins that are not on loopback). pinned trusts exactly the certificate whose SHA-256 fingerprint is pin. */
+        /** @description HTTPS verification policy. system is the secure default. custom_ca trusts the route's own CA (ca_pem, public certificates only); the optional mTLS client identity is an opaque credential reference, never PEM or private-key material. insecure skips certificate checks (audited, and shown as a warning for origins that are not on loopback). pinned trusts exactly the certificate whose SHA-256 fingerprint is pin. */
         TunnelRouteTLS: {
             /** @enum {unknown} */
             verification: "system" | "custom_ca" | "insecure" | "pinned";
@@ -8923,7 +8926,8 @@ export interface components {
             pin?: string | null;
             /** @description TLS SNI and certificate hostname; independent of the HTTP Host header. */
             server_name?: string | null;
-            ca_reference?: components["schemas"]["OriginCredentialReference"] | null;
+            /** @description PEM CA certificates (at most 8) the route trusts for its https origin; required for custom_ca and refused otherwise. Example: Caddy's tls internal root. */
+            ca_pem?: string | null;
             /** @description Optional mTLS client identity reference, orthogonal to system or custom_ca verification. */
             client_credential_reference?: components["schemas"]["OriginCredentialReference"] | null;
         } & (unknown & unknown & unknown);

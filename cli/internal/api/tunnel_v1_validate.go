@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"net"
 	"net/http"
 	"net/url"
@@ -191,19 +192,14 @@ func validateRouteOrigin(origin TunnelRouteOrigin) error {
 	if (origin.TLS.Verification == "pinned") != (origin.TLS.Pin != nil) || origin.TLS.Pin != nil && !tunnelTLSPin.MatchString(*origin.TLS.Pin) {
 		return errors.New("TLS pin is invalid")
 	}
-	if origin.TLS.Verification == "custom_ca" && (origin.TLS.CAReference == nil || strings.TrimSpace(*origin.TLS.CAReference) == "") {
-		return errors.New("custom CA reference is required")
-	}
-	if origin.TLS.Verification != "custom_ca" && origin.TLS.CAReference != nil {
-		return errors.New("CA reference requires custom_ca verification")
+	if (origin.TLS.Verification == "custom_ca") != (origin.TLS.CA != nil) || origin.TLS.CA != nil && sharedprotocol.ValidateOriginCA(*origin.TLS.CA) != nil {
+		return errors.New("custom_ca verification needs its CA, and only custom_ca takes one")
 	}
 	if origin.TLS.ServerName != nil && !validTunnelOriginHost(*origin.TLS.ServerName) {
 		return errors.New("TLS server name is invalid")
 	}
-	for _, reference := range []*string{origin.TLS.CAReference, origin.TLS.ClientCredentialReference} {
-		if reference != nil && !validTunnelCredentialReference(*reference) {
-			return errors.New("TLS credential reference is invalid")
-		}
+	if reference := origin.TLS.ClientCredentialReference; reference != nil && !validTunnelCredentialReference(*reference) {
+		return errors.New("TLS credential reference is invalid")
 	}
 	return nil
 }

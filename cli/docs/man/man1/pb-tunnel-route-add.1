@@ -23,14 +23,6 @@ JSON output is supported with --json.
 
 
 .SH OPTIONS
-\fB--ca-reference\fP=""
-	protected custom CA reference
-
-.PP
-\fB--clear-ca-reference\fP[=false]
-	remove the custom CA reference
-
-.PP
 \fB--clear-client-credential-reference\fP[=false]
 	remove the origin mTLS credential reference
 
@@ -97,6 +89,10 @@ JSON output is supported with --json.
 .PP
 \fB--timeout\fP=2m0s
 	maximum time to wait for operation completion
+
+.PP
+\fB--tls-ca\fP=""
+	trust this CA for the origin (PEM file, e.g. Caddy's tls internal root); sets custom_ca
 
 .PP
 \fB--tls-pin\fP=""

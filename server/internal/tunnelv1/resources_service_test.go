@@ -286,10 +286,10 @@ func TestResourceServicePatchCarriesFullOriginTLSAndLimitProjection(t *testing.T
 	service := resourceServiceForTest(t, repo)
 	name, protocol, priority := "renamed", "http", int32(7)
 	connect, idle, streams := int32(500), int32(2500), int32(64)
-	serverName, caReference, mtlsReference := "backend.example.test", "keychain://paperboat/origins/rte_1/ca", "keychain://paperboat/origins/rte_1/client"
+	serverName, caReference, mtlsReference := "backend.example.test", testOriginCA, "keychain://paperboat/origins/rte_1/client"
 	result, err := service.PatchRoute(context.Background(), testRequest(false), "tun_1", "rte_1", RoutePatchRequest{
 		Name: &name, Protocol: &protocol, Priority: &priority, ConnectTimeoutMS: &connect, IdleTimeoutMS: &idle, MaxConcurrentStreams: &streams,
-		Origin:   &RouteOriginRequest{Scheme: "https", Address: "backend.example.test:443", PreserveHost: false, HostOverride: resourceStringPtr("origin.example.test"), TLS: &RouteTLSRequest{Verification: "custom_ca", ServerName: &serverName, CAReference: &caReference, ClientCredentialReference: &mtlsReference}},
+		Origin:   &RouteOriginRequest{Scheme: "https", Address: "backend.example.test:443", PreserveHost: false, HostOverride: resourceStringPtr("origin.example.test"), TLS: &RouteTLSRequest{Verification: "custom_ca", ServerName: &serverName, CA: &caReference, ClientCredentialReference: &mtlsReference}},
 		Mutation: ResourceMutationInput{ExpectedGeneration: 2, IdempotencyKey: "route_patch_1", RequestHash: testHash()},
 	})
 	if err != nil {
@@ -299,7 +299,7 @@ func TestResourceServicePatchCarriesFullOriginTLSAndLimitProjection(t *testing.T
 		t.Fatalf("patch presence flags = %+v", repo.patchRoute)
 	}
 	origin := repo.patchRoute.Origin
-	if origin.Scheme != "https" || origin.PreserveHost || origin.HostOverride == nil || *origin.HostOverride != "origin.example.test" || origin.TLS == nil || origin.TLS.Verification != "custom_ca" || origin.TLS.ServerName == nil || *origin.TLS.ServerName != serverName || origin.TLS.CAReference == nil || origin.TLS.ClientCredentialReference == nil {
+	if origin.Scheme != "https" || origin.PreserveHost || origin.HostOverride == nil || *origin.HostOverride != "origin.example.test" || origin.TLS == nil || origin.TLS.Verification != "custom_ca" || origin.TLS.ServerName == nil || *origin.TLS.ServerName != serverName || origin.TLS.CA == nil || origin.TLS.ClientCredentialReference == nil {
 		t.Fatalf("full origin projection = %+v", origin)
 	}
 	if repo.patchRoute.ConnectTimeoutMS != connect || repo.patchRoute.IdleTimeoutMS != idle || repo.patchRoute.MaxConcurrentStreams != streams || result.Operation.State != "running" {
@@ -308,7 +308,7 @@ func TestResourceServicePatchCarriesFullOriginTLSAndLimitProjection(t *testing.T
 }
 
 func TestRouteTLSValidationKeepsVerificationAndCredentialReferencesCoherent(t *testing.T) {
-	ca := "keychain://paperboat/origins/ca_01"
+	ca := testOriginCA
 	client := "keychain://paperboat/origins/client_01"
 	plainPath := "/etc/paperboat/origin-ca.pem"
 	pem := "-----BEGIN CERTIFICATE-----"
@@ -321,7 +321,7 @@ func TestRouteTLSValidationKeepsVerificationAndCredentialReferencesCoherent(t *t
 	}{
 		{name: "system", value: RouteTLSRequest{Verification: "system"}},
 		{name: "system mTLS", value: RouteTLSRequest{Verification: "system", ClientCredentialReference: &client}},
-		{name: "custom CA and mTLS", value: RouteTLSRequest{Verification: "custom_ca", CAReference: &ca, ClientCredentialReference: &client}},
+		{name: "custom CA and mTLS", value: RouteTLSRequest{Verification: "custom_ca", CA: &ca, ClientCredentialReference: &client}},
 		{name: "insecure explicit", value: RouteTLSRequest{Verification: "insecure"}},
 		{name: "pinned", value: RouteTLSRequest{Verification: "pinned", Pin: &pin}},
 		{name: "pinned without pin", value: RouteTLSRequest{Verification: "pinned"}, wantErr: true},
@@ -329,10 +329,10 @@ func TestRouteTLSValidationKeepsVerificationAndCredentialReferencesCoherent(t *t
 		{name: "pin not lowercase sha256", value: RouteTLSRequest{Verification: "pinned", Pin: &badPin}, wantErr: true},
 		{name: "old development name", value: RouteTLSRequest{Verification: "insecure_development"}, wantErr: true},
 		{name: "custom CA missing reference", value: RouteTLSRequest{Verification: "custom_ca"}, wantErr: true},
-		{name: "system with irrelevant CA", value: RouteTLSRequest{Verification: "system", CAReference: &ca}, wantErr: true},
-		{name: "insecure with irrelevant CA", value: RouteTLSRequest{Verification: "insecure", CAReference: &ca}, wantErr: true},
-		{name: "raw filesystem path", value: RouteTLSRequest{Verification: "custom_ca", CAReference: &plainPath}, wantErr: true},
-		{name: "raw PEM", value: RouteTLSRequest{Verification: "custom_ca", CAReference: &pem}, wantErr: true},
+		{name: "system with irrelevant CA", value: RouteTLSRequest{Verification: "system", CA: &ca}, wantErr: true},
+		{name: "insecure with irrelevant CA", value: RouteTLSRequest{Verification: "insecure", CA: &ca}, wantErr: true},
+		{name: "a path instead of the CA", value: RouteTLSRequest{Verification: "custom_ca", CA: &plainPath}, wantErr: true},
+		{name: "PEM that is not a certificate", value: RouteTLSRequest{Verification: "custom_ca", CA: &pem}, wantErr: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			err := validateRouteTLS(test.value)
@@ -358,26 +358,33 @@ func TestRouteAuditMetadataMarksInsecureWithoutSecretReferences(t *testing.T) {
 	}
 }
 
-func TestRouteJSONContainsOnlyOpaqueTLSReferences(t *testing.T) {
+// A route's JSON carries the public CA it trusts and the mTLS identity only as an opaque reference:
+// never a private key or resolved client certificate.
+func TestRouteJSONCarriesThePublicCAAndOnlyAnOpaqueClientReference(t *testing.T) {
 	row := resourceRoute("rte_tls", "http", "managed")
 	row.OriginScheme = "https"
 	row.TlsVerification = "custom_ca"
 	row.TlsServerName = sql.NullString{String: "origin.example.test", Valid: true}
-	row.CaReference = sql.NullString{String: "keychain://paperboat/origins/rte_tls/ca", Valid: true}
+	row.TlsCa = sql.NullString{String: testOriginCA, Valid: true}
 	row.MtlsCredentialReference = sql.NullString{String: "keychain://paperboat/origins/rte_tls/client", Valid: true}
 	encoded, err := json.Marshal(routeView(row))
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(encoded)
-	for _, reference := range []string{row.CaReference.String, row.MtlsCredentialReference.String} {
-		if !strings.Contains(text, reference) {
-			t.Fatalf("route JSON omitted opaque reference %q: %s", reference, text)
-		}
+	var view struct {
+		Origin struct {
+			TLS struct {
+				CA     string `json:"ca_pem"`
+				Client string `json:"client_credential_reference"`
+			} `json:"tls"`
+		} `json:"origin"`
 	}
-	for _, forbidden := range []string{"BEGIN CERTIFICATE", "BEGIN PRIVATE KEY", "private_key_pem", "certificate_pem", "bearer"} {
-		if strings.Contains(text, forbidden) {
-			t.Fatalf("route JSON contains resolved secret marker %q: %s", forbidden, text)
+	if err := json.Unmarshal(encoded, &view); err != nil || view.Origin.TLS.CA != testOriginCA || view.Origin.TLS.Client != row.MtlsCredentialReference.String {
+		t.Fatalf("route JSON TLS = %+v, %v", view.Origin.TLS, err)
+	}
+	for _, forbidden := range []string{"BEGIN PRIVATE KEY", "private_key_pem", "certificate_pem", "bearer"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("route JSON contains secret marker %q: %s", forbidden, encoded)
 		}
 	}
 }
@@ -477,3 +484,17 @@ func (f *fakeResourceRepository) ResolveManagementAccount(_ context.Context, act
 	}
 	return actor, false, nil
 }
+
+// testOriginCA is a throwaway self-signed CA (P-256, no key kept) for custom_ca routes.
+const testOriginCA = `-----BEGIN CERTIFICATE-----
+MIIBlzCCAT2gAwIBAgIUIdrtpT9Luhwjt1J+UGY/rppiAWwwCgYIKoZIzj0EAwIw
+ITEfMB0GA1UEAwwWRXhhbXBsZSBUZXN0IE9yaWdpbiBDQTAeFw0yNjExMTExNDM0
+MjFaFw0zNjExMDgxNDM0MjFaMCExHzAdBgNVBAMMFkV4YW1wbGUgVGVzdCBPcmln
+aW4gQ0EwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAATC1VEEKvJelrhjIkBs0Bxg
+LdYjcJ4950vYMBAFWsVhVc1p2XeTtuHn7Zkk28fm0IxGYqM2vn2y4pwFIX+WxtxK
+o1MwUTAdBgNVHQ4EFgQUl35hczJPXBz4QIjMgSm1Y87MIdUwHwYDVR0jBBgwFoAU
+l35hczJPXBz4QIjMgSm1Y87MIdUwDwYDVR0TAQH/BAUwAwEB/zAKBggqhkjOPQQD
+AgNIADBFAiEAvTVH1jZGj+VY1uTmZHvXen/x/gXT3CtGjWVraatH4H4CIGpr/0YE
+cmzbAqwChtlkH/qpOVhGLFYWJMHz90AjSyGz
+-----END CERTIFICATE-----
+`

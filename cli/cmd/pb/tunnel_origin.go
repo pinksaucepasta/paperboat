@@ -104,14 +104,13 @@ func tunnelRouteOriginFlags(command *cobra.Command, preserveDefault bool) {
 	command.Flags().String("tls-pin", "", "pin the origin certificate by its fingerprint (sha256:<hex>), without connecting")
 	command.Flags().String("tls-server-name", "", "explicit origin TLS server name")
 	command.Flags().Bool("clear-tls-server-name", false, "remove the explicit origin TLS server name")
-	command.Flags().String("ca-reference", "", "protected custom CA reference")
-	command.Flags().Bool("clear-ca-reference", false, "remove the custom CA reference")
+	command.Flags().String("tls-ca", "", "trust this CA for the origin (PEM file, e.g. Caddy's tls internal root); sets custom_ca")
 	command.Flags().String("client-credential-reference", "", "protected origin mTLS credential reference")
 	command.Flags().Bool("clear-client-credential-reference", false, "remove the origin mTLS credential reference")
 }
 
 func tunnelRouteOriginFlagsChanged(command *cobra.Command) bool {
-	for _, name := range []string{"preserve-host", "host-header", "clear-host-header", "tls-verification", "tls-pin", "tls-server-name", "clear-tls-server-name", "ca-reference", "clear-ca-reference", "client-credential-reference", "clear-client-credential-reference"} {
+	for _, name := range []string{"preserve-host", "host-header", "clear-host-header", "tls-verification", "tls-pin", "tls-server-name", "clear-tls-server-name", "tls-ca", "client-credential-reference", "clear-client-credential-reference"} {
 		if command.Flags().Changed(name) {
 			return true
 		}
@@ -137,7 +136,7 @@ func applyTunnelRouteOriginFlags(command *cobra.Command, origin api.TunnelRouteO
 		origin.HostOverride = nil
 	}
 	if origin.Scheme != "https" {
-		for _, name := range []string{"tls-verification", "tls-pin", "tls-server-name", "clear-tls-server-name", "ca-reference", "clear-ca-reference", "client-credential-reference", "clear-client-credential-reference"} {
+		for _, name := range []string{"tls-verification", "tls-pin", "tls-server-name", "clear-tls-server-name", "tls-ca", "client-credential-reference", "clear-client-credential-reference"} {
 			if command.Flags().Changed(name) {
 				return api.TunnelRouteOrigin{}, errors.New("origin TLS flags require an https:// origin")
 			}
@@ -181,22 +180,15 @@ func applyTunnelRouteOriginFlags(command *cobra.Command, origin api.TunnelRouteO
 	} else if clearServerName {
 		tls.ServerName = nil
 	}
-	caReference, _ := command.Flags().GetString("ca-reference")
-	clearCA, _ := command.Flags().GetBool("clear-ca-reference")
-	if command.Flags().Changed("ca-reference") && clearCA {
-		return api.TunnelRouteOrigin{}, errors.New("--ca-reference and --clear-ca-reference cannot be combined")
-	}
-	if command.Flags().Changed("ca-reference") {
-		if strings.TrimSpace(caReference) == "" {
-			return api.TunnelRouteOrigin{}, errors.New("ca-reference is invalid")
+	if path, _ := command.Flags().GetString("tls-ca"); command.Flags().Changed("tls-ca") {
+		ca, err := readOriginCA(path)
+		if err != nil {
+			return api.TunnelRouteOrigin{}, err
 		}
-		tls.CAReference = &caReference
-		tls.Verification = "custom_ca"
-	} else if clearCA {
-		tls.CAReference = nil
-		if tls.Verification == "custom_ca" {
-			tls.Verification = "system"
+		if command.Flags().Changed("tls-verification") && tls.Verification != "custom_ca" {
+			return api.TunnelRouteOrigin{}, errors.New("--tls-ca needs --tls-verification custom_ca (or no --tls-verification)")
 		}
+		tls.CA, tls.Verification = &ca, "custom_ca"
 	}
 	clientReference, _ := command.Flags().GetString("client-credential-reference")
 	clearClient, _ := command.Flags().GetBool("clear-client-credential-reference")
@@ -211,11 +203,10 @@ func applyTunnelRouteOriginFlags(command *cobra.Command, origin api.TunnelRouteO
 	} else if clearClient {
 		tls.ClientCredentialReference = nil
 	}
-	if tls.Verification != "custom_ca" && tls.CAReference != nil {
-		return api.TunnelRouteOrigin{}, errors.New("ca-reference requires custom_ca TLS verification")
-	}
-	if tls.Verification == "custom_ca" && tls.CAReference == nil {
-		return api.TunnelRouteOrigin{}, errors.New("custom_ca TLS verification requires --ca-reference")
+	if tls.Verification != "custom_ca" {
+		tls.CA = nil
+	} else if tls.CA == nil {
+		return api.TunnelRouteOrigin{}, errors.New("custom_ca TLS verification needs --tls-ca <file> (the CA's PEM certificate)")
 	}
 	if tls.Verification != "pinned" {
 		tls.Pin = nil

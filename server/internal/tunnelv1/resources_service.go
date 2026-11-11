@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/edgeports"
 	"io"
 	"net/url"
@@ -518,7 +519,7 @@ func routeView(row dbsqlc.TunnelRoute) RouteView {
 	}
 	origin := RouteOrigin{Scheme: row.OriginScheme, Address: row.OriginAddress, PreserveHost: row.PreserveHost, HostOverride: nullStringPointer(row.HostOverride)}
 	if row.OriginScheme == "https" {
-		origin.TLS = &RouteTLS{Verification: row.TlsVerification, ServerName: nullStringPointer(row.TlsServerName), CAReference: nullStringPointer(row.CaReference), ClientCredentialReference: nullStringPointer(row.MtlsCredentialReference), Pin: nullStringPointer(row.TlsPin)}
+		origin.TLS = &RouteTLS{Verification: row.TlsVerification, ServerName: nullStringPointer(row.TlsServerName), CA: nullStringPointer(row.TlsCa), ClientCredentialReference: nullStringPointer(row.MtlsCredentialReference), Pin: nullStringPointer(row.TlsPin)}
 	}
 	return RouteView{Schema: Schema, Kind: "route", ID: row.ID, TunnelID: row.TunnelID, Name: row.Name, Protocol: wireProtocol(row.Protocol), HostMatch: hostMatch,
 		PathPrefix: nullStringPointer(row.PathPrefix), Origin: origin, Priority: row.Priority, ConnectTimeoutMS: row.ConnectTimeoutMs, IdleTimeoutMS: row.IdleTimeoutMs,
@@ -970,13 +971,13 @@ func validateRouteTLS(tls RouteTLSRequest) error {
 	if (tls.Verification == "pinned") != (tls.Pin != nil) || tls.Pin != nil && !tlsPinPattern.MatchString(*tls.Pin) {
 		return fmt.Errorf("%w: pinned verification needs pin sha256:<64 lowercase hex>, and only pinned takes a pin", ErrInvalidInput)
 	}
-	if tls.Verification == "custom_ca" && (tls.CAReference == nil || strings.TrimSpace(*tls.CAReference) == "") {
-		return fmt.Errorf("%w: custom CA reference is required", ErrInvalidInput)
+	if (tls.Verification == "custom_ca") != (tls.CA != nil) {
+		return fmt.Errorf("%w: custom_ca verification needs its CA (ca_pem), and only custom_ca takes one", ErrInvalidInput)
 	}
-	if tls.Verification != "custom_ca" && tls.CAReference != nil {
-		return fmt.Errorf("%w: CA reference requires custom_ca verification", ErrInvalidInput)
+	if tls.CA != nil && wire.ValidateOriginCA(*tls.CA) != nil {
+		return fmt.Errorf("%w: ca_pem must be PEM CA certificates (at most 8, 16 KiB)", ErrInvalidInput)
 	}
-	for name, value := range map[string]*string{"server_name": tls.ServerName, "ca_reference": tls.CAReference, "client_credential_reference": tls.ClientCredentialReference} {
+	for name, value := range map[string]*string{"server_name": tls.ServerName, "client_credential_reference": tls.ClientCredentialReference} {
 		if value != nil {
 			if err := validateWriteOnlyReferenceOrHost(name, *value); err != nil {
 				return err

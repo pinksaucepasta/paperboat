@@ -6,9 +6,12 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/pem"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -94,15 +97,59 @@ func TestOriginCertificateHintNamesTheFix(t *testing.T) {
 		leaf *x509.Certificate
 		want string
 	}{
-		{"caddy internal", certificate("", "Caddy Local Authority - ECC Intermediate", []string{"app.example.test"}, now.Add(time.Hour)), "insecure"},
+		{"caddy internal", certificate("", "Caddy Local Authority - ECC Intermediate", []string{"app.example.test"}, now.Add(time.Hour)), "--tls-ca"},
 		{"traefik default", certificate("TRAEFIK DEFAULT CERT", "TRAEFIK DEFAULT CERT", nil, now.Add(time.Hour)), "http entrypoint"},
 		{"expired", certificate("nas", "Some CA", []string{"app.example.test"}, now.Add(-time.Minute)), "expired"},
 		{"other name", certificate("nas", "Some CA", []string{"nas.lan"}, now.Add(time.Hour)), "--tls-server-name nas.lan"},
 		{"self-signed", certificate("proxmox", "proxmox", []string{"app.example.test"}, now.Add(time.Hour)), "pinned"},
-		{"private CA", certificate("app", "Corp CA", []string{"app.example.test"}, now.Add(time.Hour)), "--ca-reference"},
+		{"private CA", certificate("app", "Corp CA", []string{"app.example.test"}, now.Add(time.Hour)), "--tls-ca"},
 	} {
 		if hint := originCertificateHint(test.leaf, "app.example.test", now); !strings.Contains(hint, test.want) {
 			t.Errorf("%s: hint %q, want it to name %q", test.name, hint, test.want)
 		}
 	}
+}
+
+// --tls-ca reads and checks the CA file at add time and makes the route custom_ca; a leaf certificate
+// or a missing file fails before anything is sent.
+func TestTunnelRouteOriginCAFlag(t *testing.T) {
+	dir := t.TempDir()
+	ca := filepath.Join(dir, "root.crt")
+	root := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: testCertificateRaw(t, true)})
+	if err := os.WriteFile(ca, root, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	origin := api.TunnelRouteOrigin{Scheme: "https", Address: "localhost:443", TLS: &api.TunnelRouteTLS{Verification: "system"}}
+	got, err := applyTunnelRouteOriginFlags(tunnelOriginFlagCommand(t, "--tls-ca", ca), origin)
+	if err != nil || got.TLS.Verification != "custom_ca" || got.TLS.CA == nil || *got.TLS.CA != string(root) {
+		t.Fatalf("--tls-ca = %+v, %v", got.TLS, err)
+	}
+	leaf := filepath.Join(dir, "leaf.crt")
+	if err := os.WriteFile(leaf, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: testCertificateRaw(t, false)}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := applyTunnelRouteOriginFlags(tunnelOriginFlagCommand(t, "--tls-ca", leaf), origin); err == nil {
+		t.Fatal("a leaf certificate was accepted as the route CA")
+	}
+	if _, err := applyTunnelRouteOriginFlags(tunnelOriginFlagCommand(t, "--tls-ca", filepath.Join(dir, "missing.crt")), origin); err == nil {
+		t.Fatal("a missing CA file was accepted")
+	}
+	back, err := applyTunnelRouteOriginFlags(tunnelOriginFlagCommand(t, "--tls-verification", "system"), got)
+	if err != nil || back.TLS.CA != nil {
+		t.Fatalf("back to system kept the CA: %+v, %v", back.TLS, err)
+	}
+}
+
+func testCertificateRaw(t *testing.T, isCA bool) []byte {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Caddy Local Authority - 2026 ECC Root"}, NotBefore: time.Now(), NotAfter: time.Now().Add(time.Hour), IsCA: isCA, BasicConstraintsValid: true}
+	raw, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }

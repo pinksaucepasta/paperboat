@@ -99,14 +99,23 @@ func TestNetworkOriginTLSConfigEnforcesVerificationPolicy(t *testing.T) {
 	}
 	route.TLSVerification = "custom_ca"
 	if _, err := (NetworkOriginProber{}).originTLSConfig(context.Background(), route); !errors.Is(err, ErrInvalidConfig) {
-		t.Fatalf("custom CA without provider = %v", err)
+		t.Fatalf("custom CA without its CA = %v", err)
 	}
+	notCA := "not a certificate"
+	route.TLSCA = &notCA
+	if _, err := (NetworkOriginProber{}).originTLSConfig(context.Background(), route); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("custom CA with no certificate = %v", err)
+	}
+	route.TLSVerification, route.TLSCA = "system", nil
+	mtls := "keychain://paperboat/origins/mtls_01"
+	route.MTLSCredentialReference = &mtls
 	provider := originTLSProviderFunc(func(context.Context, hoststate.TunnelConfigRoute) (*tls.Config, error) {
 		return &tls.Config{InsecureSkipVerify: true}, nil //nolint:gosec
 	})
 	if _, err := (NetworkOriginProber{TLS: provider}).originTLSConfig(context.Background(), route); !errors.Is(err, ErrInvalidConfig) {
 		t.Fatalf("provider disabled verification: %v", err)
 	}
+	route.MTLSCredentialReference = nil
 	route.TLSVerification = "mutual_tls"
 	if err := (NetworkOriginProber{Dialer: &originDialer{}}).ProbeOrigin(context.Background(), route); !errors.Is(err, ErrInvalidConfig) {
 		t.Fatalf("obsolete mutual_tls mode = %v", err)

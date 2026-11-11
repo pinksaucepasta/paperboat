@@ -2258,7 +2258,6 @@
           "origin_address",
           "tls_server_name",
           "tls_verification",
-          "ca_reference",
           "mtls_credential_reference",
           "publication_id",
           "publication_generation",
@@ -2353,11 +2352,18 @@
             "enum": [
               "not_applicable",
               "system",
-              "custom_ca"
+              "custom_ca",
+              "insecure",
+              "pinned"
             ]
           },
-          "ca_reference": {
-            "type": "string"
+          "tls_ca_sha256": {
+            "type": "string",
+            "description": "Hex SHA-256 of the custom_ca route's CA PEM; present only for custom_ca."
+          },
+          "tls_pin": {
+            "type": "string",
+            "description": "sha256:<hex> of the pinned certificate; present only for pinned."
           },
           "mtls_credential_reference": {
             "type": "string"
@@ -2973,7 +2979,7 @@
         "required": [
           "verification"
         ],
-        "description": "HTTPS verification policy. system is the secure default. custom_ca and optional mTLS values are opaque credential references, never PEM or private-key material. insecure skips certificate checks (audited, and shown as a warning for origins that are not on loopback). pinned trusts exactly the certificate whose SHA-256 fingerprint is pin.",
+        "description": "HTTPS verification policy. system is the secure default. custom_ca trusts the route's own CA (ca_pem, public certificates only); the optional mTLS client identity is an opaque credential reference, never PEM or private-key material. insecure skips certificate checks (audited, and shown as a warning for origins that are not on loopback). pinned trusts exactly the certificate whose SHA-256 fingerprint is pin.",
         "properties": {
           "verification": {
             "enum": [
@@ -3001,15 +3007,14 @@
             "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$",
             "description": "TLS SNI and certificate hostname; independent of the HTTP Host header."
           },
-          "ca_reference": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/OriginCredentialReference"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "ca_pem": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 16384,
+            "pattern": "^(-----BEGIN CERTIFICATE-----\\r?\\n[A-Za-z0-9+/=\\r\\n]+-----END CERTIFICATE-----\\r?\\n?)+$",
+            "description": "PEM CA certificates (at most 8) the route trusts for its https origin; required for custom_ca and refused otherwise. Example: Caddy's tls internal root."
           },
           "client_credential_reference": {
             "anyOf": [
@@ -3034,11 +3039,11 @@
             },
             "then": {
               "required": [
-                "ca_reference"
+                "ca_pem"
               ],
               "properties": {
-                "ca_reference": {
-                  "$ref": "#/components/schemas/OriginCredentialReference"
+                "ca_pem": {
+                  "type": "string"
                 }
               }
             }
@@ -3078,7 +3083,7 @@
             },
             "then": {
               "properties": {
-                "ca_reference": {
+                "ca_pem": {
                   "type": "null"
                 }
               }

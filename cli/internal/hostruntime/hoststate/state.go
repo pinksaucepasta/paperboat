@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"io"
 	"net/url"
 	"path"
@@ -66,20 +67,21 @@ type TunnelConfigSnapshot struct {
 }
 
 type TunnelConfigRoute struct {
-	ID                      string  `json:"id"`
-	Name                    string  `json:"name"`
-	Protocol                string  `json:"protocol"`
-	MatchType               string  `json:"match_type"`
-	MatchHostname           string  `json:"match_hostname,omitempty"`
-	WildcardSuffix          string  `json:"wildcard_suffix,omitempty"`
-	PathPrefix              *string `json:"path_prefix"`
-	OriginScheme            string  `json:"origin_scheme"`
-	OriginAddress           string  `json:"origin_address"`
-	PreserveHost            bool    `json:"preserve_host"`
-	HostOverride            *string `json:"host_override"`
-	TLSVerification         string  `json:"tls_verification"`
-	TLSServerName           *string `json:"tls_server_name"`
-	CAReference             *string `json:"ca_reference"`
+	ID              string  `json:"id"`
+	Name            string  `json:"name"`
+	Protocol        string  `json:"protocol"`
+	MatchType       string  `json:"match_type"`
+	MatchHostname   string  `json:"match_hostname,omitempty"`
+	WildcardSuffix  string  `json:"wildcard_suffix,omitempty"`
+	PathPrefix      *string `json:"path_prefix"`
+	OriginScheme    string  `json:"origin_scheme"`
+	OriginAddress   string  `json:"origin_address"`
+	PreserveHost    bool    `json:"preserve_host"`
+	HostOverride    *string `json:"host_override"`
+	TLSVerification string  `json:"tls_verification"`
+	TLSServerName   *string `json:"tls_server_name"`
+	// TLSCA is the PEM CA a custom_ca route trusts for its https origin, stored with the route.
+	TLSCA                   *string `json:"tls_ca,omitempty"`
 	MTLSCredentialReference *string `json:"mtls_credential_reference"`
 	// TLSPin is "sha256:<hex>" of the one certificate a pinned route trusts.
 	TLSPin               *string `json:"tls_pin,omitempty"`
@@ -192,7 +194,7 @@ func parseTunnelConfigSnapshot(canonical []byte, tunnelID string, generation uin
 		if routeObject == nil {
 			return TunnelConfigSnapshot{}, ErrInvalidState
 		}
-		for _, field := range []string{"id", "name", "protocol", "match_type", "path_prefix", "origin_scheme", "origin_address", "preserve_host", "host_override", "tls_verification", "tls_server_name", "ca_reference", "mtls_credential_reference", "connect_timeout_ms", "idle_timeout_ms", "max_concurrent_streams", "desired_state"} {
+		for _, field := range []string{"id", "name", "protocol", "match_type", "path_prefix", "origin_scheme", "origin_address", "preserve_host", "host_override", "tls_verification", "tls_server_name", "mtls_credential_reference", "connect_timeout_ms", "idle_timeout_ms", "max_concurrent_streams", "desired_state"} {
 			if _, ok := routeObject[field]; !ok {
 				return TunnelConfigSnapshot{}, fmt.Errorf("%w: route field %s is required", ErrInvalidState, field)
 			}
@@ -274,10 +276,10 @@ func validateTunnelConfigRoute(route TunnelConfigRoute) error {
 		return ErrInvalidState
 	}
 	if route.OriginScheme == "https" {
-		if route.TLSVerification == "not_applicable" || route.TLSVerification == "custom_ca" && route.CAReference == nil || route.TLSVerification != "custom_ca" && route.CAReference != nil {
+		if route.TLSVerification == "not_applicable" || (route.TLSVerification == "custom_ca") != (route.TLSCA != nil) || route.TLSCA != nil && sharedprotocol.ValidateOriginCA(*route.TLSCA) != nil {
 			return ErrInvalidState
 		}
-	} else if route.CAReference != nil || route.MTLSCredentialReference != nil || route.TLSServerName != nil {
+	} else if route.TLSCA != nil || route.MTLSCredentialReference != nil || route.TLSServerName != nil {
 		return ErrInvalidState
 	}
 	if route.PathPrefix != nil && (len(*route.PathPrefix) == 0 || len(*route.PathPrefix) > 512 || !strings.HasPrefix(*route.PathPrefix, "/") || strings.ContainsAny(*route.PathPrefix, "\r\n")) {
@@ -289,7 +291,7 @@ func validateTunnelConfigRoute(route TunnelConfigRoute) error {
 	if route.TLSServerName != nil && (len(*route.TLSServerName) == 0 || len(*route.TLSServerName) > 253 || strings.TrimSpace(*route.TLSServerName) != *route.TLSServerName || strings.ContainsAny(*route.TLSServerName, "\r\n")) {
 		return ErrInvalidState
 	}
-	for _, reference := range map[string]*string{"ca_reference": route.CAReference, "mtls_credential_reference": route.MTLSCredentialReference} {
+	for _, reference := range map[string]*string{"mtls_credential_reference": route.MTLSCredentialReference} {
 		if reference != nil && !safeSnapshotCredentialReference(*reference) {
 			return safeStoreFailure("tunnel configuration contains an unsafe credential reference", ErrCredentialMaterial)
 		}

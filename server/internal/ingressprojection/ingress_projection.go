@@ -77,7 +77,7 @@ func (s SQLIngressSource) Edge(ctx context.Context, nodeID, epoch string) ([]wir
 const engineTunnelIngressSQL = `
 SELECT t.account_id,environment.id,(ra.admission->'binding'->>'tunnel_id'),t.generation,r.id,r.generation,ra.machine_id,m.installation_generation,
  publication.hostname,CASE WHEN r.protocol IN ('tcp','tls') THEN '' ELSE COALESCE(r.path_prefix,'/') END,r.origin_scheme,r.origin_address,
- r.tls_verification,COALESCE(r.tls_server_name,''),COALESCE(r.ca_reference,''),COALESCE(r.mtls_credential_reference,''),COALESCE(r.tls_pin,''),
+ r.tls_verification,COALESCE(r.tls_server_name,''),COALESCE(r.tls_ca,''),COALESCE(r.mtls_credential_reference,''),COALESCE(r.tls_pin,''),
  COALESCE(r.public_tcp_listener_id,''),COALESCE(r.public_tcp_port,0),r.protocol,
  publication.publication_id,publication.publication_generation,
  x.edge_node_id,x.edge_process_epoch,(c.admission->'binding'->>'connector_id'),c.session_id,c.process_generation,
@@ -240,10 +240,12 @@ func (s SQLIngressSource) scanIngressRows(ctx context.Context, now time.Time, qu
 			return nil, wire.ErrIngressDenied
 		}
 		var d wire.IngressDecision
+		var routeCA string
 		b := &d.Binding
-		if err = rows.Scan(&b.AccountID, &b.EnvironmentID, &b.TunnelID, &b.ResourceGeneration, &b.RouteID, &b.RouteGeneration, &b.HostID, &b.InstallationGeneration, &b.Hostname, &b.PathPrefix, &b.OriginScheme, &b.OriginAddress, &b.TLSVerification, &b.TLSServerName, &b.CAReference, &b.MTLSCredentialReference, &b.TLSPin, &b.ListenerID, &b.PublicPort, &b.Protocol, &b.PublicationID, &b.PublicationGeneration, &d.EdgeNodeID, &d.EdgeProcessEpoch, &d.ConnectorID, &d.SessionID, &d.ProcessGeneration, &d.ConfigGeneration, &d.AssignmentGeneration, &d.PolicyGeneration, &d.ExpiresAt); err != nil {
+		if err = rows.Scan(&b.AccountID, &b.EnvironmentID, &b.TunnelID, &b.ResourceGeneration, &b.RouteID, &b.RouteGeneration, &b.HostID, &b.InstallationGeneration, &b.Hostname, &b.PathPrefix, &b.OriginScheme, &b.OriginAddress, &b.TLSVerification, &b.TLSServerName, &routeCA, &b.MTLSCredentialReference, &b.TLSPin, &b.ListenerID, &b.PublicPort, &b.Protocol, &b.PublicationID, &b.PublicationGeneration, &d.EdgeNodeID, &d.EdgeProcessEpoch, &d.ConnectorID, &d.SessionID, &d.ProcessGeneration, &d.ConfigGeneration, &d.AssignmentGeneration, &d.PolicyGeneration, &d.ExpiresAt); err != nil {
 			return nil, err
 		}
+		b.TLSCASHA256 = wire.OriginCAFingerprint(routeCA) // the agent checks the CA it has against the one authorized
 		if err = completeIngressProjection(&d, now); err != nil {
 			if err = s.rowFailed(ctx, "projection", d.Binding.RouteID, err); err != nil {
 				return nil, err
