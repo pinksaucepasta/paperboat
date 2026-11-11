@@ -31,6 +31,15 @@ func TestNonTerminalStreamOpenIsBoundedAndRetryable(t *testing.T) {
 	if !errors.As(err, &coded) || coded.LocalAPICode() != "exec_start_uncertain" {
 		t.Fatalf("a timed-out exec open must be start-uncertain: %v", err)
 	}
+	// Timed out before the start request was sent (no meow ack): nothing started, a plain transport failure.
+	execCtx, execAbort = context.WithCancel(context.Background())
+	_, err = dialWithin(20*time.Millisecond, "exec", execAbort, func() (tunnel.Conn, error) {
+		<-execCtx.Done()
+		return nil, &tunnel.ExecNotStartedError{Cause: execCtx.Err()}
+	})
+	if errors.As(err, &coded) && coded.LocalAPICode() != "" || !errors.As(err, &retryable) || !retryable.TransportRetryable() {
+		t.Fatalf("an exec open that never sent its request must be a retryable transport failure, not uncertain: %v", err)
+	}
 }
 
 // Terminal setup already has the staged credential/caller deadline and native

@@ -336,3 +336,14 @@ func TestHelperExecDetachUnblocksAStdinWriteOnAFullWindow(t *testing.T) {
 		t.Fatal("Detach did not unblock the stdin write")
 	}
 }
+
+// An exec open that fails before its start request is sent started nothing; the daemon reports it as such
+// instead of as start-uncertain (canary B->A 2026-11-11: 90 s of same-operation retries for a peer with no path).
+func TestExecOpenFailingBeforeTheRequestIsNotStarted(t *testing.T) {
+	_, err := (&PeerTerminalTunnel{}).DialExec(t.Context(), resolver.ConnectInfo{}, ExecRequest{OperationID: "operation_1", Argv: []string{"true"}})
+	var notStarted *ExecNotStartedError
+	var uncertain *ExecStartUncertainError
+	if !errors.As(err, &notStarted) || !errors.Is(err, ErrPeerTerminalInvalid) || errors.As(err, &uncertain) {
+		t.Fatalf("err=%v", err)
+	}
+}
