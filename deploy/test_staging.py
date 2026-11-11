@@ -1,6 +1,11 @@
 """staging.py: the build's source archive is the repository root of the commit (it was the deploy directory: no server/ to build)."""
 import importlib.util
 import io
+import contextlib
+import hashlib
+import json
+import os
+import tempfile
 import subprocess
 import tarfile
 import unittest
@@ -37,6 +42,36 @@ class BuildVersionTest(unittest.TestCase):
             staging.subprocess.run, staging.ssh, staging.source_archive = original
         version = re.search(r'PAPERBOAT_VERSION=(\S+)', calls[0]).group(1)
         self.assertRegex(version, r'^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.(0|[1-9][0-9]*)$')  # server/deploy/Dockerfile's check
+
+
+class SeedAuthorityTest(unittest.TestCase):
+    def test_session_is_private_random_persistent_and_only_hashes_reach_database(self):
+        original = staging.remote, staging.sql
+        authorities = []
+        try:
+            for _ in range(2):
+                with tempfile.TemporaryDirectory() as root:
+                    Path(root, 'secrets').mkdir()
+                    statements = []
+                    def remote(script, **kwargs):
+                        return subprocess.check_output(['sh', '-c', script], cwd=root, text=True)
+                    staging.remote, staging.sql = remote, statements.append
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        staging.seed()
+                        staging.seed()
+                    path = Path(root, '.fixture-auth.json')
+                    self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                    authority = json.loads(path.read_text())
+                    authorities.append(authority)
+                    self.assertEqual(staging.fixture_credentials(), authority)
+                    sql = '\n'.join(statements)
+                    for key, value in authority.items():
+                        self.assertGreaterEqual(len(value), 48)
+                        self.assertNotIn(value, sql)
+                        self.assertIn(hashlib.sha256(value.encode()).hexdigest(), sql)
+            self.assertNotEqual(authorities[0], authorities[1])
+        finally:
+            staging.remote, staging.sql = original
 
 
 if __name__ == '__main__':
