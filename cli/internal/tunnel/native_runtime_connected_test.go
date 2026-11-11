@@ -163,7 +163,7 @@ func connectedRegionalTokens(t *testing.T, signer ed25519.PrivateKey, configurat
 		for _, scope := range peer.Scopes {
 			stamped := scope.ExpiresAt
 			if stamped == 0 { // a standing scope of another account's peer rides the grant with the grant's expiry
-				if !peernetwork.RelayGrantKeepsStanding(scope.ResourceKind, scope.Capability, scope.Direction, int64(scope.ResourceGeneration), int(scope.Port), false) {
+				if !peernetwork.RelayGrantKeepsStanding(scope, false) {
 					continue
 				}
 				stamped = expires

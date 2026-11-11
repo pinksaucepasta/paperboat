@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http/httptest"
 	"slices"
 	"strings"
@@ -105,6 +106,19 @@ func TestSignRelayGrantPublishesFrozenTypeAndRejectsLongLifetime(t *testing.T) {
 	scope["expires_at"] = int64(0)
 	if _, err := provider.SignRelayGrant(claims); err == nil {
 		t.Fatal("malformed scope expiry signed")
+	}
+	// Mint signs exactly what relays accept (peernetwork.ValidGrantScope): a recording scope, never an unknown one.
+	scope["expires_at"], scope["resource_kind"], scope["capability"] = int64(1_700_000_005), "recording", "recording"
+	if _, err := provider.SignRelayGrant(claims); err != nil {
+		t.Fatalf("recording scope refused: %v", err)
+	}
+	for field, value := range map[string]any{"capability": "unknown", "port": 22} {
+		bad := maps.Clone(scope)
+		bad[field] = value
+		claims["peers"] = []any{map[string]any{"wireguard_public_key": strings.Repeat("A", 43), "disco_public_key": strings.Repeat("A", 43), "scopes": []any{bad}}}
+		if _, err := provider.SignRelayGrant(claims); err == nil {
+			t.Fatalf("a scope with %s %v that relays refuse was signed", field, value)
+		}
 	}
 }
 

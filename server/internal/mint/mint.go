@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/jwks"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/pinksaucepasta/paperboat/shared/recording"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 )
@@ -175,9 +176,9 @@ func relayPeersClaim(value any) bool {
 		return false
 	}
 	var peers []struct {
-		WireGuardPublicKey string            `json:"wireguard_public_key"`
-		DiscoPublicKey     string            `json:"disco_public_key,omitempty"`
-		Scopes             []peersRelayScope `json:"scopes"`
+		WireGuardPublicKey string              `json:"wireguard_public_key"`
+		DiscoPublicKey     string              `json:"disco_public_key,omitempty"`
+		Scopes             []peernetwork.Scope `json:"scopes"`
 	}
 	if json.Unmarshal(raw, &peers) != nil || peers == nil || len(peers) > 64 {
 		return false
@@ -193,24 +194,12 @@ func relayPeersClaim(value any) bool {
 			return false
 		}
 		for _, scope := range peer.Scopes {
-			if scope.ResourceKind == "" || scope.ResourceID == "" || scope.ResourceGeneration < 1 || scope.Capability == "" || (scope.Direction != "dial" && scope.Direction != "accept") || scope.Port < 1 || scope.Port > 65535 || scope.ExpiresAt <= 0 {
+			if !peernetwork.ValidGrantScope(scope) { // the relay refuses the whole grant otherwise
 				return false
 			}
 		}
 	}
 	return true
-}
-
-// peersRelayScope is the structural subset accepted by SignRelayGrant. It is
-// kept private to avoid making mint the owner of peer-session authorization.
-type peersRelayScope struct {
-	ResourceKind       string `json:"resource_kind"`
-	ResourceID         string `json:"resource_id"`
-	ResourceGeneration int64  `json:"resource_generation"`
-	Capability         string `json:"capability"`
-	Direction          string `json:"direction"`
-	Port               int    `json:"port"`
-	ExpiresAt          int64  `json:"expires_at"`
 }
 
 // SignRegionalCandidates signs the endpoint-bound registry projection, which lives as long as the relay grants it

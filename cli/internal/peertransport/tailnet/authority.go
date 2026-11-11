@@ -42,7 +42,7 @@ const (
 	MaxConfigurationScopes = peernetwork.MaxScopes
 )
 const RefreshInterval = 30 * time.Second
-const NetworkPort = 443
+const NetworkPort = peernetwork.NetworkPort
 
 var ErrAuthority = errors.New("peer network authority is invalid")
 var ErrStaleAuthority = errors.New("peer network authority is stale")
@@ -67,15 +67,9 @@ type NetworkBinding struct {
 	QUICPublicKey              string `json:"quic_public_key"`
 	VirtualAddress             string `json:"virtual_address"`
 }
-type NetworkScope struct {
-	ResourceKind       string `json:"resource_kind"`
-	ResourceID         string `json:"resource_id"`
-	ResourceGeneration uint64 `json:"resource_generation"`
-	Capability         string `json:"capability"`
-	Direction          string `json:"direction"`
-	Port               uint16 `json:"port"`
-	ExpiresAt          int64  `json:"expires_at"`
-}
+
+// NetworkScope is the shared signed access scope (shared/peernetwork).
+type NetworkScope = peernetwork.Scope
 type NetworkPeer struct {
 	Identity NetworkBinding `json:"identity"`
 	Scopes   []NetworkScope `json:"scopes"`

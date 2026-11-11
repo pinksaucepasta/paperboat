@@ -27,10 +27,9 @@ func keyOf(s Scope) membershipKey {
 	return membershipKey{kind: s.ResourceKind, id: s.ResourceID, capability: s.Capability, generation: s.ResourceGeneration, port: s.Port}
 }
 
-// validScope is the shape every grant scope, per-peer or membership, must have.
-func validScope(s Scope) bool {
-	return peernetwork.ValidScope(s.ResourceKind, s.Capability) && s.ResourceID != "" && len(s.ResourceID) <= 256 && s.ResourceGeneration != 0 && s.Port == 443 && (s.Direction == "dial" || s.Direction == "accept") && s.ExpiresAt > 0
-}
+// validScope is the shape every grant scope, per-peer or membership, must have (the shared rule the server's mint and
+// contract tests use too).
+func validScope(s Scope) bool { return peernetwork.ValidGrantScope(s) }
 
 // validMemberships checks a grant's memberships: valid scopes, bounded, no duplicate, and no per-peer list
 // beside them.

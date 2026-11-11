@@ -46,7 +46,7 @@ func TestRelayGrantsCarryEveryPeerAndItsControlKeyInChunksOfTheRelayBound(t *tes
 			account = "other" // a team peer of another account: named, never a control peer
 		}
 		peers = append(peers, networkPeer{Identity: networkBinding{AccountID: account, EndpointID: fmt.Sprintf("peer_%03d", i), WireGuardPublicKey: fmt.Sprintf("key_%03d", (i*37)%1000)},
-			Scopes: []networkScope{{"machine_network", fmt.Sprintf("network_%03d", i), 1, "connect", "dial", 443, 1}}})
+			Scopes: []networkScope{{ResourceKind: "machine_network", ResourceID: fmt.Sprintf("network_%03d", i), ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: 1}}})
 	}
 	for _, size := range []int{maximumRelayControlPeers, maximumRelayGrantPeers} {
 		chunks := relayGrantChunks(self, peers, size, 1)
@@ -87,7 +87,7 @@ func TestRelayGrantsCarryEveryPeerAndItsControlKeyInChunksOfTheRelayBound(t *tes
 // instead of failing every other peer's grant (P0 2026-10-26: one bad peer made every until_revoked_v1 config 503).
 func TestRelayGrantsGiveUntilRevokedScopesTheGrantExpiryAndOmitKeylessPeers(t *testing.T) {
 	self := networkBinding{AccountID: "account", EndpointID: "self"}
-	untilRevoked := networkScope{"machine_network", "network_x", 1, "connect", "dial", 443, 0}
+	untilRevoked := networkScope{ResourceKind: "machine_network", ResourceID: "network_x", ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: 0}
 	peers := []networkPeer{
 		{Identity: networkBinding{AccountID: "account", EndpointID: "keyed", WireGuardPublicKey: "key_a"}, Scopes: []networkScope{untilRevoked}},
 		{Identity: networkBinding{AccountID: "account", EndpointID: "keyless"}, Scopes: []networkScope{untilRevoked}},
@@ -116,11 +116,11 @@ func TestRelayGrantsCarryStandingTeamScopesAndStayWithinTheRelayScopeBound(t *te
 	var peers []networkPeer
 	for i := range 130 {
 		scopes := []networkScope{
-			{"machine_network", fmt.Sprintf("network_%03d", i), 1, "connect", "dial", 443, 0},
-			{"machine_network", fmt.Sprintf("network_%03d", i), 1, "connect", "accept", 443, 0},
+			{ResourceKind: "machine_network", ResourceID: fmt.Sprintf("network_%03d", i), ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: 0},
+			{ResourceKind: "machine_network", ResourceID: fmt.Sprintf("network_%03d", i), ResourceGeneration: 1, Capability: "connect", Direction: "accept", Port: 443, ExpiresAt: 0},
 		}
 		for _, capability := range []string{"terminal", "exec", "managed_ssh", "file_transfer"} {
-			scopes = append(scopes, networkScope{"machine_access", "host", 7, capability, "accept", 443, 0})
+			scopes = append(scopes, networkScope{ResourceKind: "machine_access", ResourceID: "host", ResourceGeneration: 7, Capability: capability, Direction: "accept", Port: 443, ExpiresAt: 0})
 		}
 		identity := networkBinding{AccountID: "account", EndpointID: fmt.Sprintf("cli_%03d", i), WireGuardPublicKey: fmt.Sprintf("key_%03d", i)}
 		peers = append(peers, networkPeer{Identity: identity, Scopes: scopes})
@@ -129,10 +129,10 @@ func TestRelayGrantsCarryStandingTeamScopesAndStayWithinTheRelayScopeBound(t *te
 	for i := range 64 {
 		var scopes []networkScope
 		for _, capability := range []string{"terminal", "exec", "managed_ssh", "file_transfer", "inspector"} {
-			scopes = append(scopes, networkScope{"machine_access", "host", 7, capability, "accept", 443, 0})
+			scopes = append(scopes, networkScope{ResourceKind: "machine_access", ResourceID: "host", ResourceGeneration: 7, Capability: capability, Direction: "accept", Port: 443, ExpiresAt: 0})
 		}
-		scopes = append(scopes, networkScope{"machine_access", "host", 7, "private_access", "accept", 443, 0},
-			networkScope{"machine_access", "host", 0, "exec", "accept", 443, 0}, networkScope{"machine_access", "host", 7, "exec", "accept", 80, 0})
+		scopes = append(scopes, networkScope{ResourceKind: "machine_access", ResourceID: "host", ResourceGeneration: 7, Capability: "private_access", Direction: "accept", Port: 443, ExpiresAt: 0},
+			networkScope{ResourceKind: "machine_access", ResourceID: "host", ResourceGeneration: 0, Capability: "exec", Direction: "accept", Port: 443, ExpiresAt: 0}, networkScope{ResourceKind: "machine_access", ResourceID: "host", ResourceGeneration: 7, Capability: "exec", Direction: "accept", Port: 80, ExpiresAt: 0})
 		peers = append(peers, networkPeer{Identity: networkBinding{AccountID: "other", EndpointID: fmt.Sprintf("member_%03d", i), WireGuardPublicKey: fmt.Sprintf("member_%03d", i)}, Scopes: scopes})
 	}
 	chunks := relayGrantChunks(self, peers, maximumRelayGrantPeers, 1234)

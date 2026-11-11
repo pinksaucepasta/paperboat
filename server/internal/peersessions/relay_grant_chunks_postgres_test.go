@@ -65,7 +65,7 @@ func TestRelayGrantsNameEveryPeerOfAHundredPeerAccountOnPostgres(t *testing.T) {
 	want := map[string]bool{}
 	for i := range 100 {
 		p := networkPeer{Identity: networkBinding{AccountID: account, EndpointID: fmt.Sprintf("peer_%03d", i), WireGuardPublicKey: key(), DiscoPublicKey: key()},
-			Scopes: []networkScope{{ResourceKind: "machine_network", ResourceID: fmt.Sprintf("peer_%03d", i), ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 1, ExpiresAt: now.Add(time.Hour).Unix()}}}
+			Scopes: []networkScope{{ResourceKind: "machine_network", ResourceID: fmt.Sprintf("peer_%03d", i), ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: now.Add(time.Hour).Unix()}}}
 		peers = append(peers, p)
 		want[p.Identity.WireGuardPublicKey] = true
 	}

@@ -17,6 +17,39 @@ var scopeCapabilities = map[string][]string{
 	"codex_session":   {"codex"},
 }
 
+// NetworkPort is the one virtual port every scope names (the peer network serves only it).
+const NetworkPort = 443
+
+// MaxResourceIDBytes bounds a scope's resource id.
+const MaxResourceIDBytes = 256
+
+// Scope is one signed access scope: a peer entry's in a network configuration, and a peer's or membership's in a
+// relay grant. The server builds it, the client and the relay verify it; all three use this type.
+type Scope struct {
+	ResourceKind       string `json:"resource_kind"`
+	ResourceID         string `json:"resource_id"`
+	ResourceGeneration uint64 `json:"resource_generation"`
+	Capability         string `json:"capability"`
+	Direction          string `json:"direction"`
+	Port               uint16 `json:"port"`
+	ExpiresAt          int64  `json:"expires_at"`
+}
+
+// ValidGrantScope is the relay's rule for a grant scope, per peer or as a membership: a known kind and capability,
+// a resource id, a generation, NetworkPort, a direction and an expiry (a grant stamps a standing scope with its own,
+// RelayGrantKeepsStanding). The relay refuses a whole grant holding any other scope, so the server's mint and its
+// contract tests check every scope it puts in a grant with this.
+func ValidGrantScope(s Scope) bool {
+	return ValidScope(s.ResourceKind, s.Capability) && s.ResourceID != "" && len(s.ResourceID) <= MaxResourceIDBytes &&
+		s.ResourceGeneration != 0 && s.Port == NetworkPort && (s.Direction == "dial" || s.Direction == "accept") && s.ExpiresAt > 0
+}
+
+// ValidKind reports whether kind is a known scope resource kind.
+func ValidKind(kind string) bool {
+	_, ok := scopeCapabilities[kind]
+	return ok
+}
+
 // ValidScope reports whether a signed access scope of kind may carry capability.
 func ValidScope(kind, capability string) bool {
 	return slices.Contains(scopeCapabilities[kind], capability)
@@ -40,13 +73,13 @@ func Scopes(yield func(kind, capability string) bool) {
 // (same account); it is kept for a peer without one, a team member's CLI and the shared host, whose pair the relay
 // admits from reciprocal machine_access dial and accept scopes (derpquic reciprocalScopes). Keeping it for mesh peers
 // as well would push 64 CLI peers x 4 capabilities past the relay's 128-scope grant bound (P0 2026-10-26).
-func RelayGrantKeepsStanding(kind, capability, direction string, generation int64, port int, peerHasMesh bool) bool {
-	switch kind {
+func RelayGrantKeepsStanding(s Scope, peerHasMesh bool) bool {
+	switch s.ResourceKind {
 	case "machine_network":
 		return true
 	case "machine_access":
-		return !peerHasMesh && generation >= 1 && port == 443 && (direction == "dial" || direction == "accept") &&
-			(capability == "terminal" || capability == "exec" || capability == "managed_ssh" || capability == "file_transfer")
+		return !peerHasMesh && s.ResourceGeneration >= 1 && s.Port == NetworkPort && (s.Direction == "dial" || s.Direction == "accept") &&
+			(s.Capability == "terminal" || s.Capability == "exec" || s.Capability == "managed_ssh" || s.Capability == "file_transfer")
 	}
 	return false
 }

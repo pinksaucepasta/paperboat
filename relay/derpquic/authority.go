@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"tailscale.com/types/key"
 )
@@ -51,15 +52,8 @@ type Error struct {
 func (e *Error) Error() string { return e.Message }
 func (e *Error) Fatal() bool   { return e.Code == 1 || e.Code == 2 }
 
-type Scope struct {
-	ResourceKind       string `json:"resource_kind"`
-	ResourceID         string `json:"resource_id"`
-	ResourceGeneration uint64 `json:"resource_generation"`
-	Capability         string `json:"capability"`
-	Direction          string `json:"direction"`
-	Port               uint16 `json:"port"`
-	ExpiresAt          int64  `json:"expires_at"`
-}
+// Scope is the shared signed access scope (shared/peernetwork), as the server mints it.
+type Scope = peernetwork.Scope
 type ServiceDescriptor struct {
 	WireGuardPublicKey string `json:"wireguard_public_key"`
 	DiscoPublicKey     string `json:"disco_public_key"`

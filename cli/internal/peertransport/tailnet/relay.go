@@ -243,7 +243,7 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 			var scopes []NetworkScope
 			for _, scope := range peer.Scopes {
 				if scope.ExpiresAt == 0 {
-					if !peernetwork.RelayGrantKeepsStanding(scope.ResourceKind, scope.Capability, scope.Direction, int64(scope.ResourceGeneration), int(scope.Port), mesh) {
+					if !peernetwork.RelayGrantKeepsStanding(scope, mesh) {
 						continue
 					}
 					scope.ExpiresAt = g.ExpiresAt

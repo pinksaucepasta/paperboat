@@ -231,15 +231,9 @@ type networkBinding struct {
 	// out they move to the peer entry (deliverEndpoints) and are never part of a signed identity.
 	Endpoints []string `json:"endpoints,omitempty"`
 }
-type networkScope struct {
-	ResourceKind       string `json:"resource_kind"`
-	ResourceID         string `json:"resource_id"`
-	ResourceGeneration int64  `json:"resource_generation"`
-	Capability         string `json:"capability"`
-	Direction          string `json:"direction"`
-	Port               int    `json:"port"`
-	ExpiresAt          int64  `json:"expires_at"`
-}
+
+// networkScope is the shared signed access scope (shared/peernetwork) the client and the relay verify.
+type networkScope = peernetwork.Scope
 type networkPeer struct {
 	Identity  networkBinding `json:"identity"`
 	Scopes    []networkScope `json:"scopes"`
@@ -528,7 +522,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 			if scopes >= maximumNetworkAccessScopes {
 				break
 			}
-			p.Scopes = append(p.Scopes, networkScope{g.kind, g.id, 1, capability, direction, 443, g.expiry.Unix()})
+			p.Scopes = append(p.Scopes, networkScope{ResourceKind: g.kind, ResourceID: g.id, ResourceGeneration: 1, Capability: capability, Direction: direction, Port: 443, ExpiresAt: g.expiry.Unix()})
 			scopes++
 		}
 	}
@@ -578,7 +572,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 				if scopes >= peernetwork.MaxScopes {
 					return NetworkConfigResult{}, ErrResourceLimit
 				}
-				p.Scopes = append(p.Scopes, networkScope{"machine_access", h.binding.EndpointID, h.generation, capability, "dial", 443, 0})
+				p.Scopes = append(p.Scopes, networkScope{ResourceKind: "machine_access", ResourceID: h.binding.EndpointID, ResourceGeneration: uint64(h.generation), Capability: capability, Direction: "dial", Port: 443, ExpiresAt: 0})
 				scopes++
 			}
 		}
@@ -604,7 +598,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 				if scopes >= peernetwork.MaxScopes {
 					return NetworkConfigResult{}, ErrResourceLimit
 				}
-				p.Scopes = append(p.Scopes, networkScope{"machine_access", self.EndpointID, o.generation, capability, "accept", 443, 0})
+				p.Scopes = append(p.Scopes, networkScope{ResourceKind: "machine_access", ResourceID: self.EndpointID, ResourceGeneration: uint64(o.generation), Capability: capability, Direction: "accept", Port: 443, ExpiresAt: 0})
 				scopes++
 			}
 		}
@@ -678,7 +672,7 @@ func personalNetworkScope(self, peer networkBinding, expiresAt int64) networkSco
 	if self.Role == "machine" && (peer.Role == "cli" || self.EndpointID > peer.EndpointID) {
 		direction = "accept"
 	}
-	return networkScope{"machine_network", personalNetworkScopeID(self, peer), 1, "connect", direction, 443, expiresAt}
+	return networkScope{ResourceKind: "machine_network", ResourceID: personalNetworkScopeID(self, peer), ResourceGeneration: 1, Capability: "connect", Direction: direction, Port: 443, ExpiresAt: expiresAt}
 }
 
 func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, now time.Time, expiry *time.Time, admittedPeers map[string]bool, admittedNetworks []string, meshSeq int64) ([]networkBinding, error) {
@@ -906,7 +900,7 @@ func relayGrantScopes(scopes []networkScope, grantExpiry int64) []networkScope {
 	out := make([]networkScope, 0, len(scopes))
 	for _, scope := range scopes {
 		if scope.ExpiresAt == 0 {
-			if !peernetwork.RelayGrantKeepsStanding(scope.ResourceKind, scope.Capability, scope.Direction, scope.ResourceGeneration, scope.Port, mesh) {
+			if !peernetwork.RelayGrantKeepsStanding(scope, mesh) {
 				continue
 			}
 			scope.ExpiresAt = grantExpiry

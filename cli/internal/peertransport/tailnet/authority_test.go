@@ -1307,3 +1307,26 @@ func TestSignedEndpointsBecomeDirectContacts(t *testing.T) {
 		t.Fatal("withdrawing endpoints also withdrew the signed inbound peer")
 	}
 }
+
+// A native operation of any scope kind the configuration may carry can be tracked as admitted; the kinds come from
+// the shared list (shared/peernetwork), not a copy that had no codex_session.
+func TestEveryAcceptedScopeKindCanBeTrackedAsAdmitted(t *testing.T) {
+	a, c, signer, _ := networkTestAuthority(t)
+	base := c.Peers[0].Scopes[0]
+	kinds := map[string]string{"inspector": "inspector", "config_compare": "config_compare", "recording": "recording", "codex_session": "codex"}
+	for kind, capability := range kinds {
+		s := base
+		s.ResourceKind, s.ResourceID, s.Capability = kind, kind+"_1", capability
+		c.Peers[0].Scopes = append(c.Peers[0].Scopes, s)
+	}
+	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
+		t.Fatal(err)
+	}
+	for kind, capability := range kinds {
+		release, err := a.TrackAdmittedScope(c.Peers[0].Identity.EndpointID, kind+"_1", capability, base.Direction)
+		if err != nil {
+			t.Fatalf("%s scope not trackable: %v", kind, err)
+		}
+		release()
+	}
+}

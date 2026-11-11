@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
@@ -25,8 +26,7 @@ func (a *Authority) TrackAdmittedScope(peerID, resourceID, capability, direction
 			if scope.ResourceID != resourceID || scope.Capability != capability || scope.Direction != direction || !scopeLive(scope, serverclock.Now().Unix()) {
 				continue
 			}
-			switch scope.ResourceKind {
-			case "machine_access", "inspector", "config_compare", "recording":
+			if scope.ResourceKind != "machine_network" && peernetwork.ValidKind(scope.ResourceKind) { // carriers track the mesh pair
 				return a.retainScopeLocked(scope)
 			}
 		}
@@ -58,8 +58,8 @@ func (a *Authority) TrackAdmittedCarrier(peerID string) (func(), NetworkScope, e
 					backing = scope
 					break
 				}
-			case "machine_access", "inspector", "config_compare", "recording":
-				if backing.ResourceID == "" {
+			default:
+				if backing.ResourceID == "" && peernetwork.ValidKind(scope.ResourceKind) {
 					backing = scope
 				}
 			}
