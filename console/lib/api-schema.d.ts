@@ -4,6 +4,110 @@
  */
 
 export interface paths {
+    "/v1/teams/{team_id}/recordings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List session recordings
+         * @description Newest first. Owners and admins see every recording; other members see recordings on machines where a recording_view rule lets them replay. total counts every match.
+         */
+        get: operations["team_recordings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams/{team_id}/recording-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Team recording key state
+         * @description The current public key (null until set up), the manual-start setting, and every account with replay permission with its vault sharing key and whether it holds a copy of the current generation.
+         */
+        get: operations["team_recording_key"];
+        put?: never;
+        /**
+         * Create or rotate the team recording key
+         * @description Owner or admin. Generation 1, or current+1 signed by the current signing key with the current private bundle sealed to the new key. Grants seal the new generation to viewers.
+         */
+        post: operations["team_recording_key_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams/{team_id}/recording-key/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Add viewer copies of the recording key
+         * @description A client holding the current generation seals copies for viewers that have replay permission but no copy yet.
+         */
+        put: operations["team_recording_key_grants"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/teams/{team_id}/recording-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set team recording settings
+         * @description Owner or admin. Machines receive the change through their recording policy.
+         */
+        put: operations["team_recording_settings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/recordings/{recording_id}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replay a session recording
+         * @description Checks the recording_view rule, writes the replay audit event, then answers with the viewer's key copy and a ticket: a machine ticket for the CLI form, or a single-use browser ticket and stream URL for the browser form (browser sign-in required).
+         */
+        post: operations["recording_replay"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/selfhost/installations": {
         parameters: {
             query?: never;
@@ -7793,6 +7897,183 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description Public half of one generation of the team recording key. */
+        RecordingKey: {
+            /** Format: int64 */
+            generation: number;
+            /** @description X25519 public key, 32 bytes. */
+            public_key: string;
+            /** @description Ed25519 public key, 32 bytes. */
+            signing_public_key: string;
+            /** @description Ed25519 signature by the previous generation's signing key, 64 bytes. Absent at generation 1. */
+            rotation_signature?: string;
+        };
+        /** @description A viewer's copy of one generation's private bundle, sealed to the viewer's vault sharing key. */
+        RecordingSealedKey: {
+            /** Format: int64 */
+            generation: number;
+            /** @description 144-byte HPKE-sealed key bundle (shared/recording SealedBytes), standard base64. */
+            sealed: string;
+        };
+        /** @description The generation-1 private bundle sealed to this generation's public key. */
+        RecordingChainLink: {
+            /** Format: int64 */
+            generation: number;
+            /** @description 144-byte HPKE-sealed key bundle (shared/recording SealedBytes), standard base64. */
+            sealed_previous: string;
+        };
+        /** @description One sealed copy for one viewer. */
+        RecordingGrant: {
+            account_id: string;
+            /** @description The viewer's vault sharing public key the copy was sealed to. */
+            sharing_public_key: string;
+            /** @description 144-byte HPKE-sealed key bundle (shared/recording SealedBytes), standard base64. */
+            sealed: string;
+        };
+        /** @description One account with replay permission somewhere in the team. */
+        RecordingViewer: {
+            account_id: string;
+            /** @description Absent when the account has no vault yet, so no copy can be sealed for it. */
+            sharing_public_key?: string;
+            /** @description Holds a copy of the current generation. */
+            has_grant: boolean;
+        };
+        RecordingKeyState: {
+            /** @description The current generation; null until an admin sets the key up. */
+            key: components["schemas"]["RecordingKey"] | null;
+            /** @enum {string} */
+            manual_start: "anyone" | "admins";
+            viewers: components["schemas"]["RecordingViewer"][];
+            /** @description The caller's own copy of the current generation, to seal for viewers added later. Absent when the caller has no copy or it is not sealed to their current vault (reset since). */
+            my_key?: components["schemas"]["RecordingSealedKey"];
+        };
+        /** @description Generation 1, or a rotation signed by the current generation's signing key. */
+        RecordingKeyCreate: {
+            key: components["schemas"]["RecordingKey"];
+            /** @description Required for a rotation (generation > 1): the current private bundle sealed to the new key. Absent at generation 1. */
+            sealed_previous?: string;
+            grants: components["schemas"]["RecordingGrant"][];
+        };
+        RecordingGrantsPut: {
+            /** Format: int64 */
+            generation: number;
+            grants: components["schemas"]["RecordingGrant"][];
+        };
+        RecordingGrantsResult: {
+            /** @constant */
+            granted: true;
+        };
+        /** @description Who may start a recording by hand. */
+        RecordingSettings: {
+            /** @enum {string} */
+            manual_start: "anyone" | "admins";
+        };
+        /** @description One recording index row. Content stays encrypted on its machine. */
+        Recording: {
+            id: string;
+            machine_id: string;
+            machine_name: string;
+            session_id: string;
+            /** @enum {string} */
+            trigger: "rule" | "manual";
+            /** @description Account that started a manual recording; absent for rule recordings. */
+            started_by?: string;
+            /** @description Everyone attached while recording. */
+            accounts: string[];
+            /** Format: date-time */
+            started_at: string;
+            /**
+             * Format: date-time
+             * @description Absent while recording.
+             */
+            ended_at?: string;
+            /** Format: int64 */
+            bytes: number;
+            /** Format: int64 */
+            segments: number;
+            /** @enum {string} */
+            state: "recording" | "ended" | "deleted";
+        };
+        RecordingList: {
+            recordings: components["schemas"]["Recording"][];
+            /**
+             * Format: int64
+             * @description Matching recordings across all pages.
+             */
+            total: number;
+        };
+        /** @description Exactly one field. The CLI names its client session (the peer network admits it to the machine for capability recording); a browser sends its E2E public key hash and gets a browser ticket and stream URL. */
+        RecordingReplayRequest: {
+            cli_client_session_id?: string;
+            browser_public_key_sha256?: string;
+        };
+        /** @description The replay audit event was written before this answer. The browser form adds the same connect fields as a browser terminal ticket, so the browser pins the machine before any byte moves. */
+        RecordingReplay: {
+            /** @description CLI: a machine JWT (class recording_replay, 5 minutes, single use). Browser: a single-use browser ticket for stream_url. */
+            ticket: string;
+            /**
+             * Format: uri
+             * @description Browser form only.
+             */
+            stream_url?: string;
+            machine_id: string;
+            /** @description AAD of the viewer copy and the chain. */
+            team_id: string;
+            /**
+             * Format: int64
+             * @description The recording's key generation.
+             */
+            key_generation: number;
+            viewer_key: components["schemas"]["RecordingSealedKey"];
+            /** @description From viewer_key.generation down to key_generation+1; empty when they match. */
+            chain: components["schemas"]["RecordingChainLink"][];
+            /** @description Browser form only: ["paperboat.browser-terminal.e2ee.v1", "pb-ticket.<ticket>"]. */
+            subprotocols?: string[];
+            /**
+             * Format: date-time
+             * @description Browser form only: when the browser ticket expires.
+             */
+            expires_at?: string;
+            /**
+             * @description Browser form only.
+             * @constant
+             */
+            role?: "recording";
+            /** @description Browser form only. */
+            edge_node_id?: string;
+            /** @description Browser form only: the machine owner's account, whose transport root signs the machine's certificate (not the viewer's). */
+            owner_account_id?: string;
+            /** @description Browser form only: key id of the machine owner's transport root. */
+            root_key_id?: string;
+            /** @description Browser form only: the transport root public key, base64url without padding. */
+            root_public_key?: string;
+            /** @description Browser form only: SHA-256 fingerprint of the transport root, hex. */
+            root_fingerprint?: string;
+        };
+        /** @description Live recording state of a terminal session (terminal.v1, not HTTP): Snapshot.recording in the attach response, absent when not recording. */
+        RecordingState: {
+            id: string;
+            /** @enum {string} */
+            trigger: "rule" | "manual";
+            /** @description Manual recordings only. */
+            started_by?: string;
+            /** Format: date-time */
+            started_at: string;
+        };
+        /** @description terminal.v1 request on an attachment (not HTTP). record-start answers {recording: RecordingState}, record-stop answers {}. Errors: recording_unavailable, recording_forbidden, recording_active, recording_inactive, not_found_or_forbidden. */
+        RecordingControlRequest: {
+            /** @enum {string} */
+            action: "record-start" | "record-stop";
+            session_id: string;
+        };
+        /** @description terminal.v1 stream event sent to every attachment when the recording state changes (not HTTP). */
+        RecordingEvent: {
+            /** @constant */
+            event: "recording";
+            session_id: string;
+            /** @description null when the recording stopped. */
+            recording: components["schemas"]["RecordingState"] | null;
+        };
         SelfhostInstallation: {
             installation_id: string;
             node_id: string;
@@ -11789,6 +12070,507 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    team_recordings: {
+        parameters: {
+            query?: {
+                /** @description Only this machine's recordings. */
+                machine?: string;
+                /** @description Only this terminal session's recordings. */
+                session?: string;
+                /** @description Defaults to 50. */
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page with the total. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RecordingList"];
+                    };
+                };
+            };
+            /** @description invalid_request: limit, offset or a filter is out of bounds. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description unauthenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recording_forbidden: the team's policy does not allow this; team_sso_required: sign in through the team's SSO. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recording_not_found: the recording or team is unavailable. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description team_plan_required: session recordings are part of the Teams plan. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recordings_unavailable: retry. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    team_recording_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current key state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RecordingKeyState"];
+                    };
+                };
+            };
+            /** @description unauthenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recording_forbidden: the team's policy does not allow this; team_sso_required: sign in through the team's SSO. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recording_not_found: the recording or team is unavailable. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description team_plan_required: session recordings are part of the Teams plan. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recordings_unavailable: retry. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    team_recording_key_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordingKeyCreate"];
+            };
+        };
+        responses: {
+            /** @description The key that is now current. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RecordingKey"];
+                    };
+                };
+            };
+            /** @description validation_failed: the body does not match the schema; invalid_request: a value is out of bounds. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description unauthenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recording_forbidden: the team's policy does not allow this; team_sso_required: sign in through the team's SSO. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recording_not_found: the recording or team is unavailable. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description team_plan_required: session recordings are part of the Teams plan. recording_key_conflict: the generation is not current+1, the rotation signature is invalid, or a viewer's vault changed; reload and retry. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recordings_unavailable: retry. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    team_recording_key_grants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordingGrantsPut"];
+            };
+        };
+        responses: {
+            /** @description The copies were stored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RecordingGrantsResult"];
+                    };
+                };
+            };
+            /** @description validation_failed: the body does not match the schema; invalid_request: a value is out of bounds. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description unauthenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recording_forbidden: the team's policy does not allow this; team_sso_required: sign in through the team's SSO. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recording_not_found: the recording or team is unavailable. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description team_plan_required: session recordings are part of the Teams plan. recording_key_unavailable: no key yet. recording_key_conflict: the generation is not current or a viewer's vault changed; reload and retry. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recordings_unavailable: retry. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    team_recording_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordingSettings"];
+            };
+        };
+        responses: {
+            /** @description The stored settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RecordingSettings"];
+                    };
+                };
+            };
+            /** @description validation_failed: the body does not match the schema; invalid_request: a value is out of bounds. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description unauthenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recording_forbidden: the team's policy does not allow this; team_sso_required: sign in through the team's SSO. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recording_not_found: the recording or team is unavailable. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description team_plan_required: session recordings are part of the Teams plan. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recordings_unavailable: retry. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    recording_replay: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recording_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordingReplayRequest"];
+            };
+        };
+        responses: {
+            /** @description Ticket and key material. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RecordingReplay"];
+                    };
+                };
+            };
+            /** @description validation_failed or invalid_request: the body is not exactly one field. invalid_browser_key: create a new browser key and retry. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description unauthenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recording_forbidden: the team's policy does not allow this; team_sso_required: sign in through the team's SSO. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recording_not_found: the recording or team is unavailable. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description team_plan_required: session recordings are part of the Teams plan. recording_key_unavailable: the team has no key. recording_key_pending: you may replay but hold no key copy yet. machine_unavailable: the recording's machine is offline (browser form). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recording_deleted: the recording was deleted from its machine. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description too_many_pending: too many replays are opening at once; wait and retry. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recordings_unavailable: retry. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_v1_selfhost_installations: {
         parameters: {
             query?: {

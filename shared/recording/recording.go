@@ -250,6 +250,17 @@ type Replay struct {
 	KeyGeneration int64       `json:"key_generation"` // the recording's
 	ViewerKey     SealedKey   `json:"viewer_key"`
 	Chain         []ChainLink `json:"chain"` // from ViewerKey.Generation down to KeyGeneration+1
+	// Browser form only, as every browser ticket answer: the WebSocket subprotocols (the E2E protocol and
+	// "pb-ticket.<ticket>"), the ticket's expiry, role "recording", and the machine owner's transport root the
+	// browser pins before any byte moves (root_public_key base64url without padding, root_fingerprint hex).
+	Subprotocols    []string  `json:"subprotocols,omitempty"`
+	ExpiresAt       time.Time `json:"expires_at,omitzero"`
+	Role            string    `json:"role,omitempty"`
+	EdgeNodeID      string    `json:"edge_node_id,omitempty"`
+	OwnerAccountID  string    `json:"owner_account_id,omitempty"`
+	RootKeyID       string    `json:"root_key_id,omitempty"`
+	RootPublicKey   string    `json:"root_public_key,omitempty"`
+	RootFingerprint string    `json:"root_fingerprint,omitempty"`
 }
 
 // Viewer is one account with replay permission somewhere in the team.
@@ -264,6 +275,9 @@ type KeyState struct {
 	Key         *Key     `json:"key"`
 	ManualStart string   `json:"manual_start"`
 	Viewers     []Viewer `json:"viewers"`
+	// MyKey is the caller's own copy of the current generation, so a holder can seal it for viewers added later;
+	// absent when the caller has none or it is not sealed to their current vault.
+	MyKey *SealedKey `json:"my_key,omitempty"`
 }
 
 // Grant is one sealed copy for one viewer, bound to the sharing key it was sealed to.

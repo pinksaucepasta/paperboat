@@ -2,11 +2,14 @@ package httpapi
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/browserterminal"
+	"github.com/pinksaucepasta/paperboat/server/internal/peeridentity"
 	"github.com/pinksaucepasta/paperboat/server/internal/recordings"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
@@ -15,18 +18,18 @@ import (
 
 // Teams session recordings (shared/recording). Team routes use the team route guards; the machine policy is read with
 // the machine's runtime credential and proof, like the audit backlog.
-func registerRecordingRoutes(mux *http.ServeMux, s *recordings.Service, gateway *browserterminal.Gateway, read, write func(http.Handler) http.Handler) {
+func registerRecordingRoutes(mux *http.ServeMux, s *recordings.Service, gateway *browserterminal.Gateway, signer browserMachineSignerReader, read, write func(http.Handler) http.Handler) {
 	mux.Handle("GET /v1/teams/{team_id}/recordings", read(recordingHandler(s, "list")))
 	mux.Handle("GET /v1/teams/{team_id}/recording-key", read(recordingHandler(s, "key")))
 	mux.Handle("POST /v1/teams/{team_id}/recording-key", write(recordingHandler(s, "create_key")))
 	mux.Handle("PUT /v1/teams/{team_id}/recording-key/grants", write(recordingHandler(s, "grants")))
 	mux.Handle("PUT /v1/teams/{team_id}/recording-settings", write(recordingHandler(s, "settings")))
-	mux.Handle("POST /v1/recordings/{recording_id}/replay", write(recordingReplay(s, gateway)))
+	mux.Handle("POST /v1/recordings/{recording_id}/replay", write(recordingReplay(s, gateway, signer)))
 }
 
 // recordingReplay is POST /v1/recordings/{id}/replay. The service writes the replay audit event first; the browser
 // form then gets its single-use browser ticket and stream URL, the CLI form its machine ticket from the service.
-func recordingReplay(s *recordings.Service, gateway *browserterminal.Gateway) http.HandlerFunc {
+func recordingReplay(s *recordings.Service, gateway *browserterminal.Gateway, signer browserMachineSignerReader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		account, ok := vaultScopePrincipal(w, r)
 		if !ok {
@@ -42,7 +45,7 @@ func recordingReplay(s *recordings.Service, gateway *browserterminal.Gateway) ht
 			writeError(w, r, http.StatusUnauthorized, "unauthenticated", "A browser sign-in is required to replay in the browser.")
 			return
 		}
-		if browser && gateway == nil {
+		if browser && (gateway == nil || signer == nil) {
 			writeError(w, r, 503, "recordings_unavailable", "Browser replay is unavailable. Try again.")
 			return
 		}
@@ -52,11 +55,21 @@ func recordingReplay(s *recordings.Service, gateway *browserterminal.Gateway) ht
 			writeRecordingResult(w, r, out, err)
 			return
 		}
-		ticket, streamURL, _, err := gateway.IssueRecording(r.Context(), account, p.Session.ID, id, r.Header.Get("Origin"), in.BrowserPublicKeySHA256)
+		ticket, streamURL, decision, err := gateway.IssueRecording(r.Context(), account, p.Session.ID, id, r.Header.Get("Origin"), in.BrowserPublicKeySHA256)
+		var root peeridentity.AccountKey
+		if err == nil {
+			// The machine owner's transport root signs the machine's certificate (writeTerminalBrowserTicket).
+			if root, err = signer.MachineTransportSigner(r.Context(), decision.OwnerAccountID, decision.MachineID, time.Now().UTC()); err != nil {
+				writeError(w, r, 503, "recordings_unavailable", "Machine identity is temporarily unavailable. Try again.", err)
+				return
+			}
+		}
 		var pending browserterminal.TooManyPendingTicketsError
 		switch {
 		case err == nil:
-			out.Ticket, out.StreamURL = ticket.Value, streamURL
+			out.Ticket, out.StreamURL, out.Subprotocols, out.ExpiresAt = ticket.Value, streamURL, []string{browserterminal.Subprotocol, "pb-ticket." + ticket.Value}, ticket.ExpiresAt
+			out.Role, out.EdgeNodeID, out.OwnerAccountID = ticket.Role, decision.EdgeNodeID, decision.OwnerAccountID
+			out.RootKeyID, out.RootPublicKey, out.RootFingerprint = root.KeyID, base64.RawURLEncoding.EncodeToString(root.PublicKey), hex.EncodeToString(root.Fingerprint[:])
 			writeJSON(w, http.StatusOK, SuccessResponse{Data: out})
 		case expectedHTTPErrorOnly(err, browserterminal.ErrBrowserKeyInvalid):
 			writeError(w, r, http.StatusBadRequest, "invalid_browser_key", "Create a new browser key and retry.")

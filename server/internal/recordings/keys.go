@@ -103,6 +103,15 @@ func (s *Service) KeyState(ctx context.Context, account, team string) (recording
 			}
 			out.Viewers = append(out.Viewers, viewer)
 		}
+		if key == nil {
+			return nil
+		}
+		mine, err := s.viewerKeyTx(ctx, tx, account, team, key.Generation)
+		if err == nil {
+			out.MyKey = &mine
+		} else if !errors.Is(err, ErrKeyPending) {
+			return err
+		}
 		return nil
 	})
 	return out, err

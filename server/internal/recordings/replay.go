@@ -74,6 +74,7 @@ func (s *Service) List(ctx context.Context, account, team string, f Filter) (rec
 // target is a recording a viewer may replay now.
 type target struct {
 	team, machine, session, environment string
+	owner                               string // the machine's account: its transport root signs the machine's certificate
 	keyGeneration                       int64
 }
 
@@ -108,7 +109,7 @@ func authorizeTx(ctx context.Context, tx *db.Tx, account, id string) (target, er
 	if state == recording.StateDeleted {
 		return t, ErrDeleted
 	}
-	err = tx.QueryRow(ctx, `SELECT environment_id FROM user_machines WHERE id = $1 AND deleted_at IS NULL AND revoked_at IS NULL`, t.machine).Scan(&t.environment)
+	err = tx.QueryRow(ctx, `SELECT environment_id, user_id FROM user_machines WHERE id = $1 AND deleted_at IS NULL AND revoked_at IS NULL`, t.machine).Scan(&t.environment, &t.owner)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return t, ErrDeleted // the machine, and the recording with it, is gone
 	}
@@ -116,13 +117,13 @@ func authorizeTx(ctx context.Context, tx *db.Tx, account, id string) (target, er
 }
 
 // ResolveReplay re-checks a browser replay channel at its admission (browserterminal.RecordingReplays).
-func (s *Service) ResolveReplay(ctx context.Context, account, id string) (string, string, error) {
+func (s *Service) ResolveReplay(ctx context.Context, account, id string) (team, machine, owner string, err error) {
 	var t target
-	err := s.db.InReadOnlySnapshot(ctx, func(ctx context.Context, tx *db.Tx) (err error) {
+	err = s.db.InReadOnlySnapshot(ctx, func(ctx context.Context, tx *db.Tx) (err error) {
 		t, err = authorizeTx(ctx, tx, account, id)
 		return err
 	})
-	return t.team, t.machine, err
+	return t.team, t.machine, t.owner, err
 }
 
 // Replay is POST /v1/recordings/{id}/replay. In one transaction: authorizeTx, the viewer's sealed copy, the replay

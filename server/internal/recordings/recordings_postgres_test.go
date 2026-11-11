@@ -1,6 +1,7 @@
 package recordings
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -268,9 +269,19 @@ func TestPostgresRecordingsEndToEnd(t *testing.T) {
 	if _, err := f.s.Replay(f.ctx, f.admin, recID, f.native()); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("admin without a rule replays: %v", err)
 	}
+	// A holder reads its own copy of the current generation (to seal for later viewers); a member without one does not.
+	if ks, err := f.s.KeyState(f.ctx, f.member, f.team); err != nil || ks.MyKey == nil || ks.MyKey.Generation != 2 || !bytes.Equal(ks.MyKey.Sealed, sealed(f.member)) {
+		t.Fatalf("holder KeyState.MyKey = %+v, %v", ks.MyKey, err)
+	}
+	if ks, err := f.s.KeyState(f.ctx, f.bo, f.team); err != nil || ks.MyKey != nil {
+		t.Fatalf("member without a grant KeyState.MyKey = %+v, %v", ks.MyKey, err)
+	}
 	f.sharing[f.member] = random(t, 32) // the member reset their vault: the old copy no longer opens
 	if _, err := f.s.Replay(f.ctx, f.member, recID, f.native()); !errors.Is(err, ErrKeyPending) {
 		t.Fatalf("stale copy = %v", err)
+	}
+	if ks, err := f.s.KeyState(f.ctx, f.member, f.team); err != nil || ks.MyKey != nil {
+		t.Fatalf("copy sealed to the old vault returned: %+v, %v", ks.MyKey, err)
 	}
 	if err := f.s.PutGrants(f.ctx, f.member, f.team, recording.GrantsPut{Generation: 2, Grants: []recording.Grant{f.grant(f.member)}}); err != nil {
 		t.Fatal(err)
@@ -309,8 +320,9 @@ func TestPostgresRecordingsEndToEnd(t *testing.T) {
 	if err != nil || browser.Ticket != "" || browser.ViewerKey.Generation != 2 {
 		t.Fatalf("browser replay = %+v, %v", browser, err)
 	}
-	if team, machine, err := f.s.ResolveReplay(f.ctx, f.member, recID); err != nil || team != f.team || machine != f.prod {
-		t.Fatalf("ResolveReplay = %q %q %v", team, machine, err)
+	// A member who does not own the machine pins the machine owner's transport root, not their own.
+	if team, machine, owner, err := f.s.ResolveReplay(f.ctx, f.member, recID); err != nil || team != f.team || machine != f.prod || owner != f.owner {
+		t.Fatalf("ResolveReplay = %q %q %q %v", team, machine, owner, err)
 	}
 	if err := f.store.SQL().QueryRowContext(f.ctx, `SELECT count(*) FROM paperboat.audit_events WHERE event_type='team.recording_replayed' AND resource_id=$1 AND actor_user_id=$2`, f.team, f.member).Scan(&audited); err != nil || audited != 2 {
 		t.Fatalf("replay audit events = %d, %v", audited, err)

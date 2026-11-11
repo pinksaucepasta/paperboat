@@ -19,7 +19,7 @@ const RoleRecording = "recording"
 
 // RecordingReplays answers whether account may replay recording now, and where it is.
 type RecordingReplays interface {
-	ResolveReplay(ctx context.Context, account, recordingID string) (team, machine string, err error)
+	ResolveReplay(ctx context.Context, account, recordingID string) (team, machine, owner string, err error)
 }
 
 // RecordingAuthorizer resolves a recording replay channel.
@@ -33,12 +33,13 @@ func (g *Gateway) IssueRecording(ctx context.Context, userID, browserSessionID, 
 }
 
 // ResolveRecording joins the recording's replay permission with its machine's browser route. A recording channel
-// has no generation to fence; its permission is checked again at every admission.
+// has no generation to fence; its permission is checked again at every admission. OwnerAccountID is the machine's
+// account, whose transport root the browser pins, not the viewer's.
 func (a MachineAuthorizer) ResolveRecording(ctx context.Context, userID, recordingID string) (Decision, error) {
 	if a.Recordings == nil || a.Service == nil {
 		return Decision{}, ErrHostUnavailable
 	}
-	team, machine, err := a.Recordings.ResolveReplay(ctx, userID, recordingID)
+	team, machine, owner, err := a.Recordings.ResolveReplay(ctx, userID, recordingID)
 	if err != nil {
 		return Decision{}, err
 	}
@@ -49,7 +50,7 @@ func (a MachineAuthorizer) ResolveRecording(ctx context.Context, userID, recordi
 		}
 		return Decision{}, err
 	}
-	return Decision{UserID: userID, OwnerAccountID: userID, WorkspaceID: team, RecordingID: recordingID, MachineID: route.MachineID, EnvironmentID: route.EnvironmentID,
+	return Decision{UserID: userID, OwnerAccountID: owner, WorkspaceID: team, RecordingID: recordingID, MachineID: route.MachineID, EnvironmentID: route.EnvironmentID,
 		HostWSSURL: route.HostWSSURL, EdgeNodeID: route.EdgeNodeID, EdgeProcessEpoch: route.EdgeProcessEpoch, EdgeEndpointHost: route.EdgeEndpointHost, Role: RoleRecording, PolicyGeneration: 1}, nil
 }
 
