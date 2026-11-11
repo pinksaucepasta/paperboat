@@ -502,10 +502,9 @@ func classifyLaunchError(err error) error {
 	if errors.Is(err, windows.ERROR_CANCELLED) || errors.Is(err, windows.ERROR_ACCESS_DENIED) || errors.Is(err, windows.ERROR_ELEVATION_REQUIRED) {
 		return fmt.Errorf("%w: %v", ErrElevationDenied, err)
 	}
-	if errors.Is(err, windows.ERROR_FILE_NOT_FOUND) || errors.Is(err, windows.ERROR_PATH_NOT_FOUND) || errors.Is(err, windows.ERROR_BAD_EXE_FORMAT) {
-		return fmt.Errorf("%w: %v", ErrElevationUnavailable, err)
-	}
-	return fmt.Errorf("%w: %v", ErrElevationProtocol, err)
+	// Any other launch failure (no file, or no desktop to show the prompt on: ERROR_REQUIRES_INTERACTIVE_WINDOWSTATION)
+	// means Windows could not start the helper elevated; it never ran, so it is no helper protocol fault.
+	return fmt.Errorf("%w: %v", ErrElevationUnavailable, err)
 }
 
 func currentOwnerSID() (string, error) {

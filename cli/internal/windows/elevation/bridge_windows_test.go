@@ -637,6 +637,17 @@ func TestClassifyLaunchErrorSeparatesARestrictedJobFromARefusedPrompt(t *testing
 	}
 }
 
+// A launch that Windows could not even attempt (a service or scheduled task has no desktop for the prompt) is
+// unavailable elevation, which pb shows as "needs administrator rights", never an opaque helper protocol fault.
+func TestClassifyLaunchErrorReportsAnUnshowablePromptAsUnavailable(t *testing.T) {
+	for _, cause := range []error{windows.ERROR_REQUIRES_INTERACTIVE_WINDOWSTATION, windows.ERROR_FILE_NOT_FOUND, windows.ERROR_PATH_NOT_FOUND, windows.ERROR_BAD_EXE_FORMAT} {
+		err := classifyLaunchError(cause)
+		if !errors.Is(err, ErrElevationUnavailable) || errors.Is(err, ErrElevationProtocol) || errors.Is(err, ErrElevationDenied) {
+			t.Fatalf("launch error %v = %v, want ErrElevationUnavailable only", cause, err)
+		}
+	}
+}
+
 func TestLaunchDeniedErrorNamesAJobOnlyWhenTheProcessIsInOne(t *testing.T) {
 	denied := windows.ERROR_ACCESS_DENIED
 	if err := launchDeniedError(denied, func() bool { return true }); !errors.Is(err, ErrElevationRestrictedJob) {
