@@ -37,6 +37,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
 	winenv "github.com/pinksaucepasta/paperboat/internal/windowsenvironment"
@@ -792,7 +793,16 @@ type windowsActivation struct {
 const windowsSSHPreparationAttempts = 2
 
 func (a windowsActivation) run(ctx context.Context) error {
-	if err := a.prepareOwner(ctx); err != nil {
+	step := func(name string, run func(context.Context) error) error {
+		began := time.Now()
+		err := run(ctx)
+		diagnosticlog.TryInfo("windows activation step", "stage", name, "duration_ms", time.Since(began).Milliseconds(), "failed", err != nil)
+		return err
+	}
+	ssh := func(attempts int) func(context.Context) error {
+		return func(ctx context.Context) error { return a.prepareSSH(ctx, attempts) }
+	}
+	if err := step("owner", a.prepareOwner); err != nil {
 		return err
 	}
 	// The candidate's OpenSSH generation needs a carrier: prepared while hostd serves when one exists, otherwise
@@ -802,26 +812,29 @@ func (a windowsActivation) run(ctx context.Context) error {
 		return err
 	}
 	if present {
-		if err := a.prepareSSH(ctx, windowsSSHPreparationAttempts); err != nil {
+		if err := step("ssh", ssh(windowsSSHPreparationAttempts)); err != nil {
 			return err
 		}
 	}
 	if a.cutover != nil {
-		if err := a.cutover(ctx); err != nil {
+		if err := step("cutover", a.cutover); err != nil {
 			return err
 		}
 	}
-	for _, step := range []func(context.Context) error{a.stop, a.stage, a.carrier} {
-		if err := step(ctx); err != nil {
+	for _, s := range []struct {
+		name string
+		run  func(context.Context) error
+	}{{"stop", a.stop}, {"stage", a.stage}, {"carrier", a.carrier}} {
+		if err := step(s.name, s.run); err != nil {
 			return err
 		}
 	}
 	if !present {
-		if err := a.prepareSSH(ctx, 1); err != nil {
+		if err := step("ssh", ssh(1)); err != nil {
 			return err
 		}
 	}
-	return a.start(ctx)
+	return step("start", a.start)
 }
 
 // stopWindowsRuntimeForActivation stops what runs the installed slot. The returned restore starts a config worker
@@ -1058,7 +1071,13 @@ func runWindowsInstallPhase(ctx context.Context, phase string, operation func() 
 		return ErrInvalidRequest
 	}
 	result := make(chan error, 1)
-	go func() { result <- operation() }()
+	began := time.Now()
+	go func() {
+		err := operation()
+		// Phase timings are the Windows update timeline (W21): which step holds the host down.
+		diagnosticlog.TryInfo("windows install phase", "stage", strings.ReplaceAll(phase, " ", "_"), "duration_ms", time.Since(began).Milliseconds(), "failed", err != nil)
+		result <- err
+	}()
 	select {
 	case err := <-result:
 		if err != nil {

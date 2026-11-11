@@ -21,6 +21,8 @@ func retainReconnectMetadata(record slog.Record, fields map[string]string) bool 
 		"native underlay packet":  "/internal/peertransport/mesh.",
 		"native underlay session": "/internal/peertransport/mesh.",
 		"carrier cutover":         "/internal/hostruntime/hostinstall.",
+		"windows activation step": "/internal/hostruntime/hostinstall.",
+		"windows install phase":   "/internal/hostruntime/hostinstall.",
 		"peer QUIC wire":          "/internal/peertransport/peerquic.",
 		"peer QUIC close":         "/internal/peertransport/peerquic.",
 		"native owner close":      "/internal/peertransport/native.",
