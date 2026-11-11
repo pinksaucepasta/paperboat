@@ -28,3 +28,6 @@ func lockCarrierFile(path string) (func() error, error) {
 	}
 	return f.Close, nil
 }
+
+// carrierLockBusy reports a role lock another carrier holds.
+func carrierLockBusy(err error) bool { return errors.Is(err, unix.EWOULDBLOCK) }

@@ -127,12 +127,16 @@ func assembleServing(ctx context.Context, base *carrierIdentity, environ func(st
 	return &servingCarrier{peer: peer, authorization: group, usage: usageService}, nil
 }
 
-// awaitRoleLock takes the serving role's lock, waiting until ctx ends for the previous holder to leave.
+// awaitRoleLock takes the serving role's lock, waiting until ctx ends for the previous holder to leave. Any other
+// failure returns at once: a refused lock file used to be retried silently until the deadline (W21, winpool-13).
 func awaitRoleLock(ctx context.Context, path string) (func() error, error) {
 	for {
 		unlock, err := lockCarrierFile(path)
 		if err == nil {
 			return unlock, nil
+		}
+		if !carrierLockBusy(err) {
+			return nil, err
 		}
 		select {
 		case <-ctx.Done():
