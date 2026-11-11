@@ -83,7 +83,8 @@ func TestASlowTransferThatKeepsCommittingOutlivesTheRecoveryWindow(t *testing.T)
 // between must not keep extending the deadline.
 func TestASendWithoutProgressEndsOneWindowAfterItsFirstFailure(t *testing.T) {
 	saved := nativeRecoveryWindow
-	nativeRecoveryWindow = 300 * time.Millisecond
+	// Long enough that a Windows runner (coarse timers, slow connection setup) still fits 3 attempts inside it.
+	nativeRecoveryWindow = 1500 * time.Millisecond
 	defer func() { nativeRecoveryWindow = saved }()
 	item := source(bytes.Repeat([]byte("stuck"), protocol.FileTransferChunkBytes/5))
 	manifest := Manifest{TransferID: "ft_stuck", BatchID: "batch_stuck", SourceMachineID: "machine_source", DestinationMachineID: "machine_destination", InitiatingUserID: "user_1", Basename: item.Basename, Size: item.Size, SHA256: hex.EncodeToString(item.SHA256[:])}

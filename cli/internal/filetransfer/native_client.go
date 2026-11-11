@@ -17,6 +17,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/internal/neterr"
 	"github.com/pinksaucepasta/paperboat/shared/reattach"
 )
 
@@ -230,8 +231,13 @@ func retryableTransferFailure(err error) bool {
 		if remote, ok := err.(*Error); ok {
 			return transientHTTPStatus(remote.StatusCode)
 		}
+		// Winsock reports resets and refusals under its own numbers, not syscall.ECONNRESET: without neterr a cut
+		// connection on Windows ended the send instead of resuming it.
+		if neterr.Reset(err) || neterr.Aborted(err) || neterr.Refused(err) {
+			return true
+		}
 		switch err {
-		case io.EOF, io.ErrUnexpectedEOF, net.ErrClosed, context.DeadlineExceeded, syscall.ECONNRESET, syscall.ECONNABORTED, syscall.ECONNREFUSED, syscall.EPIPE, syscall.ETIMEDOUT, syscall.ENETUNREACH, syscall.EHOSTUNREACH, hostdproto.ErrMaintenanceBusy, errNativeAuthorizationChanged:
+		case io.EOF, io.ErrUnexpectedEOF, net.ErrClosed, context.DeadlineExceeded, syscall.EPIPE, syscall.ETIMEDOUT, syscall.ENETUNREACH, syscall.EHOSTUNREACH, hostdproto.ErrMaintenanceBusy, errNativeAuthorizationChanged:
 			return true
 		}
 		if timeout, ok := err.(net.Error); ok {
