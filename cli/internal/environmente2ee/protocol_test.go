@@ -7,6 +7,7 @@ import (
 	"crypto/hpke"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -784,4 +785,46 @@ func mustHex(t *testing.T, value string) []byte {
 		t.Fatal(err)
 	}
 	return decoded
+}
+
+// F21-170: a scope holds 128 variables (MaximumVariables) and 256 KiB (MaximumScopeBytes), and each bound refuses
+// the next unit: the 129th record is refused when a scope is written and when one is read back, a full 128-record
+// scope of maximum-size values round-trips only while it fits 256 KiB.
+func TestScopeBoundsRefuseTheNextRecordAndByte(t *testing.T) {
+	scope := func(count, valueBytes int) map[string][]byte {
+		values := make(map[string][]byte, count)
+		for i := range count {
+			values[fmt.Sprintf("VAR_%03d", i)] = bytes.Repeat([]byte{'v'}, valueBytes)
+		}
+		return values
+	}
+	names, raw, err := encodeScope(scope(MaximumVariables, 16))
+	if err != nil || len(names) != MaximumVariables {
+		t.Fatalf("128 records: %d names, %v", len(names), err)
+	}
+	if values, _, err := decodeScope(raw); err != nil || len(values) != MaximumVariables {
+		t.Fatalf("decode of 128 records: %d, %v", len(values), err)
+	}
+	if _, _, err := encodeScope(scope(MaximumVariables+1, 16)); err == nil {
+		t.Fatal("the 129th record was accepted when writing a scope")
+	}
+	// Seven maximum-size values (about 224 KiB) fit the 256 KiB scope; an eighth, with names, does not.
+	if _, _, err := encodeScope(scope(7, MaximumValueBytes)); err != nil {
+		t.Fatalf("a scope under 256 KiB: %v", err)
+	}
+	if _, _, err := encodeScope(scope(8, MaximumValueBytes)); err == nil {
+		t.Fatal("a scope over 256 KiB was accepted")
+	}
+	// Reading refuses a 129-entry scope even when the writer's check is bypassed.
+	entries := make([]any, 0, MaximumVariables+1)
+	for i := range MaximumVariables + 1 {
+		entries = append(entries, []any{fmt.Sprintf("VAR_%03d", i), []byte("v")})
+	}
+	oversized, err := encode([]any{"paperboat.environment.scope-plaintext", uint64(1), entries})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := decodeScope(oversized); err == nil {
+		t.Fatal("the 129th record was accepted when reading a scope")
+	}
 }
