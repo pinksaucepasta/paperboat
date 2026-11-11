@@ -766,7 +766,7 @@ var windowsActivationOps = struct {
 	switchCarrier  func(context.Context, *carrierUpgrade) error
 	writeConfig    func(WindowsRuntimeConfig, string) error
 	startRoles     func(ctx context.Context, request Request, layout service.Layout, upgradeMode string) error
-	awaitHostd     func(ctx context.Context, socket, tokenFile string) error
+	awaitHostd     func(ctx context.Context, socket, tokenFile, ownerSID string) error
 }{
 	prepareOwner:   prepareSessionOwner,
 	carrierPresent: windowsCarrierPresentForSSH,
@@ -882,7 +882,7 @@ func newWindowsActivation(request Request, layout service.Layout, instanceRoot, 
 			// serve (design: the new hostd serves, then the network switches). Moving the network while the
 			// handed-over worker port was still unbound left the new carrier unreachable (winpool-14 r5).
 			return runWindowsInstallPhase(ctx, "wait for the new hostd generation to serve", func() error {
-				return ops.awaitHostd(ctx, config.HostdSocket, config.TokenFile)
+				return ops.awaitHostd(ctx, config.HostdSocket, config.TokenFile, config.OwnerSID)
 			})
 		},
 	}, finish
@@ -1809,7 +1809,7 @@ func EnsureCommittedWindowsHostdReady(ctx context.Context, request Request) erro
 				return hostInstallFailure("restart Paperboat host service after first launch exited", lastErr, err)
 			}
 			restarted = true
-		} else if err := errors.Join(probe(readyCtx), windowsHostdServing(config.HostdSocket, config.TokenFile)); err == nil {
+		} else if err := errors.Join(probe(readyCtx), windowsHostdServing(config.HostdSocket, config.TokenFile, config.OwnerSID)); err == nil {
 			if healthySince.IsZero() {
 				healthySince = time.Now()
 			} else if time.Since(healthySince) >= 5*time.Second {
@@ -1831,11 +1831,11 @@ func EnsureCommittedWindowsHostdReady(ctx context.Context, request Request) erro
 
 // awaitWindowsHostdServing waits, for at most a minute, until socket's hostd reports an active worker with a
 // heartbeat (windowsHostdServing).
-func awaitWindowsHostdServing(ctx context.Context, socket, tokenFile string) error {
+func awaitWindowsHostdServing(ctx context.Context, socket, tokenFile, ownerSID string) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	for {
-		err := windowsHostdServing(socket, tokenFile)
+		err := windowsHostdServing(socket, tokenFile, ownerSID)
 		if err == nil {
 			return nil
 		}
