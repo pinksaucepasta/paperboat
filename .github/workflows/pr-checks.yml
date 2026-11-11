@@ -14,12 +14,29 @@ concurrency:
   group: pr-checks-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
-  targeted:
-    name: Targeted Go checks
+  # Pull requests get the fast Go check only; the heavy one runs once per merge-queue group (the combined tree of up to 8 PRs).
+  fast:
+    name: Go format and vet
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
-    # A cold cache compiles every importer with -race: PRs #3 and #5 were cut off at 5 minutes while still compiling.
-    timeout-minutes: 25
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: '**/go.sum'
+      - run: python3 tools/pr-checks.py '${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha }}' --fast
+
+  targeted:
+    name: Targeted Go checks
+    # merge_group only: on a pull request this job is skipped, which GitHub reports as passed, so the PR can enter the queue.
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    # A cold cache compiles every importer with -race (PRs #3 and #5 were cut off at 5 minutes); a group holds up to 8 PRs.
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:17
