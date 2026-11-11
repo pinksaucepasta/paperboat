@@ -31,6 +31,7 @@ ACCOUNT_REF, DNS_REF = "secret://acme/account", "secret://cloudflare/dns"
 ACCOUNT_ENV = "PAPERBOAT_CERT_SECRET_SECRET___ACME_ACCOUNT_27c59c1f5611"
 DNS_ENV = "PAPERBOAT_CERT_SECRET_SECRET___CLOUDFLARE_DNS_f9b5f91598d2"
 ROOT = Path(__file__).resolve().parent
+REPO = ROOT.parent
 
 
 def api_url():
@@ -167,10 +168,17 @@ def existing_image():
     return out or "paperboat-server:unset"
 
 
+def source_archive(commit):
+    """(short, full, tar) of the image's source: the repository root of that commit, without the console, marketing and tools
+    (README 'Building and deploying images'). git archive's pathspec is relative to the directory it runs in, so it runs at the root."""
+    git = lambda *args: subprocess.run(["git", *args], capture_output=True, check=True, cwd=REPO).stdout
+    full = git("rev-parse", commit).decode().strip()
+    short = git("rev-parse", "--short", full).decode().strip()
+    return short, full, git("archive", full, "--", ".", ":!console", ":!marketing", ":!tools")
+
+
 def build(commit):
-    short = subprocess.run(["git", "rev-parse", "--short", commit], capture_output=True, text=True, check=True, cwd=ROOT).stdout.strip()
-    full = subprocess.run(["git", "rev-parse", commit], capture_output=True, text=True, check=True, cwd=ROOT).stdout.strip()
-    tar = subprocess.run(["git", "archive", full, "--", ".", ":!console", ":!marketing", ":!tools"], capture_output=True, check=True, cwd=ROOT).stdout
+    short, full, tar = source_archive(commit)
     src = f"pb-stg-src-{short}"
     done = subprocess.run(["ssh", "-o", "BatchMode=yes", HOST, f"rm -rf ~/{src} && mkdir ~/{src} && tar x -C ~/{src}"], input=tar, capture_output=True, timeout=300)
     if done.returncode:
