@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
 )
@@ -475,5 +476,19 @@ func TestWindowsSSHPreparationOutOfTimeIsAnnouncedAndTrustFailuresStillAbort(t *
 	cancel()
 	if err := prepareWindowsSSHWithin(parent, func(ctx context.Context) error { return ctx.Err() }); err == nil {
 		t.Fatal("the caller's own cancellation was skipped")
+	}
+}
+
+// A skipped managed SSH preparation is recorded as an observed fault: the elevated helper's stderr notice reaches
+// no one, so the skip must not look like a clean install.
+func TestSkippedWindowsSSHIsAnObservedFault(t *testing.T) {
+	var faults []errorreport.Fault
+	restore := errorreport.InstallFaultObserver(func(_ context.Context, fault errorreport.Fault) { faults = append(faults, fault) })
+	t.Cleanup(restore)
+	if err := skipUnobtainableWindowsSSH(context.Background(), fmt.Errorf("%w: no App Installer", windowsopenssh.ErrInstallFailed)); err != nil {
+		t.Fatalf("an unobtainable package aborted: %v", err)
+	}
+	if len(faults) != 1 || faults[0].Code != "managed_ssh_failed" {
+		t.Fatalf("faults = %+v, want one managed_ssh_failed", faults)
 	}
 }

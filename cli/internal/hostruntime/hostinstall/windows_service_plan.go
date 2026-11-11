@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
 )
@@ -19,9 +20,17 @@ import (
 // ownership and cancellation failures still abort.
 func skipUnobtainableWindowsSSH(ctx context.Context, err error) error {
 	if err != nil && ctx.Err() == nil && windowsopenssh.Unobtainable(err) {
+		reportWindowsSSHSkipped(ctx, err)
 		return nil
 	}
 	return err
+}
+
+// reportWindowsSSHSkipped records that an install continued without managed SSH. The step usually runs in the
+// elevated helper, whose stderr nobody sees, so the skip is also an observed fault (local diagnostics and the
+// error reporter), not only a notice; the worker then reports managed SSH as not ready.
+func reportWindowsSSHSkipped(ctx context.Context, err error) {
+	errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "managed_ssh", "lifecycle", "managed_ssh_failed", err)
 }
 
 // windowsSSHPreparationBudget bounds the OpenSSH step of an install, pair or repair: obtaining the package may fall
@@ -55,6 +64,7 @@ func prepareWindowsSSHWithinAttempts(ctx context.Context, attempts int, step fun
 		}
 		if expired && (errors.Is(err, context.DeadlineExceeded) || windowsopenssh.Unobtainable(err)) {
 			windowsSSHTimeoutNotice(err)
+			reportWindowsSSHSkipped(ctx, err)
 			return nil
 		}
 		return skipUnobtainableWindowsSSH(ctx, err)
