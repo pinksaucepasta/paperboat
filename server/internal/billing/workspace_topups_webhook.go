@@ -87,7 +87,8 @@ func (s *WorkspaceService) handleTopupWebhook(ctx context.Context, event StripeW
 			return ErrProviderOutcomeUnknown
 		}
 		if expectsPaid && (state.AmountTotal != request.UnitAmount*int64(request.Quantity) || state.Currency != request.Currency) {
-			return nil
+			// Money was captured for something else: refuse so the provider retries and the failure is visible, never ack it as done.
+			return ErrTopupAmountMismatch
 		}
 		if expectsPaid {
 			// The month is the one open now, not the payment instant: a late webhook must not hand over a spent top-up.

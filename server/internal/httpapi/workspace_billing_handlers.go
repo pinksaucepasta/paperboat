@@ -18,6 +18,8 @@ func workspaceBillingError(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, r, http.StatusBadRequest, "invalid_quantity", "Choose a whole number of top-up units within the product limit.")
 	case errors.Is(err, billing.ErrTopupRequiresPaid):
 		writeError(w, r, http.StatusConflict, "paid_plan_required", "Choose a paid workspace plan before buying a bandwidth top-up.")
+	case errors.Is(err, billing.ErrTopupAmountMismatch):
+		writeError(w, r, http.StatusConflict, "topup_amount_mismatch", "The captured payment does not match the top-up purchase. Billing support must reconcile it.")
 	case errors.Is(err, billing.ErrWorkspaceForbidden):
 		writeError(w, r, http.StatusForbidden, "forbidden", "Your current workspace role does not permit this billing action.")
 	case errors.Is(err, billing.ErrSeatQuantity):

@@ -201,8 +201,10 @@ func TestWorkspaceTopupCheckoutFulfillmentAndLedgerPostgres(t *testing.T) {
 			bad := state
 			mutate(&bad)
 			f.states[state.ID] = bad
-			if _, err = s.HandleWebhook(ctx, paid); err != nil {
-				t.Fatal(err)
+			// A foreign event is ignored; a payment captured for another amount or currency is refused so it is retried and seen.
+			wantMismatch := bad.AmountTotal != state.AmountTotal || bad.Currency != state.Currency
+			if _, err = s.HandleWebhook(ctx, paid); wantMismatch != errors.Is(err, billing.ErrTopupAmountMismatch) || (!wantMismatch && err != nil) {
+				t.Fatalf("mutated provider snapshot %+v: err=%v wantMismatch=%v", bad, err, wantMismatch)
 			}
 			if remaining(w, paidAt) != 0 {
 				t.Fatal("mismatched event credited")
