@@ -1,0 +1,3 @@
+{"version":"paperboat.exec-event/v1","event":"started","operation_id":"operation_7523dd55-025b-488f-97b5-cad8c8726d94","state":"started"}
+{"version":"paperboat.exec-event/v1","event":"stdout","operation_id":"operation_7523dd55-025b-488f-97b5-cad8c8726d94","stream":"stdout","sequence":0,"data":"aHAK"}
+{"version":"paperboat.exec-event/v1","event":"exited","operation_id":"operation_7523dd55-025b-488f-97b5-cad8c8726d94","state":"exited","result":{"code":0,"exited_at":"2026-11-11T01:37:22.810330854Z"},"changed":true}

@@ -1,0 +1,4 @@
+{"version":"paperboat.exec-event/v1","event":"started","operation_id":"operation_0dd78f76-cd9a-49fd-8cc2-60b773d982ed","state":"started"}
+{"version":"paperboat.exec-event/v1","event":"stdout","operation_id":"operation_0dd78f76-cd9a-49fd-8cc2-60b773d982ed","stream":"stdout","sequence":0,"data":"cnVubmVydm1tN3VkMQ=="}
+{"version":"paperboat.exec-event/v1","event":"stdout","operation_id":"operation_0dd78f76-cd9a-49fd-8cc2-60b773d982ed","stream":"stdout","sequence":13,"data":"DQo="}
+{"version":"paperboat.exec-event/v1","event":"exited","operation_id":"operation_0dd78f76-cd9a-49fd-8cc2-60b773d982ed","state":"exited","result":{"code":0,"exited_at":"2026-11-11T01:37:26.5433811Z"},"changed":true}

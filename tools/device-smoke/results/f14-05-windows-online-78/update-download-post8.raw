@@ -1,0 +1,2 @@
+{"data":{"schema":"paperboat.updated/v1","status":"ok","version":"2026.11.10.8","updated":false,"observation":{"CheckedAt":"2026-11-11T01:37:50.5307772Z","NextCheckAt":"2026-11-11T04:00:00Z","Version":"2026.11.10.8","Updated":false,"Failure":"","Failures":0},"transaction":{"updated_at":"0001-01-01T00:00:00Z","health_deadline":"0001-01-01T00:00:00Z"},"settings":{"schema":"paperboat.update-settings/v1","enabled":true,"local_time":"04:00"},"next_maintenance_at":"2026-11-11T04:00:00Z"},"ok":true,"schema_version":"1.0"}
+

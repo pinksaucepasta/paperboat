@@ -1,0 +1,101 @@
+{
+ "ownership": "personal",
+ "owner_account": "user_5ae46801-d921-4983-be1c-db50ad886304",
+ "permissions": [
+  "terminal",
+  "exec",
+  "managed_ssh",
+  "files",
+  "preview_manage",
+  "tunnel_manage",
+  "private_access"
+ ],
+ "can_manage": true,
+ "shared": false,
+ "id": "machine_04a7619a-9b86-4cd9-983f-065bda5355a1",
+ "environment_id": "machine_04a7619a-9b86-4cd9-983f-065bda5355a1",
+ "alias": "runnervmm7ud1",
+ "state": "online",
+ "online": true,
+ "platform": "windows",
+ "architecture": "amd64",
+ "workspace_root": "C:\\Users\\runneradmin",
+ "capabilities": {
+  "file_receive": {
+   "configured": true,
+   "observed": true
+  },
+  "preview_launch": {
+   "configured": true,
+   "observed": true
+  },
+  "terminal_host": {
+   "configured": true,
+   "observed": true
+  },
+  "session_host": {
+   "configured": true,
+   "observed": true
+  },
+  "keep_awake": {
+   "configured": true,
+   "observed": true
+  },
+  "environment_injection": {
+   "configured": true,
+   "observed": true
+  }
+ },
+ "machine_capabilities": {
+  "schema": "paperboat.machine-capabilities/v1",
+  "desired": {
+   "terminal": true,
+   "managed_ssh": true,
+   "file_receive": true,
+   "preview_tunnel": true
+  },
+  "desired_version": 1,
+  "applied": {
+   "terminal": true,
+   "managed_ssh": true,
+   "file_receive": true,
+   "preview_tunnel": true
+  },
+  "applied_version": 1,
+  "status": "applied"
+ },
+ "public_identity_key": "X97xPg_JS6GGPQAkdNYsOkdRtd4RYIsrklOt77Rkijs",
+ "assigned_ip": "127.100.0.20",
+ "network_approved": true,
+ "installation_generation": 1,
+ "availability": {
+  "schema": "paperboat.availability-policy/v1",
+  "desired_mode": "allow_sleep",
+  "desired_version": 0,
+  "observed_mode": "allow_sleep",
+  "observed_version": 0,
+  "observed_at": "2026-11-11T01:06:58.970689Z",
+  "status": "applied",
+  "host_service_version": "2026.11.10.8",
+  "host_service_scope": "system",
+  "update_rollbacks": 0,
+  "update_health": "recovery_required"
+ },
+ "runtime_diagnostics": {
+  "worker_generation": 3,
+  "os_boot_id": "1794358341",
+  "worker_service_scope": "user",
+  "connector_state": "ready",
+  "connector_generation": 0,
+  "observed_at": "2026-11-11T01:37:01.939104Z"
+ },
+ "ssh": {
+  "os_user": "runneradmin",
+  "port": 58965,
+  "target_generation": 1,
+  "host_key_generation": 1,
+  "host_keys": [
+   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAsQPM+fqD1viviA2Mm+DTEx0BETcxBM7Gekd5//L/zn"
+  ]
+ }
+}

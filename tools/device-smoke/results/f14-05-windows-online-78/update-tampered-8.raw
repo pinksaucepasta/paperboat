@@ -1,0 +1,2 @@
+{"schema_version":"1.0","ok":false,"error":{"code":"update_verification_failed","category":"conflict","message":"The official update could not be verified; the installed version is unchanged. Download a fresh official update bundle and retry. Force cannot bypass verification.","retryable":false,"state_changed":false,"outcome_uncertain":false,"support_reference":"support_890bc474-bb50-4740-9d7d-a9828a0c20ee","recovery":"Download a fresh official update bundle and retry. Force cannot bypass verification."}}
+
