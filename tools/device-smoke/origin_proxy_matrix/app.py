@@ -32,6 +32,9 @@ class H(http.server.BaseHTTPRequestHandler):
                 self.wfile.flush()
                 time.sleep(0.7)
             return
+        if self.path.startswith("/slow"):  # first byte after ?seconds=N (the 100 s first-byte probe)
+            time.sleep(min(int(self.path.partition("seconds=")[2] or 1), 120))
+            return self.reply(200, b"slow ok")
         if self.path == "/range":
             data = bytes(range(256)) * 4
             start, end = 0, len(data) - 1
