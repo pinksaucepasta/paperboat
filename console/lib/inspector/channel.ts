@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { api, ApiError } from "@/lib/api"
 import { verifyTicketKey } from "@/lib/terminal/browser-root-key"
+import { validTicketSubprotocols } from "@/lib/terminal/browser-ticket"
 import { loadBrowserTerminal, type BrowserTerminalAPI, type BrowserTerminalEvent } from "@/lib/terminal/browser-terminal-wasm"
 
 /**
@@ -99,12 +100,7 @@ async function issueGrants(previewId: string): Promise<Grants> {
 function checkTicket(ticket: Ticket, machineId: string) {
   if (ticket.role !== "inspector") throw new Error("The inspector ticket has an invalid role.")
   if (ticket.machine_id !== machineId) throw new Error("The inspector ticket is for a different machine.")
-  if (
-    !Array.isArray(ticket.subprotocols) ||
-    ticket.subprotocols.length !== 2 ||
-    !ticket.subprotocols[1].startsWith("pb-ticket.")
-  )
-    throw new Error("The encrypted inspector ticket is invalid.")
+  if (!validTicketSubprotocols(ticket.subprotocols)) throw new Error("The encrypted inspector ticket is invalid.")
   const expiresAt = Date.parse(ticket.expires_at)
   if (!Number.isFinite(expiresAt) || expiresAt <= Date.now())
     throw new Error("The ticket expired before connecting. Retrying.")
