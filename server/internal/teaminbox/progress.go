@@ -3,7 +3,6 @@ package teaminbox
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"time"
 )
 
@@ -70,6 +69,6 @@ WHERE r.request_id=$2 AND r.sender_account=$1 AND r.status IN ('approved','consu
 	case current.TransferMode != "" && current.TransferMode != p.TransferMode, p.CommittedBytes < current.CommittedBytes, p.CommittedBytes > current.TotalBytes:
 		return Request{}, ErrConflict
 	default:
-		return Request{}, errors.New("team inbox progress was not recorded")
+		return Request{}, ErrConflict // the row changed between the update and the read; the sender retries
 	}
 }
