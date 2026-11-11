@@ -483,21 +483,8 @@ func (c *Coordinator) ReconcileStatus(ctx context.Context) error {
 }
 
 func (c *Coordinator) applySnapshotLocked(parent context.Context, peers []*daemonrpc.PeerUpdate, revision uint64) error {
-	localPeers, err := mapPeerSnapshot(peers, machineloopback.DefaultCIDR)
-	if err != nil {
-		c.mu.Lock()
-		guarded := c.nameClient != nil || c.cfg.ConnectNameClient != nil
-		c.mu.Unlock()
-		if guarded && parent != nil {
-			ctx, cancel := context.WithTimeout(parent, c.cfg.ReconcileTimeout)
-			withdrawalErr := c.replaceGuardedRoutes(ctx, nil)
-			cancel()
-			err = coordinatorFailure("machine snapshot rejected", err, withdrawalErr)
-		}
-		c.reportReconcileError(coordinatorFailure("machine snapshot rejected", err))
-		c.rpcBackend.ApplyPeerUpdates(nil, revision, nil)
-		return err
-	}
+	localPeers, skipped := mapPeerSnapshot(peers, machineloopback.DefaultCIDR)
+	skipped = coordinatorFailure("machine snapshot entries left out of local access", skipped)
 	c.mu.Lock()
 	namesEnabled := c.nameClient != nil || c.cfg.ConnectNameClient != nil
 	c.mu.Unlock()
@@ -509,6 +496,7 @@ func (c *Coordinator) applySnapshotLocked(parent context.Context, peers []*daemo
 		err := c.replaceGuardedRoutes(ctx, localPeers)
 		cancel()
 		if err != nil {
+			err = errors.Join(err, skipped)
 			c.reportReconcileError(fmt.Errorf("local machine access withdrawn; retry after repairing the machine guard or browser trust: %w", err))
 			c.rpcBackend.ApplyPeerUpdates(nil, revision, nil)
 			return err
@@ -545,7 +533,8 @@ func (c *Coordinator) applySnapshotLocked(parent context.Context, peers []*daemo
 		c.mu.Unlock()
 	}
 	c.rpcBackend.ApplyPeerUpdates(localPeers, revision, c.BrowserURLs())
-	return nil
+	c.reportReconcileError(skipped)
+	return skipped
 }
 
 func (c *Coordinator) Stop() error {

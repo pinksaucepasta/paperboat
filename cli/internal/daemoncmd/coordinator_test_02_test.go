@@ -568,7 +568,7 @@ func TestMapPeerSnapshotProjectsCanonicalAddressWithoutMutation(t *testing.T) {
 	if mapped[0].GetAssignedIp() != "127.212.23.45" || peer.GetAssignedIp() != "127.100.23.45" {
 		t.Fatalf("mapped=%q canonical=%q", mapped[0].GetAssignedIp(), peer.GetAssignedIp())
 	}
-	if _, err = mapPeerSnapshot([]*daemonrpc.PeerUpdate{{PeerId: "bad", AssignedIp: "127.211.23.45"}}, "127.212.0.0/16"); err == nil {
+	if mapped, err = mapPeerSnapshot([]*daemonrpc.PeerUpdate{{PeerId: "bad", AssignedIp: "127.211.23.45"}}, "127.212.0.0/16"); err == nil || len(mapped) != 0 {
 		t.Fatal("noncanonical server assignment accepted")
 	}
 }
@@ -822,3 +822,29 @@ func (c *coordinatorCleanupClient) ReplaceNames(ctx context.Context, names map[s
 	return c.coordinatorNameClient.ReplaceNames(ctx, names)
 }
 func (c *coordinatorCleanupClient) Close() error { _ = c.coordinatorNameClient.Close(); return c.cause }
+
+// One peer entry whose address cannot be mapped is left out and named; every other machine keeps its local access
+// (audit A P2-6: one bad entry withdrew every route and published zero machines).
+func TestCoordinatorKeepsOtherMachinesWhenOneSnapshotEntryIsBad(t *testing.T) {
+	names := &coordinatorNameClient{}
+	coordinator, err := NewCoordinator(CoordinatorConfig{NameClient: names, DialMachine: func(context.Context, string, int) (net.Conn, error) { return nil, errors.New("not dialed") }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator.ctx = t.Context()
+	defer coordinator.Stop()
+	peers := []*daemonrpc.PeerUpdate{
+		{PeerId: "peer", Alias: "studio", AssignedIp: "127.100.0.22", Approved: true, Online: true, ExportedPorts: []int32{8080}},
+		{PeerId: "broken", Alias: "broken", AssignedIp: "not-an-address", Approved: true, Online: true, ExportedPorts: []int32{8080}},
+	}
+	err = coordinator.reconcileSnapshot(t.Context(), peers, 1)
+	if _, parseErr := netip.ParseAddr("not-an-address"); !errors.Is(err, parseErr) || strings.Contains(err.Error(), "not-an-address") {
+		t.Fatalf("the left-out entry is not reported, or its address is exposed: %v", err)
+	}
+	if _, err = coordinator.rpcBackend.ResolveMachine(t.Context(), "peer"); err != nil {
+		t.Fatal("a good machine lost local access with one bad entry:", err)
+	}
+	if _, err = coordinator.rpcBackend.ResolveMachine(t.Context(), "broken"); err == nil {
+		t.Fatal("the bad entry was published")
+	}
+}
