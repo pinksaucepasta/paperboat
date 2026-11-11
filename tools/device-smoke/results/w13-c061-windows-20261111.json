@@ -1,0 +1,22 @@
+{
+  "row": "C061",
+  "status": "PASS",
+  "build": {
+    "commit": "7cb8c88d4f1f64085389f0190182e9e569e8565d",
+    "version": "dev-7cb8c88d4"
+  },
+  "runner": "winpool-4",
+  "platform": "Windows amd64 hosted runner",
+  "check": {
+    "check": "ssh-tools",
+    "target": "w13-linux",
+    "status": "PASS",
+    "tools": [
+      "rsync"
+    ],
+    "both_directions": true,
+    "hashes_verified": true,
+    "enrollment_unchanged": true
+  },
+  "fixture": "MSYS2 rsync on PATH; RSYNC_RSH selects native Windows OpenSSH; target is own Linux throwaway"
+}
