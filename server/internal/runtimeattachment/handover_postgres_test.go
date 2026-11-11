@@ -11,7 +11,6 @@ import (
 
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/billing"
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/endpoints"
@@ -104,7 +103,7 @@ VALUES($1,$2,$3,$3,$4,'owner_session_handover','foreground','http','127.0.0.1:30
 	}
 	// authorized reports, per route, the carrier sessions the edge's ingress authority admits now.
 	authorized := func() (map[string]map[string]bool, error) {
-		decisions, err := ingressprojection.SQLIngressSource{DB: f.database, Quota: billing.NewWorkspaceService(f.database, nil, "")}.Edge(f.ctx, f.node, f.edge.ProcessEpoch)
+		decisions, err := ingressprojection.SQLIngressSource{DB: f.database, Quota: f.quota}.Edge(f.ctx, f.node, f.edge.ProcessEpoch)
 		out := map[string]map[string]bool{lease: {}, tunnelRoute: {}}
 		for _, d := range decisions {
 			if sessions, ok := out[d.Binding.RouteID]; ok {

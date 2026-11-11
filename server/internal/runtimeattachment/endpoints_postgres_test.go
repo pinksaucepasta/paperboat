@@ -13,6 +13,7 @@ import (
 
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/billing"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/endpoints"
@@ -27,6 +28,7 @@ import (
 // agentFixture is an account with one enrolled machine, its runtime route and two edges: the
 // agent side of the endpoint engine.
 type agentFixture struct {
+	quota                                     *billing.WorkspaceService
 	database                                  *db.DB
 	ctx                                       context.Context
 	prefix, account, machine, env, route, key string
@@ -63,6 +65,10 @@ func newAgentFixture(t *testing.T, name string) *agentFixture {
 	}
 	prefix := name + "_" + strings.ReplaceAll(time.Now().UTC().Format("150405.000000000"), ".", "")
 	f := &agentFixture{database: database, ctx: ctx, prefix: prefix, account: prefix + "_account", machine: prefix + "_machine", env: prefix + "_env", route: prefix + "_route", node: prefix + "_edge", backupNode: prefix + "_zbackup"}
+	f.quota = billing.NewWorkspaceService(database, nil, "")
+	if err := f.quota.InitializeAllowancePolicy(ctx, nil, nil); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		for _, query := range []string{`DELETE FROM endpoints WHERE agent_machine_id=$1`, `DELETE FROM tunnels WHERE created_by_host_id=$1`, `DELETE FROM preview_leases WHERE owner_machine_id=$1`, `DELETE FROM runtime_carrier_attachments WHERE machine_id=$1`} {
 			_, _ = database.SQL().ExecContext(ctx, query, f.machine)
