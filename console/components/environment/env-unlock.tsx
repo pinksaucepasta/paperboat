@@ -5,6 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { unlockVault } from "@/lib/envvault/vault"
 import { Button } from "@/components/ui/button"
+import { EnvRecover } from "@/components/environment/env-recover"
 import { FieldError } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 
@@ -22,11 +23,13 @@ export function EnvUnlock({
   title?: string
 }) {
   const [password, setPassword] = useState("")
+  const [recovering, setRecovering] = useState(false)
   const client = useQueryClient()
   const unlock = useMutation({
     mutationFn: (secret: string) => unlockVault(secret),
     onSuccess: () => client.invalidateQueries({ queryKey: ["env-names"] }),
   })
+  if (recovering) return <EnvRecover onCancel={() => setRecovering(false)} />
   return (
     <div className="flex flex-col gap-3 surface rounded-lg p-4 text-sm">
       <div className="flex flex-col gap-3 md:flex-row md:items-center">
@@ -62,6 +65,13 @@ export function EnvUnlock({
         </form>
       </div>
       {unlock.isError && <FieldError>{unlock.error.message}</FieldError>}
+      <Button
+        variant="link"
+        className="h-auto self-start p-0 text-muted-foreground"
+        onClick={() => setRecovering(true)}
+      >
+        Forgot password? Use your recovery code
+      </Button>
     </div>
   )
 }

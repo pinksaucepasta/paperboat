@@ -144,6 +144,49 @@ func TestBuiltWasmInteroperatesWithNativeCode(t *testing.T) {
 	if _, err := env.OpenPasswordVault(ctx, head, []byte("wrong"), rawVault); err == nil {
 		t.Fatal("native code opened the wasm vault with a wrong password")
 	}
+	// Wasm vault with a recovery code -> native recovery; the wasm recovers it with a new password and code.
+	code, err := env.GenerateVaultRecoveryCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovering := map[string]any{"issuer": v.Issuer, "account_id": "account-three"}
+	peer.call(map[string]any{"action": "lock"}) // drops the pending initialization above
+	sealed = peer.call(map[string]any{"action": "initialize", "vault": recovering, "password": "third password", "code": string(code)})
+	rawVault, _ = decode(sealed["envelope"].(string))
+	head, _, err = env.InspectPasswordVault(rawVault)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err = env.OpenRecoveryVault(ctx, head, code, rawVault)
+	if err != nil {
+		t.Fatalf("native recovery of a wasm vault: %v", err)
+	}
+	clear(payload)
+	state := map[string]any{"issuer": head.Issuer, "account_id": head.AccountID, "generation": head.Generation, "document_id": sealed["document_id"], "envelope": sealed["envelope"]}
+	peer.call(map[string]any{"action": "lock"})
+	peer.call(map[string]any{"action": "recover", "vault": state, "code": string(code)})
+	fresh2 := peer.call(map[string]any{"action": "recovery-code"})["code"].(string)
+	recovered := peer.call(map[string]any{"action": "password", "vault": state, "password": "fourth password", "enable_recovery": true, "code": fresh2})
+	rawVault, _ = decode(recovered["envelope"].(string))
+	head, _, err = env.InspectPasswordVault(rawVault)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		secret   string
+		recovery bool
+		want     bool
+	}{{"fourth password", false, true}, {fresh2, true, true}, {"third password", false, false}, {string(code), true, false}} {
+		open := env.OpenPasswordVault
+		if c.recovery {
+			open = env.OpenRecoveryVault
+		}
+		p, err := open(ctx, head, []byte(c.secret), rawVault)
+		clear(p)
+		if (err == nil) != c.want {
+			t.Fatalf("native open of the wasm-recovered vault with %q (recovery=%v): err=%v, want open=%v", c.secret[:4], c.recovery, err, c.want)
+		}
+	}
 	peer.call(map[string]any{"action": "lock"})
 }
 

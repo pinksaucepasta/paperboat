@@ -87,18 +87,38 @@ export async function readVault(signal?: AbortSignal): Promise<Vault | null> {
   }
 }
 
-/** The password never leaves the browser: it opens the vault inside the worker. */
-export async function unlockVault(password: string): Promise<void> {
+/** The vault's issuer, which a new vault must carry: the server names it when none exists yet. */
+export async function vaultIssuer(): Promise<string> {
+  try {
+    await api<Vault>("environment-vault?workspace=personal")
+  } catch (error) {
+    const issuer = (error as { details?: { issuer?: unknown } }).details?.issuer
+    if (notFound(error) && typeof issuer === "string") return issuer
+    throw error
+  }
+  throw new Error("An ENV vault already exists for this account.")
+}
+
+/**
+ * The password (or the recovery code) never leaves the browser: it opens the vault inside the worker.
+ * A recovery code opens it too, but the vault stays closed to the page until a new password is
+ * published (see `recoverVault`).
+ */
+export async function unlockVault(secret: string, kind: "password" | "recovery" = "password"): Promise<void> {
   const [vault, me] = await Promise.all([readVault(), api<Me>("me")])
-  if (!vault) throw new ApiError(404, "not_found", "No vault yet. Run pb env vault init on a machine first.")
+  if (!vault) throw new ApiError(404, "not_found", "No vault yet. Create one first.")
   if (vault.account_id !== me.id) {
     lockVault()
     throw new Error("The ENV vault does not belong to the signed-in account.")
   }
-  await vaultCrypto({ action: "unlock", vault, password })
+  await vaultCrypto(
+    kind === "recovery"
+      ? { action: "recover", vault, code: secret.replace(/\s+/g, "") }
+      : { action: "unlock", vault, password: secret },
+  )
 }
 
-async function currentVault(signal?: AbortSignal): Promise<Vault> {
+export async function currentVault(signal?: AbortSignal): Promise<Vault> {
   const vault = await readVault(signal)
   if (!vault) throw new Error("No ENV vault exists for this account.")
   return vault

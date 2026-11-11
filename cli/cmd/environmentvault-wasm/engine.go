@@ -330,6 +330,11 @@ func (e *engine) run(ctx context.Context, r request) (any, error) {
 			secret := []byte(r.Password)
 			defer clear(secret)
 			protection, err = env.ReplaceVaultPassword(ctx, e.head, protection, secret)
+			if err == nil && r.EnableRecovery { // recover: new password and new code in one vault version, as `pb env vault recover`
+				code := []byte(r.Code)
+				defer clear(code)
+				protection, err = env.ReplaceVaultRecovery(ctx, e.head, protection, code)
+			}
 		} else {
 			code := []byte(r.Code)
 			defer clear(code)

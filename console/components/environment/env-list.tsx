@@ -1,6 +1,6 @@
 "use client"
 
-import { KeyIcon, LockSimpleIcon, PlusIcon } from "@phosphor-icons/react"
+import { LockSimpleIcon, PlusIcon } from "@phosphor-icons/react"
 import { useQuery } from "@tanstack/react-query"
 import { useState, useSyncExternalStore } from "react"
 import { meQuery, useApiQuery, useWorkspace, type Machine } from "@/lib/api"
@@ -9,10 +9,11 @@ import { readVault, type EnvScope } from "@/lib/envvault/vault"
 import { CommandBlock } from "@/components/add-machine-dialog"
 import { EnvUnlock } from "@/components/environment/env-unlock"
 import { EnvVariables } from "@/components/environment/env-variables"
+import { EnvVaultSettings } from "@/components/environment/env-vault-settings"
+import { EnvVaultSetup } from "@/components/environment/env-vault-setup"
 import { useCurrentMachine } from "@/components/machine-shell"
 import { useListScope } from "@/components/list-toolbar"
 import { Button } from "@/components/ui/button"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Section } from "@/components/section"
 import { EnvNamesSwitch } from "@/components/environment/env-names-switch"
 
@@ -27,10 +28,12 @@ export function MachineEnvironment() {
  */
 export function EnvironmentPage() {
   const [adding, setAdding] = useState(false)
+  const unlocked = useSyncExternalStore(subscribeVaultLock, vaultUnlocked, () => false)
   return (
     <div className="flex flex-col gap-10">
       <EnvironmentList adding={adding} onAddingChange={setAdding} />
       <EnvNamesSwitch />
+      {unlocked && <EnvVaultSettings />}
       <Section title="Use them">
         <div className="flex flex-col gap-4 pt-3 text-sm">
           <div className="flex flex-col gap-1.5">
@@ -52,8 +55,8 @@ export function EnvironmentPage() {
 
 /**
  * Variable names and values, end to end encrypted: the vault password opens the vault in this
- * browser, names are listed, values are written and never shown. Setting up the vault, its
- * recovery code and password changes stay in `pb env vault`. On the Environment page Add variable
+ * browser, names are listed, values are written and never shown. Without a vault the page sets one up;
+ * a forgotten password is recovered from the unlock card. On the Environment page Add variable
  * is the Section's action (`adding`); on a machine's tab it sits above the list.
  */
 export function EnvironmentList({
@@ -76,7 +79,7 @@ export function EnvironmentList({
   if (vault.isError) {
     return <p className="py-16 text-center text-sm text-destructive">{vault.error.message}</p>
   }
-  if (!vault.data) return <NoVault />
+  if (!vault.data) return <EnvVaultSetup />
   if (!unlocked) return <EnvUnlock />
   const team = workspace.kind === "team" && !machineId
   const scope: EnvScope = {
@@ -105,24 +108,5 @@ export function EnvironmentList({
     >
       <EnvVariables key={JSON.stringify(scope)} scope={scope} adding={adding} onAddingChange={onAddingChange} />
     </Section>
-  )
-}
-
-function NoVault() {
-  return (
-    <Empty className="py-16">
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <KeyIcon />
-        </EmptyMedia>
-        <EmptyTitle>Create your vault with pb</EmptyTitle>
-        <EmptyDescription>
-          The vault password is chosen on a machine. Then you can manage variables here.
-        </EmptyDescription>
-      </EmptyHeader>
-      <div className="mx-auto flex w-full max-w-md flex-col gap-2">
-        <CommandBlock command="pb env vault init" />
-      </div>
-    </Empty>
   )
 }

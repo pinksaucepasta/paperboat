@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdh"
+	"encoding/json"
+	"os"
 	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
 	"testing"
 )
@@ -638,5 +640,116 @@ func TestBrowserScopeCandidateRetainsCurrentWriterAcrossCustodyAdvance(t *testin
 	}
 	if _, err := e.run(ctx, request{Action: "scope-candidate", Vault: next, WorkspaceID: "personal", Kind: "personal", Owner: next.Account, Envelope: encoded(future.Raw)}); err == nil {
 		t.Fatal("future custody generation accepted")
+	}
+}
+
+// A vault made natively with a recovery code recovers in the browser engine (password and code replaced in
+// one version, as `pb env vault recover`) and the result opens natively; replaced secrets stop working and
+// turning recovery off leaves no code that opens the vault.
+func TestBrowserRecoveryInteroperatesWithNativeVault(t *testing.T) {
+	ctx := context.Background()
+	head := env.VaultHead{Issuer: "https://control.example", AccountID: "account-one", Generation: 1}
+	keys, err := env.NewVaultKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer keys.Clear()
+	payload, _ := keys.MarshalBinary()
+	oldCode, err := env.GenerateVaultRecoveryCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	protection, err := env.NewVaultProtection(ctx, head, []byte("native password"), oldCode, keys.WriterSeed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err := env.SealProtectedVault(ctx, head, env.DocumentID{}, protection, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := stateFrom(t, raw)
+	opens := func(raw []byte, secret []byte, recovery bool) bool {
+		h, _, _ := env.InspectPasswordVault(raw)
+		open := env.OpenPasswordVault
+		if recovery {
+			open = env.OpenRecoveryVault
+		}
+		p, err := open(ctx, h, secret, raw)
+		clear(p)
+		return err == nil
+	}
+
+	e := &engine{}
+	defer e.clear()
+	if _, err := e.run(ctx, request{Action: "recover", Vault: native, Code: "pbvr1-WRONG"}); err == nil {
+		t.Fatal("browser recovered with a bad code")
+	}
+	if _, err := e.run(ctx, request{Action: "recover", Vault: native, Code: string(oldCode)}); err != nil {
+		t.Fatalf("browser did not recover a native vault: %v", err)
+	}
+	out, err := e.run(ctx, request{Action: "recovery-code"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh := out.(map[string]string)["code"]
+	if _, err := e.run(ctx, request{Action: "password", Vault: native, Password: "browser password", EnableRecovery: true, Code: fresh}); err != nil {
+		t.Fatal(err)
+	}
+	next := stateFrom(t, e.pendingRaw)
+	if next.Generation != native.Generation+1 {
+		t.Fatalf("recovery made generation %d, want a single successor", next.Generation)
+	}
+	if _, err := e.run(ctx, request{Action: "commit", Vault: next}); err != nil {
+		t.Fatal(err)
+	}
+	if opens(e.raw, []byte("native password"), false) || opens(e.raw, oldCode, true) {
+		t.Fatal("the old password or recovery code still opens the recovered vault")
+	}
+	if !opens(e.raw, []byte("browser password"), false) || !opens(e.raw, []byte(fresh), true) {
+		t.Fatal("the new password or recovery code does not open the recovered vault natively")
+	}
+	if _, err := e.run(ctx, request{Action: "recovery", Vault: next}); err != nil {
+		t.Fatal(err)
+	}
+	off := stateFrom(t, e.pendingRaw)
+	if _, err := e.run(ctx, request{Action: "commit", Vault: off}); err != nil {
+		t.Fatal(err)
+	}
+	if opens(e.raw, []byte(fresh), true) {
+		t.Fatal("a recovery code opens a vault with recovery turned off")
+	}
+	if status, _ := e.run(ctx, request{Action: "status", Vault: off}); status.(map[string]any)["recovery_enabled"] != false {
+		t.Fatal("status reports recovery on after turning it off")
+	}
+}
+
+// console/lib/envvault/testdata/cli-vault.json is a vault sealed by the CLI's own code with a recovery
+// code; the console's tests recover it in the browser. It must stay a vault the native code opens.
+func TestConsoleFixtureIsANativeVaultWithRecovery(t *testing.T) {
+	file, err := os.ReadFile("../../../console/lib/envvault/testdata/cli-vault.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Password     string     `json:"password"`
+		RecoveryCode string     `json:"recovery_code"`
+		Vault        vaultState `json:"vault"`
+	}
+	if err := json.Unmarshal(file, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	head, raw, err := fixture.Vault.verified()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, open := range []func() ([]byte, error){
+		func() ([]byte, error) { return env.OpenPasswordVault(context.Background(), head, []byte(fixture.Password), raw) },
+		func() ([]byte, error) { return env.OpenRecoveryVault(context.Background(), head, []byte(fixture.RecoveryCode), raw) },
+	} {
+		payload, err := open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		clear(payload)
 	}
 }

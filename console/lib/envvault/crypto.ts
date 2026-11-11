@@ -60,7 +60,7 @@ function start(): Worker {
   return next
 }
 
-/** One vault operation. Any use restarts the idle timer; unlocking marks the vault open. */
+/** One vault operation. Any use restarts the idle timer; unlocking (or committing a published change) marks the vault open. */
 export async function vaultCrypto<T>(request: { action: string } & Record<string, unknown>): Promise<T> {
   const target = start()
   const id = ++sequence
@@ -69,7 +69,8 @@ export async function vaultCrypto<T>(request: { action: string } & Record<string
     target.postMessage({ id, request: JSON.stringify(request) })
   })
   if (reply.error || reply.data === undefined) throw new Error(reply.error ?? "The ENV operation failed.")
-  if (request.action === "unlock") {
+  // "commit" opens the vault after a setup, recovery or password change was published.
+  if (request.action === "unlock" || request.action === "commit") {
     unlocked = true
     notify()
   }
