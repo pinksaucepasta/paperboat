@@ -79,20 +79,7 @@ func retireCarrierGeneration(ctx context.Context, c CarrierConfig) (bool, error)
 	if err != nil {
 		return false, err
 	}
-	native := service.WindowsController{}
-	status, err := native.Inspect(ctx, installer.DefinitionPath())
-	if err != nil {
-		return false, err
-	}
-	if status.Enabled {
-		if err := native.Disable(ctx, installer.DefinitionPath()); err != nil {
-			return status.Running, err
-		}
-	}
-	if !status.Running {
-		return false, nil
-	}
-	return false, native.Stop(ctx, installer.DefinitionPath())
+	return retireNative(ctx, service.WindowsController{}, installer.DefinitionPath())
 }
 
 // removeWindowsCarrierGeneration stops and deletes one generation's service, then its own descriptor and lock. The
