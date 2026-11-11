@@ -7,11 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"io"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/shared/wirejson"
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
@@ -932,14 +934,12 @@ func decodeHelperFrame(data []byte) (helperFrame, error) {
 	if len(data) == 0 || len(data) > 64<<10 {
 		return helperFrame{}, errors.New("helper structured frame is truncated")
 	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
+	// The helper's frames are answers, not authorization claims: a field a newer helper adds is ignored (AGENTS.md).
 	var frame helperFrame
-	if err := decoder.Decode(&frame); err != nil {
-		return helperFrame{}, err
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+	if err := wirejson.Decode(data, &frame); errors.Is(err, wirejson.ErrTrailingData) {
 		return helperFrame{}, errors.New("helper structured frame has trailing data")
+	} else if err != nil {
+		return helperFrame{}, err
 	}
 	if frame.Version != helperProtocolVersion || frame.Type == "" || frame.RequestID == "" {
 		return helperFrame{}, errors.New("helper structured frame is invalid")

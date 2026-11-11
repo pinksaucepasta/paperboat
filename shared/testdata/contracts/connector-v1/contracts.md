@@ -72,7 +72,8 @@ numbers. Frames, control messages, stream-open prefaces and goaway notices ignor
 unknown fields and accept any minor version of the supported major (edge and
 host update independently; `hello` negotiation is the version gate). Authorization
 claims (the hello, auth, renewal and rotation messages, ingress decisions,
-private access requests, the signed configuration snapshot) reject unknown
+private access requests, and the configuration snapshot, which decides what a
+connector serves and to whom) reject unknown
 fields, because an unknown field there could be a restriction the receiver does
 not understand. Canonical configuration JSON is
 decoded with JSON-number preservation, recursively checked for a maximum depth
