@@ -33,10 +33,10 @@ func TestTheLargestRelayGrantChunkFitsTheRelayTokenBound(t *testing.T) {
 	}
 	now := time.Now().Unix()
 	chunks := relayGrantChunks(self, peers, maximumRelayGrantPeers, now+60)
-	// The relay and CLI accept at most 32 signed parts. Every peer of a
+	// The relay and CLI accept at most peernetwork.MaxGrantParts signed parts. Every peer of a
 	// 1,000-machine account must fit without truncation, even at full scope size.
-	if len(chunks) > 32 {
-		t.Fatalf("999 peers require %d parts; relay and CLI accept 32", len(chunks))
+	if len(chunks) > peernetwork.MaxGrantParts {
+		t.Fatalf("999 peers require %d parts; relay and CLI accept %d", len(chunks), peernetwork.MaxGrantParts)
 	}
 	named := map[string]bool{}
 	for _, chunk := range chunks {
