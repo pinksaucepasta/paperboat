@@ -156,7 +156,7 @@ func protectWindowsPinDirectory(path, ownerSID string) (resultErr error) {
 	if err := rejectWindowsReparseAncestors(path); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(path, 0700); err != nil {
+	if err := service.CreateProtectedWindowsDirectory(path); err != nil {
 		return err
 	}
 	handle, _, err := openWindowsRuntimeObject(path, true)

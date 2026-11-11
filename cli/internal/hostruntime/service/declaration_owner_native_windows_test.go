@@ -72,12 +72,14 @@ func requireCustody(t *testing.T, path string, owner *windows.SID, sddl string) 
 }
 
 func TestNativeWindowsDeclarationPublishedWithSystemOwner(t *testing.T) {
-	requireElevatedDeclarationFixture(t)
-	// The parent is missing too: it is created protected, like C:\ProgramData\Paperboat on a fresh machine.
+	user := requireElevatedDeclarationFixture(t)
+	// The parent is missing too: it is created protected, like C:\ProgramData\Paperboat on a fresh machine. Hosted
+	// runners give an elevated token the user as default owner; that must not become the owner of either folder.
 	root := filepath.Join(t.TempDir(), "Paperboat", "services")
-	if err := prepareAtomicDirectory(root); err != nil {
+	if err := windowssecurity.WithRestorePrivilegeAndOwner(user, func() error { return prepareAtomicDirectory(root) }); err != nil {
 		t.Fatal(err)
 	}
+	requireCustody(t, filepath.Dir(root), wellKnownSID(t, windows.WinBuiltinAdministratorsSid), declarationDirectoryDACL)
 	path := filepath.Join(root, "owned.json")
 	body := []byte("task-owned native declaration")
 	if err := writeServiceDefinition(path, body, 0600); err != nil {

@@ -78,7 +78,12 @@ func openProtectedWindowsDirectory(path string) (windows.Handle, error) {
 		return 0, err
 	}
 	attributes := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: descriptor}
-	if err := windowssecurity.WithRestorePrivilege(func() error {
+	administrators, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	if err != nil {
+		return 0, err
+	}
+	// The token's default owner is pinned too: Windows may otherwise substitute it for the descriptor's owner.
+	if err := windowssecurity.WithRestorePrivilegeAndOwner(administrators, func() error {
 		return windows.CreateDirectory(name, &attributes)
 	}); err != nil && !errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
 		return 0, fmt.Errorf("create %s: %w", path, err)
@@ -100,6 +105,26 @@ func openProtectedWindowsDirectory(path string) (windows.Handle, error) {
 		return 0, errors.Join(refusedWindowsDirectory(path, "is a junction, link or file instead of a directory"), windows.CloseHandle(handle))
 	}
 	return handle, nil
+}
+
+// CreateProtectedWindowsDirectory creates path and its missing parents owned by Administrators with the SYSTEM and
+// Administrators DACL already set at creation, so a fresh folder is never owned by the installing user. An existing
+// directory is left as it is for the caller's own custody check.
+func CreateProtectedWindowsDirectory(path string) error {
+	path = filepath.Clean(path)
+	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if parent := filepath.Dir(path); parent != path {
+		if err := CreateProtectedWindowsDirectory(parent); err != nil {
+			return err
+		}
+	}
+	handle, err := openProtectedWindowsDirectory(path)
+	if err != nil {
+		return err
+	}
+	return windows.CloseHandle(handle)
 }
 
 // checkWindowsParentCustody accepts a parent owned by SYSTEM or Administrators in which no other account may

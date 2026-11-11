@@ -3702,7 +3702,7 @@ func ensureWindowsExecutableDirectory(path, readerSID string) error {
 	if !safeAbsolute(path) {
 		return ErrInvalidRequest
 	}
-	if err := os.MkdirAll(path, 0o700); err != nil {
+	if err := service.CreateProtectedWindowsDirectory(path); err != nil {
 		return err
 	}
 	info, err := os.Lstat(path)
