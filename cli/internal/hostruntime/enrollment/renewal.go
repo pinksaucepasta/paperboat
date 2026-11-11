@@ -112,6 +112,13 @@ func (s *RenewingTokenSource) token(ctx context.Context, force bool) (token stri
 		}
 		return current.Credential, nil
 	}
+	if renewalRefused(s.config.StateRoot, current) {
+		return "", refusedRenewalError()
+	}
+	retry := backoffFor(s.config.StateRoot)
+	if err := retry.wait(); err != nil {
+		return "", err
+	}
 	releaseRenewalLock, err := lockRuntimeIdentityRenewal(attemptCtx, s.config.StateRoot)
 	if err != nil {
 		return "", unavailableEnrollment(err)
@@ -138,6 +145,9 @@ func (s *RenewingTokenSource) token(ctx context.Context, force bool) (token stri
 		}
 		return current.Credential, nil
 	}
+	if renewalRefused(s.config.StateRoot, current) {
+		return "", refusedRenewalError()
+	}
 	operationID, err := s.config.OperationID()
 	if err != nil {
 		return "", unavailableEnrollment(err)
@@ -161,6 +171,9 @@ func (s *RenewingTokenSource) token(ctx context.Context, force bool) (token stri
 	request.Header.Set("Accept", "application/json")
 	response, err := s.client.Do(request)
 	if err != nil {
+		if ctx.Err() == nil { // the caller giving up is not the control plane failing
+			retry.fail(err)
+		}
 		return "", unavailableEnrollment(err)
 	}
 	encoded, err := readEnrollmentResponse(response)
@@ -168,15 +181,24 @@ func (s *RenewingTokenSource) token(ctx context.Context, force bool) (token stri
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
 			err = errors.Join(errorreport.HTTPStatusFailure(response), err)
 		}
+		retry.fail(err)
 		return "", unavailableEnrollment(err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+		refusal := errorreport.HTTPStatusFailure(response)
+		if response.StatusCode == http.StatusUnauthorized {
+			// Terminal: the machine was removed or its credential revoked. Recorded against this identity; no
+			// renewal is attempted for it again (renewalRefused), and the daemon reads as refused, not unreachable.
+			recordRenewalRefusal(s.config.StateRoot, current, now)
+			return "", refusal
+		}
+		retry.fail(refusal)
+		if response.StatusCode == http.StatusForbidden {
 			// The observed refusal is the error: it is how the daemon tells a revoked machine (signed out
 			// now) from a control plane it cannot reach.
-			return "", errorreport.HTTPStatusFailure(response)
+			return "", refusal
 		}
-		return "", unavailableEnrollment(errorreport.HTTPStatusFailure(response))
+		return "", unavailableEnrollment(refusal)
 	}
 	var envelope struct {
 		Data RuntimeIdentity `json:"data"`
@@ -193,6 +215,7 @@ func (s *RenewingTokenSource) token(ctx context.Context, force bool) (token stri
 	if err := writeIdentity(s.config.StateRoot, renewed); err != nil {
 		return "", unavailableEnrollment(err)
 	}
+	retry.succeed()
 	return renewed.Credential, nil
 }
 
