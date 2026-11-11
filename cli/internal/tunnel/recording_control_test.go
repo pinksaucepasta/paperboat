@@ -3,6 +3,7 @@ package tunnel
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
@@ -32,5 +33,29 @@ func TestRecordingControlTravelsOnTheAttachment(t *testing.T) {
 	}
 	if _, err := link.RecordingControl(context.Background(), "record-everything"); err == nil {
 		t.Fatal("an unknown action was sent")
+	}
+}
+
+// pb connect carries the native terminal as a cursorTerminal; the daemon registers what it dialed, so the
+// wrapper has to be the controller too (it was not: `pb recordings start` found no attachment on a device).
+func TestCursorTerminalControlsItsSessionsRecording(t *testing.T) {
+	message := newEarlyOutputMessageConnection()
+	helper, err := newInitializedHelperTerminalConn(context.Background(), message, &resolver.TerminalTarget{SessionID: "ses_rec", CWD: "/workspace"}, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal := newCursorTerminal(context.Background(), helper, &atomic.Int64{}, func(int) {})
+	defer func() { _ = terminal.Close(); _ = message.Close(); helper.finish(0, nil) }()
+	var link Conn = terminal // what Dial returns
+	controller, ok := link.(RecordingController)
+	if !ok {
+		t.Fatal("the dialed terminal is not a RecordingController")
+	}
+	if controller.RecordingSessionID() != "ses_rec" {
+		t.Fatalf("session %q", controller.RecordingSessionID())
+	}
+	state, err := controller.RecordingControl(context.Background(), wire.ActionStart)
+	if err != nil || state == nil || state.StartedBy != "acct_1" {
+		t.Fatalf("start %+v %v", state, err)
 	}
 }
