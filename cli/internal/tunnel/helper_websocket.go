@@ -19,6 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	wire "github.com/pinksaucepasta/paperboat/shared/recording"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
@@ -661,7 +662,7 @@ func (c *helperTerminalConn) handleEvent(frame helperFrame) bool {
 		c.finish(1, ErrHandedOver)
 		return true
 	}
-	if event.Event == "recording" {
+	if event.Event == wire.EventRecording {
 		c.recordingState.report(event.Recording != nil)
 		return false
 	}

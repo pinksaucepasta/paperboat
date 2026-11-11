@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/recording"
 	"sync"
 	"time"
 
@@ -105,7 +106,7 @@ func (s *Server) startRequest(frame protocol.Frame, writer *lockedWriter, author
 		var replay bool
 		// Inspector results carry captured traffic and a resume attach carries its secret: neither is journaled.
 		resuming := authorization.Resume != nil && !authorization.Resume.resumed.Load()
-		if frame.Capability == "config.compare.v1" || frame.Capability == "inspector.v1" || terminalCleanupRequest(frame) || resuming {
+		if frame.Capability == "config.compare.v1" || frame.Capability == "inspector.v1" || frame.Capability == recording.Capability || terminalCleanupRequest(frame) || resuming {
 			outcome = execute(opCtx)
 		} else {
 			outcome, replay, err = s.config.Journal.Execute(opCtx, journalOperationID, journalRequest, execute)

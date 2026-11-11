@@ -238,7 +238,7 @@ func (r PeerStreamRequest) Validate(now time.Time) error {
 	if r.UsageSessionID != "" && (r.Consumer != "config_compare" || !safeValue(r.UsageSessionID)) {
 		return ErrInvalidConfig
 	}
-	if r.Schema != PeerStreamSchemaV1 || !safeValue(r.MachineID) || !safeValue(r.EnvironmentID) || r.MachineGeneration == 0 || !oneOf(r.Consumer, "terminal", "exec", "ssh", "private_preview", "codex", "health_probe", "file_transfer_key", "config_compare") || !safeValue(r.OperationID) || (r.Credential == "") != (r.Offline || r.Resume) || r.Offline && !OfflineConsumers[r.Consumer] || r.Resume && (r.Offline || r.Consumer != "terminal") || len(r.Credential) > 16<<10 || r.Deadline.IsZero() || r.Deadline.Sub(now) > 24*time.Hour || r.MaximumBytes == 0 || len(r.Payload) > 64<<10 || len(r.Payload) > 0 && !json.Valid(r.Payload) {
+	if r.Schema != PeerStreamSchemaV1 || !safeValue(r.MachineID) || !safeValue(r.EnvironmentID) || r.MachineGeneration == 0 || !oneOf(r.Consumer, "terminal", "exec", "ssh", "private_preview", "codex", "health_probe", "file_transfer_key", "config_compare", "recording") || !safeValue(r.OperationID) || (r.Credential == "") != (r.Offline || r.Resume) || r.Offline && !OfflineConsumers[r.Consumer] || r.Resume && (r.Offline || r.Consumer != "terminal") || len(r.Credential) > 16<<10 || r.Deadline.IsZero() || r.Deadline.Sub(now) > 24*time.Hour || r.MaximumBytes == 0 || len(r.Payload) > 64<<10 || len(r.Payload) > 0 && !json.Valid(r.Payload) {
 		return ErrInvalidConfig
 	}
 	if !r.Deadline.After(now) {

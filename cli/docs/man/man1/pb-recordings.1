@@ -1,0 +1,49 @@
+.nh
+.TH "PB-RECORDINGS" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-recordings - List and replay team terminal recordings
+
+
+.SH SYNOPSIS
+\fBpb recordings [flags]\fP
+
+
+.SH DESCRIPTION
+List and replay team terminal recordings
+
+.PP
+List the team terminal recordings you may see, start or stop recording a session you are attached to, and replay or export one from the machine that recorded it. Each replay is audited first; the recording key opens with your unlocked vault on this computer.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for recordings
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb(1)\fP, \fBpb-recordings-export(1)\fP, \fBpb-recordings-list(1)\fP, \fBpb-recordings-play(1)\fP, \fBpb-recordings-start(1)\fP, \fBpb-recordings-stop(1)\fP

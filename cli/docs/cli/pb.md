@@ -90,6 +90,7 @@ pb [environment] [new] [flags]
 * [pb ping](pb_ping.md)	 - Measure authenticated connectivity to a machine
 * [pb policy](pb_policy.md)	 - Read, test and change the workspace access policy
 * [pb preview](pb_preview.md)	 - Expose a local target through a temporary preview
+* [pb recordings](pb_recordings.md)	 - List and replay team terminal recordings
 * [pb relay](pb_relay.md)	 - Inspect hosted and self-hosted relays
 * [pb reset](pb_reset.md)	 - Remove the current Paperboat setup before fresh enrollment
 * [pb resolve](pb_resolve.md)	 - Resolve a peer machine IP, port forwardings over gRPC IPC

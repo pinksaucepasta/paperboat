@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/recording"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
@@ -334,6 +335,8 @@ func (s *terminalConnectionState) bind(authorization Authorization, frame protoc
 		binding.kind, binding.sessionID, binding.attachmentID, binding.generation, binding.inputSequence = "terminal", request.SessionID, response.AttachmentID, response.Session.Snapshot.Generation, response.InputSequence
 	} else if frame.Capability == "config.compare.v1" {
 		binding.kind = "config_compare"
+	} else if frame.Capability == recording.Capability {
+		binding.kind = "recording"
 	} else if frame.Capability == "exec.v1" {
 		var execRequest execRequest
 		if decodeStrict(frame.Payload, &execRequest) != nil || execRequest.OperationID == "" || execRequest.Action != "start" && execRequest.Action != "attach" {

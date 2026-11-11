@@ -14,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/internal/recording"
 )
 
 var ErrVaultTeamGrantRequired = errors.New("ENV team key grant is required")
@@ -659,4 +660,16 @@ func (v PasswordVault) ListScopeNames(ctx context.Context, kind, owner, machine 
 		return nil
 	})
 	return names, err
+}
+
+// RecordingKey opens generation want of a team's recording key from a replay answer: this account's
+// sealed copy of generation have, opened with its vault sharing key, then each rotation's chain link.
+func (v PasswordVault) RecordingKey(ctx context.Context, teamID string, have int64, sealed []byte, chain []recording.ChainLink, want int64) ([]byte, error) {
+	var key []byte
+	err := v.withVaultKeys(ctx, func(_ *config.PasswordVaultRecord, keys *environmente2ee.VaultKeys, _ VaultDataClient) error {
+		var err error
+		key, err = recording.OpenRecordingKey(keys.SharingPrivate, teamID, have, sealed, chain, want)
+		return err
+	})
+	return key, err
 }

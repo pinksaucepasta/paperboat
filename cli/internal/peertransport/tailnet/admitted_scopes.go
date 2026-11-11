@@ -26,7 +26,7 @@ func (a *Authority) TrackAdmittedScope(peerID, resourceID, capability, direction
 				continue
 			}
 			switch scope.ResourceKind {
-			case "machine_access", "inspector", "config_compare":
+			case "machine_access", "inspector", "config_compare", "recording":
 				return a.retainScopeLocked(scope)
 			}
 		}
@@ -58,7 +58,7 @@ func (a *Authority) TrackAdmittedCarrier(peerID string) (func(), NetworkScope, e
 					backing = scope
 					break
 				}
-			case "machine_access", "inspector", "config_compare":
+			case "machine_access", "inspector", "config_compare", "recording":
 				if backing.ResourceID == "" {
 					backing = scope
 				}

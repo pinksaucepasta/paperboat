@@ -342,6 +342,8 @@ func nativeCapability(consumer string) string {
 	switch consumer {
 	case "config_compare":
 		return "config_compare"
+	case "recording":
+		return "recording"
 	case "terminal":
 		return "terminal"
 	case "exec":

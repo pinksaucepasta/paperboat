@@ -93,7 +93,7 @@ func TunnelPeerStreamOpener(stopping context.Context, peerTunnel *tunnel.PeerTer
 			return nil, ErrInvalidInventoryConfig
 		}
 		var terminalPayload localapi.PeerTerminalPayload
-		if len(request.Payload) > 0 && request.Consumer != "config_compare" && request.Consumer != "exec" && request.Consumer != "private_preview" {
+		if len(request.Payload) > 0 && request.Consumer != "config_compare" && request.Consumer != "exec" && request.Consumer != "private_preview" && request.Consumer != "recording" {
 			if err := json.Unmarshal(request.Payload, &terminalPayload); err != nil {
 				return nil, err
 			}
@@ -135,6 +135,14 @@ func TunnelPeerStreamOpener(stopping context.Context, peerTunnel *tunnel.PeerTer
 					return nil, ErrInvalidInventoryConfig
 				}
 				return peerTunnel.DialConfigComparison(lifetime, info, request.OperationID, value)
+			case "recording":
+				var value struct {
+					RecordingID string `json:"recording_id"`
+				}
+				if json.Unmarshal(request.Payload, &value) != nil || value.RecordingID == "" || value.RecordingID != request.AccessSessionID {
+					return nil, ErrInvalidInventoryConfig
+				}
+				return peerTunnel.DialRecording(lifetime, info, request.OperationID, value.RecordingID)
 			case "ssh":
 				return peerTunnel.DialSSH(lifetime, info, request.OperationID)
 			default:
@@ -162,7 +170,7 @@ func TunnelPeerStreamOpener(stopping context.Context, peerTunnel *tunnel.PeerTer
 		if recorder := diagnostics.FromContext(ctx); recorder != nil {
 			_ = recorder.RecordWithSupportReference("stream_open", "peer_stream_opened", "info", supportref.FromContext(ctx), map[string]string{"component": "paperboat-daemon", "operation": "peer_stream", "outcome": "success"})
 		}
-		if request.Consumer == "ssh" || request.Consumer == "config_compare" {
+		if request.Consumer == "ssh" || request.Consumer == "config_compare" || request.Consumer == "recording" {
 			return &rawPeerConn{Conn: remote, cancel: func() { staged.Abort() }}, nil
 		}
 		client, server := net.Pipe()
@@ -170,6 +178,9 @@ func TunnelPeerStreamOpener(stopping context.Context, peerTunnel *tunnel.PeerTer
 			defer staged.Abort()
 			if request.Consumer == "terminal" {
 				defer func() { terminalInputOwners.finish(terminalPayload.InputOwner, request.MachineID, target, time.Now()) }()
+			}
+			if link, ok := remote.(tunnel.RecordingController); ok && request.Consumer == "terminal" {
+				defer attachedTerminals.add(link)()
 			}
 			if request.Consumer == "terminal" && terminalPayload.Debug {
 				reportLocalPeerBridgeFailure(lifetime, tunnel.ServeLocalPeerDebugTerminalConn(lifetime, server, remote, cursor))

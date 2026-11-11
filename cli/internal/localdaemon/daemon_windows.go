@@ -177,6 +177,7 @@ func runWindowsDaemon(ctx context.Context, config DaemonConfig) (runErr error) {
 		PeerStreams:          peerStreamBroker{open: config.OpenPeerStream, issue: config.IssuePeerStream},
 		PeerProbes:           peerProbeBroker{probe: config.ProbePeer},
 		InspectorRequests:    inspectorBroker(config.InspectorRequest),
+		RecordingControl:     RecordingControl,
 		RelayInventory:       config.RelayInventory,
 		WorkerOpenSSH:        config.WorkerOpenSSH,
 		FileTransfers:        config.FileTransfers,

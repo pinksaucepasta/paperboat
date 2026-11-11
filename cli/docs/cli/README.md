@@ -167,6 +167,12 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb preview replay](pb_preview_replay.md) | Deliberately replay one retained HTTP request to the same origin |
 | [pb preview status](pb_preview_status.md) | Show temporary preview status |
 | [pb preview stop](pb_preview_stop.md) | Stop a temporary preview |
+| [pb recordings](pb_recordings.md) | List and replay team terminal recordings |
+| [pb recordings export](pb_recordings_export.md) | Write a recording as an asciicast v2 file |
+| [pb recordings list](pb_recordings_list.md) | List the recordings you may see |
+| [pb recordings play](pb_recordings_play.md) | Replay a recording in this terminal |
+| [pb recordings start](pb_recordings_start.md) | Start recording the terminal session you are attached to |
+| [pb recordings stop](pb_recordings_stop.md) | Stop the recording of the terminal session you are attached to |
 | [pb relay](pb_relay.md) | Inspect hosted and self-hosted relays |
 | [pb relay list](pb_relay_list.md) | List hosted and self-hosted relays |
 | [pb reset](pb_reset.md) | Remove the current Paperboat setup before fresh enrollment |

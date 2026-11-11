@@ -1,0 +1,52 @@
+.nh
+.TH "PB-RECORDINGS-STOP" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-recordings-stop - Stop the recording of the terminal session you are attached to
+
+
+.SH SYNOPSIS
+\fBpb recordings stop [session-id] [flags]\fP
+
+
+.SH DESCRIPTION
+Stop the recording of the terminal session you are attached to
+
+.PP
+Stop the recording of the terminal session a pb connect on this computer is attached to. You may stop a recording you started; a recording a team rule started stops only for an admin.
+
+.PP
+Team terminal recordings are made on the recorded machine and stay there, encrypted to the team recording key. Replay is audited by Paperboat before any bytes move, then streams over the end-to-end encrypted machine connection; your unlocked vault opens the key locally.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for stop
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-recordings(1)\fP

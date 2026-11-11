@@ -30,13 +30,13 @@ var (
 func Code(err error) string {
 	switch {
 	case errors.Is(err, ErrUnavailable), errors.Is(err, session.ErrRecordingUnavailable):
-		return "recording_unavailable"
+		return wire.ErrorUnavailable
 	case errors.Is(err, ErrForbidden):
-		return "recording_forbidden"
+		return wire.ErrorForbidden
 	case errors.Is(err, recordings.ErrRecording):
-		return "recording_active"
+		return wire.ErrorActive
 	case errors.Is(err, recordings.ErrNotRecording):
-		return "recording_inactive"
+		return wire.ErrorInactive
 	case errors.Is(err, session.ErrSessionUnknown), errors.Is(err, session.ErrInvalidTransition):
 		return "not_found_or_forbidden"
 	default:

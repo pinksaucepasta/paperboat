@@ -450,7 +450,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		}
 		dispatchAuthorize := dispatchConfig.Authorize
 		dispatchConfig.Authorize = func(ctx context.Context, header streamauth.Header) (string, error) {
-			capability := map[string]string{"terminal": "terminal.v1", "exec": "exec.v1", "ssh": "ssh.v1", "file_transfer": "file-transfer.v1", "config_compare": "config.compare.v1", "private_tcp": "private.access.v1", "private_http": "private.access.v1", "inspector": "inspector.v1"}[header.Consumer]
+			capability := map[string]string{"terminal": "terminal.v1", "exec": "exec.v1", "ssh": "ssh.v1", "file_transfer": "file-transfer.v1", "config_compare": "config.compare.v1", "private_tcp": "private.access.v1", "private_http": "private.access.v1", "inspector": "inspector.v1", "recording": "recording.v1"}[header.Consumer]
 			if capability == "" || (dependencies.Capabilities != nil && !dependencies.Capabilities.Enabled(capability)) {
 				return "", server.ErrStreamAuthorization
 			}
@@ -482,7 +482,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		}
 		dispatchConfig.ServeStream = func(streamCtx context.Context, header streamauth.Header, conn net.Conn) error {
 			switch header.Consumer {
-			case "terminal", "exec", "config_compare":
+			case "terminal", "exec", "config_compare", "recording":
 				return nativeManager.Serve(conn)
 			case "file_transfer":
 				return server.ServeHTTPConnection(streamCtx, conn, nativeTransferHandler)

@@ -68,13 +68,8 @@ type StartRequest struct {
 	QuotaBytes     int64
 }
 
-// State is what attached clients show: the REC indicator and who may stop it.
-type State struct {
-	ID        string    `json:"id"`
-	Trigger   string    `json:"trigger"`
-	StartedBy string    `json:"started_by,omitempty"`
-	StartedAt time.Time `json:"started_at"`
-}
+// State is what attached clients show: the REC indicator and who may stop it (the shared contract).
+type State = wire.State
 
 // Meta is a recording's plaintext index entry, next to its encrypted segments.
 type Meta struct {

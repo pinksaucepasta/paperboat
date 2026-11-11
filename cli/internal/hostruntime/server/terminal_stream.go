@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/recording"
 	"sort"
 	"strings"
 	"time"
@@ -123,6 +124,9 @@ func (d *Dispatcher) OpenStream(ctx context.Context, authorization Authorization
 	}
 	if capability == "ssh.v1" {
 		return d.openSSHStream(ctx, authorization, payload, outcome)
+	}
+	if capability == recording.Capability && outcome.ErrorCode == "" {
+		return d.openRecordingStream(authorization, outcome)
 	}
 	if capability == "exec.v1" && outcome.ErrorCode == "" {
 		var request execRequest

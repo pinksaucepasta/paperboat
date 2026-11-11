@@ -10,6 +10,8 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/recording"
 )
 
 type Code string
@@ -245,7 +247,7 @@ func (v Verifier) Verify(ctx context.Context, token string, policy Policy) (Clai
 	if !validTransferModeClaims(claims) {
 		return Claims{}, &Error{Code: Malformed}
 	}
-	if claims.CredentialClass == "browser_terminal_operation" || claims.CredentialClass == "browser_inspector_operation" {
+	if claims.CredentialClass == "browser_terminal_operation" || claims.CredentialClass == "browser_inspector_operation" || claims.CredentialClass == recording.CredentialClass && claims.BrowserAttachmentID != "" {
 		if !validBrowserPublicKeyDigest(claims.BrowserPublicKeySHA256) {
 			return Claims{}, &Error{Code: BindingInvalid}
 		}

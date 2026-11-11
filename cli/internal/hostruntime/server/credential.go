@@ -12,6 +12,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	"github.com/pinksaucepasta/paperboat/shared/recording"
 )
 
 var ErrCredentialPolicy = errors.New("credential policy unavailable")
@@ -83,6 +84,11 @@ func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Fra
 			return Authorization{}, ErrCredentialPolicy
 		}
 	}
+	replay := claims.CredentialClass == recording.CredentialClass
+	if (replay || frame.Capability == recording.Capability) && (frame.Capability != recording.Capability || frame.Type == "ack" || frame.Type == "detach" || !validRecordingReplayClaims(claims)) {
+		return Authorization{}, ErrCredentialPolicy
+	}
+	browserRecording := replay && claims.BrowserAttachmentID != ""
 	var revoked *atomic.Bool
 	if a.Revocations != nil {
 		a.mu.Lock()
@@ -113,8 +119,11 @@ func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Fra
 		accountID = claims.UserID
 	}
 	clientID := claims.CLIClientSessionID
-	if browserTerminal || browserInspector {
+	if browserTerminal || browserInspector || browserRecording {
 		clientID = claims.BrowserAttachmentID
+	}
+	if replay {
+		resourceID = claims.ResourceID // the one recording the ticket opens
 	}
 	if (claims.CredentialClass == "codex_manage" || claims.CredentialClass == "codex_connect") && resourceID == "" {
 		resourceID = claims.SessionID
@@ -134,6 +143,7 @@ func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Fra
 		TerminalGeneration:  uint64(claims.ExpectedGeneration),
 		BrowserTerminal:     browserTerminal,
 		BrowserInspector:    browserInspector,
+		BrowserRecording:    browserRecording,
 		BrowserAttachmentID: claims.BrowserAttachmentID,
 		PolicyGeneration:    uint64(claims.PolicyGeneration),
 		ResourceID:          resourceID,
@@ -166,30 +176,48 @@ func (a *CredentialAuthorizer) verifiedClaims(ctx context.Context, policy auth.P
 	return claims, err
 }
 
-// BrowserTerminalPublicKeySHA256 verifies the browser terminal or inspector
-// credential before TLS starts and returns its browser client certificate pin
-// and whether it is an inspector credential. The credential is verified again
-// when ServeAuthenticated authorizes application frames.
-func (a *CredentialAuthorizer) BrowserTerminalPublicKeySHA256(ctx context.Context) (string, bool, error) {
+// Browser channel kinds: what one browser E2E connection may carry.
+const (
+	BrowserChannelTerminal  = "terminal"
+	BrowserChannelInspector = "inspector"
+	BrowserChannelRecording = "recording"
+)
+
+// BrowserTerminalPublicKeySHA256 verifies the browser terminal, inspector or recording replay
+// credential before TLS starts and returns its browser client certificate pin and its channel
+// kind. The credential is verified again when ServeAuthenticated authorizes application frames.
+func (a *CredentialAuthorizer) BrowserTerminalPublicKeySHA256(ctx context.Context) (string, string, error) {
 	if a.Verifier == nil || a.Resolver == nil || a.Token == "" {
-		return "", false, ErrCredentialPolicy
+		return "", "", ErrCredentialPolicy
 	}
 	policy, err := a.Resolver.Policy(protocol.Frame{Capability: BrowserAdmissionCapability})
 	if err != nil {
-		return "", false, err
+		return "", "", err
 	}
 	claims, err := a.verifiedClaims(ctx, policy)
 	if err != nil {
-		return "", false, err
+		return "", "", err
 	}
 	switch {
 	case claims.CredentialClass == "browser_terminal_operation" && validBrowserTerminalClaims(claims):
-		return claims.BrowserPublicKeySHA256, false, nil
+		return claims.BrowserPublicKeySHA256, BrowserChannelTerminal, nil
 	case claims.CredentialClass == "browser_inspector_operation" && validBrowserInspectorClaims(claims):
-		return claims.BrowserPublicKeySHA256, true, nil
+		return claims.BrowserPublicKeySHA256, BrowserChannelInspector, nil
+	case claims.CredentialClass == recording.CredentialClass && validRecordingReplayClaims(claims) && claims.BrowserAttachmentID != "":
+		return claims.BrowserPublicKeySHA256, BrowserChannelRecording, nil
 	default:
-		return "", false, ErrCredentialPolicy
+		return "", "", ErrCredentialPolicy
 	}
+}
+
+// validRecordingReplayClaims accepts a replay ticket for exactly one recording on this machine,
+// held by the viewer it names: natively by a CLI session, or by one browser and its key.
+func validRecordingReplayClaims(c auth.Claims) bool {
+	browser := c.BrowserAttachmentID != "" || c.BrowserPublicKeySHA256 != ""
+	return c.CredentialClass == recording.CredentialClass && len(c.Scope) == 1 && c.Scope[0] == recording.Scope &&
+		c.ResourceKind == recording.ResourceKind && recording.ValidRecordingID(c.ResourceID) && c.EnvironmentID != "" && c.MachineID != "" &&
+		c.UserID != "" && c.AccountID == c.UserID && c.SessionID == "" && c.ExpectedGeneration == 0 &&
+		(browser && c.BrowserAttachmentID != "" && c.BrowserPublicKeySHA256 != "" && c.CLIClientSessionID == "" || !browser && c.CLIClientSessionID != "")
 }
 
 // validBrowserInspectorClaims accepts a machine-scoped inspector channel: it

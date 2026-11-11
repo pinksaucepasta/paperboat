@@ -642,7 +642,7 @@ func (s *productionNativePeerService) serveStream(ctx context.Context, header st
 	switch header.Consumer {
 	case "inspector":
 		return s.serveInspector(ctx, header, stream)
-	case "terminal", "exec", "config_compare":
+	case "terminal", "exec", "config_compare", "recording":
 		return s.config.serve(stream)
 	case "ssh":
 		if s.config.dispatch != nil {

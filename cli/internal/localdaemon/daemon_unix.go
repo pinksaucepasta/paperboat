@@ -185,6 +185,7 @@ func Run(ctx context.Context, config DaemonConfig) (runErr error) {
 		CredentialsEnded:     config.CredentialsEnded,
 		PeerProbes:           peerProbeBroker{probe: config.ProbePeer},
 		InspectorRequests:    inspectorBroker(config.InspectorRequest),
+		RecordingControl:     RecordingControl,
 		RelayInventory:       config.RelayInventory,
 		FileTransfers:        config.FileTransfers,
 		VaultCustody:         vaultCustody,

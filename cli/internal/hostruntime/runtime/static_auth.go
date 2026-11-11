@@ -9,6 +9,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
+	"github.com/pinksaucepasta/paperboat/shared/recording"
 )
 
 var ErrStaticAuthInvalid = errors.New("invalid static authorization configuration")
@@ -109,7 +110,7 @@ type staticPolicyResolver struct {
 
 func (r staticPolicyResolver) Policy(frame protocol.Frame) (auth.Policy, error) {
 	base := auth.Policy{Issuer: r.issuer, Audience: "paperboat-machine", EnvironmentID: r.environmentID, MachineID: r.machineID}
-	if r.browserTerminalOnly && frame.Type != "ack" && frame.Type != "detach" && frame.Capability != "terminal.v1" && frame.Capability != "file-transfer.v1" && frame.Capability != "inspector.v1" && frame.Capability != server.BrowserAdmissionCapability {
+	if r.browserTerminalOnly && frame.Type != "ack" && frame.Type != "detach" && frame.Capability != "terminal.v1" && frame.Capability != "file-transfer.v1" && frame.Capability != "inspector.v1" && frame.Capability != recording.Capability && frame.Capability != server.BrowserAdmissionCapability {
 		return auth.Policy{}, ErrStaticAuthInvalid
 	}
 	if !r.browserTerminalOnly && (frame.Capability == "inspector.v1" || frame.Capability == server.BrowserAdmissionCapability) {
@@ -125,11 +126,17 @@ func (r staticPolicyResolver) Policy(frame protocol.Frame) (auth.Policy, error) 
 		// Pre-TLS admission accepts either browser class; every later frame
 		// is checked against its own capability's exact class and scope.
 		base.CredentialClass = "browser_terminal_operation"
-		base.AllowedCredentialClasses = []string{"browser_inspector_operation"}
-		base.AnyScopes = [][]string{{"terminal:operate"}, {"terminal:view"}, {"terminal:control"}, {"inspector:use"}}
+		base.AllowedCredentialClasses = []string{"browser_inspector_operation", recording.CredentialClass}
+		base.AnyScopes = [][]string{{"terminal:operate"}, {"terminal:view"}, {"terminal:control"}, {"inspector:use"}, {recording.Scope}}
 	case "inspector.v1":
 		base.CredentialClass = "browser_inspector_operation"
 		base.Scopes = []string{"inspector:use"}
+	case recording.Capability:
+		// A replay ticket: the server checked the replay rule and wrote the audit event before
+		// minting it for exactly one recording, for minutes.
+		base.CredentialClass = recording.CredentialClass
+		base.Scopes = []string{recording.Scope}
+		base.MaxLifetime = recording.TicketLifetime
 	case "terminal.v1":
 		base.CredentialClass = r.terminalCredentialClass()
 		base.AnyScopes = [][]string{{"terminal:operate"}, {"terminal:view"}, {"terminal:control"}}

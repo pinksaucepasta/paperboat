@@ -502,6 +502,7 @@ mode, relays, and observation timestamps.`, Example: "  pb relay list\n  pb rela
 	access.AddCommand(accessMachineCobraCommandV1())
 	root.AddCommand(access)
 	root.AddCommand(inboxCobraCommand())
+	root.AddCommand(recordingsCobraCommand())
 	root.AddCommand(sessionCobraCommand())
 	root.AddCommand(userMachineCobraCommand())
 	root.AddCommand(pairCommand())

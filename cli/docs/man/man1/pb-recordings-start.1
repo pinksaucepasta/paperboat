@@ -1,0 +1,52 @@
+.nh
+.TH "PB-RECORDINGS-START" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-recordings-start - Start recording the terminal session you are attached to
+
+
+.SH SYNOPSIS
+\fBpb recordings start [session-id] [flags]\fP
+
+
+.SH DESCRIPTION
+Start recording the terminal session you are attached to
+
+.PP
+Start recording the terminal session a pb connect on this computer is attached to, as your account. Everyone attached sees REC. The team decides who may: anyone with terminal access, or admins only.
+
+.PP
+Team terminal recordings are made on the recorded machine and stay there, encrypted to the team recording key. Replay is audited by Paperboat before any bytes move, then streams over the end-to-end encrypted machine connection; your unlocked vault opens the key locally.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for start
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-recordings(1)\fP

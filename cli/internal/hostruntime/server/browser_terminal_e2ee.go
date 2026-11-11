@@ -26,6 +26,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
+	"github.com/pinksaucepasta/paperboat/shared/recording"
 )
 
 const (
@@ -57,7 +58,7 @@ type BrowserTerminalIdentityProvider func(context.Context) (BrowserTerminalIdent
 // used for the dedicated E2EE browser endpoint. It verifies the signed
 // browser-terminal JWT before TLS and returns its canonical SPKI pin.
 type BrowserTerminalCredentialKey interface {
-	BrowserTerminalPublicKeySHA256(context.Context) (digest string, inspector bool, err error)
+	BrowserTerminalPublicKeySHA256(context.Context) (digest, channel string, err error)
 }
 
 type BrowserTerminalWebSocketHandlerConfig struct {
@@ -155,7 +156,7 @@ func (h *BrowserTerminalWebSocketHandler) ServeHTTP(writer http.ResponseWriter, 
 		http.Error(writer, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		return
 	}
-	pinnedDigest, inspectorChannel, err := keyAuthorizer.BrowserTerminalPublicKeySHA256(request.Context())
+	pinnedDigest, channel, err := keyAuthorizer.BrowserTerminalPublicKeySHA256(request.Context())
 	if err != nil {
 		if reportAuthorizationFailure(request.Context(), err) {
 			http.Error(writer, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
@@ -241,12 +242,16 @@ func (h *BrowserTerminalWebSocketHandler) ServeHTTP(writer http.ResponseWriter, 
 	var plaintext net.Conn = tlsConnection
 	if h.config.Bandwidth != nil {
 		capability, consumer := "terminal.v1", "terminal"
-		if inspectorChannel {
+		switch channel {
+		case BrowserChannelInspector:
 			capability, consumer = "inspector.v1", "inspector"
+		case BrowserChannelRecording:
+			capability, consumer = recording.Capability, "recording"
 		}
 		authorization, authorizeErr := authorizer.Authorize(request.Context(), protocol.Frame{Capability: capability})
 		bindingID := authorization.BrowserAttachmentID
-		if authorizeErr != nil || bindingID == "" || authorization.BrowserTerminal == inspectorChannel || authorization.BrowserInspector != inspectorChannel {
+		matches := authorization.BrowserTerminal == (channel == BrowserChannelTerminal) && authorization.BrowserInspector == (channel == BrowserChannelInspector) && authorization.BrowserRecording == (channel == BrowserChannelRecording)
+		if authorizeErr != nil || bindingID == "" || !matches {
 			authorityUnavailable := reportAuthorizationFailure(request.Context(), authorizeErr)
 			if closer, ok := authorizer.(AuthorizationCloser); ok {
 				closer.CloseAuthorization()

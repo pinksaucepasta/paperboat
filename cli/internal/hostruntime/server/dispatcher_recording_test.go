@@ -1,14 +1,20 @@
 package server
 
 import (
+	"bytes"
+	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/recordingcontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/recordings"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
+	wire "github.com/pinksaucepasta/paperboat/shared/recording"
 )
 
 type fakeRecordingControl struct {
@@ -77,5 +83,65 @@ func TestRecordingEventIsSentOncePerChange(t *testing.T) {
 	}
 	if err := stream.recordingEvent(session.Snapshot{ID: "s1"}); !errors.As(err, &event) || json.Unmarshal(event.Payload, &payload) != nil || payload.Recording != nil {
 		t.Fatalf("no stop event: %v", err)
+	}
+}
+
+type replaySessions struct {
+	session.Service
+	segments map[uint32][]byte
+}
+
+func (s replaySessions) Recordings() ([]recordings.Meta, error) {
+	return []recordings.Meta{{ID: replayID, Segments: 2, Bytes: int64(len(s.segments[0]) + len(s.segments[1]))}}, nil
+}
+func (s replaySessions) RecordingSegment(id string, index uint32) ([]byte, error) {
+	if segment, ok := s.segments[index]; ok && id == replayID {
+		return segment, nil
+	}
+	return nil, recordings.ErrNotFound
+}
+
+const replayID = "rec_00000000-0000-4000-8000-000000000001"
+
+// A replay ticket reads only its own recording, and the stream carries the declared segment files
+// behind their lengths, in order, then the end event.
+func TestReplayTicketReadsOnlyItsRecording(t *testing.T) {
+	sessions := replaySessions{segments: map[uint32][]byte{0: bytes.Repeat([]byte("a"), 70<<10), 1: []byte("bb")}}
+	d := &Dispatcher{config: DispatcherConfig{Sessions: sessions}}
+	ticket := Authorization{ResourceID: replayID, Value: auth.Claims{CredentialClass: wire.CredentialClass}}
+	read := func(authorization Authorization, id string) operation.Outcome {
+		payload, _ := json.Marshal(map[string]string{"action": wire.ReadAction, "recording_id": id})
+		return d.recordingRead(authorization, payload)
+	}
+	if outcome := read(ticket, "rec_00000000-0000-4000-8000-000000000002"); outcome.ErrorCode != "not_found_or_forbidden" {
+		t.Fatalf("another recording: %+v", outcome)
+	}
+	if outcome := read(Authorization{ResourceID: replayID, Value: auth.Claims{CredentialClass: "terminal_operation"}}, replayID); outcome.ErrorCode != "not_found_or_forbidden" {
+		t.Fatalf("a terminal credential read a recording: %+v", outcome)
+	}
+	outcome := read(ticket, replayID)
+	stream, ok, err := d.openRecordingStream(ticket, outcome)
+	if outcome.ErrorCode != "" || !ok || err != nil {
+		t.Fatalf("read %+v %v", outcome, err)
+	}
+	var got []byte
+	for {
+		frame, err := stream.Next(context.Background())
+		var end *StreamEnd
+		if errors.As(err, &end) {
+			break
+		}
+		if err != nil || frame.StartSequence != uint64(len(got)) || len(frame.Data) > 64<<10 {
+			t.Fatalf("frame at %d: %v", len(got), err)
+		}
+		got = append(got, frame.Data...)
+	}
+	var want []byte
+	for i := range uint32(2) {
+		want = binary.BigEndian.AppendUint32(want, uint32(len(sessions.segments[i])))
+		want = append(want, sessions.segments[i]...)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("stream %d bytes, want %d", len(got), len(want))
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/recording"
 	"io"
 	"path/filepath"
 	"strings"
@@ -97,6 +98,9 @@ func (d *Dispatcher) Capabilities() []string {
 	if d.config.Inspector != nil {
 		capabilities = append(capabilities, "inspector.v1")
 	}
+	if d.config.Recordings != nil {
+		capabilities = append(capabilities, recording.Capability)
+	}
 	return capabilities
 }
 
@@ -154,6 +158,8 @@ func (d *Dispatcher) handle(ctx context.Context, authorization Authorization, ca
 		return d.sshRequest(payload)
 	case "inspector.v1":
 		return d.browserInspector(ctx, authorization, payload)
+	case recording.Capability:
+		return d.recordingRead(authorization, payload)
 	default:
 		return failure("capability_required")
 	}
@@ -681,7 +687,7 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 		}{Snapshot: value, EligibleTransferDestinationMachineIDs: eligible})
 	case "create":
 		return d.createTerminal(ctx, authorization, request)
-	case "record-start", "record-stop":
+	case recording.ActionStart, recording.ActionStop:
 		return d.recordingAction(authorization, request)
 	case "attach", "replay":
 		attachmentID := request.AttachmentID
@@ -824,7 +830,7 @@ func browserAttachmentMatches(authorization Authorization, attachmentID string) 
 
 func browserTerminalActionAllowed(role TerminalRole, request terminalRequest) bool {
 	switch request.Action {
-	case "attach", "replay", "detach", "cursor", "screen", "record-start", "record-stop":
+	case "attach", "replay", "detach", "cursor", "screen", recording.ActionStart, recording.ActionStop:
 		return role == TerminalRoleOwner || role == TerminalRoleViewer || role == TerminalRoleInteractive
 	case "resize", "signal":
 		return role == TerminalRoleOwner || role == TerminalRoleInteractive
@@ -837,7 +843,7 @@ func sharedTerminalActionAllowed(role TerminalRole, request terminalRequest) boo
 	switch request.Action {
 	case "list", "get", "snapshot", "attach", "replay", "detach":
 		return !request.AtLiveBoundary
-	case "record-start", "record-stop":
+	case recording.ActionStart, recording.ActionStop:
 		return true
 	case "resize", "signal":
 		return role == TerminalRoleInteractive

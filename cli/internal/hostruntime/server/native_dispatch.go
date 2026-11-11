@@ -91,7 +91,7 @@ type nativeDispatchResponse struct {
 
 func nativeDispatchConsumer(consumer string) bool {
 	switch consumer {
-	case "terminal", "exec", "config_compare", "ssh", "file_transfer", "inspector", "private_tcp", "private_http":
+	case "terminal", "exec", "config_compare", "ssh", "file_transfer", "inspector", "private_tcp", "private_http", "recording":
 		return true
 	}
 	return false

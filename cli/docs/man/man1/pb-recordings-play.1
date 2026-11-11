@@ -1,0 +1,60 @@
+.nh
+.TH "PB-RECORDINGS-PLAY" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-recordings-play - Replay a recording in this terminal
+
+
+.SH SYNOPSIS
+\fBpb recordings play <recording-id> [flags]\fP
+
+
+.SH DESCRIPTION
+Replay a recording in this terminal
+
+.PP
+Replay one recording in this terminal at its recorded pace, with long pauses shortened by --idle-limit. Paperboat records the replay before the machine sends the encrypted recording; your unlocked vault decrypts it here.
+
+.PP
+Team terminal recordings are made on the recorded machine and stay there, encrypted to the team recording key. Replay is audited by Paperboat before any bytes move, then streams over the end-to-end encrypted machine connection; your unlocked vault opens the key locally.
+
+.PP
+This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for play
+
+.PP
+\fB--idle-limit\fP=2s
+	longest pause between frames
+
+.PP
+\fB--speed\fP=1
+	playback speed
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-recordings(1)\fP

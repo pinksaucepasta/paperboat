@@ -81,6 +81,7 @@ type Authorization struct {
 	TerminalGeneration  uint64
 	BrowserTerminal     bool
 	BrowserInspector    bool
+	BrowserRecording    bool // a browser E2E connection replaying one recording (ResourceID)
 	BrowserAttachmentID string
 	PolicyGeneration    uint64
 	ResourceID          string

@@ -341,6 +341,8 @@ func capabilityForConsumer(consumer string) string {
 	switch consumer {
 	case "config_compare":
 		return "config_compare"
+	case "recording":
+		return "recording"
 	case "inspector":
 		return "inspector"
 	case "terminal":

@@ -106,7 +106,7 @@ func TestStaticAuthorizerBindsBrowserTerminalCredentialToTerminalOnly(t *testing
 	if !ok {
 		t.Fatal("browser authorizer does not expose the verified TLS key binding")
 	}
-	if pin, inspectorChannel, err := keyAuthorizer.BrowserTerminalPublicKeySHA256(context.Background()); err != nil || inspectorChannel || pin != claims.BrowserPublicKeySHA256 {
+	if pin, channel, err := keyAuthorizer.BrowserTerminalPublicKeySHA256(context.Background()); err != nil || channel != server.BrowserChannelTerminal || pin != claims.BrowserPublicKeySHA256 {
 		t.Fatalf("browser client key pin=%q err=%v", pin, err)
 	}
 	plainFactory, err := NewCredentialAuthorizer(config)
@@ -275,8 +275,8 @@ func TestStaticAuthorizerBindsBrowserInspectorCredentialToInspectorOnly(t *testi
 		t.Fatal(err)
 	}
 	keyAuthorizer := authorizer.(server.BrowserTerminalCredentialKey)
-	if pin, inspectorChannel, err := keyAuthorizer.BrowserTerminalPublicKeySHA256(context.Background()); err != nil || !inspectorChannel || pin != claims.BrowserPublicKeySHA256 {
-		t.Fatalf("inspector pin=%q inspector=%v err=%v", pin, inspectorChannel, err)
+	if pin, channel, err := keyAuthorizer.BrowserTerminalPublicKeySHA256(context.Background()); err != nil || channel != server.BrowserChannelInspector || pin != claims.BrowserPublicKeySHA256 {
+		t.Fatalf("inspector pin=%q channel=%v err=%v", pin, channel, err)
 	}
 	got, err := authorizer.Authorize(context.Background(), protocol.Frame{Type: "request", Capability: "inspector.v1"})
 	if err != nil || !got.BrowserInspector || got.BrowserTerminal || got.UserID != "usr_test" || got.ClientID != claims.BrowserAttachmentID || got.SessionID != "" {

@@ -99,6 +99,7 @@ type ServerConfig struct {
 	CredentialsEndedPoll time.Duration
 	PeerProbes           PeerProbeBroker
 	InspectorRequests    InspectorBroker
+	RecordingControl     func(context.Context, Peer, RecordingControlRequest) (RecordingControlResult, error)
 	RelayInventory       func(context.Context) (RelayInventory, error)
 	FileTransfers        FileTransferBroker
 	VaultCustody         *VaultCustodyStore
@@ -291,6 +292,10 @@ func (s *Server) handler() http.Handler {
 		}
 		if request.URL.Path == "/v1/peer-probes" {
 			s.peerProbe(writer, request, requestID, peer)
+			return
+		}
+		if request.URL.Path == "/v1/recording-control" {
+			s.recordingControl(writer, request, requestID, peer)
 			return
 		}
 		if request.URL.Path == "/v1/inspector-requests" {

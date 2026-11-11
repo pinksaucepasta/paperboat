@@ -100,8 +100,8 @@ type terminalHandshakeAuthorizer struct{ digest string }
 func (a terminalHandshakeAuthorizer) Authorize(context.Context, protocol.Frame) (Authorization, error) {
 	return Authorization{}, nil
 }
-func (a terminalHandshakeAuthorizer) BrowserTerminalPublicKeySHA256(context.Context) (string, bool, error) {
-	return a.digest, false, nil
+func (a terminalHandshakeAuthorizer) BrowserTerminalPublicKeySHA256(context.Context) (string, string, error) {
+	return a.digest, BrowserChannelTerminal, nil
 }
 func TestBrowserTerminalEndpointNegotiatesItsWebSocketProtocol(t *testing.T) {
 	now := time.Now().UTC()

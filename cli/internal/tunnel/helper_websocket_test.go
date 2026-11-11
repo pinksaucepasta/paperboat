@@ -104,6 +104,11 @@ func (c *earlyOutputMessageConnection) WriteMessage(_ context.Context, kind help
 		response.Payload = json.RawMessage(`{"code":"not_found_or_forbidden","message":"missing","retryable":false}`)
 	case "create":
 		response.Payload = json.RawMessage(`{"result":{"generation":1}}`)
+	case "record-start":
+		response.Payload = json.RawMessage(`{"result":{"recording":{"id":"rec_00000000-0000-4000-8000-000000000001","trigger":"manual","started_by":"acct_1","started_at":"2026-11-11T00:00:00Z"}}}`)
+	case "record-stop":
+		response.Type = "error"
+		response.Payload = json.RawMessage(`{"code":"recording_forbidden","retryable":false}`)
 	case "attach":
 		frames := c.attachBinary
 		if len(frames) == 0 {
