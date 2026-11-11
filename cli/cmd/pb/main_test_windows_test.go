@@ -348,7 +348,7 @@ func TestWindowsUninstallHelperDirectoryRemovalIsTheUsersNotARestartDelete(t *te
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(temporary) })
 	root := filepath.Join(temporary, "Paperboat Uninstall")
-	for _, directory := range []string{`C:\unrelated`, filepath.Join(root, "not-an-identifier"), filepath.Join(temporary, "100%TEMP%", "Paperboat Uninstall", "0123456789abcdef0123456789abcdef")} {
+	for _, directory := range []string{`C:\unrelated`, filepath.Join(root, "not-an-identifier"), filepath.Join(temporary, "100%TEMP%", "Paperboat Uninstall", "0123456789abcdef0123456789abcdef"), filepath.Join(temporary, "x\" & calc & \"", "Paperboat Uninstall", "0123456789abcdef0123456789abcdef"), filepath.Join(temporary, "!PATH!", "Paperboat Uninstall", "0123456789abcdef0123456789abcdef")} {
 		if err := scheduleWindowsUninstallDirectoryRemoval(directory); err == nil {
 			t.Fatalf("removal of %s was scheduled", directory)
 		}

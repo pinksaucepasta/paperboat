@@ -913,8 +913,9 @@ func scheduleWindowsUninstallDirectoryRemovalObserved(ctx context.Context, direc
 // scheduleWindowsUninstallDirectoryRemoval writes the command into the user's registry; callers run it as the
 // user. The command runs as the user too, so it can remove only what the user could remove anyway.
 func scheduleWindowsUninstallDirectoryRemoval(directory string) (result error) {
-	// cmd expands %NAME% even inside quotes; the identifier is hexadecimal and a path holds no quote.
-	if !filepath.IsAbs(directory) || !strings.EqualFold(filepath.Base(filepath.Dir(directory)), "Paperboat Uninstall") || !isWindowsUninstallIdentifier(filepath.Base(directory)) || strings.Contains(directory, "%") {
+	// The parent comes from the user's TEMP. Inside the quotes cmd still expands %NAME% (and !NAME! when the
+	// user's registry turns on delayed expansion), and a quote would end the argument: refuse all three.
+	if !filepath.IsAbs(directory) || !strings.EqualFold(filepath.Base(filepath.Dir(directory)), "Paperboat Uninstall") || !isWindowsUninstallIdentifier(filepath.Base(directory)) || strings.ContainsAny(directory, `%!"`) {
 		return errors.New("the Windows uninstall helper directory is not one pb created; its removal was not scheduled")
 	}
 	system, err := windows.GetSystemDirectory()
