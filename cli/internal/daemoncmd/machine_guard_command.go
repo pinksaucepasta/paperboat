@@ -11,6 +11,9 @@ import (
 	"strings"
 )
 
+// Tests replace it so install never reads the host's real guard socket.
+var machineGuardBrowserDomain = hostinstall.MachineGuardBrowserDomain
+
 func AddMachineGuardCommand(root *cobra.Command) {
 	command := &cobra.Command{Use: "machine-guard", Short: "Manage protected local machine access"}
 	run := &cobra.Command{Use: "run", Short: "Run the machine guard under service supervision", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
@@ -27,7 +30,7 @@ func AddMachineGuardCommand(root *cobra.Command) {
 			if err != nil {
 				return err
 			}
-			domain, err = hostinstall.MachineGuardBrowserDomain(cmd.Context(), cfg.ServerURL)
+			domain, err = machineGuardBrowserDomain(cmd.Context(), cfg.ServerURL)
 			if err != nil {
 				return err
 			}

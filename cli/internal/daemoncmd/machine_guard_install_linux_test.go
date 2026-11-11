@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"github.com/spf13/cobra"
 )
 
@@ -20,6 +21,10 @@ func TestMachineGuardInstallDiscoversMissingDomain(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("requires an unprivileged user to protect the system guard on the pre-fix code")
 	}
+	// A host with a real guard records a domain and would skip discovery: pretend none is recorded.
+	old := machineGuardBrowserDomain
+	t.Cleanup(func() { machineGuardBrowserDomain = old })
+	machineGuardBrowserDomain = machineguard.DiscoverBrowserDomain
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var requests atomic.Int32
