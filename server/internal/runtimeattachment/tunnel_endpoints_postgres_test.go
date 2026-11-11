@@ -307,7 +307,7 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	f.exec(t, `INSERT INTO tunnel_certificate_edge_distributions(certificate_id,edge_node_id,edge_process_epoch,edge_assignment_generation,state,observed_certificate_generation) VALUES($1,$2,$3,1,'active',1),($1,$4,$5,1,'active',1)`, certificate, f.node, f.edge.ProcessEpoch, f.backupNode, f.backupEdge.ProcessEpoch)
 	// The edge's public ingress authority for the route is bound to the same carrier identity its
 	// stream preface carries, and names the tunnel route and its origin.
-	decisions, err := ingressprojection.SQLIngressSource{DB: f.database}.Edge(f.ctx, f.node, f.edge.ProcessEpoch)
+	decisions, err := ingressprojection.SQLIngressSource{DB: f.database, Quota: withinAllowance{}}.Edge(f.ctx, f.node, f.edge.ProcessEpoch)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +324,7 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	}
 	// F21-38: with nothing changed between two pulls the ingress and route answers keep the same
 	// version (decision ids and times are outside it), so an edge holding it gets "unchanged".
-	again, err := ingressprojection.SQLIngressSource{DB: f.database}.Edge(f.ctx, f.node, f.edge.ProcessEpoch)
+	again, err := ingressprojection.SQLIngressSource{DB: f.database, Quota: withinAllowance{}}.Edge(f.ctx, f.node, f.edge.ProcessEpoch)
 	if err != nil {
 		t.Fatal(err)
 	}
