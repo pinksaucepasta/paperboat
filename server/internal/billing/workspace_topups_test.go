@@ -218,14 +218,17 @@ func TestWorkspaceTopupCheckoutFulfillmentAndLedgerPostgres(t *testing.T) {
 			t.Fatal("unconfirmed paid event credited")
 		}
 		f.states[state.ID] = state
-		// Revoking paid benefits before delivery cannot grant a Free workspace credit.
+		// A plan that lapses between payment and delivery still gets the credit it paid for.
 		exec(`UPDATE paperboat.billing_workspaces SET state='canceled' WHERE id=$1`, w)
-		if _, err = s.HandleWebhook(ctx, paid); err != nil {
-			t.Fatal(err)
+		if processed, err := s.HandleWebhook(ctx, paid); err != nil || !processed {
+			t.Fatalf("paid event after the plan lapsed: processed=%v err=%v", processed, err)
 		}
-		if remaining(w, paidAt) != 0 {
-			t.Fatal("Free workspace credited")
+		if remaining(w, paidAt) != amount*3 {
+			t.Fatal("paid top-up dropped because the plan lapsed before delivery")
 		}
+		// Credit is held while lapsed; clear it so the concurrent-delivery check below starts from none.
+		exec(`DELETE FROM paperboat.billing_workspace_topup_events WHERE provider_session_id=$1`, state.ID)
+		exec(`DELETE FROM paperboat.billing_workspace_topups WHERE provider_session_id=$1`, state.ID)
 		exec(`UPDATE paperboat.billing_workspaces SET state='active',period_end=$2 WHERE id=$1`, w, end)
 		type outcome struct {
 			processed bool

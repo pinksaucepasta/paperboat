@@ -76,7 +76,7 @@ func (s *WorkspaceService) handleTopupWebhook(ctx context.Context, event StripeW
 		if e = s.decryptResult(op.Ciphertext, &receipt); e != nil {
 			return e
 		}
-		if !live || !paidTopupWorkspace(w, now) || !topupIdentity(state, request) || receipt.ProviderSessionID != state.ID || receipt.ProviderCustomerID != state.CustomerID || request.UnitBytes != TopupUnitBytes {
+		if !live || !topupWorkspaceBought(w) || !topupIdentity(state, request) || receipt.ProviderSessionID != state.ID || receipt.ProviderCustomerID != state.CustomerID || request.UnitBytes != TopupUnitBytes {
 			return nil
 		}
 		if !op.ProviderAttemptedAt.Valid || paidAt.Before(op.ProviderAttemptedAt.Time.Truncate(time.Second)) {

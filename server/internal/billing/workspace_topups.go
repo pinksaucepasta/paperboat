@@ -34,6 +34,13 @@ func paidTopupWorkspace(w Workspace, at time.Time) bool {
 	return w.ProductCode != "" && w.CustomerID != "" && w.PeriodStart != nil && !at.Before(*w.PeriodStart) && w.PaidBenefitsUntil != nil && at.Before(*w.PaidBenefitsUntil)
 }
 
+// topupWorkspaceBought reports that the workspace held a paid plan: Checkout was opened only while
+// paidTopupWorkspace held, so a plan that lapsed before the webhook must still get the credit it paid for.
+// The credit is spent only while the workspace is paid again (workspaceBandwidthTx) and ends with the allowance month.
+func topupWorkspaceBought(w Workspace) bool {
+	return w.ProductCode != "" && w.CustomerID != "" && w.PeriodStart != nil
+}
+
 // Topup journals the immutable provider request before creating payment Checkout.
 // The redirect is only a receipt; only a verified paid webhook grants bytes.
 func (s *WorkspaceService) Topup(ctx context.Context, account, team, code, key, success, cancel string, version int64, quantity int) (CheckoutSession, error) {
