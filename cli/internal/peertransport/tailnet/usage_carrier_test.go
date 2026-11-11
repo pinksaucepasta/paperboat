@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/relay/derpquic"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=peer-path-accounting-test
@@ -111,5 +112,17 @@ func TestCarrierFailureWakesRecoveryButIdleReapDoesNot(t *testing.T) {
 				t.Fatalf("wakes=%d, closed=%v", got, closed)
 			}
 		})
+	}
+}
+
+// magicsock stops a region's reader for good on a fatal error and then refuses to prepare it again; a relay refusal
+// read from a carrier reaches it as retryable, and wakes recovery, so a later grant can reconnect the region.
+func TestRelayRefusalOnReadIsNotTerminalForMagicsock(t *testing.T) {
+	r := &regionalRecovery{grantWake: make(chan struct{}, 1)}
+	c := &usageObservedCarrier{DERPCarrier: &usageFakeCarrier{err: derpquic.ErrAdmission}, authority: &relayAuthority{recovery: r}}
+	_, _, err := c.RecvDetail()
+	var fatal interface{ Fatal() bool }
+	if err == nil || errors.As(err, &fatal) && fatal.Fatal() || !r.repair.Load() {
+		t.Fatalf("read refusal err=%v repair=%v", err, r.repair.Load())
 	}
 }
