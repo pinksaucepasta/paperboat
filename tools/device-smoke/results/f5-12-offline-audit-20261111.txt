@@ -1,0 +1,8 @@
+F5-12 offline-origin audit, 2026-11-11 (sanitized): tools/device-smoke/ssh_offline_audit.sh pbvm2 <build>
+Build origin/main 7cb8c88d4 (linux/amd64). Two fresh throwaway containers on pbvm2 (OpenSSH target, client), the control plane blackholed in both
+for 156 s (longer than the signed network's 2 min refresh hint, server/internal/admission DefaultLifetime), one `pb ssh` during the outage, routes
+removed, audit read from paperboat.audit_events after the host's 30 s upload.
+Run 1: PASS  offline start + end, same session id, outcome closed, bytes 3743 in / 4355 out
+Run 2: PASS  offline start + end, same session id, outcome closed, bytes 3647 in / 4355 out
+Manual probe before the script: session at 03:10:37Z during a 161 s outage, rows origin offline, end names the start, audited 03:11:07Z.
+Machines revoked by exact id, containers and routes removed on every exit path.
