@@ -31,13 +31,8 @@ func Refusal(platform, name string) string {
 	case name == "." || name == "..":
 		return "the name is a directory reference"
 	}
-	for _, r := range name {
-		switch {
-		case r == '/' || r == 0:
-			return fmt.Sprintf("the name contains %q, which no file system allows", r)
-		case unicode.IsControl(r) || !unicode.IsPrint(r) && r != ' ':
-			return fmt.Sprintf("the name contains the non-printing character U+%04X", r)
-		}
+	if i := strings.IndexAny(name, "/\x00"); i >= 0 {
+		return fmt.Sprintf("the name contains %q, which no file system allows", name[i])
 	}
 	if platform == "windows" {
 		return windowsRefusal(name)
@@ -46,6 +41,11 @@ func Refusal(platform, name string) string {
 }
 
 func windowsRefusal(name string) string {
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return fmt.Sprintf("the name contains the control character U+%04X, which Windows does not allow", r)
+		}
+	}
 	if i := strings.IndexAny(name, `\:*?"<>|`); i >= 0 {
 		return fmt.Sprintf("the name contains %q, which Windows does not allow in file names", name[i])
 	}

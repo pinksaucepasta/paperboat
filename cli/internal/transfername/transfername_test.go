@@ -25,7 +25,7 @@ func TestUnixReceiversOnlyRefuseWhatNoFileSystemStores(t *testing.T) {
 				t.Errorf("%s refused %q: %s", platform, name, reason)
 			}
 		}
-		for _, name := range []string{"", ".", "..", "a/b", "a\x00b", "a\nb", strings.Repeat("x", 256), "bad\xffutf8"} {
+		for _, name := range []string{"", ".", "..", "a/b", "a\x00b", strings.Repeat("x", 256), "bad\xffutf8"} {
 			if Refusal(platform, name) == "" {
 				t.Errorf("%s accepted %q", platform, name)
 			}
