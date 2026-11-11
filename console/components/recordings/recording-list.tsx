@@ -50,11 +50,13 @@ export function RecordingList({ machine: tabMachine }: { machine?: Machine }) {
               Terminals are recorded by the team&apos;s rules, or when their owner starts recording.
             </EmptyDescription>
           </EmptyHeader>
-          <EmptyContent>
-            <Button variant="outline" size="lg" nativeButton={false} render={<Link href="/team?tab=recordings" />}>
-              Recording settings
-            </Button>
-          </EmptyContent>
+          {["owner", "admin", "auditor"].includes(workspace?.role ?? "") && (
+            <EmptyContent>
+              <Button variant="outline" size="lg" nativeButton={false} render={<Link href="/team?tab=recordings" />}>
+                Recording settings
+              </Button>
+            </EmptyContent>
+          )}
         </Empty>
       </div>
     )

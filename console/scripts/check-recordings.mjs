@@ -64,7 +64,7 @@ try {
     await page.locator("[data-recording-settings]").waitFor({ timeout: 30000 })
     const status = await page.locator("[data-recording-key]").getAttribute("data-recording-key", { timeout: 20000 })
     log(status === (key.body.data.key ? "ready" : "missing"), "the key status matches the server", status)
-    const toggle = page.locator("#recording-admins-only")
+    const toggle = page.getByRole("switch", { name: "Only admins start recordings" })
     const before = key.body.data.manual_start
     await toggle.click()
     let after = before
@@ -79,9 +79,25 @@ try {
     const policy = (await get(`workspaces/${encodeURIComponent(team)}/policy`)).body?.data?.policy ?? "{}"
     const expected = (policy.match(/"(record|recording_view)"/g) ?? []).length
     log((await page.locator("[data-recording-rule]").count()) === expected, "every recording rule in the policy is listed", `${expected}`)
-    await page.getByRole("button", { name: "Add rule" }).click().catch(() => {})
-    log(await page.getByRole("dialog").getByText("Record sessions").isVisible({ timeout: 5000 }).catch(() => false), "Add rule opens its dialog")
-    await page.keyboard.press("Escape")
+    // A replay rule for admins on every machine: added through the review dialog, listed, then removed again.
+    const replayRules = async () => ((await get(`workspaces/${encodeURIComponent(team)}/policy`)).body?.data?.policy.match(/"recording_view"/g) ?? []).length
+    const rulesBefore = await replayRules()
+    await page.getByRole("button", { name: "Add rule" }).click()
+    const dialog = page.getByRole("dialog")
+    log(await dialog.getByText("Record sessions").isVisible({ timeout: 5000 }).catch(() => false), "Add rule opens its dialog")
+    await dialog.getByText("Allow replay").click()
+    await dialog.getByText("Admins", { exact: true }).click()
+    await dialog.getByText("All machines").click()
+    await dialog.getByRole("button", { name: "Review" }).click()
+    await page.getByRole("dialog").getByRole("button", { name: /^Save/ }).click({ timeout: 30000 })
+    await page.getByRole("dialog").waitFor({ state: "detached", timeout: 30000 }).catch(() => {})
+    log((await replayRules()) === rulesBefore + 1, "a saved replay rule reaches the policy")
+    const added = page.locator("[data-recording-rule=recording_view]").last()
+    log(await added.isVisible({ timeout: 15000 }).catch(() => false), "the new rule is listed")
+    await added.getByRole("button", { name: "Remove rule" }).click()
+    await page.getByRole("dialog").getByRole("button", { name: /^Save/ }).click({ timeout: 30000 })
+    await page.getByRole("dialog").waitFor({ state: "detached", timeout: 30000 }).catch(() => {})
+    log((await replayRules()) === rulesBefore, "removing it restores the policy")
   }
 
   // 4. Replay: unlock, load, play/pause, seek, speed; then the error states.
