@@ -109,6 +109,8 @@ def checks(args):
                            ['--peer', 'SMOKE_EXEC_LONG_SECONDS'])
     table['ssh-long'] = (['ssh_long.py', args.peer, '--seconds', os.environ.get('SMOKE_SSH_LONG_SECONDS', '')],
                          ['--peer', 'SMOKE_SSH_LONG_SECONDS'])
+    table['ssh-long-interactive'] = (['ssh_long.py', args.peer, '--interactive', '--seconds', os.environ.get('SMOKE_SSH_LONG_SECONDS', '')],
+                                     ['--peer', 'SMOKE_SSH_LONG_SECONDS'])  # F5-02 with a held pty shell, then exit 0
     for name, step, needs in (('ssh-setup-time', 'setup', []), ('ssh-control-outage', 'outage', ['REVOKE_CLIENT_CMD']),
                               ('ssh-refusals', 'refusals', []), ('ssh-live-revoke', 'revoke', ['REVOKE_CLIENT_CMD']),
                               ('ssh-session-audit', 'audit', []), ('ssh-forwarding', 'forwarding', [])):

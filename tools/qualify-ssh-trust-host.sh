@@ -26,7 +26,7 @@ machine=${prefix}trust-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')
 step() { printf '== %s\n' "$*"; }
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 . "$repo/tools/fresh-host.sh"
-owner_pb() { $owner_command "~/.local/bin/pb $*"; }
+owner_pb() { $owner_command "${OWNER_PB:-~/.local/bin/pb} $*"; }  # OWNER_PB: the owner computer's pb (a Windows client: its quoted pb.exe path)
 cleanup() {
  if [ -n "${machine_created:-}" ]; then
   code=$(owner_pb machine revoke "$machine" --json 2>/dev/null | python3 -c 'import sys,json;d=json.load(sys.stdin);d=d.get("data",d);print(d.get("confirmation_token",""))' 2>/dev/null || true)

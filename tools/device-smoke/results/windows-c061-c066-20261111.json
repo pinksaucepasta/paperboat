@@ -1,0 +1,13 @@
+{
+  "client": "winpool-4 (hosted Windows Server runner, machine w13-runner), pb dev-9d95a8bbd (main 9d95a8bbd, contains da8bf2533 0ab3b91f4 1eefdf5ee)",
+  "C061 pb rsync": {
+    "result": "PASS",
+    "detail": "MSYS2 rsync (C:\\msys64\\usr\\bin), no manual environment: a 3,000,000-byte file and a note file `pb rsync -a` to w13-linux and back; SHA-256 identical locally (3a12685b...), on the target (sha256sum) and after the return trip; target directory removed after",
+    "also": "tools/device-smoke/windows_checks.py --only ssh-rsync PASS 137 s (results/windows-20261111T005435Z.json)"
+  },
+  "C066 pb ssh trust-host": {
+    "result": "PASS",
+    "detail": "tools/qualify-ssh-trust-host.sh with the Windows client as owner (OWNER_PB) and a throwaway ubuntu:24.04 sshd container machine w12-trust-130edd80 as target: changed host keys refused with `pb ssh trust-host --fingerprint <pending>`, a wrong fingerprint rejected, the exact pending fingerprint trusted, pb ssh works again; throwaway record revoked by exact name at the end",
+    "before_the_fixes": "dev-d419b1380 failed: generic error (support_b36a8cf6...), 'known-host authority is invalid'"
+  }
+}
