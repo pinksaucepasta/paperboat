@@ -1,16 +1,17 @@
 name: PR checks
 on:
   pull_request:
+  merge_group:
 permissions:
   contents: read
 concurrency:
-  group: pr-checks-${{ github.event.pull_request.number }}
+  group: pr-checks-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
   targeted:
     name: Targeted Go checks
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
     services:
       postgres:
         image: postgres:17
@@ -30,4 +31,4 @@ jobs:
         with:
           go-version-file: cli/go.mod
           cache-dependency-path: '**/go.sum'
-      - run: python3 tools/pr-checks.py '${{ github.event.pull_request.base.sha }}'
+      - run: python3 tools/pr-checks.py '${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha }}'

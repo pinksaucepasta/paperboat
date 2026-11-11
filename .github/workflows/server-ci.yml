@@ -6,6 +6,7 @@ on:
     # Tracker and doc-only pushes start no CI (they queued behind each other, 2026-11-04).
     paths-ignore: ['CHECKLIST.md', 'PLAN.md', 'WHITEBOARD.md', 'docs/**/*.md', '**/README.md']
   pull_request:
+  merge_group:
   workflow_dispatch:
 
 permissions:
@@ -21,7 +22,7 @@ concurrency:
 jobs:
   server:
     name: Server checks
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     defaults:
@@ -46,7 +47,7 @@ jobs:
 
   modules:
     name: Vet and test ${{ matrix.module }}
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:

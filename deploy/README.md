@@ -365,5 +365,12 @@ continues on main. The End-to-end check is added after W28 proves all its core s
 
 Prior art: GitHub's [auto-merge requirements](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-auto-merge-for-pull-requests-in-your-repository)
 and [protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches):
-required checks, strict up-to-date branches, administrator enforcement, and linear history.
+required checks, administrator enforcement, and linear history. Strict up-to-date checks
+are disabled: serialized submissions and the merge queue validate integration without
+forcing every lane to rebase and restart CI after each unrelated merge.
 The script refuses an unprotected target because auto-merge there could merge before CI.
+The public organization repository supports GitHub's [merge queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue).
+`branch-protection.sh --apply` installs its rebase queue with no bypass actors and eight build
+slots. Required workflows run on both `pull_request` and `merge_group`; full health jobs run
+on main. Queue checks have a five-minute budget. Bootstrap order: land tooling, broadcast
+the switch to every lane, then apply the rules. Never enable protection ahead of the tooling.
