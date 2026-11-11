@@ -53,15 +53,19 @@ type Sessions interface {
 	Recordings() ([]recordings.Meta, error)
 	PruneRecordings(retention time.Duration, quotaBytes int64) ([]recordings.Meta, error)
 	CloseInterruptedRecording(recordingID string) (recordings.Meta, error)
+	RecordingSegment(recordingID string, index uint32) ([]byte, error)
 }
 
 type Config struct {
 	Sessions Sessions
 	Policies *PolicyStore
 	// Fetch reads the current policy from Paperboat; Events wakes the controller when it changed.
-	Fetch  func(context.Context) (wire.Policy, error)
-	Events interface{ Changed() <-chan struct{} }
-	Audit  *offlineaudit.Queue
+	Fetch func(context.Context) (wire.Policy, error)
+	// Archive and Put copy closed segments to the team bucket; both nil keeps recordings on this machine only.
+	Archive Archive
+	Put     Put
+	Events  interface{ Changed() <-chan struct{} }
+	Audit   *offlineaudit.Queue
 	// LedgerPath holds which recording reports are already in the audit queue.
 	LedgerPath string
 	Now        func() time.Time
@@ -73,6 +77,11 @@ type Controller struct {
 	kick   chan struct{}
 	cancel context.CancelFunc
 	done   chan struct{}
+	// archiveDone closes when archiveLoop returns: uploads never delay the policy and reports in run.
+	archiveDone chan struct{}
+	// archiveNext is the earliest next archive attempt, archiveFailures the streak behind it (archiveLoop only).
+	archiveNext     time.Time
+	archiveFailures int
 }
 
 func New(config Config) (*Controller, error) {
@@ -202,8 +211,9 @@ func (c *Controller) Start(context.Context) error {
 		return errors.New("recording control already started")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	c.cancel, c.done = cancel, make(chan struct{})
+	c.cancel, c.done, c.archiveDone = cancel, make(chan struct{}), make(chan struct{})
 	go c.run(ctx)
+	go c.archiveLoop(ctx)
 	return nil
 }
 
@@ -212,12 +222,14 @@ func (c *Controller) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	c.cancel()
-	select {
-	case <-c.done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+	for _, done := range []chan struct{}{c.done, c.archiveDone} {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
+	return nil
 }
 
 func (c *Controller) run(ctx context.Context) {
