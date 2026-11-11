@@ -16,6 +16,9 @@ const sharedLockRemoteStaleAfter = 30 * time.Minute
 // budget before reclaiming an empty directory left by an interrupted process.
 const sharedLockOwnerlessStaleAfter = 30 * time.Second
 
+// processStartSlack covers the coarse (one second) process start times some platforms report.
+const processStartSlack = 2 * time.Second
+
 type sharedLockOwner struct {
 	PID       int       `json:"pid"`
 	Hostname  string    `json:"hostname"`
@@ -142,7 +145,8 @@ func sharedLockIsStale(path, hostname string) (bool, error) {
 	if owner.Hostname != hostname {
 		return time.Since(owner.CreatedAt) > sharedLockRemoteStaleAfter, nil
 	}
-	return !processAlive(owner.PID), nil
+	// A recycled PID belongs to a process that started after the lock was created; its owner is gone.
+	return !processAlive(owner.PID) || processStartedAfter(owner.PID, owner.CreatedAt), nil
 }
 
 func (l *sharedLock) Unlock() error {
