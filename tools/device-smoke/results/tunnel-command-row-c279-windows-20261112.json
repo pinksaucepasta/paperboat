@@ -1,0 +1,14 @@
+{
+ "check": "tunnel-command-rows",
+ "build": "dev-36f2a7735 (winpool-3, pb.exe)",
+ "version": "dev-36f2a7735 (winpool-3, pb.exe)",
+ "server": "prod",
+ "run": "laners-c279w",
+ "rows": {
+  "C279": {
+   "main": true,
+   "error": true,
+   "failures": []
+  }
+ }
+}
