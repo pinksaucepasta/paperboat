@@ -163,3 +163,31 @@ object's name.
   (`components/crumb-picker.tsx`; the crumb brightens on hover and while open, no box), a
   popover with a search field, rows with the name on the left and one muted detail on the right
   (IP, role), and the current item in bold instead of a check.
+
+## Motion and view transitions
+
+Reference: Vercel's `vercel-react-view-transitions` skill (`~/.claude/skills/vercel-react-view-transitions/`,
+SKILL.md and `references/`). React's `<ViewTransition>` (stable in React 19.3) and Next's
+`transitionTypes` are used as shipped; unsupported browsers simply don't animate.
+
+- **When in doubt, don't animate.** Motion says where you went, never that something refreshed.
+- **Used in three places only**, all in `components/view-transitions.tsx`:
+  - `PageTransition` wraps a page's content area (`SectionPage`, the Machines list, the machine page
+    below its header) in a short cross-fade when one page replaces another. The sidebar and the top
+    bar are outside it and stay still.
+  - `SharedName` gives one element on both sides of a navigation the same name, so it moves instead of
+    fading: a machine's name from its row in the Machines list to the machine page's title, and from
+    the Files machine list to the picker in the Files header.
+  - Dialogs, popovers and menus keep their own open and close animation; no view transition on top.
+- **Never animated:** background refreshes, polling, list updates, filtering and typing, loading
+  placeholders turning into data, live terminal output, tab switches inside a machine, and anything on
+  the terminal page itself. Every boundary is `default="none"`, so only the triggers named on it run.
+- **Tokens** (`--vt-duration` 160 ms cross-fade, `--vt-morph-duration` 280 ms move, `--vt-ease`) and
+  all `::view-transition-*` rules live together in `app/globals.css`. The root is not animated, so
+  unnamed chrome stays live and clickable.
+- **Reduced motion:** with `prefers-reduced-motion: reduce` every transition is skipped the moment
+  React starts it (`components/view-transitions.tsx`), so nothing animates and no pseudo-element
+  appears; the CSS also zeroes the durations as a second guard.
+- A browser's own back and forward never animate (React leaves them to the browser); links, including
+  the breadcrumb back to a list, do.
+- No directional slides: a browser back or forward carries no direction, and sections are lateral.

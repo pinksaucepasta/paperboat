@@ -2,7 +2,7 @@
 
 import { ShareNetworkIcon, TerminalIcon } from "@phosphor-icons/react"
 import Link from "next/link"
-import { usePathname, useRouter, useSearchParams, useSelectedLayoutSegment } from "next/navigation"
+import { useParams, usePathname, useRouter, useSearchParams, useSelectedLayoutSegment } from "next/navigation"
 import { createContext, useContext, useEffect, useState, useSyncExternalStore } from "react"
 import { meQuery, useApiQuery, useMachine, type Machine } from "@/lib/api"
 import { formatPlatform } from "@/lib/format"
@@ -21,6 +21,7 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { Button } from "@/components/ui/button"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Skeleton } from "@/components/ui/skeleton"
+import { PageTransition, SharedName } from "@/components/view-transitions"
 
 const MachineContext = createContext<Machine | null>(null)
 // True under MachineSkeleton: the machine is a stand-in, so views draw their loading state.
@@ -137,29 +138,31 @@ export function MachineShell({ machineId, children }: { machineId: string; child
   return (
     <MachineContext value={machine}>
       {header}
-      <div className="min-h-0 flex-1">
-        {terminal === "open" && !isMobile ? (
-          <ResizablePanelGroup
-            orientation={dock.value === "bottom" ? "vertical" : "horizontal"}
-            className="h-[calc(100svh-var(--header-height))]"
-          >
-            <ResizablePanel minSize="30%">{content}</ResizablePanel>
-            <ResizableHandle />
-            <ResizablePanel defaultSize="35%" minSize="15%">
-              <QuickTerminal
-                machine={machine}
-                session={session}
-                dock={dock.value}
-                onDock={dock.set}
-                onMinimize={() => setTerminal("minimized")}
-                onClose={() => setTerminal("closed")}
-              />
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        ) : (
-          content
-        )}
-      </div>
+      <PageTransition>
+        <div className="min-h-0 flex-1">
+          {terminal === "open" && !isMobile ? (
+            <ResizablePanelGroup
+              orientation={dock.value === "bottom" ? "vertical" : "horizontal"}
+              className="h-[calc(100svh-var(--header-height))]"
+            >
+              <ResizablePanel minSize="30%">{content}</ResizablePanel>
+              <ResizableHandle />
+              <ResizablePanel defaultSize="35%" minSize="15%">
+                <QuickTerminal
+                  machine={machine}
+                  session={session}
+                  dock={dock.value}
+                  onDock={dock.set}
+                  onMinimize={() => setTerminal("minimized")}
+                  onClose={() => setTerminal("closed")}
+                />
+              </ResizablePanel>
+            </ResizablePanelGroup>
+          ) : (
+            content
+          )}
+        </div>
+      </PageTransition>
       {/* Phones have no room to dock, so the terminal takes the whole screen. */}
       {terminal === "open" && isMobile && (
         <div className="fixed inset-0 z-50 pt-[env(safe-area-inset-top)]">
@@ -224,47 +227,61 @@ export function MachineSkeleton({ machineId, children }: { machineId?: string; c
   // Before the id is known (the prerendered shell) a stand-in id still draws the machine-scoped columns.
   const loading = { id: machineId ?? "pending", alias: "", tags: [] } as unknown as Machine
   const personal = useWorkspaceId() === "personal"
+  // A machine the list already has shows its name at once, so the list row's name moves into it.
+  const routeId = useParams<{ machineId?: string }>().machineId
+  const id = machineId ?? routeId
+  const alias = useMachine(id).data?.alias
   return (
     <>
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 pt-6 md:px-8 md:pt-8">
-        <div className="flex flex-wrap items-start gap-4">
-          <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <Skeleton className="my-1 h-6 w-48" />
-            {/* The tags line, then the status, platform and address line, each value sized like
+      <PageTransition>
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 pt-6 md:px-8 md:pt-8">
+          <div className="flex flex-wrap items-start gap-4">
+            <div className="flex min-w-0 flex-1 flex-col gap-2">
+              {alias ? (
+                <SharedName name={`machine-${id}`}>
+                  <h1 className="truncate font-heading text-2xl font-semibold tracking-tight">{alias}</h1>
+                </SharedName>
+              ) : (
+                <Skeleton className="my-1 h-6 w-48" />
+              )}
+              {/* The tags line, then the status, platform and address line, each value sized like
                 itself, so on a phone it wraps like the loaded one ("Last seen 5 days ago" takes
                 two lines there). */}
-            <Skeleton className="my-0.5 h-4 w-28" />
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-              <span className="inline-flex items-center gap-2">
-                <Skeleton className="size-2 rounded-full" />
-                <span className="inline-flex flex-wrap gap-x-1 gap-y-[11px]">
-                  <Skeleton className="h-[11px] w-20" />
-                  <Skeleton className="h-[11px] w-16" />
-                </span>
-              </span>
-              <Skeleton className="my-[3px] h-4 w-24" />
               <Skeleton className="my-0.5 h-4 w-28" />
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                <span className="inline-flex items-center gap-2">
+                  <Skeleton className="size-2 rounded-full" />
+                  <span className="inline-flex flex-wrap gap-x-1 gap-y-[11px]">
+                    <Skeleton className="h-[11px] w-20" />
+                    <Skeleton className="h-[11px] w-16" />
+                  </span>
+                </span>
+                <Skeleton className="my-[3px] h-4 w-24" />
+                <Skeleton className="my-0.5 h-4 w-28" />
+              </div>
             </div>
-          </div>
-          {/* Share is there for your own machines in Personal, the usual case. */}
-          {personal && (
-            <Button variant="outline" size="lg" tabIndex={-1} aria-hidden className="pointer-events-none">
-              <ShareNetworkIcon data-icon="inline-start" />
-              Share
+            {/* Share is there for your own machines in Personal, the usual case. */}
+            {personal && (
+              <Button variant="outline" size="lg" tabIndex={-1} aria-hidden className="pointer-events-none">
+                <ShareNetworkIcon data-icon="inline-start" />
+                Share
+              </Button>
+            )}
+            <Button variant="secondary" size="lg" tabIndex={-1} aria-hidden className="pointer-events-none">
+              <TerminalIcon data-icon="inline-start" />
+              Quick terminal
             </Button>
-          )}
-          <Button variant="secondary" size="lg" tabIndex={-1} aria-hidden className="pointer-events-none">
-            <TerminalIcon data-icon="inline-start" />
-            Quick terminal
-          </Button>
+          </div>
+          <MachineTabs base={machineId && `/machines/${machineId}`} tab={tab} />
         </div>
-        <MachineTabs base={machineId && `/machines/${machineId}`} tab={tab} />
-      </div>
-      <div className="mx-auto w-full max-w-6xl px-4 py-6 md:px-8">
-        <MachineContext value={loading}>
-          <MachineLoading value>{children}</MachineLoading>
-        </MachineContext>
-      </div>
+      </PageTransition>
+      <PageTransition>
+        <div className="mx-auto w-full max-w-6xl px-4 py-6 md:px-8">
+          <MachineContext value={loading}>
+            <MachineLoading value>{children}</MachineLoading>
+          </MachineContext>
+        </div>
+      </PageTransition>
     </>
   )
 }

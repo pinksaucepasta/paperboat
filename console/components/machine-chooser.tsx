@@ -13,6 +13,7 @@ import { SearchField } from "@/components/list-toolbar"
 import { LoadError } from "@/components/load-error"
 import { StatusDot } from "@/components/machine-status"
 import { TableRowsSkeleton } from "@/components/skeletons"
+import { SharedName } from "@/components/view-transitions"
 
 /**
  * For pages that show one machine at a time (Files): the workspace's machines to pick from,
@@ -82,16 +83,18 @@ export function MachineChooser({ href, action }: { href: (id: string) => string;
               >
                 <td>
                   <div className="flex h-[1lh] min-w-0 items-center gap-2">
-                    <Link
-                      href={href(machine.id)}
-                      data-machine
-                      className={cn(
-                        "truncate-x font-medium outline-none trim-cap after:absolute after:inset-0",
-                        !machine.online && "text-muted-foreground",
-                      )}
-                    >
-                      {machine.alias}
-                    </Link>
+                    <SharedName name={`machine-pick-${machine.id}`}>
+                      <Link
+                        href={href(machine.id)}
+                        data-machine
+                        className={cn(
+                          "truncate-x font-medium outline-none trim-cap after:absolute after:inset-0",
+                          !machine.online && "text-muted-foreground",
+                        )}
+                      >
+                        {machine.alias}
+                      </Link>
+                    </SharedName>
                     <StatusDot online={machine.online} />
                   </div>
                   {!machine.online && (

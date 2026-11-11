@@ -36,6 +36,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { LoadError } from "@/components/load-error"
 import { TableRowsSkeleton } from "@/components/skeletons"
+import { SharedName } from "@/components/view-transitions"
 
 export function MachineTable() {
   const { data: me } = useApiQuery(meQuery)
@@ -209,12 +210,14 @@ function MachineRow({
         <tr className="group relative transition-colors hover:bg-surface data-popup-open:bg-surface [&>td]:h-14 [&>td]:px-3">
           <td>
             <div className="flex h-[1lh] min-w-0 items-center gap-2">
-              <Link
-                href={`/machines/${machine.id}`}
-                className="truncate-x font-medium trim-cap after:absolute after:inset-0"
-              >
-                {machine.alias}
-              </Link>
+              <SharedName name={`machine-${machine.id}`}>
+                <Link
+                  href={`/machines/${machine.id}`}
+                  className="truncate-x font-medium trim-cap after:absolute after:inset-0"
+                >
+                  {machine.alias}
+                </Link>
+              </SharedName>
               <MachineDot machine={machine} />
               {/* Above the row's link overlay, so a tag filters instead of opening the machine. */}
               <TagChips tags={machine.tags} className="relative z-10 hidden min-w-0 sm:inline-flex" />
