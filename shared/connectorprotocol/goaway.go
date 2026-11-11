@@ -68,7 +68,7 @@ func ReadGoawayNotice(reader io.Reader) (GoawayNotice, error) {
 		return GoawayNotice{}, CodeError(ErrMalformedFrame, ReasonMalformed, false, err)
 	}
 	var notice GoawayNotice
-	if err := decodeStrict(payload, &notice); err != nil {
+	if err := decodeTolerant(payload, &notice); err != nil {
 		return GoawayNotice{}, CodeError(ErrMalformedFrame, ReasonMalformed, false, err)
 	}
 	if err := notice.validate(); err != nil {

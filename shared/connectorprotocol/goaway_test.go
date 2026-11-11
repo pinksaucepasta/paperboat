@@ -20,10 +20,13 @@ func TestGoawayNoticeRoundTripAndBounds(t *testing.T) {
 	if err != nil || notice.Reason != GoawayHostDraining || notice.DrainDeadline != deadline.Unix() {
 		t.Fatalf("read notice = %+v, %v", notice, err)
 	}
-	for _, bad := range []string{`{"reason":"bored","drain_deadline":1}`, `{"reason":"edge_draining"}`, `{"reason":"edge_draining","drain_deadline":1,"x":1}`, `{"reason":"edge_draining","drain_deadline":1` + strings.Repeat(" ", 2048) + `}`} {
+	for _, bad := range []string{`{"reason":"bored","drain_deadline":1}`, `{"reason":"edge_draining"}`, `{"reason":"edge_draining","drain_deadline":1` + strings.Repeat(" ", 2048) + `}`} {
 		if _, err := ReadGoawayNotice(strings.NewReader(goawayFrame(bad))); err == nil {
 			t.Fatalf("accepted goaway notice %.60s", bad)
 		}
+	}
+	if n, err := ReadGoawayNotice(strings.NewReader(goawayFrame(`{"reason":"edge_draining","drain_deadline":1,"x":1}`))); err != nil || n.DrainDeadline != 1 {
+		t.Fatalf("unknown goaway field must be ignored: %+v, %v", n, err)
 	}
 	if _, err := ReadGoawayNotice(strings.NewReader("\x00\x00\x10\x00")); err == nil {
 		t.Fatal("accepted an oversized goaway frame")

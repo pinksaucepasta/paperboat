@@ -38,7 +38,7 @@ type StreamOpen struct {
 }
 
 func (s StreamOpen) Validate() error {
-	if s.Protocol != ProtocolName || s.Version != ProtocolVersion ||
+	if s.Protocol != ProtocolName || !compatibleVersion(s.Version) ||
 		ValidateIdentifier(s.AccountID) != nil || ValidateIdentifier(s.TunnelID) != nil ||
 		ValidateIdentifier(s.ConnectorID) != nil || ValidateIdentifier(s.SessionID) != nil ||
 		ValidateIdentifier(s.RouteID) != nil || ValidateIdentifier(s.RequestID) != nil ||
@@ -107,7 +107,7 @@ func ReadStreamOpen(reader io.Reader) (StreamOpen, error) {
 		return StreamOpen{}, CodeError(ErrMalformedFrame, ReasonMalformed, false, err)
 	}
 	var stream StreamOpen
-	if err := decodeStrict(payload, &stream); err != nil {
+	if err := decodeTolerant(payload, &stream); err != nil {
 		return StreamOpen{}, CodeError(ErrMalformedFrame, ReasonMalformed, false, err)
 	}
 	if err := stream.Validate(); err != nil {

@@ -46,8 +46,8 @@ func TestStreamOpenRoundTripAndStrictBounds(t *testing.T) {
 	binary.BigEndian.PutUint32(unknownLength[:], uint32(len(unknown)))
 	unknownWire.Write(unknownLength[:])
 	unknownWire.Write(unknown)
-	if _, err := ReadStreamOpen(&unknownWire); !errors.Is(err, ErrMalformedFrame) {
-		t.Fatalf("unknown field error = %v, want malformed frame", err)
+	if _, err := ReadStreamOpen(&unknownWire); err != nil {
+		t.Fatalf("unknown field must be ignored: %v", err)
 	}
 
 	var oversized bytes.Buffer

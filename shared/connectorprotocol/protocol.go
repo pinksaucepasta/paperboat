@@ -532,7 +532,7 @@ func (f Frame) Validate() error {
 	if _, ok := allowedMessageTypes[f.Type]; !ok {
 		return CodeError(ErrUnsupportedMessage, ReasonMalformed, false, nil)
 	}
-	if f.Version != ProtocolVersion || !validRequestID(f.RequestID) || len(f.Payload) == 0 || len(f.Payload) > maxPayloadBytes(f.Type) {
+	if !compatibleVersion(f.Version) || !validRequestID(f.RequestID) || len(f.Payload) == 0 || len(f.Payload) > maxPayloadBytes(f.Type) {
 		return ErrMalformedFrame
 	}
 	if err := validatePayloadJSON(f.Payload); err != nil {
@@ -557,37 +557,37 @@ func validateMessagePayload(messageType MessageType, payload []byte) error {
 		return message.Validate(time.Time{})
 	case MessageSnapshot:
 		var message Snapshot
-		if err := decodeStrict(payload, &message); err != nil {
+		if err := decodeTolerant(payload, &message); err != nil {
 			return ErrMalformedFrame
 		}
 		return message.ValidateBound()
 	case MessageDelta:
 		var message Delta
-		if err := decodeStrict(payload, &message); err != nil {
+		if err := decodeTolerant(payload, &message); err != nil {
 			return ErrMalformedFrame
 		}
 		return message.ValidateBound()
 	case MessageAck:
 		var message Ack
-		if err := decodeStrict(payload, &message); err != nil {
+		if err := decodeTolerant(payload, &message); err != nil {
 			return ErrMalformedFrame
 		}
 		return message.Validate()
 	case MessageReady:
 		var message Readiness
-		if err := decodeStrict(payload, &message); err != nil {
+		if err := decodeTolerant(payload, &message); err != nil {
 			return ErrMalformedFrame
 		}
 		return message.Validate()
 	case MessageHeartbeat:
 		var message Heartbeat
-		if err := decodeStrict(payload, &message); err != nil {
+		if err := decodeTolerant(payload, &message); err != nil {
 			return ErrMalformedFrame
 		}
 		return message.Validate()
 	case MessageHeartbeatAck:
 		var message HeartbeatAck
-		if err := decodeStrict(payload, &message); err != nil {
+		if err := decodeTolerant(payload, &message); err != nil {
 			return ErrMalformedFrame
 		}
 		return message.Validate(time.Time{})
@@ -605,13 +605,13 @@ func validateMessagePayload(messageType MessageType, payload []byte) error {
 		return message.ValidateBound()
 	case MessageDrain:
 		var message Drain
-		if err := decodeStrict(payload, &message); err != nil {
+		if err := decodeTolerant(payload, &message); err != nil {
 			return ErrMalformedFrame
 		}
 		return message.Validate(time.Time{})
 	case MessageDrainAck:
 		var message DrainAck
-		if err := decodeStrict(payload, &message); err != nil {
+		if err := decodeTolerant(payload, &message); err != nil {
 			return ErrMalformedFrame
 		}
 		return message.Validate(time.Time{})
@@ -653,13 +653,13 @@ func validateMessagePayload(messageType MessageType, payload []byte) error {
 		return message.Validate()
 	case MessageDisconnect:
 		var message Disconnect
-		if err := decodeStrict(payload, &message); err != nil {
+		if err := decodeTolerant(payload, &message); err != nil {
 			return ErrMalformedFrame
 		}
 		return message.Validate()
 	case MessageReject:
 		var message Reject
-		if err := decodeStrict(payload, &message); err != nil {
+		if err := decodeTolerant(payload, &message); err != nil {
 			return ErrMalformedFrame
 		}
 		return message.Validate()
@@ -671,7 +671,7 @@ func (f Frame) DecodePayload(target any) error {
 	if err := f.Validate(); err != nil {
 		return err
 	}
-	return decodeStrict(f.Payload, target)
+	return decodeTolerant(f.Payload, target)
 }
 
 // ClientFrameDecodeFailure identifies a failure produced by decoding an already
@@ -730,7 +730,7 @@ func ReadFrameAllowed(reader io.Reader, allowed func(MessageType) bool) (Frame, 
 		return Frame{}, ErrMalformedFrame
 	}
 	var frame Frame
-	if err := decodeStrict(body, &frame); err != nil {
+	if err := decodeTolerant(body, &frame); err != nil {
 		return Frame{}, CodeError(ErrMalformedFrame, ReasonMalformed, false, &ClientFrameDecodeFailure{cause: err})
 	}
 	if err := frame.Validate(); err != nil {
@@ -807,12 +807,28 @@ func validRequestID(value string) bool {
 	return len(value) >= 1 && len(value) <= MaxIdentifierBytes && identifierPattern.MatchString(value)
 }
 
+// decodeTolerant decodes a wire message that carries no authorization decision: edge and host
+// update independently, so a field one side adds must not drop the frame. Size, duplicate keys,
+// nesting, trailing data and the receiver's own type and required-value checks stay.
+func decodeTolerant(data []byte, target any) error {
+	return decodeWire(data, target, false)
+}
+
+// decodeStrict is for authorization claims (the hello/auth/renewal/rotation handshake, ingress
+// decisions, private access requests): an unknown field there could be a restriction this receiver
+// does not understand, so it is refused. New claims ship behind a negotiated capability or version.
 func decodeStrict(data []byte, target any) error {
+	return decodeWire(data, target, true)
+}
+
+func decodeWire(data []byte, target any, exact bool) error {
 	if len(data) == 0 || len(data) > MaxFrameBytes || target == nil || rejectDuplicateKeys(data) != nil {
 		return ErrMalformedFrame
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
+	if exact {
+		decoder.DisallowUnknownFields()
+	}
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}
@@ -821,6 +837,14 @@ func decodeStrict(data []byte, target any) error {
 		return errors.New("trailing JSON")
 	}
 	return nil
+}
+
+// compatibleVersion accepts any minor of the supported major. The hello exchange (NegotiateVersion)
+// is the protocol gate; per-frame stamps only need to belong to the same major.
+func compatibleVersion(value string) bool {
+	major, _, ok := parseVersion(value)
+	want, _, _ := parseVersion(ProtocolVersion)
+	return ok && major == want
 }
 
 func validatePayloadJSON(data []byte) error {

@@ -139,7 +139,27 @@ func TestSharedConnectorFixtureRejectsUnknownAndTrailingData(t *testing.T) {
 	if err := duplicate.Validate(); !errors.Is(err, ErrMalformedFrame) {
 		t.Fatalf("duplicate payload error=%v", err)
 	}
-	if err := decodeStrict([]byte(`{"type":"ack","version":"1.0","request_id":"req_1","payload":{},"extra":true}`), &Frame{}); err == nil {
-		t.Fatal("unknown frame field accepted")
+}
+
+// Edge and host update independently: a field or minor version one side adds must not drop the
+// frame (the 2026-11-04 control-HTTP outage), while another major and authorization claims stay refused.
+func TestWireToleratesUnknownFieldsAndMinorVersions(t *testing.T) {
+	if err := decodeTolerant([]byte(`{"type":"ack","version":"1.7","request_id":"req_1","payload":{},"extra":true}`), &Frame{}); err != nil {
+		t.Fatalf("unknown frame field rejected: %v", err)
+	}
+	if err := decodeTolerant([]byte(`{"type":"ack","version":"1.0","request_id":"req_1","payload":{},"payload":{}}`), &Frame{}); err == nil {
+		t.Fatal("duplicate key accepted")
+	}
+	if err := decodeStrict([]byte(`{"x":1}`), &IngressDecision{}); err == nil {
+		t.Fatal("unknown field in an authorization claim accepted")
+	}
+	for version, want := range map[string]bool{"1.0": true, "1.7": true, "2.0": false, "0.9": false, "1": false, "1.x": false, "": false} {
+		if compatibleVersion(version) != want {
+			t.Errorf("compatibleVersion(%q) = %v, want %v", version, !want, want)
+		}
+	}
+	frame := Frame{Type: MessageAck, Version: "2.0", RequestID: "req_1", Payload: json.RawMessage(`{"account_id":"acct_1"}`)}
+	if frame.Validate() == nil {
+		t.Fatal("frame of another major accepted")
 	}
 }

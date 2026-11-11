@@ -67,8 +67,14 @@ snapshot payload is at most 4 MiB and the typed delta payload is at most 1 MiB;
 other typed payloads are at most 64 KiB. A frame writer must write all bytes or
 return an error. Readers must not treat a partial frame as success.
 
-All typed decoders reject unknown fields, duplicate object keys, trailing JSON,
-and invalid JSON numbers. Canonical configuration JSON is
+Typed decoders reject duplicate object keys, trailing JSON, and invalid JSON
+numbers. Frames, control messages, stream-open prefaces and goaway notices ignore
+unknown fields and accept any minor version of the supported major (edge and
+host update independently; `hello` negotiation is the version gate). Authorization
+claims (the hello, auth, renewal and rotation messages, ingress decisions,
+private access requests, the signed configuration snapshot) reject unknown
+fields, because an unknown field there could be a restriction the receiver does
+not understand. Canonical configuration JSON is
 decoded with JSON-number preservation, recursively checked for a maximum depth
 of 64, checked for secret-bearing names and values, then re-encoded with sorted
 object keys before hashing. Fields such as `api_key`, `authorization`,
