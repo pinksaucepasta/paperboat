@@ -1,0 +1,15 @@
+F5-09 Windows refusal messages, 2026-11-10 and 2026-11-11 (sanitized)
+
+1. tools/device-smoke/ssh_mac_rows.py --windows --only refusals (client hp, target a Windows runner, 2026-11-10): PASS
+   PASS F5-09 refusals CASE sshd_stopped [pb: the machine's SSH server closed the connection before answering; it may be refusing new connections (its sshd MaxStartups or MaxSessions limit) or not running. Retry shortly, or check sshd on that machine. Support reference: support_<id>. Run `pb bugreport --uploa] CASE machine_offline [pb: Paperboat could not reach <windows-machine>: it may be offline, or its Paperboat service is not running; check it in `pb status`. Support reference: support_<id>. Run `pb bugreport --upload` to send the details. Connection c
+   (sshd stopped, machine offline, client service stopped: each prints its own pb: line, both pb ssh and plain ssh.)
+
+2. 2026-11-11, same Windows runner, hp client: `pb machine capabilities --managed-ssh=false` and a stopped PaperboatSshd both print the SSH-server-closed line
+   ("the machine's SSH server closed the connection before answering ... or not running. Retry shortly, or check sshd on that machine."), not the 'SSH is not set up' wording.
+   Linux throwaway pair, same build, same two steps (managed-ssh=false; sshd stopped): the identical line. So 'SSH not set up' has no distinct message on any OS (RefusedNotSetUp is only a stale-generation case); Windows matches Linux.
+
+3. No access: the host's refusal is OS-independent Go (native/offline.go Allows false -> WriteSSHRefusal no_access, shown by managedssh/refusal.go). TestOfflineSessionsStartFromTheHostsSignedScopes, built as a windows/amd64 test binary and run on a Windows runner with a non-elevated token (runas /trustlevel:0x20000):
+   --- PASS: TestOfflineSessionsStartFromTheHostsSignedScopes (0.40s)
+   (In the elevated ssh session the same test fails before the refusal logic: 'shared credential lock parent could not be prepared', the config lock requires the temp directory's owner to be the user SID and an elevated token creates Administrators-owned directories. Not a refusal bug.)
+   TestServeAuditsRefusalsWithTheirReason, TestSSHRefusalsAreShownInPbsWords, TestSSHRefusalForADeniedRemoteLoginUserNamesTheUserAndTheSetting: PASS as Windows test binaries on the runner.
+   Same bar as Linux and macOS, where 'no access' is also the unit test (ssh_refusals.sh).
