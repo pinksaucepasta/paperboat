@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"errors"
+	"slices"
 	"sync"
 	"syscall"
 	"testing"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/originhealth"
+	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 type switchableProber struct {
@@ -92,10 +94,16 @@ func TestOriginHealthCodeNamesTheFailure(t *testing.T) {
 		{originhealth.ReasonUnreachable, syscall.EHOSTUNREACH, "unreachable"},
 		{originhealth.ReasonOther, errors.New("boom"), "unreachable"},
 		{originhealth.ReasonOther, x509.UnknownAuthorityError{}, "tls"},
+		{originhealth.ReasonOther, &CertificateChangedError{}, "certificate_changed"},
 	}
 	for _, tc := range cases {
-		if got := originHealthCode(tc.reason, tc.err); got != tc.want {
+		got := originHealthCode(tc.reason, tc.err)
+		if got != tc.want {
 			t.Errorf("%v: %q, want %q", tc.err, got, tc.want)
+		}
+		// The edge's page table (tunnel/internal/edgehttp) is keyed by this shared list.
+		if !slices.Contains(sharedprotocol.OriginFailureCodes, got) {
+			t.Errorf("%v: code %q is not in connectorprotocol.OriginFailureCodes", tc.err, got)
 		}
 	}
 }

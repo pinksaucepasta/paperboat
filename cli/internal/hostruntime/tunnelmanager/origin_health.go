@@ -10,6 +10,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/originhealth"
+	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 // OriginHealthRoute is the latest reachability of one route's local app: State is reachable or
@@ -105,17 +106,17 @@ func originHealthCode(reason originhealth.Reason, err error) string {
 	var record tls.RecordHeaderError
 	var changed *CertificateChangedError
 	if errors.As(err, &changed) {
-		return OriginCertificateChanged
+		return sharedprotocol.OriginCertificateChanged
 	}
 	if errors.As(err, &unknownAuthority) || errors.As(err, &hostname) || errors.As(err, &invalid) || errors.As(err, &verification) || errors.As(err, &record) {
-		return "tls"
+		return sharedprotocol.OriginTLS
 	}
 	switch reason {
 	case originhealth.ReasonRefused:
-		return "refused"
+		return sharedprotocol.OriginRefused
 	case originhealth.ReasonTimeout:
-		return "timeout"
+		return sharedprotocol.OriginTimeout
 	default:
-		return "unreachable"
+		return sharedprotocol.OriginUnreachable
 	}
 }

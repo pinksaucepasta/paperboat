@@ -1228,3 +1228,17 @@ func TestOwnerIPRulesRefuseBeforeTheOrigin(t *testing.T) {
 		t.Fatalf("allowed address: %d reached=%d", allowed.Code, reached)
 	}
 }
+
+// Every code a host can send in X-Paperboat-Origin-Failure has its own page, not the generic one.
+func TestOriginFailurePageForEveryHostCode(t *testing.T) {
+	_, generic := originFailure("not_a_code").page()
+	for _, code := range connectorprotocol.OriginFailureCodes {
+		status, page := originFailure(code).page()
+		if status < 500 || page == "" {
+			t.Errorf("code %q: status=%d page=%q", code, status, page)
+		}
+		if page == generic && code != connectorprotocol.OriginUnreachable {
+			t.Errorf("code %q falls through to the generic page", code)
+		}
+	}
+}

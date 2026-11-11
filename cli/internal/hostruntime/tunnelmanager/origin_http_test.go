@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
+	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 type originSecrets map[string][]byte
@@ -212,7 +213,7 @@ func TestOriginHTTPTransportPinnedAndInsecureVerification(t *testing.T) {
 	route.TLSPin = &other
 	err = visit(route)
 	var changed *CertificateChangedError
-	if !errors.As(err, &changed) || changed.Presented != pin || !strings.Contains(err.Error(), "re-pin") || originHealthCode("", err) != OriginCertificateChanged {
+	if !errors.As(err, &changed) || changed.Presented != pin || !strings.Contains(err.Error(), "re-pin") || originHealthCode("", err) != sharedprotocol.OriginCertificateChanged {
 		t.Fatalf("pin mismatch error = %v", err)
 	}
 }

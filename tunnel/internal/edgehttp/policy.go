@@ -172,7 +172,7 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 		if request != nil && connectorprotocol.IsSelfRedirect(request.Method, request.Header.Get("X-Forwarded-Host"), request.URL.RequestURI(), response) {
 			return errOriginRedirectLoop
 		}
-		if code := response.Header.Get("X-Paperboat-Origin-Failure"); code != "" {
+		if code := response.Header.Get(connectorprotocol.OriginFailureHeader); code != "" {
 			return originFailure(code)
 		}
 		return legacy.ModifyResponse(response)
@@ -392,13 +392,13 @@ func (f originFailure) Error() string { return "origin failed: " + string(f) }
 
 func (f originFailure) page() (int, string) {
 	switch f {
-	case "refused":
+	case connectorprotocol.OriginRefused:
 		return http.StatusBadGateway, "Nothing is listening on this app's port on its machine. Its owner can start the app or fix the route's port."
-	case "timeout":
+	case connectorprotocol.OriginTimeout:
 		return http.StatusGatewayTimeout, "The app's machine could not connect to it in time. Its owner can check that the app is healthy."
-	case "tls":
+	case connectorprotocol.OriginTLS:
 		return http.StatusBadGateway, "The app's TLS certificate was not accepted. Its owner can pin it (pb tunnel route update <tunnel> <route> --tls-verification pinned), give its CA, or point the route at http://."
-	case "certificate_changed":
+	case connectorprotocol.OriginCertificateChanged:
 		return http.StatusBadGateway, "The app presented a different certificate from the one pinned for it, so Paperboat refused the connection. If its owner replaced it, they can re-pin the route."
 	}
 	return http.StatusBadGateway, "The app's machine cannot reach the app's address. Its owner can check the route's origin."

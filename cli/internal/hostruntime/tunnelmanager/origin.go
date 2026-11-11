@@ -157,10 +157,6 @@ type OriginProbeObservation struct {
 	Code    string
 }
 
-// OriginCertificateChanged is the origin-health code for a pinned route whose origin presents a
-// different certificate.
-const OriginCertificateChanged = "certificate_changed"
-
 // OriginRedirectLoop: live traffic saw the origin send a visitor back to the URL it asked for (the
 // edge shows the loop page). It is also the origin-health code the control plane accepts.
 const OriginRedirectLoop = "redirect_loop"
