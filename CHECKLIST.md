@@ -894,6 +894,28 @@ Go SDK rows below are planned acceptance checks; named checks to add are not pas
 | F24-25 | Later remote filesystem reads/writes and Receive(arbitrary remote path) have their own explicit scope/protocol, remote-platform path/overwrite rules and bounded cancellation; they never fall back to exec. | [ ] | [ ] | [ ] | Owner: Lane A/B/R (contract and endpoints), SDK lane (consumer). Check to add: TestSDKRemoteFilesystemAuthorizationAndPaths, including file-only scope, traversal/symlink/overwrite denials and local/remote path separation; later phase. |
 | F24-26 | Later Python/TypeScript bindings call the Go core through the chosen C ABI/native distribution, retaining the same transport, identity, typed outcomes and Close lifecycle. | [ ] | [ ] | [ ] | Owner: SDK lane. Check to add: sdk_bindings_conformance running the same machine/exec/private-access/artifact cases and cancellation/Close checks against Go and both bindings; no transport reimplementation. |
 
+## F25. Teams session recordings
+
+| ID | Scenario | L | M | W | Evidence |
+|---|---|---|---|---|---|
+| F25-01 | Start and stop: anyone attached with terminal access (or admins only, by the team switch) starts a recording from the web terminal or `pb recordings start`; the starter or an admin stops a manual recording, only an admin stops a rule recording; start/stop are audit events. | [ ] | [ ] | [ ] | Host + CLI: 1c8e77850, 6eb0b3477 (TestWhoMayStartAndStop, TestRecordingControlPicksTheAttachedSession). Waits for Lane C: console start/stop + team key setup; then device check. |
+| F25-02 | REC indicator: every attached client (browser and `pb connect`) shows REC before the first output of a recorded session and on every change; no layout or width hides it. | [ ] | [ ] | [ ] | Host + CLI: 1c8e77850 (TestRecordingEventIsSentOncePerChange, TestRecordingStateReachesTheCLI, TestRecordingMarkLeadsAndSurvivesNarrowWidths). Waits for Lane C: console REC chip; then device check. |
+| F25-03 | Policy rules: `record` rules start recordings when a recorded account attaches or a rule changes; the machine pins the team key and follows only signed rotations; retention and disk quota prune; stopping the team's recording (plan, rule removed) stops every recording. | [ ] | [ ] | [ ] | Server 45d510533/fc87b06b6, host 1c8e77850 (TestPolicyPinsTheFirstKeyAndFollowsOnlySignedRotations, TestReportsReachTheAuditQueueOnceEach). Waits for Lane C: rule editor + key setup; then device check. |
+| F25-04 | CLI replay: `pb recordings list`, `play` and `export` show and replay a recording the account may view, after the server's replay audit event; segments verified in order (index, SHA-256 chain, final); a long replay streams to the end. | [ ] | [ ] | [ ] | 6eb0b3477, 2777bd8e3 (TestRecordingStreamDecodesAndPlaysInOrder, TestReaderFollowsTheSegmentChain, TestReplayTicketReadsOnlyItsRecording, TestNativeDispatchReplayOutlivesItsTicketDeadline). Waits for Lane C: key setup; then device check. |
+| F25-05 | Browser replay: the console replays a recording over the browser E2E channel (role "recording"), decrypting in the browser; permission removal closes the channel. | [ ] | [ ] | [ ] | Host 6eb0b3477 (TestStaticAuthorizerBindsReplayTicketsToOneRecording), server fc87b06b6. Waits for Lane C: console player. |
+| F25-06 | Team bucket: a team-pasted S3-compatible key (stored encrypted), presigned upload of closed segments by the machine, archive replay from the bucket, retention delete; only ciphertext in the bucket. | [ ] | [ ] | [ ] | Not built (build plan step 6). |
+
+**Commands**
+
+| ID | Command | Purpose | L | M | W | Evidence |
+|---|---|---|---|---|---|---|
+| C273 | `pb recordings` | List and replay team terminal recordings | [ ] | [ ] | [ ] | 6eb0b3477; waits for key setup, then device check. |
+| C274 | `pb recordings list` | List the recordings you may see | [ ] | [ ] | [ ] | 6eb0b3477; waits for key setup, then device check. |
+| C275 | `pb recordings play` | Replay a recording in this terminal | [ ] | [ ] | [ ] | 6eb0b3477, 2777bd8e3; waits for key setup, then device check. |
+| C276 | `pb recordings export` | Write a recording as an asciicast v2 file | [ ] | [ ] | [ ] | 6eb0b3477, 2777bd8e3; waits for key setup, then device check. |
+| C277 | `pb recordings start` | Start recording the terminal session you are attached to | [ ] | [ ] | [ ] | 6eb0b3477; waits for key setup, then device check. |
+| C278 | `pb recordings stop` | Stop the recording of the terminal session you are attached to | [ ] | [ ] | [ ] | 6eb0b3477; waits for key setup, then device check. |
+
 ## P. Performance (PLAN 3b)
 
 | ID | Scenario | L | M | W | Evidence |
