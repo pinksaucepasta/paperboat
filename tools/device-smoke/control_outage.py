@@ -12,7 +12,8 @@ Checks (every one is a line in the result JSON; the drill exits 1 on any FAIL):
   baseline   exec a->b and b->a work; r is refused after it signed out (a revoked machine stays refused)
   outage     a long exec each way started before the stop is still running; new exec a->b and b->a, new
              `pb ssh` a->b, start from the access rules the host holds at 30 s, 5 min and the end of the outage;
-             r is still refused; pb status shows the control-plane health item
+             r is still refused; pb status shows "Control plane is unavailable" (the staging stack has no relay, so a
+             "No relay is usable" warning is present throughout and is not part of the check)
   recovery   pb status is healthy again, both long execs finished rc 0 with their output, new exec works,
              r is still refused
 TOKEN_CMD prints one enrollment token on stdout for the machine name given as its last argument.
@@ -106,12 +107,12 @@ def eventually(fn, seconds, every=5):
 
 def health_has_outage(host):
     rc, out = in_ct(host, NAMES["a"], f"{PB} status", 60)
-    return "Health:" in out and "Paperboat" in out, out.strip()[:300]
+    return "Control plane is unavailable" in out, out.strip()[:300]
 
 
 def status_healthy(host):
     rc, out = in_ct(host, NAMES["a"], f"{PB} status", 60)
-    return rc == 0 and "Health:" not in out.split("\n\n")[0], out.strip()[:300]
+    return rc == 0 and "Control plane is unavailable" not in out and "Daemon: ready" in out, out.strip()[:300]
 
 
 def drill(args):
@@ -130,7 +131,7 @@ def drill(args):
     long_seconds = args.outage_seconds + 120
     for src, dst in (("a", "b"), ("b", "a")):
         tag = f"long-{src}{dst}"
-        in_ct(host, NAMES[src], f"rm -f /tmp/{tag}.out /tmp/{tag}.rc; nohup sh -c '{PB} exec {NAMES[dst]} -- sh -c \"sleep {long_seconds}; echo {tag}-done\" > /tmp/{tag}.out 2>&1; echo $? > /tmp/{tag}.rc' >/dev/null 2>&1 &", 30)
+        in_ct(host, NAMES[src], f"rm -f /tmp/{tag}.out /tmp/{tag}.rc; nohup sh -c '{PB} exec {NAMES[dst]} -- sh -c \"sleep {long_seconds}; echo {tag}-done\" < /dev/null > /tmp/{tag}.out 2>&1; echo $? > /tmp/{tag}.rc' >/dev/null 2>&1 &", 30)
     time.sleep(15)
     # the outage
     stopped = time.time()
