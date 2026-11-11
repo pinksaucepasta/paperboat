@@ -213,11 +213,11 @@ func launchWindowsUninstallHelper(ctx context.Context, inboxPaths, userStatePath
 		processIDs = append(processIDs, parent)
 	}
 	now := time.Now().UTC()
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil {
 		return "", windowsUninstallLocalFailure(reference, err, errors.New("resolve Windows uninstall owner"))
 	}
-	profile, err := windows.GetCurrentProcessToken().GetUserProfileDirectory()
+	profile, err := windows.GetCurrentThreadEffectiveToken().GetUserProfileDirectory()
 	if err != nil {
 		return "", err
 	}
@@ -673,8 +673,8 @@ func readWindowsUninstallPlan(planPath string) (windowsUninstallPlan, error) {
 			return windowsUninstallPlan{}, errors.New("invalid protected Windows uninstall plan")
 		}
 	}
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
-	profile, profileErr := windows.GetCurrentProcessToken().GetUserProfileDirectory()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
+	profile, profileErr := windows.GetCurrentThreadEffectiveToken().GetUserProfileDirectory()
 	if err != nil || profileErr != nil || user == nil || user.User.Sid == nil || plan.OwnerSID != user.User.Sid.String() || !strings.EqualFold(filepath.Clean(plan.OwnerProfile), filepath.Clean(profile)) || len(plan.UserStatePaths) == 0 || len(plan.UserStatePaths) > 32 {
 		return windowsUninstallPlan{}, errors.New("Windows uninstall user ownership could not be proven")
 	}
@@ -833,7 +833,7 @@ func readProtectedWindowsUninstallFile(path, message string) (encoded []byte, re
 }
 
 func uninstallWindowsSDDLDetailed() (string, error) {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil {
 		return "", windowsUninstallLocalFailure("", err)
 	}

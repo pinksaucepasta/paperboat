@@ -18,7 +18,7 @@ func privateRepositoryCredentialDirectory(path string, info os.FileInfo) bool {
 	if err != nil || attrs&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		return false
 	}
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return false
 	}
@@ -32,7 +32,7 @@ func privateRepositoryCredentialDirectory(path string, info os.FileInfo) bool {
 }
 
 func protectRepositoryCredentialDirectory(path string, _ os.FileInfo) error {
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return err
 	}
@@ -88,7 +88,7 @@ func repositoryReferencePathMatches(path, resolved string) bool {
 // Set the current user owner and protected ACL in CreateDirectory itself; an
 // existing directory still passes the strict owner guard before protection.
 func createRepositoryCredentialDirectory(path string) error {
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return err
 	}

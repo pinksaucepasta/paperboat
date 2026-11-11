@@ -16,7 +16,7 @@ func CreateSourceFile(path string) (*os.File, error) {
 	if !canonicalAbsolutePath(path) {
 		return nil, ErrSourceConfigInvalid
 	}
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil || !user.User.Sid.IsValid() {
 		return nil, ErrSourceConfigInvalid
 	}

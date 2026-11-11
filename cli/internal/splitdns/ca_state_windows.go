@@ -9,7 +9,7 @@ import (
 )
 
 func writeCAState(path string, data []byte, mode os.FileMode) error {
-	token := windows.GetCurrentProcessToken()
+	token := windows.GetCurrentThreadEffectiveToken()
 	user, err := token.GetTokenUser()
 	if err != nil {
 		return err

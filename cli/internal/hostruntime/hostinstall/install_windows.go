@@ -540,7 +540,7 @@ func migrateLegacyWindowsRuntimeSecurity() (returnedConfig WindowsRuntimeConfig,
 	if err != nil {
 		return WindowsRuntimeConfig{}, hostInstallFailure("read legacy Windows runtime config", err)
 	}
-	caller, err := windows.GetCurrentProcessToken().GetTokenUser()
+	caller, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil {
 		return WindowsRuntimeConfig{}, hostInstallFailure("resolve Windows repair caller", err)
 	}
@@ -4390,7 +4390,7 @@ func repairWindowsTreeACL(root, ownerSID string) (resultErr error) {
 }
 func isAdministrator() bool { allowed, err := checkAdministrator(); return err == nil && allowed }
 func checkAdministrator() (allowed bool, resultErr error) {
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return false, err
 	}

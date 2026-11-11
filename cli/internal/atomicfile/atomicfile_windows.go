@@ -261,7 +261,7 @@ func createProtectedTemporary(parent, descriptor string) (*os.File, string, erro
 func DefaultSecurityDescriptor() (string, error) { return currentOwnerSecurityDescriptor() }
 
 func currentOwnerSecurityDescriptor() (descriptor string, resultErr error) {
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return "", err
 	}

@@ -17,7 +17,7 @@ func openTelemetryDescriptor(path string) (*os.File, error) {
 }
 
 func telemetrySecurityDescriptor() (*windows.SECURITY_DESCRIPTOR, error) {
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return nil, err
 	}

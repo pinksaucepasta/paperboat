@@ -140,7 +140,7 @@ func protectWindowsObject(name string, directory bool) (resultErr error) {
 	if attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		return ErrInvalid
 	}
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return err
 	}

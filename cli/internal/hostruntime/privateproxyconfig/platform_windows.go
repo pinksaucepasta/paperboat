@@ -40,7 +40,7 @@ func (currentUserRegistry) InteractiveUser(context.Context) (bool, error) {
 	if uint32(activeSession) == ^uint32(0) || processSession == 0 || processSession != uint32(activeSession) {
 		return false, nil
 	}
-	token := windows.GetCurrentProcessToken()
+	token := windows.GetCurrentThreadEffectiveToken()
 	user, err := token.GetTokenUser()
 	if err != nil {
 		return false, err
@@ -150,7 +150,7 @@ func validateProxyJournal(file *os.File, _ os.FileInfo) error {
 	if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		return errors.New("private proxy journal is a reparse point")
 	}
-	token := windows.GetCurrentProcessToken()
+	token := windows.GetCurrentThreadEffectiveToken()
 	user, err := token.GetTokenUser()
 	if err != nil {
 		return err

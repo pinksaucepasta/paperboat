@@ -139,7 +139,7 @@ func (b *Builder) writeAtomic(ctx context.Context, outputPath string, body []byt
 }
 
 func createProtectedWindowsTemporary(parent windows.Handle) (string, *os.File, error) {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil {
 		return "", nil, errors.Join(err, windows.ERROR_INVALID_OWNER)
 	}
