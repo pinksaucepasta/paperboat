@@ -182,6 +182,7 @@ func (m *DispatchManager) restoreAttempt(ctx context.Context, record BackgroundR
 // current lease so the dispatch is valid for the lease's present generation.
 func refreshedDispatch(stored DispatchRequest, current Lease) DispatchRequest {
 	request := stored
+	request.Target.HostHeader = current.Target.HostHeader // the server lease is the authority for the Host the origin gets
 	request.LeaseDeadline = current.LeaseDeadline.UTC()
 	request.UserDeadline = utcTimePointer(current.UserDeadline)
 	request.LeaseETag = current.ETag

@@ -1012,3 +1012,12 @@ func TestPreviewReadinessProgressFailureClosesCarrierAndKeepsCauses(t *testing.T
 		t.Fatalf("preview failure exposed private causes: %q", err.Error())
 	}
 }
+
+func TestFormatPreviewTargetShowsTheHostHeader(t *testing.T) {
+	if got := formatPreviewTarget(preview.LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000", HostHeader: "app.example.test"}); got != "http://127.0.0.1:3000 (Host: app.example.test)" {
+		t.Fatalf("target with a host header = %q", got)
+	}
+	if got := formatPreviewTarget(preview.LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}); got != "http://127.0.0.1:3000" {
+		t.Fatalf("plain target = %q", got)
+	}
+}

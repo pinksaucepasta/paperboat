@@ -205,6 +205,7 @@ func (m *DispatchManager) ValidateNativePrivateTarget(binding nativeprivate.Bind
 		default:
 		}
 		lease := session.currentLease()
+		// The binding authorizes an origin address; the Host header the origin is sent is not part of that authority.
 		if lease.ID == binding.ResourceID && lease.Generation > 0 && uint64(lease.Generation) == binding.ResourceGeneration && lease.AccessMode == "private" && lease.Target.Scheme == binding.TargetScheme && lease.Target.Address == binding.TargetAddress && lease.LeaseDeadline.After(m.config.Now()) {
 			return nil
 		}
@@ -624,6 +625,7 @@ func (r DispatchRequest) canonicalHashInput(machineID string, now time.Time) ([]
 	r.OwnerSessionID = strings.TrimSpace(r.OwnerSessionID)
 	r.Target.Scheme = strings.ToLower(strings.TrimSpace(r.Target.Scheme))
 	r.Target.Address = strings.TrimSpace(r.Target.Address)
+	r.Target.HostHeader = strings.ToLower(strings.TrimSpace(r.Target.HostHeader)) // as the server hashes it
 	r.AccessMode = strings.ToLower(strings.TrimSpace(r.AccessMode))
 	r.Endpoint = strings.TrimSpace(r.Endpoint)
 	r.LeaseETag = strings.TrimSpace(r.LeaseETag)

@@ -702,6 +702,9 @@ func (c *DataCarrierPreviewCarrier) probeLazyHTTP(ctx context.Context, lease Lea
 		verification = "system"
 	}
 	route := hoststate.TunnelConfigRoute{ID: c.routeID, Protocol: "http", OriginScheme: lease.Target.Scheme, OriginAddress: lease.Target.Address, TLSVerification: verification, PreserveHost: false, ConnectTimeoutMs: int32(LazyOriginConnectTimeout / time.Millisecond), IdleTimeoutMs: 1000, DesiredState: "active"}
+	if lease.Target.HostHeader != "" { // probe with the Host the app will be sent
+		route.HostOverride = &lease.Target.HostHeader
+	}
 	transport := &tunnelmanager.OriginHTTPTransport{}
 	if c.dialer != nil {
 		transport.Dialer = previewBrowserDialer{carrier: c, target: lease.Target}
