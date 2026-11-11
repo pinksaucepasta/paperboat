@@ -63,7 +63,7 @@ def main():
         return 0
     host, container, user = sys.argv[1:4]
     exec_in = 'ssh %s docker exec -i -u %s -e HOME=/home/%s -w /tmp/pbts %s ' % (host, user, user, container)
-    tarball = subprocess.run(['tar', 'czf', '-', '-C', str(HERE), 'teammate_login.py', 'teammate_profile.py'], capture_output=True, check=True).stdout
+    tarball = subprocess.run(['tar', 'czf', '-', '-C', str(HERE), 'teammate_login.py', 'teammate_profile.py', 'winhost.py'], capture_output=True, check=True).stdout
     stage = 'sh -c ' + shlex.quote('rm -rf /tmp/pbts && mkdir /tmp/pbts && tar xzf - -C /tmp/pbts')
     subprocess.run(exec_in.replace('-w /tmp/pbts ', '') + shlex.quote(stage), shell=True, input=tarball, check=True)
     login = shlex.quote('sh -c ' + shlex.quote('XDG_RUNTIME_DIR=/run/user/$(id -u) python3 teammate_login.py'))

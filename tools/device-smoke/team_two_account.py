@@ -21,6 +21,7 @@ import time
 import winhost
 
 PB = '~/.local/bin/pb'
+UNKNOWN_MACHINE = 'machine_00000000-0000-4000-8000-000000000000'
 
 
 class Failure(Exception):
@@ -44,8 +45,9 @@ def main():
     parser.add_argument('--machine', required=True, help='owner machine id to share into the team')
     parser.add_argument('--member-cmd', required=True)
     parser.add_argument('--member-machine', default='', help='member machine id for the approval/transfer/remove flow')
+    parser.add_argument('--member-pb', default=PB, help='the member side pb command (member_machine_fixture.sh makes /home/pbt/pbm: pb as the member profile)')
     parser.add_argument('--suspend-cmd', default='', help='command that takes SQL on stdin and runs it on the server database')
-    parser.add_argument('--skip', default='', help='comma separated sections to skip: share,approval,resources,suspension,transfer')
+    parser.add_argument('--skip', default='', help='comma separated sections to skip: share,approval,approval_rows,resources,suspension,transfer')
     args = parser.parse_args()
     skip = set(filter(None, args.skip.split(',')))
     team, machine = args.team, args.machine
@@ -60,7 +62,7 @@ def main():
     def member_raw(*arguments, timeout=120):
         if winhost.is_side(args.member_cmd):
             return side(args.member_cmd, arguments, timeout)
-        command = ' '.join([PB] + [shlex.quote(a) for a in arguments])
+        command = ' '.join([args.member_pb] + [shlex.quote(a) for a in arguments])
         # ssh joins its arguments into one remote shell line, so the bash -lc script must be quoted for it.
         script = shlex.quote(command) if member_prefix[0] == 'ssh' else command
         return run(member_prefix + ['bash', '-lc', script], timeout)
@@ -163,6 +165,130 @@ def main():
         owner('team', 'machine', 'decline', team, mm, '--generation', generation())
         if any(m['machine_id'] == mm and m['active'] for m in owner('team', 'get', team).get('machines', [])):
             raise Failure('a declined machine is active in the team')
+
+    def approval_rows():
+        """C282-C285, one named result each, on the member's machine mm and the team's approve-new-machines rule."""
+        if not args.member_machine:
+            raise Failure('--member-machine is required for the approval rows')
+        mm = args.member_machine
+        first_state = owner('team', 'get', team).get('approve_new_machines')
+
+        def member_gen():
+            return str(member('team', 'get', team)['generation'])
+
+        def set_rule(value):
+            code, out, err = owner_raw('team', 'machine', 'approval', team, value)
+            if code != 0:
+                raise Failure(f'approval {value}: {(out or err)[:200]}')
+
+        def rule():
+            return owner('team', 'get', team).get('approve_new_machines')
+
+        def requests(who):
+            value = (owner if who == 'owner' else member)('team', 'machine', 'requests', team)
+            return value if isinstance(value, list) else value.get('requests', [])
+
+        def mine(who, state=None):
+            return [r for r in requests(who) if r.get('machine_id') == mm and (state is None or r.get('state') == state)]
+
+        def active():
+            return any(m['machine_id'] == mm and m['active'] for m in owner('team', 'get', team).get('machines', []))
+
+        def withdraw():
+            """The member's machine out of the team and out of the request list, whatever state it is in."""
+            member_raw('team', 'machine', 'unshare', team, mm, '--generation', member_gen(), '--json')
+
+        def request():
+            withdraw()
+            member('team', 'machine', 'share', team, mm, '--generation', member_gen())
+
+        def need_refused(who, *arguments):
+            if refused(who, *arguments) == '':
+                raise Failure(f'{who} {" ".join(arguments)} was refused without an error code')
+
+        def until_settled(function):
+            """The shared team's generation moves when anyone else changes it: a row starts clean, so it may run again."""
+            for attempt in range(4):
+                try:
+                    return function()
+                except Failure as error:
+                    if 'team_changed' not in str(error) or attempt == 3:
+                        raise
+                    time.sleep(2)
+
+        def row_c282():
+            set_rule('off')
+            if rule() is not False:
+                raise Failure('approval off did not show approve_new_machines=false')
+            withdraw()
+            member('team', 'machine', 'share', team, mm, '--generation', member_gen())
+            if not active() or mine('owner', 'pending'):
+                raise Failure('with approval off a member machine did not join at once')
+            withdraw()
+            set_rule('on')
+            if rule() is not True:
+                raise Failure('approval on did not show approve_new_machines=true')
+            member('team', 'machine', 'share', team, mm, '--generation', member_gen())
+            if active() or not mine('owner', 'pending'):
+                raise Failure('with approval on a member machine joined without an owner or admin')
+            code = parse(*owner_raw('team', 'machine', 'approval', team, 'maybe'))[0]
+            if code == 0:
+                raise Failure('approval accepted a value that is not on or off')
+            code = parse(*member_raw('team', 'machine', 'approval', team, 'off'))[0]
+            if code == 0 or rule() is not True:
+                raise Failure('a plain member switched the approval rule')
+            withdraw()
+
+        def row_c285():
+            withdraw()
+            if mine('owner'):
+                raise Failure('precondition: the machine is already in the request list')
+            request()
+            listed = mine('owner', 'pending')
+            if len(listed) != 1 or listed[0].get('requested_by') != member_id or not listed[0].get('alias'):
+                raise Failure(f'owner request list: {listed}')
+            if not mine('member', 'pending'):
+                raise Failure('the member does not see their own pending request')
+            owner('team', 'machine', 'approve', team, mm, '--generation', generation())
+            if mine('owner', 'pending'):
+                raise Failure('an approved request is still listed as pending')
+            withdraw()
+
+        def row_c283():
+            request()
+            need_refused('member', 'team', 'machine', 'approve', team, mm, '--generation', member_gen())
+            need_refused('owner', 'team', 'machine', 'approve', team, UNKNOWN_MACHINE, '--generation', generation())
+            owner('team', 'machine', 'approve', team, mm, '--generation', generation())
+            if not active():
+                raise Failure('an approved machine is not active in the team')
+            need_refused('owner', 'team', 'machine', 'approve', team, mm, '--generation', generation())
+            withdraw()
+
+        def row_c284():
+            request()
+            need_refused('member', 'team', 'machine', 'decline', team, mm, '--generation', member_gen())
+            need_refused('owner', 'team', 'machine', 'decline', team, UNKNOWN_MACHINE, '--generation', generation())
+            owner('team', 'machine', 'decline', team, mm, '--generation', generation())
+            if active() or mine('owner', 'pending'):
+                raise Failure('a declined machine is active or still pending')
+            if not mine('member', 'declined'):
+                raise Failure('the member does not see their declined request')
+            # a declined request stays for its owner to read (declining again is a no-op); an accepted machine has none left
+            request()
+            owner('team', 'machine', 'approve', team, mm, '--generation', generation())
+            need_refused('owner', 'team', 'machine', 'decline', team, mm, '--generation', generation())
+            withdraw()
+
+        try:
+            for name, function in (('C282 team machine approval on/off, refusals', row_c282), ('C285 team machine requests lists who asked', row_c285),
+                                   ('C283 team machine approve, refusals', row_c283), ('C284 team machine decline, refusals', row_c284)):
+                check(name, lambda function=function: until_settled(function))
+        finally:
+            try:
+                withdraw()
+            finally:
+                if rule() is not first_state:
+                    set_rule('on' if first_state else 'off')
 
     def transfer_and_remove():
         """Destroys the member's machine (its CLI credentials end with it): run last."""
@@ -303,6 +429,8 @@ def main():
             check('F12-04 share, grant, revoke, unshare (member view exact)', machine_sharing)
         if 'approval' not in skip:
             check('F12-04 member-shared machine waits for approval; approve; decline', member_machine_flow)
+        if 'approval_rows' not in skip:
+            approval_rows()
         if 'resources' not in skip:
             check('F12-05 attach tunnel, explicit grant, revoke, detach', resources)
         if 'resources' not in skip:
