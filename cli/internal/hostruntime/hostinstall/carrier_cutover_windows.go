@@ -77,8 +77,9 @@ func stageWindowsCarrierUpgrade(ctx context.Context, request Request) (*carrierU
 	return &carrierUpgrade{candidate: candidate, previous: retained, capability: append([]byte(nil), capability...)}, nil
 }
 
-// retireCarrierGeneration stops a non-active generation: a standby that never took the network, or one that
-// released it and is still exiting. It reports whether the process still runs. Repeating it is harmless.
+// retireCarrierGeneration disables a non-active generation (it must not start at boot or beside the new one) and
+// stops it: a standby that never took the network, or one that released it and is still exiting. It reports whether
+// the process still runs. Repeating it is harmless; starting the generation again enables it (WindowsController.Start).
 func retireCarrierGeneration(ctx context.Context, c CarrierConfig) (bool, error) {
 	installer, err := carrierInstallerPending(c)
 	if err != nil {
@@ -86,8 +87,16 @@ func retireCarrierGeneration(ctx context.Context, c CarrierConfig) (bool, error)
 	}
 	native := service.WindowsController{}
 	status, err := native.Inspect(ctx, installer.DefinitionPath())
-	if err != nil || !status.Running {
+	if err != nil {
 		return false, err
+	}
+	if status.Enabled {
+		if err := native.Disable(ctx, installer.DefinitionPath()); err != nil {
+			return status.Running, err
+		}
+	}
+	if !status.Running {
+		return false, nil
 	}
 	return false, native.Stop(ctx, installer.DefinitionPath())
 }

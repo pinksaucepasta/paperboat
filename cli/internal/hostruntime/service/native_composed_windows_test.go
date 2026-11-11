@@ -472,6 +472,25 @@ func TestNativeWindowsComposedLifecycle(t *testing.T) {
 	if err := updaterReady(context.Background()); err != nil {
 		t.Fatalf("updater readiness after stop/repair: %v", err)
 	}
+	// A retired generation is disabled (no start at boot) and stopped; starting it again, as a rollback to it does,
+	// enables it, as `systemctl enable --now` does.
+	controller := WindowsController{}
+	retired := hostd.DefinitionPath()
+	if err := controller.Disable(context.Background(), retired); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if err := controller.Stop(context.Background(), retired); err != nil {
+		t.Fatalf("stop disabled: %v", err)
+	}
+	if status, err := controller.Inspect(context.Background(), retired); err != nil || status.Enabled || status.Running {
+		t.Fatalf("disabled and stopped service reports %+v err=%v", status, err)
+	}
+	if err := controller.Start(context.Background(), retired); err != nil {
+		t.Fatalf("start of a disabled service: %v", err)
+	}
+	if status, err := controller.Inspect(context.Background(), retired); err != nil || !status.Enabled || !status.Running {
+		t.Fatalf("restarted service reports %+v err=%v", status, err)
+	}
 	nativeWindowsLifecycleOperation(t, "uninstall", manager.Uninstall)
 	installed = false
 	for _, name := range []string{hostdName, updaterName} {
