@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"html"
+	"regexp"
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -17,6 +18,9 @@ import (
 // row's version. A block mails the owning account once per version.
 func (s *Service) publicationAction(ctx context.Context, tx *db.Tx, target, reason string, block bool, input Input, out *Result) error {
 	host := strings.ToLower(strings.TrimSuffix(target, "."))
+	if !publicationHostPattern.MatchString(host) {
+		return ErrInvalid
+	}
 	var blocked, legal bool
 	var version int64
 	err := tx.QueryRow(ctx, `SELECT blocked,legal,version FROM publication_blocks WHERE hostname=$1 FOR UPDATE`, host).Scan(&blocked, &legal, &version)
@@ -54,6 +58,9 @@ func (s *Service) publicationAction(ctx context.Context, tx *db.Tx, target, reas
 	*out = Result{ResourceID: host, State: state, Version: version}
 	return nil
 }
+
+// publicationHostPattern is a DNS name: the host reaches a mail Subject and the edge snapshot, so no other character gets in.
+var publicationHostPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$`)
 
 // ownerAccountTx is the account serving hostname, or nil when no live preview or tunnel route holds it.
 func ownerAccountTx(ctx context.Context, tx *db.Tx, host string) any {

@@ -36,6 +36,9 @@ func TestPublicationBlockTakesDownRestoresAndMailsTheOwner(t *testing.T) {
 	if _, err := s.Execute(ctx, actor, "unblock-missing-"+x, "publication_unblock", host, "abuse_case", Input{Revision: 1}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unblocking a name never blocked: %v", err)
 	}
+	if _, err := s.Execute(ctx, actor, "block-bad-host-"+x, "publication_block", "bad host\r\nBcc: x", "abuse_case", Input{Revision: 1}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("malformed host: %v", err)
+	}
 	if _, err := s.Execute(ctx, actor, "block-stale-"+x, "publication_block", host, "abuse_case", Input{Revision: 2}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("first block with revision 2: %v", err)
 	}
@@ -63,5 +66,16 @@ func TestPublicationBlockTakesDownRestoresAndMailsTheOwner(t *testing.T) {
 	}
 	if err = store.SQL().QueryRowContext(ctx, `SELECT legal FROM paperboat.publication_blocks WHERE hostname=$1`, host).Scan(&legal); err != nil || legal {
 		t.Fatalf("a non-legal re-block kept legal=%v err=%v", legal, err)
+	}
+}
+
+func TestPublicationHostPatternRefusesAnythingButADNSName(t *testing.T) {
+	for _, bad := range []string{"", "a b.example.test", "a.example.test\r\nBcc: x@example.test", "-a.example.test", "a..example.test", "a_b.example.test", "a.example.test/x"} {
+		if publicationHostPattern.MatchString(bad) {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	if !publicationHostPattern.MatchString("phish-1.sub.example.test") {
+		t.Error("a normal host refused")
 	}
 }
