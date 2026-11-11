@@ -267,9 +267,13 @@ anvit), `init`, `up <image>`, `seed` (account `usr_staging`, a paid entitlement 
 the stored regional certificate is kept so Let's Encrypt duplicate limits are not hit), `status`, `logs`, `down`.
 Staging machines: containers `pb-stg-a` and `pb-stg-b` on anvit paired with a `pb` built with that `DefaultServerURL`.
 Staging never reads or writes prod data; it copies only the WorkOS client id/key and the Cloudflare DNS token from the
-prod env, in memory. Missing: a staging edge (the `pbh` ports 80, 443 and 27443-27446 are fixed and anvit's prod edge
-holds them), so previews, tunnels and `pb send` are not exercised on staging; and the `--stage` step of
-`gated-deploy.py`. Prior art: Google SRE canarying (stage, then a small prod slice, then all, with automatic rollback).
+prod env, in memory. `staging.py edge <tunnel image>` runs a staging edge as a plain container `pb-stg-edge` (no `pbh`, no firewall or nft
+change; the prod edge keeps 80/443/27443-27446): it registers the node the way a claim would (SQL, as
+`selfhost_tunnel_process_test.go` does), pins the account to a self-hosted-only pool, marks ingress verified by hand
+and listens on TCP 18445 (carrier). State on 2026-11-12: node ready and heartbeating, edge set assigned, machine
+carriers attached; `pb send` still fails after the file-transfer descriptor (cause not found yet). Limits by design:
+preview URLs never carry a port, so previews and tunnels cannot be served from a non-443 edge, and UDP (HTTP/3, QUIC)
+is closed on the host. `gated-deploy.py --stage` runs `deploy/staging-canary.sh` (exec both ways + ssh) first. Prior art: Google SRE canarying (stage, then a small prod slice, then all, with automatic rollback).
 
 ## Edge failover
 
