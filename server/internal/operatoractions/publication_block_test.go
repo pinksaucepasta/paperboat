@@ -32,7 +32,7 @@ func TestPublicationBlockTakesDownRestoresAndMailsTheOwner(t *testing.T) {
 		_, _ = store.SQL().ExecContext(ctx, `DELETE FROM paperboat.transactional_mail_outbox WHERE mail_id LIKE $1`, "publication-blocked:"+host+":%")
 	})
 	s := NewService(store)
-	s.ConfigureMail(config.TransactionalMail{From: "abuse@example.test"}, true)
+	s.ConfigureMail(config.TransactionalMail{From: "notices@example.test", AbuseMailbox: "abuse@mail.example.test"}, true)
 	if _, err := s.Execute(ctx, actor, "unblock-missing-"+x, "publication_unblock", host, "abuse_case", Input{Revision: 1}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unblocking a name never blocked: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestPublicationBlockTakesDownRestoresAndMailsTheOwner(t *testing.T) {
 		t.Fatalf("re-block=%#v err=%v", again, err)
 	}
 	var mails int
-	if err = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.transactional_mail_outbox WHERE mail_id=$1 AND payload->'to'->>0=$2`, "publication-blocked:"+host+":3", owner+"@test.invalid").Scan(&mails); err != nil || mails != 1 {
+	if err = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.transactional_mail_outbox WHERE mail_id=$1 AND payload->'to'->>0=$2 AND payload->>'html' LIKE '%write to abuse@mail.example.test%'`, "publication-blocked:"+host+":3", owner+"@test.invalid").Scan(&mails); err != nil || mails != 1 {
 		t.Fatalf("owner mails=%d err=%v", mails, err)
 	}
 	if err = store.SQL().QueryRowContext(ctx, `SELECT legal FROM paperboat.publication_blocks WHERE hostname=$1`, host).Scan(&legal); err != nil || legal {

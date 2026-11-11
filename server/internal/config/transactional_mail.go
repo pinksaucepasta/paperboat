@@ -15,6 +15,9 @@ type TransactionalMail struct {
 	// InvitationMailDedupSeconds: a new invitation to an address that already got one for the same
 	// team within this window sends no mail (pending or cancelled and re-created). Resend always mails.
 	InvitationMailDedupSeconds int64 `json:"invitation_mail_dedup_seconds"`
+	// AbuseMailbox is where abuse reports and takedown replies go: named in takedown mail, served to
+	// clients (the marketing abuse page) in /v1/client-configuration. Empty means none is published.
+	AbuseMailbox string `json:"abuse_mailbox"`
 }
 
 func (m TransactionalMail) Validate(key string) error {
@@ -23,6 +26,11 @@ func (m TransactionalMail) Validate(key string) error {
 	}
 	if m.InvitationMailDedupSeconds < 0 || m.InvitationMailDedupSeconds > int64(30*24*time.Hour/time.Second) {
 		return errors.New("mail invitation_mail_dedup_seconds must be between 0 and 2592000")
+	}
+	if m.AbuseMailbox != "" {
+		if address, err := mail.ParseAddress(m.AbuseMailbox); err != nil || address.Address != m.AbuseMailbox {
+			return errors.New("mail.abuse_mailbox must be one bare email address")
+		}
 	}
 	if key == "" {
 		return nil

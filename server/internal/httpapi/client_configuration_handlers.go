@@ -18,6 +18,8 @@ type clientConfigurationResponse struct {
 	Version               string `json:"version"`
 	CLIVerificationURL    string `json:"cli_verification_url"`
 	MachinesURL           string `json:"machines_url"`
+	// AbuseMailbox is where abuse is reported by email (the marketing abuse page shows it).
+	AbuseMailbox string `json:"abuse_mailbox,omitempty"`
 	// ControlRegions is the region map clients rank by measured latency (PLAN 3b).
 	ControlRegions []servernodes.Region `json:"control_regions"`
 }
@@ -34,6 +36,7 @@ func clientConfiguration(cfg config.Config, regions *servernodes.RegionCache) ht
 		RuntimeBaseDomain:     cfg.RuntimeBaseDomain,
 		CLIVerificationURL:    cfg.CLIAuth.VerificationURL,
 		MachinesURL:           cfg.CLIAuth.MachinesURL,
+		AbuseMailbox:          cfg.Mail.AbuseMailbox,
 	}
 	configurationErr := cfg.ValidateClientDiscovery()
 	return func(w http.ResponseWriter, r *http.Request) {

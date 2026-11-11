@@ -38,6 +38,7 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 	setString("PAPERBOAT_MAIL_ENDPOINT", &c.Mail.Endpoint)
 	setString("PAPERBOAT_MAIL_FROM", &c.Mail.From)
 	setString("PAPERBOAT_MAIL_CONSOLE_ORIGIN", &c.Mail.ConsoleOrigin)
+	setString("PAPERBOAT_MAIL_ABUSE_MAILBOX", &c.Mail.AbuseMailbox)
 	if v, ok := lookup("PAPERBOAT_INVITATION_LIFETIME_SECONDS"); ok {
 		n, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {

@@ -2368,6 +2368,11 @@
             "type": "string",
             "format": "uri"
           },
+          "abuse_mailbox": {
+            "type": "string",
+            "format": "email",
+            "description": "Where abuse is reported by email; absent when the server publishes none."
+          },
           "issuer": {
             "type": "string",
             "format": "uri"

@@ -55,6 +55,7 @@ func TestClientConfigurationPublishesConfiguredDomains(t *testing.T) {
 			cfg.Preview.BaseDomain = "public." + base
 			cfg.Tunnel.BaseDomain = "public." + base
 			cfg.RuntimeBaseDomain = "runtime." + base
+			cfg.Mail.AbuseMailbox = "abuse@mail." + base
 			w := httptest.NewRecorder()
 			clientConfiguration(cfg, nil).ServeHTTP(w, httptest.NewRequest("GET", "/v1/client-configuration", nil))
 			var response struct {
@@ -74,6 +75,7 @@ func TestClientConfigurationPublishesConfiguredDomains(t *testing.T) {
 				"preview_base_domain":      "public." + base,
 				"tunnel_base_domain":       "public." + base,
 				"runtime_base_domain":      "runtime." + base,
+				"abuse_mailbox":            "abuse@mail." + base,
 			} {
 				if response.Data[field] != want {
 					t.Errorf("%s=%q, want %q", field, response.Data[field], want)

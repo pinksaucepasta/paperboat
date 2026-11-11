@@ -79,10 +79,14 @@ WHERE b.hostname=$1 AND u.email_verified AND u.primary_email<>''`, host).Scan(&a
 	if err != nil {
 		return err
 	}
+	contact := "reply to this email"
+	if s.mail.AbuseMailbox != "" {
+		contact = "write to " + html.EscapeString(s.mail.AbuseMailbox)
+	}
 	message := transactionalmail.Message{
 		From: s.mail.From, To: []string{address}, Subject: "Paperboat: " + host + " was disabled",
-		HTML: fmt.Sprintf("<p>Paperboat disabled <b>%s</b> because it violated Paperboat's acceptable use policy. Visitors now see a notice instead of your app, and the address stays disabled.</p><p>Reference: %s. If you think this is a mistake, reply to this email with that reference.</p>",
-			html.EscapeString(host), html.EscapeString(reason)),
+		HTML: fmt.Sprintf("<p>Paperboat disabled <b>%s</b> because it violated Paperboat's acceptable use policy. Visitors now see a notice instead of your app, and the address stays disabled.</p><p>Reference: %s. If you think this is a mistake, %s with that reference.</p>",
+			html.EscapeString(host), html.EscapeString(reason), contact),
 	}
 	_, err = transactionalmail.EnqueueOnceTx(ctx, tx, fmt.Sprintf("publication-blocked:%s:%d", host, version), message)
 	return err
