@@ -277,8 +277,28 @@ func (c LaunchdController) Apply(ctx context.Context, path string, upgrading boo
 		if err := c.bootoutAndWait(operationCtx); err != nil {
 			return err
 		}
+	} else if err := c.bootoutOtherDomain(operationCtx); err != nil {
+		return err
 	}
 	return c.startJob(operationCtx, path, true, true)
+}
+
+// bootoutOtherDomain removes the job from the per-user domain this controller does not use: an agent bootstrapped
+// where a console login later made the other domain current would otherwise run twice, one copy unreachable by
+// start and restart. The chosen domain's own job is left alone (booting it out would cut its open streams).
+func (c LaunchdController) bootoutOtherDomain(ctx context.Context) error {
+	if !c.UserDomain {
+		return nil
+	}
+	chosen := c.domain() + "/"
+	for _, service := range c.servicesInAnyDomain() {
+		if !strings.HasPrefix(service, chosen) {
+			if err := c.bootoutService(ctx, service); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // startJob owns launchd's bootout/bootstrap reservation race for both install
