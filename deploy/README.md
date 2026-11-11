@@ -254,7 +254,7 @@ recovery line; both also go to `alerts.log`. Set the machines up with `tools/pro
 them on a `main` build (copy the binary to `/home/pbt/pb` in the container, `./pb install` as `pbt`).
 They are in the shared test account, protected from `cleanup_test_account.py`; never revoke them.
 **Account probe** (`tools/probe/account.py`, run by `canary.py --account` from `deploy/paperboat-canary-account.{service,timer}`
-every 10 minutes, not every minute: WorkOS rate-limits sign-ins and mails new-device alerts): a headless WorkOS password
+every hour, not every minute: WorkOS rate-limits sign-ins and mails new-device alerts): a headless WorkOS password
 sign-in to the console, an enrollment token minted with that session, the pair host (container `pb-canary-pair`, made with
 `CANARY_SERVER=<api> TOKEN_CMD= tools/probe/canary-setup.sh local pb-canary-pair canary-pair-1 <pb>`) joins as
 `canary-pair-<epoch>` and is seen online, the CLI session is revoked and a new `pb auth login` is approved by the browser
