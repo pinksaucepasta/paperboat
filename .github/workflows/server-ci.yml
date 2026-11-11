@@ -21,6 +21,7 @@ concurrency:
 jobs:
   server:
     name: Server checks
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     defaults:
@@ -45,12 +46,13 @@ jobs:
 
   modules:
     name: Vet and test ${{ matrix.module }}
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        module: [shared, cli, relay, tunnel, helper]
+        module: [shared, cli, relay, tunnel, helper, sdk/go]
     defaults:
       run:
         working-directory: ${{ matrix.module }}
@@ -80,6 +82,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml python3-cryptography
+      - run: python3 -m unittest discover -s tools -p test_pr_checks.py && python3 -m unittest discover -s tools -p test_push.py
       - run: python3 tools/check_domains.py && (cd tools && python3 -m unittest test_check_domains)
       - run: python3 tools/check_doc_links.py && (cd tools && python3 -m unittest test_check_doc_links)
       - run: cd tools && python3 -m unittest test_check_server_deployed
