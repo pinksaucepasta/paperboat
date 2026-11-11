@@ -65,8 +65,26 @@ func actionSSH(command *cobra.Command, args []string) error {
 		fmt.Fprintln(command.ErrOrStderr(), notice)
 	}
 	err = executeManagedSSH(command, ctx, machine, destination, args[1:], dash == 1, environment)
-	explainSSHFailure(command, machine, err, func() (*api.Client, error) { return sshClientFor(ctx, client) })
+	clientFor := func() (*api.Client, error) { return sshClientFor(ctx, client) }
+	if changed := changedSSHHostFailure(command.Context(), machine, err, clientFor); changed != nil {
+		return changed
+	}
+	explainSSHFailure(command, machine, err, clientFor)
 	return err
+}
+
+// changedSSHHostFailure is the refusal for a host key outside the active set when pb ran SSH itself (Windows
+// `pb ssh <machine> -- <command>`): that failure is ErrKnownHosts, not OpenSSH's exit 255, so it gets the same
+// trust-host answer pb ssh doctor gives. Any other failure returns nil.
+func changedSSHHostFailure(ctx context.Context, machine api.UserMachine, err error, clientFor func() (*api.Client, error)) error {
+	if !errors.Is(err, managedssh.ErrKnownHosts) {
+		return nil
+	}
+	client, clientErr := clientFor()
+	if clientErr != nil {
+		return nil
+	}
+	return pendingHostKeyFailure(ctx, client, machine, err)
 }
 
 // explainSSHFailure follows a failed OpenSSH connection (exit 255) with its reason. Only then is the server
