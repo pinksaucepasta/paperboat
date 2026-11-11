@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
@@ -497,41 +499,89 @@ func TestWindowsNativeSignedRollbackRecovery(t *testing.T) {
 }
 
 // hop-910 (winpool-6, 2026-11-11): a scheduled update left the host unavailable for 41 s. Maintenance and the update
-// gates were taken before the candidate's session owner and OpenSSH generation started (~19 s of refused work while
-// hostd still ran), and the same generation was prepared twice more after hostd stopped. The cutover now runs after
-// both preparations, and their one OpenSSH preparation is reported so the activation does not repeat it.
-func TestWindowsActivationPreparesCandidateBeforeCutover(t *testing.T) {
-	restoreOwner, restoreSSH, restoreCarrier := prepareCandidateSessionOwner, prepareCandidateSSHGeneration, activationCarrierPresent
-	t.Cleanup(func() {
-		prepareCandidateSessionOwner, prepareCandidateSSHGeneration, activationCarrierPresent = restoreOwner, restoreSSH, restoreCarrier
-	})
+// gates were taken before the candidate's session owner and OpenSSH generation started, the generation was prepared
+// three times, and the carrier was replaced in a second outage after the install (winpool-4: 10.5 s). The activation
+// that installWindows runs now prepares while hostd serves, cuts over, and replaces the carrier while the runtime is
+// stopped, before the roles start again.
+func TestWindowsActivationOrder(t *testing.T) {
 	var order []string
-	prepareCandidateSessionOwner = func(context.Context, Request, service.Layout) error {
-		order = append(order, "owner")
-		return nil
+	record := func(name string) func(context.Context) error {
+		return func(context.Context) error { order = append(order, name); return nil }
 	}
-	prepareCandidateSSHGeneration = func(context.Context, Request) error {
-		order = append(order, "ssh")
-		return nil
+	activation := func(carrier bool, cutover func(context.Context) error) windowsActivation {
+		return windowsActivation{
+			prepareOwner:   record("owner"),
+			carrierPresent: func(context.Context) (bool, error) { return carrier, nil },
+			prepareSSH: func(_ context.Context, attempts int) error {
+				order = append(order, fmt.Sprintf("ssh/%d", attempts))
+				return nil
+			},
+			cutover: cutover, stop: record("stop"), stage: record("stage"), carrier: record("carrier"), start: record("start"),
+		}
 	}
-	cutover := func(context.Context) error {
-		order = append(order, "cutover")
-		return nil
-	}
-	for _, carrier := range []bool{true, false} {
+	for _, test := range []struct {
+		carrier bool
+		want    string
+	}{
+		{true, "owner,ssh/2,cutover,stop,stage,carrier,start"},
+		// A cold machine has nothing serving to keep and no carrier for the generation until it creates one.
+		{false, "owner,cutover,stop,stage,carrier,ssh/1,start"},
+	} {
 		order = nil
-		activationCarrierPresent = func(context.Context, string) (bool, error) { return carrier, nil }
-		prepared, err := prepareWindowsActivation(context.Background(), Request{}, service.Layout{}, cutover)
-		want := "owner,cutover"
-		if carrier {
-			want = "owner,ssh,cutover"
-		}
-		if err != nil || prepared != carrier || strings.Join(order, ",") != want {
-			t.Fatalf("carrier=%v: order %v prepared %v err %v, want %s prepared %v", carrier, order, prepared, err, want, carrier)
+		if err := activation(test.carrier, record("cutover")).run(context.Background()); err != nil || strings.Join(order, ",") != test.want {
+			t.Fatalf("carrier=%v: order %v err %v, want %s", test.carrier, order, err, test.want)
 		}
 	}
+	order = nil
 	busy := errors.New("protected work")
-	if _, err := prepareWindowsActivation(context.Background(), Request{}, service.Layout{}, func(context.Context) error { return busy }); !errors.Is(err, busy) {
-		t.Fatalf("refused cutover error = %v", err)
+	err := activation(true, func(context.Context) error { order = append(order, "cutover"); return busy }).run(context.Background())
+	if !errors.Is(err, busy) || strings.Join(order, ",") != "owner,ssh/2,cutover" {
+		t.Fatalf("refused cutover: order %v err %v, want nothing stopped", order, err)
+	}
+}
+
+// The one OpenSSH preparation of an activation runs while hostd serves; a budget it outlives there is retried
+// (review of 7f4cc1054: the old post-stop repeats used to cover a transient expiry), and only the last one skipped.
+func TestWindowsSSHPreparationRetriesAnExpiredBudget(t *testing.T) {
+	budget, notice := windowsSSHPreparationBudget, windowsSSHTimeoutNotice
+	t.Cleanup(func() { windowsSSHPreparationBudget, windowsSSHTimeoutNotice = budget, notice })
+	windowsSSHPreparationBudget = 20 * time.Millisecond
+	notices := 0
+	windowsSSHTimeoutNotice = func(error) { notices++ }
+	expire := func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
+	calls := 0
+	err := prepareWindowsSSHWithinAttempts(context.Background(), 2, func(ctx context.Context) error {
+		calls++
+		if calls == 1 {
+			return expire(ctx)
+		}
+		return nil
+	})
+	if err != nil || calls != 2 || notices != 0 {
+		t.Fatalf("expired then prepared: err %v calls %d notices %d", err, calls, notices)
+	}
+	calls = 0
+	if err := prepareWindowsSSHWithinAttempts(context.Background(), 2, func(ctx context.Context) error { calls++; return expire(ctx) }); err != nil || calls != 2 || notices != 1 {
+		t.Fatalf("expired twice: err %v calls %d notices %d, want skipped once after 2 attempts", err, calls, notices)
+	}
+	refused := errors.New("untrusted sshd")
+	calls = 0
+	if err := prepareWindowsSSHWithinAttempts(context.Background(), 2, func(context.Context) error { calls++; return refused }); !errors.Is(err, refused) || calls != 1 {
+		t.Fatalf("refusal: err %v calls %d, want returned without retry", err, calls)
+	}
+}
+
+// A supplied install stops only the updater up front; hostd and the daemon serve until the cutover (hop-910: the old
+// up-front stop of every role was most of the 41-48 s `pb install` gap).
+func TestStopWindowsUpdaterStopsOnlyTheUpdater(t *testing.T) {
+	restore := stopWindowsServicesFor
+	t.Cleanup(func() { stopWindowsServicesFor = restore })
+	var stopped []string
+	stopWindowsServicesFor = func(_ context.Context, _ string, bases ...string) error {
+		stopped = append(stopped, bases...)
+		return nil
+	}
+	if err := StopWindowsUpdater(context.Background(), "S-1-5-21-111-222-333-1001"); err != nil || strings.Join(stopped, ",") != "PaperboatUpdated" {
+		t.Fatalf("stopped %v err %v, want only PaperboatUpdated", stopped, err)
 	}
 }

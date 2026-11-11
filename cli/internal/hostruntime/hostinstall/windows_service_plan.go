@@ -39,15 +39,26 @@ var windowsSSHTimeoutNotice = func(err error) {
 // SSH like any other unobtainable case. Only the expiry itself or an unobtainable package is skipped: a trust or ownership
 // refusal that arrives after the budget still aborts, as does an expiry of the caller's own context.
 func prepareWindowsSSHWithin(ctx context.Context, step func(context.Context) error) error {
-	bounded, cancel := context.WithTimeout(ctx, windowsSSHPreparationBudget)
-	defer cancel()
-	err := step(bounded)
-	if err != nil && ctx.Err() == nil && bounded.Err() != nil &&
-		(errors.Is(err, context.DeadlineExceeded) || windowsopenssh.Unobtainable(err)) {
-		windowsSSHTimeoutNotice(err)
-		return nil
+	return prepareWindowsSSHWithinAttempts(ctx, 1, step)
+}
+
+// prepareWindowsSSHWithinAttempts is prepareWindowsSSHWithin with up to attempts budgets: an attempt whose budget
+// expires is tried again, and only the last expiry is skipped.
+func prepareWindowsSSHWithinAttempts(ctx context.Context, attempts int, step func(context.Context) error) error {
+	for attempt := 1; ; attempt++ {
+		bounded, cancel := context.WithTimeout(ctx, windowsSSHPreparationBudget)
+		err := step(bounded)
+		expired := err != nil && ctx.Err() == nil && bounded.Err() != nil
+		cancel()
+		if expired && attempt < attempts {
+			continue
+		}
+		if expired && (errors.Is(err, context.DeadlineExceeded) || windowsopenssh.Unobtainable(err)) {
+			windowsSSHTimeoutNotice(err)
+			return nil
+		}
+		return skipUnobtainableWindowsSSH(ctx, err)
 	}
-	return skipUnobtainableWindowsSSH(ctx, err)
 }
 
 var standaloneVersionPattern = regexp.MustCompile(`^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]+$`)

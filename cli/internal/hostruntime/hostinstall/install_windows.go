@@ -62,9 +62,6 @@ var (
 	setupPaperboatSSH                   = windowsopenssh.Setup
 	isAdministratorForStandaloneInstall = isAdministrator
 	verifyStandaloneReleaseForInstall   = verifyStandaloneRelease
-	prepareCandidateSessionOwner        = prepareSessionOwner
-	prepareCandidateSSHGeneration       = prepareWindowsSSHGenerationIfObtainable
-	activationCarrierPresent            = windowsCarrierPresentForSSH
 	purgeStandaloneInstall              = func(context.Context) error { return nil }
 )
 
@@ -712,43 +709,156 @@ func installWindows(ctx context.Context, request Request, lifecycleOwned bool, c
 	if _, err := ensureWindowsPinnedRuntimeFrom(ctx, layout, request.Source, request.OwnerSID, request.Executable); err != nil {
 		return err
 	}
-	sshPrepared, err := prepareWindowsActivation(ctx, request, layout, cutover)
+	tokenPath, _ := WindowsInstanceTokenPath(instance)
+	var restoreConfigWorker func() error
+	defer func() {
+		if restoreConfigWorker != nil {
+			if err := restoreConfigWorker(); err != nil {
+				resultErr = errors.Join(resultErr, hostInstallFailure("restore config worker after activation", err))
+			}
+		}
+	}()
+	var pinned string
+	activation := windowsActivation{
+		prepareOwner:   func(ctx context.Context) error { return prepareSessionOwner(ctx, request, layout) },
+		carrierPresent: func(ctx context.Context) (bool, error) { return windowsCarrierPresentForSSH(ctx, instance) },
+		prepareSSH: func(ctx context.Context, attempts int) error {
+			return prepareWindowsSSHWithinAttempts(ctx, attempts, func(bounded context.Context) error {
+				_, err := PrepareWindowsSSHGeneration(bounded, request)
+				return err
+			})
+		},
+		cutover: cutover,
+		stop: func(ctx context.Context) (err error) {
+			restoreConfigWorker, err = stopWindowsRuntimeForActivation(ctx, request, layout)
+			return err
+		},
+		stage: func(ctx context.Context) error {
+			runtimeCurrent, runtimeRollback, _ := windowsRuntimePaths(layout)
+			if err := runWindowsInstallPhase(ctx, "stage verified Paperboat runtime", func() error {
+				return stageWindowsBinary(ctx, request.Executable, runtimeCurrent, runtimeRollback, request.Source, request.OwnerSID, nil)
+			}); err != nil {
+				return err
+			}
+			if err := runWindowsInstallPhase(ctx, "prepare Paperboat host token", func() error { return ensureWindowsTokenAt(tokenPath, request.OwnerSID) }); err != nil {
+				return err
+			}
+			var err error
+			pinned, err = ensureWindowsPinnedRuntime(ctx, layout, request.Source, request.OwnerSID)
+			return err
+		},
+		carrier: func(ctx context.Context) error {
+			return runWindowsInstallPhase(ctx, "activate Paperboat carrier", func() error { return activateWindowsCarrier(ctx, request, layout, pinned) })
+		},
+		start: func(ctx context.Context) error {
+			request.Artifact.Version = request.Source.Version
+			generation, err := sourceGeneration(request.Source)
+			if err != nil {
+				return err
+			}
+			config := WindowsRuntimeConfig{SessionOwnerGeneration: generation, Schema: windowsConfigSchema, Instance: instance, OwnerSID: request.OwnerSID, User: request.User, StateRoot: request.StateRoot, Workspace: request.WorkspaceRoot, ControlURL: request.ControlURL, ListenAddress: request.HelperListenAddress, MachineID: request.UserMachineID, EnrollmentPending: request.EnrollmentPending, TokenFile: tokenPath, InstalledAt: time.Now().UTC(), Artifact: request.Artifact, Source: request.Source, RollbackSource: rollbackSource, RollbackSigned: request.RollbackIdentity != nil && request.RollbackIdentity.Signed}
+			if err := runWindowsInstallPhase(ctx, "write Paperboat runtime configuration", func() error { return writeWindowsConfigAt(config, instanceRoot) }); err != nil {
+				return err
+			}
+			// Activation deliberately stopped both services before rotating the runtime
+			// slot. Re-apply their SCM definitions so the newly staged image is started;
+			// UpgradeReload would treat existing declarations as stable and leave the
+			// services stopped.
+			return runWindowsInstallPhase(ctx, "install Paperboat Windows services", func() error {
+				return installWindowsRoleServices(ctx, request, layout, "")
+			})
+		},
+	}
+	return activation.run(ctx)
+}
+
+// windowsActivation is the order of a Windows runtime activation. Everything before cutover leaves the serving
+// runtime untouched (the candidate's session owner and OpenSSH generation start while hostd answers); cutover takes
+// maintenance and the update gates; from stop to start the host does not answer, so the carrier is replaced inside
+// that window too and an update costs one outage. Linux keeps the same order (install_unix.go prepareCutover).
+type windowsActivation struct {
+	prepareOwner   func(context.Context) error
+	carrierPresent func(context.Context) (bool, error)
+	prepareSSH     func(ctx context.Context, attempts int) error
+	cutover        func(context.Context) error // nil: nothing serves that needs a drain
+	stop           func(context.Context) error
+	stage          func(context.Context) error
+	carrier        func(context.Context) error
+	start          func(context.Context) error
+}
+
+// windowsSSHPreparationAttempts bounds the OpenSSH preparation that runs while hostd still serves: a budget expiry
+// there gets one more attempt, at no cost to availability, before the activation continues without managed SSH.
+const windowsSSHPreparationAttempts = 2
+
+func (a windowsActivation) run(ctx context.Context) error {
+	if err := a.prepareOwner(ctx); err != nil {
+		return err
+	}
+	// The candidate's OpenSSH generation needs a carrier: prepared while hostd serves when one exists, otherwise
+	// once the cold carrier below exists, with one attempt (pairing has a bounded elevated bridge).
+	present, err := a.carrierPresent(ctx)
 	if err != nil {
 		return err
 	}
+	if present {
+		if err := a.prepareSSH(ctx, windowsSSHPreparationAttempts); err != nil {
+			return err
+		}
+	}
+	if a.cutover != nil {
+		if err := a.cutover(ctx); err != nil {
+			return err
+		}
+	}
+	for _, step := range []func(context.Context) error{a.stop, a.stage, a.carrier} {
+		if err := step(ctx); err != nil {
+			return err
+		}
+	}
+	if !present {
+		if err := a.prepareSSH(ctx, 1); err != nil {
+			return err
+		}
+	}
+	return a.start(ctx)
+}
+
+// stopWindowsRuntimeForActivation stops what runs the installed slot. The returned restore starts a config worker
+// that was running again; it is nil when there is none.
+func stopWindowsRuntimeForActivation(ctx context.Context, request Request, layout service.Layout) (func() error, error) {
 	// The optional config worker uses the same executable slots. Preserve its
 	// prior running state while releasing its owner-scoped SCM job before rotation.
 	configDefinition, err := windowsConfigServiceDefinitionForLayout(layout)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	configInstaller, err := service.NewPending(configDefinition)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	configController := service.WindowsController{}
 	configState, err := configController.Inspect(ctx, configInstaller.DefinitionPath())
 	if err != nil {
-		return hostInstallFailure("inspect config worker before activation", err)
+		return nil, hostInstallFailure("inspect config worker before activation", err)
 	}
+	var restore func() error
 	if configState.Registered {
 		if configState.Running {
-			defer func() {
+			restore = func() error {
 				restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 				defer cancel()
-				if err := configController.Start(restoreCtx, configInstaller.DefinitionPath()); err != nil {
-					resultErr = errors.Join(resultErr, hostInstallFailure("restore config worker after activation", err))
-				}
-			}()
+				return configController.Start(restoreCtx, configInstaller.DefinitionPath())
+			}
 		}
 		if err := runWindowsInstallPhase(ctx, "stop config worker for activation", func() error {
 			return configController.Stop(ctx, configInstaller.DefinitionPath())
 		}); err != nil {
-			return err
+			return restore, err
 		}
 	}
-	if err := runWindowsInstallPhase(ctx, "stop Paperboat Windows services for activation", func() error { return stopWindowsRuntimeServices(ctx, instance) }); err != nil {
-		return err
+	if err := runWindowsInstallPhase(ctx, "stop Paperboat Windows services for activation", func() error { return stopWindowsRuntimeServices(ctx, layout.Instance) }); err != nil {
+		return restore, err
 	}
 	// Client has no SSH capability, but PaperboatSshd can hold the current
 	// runtime open. Release that service before slot rotation; defer its slower
@@ -756,32 +866,24 @@ func installWindows(ctx context.Context, request Request, lifecycleOwned bool, c
 	// ownership-checked graceful stop must precede orphan cleanup because the
 	// stale-process matcher also recognizes the SSH service wrapper.
 	if err := runWindowsInstallPhase(ctx, "release Paperboat OpenSSH service for activation", func() error { return removeWindowsSSHBeforeActivation(ctx, request, layout) }); err != nil {
-		return err
+		return restore, err
 	}
 	// Service stop only waits for SCM-owned parents. A previous hostd worker or
 	// SSH child can outlive its parent after an interrupted activation and keep
 	// a runtime listener occupied, causing the fresh owner workload to exit.
 	// The elevated activation process is staged under a temporary executable,
 	// so terminating the fixed pb.exe image cannot terminate this installer.
-	if err := runWindowsInstallPhase(ctx, "terminate stale Paperboat runtime processes", func() error { return terminateStaleWindowsRuntimeProcesses(ctx, layout.Binary) }); err != nil {
-		return err
-	}
-	runtimeCurrent, runtimeRollback, _ := windowsRuntimePaths(layout)
-	if err := runWindowsInstallPhase(ctx, "stage verified Paperboat runtime", func() error {
-		return stageWindowsBinary(ctx, request.Executable, runtimeCurrent, runtimeRollback, request.Source, request.OwnerSID, nil)
-	}); err != nil {
-		return err
-	}
-	tokenPath, _ := WindowsInstanceTokenPath(instance)
-	if err := runWindowsInstallPhase(ctx, "prepare Paperboat host token", func() error { return ensureWindowsTokenAt(tokenPath, request.OwnerSID) }); err != nil {
-		return err
-	}
-	if _, err := ensureWindowsPinnedRuntime(ctx, layout, request.Source, request.OwnerSID); err != nil {
-		return err
-	}
-	// Disable original role declarations before the first carrier starts; a
-	// reboot during publication must not launch a second peer identity owner.
-	if carrier, err := readCarrierConfigFile(ctx, instance); installNotExistOnly(err) {
+	return restore, runWindowsInstallPhase(ctx, "terminate stale Paperboat runtime processes", func() error { return terminateStaleWindowsRuntimeProcesses(ctx, layout.Binary) })
+}
+
+// activateWindowsCarrier makes the carrier run the activated source. A cold machine gets its first carrier, with
+// the original role declarations disabled first: a reboot during publication must not launch a second peer
+// identity owner. An existing carrier of another source is replaced here, while the activation has the runtime
+// stopped, so an update costs one outage; one that still holds SSH connections stays, and the updater's reconcile
+// replaces it once idle.
+func activateWindowsCarrier(ctx context.Context, request Request, layout service.Layout, pinned string) error {
+	carrier, err := readCarrierConfigFile(ctx, layout.Instance)
+	if installNotExistOnly(err) {
 		roles, err := windowsColdRoleInstallers(layout)
 		if err != nil {
 			return err
@@ -791,40 +893,30 @@ func installWindows(ctx context.Context, request Request, lifecycleOwned bool, c
 				return err
 			}
 		}
-		if err := prepareCarrierLocked(ctx, request); err != nil {
-			return err
-		}
-	} else if err != nil {
-		return err
-	} else if err := EnsureExistingCarrier(ctx, carrier); err != nil {
-		return err
+		return prepareCarrierLocked(ctx, request)
 	}
-	// One OpenSSH preparation per activation: the generation runs from its own pin, so the stop, the stale-process
-	// sweep and the slot rotation above leave one prepared before the stop serving.
-	if !sshPrepared {
-		if err := prepareWindowsSSHGenerationIfObtainable(ctx, request); err != nil {
-			return err
-		}
-	}
-	request.Artifact.Version = request.Source.Version
-	generation, err := sourceGeneration(request.Source)
 	if err != nil {
 		return err
 	}
-	config := WindowsRuntimeConfig{SessionOwnerGeneration: generation, Schema: windowsConfigSchema, Instance: instance, OwnerSID: request.OwnerSID, User: request.User, StateRoot: request.StateRoot, Workspace: request.WorkspaceRoot, ControlURL: request.ControlURL, ListenAddress: request.HelperListenAddress, MachineID: request.UserMachineID, EnrollmentPending: request.EnrollmentPending, TokenFile: tokenPath, InstalledAt: time.Now().UTC(), Artifact: request.Artifact, Source: request.Source, RollbackSource: rollbackSource, RollbackSigned: request.RollbackIdentity != nil && request.RollbackIdentity.Signed}
-	if err := runWindowsInstallPhase(ctx, "write Paperboat runtime configuration", func() error { return writeWindowsConfigAt(config, instanceRoot) }); err != nil {
+	if err := EnsureExistingCarrier(ctx, carrier); err != nil {
 		return err
 	}
-	// Activation deliberately stopped both services before rotating the runtime
-	// slot. Re-apply their SCM definitions so the newly staged image is started;
-	// UpgradeReload would treat existing declarations as stable and leave the
-	// services stopped.
-	if err := runWindowsInstallPhase(ctx, "install Paperboat Windows services", func() error {
-		return installWindowsRoleServices(ctx, request, layout, "")
-	}); err != nil {
+	desired, replace, err := windowsCarrierFor(carrier, request.Source, pinned)
+	if err != nil || !replace {
 		return err
 	}
-	return nil
+	_, err = replaceWindowsCarrier(ctx, carrier, desired)
+	return err
+}
+
+// windowsCarrierFor is retained moved to source, run from its pin; replace is false when it already runs source.
+func windowsCarrierFor(retained CarrierConfig, source installsource.Source, pinned string) (CarrierConfig, bool, error) {
+	if retained.Source.SHA256 == source.SHA256 && retained.Source.Length == source.Length {
+		return retained, false, nil
+	}
+	desired := retained
+	desired.Source, desired.Executable = source, pinned
+	return desired, true, desired.Validate()
 }
 
 // installUnboundWindowsBinary installs only the administrator-approved bytes
@@ -1409,30 +1501,6 @@ func PrepareWindowsSSHGeneration(ctx context.Context, request Request) (windowso
 		return windowsopenssh.GenerationDescriptor{}, err
 	}
 	return windowsopenssh.PrepareGeneration(ctx, windowsopenssh.GenerationRequest{OwnerSID: request.OwnerSID, Source: request.Source, Executable: pinned})
-}
-
-// prepareWindowsActivation runs what an activation needs before it stops anything, then cutover. It reports
-// whether it prepared (or skipped as unobtainable) the candidate's OpenSSH generation, which needs the carrier,
-// so the activation does not prepare it again.
-func prepareWindowsActivation(ctx context.Context, request Request, layout service.Layout, cutover func(context.Context) error) (bool, error) {
-	if err := prepareCandidateSessionOwner(ctx, request, layout); err != nil {
-		return false, err
-	}
-	present, err := activationCarrierPresent(ctx, layout.Instance)
-	if err != nil {
-		return false, err
-	}
-	if present {
-		if err := prepareCandidateSSHGeneration(ctx, request); err != nil {
-			return false, err
-		}
-	}
-	if cutover != nil {
-		if err := cutover(ctx); err != nil {
-			return false, err
-		}
-	}
-	return present, nil
 }
 
 func windowsCarrierPresentForSSH(ctx context.Context, instance string) (bool, error) {

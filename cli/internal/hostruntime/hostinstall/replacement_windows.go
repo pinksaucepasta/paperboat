@@ -819,8 +819,10 @@ func StopWindowsUpdater(ctx context.Context, ownerSID string) error {
 	if err != nil {
 		return err
 	}
-	return stopWindowsServices(ctx, instance, "PaperboatUpdated")
+	return stopWindowsServicesFor(ctx, instance, "PaperboatUpdated")
 }
+
+var stopWindowsServicesFor = stopWindowsServices
 
 // CapturedWindowsSource projects a protected native baseline while candidate
 // runtime configuration is uncommitted; it never performs lifecycle recovery.

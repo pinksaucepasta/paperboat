@@ -559,21 +559,51 @@ func reconcileInstalledCarrier(ctx context.Context, instance string, pinReferenc
 			return err
 		}
 		mutated = true
-		if err := writeWindowsCarrierConfig(desired); err != nil {
-			return err
-		}
-		i, err := carrierInstaller(desired)
-		if err != nil {
-			return err
-		}
-		if err := i.Install(ctx); err != nil {
-			return err
-		}
-		if err := waitCarrierReady(ctx, desired); err != nil {
+		if err := startWindowsCarrier(ctx, desired); err != nil {
 			return err
 		}
 		return prepareWindowsSSHGenerationIfObtainable(ctx, request)
 	})
+}
+
+// replaceWindowsCarrier replaces retained by desired inside an activation that holds maintenance and the lifecycle
+// journal restoring retained on failure. While retained still holds SSH connections it stays, admitting SSH
+// again, and replaced is false.
+func replaceWindowsCarrier(ctx context.Context, retained, desired CarrierConfig) (replaced bool, resultErr error) {
+	capability, err := ReadCarrierCapability(ctx, retained)
+	if err != nil {
+		return false, err
+	}
+	defer clear(capability)
+	client, err := carriercontrol.NewClient(retained.ControlEndpoint, capability, retained.Source.SHA256)
+	if err != nil {
+		return false, err
+	}
+	if err := client.RetireSSH(ctx); errors.Is(err, carriercontrol.ErrBusy) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	if err := stopAndRemoveWindowsCarrier(ctx, retained); err != nil {
+		resume, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		return false, errors.Join(err, client.ResumeSSH(resume))
+	}
+	return true, startWindowsCarrier(ctx, desired)
+}
+
+func startWindowsCarrier(ctx context.Context, desired CarrierConfig) error {
+	if err := writeWindowsCarrierConfig(desired); err != nil {
+		return err
+	}
+	i, err := carrierInstaller(desired)
+	if err != nil {
+		return err
+	}
+	if err := i.Install(ctx); err != nil {
+		return err
+	}
+	return waitCarrierReady(ctx, desired)
 }
 
 func windowsCarrierInstallRequest(ctx context.Context, c WindowsRuntimeConfig) (Request, error) {
