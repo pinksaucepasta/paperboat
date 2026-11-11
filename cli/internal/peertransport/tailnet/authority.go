@@ -360,7 +360,7 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time, res
 		for _, scope := range p.Scopes {
 			scopes++
 			networkOnly := scope.ResourceKind == "machine_network" && scope.Capability == "connect" && b.AccountID == s.AccountID
-			validResource := networkOnly || peernetwork.ValidScope(scope.ResourceKind, scope.Capability)
+			validResource := networkOnly || scope.ResourceKind != "machine_network" && peernetwork.ValidScope(scope.ResourceKind, scope.Capability)
 			// Until-revoked scopes (expires_at 0, F21-01/F21-11): the network pair, a host's offline session rights
 			// (machine_access accept) and the mirror in a member's CLI document (machine_access dial, named by the
 			// host's endpoint id), whose generation is the deciding policy version.

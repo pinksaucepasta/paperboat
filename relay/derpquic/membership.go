@@ -3,6 +3,8 @@ package derpquic
 import (
 	"hash/maphash"
 	"sort"
+
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
 // Memberships let a grant authorize pairs without naming every peer (PLAN 3b "Relay pair authorization by
@@ -27,8 +29,7 @@ func keyOf(s Scope) membershipKey {
 
 // validScope is the shape every grant scope, per-peer or membership, must have.
 func validScope(s Scope) bool {
-	validResource := s.ResourceKind == "config_compare" && s.Capability == "config_compare" || s.ResourceKind == "machine_network" && s.Capability == "connect" || s.ResourceKind == "inspector" && s.Capability == "inspector" || s.ResourceKind == "machine_access" && (s.Capability == "terminal" || s.Capability == "exec" || s.Capability == "managed_ssh" || s.Capability == "file_transfer" || s.Capability == "private_access") || s.ResourceKind == "codex_session" && s.Capability == "codex"
-	return validResource && s.ResourceID != "" && len(s.ResourceID) <= 256 && s.ResourceGeneration != 0 && s.Port == 443 && (s.Direction == "dial" || s.Direction == "accept") && s.ExpiresAt > 0
+	return peernetwork.ValidScope(s.ResourceKind, s.Capability) && s.ResourceID != "" && len(s.ResourceID) <= 256 && s.ResourceGeneration != 0 && s.Port == 443 && (s.Direction == "dial" || s.Direction == "accept") && s.ExpiresAt > 0
 }
 
 // validMemberships checks a grant's memberships: valid scopes, bounded, no duplicate, and no per-peer list
