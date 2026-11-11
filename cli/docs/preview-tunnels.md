@@ -203,8 +203,19 @@ publishes at `/.well-known/jwks.json` on its API address, and check `aud` and
 Without the trusted-proxy line the proxy replaces the visitor's address with
 its own, so the app sees every visitor as one address; scheme and host still
 arrive. If the proxy's own port 80 redirects to HTTPS, point the route at the
-proxy's HTTPS port instead (`--to https://localhost:443`). Your origin does not
-need a public certificate: Paperboat holds the certificate for the public name.
+proxy's HTTPS port instead (`--to https://localhost:443`).
+
+Your origin does not need a public certificate: Paperboat holds the certificate
+for the public name. Behind a tunnel the origin cannot get one by HTTP-01 or
+TLS-ALPN-01 either, because Paperboat answers for the name (an ACME request for
+it gets a 404 that says so). Pick one:
+
+| Origin | Route |
+|---|---|
+| Plain HTTP (simplest) | `--to http://localhost:80` |
+| Caddy `tls internal` or another local certificate on the same machine | `--to https://localhost:443 --tls-verification insecure`. Do not pin it: Caddy renews its internal certificate every 12 hours with a new key |
+| A long-lived self-signed certificate (NAS, Proxmox, router) | `--tls-verification pinned` |
+| A real certificate from a DNS-01 challenge | the default verification |
 
 ## Custom domains, DNS, and TLS
 

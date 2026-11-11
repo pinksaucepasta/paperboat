@@ -72,9 +72,9 @@ func originCertificateHint(leaf *x509.Certificate, serverName string, now time.T
 	case chainErr == nil:
 		return ""
 	case strings.Contains(leaf.Issuer.CommonName, "Caddy Local Authority"):
-		return "it is Caddy's internal certificate (tls internal), renewed every few hours: use --tls-verification insecure for a local origin, --ca-reference with Caddy's root, or an http:// origin"
+		return "it is Caddy's internal certificate (tls internal), renewed every 12 hours with a new key, so do not pin it: use --tls-verification insecure for Caddy on this machine, an http:// origin, or a real certificate from a DNS-01 challenge (HTTP-01 and TLS-ALPN cannot work behind a tunnel)"
 	case leaf.Subject.CommonName == "TRAEFIK DEFAULT CERT":
-		return "Traefik answered with its default certificate, so it has no certificate for this name (its ACME cannot work behind Paperboat): point the route at Traefik's http entrypoint, or use --tls-verification insecure for a local origin"
+		return "Traefik answered with its default certificate, so it has no certificate for this name (HTTP-01 and TLS-ALPN cannot work behind a tunnel): point the route at Traefik's http entrypoint, use --tls-verification insecure for Traefik on this machine, or get a certificate with a DNS-01 challenge"
 	case now.After(leaf.NotAfter):
 		return "it expired on " + leaf.NotAfter.Format(time.DateOnly) + ": renew it on the origin, or pin the new one with --tls-verification pinned"
 	case leaf.VerifyHostname(serverName) != nil && len(leaf.DNSNames) > 0:
