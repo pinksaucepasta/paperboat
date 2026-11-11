@@ -99,3 +99,33 @@ func TestIngressAuthorityRefusesQuotaDeniedPreviewWithTypedReason(t *testing.T) 
 		t.Fatalf("preview stayed quota-denied after recovery: %v", err)
 	}
 }
+
+// A taken-down hostname is withheld with the typed takedown refusal (legal or not), wins over a quota
+// denial for the same name, and still counts as withheld for TLS.
+func TestIngressAuthorityRefusesBlockedHostname(t *testing.T) {
+	decision := ingressAuthorityTestDecision(time.Now().UTC())
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": []connectorprotocol.IngressDecision{},
+			"quota_denied": []connectorprotocol.IngressQuotaDenial{{RouteID: decision.Binding.RouteID, Hostname: decision.Binding.Hostname}},
+			"blocked":      []connectorprotocol.IngressBlock{{Hostname: decision.Binding.Hostname, Legal: true}, {Hostname: "other.customer.test"}}})
+	}))
+	defer server.Close()
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := &IngressAuthority{Client: client, NodeID: decision.EdgeNodeID, ProcessEpoch: decision.EdgeProcessEpoch}
+	rule := route.RouteRule{RouteID: decision.Binding.RouteID, Hostname: decision.Binding.Hostname}
+	var blocked connectorprotocol.PublicationBlockedError
+	if _, err := authority.Resolve(context.Background(), rule); !errors.As(err, &blocked) || !blocked.Legal || errors.Is(err, connectorprotocol.ErrIngressQuotaExhausted) {
+		t.Fatalf("blocked route: %v", err)
+	}
+	if !authority.QuotaDenied("other.customer.test") || authority.QuotaDenied("open.customer.test") {
+		t.Fatal("withheld set wrong for TLS")
+	}
+	other := rule
+	other.Hostname = "other.customer.test"
+	if _, err := authority.Resolve(context.Background(), other); !errors.As(err, &blocked) || blocked.Legal {
+		t.Fatalf("non-legal takedown: %v", err)
+	}
+}

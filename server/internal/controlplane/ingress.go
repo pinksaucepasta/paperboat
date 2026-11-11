@@ -7,7 +7,10 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/accountingauthority"
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"net/http"
+	"slices"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/ingressprojection"
 )
@@ -51,6 +54,11 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 		writeEdgeError(w, r, http.StatusServiceUnavailable, "control_unavailable", true, 1000, err)
 		return
 	}
+	blocked, err := withholdBlocked(r.Context(), s.store, &decisions, &denied)
+	if err != nil {
+		writeEdgeError(w, r, http.StatusServiceUnavailable, "control_unavailable", true, 1000, err)
+		return
+	}
 	w.Header().Set("Cache-Control", "no-store")
 	if len(denied) > 4096 {
 		denied = denied[:4096]
@@ -60,7 +68,7 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 	if s.http01 != nil {
 		responses = s.http01.ForEdge(input.NodeID)
 	}
-	version := wire.IngressVersion(decisions, denied, responses)
+	version := wire.IngressVersion(decisions, denied, blocked, responses)
 	if input.Version == version {
 		expires := make([]time.Time, len(decisions))
 		for i, d := range decisions {
@@ -69,7 +77,7 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 		writeEdgeJSON(w, http.StatusOK, map[string]any{"complete": true, "unchanged": true, "version": version, "issued_at": latestIssuedAt(decisions), "expires_at": expires})
 		return
 	}
-	snapshotBody := map[string]any{"complete": true, "version": version, "decisions": decisions, "quota_denied": denied}
+	snapshotBody := map[string]any{"complete": true, "version": version, "decisions": decisions, "quota_denied": denied, "blocked": blocked}
 	if s.http01 != nil {
 		snapshotBody["http01_responses"] = responses
 	}
@@ -110,4 +118,41 @@ func (s *EdgeService) ingressNodeState(ctx context.Context, nodeID string) (stri
 		return ingressNodeNotVerified, nil
 	}
 	return ingressNodeVerifiedEdge, nil
+}
+
+// withholdBlocked removes the decisions and quota denials of hostnames an operator took down
+// (publication_blocks) and returns those hostnames, so the edge answers the takedown page without
+// contacting the origin. A name is listed only when this edge has a decision or denial for it.
+func withholdBlocked(ctx context.Context, store *db.DB, decisions *[]wire.IngressDecision, denied *[]wire.IngressQuotaDenial) ([]wire.IngressBlock, error) {
+	names := make([]string, 0, len(*decisions)+len(*denied))
+	for _, d := range *decisions {
+		names = append(names, d.Binding.Hostname)
+	}
+	for _, d := range *denied {
+		names = append(names, d.Hostname)
+	}
+	blocked := []wire.IngressBlock{}
+	if len(names) == 0 {
+		return blocked, nil
+	}
+	rows, err := store.Pool().Query(ctx, `SELECT hostname, legal FROM publication_blocks WHERE blocked AND hostname = ANY($1::text[])`, names)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	taken := map[string]bool{}
+	for rows.Next() {
+		var b wire.IngressBlock
+		if err := rows.Scan(&b.Hostname, &b.Legal); err != nil {
+			return nil, err
+		}
+		taken[b.Hostname] = true
+		blocked = append(blocked, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	*decisions = slices.DeleteFunc(*decisions, func(d wire.IngressDecision) bool { return taken[d.Binding.Hostname] })
+	*denied = slices.DeleteFunc(*denied, func(d wire.IngressQuotaDenial) bool { return taken[d.Hostname] })
+	return blocked, nil
 }

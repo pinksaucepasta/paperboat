@@ -85,6 +85,9 @@ var operatorPolicies = map[string]operatorPolicy{
 	"POST /v1/admin/relays/{node_id}/resume":                                        {"operations", "node_id", ""},
 	"POST /v1/admin/tunnels/{tunnel_id}/disable":                                    {"operations", "tunnel_id", ""},
 	"POST /v1/admin/tunnels/{tunnel_id}/enable":                                     {"operations", "tunnel_id", ""},
+	"POST /v1/admin/publications/{hostname}/block":                                  {"operations", "hostname", ""},
+	"POST /v1/admin/publications/{hostname}/unblock":                                {"operations", "hostname", ""},
+	"GET /v1/admin/abuse-reports":                                                   {"operations", "", "abuse-reports"},
 	"GET /v1/admin/accounts/{account_id}":                                           {"support", "account_id", ""},
 	"GET /v1/admin/teams/{team_id}":                                                 {"support", "team_id", ""},
 	"GET /v1/admin/billing/workspaces/{workspace_id}":                               {"support", "workspace_id", ""},
@@ -375,6 +378,8 @@ func registerOperatorMutations(mux *http.ServeMux, opts Options) {
 			{"POST /v1/admin/relays/{node_id}/resume", "relay_resume", "node_id"},
 			{"POST /v1/admin/tunnels/{tunnel_id}/disable", "tunnel_disable", "tunnel_id"},
 			{"POST /v1/admin/tunnels/{tunnel_id}/enable", "tunnel_enable", "tunnel_id"},
+			{"POST /v1/admin/publications/{hostname}/block", "publication_block", "hostname"},
+			{"POST /v1/admin/publications/{hostname}/unblock", "publication_unblock", "hostname"},
 		} {
 			mux.Handle(route.pattern, operatorRoute(opts, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var input operatoractions.Input
@@ -389,6 +394,9 @@ func registerOperatorMutations(mux *http.ServeMux, opts Options) {
 				writeJSON(w, 200, SuccessResponse{Data: result})
 			})))
 		}
+	}
+	if opts.AbuseReports != nil {
+		mux.Handle("GET /v1/admin/abuse-reports", operatorRoute(opts, abuseReportList(opts.AbuseReports)))
 	}
 	if opts.OperatorBilling != nil {
 		mux.Handle("GET /v1/admin/billing/products", operatorRoute(opts, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

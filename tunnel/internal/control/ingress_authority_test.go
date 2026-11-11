@@ -288,7 +288,7 @@ func TestIngressAuthorityAsksForAVersionAndIdleBytesStaySmall(t *testing.T) {
 		if changed.Load() {
 			decisions = decisions[:199]
 		}
-		version := connectorprotocol.IngressVersion(decisions, nil, nil)
+		version := connectorprotocol.IngressVersion(decisions, nil, nil, nil)
 		body := map[string]any{"complete": true, "version": version, "decisions": decisions}
 		if in.Version == version {
 			expires := make([]time.Time, len(decisions))

@@ -328,7 +328,7 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first, second := wire.IngressVersion(decisions, nil, nil), wire.IngressVersion(again, nil, nil); len(decisions) == 0 || first != second {
+	if first, second := wire.IngressVersion(decisions, nil, nil, nil), wire.IngressVersion(again, nil, nil, nil); len(decisions) == 0 || first != second {
 		t.Fatalf("ingress version moved between idle pulls: %d decisions, %s then %s", len(decisions), first, second)
 	}
 	routesA, errA := control.CanonicalRouteSnapshot(f.ctx, f.node, f.edge.ProcessEpoch)

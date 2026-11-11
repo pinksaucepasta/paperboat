@@ -11,6 +11,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/ratelimit"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspacedomain"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/abusereports"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountdeletion"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountprefs"
 	"github.com/pinksaucepasta/paperboat/server/internal/activity"
@@ -78,6 +79,7 @@ type Options struct {
 	OperatorReporting        *operatorreporting.Service
 	OperatorHealth           *telemetry.HealthTracker
 	OperatorActions          *operatoractions.Service
+	AbuseReports             *abusereports.Service
 	OperatorBilling          *billing.OperatorService
 	Operator                 *operator.Service
 	OperatorAuth             *operatorauth.Service
@@ -704,6 +706,9 @@ func NewRouter(opts Options) http.Handler {
 		if opts.Auth != nil {
 			// Registered even without the secret (503 until it is set) so WorkOS reaches a handler, never a 404.
 			mux.HandleFunc("POST /v1/webhooks/workos/registration", workOSRegistrationAction(opts.Auth, opts.Config.Secrets.WorkOSActionsSecret, time.Now))
+		}
+		if opts.AbuseReports != nil {
+			mux.HandleFunc("POST /v1/abuse-reports", abuseReportSubmit(opts.AbuseReports, ratelimit.New(opts.Config.RateLimits.AbuseReportsPerMinute, opts.Config.RateLimits.AbuseReportsBurst, opts.Config.RateLimits.MaxClients)))
 		}
 		mux.HandleFunc("/", notFound)
 		handler = mux

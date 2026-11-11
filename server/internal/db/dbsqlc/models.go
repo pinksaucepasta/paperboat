@@ -12,6 +12,16 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AbuseReport struct {
+	ID            string
+	Hostname      string
+	Url           string
+	Reason        string
+	Details       string
+	ReporterEmail string
+	CreatedAt     time.Time
+}
+
 type AccountDeletionJob struct {
 	ID            string
 	UserID        string
@@ -2153,6 +2163,17 @@ type ProviderRouteCleanupOutbox struct {
 	PropagatedAt sql.NullTime
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+type PublicationBlock struct {
+	Hostname  string
+	Blocked   bool
+	Legal     bool
+	Reason    string
+	AccountID sql.NullString
+	Version   int64
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type RecordingKey struct {

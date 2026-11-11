@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/abusereports"
 	"github.com/pinksaucepasta/paperboat/server/internal/accessdescriptor"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountdeletion"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountprefs"
@@ -665,6 +666,9 @@ func New(opts Options) (*App, error) {
 	teamService.ConfigureMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
 	teamService.ConfigurePolicy(opts.Config.WorkspacePolicy)
 	workspaceBilling.ConfigureNotificationMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
+	operatorActions := operatoractions.NewService(store)
+	operatorActions.ConfigureMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
+	abuseReports := abusereports.New(store)
 	workspaceBilling.ConfigureTeamTrial(opts.Config.Billing.TeamTrialDays)
 	planlimits.Configure(opts.Config.Billing.Limits, consoleBillingURL(opts.Config.Mail.ConsoleOrigin))
 	planlimits.ConfigureSDKRates(opts.Config.RateLimits)
@@ -734,7 +738,8 @@ func New(opts Options) (*App, error) {
 		Operator:                 operatorService,
 		OperatorAuth:             &operatorauth.Service{Store: store, BootstrapEmail: opts.Config.OperatorBootstrapEmail},
 		OperatorHealth:           telemetryHealth,
-		OperatorActions:          operatoractions.NewService(store),
+		OperatorActions:          operatorActions,
+		AbuseReports:             abuseReports,
 		OperatorBilling:          billing.NewOperatorService(store, priceReader),
 		OperatorAudit:            auditWriter,
 		Selfhost:                 &httpapi.SelfhostHandlers{Service: selfhostService},

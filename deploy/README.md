@@ -234,6 +234,20 @@ edge drops out of DNS within the 60 s TTL like any other dead edge. Gap (2026-11
 pair is oracle and anvit, and both run at Oracle Cloud (AS31898), so one provider-wide null-route or
 outage takes both; the fallback needs a host at a second provider to close it.
 
+Abuse and takedowns (edge abuse plan 3.6): anyone reports a link with `POST /v1/abuse-reports` (no account;
+the marketing form and the `abuse@` mailbox feed the same queue); operators read `GET /v1/admin/abuse-reports`
+and take a hostname down with `POST /v1/admin/publications/{hostname}/block` (`Operator-Reason` = the report id,
+body `{"revision":1,"legal":false}`). The server withholds the name's ingress decisions, every edge answers
+the fixed takedown page (451 when legal, else 403) within one snapshot poll without contacting the origin, and
+the owning account is emailed. `.../unblock` restores it; the row stays as evidence. Target: phishing down
+within 1 h of a credible report in working hours, 24 h worst case.
+
+Public Suffix List (prerequisites shipped; the user files the request): list the configured preview and
+tunnel base domains in the PSL private section, add the `_psl` TXT record the PSL maintainers ask for on
+each, and keep wildcard DNS per name. Paperboat sets no cookie on those domains: edge cookies are host-only
+`__Host-` cookies (`TestEdgeCookiesAreHostOnly`) and the console lives on its own domain. Once listed,
+browsers isolate each name, and Safe Browsing and other blocklists list one name instead of the whole domain.
+
 Checking by hand: `control_tunnel_nodes` (state, `last_heartbeat_at`), `workspace_edge_sets`
 (the set per workspace), `edge_dns_publications` (what DNS holds; `failed` rows carry a
 `failure_code`). The server trusts forwarded client addresses only from `trusted_proxy_cidrs`; if the

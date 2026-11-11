@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
@@ -27,6 +28,8 @@ var (
 
 type Input struct {
 	Revision int64 `json:"revision"`
+	// Legal marks a publication_block as a legal takedown: the edge answers 451 instead of 403.
+	Legal bool `json:"legal,omitempty"`
 }
 type Result struct {
 	ResourceID string `json:"resource_id"`
@@ -34,11 +37,19 @@ type Result struct {
 	Version    int64  `json:"version"`
 }
 type Service struct {
-	store *db.DB
-	audit *audit.Writer
+	store       *db.DB
+	audit       *audit.Writer
+	mail        config.TransactionalMail
+	mailEnabled bool
 }
 
 func NewService(store *db.DB) *Service { return &Service{store: store, audit: audit.NewWriter(store)} }
+
+// ConfigureMail supplies the deployment's mail policy for owner notices (a takedown). Without it
+// the audit event is still written and no mail is queued.
+func (s *Service) ConfigureMail(policy config.TransactionalMail, enabled bool) {
+	s.mail, s.mailEnabled = policy, enabled
+}
 
 func (s *Service) Execute(ctx context.Context, actorID, key, kind, target, reason string, input Input) (Result, error) {
 	actorID, key, kind, target, reason = strings.TrimSpace(actorID), strings.TrimSpace(key), strings.TrimSpace(kind), strings.TrimSpace(target), strings.TrimSpace(reason)
@@ -94,6 +105,10 @@ func (s *Service) Execute(ctx context.Context, actorID, key, kind, target, reaso
 			result = Result{ResourceID: target, State: state, Version: generation}
 		case "relay_drain", "relay_resume":
 			if err = relayAction(ctx, tx, target, kind == "relay_drain", input.Revision, &result); err != nil {
+				return err
+			}
+		case "publication_block", "publication_unblock":
+			if err = s.publicationAction(ctx, tx, target, reason, kind == "publication_block", input, &result); err != nil {
 				return err
 			}
 		case "tunnel_disable", "tunnel_enable":
@@ -277,7 +292,7 @@ func relayAction(ctx context.Context, tx *db.Tx, target string, drain bool, revi
 
 func validKind(v string) bool {
 	switch v {
-	case "account_ban", "account_unban", "team_ban", "team_unban", "relay_drain", "relay_resume", "tunnel_disable", "tunnel_enable":
+	case "account_ban", "account_unban", "team_ban", "team_unban", "relay_drain", "relay_resume", "tunnel_disable", "tunnel_enable", "publication_block", "publication_unblock":
 		return true
 	}
 	return false
@@ -289,6 +304,9 @@ func allowed(role, kind string) bool {
 	return role == "admin" || role == "operations"
 }
 func resourceType(kind string) string {
+	if strings.HasPrefix(kind, "publication_") {
+		return "publication"
+	}
 	if strings.HasPrefix(kind, "account_") {
 		return "account"
 	}

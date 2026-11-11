@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
 )
 
@@ -36,6 +37,12 @@ func TestProxyAnswersQuotaRefusalWithTypedTooManyRequests(t *testing.T) {
 	busy := serve(errors.Join(ErrDataCarrierRouteTransport, datacarrier.ErrStreamLimit))
 	if busy.Code != http.StatusServiceUnavailable || busy.Header().Get("X-Paperboat-Error") != "carrier_stream_limit" || busy.Header().Get("Retry-After") != "2" {
 		t.Fatalf("full carrier: %d %q %q", busy.Code, busy.Header().Get("X-Paperboat-Error"), busy.Header().Get("Retry-After"))
+	}
+	for legal, status := range map[bool]int{true: http.StatusUnavailableForLegalReasons, false: http.StatusForbidden} {
+		blocked := serve(errors.Join(ErrDataCarrierRouteTransport, connectorprotocol.PublicationBlockedError{Legal: legal}))
+		if blocked.Code != status || blocked.Header().Get("X-Paperboat-Error") != "publication_blocked" || !strings.Contains(blocked.Body.String(), "acceptable use policy") {
+			t.Fatalf("takedown legal=%v: %d %q %q", legal, blocked.Code, blocked.Header().Get("X-Paperboat-Error"), blocked.Body.String())
+		}
 	}
 	other := serve(errors.New("connection refused"))
 	if other.Code != http.StatusBadGateway || other.Header().Get("X-Paperboat-Error") != "upstream_unavailable" || strings.Contains(other.Body.String(), "connection refused") || !strings.Contains(other.Body.String(), "could not reach the app") {
@@ -72,5 +79,16 @@ func TestRefusalNegotiatesPageOrProblemAndQuotaResetDate(t *testing.T) {
 	writeQuotaRefusal(unknown, request, time.Time{}, now)
 	if unknown.Header().Get("Retry-After") != "" || strings.Contains(unknown.Body.String(), "http-equiv") {
 		t.Fatalf("quota without a reset time: %v", unknown.Header())
+	}
+}
+
+// Public Suffix List prerequisite (edge abuse plan 3.6.1): every cookie the edge sets is host-only
+// (__Host- forbids a Domain attribute), so listing the preview and tunnel base domains on the PSL
+// changes nothing for Paperboat and isolates each name for browsers and blocklists.
+func TestEdgeCookiesAreHostOnly(t *testing.T) {
+	for _, name := range []string{browserEdgeCookie, browserHandoffCookie} {
+		if !strings.HasPrefix(name, "__Host-") {
+			t.Fatalf("edge cookie %q is not host-only", name)
+		}
 	}
 }

@@ -82,6 +82,23 @@ type IngressQuotaDenial struct {
 	ResetsAt time.Time `json:"resets_at,omitzero"`
 }
 
+// IngressBlock names a hostname an operator took down for violating the acceptable use policy. The
+// server withholds its decisions; the edge answers its fixed takedown page (451 when legal, else
+// 403) without contacting the origin. It grants no authority.
+type IngressBlock struct {
+	Hostname string `json:"hostname"`
+	Legal    bool   `json:"legal,omitempty"`
+}
+
+// ErrPublicationBlocked is the typed reason an edge refuses a taken-down hostname.
+var ErrPublicationBlocked = errors.New("publication taken down for violating the acceptable use policy")
+
+// PublicationBlockedError is ErrPublicationBlocked with whether the takedown is legal (451).
+type PublicationBlockedError struct{ Legal bool }
+
+func (e PublicationBlockedError) Error() string { return ErrPublicationBlocked.Error() }
+func (e PublicationBlockedError) Unwrap() error { return ErrPublicationBlocked }
+
 // IngressQuotaError is ErrIngressQuotaExhausted with the denial's reset time.
 type IngressQuotaError struct{ ResetsAt time.Time }
 
@@ -331,7 +348,7 @@ func sameNativeAuthorization(a, b *PrivateAccessOpen) bool {
 // decision id and its issue and expiry times are per-answer values) and returns a version of the
 // whole answer. An edge that sends the version it holds gets only fresh times when nothing else
 // changed (F21-38). Prior art: cloudflared applies remote config only on a version change.
-func IngressVersion(decisions []IngressDecision, denied []IngressQuotaDenial, http01 []HTTP01Response) string {
+func IngressVersion(decisions []IngressDecision, denied []IngressQuotaDenial, blocked []IngressBlock, http01 []HTTP01Response) string {
 	stable := make([][]byte, len(decisions))
 	order := make([]int, len(decisions))
 	for i, d := range decisions {
@@ -351,8 +368,9 @@ func IngressVersion(decisions []IngressDecision, denied []IngressQuotaDenial, ht
 	sort.Slice(denied, func(a, b int) bool {
 		return denied[a].RouteID+" "+denied[a].Hostname < denied[b].RouteID+" "+denied[b].Hostname
 	})
+	sort.Slice(blocked, func(a, b int) bool { return blocked[a].Hostname < blocked[b].Hostname })
 	sort.Slice(http01, func(a, b int) bool { return http01[a].Token < http01[b].Token })
-	rest, _ := json.Marshal([]any{denied, http01})
+	rest, _ := json.Marshal([]any{denied, blocked, http01})
 	hash.Write(rest)
 	return hex.EncodeToString(hash.Sum(nil))
 }

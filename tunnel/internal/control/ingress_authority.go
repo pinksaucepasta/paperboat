@@ -28,6 +28,7 @@ type IngressAuthority struct {
 	mu            sync.Mutex
 	decisions     []connectorprotocol.IngressDecision
 	quotaDenied   map[string]time.Time                        // hostnames withheld only for bandwidth quota (to their reset time), from the same fetch
+	blocked       map[string]bool                             // hostnames taken down by an operator (to whether the takedown is legal), from the same fetch
 	http01        map[string]connectorprotocol.HTTP01Response // by token, from the same fetch
 	fetched       time.Time
 	invalidated   bool
@@ -282,6 +283,10 @@ func (a *IngressAuthority) recordLocked(now time.Time, snapshot IngressSnapshot,
 	for _, d := range snapshot.QuotaDenied {
 		a.quotaDenied[d.Hostname] = d.ResetsAt
 	}
+	a.blocked = make(map[string]bool, len(snapshot.Blocked))
+	for _, b := range snapshot.Blocked {
+		a.blocked[b.Hostname] = b.Legal
+	}
 	a.http01 = make(map[string]connectorprotocol.HTTP01Response, len(snapshot.HTTP01))
 	for _, r := range snapshot.HTTP01 {
 		a.http01[r.Token] = r
@@ -383,20 +388,25 @@ func (a *IngressAuthority) ResolveDecision(ctx context.Context, candidate connec
 	return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
 }
 
-// QuotaDenied reports whether the hostname's route exists but the last server snapshot left it out
-// only because its workspace is out of bandwidth allowance. The edge then still completes TLS for
-// that name so the request can be refused with the typed 429, instead of a silent connection close.
+// QuotaDenied reports whether the last server snapshot withheld the hostname with a typed refusal: its
+// workspace is out of bandwidth allowance, or an operator took it down. The edge then still completes
+// TLS for that name so the request is answered with the typed page (429, or 451/403), instead of a
+// silent connection close.
 func (a *IngressAuthority) QuotaDenied(hostname string) bool {
-	return a.quotaError(hostname) != nil
+	return a.withheldError(hostname) != nil
 }
 
-// quotaError is the typed refusal for a quota-denied hostname, carrying its reset time; nil otherwise.
-func (a *IngressAuthority) quotaError(hostname string) error {
+// withheldError is the typed refusal for a taken-down hostname, or for a quota-denied one with its reset time;
+// nil otherwise. A takedown wins over the quota.
+func (a *IngressAuthority) withheldError(hostname string) error {
 	if a == nil {
 		return nil
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if legal, blocked := a.blocked[hostname]; blocked {
+		return connectorprotocol.PublicationBlockedError{Legal: legal}
+	}
 	resetsAt, denied := a.quotaDenied[hostname]
 	if !denied {
 		return nil
@@ -422,7 +432,7 @@ func (a *IngressAuthority) Resolve(ctx context.Context, r route.RouteRule) (conn
 		}
 	}
 	// The route exists but its workspace is out of allowance: say so, never forward.
-	if err := a.quotaError(r.Hostname); err != nil {
+	if err := a.withheldError(r.Hostname); err != nil {
 		return connectorprotocol.IngressDecision{}, err
 	}
 	return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
@@ -451,7 +461,7 @@ func (a *IngressAuthority) ResolvePreview(ctx context.Context, publication, host
 	}
 	// Withheld only because the workspace is out of allowance: refuse with the typed reason,
 	// without the readiness refresh below (nothing about origin readiness can change it).
-	if err := a.quotaError(hostname); err != nil {
+	if err := a.withheldError(hostname); err != nil {
 		return connectorprotocol.IngressDecision{}, err
 	}
 	// A snapshot read before origin readiness may legitimately omit a now-ready
@@ -514,7 +524,7 @@ func (a *IngressAuthority) ResolvePreview(ctx context.Context, publication, host
 		a.mu.Unlock()
 		return d, nil
 	}
-	if err := a.quotaError(hostname); err != nil {
+	if err := a.withheldError(hostname); err != nil {
 		return connectorprotocol.IngressDecision{}, err
 	}
 	return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied

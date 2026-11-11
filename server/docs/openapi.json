@@ -11449,6 +11449,83 @@
           "revision"
         ]
       },
+      "AbuseReportInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "url",
+          "reason"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 2048,
+            "description": "The http or https address of the link."
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "phishing",
+              "malware",
+              "spam",
+              "illegal",
+              "other"
+            ]
+          },
+          "details": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "reporter_email": {
+            "type": "string",
+            "maxLength": 320
+          }
+        }
+      },
+      "AbuseReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "hostname",
+          "url",
+          "reason",
+          "details",
+          "reporter_email",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "phishing",
+              "malware",
+              "spam",
+              "illegal",
+              "other"
+            ]
+          },
+          "details": {
+            "type": "string"
+          },
+          "reporter_email": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "OperatorActionInput": {
         "type": "object",
         "additionalProperties": false,
@@ -11457,6 +11534,10 @@
             "type": "integer",
             "format": "int64",
             "minimum": 1
+          },
+          "legal": {
+            "type": "boolean",
+            "description": "publication_block only: a legal takedown, answered 451 instead of 403."
           }
         },
         "required": [
@@ -38368,6 +38449,453 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/OperatorActionInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/publications/{hostname}/block": {
+      "post": {
+        "operationId": "post_v1_admin_publications_hostname_block",
+        "summary": "Operator block publication",
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Evidence, provider or audit unavailable; outcome may require checking target state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale resource revision or conflicting idempotency request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorActionResult"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "hostname",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9.-]+$"
+            }
+          },
+          {
+            "name": "Operator-Target",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "name": "Operator-Reason",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "security": [
+          {
+            "csrfHeader": [],
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "operations",
+        "description": "Takes one preview or tunnel hostname down for violating the acceptable use policy: the server withholds its ingress decisions and edges answer a fixed page (451 when `legal`, else 403) without contacting the origin; the owning account is emailed. Revision is 1 for a hostname never blocked, else the block's version. Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorActionInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/publications/{hostname}/unblock": {
+      "post": {
+        "operationId": "post_v1_admin_publications_hostname_unblock",
+        "summary": "Operator unblock publication",
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Evidence, provider or audit unavailable; outcome may require checking target state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale resource revision or conflicting idempotency request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorActionResult"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "hostname",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9.-]+$"
+            }
+          },
+          {
+            "name": "Operator-Target",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "name": "Operator-Reason",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_.:-]+$"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "security": [
+          {
+            "csrfHeader": [],
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "operations",
+        "description": "Restores a blocked hostname; the block row is kept as evidence. Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OperatorActionInput"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/abuse-reports": {
+      "get": {
+        "operationId": "get_v1_admin_abuse_reports",
+        "summary": "List abuse reports",
+        "responses": {
+          "400": {
+            "description": "Invalid target, body, pagination or confirmation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Browser authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operator session or capability required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Evidence, provider or audit unavailable; outcome may require checking target state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Audited result. Cache-Control: no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AbuseReport"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "hostname",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 253
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "security": [
+          {
+            "operatorCookie": []
+          }
+        ],
+        "x-operator-capability": "operations",
+        "description": "Abuse reports anyone filed (POST /v1/abuse-reports), newest first, kept 180 days. Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed."
+      }
+    },
+    "/v1/abuse-reports": {
+      "post": {
+        "operationId": "post_v1_abuse_reports",
+        "summary": "Report abuse",
+        "description": "Anyone can report phishing, malware, spam or illegal content on a link Paperboat serves; no account needed. Bounded per client network (429 with Retry-After). No reporter IP is kept; reports are kept 180 days.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AbuseReportInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid report; the message names the field.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many reports from this network; retry after Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Not recorded; retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
               }
             }
           }

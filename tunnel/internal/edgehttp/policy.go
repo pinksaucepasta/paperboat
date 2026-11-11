@@ -326,6 +326,12 @@ func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(contex
 		if observe != nil {
 			observe(request.Context(), err)
 		}
+		if errors.Is(err, connectorprotocol.ErrPublicationBlocked) {
+			var blocked connectorprotocol.PublicationBlockedError
+			errors.As(err, &blocked)
+			writeBlockedRefusal(writer, request, blocked.Legal)
+			return
+		}
 		if errors.Is(err, ErrIngressQuotaExhausted) {
 			// A typed refusal at admission: the visitor learns why, and direct access is unaffected.
 			var quota connectorprotocol.IngressQuotaError
@@ -435,6 +441,16 @@ const (
 	busyMessage            = "This link is busy right now. Wait a moment and try again."
 	edgeRateLimitedMessage = busyMessage
 )
+
+// writeBlockedRefusal answers a hostname an operator took down: the fixed page, never the origin. A
+// legal takedown is 451 (RFC 7725), any other 403.
+func writeBlockedRefusal(w http.ResponseWriter, r *http.Request, legal bool) {
+	status := http.StatusForbidden
+	if legal {
+		status = http.StatusUnavailableForLegalReasons
+	}
+	writeRefusal(w, r, status, "publication_blocked", "This link was disabled", "Paperboat disabled this address because it violated Paperboat's acceptable use policy.", 0)
+}
 
 // writeQuotaRefusal answers a workspace out of bandwidth allowance: 429 with Retry-After until the
 // allowance resets (when the server said when) and the reset date on the page.
