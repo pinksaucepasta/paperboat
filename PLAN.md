@@ -3425,7 +3425,7 @@ The coolify format (S1) also removes the old dev deployment and its test backups
 
 ## 5. Log
 
-2026-11-12 | W28 F8-16/F21-172: certificate persistence and dispatch/uncertain constraint fixes; tunnel -race, 20-repeat cert race, server DB/preview-store PostgreSQL and affected vet PASS at 099fdd9b2.
+2026-11-12 | W28 F8-17/F21-172: certificate persistence and dispatch/uncertain constraint fixes; tunnel -race, 20-repeat cert race, server DB/preview-store PostgreSQL and affected vet PASS at 099fdd9b2.
 Local core e2e blocked before build by archive VCS metadata (two attempts); required merge-queue core check uses a full checkout. Lane test dispatch starts jobs again (43101233401). No deploy; coordinator needs server migrations 291/292 and tunnel/edge image.
 
 2026-11-11 | Windows uninstall leftover elevation\request-<id> | Holder found with handle64 on winpool-12: the winget COM server (WindowsPackageManagerServer) the elevated OpenSSH step starts inherits the helper's working directory (the request dir) and outlives it. The elevated bridge now leaves that directory before any work (TestLeaveRequestDirectoryReleasesWorkingDirectory); baseline holds the dir after `pb setup`, the fix does not, and install, setup, uninstall leaves %LOCALAPPDATA%\paperboat gone.
