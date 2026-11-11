@@ -97,7 +97,8 @@ func TestPostgresTransferToPersonal(t *testing.T) {
 		}
 	}
 	for id, enrolledBy := range map[string]string{machine: enroller, orphan: gone} {
-		if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,installation_generation) VALUES($1,$2,$3,'laptop','linux','amd64','/workspace','offline','released',7)`, id, enrolledBy, "env_"+id); err != nil {
+		alias := map[string]string{machine: "laptop", orphan: "orphan"}[id]
+		if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,installation_generation) VALUES($1,$2,$3,$4,'linux','amd64','/workspace','offline','released',7)`, id, enrolledBy, "env_"+id, alias); err != nil {
 			t.Fatal(err)
 		}
 	}
