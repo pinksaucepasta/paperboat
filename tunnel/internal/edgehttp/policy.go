@@ -280,6 +280,11 @@ func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(contex
 			writeErrorPage(writer, http.StatusRequestTimeout, requestBodyIdleMessage)
 			return
 		}
+		if errors.Is(err, ErrDataCarrierPreviewResponseHeaderTimeout) {
+			writer.Header().Set("X-Paperboat-Error", "origin_timeout")
+			writeErrorPage(writer, http.StatusGatewayTimeout, originTimeoutMessage)
+			return
+		}
 		if errors.Is(err, errOriginRedirectLoop) {
 			writer.Header().Set("X-Paperboat-Error", "origin_redirect_loop")
 			writeErrorPage(writer, http.StatusBadGateway, originRedirectLoopMessage)
@@ -298,6 +303,8 @@ func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(contex
 		writeErrorPage(writer, http.StatusBadGateway, upstreamUnavailableMessage)
 	}
 }
+
+const originTimeoutMessage = "The app took longer than 100 seconds to start answering, so Paperboat ended the request. A slow page should stream its response or report progress."
 
 // errOriginRedirectLoop: the origin sent the visitor back to the URL it asked for (IsSelfRedirect).
 var errOriginRedirectLoop = errors.New("origin redirects to the URL it was asked for")

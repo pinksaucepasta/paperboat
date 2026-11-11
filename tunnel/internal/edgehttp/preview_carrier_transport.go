@@ -35,8 +35,12 @@ const (
 	dataCarrierPreviewRouteKind          = "preview_public_https_wss"
 	dataCarrierPreviewPrivateRouteKind   = "preview_private_https_wss"
 	dataCarrierPreviewDefaultOpenTimeout = 10 * time.Second
-	dataCarrierPreviewMaxRoutes          = 4096
-	dataCarrierPreviewMaxResponseHeader  = 64 << 10
+	// originFirstByteTimeout is how long the app may take to start its response once it has the
+	// whole request (Cloudflare's 100 s). It is not the control-plane timeout: report exports and
+	// non-streaming AI calls run for tens of seconds.
+	originFirstByteTimeout              = 100 * time.Second
+	dataCarrierPreviewMaxRoutes         = 4096
+	dataCarrierPreviewMaxResponseHeader = 64 << 10
 )
 
 var errPreviewRouteReplaced = errors.New("preview carrier route replaced before response headers")
@@ -573,6 +577,7 @@ func previewHostInBaseDomain(host, base string) bool {
 type DataCarrierPreviewTransport struct {
 	registry         *DataCarrierPreviewRegistry
 	openWait         time.Duration
+	firstByteWait    time.Duration
 	ingressRegistry  *DataCarrierRouteRegistry
 	runtimeUsage     IngressUsage
 	publicAuthority  func(context.Context, DataCarrierPreviewRoute) (connectorprotocol.IngressDecision, error)
@@ -582,9 +587,11 @@ type DataCarrierPreviewTransport struct {
 type DataCarrierPreviewTransportConfig struct {
 	Registry          *DataCarrierPreviewRegistry
 	StreamOpenTimeout time.Duration
-	IngressRegistry   *DataCarrierRouteRegistry
-	PublicAuthority   func(context.Context, DataCarrierPreviewRoute) (connectorprotocol.IngressDecision, error)
-	PrivateAuthority  func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)
+	// ResponseHeaderTimeout bounds the app's time to first byte; zero is originFirstByteTimeout.
+	ResponseHeaderTimeout time.Duration
+	IngressRegistry       *DataCarrierRouteRegistry
+	PublicAuthority       func(context.Context, DataCarrierPreviewRoute) (connectorprotocol.IngressDecision, error)
+	PrivateAuthority      func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)
 	// RuntimeUsage meters edge runtime sessions (runtime_https_wss) under the authority of
 	// their verified credential and ends them when that authority's allowance is exhausted.
 	RuntimeUsage IngressUsage
@@ -597,10 +604,13 @@ func NewDataCarrierPreviewTransport(config DataCarrierPreviewTransportConfig) (*
 	if config.StreamOpenTimeout == 0 {
 		config.StreamOpenTimeout = dataCarrierPreviewDefaultOpenTimeout
 	}
-	if config.StreamOpenTimeout <= 0 || config.StreamOpenTimeout > time.Minute {
+	if config.ResponseHeaderTimeout == 0 {
+		config.ResponseHeaderTimeout = originFirstByteTimeout
+	}
+	if config.StreamOpenTimeout <= 0 || config.StreamOpenTimeout > time.Minute || config.ResponseHeaderTimeout < 0 {
 		return nil, ErrDataCarrierPreviewRegistryInvalid
 	}
-	return &DataCarrierPreviewTransport{registry: config.Registry, openWait: config.StreamOpenTimeout, ingressRegistry: config.IngressRegistry, publicAuthority: config.PublicAuthority, privateAuthority: config.PrivateAuthority, runtimeUsage: config.RuntimeUsage}, nil
+	return &DataCarrierPreviewTransport{registry: config.Registry, openWait: config.StreamOpenTimeout, firstByteWait: config.ResponseHeaderTimeout, ingressRegistry: config.IngressRegistry, publicAuthority: config.PublicAuthority, privateAuthority: config.PrivateAuthority, runtimeUsage: config.RuntimeUsage}, nil
 }
 
 func (t *DataCarrierPreviewTransport) RoundTrip(request *http.Request) (*http.Response, error) {
@@ -782,7 +792,7 @@ func (t *DataCarrierPreviewTransport) roundTripRoute(request *http.Request, host
 	out.URL.Host = ""
 	out.Host = route.Hostname
 	headerContext, cancelHeader := context.WithCancel(request.Context())
-	headerWait := &responseHeaderWait{timeout: t.openWait, cancel: cancelHeader}
+	headerWait := &responseHeaderWait{timeout: t.firstByteWait, cancel: cancelHeader}
 	if request.Body == nil || request.Body == http.NoBody {
 		headerWait.start()
 	}
@@ -818,7 +828,7 @@ func (t *DataCarrierPreviewTransport) roundTripRoute(request *http.Request, host
 			return nil, sent, errors.Join(ErrDataCarrierPreviewTransport, errPreviewRouteReplaced, err, writeErr, requestCloseErr)
 		}
 		if headerTimedOut {
-			return nil, sent, errors.Join(ErrDataCarrierPreviewTransport, err, &dataCarrierPreviewResponseHeaderTimeoutError{timeout: t.openWait}, writeErr, requestCloseErr)
+			return nil, sent, errors.Join(ErrDataCarrierPreviewTransport, err, &dataCarrierPreviewResponseHeaderTimeoutError{timeout: t.firstByteWait}, writeErr, requestCloseErr)
 		}
 		return nil, sent, errors.Join(ErrDataCarrierPreviewTransport, err, request.Context().Err(), writeErr, requestCloseErr)
 	}

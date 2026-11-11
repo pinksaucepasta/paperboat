@@ -353,7 +353,7 @@ func testPreviewRouteReplacementRetry(t *testing.T, duringOpen bool) {
 		t.Fatal(err)
 	}
 	transport, err := NewDataCarrierPreviewTransport(DataCarrierPreviewTransportConfig{
-		Registry: registry, StreamOpenTimeout: 100 * time.Millisecond,
+		Registry: registry, StreamOpenTimeout: 100 * time.Millisecond, ResponseHeaderTimeout: 100 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -716,7 +716,7 @@ func TestDataCarrierPreviewTransportHeaderTimeoutStartsAfterUpload(t *testing.T)
 		t.Fatal(err)
 	}
 	const uploadChunks, chunkSize = 8, 1024
-	transport, err := NewDataCarrierPreviewTransport(DataCarrierPreviewTransportConfig{Registry: registry, StreamOpenTimeout: 150 * time.Millisecond})
+	transport, err := NewDataCarrierPreviewTransport(DataCarrierPreviewTransportConfig{Registry: registry, StreamOpenTimeout: 150 * time.Millisecond, ResponseHeaderTimeout: 150 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -993,5 +993,31 @@ func TestDataCarrierPreviewRegistryRestartedSessionReplacesTheOldCarrier(t *test
 	}
 	if got, ok := registry.Lookup("app.preview.example.test"); !ok || got.Server != newServer {
 		t.Fatalf("lookup after restart = %+v, ok=%v", got, ok)
+	}
+}
+
+// A slow app gets Cloudflare's 100 s to its first byte, independent of the carrier-open timeout, and
+// running out of it is a 504 origin_timeout, not the generic "could not reach the app".
+func TestPreviewOriginFirstByteTimeoutIsItsOwn504(t *testing.T) {
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	transport, err := NewDataCarrierPreviewTransport(DataCarrierPreviewTransportConfig{Registry: registry, StreamOpenTimeout: 10 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transport.openWait != 10*time.Second || transport.firstByteWait != 100*time.Second {
+		t.Fatalf("open=%s first byte=%s", transport.openWait, transport.firstByteWait)
+	}
+	proxy := &httputil.ReverseProxy{Rewrite: rewriteToCarrier, Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.Join(ErrDataCarrierPreviewTransport, &dataCarrierPreviewResponseHeaderTimeoutError{timeout: originFirstByteTimeout})
+	})}
+	configureProxyDiagnostics(proxy, nil)
+	recorder := httptest.NewRecorder()
+	proxy.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "https://app.preview.example.test/report", nil))
+	if recorder.Code != http.StatusGatewayTimeout || recorder.Header().Get("X-Paperboat-Error") != "origin_timeout" || !strings.Contains(recorder.Body.String(), "100 seconds") {
+		t.Fatalf("status=%d error=%q", recorder.Code, recorder.Header().Get("X-Paperboat-Error"))
 	}
 }
