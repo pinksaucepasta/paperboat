@@ -1,0 +1,28 @@
+winpool (Windows Server, hosted runner), build dev-6c6823ee2 (6c6823ee2), 2026-11-11 ~14:48Z
+Standard local user (real Medium integrity, batch logon task) runs pb with no desktop session.
+Un-elevated admin sessions cannot be made here: every interactive process on this runner is High integrity.
+
+=== version
+Version dev-6c6823ee2
+=== groups
+Mandatory Label\Medium Mandatory Level Label            S-1-16-8192
+=== pb service stop
+pb: This needs administrator rights, and this session cannot show the Windows approval prompt. Run the command from an administrator terminal. Support reference: support_x. Run `pb bugreport --upload` to send the details.
+rc=1
+=== pb service stop --json
+{"schema_version":"1.0","ok":false,"error":{"code":"operation_refused","category":"conflict","message":"This needs administrator rights, and this session cannot show the Windows approval prompt. Run the command from an administrator terminal.","retryable":false,"state_changed":"unknown","outcome_uncertain":false,"support_reference":"support_x"}}
+rc=1
+=== pb service start
+pb: This needs administrator rights, and this session cannot show the Windows approval prompt. Run the command from an administrator terminal. Support reference: support_x. Run `pb bugreport --upload` to send the details.
+rc=1
+=== diagnostics
+2026-11-11T14:43:54Z service support_x
+stop Paperboat local daemon service: elevated Windows operation timed out
+=== pb uninstall
+Paperboat attempted every local removal step. The Paperboat Inbox was preserved.
+pb: Paperboat local removal was incomplete after attempting every step. Failed: remove user Paperboat state, remove installed Paperboat product, stop local daemon. This needs administrator rights, and this session cannot show the Windows approval prompt. Run the command from an administrator terminal. Retry `pb uninstall`. Support reference: support_x. Run `pb bugreport --upload` to send the details.
+rc=1
+=== temp leftovers
+File Not Found
+
+Administrator session on the installed machine: pb uninstall -> handoff, status.json state=completed, no Paperboat services, no C:\Program Files\Paperboat, no .pb-elevated-* in TEMP.
