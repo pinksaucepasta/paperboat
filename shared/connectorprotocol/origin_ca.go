@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+const originCABlockStart = "-----BEGIN CERTIFICATE-----"
+
 // MaximumOriginCABytes bounds the CA a route trusts for its https origin (a root plus intermediates).
 const MaximumOriginCABytes = 16 << 10
 
@@ -23,9 +25,15 @@ func ValidateOriginCA(value string) error {
 	}
 	rest, count := []byte(value), 0
 	for {
+		// pem.Decode skips any text before the first block; the CA is PEM certificates and nothing else.
+		if trimmed := strings.TrimSpace(string(rest)); trimmed == "" {
+			break
+		} else if !strings.HasPrefix(trimmed, originCABlockStart) {
+			return ErrOriginCAInvalid
+		}
 		block, remaining := pem.Decode(rest)
 		if block == nil {
-			break
+			return ErrOriginCAInvalid
 		}
 		certificate, err := x509.ParseCertificate(block.Bytes)
 		if block.Type != "CERTIFICATE" || err != nil || !certificate.IsCA {
@@ -33,7 +41,7 @@ func ValidateOriginCA(value string) error {
 		}
 		count, rest = count+1, remaining
 	}
-	if count == 0 || count > 8 || strings.TrimSpace(string(rest)) != "" {
+	if count == 0 || count > 8 {
 		return ErrOriginCAInvalid
 	}
 	return nil
