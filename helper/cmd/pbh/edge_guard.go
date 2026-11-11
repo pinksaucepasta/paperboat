@@ -14,7 +14,9 @@ import (
 // The edge guard is the kernel's per-address connection limit on the public edge ports (edge abuse
 // plan, layer L1): it drops a source opening more than 100 connections a second (burst 200) and
 // resets a source holding more than 512, before the edge process spends anything on them. IPv4
-// sources count whole, IPv6 by /64. pbh owns one nftables table for it, applies it on install and
+// sources count whole, IPv6 by /64. Only traffic from outside counts: loopback and container bridges
+// (docker0, br-*) are exempt, so local services in the port range (test databases, containers reaching
+// host-network listeners) are never limited. pbh owns one nftables table for it, applies it on install and
 // on every service start (nftables rules do not survive a reboot), and deletes it on uninstall.
 // Managed edges are pbh installations, so they get the same rules. Prior art: the nftables wiki's
 // "meters" per-source rate and connlimit examples.
@@ -33,6 +35,9 @@ table inet %[1]s {
 	set held6 { type ipv6_addr; flags dynamic; size 65536; }
 	chain input {
 		type filter hook input priority filter - 10; policy accept;
+		iif "lo" accept
+		iifname "docker0" accept
+		iifname "br-*" accept
 		meta l4proto { tcp, udp } th dport { 443, %[2]d-%[3]d } ct state new jump edge_new
 	}
 	chain edge_new {

@@ -239,3 +239,20 @@ func TestEdgeGuardAppliedReappliedAndRemoved(t *testing.T) {
 		t.Fatalf("record %+v, output %q", record, out.String())
 	}
 }
+
+// Only traffic from outside is limited: loopback and container bridges are accepted before the jump to
+// the limits, so local listeners in the port range (test databases on 127.0.0.1, containers reaching a
+// host-network edge) never hit them.
+func TestEdgeGuardExemptsLoopbackAndBridgesBeforeTheLimits(t *testing.T) {
+	rules := edgeGuardRules()
+	jump := strings.Index(rules, "jump edge_new")
+	if jump < 0 {
+		t.Fatalf("no jump to the limits:\n%s", rules)
+	}
+	for _, exempt := range []string{`iif "lo" accept`, `iifname "docker0" accept`, `iifname "br-*" accept`} {
+		at := strings.Index(rules, exempt)
+		if at < 0 || at > jump {
+			t.Fatalf("%q missing or after the limits:\n%s", exempt, rules)
+		}
+	}
+}
