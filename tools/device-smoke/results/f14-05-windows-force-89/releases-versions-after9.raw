@@ -1,0 +1,44 @@
+ Volume in drive C is Windows
+ Volume Serial Number is 54CB-A274
+
+ Directory of C:\Program Files\Paperboat\users\ue655ce475da61ffc2e916d1d\releases
+
+11/11/2026  03:50 AM    <DIR>          .
+11/11/2026  01:43 AM    <DIR>          ..
+11/11/2026  02:40 AM        69,976,576 pb.rollback.exe
+11/11/2026  03:49 AM    <DIR>          versions
+               1 File(s)     69,976,576 bytes
+
+ Directory of C:\Program Files\Paperboat\users\ue655ce475da61ffc2e916d1d\releases\versions
+
+11/11/2026  03:49 AM    <DIR>          .
+11/11/2026  03:50 AM    <DIR>          ..
+11/11/2026  01:43 AM    <DIR>          2026.11.10.7
+11/11/2026  01:45 AM    <DIR>          2026.11.10.8
+11/11/2026  03:49 AM    <DIR>          2026.11.10.9
+               0 File(s)              0 bytes
+
+ Directory of C:\Program Files\Paperboat\users\ue655ce475da61ffc2e916d1d\releases\versions\2026.11.10.7
+
+11/11/2026  01:43 AM    <DIR>          .
+11/11/2026  03:49 AM    <DIR>          ..
+11/11/2026  01:43 AM        69,976,576 pb.exe
+               1 File(s)     69,976,576 bytes
+
+ Directory of C:\Program Files\Paperboat\users\ue655ce475da61ffc2e916d1d\releases\versions\2026.11.10.8
+
+11/11/2026  01:45 AM    <DIR>          .
+11/11/2026  03:49 AM    <DIR>          ..
+11/11/2026  01:45 AM        69,976,576 pb.exe
+               1 File(s)     69,976,576 bytes
+
+ Directory of C:\Program Files\Paperboat\users\ue655ce475da61ffc2e916d1d\releases\versions\2026.11.10.9
+
+11/11/2026  03:49 AM    <DIR>          .
+11/11/2026  03:49 AM    <DIR>          ..
+11/11/2026  03:49 AM        70,000,128 pb.exe
+               1 File(s)     70,000,128 bytes
+
+     Total Files Listed:
+               4 File(s)    279,929,856 bytes
+              14 Dir(s)  23,812,141,056 bytes free
