@@ -17,13 +17,9 @@ import (
 
 const windowsSystemSID = "S-1-5-18"
 
+// currentManagedSSHSID is the user the calling thread acts as (an impersonated thread's, else the process's).
 func currentManagedSSHSID() (string, error) {
-	token, err := windows.OpenCurrentProcessToken()
-	if err != nil {
-		return "", err
-	}
-	defer token.Close()
-	user, err := token.GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil || !user.User.Sid.IsValid() {
 		return "", ErrAgentDenied
 	}

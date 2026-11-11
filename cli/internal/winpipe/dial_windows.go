@@ -49,7 +49,7 @@ func Dial(ctx context.Context, path, owner string) (net.Conn, error) {
 
 // Verify applies Dial's server check to a pipe connection dialed another way and closes it when the check fails.
 func Verify(connection net.Conn, owner string) error {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil {
 		return errors.Join(errors.New("resolve current Windows user"), err, connection.Close())
 	}

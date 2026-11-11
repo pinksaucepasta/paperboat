@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -181,3 +182,22 @@ func TestNativeDialRejectsSystemOwnedImpostor(t *testing.T) {
 	}
 }
 
+// An impersonating thread acts as the impersonated user, so that is the account whose pipe it may trust.
+func TestCurrentOwnerIsTheImpersonatedUser(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	impersonate := windows.NewLazySystemDLL("advapi32.dll").NewProc("ImpersonateAnonymousToken")
+	if ok, _, err := impersonate.Call(uintptr(windows.CurrentThread())); ok == 0 {
+		t.Fatalf("impersonate the anonymous token: %v", err)
+	}
+	owner, err := currentOwner()
+	if revertErr := windows.RevertToSelf(); revertErr != nil {
+		t.Fatal(revertErr)
+	}
+	if err != nil || owner != "S-1-5-7" {
+		t.Fatalf("currentOwner while impersonating anonymous = %q, %v; want S-1-5-7", owner, err)
+	}
+	if owner, err = currentOwner(); err != nil || owner == "S-1-5-7" {
+		t.Fatalf("currentOwner after RevertToSelf = %q, %v", owner, err)
+	}
+}

@@ -42,8 +42,9 @@ var connectedDescriptor = func(conn net.Conn) (*windows.SECURITY_DESCRIPTOR, err
 	return descriptor, nil
 }
 
+// currentOwner is the user the calling thread acts as: an impersonating thread's, else the process's.
 var currentOwner = func() (string, error) {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil {
 		return "", pipeAuthFailure{message: "resolve current Windows user", cause: err}
 	}

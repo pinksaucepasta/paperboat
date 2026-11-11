@@ -510,13 +510,9 @@ func classifyLaunchError(err error) error {
 	return fmt.Errorf("%w: %v", ErrElevationUnavailable, err)
 }
 
+// currentOwnerSID is the user the calling thread acts as (an impersonated thread's, else the process's).
 func currentOwnerSID() (string, error) {
-	token, err := windows.OpenCurrentProcessToken()
-	if err != nil {
-		return "", err
-	}
-	defer token.Close()
-	user, err := token.GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil || !user.User.Sid.IsValid() {
 		if err == nil {
 			err = errors.New("current token has no valid user SID")
