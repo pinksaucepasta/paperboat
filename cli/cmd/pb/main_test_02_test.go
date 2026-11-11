@@ -637,6 +637,14 @@ func TestRemoteExecAbsolutePathUsesTargetPlatform(t *testing.T) {
 	}
 }
 
+func TestCwdRefusalNamesTheTargetForm(t *testing.T) {
+	for platform, want := range map[string]string{"windows": "drive letter", "linux": "starting with /", "darwin": "starting with /"} {
+		if got := cwdRefusal(platform).Error(); !strings.Contains(got, "--cwd") || !strings.Contains(got, want) {
+			t.Fatalf("cwdRefusal(%q) = %q, want it to name --cwd and %q", platform, got, want)
+		}
+	}
+}
+
 type execInputTestConn struct {
 	mu         sync.Mutex
 	writes     [][]byte
