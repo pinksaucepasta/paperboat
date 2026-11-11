@@ -35,7 +35,10 @@ if [ -z "$url" ]; then
 fi
 printf 'push: PR %s\n' "$url"
 gh pr merge "$url" --repo "$repo" --auto --rebase --match-head-commit "$head"
-# Keep the lock until merged: the next lane rebases on the landed batch.
+# The queue rebuilds every entry on the current main, so the next lane need not wait for this merge: release the lock
+# now (holding it until merged made lanes wait one after another, ~10 minutes each, 2026-11-12). Duplicate migration
+# numbers between parallel PRs are caught by the policy job on the queue's merge commit.
+exec 9>&-
 # A timeout leaves the PR intact for inspection, and never reports a pending PR as success.
 end=$(( $(date +%s) + 3600 ))
 while [ "$(date +%s)" -lt "$end" ]; do
