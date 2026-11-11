@@ -15,12 +15,16 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
+// mapPeerSnapshot maps every peer's address into this computer's loopback range. A peer whose address is invalid or
+// cannot be mapped is left out and reported in the returned error; the other peers keep their access (one bad entry
+// used to withdraw every route).
 func mapPeerSnapshot(peers []*daemonrpc.PeerUpdate, cidr string) ([]*daemonrpc.PeerUpdate, error) {
 	if cidr == "" {
 		cidr = machineloopback.DefaultCIDR
 	}
-	mapped := make([]*daemonrpc.PeerUpdate, len(peers))
-	for index, peer := range peers {
+	mapped := make([]*daemonrpc.PeerUpdate, 0, len(peers))
+	var skipped []error
+	for _, peer := range peers {
 		if peer == nil {
 			continue
 		}
@@ -28,17 +32,19 @@ func mapPeerSnapshot(peers []*daemonrpc.PeerUpdate, cidr string) ([]*daemonrpc.P
 		if strings.TrimSpace(peer.GetAssignedIp()) != "" {
 			canonical, err := netip.ParseAddr(peer.GetAssignedIp())
 			if err != nil {
-				return nil, coordinatorFailure("machine snapshot contains an invalid assigned address", err)
+				skipped = append(skipped, coordinatorFailure("machine snapshot contains an invalid assigned address", err))
+				continue
 			}
 			local, err := machineloopback.MapCanonical(canonical, cidr)
 			if err != nil {
-				return nil, coordinatorFailure("machine snapshot address could not be mapped", err)
+				skipped = append(skipped, coordinatorFailure("machine snapshot address could not be mapped", err))
+				continue
 			}
 			copyPeer.AssignedIp = local.String()
 		}
-		mapped[index] = copyPeer
+		mapped = append(mapped, copyPeer)
 	}
-	return mapped, nil
+	return mapped, errors.Join(skipped...)
 }
 
 // localDomain is the domain this computer's local access names live under.
