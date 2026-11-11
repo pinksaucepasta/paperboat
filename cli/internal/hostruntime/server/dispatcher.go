@@ -353,6 +353,8 @@ func execResult(value any, err error) operation.Outcome {
 		return failure("environment_unavailable")
 	case errors.Is(err, execprocess.ErrNotFound):
 		return failure("not_found_or_forbidden")
+	case errors.Is(err, execprocess.ErrWorkingDirectory):
+		return failure("exec_cwd_unavailable")
 	case errors.Is(err, execprocess.ErrConflict):
 		return failure("exec_already_running")
 	case errors.Is(err, execprocess.ErrCapacity):

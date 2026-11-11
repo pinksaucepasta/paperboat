@@ -599,8 +599,13 @@ func TestValidationRejectsEscapedCWDInvalidEnvironmentAndImplicitDimensions(t *t
 		{OperationID: "operation_bad_size", Argv: []string{"/bin/true"}, CWD: root, Dimensions: pty.Dimensions{Columns: 80, Rows: 24}},
 	}
 	for _, request := range requests {
-		if _, _, err := manager.Start(context.Background(), request); !errors.Is(err, ErrInvalid) {
+		_, _, err := manager.Start(context.Background(), request)
+		if !errors.Is(err, ErrInvalid) {
 			t.Fatalf("request=%#v err=%v", request, err)
+		}
+		// A working directory outside the workspace is told apart, so the user is told which rule refused.
+		if got := errors.Is(err, ErrWorkingDirectory); got != (request.OperationID == "operation_bad_cwd") {
+			t.Fatalf("request=%s: ErrWorkingDirectory=%v", request.OperationID, got)
 		}
 	}
 }

@@ -48,6 +48,7 @@ var errorCodes = map[string]error{
 	"session.ErrOutputOrder":           session.ErrOutputOrder,
 	"session.ErrInvalidQueueLimit":     session.ErrInvalidQueueLimit,
 	"execprocess.ErrInvalid":           execprocess.ErrInvalid,
+	"execprocess.ErrWorkingDirectory":  execprocess.ErrWorkingDirectory,
 	"execprocess.ErrConflict":          execprocess.ErrConflict,
 	"execprocess.ErrCapacity":          execprocess.ErrCapacity,
 	"execprocess.ErrUpdateInProgress":  execprocess.ErrUpdateInProgress,

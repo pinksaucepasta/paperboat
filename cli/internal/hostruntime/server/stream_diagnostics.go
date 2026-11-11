@@ -164,7 +164,7 @@ func expectedStreamOpenFailure(err error) bool {
 			session.ErrAttachmentExists, session.ErrAttachmentUnknown, session.ErrAttachmentReplaced, session.ErrAttachmentEvicted, session.ErrAttachmentLagged,
 			session.ErrInvalidInput, session.ErrInputConflict, session.ErrInputSequence,
 			session.ErrInputUncertain, session.ErrInputUnknown, session.ErrInputJournalFull,
-			execprocess.ErrInvalid, execprocess.ErrConflict, execprocess.ErrCapacity,
+			execprocess.ErrInvalid, execprocess.ErrWorkingDirectory, execprocess.ErrConflict, execprocess.ErrCapacity,
 			execprocess.ErrNotFound, execprocess.ErrReplayUnavailable,
 			managedssh.ErrSSHHostInvalid, managedssh.ErrSSHHostStale, managedssh.ErrSSHSessionsOpen,
 			browserbroadcastserver.ErrUnavailable:

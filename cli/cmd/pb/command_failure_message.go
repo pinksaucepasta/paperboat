@@ -323,6 +323,8 @@ func localAPIFailureMessage(code string) string {
 		return "The machine's terminal service isn't responding. Retry; run `pb doctor` if this continues."
 	case "peer_stream_unavailable":
 		return "The target machine was reached but did not open the connection. Its Paperboat service may still be starting, or it has not accepted this machine yet. Retry in a minute; run `pb doctor` if this continues."
+	case "exec_cwd_unavailable":
+		return "The working directory given with --cwd does not exist on the target machine or is outside its workspace (its home directory). Nothing was run. Use a directory inside the workspace, or leave --cwd out."
 	case "credential_expired":
 		return "The access Paperboat issued for this connection expired before it could be used. This machine's clock may be far off and not yet corrected; run `pb doctor` to see the clock offset, fix the system clock, then retry."
 	case "inventory_unavailable", "snapshot_unavailable", "observation_unavailable", "relay_inventory_unavailable":

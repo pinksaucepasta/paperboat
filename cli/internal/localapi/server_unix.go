@@ -659,6 +659,9 @@ func (s *Server) peerStream(writer http.ResponseWriter, request *http.Request, r
 			case "exec_start_uncertain":
 				code = "exec_start_uncertain"
 				message = "remote execution start outcome is uncertain; check the execution status before starting it again"
+			case "exec_cwd_unavailable":
+				code = "exec_cwd_unavailable"
+				message = "the working directory does not exist on the target or is outside its workspace"
 			case "environment_unavailable":
 				code = "environment_unavailable"
 				message = "Managed environment variables could not be delivered on the target. Check ENV delivery and retry."

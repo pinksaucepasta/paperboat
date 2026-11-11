@@ -56,7 +56,7 @@ type helperRemoteError struct {
 func (e *helperRemoteError) LocalAPICode() string {
 	if e != nil {
 		switch e.Code {
-		case "environment_unavailable", "resource_limit":
+		case "environment_unavailable", "resource_limit", "exec_cwd_unavailable":
 			return e.Code
 		case "unavailable", "deadline_exceeded":
 			// An authenticated terminal response proves the machine was reached.
@@ -92,6 +92,8 @@ func (e *helperRemoteError) Error() string {
 		return "Managed environment variables could not be delivered on the target. Check ENV delivery and retry."
 	case "resource_limit":
 		return hostconfig.TerminalCeilingMessage()
+	case "exec_cwd_unavailable":
+		return "the working directory does not exist on the target or is outside its workspace"
 	case "not_found_or_forbidden":
 		return "terminal resource was not found or is not permitted"
 	case "replay_gap":

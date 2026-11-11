@@ -19,11 +19,14 @@ import (
 )
 
 var (
-	ErrInvalid           = errors.New("invalid exec request")
-	ErrConflict          = errors.New("exec operation id conflict")
-	ErrCapacity          = errors.New("exec capacity reached")
-	ErrNotFound          = errors.New("exec operation not found")
-	ErrReplayUnavailable = errors.New("exec event replay unavailable")
+	ErrInvalid = errors.New("invalid exec request")
+	// ErrWorkingDirectory is an invalid request whose working directory does not exist or lies outside the machine's workspace
+	// root. It matches ErrInvalid, and is its own identity so the user can be told which rule refused (X-17).
+	ErrWorkingDirectory  error = workingDirectoryError{}
+	ErrConflict                = errors.New("exec operation id conflict")
+	ErrCapacity                = errors.New("exec capacity reached")
+	ErrNotFound                = errors.New("exec operation not found")
+	ErrReplayUnavailable       = errors.New("exec event replay unavailable")
 	// ErrInputGap: a stdin chunk starts after the bytes the execution has received, so a sender that lost bytes in a
 	// cut connection resent from too late. The execution is not given input out of order.
 	ErrInputGap          = errors.New("exec stdin resent from a later offset than the execution received")
@@ -436,7 +439,7 @@ func (m *Manager) validate(request Request) (Request, [sha256.Size]byte, error) 
 	}
 	cwd, err := filepath.EvalSymlinks(request.CWD)
 	if err != nil || !filepath.IsAbs(cwd) || !within(m.config.WorkspaceRoot, cwd) {
-		return Request{}, [sha256.Size]byte{}, ErrInvalid
+		return Request{}, [sha256.Size]byte{}, ErrWorkingDirectory
 	}
 	request.CWD = filepath.Clean(cwd)
 	if len(request.Environment) > 128 {
@@ -915,6 +918,12 @@ func validUpdateTransactionID(value string) bool {
 	}
 	return true
 }
+
+type workingDirectoryError struct{}
+
+func (workingDirectoryError) Error() string        { return "exec working directory is outside the workspace" }
+func (workingDirectoryError) Is(target error) bool { return target == ErrInvalid }
+
 func within(root, path string) bool {
 	relative, err := filepath.Rel(root, path)
 	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
