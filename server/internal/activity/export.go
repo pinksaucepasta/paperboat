@@ -25,8 +25,8 @@ var CSVHeader = []string{"id", "occurred_at", "workspace", "action", "result", "
 
 // Export writes the workspace's events matching q (newest first, at most AuditExportMaxRows) to
 // w as "csv" or "json" (one JSON array), then records the export in the audit log. Authorization
-// runs in its own short transaction: it takes the team lock, which must never be held while a
-// download streams to a slow client.
+// is re-checked for every page, in that page's short transaction: it takes the team lock, which must
+// never be held while a download streams to a slow client.
 func (s *Service) Export(ctx context.Context, account string, scope workspace.Scope, q Query, format string, w io.Writer) error {
 	if format != "csv" && format != "json" {
 		return ErrInvalid
@@ -39,19 +39,13 @@ func (s *Service) Export(ctx context.Context, account string, scope workspace.Sc
 		return ErrExportNeedsTeam
 	}
 	ws := workspaceID(account, scope)
-	var retention time.Duration
-	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		var err error
-		retention, err = s.authorizeTx(ctx, tx, account, scope)
-		return err
-	})
-	if err != nil {
-		return err
-	}
-	// Pages of exportPageRows are read by cursor, each in its own short transaction, and written after it
-	// ends: a slow client never pins a pool slot or an old snapshot (F21-41).
+	// Each page re-checks membership, the audit.read permission and the retention class in its own transaction (the
+	// team lock is taken there, never while a download streams), so access ended mid-export ends the export.
+	// Pages of exportPageRows are read by cursor and written after the transaction ends: a slow client never pins a
+	// pool slot or an old snapshot (F21-41).
+	var err error
 	rows := 0
-	out := newEncoder(format, w)
+	var out *encoder // created once the first page is authorized: the CSV header is written with it (AuditExportMaxRows >= 1)
 	var before int64
 	for rows < s.cfg.AuditExportMaxRows {
 		want := min(exportPageRows, s.cfg.AuditExportMaxRows-rows)
@@ -59,7 +53,10 @@ func (s *Service) Export(ctx context.Context, account string, scope workspace.Sc
 		var last int64
 		if err = s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 			page = page[:0]
-			var err error
+			retention, err := s.authorizeTx(ctx, tx, account, scope)
+			if err != nil {
+				return err
+			}
 			last, err = scan(ctx, tx, ws, retention, before, q, want, func(e Event) bool {
 				page = append(page, e)
 				return true
@@ -67,6 +64,9 @@ func (s *Service) Export(ctx context.Context, account string, scope workspace.Sc
 			return err
 		}); err != nil {
 			return err
+		}
+		if out == nil {
+			out = newEncoder(format, w)
 		}
 		for _, e := range page {
 			if err = out.event(e); err != nil {
