@@ -459,7 +459,7 @@
             "not_applicable",
             "system",
             "custom_ca",
-            "insecure_development"
+            "insecure"
           ]
         },
         "server_name": {
@@ -505,7 +505,7 @@
                 "enum": [
                   "not_applicable",
                   "system",
-                  "insecure_development"
+                  "insecure"
                 ]
               }
             }
@@ -1396,7 +1396,7 @@
             "not_applicable",
             "system",
             "custom_ca",
-            "insecure_development"
+            "insecure"
           ]
         },
         "tls_server_name": {
@@ -1518,7 +1518,7 @@
                 "enum": [
                   "system",
                   "custom_ca",
-                  "insecure_development"
+                  "insecure"
                 ]
               }
             }
@@ -1577,7 +1577,7 @@
                 "enum": [
                   "not_applicable",
                   "system",
-                  "insecure_development"
+                  "insecure"
                 ]
               }
             }

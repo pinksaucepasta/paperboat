@@ -99,6 +99,7 @@ type IngressBinding struct {
 	TLSVerification         string `json:"tls_verification"`
 	CAReference             string `json:"ca_reference"`
 	MTLSCredentialReference string `json:"mtls_credential_reference"`
+	TLSPin                  string `json:"tls_pin"`
 	PublicationID           string `json:"publication_id"`
 	PublicationGeneration   uint64 `json:"publication_generation"`
 	ListenerID              string `json:"listener_id"`
@@ -154,13 +155,16 @@ func (b IngressBinding) Validate() error {
 		return ErrIngressDenied
 	}
 	if b.OriginScheme == "https" {
-		if b.TLSVerification != "system" && b.TLSVerification != "custom_ca" {
+		if b.TLSVerification != "system" && b.TLSVerification != "custom_ca" && b.TLSVerification != "insecure" && b.TLSVerification != "pinned" {
+			return ErrIngressDenied
+		}
+		if (b.TLSVerification == "pinned") != (b.TLSPin != "") {
 			return ErrIngressDenied
 		}
 		if b.TLSVerification == "custom_ca" && b.CAReference == "" {
 			return ErrIngressDenied
 		}
-	} else if b.TLSVerification != "not_applicable" || b.TLSServerName != "" || b.CAReference != "" || b.MTLSCredentialReference != "" {
+	} else if b.TLSVerification != "not_applicable" || b.TLSServerName != "" || b.CAReference != "" || b.MTLSCredentialReference != "" || b.TLSPin != "" {
 		return ErrIngressDenied
 	}
 	return nil

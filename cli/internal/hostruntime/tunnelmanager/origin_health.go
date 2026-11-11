@@ -103,6 +103,10 @@ func originHealthCode(reason originhealth.Reason, err error) string {
 	var invalid x509.CertificateInvalidError
 	var verification *tls.CertificateVerificationError
 	var record tls.RecordHeaderError
+	var changed *CertificateChangedError
+	if errors.As(err, &changed) {
+		return OriginCertificateChanged
+	}
 	if errors.As(err, &unknownAuthority) || errors.As(err, &hostname) || errors.As(err, &invalid) || errors.As(err, &verification) || errors.As(err, &record) {
 		return "tls"
 	}

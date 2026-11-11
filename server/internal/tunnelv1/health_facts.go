@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 // HealthFacts are the live observations a tunnel's status explanation is built from. They are read
@@ -31,6 +33,9 @@ type HealthFacts struct {
 	// since EdgeRefusedSince (the start of the previous hour).
 	EdgeRefused      int64
 	EdgeRefusedSince time.Time
+	// InsecureRemoteRoute names an active route that skips certificate checks to an origin that is
+	// not on loopback, or is "".
+	InsecureRemoteRoute string
 }
 
 // edgeRefusedSince is the start of the window the flood-protection count covers: the previous hour
@@ -62,6 +67,25 @@ func (r *SQLRepository) HealthFacts(ctx context.Context, accountID, tunnelID str
 		return HealthFacts{}, translate(err)
 	}
 	facts.EdgeRefusedSince = edgeRefusedSince(now)
+	insecure, err := r.db.Pool().Query(ctx, `SELECT name, origin_address FROM tunnel_routes
+ WHERE tunnel_id=$1 AND tls_verification='insecure' AND desired_state='active' AND deleted_at IS NULL ORDER BY name LIMIT 64`, tunnelID)
+	if err != nil {
+		return HealthFacts{}, translate(err)
+	}
+	for insecure.Next() {
+		var name, address string
+		if err := insecure.Scan(&name, &address); err != nil {
+			insecure.Close()
+			return HealthFacts{}, translate(err)
+		}
+		if facts.InsecureRemoteRoute == "" && !wire.OriginHostIsLoopback(address) {
+			facts.InsecureRemoteRoute = name
+		}
+	}
+	insecure.Close()
+	if err := insecure.Err(); err != nil {
+		return HealthFacts{}, translate(err)
+	}
 	rows, err := r.db.Pool().Query(ctx, `SELECT hostname, ownership_state, certificate_state, certificate_strategy FROM tunnel_domains
  WHERE account_id=$1 AND tunnel_id=$2 AND deleted_at IS NULL ORDER BY hostname LIMIT 64`, accountID, tunnelID)
 	if err != nil {
@@ -103,6 +127,12 @@ func explainHealth(view HealthView, facts HealthFacts) HealthView {
 		return set("bandwidth_exhausted", "Your workspace has used its bandwidth allowance, so traffic is not forwarded.",
 			"Add bandwidth or change plan on the Billing page; traffic resumes when the allowance is available.", false)
 	}
+	if view.OverallCode == "ready" && facts.InsecureRemoteRoute != "" {
+		// Not a failure, but never silent: traffic to a remote origin can be intercepted unseen.
+		view.Dimensions.Origin = HealthDimension{Status: "degraded", Code: "origin_tls_unverified"}
+		view.RepairAction = "Route " + facts.InsecureRemoteRoute + " does not verify its origin's certificate, and the origin is not on this machine. Pin the certificate instead: `pb tunnel route update <tunnel> " + facts.InsecureRemoteRoute + " --tls-verification pinned`."
+		return view
+	}
 	switch view.OverallCode {
 	case "origin_unreachable":
 		view.Dimensions.Origin = HealthDimension{Status: "down", Code: originCode(facts.OriginReason)}
@@ -138,7 +168,7 @@ func explainHealth(view HealthView, facts HealthFacts) HealthView {
 
 func originCode(reason string) string {
 	switch reason {
-	case "refused", "timeout", "unreachable", "tls", "redirect_loop":
+	case "refused", "timeout", "unreachable", "tls", "redirect_loop", "certificate_changed":
 		return "origin_" + reason
 	}
 	return "origin_unreachable"
@@ -156,6 +186,8 @@ func originSummary(reason string) string {
 		return "The tunnel is connected, but the local app's TLS certificate was not accepted."
 	case "redirect_loop":
 		return "The tunnel is connected, but the app redirects visitors to HTTPS on the address they already use, so browsers loop."
+	case "certificate_changed":
+		return "The tunnel is connected, but the app presents a different certificate from the one pinned for its route, so Paperboat refuses it."
 	}
 	return "The tunnel is connected but its local app is not reachable."
 }
@@ -170,6 +202,8 @@ func originAction(reason string) string {
 		return "Check the route's origin address with `pb tunnel route list <tunnel>`; it must be reachable from the host."
 	case "tls":
 		return "Trust the app's certificate (route TLS settings: custom CA) or use an http origin for this route."
+	case "certificate_changed":
+		return "If you replaced the app's certificate, re-pin it: `pb tunnel route update <tunnel> <route> --tls-verification pinned` shows the new one. If you did not, something is intercepting the connection."
 	case "redirect_loop":
 		return "Point the route at the app's HTTPS port (`pb tunnel route update <tunnel> <route> --to https://localhost:443`) or turn off the app's own HTTP-to-HTTPS redirect."
 	}

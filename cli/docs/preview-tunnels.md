@@ -153,9 +153,15 @@ pb tunnel route list api
 
 HTTP routes preserve the public `Host` by default. Origin host-header rewrite,
 TLS server name, verification mode, CA reference, client credential reference,
-timeouts, priority, and stream limits are independent route settings. Prefer
-the defaults; use `--tls-verification insecure` only with an explicit reviewed
-exception.
+timeouts, priority, and stream limits are independent route settings.
+
+An https origin on `localhost` or an IP address is sent the public hostname as
+TLS server name, so Caddy, Traefik and nginx pick the right site. For an origin
+with a self-signed certificate (a NAS, Proxmox), `--tls-verification pinned`
+shows the certificate it presents and pins it; `--tls-pin sha256:<hex>` pins it
+without asking. If the certificate changes, the route is refused until you
+re-pin it. `--tls-verification insecure` turns checks off; for an origin that
+is not on the machine itself, tunnel status warns while it is set.
 
 Change or remove a route with `pb tunnel route update api web ...` and
 `pb tunnel route remove api web --wait`; the tunnel stays.

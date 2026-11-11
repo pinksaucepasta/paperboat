@@ -371,9 +371,9 @@ keys, bearer tokens, or raw filesystem paths. Explicit SNI controls certificate 
 `preserve_host` and `host_override` independently control the HTTP Host header. Cleartext
 HTTP/2 uses the explicit `h2c` scheme and is never silently downgraded to HTTP/1.1.
 
-`insecure_development` is an explicit development-only exception. The server rejects it
-unless development policy permits it, records an audit event without credential references
-or resolved bytes, and surfaces a warning. Production policy never enables this mode.
+`insecure` turns certificate verification off for one route; the server records an audit event
+without credential references or resolved bytes, and tunnel status warns while the origin is not
+on loopback. `pinned` trusts exactly the certificate whose SHA-256 fingerprint is the route's `pin`.
 Origin probes and live requests use the same TLS policy. A generation replacement creates
 fresh transports, drains the old generation, and cannot reuse stale CA, SNI, or mTLS state.
 

@@ -183,7 +183,7 @@ func New(opts Options) (*App, error) {
 		return nil, fmt.Errorf("configure tunnel service: %w", err)
 	}
 	tunnelResourceService, err := tunnelv1.NewResourceService(tunnelRepository, tunnelv1.ResourceConfig{
-		CursorKey: cursorKey[:], AllowInsecureDevelopment: opts.Config.Environment == config.EnvironmentDevelopment,
+		CursorKey: cursorKey[:],
 	})
 	if err != nil {
 		_ = store.Close()

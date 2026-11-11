@@ -77,7 +77,7 @@ func (s SQLIngressSource) Edge(ctx context.Context, nodeID, epoch string) ([]wir
 const engineTunnelIngressSQL = `
 SELECT t.account_id,environment.id,(ra.admission->'binding'->>'tunnel_id'),t.generation,r.id,r.generation,ra.machine_id,m.installation_generation,
  publication.hostname,CASE WHEN r.protocol IN ('tcp','tls') THEN '' ELSE COALESCE(r.path_prefix,'/') END,r.origin_scheme,r.origin_address,
- r.tls_verification,COALESCE(r.tls_server_name,''),COALESCE(r.ca_reference,''),COALESCE(r.mtls_credential_reference,''),
+ r.tls_verification,COALESCE(r.tls_server_name,''),COALESCE(r.ca_reference,''),COALESCE(r.mtls_credential_reference,''),COALESCE(r.tls_pin,''),
  COALESCE(r.public_tcp_listener_id,''),COALESCE(r.public_tcp_port,0),r.protocol,
  publication.publication_id,publication.publication_generation,
  x.edge_node_id,x.edge_process_epoch,(c.admission->'binding'->>'connector_id'),c.session_id,c.process_generation,
@@ -129,7 +129,7 @@ WHERE x.edge_node_id=$2 AND x.edge_process_epoch=$3 AND x.desired='active' AND n
  AND (r.protocol<>'tls' OR r.match_hostname=substring(t.stable_endpoint from 9))
  AND (r.match_type IN ('managed','exact') OR ($4<>'public' AND r.match_type='catch_all'))
  AND ((r.protocol='http' AND r.origin_scheme IN ('http','https','h2c')) OR (r.protocol IN ('tcp','tls') AND r.origin_scheme='tcp'))
- AND r.tls_verification IN ('not_applicable','system','custom_ca')
+ AND r.tls_verification IN ('not_applicable','system','custom_ca','insecure','pinned')
  AND m.deleted_at IS NULL AND m.revoked_at IS NULL AND m.state NOT IN ('pending','revoked','deleted')
  AND m.seat_state='occupied' AND m.public_identity_key=ra.public_identity_key
  AND identity.issued_at<=$1 AND identity.expires_at>$1
@@ -241,7 +241,7 @@ func (s SQLIngressSource) scanIngressRows(ctx context.Context, now time.Time, qu
 		}
 		var d wire.IngressDecision
 		b := &d.Binding
-		if err = rows.Scan(&b.AccountID, &b.EnvironmentID, &b.TunnelID, &b.ResourceGeneration, &b.RouteID, &b.RouteGeneration, &b.HostID, &b.InstallationGeneration, &b.Hostname, &b.PathPrefix, &b.OriginScheme, &b.OriginAddress, &b.TLSVerification, &b.TLSServerName, &b.CAReference, &b.MTLSCredentialReference, &b.ListenerID, &b.PublicPort, &b.Protocol, &b.PublicationID, &b.PublicationGeneration, &d.EdgeNodeID, &d.EdgeProcessEpoch, &d.ConnectorID, &d.SessionID, &d.ProcessGeneration, &d.ConfigGeneration, &d.AssignmentGeneration, &d.PolicyGeneration, &d.ExpiresAt); err != nil {
+		if err = rows.Scan(&b.AccountID, &b.EnvironmentID, &b.TunnelID, &b.ResourceGeneration, &b.RouteID, &b.RouteGeneration, &b.HostID, &b.InstallationGeneration, &b.Hostname, &b.PathPrefix, &b.OriginScheme, &b.OriginAddress, &b.TLSVerification, &b.TLSServerName, &b.CAReference, &b.MTLSCredentialReference, &b.TLSPin, &b.ListenerID, &b.PublicPort, &b.Protocol, &b.PublicationID, &b.PublicationGeneration, &d.EdgeNodeID, &d.EdgeProcessEpoch, &d.ConnectorID, &d.SessionID, &d.ProcessGeneration, &d.ConfigGeneration, &d.AssignmentGeneration, &d.PolicyGeneration, &d.ExpiresAt); err != nil {
 			return nil, err
 		}
 		if err = completeIngressProjection(&d, now); err != nil {

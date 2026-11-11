@@ -99,12 +99,16 @@ JSON output is supported with --json.
 	maximum time to wait for operation completion
 
 .PP
+\fB--tls-pin\fP=""
+	pin the origin certificate by its fingerprint (sha256:<hex>), without connecting
+
+.PP
 \fB--tls-server-name\fP=""
 	explicit origin TLS server name
 
 .PP
 \fB--tls-verification\fP=""
-	origin TLS verification (system, custom_ca, or insecure_development)
+	origin TLS verification: system, custom_ca, pinned (shows the origin certificate and pins it), or insecure
 
 .PP
 \fB--to\fP=""

@@ -293,7 +293,13 @@ func runTunnelDoctor(command *cobra.Command, args []string) error {
 		if jsonOutput {
 			return tunnelOutput(command, health, "")
 		}
-		return writeTunnelDoctorHealth(command.OutOrStdout(), health)
+		if err := writeTunnelDoctorHealth(command.OutOrStdout(), health); err != nil {
+			return err
+		}
+		if health.Dimensions.Origin.Code == "origin_tls" {
+			writeTunnelOriginCertificateHints(ctx, command.OutOrStdout(), client, tunnelID)
+		}
+		return nil
 	}
 
 	builder, preview, err := buildTunnelDoctorBundle(ctx, health, maximumBytes)

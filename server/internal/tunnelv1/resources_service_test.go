@@ -312,6 +312,8 @@ func TestRouteTLSValidationKeepsVerificationAndCredentialReferencesCoherent(t *t
 	client := "keychain://paperboat/origins/client_01"
 	plainPath := "/etc/paperboat/origin-ca.pem"
 	pem := "-----BEGIN CERTIFICATE-----"
+	pin := "sha256:" + strings.Repeat("ab", 32)
+	badPin := "sha256:" + strings.Repeat("AB", 32)
 	for _, test := range []struct {
 		name    string
 		value   RouteTLSRequest
@@ -320,10 +322,15 @@ func TestRouteTLSValidationKeepsVerificationAndCredentialReferencesCoherent(t *t
 		{name: "system", value: RouteTLSRequest{Verification: "system"}},
 		{name: "system mTLS", value: RouteTLSRequest{Verification: "system", ClientCredentialReference: &client}},
 		{name: "custom CA and mTLS", value: RouteTLSRequest{Verification: "custom_ca", CAReference: &ca, ClientCredentialReference: &client}},
-		{name: "development explicit", value: RouteTLSRequest{Verification: "insecure_development"}},
+		{name: "insecure explicit", value: RouteTLSRequest{Verification: "insecure"}},
+		{name: "pinned", value: RouteTLSRequest{Verification: "pinned", Pin: &pin}},
+		{name: "pinned without pin", value: RouteTLSRequest{Verification: "pinned"}, wantErr: true},
+		{name: "pin on system", value: RouteTLSRequest{Verification: "system", Pin: &pin}, wantErr: true},
+		{name: "pin not lowercase sha256", value: RouteTLSRequest{Verification: "pinned", Pin: &badPin}, wantErr: true},
+		{name: "old development name", value: RouteTLSRequest{Verification: "insecure_development"}, wantErr: true},
 		{name: "custom CA missing reference", value: RouteTLSRequest{Verification: "custom_ca"}, wantErr: true},
 		{name: "system with irrelevant CA", value: RouteTLSRequest{Verification: "system", CAReference: &ca}, wantErr: true},
-		{name: "development with irrelevant CA", value: RouteTLSRequest{Verification: "insecure_development", CAReference: &ca}, wantErr: true},
+		{name: "insecure with irrelevant CA", value: RouteTLSRequest{Verification: "insecure", CAReference: &ca}, wantErr: true},
 		{name: "raw filesystem path", value: RouteTLSRequest{Verification: "custom_ca", CAReference: &plainPath}, wantErr: true},
 		{name: "raw PEM", value: RouteTLSRequest{Verification: "custom_ca", CAReference: &pem}, wantErr: true},
 	} {
@@ -336,20 +343,10 @@ func TestRouteTLSValidationKeepsVerificationAndCredentialReferencesCoherent(t *t
 	}
 }
 
-func TestRouteInsecureDevelopmentRequiresExplicitServerPolicy(t *testing.T) {
-	origin := RouteOriginRequest{Scheme: "https", TLS: &RouteTLSRequest{Verification: "insecure_development"}}
-	if err := (&ResourceService{}).validateOriginPolicy(origin); !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("production policy error = %v", err)
-	}
-	if err := (&ResourceService{allowInsecureDevelopment: true}).validateOriginPolicy(origin); err != nil {
-		t.Fatalf("explicit development policy error = %v", err)
-	}
-}
-
-func TestRouteAuditMetadataMarksInsecureDevelopmentWithoutSecretReferences(t *testing.T) {
-	route := dbsqlc.TunnelRoute{Generation: 4, Protocol: "http", OriginScheme: "https", TlsVerification: "insecure_development", DesiredState: "active", CaReference: sql.NullString{String: "keychain://paperboat/origins/secret", Valid: true}}
+func TestRouteAuditMetadataMarksInsecureWithoutSecretReferences(t *testing.T) {
+	route := dbsqlc.TunnelRoute{Generation: 4, Protocol: "http", OriginScheme: "https", TlsVerification: "insecure", DesiredState: "active", CaReference: sql.NullString{String: "keychain://paperboat/origins/secret", Valid: true}}
 	metadata := routeAuditMetadata(route)
-	if metadata["origin_tls_insecure_development"] != true || metadata["origin_tls_verification"] != "insecure_development" {
+	if metadata["origin_tls_insecure"] != true || metadata["origin_tls_verification"] != "insecure" {
 		t.Fatalf("metadata=%v", metadata)
 	}
 	encoded, err := json.Marshal(metadata)

@@ -922,6 +922,7 @@ type initialTunnelRouteSnapshot struct {
 	TLSServerName           *string `json:"tls_server_name"`
 	CAReference             *string `json:"ca_reference"`
 	MTLSCredentialReference *string `json:"mtls_credential_reference"`
+	TLSPin                  *string `json:"tls_pin"`
 	ConnectTimeoutMs        int32   `json:"connect_timeout_ms"`
 	IdleTimeoutMs           int32   `json:"idle_timeout_ms"`
 	MaxStreams              int32   `json:"max_concurrent_streams"`
@@ -1014,7 +1015,7 @@ func snapshotRoute(route dbsqlc.TunnelRoute) initialTunnelRouteSnapshot {
 		MatchHostname: nullableStringValue(route.MatchHostname), WildcardSuffix: nullableStringValue(route.WildcardSuffix), PathPrefix: pathPrefix,
 		OriginScheme: route.OriginScheme, OriginAddress: route.OriginAddress, PreserveHost: route.PreserveHost, HostOverride: hostOverride,
 		TLSVerification: route.TlsVerification, TLSServerName: serverName, CAReference: caReference, MTLSCredentialReference: mtlsReference,
-		ConnectTimeoutMs: route.ConnectTimeoutMs, IdleTimeoutMs: route.IdleTimeoutMs, MaxStreams: route.MaxConcurrentStreams,
+		TLSPin: nullStringPointer(route.TlsPin), ConnectTimeoutMs: route.ConnectTimeoutMs, IdleTimeoutMs: route.IdleTimeoutMs, MaxStreams: route.MaxConcurrentStreams,
 		DesiredState: route.DesiredState,
 	}
 }

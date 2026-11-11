@@ -24,7 +24,7 @@ SELECT r.id, r.tunnel_id, r.name, r.protocol, r.match_type, r.match_hostname,
        r.ca_reference, r.mtls_credential_reference, r.connect_timeout_ms,
        r.idle_timeout_ms, r.max_concurrent_streams, r.desired_state, r.generation,
        r.created_by_actor_id, r.updated_by_actor_id, r.created_at, r.updated_at,
-       r.deleted_at, r.public_tcp_listener_id, r.public_tcp_port
+       r.deleted_at, r.public_tcp_listener_id, r.public_tcp_port, r.tls_pin
 FROM tunnel_routes AS r
 JOIN tunnels AS t ON t.id = r.tunnel_id
 WHERE r.tunnel_id = sqlc.arg(tunnel_id)
@@ -48,7 +48,7 @@ SELECT r.id, r.tunnel_id, r.name, r.protocol, r.match_type, r.match_hostname,
        r.connect_timeout_ms, r.idle_timeout_ms, r.max_concurrent_streams,
        r.desired_state, r.generation, r.created_by_actor_id,
        r.updated_by_actor_id, r.created_at, r.updated_at, r.deleted_at,
-       r.public_tcp_listener_id, r.public_tcp_port
+       r.public_tcp_listener_id, r.public_tcp_port, r.tls_pin
 FROM tunnel_routes AS r
 JOIN tunnels AS t ON t.id = r.tunnel_id
 WHERE r.id = sqlc.arg(route_id)
@@ -62,7 +62,7 @@ SELECT id, tunnel_id, name, protocol, match_type, match_hostname,
        ca_reference, mtls_credential_reference, connect_timeout_ms,
        idle_timeout_ms, max_concurrent_streams, desired_state, generation,
        created_by_actor_id, updated_by_actor_id, created_at, updated_at,
-       deleted_at, public_tcp_listener_id, public_tcp_port
+       deleted_at, public_tcp_listener_id, public_tcp_port, tls_pin
 FROM tunnel_routes
 WHERE tunnel_id = sqlc.arg(tunnel_id)
   AND desired_state = 'active'
@@ -117,7 +117,7 @@ INSERT INTO tunnel_routes
    mtls_credential_reference, connect_timeout_ms, idle_timeout_ms,
    max_concurrent_streams, desired_state, created_by_actor_id,
    public_tcp_listener_id, public_tcp_port,
-   updated_by_actor_id, created_at, updated_at)
+   updated_by_actor_id, created_at, updated_at, tls_pin)
 VALUES
   (sqlc.arg(id), sqlc.arg(tunnel_id), sqlc.arg(name), sqlc.arg(protocol),
    sqlc.arg(match_type), sqlc.narg(match_hostname), sqlc.narg(wildcard_suffix),
@@ -129,14 +129,14 @@ VALUES
    sqlc.arg(max_concurrent_streams), sqlc.arg(desired_state),
    sqlc.arg(created_by_actor_id), CASE WHEN sqlc.arg(protocol)::text='tls' THEN 'listener_tls_443' ELSE sqlc.narg(public_tcp_listener_id) END,
    CASE WHEN sqlc.arg(protocol)::text='tls' THEN 443 ELSE (SELECT port FROM public_port) END, sqlc.arg(updated_by_actor_id),
-   sqlc.arg(now), sqlc.arg(now))
+   sqlc.arg(now), sqlc.arg(now), sqlc.narg(tls_pin))
 RETURNING id, tunnel_id, name, protocol, match_type, match_hostname,
           wildcard_suffix, path_prefix, priority, origin_scheme, origin_address,
           preserve_host, host_override, tls_verification, tls_server_name,
           ca_reference, mtls_credential_reference, connect_timeout_ms,
           idle_timeout_ms, max_concurrent_streams, desired_state, generation,
           created_by_actor_id, updated_by_actor_id, created_at, updated_at,
-          deleted_at, public_tcp_listener_id, public_tcp_port;
+          deleted_at, public_tcp_listener_id, public_tcp_port, tls_pin;
 
 -- name: UpdateTunnelRouteV1 :one
 UPDATE tunnel_routes
@@ -155,6 +155,7 @@ SET name = CASE WHEN sqlc.arg(name_set)::boolean THEN sqlc.arg(name)::text ELSE 
     tls_server_name = CASE WHEN sqlc.arg(tls_server_name_set)::boolean THEN sqlc.narg(tls_server_name)::text ELSE tls_server_name END,
     ca_reference = CASE WHEN sqlc.arg(ca_reference_set)::boolean THEN sqlc.narg(ca_reference)::text ELSE ca_reference END,
     mtls_credential_reference = CASE WHEN sqlc.arg(mtls_credential_reference_set)::boolean THEN sqlc.narg(mtls_credential_reference)::text ELSE mtls_credential_reference END,
+    tls_pin = CASE WHEN sqlc.arg(tls_pin_set)::boolean THEN sqlc.narg(tls_pin)::text ELSE tls_pin END,
     connect_timeout_ms = CASE WHEN sqlc.arg(connect_timeout_set)::boolean THEN sqlc.arg(connect_timeout_ms)::integer ELSE connect_timeout_ms END,
     idle_timeout_ms = CASE WHEN sqlc.arg(idle_timeout_set)::boolean THEN sqlc.arg(idle_timeout_ms)::integer ELSE idle_timeout_ms END,
     max_concurrent_streams = CASE WHEN sqlc.arg(max_streams_set)::boolean THEN sqlc.arg(max_concurrent_streams)::integer ELSE max_concurrent_streams END,
@@ -173,7 +174,7 @@ RETURNING id, tunnel_id, name, protocol, match_type, match_hostname,
           ca_reference, mtls_credential_reference, connect_timeout_ms,
           idle_timeout_ms, max_concurrent_streams, desired_state, generation,
           created_by_actor_id, updated_by_actor_id, created_at, updated_at,
-          deleted_at, public_tcp_listener_id, public_tcp_port;
+          deleted_at, public_tcp_listener_id, public_tcp_port, tls_pin;
 
 -- name: DeleteTunnelRouteV1 :one
 UPDATE tunnel_routes
@@ -190,7 +191,7 @@ RETURNING id, tunnel_id, name, protocol, match_type, match_hostname,
           ca_reference, mtls_credential_reference, connect_timeout_ms,
           idle_timeout_ms, max_concurrent_streams, desired_state, generation,
           created_by_actor_id, updated_by_actor_id, created_at, updated_at,
-          deleted_at, public_tcp_listener_id, public_tcp_port;
+          deleted_at, public_tcp_listener_id, public_tcp_port, tls_pin;
 
 -- name: BumpTunnelGenerationForResourceV1 :one
 UPDATE tunnels

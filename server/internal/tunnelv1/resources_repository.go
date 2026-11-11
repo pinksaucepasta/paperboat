@@ -368,7 +368,7 @@ func createRouteParams(input RouteRecord) dbsqlc.CreateTunnelRouteV1Params {
 		PathPrefix: input.PathPrefix, Priority: input.Priority, OriginScheme: input.Origin.Scheme,
 		OriginAddress: input.Origin.Address, PreserveHost: input.Origin.PreserveHost, HostOverride: nullableStringPtr(input.Origin.HostOverride),
 		TlsVerification: tlsVerification, TlsServerName: nullableStringPtr(serverName), CaReference: nullableStringPtr(caRef),
-		MtlsCredentialReference: nullableStringPtr(clientRef), ConnectTimeoutMs: input.ConnectTimeoutMS, IdleTimeoutMs: input.IdleTimeoutMS,
+		MtlsCredentialReference: nullableStringPtr(clientRef), TlsPin: routeTLSPin(input.Origin), ConnectTimeoutMs: input.ConnectTimeoutMS, IdleTimeoutMs: input.IdleTimeoutMS,
 		MaxConcurrentStreams: input.MaxConcurrentStreams, DesiredState: "active", CreatedByActorID: input.ActorID, UpdatedByActorID: input.ActorID, Now: input.Now,
 		PublicTcpListenerID: nullableString(input.PublicTCPListenerID), PublicTcpPortMin: input.PublicTCPPortMin, PublicTcpPortMax: input.PublicTCPPortMax,
 	}
@@ -384,7 +384,7 @@ func updateRouteParams(input RouteRecord) dbsqlc.UpdateTunnelRouteV1Params {
 		OriginAddressSet: input.OriginSet, OriginAddress: input.Origin.Address, PreserveHostSet: input.OriginSet, PreserveHost: input.Origin.PreserveHost,
 		HostOverrideSet: input.OriginSet, HostOverride: nullableStringPtr(input.Origin.HostOverride), TlsVerificationSet: input.OriginSet, TlsVerification: tlsVerification,
 		TlsServerNameSet: input.OriginSet, TlsServerName: nullableStringPtr(serverName), CaReferenceSet: input.OriginSet, CaReference: nullableStringPtr(caRef),
-		MtlsCredentialReferenceSet: input.OriginSet, MtlsCredentialReference: nullableStringPtr(clientRef), DesiredStateSet: input.DesiredStateSet,
+		MtlsCredentialReferenceSet: input.OriginSet, MtlsCredentialReference: nullableStringPtr(clientRef), TlsPinSet: input.OriginSet, TlsPin: routeTLSPin(input.Origin), DesiredStateSet: input.DesiredStateSet,
 		DesiredState: input.DesiredState, UpdatedByActorID: input.ActorID, Now: input.Now, RouteID: input.RouteID, TunnelID: input.TunnelID,
 		ExpectedGeneration: input.ExpectedGeneration,
 		ConnectTimeoutSet:  input.ConnectTimeoutSet, ConnectTimeoutMs: input.ConnectTimeoutMS,
@@ -417,12 +417,19 @@ func routeTLSValues(origin RouteOriginRequest) (string, *string, *string, *strin
 	return origin.TLS.Verification, origin.TLS.ServerName, origin.TLS.CAReference, origin.TLS.ClientCredentialReference
 }
 
+func routeTLSPin(origin RouteOriginRequest) sql.NullString {
+	if origin.Scheme != "https" || origin.TLS == nil {
+		return sql.NullString{}
+	}
+	return nullableStringPtr(origin.TLS.Pin)
+}
+
 func routeCandidate(input RouteRecord) dbsqlc.TunnelRoute {
 	tlsVerification, serverName, caReference, clientReference := routeTLSNullValues(input.Origin)
 	return dbsqlc.TunnelRoute{ID: input.RouteID, TunnelID: input.TunnelID, Name: input.Name, Protocol: input.Protocol, MatchType: input.MatchType,
 		MatchHostname: input.Hostname, WildcardSuffix: input.WildcardSuffix, PathPrefix: input.PathPrefix, Priority: input.Priority,
 		OriginScheme: input.Origin.Scheme, OriginAddress: input.Origin.Address, PreserveHost: input.Origin.PreserveHost,
-		TlsVerification: tlsVerification, TlsServerName: serverName, CaReference: caReference, MtlsCredentialReference: clientReference,
+		TlsVerification: tlsVerification, TlsServerName: serverName, CaReference: caReference, MtlsCredentialReference: clientReference, TlsPin: routeTLSPin(input.Origin),
 		ConnectTimeoutMs: input.ConnectTimeoutMS, IdleTimeoutMs: input.IdleTimeoutMS, MaxConcurrentStreams: input.MaxConcurrentStreams,
 		DesiredState: input.DesiredState}
 }
@@ -453,6 +460,7 @@ func routeCandidateFromRecord(current dbsqlc.TunnelRoute, input RouteRecord) dbs
 		candidate.PreserveHost = input.Origin.PreserveHost
 		candidate.HostOverride = nullableStringPtr(input.Origin.HostOverride)
 		candidate.TlsVerification, candidate.TlsServerName, candidate.CaReference, candidate.MtlsCredentialReference = routeTLSNullValues(input.Origin)
+		candidate.TlsPin = routeTLSPin(input.Origin)
 	}
 	if input.PrioritySet {
 		candidate.Priority = input.Priority
@@ -526,7 +534,7 @@ func routeRecordChanges(current dbsqlc.TunnelRoute, input RouteRecord) bool {
 		current.MatchHostname != candidate.MatchHostname || current.WildcardSuffix != candidate.WildcardSuffix || current.PathPrefix != candidate.PathPrefix ||
 		current.Priority != candidate.Priority || current.OriginScheme != candidate.OriginScheme || current.OriginAddress != candidate.OriginAddress ||
 		current.PreserveHost != candidate.PreserveHost || current.HostOverride != candidate.HostOverride || current.TlsVerification != candidate.TlsVerification ||
-		current.TlsServerName != candidate.TlsServerName || current.CaReference != candidate.CaReference || current.MtlsCredentialReference != candidate.MtlsCredentialReference ||
+		current.TlsServerName != candidate.TlsServerName || current.CaReference != candidate.CaReference || current.MtlsCredentialReference != candidate.MtlsCredentialReference || current.TlsPin != candidate.TlsPin ||
 		current.ConnectTimeoutMs != candidate.ConnectTimeoutMs || current.IdleTimeoutMs != candidate.IdleTimeoutMs || current.MaxConcurrentStreams != candidate.MaxConcurrentStreams ||
 		current.DesiredState != candidate.DesiredState
 }
@@ -540,13 +548,13 @@ func routeAuditMetadata(route dbsqlc.TunnelRoute) map[string]any {
 	return map[string]any{
 		"generation": route.Generation, "protocol": wireProtocol(route.Protocol), "origin_scheme": route.OriginScheme,
 		"desired_state": route.DesiredState, "origin_tls_verification": route.TlsVerification,
-		"origin_tls_insecure_development": route.TlsVerification == "insecure_development",
+		"origin_tls_insecure": route.TlsVerification == "insecure",
 	}
 }
 
 func routeAuditMessage(message string, route dbsqlc.TunnelRoute) string {
-	if route.TlsVerification == "insecure_development" {
-		return message + "; warning: origin TLS certificate verification is disabled for development"
+	if route.TlsVerification == "insecure" {
+		return message + "; warning: origin TLS certificate verification is off"
 	}
 	return message
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/edgeports"
 	"io"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -23,13 +24,12 @@ import (
 )
 
 type ResourceService struct {
-	repository               ResourceRepository
-	cursors                  *resourceCursorCodec
-	now                      func() time.Time
-	newID                    func(prefix string) (string, error)
-	allowInsecureDevelopment bool
-	publicTCPPortMin         int32
-	publicTCPPortMax         int32
+	repository       ResourceRepository
+	cursors          *resourceCursorCodec
+	now              func() time.Time
+	newID            func(prefix string) (string, error)
+	publicTCPPortMin int32
+	publicTCPPortMax int32
 }
 
 const maxResourceLogMessageBytes = 1000
@@ -56,7 +56,7 @@ func NewResourceService(repository ResourceRepository, config ResourceConfig) (*
 	if config.PublicTCPPortMin < 1024 || config.PublicTCPPortMax > 65535 || config.PublicTCPPortMin > config.PublicTCPPortMax {
 		return nil, fmt.Errorf("public TCP port range is invalid")
 	}
-	return &ResourceService{repository: repository, cursors: cursors, now: now, newID: newID, allowInsecureDevelopment: config.AllowInsecureDevelopment, publicTCPPortMin: config.PublicTCPPortMin, publicTCPPortMax: config.PublicTCPPortMax}, nil
+	return &ResourceService{repository: repository, cursors: cursors, now: now, newID: newID, publicTCPPortMin: config.PublicTCPPortMin, publicTCPPortMax: config.PublicTCPPortMax}, nil
 }
 
 func (s *ResourceService) authorize(request previewtunnelapi.RequestContext, action string, requireHost bool) error {
@@ -127,9 +127,6 @@ func (s *ResourceService) CreateRoute(ctx context.Context, request previewtunnel
 	if err != nil {
 		return RouteMutationResult{}, err
 	}
-	if err := s.validateOriginPolicy(normalized.Origin); err != nil {
-		return RouteMutationResult{}, err
-	}
 	request, err = normalizeRequestContext(request, s.newID)
 	if err != nil {
 		return RouteMutationResult{}, err
@@ -177,11 +174,6 @@ func (s *ResourceService) PatchRoute(ctx context.Context, request previewtunnela
 	normalized, err := normalizeRoutePatch(input)
 	if err != nil {
 		return RouteMutationResult{}, err
-	}
-	if input.Origin != nil {
-		if err := s.validateOriginPolicy(normalized.Origin); err != nil {
-			return RouteMutationResult{}, err
-		}
 	}
 	request, err = normalizeRequestContext(request, s.newID)
 	if err != nil {
@@ -526,7 +518,7 @@ func routeView(row dbsqlc.TunnelRoute) RouteView {
 	}
 	origin := RouteOrigin{Scheme: row.OriginScheme, Address: row.OriginAddress, PreserveHost: row.PreserveHost, HostOverride: nullStringPointer(row.HostOverride)}
 	if row.OriginScheme == "https" {
-		origin.TLS = &RouteTLS{Verification: row.TlsVerification, ServerName: nullStringPointer(row.TlsServerName), CAReference: nullStringPointer(row.CaReference), ClientCredentialReference: nullStringPointer(row.MtlsCredentialReference)}
+		origin.TLS = &RouteTLS{Verification: row.TlsVerification, ServerName: nullStringPointer(row.TlsServerName), CAReference: nullStringPointer(row.CaReference), ClientCredentialReference: nullStringPointer(row.MtlsCredentialReference), Pin: nullStringPointer(row.TlsPin)}
 	}
 	return RouteView{Schema: Schema, Kind: "route", ID: row.ID, TunnelID: row.TunnelID, Name: row.Name, Protocol: wireProtocol(row.Protocol), HostMatch: hostMatch,
 		PathPrefix: nullStringPointer(row.PathPrefix), Origin: origin, Priority: row.Priority, ConnectTimeoutMS: row.ConnectTimeoutMs, IdleTimeoutMS: row.IdleTimeoutMs,
@@ -966,11 +958,17 @@ func normalizeRouteOrigin(input RouteOriginRequest) (RouteOriginRequest, error) 
 	return input, nil
 }
 
+// tlsPinPattern is a pinned route's certificate fingerprint (SHA-256 of the leaf certificate DER).
+var tlsPinPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
 func validateRouteTLS(tls RouteTLSRequest) error {
 	switch tls.Verification {
-	case "system", "custom_ca", "insecure_development":
+	case "system", "custom_ca", "insecure", "pinned":
 	default:
 		return fmt.Errorf("%w: TLS verification is invalid", ErrInvalidInput)
+	}
+	if (tls.Verification == "pinned") != (tls.Pin != nil) || tls.Pin != nil && !tlsPinPattern.MatchString(*tls.Pin) {
+		return fmt.Errorf("%w: pinned verification needs pin sha256:<64 lowercase hex>, and only pinned takes a pin", ErrInvalidInput)
 	}
 	if tls.Verification == "custom_ca" && (tls.CAReference == nil || strings.TrimSpace(*tls.CAReference) == "") {
 		return fmt.Errorf("%w: custom CA reference is required", ErrInvalidInput)
@@ -984,13 +982,6 @@ func validateRouteTLS(tls RouteTLSRequest) error {
 				return err
 			}
 		}
-	}
-	return nil
-}
-
-func (s *ResourceService) validateOriginPolicy(origin RouteOriginRequest) error {
-	if origin.TLS != nil && origin.TLS.Verification == "insecure_development" && !s.allowInsecureDevelopment {
-		return fmt.Errorf("%w: insecure_development origin TLS is disabled outside explicit development policy", ErrInvalidInput)
 	}
 	return nil
 }

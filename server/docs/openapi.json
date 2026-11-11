@@ -2761,14 +2761,23 @@
         "required": [
           "verification"
         ],
-        "description": "HTTPS verification policy. system is the secure default. custom_ca and optional mTLS values are opaque credential references, never PEM or private-key material. insecure_development is rejected unless explicit development policy permits and audits it.",
+        "description": "HTTPS verification policy. system is the secure default. custom_ca and optional mTLS values are opaque credential references, never PEM or private-key material. insecure skips certificate checks (audited, and shown as a warning for origins that are not on loopback). pinned trusts exactly the certificate whose SHA-256 fingerprint is pin.",
         "properties": {
           "verification": {
             "enum": [
               "system",
               "custom_ca",
-              "insecure_development"
+              "insecure",
+              "pinned"
             ]
+          },
+          "pin": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "description": "SHA-256 fingerprint of the origin's leaf certificate DER; required for pinned and refused otherwise."
           },
           "server_name": {
             "type": [
@@ -2826,9 +2835,31 @@
             "if": {
               "properties": {
                 "verification": {
+                  "const": "pinned"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "pin"
+              ]
+            },
+            "else": {
+              "properties": {
+                "pin": {
+                  "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "verification": {
                   "enum": [
                     "system",
-                    "insecure_development"
+                    "insecure",
+                    "pinned"
                   ]
                 }
               }

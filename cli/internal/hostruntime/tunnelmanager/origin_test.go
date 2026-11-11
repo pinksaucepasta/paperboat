@@ -88,10 +88,14 @@ func TestNetworkOriginTLSConfigEnforcesVerificationPolicy(t *testing.T) {
 	if err != nil || config.ServerName != serverName || config.InsecureSkipVerify || config.MinVersion != tls.VersionTLS12 {
 		t.Fatalf("system TLS config = %#v, %v", config, err)
 	}
-	route.TLSVerification = "insecure_development"
-	config, err = (NetworkOriginProber{AllowInsecureDevelopment: true}).originTLSConfig(context.Background(), route)
-	if err != nil || !config.InsecureSkipVerify {
-		t.Fatalf("development TLS config = %#v, %v", config, err)
+	route.TLSVerification = "insecure"
+	config, err = (NetworkOriginProber{}).originTLSConfig(context.Background(), route)
+	if err != nil || !config.InsecureSkipVerify || config.VerifyConnection != nil {
+		t.Fatalf("insecure TLS config = %#v, %v", config, err)
+	}
+	route.TLSVerification = "pinned"
+	if _, err := (NetworkOriginProber{}).originTLSConfig(context.Background(), route); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("pinned without a pin = %v", err)
 	}
 	route.TLSVerification = "custom_ca"
 	if _, err := (NetworkOriginProber{}).originTLSConfig(context.Background(), route); !errors.Is(err, ErrInvalidConfig) {
@@ -106,22 +110,5 @@ func TestNetworkOriginTLSConfigEnforcesVerificationPolicy(t *testing.T) {
 	route.TLSVerification = "mutual_tls"
 	if err := (NetworkOriginProber{Dialer: &originDialer{}}).ProbeOrigin(context.Background(), route); !errors.Is(err, ErrInvalidConfig) {
 		t.Fatalf("obsolete mutual_tls mode = %v", err)
-	}
-}
-
-func TestNetworkOriginProberRejectsDevelopmentTLSUnlessExplicitlyEnabled(t *testing.T) {
-	route := hoststate.TunnelConfigRoute{ID: "route_01", OriginScheme: "https", OriginAddress: "127.0.0.1:443", TLSVerification: "insecure_development", ConnectTimeoutMs: 100, DesiredState: "active"}
-	if err := (NetworkOriginProber{Dialer: &originDialer{}}).ProbeOrigin(context.Background(), route); !errors.Is(err, ErrInvalidConfig) {
-		t.Fatalf("development TLS without opt-in = %v", err)
-	}
-	if err := (NetworkOriginProber{Dialer: &originDialer{}, AllowInsecureDevelopment: true}).ProbeOrigin(context.Background(), route); !errors.Is(err, ErrInvalidConfig) {
-		t.Fatalf("development TLS without audit hook = %v", err)
-	}
-	var observations []OriginProbeObservation
-	err := (NetworkOriginProber{Dialer: &originDialer{}, AllowInsecureDevelopment: true, Observe: func(value OriginProbeObservation) {
-		observations = append(observations, value)
-	}}).ProbeOrigin(context.Background(), route)
-	if !errors.Is(err, ErrOriginUnavailable) || len(observations) != 1 || observations[0].RouteID != route.ID || observations[0].Code != OriginProbeInsecureDevelopment {
-		t.Fatalf("development TLS observation=%+v err=%v", observations, err)
 	}
 }

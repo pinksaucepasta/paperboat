@@ -389,7 +389,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		runtimeObservation.sender.carriers = attachment
 		// Engine tunnels forward to their origins with the routes' TLS settings (custom CA, mTLS from
 		// the origin-credentials store) and the daemon's shared inspector store and registry.
-		prober, streams, originErr := tunnelmanager.NewOriginRuntime(tunnelmanager.CredentialStoreOriginSecretResolver{Store: clientconfig.FileSecretStore{Dir: filepath.Join(runtimeConfig.StateRoot, "origin-credentials")}}, false, nil)
+		prober, streams, originErr := tunnelmanager.NewOriginRuntime(tunnelmanager.CredentialStoreOriginSecretResolver{Store: clientconfig.FileSecretStore{Dir: filepath.Join(runtimeConfig.StateRoot, "origin-credentials")}})
 		if originErr != nil {
 			return nil, errors.Join(ErrProductionInvalid, originErr)
 		}

@@ -407,8 +407,11 @@ missing SNI, HTTP paths/headers, and edge HTTP authentication do not apply.
 - Credential reference fields accept only bounded `keychain`, `credential-manager`,
   `secret-service`, `protected-file`, or `tpm` Paperboat references. Request and response JSON,
   logs, audit metadata, and errors never contain resolved CA, certificate, or private-key bytes.
-- `insecure_development` is accepted only under explicit development policy. Every accepted
-  change emits a safe warning audit event. It is never a production default.
+- `insecure` skips certificate verification. Every accepted change emits a safe warning audit
+  event, and a route whose origin is not on loopback shows a warning in tunnel status. It is
+  never a default.
+- `pinned` trusts exactly one certificate: `pin` is `sha256:` plus the lowercase hex SHA-256 of the
+  origin's leaf certificate (DER). A different certificate is refused until the route is re-pinned.
 - Origin probes and live streams use the same policy. HTTPS, h2c, and mTLS failures keep the
   previous ready generation active; generation replacement closes old idle origin connections.
 

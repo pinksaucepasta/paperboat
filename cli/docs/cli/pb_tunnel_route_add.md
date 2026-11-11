@@ -38,8 +38,9 @@ pb tunnel route add <tunnel> [flags]
       --priority int32                       route priority
       --protocol string                      route protocol (http, tcp, tls passthrough, or tcp_private) (default "http")
       --timeout duration                     maximum time to wait for operation completion (default 2m0s)
+      --tls-pin string                       pin the origin certificate by its fingerprint (sha256:<hex>), without connecting
       --tls-server-name string               explicit origin TLS server name
-      --tls-verification string              origin TLS verification (system, custom_ca, or insecure_development)
+      --tls-verification string              origin TLS verification: system, custom_ca, pinned (shows the origin certificate and pins it), or insecure
       --to string                            to
       --wait                                 wait for the operation to reach a terminal state
 ```

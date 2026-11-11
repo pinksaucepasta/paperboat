@@ -211,7 +211,7 @@ func TestOpenAPIOriginTLSIsReferenceOnlyAndModeBound(t *testing.T) {
 	tlsSchema := doc.Components.Schemas["TunnelRouteTLS"]
 	properties := objectValue(t, tlsSchema["properties"], "TunnelRouteTLS.properties")
 	verification := objectValue(t, properties["verification"], "TunnelRouteTLS.verification")
-	wantModes := map[string]bool{"system": true, "custom_ca": true, "insecure_development": true}
+	wantModes := map[string]bool{"system": true, "custom_ca": true, "insecure": true, "pinned": true}
 	gotModes := stringSet(t, verification["enum"], "TunnelRouteTLS.verification.enum")
 	if !reflect.DeepEqual(gotModes, wantModes) {
 		t.Fatalf("origin TLS modes = %#v, want %#v", gotModes, wantModes)
@@ -233,7 +233,7 @@ func TestOpenAPIOriginTLSIsReferenceOnlyAndModeBound(t *testing.T) {
 			t.Fatalf("origin TLS schema contains secret material field %q", forbidden)
 		}
 	}
-	if len(arrayValue(t, tlsSchema["allOf"], "TunnelRouteTLS.allOf")) != 2 {
+	if len(arrayValue(t, tlsSchema["allOf"], "TunnelRouteTLS.allOf")) != 3 { // custom_ca needs a CA, pinned needs a pin, others take neither
 		t.Fatalf("origin TLS mode/reference conditions missing: %#v", tlsSchema)
 	}
 }

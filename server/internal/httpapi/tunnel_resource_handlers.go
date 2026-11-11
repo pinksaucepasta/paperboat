@@ -29,6 +29,7 @@ type tunnelResourceRouteTLSDocument struct {
 	ServerName                *string `json:"server_name"`
 	CAReference               *string `json:"ca_reference"`
 	ClientCredentialReference *string `json:"client_credential_reference"`
+	Pin                       *string `json:"pin"`
 }
 
 type tunnelResourceRouteOriginDocument struct {
@@ -93,7 +94,7 @@ func tunnelResourceRouteOrigin(document tunnelResourceRouteOriginDocument) (tunn
 	}
 	origin := tunnelv1.RouteOriginRequest{Scheme: document.Scheme, Address: document.Address, PreserveHost: *document.PreserveHost, HostOverride: document.HostOverride}
 	if document.TLS != nil {
-		origin.TLS = &tunnelv1.RouteTLSRequest{Verification: document.TLS.Verification, ServerName: document.TLS.ServerName, CAReference: document.TLS.CAReference, ClientCredentialReference: document.TLS.ClientCredentialReference}
+		origin.TLS = &tunnelv1.RouteTLSRequest{Verification: document.TLS.Verification, ServerName: document.TLS.ServerName, CAReference: document.TLS.CAReference, ClientCredentialReference: document.TLS.ClientCredentialReference, Pin: document.TLS.Pin}
 	}
 	return origin, nil
 }

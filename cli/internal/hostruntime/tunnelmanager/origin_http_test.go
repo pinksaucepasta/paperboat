@@ -177,27 +177,43 @@ func TestOriginHTTPTransportRequiresConfiguredMTLSIdentity(t *testing.T) {
 	}
 }
 
-func TestOriginHTTPTransportInsecureDevelopmentRequiresAuditHook(t *testing.T) {
+// A self-signed origin (Proxmox, Synology) is trusted by its pinned fingerprint, known_hosts style: a
+// different certificate is refused with the re-pin hint and reported as certificate_changed.
+func TestOriginHTTPTransportPinnedAndInsecureVerification(t *testing.T) {
 	pki := newOriginPKI(t, "origin.internal.test")
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) { writer.WriteHeader(http.StatusOK) }))
 	server.TLS = &tls.Config{Certificates: []tls.Certificate{pki.serverTLS}, MinVersion: tls.VersionTLS12}
 	server.StartTLS()
 	defer server.Close()
-	route := httpsOriginRoute(server.Listener.Addr().String(), "wrong.internal.test")
-	route.TLSVerification, route.CAReference = "insecure_development", nil
-	request, _ := http.NewRequest(http.MethodGet, "https://public.example.test/", nil)
-	if _, err := (&OriginHTTPTransport{AllowInsecureDevelopment: true}).RoundTrip(context.Background(), route, request); !errors.Is(err, ErrInvalidConfig) {
-		t.Fatalf("missing audit hook error=%v", err)
-	}
-	observed := OriginProbeObservation{}
-	request, _ = http.NewRequest(http.MethodGet, "https://public.example.test/", nil)
-	response, err := (&OriginHTTPTransport{AllowInsecureDevelopment: true, Observe: func(value OriginProbeObservation) { observed = value }}).RoundTrip(context.Background(), route, request)
+	leaf, err := x509.ParseCertificate(pki.serverTLS.Certificate[0])
 	if err != nil {
 		t.Fatal(err)
 	}
-	response.Body.Close()
-	if observed.RouteID != route.ID || observed.Code != OriginProbeInsecureDevelopment {
-		t.Fatalf("audit observation=%+v", observed)
+	visit := func(route hoststate.TunnelConfigRoute) error {
+		request, _ := http.NewRequest(http.MethodGet, "https://public.example.test/", nil)
+		response, err := (&OriginHTTPTransport{}).RoundTrip(context.Background(), route, request)
+		if err == nil {
+			response.Body.Close()
+		}
+		return err
+	}
+	route := httpsOriginRoute(server.Listener.Addr().String(), "wrong.internal.test")
+	route.CAReference = nil
+	route.TLSVerification = "insecure"
+	if err := visit(route); err != nil {
+		t.Fatalf("insecure: %v", err)
+	}
+	pin := CertificateFingerprint(leaf)
+	route.TLSVerification, route.TLSPin = "pinned", &pin
+	if err := visit(route); err != nil {
+		t.Fatalf("pinned to the presented certificate: %v", err)
+	}
+	other := "sha256:" + strings.Repeat("0", 64)
+	route.TLSPin = &other
+	err = visit(route)
+	var changed *CertificateChangedError
+	if !errors.As(err, &changed) || changed.Presented != pin || !strings.Contains(err.Error(), "re-pin") || originHealthCode("", err) != OriginCertificateChanged {
+		t.Fatalf("pin mismatch error = %v", err)
 	}
 }
 

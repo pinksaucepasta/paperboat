@@ -2923,6 +2923,7 @@ type TunnelRoute struct {
 	DeletedAt               sql.NullTime
 	PublicTcpListenerID     sql.NullString
 	PublicTcpPort           sql.NullInt32
+	TlsPin                  sql.NullString
 }
 
 type TunnelRouteOriginHealth struct {

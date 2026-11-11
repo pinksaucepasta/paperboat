@@ -46,9 +46,9 @@ func TestIngressProjectionRejectsInvalidTargetAndExpiry(t *testing.T) {
 		{"expired", func(d *wire.IngressDecision) { d.ExpiresAt = now }},
 		{"excessive authority", func(d *wire.IngressDecision) { d.ExpiresAt = now.Add(time.Minute) }},
 		{"missing generation", func(d *wire.IngressDecision) { d.Binding.RouteGeneration = 0 }},
-		{"insecure TLS", func(d *wire.IngressDecision) {
+		{"pinned TLS without a pin", func(d *wire.IngressDecision) {
 			d.Binding.OriginScheme = "https"
-			d.Binding.TLSVerification = "insecure_development"
+			d.Binding.TLSVerification = "pinned"
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

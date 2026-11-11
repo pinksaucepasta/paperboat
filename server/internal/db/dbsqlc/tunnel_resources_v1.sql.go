@@ -219,7 +219,7 @@ func (q *Queries) CreateTunnelLogEntryV1(ctx context.Context, arg CreateTunnelLo
 const createTunnelRouteV1 = `-- name: CreateTunnelRouteV1 :one
 WITH public_port AS MATERIALIZED (
   SELECT candidate::integer AS port
-  FROM generate_series($26::integer, $27::integer) AS candidate
+  FROM generate_series($27::integer, $28::integer) AS candidate
   WHERE $4::text = 'tcp'
     AND NOT EXISTS (
       SELECT 1 FROM tunnel_routes
@@ -235,7 +235,7 @@ INSERT INTO tunnel_routes
    mtls_credential_reference, connect_timeout_ms, idle_timeout_ms,
    max_concurrent_streams, desired_state, created_by_actor_id,
    public_tcp_listener_id, public_tcp_port,
-   updated_by_actor_id, created_at, updated_at)
+   updated_by_actor_id, created_at, updated_at, tls_pin)
 VALUES
   ($1, $2, $3, $4,
    $5, $6, $7,
@@ -247,14 +247,14 @@ VALUES
    $20, $21,
    $22, CASE WHEN $4::text='tls' THEN 'listener_tls_443' ELSE $23 END,
    CASE WHEN $4::text='tls' THEN 443 ELSE (SELECT port FROM public_port) END, $24,
-   $25, $25)
+   $25, $25, $26)
 RETURNING id, tunnel_id, name, protocol, match_type, match_hostname,
           wildcard_suffix, path_prefix, priority, origin_scheme, origin_address,
           preserve_host, host_override, tls_verification, tls_server_name,
           ca_reference, mtls_credential_reference, connect_timeout_ms,
           idle_timeout_ms, max_concurrent_streams, desired_state, generation,
           created_by_actor_id, updated_by_actor_id, created_at, updated_at,
-          deleted_at, public_tcp_listener_id, public_tcp_port
+          deleted_at, public_tcp_listener_id, public_tcp_port, tls_pin
 `
 
 type CreateTunnelRouteV1Params struct {
@@ -283,6 +283,7 @@ type CreateTunnelRouteV1Params struct {
 	PublicTcpListenerID     interface{}
 	UpdatedByActorID        string
 	Now                     time.Time
+	TlsPin                  sql.NullString
 	PublicTcpPortMin        int32
 	PublicTcpPortMax        int32
 }
@@ -314,6 +315,7 @@ func (q *Queries) CreateTunnelRouteV1(ctx context.Context, arg CreateTunnelRoute
 		arg.PublicTcpListenerID,
 		arg.UpdatedByActorID,
 		arg.Now,
+		arg.TlsPin,
 		arg.PublicTcpPortMin,
 		arg.PublicTcpPortMax,
 	)
@@ -348,6 +350,7 @@ func (q *Queries) CreateTunnelRouteV1(ctx context.Context, arg CreateTunnelRoute
 		&i.DeletedAt,
 		&i.PublicTcpListenerID,
 		&i.PublicTcpPort,
+		&i.TlsPin,
 	)
 	return i, err
 }
@@ -453,7 +456,7 @@ RETURNING id, tunnel_id, name, protocol, match_type, match_hostname,
           ca_reference, mtls_credential_reference, connect_timeout_ms,
           idle_timeout_ms, max_concurrent_streams, desired_state, generation,
           created_by_actor_id, updated_by_actor_id, created_at, updated_at,
-          deleted_at, public_tcp_listener_id, public_tcp_port
+          deleted_at, public_tcp_listener_id, public_tcp_port, tls_pin
 `
 
 type DeleteTunnelRouteV1Params struct {
@@ -503,6 +506,7 @@ func (q *Queries) DeleteTunnelRouteV1(ctx context.Context, arg DeleteTunnelRoute
 		&i.DeletedAt,
 		&i.PublicTcpListenerID,
 		&i.PublicTcpPort,
+		&i.TlsPin,
 	)
 	return i, err
 }
@@ -695,7 +699,7 @@ SELECT r.id, r.tunnel_id, r.name, r.protocol, r.match_type, r.match_hostname,
        r.connect_timeout_ms, r.idle_timeout_ms, r.max_concurrent_streams,
        r.desired_state, r.generation, r.created_by_actor_id,
        r.updated_by_actor_id, r.created_at, r.updated_at, r.deleted_at,
-       r.public_tcp_listener_id, r.public_tcp_port
+       r.public_tcp_listener_id, r.public_tcp_port, r.tls_pin
 FROM tunnel_routes AS r
 JOIN tunnels AS t ON t.id = r.tunnel_id
 WHERE r.id = $1
@@ -742,6 +746,7 @@ func (q *Queries) GetTunnelRouteV1(ctx context.Context, arg GetTunnelRouteV1Para
 		&i.DeletedAt,
 		&i.PublicTcpListenerID,
 		&i.PublicTcpPort,
+		&i.TlsPin,
 	)
 	return i, err
 }
@@ -800,7 +805,7 @@ SELECT id, tunnel_id, name, protocol, match_type, match_hostname,
        ca_reference, mtls_credential_reference, connect_timeout_ms,
        idle_timeout_ms, max_concurrent_streams, desired_state, generation,
        created_by_actor_id, updated_by_actor_id, created_at, updated_at,
-       deleted_at, public_tcp_listener_id, public_tcp_port
+       deleted_at, public_tcp_listener_id, public_tcp_port, tls_pin
 FROM tunnel_routes
 WHERE tunnel_id = $1
   AND desired_state = 'active'
@@ -847,6 +852,7 @@ func (q *Queries) ListActiveTunnelRoutesForSnapshotV1(ctx context.Context, tunne
 			&i.DeletedAt,
 			&i.PublicTcpListenerID,
 			&i.PublicTcpPort,
+			&i.TlsPin,
 		); err != nil {
 			return nil, err
 		}
@@ -1089,7 +1095,7 @@ SELECT r.id, r.tunnel_id, r.name, r.protocol, r.match_type, r.match_hostname,
        r.ca_reference, r.mtls_credential_reference, r.connect_timeout_ms,
        r.idle_timeout_ms, r.max_concurrent_streams, r.desired_state, r.generation,
        r.created_by_actor_id, r.updated_by_actor_id, r.created_at, r.updated_at,
-       r.deleted_at, r.public_tcp_listener_id, r.public_tcp_port
+       r.deleted_at, r.public_tcp_listener_id, r.public_tcp_port, r.tls_pin
 FROM tunnel_routes AS r
 JOIN tunnels AS t ON t.id = r.tunnel_id
 WHERE r.tunnel_id = $1
@@ -1159,6 +1165,7 @@ func (q *Queries) ListTunnelRoutesV1(ctx context.Context, arg ListTunnelRoutesV1
 			&i.DeletedAt,
 			&i.PublicTcpListenerID,
 			&i.PublicTcpPort,
+			&i.TlsPin,
 		); err != nil {
 			return nil, err
 		}
@@ -1196,17 +1203,18 @@ SET name = CASE WHEN $1::boolean THEN $2::text ELSE name END,
     tls_server_name = CASE WHEN $25::boolean THEN $26::text ELSE tls_server_name END,
     ca_reference = CASE WHEN $27::boolean THEN $28::text ELSE ca_reference END,
     mtls_credential_reference = CASE WHEN $29::boolean THEN $30::text ELSE mtls_credential_reference END,
-    connect_timeout_ms = CASE WHEN $31::boolean THEN $32::integer ELSE connect_timeout_ms END,
-    idle_timeout_ms = CASE WHEN $33::boolean THEN $34::integer ELSE idle_timeout_ms END,
-    max_concurrent_streams = CASE WHEN $35::boolean THEN $36::integer ELSE max_concurrent_streams END,
-    desired_state = CASE WHEN $37::boolean THEN $38::text ELSE desired_state END,
-    updated_by_actor_id = $39,
+    tls_pin = CASE WHEN $31::boolean THEN $32::text ELSE tls_pin END,
+    connect_timeout_ms = CASE WHEN $33::boolean THEN $34::integer ELSE connect_timeout_ms END,
+    idle_timeout_ms = CASE WHEN $35::boolean THEN $36::integer ELSE idle_timeout_ms END,
+    max_concurrent_streams = CASE WHEN $37::boolean THEN $38::integer ELSE max_concurrent_streams END,
+    desired_state = CASE WHEN $39::boolean THEN $40::text ELSE desired_state END,
+    updated_by_actor_id = $41,
     generation = generation + 1,
-    updated_at = $40,
-    deleted_at = CASE WHEN $37::boolean AND $38::text = 'deleted' THEN $40 ELSE deleted_at END
-WHERE id = $41
-  AND tunnel_id = $42
-  AND generation = $43
+    updated_at = $42,
+    deleted_at = CASE WHEN $39::boolean AND $40::text = 'deleted' THEN $42 ELSE deleted_at END
+WHERE id = $43
+  AND tunnel_id = $44
+  AND generation = $45
   AND deleted_at IS NULL
 RETURNING id, tunnel_id, name, protocol, match_type, match_hostname,
           wildcard_suffix, path_prefix, priority, origin_scheme, origin_address,
@@ -1214,7 +1222,7 @@ RETURNING id, tunnel_id, name, protocol, match_type, match_hostname,
           ca_reference, mtls_credential_reference, connect_timeout_ms,
           idle_timeout_ms, max_concurrent_streams, desired_state, generation,
           created_by_actor_id, updated_by_actor_id, created_at, updated_at,
-          deleted_at, public_tcp_listener_id, public_tcp_port
+          deleted_at, public_tcp_listener_id, public_tcp_port, tls_pin
 `
 
 type UpdateTunnelRouteV1Params struct {
@@ -1248,6 +1256,8 @@ type UpdateTunnelRouteV1Params struct {
 	CaReference                sql.NullString
 	MtlsCredentialReferenceSet bool
 	MtlsCredentialReference    sql.NullString
+	TlsPinSet                  bool
+	TlsPin                     sql.NullString
 	ConnectTimeoutSet          bool
 	ConnectTimeoutMs           int32
 	IdleTimeoutSet             bool
@@ -1295,6 +1305,8 @@ func (q *Queries) UpdateTunnelRouteV1(ctx context.Context, arg UpdateTunnelRoute
 		arg.CaReference,
 		arg.MtlsCredentialReferenceSet,
 		arg.MtlsCredentialReference,
+		arg.TlsPinSet,
+		arg.TlsPin,
 		arg.ConnectTimeoutSet,
 		arg.ConnectTimeoutMs,
 		arg.IdleTimeoutSet,
@@ -1340,6 +1352,7 @@ func (q *Queries) UpdateTunnelRouteV1(ctx context.Context, arg UpdateTunnelRoute
 		&i.DeletedAt,
 		&i.PublicTcpListenerID,
 		&i.PublicTcpPort,
+		&i.TlsPin,
 	)
 	return i, err
 }

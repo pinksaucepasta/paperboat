@@ -480,7 +480,7 @@ func validateWireConfigRoute(route wireConfigRoute) error {
 		return ErrInvalidInput
 	}
 	switch route.TLSVerification {
-	case "not_applicable", "system", "custom_ca", "mutual_tls", "insecure_development":
+	case "not_applicable", "system", "custom_ca", "mutual_tls", "insecure", "pinned":
 	default:
 		return ErrInvalidInput
 	}

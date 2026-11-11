@@ -43,7 +43,7 @@ func originHealthReports(request runtimewire.OriginHealthRequest, now time.Time)
 			report.State = "unreachable"
 		}
 		codeOK := route.Code == "" && report.State == "ready" ||
-			report.State == "unreachable" && (route.Code == "refused" || route.Code == "timeout" || route.Code == "unreachable" || route.Code == "tls" || route.Code == "redirect_loop")
+			report.State == "unreachable" && (route.Code == "refused" || route.Code == "timeout" || route.Code == "unreachable" || route.Code == "tls" || route.Code == "redirect_loop" || route.Code == "certificate_changed")
 		if report.State == "" || !codeOK || route.TunnelID == "" || route.RouteID == "" {
 			return nil, false
 		}

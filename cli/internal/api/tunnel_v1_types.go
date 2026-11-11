@@ -111,6 +111,7 @@ type TunnelRouteTLS struct {
 	ServerName                *string `json:"server_name,omitempty"`
 	CAReference               *string `json:"ca_reference,omitempty"`
 	ClientCredentialReference *string `json:"client_credential_reference,omitempty"`
+	Pin                       *string `json:"pin,omitempty"`
 }
 
 type TunnelRouteOrigin struct {

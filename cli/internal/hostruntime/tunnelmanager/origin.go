@@ -3,8 +3,10 @@ package tunnelmanager
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -23,7 +25,7 @@ type OriginDialer interface {
 
 // OriginTLSProvider resolves write-only CA and client-certificate references.
 // Returned configurations are cloned before use and must not disable
-// verification; only the explicit insecure_development route mode may do so.
+// verification; only the route's insecure or pinned mode does so.
 type OriginTLSProvider interface {
 	TLSConfig(context.Context, hoststate.TunnelConfigRoute) (*tls.Config, error)
 }
@@ -63,13 +65,13 @@ func (r CredentialStoreOriginSecretResolver) ResolveOriginSecret(ctx context.Con
 
 // NewOriginRuntime constructs matching probe and request-forwarding policy so
 // readiness cannot pass with different TLS settings from live traffic.
-func NewOriginRuntime(secrets OriginSecretResolver, allowInsecureDevelopment bool, observe func(OriginProbeObservation)) (NetworkOriginProber, *OriginStreamForwarder, error) {
+func NewOriginRuntime(secrets OriginSecretResolver) (NetworkOriginProber, *OriginStreamForwarder, error) {
 	if secrets == nil {
 		return NetworkOriginProber{}, nil, ErrInvalidConfig
 	}
 	provider := ReferenceOriginTLSProvider{Secrets: secrets}
-	transport := &OriginHTTPTransport{TLS: provider, AllowInsecureDevelopment: allowInsecureDevelopment, Observe: observe}
-	prober := NetworkOriginProber{TLS: provider, AllowInsecureDevelopment: allowInsecureDevelopment, Observe: observe}
+	transport := &OriginHTTPTransport{TLS: provider}
+	prober := NetworkOriginProber{TLS: provider}
 	return prober, &OriginStreamForwarder{Transport: transport}, nil
 }
 
@@ -146,10 +148,8 @@ func (p ReferenceOriginTLSProvider) resolve(ctx context.Context, reference strin
 }
 
 type NetworkOriginProber struct {
-	Dialer                   OriginDialer
-	TLS                      OriginTLSProvider
-	AllowInsecureDevelopment bool
-	Observe                  func(OriginProbeObservation)
+	Dialer OriginDialer
+	TLS    OriginTLSProvider
 }
 
 type OriginProbeObservation struct {
@@ -157,7 +157,9 @@ type OriginProbeObservation struct {
 	Code    string
 }
 
-const OriginProbeInsecureDevelopment = "insecure_development_tls"
+// OriginCertificateChanged is the origin-health code for a pinned route whose origin presents a
+// different certificate.
+const OriginCertificateChanged = "certificate_changed"
 
 // OriginRedirectLoop: live traffic saw the origin send a visitor back to the URL it asked for (the
 // edge shows the loop page). It is also the origin-health code the control plane accepts.
@@ -186,12 +188,7 @@ func (p NetworkOriginProber) ProbeOrigin(ctx context.Context, route hoststate.Tu
 		network = "unix"
 	case "https":
 		switch route.TLSVerification {
-		case "system", "custom_ca":
-		case "insecure_development":
-			if !p.AllowInsecureDevelopment || p.Observe == nil {
-				return ErrInvalidConfig
-			}
-			p.Observe(OriginProbeObservation{RouteID: route.ID, Code: OriginProbeInsecureDevelopment})
+		case "system", "custom_ca", "insecure", "pinned":
 		default:
 			return ErrInvalidConfig
 		}
@@ -254,9 +251,24 @@ func (p NetworkOriginProber) originTLSConfig(ctx context.Context, route hoststat
 	if route.TLSVerification != "custom_ca" && route.CAReference != nil {
 		return nil, ErrInvalidConfig
 	}
-	if route.TLSVerification == "insecure_development" {
-		// This is deliberately limited to the explicit development-only mode.
-		config.InsecureSkipVerify = true //nolint:gosec
+	switch route.TLSVerification {
+	case "insecure":
+		config.InsecureSkipVerify = true //nolint:gosec // the owner turned verification off for this route
+	case "pinned":
+		if route.TLSPin == nil {
+			return nil, ErrInvalidConfig
+		}
+		pin := *route.TLSPin
+		config.InsecureSkipVerify = true //nolint:gosec // VerifyConnection checks the pinned certificate instead of a CA chain
+		config.VerifyConnection = func(state tls.ConnectionState) error {
+			if len(state.PeerCertificates) == 0 {
+				return &CertificateChangedError{Pinned: pin}
+			}
+			if presented := CertificateFingerprint(state.PeerCertificates[0]); presented != pin {
+				return &CertificateChangedError{Pinned: pin, Presented: presented}
+			}
+			return nil
+		}
 	}
 	if route.TLSServerName != nil {
 		config.ServerName = *route.TLSServerName
@@ -267,3 +279,18 @@ func (p NetworkOriginProber) originTLSConfig(ctx context.Context, route hoststat
 }
 
 var _ OriginProber = NetworkOriginProber{}
+
+// CertificateFingerprint is a pinned route's pin: "sha256:" and the hex SHA-256 of the certificate DER,
+// the value browsers and `openssl x509 -fingerprint -sha256` show (without colons, lowercase).
+func CertificateFingerprint(certificate *x509.Certificate) string {
+	sum := sha256.Sum256(certificate.Raw)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// CertificateChangedError: a pinned origin presented a different certificate. Known-hosts style, it is
+// refused until the owner re-pins the route.
+type CertificateChangedError struct{ Pinned, Presented string }
+
+func (e *CertificateChangedError) Error() string {
+	return "the origin's certificate changed (pinned " + e.Pinned + ", now " + e.Presented + "); if you replaced it, re-pin the route with `pb tunnel route update <tunnel> <route> --tls-verification pinned`"
+}

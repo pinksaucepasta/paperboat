@@ -25,10 +25,9 @@ var ErrOriginRequestInvalid = errors.New("invalid origin HTTP request")
 // or the origin address. Paperboat-internal and hop-by-hop headers never cross
 // this final trust boundary.
 type OriginHTTPTransport struct {
-	Dialer                   OriginDialer
-	TLS                      OriginTLSProvider
-	AllowInsecureDevelopment bool
-	Observe                  func(OriginProbeObservation)
+	Dialer  OriginDialer
+	TLS     OriginTLSProvider
+	Observe func(OriginProbeObservation)
 	// KeepControlPlaneHeaders lets X-Paperboat-* headers through in both directions. It is for the
 	// machine's own runtime listener, where the control plane sends an operation id and reads a file
 	// name; a user's origin never sees or sets those headers.
@@ -135,13 +134,7 @@ func (t *OriginHTTPTransport) transportFor(ctx context.Context, route hoststate.
 		}
 	}
 	if route.OriginScheme == "https" {
-		prober := NetworkOriginProber{TLS: t.TLS, AllowInsecureDevelopment: t.AllowInsecureDevelopment, Observe: t.Observe}
-		if route.TLSVerification == "insecure_development" {
-			if !t.AllowInsecureDevelopment || t.Observe == nil {
-				return nil, ErrInvalidConfig
-			}
-			t.Observe(OriginProbeObservation{RouteID: route.ID, Code: OriginProbeInsecureDevelopment})
-		}
+		prober := NetworkOriginProber{TLS: t.TLS}
 		tlsConfig, err := prober.originTLSConfig(ctx, route)
 		if err != nil {
 			return nil, errors.Join(ErrOriginUnavailable, err)
@@ -204,14 +197,14 @@ func originTransportKey(route hoststate.TunnelConfigRoute) string {
 		}
 		return *value
 	}
-	return strings.Join([]string{route.ID, route.OriginScheme, route.OriginAddress, strconv.FormatBool(route.PreserveHost), field(route.HostOverride), route.TLSVerification, field(route.TLSServerName), field(route.CAReference), field(route.MTLSCredentialReference), strconv.FormatInt(int64(route.ConnectTimeoutMs), 10), strconv.FormatInt(int64(route.IdleTimeoutMs), 10)}, "\x00")
+	return strings.Join([]string{route.ID, route.OriginScheme, route.OriginAddress, strconv.FormatBool(route.PreserveHost), field(route.HostOverride), route.TLSVerification, field(route.TLSServerName), field(route.CAReference), field(route.MTLSCredentialReference), field(route.TLSPin), strconv.FormatInt(int64(route.ConnectTimeoutMs), 10), strconv.FormatInt(int64(route.IdleTimeoutMs), 10)}, "\x00")
 }
 
 func (t *OriginHTTPTransport) newGeneration() *OriginHTTPTransport {
 	if t == nil {
 		return nil
 	}
-	return &OriginHTTPTransport{Dialer: t.Dialer, TLS: t.TLS, AllowInsecureDevelopment: t.AllowInsecureDevelopment, Observe: t.Observe, KeepControlPlaneHeaders: t.KeepControlPlaneHeaders, transports: make(map[string]originRoundTripper)}
+	return &OriginHTTPTransport{Dialer: t.Dialer, TLS: t.TLS, Observe: t.Observe, KeepControlPlaneHeaders: t.KeepControlPlaneHeaders, transports: make(map[string]originRoundTripper)}
 }
 
 func (t *OriginHTTPTransport) CloseIdleConnections() {

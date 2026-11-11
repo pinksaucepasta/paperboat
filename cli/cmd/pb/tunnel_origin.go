@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"path"
 	"strconv"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/spf13/cobra"
+
+	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 func splitTunnelOrigin(value string) (string, string, error) {
@@ -97,7 +100,8 @@ func tunnelRouteOriginFlags(command *cobra.Command, preserveDefault bool) {
 	command.Flags().Bool("preserve-host", preserveDefault, "preserve the incoming Host header")
 	command.Flags().String("host-header", "", "override the origin Host header")
 	command.Flags().Bool("clear-host-header", false, "remove the origin Host override")
-	command.Flags().String("tls-verification", "", "origin TLS verification (system, custom_ca, or insecure_development)")
+	command.Flags().String("tls-verification", "", "origin TLS verification: system, custom_ca, pinned (shows the origin certificate and pins it), or insecure")
+	command.Flags().String("tls-pin", "", "pin the origin certificate by its fingerprint (sha256:<hex>), without connecting")
 	command.Flags().String("tls-server-name", "", "explicit origin TLS server name")
 	command.Flags().Bool("clear-tls-server-name", false, "remove the explicit origin TLS server name")
 	command.Flags().String("ca-reference", "", "protected custom CA reference")
@@ -107,7 +111,7 @@ func tunnelRouteOriginFlags(command *cobra.Command, preserveDefault bool) {
 }
 
 func tunnelRouteOriginFlagsChanged(command *cobra.Command) bool {
-	for _, name := range []string{"preserve-host", "host-header", "clear-host-header", "tls-verification", "tls-server-name", "clear-tls-server-name", "ca-reference", "clear-ca-reference", "client-credential-reference", "clear-client-credential-reference"} {
+	for _, name := range []string{"preserve-host", "host-header", "clear-host-header", "tls-verification", "tls-pin", "tls-server-name", "clear-tls-server-name", "ca-reference", "clear-ca-reference", "client-credential-reference", "clear-client-credential-reference"} {
 		if command.Flags().Changed(name) {
 			return true
 		}
@@ -133,7 +137,7 @@ func applyTunnelRouteOriginFlags(command *cobra.Command, origin api.TunnelRouteO
 		origin.HostOverride = nil
 	}
 	if origin.Scheme != "https" {
-		for _, name := range []string{"tls-verification", "tls-server-name", "clear-tls-server-name", "ca-reference", "clear-ca-reference", "client-credential-reference", "clear-client-credential-reference"} {
+		for _, name := range []string{"tls-verification", "tls-pin", "tls-server-name", "clear-tls-server-name", "ca-reference", "clear-ca-reference", "client-credential-reference", "clear-client-credential-reference"} {
 			if command.Flags().Changed(name) {
 				return api.TunnelRouteOrigin{}, errors.New("origin TLS flags require an https:// origin")
 			}
@@ -147,9 +151,22 @@ func applyTunnelRouteOriginFlags(command *cobra.Command, origin api.TunnelRouteO
 	tls := *origin.TLS
 	if command.Flags().Changed("tls-verification") {
 		tls.Verification, _ = command.Flags().GetString("tls-verification")
-		if tls.Verification != "system" && tls.Verification != "custom_ca" && tls.Verification != "insecure_development" {
-			return api.TunnelRouteOrigin{}, errors.New("tls-verification must be system, custom_ca, or insecure_development")
+		switch tls.Verification {
+		case "system", "custom_ca", "pinned", "insecure":
+		default:
+			return api.TunnelRouteOrigin{}, errors.New("tls-verification must be system, custom_ca, pinned, or insecure")
 		}
+	}
+	if pin, _ := command.Flags().GetString("tls-pin"); command.Flags().Changed("tls-pin") {
+		pin = strings.ToLower(strings.ReplaceAll(pin, ":", "")) // also accept openssl's AB:CD:… form
+		pin = "sha256:" + strings.TrimPrefix(pin, "sha256")
+		if !tunnelTLSPinPattern.MatchString(pin) {
+			return api.TunnelRouteOrigin{}, errors.New("tls-pin must be sha256: followed by 64 hex digits")
+		}
+		if command.Flags().Changed("tls-verification") && tls.Verification != "pinned" {
+			return api.TunnelRouteOrigin{}, errors.New("--tls-pin needs --tls-verification pinned (or no --tls-verification)")
+		}
+		tls.Verification, tls.Pin = "pinned", &pin
 	}
 	serverName, _ := command.Flags().GetString("tls-server-name")
 	clearServerName, _ := command.Flags().GetBool("clear-tls-server-name")
@@ -199,6 +216,19 @@ func applyTunnelRouteOriginFlags(command *cobra.Command, origin api.TunnelRouteO
 	}
 	if tls.Verification == "custom_ca" && tls.CAReference == nil {
 		return api.TunnelRouteOrigin{}, errors.New("custom_ca TLS verification requires --ca-reference")
+	}
+	if tls.Verification != "pinned" {
+		tls.Pin = nil
+	} else if tls.Pin == nil || command.Flags().Changed("tls-verification") && !command.Flags().Changed("tls-pin") {
+		// A new pin, or a re-pin after the origin's certificate changed: show what it presents now.
+		pin, err := fetchOriginPin(command, origin.Address, tls.ServerName)
+		if err != nil {
+			return api.TunnelRouteOrigin{}, err
+		}
+		tls.Pin = &pin
+	}
+	if tls.Verification == "insecure" && command.Flags().Changed("tls-verification") && !sharedprotocol.OriginHostIsLoopback(origin.Address) {
+		fmt.Fprintf(command.ErrOrStderr(), "warning: %s is not on this machine; with verification off, anyone on the path can intercept it unnoticed. --tls-verification pinned checks its certificate instead.\n", origin.Address)
 	}
 	origin.TLS = &tls
 	return origin, nil

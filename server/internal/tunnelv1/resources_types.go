@@ -14,12 +14,11 @@ import (
 // CursorKey is deliberately separate from the tunnel list key so a token from
 // one resource family can never be replayed against another family.
 type ResourceConfig struct {
-	CursorKey                []byte
-	Now                      func() time.Time
-	NewID                    func(prefix string) (string, error)
-	PublicTCPPortMin         int32
-	PublicTCPPortMax         int32
-	AllowInsecureDevelopment bool
+	CursorKey        []byte
+	Now              func() time.Time
+	NewID            func(prefix string) (string, error)
+	PublicTCPPortMin int32
+	PublicTCPPortMax int32
 }
 
 type ResourceAPI interface {
@@ -87,6 +86,8 @@ type RouteTLSRequest struct {
 	ServerName                *string
 	CAReference               *string
 	ClientCredentialReference *string
+	// Pin is "sha256:<hex>" of the one certificate a pinned route trusts.
+	Pin *string
 }
 
 type RouteOriginRequest struct {
@@ -116,6 +117,7 @@ type RouteTLS struct {
 	ServerName                *string `json:"server_name,omitempty"`
 	CAReference               *string `json:"ca_reference,omitempty"`
 	ClientCredentialReference *string `json:"client_credential_reference,omitempty"`
+	Pin                       *string `json:"pin,omitempty"`
 }
 
 type RouteOrigin struct {

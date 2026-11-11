@@ -81,10 +81,12 @@ type TunnelConfigRoute struct {
 	TLSServerName           *string `json:"tls_server_name"`
 	CAReference             *string `json:"ca_reference"`
 	MTLSCredentialReference *string `json:"mtls_credential_reference"`
-	ConnectTimeoutMs        int32   `json:"connect_timeout_ms"`
-	IdleTimeoutMs           int32   `json:"idle_timeout_ms"`
-	MaxConcurrentStreams    int32   `json:"max_concurrent_streams"`
-	DesiredState            string  `json:"desired_state"`
+	// TLSPin is "sha256:<hex>" of the one certificate a pinned route trusts.
+	TLSPin               *string `json:"tls_pin,omitempty"`
+	ConnectTimeoutMs     int32   `json:"connect_timeout_ms"`
+	IdleTimeoutMs        int32   `json:"idle_timeout_ms"`
+	MaxConcurrentStreams int32   `json:"max_concurrent_streams"`
+	DesiredState         string  `json:"desired_state"`
 }
 
 // NewConfigSnapshot canonicalizes the JSON before hashing it. It rejects
@@ -260,7 +262,12 @@ func validateTunnelConfigRoute(route TunnelConfigRoute) error {
 	default:
 		return ErrInvalidState
 	}
-	if route.TLSVerification != "not_applicable" && route.TLSVerification != "system" && route.TLSVerification != "custom_ca" && route.TLSVerification != "insecure_development" {
+	switch route.TLSVerification {
+	case "not_applicable", "system", "custom_ca", "insecure", "pinned":
+	default:
+		return ErrInvalidState
+	}
+	if (route.TLSVerification == "pinned") != (route.TLSPin != nil) || route.TLSPin != nil && !tlsPinPattern.MatchString(*route.TLSPin) {
 		return ErrInvalidState
 	}
 	if route.OriginScheme != "https" && route.TLSVerification != "not_applicable" {
@@ -295,6 +302,8 @@ func validateTunnelConfigRoute(route TunnelConfigRoute) error {
 	}
 	return nil
 }
+
+var tlsPinPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 func validMatchHostname(value string) bool {
 	return len(value) <= 253 && strings.TrimSpace(value) == value && value == strings.ToLower(value) && !strings.HasSuffix(value, ".") && !strings.Contains(value, "*") && hostnamePattern.MatchString(value)

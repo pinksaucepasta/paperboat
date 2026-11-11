@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+var tunnelTLSPin = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
 func tunnelPath(parts ...string) (string, error) {
 	path := "/v1"
 	for _, part := range parts {
@@ -182,9 +184,12 @@ func validateRouteOrigin(origin TunnelRouteOrigin) error {
 		return errors.New("HTTPS origins require a TLS verification policy")
 	}
 	switch origin.TLS.Verification {
-	case "system", "custom_ca", "insecure_development":
+	case "system", "custom_ca", "insecure", "pinned":
 	default:
 		return errors.New("TLS verification is invalid")
+	}
+	if (origin.TLS.Verification == "pinned") != (origin.TLS.Pin != nil) || origin.TLS.Pin != nil && !tunnelTLSPin.MatchString(*origin.TLS.Pin) {
+		return errors.New("TLS pin is invalid")
 	}
 	if origin.TLS.Verification == "custom_ca" && (origin.TLS.CAReference == nil || strings.TrimSpace(*origin.TLS.CAReference) == "") {
 		return errors.New("custom CA reference is required")

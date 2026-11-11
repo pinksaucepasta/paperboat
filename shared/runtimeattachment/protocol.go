@@ -55,7 +55,7 @@ const HostTunnelOriginHealthPath = HostTunnelsPath + "/origin-health"
 const MaximumOriginHealthRoutes = 256
 
 // OriginHealthRoute is one route's origin state. State is "reachable" or "unreachable"; Code names
-// why an unreachable origin is down: refused, timeout, unreachable, tls or redirect_loop.
+// why an unreachable origin is down: refused, timeout, unreachable, tls, redirect_loop or certificate_changed.
 type OriginHealthRoute struct {
 	TunnelID string `json:"tunnel_id"`
 	RouteID  string `json:"route_id"`

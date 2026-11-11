@@ -24,7 +24,7 @@ type OriginRouteReport struct {
 	TunnelID   string
 	RouteID    string
 	State      string // "ready" or "unreachable"
-	Code       string // refused, timeout, unreachable, tls or redirect_loop when unreachable
+	Code       string // refused, timeout, unreachable, tls, redirect_loop or certificate_changed when unreachable
 	ObservedAt time.Time
 }
 
@@ -66,8 +66,11 @@ WHERE tunnel_route_origin_health.observed_at<=EXCLUDED.observed_at`, route.Route
 				continue
 			}
 			level, logCode, message := "warn", "tunnel_origin_unreachable", "The local app for this route is not reachable ("+route.Code+")."
-			if route.Code == "redirect_loop" {
+			switch route.Code {
+			case "redirect_loop":
 				message = "The app behind this route redirects visitors to HTTPS on the address they already use, so browsers loop."
+			case "certificate_changed":
+				message = "The app behind this route presents a different certificate from the pinned one; Paperboat refuses it until the route is re-pinned."
 			}
 			if !isUnreachable {
 				level, logCode, message = "info", "tunnel_origin_recovered", "The local app for this route is reachable again."
