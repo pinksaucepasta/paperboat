@@ -128,7 +128,8 @@ func CheckOwnedBy(descriptor *windows.SECURITY_DESCRIPTOR, owner string) error {
 // CheckService accepts a pipe created by SYSTEM, Administrators, the current user self or owner (the enrolled
 // account that runs the server, "" when there is none besides those). Its DACL must grant access to no one else
 // (tailscale's exclusive check). SYSTEM's per-user pipes also grant their one enrolled user, who can therefore
-// serve them as well: a pipe created by SYSTEM or Administrators may name one further account (never a group).
+// serve them as well: a pipe created by SYSTEM or Administrators may name one further account SID (accountSID cannot tell a domain group from
+// a user; only SYSTEM or Administrators could have written that DACL, so the entry is theirs, never a built-in group).
 func CheckService(descriptor *windows.SECURITY_DESCRIPTOR, self, owner string) error {
 	trusted := []string{systemSID, administratorsSID, self}
 	if owner != "" {
