@@ -1,14 +1,14 @@
 name: Cross-platform
 
 # Build and test the cli, shared and Go SDK modules on macOS and Windows (Linux has its own lanes), and the
-# device-smoke harness's Python unit tests on every push to main. Windows runs without the race detector (slow
+# device-smoke harness's Python unit tests on every push to main (not on pull requests: its macOS and Windows
+# jobs held every hosted runner slot and kept the required PR checks queued for 7+ minutes, 2026-11-11). Windows runs without the race detector (slow
 # there); the Linux and macOS jobs carry it.
 on:
   push:
     branches: [main]
     # Tracker and doc-only pushes start no CI (they queued behind each other, 2026-11-04).
     paths-ignore: ['CHECKLIST.md', 'PLAN.md', 'WHITEBOARD.md', 'docs/**/*.md', '**/README.md']
-  pull_request:
   workflow_dispatch:
     inputs:
       packages:
