@@ -45,11 +45,12 @@ func listenersByDiag(ctx context.Context, ownerUID uint64) ([]Service, error) {
 }
 
 const (
-	sockDiagByFamily = 20 // SOCK_DIAG_BY_FAMILY, linux/sock_diag.h
-	diagListenState   = 10 // TCP_LISTEN, linux/tcp.h
-	nlHeaderBytes    = 16
-	diagRequestBytes = 56 // struct inet_diag_req_v2
-	diagMessageBytes = 72 // struct inet_diag_msg
+	sockDiagByFamily   = 20   // SOCK_DIAG_BY_FAMILY, linux/sock_diag.h
+	diagListenState    = 10   // TCP_LISTEN, linux/tcp.h
+	nlmDumpInterrupted = 0x10 // NLM_F_DUMP_INTR, linux/netlink.h
+	nlHeaderBytes      = 16
+	diagRequestBytes   = 56 // struct inet_diag_req_v2
+	diagMessageBytes   = 72 // struct inet_diag_msg
 )
 
 func diagRequest(family uint8, sequence uint32) []byte {
@@ -71,6 +72,9 @@ func readDiagDump(ctx context.Context, fd int, buffer []byte, family uint8, owne
 			return nil, err
 		}
 		n, _, err := unix.Recvfrom(fd, buffer, 0)
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -81,6 +85,11 @@ func readDiagDump(ctx context.Context, fd int, buffer []byte, family uint8, owne
 			}
 			switch kind := binary.NativeEndian.Uint16(message[4:]); kind {
 			case unix.NLMSG_DONE:
+				// The kernel flags a dump a concurrent change interrupted: its list may be partial, and a partial
+				// list would announce a port gone. ss makes the same check; the caller then reads /proc instead.
+				if binary.NativeEndian.Uint16(message[6:])&nlmDumpInterrupted != 0 {
+					return nil, errors.New("sock_diag: the dump was interrupted by a concurrent change")
+				}
 				return services, nil
 			case unix.NLMSG_ERROR:
 				if length >= nlHeaderBytes+4 {
