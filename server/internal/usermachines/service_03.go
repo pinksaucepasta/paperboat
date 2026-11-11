@@ -68,15 +68,16 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 	if err != nil {
 		return FileTransferDescriptor{}, err
 	}
+	// Gone for good answers before offline: a running send waits through machine_offline but stops at once on not found.
+	if destination.State == "revoked" || destination.State == "disconnected" || destination.State == "deleted" {
+		return FileTransferDescriptor{}, ErrNotFound
+	}
 	requiresReceive := sessionID == "" || sourceMachineID == destinationMachineID
 	if requiresReceive && !slices.Contains(destination.ConfiguredCapabilities, "file_receive") {
 		return FileTransferDescriptor{}, ErrMachineCapabilityUnavailable
 	}
 	if requiresReceive && (!destination.Online || !slices.Contains(destination.ObservedCapabilities, "file_receive")) {
 		return FileTransferDescriptor{}, ErrMachineOffline
-	}
-	if destination.State == "revoked" || destination.State == "disconnected" || destination.State == "deleted" {
-		return FileTransferDescriptor{}, ErrNotFound
 	}
 	if sourceMachineID == destinationMachineID && (destination.State != "online" || destination.SeatState != "occupied") {
 		return FileTransferDescriptor{}, ErrMachineOffline

@@ -48,11 +48,14 @@ WHERE id IN(SELECT edge_node_id FROM paperboat.control_connector_generations WHE
 		{"unobserved receive", `UPDATE paperboat.user_machines SET observed_capabilities=ARRAY['terminal_host'] WHERE id=$1`, `UPDATE paperboat.user_machines SET observed_capabilities=configured_capabilities WHERE id=$1`, ErrMachineOffline},
 		{"offline", `UPDATE paperboat.user_machines SET online=false WHERE id=$1`, `UPDATE paperboat.user_machines SET online=true WHERE id=$1`, ErrMachineOffline},
 		{"released seat", `UPDATE paperboat.user_machines SET seat_state='released' WHERE id=$1`, `UPDATE paperboat.user_machines SET seat_state='occupied' WHERE id=$1`, ErrMachineOffline},
+		// Gone for good answers not found before offline: a running send waits through machine_offline but must stop at
+		// once for these (F14-02). They run before "revoked", whose tombstone trigger cannot be undone by a restore.
+		// The first two write what RevokeUserMachine (disconnect) and DeleteUserMachine write; the third leaves the
+		// tombstone columns empty so only the state check's order decides.
+		{"disconnected while offline", `UPDATE paperboat.user_machines SET state='disconnected',online=false,revoked_at=now(),deleted_at=now(),disconnected_at=now() WHERE id=$1`, `UPDATE paperboat.user_machines SET state='online',online=true,revoked_at=NULL,deleted_at=NULL,disconnected_at=NULL WHERE id=$1`, ErrNotFound},
+		{"deleted while offline", `UPDATE paperboat.user_machines SET state='deleted',online=false,deleted_at=now() WHERE id=$1`, `UPDATE paperboat.user_machines SET state='online',online=true,deleted_at=NULL WHERE id=$1`, ErrNotFound},
+		{"disconnected state while offline", `UPDATE paperboat.user_machines SET state='disconnected',online=false WHERE id=$1`, `UPDATE paperboat.user_machines SET state='online',online=true WHERE id=$1`, ErrNotFound},
 		{"revoked", `UPDATE paperboat.user_machines SET revoked_at=now(),state='revoked' WHERE id=$1`, `UPDATE paperboat.user_machines SET revoked_at=NULL,state='online' WHERE id=$1`, ErrNotFound},
-		// gone for good wins over offline: a running send retries machine_offline but must stop for these (F14-02)
-		{"revoked while offline", `UPDATE paperboat.user_machines SET revoked_at=now(),state='revoked',online=false WHERE id=$1`, `UPDATE paperboat.user_machines SET revoked_at=NULL,state='online',online=true WHERE id=$1`, ErrNotFound},
-		{"disconnected while offline", `UPDATE paperboat.user_machines SET state='disconnected',online=false WHERE id=$1`, `UPDATE paperboat.user_machines SET state='online',online=true WHERE id=$1`, ErrNotFound},
-		{"deleted while offline", `UPDATE paperboat.user_machines SET state='deleted',online=false WHERE id=$1`, `UPDATE paperboat.user_machines SET state='online',online=true WHERE id=$1`, ErrNotFound},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			exec(test.change)
