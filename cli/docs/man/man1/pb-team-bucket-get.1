@@ -1,0 +1,46 @@
+.nh
+.TH "PB-TEAM-BUCKET-GET" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-bucket-get - Show the team's bucket and its uses
+
+
+.SH SYNOPSIS
+\fBpb team bucket get <team> [flags]\fP
+
+
+.SH DESCRIPTION
+Show the bucket's endpoint, region, bucket, prefix, access key ID, what it is used for and when Paperboat last checked it. The secret key is never shown.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for get
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-team-bucket(1)\fP

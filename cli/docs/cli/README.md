@@ -218,6 +218,10 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb team activity](pb_team_activity.md) | Search the team audit log (owners, admins, auditors) |
 | [pb team activity export](pb_team_activity_export.md) | Export the team audit log as CSV or JSON |
 | [pb team attach](pb_team_attach.md) | Attach or detach an explicitly selected personal resource |
+| [pb team bucket](pb_team_bucket.md) | The team's own S3-compatible bucket (owners and admins) |
+| [pb team bucket get](pb_team_bucket_get.md) | Show the team's bucket and its uses |
+| [pb team bucket remove](pb_team_bucket_remove.md) | Disconnect the team's bucket |
+| [pb team bucket set](pb_team_bucket_set.md) | Connect or change the team's bucket |
 | [pb team cancel-invite](pb_team_cancel-invite.md) | Cancel an outstanding invitation |
 | [pb team create](pb_team_create.md) | Create a team by paying for its seats |
 | [pb team decline](pb_team_decline.md) | Decline an invitation bound to this account |

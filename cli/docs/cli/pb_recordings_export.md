@@ -19,6 +19,7 @@ pb recordings export <recording-id> [flags]
 ### Options
 
 ```
+      --archive         read the copy in the team bucket instead of asking the machine
   -h, --help            help for export
   -o, --output string   file to write; standard output when omitted
 ```
