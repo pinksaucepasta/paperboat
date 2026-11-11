@@ -139,6 +139,9 @@ func TestPostgresTransferToPersonal(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A teammate has terminal access to the team machine through an all-member grant.
+	if current, err = s.Get(ctx, owner, team); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = s.GrantMachine(ctx, owner, team, MachineGrantRequest{OperationID: "grant_all", ExpectedGeneration: current.Generation, MachineID: machine, Audience: "all_members", Capabilities: []string{"terminal"}, Active: true}); err != nil {
 		t.Fatal(err)
 	}
