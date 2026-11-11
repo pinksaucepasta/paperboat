@@ -2,14 +2,15 @@
   "required_status_checks": {
     "strict": true,
     "checks": [
-      {"context": "Server checks"},
-      {"context": "Vet and test shared"},
-      {"context": "Vet and test cli"},
-      {"context": "Vet and test relay"},
-      {"context": "Vet and test tunnel"},
-      {"context": "Vet and test helper"},
-      {"context": "Repository policy checks"},
-      {"context": "Console lint and types"}
+      {
+        "context": "Targeted Go checks"
+      },
+      {
+        "context": "Repository policy checks"
+      },
+      {
+        "context": "Console lint and types"
+      }
     ]
   },
   "enforce_admins": true,

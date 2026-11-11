@@ -347,3 +347,23 @@ the listing adds browser-level isolation between previews and needs no code chan
    label is a separate security boundary), the organisation's site, that the domain is registered for at least two
    years, and a link to the `_psl` TXT record check (`dig +short TXT _psl.pprbt.app`).
 3. Publication takes weeks; browsers pick it up with their releases. Nothing in Paperboat waits for it.
+
+## Pull-request submission gate (R-01)
+
+`tools/push.sh` requires an administrator-enforced protected target, creates an immutable
+`lane-submit/<base>/<head>` branch, opens its PR, enables rebase auto-merge, and waits up to
+one hour. Exit zero means merged (or no unsubmitted commits); a closed PR or timeout fails.
+The shared submission lock preserves lane ordering and the migration-number check without
+force pushes. Fetch the landed tooling before submitting from an older lane checkout.
+`PB_PUSH_BASE` selects a protected throwaway target for testing the same submission path.
+
+Required PR checks are `Targeted Go checks`, `Repository policy checks`, and `Console lint
+and types`. Targeted Go checks select changed packages, embedded-data owners, and transitive
+workspace importers (including test imports); module/workspace dependency changes expand the
+selection. PostgreSQL and race checks run on GitHub, never on oracle. Full-module health CI
+continues on main. The End-to-end check is added after W28 proves all its core stages green.
+
+Prior art: GitHub's [auto-merge requirements](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-auto-merge-for-pull-requests-in-your-repository)
+and [protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches):
+required checks, strict up-to-date branches, administrator enforcement, and linear history.
+The script refuses an unprotected target because auto-merge there could merge before CI.
