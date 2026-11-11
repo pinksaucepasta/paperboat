@@ -7,6 +7,7 @@
 3. Leader-only jobs: every "worker iteration" line (server<N>.log) is one run. Before the kill all runs of a
    job come from the victim; afterwards runs of a job are spaced at least half its interval apart, except one
    handover from the victim to its successor, and every job runs again on a survivor after the handover.
+   LISTENERS (per-process LISTEN loops) must run on every instance and are exempt from the rest.
    REQUIRED jobs must all be seen; the others are loops this CI configuration does not enable (Stripe,
    certificate and DNS providers, WorkOS organizations): TestEveryLeaderWorkerIsRegisteredForIterationCounts
    covers that they are countable.
@@ -17,9 +18,11 @@ work, bound, killed, victim = sys.argv[1], float(sys.argv[2]), float(sys.argv[3]
 fail = []
 HANDOVER = 20
 REQUIRED = """worker_machines worker_config_warnings worker_config_revocation worker_preview_leases worker_tunnel_expiry
-worker_domain_dns worker_preview_dns worker_team_retention worker_transactional_mail worker_team_entitlements
+worker_workspace_domains worker_team_retention worker_transactional_mail worker_team_entitlements
 worker_team_inbox worker_edge_sets worker_peer_endpoints worker_selfhost_ingress worker_operational_health
-worker_account_deletion worker_mint_withdrawals worker_machine_events worker_audit_streams""".split()
+worker_account_deletion worker_audit_streams""".split()
+# Per-process LISTEN loops, leader or not (app.go processListeners, F21-04): every instance must run them.
+LISTENERS = ["worker_mint_withdrawals", "worker_machine_events"]
 
 start = None
 attempts = 0
@@ -53,6 +56,10 @@ for n in (1, 2, 3):
 for job in REQUIRED:
     if job not in runs:
         fail.append(f"{job}: no run logged")
+for job in LISTENERS:
+    missing = {1, 2, 3} - {n for _, n in runs.pop(job, [])}
+    if missing:
+        fail.append(f"{job}: never ran on instances {sorted(missing)}")
 
 acquired = []
 for n in (1, 2, 3):
