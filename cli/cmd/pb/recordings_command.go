@@ -204,20 +204,15 @@ func readRecording(c *command.Context, id string, emit func([]byte) error) (resu
 		return err
 	}
 	defer clear(teamKey)
-	machines, err := client.ListUserMachines(c.Context)
+	// The recording's machine is a team machine, which the personal machine list does not carry.
+	machine, err := client.GetUserMachine(c.Context, replay.MachineID)
 	if err != nil {
 		return err
 	}
-	var environmentID string
-	var generation uint64
-	for _, machine := range machines {
-		if machine.ID == replay.MachineID && machine.InstallationGeneration > 0 {
-			environmentID, generation = machine.EnvironmentID, uint64(machine.InstallationGeneration)
-		}
-	}
-	if generation == 0 {
+	if machine.InstallationGeneration < 1 {
 		return errors.New("the recording's machine is not available to you")
 	}
+	environmentID, generation := machine.EnvironmentID, uint64(machine.InstallationGeneration)
 	local, _, err := localDaemonSnapshot(parent, installLocalDaemonService)
 	if err != nil {
 		return err
