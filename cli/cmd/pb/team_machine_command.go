@@ -14,7 +14,7 @@ func teamMachineCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "machine",
 		Short: "Share machines and manage exact team access",
-		Long:  "Share a personal enrollment or explicitly transfer it to a team. Each teammate uses their own PB account and starts separate terminal sessions. All remote work runs as the enrolled OS user, so it shares that user's OS file and process permissions. Tunnel management covers existing private/team tunnels; create tunnels locally on the target machine. Machine grants do not grant ENV administration, public publication, resharing, or attachment to another person's terminal.",
+		Long:  "Share a personal enrollment, or explicitly transfer it to a team and back. Each teammate uses their own PB account and starts separate terminal sessions. All remote work runs as the enrolled OS user, so it shares that user's OS file and process permissions. Tunnel management covers existing private/team tunnels; create tunnels locally on the target machine. Machine grants do not grant ENV administration, public publication, resharing, or attachment to another person's terminal.",
 		Args: func(_ *cobra.Command, args []string) error {
 			if len(args) != 0 {
 				return localArgumentError("unknown team machine action; run `pb team machine --help` to list supported actions")
@@ -23,7 +23,7 @@ func teamMachineCommand() *cobra.Command {
 		},
 		RunE: func(command *cobra.Command, _ []string) error { return command.Help() },
 	}
-	for _, action := range []string{"share", "unshare", "transfer-to-team", "remove"} {
+	for _, action := range []string{"share", "unshare", "transfer-to-team", "transfer-to-personal", "remove"} {
 		c.AddCommand(teamMachineActionCommand(action))
 	}
 	for _, action := range []string{"approve", "decline"} {
@@ -33,7 +33,7 @@ func teamMachineCommand() *cobra.Command {
 	return c
 }
 func teamMachineActionCommand(action string) *cobra.Command {
-	descriptions := map[string]string{"share": "Share your personal machine with a team; grants are separate. A team that approves new machines holds it until an owner or admin accepts it", "unshare": "Withdraw the team's grants while retaining personal ownership", "transfer-to-team": "Explicitly transfer your enrollment to team ownership", "remove": "Revoke a team-owned machine without personal takeover"}
+	descriptions := map[string]string{"share": "Share your personal machine with a team; grants are separate. A team that approves new machines holds it until an owner or admin accepts it", "unshare": "Withdraw the team's grants while retaining personal ownership", "transfer-to-team": "Explicitly transfer your enrollment to team ownership", "transfer-to-personal": "Return a team-owned machine to the personal account that enrolled it", "remove": "Revoke a team-owned machine without personal takeover"}
 	c := &cobra.Command{Use: action + " <team> <machine-id>", Short: descriptions[action], Args: commandArgs(cobra.ExactArgs(2)), RunE: func(c *cobra.Command, args []string) error {
 		generation, err := requiredTeamGeneration(c)
 		if err != nil {
@@ -43,7 +43,7 @@ func teamMachineActionCommand(action string) *cobra.Command {
 			return localArgumentError("team and machine must be valid identifiers")
 		}
 		confirmation := ""
-		if action == "transfer-to-team" || action == "remove" {
+		if hasConfirmation(action) {
 			confirmation, _ = c.Flags().GetString("confirm")
 			if confirmation != args[1] {
 				return localArgumentError("ownership transfer or removal requires --confirm with the exact machine identifier")
@@ -69,10 +69,15 @@ func teamMachineActionCommand(action string) *cobra.Command {
 	}}
 	teamGenerationFlag(c)
 	c.Flags().Bool("json", false, "print canonical JSON")
-	if action == "transfer-to-team" || action == "remove" {
+	if hasConfirmation(action) {
 		c.Flags().String("confirm", "", "exact machine identifier acknowledging the ownership or revocation effect")
 	}
 	return c
+}
+
+// hasConfirmation: the actions that change who owns or keeps a machine need its exact id.
+func hasConfirmation(action string) bool {
+	return action == "transfer-to-team" || action == "transfer-to-personal" || action == "remove"
 }
 func teamMachineGrantCommand() *cobra.Command {
 	c := &cobra.Command{Use: "grant <team> <machine-id>", Short: "Set all-member or selected-member machine capabilities", Long: "Set the complete capability list for one all-member or selected-member grant. Effective access is the union of both grants. Use --active=false to revoke this grant. Team roles alone do not grant machine use.", Args: commandArgs(cobra.ExactArgs(2)), RunE: func(c *cobra.Command, args []string) error {

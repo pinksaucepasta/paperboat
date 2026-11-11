@@ -239,7 +239,7 @@ func TestTeamMachineGrantRejectsAmbiguousAudienceAndImplicitCapabilities(t *test
 	}
 }
 func TestTeamMachineTransferRequiresExactConfirmationBeforeRequest(t *testing.T) {
-	for _, action := range []string{"transfer-to-team", "remove"} {
+	for _, action := range []string{"transfer-to-team", "transfer-to-personal", "remove"} {
 		requested := false
 		supportedTeamFixtureVersion(t)
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -255,6 +255,31 @@ func TestTeamMachineTransferRequiresExactConfirmationBeforeRequest(t *testing.T)
 		if code != 2 || requested || !strings.Contains(out.String(), "exact machine identifier") {
 			t.Fatalf("%s code=%d requested=%v output=%s", action, code, requested, out.String())
 		}
+	}
+}
+
+func TestTeamMachineTransferToPersonalSendsTheExactAction(t *testing.T) {
+	supportedTeamFixtureVersion(t)
+	var got map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if teamFixtureUpdatePolicy(w, r) {
+			return
+		}
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/teams/team_1/machines" || json.NewDecoder(r.Body).Decode(&got) != nil {
+			http.Error(w, "unexpected", 500)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"team_id":"team_1","generation":4}}`))
+	}))
+	defer server.Close()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	writeTestProfile(t, dir, configPath, server.URL)
+	var out bytes.Buffer
+	code := run(t.Context(), []string{"team", "machine", "transfer-to-personal", "team_1", "machine_1", "--generation", "3", "--confirm", "machine_1", "--server", server.URL, "--config", configPath}, &out, &out)
+	if code != 0 || got["action"] != "transfer_to_personal" || got["machine_id"] != "machine_1" || got["confirmation"] != "machine_1" || got["expected_generation"] != float64(3) {
+		t.Fatalf("code=%d request=%v output=%s", code, got, out.String())
 	}
 }
 

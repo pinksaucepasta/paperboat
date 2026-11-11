@@ -207,7 +207,7 @@ Backend gaps against this (current behaviour in brackets):
 - Machine approval: built (`approve_new_machines`, `machine_requests`, share/approve/decline actions).
 - A default grant applied when a machine joins a team, settable at enrollment [grants are
   separate `POST /v1/teams/{id}/machine-grants`; a bound machine without one is unusable].
-- Team → personal transfer [only `share`, `unshare`, `transfer_to_team`, `remove`].
+- Team → personal transfer: server and CLI built (`transfer_to_personal`, back to the enroller, who must still be in the team); the console has no action for it yet (PLAN Log request).
 - Moving wipes machine-scoped env values, ends sessions, stops public publications [the move is
   rejected while public previews/tunnels exist; env handling unspecified].
 - Members leaving: what happens to machines they shared [unspecified].

@@ -8,7 +8,7 @@ Share your personal machine with a team; grants are separate. A team that approv
 
 Share a personal machine with one team while keeping personal ownership. A team that approves new machines holds a member's machine until an owner or admin accepts it; owners and admins share directly. Members need explicit capability grants before they can use it.
 
-A personal machine can be shared with a team while ownership stays personal, or explicitly transferred to team ownership. Sharing and capability grants are separate decisions. Removing a team-owned machine revokes its enrollment; unsharing a personal machine withdraws that team's access.
+A personal machine can be shared with a team while ownership stays personal, or explicitly transferred to team ownership and back to the personal account that enrolled it. Sharing and capability grants are separate decisions. Removing a team-owned machine revokes its enrollment; unsharing a personal machine withdraws that team's access.
 
 JSON output is supported with --json.
 

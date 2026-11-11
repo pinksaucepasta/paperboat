@@ -1,0 +1,60 @@
+.nh
+.TH "PB-TEAM-MACHINE-TRANSFER-TO-PERSONAL" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-machine-transfer-to-personal - Return a team-owned machine to the personal account that enrolled it
+
+
+.SH SYNOPSIS
+\fBpb team machine transfer-to-personal <team> <machine-id> [flags]\fP
+
+
+.SH DESCRIPTION
+Return a team-owned machine to the personal account that enrolled it
+
+.PP
+Return a team-owned machine to the personal account that enrolled it, after exact confirmation and generation check. Needs a team owner or admin; the enroller must still be in the team. The machine keeps its id, keys and history and is not re-enrolled; the team's grants and shares for it end, and previews and tunnels the team owns on it must be ended first. Accounts other than the enroller cannot take it: its credentials belong to the enroller.
+
+.PP
+A personal machine can be shared with a team while ownership stays personal, or explicitly transferred to team ownership and back to the personal account that enrolled it. Sharing and capability grants are separate decisions. Removing a team-owned machine revokes its enrollment; unsharing a personal machine withdraws that team's access.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--confirm\fP=""
+	exact machine identifier acknowledging the ownership or revocation effect
+
+.PP
+\fB--generation\fP=0
+	expected current team generation
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for transfer-to-personal
+
+.PP
+\fB--json\fP[=false]
+	print canonical JSON
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-team-machine(1)\fP

@@ -252,6 +252,7 @@ const phrases: Record<string, string> = {
   "team.attach": "changed which previews and tunnels belong to",
   "team.machine_remove": "removed a machine from",
   "team.machine_transfer_to_team": "moved a machine into",
+  "team.machine_transfer_to_personal": "moved a machine out of",
 }
 
 /** Families of actions named by prefix (the server adds members to them over time). */

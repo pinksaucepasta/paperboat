@@ -7898,7 +7898,7 @@ export interface paths {
         put?: never;
         /**
          * Team machine
-         * @description Shares a machine with the team (or asks to, when admission is pending), approves or declines a share request, unshares it, moves a personal machine into the team, or removes a team machine. Idempotent per operation_id.
+         * @description Shares a machine with the team (or asks to, when admission is pending), approves or declines a share request, unshares it, moves a personal machine into the team, returns a team-owned machine to the account that enrolled it, or removes a team machine. Idempotent per operation_id.
          */
         post: operations["team_machine"];
         delete?: never;
@@ -11913,14 +11913,14 @@ export interface components {
             generation: number;
             active: boolean;
         };
-        /** @description One lifecycle action on a team machine. transfer_to_team and remove need confirmation equal to machine_id. */
+        /** @description One action on a machine in a team. share, unshare, approve and decline work on personal machines and requests; transfer_to_team moves the caller's own personal machine into the team; transfer_to_personal returns a team-owned machine to the account that enrolled it (the machine keeps its id, keys and history, is not re-enrolled, and the team's grants, shares and requests for it end; needs an owner or admin, the enroller must still be in the team, and team-owned previews and tunnels on it must be ended first); remove revokes a team-owned machine. transfer_to_team, transfer_to_personal and remove need confirmation equal to the machine id. */
         TeamMachineRequest: {
             operation_id: string;
             expected_generation: number;
             machine_id: string;
             /** @enum {string} */
-            action: "share" | "unshare" | "approve" | "decline" | "transfer_to_team" | "remove";
-            /** @description Required for transfer_to_team and remove: the machine_id again. */
+            action: "share" | "unshare" | "approve" | "decline" | "transfer_to_team" | "transfer_to_personal" | "remove";
+            /** @description The machine id, for transfer_to_team, transfer_to_personal and remove. */
             confirmation?: string;
         };
         /** @description Sets what an audience may do on a team machine. Capabilities are the complete set; an inactive grant removes the access. */
@@ -30207,7 +30207,7 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
-            /** @description Conflict, including team_suspended after team or invitation authorization. Ask the team owner to restore billing or resume the team. */
+            /** @description Conflict: team_changed, team_suspended, machine_name_conflict (the machine's name is taken in the destination), machine_publication_active (public previews or tunnels block transfer_to_team), machine_team_resources_active (team previews or tunnels on the machine block transfer_to_personal) or machine_owner_not_member (the enroller left the team, so transfer_to_personal cannot return the machine). */
             409: {
                 headers: {
                     [name: string]: unknown;

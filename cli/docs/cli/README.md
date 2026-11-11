@@ -237,6 +237,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb team machine remove](pb_team_machine_remove.md) | Revoke a team-owned machine without personal takeover |
 | [pb team machine requests](pb_team_machine_requests.md) | List machines waiting for a team owner or admin |
 | [pb team machine share](pb_team_machine_share.md) | Share your personal machine with a team; grants are separate. A team that approves new machines holds it until an owner or admin accepts it |
+| [pb team machine transfer-to-personal](pb_team_machine_transfer-to-personal.md) | Return a team-owned machine to the personal account that enrolled it |
 | [pb team machine transfer-to-team](pb_team_machine_transfer-to-team.md) | Explicitly transfer your enrollment to team ownership |
 | [pb team machine unshare](pb_team_machine_unshare.md) | Withdraw the team's grants while retaining personal ownership |
 | [pb team remove](pb_team_remove.md) | Remove a team member |

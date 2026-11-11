@@ -482,6 +482,18 @@ The team then controls the enrollment, other personal team shares are withdrawn,
 enroller loses implicit personal control. Remaining authorized members can keep using it
 when the enroller leaves. Team owner/admin roles govern management; machine use still
 requires a grant. Transferring the team to a new owner preserves its machine ownership.
+A team owner or admin can undo that, and give the machine back to the personal account that
+enrolled it:
+
+```sh
+pb team machine transfer-to-personal research MACHINE_ID \
+  --generation CURRENT_GENERATION --confirm MACHINE_ID
+```
+
+The machine keeps its id, keys and history and is not re-enrolled; the team's grants, shares
+and requests for it end, and the account sees it as a personal machine under its own plan
+limits. The enroller must still be in the team (their credentials stay on the machine, so no
+other account can take it), and previews and tunnels the team owns on it must be ended first.
 `pb team machine remove` requires the same exact confirmation and revokes the team-owned
 enrollment. Deleting the team also revokes its team-owned enrollments, without converting
 them to personal property. Personal machines remain personal; withdrawing a share or

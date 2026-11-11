@@ -197,3 +197,36 @@ func TestTeamActivityHTTPDoesNotMapJoinedOperationalFailureToNotFound(t *testing
 		t.Fatalf("failure log lost original cause or correlation: %+v", event)
 	}
 }
+
+type machineErrorTeamHTTPStub struct {
+	teamAPI
+	err error
+}
+
+func (s machineErrorTeamHTTPStub) Machine(context.Context, string, string, teams.MachineRequest) (teams.Team, error) {
+	return teams.Team{}, s.err
+}
+
+// Returning a machine to a personal account names what stands in the way, as its own code each time.
+func TestTeamMachineTransferToPersonalRefusalsHaveTheirOwnCodes(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		code string
+	}{
+		{teams.ErrMachineTeamResources, "machine_team_resources_active"},
+		{teams.ErrMachineOwnerLeft, "machine_owner_not_member"},
+		{teams.ErrMachineAliasConflict, "machine_name_conflict"},
+	} {
+		mux := http.NewServeMux()
+		pass := func(h http.Handler) http.Handler { return h }
+		registerTeamRoutes(mux, machineErrorTeamHTTPStub{err: tc.err}, pass, pass)
+		r := httptest.NewRequest(http.MethodPost, "/v1/teams/team_a/machines", strings.NewReader(`{"operation_id":"back","expected_generation":4,"machine_id":"machine_a","action":"transfer_to_personal","confirmation":"machine_a"}`))
+		r.Header.Set("Content-Type", "application/json")
+		r = r.WithContext(context.WithValue(r.Context(), authContextKey{}, principal{User: auth.User{ID: "actor"}}))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), `"`+tc.code+`"`) {
+			t.Fatalf("%v: status %d body %s", tc.err, w.Code, w.Body.String())
+		}
+	}
+}

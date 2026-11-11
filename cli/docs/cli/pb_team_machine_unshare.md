@@ -8,7 +8,7 @@ Withdraw the team's grants while retaining personal ownership
 
 Withdraw one team's access to a personally owned machine while retaining that enrollment. Other independent personal ownership remains intact.
 
-A personal machine can be shared with a team while ownership stays personal, or explicitly transferred to team ownership. Sharing and capability grants are separate decisions. Removing a team-owned machine revokes its enrollment; unsharing a personal machine withdraws that team's access.
+A personal machine can be shared with a team while ownership stays personal, or explicitly transferred to team ownership and back to the personal account that enrolled it. Sharing and capability grants are separate decisions. Removing a team-owned machine revokes its enrollment; unsharing a personal machine withdraws that team's access.
 
 JSON output is supported with --json.
 

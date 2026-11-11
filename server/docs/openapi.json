@@ -15481,7 +15481,7 @@
       "TeamMachineRequest": {
         "type": "object",
         "additionalProperties": false,
-        "description": "One lifecycle action on a team machine. transfer_to_team and remove need confirmation equal to machine_id.",
+        "description": "One action on a machine in a team. share, unshare, approve and decline work on personal machines and requests; transfer_to_team moves the caller's own personal machine into the team; transfer_to_personal returns a team-owned machine to the account that enrolled it (the machine keeps its id, keys and history, is not re-enrolled, and the team's grants, shares and requests for it end; needs an owner or admin, the enroller must still be in the team, and team-owned previews and tunnels on it must be ended first); remove revokes a team-owned machine. transfer_to_team, transfer_to_personal and remove need confirmation equal to the machine id.",
         "required": [
           "operation_id",
           "expected_generation",
@@ -15508,12 +15508,13 @@
               "approve",
               "decline",
               "transfer_to_team",
+              "transfer_to_personal",
               "remove"
             ]
           },
           "confirmation": {
             "type": "string",
-            "description": "Required for transfer_to_team and remove: the machine_id again."
+            "description": "The machine id, for transfer_to_team, transfer_to_personal and remove."
           }
         }
       },
@@ -51394,7 +51395,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "description": "Shares a machine with the team (or asks to, when admission is pending), approves or declines a share request, unshares it, moves a personal machine into the team, or removes a team machine. Idempotent per operation_id.",
+        "description": "Shares a machine with the team (or asks to, when admission is pending), approves or declines a share request, unshares it, moves a personal machine into the team, returns a team-owned machine to the account that enrolled it, or removes a team machine. Idempotent per operation_id.",
         "requestBody": {
           "required": true,
           "content": {
