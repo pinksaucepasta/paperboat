@@ -2,6 +2,7 @@ package updated
 
 import (
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updateflow"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
@@ -23,6 +24,15 @@ func TestUpdateHealthReportsAnUpdateWhoseCommitNeverFinished(t *testing.T) {
 	} {
 		if got := (ControlResponse{Status: "ok", Transaction: test.transaction}).UpdateHealth(); got != test.want {
 			t.Errorf("%s: health %q, want %q", test.name, got, test.want)
+		}
+	}
+}
+
+// Control operations get a budget by what they do, on every platform that serves the control socket (audit C #22).
+func TestControlOperationBudgets(t *testing.T) {
+	for operation, want := range map[string]time.Duration{"status": 30 * time.Second, "settings": 30 * time.Second, "check": 3 * time.Minute, "download": maxUpdateControlTimeout, "install": maxUpdateControlTimeout, "session-owner-start": maxUpdateControlTimeout} {
+		if got := controlOperationTimeout(operation); got != want {
+			t.Errorf("%s budget %s, want %s", operation, got, want)
 		}
 	}
 }
