@@ -228,7 +228,7 @@ func NewAuthority(options AuthorityOptions) (*Authority, error) {
 }
 
 func validID(id string) bool {
-	if len(id) == 0 || len(id) > 256 {
+	if len(id) == 0 || len(id) > peernetwork.MaxResourceIDBytes {
 		return false
 	}
 	for _, c := range id {

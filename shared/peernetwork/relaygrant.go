@@ -41,6 +41,15 @@ type RelayDescriptor struct {
 	VirtualAddress     string `json:"virtual_address"`
 }
 
+// Bounds of one relay grant (part), shared by the server that chunks and mint that signs (both refuse more) and the
+// relay that verifies. An endpoint with more peers gets more grants of the same generation.
+const (
+	MaxGrantPeers  = 64
+	MaxGrantScopes = 128 // the scopes of all peers of one grant
+	// MaxGrantBytes bounds one signed grant token: the relay reads it from one control frame (derpquic.MaxControl).
+	MaxGrantBytes = 128 << 10
+)
+
 // RelayGrantVersion and RelayGrantAudience are the values every relay grant carries.
 const (
 	RelayGrantVersion  = 1

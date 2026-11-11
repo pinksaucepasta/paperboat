@@ -46,3 +46,10 @@ func TestSignedGrantAdmitsEverySharedScope(t *testing.T) {
 	}}}
 	verify(t, g, cert)
 }
+
+// A grant token the server may sign (peernetwork.MaxGrantBytes) fits the control frame the relay reads it from.
+func TestTheGrantBoundFitsOneControlFrame(t *testing.T) {
+	if peernetwork.MaxGrantBytes > MaxControl {
+		t.Fatalf("grant bound %d exceeds the control frame %d", peernetwork.MaxGrantBytes, MaxControl)
+	}
+}

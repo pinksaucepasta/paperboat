@@ -25,7 +25,8 @@ import (
 	"golang.org/x/crypto/curve25519"
 )
 
-// networkConfigLimit bounds one signed configuration, relay grant or regional candidate token;
+// networkConfigLimit bounds one signed configuration or regional candidate token (a relay grant has its own,
+// smaller bound, peernetwork.MaxGrantBytes);
 // it is the client's bound (shared/peernetwork), so a configuration the server signs is one the
 // CLI accepts.
 const networkConfigLimit = peernetwork.MaxConfigurationBytes
@@ -213,18 +214,18 @@ func (s *NetworkService) registerAttempt(ctx context.Context, in NetworkRegistra
 }
 
 type networkBinding struct {
-	AccountID                       string   `json:"account_id"`
-	EndpointID                      string   `json:"endpoint_id"`
-	Role                            string   `json:"role"`
-	MachineID                       string   `json:"machine_id"`
-	EndpointGeneration              int64    `json:"endpoint_generation"`
-	MachineGeneration               int64    `json:"machine_generation"`
-	KeyGeneration                   int64    `json:"key_generation"`
-	WireGuardPublicKey              string   `json:"wireguard_public_key"`
-	DiscoPublicKey                  string   `json:"disco_public_key"`
-	QUICCertificateFingerprint      string   `json:"quic_certificate_fingerprint"`
-	QUICPublicKey                   string   `json:"quic_public_key"`
-	VirtualAddress                  string   `json:"virtual_address"`
+	AccountID                  string `json:"account_id"`
+	EndpointID                 string `json:"endpoint_id"`
+	Role                       string `json:"role"`
+	MachineID                  string `json:"machine_id"`
+	EndpointGeneration         int64  `json:"endpoint_generation"`
+	MachineGeneration          int64  `json:"machine_generation"`
+	KeyGeneration              int64  `json:"key_generation"`
+	WireGuardPublicKey         string `json:"wireguard_public_key"`
+	DiscoPublicKey             string `json:"disco_public_key"`
+	QUICCertificateFingerprint string `json:"quic_certificate_fingerprint"`
+	QUICPublicKey              string `json:"quic_public_key"`
+	VirtualAddress             string `json:"virtual_address"`
 	// Endpoints are the identity's delivered endpoints (N5) while it is loaded and in the mesh log; on the way
 	// out they move to the peer entry (deliverEndpoints) and are never part of a signed identity.
 	Endpoints []string `json:"endpoints,omitempty"`
@@ -517,7 +518,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 			if scopes >= maximumNetworkAccessScopes {
 				break
 			}
-			p.Scopes = append(p.Scopes, networkScope{ResourceKind: g.kind, ResourceID: g.id, ResourceGeneration: 1, Capability: capability, Direction: direction, Port: 443, ExpiresAt: g.expiry.Unix()})
+			p.Scopes = append(p.Scopes, networkScope{ResourceKind: g.kind, ResourceID: g.id, ResourceGeneration: 1, Capability: capability, Direction: direction, Port: peernetwork.NetworkPort, ExpiresAt: g.expiry.Unix()})
 			scopes++
 		}
 	}
@@ -567,7 +568,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 				if scopes >= peernetwork.MaxScopes {
 					return NetworkConfigResult{}, ErrResourceLimit
 				}
-				p.Scopes = append(p.Scopes, networkScope{ResourceKind: "machine_access", ResourceID: h.binding.EndpointID, ResourceGeneration: uint64(h.generation), Capability: capability, Direction: "dial", Port: 443, ExpiresAt: 0})
+				p.Scopes = append(p.Scopes, networkScope{ResourceKind: "machine_access", ResourceID: h.binding.EndpointID, ResourceGeneration: uint64(h.generation), Capability: capability, Direction: "dial", Port: peernetwork.NetworkPort, ExpiresAt: 0})
 				scopes++
 			}
 		}
@@ -593,7 +594,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 				if scopes >= peernetwork.MaxScopes {
 					return NetworkConfigResult{}, ErrResourceLimit
 				}
-				p.Scopes = append(p.Scopes, networkScope{ResourceKind: "machine_access", ResourceID: self.EndpointID, ResourceGeneration: uint64(o.generation), Capability: capability, Direction: "accept", Port: 443, ExpiresAt: 0})
+				p.Scopes = append(p.Scopes, networkScope{ResourceKind: "machine_access", ResourceID: self.EndpointID, ResourceGeneration: uint64(o.generation), Capability: capability, Direction: "accept", Port: peernetwork.NetworkPort, ExpiresAt: 0})
 				scopes++
 			}
 		}
@@ -664,7 +665,7 @@ func personalNetworkScope(self, peer networkBinding, expiresAt int64) networkSco
 	if self.Role == "machine" && (peer.Role == "cli" || self.EndpointID > peer.EndpointID) {
 		direction = "accept"
 	}
-	return networkScope{ResourceKind: "machine_network", ResourceID: personalNetworkScopeID(self, peer), ResourceGeneration: 1, Capability: "connect", Direction: direction, Port: 443, ExpiresAt: expiresAt}
+	return networkScope{ResourceKind: "machine_network", ResourceID: personalNetworkScopeID(self, peer), ResourceGeneration: 1, Capability: "connect", Direction: direction, Port: peernetwork.NetworkPort, ExpiresAt: expiresAt}
 }
 
 func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, now time.Time, expiry *time.Time, admittedPeers map[string]bool, admittedNetworks []string, meshSeq int64) ([]networkBinding, error) {
@@ -810,7 +811,7 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 			if err != nil {
 				return nil, err
 			}
-			if len(grant) > networkConfigLimit {
+			if len(grant) > peernetwork.MaxGrantBytes { // the relay refuses a longer token
 				slog.Warn("peer network authority unavailable", "site", "network.go:653")
 				return nil, ErrUnavailable
 			}
@@ -823,12 +824,12 @@ func (s *NetworkService) relayGrants(ctx context.Context, tx *sql.Tx, self netwo
 	return grants, nil
 }
 
-// maximumRelayGrantPeers is the relay's bound on one grant (relay derpquic
+// maximumRelayGrantPeers and maximumRelayGrantScopes are the relay's bounds on one grant (relay derpquic
 // authority and mint both refuse more); more peers are carried in more grants.
-const maximumRelayGrantPeers = 64
-
-// maximumRelayGrantScopes is the relay's bound on the scopes of all peers of one grant.
-const maximumRelayGrantScopes = 128
+const (
+	maximumRelayGrantPeers  = peernetwork.MaxGrantPeers
+	maximumRelayGrantScopes = peernetwork.MaxGrantScopes
+)
 
 // relayGrantChunk is one grant's share of the peers: their entries, and the keys of those among them that
 // may use this endpoint as a peer relay (same account).

@@ -154,7 +154,7 @@ func KeyString(k key.NodePublic) string {
 }
 func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time) (Grant, error) {
 	var g Grant
-	if len(token) > MaxControl || len(state.PeerCertificates) != 1 {
+	if len(token) > peernetwork.MaxGrantBytes || len(state.PeerCertificates) != 1 {
 		return g, ErrAdmission
 	}
 	parts := strings.Split(token, ".")
@@ -245,7 +245,7 @@ func (v Verifier) Verify(token string, state tls.ConnectionState, now time.Time)
 		}
 		for _, s := range p.Scopes {
 			scopes++
-			if scopes > 128 || !validScope(s) {
+			if scopes > peernetwork.MaxGrantScopes || !validScope(s) {
 				return Grant{}, ErrAdmission
 			}
 		}
@@ -295,7 +295,7 @@ const MaxMergedPeers = 2048
 
 // MaxGrantPeers bounds the peers, and the peer-relay control peers, one grant part names; an endpoint
 // with more sends one part per chunk of the same generation (the server issues chunks of this size).
-const MaxGrantPeers = 64
+const MaxGrantPeers = peernetwork.MaxGrantPeers
 
 // sameGrantIdentity reports whether two grants were issued for the same endpoint, relay process and
 // authorization generation, so their peers may be combined.

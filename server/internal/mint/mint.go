@@ -145,13 +145,15 @@ func validRelayDescriptor(d peernetwork.RelayDescriptor) bool {
 }
 
 func relayPeersClaim(peers []peernetwork.RelayPeer) bool {
-	if peers == nil || len(peers) > 64 {
+	if peers == nil || len(peers) > peernetwork.MaxGrantPeers {
 		return false
 	}
+	scopes := 0
 	for _, peer := range peers {
+		scopes += len(peer.Scopes)
 		decoded, err := base64.RawURLEncoding.DecodeString(peer.WireGuardPublicKey)
 		if err != nil || len(decoded) != 32 || base64.RawURLEncoding.EncodeToString(decoded) != peer.WireGuardPublicKey ||
-			!optionalRawKey(optionalString(peer.DiscoPublicKey)) || len(peer.Scopes) == 0 || len(peer.Scopes) > 128 {
+			!optionalRawKey(optionalString(peer.DiscoPublicKey)) || len(peer.Scopes) == 0 || scopes > peernetwork.MaxGrantScopes {
 			return false
 		}
 		for _, scope := range peer.Scopes {
