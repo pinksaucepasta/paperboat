@@ -42,7 +42,7 @@ func reconnectUploader(t *testing.T, unreachable int32, status int) (*Uploader, 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(status)
 		if status == http.StatusOK {
-			_, _ = w.Write([]byte(`{"accepted":1,"duplicates":0}`))
+			_, _ = w.Write([]byte(`{"data":{"accepted":1,"duplicates":0}}`))
 		}
 	}))
 	t.Cleanup(server.Close)
