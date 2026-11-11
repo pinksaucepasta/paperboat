@@ -385,35 +385,32 @@ func restoreWindowsCarrierSnapshot(ctx context.Context, layout service.Layout, b
 	if err != nil {
 		return err
 	}
-	for _, c := range generations {
-		if baseline != nil && c.Generation == baseline.Generation || own != nil && c.Generation == own.Generation {
-			continue
-		}
-		if err := removeWindowsCarrierGeneration(ctx, c); err != nil {
-			return err
-		}
-	}
+	// A candidate that cannot be removed must not leave the baseline unrepublished and stopped: remove them all,
+	// restore the baseline, report every failure.
+	removeErr := removeOtherCarrierGenerations(ctx, generations, func(c CarrierConfig) bool {
+		return baseline != nil && c.Generation == baseline.Generation || own != nil && c.Generation == own.Generation
+	}, removeWindowsCarrierGeneration)
 	if baseline == nil {
 		if own != nil {
-			return nil // windowsCarrierComponent.RemoveSelf removes it and the active descriptor last
+			return removeErr // windowsCarrierComponent.RemoveSelf removes it and the active descriptor last
 		}
-		return removeInstallFile(carrierConfigPath(layout.Instance))
+		return errors.Join(removeErr, removeInstallFile(carrierConfigPath(layout.Instance)))
 	}
 	if err := verifyWindowsSource(ctx, baseline.Executable, baseline.Source, baseline.OwnerSID); err != nil {
-		return err
+		return errors.Join(removeErr, err)
 	}
 	current, err := readCarrierConfigFile(ctx, layout.Instance)
 	if err != nil && !installNotExistOnly(err) {
-		return err
+		return errors.Join(removeErr, err)
 	}
 	want, _ := jsonCarrier(*baseline)
 	have, _ := jsonCarrier(current)
 	if err != nil || string(want) != string(have) {
 		if err := publishCarrierDescriptor(*baseline); err != nil {
-			return err
+			return errors.Join(removeErr, err)
 		}
 	}
-	return EnsureExistingCarrier(ctx, *baseline)
+	return errors.Join(removeErr, EnsureExistingCarrier(ctx, *baseline))
 }
 
 // windowsCarrierOfThisProcess is the carrier generation whose running service process is the caller, or nil.

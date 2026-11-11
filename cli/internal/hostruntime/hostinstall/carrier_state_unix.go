@@ -118,7 +118,9 @@ func restoreBaselineCarrier(ctx context.Context, baseline CarrierConfig, publish
 	return start(ctx, baseline)
 }
 
-func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) error {
+func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) (resultErr error) {
+	var removeErr error
+	defer func() { resultErr = errors.Join(removeErr, resultErr) }()
 	var baseline unixCarrierBaseline
 	if err := decodeInstallJSON(bytes.NewReader(body), &baseline, 256<<10); err != nil {
 		return err
@@ -137,9 +139,8 @@ func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) error
 		return err
 	}
 	if baseline.Carrier == nil || baseline.Carrier.Generation != canonical.Generation {
-		if err := removeCarrierGeneration(ctx, canonical); err != nil {
-			return err
-		}
+		// A candidate that cannot be removed must not leave the baseline unrestored: restore, then report both.
+		removeErr = removeCarrierGeneration(ctx, canonical)
 		// A failed network handover may have released the previous carrier's network and exited it.
 		if baseline.Carrier != nil {
 			if baseline.Carrier.Validate() != nil {
