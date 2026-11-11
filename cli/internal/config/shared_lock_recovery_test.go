@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -60,21 +59,9 @@ func TestSharedLockRecoversAbandonedDirectoryAndPreservesLiveOwner(t *testing.T)
 			t.Error(err)
 		}
 	}()
-	// Age alone cannot reclaim a valid lock held by this still-running process.
-	b, err := os.ReadFile(filepath.Join(lock.path, "owner.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var owner sharedLockOwner
-	if err = json.Unmarshal(b, &owner); err != nil {
-		t.Fatal(err)
-	}
-	owner.CreatedAt = old.Add(-time.Hour)
-	b, err = json.Marshal(owner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(filepath.Join(lock.path, "owner.json"), b, 0600); err != nil {
+	// Age alone cannot reclaim a valid lock held by this still-running process. (The owner record's own
+	// CreatedAt cannot be older than the process: that is a reused PID, see TestSharedLockIsNotTrustedAcrossAReusedPID.)
+	if err := os.Chtimes(lock.path, old.Add(-time.Hour), old.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	hostname, _ := os.Hostname()
