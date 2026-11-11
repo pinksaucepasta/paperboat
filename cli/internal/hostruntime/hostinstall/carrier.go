@@ -254,7 +254,7 @@ func EnsureExistingCarrier(ctx context.Context, c CarrierConfig) error {
 			return err
 		}
 	case ensureStart:
-		if err := native.Start(ctx, installer.DefinitionPath()); err != nil {
+		if err := enableThenStart(ctx, native, installer.DefinitionPath(), status); err != nil {
 			return err
 		}
 	}
@@ -445,4 +445,16 @@ func removeOtherCarrierGenerations(ctx context.Context, generations []CarrierCon
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// enableThenStart starts a registered carrier generation that is not running. A generation retired by an update is
+// disabled so it does not start at boot (retireCarrierGeneration); the rollback that brings it back enables it first,
+// here and only here: a plain Start of a disabled service stays refused.
+func enableThenStart(ctx context.Context, native service.NativeLifecycleController, definition string, status service.NativeControllerStatus) error {
+	if !status.Enabled {
+		if err := native.Enable(ctx, definition); err != nil {
+			return err
+		}
+	}
+	return native.Start(ctx, definition)
 }
