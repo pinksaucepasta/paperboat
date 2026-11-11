@@ -68,12 +68,12 @@ class Fake:
         return status(self.after.pop(0) if self.after else False, self.clock)
 
 
-def gate(fake, status_file, force='', wait=300):
+def gate(fake, status_file, force='', wait=300, stage=None):
     args = SimpleNamespace(what='W4 server 2', server_host='root@control', directory='/opt/paperboat',
                            edge=['local'], wait=wait, force=force, canary_status=status_file)
     out = []
     g = gated.Gate(args, fake.sh, fake.deploy, fake.canary, wall=lambda: fake.clock, mono=lambda: fake.clock,
-                   say=out.append)
+                   say=out.append, stage=stage)
     return g.run(), out
 
 
@@ -126,6 +126,18 @@ class GatedDeployTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(fake.images['server'], 'paperboat-server:1')
         self.assertTrue(any('the deploy command failed (exit 1)' in line for line in out))
+
+    def test_failed_staging_refuses_before_prod_or_the_lock_is_touched(self):
+        fake = Fake([True])
+        code, out = gate(fake, self.status, stage=lambda: 7)
+        self.assertEqual(code, 5)
+        self.assertEqual((fake.calls, fake.deployed), ([], False))
+        self.assertIn('staging step failed (exit 7)', out[0])
+
+    def test_green_staging_lets_the_prod_deploy_run(self):
+        fake = Fake([True])
+        self.assertEqual(gate(fake, self.status, stage=lambda: 0)[0], 0)
+        self.assertTrue(fake.deployed)
 
     def test_red_before_refuses_and_touches_nothing(self):
         self.write(status(False, T0 - 30))
