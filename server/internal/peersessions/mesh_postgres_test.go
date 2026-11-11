@@ -16,9 +16,9 @@ import (
 )
 
 // meshTestSigner signs nothing; it keeps the last configuration's claims.
-type meshTestSigner struct{ claims *map[string]any }
+type meshTestSigner struct{ claims *peernetwork.Configuration }
 
-func (m meshTestSigner) SignNetworkConfiguration(claims map[string]any) (string, error) {
+func (m meshTestSigner) SignNetworkConfiguration(claims peernetwork.Configuration) (string, error) {
 	if m.claims != nil {
 		*m.claims = claims
 	}
@@ -91,7 +91,7 @@ SELECT $1,$1||'_m_'||g,'machine',$1||'_m_'||g,1,1,1,sha256(convert_to('key'||$1|
 SELECT 'mesh-revocation-'||$1||'-'||g,$1,sha256(convert_to($1||'_m_'||g,'UTF8')),1,'endpoint_removed',now() FROM generate_series(0,8999) g`, other)
 	join(0, 999)
 
-	var signed map[string]any
+	var signed peernetwork.Configuration
 	service, err := NewNetworkService(store, meshTestSigner{claims: &signed}, "https://issuer.example.test")
 	if err != nil {
 		t.Fatal(err)
@@ -153,7 +153,7 @@ SELECT 'mesh-revocation-'||$1||'-'||g,$1,sha256(convert_to($1||'_m_'||g,'UTF8'))
 		t.Fatal(err)
 	}
 	store.SetQueryObserver(nil)
-	if peers, _ := signed["peers"].([]networkPeer); len(peers) != 999 {
+	if peers := signed.Peers; len(peers) != 999 {
 		t.Fatalf("configuration carries %d peers, want the other 999", len(peers))
 	}
 	if n := queries.Load(); n > 40 {

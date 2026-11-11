@@ -4,6 +4,8 @@ import (
 	"net/netip"
 	"slices"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
 // Endpoint reports tell the server this engine's own candidate addresses, so peers can reach it directly with
@@ -31,7 +33,7 @@ func (a *Authority) localEndpointReport() []string {
 		// The server refuses the whole request for one entry it would not store (Lane Q, 917095b6), so
 		// keep only what it keeps: IPv4-mapped unwrapped, no loopback, unspecified, multicast or zoned address.
 		ep = netip.AddrPortFrom(ep.Addr().Unmap(), ep.Port())
-		if !reportableEndpoint(ep) {
+		if !peernetwork.ValidPeerEndpoint(ep) {
 			continue
 		}
 		endpoints = append(endpoints, ep)

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
 // TestEmitCompatNetworkConfiguration writes, to $COMPAT_ARTIFACTS_DIR, the network configuration claims a
@@ -18,10 +20,10 @@ func TestEmitCompatNetworkConfiguration(t *testing.T) {
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	binding := func(id, address string) networkBinding {
-		return networkBinding{AccountID: "usr_compat", EndpointID: id, Role: "machine", MachineID: id, EndpointGeneration: 1, MachineGeneration: 1, KeyGeneration: 1,
+		return networkBinding{Binding: peernetwork.Binding{AccountID: "usr_compat", EndpointID: id, Role: "machine", MachineID: id, EndpointGeneration: 1, MachineGeneration: 1, KeyGeneration: 1,
 			WireGuardPublicKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", DiscoPublicKey: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
 			QUICCertificateFingerprint: "0000000000000000000000000000000000000000000000000000000000000000", QUICPublicKey: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
-			VirtualAddress: address, Endpoints: []string{"203.0.113.7:41641"}}
+			VirtualAddress: address}, Endpoints: []string{"203.0.113.7:41641"}}
 	}
 	self, peer := binding("machine_self", "100.64.0.1"), binding("machine_peer", "100.64.0.2")
 	expiry := now.Add(5 * time.Minute)

@@ -10,6 +10,8 @@ import (
 	"net/netip"
 	"sort"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
 // The personal mesh of an account (every endpoint of it is a peer of every other, PLAN 3b "Peer network deltas")
@@ -62,7 +64,7 @@ func buildMesh(ctx context.Context, tx *sql.Tx, account string, now time.Time) (
 	out := map[string]networkBinding{}
 	var earliest time.Time
 	for rows.Next() {
-		b := networkBinding{AccountID: account}
+		b := networkBinding{Binding: peernetwork.Binding{AccountID: account}}
 		var key, disco, fingerprint, quicPublic, delivered []byte
 		var expiry time.Time
 		if err := rows.Scan(&b.EndpointID, &b.Role, &b.MachineID, &b.EndpointGeneration, &b.MachineGeneration, &b.KeyGeneration,

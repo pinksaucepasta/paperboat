@@ -351,6 +351,18 @@ func TestNetworkAuthorityRejectsInvalidBindingsAndScopes(t *testing.T) {
 				}
 				return
 			}
+			// A scope of a kind or capability this build does not know (a newer server's) and a peer left without
+			// scopes authorize nothing; they never fail the rest of the configuration (peernetwork.DropUnknownScopes).
+			switch name {
+			case "ungranted", "unknown_scope", "codex_on_machine_access", "terminal_on_codex_session":
+				if err := a.Apply(context.Background(), networkToken(t, priv, c)); err != nil {
+					t.Fatal("a configuration with an unknown scope was refused whole:", err)
+				}
+				if a.Allows("machine_test", "grant_test", "terminal", "dial") || a.Allows("machine_test", "grant_test", "codex", "dial") || a.Allows("machine_test", "grant_test", "execute_everything", "dial") {
+					t.Fatal("an unknown scope authorized an operation")
+				}
+				return
+			}
 			if err := a.Apply(context.Background(), networkToken(t, priv, c)); err == nil {
 				t.Fatal("invalid authority accepted")
 			}

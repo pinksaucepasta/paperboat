@@ -40,7 +40,6 @@ const (
 	MachineEventsType = "paperboat-machine-events+jwt"
 	// MachineEventsAnswerLifetime bounds one answer; a client checks it on the answer it just received.
 	MachineEventsAnswerLifetime = time.Minute
-	NetworkConfigurationType    = "paperboat-network-config+jwt"
 	RegionalCandidatesType      = "paperboat-regional-candidates+jwt"
 	RelayGrantType              = peernetwork.RelayGrantType
 	// VisitorAssertionType is the typ of the signed visitor identity an app behind a gated (team or
@@ -62,27 +61,20 @@ func (p *Provider) SignVisitorAssertion(issuer, hostname, subject, email, teamID
 	return p.signClaims(VisitorAssertionType, claims)
 }
 
-// SignNetworkConfiguration signs the already validated network-authority
-// document. Keeping this entry point separate prevents network configuration
-// from being minted through the generic operation-credential policy table.
-func (p *Provider) SignNetworkConfiguration(claims map[string]any) (string, error) {
-	if p == nil || claims == nil || claims["version"] != 1 || claims["aud"] != "paperboat-network" {
-		return "", errors.New("network configuration claims are invalid")
+// SignNetworkConfiguration signs a network configuration that passes every client's own Check. Keeping this entry
+// point separate prevents network configuration from being minted through the generic operation-credential policy
+// table.
+func (p *Provider) SignNetworkConfiguration(c peernetwork.Configuration) (string, error) {
+	if p == nil {
+		return "", errors.New("network configuration signer is not configured")
 	}
-	issuer, issuerOK := claims["iss"].(string)
-	issuedAt, issuedOK := integerClaim(claims["iat"])
-	expiresAt, expiresOK := integerClaim(claims["exp"])
-	generation, generationOK := integerClaim(claims["generation"])
-	if !issuerOK || strings.TrimSpace(issuer) == "" || !issuedOK || !expiresOK || !generationOK || generation < 1 || expiresAt <= issuedAt || expiresAt-issuedAt > int64(MaxProofTTL/time.Second) {
-		return "", errors.New("network configuration claims are invalid")
+	if err := c.Check(time.Unix(c.IssuedAt, 0)); err != nil {
+		return "", fmt.Errorf("network configuration claims are invalid: %w", err)
 	}
-	if _, ok := claims["self"].(map[string]any); !ok {
-		return "", errors.New("network configuration self binding is required")
+	if c.ExpiresAt-c.IssuedAt > int64(MaxProofTTL/time.Second) { // the server refreshes a configuration well within
+		return "", errors.New("network configuration lifetime is too long")
 	}
-	if _, ok := claims["peers"]; !ok {
-		return "", errors.New("network configuration peers are required")
-	}
-	return p.signClaims(NetworkConfigurationType, claims)
+	return p.signClaims(peernetwork.ConfigurationType, c)
 }
 
 // SignRelayGrant signs an endpoint- and relay-process-bound routing grant.

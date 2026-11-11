@@ -76,7 +76,7 @@ type NetworkService struct {
 	endpointBuilds keyedLocks
 	store          *db.DB
 	signer         interface {
-		SignNetworkConfiguration(map[string]any) (string, error)
+		SignNetworkConfiguration(peernetwork.Configuration) (string, error)
 		SignRegionalCandidates(map[string]any) (string, error)
 		SignRelayGrant(peernetwork.RelayGrant) (string, error)
 	}
@@ -88,7 +88,7 @@ type NetworkService struct {
 }
 
 func NewNetworkService(store *db.DB, signer interface {
-	SignNetworkConfiguration(map[string]any) (string, error)
+	SignNetworkConfiguration(peernetwork.Configuration) (string, error)
 	SignRegionalCandidates(map[string]any) (string, error)
 	SignRelayGrant(peernetwork.RelayGrant) (string, error)
 }, issuer string) (*NetworkService, error) {
@@ -213,30 +213,19 @@ func (s *NetworkService) registerAttempt(ctx context.Context, in NetworkRegistra
 	return NetworkRegistrationResult{currentGen, address}, nil
 }
 
+// networkBinding is an endpoint's signed identity (shared/peernetwork) with its delivered endpoints while it is
+// loaded and in the mesh log (N5); on the way out they move to the peer entry (configurationClaims) and are never
+// part of a signed identity.
 type networkBinding struct {
-	AccountID                  string `json:"account_id"`
-	EndpointID                 string `json:"endpoint_id"`
-	Role                       string `json:"role"`
-	MachineID                  string `json:"machine_id"`
-	EndpointGeneration         int64  `json:"endpoint_generation"`
-	MachineGeneration          int64  `json:"machine_generation"`
-	KeyGeneration              int64  `json:"key_generation"`
-	WireGuardPublicKey         string `json:"wireguard_public_key"`
-	DiscoPublicKey             string `json:"disco_public_key"`
-	QUICCertificateFingerprint string `json:"quic_certificate_fingerprint"`
-	QUICPublicKey              string `json:"quic_public_key"`
-	VirtualAddress             string `json:"virtual_address"`
-	// Endpoints are the identity's delivered endpoints (N5) while it is loaded and in the mesh log; on the way
-	// out they move to the peer entry (deliverEndpoints) and are never part of a signed identity.
+	peernetwork.Binding
 	Endpoints []string `json:"endpoints,omitempty"`
 }
 
 // networkScope is the shared signed access scope (shared/peernetwork) the client and the relay verify.
 type networkScope = peernetwork.Scope
 type networkPeer struct {
-	Identity  networkBinding `json:"identity"`
-	Scopes    []networkScope `json:"scopes"`
-	Endpoints []string       `json:"endpoints,omitempty"`
+	Identity networkBinding
+	Scopes   []networkScope
 }
 
 func (s *NetworkService) Configuration(ctx context.Context, in NetworkConfigRequest) (NetworkConfigResult, error) {
@@ -721,7 +710,7 @@ func personalNetworkPeers(ctx context.Context, tx *sql.Tx, self networkBinding, 
 	}
 	peers := make([]networkBinding, 0, len(ids))
 	for _, id := range ids {
-		if admittedPeers[id] || slices.Contains(admittedNetworks, personalNetworkScopeID(self, networkBinding{EndpointID: id})) {
+		if admittedPeers[id] || slices.Contains(admittedNetworks, personalNetworkScopeID(self, networkBinding{Binding: peernetwork.Binding{EndpointID: id}})) {
 			binding, certExpiry, err := loadNetworkBinding(ctx, tx, self.AccountID, id, now, true)
 			if err == sql.ErrNoRows || err == ErrUnavailable {
 				continue

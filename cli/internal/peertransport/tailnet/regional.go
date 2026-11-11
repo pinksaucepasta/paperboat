@@ -5,13 +5,15 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/relay/derpquic"
-	"github.com/pinksaucepasta/paperboat/relay/nodetls"
-	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
-	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/relay/nodetls"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
+	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 const MaxRegionalCandidates = 32
@@ -87,7 +89,7 @@ func (a *Authority) ApplyRegionalCandidates(ctx context.Context, token string) e
 		KeyID     string `json:"kid"`
 	}
 	var c RegionalCandidates
-	if e1 != nil || e2 != nil || e3 != nil || strictDecode(header, &h) != nil || h.Algorithm != "EdDSA" || h.Type != "paperboat-regional-candidates+jwt" || !validID(h.KeyID) || strictDecode(body, &c) != nil {
+	if e1 != nil || e2 != nil || e3 != nil || peernetwork.DecodeSigned(header, &h) != nil || h.Algorithm != "EdDSA" || h.Type != "paperboat-regional-candidates+jwt" || !peernetwork.ValidID(h.KeyID) || peernetwork.DecodeSigned(body, &c) != nil {
 		return ErrRegionalAuthority
 	}
 	pub, found, err := a.options.Keys.Lookup(ctx, h.KeyID)
@@ -171,7 +173,7 @@ func (c *RegionalCandidates) Eligible(role, transport string, regions map[string
 	out := make([]RegionalNode, 0, len(c.Nodes))
 	seen := map[string]bool{}
 	for _, n := range c.Nodes {
-		if !validID(n.NodeID) || !validID(n.ProcessEpoch) || !validID(n.Region) || !validID(n.FailureDomain) || seen[n.NodeID] || n.NodeGeneration == 0 || n.State != "ready" || n.ObservedAt > now.Unix() || at.Unix()-n.ObservedAt > int64(regionalObservationMaxAge/time.Second) || n.ExpiresAt <= at.Unix() || n.CapacityObservedAt > now.Unix() || at.Unix()-n.CapacityObservedAt > int64(regionalObservationMaxAge/time.Second) || n.CapacityLimit == 0 || n.CapacityUsed >= n.CapacityLimit-n.CapacityLimit/10 || n.DrainDeadline != nil {
+		if !peernetwork.ValidID(n.NodeID) || !peernetwork.ValidID(n.ProcessEpoch) || !peernetwork.ValidID(n.Region) || !peernetwork.ValidID(n.FailureDomain) || seen[n.NodeID] || n.NodeGeneration == 0 || n.State != "ready" || n.ObservedAt > now.Unix() || at.Unix()-n.ObservedAt > int64(regionalObservationMaxAge/time.Second) || n.ExpiresAt <= at.Unix() || n.CapacityObservedAt > now.Unix() || at.Unix()-n.CapacityObservedAt > int64(regionalObservationMaxAge/time.Second) || n.CapacityLimit == 0 || n.CapacityUsed >= n.CapacityLimit-n.CapacityLimit/10 || n.DrainDeadline != nil {
 			continue
 		}
 		if len(regions) > 0 && !regions[n.Region] || !contains(n.Roles, role) || !contains(n.Transports, transport) || !validEndpointHost(n.EndpointHost) || (n.EndpointTCPPort == 0 && n.EndpointQUICPort == 0) {

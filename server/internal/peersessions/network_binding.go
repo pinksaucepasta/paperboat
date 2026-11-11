@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"log/slog"
 	"net/netip"
 	"time"
@@ -47,7 +46,7 @@ AND c.issued_at<=$3 AND (c.expires_at>$3 OR $4) WHERE n.user_id=$1 AND n.endpoin
 	} else {
 		var gen int64
 		err = tx.QueryRowContext(ctx, `SELECT m.installation_generation FROM paperboat.user_machines m JOIN paperboat.control_environments e ON e.id=m.environment_id AND e.owner_user_id=m.user_id AND e.desired_state='active' AND e.revoked_at IS NULL WHERE m.id=$1 AND m.user_id=$2 AND m.state IN ('online','offline') AND m.seat_state='occupied' AND m.revoked_at IS NULL AND m.deleted_at IS NULL`, endpointID, userID).Scan(&gen)
-		if err == sql.ErrNoRows || err == nil && gen != b.MachineGeneration {
+		if err == sql.ErrNoRows || err == nil && uint64(gen) != b.MachineGeneration {
 			slog.Warn("peer network authority unavailable", "site", "network.go:801")
 			return b, time.Time{}, ErrUnavailable
 		}
@@ -70,11 +69,4 @@ AND c.issued_at<=$3 AND (c.expires_at>$3 OR $4) WHERE n.user_id=$1 AND n.endpoin
 		return b, time.Time{}, ErrUnavailable
 	}
 	return b, expiry, nil
-}
-
-func bindingMap(b networkBinding) map[string]any {
-	raw, _ := json.Marshal(b)
-	var out map[string]any
-	_ = json.Unmarshal(raw, &out)
-	return out
 }

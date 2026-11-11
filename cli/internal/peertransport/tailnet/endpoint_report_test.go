@@ -9,6 +9,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"tailscale.com/types/key"
 )
 
@@ -52,7 +53,7 @@ func TestEndpointsAreReportedFromTheFirstRequest(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if seen[0].Endpoints == nil || len(*seen[0].Endpoints) == 0 || !validPeerEndpoints(*seen[0].Endpoints) {
+	if seen[0].Endpoints == nil || len(*seen[0].Endpoints) == 0 || !peernetwork.ValidPeerEndpoints(*seen[0].Endpoints) {
 		t.Fatalf("the first request reported %v, want the engine's normalized candidates", seen[0].Endpoints)
 	}
 	if seen[1].Endpoints != nil || seen[2].Endpoints != nil {

@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"slices"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
 // MaxReportedEndpoints is how many candidate endpoints an engine may report (PLAN 3b, N5).
-const MaxReportedEndpoints = 8
+const MaxReportedEndpoints = peernetwork.MaxPeerEndpoints
 
 // normalizeEndpoints is the stored form of an engine's reported candidate endpoints: each a unicast ip:port
 // (IPv4-mapped addresses unwrapped; no unspecified, loopback or multicast address, no port 0), sorted and
@@ -28,11 +31,11 @@ func normalizeEndpoints(reported []string) ([]string, error) {
 		if err != nil {
 			return nil, ErrInvalid
 		}
-		addr := endpoint.Addr().Unmap()
-		if !addr.IsValid() || addr.IsUnspecified() || addr.IsLoopback() || addr.IsMulticast() || addr.Zone() != "" || endpoint.Port() == 0 {
+		normalized := netip.AddrPortFrom(endpoint.Addr().Unmap(), endpoint.Port())
+		if !peernetwork.ValidPeerEndpoint(normalized) {
 			return nil, ErrInvalid
 		}
-		out = append(out, netip.AddrPortFrom(addr, endpoint.Port()).String())
+		out = append(out, normalized.String())
 	}
 	slices.Sort(out)
 	return slices.Compact(out), nil
@@ -99,18 +102,19 @@ func publishedEndpoints(raw []byte) ([]string, error) {
 	return out, nil
 }
 
-// deliverEndpoints moves each peer's delivered endpoints from its identity, where loading and the mesh log keep
-// them, onto its entry, for every recipient from its very first configuration: a dial right after an engine starts
-// goes direct when no relay is usable yet (F20-02/04).
-func deliverEndpoints(peers []networkPeer) {
-	for i := range peers {
-		peers[i].Endpoints, peers[i].Identity.Endpoints = peers[i].Identity.Endpoints, nil
+// configurationClaims is the signed network configuration for one recipient. Each peer's delivered endpoints move
+// from its identity, where loading and the mesh log keep them, onto its entry, for every recipient from its very
+// first configuration: a dial right after an engine starts goes direct when no relay is usable yet (F20-02/04). A peer
+// whose identity receivers would refuse (peernetwork.Binding.Valid, e.g. no disco key yet) is left out, so one such
+// peer never fails the whole configuration.
+func configurationClaims(issuer string, now, expiry time.Time, generation int64, self networkBinding, peers []networkPeer) peernetwork.Configuration {
+	out := peernetwork.Configuration{Version: 1, Issuer: issuer, Audience: peernetwork.ConfigurationAudience, IssuedAt: now.Unix(), ExpiresAt: expiry.Unix(), Generation: uint64(generation), Self: self.Binding, Peers: make([]peernetwork.Peer, 0, len(peers))}
+	for _, p := range peers {
+		if !p.Identity.Valid() {
+			slog.Warn("network configuration omits a peer with an incomplete identity", "site", "endpoints.go:configurationClaims")
+			continue
+		}
+		out.Peers = append(out.Peers, peernetwork.Peer{Identity: p.Identity.Binding, Scopes: p.Scopes, Endpoints: p.Identity.Endpoints})
 	}
-}
-
-// configurationClaims are the signed network configuration's claims for one recipient.
-func configurationClaims(issuer string, now, expiry time.Time, generation int64, self networkBinding, peers []networkPeer) map[string]any {
-	deliverEndpoints(peers)
-	self.Endpoints = nil
-	return map[string]any{"version": 1, "iss": issuer, "aud": "paperboat-network", "iat": now.Unix(), "exp": expiry.Unix(), "generation": generation, "self": bindingMap(self), "peers": peers}
+	return out
 }

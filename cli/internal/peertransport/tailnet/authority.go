@@ -1,17 +1,14 @@
 package tailnet
 
 import (
-	"bytes"
 	"context"
 	"crypto/ecdh"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/netip"
 	"strings"
 	"sync"
@@ -25,6 +22,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
+
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=network-key-custody
 	"tailscale.com/types/key"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=network-fault-injection
@@ -53,71 +51,15 @@ var ErrExpiredAuthority = errors.New("peer network authority expired; reconnect 
 // instead of latching a final refusal, and relayCredential asks for a fresh grant on demand.
 var ErrRelayGrantExpired = fmt.Errorf("relay grant expired; waiting for a fresh grant from Paperboat: %w", derpquic.ErrExpired)
 
-type NetworkBinding struct {
-	AccountID                  string `json:"account_id"`
-	EndpointID                 string `json:"endpoint_id"`
-	Role                       string `json:"role"`
-	MachineID                  string `json:"machine_id"`
-	EndpointGeneration         uint64 `json:"endpoint_generation"`
-	MachineGeneration          uint64 `json:"machine_generation"`
-	KeyGeneration              uint64 `json:"key_generation"`
-	WireGuardPublicKey         string `json:"wireguard_public_key"`
-	DiscoPublicKey             string `json:"disco_public_key"`
-	QUICCertificateFingerprint string `json:"quic_certificate_fingerprint"`
-	QUICPublicKey              string `json:"quic_public_key"`
-	VirtualAddress             string `json:"virtual_address"`
-}
-
-// NetworkScope is the shared signed access scope (shared/peernetwork).
+// NetworkBinding, NetworkScope, NetworkPeer and NetworkConfiguration are the shared signed configuration types
+// (shared/peernetwork), as the server mints them.
+type NetworkBinding = peernetwork.Binding
 type NetworkScope = peernetwork.Scope
-type NetworkPeer struct {
-	Identity NetworkBinding `json:"identity"`
-	Scopes   []NetworkScope `json:"scopes"`
-	// Endpoints are the peer's own candidate UDP addresses ("ip:port": its LAN interfaces, STUN-mapped and
-	// port-mapped addresses), so the engine can reach it directly with no relay (PLAN 3b "Direct paths
-	// without a relay"). Absent while the server does not send them.
-	Endpoints []string `json:"endpoints,omitempty"`
-	// CarrierOffer is no longer used: the server still sends it until its removal deploys (decoding is strict).
-	CarrierOffer []byte `json:"carrier_offer,omitempty"`
-}
+type NetworkPeer = peernetwork.Peer
+type NetworkConfiguration = peernetwork.Configuration
 
 // MaxPeerEndpoints bounds the candidate addresses one peer entry may carry.
-const MaxPeerEndpoints = 8
-
-// validPeerEndpoints reports whether endpoints are at most MaxPeerEndpoints distinct, canonical unicast
-// ip:port addresses with a nonzero port (the server stores them normalized the same way).
-func validPeerEndpoints(endpoints []string) bool {
-	if len(endpoints) > MaxPeerEndpoints {
-		return false
-	}
-	seen := make(map[netip.AddrPort]bool, len(endpoints))
-	for _, raw := range endpoints {
-		addr, err := netip.ParseAddrPort(raw)
-		if err != nil || !reportableEndpoint(addr) || addr.String() != raw || seen[addr] {
-			return false
-		}
-		seen[addr] = true
-	}
-	return true
-}
-
-// reportableEndpoint is the server's rule for a stored endpoint: a unicast address that is not loopback,
-// unspecified, multicast, zoned or IPv4-mapped, with a port.
-func reportableEndpoint(addr netip.AddrPort) bool {
-	ip := addr.Addr()
-	return addr.Port() != 0 && ip.IsValid() && ip.Zone() == "" && !ip.Is4In6() && !ip.IsLoopback() && !ip.IsUnspecified() && !ip.IsMulticast()
-}
-
-type NetworkConfiguration struct {
-	Version    int            `json:"version"`
-	Issuer     string         `json:"iss"`
-	Audience   string         `json:"aud"`
-	IssuedAt   int64          `json:"iat"`
-	ExpiresAt  int64          `json:"exp"`
-	Generation uint64         `json:"generation"`
-	Self       NetworkBinding `json:"self"`
-	Peers      []NetworkPeer  `json:"peers"`
-}
+const MaxPeerEndpoints = peernetwork.MaxPeerEndpoints
 
 // NetworkKeys is satisfied by the existing authenticated, bounded JWKS cache.
 type NetworkKeys interface {
@@ -221,31 +163,12 @@ func (a *Authority) RequestUrgentRefresh() {
 
 func NewAuthority(options AuthorityOptions) (*Authority, error) {
 	issuer, err := config.NormalizeIssuer(options.Issuer)
-	if err != nil || issuer != options.Issuer || options.Keys == nil || !validLocalBinding(options.Self) {
+	if err != nil || issuer != options.Issuer || options.Keys == nil || !options.Self.ValidLocal() {
 		return nil, ErrAuthority
 	}
 	return &Authority{options: options, done: make(chan struct{}), refreshSlot: make(chan struct{}, 1), refreshWake: make(chan struct{}, 1), refreshNow: make(chan struct{}, 1), refreshUrgent: make(chan struct{}, 1)}, nil
 }
 
-func validID(id string) bool {
-	if len(id) == 0 || len(id) > peernetwork.MaxResourceIDBytes {
-		return false
-	}
-	for _, c := range id {
-		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("._:-", c)) {
-			return false
-		}
-	}
-	return true
-}
-func validLocalBinding(b NetworkBinding) bool {
-	hash, err := hex.DecodeString(b.QUICCertificateFingerprint)
-	quicPublic, keyErr := base64.RawURLEncoding.Strict().DecodeString(b.QUICPublicKey)
-	if !validID(b.AccountID) || !validID(b.EndpointID) || b.EndpointGeneration == 0 || b.EndpointGeneration > 1<<53-1 || err != nil || len(hash) != 32 || hex.EncodeToString(hash) != b.QUICCertificateFingerprint || keyErr != nil || len(quicPublic) != ed25519.PublicKeySize || base64.RawURLEncoding.EncodeToString(quicPublic) != b.QUICPublicKey {
-		return false
-	}
-	return b.Role == "cli" && b.MachineID == "" && b.MachineGeneration == 0 || b.Role == "machine" && b.MachineID == b.EndpointID && b.MachineGeneration > 0 && b.MachineGeneration <= 1<<53-1
-}
 func publicKey(value string) (key.NodePublic, error) {
 	var result key.NodePublic
 	raw, err := base64.RawURLEncoding.Strict().DecodeString(value)
@@ -270,23 +193,6 @@ func privateKey(raw []byte) (key.NodePrivate, error) {
 		return result, ErrAuthority
 	}
 	return result, nil
-}
-func validBinding(b NetworkBinding) bool {
-	addr, err := netip.ParseAddr(b.VirtualAddress)
-	_, keyErr := publicKey(b.WireGuardPublicKey)
-	disco, discoErr := derpquic.ParseDiscoKey(b.DiscoPublicKey)
-	return validLocalBinding(b) && b.KeyGeneration > 0 && b.KeyGeneration <= 1<<53-1 && keyErr == nil && discoErr == nil && !disco.IsZero() && err == nil && addr.String() == b.VirtualAddress && netip.MustParsePrefix("fd7a:115c:a1e0::/48").Contains(addr)
-}
-func strictDecode(raw []byte, value any) error {
-	d := json.NewDecoder(bytes.NewReader(raw))
-	d.DisallowUnknownFields()
-	if err := d.Decode(value); err != nil {
-		return ErrAuthority
-	}
-	if d.Decode(&struct{}{}) != io.EOF {
-		return ErrAuthority
-	}
-	return nil
 }
 
 // verify checks a signed configuration. restored is a configuration this authority verified before and
@@ -316,7 +222,7 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time, res
 		Type      string `json:"typ"`
 		KeyID     string `json:"kid"`
 	}
-	if e1 != nil || e2 != nil || e3 != nil || len(header) > 1024 || strictDecode(header, &h) != nil || h.Algorithm != "EdDSA" || h.Type != "paperboat-network-config+jwt" || !validID(h.KeyID) {
+	if e1 != nil || e2 != nil || e3 != nil || len(header) > 1024 || peernetwork.DecodeSigned(header, &h) != nil || h.Algorithm != "EdDSA" || h.Type != peernetwork.ConfigurationType || !peernetwork.ValidID(h.KeyID) {
 		return cfg, "", ErrAuthority
 	}
 	if !restored {
@@ -325,10 +231,11 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time, res
 			return cfg, "", ErrAuthority
 		}
 	}
-	if strictDecode(body, &cfg) != nil {
+	if peernetwork.DecodeSigned(body, &cfg) != nil {
 		return cfg, "", ErrAuthority
 	}
-	if cfg.Version != 1 || cfg.Issuer != a.options.Issuer || cfg.Audience != "paperboat-network" || cfg.Generation == 0 || cfg.Generation > 1<<53-1 || cfg.IssuedAt <= 0 || cfg.IssuedAt > now.Add(derpquic.MaxClockSkew).Unix() || cfg.ExpiresAt <= cfg.IssuedAt || !validBinding(cfg.Self) || len(cfg.Peers) > MaxConfigurationPeers {
+	cfg.DropUnknownScopes()
+	if cfg.Check(now) != nil || cfg.Issuer != a.options.Issuer {
 		return cfg, "", ErrAuthority
 	}
 	if cfg.ExpiresAt <= now.Unix() && !restored {
@@ -337,38 +244,6 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time, res
 	s, want := cfg.Self, a.options.Self
 	if s.AccountID != want.AccountID || s.EndpointID != want.EndpointID || s.Role != want.Role || s.MachineID != want.MachineID || s.EndpointGeneration != want.EndpointGeneration || s.MachineGeneration != want.MachineGeneration || s.QUICCertificateFingerprint != want.QUICCertificateFingerprint || s.QUICPublicKey != want.QUICPublicKey {
 		return cfg, "", ErrAuthority
-	}
-	ids := map[string]bool{s.EndpointID: true}
-	addresses := map[string]bool{s.VirtualAddress: true}
-	keys := map[string]bool{s.WireGuardPublicKey: true}
-	scopes := 0
-	for _, p := range cfg.Peers {
-		b := p.Identity
-		if !validBinding(b) || (s.Role == "cli" && b.Role == "cli") || ids[b.EndpointID] || addresses[b.VirtualAddress] || keys[b.WireGuardPublicKey] || len(p.Scopes) == 0 || !validPeerEndpoints(p.Endpoints) {
-			return cfg, "", ErrAuthority
-		}
-		ids[b.EndpointID] = true
-		addresses[b.VirtualAddress] = true
-		keys[b.WireGuardPublicKey] = true
-		seen := map[string]bool{}
-		for _, scope := range p.Scopes {
-			scopes++
-			networkOnly := scope.ResourceKind == "machine_network" && scope.Capability == "connect" && b.AccountID == s.AccountID
-			validResource := networkOnly || scope.ResourceKind != "machine_network" && peernetwork.ValidScope(scope.ResourceKind, scope.Capability)
-			// Until-revoked scopes (expires_at 0, F21-01/F21-11): the network pair, a host's offline session rights
-			// (machine_access accept) and the mirror in a member's CLI document (machine_access dial, named by the
-			// host's endpoint id), whose generation is the deciding policy version.
-			sessionRight := scope.ResourceKind == "machine_access" && scope.Capability != "private_access" && (scope.Direction == "accept" || scope.ResourceID == b.EndpointID)
-			validGeneration := scope.ResourceGeneration == 1 || sessionRight && scope.ResourceGeneration >= 1 && scope.ResourceGeneration <= 1<<53-1
-			if scopes > MaxConfigurationScopes || !validResource || !validID(scope.ResourceID) || !validGeneration || scope.Port != NetworkPort || scope.ExpiresAt < 0 || scope.ExpiresAt == 0 && !networkOnly && !sessionRight || scope.Direction != "dial" && scope.Direction != "accept" || s.Role == "cli" && scope.Direction != "dial" || !networkOnly && (s.Role == b.Role || s.Role == "machine" && scope.Direction != "accept") {
-				return cfg, "", ErrAuthority
-			}
-			k := scope.ResourceID + "\x00" + scope.Capability + "\x00" + scope.Direction
-			if seen[k] {
-				return cfg, "", ErrAuthority
-			}
-			seen[k] = true
-		}
 	}
 	hash := sha256.Sum256(body)
 	return cfg, hex.EncodeToString(hash[:]), nil

@@ -12,6 +12,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
 // endpointsFixture is one account with two personal machines (<account>_m_0, _m_1) that have identities and
@@ -22,7 +23,7 @@ type endpointsFixture struct {
 	account string
 	suffix  string
 	service *NetworkService
-	signed  *map[string]any
+	signed  *peernetwork.Configuration
 }
 
 func newEndpointsFixture(t *testing.T) endpointsFixture {
@@ -65,7 +66,7 @@ SELECT sha256(convert_to($1||'_m_'||g,'UTF8')),$1,$1||'_m_'||g,'machine',1,1,dec
 wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at)
 SELECT $1,$1||'_m_'||g,'machine',$1||'_m_'||g,1,1,1,sha256(convert_to('key'||$1||'_m_'||g,'UTF8')),sha256(convert_to($1||'_m_'||g,'UTF8')),
  ('100.'||(64+$2::int)||'.'||$3::int||'.'||(1+g))::inet,now(),now() FROM generate_series(0,1) g`, account, int(net[0])%64, int(net[1]))
-	signed := map[string]any{}
+	signed := peernetwork.Configuration{}
 	service, err := NewNetworkService(store, meshTestSigner{claims: &signed}, "https://issuer.example.test")
 	if err != nil {
 		t.Fatal(err)

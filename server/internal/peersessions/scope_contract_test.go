@@ -39,7 +39,7 @@ func TestEveryEmittedScopeIsAcceptedByTheClientAndTheRelay(t *testing.T) {
 			emitted = append(emitted, s)
 		}
 	}
-	self, peer := networkBinding{AccountID: "account", EndpointID: "host", Role: "machine"}, networkBinding{AccountID: "account", EndpointID: "laptop", Role: "cli"}
+	self, peer := networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: "host", Role: "machine"}}, networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: "laptop", Role: "cli"}}
 	emitted = append(emitted, personalNetworkScope(self, peer, expiry), personalNetworkScope(self, peer, 0))
 
 	for _, s := range emitted {
@@ -76,7 +76,7 @@ func contractKey(seed int) string {
 func TestEveryRelayGrantTheServerBuildsIsAcceptedByRelaysAndClients(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	expires := now.Add(time.Hour)
-	self := networkBinding{AccountID: "account", EndpointID: "host", Role: "machine", WireGuardPublicKey: contractKey(0), DiscoPublicKey: contractKey(1), QUICCertificateFingerprint: strings.Repeat("ab", 32), QUICPublicKey: contractKey(2)}
+	self := networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: "host", Role: "machine", WireGuardPublicKey: contractKey(0), DiscoPublicKey: contractKey(1), QUICCertificateFingerprint: strings.Repeat("ab", 32), QUICPublicKey: contractKey(2)}}
 	var peers []networkPeer
 	n := 0
 	peernetwork.Scopes(func(kind, capability string) bool {
@@ -87,7 +87,7 @@ func TestEveryRelayGrantTheServerBuildsIsAcceptedByRelaysAndClients(t *testing.T
 				if team {
 					account = "other"
 				}
-				peer := networkBinding{AccountID: account, EndpointID: fmt.Sprint("peer_", n), Role: "cli", WireGuardPublicKey: contractKey(n + 10), DiscoPublicKey: contractKey(n + 500)}
+				peer := networkBinding{Binding: peernetwork.Binding{AccountID: account, EndpointID: fmt.Sprint("peer_", n), Role: "cli", WireGuardPublicKey: contractKey(n + 10), DiscoPublicKey: contractKey(n + 500)}}
 				s := networkScope{ResourceKind: kind, ResourceID: "resource_1", ResourceGeneration: 1, Capability: capability, Direction: "accept", Port: peernetwork.NetworkPort, ExpiresAt: now.Add(time.Minute).Unix()}
 				if kind == "machine_network" {
 					s = personalNetworkScope(self, peer, s.ExpiresAt)
@@ -101,7 +101,7 @@ func TestEveryRelayGrantTheServerBuildsIsAcceptedByRelaysAndClients(t *testing.T
 		return true
 	})
 	for i := range 3 * peernetwork.MaxGrantPeers { // several chunks
-		peer := networkBinding{AccountID: "account", EndpointID: fmt.Sprint("mesh_", i), Role: "cli", WireGuardPublicKey: contractKey(i + 1000), DiscoPublicKey: contractKey(i + 2000)}
+		peer := networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: fmt.Sprint("mesh_", i), Role: "cli", WireGuardPublicKey: contractKey(i + 1000), DiscoPublicKey: contractKey(i + 2000)}}
 		peers = append(peers, networkPeer{Identity: peer, Scopes: []networkScope{personalNetworkScope(self, peer, 0)}})
 	}
 	_, private, err := ed25519.GenerateKey(nil)
@@ -157,6 +157,90 @@ func TestEveryRelayGrantTheServerBuildsIsAcceptedByRelaysAndClients(t *testing.T
 		}
 		if named != relayable || relayable < len(peers)/2 {
 			t.Fatalf("grants name %d of %d relayable peers (%d peers)", named, relayable, len(peers))
+		}
+	}
+}
+
+// contractBinding is a complete registered identity (peernetwork.Binding.Valid) for the contract tests.
+func contractBinding(account, endpoint, role string, n int) networkBinding {
+	b := peernetwork.Binding{AccountID: account, EndpointID: endpoint, Role: role, EndpointGeneration: 1, KeyGeneration: 1, WireGuardPublicKey: contractKey(n), DiscoPublicKey: contractKey(n + 3000),
+		QUICCertificateFingerprint: strings.Repeat("ab", 32), QUICPublicKey: contractKey(n + 6000), VirtualAddress: fmt.Sprintf("fd7a:115c:a1e0::%x", n+1)}
+	if role == peernetwork.RoleMachine {
+		b.MachineID, b.MachineGeneration = endpoint, 1
+	}
+	return networkBinding{Binding: b}
+}
+
+// The scopes the server emits for peer in self's configuration (network.go admissions, offline_access.go standing
+// session rights, the account mesh pair), in self's direction.
+func emittedConfigurationScopes(self, peer networkBinding, expiry int64) []networkScope {
+	direction := "accept"
+	if self.Role == peernetwork.RoleCLI {
+		direction = "dial"
+	}
+	if self.Role == peer.Role {
+		return []networkScope{personalNetworkScope(self, peer, 0)}
+	}
+	timed := func(kind, capability string) networkScope {
+		return networkScope{ResourceKind: kind, ResourceID: "resource_" + kind + "_" + capability, ResourceGeneration: 1, Capability: capability, Direction: direction, Port: 443, ExpiresAt: expiry}
+	}
+	var out []networkScope
+	for _, capability := range []string{"terminal", "exec", "managed_ssh", "private_access", "file_transfer"} {
+		out = append(out, timed("machine_access", capability))
+	}
+	out = append(out, timed("inspector", "inspector"), timed("config_compare", "config_compare"), timed("recording", "recording"), timed("codex_session", "codex"))
+	host := self.EndpointID // offlineAccessPeers: the host's own resource
+	if self.Role == peernetwork.RoleCLI {
+		host = peer.EndpointID // teamHostPeers: the member's CLI names the host
+	}
+	for _, capability := range networkNames() {
+		out = append(out, networkScope{ResourceKind: "machine_access", ResourceID: host, ResourceGeneration: 7, Capability: capability, Direction: direction, Port: 443})
+	}
+	return append(out, personalNetworkScope(self, peer, expiry))
+}
+
+// Every network configuration the server builds (configurationClaims), signed by the real mint, is one every CLI
+// and daemon accepts: they decode it with peernetwork.DecodeSigned and check it with peernetwork.Configuration.Check,
+// the rule this runs, and none of its scopes is one they would drop. Both roles of the recipient, every emitted scope.
+func TestEveryConfigurationTheServerBuildsIsAcceptedByClients(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	_, private, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := mint.New([]mint.Key{{ID: "contract", PrivateKey: private}}, "contract", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, role := range []string{peernetwork.RoleMachine, peernetwork.RoleCLI} {
+		self := contractBinding("account", "self_"+role, role, 1)
+		var peers []networkPeer
+		for i, peerRole := range []string{peernetwork.RoleMachine, peernetwork.RoleCLI} {
+			if role == peernetwork.RoleCLI && peerRole == peernetwork.RoleCLI {
+				continue // a CLI never peers with a CLI
+			}
+			peer := contractBinding("account", fmt.Sprint("peer_", i), peerRole, 10+i)
+			peer.Endpoints = []string{"203.0.113.7:41641"}
+			peers = append(peers, networkPeer{Identity: peer, Scopes: emittedConfigurationScopes(self, peer, now.Add(time.Minute).Unix())})
+		}
+		token, err := signer.SignNetworkConfiguration(configurationClaims("https://api.example.test", now, now.Add(time.Minute), 3, self, peers))
+		if err != nil {
+			t.Fatalf("%s: mint refused a configuration the server built: %v", role, err)
+		}
+		body, err := base64.RawURLEncoding.DecodeString(strings.Split(token, ".")[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got peernetwork.Configuration
+		if err := peernetwork.DecodeSigned(body, &got); err != nil {
+			t.Fatalf("%s: clients refuse the signed claims: %v", role, err)
+		}
+		before := fmt.Sprint(got.Peers)
+		if got.DropUnknownScopes(); fmt.Sprint(got.Peers) != before {
+			t.Fatalf("%s: clients drop a scope the server emits", role)
+		}
+		if err := got.Check(now); err != nil || len(got.Peers) != len(peers) || len(got.Peers[0].Endpoints) != 1 {
+			t.Fatalf("%s: clients refuse the configuration (%d of %d peers): %v", role, len(got.Peers), len(peers), err)
 		}
 	}
 }

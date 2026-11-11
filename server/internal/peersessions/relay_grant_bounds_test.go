@@ -21,7 +21,7 @@ func TestTheLargestRelayGrantChunkFitsTheRelayTokenBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := func(i int) string { return base64.RawURLEncoding.EncodeToString(fmt.Appendf(nil, "%032d", i)) }
-	self := networkBinding{AccountID: strings.Repeat("a", 256), EndpointID: strings.Repeat("e", 256), WireGuardPublicKey: key(0)}
+	self := networkBinding{Binding: peernetwork.Binding{AccountID: strings.Repeat("a", 256), EndpointID: strings.Repeat("e", 256), WireGuardPublicKey: key(0)}}
 	var peers []networkPeer
 	for i := 1; i <= 3*peernetwork.MaxGrantPeers; i++ {
 		var scopes []networkScope
@@ -29,7 +29,7 @@ func TestTheLargestRelayGrantChunkFitsTheRelayTokenBound(t *testing.T) {
 			scopes = append(scopes, networkScope{ResourceKind: "machine_access", ResourceID: strings.Repeat(fmt.Sprint(c), peernetwork.MaxResourceIDBytes),
 				ResourceGeneration: 1 << 53, Capability: "file_transfer", Direction: "accept", Port: peernetwork.NetworkPort, ExpiresAt: 1 << 40})
 		}
-		peers = append(peers, networkPeer{Identity: networkBinding{AccountID: self.AccountID, EndpointID: fmt.Sprint(i), WireGuardPublicKey: key(i), DiscoPublicKey: key(i)}, Scopes: scopes})
+		peers = append(peers, networkPeer{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: self.AccountID, EndpointID: fmt.Sprint(i), WireGuardPublicKey: key(i), DiscoPublicKey: key(i)}}, Scopes: scopes})
 	}
 	now := time.Now().Unix()
 	for _, chunk := range relayGrantChunks(self, peers, maximumRelayGrantPeers, now+60) {

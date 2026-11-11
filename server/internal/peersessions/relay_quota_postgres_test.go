@@ -15,9 +15,11 @@ import (
 
 type grantSigner struct{}
 
-func (grantSigner) SignNetworkConfiguration(map[string]any) (string, error) { return "config", nil }
-func (grantSigner) SignRegionalCandidates(map[string]any) (string, error)   { return "candidates", nil }
-func (grantSigner) SignRelayGrant(peernetwork.RelayGrant) (string, error)   { return "grant", nil }
+func (grantSigner) SignNetworkConfiguration(peernetwork.Configuration) (string, error) {
+	return "config", nil
+}
+func (grantSigner) SignRegionalCandidates(map[string]any) (string, error) { return "candidates", nil }
+func (grantSigner) SignRelayGrant(peernetwork.RelayGrant) (string, error)      { return "grant", nil }
 
 // F13-03: hosted relays are granted per workspace: with the gate configured, a peer whose
 // connection's workspace is out of allowance gets no hosted relay, even when the account belongs
@@ -71,9 +73,9 @@ func TestRelayGrantsAreWithheldOnlyWhenTheGateDeniesPostgres(t *testing.T) {
 	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, user)
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'member',true)`, team, user)
 	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,owner_team_id) VALUES($1,$2,$1,'relay-quota-tm','linux','amd64','/w','online','occupied',$3)`, teamMachine, user, team)
-	self := networkBinding{AccountID: user, EndpointID: "endpoint_" + user, MachineID: "relay_quota_self_" + x}
-	personalPeer := networkPeer{Identity: networkBinding{AccountID: user, EndpointID: "endpoint_p_" + user, MachineID: "relay_quota_pp_" + x}}
-	teamPeer := networkPeer{Identity: networkBinding{AccountID: user, EndpointID: "endpoint_t_" + user, MachineID: teamMachine}}
+	self := networkBinding{Binding: peernetwork.Binding{AccountID: user, EndpointID: "endpoint_" + user, MachineID: "relay_quota_self_" + x}}
+	personalPeer := networkPeer{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: user, EndpointID: "endpoint_p_" + user, MachineID: "relay_quota_pp_" + x}}}
+	teamPeer := networkPeer{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: user, EndpointID: "endpoint_t_" + user, MachineID: teamMachine}}}
 
 	service := &NetworkService{store: store, signer: grantSigner{}, issuer: "https://issuer.example.test", now: time.Now}
 	billable := func(peers ...networkPeer) []networkPeer {

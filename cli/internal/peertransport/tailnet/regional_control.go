@@ -8,6 +8,7 @@ import (
 	"time"
 
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authorized-regional-control
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"tailscale.com/types/key"
 )
 
@@ -193,7 +194,7 @@ func (r *regionalControl) handle(source key.NodePublic, node RegionalNode, gener
 		return nil, true
 	}
 	var m regionalMessage
-	if strictDecode(clear, &m) != nil || !regionalNodeMatches(m, node) || m.SenderGeneration == 0 || m.Sequence == 0 || m.Epoch == [16]byte{} || m.Nonce == [16]byte{} {
+	if peernetwork.DecodeSigned(clear, &m) != nil || !regionalNodeMatches(m, node) || m.SenderGeneration == 0 || m.Sequence == 0 || m.Epoch == [16]byte{} || m.Nonce == [16]byte{} {
 		return nil, true
 	}
 	r.mu.Lock()

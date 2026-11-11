@@ -14,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
 // An account with 100 peers gets relay grants naming every peer and every peer's relay control key, across
@@ -60,11 +61,11 @@ func TestRelayGrantsNameEveryPeerOfAHundredPeerAccountOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, node)
-	self := networkBinding{AccountID: account, EndpointID: "self", WireGuardPublicKey: key(), DiscoPublicKey: key(), QUICCertificateFingerprint: hex.EncodeToString(make32()), QUICPublicKey: key()}
+	self := networkBinding{Binding: peernetwork.Binding{AccountID: account, EndpointID: "self", WireGuardPublicKey: key(), DiscoPublicKey: key(), QUICCertificateFingerprint: hex.EncodeToString(make32()), QUICPublicKey: key()}}
 	var peers []networkPeer
 	want := map[string]bool{}
 	for i := range 100 {
-		p := networkPeer{Identity: networkBinding{AccountID: account, EndpointID: fmt.Sprintf("peer_%03d", i), WireGuardPublicKey: key(), DiscoPublicKey: key()},
+		p := networkPeer{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: account, EndpointID: fmt.Sprintf("peer_%03d", i), WireGuardPublicKey: key(), DiscoPublicKey: key()}},
 			Scopes: []networkScope{{ResourceKind: "machine_network", ResourceID: fmt.Sprintf("peer_%03d", i), ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: now.Add(time.Hour).Unix()}}}
 		peers = append(peers, p)
 		want[p.Identity.WireGuardPublicKey] = true
