@@ -277,7 +277,7 @@ export function Choice({
       <DropdownMenuContent align="start" className="w-max max-w-72 min-w-40">
         <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
           {options.map((option) => (
-            <DropdownMenuRadioItem key={option.value} value={option.value}>
+            <DropdownMenuRadioItem key={option.value} value={option.value} closeOnClick>
               <span className="min-w-0 truncate">{option.label}</span>
             </DropdownMenuRadioItem>
           ))}

@@ -144,8 +144,10 @@ await dialog.getByRole("button", { name: "Done" }).click()
 // 6. The Choose machine page (/files, no machine): Send files opens with nothing chosen, picks nothing for you,
 // and sends to the machines you add; files dropped on the page wait for the choice.
 const addFromMenu = async (machine) => {
+  // Picking a machine closes the menu, so the next "Add machine" click opens it again (it used to stay open).
   await dialog.getByRole("button", { name: "Add machine" }).click()
   await page.getByRole("menuitemradio", { name: machine.alias, exact: true }).click()
+  await page.getByRole("menuitemradio").first().waitFor({ state: "detached", timeout: 5000 })
 }
 await page.goto(`${origin}/files`, { waitUntil: "networkidle", timeout: 120000 })
 await shot("chooser-desktop")
