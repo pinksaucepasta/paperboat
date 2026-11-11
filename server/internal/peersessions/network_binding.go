@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"log/slog"
 	"net/netip"
 	"time"
@@ -33,7 +34,7 @@ AND c.issued_at<=$3 AND (c.expires_at>$3 OR $4) WHERE n.user_id=$1 AND n.endpoin
 		slog.Warn("peer network authority unavailable", "site", "network.go:786")
 		return b, time.Time{}, ErrUnavailable
 	}
-	if b.Role == "cli" {
+	if b.Role == peernetwork.RoleCLI {
 		var active bool
 		err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.cli_client_sessions WHERE id=$1 AND user_id=$2 AND state='active' AND revoked_at IS NULL)`, endpointID, userID).Scan(&active)
 		if err != nil {
