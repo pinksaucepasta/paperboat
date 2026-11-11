@@ -31,8 +31,10 @@ type regionalRelay struct {
 	stop func()
 }
 
-// regionalSettle is one regional probe round (regionalProbeInterval 3 s) plus its 5 s probe timeout.
-const regionalSettle = 8 * time.Second
+// regionalDisagreement bounds how long regional status may lag the relay that carries the session. The handshake
+// reaches the server on b as soon as it probes there; recovery reports b only once its probes to the candidates the
+// server does not hold have timed out (regionalProbeTimeout, 5 s). One second covers the exchange that follows.
+const regionalDisagreement = 6 * time.Second
 
 func TestNativeRegionalFailoverPreservesSession(t *testing.T) { testNativeRegionalFailover(t, false) }
 
@@ -170,15 +172,17 @@ func testNativeRegionalFailover(t *testing.T, expiry bool) {
 	}
 	assertRegionalBytes(t, ctx, session, "before-failover")
 	// The dial can finish before recovery reports its choice: an unanswered handshake is also asked on the other
-	// relays, and the answer's region (b) carries the session. Recovery must still settle on b with reduced
-	// redundancy, within one probe round.
-	settled := time.Now().Add(regionalSettle)
+	// relays, and the answer's region (b) carries the session. Data and control may disagree only until recovery has
+	// timed out the candidates the server lacks and reports b with reduced redundancy; that window is measured and
+	// bounded, not waited out.
+	carried := time.Now()
 	for got := clientAuthority.RegionalStatus(); got.NodeID != b.node.NodeID || got.Redundancy != tailnet.RedundancyReduced; got = clientAuthority.RegionalStatus() {
-		if time.Now().After(settled) {
-			t.Fatalf("asymmetric candidate intersection: %+v", got)
+		if window := time.Since(carried); window > regionalDisagreement {
+			t.Fatalf("control still disagrees with the data path %v after the session was carried by b: %+v", window, got)
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 	}
+	t.Logf("control agreed with the data path %v after the session was carried", time.Since(carried).Round(time.Millisecond))
 	refresh()
 	waitRegional := func(within time.Duration, wantDifferent string, redundancy tailnet.Redundancy) tailnet.RegionalStatus {
 		deadline := time.Now().Add(within)

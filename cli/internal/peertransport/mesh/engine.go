@@ -5,12 +5,14 @@ package mesh
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"maps"
 	"net"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
@@ -69,7 +71,14 @@ type Server struct {
 	lb             *locoBackend
 	relayRegions   []*tailcfg.DERPRegion
 	peerReadyMu    sync.Mutex
-	peerReady      map[key.NodePublic]chan struct{}
+	peerReady      map[key.NodePublic]*meowWait
+	relayConnects  relayConnects
+}
+
+// meowWait is the outstanding handshake with one peer, shared by concurrent dials: ready closes on its answer.
+type meowWait struct {
+	ready chan struct{}
+	nonce [meowNonceLen]byte
 }
 
 // Start installs the explicit identity, allocation and peer policy before networking.
@@ -154,25 +163,11 @@ func (s *Server) Start() error {
 			return false
 		}
 		if IsMeowedPacket(pkt) {
-			go func() {
-				// The peer answered on the region it is homed on: send to it there from now on, as magicsock
-				// learns a peer's derpRoute from where it was heard (derp.go addDerpPeerRoute). Recorded before
-				// the dial is released, so its first packets take that region.
-				_ = lb.setPeerRelayRegion(src, regionID)
-				s.peerReadyMu.Lock()
-				ready := s.peerReady[src]
-				if ready != nil {
-					select {
-					case <-ready:
-					default:
-						close(ready)
-					}
-				}
-				s.peerReadyMu.Unlock()
-			}()
+			nonce, echoed := meowedNonce(pkt) // pkt is the receiver's buffer: read it before returning
+			go s.meowed(src, regionID, nonce, echoed)
 			return true
 		}
-		if _, discoPub, ok := ParseMeowPing(pkt); ok {
+		if _, discoPub, nonce, ok := ParseMeowPing(pkt); ok {
 			mc := lb.sys.MagicSock.Get()
 			go func() {
 				// Only reply once the client is fully added as a peer:
@@ -184,7 +179,7 @@ func (s *Server) Start() error {
 					// (pbmac 2026-11-05). Tailscale replies on the region it heard a peer from (magicsock
 					// derp.go derpRoute, issue 150).
 					_ = lb.setPeerRelayRegion(src, regionID)
-					if _, err := mc.SendDERPPacketTo(src, regionID, EncodeMeowed()); err == nil {
+					if _, err := mc.SendDERPPacketTo(src, regionID, EncodeMeowed(nonce)); err == nil {
 						// The client's peer map is installed before it sends the meow.
 						// Advertise after the acknowledgment on the same DERP route so
 						// it can process our endpoints before probing directly.
@@ -321,35 +316,63 @@ func (s *Server) prepareAuthorizedPeer(ctx context.Context, peer key.NodePublic,
 	return s.awaitMeow(ctx, peer)
 }
 
+// meowed handles a peer's answer to our handshake. Only the first answer to the outstanding handshake (its nonce)
+// records the region it arrived on: the peer is homed there, so send to it there from now on, as magicsock learns a
+// peer's derpRoute from where it was heard (derp.go addDerpPeerRoute). A duplicate, a late answer to an earlier
+// handshake, or a second answer from a peer still on two relays moves nothing. A bare answer (a peer that sends no
+// nonce) completes the handshake without moving the peer. The region is recorded before the dial is released, so
+// its first packets take it.
+func (s *Server) meowed(src key.NodePublic, regionID tailcfg.DERPRegionID, nonce [meowNonceLen]byte, echoed bool) {
+	s.peerReadyMu.Lock()
+	defer s.peerReadyMu.Unlock()
+	w := s.peerReady[src]
+	if w == nil {
+		return
+	}
+	select {
+	case <-w.ready:
+		return
+	default:
+	}
+	if echoed && nonce != w.nonce {
+		return
+	}
+	if echoed {
+		_ = s.lb.setPeerRelayRegion(src, regionID)
+	}
+	close(w.ready)
+}
+
+// meowFanout reports whether an unanswered handshake also asks on the other relays at this attempt: on attempts 1,
+// 2, 4, 8 and 16 (a per-peer exponential backoff), so a long dial to an unreachable peer probes five times, not
+// once a second.
+func meowFanout(attempt int) bool { return attempt > 0 && attempt&(attempt-1) == 0 && attempt <= 16 }
+
 // awaitMeow sends the meow handshake over the peer's relay region until the peer acknowledges it.
 func (s *Server) awaitMeow(ctx context.Context, peer key.NodePublic) error {
 	s.peerReadyMu.Lock()
 	if s.peerReady == nil {
-		s.peerReady = make(map[key.NodePublic]chan struct{})
+		s.peerReady = make(map[key.NodePublic]*meowWait)
 	}
-	ready := s.peerReady[peer]
-	if ready == nil {
-		ready = make(chan struct{})
-		s.peerReady[peer] = ready
+	w := s.peerReady[peer]
+	if w == nil {
+		w = &meowWait{ready: make(chan struct{})}
+		_, _ = rand.Read(w.nonce[:])
+		s.peerReady[peer] = w
 	}
 	s.peerReadyMu.Unlock()
 	mc := s.lb.sys.MagicSock.Get()
-	packet := EncodeMeowPing(s.lb.pub, mc.DiscoPublicKey())
+	packet := EncodeMeowPing(s.lb.pub, mc.DiscoPublicKey(), w.nonce)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	// send delivers the handshake through region, connecting to it first when this engine has no carrier there: a
-	// peer's home is reached where it is, as magicsock opens a peer's home DERP on demand (derp.go derpWriteChanForRegion).
+	// peer's home is reached where it is, as magicsock opens a peer's home DERP on demand (derp.go
+	// derpWriteChanForRegion). Connects are shared by every handshake on this engine (relayConnects).
 	send := func(region tailcfg.DERPRegionID) error {
-		err := mc.SendDERPPacketToRegion(peer, region, packet)
-		if err != nil && ctx.Err() == nil {
-			prepare, cancel := context.WithTimeout(ctx, time.Second)
-			err = mc.PrepareDERP(prepare, region)
-			cancel()
-			if err == nil {
-				err = mc.SendDERPPacketToRegion(peer, region, packet)
-			}
+		if err := s.relayConnects.ensure(ctx, region, s.lb.connectRelay); err != nil {
+			return err
 		}
-		return err
+		return mc.SendDERPPacketToRegion(peer, region, packet)
 	}
 	var lastSendErr error
 	for attempt := 0; ; attempt++ {
@@ -358,18 +381,27 @@ func (s *Server) awaitMeow(ctx context.Context, peer key.NodePublic) error {
 		region := s.lb.peerDERPRegion(peer)
 		lastSendErr = send(region)
 		diagnosticlog.TryInfo("native underlay session", "stage", "meow_send", "failed", lastSendErr != nil)
-		if attempt > 0 {
+		if meowFanout(attempt) {
 			// Unanswered where the peer was last known: it may have moved to another relay before its new home
-			// reached us. Ask once per tick on every other relay (at most maxRelayRegions, each bounded by its 1 s
-			// connect); the answer comes back on the peer's home and is recorded there.
+			// reached us. Ask on every other relay (at most maxRelayRegions); the answer comes back on the peer's
+			// home and is recorded there.
+			var probes sync.WaitGroup
+			var probed, failed atomic.Int32
 			for _, other := range s.lb.relayRegionIDs() {
 				if other != region {
-					go func() { _ = send(other) }()
+					probed.Add(1)
+					probes.Go(func() {
+						if send(other) != nil {
+							failed.Add(1)
+						}
+					})
 				}
 			}
+			probes.Wait() // each send is bounded by relayConnectTimeout
+			diagnosticlog.TryInfo("native underlay session", "stage", "meow_fanout", "attempt", attempt, "regions", probed.Load(), "failed", failed.Load())
 		}
 		select {
-		case <-ready:
+		case <-w.ready:
 			diagnosticlog.TryInfo("native underlay session", "stage", "meow_acked")
 			// The first advertisement in onMeow can arrive before the remote
 			// has admitted us. Its acknowledgment proves that admission is now
@@ -378,7 +410,7 @@ func (s *Server) awaitMeow(ctx context.Context, peer key.NodePublic) error {
 			return nil
 		case <-ctx.Done():
 			s.peerReadyMu.Lock()
-			if s.peerReady[peer] == ready {
+			if s.peerReady[peer] == w {
 				delete(s.peerReady, peer)
 			}
 			s.peerReadyMu.Unlock()

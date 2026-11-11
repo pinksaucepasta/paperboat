@@ -204,6 +204,11 @@ func (b *locoBackend) setPeerRelayRegion(peer key.NodePublic, id tailcfg.DERPReg
 	return nil
 }
 
+// connectRelay connects and pings this engine's carrier for region (magicsock PrepareDERP).
+func (b *locoBackend) connectRelay(ctx context.Context, region tailcfg.DERPRegionID) error {
+	return b.sys.MagicSock.Get().PrepareDERP(ctx, region)
+}
+
 // relayRegionIDs is every relay region this engine can send through.
 func (b *locoBackend) relayRegionIDs() []tailcfg.DERPRegionID {
 	b.mu.Lock()
