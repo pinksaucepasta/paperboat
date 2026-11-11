@@ -10,7 +10,7 @@ import {
   WarningCircleIcon,
   XIcon,
 } from "@phosphor-icons/react"
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useApiQuery, type Machine } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { closeTerminal, terminalQuery } from "@/lib/terminal/queries"
@@ -31,6 +31,8 @@ export type QuickSession = {
   session?: TerminalSession
   error?: string
   retry: () => void
+  /** The host pushes who is attached on the terminal's own stream: the details need polling only as a safety net. */
+  onPushed?: (pushed: boolean) => void
 }
 
 /**
@@ -41,7 +43,8 @@ export type QuickSession = {
 export function useTerminalSession(machine: Machine | undefined, active: boolean): QuickSession {
   const create = useStartShell()
   const id = create.data?.id
-  const details = useApiQuery({ ...terminalQuery(id ?? ""), enabled: Boolean(id) })
+  const [pushed, setPushed] = useState(false)
+  const details = useApiQuery({ ...terminalQuery(id ?? "", pushed), enabled: Boolean(id) })
   const available = !!machine && canHostTerminal(machine)
 
   // One shell per opening. A ref, not the mutation's state, guards it: effects can run twice
@@ -79,7 +82,7 @@ export function useTerminalSession(machine: Machine | undefined, active: boolean
     }
   }
   if (!session) return { state: "starting", retry: () => {} }
-  return { state: "ready", session, retry: () => {} }
+  return { state: "ready", session, retry: () => {}, onPushed: setPushed }
 }
 
 export function QuickTerminal({
@@ -146,7 +149,7 @@ export function QuickTerminal({
         </div>
       </div>
       {live ? (
-        <LiveTerminal session={live} />
+        <LiveTerminal session={live} onPushed={session.onPushed} />
       ) : (
         <div className="flex min-h-24 flex-1 flex-col items-center justify-center gap-3 p-4 text-sm text-muted-foreground">
           {session.state === "starting" ? (
@@ -177,10 +180,12 @@ export function QuickTerminal({
   )
 }
 
-function LiveTerminal({ session }: { session: TerminalSession }) {
+function LiveTerminal({ session, onPushed }: { session: TerminalSession; onPushed?: (pushed: boolean) => void }) {
   const { theme } = useTerminalTheme()
   const hostRef = useRef<HTMLDivElement>(null)
   const connection = useTerminalConnection({ session, theme, hostRef })
+  const pushed = connection.participants !== null
+  useEffect(() => onPushed?.(pushed), [pushed, onPushed])
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <TerminalSurface

@@ -86,13 +86,15 @@ export const terminalCountsQuery = (machine?: string) =>
 
 /**
  * One terminal with its live participants. Newer hosts push who is attached on the terminal's own
- * stream, and then this is only a safety net (`pushed`); older hosts don't, so the page polls.
+ * stream, and then this is only a safety net (`pushed`, 60 s); older hosts don't, so the page polls every 4 s.
  */
+export const participantsPollMs = (pushed: boolean) => (pushed ? 60_000 : 4_000)
+
 export const terminalQuery = (id: string, pushed = false) =>
   queryOptions({
     queryKey: terminalKeys.session(id),
     queryFn: ({ signal }) => api<TerminalSession>(`${sessionPath(id)}/sharing`, { signal }),
-    refetchInterval: pushed ? 60_000 : 4_000,
+    refetchInterval: participantsPollMs(pushed),
   })
 
 /** Owner only: who may open this terminal in a browser. */
