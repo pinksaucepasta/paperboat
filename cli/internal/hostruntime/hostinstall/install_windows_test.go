@@ -585,3 +585,51 @@ func TestStopWindowsUpdaterStopsOnlyTheUpdater(t *testing.T) {
 		t.Fatalf("stopped %v err %v, want only PaperboatUpdated", stopped, err)
 	}
 }
+
+// Review of eb50ca8f8: TestWindowsActivationOrder pins windowsActivation.run, not what installWindows wires into
+// it. This builds the activation with newWindowsActivation, as installWindows does, over recording ops: the steps
+// are the real ones in the real order (publish, token, pin, carrier with that pin, config, roles), and finish
+// discards the staged file and restores the config worker.
+func TestWindowsActivationWiring(t *testing.T) {
+	restore := windowsActivationOps
+	t.Cleanup(func() { windowsActivationOps = restore })
+	var order []string
+	note := func(name string) { order = append(order, name) }
+	ops := &windowsActivationOps
+	ops.prepareOwner = func(context.Context, Request, service.Layout) error { note("owner"); return nil }
+	ops.carrierPresent = func(context.Context, string) (bool, error) { note("carrier-present"); return true, nil }
+	ops.prepareSSH = func(context.Context, Request) error { note("ssh"); return nil }
+	ops.prestage = func(_ context.Context, source, current, rollback string, _ installsource.Source, _ string, _ *releaseindex.Target) (func(context.Context) error, func() error, error) {
+		note("prestage")
+		return func(context.Context) error { note("publish"); return nil }, func() error { note("discard"); return nil }, nil
+	}
+	ops.stop = func(context.Context, Request, service.Layout) (func() error, error) {
+		note("stop")
+		return func() error { note("restore-config-worker"); return nil }, nil
+	}
+	ops.token = func(path, _ string) error { note("token:" + path); return nil }
+	ops.pin = func(context.Context, service.Layout, installsource.Source, string) (string, error) {
+		note("pin")
+		return `C:\pins\candidate\pb.exe`, nil
+	}
+	ops.carrier = func(_ context.Context, _ Request, _ service.Layout, pinned string) error { note("carrier:" + pinned); return nil }
+	ops.writeConfig = func(config WindowsRuntimeConfig, _ string) error { note("config:" + config.TokenFile); return nil }
+	ops.startRoles = func(context.Context, Request, service.Layout, string) error { note("roles"); return nil }
+
+	layout, err := service.WindowsUserLayout("S-1-5-21-111-222-333-1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := Request{OwnerSID: "S-1-5-21-111-222-333-1001", Executable: `C:\staging\pb.exe`, Source: installsource.Source{Version: "1", Platform: "windows", Architecture: runtime.GOARCH, SHA256: strings.Repeat("a", 64), Length: 1, Distribution: installsource.Custom}}
+	activation, finish := newWindowsActivation(request, layout, `C:\root`, `C:\root\token`, nil, func(context.Context) error { note("cutover"); return nil })
+	if err := activation.run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := finish(); err != nil {
+		t.Fatal(err)
+	}
+	want := `owner,carrier-present,ssh,prestage,cutover,stop,publish,token:C:\root\token,pin,carrier:C:\pins\candidate\pb.exe,config:C:\root\token,roles,discard,restore-config-worker`
+	if got := strings.Join(order, ","); got != want {
+		t.Fatalf("activation wiring:\n got %s\nwant %s", got, want)
+	}
+}
