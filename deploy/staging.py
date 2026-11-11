@@ -326,7 +326,8 @@ def edge(image):
     nonce = os.urandom(12)
     sealed = nonce + AESGCM(hashlib.sha256(sealing.encode()).digest()).encrypt(nonce, credential.encode(), None)
     sql("DELETE FROM paperboat.selfhost_installations WHERE scope_id='usr_staging'")
-    sql("DELETE FROM paperboat.control_tunnel_nodes WHERE id LIKE 'stg_node_%'")
+    # Replaced fixture nodes still have route/carrier/audit FKs. Drain them; the isolated DB reset owns their teardown.
+    sql("UPDATE paperboat.control_tunnel_nodes SET state='draining',registry_expires_at=now() WHERE id LIKE 'stg_node_%'")
     sql(f"INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,region,failure_domain,"
         f"roles,transports,capacity_limit,capacity_observed_at,registry_expires_at,tls_spki_sha256) VALUES('{node}','{install}','1.0','initial_fixture','{host}',{EDGE_PORT},{EDGE_QUIC_PORT},"
         f"'registered','{REGION}','{REGION}',ARRAY['edge'],ARRAY['http2','http3'],32,now(),now()+interval '1 hour',decode('{pin}','hex'))")
