@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -25,9 +26,27 @@ func executeManagedSSHTool(ctx context.Context, tool string, arguments, environm
 		return managedssh.NativeLaunchError{Err: err}
 	}
 	if tool == "rsync" {
-		if arguments, err = convertDriveOperands(arguments, cygpathUnder(filepath.Dir(path))); err != nil {
+		convert := cygpathUnder(filepath.Dir(path))
+		if arguments, err = convertDriveOperands(arguments, convert); err != nil {
 			return managedssh.NativeLaunchError{Err: err}
 		}
+		// rsync runs the "ssh" first on its own PATH: MSYS2's or cwRsync's Cygwin ssh reads another ~/.ssh and never
+		// sees Paperboat's managed configuration. The native OpenSSH that reads it is named, as on Linux and macOS
+		// where rsync's ssh is that OpenSSH.
+		if !rsyncRemoteShellChosen(arguments, environment) {
+			capabilities, err := managedssh.ProbeOpenSSH(ctx, "ssh.exe", 5*time.Second)
+			if err != nil || !capabilities.Ready() {
+				return managedssh.NativeLaunchError{Err: errors.Join(managedssh.ErrOpenSSHUnavailable, err)}
+			}
+			shell, err := convert(filepath.ToSlash(capabilities.Executable))
+			if err != nil {
+				return managedssh.NativeLaunchError{Err: err}
+			}
+			arguments = append([]string{rsyncRemoteShellArgument(shell)}, arguments...)
+		}
+		// MSYS2 rewrites POSIX-looking arguments when it starts a native program: the remote "rsync --server ... /tmp/x"
+		// rsync hands to ssh.exe would reach the target as "C:/msys64/tmp/x". Cygwin does not rewrite.
+		environment = withDefaultEnvironment(environment, "MSYS2_ARG_CONV_EXCL", "*")
 	}
 	return (managedssh.OpenSSHExecutor{}).Execute(ctx, path, arguments, environment)
 }
