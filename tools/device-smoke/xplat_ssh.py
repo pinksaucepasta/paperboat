@@ -114,11 +114,10 @@ def t_rsync(src, dst):
 
 
 def t_self(src, dst):
-    done = src.pb('ssh', src.alias, '--', 'echo', 'x', timeout=60)
-    message = (done.text + done.errtext).lower()
-    assert done.rc != 0 and ('same machine' in message or 'this machine' in message or 'itself' in message or 'yourself' in message), \
-        'pb ssh to the machine itself was not refused clearly: rc %d %r' % (done.rc, message[-250:])
-    return 'refused: ' + message.strip().splitlines()[0][:110]
+    """`pb ssh` to the machine you are on works like ssh localhost (decision 2026-11-12): its own sshd, a command runs."""
+    done = src.pb('ssh', src.alias, '--', 'echo', 'x', timeout=90)
+    assert done.rc == 0 and done.text.strip() == 'x', 'pb ssh to the machine itself: rc %d %r %s' % (done.rc, done.text[-80:], done.errtext[-200:])
+    return 'pb ssh to the machine itself ran a command'
 
 
 TESTS = [('ssh', t_ssh), ('user', t_user), ('scp', t_scp), ('scp-backslash', t_scp_backslash), ('sftp', t_sftp), ('rsync', t_rsync)]
