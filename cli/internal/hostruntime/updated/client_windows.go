@@ -38,7 +38,7 @@ func (c *Client) callRequest(ctx context.Context, request ControlRequest) (Contr
 		return ControlResponse{}, ErrInvalidControl
 	}
 	if ctx == nil {
-		ctx = context.Background()
+		return ControlResponse{}, ErrInvalidControl
 	}
 	dialCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
