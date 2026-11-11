@@ -3,6 +3,7 @@
 
 CASE runonce  the uninstall RunOnce entry (conhost --headless cmd /c rd) run as Explorer would at sign-in
 CASE signin-arm   register a logon task that watches the desktop for 300 s after the next sign-in (run it before `pb uninstall`)
+CASE signin-start run the armed watcher now, for 300 s (install/pair/uninstall run over ssh meanwhile), then signin-read
 CASE signin-read  read what that watcher saw (out.json and log); fails on any visible console window or a blind watcher
 CASE exec     EXE ARGS... (e.g. pb.exe install ..., pb.exe update ..., pb.exe pair ...) started with no console
 Each case first runs a control (plain cmd.exe with no console must open a visible window), so a blind detector fails.
@@ -20,6 +21,7 @@ import winhost
 TASK = 'pbsmoke-console-flash'
 SIGNIN_TASK = TASK + '-signin'
 SIGNIN_DIR = 'C:\\Users\\Public\\pbflash-signin'  # outlives the user's TEMP and survives sign-out
+ELEVATING = ('install', 'pair', 'uninstall', 'reset')  # raise a UAC prompt on the user's desktop from a task's restricted job: run them over ssh
 CONSOLE_EXES = ('cmd.exe', 'powershell.exe', 'pwsh.exe')  # opens a visible console when detached: only the control may run one
 
 
@@ -67,12 +69,16 @@ def _run_in_session(device, name, exe, argument_line, seconds, work, control, el
 
 
 def check(device, name, exe, argument_line, seconds=30, elevated=False, timeout=0):
+    if argument_line.split(' ', 1)[0] in ELEVATING:
+        sys.exit('FAIL %s: `pb %s` can raise a UAC prompt on the user\'s desktop from here; run it over ssh while `signin-start` records the desktop' % (name, argument_line.split(' ', 1)[0]))
     control = run_in_session(device, name + ' control', 'cmd.exe', '/c ping -n 3 127.0.0.1', 5, control=True)
     if not control['flashes']:
         sys.exit('FAIL %s: the detector saw no window for the control; the check is blind' % name)
     result = run_in_session(device, name, exe, argument_line, seconds, elevated=elevated, timeout=timeout)
     if result['flashes']:
         sys.exit('FAIL %s: windows opened by %s: %s' % (name, result['command'], json.dumps(result['flashes'])))
+    if result['exit'] != 0:  # a command that failed proves nothing about its windows
+        sys.exit('FAIL %s: %s exited %s: %s' % (name, result['command'], result['exit'], result.get('output', '').strip()[:300].replace('\n', ' | ')))
     print('output: ' + result.get('output', '').strip()[:600].replace('\n', ' | '))
     print('PASS %s: no visible console window for %ss after %s (exit %s)' % (name, seconds, result['command'], result['exit']))
 
@@ -116,6 +122,10 @@ def main():
             sys.exit('FAIL runonce: the helper directory was not removed')
     elif case == 'signin-arm':
         signin_arm(device)
+    elif case == 'signin-start':
+        device.ps('clear', 'foreach ($f in "out.json","log.txt","child.txt") { Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $req.d $f) }', d=SIGNIN_DIR)  # a stale result must not read as this run's
+        device.ps('start', 'schtasks /Run /TN $req.t | Out-Null;if($LASTEXITCODE){throw "watcher not armed"}', t=SIGNIN_TASK)
+        print('watching for 300 s')
     elif case == 'signin-read':
         signin_read(device)
     elif case == 'exec' and len(sys.argv) > 2:  # EXE ARGS...: an administrator's task (HIGHEST: no UAC prompt on the user's desktop)
