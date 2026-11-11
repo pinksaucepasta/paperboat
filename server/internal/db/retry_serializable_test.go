@@ -48,7 +48,7 @@ func TestRetrySerializableReplaysOnlyConflictsAndIsBounded(t *testing.T) {
 }
 
 // F21-157: a serializable transaction that manages its own database/sql transaction replays after 40001
-// only inside RetrySerializable, so no production file may call BeginSerializable without it.
+// only inside RetrySerializable, so no production file may call BeginSerializable more often than it calls RetrySerializable.
 func TestEveryBeginSerializableCallerRetries(t *testing.T) {
 	var offenders []string
 	err := filepath.WalkDir("..", func(path string, d fs.DirEntry, err error) error {
@@ -59,7 +59,8 @@ func TestEveryBeginSerializableCallerRetries(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if strings.Contains(string(source), "BeginSerializable(") && !strings.Contains(string(source), "RetrySerializable(") {
+		text := string(source)
+		if strings.Count(text, "BeginSerializable(") > strings.Count(text, "RetrySerializable(") {
 			offenders = append(offenders, path)
 		}
 		return nil

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
@@ -97,6 +98,45 @@ func TestClientUpdatePolicyPostgres(t *testing.T) {
 			}
 		})
 	}
+	// A stale cache is served at once while one background read refreshes it: a database read that hangs
+	// must not stall the gate (the first request after each refresh interval used to wait for it).
+	t.Run("stale_cache_never_waits_for_the_database", func(t *testing.T) {
+		release := make(chan struct{})
+		var reads atomic.Int64
+		store.SetQueryObserver(func(ctx context.Context) (context.Context, func(string)) {
+			reads.Add(1)
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+			return ctx, func(string) {}
+		})
+		defer store.SetQueryObserver(nil)
+		s.cacheMu.Lock()
+		s.checkedAt = time.Now().Add(-2 * PolicyRefreshInterval)
+		s.cacheMu.Unlock()
+		started := time.Now()
+		for range 50 {
+			got, err := s.Get(ctx)
+			if err != nil || got.Revision != created.Revision {
+				t.Fatalf("stale policy=%+v err=%v", got, err)
+			}
+		}
+		if waited := time.Since(started); waited > time.Second {
+			t.Fatalf("50 stale reads waited %v for a hung database read", waited)
+		}
+		close(release)
+		deadline := time.Now().Add(5 * time.Second)
+		for s.refreshing.Load() && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if got := reads.Load(); got != 1 {
+			t.Fatalf("50 stale reads started %d refreshes, want 1", got)
+		}
+		if _, fresh, _ := s.cachedPolicy(); !fresh {
+			t.Fatal("the background refresh did not renew the cache")
+		}
+	})
 	// Replay must survive a release-origin outage and preserve original revision.
 	s.ceiling = func() (string, error) { return "", errors.New("origin down") }
 	replay, e := s.Put(ctx, actor, "set-test-key", "test_reference", input)
