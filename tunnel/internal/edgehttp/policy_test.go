@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -1313,5 +1314,51 @@ func TestAdmittedPreviewWithNoRouteMatchIsReconnectingNotNotFound(t *testing.T) 
 	}
 	if unknown := serve("gone.preview.example.test"); unknown.Code != http.StatusNotFound {
 		t.Fatalf("a name the snapshot does not admit: status %d", unknown.Code)
+	}
+}
+
+// Waiting for an admitted preview's route is bounded per name and overall: past the bound a request is answered with
+// its 503 at once instead of holding a connection for previewStartingWait.
+func TestAdmittedPreviewWaitsAreBounded(t *testing.T) {
+	policy, err := New(Config{PreviewBaseDomain: "preview.example.test", TunnelBaseDomain: "tunnels.example.test", RuntimeBaseDomain: "runtime.example.test", MaxHeaderBytes: 4096, MaxBodyBytes: 1024,
+		Readiness:       readinessFunc(func(string) (string, string, bool) { return "", "", false }),
+		PreviewAdmitted: func(host string) bool { return strings.HasSuffix(host, ".preview.example.test") },
+	}, http.NotFoundHandler())
+	if err != nil {
+		t.Fatal(err)
+	}
+	serve := func(host string) (int, time.Duration) {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.Host = host
+		started := time.Now()
+		policy.ServeHTTP(recorder, request)
+		return recorder.Code, time.Since(started)
+	}
+	var releases []func()
+	defer func() {
+		for _, release := range releases {
+			release()
+		}
+	}()
+	for i := 0; i < previewWaitPerName; i++ {
+		release, ok := policy.previewWaits.acquire("busy.preview.example.test", true)
+		if !ok {
+			t.Fatalf("waiter %d refused below the per-name bound", i)
+		}
+		releases = append(releases, release)
+	}
+	if code, took := serve("busy.preview.example.test"); code != http.StatusServiceUnavailable || took > time.Second {
+		t.Fatalf("per-name bound reached: status %d after %s, want an immediate 503", code, took)
+	}
+	for i := 0; policy.previewWaits.total < previewWaitMax; i++ {
+		release, ok := policy.previewWaits.acquire(fmt.Sprintf("n%d.preview.example.test", i), true)
+		if !ok {
+			t.Fatalf("name %d refused below the overall bound", i)
+		}
+		releases = append(releases, release)
+	}
+	if code, took := serve("fresh.preview.example.test"); code != http.StatusServiceUnavailable || took > time.Second {
+		t.Fatalf("overall bound reached: status %d after %s, want an immediate 503", code, took)
 	}
 }
