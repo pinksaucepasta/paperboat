@@ -477,3 +477,15 @@ func TestValidationRejectsUnboundedSDKLimits(t *testing.T) {
 		})
 	}
 }
+
+// F21-170: the bounds PLAN 3b lists are the defaults: config sync takes 5 MiB per file (25 MiB per batch) and a
+// team audit export stops at one million rows.
+func TestDefaultScaleBounds(t *testing.T) {
+	cfg := Default()
+	if cfg.ConfigSync.MaxFileBytes != 5<<20 || cfg.ConfigSync.MaxBatchBytes != 25<<20 {
+		t.Fatalf("config sync file/batch bytes = %d/%d, want 5 MiB/25 MiB", cfg.ConfigSync.MaxFileBytes, cfg.ConfigSync.MaxBatchBytes)
+	}
+	if cfg.Business.AuditExportMaxRows != 1_000_000 {
+		t.Fatalf("audit export cap = %d rows, want 1,000,000", cfg.Business.AuditExportMaxRows)
+	}
+}
