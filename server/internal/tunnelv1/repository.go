@@ -195,8 +195,11 @@ func (e *HostTeamOwnedError) Unwrap() error { return ErrHostNotFound }
 // account's own machine belongs to a team.
 func deniedHost(ctx context.Context, queries *dbsqlc.Queries, accountID, hostID string) error {
 	team, err := queries.GetTeamOwnerOfHostV1(ctx, dbsqlc.GetTeamOwnerOfHostV1Params{HostID: hostID, AccountID: accountID})
-	if err != nil || team == "" {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && team == "") {
 		return ErrHostNotFound
+	}
+	if err != nil {
+		return translate(err)
 	}
 	return &HostTeamOwnedError{Team: team}
 }
