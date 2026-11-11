@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/telemetry"
@@ -113,6 +114,10 @@ func (r *APIResolver) Resolve(ctx context.Context, req ConnectRequest) (ConnectI
 		var createErr error
 		resp, createdSession, createErr = r.connectWithSessionCreate(ctx, target, req.CreateTerminalSession)
 		if createErr != nil {
+			if offline, ok := r.offlineTerminal(req, target, createErr); ok {
+				outcome = "offline"
+				return offline, nil
+			}
 			return ConnectInfo{}, fmt.Errorf("connect to environment %q: %w", req.Machine, createErr)
 		}
 	} else {
@@ -165,6 +170,30 @@ func (r *APIResolver) Resolve(ctx context.Context, req ConnectRequest) (ConnectI
 	info.TerminalSession = createdSession
 	outcome = "success"
 	return info, nil
+}
+
+// offlineTerminalLifetime caps how long a terminal stream admitted without Paperboat may run (the daemon's offline
+// exec and ssh streams use the same bound).
+const offlineTerminalLifetime = 12 * time.Hour
+
+// offlineTerminal is a NEW terminal session opened while Paperboat is unreachable (F21-11): the host admits it from its
+// own signed scopes and names the session by the stream's operation, so the session id is made here and the machine
+// is the one the daemon resolved. Attaching to an existing session, or a machine the daemon did not resolve, still
+// needs Paperboat: the grant names the session and the server holds the inventory.
+func (r *APIResolver) offlineTerminal(req ConnectRequest, target target, cause error) (ConnectInfo, bool) {
+	create, resolved := req.CreateTerminalSession, req.ResolvedMachine
+	if !api.Unreachable(cause) || create == nil || req.TerminalSessionID != "" || resolved == nil || resolved.EnvironmentID == "" {
+		return ConnectInfo{}, false
+	}
+	sessionID := "terminal_offline_" + strings.ReplaceAll(uuid.NewString(), "-", "_")
+	return ConnectInfo{
+		TargetKind: target.kind, MachineID: target.id, Machine: target.name, MachineState: target.state, MachineGeneration: target.generation,
+		Terminal: &TerminalTarget{
+			Protocol: terminalprotocol.TerminalSubprotocol, EnvironmentID: resolved.EnvironmentID, SessionID: sessionID, CWD: create.CWD, ReplayHistory: true,
+			Auth: AuthTarget{Offline: true, ExpiresAt: r.now().Add(offlineTerminalLifetime).Format(time.RFC3339)},
+		},
+		TerminalSession: &TerminalSessionInfo{ID: sessionID, Name: create.Name},
+	}, true
 }
 
 func (r *APIResolver) connect(ctx context.Context, target target, terminalSessionID string) (descriptor api.ConnectionDescriptor, err error) {

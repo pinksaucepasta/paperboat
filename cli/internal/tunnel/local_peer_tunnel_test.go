@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
@@ -54,5 +55,30 @@ func TestHelperRemoteErrorExposesOnlySafeEnvironmentCode(t *testing.T) {
 		} else if exposed != "" {
 			t.Fatal("unapproved remote code escaped")
 		}
+	}
+}
+
+// F21-11: a terminal resolved while Paperboat was unreachable is requested offline: no credential and no grant to
+// obtain, the one new session named by the operation, and a request the daemon accepts. The same request for a
+// consumer that may not start offline is refused by the daemon's validation.
+func TestLocalPeerOfflineTerminalRequestCarriesNoCredential(t *testing.T) {
+	info := resolver.ConnectInfo{MachineID: "machine_1", MachineGeneration: 2, Terminal: &resolver.TerminalTarget{
+		EnvironmentID: "environment_1", SessionID: "terminal_offline_1",
+		Auth: resolver.AuthTarget{Offline: true, ExpiresAt: time.Now().Add(time.Hour).UTC().Format(time.RFC3339)},
+	}}
+	request, err := (LocalPeerTunnel{Client: &localapi.Client{}}).request(info, "terminal", "terminal_offline_1", nil)
+	if err != nil {
+		t.Fatalf("offline terminal request: %v", err)
+	}
+	if !request.Offline || request.Credential != "" || request.Resume || request.OperationID != "terminal_offline_1" || request.Consumer != "terminal" {
+		t.Fatalf("request = %+v", request)
+	}
+	if err := request.Validate(time.Now()); err != nil {
+		t.Fatalf("the daemon refuses the offline terminal request: %v", err)
+	}
+	preview := request
+	preview.Consumer = "private_preview"
+	if err := preview.Validate(time.Now()); err == nil {
+		t.Fatal("a consumer that may not start offline passed validation")
 	}
 }
