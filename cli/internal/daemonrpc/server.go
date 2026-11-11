@@ -57,7 +57,20 @@ func incomingSupportContext(ctx context.Context) context.Context {
 	return supportref.WithContext(ctx, supportref.New())
 }
 
+// checkAPIVersion refuses a call from a pb built for another local daemon API (APIVersion), or from a client that
+// sends none.
+func checkAPIVersion(ctx context.Context) error {
+	values := metadata.ValueFromIncomingContext(ctx, apiVersionMetadata)
+	if len(values) == 1 && values[0] == APIVersion {
+		return nil
+	}
+	return status.Error(codes.FailedPrecondition, "this pb and the running Paperboat daemon use different local API versions; restart the daemon with `pb doctor --repair` or update pb")
+}
+
 func supportUnaryInterceptor(ctx context.Context, request any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	if err := checkAPIVersion(ctx); err != nil {
+		return nil, err
+	}
 	return handler(incomingSupportContext(ctx), request)
 }
 
@@ -68,6 +81,9 @@ type supportServerStream struct {
 
 func (s supportServerStream) Context() context.Context { return s.ctx }
 func supportStreamInterceptor(server any, stream grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	if err := checkAPIVersion(stream.Context()); err != nil {
+		return err
+	}
 	return handler(server, supportServerStream{ServerStream: stream, ctx: incomingSupportContext(stream.Context())})
 }
 
