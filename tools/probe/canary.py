@@ -18,7 +18,7 @@ HERE = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("CANARY_STATE", Path.home() / ".local/state/paperboat-canary"))
 HISTORY_MAX = 1440
 ALERT_AFTER = 2
-# The account probe (sign-in, pair, device login, cleanup, sign-out) is `canary.py --account`, run by its own timer every 10 minutes
+# The account probe (sign-in, pair, device login, cleanup, sign-out) is `canary.py --account`, run by its own timer every hour
 # (deploy/paperboat-canary-account.timer): WorkOS rate-limits sign-ins and mails new-device alerts, and a 2-minute run must not delay the
 # one-minute probes. It runs once per interval, so its steps alert on the first failure.
 ACCOUNT_STEPS = {"signin", "pair", "login", "cleanup", "signout", "account"}
