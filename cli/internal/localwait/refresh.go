@@ -3,6 +3,8 @@ package localwait
 import (
 	"context"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 // InventoryRefreshEvery and InventoryRefreshMaximum pace the refreshes a waiting command asks its own daemon
@@ -15,20 +17,24 @@ const (
 )
 
 // KeepInventoryFresh calls refresh (at most one call in flight) after every, then after doubling waits up to
-// maximum, until ctx ends. Failures are left to the wait itself: it reports what it last saw when its own
-// deadline passes.
+// maximum, until ctx ends. The wait reports what it last saw when its own deadline passes; a refresh failure is
+// recorded in the diagnostic log (each distinct failure once) so a wait that timed out can be explained.
 func KeepInventoryFresh(ctx context.Context, refresh func(context.Context) error, every, maximum time.Duration) {
 	if refresh == nil || every <= 0 || maximum < every {
 		return
 	}
 	timer := time.NewTimer(every)
 	defer timer.Stop()
+	var lastFailure string
 	for wait := every; ; {
 		select {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			_ = refresh(ctx)
+			if err := refresh(ctx); err != nil && ctx.Err() == nil && err.Error() != lastFailure {
+				lastFailure = err.Error()
+				diagnosticlog.TryWarn("inventory refresh failed while waiting", "error", lastFailure)
+			}
 			wait = min(wait*2, maximum)
 			timer.Reset(wait)
 		}

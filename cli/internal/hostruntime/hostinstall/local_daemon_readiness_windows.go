@@ -5,6 +5,7 @@ package hostinstall
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"time"
 
@@ -193,7 +194,7 @@ func waitWindowsLocalDaemonVersion(ctx context.Context, request Request) error {
 	defer cancel()
 	tick := time.NewTicker(200 * time.Millisecond)
 	defer tick.Stop()
-	var last error
+	var probes probeErrors
 	for {
 		if err := waitWindowsLocalDaemonReady(bounded, request.OwnerSID, request.StateRoot); err != nil {
 			return err
@@ -202,10 +203,13 @@ func waitWindowsLocalDaemonVersion(ctx context.Context, request Request) error {
 		if err == nil && state.DaemonVersion == request.Source.Version && state.DaemonState == "ready" {
 			return nil
 		}
-		last = err
+		if err == nil {
+			err = fmt.Errorf("local daemon reports version %q, state %q; want version %q, state ready", state.DaemonVersion, state.DaemonState, request.Source.Version)
+		}
+		probes.note(err)
 		select {
 		case <-bounded.Done():
-			return errors.Join(service.ErrLifecycleNotReady, last, bounded.Err())
+			return errors.Join(service.ErrLifecycleNotReady, probes.err(), bounded.Err())
 		case <-tick.C:
 		}
 	}
