@@ -171,3 +171,65 @@ func TestClientUpdatePolicyOperatorPostgres(t *testing.T) {
 		t.Fatal("revoked", revoked.Code)
 	}
 }
+
+// The gate must retain an enforced floor when its database disappears: supported
+// clients continue, old clients stay refused, and a cold gate cannot guess.
+func TestClientVersionGateKeepsLastGoodPolicyDuringDatabaseOutagePostgres(t *testing.T) {
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("requires isolated remote PostgreSQL")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	if err := db.Migrate(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	original, err := clientupdate.New(store, nil, "").Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanupStore, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer cleanupStore.Close()
+		_, err = cleanupStore.Pool().Exec(context.Background(), `UPDATE paperboat.client_update_policy SET revision=$1,minimum_version=$2,reason=$3,enforce_at=$4 WHERE singleton`, original.Revision, original.MinimumVersion, original.Reason, original.EnforceAt)
+		if err != nil {
+			t.Error(err)
+		}
+	})
+	if _, err := store.Pool().Exec(ctx, `UPDATE paperboat.client_update_policy SET revision=revision+1,minimum_version='2026.11.11.1',reason='Protocol floor',enforce_at=NULL WHERE singleton`); err != nil {
+		t.Fatal(err)
+	}
+	policy := clientupdate.New(store, nil, "")
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	guard := clientUpdatePolicyGuard(policy, time.Now, next)
+	request := func(handler http.Handler, version string, want int) {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodGet, "/v1/machines", nil)
+		r.Header.Set("X-Paperboat-Client", "paperboat")
+		r.Header.Set("X-Paperboat-Distribution", "official")
+		r.Header.Set("User-Agent", "paperboat/"+version)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Fatalf("version=%s status=%d want=%d body=%s", version, w.Code, want, w.Body.String())
+		}
+	}
+	request(guard, "2026.11.11.1", http.StatusNoContent)
+	store.Pool().Close()
+	// Exercise a failed refresh, rather than only a still-fresh cache hit.
+	time.Sleep(6 * time.Second)
+	request(guard, "2026.11.11.1", http.StatusNoContent)
+	request(guard, "2026.11.10.1", http.StatusUpgradeRequired)
+	request(clientUpdatePolicyGuard(clientupdate.New(store, nil, ""), time.Now, next), "2026.11.11.1", http.StatusServiceUnavailable)
+}
