@@ -20,7 +20,7 @@ import (
 func TestSnapshotStrictlyDecodesTerminalModesAndParticipants(t *testing.T) {
 	var snapshot Snapshot
 	raw := []byte(`{"id":"session_1","title":"vim main.go","current_directory":"/workspace/api","foreground_process":"vim","cwd":"/workspace","terminal_modes":{"alternate_screen":true,"mouse_click":true,"mouse_drag":true,"mouse_motion":true,"mouse_urxvt":true,"mouse_sgr":true,"focus_events":true,"bracketed_paste":true},"participants":[{"attachment_id":"attach_1","account_id":"account_1","client_id":"client_1","role":"viewer","connected_at":"2026-09-12T12:00:00Z"}]}`)
-	if err := decodeStrict(raw, &snapshot); err != nil || snapshot.Title != "vim main.go" || snapshot.CurrentDirectory != "/workspace/api" || snapshot.ForegroundProcess != "vim" || snapshot.CWD != "/workspace" || !snapshot.TerminalModes.BracketedPaste || !snapshot.TerminalModes.AlternateScreen || !snapshot.TerminalModes.MouseClick || !snapshot.TerminalModes.MouseDrag || !snapshot.TerminalModes.MouseMotion || !snapshot.TerminalModes.MouseURXVT || !snapshot.TerminalModes.MouseSGR || !snapshot.TerminalModes.FocusEvents || !validParticipants(snapshot.Participants) {
+	if err := decodeResponse(raw, &snapshot); err != nil || snapshot.Title != "vim main.go" || snapshot.CurrentDirectory != "/workspace/api" || snapshot.ForegroundProcess != "vim" || snapshot.CWD != "/workspace" || !snapshot.TerminalModes.BracketedPaste || !snapshot.TerminalModes.AlternateScreen || !snapshot.TerminalModes.MouseClick || !snapshot.TerminalModes.MouseDrag || !snapshot.TerminalModes.MouseMotion || !snapshot.TerminalModes.MouseURXVT || !snapshot.TerminalModes.MouseSGR || !snapshot.TerminalModes.FocusEvents || !validParticipants(snapshot.Participants) {
 		t.Fatalf("snapshot=%#v err=%v", snapshot, err)
 	}
 }
@@ -70,7 +70,7 @@ func TestTerminalCloseRequiresMatchingCanonicalHelperAcknowledgement(t *testing.
 		Action    string `json:"action"`
 		SessionID string `json:"session_id"`
 	}
-	if decodeStrict(operation.Payload, &payload) != nil || payload.Action != "close" || payload.SessionID != "pts_1" {
+	if decodeResponse(operation.Payload, &payload) != nil || payload.Action != "close" || payload.SessionID != "pts_1" {
 		t.Fatalf("payload = %#v", payload)
 	}
 }
@@ -170,14 +170,14 @@ func TestCreateTerminalUsesExactSessionAndAcceptsReplay(t *testing.T) {
 		Environment      map[string]string `json:"environment"`
 		ExistingSnapshot bool              `json:"existing_snapshot"`
 	}
-	if decodeStrict(operation.Payload, &input) != nil || input.Action != "create" || input.SessionID != "umts_1" || input.Name != "work" || input.CWD != "/home/user" || input.Columns != 80 || input.Rows != 24 || input.Environment["COLORTERM"] != "truecolor" || !input.ExistingSnapshot {
+	if decodeResponse(operation.Payload, &input) != nil || input.Action != "create" || input.SessionID != "umts_1" || input.Name != "work" || input.CWD != "/home/user" || input.Columns != 80 || input.Rows != 24 || input.Environment["COLORTERM"] != "truecolor" || !input.ExistingSnapshot {
 		t.Fatalf("create request=%#v", input)
 	}
 }
 
 func TestHelperErrorAcceptsCanonicalRuntimeEnvelope(t *testing.T) {
 	var reported remoteError
-	if err := decodeStrict([]byte(`{"code":"not_found_or_forbidden","message":"Session unavailable","requestId":"req_1","retryable":false,"details":{"reason":"missing"}}`), &reported); err != nil || reported.Code != "not_found_or_forbidden" {
+	if err := decodeResponse([]byte(`{"code":"not_found_or_forbidden","message":"Session unavailable","requestId":"req_1","retryable":false,"details":{"reason":"missing"}}`), &reported); err != nil || reported.Code != "not_found_or_forbidden" {
 		t.Fatalf("runtime error=%#v decode=%v", reported, err)
 	}
 }
@@ -314,5 +314,18 @@ func TestCreateTerminalAcceptsLaunchWarnings(t *testing.T) {
 	created, err := (Client{HTTPClient: server.Client()}).CreateTerminal(context.Background(), server.URL, "signed-operation", "umts_1", "umtso_1", "work", "/home/user")
 	if err != nil || created.ID != "umts_1" || created.State != "running" {
 		t.Fatalf("created=%#v err=%v", created, err)
+	}
+}
+
+// A field a newer helper adds to its answer is ignored; trailing data is still refused (audit A P1-2).
+func TestHelperResponsesIgnoreUnknownFields(t *testing.T) {
+	var reported struct {
+		Code string `json:"code"`
+	}
+	if err := decodeResponse([]byte(`{"code":"not_found_or_forbidden","added_by_a_newer_helper":true}`), &reported); err != nil || reported.Code != "not_found_or_forbidden" {
+		t.Fatalf("unknown field refused the answer: %v", err)
+	}
+	if decodeResponse([]byte(`{"code":"x"}{}`), &reported) == nil {
+		t.Fatal("trailing data accepted")
 	}
 }
