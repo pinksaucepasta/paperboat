@@ -194,6 +194,26 @@ func TestTUFSourceRequiresDurableDeferralAndFreshFailureDomain(t *testing.T) {
 	}
 }
 
+// A deferral store that cannot be read or trusted (another account's file, a failed ownership check) is not "no
+// deferral": the release is not eligible and the error says why (audit C #9).
+func TestTUFSourceFailsClosedWhenTheDeferralStoreErrors(t *testing.T) {
+	index, now := validEligibilityIndex(t)
+	unsafe := errors.New("release eligibility path is unsafe")
+	source := TUFSource{
+		MachineID: "machine_1",
+		FailureDomain: FailureDomainSourceFunc(func(context.Context, FailureDomainRequest) (string, error) {
+			return "iad-1", nil
+		}),
+		Deferral: DeferralSourceFunc(func(context.Context) (releasepolicy.Deferral, bool, error) {
+			return releasepolicy.Deferral{}, false, unsafe
+		}),
+	}
+	eligible, err := source.eligible(context.Background(), index, now, true)
+	if eligible || !errors.Is(err, ErrDeferralUnavailable) || !errors.Is(err, unsafe) {
+		t.Fatalf("eligible=%v err=%v, want not eligible with the store's error", eligible, err)
+	}
+}
+
 func validEligibilityIndex(t *testing.T) (releaseindex.Index, time.Time) {
 	t.Helper()
 	now := time.Date(2026, 8, 31, 15, 0, 0, 0, time.UTC)

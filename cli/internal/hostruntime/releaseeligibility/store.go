@@ -1,6 +1,13 @@
 // Package releaseeligibility owns the small, durable local records that affect
 // release selection. Signed rollout state stays in TUF release metadata;
 // this package only stores an operator-approved, bounded deferral.
+//
+// Owner: the record belongs to the updater process (package updated is the only caller), on every platform: its own
+// uid on Unix, LocalSystem on Windows, where the updater is a LocalSystem service. A process of another account gets
+// ErrUnsafePath, and workerupdate turns any store error into ErrDeferralUnavailable (fail closed, never "no deferral"):
+// workerupdate.TestTUFSourceFailsClosedWhenTheDeferralStoreErrors. A record left by an earlier installation cannot decide a later
+// release: it applies only to the version it names (workerupdate.TestTUFSourceIgnoresADeferralGrantedForAnOlderRelease) and
+// expires with its own bounded window.
 package releaseeligibility
 
 import (
