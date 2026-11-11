@@ -661,3 +661,43 @@ func TestLaunchDeniedErrorNamesAJobOnlyWhenTheProcessIsInOne(t *testing.T) {
 		t.Fatalf("another launch error = %v, want it unchanged", err)
 	}
 }
+
+func TestBridgeOwnerAllowed(t *testing.T) {
+	const user, other = "S-1-5-21-1-2-3-1001", "S-1-5-21-1-2-3-1002"
+	for _, testCase := range []struct {
+		owner, request, self string
+		want                 bool
+	}{
+		{user, user, user, true},
+		{user, user, other, true}, // over-the-shoulder: the files are the requesting user's own
+		{administratorsSID, user, user, true},
+		{administratorsSID, other, user, false},
+		{other, user, user, false},
+		{user, other, user, false},
+	} {
+		if got := bridgeOwnerAllowed(testCase.owner, testCase.request, testCase.self); got != testCase.want {
+			t.Errorf("bridgeOwnerAllowed(%s, %s, %s) = %v, want %v", testCase.owner, testCase.request, testCase.self, got, testCase.want)
+		}
+	}
+}
+
+func TestExecuteRejectsRequestNamingAnotherOwner(t *testing.T) {
+	if !IsCurrentProcessElevated() {
+		t.Skip("native elevated child test requires an administrator token")
+	}
+	const other = "S-1-5-21-1-2-3-1001"
+	paths, cleanup, err := newBridgeFiles(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	request := Request{Schema: SchemaV1, RequestID: "request-other-owner", OwnerSID: other, Operation: OperationOpenSSH, Action: ActionOpenSSHSetup, CancelPath: paths.cancel, CreatedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Minute)}
+	if err := writeProtectedJSON(paths.request, request, other); err != nil {
+		t.Fatal(err)
+	}
+	ran := false
+	err = Execute(context.Background(), paths.request, paths.result, paths.cancel, func(context.Context, Request) error { ran = true; return nil })
+	if ran || !errors.Is(err, ErrElevationProtocol) || !strings.Contains(err.Error(), "not the requesting user") {
+		t.Fatalf("Execute ran=%v err=%v, want owner refusal before the handler", ran, err)
+	}
+}

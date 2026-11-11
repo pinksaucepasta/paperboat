@@ -407,6 +407,9 @@ func Execute(ctx context.Context, requestPath, resultPath, cancelPath string, ha
 	if err := handles.verify(request.OwnerSID); err != nil {
 		return fmt.Errorf("%w: %v", ErrElevationProtocol, err)
 	}
+	if err := handles.verifyOwner(request.OwnerSID); err != nil {
+		return fmt.Errorf("%w: %v", ErrElevationProtocol, err)
+	}
 	if !IsCurrentProcessElevated() {
 		writeErr := writeResultHandle(handles.result, request, Result{Schema: SchemaV1, RequestID: request.RequestID, Status: statusError, ErrorCode: "not_elevated", ErrorMessage: ErrNotElevated.Error()})
 		return errors.Join(ErrNotElevated, writeErr)
@@ -760,6 +763,38 @@ func (h *bridgeHandles) verify(ownerSID string) error {
 		}
 	}
 	return nil
+}
+
+// verifyOwner binds request.OwnerSID to whoever created the request: a matching DACL can be written by anyone,
+// but only that user (or an administrator) can own the files. An elevated launcher's files are owned by
+// Administrators (the elevated token's default owner), so that owner is accepted only when the request names
+// this helper's own user. Prior art: tailscale safesocket/pipe_windows.go checkPipeExclusiveToCurrentUser checks
+// the owner as well as the DACL.
+func (h *bridgeHandles) verifyOwner(ownerSID string) error {
+	self, err := currentOwnerSID()
+	if err != nil {
+		return fmt.Errorf("resolve elevated helper user: %w", err)
+	}
+	for handle, name := range map[windows.Handle]string{h.directory: "request directory", h.request: "request", h.result: "result", h.cancel: "cancel"} {
+		descriptor, err := windows.GetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION)
+		if err != nil {
+			return fmt.Errorf("read protected %s owner: %w", name, err)
+		}
+		owner, _, err := descriptor.Owner()
+		if err != nil || owner == nil || !owner.IsValid() {
+			return fmt.Errorf("protected %s has no valid owner", name)
+		}
+		if !bridgeOwnerAllowed(owner.String(), ownerSID, self) {
+			return fmt.Errorf("protected %s is owned by %s, not the requesting user", name, owner.String())
+		}
+	}
+	return nil
+}
+
+const administratorsSID = "S-1-5-32-544"
+
+func bridgeOwnerAllowed(fileOwner, requestOwner, self string) bool {
+	return strings.EqualFold(fileOwner, requestOwner) || (strings.EqualFold(fileOwner, administratorsSID) && strings.EqualFold(requestOwner, self))
 }
 
 func validateExecutable(path string) (string, error) {
