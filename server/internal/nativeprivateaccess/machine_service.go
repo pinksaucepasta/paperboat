@@ -66,9 +66,11 @@ func (r *SQLResolver) resolveMachineServiceAttempt(ctx context.Context, in Reque
 	}
 	now := r.now()
 	out := Target{AccountID: in.AccountID, UserID: in.UserID, ResourceKind: "machine_service", ResourceID: in.ResourceID, MachineID: in.ResourceID, RouteID: in.RouteID, Protocol: "tcp", TargetScheme: "tcp", PolicyGeneration: authority.Generation}
+	// No FOR SHARE: under SERIALIZABLE a plain read is already protected, while a share lock on rows the machine
+	// heartbeat rewrites fails the grant with 40001 "concurrent update" on every collision.
 	var services []byte
 	var snapshotExpiry time.Time
-	e = tx.QueryRowContext(ctx, `SELECT m.environment_id,s.installation_generation,s.boot_id,s.generation,s.services,s.expires_at FROM paperboat.user_machines m JOIN paperboat.machine_service_snapshots s ON s.machine_id=m.id AND s.installation_generation=m.installation_generation JOIN paperboat.control_environments env ON env.id=m.environment_id AND env.owner_user_id=m.user_id AND env.desired_state='active' AND env.revoked_at IS NULL WHERE m.id=$1 AND m.online AND m.state='online' AND s.expires_at>$2 AND EXISTS(SELECT 1 FROM paperboat.cli_client_sessions c WHERE c.id=$3 AND c.user_id=$4 AND c.state='active' AND c.revoked_at IS NULL) FOR SHARE OF m,s`, in.ResourceID, now, in.CLIClientSessionID, in.UserID).Scan(&out.EnvironmentID, &out.InstallationGeneration, &out.BootID, &out.AnnouncementGeneration, &services, &snapshotExpiry)
+	e = tx.QueryRowContext(ctx, `SELECT m.environment_id,s.installation_generation,s.boot_id,s.generation,s.services,s.expires_at FROM paperboat.user_machines m JOIN paperboat.machine_service_snapshots s ON s.machine_id=m.id AND s.installation_generation=m.installation_generation JOIN paperboat.control_environments env ON env.id=m.environment_id AND env.owner_user_id=m.user_id AND env.desired_state='active' AND env.revoked_at IS NULL WHERE m.id=$1 AND m.online AND m.state='online' AND s.expires_at>$2 AND EXISTS(SELECT 1 FROM paperboat.cli_client_sessions c WHERE c.id=$3 AND c.user_id=$4 AND c.state='active' AND c.revoked_at IS NULL) `, in.ResourceID, now, in.CLIClientSessionID, in.UserID).Scan(&out.EnvironmentID, &out.InstallationGeneration, &out.BootID, &out.AnnouncementGeneration, &services, &snapshotExpiry)
 	if e != nil {
 		return Target{}, mapResolveError(e)
 	}
