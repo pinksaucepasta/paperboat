@@ -48,3 +48,39 @@ func TestScopeConnCloseWriteAfterTheClientLeftIsClosedAndRevokedStaysAnAdmission
 		}
 	})
 }
+
+// Read and Write follow CloseWrite: a lease that ended with the client's connection or was closed is a closed stream
+// (the finished session is not a refusal); a revocation stays the admission error. The to_sshd copier of a managed SSH
+// session read the lease's end as ErrAdmission and the macOS host audited the session as failed (F5-12).
+func TestScopeConnReadAndWriteAfterTheLeaseEndedAreClosedUnlessRevoked(t *testing.T) {
+	for _, call := range []struct {
+		name string
+		do   func(*scopeConn) error
+	}{
+		{"Read", func(c *scopeConn) error { _, err := c.Read(make([]byte, 1)); return err }},
+		{"Write", func(c *scopeConn) error { _, err := c.Write([]byte{1}); return err }},
+	} {
+		t.Run(call.name+" after the client's connection ended", func(t *testing.T) {
+			parent, cancel := context.WithCancel(context.Background())
+			conn, _ := scopeConnOver(t, parent)
+			cancel()
+			if err := call.do(conn); !errors.Is(err, net.ErrClosed) || errors.Is(err, tailnet.ErrAdmission) {
+				t.Fatalf("%s after the connection ended = %v, want net.ErrClosed", call.name, err)
+			}
+		})
+		t.Run(call.name+" after the lease was closed", func(t *testing.T) {
+			conn, lease := scopeConnOver(t, context.Background())
+			lease.Close()
+			if err := call.do(conn); !errors.Is(err, net.ErrClosed) || errors.Is(err, tailnet.ErrAdmission) {
+				t.Fatalf("%s after the lease closed = %v, want net.ErrClosed", call.name, err)
+			}
+		})
+		t.Run(call.name+" after a revocation", func(t *testing.T) {
+			conn, lease := scopeConnOver(t, context.Background())
+			lease.Revoke()
+			if err := call.do(conn); !errors.Is(err, tailnet.ErrAdmission) || errors.Is(err, net.ErrClosed) {
+				t.Fatalf("%s after a revocation = %v, want the admission error", call.name, err)
+			}
+		})
+	}
+}

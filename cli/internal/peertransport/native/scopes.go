@@ -21,29 +21,40 @@ type scopeConn struct {
 	err   error
 }
 
+// leaseEnd is why the lease ended, as the connection's error: revoked access is an admission failure; the client's
+// connection ending (the lease lives under the QUIC connection) or the lease being closed means the client is already
+// gone, which is a closed stream (net.ErrClosed), not a refusal. Read and Write once reported every lease end as an
+// admission error: a client that left as sshd ended audited its finished macOS session as failed (F5-12).
+func (c *scopeConn) leaseEnd() error {
+	cause := c.lease.Check()
+	switch {
+	case cause == nil:
+		return nil
+	case errors.Is(cause, admission.ErrRevoked):
+		return tailnet.ErrAdmission
+	}
+	return fmt.Errorf("the client's connection ended: %w", net.ErrClosed)
+}
+
 func (c *scopeConn) Read(p []byte) (int, error) {
-	if c.lease.Check() != nil {
-		return 0, tailnet.ErrAdmission
+	if err := c.leaseEnd(); err != nil {
+		return 0, err
 	}
 	return c.Conn.Read(p)
 }
+
 func (c *scopeConn) Write(p []byte) (int, error) {
-	if c.lease.Check() != nil {
-		return 0, tailnet.ErrAdmission
+	if err := c.leaseEnd(); err != nil {
+		return 0, err
 	}
 	return c.Conn.Write(p)
 }
-// CloseWrite sends the FIN. A lease that ended because access was revoked is an admission failure; one that ended
-// because the client's connection ended (the lease lives under the QUIC connection) or the lease was closed means the
-// client is already gone: the FIN is moot, the stream is already closed (net.ErrClosed). Measured on a fresh Windows
-// carrier (F5-12): the late Windows sshd end let the client leave first, and this returned a plain admission error
-// that audited the finished session as failed.
+
+// CloseWrite sends the FIN; a lease that already ended makes it moot (see leaseEnd). Measured on a fresh Windows
+// carrier (F5-12): the late Windows sshd end let the client leave first and this returned a plain admission error.
 func (c *scopeConn) CloseWrite() error {
-	if cause := c.lease.Check(); cause != nil {
-		if errors.Is(cause, admission.ErrRevoked) {
-			return tailnet.ErrAdmission
-		}
-		return fmt.Errorf("the client's connection ended: %w", net.ErrClosed)
+	if err := c.leaseEnd(); err != nil {
+		return err
 	}
 	if half, ok := c.Conn.(interface{ CloseWrite() error }); ok {
 		return half.CloseWrite()
