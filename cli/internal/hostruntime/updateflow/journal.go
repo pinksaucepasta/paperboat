@@ -245,7 +245,9 @@ func (j Journal) Recovery() RecoveryAction {
 	case StageBlocked:
 		// A blocked transaction already failed its rollback attempt. Startup must
 		// retry that same durable rollback instead of permanently preventing the
-		// updater control service from coming online.
+		// updater control service from coming online. The retry has no attempt cap on purpose (audit C #37): each
+		// attempt is bounded by its own timeouts and the service manager's restart limits, and unlike a failing
+		// commit (maxCommitAttempts: idle on the installed version) a rollback has no safe state to give up into.
 		return RecoveryPerformRollback
 	default:
 		return RecoveryRequired
@@ -295,6 +297,8 @@ func Load(path string) (Journal, error) {
 
 	var journal Journal
 	decoder := json.NewDecoder(bytes.NewReader(body))
+	// Strict on purpose: a journal is only ever read by the build that wrote it (no older build is supported), so an
+	// unknown field means corruption or tampering, not a newer format (audit C #37).
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&journal); err != nil {
 		return Journal{}, &invalidJournalCauseError{cause: err}
