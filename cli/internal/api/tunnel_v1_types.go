@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	clientapi "github.com/pinksaucepasta/paperboat/shared/client/api"
+	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 	"regexp"
 	"time"
 )
@@ -141,6 +142,8 @@ type TunnelRoute struct {
 	ETag                 string               `json:"etag"`
 	PublicTCPListenerID  string               `json:"public_tcp_listener_id,omitempty"`
 	PublicTCPPort        int32                `json:"public_tcp_port,omitempty"`
+	// RewriteRules are the route's header, path and redirect rules, absent when there are none.
+	RewriteRules *tunnelrouterules.Rules `json:"rewrite_rules,omitempty"`
 }
 
 type TunnelRoutePage struct {
@@ -149,15 +152,16 @@ type TunnelRoutePage struct {
 }
 
 type TunnelRouteInput struct {
-	Name                 string               `json:"name"`
-	Protocol             string               `json:"protocol"`
-	HostMatch            TunnelRouteHostMatch `json:"host_match"`
-	PathPrefix           *string              `json:"path_prefix,omitempty"`
-	Origin               TunnelRouteOrigin    `json:"origin"`
-	Priority             int32                `json:"priority,omitempty"`
-	ConnectTimeoutMS     int32                `json:"connect_timeout_ms,omitempty"`
-	IdleTimeoutMS        int32                `json:"idle_timeout_ms,omitempty"`
-	MaxConcurrentStreams int32                `json:"max_concurrent_streams,omitempty"`
+	Name                 string                  `json:"name"`
+	Protocol             string                  `json:"protocol"`
+	HostMatch            TunnelRouteHostMatch    `json:"host_match"`
+	PathPrefix           *string                 `json:"path_prefix,omitempty"`
+	Origin               TunnelRouteOrigin       `json:"origin"`
+	Priority             int32                   `json:"priority,omitempty"`
+	ConnectTimeoutMS     int32                   `json:"connect_timeout_ms,omitempty"`
+	IdleTimeoutMS        int32                   `json:"idle_timeout_ms,omitempty"`
+	MaxConcurrentStreams int32                   `json:"max_concurrent_streams,omitempty"`
+	RewriteRules         *tunnelrouterules.Rules `json:"rewrite_rules,omitempty"`
 }
 
 type TunnelRoutePatch struct {
@@ -172,6 +176,9 @@ type TunnelRoutePatch struct {
 	IdleTimeoutMS        *int32                `json:"idle_timeout_ms,omitempty"`
 	MaxConcurrentStreams *int32                `json:"max_concurrent_streams,omitempty"`
 	DesiredState         *string               `json:"desired_state,omitempty"`
+	// RewriteRules replaces the route's rules when RewriteRulesSet; no rules (nil or empty) clears them.
+	RewriteRules    *tunnelrouterules.Rules `json:"-"`
+	RewriteRulesSet bool                    `json:"-"`
 }
 
 // MarshalJSON preserves the distinction between an omitted path_prefix and
@@ -183,17 +190,26 @@ func (p TunnelRoutePatch) MarshalJSON() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !p.PathPrefixSet && p.PathPrefix == nil {
+	if !p.PathPrefixSet && p.PathPrefix == nil && !p.RewriteRulesSet {
 		return encoded, nil
 	}
 	var fields map[string]any
 	if err := json.Unmarshal(encoded, &fields); err != nil {
 		return nil, err
 	}
-	if p.PathPrefix == nil {
-		fields["path_prefix"] = nil
-	} else {
-		fields["path_prefix"] = *p.PathPrefix
+	if p.PathPrefixSet || p.PathPrefix != nil {
+		if p.PathPrefix == nil {
+			fields["path_prefix"] = nil
+		} else {
+			fields["path_prefix"] = *p.PathPrefix
+		}
+	}
+	if p.RewriteRulesSet {
+		if p.RewriteRules == nil {
+			fields["rewrite_rules"] = tunnelrouterules.Rules{}
+		} else {
+			fields["rewrite_rules"] = p.RewriteRules
+		}
 	}
 	return json.Marshal(fields)
 }

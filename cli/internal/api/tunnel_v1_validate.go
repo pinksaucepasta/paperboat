@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 )
 
 var tunnelTLSPin = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
@@ -248,6 +250,14 @@ func validateTunnelRouteInput(in TunnelRouteInput, allowDefaults bool) error {
 	}
 	if in.Priority < 0 || in.Priority > 1000000 {
 		return errors.New("priority is out of range")
+	}
+	if in.RewriteRules != nil && !in.RewriteRules.Empty() {
+		if in.Protocol != "http" {
+			return errors.New("rewrite rules apply to http routes only")
+		}
+		if _, err := tunnelrouterules.Normalize(*in.RewriteRules); err != nil {
+			return err
+		}
 	}
 	if allowDefaults {
 		if in.ConnectTimeoutMS != 0 && (in.ConnectTimeoutMS < 100 || in.ConnectTimeoutMS > 120000) {
