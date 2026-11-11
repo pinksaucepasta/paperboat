@@ -1,0 +1,76 @@
+{
+  "date": "2026-11-11",
+  "scope": "Warm Linux amd64 listening carrier, no sessions and no bound pair. Startup rendezvous excluded.",
+  "before_source": "c26173ad8",
+  "measured_after_source": "d819e3849",
+  "pushed_code_head": "8f7538580",
+  "method": "ps -o time= before and after sleep(300); /proc/PID/stat user+system ticks at CLK_TCK for subsecond precision. Shared runner had contention during the baseline.",
+  "before": {
+    "cpu_seconds": 5.36,
+    "wall_seconds": 301.576331246004,
+    "cpu_percent": 1.7773278088019788,
+    "ps_time_start": "00:00:02",
+    "ps_time_end": "00:00:08",
+    "cpu_ticks_start": 296,
+    "cpu_ticks_end": 832
+  },
+  "after": {
+    "cpu_seconds": 1.19,
+    "wall_seconds": 300.99339527101256,
+    "cpu_percent": 0.39535751238944344,
+    "ps_time_start": "00:00:01",
+    "ps_time_end": "00:00:02",
+    "cpu_ticks_start": 116,
+    "cpu_ticks_end": 235
+  },
+  "cpu_reduction_percent": 77.7555096796726,
+  "target_cpu_percent": 0.3,
+  "target_met": false,
+  "idle_simulation": {
+    "seconds": 300,
+    "sweeps": 0,
+    "probes": 0,
+    "map_publications": 0,
+    "before_fix": {
+      "sweeps": 157,
+      "probes": 27,
+      "map_publications": 314
+    }
+  },
+  "full_race_source": "d819e3849",
+  "full_race_pass": [
+    "ok  \tgithub.com/pinksaucepasta/paperboat/internal/peertransport/mesh\t(cached)",
+    "ok  \tgithub.com/pinksaucepasta/paperboat/internal/peertransport/native\t321.054s",
+    "ok  \tgithub.com/pinksaucepasta/paperboat/internal/peertransport/tailnet\t79.403s",
+    "ok  \tgithub.com/pinksaucepasta/paperboat/internal/tunnel\t32.168s"
+  ],
+  "latest_focused_race_source": "48c628776",
+  "latest_focused_race_pass": [
+    "--- PASS: TestPeerRestartedOnTheOtherRelayIsReached (1.22s)",
+    "ok  \tgithub.com/pinksaucepasta/paperboat/internal/peertransport/mesh\t2.364s",
+    "--- PASS: TestNativeRegionalFailoverPreservesSession (43.79s)",
+    "--- PASS: TestNativeRegionalRecoversWhenControlReturnsAfterTheSetExpired (85.73s)",
+    "ok  \tgithub.com/pinksaucepasta/paperboat/internal/peertransport/native\t130.745s",
+    "--- PASS: TestRegionalRecoveryIdleFiveMinutes (0.03s)",
+    "--- PASS: TestNewRelayGrantWakesSleepingRecoverySweep (0.95s)",
+    "--- PASS: TestCarrierFailureWakesRecoveryButIdleReapDoesNot (0.00s)",
+    "ok  \tgithub.com/pinksaucepasta/paperboat/internal/peertransport/tailnet\t2.133s",
+    "--- PASS: TestProductionCLINativeRuntimeConnectsOrdinaryApplicationAndReusesOwner (0.38s)",
+    "ok  \tgithub.com/pinksaucepasta/paperboat/internal/tunnel\t1.533s"
+  ],
+  "other_checks": [
+    "go vet: mesh, native, tailnet, tunnel",
+    "committed CLI build",
+    "check_domains.py",
+    "git diff --check"
+  ],
+  "reference": "~/ref/tailscale/wgengine/magicsock/endpoint.go: heartbeat stops after sessionActiveTimeout; magicsock.go:4068 sets 45 seconds.",
+  "cleanup": {
+    "throwaways_revoked_by_exact_id": 2,
+    "throwaway_containers_removed": 2
+  },
+  "not_checked": [
+    "macOS CPU",
+    "full repository gate; focused remote vet/race and committed CLI build used; pre-push local hook skipped"
+  ]
+}
