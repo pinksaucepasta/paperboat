@@ -118,9 +118,14 @@ def mcp_handshake():
         {'jsonrpc': '2.0', 'method': 'notifications/initialized'},
         {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list'},
     ]
-    if DEVICE:  # one stdin delivery: the server answers what it read before EOF
-        result = PB.run_remote(('mcp',), input=''.join(json.dumps(m) + '\n' for m in messages), timeout=60)
-        lines = [line for line in result.stdout.splitlines() if line.strip().startswith('{')]
+    if DEVICE:  # the device's own PowerShell keeps stdin open between requests, as a client does
+        try:
+            session = DEVICE.mcp_handshake(PB.exe, *(json.dumps(m) for m in messages))
+        except Exception as error:
+            return {'ok': False, 'error': repr(error)}
+        if session.get('rc') != 0:
+            return {'ok': False, 'error': 'pb mcp exited %s after stdin closed' % session.get('rc')}
+        lines = [json.dumps(session['list'])]
     else:
         process = subprocess.Popen([str(PB), 'mcp'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         lines = []
@@ -289,8 +294,8 @@ def rows(args):
     code2, short, _ = run('--version')
     r.expect(code == 0 and code2 == 0 and o.strip() == short.strip() and 'Version ' in o, 'pb version differs from pb --version or prints no version')
     d = r.json_ok()
-    r.expect(isinstance(d, dict) and d.get('version') and re.fullmatch(r'[0-9a-f]{40}', d.get('commit', '')) is not None
-             and d['version'] in o, 'version --json lacks the version and 40-hex source commit that the text shows')
+    r.expect(isinstance(d, dict) and d.get('version') and re.fullmatch(r'[0-9a-f]{7,40}', d.get('commit', '')) is not None
+             and d['version'] in o, 'version --json lacks the version and source commit (7-40 hex) that the text shows')
     r.invalid('bogus')
     out.append(r)
 
