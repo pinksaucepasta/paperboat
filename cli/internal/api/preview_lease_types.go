@@ -14,6 +14,8 @@ const PreviewTunnelSchemaV1 = "paperboat.preview-tunnel/v1"
 type PreviewLeaseTarget struct {
 	Scheme  string `json:"scheme"`
 	Address string `json:"address"`
+	// HostHeader is the Host the origin receives instead of the public host (http, https and h2c targets).
+	HostHeader string `json:"host_header,omitempty"`
 }
 
 // PreviewLease is the safe server projection of a temporary preview lease.

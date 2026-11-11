@@ -130,7 +130,11 @@ func (c *DataCarrierPreviewCarrier) previewHTTPRoute(routeID string, target Leas
 	if c != nil {
 		maxStreams = c.max
 	}
-	return hoststate.TunnelConfigRoute{ID: routeID, Protocol: "http", OriginScheme: target.Scheme, OriginAddress: target.Address, TLSVerification: verification, PreserveHost: true, ConnectTimeoutMs: int32(dialWait / time.Millisecond), IdleTimeoutMs: 90000, MaxConcurrentStreams: int32(maxStreams), DesiredState: "active"}
+	route := hoststate.TunnelConfigRoute{ID: routeID, Protocol: "http", OriginScheme: target.Scheme, OriginAddress: target.Address, TLSVerification: verification, PreserveHost: true, ConnectTimeoutMs: int32(dialWait / time.Millisecond), IdleTimeoutMs: 90000, MaxConcurrentStreams: int32(maxStreams), DesiredState: "active"}
+	if target.HostHeader != "" { // pb preview --host-header: the origin sees this Host, the visitor keeps the public one
+		route.HostOverride = &target.HostHeader
+	}
+	return route
 }
 
 // previewHTTPTransport returns a fresh origin transport for a lease target.

@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -175,5 +176,53 @@ func TestSharedFileMissingThroughOriginTransportIs404(t *testing.T) {
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusNotFound {
 		t.Fatalf("status %d", response.StatusCode)
+	}
+}
+
+// pb preview --host-header: the origin sees the target's Host instead of the public one; without it the public
+// Host passes through. Both the browser and public paths build their route here.
+func TestPreviewHTTPRouteCarriesTheTargetHostHeader(t *testing.T) {
+	origin := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_, _ = io.WriteString(writer, request.Host)
+	}))
+	defer origin.Close()
+	carrier := &DataCarrierPreviewCarrier{}
+	for _, test := range []struct{ name, hostHeader, want string }{
+		{"public host kept", "", "share.example.test"},
+		{"host header sent", "localhost", "localhost"},
+	} {
+		target := LeaseTarget{Scheme: "http", Address: origin.Listener.Addr().String(), HostHeader: test.hostHeader}
+		transport := carrier.previewHTTPTransport(target)
+		route := carrier.previewHTTPRoute("route_1", target, "not_applicable", time.Second)
+		request, _ := http.NewRequest(http.MethodGet, "https://share.example.test/", nil)
+		request.Header.Set("X-Forwarded-Host", "share.example.test")
+		response, err := transport.RoundTrip(context.Background(), route, request)
+		if err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		transport.CloseIdleConnections()
+		if string(body) != test.want {
+			t.Fatalf("%s: origin saw Host %q, want %q", test.name, body, test.want)
+		}
+	}
+}
+
+func TestLeaseTargetHostHeaderValidation(t *testing.T) {
+	for _, test := range []struct {
+		target LeaseTarget
+		ok     bool
+	}{
+		{LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000", HostHeader: "app.example.test"}, true},
+		{LeaseTarget{Scheme: "h2c", Address: "127.0.0.1:3000", HostHeader: "localhost"}, true},
+		{LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, true},
+		{LeaseTarget{Scheme: "unix", Address: "/tmp/app.sock", HostHeader: "app.example.test"}, false},
+		{LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000", HostHeader: "app.example.test:8080"}, false},
+		{LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000", HostHeader: "http://app"}, false},
+	} {
+		if err := validateLeaseTarget(test.target); (err == nil) != test.ok {
+			t.Errorf("%+v: err = %v, want ok = %v", test.target, err, test.ok)
+		}
 	}
 }

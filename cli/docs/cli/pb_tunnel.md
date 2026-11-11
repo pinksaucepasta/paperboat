@@ -21,6 +21,7 @@ pb tunnel [--ephemeral] [<port|url|path>] [flags]
       --domain stringArray   attach a verified custom domain (repeatable)
       --ephemeral            use the temporary preview lifecycle
   -h, --help                 help for tunnel
+      --host-header string   send this Host to the origin instead of the public host (http, https, h2c targets; for dev servers with a host allow-list)
       --json                 print the canonical preview resource as JSON
       --private              limit the preview to this account
       --team                 require an explicit team grant for browser access

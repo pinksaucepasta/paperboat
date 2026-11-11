@@ -124,6 +124,25 @@ func TestPreviewCommandSurfaceAndHelp(t *testing.T) {
 	}
 }
 
+// --host-header names the Host the origin receives: a bare host name on an http, https or h2c target only.
+func TestPreviewHostHeaderFlagIsValidatedBeforeAnythingStarts(t *testing.T) {
+	for name, args := range map[string][]string{
+		"with a port": {"3000", "--host-header", "app.example.test:8080"},
+		"a URL":       {"3000", "--host-header", "https://app.example.test"},
+		"unix target": {"unix:///tmp/app.sock", "--host-header", "app.example.test"},
+		"white space": {"3000", "--host-header", "a b"},
+	} {
+		command := previewCobraCommandV1()
+		command.SetOut(io.Discard)
+		command.SetErr(io.Discard)
+		command.SetArgs(args)
+		err := command.Execute()
+		if err == nil || !errors.Is(err, ErrPreviewInvalidTarget) || !strings.Contains(err.Error(), "--host-header") {
+			t.Errorf("%s: err = %v, want ErrPreviewInvalidTarget naming --host-header", name, err)
+		}
+	}
+}
+
 func TestPreviewAndEphemeralTunnelUseEquivalentLaunchValidation(t *testing.T) {
 	previewCommand := previewCobraCommandV1()
 	previewCommand.SetOut(io.Discard)
