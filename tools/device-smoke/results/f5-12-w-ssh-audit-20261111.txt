@@ -1,0 +1,15 @@
+F5-12 Windows managed-SSH audit, 2026-11-11 (sanitized)
+Build: origin/main bb5a53336 (includes b8174ee3d and 641bc5e91), fresh `pb uninstall` + install + pair on winpool-1 (new PaperboatCarrier image path hash == installed hash). Client: hp, `pb ssh`.
+Source of truth: paperboat.audit_events (machine.access_ended, capability managed_ssh) for the carrier machine, read from the server DB after the run.
+
+Online audit, 25 back-to-back short `pb ssh` sessions: 25 started / 25 ended, outcome closed 25, failed 0.
+DB re-query by Claude (W3) after the run: outcome closed = 26 rows (25 + one setup session), no other outcome, created_at 02:31:11Z to 02:32:12Z.
+
+Parity with Linux, same build, same procedure:
+ (a) clean echo ............................. Windows closed | Linux closed
+ (b) sshd-session killed mid-download ....... Windows closed (304 MB out) | n/a on Linux
+ (c) client pkill -9 mid-upload (client dead) Windows closed | Linux closed
+ (d) client pkill -9 mid-download (client dead) Windows closed | Linux closed
+
+Earlier build 1c58ecf33 (before b8174ee3d) failed 2 of ~40 sessions on the to_sshd side (bridge's own sshd close inside CloseWrite); fixed and covered by TestBridgeSSHOwnCloseInsideCloseWriteIsClean.
+Not covered here: sessions started while Paperboat was unreachable (no Windows or smoke check for the offline origin exists yet; same gap as the L/M cells).
