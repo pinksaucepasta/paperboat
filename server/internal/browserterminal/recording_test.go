@@ -3,6 +3,7 @@ package browserterminal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
+	"github.com/pinksaucepasta/paperboat/server/internal/recordings"
 	"github.com/pinksaucepasta/paperboat/shared/recording"
 )
 
@@ -101,5 +103,26 @@ func TestEdgeAdmitsRecordingReplayChannelAndClosesItWhenAccessEnds(t *testing.T)
 	}
 	if ctx.Err() != nil {
 		t.Fatal("revoked recording channel stayed open")
+	}
+}
+
+type refusingReplays struct{ err error }
+
+func (r refusingReplays) ResolveReplay(context.Context, string, string) (string, string, string, error) {
+	return "", "", "", r.err
+}
+
+// The recordings service refuses with its own errors. An open replay channel must see them as an answered refusal
+// (closed at the next check, reason revoked), not as an outage the edge waits six seconds out.
+func TestRemovedReplayPermissionIsAnAnsweredRefusal(t *testing.T) {
+	for _, refusal := range []error{recordings.ErrForbidden, recordings.ErrNotFound, recordings.ErrDeleted, recordings.ErrNeedsTeam} {
+		_, err := MachineAuthorizer{Recordings: refusingReplays{refusal}}.ResolveRecording(context.Background(), "usr_1", testRecordingID)
+		if !expectedTerminalRejection(err) {
+			t.Errorf("%v became %v, which the edge treats as an outage", refusal, err)
+		}
+	}
+	_, err := MachineAuthorizer{Recordings: refusingReplays{errors.New("database unavailable")}}.ResolveRecording(context.Background(), "usr_1", testRecordingID)
+	if err == nil || expectedTerminalRejection(err) {
+		t.Fatalf("an outage was taken as a refusal: %v", err)
 	}
 }
