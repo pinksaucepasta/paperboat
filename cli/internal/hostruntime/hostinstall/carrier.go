@@ -447,6 +447,24 @@ func removeOtherCarrierGenerations(ctx context.Context, generations []CarrierCon
 	return errors.Join(errs...)
 }
 
+// retireNative disables a carrier generation's service and stops it (in that order: a disabled service is not
+// resurrected by the service manager's restart recovery). It reports whether the process still runs when it fails.
+func retireNative(ctx context.Context, native service.NativeLifecycleController, definition string) (bool, error) {
+	status, err := native.Inspect(ctx, definition)
+	if err != nil {
+		return false, err
+	}
+	if status.Enabled {
+		if err := native.Disable(ctx, definition); err != nil {
+			return status.Running, err
+		}
+	}
+	if !status.Running {
+		return false, nil
+	}
+	return false, native.Stop(ctx, definition)
+}
+
 // enableThenStart starts a registered carrier generation that is not running. A generation retired by an update is
 // disabled so it does not start at boot (retireCarrierGeneration); the rollback that brings it back enables it first,
 // here and only here: a plain Start of a disabled service stays refused.
