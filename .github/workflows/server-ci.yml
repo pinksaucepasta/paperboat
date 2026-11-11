@@ -17,7 +17,7 @@ permissions:
 # refs still supersede.
 concurrency:
   group: ci-${{ github.repository }}-${{ github.event_name == 'push' && github.ref || github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.event_name != 'workflow_dispatch' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   server:

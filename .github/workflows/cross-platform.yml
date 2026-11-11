@@ -30,7 +30,7 @@ permissions:
 # later pushes. A hand dispatch has its own group.
 concurrency:
   group: cross-platform-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || '' }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   test:
