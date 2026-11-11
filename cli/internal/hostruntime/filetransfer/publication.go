@@ -115,11 +115,12 @@ func (s *Service) publishToRoot(ctx context.Context, transfer store.FileTransfer
 			return "", err
 		}
 	}
-	if err := os.MkdirAll(root, 0700); err != nil {
-		return "", &Error{Code: StorageUnavailable, Cause: err}
-	}
-	if err := os.Chmod(root, 0700); err != nil {
-		return "", &Error{Code: StorageUnavailable, Cause: err}
+	// Also for a pinned receipt: its directory is checked again, not trusted because a path was stored. The spool
+	// root itself was made private by New.
+	if root != s.config.Root {
+		if err := s.config.EnsurePublishRoot(root); err != nil {
+			return "", &Error{Code: StorageUnavailable, Cause: err}
+		}
 	}
 	content := s.contentPath(transfer.ID)
 	contentInfo, err := os.Stat(content)

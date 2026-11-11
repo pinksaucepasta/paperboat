@@ -1194,3 +1194,39 @@ func TestAcquireIsBoundedWithoutACallerDeadline(t *testing.T) {
 		t.Fatalf("acquire with no free slot = %v, want ResourceLimit", err)
 	}
 }
+
+// Every publish, also into a receipt directory reserved earlier, goes through EnsurePublishRoot; a refused root
+// publishes nothing.
+func TestPublishChecksTheRootEveryTime(t *testing.T) {
+	service, _, _ := newService(t)
+	inbox := filepath.Join(t.TempDir(), "Inbox")
+	service.config.PublishRoot = func() (string, error) { return inbox, nil }
+	var checked []string
+	refuse := false
+	service.config.EnsurePublishRoot = func(path string) error {
+		checked = append(checked, path)
+		if refuse {
+			return errors.New("inbox custody refused")
+		}
+		return privateDirectory(path)
+	}
+	data := []byte("abc")
+	created, err := service.Create(context.Background(), requestFor(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := created[0].ID
+	if _, err := service.Append(context.Background(), id, 0, bytes.NewReader(data)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Complete(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.PublishedPath(context.Background(), id); err != nil || len(checked) != 1 || checked[0] != inbox {
+		t.Fatalf("first publish: err=%v checked=%v", err, checked)
+	}
+	refuse = true
+	if _, err := service.PublishedPath(context.Background(), id); err == nil || len(checked) != 2 {
+		t.Fatalf("a refused receipt directory still published: err=%v checked=%v", err, checked)
+	}
+}

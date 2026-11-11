@@ -32,6 +32,9 @@ func New(config Config) (*Service, error) {
 	if config.Policy == nil {
 		config.Policy = NewPolicyStore(DefaultPolicy)
 	}
+	if config.EnsurePublishRoot == nil {
+		config.EnsurePublishRoot = privateDirectory
+	}
 	if !filepath.IsAbs(config.Root) || config.LocalMachineID == "" || config.Store == nil {
 		return nil, &Error{Code: InvalidPath}
 	}
@@ -42,6 +45,13 @@ func New(config Config) (*Service, error) {
 		return nil, storageFailure(err)
 	}
 	return &Service{config: config}, nil
+}
+
+func privateDirectory(path string) error {
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o700)
 }
 
 // ActiveCount reports current admitted content-write operations. Retained

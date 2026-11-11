@@ -28,6 +28,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
+	"github.com/pinksaucepasta/paperboat/internal/inbox"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	stablehostd "github.com/pinksaucepasta/paperboat/internal/hostruntime/hostd"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
@@ -322,7 +323,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	}
 	transferService, err := filetransfer.New(filetransfer.Config{
 		Root: filepath.Join(config.Runtime.StateRoot, "file-transfers"), LocalMachineID: config.MachineID, Store: durable,
-		PublishRoot: config.InboxPath, Random: random, Policy: config.FileTransferPolicy,
+		PublishRoot: config.InboxPath, EnsurePublishRoot: inbox.EnsurePath, Random: random, Policy: config.FileTransferPolicy,
 	})
 	if err != nil {
 		return nil, err
