@@ -11,7 +11,7 @@ require_module() {
   }
 }
 
-require_module golang.org/x/crypto v0.58.0
+require_module golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2
 require_module github.com/realclientip/realclientip-go v1.0.0
 
 echo "server dependencies: valid"

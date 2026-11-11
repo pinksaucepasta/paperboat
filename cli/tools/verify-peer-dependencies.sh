@@ -30,7 +30,7 @@ require_module github.com/quic-go/quic-go v0.61.0
 require_module github.com/tailscale/peercred v0.0.0-20250107143737-35a0c7bd7edc
 require_module github.com/tailscale/squibble v0.0.0-20260411062017-141f5d618bc4
 require_module go.uber.org/goleak v1.3.0
-require_module golang.org/x/crypto v0.58.0
+require_module golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2
 require_module howett.net/plist v1.0.1
 require_module pgregory.net/rapid v1.3.0
 require_module tailscale.com v1.103.0-pre.0.20260923014604-610b05c58e8d
