@@ -63,9 +63,9 @@ SELECT $1||'_m_'||g,$1,$1||'_env_'||g,'m-'||g,'linux','amd64','/w','online','occ
 SELECT sha256(convert_to($1||'_m_'||g,'UTF8')),$1,$1||'_m_'||g,'machine',1,1,decode(repeat('00',200),'hex'),sha256(convert_to('key'||$1||'_m_'||g,'UTF8')),now()-interval '1 minute',now()+interval '1 day','key',
  sha256(convert_to('key'||$1||'_m_'||g,'UTF8')) FROM generate_series(0,1) g`, account)
 	exec(`INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,
-wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at)
-SELECT $1,$1||'_m_'||g,'machine',$1||'_m_'||g,1,1,1,sha256(convert_to('key'||$1||'_m_'||g,'UTF8')),sha256(convert_to($1||'_m_'||g,'UTF8')),
- ('100.'||(64+$2::int)||'.'||$3::int||'.'||(1+g))::inet,now(),now() FROM generate_series(0,1) g`, account, int(net[0])%64, int(net[1]))
+wireguard_public_key,disco_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at)
+SELECT $1,$1||'_m_'||g,'machine',$1||'_m_'||g,1,1,1,sha256(convert_to('key'||$1||'_m_'||g,'UTF8')),sha256(convert_to('disco'||$1||'_m_'||g,'UTF8')),sha256(convert_to($1||'_m_'||g,'UTF8')),
+ ('fd7a:115c:a1e0:'||to_hex($2::int)||':'||to_hex($3::int)||'::'||to_hex(1+g))::inet,now(),now() FROM generate_series(0,1) g`, account, int(net[0]), int(net[1]))
 	signed := peernetwork.Configuration{}
 	service, err := NewNetworkService(store, meshTestSigner{claims: &signed}, "https://issuer.example.test")
 	if err != nil {
