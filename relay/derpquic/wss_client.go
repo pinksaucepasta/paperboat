@@ -38,9 +38,11 @@ type WSSClient struct {
 	observed    atomic.Pointer[wssClientConn]
 	generation  int
 	fatal       error
+	fatalToken  string // the credential fatal answered (refusal)
 }
 
 type wssClientConn struct {
+	token           string // the credential this connection was admitted with
 	ctx             context.Context
 	cancel          context.CancelFunc
 	ws              *websocket.Conn
@@ -95,8 +97,8 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 	if c.ctx.Err() != nil {
 		return nil, ErrClosed
 	}
-	if c.fatal != nil {
-		return nil, c.fatal
+	if err := refused(ctx, c.config.Credential, &c.fatal, &c.fatalToken); err != nil {
+		return nil, err
 	}
 	if old := c.current; old != nil {
 		if old.ctx.Err() == nil {
@@ -106,12 +108,12 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 		old.errMu.Lock()
 		ended := old.err
 		old.errMu.Unlock()
-		if fatalCarrier(ended) {
-			c.fatal = ended
-			return nil, ended
-		}
 		c.current = nil
 		c.observed.Store(nil)
+		if fatalCarrier(ended) {
+			c.fatal, c.fatalToken = ended, old.token
+			return nil, ended
+		}
 	}
 	if c.config.TLS == nil || c.config.TLS.InsecureSkipVerify && c.config.TLS.VerifyConnection == nil && c.config.TLS.VerifyPeerCertificate == nil || len(c.config.TLS.Certificates) != 1 || c.config.Credential == nil || c.config.URL == "" {
 		c.fatal = ErrAdmission
@@ -133,7 +135,7 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 		if errors.Is(err, ErrExpired) {
 			return nil, retainDecision(ErrExpired, err)
 		}
-		c.fatal = retainDecision(ErrAdmission, err)
+		c.fatal, c.fatalToken = retainDecision(ErrAdmission, err), ""
 		return nil, c.fatal
 	}
 	proxy := c.config.Proxy
@@ -145,14 +147,14 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 	ws, response, err := websocket.Dial(dialCtx, c.config.URL, &websocket.DialOptions{HTTPClient: &http.Client{Transport: transport}, Subprotocols: []string{WSSSubprotocol}, CompressionMode: websocket.CompressionDisabled})
 	if err != nil {
 		if response != nil && response.StatusCode == http.StatusUnauthorized {
-			c.fatal = retainDecision(ErrAdmission, err)
+			c.fatal, c.fatalToken = retainDecision(ErrAdmission, err), token
 			return nil, c.fatal
 		}
 		return nil, classifyWSS(err)
 	}
 	if ws.Subprotocol() != WSSSubprotocol {
 		_ = ws.Close(websocket.StatusPolicyViolation, "relay protocol mismatch")
-		c.fatal = ErrProtocol
+		c.fatal, c.fatalToken = ErrProtocol, token
 		return nil, c.fatal
 	}
 	connCtx, connCancel := context.WithCancel(c.ctx)
@@ -164,7 +166,7 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 		err = classifyWSS(err)
 		var fatal interface{ Fatal() bool }
 		if errors.As(err, &fatal) && fatal.Fatal() {
-			c.fatal = err
+			c.fatal, c.fatalToken = err, token
 		}
 		return nil, err
 	}
@@ -182,7 +184,7 @@ func (c *WSSClient) ensure(ctx context.Context) (*wssClientConn, error) {
 
 	_ = nc.SetDeadline(time.Time{})
 	c.generation++
-	cc := &wssClientConn{namespace: c.config.Namespace, generationDisco: c.config.GenerationDisco, ctx: connCtx, cancel: connCancel, ws: ws, conn: nc, receive: make(chan packet, queueDepth), generation: c.generation, pings: make(map[[8]byte]chan struct{})}
+	cc := &wssClientConn{token: token, namespace: c.config.Namespace, generationDisco: c.config.GenerationDisco, ctx: connCtx, cancel: connCancel, ws: ws, conn: nc, receive: make(chan packet, queueDepth), generation: c.generation, pings: make(map[[8]byte]chan struct{})}
 	c.current = cc
 	c.observed.Store(cc)
 	cc.workers.Add(2)
@@ -268,7 +270,7 @@ func (c *WSSClient) RecvDetail() (derp.ReceivedMessage, int, error) {
 		if fatalCarrier(ended) {
 			c.mu.Lock()
 			if c.fatal == nil {
-				c.fatal = ended
+				c.fatal, c.fatalToken = ended, cc.token
 			}
 			c.mu.Unlock()
 		}
