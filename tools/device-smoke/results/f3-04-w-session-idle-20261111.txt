@@ -1,0 +1,7 @@
+F3-04 Windows target, session idle 8 h, 2026-11-11 (sanitized): tools/device-smoke/session_idle.py start / verify
+Target: victus-main-4 (Windows, build dev-c897022f2, session shell cmd.exe under ConPTY). Client: hp (Linux, pb dev-07288229b), local pb connect / session attach.
+start   2026-11-11T03:06:50Z  detached session created, shell variable set, shell pid recorded (state file on hp)
+verify  2026-11-11T11:12:11Z  re-attached with `pb session attach`
+result  {"check": "session-idle", "phase": "verify", "status": "PASS", "idle_hours": 8.09, "same_shell_and_variable": true}
+The detached session was usable after 8.09 h with the same shell (same parent pid) and its variable intact.
+Harness: the start step retypes the first PB_READY line (6ce3b78a9): cmd.exe startup discards input typed right after a new session opens, the same under plain ssh (b51c7916b).
