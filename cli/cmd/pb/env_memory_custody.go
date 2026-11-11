@@ -40,7 +40,19 @@ func newDaemonVaultCustody(command *cobra.Command, profile config.Profile) (*dae
 	digest := sha256.Sum256([]byte(profile.Issuer + "\x00" + profile.Account.ID + "\x00password_vault"))
 	action := command.Name()
 	return &daemonVaultCustody{command: command, client: client, issuer: profile.Issuer, account: profile.Account.ID, session: profile.CLIClientSessionID,
-		reference: "environment-password-vault-v1-" + hex.EncodeToString(digest[:16]), unlock: action == "unlock" || action == "init" || action == "recover"}, nil
+		reference: "environment-password-vault-v1-" + hex.EncodeToString(digest[:16]), unlock: vaultCustodyEstablishedBy(action)}, nil
+}
+
+// vaultCustodyEstablishedBy reports whether a vault command may put new keys into a locked memory custody: the
+// commands that prove the password or recovery code, and reset, which after its exact total-loss confirmation
+// installs brand-new keys for a user who lost both (it never needs the old ones). Every other command needs an
+// unlocked vault; reset used to be refused as "ENV vault is locked" on headless machines.
+func vaultCustodyEstablishedBy(action string) bool {
+	switch action {
+	case "unlock", "init", "recover", "reset":
+		return true
+	}
+	return false
 }
 
 func (*daemonVaultCustody) EnvironmentSecureStore() {}
