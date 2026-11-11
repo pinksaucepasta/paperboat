@@ -109,7 +109,11 @@ func LoadEnrolledOwner(uid int) (Request, error) {
 func ensureHostdToken(paths installPaths, request Request) error {
 	// Hostd runs as the enrolled user, while the token directory is root-owned.
 	// Keep the directory non-writable to that user but traversable so hostd can
-	// read its 0600 token file.
+	// read its 0600 token file. The file itself is owned by that user, so the process the token
+	// authenticates can rewrite it: accepted, because hostd and the user's other processes are the same trust
+	// domain (a compromised hostd already has the user's whole account), and the alternative has no safe form here:
+	// a root-owned file readable through the group would be readable by every local user on macOS, where the
+	// enrolled user's group is the shared "staff" (audit C #36; tailscaled avoids it by running as root).
 	if err := secureRootDirectory(filepath.Dir(paths.hostdToken), 0o755); err != nil {
 		return err
 	}
