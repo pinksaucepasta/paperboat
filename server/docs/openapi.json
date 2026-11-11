@@ -51382,7 +51382,7 @@
             "$ref": "#/components/responses/Error"
           },
           "409": {
-            "description": "Conflict, including team_suspended after team or invitation authorization. Ask the team owner to restore billing or resume the team.",
+            "description": "Conflict: team_changed, team_suspended, machine_name_conflict (the machine's name is taken in the destination), machine_publication_active (public previews or tunnels block transfer_to_team), machine_team_resources_active (team previews or tunnels on the machine block transfer_to_personal) or machine_owner_not_member (the enroller left the team, so transfer_to_personal cannot return the machine).",
             "content": {
               "application/json": {
                 "schema": {
