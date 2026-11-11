@@ -16,7 +16,7 @@ command -v go >/dev/null || { echo "build-environment-vault-wasm: Go is required
 toolchain=go
 command -v tinygo >/dev/null && toolchain=tinygo
 if [ -f "$assets_dir/environment-vault.wasm" ] &&
-  [ -z "$(find "$cli_dir/cmd/environmentvault-wasm" "$cli_dir/internal/environmente2ee" -name '*.go' -newer "$assets_dir/environment-vault.wasm" -print -quit)" ]; then
+  [ -z "$(find "$cli_dir/cmd/environmentvault-wasm" "$cli_dir/internal/environmente2ee" "$cli_dir/internal/recording" -name '*.go' -newer "$assets_dir/environment-vault.wasm" -print -quit)" ]; then
   exit 0
 fi
 

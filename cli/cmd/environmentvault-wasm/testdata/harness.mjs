@@ -11,5 +11,12 @@ const { instance } = await WebAssembly.instantiate(readFileSync(wasmPath), go.im
 void go.run(instance)
 while (!globalThis.paperboatEnvironmentVault) await new Promise((r) => setTimeout(r, 10))
 for await (const line of createInterface({ input: process.stdin })) {
-  if (line.trim()) process.stdout.write((await globalThis.paperboatEnvironmentVault(line)) + "\n")
+  if (!line.trim()) continue
+  // A request with "segment_file" (base64url) passes that file as bytes beside the JSON, as the console does.
+  const request = JSON.parse(line)
+  const file = request.segment_file
+  delete request.segment_file
+  const args = [JSON.stringify(request)]
+  if (file !== undefined) args.push(new Uint8Array(Buffer.from(file, "base64url")))
+  process.stdout.write((await globalThis.paperboatEnvironmentVault(...args)) + "\n")
 }

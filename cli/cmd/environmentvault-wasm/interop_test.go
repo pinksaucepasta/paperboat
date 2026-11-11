@@ -2,14 +2,18 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"crypto/ecdh"
 	"encoding/json"
 	"os"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
 	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
+	"github.com/pinksaucepasta/paperboat/internal/recording"
 )
 
 // wasmPeer talks to a built wasm module through testdata/harness.mjs.
@@ -123,6 +127,7 @@ func TestBuiltWasmInteroperatesWithNativeCode(t *testing.T) {
 	if named["name"] != "NATIVE_NAME" || named["deleted"] != false || len(named) != 2 {
 		t.Fatalf("wasm record-name reply: %v", named)
 	}
+	interopRecording(t, peer, e, vault)
 	// Wasm-initialized vault -> native unlock.
 	fresh := map[string]any{"issuer": v.Issuer, "account_id": "account-two"}
 	sealed := peer.call(map[string]any{"action": "initialize", "vault": fresh, "password": "second password"})
@@ -140,4 +145,35 @@ func TestBuiltWasmInteroperatesWithNativeCode(t *testing.T) {
 		t.Fatal("native code opened the wasm vault with a wrong password")
 	}
 	peer.call(map[string]any{"action": "lock"})
+}
+
+// interopRecording: the module makes a team recording key whose copy the native code opens, and reads
+// a segment the native recorder sealed to it.
+func interopRecording(t *testing.T, peer *wasmPeer, e *engine, vault map[string]any) {
+	t.Helper()
+	viewer := sharingPublic(t, e)
+	created := peer.call(map[string]any{"action": "recording-key-create", "team_id": "team-one", "viewers": []map[string]any{{"account_id": "account-one", "sharing_public_key": viewer}}})
+	grant := created["grants"].([]any)[0].(map[string]any)["sealed"].(string)
+	sealed, _ := decode(grant)
+	bundle, err := recording.OpenBundle(e.keys.SharingPrivate, "team-one", 1, sealed)
+	if err != nil {
+		t.Fatalf("native code rejected the wasm recording key copy: %v", err)
+	}
+	public, _ := decode(created["key"].(map[string]any)["public_key"].(string))
+	if derived, err := ecdh.X25519().NewPrivateKey(bundle.Private); err != nil || !bytes.Equal(derived.PublicKey().Bytes(), public) {
+		t.Fatal("the wasm key copy does not match its public key")
+	}
+	const id = "rec_00000000-0000-4000-8000-000000000001"
+	dataKey, _ := recording.NewDataKey()
+	sealedKey, _ := recording.SealDataKey(public, id, 1, dataKey)
+	text := recording.EventLine(time.Second, recording.CodeOutput, strings.Repeat("output ", 1000))
+	file, err := recording.EncodeSegment(recording.SegmentHeader{Recording: id, KeyGeneration: 1, SealedKey: sealedKey, Final: true}, dataKey, text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle := peer.call(map[string]any{"action": "recording-open", "vault": vault, "team_id": "team-one", "recording_id": id, "key_generation": 1, "viewer_key": map[string]any{"generation": 1, "sealed": grant}})["handle"]
+	read := peer.call(map[string]any{"action": "recording-segment", "handle": handle, "segment_file": encoded(file)})
+	if read["text"] != string(text) || read["final"] != true {
+		t.Fatalf("wasm segment read %v", read["final"])
+	}
 }
