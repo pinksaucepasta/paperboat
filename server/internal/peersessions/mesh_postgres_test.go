@@ -67,7 +67,7 @@ func TestMeshJoinOnAThousandMachineAccountWritesOneLogRowOnPostgres(t *testing.T
 	t.Cleanup(func() {
 		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id IN ($1,$2)`, account, other)
 	})
-	// One /16 of the CGNAT range per fixture for unique virtual addresses.
+	// One /64 of the peer network per fixture account for unique virtual addresses.
 	net := sha256.Sum256([]byte(s))
 	joinAccount := func(account string, net byte, from, to int) {
 		t.Helper()
@@ -79,9 +79,9 @@ SELECT $1||'_m_'||g,$1,$1||'_env_'||g,'m-'||g,'linux','amd64','/w','online','occ
 SELECT sha256(convert_to($1||'_m_'||g,'UTF8')),$1,$1||'_m_'||g,'machine',1,1,decode(repeat('00',200),'hex'),sha256(convert_to('key'||$1||'_m_'||g,'UTF8')),now()-interval '1 minute',now()+interval '1 day','key',
  sha256(convert_to('key'||$1||'_m_'||g,'UTF8')) FROM generate_series($2::int,$3::int) g`, account, from, to)
 		exec(`INSERT INTO paperboat.peer_network_identities(user_id,endpoint_id,role,machine_id,endpoint_generation,machine_generation,key_generation,
-wireguard_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at)
-SELECT $1,$1||'_m_'||g,'machine',$1||'_m_'||g,1,1,1,sha256(convert_to('key'||$1||'_m_'||g,'UTF8')),sha256(convert_to($1||'_m_'||g,'UTF8')),
- ('100.'||(64+$4::int)||'.'||(g/250)||'.'||(1+g%250))::inet,now(),now() FROM generate_series($2::int,$3::int) g`, account, from, to, int(net)%64)
+wireguard_public_key,disco_public_key,quic_certificate_fingerprint,virtual_address,created_at,updated_at)
+SELECT $1,$1||'_m_'||g,'machine',$1||'_m_'||g,1,1,1,sha256(convert_to('key'||$1||'_m_'||g,'UTF8')),sha256(convert_to('disco'||$1||'_m_'||g,'UTF8')),sha256(convert_to($1||'_m_'||g,'UTF8')),
+ ('fd7a:115c:a1e0:'||to_hex($4::int)||'::'||to_hex(1+g))::inet,now(),now() FROM generate_series($2::int,$3::int) g`, account, from, to, int(net))
 	}
 	join := func(from, to int) { t.Helper(); joinAccount(account, net[0], from, to) }
 	for from := 0; from < 9000; from += 1000 { // statements of 1,000 rows stay far below the statement timeout
