@@ -78,7 +78,7 @@ func (s *Server) Run(ctx context.Context) (resultErr error) {
 	if err != nil {
 		err = ownerTransportFailure{cause: err}
 	}
-	server := &http.Server{Handler: s.handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 4096, BaseContext: func(net.Listener) context.Context { return ctx }}
+	server := &http.Server{Handler: s.handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: ownerIdleTimeout, MaxHeaderBytes: 4096, BaseContext: func(net.Listener) context.Context { return ctx }}
 	s.serverMu.Lock()
 	s.server = server
 	s.serverMu.Unlock()
@@ -406,13 +406,22 @@ type Client struct {
 
 // NewClient dials the bridge at endpoint; ownerSID is the Windows account whose process serves it ("" for hostd,
 // a SYSTEM service, and on Unix).
+// The session owner closes a connection idle for ownerIdleTimeout. A worker that kept its idle connections as long
+// reused one at the instant the owner closed it, got a connection reset on its health call and exited, and hostd
+// with it (canary-a 17:53 and 19:33 2026-11-11: 6 s of 404 on both edges). The worker drops idle connections well
+// before the owner does, the rule for every HTTP keep-alive client (client idle timeout below the server's).
+const (
+	ownerIdleTimeout  = 30 * time.Second
+	workerIdleTimeout = ownerIdleTimeout / 2
+)
+
 func NewClient(endpoint string, token []byte, worker string, epoch uint64, ownerSID string) (*Client, error) {
 	if endpoint == "" || len(token) != 32 || worker == "" || epoch == 0 {
 		return nil, session.ErrInvalidSession
 	}
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return hostdproto.DialWorkloads(ctx, endpoint, ownerSID)
-	}, MaxIdleConns: 16, MaxIdleConnsPerHost: 16, IdleConnTimeout: 30 * time.Second}
+	}, MaxIdleConns: 16, MaxIdleConnsPerHost: 16, IdleConnTimeout: workerIdleTimeout}
 	return &Client{endpoint: endpoint, token: base64.RawURLEncoding.EncodeToString(token), worker: worker, epoch: epoch, transport: transport, http: &http.Client{Transport: transport}}, nil
 }
 func (c *Client) Close() { c.transport.CloseIdleConnections() }
@@ -443,6 +452,11 @@ func (c *Client) callOnce(ctx context.Context, kind, op string, body json.RawMes
 	req, err := http.NewRequestWithContext(ctx, "POST", "http://terminal-owner/"+kind+"/"+op, bytes.NewReader(body))
 	if err != nil {
 		return nil, ownerTransportFailure{cause: err}
+	}
+	if kind == "owner" && op == "health" {
+		// The health check is safe to send again, and its failure ends the worker: net/http then retries it on a
+		// fresh connection when a reused one turns out closed (Transport replays only idempotent requests).
+		req.Header.Set("Idempotency-Key", "health")
 	}
 	req.Header.Set("X-Paperboat-Owner-Capability", c.token)
 	req.Header.Set("X-Paperboat-Worker-ID", c.worker)
