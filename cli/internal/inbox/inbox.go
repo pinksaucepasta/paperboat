@@ -655,7 +655,14 @@ func loadJournal(root string) (journal, error) {
 	decoder := json.NewDecoder(strings.NewReader(string(data)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&result); err != nil || result.Version != 1 || result.Entries == nil {
-		return journal{}, errors.New("receipt journal is corrupt")
+		// A journal this build cannot read (a newer version, or damage) must not fail every delivery for good.
+		// Keep it aside for diagnosis and start a new one; the cost is that an old transfer replayed later is
+		// delivered again under a new name.
+		path := filepath.Join(root, journalName)
+		if err := os.Rename(path, path+".rejected"); err != nil {
+			return journal{}, err
+		}
+		return journal{Version: 1, Entries: make(map[string]receipt)}, nil
 	}
 	return result, nil
 }
