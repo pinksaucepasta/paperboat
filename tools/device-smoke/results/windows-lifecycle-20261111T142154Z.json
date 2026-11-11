@@ -1,0 +1,12 @@
+{
+ "version": "dev-1e7fe0c7d",
+ "device": "pujan@victus",
+ "results": [
+  {
+   "id": "windows:install-pair",
+   "status": "PASS",
+   "seconds": 82,
+   "detail": ""
+  }
+ ]
+}

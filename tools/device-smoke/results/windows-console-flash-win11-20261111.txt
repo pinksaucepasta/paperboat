@@ -1,0 +1,30 @@
+windows_console_flash on Windows 11 (victus, real laptop, user pujan signed in over RDP), 2026-11-11 IST. Build dev-1e7fe0c7d (origin/main 1e7fe0c7d, includes b641ff023).
+Detector: windows_console_flash.py (a visible control window must open first, else FAIL); desktop session 3.
+
+CASES RUN THROUGH THE DESKTOP DETECTOR (windows_console_flash.py exec, elevated task; each: control opened a window, then 15 s watch, exit 0, no window):
+### exec pb service stop
+output: Paperboat daemon service stopped
+PASS exec pb.exe service: no visible console window for 15s after "C:\Program Files\Paperboat\users\uba6bceb9290ebd807a30e102\bin\pb.exe" service stop (exit 0)
+rc=0
+### exec pb service start
+output: Paperboat daemon service started and ready
+PASS exec pb.exe service: no visible console window for 15s after "C:\Program Files\Paperboat\users\uba6bceb9290ebd807a30e102\bin\pb.exe" service start (exit 0)
+rc=0
+### exec pb service restart
+output: Paperboat daemon service restarted and ready
+PASS exec pb.exe service: no visible console window for 15s after "C:\Program Files\Paperboat\users\uba6bceb9290ebd807a30e102\bin\pb.exe" service restart (exit 0)
+rc=0
+### exec pb update --from (VIA_EXPLORER)
+output: Updated Paperboat from dev-1e7fe0c7d to dev-1e7fe0c7db.
+PASS exec pb.exe update: no visible console window for 15s after "C:\Program Files\Paperboat\users\uba6bceb9290ebd807a30e102\bin\pb.exe" update --from C:\Users\USER\AppData\Local\Temp\pbstage\pb-b.exe (exit 0)
+rc=0
+
+INSTALL + PAIR on Windows 11 (run over elevated ssh by windows_lifecycle.py install-pair; the desktop watcher ran meanwhile):
+  tools/device-smoke/results/windows-lifecycle-20261111T142154Z.json  PASS 82 s (install, pair, online within 30 s, doctor healthy within 60 s)
+  watcher (signin-start, 300 s from 2026-11-11T19:49:16+05:30; install+pair ran inside it, ~19:50:30-19:51:54): control_flashes=2, flashes=[], "finished, windows seen: 0"
+  (an earlier install-pair on the same build also PASSED: results/windows-lifecycle-20261111T140821Z.json)
+
+UNINSTALL + SIGN-IN AFTER UNINSTALL: results/windows-console-flash-signin-20261111.txt (watcher + the user's own observation: nothing new appeared at sign-in; RunOnce cleanups ran).
+
+HARNESS NOTE: an observed install/pair through the desktop task raised a UAC prompt on the user's desktop at 19:46 IST (pb sat in the task's restricted job and tried its elevation helper) and exited 1; the check wrongly printed PASS. Fixed (check fails on non-zero exit; install/pair/uninstall/reset are refused in the task path); those lines are not evidence.
+RESULT: PASS
