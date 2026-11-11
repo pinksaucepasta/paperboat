@@ -84,12 +84,17 @@ func (b *locoBackend) setRelayRegions(regions []*tailcfg.DERPRegion) {
 	}
 	redefined := redefinedPinnedRegions(b.dm, dm, b.clients)
 	b.dm = dm
+	previousHome := b.homeDERP
 	b.homeDERP = 0
 	if len(regions) != 0 {
 		b.homeDERP = regions[0].RegionID
 	}
 	b.updateServerMapLocked()
+	homeMoved, report := b.homeDERP != previousHome, b.onLocalEndpoints
 	b.mu.Unlock()
+	if homeMoved && report != nil {
+		go report() // peers learn the new home from the next renewal (HomeRegion)
+	}
 	ms := b.sys.MagicSock.Get()
 	ms.SetDERPMap(dm)
 	for _, id := range redefined {
@@ -220,6 +225,19 @@ func (b *locoBackend) setPeerRelayRegion(peer key.NodePublic, id tailcfg.DERPReg
 // connectRelay connects and pings this engine's carrier for region (magicsock PrepareDERP).
 func (b *locoBackend) connectRelay(ctx context.Context, region tailcfg.DERPRegionID) error {
 	return b.sys.MagicSock.Get().PrepareDERP(ctx, region)
+}
+
+// HomeRegion is the relay region this engine is homed on (0 before a relay is set).
+func (s *Server) HomeRegion() tailcfg.DERPRegionID {
+	if s.lb == nil {
+		return 0
+	}
+	s.lb.mu.Lock()
+	defer s.lb.mu.Unlock()
+	if s.lb.dm == nil {
+		return 0
+	}
+	return s.lb.derpRegionIDLocked()
 }
 
 // relayRegionIDs is every relay region this engine can send through.

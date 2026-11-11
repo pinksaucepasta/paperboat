@@ -32,6 +32,8 @@ type peerNetworkConfigBody struct {
 	AdmittedScopes []peersessions.AdmittedScope `json:"admitted_scopes,omitempty"`
 	// Endpoints are the engine's own candidate endpoints (ip:port, at most 8; PLAN 3b N5), sent from the first request.
 	Endpoints []string `json:"endpoints,omitempty"`
+	// HomeRelay is the node id of the regional relay a machine is homed on; peers send their relay handshake there.
+	HomeRelay string `json:"home_relay,omitempty"`
 	// Authority names the peer-state semantics the daemon understands: "" (every scope expires with the document)
 	// or peersessions.AuthorityUntilRevoked (PLAN 3b offline-capable authority, F21-01/F21-11).
 	Authority string `json:"authority,omitempty"`
@@ -196,7 +198,7 @@ func machinePeerNetwork(s peerNetworkService, v machineEndpointProofVerifier, re
 			writeError(w, r, http.StatusBadRequest, "invalid_request", "Peer network configuration request is invalid.")
 			return
 		}
-		value, e := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: claims.UserID, EndpointID: claims.MachineID, AdmittedScopes: body.AdmittedScopes, Endpoints: body.Endpoints, Authority: body.Authority, BaseGeneration: body.BaseGeneration})
+		value, e := s.Configuration(r.Context(), peersessions.NetworkConfigRequest{OperationID: body.OperationID, UserID: claims.UserID, EndpointID: claims.MachineID, AdmittedScopes: body.AdmittedScopes, Endpoints: body.Endpoints, HomeRelay: body.HomeRelay, Authority: body.Authority, BaseGeneration: body.BaseGeneration})
 		if e != nil {
 			peerNetworkError(w, r, e)
 			return

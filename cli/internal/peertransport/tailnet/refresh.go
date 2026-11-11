@@ -222,6 +222,7 @@ func (a *Authority) refresh(ctx context.Context, client NetworkAPI, since time.T
 		}
 		request := api.PeerNetworkConfigurationRequest{OperationID: "operation_" + operation.String(), AdmittedScopes: a.AdmittedScopes()}
 		request.Endpoints = a.endpointReportDue()
+		request.HomeRelay = a.homeRelayReport()
 		request.Authority = api.PeerNetworkAuthorityUntilRevoked
 		if !full {
 			request.BaseGeneration = peernetwork.ConfigurationGeneration(held)

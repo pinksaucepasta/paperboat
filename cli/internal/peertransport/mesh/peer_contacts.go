@@ -28,6 +28,10 @@ type PeerContact struct {
 	Live      bool
 	Disco     key.DiscoPublic
 	Endpoints []netip.AddrPort
+	// Home is the relay region the peer reported it is homed on (0: not reported). As magicsock installs a
+	// peer's HomeDERP from the control plane (wgengine/magicsock/endpoint.go updateFromNode), a new value
+	// replaces the region this engine remembered, so a peer that restarted on the other relay is reached there.
+	Home tailcfg.DERPRegionID
 }
 
 // maxPeerContactEndpoints matches the signed configuration's bound.
@@ -72,9 +76,18 @@ func (s *Server) SetPeerContacts(contacts map[key.NodePublic]PeerContact) error 
 		c.Endpoints = slices.Clone(c.Endpoints)
 		next[k] = c
 	}
+	previous := b.contacts
 	b.contacts = next // addClientLocked reads the new endpoints from here
 	changed := false
 	for k, c := range next {
+		// Only a changed report moves the peer: an unchanged one must not undo a region learned since from an
+		// answer (setPeerRelayRegion), which is newer.
+		if c.Home != previous[k].Home && b.dm.Regions[c.Home].HasDERP() {
+			if b.peerRegions == nil {
+				b.peerRegions = make(map[key.NodePublic]tailcfg.DERPRegionID)
+			}
+			b.peerRegions[k] = c.Home
+		}
 		addr, allowed := b.allowedPeers[k]
 		if !allowed {
 			continue
@@ -83,11 +96,14 @@ func (s *Server) SetPeerContacts(contacts map[key.NodePublic]PeerContact) error 
 		if n == nil {
 			b.addClientLocked(k, c.Disco, addr)
 			changed = true
-		} else if n.DiscoKey != c.Disco || !slices.Equal(n.Endpoints, c.Endpoints) {
+		} else if home := b.signedRegionLocked(k); n.DiscoKey != c.Disco || !slices.Equal(n.Endpoints, c.Endpoints) || (home != 0 && n.HomeDERP != home) {
 			// Update a live peer in place, as magicsock's updateFromNode does.
 			updated := n.Clone()
 			updated.DiscoKey = c.Disco
 			updated.Endpoints = slices.Clone(c.Endpoints)
+			if home != 0 {
+				updated.HomeDERP = home
+			}
 			b.setClientLocked(k, updated)
 			changed = true
 		}
@@ -233,3 +249,22 @@ const directPingFirstRetry, directPingMaxRetry = 250 * time.Millisecond, 2 * tim
 // newHandshakeHold bounds how long a direct answer waits for a new handshake's relay acknowledgment, leaving most
 // of QUIC's 1 s handshake budget.
 const newHandshakeHold = 500 * time.Millisecond
+
+// signedRegionLocked is the home region the signed configuration gave peer, or 0 when this engine no longer has
+// that relay (a decommissioned relay's region must not be reinstalled on every renewal).
+func (b *locoBackend) signedRegionLocked(peer key.NodePublic) tailcfg.DERPRegionID {
+	if home := b.peerRegions[peer]; b.dm.Regions[home].HasDERP() {
+		return home
+	}
+	return 0
+}
+
+// signedHomeKnown reports whether the signed configuration gives peer's home relay and this engine has that relay:
+// it outranks a region learned from an answer, as magicsock's control-plane HomeDERP outranks a learned derpRoute
+// (wgengine/magicsock/derp.go fallbackDERPRegionForPeer).
+func (b *locoBackend) signedHomeKnown(peer key.NodePublic) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	home := b.contacts[peer].Home
+	return home != 0 && b.dm.Regions[home].HasDERP()
+}

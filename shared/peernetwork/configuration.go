@@ -19,6 +19,8 @@ const (
 	MaxSafeInteger = 1<<53 - 1
 	// MaxPeerEndpoints bounds the candidate addresses one peer entry carries (and an endpoint reports).
 	MaxPeerEndpoints = 8
+	// MaxHomeRelayLength bounds a peer's reported home relay node id.
+	MaxHomeRelayLength = 128
 )
 
 // Endpoint roles: a signed-in CLI session or an enrolled machine.
@@ -51,6 +53,8 @@ type Peer struct {
 	// port-mapped addresses), so the engine can reach it directly with no relay (PLAN 3b "Direct paths without a
 	// relay"); absent until the peer reported some.
 	Endpoints []string `json:"endpoints,omitempty"`
+	// HomeRelay is the node id of the regional relay the peer reported it is homed on (empty: not reported).
+	HomeRelay string `json:"home_relay,omitempty"`
 }
 
 // Configuration is a signed network configuration's claims: an endpoint's identity and every peer it may reach.
@@ -98,7 +102,7 @@ func (c Configuration) Check(now time.Time) error {
 	scopes := 0
 	for _, p := range c.Peers {
 		b := p.Identity
-		if !b.Valid() || s.Role == RoleCLI && b.Role == RoleCLI || ids[b.EndpointID] || addresses[b.VirtualAddress] || keys[b.WireGuardPublicKey] || len(p.Scopes) == 0 || !ValidPeerEndpoints(p.Endpoints) {
+		if !b.Valid() || s.Role == RoleCLI && b.Role == RoleCLI || ids[b.EndpointID] || addresses[b.VirtualAddress] || keys[b.WireGuardPublicKey] || len(p.Scopes) == 0 || !ValidPeerEndpoints(p.Endpoints) || len(p.HomeRelay) > MaxHomeRelayLength {
 			return invalid("configuration peer")
 		}
 		ids[b.EndpointID], addresses[b.VirtualAddress], keys[b.WireGuardPublicKey] = true, true, true

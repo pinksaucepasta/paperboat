@@ -17,14 +17,15 @@ import (
 
 // hop-89: a Windows machine restarted after an update and homed on the other relay of the account's pair. hp kept
 // sending its handshake to the relay it remembered, which the restarted machine was no longer on, so every exec
-// failed until something else moved hp. An unanswered handshake now also asks on the other relays (connecting to
-// them when needed), and the region the answer arrives on is recorded.
+// failed until something else moved hp. The peer's signed home now replaces the remembered region (one try), and
+// without one the answer to a probe on the other relays is recorded (a bounded fallback).
 func TestPeerRestartedOnTheOtherRelayIsReached(t *testing.T) {
 	envknob.Setenv("TS_DEBUG_ALWAYS_USE_DERP", "true")
 	t.Cleanup(func() { envknob.Setenv("TS_DEBUG_ALWAYS_USE_DERP", "") })
 	one := integration.RunDERPAndSTUN(t, logger.Discard, "127.0.0.1").Regions[1]
 	two := relayRegionCopy(integration.RunDERPAndSTUN(t, logger.Discard, "127.0.0.1").Regions[1], 2)
-	testPeerMovedRelay(t, one, two, 4*time.Second)
+	t.Run("signed home", func(t *testing.T) { testPeerMovedRelay(t, one, two, true, time.Second) })
+	t.Run("answer from a probe", func(t *testing.T) { testPeerMovedRelay(t, one, two, false, 4*time.Second) })
 }
 
 func relayRegionCopy(r *tailcfg.DERPRegion, id tailcfg.DERPRegionID) *tailcfg.DERPRegion {
@@ -38,7 +39,7 @@ func relayRegionCopy(r *tailcfg.DERPRegion, id tailcfg.DERPRegionID) *tailcfg.DE
 	return &c
 }
 
-func testPeerMovedRelay(t *testing.T, one, two *tailcfg.DERPRegion, within time.Duration) {
+func testPeerMovedRelay(t *testing.T, one, two *tailcfg.DERPRegion, signed bool, within time.Duration) {
 	clientKey, hostKey := key.NewNode(), key.NewNode()
 	clientAddr := netip.MustParseAddr("fd7a:115c:a1e0::40")
 	hostAddr := netip.MustParseAddr("fd7a:115c:a1e0::41")
@@ -78,9 +79,9 @@ func testPeerMovedRelay(t *testing.T, one, two *tailcfg.DERPRegion, within time.
 		return s
 	}
 	// UDP is off (relay only); a signed candidate per start models the restarted peer's new endpoints.
-	contact := func(to, from *Server) {
+	contact := func(to, from *Server, home tailcfg.DERPRegionID) {
 		t.Helper()
-		c := PeerContact{Disco: from.lb.discoPublic(),
+		c := PeerContact{Disco: from.lb.discoPublic(), Home: home,
 			Endpoints: []netip.AddrPort{netip.AddrPortFrom(netip.MustParseAddr("192.0.2.20"), uint16(40000+started))}}
 		if err := to.SetPeerContacts(map[key.NodePublic]PeerContact{from.Key.Public(): c}); err != nil {
 			t.Fatal(err)
@@ -88,16 +89,23 @@ func testPeerMovedRelay(t *testing.T, one, two *tailcfg.DERPRegion, within time.
 	}
 	client := start(clientKey, clientAddr, hostKey.Public(), hostAddr, one, two)
 	host := start(hostKey, hostAddr, clientKey.Public(), clientAddr, one)
-	contact(client, host)
-	contact(host, client)
+	var home tailcfg.DERPRegionID
+	if signed {
+		home = one.RegionID
+	}
+	contact(client, host, home)
+	contact(host, client, 0)
 	restartExchange(t, host, client) // the client learns the host's relay from its handshake
 	restartExchange(t, client, host)
 	if err := host.Close(); err != nil {
 		t.Fatal(err)
 	}
 	host = start(hostKey, hostAddr, clientKey.Public(), clientAddr, two) // same identity, now on the other relay only
-	contact(host, client)
-	contact(client, host)
+	contact(host, client, 0)
+	if signed {
+		home = two.RegionID
+	}
+	contact(client, host, home)
 	begin := time.Now()
 	restartExchange(t, client, host)
 	if took := time.Since(begin); took > within {
@@ -168,5 +176,79 @@ func TestTheDERPMapHoldsOnlyTheGivenRelays(t *testing.T) {
 				t.Fatalf("region %d node %+v is not one of the given relays", id, node)
 			}
 		}
+	}
+}
+
+// A peer's signed home relay outranks a region learned from an answer: a matching answer that arrives on another
+// relay (the peer still holds a connection there) does not move a peer whose home the configuration gives.
+func TestSignedHomeOutranksAnAnsweredRegion(t *testing.T) {
+	regions := integration.RunDERPAndSTUN(t, logger.Discard, "127.0.0.1")
+	one, two := regions.Regions[1], relayRegionCopy(regions.Regions[1], 2)
+	peer := key.NewNode().Public()
+	s := &Server{Key: key.NewNode(), LocalAddr: netip.MustParseAddr("fd7a:115c:a1e0::60"),
+		AllowedPeers: map[key.NodePublic]netip.Addr{peer: netip.MustParseAddr("fd7a:115c:a1e0::61")}}
+	if err := s.SetRelayRegions([]*tailcfg.DERPRegion{two, one}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: {Disco: key.NewDisco().Public(), Home: one.RegionID}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.lb.peerDERPRegion(peer); got != one.RegionID {
+		t.Fatalf("signed home not applied: %d", got)
+	}
+	w := &meowWait{ready: make(chan struct{}), nonce: [meowNonceLen]byte{3}}
+	s.peerReadyMu.Lock()
+	s.peerReady = map[key.NodePublic]*meowWait{peer: w}
+	s.peerReadyMu.Unlock()
+	s.meowed(peer, two.RegionID, w.nonce, [meowNonceLen]byte{}, true)
+	select {
+	case <-w.ready:
+	default:
+		t.Fatal("the answer did not complete the handshake")
+	}
+	if got := s.lb.peerDERPRegion(peer); got != one.RegionID {
+		t.Fatalf("an answered region (%d) outranked the signed home (%d)", got, one.RegionID)
+	}
+}
+
+// A signed home whose relay this engine no longer has is not reinstalled on a peer by later renewals (the server keeps
+// naming a decommissioned relay): signedRegionLocked drops it with the region.
+func TestSignedHomeOfAWithdrawnRelayIsNotReinstalled(t *testing.T) {
+	regions := integration.RunDERPAndSTUN(t, logger.Discard, "127.0.0.1")
+	one, two := regions.Regions[1], relayRegionCopy(regions.Regions[1], 2)
+	peer := key.NewNode().Public()
+	s := &Server{Key: key.NewNode(), LocalAddr: netip.MustParseAddr("fd7a:115c:a1e0::70"),
+		AllowedPeers: map[key.NodePublic]netip.Addr{peer: netip.MustParseAddr("fd7a:115c:a1e0::71")}}
+	if err := s.SetRelayRegions([]*tailcfg.DERPRegion{two, one}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	contact := PeerContact{Disco: key.NewDisco().Public(), Home: one.RegionID}
+	if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: contact}); err != nil {
+		t.Fatal(err)
+	}
+	signed := func() tailcfg.DERPRegionID {
+		s.lb.mu.Lock()
+		defer s.lb.mu.Unlock()
+		return s.lb.signedRegionLocked(peer)
+	}
+	if got := signed(); got != one.RegionID {
+		t.Fatalf("signed region %d, want %d", got, one.RegionID)
+	}
+	if err := s.SetRelayRegions([]*tailcfg.DERPRegion{two}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: contact}); err != nil { // the unchanged renewal
+		t.Fatal(err)
+	}
+	if got := signed(); got != 0 {
+		t.Fatalf("a withdrawn relay's region %d is still the signed home", got)
 	}
 }

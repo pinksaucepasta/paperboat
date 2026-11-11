@@ -53,6 +53,9 @@ type NetworkConfigRequest struct {
 	AdmittedScopes                  []AdmittedScope
 	// Endpoints are the engine's own candidate endpoints (ip:port); nil when the request reports none.
 	Endpoints []string
+	// HomeRelay is the node id of the regional relay a machine is homed on; empty when not reported. Only an
+	// eligible relay of the account is stored (homeRelayUpdate).
+	HomeRelay string
 	// Authority is AuthorityUntilRevoked when the daemon keeps verified peer state until it is revoked; empty for
 	// daemons that let every scope end with the document.
 	Authority string
@@ -237,6 +240,8 @@ func (s *NetworkService) registerAttempt(ctx context.Context, in NetworkRegistra
 type networkBinding struct {
 	peernetwork.Binding
 	Endpoints []string `json:"endpoints,omitempty"`
+	// HomeRelay is the identity's reported home relay, moved to the peer entry like Endpoints.
+	HomeRelay string `json:"home_relay,omitempty"`
 }
 
 // networkScope is the shared signed access scope (shared/peernetwork) the client and the relay verify.
@@ -319,9 +324,16 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	if err != nil {
 		return NetworkConfigResult{}, err
 	}
+	if in.HomeRelay != "" && !bounded(in.HomeRelay, 1, 128) {
+		return NetworkConfigResult{}, ErrInvalid
+	}
+	var homeRelay any
+	if in.HomeRelay != "" {
+		homeRelay = in.HomeRelay
+	}
 	start, cacheable := s.cache.begin()
 	step := time.Now()
-	err = s.store.SQL().QueryRowContext(ctx, endpointsUpdate, now, in.UserID, in.EndpointID, endpoints, endpointPublishInterval.Seconds()).
+	err = s.store.SQL().QueryRowContext(ctx, endpointsUpdate, now, in.UserID, in.EndpointID, endpoints, endpointPublishInterval.Seconds(), homeRelay).
 		Scan(&generation)
 	trace.generation = time.Since(step)
 	if err == sql.ErrNoRows {

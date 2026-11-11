@@ -53,7 +53,11 @@ func (a *Authority) peerContactsLocked() map[key.NodePublic]mesh.PeerContact {
 		for _, raw := range p.Endpoints {
 			endpoints = append(endpoints, netip.MustParseAddrPort(raw)) // validated with the configuration
 		}
-		contacts[pub] = mesh.PeerContact{Disco: disco, Endpoints: endpoints, Live: a.carrierPeers[p.Identity.EndpointID] > 0}
+		contact := mesh.PeerContact{Disco: disco, Endpoints: endpoints, Live: a.carrierPeers[p.Identity.EndpointID] > 0}
+		if p.HomeRelay != "" {
+			contact.Home = regionalID(p.HomeRelay) // the engine uses it only if it has that relay
+		}
+		contacts[pub] = contact
 	}
 	return contacts
 }

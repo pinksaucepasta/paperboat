@@ -2108,6 +2108,7 @@ type PeerNetworkIdentity struct {
 	PublishedEndpoints         []string
 	EndpointsPublishedAt       sql.NullTime
 	EndpointsDueAt             sql.NullTime
+	HomeRelay                  sql.NullString
 }
 
 type PeerNetworkRegistrationOperation struct {

@@ -1426,3 +1426,25 @@ func TestAdmittedInventoryHoldsHundredTerminalsAndFiftyViewers(t *testing.T) {
 		t.Fatalf("a scope past the bound was admitted: %v", err)
 	}
 }
+
+// hop-89: a peer's signed home relay reaches the engine as its contact's home region, so a peer that restarted on
+// the other relay is sent its handshake there; an oversized value refuses the configuration like any malformed field.
+func TestSignedHomeRelayBecomesTheContactsHome(t *testing.T) {
+	a, cfg, signer, _ := networkTestAuthority(t)
+	cfg.Peers[0].HomeRelay = "node_relay_b"
+	if err := a.Apply(t.Context(), networkToken(t, signer, cfg)); err != nil {
+		t.Fatal(err)
+	}
+	a.mu.Lock()
+	contacts := a.peerContactsLocked()
+	a.mu.Unlock()
+	peer, _ := publicKey(cfg.Peers[0].Identity.WireGuardPublicKey)
+	if got := contacts[peer].Home; got != regionalID("node_relay_b") {
+		t.Fatalf("contact home %d, want %d", got, regionalID("node_relay_b"))
+	}
+	b, cfg, signer, _ := networkTestAuthority(t)
+	cfg.Peers[0].HomeRelay = strings.Repeat("n", 129)
+	if err := b.Apply(t.Context(), networkToken(t, signer, cfg)); err == nil {
+		t.Fatal("an oversized home relay was accepted")
+	}
+}

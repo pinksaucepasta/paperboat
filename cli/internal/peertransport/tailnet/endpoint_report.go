@@ -5,6 +5,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/cli/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
@@ -118,4 +119,28 @@ func (a *Authority) endpointsChanged() {
 		a.reportMu.Unlock()
 		a.RequestRefresh()
 	})
+}
+
+// homeRelayReport is the node id of the regional relay this machine's listening engine is homed on (the first of
+// its relay regions), or empty for a CLI or before a relay is set. Every renewal carries it, as a Tailscale node
+// reports its PreferredDERP in each map request (control/controlclient); its change asks for one (endpointsChanged).
+func (a *Authority) homeRelayReport() string {
+	a.mu.Lock()
+	var engine *mesh.Server
+	if a.server != nil {
+		engine = a.server.server
+	}
+	a.mu.Unlock()
+	if engine == nil {
+		return ""
+	}
+	home := engine.HomeRegion()
+	a.relay.mu.Lock()
+	defer a.relay.mu.Unlock()
+	for _, node := range a.relay.nodes {
+		if regionalID(node.NodeID) == home {
+			return node.NodeID
+		}
+	}
+	return ""
 }
