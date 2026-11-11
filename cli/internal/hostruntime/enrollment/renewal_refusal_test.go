@@ -92,6 +92,15 @@ func TestRenewalRefusedWith401IsAttemptedOnceUntilReEnrollment(t *testing.T) {
 	if got := requests.Load(); got != 2 {
 		t.Fatalf("%d requests after a restart, want 2", got)
 	}
+	// The hold ends after renewalRefusalHold: one more attempt (a wrong clock, once right, heals without re-enrollment).
+	wall := time.Now()
+	backoffNow = func() time.Time { return wall.Add(renewalRefusalHold + time.Minute) }
+	t.Cleanup(func() { backoffNow = time.Now })
+	_, _ = source.Token(context.Background())
+	if got := requests.Load(); got != 3 {
+		t.Fatalf("%d requests after the hold, want 3", got)
+	}
+	backoffNow = time.Now // the refusal recorded at the fake time still holds: only a new credential lifts it
 	reenrolled, err := LoadRuntimeIdentityForRenewal(root, now)
 	if err != nil {
 		t.Fatal(err)
@@ -104,8 +113,8 @@ func TestRenewalRefusedWith401IsAttemptedOnceUntilReEnrollment(t *testing.T) {
 		t.Fatal("a new enrollment is still reported as refused")
 	}
 	_, _ = source.Token(context.Background())
-	if got := requests.Load(); got != 3 {
-		t.Fatalf("%d requests after re-enrollment, want 3", got)
+	if got := requests.Load(); got != 4 {
+		t.Fatalf("%d requests after re-enrollment, want 4", got)
 	}
 }
 
