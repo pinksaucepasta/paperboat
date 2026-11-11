@@ -124,7 +124,7 @@ def scheduled_phase(lead, before, latest):
         report = report.get('data', report)
         guard = [c for c in report.get('checks', []) if c.get('code') == 'machine_guard_version']
         return (state['runtime_version'] == latest and state['activation_pending'] is False
-                and report.get('overall') == 'healthy' and (not guard or guard[0].get('status') == 'pass'))
+                and p.doctor_healthy(report) and (not guard or guard[0].get('status') == 'pass'))
     wait_until(clock.now() + datetime.timedelta(seconds=ACTIVATION_SECONDS), settled, 'doctor healthy, activation done and the guard on %s' % latest)
     next_run = status()['next_maintenance_at']
     assert utc_stamp(next_run)[:16] > utc_minute(target + datetime.timedelta(hours=1)), \
