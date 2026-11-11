@@ -1,0 +1,70 @@
+{
+  "row": "F10-07",
+  "status": "PASS",
+  "build": "dev-25e2443d1",
+  "commit": "25e2443d1",
+  "platform": "linux/amd64, headless container (no OS keychain, auth.allow_file_fallback=true), laneA- throwaway on pbvm2",
+  "account": "user_e1e858ba-8439-42c6-9102-8300adbe5128",
+  "note": "Teammate account acct3, not the shared main test account. acct3's personal ENV values were reset by this check. Its new vault password and recovery code were written back to the operator's local protected files (mode 600) so other checks keep working. The container signed in with throwaway API tokens only (no machine record was created); every token was revoked and the container removed afterwards.",
+  "steps": [
+    {
+      "step": "init the vault with the current password",
+      "want_ok": true,
+      "ok": true,
+      "code": null
+    },
+    {
+      "step": "set a personal value",
+      "want_ok": true,
+      "ok": true,
+      "code": null
+    },
+    {
+      "step": "value listed before reset",
+      "ok": true,
+      "key_epoch": 1
+    },
+    {
+      "step": "lock",
+      "want_ok": true,
+      "ok": true,
+      "code": null
+    },
+    {
+      "step": "reset with a wrong confirmation is refused",
+      "want_ok": false,
+      "ok": false,
+      "code": "invalid_invocation"
+    },
+    {
+      "step": "reset the locked vault",
+      "want_ok": true,
+      "ok": true,
+      "code": null
+    },
+    {
+      "step": "personal values gone, key epoch increased",
+      "ok": true,
+      "key_epoch": 2,
+      "names_left": 0
+    },
+    {
+      "step": "lock after reset",
+      "want_ok": true,
+      "ok": true,
+      "code": null
+    },
+    {
+      "step": "the old password is refused",
+      "want_ok": false,
+      "ok": false,
+      "code": "operation_failed"
+    },
+    {
+      "step": "the new password unlocks",
+      "want_ok": true,
+      "ok": true,
+      "code": null
+    }
+  ]
+}
