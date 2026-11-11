@@ -126,6 +126,12 @@ var policies = []policy{
 		seconds(func(c config.Retention) time.Duration { return c.TunnelLogs })},
 	{"team_machine_requests", batchOf("team_machine_requests", `decided_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.DecidedMachineRequests })},
+	// The receipt outbox row goes with its request (ON DELETE CASCADE). A request still pending or approved is kept
+	// until its own expiry has passed by the window; a request in transfer (consumed) until it stopped changing.
+	{"team_inbox_requests", batchOf("team_inbox_requests",
+		`(status IN ('declined','expired','revoked','consumed','completed') AND updated_at < now()-make_interval(secs=>$2))
+ OR (status IN ('pending','approved') AND expires_at < now()-make_interval(secs=>$2))`),
+		seconds(func(c config.Retention) time.Duration { return c.InboxRequests })},
 	{"stripe_events", batchOf("stripe_events", `processed_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.StripeEvents })},
 	{"support_reports_expired", batchOf("support_reports", `expires_at < now()`), none},

@@ -22,6 +22,9 @@ type Retention struct {
 	AcknowledgedUsageReceipts time.Duration `json:"acknowledged_usage_receipts"`
 	TunnelLogs                time.Duration `json:"tunnel_logs"`
 	DecidedMachineRequests    time.Duration `json:"decided_machine_requests"`
+	// InboxRequests: a team inbox request (and, by cascade, its receipt outbox row) after it ended (declined, expired,
+	// revoked, consumed, completed) or after its expiry if nobody decided it.
+	InboxRequests time.Duration `json:"inbox_requests"`
 	// StripeEvents de-duplicate webhooks; Stripe retries for at most three days.
 	StripeEvents time.Duration `json:"stripe_events"`
 	// SupersededMeshEntries: a peer mesh log entry after a newer entry of the same endpoint replaced it (readers
@@ -40,7 +43,7 @@ type Retention struct {
 func defaultRetention() Retention {
 	return Retention{
 		ExpiredCredentials: time.Hour, IdempotencyRecords: day, FinishedOperations: 7 * day, EndedSessions: 30 * day,
-		AcknowledgedUsageReceipts: 2 * day, TunnelLogs: 7 * day, DecidedMachineRequests: 90 * day, StripeEvents: 30 * day,
+		AcknowledgedUsageReceipts: 2 * day, TunnelLogs: 7 * day, DecidedMachineRequests: 90 * day, InboxRequests: 30 * day, StripeEvents: 30 * day,
 		SupersededMeshEntries: time.Hour, Recordings: 90 * day, SupportReportsPerAccount: 1000, Batch: 500, Budget: 20 * time.Second,
 	}
 }
@@ -48,7 +51,7 @@ func defaultRetention() Retention {
 func (r Retention) validate(accessSessionRetention time.Duration) error {
 	switch {
 	case r.ExpiredCredentials < time.Minute, r.IdempotencyRecords < time.Hour, r.FinishedOperations < day,
-		r.AcknowledgedUsageReceipts < time.Hour, r.TunnelLogs < time.Hour, r.DecidedMachineRequests < day, r.StripeEvents < 4*day,
+		r.AcknowledgedUsageReceipts < time.Hour, r.TunnelLogs < time.Hour, r.DecidedMachineRequests < day, r.InboxRequests < day, r.StripeEvents < 4*day,
 		r.SupersededMeshEntries < time.Minute:
 		return fmt.Errorf("retention: a window is below its minimum")
 	case r.EndedSessions < accessSessionRetention:
