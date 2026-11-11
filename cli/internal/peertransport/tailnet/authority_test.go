@@ -566,7 +566,7 @@ const storageWaitBudget = 5 * time.Second
 
 func TestNetworkAuthorityExpiryDoesNotWaitForStorage(t *testing.T) {
 	a, c, signer, store := networkTestAuthority(t)
-	c.ExpiresAt = time.Now().Unix() + 1
+	c.ExpiresAt = time.Now().Unix() + 3 // Unix() floors: 2-3 s for Apply under load
 	c.Peers[0].Scopes[0].ExpiresAt = c.ExpiresAt
 	if err := a.Apply(t.Context(), networkToken(t, signer, c)); err != nil {
 		t.Fatal(err)
@@ -766,7 +766,8 @@ func TestNetworkAllocatedUDPRotationRemovalAndAdmittedLifetime(t *testing.T) {
 	apply(cli, c)
 	_, in = exchange()
 	m.Generation++
-	m.ExpiresAt = time.Now().Unix() + 1
+	// Unix() floors, so +3 leaves 2-3 s for Apply to run under load before the snapshot expires.
+	m.ExpiresAt = time.Now().Unix() + 3
 	apply(machine, m)
 	// The snapshot expires for new admission, while the admitted packet flow remains usable.
 	time.Sleep(time.Until(time.Unix(m.ExpiresAt, 0)) + 20*time.Millisecond)
