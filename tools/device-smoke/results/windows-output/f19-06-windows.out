@@ -1,0 +1,17 @@
+{"row":"F19-06","part":"Windows","device":"winpool-7 (ssh runneradmin)","owner_readback":"winpool-8 owner profile (user_ad3f1abe-afc3-475a-b433-2d43f319e618)","build":"dev-6910b08c9","team":"laner-sso","domain":"laner-sso.pprbt.dev","machine":{"id":"machine_f5398c8c-5e05-435f-b79d-678ffc314b83","alias":"runnervmm7ud1-2"},"note":"cwd /home/ubuntu/pb-wt/w11/tools/device-smoke; scim fixture via --dir path only; no secrets recorded"}
+{"step":"1-baseline-win7","alice_auth_status":{"rc":0,"signed_in":true},"team_get":{"rc":0,"member_count":4,"my_role":"member"},"machine_online":true,"result":"pass"}
+{"step":"2-pre-scim-users","note":"alice directory-active=false as found (left suspended by 11-06 L/M run); team membership still active=true","action":"normalize with activate before test"}
+{"step":"3-activate-normalize","scim":"activate alice 200","team_get_after":{"rc":0},"result":"pass"}
+{"step":"4-probe-token","cmd":"pb api-token create f19-06-w7probe --workspace laner-sso (as alice, winpool-7)","rc":0,"token_id":"apitok_01aed653748921312460d7de91262b93","workspace":"laner-sso","result":"pass"}
+{"step":"5-share-machine","share_cmd":"pb team machine share laner-sso machine_f5398c8c --generation 86 (as alice)","share_result":"pending (approve_new_machines=true)","owner_approve":{"rc":0,"gen":88},"binding":{"alias":"runnervmm7ud1-2","active":true,"online":true},"result":"pass"}
+{"step":"6-owner-baseline-gen88","membership_alice_active":true,"probe_token":"live (no revoked_at)","other_members_all_active":true,"result":"pass"}
+{"step":"7-suspend","at":"2026-11-11T01:19:26Z","scim":"suspend alice 200","result":"pass"}
+{"step":"8-poll-refused","first_refused_at":"2026-11-11T01:19:35Z","elapsed_s":9,"team_get":{"rc":1,"error_code":"forbidden","category":"authorization_or_entitlement"},"result":"pass"}
+{"step":"9-personal-still-answers","team_list":{"rc":0,"teams_visible":0},"machine_list":{"rc":0,"machines":3,"runnervmm7ud1-2":"online"},"auth_status":{"still_signed_in":true,"session_unchanged":true},"result":"pass"}
+{"step":"10-owner-readback-suspended","gen":89,"membership_alice_active":false,"membership_gen":14,"probe_token_revoked_at":"2026-11-11T01:19:34.69519Z","binding_runnervmm7ud1-2_active":false,"other_members_untouched":true,"owner_untouched":true,"result":"pass"}
+{"step":"11-activate-restore","at":"2026-11-11T01:20:51Z","scim":"activate alice 200","still_refused_at":"2026-11-11T01:20:59Z","restored_at":"2026-11-11T01:21:12Z","elapsed_s":21,"team_get":{"rc":0},"result":"pass"}
+{"step":"12-owner-readback-restored","gen":90,"all_members_active":true,"alice_team_list":"laner-sso visible","alice_session_unchanged":true,"binding_runnervmm7ud1-2_active":false,"binding_note":"shared-machine binding stays inactive after re-activate; membership/access restored (product behavior, recorded)","probe_token":"stays revoked (expected permanent)","result":"pass"}
+{"step":"13-final-0136Z","recheck_gen":90,"alice_active":true,"result":"pass"}
+{"step":"delete-variant","status":"skipped","reason":"fixture supports only alice/bob; alice must never be deleted; L/M evidence is suspend-only"}
+{"step":"cleanup","state":"alice activated in directory and team-active; probe token left revoked (as L/M left theirs); w7probe binding left inactive; hp/apple/victus untouched","result":"pass"}
+{"verdict":"PASS"}

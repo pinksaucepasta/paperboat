@@ -1,0 +1,27 @@
+{"t": "2026-11-11T01:13:20Z", "step": "baseline_alice_team_get", "rc": 0, "code": null, "detail": "my_role=member"}
+{"t": "2026-11-11T01:13:24Z", "step": "baseline_owner_team_get", "rc": 0, "code": null, "detail": "my_role=owner"}
+{"t": "2026-11-11T01:13:28Z", "step": "baseline_sso_status", "rc": 0, "code": null, "detail": "required=False"}
+{"t": "2026-11-11T01:13:32Z", "step": "enforce_on_review", "rc": 0, "code": null, "detail": "rc=2 review_lists_non_sso_member=True confirm_present=True"}
+{"t": "2026-11-11T01:13:36Z", "step": "enforce_on_confirm", "rc": 0, "code": null, "detail": "Required SSO on"}
+{"t": "2026-11-11T01:13:51Z", "step": "teammate_login_non_sso", "rc": 0, "code": null, "detail": "token session as non-SSO member id"}
+{"t": "2026-11-11T01:13:54Z", "step": "teammate_team_get_refused_cli", "rc": 0, "code": "team_sso_required", "detail": "rc=1"}
+{"t": "2026-11-11T01:13:55Z", "step": "teammate_team_api_refused", "rc": 0, "code": "team_sso_required", "detail": "http=403"}
+{"t": "2026-11-11T01:13:58Z", "step": "teammate_team_token_create_refused", "rc": 0, "code": "forbidden", "detail": "no token issued"}
+{"t": "2026-11-11T01:13:58Z", "step": "new_connection_probe_limits", "rc": 0, "code": null, "detail": "documented; no online team target"}
+{"t": "2026-11-11T01:14:02Z", "step": "teammate_personal_continues", "rc": 0, "code": null, "detail": "personal answers"}
+{"t": "2026-11-11T01:14:07Z", "step": "alice_still_reads_under_enforcement", "rc": 0, "code": null, "detail": "recent-SSO access"}
+{"t": "2026-11-11T01:14:11Z", "step": "owner_still_reads_break_glass", "rc": 0, "code": null, "detail": "owner bypass"}
+{"t": "2026-11-11T01:14:15Z", "step": "exempt_add", "rc": 0, "code": null, "detail": "member exempt"}
+{"t": "2026-11-11T01:14:20Z", "step": "teammate_reads_when_exempt", "rc": 0, "code": null, "detail": "bypass works"}
+{"t": "2026-11-11T01:14:23Z", "step": "bypass_recorded", "rc": 0, "code": null, "detail": "exempt_events=8 bypass_for_member=0"}
+{"t": "2026-11-11T01:14:27Z", "step": "exempt_remove", "rc": 0, "code": null, "detail": "member unmarked"}
+{"t": "2026-11-11T01:14:31Z", "step": "teammate_refused_after_remove", "rc": 0, "code": "team_sso_required", "detail": "rc=1"}
+{"t": "2026-11-11T01:14:39Z", "step": "invite_outside_domain_refused", "rc": 0, "code": "invitation_domain_not_verified", "detail": "nothing created"}
+{"t": "2026-11-11T01:14:43Z", "step": "enforce_off", "rc": 0, "code": null, "detail": "Require SSO off (restored)"}
+{"t": "2026-11-11T01:14:47Z", "step": "sso_status_required_off", "rc": 0, "code": null, "detail": "required=False"}
+{"t": "2026-11-11T01:14:51Z", "step": "teammate_reads_after_off", "rc": 0, "code": null, "detail": "non-SSO reads again"}
+{"t": "2026-11-11T01:14:55Z", "step": "alice_reads_after_off", "rc": 0, "code": null, "detail": "rc=0"}
+{"t": "2026-11-11T01:15:00Z", "step": "owner_reads_after_off", "rc": 0, "code": null, "detail": "rc=0"}
+{"t": "2026-11-11T01:15:04Z", "step": "probe_token_revoked", "rc": 0, "code": null, "detail": "name=f19-04-win-1794359625"}
+{"t": "2026-11-11T01:15:07Z", "step": "teammate_profile_cleanup", "rc": 0, "code": null, "detail": "local dir removed"}
+{"t": "2026-11-11T01:15:07Z", "verdict": "PASS", "fails": [], "team": "laner-sso", "member_non_sso": "user_e1e858ba-8439-42c6-9102-8300adbe5128", "devices": "winpool-7 alice(SSO)+teammate(non-SSO,browser-approved), winpool-8 owner"}
