@@ -15,10 +15,11 @@ case "$1 $2" in
 'api graphql') n=$(cat "$COUNTER" 2>/dev/null || echo 0); echo $((n + 1)) > "$COUNTER"
   # the first answer (right after submission) is armed; with LOST set every later one says the PR left the queue
   if [ -n "$LOST" ] && [ "$n" -gt 0 ]; then echo false; else echo true; fi ;;
-'pr list') ;;
+'pr list') [ -z "$PR_HEAD" ] || echo 'https://example.test/pull/50' ;;
 'pr create') echo "https://example.test/pull/${LANE_NUMBER:-1}" ;;
 'pr merge') case "$*" in *--delete-branch*) echo 'merge queue refuses --delete-branch' >&2; exit 1 ;; esac ;;
 'pr view') case "$*" in
+  *headRefName*) echo "$PR_HEAD" ;;
   *statusCheckRollup*) echo "{\\"statusCheckRollup\\":[{\\"name\\":\\"Targeted Go checks\\",\\"conclusion\\":\\"$CHECK\\"},{\\"name\\":\\"End-to-end\\",\\"conclusion\\":\\"FAILURE\\"}]}" ;;
   *) if [ -n "$FLAG" ]; then [ -e "$FLAG" ] && echo MERGED || echo OPEN; else echo "$PR_STATE"; fi ;; esac ;;
 *) exit 9 ;;
@@ -81,6 +82,24 @@ class PushTests(unittest.TestCase):
         done, refs = self.run_case()
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn('refs/heads/lane-submit/', refs)
+
+    def test_followup_updates_requested_pr_branch_without_pushing_main(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Repo(Path(tmp))
+            branch = 'lane-submit/main/original-head'
+            git('git', 'push', 'origin', f'HEAD:refs/heads/{branch}', cwd=repo.lane, env=repo.env)
+            repo.commit(repo.lane, 'renumber row')
+            head = git('git', 'rev-parse', 'HEAD', cwd=repo.lane, env=repo.env)
+            env = dict(repo.env, PB_PUSH_PR='50', PR_HEAD=branch, PR_STATE='MERGED',
+                       COUNTER=str(Path(tmp) / 'counter'))
+            done = subprocess.run(['sh', str(SCRIPT)], cwd=repo.lane, env=env,
+                                  capture_output=True, text=True, timeout=20)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            remote_head = git('git', '--git-dir', str(repo.root / 'origin.git'),
+                              'rev-parse', branch, cwd=repo.root, env=repo.env)
+            self.assertEqual(remote_head, head)
+            self.assertEqual(repo.main_head(), repo.original)
+            self.assertEqual(repo.refs().splitlines(), ['refs/heads/' + branch, 'refs/heads/main'])
 
     def test_failed_required_check_fails_the_push(self):
         done, _ = self.run_case(state='OPEN', check='FAILURE')
