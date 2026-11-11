@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Close/delete only the exact non-default terminal created by a smoke check."""
 import json
+import os
 import re
 import subprocess
 import sys
@@ -13,7 +14,11 @@ class CleanupError(Exception):
 
 
 def command(pb, *args):
-    """pb is a path string, a Path, or the Windows device's pb.exe (winhost.WindowsPb)."""
+    """pb is a path string, a Path, or the Windows device's pb.exe (winhost.WindowsPb).
+
+    PB_SMOKE_WORKSPACE names the team workspace of a team-owned target (a team machine is not in the personal list)."""
+    if os.environ.get('PB_SMOKE_WORKSPACE'):
+        args = (*args, '--workspace', os.environ['PB_SMOKE_WORKSPACE'])
     if hasattr(pb, 'run_remote'):
         result = pb.run_remote(["session", *args, "--json"], timeout=30, text=False)
         if len(result.stdout) > 2 * 1024 * 1024:
