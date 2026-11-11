@@ -3425,6 +3425,9 @@ The coolify format (S1) also removes the old dev deployment and its test backups
 
 ## 5. Log
 
+2026-11-12 | W28 PR50 queue regression: missing mandatory quota checker reproduced on head and base; fixture now uses initialized billing policy, unchanged route/handover assertions; runtimeattachment PostgreSQL -race PASS at cd98bdafb (25.694s).
+Result: tools/device-smoke/results/w28-queue-regression.json. Existing-PR updates preserve published ancestry as main advances; eight push-tool tests PASS, new ancestry check failed before fix.
+
 2026-11-12 | W28 F8-17/F21-172: certificate persistence and dispatch/uncertain constraint fixes; tunnel -race, 20-repeat cert race, server DB/preview-store PostgreSQL and affected vet PASS at 099fdd9b2.
 Local core e2e blocked before build by archive VCS metadata (two attempts); required merge-queue core check uses a full checkout. Lane test dispatch starts jobs again (43101233401). No deploy; coordinator needs server migrations 291/292 and tunnel/edge image.
 
