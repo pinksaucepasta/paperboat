@@ -248,6 +248,10 @@ func launchWindowsUninstallHelper(ctx context.Context, inboxPaths, userStatePath
 		return "", err
 	}
 	if err := elevation.LaunchDetached(ctx, helperPath, []string{"__complete-uninstall", "--plan", planPath}); err != nil {
+		if helperStartedDespite(helperPath) {
+			keepDirectory = true // the helper runs from this directory and holds status.json: removing it fails, the helper finishes
+			return statusPath, nil
+		}
 		statusErr := writeWindowsUninstallStatus(statusPath, windowsUninstallStatusValue(ctx, "failed", err))
 		return "", errors.Join(err, statusErr)
 	}
@@ -259,6 +263,14 @@ func launchWindowsUninstallHelper(ctx context.Context, inboxPaths, userStatePath
 		return "", err
 	}
 	return statusPath, nil
+}
+
+// helperStartedDespite reports a helper image that is running from its directory although the launch reported an
+// error (hop-910b: ok:false, 'Could not remove ...Temp\Paperboat Uninstall', while the helper went on and completed
+// at 07:18:02Z): the launch worked, so the uninstall is pending, not failed, and its directory must not be removed.
+func helperStartedDespite(helperPath string) bool {
+	running, err := windowsHelperIsRunning(helperPath)
+	return err == nil && running
 }
 
 // pendingWindowsUninstallHandoff reports a handoff that ran out of time while its helper is alive. Windows certifies

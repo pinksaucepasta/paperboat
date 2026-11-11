@@ -118,3 +118,24 @@ func TestAppendLeftoverReportsEachPathOnce(t *testing.T) {
 		t.Fatalf("leftovers = %v, want the two distinct directories once each", leftovers)
 	}
 }
+
+func TestAHelperRunningDespiteALaunchErrorIsAPendingUninstallNotAFailure(t *testing.T) {
+	original := windowsHelperIsRunning
+	t.Cleanup(func() { windowsHelperIsRunning = original })
+	helper := `C:\Users\u\AppData\Local\Temp\Paperboat Uninstall\x\paperboat-uninstall-helper.exe`
+	windowsHelperIsRunning = func(path string) (bool, error) { return path == helper, nil }
+	if !helperStartedDespite(helper) {
+		t.Fatal("a running helper was treated as a failed launch")
+	}
+	if helperStartedDespite(`C:\other\paperboat-uninstall-helper.exe`) {
+		t.Fatal("another image counted as this helper")
+	}
+	windowsHelperIsRunning = func(string) (bool, error) { return false, nil }
+	if helperStartedDespite(helper) {
+		t.Fatal("a helper that is not running counted as started")
+	}
+	windowsHelperIsRunning = func(string) (bool, error) { return true, errors.New("process query failed") }
+	if helperStartedDespite(helper) {
+		t.Fatal("an unreadable process list counted as started")
+	}
+}
