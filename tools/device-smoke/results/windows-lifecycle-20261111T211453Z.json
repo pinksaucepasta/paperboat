@@ -1,0 +1,30 @@
+{
+ "version": "dev-h2-7c9deaa7e",
+ "device": "winpool-5",
+ "results": [
+  {
+   "id": "windows:update",
+   "status": "PASS",
+   "seconds": 63,
+   "detail": ""
+  },
+  {
+   "id": "windows:doctor",
+   "status": "PASS",
+   "seconds": 4,
+   "detail": ""
+  },
+  {
+   "id": "windows:status",
+   "status": "PASS",
+   "seconds": 3,
+   "detail": ""
+  },
+  {
+   "id": "windows:exec",
+   "status": "FAIL",
+   "seconds": 1,
+   "detail": "exec rc=1: retry. Support reference: support_214d42fd-5a84-48de-805a-564227f8597b. Run `pb bugreport --upload` to send the details."
+  }
+ ]
+}

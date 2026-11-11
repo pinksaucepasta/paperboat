@@ -1,0 +1,60 @@
+{
+ "version": "dev-7c9deaa7e",
+ "device": "winpool-5",
+ "results": [
+  {
+   "id": "windows:install-pair",
+   "status": "PASS",
+   "seconds": 80,
+   "detail": ""
+  },
+  {
+   "id": "windows:version",
+   "status": "PASS",
+   "seconds": 3,
+   "detail": ""
+  },
+  {
+   "id": "windows:doctor",
+   "status": "PASS",
+   "seconds": 4,
+   "detail": ""
+  },
+  {
+   "id": "windows:status",
+   "status": "PASS",
+   "seconds": 3,
+   "detail": ""
+  },
+  {
+   "id": "windows:service",
+   "status": "PASS",
+   "seconds": 121,
+   "detail": ""
+  },
+  {
+   "id": "windows:crash",
+   "status": "PASS",
+   "seconds": 18,
+   "detail": ""
+  },
+  {
+   "id": "windows:availability",
+   "status": "PASS",
+   "seconds": 18,
+   "detail": ""
+  },
+  {
+   "id": "windows:exec",
+   "status": "PASS",
+   "seconds": 4,
+   "detail": ""
+  },
+  {
+   "id": "windows:exec-self",
+   "status": "PASS",
+   "seconds": 5,
+   "detail": ""
+  }
+ ]
+}
