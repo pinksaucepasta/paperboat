@@ -5,6 +5,7 @@ import {
   PencilSimpleIcon,
   PlusIcon,
   PowerIcon,
+  SlidersHorizontalIcon,
   TrashIcon,
   WarningCircleIcon,
 } from "@phosphor-icons/react"
@@ -42,6 +43,7 @@ import { isLimitReached, LimitReached } from "@/components/limit-reached"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { RouteRulesDialog } from "@/components/tunnels/tunnel-route-rules"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
 /*
@@ -58,6 +60,13 @@ function routeHost(route: TunnelRoute) {
   if (match.type === "catch_all") return "Any other hostname"
   if (match.type === "one_label_wildcard") return `*.${(match.hostname ?? "").replace(/^\*\./, "")}`
   return match.hostname ?? ""
+}
+
+/** How many header, path and redirect rules the route carries. */
+function ruleCount(route: TunnelRoute) {
+  const rules = route.rewrite_rules
+  if (!rules) return 0
+  return (rules.request_headers?.length ?? 0) + (rules.response_headers?.length ?? 0) + (rules.path_rewrite ? 1 : 0) + (rules.redirects?.length ?? 0)
 }
 
 /** A hostname's state: its workspace domain is verified already, so a certificate copy, then ready. */
@@ -131,6 +140,7 @@ function HostnameRow({
 }) {
   const queryClient = useQueryClient()
   const [editing, setEditing] = useState(false)
+  const [ruling, setRuling] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const off = route.desired_state === "disabled"
   const host = alias && domain ? domain.hostname : routeHost(route)
@@ -150,6 +160,9 @@ function HostnameRow({
       ? []
       : ([
           { kind: "item", label: "Edit…", icon: PencilSimpleIcon, onSelect: () => setEditing(true) },
+          ...(route.protocol === "http"
+            ? ([{ kind: "item", label: "Edit rules…", icon: SlidersHorizontalIcon, onSelect: () => setRuling(true) }] satisfies Entry[])
+            : []),
           { kind: "item", label: off ? "Turn on" : "Turn off", icon: PowerIcon, onSelect: () => toggle.mutate() },
           { kind: "separator" },
         ] satisfies Entry[])),
@@ -172,6 +185,11 @@ function HostnameRow({
               {off && (
                 <Badge variant="outline" className="font-normal text-muted-foreground trim-cap">
                   Off
+                </Badge>
+              )}
+              {ruleCount(route) > 0 && (
+                <Badge variant="outline" className="font-normal text-muted-foreground trim-cap">
+                  {ruleCount(route) === 1 ? "1 rule" : `${ruleCount(route)} rules`}
                 </Badge>
               )}
             </span>
@@ -204,6 +222,7 @@ function HostnameRow({
           {editing && (
             <HostnameDialog tunnel={tunnel} route={route} domain={domain} onClose={() => setEditing(false)} />
           )}
+          {ruling && <RouteRulesDialog tunnel={tunnel} route={route} onClose={() => setRuling(false)} />}
           <ConfirmAction
             open={deleting}
             onOpenChange={setDeleting}

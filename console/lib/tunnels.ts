@@ -257,9 +257,14 @@ export async function createRoute(tunnelId: string, input: RouteInput) {
   )
   return result.kind === "operation" ? result.resource_id! : result.id
 }
+/** A route's header, path-prefix and redirect rules (http routes), applied by the edge before your app. */
+export type RouteRules = NonNullable<TunnelRoute["rewrite_rules"]>
+export type RouteHeaderRule = NonNullable<RouteRules["request_headers"]>[number]
+export type RouteRedirect = NonNullable<RouteRules["redirects"]>[number]
+
 export const patchRoute = (
   route: TunnelRoute,
-  patch: Partial<RouteInput> & { desired_state?: "active" | "disabled" },
+  patch: Partial<RouteInput> & { desired_state?: "active" | "disabled"; rewrite_rules?: RouteRules },
 ) =>
   change(`${tunnelPath(route.tunnel_id)}/routes/${encodeURIComponent(route.id)}`, "PATCH", {
     etag: route.etag,
