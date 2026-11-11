@@ -8,7 +8,6 @@ import { sections } from "@/lib/sections"
 import { MachinePicker } from "@/components/machine-picker"
 import { Crumb, CrumbLink, PageHeader } from "@/components/page-header"
 import { Skeleton } from "@/components/ui/skeleton"
-import { PageTransition } from "@/components/view-transitions"
 
 /**
  * Frame for a sidebar section: the page's one content column. Machine-scoped sections keep the
@@ -37,9 +36,7 @@ export function SectionPage({
           </Suspense>
         )}
       </PageHeader>
-      <PageTransition>
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-8 md:py-8">{children}</main>
-      </PageTransition>
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-8 md:py-8">{children}</main>
     </>
   )
 }
@@ -52,5 +49,5 @@ function SectionCrumb({ href, title }: { href: string; title: string }) {
 
 function MachineScope({ allowAll }: { allowAll: boolean }) {
   const [machine, setMachine] = useQueryState("machine", parseAsString)
-  return <MachinePicker allowAll={allowAll} value={machine} onChange={setMachine} morph />
+  return <MachinePicker allowAll={allowAll} value={machine} onChange={setMachine} />
 }

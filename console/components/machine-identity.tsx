@@ -11,7 +11,6 @@ import { useMachineEdit } from "@/components/machine-edit"
 import { TagChips } from "@/components/machine-tags"
 import { RemoveMachineDialog } from "@/components/machine-remove"
 import { DangerZone as DangerZonePanel } from "@/components/section"
-import { SharedName } from "@/components/view-transitions"
 
 /**
  * The machine's name and tags. Hovering shows a pencil; editing happens in the title
@@ -23,9 +22,7 @@ export function MachineTitle({ machine }: { machine: Machine }) {
   return (
     <div className="group/title flex min-w-0 flex-col gap-1">
       <div className="flex min-w-0 items-center gap-1">
-        <SharedName name={`machine-${machine.id}`}>
-          <h1 className="truncate font-heading text-2xl font-semibold tracking-tight">{machine.alias}</h1>
-        </SharedName>
+        <h1 className="truncate font-heading text-2xl font-semibold tracking-tight">{machine.alias}</h1>
         {machine.can_manage && (
           <Button
             variant="ghost"

@@ -8,7 +8,6 @@ import { machineSearchQuery, useApiQuery, useMachine, useWorkspace, type Machine
 import { recentMachines, rememberMachine } from "@/lib/recent-machines"
 import { cn } from "@/lib/utils"
 import { CrumbPickerTrigger, pickerOption } from "@/components/crumb-picker"
-import { SharedName } from "@/components/view-transitions"
 import { StatusDot } from "@/components/machine-status"
 import {
   Command,
@@ -27,14 +26,12 @@ type Props = {
   onChange: (machineId: string | null) => void
   /** Offer "All machines"; otherwise a machine must be chosen. */
   allowAll?: boolean
-  /** The chosen name moves in from the machine chooser's row (Files) instead of appearing. */
-  morph?: boolean
 }
 
 /** Without a search the picker shows a short list; typing searches every machine on the server. */
 const suggestionLimit = 6
 
-export function MachinePicker({ value, onChange, allowAll = false, morph = false }: Props) {
+export function MachinePicker({ value, onChange, allowAll = false }: Props) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
   const query = useDebounced(search.trim(), 200)
@@ -86,9 +83,7 @@ export function MachinePicker({ value, onChange, allowAll = false, morph = false
       <CrumbPickerTrigger>
         {selected ? (
           <>
-            <SharedName name={morph ? `machine-pick-${selected.id}` : undefined}>
-              <span className="max-w-48 truncate-x text-foreground trim-cap">{selected.alias}</span>
-            </SharedName>
+            <span className="max-w-48 truncate-x text-foreground trim-cap">{selected.alias}</span>
             <StatusDot online={selected.online} />
           </>
         ) : (

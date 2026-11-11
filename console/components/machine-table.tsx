@@ -36,7 +36,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { LoadError } from "@/components/load-error"
 import { TableRowsSkeleton } from "@/components/skeletons"
-import { SharedName } from "@/components/view-transitions"
 
 export function MachineTable() {
   const { data: me } = useApiQuery(meQuery)
@@ -202,7 +201,6 @@ function MachineRow({
 }) {
   const owner = machineOwner(machine, me)
   const subtitle = owner === "shared" ? "Shared with you" : undefined
-  const [opened, setOpened] = useState(false)
   // Right-clicking anywhere on the row opens the same menu as its "…" button.
   return (
     <MachineRowMenus
@@ -211,15 +209,11 @@ function MachineRow({
         <tr className="group relative transition-colors hover:bg-surface data-popup-open:bg-surface [&>td]:h-14 [&>td]:px-3">
           <td>
             <div className="flex h-[1lh] min-w-0 items-center gap-2">
-              {/* Only the opened row is named, and only its text, so every other row stays clickable mid-transition. */}
               <Link
                 href={`/machines/${machine.id}`}
-                onClick={() => setOpened(true)}
                 className="min-w-0 font-medium after:absolute after:inset-0"
               >
-                <SharedName name={opened ? `machine-${machine.id}` : undefined}>
-                  <span className="block truncate-x trim-cap">{machine.alias}</span>
-                </SharedName>
+                <span className="block truncate-x trim-cap">{machine.alias}</span>
               </Link>
               <MachineDot machine={machine} />
               {/* Above the row's link overlay, so a tag filters instead of opening the machine. */}

@@ -6,7 +6,6 @@ import { MachineTable } from "@/components/machine-table"
 import { Crumb, PageHeader } from "@/components/page-header"
 import { ServerData } from "@/components/server-data"
 import { UsageLimits } from "@/components/usage-limits"
-import { PageTransition } from "@/components/view-transitions"
 
 export const metadata: Metadata = { title: "Machines" }
 
@@ -16,14 +15,12 @@ function MachinesPage({ initial }: { initial?: MachineUrl }) {
       <PageHeader>
         <Crumb>Machines</Crumb>
       </PageHeader>
-      <PageTransition>
-        <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-8 px-4 py-6 md:px-8 md:py-8">
-          <MachineQueryProvider initial={initial}>
-            <UsageLimits />
-            <MachineTable />
-          </MachineQueryProvider>
-        </main>
-      </PageTransition>
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-8 px-4 py-6 md:px-8 md:py-8">
+        <MachineQueryProvider initial={initial}>
+          <UsageLimits />
+          <MachineTable />
+        </MachineQueryProvider>
+      </main>
     </>
   )
 }
