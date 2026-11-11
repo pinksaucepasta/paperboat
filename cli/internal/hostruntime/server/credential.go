@@ -125,9 +125,6 @@ func (a *CredentialAuthorizer) Authorize(ctx context.Context, frame protocol.Fra
 	if replay {
 		resourceID = claims.ResourceID // the one recording the ticket opens
 	}
-	if (claims.CredentialClass == "codex_manage" || claims.CredentialClass == "codex_connect") && resourceID == "" {
-		resourceID = claims.SessionID
-	}
 	return Authorization{
 		WorkspaceID:         claims.WorkspaceID,
 		ActorAccountID:      claims.ActorAccountID,

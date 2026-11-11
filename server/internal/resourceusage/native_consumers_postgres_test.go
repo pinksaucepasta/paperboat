@@ -43,7 +43,7 @@ func assertNativeConsumerWorkspace(t *testing.T, store *db.DB, service *Service,
 		exec(`INSERT INTO user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation) VALUES($1,$2,$1,'linux','amd64','/workspace','online','occupied',true,1)`, machine, owner)
 		exec(`INSERT INTO cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES($1,$2,$1,'Usage','desktop','linux',ARRAY['account:read'],'active',$3,$3)`, client, member, now)
 		for _, c := range []struct{ consumer, capability, kind string }{
-			{"terminal", "terminal", "terminal"}, {"exec", "exec", "exec"}, {"ssh", "managed_ssh", "ssh"}, {"file", "files", "file_transfer"}, {"file_transfer", "files", "file_transfer"}, {"file_transfer_key", "files", "file_transfer"}, {"private_http", "private_access", "private_http"}, {"private_tcp", "private_access", "private_tcp"},
+			{"terminal", "terminal", "terminal"}, {"exec", "exec", "exec"}, {"ssh", "managed_ssh", "ssh"}, {"file_transfer", "files", "file_transfer"}, {"private_http", "private_access", "private_http"}, {"private_tcp", "private_access", "private_tcp"},
 		} {
 			t.Run(c.consumer, func(t *testing.T) {
 				session := "native_" + c.consumer + suffix
@@ -62,6 +62,16 @@ func assertNativeConsumerWorkspace(t *testing.T, store *db.DB, service *Service,
 				exec(`DELETE FROM resource_bandwidth_events WHERE machine_id=$1`, machine)
 			})
 		}
+		// A host meters every stream, recordings included: a recording report is judged on its own (here: no usage
+		// authority, so rejected) and never refuses the rest of the batch, which it did as an unknown consumer.
+		terminal := NativeReport{AccessSessionID: "native_terminal" + suffix, StreamID: "batch_terminal", Consumer: "terminal", Mode: "direct", IntervalStart: now, IntervalEnd: now.Add(20 * time.Second), Upload: 1, Download: 1}
+		recording := terminal
+		recording.StreamID, recording.Consumer = "batch_recording", "recording"
+		receipt, err := service.RecordNative(ctx, machine, 1, NativeBatch{Reports: []NativeReport{terminal, recording}})
+		if err != nil || receipt.Accepted != 1 || len(receipt.RejectedIndices) != 1 || receipt.RejectedIndices[0] != 1 {
+			t.Fatalf("a batch with a recording report: %+v %v", receipt, err)
+		}
+		exec(`DELETE FROM resource_bandwidth_events WHERE machine_id=$1`, machine)
 	})
 }
 

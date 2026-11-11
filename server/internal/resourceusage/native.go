@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/peerconsumer"
 	"strings"
 	"time"
 
@@ -62,28 +63,24 @@ func (r NativeReport) validate(now time.Time) error {
 	default:
 		return ErrInvalid
 	}
-	switch r.Consumer {
-	case "terminal", "exec", "ssh", "file", "file_transfer", "file_transfer_key", "private_http", "private_tcp", "inspector", "config_compare":
-	default:
+	// Every stream with network access is metered by its host (shared/peerconsumer).
+	if peerconsumer.NetworkCapability(r.Consumer) == "" {
 		return ErrInvalid
 	}
-	// Host rules admit only terminal, exec and ssh (streamauth.OfflineConsumers), never through an edge.
-	if r.PeerAccountID != "" && (len(r.PeerAccountID) > 256 || r.Mode == "edge" || r.Consumer != "terminal" && r.Consumer != "exec" && r.Consumer != "ssh") {
+	// Host rules admit only the offline consumers (peerconsumer.Offline), never through an edge.
+	if r.PeerAccountID != "" && (len(r.PeerAccountID) > 256 || r.Mode == "edge" || !peerconsumer.Offline(r.Consumer)) {
 		return ErrInvalid
 	}
 	return nil
 }
+
+// consumerCapability is the access-policy capability a consumer's usage is attributed under: its network scope
+// capability, except that file transfers are the policy's "files".
 func consumerCapability(consumer string) string {
-	switch consumer {
-	case "ssh":
-		return "managed_ssh"
-	case "file", "file_transfer", "file_transfer_key":
+	if consumer == peerconsumer.FileTransfer {
 		return "files"
-	case "private_http", "private_tcp":
-		return "private_access"
-	default:
-		return consumer
 	}
+	return peerconsumer.NetworkCapability(consumer)
 }
 
 type NativeReceipt struct {
@@ -129,9 +126,6 @@ func (s *Service) RecordNative(ctx context.Context, machine string, generation i
 			}
 			if kind == "machine" {
 				kind = r.Consumer
-				if kind == "file" || kind == "file_transfer_key" {
-					kind = "file_transfer"
-				}
 				name = machineName + " · " + strings.ReplaceAll(kind, "_", " ")
 			}
 			if r.Mode == "edge" {

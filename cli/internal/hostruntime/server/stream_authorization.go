@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/peerconsumer"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
@@ -25,7 +26,7 @@ func CredentialStreamAuthorizer(factory AuthorizerFactory) func(context.Context,
 		if closer, ok := authorizer.(AuthorizationCloser); ok {
 			defer closer.CloseAuthorization()
 		}
-		capability := map[string]string{"config_compare": "config.compare.v1", "terminal": "terminal.v1", "exec": "exec.v1", "ssh": "ssh.v1", "file_transfer": "file-transfer.v1", "private_preview": "preview.launch.v1", "private_http": "private.access.v1", "private_tcp": "private.access.v1", "codex": "codex.connect.v1", "recording": "recording.v1"}[header.Consumer]
+		capability := peerconsumer.ProtocolCapability(header.Consumer)
 		if capability == "" {
 			return Authorization{}, ErrStreamAuthorization
 		}

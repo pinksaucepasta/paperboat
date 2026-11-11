@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/peerconsumer"
 	"io"
 	"net"
 	"net/http"
@@ -87,14 +88,6 @@ type nativeDispatchResponse struct {
 	AccessSessionID string                 `json:"access_session_id,omitempty"`
 	ValidUntil      time.Time              `json:"valid_until,omitempty"`
 	SSH             *managedssh.HostTarget `json:"ssh,omitempty"`
-}
-
-func nativeDispatchConsumer(consumer string) bool {
-	switch consumer {
-	case "terminal", "exec", "config_compare", "ssh", "file_transfer", "inspector", "private_tcp", "private_http", "recording":
-		return true
-	}
-	return false
 }
 
 type nativeDispatchLifetimeKey struct{}
@@ -237,7 +230,7 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 				return
 			}
 			header, err = streamauth.Parse(envelope.Header, serverclock.Now().UTC())
-			if err != nil || !nativeDispatchConsumer(header.Consumer) {
+			if err != nil || peerconsumer.ProtocolCapability(header.Consumer) == "" {
 				if err == nil {
 					err = streamauth.ErrInvalid
 				}

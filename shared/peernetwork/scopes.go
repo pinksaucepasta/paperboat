@@ -14,7 +14,6 @@ var scopeCapabilities = map[string][]string{
 	"inspector":       {"inspector"},
 	"config_compare":  {"config_compare"},
 	"recording":       {"recording"}, // a CLI session recording replay (shared/recording NativeConsumer)
-	"codex_session":   {"codex"},
 }
 
 // NetworkPort is the one virtual port every scope names (the peer network serves only it).

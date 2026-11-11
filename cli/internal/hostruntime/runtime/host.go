@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/shared/peerconsumer"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
@@ -28,7 +29,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
-	"github.com/pinksaucepasta/paperboat/internal/inbox"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/health"
 	stablehostd "github.com/pinksaucepasta/paperboat/internal/hostruntime/hostd"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
@@ -45,6 +45,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
 	hosttelemetry "github.com/pinksaucepasta/paperboat/internal/hostruntime/telemetry"
+	"github.com/pinksaucepasta/paperboat/internal/inbox"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
@@ -451,7 +452,7 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		}
 		dispatchAuthorize := dispatchConfig.Authorize
 		dispatchConfig.Authorize = func(ctx context.Context, header streamauth.Header) (string, error) {
-			capability := map[string]string{"terminal": "terminal.v1", "exec": "exec.v1", "ssh": "ssh.v1", "file_transfer": "file-transfer.v1", "config_compare": "config.compare.v1", "private_tcp": "private.access.v1", "private_http": "private.access.v1", "inspector": "inspector.v1", "recording": "recording.v1"}[header.Consumer]
+			capability := peerconsumer.ProtocolCapability(header.Consumer)
 			if capability == "" || (dependencies.Capabilities != nil && !dependencies.Capabilities.Enabled(capability)) {
 				return "", server.ErrStreamAuthorization
 			}
