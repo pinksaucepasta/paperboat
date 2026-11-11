@@ -109,11 +109,12 @@ func runPreviewCobra(command *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	hostHeader = strings.TrimSpace(hostHeader)
 	if hostHeader != "" {
 		if target.Scheme != "http" && target.Scheme != "https" && target.Scheme != "h2c" || !connectorprotocol.ValidOriginHostName(hostHeader) {
 			return fmt.Errorf("%w: --host-header must be a bare host name (no port) and the target an http, https or h2c address", ErrPreviewInvalidTarget)
 		}
-		target.HostHeader = strings.ToLower(hostHeader)
+		target.HostHeader = strings.ToLower(strings.TrimSpace(hostHeader))
 	}
 	ttl, err := command.Flags().GetDuration("ttl")
 	if err != nil || ttl < 0 {
@@ -689,6 +690,9 @@ func formatPreviewTarget(target preview.LeaseTarget) string {
 	if target.Scheme == "unix" {
 		return "unix://" + target.Address
 	}
+	if target.HostHeader != "" {
+		return target.Scheme + "://" + target.Address + " (Host: " + target.HostHeader + ")"
+	}
 	return target.Scheme + "://" + target.Address
 }
 
@@ -711,7 +715,7 @@ func writePreviewLeaseTable(writer io.Writer, items []api.PreviewLease) error {
 	}
 	for _, item := range items {
 		deadline := item.LeaseDeadline.UTC().Format(time.RFC3339)
-		_, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n", item.ID, item.AccessMode, formatPreviewTarget(preview.LeaseTarget{Scheme: item.Target.Scheme, Address: item.Target.Address}), item.State, deadline)
+		_, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\n", item.ID, item.AccessMode, formatPreviewTarget(preview.LeaseTarget{Scheme: item.Target.Scheme, Address: item.Target.Address, HostHeader: item.Target.HostHeader}), item.State, deadline)
 		if err != nil {
 			return err
 		}

@@ -552,3 +552,30 @@ func TestDispatchFailureRetainsSafeReadinessReason(t *testing.T) {
 		t.Fatalf("readiness failure diagnostic missing: %+v", events)
 	}
 }
+
+// The Host header a preview sends its origin is hashed in the form the server hashes it (trimmed, lower case), and a
+// resumed dispatch takes it from the server's current lease.
+func TestDispatchHashAndResumeUseTheServersHostHeader(t *testing.T) {
+	now := time.Date(2098, 1, 2, 3, 4, 5, 0, time.UTC)
+	plain := testDispatchRequest(t, now)
+	plain.Target = LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000", HostHeader: "app.example.test"}
+	untidy := plain
+	untidy.Target.HostHeader = "  App.Example.Test "
+	first, err := plain.ComputeRequestHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := untidy.ComputeRequestHash()
+	if err != nil || first != second {
+		t.Fatalf("hash of a non-normalized host header differs: %v %v", err, first == second)
+	}
+	other := plain
+	other.Target.HostHeader = "other.example.test"
+	if third, _ := other.ComputeRequestHash(); third == first {
+		t.Fatal("the host header is not part of the request hash")
+	}
+	current := Lease{Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000", HostHeader: "changed.example.test"}, LeaseDeadline: now.Add(time.Hour)}
+	if got := refreshedDispatch(plain, current).Target.HostHeader; got != "changed.example.test" {
+		t.Fatalf("resumed host header = %q, want the server lease's", got)
+	}
+}
