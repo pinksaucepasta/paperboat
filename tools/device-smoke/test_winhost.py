@@ -2110,6 +2110,24 @@ class RemainingFamilyPlumbing(unittest.TestCase):
         import edge_restart_previews  # the module's imports resolve (serve() left preview_survival in 91440c787)
         self.assertTrue(callable(edge_restart_previews.stoppable_origin))
 
+    def test_edge_restart_pin_requires_every_preview_to_serve_from_the_edge_ip(self):
+        import edge_restart_previews as erp
+        with tempfile.TemporaryDirectory() as directory:
+            done = pathlib.Path(directory, 'done')
+            done.write_text('')
+            seen = []
+
+            def fetch(endpoint, ip):
+                seen.append((endpoint, ip))
+                return 'M' if endpoint != 'https://b.example.test' else ''
+            with patch.object(erp, 'pinned_body', fetch), patch.object(erp.time, 'sleep', lambda s: None):
+                served, failed = erp.pin_every_preview(['https://a.example.test', 'https://b.example.test'], 'M', '192.0.2.1', done, serve_s=0)
+            self.assertEqual(([0], [1]), (list(served), failed))
+            self.assertTrue(all(ip == '192.0.2.1' for _, ip in seen))
+            # the restart never finishes: nothing is claimed served
+            served, failed = erp.pin_every_preview(['https://a.example.test'], 'M', '192.0.2.1', pathlib.Path(directory, 'never'), wait_s=0)
+            self.assertEqual(({}, [0]), (served, failed))
+
     def test_pb_text_keeps_the_stdin_of_the_local_call(self):
         done = winhost.pb_text(sys.executable, ['-c', 'import sys;print(len(sys.stdin.read()))'], timeout=30, stdin=subprocess.DEVNULL)
         self.assertEqual('0\n', done.stdout)
