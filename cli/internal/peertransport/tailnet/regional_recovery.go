@@ -70,6 +70,7 @@ type regionalInbound struct {
 type regionalRecovery struct {
 	authority *Authority
 	wake      chan struct{} // the engine's network monitor reports a change; nil never wakes
+	grantWake chan struct{} // new relay grants landed: sweep now without lifting a refusal fence; nil never wakes
 	control   *regionalControl
 	mu        sync.Mutex
 	engine    relayEngine
@@ -93,7 +94,7 @@ type regionalRecovery struct {
 // newRegionalRecoveryLocked returns recovery state bound to the current node
 // private key. Callers hold both Authority.mu and relay.mu.
 func (a *Authority) newRegionalRecoveryLocked() *regionalRecovery {
-	return &regionalRecovery{authority: a, wake: make(chan struct{}, 1), control: newRegionalControl(a.private, time.Now), done: make(chan struct{}), ready: make(chan struct{}), inbox: make(chan regionalInbound, 64)}
+	return &regionalRecovery{authority: a, wake: make(chan struct{}, 1), grantWake: make(chan struct{}, 1), control: newRegionalControl(a.private, time.Now), done: make(chan struct{}), ready: make(chan struct{}), inbox: make(chan regionalInbound, 64)}
 }
 
 func (a *Authority) regionalRecoveryLocked() (*regionalRecovery, bool) {
@@ -587,6 +588,10 @@ func (r *regionalRecovery) run(ctx context.Context) {
 		case <-r.authority.done:
 			return
 		case <-timer.C:
+		case <-r.grantWake:
+			// A new grant ends the per-relay retry waits (a refusal is the usual cause); the fence still guards a
+			// grant of the same generation, and grants arrive once per refresh, so this cannot spin.
+			clear(retries)
 		case <-r.wake: // a new network: refused relays get a fresh try now, as Tailscale re-dials DERP on a link change
 			fence.networkChanged()
 		}

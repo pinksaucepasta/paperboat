@@ -455,6 +455,19 @@ func connectedProductionRuntime(t *testing.T, mode string, fault ...string) {
 		state.mu.Unlock()
 		connectedApply(t, machineAuthority, signerPrivate, machineConfig, machineNode)
 		connectedApply(t, runtime.authority, signerPrivate, clientConfig, node)
+		// The open below has its own fixed budget: wait for the machine's carrier to come back first, so a loaded
+		// host does not spend that budget on the recovery that the new grants start.
+		deadline = time.NewTimer(30 * time.Second)
+		ticker = time.NewTicker(10 * time.Millisecond)
+		for relay.Snapshot().Connections == 0 {
+			select {
+			case <-deadline.C:
+				t.Fatalf("receiver did not reconnect on the new grants: %+v; relay: %+v", machineAuthority.RegionalStatus(), relay.Snapshot())
+			case <-ticker.C:
+			}
+		}
+		deadline.Stop()
+		ticker.Stop()
 	}
 	if machine != nil {
 		if mode == "machine_proxy" {
