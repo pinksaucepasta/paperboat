@@ -59,8 +59,20 @@ export function FileList({ machine: tabMachine }: { machine?: Machine }) {
     <section className="flex flex-col gap-4">
       <Requests scope={scope} />
       <Transfers scope={scope} />
-      {scope ? <MachineInbox machineId={scope} /> : <MachineChooser href={filesOf} />}
+      {scope ? <MachineInbox machineId={scope} /> : <ChooseMachine />}
     </section>
+  )
+}
+
+/** Files with no machine: the list to pick from, and Send files to any of them (files dropped anywhere wait for the choice). */
+function ChooseMachine() {
+  const drop = usePageFileDrop()
+  return (
+    <>
+      {drop.over && !drop.files.length && <DropOverlay title="Drop to send" detail="Then choose the machines" />}
+      {drop.files.length > 0 && <SendFilesDialog choose files={drop.files} onClose={drop.clear} />}
+      <MachineChooser href={filesOf} action={<SendFilesButton choose />} />
+    </>
   )
 }
 

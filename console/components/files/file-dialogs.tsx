@@ -26,7 +26,8 @@ export function canReceive(machine: Machine) {
 type Upload = { file: File; progress: number; state: "waiting" | "sending" | "sent" | "failed"; error?: string }
 type Run = { machine: Pick<Machine, "id" | "alias">; uploads: Upload[] }
 
-export function SendFilesButton({ machine }: { machine?: Machine }) {
+/** `choose`: no machine is in context (the Choose machine page), so none is picked until the person picks. */
+export function SendFilesButton({ machine, choose }: { machine?: Machine; choose?: boolean }) {
   const [open, setOpen] = useState(false)
   return (
     <>
@@ -34,7 +35,7 @@ export function SendFilesButton({ machine }: { machine?: Machine }) {
         <UploadSimpleIcon data-icon="inline-start" />
         Send files
       </Button>
-      {open && <SendFilesDialog machine={machine} onClose={() => setOpen(false)} />}
+      {open && <SendFilesDialog machine={machine} choose={choose} onClose={() => setOpen(false)} />}
     </>
   )
 }
@@ -97,7 +98,7 @@ function MachineChips({
           )}
         </Badge>
       ))}
-      {!selected.length && <span className="font-medium text-foreground">{pending ? "…" : "no machine"}</span>}
+      {!selected.length && !rest.length && <span className="font-medium text-foreground">{pending ? "…" : "no machine"}</span>}
       {rest.length > 0 && (
         <Choice
           label="Add machine"
@@ -132,10 +133,12 @@ function statusLine(runs: Run[], busy: boolean) {
  */
 export function SendFilesDialog({
   machine,
+  choose,
   files: initialFiles,
   onClose,
 }: {
   machine?: Machine
+  choose?: boolean
   files?: File[]
   onClose: () => void
 }) {
@@ -146,7 +149,7 @@ export function SendFilesDialog({
   const usable = (machines.data ?? []).filter((entry) => canReceive(entry) && canHostTerminal(entry))
   // Until the person changes it, the destination is the page's machine, else the first usable one.
   const [picked, setPicked] = useState<string[]>()
-  const fallback = usable.find((entry) => entry.id === machine?.id) ?? usable[0]
+  const fallback = choose ? undefined : (usable.find((entry) => entry.id === machine?.id) ?? usable[0])
   const selected = picked ? usable.filter((entry) => picked.includes(entry.id)) : fallback ? [fallback] : []
   const ids = selected.map((entry) => entry.id)
   const [runs, setRuns] = useState<Run[]>([])
@@ -207,6 +210,8 @@ export function SendFilesDialog({
 
   const busy = runs.some((run) => run.uploads.some((entry) => entry.state === "waiting" || entry.state === "sending"))
   const several = runs.length > 1
+  // Dropped files wait in the drop zone until a machine is chosen (then the effect above sends them).
+  const waiting = initialFiles?.length ?? 0
   const plural = selected.length > 1
 
   return (
@@ -285,8 +290,12 @@ export function SendFilesDialog({
               )}
             >
               <UploadSimpleIcon className="size-5 text-muted-foreground" />
-              <span className="font-medium">{over ? "Drop to send" : "Drop files here"}</span>
-              <span className="text-xs text-muted-foreground">or click to choose</span>
+              <span className="font-medium">
+                {waiting ? `${waiting} ${waiting === 1 ? "file" : "files"} waiting` : over ? "Drop to send" : "Drop files here"}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {waiting ? "They send once you choose a machine" : "or click to choose"}
+              </span>
             </button>
             <p className="text-xs text-muted-foreground">
               {selected.length

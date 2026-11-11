@@ -19,9 +19,9 @@ import { TableRowsSkeleton } from "@/components/skeletons"
  * online first, in the machines table's row pattern (name, then status dot; offline ones say since
  * when under the name). Each row opens `href(id)`, the same URL the header's machine picker sets; offline
  * machines are listed too (the page says what it can't reach). Arrow keys move between rows and
- * Enter opens one. A workspace with one machine goes straight to it.
+ * Enter opens one. A workspace with one machine goes straight to it. `action` sits at the right of the search field.
  */
-export function MachineChooser({ href }: { href: (id: string) => string }) {
+export function MachineChooser({ href, action }: { href: (id: string) => string; action?: React.ReactNode }) {
   const router = useRouter()
   const machines = useMachines()
   const { date } = useTimeFormat()
@@ -50,7 +50,10 @@ export function MachineChooser({ href }: { href: (id: string) => string }) {
 
   return (
     <section className="flex flex-col gap-3" onKeyDown={move}>
-      <SearchField value={search} onChange={setSearch} placeholder="Search machines" />
+      <div className="flex items-center gap-2">
+        <SearchField value={search} onChange={setSearch} placeholder="Search machines" />
+        {action && <div className="ml-auto flex items-center gap-2">{action}</div>}
+      </div>
       <table className="w-full table-fixed text-sm">
         <colgroup>
           <col />

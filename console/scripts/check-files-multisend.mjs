@@ -6,8 +6,11 @@
 // machines' Inboxes.", the file is in both Inboxes; (3) the last chip has no remove button; (4) one machine refused
 // (its shell start answered with the plan's browser-terminal limit in the browser, nothing real changes): the other
 // still gets the file, the status reads "Sent to 1 of 2 machines. 1 failed." and keeps the error text.
-// Files travel over the terminal's encrypted browser connection (a shell session per machine, closed afterwards). 12 files go in two batches on one connection; sent test files are
-// deleted from the Inboxes at the end. Prints PASS/FAIL per step; exits 1 on any FAIL.
+// Files travel over the terminal's encrypted browser connection (a shell session per machine, closed afterwards).
+// (5) 12 files go in two batches on one connection; (6) from the Choose machine page (/files, no machine) Send files
+// opens with nothing chosen and a disabled drop zone, and a file sent to two added machines is in both Inboxes; (7) a
+// file dropped on that page waits until a machine is added, then sends. Test files are deleted from the Inboxes at the
+// end. Prints PASS/FAIL per step; exits 1 on any FAIL.
 import { mkdirSync } from "node:fs"
 
 const { chromium } = await import(process.env.PW_MODULE ?? "playwright-core")
@@ -138,6 +141,48 @@ const inbox = new Set(((await api(`machines/${a.id}/inbox`)).items ?? []).map((i
 log(many.every((name) => inbox.has(name)), `all 12 files are in ${a.alias}'s Inbox`, `${many.filter((name) => inbox.has(name)).length}/12`)
 await dialog.getByRole("button", { name: "Done" }).click()
 
+// 6. The Choose machine page (/files, no machine): Send files opens with nothing chosen, picks nothing for you,
+// and sends to the machines you add; files dropped on the page wait for the choice.
+const addFromMenu = async (machine) => {
+  await dialog.getByRole("button", { name: "Add machine" }).click()
+  await page.getByRole("menuitemradio", { name: machine.alias, exact: true }).click()
+}
+await page.goto(`${origin}/files`, { waitUntil: "networkidle", timeout: 120000 })
+await shot("chooser-desktop")
+await page.getByRole("button", { name: "Send files" }).first().click()
+await dialog.getByText("Drop files here").waitFor({ timeout: 30000 })
+log((await dialog.locator("span.rounded-full").count()) === 0, "from Choose machine the dialog opens with no machine chosen")
+log(await dialog.locator("button[data-file-drop]").isDisabled(), "the drop zone is disabled until a machine is chosen")
+log(await dialog.getByText("Choose a machine to send to").isVisible(), "the hint says Choose a machine to send to")
+await shot("chooser-dialog-desktop")
+await addFromMenu(a)
+log(!(await dialog.locator("button[data-file-drop]").isDisabled()), "choosing a machine enables the drop zone")
+await addFromMenu(b)
+const chosen = `multisend-chooser-${stamp}.txt`
+await chooseFile(chosen)
+await dialog.getByText("Sent 1 file to 2 machines’ Inboxes.").waitFor({ timeout: 120000 }).catch(() => {})
+log(await dialog.getByText("Sent 1 file to 2 machines’ Inboxes.").isVisible(), "from Choose machine: Sent 1 file to 2 machines' Inboxes.")
+log(await inboxHasWithin(a, chosen), `the file is in ${a.alias}'s Inbox`)
+log(await inboxHasWithin(b, chosen), `the file is in ${b.alias}'s Inbox`)
+await dialog.getByRole("button", { name: "Done" }).click()
+
+// 7. A file dropped anywhere on the Choose machine page opens the dialog with it waiting; it sends once a machine is added.
+const dropped = `multisend-dropped-${stamp}.txt`
+await page.goto(`${origin}/files`, { waitUntil: "networkidle", timeout: 120000 })
+await page.evaluate((name) => {
+  const data = new DataTransfer()
+  data.items.add(new File([`${name}\n`], name, { type: "text/plain" }))
+  window.dispatchEvent(new DragEvent("drop", { dataTransfer: data, bubbles: true, cancelable: true }))
+}, dropped)
+await dialog.getByText("1 file waiting").waitFor({ timeout: 30000 }).catch(() => {})
+log(await dialog.getByText("1 file waiting").isVisible(), "a file dropped on Choose machine waits in the dialog")
+log(await dialog.locator("button[data-file-drop]").isDisabled(), "it does not start before a machine is chosen")
+await addFromMenu(a)
+await dialog.getByText(`Sent 1 of 1 to ${a.alias}’s Inbox.`).waitFor({ timeout: 120000 }).catch(() => {})
+log(await dialog.getByText(`Sent 1 of 1 to ${a.alias}’s Inbox.`).isVisible(), "choosing a machine sends the waiting file")
+log(await inboxHasWithin(a, dropped), `the dropped file is in ${a.alias}'s Inbox`)
+await dialog.getByRole("button", { name: "Done" }).click()
+
 // Mobile and dark, for the screenshots.
 if (shots) {
   await page.setViewportSize({ width: 375, height: 800 })
@@ -147,11 +192,25 @@ if (shots) {
   await dialog.getByText(/^Sent 1 file to 2 machines/).waitFor({ timeout: 120000 }).catch(() => {})
   await shot("mobile-sent")
   await dialog.getByRole("button", { name: "Done" }).click()
+  await page.goto(`${origin}/files`, { waitUntil: "networkidle", timeout: 120000 })
+  await shot("chooser-mobile")
+  await page.getByRole("button", { name: "Send files" }).first().click()
+  await dialog.getByText("Drop files here").waitFor({ timeout: 30000 })
+  await addFromMenu(a)
+  await shot("chooser-dialog-mobile")
+  await page.keyboard.press("Escape")
   await page.emulateMedia({ colorScheme: "dark" })
   await page.evaluate(() => document.documentElement.classList.add("dark"))
   await page.setViewportSize({ width: 1280, height: 900 })
   await openDialog([a, b])
   await shot("dark-picker")
+  await page.keyboard.press("Escape")
+  await page.goto(`${origin}/files`, { waitUntil: "networkidle", timeout: 120000 })
+  await page.evaluate(() => document.documentElement.classList.add("dark"))
+  await shot("chooser-dark")
+  await page.getByRole("button", { name: "Send files" }).first().click()
+  await dialog.getByText("Drop files here").waitFor({ timeout: 30000 })
+  await shot("chooser-dialog-dark")
   await page.keyboard.press("Escape")
 }
 
