@@ -245,8 +245,8 @@ func TestPostgresTransferToPersonal(t *testing.T) {
 		t.Fatalf("after return: requests=%d ownerSessionInPersonal=%d teammateSessionUntouched=%d liveBindings=%d liveGrants=%d", requests, mineTeam, theirsTeam, liveBindings, liveGrants)
 	}
 	// Peers: the account's other machines now see it as a personal peer; the team's members no longer see it.
-	var audience []string
-	if err = store.SQL().QueryRowContext(ctx, `SELECT paperboat.machine_audience_accounts($1)`, machine).Scan(&audience); err != nil || len(audience) != 1 || audience[0] != enroller {
+	var audience string
+	if err = store.SQL().QueryRowContext(ctx, `SELECT array_to_string(paperboat.machine_audience_accounts($1),',')`, machine).Scan(&audience); err != nil || audience != enroller {
 		t.Fatalf("audience after return: %v %v", audience, err)
 	}
 	var topicAfter, topicPlainAfter int64
