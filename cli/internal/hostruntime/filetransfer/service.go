@@ -279,7 +279,7 @@ func (s *Service) append(ctx context.Context, id string, offset int64, body io.R
 		}
 		body = bytes.NewReader(chunk)
 	}
-	file, err := os.OpenFile(s.partialPath(id), os.O_WRONLY, 0)
+	file, err := openSpoolFile(s.partialPath(id), true)
 	if err != nil {
 		return transfer, storageFailure(err)
 	}
@@ -380,23 +380,31 @@ func (s *Service) Complete(ctx context.Context, id string) (store.FileTransfer, 
 		}
 		return transfer, nil
 	}
+	// The verified files stay open until the commit is checked: each renamed path must still be the file whose
+	// bytes were hashed, so a swap between the hash and the rename fails the batch instead of publishing other bytes.
+	verified := make(map[string]*os.File, len(transfers))
+	defer func() {
+		for _, file := range verified {
+			_ = file.Close()
+		}
+	}()
 	for _, transfer := range transfers {
 		if transfer.CommittedOffset != transfer.Size || transfer.State != "created" && transfer.State != "uploading" {
 			return requested, &Error{Code: InvalidSize}
 		}
 		contentPath := s.partialPath(transfer.ID)
-		if _, statErr := os.Stat(contentPath); errors.Is(statErr, os.ErrNotExist) {
+		if _, statErr := os.Lstat(contentPath); errors.Is(statErr, os.ErrNotExist) {
 			contentPath = s.contentPath(transfer.ID)
 		}
-		file, openErr := os.Open(contentPath)
+		file, openErr := openSpoolFile(contentPath, false)
 		if openErr != nil {
 			return requested, storageFailure(openErr)
 		}
+		verified[transfer.ID] = file
 		hash := sha256.New()
 		written, copyErr := io.Copy(hash, &contextReader{ctx: ctx, reader: file, canceled: s.cancelSignal(transfer.ID)})
-		closeErr := file.Close()
-		if copyErr != nil || closeErr != nil {
-			return requested, classifyIO(errors.Join(copyErr, closeErr))
+		if copyErr != nil {
+			return requested, classifyIO(copyErr)
 		}
 		if written != transfer.Size || hex.EncodeToString(hash.Sum(nil)) != transfer.SHA256 {
 			_ = s.cancelBatchLocked(context.Background(), transfers)
@@ -404,19 +412,28 @@ func (s *Service) Complete(ctx context.Context, id string) (store.FileTransfer, 
 		}
 	}
 	var renamed []store.FileTransfer
+	rollback := func() {
+		for index := len(renamed) - 1; index >= 0; index-- {
+			//paperboat:allow-source-policy atomic-replacement owner=file-transfer reason=batch-commit-rollback
+			_ = os.Rename(s.contentPath(renamed[index].ID), s.partialPath(renamed[index].ID))
+		}
+	}
 	for _, transfer := range transfers {
-		if _, statErr := os.Stat(s.contentPath(transfer.ID)); statErr == nil {
-			continue
-		}
-		//paperboat:allow-source-policy atomic-replacement owner=file-transfer reason=verified-content-commit
-		if renameErr := os.Rename(s.partialPath(transfer.ID), s.contentPath(transfer.ID)); renameErr != nil {
-			for index := len(renamed) - 1; index >= 0; index-- {
-				//paperboat:allow-source-policy atomic-replacement owner=file-transfer reason=batch-commit-rollback
-				_ = os.Rename(s.contentPath(renamed[index].ID), s.partialPath(renamed[index].ID))
+		if _, statErr := os.Lstat(s.contentPath(transfer.ID)); statErr != nil {
+			//paperboat:allow-source-policy atomic-replacement owner=file-transfer reason=verified-content-commit
+			if renameErr := os.Rename(s.partialPath(transfer.ID), s.contentPath(transfer.ID)); renameErr != nil {
+				rollback()
+				return requested, storageFailure(renameErr)
 			}
-			return requested, storageFailure(renameErr)
+			renamed = append(renamed, transfer)
 		}
-		renamed = append(renamed, transfer)
+		held, heldErr := verified[transfer.ID].Stat()
+		committed, committedErr := os.Lstat(s.contentPath(transfer.ID))
+		if heldErr != nil || committedErr != nil || !os.SameFile(held, committed) {
+			rollback()
+			_ = s.cancelBatchLocked(context.Background(), transfers)
+			return requested, &Error{Code: DigestMismatch, Cause: errors.Join(heldErr, committedErr)}
+		}
 	}
 	if err := syncDir(s.config.Root); err != nil {
 		return requested, storageFailure(err)

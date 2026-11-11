@@ -1158,3 +1158,23 @@ func TestTransferClaimsReplaceThePolicyCaps(t *testing.T) {
 		t.Fatalf("an unlimited credential was bounded: %v", err)
 	}
 }
+
+// A spool file with a second link could be changed through the other name after verification: the commit refuses it.
+func TestCompleteRefusesAHardLinkedSpoolFile(t *testing.T) {
+	service, _, root := newService(t)
+	data := []byte("abcdefgh")
+	created, err := service.Create(context.Background(), requestFor(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := created[0].ID
+	if _, err := service.Append(context.Background(), id, 0, bytes.NewReader(data)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(filepath.Join(root, id+".part"), filepath.Join(t.TempDir(), "outside")); err != nil {
+		t.Skipf("hard links unavailable: %v", err)
+	}
+	if completed, err := service.Complete(context.Background(), id); err == nil {
+		t.Fatalf("a hard-linked spool file was published: %#v", completed)
+	}
+}
