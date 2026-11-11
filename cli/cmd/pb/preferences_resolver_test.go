@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -244,5 +246,34 @@ func TestPreferenceGlobalSelectionUsesLastOccurrenceBeforeDash(t *testing.T) {
 	}
 	if preferenceFlag(args, "no-customization") {
 		t.Fatal("last pre-boundary false did not win")
+	}
+}
+
+// F21-159: a preferences file from a newer version blocks the commands that read preferences with an error that
+// names the way out, and the way out works (--no-customization, `pb config customize`, sign-in, help, version);
+// the file itself is never rewritten.
+func TestNewerPreferencesVersionNamesTheRecoveryAndRecoveryWorks(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	path, err := preferences.Path(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"version":2,"port_action":"preview"}`)
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = preparePreferences(preferenceTestRoot(), []string{"--config", configPath, "preview", "3000"}, context.Background())
+	var invalid *preferences.InvalidError
+	if !errors.As(err, &invalid) || !strings.Contains(err.Error(), "pb config customize") || !strings.Contains(err.Error(), "--no-customization") {
+		t.Fatalf("a newer preferences version: err=%v, want the recovery named", err)
+	}
+	for _, invocation := range [][]string{{"--no-customization", "preview", "3000"}, {"config", "customize"}, {"login", "--no-browser"}, {"--version"}, {"--help"}} {
+		args := append([]string{"--config", configPath}, invocation...)
+		if _, _, err := preparePreferences(preferenceTestRoot(), args, context.Background()); err != nil {
+			t.Fatalf("recovery %q: %v", invocation, err)
+		}
+	}
+	if after, _ := os.ReadFile(path); !bytes.Equal(after, body) {
+		t.Fatal("a refused load rewrote the preferences file")
 	}
 }
