@@ -45,7 +45,7 @@ func TestSchemaMatchesTheParser(t *testing.T) {
 	if got := keys(s.Defs["test"].Properties); !reflect.DeepEqual(got, []string{"allow", "deny", "dst", "src"}) {
 		t.Fatalf("test keys %q", got)
 	}
-	want := append([]string{"*"}, MachineActions...)
+	want := slices.Concat([]string{"*"}, MachineActions, RecordingActions)
 	want = append(want, ENVActions...)
 	if !reflect.DeepEqual(s.Defs["action"].Enum, want) {
 		t.Fatalf("actions %q, want %q", s.Defs["action"].Enum, want)

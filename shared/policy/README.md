@@ -81,7 +81,9 @@ are all machines/tags, all previews/tunnels, or `env:team`.
 | `private_access` | machines | reach the machine's ports privately; `ports` narrows it (an allow defaults to 1024-65535, a deny to every port) |
 | `inspect` | machines, previews, tunnels | read captured requests (on a machine: every preview and tunnel it publishes) |
 | `replay` | machines, previews, tunnels | replay a captured request; `inspect` does not imply it |
-| `*` | machines | all of the above |
+| `record` | machines (team, Teams plan) | the subject's Paperboat terminal sessions there are recorded (not ssh, scp, sftp or exec); not part of `*` |
+| `recording_view` | machines (team, Teams plan) | replay recordings made there; not part of `*`, and owner and admins need a rule too |
+| `*` | machines | every machine action above except `record` and `recording_view` |
 | `env_read`, `env_write` | `env:team` | receive or change the team ENV |
 
 ## Error codes

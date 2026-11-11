@@ -447,3 +447,38 @@ func TestChangesNeverListTheOwnerGuardrail(t *testing.T) {
 		t.Fatalf("the owner keeps the team ENV, so only the admin loses it: %q", got)
 	}
 }
+
+func TestRecordingActionsNeedAnExplicitTeamRule(t *testing.T) {
+	c := mustCompile(t, `{"tags": {"tag:prod": ["machine:db1"]}, "rules": [
+		{"src": ["*"], "dst": ["machine:*"], "allow": ["*"]},
+		{"src": ["role:member"], "dst": ["tag:prod"], "allow": ["record"]},
+		{"src": ["user:bo@example.test"], "dst": ["tag:prod"], "deny": ["record"]},
+		{"src": ["user:cy@example.test"], "dst": ["machine:db1"], "allow": ["recording_view"]}]}`, team())
+	if d := c.Decide("cy", machine("m-db1"), ActionRecord, 0); !d.Allowed || !slices.Equal(d.Rules, []string{"/rules/1"}) {
+		t.Fatalf("record rule: %+v", d)
+	}
+	if d := c.Decide("bo", machine("m-db1"), ActionRecord, 0); d.Allowed || d.Reason != "denied_by_rule" {
+		t.Fatalf("a deny exempts: %+v", d)
+	}
+	if d := c.Decide("cy", machine("m-runner"), ActionRecord, 0); d.Allowed {
+		t.Fatalf("* must not include record: %+v", d)
+	}
+	if d := c.Decide("ana", machine("m-db1"), ActionRecordingView, 0); d.Allowed {
+		t.Fatalf("the owner needs a rule to replay: %+v", d)
+	}
+	if d := c.Decide("cy", machine("m-web1"), ActionRecordingView, 0); d.Allowed {
+		t.Fatalf("a shared machine's owner needs a rule to replay: %+v", d)
+	}
+	if d := c.Decide("cy", machine("m-db1"), ActionRecordingView, 0); !d.Allowed {
+		t.Fatalf("recording_view rule: %+v", d)
+	}
+	d, _ := Parse([]byte(`{"rules": [{"src": ["*"], "dst": ["machine:laptop"], "allow": ["record"]}, {"src": ["*"], "dst": ["env:team"], "allow": ["recording_view"]}]}`))
+	_, errs := Compile(d, personal(), Limits{})
+	if got := codes(errs); !slices.Contains(got, "/rules/0/allow/0 team_only") {
+		t.Fatalf("record in a personal workspace: %q", got)
+	}
+	_, errs = Compile(d, team(), Limits{})
+	if got := codes(errs); !slices.Contains(got, "/rules/1/allow/0 action_not_for_target") {
+		t.Fatalf("recording_view on env: %q", got)
+	}
+}

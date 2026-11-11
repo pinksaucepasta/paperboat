@@ -36,8 +36,8 @@
     },
     "action": {
       "type": "string",
-      "description": "Machine actions (machine:, tag:): terminal, exec, managed_ssh, files, preview_manage, tunnel_manage, private_access, inspect, replay, or * for all of them. Preview/tunnel actions: inspect, replay. ENV actions (env:team): env_read, env_write.",
-      "enum": ["*", "terminal", "exec", "managed_ssh", "files", "preview_manage", "tunnel_manage", "private_access", "inspect", "replay", "env_read", "env_write"]
+      "description": "Machine actions (machine:, tag:): terminal, exec, managed_ssh, files, preview_manage, tunnel_manage, private_access, inspect, replay, or * for all of them. Team recordings (machine:, tag:; not part of *): record, recording_view. Preview/tunnel actions: inspect, replay. ENV actions (env:team): env_read, env_write.",
+      "enum": ["*", "terminal", "exec", "managed_ssh", "files", "preview_manage", "tunnel_manage", "private_access", "inspect", "replay", "record", "recording_view", "env_read", "env_write"]
     },
     "port": {
       "description": "A port (5432) or an inclusive range (\"8000-8100\").",

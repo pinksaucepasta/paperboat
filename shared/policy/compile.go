@@ -107,7 +107,7 @@ func (c Compiled) compileScope(scope []ScopeEntry) ([]Grant, Errors) {
 			e.add(p, "empty", "a scope entry needs dst and allow")
 		}
 		family, targets := ruleTargets(e, c.x, c.tags, pointer(p, "dst"), s.Dst)
-		actions := ruleActions(e, family, pointer(p, "allow"), s.Allow)
+		actions := ruleActions(e, c.x.inv.Team, family, pointer(p, "allow"), s.Allow)
 		ports := rulePorts(e, p, actions, s.Ports, false)
 		if len(e.errs) > before {
 			continue

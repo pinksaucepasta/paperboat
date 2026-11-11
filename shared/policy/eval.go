@@ -40,6 +40,9 @@ func (c Compiled) Enforced() []Grant {
 // the personal machine it runs on, may always inspect and replay it, and the team owner keeps
 // the team ENV.
 func (c Compiled) owns(account string, t Target, action string) bool {
+	if slices.Contains(RecordingActions, action) {
+		return false
+	}
 	inspector := action == ActionInspect || action == ActionReplay
 	switch t.Kind {
 	case "machine":
@@ -196,12 +199,7 @@ func RunTests(d Document, c Compiled) Errors {
 
 func testAction(a string) (string, int, bool) {
 	name, port, hasPort := strings.Cut(a, ":")
-	known := false
-	for _, list := range [][]string{MachineActions, ENVActions} {
-		for _, x := range list {
-			known = known || x == name
-		}
-	}
+	known := knownAction(name)
 	if !hasPort {
 		return name, 0, known
 	}

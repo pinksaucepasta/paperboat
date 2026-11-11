@@ -28,6 +28,10 @@ const (
 	ActionReplay        = "replay"
 	ActionENVRead       = "env_read"
 	ActionENVWrite      = "env_write"
+	// ActionRecord: the subject's Paperboat terminal sessions on the target are recorded (Teams).
+	ActionRecord = "record"
+	// ActionRecordingView: the subject may replay recordings made on the target (Teams).
+	ActionRecordingView = "recording_view"
 )
 
 // MachineCapabilities are the actions that are machine capabilities on the server
@@ -39,6 +43,10 @@ var MachineActions = append(slices.Clone(MachineCapabilities), ActionInspect, Ac
 
 // ResourceActions apply to one preview or tunnel target.
 var ResourceActions = []string{ActionInspect, ActionReplay}
+
+// RecordingActions apply to machine targets in a team workspace. "*" does not include them and
+// no role or owner guardrail implies them: recording and replay need an explicit rule.
+var RecordingActions = []string{ActionRecord, ActionRecordingView}
 
 // ENVActions apply to the env:team target.
 var ENVActions = []string{ActionENVRead, ActionENVWrite}

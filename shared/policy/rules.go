@@ -21,7 +21,7 @@ func compileRule(c *collector, allow, deny *builder, x *index, groups map[string
 	}
 	accounts := ruleSubjects(c, x, groups, pointer(p, "src"), r.Src)
 	family, targets := ruleTargets(c, x, tags, pointer(p, "dst"), r.Dst)
-	actions := ruleActions(c, family, pointer(p, field), list)
+	actions := ruleActions(c, x.inv.Team, family, pointer(p, field), list)
 	ports := rulePorts(c, p, actions, r.Ports, denies)
 	if len(c.errs) > before {
 		return
@@ -164,26 +164,32 @@ func ruleTargets(c *collector, x *index, tags map[string][]string, p string, dst
 	return family, out
 }
 
-func ruleActions(c *collector, family, p string, allow []string) []string {
-	valid := map[string][]string{"machine": MachineActions, "resource": ResourceActions, "env": ENVActions}[family]
+func ruleActions(c *collector, team bool, family, p string, allow []string) []string {
+	valid := map[string][]string{"machine": slices.Concat(MachineActions, RecordingActions), "resource": ResourceActions, "env": ENVActions}[family]
 	var out []string
 	for i, a := range allow {
 		ep := pointer(p, i)
 		switch {
 		case a == "*" && family == "machine":
 			out = append(out, MachineActions...)
+		case slices.Contains(RecordingActions, a) && family == "machine" && !team:
+			c.add(ep, "team_only", "%q exists only in a team workspace", a)
 		case slices.Contains(valid, a):
 			out = append(out, a)
 		case family == "":
 			// dst already failed; the action cannot be checked against it.
-		case slices.Contains(MachineActions, a) || slices.Contains(ENVActions, a) || a == "*":
+		case knownAction(a) || a == "*":
 			c.add(ep, "action_not_for_target", "%q does not apply to these targets; they allow: %s", a, strings.Join(valid, ", "))
 		default:
-			c.add(ep, "unknown_action", "unknown action %q; actions are %s, %s", a, strings.Join(MachineActions, ", "), strings.Join(ENVActions, ", "))
+			c.add(ep, "unknown_action", "unknown action %q; actions are %s", a, strings.Join(slices.Concat(MachineActions, RecordingActions, ENVActions), ", "))
 		}
 	}
 	slices.Sort(out)
 	return slices.Compact(out)
+}
+
+func knownAction(a string) bool {
+	return slices.Contains(MachineActions, a) || slices.Contains(RecordingActions, a) || slices.Contains(ENVActions, a)
 }
 
 // Roles are the role:<name> subjects. Roles give admin rights only; machine use comes from rules.
