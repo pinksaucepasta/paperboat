@@ -41,19 +41,7 @@ func (r *Registry) ExportEncoded() ([][]byte, error) {
 		if e.state != StateActive || !e.notAfter.After(now) {
 			continue
 		}
-		var chain []byte
-		for _, der := range e.certificate.Certificate {
-			chain = append(chain, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})...)
-		}
-		keyDER, err := x509.MarshalPKCS8PrivateKey(e.certificate.PrivateKey)
-		if err != nil {
-			WipeEncoded(records)
-			return nil, err
-		}
-		keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
-		clear(keyDER)
-		record, err := json.Marshal(ExportedCertificate{Binding: e.binding, Bundle: Bundle{CertificatePEM: chain, PrivateKeyPEM: keyPEM, Issuer: e.issuer, NotBefore: e.notBefore, NotAfter: e.notAfter}})
-		clear(keyPEM)
+		record, err := encodeEntry(e)
 		if err != nil {
 			WipeEncoded(records)
 			return nil, err
@@ -61,6 +49,25 @@ func (r *Registry) ExportEncoded() ([][]byte, error) {
 		records = append(records, record)
 	}
 	return records, nil
+}
+
+// encodeEntry is the opaque record of one certificate: its binding and bundle, with the private key. The caller
+// wipes it.
+func encodeEntry(e *entry) ([]byte, error) {
+	var chain []byte
+	for _, der := range e.certificate.Certificate {
+		chain = append(chain, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})...)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(e.certificate.PrivateKey)
+	if err != nil {
+		return nil, err
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
+	clear(keyDER)
+	record, err := json.Marshal(ExportedCertificate{Binding: e.binding, Bundle: Bundle{CertificatePEM: chain, PrivateKeyPEM: keyPEM, Issuer: e.issuer, NotBefore: e.notBefore, NotAfter: e.notAfter}})
+	clear(keyPEM)
+	clear(chain)
+	return record, err
 }
 
 // ImportEncoded stages, readies and activates handed-over certificates through the registry's own
