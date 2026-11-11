@@ -47,15 +47,45 @@ type NativeDispatchConfig struct {
 	// AuthorizeResume admits a credential-free terminal resume the carrier already proved from its current
 	// authority; it only gates the feature. Unset, every resume is refused.
 	AuthorizeResume func(context.Context, streamauth.Header) (string, error)
-	ServeStream     func(context.Context, streamauth.Header, net.Conn) error
-	Current         NativePrivateTCPCurrent
-	DialPrivate     func(context.Context, nativeprivate.Binding) (net.Conn, error)
-	SSHTarget       func(context.Context) (managedssh.HostTarget, error)
+	// AuthorizeOffline admits a credential-free terminal or exec session the carrier already admitted from its signed
+	// session scopes while Paperboat is unreachable (F21-11); it only gates the feature. Unset, every one is refused.
+	AuthorizeOffline func(context.Context, streamauth.Header) (string, error)
+	ServeStream      func(context.Context, streamauth.Header, net.Conn) error
+	Current          NativePrivateTCPCurrent
+	DialPrivate      func(context.Context, nativeprivate.Binding) (net.Conn, error)
+	SSHTarget        func(context.Context) (managedssh.HostTarget, error)
 }
 type nativeDispatchEnvelope struct {
-	Header  json.RawMessage           `json:"header,omitempty"`
-	Binding *nativeprivate.Binding    `json:"binding,omitempty"`
-	Resume  *NativeDispatchResumePeer `json:"resume,omitempty"`
+	Header  json.RawMessage            `json:"header,omitempty"`
+	Binding *nativeprivate.Binding     `json:"binding,omitempty"`
+	Resume  *NativeDispatchResumePeer  `json:"resume,omitempty"`
+	Offline *NativeDispatchOfflinePeer `json:"offline,omitempty"`
+}
+
+// NativeDispatchOfflinePeer is the peer the carrier admitted from its own signed scopes for an offline session; the
+// dispatch token vouches for it.
+type NativeDispatchOfflinePeer struct {
+	AccountID  string `json:"account_id"`
+	EndpointID string `json:"endpoint_id"`
+}
+
+// dispatchOfflineConn is a worker-side stream for one offline session of the carrier-admitted peer: the terminal and
+// exec servers authorize its requests from OfflinePeer instead of a server-signed credential.
+type dispatchOfflineConn struct {
+	net.Conn
+	peer   NativeDispatchOfflinePeer
+	header streamauth.Header
+}
+
+func (c *dispatchOfflineConn) OfflinePeer() (accountID, endpointID, consumer, operationID string, deadline time.Time) {
+	return c.peer.AccountID, c.peer.EndpointID, c.header.Consumer, c.header.OperationID, time.Unix(c.header.DeadlineUnix, 0)
+}
+
+func (c *dispatchOfflineConn) CloseWrite() error {
+	if closer, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return closer.CloseWrite()
+	}
+	return nil
 }
 
 // NativeDispatchResumePeer is the peer the carrier proved for a terminal resume; the dispatch token vouches for it.
@@ -258,9 +288,19 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 				http.Error(w, "invalid dispatch resume", http.StatusBadRequest)
 				return
 			}
+			// An offline header and the carrier-admitted peer likewise come together or not at all, only on a stream, only
+			// for the sessions a host may start offline.
+			if header.Offline != (envelope.Offline != nil) || (envelope.Offline != nil && (operation != "stream" || envelope.Resume != nil || envelope.Offline.AccountID == "" || envelope.Offline.EndpointID == "" || header.Consumer != "terminal" && header.Consumer != "exec")) {
+				recordNativeAdmissionFailure("offline_peer", ErrStreamAuthorization)
+				http.Error(w, "invalid dispatch offline session", http.StatusBadRequest)
+				return
+			}
 			authorize := config.Authorize
 			if header.Resume != "" {
 				authorize = config.AuthorizeResume
+			}
+			if header.Offline {
+				authorize = config.AuthorizeOffline
 			}
 			if authorize == nil {
 				err = ErrStreamAuthorization
@@ -316,6 +356,9 @@ func NewNativeDispatchHandler(config NativeDispatchConfig) (*NativeDispatchHandl
 				stream := native.LimitConnection(connection, header.MaximumBytes)
 				if envelope.Resume != nil {
 					stream = &dispatchResumeConn{Conn: stream, peer: *envelope.Resume, sessionID: header.OperationID, resource: header.Resume}
+				}
+				if envelope.Offline != nil {
+					stream = &dispatchOfflineConn{Conn: stream, peer: *envelope.Offline, header: header}
 				}
 				if err := config.ServeStream(lifetime, header, stream); err != nil {
 					recordNativeAdmissionFailure("application", err)
