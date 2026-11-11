@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 )
@@ -245,5 +246,20 @@ func TestReadAdmittedIngressDecisionAcceptsAnExpiredAdmissionButNewStreamsDoNot(
 	}
 	if _, err := ReadIngressDecision(bytes.NewReader(frame), later); !errors.Is(err, ErrIngressDenied) {
 		t.Fatalf("new stream after the deadline: %v", err)
+	}
+}
+
+// The decision the edge writes to the agent never carries the visitor assertion (the app gets it as a
+// header), and a route that is not pinned carries no tls_pin key at all.
+func TestIngressDecisionOnTheStreamCarriesOnlyWhatTheAgentChecks(t *testing.T) {
+	now := time.Now().UTC()
+	d, _ := ingressFixture(now)
+	d.VisitorAssertion = "signed.visitor.jwt"
+	var wire bytes.Buffer
+	if err := WriteIngressDecision(&wire, d, now); err != nil {
+		t.Fatal(err)
+	}
+	if body := wire.String(); strings.Contains(body, "visitor") || strings.Contains(body, "tls_pin") {
+		t.Fatalf("stream decision = %s", body[4:])
 	}
 }
