@@ -50,7 +50,8 @@ var openConnectionsFromDaemon = openConnectionsForUpdate
 
 // updateOpenConnectionsFromFile keeps an installation from a file from silently ending open SSH
 // connections and access forwards, as the signed updater does: replacing the daemon closes them.
-// A daemon that cannot answer never blocks the install (the updater must work when the app is broken).
+// A daemon that cannot answer never blocks the install (the updater must work when the app is broken); the failed probe
+// is recorded (liveconnections.RecordUnconfirmed) so a session it cut can be explained.
 func updateOpenConnectionsFromFile(ctx context.Context) error {
 	open, err := openConnectionsFromDaemon(ctx)
 	if err != nil {
