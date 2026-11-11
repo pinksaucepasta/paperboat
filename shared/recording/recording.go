@@ -328,8 +328,15 @@ type Settings struct {
 const (
 	ActionStart    = "record-start" // request {"action":ActionStart,"session_id"}; answers {"recording":State}
 	ActionStop     = "record-stop"  // request {"action":ActionStop,"session_id"}; answers {}
-	EventRecording = "recording"    // stream event {"event":EventRecording,"session_id","recording":State|null}
+	EventRecording = "recording"    // stream event Event
 )
+
+// Event is the stream event EventRecording: the session's recording started (Recording set) or stopped (nil).
+type Event struct {
+	Event     string `json:"event"`
+	SessionID string `json:"session_id"`
+	Recording *State `json:"recording"`
+}
 
 // Replay stream on the machine (browser E2E or native consumer peerconsumer.Recording): request {"action":ReadAction,
 // "recording_id"} on Capability, then binary frames each carrying one segment file behind a 4-byte big-endian

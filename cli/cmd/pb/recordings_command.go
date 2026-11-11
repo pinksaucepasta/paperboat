@@ -85,7 +85,7 @@ func recordingsList(c *command.Context) error {
 		return err
 	}
 	for _, r := range page.Recordings {
-		ended := "recording"
+		ended := wire.StateRecording
 		if r.EndedAt != nil {
 			ended = r.EndedAt.Sub(r.StartedAt).Round(time.Second).String()
 		}
