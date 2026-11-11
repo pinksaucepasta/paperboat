@@ -1,0 +1,21 @@
+command_rows.py --only C286..C293, 2026-11-12 (IST). Rows: env names access, version, account, api-token, policy, team scim, team sso, mcp.
+
+== L: hp (Linux), pb dev-a427ba5f6r3 (commit 094b8f3f1), run on the device
+{"check": "command-row", "row": "C286", "command": "pb env names access", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C287", "command": "pb version", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C288", "command": "pb account", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C289", "command": "pb api-token", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C290", "command": "pb policy", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C291", "command": "pb team scim", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C292", "command": "pb team sso", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C293", "command": "pb mcp", "status": "PASS", "failures": []}
+
+== W: winpool-13 (Windows Server 2025 runner), pb dev-36f2a7735 (main 36f2a7735), driven from the controller with SMOKE_WINDOWS_SSH
+{"check": "command-row", "row": "C286", "command": "pb env names access", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C287", "command": "pb version", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C288", "command": "pb account", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C289", "command": "pb api-token", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C290", "command": "pb policy", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C291", "command": "pb team scim", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C292", "command": "pb team sso", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C293", "command": "pb mcp", "status": "PASS", "failures": []}
