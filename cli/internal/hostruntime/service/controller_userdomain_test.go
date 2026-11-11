@@ -92,3 +92,21 @@ func TestRemovingAPerUserAgentReachesEveryDomainAndToleratesAMissingGUIDomain(t 
 		}
 	}
 }
+
+// An agent loaded in the user domain while the console session's gui domain exists is booted out of gui before the
+// declaration is applied again, so one job runs and start/restart reach it.
+func TestApplyingAPerUserAgentBootsItOutOfTheOtherDomain(t *testing.T) {
+	describeMac(t, true, true) // chosen domain: user/502 (it already holds the job)
+	absent := errors.New("launchctl bootout: Could not find service in domain: No such process")
+	runner := &outputCommandRunner{errors: []error{absent}}
+	controller := LaunchdController{Runner: runner, UID: 502, Label: DaemonLabel, UserDomain: true}
+	_ = controller.Apply(context.Background(), "/x/agent.plist", false)
+	if len(runner.calls) < 1 || strings.Join(runner.calls[0], " ") != "launchctl bootout gui/502/"+DaemonLabel {
+		t.Fatalf("calls=%v, want the first call to boot the job out of gui/502", runner.calls)
+	}
+	for _, call := range runner.calls {
+		if strings.Join(call, " ") == "launchctl bootout user/502/"+DaemonLabel {
+			t.Fatalf("the chosen domain's own job was booted out: %v", runner.calls)
+		}
+	}
+}
