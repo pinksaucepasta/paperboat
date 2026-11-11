@@ -77,7 +77,7 @@ require (
 	github.com/pressly/goose/v3 v3.26.0
 	github.com/realclientip/realclientip-go v1.0.0
 	github.com/xeipuuv/gojsonschema v1.2.0
-	golang.org/x/crypto v0.58.0
+	golang.org/x/crypto v0.58.1-0.20261009181718-2f1f834330b2
 	golang.org/x/net v0.62.0
 )
 
