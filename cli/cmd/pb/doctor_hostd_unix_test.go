@@ -50,3 +50,19 @@ func TestDoctorWaitsOutAHostdRestart(t *testing.T) {
 		t.Fatalf("a restart inside the window reported %+v after %d dials", got, calls)
 	}
 }
+
+// Doctor stops waiting for a restarting hostd the moment its own context ends, not after the retry interval.
+func TestDoctorHostdWaitEndsWithTheContext(t *testing.T) {
+	installed := filepath.Join(t.TempDir(), "pb")
+	if err := os.WriteFile(installed, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	refused := func(context.Context, string) error { return errors.New("connect: connection refused") }
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	got := doctorHostdCheck(ctx, installed, "/run/stale.sock", refused, time.Minute, 10*time.Second)
+	if got.Status != doctorpkg.StatusFail || time.Since(started) > 2*time.Second {
+		t.Fatalf("status %v after %v: the wait slept through its context", got.Status, time.Since(started))
+	}
+}
