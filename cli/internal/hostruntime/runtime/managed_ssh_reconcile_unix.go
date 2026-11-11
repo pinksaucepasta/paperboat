@@ -201,7 +201,10 @@ func retryableManagedSSHAuthorityError(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
-	var network *net.OpError
+	// Any network failure: a refused or timed-out connect (*net.OpError), a failed lookup (*net.DNSError), an HTTP client
+	// timeout (*url.Error). Paperboat unreachable keeps the last verified keys until a revocation the host receives (F5-08);
+	// only an explicit answer removes them. Matching *net.OpError alone dropped them on a lookup failure.
+	var network net.Error
 	return errors.As(err, &network)
 }
 
