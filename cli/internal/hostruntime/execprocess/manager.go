@@ -705,7 +705,9 @@ func (e *Execution) output(stream string, data []byte) {
 	e.streamSequences[stream] += uint64(len(data))
 	e.appendLocked(Event{Stream: stream, StreamSequence: sequence, Data: append([]byte(nil), data...)})
 	// Output nobody has taken yet is never dropped: when the buffer is full of it, the process waits
-	// (as a pipe writer does) until a client reads, whether or not one is attached right now.
+	// (as a pipe writer does) until a client reads. The wait ends when the command ends: a command with no
+	// attached client is abandoned after DetachedLinger (which cancels it and releases this wait through stopOutput),
+	// and one that outlives its timeout is canceled the same way.
 	for e.eventBytes > e.manager.config.ReplayBytes && len(e.events) > 1 && e.earliest >= e.evictBoundaryLocked() {
 		wake := e.wake
 		e.mu.Unlock()
