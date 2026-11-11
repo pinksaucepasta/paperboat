@@ -20,7 +20,8 @@ HOST = os.environ.get("STAGING_HOST", "ubuntu@anvit")
 PROD = os.environ.get("STAGING_PROD_HOST", "root@coolify")
 DIR = "pb-release-staging"                     # on HOST, relative to its home
 REGION, INSTANCE = "anvit", "slot-01"
-DOMAIN = os.environ.get("STAGING_DOMAIN", "stg.pprbt.dev")   # regional domain; zone is its parent
+# The regional domain is "stg." under the production API host's parent domain (read from the prod server env at init,
+# kept in the stack's .env): no domain is written in code.
 PORT = int(os.environ.get("STAGING_PORT", "18443"))           # inside anvit's open public range 10000-59999
 LOOPBACK = 18091                                              # plain API on anvit's loopback (seed, probes)
 ACME = os.environ.get("STAGING_ACME_DIRECTORY", "https://acme-v02.api.letsencrypt.org/directory")
@@ -29,6 +30,17 @@ ACCOUNT_REF, DNS_REF = "secret://acme/account", "secret://cloudflare/dns"
 ACCOUNT_ENV = "PAPERBOAT_CERT_SECRET_SECRET___ACME_ACCOUNT_27c59c1f5611"
 DNS_ENV = "PAPERBOAT_CERT_SECRET_SECRET___CLOUDFLARE_DNS_f9b5f91598d2"
 ROOT = Path(__file__).resolve().parent
+
+
+def api_url():
+    return f"https://{REGION}.{domain()}:{PORT}"
+
+
+def domain():
+    got = os.environ.get("STAGING_DOMAIN") or remote("grep '^PAPERBOAT_STAGING_DOMAIN=' .env | cut -d= -f2", check=False).strip()
+    if not got:
+        raise SystemExit("staging: no staging domain; run `staging.py init` first")
+    return got
 
 
 def ssh(host, script, stdin=None, check=True):
@@ -68,7 +80,7 @@ def new_acme_key():
 def build_env(existing, prod):
     """The staging server.env: existing random secrets are kept, production credentials are copied in memory."""
     keep = lambda k, make: existing.get(k) or make()
-    api = f"https://{REGION}.{DOMAIN}:{PORT}"
+    api, DOMAIN = api_url(), domain()
     sub = lambda name: f"{name}.{DOMAIN}"
     workos = lambda f: ssh(PROD, f"cat /opt/paperboat/secrets/{f}").strip()
     env = {
@@ -113,6 +125,8 @@ def read_existing():
 def init():
     existing = read_existing()
     prod = parse_env(ssh(PROD, "cat /opt/paperboat/server.env"))
+    parent = prod["PAPERBOAT_PUBLIC_BASE_URL"].split("://", 1)[1].split("/")[0].split(":")[0].split(".", 1)[1]
+    os.environ.setdefault("STAGING_DOMAIN", "stg." + parent)
     prod = {k: v for k, v in prod.items() if k in ("PAPERBOAT_OPERATOR_EMAIL", "PAPERBOAT_CERTIFICATES_DNS_ZONE_ID", DNS_ENV)}
     password = keep_password(existing)
     existing["_postgres_password"] = password
@@ -121,15 +135,15 @@ def init():
     remote("umask 077 && cat > secrets/postgres_password", stdin=password)
     remote("cat > compose.yaml", stdin=(ROOT / "staging.compose.yaml").read_text())
     remote("umask 077 && cat > .env", stdin=f"PAPERBOAT_STAGING_PROJECT=pb-release-staging\nPAPERBOAT_POSTGRES_IMAGE=postgres:17\n"
-           f"PAPERBOAT_STAGING_API_PORT={LOOPBACK}\nPAPERBOAT_STAGING_HTTPS_PORT={PORT}\n"
+           f"PAPERBOAT_STAGING_API_PORT={LOOPBACK}\nPAPERBOAT_STAGING_HTTPS_PORT={PORT}\nPAPERBOAT_STAGING_DOMAIN={os.environ['STAGING_DOMAIN']}\n"
            + (f"PAPERBOAT_SERVER_IMAGE={existing_image()}\n"))
-    print(json.dumps({"ok": True, "api": f"https://{REGION}.{DOMAIN}:{PORT}", "dns": ensure_dns(prod)}))
+    print(json.dumps({"ok": True, "api": api_url(), "dns": ensure_dns(prod)}))
 
 
 def ensure_dns(prod):
     """One A record <region>.<domain> -> anvit's public address (a lone node has no enrolled addresses for the DNS worker)."""
     address = ssh(HOST, "curl -s -m10 https://api.ipify.org").strip()
-    zone, name = prod["PAPERBOAT_CERTIFICATES_DNS_ZONE_ID"], f"{REGION}.{DOMAIN}"
+    zone, name = prod["PAPERBOAT_CERTIFICATES_DNS_ZONE_ID"], f"{REGION}.{domain()}"
     def api(method, path, body=None):
         request = urllib.request.Request("https://api.cloudflare.com/client/v4" + path, method=method, headers={
             "Authorization": "Bearer " + prod[DNS_ENV], "Content-Type": "application/json"}, data=json.dumps(body).encode() if body else None)
@@ -181,7 +195,7 @@ def status():
     cert = remote("docker compose exec -T postgres psql -U postgres -d paperboat_staging -Atc "
                   "\"select count(*) from paperboat.control_server_node_acme_cache where key='regional-wildcard'\"", check=False).strip()
     return {"server_version": version[:200], "regional_certificate_stored": cert == "1",
-            "api": f"https://{REGION}.{DOMAIN}:{PORT}", "image": existing_image()}
+            "api": api_url(), "image": existing_image()}
 
 
 def sql(statement):
@@ -208,7 +222,7 @@ def seed():
 
 
 def enroll(name):
-    base = f"https://{REGION}.{DOMAIN}:{PORT}"
+    base = api_url()
     body = json.dumps({})
     out = remote(f"curl -s -m20 -X POST http://127.0.0.1:{LOOPBACK}/v1/machine-enrollments "
                  f"-H 'Cookie: __Host-pb-session={SESSION}; __Host-pb-csrf={CSRF}' -H 'X-CSRF-Token: {CSRF}' "
