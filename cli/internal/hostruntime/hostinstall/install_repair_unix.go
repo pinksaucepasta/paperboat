@@ -58,16 +58,13 @@ func commitPreparedInstallationLocked(ctx context.Context, request Request, path
 	if err := checkPendingInstallation(journal, request); err != nil {
 		return err
 	}
-	if _, statErr := os.Lstat(paths.updateState); statErr == nil {
-		if !nativeLockHeld {
-			lock, lockErr := updated.LockUnixNativeInstall(ctx, paths.updateState)
-			if lockErr != nil {
-				return lockErr
-			}
-			defer func() { resultErr = withCleanup("installation cleanup failed", resultErr, lock.Close()) }()
+	if !nativeLockHeld {
+		// Absent update state is no reason to commit unlocked: the lock creates the directory it needs.
+		lock, lockErr := lockUnixInstallState(ctx, paths.updateState)
+		if lockErr != nil {
+			return lockErr
 		}
-	} else if !installNotExistOnly(statErr) {
-		return statErr
+		defer func() { resultErr = withCleanup("installation cleanup failed", resultErr, lock.Close()) }()
 	}
 	request.SessionOwnerGeneration = generation
 	if err := writeInstallMetadata(paths.metadata, request); err != nil {
