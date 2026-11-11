@@ -1,6 +1,7 @@
 package tunnelmanager
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -294,6 +295,44 @@ func TestOriginHTTPTransportUsesRealH2C(t *testing.T) {
 	_ = response.Body.Close()
 	if response.ProtoMajor != 2 || response.StatusCode != http.StatusNoContent {
 		t.Fatalf("response protocol/status=%s %d", response.Proto, response.StatusCode)
+	}
+}
+
+// A strict gRPC origin (grpc-java, Envoy) refuses a request without "te: trailers" and answers over h2c with a
+// grpc-status trailer: both must cross the agent's transport, and no other TE value may.
+func TestOriginHTTPTransportCarriesGRPCTEHeaderAndTrailersOverH2C(t *testing.T) {
+	var sawTE []string
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		sawTE = request.Header.Values("Te")
+		if request.ProtoMajor != 2 || request.Header.Get("Te") != "trailers" {
+			writer.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		_, _ = io.Copy(io.Discard, request.Body)
+		writer.Header().Set("Content-Type", "application/grpc")
+		writer.Header().Set("Trailer", "Grpc-Status")
+		writer.WriteHeader(http.StatusOK)
+		_, _ = writer.Write([]byte{0, 0, 0, 0, 0})
+		writer.Header().Set("Grpc-Status", "0")
+	}))
+	server.Config.Protocols = new(http.Protocols)
+	server.Config.Protocols.SetUnencryptedHTTP2(true)
+	server.Start()
+	defer server.Close()
+	route := hoststate.TunnelConfigRoute{ID: "route_grpc", Protocol: "http", OriginScheme: "h2c", OriginAddress: server.Listener.Addr().String(), PreserveHost: true, TLSVerification: "not_applicable", ConnectTimeoutMs: 1000, IdleTimeoutMs: 5000, DesiredState: "active"}
+	transport := (&OriginHTTPTransport{}).newGeneration()
+	defer transport.CloseIdleConnections()
+	request, _ := http.NewRequest(http.MethodPost, "http://public.example.test/pkg.Service/Method", bytes.NewReader([]byte{0, 0, 0, 0, 0}))
+	request.Header.Set("Content-Type", "application/grpc")
+	request.Header.Set("Te", "trailers, deflate") // the edge sends exactly "trailers"; any other token must not pass
+	response, err := transport.RoundTrip(context.Background(), route, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, response.Body)
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK || response.Trailer.Get("Grpc-Status") != "0" || len(sawTE) != 1 || sawTE[0] != "trailers" {
+		t.Fatalf("status=%d trailers=%v origin TE=%q", response.StatusCode, response.Trailer, sawTE)
 	}
 }
 

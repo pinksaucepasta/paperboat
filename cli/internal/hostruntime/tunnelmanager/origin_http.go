@@ -15,6 +15,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"golang.org/x/net/http/httpguts"
 	"golang.org/x/net/http2"
 )
 
@@ -233,6 +234,8 @@ func sanitizeOriginRequestHeaders(header http.Header, preserveWebSocketUpgrade, 
 	if header == nil {
 		return
 	}
+	// "TE: trailers" survives: a gRPC client says so, and strict servers (grpc-java, Envoy) refuse without it.
+	trailers := httpguts.HeaderValuesContainsToken(header["Te"], "trailers")
 	connectionTokens := strings.Split(header.Get("Connection"), ",")
 	for _, token := range connectionTokens {
 		if token = strings.TrimSpace(token); token != "" {
@@ -241,6 +244,9 @@ func sanitizeOriginRequestHeaders(header http.Header, preserveWebSocketUpgrade, 
 	}
 	for _, name := range []string{"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "TE", "Trailer", "Transfer-Encoding", "Upgrade"} {
 		header.Del(name)
+	}
+	if trailers {
+		header.Set("Te", "trailers")
 	}
 	for name := range header {
 		lower := strings.ToLower(name)
