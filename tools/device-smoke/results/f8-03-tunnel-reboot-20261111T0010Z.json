@@ -1,0 +1,147 @@
+{
+ "check": "tunnel-reboot",
+ "machine_id": "machine_6db3d687-b9c4-4eb9-b548-0b46038e0861",
+ "boot_pre": "2026-11-10T23:47:40.5000000Z",
+ "services_pre": [
+  "PaperboatCarrier-uba6bceb9290ebd807a30e102:Running/Automatic",
+  "PaperboatHostd-uba6bceb9290ebd807a30e102:Running/Automatic",
+  "PaperboatLocalDaemon-uba6bceb9290ebd807a30e102:Running/Automatic",
+  "PaperboatSessionOwner-uba6bceb9290ebd807a30e102-662c7c851eb17bfa7e65203225058777:Running/Automatic",
+  "PaperboatSshd-uba6bceb9290ebd807a30e102-662c7c851eb17bfa7e65203225058777:Running/Automatic",
+  "PaperboatUpdated-uba6bceb9290ebd807a30e102:Running/Automatic"
+ ],
+ "vms_pre": [
+  {
+   "Name": "pbvm1",
+   "State": "Off",
+   "AutoStart": "Nothing"
+  },
+  {
+   "Name": "pbvm2",
+   "State": "Running",
+   "AutoStart": "Start"
+  },
+  {
+   "Name": "pbvm3",
+   "State": "Running",
+   "AutoStart": "Nothing"
+  },
+  {
+   "Name": "pbvm4",
+   "State": "Running",
+   "AutoStart": "Start"
+  },
+  {
+   "Name": "pbvm5",
+   "State": "Off",
+   "AutoStart": "Nothing"
+  },
+  {
+   "Name": "ubuntu24",
+   "State": "Off",
+   "AutoStart": "Nothing"
+  }
+ ],
+ "origin_port": 50845,
+ "tunnel_id": "tunnel_82275371-2b64-4d7c-af31-1e321b32c3de",
+ "doctor_pre": "healthy",
+ "reboot_issued": "2026-11-11T00:04:28Z",
+ "boot_post": "2026-11-11T00:05:26.5000000Z",
+ "services_post": [
+  "PaperboatCarrier-uba6bceb9290ebd807a30e102:Running/Automatic",
+  "PaperboatHostd-uba6bceb9290ebd807a30e102:Running/Automatic",
+  "PaperboatLocalDaemon-uba6bceb9290ebd807a30e102:Running/Automatic",
+  "PaperboatSessionOwner-uba6bceb9290ebd807a30e102-662c7c851eb17bfa7e65203225058777:Running/Automatic",
+  "PaperboatSshd-uba6bceb9290ebd807a30e102-662c7c851eb17bfa7e65203225058777:Running/Automatic",
+  "PaperboatUpdated-uba6bceb9290ebd807a30e102:Running/Automatic"
+ ],
+ "vms_post_reboot": [
+  {
+   "Name": "pbvm1",
+   "State": "Off",
+   "AutoStart": "Nothing"
+  },
+  {
+   "Name": "pbvm2",
+   "State": "Running",
+   "AutoStart": "Start"
+  },
+  {
+   "Name": "pbvm3",
+   "State": "Saved",
+   "AutoStart": "Nothing"
+  },
+  {
+   "Name": "pbvm4",
+   "State": "Running",
+   "AutoStart": "Start"
+  },
+  {
+   "Name": "pbvm5",
+   "State": "Off",
+   "AutoStart": "Nothing"
+  },
+  {
+   "Name": "ubuntu24",
+   "State": "Off",
+   "AutoStart": "Nothing"
+  }
+ ],
+ "vms_final": [
+  {
+   "Name": "pbvm1",
+   "State": "Off",
+   "AutoStart": "Nothing"
+  },
+  {
+   "Name": "pbvm2",
+   "State": "Running",
+   "AutoStart": "Start"
+  },
+  {
+   "Name": "pbvm3",
+   "State": "Running",
+   "AutoStart": "Nothing"
+  },
+  {
+   "Name": "pbvm4",
+   "State": "Running",
+   "AutoStart": "Start"
+  },
+  {
+   "Name": "pbvm5",
+   "State": "Off",
+   "AutoStart": "Nothing"
+  },
+  {
+   "Name": "ubuntu24",
+   "State": "Off",
+   "AutoStart": "Nothing"
+  }
+ ],
+ "pbvm2_ssh": true,
+ "pbvm3_ssh": true,
+ "served_post": true,
+ "ready_post": true,
+ "status": "PASS",
+ "events": {
+  "driver_start": "2026-11-11T00:03:53Z",
+  "prestate_recorded": "2026-11-11T00:04:03Z",
+  "origin_started": "2026-11-11T00:04:12Z",
+  "tunnel_created": "2026-11-11T00:04:23Z",
+  "served_pre": "2026-11-11T00:04:23Z",
+  "ready_pre": "2026-11-11T00:04:25Z",
+  "reboot_command_sent": "2026-11-11T00:04:29Z",
+  "ssh_back": "2026-11-11T00:06:46Z",
+  "services_post_ok": "2026-11-11T00:06:49Z",
+  "doctor_post_healthy": "2026-11-11T00:06:52Z",
+  "online_post": "2026-11-11T00:06:53Z",
+  "vms_restored": "2026-11-11T00:08:03Z",
+  "origin_restarted": "2026-11-11T00:08:11Z",
+  "served_post_checked": "2026-11-11T00:08:15Z",
+  "tunnel_deleted": "2026-11-11T00:08:21Z"
+ },
+ "notes": [
+  "started pbvm3 (was Saved)"
+ ]
+}
