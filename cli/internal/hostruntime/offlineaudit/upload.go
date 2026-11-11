@@ -44,17 +44,24 @@ type Uploader struct {
 	// MinInterval spaces the uploads: while sessions run, the backlog goes up at most once per
 	// interval and nothing is sent when idle. Zero sends as soon as an event is queued.
 	MinInterval time.Duration
+	// Wake, when it fires, ends any retry wait: the control plane is reachable again (nil never wakes).
+	Wake <-chan struct{}
 }
 
 // UploadInterval is the host's cadence for the audit backlog (F5-12).
 const UploadInterval = 30 * time.Second
 
-// unreachableRetry is the wait after an upload that never opened a connection to the server (DNS, route or connect
-// failed). Such a retry costs the server nothing, and the backlog of sessions started while Paperboat was unreachable
-// must go up within seconds of the network coming back, not after a backoff measured for a failing server (measured:
-// up to 5 min). The runtime observation uses the same split (runtimeObservationReconnectRetry). A variable so a test can
-// shorten it.
-var unreachableRetry = 2 * time.Second
+// An upload that never opened a connection to the server (DNS, route or connect failed) costs the server nothing, and
+// the backlog of sessions started while Paperboat was unreachable must go up within seconds of the network coming
+// back, not after the 5 min backoff of a failing server (measured: 5 min late). Those failures retry from
+// unreachableRetry doubling up to unreachableMax (a machine offline for hours settles at the cap), and Wake ends the wait
+// at once. Variables so a test can shorten them.
+var (
+	unreachableRetry = 2 * time.Second
+	unreachableMax   = 30 * time.Second
+	// retryTimer starts a retry wait; a test replaces it to record the waits instead of sleeping them.
+	retryTimer = time.After
+)
 
 // neverReachedServer reports whether err happened before any connection to the server existed.
 func neverReachedServer(err error) bool {
@@ -63,9 +70,10 @@ func neverReachedServer(err error) bool {
 	return errors.As(err, &dns) || errors.As(err, &network) && network.Op == "dial"
 }
 
-// Run uploads whenever events are queued, retrying failures with doubling waits.
+// Run uploads whenever events are queued. A failure the server answered backs off doubling up to maximumRetry; one that
+// never reached it retries on the short unreachable schedule.
 func (u *Uploader) Run(ctx context.Context) {
-	retry := firstRetry
+	retry, unreachable := firstRetry, 0
 	var wait <-chan time.Time
 	var last time.Time
 	for {
@@ -73,6 +81,8 @@ func (u *Uploader) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-u.Queue.Changed():
+		case <-u.Wake:
+			unreachable = 0
 		case <-wait:
 		}
 		wait = nil
@@ -89,18 +99,18 @@ func (u *Uploader) Run(ctx context.Context) {
 				return
 			}
 			diagnosticlog.TryWarn("could not upload the offline session audit events; the next attempt follows", "error", err, "queued", u.Queue.Len())
-			if neverReachedServer(err) {
-				wait = time.After(backoff.Jitter(unreachableRetry)) // MinInterval spaces uploads that reached the server only
+			if neverReachedServer(err) { // MinInterval spaces uploads that reached the server only
+				unreachable++
+				wait = retryTimer(backoff.Retry(unreachable, unreachableRetry, unreachableMax))
 				retry = firstRetry
 				continue
 			}
-			last = time.Now()
+			unreachable, last = 0, time.Now()
 			wait = time.After(backoff.Jitter(retry))
 			retry = min(retry*2, maximumRetry)
 			continue
 		}
-		last = time.Now()
-		retry = firstRetry
+		unreachable, last, retry = 0, time.Now(), firstRetry
 	}
 }
 

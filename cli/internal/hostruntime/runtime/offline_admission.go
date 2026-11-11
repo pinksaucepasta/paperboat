@@ -47,10 +47,10 @@ func offlineAdmission(queue *offlineaudit.Queue, dispatching bool, online func()
 }
 
 // newOfflineAuditService uploads queue to POST /v1/machines/{id}/audit-backlog with the machine's own credential.
-func newOfflineAuditService(queue *offlineaudit.Queue, controlURL *url.URL, machineID, stateRoot string, transport http.RoundTripper, tokens *enrollment.RenewingTokenSource, operationID func() (string, error)) *offlineAuditService {
+func newOfflineAuditService(queue *offlineaudit.Queue, controlURL *url.URL, machineID, stateRoot string, transport http.RoundTripper, tokens *enrollment.RenewingTokenSource, operationID func() (string, error), reachable <-chan struct{}) *offlineAuditService {
 	return &offlineAuditService{uploader: &offlineaudit.Uploader{Queue: queue, ServerURL: strings.TrimSuffix(controlURL.String(), "/"), MachineID: machineID,
 		Client: &http.Client{Transport: errorreport.TransportOperation(transport, controlURL.String(), "offline_audit"), CheckRedirect: rejectRuntimePolicyRedirect},
-		Tokens: tokens, Proofs: enrollment.ProofSource{StateRoot: stateRoot}, OperationID: operationID, MinInterval: offlineaudit.UploadInterval}}
+		Tokens: tokens, Proofs: enrollment.ProofSource{StateRoot: stateRoot}, OperationID: operationID, MinInterval: offlineaudit.UploadInterval, Wake: reachable}}
 }
 
 // offlineAuditService uploads the offline session backlog whenever events are queued.

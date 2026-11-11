@@ -340,7 +340,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
-	offlineAuditUploads := newOfflineAuditService(offlineAudit, controlURL, machineID, runtimeConfig.StateRoot, transport, renewingTokens, operationID)
+	offlineAuditUploads := newOfflineAuditService(offlineAudit, controlURL, machineID, runtimeConfig.StateRoot, transport, renewingTokens, operationID, machineEvents.Recovered())
 	runtimeService := serviceGroup{availabilityService, runtimeObservation, offlineAuditUploads}
 	previewAssembly, err := newProductionPreviewAssembly(productionPreviewAssemblyConfig{
 		ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, MachineID: machineID, InstallationGeneration: machineRegistration.InstallationGeneration, BootID: lazyBootID, OSBootID: bootState.OSBootID,

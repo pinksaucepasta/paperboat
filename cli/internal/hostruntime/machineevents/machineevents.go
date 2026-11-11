@@ -91,8 +91,11 @@ type Hub struct {
 	known   map[Topic]int64
 	healthy bool
 	changed chan struct{} // closed and replaced when a topic is first subscribed
-	cancel  context.CancelFunc
-	done    chan struct{}
+	// recovered gets one token each time the wait loop succeeds again after failing: the control plane is
+	// reachable again. One consumer: the offline audit uploader.
+	recovered chan struct{}
+	cancel    context.CancelFunc
+	done      chan struct{}
 }
 
 // New builds a hub for a host that authenticates with its machine identity. The loop starts with Start.
@@ -143,7 +146,7 @@ func NewWithWaiter(wait WaitFunc, fallback time.Duration) (*Hub, error) {
 	if fallback == 0 {
 		fallback = DefaultFallbackInterval
 	}
-	return &Hub{wait: wait, fallback: fallback, subs: make(map[Topic][]*Subscription), known: make(map[Topic]int64), changed: make(chan struct{})}, nil
+	return &Hub{wait: wait, fallback: fallback, subs: make(map[Topic][]*Subscription), known: make(map[Topic]int64), changed: make(chan struct{}), recovered: make(chan struct{}, 1)}, nil
 }
 
 // Subscribe registers interest in one or more topics; the subscription wakes when any of them moves.
@@ -251,8 +254,15 @@ func (h *Hub) run(ctx context.Context) {
 			}
 			continue
 		}
+		recoveredNow := failing
 		failing, backoff = false, 0
 		h.setHealthy(true)
+		if recoveredNow {
+			select {
+			case h.recovered <- struct{}{}:
+			default:
+			}
+		}
 		h.deliver(moved)
 	}
 }
@@ -405,6 +415,15 @@ func (s *Subscription) Wait(ctx context.Context, base time.Duration) bool {
 			timer.Reset(base)
 		}
 	}
+}
+
+// Recovered gets a token when the wait loop succeeds again after failing (the control plane is reachable again); nil
+// for a nil Hub. Meant for one consumer.
+func (h *Hub) Recovered() <-chan struct{} {
+	if h == nil {
+		return nil
+	}
+	return h.recovered
 }
 
 // Healthy reports whether the hub's wait loop is currently receiving changes; a nil Subscription never is.

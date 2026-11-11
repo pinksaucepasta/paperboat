@@ -123,7 +123,7 @@ func assembleServing(ctx context.Context, base *carrierIdentity, environ func(st
 	if err != nil {
 		return nil, err
 	}
-	group := serviceGroup{base.events, &jwksRefreshService{cache: keys}, newPeerEnrollmentRuntimeService(base.peerEnrollment, 2*time.Second), newOfflineAuditService(audit, controlURL, base.identity.MachineID, config.StateRoot, transport, base.tokens, base.operationID)}
+	group := serviceGroup{base.events, &jwksRefreshService{cache: keys}, newPeerEnrollmentRuntimeService(base.peerEnrollment, 2*time.Second), newOfflineAuditService(audit, controlURL, base.identity.MachineID, config.StateRoot, transport, base.tokens, base.operationID, base.events.Recovered())}
 	return &servingCarrier{peer: peer, authorization: group, usage: usageService}, nil
 }
 
