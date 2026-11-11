@@ -494,6 +494,9 @@ func validateWireConfigRoute(route wireConfigRoute) error {
 		(route.TLSVerification == "pinned") != (route.TLSPin != nil) || route.TLSPin != nil && !originTLSPinPattern.MatchString(*route.TLSPin) {
 		return ErrInvalidInput
 	}
+	if route.OriginScheme != "https" && (route.TLSCA != nil || route.MTLSCredentialReference != nil || route.TLSServerName != nil) {
+		return ErrInvalidInput // TLS settings belong to https origins only, as hoststate requires
+	}
 	if route.PathPrefix != nil && (len(*route.PathPrefix) == 0 || len(*route.PathPrefix) > 512 || !strings.HasPrefix(*route.PathPrefix, "/") || strings.ContainsAny(*route.PathPrefix, "\r\n")) {
 		return ErrInvalidInput
 	}

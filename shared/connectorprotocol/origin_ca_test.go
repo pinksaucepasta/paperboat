@@ -79,6 +79,14 @@ func TestSnapshotRouteTLSEquivalences(t *testing.T) {
 		"a pin on system":          {func(r *wireConfigRoute) { r.TLSPin = &pin }, false},
 		"https without a mode":     {func(r *wireConfigRoute) { r.TLSVerification = "not_applicable" }, false},
 		"mutual_tls is not a mode": {func(r *wireConfigRoute) { r.TLSVerification = "mutual_tls" }, false},
+		"a server name on http": {func(r *wireConfigRoute) {
+			name := "app.example.test"
+			r.OriginScheme, r.TLSVerification, r.TLSServerName = "http", "not_applicable", &name
+		}, false},
+		"an mTLS reference on http": {func(r *wireConfigRoute) {
+			reference := "paperboat://paperboat/mtls/1"
+			r.OriginScheme, r.TLSVerification, r.MTLSCredentialReference = "http", "not_applicable", &reference
+		}, false},
 	} {
 		route := base()
 		test.mutate(&route)
