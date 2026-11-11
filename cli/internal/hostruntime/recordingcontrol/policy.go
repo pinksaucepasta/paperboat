@@ -172,9 +172,11 @@ func (s *PolicyStore) Current() Policy {
 func (s *PolicyStore) Replace(policy wire.Policy) (Policy, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if policy.Version < s.current.Policy.Version {
+	// The server's version is a digest of the policy's content, not a counter: it says whether the policy changed, never
+	// which is newer, so every fetched policy replaces the cached one and an unchanged one is not written again.
+	if policy.Version == s.current.Policy.Version && policy.Version != 0 {
 		key, _ := verifiedKey(s.current.Policy, s.current.pin(s.current.Policy))
-		return Policy{Policy: s.current.Policy, Key: key}, nil // an older answer never replaces a newer one
+		return Policy{Policy: s.current.Policy, Key: key}, nil
 	}
 	next := cached{Policy: policy, Pinned: s.current.pin(policy), PinnedTeam: policy.TeamID}
 	key, err := verifiedKey(policy, next.Pinned)

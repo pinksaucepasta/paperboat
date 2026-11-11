@@ -68,8 +68,9 @@ func TestPolicyPinsTheFirstKeyAndFollowsOnlySignedRotations(t *testing.T) {
 	if got, err := reopened.Replace(policyWith(4, first.key, second.key, third.key)); err != nil || got.Key == nil || got.Key.Generation != 3 {
 		t.Fatalf("signed rotation %+v %v", got.Key, err)
 	}
-	if got, _ := reopened.Replace(policyWith(1, first.key)); got.Version != 4 {
-		t.Fatalf("an older policy replaced a newer one: %d", got.Version)
+	// The server's version is a content digest: a changed policy replaces the cached one even when its number is lower.
+	if got, _ := reopened.Replace(policyWith(1, first.key, second.key, third.key)); got.Version != 1 || got.Key == nil || got.Key.Generation != 3 {
+		t.Fatalf("a changed policy with a lower version was ignored: %+v", got.Version)
 	}
 }
 
