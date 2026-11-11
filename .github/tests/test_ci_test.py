@@ -107,15 +107,16 @@ class CITestScript(unittest.TestCase):
                 if not deleted:
                     self.assertIn("kept ci/lane1-", result.stderr)
 
-    def test_removes_finished_branches_of_this_lane_but_not_queued_or_live_ones(self):
-        finished, queued, live = "ci/lane1-aaa-1-999999", "ci/lane1-bbb-1-999998", f"ci/lane1-ccc-1-{os.getpid()}"
-        result, calls, _, _ = self.run_script(appear_after=1, active={queued: 1}, remote_branches=(finished, queued, live))
+    def test_deletes_only_its_own_branch_never_other_branches_of_the_lane(self):
+        # 1fc37dd85: foreign ci/<lane>-* branches belong to concurrent runs, finished-looking or not.
+        dead, queued, live = "ci/lane1-aaa-1-999999", "ci/lane1-bbb-1-999998", f"ci/lane1-ccc-1-{os.getpid()}"
+        result, calls, _, _ = self.run_script(appear_after=1, active={queued: 1}, remote_branches=(dead, queued, live))
         self.assertEqual(result.returncode, 0, result.stderr)
         removed = self.deleted(calls)
-        self.assertIn(finished, removed)
-        self.assertNotIn(queued, removed)
-        self.assertNotIn(live, removed)
-        self.assertFalse(any(live in call for call in calls if call.startswith("gh run list")), "a live ci-test was queried")
+        self.assertEqual(len(removed), 1, calls)
+        self.assertRegex(removed[0], r"^ci/lane1-abc1234-\d{6}-\d+$")
+        self.assertFalse(any(name in call for name in (dead, queued, live) for call in calls
+                             if call.startswith("gh run list")), "a foreign branch was queried")
 
 
 if __name__ == "__main__":
