@@ -21,6 +21,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/machineguard"
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
+	"golang.org/x/sys/windows"
 )
 
 // runServiceCommand is the sole privileged command bridge used by the MSI,
@@ -112,7 +113,24 @@ func runServiceBridge(ctx context.Context, args []string) error {
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *requestPath == "" || *resultPath == "" || *cancelPath == "" {
 		return errors.New("service bridge requires request-file, result-file, and cancel-file")
 	}
+	if err := leaveRequestDirectory(); err != nil {
+		return err
+	}
 	return elevation.Execute(ctx, *requestPath, *resultPath, *cancelPath, dispatchElevatedOperation)
+}
+
+// leaveRequestDirectory moves the elevated helper out of its request directory, which ShellExecute made its
+// working directory. A child that outlives the helper (the winget COM server) inherits the working directory and
+// keeps the directory open, so the caller cannot remove it and uninstall reports it as a leftover.
+func leaveRequestDirectory() error {
+	system, err := windows.GetSystemDirectory()
+	if err != nil {
+		return fmt.Errorf("resolve the Windows system directory: %w", err)
+	}
+	if err := os.Chdir(system); err != nil {
+		return fmt.Errorf("leave the elevation request directory: %w", err)
+	}
+	return nil
 }
 
 // openSSHUnobtainableAsRemote gives an OpenSSH operation that failed only because this machine cannot supply the package

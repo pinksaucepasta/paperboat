@@ -3425,6 +3425,7 @@ The coolify format (S1) also removes the old dev deployment and its test backups
 
 ## 5. Log
 
+2026-11-11 | Windows uninstall leftover elevation\request-<id> | Holder found with handle64 on winpool-12: the winget COM server (WindowsPackageManagerServer) the elevated OpenSSH step starts inherits the helper's working directory (the request dir) and outlives it. The elevated bridge now leaves that directory before any work (TestLeaveRequestDirectoryReleasesWorkingDirectory); baseline holds the dir after `pb setup`, the fix does not, and install, setup, uninstall leaves %LOCALAPPDATA%\paperboat gone.
 2026-11-11 | W3 managedssh | TestOpenSSHExecutorInheritsForegroundTTYAndRestoresTerminal failed once in a loaded `-race -count=15` package run (execute_unix_test.go:321, typed input lost: "bash: g: command not found"); 50/50 alone, 15/15 package runs on base and HEAD pass. Rare PTY typing flake; fix after F3-11 and F5-12.
 
 2026-11-11 | W13 C006/C008: standalone guard install rediscovers the domain removed by uninstall (482333906); Windows round trip + doctor healthy PASS, result w13-guard-fixed-20261111.json. C031/C220 proved c2113e3f8; C061/C066 wait for Lane W15: Administrators-owned SSH directory support; winpool-4 original owner restored, DACL untouched. Focused guard race tests PASS on anvit (daemoncmd, machineguard, hostinstall).
