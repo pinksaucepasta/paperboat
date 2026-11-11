@@ -1,0 +1,10 @@
+{
+ "check": "perf-idle (PR-03 client half)",
+ "date": "2026-11-11",
+ "machine": "staging container rel-sco-b (arm64, systemd), pb dev-4f632c765 (main 4f8a6ebe7 + this lane), idle 600 s after pairing, no sessions",
+ "command": "perf_idle.py --seconds 600 --no-budget (run inside the container)",
+ "result": {"status": "PASS_ON_WAKEUPS_AND_BYTES_FAIL_ON_CPU", "cpu_percent": 1.29, "wakeups_per_s": 134.8, "tls_mb_per_hour": 0.0, "pb_processes": 8, "seconds": 600},
+ "budget": {"cpu_percent_max": 1, "wakeups_per_s_max": 600, "tls_mb_per_hour_max": 5},
+ "budget_failures": ["cpu_percent 1.29 > 1"],
+ "not_measured": "the server half (<= 0.1 API requests/s per machine): tools/loadtest/idle_api_requests.sh needs exactly one active machine on staging; the stack is shared"
+}
