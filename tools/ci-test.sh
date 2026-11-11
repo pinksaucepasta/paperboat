@@ -58,6 +58,18 @@ remove_branch() {
 }
 trap 'remove_branch "$branch"' EXIT
 
+# Branches of runs killed before their trap ran (reboot, SIGKILL) are never swept by name or pid: delete a
+# ci/* branch of any lane only when its last commit is older than 24 h and no run on it is queued or in progress.
+sweep_old_branches() {
+  local cutoff=$(($(date +%s) - 86400)) when ref
+  git fetch -q --no-tags --depth=1 --no-write-fetch-head origin '+refs/heads/ci/*:refs/ci-sweep/*' 2>/dev/null || return 0
+  while read -r when ref; do
+    [ "$when" -lt "$cutoff" ] && remove_branch "ci/${ref#refs/ci-sweep/}"
+    git update-ref -d "$ref" || true
+  done < <(git for-each-ref --format='%(committerdate:unix) %(refname)' refs/ci-sweep)
+}
+sweep_old_branches || true
+
 # Same tree as HEAD in a child commit whose message skips the push-triggered run: the dispatch below
 # is the only run, and it carries the module/-run inputs.
 commit=$(git commit-tree "HEAD^{tree}" -p HEAD -m "ci-test $lane $sha [skip ci]")

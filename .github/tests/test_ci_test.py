@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 
@@ -52,7 +53,9 @@ case "$1" in
   status) ;;
   commit-tree) echo deadbeef ;;
   push) exit 0 ;;
-  ls-remote) cat "$FAKE_REMOTE" ;;
+  fetch) ;;
+  for-each-ref) cat "$FAKE_REMOTE" ;;
+  update-ref) ;;
   *) exit 1 ;;
 esac
 '''
@@ -70,7 +73,7 @@ class CITestScript(unittest.TestCase):
         state.write_text(json.dumps({"lookups": 0, "appear_after": appear_after, "active_default": active_default,
                                      "active": active or {}}))
         remote = root / "remote"
-        remote.write_text("".join(f"0000000 refs/heads/{name}\n" for name in remote_branches))
+        remote.write_text("".join(f"{when} refs/ci-sweep/{name[3:]}\n" for name, when in remote_branches))
         log, sleeps = root / "calls.log", root / "sleeps.log"
         log.write_text("")
         sleeps.write_text("")
@@ -107,17 +110,20 @@ class CITestScript(unittest.TestCase):
                 if not deleted:
                     self.assertIn("kept ci/lane1-", result.stderr)
 
-    def test_deletes_only_its_own_branch_never_other_branches_of_the_lane(self):
-        # 1fc37dd85: foreign ci/<lane>-* branches belong to concurrent runs, finished-looking or not.
-        dead, queued, live = "ci/lane1-aaa-1-999999", "ci/lane1-bbb-1-999998", f"ci/lane1-ccc-1-{os.getpid()}"
-        result, calls, _, _ = self.run_script(appear_after=1, active={queued: 1}, remote_branches=(dead, queued, live))
+    def test_sweeps_only_branches_older_than_24h_without_a_queued_or_unknown_run(self):
+        now = int(time.time())
+        old, young, queued, unknown = ("ci/lane2-aaa-1-1", "ci/lane2-bbb-1-2", "ci/lane3-ccc-1-3", "ci/lane4-ddd-1-4")
+        result, calls, _, _ = self.run_script(
+            appear_after=1, active={queued: 1, unknown: "unknown"},
+            remote_branches=((old, now - 86400 - 60), (young, now - 86400 + 3600), (queued, now - 90000),
+                             (unknown, now - 90000)))
         self.assertEqual(result.returncode, 0, result.stderr)
         removed = self.deleted(calls)
-        self.assertEqual(len(removed), 1, calls)
-        self.assertRegex(removed[0], r"^ci/lane1-abc1234-\d{6}-\d+$")
-        self.assertFalse(any(name in call for name in (dead, queued, live) for call in calls
-                             if call.startswith("gh run list")), "a foreign branch was queried")
-
+        self.assertIn(old, removed)  # another lane's, so the sweep is not limited to this lane
+        for kept in (young, queued, unknown):
+            self.assertNotIn(kept, removed)
+        self.assertFalse(any(young in call for call in calls if call.startswith("gh run list")), "a young branch was queried")
+        self.assertEqual(len(removed), 2, calls)  # the old one and this invocation's own
 
 if __name__ == "__main__":
     unittest.main()
