@@ -172,8 +172,6 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, refs := range map[string][]AdmittedScope{
-		"duplicate":        {live[0], live[0]},
-		"unsupported kind": {{ResourceKind: "account", ResourceID: account}},
 		"oversized id":     {{ResourceKind: "machine_access", ResourceID: strings.Repeat("a", 257)}},
 		"over budget":      make([]AdmittedScope, 129),
 	} {

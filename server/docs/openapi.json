@@ -7772,7 +7772,9 @@
                     "machine_access",
                     "inspector",
                     "config_compare",
-                    "machine_network"
+                    "machine_network",
+                    "recording",
+                    "codex_session"
                   ]
                 },
                 "resource_id": {

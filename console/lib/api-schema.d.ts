@@ -9945,7 +9945,7 @@ export interface components {
             /** @description Only scopes referenced by currently live admitted operations on this exact authenticated endpoint. Keeps current revocation authority visible after original credential expiry without renewing that credential. Drop each reference when its work ends. Historical cached credentials must not be submitted. machine_network identifies an already-admitted personal peer carrier using its signed network scope ID, including idle carriers; this retains current authority beyond endpoint certificate expiry without reissuing that certificate. Fresh transports still require current certificates. */
             admitted_scopes?: {
                 /** @enum {string} */
-                resource_kind: "machine_access" | "inspector" | "config_compare" | "machine_network";
+                resource_kind: "machine_access" | "inspector" | "config_compare" | "machine_network" | "recording" | "codex_session";
                 resource_id: string;
             }[];
         };

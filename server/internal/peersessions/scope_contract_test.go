@@ -161,7 +161,7 @@ func TestEveryRelayGrantTheServerBuildsIsAcceptedByRelaysAndClients(t *testing.T
 	}
 }
 
-// The admitted scopes an endpoint reports are the kinds of the shared list; an unknown kind is refused.
+// The admitted scopes an endpoint reports are the kinds of the shared list.
 func TestAdmittedScopesTakeEverySharedKind(t *testing.T) {
 	var scopes []AdmittedScope
 	peernetwork.Scopes(func(kind, capability string) bool {
@@ -177,7 +177,13 @@ func TestAdmittedScopesTakeEverySharedKind(t *testing.T) {
 			t.Errorf("%s admitted scopes dropped", s.ResourceKind)
 		}
 	}
-	if _, err := admittedScopeIDs([]AdmittedScope{{ResourceKind: "unknown", ResourceID: "x"}}); err == nil {
-		t.Fatal("an unknown kind was accepted")
+	// A newer client's kind and a retried duplicate are skipped, never a refusal of the whole configuration
+	// (audit-A P1-3); a malformed id still is.
+	ids, err = admittedScopeIDs([]AdmittedScope{{ResourceKind: "unknown", ResourceID: "x"}, {ResourceKind: "recording", ResourceID: "r"}, {ResourceKind: "recording", ResourceID: "r"}})
+	if err != nil || len(ids["unknown"]) != 0 || len(ids["recording"]) != 1 {
+		t.Fatalf("ids %v, err %v", ids, err)
+	}
+	if _, err := admittedScopeIDs([]AdmittedScope{{ResourceKind: "recording", ResourceID: ""}}); err == nil {
+		t.Fatal("an empty id was accepted")
 	}
 }
