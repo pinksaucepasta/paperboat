@@ -176,6 +176,31 @@ optional TLS. It has no HTTP path and does not use Paperboat's private-access he
 A `tcp_private` route has no public listener or HTTP hostname/path matcher and never
 enters the public route table.
 
+### Header and URL rules on a route
+
+An http route can carry a few rules that the Paperboat edge applies before a request reaches your app: request and response
+header changes, one path-prefix rewrite and redirects. They are stored with the route and travel with it.
+
+```sh
+pb tunnel route update api web \
+  --request-header 'set:X-Env=prod' --request-header 'remove:X-Debug' \
+  --response-header 'add:X-Served-By=paperboat' \
+  --rewrite-path '/api -> /v1' \
+  --redirect '/old -> 308:/new' --redirect '/docs -> 301:https://example.com/help'
+```
+
+- Headers: `set` replaces, `add` appends, `remove` deletes; at most 8 per direction, names of letters, digits and `-_.`,
+  values up to 4096 bytes without line breaks.
+- `--rewrite-path '/from -> /to'` changes the path the app sees; it matches whole segments (`/api` covers `/api/x`, not `/apix`)
+  and does not apply to WebSocket handshakes.
+- `--redirect '/from -> [301|302|307|308:]target'` answers at the edge without calling your app (302 when no status is given);
+  the target is a path or an `https://` URL, what follows the prefix and the query are kept; at most 4, longest prefix first.
+- The edge keeps what it owns: rules cannot name `Forwarded`, `X-Forwarded-*`, `X-Real-IP`, `Host`, `Cookie`, `Set-Cookie`,
+  `Authorization`, `X-Paperboat-*`, `Paperboat-*` (including the signed visitor assertion), connection headers, `Alt-Svc` or the
+  security headers it sets (use `--host-header` for the Host the app sees).
+- On update each list is replaced as a whole and the route's other rules stay; `--clear-request-headers`,
+  `--clear-response-headers`, `--clear-rewrite-path` and `--clear-redirects` remove one. Previews and TCP/TLS routes take no rules.
+
 ## Apps and proxies behind a tunnel
 
 Paperboat serves the public name over HTTPS and tells the origin so. Every

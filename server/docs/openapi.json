@@ -2784,6 +2784,109 @@
           }
         }
       },
+      "TunnelRouteRewriteRules": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Header, path-prefix and redirect rules the edge applies to an http route before the request goes to the app (set with pb tunnel route add/update). At most 8 request and 8 response header rules, one path rewrite and 4 redirects, 8 KiB in all. Rules cannot name headers the edge, the connection or the browser own (Forwarded, X-Forwarded-*, X-Real-IP, Host, Cookie, Set-Cookie, Authorization, X-Paperboat-*, Paperboat-*, Alt-Svc and the security headers); an update replaces the whole document and an empty object clears it.",
+        "properties": {
+          "request_headers": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "$ref": "#/components/schemas/TunnelRouteHeaderRule"
+            }
+          },
+          "response_headers": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "$ref": "#/components/schemas/TunnelRouteHeaderRule"
+            }
+          },
+          "path_rewrite": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "from",
+              "to"
+            ],
+            "properties": {
+              "from": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512,
+                "description": "Absolute path prefix; /api maps /api and /api/x, never /apix."
+              },
+              "to": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              }
+            }
+          },
+          "redirects": {
+            "type": "array",
+            "maxItems": 4,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "from",
+                "code",
+                "to"
+              ],
+              "properties": {
+                "from": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "code": {
+                  "enum": [
+                    301,
+                    302,
+                    307,
+                    308
+                  ]
+                },
+                "to": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2048,
+                  "description": "A path starting with a single /, or an https:// URL; what follows the matched prefix and the query are appended."
+                }
+              }
+            }
+          }
+        }
+      },
+      "TunnelRouteHeaderRule": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "op",
+          "name"
+        ],
+        "properties": {
+          "op": {
+            "enum": [
+              "add",
+              "set",
+              "remove"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "value": {
+            "type": "string",
+            "maxLength": 4096,
+            "description": "No line breaks; absent for remove."
+          }
+        }
+      },
       "TunnelRoute": {
         "type": "object",
         "additionalProperties": false,
@@ -2866,6 +2969,9 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 10000
+          },
+          "rewrite_rules": {
+            "$ref": "#/components/schemas/TunnelRouteRewriteRules"
           },
           "desired_state": {
             "enum": [
@@ -3271,6 +3377,9 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 10000
+          },
+          "rewrite_rules": {
+            "$ref": "#/components/schemas/TunnelRouteRewriteRules"
           }
         }
       },
@@ -3324,6 +3433,9 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 10000
+          },
+          "rewrite_rules": {
+            "$ref": "#/components/schemas/TunnelRouteRewriteRules"
           },
           "desired_state": {
             "enum": [
