@@ -219,3 +219,21 @@ func featureNativeDispatch(ctx context.Context, bridge *workloadbridge.Client) (
 	// that hostd fenced refuses whatever the carrier last saw as active.
 	return &server.NativeDispatchConfig{Token: base64.RawURLEncoding.EncodeToString(capability), HandshakeTimeout: 15 * time.Second, Fence: bridge.AcquireAdmission}, nil
 }
+
+// workerHealthRetry is the pause before the one retry of a failed feature health check. A single failed call (a
+// reset connection to the session owner) ended the worker and hostd with it, cutting every carrier for the 5 s
+// systemd restart; an owner that is really gone fails the retry too and ends the worker within a second.
+var workerHealthRetry = 250 * time.Millisecond
+
+func workerFeatureHealthy(ctx context.Context, feature workerFeature) error {
+	err := feature.Health(ctx)
+	if err == nil || ctx.Err() != nil || errors.Is(err, workloadbridge.ErrFenced) { // fenced: end at once
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return err
+	case <-time.After(workerHealthRetry):
+	}
+	return feature.Health(ctx)
+}

@@ -319,7 +319,7 @@ func runWorkerWith(ctx context.Context, args []string, input io.Reader, output, 
 			}
 			return nil
 		case <-ticker.C:
-			if err := feature.Health(ctx); err != nil {
+			if err := workerFeatureHealthy(ctx, feature); err != nil {
 				return err
 			}
 			if err := candidate.Heartbeat(ctx); err != nil {
