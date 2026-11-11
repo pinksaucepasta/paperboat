@@ -102,7 +102,10 @@ func TestE2ECore(t *testing.T) {
 		if err := e.awaitEdgeReady(); err != nil {
 			return err
 		}
-		return e.awaitEdgeServes()
+		if err := e.awaitEdgeServes(); err != nil {
+			return err
+		}
+		return e.requireRestoredCertificates()
 	})
 	e.assertAll("after edge restart")
 	e.step("block the direct path between the machines", e.blockDirect)

@@ -230,6 +230,10 @@ type CertificateView struct {
 type Config struct {
 	Now                    func() time.Time
 	MaximumCertificateLife time.Duration
+	// Persistence, when set, keeps each active certificate across process restarts (persist.go). A failed write never
+	// fails the activation that triggered it: the certificate keeps serving and OnPersistError reports the failure.
+	Persistence    Persistence
+	OnPersistError func(operation string, err error)
 }
 
 type Registry struct {
@@ -239,6 +243,10 @@ type Registry struct {
 	closed  bool
 	entries map[string]*entry
 	active  map[string]string
+	persist Persistence
+	onError func(operation string, err error)
+	// persistMu serialises the disk step of persist jobs (finishPersist).
+	persistMu sync.Mutex
 }
 
 type entry struct {
@@ -254,6 +262,9 @@ type entry struct {
 	retiredAt   time.Time
 	revokedAt   time.Time
 	certificate tls.Certificate
+	// restored marks an entry read back from disk by RestoreEncoded: no server action will ever retire it, so the
+	// activation that replaces it discards it.
+	restored bool
 }
 
 func NewRegistry(config Config) (*Registry, error) {
@@ -265,7 +276,7 @@ func NewRegistry(config Config) (*Registry, error) {
 	if maxLife <= 0 || maxLife > defaultMaximumLifetime {
 		maxLife = defaultMaximumLifetime
 	}
-	return &Registry{now: now, maxLife: maxLife, entries: make(map[string]*entry), active: make(map[string]string)}, nil
+	return &Registry{now: now, maxLife: maxLife, entries: make(map[string]*entry), active: make(map[string]string), persist: config.Persistence, onError: config.OnPersistError}, nil
 }
 
 func (r *Registry) Stage(ctx context.Context, binding Binding, bundle Bundle) error {
@@ -424,6 +435,8 @@ func (r *Registry) activate(ctx context.Context, binding Binding, expectedFinger
 	}
 	binding.Hostname = host
 	now := r.now().UTC()
+	var job *persistJob
+	defer func() { r.finishPersist(job) }() // registered first: runs after the unlock below, outside the registry lock
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
@@ -475,10 +488,11 @@ func (r *Registry) activate(ctx context.Context, binding Binding, expectedFinger
 		if previous := r.entries[previousKey]; previous != nil && previous.state == StateActive {
 			previous.state = StateRetired
 			previous.retiredAt = now
-			if previous.binding.CertificateGeneration == binding.CertificateGeneration && previous.binding.Target().normalizedKind() == TargetPreviewLease && previous.fingerprint == e.fingerprint {
+			if previous.restored || previous.binding.CertificateGeneration == binding.CertificateGeneration && previous.binding.Target().normalizedKind() == TargetPreviewLease && previous.fingerprint == e.fingerprint {
 				// The replacement is already ready, so discard the old target's
 				// private-key copy immediately. A later retire message is safely
-				// idempotent because the entry is gone.
+				// idempotent because the entry is gone. A restored entry has no
+				// server action that would ever retire it.
 				wipeTLSCertificate(&previous.certificate)
 				delete(r.entries, previousKey)
 			}
@@ -487,6 +501,7 @@ func (r *Registry) activate(ctx context.Context, binding Binding, expectedFinger
 	e.state = StateActive
 	e.activatedAt = now
 	r.active[activeKey] = bindingKey(binding)
+	job = r.persistJobLocked(activeKey, e)
 	return nil
 }
 
@@ -547,6 +562,8 @@ func (r *Registry) revoke(ctx context.Context, binding Binding, expectedFingerpr
 	}
 	binding.Hostname = host
 	now := r.now().UTC()
+	var job *persistJob
+	defer func() { r.finishPersist(job) }() // runs after the unlock below
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	e, ok := r.entries[bindingKey(binding)]
@@ -560,6 +577,7 @@ func (r *Registry) revoke(ctx context.Context, binding Binding, expectedFingerpr
 	e.revokedAt = now
 	if r.active[hostKey(e.hostname, e.wildcard)] == bindingKey(binding) {
 		delete(r.active, hostKey(e.hostname, e.wildcard))
+		job = &persistJob{key: hostKey(e.hostname, e.wildcard), remove: true}
 	}
 	wipeTLSCertificate(&e.certificate)
 	delete(r.entries, bindingKey(binding))
