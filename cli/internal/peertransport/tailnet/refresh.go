@@ -366,6 +366,11 @@ func (a *Authority) nextRefresh(err error, failures, unusable int) time.Duration
 	// Signed health observations expire regionalObservationMaxAge after they were
 	// made, not after they were issued. Active regional recovery renews before the
 	// earliest one ends, so its relays are not withdrawn between renewals.
+	if recovery != nil && recovery.pair() == "" {
+		// An idle listener needs lease renewal, not fresh relay observations.
+		// Machine events still request urgent refreshes for access changes.
+		delay *= 2
+	}
 	if recovery != nil && recovery.pair() != "" {
 		delay = backoff.Retry(unusable, regionalUnusableRetry, regionalUnusableRetryMaximum)
 		if due, ok := a.regionalRenewalDelay(serverclock.Now()); ok {

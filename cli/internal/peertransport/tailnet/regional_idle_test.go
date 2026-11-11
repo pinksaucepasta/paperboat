@@ -62,7 +62,7 @@ func TestRegionalRecoveryIdleFiveMinutes(t *testing.T) {
 			t.Fatalf("idle 300s: sweeps=%d probes=%d map publications=%d", e.sweeps.Load(), e.probes.Load(), e.maps.Load())
 		}
 		// Idle observation expiry must not pull the regular control refresh forward.
-		if delay := a.nextRefresh(nil, 0, 0); delay < 24*time.Second {
+		if delay := a.nextRefresh(nil, 0, 0); delay < 48*time.Second {
 			t.Fatalf("idle refresh in %s", delay)
 		}
 		a.BindRegionalPeer(cfg.Peers[0].Identity.EndpointID)
