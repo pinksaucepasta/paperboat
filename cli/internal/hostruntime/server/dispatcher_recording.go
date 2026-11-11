@@ -70,11 +70,7 @@ func (s *terminalOutputStream) recordingEvent(snapshot session.Snapshot) error {
 		return nil
 	}
 	s.recordingID = id
-	payload, err := json.Marshal(struct {
-		Event     string            `json:"event"`
-		SessionID string            `json:"session_id"`
-		Recording *recordings.State `json:"recording"`
-	}{recording.EventRecording, snapshot.ID, snapshot.Recording})
+	payload, err := json.Marshal(recording.Event{Event: recording.EventRecording, SessionID: snapshot.ID, Recording: snapshot.Recording})
 	if err != nil {
 		return err
 	}
