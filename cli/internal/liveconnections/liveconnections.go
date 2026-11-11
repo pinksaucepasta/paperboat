@@ -4,6 +4,7 @@
 package liveconnections
 
 import (
+	"errors"
 	"sync/atomic"
 
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
@@ -43,5 +44,8 @@ func Current() Counts { return Counts{SSH: int(ssh.Load()), Forwards: int(forwar
 // RecordUnconfirmed leaves a diagnostic record when the daemon could not say how many connections are open. The
 // update proceeds anyway (the updater must work when the app is broken), but a session it cuts can then be explained.
 func RecordUnconfirmed(source string, err error) {
+	if err == nil {
+		err = errors.New("no reason given")
+	}
 	diagnosticlog.TryWarn("open connections could not be confirmed; the update proceeds", "source", source, "error", err.Error())
 }
