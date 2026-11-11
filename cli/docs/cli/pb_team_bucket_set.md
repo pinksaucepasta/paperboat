@@ -4,7 +4,7 @@ Connect or change the team's bucket
 
 ### Synopsis
 
-Save the bucket after Paperboat writes, reads back and deletes a small check object in it; a failing step is named and nothing is saved. Give the secret access key on standard input (--secret-access-key-stdin), never as an argument. Changing only --use keeps the key. --use is recordings, files, or both separated by a comma.
+Save the bucket after Paperboat writes, reads back and deletes a small check object in it; a failing step is named and nothing is saved. Give the secret access key on standard input (--secret-access-key-stdin), never as an argument; leave it out to keep the stored key while changing another field.
 
 JSON output is supported with --json.
 
@@ -24,7 +24,6 @@ pb team bucket set <team> [flags]
       --prefix string             optional folder inside the bucket
       --region string             region of the bucket
       --secret-access-key-stdin   read the secret access key from standard input
-      --use string                what the bucket is for: recordings, files, or recordings,files
 ```
 
 ### Options inherited from parent commands

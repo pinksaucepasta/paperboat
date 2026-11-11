@@ -10,7 +10,6 @@ import {
   saveTeamBucket,
   teamBucketQuery,
   type TeamBucket,
-  type TeamBucketInput,
 } from "@/lib/team-bucket"
 import { useTimeFormat } from "@/lib/use-time-format"
 import { ConfirmAction } from "@/components/list-toolbar"
@@ -23,8 +22,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 
 /**
- * Team → Storage: the team's own S3-compatible bucket and what it is used for. Owners and admins change it. The access
- * key is stored encrypted and never shown; saving checks the bucket and names the step that fails.
+ * Team → Storage: the team's own S3-compatible bucket, where machines archive their terminal recordings. Owners and admins
+ * change it. The access key is stored encrypted and never shown; saving checks the bucket and names the step that fails.
  */
 export function TeamStorage({ team, admin }: { team: string; admin: boolean }) {
   const bucket = useApiQuery(teamBucketQuery(team))
@@ -65,22 +64,17 @@ export function TeamStorage({ team, admin }: { team: string; admin: boolean }) {
           <BucketRows bucket={bucket.data} />
         )}
       </Section>
-      {bucket.data && (
-        <>
-          <UsesSection team={team} bucket={bucket.data} admin={admin} />
-          {admin && (
-            <Button variant="ghost" className="self-start text-destructive" onClick={() => setRemoving(true)}>
-              Disconnect bucket
-            </Button>
-          )}
-        </>
+      {bucket.data && admin && (
+        <Button variant="ghost" className="self-start text-destructive" onClick={() => setRemoving(true)}>
+          Disconnect bucket
+        </Button>
       )}
       {editing && <BucketDialog team={team} bucket={bucket.data ?? undefined} onClose={() => setEditing(false)} />}
       <ConfirmAction
         open={removing}
         onOpenChange={setRemoving}
         title="Disconnect the bucket?"
-        description="Files already in the bucket stay there. Recordings stay on their machines."
+        description="Recordings already in the bucket stay there, and recordings stay on their machines."
         action="Disconnect"
         pending="Disconnecting…"
         mutation={{
@@ -113,51 +107,6 @@ function BucketRows({ bucket }: { bucket: TeamBucket }) {
   )
 }
 
-function UsesSection({ team, bucket, admin }: { team: string; bucket: TeamBucket; admin: boolean }) {
-  const queryClient = useQueryClient()
-  const change = useMutation({
-    mutationFn: (uses: { use_recordings: boolean; use_files: boolean }) =>
-      saveTeamBucket(team, { ...input(bucket), secret_access_key: "", ...uses }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: teamBucketQuery(team).queryKey }),
-  })
-  const next = change.isPending ? change.variables : { use_recordings: bucket.use_recordings, use_files: bucket.use_files }
-  const toggle = (name: "use_recordings" | "use_files", checked: boolean) => {
-    const uses = { ...next, [name]: checked }
-    if (uses.use_recordings || uses.use_files) change.mutate(uses)
-  }
-  const last = (name: "use_recordings" | "use_files") => next[name] && !next[name === "use_recordings" ? "use_files" : "use_recordings"]
-  return (
-    <Section title="Used for">
-      <SettingRow label="Recordings" description="Machines copy closed terminal recordings here." htmlFor="bucket-recordings">
-        <Switch
-          id="bucket-recordings"
-          checked={next.use_recordings}
-          disabled={!admin || change.isPending || last("use_recordings")}
-          onCheckedChange={(checked) => toggle("use_recordings", checked)}
-        />
-      </SettingRow>
-      <SettingRow label="Files" description="Files for machines that are offline wait here." htmlFor="bucket-files">
-        <Switch
-          id="bucket-files"
-          checked={next.use_files}
-          disabled={!admin || change.isPending || last("use_files")}
-          onCheckedChange={(checked) => toggle("use_files", checked)}
-        />
-      </SettingRow>
-      {change.isError && <p className="py-3 text-sm text-destructive">{bucketMessage(change.error)}</p>}
-    </Section>
-  )
-}
-
-const input = (bucket: TeamBucket): Omit<TeamBucketInput, "secret_access_key" | "use_recordings" | "use_files"> => ({
-  endpoint: bucket.endpoint,
-  region: bucket.region,
-  bucket: bucket.bucket,
-  prefix: bucket.prefix,
-  path_style: bucket.path_style,
-  access_key_id: bucket.access_key_id,
-})
-
 function BucketDialog({ team, bucket, onClose }: { team: string; bucket?: TeamBucket; onClose: () => void }) {
   const queryClient = useQueryClient()
   const [draft, setDraft] = useState({
@@ -179,8 +128,6 @@ function BucketDialog({ team, bucket, onClose }: { team: string; bucket?: TeamBu
         access_key_id: draft.access_key_id.trim(),
         secret_access_key: draft.secret_access_key,
         path_style: pathStyle,
-        use_recordings: bucket?.use_recordings ?? true,
-        use_files: bucket?.use_files ?? false,
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: teamBucketQuery(team).queryKey })

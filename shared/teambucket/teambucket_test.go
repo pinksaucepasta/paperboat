@@ -7,7 +7,7 @@ import (
 )
 
 func valid() Input {
-	return Input{Endpoint: "https://s3.example.test", Region: "us-east-1", Bucket: "team-bucket", Prefix: "paperboat", AccessKeyID: "AKIAEXAMPLE", SecretAccessKey: "s", UseRecordings: true}
+	return Input{Endpoint: "https://s3.example.test", Region: "us-east-1", Bucket: "team-bucket", Prefix: "paperboat", AccessKeyID: "AKIAEXAMPLE", SecretAccessKey: "s"}
 }
 
 func TestInputValidate(t *testing.T) {
@@ -26,7 +26,6 @@ func TestInputValidate(t *testing.T) {
 		"private address":    func(in *Input) { in.Endpoint = "https://10.0.0.5" },
 		"metadata address":   func(in *Input) { in.Endpoint = "https://169.254.169.254" },
 		"one-label host":     func(in *Input) { in.Endpoint = "https://minio" },
-		"no use":             func(in *Input) { in.UseRecordings, in.UseFiles = false, false },
 	} {
 		in := valid()
 		change(&in)
@@ -57,9 +56,6 @@ func TestObjectKeysStayUnderThePrefix(t *testing.T) {
 	}
 	if _, err := RecordingSegmentKey("p", id, 1000000); err == nil {
 		t.Error("segment index bound")
-	}
-	if _, err := FileKey("p", "xfr_00000000-0000-4000-8000-000000000001", "../part"); err == nil || !strings.Contains(err.Error(), "invalid") {
-		t.Error("a file object name cannot leave its transfer folder")
 	}
 }
 

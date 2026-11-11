@@ -16,18 +16,14 @@ import (
 
 // fakeBucket is a team bucket in memory: it presigns URLs naming the key and records what is deleted.
 type fakeBucket struct {
-	use       teambucket.Use // "" when the team has no bucket
-	prefix    string
+	prefix    string // "none": the team has no bucket
 	deleted   []string
 	deleteErr error
 }
 
-func (b *fakeBucket) StoreFor(_ context.Context, _ *db.Tx, _ string, use teambucket.Use) (teambucket.ObjectStore, error) {
-	switch {
-	case b.use == "" && b.prefix == "none":
+func (b *fakeBucket) StoreFor(context.Context, *db.Tx, string) (teambucket.ObjectStore, error) {
+	if b.prefix == "none" {
 		return nil, teambucket.ErrNotFound
-	case use != teambucket.UseAny && use != b.use:
-		return nil, teambucket.ErrUseOff
 	}
 	return b, nil
 }
@@ -73,14 +69,12 @@ func TestPostgresRecordingsArchive(t *testing.T) {
 	digest := strings.Repeat("ab", 32)
 	request := shared.UploadRequest{Segments: []shared.Segment{{Index: 0, Bytes: 100, SHA256: digest}, {Index: 1, Bytes: 200, SHA256: digest}}}
 
-	// No bucket, or a bucket chosen for files only: nothing to upload to.
-	for _, b := range []*fakeBucket{{prefix: "none"}, {use: teambucket.UseFiles}} {
-		f.s.SetBuckets(b)
-		if _, err := f.s.UploadURLs(f.ctx, f.prod, recID, request); !errors.Is(err, ErrNoBucket) {
-			t.Fatalf("upload without a recordings bucket = %v", err)
-		}
+	// No bucket: nothing to upload to.
+	f.s.SetBuckets(&fakeBucket{prefix: "none"})
+	if _, err := f.s.UploadURLs(f.ctx, f.prod, recID, request); !errors.Is(err, ErrNoBucket) {
+		t.Fatalf("upload without a bucket = %v", err)
 	}
-	bucket := &fakeBucket{use: teambucket.UseRecordings, prefix: "paperboat"}
+	bucket := &fakeBucket{prefix: "paperboat"}
 	f.s.SetBuckets(bucket)
 	if _, err := f.s.UploadURLs(f.ctx, f.dev, recID, request); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("another machine's upload = %v", err)
@@ -159,8 +153,8 @@ func TestPostgresRecordingsArchive(t *testing.T) {
 	if err := f.s.PruneArchive(f.ctx); err != nil || archivedOf(t, f, recID) != 3 || len(bucket.deleted) != 0 {
 		t.Fatalf("a team without a bucket was pruned: %v archived %d deleted %v", err, archivedOf(t, f, recID), bucket.deleted)
 	}
-	f.exec(`INSERT INTO paperboat.team_buckets(team_id,endpoint,region,bucket,prefix,access_key_id,secret,use_recordings,use_files,checked_at)
- VALUES($1,'https://s3.example.test','us-east-1','team-bucket','paperboat','AKIAEXAMPLE',decode('00','hex'),true,false,now())`, f.team)
+	f.exec(`INSERT INTO paperboat.team_buckets(team_id,endpoint,region,bucket,prefix,access_key_id,secret,checked_at)
+ VALUES($1,'https://s3.example.test','us-east-1','team-bucket','paperboat','AKIAEXAMPLE',decode('00','hex'),now())`, f.team)
 	bucket.deleteErr = errors.New("bucket down")
 	if err := f.s.PruneArchive(f.ctx); err == nil {
 		t.Fatal("a failed delete was swallowed")

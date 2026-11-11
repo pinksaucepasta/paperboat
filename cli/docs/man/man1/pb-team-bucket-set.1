@@ -10,7 +10,7 @@ pb-team-bucket-set - Connect or change the team's bucket
 
 
 .SH DESCRIPTION
-Save the bucket after Paperboat writes, reads back and deletes a small check object in it; a failing step is named and nothing is saved. Give the secret access key on standard input (--secret-access-key-stdin), never as an argument. Changing only --use keeps the key. --use is recordings, files, or both separated by a comma.
+Save the bucket after Paperboat writes, reads back and deletes a small check object in it; a failing step is named and nothing is saved. Give the secret access key on standard input (--secret-access-key-stdin), never as an argument; leave it out to keep the stored key while changing another field.
 
 .PP
 JSON output is supported with --json.
@@ -51,10 +51,6 @@ JSON output is supported with --json.
 .PP
 \fB--secret-access-key-stdin\fP[=false]
 	read the secret access key from standard input
-
-.PP
-\fB--use\fP=""
-	what the bucket is for: recordings, files, or recordings,files
 
 
 .SH OPTIONS INHERITED FROM PARENT COMMANDS

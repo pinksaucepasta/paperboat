@@ -4,7 +4,7 @@ The team's own S3-compatible bucket (owners and admins)
 
 ### Synopsis
 
-A team connects its own S3-compatible bucket and chooses what it is used for: recordings (machines copy closed terminal recordings there, so they replay when the machine is offline), files (files for machines that are offline wait there), or both. Paperboat stores the access key encrypted and only signs short-lived links; everything in the bucket is encrypted before it leaves the machine or browser, and the bucket's own security is the team's.
+A team connects its own S3-compatible bucket and its machines copy closed terminal recordings there, so a recording replays when its machine is offline. Paperboat stores the access key encrypted and only signs short-lived links; everything in the bucket is encrypted before it leaves the machine, and the bucket's own security is the team's.
 
 With --json, this command group lists its available commands.
 

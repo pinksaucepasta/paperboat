@@ -27,28 +27,25 @@ func bucketCommandWith(t *testing.T, stdin string, args ...string) (teambucket.I
 }
 
 func TestBucketInputTakesTheSecretFromStandardInputAndChecksTheRest(t *testing.T) {
-	base := []string{"--endpoint", "https://s3.example.test", "--region", "us-east-1", "--bucket", "team-bucket", "--access-key-id", "AKIAEXAMPLE", "--use", "recordings,files", "--secret-access-key-stdin"}
+	base := []string{"--endpoint", "https://s3.example.test", "--region", "us-east-1", "--bucket", "team-bucket", "--access-key-id", "AKIAEXAMPLE", "--secret-access-key-stdin"}
 	in, err := bucketCommandWith(t, "top-secret\nignored\n", base...)
-	if err != nil || in.SecretAccessKey != "top-secret" || !in.UseRecordings || !in.UseFiles || in.Prefix != "" {
+	if err != nil || in.SecretAccessKey != "top-secret" || in.Prefix != "" {
 		t.Fatalf("%+v %v", in, err)
 	}
 	if in, err = bucketCommandWith(t, "", base[:len(base)-1]...); err != nil || in.SecretAccessKey != "" {
-		t.Fatalf("a change of uses keeps the stored key: %+v %v", in, err)
+		t.Fatalf("no key on standard input keeps the stored key: %+v %v", in, err)
 	}
-	if _, err := bucketCommandWith(t, "", "--endpoint", "http://s3.example.test", "--region", "r", "--bucket", "team-bucket", "--access-key-id", "A", "--use", "files"); err == nil || !strings.Contains(err.Error(), "https") {
+	if _, err := bucketCommandWith(t, "", "--endpoint", "http://s3.example.test", "--region", "r", "--bucket", "team-bucket", "--access-key-id", "A"); err == nil || !strings.Contains(err.Error(), "https") {
 		t.Fatalf("a plain http endpoint = %v", err)
-	}
-	if _, err := bucketCommandWith(t, "", "--endpoint", "https://s3.example.test", "--use", "everything"); err == nil || !strings.Contains(err.Error(), "--use") {
-		t.Fatalf("an unknown use = %v", err)
 	}
 }
 
 func TestPrintBucketNeverCarriesASecret(t *testing.T) {
 	var out bytes.Buffer
-	if err := printBucket(&out, teambucket.Config{Endpoint: "https://s3.example.test", Region: "r", Bucket: "team-bucket", AccessKeyID: "AKIAEXAMPLE", UseRecordings: true}, false); err != nil {
+	if err := printBucket(&out, teambucket.Config{Endpoint: "https://s3.example.test", Region: "r", Bucket: "team-bucket", AccessKeyID: "AKIAEXAMPLE"}, false); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "Used for: recordings") || !strings.Contains(out.String(), "(bucket root)") || strings.Contains(strings.ToLower(out.String()), "secret") {
+	if !strings.Contains(out.String(), "(bucket root)") || strings.Contains(strings.ToLower(out.String()), "secret") {
 		t.Fatalf("%q", out.String())
 	}
 }

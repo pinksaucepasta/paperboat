@@ -682,8 +682,6 @@
           "prefix",
           "path_style",
           "access_key_id",
-          "use_recordings",
-          "use_files",
           "checked_at"
         ],
         "properties": {
@@ -706,14 +704,6 @@
           "access_key_id": {
             "type": "string"
           },
-          "use_recordings": {
-            "type": "boolean",
-            "description": "Machines copy closed recordings here."
-          },
-          "use_files": {
-            "type": "boolean",
-            "description": "Files for offline machines wait here."
-          },
           "checked_at": {
             "type": "string",
             "format": "date-time",
@@ -731,9 +721,7 @@
           "bucket",
           "prefix",
           "path_style",
-          "access_key_id",
-          "use_recordings",
-          "use_files"
+          "access_key_id"
         ],
         "properties": {
           "endpoint": {
@@ -763,15 +751,9 @@
             "type": "string",
             "maxLength": 256,
             "description": "Empty keeps the stored key when the bucket already exists."
-          },
-          "use_recordings": {
-            "type": "boolean"
-          },
-          "use_files": {
-            "type": "boolean"
           }
         },
-        "description": "At least one use is required."
+        "description": "Saving a new or changed bucket checks it with a probe object first."
       },
       "RecordingState": {
         "type": "object",
@@ -50462,7 +50444,7 @@
       "put": {
         "operationId": "team_bucket_save",
         "summary": "Connect or change the team's bucket",
-        "description": "Owners and admins. Unless only the uses change, Paperboat first writes, reads back and deletes a check object; a failing step is refused as bucket_check_failed (422) and nothing is saved. The secret key is stored encrypted and never returned.",
+        "description": "Owners and admins. Unless nothing changed, Paperboat first writes, reads back and deletes a check object; a failing step is refused as bucket_check_failed (422) and nothing is saved. The secret key is stored encrypted and never returned.",
         "security": [
           {
             "cookieSession": [],

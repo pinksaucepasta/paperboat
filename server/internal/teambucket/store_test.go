@@ -53,7 +53,7 @@ func newTestStore(t *testing.T, fake *fakeS3) (*Store, *http.Client) {
 	t.Helper()
 	server := httptest.NewTLSServer(fake)
 	t.Cleanup(server.Close)
-	cfg := shared.Config{Endpoint: server.URL, Region: "us-east-1", Bucket: "team-bucket", Prefix: "paperboat", PathStyle: true, AccessKeyID: "AKIAEXAMPLE", UseRecordings: true}
+	cfg := shared.Config{Endpoint: server.URL, Region: "us-east-1", Bucket: "team-bucket", Prefix: "paperboat", PathStyle: true, AccessKeyID: "AKIAEXAMPLE"}
 	store, err := newStore(context.Background(), cfg, "secret", server.Client())
 	if err != nil {
 		t.Fatal(err)

@@ -1,6 +1,6 @@
-// Package teambucket keeps each team's own S3-compatible bucket: where it is, which credentials reach it (stored
-// encrypted, never returned) and what the team uses it for. Everything in the bucket is client-side ciphertext;
-// machines and browsers get short-lived presigned requests from here.
+// Package teambucket keeps each team's own S3-compatible bucket: where it is and which credentials reach it (stored
+// encrypted, never returned). Machines archive their terminal recordings in it. Everything in the bucket is client-side
+// ciphertext; machines and browsers get short-lived presigned requests from here.
 package teambucket
 
 import (
@@ -22,8 +22,6 @@ var (
 	ErrNotFound  = errors.New("team or bucket not found")
 	ErrNeedsTeam = errors.New("the team bucket is a Team plan feature")
 	ErrNoKey     = errors.New("the server has no encryption key for bucket credentials")
-	// ErrUseOff means the team has a bucket but did not choose it for this use.
-	ErrUseOff = errors.New("the team bucket is not used for this")
 )
 
 type Service struct {
@@ -61,11 +59,11 @@ func authorizeTx(ctx context.Context, tx *db.Tx, account, team string) error {
 	return teams.SSOGuardTx(ctx, tx, team, account)
 }
 
-const columns = `endpoint, region, bucket, prefix, path_style, access_key_id, use_recordings, use_files, checked_at`
+const columns = `endpoint, region, bucket, prefix, path_style, access_key_id, checked_at`
 
 func scan(row interface{ Scan(...any) error }) (shared.Config, error) {
 	var c shared.Config
-	err := row.Scan(&c.Endpoint, &c.Region, &c.Bucket, &c.Prefix, &c.PathStyle, &c.AccessKeyID, &c.UseRecordings, &c.UseFiles, &c.CheckedAt)
+	err := row.Scan(&c.Endpoint, &c.Region, &c.Bucket, &c.Prefix, &c.PathStyle, &c.AccessKeyID, &c.CheckedAt)
 	return c, err
 }
 
@@ -86,8 +84,8 @@ func (s *Service) Get(ctx context.Context, account, team string) (shared.Config,
 	return out, err
 }
 
-// Put is PUT /v1/teams/{team}/bucket. A changed endpoint, region, bucket, prefix, key or secret is checked with a
-// probe object first and refused with a *ProbeError naming the failing step; only toggling the uses skips the check.
+// Put is PUT /v1/teams/{team}/bucket. A new or changed bucket, key or secret is checked with a probe object first and
+// refused with a *ProbeError naming the failing step; saving the same bucket again changes nothing.
 func (s *Service) Put(ctx context.Context, account, team string, in shared.Input) (shared.Config, error) {
 	if s.key == "" {
 		return shared.Config{}, ErrNoKey
@@ -124,17 +122,16 @@ func (s *Service) Put(ctx context.Context, account, team string, in shared.Input
 		}
 	}
 	next := shared.Config{Endpoint: in.Endpoint, Region: in.Region, Bucket: in.Bucket, Prefix: in.Prefix, PathStyle: in.PathStyle,
-		AccessKeyID: in.AccessKeyID, UseRecordings: in.UseRecordings, UseFiles: in.UseFiles, CheckedAt: s.now().UTC()}
+		AccessKeyID: in.AccessKeyID, CheckedAt: s.now().UTC()}
 	if current != nil && in.SecretAccessKey == "" && sameBucket(*current, next) {
-		next.CheckedAt = current.CheckedAt // only the uses changed: the bucket was already proved
-	} else {
-		store, err := newStore(ctx, next, secret, s.client())
-		if err != nil {
-			return shared.Config{}, err
-		}
-		if err := store.Probe(ctx); err != nil {
-			return shared.Config{}, err
-		}
+		return *current, nil // nothing changed: the bucket was already proved
+	}
+	store, err := newStore(ctx, next, secret, s.client())
+	if err != nil {
+		return shared.Config{}, err
+	}
+	if err := store.Probe(ctx); err != nil {
+		return shared.Config{}, err
 	}
 	box, err := secrets.Encrypt(s.key, secret)
 	if err != nil {
@@ -145,15 +142,15 @@ func (s *Service) Put(ctx context.Context, account, team string, in shared.Input
 		if err := authorizeTx(ctx, tx, account, team); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO team_buckets(team_id,endpoint,region,bucket,prefix,path_style,access_key_id,secret,use_recordings,use_files,checked_at)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		if _, err := tx.Exec(ctx, `INSERT INTO team_buckets(team_id,endpoint,region,bucket,prefix,path_style,access_key_id,secret,checked_at)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
  ON CONFLICT(team_id) DO UPDATE SET endpoint=EXCLUDED.endpoint,region=EXCLUDED.region,bucket=EXCLUDED.bucket,prefix=EXCLUDED.prefix,path_style=EXCLUDED.path_style,
- access_key_id=EXCLUDED.access_key_id,secret=EXCLUDED.secret,use_recordings=EXCLUDED.use_recordings,use_files=EXCLUDED.use_files,checked_at=EXCLUDED.checked_at,updated_at=now()`,
-			team, next.Endpoint, next.Region, next.Bucket, next.Prefix, next.PathStyle, next.AccessKeyID, box, next.UseRecordings, next.UseFiles, next.CheckedAt); err != nil {
+ access_key_id=EXCLUDED.access_key_id,secret=EXCLUDED.secret,checked_at=EXCLUDED.checked_at,updated_at=now()`,
+			team, next.Endpoint, next.Region, next.Bucket, next.Prefix, next.PathStyle, next.AccessKeyID, box, next.CheckedAt); err != nil {
 			return err
 		}
 		out = next
-		return teams.AuditDirectoryChangeTx(ctx, tx, account, team, "team_bucket_configured", map[string]any{"use_recordings": next.UseRecordings, "use_files": next.UseFiles})
+		return teams.AuditDirectoryChangeTx(ctx, tx, account, team, "team_bucket_configured", map[string]any{})
 	})
 	return out, err
 }
@@ -179,34 +176,20 @@ func (s *Service) Delete(ctx context.Context, account, team string) error {
 	})
 }
 
-// Use names what a bucket is for.
-type Use string
-
-const (
-	UseRecordings Use = "recordings"
-	UseFiles      Use = "files"
-	// UseAny opens the bucket for deleting what it holds, whichever use the team has since switched off.
-	UseAny Use = ""
-)
-
-// StoreFor opens team's bucket for one use inside the caller's transaction: ErrNotFound without a bucket, ErrUseOff when
-// the team did not choose it for that use.
-func (s *Service) StoreFor(ctx context.Context, tx *db.Tx, team string, use Use) (ObjectStore, error) {
+// StoreFor opens team's bucket inside the caller's transaction: ErrNotFound when the team has none.
+func (s *Service) StoreFor(ctx context.Context, tx *db.Tx, team string) (ObjectStore, error) {
 	if s.key == "" {
 		return nil, ErrNoKey
 	}
 	var sealed []byte
-	row := tx.QueryRow(ctx, `SELECT `+columns+`, secret FROM team_buckets WHERE team_id=$1`, team)
 	var c shared.Config
-	err := row.Scan(&c.Endpoint, &c.Region, &c.Bucket, &c.Prefix, &c.PathStyle, &c.AccessKeyID, &c.UseRecordings, &c.UseFiles, &c.CheckedAt, &sealed)
+	err := tx.QueryRow(ctx, `SELECT `+columns+`, secret FROM team_buckets WHERE team_id=$1`, team).
+		Scan(&c.Endpoint, &c.Region, &c.Bucket, &c.Prefix, &c.PathStyle, &c.AccessKeyID, &c.CheckedAt, &sealed)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
-	}
-	if use == UseRecordings && !c.UseRecordings || use == UseFiles && !c.UseFiles {
-		return nil, ErrUseOff
 	}
 	secret, err := secrets.Decrypt(s.key, sealed)
 	if err != nil {

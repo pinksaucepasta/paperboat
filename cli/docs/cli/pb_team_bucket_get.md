@@ -4,7 +4,7 @@ Show the team's bucket and its uses
 
 ### Synopsis
 
-Show the bucket's endpoint, region, bucket, prefix, access key ID, what it is used for and when Paperboat last checked it. The secret key is never shown.
+Show the bucket's endpoint, region, bucket, prefix, access key ID and when Paperboat last checked it. The secret key is never shown.
 
 JSON output is supported with --json.
 

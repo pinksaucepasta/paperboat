@@ -1,7 +1,7 @@
 // Package teambucket is the wire contract of a team's own S3-compatible bucket. The team configures it once
-// (endpoint, bucket, region, credentials stored encrypted by the server) and chooses what it is used for:
-// recordings, files, or both. Only ciphertext ever goes in the bucket; machines and browsers reach it through
-// short-lived presigned requests the server signs, and never hold the credentials.
+// (endpoint, bucket, region, credentials stored encrypted by the server); machines archive their terminal recordings in
+// it. Only ciphertext ever goes in the bucket; machines and browsers reach it through short-lived presigned requests the
+// server signs, and never hold the credentials.
 package teambucket
 
 import (
@@ -18,7 +18,6 @@ import (
 // Object layout under the team's prefix.
 const (
 	recordingsDir = "v1/recordings"
-	filesDir      = "v1/files"
 	verifyDir     = "v1/verify"
 )
 
@@ -33,19 +32,17 @@ const (
 
 // Config is the team's bucket as the console and CLI read it. The secret key is never returned.
 type Config struct {
-	Endpoint      string    `json:"endpoint"`
-	Region        string    `json:"region"`
-	Bucket        string    `json:"bucket"`
-	Prefix        string    `json:"prefix"`
-	PathStyle     bool      `json:"path_style"`
-	AccessKeyID   string    `json:"access_key_id"`
-	UseRecordings bool      `json:"use_recordings"`
-	UseFiles      bool      `json:"use_files"`
-	CheckedAt     time.Time `json:"checked_at"`
+	Endpoint    string    `json:"endpoint"`
+	Region      string    `json:"region"`
+	Bucket      string    `json:"bucket"`
+	Prefix      string    `json:"prefix"`
+	PathStyle   bool      `json:"path_style"`
+	AccessKeyID string    `json:"access_key_id"`
+	CheckedAt   time.Time `json:"checked_at"`
 }
 
 // Input saves the bucket (PUT /v1/teams/{team}/bucket). An empty SecretAccessKey keeps the stored one when the
-// bucket already exists. Saving checks the bucket with a probe object; a failed check is a refusal that names
+// bucket already exists. Saving a changed bucket checks it with a probe object; a failed check is a refusal that names
 // the step, and nothing is stored.
 type Input struct {
 	Endpoint        string `json:"endpoint"`
@@ -55,8 +52,6 @@ type Input struct {
 	PathStyle       bool   `json:"path_style"`
 	AccessKeyID     string `json:"access_key_id"`
 	SecretAccessKey string `json:"secret_access_key,omitempty"`
-	UseRecordings   bool   `json:"use_recordings"`
-	UseFiles        bool   `json:"use_files"`
 }
 
 // Authority is one presigned request: the URL and the headers the caller must send with it unchanged.
@@ -103,7 +98,6 @@ var (
 	prefixPattern = regexp.MustCompile(`^([A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*)?$`)
 	keyPattern    = regexp.MustCompile(`^[A-Za-z0-9+/=_.-]{1,128}$`)
 	idPattern     = regexp.MustCompile(`^[a-z]{2,8}_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
-	namePattern   = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 	hexSHA256     = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
@@ -127,8 +121,6 @@ func (in Input) Validate() error {
 		return fmt.Errorf("%w: the access key ID is not valid", ErrInvalid)
 	case len(in.SecretAccessKey) > 256:
 		return fmt.Errorf("%w: the secret access key is too long", ErrInvalid)
-	case !in.UseRecordings && !in.UseFiles:
-		return fmt.Errorf("%w: choose at least one use", ErrInvalid)
 	}
 	return nil
 }
@@ -163,14 +155,6 @@ func RecordingPrefixKey(prefix, recordingID string) (string, error) {
 		return "", ErrInvalid
 	}
 	return join(prefix, recordingsDir+"/"+recordingID+"/"), nil
-}
-
-// FileKey is one object of a file waiting for its recipient (a transfer id and a part name).
-func FileKey(prefix, transferID, name string) (string, error) {
-	if !idPattern.MatchString(transferID) || !namePattern.MatchString(name) {
-		return "", ErrInvalid
-	}
-	return join(prefix, filesDir+"/"+transferID+"/"+name), nil
 }
 
 // VerifyKey is the probe object a save writes, reads and deletes.

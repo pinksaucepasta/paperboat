@@ -7586,7 +7586,7 @@ export interface paths {
         get: operations["team_bucket"];
         /**
          * Connect or change the team's bucket
-         * @description Owners and admins. Unless only the uses change, Paperboat first writes, reads back and deletes a check object; a failing step is refused as bucket_check_failed (422) and nothing is saved. The secret key is stored encrypted and never returned.
+         * @description Owners and admins. Unless nothing changed, Paperboat first writes, reads back and deletes a check object; a failing step is refused as bucket_check_failed (422) and nothing is saved. The secret key is stored encrypted and never returned.
          */
         put: operations["team_bucket_save"];
         post?: never;
@@ -8303,17 +8303,13 @@ export interface components {
             prefix: string;
             path_style: boolean;
             access_key_id: string;
-            /** @description Machines copy closed recordings here. */
-            use_recordings: boolean;
-            /** @description Files for offline machines wait here. */
-            use_files: boolean;
             /**
              * Format: date-time
              * @description When Paperboat last wrote, read and deleted a check object.
              */
             checked_at: string;
         };
-        /** @description At least one use is required. */
+        /** @description Saving a new or changed bucket checks it with a probe object first. */
         TeamBucketInput: {
             /**
              * Format: uri
@@ -8327,8 +8323,6 @@ export interface components {
             access_key_id: string;
             /** @description Empty keeps the stored key when the bucket already exists. */
             secret_access_key?: string;
-            use_recordings: boolean;
-            use_files: boolean;
         };
         /** @description Live recording state of a terminal session (terminal.v1, not HTTP): Snapshot.recording in the attach response, absent when not recording. */
         RecordingState: {

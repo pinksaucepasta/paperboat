@@ -2444,18 +2444,16 @@ type Team struct {
 }
 
 type TeamBucket struct {
-	TeamID        string
-	Endpoint      string
-	Region        string
-	Bucket        string
-	Prefix        string
-	PathStyle     bool
-	AccessKeyID   string
-	Secret        []byte
-	UseRecordings bool
-	UseFiles      bool
-	CheckedAt     time.Time
-	UpdatedAt     time.Time
+	TeamID      string
+	Endpoint    string
+	Region      string
+	Bucket      string
+	Prefix      string
+	PathStyle   bool
+	AccessKeyID string
+	Secret      []byte
+	CheckedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type TeamConfigDefault struct {

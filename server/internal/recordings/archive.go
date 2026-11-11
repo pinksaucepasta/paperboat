@@ -13,7 +13,7 @@ import (
 	shared "github.com/pinksaucepasta/paperboat/shared/teambucket"
 )
 
-// ErrNoBucket: the team has no bucket, or did not choose it for recordings.
+// ErrNoBucket: the team has no bucket.
 var ErrNoBucket = errors.New("the team has no bucket for recordings")
 
 // ErrNotArchived: no segment of the recording is in the bucket.
@@ -21,18 +21,18 @@ var ErrNotArchived = errors.New("the recording is not archived in the team bucke
 
 // Buckets opens a team's bucket inside the caller's transaction (teambucket.Service).
 type Buckets interface {
-	StoreFor(ctx context.Context, tx *db.Tx, team string, use teambucket.Use) (teambucket.ObjectStore, error)
+	StoreFor(ctx context.Context, tx *db.Tx, team string) (teambucket.ObjectStore, error)
 }
 
 // SetBuckets connects the service to the team buckets; without it the archive endpoints answer ErrNoBucket.
 func (s *Service) SetBuckets(b Buckets) { s.buckets = b }
 
-func (s *Service) storeTx(ctx context.Context, tx *db.Tx, team string, use teambucket.Use) (teambucket.ObjectStore, error) {
+func (s *Service) storeTx(ctx context.Context, tx *db.Tx, team string) (teambucket.ObjectStore, error) {
 	if s.buckets == nil {
 		return nil, ErrNoBucket
 	}
-	store, err := s.buckets.StoreFor(ctx, tx, team, use)
-	if errors.Is(err, teambucket.ErrNotFound) || errors.Is(err, teambucket.ErrUseOff) {
+	store, err := s.buckets.StoreFor(ctx, tx, team)
+	if errors.Is(err, teambucket.ErrNotFound) {
 		return nil, ErrNoBucket
 	}
 	return store, err
@@ -63,7 +63,7 @@ func (s *Service) UploadURLs(ctx context.Context, machineID, id string, in share
 		if state == recording.StateDeleted {
 			return ErrDeleted
 		}
-		store, err := s.storeTx(ctx, tx, team, teambucket.UseRecordings)
+		store, err := s.storeTx(ctx, tx, team)
 		if err != nil {
 			return err
 		}
@@ -120,7 +120,7 @@ func (s *Service) archiveReplayTx(ctx context.Context, tx *db.Tx, t target, id s
 	if archived > maxArchiveSegments {
 		return fmt.Errorf("%w: archive of %d segments exceeds one replay", ErrInvalid, archived)
 	}
-	store, err := s.storeTx(ctx, tx, t.team, teambucket.UseAny)
+	store, err := s.storeTx(ctx, tx, t.team)
 	if err != nil {
 		return err
 	}
@@ -185,7 +185,7 @@ func (s *Service) PruneArchive(ctx context.Context) error {
 		budget -= e.segments
 		var store teambucket.ObjectStore
 		if err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) (err error) {
-			store, err = s.storeTx(ctx, tx, e.team, teambucket.UseAny)
+			store, err = s.storeTx(ctx, tx, e.team)
 			return err
 		}); err != nil {
 			failures = append(failures, err)
