@@ -681,3 +681,29 @@ func TestLifecycleRollbackPreservesUnchangedCarrier(t *testing.T) {
 		t.Fatalf("changed worker was not restored: %+v", restored)
 	}
 }
+
+// Without a configured budget a rollback gets a minute for each component, up to five minutes; a configured budget is kept.
+func TestRollbackBudgetScalesWithTheComponents(t *testing.T) {
+	var calls []string
+	var mu sync.Mutex
+	manager := func(count int, configured time.Duration) *LifecycleManager {
+		var components []TransactionalComponent
+		for i := range count {
+			components = append(components, newFakeTransactionalComponent(fmt.Sprintf("c%d", i), &calls, &mu))
+		}
+		m, err := NewLifecycleManager(LifecycleConfig{StateRoot: filepath.Join(shorttemp.Dir(t), "state"), Components: components, RollbackTimeout: configured})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	for _, test := range []struct {
+		count      int
+		configured time.Duration
+		want       time.Duration
+	}{{1, 0, time.Minute}, {3, 0, 3 * time.Minute}, {9, 0, 5 * time.Minute}, {3, 10 * time.Second, 10 * time.Second}} {
+		if got := manager(test.count, test.configured).rollbackTimeout; got != test.want {
+			t.Errorf("%d components, configured %s: rollback budget %s, want %s", test.count, test.configured, got, test.want)
+		}
+	}
+}
