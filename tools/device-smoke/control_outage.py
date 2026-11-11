@@ -144,7 +144,7 @@ def drill(args):
         res.add(f"baseline exec {src}->{dst}", ok, detail)
     ok, detail = eventually(lambda: exec_ok(host, "r", "b", "baseline-rb"), 120)
     res.add("baseline exec r->b before sign-out", ok, detail)
-    ok, detail = revoke_machine(host, NAMES["a"], NAMES["r"])
+    ok, detail = revoke_machine(host, NAMES["a"], active_name(host, NAMES["a"], NAMES["r"]))
     res.add("machine r revoked by its owner (pb machine revoke, exact enrollment)", ok, detail)
     ok, detail = eventually(lambda: refused(host, "r", "b"), 240)
     res.add("revoked machine r is refused (control plane up)", ok, detail)
@@ -158,11 +158,12 @@ def drill(args):
     stopped = time.time()
     rc, out = cut_control_plane(host, args)
     res.add("control plane unreachable", rc == 0, out.strip()[-120:])
+    restored = None
     try:
         outage_checks(host, res, args, stopped)
     finally:
-        restore_control_plane(host, args)  # never leave the stack stopped or the containers cut off
-    return finish(host, res, args, stopped)
+        restored = restore_control_plane(host, args)  # never leave the stack stopped or the containers cut off
+    return finish(host, res, args, stopped, restored)
 
 
 def outage_checks(host, res, args, stopped):
@@ -185,9 +186,8 @@ def outage_checks(host, res, args, stopped):
     time.sleep(max(0, stopped + args.outage_seconds - time.time()))
 
 
-def finish(host, res, args, stopped):
-    time.sleep(max(0, stopped + args.outage_seconds - time.time()))
-    rc, out = restore_control_plane(host, args)
+def finish(host, res, args, stopped, restored):
+    rc, out = restored
     res.add("control plane reachable again", rc == 0, out.strip()[-120:])
     started = time.time()
     ok, detail = eventually(lambda: status_healthy(host), 180, 5)
@@ -208,6 +208,13 @@ def finish(host, res, args, stopped):
     return 0 if all(c["status"] == "PASS" for c in res.checks) else 1
 
 
+def active_name(host, from_ct, stem):
+    """The online enrollment named stem or stem-N: a name already used by an earlier, revoked record is numbered."""
+    rc, out = in_ct(host, from_ct, f"{PB} machine list", 60)
+    names = [line.split()[0] for line in out.splitlines() if re.match(rf"^{re.escape(stem)}(-\d+)?\s", line) and " online " in line]
+    return names[-1] if names else stem
+
+
 def revoke_machine(host, from_ct, name):
     """Revoke one exact enrollment from a signed-in machine of the account: preview, then the confirmation it prints."""
     rc, out = in_ct(host, from_ct, f"{PB} machine revoke {name} --json", 90)
@@ -222,7 +229,7 @@ def cleanup(args):
     state = load()
     host = state["host"]
     for victim in ("r", "b", "a"):  # each from a machine that is still signed in; a last, from itself
-        ok, detail = revoke_machine(host, NAMES["a"], NAMES[victim])
+        ok, detail = revoke_machine(host, NAMES["a"], active_name(host, NAMES["a"], NAMES[victim]))
         print(("revoked " if ok else "NOT revoked ") + NAMES[victim], detail)
     host_run(host, "sudo -n docker rm -f " + " ".join(NAMES.values()), 120)
 
