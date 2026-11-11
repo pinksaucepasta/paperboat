@@ -232,7 +232,7 @@ func (f OriginStreamForwarder) serve(ctx context.Context, active StreamSource, i
 				defer release()
 				streamCtx = authorized
 			}
-			bounded := idleOriginStream{ReadWriteCloser: stream, idle: time.Duration(route.IdleTimeoutMs) * time.Millisecond}
+			bounded := &idleOriginStream{ReadWriteCloser: stream, idle: time.Duration(route.IdleTimeoutMs) * time.Millisecond}
 			if opaqueTCP(route) {
 				_ = f.serveTCP(streamCtx, bounded, route)
 			} else {
@@ -644,6 +644,9 @@ func writeOriginResponse(ctx context.Context, stream io.ReadWriteCloser, reader 
 		headers.ContentLength = 0
 		if err := headers.Write(stream); err != nil {
 			return err
+		}
+		if idle, ok := stream.(interface{ extendIdle(time.Duration) }); ok {
+			idle.extendIdle(upgradedStreamIdle)
 		}
 		return bridgeOriginUpgrade(ctx, stream, reader, upgraded)
 	}

@@ -445,3 +445,28 @@ func TestOriginHTTPTransportSendsPublicSNIToLoopbackOrigins(t *testing.T) {
 		}
 	}
 }
+
+// With --host-header localhost:3000 the app redirects to and scopes cookies for localhost:3000; the
+// visitor gets them back on the public host.
+func TestOriginHTTPTransportRestoresPublicHostAfterHostRewrite(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Add("Set-Cookie", "session=1; Path=/; Domain=localhost; HttpOnly")
+		writer.Header().Add("Set-Cookie", "theme=dark; Domain=example.test")
+		http.Redirect(writer, request, "http://"+request.Host+"/login?next=%2F", http.StatusFound)
+	}))
+	defer server.Close()
+	_, port, _ := net.SplitHostPort(server.Listener.Addr().String())
+	override := "localhost:" + port
+	route := hoststate.TunnelConfigRoute{ID: "route_01", Protocol: "http", OriginScheme: "http", OriginAddress: server.Listener.Addr().String(), HostOverride: &override, TLSVerification: "not_applicable", ConnectTimeoutMs: 1000, IdleTimeoutMs: 2000, DesiredState: "active"}
+	request, _ := http.NewRequest(http.MethodGet, "https://app.example.test/", nil)
+	request.Header.Set("X-Forwarded-Host", "app.example.test")
+	response, err := (&OriginHTTPTransport{}).RoundTrip(context.Background(), route, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	cookies := response.Header.Values("Set-Cookie")
+	if response.Header.Get("Location") != "https://app.example.test/login?next=%2F" || len(cookies) != 2 || strings.Contains(cookies[0], "Domain") || !strings.Contains(cookies[0], "HttpOnly") || !strings.Contains(cookies[1], "Domain=example.test") {
+		t.Fatalf("location=%q cookies=%q", response.Header.Get("Location"), cookies)
+	}
+}

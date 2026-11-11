@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -90,6 +91,9 @@ func (t *OriginHTTPTransport) RoundTrip(ctx context.Context, route hoststate.Tun
 	}
 	responseUpgrade := webSocketUpgrade && response.StatusCode == http.StatusSwitchingProtocols && headerHasToken(response.Header, "Connection", "upgrade") && strings.EqualFold(strings.TrimSpace(response.Header.Get("Upgrade")), "websocket")
 	sanitizeOriginResponseHeaders(response.Header, responseUpgrade, t.KeepControlPlaneHeaders)
+	if publicHost != "" && !strings.EqualFold(out.Host, publicHost) {
+		restorePublicHost(response.Header, out.Host, publicHost)
+	}
 	return response, nil
 }
 
@@ -118,7 +122,7 @@ func (t *OriginHTTPTransport) transportFor(ctx context.Context, route hoststate.
 		DialContext:            dialer.DialContext,
 		ForceAttemptHTTP2:      route.OriginScheme == "https",
 		DisableCompression:     true,
-		IdleConnTimeout:        time.Duration(route.IdleTimeoutMs) * time.Millisecond,
+		IdleConnTimeout:        originIdleConnTimeout,
 		TLSHandshakeTimeout:    time.Duration(route.ConnectTimeoutMs) * time.Millisecond,
 		ExpectContinueTimeout:  time.Second,
 		MaxIdleConnsPerHost:    2,
@@ -170,6 +174,10 @@ func (t *OriginHTTPTransport) transportFor(ctx context.Context, route hoststate.
 	t.transports[key] = transport
 	return transport, nil
 }
+
+// originIdleConnTimeout drops a pooled origin connection before Node's 5 s keep-alive closes it, so a
+// POST never lands on a connection the origin is closing (Go retries only idempotent requests).
+const originIdleConnTimeout = 4 * time.Second
 
 // maximumOriginTransports bounds the pooled origin transports of one generation (one per route
 // and SNI); the oldest-chosen entry is dropped at random when full.
@@ -285,6 +293,34 @@ func sanitizeOriginResponseHeaders(header http.Header, preserveWebSocketUpgrade,
 	if preserveWebSocketUpgrade {
 		header.Set("Connection", "Upgrade")
 		header.Set("Upgrade", "websocket")
+	}
+}
+
+// restorePublicHost undoes a route's Host rewrite in the origin's answer, as ngrok does: an app that
+// was told it is originHost (localhost:3000) redirects there and scopes cookies to it, which the
+// visitor's browser cannot reach or keep. A Location on originHost moves to https://publicHost and a
+// cookie Domain naming originHost is dropped, so the cookie binds to the public host.
+func restorePublicHost(header http.Header, originHost, publicHost string) {
+	if location, err := url.Parse(header.Get("Location")); err == nil && location.Host != "" && strings.EqualFold(location.Host, originHost) {
+		location.Scheme, location.Host = "https", publicHost
+		header.Set("Location", location.String())
+	}
+	originName := originHost
+	if name, _, err := net.SplitHostPort(originHost); err == nil {
+		originName = name
+	}
+	cookies := header.Values("Set-Cookie")
+	for index, cookie := range cookies {
+		parts := strings.Split(cookie, ";")
+		kept := parts[:1]
+		for _, attribute := range parts[1:] {
+			name, value, _ := strings.Cut(strings.TrimSpace(attribute), "=")
+			if strings.EqualFold(name, "domain") && strings.EqualFold(strings.TrimPrefix(value, "."), originName) {
+				continue
+			}
+			kept = append(kept, attribute)
+		}
+		cookies[index] = strings.Join(kept, ";")
 	}
 }
 

@@ -299,5 +299,5 @@ func (f OriginStreamForwarder) ForwardIngressHTTP(ctx context.Context, stream io
 		return err
 	}
 	defer release()
-	return f.serveHTTP(authorized, idleOriginStream{ReadWriteCloser: stream, idle: time.Duration(route.IdleTimeoutMs) * time.Millisecond}, route, f.Transport)
+	return f.serveHTTP(authorized, &idleOriginStream{ReadWriteCloser: stream, idle: time.Duration(route.IdleTimeoutMs) * time.Millisecond}, route, f.Transport)
 }
