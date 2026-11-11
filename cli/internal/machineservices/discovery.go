@@ -56,13 +56,29 @@ func normalize(in []Service) []Service {
 	return out
 }
 
+// readBufferBytes is the first read buffer. A /proc/net/tcp read returns whole lines up to the buffer's size and every
+// read call walks the kernel's socket table again, so io.ReadAll's 512-byte start cost a syscall per three lines: that
+// was 85% of an idle worker's CPU (pprof, 2026-11-11), re-read every two seconds.
+const readBufferBytes = 64 << 10
+
 func readBounded(r io.Reader, remaining int64) ([]byte, error) {
 	if remaining < 0 {
 		return nil, ErrSnapshotTooLarge
 	}
-	data, err := io.ReadAll(io.LimitReader(r, remaining+1))
-	if err != nil {
-		return nil, err
+	limited := io.LimitReader(r, remaining+1)
+	data := make([]byte, 0, min(remaining+1, readBufferBytes))
+	for {
+		if len(data) == cap(data) {
+			data = append(data, 0)[:len(data)]
+		}
+		n, err := limited.Read(data[len(data):cap(data)])
+		data = data[:len(data)+n]
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 	if int64(len(data)) > remaining {
 		return nil, ErrSnapshotTooLarge

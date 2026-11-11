@@ -14,6 +14,16 @@ import (
 )
 
 func snapshot(ctx context.Context) ([]Service, error) {
+	if services, err := listenersByDiag(ctx, uint64(os.Geteuid())); err == nil {
+		return services, nil
+	} else if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	// A kernel or sandbox without sock_diag (gVisor, WSL1) still answers from /proc/net/tcp.
+	return snapshotProc(ctx)
+}
+
+func snapshotProc(ctx context.Context) ([]Service, error) {
 	remaining := int64(maximumSnapshotBytes)
 	var services []Service
 	for _, path := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
