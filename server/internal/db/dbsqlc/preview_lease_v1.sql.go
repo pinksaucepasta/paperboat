@@ -320,7 +320,7 @@ const getPreviewLeaseForReconciliationV1 = `-- name: GetPreviewLeaseForReconcili
 SELECT p.id, p.endpoint, p.account_id, p.actor_id, p.owner_machine_id, p.owner_session_id,
        p.target_scheme, p.target_address, p.access_mode, p.lease_deadline, p.user_deadline,
        p.allocation_state, p.edge_state, p.origin_state, p.terminal_state, p.created_at, p.ready_at,
-       p.last_renewed_at, p.stopped_at, p.generation, p.owner_last_seen_at,p.owner_session_kind,p.owner_team_id
+       p.last_renewed_at, p.stopped_at, p.generation, p.owner_last_seen_at,p.owner_session_kind,p.owner_team_id,p.host_header
 FROM preview_leases AS p
 WHERE p.id = $1
 `
@@ -352,6 +352,7 @@ func (q *Queries) GetPreviewLeaseForReconciliationV1(ctx context.Context, id str
 		&i.OwnerLastSeenAt,
 		&i.OwnerSessionKind,
 		&i.OwnerTeamID,
+		&i.HostHeader,
 	)
 	return i, err
 }
@@ -360,7 +361,7 @@ const getPreviewLeaseV1 = `-- name: GetPreviewLeaseV1 :one
 SELECT p.id, p.endpoint, p.account_id, p.actor_id, p.owner_machine_id, p.owner_session_id,
        p.target_scheme, p.target_address, p.access_mode, p.lease_deadline, p.user_deadline,
        p.allocation_state, p.edge_state, p.origin_state, p.terminal_state, p.created_at, p.ready_at,
-       p.last_renewed_at, p.stopped_at, p.generation, p.owner_last_seen_at,p.owner_session_kind,p.owner_team_id
+       p.last_renewed_at, p.stopped_at, p.generation, p.owner_last_seen_at,p.owner_session_kind,p.owner_team_id,p.host_header
 FROM preview_leases AS p
 WHERE p.id = $1 AND p.account_id = $2
 `
@@ -397,6 +398,7 @@ func (q *Queries) GetPreviewLeaseV1(ctx context.Context, arg GetPreviewLeaseV1Pa
 		&i.OwnerLastSeenAt,
 		&i.OwnerSessionKind,
 		&i.OwnerTeamID,
+		&i.HostHeader,
 	)
 	return i, err
 }
@@ -405,7 +407,7 @@ const listPreviewLeasesV1 = `-- name: ListPreviewLeasesV1 :many
 SELECT c.id, c.endpoint, c.account_id, c.actor_id, c.owner_machine_id, c.owner_session_id,
        c.target_scheme, c.target_address, c.access_mode, c.lease_deadline, c.user_deadline,
        c.allocation_state, c.edge_state, c.origin_state, c.terminal_state, c.created_at, c.ready_at,
-       c.last_renewed_at, c.stopped_at, c.generation, c.owner_last_seen_at,c.owner_session_kind,c.owner_team_id
+       c.last_renewed_at, c.stopped_at, c.generation, c.owner_last_seen_at,c.owner_session_kind,c.owner_team_id,c.host_header
 FROM preview_leases AS c
 WHERE c.id IN (SELECT paperboat.manageable_preview_ids($1::text, $2::boolean, $3::text,
   $4::text, $5::text, $6::text, $7::text,
@@ -473,6 +475,7 @@ func (q *Queries) ListPreviewLeasesV1(ctx context.Context, arg ListPreviewLeases
 			&i.OwnerLastSeenAt,
 			&i.OwnerSessionKind,
 			&i.OwnerTeamID,
+			&i.HostHeader,
 		); err != nil {
 			return nil, err
 		}

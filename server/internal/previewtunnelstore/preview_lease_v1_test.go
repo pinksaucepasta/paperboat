@@ -75,6 +75,21 @@ func TestPreviewLeaseTargetAndEndpointValidation(t *testing.T) {
 	}
 }
 
+func TestValidPreviewHostHeaderV1(t *testing.T) {
+	for _, test := range []struct {
+		scheme, host string
+		ok           bool
+	}{
+		{"http", "", true}, {"unix", "", true}, {"http", "app.example.test", true}, {"https", "localhost", true}, {"h2c", "10.0.0.1", true},
+		{"unix", "app.example.test", false}, {"tcp", "app.example.test", false}, {"file", "app.example.test", false},
+		{"http", "app.example.test:8080", false}, {"http", "http://app", false}, {"http", "a b", false},
+	} {
+		if got := ValidPreviewHostHeaderV1(test.scheme, test.host); got != test.ok {
+			t.Errorf("ValidPreviewHostHeaderV1(%q, %q) = %v, want %v", test.scheme, test.host, got, test.ok)
+		}
+	}
+}
+
 func TestValidatePreviewLeaseRequiresAuditRequestIdentity(t *testing.T) {
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
 	input := CreatePreviewLeaseV1Input{

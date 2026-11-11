@@ -116,12 +116,12 @@ RETURNING *;
 -- name: CreatePreviewLease :one
 INSERT INTO preview_leases
   (id, endpoint, account_id, owner_team_id, actor_id, owner_machine_id, owner_session_id,owner_session_kind,
-   target_scheme, target_address, access_mode, lease_deadline, user_deadline,
+   target_scheme, target_address, host_header, access_mode, lease_deadline, user_deadline,
    allocation_state, edge_state, origin_state, terminal_state, created_at, last_renewed_at)
 VALUES
   (sqlc.arg(id), sqlc.arg(endpoint), sqlc.arg(account_id), sqlc.narg(owner_team_id),
    sqlc.arg(actor_id), sqlc.arg(owner_machine_id), sqlc.arg(owner_session_id),sqlc.arg(owner_session_kind),
-   sqlc.arg(target_scheme), sqlc.arg(target_address), sqlc.arg(access_mode),
+   sqlc.arg(target_scheme), sqlc.arg(target_address), sqlc.narg(host_header), sqlc.arg(access_mode),
    sqlc.arg(lease_deadline), sqlc.narg(user_deadline), sqlc.arg(allocation_state),
    sqlc.arg(edge_state), sqlc.arg(origin_state), 'active', sqlc.arg(now), sqlc.arg(now))
 RETURNING *;

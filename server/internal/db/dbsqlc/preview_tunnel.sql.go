@@ -148,15 +148,15 @@ func (q *Queries) CompletePreviewTunnelOperation(ctx context.Context, arg Comple
 const createPreviewLease = `-- name: CreatePreviewLease :one
 INSERT INTO preview_leases
   (id, endpoint, account_id, owner_team_id, actor_id, owner_machine_id, owner_session_id,owner_session_kind,
-   target_scheme, target_address, access_mode, lease_deadline, user_deadline,
+   target_scheme, target_address, host_header, access_mode, lease_deadline, user_deadline,
    allocation_state, edge_state, origin_state, terminal_state, created_at, last_renewed_at)
 VALUES
   ($1, $2, $3, $4,
    $5, $6, $7,$8,
-   $9, $10, $11,
-   $12, $13, $14,
-   $15, $16, 'active', $17, $17)
-RETURNING id, endpoint, account_id, actor_id, owner_machine_id, owner_session_id, target_scheme, target_address, access_mode, lease_deadline, user_deadline, allocation_state, edge_state, origin_state, terminal_state, created_at, ready_at, last_renewed_at, stopped_at, generation, owner_last_seen_at, owner_session_kind, owner_team_id
+   $9, $10, $11, $12,
+   $13, $14, $15,
+   $16, $17, 'active', $18, $18)
+RETURNING id, endpoint, account_id, actor_id, owner_machine_id, owner_session_id, target_scheme, target_address, access_mode, lease_deadline, user_deadline, allocation_state, edge_state, origin_state, terminal_state, created_at, ready_at, last_renewed_at, stopped_at, generation, owner_last_seen_at, owner_session_kind, owner_team_id, host_header
 `
 
 type CreatePreviewLeaseParams struct {
@@ -170,6 +170,7 @@ type CreatePreviewLeaseParams struct {
 	OwnerSessionKind string
 	TargetScheme     string
 	TargetAddress    string
+	HostHeader       sql.NullString
 	AccessMode       string
 	LeaseDeadline    time.Time
 	UserDeadline     sql.NullTime
@@ -191,6 +192,7 @@ func (q *Queries) CreatePreviewLease(ctx context.Context, arg CreatePreviewLease
 		arg.OwnerSessionKind,
 		arg.TargetScheme,
 		arg.TargetAddress,
+		arg.HostHeader,
 		arg.AccessMode,
 		arg.LeaseDeadline,
 		arg.UserDeadline,
@@ -224,6 +226,7 @@ func (q *Queries) CreatePreviewLease(ctx context.Context, arg CreatePreviewLease
 		&i.OwnerLastSeenAt,
 		&i.OwnerSessionKind,
 		&i.OwnerTeamID,
+		&i.HostHeader,
 	)
 	return i, err
 }

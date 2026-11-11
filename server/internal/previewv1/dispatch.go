@@ -131,6 +131,7 @@ func (r DispatchRequest) canonicalHashInput(machineID string) ([]byte, error) {
 	r.OwnerSessionID = strings.TrimSpace(r.OwnerSessionID)
 	r.Target.Scheme = strings.ToLower(strings.TrimSpace(r.Target.Scheme))
 	r.Target.Address = strings.TrimSpace(r.Target.Address)
+	r.Target.HostHeader = previewHostHeader(r.Target)
 	r.AccessMode = strings.ToLower(strings.TrimSpace(r.AccessMode))
 	r.Endpoint = strings.TrimSpace(r.Endpoint)
 	r.LeaseETag = strings.TrimSpace(r.LeaseETag)
@@ -149,7 +150,7 @@ func (r DispatchRequest) canonicalHashInput(machineID string) ([]byte, error) {
 	if !validDispatchTrace(r.IdempotencyKey, 1, 256) || !validDispatchTrace(r.RequestID, 3, 128) || !validDispatchTrace(r.CorrelationID, 3, 128) {
 		return nil, ErrDispatchInvalid
 	}
-	if !previewtunnelstore.ValidPreviewTargetV1(r.Target.Scheme, r.Target.Address, r.AccessMode) {
+	if !previewtunnelstore.ValidPreviewTargetV1(r.Target.Scheme, r.Target.Address, r.AccessMode) || !previewtunnelstore.ValidPreviewHostHeaderV1(r.Target.Scheme, r.Target.HostHeader) {
 		return nil, ErrDispatchInvalid
 	}
 	if r.AccessMode != "public" && r.AccessMode != "private" && r.AccessMode != "team" || !validDispatchEndpoint(r.Endpoint) {

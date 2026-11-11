@@ -33,7 +33,8 @@
       "required": ["scheme", "address"],
       "properties": {
         "scheme": { "enum": ["http", "https", "h2c", "unix", "tcp"] },
-        "address": { "type": "string", "minLength": 1, "maxLength": 512 }
+        "address": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "host_header": { "type": "string", "minLength": 1, "maxLength": 253 }
       },
       "additionalProperties": false
     },

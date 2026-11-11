@@ -8933,6 +8933,8 @@ export interface components {
             /** @enum {string} */
             scheme: "http" | "https" | "h2c" | "unix" | "tcp" | "file";
             address: string;
+            /** @description The Host header the origin receives instead of the public host; a bare host name, for http, https and h2c targets only. */
+            host_header?: string;
         };
         PreviewLease: {
             /** @constant */

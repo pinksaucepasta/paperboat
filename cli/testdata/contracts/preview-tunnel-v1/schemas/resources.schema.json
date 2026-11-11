@@ -148,6 +148,11 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 512
+        },
+        "host_header": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253
         }
       },
       "additionalProperties": false

@@ -3553,6 +3553,12 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 512
+          },
+          "host_header": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 253,
+            "description": "The Host header the origin receives instead of the public host; a bare host name, for http, https and h2c targets only."
           }
         }
       },
