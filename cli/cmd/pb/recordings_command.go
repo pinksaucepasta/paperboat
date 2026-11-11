@@ -136,7 +136,7 @@ var recordingRefusals = map[string]string{
 func recordingsExport(c *command.Context) (resultErr error) {
 	out := c.Writer
 	if path := c.String("output"); path != "" {
-		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		file, err := createExportFile(path)
 		if err != nil {
 			return err
 		}
@@ -151,6 +151,11 @@ func recordingsExport(c *command.Context) (resultErr error) {
 		out = file
 	}
 	return readRecording(c, c.Args().First(), func(text []byte) error { _, err := out.Write(text); return err })
+}
+
+// createExportFile creates a new owner-only file: an export never overwrites anything.
+func createExportFile(path string) (*os.File, error) {
+	return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 }
 
 func recordingsPlay(c *command.Context) error {

@@ -3,6 +3,9 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -11,6 +14,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/operation"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/recordingcontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/recordings"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
@@ -168,5 +172,58 @@ func TestReplayTicketReadsOnlyItsRecording(t *testing.T) {
 		if outcome := ranged(r[0], r[1]); outcome.ErrorCode != "invalid_request" {
 			t.Fatalf("range %v: %+v", r, outcome)
 		}
+	}
+}
+
+// A replay ticket's JTI is in the host's live list for as long as its stream runs, so the server's
+// revocation feed reaches it: revoking it (viewer lost recording_view, left the team, machine revoked)
+// ends a running replay at its next frame.
+func TestRevocationEndsARunningReplay(t *testing.T) {
+	public, private, _ := ed25519.GenerateKey(rand.Reader)
+	clock := &credentialLifetimeClock{now: time.Now().Truncate(time.Second)}
+	claims := auth.Claims{Issuer: "https://api.example.test", Audience: "paperboat-machine", Subject: "user", UserID: "user", AccountID: "user", JTI: "token_replay_1", IssuedAt: clock.now.Unix(), ExpiresAt: clock.now.Add(wire.TicketLifetime).Unix(), CredentialClass: wire.CredentialClass, Scope: []string{wire.Scope}, EnvironmentID: "env", MachineID: "machine", ResourceKind: wire.ResourceKind, ResourceID: replayID, CLIClientSessionID: "cli"}
+	header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-credential+jwt", "kid": "key"})
+	payload, _ := json.Marshal(claims)
+	unsigned := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payload)
+	token := unsigned + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(private, []byte(unsigned)))
+	revocations := auth.NewRevocationCache()
+	verifier := auth.Verifier{Keys: credentialLifetimeKeys{public}, Clock: clock, Revocations: revocations}
+	resolver := resolverFunc(func(protocol.Frame) (auth.Policy, error) {
+		return auth.Policy{Issuer: claims.Issuer, Audience: claims.Audience, CredentialClass: wire.CredentialClass, Scopes: []string{wire.Scope}, EnvironmentID: "env", MachineID: "machine", MaxLifetime: wire.TicketLifetime}, nil
+	})
+	authorizer := &CredentialAuthorizer{Token: token, Verifier: verifier, Resolver: resolver, Revocations: revocations}
+	defer authorizer.CloseAuthorization()
+	payloadRead, _ := json.Marshal(map[string]string{"action": wire.ReadAction, "recording_id": replayID})
+	authorization, err := authorizer.Authorize(t.Context(), protocol.Frame{Type: "request", Capability: wire.Capability, Payload: payloadRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live := revocations.Live(); len(live) != 1 || live[0] != claims.JTI {
+		t.Fatalf("the replay ticket is not in the live list: %v", live)
+	}
+	d := &Dispatcher{config: DispatcherConfig{Sessions: replaySessions{segments: map[uint32][]byte{0: bytes.Repeat([]byte("a"), 200<<10), 1: []byte("bb")}}}}
+	outcome := d.recordingRead(authorization, payloadRead)
+	stream, _, err := d.openRecordingStream(authorization, outcome)
+	if outcome.ErrorCode != "" || err != nil {
+		t.Fatalf("read %+v %v", outcome, err)
+	}
+	if _, err := stream.Next(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	// Past the ticket's expiry the admitted replay still streams; only a revocation ends it.
+	clock.now = clock.now.Add(2 * wire.TicketLifetime)
+	if _, err := stream.Next(t.Context()); err != nil {
+		t.Fatalf("expiry ended the replay: %v", err)
+	}
+	if err := revocations.Replace([]string{claims.JTI}); err != nil {
+		t.Fatal(err)
+	}
+	var refused *StreamError
+	if _, err := stream.Next(t.Context()); !errors.As(err, &refused) || refused.Code != "credential_revoked" {
+		t.Fatalf("a revoked replay kept streaming: %v", err)
+	}
+	authorizer.CloseAuthorization()
+	if live := revocations.Live(); len(live) != 0 {
+		t.Fatalf("the ended replay stayed in the live list: %v", live)
 	}
 }

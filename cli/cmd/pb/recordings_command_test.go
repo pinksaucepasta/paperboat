@@ -9,6 +9,10 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -87,5 +91,21 @@ func TestRecordingStreamDecodesAndPlaysInOrder(t *testing.T) {
 	other, _ := ecdh.X25519().GenerateKey(rand.Reader)
 	if err := decodeRecordingStream(bufio.NewReader(bytes.NewReader(stream)), recording.NewReader(other.Bytes(), testRecordingID, 1), testRecordingID, func([]byte) error { return nil }); err == nil {
 		t.Fatal("a recording opened with another team key")
+	}
+}
+
+// An export is owner-only and never replaces an existing file.
+func TestRecordingExportFileIsNewAndOwnerOnly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.cast")
+	file, err := createExportFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = file.Close()
+	if info, err := os.Stat(path); err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+		t.Fatalf("export file mode %v %v", info.Mode(), err)
+	}
+	if _, err := createExportFile(path); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("an export replaced an existing file: %v", err)
 	}
 }
