@@ -1,0 +1,19 @@
+windows_console_flash signin (F1-13, sign-in after uninstall) — victus, Windows 11, 2026-11-11 (IST)
+Build under test: dev-f113b-a2b9ca5f5 (main a2b9ca5f5 + sign-in watcher mode, tools only)
+
+Setup (before `pb uninstall`): `windows_console_flash.py signin-arm` registered the logon task
+pbsmoke-console-flash-signin (user pujan, interactive, limited). `pb uninstall --json` over the elevated ssh
+session ended state=completed (no services, no Program Files\Paperboat, no local state); it registered two
+HKCU RunOnce values "Paperboat Uninstall <id>" (conhost --headless cmd /d /c rd /s /q ...), one from an earlier
+attempt. quser before: session 2, logon 13:34. The user's two pre-existing cmd windows were the user's ComfyUI
+render task (svchost -s Schedule, start-render.bat) and a harness leftover (killed); no Paperboat process existed.
+
+Sign-in: the user signed out and back in (quser after: session 3, logon 19:01). Watcher result (out.json):
+  watch=true control_flashes=2 (the control cmd.exe opened visible windows: the detector was not blind)
+  watched 2026-11-11T19:02:40+05:30 for 300 s: flashes=[]  (log: "finished, windows seen: 1", not a console)
+After the watch: both RunOnce values gone and the "Paperboat Uninstall" helper directory removed (the cleanups ran).
+User's observation (relayed by the coordinator, own words): "the one cmd which was there stayed there, nothing
+new appeared when i signed back in" (the one that stayed is the ComfyUI window).
+
+Not covered by the watcher: the ~54 s between logon (19:01:46) and the watch start; the user's observation covers it.
+RESULT: PASS (no console window caused by Paperboat at sign-in after uninstall)
