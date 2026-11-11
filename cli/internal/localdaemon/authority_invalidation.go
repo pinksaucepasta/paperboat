@@ -20,6 +20,7 @@ type machineAuthorityState struct {
 	identityKey     string
 	installationGen int64
 	terminalState   bool
+	networkApproved bool
 }
 
 func NewMachineAuthorityInvalidator(invalidate func(string)) *MachineAuthorityInvalidator {
@@ -39,6 +40,7 @@ func (o *MachineAuthorityInvalidator) Observe(machines []api.UserMachine) bool {
 		current[machine.ID] = machineAuthorityState{
 			environmentID: machine.EnvironmentID, identityKey: machine.PublicIdentityKey,
 			installationGen: machine.InstallationGeneration,
+			networkApproved: machine.NetworkApproved,
 			terminalState:   machine.State == "revoked" || machine.State == "deleted",
 		}
 	}
