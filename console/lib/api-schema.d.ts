@@ -5053,6 +5053,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/publications/{hostname}/block": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator block publication
+         * @description Takes one preview or tunnel hostname down for violating the acceptable use policy: the server withholds its ingress decisions and edges answer a fixed page (451 when `legal`, else 403) without contacting the origin; the owning account is emailed. Revision is 1 for a hostname never blocked, else the block's version. Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result.
+         */
+        post: operations["post_v1_admin_publications_hostname_block"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/publications/{hostname}/unblock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator unblock publication
+         * @description Restores a blocked hostname; the block row is kept as evidence. Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Mutations require explicit target confirmation, an opaque evidence reference and stable idempotency key. Read current state before retrying an uncertain result.
+         */
+        post: operations["post_v1_admin_publications_hostname_unblock"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/abuse-reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List abuse reports
+         * @description Abuse reports anyone filed (POST /v1/abuse-reports), newest first, kept 180 days. Current active operator account and separate operator session required. See docs/runbooks/operator-admin.md. Audited before disclosure; unavailable auditing fails closed.
+         */
+        get: operations["get_v1_admin_abuse_reports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/abuse-reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report abuse
+         * @description Anyone can report phishing, malware, spam or illegal content on a link Paperboat serves; no account needed. Bounded per client network (429 with Retry-After). No reporter IP is kept; reports are kept 180 days.
+         */
+        post: operations["post_v1_abuse_reports"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/tunnels/{tunnel_id}/disable": {
         parameters: {
             query?: never;
@@ -8636,16 +8716,18 @@ export interface components {
             /** @constant */
             wildcard_labels?: 1;
         } & (unknown & unknown & unknown);
-        /** @description HTTPS verification policy. system is the secure default. custom_ca and optional mTLS values are opaque credential references, never PEM or private-key material. insecure_development is rejected unless explicit development policy permits and audits it. */
+        /** @description HTTPS verification policy. system is the secure default. custom_ca and optional mTLS values are opaque credential references, never PEM or private-key material. insecure skips certificate checks (audited, and shown as a warning for origins that are not on loopback). pinned trusts exactly the certificate whose SHA-256 fingerprint is pin. */
         TunnelRouteTLS: {
             /** @enum {unknown} */
-            verification: "system" | "custom_ca" | "insecure_development";
+            verification: "system" | "custom_ca" | "insecure" | "pinned";
+            /** @description SHA-256 fingerprint of the origin's leaf certificate DER; required for pinned and refused otherwise. */
+            pin?: string | null;
             /** @description TLS SNI and certificate hostname; independent of the HTTP Host header. */
             server_name?: string | null;
             ca_reference?: components["schemas"]["OriginCredentialReference"] | null;
             /** @description Optional mTLS client identity reference, orthogonal to system or custom_ca verification. */
             client_credential_reference?: components["schemas"]["OriginCredentialReference"] | null;
-        } & (unknown & unknown);
+        } & (unknown & unknown & unknown);
         /** @description Opaque write-only secret-store reference. Raw PEM, keys, bearer tokens, query strings, and filesystem paths are forbidden. */
         OriginCredentialReference: string;
         TunnelRouteOrigin: {
@@ -9010,6 +9092,14 @@ export interface components {
             next_retry_at?: string;
             repair_action: string;
             correlation_id: string;
+            /** @description Set when Paperboat's edge flood protection (per-address limits, per-link share of an edge) refused some of this resource's traffic since `since`. */
+            flood_protection?: {
+                /** Format: int64 */
+                refused: number;
+                /** Format: date-time */
+                since: string;
+                summary: string;
+            };
         };
         PreviewTunnelHealthResponse: {
             data: components["schemas"]["PreviewTunnelHealth"];
@@ -9800,11 +9890,6 @@ export interface components {
                 /** @enum {string} */
                 resource_kind: "machine_access" | "inspector" | "config_compare" | "machine_network";
                 resource_id: string;
-            }[];
-            /** @description Exact certificates pinned by live admitted carriers; requires admitted_scopes. Current signed self/peer binding returns admitted_certificate_fingerprints only for requested original certificates with identical account, endpoint, role, generation, QUIC key and signer. Expiry and same-key supersession do not revoke admitted carriers; explicit certificate revocation does. These fingerprints never permit fresh admission. Drop on disconnect. */
-            admitted_certificates?: {
-                endpoint_id: string;
-                fingerprint: string;
             }[];
         };
         PeerNetworkRegistration: {
@@ -10700,9 +10785,30 @@ export interface components {
             /** Format: int64 */
             revision: number;
         };
+        AbuseReportInput: {
+            /** @description The http or https address of the link. */
+            url: string;
+            /** @enum {string} */
+            reason: "phishing" | "malware" | "spam" | "illegal" | "other";
+            details?: string;
+            reporter_email?: string;
+        };
+        AbuseReport: {
+            id: string;
+            hostname: string;
+            url: string;
+            /** @enum {string} */
+            reason: "phishing" | "malware" | "spam" | "illegal" | "other";
+            details: string;
+            reporter_email: string;
+            /** Format: date-time */
+            created_at: string;
+        };
         OperatorActionInput: {
             /** Format: int64 */
             revision: number;
+            /** @description publication_block only: a legal takedown, answered 451 instead of 403. */
+            legal?: boolean;
         };
         OperatorActionResult: {
             resource_id: string;
@@ -23618,6 +23724,277 @@ export interface operations {
                 };
             };
             /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_v1_admin_publications_hostname_block: {
+        parameters: {
+            query?: never;
+            header: {
+                "Operator-Target": string;
+                "Operator-Reason": string;
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                hostname: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OperatorActionInput"];
+            };
+        };
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorActionResult"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Stale resource revision or conflicting idempotency request */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_v1_admin_publications_hostname_unblock: {
+        parameters: {
+            query?: never;
+            header: {
+                "Operator-Target": string;
+                "Operator-Reason": string;
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                hostname: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OperatorActionInput"];
+            };
+        };
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorActionResult"];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Stale resource revision or conflicting idempotency request */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_admin_abuse_reports: {
+        parameters: {
+            query?: {
+                limit?: number;
+                hostname?: string;
+                before?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited result. Cache-Control: no-store. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AbuseReport"][];
+                    };
+                };
+            };
+            /** @description Invalid target, body, pagination or confirmation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Browser authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Operator session or capability required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Evidence, provider or audit unavailable; outcome may require checking target state */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_v1_abuse_reports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AbuseReportInput"];
+            };
+        };
+        responses: {
+            /** @description Recorded. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            id: string;
+                        };
+                    };
+                };
+            };
+            /** @description Invalid report; the message names the field. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Too many reports from this network; retry after Retry-After. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not recorded; retry. */
             503: {
                 headers: {
                     [name: string]: unknown;

@@ -47,7 +47,6 @@ type NetworkRegistrationResult struct {
 type NetworkConfigRequest struct {
 	OperationID, UserID, EndpointID string
 	AdmittedScopes                  []AdmittedScope
-	AdmittedCertificates            []AdmittedCertificate
 	// Endpoints are the engine's own candidate endpoints (ip:port); nil when the request reports none.
 	Endpoints []string
 	// Authority is AuthorityUntilRevoked when the daemon keeps verified peer state until it is revoked; empty for
@@ -225,7 +224,6 @@ type networkBinding struct {
 	DiscoPublicKey                  string   `json:"disco_public_key"`
 	QUICCertificateFingerprint      string   `json:"quic_certificate_fingerprint"`
 	QUICPublicKey                   string   `json:"quic_public_key"`
-	AdmittedCertificateFingerprints []string `json:"admitted_certificate_fingerprints,omitempty"`
 	VirtualAddress                  string   `json:"virtual_address"`
 	// Endpoints are the identity's delivered endpoints (N5) while it is loaded and in the mesh log; on the way
 	// out they move to the peer entry (deliverEndpoints) and are never part of a signed identity.
@@ -271,9 +269,6 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		return NetworkConfigResult{}, ErrInvalid
 	}
 	untilRevoked := in.Authority == AuthorityUntilRevoked
-	if err := validateAdmittedCertificates(in.AdmittedCertificates, len(in.AdmittedScopes) > 0); err != nil {
-		return NetworkConfigResult{}, err
-	}
 	live, err := admittedScopeIDs(in.AdmittedScopes)
 	if err != nil {
 		return NetworkConfigResult{}, err
@@ -602,9 +597,6 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 				scopes++
 			}
 		}
-	}
-	if err := retainAdmittedCertificates(ctx, tx, &self, byPeer, in.AdmittedCertificates, now); err != nil {
-		return NetworkConfigResult{}, err
 	}
 	peerIDs := make([]string, 0, len(byPeer))
 	for id := range byPeer {
