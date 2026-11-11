@@ -20,11 +20,15 @@ const maxUpdateControlTimeout = 15 * time.Minute
 // that connects and sends nothing must not hold a handler for the 15 minutes an install may take.
 var controlRequestReadTimeout = 10 * time.Second
 
-// controlOperationTimeout is the budget of one control operation: reading status or settings is seconds of work,
-// check, download and install get the full update window.
+// controlOperationTimeout is the budget of one control operation, by what it does: reading status or settings is
+// local (seconds), check resolves release metadata over the network (a few minutes), download and install fetch
+// and activate (the full update window). One stuck connection must not hold the control slot for 15 minutes.
 func controlOperationTimeout(operation string) time.Duration {
-	if operation == "status" || operation == "settings" {
-		return time.Minute
+	switch operation {
+	case "status", "settings":
+		return 30 * time.Second
+	case "check":
+		return 3 * time.Minute
 	}
 	return maxUpdateControlTimeout
 }
