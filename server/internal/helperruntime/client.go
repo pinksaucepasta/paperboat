@@ -3,6 +3,7 @@ package helperruntime
 import (
 	"bytes"
 	"context"
+
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 
@@ -226,7 +227,7 @@ func (c Client) terminalEndpoint(ctx context.Context, endpoint, credential, acti
 		Version      string   `json:"version"`
 		Capabilities []string `json:"capabilities"`
 	}
-	if err := decodeStrict(welcome.Payload, &negotiated); err != nil {
+	if err := decodeResponse(welcome.Payload, &negotiated); err != nil {
 		return Snapshot{}, protocolError("capabilities_mismatch", "helper runtime did not negotiate required capabilities", err)
 	}
 	if negotiated.Version != protocolVersion || !contains(negotiated.Capabilities, "terminal.v1") || !contains(negotiated.Capabilities, "health.v1") {
@@ -268,7 +269,7 @@ func (c Client) terminalEndpoint(ctx context.Context, endpoint, credential, acti
 		}
 		if response.Type == "error" {
 			var remote remoteError
-			if err := decodeStrict(response.Payload, &remote); err != nil {
+			if err := decodeResponse(response.Payload, &remote); err != nil {
 				return Snapshot{}, protocolError("error_invalid", "helper runtime returned an invalid error", err)
 			}
 			if remote.Code == "" {
@@ -283,12 +284,12 @@ func (c Client) terminalEndpoint(ctx context.Context, endpoint, credential, acti
 			Result json.RawMessage `json:"result"`
 			Replay bool            `json:"replay"`
 		}
-		if err := decodeStrict(response.Payload, &envelope); err != nil {
+		if err := decodeResponse(response.Payload, &envelope); err != nil {
 			return Snapshot{}, protocolError("snapshot_invalid", "helper runtime returned an invalid terminal snapshot", err)
 		}
 		if action == "delete" {
 			var empty struct{}
-			if err := decodeStrict(envelope.Result, &empty); err != nil {
+			if err := decodeResponse(envelope.Result, &empty); err != nil {
 				return Snapshot{}, protocolError("delete_ack_invalid", "helper runtime returned an invalid delete acknowledgement", err)
 			}
 			return Snapshot{ID: sessionID, State: "deleted"}, nil
@@ -300,7 +301,7 @@ func (c Client) terminalEndpoint(ctx context.Context, endpoint, credential, acti
 				// The host launched without its pending managed ENV and notes it; the launch succeeded.
 				LaunchWarnings []string `json:"launch_warnings,omitempty"`
 			}
-			if err := decodeStrict(envelope.Result, &created); err != nil {
+			if err := decodeResponse(envelope.Result, &created); err != nil {
 				return Snapshot{}, protocolError("create_ack_invalid", "helper runtime returned an invalid terminal creation", err)
 			}
 			if created.ID != sessionID || !validParticipants(created.Participants) {
@@ -309,7 +310,7 @@ func (c Client) terminalEndpoint(ctx context.Context, endpoint, credential, acti
 			return created.Snapshot, nil
 		}
 		var snapshot Snapshot
-		if err := decodeStrict(envelope.Result, &snapshot); err != nil {
+		if err := decodeResponse(envelope.Result, &snapshot); err != nil {
 			return Snapshot{}, protocolError("snapshot_encoding_invalid", "helper runtime returned an invalid terminal snapshot encoding", err)
 		}
 		if snapshot.ID != sessionID {
@@ -370,7 +371,7 @@ func readFrame(ctx context.Context, connection *websocket.Conn) (frame, error) {
 		return frame{}, protocolError("frame_invalid", "invalid helper runtime frame", nil)
 	}
 	var value frame
-	if err := decodeStrict(data, &value); err != nil {
+	if err := decodeResponse(data, &value); err != nil {
 		return frame{}, protocolError("frame_invalid", "invalid helper runtime frame", err)
 	}
 	if value.Version != protocolVersion || value.Type == "" || value.RequestID == "" {
@@ -379,9 +380,10 @@ func readFrame(ctx context.Context, connection *websocket.Conn) (frame, error) {
 	return value, nil
 }
 
-func decodeStrict(data []byte, target any) error {
+// decodeResponse decodes one JSON document the machine's helper sent. Its answers are not authorization claims: a
+// field a newer helper adds is ignored (AGENTS.md), every value this build reads is still checked by its caller.
+func decodeResponse(data []byte, target any) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}

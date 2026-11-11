@@ -347,3 +347,14 @@ func TestExecOpenFailingBeforeTheRequestIsNotStarted(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+// A field a newer helper adds to a structured frame is ignored; the envelope's own checks still apply.
+func TestHelperFrameIgnoresUnknownFields(t *testing.T) {
+	frame, err := decodeHelperFrame([]byte(`{"type":"response","request_id":"request_1","version":"` + helperProtocolVersion + `","added_by_a_newer_helper":true}`))
+	if err != nil || frame.Type != "response" {
+		t.Fatalf("unknown field refused the frame: %v", err)
+	}
+	if _, err := decodeHelperFrame([]byte(`{"type":"response","request_id":"request_1","version":"` + helperProtocolVersion + `"}{}`)); err == nil {
+		t.Fatal("trailing data accepted")
+	}
+}
