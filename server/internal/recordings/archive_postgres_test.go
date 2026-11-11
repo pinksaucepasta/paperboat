@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/teambucket"
 	"github.com/pinksaucepasta/paperboat/shared/recording"
@@ -50,6 +51,7 @@ func (b *fakeBucket) Delete(_ context.Context, key string) error {
 // retention that deletes the segments and forgets them.
 func TestPostgresRecordingsArchive(t *testing.T) {
 	f := newFixture(t)
+	recID := "rec_" + uuid.NewString() // unique: another test's cleanup must not matter
 	f.paid()
 	if err := f.policy(`{"rules": [{"src": ["user:` + f.member + `@example.test"], "dst": ["machine:prod"], "allow": ["recording_view"]}]}`); err != nil {
 		t.Fatal(err)
