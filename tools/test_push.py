@@ -30,6 +30,7 @@ class PushTests(unittest.TestCase):
 case "$1 $2" in
 'repo view') echo test/repo ;;
 'api repos/test/repo/branches/main/protection') echo "$PROTECTED" ;;
+'api graphql') echo true ;;
 'pr list') ;;
 'pr create') echo https://example.test/pull/1 ;;
 'pr merge') case "$*" in *--delete-branch*) echo 'merge queue refuses --delete-branch' >&2; exit 1 ;; esac ;;
