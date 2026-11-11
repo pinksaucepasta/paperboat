@@ -32,7 +32,7 @@ case "$1 $2" in
 'api repos/test/repo/branches/main/protection') echo "$PROTECTED" ;;
 'pr list') ;;
 'pr create') echo https://example.test/pull/1 ;;
-'pr merge') exit 0 ;;
+'pr merge') case "$*" in *--delete-branch*) echo 'merge queue refuses --delete-branch' >&2; exit 1 ;; esac ;;
 'pr view') case "$*" in *statusCheckRollup*) echo true ;; *) echo "$PR_STATE" ;; esac ;;
 *) exit 9 ;;
 esac
