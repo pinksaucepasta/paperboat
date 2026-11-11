@@ -256,20 +256,23 @@ export function Choice({
   value,
   options,
   onChange,
+  min = 2,
 }: {
   label: string
   value: string
   options: { value: string; label: string }[]
   onChange: (value: string) => void
+  /** Fewest options that make it a menu; below it, a plain label. */
+  min?: number
 }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        disabled={options.length < 2}
+        disabled={options.length < min}
         className="inline-flex items-center gap-0.5 rounded-sm font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:pointer-events-none"
       >
         {label}
-        {options.length > 1 && <CaretDownIcon className="size-3 text-muted-foreground" />}
+        {options.length >= min && <CaretDownIcon className="size-3 text-muted-foreground" />}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-40">
         <DropdownMenuRadioGroup value={value} onValueChange={onChange}>

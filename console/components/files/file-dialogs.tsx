@@ -1,6 +1,6 @@
 "use client"
 
-import { CheckCircleIcon, FileIcon, UploadSimpleIcon, WarningCircleIcon } from "@phosphor-icons/react"
+import { CheckCircleIcon, FileIcon, UploadSimpleIcon, WarningCircleIcon, XIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
@@ -11,6 +11,7 @@ import { opensInBrowser } from "@/lib/tunnels"
 import { cn } from "@/lib/utils"
 import { Starting } from "@/components/tunnels/new-preview"
 import { Choice } from "@/components/tunnels/share-file"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
@@ -21,6 +22,7 @@ export function canReceive(machine: Machine) {
 }
 
 type Upload = { file: File; progress: number; state: "waiting" | "sending" | "sent" | "failed"; error?: string }
+type Run = { machine: Pick<Machine, "id" | "alias">; uploads: Upload[] }
 
 export function SendFilesButton({ machine }: { machine?: Machine }) {
   const [open, setOpen] = useState(false)
@@ -35,9 +37,96 @@ export function SendFilesButton({ machine }: { machine?: Machine }) {
   )
 }
 
+function UploadRow({ entry }: { entry: Upload }) {
+  return (
+    <li className="flex min-w-0 flex-col gap-1.5 rounded-lg bg-surface p-3 text-sm">
+      <div className="flex min-w-0 items-center gap-3">
+        <FileIcon className="size-4 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 truncate">{entry.file.name}</span>
+        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+          {entry.state === "sent" ? (
+            <CheckCircleIcon weight="fill" className="size-4 text-success" aria-label="Sent" />
+          ) : entry.state === "failed" ? (
+            <WarningCircleIcon weight="fill" className="size-4 text-destructive" aria-label="Failed" />
+          ) : (
+            formatBytes(entry.file.size)
+          )}
+        </span>
+      </div>
+      {entry.state === "sending" && (
+        <div className="h-1 overflow-hidden rounded-full bg-muted">
+          <div className="h-full bg-primary transition-[width]" style={{ width: `${Math.round(entry.progress * 100)}%` }} />
+        </div>
+      )}
+      {entry.error && <p className="text-xs text-destructive">{entry.error}</p>}
+    </li>
+  )
+}
+
+/** The chosen machines as removable chips (the last one stays), then the machines still to add. */
+function MachineChips({
+  selected,
+  rest,
+  pending,
+  onAdd,
+  onRemove,
+}: {
+  selected: Machine[]
+  rest: Machine[]
+  pending: boolean
+  onAdd: (id: string) => void
+  onRemove: (id: string) => void
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
+      <span>To</span>
+      {selected.map((entry) => (
+        <Badge key={entry.id} variant="outline" className="h-6 text-xs font-normal text-foreground">
+          {entry.alias}
+          {selected.length > 1 && (
+            <button
+              type="button"
+              aria-label={`Remove ${entry.alias}`}
+              onClick={() => onRemove(entry.id)}
+              className="-mr-1 rounded-full text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
+            >
+              <XIcon />
+            </button>
+          )}
+        </Badge>
+      ))}
+      {!selected.length && <span className="font-medium text-foreground">{pending ? "…" : "no machine"}</span>}
+      {rest.length > 0 && (
+        <Choice
+          label="Add machine"
+          value=""
+          min={1}
+          options={rest.map((entry) => ({ value: entry.id, label: entry.alias }))}
+          onChange={onAdd}
+        />
+      )}
+    </div>
+  )
+}
+
+/** Sent files and failures across the runs, in the status line's words. */
+function statusLine(runs: Run[], busy: boolean) {
+  if (runs.length === 1) {
+    const { alias } = runs[0].machine
+    const sent = runs[0].uploads.filter((entry) => entry.state === "sent").length
+    return busy ? `Sending to ${alias}…` : `Sent ${sent} of ${runs[0].uploads.length} to ${alias}’s Inbox.`
+  }
+  if (busy) return `Sending to ${runs.length} machines…`
+  const failed = runs.filter((run) => run.uploads.some((entry) => entry.state === "failed")).length
+  return failed
+    ? `Sent to ${runs.length - failed} of ${runs.length} machines. ${failed} failed.`
+    : `Sent ${runs[0].uploads.length} ${runs[0].uploads.length === 1 ? "file" : "files"} to ${runs.length} machines’ Inboxes.`
+}
+
 /**
- * Drop files, they go to a machine's Inbox. The destination is one line above the drop zone
- * ("To homelab ▾"), so dropping is the only step; each file shows its own progress.
+ * Drop files, they go to one or more machines' Inboxes. The destinations are one line above the
+ * drop zone ("To homelab ✕ build ✕ Add machine ▾"), so dropping is the only step; each file shows
+ * its own progress.
  */
 export function SendFilesDialog({
   machine,
@@ -51,44 +140,60 @@ export function SendFilesDialog({
   const queryClient = useQueryClient()
   const machines = useMachines()
   const usable = (machines.data ?? []).filter(canReceive)
-  const [chosen, setChosen] = useState<string | undefined>(machine?.id)
-  const target = usable.find((entry) => entry.id === chosen) ?? usable[0]
-  const [uploads, setUploads] = useState<Upload[]>([])
+  // Until the person changes it, the destination is the page's machine, else the first usable one.
+  const [picked, setPicked] = useState<string[]>()
+  const fallback = usable.find((entry) => entry.id === machine?.id) ?? usable[0]
+  const selected = picked ? usable.filter((entry) => picked.includes(entry.id)) : fallback ? [fallback] : []
+  const ids = selected.map((entry) => entry.id)
+  const [runs, setRuns] = useState<Run[]>([])
   const cancels = useRef<(() => void)[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
   const [over, setOver] = useState(false)
 
-  const update = (index: number, change: Partial<Upload>) =>
-    setUploads((current) => current.map((entry, at) => (at === index ? { ...entry, ...change } : entry)))
+  const update = (run: number, index: number, change: Partial<Upload>) =>
+    setRuns((current) =>
+      current.map((entry, at) =>
+        at === run
+          ? { ...entry, uploads: entry.uploads.map((upload, i) => (i === index ? { ...upload, ...change } : upload)) }
+          : entry,
+      ),
+    )
 
-  const start = async (files: File[]) => {
-    if (!target || !files.length) return
-    setUploads(files.map((file) => ({ file, progress: 0, state: "waiting" })))
-    // One at a time: the machine writes each file in full before the next starts.
+  const sendTo = async (run: number, target: Machine, files: File[]) => {
+    // One file at a time per machine: it writes each file in full before the next starts.
     for (const [index, file] of files.entries()) {
-      update(index, { state: "sending" })
-      const upload = sendToInbox(target.id, file, (progress) => update(index, { progress }))
+      update(run, index, { state: "sending" })
+      const upload = sendToInbox(target.id, file, (progress) => update(run, index, { progress }))
       cancels.current.push(upload.cancel)
       try {
         await upload.done
-        update(index, { state: "sent", progress: 1 })
+        update(run, index, { state: "sent", progress: 1 })
       } catch (error) {
-        update(index, { state: "failed", error: (error as Error).message })
+        update(run, index, { state: "failed", error: (error as Error).message })
       }
     }
+  }
+
+  const start = async (files: File[]) => {
+    if (!selected.length || !files.length) return
+    const targets = selected
+    setRuns(targets.map((entry) => ({ machine: entry, uploads: files.map((file) => ({ file, progress: 0, state: "waiting" })) })))
+    // Machines run in parallel; one failing never stops the others (sendTo catches its own errors).
+    await Promise.all(targets.map((entry, run) => sendTo(run, entry, files)))
     await queryClient.invalidateQueries({ queryKey: fileKeys.inboxes })
   }
 
   // Files dropped on the page start as soon as there's a machine to take them.
   const started = useRef(false)
   useEffect(() => {
-    if (!initialFiles?.length || started.current || !target) return
+    if (!initialFiles?.length || started.current || !selected.length) return
     started.current = true
     void start(initialFiles)
   })
 
-  const busy = uploads.some((entry) => entry.state === "waiting" || entry.state === "sending")
-  const sent = uploads.filter((entry) => entry.state === "sent").length
+  const busy = runs.some((run) => run.uploads.some((entry) => entry.state === "waiting" || entry.state === "sending"))
+  const several = runs.length > 1
+  const plural = selected.length > 1
 
   return (
     <Dialog
@@ -103,40 +208,29 @@ export function SendFilesDialog({
         <DialogHeader>
           <DialogTitle>Send files</DialogTitle>
         </DialogHeader>
-        {uploads.length ? (
+        {runs.length ? (
           <div className="flex min-w-0 flex-col gap-3">
-            <ul className="flex max-h-72 flex-col gap-2 overflow-y-auto">
-              {uploads.map((entry, index) => (
-                <li key={index} className="flex min-w-0 flex-col gap-1.5 rounded-lg bg-surface p-3 text-sm">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <FileIcon className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1 truncate">{entry.file.name}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-                      {entry.state === "sent" ? (
-                        <CheckCircleIcon weight="fill" className="size-4 text-success" aria-label="Sent" />
-                      ) : entry.state === "failed" ? (
-                        <WarningCircleIcon weight="fill" className="size-4 text-destructive" aria-label="Failed" />
-                      ) : (
-                        formatBytes(entry.file.size)
-                      )}
-                    </span>
-                  </div>
-                  {entry.state === "sending" && (
-                    <div className="h-1 overflow-hidden rounded-full bg-muted">
-                      <div
-                        className="h-full bg-primary transition-[width]"
-                        style={{ width: `${Math.round(entry.progress * 100)}%` }}
-                      />
-                    </div>
+            <div className="flex max-h-72 flex-col gap-3 overflow-y-auto">
+              {runs.map((run) => (
+                <section key={run.machine.id} className="flex min-w-0 flex-col gap-2">
+                  {several && (
+                    <h3 className="flex items-baseline justify-between gap-3 text-xs">
+                      <span className="min-w-0 truncate font-medium">{run.machine.alias}</span>
+                      <span className="shrink-0 text-muted-foreground tabular-nums">
+                        {run.uploads.filter((entry) => entry.state === "sent").length} of {run.uploads.length} sent
+                      </span>
+                    </h3>
                   )}
-                  {entry.error && <p className="text-xs text-destructive">{entry.error}</p>}
-                </li>
+                  <ul className="flex flex-col gap-2">
+                    {run.uploads.map((entry, index) => (
+                      <UploadRow key={index} entry={entry} />
+                    ))}
+                  </ul>
+                </section>
               ))}
-            </ul>
+            </div>
             <p className="text-xs text-muted-foreground" role="status">
-              {busy
-                ? `Sending to ${target?.alias ?? "the machine"}…`
-                : `Sent ${sent} of ${uploads.length} to ${target?.alias ?? "the machine"}’s Inbox.`}
+              {statusLine(runs, busy)}
             </p>
             {!busy && (
               <DialogFooter>
@@ -148,19 +242,17 @@ export function SendFilesDialog({
           </div>
         ) : (
           <>
-            <div className="flex flex-wrap items-center gap-x-1.5 text-sm text-muted-foreground">
-              <span>To</span>
-              <Choice
-                label={target?.alias ?? (machines.isPending ? "…" : "no machine")}
-                value={target?.id ?? ""}
-                options={usable.map((entry) => ({ value: entry.id, label: entry.alias }))}
-                onChange={setChosen}
-              />
-            </div>
+            <MachineChips
+              selected={selected}
+              rest={usable.filter((entry) => !ids.includes(entry.id))}
+              pending={machines.isPending}
+              onAdd={(id) => setPicked([...ids, id])}
+              onRemove={(id) => setPicked(ids.filter((entry) => entry !== id))}
+            />
             <button
               type="button"
               data-file-drop
-              disabled={!target}
+              disabled={!selected.length}
               onClick={() => inputRef.current?.click()}
               onDragOver={(event) => {
                 event.preventDefault()
@@ -183,9 +275,13 @@ export function SendFilesDialog({
               <span className="text-xs text-muted-foreground">or click to choose</span>
             </button>
             <p className="text-xs text-muted-foreground">
-              {target || machines.isPending
-                ? `Files land in ${target?.alias ?? "the machine"}’s Paperboat Inbox, in its Downloads folder.`
-                : "No machine can receive files right now. Bring a machine online to send."}
+              {selected.length
+                ? `Files land in ${plural ? "each machine’s" : `${selected[0].alias}’s`} Paperboat Inbox, in its Downloads folder.`
+                : machines.isPending
+                  ? "Files land in the machine’s Paperboat Inbox, in its Downloads folder."
+                  : usable.length
+                    ? "Choose a machine to send to"
+                    : "No machine can receive files right now. Bring a machine online to send."}
             </p>
             <input
               ref={inputRef}
