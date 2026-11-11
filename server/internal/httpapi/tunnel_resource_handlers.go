@@ -12,6 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
+	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 )
 
 // The resource handlers deliberately keep the wire documents separate from
@@ -50,6 +51,7 @@ type tunnelResourceRouteCreateDocument struct {
 	ConnectTimeoutMS     int32                                `json:"connect_timeout_ms"`
 	IdleTimeoutMS        int32                                `json:"idle_timeout_ms"`
 	MaxConcurrentStreams int32                                `json:"max_concurrent_streams"`
+	RewriteRules         *tunnelrouterules.Rules              `json:"rewrite_rules"`
 }
 
 type tunnelResourceRoutePatchDocument struct {
@@ -63,6 +65,7 @@ type tunnelResourceRoutePatchDocument struct {
 	IdleTimeoutMS        *int32                                `json:"idle_timeout_ms"`
 	MaxConcurrentStreams *int32                                `json:"max_concurrent_streams"`
 	DesiredState         *string                               `json:"desired_state"`
+	RewriteRules         *tunnelrouterules.Rules               `json:"rewrite_rules"`
 	raw                  map[string]json.RawMessage
 }
 
@@ -139,12 +142,13 @@ func (d tunnelResourceRouteCreateDocument) request() (tunnelv1.RouteCreateReques
 		wildcard = strings.TrimPrefix(wildcard, "*.")
 	}
 	return tunnelv1.RouteCreateRequest{Name: d.Name, Protocol: d.Protocol, MatchType: matchType, Hostname: hostname, WildcardSuffix: wildcard, PathPrefix: d.PathPrefix, Origin: origin, Priority: d.Priority,
-		ConnectTimeoutMS: d.ConnectTimeoutMS, IdleTimeoutMS: d.IdleTimeoutMS, MaxConcurrentStreams: d.MaxConcurrentStreams}, nil
+		ConnectTimeoutMS: d.ConnectTimeoutMS, IdleTimeoutMS: d.IdleTimeoutMS, MaxConcurrentStreams: d.MaxConcurrentStreams, RewriteRules: d.RewriteRules}, nil
 }
 
 func (d tunnelResourceRoutePatchDocument) request() (tunnelv1.RoutePatchRequest, error) {
 	result := tunnelv1.RoutePatchRequest{Name: d.Name, Protocol: d.Protocol, PathPrefix: d.PathPrefix, PathPrefixSet: hasJSONField(d.raw, "path_prefix"), Priority: d.Priority,
-		ConnectTimeoutMS: d.ConnectTimeoutMS, IdleTimeoutMS: d.IdleTimeoutMS, MaxConcurrentStreams: d.MaxConcurrentStreams, DesiredState: d.DesiredState}
+		ConnectTimeoutMS: d.ConnectTimeoutMS, IdleTimeoutMS: d.IdleTimeoutMS, MaxConcurrentStreams: d.MaxConcurrentStreams, DesiredState: d.DesiredState,
+		RewriteRules: d.RewriteRules, RewriteRulesSet: hasJSONField(d.raw, "rewrite_rules")}
 	if d.HostMatch != nil {
 		matchType, hostname, wildcard, err := tunnelResourceRouteHostMatch(*d.HostMatch)
 		if err != nil {

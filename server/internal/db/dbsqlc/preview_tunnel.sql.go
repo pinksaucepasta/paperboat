@@ -541,7 +541,7 @@ VALUES
    $20, $21, $22,
    $23, (SELECT port FROM public_port),
    $24, $25, $25)
-RETURNING id, tunnel_id, name, protocol, match_type, match_hostname, wildcard_suffix, path_prefix, priority, origin_scheme, origin_address, preserve_host, host_override, tls_verification, tls_server_name, ca_reference, mtls_credential_reference, connect_timeout_ms, idle_timeout_ms, max_concurrent_streams, desired_state, generation, created_by_actor_id, updated_by_actor_id, created_at, updated_at, deleted_at, public_tcp_listener_id, public_tcp_port, tls_pin
+RETURNING id, tunnel_id, name, protocol, match_type, match_hostname, wildcard_suffix, path_prefix, priority, origin_scheme, origin_address, preserve_host, host_override, tls_verification, tls_server_name, ca_reference, mtls_credential_reference, connect_timeout_ms, idle_timeout_ms, max_concurrent_streams, desired_state, generation, created_by_actor_id, updated_by_actor_id, created_at, updated_at, deleted_at, public_tcp_listener_id, public_tcp_port, tls_pin, rewrite_rules
 `
 
 type CreatePreviewTunnelRouteParams struct {
@@ -636,6 +636,7 @@ func (q *Queries) CreatePreviewTunnelRoute(ctx context.Context, arg CreatePrevie
 		&i.PublicTcpListenerID,
 		&i.PublicTcpPort,
 		&i.TlsPin,
+		&i.RewriteRules,
 	)
 	return i, err
 }

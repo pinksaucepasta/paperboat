@@ -20,6 +20,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 	"golang.org/x/net/idna"
 )
 
@@ -145,7 +146,7 @@ func (s *ResourceService) CreateRoute(ctx context.Context, request previewtunnel
 		Priority: normalized.Priority, ConnectTimeoutMS: normalized.ConnectTimeoutMS, IdleTimeoutMS: normalized.IdleTimeoutMS, MaxConcurrentStreams: normalized.MaxConcurrentStreams,
 		DesiredState: "active", IdempotencyKey: input.Mutation.IdempotencyKey, RequestHash: input.Mutation.RequestHash,
 		ActorID: request.Actor.ActorID, AuditActorID: auditActorIDForActor(request.Actor), ActorType: auditActorType(request.Actor), RequestID: request.RequestID,
-		CorrelationID: request.CorrelationID, SourceMachineID: request.Actor.MachineID, Now: s.now().UTC()}
+		CorrelationID: request.CorrelationID, SourceMachineID: request.Actor.MachineID, Now: s.now().UTC(), RewriteRules: normalized.RewriteRules}
 	if record.Protocol == "tcp" {
 		record.PublicTCPListenerID, err = s.newID("listener")
 		if err != nil {
@@ -191,7 +192,8 @@ func (s *ResourceService) PatchRoute(ctx context.Context, request previewtunnela
 		RequestID: request.RequestID, CorrelationID: request.CorrelationID, SourceMachineID: request.Actor.MachineID, Now: s.now().UTC(), NameSet: input.Name != nil, ProtocolSet: input.Protocol != nil,
 		MatchTypeSet: input.MatchType != nil, HostnameSet: input.Hostname != nil, WildcardSuffixSet: input.WildcardSuffix != nil, PathPrefixSet: input.PathPrefixSet, OriginSet: input.Origin != nil,
 		PrioritySet: input.Priority != nil, ConnectTimeoutSet: input.ConnectTimeoutMS != nil, IdleTimeoutSet: input.IdleTimeoutMS != nil,
-		MaxStreamsSet: input.MaxConcurrentStreams != nil, DesiredStateSet: input.DesiredState != nil}
+		MaxStreamsSet: input.MaxConcurrentStreams != nil, DesiredStateSet: input.DesiredState != nil,
+		RewriteRules: normalized.RewriteRules, RewriteRulesSet: input.RewriteRulesSet}
 	result, err := s.repository.PatchResourceRoute(ctx, record)
 	if err != nil {
 		return RouteMutationResult{}, err
@@ -523,7 +525,17 @@ func routeView(row dbsqlc.TunnelRoute) RouteView {
 	return RouteView{Schema: Schema, Kind: "route", ID: row.ID, TunnelID: row.TunnelID, Name: row.Name, Protocol: wireProtocol(row.Protocol), HostMatch: hostMatch,
 		PathPrefix: nullStringPointer(row.PathPrefix), Origin: origin, Priority: row.Priority, ConnectTimeoutMS: row.ConnectTimeoutMs, IdleTimeoutMS: row.IdleTimeoutMs,
 		MaxConcurrentStreams: row.MaxConcurrentStreams, DesiredState: row.DesiredState, Generation: row.Generation,
-		ETag: previewtunnelapi.ETag("route", row.ID, row.Generation), PublicTCPListenerID: nullStringValue(row.PublicTcpListenerID), PublicTCPPort: row.PublicTcpPort.Int32}
+		ETag: previewtunnelapi.ETag("route", row.ID, row.Generation), PublicTCPListenerID: nullStringValue(row.PublicTcpListenerID), PublicTCPPort: row.PublicTcpPort.Int32,
+		RewriteRules: routeRewriteRules(row.RewriteRules)}
+}
+
+// routeRewriteRules is the stored rules for a view, nil for none (or for a document that no longer parses).
+func routeRewriteRules(raw []byte) *tunnelrouterules.Rules {
+	rules, err := tunnelrouterules.Decode(raw)
+	if err != nil || rules.Empty() {
+		return nil
+	}
+	return &rules
 }
 
 // DomainViewFromRow is the wire view of a tunnel domain binding.
@@ -676,6 +688,7 @@ type normalizedRouteCreate struct {
 	ConnectTimeoutMS     int32
 	IdleTimeoutMS        int32
 	MaxConcurrentStreams int32
+	RewriteRules         []byte
 }
 
 type normalizedRoutePatch struct {
@@ -691,6 +704,22 @@ type normalizedRoutePatch struct {
 	IdleTimeoutMS        int32
 	MaxConcurrentStreams int32
 	DesiredState         string
+	RewriteRules         []byte
+}
+
+// normalizeRewriteRules is the canonical JSON of a route's rules ("{}" for none). Rules apply to http routes only.
+func normalizeRewriteRules(rules *tunnelrouterules.Rules, protocol string) ([]byte, error) {
+	if rules == nil || rules.Empty() {
+		return []byte("{}"), nil
+	}
+	if protocol != "" && protocol != "http" {
+		return nil, fmt.Errorf("%w: rewrite rules apply to http routes only", ErrInvalidInput)
+	}
+	canonical, err := tunnelrouterules.Canonical(*rules)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+	}
+	return canonical, nil
 }
 
 func normalizeRouteCreate(input RouteCreateRequest) (normalizedRouteCreate, error) {
@@ -736,8 +765,12 @@ func normalizeRouteCreate(input RouteCreateRequest) (normalizedRouteCreate, erro
 	if err != nil {
 		return normalizedRouteCreate{}, err
 	}
+	rewriteRules, err := normalizeRewriteRules(input.RewriteRules, protocol)
+	if err != nil {
+		return normalizedRouteCreate{}, err
+	}
 	return normalizedRouteCreate{Name: name, Protocol: protocol, MatchType: matchType, Hostname: hostname, WildcardSuffix: wildcard, PathPrefix: pathPrefix, Origin: origin, Priority: input.Priority,
-		ConnectTimeoutMS: connectTimeout, IdleTimeoutMS: idleTimeout, MaxConcurrentStreams: maxStreams}, nil
+		ConnectTimeoutMS: connectTimeout, IdleTimeoutMS: idleTimeout, MaxConcurrentStreams: maxStreams, RewriteRules: rewriteRules}, nil
 }
 
 func normalizeRoutePatch(input RoutePatchRequest) (normalizedRoutePatch, error) {
@@ -801,6 +834,14 @@ func normalizeRoutePatch(input RoutePatchRequest) (normalizedRoutePatch, error) 
 			return result, err
 		}
 		result.ConnectTimeoutMS, result.IdleTimeoutMS, result.MaxConcurrentStreams = connectTimeout, idleTimeout, maxStreams
+	}
+	if input.RewriteRulesSet {
+		// the route's protocol is checked against the stored one with the candidate (validateEffectiveRouteCandidate)
+		value, err := normalizeRewriteRules(input.RewriteRules, "")
+		if err != nil {
+			return result, err
+		}
+		result.RewriteRules = value
 	}
 	if input.DesiredState != nil {
 		switch *input.DesiredState {

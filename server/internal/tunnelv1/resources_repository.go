@@ -21,6 +21,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/publicationdns"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspacedomain"
+	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 )
 
 func (r *SQLRepository) ListResourceRoutes(ctx context.Context, accountID, tunnelID string, after *ListPosition, limit int) ([]dbsqlc.TunnelRoute, error) {
@@ -371,6 +372,7 @@ func createRouteParams(input RouteRecord) dbsqlc.CreateTunnelRouteV1Params {
 		MtlsCredentialReference: nullableStringPtr(clientRef), TlsPin: routeTLSPin(input.Origin), ConnectTimeoutMs: input.ConnectTimeoutMS, IdleTimeoutMs: input.IdleTimeoutMS,
 		MaxConcurrentStreams: input.MaxConcurrentStreams, DesiredState: "active", CreatedByActorID: input.ActorID, UpdatedByActorID: input.ActorID, Now: input.Now,
 		PublicTcpListenerID: nullableString(input.PublicTCPListenerID), PublicTcpPortMin: input.PublicTCPPortMin, PublicTcpPortMax: input.PublicTCPPortMax,
+		RewriteRules: rewriteRulesOrEmpty(input.RewriteRules),
 	}
 }
 
@@ -390,7 +392,28 @@ func updateRouteParams(input RouteRecord) dbsqlc.UpdateTunnelRouteV1Params {
 		ConnectTimeoutSet:  input.ConnectTimeoutSet, ConnectTimeoutMs: input.ConnectTimeoutMS,
 		IdleTimeoutSet: input.IdleTimeoutSet, IdleTimeoutMs: input.IdleTimeoutMS,
 		MaxStreamsSet: input.MaxStreamsSet, MaxConcurrentStreams: input.MaxConcurrentStreams,
+		RewriteRulesSet: input.RewriteRulesSet, RewriteRules: rewriteRulesOrEmpty(input.RewriteRules),
 	}
+}
+
+// sameRewriteRules compares two rule documents by meaning: PostgreSQL prints jsonb with spaces, the API stores compact.
+func sameRewriteRules(a, b []byte) bool {
+	left, leftErr := tunnelrouterules.Decode(a)
+	right, rightErr := tunnelrouterules.Decode(b)
+	if leftErr != nil || rightErr != nil {
+		return string(a) == string(b)
+	}
+	leftJSON, _ := tunnelrouterules.Canonical(left)
+	rightJSON, _ := tunnelrouterules.Canonical(right)
+	return string(leftJSON) == string(rightJSON)
+}
+
+// rewriteRulesOrEmpty is the stored form of a route's rules: the canonical JSON, or "{}" for none.
+func rewriteRulesOrEmpty(raw []byte) []byte {
+	if len(raw) == 0 {
+		return []byte("{}")
+	}
+	return raw
 }
 
 func nullableStringPtr(value *string) sql.NullString {
@@ -431,7 +454,7 @@ func routeCandidate(input RouteRecord) dbsqlc.TunnelRoute {
 		OriginScheme: input.Origin.Scheme, OriginAddress: input.Origin.Address, PreserveHost: input.Origin.PreserveHost,
 		TlsVerification: tlsVerification, TlsServerName: serverName, CaReference: caReference, MtlsCredentialReference: clientReference, TlsPin: routeTLSPin(input.Origin),
 		ConnectTimeoutMs: input.ConnectTimeoutMS, IdleTimeoutMs: input.IdleTimeoutMS, MaxConcurrentStreams: input.MaxConcurrentStreams,
-		DesiredState: input.DesiredState}
+		DesiredState: input.DesiredState, RewriteRules: rewriteRulesOrEmpty(input.RewriteRules)}
 }
 
 func routeCandidateFromRecord(current dbsqlc.TunnelRoute, input RouteRecord) dbsqlc.TunnelRoute {
@@ -462,6 +485,9 @@ func routeCandidateFromRecord(current dbsqlc.TunnelRoute, input RouteRecord) dbs
 		candidate.TlsVerification, candidate.TlsServerName, candidate.CaReference, candidate.MtlsCredentialReference = routeTLSNullValues(input.Origin)
 		candidate.TlsPin = routeTLSPin(input.Origin)
 	}
+	if input.RewriteRulesSet {
+		candidate.RewriteRules = rewriteRulesOrEmpty(input.RewriteRules)
+	}
 	if input.PrioritySet {
 		candidate.Priority = input.Priority
 	}
@@ -485,6 +511,9 @@ func routeCandidateFromRecord(current dbsqlc.TunnelRoute, input RouteRecord) dbs
 // tunnel-access, host-match, and origin semantics atomic across partial
 // updates.
 func validateEffectiveRouteCandidate(tunnel dbsqlc.Tunnel, candidate dbsqlc.TunnelRoute) error {
+	if rules, err := tunnelrouterules.Decode(candidate.RewriteRules); candidate.Protocol != "http" && (err != nil || !rules.Empty()) {
+		return fmt.Errorf("%w: rewrite rules apply to http routes only; clear them before changing the protocol", ErrInvalidInput)
+	}
 	if candidate.Protocol == "tcp" {
 		if tunnel.AccessMode != AccessPublic || candidate.OriginScheme != "tcp" || candidate.MatchType != "managed" || !candidate.MatchHostname.Valid || candidate.PathPrefix.Valid || candidate.PreserveHost || candidate.HostOverride.Valid {
 			return fmt.Errorf("%w: public TCP routes require a public tunnel, managed hostname, tcp origin, and no path", ErrInvalidInput)
@@ -535,6 +564,7 @@ func routeRecordChanges(current dbsqlc.TunnelRoute, input RouteRecord) bool {
 		current.Priority != candidate.Priority || current.OriginScheme != candidate.OriginScheme || current.OriginAddress != candidate.OriginAddress ||
 		current.PreserveHost != candidate.PreserveHost || current.HostOverride != candidate.HostOverride || current.TlsVerification != candidate.TlsVerification ||
 		current.TlsServerName != candidate.TlsServerName || current.CaReference != candidate.CaReference || current.MtlsCredentialReference != candidate.MtlsCredentialReference || current.TlsPin != candidate.TlsPin ||
+		!sameRewriteRules(current.RewriteRules, candidate.RewriteRules) ||
 		current.ConnectTimeoutMs != candidate.ConnectTimeoutMs || current.IdleTimeoutMs != candidate.IdleTimeoutMs || current.MaxConcurrentStreams != candidate.MaxConcurrentStreams ||
 		current.DesiredState != candidate.DesiredState
 }

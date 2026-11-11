@@ -8,6 +8,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelapi"
+	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 )
 
 // ResourceConfig controls the resource service's deterministic dependencies.
@@ -61,7 +62,9 @@ type RouteCreateRequest struct {
 	ConnectTimeoutMS     int32
 	IdleTimeoutMS        int32
 	MaxConcurrentStreams int32
-	Mutation             ResourceMutationInput
+	// RewriteRules are the route's header, path and redirect rules (protocol http only).
+	RewriteRules *tunnelrouterules.Rules
+	Mutation     ResourceMutationInput
 }
 
 type RoutePatchRequest struct {
@@ -78,7 +81,10 @@ type RoutePatchRequest struct {
 	IdleTimeoutMS        *int32
 	MaxConcurrentStreams *int32
 	DesiredState         *string
-	Mutation             ResourceMutationInput
+	// RewriteRules replaces the route's rules when RewriteRulesSet; a nil or empty value clears them.
+	RewriteRules    *tunnelrouterules.Rules
+	RewriteRulesSet bool
+	Mutation        ResourceMutationInput
 }
 
 type RouteTLSRequest struct {
@@ -147,6 +153,8 @@ type RouteView struct {
 	ETag                 string         `json:"etag"`
 	PublicTCPListenerID  string         `json:"public_tcp_listener_id,omitempty"`
 	PublicTCPPort        int32          `json:"public_tcp_port,omitempty"`
+	// RewriteRules are the route's header, path and redirect rules, omitted when there are none.
+	RewriteRules *tunnelrouterules.Rules `json:"rewrite_rules,omitempty"`
 }
 
 type RoutePage struct {
@@ -298,6 +306,9 @@ type RouteRecord struct {
 	IdleTimeoutSet       bool
 	MaxStreamsSet        bool
 	DesiredStateSet      bool
+	// RewriteRules is the canonical JSON ("{}" for none); RewriteRulesSet when a patch replaces it.
+	RewriteRules    []byte
+	RewriteRulesSet bool
 }
 
 type DomainRecord struct {

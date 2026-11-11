@@ -3854,6 +3854,7 @@ SELECT ('epa_' || x.route_id)::text AS assignment_id,
        tr.origin_scheme AS origin_scheme,
        tr.preserve_host AS preserve_host,
        tr.host_override AS host_override,
+       tr.rewrite_rules AS rewrite_rules,
        COALESCE(engine_scoped_domain.hostname, '')::text AS scoped_domain_hostname,
        COALESCE(engine_scoped_domain.match_type, '')::text AS scoped_domain_match_type,
        COALESCE((
@@ -3947,6 +3948,7 @@ type ListTunnelEdgeRouteAssignmentsForNodeV1Row struct {
 	OriginScheme               string
 	PreserveHost               bool
 	HostOverride               sql.NullString
+	RewriteRules               []byte
 	ScopedDomainHostname       string
 	ScopedDomainMatchType      string
 	DomainBindings             string
@@ -4007,6 +4009,7 @@ func (q *Queries) ListTunnelEdgeRouteAssignmentsForNodeV1(ctx context.Context, a
 			&i.OriginScheme,
 			&i.PreserveHost,
 			&i.HostOverride,
+			&i.RewriteRules,
 			&i.ScopedDomainHostname,
 			&i.ScopedDomainMatchType,
 			&i.DomainBindings,
