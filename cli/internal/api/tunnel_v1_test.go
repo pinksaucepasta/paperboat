@@ -608,3 +608,20 @@ func TestTunnelDomainMutationReadsCanonicalResourceAfterOperation(t *testing.T) 
 		})
 	}
 }
+
+// A clock-skewed machine proof (the 400 clock_skew every machine-proof endpoint answers, private-access routes included)
+// reaches the caller as an APIError with its code and the server's time, and shows the clock guidance.
+func TestTunnelPrivateAccessDiscoveryShowsClockSkewGuidance(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		io.WriteString(w, `{"error":{"schema":"paperboat.preview-tunnel/v1","kind":"error","code":"clock_skew","message":"This machine's clock is off by more than a minute.","retryable":true,"details":{"server_time":"2026-11-11T01:02:03Z","allowed_skew_seconds":60}}}`)
+	}))
+	defer server.Close()
+	_, err := New(server.URL, config.Credential{}, server.Client()).DiscoverTunnelPrivateAccessRoutesV1(context.Background(), "operation_clock_01")
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusBadRequest || apiErr.Code != "clock_skew" || apiErr.Details["server_time"] != "2026-11-11T01:02:03Z" ||
+		!strings.Contains(apiErr.Message, "clock is off") || !strings.Contains(apiErr.Message, "automatic time") {
+		t.Fatalf("clock skew error = %#v (%v)", apiErr, err)
+	}
+}

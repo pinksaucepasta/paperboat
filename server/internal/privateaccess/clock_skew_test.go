@@ -2,6 +2,7 @@ package privateaccess
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -13,13 +14,16 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 )
 
+// clockSkewAnswer is the standard nested error envelope, the shape every other machine-proof endpoint answers with.
 type clockSkewAnswer struct {
-	Code      string `json:"code"`
-	Retryable bool   `json:"retryable"`
-	Details   struct {
-		ServerTime         string `json:"server_time"`
-		AllowedSkewSeconds int    `json:"allowed_skew_seconds"`
-	} `json:"details"`
+	Error struct {
+		Code      string `json:"code"`
+		Retryable bool   `json:"retryable"`
+		Details   struct {
+			ServerTime         string `json:"server_time"`
+			AllowedSkewSeconds int    `json:"allowed_skew_seconds"`
+		} `json:"details"`
+	} `json:"error"`
 }
 
 // A correctly signed proof from a machine whose clock is off is a 400 clock_skew carrying the server's time, so the
@@ -93,8 +97,24 @@ func checkClockSkewAnswer(t *testing.T, response *httptest.ResponseRecorder, wan
 		return
 	}
 	var answer clockSkewAnswer
-	if err := json.Unmarshal(response.Body.Bytes(), &answer); err != nil || answer.Code != "clock_skew" || !answer.Retryable ||
-		answer.Details.ServerTime == "" || answer.Details.AllowedSkewSeconds <= 0 {
+	if err := json.Unmarshal(response.Body.Bytes(), &answer); err != nil || answer.Error.Code != "clock_skew" || !answer.Error.Retryable ||
+		answer.Error.Details.ServerTime == "" || answer.Error.Details.AllowedSkewSeconds <= 0 {
 		t.Fatalf("clock skew answer = %s (%v)", response.Body.String(), err)
+	}
+}
+
+// Every private-access refusal uses the same nested envelope, not a second flat shape clients would have to learn.
+func TestPrivateAccessErrorsUseTheStandardNestedEnvelope(t *testing.T) {
+	response := httptest.NewRecorder()
+	writeHTTPError(context.Background(), response, http.StatusUnauthorized, "machine_identity_invalid", "Machine authentication is required.", false)
+	var body struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || body.Error.Code != "machine_identity_invalid" || body.Error.Message == "" || body.Code != "" {
+		t.Fatalf("answer = %s (%v)", response.Body.String(), err)
 	}
 }

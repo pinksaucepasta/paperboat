@@ -202,17 +202,30 @@ func writeDecision(w http.ResponseWriter, ctx context.Context, decision Decision
 	}
 }
 
+// errorBody is the standard error envelope every API answers with, {"error":{...}}; the request's support reference and
+// request id travel in the response headers the request middleware sets.
+type errorBody struct {
+	Error struct {
+		Schema    string         `json:"schema"`
+		Kind      string         `json:"kind"`
+		Code      string         `json:"code"`
+		Message   string         `json:"message"`
+		Retryable bool           `json:"retryable"`
+		Details   map[string]any `json:"details,omitempty"`
+	} `json:"error"`
+}
+
 func writeHTTPError(ctx context.Context, w http.ResponseWriter, status int, code, message string, retryable bool) {
+	writeHTTPErrorDetails(ctx, w, status, code, message, retryable, nil)
+}
+
+func writeHTTPErrorDetails(ctx context.Context, w http.ResponseWriter, status int, code, message string, retryable bool, details map[string]any) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(struct {
-		Schema    string `json:"schema"`
-		Kind      string `json:"kind"`
-		Code      string `json:"code"`
-		Message   string `json:"message"`
-		Retryable bool   `json:"retryable"`
-	}{Schema: Schema, Kind: "error", Code: code, Message: message, Retryable: retryable}); err != nil {
+	var body errorBody
+	body.Error.Schema, body.Error.Kind, body.Error.Code, body.Error.Message, body.Error.Retryable, body.Error.Details = Schema, "error", code, message, retryable, details
+	if err := json.NewEncoder(w).Encode(body); err != nil {
 		capturePrivateAccessFailure(ctx, status, "authorization_unavailable", err, false)
 	}
 }
@@ -225,20 +238,8 @@ func clockSkewed(err error) bool {
 
 func writeClockSkew(ctx context.Context, w http.ResponseWriter, err error) {
 	capturePrivateAccessFailure(ctx, http.StatusBadRequest, "machine_identity_invalid", err, false)
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusBadRequest)
-	if encodeErr := json.NewEncoder(w).Encode(struct {
-		Schema    string         `json:"schema"`
-		Kind      string         `json:"kind"`
-		Code      string         `json:"code"`
-		Message   string         `json:"message"`
-		Retryable bool           `json:"retryable"`
-		Details   map[string]any `json:"details"`
-	}{Schema: Schema, Kind: "error", Code: "clock_skew", Message: "This machine's clock is off by more than a minute. Correct the system time; Paperboat retries with the server's time.", Retryable: true,
-		Details: map[string]any{"server_time": time.Now().UTC().Format(time.RFC3339), "allowed_skew_seconds": int(controlplane.ProofClockWindow / time.Second)}}); encodeErr != nil {
-		capturePrivateAccessFailure(ctx, http.StatusBadRequest, "authorization_unavailable", encodeErr, false)
-	}
+	writeHTTPErrorDetails(ctx, w, http.StatusBadRequest, "clock_skew", "This machine's clock is off by more than a minute. Correct the system time; Paperboat retries with the server's time.", true,
+		map[string]any{"server_time": time.Now().UTC().Format(time.RFC3339), "allowed_skew_seconds": int(controlplane.ProofClockWindow / time.Second)})
 }
 
 func decodeRequest(raw []byte) (Request, error) {
