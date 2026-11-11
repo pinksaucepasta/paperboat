@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
+	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/admission"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/usage"
 )
@@ -46,54 +47,56 @@ type UsageResult struct {
 }
 
 type RouteAssignment struct {
-	RouteID                    string          `json:"route_id"`
-	Revision                   uint64          `json:"route_revision"`
-	Environment                string          `json:"environment_id"`
-	AccountID                  string          `json:"account_id,omitempty"`
-	HostID                     string          `json:"host_id,omitempty"`
-	MachineIdentityPublicKey   string          `json:"machine_identity_public_key,omitempty"`
-	MachineIdentityThumbprint  string          `json:"machine_identity_thumbprint,omitempty"`
-	TunnelID                   string          `json:"tunnel_id,omitempty"`
-	ResourceID                 string          `json:"resource_id,omitempty"` // the tunnel, when TunnelID names its carrier
-	ConnectorID                string          `json:"connector_id"`
-	Generation                 uint64          `json:"connector_generation"`
-	ConnectorSessionID         string          `json:"connector_session_id,omitempty"`
-	ConnectorProcessGeneration uint64          `json:"connector_process_generation,omitempty"`
-	ConfigGeneration           uint64          `json:"config_generation,omitempty"`
-	ConfigContentHash          string          `json:"config_content_hash,omitempty"`
-	AssignmentID               string          `json:"assignment_id,omitempty"`
-	AssignmentGeneration       uint64          `json:"assignment_generation,omitempty"`
-	EdgeFailureDomain          string          `json:"edge_failure_domain,omitempty"`
-	EdgeProcessEpoch           string          `json:"edge_process_epoch,omitempty"`
-	NodeID                     string          `json:"edge_node_id"`
-	Kind                       string          `json:"kind"`
-	PublicHost                 string          `json:"public_host"`
-	MatchType                  string          `json:"match_type,omitempty"`
-	MatchHostname              string          `json:"match_hostname,omitempty"`
-	WildcardSuffix             string          `json:"wildcard_suffix,omitempty"`
-	PathPrefix                 string          `json:"path_prefix,omitempty"`
-	Priority                   int             `json:"priority,omitempty"`
-	Protocol                   string          `json:"protocol,omitempty"`
-	PublicTCPListenerID        string          `json:"public_tcp_listener_id,omitempty"`
-	PublicTCPPort              uint16          `json:"public_tcp_port,omitempty"`
-	OriginScheme               string          `json:"origin_scheme,omitempty"`
-	AccessMode                 string          `json:"access_mode,omitempty"`
-	ViewerPolicyGeneration     uint64          `json:"viewer_policy_generation,omitempty"`
-	OriginAddress              string          `json:"origin_address,omitempty"`
-	PreserveHost               bool            `json:"preserve_host,omitempty"`
-	HostOverride               string          `json:"host_override,omitempty"`
-	DomainBindings             []DomainBinding `json:"domain_bindings,omitempty"`
-	State                      string          `json:"state,omitempty"`
-	DesiredState               string          `json:"desired_state,omitempty"`
-	ObservedState              string          `json:"observed_state,omitempty"`
-	TargetHost                 string          `json:"target_host,omitempty"`
-	TargetPort                 uint16          `json:"target_port,omitempty"`
-	TargetRouteID              string          `json:"-"`
-	TargetConnectorSessionID   string          `json:"-"`
-	TargetConnectorProcessGen  uint64          `json:"-"`
-	TargetConfigGeneration     uint64          `json:"-"`
-	PreviewState               string          `json:"preview_state,omitempty"`
-	PreviewReason              string          `json:"preview_reason,omitempty"`
+	RouteID                    string `json:"route_id"`
+	Revision                   uint64 `json:"route_revision"`
+	Environment                string `json:"environment_id"`
+	AccountID                  string `json:"account_id,omitempty"`
+	HostID                     string `json:"host_id,omitempty"`
+	MachineIdentityPublicKey   string `json:"machine_identity_public_key,omitempty"`
+	MachineIdentityThumbprint  string `json:"machine_identity_thumbprint,omitempty"`
+	TunnelID                   string `json:"tunnel_id,omitempty"`
+	ResourceID                 string `json:"resource_id,omitempty"` // the tunnel, when TunnelID names its carrier
+	ConnectorID                string `json:"connector_id"`
+	Generation                 uint64 `json:"connector_generation"`
+	ConnectorSessionID         string `json:"connector_session_id,omitempty"`
+	ConnectorProcessGeneration uint64 `json:"connector_process_generation,omitempty"`
+	ConfigGeneration           uint64 `json:"config_generation,omitempty"`
+	ConfigContentHash          string `json:"config_content_hash,omitempty"`
+	AssignmentID               string `json:"assignment_id,omitempty"`
+	AssignmentGeneration       uint64 `json:"assignment_generation,omitempty"`
+	EdgeFailureDomain          string `json:"edge_failure_domain,omitempty"`
+	EdgeProcessEpoch           string `json:"edge_process_epoch,omitempty"`
+	NodeID                     string `json:"edge_node_id"`
+	Kind                       string `json:"kind"`
+	PublicHost                 string `json:"public_host"`
+	MatchType                  string `json:"match_type,omitempty"`
+	MatchHostname              string `json:"match_hostname,omitempty"`
+	WildcardSuffix             string `json:"wildcard_suffix,omitempty"`
+	PathPrefix                 string `json:"path_prefix,omitempty"`
+	Priority                   int    `json:"priority,omitempty"`
+	Protocol                   string `json:"protocol,omitempty"`
+	PublicTCPListenerID        string `json:"public_tcp_listener_id,omitempty"`
+	PublicTCPPort              uint16 `json:"public_tcp_port,omitempty"`
+	OriginScheme               string `json:"origin_scheme,omitempty"`
+	AccessMode                 string `json:"access_mode,omitempty"`
+	ViewerPolicyGeneration     uint64 `json:"viewer_policy_generation,omitempty"`
+	OriginAddress              string `json:"origin_address,omitempty"`
+	PreserveHost               bool   `json:"preserve_host,omitempty"`
+	HostOverride               string `json:"host_override,omitempty"`
+	// RewriteRules are the route's header, path and redirect rules (protocol http), applied at the edge.
+	RewriteRules              *tunnelrouterules.Rules `json:"rewrite_rules,omitempty"`
+	DomainBindings            []DomainBinding         `json:"domain_bindings,omitempty"`
+	State                     string                  `json:"state,omitempty"`
+	DesiredState              string                  `json:"desired_state,omitempty"`
+	ObservedState             string                  `json:"observed_state,omitempty"`
+	TargetHost                string                  `json:"target_host,omitempty"`
+	TargetPort                uint16                  `json:"target_port,omitempty"`
+	TargetRouteID             string                  `json:"-"`
+	TargetConnectorSessionID  string                  `json:"-"`
+	TargetConnectorProcessGen uint64                  `json:"-"`
+	TargetConfigGeneration    uint64                  `json:"-"`
+	PreviewState              string                  `json:"preview_state,omitempty"`
+	PreviewReason             string                  `json:"preview_reason,omitempty"`
 	// Canonical is an in-process marker set only by the versioned snapshot
 	// decoder. It is deliberately not accepted from callers or serialized.
 	Canonical bool `json:"-"`
