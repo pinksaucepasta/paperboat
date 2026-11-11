@@ -105,6 +105,9 @@ type Policy struct {
 	clientStrategy realclientip.Strategy
 	// routeHolds bounds the requests held for their route during the takeover grace (holdForRoute).
 	routeHolds *holdSet
+	// previewWaits bounds the requests that wait for an admitted preview's route (awaitPreviewRoute); past it a
+	// request gets its 503 at once instead of waiting.
+	previewWaits *holdSet
 	// addresses is the edge-wide per-client-address limit (ip_limits.go).
 	addresses *addressLimiter
 }
@@ -114,6 +117,9 @@ type Policy struct {
 const (
 	routeHoldMax     = 256
 	routeHoldPerName = 64
+	// previewWaitMax and previewWaitPerName bound the requests waiting previewStartingWait for a preview route.
+	previewWaitMax     = 256
+	previewWaitPerName = 16
 )
 
 func New(config Config, next http.Handler) (*Policy, error) {
@@ -131,7 +137,7 @@ func New(config Config, next http.Handler) (*Policy, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Policy{config: config, next: next, clientStrategy: strategy, routeHolds: newHoldSet(routeHoldMax, routeHoldPerName, 0), addresses: newAddressLimiter(addressRequestRate, addressUpgradeRate, addressStreams)}, nil
+	return &Policy{config: config, next: next, clientStrategy: strategy, routeHolds: newHoldSet(routeHoldMax, routeHoldPerName, 0), previewWaits: newHoldSet(previewWaitMax, previewWaitPerName, 0), addresses: newAddressLimiter(addressRequestRate, addressUpgradeRate, addressStreams)}, nil
 }
 
 // NewGateway builds the live public-preview gate. The target is the private
@@ -763,7 +769,11 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// host restarted or its network blinked), not a name that is gone: wait for it, then a retryable 503.
 			admitted := p.config.PreviewAdmitted != nil && p.config.PreviewAdmitted(host)
 			if !found && (admitted || p.config.PreviewPending != nil && p.config.PreviewPending(host)) {
-				if kind, state, reason, found = p.awaitPreviewRoute(r.Context(), host); !found {
+				if release, held := p.previewWaits.acquire(host, true); held {
+					kind, state, reason, found = p.awaitPreviewRoute(r.Context(), host)
+					release()
+				}
+				if !found {
 					if admitted {
 						w.Header().Set("X-Paperboat-Error", "preview_reconnecting")
 						w.Header().Set("Retry-After", "2")
