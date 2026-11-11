@@ -13,6 +13,9 @@
       },
       {
         "context": "End-to-end core"
+      },
+      {
+        "context": "Go format and vet"
       }
     ]
   },

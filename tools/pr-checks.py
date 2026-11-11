@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""R-01: vet/test changed Go packages and their workspace reverse dependencies."""
+"""R-01: check changed Go packages.
+  pr-checks.py BASE          vet and -race test the changed packages and their workspace reverse dependencies (merge queue groups)
+  pr-checks.py BASE --fast   gofmt of the changed Go files and go vet of the changed packages only (pull requests: seconds, no tests)"""
 import json
 import os
 import subprocess
@@ -12,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DATABASE_MODULES = ('server', 'tunnel', 'helper')
 
 
-def affected(packages, paths):
+def affected(packages, paths, transitive=True):
     selected = set()
     for name, p in packages.items():
         directory = p['directory']
@@ -34,11 +36,12 @@ def affected(packages, paths):
                 if old not in packages:
                     selected.add(old)
                 break
-    while True:
+    while transitive:
         expanded = selected | {name for name, p in packages.items() if selected.intersection(p['imports'])}
         if expanded == selected:
             return sorted(selected.intersection(packages))
         selected = expanded
+    return sorted(selected.intersection(packages))
 
 
 def database_dsn(dsn, name):
@@ -72,8 +75,17 @@ def output(*argv, cwd=ROOT):
     return subprocess.check_output(argv, cwd=cwd, text=True)
 
 
+def unformatted(paths):
+    """Changed Go files that gofmt would rewrite (deleted files are skipped)."""
+    files = [str(ROOT / p) for p in paths if p.endswith('.go') and (ROOT / p).is_file()]
+    return output('gofmt', '-l', *files).split() if files else []
+
+
 def main():
+    fast = '--fast' in sys.argv[2:]
     paths = output('git', 'diff', '--name-only', sys.argv[1], 'HEAD').splitlines()
+    if fast and (bad := unformatted(paths)):
+        sys.exit('gofmt would change: ' + ' '.join(bad) + ' (run gofmt -w on them)')
     packages = {}
     for module in MODULES:
         text = output('go', 'list', '-json', './...', cwd=ROOT / module)
@@ -85,14 +97,15 @@ def main():
                 'directory': str(Path(p['Dir']).relative_to(ROOT)), 'module': module,
                 'module_path': p['Module']['Path'],
                 'imports': p.get('Imports', []) + p.get('TestImports', []) + p.get('XTestImports', [])}
-    chosen = affected(packages, paths)
+    chosen = affected(packages, paths, transitive=not fast)
     for module in MODULES:
         names = [name for name in chosen if packages[name]['module'] == module]
         if names:
             print(f'{module}: ' + ' '.join(names), flush=True)
             subprocess.run(['go', 'vet'] + names, cwd=ROOT / module, check=True, timeout=1200)
-            test_packages(module, names)
-    print(f'Targeted checks passed ({len(chosen)} packages).')
+            if not fast:
+                test_packages(module, names)
+    print(f"{'Fast' if fast else 'Targeted'} checks passed ({len(chosen)} packages).")
 
 
 if __name__ == '__main__':

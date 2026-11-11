@@ -39,3 +39,11 @@ class DatabaseTests(unittest.TestCase):
     def test_database_names_satisfy_the_servers_isolation_guard(self):
         for index in (0, 7, 31):
             self.assertTrue(checks.database_name(index).endswith('_test'))
+
+    def test_fast_mode_selects_only_the_changed_packages(self):
+        packages = {
+            'm/a': {'directory': 'shared/a', 'module': 'shared', 'module_path': 'm', 'imports': []},
+            'm/b': {'directory': 'server/b', 'module': 'server', 'module_path': 'm', 'imports': ['m/a']},
+        }
+        self.assertEqual(checks.affected(packages, ['shared/a/x.go']), ['m/a', 'm/b'])
+        self.assertEqual(checks.affected(packages, ['shared/a/x.go'], transitive=False), ['m/a'])
