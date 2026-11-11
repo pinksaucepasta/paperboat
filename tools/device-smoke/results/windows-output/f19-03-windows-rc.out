@@ -1,0 +1,4 @@
+{"t": "2026-11-11T01:50:48Z", "step": "sso_login_exit_code", "device": "winpool-9", "command": "pb login --no-browser --json", "rc": 0, "code": null, "result": "pass", "detail": "approved=approved; example.test\",\"display_name\":\"Alice Test\"},\"added_to_workspace\":\"personal\",\"admission\":\"accepted\",\"signed_in\":true}}"}
+{"t": "2026-11-11T01:50:51Z", "step": "auth_status_signed_in", "device": "winpool-9", "command": "pb auth status --json", "rc": 0, "code": null, "result": "pass", "detail": "email=<email>"}
+{"t": "2026-11-11T01:50:56Z", "step": "team_get_as_sso_user", "device": "winpool-9", "command": "pb team get laner-sso --json", "rc": 0, "code": null, "result": "pass", "detail": "\"],\"generation\":2,\"active\":false}],\"machine_grants\":[],\"approve_new_machines\":true,\"machine_requests\":[],\"allow_private_access\":false,\"env_names_listable\":true}"}
+{"verdict": "PASS", "fails": [], "mode": "login", "team": "laner-sso", "build": "dev-6910b08c9"}

@@ -39,3 +39,17 @@ How it is wired: the runner starts sshd on loopback with the controller's public
 (secrets `WINPOOL_TUNNEL_KEY`, `WINPOOL_TUNNEL_HOST`, `WINPOOL_TUNNEL_KNOWN_HOSTS`). On the jump host that user has
 no shell and `/etc/ssh/sshd_config.d/70-winpool.conf` allows it only those fourteen loopback listeners; the key's own `permitlisten=` options in `~winpool/.ssh/authorized_keys` must list the same fourteen ports (a port missing from either place makes `ssh -R` fail forever, 2026-11-10 slots 7-10). The controller
 reaches a machine with `ProxyJump` through its own login on the jump host (`WINPOOL_JUMP`, default `ubuntu@anvit`).
+
+## SSO from the Windows CLI (F19-03, F19-04)
+
+`sso_windows.py` runs `pb login` (SSO sign-in, exit code read from the process) and the Require-SSO flow (a real non-SSO
+member's Windows `pb team get` refused with `team_sso_required`, works when exempt and after Require SSO is off) on one
+runner. Each result line has the device, the command and the exit code. Console sessions come from `console_session.mjs`
+(`password EMAIL PASSWORD_FILE OUT` for a password account, `sso USER FIXTURE OUT` with `IDP_START` for an IdP user).
+
+```sh
+export SMOKE_WINDOWS_SSH=winpool-N PB_SMOKE_WINDOWS_PB='C:\Program Files\Paperboat\users\<id>\bin\pb.exe'   # pb install ran, no pair
+python3 tools/device-smoke/sso_windows.py login --team T --sso-state alice.json --out f19-03.out
+python3 tools/device-smoke/sso_windows.py require-sso --team T --member-state m.json --owner-state o.json --out f19-04.out
+```
+Each run enrolls the runner as a machine of the signed-in account: revoke that record by exact id afterwards.
