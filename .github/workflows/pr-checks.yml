@@ -6,7 +6,8 @@ on:
   # and a job that is cancelled never saves its own, so every run started cold (2026-11-11).
   push:
     branches: [main]
-    paths-ignore: ['CHECKLIST.md', 'PLAN.md', 'WHITEBOARD.md', 'docs/**/*.md', '**/README.md']
+    # Only a changed dependency set needs fresh caches (setup-go keys them on go.sum); every other main push would run this job for nothing.
+    paths: ['**/go.sum', '**/go.mod', 'go.work', 'go.work.sum', '.github/workflows/pr-checks.yml']
 permissions:
   contents: read
 concurrency:
