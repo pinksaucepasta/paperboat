@@ -354,6 +354,8 @@ func (i *Inbox) Deliver(ctx context.Context, manifest filetransfer.Manifest) (pa
 		return "", storageError(err)
 	}
 	// Two daemon generations overlap during an update; the journal read-modify-write is one critical section.
+	// shortcut: the lock is held across the download, so an overlapping generation waits for it (bounded by ctx);
+	// split into load / download / re-load+save if a delivery ever stalls the other generation in practice.
 	unlock, err := filelock.Lock(ctx, filepath.Join(root, journalLockName))
 	if err != nil {
 		return "", storageError(err)
@@ -656,10 +658,10 @@ func loadJournal(root string) (journal, error) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&result); err != nil || result.Version != 1 || result.Entries == nil {
 		// A journal this build cannot read (a newer version, or damage) must not fail every delivery for good.
-		// Keep it aside for diagnosis and start a new one; the cost is that an old transfer replayed later is
+		// Keep it aside (each one under its own name) for diagnosis and start a new one; the cost is that an old transfer replayed later is
 		// delivered again under a new name.
 		path := filepath.Join(root, journalName)
-		if err := os.Rename(path, path+".rejected"); err != nil {
+		if err := os.Rename(path, fmt.Sprintf("%s.rejected-%d", path, time.Now().UnixNano())); err != nil {
 			return journal{}, err
 		}
 		return journal{Version: 1, Entries: make(map[string]receipt)}, nil
