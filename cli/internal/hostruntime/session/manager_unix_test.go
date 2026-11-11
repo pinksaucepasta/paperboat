@@ -906,6 +906,34 @@ func TestCtrlCOvertakesAPasteTheProgramNeverReads(t *testing.T) {
 	waitState(t, manager, created.ID, Exited)
 }
 
+// The Ctrl-C that stops a program can reach WriteContext after the program is gone (Interrupt killed it, capture
+// cleared the live process). Its own write is answered "delivered", not rejected as stale; any other key still is.
+func TestCtrlCWriteAfterItKilledTheProgramIsDelivered(t *testing.T) {
+	manager, root, shell := realManager(t)
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "late", Command: shellCommand(shell, root, "exec sleep 30")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close(context.Background(), created.ID)
+	if _, err := manager.Attach(created.ID, "att_late", 0); err != nil {
+		t.Fatal(err)
+	}
+	key := func(sequence uint64) InputKey {
+		return InputKey{ClientID: "cli", AttachmentID: "att_late", Generation: created.Generation, InputSequence: sequence}
+	}
+	if !manager.Interrupt(created.ID, key(1), 3) {
+		t.Fatal("Ctrl-C was not taken as the terminal's interrupt")
+	}
+	waitState(t, manager, created.ID, Exited)
+	decision, err := manager.Write(created.ID, key(1), []byte{3})
+	if err != nil || decision.Status != InputAccepted {
+		t.Fatalf("the Ctrl-C that ended the program: decision=%#v err=%v", decision, err)
+	}
+	if _, err := manager.Write(created.ID, key(2), []byte("x")); !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("a later key after the program ended: %v", err)
+	}
+}
+
 // A flood with a slow owner and a viewer that does not read (F3-11, F3-13): the owner paces the program and
 // receives every byte in order, never evicted; the viewer is never evicted either, it is told it lagged.
 func TestSlowOwnerGetsEveryByteAndAStalledViewerLags(t *testing.T) {

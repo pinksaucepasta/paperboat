@@ -31,12 +31,14 @@ func (m *Manager) WriteContext(ctx context.Context, sessionID string, key InputK
 	}
 	defer session.inputMu.Unlock()
 	live := session.liveProcess.Load()
-	if live == nil || key.Generation != live.generation {
-		_, generation := session.lifecycle.Snapshot()
+	interrupt := session.interrupt.Load()
+	var process io.Writer = deliveredInput{}
+	if live != nil && key.Generation == live.generation {
+		process = live.process
+	} else if _, generation := session.lifecycle.Snapshot(); live != nil || !interruptKilledGeneration(interrupt, key, generation) {
 		return InputDecision{}, &StaleGenerationError{CurrentGeneration: generation}
 	}
-	var process io.Writer = live.process
-	if interrupt := session.interrupt.Load(); interrupt != nil && sameInputCursor(*interrupt, key) && key.InputSequence != 0 {
+	if interrupt != nil && sameInputCursor(*interrupt, key) && key.InputSequence != 0 {
 		// Interrupt already delivered this key; input queued before it was discarded with the tty queue.
 		switch {
 		case key.InputSequence < interrupt.InputSequence:
@@ -166,6 +168,12 @@ func (s *managedSession) answerInterrupt(key InputKey, decision *InputDecision) 
 
 func sameInputCursor(a, b InputKey) bool {
 	return a.ClientID == b.ClientID && a.AttachmentID == b.AttachmentID && a.Generation == b.Generation
+}
+
+// interruptKilledGeneration reports that key is the Ctrl-C Interrupt delivered and the program it stopped is gone
+// already: its own write lands as the session finishes, which is an answer ("delivered"), not a stale generation.
+func interruptKilledGeneration(interrupt *InputKey, key InputKey, generation uint64) bool {
+	return interrupt != nil && key.Generation == generation && sameInputCursor(*interrupt, key) && key.InputSequence != 0 && key.InputSequence == interrupt.InputSequence
 }
 
 // deliveredInput stands in for the PTY once Interrupt has delivered the byte.
