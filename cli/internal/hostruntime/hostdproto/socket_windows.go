@@ -124,17 +124,33 @@ func (s *Server) Run(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	listener, err := winio.ListenPipe(s.config.SocketPath, &winio.PipeConfig{
+	listener, err := s.Listen(s.config.SocketPath)
+	if err != nil {
+		return err
+	}
+	return s.serve(ctx, listener)
+}
+
+// Listen binds one more pipe this server answers (a generation's private pipe, the fixed names it takes over in a
+// handover, the handover pipe), with the lifecycle pipe's security. Serve answers on it.
+func (s *Server) Listen(path string) (net.Listener, error) {
+	if !validPipePath(path) {
+		return nil, ErrSocketConfig
+	}
+	listener, err := winio.ListenPipe(path, &winio.PipeConfig{
 		SecurityDescriptor: pipeSecurityDescriptor(s.config.SID),
 		MessageMode:        false,
 		InputBufferSize:    MaxFrameBytes + installationTokenBytes + 4,
 		OutputBufferSize:   MaxFrameBytes + 4,
 	})
 	if err != nil {
-		return causedFailure{message: "hostd lifecycle pipe could not start", cause: err}
+		return nil, causedFailure{message: "hostd lifecycle pipe could not start", cause: err}
 	}
-	return s.serve(ctx, listener)
+	return listener, nil
 }
+
+// Serve answers lifecycle requests on listener until ctx ends or listener is closed.
+func (s *Server) Serve(ctx context.Context, listener net.Listener) error { return s.serve(ctx, listener) }
 
 func (s *Server) serve(ctx context.Context, listener net.Listener) (result error) {
 	if ctx == nil {

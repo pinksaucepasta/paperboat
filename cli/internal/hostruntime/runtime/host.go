@@ -918,6 +918,11 @@ func (h *Host) Shutdown(ctx context.Context) error {
 	return errors.Join(h.workers.Shutdown(ctx), h.hostd.Shutdown(ctx))
 }
 
+// StopAccepting closes the loopback listener and keeps the accepted connections; ResumeAccepting binds it again.
+// A Windows hostd handover moves the address to the next generation's worker this way (it cannot pass sockets).
+func (h *Host) StopAccepting()                            { h.http.StopAccepting() }
+func (h *Host) ResumeAccepting(ctx context.Context) error { return h.http.ResumeAccepting(ctx) }
+
 // DrainLocal stops accepting on the loopback listener and waits, until ctx
 // ends, for in-flight local requests and, each up to runtimewire.DrainLimit,
 // the file transfers its native streams carry and the browser terminals its

@@ -28,6 +28,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/binarytarget"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
@@ -120,6 +121,40 @@ type WindowsRuntimeConfig struct {
 	Source                 installsource.Source     `json:"source"`
 	RollbackSource         *installsource.Source    `json:"rollback_source,omitempty"`
 	RollbackSigned         bool                     `json:"rollback_signed,omitempty"`
+	// HostdSocket is the installed hostd generation's lifecycle pipe (windowsHostdSocket): the one place every local
+	// client (CLI, doctor, updater, carrier descriptor) takes it from. HandoverFrom is the generation it replaced,
+	// whose worker listener the new hostd takes over; empty when there was none.
+	HostdSocket  string `json:"hostd_socket"`
+	HandoverFrom string `json:"handover_from,omitempty"`
+}
+
+// windowsHostdSocket names one hostd generation's lifecycle pipe; its workloads and handover pipes add a suffix.
+// Each generation has its own names, so an update's hostd serves beside the previous one (a named pipe cannot be
+// bound again while the old generation still has a client on it). Only the runtime config and the carrier
+// descriptor are written from it; clients read those.
+func windowsHostdSocket(instance, generation string) (string, error) {
+	layout, err := WindowsLayoutForInstance(instance)
+	if err != nil {
+		return "", err
+	}
+	if !sessionowner.ValidGeneration(generation) {
+		return "", ErrInvalidRequest
+	}
+	return layout.HostdSocket + "-" + generation, nil
+}
+
+// windowsHostdSockets returns the config's hostd pipe and the one it hands over from, for a new installation of
+// source replacing previous (nil on a first installation).
+func windowsHostdSockets(instance string, source installsource.Source, previous *WindowsRuntimeConfig) (string, string, error) {
+	generation, err := sourceGeneration(source)
+	if err != nil {
+		return "", "", err
+	}
+	socket, err := windowsHostdSocket(instance, generation)
+	if err != nil || previous == nil || previous.HostdSocket == socket {
+		return socket, "", err
+	}
+	return socket, previous.HostdSocket, nil
 }
 
 const windowsConfigSchema = "paperboat.windows-runtime-install/v1"
@@ -820,7 +855,15 @@ func newWindowsActivation(request Request, layout service.Layout, instanceRoot, 
 			if err != nil {
 				return err
 			}
-			config := WindowsRuntimeConfig{SessionOwnerGeneration: generation, Schema: windowsConfigSchema, Instance: layout.Instance, OwnerSID: request.OwnerSID, User: request.User, StateRoot: request.StateRoot, Workspace: request.WorkspaceRoot, ControlURL: request.ControlURL, ListenAddress: request.HelperListenAddress, MachineID: request.UserMachineID, EnrollmentPending: request.EnrollmentPending, TokenFile: tokenPath, InstalledAt: time.Now().UTC(), Artifact: request.Artifact, Source: request.Source, RollbackSource: rollbackSource, RollbackSigned: request.RollbackIdentity != nil && request.RollbackIdentity.Signed}
+			var previous *WindowsRuntimeConfig
+			if installed, loadErr := LoadWindowsRuntimeConfigForInstance(layout.Instance); loadErr == nil {
+				previous = &installed
+			}
+			hostdSocket, handoverFrom, err := windowsHostdSockets(layout.Instance, request.Source, previous)
+			if err != nil {
+				return err
+			}
+			config := WindowsRuntimeConfig{HostdSocket: hostdSocket, HandoverFrom: handoverFrom, SessionOwnerGeneration: generation, Schema: windowsConfigSchema, Instance: layout.Instance, OwnerSID: request.OwnerSID, User: request.User, StateRoot: request.StateRoot, Workspace: request.WorkspaceRoot, ControlURL: request.ControlURL, ListenAddress: request.HelperListenAddress, MachineID: request.UserMachineID, EnrollmentPending: request.EnrollmentPending, TokenFile: tokenPath, InstalledAt: time.Now().UTC(), Artifact: request.Artifact, Source: request.Source, RollbackSource: rollbackSource, RollbackSigned: request.RollbackIdentity != nil && request.RollbackIdentity.Signed}
 			if err := runWindowsInstallPhase(ctx, "write Paperboat runtime configuration", func() error { return ops.writeConfig(config, instanceRoot) }); err != nil {
 				return err
 			}
@@ -944,7 +987,18 @@ func stopWindowsRuntimeForActivation(ctx context.Context, request Request, layou
 			return restore, err
 		}
 	}
-	if err := runWindowsInstallPhase(ctx, "stop Paperboat Windows services for activation", func() error { return stopWindowsRuntimeServices(ctx, layout.Instance) }); err != nil {
+	stop, stale := func() error { return stopWindowsRuntimeServices(ctx, layout.Instance) }, staleWindowsRuntimeProcessPattern
+	if windowsHostdHandover(layout.Instance, request.Source) {
+		// Its hostd and worker keep running, possibly from the slot image (a first installation starts hostd before
+		// any carrier pin exists), so the stale sweep leaves them alone.
+		stale = staleWindowsHandoverProcessPattern
+		// The serving hostd generation keeps running: the new one takes its worker listener over and it finishes its
+		// accepted work. Only the services the slot rotation needs stop (neither is on the remote path).
+		stop = func() error {
+			return stopWindowsServiceNames(ctx, []string{"PaperboatUpdated-" + layout.Instance, "PaperboatLocalDaemon-" + layout.Instance})
+		}
+	}
+	if err := runWindowsInstallPhase(ctx, "stop Paperboat Windows services for activation", stop); err != nil {
 		return restore, err
 	}
 	// Client has no SSH capability, but PaperboatSshd can hold the current
@@ -960,7 +1014,7 @@ func stopWindowsRuntimeForActivation(ctx context.Context, request Request, layou
 	// a runtime listener occupied, causing the fresh owner workload to exit.
 	// The elevated activation process is staged under a temporary executable,
 	// so terminating the fixed pb.exe image cannot terminate this installer.
-	return restore, runWindowsInstallPhase(ctx, "terminate stale Paperboat runtime processes", func() error { return terminateStaleWindowsRuntimeProcesses(ctx, layout.Binary) })
+	return restore, runWindowsInstallPhase(ctx, "terminate stale Paperboat runtime processes", func() error { return terminateStaleWindowsRuntimeProcesses(ctx, layout.Binary, stale) })
 }
 
 // activateWindowsCarrier makes the carrier run the activated source while the runtime is stopped. upgrade, staged
@@ -1125,7 +1179,11 @@ func installUnboundWindowsBinary(ctx context.Context, request Request) (resultEr
 	// The artifact descriptor is what signed recovery authorizes against: without it a failed first install
 	// cannot restore anything (victus 2026-11-10: TUF target descriptor invalid).
 	request.Artifact.Version = request.Source.Version
-	config := WindowsRuntimeConfig{Schema: windowsConfigSchema, Instance: instance, OwnerSID: request.OwnerSID, User: request.User, StateRoot: request.StateRoot, Workspace: request.WorkspaceRoot, ControlURL: request.ControlURL, ListenAddress: runtimeport.Primary, EnrollmentPending: true, TokenFile: tokenPath, InstalledAt: time.Now().UTC(), Artifact: request.Artifact, Source: request.Source, RollbackSource: rollbackSource}
+	hostdSocket, _, err := windowsHostdSockets(instance, request.Source, nil)
+	if err != nil {
+		return err
+	}
+	config := WindowsRuntimeConfig{HostdSocket: hostdSocket, Schema: windowsConfigSchema, Instance: instance, OwnerSID: request.OwnerSID, User: request.User, StateRoot: request.StateRoot, Workspace: request.WorkspaceRoot, ControlURL: request.ControlURL, ListenAddress: runtimeport.Primary, EnrollmentPending: true, TokenFile: tokenPath, InstalledAt: time.Now().UTC(), Artifact: request.Artifact, Source: request.Source, RollbackSource: rollbackSource}
 	if err := writeWindowsConfigAt(config, instanceRoot); err != nil {
 		return err
 	}
@@ -1674,16 +1732,12 @@ func Commit(request Request) error {
 	if err := writeWindowsConfigAt(config, instanceRoot); err != nil {
 		return err
 	}
-	layout, err := service.WindowsUserLayout(config.OwnerSID)
-	if err != nil {
-		return err
-	}
 	token, err := os.ReadFile(config.TokenFile)
 	if err != nil {
 		return err
 	}
 	defer clear(token)
-	client, err := hostdproto.NewClient(layout.HostdSocket, token, 5*time.Second, config.OwnerSID)
+	client, err := hostdproto.NewClient(config.HostdSocket, token, 5*time.Second, config.OwnerSID)
 	if err != nil {
 		return err
 	}
@@ -1745,7 +1799,7 @@ func EnsureCommittedWindowsHostdReady(ctx context.Context, request Request) erro
 				return hostInstallFailure("restart Paperboat host service after first launch exited", lastErr, err)
 			}
 			restarted = true
-		} else if err := probe(readyCtx); err == nil {
+		} else if err := errors.Join(probe(readyCtx), windowsHostdServing(config.HostdSocket, config.TokenFile)); err == nil {
 			if healthySince.IsZero() {
 				healthySince = time.Now()
 			} else if time.Since(healthySince) >= 5*time.Second {
@@ -1759,14 +1813,16 @@ func EnsureCommittedWindowsHostdReady(ctx context.Context, request Request) erro
 		select {
 		case <-readyCtx.Done():
 			timer.Stop()
-			return hostInstallFailure("Paperboat host service health check did not stabilize", errors.Join(readyCtx.Err(), context.Cause(readyCtx), lastErr, windowsHostdStartPhase(layout.HostdSocket, config.TokenFile, config.OwnerSID)))
+			return hostInstallFailure("Paperboat host service health check did not stabilize", errors.Join(readyCtx.Err(), context.Cause(readyCtx), lastErr, windowsHostdServing(config.HostdSocket, config.TokenFile, config.OwnerSID)))
 		case <-timer.C:
 		}
 	}
 }
 
-// windowsHostdStartPhase asks the host service how far its start got (hostdStartPhase).
-func windowsHostdStartPhase(socket, tokenFile, ownerSID string) error {
+// windowsHostdServing is nil once socket's hostd has an activated worker with a heartbeat, and otherwise says how
+// far its start got (hostdStartPhase). In a handover the previous generation's worker answers the shared health
+// address until the new one has taken it, so health alone does not prove the new generation serves.
+func windowsHostdServing(socket, tokenFile, ownerSID string) error {
 	token, err := os.ReadFile(tokenFile)
 	if err != nil {
 		return fmt.Errorf("host service start phase: its token could not be read: %w", err)
@@ -1779,6 +1835,9 @@ func windowsHostdStartPhase(socket, tokenFile, ownerSID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	status, err := client.Active(ctx)
+	if err == nil && status.State == hostdproto.StateActive && status.LastHeartbeatUnixMilli != 0 {
+		return nil
+	}
 	return hostdStartPhase(status, err, time.Now())
 }
 
@@ -1821,6 +1880,17 @@ func stopWindowsRuntimeServices(ctx context.Context, instance string) error {
 	return stopWindowsServiceNames(ctx, append(hostds, "PaperboatUpdated-"+instance, "PaperboatLocalDaemon-"+instance))
 }
 
+// windowsHostdHandover reports an installation of source over another configured hostd generation: the new hostd
+// takes the worker's listener over while the old one finishes its accepted work (install_unix.go hostdHandover).
+func windowsHostdHandover(instance string, source installsource.Source) bool {
+	installed, err := LoadWindowsRuntimeConfigForInstance(instance)
+	if err != nil {
+		return false
+	}
+	socket, _, err := windowsHostdSockets(instance, source, nil)
+	return err == nil && installed.HostdSocket != socket
+}
+
 // installedWindowsHostdGeneration is the installed source's hostd generation, or absentGeneration with none.
 func installedWindowsHostdGeneration(instance string) string {
 	config, err := LoadWindowsRuntimeConfigForInstance(instance)
@@ -1840,7 +1910,7 @@ func sourceGenerationOrAbsent(source installsource.Source) string {
 
 // windowsHostdGenerationNames lists the account's hostd generation services (registered or declared).
 func windowsHostdGenerationNames(ctx context.Context, instance string) ([]string, error) {
-	inventory, err := windowsGenerationRemovalInventory(ctx, instance)
+	inventory, err := windowsGenerationServiceInventory(ctx, instance)
 	if err != nil {
 		return nil, err
 	}
@@ -2153,7 +2223,7 @@ func repairWindows(ctx context.Context, ownerSID string, identity *WindowsRollba
 			return err
 		}
 		if status.Running {
-			abort, err := PrepareSuppliedMaintenance(ctx, layout.HostdSocket, config.TokenFile, false, config.OwnerSID)
+			abort, err := PrepareSuppliedMaintenance(ctx, config.HostdSocket, config.TokenFile, false, config.OwnerSID)
 			if err != nil {
 				return err
 			}
@@ -2431,7 +2501,9 @@ func purgeWindows(ctx context.Context, ownerSID string, preserveCLI bool) (resul
 	// still alive. Terminate only the fixed Paperboat executable after SCM no
 	// longer owns a restartable declaration, otherwise pb.rollback.exe remains
 	// locked and a fresh dashboard install fails halfway through cleanup.
-	cleanup("terminate stale Paperboat processes", func() error { return terminateStaleWindowsRuntimeProcesses(ctx, layout.Binary) })
+	cleanup("terminate stale Paperboat processes", func() error {
+		return terminateStaleWindowsRuntimeProcesses(ctx, layout.Binary, staleWindowsRuntimeProcessPattern)
+	})
 	if persisted.OwnerSID != "" {
 		if lockPath, lockErr := windowsLocalDaemonLockPath(persisted.StateRoot); lockErr != nil {
 			result = errors.Join(result, hostInstallFailure("resolve legacy Windows daemon lock", lockErr))
@@ -2478,7 +2550,7 @@ func terminatePaperboatProcesses(ctx context.Context) error {
 	return nil
 }
 
-func terminateStaleWindowsRuntimeProcesses(ctx context.Context, binary string) error {
+func terminateStaleWindowsRuntimeProcesses(ctx context.Context, binary, pattern string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -2488,7 +2560,7 @@ func terminateStaleWindowsRuntimeProcesses(ctx context.Context, binary string) e
 	// Match only durable runtime entry points. The dashboard installer itself
 	// is a pb.exe bootstrap process and must remain alive while the elevated
 	// commit rotates the installed slot.
-	script := `$ErrorActionPreference = 'Stop'; $image='` + binary + `'; Get-CimInstance Win32_Process -Filter "Name = 'pb.exe'" | Where-Object { $_.ExecutablePath -ieq $image -and $_.CommandLine -match '` + staleWindowsRuntimeProcessPattern + `' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop }`
+	script := `$ErrorActionPreference = 'Stop'; $image='` + binary + `'; Get-CimInstance Win32_Process -Filter "Name = 'pb.exe'" | Where-Object { $_.ExecutablePath -ieq $image -and $_.CommandLine -match '` + pattern + `' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop }`
 	command := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
 	processlaunch.ConfigureBackground(command)
 	if err := command.Run(); err != nil {
@@ -2498,6 +2570,10 @@ func terminateStaleWindowsRuntimeProcesses(ctx context.Context, binary string) e
 }
 
 const staleWindowsRuntimeProcessPattern = `__(runtime-(hostd|worker|updated|local-daemon|config)|local-daemon|windows-sshd-service)`
+
+// staleWindowsHandoverProcessPattern is the sweep of an activation that hands the serving hostd generation over: its
+// hostd and worker stay.
+const staleWindowsHandoverProcessPattern = `__(runtime-(updated|local-daemon|config)|local-daemon|windows-sshd-service)`
 
 const staleWindowsRuntimeProcessScript = `$ErrorActionPreference = 'Stop'; Get-CimInstance Win32_Process -Filter "Name = 'pb.exe'" | Where-Object { $_.CommandLine -match '` + staleWindowsRuntimeProcessPattern + `' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop }`
 
@@ -3057,7 +3133,14 @@ func validWindowsConfig(config WindowsRuntimeConfig) bool {
 	bound := config.MachineID != "" && !config.EnrollmentPending && (config.Source.Distribution == installsource.Custom || bootstrap.VerifyArtifactTarget(config.Artifact) == nil && config.Artifact.Platform == "windows" && config.Artifact.Architecture == runtime.GOARCH)
 	unbound := config.MachineID == "" && config.EnrollmentPending
 	rollbackValid := (config.RollbackSource == nil && !config.RollbackSigned) || config.RollbackSource != nil && config.RollbackSource.Validate() == nil && config.RollbackSource.Platform == "windows" && config.RollbackSource.Architecture == runtime.GOARCH && (!config.RollbackSigned || config.RollbackSource.Distribution == installsource.Official)
-	return config.Schema == windowsConfigSchema && validSID(config.OwnerSID) && tokenValid && config.User != "" && safeAbsolute(config.StateRoot) && safeAbsolute(config.Workspace) && (bound || unbound) && config.Source.Validate() == nil && config.Source.Platform == "windows" && config.Source.Architecture == runtime.GOARCH && rollbackValid && listenErr == nil && port != "" && net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback()
+	// A legacy machine-wide configuration (no instance) has no hostd generation pipes.
+	socketValid := config.Instance == "" && config.HostdSocket == "" && config.HandoverFrom == ""
+	if generation, err := sourceGeneration(config.Source); err == nil && config.Instance != "" {
+		socket, socketErr := windowsHostdSocket(config.Instance, generation)
+		from, ours := strings.CutPrefix(config.HandoverFrom, strings.TrimSuffix(socket, generation))
+		socketValid = socketErr == nil && config.HostdSocket == socket && (config.HandoverFrom == "" || ours && from != generation && sessionowner.ValidGeneration(from))
+	}
+	return config.Schema == windowsConfigSchema && socketValid && validSID(config.OwnerSID) && tokenValid && config.User != "" && safeAbsolute(config.StateRoot) && safeAbsolute(config.Workspace) && (bound || unbound) && config.Source.Validate() == nil && config.Source.Platform == "windows" && config.Source.Architecture == runtime.GOARCH && rollbackValid && listenErr == nil && port != "" && net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback()
 }
 func safeAbsolute(path string) bool {
 	return filepath.IsAbs(path) && filepath.Clean(path) == path && !strings.ContainsAny(path, "\x00\r\n")

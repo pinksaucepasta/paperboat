@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,6 +33,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
 	"golang.org/x/sys/windows"
+
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 )
 
 const windowsOwnerWorkloadEnvironment = "PAPERBOAT_WINDOWS_OWNER_WORKLOAD"
@@ -114,7 +117,7 @@ func windowsHostdWorkerEnvironment(install hostinstall.WindowsRuntimeConfig, lay
 		"PAPERBOAT_WINDOWS_OWNER_SID":      install.OwnerSID,
 		"PAPERBOAT_SESSION_OWNER_CATALOG":  filepath.Join(instanceRoot, "session-owners"),
 		"PAPERBOAT_UPDATED_SOCKET":         layout.UpdaterSocket,
-		"PAPERBOAT_HOSTD_SOCKET":           layout.HostdSocket,
+		"PAPERBOAT_HOSTD_SOCKET":           install.HostdSocket,
 		"PAPERBOAT_HOSTD_TOKEN_FILE":       install.TokenFile,
 		"PAPERBOAT_RUNTIME_CURRENT":        runtimeExecutable,
 		"PAPERBOAT_BINARY_ROLLBACK":        layout.BinaryRollback,
@@ -191,8 +194,6 @@ func runWindowsHostdService(install hostinstall.WindowsRuntimeConfig, instance w
 		},
 		StartPrivilegedSidecar: func(ctx context.Context) (service.PrivilegedSidecar, error) {
 			sidecarCtx, cancelSidecars := context.WithCancel(ctx)
-			results := make(chan error, 1)
-			availabilityReady := make(chan struct{})
 			updateDiagnostics, err := hostservice.NewWindowsUpdateDiagnostics(layout.UpdateStateRoot, install.MachineID)
 			if err != nil {
 				cancelSidecars()
@@ -213,41 +214,36 @@ func runWindowsHostdService(install hostinstall.WindowsRuntimeConfig, instance w
 				cancelSidecars()
 				return service.PrivilegedSidecar{}, err
 			}
-			availability, err := hostservice.New(hostservice.Config{
-				SocketPath:        hostServiceSocket,
-				StatePath:         filepath.Join(instanceRoot, "availability-policy.json"),
-				SID:               install.OwnerSID,
-				Applier:           hostservice.NewPlatformApplier(filepath.Join(instanceRoot, "power-baseline.json")),
-				Version:           buildinfo.Version,
-				UpdateDiagnostics: updateDiagnostics,
-				AuthorizedKeys:    authorizedKeys,
-				Ready: func() error {
-					close(availabilityReady)
-					return nil
-				},
-			})
-			if err != nil {
+			newHostService := func() (*hostservice.Server, error) {
+				return hostservice.New(hostservice.Config{
+					SocketPath:        hostServiceSocket,
+					StatePath:         filepath.Join(instanceRoot, "availability-policy.json"),
+					SID:               install.OwnerSID,
+					Applier:           hostservice.NewPlatformApplier(filepath.Join(instanceRoot, "power-baseline.json")),
+					Version:           buildinfo.Version,
+					UpdateDiagnostics: updateDiagnostics,
+					AuthorizedKeys:    authorizedKeys,
+				})
+			}
+			if _, err := newHostService(); err != nil {
 				cancelSidecars()
 				return service.PrivilegedSidecar{}, err
 			}
-			go func() { results <- availability.Run(sidecarCtx) }()
-			for availabilityReady != nil {
-				select {
-				case sidecarErr := <-results:
-					cancelSidecars()
-					return service.PrivilegedSidecar{}, sidecarErr
-				case <-availabilityReady:
-					availabilityReady = nil
-				case <-time.After(15 * time.Second):
-					cancelSidecars()
-					return service.PrivilegedSidecar{}, errors.New("Windows privileged host sidecars did not become ready")
-				}
+			installedSocket := func() (string, error) {
+				current, err := hostinstall.LoadWindowsRuntimeConfigForInstance(install.Instance)
+				return current.HostdSocket, err
 			}
 			done := make(chan error, 1)
 			go func() {
-				first := <-results
+				done <- followInstalledGeneration(sidecarCtx, install.HostdSocket, installedSocket, func(ctx context.Context) error {
+					// Built per run: it reads the policy the other generation may have saved since.
+					server, err := newHostService()
+					if err != nil {
+						return err
+					}
+					return server.Run(ctx)
+				})
 				cancelSidecars()
-				done <- first
 			}()
 			return service.PrivilegedSidecar{Done: done}, nil
 		},
@@ -272,10 +268,8 @@ func recordWindowsLaunchFailure(path string, cause error) {
 }
 
 func runOwnerHostd(ctx context.Context, output io.Writer, install hostinstall.WindowsRuntimeConfig) (resultErr error) {
-	socket, tokenPath, executable := os.Getenv("PAPERBOAT_HOSTD_SOCKET"), os.Getenv("PAPERBOAT_HOSTD_TOKEN_FILE"), os.Getenv("PAPERBOAT_RUNTIME_CURRENT")
-	if socket == "" {
-		socket = `\\.\pipe\PaperboatHostd`
-	}
+	// The installed configuration names this generation's pipes (hostinstall windowsHostdSocket).
+	socket, tokenPath, executable := install.HostdSocket, os.Getenv("PAPERBOAT_HOSTD_TOKEN_FILE"), os.Getenv("PAPERBOAT_RUNTIME_CURRENT")
 	if tokenPath == "" {
 		tokenPath = install.TokenFile
 	}
@@ -390,20 +384,53 @@ func runOwnerHostd(ctx context.Context, output io.Writer, install hostinstall.Wi
 		stopServer()
 		return err
 	}
+	// The generation this one replaced still serves the worker's loopback address; it gives it up only once this
+	// generation's worker is ready to take it (hostdproto handover_windows.go). Without one, start fresh.
+	var handover *hostdproto.Handover
+	if install.HandoverFrom != "" {
+		handover, err = hostdproto.DialHandover(ctx, hostdproto.HandoverPath(install.HandoverFrom), token)
+		if errors.Is(err, hostdproto.ErrNoHandover) {
+			handover, err = nil, nil
+		}
+		if err != nil {
+			stopServer()
+			return runtimeFailure("hostd could not take over from the running generation", err)
+		}
+		if handover != nil {
+			// Closing before the commit leaves the old generation serving.
+			defer handover.Close()
+		}
+	}
 	_, err = owned.HandleWorkerControl(ctx, hostdproto.WorkerControlRequest{Operation: "start", WorkerID: template.WorkerID, Executable: executable, Version: template.Version, APIMin: 1, APIMax: 1})
 	if err == nil {
 		_, err = owned.HandleWorkerControl(ctx, hostdproto.WorkerControlRequest{Operation: "ready", WorkerID: template.WorkerID})
 	}
-	if err == nil {
-		_, err = owned.HandleWorkerControl(ctx, hostdproto.WorkerControlRequest{Operation: "activate", WorkerID: template.WorkerID})
+	activate := func() error {
+		_, err := owned.HandleWorkerControl(ctx, hostdproto.WorkerControlRequest{Operation: "activate", WorkerID: template.WorkerID})
+		return err
+	}
+	if err == nil && handover != nil {
+		err = handover.Commit(activate)
+	} else if err == nil {
+		err = activate()
 	}
 	if err != nil {
 		stopServer()
 		return err
 	}
+	handoverListener, err := server.Listen(hostdproto.HandoverPath(socket))
+	if err != nil {
+		stopServer()
+		return err
+	}
+	defer handoverListener.Close()
 	if _, err := fmt.Fprintln(output, "pb daemon hostd ready"); err != nil {
 		return runtimeFailure("hostd readiness could not be written", err)
 	}
+	handedOver := make(chan error, 1)
+	go func() {
+		handedOver <- hostdproto.ServeHandover(serverCtx, hostdproto.HandoverConfig{Token: token, Listener: func() net.Listener { return handoverListener }, StopAccepting: owned.stopAccepting, Resume: owned.resumeAccepting})
+	}()
 	select {
 	case <-ctx.Done():
 		return runtimeShutdownCause(ctx)
@@ -412,6 +439,18 @@ func runOwnerHostd(ctx context.Context, output io.Writer, install hostinstall.Wi
 			return runtimeShutdownCause(ctx)
 		}
 		return runtimeFailure("hostd lifecycle listener stopped", serverErr)
+	case err := <-handedOver:
+		if ctx.Err() != nil {
+			return runtimeShutdownCause(ctx)
+		}
+		if err != nil {
+			return runtimeFailure("hostd handover listener stopped", err)
+		}
+		// The next generation serves the worker address. This one finishes its accepted work, bounded like Unix
+		// (worker_unix.go), and exits 0, a clean stop that starts no recovery action; the sweep then removes it.
+		drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runtimewire.DrainLimit)
+		defer cancel()
+		return owned.drain(drainCtx)
 	}
 }
 
@@ -529,12 +568,24 @@ func runWorkerWith(ctx context.Context, args []string, input io.Reader, output, 
 	if _, err := fmt.Fprintf(output, "active %d %d\n", active.Epoch, active.APIVersion); err != nil {
 		return runtimeFailure("hostd worker activation output could not be written", err)
 	}
+	var control chan error
+	if *waitActivation {
+		control = make(chan error, 1)
+		go func() { control <- serveWorkerControl(ctx, input, output, feature) }()
+	}
 	ticker := time.NewTicker(*heartbeat)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return runtimeShutdownCause(ctx)
+		case err := <-control:
+			if errors.Is(err, errWorkerControlClosed) {
+				control = nil
+				continue
+			}
+			// Drained after a handover (nil), or a handover step failed.
+			return err
 		case <-ticker.C:
 			if err := feature.Health(ctx); err != nil {
 				return err
@@ -629,6 +680,7 @@ type windowsRuntimeWorker struct {
 	workerID   string
 	mu         sync.Mutex
 	ready      hostdproto.Status
+	active     bool // the control pipe then carries the handover lines (serveWorkerControl)
 	stdout     io.ReadCloser
 	outputOnce sync.Once
 	outputErr  error
@@ -661,7 +713,7 @@ func startWindowsRuntimeWorkerForRelease(ctx context.Context, executable, socket
 	if err := command.Start(); err != nil {
 		return nil, runtimeFailure("starting the runtime worker failed", err, control.Close(), stdout.Close())
 	}
-	return &windowsRuntimeWorker{command: command, control: control, lines: bufio.NewReader(io.LimitReader(stdout, 128)), workerID: workerID, stdout: stdout}, nil
+	return &windowsRuntimeWorker{command: command, control: control, lines: bufio.NewReader(io.LimitReader(stdout, 4096)), workerID: workerID, stdout: stdout}, nil
 }
 
 func (w *windowsRuntimeWorker) Ready(ctx context.Context) (hostdproto.Status, error) {
@@ -684,16 +736,13 @@ func (w *windowsRuntimeWorker) Ready(ctx context.Context) (hostdproto.Status, er
 func (w *windowsRuntimeWorker) Activate(ctx context.Context) (hostdproto.Status, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.ready.Epoch == 0 || w.control == nil {
+	if w.ready.Epoch == 0 || w.control == nil || w.active {
 		return hostdproto.Status{}, errors.New("worker is not ready")
 	}
 	if _, err := io.WriteString(w.control, "activate\n"); err != nil {
 		return hostdproto.Status{}, err
 	}
-	if err := w.control.Close(); err != nil {
-		return hostdproto.Status{}, err
-	}
-	w.control = nil
+	w.active = true
 	line, err := readWindowsWorkerLine(ctx, w.lines, w.closeOutput)
 	if err != nil {
 		return hostdproto.Status{}, err
@@ -713,7 +762,51 @@ func (w *windowsRuntimeWorker) closeOutput() error {
 	})
 	return w.outputErr
 }
-func (w *windowsRuntimeWorker) Stop(ctx context.Context) error {
+// handover writes one handover line to the active worker and checks its answer (serveWorkerControl).
+func (w *windowsRuntimeWorker) handover(ctx context.Context, line, answer string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.active || w.control == nil {
+		return errors.New("the runtime worker is not active")
+	}
+	if _, err := io.WriteString(w.control, line); err != nil {
+		return runtimeFailure("the runtime worker handover request could not be written", err)
+	}
+	got, err := readWindowsWorkerLine(ctx, w.lines, w.closeOutput)
+	if err != nil {
+		return runtimeFailure("the runtime worker handover answer could not be read", err)
+	}
+	if got != answer {
+		return errors.New("invalid Windows worker handover answer")
+	}
+	return nil
+}
+
+// StopAccepting closes the worker's loopback listener; its accepted connections keep running.
+func (w *windowsRuntimeWorker) StopAccepting(ctx context.Context) error {
+	return w.handover(ctx, "stop\n", "stopped\n")
+}
+
+// ResumeAccepting binds the worker's loopback listener again after a handover that did not complete.
+func (w *windowsRuntimeWorker) ResumeAccepting(ctx context.Context) error {
+	return w.handover(ctx, "resume\n", "resumed\n")
+}
+
+// Drain lets the worker finish its accepted work and exit, until ctx ends; then it is stopped.
+func (w *windowsRuntimeWorker) Drain(ctx context.Context) error {
+	w.mu.Lock()
+	var writeErr error
+	if w.active && w.control != nil {
+		_, writeErr = io.WriteString(w.control, "drain\n")
+	}
+	w.mu.Unlock()
+	return errors.Join(writeErr, w.stopWithin(ctx, 0))
+}
+
+func (w *windowsRuntimeWorker) Stop(ctx context.Context) error { return w.stopWithin(ctx, 5*time.Second) }
+
+// stopWithin waits for the worker to exit for grace (until ctx ends when grace is 0), then kills it.
+func (w *windowsRuntimeWorker) stopWithin(ctx context.Context, grace time.Duration) error {
 	if w == nil || w.command == nil || w.command.Process == nil {
 		return nil
 	}
@@ -721,18 +814,28 @@ func (w *windowsRuntimeWorker) Stop(ctx context.Context) error {
 		ctx = context.Background()
 	}
 	closeErr := w.closeOutput()
+	w.mu.Lock()
+	if w.control != nil {
+		closeErr = errors.Join(closeErr, w.control.Close())
+		w.control = nil
+	}
+	w.mu.Unlock()
 	w.waitOnce.Do(func() {
 		w.waitDone = make(chan struct{})
 		go func() { w.waitErr = w.command.Wait(); close(w.waitDone) }()
 	})
-	timer := time.NewTimer(5 * time.Second)
-	defer timer.Stop()
+	var expired <-chan time.Time
+	if grace > 0 {
+		timer := time.NewTimer(grace)
+		defer timer.Stop()
+		expired = timer.C
+	}
 	var stopErr error
 	select {
 	case <-w.waitDone:
 	case <-ctx.Done():
 		stopErr = runtimeContextFailure(ctx)
-	case <-timer.C:
+	case <-expired:
 	}
 	select {
 	case <-w.waitDone:

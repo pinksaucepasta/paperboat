@@ -11,3 +11,9 @@ func featureCarrierInstance() (string, error) {
 	}
 	return hostinstall.WindowsInstanceForSID(sid)
 }
+
+// carrierPairedWithHostd reports whether config's carrier serves the hostd generation at endpoint: each Windows hostd
+// generation has its own pipes and pairs with the carrier generation staged for it.
+func carrierPairedWithHostd(config hostinstall.CarrierConfig, endpoint string) bool {
+	return config.HostdEndpoint == endpoint
+}

@@ -992,16 +992,30 @@ func (b *windowsSCMActivationBackend) activeHostdStatus(ctx context.Context) (ho
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	token, err := os.ReadFile(b.config.TokenFile)
-	if err != nil {
-		return hostdproto.Status{}, err
-	}
-	defer clear(token)
-	hostd, err := hostdproto.NewClient(b.config.HostdSocket, token, 5*time.Second, b.config.OwnerSID)
+	hostd, err := installedHostdClient(b.config, 5*time.Second)
 	if err != nil {
 		return hostdproto.Status{}, err
 	}
 	return hostd.Active(ctx)
+}
+
+// installedHostdClient dials the hostd generation the installed configuration names (its one record of the pipe):
+// an update moves it to the new generation while this updater keeps running.
+func installedHostdClient(config WindowsConfig, timeout time.Duration) (*hostdproto.Client, error) {
+	instance, err := service.WindowsUserInstance(config.OwnerSID)
+	if err != nil {
+		return nil, err
+	}
+	installed, err := hostinstall.LoadWindowsRuntimeConfigForInstance(instance)
+	if err != nil {
+		return nil, err
+	}
+	token, err := os.ReadFile(config.TokenFile)
+	if err != nil {
+		return nil, err
+	}
+	defer clear(token)
+	return hostdproto.NewClient(installed.HostdSocket, token, timeout, config.OwnerSID)
 }
 
 func windowsStabilityCallTimeout(window, interval time.Duration) time.Duration {
@@ -1586,12 +1600,7 @@ func verifyWindowsPreparedCandidate(ctx context.Context, j windowsActivationJour
 }
 
 func (b *windowsSCMActivationBackend) ownerControlClient() (*hostdproto.Client, error) {
-	token, err := os.ReadFile(b.config.TokenFile)
-	if err != nil {
-		return nil, err
-	}
-	defer clear(token)
-	return hostdproto.NewClient(b.config.HostdSocket, token, 31*time.Minute, b.config.OwnerSID)
+	return installedHostdClient(b.config, 31*time.Minute)
 }
 func (b *windowsSCMActivationBackend) featureGate(ctx context.Context, j windowsActivationJournal, operation string) (hostdproto.UpdateGateResponse, error) {
 	client, err := b.ownerControlClient()

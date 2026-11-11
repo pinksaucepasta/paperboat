@@ -74,7 +74,7 @@ func windowsHostdClient() (*hostdproto.Client, error) {
 		if configErr != nil {
 			return nil, configErr
 		}
-		endpoint = instance.layout.HostdSocket
+		endpoint = config.HostdSocket
 	}
 	tokenPath, tokenPathSet := os.LookupEnv("PAPERBOAT_HOSTD_TOKEN_FILE")
 	if !tokenPathSet && configErr == nil {

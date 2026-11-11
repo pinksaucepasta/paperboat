@@ -12,7 +12,10 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workloadbridge"
 	"os"
+	"sync"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
 )
 
 type workerFeature interface {
@@ -27,6 +30,10 @@ type activeFeature struct {
 
 func (f *activeFeature) Health(ctx context.Context) error     { return f.bridge.Health(ctx) }
 func (f *activeFeature) DrainLocal(ctx context.Context) error { return f.host.DrainLocal(ctx) }
+func (f *activeFeature) StopAccepting()                       { f.host.StopAccepting() }
+func (f *activeFeature) ResumeAccepting(ctx context.Context) error {
+	return f.host.ResumeAccepting(ctx)
+}
 func (f *activeFeature) Shutdown(ctx context.Context) error {
 	defer f.bridge.Close()
 	return f.host.Shutdown(ctx)
@@ -59,9 +66,20 @@ func newWorkerFeature(ctx context.Context, endpoint string, token []byte, worker
 	}
 	var reconcileSSH func(context.Context, bool) error
 	if dispatch != nil {
-		reconcileSSH = func(ctx context.Context, enabled bool) error {
-			return reconcileFeatureCarrierSSH(ctx, worker, epoch, enabled)
+		instance, err := featureCarrierInstance()
+		if err != nil {
+			return nil, err
 		}
+		ssh := &carrierSSH{
+			read: func(ctx context.Context) (hostinstall.CarrierConfig, error) {
+				return hostinstall.ReadCarrierConfig(ctx, instance)
+			},
+			paired: func(config hostinstall.CarrierConfig) bool { return carrierPairedWithHostd(config, endpoint) },
+			apply: func(ctx context.Context, config hostinstall.CarrierConfig, enabled bool) error {
+				return applyFeatureCarrierSSH(ctx, config, worker, epoch, enabled)
+			},
+		}
+		reconcileSSH = ssh.reconcile
 	}
 	host, err := hostruntime.NewProductionFeatureHost(ctx, version, os.Getenv, sessions, executions, dispatch, reconcileSSH, epoch)
 	if err != nil {
@@ -80,15 +98,77 @@ func newWorkerFeature(ctx context.Context, endpoint string, token []byte, worker
 	return &activeFeature{host: host, bridge: bridge}, nil
 }
 
-func reconcileFeatureCarrierSSH(ctx context.Context, worker string, epoch uint64, enabled bool) error {
-	instance, err := featureCarrierInstance()
+// carrierSSHPairWait bounds how long a worker waits for the carrier of its hostd generation to serve.
+var carrierSSHPairWait = 2 * time.Minute
+
+// carrierSSH applies the worker's managed-SSH state to the carrier serving its hostd generation. In a Windows update
+// the new hostd's worker starts while the previous generation's carrier still serves the network, and that carrier
+// fences every worker but its own hostd's: that is the update in progress, not a failure. The wanted state is then
+// kept and applied in the background once the active carrier pairs with this hostd, polling with backoff (50 ms
+// doubling to 1 s) for at most carrierSSHPairWait; nothing is reported as an error meanwhile. It never waits in
+// reconcile itself: the first reconcile runs inside worker startup, which a handover bounds to seconds.
+type carrierSSH struct {
+	read   func(context.Context) (hostinstall.CarrierConfig, error)
+	paired func(hostinstall.CarrierConfig) bool
+	apply  func(context.Context, hostinstall.CarrierConfig, bool) error
+
+	mu      sync.Mutex
+	wanted  *bool // a state still to apply once the carrier pairs
+	waiting bool
+}
+
+func (c *carrierSSH) reconcile(ctx context.Context, enabled bool) error {
+	config, err := c.read(ctx)
 	if err != nil {
 		return err
 	}
-	config, err := hostinstall.ReadCarrierConfig(ctx, instance)
-	if err != nil {
-		return err
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.paired(config) {
+		c.wanted = nil
+		return c.apply(ctx, config, enabled)
 	}
+	c.wanted = &enabled
+	if !c.waiting {
+		c.waiting = true
+		go c.applyWhenPaired(context.WithoutCancel(ctx))
+	}
+	return nil
+}
+
+func (c *carrierSSH) applyWhenPaired(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, carrierSSHPairWait)
+	defer cancel()
+	for delay := 50 * time.Millisecond; ; delay = min(2*delay, time.Second) {
+		select {
+		case <-ctx.Done():
+			c.mu.Lock()
+			c.waiting = false
+			c.mu.Unlock()
+			diagnosticlog.TryWarn("managed SSH state not applied: the carrier of this hostd generation did not start serving")
+			return
+		case <-time.After(delay):
+		}
+		config, err := c.read(ctx)
+		if err != nil || !c.paired(config) {
+			continue
+		}
+		c.mu.Lock()
+		wanted := c.wanted
+		c.wanted, c.waiting = nil, false
+		var applyErr error
+		if wanted != nil {
+			applyErr = c.apply(ctx, config, *wanted)
+		}
+		c.mu.Unlock()
+		if applyErr != nil {
+			diagnosticlog.TryWarn("managed SSH state could not be applied to the carrier", "error", applyErr)
+		}
+		return
+	}
+}
+
+func applyFeatureCarrierSSH(ctx context.Context, config hostinstall.CarrierConfig, worker string, epoch uint64, enabled bool) error {
 	capability, err := hostinstall.ReadCarrierCapability(ctx, config)
 	if err != nil {
 		return err

@@ -326,7 +326,7 @@ func (s windowsInstallationState) Restore(ctx context.Context, snapshot []byte) 
 	if err := removeWindowsHostdGenerations(ctx, s.layout.Instance, sourceGenerationOrAbsent(*state.Source), false); err != nil {
 		return err
 	}
-	if err := terminateStaleWindowsRuntimeProcesses(ctx, s.layout.Binary); err != nil {
+	if err := terminateStaleWindowsRuntimeProcesses(ctx, s.layout.Binary, staleWindowsRuntimeProcessPattern); err != nil {
 		return err
 	}
 	current, rollback, _ := windowsRuntimePaths(s.layout)
@@ -377,7 +377,11 @@ var windowsHostdRunning = func(ctx context.Context, layout service.Layout) (bool
 // service is stopped is there no work to protect, so installing over a broken installation proceeds (the rule
 // repair follows). Asking first keeps a hostd that the service manager restarts in between under admission.
 func prepareWindowsReplacementMaintenance(ctx context.Context, layout service.Layout, tokenFile, ownerSID string, force bool, timeout time.Duration) (func() error, error) {
-	abort, err := prepareMaintenance(ctx, layout.HostdSocket, tokenFile, force, timeout, ownerSID)
+	// The installed configuration names the serving hostd generation; without one no hostd can be asked.
+	abort, err := func() error { return nil }, error(os.ErrNotExist)
+	if installed, loadErr := LoadWindowsRuntimeConfigForInstance(layout.Instance); loadErr == nil {
+		abort, err = prepareMaintenance(ctx, installed.HostdSocket, tokenFile, force, timeout, ownerSID)
+	}
 	if err == nil {
 		return abort, nil
 	}
@@ -785,8 +789,11 @@ func replaceWindowsInstallationLocked(ctx context.Context, request Request, stat
 			_ = abort()
 		}
 	}()
+	// A new hostd generation takes the worker listener over while the serving one finishes its accepted work, so
+	// nothing drains for it (install_unix.go hostdHandover).
+	handover := windowsHostdHandover(layout.Instance, request.Source)
 	cutover := func(ctx context.Context) error {
-		if present && abort == nil {
+		if present && abort == nil && !handover {
 			timeout := hooks.DrainTimeout
 			if timeout == 0 {
 				timeout = 35 * time.Second

@@ -36,24 +36,7 @@ import (
 //
 // A new generation that fails before 'A' leaves the old one serving.
 
-// HandoverEnv names the old generation's handover socket for a new hostd.
-const HandoverEnv = "PAPERBOAT_HOSTD_HANDOVER_SOCKET"
-
-// ErrNoHandover means no generation answers on the handover socket.
-var ErrNoHandover = errors.New("no running hostd generation to take over from")
-
-const (
-	handoverStart    = 'S'
-	handoverCommit   = 'C'
-	handoverAck      = 'A'
-	maxHandoverFiles = 4
-	// The new generation starts its worker between start and commit.
-	handoverCommitTimeout = 5 * time.Minute
-	handoverStepTimeout   = 10 * time.Second
-)
-
-// HandoverPath is the fixed handover socket next to the lifecycle socket.
-func HandoverPath(socket string) string { return socket + ".handover" }
+const maxHandoverFiles = 4
 
 // HandoverConfig names the descriptors sent in each phase. ServeHandover
 // never closes them; a failed attempt sends the same ones to the next.
@@ -229,20 +212,6 @@ func receiveHandoverFiles(connection *net.UnixConn, marker byte, count int) ([]*
 		return nil, errors.Join(ErrInvalidFrame, closeFiles(files))
 	}
 	return files, nil
-}
-
-func expectHandoverByte(connection *net.UnixConn, want byte, timeout time.Duration) error {
-	if err := connection.SetDeadline(time.Now().Add(timeout)); err != nil {
-		return err
-	}
-	got := make([]byte, 1)
-	if _, err := io.ReadFull(connection, got); err != nil {
-		return err
-	}
-	if got[0] != want {
-		return ErrInvalidFrame
-	}
-	return nil
 }
 
 func closeFiles(files []*os.File) error {

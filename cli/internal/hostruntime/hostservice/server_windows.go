@@ -128,31 +128,59 @@ func (s *Server) Run(ctx context.Context) error {
 	s.mu.Lock()
 	mode, version := s.state.DesiredMode, s.state.DesiredVersion
 	s.mu.Unlock()
+	// During a hostd update the previous generation holds the pipe until the installed configuration moves past it:
+	// wait for the name, then apply the policy, so its release (below) always comes before this apply.
+	listener, err := listenHostServicePipe(ctx, s.config.SocketPath, &winio.PipeConfig{SecurityDescriptor: hostServiceSecurityDescriptor(s.config.SID), InputBufferSize: windowsHostServiceMaxRequestSize, OutputBufferSize: 16 << 10})
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
 	if mode == KeepAwake {
 		if err := s.apply(ctx, mode, version); err != nil {
 			return err
 		}
 	}
-	listener, err := winio.ListenPipe(s.config.SocketPath, &winio.PipeConfig{SecurityDescriptor: hostServiceSecurityDescriptor(s.config.SID), InputBufferSize: windowsHostServiceMaxRequestSize, OutputBufferSize: 16 << 10})
-	if err != nil {
-		return err
-	}
-	defer listener.Close()
 	if s.config.Ready != nil {
 		if err := s.config.Ready(); err != nil {
-			return err
+			return errors.Join(err, s.config.Applier.Close(context.WithoutCancel(ctx)))
 		}
 	}
-	go func() { <-ctx.Done(); _ = listener.Close() }()
+	// The policy is released before the pipe closes, so a successor that binds the pipe applies after it.
+	released := make(chan error, 1)
+	stop := context.AfterFunc(ctx, func() {
+		released <- s.config.Applier.Close(context.WithoutCancel(ctx))
+		_ = listener.Close()
+	})
+	defer stop()
 	for {
 		connection, acceptErr := listener.Accept()
 		if acceptErr != nil {
 			if ctx.Err() != nil || errors.Is(acceptErr, net.ErrClosed) || errors.Is(acceptErr, winio.ErrPipeListenerClosed) {
-				return errors.Join(ctx.Err(), s.config.Applier.Close(context.WithoutCancel(ctx)))
+				if stop() {
+					// Closed without ctx ending: release here.
+					return errors.Join(acceptErr, s.config.Applier.Close(context.WithoutCancel(ctx)))
+				}
+				return errors.Join(ctx.Err(), <-released)
 			}
 			return acceptErr
 		}
 		s.serveConnection(ctx, connection)
+	}
+}
+
+// listenHostServicePipe binds path, waiting in 20 ms steps while another instance holds it (first-instance pipes
+// refuse a second creator with access denied), until ctx ends.
+func listenHostServicePipe(ctx context.Context, path string, config *winio.PipeConfig) (net.Listener, error) {
+	for {
+		listener, err := winio.ListenPipe(path, config)
+		if err == nil || !errors.Is(err, windows.ERROR_ACCESS_DENIED) && !errors.Is(err, windows.ERROR_PIPE_BUSY) {
+			return listener, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, errors.Join(err, ctx.Err())
+		case <-time.After(20 * time.Millisecond):
+		}
 	}
 }
 

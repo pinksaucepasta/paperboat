@@ -17,7 +17,6 @@ import (
 
 	"github.com/Microsoft/go-winio"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseeligibility"
@@ -93,12 +92,7 @@ func newWindowsController(config WindowsConfig) (*windowsController, error) {
 }
 
 func newWindowsTUFSource(config WindowsConfig) (workerupdate.TUFSource, error) {
-	token, err := os.ReadFile(config.TokenFile)
-	if err != nil {
-		return workerupdate.TUFSource{}, err
-	}
-	client, err := hostdproto.NewClient(config.HostdSocket, token, 31*time.Minute, config.OwnerSID)
-	clear(token)
+	client, err := installedHostdClient(config, 31*time.Minute)
 	if err != nil {
 		return workerupdate.TUFSource{}, err
 	}
