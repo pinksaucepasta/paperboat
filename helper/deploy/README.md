@@ -93,8 +93,10 @@ Flood protection on a tunnel installation: `pbh install` loads the nftables tabl
 `inet paperboat_edge_guard` (rules in the state directory, `edge-guard.nft`) and
 the service re-loads it on every start. It drops a source opening more than 100
 connections a second (burst 200) and resets a source holding more than 512, on
-TCP/UDP 443 and the public TCP range; IPv6 sources count per /64. A host without
-`nft` installs without it and `pbh doctor` names it. The edge process adds
+TCP/UDP 443 and the public TCP range; IPv6 sources count per /64. Only traffic
+arriving on an interface with a default route counts; loopback, container and VM
+bridges and VPN interfaces are never limited. A host without `nft` installs
+without it and `pbh doctor` names it. The edge process adds
 per-address limits of its own (20 TLS handshakes/s, 100 requests/s burst 1000,
 256 in flight, 20 new WebSockets/s) and caps one name at a quarter of its TLS
 slots. Volumetric attacks are your hosting provider's to absorb; if your host

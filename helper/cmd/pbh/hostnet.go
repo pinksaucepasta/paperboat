@@ -362,8 +362,8 @@ func reapplyHostFirewall(ctx context.Context, run commander, paths hostPaths, ou
 		}
 	}
 	if record.Guard {
-		if _, err := applyEdgeGuard(ctx, run, paths.guard); err != nil {
-			fmt.Fprintf(out, "pbh: could not re-apply the per-address connection limits (nftables table %s): %v\n", edgeGuardTable, err)
+		if skipped, err := applyEdgeGuard(ctx, run, paths.guard); err != nil || skipped != "" {
+			fmt.Fprintf(out, "pbh: could not re-apply the per-address connection limits (nftables table %s): %v%s\n", edgeGuardTable, err, skipped)
 		}
 	}
 }

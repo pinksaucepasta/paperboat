@@ -204,12 +204,13 @@ func TestEdgeGuardAppliedReappliedAndRemoved(t *testing.T) {
 	apply := "nft -f " + f.paths.guard
 	list := "nft list table inet " + edgeGuardTable
 	f.answers[apply] = ""
+	f.answers["ip -4 -o route show default"] = "default via 10.0.0.1 dev ens3 proto dhcp src 10.0.0.5 metric 100\n"
 	var out strings.Builder
 	if err := setupHostNetwork(t.Context(), f.run, f.paths, &out); err != nil {
 		t.Fatal(err)
 	}
 	rules, _ := os.ReadFile(f.paths.guard)
-	for _, want := range []string{"table inet " + edgeGuardTable, "th dport { 443, 10000-59999 }", "limit rate over 100/second burst 200 packets", "ct count over 512", "ip6 saddr and ffff:ffff:ffff:ffff::"} {
+	for _, want := range []string{"table inet " + edgeGuardTable, `iifname != { "ens3" } accept`, "th dport { 443, 10000-59999 }", "limit rate over 100/second burst 200 packets", "ct count over 512", "ip6 saddr and ffff:ffff:ffff:ffff::"} {
 		if !strings.Contains(string(rules), want) {
 			t.Fatalf("guard rules miss %q:\n%s", want, rules)
 		}
@@ -231,6 +232,7 @@ func TestEdgeGuardAppliedReappliedAndRemoved(t *testing.T) {
 	}
 
 	bare := newFakeHost(t, "60000 65535")
+	bare.answers["ip -4 -o route show default"] = "default via 10.0.0.1 dev ens3\n"
 	out.Reset()
 	if err := setupHostNetwork(t.Context(), bare.run, bare.paths, &out); err != nil {
 		t.Fatalf("install failed without nft: %v", err)
@@ -240,19 +242,24 @@ func TestEdgeGuardAppliedReappliedAndRemoved(t *testing.T) {
 	}
 }
 
-// Only traffic from outside is limited: loopback and container bridges are accepted before the jump to
-// the limits, so local listeners in the port range (test databases on 127.0.0.1, containers reaching a
-// host-network edge) never hit them.
-func TestEdgeGuardExemptsLoopbackAndBridgesBeforeTheLimits(t *testing.T) {
-	rules := edgeGuardRules()
-	jump := strings.Index(rules, "jump edge_new")
-	if jump < 0 {
-		t.Fatalf("no jump to the limits:\n%s", rules)
+// Only traffic arriving on a public interface (one with a default route) is limited: everything else
+// (loopback, Docker/Podman/CNI/libvirt bridges, VPNs) is accepted before the jump to the limits, so
+// local listeners in the port range never hit them. Interfaces come from both route families.
+func TestEdgeGuardLimitsOnlyPublicInterfaces(t *testing.T) {
+	f := newFakeHost(t, "60000 65535")
+	f.answers["ip -4 -o route show default"] = "default via 10.0.0.1 dev enp0s6 proto dhcp src 10.0.0.221 metric 100\n"
+	f.answers["ip -6 -o route show default"] = "default via fe80::1 dev enp0s6 proto ra metric 100\ndefault dev wan1@if7 metric 200\ndefault dev bad\"name metric 300\n"
+	public := publicInterfaces(t.Context(), f.run)
+	if strings.Join(public, ",") != "enp0s6,wan1" {
+		t.Fatalf("public interfaces = %v", public)
 	}
-	for _, exempt := range []string{`iif "lo" accept`, `iifname "docker0" accept`, `iifname "br-*" accept`} {
-		at := strings.Index(rules, exempt)
-		if at < 0 || at > jump {
-			t.Fatalf("%q missing or after the limits:\n%s", exempt, rules)
-		}
+	rules := edgeGuardRules(public)
+	jump := strings.Index(rules, "jump edge_new")
+	exempt := strings.Index(rules, `iifname != { "enp0s6", "wan1" } accept`)
+	if jump < 0 || exempt < 0 || exempt > jump {
+		t.Fatalf("non-public interfaces are not accepted before the limits:\n%s", rules)
+	}
+	if skipped, err := applyEdgeGuard(t.Context(), newFakeHost(t, "60000 65535").run, f.paths.guard); err != nil || !strings.Contains(skipped, "default route") {
+		t.Fatalf("a host with no default route: skipped=%q err=%v", skipped, err)
 	}
 }
