@@ -2,6 +2,7 @@ package tailnet
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=peer-path-accounting
 	"tailscale.com/derp"
@@ -56,11 +57,15 @@ type usageObservedCarrier struct {
 	authority *relayAuthority
 	node      RegionalNode
 	namespace [32]byte
+	closed    atomic.Bool
 }
 
 // A lost listening path is real recovery demand even before a session exists.
 // Normal idle grant renewals do not wake recovery; a broken carrier does.
 func (c *usageObservedCarrier) lostPath() {
+	if c.closed.Load() {
+		return
+	}
 	c.authority.mu.Lock()
 	r := c.authority.recovery
 	c.authority.mu.Unlock()
@@ -75,6 +80,11 @@ func (c *usageObservedCarrier) Connect(ctx context.Context) error {
 		c.lostPath()
 	}
 	return err
+}
+
+func (c *usageObservedCarrier) Close() error {
+	c.closed.Store(true) // an intentional idle reap is not a lost path
+	return c.DERPCarrier.Close()
 }
 
 func (c *usageObservedCarrier) Transport() string {

@@ -2,7 +2,9 @@ package tailnet
 
 import (
 	"errors"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+	"io"
 	"testing"
 	"time"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=peer-path-accounting-test
@@ -82,5 +84,30 @@ func TestUsageCarrierActualNodeAndDirection(t *testing.T) {
 	r.grants[node.NodeID] = grant
 	if got := r.usageNode(peer, "download", time.Now()); got != "" {
 		t.Fatal("stale generation recorded")
+	}
+}
+
+func (*usageFakeCarrier) Close() error { return nil }
+
+func TestCarrierFailureWakesRecoveryButIdleReapDoesNot(t *testing.T) {
+	for _, closed := range []bool{false, true} {
+		t.Run(fmt.Sprint("closed=", closed), func(t *testing.T) {
+			r := &regionalRecovery{grantWake: make(chan struct{}, 1)}
+			c := &usageObservedCarrier{DERPCarrier: &usageFakeCarrier{err: io.EOF}, authority: &relayAuthority{recovery: r}}
+			if closed {
+				_ = c.Close()
+			}
+			_, _, _ = c.RecvDetail()
+			if got := r.repair.Load(); got != !closed {
+				t.Fatalf("repair=%v, closed=%v", got, closed)
+			}
+			want := 1
+			if closed {
+				want = 0
+			}
+			if got := len(r.grantWake); got != want {
+				t.Fatalf("wakes=%d, closed=%v", got, closed)
+			}
+		})
 	}
 }
