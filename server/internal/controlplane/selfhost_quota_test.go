@@ -72,20 +72,13 @@ func TestSelfhostAdmissionIgnoresHostedBandwidthExhaustion(t *testing.T) {
 			}
 			exec(`UPDATE selfhost_installations SET scope_kind=$2,scope_id=$3 WHERE id=$1`, install, ownership, scopeID)
 			b.ID = "quota:" + suffix + ":" + payer + ":" + ownership
-			for _, withPolicy := range []bool{false, true} {
-				var err error
-				if withPolicy {
-					err = accountingauthority.Record(ctx, store, b, policy)
-				} else {
-					err = accountingauthority.Record(ctx, store, b)
+			err := accountingauthority.Record(ctx, store, b, policy)
+			if ownership == "global" {
+				if !errors.Is(err, accountingauthority.ErrQuotaExhausted) {
+					t.Fatalf("hosted/global quota: %v", err)
 				}
-				if ownership == "global" {
-					if !errors.Is(err, accountingauthority.ErrQuotaExhausted) {
-						t.Fatalf("hosted/global quota policy=%v: %v", withPolicy, err)
-					}
-				} else if err != nil {
-					t.Fatalf("selfhost %s payer %s policy=%v: %v", ownership, payer, withPolicy, err)
-				}
+			} else if err != nil {
+				t.Fatalf("selfhost %s payer %s: %v", ownership, payer, err)
 			}
 		}
 		exec(`DELETE FROM selfhost_installations WHERE id=$1`, install)

@@ -52,8 +52,10 @@ type QuotaChecker interface {
 	CheckWorkspaceBandwidthTx(context.Context, *db.Tx, string, time.Time) (bool, error)
 }
 
-func Record(ctx context.Context, store *db.DB, b Binding, policy ...QuotaChecker) error {
-	if b.ID == "" || b.Node == "" || b.Environment == "" || b.Route == "" || b.User == "" || len(b.User) > 256 || b.Revision < 1 || b.ExpiresAt.Before(b.IssuedAt) {
+// Record admits b against its workspace's bandwidth allowance, judged by policy: the one authoritative check, which
+// counts budget segments and top-ups. Without a policy admission cannot be judged, so it fails closed.
+func Record(ctx context.Context, store *db.DB, b Binding, policy QuotaChecker) error {
+	if policy == nil || b.ID == "" || b.Node == "" || b.Environment == "" || b.Route == "" || b.User == "" || len(b.User) > 256 || b.Revision < 1 || b.ExpiresAt.Before(b.IssuedAt) {
 		return ErrUnavailable
 	}
 	return store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -88,22 +90,12 @@ func Record(ctx context.Context, store *db.DB, b Binding, policy ...QuotaChecker
 			return err
 		}
 		if !customerOwned {
-			var exhausted bool
-			if len(policy) > 0 && policy[0] != nil {
-				exhausted, err = policy[0].CheckWorkspaceBandwidthTx(ctx, tx, workspace, b.IssuedAt)
-				if err != nil {
-					return err
-				}
-				if exhausted {
-					return quotaExhaustedTx(ctx, tx, workspace, b.IssuedAt)
-				}
-			} else {
-				if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM billing_workspace_usage_periods WHERE workspace_id=$1 AND period_start<=$2 AND period_end>$2 AND included_bytes IS NOT NULL AND consumed_bytes>=included_bytes)`, workspace, b.IssuedAt).Scan(&exhausted); err != nil {
-					return err
-				}
-				if exhausted {
-					return quotaExhaustedTx(ctx, tx, workspace, b.IssuedAt)
-				}
+			exhausted, err := policy.CheckWorkspaceBandwidthTx(ctx, tx, workspace, b.IssuedAt)
+			if err != nil {
+				return err
+			}
+			if exhausted {
+				return quotaExhaustedTx(ctx, tx, workspace, b.IssuedAt)
 			}
 		}
 		return retainBindingTx(ctx, tx, b, workspace)

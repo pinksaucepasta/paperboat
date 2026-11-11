@@ -98,7 +98,7 @@ func TestWorkspaceIdentityPreservesExistingOwnerRowOnPostgres(t *testing.T) {
 		t.Fatalf("team workspace count=%d err=%v", count, err)
 	}
 	binding := accountingauthority.Binding{ID: "workspace-authority-" + suffix, Node: "workspace-edge-" + suffix, Environment: "workspace-env-" + suffix, Route: "workspace-route-" + suffix, User: owner, Team: team, Revision: 1, IssuedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Minute)}
-	if err := accountingauthority.Record(ctx, store, binding); err != nil {
+	if err := accountingauthority.Record(ctx, store, binding, openQuota{}); err != nil {
 		t.Fatalf("record existing team payer authority: %v", err)
 	}
 	var payer string
@@ -106,11 +106,11 @@ func TestWorkspaceIdentityPreservesExistingOwnerRowOnPostgres(t *testing.T) {
 		t.Fatalf("retained team payer=%s err=%v", payer, err)
 	}
 	binding.User = member
-	if err := accountingauthority.Record(ctx, store, binding); !errors.Is(err, accountingauthority.ErrUnavailable) {
+	if err := accountingauthority.Record(ctx, store, binding, openQuota{}); !errors.Is(err, accountingauthority.ErrUnavailable) {
 		t.Fatalf("retained authority actor changed inside same team: %v", err)
 	}
 	binding.User = owner
-	if err := accountingauthority.Record(ctx, store, binding); err != nil {
+	if err := accountingauthority.Record(ctx, store, binding, openQuota{}); err != nil {
 		t.Fatalf("identical actor retry: %v", err)
 	}
 	var actor string
@@ -118,15 +118,22 @@ func TestWorkspaceIdentityPreservesExistingOwnerRowOnPostgres(t *testing.T) {
 		t.Fatalf("retained actor changed after denied rebind: %v", err)
 	}
 	binding.Team = ""
-	if err := accountingauthority.Record(ctx, store, binding); !errors.Is(err, accountingauthority.ErrUnavailable) {
+	if err := accountingauthority.Record(ctx, store, binding, openQuota{}); !errors.Is(err, accountingauthority.ErrUnavailable) {
 		t.Fatalf("retained authority payer changed: %v", err)
 	}
 	binding.ID = "personal-authority-" + suffix
-	if err := accountingauthority.Record(ctx, store, binding); err != nil {
+	if err := accountingauthority.Record(ctx, store, binding, openQuota{}); err != nil {
 		t.Fatalf("record existing personal payer authority: %v", err)
 	}
 	if err := store.SQL().QueryRowContext(ctx, `SELECT workspace_id FROM paperboat.usage_accounting_authorities WHERE authority_id=$1`, binding.ID).Scan(&payer); err != nil || payer != personalRow {
 		t.Fatalf("retained personal payer=%s err=%v", payer, err)
 	}
 
+}
+
+// openQuota admits every request: these checks are about who pays, not how much is left.
+type openQuota struct{}
+
+func (openQuota) CheckWorkspaceBandwidthTx(context.Context, *db.Tx, string, time.Time) (bool, error) {
+	return false, nil
 }

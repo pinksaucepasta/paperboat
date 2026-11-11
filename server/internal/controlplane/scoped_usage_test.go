@@ -20,6 +20,15 @@ func (scopedTestDebiter) DebitWorkspaceBandwidthTx(ctx context.Context, tx *db.T
 	return n, exhausted, err
 }
 
+// scopedTestQuota judges only the current period row; these tests keep one row per workspace.
+type scopedTestQuota struct{}
+
+func (scopedTestQuota) CheckWorkspaceBandwidthTx(ctx context.Context, tx *db.Tx, workspace string, at time.Time) (bool, error) {
+	var exhausted bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM billing_workspace_usage_periods WHERE workspace_id=$1 AND period_start<=$2 AND period_end>$2 AND included_bytes IS NOT NULL AND consumed_bytes>=included_bytes)`, workspace, at).Scan(&exhausted)
+	return exhausted, err
+}
+
 func TestScopedUsageSharedRouteDelayedCredentialAndReplay(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
@@ -60,7 +69,7 @@ func TestScopedUsageSharedRouteDelayedCredentialAndReplay(t *testing.T) {
 			t.Fatal(err)
 		}
 		binding := accountingauthority.Binding{ID: "grant:" + grant, Node: "node_" + suffix, Environment: "env_" + suffix, Route: "route_" + suffix, Revision: 1, User: user, Team: team, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(time.Minute)}
-		if err := accountingauthority.Record(ctx, store, binding); err != nil {
+		if err := accountingauthority.Record(ctx, store, binding, scopedTestQuota{}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO billing_workspace_usage_periods(workspace_id,period_start,period_end,included_bytes) VALUES($1,$2,$3,100)`, "team:"+team, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
@@ -112,7 +121,7 @@ func TestScopedUsageSharedRouteDelayedCredentialAndReplay(t *testing.T) {
 		quotaBinding := binding
 		quotaBinding.ID += "_quota"
 		quotaBinding.IssuedAt = now
-		err = accountingauthority.Record(ctx, store, quotaBinding)
+		err = accountingauthority.Record(ctx, store, quotaBinding, scopedTestQuota{})
 		var quota *accountingauthority.QuotaExhaustedError
 		var periodEnd time.Time
 		if e := store.SQL().QueryRowContext(ctx, `SELECT max(period_end) FROM billing_workspace_usage_periods WHERE workspace_id=$1`, "team:"+team).Scan(&periodEnd); e != nil {
@@ -151,12 +160,12 @@ func TestScopedUsageSharedRouteDelayedCredentialAndReplay(t *testing.T) {
 			}
 			capped := binding
 			capped.ID = "grant:new-at-capacity"
-			if err = accountingauthority.Record(ctx, store, capped); !errors.Is(err, accountingauthority.ErrUnavailable) {
+			if err = accountingauthority.Record(ctx, store, capped, scopedTestQuota{}); !errors.Is(err, accountingauthority.ErrUnavailable) {
 				t.Fatalf("unbounded admission: %v", err)
 			}
 			capped.IssuedAt = now.Add(2*accountingauthority.DeliveryWindow + 2*time.Minute)
 			capped.ExpiresAt = capped.IssuedAt.Add(time.Minute)
-			if err = accountingauthority.Record(ctx, store, capped); err != nil {
+			if err = accountingauthority.Record(ctx, store, capped, scopedTestQuota{}); err != nil {
 				t.Fatalf("expired capacity did not recover: %v", err)
 			}
 		}
