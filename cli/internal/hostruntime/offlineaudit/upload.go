@@ -193,11 +193,15 @@ func (u *Uploader) send(ctx context.Context, batch []Event) error {
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("offline audit upload: the server answered %d", response.StatusCode)
 	}
-	var result struct {
-		Accepted   int `json:"accepted"`
-		Duplicates int `json:"duplicates"`
+	// The server answers every success as {"data": ...}; the receipt is inside it.
+	var envelope struct {
+		Data struct {
+			Accepted   int `json:"accepted"`
+			Duplicates int `json:"duplicates"`
+		} `json:"data"`
 	}
-	if err := json.Unmarshal(answer, &result); err != nil || result.Accepted < 0 || result.Duplicates < 0 || result.Accepted+result.Duplicates != len(batch) {
+	result := &envelope.Data
+	if err := json.Unmarshal(answer, &envelope); err != nil || result.Accepted < 0 || result.Duplicates < 0 || result.Accepted+result.Duplicates != len(batch) {
 		return fmt.Errorf("offline audit upload: the answer does not account for %d events", len(batch))
 	}
 	return nil
