@@ -74,11 +74,14 @@ func TestRestoredListenerReachesRelaysThatArriveAfterStart(t *testing.T) {
 		if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, candidates)); err != nil {
 			t.Fatal(err)
 		}
-		g := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: long, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch}
-		header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-relay-grant+jwt", "kid": "network_test"})
-		body, _ := json.Marshal(g)
-		signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)
-		if err := a.ApplyRelayGrants(t.Context(), []string{signed + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(signer, []byte(signed)))}); err != nil {
+		grant := func(node RegionalNode) string {
+			g := peernetwork.RelayGrant{Version: 1, Issuer: cfg.Issuer, Audience: "paperboat-relay", IssuedAt: now, ExpiresAt: long, Generation: cfg.Generation, AccountID: cfg.Self.AccountID, EndpointID: cfg.Self.EndpointID, WireGuardPublicKey: cfg.Self.WireGuardPublicKey, CertificateFingerprint: cfg.Self.QUICCertificateFingerprint, QUICPublicKey: cfg.Self.QUICPublicKey, NodeID: node.NodeID, NodeGeneration: node.NodeGeneration, ProcessEpoch: node.ProcessEpoch}
+			header, _ := json.Marshal(map[string]string{"alg": "EdDSA", "typ": "paperboat-relay-grant+jwt", "kid": "network_test"})
+			body, _ := json.Marshal(g)
+			signed := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(body)
+			return signed + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(signer, []byte(signed)))
+		}
+		if err := a.ApplyRelayGrants(t.Context(), []string{grant(node)}); err != nil {
 			t.Fatal(err)
 		}
 		time.Sleep(5 * time.Second)
@@ -104,6 +107,34 @@ func TestRestoredListenerReachesRelaysThatArriveAfterStart(t *testing.T) {
 		synctest.Wait()
 		if got := e.prepares.Load(); got != quiet {
 			t.Fatalf("a connected idle listener kept probing: %d prepares in 5 min", got-quiet)
+		}
+
+		// A relay added while the listener idles on the first one is published and connected too; a renewal of the
+		// same relay set stays quiet.
+		if err := a.ApplyRelayGrants(t.Context(), []string{grant(node)}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(10 * time.Second)
+		synctest.Wait()
+		if got := e.prepares.Load(); got != quiet {
+			t.Fatalf("an unchanged relay renewal woke the idle listener: %d prepares", got-quiet)
+		}
+		added := node
+		added.NodeID, added.ProcessEpoch = "relay_added", "epoch_added"
+		candidates.Generation, candidates.Nodes = 2, []RegionalNode{node, added}
+		if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, candidates)); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.ApplyRelayGrants(t.Context(), []string{grant(node), grant(added)}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(10 * time.Second)
+		synctest.Wait()
+		e.mu.Lock()
+		regions := len(e.published)
+		e.mu.Unlock()
+		if regions != 2 || e.prepares.Load() == quiet || r.repair.Load() {
+			t.Fatalf("relay added while idle: published %d regions, %d prepares, repair=%v", regions, e.prepares.Load()-quiet, r.repair.Load())
 		}
 	})
 }

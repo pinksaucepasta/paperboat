@@ -93,6 +93,7 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 		}
 		a.relay.mu.Lock()
 		removed, added := relayGrantDiff(a.relay.grants, grants)
+		moved := relaysMoved(a.relay.grants, grants)
 		if added {
 			a.relay.retained = nil // a grant that adds a pair is never held back
 		} else if removed && len(a.withdrawing) > 0 && a.relay.retained == nil {
@@ -105,6 +106,9 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 			a.relay.controlPeers = append(a.relay.controlPeers, peer)
 		}
 		controlPeers := append([]key.NodePublic(nil), a.relay.controlPeers...)
+		if recovery := a.relay.recovery; recovery != nil && resultErr == nil && moved {
+			recovery.relaysMoved()
+		}
 		if recovery := a.relay.recovery; recovery != nil && resultErr == nil && (recovery.pair() != "" || recovery.repair.Load()) {
 			// Tailscale re-STUNs at once on a DERP map update; do not wait out the probe delay.
 			select {
@@ -570,6 +574,16 @@ func (a *Authority) relayToken(node RegionalNode) (string, error) {
 type retainedRelayGrants struct {
 	tokens map[string]string
 	grants map[string]peernetwork.RelayGrant
+}
+
+// relaysMoved reports whether next grants a relay process previous did not: a relay added, restarted or moved.
+func relaysMoved(previous, next map[string]peernetwork.RelayGrant) bool {
+	for node, g := range next {
+		if old, ok := previous[node]; !ok || old.NodeGeneration != g.NodeGeneration || old.ProcessEpoch != g.ProcessEpoch {
+			return true
+		}
+	}
+	return false
 }
 
 // relayGrantDiff reports whether next drops some peer scope of previous and whether it adds one; a renewal of the same
