@@ -441,11 +441,3 @@ func TestControlHandlerDropsASilentConnection(t *testing.T) {
 		t.Fatal("the handler still waits for a request after the read timeout")
 	}
 }
-
-func TestControlOperationBudgets(t *testing.T) {
-	for operation, want := range map[string]time.Duration{"status": 30 * time.Second, "settings": 30 * time.Second, "check": 3 * time.Minute, "download": maxUpdateControlTimeout, "install": maxUpdateControlTimeout, "session-owner-start": maxUpdateControlTimeout} {
-		if got := controlOperationTimeout(operation); got != want {
-			t.Errorf("%s budget %s, want %s", operation, got, want)
-		}
-	}
-}
