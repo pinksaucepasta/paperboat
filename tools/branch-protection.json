@@ -10,6 +10,9 @@
       },
       {
         "context": "Console lint and types"
+      },
+      {
+        "context": "End-to-end core"
       }
     ]
   },
