@@ -56,7 +56,15 @@ func doctorHostdCheck(ctx context.Context, installed, socket string, dial func(c
 	}
 	err := dial(ctx, socket)
 	for deadline := time.Now().Add(window); err != nil && time.Now().Before(deadline) && ctx.Err() == nil; {
-		time.Sleep(interval)
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+		case <-timer.C:
+		}
+		if ctx.Err() != nil {
+			break
+		}
 		err = dial(ctx, socket)
 	}
 	if err != nil {
