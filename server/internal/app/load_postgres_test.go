@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -41,6 +42,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/perf"
+	"github.com/pinksaucepasta/paperboat/shared/backoff"
 )
 
 const loadOrigin = "http://console.example.test"
@@ -49,6 +51,9 @@ type loadServer struct {
 	url, session, csrf string
 	machines           []string
 	store              *db.DB
+	// restart stops the in-process server, leaves the port closed for the given time and starts a new application
+	// on the same address and database (nil when the server runs elsewhere).
+	restart func(down time.Duration)
 }
 
 // transactions is the database's committed + rolled-back transaction count (pg_stat_database). It measures the
@@ -68,6 +73,10 @@ func (s *loadServer) transactions(t *testing.T) int64 {
 func startLoadServer(t *testing.T) *loadServer {
 	t.Helper()
 	dsn := os.Getenv("PAPERBOAT_PERF_DATABASE_DSN")
+	if dsn == "" {
+		// tools/remote-test.sh gives each package a fresh isolated database.
+		dsn = os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	}
 	if dsn == "" {
 		t.Skip("set PAPERBOAT_PERF_DATABASE_DSN to an isolated *_test database")
 	}
@@ -119,14 +128,45 @@ ON CONFLICT (id) DO UPDATE SET session_hash=excluded.session_hash,csrf_hash=excl
 		server.url = target
 		return server
 	}
-	application, err := New(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
-	if err != nil {
-		t.Fatal(err)
+	var current struct {
+		application *App
+		listener    *httptest.Server
 	}
-	t.Cleanup(func() { _ = application.db.Close() })
-	listener := httptest.NewServer(application.server.Handler)
-	t.Cleanup(listener.Close)
-	server.url = listener.URL
+	address := ""
+	stop := func() {
+		if current.listener != nil {
+			current.listener.CloseClientConnections()
+			current.listener.Close()
+			_ = current.application.db.Close()
+			current.listener = nil
+		}
+	}
+	start := func() {
+		application, err := New(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		listener := httptest.NewUnstartedServer(application.server.Handler)
+		if address != "" {
+			_ = listener.Listener.Close()
+			if listener.Listener, err = net.Listen("tcp", address); err != nil {
+				t.Fatal(err)
+			}
+		}
+		listener.Start()
+		current.application, current.listener = application, listener
+		if address == "" {
+			// A restart reuses the address, so the URL daemons read never changes.
+			address, server.url = listener.Listener.Addr().String(), listener.URL
+		}
+	}
+	start()
+	t.Cleanup(stop)
+	server.restart = func(down time.Duration) {
+		stop()
+		time.Sleep(down)
+		start()
+	}
 	return server
 }
 
@@ -478,4 +518,120 @@ func hostCPU() (busy, total uint64) {
 		}
 	}
 	return busy, total
+}
+
+// TestLoadRestartStorm is F21-165: a server restart (deploy or crash, the port closed for PAPERBOAT_LOAD_DOWN_SECONDS)
+// under PAPERBOAT_LOAD_DAEMONS held event waits plus the daemon refresh mix, each daemon retrying a failed request
+// with the daemons' own schedule (shared/backoff.Retry, doubling and jittered). Pass: every daemon's wait loop is
+// answered again within 30 s of the new server listening, and the restarted server answers no 5xx.
+func TestLoadRestartStorm(t *testing.T) {
+	server := startLoadServer(t)
+	if server.restart == nil {
+		t.Skip("the restart storm needs the in-process server (unset PAPERBOAT_LOAD_TARGET_URL)")
+	}
+	daemons := loadSteps("PAPERBOAT_LOAD_DAEMONS", []int{100})[0]
+	down := time.Duration(loadSteps("PAPERBOAT_LOAD_DOWN_SECONDS", []int{5})[0]) * time.Second
+	const warm, after = 20 * time.Second, 60 * time.Second
+	client := loadClient(512)
+	ctx, cancel := context.WithTimeout(context.Background(), warm+down+after+20*time.Second)
+	defer cancel()
+	var mu sync.Mutex
+	var upAt time.Time                        // set when the restarted server listens
+	firstAnswer := make([]time.Time, daemons) // per daemon, the first wait answered after upAt
+	fiveXX := map[int]int{}
+	var wg sync.WaitGroup
+	body := `{"topics":{"inventory":0,"machine_services":0,"peer_network":0}}`
+	for daemon := range daemons {
+		machine := server.machines[daemon%len(server.machines)]
+		wg.Add(2)
+		go func() { // the held event wait, retried like the daemon retries it
+			defer wg.Done()
+			failures := 0
+			for ctx.Err() == nil {
+				requestCtx, cancelRequest := context.WithTimeout(ctx, 40*time.Second)
+				status, err := server.request(requestCtx, client, http.MethodPost, "/v1/machines/"+machine+"/events/wait", body)
+				cancelRequest()
+				if ctx.Err() != nil {
+					return
+				}
+				ok := err == nil && (status == http.StatusOK || status == http.StatusNoContent)
+				mu.Lock()
+				if err == nil && status >= 500 {
+					fiveXX[status]++
+				}
+				if ok && !upAt.IsZero() && firstAnswer[daemon].IsZero() {
+					firstAnswer[daemon] = time.Now()
+				}
+				mu.Unlock()
+				if ok {
+					failures = 0
+					continue
+				}
+				failures++
+				time.Sleep(backoff.Retry(failures, time.Second, 30*time.Second))
+			}
+		}()
+		go func() { // the refresh mix every 15 s
+			defer wg.Done()
+			time.Sleep(time.Duration(daemon) * 15 * time.Second / time.Duration(daemons))
+			failures := 0
+			for ctx.Err() == nil {
+				next := time.Now().Add(15 * time.Second)
+				for _, path := range refreshMix {
+					requestCtx, cancelRequest := context.WithTimeout(ctx, 30*time.Second)
+					status, err := server.request(requestCtx, client, http.MethodGet, path, "")
+					cancelRequest()
+					if ctx.Err() != nil {
+						return
+					}
+					mu.Lock()
+					if err == nil && status >= 500 {
+						fiveXX[status]++
+					}
+					mu.Unlock()
+					if err != nil || status >= 500 {
+						failures++
+						time.Sleep(backoff.Retry(failures, time.Second, 30*time.Second))
+						break
+					}
+					failures = 0
+				}
+				select {
+				case <-ctx.Done():
+				case <-time.After(time.Until(next)):
+				}
+			}
+		}()
+	}
+	time.Sleep(warm)
+	mu.Lock()
+	for status, count := range fiveXX {
+		t.Errorf("%d x HTTP %d before the restart", count, status)
+	}
+	clear(fiveXX)
+	mu.Unlock()
+	server.restart(down)
+	mu.Lock()
+	upAt = time.Now()
+	mu.Unlock()
+	time.Sleep(after)
+	cancel()
+	wg.Wait()
+	var slowest time.Duration
+	missing := 0
+	for _, answered := range firstAnswer {
+		if answered.IsZero() {
+			missing++
+			continue
+		}
+		slowest = max(slowest, answered.Sub(upAt))
+	}
+	t.Logf("daemons=%d down=%v: slowest wait answered %v after the server listened, %d never answered, 5xx after restart: %v",
+		daemons, down, slowest.Round(time.Millisecond), missing, fiveXX)
+	if missing > 0 || slowest > 30*time.Second {
+		t.Errorf("%d daemons never answered, slowest %v (want all within 30 s)", missing, slowest)
+	}
+	for status, count := range fiveXX {
+		t.Errorf("%d x HTTP %d after the restart", count, status)
+	}
 }
