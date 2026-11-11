@@ -23,3 +23,15 @@ func TestOriginHostClasses(t *testing.T) {
 		}
 	}
 }
+
+func TestValidOriginHostName(t *testing.T) {
+	for value, want := range map[string]bool{
+		"localhost": true, "127.0.0.1": true, "::1": true, "app.example.test": true, "my-app.local": true,
+		"": false, "app.example.test:8080": false, "http://app": false, "a b": false, "app/": false, "-bad.test": false,
+		"bad-.test": false, "a..b": false, "user@host": false, "ex\nample.test": false, "under_score.test": false,
+	} {
+		if got := ValidOriginHostName(value); got != want {
+			t.Errorf("ValidOriginHostName(%q) = %v, want %v", value, got, want)
+		}
+	}
+}
