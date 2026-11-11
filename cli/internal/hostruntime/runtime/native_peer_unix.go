@@ -271,7 +271,7 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
 	usage := s.config.usage
-	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, AdmitOffline: offlineAdmission(s.config.offlineAudit, s.config.dispatch != nil, s.paperboatAnswering), MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
+	owner, err := native.NewOwner(native.Config{Authority: authority, TLS: tlsConfig, AdmitOffline: offlineAdmission(s.config.offlineAudit, s.paperboatAnswering), MeterIncoming: func(conn net.Conn, binding native.MeterBinding) net.Conn {
 		return usage.Wrap(conn, bandwidth.Binding{AccessSessionID: binding.AccessSessionID, StreamID: binding.StreamID, Consumer: binding.Consumer, PeerAccountID: binding.PeerAccountID, Reverse: binding.Reverse}, func(direction string) bandwidth.Path {
 			mode, node := binding.Path(direction)
 			return bandwidth.Path{Mode: mode, NodeID: node}
@@ -623,7 +623,12 @@ func (s *productionNativePeerService) serveStream(ctx context.Context, header st
 	if s.config.dispatch != nil && header.Consumer != "ssh" {
 		var remote net.Conn
 		var err error
-		if resume, ok := stream.(server.ResumePeerConn); ok {
+		if offline, ok := stream.(*native.OfflineConn); ok {
+			// An offline session carries no credential for the worker to verify: forward the peer this carrier admitted from
+			// its signed scopes (F21-11).
+			accountID, endpointID, _, _, _ := offline.OfflinePeer()
+			remote, err = s.config.dispatch.OpenOffline(ctx, header, server.NativeDispatchOfflinePeer{AccountID: accountID, EndpointID: endpointID})
+		} else if resume, ok := stream.(server.ResumePeerConn); ok {
 			// A resume has no credential for the worker to verify: forward the peer this carrier admitted.
 			accountID, endpointID, _, _, standing := resume.ResumePeer()
 			remote, err = s.config.dispatch.OpenResume(ctx, header, server.NativeDispatchResumePeer{AccountID: accountID, EndpointID: endpointID, Standing: standing})
