@@ -12,6 +12,13 @@ import (
 
 const supportReferenceMetadata = "support-reference"
 
+// APIVersion is the version of the local daemon API (daemon.proto and its semantics). The client sends it with every
+// call and the daemon refuses any other (checkAPIVersion), so a pb and a daemon built for different APIs fail loudly
+// instead of one silently dropping the other's fields. Raise it with any incompatible change to daemon.proto.
+const APIVersion = "1"
+
+const apiVersionMetadata = "daemon-api-version"
+
 // Client is a gRPC client communicating with the Paperboat daemon.
 type Client struct {
 	conn   *grpc.ClientConn
@@ -27,7 +34,7 @@ func rpcContext(ctx context.Context) context.Context {
 		reference = supportref.New()
 		ctx = supportref.WithContext(ctx, reference)
 	}
-	return metadata.AppendToOutgoingContext(ctx, supportReferenceMetadata, reference)
+	return metadata.AppendToOutgoingContext(ctx, supportReferenceMetadata, reference, apiVersionMetadata, APIVersion)
 }
 
 // dialTimeout bounds a blocking Dial whatever context the caller passes: a socket that exists but never accepts
