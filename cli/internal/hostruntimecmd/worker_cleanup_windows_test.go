@@ -138,3 +138,66 @@ func TestWindowsRuntimeTokenNativeFailureAndFreshRecovery(t *testing.T) {
 		t.Fatalf("staging cause/privacy: %T", err)
 	}
 }
+
+func TestStagedElevationExecutableIsRemovedWhileItsHelperIsStillExiting(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "pb.exe")
+	if err := os.WriteFile(source, []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	staged, cleanup, err := stageWindowsElevationExecutable(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A running image cannot be deleted: an open handle without delete sharing stands in for the helper that a
+	// canceled or timed-out elevation leaves behind for a moment.
+	running, err := os.Open(staged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { time.Sleep(1500 * time.Millisecond); _ = running.Close() }()
+	if err := cleanup(); err != nil {
+		t.Fatalf("cleanup did not wait for the helper to exit: %v", err)
+	}
+	if _, err := os.Stat(staged); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("elevation executable retained after cleanup")
+	}
+}
+
+func TestStagingSweepsElevationExecutablesLeftByAKilledInstaller(t *testing.T) {
+	temp := t.TempDir()
+	t.Setenv("TMP", temp)
+	t.Setenv("TEMP", temp)
+	old := time.Now().Add(-2 * staleElevationExecutableAge)
+	stale := filepath.Join(temp, ".pb-elevated-stale.exe")
+	young := filepath.Join(temp, ".pb-elevated-young.exe")
+	other := filepath.Join(temp, "keep-elevated.exe")
+	for _, path := range []string{stale, young, other} {
+		if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, path := range []string{stale, other} {
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	source := filepath.Join(t.TempDir(), "pb.exe")
+	if err := os.WriteFile(source, []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, cleanup, err := stageWindowsElevationExecutable(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanup(); err != nil {
+		t.Fatal(err)
+	}
+	for path, wantGone := range map[string]bool{stale: true, young: false, other: false} {
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) != wantGone {
+			t.Errorf("%s: gone=%v, want %v", filepath.Base(path), errors.Is(err, os.ErrNotExist), wantGone)
+		}
+	}
+	if matches, _ := filepath.Glob(filepath.Join(temp, elevationExecutablePattern)); len(matches) != 1 || matches[0] != young {
+		t.Fatalf("left in TEMP: %v", matches)
+	}
+}

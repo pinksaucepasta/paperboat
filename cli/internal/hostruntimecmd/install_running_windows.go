@@ -10,6 +10,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	clientconfig "github.com/pinksaucepasta/paperboat/internal/config"
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
@@ -128,19 +129,52 @@ func installUpdateSource(ctx context.Context, sourcePath string, source installs
 	return layout.Binary, nil
 }
 
+const (
+	elevationExecutablePattern = ".pb-elevated-*.exe"
+	// A copy older than this belongs to an installer that was killed (or whose helper outlived it): no live
+	// installation takes this long to start its helper.
+	staleElevationExecutableAge = time.Hour
+	// A helper that was canceled or timed out is still exiting when the installer returns, and Windows refuses to
+	// delete an image that is running: the removal waits for it, within this bound.
+	elevationExecutableRemoveAttempts = 20
+	elevationExecutableRemoveWait     = 500 * time.Millisecond
+)
+
+// sweepStaleElevationExecutables deletes the elevation-helper copies an earlier installer left in dir. A copy that
+// is still running, or is too young to be stale, stays (the removal of a running image fails and is ignored).
+func sweepStaleElevationExecutables(dir string, now time.Time) {
+	matches, err := filepath.Glob(filepath.Join(dir, elevationExecutablePattern))
+	if err != nil {
+		return
+	}
+	for _, path := range matches {
+		if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() && now.Sub(info.ModTime()) > staleElevationExecutableAge {
+			_ = os.Remove(path)
+		}
+	}
+}
+
+// removeElevationExecutable deletes path, retrying while its helper is still exiting. A copy that stays is swept by
+// the next installation.
+func removeElevationExecutable(path string) error {
+	var err error
+	for attempt := 0; attempt < elevationExecutableRemoveAttempts; attempt++ {
+		if err = os.Remove(path); err == nil || runtimeCausesOnly(err, os.ErrNotExist) {
+			return nil
+		}
+		time.Sleep(elevationExecutableRemoveWait)
+	}
+	return err
+}
+
 func stageWindowsElevationExecutable(sourcePath string) (string, func() error, error) {
-	temporary, err := os.CreateTemp("", ".pb-elevated-*.exe")
+	sweepStaleElevationExecutables(os.TempDir(), time.Now())
+	temporary, err := os.CreateTemp("", elevationExecutablePattern)
 	if err != nil {
 		return "", func() error { return nil }, runtimeFailure("creating the elevation executable failed", err)
 	}
 	path := temporary.Name()
-	cleanup := func() error {
-		err := os.Remove(path)
-		if runtimeCausesOnly(err, os.ErrNotExist) {
-			return nil
-		}
-		return err
-	}
+	cleanup := func() error { return removeElevationExecutable(path) }
 	source, err := os.Open(sourcePath)
 	if err != nil {
 		return "", func() error { return nil }, runtimeFailure("opening the elevation source failed", err, temporary.Close(), cleanup())
