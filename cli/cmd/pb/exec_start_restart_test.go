@@ -79,3 +79,35 @@ func TestUncertainExecStartEndsAtTheWindowStillUncertain(t *testing.T) {
 		t.Fatalf("err=%v after %v", err, time.Since(start))
 	}
 }
+
+// W1: `pb exec --timeout 2s` against a machine in the middle of an update waited 10 s, because the uncertain-start
+// recovery (up to 90 s) ignored the user's timeout. The timeout bounds the start too: the exec returns at about 2 s,
+// still reporting that the start is uncertain, whether the opens keep failing or the first one never answers.
+func TestUncertainStartEndsAtTheUserTimeout(t *testing.T) {
+	for name, open := range map[string]func(context.Context) (tunnel.ExecConn, error){
+		"opens keep failing": func(ctx context.Context) (tunnel.ExecConn, error) {
+			select {
+			case <-time.After(300 * time.Millisecond): // the daemon reports an open that did not complete
+				return nil, localapi.ErrExecStartUncertain
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		},
+		"first open never answers": func(ctx context.Context) (tunnel.ExecConn, error) {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			begin := time.Now()
+			conn, uncertain, err := startExec(context.Background(), 2*time.Second, open)
+			took := time.Since(begin)
+			if conn != nil || !uncertain || !execStartUncertain(err) {
+				t.Fatalf("conn %v uncertain %v err %v", conn, uncertain, err)
+			}
+			if took < 1900*time.Millisecond || took > 2600*time.Millisecond {
+				t.Fatalf("returned after %v, want about the 2 s --timeout", took)
+			}
+		})
+	}
+}

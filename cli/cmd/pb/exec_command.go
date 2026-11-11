@@ -110,14 +110,9 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 			return d.peerApplications.DialExec(ctx, execConnectInfo(machine, current, client.Workspace()), request)
 		})
 	}
-	connection, err := dial(c.Context, descriptor)
-	initialUncertain := err != nil && execStartUncertain(err)
-	if initialUncertain {
-		observeExecFailure(c.Context, err)
-		connection, err = retryUncertainExecStart(c.Context, func(ctx context.Context) (tunnel.ExecConn, error) {
-			return dial(ctx, descriptor)
-		})
-	}
+	connection, initialUncertain, err := startExec(c.Context, request.Timeout, func(ctx context.Context) (tunnel.ExecConn, error) {
+		return dial(ctx, descriptor)
+	})
 	if err != nil {
 		var uncertain *tunnel.ExecStartUncertainError
 		if initialUncertain || errors.As(err, &uncertain) || errors.Is(err, localapi.ErrExecStartUncertain) {
@@ -470,6 +465,32 @@ func execStartUncertain(err error) bool {
 // retryUncertainExecStart retries an exec whose start is uncertain, with the same operation ID (the host runs it at
 // most once), for as long as a running exec may reattach: a machine restarting for an update answers again within that
 // window, where three 10 s peer opens gave up first (winpool pb install: worker unavailable 41 s, pb exec failed at 31 s).
+// startExec opens the exec and retries an uncertain start (retryUncertainExecStart), all within the user's --timeout
+// when one is set: the timeout bounds the whole exec, its start included (W1: --timeout 2s waited out a peer update
+// for 10 s). A start that has not opened when it ends is reported as uncertain: the open may have reached the host.
+// uncertain reports whether the start's outcome is unknown.
+func startExec(ctx context.Context, timeout time.Duration, dial func(context.Context) (tunnel.ExecConn, error)) (connection tunnel.ExecConn, uncertain bool, err error) {
+	start := ctx
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		start, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	connection, err = dial(start)
+	if err == nil {
+		return connection, false, nil
+	}
+	if ctx.Err() == nil && start.Err() != nil {
+		return nil, true, fmt.Errorf("the command did not start within --timeout %v: %w", timeout, localapi.ErrExecStartUncertain)
+	}
+	if !execStartUncertain(err) {
+		return nil, false, err
+	}
+	observeExecFailure(ctx, err)
+	connection, err = retryUncertainExecStart(start, dial)
+	return connection, true, err
+}
+
 func retryUncertainExecStart(ctx context.Context, dial func(context.Context) (tunnel.ExecConn, error)) (tunnel.ExecConn, error) {
 	recovery := reattach.New(reattach.Policy{Attempts: execReattachAttempts, Backoff: execRecoveryBackoff, Retryable: execStartUncertain})
 	var uncertain error
@@ -480,8 +501,8 @@ func retryUncertainExecStart(ctx context.Context, dial func(context.Context) (tu
 		}
 		return connection, err
 	})
-	if errors.Is(err, reattach.ErrExhausted) && uncertain != nil {
-		// The window ending cancelled the last open; the outcome is still that the start is uncertain.
+	if uncertain != nil && (errors.Is(err, reattach.ErrExhausted) || errors.Is(err, context.DeadlineExceeded)) {
+		// The window or the user's --timeout ended the last open; the outcome is still that the start is uncertain.
 		return nil, uncertain
 	}
 	return connection, err
