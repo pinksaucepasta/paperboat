@@ -40,6 +40,7 @@ func TestGatewayRoutesAttachedPreviewToCarrierTransport(t *testing.T) {
 	}
 
 	serveDone := make(chan error, 1)
+	var originSaw http.Header
 	go func() {
 		stream, open, acceptErr := client.AcceptStream(context.Background())
 		if acceptErr != nil {
@@ -52,6 +53,7 @@ func TestGatewayRoutesAttachedPreviewToCarrierTransport(t *testing.T) {
 			return
 		}
 		serveDone <- datacarrier.ServeHTTPStream(context.Background(), stream, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			originSaw = request.Header.Clone()
 			if request.Host != "app.preview.example.test" || request.URL.Path != "/" {
 				writer.WriteHeader(http.StatusBadRequest)
 				return
@@ -83,6 +85,11 @@ func TestGatewayRoutesAttachedPreviewToCarrierTransport(t *testing.T) {
 
 	request := httptest.NewRequest(http.MethodGet, "https://app.preview.example.test/", nil)
 	request.Host = "app.preview.example.test"
+	request.RemoteAddr = "198.51.100.7:4000"
+	request.Header.Set("X-Forwarded-Proto", "http") // a visitor's own claim must not survive
+	request.Header.Set("X-Forwarded-For", "203.0.113.9")
+	request.Header.Set("X-Real-IP", "203.0.113.9")
+	request.Header.Set("X-Forwarded-Port", "8080")
 	response := httptest.NewRecorder()
 	gateway.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || response.Body.String() != "preview reached over carrier\n" {
@@ -95,5 +102,11 @@ func TestGatewayRoutesAttachedPreviewToCarrierTransport(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("carrier HTTP handler did not stop")
+	}
+	// What the agent receives from the edge: the edge's own facts, one value each.
+	for name, want := range map[string]string{"X-Forwarded-Proto": "https", "X-Forwarded-Host": "app.preview.example.test", "X-Forwarded-For": "198.51.100.7", "Forwarded": "for=198.51.100.7;proto=https;host=app.preview.example.test", "X-Forwarded-Port": "443", "X-Real-IP": "198.51.100.7"} {
+		if got := originSaw.Values(name); len(got) != 1 || got[0] != want {
+			t.Fatalf("%s reached the agent as %q, want %q", name, got, want)
+		}
 	}
 }

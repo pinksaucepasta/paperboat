@@ -167,6 +167,31 @@ optional TLS. It has no HTTP path and does not use Paperboat's private-access he
 A `tcp_private` route has no public listener or HTTP hostname/path matcher and never
 enters the public route table.
 
+## Apps and proxies behind a tunnel
+
+Paperboat serves the public name over HTTPS and tells the origin so. Every
+request carries headers the edge sets itself (anything the visitor sent under
+these names is dropped first): `X-Forwarded-Proto: https`, `X-Forwarded-Host`
+(the public name), `X-Forwarded-Port: 443`, `X-Forwarded-For` and `X-Real-IP`
+(the visitor's address, one value), and `Forwarded`. The request arrives from
+loopback, which most frameworks already trust, so redirects, absolute URLs,
+`Secure` cookies and CSRF origin checks work without changes.
+
+When a reverse proxy sits in front of your app, it decides what the app sees:
+
+| Proxy | Settings |
+|---|---|
+| nginx | `proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;` (not `$scheme`, which says `http`); `set_real_ip_from 127.0.0.1; real_ip_header X-Forwarded-For;` for the visitor's address; `proxy_buffering off;` so streamed responses (SSE, AI tokens) are not held back; `client_max_body_size` at least your upload size (nginx refuses bodies over 1 MiB by default) |
+| Caddy | `trusted_proxies static 127.0.0.1/32 ::1/128` in the global `servers` block; serve the site as `http://name` or use `auto_https disable_redirects` on the port the tunnel uses |
+| Traefik | `entryPoints.<name>.forwardedHeaders.trustedIPs=127.0.0.1/32,::1/128` (add the Docker bridge if Traefik runs in a container); put the HTTP-to-HTTPS redirect only on entrypoints the tunnel does not use |
+| Apache | `RemoteIPHeader X-Forwarded-For` with `RemoteIPInternalProxy 127.0.0.1`; `SetEnvIf X-Forwarded-Proto https HTTPS=on` and guard `RewriteCond %{HTTPS} off` redirects with it |
+
+Without the trusted-proxy line the proxy replaces the visitor's address with
+its own, so the app sees every visitor as one address; scheme and host still
+arrive. If the proxy's own port 80 redirects to HTTPS, point the route at the
+proxy's HTTPS port instead (`--to https://localhost:443`). Your origin does not
+need a public certificate: Paperboat holds the certificate for the public name.
+
 ## Custom domains, DNS, and TLS
 
 Add a domain you control to the workspace once, add the DNS records it prints,

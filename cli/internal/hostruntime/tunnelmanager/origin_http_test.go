@@ -284,8 +284,13 @@ func TestOriginHTTPHeaderSanitizationPreservesApplicationCredentials(t *testing.
 	request := http.Header{
 		"Authorization":       {"Bearer application"},
 		"Proxy-Authorization": {"Bearer proxy"},
-		"Forwarded":           {"for=attacker"},
-		"X-Forwarded-For":     {"attacker"},
+		"Forwarded":           {"for=198.51.100.7;proto=https;host=app.example.test"},
+		"X-Forwarded-For":     {"198.51.100.7"},
+		"X-Forwarded-Host":    {"app.example.test"},
+		"X-Forwarded-Proto":   {"https"},
+		"X-Forwarded-Port":    {"443"},
+		"X-Real-Ip":           {"198.51.100.7"},
+		"X-Forwarded-Server":  {"attacker"},
 		"X-Paperboat-Grant":   {"secret"},
 		"Paperboat-Grant":     {"secret"},
 		"Cookie":              {"session=application; Paperboat-access=secret; __Host-Paperboat_csrf=secret; theme=dark"},
@@ -294,7 +299,12 @@ func TestOriginHTTPHeaderSanitizationPreservesApplicationCredentials(t *testing.
 	if request.Get("Authorization") != "Bearer application" || request.Get("Cookie") != "session=application; theme=dark" {
 		t.Fatalf("application credentials changed: auth=%q cookie=%q", request.Get("Authorization"), request.Get("Cookie"))
 	}
-	for _, name := range []string{"Proxy-Authorization", "Forwarded", "X-Forwarded-For", "X-Paperboat-Grant", "Paperboat-Grant"} {
+	for name, want := range map[string]string{"Forwarded": "for=198.51.100.7;proto=https;host=app.example.test", "X-Forwarded-For": "198.51.100.7", "X-Forwarded-Host": "app.example.test", "X-Forwarded-Proto": "https", "X-Forwarded-Port": "443", "X-Real-IP": "198.51.100.7"} {
+		if request.Get(name) != want {
+			t.Fatalf("edge fact %s = %q, want %q", name, request.Get(name), want)
+		}
+	}
+	for _, name := range []string{"Proxy-Authorization", "X-Forwarded-Server", "X-Paperboat-Grant", "Paperboat-Grant"} {
 		if request.Get(name) != "" {
 			t.Fatalf("reserved request header %s survived", name)
 		}

@@ -157,12 +157,9 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 	var canonical http.Handler
 	if canonicalTransport != nil {
 		proxy := &httputil.ReverseProxy{
-			Transport:     canonicalTransport,
-			FlushInterval: -1,
-			Rewrite: func(request *httputil.ProxyRequest) {
-				request.Out.URL.Scheme = "http"
-				request.Out.URL.Host = request.In.Host
-			},
+			Transport:      canonicalTransport,
+			FlushInterval:  -1,
+			Rewrite:        rewriteToCarrier,
 			ModifyResponse: legacy.ModifyResponse,
 		}
 		configureProxyDiagnostics(proxy, config.OnFailure)
@@ -176,10 +173,7 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 	if previewTransport != nil || canonicalTransport != nil || config.RuntimeCarrierTransport != nil {
 		var runtimeHandler http.Handler
 		if config.RuntimeCarrierTransport != nil {
-			proxy := &httputil.ReverseProxy{Transport: config.RuntimeCarrierTransport, FlushInterval: -1, Rewrite: func(request *httputil.ProxyRequest) {
-				request.Out.URL.Scheme = "http"
-				request.Out.URL.Host = request.In.Host
-			}, ModifyResponse: func(response *http.Response) error {
+			proxy := &httputil.ReverseProxy{Transport: config.RuntimeCarrierTransport, FlushInterval: -1, Rewrite: rewriteToCarrier, ModifyResponse: func(response *http.Response) error {
 				if response.Request != nil && response.Request.URL.Path == "/v1/browser-terminal" {
 					edgetelemetry.Log(response.Request.Context(), edgetelemetry.SeverityInfo, "browser_terminal_host_response", edgetelemetry.OutcomeSuccess, "status", response.StatusCode)
 				}
@@ -191,12 +185,9 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 		var preview http.Handler
 		if previewTransport != nil {
 			proxy := &httputil.ReverseProxy{
-				Transport:     retryPreviewTransport{next: previewTransport},
-				FlushInterval: -1,
-				Rewrite: func(request *httputil.ProxyRequest) {
-					request.Out.URL.Scheme = "http"
-					request.Out.URL.Host = request.In.Host
-				},
+				Transport:      retryPreviewTransport{next: previewTransport},
+				FlushInterval:  -1,
+				Rewrite:        rewriteToCarrier,
 				ModifyResponse: legacy.ModifyResponse,
 			}
 			configureProxyDiagnostics(proxy, config.OnFailure)
@@ -234,6 +225,21 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 		})
 	}
 	return New(config, next)
+}
+
+// rewriteToCarrier hands the origin what the edge knows and the origin cannot: the visitor used
+// https on this public host, from this client address. ReverseProxy drops Forwarded and
+// X-Forwarded-For/-Host/-Proto from the outgoing request before Rewrite runs, so they are copied
+// back from the inbound request, where Policy already replaced the visitor's copies with its own.
+// Set, never append: a second X-Forwarded-Host breaks Next.js and a leftmost X-Forwarded-For is forgeable.
+func rewriteToCarrier(request *httputil.ProxyRequest) {
+	request.Out.URL.Scheme = "http"
+	request.Out.URL.Host = request.In.Host
+	for _, name := range []string{"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Forwarded-Port", "X-Real-IP"} {
+		if value := request.In.Header.Get(name); value != "" {
+			request.Out.Header.Set(name, value)
+		}
+	}
 }
 
 var errProxyHTTPDiagnostic = errors.New("edge proxy HTTP diagnostic")
@@ -533,6 +539,8 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Header.Set("X-Forwarded-For", clientIP)
 	r.Header.Set("X-Forwarded-Host", host)
 	r.Header.Set("X-Forwarded-Proto", "https")
+	r.Header.Set("X-Forwarded-Port", "443")
+	r.Header.Set("X-Real-IP", clientIP)
 	info, _ := RequestTelemetryInfo(r.Context())
 	requestID, requestIDErr := info.IDs.RequestID, error(nil)
 	if !validRequestID(requestID) {
@@ -929,7 +937,7 @@ func stripHopByHop(headers http.Header) {
 			headers.Del(strings.TrimSpace(name))
 		}
 	}
-	for _, name := range []string{"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade", "Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Real-IP", "X-Request-ID"} {
+	for _, name := range []string{"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade", "Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Forwarded-Port", "X-Real-IP", "X-Request-ID"} {
 		headers.Del(name)
 	}
 }
