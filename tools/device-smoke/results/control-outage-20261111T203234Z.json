@@ -1,0 +1,180 @@
+{
+ "outage_seconds": 600,
+ "checks": [
+  {
+   "check": "baseline exec a->b",
+   "status": "PASS",
+   "detail": "baseline-ab"
+  },
+  {
+   "check": "baseline exec b->a",
+   "status": "PASS",
+   "detail": "baseline-ba"
+  },
+  {
+   "check": "baseline exec r->b before sign-out",
+   "status": "PASS",
+   "detail": "baseline-rb"
+  },
+  {
+   "check": "machine r revoked by its owner (pb machine revoke, exact enrollment)",
+   "status": "PASS",
+   "detail": ":\"rel-sco-r-2\",\"id\":\"machine_ee5e0d71-3967-48f4-955b-98c4630638db\",\"state\":\"disconnected\"},\"outcome\":\"confirmed\",\"retry\":\"not_required\",\"version\":\"1\"}"
+  },
+  {
+   "check": "revoked machine r is refused (control plane up)",
+   "status": "PASS",
+   "detail": "`pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_be7877c3-e578-41ec-9c43-a11a74b1e8e0."
+  },
+  {
+   "check": "control plane unreachable",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "outage 30 s: new exec a->b",
+   "status": "PASS",
+   "detail": "outage-30s-ab Paperboat ENV not applied: delivery to this machine is pending. The command ran without your managed values; run `pb env vault unlock` on any of your devices."
+  },
+  {
+   "check": "outage 30 s: new exec b->a",
+   "status": "PASS",
+   "detail": "outage-30s-ba Paperboat ENV not applied: delivery to this machine is pending. The command ran without your managed values; run `pb env vault unlock` on any of your devices."
+  },
+  {
+   "check": "outage 30 s: new pb ssh a->b",
+   "status": "PASS",
+   "detail": "outage-ssh"
+  },
+  {
+   "check": "outage 30 s: revoked r still refused",
+   "status": "PASS",
+   "detail": "e command. Check the current state before retrying; run `pb doctor` if this continues. Support reference: support_d25aafe4-149a-4ba5-b168-978eb11f1c17. Run `pb bugreport --upload` to send the details."
+  },
+  {
+   "check": "outage 30 s: long-ab still running",
+   "status": "PASS",
+   "detail": "running"
+  },
+  {
+   "check": "outage 30 s: long-ba still running",
+   "status": "PASS",
+   "detail": "running"
+  },
+  {
+   "check": "outage 30 s: pb status shows the control plane as unreachable",
+   "status": "PASS",
+   "detail": "Daemon: degraded  Generation: 15  Observed: 2026-11-11T20:21:09Z Health: error: Control plane is unavailable  Recovery: Check network access and Paperboat authentication Health: warning: No relay is usable: no relay is authorized for both machines  Recovery: Direct connections keep working. Paperboa"
+  },
+  {
+   "check": "outage 5 min: new exec a->b",
+   "status": "PASS",
+   "detail": "outage-5min-ab Paperboat ENV not applied: delivery to this machine is pending. The command ran without your managed values; run `pb env vault unlock` on any of your devices."
+  },
+  {
+   "check": "outage 5 min: new exec b->a",
+   "status": "PASS",
+   "detail": "outage-5min-ba Paperboat ENV not applied: delivery to this machine is pending. The command ran without your managed values; run `pb env vault unlock` on any of your devices."
+  },
+  {
+   "check": "outage 5 min: new pb ssh a->b",
+   "status": "PASS",
+   "detail": "outage-ssh"
+  },
+  {
+   "check": "outage 5 min: revoked r still refused",
+   "status": "PASS",
+   "detail": "e command. Check the current state before retrying; run `pb doctor` if this continues. Support reference: support_9dea4b64-ae2c-461a-a634-3178478bb287. Run `pb bugreport --upload` to send the details."
+  },
+  {
+   "check": "outage 5 min: long-ab still running",
+   "status": "PASS",
+   "detail": "running"
+  },
+  {
+   "check": "outage 5 min: long-ba still running",
+   "status": "PASS",
+   "detail": "running"
+  },
+  {
+   "check": "outage 5 min: pb status shows the control plane as unreachable",
+   "status": "PASS",
+   "detail": "Daemon: degraded  Generation: 15  Observed: 2026-11-11T20:21:09Z Health: error: Control plane is unavailable  Recovery: Check network access and Paperboat authentication Health: warning: No relay is usable: no relay is authorized for both machines  Recovery: Direct connections keep working. Paperboa"
+  },
+  {
+   "check": "outage end: new exec a->b",
+   "status": "PASS",
+   "detail": "outage-end-ab Paperboat ENV not applied: delivery to this machine is pending. The command ran without your managed values; run `pb env vault unlock` on any of your devices."
+  },
+  {
+   "check": "outage end: new exec b->a",
+   "status": "PASS",
+   "detail": "outage-end-ba Paperboat ENV not applied: delivery to this machine is pending. The command ran without your managed values; run `pb env vault unlock` on any of your devices."
+  },
+  {
+   "check": "outage end: new pb ssh a->b",
+   "status": "PASS",
+   "detail": "outage-ssh"
+  },
+  {
+   "check": "outage end: revoked r still refused",
+   "status": "PASS",
+   "detail": "e command. Check the current state before retrying; run `pb doctor` if this continues. Support reference: support_b0698c0e-0aaa-4472-9b9f-cbabae6eddd3. Run `pb bugreport --upload` to send the details."
+  },
+  {
+   "check": "outage end: long-ab still running",
+   "status": "PASS",
+   "detail": "running"
+  },
+  {
+   "check": "outage end: long-ba still running",
+   "status": "PASS",
+   "detail": "running"
+  },
+  {
+   "check": "outage end: pb status shows the control plane as unreachable",
+   "status": "PASS",
+   "detail": "Daemon: degraded  Generation: 15  Observed: 2026-11-11T20:21:09Z Health: error: Control plane is unavailable  Recovery: Check network access and Paperboat authentication Health: warning: No relay is usable: no relay is authorized for both machines  Recovery: Direct connections keep working. Paperboa"
+  },
+  {
+   "check": "outage: pb doctor runs and names the control plane",
+   "status": "PASS",
+   "detail": "Paperboat doctor: unhealthy Correlation: support_c2bf2efa-f19f-4d11-a946-3fcaddac499a authentication: fail: The Paperboat server did not accept the authenticated health check.   Recovery: Check networ"
+  },
+  {
+   "check": "control plane reachable again",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "recovery: pb status healthy again",
+   "status": "PASS",
+   "detail": "15 s after the start; Daemon: ready  Generation: 16  Observed: 2026-11-11T20:30:57Z Health: warning: No relay is usable: no relay is authorized for both machines  Recovery: Direct connections keep working. Paperboat retries the relays automatically; check that UDP and HTTPS to the relays are allowed"
+  },
+  {
+   "check": "recovery: new exec a->b",
+   "status": "PASS",
+   "detail": "recovered-ab"
+  },
+  {
+   "check": "recovery: new exec b->a",
+   "status": "PASS",
+   "detail": "recovered-ba"
+  },
+  {
+   "check": "recovery: revoked r still refused",
+   "status": "PASS",
+   "detail": "`pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_c89f1148-0c6c-4b0d-baee-fb5393baf730."
+  },
+  {
+   "check": "recovery: long-ab finished rc 0 with its output",
+   "status": "PASS",
+   "detail": "long-ab-done"
+  },
+  {
+   "check": "recovery: long-ba finished rc 0 with its output",
+   "status": "PASS",
+   "detail": "long-ba-done"
+  }
+ ]
+}
