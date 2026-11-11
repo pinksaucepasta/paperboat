@@ -30,6 +30,8 @@ func supervisorDirectoryIsSecure(path string, info os.FileInfo) bool {
 	return err == nil && windowssecurity.ProtectedDACLMatches(path, want.String())
 }
 
+// No-op by design (audit C #40): Windows access is decided by the exact protected DACL that supervisorDirectoryIsSecure
+// asserts before this runs (ensureDirectory), never by a uid or gid.
 func setSupervisorDirectoryOwner(_ string, _, _ int) error { return nil }
 
 func prepareSupervisorArtifact(path string, _ *os.File, _, _ int) error {
