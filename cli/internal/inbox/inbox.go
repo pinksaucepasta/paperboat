@@ -20,6 +20,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/filelock"
 	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
 	"github.com/pinksaucepasta/paperboat/shared/backoff"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
@@ -27,6 +28,7 @@ import (
 
 const (
 	journalName       = ".paperboat-receipts.json"
+	journalLockName   = ".paperboat-receipts.lock"
 	maxJournalEntries = 1024
 )
 
@@ -351,6 +353,16 @@ func (i *Inbox) Deliver(ctx context.Context, manifest filetransfer.Manifest) (pa
 	if err := os.Chmod(root, 0o700); err != nil {
 		return "", storageError(err)
 	}
+	// Two daemon generations overlap during an update; the journal read-modify-write is one critical section.
+	unlock, err := filelock.Lock(ctx, filepath.Join(root, journalLockName))
+	if err != nil {
+		return "", storageError(err)
+	}
+	defer func() {
+		if unlockErr := unlock(); unlockErr != nil {
+			resultErr = errors.Join(resultErr, storageError(unlockErr))
+		}
+	}()
 	receipts, err := loadJournal(root)
 	if err != nil {
 		return "", storageError(err)
