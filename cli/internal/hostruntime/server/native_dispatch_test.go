@@ -399,3 +399,66 @@ func TestNativeDispatchReplayOutlivesItsTicketDeadline(t *testing.T) {
 	case <-time.After(time.Second):
 	}
 }
+
+// F21-11: a carrier that admitted an offline terminal or exec session from its signed scopes forwards the admitted
+// peer, and the worker serves the stream as that peer's OfflinePeerConn (the terminal and exec servers authorize the
+// one session from it). The peer and the offline header come together or not at all, only for terminal and exec.
+func TestNativeDispatchCarriesAnOfflineSessionsPeerToTheWorker(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	served := make(chan OfflinePeerConn, 1)
+	handler, err := NewNativeDispatchHandler(NativeDispatchConfig{Token: strings.Repeat("a", 43), MaximumConcurrent: 4, HandshakeTimeout: time.Second,
+		Fence: func(context.Context) (func(), <-chan struct{}, error) { return func() {}, make(chan struct{}), nil },
+		Authorize: func(context.Context, streamauth.Header) (string, error) {
+			return "", errors.New("an offline session must not reach the credential check")
+		},
+		AuthorizeOffline: func(_ context.Context, h streamauth.Header) (string, error) { return h.OperationID, nil },
+		ServeStream: func(_ context.Context, _ streamauth.Header, conn net.Conn) error {
+			offline, ok := conn.(OfflinePeerConn)
+			if !ok {
+				return errors.New("worker stream is not an OfflinePeerConn")
+			}
+			served <- offline
+			_, err := io.Copy(io.Discard, conn)
+			return err
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer handler.Close(ctx)
+	worker := httptest.NewServer(handler)
+	defer worker.Close()
+	client, err := NewNativeDispatchClient(NativeDispatchClientConfig{Address: strings.TrimPrefix(worker.URL, "http://"), Token: strings.Repeat("a", 43), DialTimeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	header, err := streamauth.NewOffline("operation-offline", "exec", "stream", time.Now().Add(2*time.Second), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Open(ctx, header); !errors.Is(err, ErrStreamAuthorization) {
+		t.Fatalf("an offline session without the carrier's peer was admitted: %v", err)
+	}
+	connection, err := client.OpenOffline(ctx, header, NativeDispatchOfflinePeer{AccountID: "account", EndpointID: "endpoint"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	select {
+	case offline := <-served:
+		account, endpoint, consumer, operation, deadline := offline.OfflinePeer()
+		if account != "account" || endpoint != "endpoint" || consumer != "exec" || operation != "operation-offline" || !deadline.After(time.Now()) {
+			t.Fatalf("peer=%q/%q consumer=%q operation=%q deadline=%v", account, endpoint, consumer, operation, deadline)
+		}
+	case <-ctx.Done():
+		t.Fatal("offline stream never reached the worker's exec server")
+	}
+	credentialed, _ := streamauth.New("operation", "exec", "stream", "allowed", time.Now().Add(2*time.Second), 1<<20)
+	if _, err := client.OpenOffline(ctx, credentialed, NativeDispatchOfflinePeer{AccountID: "account", EndpointID: "endpoint"}); !errors.Is(err, ErrStreamAuthorization) {
+		t.Fatalf("a credentialed stream carried an offline peer: %v", err)
+	}
+	if _, err := client.OpenOffline(ctx, header, NativeDispatchOfflinePeer{AccountID: "account"}); !errors.Is(err, ErrStreamAuthorization) {
+		t.Fatalf("an offline peer without an endpoint was admitted: %v", err)
+	}
+}

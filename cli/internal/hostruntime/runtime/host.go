@@ -464,6 +464,16 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 			}
 			return header.Resume, nil
 		}
+		// An offline terminal or exec session was admitted by the carrier from its signed scopes (F21-11); the worker
+		// only checks that the capability is enabled here, and the native manager then authorizes the one session from
+		// the admitted peer (server.offlineAuthorizer).
+		dispatchConfig.AuthorizeOffline = func(_ context.Context, header streamauth.Header) (string, error) {
+			capability := map[string]string{"terminal": "terminal.v1", "exec": "exec.v1"}[header.Consumer]
+			if capability == "" || dependencies.Capabilities != nil && !dependencies.Capabilities.Enabled(capability) {
+				return "", server.ErrStreamAuthorization
+			}
+			return header.OperationID, nil
+		}
 		if dispatchConfig.SSHTarget == nil && dependencies.ManagedSSH != nil {
 			dispatchConfig.SSHTarget = func(context.Context) (managedssh.HostTarget, error) {
 				target, ok := dependencies.ManagedSSH.Target()
