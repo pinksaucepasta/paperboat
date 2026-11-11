@@ -1,0 +1,10 @@
+{"check": "update-survival", "target": "w16-winpool12-2307", "peer": "w7-f19-dut-20261110t121807z", "update_started": true, "same_shell_after_update": true, "preview_same_url": true, "tunnel_same_url": true, "transfer_byte_identical": true, "status": "PASS"}
+# F14-02 Windows, update_survival.py --mib 600 --terminal (harness at e846e8117, unchanged at 0b45d16d9), run once, first pass on this build.
+# Runner: winpool-12 (hosted Windows Server runner), machine w16-winpool12-2307; peer: Linux container w7-f19-dut-20261110t121807z.
+# BASE dev-0b45d16d9 -> CAND dev-0b45d16d9c (clean builds of main 0b45d16d9, both contain 1f6c7685f, 276007fb2, 0b45d16d9),
+# sha256 base e19fe77753372a8778cf9097efe703bcd78124e447eb39ea8e8bc59bbdc513d2, cand 9e70cfab3d0886e6720cb0a3264aad370b0f86d7d9d4b96738cc29497be801c6.
+# Harness 01:04:49Z-01:27Z UTC. Receiver committed bytes (pb send list --on PEER), per file of 629145600:
+# 01:10:59Z ver=dev-0b45d16d9c 118489088 / 119537664 uploading
+# 01:16:07Z 272629760 / 273678336 uploading
+# 01:21:15Z 441450496 / 441450496 uploading
+# 01:26:23Z 629145600 / 629145600 published
