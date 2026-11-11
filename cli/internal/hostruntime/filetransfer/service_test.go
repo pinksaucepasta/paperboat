@@ -1178,3 +1178,19 @@ func TestCompleteRefusesAHardLinkedSpoolFile(t *testing.T) {
 		t.Fatalf("a hard-linked spool file was published: %#v", completed)
 	}
 }
+
+// With every slot busy and a context that never ends, a write fails with ResourceLimit after slotWait.
+func TestAcquireIsBoundedWithoutACallerDeadline(t *testing.T) {
+	service, _, _ := newService(t)
+	original := slotWait
+	slotWait = 50 * time.Millisecond
+	t.Cleanup(func() { slotWait = original })
+	service.slotMu.Lock()
+	service.active = service.config.Policy.Current().MaxConcurrentTransfers
+	service.slotMu.Unlock()
+	err := service.acquire(context.Background())
+	var transferErr *Error
+	if !errors.As(err, &transferErr) || transferErr.Code != ResourceLimit {
+		t.Fatalf("acquire with no free slot = %v, want ResourceLimit", err)
+	}
+}

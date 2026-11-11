@@ -329,7 +329,12 @@ func (s *Service) append(ctx context.Context, id string, offset int64, body io.R
 	return transfer, nil
 }
 
+// slotWait bounds how long a write waits for a free transfer slot; a caller whose context never ends (a stalled
+// HTTP client) gets ResourceLimit instead of waiting forever.
+var slotWait = 30 * time.Second
+
 func (s *Service) acquire(ctx context.Context) error {
+	deadline := time.Now().Add(slotWait)
 	for {
 		s.slotMu.Lock()
 		limit := s.config.Policy.Current().MaxConcurrentTransfers
@@ -339,6 +344,9 @@ func (s *Service) acquire(ctx context.Context) error {
 			return nil
 		}
 		s.slotMu.Unlock()
+		if !time.Now().Before(deadline) {
+			return &Error{Code: ResourceLimit, Cause: errors.New("no file transfer slot became free")}
+		}
 		timer := time.NewTimer(10 * time.Millisecond)
 		select {
 		case <-ctx.Done():

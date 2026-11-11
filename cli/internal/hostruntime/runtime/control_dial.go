@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 )
 
 // controlDialer resolves the control host with a bounded retry and remembers
@@ -101,14 +103,17 @@ func (c *controlDialer) remember(host string, addrs []string) {
 	if err != nil {
 		return
 	}
-	tmp := c.cache + ".tmp"
-	if os.WriteFile(tmp, body, 0o600) == nil {
-		_ = os.Rename(tmp, c.cache)
-	}
+	// Atomic and owner-only; a link planted at the path is refused, never written through.
+	_ = atomicfile.Write(c.cache, body, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1})
 }
 
 func (c *controlDialer) remembered(host string) []string {
 	if c.cache == "" {
+		return nil
+	}
+	// Only a regular file is read: a link could point the control host at addresses nobody here wrote. TLS still
+	// verifies the hostname, so a stale entry can only fail to connect.
+	if info, err := os.Lstat(c.cache); err != nil || !info.Mode().IsRegular() {
 		return nil
 	}
 	body, err := os.ReadFile(c.cache)
