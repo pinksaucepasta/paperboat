@@ -495,3 +495,43 @@ func TestWindowsNativeSignedRollbackRecovery(t *testing.T) {
 		})
 	}
 }
+
+// hop-910 (winpool-6, 2026-11-11): a scheduled update left the host unavailable for 41 s. Maintenance and the update
+// gates were taken before the candidate's session owner and OpenSSH generation started (~19 s of refused work while
+// hostd still ran), and the same generation was prepared twice more after hostd stopped. The cutover now runs after
+// both preparations, and their one OpenSSH preparation is reported so the activation does not repeat it.
+func TestWindowsActivationPreparesCandidateBeforeCutover(t *testing.T) {
+	restoreOwner, restoreSSH, restoreCarrier := prepareCandidateSessionOwner, prepareCandidateSSHGeneration, activationCarrierPresent
+	t.Cleanup(func() {
+		prepareCandidateSessionOwner, prepareCandidateSSHGeneration, activationCarrierPresent = restoreOwner, restoreSSH, restoreCarrier
+	})
+	var order []string
+	prepareCandidateSessionOwner = func(context.Context, Request, service.Layout) error {
+		order = append(order, "owner")
+		return nil
+	}
+	prepareCandidateSSHGeneration = func(context.Context, Request) error {
+		order = append(order, "ssh")
+		return nil
+	}
+	cutover := func(context.Context) error {
+		order = append(order, "cutover")
+		return nil
+	}
+	for _, carrier := range []bool{true, false} {
+		order = nil
+		activationCarrierPresent = func(context.Context, string) (bool, error) { return carrier, nil }
+		prepared, err := prepareWindowsActivation(context.Background(), Request{}, service.Layout{}, cutover)
+		want := "owner,cutover"
+		if carrier {
+			want = "owner,ssh,cutover"
+		}
+		if err != nil || prepared != carrier || strings.Join(order, ",") != want {
+			t.Fatalf("carrier=%v: order %v prepared %v err %v, want %s prepared %v", carrier, order, prepared, err, want, carrier)
+		}
+	}
+	busy := errors.New("protected work")
+	if _, err := prepareWindowsActivation(context.Background(), Request{}, service.Layout{}, func(context.Context) error { return busy }); !errors.Is(err, busy) {
+		t.Fatalf("refused cutover error = %v", err)
+	}
+}

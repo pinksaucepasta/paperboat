@@ -78,8 +78,8 @@ func ActivatePreparedWindowsUpdate(ctx context.Context, ownerSID, executable str
 	if err := Validate(request, 0); err != nil {
 		return err
 	}
-	return replaceWindowsInstallationLocked(ctx, request, state, func(ctx context.Context) error {
-		if err := InstallWindowsReplacement(ctx, request); err != nil {
+	return replaceWindowsInstallationLocked(ctx, request, state, func(ctx context.Context, cutover func(context.Context) error) error {
+		if err := InstallWindowsReplacement(ctx, request, cutover); err != nil {
 			return err
 		}
 		// Native role startup needs its candidate configuration. Committed remains

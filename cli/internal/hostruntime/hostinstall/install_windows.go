@@ -62,6 +62,9 @@ var (
 	setupPaperboatSSH                   = windowsopenssh.Setup
 	isAdministratorForStandaloneInstall = isAdministrator
 	verifyStandaloneReleaseForInstall   = verifyStandaloneRelease
+	prepareCandidateSessionOwner        = prepareSessionOwner
+	prepareCandidateSSHGeneration       = prepareWindowsSSHGenerationIfObtainable
+	activationCarrierPresent            = windowsCarrierPresentForSSH
 	purgeStandaloneInstall              = func(context.Context) error { return nil }
 )
 
@@ -573,7 +576,7 @@ func migrateLegacyWindowsRuntimeSecurity() (returnedConfig WindowsRuntimeConfig,
 
 func Install(ctx context.Context, request Request) (resultErr error) {
 	if request.EnrollmentPending {
-		return installWindows(ctx, request, false)
+		return installWindows(ctx, request, false, nil)
 	}
 	if err := Validate(request, 0); err != nil {
 		return err
@@ -616,10 +619,14 @@ func Install(ctx context.Context, request Request) (resultErr error) {
 	if err := manager.Recover(ctx); err != nil {
 		return err
 	}
-	return replaceWindowsCandidate(ctx, manager, request, func(ctx context.Context) error { return installWindows(ctx, request, true) })
+	return replaceWindowsCandidate(ctx, manager, request, func(ctx context.Context) error { return installWindows(ctx, request, true, nil) })
 }
 
-func installWindows(ctx context.Context, request Request, lifecycleOwned bool) (resultErr error) {
+// installWindows replaces the runtime. cutover, when set, runs once everything that leaves the serving runtime
+// untouched is ready, immediately before the first service stops: the replacement takes maintenance and its update
+// gates there, so hostd keeps answering while the candidate's session owner and OpenSSH generation start. Linux does
+// the same (install_unix.go prepareCutover).
+func installWindows(ctx context.Context, request Request, lifecycleOwned bool, cutover func(context.Context) error) (resultErr error) {
 	if allowed, err := checkAdministrator(); err != nil {
 		return err
 	} else if !allowed {
@@ -705,10 +712,8 @@ func installWindows(ctx context.Context, request Request, lifecycleOwned bool) (
 	if _, err := ensureWindowsPinnedRuntimeFrom(ctx, layout, request.Source, request.OwnerSID, request.Executable); err != nil {
 		return err
 	}
-	if err := prepareSessionOwner(ctx, request, layout); err != nil {
-		return err
-	}
-	if err := prepareWindowsSSHGenerationWhenCarrierPresent(ctx, request, layout); err != nil {
+	sshPrepared, err := prepareWindowsActivation(ctx, request, layout, cutover)
+	if err != nil {
 		return err
 	}
 	// The optional config worker uses the same executable slots. Preserve its
@@ -794,8 +799,12 @@ func installWindows(ctx context.Context, request Request, lifecycleOwned bool) (
 	} else if err := EnsureExistingCarrier(ctx, carrier); err != nil {
 		return err
 	}
-	if err := prepareWindowsSSHGenerationIfObtainable(ctx, request); err != nil {
-		return err
+	// One OpenSSH preparation per activation: the generation runs from its own pin, so the stop, the stale-process
+	// sweep and the slot rotation above leave one prepared before the stop serving.
+	if !sshPrepared {
+		if err := prepareWindowsSSHGenerationIfObtainable(ctx, request); err != nil {
+			return err
+		}
 	}
 	request.Artifact.Version = request.Source.Version
 	generation, err := sourceGeneration(request.Source)
@@ -1402,12 +1411,28 @@ func PrepareWindowsSSHGeneration(ctx context.Context, request Request) (windowso
 	return windowsopenssh.PrepareGeneration(ctx, windowsopenssh.GenerationRequest{OwnerSID: request.OwnerSID, Source: request.Source, Executable: pinned})
 }
 
-func prepareWindowsSSHGenerationWhenCarrierPresent(ctx context.Context, request Request, layout service.Layout) error {
-	present, err := windowsCarrierPresentForSSH(ctx, layout.Instance)
-	if err != nil || !present {
-		return err
+// prepareWindowsActivation runs what an activation needs before it stops anything, then cutover. It reports
+// whether it prepared (or skipped as unobtainable) the candidate's OpenSSH generation, which needs the carrier,
+// so the activation does not prepare it again.
+func prepareWindowsActivation(ctx context.Context, request Request, layout service.Layout, cutover func(context.Context) error) (bool, error) {
+	if err := prepareCandidateSessionOwner(ctx, request, layout); err != nil {
+		return false, err
 	}
-	return prepareWindowsSSHGenerationIfObtainable(ctx, request)
+	present, err := activationCarrierPresent(ctx, layout.Instance)
+	if err != nil {
+		return false, err
+	}
+	if present {
+		if err := prepareCandidateSSHGeneration(ctx, request); err != nil {
+			return false, err
+		}
+	}
+	if cutover != nil {
+		if err := cutover(ctx); err != nil {
+			return false, err
+		}
+	}
+	return present, nil
 }
 
 func windowsCarrierPresentForSSH(ctx context.Context, instance string) (bool, error) {
@@ -1627,7 +1652,11 @@ func windowsRuntimeServiceExists(instance string) (exists bool, resultErr error)
 	return false, nil
 }
 
-func stopWindowsRuntimeServices(ctx context.Context, instance string) (resultErr error) {
+func stopWindowsRuntimeServices(ctx context.Context, instance string) error {
+	return stopWindowsServices(ctx, instance, "PaperboatHostd", "PaperboatUpdated", "PaperboatLocalDaemon")
+}
+
+func stopWindowsServices(ctx context.Context, instance string, bases ...string) (resultErr error) {
 	if !validWindowsInstance(instance) {
 		return ErrInvalidRequest
 	}
@@ -1638,7 +1667,7 @@ func stopWindowsRuntimeServices(ctx context.Context, instance string) (resultErr
 	defer func() {
 		resultErr = withCleanup("Windows installation cleanup failed", resultErr, manager.Disconnect())
 	}()
-	for _, base := range []string{"PaperboatHostd", "PaperboatUpdated", "PaperboatLocalDaemon"} {
+	for _, base := range bases {
 		name := base + "-" + instance
 		current, openErr := manager.OpenService(name)
 		if errors.Is(openErr, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
@@ -2436,9 +2465,11 @@ func removeWindowsActivatorService(ctx context.Context, layout service.Layout) e
 	return removeOrphanWindowsService(ctx, name, filepath.Clean(arguments[0]), []string{"daemon", "__runtime-activate", "--instance", layout.Instance})
 }
 
+// installWindowsRoleServices starts the runtime roles of an activation whose carrier is present and whose OpenSSH
+// generation installWindows has already prepared.
 func installWindowsRoleServices(ctx context.Context, request Request, layout service.Layout, upgradeMode string) error {
 	return executeWindowsServiceInstallPlan(
-		func() error { return installWindowsSSHAfterActivation(ctx, request, layout) },
+		func() error { return nil },
 		func() error {
 			if err := prepareWindowsLocalDaemonMigrationAndState(ctx, request.OwnerSID, request.StateRoot); err != nil {
 				return hostInstallFailure("migrate Paperboat local daemon task", err)
@@ -2446,12 +2477,10 @@ func installWindowsRoleServices(ctx context.Context, request Request, layout ser
 			return nil
 		},
 		func() error {
+			// The daemon's readiness is proved by the plan's afterStart hook.
 			cleanupServices, err := installWindowsServicesWithRollback(ctx, request, layout, upgradeMode)
 			if err != nil {
 				return err
-			}
-			if err := waitWindowsLocalDaemonReady(ctx, request.OwnerSID, request.StateRoot); err != nil {
-				return errors.Join(err, rollbackWindowsServicePlan(cleanupServices))
 			}
 			if err := localdaemon.RemoveWindowsLegacyTask(ctx, request.OwnerSID); err != nil {
 				return errors.Join(err, rollbackWindowsServicePlan(cleanupServices))

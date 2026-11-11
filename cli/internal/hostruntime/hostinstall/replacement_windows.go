@@ -719,12 +719,14 @@ func PrepareWindowsReplacement(ctx context.Context, request Request) (func(), er
 }
 
 // ReplaceWindowsInstallation uses the existing native lifecycle journal for
-// supplied replacement bytes/config and the exact prior SCM definitions.
-func ReplaceWindowsInstallation(ctx context.Context, request Request, state service.NativeInstallationState, replace func(context.Context) error) error {
+// supplied replacement bytes/config and the exact prior SCM definitions. replace
+// passes cutover to InstallWindowsReplacement, which runs it right before it stops
+// the serving runtime.
+func ReplaceWindowsInstallation(ctx context.Context, request Request, state service.NativeInstallationState, replace func(ctx context.Context, cutover func(context.Context) error) error) error {
 	return replaceWindowsInstallation(ctx, request, state, replace, PreparedUpdateHooks{})
 }
 
-func replaceWindowsInstallation(ctx context.Context, request Request, state service.NativeInstallationState, replace func(context.Context) error, hooks PreparedUpdateHooks) (resultErr error) {
+func replaceWindowsInstallation(ctx context.Context, request Request, state service.NativeInstallationState, replace func(context.Context, func(context.Context) error) error, hooks PreparedUpdateHooks) (resultErr error) {
 	if err := Validate(request, 0); err != nil {
 		return err
 	}
@@ -742,7 +744,7 @@ func replaceWindowsInstallation(ctx context.Context, request Request, state serv
 	return replaceWindowsInstallationLocked(ctx, request, state, replace, hooks)
 }
 
-func replaceWindowsInstallationLocked(ctx context.Context, request Request, state service.NativeInstallationState, replace func(context.Context) error, hooks PreparedUpdateHooks) error {
+func replaceWindowsInstallationLocked(ctx context.Context, request Request, state service.NativeInstallationState, replace func(context.Context, func(context.Context) error) error, hooks PreparedUpdateHooks) error {
 	layout, err := service.WindowsUserLayout(request.OwnerSID)
 	if err != nil {
 		return err
@@ -771,41 +773,53 @@ func replaceWindowsInstallationLocked(ctx context.Context, request Request, stat
 	if err != nil {
 		return err
 	}
-	if present {
-		timeout := hooks.DrainTimeout
-		if timeout == 0 {
-			timeout = 35 * time.Second
+	// Maintenance admission and the update gates make hostd refuse new work, so
+	// they are taken at the cutover, not before the candidate is prepared.
+	var abort func() error
+	defer func() {
+		if abort != nil {
+			_ = abort()
 		}
-		abort, err := prepareWindowsReplacementMaintenance(ctx, layout, installed.TokenFile, request.Force, timeout)
-		if err != nil {
-			return err
+	}()
+	cutover := func(ctx context.Context) error {
+		if present && abort == nil {
+			timeout := hooks.DrainTimeout
+			if timeout == 0 {
+				timeout = 35 * time.Second
+			}
+			admitted, err := prepareWindowsReplacementMaintenance(ctx, layout, installed.TokenFile, request.Force, timeout)
+			if err != nil {
+				return err
+			}
+			abort = admitted
 		}
-		defer abort()
-	}
-	if hooks.Prepare != nil {
-		if err := hooks.Prepare(ctx); err != nil {
-			return err
+		if hooks.Prepare != nil {
+			return hooks.Prepare(ctx)
 		}
+		return nil
 	}
 	cleanup, err := PrepareWindowsReplacement(ctx, request)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
-	return replaceWindowsCandidate(ctx, manager, request, replace)
+	return replaceWindowsCandidate(ctx, manager, request, func(ctx context.Context) error { return replace(ctx, cutover) })
 }
 
-// InstallWindowsReplacement is called only inside the owning lifecycle Replace.
-func InstallWindowsReplacement(ctx context.Context, request Request) error {
-	return installWindows(ctx, request, true)
+// InstallWindowsReplacement is called only inside the owning lifecycle Replace,
+// with the cutover that Replace handed it.
+func InstallWindowsReplacement(ctx context.Context, request Request, cutover func(context.Context) error) error {
+	return installWindows(ctx, request, true, cutover)
 }
 
-func StopWindowsReplacement(ctx context.Context, ownerSID string) error {
+// StopWindowsUpdater stops only the updater, which a supplied install retires
+// before the replacement; hostd keeps serving until the replacement's cutover.
+func StopWindowsUpdater(ctx context.Context, ownerSID string) error {
 	instance, err := WindowsInstanceForSID(ownerSID)
 	if err != nil {
 		return err
 	}
-	return stopWindowsRuntimeServices(ctx, instance)
+	return stopWindowsServices(ctx, instance, "PaperboatUpdated")
 }
 
 // CapturedWindowsSource projects a protected native baseline while candidate

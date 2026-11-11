@@ -414,8 +414,8 @@ func installWindowsRuntimeFromSuppliedBytesWithCommit(ctx context.Context, reque
 	if nativeReplacement {
 		step = "install_runtime"
 		replacementStarted = true
-		err := hostinstall.ReplaceWindowsInstallation(ctx, request, snapshot, func(ctx context.Context) error {
-			if err := hostinstall.StopWindowsReplacement(ctx, request.OwnerSID); err != nil {
+		err := hostinstall.ReplaceWindowsInstallation(ctx, request, snapshot, func(ctx context.Context, cutover func(context.Context) error) error {
+			if err := hostinstall.StopWindowsUpdater(ctx, request.OwnerSID); err != nil {
 				return err
 			}
 			prepare := updated.PrepareWindowsNativeInstall
@@ -429,7 +429,7 @@ func installWindowsRuntimeFromSuppliedBytesWithCommit(ctx context.Context, reque
 			}
 			request.RollbackIdentity = rollbackIdentity
 			step = "install_runtime"
-			if err := hostinstall.InstallWindowsReplacement(ctx, request); err != nil {
+			if err := hostinstall.InstallWindowsReplacement(ctx, request, cutover); err != nil {
 				return errors.Join(fmt.Errorf("install supplied Windows runtime: %w", err), restoreJournal())
 			}
 			step = "install_commit"
@@ -443,7 +443,7 @@ func installWindowsRuntimeFromSuppliedBytesWithCommit(ctx context.Context, reque
 			return nil
 		})
 		if errors.Is(err, hostdproto.ErrMaintenanceBusy) {
-			return &elevation.RemoteError{Code: "maintenance_busy", Message: "Paperboat has protected work; no services were stopped"}
+			return &elevation.RemoteError{Code: "maintenance_busy", Message: "Paperboat has protected work; the installation was left as it was"}
 		}
 		return err
 	}
