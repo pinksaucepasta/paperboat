@@ -189,7 +189,7 @@ func TestPostgresTransferToPersonal(t *testing.T) {
 		t.Fatal(err)
 	}
 	preview := "tp_preview_" + suffix
-	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.preview_leases(owner_session_kind,id,endpoint,account_id,owner_team_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,access_mode,lease_deadline) VALUES('foreground',$1,'https://'||$1||'.example.test',$2,$3,$2,$4,'tp-owner-session','http','127.0.0.1:3000','team',now()+interval '1 hour')`, preview, enroller, team, machine); err != nil {
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.preview_leases(owner_session_kind,id,endpoint,account_id,owner_team_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,access_mode,lease_deadline) VALUES('foreground',$1,$5,$2,$3,$2,$4,'tp-owner-session','http','127.0.0.1:3000','team',now()+interval '1 hour')`, preview, enroller, team, machine, "https://tp-preview-"+suffix+".preview.example.test"); err != nil {
 		t.Fatal(err)
 	}
 	if err = act(owner, machine, "transfer_to_personal", "previewed"); !errors.Is(err, ErrMachineTeamResources) {
