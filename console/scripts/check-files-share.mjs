@@ -130,7 +130,8 @@ await page.keyboard.press("Escape")
 // The share appears under Previews, which keeps listing active links.
 if (link) {
   await page.goto(`${origin}/previews?machine=${machine.id}`, { waitUntil: "networkidle", timeout: 120000 })
-  log(await page.getByText(sharedName).first().isVisible().catch(() => false), "Previews lists the shared file's link")
+  // The list shows each preview by its address (a file origin forwards to its file id), not by the file name.
+  log(await page.getByText(new URL(link).host).first().isVisible().catch(() => false), "Previews lists the shared file's link")
 }
 
 // Clean up the Inbox test file.
