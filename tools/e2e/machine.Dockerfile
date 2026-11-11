@@ -1,4 +1,4 @@
-# A machine of the core end-to-end (server/internal/app TestE2ECore): the device-smoke systemd image
+# A machine of both end-to-end jobs (e2e.yml: TestE2ECore and tools/e2e/run.sh): the device-smoke systemd image
 # (tools/device-smoke/ubuntu24-systemd.Dockerfile) plus an OpenSSH server, which managed SSH (pb ssh) bridges to.
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
