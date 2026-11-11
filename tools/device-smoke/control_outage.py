@@ -120,6 +120,21 @@ def status_healthy(host):
     return rc == 0 and "Control plane is unavailable" not in out and "Daemon: ready" in out, out.strip()[:300]
 
 
+def cut_control_plane(host, args):
+    """--mode stop stops the staging server container (a window agreed with its owner); --mode blackhole adds a
+    blackhole route to the API address inside the three containers only, the way ssh_control_outage.sh does: the
+    shared server keeps running and nothing else is affected."""
+    if args.mode == "stop":
+        return host_run(host, f"sudo -n docker stop -t 20 {args.server_container}", 120)
+    return host_run(host, " && ".join(f"sudo -n docker exec {ct} ip route add blackhole {args.api_ip}" for ct in NAMES.values()), 60)
+
+
+def restore_control_plane(host, args):
+    if args.mode == "stop":
+        return host_run(host, f"sudo -n docker start {args.server_container}", 120)
+    return host_run(host, "; ".join(f"sudo -n docker exec {ct} ip route del blackhole {args.api_ip}" for ct in NAMES.values()), 60)
+
+
 def drill(args):
     host = load()["host"]
     res = Result(args.redact)
@@ -129,8 +144,8 @@ def drill(args):
         res.add(f"baseline exec {src}->{dst}", ok, detail)
     ok, detail = eventually(lambda: exec_ok(host, "r", "b", "baseline-rb"), 120)
     res.add("baseline exec r->b before sign-out", ok, detail)
-    revoke = subprocess.run(["python3", str(HERE / "cleanup_test_account.py"), "--id", load()["ids"]["r"], "--stale", "0 seconds", "--apply"], capture_output=True, text=True, timeout=300)
-    res.add("machine r revoked by exact id", revoke.returncode == 0, revoke.stdout[-120:] + revoke.stderr[-120:])
+    ok, detail = revoke_machine(host, NAMES["a"], NAMES["r"])
+    res.add("machine r revoked by its owner (pb machine revoke, exact enrollment)", ok, detail)
     ok, detail = eventually(lambda: refused(host, "r", "b"), 240)
     res.add("revoked machine r is refused (control plane up)", ok, detail)
     # long sessions across the outage
@@ -141,12 +156,12 @@ def drill(args):
     time.sleep(15)
     # the outage
     stopped = time.time()
-    rc, out = host_run(host, f"sudo -n docker stop -t 20 {args.server_container}", 120)
-    res.add("control plane stopped", rc == 0, out.strip()[-120:])
+    rc, out = cut_control_plane(host, args)
+    res.add("control plane unreachable", rc == 0, out.strip()[-120:])
     try:
         outage_checks(host, res, args, stopped)
     finally:
-        host_run(host, f"sudo -n docker start {args.server_container}", 120)  # never leave staging stopped
+        restore_control_plane(host, args)  # never leave the stack stopped or the containers cut off
     return finish(host, res, args, stopped)
 
 
@@ -161,8 +176,8 @@ def outage_checks(host, res, args, stopped):
         ok, detail = refused(host, "r", "b")
         res.add(f"outage {label}: revoked r still refused", ok, detail)
         for tag in ("long-ab", "long-ba"):
-            rc, out = in_ct(host, NAMES[tag[-2]], f"test ! -e /tmp/{tag}.rc && echo running", 30)
-            res.add(f"outage {label}: {tag} still running", "running" in out, out.strip()[-80:])
+            rc, out = in_ct(host, NAMES[tag[-2]], f"pgrep -f 'echo {tag}-done' >/dev/null && test ! -e /tmp/{tag}.rc && echo running", 30)
+            res.add(f"outage {label}: {tag} still running", "running" in out, out.strip()[-80:] or f"rc={rc}")
         ok, detail = eventually(lambda: health_has_outage(host), 90, 10)
         res.add(f"outage {label}: pb status shows the control plane as unreachable", ok, detail)
     rc, out = in_ct(host, NAMES["a"], f"{PB} doctor", 120)
@@ -172,8 +187,8 @@ def outage_checks(host, res, args, stopped):
 
 def finish(host, res, args, stopped):
     time.sleep(max(0, stopped + args.outage_seconds - time.time()))
-    rc, out = host_run(host, f"sudo -n docker start {args.server_container}", 120)
-    res.add("control plane started", rc == 0, out.strip()[-120:])
+    rc, out = restore_control_plane(host, args)
+    res.add("control plane reachable again", rc == 0, out.strip()[-120:])
     started = time.time()
     ok, detail = eventually(lambda: status_healthy(host), 180, 5)
     res.add("recovery: pb status healthy again", ok, f"{int(time.time() - started)} s after the start; {detail}")
@@ -193,12 +208,23 @@ def finish(host, res, args, stopped):
     return 0 if all(c["status"] == "PASS" for c in res.checks) else 1
 
 
+def revoke_machine(host, from_ct, name):
+    """Revoke one exact enrollment from a signed-in machine of the account: preview, then the confirmation it prints."""
+    rc, out = in_ct(host, from_ct, f"{PB} machine revoke {name} --json", 90)
+    token = re.search(r'"confirmation_token":"([A-Z0-9]+)"', out)
+    if not token:
+        return False, out.strip()[-150:]
+    rc, out = in_ct(host, from_ct, f"{PB} machine revoke {name} --json --confirm {token.group(1)}", 90)
+    return rc == 0, out.strip()[-150:]
+
+
 def cleanup(args):
     state = load()
-    for key, machine_id in state["ids"].items():
-        if machine_id:
-            subprocess.run(["python3", str(HERE / "cleanup_test_account.py"), "--id", machine_id, "--stale", "0 seconds", "--apply"], check=False, timeout=300)
-    host_run(state["host"], "sudo -n docker rm -f " + " ".join(NAMES.values()), 120)
+    host = state["host"]
+    for victim in ("r", "b", "a"):  # each from a machine that is still signed in; a last, from itself
+        ok, detail = revoke_machine(host, NAMES["a"], NAMES[victim])
+        print(("revoked " if ok else "NOT revoked ") + NAMES[victim], detail)
+    host_run(host, "sudo -n docker rm -f " + " ".join(NAMES.values()), 120)
 
 
 def main():
@@ -209,6 +235,8 @@ def main():
     parser.add_argument("--token-cmd")
     parser.add_argument("--server-container", default="pb-release-staging-server-1")
     parser.add_argument("--outage-seconds", type=int, default=660)
+    parser.add_argument("--mode", choices=["blackhole", "stop"], default="blackhole")
+    parser.add_argument("--api-ip", help="the staging API address to cut off in --mode blackhole")
     parser.add_argument("--redact", action="append", default=[], help="host names to replace with example.test in the result")
     args = parser.parse_args()
     if args.phase == "setup":
