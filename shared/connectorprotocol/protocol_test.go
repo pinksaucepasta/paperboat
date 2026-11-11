@@ -153,7 +153,9 @@ func TestSecretBearingPayloadsAreRejected(t *testing.T) {
 			t.Fatalf("secret payload accepted: %s", payload)
 		}
 	}
+	// An mTLS client identity belongs to an https origin: the route is https with system verification.
 	safe := strings.Replace(string(testConfigPayload(1, "preview.example.test")), `"mtls_credential_reference":null`, `"mtls_credential_reference":"keychain://paperboat/connectors/connector_1"`, 1)
+	safe = strings.Replace(strings.Replace(safe, `"origin_scheme":"http"`, `"origin_scheme":"https"`, 1), `"tls_verification":"not_applicable"`, `"tls_verification":"system"`, 1)
 	if _, err := NewSnapshot("tunnel_1", 1, []byte(safe)); err != nil {
 		t.Fatalf("safe reference rejected: %v", err)
 	}
