@@ -20,7 +20,11 @@ var openConnectionsForAutomatic = readWindowsOpenConnections
 // SSH sessions the hostd worker bridges (localapi ServerConfig.WorkerOpenSSH).
 func (c *windowsController) refuseWhileConnectionsAreOpen(ctx context.Context, version string) error {
 	open, err := openConnectionsForAutomatic(ctx, c.config)
-	if err != nil || open.Total() == 0 {
+	if err != nil {
+		liveconnections.RecordUnconfirmed("updater", err)
+		return nil
+	}
+	if open.Total() == 0 {
 		return nil
 	}
 	return &autoupdate.ActiveTerminalSessionsError{RequiredVersion: version, SSH: open.SSH, Forwards: open.Forwards}
