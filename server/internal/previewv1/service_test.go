@@ -110,7 +110,7 @@ func (f *previewLeaseFake) CreatePreviewLeaseV1(_ context.Context, input preview
 	lease := previewtunnelstore.PreviewLeaseRecord{PreviewLease: dbsqlc.PreviewLease{
 		ID: input.LeaseID, Endpoint: input.Endpoint, AccountID: input.AccountID,
 		ActorID: input.ActorID, OwnerMachineID: input.OwnerMachineID, OwnerSessionID: input.OwnerSessionID, OwnerSessionKind: input.OwnerSessionKind,
-		TargetScheme: input.TargetScheme, TargetAddress: input.TargetAddress, AccessMode: input.AccessMode,
+		TargetScheme: input.TargetScheme, TargetAddress: input.TargetAddress, HostHeader: input.HostHeader, AccessMode: input.AccessMode,
 		LeaseDeadline: input.LeaseDeadline, UserDeadline: input.UserDeadline, AllocationState: "pending",
 		EdgeState: "pending", OriginState: "unknown", TerminalState: "active", CreatedAt: input.Now,
 		LastRenewedAt: input.Now, Generation: 1, OwnerLastSeenAt: input.Now,
@@ -340,6 +340,41 @@ func TestCreateDefaultsPublicAndAllocatesRandomEndpoint(t *testing.T) {
 	}
 	if len(fake.createInput) != 1 || fake.createInput[0].Endpoint == "" {
 		t.Fatalf("create input missing endpoint: %#v", fake.createInput)
+	}
+}
+
+// pb preview --host-header: the Host the origin receives is stored with the lease (lower case), shown on its
+// projection, and refused for targets with no HTTP request to rewrite or for anything but a bare host name.
+func TestCreateStoresTheHostHeaderOfAnHTTPTarget(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
+	fake := newPreviewLeaseFake()
+	fake.owners["acct_1:machine_1"] = true
+	service := testPreviewLeaseService(t, fake, now)
+	input := createInput("machine_1")
+	input.Target.HostHeader = " My-App.Example.test "
+	result, err := service.Create(context.Background(), browserRequest(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := result.Preview.Target.HostHeader; got != "my-app.example.test" {
+		t.Fatalf("projected host header = %q", got)
+	}
+	if h := fake.createInput[0].HostHeader; !h.Valid || h.String != "my-app.example.test" {
+		t.Fatalf("stored host header = %#v", h)
+	}
+	for name, target := range map[string]Target{
+		"with a port": {Scheme: "http", Address: "127.0.0.1:3000", HostHeader: "app.example.test:8080"},
+		"unix target": {Scheme: "unix", Address: "/tmp/app.sock", HostHeader: "app.example.test"},
+		"a URL":       {Scheme: "http", Address: "127.0.0.1:3000", HostHeader: "https://app.example.test"},
+		"white space": {Scheme: "http", Address: "127.0.0.1:3000", HostHeader: "app example.test"},
+		"too long":    {Scheme: "http", Address: "127.0.0.1:3000", HostHeader: strings.Repeat("a", 254)},
+	} {
+		bad := createInput("machine_1")
+		bad.IdempotencyKey = "create_bad_" + strings.ReplaceAll(name, " ", "_")
+		bad.Target = target
+		if _, err := service.Create(context.Background(), browserRequest(), bad); !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("%s: err = %v, want ErrInvalidInput", name, err)
+		}
 	}
 }
 

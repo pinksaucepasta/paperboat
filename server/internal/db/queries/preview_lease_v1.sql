@@ -17,7 +17,7 @@ LIMIT 1;
 SELECT p.id, p.endpoint, p.account_id, p.actor_id, p.owner_machine_id, p.owner_session_id,
        p.target_scheme, p.target_address, p.access_mode, p.lease_deadline, p.user_deadline,
        p.allocation_state, p.edge_state, p.origin_state, p.terminal_state, p.created_at, p.ready_at,
-       p.last_renewed_at, p.stopped_at, p.generation, p.owner_last_seen_at,p.owner_session_kind,p.owner_team_id
+       p.last_renewed_at, p.stopped_at, p.generation, p.owner_last_seen_at,p.owner_session_kind,p.owner_team_id,p.host_header
 FROM preview_leases AS p
 WHERE p.id = sqlc.arg(id) AND p.account_id = sqlc.arg(account_id);
 
@@ -25,7 +25,7 @@ WHERE p.id = sqlc.arg(id) AND p.account_id = sqlc.arg(account_id);
 SELECT p.id, p.endpoint, p.account_id, p.actor_id, p.owner_machine_id, p.owner_session_id,
        p.target_scheme, p.target_address, p.access_mode, p.lease_deadline, p.user_deadline,
        p.allocation_state, p.edge_state, p.origin_state, p.terminal_state, p.created_at, p.ready_at,
-       p.last_renewed_at, p.stopped_at, p.generation, p.owner_last_seen_at,p.owner_session_kind,p.owner_team_id
+       p.last_renewed_at, p.stopped_at, p.generation, p.owner_last_seen_at,p.owner_session_kind,p.owner_team_id,p.host_header
 FROM preview_leases AS p
 WHERE p.id = sqlc.arg(id);
 
@@ -98,7 +98,7 @@ RETURNING id, account_id, idempotency_key, request_hash, operation_type, resourc
 SELECT c.id, c.endpoint, c.account_id, c.actor_id, c.owner_machine_id, c.owner_session_id,
        c.target_scheme, c.target_address, c.access_mode, c.lease_deadline, c.user_deadline,
        c.allocation_state, c.edge_state, c.origin_state, c.terminal_state, c.created_at, c.ready_at,
-       c.last_renewed_at, c.stopped_at, c.generation, c.owner_last_seen_at,c.owner_session_kind,c.owner_team_id
+       c.last_renewed_at, c.stopped_at, c.generation, c.owner_last_seen_at,c.owner_session_kind,c.owner_team_id,c.host_header
 FROM preview_leases AS c
 WHERE c.id IN (SELECT paperboat.manageable_preview_ids(sqlc.arg(account_id)::text, sqlc.arg(workspace_set)::boolean, sqlc.narg(workspace_team_id)::text,
   sqlc.arg(q)::text, sqlc.arg(state)::text, sqlc.arg(owner)::text, sqlc.arg(machine_id)::text,

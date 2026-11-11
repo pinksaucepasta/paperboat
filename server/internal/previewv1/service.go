@@ -124,6 +124,8 @@ type previewDomainProjectionReader interface {
 type Target struct {
 	Scheme  string `json:"scheme"`
 	Address string `json:"address"`
+	// HostHeader is the Host the origin receives instead of the public one (http, https and h2c targets).
+	HostHeader string `json:"host_header,omitempty"`
 }
 
 // CreateRequest is the server-facing form of POST /v1/previews. RequestHash
@@ -329,7 +331,7 @@ func (s *Service) Create(ctx context.Context, request previewtunnelapi.RequestCo
 	if accessMode != "public" && accessMode != "private" && accessMode != "team" {
 		return CreateResult{}, fmt.Errorf("%w: access_mode must be public, private or team", ErrInvalidInput)
 	}
-	if !previewtunnelstore.ValidPreviewTargetV1(input.Target.Scheme, strings.TrimSpace(input.Target.Address), accessMode) {
+	if !previewtunnelstore.ValidPreviewTargetV1(input.Target.Scheme, strings.TrimSpace(input.Target.Address), accessMode) || !previewtunnelstore.ValidPreviewHostHeaderV1(input.Target.Scheme, previewHostHeader(input.Target)) {
 		return CreateResult{}, fmt.Errorf("%w: target is not valid for its scheme and access mode", ErrInvalidInput)
 	}
 	leaseDeadline, userDeadline, err := s.deadlines(now, input.ExpiresAt)
@@ -372,7 +374,7 @@ func (s *Service) Create(ctx context.Context, request previewtunnelapi.RequestCo
 			OperationID: operationID, LeaseID: leaseID, AuditEventID: auditID,
 			AccountID: request.Actor.AccountID, ActorID: request.Actor.ActorID, ActorType: actorType(request.Actor),
 			OwnerMachineID: strings.TrimSpace(input.OwnerMachineID), OwnerSessionID: strings.TrimSpace(input.OwnerSessionID), OwnerSessionKind: input.OwnerSessionKind,
-			TargetScheme: input.Target.Scheme, TargetAddress: strings.TrimSpace(input.Target.Address), AccessMode: accessMode,
+			TargetScheme: input.Target.Scheme, TargetAddress: strings.TrimSpace(input.Target.Address), HostHeader: nullableHostHeader(previewHostHeader(input.Target)), AccessMode: accessMode,
 			Endpoint: endpoint, LeaseDeadline: leaseDeadline, UserDeadline: userDeadline,
 			RequestHash: requestHash[:], IdempotencyKey: input.IdempotencyKey, CorrelationID: request.CorrelationID,
 			RequestID: request.RequestID, SourceMachineID: request.Actor.MachineID, Now: now,
@@ -1097,7 +1099,7 @@ func previewView(row previewtunnelstore.PreviewLeaseRecord) Preview {
 	view := Preview{
 		Schema: Schema, Kind: Kind, ID: row.ID, AccountID: row.AccountID, ActorID: row.ActorID,
 		OwnerMachineID: row.OwnerMachineID, OwnerSessionID: row.OwnerSessionID, OwnerSessionKind: row.OwnerSessionKind,
-		Target: Target{Scheme: row.TargetScheme, Address: row.TargetAddress}, AccessMode: row.AccessMode,
+		Target: Target{Scheme: row.TargetScheme, Address: row.TargetAddress, HostHeader: row.HostHeader.String}, AccessMode: row.AccessMode,
 		Persistent: false, Endpoint: endpoint, EndpointState: endpointState, LeaseDeadline: row.LeaseDeadline.UTC(), UserDeadline: nil,
 		State: state, AllocationState: allocationState, EdgeState: edgeState, OriginState: originState,
 		CreatedAt: row.CreatedAt.UTC(), LastRenewedAt: row.LastRenewedAt.UTC(), Domains: make([]PreviewDomainSummary, 0),
@@ -1146,7 +1148,7 @@ func validateCreateRequest(input CreateRequest) error {
 	if strings.TrimSpace(input.IdempotencyKey) == "" || len(input.IdempotencyKey) > 256 {
 		return fmt.Errorf("%w: idempotency key is required", ErrInvalidInput)
 	}
-	if !previewtunnelstore.ValidPreviewTargetV1(input.Target.Scheme, strings.TrimSpace(input.Target.Address), normalizedAccessMode(input.AccessMode)) {
+	if !previewtunnelstore.ValidPreviewTargetV1(input.Target.Scheme, strings.TrimSpace(input.Target.Address), normalizedAccessMode(input.AccessMode)) || !previewtunnelstore.ValidPreviewHostHeaderV1(input.Target.Scheme, previewHostHeader(input.Target)) {
 		return fmt.Errorf("%w: target is not valid for its scheme and access mode", ErrInvalidInput)
 	}
 	if _, err := normalizePreviewDomains(input.Domains); err != nil {
@@ -1500,3 +1502,12 @@ type previewOwnerDenial struct{ cause error }
 func (*previewOwnerDenial) Error() string        { return "preview lease ownership denied" }
 func (e *previewOwnerDenial) Unwrap() error      { return e.cause }
 func (*previewOwnerDenial) Is(target error) bool { return target == ErrOwnerDenied }
+
+// previewHostHeader is the target's Host header in its stored form: trimmed and lower case.
+func previewHostHeader(target Target) string {
+	return strings.ToLower(strings.TrimSpace(target.HostHeader))
+}
+
+func nullableHostHeader(value string) sql.NullString {
+	return sql.NullString{String: value, Valid: value != ""}
+}

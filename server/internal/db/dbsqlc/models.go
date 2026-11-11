@@ -2099,6 +2099,7 @@ type PreviewLease struct {
 	OwnerLastSeenAt  time.Time
 	OwnerSessionKind string
 	OwnerTeamID      sql.NullString
+	HostHeader       sql.NullString
 }
 
 type PreviewLeaseCreateOperation struct {

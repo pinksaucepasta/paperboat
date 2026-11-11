@@ -23,6 +23,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 var (
@@ -68,6 +69,7 @@ type CreatePreviewLeaseV1Input struct {
 	OwnerSessionKind string
 	TargetScheme     string
 	TargetAddress    string
+	HostHeader       sql.NullString
 	AccessMode       string
 	Endpoint         string
 	LeaseDeadline    time.Time
@@ -404,7 +406,7 @@ func (s *Store) CreatePreviewLeaseV1(ctx context.Context, input CreatePreviewLea
 			ID: input.LeaseID, Endpoint: input.Endpoint,
 			AccountID: input.AccountID, OwnerTeamID: nullableText(ws.TeamID), ActorID: input.ActorID, OwnerMachineID: input.OwnerMachineID,
 			OwnerSessionID: input.OwnerSessionID, OwnerSessionKind: input.OwnerSessionKind, TargetScheme: input.TargetScheme,
-			TargetAddress: input.TargetAddress, AccessMode: input.AccessMode,
+			TargetAddress: input.TargetAddress, HostHeader: input.HostHeader, AccessMode: input.AccessMode,
 			LeaseDeadline: input.LeaseDeadline, UserDeadline: input.UserDeadline,
 			AllocationState: "pending", EdgeState: "pending", OriginState: "unknown", Now: now,
 		})
@@ -978,7 +980,7 @@ func validateCreatePreviewLeaseV1(input CreatePreviewLeaseV1Input) error {
 	if input.AccessMode != "public" && input.AccessMode != "private" && input.AccessMode != "team" {
 		return ErrInvalidInput
 	}
-	if !ValidPreviewTargetV1(input.TargetScheme, input.TargetAddress, input.AccessMode) {
+	if !ValidPreviewTargetV1(input.TargetScheme, input.TargetAddress, input.AccessMode) || !ValidPreviewHostHeaderV1(input.TargetScheme, input.HostHeader.String) || input.HostHeader.Valid != (input.HostHeader.String != "") {
 		return ErrInvalidInput
 	}
 	if !validPreviewEndpoint(input.Endpoint) || input.LeaseDeadline.IsZero() || input.Now.IsZero() || !input.LeaseDeadline.After(input.Now) {
@@ -1114,6 +1116,19 @@ func ValidPreviewTargetV1(scheme, raw, accessMode string) bool {
 	default:
 		return false
 	}
+}
+
+// ValidPreviewHostHeaderV1 accepts no Host header, or a bare host name on an http, https or h2c target (the
+// only schemes with an HTTP request to rewrite).
+func ValidPreviewHostHeaderV1(scheme, hostHeader string) bool {
+	if hostHeader == "" {
+		return true
+	}
+	switch scheme {
+	case "http", "https", "h2c":
+		return connectorprotocol.ValidOriginHostName(hostHeader)
+	}
+	return false
 }
 
 // ValidInboxFileID is the shape of a machine's Inbox file id (16 lowercase hex), the address of a
