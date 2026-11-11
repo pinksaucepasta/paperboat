@@ -25,7 +25,7 @@ const DefaultSocket = `\\.\pipe\PaperboatMachineGuard`
 const DefaultStateDir = `C:\ProgramData\Paperboat\MachineGuard`
 
 func requirePrivilege() error {
-	token, err := windowssecurity.OpenEffectiveToken()
+	token, err := windows.OpenCurrentProcessToken()
 	if err != nil {
 		return err
 	}
