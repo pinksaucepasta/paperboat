@@ -3,7 +3,8 @@ package clientupdate
 import "time"
 
 const (
-	policyRefreshInterval = 5 * time.Second
+	// PolicyRefreshInterval is also how long another instance's policy change can take to reach this one.
+	PolicyRefreshInterval = 5 * time.Second
 	policyReadTimeout     = 2 * time.Second
 )
 
