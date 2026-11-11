@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -531,6 +532,37 @@ func TestReconnectingConnAdoptsTheProbeWhenTheHostHandsTheTerminalToIt(t *testin
 			t.Fatalf("output after the handover = %q, want the fresh link's", b)
 		}
 	case <-time.After(3 * time.Second):
+		t.Fatal("terminal left without a link after its probe reattached")
+	}
+}
+
+// Windows CI run 42963879264 (075936b86): the old link's handover-cleared end reached the supervisor before the probe
+// stored its fresh link, so the terminal ended with no output and no link (the silent terminal of a41f3d241). The
+// probe here returns only after the terminal ended or the supervisor waits for it, forcing that interleaving.
+func TestReconnectingConnAdoptsTheProbeWhenTheOldLinkEndsBeforeTheProbeStoresIt(t *testing.T) {
+	waiting, ended := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	probeWait := func(o *reconnectingOptions) { o.probeWait = func() { once.Do(func() { close(waiting) }) } }
+	old := &handoverConn{blockingReconnectConn: &blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}}
+	fresh := &reconnectTestConn{Reader: bytes.NewReader([]byte("resumed")), code: 0}
+	c := NewObservedReconnectingConn(context.Background(), old, 600, time.Millisecond, func(ctx context.Context) (Conn, error) {
+		old.handOver()
+		select {
+		case <-ended:
+		case <-waiting:
+		case <-ctx.Done():
+		}
+		return fresh, nil
+	}, nil, nil, TelemetryContext{}, probeWait)
+	defer c.Close()
+	got := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(c); close(ended); got <- b }()
+	select {
+	case b := <-got:
+		if string(b) != "resumed" {
+			t.Fatalf("output after the handover = %q, want the fresh link's", b)
+		}
+	case <-time.After(5 * time.Second):
 		t.Fatal("terminal left without a link after its probe reattached")
 	}
 }

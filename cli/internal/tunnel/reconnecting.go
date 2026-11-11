@@ -88,6 +88,7 @@ type reconnectingOptions struct {
 	outputQueueChunks int
 	outputBatchWindow time.Duration
 	observer          func(ReconnectEvent)
+	probeWait         func() // tests: runs before supervise waits for a running probe
 }
 
 // ReconnectReason says, in words for the user, why the terminal is reconnecting or last reconnected.
@@ -138,7 +139,7 @@ type ReconnectingConn struct {
 	available   chan struct{}
 	redial      atomic.Bool
 	probed      atomic.Pointer[probedLink] // a fresh link dialed while the current one was stalled
-	probing     atomic.Bool
+	probing     sync.Mutex                 // held by the one running probeStalled; supervise waits on it before a clean end
 	linkStalled atomic.Bool
 	// refused is a permanent refusal the stalled-link probe met (access revoked); supervise ends with it.
 	refused           atomic.Pointer[error]
@@ -169,6 +170,7 @@ type ReconnectingConn struct {
 	maxEchoLatencyMS  atomic.Int64
 	outputBatchWindow time.Duration
 	observer          func(ReconnectEvent)
+	probeWait         func()
 	reason            atomic.Value // string: why the current or last reconnect happened
 }
 
@@ -207,7 +209,7 @@ func NewObservedReconnectingConn(ctx context.Context, initial Conn, maxRetries i
 		option(&options)
 	}
 	runCtx, cancel := context.WithCancel(ctx)
-	c := &ReconnectingConn{ctx: runCtx, cancel: cancel, current: initial, available: available, reconnect: reconnect, maxRetries: maxRetries, delay: min(delay, time.Second), out: make(chan []byte, options.outputQueueChunks), done: make(chan reconnectResult, 1), closed: make(chan struct{}), telemetry: sink, now: now, started: now(), correlation: correlation, outputBatchWindow: options.outputBatchWindow, observer: options.observer, passive: options.passive}
+	c := &ReconnectingConn{ctx: runCtx, cancel: cancel, current: initial, available: available, reconnect: reconnect, maxRetries: maxRetries, delay: min(delay, time.Second), out: make(chan []byte, options.outputQueueChunks), done: make(chan reconnectResult, 1), closed: make(chan struct{}), telemetry: sink, now: now, started: now(), correlation: correlation, outputBatchWindow: options.outputBatchWindow, observer: options.observer, passive: options.passive, probeWait: options.probeWait}
 	go c.supervise(initial)
 	return c
 }
@@ -279,6 +281,16 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 		<-readDone
 		joinEnd(nil)
 		c.recordCompression(conn)
+		if err == nil {
+			// The host hands the terminal to an attached probe by clearing the old link's stall and then ending it,
+			// which can get here before the probe stores its link: ending the terminal then left no link and nothing
+			// redialing (a41f3d241's silent terminal). Let a running probe finish so its link is adopted.
+			if c.probeWait != nil {
+				c.probeWait()
+			}
+			c.probing.Lock()
+			c.probing.Unlock()
+		}
 		if refused := c.refused.Swap(nil); refused != nil {
 			c.notify(ReconnectFailed)
 			c.done <- reconnectResult{1, *refused}
@@ -595,10 +607,10 @@ type probedLink struct{ stalled, conn Conn }
 // it; the daemon carries unanswered input to it by input owner. ET does the same on keepalive loss
 // (~/ref/EternalTerminal/src/base/ClientConnection.cpp:210).
 func (c *ReconnectingConn) probeStalled(stalled Conn, connection string) {
-	if c.reconnect == nil || c.maxRetries <= 0 || c.probing.Swap(true) {
+	if c.reconnect == nil || c.maxRetries <= 0 || !c.probing.TryLock() {
 		return
 	}
-	defer c.probing.Store(false)
+	defer c.probing.Unlock()
 	current := func() bool {
 		c.mu.RLock()
 		current := c.current
