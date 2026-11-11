@@ -229,6 +229,18 @@ func TestReplaceMachineCutsOverToTheVerifiedNewRecordAndKeepsTheAddress(t *testi
 		t.Fatalf("a retry after the cutover must be a no-op: %v", err)
 	}
 
+	// A computer that was renamed keeps its name across a reset, although the new record came up under the
+	// hostname (not a numbered variant of the old name).
+	renamedOld, renamedNew := "mch_crold_"+suffix, "mch_crnew_"+suffix
+	addMachine(renamedOld, userA, "apple")
+	addMachine(renamedNew, userA, "manageds-virtual-machine")
+	if err := service.ReplaceMachine(ctx, userA, renamedOld, renamedNew); err != nil {
+		t.Fatalf("replace a renamed computer: %v", err)
+	}
+	if alias, deleted := state(renamedNew); alias != "apple" || deleted {
+		t.Fatalf("a renamed computer lost its name across the cutover: alias=%q deleted=%v", alias, deleted)
+	}
+
 	// Another account's record is never touched.
 	foreign := "mch_cforeign_" + suffix
 	addMachine(foreign, userB, "desk")
