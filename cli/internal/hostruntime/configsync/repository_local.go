@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -180,6 +181,29 @@ func (r *contextGitReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// staleRepositoryLock bounds how long a publisher can hold a branch lock: it only copies a bounded set of
+// objects and renames one reference. A lock this old was left by a killed process (Git itself never clears
+// one, so a SIGKILL would otherwise wedge every later publish until someone removed the file).
+const staleRepositoryLock = 10 * time.Minute
+
+// openRepositoryLock creates Git's exclusive branch lock. A lock older than staleRepositoryLock is removed once
+// and retaken; a younger one belongs to a live writer and is refused.
+func openRepositoryLock(path string, mode os.FileMode) (*os.File, error) {
+	for attempt := 0; ; attempt++ {
+		lock, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+		if err == nil || !errors.Is(err, os.ErrExist) || attempt > 0 {
+			return lock, err
+		}
+		info, statErr := os.Lstat(path)
+		if statErr != nil || !info.Mode().IsRegular() || time.Since(info.ModTime()) < staleRepositoryLock {
+			return nil, err
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+	}
+}
+
 // publishLocal holds Git's exclusive branch lock while checking the old head,
 // copying durable objects, and atomically renaming exactly one reference.
 func publishLocal(ctx context.Context, source *git.Repository, a RepositoryAccess, p PreparedPublication) (PublishResult, error) {
@@ -200,7 +224,7 @@ func publishLocal(ctx context.Context, source *git.Repository, a RepositoryAcces
 	if info, err := os.Lstat(path); err == nil {
 		mode = info.Mode().Perm() & 0666
 	}
-	lock, err := os.OpenFile(path+".lock", os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	lock, err := openRepositoryLock(path+".lock", mode)
 	if err != nil {
 		return PublishResult{}, ErrRepositoryUnavailable
 	}
