@@ -355,3 +355,18 @@ func loadNamesForTest(t *testing.T, url string) envHookResult {
 	t.Helper()
 	return requestShellEnvironment(t.Context(), url, "token", runtime.ShellEnvironmentNamesPath, envHookRecord{AccountID: "acct_1", WorkspaceID: "personal"})
 }
+
+// The Windows console decodes native output with its OEM code page: the PowerShell assignment carries no byte above 0x7f.
+func TestPowerShellAssignmentIsASCIIOnly(t *testing.T) {
+	line := envHookAssignment(envHookPowerShell, "PB_EMOJI", "emoji \U0001F680 \u8239 \u00fc it's\nnext")
+	for i := 0; i < len(line); i++ {
+		if line[i] >= 0x80 {
+			t.Fatalf("byte %#x at %d in %q", line[i], i, line)
+		}
+	}
+	for _, want := range []string{"ConvertFromUtf32(0x1F680)", "ConvertFromUtf32(0x8239)", "ConvertFromUtf32(0xFC)", "it''s", "[char]10"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("%q does not contain %q", line, want)
+		}
+	}
+}

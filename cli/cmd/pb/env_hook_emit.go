@@ -82,7 +82,7 @@ func envHookAssignment(shell, name, value string) string {
 	case "fish":
 		return "set -gx " + name + " " + fishSingleQuote(value) + "\n"
 	case envHookPowerShell:
-		return "$env:" + name + " = " + powerShellSingleQuote(value) + "\n"
+		return "$env:" + name + " = " + powerShellValueLiteral(value) + "\n"
 	}
 	return "export " + name + "=" + shellSingleQuote(value) + "\n"
 }
@@ -241,6 +241,30 @@ func shellSingleQuote(value string) string {
 func powerShellSingleQuote(value string) string {
 	return "'" + strings.NewReplacer("'", "''", "\u2018", "\u2018\u2018", "\u2019", "\u2019\u2019",
 		"\u201a", "\u201a\u201a", "\u201b", "\u201b\u201b", "\r", "' + [char]13 + '", "\n", "' + [char]10 + '").Replace(value) + "'"
+}
+
+// powerShellValueLiteral is a value as ASCII only: PowerShell decodes the native output of the hook line with the console's
+// OEM code page (437 over ssh), which turned 'emoji \U0001F680' into mojibake in a plain ssh session on Windows (X lane, X-11).
+// Non-ASCII characters therefore travel as code points, line breaks as [char] joins (see powerShellSingleQuote).
+func powerShellValueLiteral(value string) string {
+	var out strings.Builder
+	out.WriteByte('\'')
+	for _, r := range value {
+		switch {
+		case r == '\'':
+			out.WriteString("''")
+		case r == '\r':
+			out.WriteString("' + [char]13 + '")
+		case r == '\n':
+			out.WriteString("' + [char]10 + '")
+		case r < 0x80:
+			out.WriteRune(r)
+		default:
+			fmt.Fprintf(&out, "' + [char]::ConvertFromUtf32(0x%X) + '", r)
+		}
+	}
+	out.WriteByte('\'')
+	return out.String()
 }
 
 func fishSingleQuote(value string) string {
