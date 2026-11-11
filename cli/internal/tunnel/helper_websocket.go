@@ -276,7 +276,7 @@ func helperHandshake(ctx context.Context, message helperMessageConnection) (bool
 }
 
 func helperCapabilities() []string {
-	return []string{"terminal.v1", "health.v1", "exec.v1", "ssh.v1", "config.compare.v1"}
+	return []string{"terminal.v1", "health.v1", "exec.v1", "ssh.v1", "config.compare.v1", "recording.v1"}
 }
 
 // initialize attaches the canonical terminal session with a create-or-get

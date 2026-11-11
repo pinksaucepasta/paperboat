@@ -87,3 +87,18 @@ func TestNegotiatorSelectsFileTransferOnlyWhenImplemented(t *testing.T) {
 		}
 	}
 }
+
+// A native replay reads over recording.v1; without it in the offer and the allowed list the host answered every read
+// with capability_required (pb recordings play and export never worked on a device).
+func TestNegotiatorSelectsRecordingWhenOfferedAndAvailable(t *testing.T) {
+	offered := []string{"terminal.v1", "health.v1", "recording.v1"}
+	for _, enabled := range []bool{false, true} {
+		welcome, err := (Negotiator{Available: map[string]bool{"terminal.v1": true, "health.v1": true, "recording.v1": enabled}}).Negotiate("1.0", "1.0", offered)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if slices.Contains(welcome.Capabilities, "recording.v1") != enabled {
+			t.Fatalf("available=%v selected=%v", enabled, welcome.Capabilities)
+		}
+	}
+}
