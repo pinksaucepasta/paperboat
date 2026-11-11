@@ -106,3 +106,15 @@ func TestSlowButRunningUninstallHelperIsPendingNotFailure(t *testing.T) {
 		t.Fatal("a failed process query was treated as pending")
 	}
 }
+
+func TestAppendLeftoverReportsEachPathOnce(t *testing.T) {
+	var leftovers []string
+	for i := 0; i < 5; i++ { // every retry of the same removal names the same directory
+		leftovers = appendLeftover(leftovers, `C:\Users\u\AppData\Local\Paperboat\elevation\request-0123abcd`)
+	}
+	leftovers = appendLeftover(leftovers, `c:\users\u\appdata\local\paperboat\elevation\REQUEST-0123ABCD`)
+	leftovers = appendLeftover(leftovers, `C:\Users\u\AppData\Local\Paperboat\elevation\request-4567ef01`)
+	if len(leftovers) != 2 {
+		t.Fatalf("leftovers = %v, want the two distinct directories once each", leftovers)
+	}
+}

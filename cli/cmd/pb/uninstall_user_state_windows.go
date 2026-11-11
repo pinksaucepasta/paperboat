@@ -80,7 +80,7 @@ func retryWindowsRemoval(ctx context.Context, profile, path string, preserved []
 			return last
 		}
 		if leftover, ok := lockedBridgeLeftover(last); ok && leftovers != nil {
-			*leftovers = append(*leftovers, leftover)
+			*leftovers = appendLeftover(*leftovers, leftover)
 			return nil
 		}
 		select {
@@ -149,4 +149,14 @@ func checkWindowsStateDirectory(directory *os.Root, path string) (result error) 
 		}
 	}
 	return errWindowsUserStateRefused
+}
+
+// appendLeftover records a leftover path once: every retry of the same removal reports the same directory.
+func appendLeftover(leftovers []string, leftover string) []string {
+	for _, existing := range leftovers {
+		if strings.EqualFold(existing, leftover) {
+			return leftovers
+		}
+	}
+	return append(leftovers, leftover)
 }
