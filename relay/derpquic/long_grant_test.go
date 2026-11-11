@@ -1,8 +1,6 @@
 package derpquic
 
 import (
-	"crypto/ed25519"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
@@ -56,36 +54,61 @@ func TestLongGrantAdmittedAndRevokedByFence(t *testing.T) {
 	}
 }
 
-// Grants live 12 h, so fences outlive their connections and the table can fill with idle endpoints; it then drops
-// an idle admission fence for a new endpoint, never a connected one's and never a revocation's.
-func TestFullFenceTableEvictsOnlyIdleAdmissionFences(t *testing.T) {
-	pub, _, _ := ed25519.GenerateKey(rand.Reader)
-	s, err := NewServer(Verifier{Issuer: "test", NodeID: "relay", NodeGeneration: 1, ProcessEpoch: "epoch", Keys: map[string]ed25519.PublicKey{"test": pub}})
+// Capacity must never erase a live admission high-water mark: an older signed
+// grant could otherwise be replayed for the next twelve hours.
+func TestFullFenceTableRetainsAdmissionHighWaterMarks(t *testing.T) {
+	f := newFixture(t)
+	s, err := NewServer(f.verifier)
 	if err != nil {
 		t.Fatal(err)
 	}
 	soon := time.Now().Add(time.Hour).Unix()
-	s.mu.Lock()
 	for i := range MaxConnections {
-		id := fmt.Sprintf("account\x00endpoint-%d", i)
-		s.fences[id] = &grantFence{Grant{RelayGrant: peernetwork.RelayGrant{AccountID: "account", EndpointID: fmt.Sprintf("endpoint-%d", i), Generation: 1, ExpiresAt: soon + int64(i)}}}
+		endpoint := fmt.Sprintf("endpoint-%d", i)
+		s.fences["account\x00"+endpoint] = newGrantFence(Grant{RelayGrant: peernetwork.RelayGrant{AccountID: "account", EndpointID: endpoint, Generation: 5, ExpiresAt: soon + int64(i)}}, time.Now())
 	}
-	revoked := "account\x00endpoint-0"
-	s.fences[revoked] = &grantFence{Grant{RelayGrant: peernetwork.RelayGrant{Generation: 5, ExpiresAt: soon}}} // a revocation: no signed grant
-	if !s.evictIdleFenceLocked() {
-		t.Fatal("a full table with idle admission fences made no room")
+	cert := certificate(t)
+	g := f.grant(key.NewNode().Public(), cert, "new_endpoint")
+	if err := s.admit(&peerConn{}, g, time.Now()); !errors.Is(err, ErrOverload) {
+		t.Fatalf("full fence table accepted new endpoint: %v", err)
 	}
-	if s.fences[revoked] == nil || len(s.fences) != MaxConnections-1 {
-		t.Fatalf("evicted the revocation fence or the wrong count: %d", len(s.fences))
+	if len(s.fences) != MaxConnections || s.fences["account\x00endpoint-0"] == nil {
+		t.Fatal("capacity evicted an admission high-water mark")
 	}
-	if s.fences["account\x00endpoint-1"] != nil {
-		t.Fatal("did not drop the admission fence that ends soonest")
+	g.EndpointID, g.Generation = "endpoint-0", 1
+	if err := s.admit(&peerConn{}, g, time.Now()); !errors.Is(err, ErrAdmission) {
+		t.Fatalf("older grant was readmitted after capacity pressure: %v", err)
 	}
-	for id, f := range s.fences {
-		s.fences[id] = &grantFence{Grant{RelayGrant: peernetwork.RelayGrant{Generation: 2, ExpiresAt: f.ExpiresAt}}}
+	if err := s.Revoke("account", "new_revocation", 2); !errors.Is(err, ErrOverload) {
+		t.Fatalf("unbounded revocation admission: %v", err)
 	}
-	if s.evictIdleFenceLocked() {
-		t.Fatal("dropped a revocation fence")
+	if err := s.Revoke("account", "endpoint-0", 6); err != nil {
+		t.Fatalf("existing endpoint could not be revoked at capacity: %v", err)
 	}
-	s.mu.Unlock()
+	if s.fences["account\x00endpoint-1"] == nil {
+		t.Fatal("revocation erased an unrelated fence")
+	}
+}
+
+func TestShorterGrantCannotExpireItsReplayFence(t *testing.T) {
+	f := newFixture(t)
+	s, err := NewServer(f.verifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	g := f.grant(key.NewNode().Public(), certificate(t), "endpoint")
+	g.Generation, g.ExpiresAt = 3, now.Add(time.Second).Unix()
+	if err := s.admit(&peerConn{}, g, now); err != nil {
+		t.Fatal(err)
+	}
+	if s.fences[grantID(g)].ExpiresAt != g.ExpiresAt {
+		t.Fatal("retention extended authorization expiry")
+	}
+	s.peers = make(map[key.NodePublic]*peerConn) // endpoint disconnected
+	old := g
+	old.Generation, old.ExpiresAt = 2, now.Add(time.Hour).Unix()
+	if err := s.admit(&peerConn{}, old, now.Add(2*time.Second)); !errors.Is(err, ErrAdmission) {
+		t.Fatalf("older long-lived grant replayed after newer grant expiry: %v", err)
+	}
 }

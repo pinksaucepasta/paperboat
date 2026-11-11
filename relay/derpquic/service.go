@@ -198,7 +198,16 @@ func (s *Server) tryControlService(p *peerConn, msg packet) bool {
 
 // A fence is retained only while its signed authority is continuously compatible.
 // Revoke and incompatible renewals replace the record, permanently fencing old leases.
-type grantFence struct{ Grant }
+// A high-water mark must outlive every older signed grant, even when its own
+// grant expires sooner. Retention never extends that grant's authority.
+type grantFence struct {
+	Grant
+	retainUntil int64
+}
+
+func newGrantFence(g Grant, now time.Time) *grantFence {
+	return &grantFence{Grant: g, retainUntil: now.Add(MaxGrantLifetime + MaxClockSkew).Unix()}
+}
 
 func grantID(g Grant) string { return g.AccountID + "\x00" + g.EndpointID }
 func sameGrantAuthority(a, b Grant) bool {
