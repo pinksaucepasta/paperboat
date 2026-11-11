@@ -1,7 +1,8 @@
 # Runs in the signed-in desktop session (windows_console_flash.py starts it through an interactive scheduled task).
 # Starts -Exe DETACHED (-Inherit: with this script's console, like a command the user types in their terminal) (no console, like a service, the updater or a RunOnce entry) and watches the desktop for
 # new visible console windows until -Seconds after it exits. Writes JSON to -Out. Exit 1 on a flash.
-param([string]$Exe, [string]$ArgumentLine = '', [int]$Seconds = 30, [int]$Timeout = 0, [string]$Log = '', [string]$PathPrepend = '', [switch]$Inherit, [string]$Out, [switch]$Control)
+# -Watch (sign-in mode, started by a logon task): -Exe/-ArgumentLine are a control (plain cmd.exe, must open a window), then only watch the desktop for -Seconds.
+param([string]$Exe, [string]$ArgumentLine = '', [int]$Seconds = 30, [int]$Timeout = 0, [string]$Log = '', [string]$PathPrepend = '', [switch]$Inherit, [string]$Out, [switch]$Control, [switch]$Watch)
 Add-Type -TypeDefinition @'
 using System; using System.Collections.Generic; using System.Runtime.InteropServices; using System.Text;
 public static class Win {
@@ -34,7 +35,7 @@ public static class Win {
     bool ok = CreateProcessW(null, new StringBuilder(cmd), IntPtr.Zero, IntPtr.Zero, inherit, inherit_console ? 0u : 0x00000008u, IntPtr.Zero, null, ref si, out pi);
     if (file != IntPtr.Zero) CloseHandle(file);
     if (!ok) throw new System.ComponentModel.Win32Exception();
-    pid = pi.pid; if (WaitForSingleObject(pi.hp, timeoutMs) != 0) return -1; uint code; GetExitCodeProcess(pi.hp, out code); return (int)code; }
+    pid = pi.pid; if (WaitForSingleObject(pi.hp, timeoutMs) != 0) { var k = new System.Diagnostics.ProcessStartInfo("taskkill.exe", "/T /F /PID " + pi.pid); k.CreateNoWindow = true; k.UseShellExecute = false; System.Diagnostics.Process.Start(k).WaitForExit(); return -1; } uint code; GetExitCodeProcess(pi.hp, out code); return (int)code; }
 }
 '@
 $suspect = 'ConsoleWindowClass', 'CASCADIA_HOSTING_WINDOW_CLASS', 'PseudoConsoleWindow'
@@ -52,6 +53,7 @@ $base = @{}; foreach ($w in [Win]::Visible()) { $base[($w -split '\|')[0]] = 1 }
 Write-Output "baseline windows: $($base.Count)"
 if ($PathPrepend) { $env:PATH = $PathPrepend + ';' + $env:PATH }  # the child inherits it
 $cmd = '"' + $Exe + '" ' + $ArgumentLine
+$watchSeconds = $Seconds; if ($Watch) { $Seconds = 2 }
 $pidOut = [uint32]0; $code = $null; $job = $null
 $job = [powerShell]::Create().AddScript({ param($c, $ms, $l, $i) $p = [uint32]0; [Win]::RunDetached($c, $ms, $l, $i, [ref]$p) }).AddArgument($cmd).AddArgument([uint32](($(if ($Timeout) { $Timeout } else { $Seconds })) * 1000)).AddArgument($Log).AddArgument([bool]$Inherit)
 $handle = $job.BeginInvoke()
@@ -63,11 +65,20 @@ while ($true) {
   if ($end -and (Get-Date) -gt $end) { break }
   Start-Sleep -Milliseconds 25
 }
+$controlFlashes = @()
+if ($Watch) {  # the control ran above; forget it and watch the sign-in
+  $controlFlashes = @($seen.Values | Where-Object { $suspect -contains $_.class -or $names -contains $_.process })
+  $seen.Clear(); $base = @{}; foreach ($w in [Win]::Visible()) { $base[($w -split '\|')[0]] = 1 }
+  $watchStart = (Get-Date).ToString('o'); Write-Output "watching $watchSeconds s from $watchStart"
+  $end = (Get-Date).AddSeconds($watchSeconds)
+  while ((Get-Date) -lt $end) { Sample $base; Start-Sleep -Milliseconds 25 }
+}
 Write-Output "finished, windows seen: $($seen.Count)"
 $code = $job.EndInvoke($handle)
 if ($job.Streams.Error.Count) { Write-Output ('runspace error: ' + $job.Streams.Error[0]) }
 $flashes = @($seen.Values | Where-Object { $suspect -contains $_.class -or $names -contains $_.process })
-$result = [ordered]@{ command = $cmd; exit = ($code | Select-Object -First 1); control = [bool]$Control; flashes = $flashes }
+$result = [ordered]@{ command = $cmd; exit = ($code | Select-Object -First 1); control = [bool]$Control; watch = [bool]$Watch; control_flashes = $controlFlashes.Count; started = $watchStart; flashes = $flashes }
 $result | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 -Path $Out
 if ($Control) { exit $(if ($flashes.Count -gt 0) { 0 } else { 1 }) }  # the control must show a window, else the detector is blind
+if ($Watch -and $controlFlashes.Count -eq 0) { exit 1 }  # a blind watcher proves nothing
 exit $(if ($flashes.Count -eq 0) { 0 } else { 1 })
