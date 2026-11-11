@@ -14,8 +14,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
+	"testing"
 	"time"
 
 	"github.com/miekg/dns"
@@ -26,6 +28,27 @@ import (
 // relayed native traffic go through it; certificates come from Pebble (Let's Encrypt's test CA, validation off).
 
 const e2ePebbleImage = "ghcr.io/letsencrypt/pebble:2.7.0"
+
+// e2ePorts are the host ports of Pebble and the edge, each free when allocated (see freePort). The edge's public
+// HTTPS and HTTP listeners stay on 443 and 80: production's names carry no port, and the server dials 443.
+type e2ePorts struct{ acme, pebbleManagement, listen, tunnelTCP, tunnelQUIC, relayTCP, relayQUIC string }
+
+func allocateE2EPorts(t *testing.T, host string, taken ...string) e2ePorts {
+	used := map[string]bool{}
+	for _, port := range taken {
+		used[port] = true
+	}
+	next := func() string {
+		for {
+			port := freePort(t, host)
+			if !used[port] {
+				used[port] = true
+				return port
+			}
+		}
+	}
+	return e2ePorts{acme: next(), pebbleManagement: next(), listen: next(), tunnelTCP: next(), tunnelQUIC: next(), relayTCP: next(), relayQUIC: next()}
+}
 
 // buildEdge builds the edge and relay binaries and the installation supervisor (relay/selfhost TestE2ESelfhostNode).
 func (e *e2eCore) buildEdge() error {
@@ -50,7 +73,7 @@ func (e *e2eCore) buildEdge() error {
 // startPebble runs Pebble with validation off and keeps its TLS root for the server's ACME client.
 func (e *e2eCore) startPebble() error {
 	_, _ = e.run(time.Minute, "docker", "rm", "-f", "e2e-pebble")
-	if _, err := e.run(5*time.Minute, "docker", "run", "-d", "--name", "e2e-pebble", "-p", "127.0.0.1:14000:14000", "-p", "127.0.0.1:15000:15000",
+	if _, err := e.run(5*time.Minute, "docker", "run", "-d", "--name", "e2e-pebble", "-p", "127.0.0.1:"+e.ports.acme+":14000", "-p", "127.0.0.1:"+e.ports.pebbleManagement+":15000",
 		"-e", "PEBBLE_VA_ALWAYS_VALID=1", "-e", "PEBBLE_VA_NOSLEEP=1", e2ePebbleImage); err != nil {
 		return err
 	}
@@ -61,7 +84,14 @@ func (e *e2eCore) startPebble() error {
 	if err != nil {
 		return err
 	}
-	return waitFor(time.Minute, func() error { return getOK(client, "https://localhost:14000/dir") })
+	return waitFor(time.Minute, func() error { return getOK(client, e.acmeDirectory()) })
+}
+
+func (e *e2eCore) acmeDirectory() string { return "https://localhost:" + e.ports.acme + "/dir" }
+
+func atoi(port string) int {
+	n, _ := strconv.Atoi(port) // allocated by freePort: always a number
+	return n
 }
 
 // startCAAResolver answers every DNS question with NXDOMAIN: no CAA record, so any issuer may issue.
@@ -84,10 +114,10 @@ func (e *e2eCore) startCAAResolver() error {
 // startEdge runs the installation supervisor; the first start writes claim.json, a restart serves the claimed edge.
 func (e *e2eCore) startEdge() error {
 	config, err := json.Marshal(map[string]any{
-		"name": "e2e-edge", "endpoint_host": e.gateway, "listen": net.JoinHostPort(e.gateway, "18443"),
+		"name": "e2e-edge", "endpoint_host": e.gateway, "listen": net.JoinHostPort(e.gateway, e.ports.listen),
 		"components": []map[string]any{
-			{"capability": "tunnel", "tcp_port": 27443, "quic_port": 27444, "region": "e2e", "failure_domain": "e2e", "capacity_limit": 128},
-			{"capability": "relay", "tcp_port": 27445, "quic_port": 27446, "region": "e2e", "failure_domain": "e2e", "capacity_limit": 128},
+			{"capability": "tunnel", "tcp_port": atoi(e.ports.tunnelTCP), "quic_port": atoi(e.ports.tunnelQUIC), "region": "e2e", "failure_domain": "e2e", "capacity_limit": 128},
+			{"capability": "relay", "tcp_port": atoi(e.ports.relayTCP), "quic_port": atoi(e.ports.relayQUIC), "region": "e2e", "failure_domain": "e2e", "capacity_limit": 128},
 		},
 		"preview_domain": "public.example.test", "tunnel_domain": "public.example.test", "runtime_domain": "runtime.example.test",
 		"control_ca":             filepath.Join(e.work, "ca.pem"),
@@ -341,7 +371,7 @@ func (e *e2eCore) pebbleRoots() error {
 	if err != nil {
 		return err
 	}
-	response, err := client.Get("https://localhost:15000/roots/0")
+	response, err := client.Get("https://localhost:" + e.ports.pebbleManagement + "/roots/0")
 	if err != nil {
 		return err
 	}
