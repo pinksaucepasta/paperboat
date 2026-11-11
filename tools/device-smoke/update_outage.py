@@ -7,7 +7,7 @@ longest stretch with no probe completing (the method of the Windows measurement 
 20261111.json, so the number is comparable). The check passes when the window is at most --budget seconds and there
 is exactly one such outage. Containers come from `control_outage.py setup`.
 """
-import argparse, json, sys, time
+import argparse, base64, json, sys, time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -36,8 +36,9 @@ def main():
     args = parser.parse_args()
     host = args.host
     probe_script = "/home/pbt/update_probe.py"
-    c.in_ct(host, c.NAMES["a"], f"cat > {probe_script} <<'PY'\n{PROBE}\nPY", 30)
-    c.in_ct(host, c.NAMES["a"], f"rm -f /tmp/update-probe.log; nohup python3 {probe_script} {args.seconds} {c.NAMES['b']} < /dev/null > /tmp/update-probe.log 2>&1 &", 30)
+    encoded = base64.b64encode(PROBE.encode()).decode()
+    c.in_ct(host, c.NAMES["a"], f"echo {encoded} | base64 -d > {probe_script}", 30)
+    c.detached(host, c.NAMES["a"], f"rm -f /tmp/update-probe.log; python3 {probe_script} {args.seconds} {c.NAMES['b']} < /dev/null > /tmp/update-probe.log 2>&1")
     time.sleep(20)  # warm: the probe completes before the install starts
     # The install is timed on the container's clock, the same clock the probe log uses.
     rc, out = c.in_ct(host, c.NAMES["b"], 'date +%s.%N; ./pb install >/dev/null 2>&1; echo rc=$?; date +%s.%N', 300)

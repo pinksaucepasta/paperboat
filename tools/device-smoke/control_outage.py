@@ -18,7 +18,7 @@ Checks (every one is a line in the result JSON; the drill exits 1 on any FAIL):
              r is still refused
 TOKEN_CMD prints one enrollment token on stdout for the machine name given as its last argument.
 """
-import argparse, json, os, re, subprocess, sys, time
+import argparse, json, os, re, shlex, subprocess, sys, time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -31,6 +31,11 @@ PB = ".local/bin/pb"
 def host_run(host, script, timeout=120):
     done = subprocess.run(["ssh", "-o", "BatchMode=yes", host, script], capture_output=True, text=True, timeout=timeout)
     return done.returncode, (done.stdout + done.stderr)
+
+
+def detached(host, ct, script):
+    """Start a long-running shell script in the container and return at once (docker exec -d)."""
+    return host_run(host, f"sudo -n docker exec -d -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 -w /home/pbt {ct} sh -c {shlex.quote(script)}", 60)
 
 
 def in_ct(host, ct, command, timeout=120):
@@ -124,19 +129,28 @@ def drill(args):
         res.add(f"baseline exec {src}->{dst}", ok, detail)
     ok, detail = eventually(lambda: exec_ok(host, "r", "b", "baseline-rb"), 120)
     res.add("baseline exec r->b before sign-out", ok, detail)
-    in_ct(host, NAMES["r"], f"{PB} logout", 60)
+    revoke = subprocess.run(["python3", str(HERE / "cleanup_test_account.py"), "--id", load()["ids"]["r"], "--stale", "0 seconds", "--apply"], capture_output=True, text=True, timeout=300)
+    res.add("machine r revoked by exact id", revoke.returncode == 0, revoke.stdout[-120:] + revoke.stderr[-120:])
     ok, detail = eventually(lambda: refused(host, "r", "b"), 240)
     res.add("revoked machine r is refused (control plane up)", ok, detail)
     # long sessions across the outage
     long_seconds = args.outage_seconds + 120
     for src, dst in (("a", "b"), ("b", "a")):
         tag = f"long-{src}{dst}"
-        in_ct(host, NAMES[src], f"rm -f /tmp/{tag}.out /tmp/{tag}.rc; nohup sh -c '{PB} exec {NAMES[dst]} -- sh -c \"sleep {long_seconds}; echo {tag}-done\" < /dev/null > /tmp/{tag}.out 2>&1; echo $? > /tmp/{tag}.rc' >/dev/null 2>&1 &", 30)
+        detached(host, NAMES[src], f"rm -f /tmp/{tag}.out /tmp/{tag}.rc; {PB} exec {NAMES[dst]} -- sh -c 'sleep {long_seconds}; echo {tag}-done' < /dev/null > /tmp/{tag}.out 2>&1; echo $? > /tmp/{tag}.rc")
     time.sleep(15)
     # the outage
     stopped = time.time()
     rc, out = host_run(host, f"sudo -n docker stop -t 20 {args.server_container}", 120)
     res.add("control plane stopped", rc == 0, out.strip()[-120:])
+    try:
+        outage_checks(host, res, args, stopped)
+    finally:
+        host_run(host, f"sudo -n docker start {args.server_container}", 120)  # never leave staging stopped
+    return finish(host, res, args, stopped)
+
+
+def outage_checks(host, res, args, stopped):
     for label, at in (("30 s", 30), ("5 min", 300), ("end", args.outage_seconds - 20)):
         time.sleep(max(0, stopped + at - time.time()))
         for src, dst in (("a", "b"), ("b", "a")):
@@ -153,7 +167,10 @@ def drill(args):
         res.add(f"outage {label}: pb status shows the control plane as unreachable", ok, detail)
     rc, out = in_ct(host, NAMES["a"], f"{PB} doctor", 120)
     res.add("outage: pb doctor runs and names the control plane", rc in (0, 1) and ("control" in out.lower() or "paperboat" in out.lower()), out.strip()[:200])
-    # recovery
+    time.sleep(max(0, stopped + args.outage_seconds - time.time()))
+
+
+def finish(host, res, args, stopped):
     time.sleep(max(0, stopped + args.outage_seconds - time.time()))
     rc, out = host_run(host, f"sudo -n docker start {args.server_container}", 120)
     res.add("control plane started", rc == 0, out.strip()[-120:])
