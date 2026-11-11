@@ -3,6 +3,7 @@ package tunnel
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 
@@ -79,5 +80,18 @@ func TestCursorTerminalTellsARecordingObserverAtOnce(t *testing.T) {
 	helper.recordingState.report(false)
 	if len(got) != 2 || got[1] {
 		t.Fatalf("a change was not delivered in order: %v", got)
+	}
+}
+
+// The reconnect supervisor and the local API both observe one link; neither may replace the other's registration.
+func TestRecordingStateTellsEveryObserver(t *testing.T) {
+	var state recordingState
+	var first, second []bool
+	state.observe(func(recording bool) { first = append(first, recording) })
+	state.report(true)
+	state.observe(func(recording bool) { second = append(second, recording) })
+	state.report(false)
+	if fmt.Sprint(first) != "[true false]" || fmt.Sprint(second) != "[true false]" {
+		t.Fatalf("first %v second %v", first, second)
 	}
 }
