@@ -1,0 +1,37 @@
+F3-11 Windows client, pb terminal vs plain ssh, 2026-11-11 (sanitized): client winpool-1 (pb dev-bb5a53336, local ConPTY driver, no controller hop), target hp, same flood
+
+== typing latency (200 keystrokes per run, 3 runs each interleaved; flood = yes in a second session on hp reading its output) ==
+cell(3 pooled)    n      p50      p99      max      min     mean
+pb/idle       600    246.9    327.3    358.6    233.1    255.5
+pb/flood      600    247.4    316.4    499.0    232.9    253.8
+ssh/idle      600    447.0    479.7    694.7    416.6    441.9
+ssh/flood     600    447.8    685.7   2007.3    251.2    452.5
+
+added delay under flood (flood - idle):
+  pb: p50 +0.4 ms, p99 -10.9 ms
+  ssh: p50 +0.8 ms, p99 +206.0 ms
+
+== Ctrl-C under flood (yes + 256 KiB paste, pb with a never-reading second viewer; quiet = last output byte minus Ctrl-C, 1 s quiet threshold) ==
+pb (5 runs, interleaved):
+c1-pb-flood quiet=0.61s bytes_after=346493 answered=true
+c3-pb-flood quiet=1.38s bytes_after=1217842 answered=true
+c5-pb-flood quiet=0.78s bytes_after=647790 answered=true
+c7-pb-flood quiet=0.98s bytes_after=851993 answered=true
+c9-pb-flood quiet=0.91s bytes_after=661828 answered=true
+
+ssh (5 runs, interleaved, via oracle -> 127.0.0.1:12211 -> ssh -N -L to hp:22, no second viewer):
+c2-ssh-flood TIMEOUT 60s bytes_in_60s=50607609 answered=false
+c4-ssh-flood TIMEOUT 60s bytes_in_60s=56719107 answered=false
+c6-ssh-flood TIMEOUT 60s bytes_in_60s=51118167 answered=false
+c8-ssh-flood TIMEOUT 60s bytes_in_60s=56344927 answered=false
+c10-ssh-flood TIMEOUT 60s bytes_in_60s=56587644 answered=false
+
+Baseline without paste (debug, same driver -pasteKB 0):
+pb nopaste + stalled viewer: quiet=2.37s bytes_after=1818617 answered=true
+ssh nopaste, no viewer: quiet=1.66s bytes_after=1035730 answered=true
+
+Oracle-hop bias: ssh path is winpool-1 -> oracle public IP -> 127.0.0.1:12211 L-tunnel -> hp:22 (one extra TCP forward + one extra ssh -L hop vs pb peer-to-peer/relay). Prior latency work (results/SUMMARY.txt) shows ssh p50 ~447ms vs pb p50 ~247ms (+200ms) from this hop + ssh overhead. For the flood case the bias is negligible next to the 60s-vs-1s gap: the extra ~0.2-0.4s RTT cannot explain ssh never stopping. If anything the hop flatters pb (ssh numbers are slightly inflated), yet pb still stops ~60x sooner with the paste, and ssh is faster only in the nopaste baseline where no backlog blocks the 0x03.
+
+Result: pb is NOT slower than plain ssh under the specified flood (paste+yes+stalled viewer). pb stops in 0.6-1.4s and the shell answers; plain ssh never stops within 60s (50-56MB still flowing, shell never answers because the driver gives up before asking). Per task, no host fanout/discard / client hold / ConPTY read-size delay analysis required.
+
+Notes: ssh path has one extra oracle hop (+~200 ms baseline typing latency, negligible against 60 s). Plain ssh without the paste also stops (1.66 s); the 256 KiB paste queues the 0x03 behind data the flooding yes never reads. Driver stays in scratch (not committed); the committed pb-only check is cli/internal/hostruntime/pty TestDeviceClientCtrlCUnderFlood (bound 5 s).
