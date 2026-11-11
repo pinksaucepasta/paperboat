@@ -10,15 +10,16 @@ server, then the server container is stopped for --outage-seconds and started ag
 
 Checks (every one is a line in the result JSON; the drill exits 1 on any FAIL):
   baseline   exec a->b and b->a work; r is refused after it signed out (a revoked machine stays refused)
-  outage     a long exec each way started before the stop is still running; new exec a->b and b->a, new
-             `pb ssh` a->b, start from the access rules the host holds at 30 s, 5 min and the end of the outage;
+  outage     a long exec each way started before the stop is still running; new exec a->b and b->a, a new
+             terminal (`pb connect`) a->b, new `pb ssh` a->b, start from the access rules the host holds at 30 s,
+             5 min and the end of the outage;
              r is still refused; pb status shows "Control plane is unavailable" (the staging stack has no relay, so a
              "No relay is usable" warning is present throughout and is not part of the check)
   recovery   pb status is healthy again, both long execs finished rc 0 with their output, new exec works,
              r is still refused
 TOKEN_CMD prints one enrollment token on stdout for the machine name given as its last argument.
 """
-import argparse, json, os, re, shlex, subprocess, sys, time
+import argparse, base64, json, os, re, shlex, subprocess, sys, time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -93,6 +94,18 @@ def machine_id(status_json, alias):
 def exec_ok(host, src, dst, marker, timeout=90):
     rc, out = in_ct(host, NAMES[src], f"{PB} exec {NAMES[dst]} -- echo {marker}", timeout)
     return rc == 0 and marker in out, out.strip()[-200:]
+
+
+def terminal_ok(host, src, dst, marker):
+    """A new `pb connect` session with the control plane unreachable: type a command and look for its result (the typed
+    text shows $((6*7)); only the shell on the machine prints 42). The script goes in as base64 so no shell expands it."""
+    script = f"""#!/bin/bash
+(sleep 12; printf 'echo {marker}-$((6*7))\\n'; sleep 3; printf 'exit\\n'; sleep 3) | timeout 80 script -qec '{PB} connect {NAMES[dst]}' /dev/null 2>&1 | tr -d '\\r'
+"""
+    encoded = base64.b64encode(script.encode()).decode()
+    in_ct(host, NAMES[src], f"echo {encoded} | base64 -d > /tmp/term-{marker}.sh", 30)
+    rc, out = in_ct(host, NAMES[src], f"bash /tmp/term-{marker}.sh", 100)
+    return f"{marker}-42" in out, out.strip()[-160:]
 
 
 def refused(host, src, dst, timeout=90):
@@ -172,6 +185,8 @@ def outage_checks(host, res, args, stopped):
         for src, dst in (("a", "b"), ("b", "a")):
             ok, detail = eventually(lambda: exec_ok(host, src, dst, f"outage-{label.replace(' ', '')}-{src}{dst}"), 60, 10)
             res.add(f"outage {label}: new exec {src}->{dst}", ok, detail)
+        ok, detail = eventually(lambda: terminal_ok(host, "a", "b", f"outage-{label.replace(' ', '')}-term"), 60, 10)
+        res.add(f"outage {label}: new pb connect terminal a->b", ok, detail)
         rc, out = in_ct(host, NAMES["a"], f"{PB} ssh {NAMES['b']} -- echo outage-ssh", 90)
         res.add(f"outage {label}: new pb ssh a->b", rc == 0 and "outage-ssh" in out, out.strip()[-200:])
         ok, detail = refused(host, "r", "b")
