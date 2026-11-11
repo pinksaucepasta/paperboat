@@ -16,7 +16,20 @@ type RecordingController interface {
 	RecordingControl(ctx context.Context, action string) (*wire.State, error)
 }
 
+// The native terminal pb connect carries is a cursorTerminal around its helper link, and the daemon registers the
+// terminal it dialed: both types must be controllers, or `pb recordings start|stop` never finds the attachment.
+var (
+	_ RecordingController = (*helperTerminalConn)(nil)
+	_ RecordingController = (*cursorTerminal)(nil)
+)
+
 func (c *helperTerminalConn) RecordingSessionID() string { return c.target.SessionID }
+
+func (c *cursorTerminal) RecordingSessionID() string { return c.helper.RecordingSessionID() }
+
+func (c *cursorTerminal) RecordingControl(ctx context.Context, action string) (*wire.State, error) {
+	return c.helper.RecordingControl(ctx, action)
+}
 
 // RecordingControl sends record-start or record-stop on this attachment and returns the recording
 // that runs now (nil after a stop). Refusals come back as the host's error code.
