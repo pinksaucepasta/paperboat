@@ -1,0 +1,12 @@
+{
+  "commit": "099fdd9b2eee0150b2fbf3a90649aafdb597b432",
+  "row": "F21-172",
+  "check": "TestPreviewDispatchUncertainWritesOnPostgres",
+  "command": "tools/remote-test.sh <postgres-test-host> server -count=1 ./internal/db ./internal/previewtunnelstore",
+  "exit_code": 0,
+  "packages": {
+    "internal/db": "PASS 72.651s",
+    "internal/previewtunnelstore": "PASS 4.921s"
+  },
+  "database": "fresh isolated database per package; migrations 291/292 applied"
+}
