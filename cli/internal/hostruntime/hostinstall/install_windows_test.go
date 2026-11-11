@@ -630,9 +630,21 @@ func TestWindowsActivationWiring(t *testing.T) {
 		note(fmt.Sprintf("network:staged=%v", upgrade == staged))
 		return nil
 	}
-	ops.writeConfig = func(config WindowsRuntimeConfig, _ string) error { note("config:" + config.TokenFile); return nil }
+	var configuredSocket string
+	ops.writeConfig = func(config WindowsRuntimeConfig, _ string) error {
+		configuredSocket = config.HostdSocket
+		note("config:" + config.TokenFile)
+		return nil
+	}
 	ops.startRoles = func(context.Context, Request, service.Layout, string) error { note("roles"); return nil }
-	ops.awaitHostd = func(context.Context, string, string) error { note("hostd-serving"); return nil }
+	ops.awaitHostd = func(_ context.Context, socket, tokenFile string) error {
+		// the new generation's own pipe and token, not the handover source's
+		if socket == "" || socket != configuredSocket || tokenFile != `C:\root\token` {
+			t.Errorf("awaited socket %q token %q, want the configured socket %q and C:\\root\\token", socket, tokenFile, configuredSocket)
+		}
+		note("hostd-serving")
+		return nil
+	}
 
 	layout, err := service.WindowsUserLayout("S-1-5-21-111-222-333-1001")
 	if err != nil {
