@@ -18,20 +18,22 @@ import (
 // An edge serving public TCP tunnels needs three things from its host: an outgoing (ephemeral) port
 // range clear of the public range, a host firewall that lets 443 and the public range in, and (which
 // pbh cannot change) a cloud firewall that does the same. pbh sets up the first two on install and
-// serve, removes exactly what it added on uninstall, and names the third.
+// serve, removes exactly what it added on uninstall, and names the third. It also applies the
+// per-address connection limits (edge_guard.go).
 
 const (
 	sysctlPath        = "/etc/sysctl.d/90-paperboat-edge.conf"
 	outgoingProcPath  = "/proc/sys/net/ipv4/ip_local_port_range"
 	hostnetRecordFile = "hostnet.json"
+	edgeGuardFile     = "edge-guard.nft"
 	firewallComment   = "paperboat-edge"
 )
 
 // hostPaths are the files pbh reads and writes; tests point them at a temp directory.
-type hostPaths struct{ sysctl, proc, record string }
+type hostPaths struct{ sysctl, proc, record, guard string }
 
 func defaultHostPaths(stateDir string) hostPaths {
-	return hostPaths{sysctl: sysctlPath, proc: outgoingProcPath, record: filepath.Join(stateDir, hostnetRecordFile)}
+	return hostPaths{sysctl: sysctlPath, proc: outgoingProcPath, record: filepath.Join(stateDir, hostnetRecordFile), guard: filepath.Join(stateDir, edgeGuardFile)}
 }
 
 // commander runs one host command and returns its combined output.
@@ -50,6 +52,7 @@ type hostnetRecord struct {
 	Added            []string `json:"added,omitempty"`
 	SysctlWritten    bool     `json:"sysctl_written,omitempty"`
 	PreviousOutgoing string   `json:"previous_outgoing,omitempty"`
+	Guard            bool     `json:"guard,omitempty"`
 }
 
 func readHostnetRecord(path string) (hostnetRecord, error) {
@@ -109,6 +112,10 @@ func setupHostNetwork(ctx context.Context, run commander, paths hostPaths, out i
 		fmt.Fprintf(out, "Host firewall (%s): TCP 443 and %d-%d allowed.\n", record.Firewall, edgeports.PublicTCPMin, edgeports.PublicTCPMax)
 	} else {
 		fmt.Fprintln(out, "No active host firewall found; nothing to open on this host.")
+	}
+	if err := setupEdgeGuard(ctx, run, paths, &record, out); err != nil {
+		_ = writeHostnetRecord(paths.record, record)
+		return err
 	}
 	fmt.Fprintf(out, "If this host sits behind a cloud firewall (security group, security list, VPC firewall), %s. pbh cannot change it from the host; run pbh doctor to check.\n", cloudRule())
 	return writeHostnetRecord(paths.record, record)
@@ -342,15 +349,22 @@ func firewallRemove(ctx context.Context, run commander, kind string, added []str
 	return errors.Join(errs...)
 }
 
-// reapplyHostFirewall re-adds a runtime-only rule (iptables, nft) after a reboot; the service calls it
-// on every start. ufw and firewalld rules persist on their own.
+// reapplyHostFirewall re-adds a runtime-only rule (iptables, nft) and the edge guard after a reboot;
+// the service calls it on every start. ufw and firewalld rules persist on their own.
 func reapplyHostFirewall(ctx context.Context, run commander, paths hostPaths, out io.Writer) {
 	record, err := readHostnetRecord(paths.record)
-	if err != nil || (record.Firewall != "iptables" && record.Firewall != "nft") {
+	if err != nil {
 		return
 	}
-	if _, err := firewallAdd(ctx, run, record.Firewall); err != nil {
-		fmt.Fprintf(out, "pbh: could not re-open the %s host firewall for the public TCP range: %v\n", record.Firewall, err)
+	if record.Firewall == "iptables" || record.Firewall == "nft" {
+		if _, err := firewallAdd(ctx, run, record.Firewall); err != nil {
+			fmt.Fprintf(out, "pbh: could not re-open the %s host firewall for the public TCP range: %v\n", record.Firewall, err)
+		}
+	}
+	if record.Guard {
+		if _, err := applyEdgeGuard(ctx, run, paths.guard); err != nil {
+			fmt.Fprintf(out, "pbh: could not re-apply the per-address connection limits (nftables table %s): %v\n", edgeGuardTable, err)
+		}
 	}
 }
 
@@ -367,6 +381,14 @@ func removeHostNetwork(ctx context.Context, run commander, paths hostPaths, out 
 			errs = append(errs, fmt.Errorf("remove %s rules: %w", record.Firewall, err))
 		} else {
 			fmt.Fprintf(out, "Removed the %s host firewall rules pbh added.\n", record.Firewall)
+		}
+	}
+	if record.Guard {
+		if err := removeEdgeGuard(ctx, run); err != nil {
+			errs = append(errs, fmt.Errorf("remove nftables table %s: %w", edgeGuardTable, err))
+		} else {
+			_ = os.Remove(paths.guard)
+			fmt.Fprintln(out, "Removed the per-address connection limits.")
 		}
 	}
 	if record.SysctlWritten {

@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,7 +22,7 @@ type fakeHost struct {
 
 func newFakeHost(t *testing.T, outgoing string) *fakeHost {
 	dir := t.TempDir()
-	f := &fakeHost{paths: hostPaths{sysctl: filepath.Join(dir, "sysctl.conf"), proc: filepath.Join(dir, "range"), record: filepath.Join(dir, "hostnet.json")}, answers: map[string]string{}}
+	f := &fakeHost{paths: hostPaths{sysctl: filepath.Join(dir, "sysctl.conf"), proc: filepath.Join(dir, "range"), record: filepath.Join(dir, "hostnet.json"), guard: filepath.Join(dir, "edge-guard.nft")}, answers: map[string]string{}}
 	if err := os.WriteFile(f.paths.proc, []byte(outgoing+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -38,6 +40,9 @@ func (f *fakeHost) run(_ context.Context, name string, args ...string) (string, 
 	}
 	if out, ok := f.answers[line]; ok {
 		return out, nil
+	}
+	if name == "nft" {
+		return "", fmt.Errorf("%s: %w", line, exec.ErrNotFound) // a host without nftables
 	}
 	return "", errors.New("not found: " + line)
 }
@@ -189,5 +194,48 @@ func TestReapplyOnlyForRuntimeOnlyFirewalls(t *testing.T) {
 		if (len(f.calls) > 0) != wantCalls {
 			t.Errorf("%q: calls %v, want calls=%v", kind, f.calls, wantCalls)
 		}
+	}
+}
+
+// The per-address connection limits are one nftables table pbh applies on install, re-applies on every
+// service start and deletes on uninstall; a host without nft installs without them and is told.
+func TestEdgeGuardAppliedReappliedAndRemoved(t *testing.T) {
+	f := newFakeHost(t, "60000 65535")
+	apply := "nft -f " + f.paths.guard
+	list := "nft list table inet " + edgeGuardTable
+	f.answers[apply] = ""
+	var out strings.Builder
+	if err := setupHostNetwork(t.Context(), f.run, f.paths, &out); err != nil {
+		t.Fatal(err)
+	}
+	rules, _ := os.ReadFile(f.paths.guard)
+	for _, want := range []string{"table inet " + edgeGuardTable, "th dport { 443, 10000-59999 }", "limit rate over 100/second burst 200 packets", "ct count over 512", "ip6 saddr and ffff:ffff:ffff:ffff::"} {
+		if !strings.Contains(string(rules), want) {
+			t.Fatalf("guard rules miss %q:\n%s", want, rules)
+		}
+	}
+	if f.called(apply) != 1 || !strings.Contains(out.String(), "Per-address connection limits") {
+		t.Fatalf("guard not applied: %v\n%s", f.calls, out.String())
+	}
+	reapplyHostFirewall(t.Context(), f.run, f.paths, &out)
+	if f.called(apply) != 2 {
+		t.Fatalf("guard not re-applied on start: %v", f.calls)
+	}
+	f.answers[list] = "table inet " + edgeGuardTable
+	f.answers["nft delete table inet "+edgeGuardTable] = ""
+	if err := removeHostNetwork(t.Context(), f.run, f.paths, &out); err != nil {
+		t.Fatal(err)
+	}
+	if f.called("nft delete table inet "+edgeGuardTable) != 1 {
+		t.Fatalf("guard not removed: %v", f.calls)
+	}
+
+	bare := newFakeHost(t, "60000 65535")
+	out.Reset()
+	if err := setupHostNetwork(t.Context(), bare.run, bare.paths, &out); err != nil {
+		t.Fatalf("install failed without nft: %v", err)
+	}
+	if record, _ := readHostnetRecord(bare.paths.record); record.Guard || !strings.Contains(out.String(), "nftables (nft) is not installed") {
+		t.Fatalf("record %+v, output %q", record, out.String())
 	}
 }

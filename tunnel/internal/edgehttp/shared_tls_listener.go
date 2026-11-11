@@ -53,6 +53,10 @@ type SharedTLSListener struct {
 	routeGrace   func() time.Duration
 	holdableName func(string) bool
 	held         *holdSet
+	// handshakes is the per-address TLS handshake rate; names caps one name's share of the slots, so a
+	// flood aimed at one preview cannot starve every other name (edge abuse plan, L2 and L5).
+	handshakes *addressLimiter
+	names      *holdSet
 }
 
 // holdSet bounds the connections held during a takeover grace: overall, per name, and with a reserve of slots only
@@ -98,6 +102,12 @@ const (
 	takeoverHoldReserve = 64
 )
 
+// nameShare is the most connections one TLS name may hold of the listener's slots: a quarter.
+func nameShare(slots int) int { return max(1, slots/4) }
+
+var errNameShareFull = errors.New("one name holds its full share of the edge's TLS slots")
+var errHandshakeRate = errors.New("client address over its TLS handshake rate")
+
 // ServeUnknownNamesWithPage sets the TLS config (the edge certificate selector, wildcard fallback) used to
 // answer names that have no live decision with the branded not-found page instead of dropping TLS.
 func (l *SharedTLSListener) ServeUnknownNamesWithPage(config *tls.Config) {
@@ -117,7 +127,8 @@ func NewSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, r
 
 func newSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, routes *DataCarrierRouteRegistry, httpsHostname func(string) bool, slots chan struct{}, infrastructureHostname string, admittedHTTPSHostname func(string) bool, previewHTTPSAuthority func(context.Context, string) error, observe func(context.Context, string, error)) *SharedTLSListener {
 	ctx, cancel := context.WithCancel(context.Background())
-	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, admittedHTTPSHostname: admittedHTTPSHostname, previewHTTPSAuthority: previewHTTPSAuthority, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), held: newHoldSet(takeoverHoldMax, takeoverHoldPerName, takeoverHoldReserve), slots: slots, passthrough: make(chan struct{}, cap(slots)), https: make(chan struct{}, cap(slots)), forward: routes.ForwardPublicTCP, done: make(chan struct{}), onFailure: observe}
+	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, admittedHTTPSHostname: admittedHTTPSHostname, previewHTTPSAuthority: previewHTTPSAuthority, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), held: newHoldSet(takeoverHoldMax, takeoverHoldPerName, takeoverHoldReserve), slots: slots, passthrough: make(chan struct{}, cap(slots)), https: make(chan struct{}, cap(slots)), forward: routes.ForwardPublicTCP, done: make(chan struct{}), onFailure: observe,
+		handshakes: newAddressLimiter(addressHandshakeRate, addressRate{}, 0), names: newHoldSet(cap(slots), nameShare(cap(slots)), 0)}
 	go l.run()
 	return l
 }
@@ -134,6 +145,13 @@ func (l *SharedTLSListener) run() {
 			l.mu.Unlock()
 			l.cancel()
 			return
+		}
+		if host, _, err := net.SplitHostPort(conn.RemoteAddr().String()); err == nil {
+			if _, ok := l.handshakes.admit(host, false); !ok {
+				_ = conn.Close()
+				l.observe("tls_handshake_rate", errHandshakeRate)
+				continue
+			}
 		}
 		select {
 		case l.slots <- struct{}{}:
@@ -157,6 +175,17 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 		l.observe("tls_dispatch", err)
 		return
 	}
+	releaseName, ok := l.names.acquire(host, true)
+	if !ok {
+		l.observe("tls_name_share", errNameShareFull)
+		return
+	}
+	// The name's share is held for the connection's whole life; ownership moves with the connection.
+	defer func() {
+		if owned {
+			releaseName()
+		}
+	}()
 	ctx, cancel := context.WithTimeout(l.ctx, 2*time.Second)
 	decisions, err := l.authority.Snapshot(ctx)
 	cancel()
@@ -241,6 +270,7 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 		l.workers.Add(1)
 		go func() {
 			defer l.workers.Done()
+			defer releaseName()
 			defer func() { <-l.passthrough }()
 			defer conn.Close()
 			l.observe("public_tcp_stream", l.forward(l.ctx, replay, decision, l.authority.ResolveDecision))
@@ -263,7 +293,7 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 		return
 	}
 	owned = false
-	replay.(*replayTLSConn).release = func() { <-l.https }
+	replay.(*replayTLSConn).release = func() { <-l.https; releaseName() }
 	select {
 	case l.ready <- replay:
 	case <-l.ctx.Done():

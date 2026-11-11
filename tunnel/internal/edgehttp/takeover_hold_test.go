@@ -3,9 +3,11 @@ package edgehttp
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -158,5 +160,56 @@ func TestHTTPRouteHoldIsBounded(t *testing.T) {
 	policy.ServeHTTP(w, r)
 	if w.Code != 404 || time.Since(start) > 500*time.Millisecond {
 		t.Fatalf("a request past the hold bound: %d after %v, want 404 at once", w.Code, time.Since(start))
+	}
+}
+
+// One name may hold at most a quarter of the listener's slots for its connections' lives, so a flood
+// aimed at one preview cannot take every slot; a closed connection gives its share back.
+func TestSharedTLSNameShareIsBounded(t *testing.T) {
+	match, _ := browserTestMatch()
+	clientTLS, serverTLS, _, _, _ := task24Certificates(t, match.Host)
+	clientTLS.ServerName = match.Host
+	raw, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	defer registry.Close()
+	shared := newSharedTLSListener(raw, &quotaDeniedAuthority{}, registry, func(string) bool { return false }, make(chan struct{}, 4), "", func(string) bool { return true }, nil, nil)
+	server := &http.Server{TLSConfig: serverTLS, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })}
+	defer server.Close()
+	go server.ServeTLS(shared, "", "")
+	dial := func() (*tls.Conn, error) {
+		conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 2 * time.Second}, "tcp", raw.Addr().String(), clientTLS)
+		if err != nil {
+			return nil, err
+		}
+		// A refused connection is closed after the handshake would have started; a read shows which.
+		_ = conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		if _, err := conn.Read(make([]byte, 1)); err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
+			_ = conn.Close()
+			return nil, err
+		}
+		_ = conn.SetReadDeadline(time.Time{})
+		return conn, nil
+	}
+	first, err := dial()
+	if err != nil {
+		t.Fatalf("first connection: %v", err)
+	}
+	if second, err := dial(); err == nil {
+		second.Close()
+		t.Fatal("a second connection to the same name passed its 1-slot share")
+	}
+	first.Close()
+	for deadline := time.Now().Add(2 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		third, err := dial()
+		if err == nil {
+			third.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("share not given back after close: %v", err)
+		}
 	}
 }

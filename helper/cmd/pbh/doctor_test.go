@@ -31,7 +31,7 @@ func doctorFixture(t *testing.T, outgoing string, answers map[string]string, pro
 }
 
 func TestDoctorPassesWhenEverythingIsOpen(t *testing.T) {
-	deps, out := doctorFixture(t, "60000 65535", nil, containers.PortProbe{Reachable: true, Detail: "connected"}, nil)
+	deps, out := doctorFixture(t, "60000 65535", map[string]string{"nft list table inet " + edgeGuardTable: ""}, containers.PortProbe{Reachable: true, Detail: "connected"}, nil)
 	if err := runDoctor(t.Context(), tunnelConfig(), deps, out); err != nil {
 		t.Fatalf("err = %v\n%s", err, out)
 	}

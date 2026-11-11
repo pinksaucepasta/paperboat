@@ -98,6 +98,8 @@ type Policy struct {
 	clientStrategy realclientip.Strategy
 	// routeHolds bounds the requests held for their route during the takeover grace (holdForRoute).
 	routeHolds *holdSet
+	// addresses is the edge-wide per-client-address limit (ip_limits.go).
+	addresses *addressLimiter
 }
 
 // routeHoldMax and routeHoldPerName bound the HTTP-layer holds: 256 requests at once, 64 per host. A request got
@@ -122,7 +124,7 @@ func New(config Config, next http.Handler) (*Policy, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Policy{config: config, next: next, clientStrategy: strategy, routeHolds: newHoldSet(routeHoldMax, routeHoldPerName, 0)}, nil
+	return &Policy{config: config, next: next, clientStrategy: strategy, routeHolds: newHoldSet(routeHoldMax, routeHoldPerName, 0), addresses: newAddressLimiter(addressRequestRate, addressUpgradeRate, addressStreams)}, nil
 }
 
 // NewGateway builds the live public-preview gate. The target is the private
@@ -396,6 +398,11 @@ func ParseTrustedProxies(values []string) ([]*net.IPNet, error) {
 }
 
 func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	release, admitted := p.admitAddress(w, r)
+	if !admitted {
+		return
+	}
+	defer release()
 	// Tickets use the selected edge's own TLS hostname so browser DNS caches
 	// cannot send a fresh admission to the former active edge. The path names
 	// only a candidate route; the one-use ticket and current node/epoch are
@@ -874,6 +881,21 @@ func dispatchHost(value string) (string, bool) {
 		return "", false
 	}
 	return host, true
+}
+
+// admitAddress applies the edge-wide limit for the request's client address before any route or
+// origin work; over it, the visitor gets the busy answer and nothing else runs.
+func (p *Policy) admitAddress(w http.ResponseWriter, r *http.Request) (func(), bool) {
+	if p.addresses == nil {
+		return func() {}, true
+	}
+	release, ok := p.addresses.admit(p.clientIP(r), isWebSocketUpgrade(r.Header))
+	if !ok {
+		w.Header().Set("X-Paperboat-Error", "edge_rate_limited")
+		w.Header().Set("Retry-After", "1")
+		writeErrorPage(w, http.StatusTooManyRequests, edgeRateLimitedMessage)
+	}
+	return release, ok
 }
 
 func (p *Policy) clientIP(r *http.Request) string {

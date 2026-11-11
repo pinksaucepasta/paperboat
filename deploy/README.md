@@ -227,6 +227,13 @@ its own self-hosted servers; never mixed). What the system does without help:
   managed edge, a self-hosted one another selected installation, otherwise it keeps the remaining
   edge (`worker_edge_sets`).
 
+Flood and DDoS layers (spark plan `research-edge-ddos-abuse.md`): provider scrubbing for volume, then
+pbh's nftables guard per source address (helper/deploy/README.md), then the edge's per-address and
+per-name limits, then byte pacing per publication and account (`edge_ingress_limits`). A null-routed
+edge drops out of DNS within the 60 s TTL like any other dead edge. Gap (2026-11-11): the managed
+pair is oracle and anvit, and both run at Oracle Cloud (AS31898), so one provider-wide null-route or
+outage takes both; the fallback needs a host at a second provider to close it.
+
 Checking by hand: `control_tunnel_nodes` (state, `last_heartbeat_at`), `workspace_edge_sets`
 (the set per workspace), `edge_dns_publications` (what DNS holds; `failed` rows carry a
 `failure_code`). The server trusts forwarded client addresses only from `trusted_proxy_cidrs`; if the
