@@ -96,3 +96,65 @@ func closeWriteAfterThePeerStoppedReading(t *testing.T, accept bool) {
 		t.Fatalf("CloseWrite after the peer stopped reading = %v, want net.ErrClosed", err)
 	}
 }
+
+// The mapping is narrow: a send side canceled locally (CancelWrite), or a connection that is gone, is not "the peer
+// stopped reading": a failed FIN there stays an error, on the accept path too.
+func TestCloseWriteFailureOtherThanThePeerStoppingReadingStaysAnError(t *testing.T) {
+	for _, accept := range []bool{false, true} {
+		stream, _, connection := openedServerStream(t)
+		var conn interface{ CloseWrite() error } = &streamConn{Stream: stream, local: directAddr("local"), remote: directAddr("peer")}
+		if accept {
+			conn = &routedConn{RoutedStream: &peerquic.RoutedStream{Stream: stream}, local: directAddr("local"), remote: directAddr("peer")}
+		}
+		stream.CancelWrite(7) // our own cancel: Close then fails with the plain error, but not because the peer stopped reading
+		err := conn.CloseWrite()
+		if err == nil || errors.Is(err, net.ErrClosed) {
+			t.Fatalf("CloseWrite after a local cancel = %v (accept path %v), want a plain error", err, accept)
+		}
+		connection.CloseWithError(0, "")
+	}
+}
+
+// openedServerStream returns the server's side of a fresh quic-go stream and the client's stream and connection.
+func openedServerStream(t *testing.T) (*quic.Stream, *quic.Stream, *quic.Conn) {
+	t.Helper()
+	config := selfSignedTLS(t)
+	listener, err := quic.ListenAddr("127.0.0.1:0", config, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { listener.Close() })
+	type accepted struct {
+		stream *quic.Stream
+		err    error
+	}
+	got := make(chan accepted, 1)
+	go func() {
+		connection, acceptErr := listener.Accept(context.Background())
+		if acceptErr != nil {
+			got <- accepted{err: acceptErr}
+			return
+		}
+		stream, acceptErr := connection.AcceptStream(context.Background())
+		got <- accepted{stream: stream, err: acceptErr}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	connection, err := quic.DialAddr(ctx, listener.Addr().String(), config, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { connection.CloseWithError(0, "") })
+	clientStream, err := connection.OpenStreamSync(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := clientStream.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	server := <-got
+	if server.err != nil {
+		t.Fatal(server.err)
+	}
+	return server.stream, clientStream, connection
+}
