@@ -17,7 +17,7 @@ func TestCarrierCallerVerifies(t *testing.T) {
 		refused  bool
 	}{
 		{"the account itself has nothing it can verify", owner, false, false, false},
-		{"the account itself elevated", owner, true, false, false},
+		{"the account itself elevated verifies like any administrator", owner, true, true, false},
 		{"SYSTEM verifies", system, true, true, false},
 		{"an elevated administrator is no longer refused", other, true, true, false},
 		{"another account is refused", other, false, false, true},
