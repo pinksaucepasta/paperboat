@@ -2,6 +2,7 @@ package mesh
 
 import (
 	"context"
+	"fmt"
 	"net/netip"
 	"testing"
 	"time"
@@ -133,5 +134,39 @@ func TestAdvertisedHomeIsTheSelectedRegionNotTheLowestID(t *testing.T) {
 	}
 	if got := advertised(); got != 1 {
 		t.Fatalf("after promoting region 1 the advertised home = %d", got)
+	}
+}
+
+// F21-29: the only STUN servers the engine can ask are the relays it was given. magicsock and netcheck probe the
+// DERP map's nodes (STUNPort), and the map the engine installs is exactly the relay inventory: no other region,
+// no extra node, and no other address in a node.
+func TestTheDERPMapHoldsOnlyTheGivenRelays(t *testing.T) {
+	one := integration.RunDERPAndSTUN(t, logger.Discard, "127.0.0.1").Regions[1]
+	two := relayRegionCopy(integration.RunDERPAndSTUN(t, logger.Discard, "127.0.0.1").Regions[1], 2)
+	s := &Server{Key: key.NewNode(), LocalAddr: netip.MustParseAddr("fd7a:115c:a1e0::60"), AllowedPeers: map[key.NodePublic]netip.Addr{key.NewNode().Public(): netip.MustParseAddr("fd7a:115c:a1e0::61")}}
+	if err := s.SetRelayRegions([]*tailcfg.DERPRegion{one, two}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	given := map[string]bool{}
+	for _, region := range []*tailcfg.DERPRegion{one, two} {
+		for _, node := range region.Nodes {
+			given[fmt.Sprint(region.RegionID, node.HostName, node.STUNPort, node.IPv4, node.IPv6, node.STUNTestIP, node.STUNOnly)] = true
+		}
+	}
+	s.lb.mu.Lock()
+	defer s.lb.mu.Unlock()
+	if len(s.lb.dm.Regions) != 2 {
+		t.Fatalf("DERP map has %d regions, want the 2 relays", len(s.lb.dm.Regions))
+	}
+	for id, region := range s.lb.dm.Regions {
+		for _, node := range region.Nodes {
+			if !given[fmt.Sprint(id, node.HostName, node.STUNPort, node.IPv4, node.IPv6, node.STUNTestIP, node.STUNOnly)] {
+				t.Fatalf("region %d node %+v is not one of the given relays", id, node)
+			}
+		}
 	}
 }
