@@ -417,7 +417,7 @@ updater continues to use full TUF verification for future updates and rollback.
 
 ## Stack
 
-Go (Cobra, Go 1.27.3) - released as native static binaries for Linux and macOS.
+Go (Cobra, Go 1.27.4) - released as native static binaries for Linux and macOS.
 Windows builds from source but is not released yet.
 
 ## Layout

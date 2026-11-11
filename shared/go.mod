@@ -1,6 +1,6 @@
 module github.com/pinksaucepasta/paperboat/shared
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/getsentry/sentry-go v0.49.0

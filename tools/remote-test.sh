@@ -3,7 +3,7 @@
 #   tools/remote-test.sh <host> <module> [go test args...]
 #   tools/remote-test.sh pbvm2 cli -run TestExec ./cmd/pb
 #   tools/remote-test.sh pbvm3 shared            # go test -p 2 ./...
-# <host> is an ssh alias with Go 1.27.3 in ~/.local/go1.27.3 or ~/go-sdk (pbvm2, pbvm3, ubuntu@anvit). The VMs have 3-4 GB
+# <host> is an ssh alias with Go 1.27.4 in ~/.local/go1.27.4 or ~/go-sdk-1.27.4 (pbvm2, pbvm3, ubuntu@anvit). The VMs have 3-4 GB
 # of RAM, so the host runs one test job at a time (a host-wide lock; later jobs wait) with `nice go test -p 2`.
 # Only git-tracked, committed files are tested: that is what `git archive HEAD` ships. No PostgreSQL is
 # on pbvm2/pbvm3, so PostgreSQL suites skip there; anvit has one (~/.pb-test-pg-dsn), so use anvit for server.
@@ -51,7 +51,7 @@ exec ssh -o BatchMode=yes -o ServerAliveInterval=30 "$host" \
 set -euo pipefail
 module=$1 lane=$2
 shift 2
-export PATH=$HOME/.local/go1.27.3/bin:$HOME/go-sdk/bin:$PATH GOTOOLCHAIN=local
+export PATH=$HOME/.local/go1.27.4/bin:$HOME/go-sdk-1.27.4/bin:$PATH GOTOOLCHAIN=local
 cd "$HOME/pb-remote-test/$lane/$module"
 go version
 # A host with ~/.pb-test-pg-dsn (anvit) runs PostgreSQL suites like CI: each package gets its own fresh database.

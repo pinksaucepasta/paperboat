@@ -1,6 +1,6 @@
 module github.com/pinksaucepasta/paperboat/sdk/go
 
-go 1.27.3
+go 1.27.4
 
 require github.com/pinksaucepasta/paperboat/shared v0.0.0
 
