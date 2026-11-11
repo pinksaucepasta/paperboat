@@ -7896,7 +7896,11 @@ export interface paths {
          */
         get: operations["team_machines_list"];
         put?: never;
-        post?: never;
+        /**
+         * Team machine
+         * @description Shares a machine with the team (or asks to, when admission is pending), approves or declines a share request, unshares it, moves a personal machine into the team, or removes a team machine. Idempotent per operation_id.
+         */
+        post: operations["team_machine"];
         delete?: never;
         options?: never;
         head?: never;
@@ -11908,6 +11912,16 @@ export interface components {
             capabilities: ("terminal" | "exec" | "managed_ssh" | "files" | "preview_manage" | "tunnel_manage" | "private_access")[];
             generation: number;
             active: boolean;
+        };
+        /** @description One lifecycle action on a team machine. transfer_to_team and remove need confirmation equal to machine_id. */
+        TeamMachineRequest: {
+            operation_id: string;
+            expected_generation: number;
+            machine_id: string;
+            /** @enum {string} */
+            action: "share" | "unshare" | "approve" | "decline" | "transfer_to_team" | "remove";
+            /** @description Required for transfer_to_team and remove: the machine_id again. */
+            confirmation?: string;
         };
         /** @description Sets what an audience may do on a team machine. Capabilities are the complete set; an inactive grant removes the access. */
         TeamMachineGrantRequest: {
@@ -30161,6 +30175,48 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    team_machine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TeamMachineRequest"];
+            };
+        };
+        responses: {
+            /** @description Authenticated current state or exact committed operation result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TeamTeam"];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            /** @description Conflict, including team_suspended after team or invitation authorization. Ask the team owner to restore billing or resume the team. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            412: components["responses"]["Error"];
         };
     };
     post_v1_admin_server_nodes_enrollments: {

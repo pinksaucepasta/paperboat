@@ -15478,6 +15478,45 @@
           }
         }
       },
+      "TeamMachineRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "One lifecycle action on a team machine. transfer_to_team and remove need confirmation equal to machine_id.",
+        "required": [
+          "operation_id",
+          "expected_generation",
+          "machine_id",
+          "action"
+        ],
+        "properties": {
+          "operation_id": {
+            "type": "string"
+          },
+          "expected_generation": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "machine_id": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "share",
+              "unshare",
+              "approve",
+              "decline",
+              "transfer_to_team",
+              "remove"
+            ]
+          },
+          "confirmation": {
+            "type": "string",
+            "description": "Required for transfer_to_team and remove: the machine_id again."
+          }
+        }
+      },
       "TeamMachineGrantRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -51294,6 +51333,88 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      },
+      "post": {
+        "operationId": "team_machine",
+        "summary": "Team machine",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "responses": {
+          "200": {
+            "description": "Authenticated current state or exact committed operation result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TeamTeam"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "description": "Conflict, including team_suspended after team or invitation authorization. Ask the team owner to restore billing or resume the team.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "412": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "description": "Shares a machine with the team (or asks to, when admission is pending), approves or declines a share request, unshares it, moves a personal machine into the team, or removes a team machine. Idempotent per operation_id.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TeamMachineRequest"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/v1/admin/server-nodes/enrollments": {

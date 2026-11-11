@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -16,7 +15,8 @@ import (
 	"testing"
 )
 
-var registeredRoutePattern = regexp.MustCompile(`mux\.Handle(?:Func)?\("(GET|POST|PUT|PATCH|DELETE) ([^"]+)"`)
+// registeredRoutePattern matches mux.Handle("GET /v1/x", …) and the local handle("GET /v1/x", …) helpers.
+var registeredRoutePattern = regexp.MustCompile(`(?:mux\.Handle(?:Func)?|\bhandle)\("(GET|POST|PUT|PATCH|DELETE) ([^"]+)"`)
 var operationIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 func TestOpenAPIMatchesRegisteredRoutes(t *testing.T) {
@@ -34,19 +34,32 @@ func TestOpenAPIMatchesRegisteredRoutes(t *testing.T) {
 		t.Fatalf("openapi json contains duplicate object key: %v", err)
 	}
 
-	router, err := os.Open("router.go")
+	// Routes are registered across many files (teams, inbox, policy, …), so scan every non-test source file.
+	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer router.Close()
+	var lines []string
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		data, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines = append(lines, strings.Split(string(data), "\n")...)
+	}
 	registered := make(map[string]map[string]bool)
-	scanner := bufio.NewScanner(router)
-	for scanner.Scan() {
-		match := registeredRoutePattern.FindStringSubmatch(scanner.Text())
+	for _, line := range lines {
+		match := registeredRoutePattern.FindStringSubmatch(line)
 		if match == nil {
 			continue
 		}
 		method, path := strings.ToLower(match[1]), match[2]
+		if strings.HasSuffix(path, "/") {
+			continue // a prefix whose action is concatenated at registration; its full paths cannot be read from source
+		}
 		if strings.HasPrefix(path, "/api/") {
 			t.Errorf("registered route is not versioned: %s %s", match[1], path)
 		}
@@ -64,9 +77,6 @@ func TestOpenAPIMatchesRegisteredRoutes(t *testing.T) {
 			registered[path] = make(map[string]bool)
 		}
 		registered[path][method] = true
-	}
-	if err := scanner.Err(); err != nil {
-		t.Fatal(err)
 	}
 
 	for path, methods := range registered {

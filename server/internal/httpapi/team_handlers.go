@@ -108,12 +108,6 @@ func registerTeamRoutes(mux *http.ServeMux, service teamAPI, read, write func(ht
 					return
 				}
 				out, err = service.GrantMachine(r.Context(), account, team, in)
-			case "terminal_session_grant":
-				var in teams.TerminalSessionGrantRequest
-				if !decodeStrictJSON(w, r, &in) {
-					return
-				}
-				out, err = service.GrantTerminalSession(r.Context(), account, team, in)
 			case "attach":
 				var in teams.AttachRequest
 				if !decodeStrictJSON(w, r, &in) {
@@ -177,7 +171,6 @@ func registerTeamRoutes(mux *http.ServeMux, service teamAPI, read, write func(ht
 	}
 	handle("POST /v1/teams/{team_id}/machines", "machine", true)
 	handle("POST /v1/teams/{team_id}/machine-grants", "machine_grant", true)
-	handle("POST /v1/teams/{team_id}/terminal-session-grants", "terminal_session_grant", true)
 	handle("GET /v1/teams", "list", false)
 	handle("GET /v1/team-roles", "roles", false)
 	handle("GET /v1/teams/{team_id}/activity", "activity", false)
