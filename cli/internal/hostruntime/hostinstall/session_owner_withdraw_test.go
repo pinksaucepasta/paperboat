@@ -7,6 +7,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
 )
 
 type orderedGuardUndo struct{ note func(string) }
@@ -77,6 +79,15 @@ func TestAFailedReplacementWithdrawsItsCandidateAndRestoresTheGuard(t *testing.T
 		if test.guardErr == nil && test.replaceErr == nil && err != nil {
 			t.Errorf("%s: %v", test.name, err)
 		}
+	}
+}
+
+// An attempt that died before publishing its session owner left no descriptor: withdrawing it is a no-op, not a failure
+// that blocks every later install.
+func TestWithdrawingACandidateThatNeverPublishedSucceeds(t *testing.T) {
+	candidate := candidateSessionOwner{catalog: sessionowner.Catalog{Root: t.TempDir()}, generation: strings.Repeat("ab", 16)}
+	if err := candidate.withdrawUnless(context.Background(), strings.Repeat("cd", 16)); err != nil {
+		t.Fatalf("a candidate with no descriptor: %v", err)
 	}
 }
 
