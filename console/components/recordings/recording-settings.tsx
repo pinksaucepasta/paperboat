@@ -137,6 +137,7 @@ function ManualStartSection({ teamId, state, admin }: { teamId: string; state: R
 const actionTitles: Record<RecordingAction, string> = { record: "Recorded", recording_view: "Can replay" }
 
 function RulesSection({ policy, admin }: { policy: Policy | undefined; admin: boolean }) {
+  const queryClient = useQueryClient()
   const [adding, setAdding] = useState(false)
   const [saving, setSaving] = useState<{ title: string; text: string } | null>(null)
   const rules = policy ? recordingRules(policy.policy) : []
@@ -209,7 +210,11 @@ function RulesSection({ policy, admin }: { policy: Policy | undefined; admin: bo
           review={(signal) => validatePolicy(policy.workspace, saving.text, signal)}
           run={(fields) => savePolicy(policy.workspace, { policy: saving.text, expected_version: policy.version, ...fields })}
           onClose={() => setSaving(null)}
-          onDone={() => setSaving(null)}
+          onDone={() => {
+            setSaving(null)
+            // A replay rule adds or removes viewers, which the key section seals for.
+            void queryClient.invalidateQueries({ queryKey: recordingKeyQuery(policy.workspace).queryKey })
+          }}
         />
       )}
     </Section>
