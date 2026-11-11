@@ -8,7 +8,7 @@ import (
 )
 
 func writeLoginEnrollmentToken(path, token string) error {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil {
 		return err
 	}

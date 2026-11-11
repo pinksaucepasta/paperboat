@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
 	"io"
 	"os"
 	"path/filepath"
@@ -125,6 +126,7 @@ func deriveWindowsCarrierConfig(r Request, layout service.Layout, pin string) (C
 	c := CarrierConfig{Schema: carrierSchema, Instance: layout.Instance, Source: r.Source, Generation: generation, Executable: pin, UID: r.UID, GID: r.GID, OwnerSID: r.OwnerSID, User: "Paperboat", Group: "Paperboat", RuntimeRoot: r.StateRoot, Environment: environment, WorkerAddress: r.HelperListenAddress, HostdEndpoint: hostd, ControlEndpoint: carrierControlEndpoint(hostd, generation), HostdTokenFile: token, DispatchCapabilityFile: filepath.Join(root, "dispatch.cap"), LockPath: filepath.Join(root, "owner-"+generation+".lock")}
 	return c, c.Validate()
 }
+
 // readCarrierConfigFile reads the active generation's descriptor.
 func readCarrierConfigFile(ctx context.Context, instance string) (CarrierConfig, error) {
 	return readWindowsCarrierFile(ctx, instance, carrierConfigPath(instance))
@@ -276,8 +278,9 @@ func writeWindowsCarrierDescriptors(c CarrierConfig, active bool) error {
 	}
 	return atomicfile.Write(carrierConfigPath(c.Instance), body, options)
 }
+
 func verifyCarrierNative(c CarrierConfig, i *service.Installer) error {
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return err
 	}
@@ -306,7 +309,7 @@ func LockCarrier(c CarrierConfig) (io.Closer, error) {
 	if c.Validate() != nil {
 		return nil, ErrInvalidRequest
 	}
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return nil, err
 	}

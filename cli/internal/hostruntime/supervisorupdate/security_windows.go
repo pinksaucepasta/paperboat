@@ -66,7 +66,7 @@ func currentSupervisorDirectoryDescriptor() (*windows.SECURITY_DESCRIPTOR, error
 }
 
 func currentSupervisorSID() (string, error) {
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return "", err
 	}

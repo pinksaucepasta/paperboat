@@ -59,7 +59,7 @@ func initializeProductionManagedSSH(ctx context.Context, host *managedssh.Host, 
 	if registration.SSHPort == 0 || registration.SSHUser == "" {
 		return nil, ErrManagedSSHUnavailable
 	}
-	user, sidErr := windows.GetCurrentProcessToken().GetTokenUser()
+	user, sidErr := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if sidErr != nil || user == nil || user.User.Sid == nil {
 		return nil, errors.Join(ErrManagedSSHUnavailable, sidErr)
 	}
@@ -176,7 +176,7 @@ func validateMachineWorkspace(path string) error {
 }
 
 func newProductionAvailabilityHostClient(timeout time.Duration) (*availability.HostClient, error) {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil || !user.User.Sid.IsValid() {
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}
@@ -195,7 +195,7 @@ func cleanupProductionManagedSSH(ctx context.Context, _ runtimeidentity.Registra
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil {
 		return ErrManagedSSHUnavailable
 	}

@@ -11,7 +11,7 @@ import (
 )
 
 func currentUserSID() (*windows.SID, error) {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil || !user.User.Sid.IsValid() {
 		return nil, errors.New("cannot resolve current Windows user SID")
 	}

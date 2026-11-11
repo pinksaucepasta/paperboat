@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
 	"os"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
@@ -53,7 +54,7 @@ func purgeFreshEnrollmentRuntime(ctx context.Context) error {
 }
 
 func currentProcessOwnerSID() (string, error) {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil {
 		return "", errors.New("resolve current Windows user")
 	}
@@ -61,7 +62,7 @@ func currentProcessOwnerSID() (string, error) {
 }
 
 func existingFreshEnrollmentExecutable() (string, error) {
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return "", err
 	}

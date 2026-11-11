@@ -18,7 +18,7 @@ func secureIdentityFile(path string, info os.FileInfo, requirePrivateMode bool) 
 	if !requirePrivateMode {
 		return true
 	}
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return false
 	}
@@ -41,7 +41,7 @@ func secureIdentityPath(path string, info os.FileInfo, requirePrivateMode bool) 
 	if !secureIdentityFile(path, info, requirePrivateMode) {
 		return false
 	}
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return false
 	}

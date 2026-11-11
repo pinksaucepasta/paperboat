@@ -42,7 +42,7 @@ type tcpRow6 struct {
 }
 
 func snapshot(ctx context.Context) ([]Service, error) {
-	currentUser, err := windows.GetCurrentProcessToken().GetTokenUser()
+	currentUser, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil {
 		return nil, &windowsTokenDiscoveryFailure{cause: err}
 	}

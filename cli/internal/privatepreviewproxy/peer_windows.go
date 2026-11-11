@@ -11,7 +11,7 @@ func init() { platformPeerSID = machineguard.ConnectionOwnerSID }
 
 // platformOwnSID is the user this process runs as; empty (so every peer is "another user") if it cannot be read.
 func platformOwnSID() string {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil {
 		return ""
 	}

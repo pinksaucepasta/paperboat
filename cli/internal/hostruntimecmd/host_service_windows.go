@@ -26,7 +26,7 @@ func ExecuteHostService(ctx context.Context, args []string, stderr io.Writer) in
 		fmt.Fprintln(stderr, "pb: invalid host-service invocation")
 		return 2
 	}
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil {
 		return finishRuntimeCommand(ctx, "daemon", stderr, runtimeFailure("Windows host service identity is unavailable", err), 1)
 	}

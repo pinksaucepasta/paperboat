@@ -33,7 +33,7 @@ func checkIdentityFile(path string, info os.FileInfo, maximum int64) (matches bo
 	if attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		return false, nil
 	}
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return false, err
 	}
