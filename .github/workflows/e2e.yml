@@ -2,8 +2,9 @@ name: End-to-end
 
 # R-02: real server services on PostgreSQL, two systemd containers each running a real pb.
 # Stages (E2E_STAGES): pair exec send preview. Not yet a required check.
+# Not on pull_request until it is a required check (R-02): its two jobs per PR, 30 minutes each, filled the hosted runners
+# and kept the required checks queued for 10+ minutes (2026-11-12). The merge queue will run it on merge_group then.
 on:
-  pull_request:
   push:
     branches: ['r21-e2e*']
   workflow_dispatch:
