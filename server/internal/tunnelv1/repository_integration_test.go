@@ -586,6 +586,15 @@ func TestSQLRepositoryTRK07ConfigChainScopeAndConflictsOnPostgres(t *testing.T) 
 	if routeResult.Route.ID != routeID || routeResult.Operation.State != "running" {
 		t.Fatalf("route result = %#v", routeResult)
 	}
+	// The row backstops the invariant the API keeps: custom_ca has a CA, every other mode has none.
+	for _, statement := range []string{
+		`UPDATE paperboat.tunnel_routes SET tls_ca = NULL WHERE id = $1`,
+		`UPDATE paperboat.tunnel_routes SET tls_verification = 'system' WHERE id = $1`,
+	} {
+		if _, err := fixture.database.SQL().ExecContext(ctx, statement, routeID); err == nil {
+			t.Fatalf("tunnel_routes accepted %q", statement)
+		}
+	}
 
 	var rows *sql.Rows
 	rows, err = fixture.database.SQL().QueryContext(ctx, `
