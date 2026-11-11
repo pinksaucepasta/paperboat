@@ -24,7 +24,7 @@ type Service interface {
 	DetachAttachment(sessionID, attachmentID string, lease uint64) error
 	WaitNextAttachment(ctx context.Context, sessionID, attachmentID string, from, lease uint64) (history.Event, error)
 	Detach(sessionID, attachmentID string) error
-	DetachParticipantAtGeneration(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64) error
+	DetachParticipantAtGeneration(sessionID, attachmentID, accountID, clientID string, expectedGeneration, lease uint64) error
 	AttachmentOwnedBy(sessionID, attachmentID, accountID, clientID string) bool
 	IssueResume(sessionID, attachmentID string, lease uint64, resource string) ([]byte, error)
 	ResumeAttachment(sessionID string, request ResumeRequest) (AttachResult, error)

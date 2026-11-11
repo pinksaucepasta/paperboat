@@ -773,12 +773,15 @@ func TestPTYSizeFollowsTheLatestActiveWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer manager.Close(context.Background(), created.ID)
+	leases := map[string]uint64{}
 	attach := func(attachment string, size pty.Dimensions) {
 		t.Helper()
 		participant := Participant{AttachmentID: attachment, AccountID: "acc_owner", ClientID: "cli_" + attachment, Role: "owner", ConnectedAt: time.Now(), Dimensions: size}
-		if _, err := manager.AttachParticipantAtGeneration(created.ID, participant, 0, created.Generation); err != nil {
+		attached, err := manager.AttachParticipantAtGeneration(created.ID, participant, 0, created.Generation)
+		if err != nil {
 			t.Fatal(err)
 		}
+		leases[attachment] = attached.AttachmentLease
 	}
 	size := func() pty.Dimensions {
 		snapshot, err := manager.Snapshot(created.ID)
@@ -837,7 +840,7 @@ func TestPTYSizeFollowsTheLatestActiveWindow(t *testing.T) {
 
 	// Window a reconnects (its connection drops and the same attachment id comes back with a new size): it does not
 	// take control, because attaching is not activity.
-	if err := manager.DetachParticipantAtGeneration(created.ID, "att_a", "acc_owner", "cli_att_a", created.Generation); err != nil {
+	if err := manager.DetachParticipantAtGeneration(created.ID, "att_a", "acc_owner", "cli_att_a", created.Generation, leases["att_a"]); err != nil {
 		t.Fatal(err)
 	}
 	attach("att_a", pty.Dimensions{Columns: 90, Rows: 28})
@@ -857,7 +860,7 @@ func TestPTYSizeFollowsTheLatestActiveWindow(t *testing.T) {
 	}
 
 	// The controller leaves: the next most recently active window takes over.
-	if err := manager.DetachParticipantAtGeneration(created.ID, "att_b", "acc_owner", "cli_att_b", created.Generation); err != nil {
+	if err := manager.DetachParticipantAtGeneration(created.ID, "att_b", "acc_owner", "cli_att_b", created.Generation, leases["att_b"]); err != nil {
 		t.Fatal(err)
 	}
 	wantSize(pty.Dimensions{Columns: 90, Rows: 28}, "the controller left")
@@ -1112,7 +1115,7 @@ func TestCtrlCResyncScreenHoldsTheAnswer(t *testing.T) {
 // F3-11: a lone Ctrl-C is always answered with the cut the host made for it, whatever the terminal mode, so the
 // client's hold ends on it: through is the end of the output that predates the key, discarded says the sender's
 // queued output up to there was dropped for a screen.
-// The shells ignore SIGINT (trap '' INT, inherited by the sleep they exec into): the test interrupts and then writes
+// The shells ignore SIGINT (trap ” INT, inherited by the sleep they exec into): the test interrupts and then writes
 // the key, and a program that died of the SIGINT would make that write fail with a stale generation, as it did in CI
 // under -race.
 func TestLoneCtrlCIsAnsweredWithTheCut(t *testing.T) {

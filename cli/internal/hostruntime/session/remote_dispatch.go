@@ -173,11 +173,12 @@ func ServeRemoteCall(ctx context.Context, m Service, op string, body json.RawMes
 			Accountid          string
 			Clientid           string
 			Expectedgeneration uint64
+			Lease              uint64
 		}
 		if err := decodeRemoteRequest(body, &args); err != nil {
 			return nil, ErrInvalidSession
 		}
-		err := m.DetachParticipantAtGeneration(args.Sessionid, args.Attachmentid, args.Accountid, args.Clientid, args.Expectedgeneration)
+		err := m.DetachParticipantAtGeneration(args.Sessionid, args.Attachmentid, args.Accountid, args.Clientid, args.Expectedgeneration, args.Lease)
 		if err != nil {
 			return nil, err
 		}

@@ -116,7 +116,7 @@ func (c *earlyOutputMessageConnection) WriteMessage(_ context.Context, kind help
 				data []byte
 			}{helperBinaryMessage, binaryFrame}
 		}
-		response.Payload = json.RawMessage(`{"result":{"stream_id":7,"attachment_id":"att_early","session":{"snapshot":{"generation":1}}}}`)
+		response.Payload = json.RawMessage(`{"result":{"stream_id":7,"attachment_lease":1,"attachment_id":"att_early","session":{"snapshot":{"generation":1}}}}`)
 	}
 	encoded, _ := json.Marshal(response)
 	c.reads <- struct {
@@ -297,7 +297,7 @@ func TestCanonicalHelperTerminalFramingIOResizeAndExit(t *testing.T) {
 				case "create":
 					writeHelperTestFrame(t, ws, helperFrame{Type: "response", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(`{"result":{"id":"terminal_00000000-0000-4000-8000-000000000001","generation":1},"replay":false}`)})
 				case "attach":
-					writeHelperTestFrame(t, ws, helperFrame{Type: "response", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(`{"result":{"stream_id":7,"attachment_id":"att_1","session":{"snapshot":{"generation":1}}},"replay":false}`)})
+					writeHelperTestFrame(t, ws, helperFrame{Type: "response", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(`{"result":{"stream_id":7,"attachment_lease":1,"attachment_id":"att_1","session":{"snapshot":{"generation":1}}},"replay":false}`)})
 					writeHelperTestBinary(t, ws, 7, 0, []byte("h"))
 					writeHelperTestBinary(t, ws, 7, 1, []byte("el"))
 					writeHelperTestBinary(t, ws, 7, 3, []byte("lo"))
@@ -447,7 +447,7 @@ func TestCanonicalHelperExistingSessionDoesNotInjectTerminalInput(t *testing.T) 
 				case "create":
 					writeHelperTestFrame(t, ws, helperFrame{Type: "response", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(`{"result":{"state":"running","generation":1,"earliest_sequence":100,"latest_sequence":200,"existing":true},"replay":false}`)})
 				case "attach":
-					writeHelperTestFrame(t, ws, helperFrame{Type: "response", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(`{"result":{"stream_id":8,"attachment_id":"att_live","session":{"snapshot":{"generation":1}}},"replay":false}`)})
+					writeHelperTestFrame(t, ws, helperFrame{Type: "response", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(`{"result":{"stream_id":8,"attachment_lease":1,"attachment_id":"att_live","session":{"snapshot":{"generation":1}}},"replay":false}`)})
 				}
 			}
 		}
@@ -540,7 +540,7 @@ func TestCanonicalHelperRestartIsLimitedToInitialAttach(t *testing.T) {
 					case "restart":
 						writeHelperTestFrame(t, ws, helperFrame{Type: "response", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(`{"result":{"state":"running","generation":4},"replay":false}`)})
 					case "attach":
-						response := fmt.Sprintf(`{"result":{"stream_id":9,"attachment_id":%q,"session":{"snapshot":{"generation":%d}}},"replay":false}`, test.attachmentID, test.generation)
+						response := fmt.Sprintf(`{"result":{"stream_id":9,"attachment_lease":1,"attachment_id":%q,"session":{"snapshot":{"generation":%d}}},"replay":false}`, test.attachmentID, test.generation)
 						writeHelperTestFrame(t, ws, helperFrame{Type: "response", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(response)})
 						event := fmt.Sprintf(`{"event":"terminal_stream_end","session_id":"ses_retained","state":"exited","final_sequence":17,"exit":{"code":%d}}`, test.wantExitCode)
 						writeHelperTestFrame(t, ws, helperFrame{Type: "event", RequestID: "stream", Version: helperProtocolVersion, Capability: "terminal.v1", Payload: json.RawMessage(event)})
@@ -625,7 +625,7 @@ func TestCanonicalHelperStaleReconnectCursorReportsReplayGap(t *testing.T) {
 					writeHelperTestFrame(t, ws, helperFrame{Type: "error", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(`{"code":"replay_gap","message":"operation failed","retryable":false,"details":{"requested_sequence":2,"earliest_sequence":10,"latest_sequence":18}}`)})
 					continue
 				}
-				writeHelperTestFrame(t, ws, helperFrame{Type: "response", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(`{"result":{"stream_id":10,"attachment_id":"att_recovered","session":{"snapshot":{"generation":1}}},"replay":true}`)})
+				writeHelperTestFrame(t, ws, helperFrame{Type: "response", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(`{"result":{"stream_id":10,"attachment_lease":1,"attachment_id":"att_recovered","session":{"snapshot":{"generation":1}}},"replay":true}`)})
 				writeHelperTestBinary(t, ws, 10, 18, []byte("fresh\n"))
 				writeHelperTestFrame(t, ws, helperFrame{Type: "event", RequestID: "stream", Version: helperProtocolVersion, Capability: "terminal.v1", Payload: json.RawMessage(`{"event":"terminal_stream_end","session_id":"ses_gap","state":"exited","final_sequence":24,"exit":{"code":0}}`)})
 			}
@@ -865,7 +865,7 @@ func TestReattachResendsUnansweredInputExactlyOnce(t *testing.T) {
 	}
 	message := &capturedHelperMessageConnection{}
 	connection := newHelperTerminalConn(message, target, 1)
-	attached := helperFrame{Payload: json.RawMessage(`{"result":{"stream_id":7,"attachment_id":"att_1","input_sequence":2,"session":{"snapshot":{"generation":1}}}}`)}
+	attached := helperFrame{Payload: json.RawMessage(`{"result":{"stream_id":7,"attachment_lease":1,"attachment_id":"att_1","input_sequence":2,"session":{"snapshot":{"generation":1}}}}`)}
 	if err := connection.finishAttachment(attached, true, 0, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -956,7 +956,7 @@ func TestReattachToHostWithoutOurNumberingResendsNothingAndSaysSo(t *testing.T) 
 	target.InputQueue.Complete(2)
 	message := &capturedHelperMessageConnection{}
 	connection := newHelperTerminalConn(message, target, 1)
-	attached := helperFrame{Payload: json.RawMessage(`{"result":{"stream_id":7,"attachment_id":"att_2","input_sequence":0,"session":{"snapshot":{"generation":1}}}}`)}
+	attached := helperFrame{Payload: json.RawMessage(`{"result":{"stream_id":7,"attachment_lease":1,"attachment_id":"att_2","input_sequence":0,"session":{"snapshot":{"generation":1}}}}`)}
 	if err := connection.finishAttachment(attached, true, 0, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -1032,5 +1032,38 @@ func TestHelperTerminalHandoverEndsAsHandedOverWithoutDetaching(t *testing.T) {
 		if strings.Contains(string(write), `"detach"`) {
 			t.Fatalf("closing a handed-over link detached its attachment: %s", write)
 		}
+	}
+}
+
+// The probe resumes the same attachment id this link held, so the old link's detach names its own attach by lease:
+// the host then ignores it once the probe's newer attach holds the id, instead of removing the adopted link's output.
+func TestHelperTerminalDetachNamesItsAttachLease(t *testing.T) {
+	message := &capturedHelperMessageConnection{}
+	connection := newHelperTerminalConn(message, &resolver.TerminalTarget{SessionID: "ses_leased"}, 1)
+	attached := helperFrame{Payload: json.RawMessage(`{"result":{"stream_id":7,"attachment_lease":42,"attachment_id":"att_leased","session":{"snapshot":{"generation":1}}}}`)}
+	if err := connection.finishAttachment(attached, false, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	_ = connection.Close()
+	connection.finish(0, nil)
+	message.mu.Lock()
+	defer message.mu.Unlock()
+	for _, write := range message.writes {
+		if frame, err := decodeHelperFrame(write); err == nil && frame.Type == "detach" {
+			if !strings.Contains(string(frame.Payload), `"attachment_lease":42`) {
+				t.Fatalf("detach does not name its attach: %s", frame.Payload)
+			}
+			return
+		}
+	}
+	t.Fatal("closing the link sent no detach")
+}
+
+// An attach reply without a lease would leave the link unable to detach only its own attach; it is refused.
+func TestHelperTerminalRefusesAnAttachWithoutALease(t *testing.T) {
+	connection := newHelperTerminalConn(&capturedHelperMessageConnection{}, &resolver.TerminalTarget{SessionID: "ses_leased"}, 1)
+	attached := helperFrame{Payload: json.RawMessage(`{"result":{"stream_id":7,"attachment_id":"att_leased","session":{"snapshot":{"generation":1}}}}`)}
+	if err := connection.finishAttachment(attached, false, 0, 0); err == nil {
+		t.Fatal("an attach without a lease was accepted")
 	}
 }

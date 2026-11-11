@@ -208,6 +208,9 @@ type attachmentControl struct {
 	SessionID    string `json:"session_id"`
 	AttachmentID string `json:"attachment_id"`
 	NextSequence uint64 `json:"next_sequence,omitempty"`
+	// AttachmentLease is required on detach: the client attaches the same attachment id again (its probe resumes it),
+	// so only the lease tells the newer attach from an old link's late detach, which must not remove it.
+	AttachmentLease uint64 `json:"attachment_lease,omitempty"`
 }
 
 func (d *Dispatcher) mayType(authorization Authorization, sessionID, attachmentID string, generation uint64) bool {
@@ -313,15 +316,22 @@ func (d *Dispatcher) HandleControl(_ context.Context, authorization Authorizatio
 			err = d.config.Sessions.Acknowledge(control.SessionID, control.AttachmentID, control.NextSequence)
 		}
 	case "detach":
-		if isGenerationBoundTerminal(authorization) {
-			err = d.config.Sessions.DetachParticipantAtGeneration(control.SessionID, control.AttachmentID, authorization.AccountID, authorization.ClientID, authorization.TerminalGeneration)
-		} else {
-			err = d.config.Sessions.Detach(control.SessionID, control.AttachmentID)
-		}
+		err = d.detachLeased(authorization, control.SessionID, control.AttachmentID, control.AttachmentLease)
 	default:
 		return failure("invalid_request")
 	}
 	return domainResult(struct{}{}, err)
+}
+
+// detachLeased ends the one attach that lease names; a detach for an attach since superseded is a no-op.
+func (d *Dispatcher) detachLeased(authorization Authorization, sessionID, attachmentID string, lease uint64) error {
+	if lease == 0 {
+		return session.ErrInvalidInput
+	}
+	if isGenerationBoundTerminal(authorization) {
+		return d.config.Sessions.DetachParticipantAtGeneration(sessionID, attachmentID, authorization.AccountID, authorization.ClientID, authorization.TerminalGeneration, lease)
+	}
+	return d.config.Sessions.DetachAttachment(sessionID, attachmentID, lease)
 }
 
 func execResult(value any, err error) operation.Outcome {
@@ -714,11 +724,7 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 			}
 			request.AttachmentID = authorization.BrowserAttachmentID
 		}
-		if participantBound {
-			err = d.config.Sessions.DetachParticipantAtGeneration(request.SessionID, request.AttachmentID, authorization.AccountID, authorization.ClientID, authorization.TerminalGeneration)
-		} else {
-			err = d.config.Sessions.Detach(request.SessionID, request.AttachmentID)
-		}
+		err = d.detachLeased(authorization, request.SessionID, request.AttachmentID, request.AttachmentLease)
 		return domainResult(struct{}{}, err)
 	case "screen":
 		// A browser that fell behind a flood asks for a fresh screen on its live stream instead of reconnecting.

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/filetransfer"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/session"
 )
@@ -62,6 +63,23 @@ func TestOldTerminalStreamCannotReadOrDetachReplacement(t *testing.T) {
 	if err := old.Close(); err != nil {
 		t.Fatal("old stream cleanup should be a no-op", err)
 	}
+	// The old link's own detach arrives after the probe adopted the attachment (the network came back at once, so the
+	// old link still delivers): it names the old lease and must leave the newer attach streaming. A detach without a
+	// lease is refused. Both the browser (generation-bound) and the owner path check it.
+	browserAuth := auth
+	browserAuth.BrowserTerminal, browserAuth.BrowserAttachmentID = true, "att_handoff"
+	detach := func(authorization Authorization, lease uint64) string {
+		control, _ := json.Marshal(map[string]any{"session_id": created.ID, "attachment_id": "att_handoff", "attachment_lease": lease})
+		return dispatcher.HandleControl(ctx, authorization, protocol.Frame{Type: "detach", Payload: control}).ErrorCode
+	}
+	for _, authorization := range []Authorization{auth, browserAuth} {
+		if code := detach(authorization, old.attachmentLease); code != "" {
+			t.Fatal("old link's detach failed", code)
+		}
+		if code := detach(authorization, 0); code == "" {
+			t.Fatal("a detach without a lease was accepted")
+		}
+	}
 	writers, err := dispatcher.config.Sessions.ActiveWriters(created.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -79,5 +97,11 @@ func TestOldTerminalStreamCannotReadOrDetachReplacement(t *testing.T) {
 	defer event.Release()
 	if len(event.Data) == 0 {
 		t.Fatal("replacement received no PTY output")
+	}
+	if code := detach(auth, next.attachmentLease); code != "" {
+		t.Fatal("the current attach's detach failed", code)
+	}
+	if _, err := dispatcher.config.Sessions.WaitNextAttachment(ctx, created.ID, "att_handoff", 0, next.attachmentLease); !errors.Is(err, session.ErrAttachmentUnknown) {
+		t.Fatal("a detach naming the current lease left the attachment", err)
 	}
 }

@@ -180,6 +180,7 @@ type helperTerminalConn struct {
 	responses map[string]chan helperFrame
 
 	attachmentID              string
+	attachmentLease           uint64 // which attach of attachmentID this link holds; its detach names it
 	streamID                  uint32
 	generation                uint64
 	inputSeq                  atomic.Uint64
@@ -376,18 +377,19 @@ func (c *helperTerminalConn) initialize(ctx context.Context) error {
 func (c *helperTerminalConn) finishAttachment(frame helperFrame, existingSession bool, snapshotLatest, fromSequence uint64) error {
 	var response struct {
 		Result struct {
-			ResumeSecret  []byte `json:"resume_secret"`
-			StreamID      uint32 `json:"stream_id"`
-			AttachmentID  string `json:"attachment_id"`
-			InputSequence uint64 `json:"input_sequence"`
-			Session       struct {
+			ResumeSecret    []byte `json:"resume_secret"`
+			AttachmentLease uint64 `json:"attachment_lease"`
+			StreamID        uint32 `json:"stream_id"`
+			AttachmentID    string `json:"attachment_id"`
+			InputSequence   uint64 `json:"input_sequence"`
+			Session         struct {
 				Snapshot struct {
 					Generation uint64 `json:"generation"`
 				} `json:"snapshot"`
 			} `json:"session"`
 		} `json:"result"`
 	}
-	if json.Unmarshal(frame.Payload, &response) != nil || response.Result.StreamID == 0 || response.Result.AttachmentID == "" {
+	if json.Unmarshal(frame.Payload, &response) != nil || response.Result.StreamID == 0 || response.Result.AttachmentID == "" || response.Result.AttachmentLease == 0 {
 		return errors.New("helper returned an invalid terminal attachment")
 	}
 	if existingSession && c.target.AfterSequence <= 0 {
@@ -396,6 +398,7 @@ func (c *helperTerminalConn) finishAttachment(frame helperFrame, existingSession
 		}
 	}
 	c.attachmentID = response.Result.AttachmentID
+	c.attachmentLease = response.Result.AttachmentLease
 	c.target.InputAttachmentID = response.Result.AttachmentID
 	c.target.ResumeSecret = response.Result.ResumeSecret
 	c.streamID = response.Result.StreamID
@@ -865,7 +868,7 @@ func (c *helperTerminalConn) Close() error {
 		return nil
 	}
 	if !c.handedOver.Load() {
-		payload, _ := json.Marshal(map[string]any{"session_id": c.target.SessionID, "attachment_id": c.attachmentID})
+		payload, _ := json.Marshal(map[string]any{"session_id": c.target.SessionID, "attachment_id": c.attachmentID, "attachment_lease": c.attachmentLease})
 		_ = c.writeFrame(helperFrame{Type: "detach", RequestID: helperID("request"), Version: helperProtocolVersion, Payload: payload})
 	}
 	return c.message.Close()

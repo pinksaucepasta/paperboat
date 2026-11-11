@@ -274,7 +274,12 @@ func (m *Manager) Detach(sessionID, attachmentID string) error {
 	return err
 }
 
-func (m *Manager) DetachParticipantAtGeneration(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64) error {
+// DetachParticipantAtGeneration detaches only the attachment lease names: a detach from a link the same client has
+// since replaced (its probe resumed the attachment) is a no-op, so it cannot remove the newer link's attachment.
+func (m *Manager) DetachParticipantAtGeneration(sessionID, attachmentID, accountID, clientID string, expectedGeneration, lease uint64) error {
+	if lease == 0 {
+		return ErrInvalidInput
+	}
 	session, err := m.get(sessionID)
 	if err != nil {
 		return err
@@ -285,6 +290,9 @@ func (m *Manager) DetachParticipantAtGeneration(sessionID, attachmentID, account
 	p, ok := session.participants[attachmentID]
 	if expectedGeneration == 0 || generation != expectedGeneration || !ok || p.AccountID != accountID || p.ClientID != clientID {
 		return ErrStaleGeneration
+	}
+	if session.fanout.attachmentLease(attachmentID) != lease {
+		return nil
 	}
 	if err = session.fanout.Detach(attachmentID); err == nil {
 		session.removeParticipantLocked(attachmentID)

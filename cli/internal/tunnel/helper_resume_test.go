@@ -68,7 +68,7 @@ func TestResumeAttachesWithTheHeldSecretAndKeepsTheRotatedOne(t *testing.T) {
 					_ = json.Unmarshal(frame.Payload, &resumed)
 					answer = second
 				}
-				body := `{"result":{"stream_id":10,"attachment_id":"att_held","resume_secret":"` + base64.StdEncoding.EncodeToString(answer) + `","session":{"snapshot":{"generation":1}}},"replay":true}`
+				body := `{"result":{"stream_id":10,"attachment_lease":1,"attachment_id":"att_held","resume_secret":"` + base64.StdEncoding.EncodeToString(answer) + `","session":{"snapshot":{"generation":1}}},"replay":true}`
 				writeHelperTestFrame(t, ws, helperFrame{Type: "response", RequestID: frame.RequestID, Version: helperProtocolVersion, Payload: json.RawMessage(body)})
 			}
 		}

@@ -55,6 +55,7 @@ type browserTerminal struct {
 	tls             *tls.Conn
 	streamID        uint32
 	attachmentID    string
+	attachmentLease uint64
 	inputSequence   uint64
 	resizeSequence  uint64
 	cursorRequestID string

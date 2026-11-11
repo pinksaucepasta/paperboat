@@ -319,6 +319,7 @@ func randomID(noun string) (string, error) {
 type terminalAttachState struct {
 	StreamID         uint32
 	AttachmentID     string
+	AttachmentLease  uint64
 	InputSequence    uint64
 	Generation       uint64
 	Columns          int
@@ -336,6 +337,7 @@ func parseAttachResponse(payload []byte) (terminalAttachState, error) {
 		Result struct {
 			StreamID        uint32 `json:"stream_id"`
 			AttachmentID    string `json:"attachment_id"`
+			AttachmentLease uint64 `json:"attachment_lease"`
 			InputSequence   uint64 `json:"input_sequence"`
 			FirstAttachment bool   `json:"first_attachment"`
 			Session         struct {
@@ -360,11 +362,11 @@ func parseAttachResponse(payload []byte) (terminalAttachState, error) {
 		return terminalAttachState{}, errors.New("invalid terminal attach response")
 	}
 	result := envelope.Result
-	if result.StreamID == 0 || result.AttachmentID == "" || result.Session.Snapshot.Generation == 0 || result.Session.Snapshot.Dimensions.Columns < 1 || result.Session.Snapshot.Dimensions.Columns > maximumColumns || result.Session.Snapshot.Dimensions.Rows < 1 || result.Session.Snapshot.Dimensions.Rows > maximumRows {
+	if result.StreamID == 0 || result.AttachmentID == "" || result.AttachmentLease == 0 || result.Session.Snapshot.Generation == 0 || result.Session.Snapshot.Dimensions.Columns < 1 || result.Session.Snapshot.Dimensions.Columns > maximumColumns || result.Session.Snapshot.Dimensions.Rows < 1 || result.Session.Snapshot.Dimensions.Rows > maximumRows {
 		return terminalAttachState{}, errors.New("terminal attach response is missing its stream or geometry")
 	}
 	return terminalAttachState{
-		StreamID: result.StreamID, AttachmentID: result.AttachmentID, InputSequence: result.InputSequence, Generation: result.Session.Snapshot.Generation,
+		StreamID: result.StreamID, AttachmentID: result.AttachmentID, AttachmentLease: result.AttachmentLease, InputSequence: result.InputSequence, Generation: result.Session.Snapshot.Generation,
 		Columns: result.Session.Snapshot.Dimensions.Columns, Rows: result.Session.Snapshot.Dimensions.Rows,
 		FirstAttachment: result.FirstAttachment,
 		State:           result.Session.Snapshot.State, ReplayFrom: result.Session.Replay.FromSequence, ReplayTo: result.Session.Replay.ToSequence,

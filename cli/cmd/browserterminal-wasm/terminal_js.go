@@ -213,6 +213,7 @@ func (connection *browserTerminal) connectAndServe() error {
 		connection.mu.Lock()
 		connection.streamID = attachState.StreamID
 		connection.attachmentID = attachState.AttachmentID
+		connection.attachmentLease = attachState.AttachmentLease
 		connection.inputSequence = attachState.InputSequence
 		connection.resizeSequence = 0
 		connection.attached = true
@@ -809,10 +810,10 @@ func (connection *browserTerminal) sendDetach() {
 		return
 	}
 	writer := connection.tls
-	sessionID, attachmentID := connection.config.TerminalSessionID, connection.attachmentID
+	sessionID, attachmentID, lease := connection.config.TerminalSessionID, connection.attachmentID, connection.attachmentLease
 	connection.attached = false
 	connection.mu.Unlock()
-	payload, _ := json.Marshal(map[string]string{"session_id": sessionID, "attachment_id": attachmentID})
+	payload, _ := json.Marshal(map[string]any{"session_id": sessionID, "attachment_id": attachmentID, "attachment_lease": lease})
 	requestID, err := randomID("request")
 	if err != nil {
 		return

@@ -71,19 +71,21 @@ func (d *Dispatcher) createTerminal(ctx context.Context, authorization Authoriza
 }
 
 type terminalRequest struct {
-	Action         string            `json:"action"`
-	OperationID    string            `json:"operation_id,omitempty"`
-	Name           string            `json:"name,omitempty"`
-	CWD            string            `json:"cwd,omitempty"`
-	SessionID      string            `json:"session_id,omitempty"`
-	AttachmentID   string            `json:"attachment_id,omitempty"`
-	FromSequence   uint64            `json:"from_sequence,omitempty"`
-	AtLiveBoundary bool              `json:"at_live_boundary,omitempty"`
-	Generation     uint64            `json:"generation,omitempty"`
-	Columns        uint16            `json:"columns,omitempty"`
-	Rows           uint16            `json:"rows,omitempty"`
-	Environment    map[string]string `json:"environment,omitempty"`
-	Signal         string            `json:"signal,omitempty"`
+	Action       string `json:"action"`
+	OperationID  string `json:"operation_id,omitempty"`
+	Name         string `json:"name,omitempty"`
+	CWD          string `json:"cwd,omitempty"`
+	SessionID    string `json:"session_id,omitempty"`
+	AttachmentID string `json:"attachment_id,omitempty"`
+	// AttachmentLease names which attach of AttachmentID a detach ends; see attachmentControl.
+	AttachmentLease uint64            `json:"attachment_lease,omitempty"`
+	FromSequence    uint64            `json:"from_sequence,omitempty"`
+	AtLiveBoundary  bool              `json:"at_live_boundary,omitempty"`
+	Generation      uint64            `json:"generation,omitempty"`
+	Columns         uint16            `json:"columns,omitempty"`
+	Rows            uint16            `json:"rows,omitempty"`
+	Environment     map[string]string `json:"environment,omitempty"`
+	Signal          string            `json:"signal,omitempty"`
 	// ExistingSnapshot asks create to return the current snapshot instead of
 	// failing when the session already exists. Responses to such creates carry
 	// an "existing" flag so the client can pick the right attach boundary.

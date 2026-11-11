@@ -137,7 +137,7 @@ func (m *RemoteManager) Detach(sessionID, attachmentID string) error {
 	}{sessionID, attachmentID}, &out)
 	return err
 }
-func (m *RemoteManager) DetachParticipantAtGeneration(sessionID, attachmentID, accountID, clientID string, expectedGeneration uint64) error {
+func (m *RemoteManager) DetachParticipantAtGeneration(sessionID, attachmentID, accountID, clientID string, expectedGeneration, lease uint64) error {
 	var out struct{}
 	err := m.invoke(context.Background(), "DetachParticipantAtGeneration", struct {
 		Sessionid          string
@@ -145,7 +145,8 @@ func (m *RemoteManager) DetachParticipantAtGeneration(sessionID, attachmentID, a
 		Accountid          string
 		Clientid           string
 		Expectedgeneration uint64
-	}{sessionID, attachmentID, accountID, clientID, expectedGeneration}, &out)
+		Lease              uint64
+	}{sessionID, attachmentID, accountID, clientID, expectedGeneration, lease}, &out)
 	return err
 }
 func (m *RemoteManager) AttachmentOwnedBy(sessionID, attachmentID, accountID, clientID string) bool {

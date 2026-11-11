@@ -593,10 +593,11 @@ func TestAttachStreamsReplayAndLiveOutputAsBinaryFrames(t *testing.T) {
 	}
 	var attached struct {
 		Result struct {
-			AttachmentID string `json:"attachment_id"`
+			AttachmentID    string `json:"attachment_id"`
+			AttachmentLease uint64 `json:"attachment_lease"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(response.Payload, &attached); err != nil || attached.Result.AttachmentID == "" {
+	if err := json.Unmarshal(response.Payload, &attached); err != nil || attached.Result.AttachmentID == "" || attached.Result.AttachmentLease == 0 {
 		t.Fatalf("attach payload=%s err=%v", response.Payload, err)
 	}
 	binary, err := protocol.ReadBinaryFrame(client)
@@ -606,7 +607,7 @@ func TestAttachStreamsReplayAndLiveOutputAsBinaryFrames(t *testing.T) {
 	if binary.Channel != protocol.Stdout || binary.StartSequence != 0 || string(binary.Data) != "stream-data" {
 		t.Fatalf("binary=%#v", binary)
 	}
-	control, _ := json.Marshal(map[string]any{"session_id": created.Result.ID, "attachment_id": attached.Result.AttachmentID})
+	control, _ := json.Marshal(map[string]any{"session_id": created.Result.ID, "attachment_id": attached.Result.AttachmentID, "attachment_lease": attached.Result.AttachmentLease})
 	if response = sendRequest(t, client, protocol.Frame{Type: "detach", RequestID: "req_detach", Version: "1.0", Payload: control}); response.Type != "response" {
 		t.Fatalf("detach=%s", response.Payload)
 	}
