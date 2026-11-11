@@ -7,35 +7,24 @@ import (
 	"encoding/json"
 	"syscall/js"
 	"time"
-
-	"github.com/pinksaucepasta/paperboat/internal/recording"
 )
 
 func main() {
 	state := &engine{}
 	run := js.FuncOf(func(_ js.Value, args []js.Value) any {
-		if len(args) < 1 || len(args) > 2 || args[0].Type() != js.TypeString {
+		if len(args) != 1 || args[0].Type() != js.TypeString {
 			return js.Null()
 		}
 		input := args[0].String()
-		// recording-segment passes the segment file as a Uint8Array beside the JSON, not as base64.
-		var file []byte
-		if len(args) == 2 {
-			if !args[1].InstanceOf(js.Global().Get("Uint8Array")) || args[1].Get("byteLength").Int() > recording.MaxSegmentFile {
-				return js.Null()
-			}
-			file = make([]byte, args[1].Get("byteLength").Int())
-			js.CopyBytesToGo(file, args[1])
-		}
 		executor := js.FuncOf(func(_ js.Value, callbacks []js.Value) any {
 			resolve := callbacks[0]
 			go func() {
 				result := map[string]any{}
 				var r request
-				if len(input) > 2<<20 || json.Unmarshal([]byte(input), &r) != nil {
+				// Only recording-segment carries a segment file (base64url, up to recording.MaxSegmentFile).
+				if len(input) > 6<<20 || json.Unmarshal([]byte(input), &r) != nil || len(input) > 2<<20 && r.Action != "recording-segment" {
 					result["error"] = "Invalid ENV operation."
 				} else {
-					r.file = file
 					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 					defer cancel()
 					data, err := state.run(ctx, r)

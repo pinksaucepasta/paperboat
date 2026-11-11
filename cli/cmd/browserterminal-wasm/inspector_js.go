@@ -48,41 +48,6 @@ func apiRecordingControl(_ js.Value, args []js.Value) any {
 	})
 }
 
-// apiRecordingRead(connectionID, recordingID, fromSegment) asks a recording-mode connection for one
-// segment of its recording. It resolves {result:{recording_id, from_segment, segments, total_segments,
-// bytes, final}}; the segment then arrives as "output" events (start_sequence = byte offset in this
-// read, data = a 4-byte big-endian length then the segment file) and recording_stream_end as an
-// "event". Ask for the next segment after that event; one segment at a time keeps the receive queue
-// bounded, and a replay resumes from any segment with a fresh ticket.
-func apiRecordingRead(_ js.Value, args []js.Value) any {
-	if len(args) != 3 || args[1].Type() != js.TypeString || !wire.ValidRecordingID(args[1].String()) || args[2].Type() != js.TypeNumber || args[2].Int() < 0 || float64(args[2].Int()) != args[2].Float() {
-		return errorObject("invalid_request", "The recording request is invalid.")
-	}
-	connection := getConnection(args[0].String())
-	if connection == nil || connection.config.Mode != connectionModeRecording {
-		return errorObject("connection_closed", "The recording connection is closed. Reconnect to continue.")
-	}
-	payload, _ := json.Marshal(map[string]any{"action": wire.ReadAction, "recording_id": args[1].String(), "from_segment": args[2].Int(), "max_segments": 1})
-	return browserPromise(func() any {
-		return connection.call(wire.Capability, payload, connection.recordingReady, browserRecordingFailure, connection.bindRecordingStream)
-	})
-}
-
-// bindRecordingStream runs in the read loop before the next frame, so the replay's output frames
-// that follow the response match this connection's stream.
-func (connection *browserTerminal) bindRecordingStream(response protocol.Frame) {
-	var body struct {
-		Result struct {
-			StreamID uint32 `json:"stream_id"`
-		} `json:"result"`
-	}
-	if response.Type == "response" && json.Unmarshal(response.Payload, &body) == nil && body.Result.StreamID != 0 {
-		connection.mu.Lock()
-		connection.streamID = body.Result.StreamID
-		connection.mu.Unlock()
-	}
-}
-
 type pendingCall struct {
 	reply      chan protocol.Frame
 	onResponse func(protocol.Frame) // runs in the read loop, before the next frame
@@ -90,39 +55,48 @@ type pendingCall struct {
 
 // call sends one request on this connection and resolves the response payload or {error, message}.
 func (connection *browserTerminal) call(capability string, payload json.RawMessage, ready bool, failure func(string) (string, string), onResponse func(protocol.Frame)) any {
+	response, failed := connection.callFrame(capability, payload, ready, failure, onResponse)
+	if failed != nil {
+		return failed
+	}
+	return js.Global().Get("JSON").Call("parse", string(response.Payload))
+}
+
+// callFrame sends one request and returns its response frame, or the {error, message} to resolve.
+func (connection *browserTerminal) callFrame(capability string, payload json.RawMessage, ready bool, failure func(string) (string, string), onResponse func(protocol.Frame)) (protocol.Frame, any) {
 	requestID, err := randomID("call_request")
 	if err != nil {
-		return errorObject("request_failed", "The request could not be created.")
+		return protocol.Frame{}, errorObject("request_failed", "The request could not be created.")
 	}
 	operationID, err := randomID("operation")
 	if err != nil {
-		return errorObject("request_failed", "The request could not be created.")
+		return protocol.Frame{}, errorObject("request_failed", "The request could not be created.")
 	}
 	_, encoded, ok := callRequestFrame(requestID, operationID, capability, payload)
 	if !ok {
-		return errorObject("invalid_request", "The request is invalid.")
+		return protocol.Frame{}, errorObject("invalid_request", "The request is invalid.")
 	}
 	pending := pendingCall{reply: make(chan protocol.Frame, 1), onResponse: onResponse}
 	connection.mu.Lock()
 	if !connection.attached || connection.stopping.Load() {
 		connection.mu.Unlock()
-		return errorObject("connection_closed", "The connection is closed. Reconnect to continue.")
+		return protocol.Frame{}, errorObject("connection_closed", "The connection is closed. Reconnect to continue.")
 	}
 	if !ready {
 		connection.mu.Unlock()
 		code, message := failure("capability_required")
-		return errorObject(code, message)
+		return protocol.Frame{}, errorObject(code, message)
 	}
 	if len(connection.calls) >= callMaxInFlight {
 		connection.mu.Unlock()
-		return errorObject("request_busy", "Too many requests are running. Retry shortly.")
+		return protocol.Frame{}, errorObject("request_busy", "Too many requests are running. Retry shortly.")
 	}
 	connection.calls[requestID] = pending
 	err = connection.writes.enqueue(terminalWrite{kind: appKindStructured, payloads: [][]byte{encoded}, bytes: len(encoded) + 5})
 	connection.mu.Unlock()
 	defer func() { connection.mu.Lock(); delete(connection.calls, requestID); connection.mu.Unlock() }()
 	if err != nil {
-		return errorObject("request_busy", "The encrypted connection is busy. Retry shortly.")
+		return protocol.Frame{}, errorObject("request_busy", "The encrypted connection is busy. Retry shortly.")
 	}
 	timer := time.NewTimer(callDeadlineMS * time.Millisecond)
 	defer timer.Stop()
@@ -133,19 +107,19 @@ func (connection *browserTerminal) call(capability string, payload json.RawMessa
 				Code string `json:"code"`
 			}
 			if json.Unmarshal(response.Payload, &body) != nil {
-				return errorObject("invalid_response", "The machine returned an invalid response.")
+				return protocol.Frame{}, errorObject("invalid_response", "The machine returned an invalid response.")
 			}
 			code, message := failure(body.Code)
 			if body.Code == "credential_expired" && capability == inspectorCapability {
 				connection.emit("state", map[string]any{"state": "reconnecting", "code": body.Code, "message": message})
 			}
-			return errorObject(code, message)
+			return protocol.Frame{}, errorObject(code, message)
 		}
-		return js.Global().Get("JSON").Call("parse", string(response.Payload))
+		return response, nil
 	case <-connection.fileDone:
-		return errorObject("connection_closed", "The connection is closed. Reconnect to continue.")
+		return protocol.Frame{}, errorObject("connection_closed", "The connection is closed. Reconnect to continue.")
 	case <-timer.C:
-		return errorObject("request_timeout", "The machine did not answer in time. Retry.")
+		return protocol.Frame{}, errorObject("request_timeout", "The machine did not answer in time. Retry.")
 	}
 }
 

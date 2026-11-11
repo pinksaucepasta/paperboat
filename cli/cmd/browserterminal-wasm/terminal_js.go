@@ -341,11 +341,12 @@ func (connection *browserTerminal) readTerminalStream(stream io.Reader) error {
 				}
 				continue
 			}
+			start := connection.replayOffset(frame.StartSequence)
 			connection.emit("output", map[string]any{
 				"stream_id":      frame.StreamID,
 				"channel":        frame.Channel,
-				"start_sequence": strconv.FormatUint(frame.StartSequence, 10),
-				"next_sequence":  strconv.FormatUint(frame.StartSequence+uint64(len(frame.Data)), 10),
+				"start_sequence": strconv.FormatUint(start, 10),
+				"next_sequence":  strconv.FormatUint(start+uint64(len(frame.Data)), 10),
 				"data":           jsByteArray(frame.Data),
 			})
 			continue
@@ -406,6 +407,9 @@ func (connection *browserTerminal) readTerminalStream(stream io.Reader) error {
 				State string `json:"state"`
 			}
 			_ = json.Unmarshal(frame.Payload, &event)
+			if event.Event == wire.EventStreamEnd && connection.config.Mode == connectionModeRecording && connection.replayContinues() {
+				continue
+			}
 			if event.Event == "terminal_stream_end" {
 				connection.ended.Store(true)
 				connection.emit("state", map[string]any{"state": "closed", "message": "The remote terminal has closed."})
@@ -622,6 +626,9 @@ func (connection *browserTerminal) sendActivity() error {
 }
 
 func (connection *browserTerminal) sendAck(nextSequence uint64) error {
+	if connection.config.Mode != connectionModeTerminal {
+		return nil // only a terminal stream has an output window; a replay ticket may not ack
+	}
 	connection.mu.Lock()
 	defer connection.mu.Unlock()
 	if !connection.attached || connection.tls == nil || connection.stopping.Load() {

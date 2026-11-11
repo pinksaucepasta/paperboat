@@ -52,12 +52,12 @@ func TestRecordingKeyCreateGrantOpenAndRead(t *testing.T) {
 	if key["generation"] != 1 || len(grants) != 1 || grants[0].AccountID != a.Account {
 		t.Fatalf("create %+v", created)
 	}
-	out, err = alice.run(ctx, request{Action: "recording-key-grant", Vault: a, TeamID: "team-one", Generation: 1, Sealed: grants[0].Sealed, Viewers: []recordingViewer{{AccountID: b.Account, SharingPublicKey: sharingPublic(t, bob)}}})
+	out, err = alice.run(ctx, request{Action: "recording-key-grant", TeamID: "team-one", Generation: 1, Sealed: grants[0].Sealed, Viewers: []recordingViewer{{AccountID: b.Account, SharingPublicKey: sharingPublic(t, bob)}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	bobCopy := out.(map[string]any)["grants"].([]recordingGrant)[0].Sealed
-	if _, err := carol.run(ctx, request{Action: "recording-key-grant", Vault: c, TeamID: "team-one", Generation: 1, Sealed: bobCopy, Viewers: []recordingViewer{{AccountID: c.Account, SharingPublicKey: sharingPublic(t, carol)}}}); err == nil {
+	if _, err := carol.run(ctx, request{Action: "recording-key-grant", TeamID: "team-one", Generation: 1, Sealed: bobCopy, Viewers: []recordingViewer{{AccountID: c.Account, SharingPublicKey: sharingPublic(t, carol)}}}); err == nil {
 		t.Fatal("a viewer without a copy shared the key")
 	}
 
@@ -75,8 +75,8 @@ func TestRecordingKeyCreateGrantOpenAndRead(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	open := request{Action: "recording-open", Vault: b, TeamID: "team-one", RecordingID: id, KeyGeneration: 1, ViewerKey: &recordingSealed{Generation: 1, Sealed: bobCopy}}
-	if _, err := carol.run(ctx, request{Action: open.Action, Vault: c, TeamID: open.TeamID, RecordingID: id, KeyGeneration: 1, ViewerKey: open.ViewerKey}); err == nil {
+	open := request{Action: "recording-open", TeamID: "team-one", RecordingID: id, KeyGeneration: 1, ViewerKey: &recordingSealed{Generation: 1, Sealed: bobCopy}}
+	if _, err := carol.run(ctx, request{Action: open.Action, TeamID: open.TeamID, RecordingID: id, KeyGeneration: 1, ViewerKey: open.ViewerKey}); err == nil {
 		t.Fatal("another viewer's copy opened the recording")
 	}
 	out, err = bob.run(ctx, open)
@@ -86,10 +86,10 @@ func TestRecordingKeyCreateGrantOpenAndRead(t *testing.T) {
 	handle := out.(map[string]string)["handle"]
 	tampered := append([]byte(nil), file...)
 	tampered[len(tampered)-1] ^= 1
-	if _, err := bob.run(ctx, request{Action: "recording-segment", Handle: handle, file: tampered}); err == nil {
+	if _, err := bob.run(ctx, request{Action: "recording-segment", Handle: handle, File: encoded(tampered)}); err == nil {
 		t.Fatal("a tampered segment opened")
 	}
-	out, err = bob.run(ctx, request{Action: "recording-segment", Handle: handle, file: file})
+	out, err = bob.run(ctx, request{Action: "recording-segment", Handle: handle, File: encoded(file)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestRecordingKeyCreateGrantOpenAndRead(t *testing.T) {
 	if _, err := bob.run(ctx, request{Action: "recording-close", Handle: handle}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := bob.run(ctx, request{Action: "recording-segment", Handle: handle, file: file}); err == nil {
+	if _, err := bob.run(ctx, request{Action: "recording-segment", Handle: handle, File: encoded(file)}); err == nil {
 		t.Fatal("a closed handle read a segment")
 	}
 	// Locking drops open recordings.
@@ -108,7 +108,7 @@ func TestRecordingKeyCreateGrantOpenAndRead(t *testing.T) {
 	if _, err := bob.run(ctx, request{Action: "lock"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := bob.run(ctx, request{Action: "recording-segment", Handle: handle, file: file}); err == nil {
+	if _, err := bob.run(ctx, request{Action: "recording-segment", Handle: handle, File: encoded(file)}); err == nil {
 		t.Fatal("a recording stayed open after lock")
 	}
 }

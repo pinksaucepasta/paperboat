@@ -74,7 +74,7 @@ type request struct {
 	ViewerKey     *recordingSealed  `json:"viewer_key"`
 	Chain         []recordingLink   `json:"chain"`
 	Handle        string            `json:"handle"`
-	file          []byte            // recording-segment: the segment file, passed as bytes beside the JSON
+	File          string            `json:"file"` // recording-segment: one segment file
 }
 type engine struct {
 	mu          sync.Mutex

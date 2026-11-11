@@ -102,6 +102,7 @@ type recordingReadResult struct {
 	Segments      uint32 `json:"segments"`
 	TotalSegments uint32 `json:"total_segments"`
 	Bytes         int64  `json:"bytes"`
+	TotalBytes    int64  `json:"total_bytes"` // every segment's file, without the lengths
 	Final         bool   `json:"final"`
 }
 
@@ -126,7 +127,7 @@ func (d *Dispatcher) recordingRead(authorization Authorization, payload json.Raw
 		if request.FromSegment > meta.Segments {
 			return failure("invalid_request")
 		}
-		declared := recordingReadResult{RecordingID: meta.ID, Segments: meta.Segments, TotalSegments: meta.Segments, Bytes: meta.Bytes, Final: meta.EndedAt != nil}
+		declared := recordingReadResult{RecordingID: meta.ID, Segments: meta.Segments, TotalSegments: meta.Segments, Bytes: meta.Bytes, TotalBytes: meta.Bytes, Final: meta.EndedAt != nil}
 		if request.MaxSegments == 0 {
 			return result(declared)
 		}

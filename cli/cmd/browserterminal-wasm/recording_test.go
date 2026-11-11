@@ -53,3 +53,39 @@ func TestRecordingFailureMessagesAreAuthored(t *testing.T) {
 		t.Fatalf("unknown code passed through: %q", code)
 	}
 }
+
+// The worker's paced replay shows the page one stream: offsets continue across ranges, the size is
+// fixed by the first answer, and an answer that skips, repeats or stalls is refused.
+func TestPacedReplayIsOneStream(t *testing.T) {
+	const id = "rec_00000000-0000-4000-8000-000000000001"
+	r := replayRange{recordingID: id}
+	if !r.bind(replayReadResult{RecordingID: id, StreamID: 3, FromSegment: 0, Segments: 1, TotalSegments: 2, Bytes: 100, TotalBytes: 150}, true) || r.streamBytes() != 158 {
+		t.Fatalf("first range %+v", r)
+	}
+	if from, more := r.ended(); from != 1 || !more || r.base != 104 {
+		t.Fatalf("after the first range from=%d more=%v base=%d", from, more, r.base)
+	}
+	for name, bad := range map[string]replayReadResult{
+		"repeated":  {RecordingID: id, StreamID: 4, FromSegment: 0, Segments: 1, Bytes: 100},
+		"stalled":   {RecordingID: id, StreamID: 4, FromSegment: 1, Segments: 0},
+		"other":     {RecordingID: "rec_00000000-0000-4000-8000-000000000002", StreamID: 4, FromSegment: 1, Segments: 1, Bytes: 50},
+		"no_stream": {RecordingID: id, FromSegment: 1, Segments: 1, Bytes: 50},
+	} {
+		if copy := r; copy.bind(bad, false) {
+			t.Fatalf("%s range accepted", name)
+		}
+	}
+	if !r.bind(replayReadResult{RecordingID: id, StreamID: 4, FromSegment: 1, Segments: 1, Bytes: 50, Final: true}, false) || !r.final {
+		t.Fatalf("second range %+v", r)
+	}
+	if from, more := r.ended(); from != 2 || more || r.base != 158 {
+		t.Fatalf("after the last range from=%d more=%v base=%d", from, more, r.base)
+	}
+	empty := replayRange{recordingID: id}
+	if !empty.bind(replayReadResult{RecordingID: id, StreamID: 1, TotalSegments: 0}, true) {
+		t.Fatal("an empty recording was refused")
+	}
+	if _, more := empty.ended(); more {
+		t.Fatal("an empty recording asked for more")
+	}
+}

@@ -156,7 +156,7 @@ func TestReplayTicketReadsOnlyItsRecording(t *testing.T) {
 	}
 	outcome = ranged(1, 1)
 	var declared recordingReadResult
-	if outcome.ErrorCode != "" || json.Unmarshal(outcome.Result, &declared) != nil || declared.FromSegment != 1 || declared.Segments != 1 || declared.TotalSegments != 2 || declared.Bytes != 2 {
+	if outcome.ErrorCode != "" || json.Unmarshal(outcome.Result, &declared) != nil || declared.FromSegment != 1 || declared.Segments != 1 || declared.TotalSegments != 2 || declared.Bytes != 2 || declared.TotalBytes != 70<<10+2 {
 		t.Fatalf("ranged read %+v %s", outcome, outcome.Result)
 	}
 	stream, _, _ = d.openRecordingStream(ticket, outcome)

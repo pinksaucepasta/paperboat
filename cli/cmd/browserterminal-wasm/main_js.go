@@ -66,6 +66,7 @@ type browserTerminal struct {
 	calls           map[string]pendingCall
 	inspectorReady  bool
 	recordingReady  bool
+	replay          *replayRange // recording mode: the paced replay in progress
 	fileDone        chan struct{}
 	fileCloseOnce   sync.Once
 	filesAvailable  bool

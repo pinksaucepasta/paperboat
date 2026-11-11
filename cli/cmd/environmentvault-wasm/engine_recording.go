@@ -35,6 +35,8 @@ type recordingLink struct {
 	SealedPrevious string `json:"sealed_previous"`
 }
 
+var errRecordingLocked = errors.New("Unlock ENV to use team recordings.")
+
 // maxRecordingViewers bounds one grant request; maxRecordingHandles the replays open at once.
 const (
 	maxRecordingViewers = 512
@@ -51,10 +53,11 @@ func (e *engine) recordingOperation(r request) (any, error) {
 		return e.recordingOpen(r)
 	case "recording-segment":
 		reader := e.recordings[r.Handle]
-		if reader == nil || len(r.file) == 0 {
+		file, err := decode(r.File)
+		if reader == nil || err != nil || len(file) == 0 || len(file) > recording.MaxSegmentFile {
 			return nil, env.ErrInvalid
 		}
-		text, err := reader.Open(r.file)
+		text, err := reader.Open(file)
 		if err != nil {
 			return nil, errors.New("A recording segment failed verification.")
 		}
@@ -97,8 +100,8 @@ func (e *engine) recordingKeyCreate(r request) (any, error) {
 
 // recordingKeyGrant opens this account's copy and seals the same generation for pending viewers.
 func (e *engine) recordingKeyGrant(r request) (any, error) {
-	if err := e.current(r.Vault); err != nil {
-		return nil, err
+	if len(e.raw) == 0 {
+		return nil, errRecordingLocked
 	}
 	sealed, err := decode(r.Sealed)
 	if err != nil || r.TeamID == "" || r.Generation < 1 || len(r.Viewers) == 0 || len(r.Viewers) > maxRecordingViewers {
@@ -135,8 +138,8 @@ func sealRecordingGrants(teamID string, generation int64, bundle recording.Bundl
 
 // recordingOpen opens the key generation that sealed one recording and keeps a reader for its segments.
 func (e *engine) recordingOpen(r request) (any, error) {
-	if err := e.current(r.Vault); err != nil {
-		return nil, err
+	if len(e.raw) == 0 {
+		return nil, errRecordingLocked
 	}
 	if r.ViewerKey == nil || r.TeamID == "" || r.RecordingID == "" || r.KeyGeneration < 1 || len(r.Chain) > 1024 {
 		return nil, env.ErrInvalid

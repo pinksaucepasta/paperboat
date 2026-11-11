@@ -127,7 +127,7 @@ func TestBuiltWasmInteroperatesWithNativeCode(t *testing.T) {
 	if named["name"] != "NATIVE_NAME" || named["deleted"] != false || len(named) != 2 {
 		t.Fatalf("wasm record-name reply: %v", named)
 	}
-	interopRecording(t, peer, e, vault)
+	interopRecording(t, peer, e)
 	// Wasm-initialized vault -> native unlock.
 	fresh := map[string]any{"issuer": v.Issuer, "account_id": "account-two"}
 	sealed := peer.call(map[string]any{"action": "initialize", "vault": fresh, "password": "second password"})
@@ -148,8 +148,8 @@ func TestBuiltWasmInteroperatesWithNativeCode(t *testing.T) {
 }
 
 // interopRecording: the module makes a team recording key whose copy the native code opens, and reads
-// a segment the native recorder sealed to it.
-func interopRecording(t *testing.T, peer *wasmPeer, e *engine, vault map[string]any) {
+// a segment the native recorder sealed to it (base64url in the JSON, as the console sends it).
+func interopRecording(t *testing.T, peer *wasmPeer, e *engine) {
 	t.Helper()
 	viewer := sharingPublic(t, e)
 	created := peer.call(map[string]any{"action": "recording-key-create", "team_id": "team-one", "viewers": []map[string]any{{"account_id": "account-one", "sharing_public_key": viewer}}})
@@ -171,8 +171,8 @@ func interopRecording(t *testing.T, peer *wasmPeer, e *engine, vault map[string]
 	if err != nil {
 		t.Fatal(err)
 	}
-	handle := peer.call(map[string]any{"action": "recording-open", "vault": vault, "team_id": "team-one", "recording_id": id, "key_generation": 1, "viewer_key": map[string]any{"generation": 1, "sealed": grant}})["handle"]
-	read := peer.call(map[string]any{"action": "recording-segment", "handle": handle, "segment_file": encoded(file)})
+	handle := peer.call(map[string]any{"action": "recording-open", "team_id": "team-one", "recording_id": id, "key_generation": 1, "viewer_key": map[string]any{"generation": 1, "sealed": grant}})["handle"]
+	read := peer.call(map[string]any{"action": "recording-segment", "handle": handle, "file": encoded(file)})
 	if read["text"] != string(text) || read["final"] != true {
 		t.Fatalf("wasm segment read %v", read["final"])
 	}
