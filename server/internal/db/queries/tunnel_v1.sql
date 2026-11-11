@@ -65,6 +65,16 @@ WHERE id = sqlc.arg(host_id)
   AND public_identity_key IS NOT NULL
 FOR UPDATE;
 
+-- name: GetTeamOwnerOfHostV1 :one
+-- The team that owns one of the account's live machines: a team machine gets tunnel access only from its team's grants.
+SELECT owner_team_id::text AS team_id
+FROM user_machines
+WHERE id = sqlc.arg(host_id)
+  AND user_id = sqlc.arg(account_id)
+  AND owner_team_id IS NOT NULL
+  AND deleted_at IS NULL
+  AND revoked_at IS NULL;
+
 -- name: ListExpiredPreviewTunnelsV1 :many
 SELECT *
 FROM tunnels

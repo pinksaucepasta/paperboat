@@ -445,6 +445,21 @@ func writeTunnelMutation(w http.ResponseWriter, result tunnelv1.MutationResult, 
 	writeJSON(w, status, SuccessResponse{Data: result.Tunnel})
 }
 
+// hostTeamOwned is the machine-belongs-to-a-team refusal of a tunnel create, or nil.
+func hostTeamOwned(err error) *tunnelv1.HostTeamOwnedError {
+	var owned *tunnelv1.HostTeamOwnedError
+	if errors.As(err, &owned) {
+		return owned
+	}
+	return nil
+}
+
+// hostTeamOwnedMessage tells the owner why a machine of theirs may not create tunnels and the two ways out.
+func hostTeamOwnedMessage(team string) string {
+	return "This machine belongs to team " + team + ", so it gets tunnel access only from that team's machine grants (team roles alone grant none). " +
+		"Ask a team owner or admin to grant it (pb team machine grant), or move it back to your account (pb team machine transfer-to-personal)."
+}
+
 func writeTunnelError(w http.ResponseWriter, r *http.Request, err error) {
 	if expectedHTTPErrorOnly(err, workspace.ErrForbidden, workspace.ErrSSORequired) || expectedHTTPErrorOnly(err, workspace.ErrInvalid) {
 		writeWorkspaceError(w, r, err)
@@ -468,6 +483,8 @@ func writeTunnelError(w http.ResponseWriter, r *http.Request, err error) {
 		writePreviewTunnelError(w, r, http.StatusBadRequest, "idempotency_required", "Idempotency-Key is required.", "unchanged", false, "retry_with_idempotency_key", err)
 	case expectedHTTPErrorOnly(err, previewtunnelapi.ErrInvalidIdempotency):
 		writePreviewTunnelError(w, r, http.StatusBadRequest, "invalid_idempotency_key", "Idempotency-Key is invalid.", "unchanged", false, "send_valid_idempotency_key", err)
+	case hostTeamOwned(err) != nil:
+		writePreviewTunnelError(w, r, http.StatusForbidden, "machine_team_owned", hostTeamOwnedMessage(hostTeamOwned(err).Team), "unchanged", false, "grant_machine_tunnel_access", err)
 	case expectedHTTPErrorOnly(err, previewtunnelapi.ErrHostActorRequired, previewtunnelapi.ErrForbidden, tunnelv1.ErrHostNotFound):
 		writePreviewTunnelError(w, r, http.StatusForbidden, "forbidden", "You are not allowed to perform this tunnel operation.", "unchanged", false, "authenticate_with_required_host", err)
 	case expectedHTTPErrorOnly(err, tunnelv1.ErrNotFound):

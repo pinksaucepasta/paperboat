@@ -179,9 +179,26 @@ func verifyHostWithQueries(ctx context.Context, queries *dbsqlc.Queries, account
 		HostID: hostID, AccountID: accountID,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrHostNotFound
+		return deniedHost(ctx, queries, accountID, hostID)
 	}
 	return translate(err)
+}
+
+// HostTeamOwnedError is ErrHostNotFound for a machine that belongs to a team: it has no tunnel access of its own,
+// only the team's machine grants, and the owner needs to be told that instead of a bare "forbidden".
+type HostTeamOwnedError struct{ Team string }
+
+func (e *HostTeamOwnedError) Error() string { return "host machine is owned by team " + e.Team }
+func (e *HostTeamOwnedError) Unwrap() error { return ErrHostNotFound }
+
+// deniedHost explains why a host may not create tunnels: ErrHostNotFound, or HostTeamOwnedError when the
+// account's own machine belongs to a team.
+func deniedHost(ctx context.Context, queries *dbsqlc.Queries, accountID, hostID string) error {
+	team, err := queries.GetTeamOwnerOfHostV1(ctx, dbsqlc.GetTeamOwnerOfHostV1Params{HostID: hostID, AccountID: accountID})
+	if err != nil || team == "" {
+		return ErrHostNotFound
+	}
+	return &HostTeamOwnedError{Team: team}
 }
 
 func (r *SQLRepository) Get(ctx context.Context, accountID, tunnelID string) (dbsqlc.Tunnel, error) {
@@ -305,7 +322,7 @@ func (r *SQLRepository) Create(ctx context.Context, input CreateRecord) (Mutatio
 				return err
 			}
 			if !allowed {
-				return ErrHostNotFound
+				return deniedHost(ctx, queries, input.AccountID, input.HostID)
 			}
 			if err := previewtunnelstore.RequireWorkspacePublisherEntitlementTx(ctx, tx, ws.TeamID); err != nil {
 				return err

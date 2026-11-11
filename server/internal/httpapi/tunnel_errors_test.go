@@ -33,6 +33,7 @@ func TestTunnelErrorPureTypedDomainOutcomes(t *testing.T) {
 		{name: "host actor required", err: previewtunnelapi.ErrHostActorRequired, status: http.StatusForbidden, code: "forbidden", outcome: "unchanged", repairAction: "authenticate_with_required_host"},
 		{name: "forbidden", err: previewtunnelapi.ErrForbidden, status: http.StatusForbidden, code: "forbidden", outcome: "unchanged", repairAction: "authenticate_with_required_host"},
 		{name: "host not found", err: tunnelv1.ErrHostNotFound, status: http.StatusForbidden, code: "forbidden", outcome: "unchanged", repairAction: "authenticate_with_required_host"},
+		{name: "machine owned by a team", err: &tunnelv1.HostTeamOwnedError{Team: "team-x"}, status: http.StatusForbidden, code: "machine_team_owned", outcome: "unchanged", repairAction: "grant_machine_tunnel_access"},
 		{name: "not found", err: tunnelv1.ErrNotFound, status: http.StatusNotFound, code: "tunnel_not_found", outcome: "unchanged", repairAction: "refresh"},
 		{name: "generation conflict", err: tunnelv1.ErrGenerationConflict, status: http.StatusPreconditionFailed, code: "generation_conflict", outcome: "unchanged", repairAction: "fetch_current_tunnel"},
 		{name: "idempotency conflict", err: tunnelv1.ErrIdempotencyConflict, status: http.StatusConflict, code: "idempotency_conflict", outcome: "unchanged", repairAction: "retry_with_new_idempotency_key"},
@@ -165,5 +166,28 @@ func TestTunnelErrorMixedDomainFailuresReachFaultOwner(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A machine that belongs to a team has no tunnel access of its own: the owner is told which team, and the two ways out,
+// instead of a bare "forbidden".
+func TestTunnelCreateOnATeamMachineNamesTheTeamAndTheFix(t *testing.T) {
+	request, _, _ := diagnosticRequest("/v1/tunnels")
+	response := httptest.NewRecorder()
+	writeTunnelError(response, request, &tunnelv1.HostTeamOwnedError{Team: "team-x"})
+	var body ErrorResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"team team-x", "pb team machine grant", "pb team machine transfer-to-personal"} {
+		if !strings.Contains(body.Error.Message, want) {
+			t.Errorf("the message lacks %q: %s", want, body.Error.Message)
+		}
+	}
+	// the personal-machine refusal stays the generic one
+	generic := httptest.NewRecorder()
+	writeTunnelError(generic, request, tunnelv1.ErrHostNotFound)
+	if !strings.Contains(generic.Body.String(), `"forbidden"`) {
+		t.Fatalf("an unknown host stopped being forbidden: %s", generic.Body.String())
 	}
 }
