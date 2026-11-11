@@ -93,7 +93,7 @@ func (s *controlServer) handle(connection *net.UnixConn) error {
 	if err != nil || identity.UID != s.uid {
 		return ErrControlDenied
 	}
-	_ = connection.SetDeadline(time.Now().Add(maxUpdateControlTimeout))
+	_ = connection.SetDeadline(time.Now().Add(controlRequestReadTimeout))
 	decoder := json.NewDecoder(io.LimitReader(connection, 4<<10))
 	decoder.DisallowUnknownFields()
 	var request ControlRequest
@@ -104,12 +104,16 @@ func (s *controlServer) handle(connection *net.UnixConn) error {
 	if decoder.Decode(&extra) != io.EOF || request.Schema != ControlProtocolV1 || !validControlRequest(request) {
 		return s.respond(connection, ControlResponse{Schema: ControlProtocolV1, Status: "error", ErrorCode: "invalid_request"})
 	}
+	budget := controlOperationTimeout(request.Operation)
+	_ = connection.SetDeadline(time.Now().Add(budget))
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
 	var response ControlResponse
 	var invokeErr error
 	if s.invokeRequest != nil {
-		response, invokeErr = s.invokeRequest(context.Background(), request)
+		response, invokeErr = s.invokeRequest(ctx, request)
 	} else {
-		response, invokeErr = s.invoke(context.Background(), request.Operation)
+		response, invokeErr = s.invoke(ctx, request.Operation)
 	}
 	if invokeErr != nil {
 		response.Schema = ControlProtocolV1

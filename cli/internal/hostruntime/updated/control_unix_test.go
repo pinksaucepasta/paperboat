@@ -405,3 +405,45 @@ func TestControlPendingInstallationBecomesCommittedWithoutRestart(t *testing.T) 
 		t.Fatal("committed source stayed fenced", err)
 	}
 }
+
+// A peer that connects and never sends its request frees the handler after controlRequestReadTimeout, not after the
+// 15 minutes an install may take.
+func TestControlHandlerDropsASilentConnection(t *testing.T) {
+	original := controlRequestReadTimeout
+	controlRequestReadTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { controlRequestReadTimeout = original })
+	path := testSocketPath(t)
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	server := controlServer{socketPath: path, uid: os.Geteuid(), gid: os.Getegid(), invoke: func(context.Context, string) (ControlResponse, error) {
+		t.Error("a request that never arrived was invoked")
+		return ControlResponse{}, nil
+	}}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if connection, acceptErr := listener.AcceptUnix(); acceptErr == nil {
+			_ = server.handle(connection)
+			_ = connection.Close()
+		}
+	}()
+	connection, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the handler still waits for a request after the read timeout")
+	}
+}
+
+func TestControlOperationBudgets(t *testing.T) {
+	if controlOperationTimeout("status") != time.Minute || controlOperationTimeout("settings") != time.Minute || controlOperationTimeout("install") != maxUpdateControlTimeout || controlOperationTimeout("download") != maxUpdateControlTimeout {
+		t.Fatal("control operation budgets changed")
+	}
+}

@@ -16,6 +16,19 @@ import (
 const ControlProtocolV1 = "paperboat.updated/v1"
 const maxUpdateControlTimeout = 15 * time.Minute
 
+// controlRequestReadTimeout bounds how long a control connection may take to send its one request line: a client
+// that connects and sends nothing must not hold a handler for the 15 minutes an install may take.
+var controlRequestReadTimeout = 10 * time.Second
+
+// controlOperationTimeout is the budget of one control operation: reading status or settings is seconds of work,
+// check, download and install get the full update window.
+func controlOperationTimeout(operation string) time.Duration {
+	if operation == "status" || operation == "settings" {
+		return time.Minute
+	}
+	return maxUpdateControlTimeout
+}
+
 var (
 	ErrInvalidControl   = errors.New("invalid paperboat-updated control request")
 	ErrControlDenied    = errors.New("paperboat-updated control peer authorization failed")

@@ -209,11 +209,11 @@ func handleWindowsControl(ctx context.Context, connection net.Conn, invoke func(
 	if connection == nil {
 		return false, ErrInvalidControl
 	}
-	deadline := time.Now().Add(maxUpdateControlTimeout)
-	if requestDeadline, ok := ctx.Deadline(); ok && requestDeadline.Before(deadline) {
-		deadline = requestDeadline
+	readDeadline := time.Now().Add(controlRequestReadTimeout)
+	if requestDeadline, ok := ctx.Deadline(); ok && requestDeadline.Before(readDeadline) {
+		readDeadline = requestDeadline
 	}
-	_ = connection.SetDeadline(deadline)
+	_ = connection.SetDeadline(readDeadline)
 	reader := bufio.NewReaderSize(io.LimitReader(connection, (4<<10)+1), (4<<10)+1)
 	body, err := reader.ReadBytes('\n')
 	if err != nil || len(body) == 0 || len(body) > 4<<10 {
@@ -225,6 +225,11 @@ func handleWindowsControl(ctx context.Context, connection net.Conn, invoke func(
 	var extra any
 	if decoder.Decode(&request) != nil || decoder.Decode(&extra) != io.EOF || request.Schema != ControlProtocolV1 || !validControlRequest(request) {
 		return false, json.NewEncoder(connection).Encode(ControlResponse{Schema: ControlProtocolV1, Status: "error", ErrorCode: "invalid_request"})
+	}
+	ctx, cancel := context.WithTimeout(ctx, controlOperationTimeout(request.Operation))
+	defer cancel()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = connection.SetDeadline(deadline)
 	}
 	response, invokeErr := invoke(ctx, request)
 	if invokeErr != nil {
