@@ -119,6 +119,9 @@ type lifecycleJournal struct {
 	Before             []NativeComponentStatus `json:"before"`
 }
 
+// maxRollbackTimeout is the longest rollback budget, configured or derived.
+const maxRollbackTimeout = 5 * time.Minute
+
 func NewLifecycleManager(config LifecycleConfig) (*LifecycleManager, error) {
 	if !filepath.IsAbs(config.StateRoot) || filepath.Clean(config.StateRoot) != config.StateRoot || len(config.Components) == 0 {
 		return nil, ErrLifecycleInvalid
@@ -141,9 +144,11 @@ func NewLifecycleManager(config LifecycleConfig) (*LifecycleManager, error) {
 	}
 	rollbackTimeout := config.RollbackTimeout
 	if rollbackTimeout == 0 {
-		rollbackTimeout = time.Minute
+		// A rollback undoes every component and one step may take most of a minute (nativeServiceOperationTimeout is 90 s):
+		// a minute for each, so a three-component rollback is not cut off after the first.
+		rollbackTimeout = min(time.Minute*time.Duration(len(components)), maxRollbackTimeout)
 	}
-	if rollbackTimeout < time.Second || rollbackTimeout > 5*time.Minute {
+	if rollbackTimeout < time.Second || rollbackTimeout > maxRollbackTimeout {
 		return nil, ErrLifecycleInvalid
 	}
 	return &LifecycleManager{
