@@ -1,0 +1,19 @@
+events {}
+http {
+  server {
+    listen 80 default_server;
+    return 301 https://$host$request_uri;
+  }
+  server {
+    listen 443 ssl;
+    server_name @HOST@;
+    ssl_certificate /certs/leaf.crt;
+    ssl_certificate_key /certs/leaf.key;
+    location / {
+      proxy_pass http://app:9000;
+      proxy_set_header Host $host;
+      proxy_set_header X-Forwarded-Proto $scheme;
+      proxy_set_header X-Forwarded-Host $host;
+    }
+  }
+}

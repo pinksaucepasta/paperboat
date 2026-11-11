@@ -1,0 +1,14 @@
+http:
+  routers:
+    app:
+      rule: "Host(`@HOST@`)"
+      entryPoints: [websecure]
+      service: app
+      tls: {}
+  services:
+    app:
+      loadBalancer:
+        servers: [{url: "http://app:9000"}]
+tls:
+  certificates:
+    - {certFile: /certs/leaf.crt, keyFile: /certs/leaf.key}

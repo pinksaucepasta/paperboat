@@ -1,0 +1,7 @@
+{
+	admin off
+}
+https://{$PUBLIC_HOST} {
+	tls internal
+	reverse_proxy app:9000
+}

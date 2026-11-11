@@ -1,0 +1,7 @@
+{
+	admin off
+}
+https://{$PUBLIC_HOST} {
+	tls /certs/leaf.crt /certs/leaf.key
+	reverse_proxy app:9000
+}

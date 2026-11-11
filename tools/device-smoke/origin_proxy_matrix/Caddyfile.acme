@@ -1,0 +1,7 @@
+{
+	admin off
+	acme_ca http://127.0.0.1:1/directory
+}
+https://{$PUBLIC_HOST} {
+	reverse_proxy app:9000
+}
