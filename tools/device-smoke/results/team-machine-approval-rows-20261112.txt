@@ -1,0 +1,6 @@
+team_two_account.py C282-C285 on L: owner = dev account on pbvm4 (team paperboat-smoke-paid, the shared paid test team), member = second test account (Final Rech) with machine laners-m1 (machine_d6e7a4c7-d30a-40a5-b40a-c4a305838fe0) paired by member_container.sh; pb dev-a31bef562 (server prod)
+2026-11-11T21:41:05Z
+PASS  C282 team machine approval on/off, refusals  59.6s  
+PASS  C285 team machine requests lists who asked   34.1s  
+PASS  C283 team machine approve, refusals          41.2s  
+PASS  C284 team machine decline, refusals          64.3s  
