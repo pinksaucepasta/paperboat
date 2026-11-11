@@ -89,7 +89,9 @@ export function BrandBar({ onNavigate }: { onNavigate?: () => void }) {
     const setBlur = (speed: number) => {
       const px = Math.min(maxBlur, Math.max(0, Math.abs(speed) - blurFrom) * blurPerSpeed)
       // The filter works in the SVG's own units: convert from screen pixels.
-      const units = (px * 600) / boatEl.getBoundingClientRect().width
+      // A closed sheet (phones) has no width yet: 0 / 0 would be NaN.
+      const width = boatEl.getBoundingClientRect().width
+      const units = width ? (px * 600) / width : 0
       blurEl.setAttribute("stdDeviation", `${units.toFixed(2)} 0`)
     }
     const finish = () => {
