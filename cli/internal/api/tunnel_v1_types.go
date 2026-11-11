@@ -109,7 +109,8 @@ type TunnelRouteHostMatch struct {
 type TunnelRouteTLS struct {
 	Verification              string  `json:"verification"`
 	ServerName                *string `json:"server_name,omitempty"`
-	CAReference               *string `json:"ca_reference,omitempty"`
+	// CA is the PEM CA a custom_ca route trusts for its origin (Caddy's tls internal root, a private CA).
+	CA *string `json:"ca_pem,omitempty"`
 	ClientCredentialReference *string `json:"client_credential_reference,omitempty"`
 	Pin                       *string `json:"pin,omitempty"`
 }

@@ -101,9 +101,9 @@ func newOriginPKI(t *testing.T, serverName string) originPKI {
 	return originPKI{caPEM: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}), serverTLS: server, clientDoc: document}
 }
 
-func httpsOriginRoute(address, serverName string) hoststate.TunnelConfigRoute {
-	caRef := "keychain://paperboat/origins/ca_01"
-	return hoststate.TunnelConfigRoute{ID: "route_01", Protocol: "http", OriginScheme: "https", OriginAddress: address, PreserveHost: true, TLSVerification: "custom_ca", TLSServerName: &serverName, CAReference: &caRef, ConnectTimeoutMs: 1000, IdleTimeoutMs: 2000, DesiredState: "active"}
+func httpsOriginRoute(address, serverName string, caPEM []byte) hoststate.TunnelConfigRoute {
+	ca := string(caPEM)
+	return hoststate.TunnelConfigRoute{ID: "route_01", Protocol: "http", OriginScheme: "https", OriginAddress: address, PreserveHost: true, TLSVerification: "custom_ca", TLSServerName: &serverName, TLSCA: &ca, ConnectTimeoutMs: 1000, IdleTimeoutMs: 2000, DesiredState: "active"}
 }
 
 func TestOriginHTTPTransportCustomCAKeepsHostAndSNIIndependent(t *testing.T) {
@@ -118,8 +118,8 @@ func TestOriginHTTPTransportCustomCAKeepsHostAndSNIIndependent(t *testing.T) {
 	server.TLS = &tls.Config{Certificates: []tls.Certificate{pki.serverTLS}, MinVersion: tls.VersionTLS12}
 	server.StartTLS()
 	defer server.Close()
-	route := httpsOriginRoute(server.Listener.Addr().String(), "origin.internal.test")
-	provider := ReferenceOriginTLSProvider{Secrets: originSecrets{*route.CAReference: pki.caPEM}}
+	route := httpsOriginRoute(server.Listener.Addr().String(), "origin.internal.test", pki.caPEM)
+	provider := ReferenceOriginTLSProvider{Secrets: originSecrets{}}
 	request, _ := http.NewRequest(http.MethodGet, "https://public.example.test/status", nil)
 	request.Host = "public.example.test"
 	request.Header.Set("X-Paperboat-Session", "must-not-reach-origin")
@@ -161,10 +161,10 @@ func TestOriginHTTPTransportRequiresConfiguredMTLSIdentity(t *testing.T) {
 	server.TLS = &tls.Config{Certificates: []tls.Certificate{pki.serverTLS}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: roots, MinVersion: tls.VersionTLS12}
 	server.StartTLS()
 	defer server.Close()
-	route := httpsOriginRoute(server.Listener.Addr().String(), "origin.internal.test")
+	route := httpsOriginRoute(server.Listener.Addr().String(), "origin.internal.test", pki.caPEM)
 	clientRef := "keychain://paperboat/origins/mtls_01"
 	route.MTLSCredentialReference = &clientRef
-	secrets := originSecrets{*route.CAReference: pki.caPEM, clientRef: pki.clientDoc}
+	secrets := originSecrets{clientRef: pki.clientDoc}
 	request, _ := http.NewRequest(http.MethodGet, "https://public.example.test/", nil)
 	response, err := (&OriginHTTPTransport{TLS: ReferenceOriginTLSProvider{Secrets: secrets}}).RoundTrip(context.Background(), route, request)
 	if err != nil {
@@ -199,8 +199,8 @@ func TestOriginHTTPTransportPinnedAndInsecureVerification(t *testing.T) {
 		}
 		return err
 	}
-	route := httpsOriginRoute(server.Listener.Addr().String(), "wrong.internal.test")
-	route.CAReference = nil
+	route := httpsOriginRoute(server.Listener.Addr().String(), "wrong.internal.test", nil)
+	route.TLSCA = nil
 	route.TLSVerification = "insecure"
 	if err := visit(route); err != nil {
 		t.Fatalf("insecure: %v", err)
@@ -221,9 +221,9 @@ func TestOriginHTTPTransportPinnedAndInsecureVerification(t *testing.T) {
 
 func TestReferenceOriginTLSProviderClearsResolverOwnedBuffer(t *testing.T) {
 	pki := newOriginPKI(t, "origin.internal.test")
-	secret := &observingOriginSecret{payload: append([]byte(nil), pki.caPEM...)}
-	reference := "keychain://paperboat/origins/ca_01"
-	_, err := (ReferenceOriginTLSProvider{Secrets: secret}).TLSConfig(context.Background(), hoststate.TunnelConfigRoute{TLSVerification: "custom_ca", CAReference: &reference})
+	secret := &observingOriginSecret{payload: append([]byte(nil), pki.clientDoc...)}
+	reference := "keychain://paperboat/origins/mtls_01"
+	_, err := (ReferenceOriginTLSProvider{Secrets: secret}).TLSConfig(context.Background(), hoststate.TunnelConfigRoute{TLSVerification: "system", MTLSCredentialReference: &reference})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -475,9 +475,9 @@ func TestOriginHTTPTransportSendsPublicSNIToLoopbackOrigins(t *testing.T) {
 	}}
 	server.StartTLS()
 	defer server.Close()
-	route := httpsOriginRoute(server.Listener.Addr().String(), "")
+	route := httpsOriginRoute(server.Listener.Addr().String(), "", pki.caPEM)
 	route.TLSServerName = nil
-	transport := &OriginHTTPTransport{TLS: ReferenceOriginTLSProvider{Secrets: originSecrets{*route.CAReference: pki.caPEM}}}
+	transport := &OriginHTTPTransport{}
 	defer transport.CloseIdleConnections()
 	visit := func(publicHost string) error {
 		request, _ := http.NewRequest(http.MethodGet, "https://"+publicHost+"/", nil)

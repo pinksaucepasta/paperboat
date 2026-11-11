@@ -356,7 +356,8 @@ type wireConfigRoute struct {
 	HostOverride            *string `json:"host_override"`
 	TLSVerification         string  `json:"tls_verification"`
 	TLSServerName           *string `json:"tls_server_name"`
-	CAReference             *string `json:"ca_reference"`
+	TLSCA                   *string `json:"tls_ca,omitempty"`
+	TLSPin                  *string `json:"tls_pin,omitempty"`
 	MTLSCredentialReference *string `json:"mtls_credential_reference"`
 	ConnectTimeoutMs        int32   `json:"connect_timeout_ms"`
 	IdleTimeoutMs           int32   `json:"idle_timeout_ms"`
@@ -396,7 +397,7 @@ func ValidateConfigSnapshotPayload(payload []byte, tunnelID string, generation u
 		if err := json.Unmarshal(rawRoutes[index], &routeFields); err != nil || routeFields == nil {
 			return ErrSnapshotRejected
 		}
-		for _, field := range []string{"id", "name", "protocol", "match_type", "path_prefix", "origin_scheme", "origin_address", "preserve_host", "host_override", "tls_verification", "tls_server_name", "ca_reference", "mtls_credential_reference", "connect_timeout_ms", "idle_timeout_ms", "max_concurrent_streams", "desired_state"} {
+		for _, field := range []string{"id", "name", "protocol", "match_type", "path_prefix", "origin_scheme", "origin_address", "preserve_host", "host_override", "tls_verification", "tls_server_name", "mtls_credential_reference", "connect_timeout_ms", "idle_timeout_ms", "max_concurrent_streams", "desired_state"} {
 			if _, ok := routeFields[field]; !ok {
 				return fmt.Errorf("%w: route field %s is required", ErrSnapshotRejected, field)
 			}
@@ -496,10 +497,8 @@ func validateWireConfigRoute(route wireConfigRoute) error {
 	if route.TLSServerName != nil && (len(*route.TLSServerName) == 0 || len(*route.TLSServerName) > 253 || strings.TrimSpace(*route.TLSServerName) != *route.TLSServerName || strings.ContainsAny(*route.TLSServerName, "\r\n")) {
 		return ErrInvalidInput
 	}
-	for _, reference := range []*string{route.CAReference, route.MTLSCredentialReference} {
-		if reference != nil && ValidateCredentialReference(*reference) != nil {
-			return ErrInvalidInput
-		}
+	if route.MTLSCredentialReference != nil && ValidateCredentialReference(*route.MTLSCredentialReference) != nil || route.TLSCA != nil && ValidateOriginCA(*route.TLSCA) != nil {
+		return ErrInvalidInput
 	}
 	if route.ConnectTimeoutMs < 100 || route.ConnectTimeoutMs > 120000 || route.IdleTimeoutMs < 1000 || route.IdleTimeoutMs > 3600000 || route.MaxConcurrentStreams < 1 || route.MaxConcurrentStreams > 100000 || route.DesiredState != "active" && route.DesiredState != "disabled" && route.DesiredState != "deleted" {
 		return ErrInvalidInput

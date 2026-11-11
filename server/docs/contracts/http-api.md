@@ -398,9 +398,9 @@ only while its exact domain binding is ownership-verified with certificate
 strategy `none`. The origin presents and owns the certificate. Wildcards,
 missing SNI, HTTP paths/headers, and edge HTTP authentication do not apply.
 
-- HTTPS origins use system CA and hostname verification by default. `custom_ca` requires
-  an opaque Paperboat credential reference. Optional mTLS is a separate client credential
-  reference and works with either system or custom CA verification.
+- HTTPS origins use system CA and hostname verification by default. `custom_ca` trusts
+  the route's own CA: `ca_pem`, PEM CA certificates (at most 8, 16 KiB), validated on write. Optional
+  mTLS is a separate client credential reference and works with any verification mode.
 - `tls.server_name` controls SNI and certificate hostname verification. `preserve_host` and
   `host_override` independently control the HTTP Host header. Changing one never changes the
   other implicitly.

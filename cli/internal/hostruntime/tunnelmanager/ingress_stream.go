@@ -3,6 +3,7 @@ package tunnelmanager
 import (
 	"context"
 	"errors"
+	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"io"
 	"net"
 	"net/http"
@@ -212,7 +213,7 @@ func ingressRouteMatches(b connectorprotocol.IngressBinding, r hoststate.TunnelC
 	if host, port, err := net.SplitHostPort(origin); err == nil && strings.EqualFold(host, "localhost") {
 		origin = net.JoinHostPort("127.0.0.1", port)
 	}
-	return b.RouteID == r.ID && b.Protocol == r.Protocol && b.OriginScheme == r.OriginScheme && b.OriginAddress == origin && b.TLSVerification == r.TLSVerification && b.TLSServerName == value(r.TLSServerName) && b.CAReference == value(r.CAReference) && b.MTLSCredentialReference == value(r.MTLSCredentialReference) && b.TLSPin == value(r.TLSPin)
+	return b.RouteID == r.ID && b.Protocol == r.Protocol && b.OriginScheme == r.OriginScheme && b.OriginAddress == origin && b.TLSVerification == r.TLSVerification && b.TLSServerName == value(r.TLSServerName) && b.TLSCASHA256 == sharedprotocol.OriginCAFingerprint(value(r.TLSCA)) && b.MTLSCredentialReference == value(r.MTLSCredentialReference) && b.TLSPin == value(r.TLSPin)
 }
 
 func validateIngressHTTPRequest(ctx context.Context, r *http.Request) error {

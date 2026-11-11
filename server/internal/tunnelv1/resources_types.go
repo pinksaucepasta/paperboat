@@ -82,9 +82,10 @@ type RoutePatchRequest struct {
 }
 
 type RouteTLSRequest struct {
-	Verification              string
-	ServerName                *string
-	CAReference               *string
+	Verification string
+	ServerName   *string
+	// CA is the PEM CA a custom_ca route trusts for its origin (stored with the route).
+	CA                        *string
 	ClientCredentialReference *string
 	// Pin is "sha256:<hex>" of the one certificate a pinned route trusts.
 	Pin *string
@@ -115,7 +116,7 @@ type RouteHostMatch struct {
 type RouteTLS struct {
 	Verification              string  `json:"verification"`
 	ServerName                *string `json:"server_name,omitempty"`
-	CAReference               *string `json:"ca_reference,omitempty"`
+	CA                        *string `json:"ca_pem,omitempty"`
 	ClientCredentialReference *string `json:"client_credential_reference,omitempty"`
 	Pin                       *string `json:"pin,omitempty"`
 }

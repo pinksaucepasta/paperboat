@@ -155,6 +155,9 @@ HTTP routes preserve the public `Host` by default. Origin host-header rewrite,
 TLS server name, verification mode, CA reference, client credential reference,
 timeouts, priority, and stream limits are independent route settings.
 
+`--tls-ca <file>` trusts one CA for the route (the PEM file is checked and
+stored with the route; only that CA is trusted, not the system roots).
+
 An https origin on `localhost` or an IP address is sent the public hostname as
 TLS server name, so Caddy, Traefik and nginx pick the right site. For an origin
 with a self-signed certificate (a NAS, Proxmox), `--tls-verification pinned`
@@ -213,8 +216,9 @@ it gets a 404 that says so). Pick one:
 | Origin | Route |
 |---|---|
 | Plain HTTP (simplest) | `--to http://localhost:80` |
-| Caddy `tls internal` or another local certificate on the same machine | `--to https://localhost:443 --tls-verification insecure`. Do not pin it: Caddy renews its internal certificate every 12 hours with a new key |
+| Caddy `tls internal`, or an origin with its own private CA | `--to https://localhost:443 --tls-ca <root.crt>`: trust Caddy's root, which Caddy logs at startup (in Docker `/data/caddy/pki/authorities/local/root.crt`). Do not pin it: Caddy renews its internal certificate every 12 hours with a new key |
 | A long-lived self-signed certificate (NAS, Proxmox, router) | `--tls-verification pinned` |
+| Any local certificate, when you just want it to work | `--tls-verification insecure`, only for an origin on the same machine; for any other origin tunnel status warns |
 | A real certificate from a DNS-01 challenge | the default verification |
 
 ## Custom domains, DNS, and TLS

@@ -94,18 +94,6 @@ func (p ReferenceOriginTLSProvider) TLSConfig(ctx context.Context, route hoststa
 		return nil, ErrInvalidConfig
 	}
 	config := &tls.Config{MinVersion: tls.VersionTLS12}
-	if route.CAReference != nil {
-		payload, err := p.resolve(ctx, *route.CAReference)
-		if err != nil {
-			return nil, err
-		}
-		defer clear(payload)
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(payload) {
-			return nil, errors.Join(ErrInvalidConfig, errors.New("origin CA reference contains no certificates"))
-		}
-		config.RootCAs = pool
-	}
 	if route.MTLSCredentialReference != nil {
 		payload, err := p.resolve(ctx, *route.MTLSCredentialReference)
 		if err != nil {
@@ -215,7 +203,7 @@ func (p NetworkOriginProber) ProbeOrigin(ctx context.Context, route hoststate.Tu
 
 func (p NetworkOriginProber) originTLSConfig(ctx context.Context, route hoststate.TunnelConfigRoute) (*tls.Config, error) {
 	config := &tls.Config{MinVersion: tls.VersionTLS12}
-	needsProvider := route.CAReference != nil || route.MTLSCredentialReference != nil
+	needsProvider := route.MTLSCredentialReference != nil
 	if needsProvider {
 		if p.TLS == nil {
 			return nil, ErrInvalidConfig
@@ -234,18 +222,20 @@ func (p NetworkOriginProber) originTLSConfig(ctx context.Context, route hoststat
 		if config.InsecureSkipVerify {
 			return nil, ErrInvalidConfig
 		}
-		if route.TLSVerification == "custom_ca" && config.RootCAs == nil {
-			return nil, ErrInvalidConfig
-		}
 		if route.MTLSCredentialReference != nil && len(config.Certificates) == 0 && config.GetClientCertificate == nil {
 			return nil, ErrInvalidConfig
 		}
 	}
-	if route.TLSVerification == "custom_ca" && route.CAReference == nil {
+	if (route.TLSVerification == "custom_ca") != (route.TLSCA != nil) {
 		return nil, ErrInvalidConfig
 	}
-	if route.TLSVerification != "custom_ca" && route.CAReference != nil {
-		return nil, ErrInvalidConfig
+	if route.TLSCA != nil {
+		// The route's own CA, stored with it (cloudflared's caPool, tlsconfig/origin_ca.go): only it is trusted.
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM([]byte(*route.TLSCA)) {
+			return nil, errors.Join(ErrInvalidConfig, errors.New("the route's CA contains no certificates"))
+		}
+		config.RootCAs = pool
 	}
 	switch route.TLSVerification {
 	case "insecure":

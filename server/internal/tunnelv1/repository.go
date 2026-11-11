@@ -920,7 +920,7 @@ type initialTunnelRouteSnapshot struct {
 	HostOverride            *string `json:"host_override"`
 	TLSVerification         string  `json:"tls_verification"`
 	TLSServerName           *string `json:"tls_server_name"`
-	CAReference             *string `json:"ca_reference"`
+	TLSCA                   *string `json:"tls_ca,omitempty"`
 	MTLSCredentialReference *string `json:"mtls_credential_reference"`
 	TLSPin                  *string `json:"tls_pin"`
 	ConnectTimeoutMs        int32   `json:"connect_timeout_ms"`
@@ -997,14 +997,10 @@ func snapshotRoute(route dbsqlc.TunnelRoute) initialTunnelRouteSnapshot {
 		value := route.HostOverride.String
 		hostOverride = &value
 	}
-	var serverName, caReference, mtlsReference *string
+	var serverName, mtlsReference *string
 	if route.TlsServerName.Valid {
 		value := route.TlsServerName.String
 		serverName = &value
-	}
-	if route.CaReference.Valid {
-		value := route.CaReference.String
-		caReference = &value
 	}
 	if route.MtlsCredentialReference.Valid {
 		value := route.MtlsCredentialReference.String
@@ -1014,7 +1010,7 @@ func snapshotRoute(route dbsqlc.TunnelRoute) initialTunnelRouteSnapshot {
 		ID: route.ID, Name: route.Name, Protocol: wireProtocol(route.Protocol), MatchType: wireMatchType(route.MatchType),
 		MatchHostname: nullableStringValue(route.MatchHostname), WildcardSuffix: nullableStringValue(route.WildcardSuffix), PathPrefix: pathPrefix,
 		OriginScheme: route.OriginScheme, OriginAddress: route.OriginAddress, PreserveHost: route.PreserveHost, HostOverride: hostOverride,
-		TLSVerification: route.TlsVerification, TLSServerName: serverName, CAReference: caReference, MTLSCredentialReference: mtlsReference,
+		TLSVerification: route.TlsVerification, TLSServerName: serverName, TLSCA: nullStringPointer(route.TlsCa), MTLSCredentialReference: mtlsReference,
 		TLSPin: nullStringPointer(route.TlsPin), ConnectTimeoutMs: route.ConnectTimeoutMs, IdleTimeoutMs: route.IdleTimeoutMs, MaxStreams: route.MaxConcurrentStreams,
 		DesiredState: route.DesiredState,
 	}

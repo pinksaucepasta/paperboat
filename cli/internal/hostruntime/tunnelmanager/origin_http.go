@@ -206,7 +206,7 @@ func originTransportKey(route hoststate.TunnelConfigRoute) string {
 		}
 		return *value
 	}
-	return strings.Join([]string{route.ID, route.OriginScheme, route.OriginAddress, strconv.FormatBool(route.PreserveHost), field(route.HostOverride), route.TLSVerification, field(route.TLSServerName), field(route.CAReference), field(route.MTLSCredentialReference), field(route.TLSPin), strconv.FormatInt(int64(route.ConnectTimeoutMs), 10), strconv.FormatInt(int64(route.IdleTimeoutMs), 10)}, "\x00")
+	return strings.Join([]string{route.ID, route.OriginScheme, route.OriginAddress, strconv.FormatBool(route.PreserveHost), field(route.HostOverride), route.TLSVerification, field(route.TLSServerName), field(route.TLSCA), field(route.MTLSCredentialReference), field(route.TLSPin), strconv.FormatInt(int64(route.ConnectTimeoutMs), 10), strconv.FormatInt(int64(route.IdleTimeoutMs), 10)}, "\x00")
 }
 
 func (t *OriginHTTPTransport) newGeneration() *OriginHTTPTransport {

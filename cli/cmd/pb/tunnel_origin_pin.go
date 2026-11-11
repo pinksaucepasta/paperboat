@@ -72,7 +72,7 @@ func originCertificateHint(leaf *x509.Certificate, serverName string, now time.T
 	case chainErr == nil:
 		return ""
 	case strings.Contains(leaf.Issuer.CommonName, "Caddy Local Authority"):
-		return "it is Caddy's internal certificate (tls internal), renewed every 12 hours with a new key, so do not pin it: use --tls-verification insecure for Caddy on this machine, an http:// origin, or a real certificate from a DNS-01 challenge (HTTP-01 and TLS-ALPN cannot work behind a tunnel)"
+		return "it is Caddy's internal certificate (tls internal), renewed every 12 hours with a new key, so do not pin it: trust Caddy's root with --tls-ca <caddy data dir>/pki/authorities/local/root.crt (Caddy logs its path; in Docker /data/caddy/pki/authorities/local/root.crt), or use an http:// origin or a DNS-01 certificate (HTTP-01 and TLS-ALPN cannot work behind a tunnel)"
 	case leaf.Subject.CommonName == "TRAEFIK DEFAULT CERT":
 		return "Traefik answered with its default certificate, so it has no certificate for this name (HTTP-01 and TLS-ALPN cannot work behind a tunnel): point the route at Traefik's http entrypoint, use --tls-verification insecure for Traefik on this machine, or get a certificate with a DNS-01 challenge"
 	case now.After(leaf.NotAfter):
@@ -82,7 +82,7 @@ func originCertificateHint(leaf *x509.Certificate, serverName string, now time.T
 	case leaf.Issuer.String() == leaf.Subject.String():
 		return "it is self-signed: pin it with --tls-verification pinned (or --tls-verification insecure for a local origin)"
 	default:
-		return "it is signed by " + leaf.Issuer.String() + ", which this machine does not trust: give that CA with --ca-reference, pin it with --tls-verification pinned, or use an http:// origin"
+		return "it is signed by " + leaf.Issuer.String() + ", which this machine does not trust: trust that CA with --tls-ca <its PEM file>, pin it with --tls-verification pinned, or use an http:// origin"
 	}
 }
 
@@ -124,4 +124,22 @@ func writeTunnelOriginCertificateHints(ctx context.Context, writer io.Writer, cl
 			_, _ = fmt.Fprintf(writer, "Origin certificate (route %s, seen from this machine): %s.\n", route.Name, hint)
 		}
 	}
+}
+
+// readOriginCA reads the CA a route trusts for its origin and checks it here, so a wrong file fails
+// at add time rather than on the first visit.
+func readOriginCA(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("read --tls-ca: %w", err)
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, sharedprotocol.MaximumOriginCABytes+1))
+	if err != nil {
+		return "", fmt.Errorf("read --tls-ca: %w", err)
+	}
+	if err := sharedprotocol.ValidateOriginCA(string(data)); err != nil {
+		return "", fmt.Errorf("--tls-ca %s: %w", path, err)
+	}
+	return string(data), nil
 }

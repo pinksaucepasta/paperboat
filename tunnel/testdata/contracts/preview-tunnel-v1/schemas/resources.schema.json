@@ -471,8 +471,13 @@
           "maxLength": 253,
           "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$"
         },
-        "ca_reference": {
-          "$ref": "#/definitions/nullable_credential_reference"
+        "ca_pem": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 16384,
+          "pattern": "^(-----BEGIN CERTIFICATE-----\\r?\\n[A-Za-z0-9+/=\\r\\n]+-----END CERTIFICATE-----\\r?\\n?)+$"
         },
         "client_credential_reference": {
           "$ref": "#/definitions/nullable_credential_reference"
@@ -489,11 +494,11 @@
           },
           "then": {
             "required": [
-              "ca_reference"
+              "ca_pem"
             ],
             "properties": {
-              "ca_reference": {
-                "$ref": "#/definitions/credential_reference"
+              "ca_pem": {
+                "type": "string"
               }
             }
           }
@@ -512,7 +517,7 @@
           },
           "then": {
             "properties": {
-              "ca_reference": {
+              "ca_pem": {
                 "type": "null"
               }
             }
@@ -1322,7 +1327,6 @@
         "host_override",
         "tls_verification",
         "tls_server_name",
-        "ca_reference",
         "mtls_credential_reference",
         "connect_timeout_ms",
         "idle_timeout_ms",
@@ -1408,8 +1412,12 @@
           "maxLength": 253,
           "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$"
         },
-        "ca_reference": {
-          "$ref": "#/definitions/nullable_credential_reference"
+        "tls_ca": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 16384
         },
         "mtls_credential_reference": {
           "$ref": "#/definitions/nullable_credential_reference"
@@ -1545,7 +1553,7 @@
               "tls_server_name": {
                 "type": "null"
               },
-              "ca_reference": {
+              "tls_ca": {
                 "type": "null"
               },
               "mtls_credential_reference": {
@@ -1564,8 +1572,8 @@
           },
           "then": {
             "properties": {
-              "ca_reference": {
-                "$ref": "#/definitions/credential_reference"
+              "tls_ca": {
+                "type": "string"
               }
             }
           }
@@ -1584,7 +1592,7 @@
           },
           "then": {
             "properties": {
-              "ca_reference": {
+              "tls_ca": {
                 "type": "null"
               }
             }

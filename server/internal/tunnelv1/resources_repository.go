@@ -367,7 +367,7 @@ func createRouteParams(input RouteRecord) dbsqlc.CreateTunnelRouteV1Params {
 		MatchType: input.MatchType, MatchHostname: input.Hostname, WildcardSuffix: input.WildcardSuffix,
 		PathPrefix: input.PathPrefix, Priority: input.Priority, OriginScheme: input.Origin.Scheme,
 		OriginAddress: input.Origin.Address, PreserveHost: input.Origin.PreserveHost, HostOverride: nullableStringPtr(input.Origin.HostOverride),
-		TlsVerification: tlsVerification, TlsServerName: nullableStringPtr(serverName), CaReference: nullableStringPtr(caRef),
+		TlsVerification: tlsVerification, TlsServerName: nullableStringPtr(serverName), TlsCa: nullableStringPtr(caRef),
 		MtlsCredentialReference: nullableStringPtr(clientRef), TlsPin: routeTLSPin(input.Origin), ConnectTimeoutMs: input.ConnectTimeoutMS, IdleTimeoutMs: input.IdleTimeoutMS,
 		MaxConcurrentStreams: input.MaxConcurrentStreams, DesiredState: "active", CreatedByActorID: input.ActorID, UpdatedByActorID: input.ActorID, Now: input.Now,
 		PublicTcpListenerID: nullableString(input.PublicTCPListenerID), PublicTcpPortMin: input.PublicTCPPortMin, PublicTcpPortMax: input.PublicTCPPortMax,
@@ -383,7 +383,7 @@ func updateRouteParams(input RouteRecord) dbsqlc.UpdateTunnelRouteV1Params {
 		PrioritySet: input.PrioritySet, Priority: input.Priority, OriginSchemeSet: input.OriginSet, OriginScheme: input.Origin.Scheme,
 		OriginAddressSet: input.OriginSet, OriginAddress: input.Origin.Address, PreserveHostSet: input.OriginSet, PreserveHost: input.Origin.PreserveHost,
 		HostOverrideSet: input.OriginSet, HostOverride: nullableStringPtr(input.Origin.HostOverride), TlsVerificationSet: input.OriginSet, TlsVerification: tlsVerification,
-		TlsServerNameSet: input.OriginSet, TlsServerName: nullableStringPtr(serverName), CaReferenceSet: input.OriginSet, CaReference: nullableStringPtr(caRef),
+		TlsServerNameSet: input.OriginSet, TlsServerName: nullableStringPtr(serverName), CaReferenceSet: input.OriginSet, TlsCaSet: input.OriginSet, TlsCa: nullableStringPtr(caRef),
 		MtlsCredentialReferenceSet: input.OriginSet, MtlsCredentialReference: nullableStringPtr(clientRef), TlsPinSet: input.OriginSet, TlsPin: routeTLSPin(input.Origin), DesiredStateSet: input.DesiredStateSet,
 		DesiredState: input.DesiredState, UpdatedByActorID: input.ActorID, Now: input.Now, RouteID: input.RouteID, TunnelID: input.TunnelID,
 		ExpectedGeneration: input.ExpectedGeneration,
@@ -414,7 +414,7 @@ func routeTLSValues(origin RouteOriginRequest) (string, *string, *string, *strin
 		}
 		return "not_applicable", nil, nil, nil
 	}
-	return origin.TLS.Verification, origin.TLS.ServerName, origin.TLS.CAReference, origin.TLS.ClientCredentialReference
+	return origin.TLS.Verification, origin.TLS.ServerName, origin.TLS.CA, origin.TLS.ClientCredentialReference
 }
 
 func routeTLSPin(origin RouteOriginRequest) sql.NullString {
@@ -429,7 +429,7 @@ func routeCandidate(input RouteRecord) dbsqlc.TunnelRoute {
 	return dbsqlc.TunnelRoute{ID: input.RouteID, TunnelID: input.TunnelID, Name: input.Name, Protocol: input.Protocol, MatchType: input.MatchType,
 		MatchHostname: input.Hostname, WildcardSuffix: input.WildcardSuffix, PathPrefix: input.PathPrefix, Priority: input.Priority,
 		OriginScheme: input.Origin.Scheme, OriginAddress: input.Origin.Address, PreserveHost: input.Origin.PreserveHost,
-		TlsVerification: tlsVerification, TlsServerName: serverName, CaReference: caReference, MtlsCredentialReference: clientReference, TlsPin: routeTLSPin(input.Origin),
+		TlsVerification: tlsVerification, TlsServerName: serverName, TlsCa: caReference, MtlsCredentialReference: clientReference, TlsPin: routeTLSPin(input.Origin),
 		ConnectTimeoutMs: input.ConnectTimeoutMS, IdleTimeoutMs: input.IdleTimeoutMS, MaxConcurrentStreams: input.MaxConcurrentStreams,
 		DesiredState: input.DesiredState}
 }
@@ -459,7 +459,7 @@ func routeCandidateFromRecord(current dbsqlc.TunnelRoute, input RouteRecord) dbs
 		candidate.OriginAddress = input.Origin.Address
 		candidate.PreserveHost = input.Origin.PreserveHost
 		candidate.HostOverride = nullableStringPtr(input.Origin.HostOverride)
-		candidate.TlsVerification, candidate.TlsServerName, candidate.CaReference, candidate.MtlsCredentialReference = routeTLSNullValues(input.Origin)
+		candidate.TlsVerification, candidate.TlsServerName, candidate.TlsCa, candidate.MtlsCredentialReference = routeTLSNullValues(input.Origin)
 		candidate.TlsPin = routeTLSPin(input.Origin)
 	}
 	if input.PrioritySet {
@@ -534,7 +534,7 @@ func routeRecordChanges(current dbsqlc.TunnelRoute, input RouteRecord) bool {
 		current.MatchHostname != candidate.MatchHostname || current.WildcardSuffix != candidate.WildcardSuffix || current.PathPrefix != candidate.PathPrefix ||
 		current.Priority != candidate.Priority || current.OriginScheme != candidate.OriginScheme || current.OriginAddress != candidate.OriginAddress ||
 		current.PreserveHost != candidate.PreserveHost || current.HostOverride != candidate.HostOverride || current.TlsVerification != candidate.TlsVerification ||
-		current.TlsServerName != candidate.TlsServerName || current.CaReference != candidate.CaReference || current.MtlsCredentialReference != candidate.MtlsCredentialReference || current.TlsPin != candidate.TlsPin ||
+		current.TlsServerName != candidate.TlsServerName || current.TlsCa != candidate.TlsCa || current.MtlsCredentialReference != candidate.MtlsCredentialReference || current.TlsPin != candidate.TlsPin ||
 		current.ConnectTimeoutMs != candidate.ConnectTimeoutMs || current.IdleTimeoutMs != candidate.IdleTimeoutMs || current.MaxConcurrentStreams != candidate.MaxConcurrentStreams ||
 		current.DesiredState != candidate.DesiredState
 }

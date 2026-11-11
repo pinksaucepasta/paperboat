@@ -2954,6 +2954,7 @@ type TunnelRoute struct {
 	PublicTcpListenerID     sql.NullString
 	PublicTcpPort           sql.NullInt32
 	TlsPin                  sql.NullString
+	TlsCa                   sql.NullString
 }
 
 type TunnelRouteOriginHealth struct {

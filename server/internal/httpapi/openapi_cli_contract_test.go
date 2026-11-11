@@ -228,7 +228,7 @@ func TestOpenAPIOriginTLSIsReferenceOnlyAndModeBound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{"BEGIN CERTIFICATE", "BEGIN PRIVATE KEY", "bearer_token", "private_key_pem"} {
+	for _, forbidden := range []string{"BEGIN PRIVATE KEY", "bearer_token", "private_key_pem"} {
 		if strings.Contains(string(encoded), forbidden) {
 			t.Fatalf("origin TLS schema contains secret material field %q", forbidden)
 		}
