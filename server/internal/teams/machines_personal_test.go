@@ -97,7 +97,7 @@ func TestPostgresTransferToPersonal(t *testing.T) {
 		}
 	}
 	for id, enrolledBy := range map[string]string{machine: enroller, orphan: gone} {
-		if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,installation_generation) VALUES($1,$2,$3,$1,'linux','amd64','/workspace','offline','released',7)`, id, enrolledBy, "env_"+id); err != nil {
+		if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,installation_generation) VALUES($1,$2,$3,'laptop','linux','amd64','/workspace','offline','released',7)`, id, enrolledBy, "env_"+id); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -143,6 +143,22 @@ func TestPostgresTransferToPersonal(t *testing.T) {
 	}
 	allowed(plain, team, machine, true)
 	allowed(enroller, "", machine, false)
+	// Terminal sessions opened on the team machine: the enroller's own (shared with the team) and a teammate's.
+	mine, theirs := "tp_term_mine_"+suffix, "tp_term_theirs_"+suffix
+	for id, who := range map[string]string{mine: enroller, theirs: plain} {
+		if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machine_terminal_sessions(id,user_machine_id,owner_account,owner_team_id,name,launch_cwd) VALUES($1,$2,$3,$4,'work','/workspace')`, id, machine, who, team); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if current, err = s.Get(ctx, owner, team); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.GrantTerminalSession(ctx, enroller, team, TerminalSessionGrantRequest{OperationID: "share_terminal", ExpectedGeneration: current.Generation, TerminalSessionID: mine, Audience: "all_members", Role: "viewer", RuntimeGeneration: 1, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.team_machine_requests(team_id,machine_id,requested_by,state) VALUES($1,$2,$3,'pending')`, team, machine, enroller); err != nil {
+		t.Fatal(err)
+	}
 
 	// A plain member cannot return it.
 	if err = act(plain, machine, "transfer_to_personal", "plain"); !errors.Is(err, ErrForbidden) {
@@ -168,8 +184,18 @@ func TestPostgresTransferToPersonal(t *testing.T) {
 	if _, err = store.SQL().ExecContext(ctx, `DELETE FROM paperboat.tunnels WHERE id=$1`, tunnel); err != nil {
 		t.Fatal(err)
 	}
+	preview := "tp_preview_" + suffix
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.preview_leases(owner_session_kind,id,endpoint,account_id,owner_team_id,actor_id,owner_machine_id,owner_session_id,target_scheme,target_address,access_mode,lease_deadline) VALUES('foreground',$1,'https://'||$1||'.example.test',$2,$3,$2,$4,'tp-owner-session','http','127.0.0.1:3000','team',now()+interval '1 hour')`, preview, enroller, team, machine); err != nil {
+		t.Fatal(err)
+	}
+	if err = act(owner, machine, "transfer_to_personal", "previewed"); !errors.Is(err, ErrMachineTeamResources) {
+		t.Fatalf("team preview on the machine: %v", err)
+	}
+	if _, err = store.SQL().ExecContext(ctx, `DELETE FROM paperboat.preview_leases WHERE id=$1`, preview); err != nil {
+		t.Fatal(err)
+	}
 	// A personal machine of the same account already named like it blocks it, as in the other direction.
-	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$3,$4,'linux','amd64','/workspace','offline','released')`, clash, enroller, "env_"+clash, machine); err != nil {
+	if _, err = store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$3,'laptop','linux','amd64','/workspace','offline','released')`, clash, enroller, "env_"+clash); err != nil {
 		t.Fatal(err)
 	}
 	if err = act(owner, machine, "transfer_to_personal", "clash"); !errors.Is(err, ErrMachineAliasConflict) {
@@ -187,8 +213,8 @@ func TestPostgresTransferToPersonal(t *testing.T) {
 	if err = store.SQL().QueryRowContext(ctx, topic, plain).Scan(&topicPlainBefore); err != nil {
 		t.Fatal(err)
 	}
-	// An owner or admin returns it: same id, back to the account that enrolled it.
-	if err = act(owner, machine, "transfer_to_personal", "back"); err != nil {
+	// An admin returns it: same id, back to the account that enrolled it.
+	if err = act(enroller, machine, "transfer_to_personal", "back"); err != nil {
 		t.Fatal(err)
 	}
 	var user, ownerTeam string
@@ -202,6 +228,17 @@ func TestPostgresTransferToPersonal(t *testing.T) {
 	var active int
 	if err = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.team_resource_bindings WHERE team_id=$1 AND resource_id=$2 AND active`, team, machine).Scan(&active); err != nil || active != 0 {
 		t.Fatalf("team binding after return: %d %v", active, err)
+	}
+	var requests, mineTeam, theirsTeam, liveBindings, liveGrants int
+	if err = store.SQL().QueryRowContext(ctx, `SELECT (SELECT count(*) FROM paperboat.team_machine_requests WHERE machine_id=$1),
+ (SELECT count(*) FROM paperboat.user_machine_terminal_sessions WHERE id=$2 AND owner_team_id IS NULL),
+ (SELECT count(*) FROM paperboat.user_machine_terminal_sessions WHERE id=$3 AND owner_team_id=$4),
+ (SELECT count(*) FROM paperboat.team_resource_bindings WHERE team_id=$4 AND resource_kind='terminal_session' AND resource_id=$2 AND active),
+ (SELECT count(*) FROM paperboat.team_terminal_session_grants WHERE team_id=$4 AND terminal_session_id=$2 AND active)`, machine, mine, theirs, team).Scan(&requests, &mineTeam, &theirsTeam, &liveBindings, &liveGrants); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 0 || mineTeam != 1 || theirsTeam != 1 || liveBindings != 0 || liveGrants != 0 {
+		t.Fatalf("after return: requests=%d ownerSessionInPersonal=%d teammateSessionUntouched=%d liveBindings=%d liveGrants=%d", requests, mineTeam, theirsTeam, liveBindings, liveGrants)
 	}
 	// Peers: the account's other machines now see it as a personal peer; the team's members no longer see it.
 	var audience []string

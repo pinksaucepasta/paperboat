@@ -333,6 +333,9 @@ func transferToPersonalTx(ctx context.Context, tx *db.Tx, t Team, team, owner, o
 	if _, err = tx.Exec(ctx, `UPDATE team_resource_bindings b SET active=false,generation=b.generation+1 FROM user_machine_terminal_sessions s WHERE b.team_id=$2 AND b.resource_kind='terminal_session' AND b.resource_id=s.id AND s.user_machine_id=$1 AND b.active`, r.MachineID, team); err != nil {
 		return err
 	}
+	if _, err = tx.Exec(ctx, `UPDATE team_terminal_session_grants g SET active=false,generation=g.generation+1 FROM user_machine_terminal_sessions s WHERE g.team_id=$2 AND g.terminal_session_id=s.id AND s.user_machine_id=$1 AND g.active`, r.MachineID, team); err != nil {
+		return err
+	}
 	if _, err = tx.Exec(ctx, `DELETE FROM team_machine_requests WHERE team_id=$1 AND machine_id=$2`, team, r.MachineID); err != nil {
 		return err
 	}
