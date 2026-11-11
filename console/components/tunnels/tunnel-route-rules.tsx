@@ -53,13 +53,13 @@ const pathProblem = (value: string) =>
     : undefined
 
 function redirectProblem(rule: RouteRedirect) {
-  const from = pathProblem(rule.from)
-  if (from) return from
+  const fromProblem = pathProblem(rule.from)
+  if (fromProblem) return fromProblem
   const to = rule.to
   if (!/^\/(?!\/)[^\s\\]*$/.test(to) && !/^https:\/\/[^\s/@\\]+[^\s\\]*$/.test(to)) return "Send to a path like /new or an https:// address."
   const target = to.split(/[?#]/)[0]
-  const prefix = from.replace(/\/+$/, "")
-  if (to.startsWith("/") && (target === prefix || target.startsWith(`${prefix}/`) || prefix === "")) {
+  const prefix = rule.from.replace(/\/+$/, "")
+  if (to.startsWith("/") && (prefix === "" || target === prefix || target.startsWith(`${prefix}/`))) {
     return "That sends the path to itself or below it, so it would redirect again."
   }
   return undefined
