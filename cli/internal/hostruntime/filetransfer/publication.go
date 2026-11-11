@@ -3,6 +3,7 @@ package filetransfer
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -43,46 +44,55 @@ func (s *Service) ExistingPublishedPath(ctx context.Context, id string) (string,
 	if transfer.DestinationMachineID != s.config.LocalMachineID || transfer.State != "published" {
 		return "", &Error{Code: InvalidPath}
 	}
-	contentInfo, err := os.Stat(s.contentPath(id))
+	if transfer.ReceiptPath == "" || !s.publishedMarked(id) {
+		return "", &Error{Code: InvalidPath}
+	}
+	info, err := os.Lstat(transfer.ReceiptPath)
+	if errors.Is(err, os.ErrNotExist) || err == nil && (!info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0) {
+		return "", &Error{Code: InvalidPath}
+	}
 	if err != nil {
 		return "", &Error{Code: StorageUnavailable, Cause: err}
 	}
-	if transfer.ReceiptPath != "" {
-		matches, err := publishedFileMatches(contentInfo, transfer.ReceiptPath)
-		if err != nil {
-			return "", &Error{Code: StorageUnavailable, Cause: err}
-		}
-		if !matches {
-			return "", &Error{Code: InvalidPath}
-		}
-		return transfer.ReceiptPath, nil
-	}
-	root, base, err := s.publicationRoot(transfer)
-	if err != nil {
-		return "", err
-	}
-	for index := 1; index <= 10000; index++ {
-		path := filepath.Join(root, publishedName(base, index))
-		matches, err := publishedFileMatches(contentInfo, path)
-		if err != nil {
-			return "", &Error{Code: StorageUnavailable, Cause: err}
-		}
-		if matches {
-			return path, nil
-		}
-	}
-	return "", &Error{Code: InvalidPath}
+	return transfer.ReceiptPath, nil
 }
 
-func publishedFileMatches(contentInfo os.FileInfo, path string) (bool, error) {
-	info, err := os.Lstat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+// The published file is a copy, not a second name for the spool content: a hard link would leave a second link inside
+// the user-state tree (which the privileged install repair refuses, so a received file blocked every later update) and
+// would let an edit of the Inbox file change what the spool serves. A published marker in the spool says the copy at the
+// pinned receipt path is complete and ours, which the old same-file test said.
+func (s *Service) markerPath(id string) string { return filepath.Join(s.config.Root, id+".published") }
+
+func (s *Service) publishedMarked(id string) bool {
+	info, err := os.Lstat(s.markerPath(id))
+	return err == nil && info.Mode().IsRegular()
+}
+
+// copyToInbox writes the content next to path and links it into place without replacing anything (an existing file is
+// ErrExist), so the Inbox never shows a half-written file and a file someone else put there is never overwritten.
+func (s *Service) copyToInbox(content, root, path string, id string) error {
+	temporary := filepath.Join(root, "."+id+".publish")
+	if err := os.Remove(temporary); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
+	source, err := os.Open(content)
 	if err != nil {
-		return false, err
+		return err
 	}
-	return info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 && os.SameFile(contentInfo, info), nil
+	defer source.Close()
+	file, err := os.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(file, source)
+	if copyErr == nil {
+		copyErr = file.Sync()
+	}
+	if err := errors.Join(copyErr, file.Close()); err != nil {
+		return errors.Join(err, os.Remove(temporary))
+	}
+	linkErr := os.Link(temporary, path)
+	return errors.Join(linkErr, os.Remove(temporary))
 }
 
 func (s *Service) publicationRoot(transfer store.FileTransfer) (string, string, error) {
@@ -123,8 +133,7 @@ func (s *Service) publishToRoot(ctx context.Context, transfer store.FileTransfer
 		}
 	}
 	content := s.contentPath(transfer.ID)
-	contentInfo, err := os.Stat(content)
-	if err != nil {
+	if _, err := os.Stat(content); err != nil {
 		return "", &Error{Code: StorageUnavailable, Cause: err}
 	}
 	// Try the reserved destination first after a restart, before considering a
@@ -138,10 +147,14 @@ func (s *Service) publishToRoot(ctx context.Context, transfer store.FileTransfer
 			path = filepath.Join(root, publishedName(base, index))
 		}
 		info, statErr := os.Lstat(path)
-		if statErr == nil && (!info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || !os.SameFile(contentInfo, info)) {
+		if statErr == nil {
+			// Ours only when it is the pinned receipt and its copy was completed; anything else is someone's file.
+			if path == transfer.ReceiptPath && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0 && s.publishedMarked(transfer.ID) {
+				return path, nil
+			}
 			continue
 		}
-		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		if !errors.Is(statErr, os.ErrNotExist) {
 			return "", &Error{Code: StorageUnavailable, Cause: statErr}
 		}
 		if transfer.ReceiptPath != path {
@@ -150,14 +163,21 @@ func (s *Service) publishToRoot(ctx context.Context, transfer store.FileTransfer
 			}
 			transfer.ReceiptPath = path
 		}
-		if statErr == nil {
-			return path, nil
+		// The marker comes first: a crash after the copy linked the file must find it marked and keep its name, not
+		// publish a second copy as 'name (2)'. Marked but not yet copied is the same state as pinned but not copied.
+		marker, err := os.OpenFile(s.markerPath(transfer.ID), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+		if err != nil {
+			return "", &Error{Code: StorageUnavailable, Cause: err}
 		}
-		if err := os.Link(content, path); err != nil {
+		if err := errors.Join(marker.Sync(), marker.Close(), syncDir(s.config.Root)); err != nil {
+			return "", &Error{Code: StorageUnavailable, Cause: err}
+		}
+		if err := s.copyToInbox(content, root, path, transfer.ID); err != nil {
 			if errors.Is(err, os.ErrExist) {
+				_ = os.Remove(s.markerPath(transfer.ID)) // the marker says the pinned name is ours; someone's file is there
 				continue
 			}
-			return "", &Error{Code: StorageUnavailable, Cause: err}
+			return "", storageFailure(err) // a full disk is its own permanent code
 		}
 		if err := syncDir(root); err != nil {
 			return "", &Error{Code: StorageUnavailable, Cause: err}
