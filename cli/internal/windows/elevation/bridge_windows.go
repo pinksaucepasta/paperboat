@@ -1538,12 +1538,28 @@ func shellExecuteEx(executable, parameters, directory string) (windows.Handle, e
 	return info.hProcess, nil
 }
 
+// bridgeProgressInterval is how often the caller is told that the administrator step is still running: an elevated
+// install can legitimately take minutes (Defender scanning each new executable, a first-start settle) and a terminal
+// that shows nothing for that long looks hung.
+var bridgeProgressInterval = 30 * time.Second
+
+// bridgeProgress says the administrator step is still running; a variable so tests can count the reports.
+var bridgeProgress = func(elapsed time.Duration) {
+	fmt.Fprintf(os.Stderr, "Still working on the administrator step (%s)...\n", elapsed.Round(time.Second))
+}
+
 func waitForProcessExit(ctx context.Context, handle windows.Handle) error {
+	started := time.Now()
+	nextProgress := started.Add(bridgeProgressInterval)
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
+		}
+		if now := time.Now(); !now.Before(nextProgress) {
+			bridgeProgress(now.Sub(started))
+			nextProgress = now.Add(bridgeProgressInterval)
 		}
 		event, err := windows.WaitForSingleObject(handle, uint32(bridgePollInterval/time.Millisecond))
 		if err != nil {

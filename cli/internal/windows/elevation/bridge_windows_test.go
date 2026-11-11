@@ -701,3 +701,30 @@ func TestExecuteRejectsRequestNamingAnotherOwner(t *testing.T) {
 		t.Fatalf("Execute ran=%v err=%v, want owner refusal before the handler", ran, err)
 	}
 }
+
+// A wait for the elevated helper reports every bridgeProgressInterval that it is still running, then returns when
+// the process (here a waitable event) is signaled.
+func TestWaitForProcessExitReportsProgress(t *testing.T) {
+	event, err := windows.CreateEvent(nil, 1, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(event)
+	bridgeTestMutex.Lock()
+	defer bridgeTestMutex.Unlock()
+	previousInterval, previousProgress := bridgeProgressInterval, bridgeProgress
+	t.Cleanup(func() { bridgeProgressInterval, bridgeProgress = previousInterval, previousProgress })
+	bridgeProgressInterval = 150 * time.Millisecond
+	reports := 0
+	bridgeProgress = func(time.Duration) { reports++ }
+	go func() {
+		time.Sleep(700 * time.Millisecond)
+		_ = windows.SetEvent(event)
+	}()
+	if err := waitForProcessExit(context.Background(), event); err != nil {
+		t.Fatal(err)
+	}
+	if reports < 2 {
+		t.Fatalf("%d progress reports during a 700 ms wait at a 150 ms interval", reports)
+	}
+}
