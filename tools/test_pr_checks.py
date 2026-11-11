@@ -29,3 +29,9 @@ class AffectedTests(unittest.TestCase):
     def test_removed_package_still_selects_its_importers(self):
         packages = {'test/cli/cmd': dict(directory='cli/cmd', module='cli', module_path='test/cli', imports=['test/cli/removed'])}
         self.assertEqual(checks.affected(packages, ['cli/removed/a.go']), ['test/cli/cmd'])
+
+
+class DatabaseTests(unittest.TestCase):
+    def test_database_dsn_keeps_the_server_and_changes_the_name(self):
+        self.assertEqual(checks.database_dsn('postgres://u:p@localhost:5432/paperboat_test?sslmode=disable', 'paperboat_pr_3'),
+                         'postgres://u:p@localhost:5432/paperboat_pr_3?sslmode=disable')

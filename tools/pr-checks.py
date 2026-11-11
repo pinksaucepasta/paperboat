@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """R-01: vet/test changed Go packages and their workspace reverse dependencies."""
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 MODULES = ('shared', 'server', 'cli', 'relay', 'tunnel', 'helper', 'sdk/go')
 ROOT = Path(__file__).resolve().parents[1]
+DATABASE_MODULES = ('server', 'tunnel', 'helper')
 
 
 def affected(packages, paths):
@@ -38,6 +41,28 @@ def affected(packages, paths):
         selected = expanded
 
 
+def database_dsn(dsn, name):
+    """The same server with another database name."""
+    parts = urlsplit(dsn)
+    return urlunsplit(parts._replace(path='/' + name))
+
+
+def test_packages(module, names):
+    """-race tests. Every package of a database module gets its own fresh database, as the lane-test workflow and
+    tools/remote-test.sh do: packages sharing one database truncate each other's rows (deadlocks, foreign key errors)."""
+    command = ['go', 'test', '-race', '-count=1']
+    dsn = os.environ.get('PAPERBOAT_TEST_DATABASE_DSN')
+    if not dsn or module not in DATABASE_MODULES:
+        subprocess.run(command + names, cwd=ROOT / module, check=True, timeout=1200)
+        return
+    for index, name in enumerate(names):
+        database = f'paperboat_pr_{index}'
+        subprocess.run(['psql', database_dsn(dsn, 'postgres').split('?')[0], '-qv', 'ON_ERROR_STOP=1',
+                        '-c', f'drop database if exists "{database}" with (force)', '-c', f'create database "{database}"'], check=True, timeout=120)
+        subprocess.run(command + [name], cwd=ROOT / module, check=True, timeout=1200,
+                       env=dict(os.environ, PAPERBOAT_TEST_DATABASE_DSN=database_dsn(dsn, database)))
+
+
 def output(*argv, cwd=ROOT):
     return subprocess.check_output(argv, cwd=cwd, text=True)
 
@@ -60,8 +85,8 @@ def main():
         names = [name for name in chosen if packages[name]['module'] == module]
         if names:
             print(f'{module}: ' + ' '.join(names), flush=True)
-            for command in (['go', 'vet'], ['go', 'test', '-race', '-count=1']):
-                subprocess.run(command + names, cwd=ROOT / module, check=True, timeout=1200)
+            subprocess.run(['go', 'vet'] + names, cwd=ROOT / module, check=True, timeout=1200)
+            test_packages(module, names)
     print(f'Targeted checks passed ({len(chosen)} packages).')
 
 
