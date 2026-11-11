@@ -4,6 +4,7 @@ package filelock
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
@@ -21,7 +22,10 @@ func Lock(ctx context.Context, path string) (func() error, error) {
 	for {
 		busy, err := tryLock(file)
 		if err == nil && !busy {
-			return func() error { return unlock(file) }, nil
+			var once sync.Once
+			var releaseErr error
+			// Once: a second release on a closed descriptor number another open may now own would unlock that file.
+			return func() error { once.Do(func() { releaseErr = unlock(file) }); return releaseErr }, nil
 		}
 		if err != nil {
 			_ = file.Close()

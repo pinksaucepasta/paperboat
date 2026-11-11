@@ -63,8 +63,12 @@ func TestUnreadableReceiptJournalIsSetAsideAndDeliveryContinues(t *testing.T) {
 			if _, err := receiver.Deliver(context.Background(), manifest("ft_after_bad_journal", "ok.txt", content)); err != nil {
 				t.Fatalf("delivery blocked by an unreadable journal: %v", err)
 			}
-			if kept, err := os.ReadFile(filepath.Join(root, journalName+".rejected")); err != nil || string(kept) != body {
-				t.Fatalf("the unreadable journal was not kept aside: %q %v", kept, err)
+			kept, _ := filepath.Glob(filepath.Join(root, journalName+".rejected-*"))
+			if len(kept) != 1 {
+				t.Fatalf("the unreadable journal was not kept aside: %v", kept)
+			}
+			if data, err := os.ReadFile(kept[0]); err != nil || string(data) != body {
+				t.Fatalf("the kept journal differs: %q %v", data, err)
 			}
 			if receipts, err := loadJournal(root); err != nil || len(receipts.Entries) != 1 {
 				t.Fatalf("new journal %v %v", receipts.Entries, err)

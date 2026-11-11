@@ -186,6 +186,30 @@ func (r *contextGitReader) Read(p []byte) (int, error) {
 // one, so a SIGKILL would otherwise wedge every later publish until someone removed the file).
 const staleRepositoryLock = 10 * time.Minute
 
+// repositoryLockHeartbeat renews the lock's modification time while its holder works, so a slow publish (100,000
+// objects with an fsync each) is never mistaken for a killed one.
+const repositoryLockHeartbeat = time.Minute
+
+// keepLockFresh touches path every interval until the returned stop is called.
+func keepLockFresh(path string, interval time.Duration) (stop func()) {
+	done := make(chan struct{})
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case now := <-ticker.C:
+				_ = os.Chtimes(path, now, now)
+			}
+		}
+	}()
+	return func() { close(done); <-finished }
+}
+
 // openRepositoryLock creates Git's exclusive branch lock. A lock older than staleRepositoryLock is removed once
 // and retaken; a younger one belongs to a live writer and is refused.
 func openRepositoryLock(path string, mode os.FileMode) (*os.File, error) {
@@ -228,7 +252,8 @@ func publishLocal(ctx context.Context, source *git.Repository, a RepositoryAcces
 	if err != nil {
 		return PublishResult{}, ErrRepositoryUnavailable
 	}
-	defer func() { lock.Close(); os.Remove(path + ".lock") }()
+	stopHeartbeat := keepLockFresh(path+".lock", repositoryLockHeartbeat)
+	defer func() { stopHeartbeat(); lock.Close(); os.Remove(path + ".lock") }()
 	if err := ctx.Err(); err != nil {
 		return PublishResult{}, err
 	}
