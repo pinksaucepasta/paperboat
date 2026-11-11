@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -34,10 +35,15 @@ func TestNativeWindowsComponentsCanStageAllRolesBeforeReadiness(t *testing.T) {
 	for _, role := range roles {
 		control := &fakeNativeController{}
 		controls[role.kind] = control
-		installer, err := New(Config{
+		config := Config{
 			Platform: "windows", Kind: role.kind, ConfigRoot: root, Executable: executable,
 			User: "SYSTEM", Group: "SYSTEM", Arguments: []string{role.argument}, Controller: control,
-		})
+		}
+		if role.kind == HostdKind {
+			// Each hostd generation is its own service of one account.
+			config.Instance, config.Generation = "u0123456789abcdef01234567", strings.Repeat("a", 32)
+		}
+		installer, err := New(config)
 		if err != nil {
 			t.Fatalf("new %s installer: %v", role.kind, err)
 		}

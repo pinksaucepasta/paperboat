@@ -44,7 +44,7 @@ func TestWindowsServiceDeclarationBindsExpectedExecutableBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := sha256.Sum256(bytes)
-	config := Config{Platform: "windows", Kind: HostdKind, Instance: "u0123456789abcdef01234567", Executable: path, ExecutableSHA256: hex.EncodeToString(digest[:]), ExecutableLength: int64(len(bytes))}
+	config := Config{Platform: "windows", Kind: UpdaterKind, Instance: "u0123456789abcdef01234567", Executable: path, ExecutableSHA256: hex.EncodeToString(digest[:]), ExecutableLength: int64(len(bytes))}
 	body, err := renderWindowsService(config)
 	if err != nil {
 		t.Fatal(err)

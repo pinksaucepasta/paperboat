@@ -20,7 +20,6 @@ func TestWindowsServiceInstanceNamesAreBoundedAndRoleScoped(t *testing.T) {
 		kind string
 		base string
 	}{
-		{kind: HostdKind, base: "PaperboatHostd"},
 		{kind: UpdaterKind, base: "PaperboatUpdated"},
 		{kind: HostKind, base: "PaperboatHost"},
 		{kind: ConfigKind, base: "PaperboatRuntimeConfig"},
@@ -38,11 +37,11 @@ func TestWindowsServiceInstanceNamesAreBoundedAndRoleScoped(t *testing.T) {
 			t.Fatalf("windowsServiceNameFromDefinitionPath(%q)=%q, %v; want %q", path, parsed, err, name)
 		}
 	}
-	if got := windowsServiceName(HostdKind, ""); got != "PaperboatHostd" {
+	if got := windowsServiceName(UpdaterKind, ""); got != "PaperboatUpdated" {
 		t.Fatalf("empty instance changed production service name: %q", got)
 	}
 	for _, instance := range []string{" leading", "trailing ", "bad\\name", "bad/name", strings.Repeat("x", windowsServiceInstanceMax+1)} {
-		if safeWindowsServiceKind(HostdKind, instance) {
+		if safeWindowsServiceKind(UpdaterKind, instance) {
 			t.Fatalf("unsafe instance accepted: %q", instance)
 		}
 	}
@@ -123,12 +122,12 @@ func TestWindowsServiceConfigTransitionRestoresOwnedDeclaration(t *testing.T) {
 		t.Fatal(err)
 	}
 	old := windowsServiceDefinition{
-		Schema: "paperboat.windows-service/v1", Name: "PaperboatHostd-" + instance,
-		DisplayName: "old hostd", Description: "old declaration",
-		Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-hostd", "--instance", instance, "--restored"}, Account: "SYSTEM",
+		Schema: "paperboat.windows-service/v1", Name: "PaperboatUpdated-" + instance,
+		DisplayName: "old updater", Description: "old declaration",
+		Executable: layout.Binary, Arguments: []string{"daemon", "__runtime-updated", "--instance", instance, "--restored"}, Account: "SYSTEM",
 	}
 	current := mgr.Config{
-		BinaryPathName:   windows.ComposeCommandLine([]string{layout.Binary, "daemon", "__runtime-hostd", "--instance", instance}),
+		BinaryPathName:   windows.ComposeCommandLine([]string{layout.Binary, "daemon", "__runtime-updated", "--instance", instance}),
 		ServiceStartName: "LocalSystem", StartType: mgr.StartAutomatic,
 		SidType: windows.SERVICE_SID_TYPE_UNRESTRICTED,
 	}
@@ -136,14 +135,14 @@ func TestWindowsServiceConfigTransitionRestoresOwnedDeclaration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("owned transition rejected: %v", err)
 	}
-	wantPath := windows.ComposeCommandLine([]string{layout.Binary, "daemon", "__runtime-hostd", "--instance", instance, "--restored"})
+	wantPath := windows.ComposeCommandLine([]string{layout.Binary, "daemon", "__runtime-updated", "--instance", instance, "--restored"})
 	if updated.BinaryPathName != wantPath || updated.DisplayName != old.DisplayName || updated.Description != old.Description || updated.StartType != mgr.StartAutomatic || !isWindowsSystemAccount(updated.ServiceStartName) {
 		t.Fatalf("restored config=%+v want path=%q and old metadata", updated, wantPath)
 	}
 	for _, foreign := range []mgr.Config{
-		{BinaryPathName: windows.ComposeCommandLine([]string{`C:\Foreign\pb.exe`, "daemon", "__runtime-hostd", "--instance", instance}), ServiceStartName: "LocalSystem", SidType: windows.SERVICE_SID_TYPE_UNRESTRICTED},
-		{BinaryPathName: windows.ComposeCommandLine([]string{layout.Binary, "daemon", "__runtime-hostd", "--instance", instance}), ServiceStartName: "Administrator", SidType: windows.SERVICE_SID_TYPE_UNRESTRICTED},
-		{BinaryPathName: windows.ComposeCommandLine([]string{layout.Binary, "daemon", "__runtime-hostd", "--instance", instance}), ServiceStartName: "LocalSystem", SidType: windows.SERVICE_SID_TYPE_NONE},
+		{BinaryPathName: windows.ComposeCommandLine([]string{`C:\Foreign\pb.exe`, "daemon", "__runtime-updated", "--instance", instance}), ServiceStartName: "LocalSystem", SidType: windows.SERVICE_SID_TYPE_UNRESTRICTED},
+		{BinaryPathName: windows.ComposeCommandLine([]string{layout.Binary, "daemon", "__runtime-updated", "--instance", instance}), ServiceStartName: "Administrator", SidType: windows.SERVICE_SID_TYPE_UNRESTRICTED},
+		{BinaryPathName: windows.ComposeCommandLine([]string{layout.Binary, "daemon", "__runtime-updated", "--instance", instance}), ServiceStartName: "LocalSystem", SidType: windows.SERVICE_SID_TYPE_NONE},
 	} {
 		if _, err := windowsServiceConfigForDefinition(foreign, old); !errors.Is(err, ErrInvalidDefinition) {
 			t.Fatalf("foreign transition accepted: config=%+v err=%v", foreign, err)
@@ -157,9 +156,9 @@ func TestPendingWindowsInstallerAllowsRecoveryBeforeBinaryPublication(t *testing
 		t.Fatal(err)
 	}
 	config := Config{
-		Platform: "windows", Kind: HostdKind, ConfigRoot: `C:\ProgramData\Paperboat`,
+		Platform: "windows", Kind: UpdaterKind, ConfigRoot: `C:\ProgramData\Paperboat`,
 		Executable: layout.Binary, User: "Paperboat", Group: "Paperboat",
-		Arguments: []string{"daemon", "__runtime-hostd"}, Controller: WindowsController{},
+		Arguments: []string{"daemon", "__runtime-updated"}, Controller: WindowsController{},
 	}
 	if _, err := New(config); !errors.Is(err, ErrInvalidDefinition) {
 		t.Fatalf("ordinary Windows installer accepted missing runtime: %v", err)

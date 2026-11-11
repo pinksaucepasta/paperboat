@@ -255,7 +255,20 @@ func TestWindowsActivationPathsAcceptRollbackUpdaterDuringRecovery(t *testing.T)
 func TestWindowsRuntimeServiceTargetPreservesExactInstance(t *testing.T) {
 	const instance = "u0123456789abcdef01234567"
 	executable := `C:\Program Files\Paperboat\users\` + instance + `\bin\pb.exe`
-	for _, role := range []struct{ name, command string }{{windowsHostdService, "__runtime-hostd"}, {windowsUpdaterService, "__runtime-updated"}, {windowsLocalDaemonService, "__runtime-local-daemon"}} {
+	// A hostd generation carries its generation; its name binds both.
+	generation := strings.Repeat("a", 32)
+	hostdArgs := []string{executable, "daemon", "__runtime-hostd", "--instance", instance, "--generation", generation}
+	hostdName := windowsHostdService + "-" + instance + "-" + generation
+	target, err := parseWindowsRuntimeServiceTarget(hostdName, "__runtime-hostd", windows.ComposeCommandLine(hostdArgs))
+	if err != nil || target.Executable != executable || strings.Join(target.Arguments, "|") != strings.Join(hostdArgs[1:5], "|") {
+		t.Fatalf("hostd generation target lost its binding: %+v, %v", target, err)
+	}
+	for _, wrong := range []string{windowsHostdService + "-" + instance, windowsHostdService + "-" + instance + "-" + strings.Repeat("b", 32)} {
+		if _, err := parseWindowsRuntimeServiceTarget(wrong, "__runtime-hostd", windows.ComposeCommandLine(hostdArgs)); !errors.Is(err, errInvalidWindowsActivation) {
+			t.Fatalf("hostd target accepted under the name %q: %v", wrong, err)
+		}
+	}
+	for _, role := range []struct{ name, command string }{{windowsUpdaterService, "__runtime-updated"}, {windowsLocalDaemonService, "__runtime-local-daemon"}} {
 		args := []string{executable, "daemon", role.command, "--instance", instance}
 		name := role.name + "-" + instance
 		target, err := parseWindowsRuntimeServiceTarget(name, role.command, windows.ComposeCommandLine(args))
