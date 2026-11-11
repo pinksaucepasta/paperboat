@@ -1499,6 +1499,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/tunnels/{tunnel_id}/ip-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get tunnel IP rules
+         * @description The owner's IP allow and deny lists for this tunnel (CIDRs or single addresses, at most 256 each). Edges refuse an address a deny entry matches, or that no allow entry matches when allow is not empty, with 403 ip_restricted before the origin.
+         */
+        get: operations["get_v1_tunnels_tunnel_id_ip_rules"];
+        /**
+         * Replace tunnel IP rules
+         * @description The owner's IP allow and deny lists for this tunnel (CIDRs or single addresses, at most 256 each). Edges refuse an address a deny entry matches, or that no allow entry matches when allow is not empty, with 403 ip_restricted before the origin. Empty lists remove the rules. Entries come back normalized (masked prefixes, sorted, no duplicates).
+         */
+        put: operations["put_v1_tunnels_tunnel_id_ip_rules"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/previews/{preview_id}/ip-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get preview IP rules
+         * @description The owner's IP allow and deny lists for this preview (CIDRs or single addresses, at most 256 each). Edges refuse an address a deny entry matches, or that no allow entry matches when allow is not empty, with 403 ip_restricted before the origin.
+         */
+        get: operations["get_v1_previews_preview_id_ip_rules"];
+        /**
+         * Replace preview IP rules
+         * @description The owner's IP allow and deny lists for this preview (CIDRs or single addresses, at most 256 each). Edges refuse an address a deny entry matches, or that no allow entry matches when allow is not empty, with 403 ip_restricted before the origin. Empty lists remove the rules. Entries come back normalized (masked prefixes, sorted, no duplicates).
+         */
+        put: operations["put_v1_previews_preview_id_ip_rules"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/tunnels/{tunnel_id}/status": {
         parameters: {
             query?: never;
@@ -8629,6 +8677,11 @@ export interface components {
             cli_verification_url: string;
             /** Format: uri */
             machines_url: string;
+            /**
+             * Format: email
+             * @description Where abuse is reported by email; absent when the server publishes none.
+             */
+            abuse_mailbox?: string;
             /** Format: uri */
             issuer: string;
             /** Format: uri */
@@ -10803,6 +10856,10 @@ export interface components {
             reporter_email: string;
             /** Format: date-time */
             created_at: string;
+        };
+        IPRules: {
+            allow: string[];
+            deny: string[];
         };
         OperatorActionInput: {
             /** Format: int64 */
@@ -15421,6 +15478,254 @@ export interface operations {
             409: components["responses"]["Error"];
             412: components["responses"]["Error"];
             428: components["responses"]["Error"];
+        };
+    };
+    get_v1_tunnels_tunnel_id_ip_rules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tunnel_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rules. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["IPRules"];
+                    };
+                };
+            };
+            /** @description An entry is not an address or CIDR, or a list is too long. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The credential lacks the scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found, or not manageable by this account. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unavailable; retry. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    put_v1_tunnels_tunnel_id_ip_rules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tunnel_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IPRules"];
+            };
+        };
+        responses: {
+            /** @description The rules. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["IPRules"];
+                    };
+                };
+            };
+            /** @description An entry is not an address or CIDR, or a list is too long. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The credential lacks the scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found, or not manageable by this account. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unavailable; retry. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_v1_previews_preview_id_ip_rules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                preview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rules. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["IPRules"];
+                    };
+                };
+            };
+            /** @description An entry is not an address or CIDR, or a list is too long. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The credential lacks the scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found, or not manageable by this account. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unavailable; retry. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    put_v1_previews_preview_id_ip_rules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                preview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IPRules"];
+            };
+        };
+        responses: {
+            /** @description The rules. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["IPRules"];
+                    };
+                };
+            };
+            /** @description An entry is not an address or CIDR, or a list is too long. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The credential lacks the scope. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Not found, or not manageable by this account. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unavailable; retry. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     get_v1_tunnels_tunnel_id_status: {
