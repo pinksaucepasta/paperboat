@@ -39,7 +39,7 @@ func TestNetworkHandoffOperationsRoundTrip(t *testing.T) {
 	if err := <-server.Ready; err != nil {
 		t.Fatal(err)
 	}
-	client, err := NewClient(server.Endpoint, token, sha)
+	client, err := NewClient(server.Endpoint, token, sha, "")
 	if err != nil {
 		t.Fatal(err)
 	}

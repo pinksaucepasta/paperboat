@@ -74,7 +74,7 @@ func TestKilledExecClientEndsOwnerProcessAndOwnerRetires(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { stopBridge(); <-bridgeDone; _ = ownerSessions.Shutdown(context.Background()) })
-	ownerClient, err := workloadbridge.NewClient(bridge.Endpoint, token, "owner", 1)
+	ownerClient, err := workloadbridge.NewClient(bridge.Endpoint, token, "owner", 1, "")
 	if err != nil {
 		t.Fatal(err)
 	}

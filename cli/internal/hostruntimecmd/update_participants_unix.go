@@ -94,7 +94,7 @@ func carrierOpenSSH(ctx context.Context, uid int) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	client, err := carriercontrol.NewClient(config.ControlEndpoint, capability, config.Source.SHA256)
+	client, err := carriercontrol.NewClient(config.ControlEndpoint, capability, config.Source.SHA256, config.OwnerSID)
 	if err != nil {
 		return 0, err
 	}

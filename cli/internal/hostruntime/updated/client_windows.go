@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Microsoft/go-winio"
+	"github.com/pinksaucepasta/paperboat/internal/winpipe"
 )
 
 type Client struct {
@@ -43,6 +44,9 @@ func (c *Client) callRequest(ctx context.Context, request ControlRequest) (Contr
 	defer cancel()
 	connection, err := winio.DialPipeContext(dialCtx, c.socketPath)
 	if err != nil {
+		return ControlResponse{}, controlClientFailure{kind: ErrUnavailable, cause: err}
+	}
+	if err := winpipe.Verify(connection, ""); err != nil {
 		return ControlResponse{}, controlClientFailure{kind: ErrUnavailable, cause: err}
 	}
 	return exchangeControl(ctx, connection, request, c.timeout, false)

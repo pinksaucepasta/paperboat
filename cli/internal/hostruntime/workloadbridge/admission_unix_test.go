@@ -72,7 +72,7 @@ func TestAcceptedFeatureAdmissionHoldsNativeMaintenanceUntilReleased(t *testing.
 			t.Error(err)
 		}
 	}()
-	client, err := NewClient(server.Endpoint, token, "worker", welcome.Epoch)
+	client, err := NewClient(server.Endpoint, token, "worker", welcome.Epoch, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestAcceptedFeatureAdmissionHoldsNativeMaintenanceUntilReleased(t *testing.
 		t.Fatal("native owner lost maintenance refusal reason")
 	}
 	controller.AbortMaintenance()
-	stale, err := NewClient(server.Endpoint, token, "worker", welcome.Epoch+1)
+	stale, err := NewClient(server.Endpoint, token, "worker", welcome.Epoch+1, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -78,7 +78,7 @@ func TestPrivateCarrierRetirementPreservesAcceptedConnection(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("carrier control not ready")
 	}
-	client, err := NewClient(endpoint, token, sha)
+	client, err := NewClient(endpoint, token, sha, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,8 +92,8 @@ func TestPrivateCarrierRetirementPreservesAcceptedConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wrongSource, _ := NewClient(endpoint, token, strings.Repeat("b", 64))
-	wrongToken, _ := NewClient(endpoint, []byte(strings.Repeat("x", 32)), sha)
+	wrongSource, _ := NewClient(endpoint, token, strings.Repeat("b", 64), "")
+	wrongToken, _ := NewClient(endpoint, []byte(strings.Repeat("x", 32)), sha, "")
 	wrongWorker, err := client.BindWorker("other-worker", workerEpoch)
 	if err != nil {
 		t.Fatal(err)
@@ -315,7 +315,7 @@ func TestDisableSSHCancelsOnWorkerLeaseLossAndJoinsWatcher(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("carrier control not ready")
 	}
-	client, err := NewClient(endpoint, token, server.SHA256)
+	client, err := NewClient(endpoint, token, server.SHA256, "")
 	if err != nil {
 		t.Fatal(err)
 	}

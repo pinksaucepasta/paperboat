@@ -72,7 +72,7 @@ func TestBridgeCanceledExecUpdateDrainReopensAdmission(t *testing.T) {
 			t.Errorf("owner bridge shutdown: %v", err)
 		}
 	})
-	client, err := NewClient(server.Endpoint, token, "worker", 1)
+	client, err := NewClient(server.Endpoint, token, "worker", 1, "")
 	if err != nil {
 		t.Fatal(err)
 	}

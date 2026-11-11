@@ -79,7 +79,7 @@ func (c *Client) call(ctx context.Context, request Request) (Response, error) {
 	}
 	dialCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
-	connection, err := winpipe.Dial(dialCtx, c.socketPath)
+	connection, err := winpipe.Dial(dialCtx, c.socketPath, "")
 	if err != nil {
 		return Response{}, err
 	}

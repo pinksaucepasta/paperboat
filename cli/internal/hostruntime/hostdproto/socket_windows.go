@@ -387,7 +387,7 @@ func (c *Client) Request(ctx context.Context, request Message) (response Message
 	failure := func(message string, cause error) error {
 		return causedFailure{message: message, cause: errors.Join(requestCtx.Err(), cause)}
 	}
-	connection, err := winpipe.Dial(requestCtx, c.socketPath)
+	connection, err := winpipe.Dial(requestCtx, c.socketPath, "")
 	if err != nil {
 		return nil, failure("hostd lifecycle pipe connection failed", err)
 	}

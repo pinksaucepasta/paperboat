@@ -301,16 +301,18 @@ func (s *Server) Run(ctx context.Context) (resultErr error) {
 
 type Client struct {
 	endpoint, sha256 string
+	ownerSID         string // Windows: the enrolled account the carrier runs as
 	token            []byte
 	workerID         string
 	workerEpoch      uint64
 }
 
-func NewClient(endpoint string, token []byte, sha256 string) (*Client, error) {
+// NewClient dials the carrier at endpoint; ownerSID is the Windows account the carrier runs as ("" on Unix).
+func NewClient(endpoint string, token []byte, sha256, ownerSID string) (*Client, error) {
 	if endpoint == "" || len(token) != 32 || !validHash(sha256) {
 		return nil, ErrInvalid
 	}
-	return &Client{endpoint: endpoint, token: append([]byte(nil), token...), sha256: sha256}, nil
+	return &Client{endpoint: endpoint, token: append([]byte(nil), token...), sha256: sha256, ownerSID: ownerSID}, nil
 }
 
 // BindWorker returns a client whose explicit SSH capability mutations are
@@ -367,7 +369,7 @@ func (c *Client) do(ctx context.Context, req request) (_ response, err error) {
 	callCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return hostdproto.DialWorkloads(ctx, c.endpoint)
+		return hostdproto.DialWorkloads(ctx, c.endpoint, c.ownerSID)
 	}, DisableKeepAlives: true, ResponseHeaderTimeout: timeout}
 	defer transport.CloseIdleConnections()
 	httpReq, err := http.NewRequestWithContext(callCtx, http.MethodPost, "http://carrier"+path, bytes.NewReader(body))

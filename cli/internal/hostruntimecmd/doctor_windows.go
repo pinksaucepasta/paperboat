@@ -155,7 +155,7 @@ func windowsHostDiagnostics(ctx context.Context) (response hostservice.Response,
 	if err != nil {
 		return hostservice.Response{}, err
 	}
-	connection, err := winpipe.Dial(timed, socket)
+	connection, err := winpipe.Dial(timed, socket, "")
 	if err != nil {
 		return hostservice.Response{}, err
 	}

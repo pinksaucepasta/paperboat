@@ -33,11 +33,11 @@ func (u *carrierUpgrade) switchNetwork(ctx context.Context) error {
 	if u == nil {
 		return nil
 	}
-	previous, err := carriercontrol.NewClient(u.previous.ControlEndpoint, u.capability, u.previous.Source.SHA256)
+	previous, err := carriercontrol.NewClient(u.previous.ControlEndpoint, u.capability, u.previous.Source.SHA256, u.previous.OwnerSID)
 	if err != nil {
 		return err
 	}
-	next, err := carriercontrol.NewClient(u.candidate.ControlEndpoint, u.capability, u.candidate.Source.SHA256)
+	next, err := carriercontrol.NewClient(u.candidate.ControlEndpoint, u.capability, u.candidate.Source.SHA256, u.candidate.OwnerSID)
 	if err != nil {
 		return err
 	}
@@ -65,7 +65,7 @@ func (u *carrierUpgrade) confirmServing(ctx context.Context, wait time.Duration)
 	if u == nil {
 		return nil
 	}
-	client, err := carriercontrol.NewClient(u.candidate.ControlEndpoint, u.capability, u.candidate.Source.SHA256)
+	client, err := carriercontrol.NewClient(u.candidate.ControlEndpoint, u.capability, u.candidate.Source.SHA256, u.candidate.OwnerSID)
 	if err != nil {
 		return err
 	}

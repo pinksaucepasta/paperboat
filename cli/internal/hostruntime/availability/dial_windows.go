@@ -33,7 +33,7 @@ func dialAvailabilityHostService(ctx context.Context, path string, timeout time.
 	}
 	dialCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return winpipe.Dial(dialCtx, canonical)
+	return winpipe.Dial(dialCtx, canonical, "")
 }
 
 // Named pipes preserve message completion without a half-close. The server

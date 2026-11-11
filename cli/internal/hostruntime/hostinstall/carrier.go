@@ -382,7 +382,7 @@ func waitCarrierReady(ctx context.Context, c CarrierConfig) error {
 	if err != nil {
 		return err
 	}
-	client, err := carriercontrol.NewClient(c.ControlEndpoint, capability, c.Source.SHA256)
+	client, err := carriercontrol.NewClient(c.ControlEndpoint, capability, c.Source.SHA256, c.OwnerSID)
 	if err != nil {
 		return err
 	}

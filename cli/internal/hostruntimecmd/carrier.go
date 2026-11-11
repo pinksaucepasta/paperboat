@@ -109,7 +109,7 @@ func runCarrierProcess(ctx context.Context, config hostinstall.CarrierConfig, re
 		return err
 	}
 	privateControl.WorkerFence = func(ctx context.Context, worker string, epoch uint64) (func(), <-chan struct{}, error) {
-		bridge, err := workloadbridge.NewClient(config.HostdEndpoint+".workloads", hostdToken, worker, epoch)
+		bridge, err := workloadbridge.NewClient(config.HostdEndpoint+".workloads", hostdToken, worker, epoch, "")
 		if err != nil {
 			return nil, nil, err
 		}

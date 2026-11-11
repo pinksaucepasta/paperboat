@@ -67,7 +67,7 @@ func TestOwnerBridgePreservesRealShellChildReplayAndInputAcrossWorkerReplacement
 			t.Error(err)
 		}
 	}()
-	client, err := NewClient(server.Endpoint, token, "worker-one", 1)
+	client, err := NewClient(server.Endpoint, token, "worker-one", 1, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestOwnerBridgePreservesRealShellChildReplayAndInputAcrossWorkerReplacement
 	fence.WorkerID = "worker-two"
 	fence.Epoch = 2
 	mu.Unlock()
-	replacement, _ := NewClient(server.Endpoint, token, "worker-two", 2)
+	replacement, _ := NewClient(server.Endpoint, token, "worker-two", 2, "")
 	defer replacement.Close()
 	next, _ := replacement.Sessions()
 	if err = replacement.Health(ctx); err != nil {
@@ -270,7 +270,7 @@ func TestOwnerBridgeDoesNotHideOperationalFailureBehindWireRejection(t *testing.
 			t.Error(err)
 		}
 	}()
-	client, err := NewClient(server.Endpoint, token, "worker", 1)
+	client, err := NewClient(server.Endpoint, token, "worker", 1, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +320,7 @@ func TestOwnerBridgeDoesNotHideOperationalFailureBehindWireRejection(t *testing.
 
 func TestOwnerBridgeClientKeepsLocalTransportAndParserCausesPrivate(t *testing.T) {
 	endpoint := filepath.Join(shorttemp.Dir(t), "socket", "owner.sock")
-	client, err := NewClient(endpoint, make([]byte, 32), "worker", 1)
+	client, err := NewClient(endpoint, make([]byte, 32), "worker", 1, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,7 +423,7 @@ func (bridgeFaultTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 func TestOwnerBridgeCallerCancellationKeepsJoinedNativeFailure(t *testing.T) {
-	client, err := NewClient(filepath.Join(shorttemp.Dir(t), "owner.sock"), make([]byte, 32), "worker", 1)
+	client, err := NewClient(filepath.Join(shorttemp.Dir(t), "owner.sock"), make([]byte, 32), "worker", 1, "")
 	if err != nil {
 		t.Fatal(err)
 	}

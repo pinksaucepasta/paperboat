@@ -27,7 +27,7 @@ func connectOwner(ctx context.Context, d Descriptor, allowRetired bool) (*worklo
 	if err != nil {
 		return nil, err
 	}
-	client, err := workloadbridge.NewClient(d.Endpoint, token, d.Generation, 1)
+	client, err := workloadbridge.NewClient(d.Endpoint, token, d.Generation, 1, d.OwnerSID)
 	if err != nil {
 		return nil, err
 	}

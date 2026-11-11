@@ -24,7 +24,7 @@ func pruneWindowsSSHGenerations(ctx context.Context, carrier CarrierConfig, curr
 		return err
 	}
 	defer clear(capability)
-	control, err := carriercontrol.NewClient(carrier.ControlEndpoint, capability, carrier.Source.SHA256)
+	control, err := carriercontrol.NewClient(carrier.ControlEndpoint, capability, carrier.Source.SHA256, carrier.OwnerSID)
 	if err != nil {
 		return err
 	}

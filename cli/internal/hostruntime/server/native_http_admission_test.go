@@ -106,7 +106,7 @@ func TestFileTransferAdmissionEndsAtResponseAndFencesIdleAssociation(t *testing.
 			t.Error(err)
 		}
 	}()
-	bridge, err := workloadbridge.NewClient(bridgeServer.Endpoint, token, active.WorkerID, active.Epoch)
+	bridge, err := workloadbridge.NewClient(bridgeServer.Endpoint, token, active.WorkerID, active.Epoch, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -32,7 +32,7 @@ func (f *activeFeature) Shutdown(ctx context.Context) error {
 	return f.host.Shutdown(ctx)
 }
 func newWorkerFeature(ctx context.Context, endpoint string, token []byte, worker string, epoch uint64, version string) (workerFeature, error) {
-	bridge, err := workloadbridge.NewClient(endpoint+".workloads", token, worker, epoch)
+	bridge, err := workloadbridge.NewClient(endpoint+".workloads", token, worker, epoch, "")
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +94,7 @@ func reconcileFeatureCarrierSSH(ctx context.Context, worker string, epoch uint64
 		return err
 	}
 	defer clear(capability)
-	client, err := carriercontrol.NewClient(config.ControlEndpoint, capability, config.Source.SHA256)
+	client, err := carriercontrol.NewClient(config.ControlEndpoint, capability, config.Source.SHA256, config.OwnerSID)
 	if err != nil {
 		return err
 	}

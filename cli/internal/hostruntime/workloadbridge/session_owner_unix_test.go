@@ -52,7 +52,7 @@ func TestIndependentOwnerRetirementOverPrivateWire(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	client, err := NewClient(server.Endpoint, token, identity.Generation, 1)
+	client, err := NewClient(server.Endpoint, token, identity.Generation, 1, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestIndependentOwnerRetirementOverPrivateWire(t *testing.T) {
 	}
 	wrong := append([]byte(nil), token...)
 	wrong[0]++
-	untrusted, _ := NewClient(server.Endpoint, wrong, identity.Generation, 1)
+	untrusted, _ := NewClient(server.Endpoint, wrong, identity.Generation, 1, "")
 	defer untrusted.Close()
 	if _, err := untrusted.OwnerIdentity(ctx); !errors.Is(err, session.ErrOwnerUnavailable) {
 		t.Fatalf("unauthenticated readiness: %v", err)

@@ -404,12 +404,14 @@ type Client struct {
 	http      *http.Client
 }
 
-func NewClient(endpoint string, token []byte, worker string, epoch uint64) (*Client, error) {
+// NewClient dials the bridge at endpoint; ownerSID is the Windows account whose process serves it ("" for hostd,
+// a SYSTEM service, and on Unix).
+func NewClient(endpoint string, token []byte, worker string, epoch uint64, ownerSID string) (*Client, error) {
 	if endpoint == "" || len(token) != 32 || worker == "" || epoch == 0 {
 		return nil, session.ErrInvalidSession
 	}
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return hostdproto.DialWorkloads(ctx, endpoint)
+		return hostdproto.DialWorkloads(ctx, endpoint, ownerSID)
 	}, MaxIdleConns: 16, MaxIdleConnsPerHost: 16, IdleConnTimeout: 30 * time.Second}
 	return &Client{endpoint: endpoint, token: base64.RawURLEncoding.EncodeToString(token), worker: worker, epoch: epoch, transport: transport, http: &http.Client{Transport: transport}}, nil
 }

@@ -120,7 +120,7 @@ func startHandoverGeneration(t *testing.T, ctx context.Context, name string, sha
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { stopBridge(); <-bridgeDone })
-	bridge, err := workloadbridge.NewClient(bridgeServer.Endpoint, token, active.WorkerID, active.Epoch)
+	bridge, err := workloadbridge.NewClient(bridgeServer.Endpoint, token, active.WorkerID, active.Epoch, "")
 	if err != nil {
 		t.Fatal(err)
 	}

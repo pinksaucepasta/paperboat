@@ -47,7 +47,7 @@ func TestCarrierControlAnswersOperationsLongerThanFiveSeconds(t *testing.T) {
 	if err := <-server.Ready; err != nil {
 		t.Fatal(err)
 	}
-	client, err := NewClient(endpoint, token, sha)
+	client, err := NewClient(endpoint, token, sha, "")
 	if err != nil {
 		t.Fatal(err)
 	}

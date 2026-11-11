@@ -14,7 +14,8 @@ func ListenWorkloads(path string) (net.Listener, error) {
 	s := &Server{config: SocketConfig{SocketPath: path, UID: os.Geteuid(), GID: os.Getegid()}}
 	return s.Listen(path)
 }
-func DialWorkloads(ctx context.Context, path string) (net.Conn, error) {
+// DialWorkloads ignores ownerSID, the Windows account of the server: the socket's directory carries its custody.
+func DialWorkloads(ctx context.Context, path, _ string) (net.Conn, error) {
 	return (&net.Dialer{}).DialContext(ctx, "unix", path)
 }
 func RemoveWorkloadSocket(path string) error { return os.Remove(path) }
