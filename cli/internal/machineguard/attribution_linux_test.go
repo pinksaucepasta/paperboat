@@ -26,7 +26,14 @@ func gatewayPair(t *testing.T, listener net.Listener, dialer *net.Dialer) (clien
 		}
 		done <- conn
 	}()
-	client, err := dialer.Dial("tcp", listener.Addr().String())
+	// A fixed local port can still be held for a moment by the previous round's reset socket or a neighbour test.
+	var err error
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		client, err = dialer.Dial("tcp", listener.Addr().String())
+		if !errors.Is(err, syscall.EADDRINUSE) || time.Now().After(deadline) {
+			break
+		}
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
