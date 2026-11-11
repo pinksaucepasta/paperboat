@@ -17,13 +17,17 @@ import (
 
 // A renewal the server refuses with 401 will be refused again: the machine was removed or its credential revoked
 // (prod 2026-11-11: six orphan daemons retried every ~65 s for hours). The refusal is recorded against the identity
-// it was for, and this process attempts no renewal for that identity again; a new enrollment writes a new credential
-// and clears it by itself, and a restarted daemon makes one new attempt (see renewalRefused). Transient failures back off, doubling with jitter to a cap (tailscaled util/backoff; the
+// it was for, and this process attempts no renewal for that identity for renewalRefusalHold; a new enrollment writes a
+// new credential and clears it by itself, and a restarted daemon makes one new attempt (see renewalRefused). Transient failures back off, doubling with jitter to a cap (tailscaled util/backoff; the
 // shared schedule in shared/backoff), so a down control plane is not hit by every consumer on every call.
 const (
 	renewalRefusedFile    = "renewal-refused.json"
 	renewalBackoffStart   = 5 * time.Second
 	renewalBackoffMaximum = 2 * time.Minute // well inside RenewBefore: a credential still has time to be renewed
+	// renewalRefusalHold is how long a refusal stops renewal in a process: an orphan then costs one request an hour
+	// (not one a minute), and a machine refused only because its clock was off (the server answers 401 for a proof
+	// outside its window) heals within the hour once the clock is right, without a re-enrollment.
+	renewalRefusalHold = time.Hour
 )
 
 type renewalRefusal struct {
@@ -48,14 +52,15 @@ var (
 
 func recordRenewalRefusal(root string, identity RuntimeIdentity, now time.Time) {
 	refusal := refusalFor(identity)
-	refusal.At = now.UTC()
+	refusal.At = backoffNow().UTC()
 	refusals.Store(root, refusal)
 	if encoded, err := json.Marshal(refusal); err == nil { // best effort: the in-process record already stops this daemon
 		_ = atomicfile.Write(filepath.Join(root, renewalRefusedFile), encoded, atomicfile.Options{Mode: 0o600, OwnerUID: -1, OwnerGID: -1})
 	}
 }
 
-// renewalRefused reports whether this process was already refused a renewal for exactly this identity. Only the
+// renewalRefused reports whether this process was refused a renewal for exactly this identity within
+// renewalRefusalHold. Only the
 // process remembers it: a 401 can also come from a proof the server judged expired (a wrong clock), which a daemon
 // restart (or the clock being fixed) must be able to recover from, so the next process makes one new attempt.
 func renewalRefused(root string, identity RuntimeIdentity) bool {
@@ -64,7 +69,7 @@ func renewalRefused(root string, identity RuntimeIdentity) bool {
 		return false
 	}
 	want, got := refusalFor(identity), recorded.(renewalRefusal)
-	return got.HelperID == want.HelperID && got.CredentialSHA256 == want.CredentialSHA256
+	return got.HelperID == want.HelperID && got.CredentialSHA256 == want.CredentialSHA256 && backoffNow().Before(got.At.Add(renewalRefusalHold))
 }
 
 func clearRenewalRefusal(root string) {
