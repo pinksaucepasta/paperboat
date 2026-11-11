@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/shorttemp"
+	"net"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -125,5 +126,43 @@ func TestListenerPreservesLiveSocketAndUnrelatedFile(t *testing.T) {
 	data, err := os.ReadFile(path)
 	if err != nil || string(data) != "preserve" {
 		t.Fatal("existing file changed", err)
+	}
+}
+
+func TestDaemonSocketTrustsOnlyThisUserAndRoot(t *testing.T) {
+	if !trustedPeerUID(os.Geteuid()) || !trustedPeerUID(0) {
+		t.Fatal("this user or root refused")
+	}
+	if os.Geteuid() != 12345 && trustedPeerUID(12345) {
+		t.Fatal("another account trusted")
+	}
+}
+
+// The peer check reads real kernel credentials: a same-user connection passes on both ends.
+func TestDaemonSocketPeerCheckAcceptsThisUser(t *testing.T) {
+	path := filepath.Join(shorttemp.Dir(t), "daemon.sock")
+	listener, err := Listen(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	accepted := make(chan error, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err == nil {
+			_ = conn.Close()
+		}
+		accepted <- err
+	}()
+	conn, err := net.Dial("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := checkPeer(conn); err != nil {
+		t.Fatalf("client-side peer check: %v", err)
+	}
+	if err := <-accepted; err != nil {
+		t.Fatalf("server refused this user: %v", err)
 	}
 }

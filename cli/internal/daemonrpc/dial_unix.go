@@ -4,6 +4,7 @@ package daemonrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -27,7 +28,16 @@ func Dial(ctx context.Context, addr string) (*grpc.ClientConn, error) {
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
 			var dialer net.Dialer
 			dialer.Timeout = 2 * time.Second
-			return dialer.DialContext(ctx, "unix", sockPath)
+			conn, err := dialer.DialContext(ctx, "unix", sockPath)
+			if err != nil {
+				return nil, err
+			}
+			// A socket path from PAPERBOAT_DAEMON_SOCK or a swapped directory reaches another account's
+			// server only if this check passes: the daemon must run as this user or root.
+			if err := checkPeer(conn); err != nil {
+				return nil, errors.Join(err, conn.Close())
+			}
+			return conn, nil
 		}),
 		grpc.WithBlock(),
 	)

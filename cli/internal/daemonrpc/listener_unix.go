@@ -12,6 +12,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/ospeer"
 )
 
 // A process lock fences both stale-socket cleanup and the entire listener
@@ -80,6 +82,36 @@ func Listen(addr string) (net.Listener, error) {
 	success = true
 	return &ownedListener{Listener: listener, lock: lock}, nil
 }
+
+// Accept serves only this user's (or root's) processes: the socket's mode is the first fence, the peer's kernel
+// credentials the second, as tailscale ipnauth GetConnIdentity reads them. Another account's connection is closed.
+func (l *ownedListener) Accept() (net.Conn, error) {
+	for {
+		conn, err := l.Listener.Accept()
+		if err != nil {
+			return nil, err
+		}
+		if err := checkPeer(conn); err != nil {
+			_ = conn.Close()
+			continue
+		}
+		return conn, nil
+	}
+}
+
+// checkPeer accepts a connection whose other end runs as this process's user or as root.
+func checkPeer(conn net.Conn) error {
+	identity, err := ospeer.Get(conn)
+	if err != nil {
+		return fmt.Errorf("read daemon socket peer: %w", err)
+	}
+	if !trustedPeerUID(identity.UID) {
+		return fmt.Errorf("daemon socket peer runs as user %d, not %d", identity.UID, os.Geteuid())
+	}
+	return nil
+}
+
+func trustedPeerUID(uid int) bool { return uid == os.Geteuid() || uid == 0 }
 
 type ownedListener struct {
 	net.Listener
