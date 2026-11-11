@@ -119,7 +119,7 @@ func windowsActivationJournalPath(stateRoot string) string {
 
 func stageWindowsActivation(ctx context.Context, config WindowsConfig, release workerupdate.Release) (result windowsActivationJournal, resultErr error) {
 	if ctx == nil {
-		ctx = context.Background()
+		return windowsActivationJournal{}, errInvalidWindowsActivation
 	}
 	unlock, err := hostinstall.LockWindowsNativePublication(ctx)
 	if err != nil {
@@ -937,7 +937,7 @@ func removeWindowsActivationFile(path string) error {
 
 func retryWindowsFileOperation(ctx context.Context, operation func() error) error {
 	if ctx == nil {
-		ctx = context.Background()
+		return errInvalidWindowsActivation
 	}
 	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()
@@ -990,7 +990,7 @@ func sameWindowsServiceIdentity(actual, expected windowsServiceTarget) bool {
 
 func (b *windowsSCMActivationBackend) activeHostdStatus(ctx context.Context) (hostdproto.Status, error) {
 	if ctx == nil {
-		ctx = context.Background()
+		return hostdproto.Status{}, errInvalidWindowsActivation
 	}
 	token, err := os.ReadFile(b.config.TokenFile)
 	if err != nil {

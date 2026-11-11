@@ -162,3 +162,12 @@ func TestControlExchangeKeepsOriginalMixedCauseWithoutFormatting(t *testing.T) {
 		t.Fatal("updater error prose exposes original cause")
 	}
 }
+
+// A nil context is a programming error, not an unbounded wait: the call refuses before it dials.
+func TestControlClientRefusesANilContext(t *testing.T) {
+	var nilCtx context.Context
+	client := &Client{socketPath: "unused", timeout: time.Second}
+	if _, err := client.Status(nilCtx); !errors.Is(err, ErrInvalidControl) {
+		t.Fatalf("a nil context was accepted: %v", err)
+	}
+}

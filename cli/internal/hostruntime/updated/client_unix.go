@@ -43,7 +43,7 @@ func (c *Client) callRequest(ctx context.Context, request ControlRequest) (Contr
 		return ControlResponse{}, ErrInvalidControl
 	}
 	if ctx == nil {
-		ctx = context.Background()
+		return ControlResponse{}, ErrInvalidControl
 	}
 	connection, err := (&net.Dialer{Timeout: c.timeout}).DialContext(ctx, "unix", c.socketPath)
 	if err != nil {
