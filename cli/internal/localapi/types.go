@@ -115,7 +115,7 @@ type PeerStreamRequest struct {
 }
 
 // OfflineConsumers are the streams the daemon may open without Paperboat.
-var OfflineConsumers = map[string]bool{"exec": true, "ssh": true}
+var OfflineConsumers = map[string]bool{"terminal": true, "exec": true, "ssh": true}
 
 type PeerTerminalPayload struct {
 	Scopes              []string          `json:"scopes,omitempty"`
