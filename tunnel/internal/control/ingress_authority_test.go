@@ -485,3 +485,32 @@ func TestIngressAuthorityPreviewMissesInGraceShareFetchesAndBackOff(t *testing.T
 		t.Fatalf("backoff %v %v %v %v, want 0.5s 0.5s 1s 2s", a.previewMissTTL(0), a.previewMissTTL(1), a.previewMissTTL(2), ttl)
 	}
 }
+
+// The held snapshot admits a preview publication by hostname while its decision stands: an ephemeral public one always
+// (it is renewed locally until a newer snapshot ends it), a restricted one until it expires; a durable tunnel's decision
+// or an unknown name is not a preview admission.
+func TestAdmitsPreviewByHostname(t *testing.T) {
+	now := time.Now()
+	decision := func(host, audience string, lifecycle string, expires time.Time) connectorprotocol.IngressDecision {
+		var d connectorprotocol.IngressDecision
+		d.Binding.Hostname, d.Binding.Audience, d.Binding.Lifecycle, d.ExpiresAt = host, audience, lifecycle, expires
+		return d
+	}
+	a := &IngressAuthority{decisions: []connectorprotocol.IngressDecision{
+		decision("public.preview.example.test", "public", connectorprotocol.TunnelEphemeral, now.Add(-time.Hour)),
+		decision("team.preview.example.test", "team", connectorprotocol.TunnelEphemeral, now.Add(time.Hour)),
+		decision("lapsed.preview.example.test", "team", connectorprotocol.TunnelEphemeral, now.Add(-time.Minute)),
+		decision("tunnel.tunnels.example.test", "public", connectorprotocol.TunnelDurable, now.Add(time.Hour)),
+	}}
+	for host, want := range map[string]bool{
+		"public.preview.example.test": true, "team.preview.example.test": true, "lapsed.preview.example.test": false,
+		"tunnel.tunnels.example.test": false, "unknown.preview.example.test": false, "": false,
+	} {
+		if got := a.AdmitsPreview(host); got != want {
+			t.Errorf("AdmitsPreview(%q) = %v, want %v", host, got, want)
+		}
+	}
+	if (*IngressAuthority)(nil).AdmitsPreview("public.preview.example.test") {
+		t.Error("a missing authority admitted a preview")
+	}
+}
