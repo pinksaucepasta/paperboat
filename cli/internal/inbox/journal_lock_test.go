@@ -3,6 +3,7 @@ package inbox
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -39,5 +40,35 @@ func TestConcurrentDeliveriesFromSeparateInboxesKeepEveryReceipt(t *testing.T) {
 	receipts, err := loadJournal(root)
 	if err != nil || len(receipts.Entries) != writers {
 		t.Fatalf("journal holds %d receipts (err %v), want %d: a concurrent rewrite dropped one", len(receipts.Entries), err, writers)
+	}
+}
+
+// F21-159: a receipt journal this build cannot read (a newer version, or damage) no longer fails every delivery:
+// it is kept aside byte for byte and a new journal starts.
+func TestUnreadableReceiptJournalIsSetAsideAndDeliveryContinues(t *testing.T) {
+	for name, body := range map[string]string{"newer version": `{"version":2,"entries":{},"extra":true}`, "damaged": `{"version":1,"entries":`} {
+		t.Run(name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "Paperboat Inbox")
+			if err := os.MkdirAll(root, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, journalName), []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			content := []byte("after the bad journal")
+			receiver, err := New(Config{Client: &fakeClient{data: content}, MachineID: "machine_local", SessionID: "session_1", Path: root})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := receiver.Deliver(context.Background(), manifest("ft_after_bad_journal", "ok.txt", content)); err != nil {
+				t.Fatalf("delivery blocked by an unreadable journal: %v", err)
+			}
+			if kept, err := os.ReadFile(filepath.Join(root, journalName+".rejected")); err != nil || string(kept) != body {
+				t.Fatalf("the unreadable journal was not kept aside: %q %v", kept, err)
+			}
+			if receipts, err := loadJournal(root); err != nil || len(receipts.Entries) != 1 {
+				t.Fatalf("new journal %v %v", receipts.Entries, err)
+			}
+		})
 	}
 }
