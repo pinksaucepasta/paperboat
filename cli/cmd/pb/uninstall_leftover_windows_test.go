@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/windows"
 )
@@ -137,5 +138,36 @@ func TestAHelperRunningDespiteALaunchErrorIsAPendingUninstallNotAFailure(t *test
 	windowsHelperIsRunning = func(string) (bool, error) { return true, errors.New("process query failed") }
 	if helperStartedDespite(helper) {
 		t.Fatal("an unreadable process list counted as started")
+	}
+}
+
+func TestHandoffWaitReadsThroughATransientStatusReadError(t *testing.T) {
+	originalRead, originalTimeout := readUninstallStatus, windowsHandoffTimeout
+	t.Cleanup(func() { readUninstallStatus, windowsHandoffTimeout = originalRead, originalTimeout })
+	windowsHandoffTimeout = 5 * time.Second
+	statusPath := `C:\Users\u\AppData\Local\Temp\Paperboat Uninstall\x\status.json`
+	reads := 0
+	readUninstallStatus = func(string) (windowsUninstallStatus, error) {
+		reads++
+		if reads <= 2 { // the helper replaces status.json while it is read
+			return windowsUninstallStatus{}, &fs.PathError{Op: "open", Path: statusPath, Err: windows.ERROR_SHARING_VIOLATION}
+		}
+		return windowsUninstallStatus{State: "completed"}, nil
+	}
+	if err := waitForWindowsUninstallHandoff(context.Background(), statusPath); err != nil || reads != 3 {
+		t.Fatalf("a transient sharing violation failed the handoff: err=%v reads=%d", err, reads)
+	}
+}
+
+func TestHandoffWaitFailsWithTheReadErrorWhenTheStatusStaysUnreadable(t *testing.T) {
+	originalRead, originalTimeout := readUninstallStatus, windowsHandoffTimeout
+	t.Cleanup(func() { readUninstallStatus, windowsHandoffTimeout = originalRead, originalTimeout })
+	windowsHandoffTimeout = 300 * time.Millisecond
+	statusPath := `C:\Users\u\AppData\Local\Temp\Paperboat Uninstall\x\status.json`
+	broken := errors.New("invalid protected Windows uninstall status")
+	readUninstallStatus = func(string) (windowsUninstallStatus, error) { return windowsUninstallStatus{}, broken }
+	err := waitForWindowsUninstallHandoff(context.Background(), statusPath)
+	if err == nil || !errors.Is(err, broken) {
+		t.Fatalf("a status that never validates must fail with its own error, got %v", err)
 	}
 }

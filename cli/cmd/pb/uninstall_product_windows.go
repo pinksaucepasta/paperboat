@@ -43,6 +43,8 @@ var (
 	windowsUninstallExecutable = os.Executable
 	windowsProcessIsRunning    = isWindowsProcessRunning
 	windowsHelperIsRunning     = windowsExecutableIsRunning
+	readUninstallStatus        = readWindowsUninstallStatus
+	windowsHandoffTimeout      = 30 * time.Second
 	windowsUninstallRoot       = func() string { return filepath.Join(os.TempDir(), "Paperboat Uninstall") }
 	recoverWindowsUninstall    = recoverExpiredWindowsUninstallHelpers
 )
@@ -725,13 +727,25 @@ func readWindowsUninstallPlan(planPath string) (windowsUninstallPlan, error) {
 func waitForWindowsUninstallHandoff(ctx context.Context, statusPath string) error {
 	// This is a startup acknowledgement, not the five-minute teardown itself.
 	// A caller without a deadline must still regain control if startup stalls.
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, windowsHandoffTimeout)
 	defer cancel()
+	var readErr error
 	for {
-		status, err := readWindowsUninstallStatus(statusPath)
+		status, err := readUninstallStatus(statusPath)
 		if err != nil {
-			return err
+			// The helper (SYSTEM) replaces status.json while this reads it: an open that hits a sharing violation
+			// or half a file is not a verdict. Keep reading until the acknowledgement or the timeout; a file
+			// that stays unreadable or invalid fails with its own error when time runs out (winpool-12: the
+			// first failed read printed an 'incomplete' error for an uninstall that completed).
+			readErr = err
+			select {
+			case <-ctx.Done():
+				return windowsUninstallLocalFailure("", readErr, ctx.Err(), context.Cause(ctx))
+			case <-time.After(100 * time.Millisecond):
+			}
+			continue
 		}
+		readErr = nil
 		switch status.State {
 		case "waiting_for_parent", "completed":
 			return nil
