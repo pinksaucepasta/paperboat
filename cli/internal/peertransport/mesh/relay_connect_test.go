@@ -170,3 +170,49 @@ func TestOnlyTheAnswerToOurHandshakeRecordsItsRegion(t *testing.T) {
 		t.Fatal("a bare answer must complete the handshake without moving the peer")
 	}
 }
+
+// Review of b6eb2018c, P1: an answer to our handshake racing a contact change (a peer that moved relay) deadlocked the
+// engine. meowed held peerReadyMu while setPeerRelayRegion took policyMu; SetPeerContacts and InvalidateAuthorizedPeer
+// hold policyMu while they take peerReadyMu. The test forces that interleaving: it holds policyMu, lets the answer
+// arrive, then invalidates the peer under policyMu, which must not wait on the answer.
+func TestHandshakeAnswerRacingAContactChangeDoesNotDeadlock(t *testing.T) {
+	regions := integration.RunDERPAndSTUN(t, logger.Discard, "127.0.0.1")
+	one, two := regions.Regions[1], relayRegionCopy(regions.Regions[1], 2)
+	peer := key.NewNode().Public()
+	s := &Server{Key: key.NewNode(), LocalAddr: netip.MustParseAddr("fd7a:115c:a1e0::70"),
+		AllowedPeers: map[key.NodePublic]netip.Addr{peer: netip.MustParseAddr("fd7a:115c:a1e0::71")}}
+	if err := s.SetRelayRegions([]*tailcfg.DERPRegion{one, two}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if err := s.SetPeerContacts(map[key.NodePublic]PeerContact{peer: {Disco: key.NewDisco().Public()}}); err != nil {
+		t.Fatal(err)
+	}
+	w := &meowWait{ready: make(chan struct{}), nonce: [meowNonceLen]byte{5}}
+	s.peerReadyMu.Lock()
+	s.peerReady = map[key.NodePublic]*meowWait{peer: w}
+	s.peerReadyMu.Unlock()
+
+	s.lb.policyMu.Lock() // a contact change is under way
+	answered := make(chan struct{})
+	go func() { s.meowed(peer, two.RegionID, w.nonce, true); close(answered) }()
+	time.Sleep(100 * time.Millisecond) // the answer is now waiting for policyMu inside setPeerRelayRegion
+	invalidated := make(chan struct{})
+	go func() { s.invalidateAuthorizedPeerLocked(peer); close(invalidated) }()
+	select {
+	case <-invalidated:
+	case <-time.After(3 * time.Second):
+		s.lb.policyMu.Unlock() // unwind the deadlock so the test binary can finish
+		<-invalidated
+		t.Fatal("invalidating a peer under policyMu waited on a handshake answer: ABBA deadlock")
+	}
+	s.lb.policyMu.Unlock()
+	select {
+	case <-answered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the handshake answer did not finish after the contact change")
+	}
+}

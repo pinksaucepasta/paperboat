@@ -77,8 +77,9 @@ type Server struct {
 
 // meowWait is the outstanding handshake with one peer, shared by concurrent dials: ready closes on its answer.
 type meowWait struct {
-	ready chan struct{}
-	nonce [meowNonceLen]byte
+	ready   chan struct{}
+	nonce   [meowNonceLen]byte
+	claimed bool // an answer is being taken; peerReadyMu guards it
 }
 
 // Start installs the explicit identity, allocation and peer policy before networking.
@@ -323,24 +324,24 @@ func (s *Server) prepareAuthorizedPeer(ctx context.Context, peer key.NodePublic,
 // nonce) completes the handshake without moving the peer. The region is recorded before the dial is released, so
 // its first packets take it.
 func (s *Server) meowed(src key.NodePublic, regionID tailcfg.DERPRegionID, nonce [meowNonceLen]byte, echoed bool) {
+	// The waiter is claimed under peerReadyMu and the region set without it: setPeerRelayRegion takes policyMu, which
+	// SetPeerContacts and InvalidateAuthorizedPeer hold while they take peerReadyMu (ABBA, review of b6eb2018c).
 	s.peerReadyMu.Lock()
-	defer s.peerReadyMu.Unlock()
 	w := s.peerReady[src]
-	if w == nil {
+	if w == nil || w.claimed || (echoed && nonce != w.nonce) {
+		s.peerReadyMu.Unlock()
 		return
 	}
-	select {
-	case <-w.ready:
-		return
-	default:
-	}
-	if echoed && nonce != w.nonce {
-		return
-	}
+	w.claimed = true
+	s.peerReadyMu.Unlock()
 	if echoed {
 		_ = s.lb.setPeerRelayRegion(src, regionID)
 	}
-	close(w.ready)
+	s.peerReadyMu.Lock()
+	defer s.peerReadyMu.Unlock()
+	if s.peerReady[src] == w { // not invalidated meanwhile
+		close(w.ready)
+	}
 }
 
 // meowFanout reports whether an unanswered handshake also asks on the other relays at this attempt: on attempts 1,
