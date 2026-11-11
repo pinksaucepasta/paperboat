@@ -45,10 +45,10 @@ def domain():
     return got
 
 
-def ssh(host, script, stdin=None, check=True):
+def ssh(host, script, stdin=None, check=True, tail=300):
     done = subprocess.run(["ssh", "-o", "BatchMode=yes", host, script], input=stdin, capture_output=True, text=True, timeout=900)
     if check and done.returncode:
-        raise SystemExit(f"staging: `{script[:80]}` on {host} failed (exit {done.returncode}): {done.stderr.strip()[-300:]}")
+        raise SystemExit(f"staging: `{script[:80]}` on {host} failed (exit {done.returncode}): {done.stderr.strip()[-tail:]}")
     return done.stdout
 
 
@@ -184,8 +184,12 @@ def build(commit):
     if done.returncode:
         raise SystemExit(f"staging: copying the source to {HOST} failed: {done.stderr.decode()[-300:]}")
     image = f"paperboat-server:stg-{short}"
-    ssh(HOST, f"cd ~/{src} && nice -n 10 docker build -q --build-arg PAPERBOAT_VERSION=stg-{short} --build-arg PAPERBOAT_COMMIT={full} "
-              f"-t {image} -f server/deploy/Dockerfile . >/dev/null; rc=$?; rm -rf ~/{src}; exit $rc")
+    # The Dockerfile accepts only YYYY.MM.DD.N: a staging build is today's date with a high N derived from the commit, never a release number.
+    version = datetime.datetime.now(datetime.timezone.utc).strftime("%Y.%m.%d") + f".{900000 + int(full[:5], 16) % 100000}"
+    # The build log stays on the host (~/pb-stg-build.log); a failure prints its last lines: the compiler error, not just 'exit code 1'.
+    ssh(HOST, f"cd ~/{src} && nice -n 10 docker build --progress=plain --build-arg PAPERBOAT_VERSION={version} --build-arg PAPERBOAT_COMMIT={full} "
+              f"-t {image} -f server/deploy/Dockerfile . > ~/pb-stg-build.log 2>&1; rc=$?; rm -rf ~/{src}; "
+              f"[ $rc = 0 ] || {{ grep -v -E '^#[0-9]+ (DONE|CACHED|sha256)' ~/pb-stg-build.log | tail -25 >&2; }}; exit $rc", tail=2500)
     print(image)
 
 

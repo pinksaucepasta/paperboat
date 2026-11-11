@@ -23,5 +23,21 @@ class SourceArchiveTest(unittest.TestCase):
         self.assertFalse([n for n in names if n.split('/')[0] in ('console', 'marketing', 'tools')])
 
 
+class BuildVersionTest(unittest.TestCase):
+    def test_build_version_matches_the_dockerfile_pattern(self):
+        import re
+        calls = []
+        original = (staging.subprocess.run, staging.ssh, staging.source_archive)
+        staging.source_archive = lambda commit: ('abcdef0', 'abcdef0123456789abcdef0123456789abcdef01', b'')
+        staging.subprocess.run = lambda *a, **k: type('Done', (), {'returncode': 0, 'stderr': b''})()
+        staging.ssh = lambda host, script, **k: calls.append(script)
+        try:
+            staging.build('HEAD')
+        finally:
+            staging.subprocess.run, staging.ssh, staging.source_archive = original
+        version = re.search(r'PAPERBOAT_VERSION=(\S+)', calls[0]).group(1)
+        self.assertRegex(version, r'^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.(0|[1-9][0-9]*)$')  # server/deploy/Dockerfile's check
+
+
 if __name__ == '__main__':
     unittest.main()
