@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
-	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 	"io"
 	"os"
 	"reflect"
