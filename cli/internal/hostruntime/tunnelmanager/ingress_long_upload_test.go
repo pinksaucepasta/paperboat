@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 // Device finding: a 16 MiB HTTP/2 POST through a durable tunnel was cut after

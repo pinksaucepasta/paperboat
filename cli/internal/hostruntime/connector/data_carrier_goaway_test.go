@@ -9,8 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
-	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 // goawayHost is a one-carrier pool whose dials each reach a new edge carrier, sent on edges, and
@@ -81,7 +80,7 @@ func newGoawayHost(t *testing.T, fail func(dial int) bool) *goawayHost {
 				_ = stream.Close()
 				continue
 			}
-			if open.Kind == sharedprotocol.Goaway {
+			if open.Kind == connectorprotocol.Goaway {
 				go stream.HandleGoaway()
 				continue
 			}
@@ -130,14 +129,14 @@ func edgeHeldStream(t *testing.T, h *goawayHost, edge *DataCarrier) (edgeSide io
 func sendEdgeGoaway(t *testing.T, edge *DataCarrier) {
 	t.Helper()
 	sendGoaway(t, edge, func(w io.Writer) error {
-		return sharedprotocol.WriteGoawayNotice(w, sharedprotocol.GoawayEdgeDraining, time.Now().Add(30*time.Second))
+		return connectorprotocol.WriteGoawayNotice(w, connectorprotocol.GoawayEdgeDraining, time.Now().Add(30*time.Second))
 	})
 }
 
 func sendGoaway(t *testing.T, edge *DataCarrier, write func(io.Writer) error) {
 	t.Helper()
 	open := testDataCarrierStreamOpen("route-a", "goaway")
-	open.Kind = sharedprotocol.Goaway
+	open.Kind = connectorprotocol.Goaway
 	stream := edgeOpen(t, edge, open)
 	defer stream.Close()
 	if err := write(stream); err != nil {
@@ -269,7 +268,7 @@ func TestEdgeGoawayIgnoresOtherNotices(t *testing.T) {
 	edge := <-h.edges
 	for _, write := range []func(io.Writer) error{
 		func(w io.Writer) error {
-			return sharedprotocol.WriteGoawayNotice(w, sharedprotocol.GoawayHostDraining, time.Now().Add(time.Minute))
+			return connectorprotocol.WriteGoawayNotice(w, connectorprotocol.GoawayHostDraining, time.Now().Add(time.Minute))
 		},
 		func(w io.Writer) error { _, err := io.WriteString(w, "\x00\x00\x00\x04junk"); return err },
 	} {

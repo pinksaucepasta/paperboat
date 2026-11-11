@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 // TestInspectorDurableRegistersReplayBinding proves the durable forwarding

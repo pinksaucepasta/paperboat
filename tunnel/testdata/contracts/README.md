@@ -7,5 +7,5 @@ that use them and preserve the protocol and security behavior coverage.
 Run affected checks from the repository root, including:
 
 ```sh
-go test ./internal/connectorprotocol ./internal/contracttest
+go test ./internal/contracttest
 ```

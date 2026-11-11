@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/inspectorapi"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 // TestInspectorEphemeralCaptureAndReplay proves one shared daemon inspector

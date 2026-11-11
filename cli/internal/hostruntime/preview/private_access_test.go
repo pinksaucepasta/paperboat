@@ -18,9 +18,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/privatepreviewproxy"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 type privateAccessTestAuth struct{}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,14 +15,11 @@ import (
 	"testing"
 	"time"
 
-	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
-	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
-
-	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 func edgeRequest(route, id, kind string) connector.StreamOpen {
@@ -52,8 +50,8 @@ func sendEdgeGoaway(t *testing.T, edge *connector.DataCarrier) {
 // sendEdgeGoawayOn names route, one of the routes attached on the carrier.
 func sendEdgeGoawayOn(t *testing.T, edge *connector.DataCarrier, route string) {
 	t.Helper()
-	stream := edgeOpen(t, edge, edgeRequest(route, "goaway", sharedprotocol.Goaway))
-	if err := sharedprotocol.WriteGoawayNotice(stream, sharedprotocol.GoawayEdgeDraining, time.Now().Add(30*time.Second)); err != nil {
+	stream := edgeOpen(t, edge, edgeRequest(route, "goaway", connectorprotocol.Goaway))
+	if err := connectorprotocol.WriteGoawayNotice(stream, connectorprotocol.GoawayEdgeDraining, time.Now().Add(30*time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	closed := make(chan struct{})
@@ -167,7 +165,7 @@ func TestEdgeGoawayMovesTheRuntimeCarrierWithoutFailingRequests(t *testing.T) {
 			t.Fatalf("host stream did not reach the replacement: %v", err)
 		}
 		_ = stream.Close()
-		if open.Kind == sharedprotocol.Goaway {
+		if open.Kind == connectorprotocol.Goaway {
 			return
 		}
 	}

@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 // F7-05: the edge writes the GET upgrade onto a carrier stream and then keeps it

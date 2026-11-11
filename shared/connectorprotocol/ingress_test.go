@@ -211,3 +211,39 @@ func TestIngressFileOriginIsAnInboxFileID(t *testing.T) {
 		}
 	}
 }
+
+func TestIngressUnixTargetIsExactAndBounded(t *testing.T) {
+	d, _ := ingressFixture(time.Now().UTC())
+	d.Binding.Protocol = "http"
+	d.Binding.OriginScheme = "unix"
+	d.Binding.OriginAddress = "/tmp/paperboat-origin.sock"
+	d.Binding.TLSVerification = "not_applicable"
+	if err := d.Validate(time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	for _, address := range []string{"relative.sock", "/tmp/../origin.sock", "/tmp/origin\x00.sock", "/tmp/origin\n.sock"} {
+		mutated := d
+		mutated.Binding.OriginAddress = address
+		if mutated.Validate(time.Now().UTC()) == nil {
+			t.Fatalf("accepted invalid Unix address %q", address)
+		}
+	}
+}
+
+// An existing admission's reply may outlive its credential deadline; a new stream's may not.
+func TestReadAdmittedIngressDecisionAcceptsAnExpiredAdmissionButNewStreamsDoNot(t *testing.T) {
+	now := time.Now().UTC()
+	d, _ := ingressFixture(now)
+	later := d.ExpiresAt.Add(time.Second)
+	var wire bytes.Buffer
+	if err := WriteIngressDecision(&wire, d, now); err != nil {
+		t.Fatal(err)
+	}
+	frame := wire.Bytes()
+	if _, err := ReadAdmittedIngressDecision(bytes.NewReader(frame), later); err != nil {
+		t.Fatalf("admitted reply after its deadline: %v", err)
+	}
+	if _, err := ReadIngressDecision(bytes.NewReader(frame), later); !errors.Is(err, ErrIngressDenied) {
+		t.Fatalf("new stream after the deadline: %v", err)
+	}
+}

@@ -22,9 +22,7 @@ import (
 	"testing"
 	"time"
 
-	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
-
-	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
@@ -679,13 +677,13 @@ func TestClosingRuntimeCarrierSendsHostGoaway(t *testing.T) {
 		if err != nil {
 			t.Fatalf("no goaway before the carrier closed: %v", err)
 		}
-		if open.Kind != sharedprotocol.Goaway {
+		if open.Kind != connectorprotocol.Goaway {
 			_ = stream.Close()
 			continue
 		}
-		notice, err := sharedprotocol.ReadGoawayNotice(stream)
+		notice, err := connectorprotocol.ReadGoawayNotice(stream)
 		_ = stream.Close()
-		if err != nil || notice.Reason != sharedprotocol.GoawayHostDraining || notice.DrainDeadline < time.Now().Unix() || open.RouteID != "route-test" {
+		if err != nil || notice.Reason != connectorprotocol.GoawayHostDraining || notice.DrainDeadline < time.Now().Unix() || open.RouteID != "route-test" {
 			t.Fatalf("goaway = %+v %+v, %v", open, notice, err)
 		}
 		return
@@ -717,7 +715,7 @@ func TestGoawayCarrierServesUntilTheEdgeStopsOpeningStreams(t *testing.T) {
 			t.Fatalf("no goaway: %v", err)
 		}
 		_ = stream.Close()
-		if open.Kind == sharedprotocol.Goaway {
+		if open.Kind == connectorprotocol.Goaway {
 			request = open
 			break
 		}
@@ -786,7 +784,7 @@ func TestRetiringWorkerKeepsItsCarrierForHeldBrowserTerminals(t *testing.T) {
 					t.Fatalf("no goaway: %v", err)
 				}
 				_ = stream.Close()
-				if open.Kind == sharedprotocol.Goaway {
+				if open.Kind == connectorprotocol.Goaway {
 					request = open
 					break
 				}
@@ -865,7 +863,7 @@ func TestShutdownAfterTheHandoverServesWhileTheEdgeStillSendsRequests(t *testing
 			t.Fatalf("no goaway: %v", err)
 		}
 		_ = stream.Close()
-		if open.Kind == sharedprotocol.Goaway {
+		if open.Kind == connectorprotocol.Goaway {
 			request = open
 			break
 		}
@@ -945,7 +943,7 @@ func TestDrainEndsTheBrowserTerminalsItHoldsAfterTheHandover(t *testing.T) {
 			t.Fatalf("no goaway: %v", err)
 		}
 		_ = stream.Close()
-		if open.Kind == sharedprotocol.Goaway {
+		if open.Kind == connectorprotocol.Goaway {
 			close(sawGoaway)
 			break
 		}

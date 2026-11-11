@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
-	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"io"
 	"net"
 	"net/http"

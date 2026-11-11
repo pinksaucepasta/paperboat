@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 type authenticatedInspectorStub struct{ calls int }

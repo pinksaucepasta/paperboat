@@ -19,10 +19,10 @@ import (
 	"github.com/google/uuid"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
-	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 // PLAN 3a step 4.3: once every edge serves this agent's tunnels, the agent serves each engine

@@ -23,9 +23,7 @@ import (
 
 	"github.com/google/uuid"
 	lifetimeadmission "github.com/pinksaucepasta/paperboat/shared/admission"
-	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 
-	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcastserver"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
@@ -34,6 +32,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machinecontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/tunnelmanager"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
@@ -769,13 +768,13 @@ func (s *Service) connect(ctx context.Context, a admissionBinding, key string) (
 			Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: b.AccountID,
 			TunnelID: b.TunnelID, ConnectorID: b.ConnectorID, SessionID: b.SessionID,
 			ProcessGeneration: b.ProcessGeneration, Generation: b.ConfigGeneration,
-			RouteID: b.RouteID, RequestID: requestID, Kind: sharedprotocol.Goaway,
+			RouteID: b.RouteID, RequestID: requestID, Kind: connectorprotocol.Goaway,
 		})
 		if err != nil {
 			return
 		}
 		defer stream.Close()
-		if sharedprotocol.WriteGoawayNotice(stream, sharedprotocol.GoawayHostDraining, time.Now().Add(carrierDrainGrace)) != nil {
+		if connectorprotocol.WriteGoawayNotice(stream, connectorprotocol.GoawayHostDraining, time.Now().Add(carrierDrainGrace)) != nil {
 			return
 		}
 		// The edge closes the stream once it has the notice; wait for that (bounded by ctx) so the

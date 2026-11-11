@@ -36,6 +36,16 @@ func WriteIngressDecision(w io.Writer, d IngressDecision, now time.Time) error {
 }
 
 func ReadIngressDecision(r io.Reader, now time.Time) (IngressDecision, error) {
+	return readIngressDecision(r, now, false)
+}
+
+// ReadAdmittedIngressDecision decodes an authenticated current-authority reply for an existing
+// admission (see ValidateAdmitted). A new application stream must always use ReadIngressDecision.
+func ReadAdmittedIngressDecision(r io.Reader, now time.Time) (IngressDecision, error) {
+	return readIngressDecision(r, now, true)
+}
+
+func readIngressDecision(r io.Reader, now time.Time, admitted bool) (IngressDecision, error) {
 	var d IngressDecision
 	if r == nil {
 		return d, ErrIngressDenied
@@ -52,7 +62,7 @@ func ReadIngressDecision(r io.Reader, now time.Time) (IngressDecision, error) {
 	if _, err := io.ReadFull(r, p); err != nil {
 		return d, ingressReadFailure{cause: err}
 	}
-	if decodeStrict(p, &d) != nil || d.Validate(now) != nil {
+	if decodeStrict(p, &d) != nil || d.validate(now, admitted) != nil {
 		return IngressDecision{}, ErrIngressDenied
 	}
 	return d, nil

@@ -15,12 +15,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/connector"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/originhealth"
 	"github.com/pinksaucepasta/paperboat/internal/inspector"
-	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 const (
@@ -639,7 +638,7 @@ func buildRawRequest(request *http.Request, body []byte) []byte {
 // the cause, instead of closing the stream and leaving the edge to guess. The original error is kept.
 func writeOriginFailure(stream io.Writer, err error) error {
 	code := originHealthCode(originhealth.Classify(err), err)
-	_, _ = io.WriteString(stream, "HTTP/1.1 502 Bad Gateway\r\n"+sharedprotocol.OriginFailureHeader+": "+code+"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+	_, _ = io.WriteString(stream, "HTTP/1.1 502 Bad Gateway\r\n"+connectorprotocol.OriginFailureHeader+": "+code+"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
 	return err
 }
 
