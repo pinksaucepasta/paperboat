@@ -35,3 +35,7 @@ class DatabaseTests(unittest.TestCase):
     def test_database_dsn_keeps_the_server_and_changes_the_name(self):
         self.assertEqual(checks.database_dsn('postgres://u:p@localhost:5432/paperboat_test?sslmode=disable', 'paperboat_pr_3'),
                          'postgres://u:p@localhost:5432/paperboat_pr_3?sslmode=disable')
+
+    def test_database_names_satisfy_the_servers_isolation_guard(self):
+        for index in (0, 7, 31):
+            self.assertTrue(checks.database_name(index).endswith('_test'))
