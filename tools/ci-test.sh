@@ -41,7 +41,8 @@ branch="ci/$lane-$sha-$(date +%H%M%S)-$$"
 
 # A ci branch is deleted only once no run on it is queued or in progress: deleting it under a queued run
 # wasted that run (2026-11-05, GitHub took longer than this script waited to list a dispatched run).
-# Unknown (the API call failed) keeps the branch too; the next ci-test of this lane removes it.
+# Unknown (the API call failed) keeps the branch too. Only the branch this invocation created is ever
+# deleted: other ci/<lane>-* branches belong to concurrent runs (cross-platform dispatches) that still use them.
 active_runs() {
   gh run list --workflow lane-test.yml --branch "$1" --json status --jq '[.[] | select(.status != "completed")] | length' 2>/dev/null ||
     echo unknown
@@ -52,13 +53,9 @@ remove_branch() {
   if [ "$active" = 0 ]; then
     git push -q --no-verify origin --delete "$1" >/dev/null 2>&1 || true
   else
-    echo "ci-test: kept $1: its run is not finished ($active active); the next ci-test of this lane removes it" >&2
+    echo "ci-test: kept $1: its run is not finished ($active active); delete it by hand once the run ends" >&2
   fi
 }
-for old in $(git ls-remote --heads origin "ci/$lane-*" 2>/dev/null | awk '{sub("refs/heads/", "", $2); print $2}'); do
-  # A concurrent ci-test of this lane (its pid ends the name) may not have a listed run yet.
-  kill -0 "${old##*-}" 2>/dev/null || remove_branch "$old"
-done
 trap 'remove_branch "$branch"' EXIT
 
 # Same tree as HEAD in a child commit whose message skips the push-triggered run: the dispatch below
