@@ -193,10 +193,11 @@ type ConnectRequest struct {
 // ResolvedMachine is a machine catalog entry the caller resolved before
 // requesting a connection descriptor.
 type ResolvedMachine struct {
-	ID         string
-	Name       string
-	State      string
-	Generation uint64
+	ID            string
+	Name          string
+	State         string
+	Generation    uint64
+	EnvironmentID string // the daemon's snapshot carries it; an offline terminal needs it without asking Paperboat
 }
 
 // TerminalSessionCreate describes the durable terminal session the resolver

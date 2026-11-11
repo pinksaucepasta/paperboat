@@ -26,6 +26,7 @@ type fakeClient struct {
 	statusN           int
 	connectSessionIDs []string
 	statusSessionIDs  []string
+	connectErr        error // answered by every descriptor request when set
 }
 
 func terminalHost(id, name, state string) api.UserMachine {
@@ -56,6 +57,9 @@ func (f *fakeClient) nextStatus() (api.ConnectionDescriptor, error) {
 }
 
 func (f *fakeClient) UserMachineConnectionDescriptor(context.Context, string) (api.ConnectionDescriptor, error) {
+	if f.connectErr != nil {
+		return api.ConnectionDescriptor{}, f.connectErr
+	}
 	return f.nextConnect()
 }
 
@@ -76,6 +80,9 @@ func (f *fakeClient) UserMachineConnectionReadinessForSession(_ context.Context,
 func (f *fakeClient) UserMachineConnectionDescriptorWithSessionCreate(_ context.Context, machineID, name, idempotencyKey, cwd string) (api.ConnectionDescriptor, api.TerminalSession, error) {
 	f.createCWD = cwd
 	f.connectSessionIDs = append(f.connectSessionIDs, idempotencyKey)
+	if f.connectErr != nil {
+		return api.ConnectionDescriptor{}, api.TerminalSession{}, f.connectErr
+	}
 	descriptor, err := f.nextConnect()
 	if err != nil {
 		return api.ConnectionDescriptor{}, api.TerminalSession{}, err
