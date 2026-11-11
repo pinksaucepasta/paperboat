@@ -185,6 +185,9 @@ export class InboxUploadFailed extends Error {
   }
 }
 
+/** The file name in an Inbox path as the machine reports it (either kind of separator). It may differ from the uploaded name when the Inbox already held one. */
+export const inboxBasename = (path: string) => path.split(/[\\/]/).pop() ?? path
+
 /** The machine takes a few files per batch; the user's files go in as many batches as that needs. */
 export const splitBatches = <T>(files: T[], size = FILE_TRANSFER_MAX_BATCH_FILES): T[][] =>
   Array.from({ length: Math.ceil(files.length / size) }, (_, at) => files.slice(at * size, (at + 1) * size))
@@ -193,15 +196,15 @@ export const splitBatches = <T>(files: T[], size = FILE_TRANSFER_MAX_BATCH_FILES
  * Puts files in a machine's Inbox the way the terminal's upload does, with no terminal shown and nothing
  * typed: a shell session is opened only to carry the connection, and closed when the upload ends or is
  * canceled. It counts toward the plan's browser-terminal limit while it runs. More files than a batch holds go
- * in batches, one after another on the same connection, with one progress. `done` rejects with an
- * `InboxUploadFailed` whose message is safe to show.
+ * in batches, one after another on the same connection, with one progress. `done` resolves with where the machine
+ * published each file (its Inbox paths, in order) and rejects with an `InboxUploadFailed` whose message is safe to show.
  */
 export function uploadToInbox(
   machine: { id: string },
   workspace: string,
   files: File[],
   onProgress: (progress: InboxUploadProgress) => void,
-): { done: Promise<void>; cancel: () => void } {
+): { done: Promise<string[]>; cancel: () => void } {
   let canceled = false
   let cancelUpload: () => unknown = () => undefined
   let filesDone = 0
@@ -260,6 +263,7 @@ export function uploadToInbox(
       if (canceled) throw new FilePasteError("canceled")
       const runtime = browser
       let doneBytes = 0
+      const receipts: string[] = []
       const totalBytes = files.reduce((sum, file) => sum + file.size, 0)
       const uploader = new FilePasteUploader(
         () => ({ api: runtime, connectionID }),
@@ -278,9 +282,11 @@ export function uploadToInbox(
       for (const batch of splitBatches(files)) {
         if (canceled) throw new FilePasteError("canceled")
         await uploader.upload(batch)
+        receipts.push(...uploader.receipts)
         filesDone += batch.length
         doneBytes += batch.reduce((sum, file) => sum + file.size, 0)
       }
+      return receipts
     } catch (reason) {
       throw new InboxUploadFailed(canceled ? "Upload canceled." : describeUploadFailure(reason), filesDone)
     } finally {

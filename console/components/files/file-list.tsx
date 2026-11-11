@@ -277,15 +277,17 @@ function FileRow({
 
   // Each action is answered live by the machine; it appears when its endpoint is deployed.
   const entries: Entry[] = [
-    { kind: "item", label: "Share link…", icon: LinkIcon, onSelect: () => setDialog("share") },
+    ...(inboxLive.share
+      ? ([{ kind: "item", label: "Share link…", icon: LinkIcon, onSelect: () => setDialog("share") }] satisfies Entry[])
+      : []),
     ...(inboxLive.send
       ? ([
           { kind: "item", label: "Send to…", icon: PaperPlaneTiltIcon, onSelect: () => setDialog("send") },
         ] satisfies Entry[])
       : []),
+    ...((inboxLive.share || inboxLive.send) && inboxLive.remove ? ([{ kind: "separator" }] satisfies Entry[]) : []),
     ...(inboxLive.remove
       ? ([
-          { kind: "separator" },
           { kind: "item", label: "Delete", icon: TrashIcon, destructive: true, onSelect: () => setDialog("delete") },
         ] satisfies Entry[])
       : []),

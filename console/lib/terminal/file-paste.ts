@@ -283,6 +283,8 @@ function checkAborted(operation: FilePasteOperation): void {
 }
 
 export class FilePasteUploader {
+  /** Where the machine published the files of the last finished upload, in order (the Inbox paths). */
+  receipts: string[] = []
   private active: FilePasteOperation | null = null
   private readonly connection: () => FilePasteConnection | null
   private readonly onProgress: (progress: FilePasteProgress | null) => void
@@ -476,6 +478,7 @@ export class FilePasteUploader {
       }
       checkAborted(operation)
       operation.completed = true
+      this.receipts = paths
       return quoteRemotePaths(paths)
     } catch (reason) {
       const code = errorCode(reason)

@@ -3,7 +3,6 @@
 import { queryOptions } from "@tanstack/react-query"
 import { cursorPage } from "@/lib/cursor-pages"
 import { allPages, api, ApiError, idempotencyKey, send, type Data } from "@/lib/api"
-import { uploadFile } from "@/lib/upload"
 import { keepWithinWorkspace, queryKeys } from "@/lib/query-keys"
 
 /*
@@ -234,27 +233,6 @@ export function opensInBrowser(file: { name: string; type: string }) {
   )
 }
 
-/**
- * Shares one file as a preview: the browser sends it to the chosen machine (the server passes it
- * through and keeps nothing), the machine serves it at a new preview address, and the call answers
- * with the preview's ID. HTML, Markdown and other viewable files open in the browser; the rest
- * download.
- */
-export function shareFile(
-  input: { file: File; machineId: string; workspace: string; access: Preview["access_mode"]; hours: number },
-  onProgress: (fraction: number) => void,
-): { done: Promise<string>; cancel: () => void } {
-  const query = new URLSearchParams({
-    workspace: input.workspace,
-    machine: input.machineId,
-    name: input.file.name,
-    access_mode: input.access,
-    expires_at: new Date(Date.now() + input.hours * 3_600_000).toISOString(),
-  })
-  const upload = uploadFile<OperationOrResource>(`previews/files?${query}`, input.file, onProgress)
-  return { done: upload.done.then(resourceId), cancel: upload.cancel }
-}
-
 export const pauseTunnel = (tunnel: Tunnel) => change(`${tunnelPath(tunnel.id)}/pause`, "POST", { etag: tunnel.etag })
 export const resumeTunnel = (tunnel: Tunnel) => change(`${tunnelPath(tunnel.id)}/resume`, "POST", { etag: tunnel.etag })
 export const deleteTunnel = (tunnel: Tunnel) => change(tunnelPath(tunnel.id), "DELETE", { etag: tunnel.etag })
@@ -320,7 +298,7 @@ export const urlOf = (host: string) => (/^[a-z]+:\/\//.test(host) ? host : `http
 /** Where traffic goes on the machine, written the way people type it: `localhost:3000`. */
 export function originLabel(origin: { scheme: string; address: string }) {
   if (origin.scheme === "unix") return `unix:${origin.address}`
-  // A shared file: the machine serves the file itself (`shareFile`).
+  // A shared file: the machine serves the file itself (a shared Inbox file).
   if (origin.scheme === "file") return origin.address.split("/").pop() ?? origin.address
   const address = origin.address.replace(/^127\.0\.0\.1(?=:)/, "localhost")
   return origin.scheme === "http" ? address : `${origin.scheme}://${address}`

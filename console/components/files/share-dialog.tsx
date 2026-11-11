@@ -4,11 +4,13 @@ import { FileIcon, UploadSimpleIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { useMachines, useWorkspace, type Machine } from "@/lib/api"
-import { shareInboxFile, type InboxFile } from "@/lib/files"
+import { inboxLive, shareInboxFile, shareNewFile, type InboxFile } from "@/lib/files"
 import { formatBytes } from "@/lib/format"
-import { opensInBrowser, shareFile, type Preview } from "@/lib/tunnels"
+import { opensInBrowser, type Preview } from "@/lib/tunnels"
 import { cn } from "@/lib/utils"
 import { Choice } from "@/components/choice"
+import { canReceive } from "@/components/files/file-dialogs"
+import { canHostTerminal } from "@/components/terminal/new-terminal"
 import { canPreview } from "@/components/tunnels/machine-choice"
 import { Starting } from "@/components/tunnels/new-preview"
 import { Button } from "@/components/ui/button"
@@ -35,12 +37,13 @@ type Access = Preview["access_mode"]
  */
 type Destination = { kind: "machine"; id: string; label: string }
 const destinationValue = (destination: Destination) => `${destination.kind}:${destination.id}`
+// A machine hosts a share when it can serve previews, receive files and carry the terminal connection the upload rides.
 const destinationsOf = (machines: Machine[]): Destination[] =>
-  machines.filter(canPreview).map((machine) => ({ kind: "machine", id: machine.id, label: machine.alias }))
+  machines.filter((machine) => canPreview(machine) && canReceive(machine) && canHostTerminal(machine)).map((machine) => ({ kind: "machine", id: machine.id, label: machine.alias }))
 
 type HostInput = { file: File; workspace: string; access: Access; hours: number }
-const host: Record<Destination["kind"], (destination: Destination, input: HostInput, onProgress: (fraction: number) => void) => ReturnType<typeof shareFile>> = {
-  machine: (destination, input, onProgress) => shareFile({ ...input, machineId: destination.id }, onProgress),
+const host: Record<Destination["kind"], (destination: Destination, input: HostInput, onProgress: (fraction: number) => void) => ReturnType<typeof shareNewFile>> = {
+  machine: (destination, input, onProgress) => shareNewFile({ ...input, machine: destination }, onProgress),
 }
 
 const rememberedKey = "paperboat:share-file-destination"
@@ -67,6 +70,7 @@ export type ShareSource =
 
 export function ShareFileButton({ machine }: { machine?: Machine }) {
   const [open, setOpen] = useState(false)
+  if (!inboxLive.share) return null
   return (
     <>
       <Button variant="secondary" size="lg" onClick={() => setOpen(true)}>

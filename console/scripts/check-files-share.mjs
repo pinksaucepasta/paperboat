@@ -1,6 +1,9 @@
 // Share a file from the Files page. Signed-in console, live machine:
 //   STATE=<playwright storage state> CHROME=<Chromium> CONSOLE_ORIGIN=<console origin> [PW_MODULE=<playwright-core index.mjs>]
 //   [MACHINE=<alias>] [SHOTS=<dir for screenshots>] node check-files-share.mjs
+// SHARE_LIVE=1 once `inboxLive.share` is on (after lane W24's server part): then everything below runs. Without it the
+// check asserts the share entry points are still hidden (Share a file on Files and Choose machine, Share link… in a row
+// menu) and stops.
 // Layout (needs no hosting): a machine's Files page has "Share a file" next to "Send files"; the Choose machine page
 // has both too; Previews has no "Share a file" and no page-wide drop; a file's row menu has "Share link…"; the dialog
 // opens with one defaults line (Hosted on <machine> · Anyone with the link · 24 hours) and its drop zone.
@@ -25,6 +28,20 @@ if (!machine) throw new Error(`${alias} is not online`)
 const shot = (name) => (shots ? page.screenshot({ path: `${shots}/${name}.png` }) : undefined)
 const dialog = page.getByRole("dialog")
 const stamp = Date.now()
+
+if (process.env.SHARE_LIVE !== "1") {
+  const hidden = (p) => p.getByRole("button", { name: "Share a file" }).count().then((count) => count === 0)
+  log(await hidden(page), "Choose machine: Share a file is hidden until sharing is switched on")
+  await page.goto(`${origin}/files?machine=${machine.id}`, { waitUntil: "networkidle", timeout: 120000 })
+  log(await hidden(page), "a machine's Files page: Share a file is hidden")
+  const menu = page.locator("tbody tr").first().getByRole("button", { name: /^Actions for / })
+  await menu.click()
+  await page.getByRole("menuitem", { name: /^Delete/ }).waitFor({ timeout: 8000 }).catch(() => {})
+  log((await page.getByRole("menuitem", { name: /^Share link/ }).count()) === 0, "a file's row menu has no Share link… yet")
+  await browser.close()
+  console.log(failed ? `${failed} failed` : "all passed (sharing is off)")
+  process.exit(failed ? 1 : 0)
+}
 
 // Layout
 await shot("share-choose-machine")

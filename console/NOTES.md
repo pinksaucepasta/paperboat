@@ -310,17 +310,17 @@ inspects, changes and stops them (`lib/tunnels.ts`, `components/tunnels/`). Gaps
   `console_<random>` session ID).
 - **Tunnel address is not editable.** The server patches only `name`, `access_mode` and `expires_at`
   (`TunnelPatchRequest`); the address is generated, so the console renames the tunnel only.
-- **Share a file (drop.new-style) is UI-only for now, and lives on the Files page.** Files has "Share a file" next
-  to Send files and "Share link…" in each Inbox row's menu (`components/files/share-dialog.tsx`, one dialog for both);
-  the links are previews, so Previews keeps listing them. Two calls have no server route yet: a new file is sent with
-  `POST /v1/previews/files?workspace=&machine=&name=&access_mode=&expires_at=` (raw body, Idempotency-Key; answers a
-  `PreviewLease` or operation like `POST /v1/previews`), an Inbox file with
-  `POST /v1/machines/{id}/inbox/{file_id}/share` (`access_mode`, `expires_at`). Both need the machine to serve one
-  file as a preview (target `{ scheme: "file", address: <inbox path> }`: inline for HTML, Markdown (rendered), PDF,
-  images and text, `Content-Disposition: attachment` for the rest; deleted from the Inbox when the preview ends), a
-  `file` origin scheme in the preview schema (today `http | https | h2c | unix | tcp`) and a size limit per
-  workspace. Where a new file is hosted is `Destination` in the share dialog: machines now, "Team storage" later as
-  one more kind.
+- **Share a file (drop.new-style) lives on the Files page and waits for lane W24's server part (`inboxLive.share`).**
+  Files has "Share a file" next to Send files and "Share link…" in each Inbox row's menu (`components/files/share-dialog.tsx`,
+  one dialog for both); the links are previews, so Previews keeps listing them. The server stays out of the file's
+  path: a new file is uploaded into the chosen machine's Inbox over the terminal's encrypted connection
+  (`uploadToInbox`, the same as Send files; the machine must host terminals, receive files and serve previews), the
+  Inbox file is found by the name the machine published, then `POST /v1/machines/{id}/inbox/{file_id}/share`
+  (`access_mode`, `expires_at`; answers a preview lease or operation) shares it. "Share link…" on an existing Inbox
+  file calls the same endpoint. The machine serves the one file as a preview (inline for HTML, Markdown, PDF, images
+  and text, `Content-Disposition: attachment` for the rest; the preview ends with the link). Both buttons and the menu
+  item stay hidden until `inboxLive.share` is switched on after that deploy. Where a new file is hosted is
+  `Destination` in the share dialog: machines now, "Team storage" later as one more kind.
 - **Public hostnames** are the console's name for a route plus, for your own domain, its domain
   binding; adding/removing one does both calls. Removing a domain then a route is two requests,
   so a failure in between leaves the route; the row stays and can be removed again.

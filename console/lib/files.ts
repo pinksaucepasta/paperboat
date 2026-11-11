@@ -3,6 +3,7 @@
 import { queryOptions } from "@tanstack/react-query"
 import { queryKeys } from "@/lib/query-keys"
 import { api, apiAction, idempotencyKey } from "@/lib/api"
+import { inboxBasename, uploadToInbox } from "@/lib/terminal/inbox-upload"
 import { resourceId, type OperationOrResource } from "@/lib/tunnels"
 
 /*
@@ -14,7 +15,7 @@ import { resourceId, type OperationOrResource } from "@/lib/tunnels"
  */
 
 /** Which Inbox endpoints the deployed server answers. Flip one when its deploy is logged. */
-export const inboxLive = { content: true, remove: true, send: false } as const
+export const inboxLive = { content: true, remove: true, send: false, share: false } as const
 
 export type InboxFile = {
   id: string
@@ -61,12 +62,14 @@ export const fileKeys = {
   requests: queryKeys.inboxRequests,
 }
 
+const listInbox = (machineId: string, workspace: string, signal?: AbortSignal) =>
+  api<InboxListing>(`${inboxPath(machineId)}?${new URLSearchParams({ workspace })}`, { signal })
+
 /** `GET /v1/machines/{id}/inbox`: one machine's Inbox, read live from the machine, newest first. */
 export const inboxQuery = (machineId: string, workspace: string) =>
   queryOptions({
     queryKey: [...fileKeys.inboxes, machineId],
-    queryFn: ({ signal }) =>
-      api<InboxListing>(`${inboxPath(machineId)}?${new URLSearchParams({ workspace })}`, { signal }),
+    queryFn: ({ signal }) => listInbox(machineId, workspace, signal),
     // The machine answers live, so poll gently and let a 409 machine_offline stand.
     refetchInterval: 30_000,
     retry: false,
@@ -119,3 +122,26 @@ export const decideRequest = (request: InboxRequest, decision: "approve" | "decl
   post(`team-inbox/requests/${encodeURIComponent(request.request_id)}/${decision}`, {
     expected_generation: request.decision_generation,
   })
+
+/**
+ * Shares a new file as a link without the server in the file's path: it goes into the machine's Inbox over
+ * the terminal's encrypted connection (the same upload as Send files), then the Inbox file is shared like any
+ * other. Answers the new preview's ID. `steps` are the three calls, so a test can stand in for them.
+ */
+export function shareNewFile(
+  input: { machine: { id: string }; workspace: string; file: File; access: "public" | "private"; hours: number },
+  onProgress: (fraction: number) => void,
+  steps = { upload: uploadToInbox, list: listInbox, share: shareInboxFile },
+): { done: Promise<string>; cancel: () => void } {
+  const upload = steps.upload(input.machine, input.workspace, [input.file], ({ transferredBytes, totalBytes }) =>
+    onProgress(totalBytes ? transferredBytes / totalBytes : 0),
+  )
+  const done = upload.done.then(async ([receipt]) => {
+    // The machine may have renamed it ("name (2).html") when the Inbox already held that name.
+    const name = receipt ? inboxBasename(receipt) : input.file.name
+    const item = (await steps.list(input.machine.id, input.workspace)).items.find((entry) => entry.name === name)
+    if (!item) throw new Error(`${input.file.name} reached the machine but isn't in its Inbox yet. Share it from its row in a moment.`)
+    return steps.share(input.machine.id, item.id, { access: input.access, hours: input.hours })
+  })
+  return { done, cancel: upload.cancel }
+}
