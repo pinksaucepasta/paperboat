@@ -25,10 +25,12 @@ type ledger struct {
 	mu      sync.Mutex
 	Sent    map[string]string `json:"sent"`
 	Deleted map[string]string `json:"deleted,omitempty"`
+	// Archived is how many leading segments of each recording are in the team bucket.
+	Archived map[string]int `json:"archived,omitempty"`
 }
 
 func openLedger(path string) (*ledger, error) {
-	l := &ledger{path: path, Sent: map[string]string{}, Deleted: map[string]string{}}
+	l := &ledger{path: path, Sent: map[string]string{}, Deleted: map[string]string{}, Archived: map[string]int{}}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return l, nil
@@ -43,6 +45,9 @@ func openLedger(path string) (*ledger, error) {
 	}
 	if l.Deleted == nil {
 		l.Deleted = map[string]string{}
+	}
+	if l.Archived == nil {
+		l.Archived = map[string]int{}
 	}
 	return l, nil
 }
@@ -136,6 +141,12 @@ func (c *Controller) report() {
 		delete(c.ledger.Sent, id)
 		delete(c.ledger.Deleted, id)
 		changed = true
+	}
+	for id := range c.ledger.Archived {
+		if !present[id] {
+			delete(c.ledger.Archived, id) // its files are gone; the bucket keeps its own copy
+			changed = true
+		}
 	}
 	for id := range c.ledger.Deleted {
 		if c.ledger.Sent[id] == "" {

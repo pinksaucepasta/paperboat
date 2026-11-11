@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -114,6 +115,9 @@ func (f *fakeSessions) StopRecording(id, actor, reason string) (recordings.Meta,
 	return recordings.Meta{}, nil
 }
 func (f *fakeSessions) Recordings() ([]recordings.Meta, error) { return f.metas, nil }
+func (f *fakeSessions) RecordingSegment(id string, index uint32) ([]byte, error) {
+	return []byte(fmt.Sprintf("segment %s %d", id, index)), nil
+}
 func (f *fakeSessions) PruneRecordings(time.Duration, int64) ([]recordings.Meta, error) {
 	return f.pruned, nil
 }
