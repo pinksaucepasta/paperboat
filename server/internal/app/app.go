@@ -670,6 +670,7 @@ func New(opts Options) (*App, error) {
 	operatorActions := operatoractions.NewService(store)
 	operatorActions.ConfigureMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
 	abuseReports := abusereports.New(store)
+	abuseReports.ConfigureMail(opts.Config.Mail, opts.Config.Secrets.ResendAPIKey != "")
 	workspaceBilling.ConfigureTeamTrial(opts.Config.Billing.TeamTrialDays)
 	planlimits.Configure(opts.Config.Billing.Limits, consoleBillingURL(opts.Config.Mail.ConsoleOrigin))
 	planlimits.ConfigureSDKRates(opts.Config.RateLimits)

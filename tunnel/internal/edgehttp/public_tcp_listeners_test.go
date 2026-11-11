@@ -264,3 +264,14 @@ func TestPublicTCPListenersRefusePortsOutsideTheRange(t *testing.T) {
 		t.Fatalf("listeners=%d failures=%d, want none bound and 3 reported", bound, len(failures))
 	}
 }
+
+func TestSlotsUsedPercent(t *testing.T) {
+	for _, c := range []struct {
+		used, capacity int
+		want           uint64
+	}{{0, 512, 0}, {410, 512, 80}, {512, 512, 100}, {3, 0, 0}} {
+		if got := slotsUsedPercent(c.used, c.capacity); got != c.want {
+			t.Errorf("slotsUsedPercent(%d, %d) = %d, want %d", c.used, c.capacity, got, c.want)
+		}
+	}
+}

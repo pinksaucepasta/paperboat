@@ -8,6 +8,8 @@
 #   CANARY_PORT          origin port on A serving ~/canary-www (default 18099)
 #   PB                   pb path on the machines (default .local/bin/pb, relative to the user's home)
 #   PROBE_STEP_TIMEOUT   seconds per step (default 45)
+#   CANARY_EDGES         every managed edge address (space separated); each must serve the canary tunnel
+#                        directly, so an edge that dropped out of DNS or was null-routed still fails a step
 set -uo pipefail
 a=${CANARY_A:?} b=${CANARY_B:?} tunnel=${CANARY_TUNNEL_URL:?} port=${CANARY_PORT:-18099}
 pb=${PB:-.local/bin/pb} limit=${PROBE_STEP_TIMEOUT:-45}
@@ -64,6 +66,14 @@ preview() { # a new preview of A's origin, fetched from here without credentials
   [ $rc = 0 ] || { cat "$tmp/fetch" >&2; return 1; }
 }
 tunnel() { fetch_all "$tunnel"; }
+edges() { # fetch_all only sees the addresses in DNS; a dead edge leaves DNS within its TTL and would pass
+  local host=${tunnel#*://} ip bad=; host=${host%%/*}; host=${host%%:*}
+  for ip in ${CANARY_EDGES:?}; do
+    curl -fsS --max-time 10 --resolve "$host:443:$ip" "$tunnel/" >"$tmp/got" 2>"$tmp/curl" && want 2>>"$tmp/curl" ||
+      bad="$bad edge $ip: $(tail -c 120 "$tmp/curl" | tr '\n' ' ')"
+  done
+  [ -z "$bad" ] || { echo "$bad" >&2; return 1; }
+}
 
 step origin origin
 step exec_a_to_b exec_ab
@@ -72,4 +82,5 @@ step ssh_a_to_b ssh_ab
 step send_a_to_b send_ab
 step preview preview
 step tunnel tunnel
+[ -z "${CANARY_EDGES:-}" ] || step edges edges
 exit $failed

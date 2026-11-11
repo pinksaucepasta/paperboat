@@ -63,6 +63,7 @@ func TestSubmitListAndRetentionOnPostgres(t *testing.T) {
 	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
 	s := New(store)
 	s.now = func() time.Time { return now }
+	s.ConfigureMail(config.TransactionalMail{From: "notices@example.test", AbuseMailbox: "abuse@mail.example.test"}, true)
 	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.abuse_reports(id,hostname,url,reason,created_at) VALUES('abuse_00000000-0000-4000-8000-'||lpad((extract(epoch from now())*1000)::bigint::text,12,'0'),$1,'https://'||$1,'spam',$2)`, host, now.Add(-Retention-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
@@ -79,8 +80,23 @@ func TestSubmitListAndRetentionOnPostgres(t *testing.T) {
 	if err != nil || len(reports) != 2 || reports[0].ID != second.ID || reports[1].ID != first.ID || reports[0].Details != "drops an exe" {
 		t.Fatalf("reports=%+v err=%v (the expired one must be gone)", reports, err)
 	}
+	// Every report alerts the abuse mailbox once, with reporter text escaped.
+	t.Cleanup(func() {
+		_, _ = store.SQL().ExecContext(ctx, `DELETE FROM paperboat.transactional_mail_outbox WHERE mail_id = ANY($1)`, []string{"abuse-report:" + first.ID, "abuse-report:" + second.ID})
+	})
+	var alerts int
+	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.transactional_mail_outbox WHERE mail_id = ANY($1) AND payload->'to'->>0='abuse@mail.example.test'`, []string{"abuse-report:" + first.ID, "abuse-report:" + second.ID}).Scan(&alerts); err != nil || alerts != 2 {
+		t.Fatalf("alerts=%d err=%v", alerts, err)
+	}
 	older, err := s.List(ctx, host, reports[0].CreatedAt, 10)
 	if err != nil || len(older) != 1 || older[0].ID != first.ID {
 		t.Fatalf("page before the newest=%+v err=%v", older, err)
+	}
+}
+
+func TestAlertMessageEscapesReporterText(t *testing.T) {
+	m := alertMessage(config.TransactionalMail{From: "n@example.test", AbuseMailbox: "abuse@mail.example.test"}, Report{ID: "abuse_x", Hostname: "a.example.test", URL: "https://a.example.test/<script>", Reason: "phishing", Details: "<b>hi</b>", ReporterEmail: "r@example.test"})
+	if strings.Contains(m.HTML, "<script>") || strings.Contains(m.HTML, "<b>hi") || m.To[0] != "abuse@mail.example.test" || !strings.Contains(m.Subject, "a.example.test") {
+		t.Fatalf("alert = %+v", m)
 	}
 }

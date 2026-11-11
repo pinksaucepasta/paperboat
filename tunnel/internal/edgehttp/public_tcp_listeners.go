@@ -26,7 +26,9 @@ type PublicTCPAuthority interface {
 }
 
 type PublicTCPListenerConfig struct {
-	OnFailure             func(context.Context, string, error)
+	OnFailure func(context.Context, string, error)
+	// SlotsUsed, when set, gets the percent of admission slots in use on every reconcile tick.
+	SlotsUsed             func(percent uint64)
 	PreviewHTTPSAuthority func(context.Context, string) error
 	// RouteGrace is how long a TLS name that is not admitted yet waits to be (after a handover takeover); nil or 0 waits not.
 	RouteGrace func() time.Duration
@@ -166,6 +168,9 @@ func (p *PublicTCPListeners) run(done chan struct{}) {
 		case <-p.ctx.Done():
 			return
 		case <-ticker.C:
+			if p.cfg.SlotsUsed != nil {
+				p.cfg.SlotsUsed(slotsUsedPercent(len(p.connections), cap(p.connections)))
+			}
 			ctx, cancel := context.WithTimeout(p.ctx, p.cfg.Interval)
 			p.observe(ctx, "public_tcp_reconcile", p.reconcile(ctx))
 			cancel()
@@ -376,4 +381,11 @@ func (p *PublicTCPListeners) WrapTLSListener(listener net.Listener, httpsHostnam
 	shared.holdableName = p.cfg.HoldableName
 	p.sharedTLS = shared
 	return shared, nil
+}
+
+func slotsUsedPercent(used, capacity int) uint64 {
+	if capacity <= 0 {
+		return 0
+	}
+	return uint64(used * 100 / capacity)
 }

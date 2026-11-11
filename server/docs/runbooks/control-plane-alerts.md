@@ -23,6 +23,9 @@ collectors; never expose or route either endpoint publicly.
 | `paperboat_runtime_restart_total` | repeated restarts within 5 minutes | sustained restart loop | Inspect boot ID/generation, service exit status, and bounded logs. |
 | `paperboat_runtime_renewal_failures_total` | increasing for two credential refresh attempts | credential expiry without recovery | Check proof freshness, active helper key, revocation, and server signing-key health. |
 | `paperboat_runtime_connector_recovery_seconds` | above 60 seconds | sustained unavailability after network restoration | Check interface/DNS wakeups, admission, QUIC, and TCP/TLS fallback. |
+| `paperboat_edge_admission_slots_used_percent` (each edge) | above 80 for 2 minutes | 95 or more for 1 minute | A flood or one hot name: check the edge log for `tls_handshake_rate` and `tls_name_share` refusals and `edge_refusals` for the names; per-address and per-name limits already shed it. If it is volumetric, check the provider's DDoS status and move the account pairs off a null-routed edge. |
+| Canary step `edges` (`tools/probe/canary.py`, coordinator thread) | red two runs in a row | red for 10 minutes | An edge does not serve the canary tunnel at its own address: host down, provider null-route or firewall. DNS has already dropped it (60 s TTL); restore it or replace it in the managed pool. |
+| Abuse report (mail to `mail.abuse_mailbox`) | any | phishing or malware not acted on within 1 hour in working hours | Open the link with care, `GET /v1/admin/abuse-reports?hostname=`, and take it down with `POST /v1/admin/publications/{hostname}/block` (Operator-Reason = the report id). 24 hours worst case. |
 | `paperboat_runtime_update_rollbacks_total` | greater than 0 | repeated for the same release | Stop rollout and inspect paired signatures, journal stage, worker health, and preserved previous versions. |
 
 Connector incidents are scoped by `(machine_id, connector_id, connector_generation)`.

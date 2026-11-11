@@ -495,7 +495,9 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		}
 		return false
 	}
-	publicTCP, err := edgehttp.NewPublicTCPListeners(edgehttp.PublicTCPListenerConfig{RouteGrace: routeGrace, HoldableName: holdableName, OnFailure: func(ctx context.Context, phase string, cause error) {
+	publicTCP, err := edgehttp.NewPublicTCPListeners(edgehttp.PublicTCPListenerConfig{SlotsUsed: func(percent uint64) {
+		_ = typedMetrics.SetGauge(edgetelemetry.MetricAdmissionSlotsUsed, nil, percent)
+	}, RouteGrace: routeGrace, HoldableName: holdableName, OnFailure: func(ctx context.Context, phase string, cause error) {
 		switch phase {
 		case "public_tcp_reconcile", "public_tcp_listener", "public_tcp_stream", "tls_dispatch":
 			reporter.ObserveFailure(ctx, phase, cause)

@@ -246,7 +246,9 @@ origin) and `canary-b` (container `pb-canary-b` on anvit). Oracle because the de
 the gate reads the canary's state locally, and it is not the control-plane host, so a server outage cannot
 take the prober down with it. Results: `~/.local/state/paperboat-canary/` (`history.jsonl`, the last 1440
 runs; `status.json`; `alerts.log`), shown as the first card on the progress page and at its `/canary.json`.
-A step that fails two runs in a row sends one line to the coordinator thread (`t3 thread send`,
+With `CANARY_EDGES` (every managed edge address, space separated, in the same env file) the `edges` step also
+fetches the canary tunnel at each edge's own address, so an edge that DNS already dropped (heartbeat lost,
+provider null-route) still turns the canary red. A step that fails two runs in a row sends one line to the coordinator thread (`t3 thread send`,
 `CANARY_ALERT_THREAD` in the mode-0600 `~/.config/paperboat-canary.env`) and its first pass sends one
 recovery line; both also go to `alerts.log`. Set the machines up with `tools/probe/canary-setup.sh`; keep
 them on a `main` build (copy the binary to `/home/pbt/pb` in the container, `./pb install` as `pbt`).

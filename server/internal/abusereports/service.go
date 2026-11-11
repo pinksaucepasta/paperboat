@@ -8,13 +8,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"net/url"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/transactionalmail"
 )
 
 // ErrInvalid reports a report the server cannot accept; the message says which field.
@@ -44,12 +47,21 @@ type Report struct {
 }
 
 type Service struct {
-	store *db.DB
-	now   func() time.Time
+	store       *db.DB
+	now         func() time.Time
+	mail        config.TransactionalMail
+	mailEnabled bool
 }
 
 func New(store *db.DB) *Service {
 	return &Service{store: store, now: func() time.Time { return time.Now().UTC() }}
+}
+
+// ConfigureMail turns on the operator alert: every report is mailed to the abuse mailbox
+// (mail.abuse_mailbox) in the same transaction, so no report goes unseen. Without mail or a mailbox,
+// reports are only stored.
+func (s *Service) ConfigureMail(policy config.TransactionalMail, enabled bool) {
+	s.mail, s.mailEnabled = policy, enabled
 }
 
 // validate checks a report and returns its normalized form and hostname.
@@ -98,6 +110,11 @@ func (s *Service) Submit(ctx context.Context, in Input) (Report, error) {
 			report.ID, report.Hostname, report.URL, report.Reason, report.Details, report.ReporterEmail, report.CreatedAt); err != nil {
 			return err
 		}
+		if s.mailEnabled && s.mail.AbuseMailbox != "" {
+			if _, err := transactionalmail.EnqueueOnceTx(ctx, tx, "abuse-report:"+report.ID, alertMessage(s.mail, report)); err != nil {
+				return err
+			}
+		}
 		_, err := tx.Exec(ctx, `DELETE FROM abuse_reports WHERE created_at<$1`, report.CreatedAt.Add(-Retention))
 		return err
 	})
@@ -131,4 +148,18 @@ WHERE ($1='' OR hostname=$1) AND created_at<$2 ORDER BY created_at DESC, id DESC
 		reports = append(reports, r)
 	}
 	return reports, rows.Err()
+}
+
+// alertMessage is the operator's copy of one report. Every reporter-supplied value is escaped.
+func alertMessage(policy config.TransactionalMail, r Report) transactionalmail.Message {
+	reporter := "not given"
+	if r.ReporterEmail != "" {
+		reporter = html.EscapeString(r.ReporterEmail)
+	}
+	return transactionalmail.Message{
+		From: policy.From, To: []string{policy.AbuseMailbox},
+		Subject: "Abuse report (" + r.Reason + "): " + r.Hostname,
+		HTML: fmt.Sprintf("<p>Report %s, %s UTC.</p><p>Link: %s<br>Reason: %s<br>Reporter: %s</p><pre>%s</pre><p>Take it down: POST /v1/admin/publications/%s/block with Operator-Reason %s.</p>",
+			r.ID, r.CreatedAt.Format("2006-01-02 15:04"), html.EscapeString(r.URL), r.Reason, reporter, html.EscapeString(r.Details), html.EscapeString(r.Hostname), r.ID),
+	}
 }

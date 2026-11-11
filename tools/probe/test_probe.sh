@@ -28,4 +28,7 @@ if out=$(FAKE_FAIL=1 "$here/probe.sh"); then echo "broken exec passed: $out"; ex
 grep -q '"step":"exec_a_to_b","ok":false,"seconds":[0-9]*,"error":"machine unreachable"' <<<"$out"
 grep -q '"step":"exec_b_to_a","ok":false' <<<"$out"
 [ "$(grep -c '"ok":true' <<<"$out")" = 5 ] || { echo "broken exec run: $out"; exit 1; }
+# Every configured edge is fetched directly; one that does not answer fails the edges step only.
+out=$(CANARY_EDGES="127.0.0.1" "$here/probe.sh") || { echo "edges run failed: $out"; exit 1; }
+grep -q '"step":"edges","ok":true' <<<"$out" || { echo "edges step missing: $out"; exit 1; }
 echo "probe self-check ok"
