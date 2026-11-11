@@ -53,6 +53,10 @@ func normalizeList(name string, entries []string) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%w: %s entry %q is not an IP address or CIDR", ErrInvalid, name, entry)
 		}
+		// An allow list of /0 admits one address family only, so it never means "allow everyone"; leave the list empty for that.
+		if name == "allow" && prefix.Bits() == 0 {
+			return nil, fmt.Errorf("%w: allow entry %q matches every address of its family; remove the allow list to allow everyone", ErrInvalid, entry)
+		}
 		if s := prefix.String(); !slices.Contains(out, s) {
 			out = append(out, s)
 		}

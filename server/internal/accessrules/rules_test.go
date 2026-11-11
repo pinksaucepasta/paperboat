@@ -13,8 +13,8 @@ func TestNormalizeMasksDedupesAndBounds(t *testing.T) {
 		t.Fatalf("normalized = %+v %v", got, err)
 	}
 	for name, bad := range map[string]Rules{
-		"text": {Allow: []string{"office"}},
-		"zone": {Deny: []string{"fe80::1%eth0"}},
+		"text":        {Allow: []string{"office"}},
+		"allow /0 v4": {Allow: []string{"0.0.0.0/0"}}, "allow /0 v6": {Allow: []string{"::/0"}}, "zone": {Deny: []string{"fe80::1%eth0"}},
 		"too many": {Allow: func() []string {
 			out := make([]string, MaxEntries+1)
 			for i := range out {
@@ -26,5 +26,12 @@ func TestNormalizeMasksDedupesAndBounds(t *testing.T) {
 		if _, err := Normalize(bad); !errors.Is(err, ErrInvalid) {
 			t.Errorf("%s accepted: %v", name, err)
 		}
+	}
+}
+
+func TestNormalizeKeepsDenyOfAWholeFamily(t *testing.T) {
+	got, err := Normalize(Rules{Deny: []string{"0.0.0.0/0", "::/0"}})
+	if err != nil || strings.Join(got.Deny, ",") != "0.0.0.0/0,::/0" {
+		t.Fatalf("deny /0 = %+v %v", got, err)
 	}
 }
