@@ -449,10 +449,12 @@ func updateWithProgress(command *cobra.Command, ctx context.Context, update func
 		case <-ctx.Done():
 			// The control client closes its connection on cancellation, so its result follows at once; a call
 			// that does not is abandoned after the grace instead of holding the CLI past its deadline.
+			grace := time.NewTimer(updateCancelGrace)
+			defer grace.Stop()
 			select {
 			case finished := <-resultCh:
 				return finished.response, errors.Join(finished.err, ctx.Err())
-			case <-time.After(updateCancelGrace):
+			case <-grace.C:
 				return updated.ControlResponse{}, ctx.Err()
 			}
 		case <-ticker.C:
