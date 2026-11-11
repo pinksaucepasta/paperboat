@@ -8,6 +8,8 @@ name: Terminal drain
 
 on:
   push:
+    # main only: with no branch filter every lane-submit push that touched these paths started a run (2026-11-12 runner starvation).
+    branches: [main]
     paths:
       - 'tunnel/**'
       - 'cli/internal/hostruntime/**'
@@ -24,8 +26,8 @@ permissions:
 
 concurrency:
   group: terminal-drain-${{ github.ref }}
-  # On main the run in progress finishes (the newest waiting push is kept), as in server-ci.yml and lane-test.yml.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # Only the newest push is tested: the merge queue already tested each PR, the health run needs the tip.
+  cancel-in-progress: true
 
 jobs:
   drain:

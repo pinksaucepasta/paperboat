@@ -9,7 +9,8 @@ name: End-to-end
 # and runs only on r21-e2e* pushes and dispatch.
 on:
   push:
-    branches: [main, 'r21-e2e*']
+    # Not main: the merge queue ran End-to-end core on exactly these commits before they landed.
+    branches: ['r21-e2e*']
     paths:
       - 'server/**'
       - 'tunnel/**'
