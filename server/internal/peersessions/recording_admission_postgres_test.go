@@ -107,6 +107,20 @@ func TestRecordingReplayAdmissionReachesBothEndpointsOnPostgres(t *testing.T) {
 			t.Fatalf("recording scopes = %d, want one per recording", scopes)
 		}
 	}
+	// Past the ticket's expiry a replay the endpoint still runs keeps its scope; one it does not run loses it.
+	execute(`UPDATE paperboat.recording_native_admissions SET expires_at=$2 WHERE recording_id=$1`, admissionID, now.Add(-time.Minute))
+	for _, endpoint := range []string{cli, machine} {
+		running, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "recording_running_" + suffix, UserID: account, EndpointID: endpoint, AdmittedScopes: live})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertNetworkScope(t, running.Configuration, "recording", admissionID, "recording")
+		idle, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "recording_idle_" + suffix, UserID: account, EndpointID: endpoint})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertNoNetworkScope(t, idle.Configuration, "recording", admissionID, "recording")
+	}
 	execute(`DELETE FROM paperboat.workspace_policy_rules WHERE action='recording_view' AND target_id=$1`, machine)
 	for _, endpoint := range []string{cli, machine} {
 		result, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "recording_revoked_" + suffix, UserID: account, EndpointID: endpoint, AdmittedScopes: live})
