@@ -15,6 +15,56 @@ export type ReplayLoad =
   | { phase: "ready"; cast: Cast }
   | { phase: "failed"; error: unknown }
 
+/** Why the machine could not serve the recording: its copy is gone or it cannot be reached. */
+const machineGone = (error: unknown) =>
+  error instanceof ApiError && ["recording_deleted", "machine_unavailable", "connection_failed", "connection_lost"].includes(error.code)
+
+/**
+ * Plays the copy in the team bucket: the server writes the replay audit event and signs one download per archived
+ * segment; the vault worker opens the key and every segment in order. The bucket must allow this console's address
+ * (CORS) for the browser to read it.
+ */
+async function loadArchive(
+  id: string,
+  update: (next: ReplayLoad) => void,
+  setHandle: (handle: string) => void,
+  stopped: () => boolean,
+) {
+  const replay = await api<Replay>(`recordings/${encodeURIComponent(id)}/replay`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ source: "bucket" }),
+    cache: "no-store",
+  })
+  const segments = replay.segments ?? []
+  const opened = await recordingVault<{ handle: string }>({
+    action: "recording-open",
+    team_id: replay.team_id,
+    recording_id: id,
+    key_generation: replay.key_generation,
+    viewer_key: replay.viewer_key,
+    chain: replay.chain,
+  })
+  setHandle(opened.handle)
+  const texts: string[] = []
+  for (const [index, segment] of segments.entries()) {
+    if (stopped()) return
+    update({ phase: "loading", received: index, total: segments.length })
+    let file: ArrayBuffer
+    try {
+      const response = await fetch(segment.url, { headers: segment.headers, cache: "no-store" })
+      if (!response.ok) throw new ApiError(response.status, "bucket_unavailable", `The team bucket answered ${response.status}.`)
+      file = await response.arrayBuffer()
+    } catch (error) {
+      if (error instanceof ApiError) throw error
+      throw new ApiError(0, "bucket_unreachable", "The browser couldn't read the team bucket. Its CORS settings must allow this console's address.")
+    }
+    const text = await recordingVault<{ text: string }>({ action: "recording-segment", handle: opened.handle, file: toBase64(new Uint8Array(file)) })
+    texts.push(text.text)
+  }
+  if (!stopped()) update({ phase: "ready", cast: parseCast(texts.join("")) })
+}
+
 /**
  * Loads one recording into memory: the server writes the replay audit event and answers with a single-use browser
  * ticket and the viewer's sealed key; the machine streams the ciphertext over the end-to-end channel; the vault
@@ -28,6 +78,16 @@ export function useRecordingReplay(id: string, attempt: number, enabled: boolean
     let leave = () => {}
     let handle = ""
     const update = (next: ReplayLoad) => !stopped && setLoad(next)
+    // The machine's copy first; when the machine is gone or offline, the archive in the team bucket, if there is one.
+    let archiveTried = false
+    const fail = (error: unknown) => {
+      leave()
+      if (!machineGone(error) || archiveTried) return update({ phase: "failed", error })
+      archiveTried = true
+      void loadArchive(id, update, (value) => (handle = value), () => stopped).catch((archiveError) =>
+        update({ phase: "failed", error: archiveError instanceof ApiError && ["bucket_not_configured", "recording_not_archived"].includes(archiveError.code) ? error : archiveError }),
+      )
+    }
     update({ phase: "loading", received: 0, total: 0 })
     void (async () => {
       const runtime = await loadBrowserTerminal()
@@ -64,10 +124,6 @@ export function useRecordingReplay(id: string, attempt: number, enabled: boolean
       let received = 0
       let total = 0
       let connection = ""
-      const fail = (error: unknown) => {
-        leave()
-        update({ phase: "failed", error })
-      }
       const onEvent = (event: BrowserTerminalEvent) => {
         if (stopped) return
         if (event.type === "state" && event.state === "connected")
@@ -119,7 +175,7 @@ export function useRecordingReplay(id: string, attempt: number, enabled: boolean
       connection = result.id
       leave = () => runtime.leave(result.id!)
       if (stopped) leave()
-    })().catch((error) => update({ phase: "failed", error }))
+    })().catch(fail)
     return () => {
       stopped = true
       leave()
