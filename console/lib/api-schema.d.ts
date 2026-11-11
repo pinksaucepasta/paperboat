@@ -17243,7 +17243,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description A personal machine cannot replace a team machine. */
+            /** @description The old record is in another ownership scope (personal or a different team), or another machine already replaced it. */
             409: {
                 headers: {
                     [name: string]: unknown;

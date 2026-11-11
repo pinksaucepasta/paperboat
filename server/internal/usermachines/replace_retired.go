@@ -28,8 +28,13 @@ func (s *Service) ReplaceRetiredMachineTx(ctx context.Context, tx *db.Tx, userID
 	return err
 }
 
-// ErrReplacementTeamMismatch refuses a replacement across ownership: a personal record never replaces a team one.
-var ErrReplacementTeamMismatch = errors.New("a personal machine record cannot replace a team one")
+// ErrReplacementTeamMismatch refuses a replacement across ownership scopes: a personal record never replaces a
+// team one, and a record of one team never replaces a record of another team.
+var ErrReplacementTeamMismatch = errors.New("a machine record can only replace one in the same ownership scope")
+
+// ErrAlreadyReplaced reports that another machine already took over the old record, so this replacement did not
+// happen. A retry by the machine that did replace it is still a no-op success.
+var ErrAlreadyReplaced = errors.New("the old machine record was already replaced by another machine")
 
 // ReplaceMachine is the cutover of pb reset: pb pair calls it with the new machine's session once the new
 // runtime is verified (signed configuration fetched, daemon bound), and only then is the old record of the
@@ -68,7 +73,20 @@ func (s *Service) replaceMachineTx(ctx context.Context, tx *db.Tx, userID, retir
 	}
 	retired, err := tx.Queries().GetUserMachineForUpdate(ctx, dbsqlc.GetUserMachineForUpdateParams{ID: retiredID, UserID: userID})
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil // already removed, or not this account's record
+		// Already removed, or not this account's record. Removed by another machine's cutover is an error for
+		// this one; a retry by the machine that replaced it, or an unknown record, stays a no-op.
+		if !onlyRetired {
+			var taker string
+			err := tx.QueryRow(ctx, `SELECT resource_id FROM paperboat.audit_events WHERE event_type='user_machine.replaced' AND actor_user_id=$1 AND starts_with(idempotency_key,$2) LIMIT 1`,
+				userID, "user_machine.replaced:"+retiredID+":").Scan(&taker)
+			if err == nil && taker != replacementID {
+				return false, ErrAlreadyReplaced
+			}
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) && !errors.Is(err, sql.ErrNoRows) {
+				return false, err
+			}
+		}
+		return false, nil
 	}
 	if err != nil {
 		return false, err
@@ -85,11 +103,18 @@ func (s *Service) replaceMachineTx(ctx context.Context, tx *db.Tx, userID, retir
 	if err != nil {
 		return false, err
 	}
-	if retired.OwnerTeamID.Valid != replacement.OwnerTeamID.Valid {
+	if retired.OwnerTeamID != replacement.OwnerTeamID {
 		if onlyRetired {
 			return false, nil
 		}
 		return false, ErrReplacementTeamMismatch
+	}
+	if retired.OwnerTeamID.Valid {
+		// Team names are unique per team and the alias trigger locks the team; take the same lock first so a
+		// concurrent enrollment of the name waits instead of failing this transaction with a unique violation.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, "team:"+retired.OwnerTeamID.String); err != nil {
+			return false, err
+		}
 	}
 	if err := s.revokeUserMachineControlTx(ctx, tx, userID, retired, true); err != nil {
 		return false, err

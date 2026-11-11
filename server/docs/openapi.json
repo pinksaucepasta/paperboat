@@ -26382,7 +26382,7 @@
             "description": "The new machine was not found."
           },
           "409": {
-            "description": "A personal machine cannot replace a team machine."
+            "description": "The old record is in another ownership scope (personal or a different team), or another machine already replaced it."
           }
         },
         "operationId": "post_v1_user_machines_machine_id_replace"

@@ -1062,7 +1062,9 @@ func userMachineReplace(service *usermachines.Service) http.HandlerFunc {
 		case errors.Is(err, usermachines.ErrNotFound):
 			writeError(w, r, http.StatusNotFound, "user_machine_not_found", "Machine was not found.")
 		case errors.Is(err, usermachines.ErrReplacementTeamMismatch):
-			writeError(w, r, http.StatusConflict, "user_machine_replace_team_mismatch", "A personal machine cannot replace a team machine. Remove the old machine in the dashboard.")
+			writeError(w, r, http.StatusConflict, "user_machine_replace_team_mismatch", "A machine can only replace one in the same ownership scope. Remove the old machine in the dashboard.")
+		case errors.Is(err, usermachines.ErrAlreadyReplaced):
+			writeError(w, r, http.StatusConflict, "user_machine_already_replaced", "The old machine record was already replaced by another machine.")
 		default:
 			writeError(w, r, http.StatusInternalServerError, "user_machine_replace_failed", "Unable to replace the old machine record.", err)
 		}
