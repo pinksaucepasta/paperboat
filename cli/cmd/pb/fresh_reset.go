@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
@@ -208,6 +209,15 @@ func (e machineReplacementError) Error() string {
 		return "pb reset could not save which machine record the new pairing replaces, so nothing was removed. Check that your user configuration directory is writable, then run the installer again."
 	case replaceStepVerifyCLI:
 		return "pb reset removed the local setup, but the pb executable it runs from changed during cleanup. The old machine record and its address are kept; run the installer again to pair."
+	}
+	var apiErr *api.APIError
+	if errors.As(e.cause, &apiErr) {
+		switch apiErr.Code {
+		case "user_machine_already_replaced":
+			return "Another machine already replaced " + e.retiredID + ". This machine is paired and working; see `pb machine list`."
+		case "user_machine_replace_team_mismatch":
+			return "This machine is paired and working. The old machine record " + e.retiredID + " belongs to a different team or account, so it was left as it is; see `pb machine list`."
+		}
 	}
 	return "This machine is paired and working, but its old machine record " + e.retiredID + " could not be replaced. Check your connection, then remove the old machine in the dashboard."
 }

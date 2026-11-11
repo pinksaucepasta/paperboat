@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile/atomicfiletest"
 	"io"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
@@ -120,6 +122,27 @@ func TestFreshEnrollmentResetFailureNamesTheStepAndKeepsTheOldRecord(t *testing.
 	verify := classifyCLIJSONError(machineReplacementError{step: replaceStepVerifyCLI, cause: errors.New("digest changed")})
 	if !strings.Contains(verify.Message, "old machine record and its address are kept") {
 		t.Fatalf("verify step message=%q", verify.Message)
+	}
+}
+
+// A machine that loses a replace race, or whose old record is in another scope, is told so in plain words
+// instead of "check your connection"; other failures keep the generic text.
+func TestMachineReplacementErrorNamesTheServerRefusal(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		cause error
+		want  string
+		not   string
+	}{
+		{"already replaced", &api.APIError{Status: 409, Code: "user_machine_already_replaced"}, "Another machine already replaced machine_old. This machine is paired and working; see `pb machine list`.", "Check your connection"},
+		{"team mismatch", fmt.Errorf("replace: %w", &api.APIError{Status: 409, Code: "user_machine_replace_team_mismatch"}), "belongs to a different team or account, so it was left as it is", "Check your connection"},
+		{"other api error", &api.APIError{Status: 409, Code: "conflict"}, "Check your connection, then remove the old machine in the dashboard.", "Another machine"},
+		{"network error", errors.New("dial tcp: timeout"), "Check your connection, then remove the old machine in the dashboard.", "Another machine"},
+	} {
+		got := classifyCLIJSONError(machineReplacementError{step: replaceStepCutover, retiredID: "machine_old", cause: test.cause}).Message
+		if !strings.Contains(got, test.want) || strings.Contains(got, test.not) {
+			t.Fatalf("%s: message=%q", test.name, got)
+		}
 	}
 }
 
