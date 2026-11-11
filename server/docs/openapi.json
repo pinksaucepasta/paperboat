@@ -4511,6 +4511,31 @@
             "type": "string",
             "minLength": 3,
             "maxLength": 128
+          },
+          "flood_protection": {
+            "type": "object",
+            "description": "Set when Paperboat's edge flood protection (per-address limits, per-link share of an edge) refused some of this resource's traffic since `since`.",
+            "additionalProperties": false,
+            "required": [
+              "refused",
+              "since",
+              "summary"
+            ],
+            "properties": {
+              "refused": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 1
+              },
+              "since": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "summary": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
           }
         }
       },

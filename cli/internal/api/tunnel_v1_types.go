@@ -356,6 +356,14 @@ type TunnelHealth struct {
 	NextRetryAt   *time.Time             `json:"next_retry_at,omitempty"`
 	RepairAction  string                 `json:"repair_action"`
 	CorrelationID string                 `json:"correlation_id"`
+	// FloodProtection is set when Paperboat's edge limits refused some of the tunnel's traffic recently.
+	FloodProtection *TunnelFloodProtection `json:"flood_protection,omitempty"`
+}
+
+type TunnelFloodProtection struct {
+	Refused int64     `json:"refused"`
+	Since   time.Time `json:"since"`
+	Summary string    `json:"summary"`
 }
 
 type TunnelLogEntry struct {

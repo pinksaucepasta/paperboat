@@ -120,6 +120,17 @@ type HealthView struct {
 	NextRetryAt   *time.Time       `json:"next_retry_at,omitempty"`
 	RepairAction  string           `json:"repair_action"`
 	CorrelationID string           `json:"correlation_id"`
+	// FloodProtection is set when Paperboat's own edge limits refused some of this tunnel's traffic
+	// recently, so the owner learns why visitors saw "busy" (edge abuse plan 6.4).
+	FloodProtection *FloodProtection `json:"flood_protection,omitempty"`
+}
+
+// FloodProtection counts what the edges refused for flood protection: client addresses over their
+// per-address limit, or the link over its share of an edge.
+type FloodProtection struct {
+	Refused int64     `json:"refused"`
+	Since   time.Time `json:"since"`
+	Summary string    `json:"summary"`
 }
 
 // EndpointBuilder allocates a user-facing stable endpoint from the immutable

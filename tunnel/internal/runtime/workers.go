@@ -216,6 +216,9 @@ func (w *NodeWorker) heartbeat(ctx context.Context, at time.Time) error {
 	for _, page := range telemetry.TakeErrorPages() {
 		observation.ErrorPages = append(observation.ErrorPages, control.ErrorPageReference{Reference: page.Reference, Status: page.Status})
 	}
+	for hostname, count := range telemetry.TakeRefusals() {
+		observation.Refusals = append(observation.Refusals, control.HostRefusals{Hostname: hostname, Count: count})
+	}
 	answer, err := w.Sink.Heartbeat(ctx, observation)
 	if errors.Is(err, control.ErrNodeObservationStale) {
 		answer, err = w.Manager.RegisterAndHeartbeat(ctx, w.Sink, w.Registration, at)

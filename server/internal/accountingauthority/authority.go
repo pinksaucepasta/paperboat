@@ -4,6 +4,7 @@ package accountingauthority
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 
@@ -20,6 +21,24 @@ const DeliveryWindow = 7 * 24 * time.Hour
 const MaximumPerNode = 4096
 
 var ErrQuotaExhausted = errors.New("workspace bandwidth allowance is exhausted")
+
+// QuotaExhaustedError is ErrQuotaExhausted with the end of the allowance period it applies to, so
+// the edge can tell a visitor when the address resumes.
+type QuotaExhaustedError struct{ ResetsAt time.Time }
+
+func (e *QuotaExhaustedError) Error() string { return ErrQuotaExhausted.Error() }
+func (e *QuotaExhaustedError) Unwrap() error { return ErrQuotaExhausted }
+
+// quotaExhaustedTx is the exhaustion answer with the current period's end, read from the period row
+// the quota check just found or created.
+func quotaExhaustedTx(ctx context.Context, tx *db.Tx, workspace string, at time.Time) error {
+	var end sql.NullTime
+	if err := tx.QueryRow(ctx, `SELECT max(period_end) FROM billing_workspace_usage_periods WHERE workspace_id=$1 AND period_start<=$2 AND period_end>$2`, workspace, at).Scan(&end); err != nil {
+		return err
+	}
+	// No covering row: the reset time is unknown, the refusal stands.
+	return &QuotaExhaustedError{ResetsAt: end.Time.UTC()}
+}
 
 var ErrUnavailable = errors.New("usage accounting authority is unavailable; retry after retained usage expires")
 
@@ -76,14 +95,14 @@ func Record(ctx context.Context, store *db.DB, b Binding, policy ...QuotaChecker
 					return err
 				}
 				if exhausted {
-					return ErrQuotaExhausted
+					return quotaExhaustedTx(ctx, tx, workspace, b.IssuedAt)
 				}
 			} else {
 				if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM billing_workspace_usage_periods WHERE workspace_id=$1 AND period_start<=$2 AND period_end>$2 AND included_bytes IS NOT NULL AND consumed_bytes>=included_bytes)`, workspace, b.IssuedAt).Scan(&exhausted); err != nil {
 					return err
 				}
 				if exhausted {
-					return ErrQuotaExhausted
+					return quotaExhaustedTx(ctx, tx, workspace, b.IssuedAt)
 				}
 			}
 		}

@@ -93,4 +93,14 @@ VALUES ($1,$2,$3,$4,$5,'exact','dns-challenge://test','stable.example.test','gen
 	if err != nil || facts.OriginReason != "" {
 		t.Fatalf("an old origin report still counts: %+v err=%v", facts, err)
 	}
+	// Flood-protection refusals count from the edges serving the route, within the window only; an
+	// edge not assigned the route cannot mark it.
+	engineHost := "engine-" + strings.ReplaceAll(f.suffix, "_", "-") + ".example.test"
+	t.Cleanup(func() { _, _ = f.database.SQL().ExecContext(ctx, `DELETE FROM paperboat.edge_refusals WHERE hostname=$1`, engineHost) })
+	hour := now.UTC().Truncate(time.Hour)
+	exec(`INSERT INTO paperboat.edge_refusals(hostname,edge_node_id,hour,refused) VALUES($1,$2,$3,30),($1,$2,$4,12),($1,'node_other',$3,1000),($1,$2,$5,7)`, engineHost, node, hour, hour.Add(-time.Hour), hour.Add(-3*time.Hour))
+	facts, err = f.repository.HealthFacts(ctx, account, tunnel, now)
+	if err != nil || facts.EdgeRefused != 42 || !facts.EdgeRefusedSince.Equal(hour.Add(-time.Hour)) {
+		t.Fatalf("refusal fact = %d since %v, want 42 since %v (err %v)", facts.EdgeRefused, facts.EdgeRefusedSince, hour.Add(-time.Hour), err)
+	}
 }

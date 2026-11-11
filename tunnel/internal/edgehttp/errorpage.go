@@ -4,8 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"html/template"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -30,6 +33,7 @@ const wordmarkPath = "M71.4 200V-500H160.1L164.7 -418.7Q191.9 -462.7 233.9 -487.
 var errorPageTemplate = template.Must(template.New("error").Parse(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
+{{if .Refresh}}<meta http-equiv="refresh" content="{{.Refresh}}">{{end}}
 <title>{{.Title}} - Paperboat</title>
 <style>
 *{box-sizing:border-box}
@@ -189,6 +193,12 @@ func writeErrorPageLink(w http.ResponseWriter, status int, message, linkText, li
 			linkText = "Try again" // an empty href reloads the address
 		}
 	}
+	ref := noteErrorPage(status)
+	writeErrorPageBody(w, status, title, message, linkText, linkURL, ref, 0)
+}
+
+// noteErrorPage mints the page's support reference and logs it like every edge error page.
+func noteErrorPage(status int) string {
 	ref := newReference()
 	switch {
 	case status >= http.StatusInternalServerError:
@@ -203,6 +213,11 @@ func writeErrorPageLink(w http.ResponseWriter, status int, message, linkText, li
 			edgetelemetry.NoteErrorPage(ref, status)
 		}
 	}
+	return ref
+}
+
+// writeErrorPageBody writes the branded page; refresh, when positive, reloads it after that many seconds.
+func writeErrorPageBody(w http.ResponseWriter, status int, title, message, linkText, linkURL, ref string, refresh int) {
 	h := w.Header()
 	h.Set("Content-Type", "text/html; charset=utf-8")
 	h.Set("Cache-Control", "no-store")
@@ -213,6 +228,48 @@ func writeErrorPageLink(w http.ResponseWriter, status int, message, linkText, li
 	w.WriteHeader(status)
 	_ = errorPageTemplate.Execute(w, struct {
 		Title, Message, ActionText, ActionURL, Reference, Time string
-		Status                                                 int
-	}{title, message, linkText, linkURL, ref, time.Now().UTC().Format("2006-01-02 15:04:05 UTC"), status})
+		Status, Refresh                                        int
+	}{title, message, linkText, linkURL, ref, time.Now().UTC().Format("2006-01-02 15:04:05 UTC"), status, refresh})
+}
+
+// writeRefusal answers a limit or block the edge applied itself (edge abuse plan 3.8). The typed
+// X-Paperboat-Error code tells owners and scripts which one; the visitor sees only plain words. A
+// browser navigation (Accept names text/html) gets the branded page, reloading itself after
+// Retry-After; anything else gets application/problem+json (RFC 9457). Retry-After is set whenever
+// waiting helps. A WebSocket upgrade gets the same status before any 101, which the page that opened
+// it cannot read; that page shows its own error.
+func writeRefusal(w http.ResponseWriter, r *http.Request, status int, code, title, message string, retryAfter time.Duration) {
+	seconds := 0
+	if retryAfter > 0 {
+		seconds = int((retryAfter + time.Second - 1) / time.Second)
+		w.Header().Set("Retry-After", strconv.Itoa(seconds))
+	}
+	w.Header().Set("X-Paperboat-Error", code)
+	ref := noteErrorPage(status)
+	if r != nil && strings.Contains(r.Header.Get("Accept"), "text/html") {
+		linkText := ""
+		if seconds > 0 {
+			linkText = "Try again"
+		}
+		writeErrorPageBody(w, status, title, message, linkText, "", ref, seconds)
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", "application/problem+json")
+	h.Set("Cache-Control", "no-store")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set(referenceHeader, ref)
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(problem{Type: "urn:paperboat:error:" + code, Title: title, Status: status, Detail: message, Code: code, RetryAfter: seconds, Reference: ref})
+}
+
+// problem is an RFC 9457 problem document; code, retry_after and reference are extension members.
+type problem struct {
+	Type       string `json:"type"`
+	Title      string `json:"title"`
+	Status     int    `json:"status"`
+	Detail     string `json:"detail"`
+	Code       string `json:"code"`
+	RetryAfter int    `json:"retry_after,omitempty"`
+	Reference  string `json:"reference"`
 }

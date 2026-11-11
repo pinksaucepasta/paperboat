@@ -204,9 +204,9 @@ func (s SQLIngressSource) projectPreviews(ctx context.Context, node, epoch strin
 			authority = "grant:" + evidence.Request.Nonce
 		}
 		err := accountingauthority.Record(ctx, s.DB, accountingauthority.Binding{ID: authority, Node: d.EdgeNodeID, Environment: b.EnvironmentID, Route: b.RouteID, Revision: int64(b.RouteGeneration), User: b.AccountID, Team: teams[i], IssuedAt: d.IssuedAt, ExpiresAt: d.ExpiresAt}, s.Quota)
-		if isExactQuotaExhaustion(err) {
+		if resetsAt, exhausted := quotaExhaustion(err); exhausted {
 			if s.QuotaDenied != nil {
-				*s.QuotaDenied = append(*s.QuotaDenied, wire.IngressQuotaDenial{RouteID: b.RouteID, Hostname: b.Hostname})
+				*s.QuotaDenied = append(*s.QuotaDenied, wire.IngressQuotaDenial{RouteID: b.RouteID, Hostname: b.Hostname, ResetsAt: resetsAt})
 			}
 			continue
 		}

@@ -150,6 +150,9 @@ func tunnelStatusCommand() *cobra.Command {
 // not ready, what to do about it and whether Paperboat keeps retrying by itself.
 func tunnelStatusText(health api.TunnelHealth) string {
 	text := fmt.Sprintf("%s\t%s\t%s", health.ResourceID, health.OverallCode, health.Summary)
+	if health.FloodProtection != nil {
+		text += "\n  " + health.FloodProtection.Summary
+	}
 	if health.OverallCode == "ready" {
 		return text
 	}

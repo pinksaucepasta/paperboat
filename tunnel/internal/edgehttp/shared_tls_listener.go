@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	edgetelemetry "github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
 )
 
 // SharedTLSListener dispatches the original ClientHello before any TLS writes.
@@ -178,6 +179,7 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 	releaseName, ok := l.names.acquire(host, true)
 	if !ok {
 		l.observe("tls_name_share", errNameShareFull)
+		edgetelemetry.NoteRefusal(host)
 		return
 	}
 	// The name's share is held for the connection's whole life; ownership moves with the connection.

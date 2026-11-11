@@ -27,7 +27,15 @@ type HealthFacts struct {
 	// EngineServed reports that the endpoint engine serves the tunnel: an active tunnel endpoint
 	// with an edge assignment observed ready.
 	EngineServed bool
+	// EdgeRefused counts requests and connections the tunnel's edges refused for flood protection
+	// since EdgeRefusedSince (the start of the previous hour).
+	EdgeRefused      int64
+	EdgeRefusedSince time.Time
 }
+
+// edgeRefusedSince is the start of the window the flood-protection count covers: the previous hour
+// bucket and the current one (edge_refusals rows are hourly).
+func edgeRefusedSince(now time.Time) time.Time { return now.UTC().Truncate(time.Hour).Add(-time.Hour) }
 
 // healthFactsFreshness is how recent a heartbeat or edge observation must be to count as live.
 const healthFactsFreshness = 15 * time.Second
@@ -44,12 +52,16 @@ func (r *SQLRepository) HealthFacts(ctx context.Context, accountID, tunnelID str
  EXISTS(SELECT 1 FROM endpoints e JOIN endpoint_edge_assignments x ON x.endpoint_id=e.id
    WHERE e.tunnel_id=$1 AND e.kind='tunnel' AND e.desired_state='active' AND x.desired='active' AND x.observed_ready),
  EXISTS(SELECT 1 FROM endpoints e JOIN runtime_carrier_attachments ra ON ra.machine_id=e.agent_machine_id
-   WHERE e.tunnel_id=$1 AND e.kind='tunnel' AND ra.expires_at>$2)`,
-		tunnelID, now, fresh, OriginHealthMaxAge.Seconds()).
-		Scan(&facts.EdgeReady, &facts.OriginReason, &facts.EngineServed, &facts.HostConnected)
+   WHERE e.tunnel_id=$1 AND e.kind='tunnel' AND ra.expires_at>$2),
+ coalesce((SELECT sum(rf.refused) FROM edge_refusals rf WHERE rf.hour>=$5 AND EXISTS(SELECT 1 FROM endpoint_routes er
+   JOIN endpoints e ON e.id=er.endpoint_id JOIN endpoint_edge_assignments x ON x.route_id=er.id
+   WHERE e.tunnel_id=$1 AND er.hostname=rf.hostname AND x.edge_node_id=rf.edge_node_id)),0)`,
+		tunnelID, now, fresh, OriginHealthMaxAge.Seconds(), edgeRefusedSince(now)).
+		Scan(&facts.EdgeReady, &facts.OriginReason, &facts.EngineServed, &facts.HostConnected, &facts.EdgeRefused)
 	if err != nil {
 		return HealthFacts{}, translate(err)
 	}
+	facts.EdgeRefusedSince = edgeRefusedSince(now)
 	rows, err := r.db.Pool().Query(ctx, `SELECT hostname, ownership_state, certificate_state, certificate_strategy FROM tunnel_domains
  WHERE account_id=$1 AND tunnel_id=$2 AND deleted_at IS NULL ORDER BY hostname LIMIT 64`, accountID, tunnelID)
 	if err != nil {

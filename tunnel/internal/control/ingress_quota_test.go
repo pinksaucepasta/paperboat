@@ -19,12 +19,13 @@ import (
 // typed reason at admission (never forwarded), and ordinary denial stays generic.
 func TestIngressAuthorityRefusesQuotaDeniedRouteWithTypedReasonAndRecovers(t *testing.T) {
 	decision := ingressAuthorityTestDecision(time.Now().UTC())
+	resets := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
 	var exhausted atomic.Bool
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		denied := []connectorprotocol.IngressQuotaDenial{}
 		decisions := []connectorprotocol.IngressDecision{}
 		if exhausted.Load() {
-			denied = append(denied, connectorprotocol.IngressQuotaDenial{RouteID: decision.Binding.RouteID, Hostname: decision.Binding.Hostname})
+			denied = append(denied, connectorprotocol.IngressQuotaDenial{RouteID: decision.Binding.RouteID, Hostname: decision.Binding.Hostname, ResetsAt: resets})
 		} else {
 			decisions = append(decisions, decision)
 		}
@@ -45,6 +46,10 @@ func TestIngressAuthorityRefusesQuotaDeniedRouteWithTypedReasonAndRecovers(t *te
 	authority.Invalidate()
 	if _, err := authority.Resolve(context.Background(), rule); !errors.Is(err, connectorprotocol.ErrIngressQuotaExhausted) || errors.Is(err, connectorprotocol.ErrIngressDenied) {
 		t.Fatalf("quota-denied route: %v, want ErrIngressQuotaExhausted only", err)
+	}
+	var quota connectorprotocol.IngressQuotaError
+	if _, err := authority.Resolve(context.Background(), rule); !errors.As(err, &quota) || !quota.ResetsAt.Equal(resets) {
+		t.Fatalf("quota refusal lost the reset time: %v", err)
 	}
 	other := rule
 	other.Hostname = "unpublished.customer.test"

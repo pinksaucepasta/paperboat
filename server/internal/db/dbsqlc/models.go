@@ -1062,6 +1062,13 @@ type EdgeDnsPublication struct {
 	VerifiedAt            sql.NullTime
 }
 
+type EdgeRefusal struct {
+	Hostname   string
+	EdgeNodeID string
+	Hour       time.Time
+	Refused    int64
+}
+
 type Endpoint struct {
 	ID             string
 	Kind           string

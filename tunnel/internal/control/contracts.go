@@ -298,6 +298,14 @@ type NodeObservation struct {
 	// ErrorPages are the support references this edge's error pages showed visitors since the last heartbeat; the
 	// server stores each in support_reports so the reference resolves.
 	ErrorPages []ErrorPageReference `json:"error_pages,omitempty"`
+	// Refusals count, per hostname, what this edge refused for flood protection since the last heartbeat.
+	Refusals []HostRefusals `json:"refusals,omitempty"`
+}
+
+// HostRefusals is how many requests or connections to one hostname the edge refused for flood protection.
+type HostRefusals struct {
+	Hostname string `json:"hostname"`
+	Count    uint64 `json:"count"`
 }
 
 // ErrorPageReference is one error page an edge answered: the reference its footer and X-Paperboat-Reference carry.

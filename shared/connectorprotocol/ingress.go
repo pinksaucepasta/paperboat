@@ -77,7 +77,16 @@ var ErrIngressQuotaExhausted = errors.New("workspace bandwidth allowance exhaust
 type IngressQuotaDenial struct {
 	RouteID  string `json:"route_id"`
 	Hostname string `json:"hostname"`
+	// ResetsAt is when the workspace's allowance period ends, so the visitor's page can say when
+	// the address resumes; zero when the server does not know.
+	ResetsAt time.Time `json:"resets_at,omitzero"`
 }
+
+// IngressQuotaError is ErrIngressQuotaExhausted with the denial's reset time.
+type IngressQuotaError struct{ ResetsAt time.Time }
+
+func (e IngressQuotaError) Error() string { return ErrIngressQuotaExhausted.Error() }
+func (e IngressQuotaError) Unwrap() error { return ErrIngressQuotaExhausted }
 
 type ingressReadFailure struct{ cause error }
 

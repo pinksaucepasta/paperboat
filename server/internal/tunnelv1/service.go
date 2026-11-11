@@ -401,7 +401,12 @@ func (s *Service) Status(ctx context.Context, request previewtunnelapi.RequestCo
 	if s.bandwidthDenied != nil {
 		facts.BandwidthExhausted = s.bandwidthDenied(ctx, request.Actor.AccountID, now)
 	}
-	return explainHealth(view, facts), nil
+	view = explainHealth(view, facts)
+	if facts.EdgeRefused > 0 {
+		view.FloodProtection = &FloodProtection{Refused: facts.EdgeRefused, Since: facts.EdgeRefusedSince,
+			Summary: fmt.Sprintf("Paperboat's flood protection refused %d requests to this tunnel since %s UTC: some client addresses sent more than the edge allows.", facts.EdgeRefused, facts.EdgeRefusedSince.Format("15:04"))}
+	}
+	return view, nil
 }
 
 // ReconcileExpired performs the server-side expiry sweep. Expiry changes only

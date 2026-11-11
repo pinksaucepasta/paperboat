@@ -587,6 +587,50 @@ type edgeNodeObservation struct {
 	At            time.Time `json:"at"`
 	// ErrorPages are the support references this edge's error pages showed visitors since its last heartbeat.
 	ErrorPages []edgeErrorPage `json:"error_pages,omitempty"`
+	// Refusals count, per hostname, what the edge refused for flood protection since its last heartbeat.
+	Refusals []edgeHostRefusals `json:"refusals,omitempty"`
+}
+
+type edgeHostRefusals struct {
+	Hostname string `json:"hostname"`
+	Count    int64  `json:"count"`
+}
+
+// maxEdgeRefusalHosts bounds the hostnames taken from one heartbeat (the edge sends at most as many).
+const maxEdgeRefusalHosts = 256
+
+// edgeRefusalRetention is how long the hourly refusal counts are kept.
+const edgeRefusalRetention = 7 * 24 * time.Hour
+
+// recordEdgeRefusals adds one heartbeat's flood-protection refusals to the hourly counts and drops
+// counts past retention. Readers count a row only when its edge serves the hostname's route, so an
+// edge cannot mark another account's link. A failure is logged; it never fails the heartbeat.
+func (s *EdgeService) recordEdgeRefusals(ctx context.Context, node string, refusals []edgeHostRefusals) {
+	now := s.clock().UTC()
+	hosts, counts := make([]string, 0, len(refusals)), make([]int64, 0, len(refusals))
+	for _, r := range refusals {
+		if len(hosts) == maxEdgeRefusalHosts {
+			break
+		}
+		if r.Count > 0 && r.Count <= 1<<40 && len(r.Hostname) >= 1 && len(r.Hostname) <= 253 {
+			hosts, counts = append(hosts, strings.ToLower(r.Hostname)), append(counts, r.Count)
+		}
+	}
+	if len(hosts) == 0 {
+		return
+	}
+	err := s.store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO edge_refusals(hostname,edge_node_id,hour,refused)
+SELECT h, $2, date_trunc('hour',$3::timestamptz), sum(c) FROM unnest($1::text[],$4::bigint[]) AS u(h,c) GROUP BY h
+ON CONFLICT (hostname,edge_node_id,hour) DO UPDATE SET refused=edge_refusals.refused+excluded.refused`, hosts, node, now, counts); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `DELETE FROM edge_refusals WHERE hour<$1`, now.Add(-edgeRefusalRetention))
+		return err
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "edge refusal counts not recorded", "error", err.Error(), "edge_node_id", node)
+	}
 }
 
 // edgeErrorPage is one error page an edge answered: the reference its footer and X-Paperboat-Reference carry.
@@ -972,6 +1016,7 @@ func (s *EdgeService) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	recordEdgeErrorPages(r.Context(), input.ErrorPages)
+	s.recordEdgeRefusals(r.Context(), input.NodeID, input.Refusals)
 	writeHeartbeatAnswer(w, s.ingressLimits)
 }
 

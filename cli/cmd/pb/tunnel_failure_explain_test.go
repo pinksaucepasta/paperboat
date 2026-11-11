@@ -83,3 +83,13 @@ func TestTunnelStatusStaysOneLineWhenReady(t *testing.T) {
 		t.Fatalf("ready status = %q", got)
 	}
 }
+
+// Edge abuse plan 6.4: when Paperboat's flood protection refused some of the tunnel's traffic, status
+// says so even while the tunnel is ready.
+func TestTunnelStatusNamesFloodProtectionRefusals(t *testing.T) {
+	health := failingHealth("ready", "", "", "Tunnel is ready to accept traffic.", "No action required.", false)
+	health.FloodProtection = &api.TunnelFloodProtection{Refused: 42, Since: time.Unix(0, 0).UTC(), Summary: "Paperboat's flood protection refused 42 requests to this tunnel since 00:00 UTC."}
+	if got := tunnelStatusText(health); !strings.Contains(got, "\n  Paperboat's flood protection refused 42 requests") {
+		t.Fatalf("status = %q", got)
+	}
+}

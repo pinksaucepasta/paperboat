@@ -196,9 +196,9 @@ func (s SQLIngressSource) project(ctx context.Context, nodeID, epoch, audience, 
 				continue
 			}
 			if err = accountingauthority.Record(ctx, s.DB, accountingauthority.Binding{ID: fmt.Sprintf("public:%s:%d", b.PublicationID, b.PublicationGeneration), Node: d.EdgeNodeID, Environment: b.EnvironmentID, Route: b.RouteID, Revision: int64(b.RouteGeneration), User: b.AccountID, Team: team, IssuedAt: d.IssuedAt, ExpiresAt: d.ExpiresAt}, s.Quota); err != nil {
-				if isExactQuotaExhaustion(err) {
+				if resetsAt, exhausted := quotaExhaustion(err); exhausted {
 					if s.QuotaDenied != nil {
-						*s.QuotaDenied = append(*s.QuotaDenied, wire.IngressQuotaDenial{RouteID: b.RouteID, Hostname: b.Hostname})
+						*s.QuotaDenied = append(*s.QuotaDenied, wire.IngressQuotaDenial{RouteID: b.RouteID, Hostname: b.Hostname, ResetsAt: resetsAt})
 					}
 					continue
 				}
@@ -261,8 +261,13 @@ func (s SQLIngressSource) scanIngressRows(ctx context.Context, now time.Time, qu
 	return out, nil
 }
 
-func isExactQuotaExhaustion(err error) bool {
-	return err == accountingauthority.ErrQuotaExhausted
+// quotaExhaustion reports an exact quota answer (never one joined with another failure) and the
+// allowance's reset time when the answer carries it.
+func quotaExhaustion(err error) (time.Time, bool) {
+	if quota, ok := err.(*accountingauthority.QuotaExhaustedError); ok {
+		return quota.ResetsAt, true
+	}
+	return time.Time{}, err == accountingauthority.ErrQuotaExhausted
 }
 
 func completeIngressProjection(d *wire.IngressDecision, now time.Time) error {

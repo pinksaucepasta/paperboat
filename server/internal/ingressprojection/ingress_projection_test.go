@@ -94,14 +94,20 @@ func TestIngressProjectionPreservesAliasPublicationFence(t *testing.T) {
 	}
 }
 
+func isExhausted(err error) bool { _, ok := quotaExhaustion(err); return ok }
+
 func TestQuotaFilteringRequiresExactExpectedResult(t *testing.T) {
-	if !isExactQuotaExhaustion(accountingauthority.ErrQuotaExhausted) {
+	if _, ok := quotaExhaustion(accountingauthority.ErrQuotaExhausted); !ok {
 		t.Fatal("direct quota exhaustion should omit the projection")
 	}
-	if isExactQuotaExhaustion(errors.Join(accountingauthority.ErrQuotaExhausted, syscall.EIO)) {
+	resets := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
+	if at, ok := quotaExhaustion(&accountingauthority.QuotaExhaustedError{ResetsAt: resets}); !ok || !at.Equal(resets) {
+		t.Fatalf("typed exhaustion = %v %v, want its reset time", at, ok)
+	}
+	if isExhausted(errors.Join(accountingauthority.ErrQuotaExhausted, syscall.EIO)) {
 		t.Fatal("mixed quota and operational failure was treated as expected exhaustion")
 	}
-	if isExactQuotaExhaustion(syscall.EIO) {
+	if isExhausted(syscall.EIO) {
 		t.Fatal("operational failure was treated as expected exhaustion")
 	}
 }

@@ -432,6 +432,9 @@ func validateHealth(v *TunnelHealth, tunnelID string) error {
 			return ErrUnsafeTunnelResponse
 		}
 	}
+	if f := v.FloodProtection; f != nil && (f.Refused < 1 || f.Summary == "" || len(f.Summary) > 500 || containsTunnelControl(f.Summary)) {
+		return ErrUnsafeTunnelResponse
+	}
 	v.Summary = redactTunnelText(v.Summary)
 	v.RepairAction = redactTunnelText(v.RepairAction)
 	return nil
