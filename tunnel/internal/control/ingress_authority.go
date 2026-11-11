@@ -26,7 +26,7 @@ type IngressAuthority struct {
 	// again after previewRecheckInGrace instead of IngressRefreshInterval, because the server issues the
 	// replacement's decision a moment after the host's carrier attaches there.
 	Grace         func() time.Duration
-	mu            sync.Mutex
+	mu            sync.RWMutex // AdmitsPreview, asked on every missed request, only reads
 	decisions     []connectorprotocol.IngressDecision
 	quotaDenied   map[string]time.Time                        // hostnames withheld only for bandwidth quota (to their reset time), from the same fetch
 	blocked       map[string]bool                             // hostnames taken down by an operator (to whether the takedown is legal), from the same fetch
@@ -396,16 +396,17 @@ func (a *IngressAuthority) ResolveDecision(ctx context.Context, candidate connec
 
 // AdmitsPreview reports whether the held snapshot still admits a preview publication on hostname (an ephemeral
 // decision that has not lapsed; a public one is renewed locally until a newer snapshot ends it). It is how the edge
-// tells an app that lost its carrier for a moment from a name the server never admitted.
+// tells an app that lost its carrier for a moment from a name the server never admitted. Only decisions issued to
+// this edge count: a preview another edge serves is answered 404 here as before.
 func (a *IngressAuthority) AdmitsPreview(hostname string) bool {
 	if a == nil || hostname == "" {
 		return false
 	}
 	now := time.Now()
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	for _, d := range a.decisions {
-		if d.Binding.Hostname == hostname && d.Binding.Lifecycle == connectorprotocol.TunnelEphemeral && (d.Binding.Audience == "public" || now.Before(d.ExpiresAt)) {
+		if d.Binding.Hostname == hostname && d.EdgeNodeID == a.NodeID && d.Binding.Lifecycle == connectorprotocol.TunnelEphemeral && (d.Binding.Audience == "public" || now.Before(d.ExpiresAt)) {
 			return true
 		}
 	}
