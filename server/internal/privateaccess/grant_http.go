@@ -136,6 +136,10 @@ func (h *GrantHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	claims, err := h.machine.VerifyMachineControlRequest(r.Context(), machineIdentity, proof, r.Method, r.URL.Path, raw)
 	if err != nil {
+		if clockSkewed(err) {
+			writeClockSkew(requestContext(r), w, err)
+			return
+		}
 		if pureExpectedPrivateAccessError(err, controlplane.ErrHelperProof) {
 			capturePrivateAccessFailure(r.Context(), http.StatusUnauthorized, "machine_identity_invalid", err, false)
 			writeHTTPError(requestContext(r), w, http.StatusUnauthorized, "machine_identity_invalid", "The machine identity could not be verified.", false)

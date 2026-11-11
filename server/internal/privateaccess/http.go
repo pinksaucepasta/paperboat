@@ -9,8 +9,10 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/canonicaljson"
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 )
@@ -212,6 +214,30 @@ func writeHTTPError(ctx context.Context, w http.ResponseWriter, status int, code
 		Retryable bool   `json:"retryable"`
 	}{Schema: Schema, Kind: "error", Code: code, Message: message, Retryable: retryable}); err != nil {
 		capturePrivateAccessFailure(ctx, status, "authorization_unavailable", err, false)
+	}
+}
+
+// clockSkewed reports a correctly signed machine proof made with a clock outside the server's window: the machine is still
+// signed in, so it is a 400 clock_skew (with the server's time), not a 401, as every other machine-proof verifier answers.
+func clockSkewed(err error) bool {
+	return errors.Is(err, controlplane.ErrClockSkew) && pureExpectedPrivateAccessError(err, controlplane.ErrHelperProof)
+}
+
+func writeClockSkew(ctx context.Context, w http.ResponseWriter, err error) {
+	capturePrivateAccessFailure(ctx, http.StatusBadRequest, "machine_identity_invalid", err, false)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	if encodeErr := json.NewEncoder(w).Encode(struct {
+		Schema    string         `json:"schema"`
+		Kind      string         `json:"kind"`
+		Code      string         `json:"code"`
+		Message   string         `json:"message"`
+		Retryable bool           `json:"retryable"`
+		Details   map[string]any `json:"details"`
+	}{Schema: Schema, Kind: "error", Code: "clock_skew", Message: "This machine's clock is off by more than a minute. Correct the system time; Paperboat retries with the server's time.", Retryable: true,
+		Details: map[string]any{"server_time": time.Now().UTC().Format(time.RFC3339), "allowed_skew_seconds": int(controlplane.ProofClockWindow / time.Second)}}); encodeErr != nil {
+		capturePrivateAccessFailure(ctx, http.StatusBadRequest, "authorization_unavailable", encodeErr, false)
 	}
 }
 

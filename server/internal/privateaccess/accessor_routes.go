@@ -280,6 +280,10 @@ func (h *AccessorHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 		claims, e := h.machine.VerifyMachineControlRequest(r.Context(), identity, proof, r.Method, r.URL.Path, raw)
 		if e != nil {
+			if clockSkewed(e) {
+				writeClockSkew(requestContext(r), w, e)
+				return
+			}
 			if pureExpectedPrivateAccessError(e, controlplane.ErrHelperProof, previewattachment.ErrUnauthorized) {
 				capturePrivateAccessFailure(r.Context(), http.StatusUnauthorized, "machine_identity_invalid", e, false)
 				writeHTTPError(requestContext(r), w, 401, "machine_identity_invalid", "Machine authentication is required.", false)
