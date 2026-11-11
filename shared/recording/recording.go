@@ -59,7 +59,7 @@ const (
 // Replay ticket claims (a machine JWT checked by the host's verifier).
 const (
 	CredentialClass = "recording_replay"
-	Scope           = "recording.read"
+	Scope           = "recording:read"
 	ResourceKind    = "recording"
 	// TicketLifetime bounds exp - iat; the host keeps the jti in its replay cache that long.
 	TicketLifetime = 5 * time.Minute
@@ -88,9 +88,12 @@ type Key struct {
 type Policy struct {
 	Version int64 `json:"version"`
 	// Enabled is false without the Teams entitlement or on a machine without an owner team.
-	Enabled        bool     `json:"enabled"`
-	TeamID         string   `json:"team_id,omitempty"`
-	Key            *Key     `json:"key,omitempty"` // nil until an admin sets the key up
+	Enabled bool   `json:"enabled"`
+	TeamID  string `json:"team_id,omitempty"`
+	// Keys are every generation of the team recording key, oldest first; the last is current. A host that
+	// pinned generation g verifies g+1..last in order (VerifyRotation), so it catches up after missing
+	// rotations while offline. Empty until an admin sets the key up.
+	Keys           []Key    `json:"keys"`
 	RecordAccounts []string `json:"record_accounts"`
 	ManualStart    string   `json:"manual_start"`
 	AdminAccounts  []string `json:"admin_accounts"` // owner and admins: stop rule recordings, start when admins-only
@@ -255,13 +258,13 @@ type Settings struct {
 
 // Typed error codes.
 const (
-	ErrorTeamPlanRequired  = "team_plan_required"
-	ErrorNotFound          = "recording_not_found"
-	ErrorForbidden         = "recording_forbidden"
-	ErrorKeyUnavailable    = "recording_key_unavailable"
-	ErrorKeyPending        = "recording_key_pending"
-	ErrorKeyConflict       = "recording_key_conflict" // generation is not current+1, or a bad rotation signature
-	ErrorRecordingDeleted  = "recording_deleted"
+	ErrorTeamPlanRequired = "team_plan_required"
+	ErrorNotFound         = "recording_not_found"
+	ErrorForbidden        = "recording_forbidden"
+	ErrorKeyUnavailable   = "recording_key_unavailable"
+	ErrorKeyPending       = "recording_key_pending"
+	ErrorKeyConflict      = "recording_key_conflict" // generation is not current+1, or a bad rotation signature
+	ErrorRecordingDeleted = "recording_deleted"
 )
 
 const rotationDomain = "paperboat.recording-key.rotation.v1"

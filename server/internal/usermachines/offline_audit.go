@@ -9,6 +9,8 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/audit"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/recordings"
+	"github.com/pinksaucepasta/paperboat/shared/recording"
 )
 
 // PLAN 3b offline-capable authority, point 5 (F21-11): a host records every session it starts or refuses while the
@@ -41,6 +43,8 @@ type OfflineAuditEvent struct {
 	Outcome    string `json:"outcome,omitempty"`
 	BytesIn    int64  `json:"bytes_in,omitempty"`
 	BytesOut   int64  `json:"bytes_out,omitempty"`
+	// Recording belongs to the recording_* kinds (shared/recording); it also feeds the recording index.
+	Recording *recording.Report `json:"recording,omitempty"`
 }
 
 type OfflineAuditReceipt struct {
@@ -81,11 +85,25 @@ func validSSHAuditEvent(e OfflineAuditEvent) bool {
 	return e.Reason == "" && sshEndOutcomes[e.Outcome] && offlineAuditIdentifier.MatchString(e.SessionID)
 }
 
+func isRecordingKind(kind string) bool {
+	return kind == recording.KindStarted || kind == recording.KindStopped || kind == recording.KindDeleted
+}
+
+// validRecordingEvent checks the recording_* kinds: no peer (a rule recording has none; a manual one names its
+// actor in the report), only the report.
+func validRecordingEvent(e OfflineAuditEvent, now time.Time) bool {
+	bare := OfflineAuditEvent{EventID: e.EventID, Kind: e.Kind, OccurredAt: e.OccurredAt, Recording: e.Recording}
+	return e == bare && e.Recording != nil && e.Recording.Validate(e.Kind, now) == nil
+}
+
 func validOfflineAuditEvent(e OfflineAuditEvent, now time.Time) bool {
-	if !offlineAuditIdentifier.MatchString(e.EventID) || !offlineAuditIdentifier.MatchString(e.PeerEndpointID) || !offlineAuditIdentifier.MatchString(e.PeerAccountID) {
+	if !offlineAuditIdentifier.MatchString(e.EventID) || e.OccurredAt.IsZero() || e.OccurredAt.After(now.Add(time.Minute)) || e.OccurredAt.Before(now.Add(-OfflineAuditRetention)) {
 		return false
 	}
-	if e.OccurredAt.IsZero() || e.OccurredAt.After(now.Add(time.Minute)) || e.OccurredAt.Before(now.Add(-OfflineAuditRetention)) {
+	if isRecordingKind(e.Kind) || e.Recording != nil {
+		return validRecordingEvent(e, now)
+	}
+	if !offlineAuditIdentifier.MatchString(e.PeerEndpointID) || !offlineAuditIdentifier.MatchString(e.PeerAccountID) {
 		return false
 	}
 	if isSSHKind(e.Kind) {
@@ -123,6 +141,9 @@ func (s *Service) RecordOfflineAuditBacklog(ctx context.Context, machineID strin
 		seen[e.EventID] = true
 		keys = append(keys, "offline:"+e.EventID)
 		accounts = append(accounts, e.PeerAccountID)
+		if e.Recording != nil {
+			accounts = append(accounts, e.Recording.ActorAccountID)
+		}
 	}
 	var receipt OfflineAuditReceipt
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
@@ -149,6 +170,22 @@ func (s *Service) RecordOfflineAuditBacklog(ctx context.Context, machineID strin
 			}
 			if e.Kind == "sdk_operation_ended" {
 				if err := s.recordSDKOperationEndTx(ctx, tx, machineID, e); err != nil {
+					return err
+				}
+				existing[key] = true
+				receipt.Accepted++
+				continue
+			}
+			if e.Recording != nil {
+				if err := recordings.ApplyReportTx(ctx, tx, machineID, e.Kind, *e.Recording); err != nil {
+					return err
+				}
+				actor, actorType := e.Recording.ActorAccountID, audit.ActorUser
+				if !known[actor] {
+					actor, actorType = "", audit.ActorSystem
+				}
+				if err := s.audit.WriteTx(ctx, tx, audit.Event{ActorUserID: actor, ActorType: actorType, EventType: "machine." + e.Kind, Result: audit.ResultSuccess,
+					ResourceType: "user_machine", ResourceID: machineID, IdempotencyKey: key, Metadata: recordingAuditMetadata(e, installationGeneration)}); err != nil {
 					return err
 				}
 				existing[key] = true
@@ -201,6 +238,26 @@ func auditEventFor(e OfflineAuditEvent, installationGeneration int64) (string, s
 		return accessDeniedEvent, audit.ResultDenied, metadata
 	}
 	return accessStartedEvent, audit.ResultSuccess, metadata
+}
+
+func recordingAuditMetadata(e OfflineAuditEvent, installationGeneration int64) map[string]any {
+	r := e.Recording
+	m := map[string]any{"recording_id": r.RecordingID, "occurred_at": e.OccurredAt.UTC().Format(time.RFC3339Nano), "installation_generation": installationGeneration}
+	for key, value := range map[string]string{"session_id": r.SessionID, "trigger": r.Trigger, "actor_account_id": r.ActorAccountID, "reason": r.Reason} {
+		if value != "" {
+			m[key] = value
+		}
+	}
+	if len(r.Accounts) > 0 {
+		m["accounts"] = r.Accounts
+	}
+	if e.Kind == recording.KindStarted {
+		m["key_generation"] = r.KeyGeneration
+	}
+	if e.Kind == recording.KindStopped {
+		m["bytes"], m["segments"] = r.Bytes, r.Segments
+	}
+	return m
 }
 
 func stringSet(ctx context.Context, tx *db.Tx, query string, args ...any) (map[string]bool, error) {

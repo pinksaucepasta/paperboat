@@ -44,6 +44,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/peersessions"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewdomain"
 	"github.com/pinksaucepasta/paperboat/server/internal/privateaccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/recordings"
 	"github.com/pinksaucepasta/paperboat/server/internal/releaseauthority"
 	"github.com/pinksaucepasta/paperboat/server/internal/resourceusage"
 	"github.com/pinksaucepasta/paperboat/server/internal/servernodes"
@@ -55,6 +56,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/tunnelv1"
 	"github.com/pinksaucepasta/paperboat/server/internal/usermachines"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/shared/recording"
 )
 
 type ReadinessChecker interface {
@@ -65,6 +67,7 @@ type Options struct {
 	Activity               *activity.Service
 	TeamIdentity           *teamidentity.Service
 	AuditStreams           *auditstream.Service
+	Recordings             *recordings.Service
 	ClientUpdatePolicy     ClientUpdatePolicyAPI
 	OperatorInfrastructure *operatorinfra.Service
 	ServerNodes            *servernodes.Enroller
@@ -342,6 +345,9 @@ func NewRouter(opts Options) http.Handler {
 		if opts.ResourceUsage != nil {
 			mux.HandleFunc("POST /v1/usage/native", resourceUsageNative(opts.RuntimeIdentity, opts.ResourceUsage))
 			mux.HandleFunc("POST /v1/machines/{id}/audit-backlog", machineAuditBacklog(opts.RuntimeIdentity, opts.Machines))
+			if opts.Recordings != nil {
+				mux.HandleFunc("GET "+recording.PolicyPath, machineRecordingPolicy(opts.RuntimeIdentity, opts.Recordings))
+			}
 			mux.Handle("GET /v1/usage", requireAnyAuth(opts.Auth, opts.DeviceAuth, requireScope("account:read", resourceUsageGet(opts.ResourceUsage))))
 		}
 		if opts.Selfhost != nil {
@@ -510,6 +516,9 @@ func NewRouter(opts Options) http.Handler {
 				}
 				if opts.AuditStreams != nil {
 					registerAuditStreamRoutes(mux, opts.AuditStreams, func(h http.Handler) http.Handler { return secure("machines:read", h) }, func(h http.Handler) http.Handler { return secure("machines:connect", requireCSRF(opts.Auth, h)) })
+				}
+				if opts.Recordings != nil {
+					registerRecordingRoutes(mux, opts.Recordings, func(h http.Handler) http.Handler { return secure("machines:read", h) }, func(h http.Handler) http.Handler { return secure("machines:connect", requireCSRF(opts.Auth, h)) })
 				}
 				if opts.TeamIdentity != nil {
 					registerTeamIdentityRoutes(mux, opts.TeamIdentity, func(h http.Handler) http.Handler { return secure("machines:read", h) }, func(h http.Handler) http.Handler { return secure("machines:connect", requireCSRF(opts.Auth, h)) })

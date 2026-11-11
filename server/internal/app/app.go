@@ -65,6 +65,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewv1"
 	"github.com/pinksaucepasta/paperboat/server/internal/privateaccess"
+	"github.com/pinksaucepasta/paperboat/server/internal/recordings"
 	"github.com/pinksaucepasta/paperboat/server/internal/releaseauthority"
 	"github.com/pinksaucepasta/paperboat/server/internal/resourceusage"
 	"github.com/pinksaucepasta/paperboat/server/internal/retention"
@@ -780,6 +781,7 @@ func New(opts Options) (*App, error) {
 		Activity:                 activityLog,
 		TeamIdentity:             teamIdentity,
 		AuditStreams:             auditStreams,
+		Recordings:               recordings.New(store, opts.Config.Recordings, mintKeys, config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL)),
 		NativePrivateAccess:      nativePrivateService,
 		ManagedSSH:               managedSSHService,
 		DiagnosticUploads:        diagnosticUploadService,

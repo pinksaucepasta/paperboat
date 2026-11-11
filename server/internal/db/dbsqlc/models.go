@@ -2147,6 +2147,27 @@ type ProviderRouteCleanupOutbox struct {
 	UpdatedAt    time.Time
 }
 
+type RecordingKey struct {
+	TeamID            string
+	Generation        int64
+	PublicKey         []byte
+	SigningPublicKey  []byte
+	RotationSignature []byte
+	SealedPrevious    []byte
+	CreatedBy         string
+	CreatedAt         time.Time
+}
+
+type RecordingKeyGrant struct {
+	TeamID                 string
+	AccountID              string
+	Generation             int64
+	RecipientSharingPublic []byte
+	Sealed                 []byte
+	GrantedBy              string
+	CreatedAt              time.Time
+}
+
 type RelaySubjectSet struct {
 	NodeID         string
 	ProcessEpoch   string
@@ -2294,6 +2315,25 @@ type Session struct {
 	WorkosSubject                sql.NullString
 }
 
+type SessionRecording struct {
+	ID            string
+	TeamID        string
+	MachineID     string
+	MachineName   string
+	SessionID     string
+	Trigger       string
+	StartedBy     sql.NullString
+	KeyGeneration int64
+	Accounts      []string
+	StartedAt     time.Time
+	EndedAt       sql.NullTime
+	EndReason     sql.NullString
+	Bytes         int64
+	Segments      int64
+	State         string
+	DeletedAt     sql.NullTime
+}
+
 type Shared443NamesV1 struct {
 	Owner       interface{}
 	Passthrough bool
@@ -2351,6 +2391,7 @@ type Team struct {
 	SsoJit               bool
 	DirectoryMappedOnly  bool
 	EnvNamesListable     bool
+	RecordingAdminsOnly  bool
 }
 
 type TeamConfigDefault struct {

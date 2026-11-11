@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/jwks"
+	"github.com/pinksaucepasta/paperboat/shared/recording"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 )
 
@@ -562,6 +563,7 @@ var credentialPolicies = map[string]struct {
 	"private_access":              {audience: "paperboat-edge", scopes: []string{"private:access"}, maxTTL: 2 * time.Minute},
 	"native_private":              {audience: "paperboat-machine", scopes: []string{"private:native"}, maxTTL: 5 * time.Minute},
 	"file_transfer":               {audience: "paperboat-machine", scopes: []string{"file:transfer"}, maxTTL: 5 * time.Minute},
+	recording.CredentialClass:     {audience: "paperboat-machine", scopes: []string{recording.Scope}, maxTTL: recording.TicketLifetime},
 }
 
 // private_access grants use the audience for the concrete edge protocol. The
@@ -850,6 +852,15 @@ func (p *Provider) SignCredential(input CredentialInput) (string, error) {
 		}
 		claims["machine_id"], claims["user_id"], claims["account_id"] = input.MachineID, input.UserID, input.AccountID
 		claims["browser_attachment_id"], claims["browser_public_key_sha256"] = input.BrowserAttachmentID, input.BrowserPublicKeySHA256
+	case recording.CredentialClass:
+		if !validRecordingReplay(input.MachineID, input.UserID, input.AccountID, input.WorkspaceID, input.ResourceKind, input.ResourceID, input.BrowserAttachmentID, input.BrowserPublicKeySHA256) || input.SessionID != "" || input.CLIClientSessionID != "" || input.SourceMachineID != "" {
+			return "", errors.New("recording replay bindings are required")
+		}
+		claims["machine_id"], claims["user_id"], claims["account_id"], claims["workspace_id"] = input.MachineID, input.UserID, input.AccountID, input.WorkspaceID
+		claims["resource_kind"], claims["resource_id"] = input.ResourceKind, input.ResourceID
+		if input.BrowserAttachmentID != "" {
+			claims["browser_attachment_id"], claims["browser_public_key_sha256"] = input.BrowserAttachmentID, input.BrowserPublicKeySHA256
+		}
 	case "exec_operation":
 		if input.MachineID == "" || input.UserID == "" || input.CLIClientSessionID == "" || !ValidOperationID(input.OperationID) {
 			return "", errors.New("exec operation bindings are required")
@@ -1075,6 +1086,10 @@ func (p *Provider) verifyCredential(token, expectedIssuer, expectedClass string,
 		}
 	case "browser_inspector_operation":
 		if claims.MachineID == "" || claims.UserID == "" || claims.AccountID != claims.UserID || claims.BrowserAttachmentID == "" || !validBrowserKeyDigest(claims.BrowserPublicKeySHA256) || claims.SessionID != "" || claims.ExpectedGeneration != 0 || claims.PolicyGeneration != 0 || claims.CLIClientSessionID != "" || claims.SourceMachineID != "" {
+			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
+		}
+	case recording.CredentialClass:
+		if !validRecordingReplay(claims.MachineID, claims.UserID, claims.AccountID, claims.WorkspaceID, claims.ResourceKind, claims.ResourceID, claims.BrowserAttachmentID, claims.BrowserPublicKeySHA256) || claims.SessionID != "" || claims.CLIClientSessionID != "" || claims.SourceMachineID != "" {
 			return CredentialClaims{}, CredentialVerificationError{Code: CredentialClaimsInvalid}
 		}
 	case "exec_operation":
@@ -1548,6 +1563,13 @@ func validateMachineServiceFields(kind, machine, resource, route, protocol, addr
 
 func validPreviewOwnerSessionKind(kind string) bool {
 	return kind == "local_lease" || kind == "foreground" || kind == "lazy_runtime"
+}
+
+// validRecordingReplay: a replay ticket names one recording on one machine for one account of its team; the browser
+// form also binds the E2E attachment and key, the native form neither.
+func validRecordingReplay(machine, user, account, workspace, kind, resource, attachment, keyDigest string) bool {
+	return machine != "" && user != "" && account == user && workspace != "" && kind == recording.ResourceKind && recording.ValidRecordingID(resource) &&
+		(attachment == "") == (keyDigest == "") && (keyDigest == "" || validBrowserKeyDigest(keyDigest))
 }
 
 func processCredentialClass(class string) bool {

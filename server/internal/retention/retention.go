@@ -40,6 +40,9 @@ func batchOf(table, candidates string) string {
 
 // policies run in this order: a parent whose foreign keys do not cascade comes after the children that hold it.
 var policies = []policy{
+	// A recording's index row (the bytes live, and are deleted, on its machine).
+	{"session_recordings", batchOf("session_recordings", `started_at < now()-make_interval(secs=>$2)`),
+		seconds(func(c config.Retention) time.Duration { return c.Recordings })},
 	{"control_config_credentials", batchOf("control_config_credentials", `expires_at < now()-make_interval(secs=>$2)`),
 		seconds(func(c config.Retention) time.Duration { return c.ExpiredCredentials })},
 	// A revoked grant still waiting for its provider revocation keeps the ciphertext the revocation needs.

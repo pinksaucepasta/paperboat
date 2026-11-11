@@ -29,9 +29,11 @@ const (
 	// TopicPrivateRoutes moves when the private-access routes a machine can open change (a route becoming
 	// ready, stopping, moving edge or changing audience). Time-only expiry does not move it.
 	TopicPrivateRoutes = "private_routes"
+	// TopicRecordingPolicy moves when a team machine's recording policy may have changed (shared/recording).
+	TopicRecordingPolicy = "recording_policy"
 )
 
-var topics = []string{TopicMachineAccess, TopicPeerNetwork, TopicPreviews, TopicTunnels, TopicConfig, TopicInventory, TopicMachineServices, TopicPrivateRoutes}
+var topics = []string{TopicMachineAccess, TopicPeerNetwork, TopicPreviews, TopicTunnels, TopicConfig, TopicInventory, TopicMachineServices, TopicPrivateRoutes, TopicRecordingPolicy}
 
 // ValidTopic reports whether name is a topic a host may wait on.
 func ValidTopic(name string) bool { return slices.Contains(topics, name) }

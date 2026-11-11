@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -303,6 +304,12 @@ func savePolicyTx(ctx context.Context, tx *db.Tx, w Workspace, cfg config.Worksp
 		return cur, nil, err
 	}
 	next, errs := compileForSave(in, inv, cfg.Limits())
+	if len(errs) == 0 && w.TeamID != "" && in.kind != "rewritten" {
+		errs, err = recordingEntitlementTx(ctx, tx, w.TeamID, next)
+		if err != nil {
+			return cur, nil, err
+		}
+	}
 	if len(errs) > 0 {
 		return cur, nil, &PolicyInvalidError{Errors: errs}
 	}
@@ -368,8 +375,32 @@ func savePolicyTx(ctx context.Context, tx *db.Tx, w Workspace, cfg config.Worksp
 	if err = envAccessChangedTx(ctx, tx, w.TeamID, changes); err != nil {
 		return cur, nil, err
 	}
+	// A member the policy no longer lets replay anywhere loses their copy of the recording key (history stays as it is).
+	if _, err = tx.Exec(ctx, `DELETE FROM recording_key_grants WHERE team_id=$1 AND account_id NOT IN (SELECT paperboat.recording_viewers($1))`, w.TeamID); err != nil {
+		return cur, nil, err
+	}
 	err = AuditTx(ctx, tx, in.actor, w.TeamID, event, "policy:"+w.TeamID+":"+fmt.Sprint(next0.version), metadata)
 	return next0, changes, err
+}
+
+// recordingEntitlementTx refuses allow rules for session recordings in a team without the Teams plan (a system
+// rewrite after a downgrade keeps them; machines then record nothing, shared/recording Policy.Enabled).
+func recordingEntitlementTx(ctx context.Context, tx *db.Tx, team string, next policy.Compiled) (policy.Errors, error) {
+	var errs policy.Errors
+	for _, r := range next.Store().Rows {
+		if !r.Deny && slices.Contains(policy.RecordingActions, r.Action) {
+			errs = append(errs, policy.Error{Path: fmt.Sprintf("/rules/%d", r.Rule), Code: "team_plan_required", Message: "session recordings (record, recording_view) are part of the Teams plan"})
+			break
+		}
+	}
+	if len(errs) == 0 {
+		return nil, nil
+	}
+	var paid bool
+	if err := tx.QueryRow(ctx, `SELECT team_paid_entitled($1)`, team).Scan(&paid); err != nil || paid {
+		return nil, err
+	}
+	return errs, nil
 }
 
 // envAccessChangedTx applies a policy change to the team ENV: a member the policy no longer

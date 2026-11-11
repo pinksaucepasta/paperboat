@@ -27,6 +27,9 @@ type Retention struct {
 	// SupersededMeshEntries: a peer mesh log entry after a newer entry of the same endpoint replaced it (readers
 	// read the latest entry per endpoint at a sequence they just took, so only a moment-old sequence can need it).
 	SupersededMeshEntries time.Duration `json:"superseded_mesh_entries"`
+	// Recordings: session recording index rows after the recording started (the bytes live on the machine, which
+	// deletes them after Recordings.MachineRetentionDays).
+	Recordings time.Duration `json:"recordings"`
 	// SupportReportsPerAccount keeps an account's newest reports (they also expire on their own).
 	SupportReportsPerAccount int `json:"support_reports_per_account"`
 	// Batch rows per delete statement and the time one pass may take, so a backlog drains without long locks.
@@ -38,7 +41,7 @@ func defaultRetention() Retention {
 	return Retention{
 		ExpiredCredentials: time.Hour, IdempotencyRecords: day, FinishedOperations: 7 * day, EndedSessions: 30 * day,
 		AcknowledgedUsageReceipts: 2 * day, TunnelLogs: 7 * day, DecidedMachineRequests: 90 * day, StripeEvents: 30 * day,
-		SupersededMeshEntries: time.Hour, SupportReportsPerAccount: 1000, Batch: 500, Budget: 20 * time.Second,
+		SupersededMeshEntries: time.Hour, Recordings: 90 * day, SupportReportsPerAccount: 1000, Batch: 500, Budget: 20 * time.Second,
 	}
 }
 
