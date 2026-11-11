@@ -131,7 +131,7 @@ func startCarrierIfStopped(ctx context.Context, c CarrierConfig) error {
 		return err
 	}
 	if !status.Running {
-		if err := native.Start(ctx, installer.DefinitionPath()); err != nil {
+		if err := enableThenStart(ctx, native, installer.DefinitionPath(), status); err != nil {
 			return err
 		}
 	}
