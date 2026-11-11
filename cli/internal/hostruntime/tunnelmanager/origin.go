@@ -209,7 +209,7 @@ func (p NetworkOriginProber) ProbeOrigin(ctx context.Context, route hoststate.Tu
 	if route.OriginScheme != "https" {
 		return nil
 	}
-	config, err := p.originTLSConfig(probeCtx, route)
+	config, err := p.originTLSConfig(probeCtx, withPublicServerName(route, route.MatchHostname))
 	if err != nil {
 		return errors.Join(ErrOriginUnavailable, err)
 	}

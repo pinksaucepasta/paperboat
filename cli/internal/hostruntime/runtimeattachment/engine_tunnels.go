@@ -8,6 +8,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/originhealth"
 	"io"
 	"net/http"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -121,6 +123,8 @@ type engineTunnel struct {
 	hash       string
 	restricted bool
 	routes     []hoststate.TunnelConfigRoute
+	// publicHost is the tunnel's stable hostname, the SNI its origin probe presents for routes without one.
+	publicHost string
 	// capture is the inspector identity of each route (tunnel and route generations), so a
 	// captured request can be replayed.
 	capture map[string]tunnelmanager.CaptureIdentity
@@ -301,7 +305,7 @@ func decodeEngineTunnel(item runtimewire.EngineTunnel) (engineTunnel, error) {
 	if err != nil {
 		return engineTunnel{}, err
 	}
-	tunnel := engineTunnel{generation: item.ConfigGeneration, hash: item.ConfigContentHash, restricted: parsed.AccessMode != "public", capture: map[string]tunnelmanager.CaptureIdentity{}}
+	tunnel := engineTunnel{generation: item.ConfigGeneration, hash: item.ConfigContentHash, restricted: parsed.AccessMode != "public", publicHost: strings.TrimPrefix(parsed.StableEndpoint, "https://"), capture: map[string]tunnelmanager.CaptureIdentity{}}
 	// Replay re-checks a fresh server decision each time; this expiry only bounds the local binding.
 	// shortcut: a route restarts on config changes only, so a tunnel generation bump alone (rename)
 	// leaves its captures unreplayable until the next config change; key restarts on it if that matters.
@@ -419,7 +423,14 @@ func (e *EngineTunnels) reconcileOrigins(ctx context.Context) {
 			}
 			current.stop()
 		}
-		stop := tunnelmanager.StartOriginHealth(ctx, tunnelID, tunnel.routes, e.Prober, e.Service, cmp.Or(e.originInterval, originhealth.DefaultProbeInterval))
+		// The probe presents a public name to loopback/IP https origins, like live traffic does.
+		probed := slices.Clone(tunnel.routes)
+		for index := range probed {
+			if probed[index].MatchHostname == "" {
+				probed[index].MatchHostname = tunnel.publicHost
+			}
+		}
+		stop := tunnelmanager.StartOriginHealth(ctx, tunnelID, probed, e.Prober, e.Service, cmp.Or(e.originInterval, originhealth.DefaultProbeInterval))
 		e.origins[tunnelID] = engineOrigins{generation: tunnel.generation, hash: tunnel.hash, stop: stop}
 	}
 	for tunnelID, current := range e.origins {

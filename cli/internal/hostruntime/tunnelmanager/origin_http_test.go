@@ -374,3 +374,58 @@ func TestOriginHTTPTransportKeepsControlPlaneHeadersOnlyWhenAsked(t *testing.T) 
 		}
 	}
 }
+
+// Caddy/Traefik on https://localhost:443 pick the site by SNI: a loopback or IP origin is sent the
+// visitor's public hostname, each name on its own pooled transport; a DNS-name origin or an explicit
+// tls_server_name keeps its own.
+func TestOriginHTTPTransportSendsPublicSNIToLoopbackOrigins(t *testing.T) {
+	pki := newOriginPKI(t, "app.example.test")
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) { writer.WriteHeader(http.StatusNoContent) }))
+	server.TLS = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+		if hello.ServerName != "app.example.test" {
+			return nil, errors.New("no site for this name")
+		}
+		return &pki.serverTLS, nil
+	}}
+	server.StartTLS()
+	defer server.Close()
+	route := httpsOriginRoute(server.Listener.Addr().String(), "")
+	route.TLSServerName = nil
+	transport := &OriginHTTPTransport{TLS: ReferenceOriginTLSProvider{Secrets: originSecrets{*route.CAReference: pki.caPEM}}}
+	defer transport.CloseIdleConnections()
+	visit := func(publicHost string) error {
+		request, _ := http.NewRequest(http.MethodGet, "https://"+publicHost+"/", nil)
+		request.Header.Set("X-Forwarded-Host", publicHost)
+		response, err := transport.RoundTrip(context.Background(), route, request)
+		if err == nil {
+			response.Body.Close()
+		}
+		return err
+	}
+	if err := visit("app.example.test"); err != nil {
+		t.Fatalf("public SNI to a loopback origin: %v", err)
+	}
+	if err := visit("other.example.test"); err == nil {
+		t.Fatal("a second public name reused the first name's TLS session")
+	}
+	if err := visit("app.example.test"); err != nil {
+		t.Fatalf("first name broken by the second: %v", err)
+	}
+	explicit, dns := "origin.internal.test", "app.internal.test:443"
+	for _, test := range []struct {
+		route hoststate.TunnelConfigRoute
+		want  string
+	}{
+		{hoststate.TunnelConfigRoute{OriginScheme: "https", OriginAddress: "localhost:443"}, "app.example.test"},
+		{hoststate.TunnelConfigRoute{OriginScheme: "https", OriginAddress: "[::1]:8443"}, "app.example.test"},
+		{hoststate.TunnelConfigRoute{OriginScheme: "https", OriginAddress: "192.168.1.10:8006"}, "app.example.test"},
+		{hoststate.TunnelConfigRoute{OriginScheme: "https", OriginAddress: dns}, ""},
+		{hoststate.TunnelConfigRoute{OriginScheme: "https", OriginAddress: "localhost:443", TLSServerName: &explicit}, explicit},
+		{hoststate.TunnelConfigRoute{OriginScheme: "http", OriginAddress: "localhost:80"}, ""},
+	} {
+		got := withPublicServerName(test.route, "app.example.test:443").TLSServerName
+		if (got == nil) != (test.want == "") || got != nil && *got != test.want {
+			t.Errorf("%s: SNI %v, want %q", test.route.OriginAddress, got, test.want)
+		}
+	}
+}

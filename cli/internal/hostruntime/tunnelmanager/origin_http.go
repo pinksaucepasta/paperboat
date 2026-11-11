@@ -56,6 +56,11 @@ func (t *OriginHTTPTransport) RoundTrip(ctx context.Context, route hoststate.Tun
 	if route.ConnectTimeoutMs < 100 || route.IdleTimeoutMs < 1000 {
 		return nil, ErrOriginRequestInvalid
 	}
+	publicHost := request.Header.Get("X-Forwarded-Host")
+	if publicHost == "" {
+		publicHost = request.Host
+	}
+	route = withPublicServerName(route, publicHost)
 	transport, err := t.transportFor(ctx, route)
 	if err != nil {
 		return nil, err
@@ -162,8 +167,34 @@ func (t *OriginHTTPTransport) transportFor(ctx context.Context, route hoststate.
 	if t.transports == nil {
 		t.transports = make(map[string]originRoundTripper)
 	}
+	if len(t.transports) >= maximumOriginTransports { // wildcard routes key by visitor-chosen SNI
+		for oldKey, old := range t.transports {
+			old.CloseIdleConnections()
+			delete(t.transports, oldKey)
+			break
+		}
+	}
 	t.transports[key] = transport
 	return transport, nil
+}
+
+// maximumOriginTransports bounds the pooled origin transports of one generation (one per route
+// and SNI); the oldest-chosen entry is dropped at random when full.
+const maximumOriginTransports = 256
+
+// withPublicServerName makes an https route to localhost or an IP literal present the public
+// hostname as SNI: neither can carry a real certificate name, and Caddy, Traefik and per-site
+// nginx choose the site and certificate by SNI. An explicit tls_server_name or a DNS-name origin
+// keeps its own name. The transport is keyed by TLSServerName, so no shared transport changes.
+func withPublicServerName(route hoststate.TunnelConfigRoute, publicHost string) hoststate.TunnelConfigRoute {
+	if route.OriginScheme != "https" || route.TLSServerName != nil || publicHost == "" || !sharedprotocol.OriginHostIsLocalhostOrIP(route.OriginAddress) {
+		return route
+	}
+	if host, _, err := net.SplitHostPort(publicHost); err == nil {
+		publicHost = host
+	}
+	route.TLSServerName = &publicHost
+	return route
 }
 
 func originTransportKey(route hoststate.TunnelConfigRoute) string {
