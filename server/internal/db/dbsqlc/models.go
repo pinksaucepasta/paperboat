@@ -2364,22 +2364,23 @@ type Session struct {
 }
 
 type SessionRecording struct {
-	ID            string
-	TeamID        string
-	MachineID     string
-	MachineName   string
-	SessionID     string
-	Trigger       string
-	StartedBy     sql.NullString
-	KeyGeneration int64
-	Accounts      []string
-	StartedAt     time.Time
-	EndedAt       sql.NullTime
-	EndReason     sql.NullString
-	Bytes         int64
-	Segments      int64
-	State         string
-	DeletedAt     sql.NullTime
+	ID               string
+	TeamID           string
+	MachineID        string
+	MachineName      string
+	SessionID        string
+	Trigger          string
+	StartedBy        sql.NullString
+	KeyGeneration    int64
+	Accounts         []string
+	StartedAt        time.Time
+	EndedAt          sql.NullTime
+	EndReason        sql.NullString
+	Bytes            int64
+	Segments         int64
+	State            string
+	DeletedAt        sql.NullTime
+	ArchivedSegments int64
 }
 
 type Shared443NamesV1 struct {
@@ -2440,6 +2441,21 @@ type Team struct {
 	DirectoryMappedOnly  bool
 	EnvNamesListable     bool
 	RecordingAdminsOnly  bool
+}
+
+type TeamBucket struct {
+	TeamID        string
+	Endpoint      string
+	Region        string
+	Bucket        string
+	Prefix        string
+	PathStyle     bool
+	AccessKeyID   string
+	Secret        []byte
+	UseRecordings bool
+	UseFiles      bool
+	CheckedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type TeamConfigDefault struct {
