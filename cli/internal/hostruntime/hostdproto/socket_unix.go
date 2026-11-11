@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
@@ -19,6 +20,8 @@ import (
 var (
 	ErrSocketConfig = errors.New("invalid hostd worker socket configuration")
 	ErrUnauthorized = errors.New("hostd worker socket peer is unauthorized")
+	// ErrSocketActive means a live server still accepts on the socket path, so it is not replaced.
+	ErrSocketActive = errors.New("hostd socket is already served by a running process")
 )
 
 const (
@@ -363,7 +366,9 @@ func (s *Server) writeError(ctx context.Context, connection *net.UnixConn, err e
 }
 
 // Listen binds an owner-only socket at path, replacing a stale one, in the
-// lifecycle socket's secured directory.
+// lifecycle socket's secured directory. A socket that still accepts belongs to a live server (a generation that
+// a handover has not retired) and is never unlinked; only one that refuses connections is replaced, as daemonrpc
+// and tailscale safesocket/unixsocket.go do.
 func (s *Server) Listen(path string) (*net.UnixListener, error) {
 	directory := filepath.Dir(path)
 	if !filepath.IsAbs(path) || directory != filepath.Dir(s.config.SocketPath) {
@@ -375,6 +380,13 @@ func (s *Server) Listen(path string) (*net.UnixListener, error) {
 	if info, err := os.Lstat(path); err == nil {
 		if info.Mode()&os.ModeSocket == 0 || info.Mode()&os.ModeSymlink != 0 {
 			return nil, ErrSocketConfig
+		}
+		connection, dialErr := net.DialTimeout("unix", path, 200*time.Millisecond)
+		if dialErr == nil {
+			return nil, errors.Join(ErrSocketActive, connection.Close())
+		}
+		if !errors.Is(dialErr, syscall.ECONNREFUSED) {
+			return nil, causedFailure{message: "hostd lifecycle socket could not tell whether its endpoint is stale", cause: dialErr}
 		}
 		if err := os.Remove(path); err != nil {
 			return nil, causedFailure{message: "hostd lifecycle socket could not replace its stale endpoint", cause: err}

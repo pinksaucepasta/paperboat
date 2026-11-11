@@ -844,3 +844,34 @@ func TestSocketWithoutOpenSSHCountRefusesTheQuery(t *testing.T) {
 		t.Fatal("a worker without the count answered")
 	}
 }
+
+// A socket path a live server still accepts on is never unlinked by another Listen; one whose server died is.
+func TestListenReplacesOnlyAStaleSocket(t *testing.T) {
+	config := testSocketConfig(t)
+	server, err := NewServer(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(filepath.Dir(config.SocketPath), "probe.sock")
+	live, err := server.Listen(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.Listen(path); !errors.Is(err, ErrSocketActive) {
+		t.Fatalf("Listen over a live socket = %v, want ErrSocketActive", err)
+	}
+	connection, err := net.DialTimeout("unix", path, time.Second)
+	if err != nil {
+		t.Fatalf("the live server lost its socket: %v", err)
+	}
+	_ = connection.Close()
+	live.SetUnlinkOnClose(false)
+	if err := live.Close(); err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := server.Listen(path)
+	if err != nil {
+		t.Fatalf("a stale socket was not replaced: %v", err)
+	}
+	_ = replacement.Close()
+}
