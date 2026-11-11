@@ -13,9 +13,9 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/config"
-	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
-	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/trustedkeys"
+	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
+	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 )
 
 const (

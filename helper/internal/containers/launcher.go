@@ -17,6 +17,7 @@ import (
 )
 
 const ownerLabel = "io.paperboat.pbh-owner"
+
 // StartupTimeout bounds a runtime container from start to ready: certificates, registration and
 // its first control pulls.
 const StartupTimeout = 45 * time.Second

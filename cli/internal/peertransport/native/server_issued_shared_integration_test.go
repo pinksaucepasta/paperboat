@@ -552,7 +552,6 @@ func TestServerIssuedCrossAccountNativeRuntime(t *testing.T) {
 	succeeded = true
 }
 
-
 func mustConnectionLimiter(t *testing.T, maximum int) *hostserver.ConnectionLimiter {
 	t.Helper()
 	limiter, err := hostserver.NewConnectionLimiter(maximum)

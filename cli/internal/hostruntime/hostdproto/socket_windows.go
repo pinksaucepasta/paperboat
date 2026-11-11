@@ -150,7 +150,9 @@ func (s *Server) Listen(path string) (net.Listener, error) {
 }
 
 // Serve answers lifecycle requests on listener until ctx ends or listener is closed.
-func (s *Server) Serve(ctx context.Context, listener net.Listener) error { return s.serve(ctx, listener) }
+func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
+	return s.serve(ctx, listener)
+}
 
 func (s *Server) serve(ctx context.Context, listener net.Listener) (result error) {
 	if ctx == nil {

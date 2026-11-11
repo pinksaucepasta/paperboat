@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"testing"
 	"time"
-
 )
 
 func TestSaveResumeAcceptsRealShapedWindowsClientMaterial(t *testing.T) {

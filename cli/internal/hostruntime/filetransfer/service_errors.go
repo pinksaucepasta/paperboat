@@ -24,8 +24,8 @@ const (
 	// UpdateInProgress is the update fence: the receiver is replacing its runtime and admits no new transfer for
 	// a few seconds. A sender waits and retries; it is not the concurrency limit (ResourceLimit).
 	UpdateInProgress Code = "update_in_progress"
-	Canceled           Code = "canceled"
-	DeliveryTimeout    Code = "delivery_timeout"
+	Canceled         Code = "canceled"
+	DeliveryTimeout  Code = "delivery_timeout"
 	// InsufficientStorage means the receiving disk has no room for the files. It is permanent until
 	// space is freed, so a sender must not keep retrying it.
 	InsufficientStorage Code = "insufficient_storage"

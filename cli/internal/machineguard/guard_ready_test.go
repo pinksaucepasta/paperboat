@@ -37,7 +37,7 @@ func TestWaitGuardReadyOutlastsALateStartAndNamesATimeout(t *testing.T) {
 func TestStartGuardWithRetryRestartsAStarvedStart(t *testing.T) {
 	previous, previousAttempts := guardAttemptTimeout, guardStartAttempts
 	t.Cleanup(func() { guardAttemptTimeout, guardStartAttempts = previous, previousAttempts })
-	guardAttemptTimeout, guardStartAttempts = 150*time.Millisecond, 3  // the test's own budget; production values are asserted below
+	guardAttemptTimeout, guardStartAttempts = 150*time.Millisecond, 3 // the test's own budget; production values are asserted below
 	restarts := 0
 	probe := func(context.Context) error {
 		if restarts == 0 {

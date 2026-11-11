@@ -36,9 +36,9 @@ var (
 type Stage string
 
 const (
-	StagePrepared       Stage = "prepared"
-	StageTunnelCreated  Stage = "tunnel_created"
-	StageDomainsReady   Stage = "domains_ready"
+	StagePrepared      Stage = "prepared"
+	StageTunnelCreated Stage = "tunnel_created"
+	StageDomainsReady  Stage = "domains_ready"
 )
 
 type Domain struct {

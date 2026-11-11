@@ -26,8 +26,8 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
+	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcast"
@@ -740,7 +740,6 @@ func mustKey(t *testing.T) (ed25519.PublicKey, ed25519.PrivateKey) {
 	}
 	return public, private
 }
-
 
 func readJSONFile(t *testing.T, ctx context.Context, path string, value any) {
 	t.Helper()

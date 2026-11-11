@@ -21,8 +21,8 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/nativeprivate"
-	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
+	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 )
 
 func TestProductionNativePeerSupervisorRestartsAndShutdownRemainsAwaitable(t *testing.T) {

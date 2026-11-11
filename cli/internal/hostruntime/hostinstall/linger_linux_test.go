@@ -38,7 +38,9 @@ func newLingerFixture(t *testing.T) *lingerFixture {
 		}
 		return os.Remove(path)
 	}
-	t.Cleanup(func() { lingerDirectory, systemdRuntime, runLoginctl, stateOwner = oldDir, oldRuntime, oldRun, oldOwner })
+	t.Cleanup(func() {
+		lingerDirectory, systemdRuntime, runLoginctl, stateOwner = oldDir, oldRuntime, oldRun, oldOwner
+	})
 	return fixture
 }
 
