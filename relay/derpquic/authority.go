@@ -225,9 +225,8 @@ func allowedPairExpiry(a, b Grant, now time.Time) int64 {
 	return latest
 }
 
-// MaxMergedPeers bounds the peers one endpoint's grants name together: the account's endpoint bound
-// (the CLI's endpointidentity.MaxTrustedKeys).
-const MaxMergedPeers = 2048
+// MaxMergedPeers bounds the peers one endpoint's grants name together: the account's endpoint bound.
+const MaxMergedPeers = peernetwork.MaxEndpoints
 
 // MaxGrantPeers bounds the peers, and the peer-relay control peers, one grant part names; an endpoint
 // with more sends one part per chunk of the same generation (the server issues chunks of this size).

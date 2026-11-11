@@ -15,7 +15,7 @@ import (
 // the same E2E browser transport as a terminal, admitted by one recording instead of a terminal session. The replay
 // audit event is written before the ticket is issued (recordings.Service.Replay); permission is checked again at
 // admission.
-const RoleRecording = "recording"
+const RoleRecording = recording.TicketRole
 
 // RecordingReplays answers whether account may replay recording now, and where it is.
 type RecordingReplays interface {

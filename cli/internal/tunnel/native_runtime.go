@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/shared/peerconsumer"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"net"
 	"net/http"
@@ -692,7 +693,7 @@ func newCLINativeAuthority(ctx context.Context, issuer string, store config.Prof
 	relayTLS.MinVersion = tls.VersionTLS13
 	relayTLS.Certificates = []tls.Certificate{leaf}
 	relayTLS.GetClientCertificate = getClientCertificate
-	self := tailnet.NetworkBinding{AccountID: accountID, EndpointID: endpointID, Role: "cli", EndpointGeneration: identity.LocalCertificate.Claims.Generation, QUICCertificateFingerprint: identity.LocalCertificate.Fingerprint(), QUICPublicKey: base64.RawURLEncoding.EncodeToString(identity.LocalCertificate.Claims.QUICPublicKey)}
+	self := tailnet.NetworkBinding{AccountID: accountID, EndpointID: endpointID, Role: peernetwork.RoleCLI, EndpointGeneration: identity.LocalCertificate.Claims.Generation, QUICCertificateFingerprint: identity.LocalCertificate.Fingerprint(), QUICPublicKey: base64.RawURLEncoding.EncodeToString(identity.LocalCertificate.Claims.QUICPublicKey)}
 	authority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: store, Issuer: issuer, Self: self, Keys: keys, LocalMachineID: localMachineID})
 	if err != nil {
 		return nil, nil, nil, err

@@ -52,7 +52,7 @@ func TestRelayGrantsCarryEveryPeerAndItsControlKeyInChunksOfTheRelayBound(t *tes
 		peers = append(peers, networkPeer{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: account, EndpointID: fmt.Sprintf("peer_%03d", i), WireGuardPublicKey: fmt.Sprintf("key_%03d", (i*37)%1000)}},
 			Scopes: []networkScope{{ResourceKind: "machine_network", ResourceID: fmt.Sprintf("network_%03d", i), ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: 443, ExpiresAt: 1}}})
 	}
-	for _, size := range []int{peernetwork.MaxGrantPeers, maximumRelayGrantPeers} {
+	for _, size := range []int{peernetwork.MaxGrantPeers} {
 		chunks := relayGrantChunks(self, peers, size, 1)
 		if want := (len(peers) + size - 1) / size; len(chunks) != want {
 			t.Fatalf("size %d: chunks = %d, want %d", size, len(chunks), want)
@@ -81,7 +81,7 @@ func TestRelayGrantsCarryEveryPeerAndItsControlKeyInChunksOfTheRelayBound(t *tes
 			t.Fatalf("size %d: named %d of 100 peers, %d of 90 control keys", size, len(named), len(control))
 		}
 	}
-	if empty := relayGrantChunks(self, nil, maximumRelayGrantPeers, 1); len(empty) != 1 || len(empty[0].peers) != 0 {
+	if empty := relayGrantChunks(self, nil, peernetwork.MaxGrantPeers, 1); len(empty) != 1 || len(empty[0].peers) != 0 {
 		t.Fatal("an endpoint without peers still gets one grant per node")
 	}
 }
@@ -96,7 +96,7 @@ func TestRelayGrantsGiveUntilRevokedScopesTheGrantExpiryAndOmitKeylessPeers(t *t
 		{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: "keyed", WireGuardPublicKey: "key_a"}}, Scopes: []networkScope{untilRevoked}},
 		{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: "account", EndpointID: "keyless"}}, Scopes: []networkScope{untilRevoked}},
 	}
-	chunks := relayGrantChunks(self, peers, maximumRelayGrantPeers, 1234)
+	chunks := relayGrantChunks(self, peers, peernetwork.MaxGrantPeers, 1234)
 	if len(chunks) != 1 || len(chunks[0].peers) != 1 || len(chunks[0].control) != 1 || chunks[0].control[0] != "key_a" {
 		t.Fatalf("chunks %+v: want the keyed peer only", chunks)
 	}
@@ -139,7 +139,7 @@ func TestRelayGrantsCarryStandingTeamScopesAndStayWithinTheRelayScopeBound(t *te
 			networkScope{ResourceKind: "machine_access", ResourceID: "host", ResourceGeneration: 0, Capability: "exec", Direction: "accept", Port: 443, ExpiresAt: 0}, networkScope{ResourceKind: "machine_access", ResourceID: "host", ResourceGeneration: 7, Capability: "exec", Direction: "accept", Port: 80, ExpiresAt: 0})
 		peers = append(peers, networkPeer{Identity: networkBinding{Binding: peernetwork.Binding{AccountID: "other", EndpointID: fmt.Sprintf("member_%03d", i), WireGuardPublicKey: fmt.Sprintf("member_%03d", i)}}, Scopes: scopes})
 	}
-	chunks := relayGrantChunks(self, peers, maximumRelayGrantPeers, 1234)
+	chunks := relayGrantChunks(self, peers, peernetwork.MaxGrantPeers, 1234)
 	named, members := map[string]bool{}, 0
 	for _, chunk := range chunks {
 		total := 0
@@ -166,7 +166,7 @@ func TestRelayGrantsCarryStandingTeamScopesAndStayWithinTheRelayScopeBound(t *te
 				}
 			}
 		}
-		if total != chunk.scopes || total > maximumRelayGrantScopes || len(chunk.peers) > maximumRelayGrantPeers {
+		if total != chunk.scopes || total > peernetwork.MaxGrantScopes || len(chunk.peers) > peernetwork.MaxGrantPeers {
 			t.Fatalf("a grant holds %d scopes (counted %d) for %d peers, the relay accepts 128 scopes", total, chunk.scopes, len(chunk.peers))
 		}
 	}
