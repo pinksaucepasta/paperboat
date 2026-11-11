@@ -53,6 +53,8 @@ type MachinePreviewRuntimeConfig struct {
 	Inspector     *inspector.Store
 	Registry      *inspector.Registry
 	InspectorHTTP tunnelmanager.AuthenticatedInspectorHTTP
+	// InboxPath is the machine's Inbox folder, served by "file" previews (shared Inbox files).
+	InboxPath func() (string, error)
 }
 
 // MachinePreviewRuntime owns one authenticated machine carrier source and
@@ -134,6 +136,7 @@ func NewMachinePreviewRuntime(config MachinePreviewRuntimeConfig) (*MachinePrevi
 		OriginCloseTimeout: config.OriginCloseTimeout, ObserveStreamError: config.ObserveStreamError,
 		BrowserIngress: browserIngress, BrowserRouteGeneration: endpointRouteRevision,
 		Inspector: config.Inspector, Registry: config.Registry, InspectorHTTP: config.InspectorHTTP,
+		InboxPath: config.InboxPath,
 	}
 	return &MachinePreviewRuntime{sessions: sessions, private: privateAccess, auth: auth, machineID: registration.MachineID, route: route}, nil
 }

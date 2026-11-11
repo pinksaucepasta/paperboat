@@ -63,6 +63,7 @@ type productionPreviewAssemblyConfig struct {
 	InspectorStore    *inspector.Store
 	InspectorRegistry *inspector.Registry
 	InspectorHTTP     tunnelmanager.AuthenticatedInspectorHTTP
+	InboxPath         func() (string, error)
 }
 
 func newProductionPreviewAssembly(config productionPreviewAssemblyConfig) (*productionPreviewAssembly, error) {
@@ -79,6 +80,7 @@ func newProductionPreviewAssembly(config productionPreviewAssemblyConfig) (*prod
 		Inspector:     config.InspectorStore,
 		Registry:      config.InspectorRegistry,
 		InspectorHTTP: config.InspectorHTTP,
+		InboxPath:     config.InboxPath,
 		ObserveStreamError: func(err error) {
 			if err != nil {
 				errorreport.Current().CaptureFailure(config.RunContext, "paperboat-daemon", "preview", "delivery", "transport_failed", err)

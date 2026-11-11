@@ -379,7 +379,7 @@ func validateSessionConfig(config SessionConfig) error {
 
 func validateLeaseTarget(target LeaseTarget) error {
 	scheme := strings.ToLower(strings.TrimSpace(target.Scheme))
-	if scheme != "http" && scheme != "https" && scheme != "h2c" && scheme != "unix" && scheme != "tcp" {
+	if scheme != "http" && scheme != "https" && scheme != "h2c" && scheme != "unix" && scheme != "tcp" && scheme != "file" {
 		return fmt.Errorf("%w: target scheme %q is unsupported", ErrSessionInvalid, target.Scheme)
 	}
 	if strings.TrimSpace(target.Address) == "" || len(target.Address) > 512 || strings.ContainsAny(target.Address, "\r\n") {

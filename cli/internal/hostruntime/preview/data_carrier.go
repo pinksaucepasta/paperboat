@@ -410,6 +410,7 @@ type DataCarrierPreviewCarrier struct {
 	observe                func(error)
 	ownHub                 bool
 	originProbeInterval    time.Duration
+	inboxPath              func() (string, error)
 	health                 *originhealth.Tracker
 
 	mu        sync.Mutex
@@ -443,6 +444,8 @@ type DataCarrierPreviewCarrierConfig struct {
 	// OriginProbeInterval is how often the app is probed while the preview runs; zero selects
 	// originhealth.DefaultProbeInterval.
 	OriginProbeInterval time.Duration
+	// InboxPath is the machine's Inbox folder, the home of "file" preview targets.
+	InboxPath func() (string, error)
 }
 
 func NewDataCarrierPreviewCarrier(config DataCarrierPreviewCarrierConfig) (*DataCarrierPreviewCarrier, error) {
@@ -485,7 +488,7 @@ func NewDataCarrierPreviewCarrier(config DataCarrierPreviewCarrierConfig) (*Data
 	if config.OriginDialTimeout <= 0 || config.OriginCloseTimeout <= 0 {
 		return nil, ErrDataCarrierPreviewInvalid
 	}
-	return &DataCarrierPreviewCarrier{hub: config.Hub, active: config.Active, identity: config.Identity, routeID: config.RouteID, dialer: config.DialOrigin, browserIngress: config.BrowserIngress, browserRouteGeneration: config.BrowserRouteGeneration, inspector: config.Inspector, registry: config.Registry, inspectorHTTP: config.InspectorHTTP, max: config.MaxStreams, dialWait: config.OriginDialTimeout, closeWait: config.OriginCloseTimeout, observe: config.ObserveStreamError, ownHub: ownHub, originProbeInterval: config.OriginProbeInterval}, nil
+	return &DataCarrierPreviewCarrier{hub: config.Hub, active: config.Active, identity: config.Identity, routeID: config.RouteID, dialer: config.DialOrigin, browserIngress: config.BrowserIngress, browserRouteGeneration: config.BrowserRouteGeneration, inspector: config.Inspector, registry: config.Registry, inspectorHTTP: config.InspectorHTTP, max: config.MaxStreams, dialWait: config.OriginDialTimeout, closeWait: config.OriginCloseTimeout, observe: config.ObserveStreamError, ownHub: ownHub, originProbeInterval: config.OriginProbeInterval, inboxPath: config.InboxPath}, nil
 }
 
 func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready func(Lease) error) error {
@@ -784,7 +787,9 @@ func (c *DataCarrierPreviewCarrier) isClosed() bool {
 func (c *DataCarrierPreviewCarrier) dialOrigin(ctx context.Context, target LeaseTarget) (io.ReadWriteCloser, error) {
 	var connection io.ReadWriteCloser
 	var err error
-	if c.dialer != nil {
+	if strings.EqualFold(target.Scheme, "file") {
+		connection, err = dialFileOrigin(c.inboxPath, target.Address)
+	} else if c.dialer != nil {
 		connection, err = c.dialer(ctx, target)
 	} else {
 		connection, err = dialPreviewOrigin(ctx, target)
@@ -803,7 +808,8 @@ func (c *DataCarrierPreviewCarrier) dialOrigin(ctx context.Context, target Lease
 // and a small TCP probe covers the time without visitors. Changes are reported to whoever owns
 // the lease (the dispatch layer) through the report hub.
 func (c *DataCarrierPreviewCarrier) startOriginHealth(ctx context.Context, lease Lease) {
-	if lease.LazyLifecycle != nil || strings.TrimSpace(lease.Target.Address) == "" {
+	// A shared file has no app to watch: each visit opens the file again.
+	if lease.LazyLifecycle != nil || strings.TrimSpace(lease.Target.Address) == "" || strings.EqualFold(lease.Target.Scheme, "file") {
 		return
 	}
 	tracker := originhealth.New(func(event originhealth.Event) { previewOriginReports.report(lease.ID, event) }, 0, nil)

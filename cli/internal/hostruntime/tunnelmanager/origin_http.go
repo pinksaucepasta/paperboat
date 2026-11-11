@@ -48,7 +48,7 @@ func (t *OriginHTTPTransport) RoundTrip(ctx context.Context, route hoststate.Tun
 		return nil, ErrOriginRequestInvalid
 	}
 	switch route.OriginScheme {
-	case "http", "h2c", "https", "unix":
+	case "http", "h2c", "https", "unix", "file":
 	default:
 		return nil, ErrOriginRequestInvalid
 	}
@@ -62,11 +62,11 @@ func (t *OriginHTTPTransport) RoundTrip(ctx context.Context, route hoststate.Tun
 	out := request.Clone(ctx)
 	out.RequestURI = ""
 	out.URL.Scheme = route.OriginScheme
-	if route.OriginScheme == "h2c" || route.OriginScheme == "unix" {
+	if route.OriginScheme == "h2c" || route.OriginScheme == "unix" || route.OriginScheme == "file" {
 		out.URL.Scheme = "http"
 	}
 	out.URL.Host = route.OriginAddress
-	if route.OriginScheme == "unix" {
+	if route.OriginScheme == "unix" || route.OriginScheme == "file" {
 		out.URL.Host = "paperboat-origin.invalid"
 	}
 	if route.HostOverride != nil {
@@ -116,9 +116,13 @@ func (t *OriginHTTPTransport) transportFor(ctx context.Context, route hoststate.
 		MaxIdleConnsPerHost:    2,
 		MaxResponseHeaderBytes: maximumOriginResponseHeaderBytes,
 	}
-	if route.OriginScheme == "unix" {
+	if route.OriginScheme == "unix" || route.OriginScheme == "file" {
+		// A "file" origin is served in process; only the preview carrier's dialer can reach it.
+		if route.OriginScheme == "file" && t.Dialer == nil {
+			return nil, ErrInvalidConfig
+		}
 		standard.DialContext = func(dialCtx context.Context, _, _ string) (net.Conn, error) {
-			return dialer.DialContext(dialCtx, "unix", route.OriginAddress)
+			return dialer.DialContext(dialCtx, route.OriginScheme, route.OriginAddress)
 		}
 	}
 	if route.OriginScheme == "https" {

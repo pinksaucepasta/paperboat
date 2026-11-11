@@ -321,7 +321,7 @@ func equalPreviewOptionalTime(left, right *time.Time) bool {
 
 func validatePreviewLeaseTarget(target PreviewLeaseTarget) error {
 	scheme := strings.ToLower(strings.TrimSpace(target.Scheme))
-	if scheme != "http" && scheme != "https" && scheme != "h2c" && scheme != "unix" && scheme != "tcp" {
+	if scheme != "http" && scheme != "https" && scheme != "h2c" && scheme != "unix" && scheme != "tcp" && scheme != "file" {
 		return fmt.Errorf("%w: target scheme is unsupported", ErrPreviewLeaseInvalid)
 	}
 	if strings.TrimSpace(target.Address) == "" || len(target.Address) > 512 || strings.ContainsAny(target.Address, "\r\n") {

@@ -3,6 +3,7 @@ package preview
 import (
 	"bufio"
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -57,7 +58,7 @@ func normalizePreviewTarget(target LeaseTarget) LeaseTarget {
 
 func isPreviewHTTPScheme(scheme string) bool {
 	switch strings.ToLower(strings.TrimSpace(scheme)) {
-	case "http", "https", "h2c":
+	case "http", "https", "h2c", "file":
 		return true
 	default:
 		return false
@@ -137,7 +138,7 @@ func (c *DataCarrierPreviewCarrier) previewHTTPRoute(routeID string, target Leas
 // close with their stream; the caller owns idle-connection cleanup.
 func (c *DataCarrierPreviewCarrier) previewHTTPTransport(target LeaseTarget) *tunnelmanager.OriginHTTPTransport {
 	transport := &tunnelmanager.OriginHTTPTransport{}
-	if c != nil && c.dialer != nil {
+	if c != nil && (c.dialer != nil || strings.EqualFold(target.Scheme, "file")) {
 		transport.Dialer = previewBrowserDialer{carrier: c, target: target}
 	}
 	return transport
@@ -179,7 +180,13 @@ func (d previewBrowserDialer) DialContext(ctx context.Context, network, address 
 	if target.Scheme == "https" {
 		target.Scheme = "http"
 	}
-	connection, err := d.carrier.dialer(ctx, target)
+	var connection io.ReadWriteCloser
+	var err error
+	if strings.EqualFold(target.Scheme, "file") {
+		connection, err = dialFileOrigin(d.carrier.inboxPath, target.Address)
+	} else {
+		connection, err = d.carrier.dialer(ctx, target)
+	}
 	if err != nil {
 		return nil, err
 	}

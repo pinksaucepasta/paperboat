@@ -13,6 +13,8 @@ import (
 	"io"
 	"net/url"
 	"strings"
+
+	"github.com/pinksaucepasta/paperboat/internal/inbox"
 )
 
 func validateAttachmentTarget(target LeaseTarget) error {
@@ -21,6 +23,11 @@ func validateAttachmentTarget(target LeaseTarget) error {
 	}
 	switch strings.ToLower(target.Scheme) {
 	case "http", "https", "h2c", "tcp", "unix":
+		return nil
+	case "file":
+		if !inbox.ValidFileID(target.Address) {
+			return fmt.Errorf("%w: invalid inbox file id", ErrAttachmentBinding)
+		}
 		return nil
 	default:
 		return fmt.Errorf("%w: unsupported attachment target scheme", ErrAttachmentBinding)
