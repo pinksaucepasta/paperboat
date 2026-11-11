@@ -4,7 +4,7 @@ Disconnect the team's bucket
 
 ### Synopsis
 
-Disconnect the bucket. What it already holds stays there, and recordings stay on their machines.
+Disconnect the team's bucket. Paperboat forgets the stored access key and stops giving machines and browsers links to it. What the bucket already holds stays there for the team to manage, and terminal recordings stay on their machines, where they can still be replayed while the machine is online.
 
 JSON output is supported with --json.
 
