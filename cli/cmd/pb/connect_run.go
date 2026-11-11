@@ -333,7 +333,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	for attempt := 0; attempt <= d.cfg.Connect.DialRetries; attempt++ {
 		resolveRequest := resolver.ConnectRequest{Machine: machineRef, Credential: cred, TerminalSessionID: terminalSessionID, CreateTerminalSession: createSession}
 		if target.kind == environmentUserMachine && resolvedMachine.ID != "" && resolvedMachine.InstallationGeneration > 0 {
-			resolveRequest.ResolvedMachine = &resolver.ResolvedMachine{ID: resolvedMachine.ID, Name: resolvedMachine.Alias, State: resolvedMachine.State, Generation: uint64(resolvedMachine.InstallationGeneration)}
+			resolveRequest.ResolvedMachine = &resolver.ResolvedMachine{ID: resolvedMachine.ID, Name: resolvedMachine.Alias, State: resolvedMachine.State, Generation: uint64(resolvedMachine.InstallationGeneration), EnvironmentID: resolvedMachine.EnvironmentID}
 		}
 		info, err = d.resolver.Resolve(ctx, resolveRequest)
 		if err == nil {
@@ -341,7 +341,9 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 				created := info.TerminalSession
 				if terminalSessionID == "" {
 					terminalSessionID = created.ID
-					createdSessionID, createdMachineID = created.ID, info.MachineID
+					if info.Terminal == nil || !info.Terminal.Auth.Offline { // the server never heard of an offline session
+						createdSessionID, createdMachineID = created.ID, info.MachineID
+					}
 				}
 				if created.Name != "" && created.Name != terminalSessionName {
 					terminalSessionName = created.Name
