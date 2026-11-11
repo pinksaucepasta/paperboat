@@ -1957,5 +1957,7 @@
    "2026-11-11T10:00:51.509Z rc=0 dur_ms=2577 out=winrunner",
    "2026-11-11T10:00:52.510Z rc=0 dur_ms=2564 out=winrunner"
   ]
- }
+ },
+  "part_b2": {"run": "q1, hostd one service per generation (W21 Part B step 2, 1d2008fcf), pb install over a Part A install on winpool-4", "no_exec_completing_s": 2.0, "hostd_down_s": 1.8, "samples": 1, "notes": ["the old hostd generation is stopped, the new one started under its own service name; the sweep removed the old service, no orphans"]},
+  "scheduled_hop_10_11": {"run": "official 2026.11.10.10 -> 2026.11.10.11 scheduled update (update_scheduled.py --lead-minutes 3) on a fresh official .10 install, Windows runner, non-retrying probe from a Linux peer every 1 s", "status": "PASS", "no_exec_completing_s": 44.5, "longest_failing_run_s": 40.0, "probes": 1499, "failed": 42, "timeline_utc": {"activator_running": "11:19:05.0", "first_probe_failed": "11:19:05.5", "hostd_stopped": "11:19:26.7", "hostd_running": "11:19:46.4", "first_probe_ok": "11:19:45.5"}, "notes": ["the activator runs the previous release's pinned helper, so this hop ran 2026.11.10.10's activation code: it is the before figure again (hop 9->10: 43.8 s), not the fixed path", "execs are refused from the update gate's drain (11:19:05) until the new hostd serves; the first hop that runs the fixed activation is one from a release containing 7f4cc1054 and later"]}
 }
