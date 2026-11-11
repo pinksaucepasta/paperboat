@@ -80,6 +80,7 @@ type regionalRecovery struct {
 	ready     chan struct{}
 	readyOnce sync.Once
 	// provisioning is set while a background provisional preparation for a direct peer runs.
+	repair       atomic.Bool // a carrier lost its path; cleared after a successful preparation
 	provisioning atomic.Bool
 	inbox        chan regionalInbound
 	status       RegionalStatus
@@ -617,7 +618,7 @@ func (r *regionalRecovery) run(ctx context.Context) {
 		// Tailscale's endpoint.heartbeat stops after sessionActiveTimeout
 		// (wgengine/magicsock/endpoint.go). With no pair, park before probes
 		// and map publications. receive still answers inbound relay control.
-		if r.pair() == "" {
+		if r.pair() == "" && !r.repair.Load() {
 			timer.Stop()
 			continue
 		}
@@ -777,6 +778,7 @@ func (r *regionalRecovery) run(ctx context.Context) {
 			continue
 		}
 		if prepared.Load() > 0 {
+			r.repair.Store(false)
 			if since, was := fence.clear(); was {
 				diagnosticlog.TryInfo("relays accept this machine again", "refused_for", time.Since(since).Round(time.Second).String())
 			}

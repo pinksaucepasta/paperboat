@@ -1,6 +1,7 @@
 package tailnet
 
 import (
+	"context"
 	"time"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=peer-path-accounting
 	"tailscale.com/derp"
@@ -57,6 +58,25 @@ type usageObservedCarrier struct {
 	namespace [32]byte
 }
 
+// A lost listening path is real recovery demand even before a session exists.
+// Normal idle grant renewals do not wake recovery; a broken carrier does.
+func (c *usageObservedCarrier) lostPath() {
+	c.authority.mu.Lock()
+	r := c.authority.recovery
+	c.authority.mu.Unlock()
+	if r != nil && r.repair.CompareAndSwap(false, true) {
+		r.poke()
+	}
+}
+
+func (c *usageObservedCarrier) Connect(ctx context.Context) error {
+	err := c.DERPCarrier.Connect(ctx)
+	if err != nil && ctx.Err() == nil {
+		c.lostPath()
+	}
+	return err
+}
+
 func (c *usageObservedCarrier) Transport() string {
 	if reporter, ok := c.DERPCarrier.(interface{ Transport() string }); ok {
 		return reporter.Transport()
@@ -79,6 +99,9 @@ func (c *usageObservedCarrier) SendControl(peer key.NodePublic, data []byte) err
 }
 func (c *usageObservedCarrier) RecvDetail() (derp.ReceivedMessage, int, error) {
 	message, generation, err := c.DERPCarrier.RecvDetail()
+	if err != nil {
+		c.lostPath()
+	}
 	if packet, ok := message.(derp.ReceivedPacket); err == nil && ok && wireGuardData(packet.Data) {
 		c.record(packet.Source, true, time.Now())
 	}

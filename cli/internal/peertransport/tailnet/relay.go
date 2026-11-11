@@ -103,7 +103,7 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 			a.relay.controlPeers = append(a.relay.controlPeers, peer)
 		}
 		controlPeers := append([]key.NodePublic(nil), a.relay.controlPeers...)
-		if recovery := a.relay.recovery; recovery != nil && resultErr == nil && recovery.pair() != "" {
+		if recovery := a.relay.recovery; recovery != nil && resultErr == nil && (recovery.pair() != "" || recovery.repair.Load()) {
 			// Tailscale re-STUNs at once on a DERP map update; do not wait out the probe delay.
 			select {
 			case recovery.grantWake <- struct{}{}:
