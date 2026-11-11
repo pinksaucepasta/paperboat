@@ -111,22 +111,12 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		})
 	}
 	connection, err := dial(c.Context, descriptor)
-	initialUncertain := false
-	if err != nil {
-		var uncertain *tunnel.ExecStartUncertainError
-		if errors.As(err, &uncertain) || errors.Is(err, localapi.ErrExecStartUncertain) {
-			initialUncertain = true
-			observeExecFailure(c.Context, err)
-			initial := reattach.New(reattach.Policy{Attempts: 2, Backoff: execRecoveryBackoff, Retryable: func(err error) bool {
-				var uncertain *tunnel.ExecStartUncertainError
-				return errors.As(err, &uncertain) || errors.Is(err, localapi.ErrExecStartUncertain)
-			}})
-			err = initial.Run(c.Context, func(context.Context) error {
-				var attemptErr error
-				connection, attemptErr = dial(c.Context, descriptor)
-				return attemptErr
-			})
-		}
+	initialUncertain := err != nil && execStartUncertain(err)
+	if initialUncertain {
+		observeExecFailure(c.Context, err)
+		connection, err = retryUncertainExecStart(c.Context, func(ctx context.Context) (tunnel.ExecConn, error) {
+			return dial(ctx, descriptor)
+		})
 	}
 	if err != nil {
 		var uncertain *tunnel.ExecStartUncertainError
@@ -387,9 +377,10 @@ const execReattachAttempts = 40
 // execReattachAttemptTimeout bounds one reattach attempt; the daemon's own peer open takes up to 10 s.
 var execReattachAttemptTimeout = 15 * time.Second
 
-// execReattachWindow bounds one recovery: the ~24 s execRecoveryBackoff sleeps across all attempts plus one attempt
-// at its execReattachAttemptTimeout. Attempts alone do not bound time: 40 attempts that each hang to 15 s take 10 min.
-var execReattachWindow = 40 * time.Second
+// execReattachWindow bounds one recovery: it outlasts a machine restarting for an update (a Windows worker was
+// unavailable 41 and 48 s through pb install on winpool-8; 40 s dropped the exec 2 s before it was back). Attempts alone
+// do not bound time: 40 attempts that each hang to 15 s take 10 min.
+var execReattachWindow = 90 * time.Second
 
 // recoverExecConnection runs one recovery under execReattachWindow; the attempt budget stays recovery's own.
 func recoverExecConnection(
@@ -471,9 +462,33 @@ func execRecoveryBackoff(attempt int) time.Duration {
 	}
 	return min(time.Duration(attempt-20)*100*time.Millisecond, 2*time.Second)
 }
-func retryableExecReattachment(err error) bool {
+func execStartUncertain(err error) bool {
 	var uncertain *tunnel.ExecStartUncertainError
-	return errors.As(err, &uncertain) || errors.Is(err, localapi.ErrExecStartUncertain) || retryableInitialConnectFailure(err) || machineOfflineError(err) || errors.Is(err, errExecInputFlush)
+	return errors.As(err, &uncertain) || errors.Is(err, localapi.ErrExecStartUncertain)
+}
+
+// retryUncertainExecStart retries an exec whose start is uncertain, with the same operation ID (the host runs it at
+// most once), for as long as a running exec may reattach: a machine restarting for an update answers again within that
+// window, where three 10 s peer opens gave up first (winpool pb install: worker unavailable 41 s, pb exec failed at 31 s).
+func retryUncertainExecStart(ctx context.Context, dial func(context.Context) (tunnel.ExecConn, error)) (tunnel.ExecConn, error) {
+	recovery := reattach.New(reattach.Policy{Attempts: execReattachAttempts, Backoff: execRecoveryBackoff, Retryable: execStartUncertain})
+	var uncertain error
+	connection, err := recoverExecConnection(ctx, recovery, func(ctx context.Context) (tunnel.ExecConn, error) {
+		connection, err := dial(ctx)
+		if execStartUncertain(err) {
+			uncertain = err
+		}
+		return connection, err
+	})
+	if errors.Is(err, reattach.ErrExhausted) && uncertain != nil {
+		// The window ending cancelled the last open; the outcome is still that the start is uncertain.
+		return nil, uncertain
+	}
+	return connection, err
+}
+
+func retryableExecReattachment(err error) bool {
+	return execStartUncertain(err) || retryableInitialConnectFailure(err) || machineOfflineError(err) || errors.Is(err, errExecInputFlush)
 }
 
 func safeExecError(err error) string {
