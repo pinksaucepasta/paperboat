@@ -5,7 +5,7 @@
 # on a Linux host that you own and a prebuilt test binary:
 #   (cd cli && CGO_ENABLED=0 go test -c -o /tmp/origin.test ./internal/hostruntime/tunnelmanager)
 #   DOCKER="sudo docker" PB_MATRIX_TEST_BIN=/tmp/origin.test tools/device-smoke/origin_proxy_matrix.sh
-# Containers use the prefix tlshttps- and are removed on exit. Exit 1 when a promised cell fails.
+# PB_MATRIX_LOGS="httpd nginx" prints those containers' logs. Containers use the prefix tlshttps- and are removed on exit. Exit 1 when a promised cell fails.
 set -euo pipefail
 DOCKER=${DOCKER:-docker}
 BIN=${PB_MATRIX_TEST_BIN:?set PB_MATRIX_TEST_BIN to a go test -c binary of internal/hostruntime/tunnelmanager}
@@ -50,22 +50,30 @@ PB_PROXY_HOST=$HOST SSL_CERT_FILE="$W/trust.pem" SSL_CERT_DIR=/nonexistent \
 PB_PROXY_MATRIX="caddy=11080,11443;caddy-internal=12080,12443;caddy-acme=13080,13443;traefik=14080,14443;nginx=15080,15443;httpd=16080,16443" \
   "$BIN" -test.run TestOriginProxyMatrix -test.v | grep '^MATRIX ' | sed 's/^MATRIX //' > "$W/cells.jsonl"
 
+for ct in ${PB_MATRIX_LOGS:-}; do echo "--- logs $ct"; $DOCKER logs --tail 15 "tlshttps-$ct" 2>&1; done
 python3 - "$W/cells.jsonl" <<'PY'
 import json, sys
 cells = [json.loads(l) for l in open(sys.argv[1])]
-modes = ["a-http", "b-https", "c-https-sni"]
-print("%-15s %-30s %-30s %-30s" % ("server", *["a: http origin", "b: https origin", "c: https + public host SNI"]))
-failed = 0
+modes = ["a-http", "b-https", "c-https-sni", "C8-sse", "C12-range", "C13-expect", "F-force-ssl"]
+heads = ["a http origin", "b https origin", "c https+SNI", "SSE", "Range", "Expect", "force-ssl app"]
 def text(c):
     r = c["result"]
-    if r == "ok": return "ok host=%s xfp=%s" % (c.get("host"), c.get("xfp"))
-    if r == "loop": return "LOOP (%d hops)" % c["hops"]
-    if r == "app_refuses": return "app refuses (xfp=%s)" % c.get("xfp")
-    return "%s: %s" % (r, str(c.get("detail", ""))[:60])
+    if r == "ok": return "ok"
+    if r == "loop": return "LOOP"
+    if r == "app_refuses": return "refuses"
+    if r == "origin_error":
+        d = str(c.get("detail", ""))
+        return "tls-name" if "valid for" in d else "tls-alert" if "remote error" in d else "error"
+    return r
+print("%-15s" % "server" + "".join("%-16s" % h for h in heads))
 for s in dict.fromkeys(c["server"] for c in cells):
     row = {c["mode"]: c for c in cells if c["server"] == s}
-    print("%-15s %-30s %-30s %-30s" % (s, *[text(row[m])[:29] for m in modes]))
+    print("%-15s" % s + "".join("%-16s" % (text(row[m]) if m in row else "-") for m in modes))
+print("\nwhat the app saw through mode c (X-Forwarded-* the edge sent are: proto=https host=public for=client):")
+for c in cells:
+    if c["mode"] == "c-https-sni" and c["result"] == "ok":
+        print("  %-15s host=%s xfp=%s xfh=%s xff=%s" % (c["server"], c.get("host"), c.get("xfp"), c.get("xfh"), c.get("xff")))
 print()
 for c in cells:
-    if c["result"] != "ok": print("  %s / %s: %s %s" % (c["server"], c["mode"], c["result"], c.get("detail", "")))
+    if c["result"] != "ok": print("  %s / %s: %s %s" % (c["server"], c["mode"], c["result"], str(c.get("detail", ""))[:140]))
 PY

@@ -7,6 +7,7 @@ http {
   server {
     listen 443 ssl;
     server_name @HOST@;
+    client_max_body_size 0;
     ssl_certificate /certs/leaf.crt;
     ssl_certificate_key /certs/leaf.key;
     location / {

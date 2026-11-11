@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
 )
@@ -41,24 +42,91 @@ func TestOriginProxyMatrix(t *testing.T) {
 			if mode.scheme == "https" {
 				route.TLSVerification = "system"
 			}
-			cell := browse(t, route, host)
-			cell["server"], cell["mode"] = name, mode.name
-			line, _ := json.Marshal(cell)
-			fmt.Println("MATRIX " + string(line))
+			emit(name, mode.name, browse(t, route, host, "/"))
+			if mode.name == "c-https-sni" { // the classes run through the mode that works everywhere today
+				for class, probe := range map[string]func(hoststate.TunnelConfigRoute, string) map[string]any{"C8-sse": probeSSE, "C12-range": probeRange, "C13-expect": probeExpect, "F-force-ssl": probeForceSSL} {
+					emit(name, class, probe(route, host))
+				}
+			}
 		}
 	}
 }
 
+func emit(server, mode string, cell map[string]any) {
+	cell["server"], cell["mode"] = server, mode
+	line, _ := json.Marshal(cell)
+	fmt.Println("MATRIX " + string(line))
+}
+
+func request(route hoststate.TunnelConfigRoute, host, method, path string, body io.Reader, header map[string]string) (*http.Response, error) {
+	req, _ := http.NewRequest(method, "https://"+host+path, body)
+	req.Host = host
+	req.Header.Set("X-Forwarded-Proto", "https")
+	for name, value := range header {
+		req.Header.Set(name, value)
+	}
+	return (&OriginHTTPTransport{}).RoundTrip(context.Background(), route, req)
+}
+
+// probeSSE: the first event must reach the visitor before the app has finished (events are 0.7 s apart).
+func probeSSE(route hoststate.TunnelConfigRoute, host string) map[string]any {
+	start := time.Now()
+	response, err := request(route, host, http.MethodGet, "/sse", nil, map[string]string{"Accept": "text/event-stream"})
+	if err != nil {
+		return map[string]any{"result": "origin_error", "detail": err.Error()}
+	}
+	defer response.Body.Close()
+	first := make([]byte, 1)
+	if _, err := io.ReadFull(response.Body, first); err != nil {
+		return map[string]any{"result": "origin_error", "detail": err.Error()}
+	}
+	elapsed := time.Since(start)
+	if elapsed > 500*time.Millisecond {
+		return map[string]any{"result": "buffered", "detail": fmt.Sprintf("first event after %dms", elapsed.Milliseconds())}
+	}
+	return map[string]any{"result": "ok", "detail": fmt.Sprintf("first event after %dms", elapsed.Milliseconds())}
+}
+
+func probeRange(route hoststate.TunnelConfigRoute, host string) map[string]any {
+	response, err := request(route, host, http.MethodGet, "/range", nil, map[string]string{"Range": "bytes=100-199"})
+	if err != nil {
+		return map[string]any{"result": "origin_error", "detail": err.Error()}
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != http.StatusPartialContent || len(body) != 100 {
+		return map[string]any{"result": "range_lost", "detail": fmt.Sprintf("status %d, %d bytes", response.StatusCode, len(body))}
+	}
+	return map[string]any{"result": "ok"}
+}
+
+func probeExpect(route hoststate.TunnelConfigRoute, host string) map[string]any {
+	response, err := request(route, host, http.MethodPost, "/upload", strings.NewReader(strings.Repeat("x", 5<<20)), map[string]string{"Expect": "100-continue"})
+	if err != nil {
+		return map[string]any{"result": "origin_error", "detail": err.Error()}
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return map[string]any{"result": "app_refuses", "detail": fmt.Sprintf("status %d", response.StatusCode)}
+	}
+	return map[string]any{"result": "ok"}
+}
+
+// probeForceSSL: an app that redirects to https unless the proxy told it the request was https.
+func probeForceSSL(route hoststate.TunnelConfigRoute, host string) map[string]any {
+	return browse(nil, route, host, "/force-ssl")
+}
+
 // browse follows redirects like a browser does: every hop goes back through the same route,
 // because the public hostname always lands on it.
-func browse(t *testing.T, route hoststate.TunnelConfigRoute, host string) map[string]any {
+func browse(_ *testing.T, route hoststate.TunnelConfigRoute, host, path string) map[string]any {
 	transport := &OriginHTTPTransport{}
 	defer transport.CloseIdleConnections()
-	next := "https://" + host + "/"
+	next := "https://" + host + path
 	for hop := 0; hop < 8; hop++ {
 		request, _ := http.NewRequest(http.MethodGet, next, nil)
 		request.Host = host
-		for name, value := range map[string]string{"X-Forwarded-Proto": "https", "X-Forwarded-Host": host} {
+		for name, value := range map[string]string{"X-Forwarded-Proto": "https", "X-Forwarded-Host": host, "X-Forwarded-For": "198.51.100.7", "Forwarded": "for=198.51.100.7;proto=https;host=" + host} {
 			request.Header.Set(name, value) // what the edge sets; the origin transport decides what crosses
 		}
 		response, err := transport.RoundTrip(context.Background(), route, request)
