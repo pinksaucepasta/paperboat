@@ -60,6 +60,7 @@ def text(c):
     r = c["result"]
     if r == "ok": return "ok"
     if r == "loop": return "LOOP"
+    if r == "loop_page": return "loop-page"
     if r == "app_refuses": return "refuses"
     if r == "origin_error":
         d = str(c.get("detail", ""))

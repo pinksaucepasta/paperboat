@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hoststate"
+	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 )
 
 // TestOriginProxyMatrix drives the real origin transport against reverse proxies that force HTTPS
@@ -135,6 +136,9 @@ func browse(_ *testing.T, route hoststate.TunnelConfigRoute, host, path string) 
 		}
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 		response.Body.Close()
+		if sharedprotocol.IsSelfRedirect(request.Method, host, request.URL.RequestURI(), response) {
+			return map[string]any{"result": "loop_page", "hops": hop + 1, "detail": "the edge shows the redirect-loop page"}
+		}
 		if response.StatusCode >= 300 && response.StatusCode < 400 {
 			target, err := url.Parse(response.Header.Get("Location"))
 			if err != nil || (target.Host != "" && target.Hostname() != host) {
