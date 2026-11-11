@@ -3,7 +3,11 @@
 // the daemon and ends them, so the updater asks for these counts before it starts.
 package liveconnections
 
-import "sync/atomic"
+import (
+	"sync/atomic"
+
+	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+)
 
 // Counts is the number of connections open right now.
 type Counts struct {
@@ -35,3 +39,9 @@ func track(counter *atomic.Int64) func() {
 
 // Current returns the connections open now.
 func Current() Counts { return Counts{SSH: int(ssh.Load()), Forwards: int(forwards.Load())} }
+
+// RecordUnconfirmed leaves a diagnostic record when the daemon could not say how many connections are open. The
+// update proceeds anyway (the updater must work when the app is broken), but a session it cuts can then be explained.
+func RecordUnconfirmed(source string, err error) {
+	diagnosticlog.TryWarn("open connections could not be confirmed; the update proceeds", "source", source, "error", err.Error())
+}
