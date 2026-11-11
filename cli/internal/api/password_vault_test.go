@@ -15,7 +15,7 @@ import (
 )
 
 func TestPasswordVaultHTTPBoundary(t *testing.T) {
-	fixture, err := os.ReadFile("../../testdata/contracts/environment-e2ee-v1/password-vault.json")
+	fixture, err := os.ReadFile("../../../shared/testdata/contracts/environment-e2ee-v1/password-vault.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestPasswordVaultHTTPBoundary(t *testing.T) {
 }
 
 func TestPasswordVaultResetHTTPBoundary(t *testing.T) {
-	fixture, err := os.ReadFile("../../testdata/contracts/environment-e2ee-v1/password-vault.json")
+	fixture, err := os.ReadFile("../../../shared/testdata/contracts/environment-e2ee-v1/password-vault.json")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -193,7 +193,7 @@ func unwrapTestDataKey(t *testing.T, head VaultHead, password, raw []byte) []byt
 }
 
 func TestPasswordVaultSharedVector(t *testing.T) {
-	data, err := os.ReadFile("../../testdata/contracts/environment-e2ee-v1/password-vault.json")
+	data, err := os.ReadFile("../../../shared/testdata/contracts/environment-e2ee-v1/password-vault.json")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -9,7 +9,7 @@ import (
 )
 
 func TestHostStateConsumesPreviewTunnelV1CredentialAndGenerationContracts(t *testing.T) {
-	fixtures := filepath.Join("..", "..", "..", "testdata", "contracts", "preview-tunnel-v1", "fixtures", "resources.ndjson")
+	fixtures := filepath.Join("..", "..", "..", "..", "shared", "testdata", "contracts", "preview-tunnel-v1", "fixtures", "resources.ndjson")
 	file, err := os.Open(fixtures)
 	if err != nil {
 		t.Fatal(err)

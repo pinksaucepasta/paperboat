@@ -8,7 +8,7 @@ import (
 )
 
 func TestEdgeControlContractCoverage(t *testing.T) {
-	f, err := os.Open("../../../testdata/contracts/fixtures/edge/control.ndjson")
+	f, err := os.Open("../../../../shared/testdata/contracts/fixtures/edge/control.ndjson")
 	if err != nil {
 		t.Fatal(err)
 	}

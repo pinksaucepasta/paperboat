@@ -29,7 +29,7 @@ func TestEdgeControlVectors(t *testing.T) {
 		"usage-increase": false, "usage-lower-duplicate": false,
 		"usage-new-epoch": false,
 	}
-	f, err := os.Open("../../testdata/contracts/fixtures/edge/control.ndjson")
+	f, err := os.Open("../../../shared/testdata/contracts/fixtures/edge/control.ndjson")
 	if err != nil {
 		t.Fatal(err)
 	}

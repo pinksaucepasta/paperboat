@@ -17,7 +17,7 @@ import (
 )
 
 func TestApprovedEndpointCertificateVector(t *testing.T) {
-	raw, err := os.ReadFile("../../server/testdata/contracts/p2p-v1/fixtures/endpoint-certificate.json")
+	raw, err := os.ReadFile("../testdata/contracts/p2p-v1/fixtures/endpoint-certificate.json")
 	if err != nil {
 		t.Fatal(err)
 	}

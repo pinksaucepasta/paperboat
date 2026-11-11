@@ -10,9 +10,15 @@ import (
 	"testing"
 )
 
+// Contracts only the server reads live in its testdata; those other modules read too, in shared/testdata.
+const (
+	serverContracts = "../../testdata/contracts/"
+	sharedContracts = "../../../shared/testdata/contracts/"
+)
+
 func readJSON(t *testing.T, path string, target any) {
 	t.Helper()
-	b, err := os.ReadFile("../../testdata/contracts/" + path)
+	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +33,7 @@ func TestMachineHelperCapabilitiesRequireCurrentConsent(t *testing.T) {
 		Allowed     []string          `json:"allowed"`
 		Conditional map[string]string `json:"conditional"`
 	}
-	readJSON(t, "helper/capabilities.json", &capabilities)
+	readJSON(t, serverContracts+"helper/capabilities.json", &capabilities)
 	if !contains(capabilities.Required, "terminal.v1") || !contains(capabilities.Required, "health.v1") {
 		t.Fatalf("missing machine capabilities: %#v", capabilities)
 	}
@@ -38,11 +44,11 @@ func TestMachineHelperCapabilitiesRequireCurrentConsent(t *testing.T) {
 
 func TestHelperContractsDoNotExposeRetiredPreviewSurface(t *testing.T) {
 	for _, path := range []string{
-		"helper/capabilities.json",
-		"fixtures/helper/operations.ndjson",
-		"credentials/classes.json",
+		serverContracts + "helper/capabilities.json",
+		serverContracts + "fixtures/helper/operations.ndjson",
+		sharedContracts + "credentials/classes.json",
 	} {
-		b, err := os.ReadFile("../../testdata/contracts/" + path)
+		b, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -60,7 +66,7 @@ func TestSessionControlStates(t *testing.T) {
 			Allow []string `json:"allow"`
 		} `json:"states"`
 	}
-	readJSON(t, "states/session.json", &session)
+	readJSON(t, sharedContracts+"states/session.json", &session)
 	if contains(session.States["running"].Allow, "deleted") || !contains(session.States["closed"].Allow, "deleted") {
 		t.Fatal("running sessions must close before control-plane deletion")
 	}
@@ -74,7 +80,7 @@ func TestCredentialClassesAreNonInterchangeable(t *testing.T) {
 			Scopes   []string `json:"scopes"`
 		} `json:"classes"`
 	}
-	readJSON(t, "credentials/classes.json", &matrix)
+	readJSON(t, sharedContracts+"credentials/classes.json", &matrix)
 	seenID, seenAuthority := map[string]bool{}, map[string]string{}
 	for _, class := range matrix.Classes {
 		if seenID[class.ID] || class.Audience == "" || len(class.Scopes) == 0 {
@@ -103,7 +109,7 @@ func TestCredentialSigningVector(t *testing.T) {
 		} `json:"key"`
 		Token string `json:"token"`
 	}
-	readJSON(t, "fixtures/credentials/terminal-operation.ed25519.json", &vector)
+	readJSON(t, sharedContracts+"fixtures/credentials/terminal-operation.ed25519.json", &vector)
 	parts := strings.Split(vector.Token, ".")
 	if len(parts) != 3 {
 		t.Fatal("credential vector is not compact JWS")
@@ -122,7 +128,7 @@ func TestCredentialSigningVector(t *testing.T) {
 }
 
 func TestEdgeUsageVectorsAreMonotonicAndReplaySafe(t *testing.T) {
-	f, err := os.Open("../../testdata/contracts/fixtures/edge/control.ndjson")
+	f, err := os.Open("../../../shared/testdata/contracts/fixtures/edge/control.ndjson")
 	if err != nil {
 		t.Fatal(err)
 	}

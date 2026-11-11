@@ -62,8 +62,7 @@ infrastructure names appear only in restricted operator diagnostics.
 
 ### Fixture changes
 
-1. Keep JSON, NDJSON, and schema fixtures owned by this repository beside the tests that
-   consume them.
-2. Run the affected repository-local Go tests, including
-   `go test ./internal/connectorprotocol ./internal/contracttest` for connector changes.
+1. A contract more than one module reads has one copy, here in `shared/testdata/contracts`;
+   a fixture only one module reads stays in that module's `testdata/contracts`. Never copy one.
+2. Run the Go tests of every module that reads the changed file (grep `testdata/contracts`).
 3. Preserve the protocol and security behavior tests when changing fixtures.

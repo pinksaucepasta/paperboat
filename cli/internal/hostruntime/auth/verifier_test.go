@@ -70,7 +70,7 @@ type signingFixture struct {
 
 func loadFixture(t *testing.T) (signingFixture, ed25519.PrivateKey, ed25519.PublicKey) {
 	t.Helper()
-	b, err := os.ReadFile("../../../testdata/contracts/fixtures/credentials/terminal-operation.ed25519.json")
+	b, err := os.ReadFile("../../../../shared/testdata/contracts/fixtures/credentials/terminal-operation.ed25519.json")
 	if err != nil {
 		t.Fatal(err)
 	}

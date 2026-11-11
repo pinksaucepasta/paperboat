@@ -20,7 +20,7 @@ type stateTable struct {
 }
 
 func TestSessionStateContract(t *testing.T) {
-	b, err := os.ReadFile("../../../testdata/contracts/states/session.json")
+	b, err := os.ReadFile("../../../../shared/testdata/contracts/states/session.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func assertTransition(t *testing.T, states map[string]struct {
 }
 
 func TestSessionOperationVectorCoverage(t *testing.T) {
-	f, err := os.Open("../../../testdata/contracts/fixtures/session/operations.ndjson")
+	f, err := os.Open("../../../../shared/testdata/contracts/fixtures/session/operations.ndjson")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -52,7 +52,7 @@ func classifyFrame(c frameCase) string {
 }
 
 func TestHelperFrameContractVectors(t *testing.T) {
-	f, err := os.Open("../../../testdata/contracts/fixtures/helper/frames.ndjson")
+	f, err := os.Open("../../../../shared/testdata/contracts/fixtures/helper/frames.ndjson")
 	if err != nil {
 		t.Fatal(err)
 	}

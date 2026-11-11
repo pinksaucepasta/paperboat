@@ -108,7 +108,7 @@ func TestPreviewTunnelV1ContractChaos(t *testing.T) {
 
 func findContractRoot(t *testing.T) string {
 	t.Helper()
-	return "../../testdata/contracts/preview-tunnel-v1"
+	return "../../../shared/testdata/contracts/preview-tunnel-v1"
 }
 
 func loadFamilies(t *testing.T, root string) map[string]familyFixture {

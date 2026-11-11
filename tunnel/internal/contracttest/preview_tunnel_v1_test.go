@@ -8,7 +8,7 @@ import (
 )
 
 func TestPreviewTunnelV1EdgeOwnership(t *testing.T) {
-	fixtures, err := os.Open("../../testdata/contracts/preview-tunnel-v1/fixtures/resources.ndjson")
+	fixtures, err := os.Open("../../../shared/testdata/contracts/preview-tunnel-v1/fixtures/resources.ndjson")
 	if err != nil {
 		t.Fatal(err)
 	}
