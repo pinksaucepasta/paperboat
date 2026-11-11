@@ -36,8 +36,10 @@ func (s *Service) Receipt(ctx context.Context, id, clientID, resultCode, receipt
 	if err := s.config.Store.ReceiptFileTransfer(ctx, id, clientID, resultCode, receiptPath); err != nil {
 		return err
 	}
-	if err := os.Remove(s.contentPath(id)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return &Error{Code: StorageUnavailable, Cause: err}
+	for _, path := range []string{s.contentPath(id), s.markerPath(id)} {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return &Error{Code: StorageUnavailable, Cause: err}
+		}
 	}
 	s.cancels.Delete(id)
 	return syncDir(s.config.Root)
@@ -53,8 +55,10 @@ func (s *Service) ReceiptBatch(ctx context.Context, receipts []store.FileTransfe
 		return err
 	}
 	for _, receipt := range receipts {
-		if err := os.Remove(s.contentPath(receipt.ID)); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return &Error{Code: StorageUnavailable, Cause: err}
+		for _, path := range []string{s.contentPath(receipt.ID), s.markerPath(receipt.ID)} {
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return &Error{Code: StorageUnavailable, Cause: err}
+			}
 		}
 		s.cancels.Delete(receipt.ID)
 	}

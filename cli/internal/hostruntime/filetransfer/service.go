@@ -546,7 +546,7 @@ func (s *Service) cancelBatchLocked(ctx context.Context, transfers []store.FileT
 		return errors.Join(result, storageFailure(err))
 	}
 	for _, transfer := range transfers {
-		for _, path := range []string{s.partialPath(transfer.ID), s.contentPath(transfer.ID), s.publishedPath(transfer)} {
+		for _, path := range s.spoolFiles(transfer) {
 			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 				result = errors.Join(result, err)
 			}
@@ -559,6 +559,17 @@ func (s *Service) partialPath(id string) string { return filepath.Join(s.config.
 func (s *Service) contentPath(id string) string { return filepath.Join(s.config.Root, id+".content") }
 func (s *Service) publishedPath(transfer store.FileTransfer) string {
 	return filepath.Join(s.config.Root, transfer.ID+"-"+transfer.Basename)
+}
+
+// spoolFiles are the files a transfer owns in the spool: its parts, its published marker and, when the transfer was
+// published into the spool itself (no Inbox), the published copy under the name it was pinned to (a collision pins
+// 'name (2)', not the reconstructed name).
+func (s *Service) spoolFiles(transfer store.FileTransfer) []string {
+	files := []string{s.partialPath(transfer.ID), s.contentPath(transfer.ID), s.markerPath(transfer.ID), s.publishedPath(transfer)}
+	if transfer.ReceiptPath != "" && filepath.Dir(transfer.ReceiptPath) == s.config.Root {
+		files = append(files, transfer.ReceiptPath)
+	}
+	return files
 }
 func (s *Service) lock(id string) *sync.Mutex {
 	value, _ := s.locks.LoadOrStore(id, &sync.Mutex{})

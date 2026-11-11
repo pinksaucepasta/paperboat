@@ -1230,3 +1230,129 @@ func TestPublishChecksTheRootEveryTime(t *testing.T) {
 		t.Fatalf("a refused receipt directory still published: err=%v checked=%v", err, checked)
 	}
 }
+
+// A received file is published as a copy: the spool content and the Inbox file each have one link (a second link in the
+// user-state tree made the privileged install repair refuse every later update on Windows), an edit of the Inbox file
+// does not reach what the spool serves, and publishing again, also after such an edit, stays on the same path.
+func TestPublishedFileIsACopyAndRepublishingStaysIdempotent(t *testing.T) {
+	root := t.TempDir()
+	durable, err := store.Open(context.Background(), store.Config{Root: filepath.Join(root, "state")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = durable.Close() })
+	inbox := filepath.Join(root, "inbox")
+	spool := filepath.Join(root, "transfers")
+	service, err := New(Config{Root: spool, PublishRoot: func() (string, error) { return inbox, nil }, LocalMachineID: "machine_local", Store: durable, Now: func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("received bytes")
+	created, err := service.Create(context.Background(), requestFor(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := created[0].ID
+	if _, err := service.Append(context.Background(), id, 0, bytes.NewReader(data)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Complete(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	published, err := service.PublishedPath(context.Background(), id)
+	if err != nil || published != filepath.Join(inbox, "data.bin") {
+		t.Fatalf("published=%q err=%v", published, err)
+	}
+	content := filepath.Join(spool, id+".content")
+	for _, path := range []string{content, published} {
+		if links, err := fileLinks(path); err != nil || links != 1 {
+			t.Fatalf("%s has %d links (err=%v), want 1", path, links, err)
+		}
+	}
+	// The user edits the received file; the spool still serves what was received.
+	if err := os.WriteFile(published, []byte("edited by the user"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if kept, err := os.ReadFile(content); err != nil || !bytes.Equal(kept, data) {
+		t.Fatalf("an edit of the Inbox file reached the spool: %q %v", kept, err)
+	}
+	for _, call := range []func(context.Context, string) (string, error){service.PublishedPath, service.ExistingPublishedPath} {
+		if again, err := call(context.Background(), id); err != nil || again != published {
+			t.Fatalf("published again: %q %v", again, err)
+		}
+	}
+	if entries, err := os.ReadDir(inbox); err != nil || len(entries) != 1 {
+		t.Fatalf("the Inbox holds %d entries (err=%v), want the one file and no staging leftovers", len(entries), err)
+	}
+	// A file someone else put at the name is never taken for ours: the next name is used.
+	foreign := filepath.Join(inbox, "foreign.bin")
+	if err := os.WriteFile(foreign, []byte("not ours"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.Create(context.Background(), CreateRequest{BatchID: "fb_2", SourceMachineID: "machine_source", DestinationMachineID: "machine_local", InitiatingUserID: "user_1", SessionID: "ses_1", Files: []File{{Basename: "foreign.bin", Size: int64(len(data)), SHA256: digest(data)}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Append(context.Background(), second[0].ID, 0, bytes.NewReader(data)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Complete(context.Background(), second[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if path, err := service.PublishedPath(context.Background(), second[0].ID); err != nil || path != filepath.Join(inbox, "foreign (2).bin") {
+		t.Fatalf("a foreign file at the name was taken for ours: %q %v", path, err)
+	}
+	if kept, _ := os.ReadFile(foreign); string(kept) != "not ours" {
+		t.Fatal("a foreign file was overwritten")
+	}
+}
+
+// Published into the spool itself (no Inbox) under a collision-renamed copy, expiry removes that copy and the marker, not
+// only the name it would have had without the collision; and a file that took the pinned name between pin and copy is
+// never taken for ours.
+func TestSpoolPublishedCollisionCopyIsRemovedAtExpiry(t *testing.T) {
+	root := t.TempDir()
+	durable, err := store.Open(context.Background(), store.Config{Root: filepath.Join(root, "state")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = durable.Close() })
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	spool := filepath.Join(root, "transfers")
+	service, err := New(Config{Root: spool, LocalMachineID: "machine_local", Store: durable, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("received bytes")
+	created, err := service.Create(context.Background(), requestFor(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := created[0].ID
+	foreign := filepath.Join(spool, id+"-data.bin")
+	if err := os.WriteFile(foreign, []byte("not ours"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Append(context.Background(), id, 0, bytes.NewReader(data)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Complete(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	published, err := service.PublishedPath(context.Background(), id)
+	if err != nil || published != filepath.Join(spool, id+"-data (2).bin") {
+		t.Fatalf("published=%q err=%v, want the collision name", published, err)
+	}
+	if kept, _ := os.ReadFile(foreign); string(kept) != "not ours" {
+		t.Fatal("a foreign file was overwritten")
+	}
+	now = now.Add(365 * 24 * time.Hour)
+	if err := service.CleanupExpired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{published, service.markerPath(id), service.contentPath(id)} {
+		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s survived expiry (err=%v)", path, err)
+		}
+	}
+}

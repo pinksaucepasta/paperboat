@@ -64,7 +64,7 @@ func (s *Service) CleanupExpired(ctx context.Context) error {
 			continue
 		}
 		var removeErr error
-		for _, path := range []string{s.partialPath(current.ID), s.contentPath(current.ID), s.publishedPath(current)} {
+		for _, path := range s.spoolFiles(current) {
 			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 				removeErr = errors.Join(removeErr, err)
 			}
