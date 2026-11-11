@@ -11,6 +11,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/command"
+	"github.com/pinksaucepasta/paperboat/internal/daemoncmd"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
@@ -242,7 +243,7 @@ func runFreshEnrollmentCleanup(command *cobra.Command) error {
 			if executableErr != nil {
 				return executableErr
 			}
-			ctx, cancel := context.WithTimeout(context.WithoutCancel(command.Context()), 30*time.Second)
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(command.Context()), daemoncmd.ServiceElevationTimeout())
 			defer cancel()
 			return removeLocalDaemonService(ctx, executable)
 		}, func() error {

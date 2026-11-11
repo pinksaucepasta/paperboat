@@ -519,7 +519,9 @@ mode, relays, and observation timestamps.`, Example: "  pb relay list\n  pb rela
 	service := daemoncmd.ServiceCommand()
 	for _, sub := range service.Commands() {
 		if run := sub.RunE; run != nil {
-			sub.RunE = func(command *cobra.Command, args []string) error { return rejectDaemonDegraded(run(command, args)) }
+			sub.RunE = func(command *cobra.Command, args []string) error {
+				return rejectAdministratorRequired(rejectDaemonDegraded(run(command, args)))
+			}
 		}
 	}
 	root.AddCommand(service)

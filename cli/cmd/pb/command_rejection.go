@@ -6,6 +6,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/daemoncmd"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/preview"
+	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	servepkg "github.com/pinksaucepasta/paperboat/internal/serve"
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"reflect"
@@ -47,6 +48,7 @@ const (
 	commandRejectUpdateApprovalID
 	commandRejectUpdateSource
 	commandRejectDaemonDegraded
+	commandRejectAdministrator
 	commandRejectUpdateFlags
 	commandRejectUpdatePlatform
 )
@@ -102,6 +104,11 @@ func (e commandRejection) Error() string {
 		var degraded *daemoncmd.DaemonDegraded
 		if errors.As(e.cause, &degraded) {
 			return degraded.Error()
+		}
+	case commandRejectAdministrator:
+		var needed *localdaemon.AdministratorRequiredError
+		if errors.As(e.cause, &needed) {
+			return needed.Error()
 		}
 	case commandRejectApproval:
 		var refusal *daemoncmd.ApprovalRefusal
@@ -235,6 +242,15 @@ func rejectApprovalRefusal(err error) error {
 	var refusal *daemoncmd.ApprovalRefusal
 	if errors.As(err, &refusal) {
 		return commandRejection{reason: commandRejectApproval, cause: err}
+	}
+	return err
+}
+
+// rejectAdministratorRequired presents a service action that needed administrator rights it did not get.
+func rejectAdministratorRequired(err error) error {
+	var needed *localdaemon.AdministratorRequiredError
+	if errors.As(err, &needed) {
+		return commandRejection{reason: commandRejectAdministrator, cause: err}
 	}
 	return err
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
+	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/spf13/cobra"
 )
 
@@ -95,6 +96,10 @@ func (e uninstallCleanupError) Error() string {
 // removal says exactly what is left and why.
 func purgeIncompleteDetail(err error) string {
 	detail := ""
+	var needed *localdaemon.AdministratorRequiredError
+	if errors.As(err, &needed) {
+		detail += " " + needed.Error()
+	}
 	var pathErr *fs.PathError
 	if errors.As(err, &pathErr) && pathErr.Path != "" {
 		detail += " Could not remove " + pathErr.Path + ": " + pathErr.Err.Error() + "."

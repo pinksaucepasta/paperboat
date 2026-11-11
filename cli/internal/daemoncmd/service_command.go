@@ -43,13 +43,17 @@ func serviceContext(cmd *cobra.Command) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(cmd.Context(), serviceTimeout)
 }
 
-// serviceRegistrationContext bounds registering or removing the service. On Windows that waits for the
-// user to answer an administrator prompt and for the elevated helper, which has its own bound.
-func serviceRegistrationContext(cmd *cobra.Command) (context.Context, context.CancelFunc) {
+// ServiceElevationTimeout bounds a service action that may ask for administrator rights. On Windows that
+// waits for the user to answer the prompt and for the elevated helper, which has its own bound.
+func ServiceElevationTimeout() time.Duration {
 	if runtime.GOOS == "windows" {
-		return context.WithTimeout(cmd.Context(), serviceTimeout+elevation.RuntimeActivationDuration)
+		return serviceTimeout + elevation.RuntimeActivationDuration
 	}
-	return serviceContext(cmd)
+	return serviceTimeout
+}
+
+func serviceRegistrationContext(cmd *cobra.Command) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(cmd.Context(), ServiceElevationTimeout())
 }
 func executableForService() (string, error) {
 	executable, err := serviceExecutable()
@@ -203,16 +207,18 @@ func serviceActionCommand(action, short string, ready bool) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		ctx, cancel := serviceContext(cmd)
-		defer cancel()
+		actionCtx, cancelAction := serviceRegistrationContext(cmd)
+		defer cancelAction()
 		if ready {
-			err = startDaemonService(ctx, executable)
+			err = startDaemonService(actionCtx, executable)
 		} else {
-			err = stopDaemonService(ctx, executable)
+			err = stopDaemonService(actionCtx, executable)
 		}
 		if err != nil {
 			return fmt.Errorf("%s Paperboat local daemon service: %w", action, err)
 		}
+		ctx, cancel := serviceContext(cmd)
+		defer cancel()
 		if ready {
 			err = awaitDaemonReady(ctx)
 		} else {
@@ -237,18 +243,22 @@ func serviceRestartCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		ctx, cancel := serviceContext(cmd)
-		defer cancel()
-		if err = stopDaemonService(ctx, executable); err != nil {
+		actionCtx, cancelAction := serviceRegistrationContext(cmd)
+		defer cancelAction()
+		if err = stopDaemonService(actionCtx, executable); err != nil {
 			return fmt.Errorf("stop Paperboat local daemon service: %w", err)
 		}
+		ctx, cancel := serviceContext(cmd)
+		defer cancel()
 		if err = awaitDaemonStopped(ctx, executable); err != nil {
 			return err
 		}
-		if err = startDaemonService(ctx, executable); err != nil {
+		if err = startDaemonService(actionCtx, executable); err != nil {
 			return fmt.Errorf("start Paperboat local daemon service: %w", err)
 		}
-		if err = awaitDaemonReady(ctx); err != nil {
+		readyCtx, cancelReady := serviceContext(cmd)
+		defer cancelReady()
+		if err = awaitDaemonReady(readyCtx); err != nil {
 			return err
 		}
 		return writeDaemonCommandResult(cmd, map[string]any{"service": daemonServiceName, "action": "restart", "completed": true}, "Paperboat daemon service restarted and ready")

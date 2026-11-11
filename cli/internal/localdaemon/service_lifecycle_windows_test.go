@@ -165,3 +165,92 @@ func TestUninstallCurrentUserServiceRejectsAnInvalidHelper(t *testing.T) {
 		t.Fatalf("elevated=%q", fake.elevated)
 	}
 }
+
+func deniedByServiceManager() error {
+	return fmt.Errorf("open service manager: %w", windows.ERROR_ACCESS_DENIED)
+}
+
+// An un-elevated terminal's own start, stop and removal are refused by the service manager; each of them
+// then asks for administrator rights through the same bridge, with its own action.
+func TestServiceActionsElevateWhenTheServiceManagerDeniesAccess(t *testing.T) {
+	fake := &fakeWindowsDaemonService{installed: true}
+	executable := installFakeWindowsDaemonService(t, fake)
+	previousStop, previousStopService := stopCurrentUserDaemon, stopWindowsLocalDaemonService
+	previousTask, previousRead := runWindowsTaskCommand, readWindowsDaemonPIDLock
+	t.Cleanup(func() {
+		stopCurrentUserDaemon, stopWindowsLocalDaemonService = previousStop, previousStopService
+		runWindowsTaskCommand, readWindowsDaemonPIDLock = previousTask, previousRead
+	})
+	invokeWindowsOwnerServiceStart = func(context.Context, string) error { return deniedByServiceManager() }
+	stopCurrentUserDaemon = func(context.Context) error { return deniedByServiceManager() }
+	stopWindowsLocalDaemonService = func(context.Context) error { return deniedByServiceManager() }
+	runWindowsTaskCommand = func(context.Context, ...string) error {
+		return &windowsTaskCommandError{err: errors.New("exit status 1"), kind: windowsTaskErrorMissing}
+	}
+	readWindowsDaemonPIDLock = func(string, string) (windowsDaemonPIDLock, error) { return windowsDaemonPIDLock{}, os.ErrNotExist }
+	for _, step := range []struct {
+		name   string
+		run    func() error
+		action string
+	}{
+		{"start", func() error { return StartCurrentUserService(context.Background(), executable) }, elevation.ActionDaemonStart},
+		{"stop", func() error { return StopCurrentUserService(context.Background(), executable) }, elevation.ActionDaemonStop},
+		{"uninstall step", func() error { return RemoveCurrentUserService(context.Background(), executable) }, elevation.ActionDaemonRemove},
+	} {
+		fake.elevated = nil
+		if err := step.run(); err != nil {
+			t.Fatalf("%s: %v", step.name, err)
+		}
+		if len(fake.elevated) != 1 || fake.elevated[0] != step.action {
+			t.Fatalf("%s: elevated=%q want %q", step.name, fake.elevated, step.action)
+		}
+	}
+}
+
+func TestServiceActionsDoNotElevateForOtherFailures(t *testing.T) {
+	fake := &fakeWindowsDaemonService{installed: true}
+	executable := installFakeWindowsDaemonService(t, fake)
+	previous := stopCurrentUserDaemon
+	t.Cleanup(func() { stopCurrentUserDaemon = previous })
+	failure := errors.New("service is stuck")
+	stopCurrentUserDaemon = func(context.Context) error { return failure }
+	if err := StopCurrentUserService(context.Background(), executable); !errors.Is(err, failure) || len(fake.elevated) != 0 {
+		t.Fatalf("error=%v elevated=%q", err, fake.elevated)
+	}
+}
+
+// A declined or impossible prompt ends in the typed error that tells the user how to get administrator
+// rights, from every action, and still matches the bridge's own error.
+func TestServiceActionsReportDeclinedElevationAsAdministratorRequired(t *testing.T) {
+	for _, cause := range []error{elevation.ErrElevationDenied, elevation.ErrElevationUnavailable, elevation.ErrElevationRestrictedJob} {
+		fake := &fakeWindowsDaemonService{installed: true}
+		executable := installFakeWindowsDaemonService(t, fake)
+		previous := stopCurrentUserDaemon
+		t.Cleanup(func() { stopCurrentUserDaemon = previous })
+		stopCurrentUserDaemon = func(context.Context) error { return deniedByServiceManager() }
+		runElevatedDaemonService = func(context.Context, string, string) error { return cause }
+		err := StopCurrentUserService(context.Background(), executable)
+		var needed *AdministratorRequiredError
+		if !errors.As(err, &needed) || !errors.Is(err, cause) {
+			t.Fatalf("cause=%v error=%v", cause, err)
+		}
+		if cause == elevation.ErrElevationRestrictedJob {
+			if needed.Error() != cause.Error() {
+				t.Fatalf("restricted job message=%q", needed.Error())
+			}
+		} else if !strings.Contains(needed.Error(), "administrator") || !strings.Contains(needed.Error(), "Windows prompt") {
+			t.Fatalf("message=%q", needed.Error())
+		}
+	}
+	// pb service install and uninstall use the same path.
+	fake := &fakeWindowsDaemonService{}
+	executable := installFakeWindowsDaemonService(t, fake)
+	runElevatedDaemonService = func(context.Context, string, string) error { return elevation.ErrElevationDenied }
+	var needed *AdministratorRequiredError
+	if err := CreateCurrentUserService(context.Background(), executable, "", ""); !errors.As(err, &needed) {
+		t.Fatalf("install error=%v", err)
+	}
+	if err := UninstallCurrentUserService(context.Background(), executable); !errors.As(err, &needed) {
+		t.Fatalf("uninstall error=%v", err)
+	}
+}

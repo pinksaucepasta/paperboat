@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/daemoncmd"
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/inbox"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
@@ -89,7 +90,7 @@ func uninstallCommand() *cobra.Command {
 					if executableErr != nil {
 						return executableErr
 					}
-					serviceCtx, cancelService := context.WithTimeout(context.WithoutCancel(command.Context()), 30*time.Second)
+					serviceCtx, cancelService := context.WithTimeout(context.WithoutCancel(command.Context()), daemoncmd.ServiceElevationTimeout())
 					defer cancelService()
 					err := localdaemon.RemoveCurrentUserService(serviceCtx, executable)
 					if err == nil {

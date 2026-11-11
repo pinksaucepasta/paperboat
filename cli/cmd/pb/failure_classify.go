@@ -22,6 +22,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/internal/localwait"
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/identitybootstrap"
@@ -231,7 +232,7 @@ func classifyCommandFailure(err error) (failure commandFailure) {
 				remaining = append(remaining, causeFrame{err: owner.cause, status: frame.status})
 			}
 			continue
-		case daemoncmd.ErrDaemonAccountMismatch, *daemoncmd.ApprovalRefusal, *daemoncmd.DaemonDegraded:
+		case daemoncmd.ErrDaemonAccountMismatch, *daemoncmd.ApprovalRefusal, *daemoncmd.DaemonDegraded, *localdaemon.AdministratorRequiredError:
 			set(commandRejected, current)
 			continue
 		case *inspectorDaemonError:

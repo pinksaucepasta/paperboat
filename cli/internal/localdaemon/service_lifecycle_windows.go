@@ -16,6 +16,28 @@ var runElevatedDaemonService = func(ctx context.Context, executable, action stri
 	return elevation.RunRuntimeService(ctx, executable, action, nil)
 }
 
+// runDaemonServiceAsAdministrator is the one path every service action takes once the service manager has
+// refused this terminal's token. A prompt that was declined, or that Windows could not show, becomes the
+// typed AdministratorRequiredError instead of an opaque failure.
+func runDaemonServiceAsAdministrator(ctx context.Context, executable, action string) error {
+	err := runElevatedDaemonService(ctx, executable, action)
+	switch {
+	case errors.Is(err, elevation.ErrElevationRestrictedJob):
+		return &AdministratorRequiredError{Cause: err, Reason: elevation.ErrElevationRestrictedJob.Error()}
+	case errors.Is(err, elevation.ErrElevationDenied), errors.Is(err, elevation.ErrElevationUnavailable):
+		return &AdministratorRequiredError{Cause: err}
+	}
+	return err
+}
+
+// elevateIfDenied runs action as administrator when err is the service manager refusing this terminal.
+func elevateIfDenied(ctx context.Context, executable, action string, err error) error {
+	if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+		return runDaemonServiceAsAdministrator(ctx, executable, action)
+	}
+	return err
+}
+
 // CreateCurrentUserService is pb service install: it starts the account's SCM service and
 // registers it first when it is missing. Only this command registers it; a command that
 // merely finds no daemon (InstallCurrentUserService) never asks for administrator rights.
@@ -24,7 +46,7 @@ func CreateCurrentUserService(ctx context.Context, executable, configPath, serve
 	// Registering an SCM service needs administrator rights, and so does opening the
 	// service manager from a terminal that is not elevated.
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) || errors.Is(err, windows.ERROR_ACCESS_DENIED) {
-		return runElevatedDaemonService(ctx, executable, elevation.ActionDaemonInstall)
+		return runDaemonServiceAsAdministrator(ctx, executable, elevation.ActionDaemonInstall)
 	}
 	return err
 }
@@ -35,7 +57,13 @@ func UninstallCurrentUserService(ctx context.Context, executable string) error {
 	if ctx == nil || !validWindowsExecutable(executable) {
 		return ErrInvalidInventoryConfig
 	}
-	return runElevatedDaemonService(ctx, executable, elevation.ActionDaemonRemove)
+	return runDaemonServiceAsAdministrator(ctx, executable, elevation.ActionDaemonRemove)
+}
+
+// RemoveCurrentUserService stops and removes the account's daemon for pb uninstall and a fresh reset,
+// asking for administrator rights only when the service manager refuses this terminal.
+func RemoveCurrentUserService(ctx context.Context, executable string) error {
+	return elevateIfDenied(ctx, executable, elevation.ActionDaemonRemove, removeWindowsCurrentUserService(ctx, executable))
 }
 
 func InspectCurrentUserService(context.Context, string) (ServiceState, error) {
@@ -51,7 +79,11 @@ func InspectCurrentUserService(context.Context, string) (ServiceState, error) {
 	return ServiceState{Installed: true, Running: running}, err
 }
 
-func StartCurrentUserService(ctx context.Context, _ string) error {
+func StartCurrentUserService(ctx context.Context, executable string) error {
+	return elevateIfDenied(ctx, executable, elevation.ActionDaemonStart, startCurrentUserService(ctx))
+}
+
+func startCurrentUserService(ctx context.Context) error {
 	owner, err := currentWindowsServiceSID()
 	if err != nil {
 		return err
@@ -66,7 +98,13 @@ func StartCurrentUserService(ctx context.Context, _ string) error {
 	return invokeWindowsOwnerServiceStart(ctx, owner)
 }
 
-func StopCurrentUserService(ctx context.Context, _ string) error {
+var stopCurrentUserDaemon = stopCurrentUserService
+
+func StopCurrentUserService(ctx context.Context, executable string) error {
+	return elevateIfDenied(ctx, executable, elevation.ActionDaemonStop, stopCurrentUserDaemon(ctx))
+}
+
+func stopCurrentUserService(ctx context.Context) error {
 	owner, err := CurrentUserSID()
 	if err != nil {
 		return err

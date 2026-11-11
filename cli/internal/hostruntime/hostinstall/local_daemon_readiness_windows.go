@@ -124,6 +124,47 @@ func RemoveWindowsLocalDaemonService(ctx context.Context, ownerSID string) (resu
 	return daemon.Uninstall(ctx)
 }
 
+// StopWindowsLocalDaemon is pb service stop run as administrator, for a terminal whose own token the service
+// manager refused: it stops this account's daemon service and process and leaves the service registered.
+func StopWindowsLocalDaemon(ctx context.Context, ownerSID string) (resultErr error) {
+	if allowed, err := checkAdministrator(); err != nil {
+		return err
+	} else if !allowed {
+		return ErrNotPrivileged
+	}
+	unlock, err := lockWindowsLocalDaemonMigration(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { resultErr = withCleanup("Windows installation cleanup failed", resultErr, unlock()) }()
+	instance, err := WindowsInstanceForSID(ownerSID)
+	if err != nil {
+		return err
+	}
+	config, err := LoadWindowsRuntimeConfigForInstance(instance)
+	if err != nil {
+		return err
+	}
+	lockPath, err := windowsLocalDaemonLockPath(config.StateRoot)
+	if err != nil {
+		return err
+	}
+	if err := localdaemon.StopWindowsOwnerService(ctx, lockPath, config.OwnerSID); err != nil {
+		return hostInstallFailure("stop Paperboat local daemon service", err)
+	}
+	return nil
+}
+
+// StartWindowsLocalDaemon is pb service start run as administrator.
+func StartWindowsLocalDaemon(ctx context.Context, ownerSID string) error {
+	if allowed, err := checkAdministrator(); err != nil {
+		return err
+	} else if !allowed {
+		return ErrNotPrivileged
+	}
+	return localdaemon.StartWindowsOwnerService(ctx, ownerSID)
+}
+
 func readWindowsLocalDaemonSnapshot(ctx context.Context, ownerSID, stateRoot string) (localapi.Snapshot, error) {
 	paths, err := localapi.WindowsPaths(stateRoot, ownerSID)
 	if err != nil {

@@ -82,10 +82,6 @@ func InstallCurrentUserService(ctx context.Context, executable, configPath, serv
 	return installWindowsCurrentUserService(ctx, executable, configPath, serverURL)
 }
 
-func RemoveCurrentUserService(ctx context.Context, executable string) error {
-	return removeWindowsCurrentUserService(ctx, executable)
-}
-
 // WindowsOwnerServiceRunning verifies the SID-bound daemon owner record and
 // process identity before reporting that the enrolled user's daemon is live.
 // It is used by the LocalSystem updater before replacing the managed binary.

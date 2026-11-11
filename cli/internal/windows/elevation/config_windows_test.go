@@ -11,7 +11,7 @@ import (
 // The config sync service and the local daemon service (pb service install/uninstall) are named by
 // the requester's SID alone: the elevated side takes nothing else from the caller.
 func TestConfigServiceElevationRejectsCallerControlledPayload(t *testing.T) {
-	for _, action := range []string{ActionConfigInstall, ActionConfigRemove, ActionDaemonInstall, ActionDaemonRemove} {
+	for _, action := range []string{ActionConfigInstall, ActionConfigRemove, ActionDaemonInstall, ActionDaemonRemove, ActionDaemonStart, ActionDaemonStop} {
 		now := time.Now()
 		req := Request{Schema: SchemaV1, RequestID: "config", OwnerSID: "S-1-5-21-1-2-3-1001", Operation: OperationRuntimeService, Action: action, CancelPath: `C:\cancel`, CreatedAt: now, ExpiresAt: now.Add(RuntimeActivationDuration)}
 		if err := validateRequest(req); err != nil {
