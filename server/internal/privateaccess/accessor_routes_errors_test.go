@@ -49,6 +49,8 @@ func TestAccessorRoutesSeparateCredentialRejectionFromAuthorityOutage(t *testing
 		want     int
 	}{
 		{name: "bad machine proof", verifier: controlplane.ErrHelperProof, want: http.StatusUnauthorized},
+		{name: "rejected machine credential (a machine no longer active)", verifier: controlplane.ProofRejection{Reason: "machine_not_active"}, want: http.StatusUnauthorized},
+		{name: "rejected machine credential joined with I/O failure", verifier: errors.Join(controlplane.ProofRejection{Reason: "machine_not_active"}, syscall.EIO), want: http.StatusServiceUnavailable},
 		{name: "machine verifier database outage", verifier: outage, want: http.StatusServiceUnavailable},
 		{name: "bad machine proof joined with I/O failure", verifier: errors.Join(controlplane.ErrHelperProof, syscall.EIO), want: http.StatusServiceUnavailable},
 		{name: "machine route read outage", repo: outage, want: http.StatusServiceUnavailable},
@@ -116,11 +118,11 @@ func TestAccessorRoutesSeparateCredentialRejectionFromAuthorityOutage(t *testing
 	if strings.Contains(logs.String(), "PRIVATE_ACCESSOR_DATABASE_DETAIL") {
 		t.Fatal("accessor route diagnostics exposed arbitrary error text")
 	}
-	if got := strings.Count(logs.String(), `"outcome":"failed"`); got != 6 {
-		t.Errorf("recorded %d failed operations, want 6: %s", got, logs.String())
+	if got := strings.Count(logs.String(), `"outcome":"failed"`); got != 7 {
+		t.Errorf("recorded %d failed operations, want 7: %s", got, logs.String())
 	}
-	if got := strings.Count(logs.String(), `"outcome":"rejected"`); got != 2 {
-		t.Errorf("recorded %d expected credential rejections, want 2: %s", got, logs.String())
+	if got := strings.Count(logs.String(), `"outcome":"rejected"`); got != 3 {
+		t.Errorf("recorded %d expected credential rejections, want 3: %s", got, logs.String())
 	}
 	if !strings.Contains(logs.String(), "Errno") || !strings.Contains(logs.String(), `"http_status":503`) {
 		t.Errorf("joined credential and I/O failures lost bounded cause or 503 status: %s", logs.String())

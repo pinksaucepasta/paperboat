@@ -1,6 +1,10 @@
 package privateaccess
 
-import "reflect"
+import (
+	"reflect"
+
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+)
 
 const (
 	maxPrivateAccessErrorDepth = 8
@@ -33,6 +37,16 @@ func pureExpectedPrivateAccessError(err error, expected ...error) (accepted bool
 			return false
 		}
 		nodes++
+		// A machine credential or proof the control plane rejected (a ProofRejection value with a fixed reason, such as
+		// machine_not_active) is the expected ErrHelperProof; matching by sentinel equality alone missed it and answered 503.
+		if _, ok := current.(controlplane.ProofRejection); ok {
+			for _, sentinel := range expected {
+				if sentinel == controlplane.ErrHelperProof {
+					matched = true
+					return true
+				}
+			}
+		}
 		if typ.Comparable() {
 			for _, sentinel := range expected {
 				sentinelType := reflect.TypeOf(sentinel)

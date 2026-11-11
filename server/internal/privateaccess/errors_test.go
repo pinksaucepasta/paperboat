@@ -496,7 +496,7 @@ func TestPrivateAccessVerifierDistinguishesRejectionFromOutage(t *testing.T) {
 	if strings.Contains(logs.String()+"\n", "PRIVATE_EDGE_DATABASE_DETAIL") {
 		t.Fatal("edge verifier failure exposed arbitrary error text")
 	}
-	if strings.Count(logs.String(), `"outcome":"failed"`) != 2 || strings.Count(logs.String(), `"outcome":"rejected"`) != 1 {
+	if strings.Count(logs.String(), `"outcome":"failed"`) != 3 || strings.Count(logs.String(), `"outcome":"rejected"`) != 2 {
 		t.Fatalf("verifier outcomes were not logged once as failure plus expected rejection: %s", logs.String())
 	}
 	if !strings.Contains(logs.String(), "Errno") || !strings.Contains(logs.String(), `"http_status":503`) {
@@ -564,6 +564,8 @@ func TestGrantIssueVerifierOutageIsActionableAndInvalidProofStaysRejected(t *tes
 	}{
 		{name: "machine database unavailable", err: errors.Join(syscall.ECONNREFUSED, secret), want: http.StatusServiceUnavailable},
 		{name: "invalid proof", err: controlplane.ErrHelperProof, want: http.StatusUnauthorized},
+		{name: "rejected machine credential", err: controlplane.ProofRejection{Reason: "control_credential_invalid"}, want: http.StatusUnauthorized},
+		{name: "rejected machine credential joined with I/O failure", err: errors.Join(controlplane.ProofRejection{Reason: "control_credential_invalid"}, syscall.EIO), want: http.StatusServiceUnavailable},
 		{name: "invalid proof joined with I/O failure", err: errors.Join(controlplane.ErrHelperProof, syscall.EIO), want: http.StatusServiceUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -592,7 +594,7 @@ func TestGrantIssueVerifierOutageIsActionableAndInvalidProofStaysRejected(t *tes
 	if strings.Contains(logs.String(), "PRIVATE_MACHINE_AUTHORITY_DETAIL") {
 		t.Fatal("machine verifier failure exposed arbitrary error text")
 	}
-	if strings.Count(logs.String(), `"outcome":"failed"`) != 2 || strings.Count(logs.String(), `"outcome":"rejected"`) != 1 {
+	if strings.Count(logs.String(), `"outcome":"failed"`) != 3 || strings.Count(logs.String(), `"outcome":"rejected"`) != 2 {
 		t.Fatalf("machine verifier outcomes were not recorded once: %s", logs.String())
 	}
 	if !strings.Contains(logs.String(), "Errno") || !strings.Contains(logs.String(), `"http_status":503`) {
