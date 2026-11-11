@@ -86,7 +86,7 @@ type Service struct {
 
 func New(store *db.DB, log *activity.Service, cfg config.Business, key string, mail config.TransactionalMail, mailEnabled bool) *Service {
 	return &Service{db: store, log: log, cfg: cfg, key: key, mail: mail, mailEnabled: mailEnabled,
-		client: func() httpDoer { return publicClient(15 * time.Second) }, now: time.Now}
+		client: func() httpDoer { return PublicClient(15 * time.Second) }, now: time.Now}
 }
 
 // authorizeTx checks the team, its Team plan and the account's permission.

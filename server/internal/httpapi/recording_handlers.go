@@ -152,6 +152,10 @@ func writeRecordingResult(w http.ResponseWriter, r *http.Request, out any, err e
 		writeError(w, r, 409, recording.ErrorKeyPending, "You have replay permission but no copy of the recording key yet. Ask a team member who can replay to open Paperboat once.")
 	case errors.Is(err, recordings.ErrKeyConflict):
 		writeError(w, r, 409, recording.ErrorKeyConflict, "The recording key or a viewer's vault changed. Reload and try again.")
+	case errors.Is(err, recordings.ErrNoBucket):
+		writeError(w, r, 409, "bucket_not_configured", "The team has no bucket for recordings.")
+	case errors.Is(err, recordings.ErrNotArchived):
+		writeError(w, r, 409, "recording_not_archived", "This recording was never copied to the team bucket.")
 	case errors.Is(err, recordings.ErrTooMany):
 		writeError(w, r, 429, "too_many_pending", "Too many replays are open at once. Wait a few minutes and retry.")
 	case errors.Is(err, recordings.ErrDeleted):

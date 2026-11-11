@@ -53,7 +53,7 @@ func (s *Service) List(ctx context.Context, account, team string, f Filter) (rec
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM session_recordings WHERE `+where, args...).Scan(&out.Total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT id, machine_id, machine_name, session_id, trigger, coalesce(started_by, ''), accounts, started_at, ended_at, bytes, segments, state
+		rows, err := tx.Query(ctx, `SELECT id, machine_id, machine_name, session_id, trigger, coalesce(started_by, ''), accounts, started_at, ended_at, bytes, segments, archived_segments, state
  FROM session_recordings WHERE `+where+` ORDER BY started_at DESC, id LIMIT $5 OFFSET $6`, append(args, f.Limit, f.Offset)...)
 		if err != nil {
 			return err
@@ -61,7 +61,7 @@ func (s *Service) List(ctx context.Context, account, team string, f Filter) (rec
 		defer rows.Close()
 		for rows.Next() {
 			var r recording.Recording
-			if err := rows.Scan(&r.ID, &r.MachineID, &r.MachineName, &r.SessionID, &r.Trigger, &r.StartedBy, &r.Accounts, &r.StartedAt, &r.EndedAt, &r.Bytes, &r.Segments, &r.State); err != nil {
+			if err := rows.Scan(&r.ID, &r.MachineID, &r.MachineName, &r.SessionID, &r.Trigger, &r.StartedBy, &r.Accounts, &r.StartedAt, &r.EndedAt, &r.Bytes, &r.Segments, &r.ArchivedSegments, &r.State); err != nil {
 				return err
 			}
 			out.Recordings = append(out.Recordings, r)
@@ -80,7 +80,7 @@ type target struct {
 
 // authorizeTx checks, in order: the recording exists, the account is a member of its team on the Teams plan, an
 // explicit recording_view rule covers its machine, it is not deleted and its machine still exists.
-func authorizeTx(ctx context.Context, tx *db.Tx, account, id string) (target, error) {
+func authorizeTx(ctx context.Context, tx *db.Tx, account, id string, archive bool) (target, error) {
 	var t target
 	var state string
 	if !recording.ValidRecordingID(id) {
@@ -106,12 +106,15 @@ func authorizeTx(ctx context.Context, tx *db.Tx, account, id string) (target, er
 	if !allowed {
 		return t, ErrForbidden
 	}
-	if state == recording.StateDeleted {
+	if state == recording.StateDeleted && !archive {
 		return t, ErrDeleted
 	}
 	err = tx.QueryRow(ctx, `SELECT environment_id, user_id FROM user_machines WHERE id = $1 AND deleted_at IS NULL AND revoked_at IS NULL`, t.machine).Scan(&t.environment, &t.owner)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, pgx.ErrNoRows) && !archive {
 		return t, ErrDeleted // the machine, and the recording with it, is gone
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return t, nil // the archive outlives its machine
 	}
 	return t, err
 }
@@ -120,7 +123,7 @@ func authorizeTx(ctx context.Context, tx *db.Tx, account, id string) (target, er
 func (s *Service) ResolveReplay(ctx context.Context, account, id string) (team, machine, owner string, err error) {
 	var t target
 	err = s.db.InReadOnlySnapshot(ctx, func(ctx context.Context, tx *db.Tx) (err error) {
-		t, err = authorizeTx(ctx, tx, account, id)
+		t, err = authorizeTx(ctx, tx, account, id, false)
 		return err
 	})
 	return t.team, t.machine, t.owner, err
@@ -132,12 +135,14 @@ func (s *Service) ResolveReplay(ctx context.Context, account, id string) (team, 
 // lifetime. The browser form returns no ticket: the caller then issues the browser ticket (the audit event is
 // already committed), and the host credential is minted at edge admission.
 func (s *Service) Replay(ctx context.Context, account, id string, in recording.ReplayRequest) (recording.Replay, error) {
-	if (in.CLIClientSessionID == "") == (in.BrowserPublicKeySHA256 == "") || len(in.CLIClientSessionID) > 128 {
+	archive := in.Source == recording.SourceBucket
+	if archive && (in.CLIClientSessionID != "" || in.BrowserPublicKeySHA256 != "") || in.Source != "" && !archive ||
+		!archive && ((in.CLIClientSessionID == "") == (in.BrowserPublicKeySHA256 == "") || len(in.CLIClientSessionID) > 128) {
 		return recording.Replay{}, ErrInvalid
 	}
 	var out recording.Replay
 	err := s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		t, err := authorizeTx(ctx, tx, account, id)
+		t, err := authorizeTx(ctx, tx, account, id, archive)
 		if err != nil {
 			return err
 		}
@@ -149,8 +154,11 @@ func (s *Service) Replay(ctx context.Context, account, id string, in recording.R
 			return err
 		}
 		jti := "token_" + uuid.NewString()
-		if err := teams.AuditTx(ctx, tx, account, t.team, "recording_replayed", jti, map[string]any{"recording_id": id, "machine_id": t.machine, "session_id": t.session, "generation": t.keyGeneration}); err != nil {
+		if err := teams.AuditTx(ctx, tx, account, t.team, "recording_replayed", jti, map[string]any{"recording_id": id, "machine_id": t.machine, "session_id": t.session, "generation": t.keyGeneration, "source": sourceName(archive)}); err != nil {
 			return err
+		}
+		if archive {
+			return s.archiveReplayTx(ctx, tx, t, id, &out)
 		}
 		if in.CLIClientSessionID == "" {
 			return nil
@@ -177,6 +185,13 @@ func (s *Service) Replay(ctx context.Context, account, id string, in recording.R
 		return recording.Replay{}, err
 	}
 	return out, nil
+}
+
+func sourceName(archive bool) string {
+	if archive {
+		return recording.SourceBucket
+	}
+	return "machine"
 }
 
 // maxNativeAdmissions bounds one account's live replay admissions (each one peer network scope).
