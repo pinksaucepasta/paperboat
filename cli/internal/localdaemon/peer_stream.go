@@ -25,8 +25,10 @@ import (
 // On a 30% loss link an open hung ~110 s without it (ltc-j1, peer_stream transport_failed).
 const peerStreamOpenTimeout = 10 * time.Second
 
-// An exec open that timed out may have started the command, so it reads as start-uncertain: pb exec
-// retries the same operation ID, which the host runs at most once, instead of reporting "not started".
+// An exec open that timed out after its start request was sent may have started the command, so it reads as
+// start-uncertain: pb exec retries the same operation ID, which the host runs at most once. One that timed out
+// before (the peer never answered the handshake: no path or no relay) started nothing and fails at once as a
+// transport failure instead of waiting out the 90 s uncertain-start retry (canary B->A 2026-11-11).
 type peerStreamOpenTimeoutError struct {
 	cause error
 	exec  bool
@@ -59,7 +61,8 @@ func dialWithin(timeout time.Duration, consumer string, abort func(), dial func(
 	if err == nil {
 		_ = conn.Close()
 	}
-	return nil, peerStreamOpenTimeoutError{cause: err, exec: consumer == "exec"}
+	var notStarted *tunnel.ExecNotStartedError
+	return nil, peerStreamOpenTimeoutError{cause: err, exec: consumer == "exec" && !errors.As(err, &notStarted)}
 }
 
 // tracedDial gives an exec, ssh or config-compare dial the step records a terminal redial has (peer_descriptor,

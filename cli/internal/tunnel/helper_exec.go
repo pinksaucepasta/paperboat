@@ -65,6 +65,15 @@ func (e *ExecStartUncertainError) Error() string {
 func (e *ExecStartUncertainError) Unwrap() error        { return e.Cause }
 func (e *ExecStartUncertainError) LocalAPICode() string { return "exec_start_uncertain" }
 
+// ExecNotStartedError is an exec open that failed before its start request was sent (no session, no admitted
+// stream): the host cannot have started the command, so a caller may report "not started" instead of retrying it.
+type ExecNotStartedError struct {
+	Cause error
+}
+
+func (e *ExecNotStartedError) Error() string { return e.Cause.Error() }
+func (e *ExecNotStartedError) Unwrap() error { return e.Cause }
+
 type ExecConn interface {
 	Conn
 	Events() <-chan ExecEvent
@@ -100,13 +109,18 @@ type helperExecConn struct {
 }
 
 func (t *PeerTerminalTunnel) DialExec(ctx context.Context, info resolver.ConnectInfo, request ExecRequest) (ExecConn, error) {
+	var requested atomic.Bool
 	connection, err := t.dial(ctx, info, "exec", peerApplication{operationID: request.OperationID, helper: func(attachCtx context.Context, message helperMessageConnection, target *resolver.TerminalTarget) (Conn, error) {
+		requested.Store(true) // from here the start request may reach the host
 		exec := &helperExecConn{message: message, target: target, request: request, events: make(chan ExecEvent, 256), done: make(chan struct{}), pending: make(map[string]chan helperFrame)}
 		if err := exec.initialize(attachCtx); err != nil {
 			return nil, err
 		}
 		return exec, nil
 	}})
+	if err != nil && !requested.Load() {
+		return nil, &ExecNotStartedError{Cause: err}
+	}
 	if err != nil {
 		return nil, err
 	}
