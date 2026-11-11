@@ -394,6 +394,24 @@ func (a *IngressAuthority) ResolveDecision(ctx context.Context, candidate connec
 	return connectorprotocol.IngressDecision{}, connectorprotocol.ErrIngressDenied
 }
 
+// AdmitsPreview reports whether the held snapshot still admits a preview publication on hostname (an ephemeral
+// decision that has not lapsed; a public one is renewed locally until a newer snapshot ends it). It is how the edge
+// tells an app that lost its carrier for a moment from a name the server never admitted.
+func (a *IngressAuthority) AdmitsPreview(hostname string) bool {
+	if a == nil || hostname == "" {
+		return false
+	}
+	now := time.Now()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, d := range a.decisions {
+		if d.Binding.Hostname == hostname && d.Binding.Lifecycle == connectorprotocol.TunnelEphemeral && (d.Binding.Audience == "public" || now.Before(d.ExpiresAt)) {
+			return true
+		}
+	}
+	return false
+}
+
 // QuotaDenied reports whether the last server snapshot withheld the hostname with a typed refusal: its
 // workspace is out of bandwidth allowance, or an operator took it down. The edge then still completes
 // TLS for that name so the request is answered with the typed page (429, or 451/403), instead of a
