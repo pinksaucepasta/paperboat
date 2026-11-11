@@ -22,13 +22,10 @@ import (
 //   - "never": the client stays, waiting for the rest: an upload or download cut short
 func resetBridge(t *testing.T, order string) error {
 	t.Helper()
-	if len(closeResets) == 0 { // the Windows reset error is already listed; a Unix host lists none
-		closeResets = []error{syscall.ECONNRESET}
-		defer func() { closeResets = nil }()
+	if len(resetErrors()) == 0 { // the Windows reset error is already listed; a Unix host lists none
+		defer overrideCloseResets([]error{syscall.ECONNRESET})()
 	}
-	previous := resetGrace
-	resetGrace = 500 * time.Millisecond
-	defer func() { resetGrace = previous }()
+	defer overrideResetGrace(500 * time.Millisecond)()
 	listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
 	if err != nil {
 		t.Fatal(err)
@@ -152,12 +149,10 @@ func TestClientAbortAfterTheReplyIsRecordedLikeOnUnix(t *testing.T) {
 
 // On Unix a reset from sshd is not an end: closeResets is empty there (bridge_reset_other.go), so it stays a failure.
 func TestUnixResetFromSSHDStaysAFailure(t *testing.T) {
-	if len(closeResets) != 0 {
+	if len(resetErrors()) != 0 {
 		t.Skip("closeResets lists the Windows reset")
 	}
-	previous := resetGrace
-	resetGrace = 200 * time.Millisecond
-	defer func() { resetGrace = previous }()
+	defer overrideResetGrace(200 * time.Millisecond)()
 	listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
 	if err != nil {
 		t.Fatal(err)
@@ -182,13 +177,10 @@ func TestUnixResetFromSSHDStaysAFailure(t *testing.T) {
 // A client that aborts mid-upload while sshd is still running is a cut session on every OS: sshd has not ended, so
 // nothing forgives the client's error.
 func TestClientAbortWhileSSHDIsStillRunningIsAFailure(t *testing.T) {
-	if len(closeResets) == 0 { // the Windows reset error is already listed; a Unix host lists none
-		closeResets = []error{syscall.ECONNRESET}
-		defer func() { closeResets = nil }()
+	if len(resetErrors()) == 0 { // the Windows reset error is already listed; a Unix host lists none
+		defer overrideCloseResets([]error{syscall.ECONNRESET})()
 	}
-	previous := resetGrace
-	resetGrace = 200 * time.Millisecond
-	defer func() { resetGrace = previous }()
+	defer overrideResetGrace(200 * time.Millisecond)()
 	listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
 	if err != nil {
 		t.Fatal(err)
@@ -231,12 +223,10 @@ func TestBridgeSSHFailedFINToSSHDIsAFailure(t *testing.T) {
 			_, _ = io.Copy(io.Discard, connection)
 		}
 	}()
-	previous := dialSSHD
-	dialSSHD = func(ctx context.Context, address string) (net.Conn, error) {
-		connection, dialErr := previous(ctx, address)
+	defer overrideDialSSHD(func(ctx context.Context, address string) (net.Conn, error) {
+		connection, dialErr := (&net.Dialer{}).DialContext(ctx, "tcp", address)
 		return finLostConn{connection}, dialErr
-	}
-	defer func() { dialSSHD = previous }()
+	})()
 	bridgeSide, clientSide := tcpPair(t)
 	defer clientSide.Close()
 	_ = clientSide.CloseWrite() // a clean copy: the client finished sending
@@ -248,9 +238,7 @@ func TestBridgeSSHFailedFINToSSHDIsAFailure(t *testing.T) {
 
 // A failed FIN towards the client is a failure unless the client had already left (its EOF).
 func TestBridgeSSHFailedFINToTheClientIsAFailureUnlessItLeft(t *testing.T) {
-	previous := resetGrace
-	resetGrace = 300 * time.Millisecond
-	defer func() { resetGrace = previous }()
+	defer overrideResetGrace(300 * time.Millisecond)()
 	for _, clientLeaves := range []bool{true, false} {
 		listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
 		if err != nil {
@@ -323,12 +311,10 @@ func (c *closedAwareConn) CloseWrite() error {
 // sshd ends first, the bridge closes sshd and then the stream, and to_sshd's CloseWrite meets the closed socket: that
 // is the bridge's own close, a clean session (the ordering the closed flag has to get right).
 func TestBridgeSSHOwnCloseRacingCloseWriteIsClean(t *testing.T) {
-	previous := dialSSHD
-	dialSSHD = func(ctx context.Context, address string) (net.Conn, error) {
-		connection, dialErr := previous(ctx, address)
+	defer overrideDialSSHD(func(ctx context.Context, address string) (net.Conn, error) {
+		connection, dialErr := (&net.Dialer{}).DialContext(ctx, "tcp", address)
 		return &closedAwareConn{Conn: connection}, dialErr
-	}
-	defer func() { dialSSHD = previous }()
+	})()
 	for range 50 { // the order of the two closes against the copier's wake-up is a race: repeat
 		listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
 		if err != nil {
@@ -374,14 +360,11 @@ func TestResultOfOwnCloseNamesWhatARealClosedSocketReports(t *testing.T) {
 // the test that would have caught it), with and without the Windows reset listed.
 func TestMidUploadAbortStaysFailedEvenWhenSSHDExitsPromptly(t *testing.T) {
 	for _, windows := range []bool{false, true} {
-		saved := closeResets
+		resets := []error(nil)
 		if windows {
-			closeResets = []error{syscall.ECONNRESET}
-		} else {
-			closeResets = nil
+			resets = []error{syscall.ECONNRESET}
 		}
-		previous := resetGrace
-		resetGrace = 500 * time.Millisecond
+		restoreResets, restoreGrace := overrideCloseResets(resets), overrideResetGrace(500 * time.Millisecond)
 		listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
 		if err != nil {
 			t.Fatal(err)
@@ -400,7 +383,8 @@ func TestMidUploadAbortStaysFailedEvenWhenSSHDExitsPromptly(t *testing.T) {
 			_ = clientSide.Close() // the abort
 		}()
 		_, err = BridgeSSH(t.Context(), abortedStream{bridgeSide}, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second)
-		resetGrace, closeResets = previous, saved
+		restoreGrace()
+		restoreResets()
 		_ = listener.Close()
 		if err == nil {
 			t.Fatalf("a mid-upload client abort, sshd exiting at once, was recorded closed (windows reset listed: %v)", windows)
@@ -412,14 +396,11 @@ func TestMidUploadAbortStaysFailedEvenWhenSSHDExitsPromptly(t *testing.T) {
 // aborted client fails, which is a write error, never sshd's end of output (only a reset READ from sshd is that).
 func TestMidDownloadClientAbortIsFailedOnEveryOS(t *testing.T) {
 	for _, windows := range []bool{false, true} {
-		saved := closeResets
+		resets := []error(nil)
 		if windows {
-			closeResets = []error{syscall.ECONNRESET}
-		} else {
-			closeResets = nil
+			resets = []error{syscall.ECONNRESET}
 		}
-		previous := resetGrace
-		resetGrace = 200 * time.Millisecond
+		restoreResets, restoreGrace := overrideCloseResets(resets), overrideResetGrace(200 * time.Millisecond)
 		listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
 		if err != nil {
 			t.Fatal(err)
@@ -442,7 +423,8 @@ func TestMidDownloadClientAbortIsFailedOnEveryOS(t *testing.T) {
 			_ = clientSide.Close() // the abort
 		}()
 		_, err = BridgeSSH(t.Context(), abortedStream{bridgeSide}, LoopbackTarget{Host: "127.0.0.1", Port: uint16(listener.Addr().(*net.TCPAddr).Port)}, time.Second)
-		resetGrace, closeResets = previous, saved
+		restoreGrace()
+		restoreResets()
 		_ = listener.Close()
 		if err == nil {
 			t.Fatalf("a client abort mid-download was recorded closed (windows reset listed: %v)", windows)

@@ -91,11 +91,6 @@ func ProbeLoopbackSSH(ctx context.Context, port uint16, timeout time.Duration) (
 	return readiness, nil
 }
 
-// dialSSHD opens the connection to the loopback sshd; tests replace it to give the connection a failing CloseWrite.
-var dialSSHD = func(ctx context.Context, address string) (net.Conn, error) {
-	return (&net.Dialer{}).DialContext(ctx, "tcp", address)
-}
-
 func BridgeSSH(ctx context.Context, stream io.ReadWriteCloser, target LoopbackTarget, dialTimeout time.Duration) (BridgeResult, error) {
 	if ctx == nil || stream == nil || dialTimeout <= 0 || dialTimeout > 30*time.Second {
 		return BridgeResult{}, ErrSSHTargetInvalid
@@ -269,7 +264,7 @@ func waitClientLeft(ctx context.Context, err error, clientLeft <-chan struct{}) 
 	if err == nil {
 		return nil
 	}
-	timer := time.NewTimer(resetGrace)
+	timer := time.NewTimer(resetGrace())
 	defer timer.Stop()
 	select {
 	case <-clientLeft:
@@ -279,9 +274,6 @@ func waitClientLeft(ctx context.Context, err error, clientLeft <-chan struct{}) 
 	}
 	return err
 }
-
-// resetGrace bounds how long a connection reset waits for the other direction to show a plain EOF.
-var resetGrace = 2 * time.Second
 
 func normalizeBridgeError(err error) error {
 	if err == nil || managedSSHLeavesMatch(err, io.EOF, io.ErrClosedPipe, net.ErrClosed) {
@@ -295,7 +287,7 @@ type onlyWriter struct{ io.Writer }
 // sshdReadReset reports a connection reset read from sshd (Op "read" with only reset leaves): on Windows the way a
 // sshd connection ends, where a Unix sshd ends with EOF. closeResets is empty on Unix, so this never fires there.
 func sshdReadReset(err error) bool {
-	if err == nil || len(closeResets) == 0 || !managedSSHLeavesMatch(err, closeResets...) {
+	if err == nil || len(resetErrors()) == 0 || !managedSSHLeavesMatch(err, resetErrors()...) {
 		return false
 	}
 	// Go's WriteTo wraps the failed read ("writeto") around the read's own OpError: look for the read in the chain.
@@ -311,10 +303,10 @@ func sshdReadReset(err error) bool {
 // own output must have ended too, within resetGrace, which sshdReadReset records as its EOF. A reset with sshd still
 // sending is a failure.
 func excuseReset(ctx context.Context, err error, otherEOF <-chan struct{}) error {
-	if err == nil || len(closeResets) == 0 || !managedSSHLeavesMatch(err, closeResets...) {
+	if err == nil || len(resetErrors()) == 0 || !managedSSHLeavesMatch(err, resetErrors()...) {
 		return err
 	}
-	timer := time.NewTimer(resetGrace)
+	timer := time.NewTimer(resetGrace())
 	defer timer.Stop()
 	select {
 	case <-otherEOF:
