@@ -10,6 +10,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -166,5 +167,37 @@ func TestRestoreRefusesATamperedPinBeforeChangingAnything(t *testing.T) {
 		if err != nil || !bytes.Equal(got, want) {
 			t.Fatalf("the refused restore changed %s: %v", path, err)
 		}
+	}
+}
+
+// A candidate that cannot be removed does not leave the previous carrier unrestored (audit C #15): the baseline is
+// still verified, published and started, and the removal failure is reported with the result.
+func TestRestoreAfterCandidateRestoresTheBaselineWhenTheCandidateStaysBehind(t *testing.T) {
+	paths := platformPaths(1001)
+	candidate, err := deriveUnixCarrierConfig(generationRequest("b"), paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := deriveUnixCarrierConfig(generationRequest("a"), paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	held := errors.New("the candidate is held")
+	var steps []string
+	remove := func(context.Context, CarrierConfig) error { steps = append(steps, "remove"); return held }
+	verify := func(CarrierConfig) error { steps = append(steps, "verify"); return nil }
+	publish := func(CarrierConfig) error { steps = append(steps, "publish"); return nil }
+	start := func(context.Context, CarrierConfig) error { steps = append(steps, "start"); return nil }
+	removeErr, err := restoreAfterCandidate(context.Background(), candidate, &baseline, remove, verify, publish, start)
+	if !errors.Is(removeErr, held) || err != nil {
+		t.Fatalf("removeErr=%v err=%v", removeErr, err)
+	}
+	if got := strings.Join(steps, " "); got != "remove verify publish start" {
+		t.Fatalf("steps %q, want the baseline restored after the failed removal", got)
+	}
+	steps = nil
+	removeErr, err = restoreAfterCandidate(context.Background(), candidate, nil, remove, verify, publish, start)
+	if !errors.Is(removeErr, held) || err != nil || strings.Join(steps, " ") != "remove" {
+		t.Fatalf("no baseline: removeErr=%v err=%v steps=%v", removeErr, err, steps)
 	}
 }

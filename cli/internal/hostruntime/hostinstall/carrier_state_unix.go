@@ -118,6 +118,24 @@ func restoreBaselineCarrier(ctx context.Context, baseline CarrierConfig, publish
 	return start(ctx, baseline)
 }
 
+// restoreAfterCandidate removes the failed candidate and brings the previous carrier back. A candidate that cannot be
+// removed must not leave the baseline unrestored: the baseline is restored regardless and both failures are reported
+// (removeErr is returned separately so the caller reports it whatever the restore did).
+func restoreAfterCandidate(ctx context.Context, candidate CarrierConfig, baseline *CarrierConfig, remove func(context.Context, CarrierConfig) error, verify func(CarrierConfig) error, publish func(CarrierConfig) error, start func(context.Context, CarrierConfig) error) (removeErr, err error) {
+	removeErr = remove(ctx, candidate)
+	// A failed network handover may have released the previous carrier's network and exited it.
+	if baseline == nil {
+		return removeErr, nil
+	}
+	if baseline.Validate() != nil {
+		return removeErr, ErrInvalidRequest
+	}
+	if err := verify(*baseline); err != nil {
+		return removeErr, err
+	}
+	return removeErr, restoreBaselineCarrier(ctx, *baseline, publish, start)
+}
+
 func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) (resultErr error) {
 	var removeErr error
 	defer func() { resultErr = errors.Join(removeErr, resultErr) }()
@@ -139,19 +157,9 @@ func (s unixCarrierInstallation) Restore(ctx context.Context, body []byte) (resu
 		return err
 	}
 	if baseline.Carrier == nil || baseline.Carrier.Generation != canonical.Generation {
-		// A candidate that cannot be removed must not leave the baseline unrestored: restore, then report both.
-		removeErr = removeCarrierGeneration(ctx, canonical)
-		// A failed network handover may have released the previous carrier's network and exited it.
-		if baseline.Carrier != nil {
-			if baseline.Carrier.Validate() != nil {
-				return ErrInvalidRequest
-			}
-			if err := baseline.Carrier.Source.Verify(baseline.Carrier.Executable); err != nil {
-				return err
-			}
-			if err := restoreBaselineCarrier(ctx, *baseline.Carrier, publishCarrierDescriptor, startCarrierIfStopped); err != nil {
-				return err
-			}
+		removeErr, err = restoreAfterCandidate(ctx, canonical, baseline.Carrier, removeCarrierGeneration, func(c CarrierConfig) error { return c.Source.Verify(c.Executable) }, publishCarrierDescriptor, startCarrierIfStopped)
+		if err != nil {
+			return err
 		}
 	}
 	current, err := readCarrierConfigFile(ctx, s.paths.instance)
