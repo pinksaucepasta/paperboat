@@ -132,155 +132,25 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 	if err != nil {
 		return err
 	}
+	// A grant that does not verify makes only its relay unusable, with every part of that relay's grant; the
+	// other relays still apply (Tailscale fails a DERP region, never the whole map: wgengine/magicsock/derp.go).
+	refused := map[string]bool{}
+	control := map[string][]key.NodePublic{}
 	for _, token := range tokens {
-		parts := strings.Split(token, ".")
-		if len(parts) != 3 || len(token) > MaxConfigurationBytes {
-			next = nil
-			grants = nil
-			return ErrAuthority
+		g, peers, err := a.verifyRelayGrant(ctx, token, cfg, nodes)
+		earlier, chunk := grants[g.NodeID], next[g.NodeID] != ""
+		if err == nil && chunk && (len(strings.Split(next[g.NodeID], "\n")) >= derpquic.MaxGrantParts || earlier.ExpiresAt != g.ExpiresAt || earlier.IssuedAt != g.IssuedAt) {
+			err = ErrAuthority // the parts of one grant share one issue and one expiry, within the relay's bound
 		}
-		header, err := base64.RawURLEncoding.Strict().DecodeString(parts[0])
-		var h struct {
-			KeyID string `json:"kid"`
+		if err == nil {
+			err = relayGrantPeersConfigured(g, earlier, chunk, cfg)
 		}
-		if err != nil || json.Unmarshal(header, &h) != nil {
-			next = nil
-			grants = nil
-			return ErrAuthority
-		}
-		body, err := base64.RawURLEncoding.Strict().DecodeString(parts[1])
-		var g peernetwork.RelayGrant
-		if err != nil || peernetwork.DecodeSigned(body, &g) != nil {
-			next = nil
-			grants = nil
-			return ErrAuthority
-		}
-		var node *RegionalNode
-		for i := range nodes {
-			if nodes[i].NodeID == g.NodeID {
-				node = &nodes[i]
-				break
-			}
-		}
-		if node == nil {
-			next = nil
-			grants = nil
-			return ErrRegionalAuthority
-		}
-		pub, found, err := a.options.Keys.Lookup(ctx, h.KeyID)
-		if err != nil || !found {
-			next = nil
-			grants = nil
-			return ErrAuthority
-		}
-		// The real certificate is required when configuring the carrier. Before that,
-		// verify the signature and all claims here, then compare its signed fingerprint
-		// with the already approved local binding.
-		if len(pub) != 32 || !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), mustDecodeRelaySignature(parts[2])) || h.KeyID == "" {
-			next = nil
-			grants = nil
-			return ErrAuthority
-		}
-		var fullHeader struct {
-			Algorithm string `json:"alg"`
-			Type      string `json:"typ"`
-			KeyID     string `json:"kid"`
-		}
-		g.DropUnknownScopes()
-		if peernetwork.DecodeSigned(header, &fullHeader) != nil || fullHeader.Algorithm != "EdDSA" || fullHeader.Type != peernetwork.RelayGrantType || g.Issuer != a.options.Issuer || g.AccountID != cfg.Self.AccountID || g.EndpointID != cfg.Self.EndpointID || g.WireGuardPublicKey != cfg.Self.WireGuardPublicKey || g.CertificateFingerprint != cfg.Self.QUICCertificateFingerprint || g.QUICPublicKey != cfg.Self.QUICPublicKey || g.Generation != cfg.Generation || g.NodeGeneration != node.NodeGeneration || g.ProcessEpoch != node.ProcessEpoch || g.ExpiresAt <= serverclock.Now().Unix() {
-			next = nil
-			grants = nil
-			return ErrAuthority
-		}
-		// A grant relays would refuse makes only its relay unusable; the others still apply.
-		if err := g.Check(serverclock.Now()); err != nil {
-			diagnosticlog.TryWarn("a relay grant relays would refuse is not used", "node", g.NodeID, "error", err)
+		if err != nil {
+			diagnosticlog.TryWarn("a relay grant that does not verify is not used; the other relays still apply", "node", g.NodeID, "error", err)
+			refused[g.NodeID] = true
 			continue
 		}
-		// A grant names at most a bounded subset of this endpoint's peers (the relay's per-grant
-		// bound); every peer it names must be a configured peer with exactly its configured scopes.
-		if len(g.Peers) > len(cfg.Peers) {
-			next = nil
-			grants = nil
-			return ErrAuthority
-		}
-		for _, peerKey := range g.RelayControlPeers {
-			peer, err := publicKey(peerKey)
-			if err != nil {
-				next = nil
-				grants = nil
-				return ErrAuthority
-			}
-			controlSet[peer] = true
-		}
-		// A membership grant names no peers: each membership must be a scope this configuration gives the
-		// endpoint (same resource and direction), and its account mesh membership makes every configured peer
-		// of the account a relay-control peer, as the relay itself decides (derpquic membership.go).
-		if len(g.Memberships) > 0 {
-			if len(g.Peers)+len(g.RelayControlPeers) > 0 || !membershipsConfigured(g.Memberships, cfg) {
-				next = nil
-				grants = nil
-				return ErrAuthority
-			}
-			for _, m := range g.Memberships {
-				if m.ResourceKind != "machine_network" {
-					continue
-				}
-				for _, p := range cfg.Peers {
-					if peer, err := publicKey(p.Identity.WireGuardPublicKey); err == nil && p.Identity.AccountID == cfg.Self.AccountID {
-						controlSet[peer] = true
-					}
-				}
-				break
-			}
-		}
-		// An endpoint with more peers than one grant names gets one grant per chunk of peers for a node;
-		// together they name each configured peer at most once.
-		earlier, chunk := grants[g.NodeID], next[g.NodeID] != ""
-		if chunk && (len(strings.Split(next[g.NodeID], "\n")) >= derpquic.MaxGrantParts || earlier.ExpiresAt != g.ExpiresAt || earlier.IssuedAt != g.IssuedAt) {
-			next = nil
-			grants = nil
-			return ErrAuthority
-		}
-		configured := make(map[string]string, len(cfg.Peers))
-		for _, peer := range cfg.Peers {
-			// Until-revoked scopes (expires_at 0, F21-01) differ in a grant: relays and the mint refuse peer scopes
-			// without expiry, so a kept scope appears with the grant's own expiry and the rest is left out
-			// (peernetwork.RelayGrantKeepsStanding, the rule the server applies). A peer with nothing kept is not
-			// named. Everything else must match exactly.
-			mesh := slices.ContainsFunc(peer.Scopes, func(s NetworkScope) bool { return s.ResourceKind == "machine_network" })
-			var scopes []NetworkScope
-			for _, scope := range peer.Scopes {
-				if scope.ExpiresAt == 0 {
-					if !peernetwork.RelayGrantKeepsStanding(scope, mesh) {
-						continue
-					}
-					scope.ExpiresAt = g.ExpiresAt
-				}
-				scopes = append(scopes, scope)
-			}
-			if len(scopes) == 0 {
-				continue
-			}
-			encoded, _ := json.Marshal(scopes)
-			configured[peer.Identity.WireGuardPublicKey] = string(encoded)
-		}
-		seenPeer := make(map[string]bool, len(g.Peers)+len(earlier.Peers))
-		if chunk {
-			for _, p := range earlier.Peers {
-				seenPeer[p.WireGuardPublicKey] = true
-			}
-		}
-		for _, p := range g.Peers {
-			expected, ok := configured[p.WireGuardPublicKey]
-			actual, _ := json.Marshal(p.Scopes)
-			if !ok || seenPeer[p.WireGuardPublicKey] || expected != string(actual) {
-				next = nil
-				grants = nil
-				return ErrAuthority
-			}
-			seenPeer[p.WireGuardPublicKey] = true
-		}
+		control[g.NodeID] = append(control[g.NodeID], peers...)
 		if chunk {
 			merged := earlier
 			merged.Peers = append(append([]peernetwork.RelayPeer(nil), earlier.Peers...), g.Peers...)
@@ -296,11 +166,147 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 		next[g.NodeID] = token
 		grants[g.NodeID] = g
 	}
+	for node := range refused {
+		delete(next, node)
+		delete(grants, node)
+	}
+	for node, peers := range control {
+		if !refused[node] {
+			for _, peer := range peers {
+				controlSet[peer] = true
+			}
+		}
+	}
 	if len(tokens) > 0 && len(grants) == 0 {
 		return ErrAuthority // every grant was refused; the empty set is still installed
 	}
 	return nil
 }
+
+// verifyRelayGrant checks one grant part exactly: its signature, every claim against this configuration and the
+// relay it names, and the relay's own rules. It returns the grant (its NodeID set once the body decodes, so a
+// failure names its relay) and the relay-control peers the grant makes.
+func (a *Authority) verifyRelayGrant(ctx context.Context, token string, cfg NetworkConfiguration, nodes []RegionalNode) (peernetwork.RelayGrant, []key.NodePublic, error) {
+	var g peernetwork.RelayGrant
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 || len(token) > MaxConfigurationBytes {
+		return g, nil, ErrAuthority
+	}
+	header, err := base64.RawURLEncoding.Strict().DecodeString(parts[0])
+	var h struct {
+		KeyID string `json:"kid"`
+	}
+	if err != nil || json.Unmarshal(header, &h) != nil {
+		return g, nil, ErrAuthority
+	}
+	body, err := base64.RawURLEncoding.Strict().DecodeString(parts[1])
+	if err != nil || peernetwork.DecodeSigned(body, &g) != nil {
+		return peernetwork.RelayGrant{}, nil, ErrAuthority
+	}
+	var node *RegionalNode
+	for i := range nodes {
+		if nodes[i].NodeID == g.NodeID {
+			node = &nodes[i]
+			break
+		}
+	}
+	if node == nil {
+		return g, nil, ErrRegionalAuthority
+	}
+	pub, found, err := a.options.Keys.Lookup(ctx, h.KeyID)
+	if err != nil || !found {
+		return g, nil, ErrAuthority
+	}
+	// The real certificate is required when configuring the carrier. Before that,
+	// verify the signature and all claims here, then compare its signed fingerprint
+	// with the already approved local binding.
+	if len(pub) != 32 || !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), mustDecodeRelaySignature(parts[2])) || h.KeyID == "" {
+		return g, nil, ErrAuthority
+	}
+	var fullHeader struct {
+		Algorithm string `json:"alg"`
+		Type      string `json:"typ"`
+		KeyID     string `json:"kid"`
+	}
+	g.DropUnknownScopes()
+	if peernetwork.DecodeSigned(header, &fullHeader) != nil || fullHeader.Algorithm != "EdDSA" || fullHeader.Type != peernetwork.RelayGrantType || g.Issuer != a.options.Issuer || g.AccountID != cfg.Self.AccountID || g.EndpointID != cfg.Self.EndpointID || g.WireGuardPublicKey != cfg.Self.WireGuardPublicKey || g.CertificateFingerprint != cfg.Self.QUICCertificateFingerprint || g.QUICPublicKey != cfg.Self.QUICPublicKey || g.Generation != cfg.Generation || g.NodeGeneration != node.NodeGeneration || g.ProcessEpoch != node.ProcessEpoch || g.ExpiresAt <= serverclock.Now().Unix() {
+		return g, nil, ErrAuthority
+	}
+	if err := g.Check(serverclock.Now()); err != nil {
+		return g, nil, err // relays would refuse it
+	}
+	var control []key.NodePublic
+	for _, peerKey := range g.RelayControlPeers {
+		peer, err := publicKey(peerKey)
+		if err != nil {
+			return g, nil, ErrAuthority
+		}
+		control = append(control, peer)
+	}
+	// A membership grant names no peers: each membership must be a scope this configuration gives the
+	// endpoint (same resource and direction), and its account mesh membership makes every configured peer
+	// of the account a relay-control peer, as the relay itself decides (derpquic membership.go).
+	if len(g.Memberships) > 0 {
+		if len(g.Peers)+len(g.RelayControlPeers) > 0 || !membershipsConfigured(g.Memberships, cfg) {
+			return g, nil, ErrAuthority
+		}
+		if slices.ContainsFunc(g.Memberships, func(m derpquic.Scope) bool { return m.ResourceKind == "machine_network" }) {
+			for _, p := range cfg.Peers {
+				if peer, err := publicKey(p.Identity.WireGuardPublicKey); err == nil && p.Identity.AccountID == cfg.Self.AccountID {
+					control = append(control, peer)
+				}
+			}
+		}
+	}
+	return g, control, nil
+}
+
+// relayGrantPeersConfigured checks a grant part's peers: a bounded subset of this endpoint's configured peers, each
+// with exactly its configured scopes and named once across the parts of its relay's grant.
+func relayGrantPeersConfigured(g, earlier peernetwork.RelayGrant, chunk bool, cfg NetworkConfiguration) error {
+	if len(g.Peers) > len(cfg.Peers) {
+		return ErrAuthority
+	}
+	configured := make(map[string]string, len(cfg.Peers))
+	for _, peer := range cfg.Peers {
+		// Until-revoked scopes (expires_at 0, F21-01) differ in a grant: relays and the mint refuse peer scopes
+		// without expiry, so a kept scope appears with the grant's own expiry and the rest is left out
+		// (peernetwork.RelayGrantKeepsStanding, the rule the server applies). A peer with nothing kept is not
+		// named. Everything else must match exactly.
+		mesh := slices.ContainsFunc(peer.Scopes, func(s NetworkScope) bool { return s.ResourceKind == "machine_network" })
+		var scopes []NetworkScope
+		for _, scope := range peer.Scopes {
+			if scope.ExpiresAt == 0 {
+				if !peernetwork.RelayGrantKeepsStanding(scope, mesh) {
+					continue
+				}
+				scope.ExpiresAt = g.ExpiresAt
+			}
+			scopes = append(scopes, scope)
+		}
+		if len(scopes) == 0 {
+			continue
+		}
+		encoded, _ := json.Marshal(scopes)
+		configured[peer.Identity.WireGuardPublicKey] = string(encoded)
+	}
+	seenPeer := make(map[string]bool, len(g.Peers)+len(earlier.Peers))
+	if chunk {
+		for _, p := range earlier.Peers {
+			seenPeer[p.WireGuardPublicKey] = true
+		}
+	}
+	for _, p := range g.Peers {
+		expected, ok := configured[p.WireGuardPublicKey]
+		actual, _ := json.Marshal(p.Scopes)
+		if !ok || seenPeer[p.WireGuardPublicKey] || expected != string(actual) {
+			return ErrAuthority
+		}
+		seenPeer[p.WireGuardPublicKey] = true
+	}
+	return nil
+}
+
 func mustDecodeRelaySignature(s string) []byte {
 	b, _ := base64.RawURLEncoding.Strict().DecodeString(s)
 	return b
