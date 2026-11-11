@@ -472,8 +472,8 @@ func TestNativeWindowsComposedLifecycle(t *testing.T) {
 	if err := updaterReady(context.Background()); err != nil {
 		t.Fatalf("updater readiness after stop/repair: %v", err)
 	}
-	// A retired generation is disabled (no start at boot) and stopped; starting it again, as a rollback to it does,
-	// enables it, as `systemctl enable --now` does.
+	// A retired generation is disabled (no start at boot) and stopped; a plain Start stays refused, enabling it first
+	// (a rollback to it) lets it start.
 	controller := WindowsController{}
 	retired := hostd.DefinitionPath()
 	if err := controller.Disable(context.Background(), retired); err != nil {
@@ -485,8 +485,14 @@ func TestNativeWindowsComposedLifecycle(t *testing.T) {
 	if status, err := controller.Inspect(context.Background(), retired); err != nil || status.Enabled || status.Running {
 		t.Fatalf("disabled and stopped service reports %+v err=%v", status, err)
 	}
+	if err := controller.Start(context.Background(), retired); !errors.Is(err, ErrInvalidDefinition) {
+		t.Fatalf("a plain start of a disabled service was not refused: %v", err)
+	}
+	if err := controller.Enable(context.Background(), retired); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
 	if err := controller.Start(context.Background(), retired); err != nil {
-		t.Fatalf("start of a disabled service: %v", err)
+		t.Fatalf("start after enable: %v", err)
 	}
 	if status, err := controller.Inspect(context.Background(), retired); err != nil || !status.Enabled || !status.Running {
 		t.Fatalf("restarted service reports %+v err=%v", status, err)
