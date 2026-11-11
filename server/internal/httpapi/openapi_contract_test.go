@@ -51,6 +51,7 @@ func TestOpenAPIMatchesRegisteredRoutes(t *testing.T) {
 		lines = append(lines, strings.Split(string(data), "\n")...)
 	}
 	registered := make(map[string]map[string]bool)
+	var prefixes [][2]string
 	for _, line := range lines {
 		match := registeredRoutePattern.FindStringSubmatch(line)
 		if match == nil {
@@ -58,7 +59,9 @@ func TestOpenAPIMatchesRegisteredRoutes(t *testing.T) {
 		}
 		method, path := strings.ToLower(match[1]), match[2]
 		if strings.HasSuffix(path, "/") {
-			continue // a prefix whose action is concatenated at registration; its full paths cannot be read from source
+			// An action is concatenated at registration, so the full paths are not in the source: require the spec to hold some path under the prefix.
+			prefixes = append(prefixes, [2]string{method, path})
+			continue
 		}
 		if strings.HasPrefix(path, "/api/") {
 			t.Errorf("registered route is not versioned: %s %s", match[1], path)
@@ -79,6 +82,15 @@ func TestOpenAPIMatchesRegisteredRoutes(t *testing.T) {
 		registered[path][method] = true
 	}
 
+	for _, prefix := range prefixes {
+		found := false
+		for path, operations := range doc.Paths {
+			found = found || strings.HasPrefix(path, prefix[1]) && operations[prefix[0]] != nil
+		}
+		if !found {
+			t.Errorf("openapi has no %s operation under registered prefix %s", strings.ToUpper(prefix[0]), prefix[1])
+		}
+	}
 	for path, methods := range registered {
 		operations, ok := doc.Paths[path]
 		if !ok {
