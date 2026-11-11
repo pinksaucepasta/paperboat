@@ -21,6 +21,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 )
@@ -627,5 +628,21 @@ func TestApprovePeerRefusalReachesTheCallerAsACode(t *testing.T) {
 	_, err := server.ApprovePeer(context.Background(), &pb.ApprovePeerRequest{MachineId: "dev-1", Approved: true, AccountId: "user_test"})
 	if _, ok := RefusalCode(err); ok || strings.Contains(err.Error(), "exploded") {
 		t.Fatalf("an ordinary failure must stay masked: %v", err)
+	}
+}
+
+// A call without the daemon API version, or with another one, is refused before it reaches the backend.
+func TestDaemonRefusesACallFromAnotherAPIVersion(t *testing.T) {
+	for name, md := range map[string]metadata.MD{
+		"no version":    metadata.Pairs(),
+		"other version": metadata.Pairs(apiVersionMetadata, APIVersion+"-other"),
+	} {
+		ctx := metadata.NewIncomingContext(context.Background(), md)
+		if err := checkAPIVersion(ctx); status.Code(err) != codes.FailedPrecondition {
+			t.Errorf("%s: code %s, want FailedPrecondition", name, status.Code(err))
+		}
+	}
+	if err := checkAPIVersion(metadata.NewIncomingContext(context.Background(), metadata.Pairs(apiVersionMetadata, APIVersion))); err != nil {
+		t.Fatalf("the current version was refused: %v", err)
 	}
 }
