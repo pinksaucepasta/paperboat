@@ -1792,6 +1792,7 @@ func EnsureCommittedWindowsHostdReady(ctx context.Context, request Request) erro
 	var healthySince time.Time
 	restarted := false
 	var lastErr error
+	var probes probeErrors
 	for {
 		status, inspectErr := controller.Inspect(readyCtx, hostd.DefinitionPath())
 		if inspectErr != nil {
@@ -1818,12 +1819,13 @@ func EnsureCommittedWindowsHostdReady(ctx context.Context, request Request) erro
 		} else {
 			healthySince = time.Time{}
 			lastErr = err
+			probes.note(err)
 		}
 		timer := time.NewTimer(250 * time.Millisecond)
 		select {
 		case <-readyCtx.Done():
 			timer.Stop()
-			return hostInstallFailure("Paperboat host service health check did not stabilize", errors.Join(readyCtx.Err(), context.Cause(readyCtx), lastErr, windowsHostdServing(config.HostdSocket, config.TokenFile, config.OwnerSID)))
+			return hostInstallFailure("Paperboat host service health check did not stabilize", errors.Join(readyCtx.Err(), context.Cause(readyCtx), probes.err(), windowsHostdServing(config.HostdSocket, config.TokenFile, config.OwnerSID)))
 		case <-timer.C:
 		}
 	}

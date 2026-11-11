@@ -71,13 +71,17 @@ func (u *carrierUpgrade) confirmServing(ctx context.Context, wait time.Duration)
 	}
 	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
+	var probes probeErrors
 	for {
 		if err = client.Health(ctx); err == nil {
 			return nil
 		}
+		// No fail-fast here: the carrier answers a rejected capability as unavailable on purpose (no oracle), so a
+		// definite error cannot be told from "still starting"; the budget is the bound and both ends are reported.
+		probes.note(err)
 		select {
 		case <-ctx.Done():
-			return hostInstallFailure("the new version's carrier is not serving, so the update is not committed", err)
+			return hostInstallFailure("the new version's carrier is not serving, so the update is not committed", probes.err())
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
