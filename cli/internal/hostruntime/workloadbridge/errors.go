@@ -41,6 +41,7 @@ var errorCodes = map[string]error{
 	"session.ErrUpdateInProgress":      session.ErrUpdateInProgress,
 	"session.ErrAttachmentExists":      session.ErrAttachmentExists,
 	"session.ErrAttachmentUnknown":     session.ErrAttachmentUnknown,
+	"session.ErrAttachmentReplaced":    session.ErrAttachmentReplaced,
 	"session.ErrAttachmentEvicted":     session.ErrAttachmentEvicted,
 	"session.ErrAttachmentLagged":      session.ErrAttachmentLagged,
 	"session.ErrOutputOrder":           session.ErrOutputOrder,

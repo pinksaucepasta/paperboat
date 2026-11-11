@@ -44,8 +44,20 @@ func TestOldTerminalStreamCannotReadOrDetachReplacement(t *testing.T) {
 	}
 	// An old in-flight poll must not advance the new replay queue, even if its
 	// cursor was ahead of what the client actually received before switching.
-	if _, err := dispatcher.config.Sessions.WaitNextAttachment(ctx, created.ID, "att_handoff", ^uint64(0), old.attachmentLease); !errors.Is(err, session.ErrAttachmentUnknown) {
+	if _, err := dispatcher.config.Sessions.WaitNextAttachment(ctx, created.ID, "att_handoff", ^uint64(0), old.attachmentLease); !errors.Is(err, session.ErrAttachmentReplaced) {
 		t.Fatal("old reader retained the replacement queue", err)
+	}
+	// The old link ends marked as handed over, so its client adopts the newer link instead of ending the terminal.
+	for frames := 0; ; frames++ {
+		_, err := old.Next(ctx)
+		if err == nil && frames < 64 {
+			continue // the old attachment's checkpoint
+		}
+		var end *StreamEnd
+		if !errors.As(err, &end) || string(end.Payload) != `{"event":"terminal_handed_over","session_id":"ses_handoff"}` {
+			t.Fatal("old stream did not end as handed over", err)
+		}
+		break
 	}
 	if err := old.Close(); err != nil {
 		t.Fatal("old stream cleanup should be a no-op", err)

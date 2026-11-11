@@ -63,6 +63,10 @@ var ErrTransportLost = errors.New("terminal transport lost")
 // ErrLocalDaemonLost: the link to the Paperboat daemon on this computer broke (it restarted or stopped).
 var ErrLocalDaemonLost = fmt.Errorf("local Paperboat daemon connection lost: %w", ErrTransportLost)
 
+// ErrHandedOver: the host ended this link because the same terminal was attached again (the stalled-link probe resumed
+// it); the newer link has the terminal. Without an adopted probe it is redialed like a lost link.
+var ErrHandedOver = fmt.Errorf("terminal handed to a newer attachment: %w", ErrTransportLost)
+
 // ErrInputNotSent: a write failed before any of it left this process, so it is safe to send again on the next link.
 var ErrInputNotSent = fmt.Errorf("terminal input was not sent: %w", ErrTransportLost)
 
@@ -139,7 +143,7 @@ type ReconnectingConn struct {
 	available   chan struct{}
 	redial      atomic.Bool
 	probed      atomic.Pointer[probedLink] // a fresh link dialed while the current one was stalled
-	probing     sync.Mutex                 // held by the one running probeStalled; supervise waits on it before a clean end
+	probing     sync.Mutex                 // held by the one running probeStalled; supervise waits on it after a handover end
 	linkStalled atomic.Bool
 	// refused is a permanent refusal the stalled-link probe met (access revoked); supervise ends with it.
 	refused           atomic.Pointer[error]
@@ -226,7 +230,7 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 	}()
 	for {
 		connection := rand.Text()
-		var silent atomic.Bool // this link's own state; linkStalled follows whichever link is current
+		var silent atomic.Bool                             // this link's own state; linkStalled follows whichever link is current
 		probeCtx, cancelProbe := context.WithCancel(c.ctx) // this link's probe; ends once supervise is done with the link
 		if observed, ok := conn.(LinkStateObserver); ok {
 			stalledConn := conn
@@ -282,20 +286,15 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 		<-readDone
 		joinEnd(nil)
 		c.recordCompression(conn)
-		if err == nil {
-			// The host hands the terminal to an attached probe by clearing the old link's stall and then ending it,
-			// which can get here before the probe stores its link: ending the terminal then left no link and nothing
-			// redialing (a41f3d241's silent terminal). Let a running probe finish so its link is adopted.
+		if errors.Is(err, ErrHandedOver) {
+			// The host ends the old link as the probe's attachment completes, which can get here before the probe stores
+			// its link: redialing then took the terminal back from it. Let the running probe finish (each attempt is
+			// bounded by probeAttemptTimeout) so its link is adopted. A shell exit or an error end does not wait.
 			if c.probeWait != nil {
 				c.probeWait()
 			}
-			// The host ends the old link only once the probe's attachment completed there, so a handover leaves the probe
-			// one reply's trip from storing its link; a user's exit must not wait out a probe still dialing (resolve and
-			// QUIC are bounded only by ctx), so the probe is cancelled after probeHandoverGrace.
-			abandon := time.AfterFunc(probeHandoverGrace, cancelProbe)
 			c.probing.Lock()
 			c.probing.Unlock()
-			abandon.Stop()
 		}
 		cancelProbe()
 		if refused := c.refused.Swap(nil); refused != nil {
@@ -606,13 +605,9 @@ func (c *ReconnectingConn) Redial() {
 	_ = conn.Close()
 }
 
-const (
-	// probeHandoverGrace: how long a clean end of the old link waits for a running probe to store its link.
-	probeHandoverGrace = time.Second
-	// probeAttemptTimeout: a silent link is given up by TCP after about 2 min and then redialed by supervise, so a
-	// probe attempt that takes longer can only hold the probe slot.
-	probeAttemptTimeout = 2 * time.Minute
-)
+// probeAttemptTimeout: a silent link is given up by TCP after about 2 min and then redialed by supervise, so a
+// probe attempt that takes longer can only hold the probe slot.
+const probeAttemptTimeout = 2 * time.Minute
 
 // probedLink is a fresh link and the stalled link it was dialed to replace.
 type probedLink struct{ stalled, conn Conn }
@@ -630,7 +625,8 @@ func (c *ReconnectingConn) probeStalled(ctx context.Context, stalled Conn, conne
 		c.mu.RLock()
 		current := c.current
 		c.mu.RUnlock()
-		return current == stalled && c.ctx.Err() == nil
+		// ctx ends once supervise is done with the link, so a probe can never store a link nobody will adopt.
+		return current == stalled && ctx.Err() == nil
 	}
 	still := func() bool { return c.linkStalled.Load() && current() }
 	backoff := reattach.Backoff(c.delay, c.delay)

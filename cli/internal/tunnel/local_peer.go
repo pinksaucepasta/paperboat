@@ -36,6 +36,12 @@ const (
 	localPeerLinkState
 )
 
+// A localPeerFailure payload says why the terminal link failed; empty is a lost transport.
+const (
+	localPeerFailureDaemonStopping byte = 1
+	localPeerFailureHandedOver     byte = 2
+)
+
 // LinkStateObserver is a terminal connection that reports when its host goes silent (true) and is heard again (false).
 type LinkStateObserver interface{ ObserveLinkState(func(stalled bool)) }
 
@@ -325,7 +331,8 @@ func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includ
 							return
 						}
 					}
-					if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrClosedPipe) && !errors.Is(err, net.ErrClosed) {
+					// A handover is reported by the Wait result; ending the bridge here could close it before that is sent.
+					if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrClosedPipe) && !errors.Is(err, net.ErrClosed) && !errors.Is(err, ErrHandedOver) {
 						done <- err
 					}
 					return
@@ -384,8 +391,10 @@ func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includ
 					kind := localPeerResult
 					if waitErr != nil {
 						kind, result = localPeerFailure, nil
-						if cursor.stopping() {
-							result = []byte{1}
+						if errors.Is(waitErr, ErrHandedOver) {
+							result = []byte{localPeerFailureHandedOver}
+						} else if cursor.stopping() {
+							result = []byte{localPeerFailureDaemonStopping}
 						}
 					}
 					if err := writer.write(kind, result); err != nil {
@@ -658,9 +667,12 @@ func (c *localPeerConn) readLoop() {
 			}
 			c.publishResult(localPeerWaitResult{code: int(int32(binary.BigEndian.Uint32(payload)))})
 		case localPeerFailure:
-			if len(payload) == 1 && payload[0] == 1 {
+			switch {
+			case len(payload) == 1 && payload[0] == localPeerFailureDaemonStopping:
 				c.publishResult(localPeerWaitResult{err: ErrLocalDaemonLost})
-			} else {
+			case len(payload) == 1 && payload[0] == localPeerFailureHandedOver:
+				c.publishResult(localPeerWaitResult{err: ErrHandedOver})
+			default:
 				c.publishResult(localPeerWaitResult{err: ErrTransportLost})
 			}
 		case localPeerExecEvent:

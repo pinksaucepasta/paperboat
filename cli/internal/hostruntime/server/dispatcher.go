@@ -538,6 +538,15 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 			}{queued})
 			return protocol.BinaryFrame{}, &StreamError{Code: "slow_consumer", Details: details, CloseCode: protocol.CloseSlowConsumer}
 		}
+		if errors.Is(err, session.ErrAttachmentReplaced) {
+			// The client attached again (its stalled-link probe resumed): this link ends marked as handed over, so the
+			// client adopts the newer link instead of reading the end as the shell's exit.
+			payload, _ := json.Marshal(struct {
+				Event     string `json:"event"`
+				SessionID string `json:"session_id"`
+			}{"terminal_handed_over", s.sessionID})
+			return protocol.BinaryFrame{}, &StreamEnd{Payload: payload}
+		}
 		if errors.Is(err, session.ErrInvalidTransition) || errors.Is(err, session.ErrAttachmentUnknown) {
 			return protocol.BinaryFrame{}, ErrStreamClosed
 		}

@@ -859,3 +859,41 @@ func TestLocalExecPeerWaitAfterTheDaemonClosedTheStreamIsATransportLoss(t *testi
 		t.Fatalf("Wait after the daemon closed the stream = %v, want a transport loss", err)
 	}
 }
+
+// handedOverRemote is a host link the host ended because the terminal was attached again: Read fails with the
+// handover, as helperTerminalConn's does, while Wait reports it.
+type handedOverRemote struct {
+	*localPeerRemote
+	ended <-chan struct{}
+}
+
+func (r *handedOverRemote) Read([]byte) (int, error) { <-r.ended; return 0, ErrHandedOver }
+func (r *handedOverRemote) Wait() (int, error)       { <-r.ended; return 1, ErrHandedOver }
+func (r *handedOverRemote) Close() error             { return nil }
+
+// The host's handover end crosses the daemon to pb connect as a handover, not a lost link: only then does the CLI
+// wait for its probe instead of redialing and taking the terminal back from it. The read failing first must not end
+// the bridge before the Wait result is sent.
+func TestLocalPeerCarriesAHandoverEndToTheCLI(t *testing.T) {
+	localClient, localServer := net.Pipe()
+	ended := make(chan struct{})
+	go func() {
+		_ = ServeLocalPeerTerminalConn(context.Background(), localServer, &handedOverRemote{localPeerRemote: &localPeerRemote{}, ended: ended}, &LocalPeerCursorBridge{})
+	}()
+	connection, err := NewLocalPeerConn(localClient, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	waited := make(chan error, 1)
+	go func() { _, err := connection.Wait(); waited <- err }()
+	close(ended)
+	select {
+	case err := <-waited:
+		if !errors.Is(err, ErrHandedOver) {
+			t.Fatalf("handover read as %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("wait did not end")
+	}
+}

@@ -1000,3 +1000,37 @@ func TestHelperTerminalSendsCtrlCInARecordOfItsOwn(t *testing.T) {
 		}())
 	}
 }
+
+type handoverMessageConnection struct {
+	capturedHelperMessageConnection
+	sent atomic.Bool
+}
+
+func (c *handoverMessageConnection) ReadMessage(ctx context.Context) (helperMessageType, []byte, error) {
+	if !c.sent.Swap(true) {
+		return helperStructuredMessage, []byte(`{"type":"event","request_id":"stream","version":"1.0","capability":"terminal.v1","payload":{"event":"terminal_handed_over","session_id":"ses_moved"}}`), nil
+	}
+	<-ctx.Done()
+	return 0, nil, ctx.Err()
+}
+
+// The host ends a link whose terminal was attached again with terminal_handed_over: the link ends as a handover, not
+// as the shell's exit, and closing it does not detach the attachment the newer link now holds.
+func TestHelperTerminalHandoverEndsAsHandedOverWithoutDetaching(t *testing.T) {
+	message := &handoverMessageConnection{}
+	connection := newHelperTerminalConn(message, &resolver.TerminalTarget{SessionID: "ses_moved"}, 1)
+	connection.attachmentID = "att_moved"
+	go connection.writeLoop()
+	go connection.readLoop()
+	if _, err := connection.Wait(); !errors.Is(err, ErrHandedOver) {
+		t.Fatalf("handover ended as %v", err)
+	}
+	_ = connection.Close()
+	message.mu.Lock()
+	defer message.mu.Unlock()
+	for _, write := range message.writes {
+		if strings.Contains(string(write), `"detach"`) {
+			t.Fatalf("closing a handed-over link detached its attachment: %s", write)
+		}
+	}
+}

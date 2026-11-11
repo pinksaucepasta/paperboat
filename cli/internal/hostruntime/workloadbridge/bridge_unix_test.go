@@ -110,7 +110,7 @@ func TestOwnerBridgePreservesRealShellChildReplayAndInputAcrossWorkerReplacement
 	if err := remote.DetachAttachment(created.ID, participant.AttachmentID, oldLease); err != nil {
 		t.Fatal("old IPC cleanup failed", err)
 	}
-	if _, err := remote.WaitNextAttachment(ctx, created.ID, participant.AttachmentID, waitFrom, oldLease); !errors.Is(err, session.ErrAttachmentUnknown) {
+	if _, err := remote.WaitNextAttachment(ctx, created.ID, participant.AttachmentID, waitFrom, oldLease); !errors.Is(err, session.ErrAttachmentReplaced) {
 		t.Fatal("old IPC reader retained replacement authority", err)
 	}
 	// Idle terminal polling uses short caller deadlines. Those are ordinary

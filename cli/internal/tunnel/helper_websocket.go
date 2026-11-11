@@ -191,6 +191,7 @@ type helperTerminalConn struct {
 	ackMu                     sync.Mutex
 	inputQueue                *resolver.TerminalInputQueue
 	closing                   atomic.Bool
+	handedOver                atomic.Bool
 	finishOnce                sync.Once
 	exitCode                  int
 	exitErr                   error
@@ -639,6 +640,16 @@ func (c *helperTerminalConn) handleEvent(frame helperFrame) bool {
 		c.resolveHold(event.Sequence, event.InterruptThrough, event.Status == "accepted" && event.InterruptDiscarded)
 		return false
 	}
+	if event.Event == "terminal_handed_over" {
+		if c.target == nil || event.SessionID != c.target.SessionID {
+			c.finish(1, errors.Join(ErrTransportLost, errors.New("invalid helper terminal event")))
+			return true
+		}
+		// The attachment is the newer link's now: Close must not detach it.
+		c.handedOver.Store(true)
+		c.finish(1, ErrHandedOver)
+		return true
+	}
 	if event.Event != "terminal_stream_end" {
 		// Newer hosts add events (for example participants for browser viewers); ignore what this
 		// client does not use instead of ending the terminal.
@@ -853,8 +864,10 @@ func (c *helperTerminalConn) Close() error {
 	if c.closing.Swap(true) {
 		return nil
 	}
-	payload, _ := json.Marshal(map[string]any{"session_id": c.target.SessionID, "attachment_id": c.attachmentID})
-	_ = c.writeFrame(helperFrame{Type: "detach", RequestID: helperID("request"), Version: helperProtocolVersion, Payload: payload})
+	if !c.handedOver.Load() {
+		payload, _ := json.Marshal(map[string]any{"session_id": c.target.SessionID, "attachment_id": c.attachmentID})
+		_ = c.writeFrame(helperFrame{Type: "detach", RequestID: helperID("request"), Version: helperProtocolVersion, Payload: payload})
+	}
 	return c.message.Close()
 }
 

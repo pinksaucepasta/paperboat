@@ -492,10 +492,15 @@ func TestReconnectingConnStalledLinkEndsAtOnceWhenTheReattachIsRefused(t *testin
 }
 
 // handoverConn is a stalled link whose host hands the terminal to a newer attachment: the attachment's arrival
-// sends the old link a last message (clearing its stall), then the host ends it.
+// sends the old link a last message (clearing its stall), then the host ends it marked as handed over.
 type handoverConn struct {
 	*blockingReconnectConn
 	observer atomic.Pointer[func(bool)]
+	end      atomic.Pointer[error] // how the link ended; nil is the shell's exit
+}
+
+func newHandoverConn() *handoverConn {
+	return &handoverConn{blockingReconnectConn: &blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}}
 }
 
 func (c *handoverConn) ObserveLinkState(observer func(bool)) {
@@ -503,10 +508,31 @@ func (c *handoverConn) ObserveLinkState(observer func(bool)) {
 	go observer(true)
 }
 
-func (c *handoverConn) handOver() {
+func (c *handoverConn) Wait() (int, error) {
+	<-c.stop
+	if end := c.end.Load(); end != nil {
+		return 1, *end
+	}
+	return 0, nil
+}
+
+// heard clears the stall: the host's last message reached the old link.
+func (c *handoverConn) heard() {
 	if observer := c.observer.Load(); observer != nil {
 		(*observer)(false)
 	}
+}
+
+func (c *handoverConn) handOver() {
+	c.heard()
+	err := ErrHandedOver
+	c.end.Store(&err)
+	_ = c.Close()
+}
+
+// exit is the shell exiting after the stall flapped back.
+func (c *handoverConn) exit() {
+	c.heard()
 	_ = c.Close()
 }
 
@@ -517,7 +543,7 @@ func (c *handoverConn) handOver() {
 // A probe that has attached supersedes the old link on the host; it is adopted, as ET and mosh let the newest
 // client connection win.
 func TestReconnectingConnAdoptsTheProbeWhenTheHostHandsTheTerminalToIt(t *testing.T) {
-	old := &handoverConn{blockingReconnectConn: &blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}}
+	old := newHandoverConn()
 	fresh := &reconnectTestConn{Reader: bytes.NewReader([]byte("resumed")), code: 0}
 	c := NewReconnectingConn(context.Background(), old, 600, time.Millisecond, func(context.Context) (Conn, error) {
 		old.handOver() // the host takes the terminal from the old link as this attachment completes
@@ -543,7 +569,7 @@ func TestReconnectingConnAdoptsTheProbeWhenTheOldLinkEndsBeforeTheProbeStoresIt(
 	waiting, ended := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	probeWait := func(o *reconnectingOptions) { o.probeWait = func() { once.Do(func() { close(waiting) }) } }
-	old := &handoverConn{blockingReconnectConn: &blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}}
+	old := newHandoverConn()
 	fresh := &reconnectTestConn{Reader: bytes.NewReader([]byte("resumed")), code: 0}
 	c := NewObservedReconnectingConn(context.Background(), old, 600, time.Millisecond, func(ctx context.Context) (Conn, error) {
 		old.handOver()
@@ -569,9 +595,10 @@ func TestReconnectingConnAdoptsTheProbeWhenTheOldLinkEndsBeforeTheProbeStoresIt(
 
 // Review of 841635f63: a stall flapped back, then the user typed exit while the probe was still dialing; the clean end
 // waited on the probe, whose terminal dial has no watchdog, so exit hung as long as the dial (unbounded in resolve or
-// QUIC). The probe's dial here returns only when its context is cancelled.
+// QUIC), and 5c24bc0f2 still held it up to 1 s. A shell exit is not a handover: it returns at once. The probe's dial
+// here returns only when its context is cancelled.
 func TestReconnectingConnCleanExitDoesNotWaitOutAProbeStillDialing(t *testing.T) {
-	old := &handoverConn{blockingReconnectConn: &blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}}
+	old := newHandoverConn()
 	dialing := make(chan struct{})
 	var once sync.Once
 	c := NewReconnectingConn(context.Background(), old, 600, time.Millisecond, func(ctx context.Context) (Conn, error) {
@@ -585,16 +612,63 @@ func TestReconnectingConnCleanExitDoesNotWaitOutAProbeStillDialing(t *testing.T)
 	case <-time.After(5 * time.Second):
 		t.Fatal("the stalled link was never probed")
 	}
-	old.handOver() // the stall clears and the shell exits cleanly
 	ended := make(chan error, 1)
+	exited := time.Now()
+	old.exit()
 	go func() { _, err := c.Wait(); ended <- err }()
 	select {
 	case err := <-ended:
 		if err != nil {
 			t.Fatalf("clean exit ended with %v", err)
 		}
-	case <-time.After(probeHandoverGrace + 3*time.Second):
+		if took := time.Since(exited); took >= 100*time.Millisecond {
+			t.Fatalf("clean exit took %v while a probe was dialing", took)
+		}
+	case <-time.After(3 * time.Second):
 		t.Fatal("clean exit is waiting for a probe that is still dialing")
+	}
+}
+
+// 5c24bc0f2 cancelled the probe 1 s after the old link ended, so a handover over a slow link (high RTT) ended the user's
+// terminal. The host now marks a handover end, and the supervisor waits for the probe however long its attempt takes.
+func TestReconnectingConnAdoptsASlowProbeAfterAHandoverEnd(t *testing.T) {
+	old := newHandoverConn()
+	fresh := &reconnectTestConn{Reader: bytes.NewReader([]byte("resumed")), code: 0}
+	var dials atomic.Int32
+	c := NewReconnectingConn(context.Background(), old, 600, time.Millisecond, func(ctx context.Context) (Conn, error) {
+		if dials.Add(1) > 1 {
+			return nil, errors.New("redialed instead of adopting the probe")
+		}
+		old.handOver()
+		select {
+		case <-time.After(5 * time.Second): // the attach reply crossing a slow link
+			return fresh, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	})
+	defer c.Close()
+	got := make(chan []byte, 1)
+	go func() { b, _ := io.ReadAll(c); got <- b }()
+	select {
+	case b := <-got:
+		if string(b) != "resumed" || dials.Load() != 1 {
+			t.Fatalf("output after a slow handover = %q after %d dials, want the probe's link", b, dials.Load())
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("terminal left without a link after a slow handover")
+	}
+}
+
+// A handover end with no probe of ours left to adopt is a lost link: the terminal redials instead of ending.
+func TestReconnectingConnRedialsAHandoverEndWithoutAProbe(t *testing.T) {
+	first := &reconnectTestConn{Reader: bytes.NewReader(nil), code: 1, err: ErrHandedOver}
+	second := &reconnectTestConn{Reader: bytes.NewReader([]byte("redialed")), code: 0}
+	c := NewReconnectingConn(context.Background(), first, 3, time.Millisecond, func(context.Context) (Conn, error) { return second, nil })
+	defer c.Close()
+	got, _ := io.ReadAll(c)
+	if code, err := c.Wait(); err != nil || code != 0 || string(got) != "redialed" {
+		t.Fatalf("code=%d err=%v output=%q", code, err, got)
 	}
 }
 

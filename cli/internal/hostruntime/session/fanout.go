@@ -15,7 +15,10 @@ import (
 var (
 	ErrAttachmentExists  = errors.New("attachment already exists")
 	ErrAttachmentUnknown = errors.New("attachment not found")
-	ErrAttachmentEvicted = errors.New("slow consumer evicted")
+	// ErrAttachmentReplaced: the same client attached this attachment again (a resume or a reattach took it over),
+	// so the stream holding the earlier lease ends and the newer one has the terminal.
+	ErrAttachmentReplaced = errors.New("attachment taken over by a newer attach")
+	ErrAttachmentEvicted  = errors.New("slow consumer evicted")
 	// ErrAttachmentLagged: a free-running attachment fell behind and its backlog was dropped; the consumer
 	// restores a fresh screen in-band and keeps its connection.
 	ErrAttachmentLagged  = errors.New("attachment fell behind; restore the screen")
@@ -413,7 +416,7 @@ func (f *Fanout) waitNextFromLease(ctx context.Context, attachmentID string, fro
 		}
 		if lease != 0 && cursor.lease != lease {
 			f.mu.Unlock()
-			return history.Event{}, ErrAttachmentUnknown
+			return history.Event{}, ErrAttachmentReplaced
 		}
 		if cursor.state == Evicted {
 			f.mu.Unlock()
