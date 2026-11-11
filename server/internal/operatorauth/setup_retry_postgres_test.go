@@ -41,6 +41,16 @@ func TestSetupSurvivesOneSerializationFailureOnPostgres(t *testing.T) {
 	suffix := time.Now().UnixNano()
 	seq := fmt.Sprintf("setup_retry_seq_%d", suffix)
 	fn := fmt.Sprintf("setup_retry_fn_%d", suffix)
+	email := fmt.Sprintf("setup-retry-%d@example.test", suffix)
+	t.Cleanup(func() {
+		bg := context.Background()
+		store.SQL().ExecContext(bg, fmt.Sprintf(`DROP TRIGGER IF EXISTS %s ON paperboat.operator_sessions`, fn))
+		store.SQL().ExecContext(bg, fmt.Sprintf(`DROP FUNCTION IF EXISTS paperboat.%s()`, fn))
+		store.SQL().ExecContext(bg, fmt.Sprintf(`DROP SEQUENCE IF EXISTS paperboat.%s`, seq))
+		store.SQL().ExecContext(bg, `DELETE FROM paperboat.operator_sessions`)
+		store.SQL().ExecContext(bg, `DELETE FROM paperboat.operator_bootstrap`)
+		store.SQL().ExecContext(bg, `DELETE FROM paperboat.operator_accounts WHERE email=$1`, email)
+	})
 	for _, q := range []string{
 		fmt.Sprintf(`CREATE SEQUENCE paperboat.%s`, seq),
 		fmt.Sprintf(`CREATE FUNCTION paperboat.%s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF nextval('paperboat.%s') = 1 THEN RAISE EXCEPTION 'forced' USING ERRCODE = '40001'; END IF; RETURN NEW; END $$`, fn, seq),
@@ -50,16 +60,6 @@ func TestSetupSurvivesOneSerializationFailureOnPostgres(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	email := fmt.Sprintf("setup-retry-%d@example.test", suffix)
-	t.Cleanup(func() {
-		bg := context.Background()
-		store.SQL().ExecContext(bg, fmt.Sprintf(`DROP TRIGGER %s ON paperboat.operator_sessions`, fn))
-		store.SQL().ExecContext(bg, fmt.Sprintf(`DROP FUNCTION paperboat.%s()`, fn))
-		store.SQL().ExecContext(bg, fmt.Sprintf(`DROP SEQUENCE paperboat.%s`, seq))
-		store.SQL().ExecContext(bg, `DELETE FROM paperboat.operator_sessions`)
-		store.SQL().ExecContext(bg, `DELETE FROM paperboat.operator_bootstrap`)
-		store.SQL().ExecContext(bg, `DELETE FROM paperboat.operator_accounts WHERE email=$1`, email)
-	})
 	s := &Service{Store: store, BootstrapEmail: email}
 	session, err := s.Setup(ctx, email, "a sufficiently long operator password")
 	if err != nil {
