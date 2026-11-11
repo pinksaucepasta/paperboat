@@ -28,6 +28,8 @@ if (!machine) throw new Error(`${alias} is not online`)
 const shot = (name) => (shots ? page.screenshot({ path: `${shots}/${name}.png` }) : undefined)
 const dialog = page.getByRole("dialog")
 const stamp = Date.now()
+// Open is an anchor the dialog renders as a button (role=button), so match the element, not the link role.
+const openLink = dialog.locator("a[href]", { hasText: /^Open$/ })
 
 if (process.env.SHARE_LIVE !== "1") {
   const hidden = (p) => p.getByRole("button", { name: "Share a file" }).count().then((count) => count === 0)
@@ -98,7 +100,7 @@ const content = async (endpoint) => {
 await dialog.getByRole("button", { name: "Create link" }).click()
 const live = dialog.getByText(`${inboxName} is live`)
 await live.waitFor({ timeout: 90000 }).catch(() => {})
-const inboxLink = await dialog.getByRole("link", { name: "Open" }).getAttribute("href").catch(() => null)
+const inboxLink = await openLink.getAttribute("href").catch(() => null)
 log(Boolean(inboxLink), "Share link… on an Inbox file gives a live link", inboxLink ? new URL(inboxLink).host : (await dialog.innerText()).replace(/\s+/g, " ").slice(0, 160))
 if (inboxLink) log((await content(inboxLink)).includes(marker), "opening that link shows the file's content")
 await shot("share-link-live")
@@ -113,7 +115,7 @@ await shot("share-file-dialog")
 const sharedName = `shared-${stamp}.html`
 await dialog.locator('input[type="file"]').setInputFiles({ name: sharedName, mimeType: "text/html", buffer: Buffer.from(html) })
 await dialog.getByText(`${sharedName} is live`).waitFor({ timeout: 90000 }).catch(() => {})
-const link = await dialog.getByRole("link", { name: "Open" }).getAttribute("href").catch(() => null)
+const link = await openLink.getAttribute("href").catch(() => null)
 log(Boolean(link), "Share a file gives a live link", link ? new URL(link).host : (await dialog.innerText()).replace(/\s+/g, " ").slice(0, 160))
 if (link) log((await content(link)).includes(marker), "opening that link shows the file's content")
 await shot("share-file-live")
