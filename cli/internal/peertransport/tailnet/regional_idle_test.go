@@ -65,6 +65,11 @@ func TestRegionalRecoveryIdleFiveMinutes(t *testing.T) {
 		if delay := a.nextRefresh(nil, 0, 0); delay < 48*time.Second {
 			t.Fatalf("idle refresh in %s", delay)
 		}
+		r.repair.Store(true)
+		if delay := a.nextRefresh(nil, 0, 0); delay >= 12*time.Second {
+			t.Fatalf("lost listening path used idle refresh cadence: %s", delay)
+		}
+		r.repair.Store(false)
 		a.BindRegionalPeer(cfg.Peers[0].Identity.EndpointID)
 		synctest.Wait()
 		if e.sweeps.Load() == 0 {
