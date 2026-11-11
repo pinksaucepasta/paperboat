@@ -6,7 +6,7 @@
 // machines' Inboxes.", the file is in both Inboxes; (3) the last chip has no remove button; (4) one machine refused
 // (its shell start answered with the plan's browser-terminal limit in the browser, nothing real changes): the other
 // still gets the file, the status reads "Sent to 1 of 2 machines. 1 failed." and keeps the error text.
-// Files travel over the terminal's encrypted browser connection (a shell session per machine, closed afterwards). Sent test files are
+// Files travel over the terminal's encrypted browser connection (a shell session per machine, closed afterwards). 12 files go in two batches on one connection; sent test files are
 // deleted from the Inboxes at the end. Prints PASS/FAIL per step; exits 1 on any FAIL.
 import { mkdirSync } from "node:fs"
 
@@ -124,6 +124,18 @@ await shot("desktop-partial")
 await page.unroute(refuseB)
 log(await inboxHasWithin(a, partial), `${a.alias} still got the file`)
 log(!(await inboxHas(b, partial)), `${b.alias} did not get it`)
+await dialog.getByRole("button", { name: "Done" }).click()
+
+// 5. more files than one batch holds (10): 12 files go in two batches on one connection, shown as one list
+const many = Array.from({ length: 12 }, (_, at) => `multisend-many-${stamp}-${String(at).padStart(2, "0")}.txt`)
+await page.reload({ waitUntil: "networkidle" })
+await openDialog([a])
+await dialog.locator('input[type="file"]').setInputFiles(many.map((name) => ({ name, mimeType: "text/plain", buffer: Buffer.from(`${name}\n`) })))
+await dialog.getByText(`Sent 12 of 12 to ${a.alias}’s Inbox.`).waitFor({ timeout: 180000 }).catch(() => {})
+log(await dialog.getByText(`Sent 12 of 12 to ${a.alias}’s Inbox.`).isVisible(), "12 files read Sent 12 of 12 in one list, no batch limit shown")
+log((await dialog.locator("li").count()) === 12, "the list has all 12 files")
+const inbox = new Set(((await api(`machines/${a.id}/inbox`)).items ?? []).map((item) => item.name))
+log(many.every((name) => inbox.has(name)), `all 12 files are in ${a.alias}'s Inbox`, `${many.filter((name) => inbox.has(name)).length}/12`)
 await dialog.getByRole("button", { name: "Done" }).click()
 
 // Mobile and dark, for the screenshots.

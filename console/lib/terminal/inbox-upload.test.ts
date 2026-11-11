@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import type { BrowserTerminalAPI, BrowserTerminalEvent } from "@/lib/terminal/browser-terminal-wasm"
-import { describeUploadFailure, openBrowserConnection, retryTransient, type Ticket } from "@/lib/terminal/inbox-upload"
+import { describeUploadFailure, openBrowserConnection, retryTransient, splitBatches, type Ticket } from "@/lib/terminal/inbox-upload"
 import { ApiError } from "@/lib/api"
 import { FilePasteError } from "@/lib/terminal/file-paste"
 
@@ -122,4 +122,14 @@ test("a close that heals on its own is retried after each delay; anything else e
   let exhausted = 0
   await expect(retryTransient(async () => (exhausted++, Promise.reject(new ApiError(409, "machine_edge_unavailable", "down"))), options)).rejects.toBeInstanceOf(ApiError)
   expect(exhausted).toBe(4)
+})
+
+test("25 files go in batches of 10, in order, none lost or repeated", () => {
+  const files = Array.from({ length: 25 }, (_, at) => `file-${at}`)
+  const batches = splitBatches(files)
+  expect(batches.map((batch) => batch.length)).toEqual([10, 10, 5])
+  expect(batches.flat()).toEqual(files)
+  expect(splitBatches(files.slice(0, 10)).length).toBe(1)
+  expect(splitBatches(files.slice(0, 1))).toEqual([["file-0"]])
+  expect(splitBatches([])).toEqual([])
 })

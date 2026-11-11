@@ -2,7 +2,13 @@ import { api, ApiError } from "@/lib/api"
 import { verifyTicketKey, type RootPin } from "@/lib/terminal/browser-root-key"
 import { loadBrowserTerminal, type BrowserTerminalAPI, type BrowserTerminalEvent } from "@/lib/terminal/browser-terminal-wasm"
 import { terminalCloseCodes, ticketCloseCode, workerCloseCode } from "@/lib/terminal/close-codes"
-import { FilePasteError, FilePasteUploader, filePasteMessage, type FilePasteProgress } from "@/lib/terminal/file-paste"
+import {
+  FILE_TRANSFER_MAX_BATCH_FILES,
+  FilePasteError,
+  FilePasteUploader,
+  filePasteMessage,
+  type FilePasteProgress,
+} from "@/lib/terminal/file-paste"
 import { closeTerminal, startShell } from "@/lib/terminal/queries"
 import type { TerminalSession } from "@/lib/terminal/use-terminal-connection"
 
@@ -166,20 +172,39 @@ export async function retryTransient<T>(
   }
 }
 
+/** Bytes and files counted over the whole upload, however many batches it takes. */
+export type InboxUploadProgress = FilePasteProgress & { filesDone: number }
+
+/** A batch failed: the files before it (`filesDone`) are already in the Inbox. */
+export class InboxUploadFailed extends Error {
+  constructor(
+    message: string,
+    readonly filesDone: number,
+  ) {
+    super(message)
+  }
+}
+
+/** The machine takes a few files per batch; the user's files go in as many batches as that needs. */
+export const splitBatches = <T>(files: T[], size = FILE_TRANSFER_MAX_BATCH_FILES): T[][] =>
+  Array.from({ length: Math.ceil(files.length / size) }, (_, at) => files.slice(at * size, (at + 1) * size))
+
 /**
  * Puts files in a machine's Inbox the way the terminal's upload does, with no terminal shown and nothing
  * typed: a shell session is opened only to carry the connection, and closed when the upload ends or is
- * canceled. It counts toward the plan's browser-terminal limit while it runs. `done` rejects with a
- * sentence that is safe to show.
+ * canceled. It counts toward the plan's browser-terminal limit while it runs. More files than a batch holds go
+ * in batches, one after another on the same connection, with one progress. `done` rejects with an
+ * `InboxUploadFailed` whose message is safe to show.
  */
 export function uploadToInbox(
   machine: { id: string },
   workspace: string,
   files: File[],
-  onProgress: (progress: FilePasteProgress) => void,
+  onProgress: (progress: InboxUploadProgress) => void,
 ): { done: Promise<void>; cancel: () => void } {
   let canceled = false
   let cancelUpload: () => unknown = () => undefined
+  let filesDone = 0
   const connect = async (browser: BrowserTerminalAPI, sessionID: string, attached: { resolve: () => void; reject: (error: Error) => void }) => {
     // The shell's owner is who the ticket must be for, as the terminal page checks.
     const owner = await api<TerminalSession>(`terminal-sessions/${encodeURIComponent(sessionID)}/sharing`)
@@ -234,11 +259,30 @@ export function uploadToInbox(
       )
       if (canceled) throw new FilePasteError("canceled")
       const runtime = browser
-      const uploader = new FilePasteUploader(() => ({ api: runtime, connectionID }), (progress) => progress && onProgress(progress))
+      let doneBytes = 0
+      const totalBytes = files.reduce((sum, file) => sum + file.size, 0)
+      const uploader = new FilePasteUploader(
+        () => ({ api: runtime, connectionID }),
+        (progress) =>
+          progress &&
+          onProgress({
+            ...progress,
+            fileNumber: filesDone + progress.fileNumber,
+            fileCount: files.length,
+            transferredBytes: doneBytes + progress.transferredBytes,
+            totalBytes,
+            filesDone,
+          }),
+      )
       cancelUpload = () => uploader.cancel()
-      await uploader.upload(files)
+      for (const batch of splitBatches(files)) {
+        if (canceled) throw new FilePasteError("canceled")
+        await uploader.upload(batch)
+        filesDone += batch.length
+        doneBytes += batch.reduce((sum, file) => sum + file.size, 0)
+      }
     } catch (reason) {
-      throw new Error(canceled ? "Upload canceled." : describeUploadFailure(reason))
+      throw new InboxUploadFailed(canceled ? "Upload canceled." : describeUploadFailure(reason), filesDone)
     } finally {
       if (connectionID) browser?.leave(connectionID)
       if (sessionID) void closeTerminal(machine.id, sessionID).catch(() => undefined)
