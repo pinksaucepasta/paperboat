@@ -361,21 +361,23 @@ func (r *SQLRepository) DeleteResourceRoute(ctx context.Context, input RouteReco
 }
 
 func createRouteParams(input RouteRecord) dbsqlc.CreateTunnelRouteV1Params {
-	tlsVerification, serverName, caRef, clientRef := routeTLSValues(input.Origin)
+	tlsVerification, serverName, ca, clientRef := routeTLSValues(input.Origin)
 	return dbsqlc.CreateTunnelRouteV1Params{
 		ID: input.RouteID, TunnelID: input.TunnelID, Name: input.Name, Protocol: input.Protocol,
 		MatchType: input.MatchType, MatchHostname: input.Hostname, WildcardSuffix: input.WildcardSuffix,
 		PathPrefix: input.PathPrefix, Priority: input.Priority, OriginScheme: input.Origin.Scheme,
 		OriginAddress: input.Origin.Address, PreserveHost: input.Origin.PreserveHost, HostOverride: nullableStringPtr(input.Origin.HostOverride),
-		TlsVerification: tlsVerification, TlsServerName: nullableStringPtr(serverName), TlsCa: nullableStringPtr(caRef),
+		TlsVerification: tlsVerification, TlsServerName: nullableStringPtr(serverName), TlsCa: nullableStringPtr(ca),
 		MtlsCredentialReference: nullableStringPtr(clientRef), TlsPin: routeTLSPin(input.Origin), ConnectTimeoutMs: input.ConnectTimeoutMS, IdleTimeoutMs: input.IdleTimeoutMS,
 		MaxConcurrentStreams: input.MaxConcurrentStreams, DesiredState: "active", CreatedByActorID: input.ActorID, UpdatedByActorID: input.ActorID, Now: input.Now,
 		PublicTcpListenerID: nullableString(input.PublicTCPListenerID), PublicTcpPortMin: input.PublicTCPPortMin, PublicTcpPortMax: input.PublicTCPPortMax,
 	}
 }
 
+// updateRouteParams clears the legacy ca_reference column on every origin patch (CaReference stays NULL on
+// purpose); the column is dropped one deploy after nothing reads it.
 func updateRouteParams(input RouteRecord) dbsqlc.UpdateTunnelRouteV1Params {
-	tlsVerification, serverName, caRef, clientRef := routeTLSValues(input.Origin)
+	tlsVerification, serverName, ca, clientRef := routeTLSValues(input.Origin)
 	return dbsqlc.UpdateTunnelRouteV1Params{
 		NameSet: input.NameSet, Name: input.Name, ProtocolSet: input.ProtocolSet, Protocol: input.Protocol,
 		MatchTypeSet: input.MatchTypeSet, MatchType: input.MatchType, MatchHostnameSet: input.HostnameSet, MatchHostname: input.Hostname,
@@ -383,7 +385,7 @@ func updateRouteParams(input RouteRecord) dbsqlc.UpdateTunnelRouteV1Params {
 		PrioritySet: input.PrioritySet, Priority: input.Priority, OriginSchemeSet: input.OriginSet, OriginScheme: input.Origin.Scheme,
 		OriginAddressSet: input.OriginSet, OriginAddress: input.Origin.Address, PreserveHostSet: input.OriginSet, PreserveHost: input.Origin.PreserveHost,
 		HostOverrideSet: input.OriginSet, HostOverride: nullableStringPtr(input.Origin.HostOverride), TlsVerificationSet: input.OriginSet, TlsVerification: tlsVerification,
-		TlsServerNameSet: input.OriginSet, TlsServerName: nullableStringPtr(serverName), CaReferenceSet: input.OriginSet, TlsCaSet: input.OriginSet, TlsCa: nullableStringPtr(caRef),
+		TlsServerNameSet: input.OriginSet, TlsServerName: nullableStringPtr(serverName), CaReferenceSet: input.OriginSet, CaReference: sql.NullString{}, TlsCaSet: input.OriginSet, TlsCa: nullableStringPtr(ca),
 		MtlsCredentialReferenceSet: input.OriginSet, MtlsCredentialReference: nullableStringPtr(clientRef), TlsPinSet: input.OriginSet, TlsPin: routeTLSPin(input.Origin), DesiredStateSet: input.DesiredStateSet,
 		DesiredState: input.DesiredState, UpdatedByActorID: input.ActorID, Now: input.Now, RouteID: input.RouteID, TunnelID: input.TunnelID,
 		ExpectedGeneration: input.ExpectedGeneration,
