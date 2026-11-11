@@ -154,7 +154,9 @@ func windowsCarrierGenerations(ctx context.Context, instance string) ([]CarrierC
 // generation goes.
 func sweepWindowsCarrierGenerations(ctx context.Context, instance, active string) error {
 	generations, result := windowsCarrierGenerations(ctx, instance)
+	handled := []string{active}
 	for _, c := range generations {
+		handled = append(handled, c.Generation)
 		if c.Generation == active {
 			continue
 		}
@@ -164,8 +166,36 @@ func sweepWindowsCarrierGenerations(ctx context.Context, instance, active string
 		}
 		result = errors.Join(result, err)
 	}
+	return errors.Join(result, removeOrphanWindowsCarrierServices(ctx, instance, handled))
+}
+
+// removeOrphanWindowsCarrierServices removes the account's carrier services the descriptors above did not name: a
+// registration left without its generation descriptor (a crash between the two) is otherwise never swept.
+func removeOrphanWindowsCarrierServices(ctx context.Context, instance string, handled []string) error {
+	names, err := windowsCarrierServiceInventory(ctx, instance)
+	if err != nil {
+		return err
+	}
+	var result error
+	for _, name := range names {
+		orphan := strings.HasPrefix(strings.ToLower(name), "paperboatcarrier-")
+		for _, generation := range handled {
+			if known, err := service.WindowsCarrierName(instance, generation); err == nil && strings.EqualFold(name, known) {
+				orphan = false
+			}
+		}
+		if orphan {
+			result = errors.Join(result, removeWindowsServiceDeclaration(ctx, filepath.Join(WindowsProgramDataRoot(), "services", name+".json")))
+		}
+	}
 	return result
 }
+
+// The SCM inventory and the service removal are what TestWindowsCarrierSweepRemovesOrphanServices replaces.
+var (
+	windowsCarrierServiceInventory  = windowsGenerationRemovalInventory
+	removeWindowsServiceDeclaration = service.WindowsController{}.Remove
+)
 
 // removeWindowsHostdGenerations removes the account's hostd generation services other than keep (registered or only
 // declared). With onlyStopped a running generation stays: it is still serving or finishing work.

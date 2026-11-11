@@ -121,7 +121,7 @@ func TestWindowsStagedRuntimeSwappedBeforePublishIsRefused(t *testing.T) {
 // Review of 5356e280a: the previous rollback image was deleted before current took its place, so a failure in
 // either later rename lost the image a rollback needs. It is moved aside and put back on failure.
 func TestWindowsRuntimeSlotRotationKeepsTheRollbackImage(t *testing.T) {
-	for _, failing := range []int{2, 3} { // 1: rollback aside, 2: current to rollback, 3: staged to current
+	for _, failing := range []int{1, 2, 3} { // 1: rollback aside, 2: current to rollback, 3: staged to current
 		t.Run(fmt.Sprintf("rename%d", failing), func(t *testing.T) {
 			rename := renameWindowsRuntimeSlot
 			t.Cleanup(func() { renameWindowsRuntimeSlot = rename })
@@ -168,5 +168,24 @@ func TestWindowsRuntimeSlotRotationKeepsTheRollbackImage(t *testing.T) {
 	_, asideErr := os.Stat(rollback + ".aside")
 	if string(newBody) != "new" || string(oldBody) != "current" || !os.IsNotExist(asideErr) {
 		t.Fatalf("rotation: current %q rollback %q aside %v", newBody, oldBody, asideErr)
+	}
+}
+
+// Review of 930d4805e: with current missing, publishing the staged image must not delete the only good image left.
+func TestWindowsRuntimeSlotRotationWithoutCurrentKeepsTheRollback(t *testing.T) {
+	dir := t.TempDir()
+	staged, current, rollback := filepath.Join(dir, "staged.exe"), filepath.Join(dir, "pb.exe"), filepath.Join(dir, "pb.rollback.exe")
+	for path, body := range map[string]string{staged: "new", rollback: "previous"} {
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := rotateWindowsRuntimeSlot(context.Background(), staged, current, rollback); err != nil {
+		t.Fatal(err)
+	}
+	newBody, _ := os.ReadFile(current)
+	oldBody, err := os.ReadFile(rollback)
+	if string(newBody) != "new" || err != nil || string(oldBody) != "previous" {
+		t.Fatalf("current %q, rollback %q (%v): want new and previous", newBody, oldBody, err)
 	}
 }

@@ -3619,6 +3619,13 @@ func stageWindowsRuntimeFile(ctx context.Context, body []byte, current, rollback
 // image is only moved aside until current has taken its place, and is put back when a later rename fails: a double
 // failure must not lose the image a rollback needs (review of 5356e280a). It is deleted only after both renames.
 func rotateWindowsRuntimeSlot(ctx context.Context, staged, current, rollback string) error {
+	// Without a current image there is nothing to rotate, and the rollback image is the only good one: keep it.
+	if _, err := os.Stat(current); installNotExistOnly(err) {
+		//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=verified-staged-runtime-activation
+		return renameWindowsRuntimeSlot(staged, current)
+	} else if err != nil {
+		return hostInstallFailure("inspect current runtime", err)
+	}
 	aside := rollback + ".aside"
 	if err := removeWindowsFileWithRetry(ctx, aside); err != nil {
 		return err
@@ -3640,13 +3647,9 @@ func rotateWindowsRuntimeSlot(ctx context.Context, staged, current, rollback str
 		//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=restore-previous-rollback
 		return renameWindowsRuntimeSlot(aside, rollback)
 	}
-	if _, err := os.Stat(current); err == nil {
-		//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=current-to-rollback-slot-transition
-		if err := renameWindowsRuntimeSlot(current, rollback); err != nil {
-			return hostInstallFailure("runtime rollback slot rotation failed", err, restoreAside())
-		}
-	} else if !installNotExistOnly(err) {
-		return hostInstallFailure("inspect current runtime", err, restoreAside())
+	//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=current-to-rollback-slot-transition
+	if err := renameWindowsRuntimeSlot(current, rollback); err != nil {
+		return hostInstallFailure("runtime rollback slot rotation failed", err, restoreAside())
 	}
 	//paperboat:allow-source-policy atomic-replacement owner=windows-host-install reason=verified-staged-runtime-activation
 	if err := renameWindowsRuntimeSlot(staged, current); err != nil {
