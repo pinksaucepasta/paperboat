@@ -24,7 +24,7 @@ func TestLoadDeploymentStrictProfile(t *testing.T) {
 	if deployment.PublicHTTPSCertFile != "/cert.pem" || deployment.PublicHTTPSKeyFile != "/key.pem" {
 		t.Fatal("public HTTPS certificate paths were not retained")
 	}
-	if deployment.CarrierTCPListenAddress != "0.0.0.0:27443" || deployment.CarrierQUICListenAddress != "0.0.0.0:27444" || deployment.PreviewBaseDomain != "preview.example.test" || deployment.TunnelBaseDomain != "tunnels.example.test" || deployment.RuntimeBaseDomain != "runtime.example.test" || deployment.NodeCapacity != 128 || deployment.MaxBodyBytes != 50<<20 || deployment.MaxHeaderBytes != 32<<10 {
+	if deployment.CarrierTCPListenAddress != "0.0.0.0:27443" || deployment.CarrierQUICListenAddress != "0.0.0.0:27444" || deployment.PreviewBaseDomain != "preview.example.test" || deployment.TunnelBaseDomain != "tunnels.example.test" || deployment.RuntimeBaseDomain != "runtime.example.test" || deployment.NodeCapacity != 128 || deployment.MaxBodyBytes != 100<<20 || deployment.MaxHeaderBytes != 32<<10 {
 		t.Fatalf("deployment = %+v", deployment)
 	}
 }

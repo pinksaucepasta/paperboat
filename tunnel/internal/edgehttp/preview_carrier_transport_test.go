@@ -1021,3 +1021,21 @@ func TestPreviewOriginFirstByteTimeoutIsItsOwn504(t *testing.T) {
 		t.Fatalf("status=%d error=%q", recorder.Code, recorder.Header().Get("X-Paperboat-Error"))
 	}
 }
+
+// A chunked upload that runs past the body cap mid-stream gets the same 413 as a declared
+// Content-Length over the cap, not "could not reach the app".
+func TestUploadOverTheCapMidStreamIs413(t *testing.T) {
+	proxy := &httputil.ReverseProxy{Rewrite: rewriteToCarrier, Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		_, err := io.ReadAll(request.Body)
+		return nil, errors.Join(ErrDataCarrierPreviewTransport, err)
+	})}
+	configureProxyDiagnostics(proxy, nil)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "https://app.preview.example.test/upload", io.NopCloser(strings.NewReader(strings.Repeat("x", 64))))
+	request.ContentLength = -1
+	request.Body = http.MaxBytesReader(recorder, request.Body, 16)
+	proxy.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusRequestEntityTooLarge || recorder.Header().Get("X-Paperboat-Error") != "request_body_too_large" {
+		t.Fatalf("status=%d error=%q", recorder.Code, recorder.Header().Get("X-Paperboat-Error"))
+	}
+}

@@ -85,29 +85,31 @@ const (
 )
 
 var defaultErrorMessages = map[int]string{
-	http.StatusBadRequest:            badRequestMessage,
-	http.StatusUnauthorized:          signInMessage,
-	http.StatusForbidden:             "Your account cannot open this address. Ask its owner to share it with you.",
-	http.StatusNotFound:              notFoundMessage,
-	http.StatusConflict:              retryMessage,
-	http.StatusRequestEntityTooLarge: "This request is too large. Send less data and try again.",
-	http.StatusTooManyRequests:       edgeRateLimitedMessage,
-	http.StatusBadGateway:            upstreamUnavailableMessage,
-	http.StatusServiceUnavailable:    retryMessage,
-	http.StatusGatewayTimeout:        retryMessage,
+	http.StatusBadRequest:                  badRequestMessage,
+	http.StatusUnauthorized:                signInMessage,
+	http.StatusForbidden:                   "Your account cannot open this address. Ask its owner to share it with you.",
+	http.StatusNotFound:                    notFoundMessage,
+	http.StatusConflict:                    retryMessage,
+	http.StatusRequestEntityTooLarge:       "This request is too large. Send less data and try again.",
+	http.StatusRequestHeaderFieldsTooLarge: "This request's headers are too large, often from too many cookies. Clear this site's cookies and try again.",
+	http.StatusTooManyRequests:             edgeRateLimitedMessage,
+	http.StatusBadGateway:                  upstreamUnavailableMessage,
+	http.StatusServiceUnavailable:          retryMessage,
+	http.StatusGatewayTimeout:              retryMessage,
 }
 
 // errorTitles say what happened in plain words; the HTTP reason phrase never reaches a visitor.
 const defaultErrorTitle = "Paperboat couldn't finish this request"
 
 var errorTitles = map[int]string{
-	http.StatusBadRequest:            "This link doesn't work",
-	http.StatusUnauthorized:          "Sign in to continue",
-	http.StatusForbidden:             "You don't have access to this app",
-	http.StatusNotFound:              "Page not found",
-	http.StatusRequestEntityTooLarge: "Request too large",
-	http.StatusTooManyRequests:       "Too many requests",
-	http.StatusBadGateway:            "This app isn't responding",
+	http.StatusBadRequest:                  "This link doesn't work",
+	http.StatusUnauthorized:                "Sign in to continue",
+	http.StatusForbidden:                   "You don't have access to this app",
+	http.StatusNotFound:                    "Page not found",
+	http.StatusRequestEntityTooLarge:       "Request too large",
+	http.StatusRequestHeaderFieldsTooLarge: "Request headers too large",
+	http.StatusTooManyRequests:             "Too many requests",
+	http.StatusBadGateway:                  "This app isn't responding",
 }
 
 // referenceHeader carries the same id the page shows and the edge logs, so support finds the failure from either.
@@ -222,6 +224,7 @@ func writeErrorPageBody(w http.ResponseWriter, status int, title, message, linkT
 	h.Set("Content-Type", "text/html; charset=utf-8")
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("X-Robots-Tag", "noindex, nofollow, noarchive")
 	h.Set(referenceHeader, ref)
 	// The page's only active content is its own inline style; this also replaces the stricter header some callers set.
 	h.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; form-action 'none'")

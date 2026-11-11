@@ -153,14 +153,21 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 	legacy.FlushInterval = -1
 	configureProxyDiagnostics(legacy, config.OnFailure)
 	legacy.ModifyResponse = func(response *http.Response) error {
-		response.Header.Del("X-Robots-Tag")
 		stripBrowserResponseCredentials(response.Header)
+		if response.Request != nil {
+			if app, ok := response.Request.Context().Value(appRouteKey{}).(appRoute); ok {
+				appResponseHeaders(response.Header, app.gated, app.preview)
+				return nil
+			}
+		}
+		response.Header.Del("X-Robots-Tag") // the edge set it on the writer before proxying
 		return nil
 	}
 	// originResponse guards the routes whose origin is the user's app: a self-redirect becomes the
 	// loop page instead of reaching the browser.
 	originResponse := func(response *http.Response) error {
-		if request := response.Request; request != nil && connectorprotocol.IsSelfRedirect(request.Method, request.Header.Get("X-Forwarded-Host"), request.URL.RequestURI(), response) {
+		request := response.Request
+		if request != nil && connectorprotocol.IsSelfRedirect(request.Method, request.Header.Get("X-Forwarded-Host"), request.URL.RequestURI(), response) {
 			return errOriginRedirectLoop
 		}
 		return legacy.ModifyResponse(response)
@@ -238,6 +245,42 @@ func NewGatewayWithTransports(config Config, privateUpstream string, previewTran
 	return New(config, next)
 }
 
+type appRouteKey struct{}
+
+type appRoute struct{ gated, preview bool }
+
+func isAppRouteKind(kind string) bool {
+	return kind == string(route.TunnelHTTPSWSS) || kind == string(route.PreviewHTTPSWSS) || kind == dataCarrierPreviewPrivateRouteKind
+}
+
+func setStrictEdgeHeaders(header http.Header) {
+	header.Set("Referrer-Policy", "no-referrer")
+	header.Set("X-Frame-Options", "DENY")
+	header.Set("X-Robots-Tag", "noindex, nofollow, noarchive")
+}
+
+// appResponseHeaders applies the edge's headers to an app's response. A gated (team or private) route
+// keeps the strict set: framing or leaking its URL would expose the edge's session. A public route
+// keeps the app's own framing and referrer choices (Grafana panels, embedded docs) and gets the
+// strict ones only where it set none. Previews are never indexed; a tunnel on a real domain is the
+// owner's site. The origin's Alt-Svc describes the origin, not the edge, so it never passes.
+func appResponseHeaders(header http.Header, gated, preview bool) {
+	header.Del("Alt-Svc")
+	if gated {
+		setStrictEdgeHeaders(header)
+		return
+	}
+	if header.Get("Referrer-Policy") == "" {
+		header.Set("Referrer-Policy", "no-referrer")
+	}
+	if header.Get("X-Frame-Options") == "" && !strings.Contains(strings.ToLower(strings.Join(header.Values("Content-Security-Policy"), ";")), "frame-ancestors") {
+		header.Set("X-Frame-Options", "DENY")
+	}
+	if preview {
+		header.Set("X-Robots-Tag", "noindex, nofollow, noarchive")
+	}
+}
+
 // rewriteToCarrier hands the origin what the edge knows and the origin cannot: the visitor used
 // https on this public host, from this client address. ReverseProxy drops Forwarded and
 // X-Forwarded-For/-Host/-Proto from the outgoing request before Rewrite runs, so they are copied
@@ -287,6 +330,13 @@ func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(contex
 		if errors.Is(err, errRequestBodyIdle) {
 			writer.Header().Set("X-Paperboat-Error", "request_body_timeout")
 			writeErrorPage(writer, http.StatusRequestTimeout, requestBodyIdleMessage)
+			return
+		}
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			// A chunked or unknown-length body ran past the cap mid-stream: the same answer as a declared one.
+			writer.Header().Set("X-Paperboat-Error", "request_body_too_large")
+			writeErrorPage(writer, http.StatusRequestEntityTooLarge, "")
 			return
 		}
 		if errors.Is(err, ErrDataCarrierPreviewResponseHeaderTimeout) {
@@ -533,11 +583,17 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		r = r.WithContext(context.WithValue(lease.Context(), routeMatchContextKey{}, matched))
 	}
-	if !ok || !normalizeRequestTarget(r, host) || headerBytes(r.Header) > p.config.MaxHeaderBytes {
+	if !ok || !normalizeRequestTarget(r, host) {
 		writeErrorPage(w, http.StatusNotFound, "")
 		return
 	}
+	if headerBytes(r.Header) > p.config.MaxHeaderBytes {
+		w.Header().Set("X-Paperboat-Error", "request_headers_too_large")
+		writeErrorPage(w, http.StatusRequestHeaderFieldsTooLarge, "")
+		return
+	}
 	if r.ContentLength > p.config.MaxBodyBytes {
+		w.Header().Set("X-Paperboat-Error", "request_body_too_large")
 		writeErrorPage(w, http.StatusRequestEntityTooLarge, "")
 		return
 	}
@@ -612,9 +668,11 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, p.config.MaxBodyBytes)
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Referrer-Policy", "no-referrer")
-	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Set("X-Robots-Tag", "noindex, nofollow, noarchive")
+	if isAppRouteKind(expectedKind) { // the app's response gets its headers per route (appResponseHeaders)
+		r = r.WithContext(context.WithValue(r.Context(), appRouteKey{}, appRoute{gated: matched.Rule.AccessMode != "public", preview: expectedKind != string(route.TunnelHTTPSWSS)}))
+	} else {
+		setStrictEdgeHeaders(w.Header())
+	}
 	if p.config.Readiness != nil || matched.Rule.ID != "" {
 		kind, state, reason, found := "", "", "", false
 		if matched.Rule.ID != "" && matched.Rule.ObservedState != "" {

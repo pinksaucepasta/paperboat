@@ -111,6 +111,14 @@ func testGatewayDispatchesDurableRoute(t *testing.T, host string) {
 	if recorder.Code != http.StatusBadGateway || recorder.Header().Get("X-Paperboat-Error") != "origin_redirect_loop" || recorder.Header().Get("Location") != "" || !strings.Contains(recorder.Body.String(), "redirects to HTTPS") {
 		t.Fatalf("self-redirect reached the visitor: status=%d error=%q location=%q", recorder.Code, recorder.Header().Get("X-Paperboat-Error"), recorder.Header().Get("Location"))
 	}
+	cookies := httptest.NewRequest(http.MethodGet, "https://"+host+"/normal", nil)
+	cookies.Host = host
+	cookies.Header.Set("Cookie", strings.Repeat("c", 5000)) // over MaxHeaderBytes: 431, not "not found"
+	recorder = httptest.NewRecorder()
+	policy.ServeHTTP(recorder, cookies)
+	if recorder.Code != http.StatusRequestHeaderFieldsTooLarge || recorder.Header().Get("X-Paperboat-Error") != "request_headers_too_large" {
+		t.Fatalf("oversized headers: status=%d error=%q", recorder.Code, recorder.Header().Get("X-Paperboat-Error"))
+	}
 }
 
 func TestDurableIngressRequiresExactRoutePolicyModeAndGeneration(t *testing.T) {

@@ -17,7 +17,7 @@ import (
 
 const (
 	maxDeploymentBytes        = 1 << 20
-	defaultGatewayBodyBytes   = 50 << 20
+	defaultGatewayBodyBytes   = 100 << 20 // Cloudflare's free-plan request body limit
 	defaultGatewayHeaderBytes = 32 << 10
 	maximumGatewayHeaderBytes = 128 << 10
 )

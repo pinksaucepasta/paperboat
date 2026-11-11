@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -958,7 +959,7 @@ func TestRejectsHostConfusionAbsoluteFormAndLimits(t *testing.T) {
 		{"a.b.preview.example.test", "/", false, 0, http.StatusNotFound},
 		{"evilpreview.example.test", "/", false, 0, http.StatusNotFound},
 		{"app.preview.example.test", "http://other.test/", false, 0, http.StatusNotFound},
-		{"app.preview.example.test", "/", true, 0, http.StatusNotFound},
+		{"app.preview.example.test", "/", true, 0, http.StatusRequestHeaderFieldsTooLarge},
 		{"app.preview.example.test", "/", false, 2048, http.StatusRequestEntityTooLarge},
 	}
 	for _, test := range tests {
@@ -1149,5 +1150,38 @@ func TestAdmittedPreviewWaitsForItsRouteInsteadOfNotFound(t *testing.T) {
 	got, took := serve("stuck.preview.example.test")
 	if got.Code != http.StatusServiceUnavailable || got.Header().Get("X-Paperboat-Error") != "preview_starting" || got.Header().Get("Retry-After") != "1" || took < previewStartingWait || reached.Load() != 1 {
 		t.Fatalf("preview that never attaches: status %d %q after %s", got.Code, got.Header().Get("X-Paperboat-Error"), took)
+	}
+}
+
+// A public tunnel keeps the app's own framing and referrer choices and is indexable; a preview is never
+// indexed; a gated route always gets the strict set; the origin's Alt-Svc never reaches the browser.
+func TestAppResponseHeadersRespectPublicApps(t *testing.T) {
+	app := func() http.Header {
+		return http.Header{"X-Frame-Options": {"SAMEORIGIN"}, "Referrer-Policy": {"strict-origin"}, "Alt-Svc": {`h3=":443"`}, "X-Robots-Tag": {"index"}}
+	}
+	public := app()
+	appResponseHeaders(public, false, false)
+	if public.Get("X-Frame-Options") != "SAMEORIGIN" || public.Get("Referrer-Policy") != "strict-origin" || public.Get("X-Robots-Tag") != "index" || public.Get("Alt-Svc") != "" {
+		t.Fatalf("public tunnel headers = %v", public)
+	}
+	preview := app()
+	appResponseHeaders(preview, false, true)
+	if preview.Get("X-Robots-Tag") != "noindex, nofollow, noarchive" || preview.Get("X-Frame-Options") != "SAMEORIGIN" {
+		t.Fatalf("public preview headers = %v", preview)
+	}
+	gated := app()
+	appResponseHeaders(gated, true, false)
+	if gated.Get("X-Frame-Options") != "DENY" || gated.Get("Referrer-Policy") != "no-referrer" || len(gated.Values("X-Frame-Options")) != 1 {
+		t.Fatalf("gated headers = %v", gated)
+	}
+	bare := http.Header{}
+	appResponseHeaders(bare, false, false)
+	if bare.Get("X-Frame-Options") != "DENY" || bare.Get("Referrer-Policy") != "no-referrer" {
+		t.Fatalf("defaults for an app that sets none = %v", bare)
+	}
+	embeddable := http.Header{"Content-Security-Policy": {"frame-ancestors https://grafana.example.test"}}
+	appResponseHeaders(embeddable, false, false)
+	if embeddable.Get("X-Frame-Options") != "" {
+		t.Fatalf("X-Frame-Options overrode the app's frame-ancestors: %v", embeddable)
 	}
 }

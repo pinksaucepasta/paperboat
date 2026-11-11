@@ -24,6 +24,6 @@
   "node_capacity": 128,
   "control_interval": 5000000000,
   "control_timeout": 5000000000,
-  "max_body_bytes": 52428800,
+  "max_body_bytes": 104857600,
   "max_header_bytes": 32768
 }
