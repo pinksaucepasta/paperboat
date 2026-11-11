@@ -3,23 +3,27 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	nethttp "net/http"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/recording"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 	wire "github.com/pinksaucepasta/paperboat/shared/recording"
+	"github.com/pinksaucepasta/paperboat/shared/teambucket"
 	"github.com/spf13/cobra"
 )
 
@@ -35,8 +39,10 @@ func recordingsCobraCommand() *cobra.Command {
 	play := &cobra.Command{Use: "play <recording-id>", Short: "Replay a recording in this terminal", Args: commandArgs(cobra.ExactArgs(1)), RunE: actionRun(recordingsPlay)}
 	play.Flags().Float64("speed", 1, "playback speed")
 	play.Flags().Duration("idle-limit", 2*time.Second, "longest pause between frames")
+	play.Flags().Bool("archive", false, "replay the copy in the team bucket instead of asking the machine")
 	export := &cobra.Command{Use: "export <recording-id>", Short: "Write a recording as an asciicast v2 file", Args: commandArgs(cobra.ExactArgs(1)), RunE: actionRun(recordingsExport)}
 	export.Flags().StringP("output", "o", "", "file to write; standard output when omitted")
+	export.Flags().Bool("archive", false, "read the copy in the team bucket instead of asking the machine")
 	for _, action := range []struct{ use, short, action string }{
 		{"start [session-id]", "Start recording the terminal session you are attached to", wire.ActionStart},
 		{"stop [session-id]", "Stop the recording of the terminal session you are attached to", wire.ActionStop},
@@ -186,19 +192,14 @@ func readRecording(c *command.Context, id string, emit func([]byte) error) (resu
 	if !ok {
 		return errors.New("replay requires CLI command context")
 	}
+	if archive, _ := parent.Flags().GetBool("archive"); archive {
+		return readArchive(c, parent, client, id, emit)
+	}
 	replay, err := client.ReplayRecording(c.Context, id, profile.CLIClientSessionID)
 	if err != nil {
 		return err
 	}
-	vault, err := passwordVaultForCommand(parent)
-	if err != nil {
-		return err
-	}
-	chain := make([]recording.ChainLink, len(replay.Chain))
-	for i, link := range replay.Chain {
-		chain[i] = recording.ChainLink{Generation: link.Generation, SealedPrevious: link.SealedPrevious}
-	}
-	teamKey, err := vault.RecordingKey(c.Context, replay.TeamID, replay.ViewerKey.Generation, replay.ViewerKey.Sealed, chain, replay.KeyGeneration)
+	teamKey, err := openRecordingKey(c, parent, replay)
 	if err != nil {
 		return err
 	}
@@ -241,6 +242,79 @@ func readRecording(c *command.Context, id string, emit func([]byte) error) (resu
 		}
 	}()
 	return decodeRecordingStream(bufio.NewReaderSize(stream, 64<<10), recording.NewReader(teamKey, id, replay.KeyGeneration), id, emit)
+}
+
+// openRecordingKey opens the team recording key of a replay answer with this account's unlocked vault.
+func openRecordingKey(c *command.Context, parent *cobra.Command, replay wire.Replay) ([]byte, error) {
+	vault, err := passwordVaultForCommand(parent)
+	if err != nil {
+		return nil, err
+	}
+	chain := make([]recording.ChainLink, len(replay.Chain))
+	for i, link := range replay.Chain {
+		chain[i] = recording.ChainLink{Generation: link.Generation, SealedPrevious: link.SealedPrevious}
+	}
+	return vault.RecordingKey(c.Context, replay.TeamID, replay.ViewerKey.Generation, replay.ViewerKey.Sealed, chain, replay.KeyGeneration)
+}
+
+// readArchive replays from the team bucket: the server audits the replay and signs one download per archived
+// segment; the segments verify and decrypt here exactly as the machine's do.
+func readArchive(c *command.Context, parent *cobra.Command, client *api.Client, id string, emit func([]byte) error) error {
+	replay, err := client.ReplayRecordingArchive(c.Context, id)
+	if err != nil {
+		return err
+	}
+	teamKey, err := openRecordingKey(c, parent, replay)
+	if err != nil {
+		return err
+	}
+	defer clear(teamKey)
+	reader := recording.NewReader(teamKey, id, replay.KeyGeneration)
+	defer reader.Close()
+	http := &nethttp.Client{Timeout: 2 * time.Minute, CheckRedirect: func(*nethttp.Request, []*nethttp.Request) error { return nethttp.ErrUseLastResponse }}
+	for i, segment := range replay.Segments {
+		file, err := downloadSegment(c.Context, http, segment)
+		if err != nil {
+			return fmt.Errorf("the team bucket did not give segment %d: %w", i, err)
+		}
+		text, err := reader.Open(file)
+		if err != nil {
+			return fmt.Errorf("recording segment %d failed verification: %w", i, err)
+		}
+		if err := emit(text); err != nil {
+			return err
+		}
+	}
+	if replay.Final && !reader.Final() {
+		return errors.New("the archive is missing the recording's final segment")
+	}
+	return nil
+}
+
+func downloadSegment(ctx context.Context, client *nethttp.Client, download teambucket.Authority) ([]byte, error) {
+	request, err := nethttp.NewRequestWithContext(ctx, nethttp.MethodGet, download.URL, nil)
+	if err != nil {
+		return nil, err
+	}
+	for name, value := range download.Headers {
+		request.Header.Set(name, value)
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != nethttp.StatusOK {
+		return nil, fmt.Errorf("the bucket answered %d", response.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, recording.MaxSegmentFile+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > recording.MaxSegmentFile {
+		return nil, errors.New("the segment is larger than any segment can be")
+	}
+	return data, nil
 }
 
 // decodeRecordingStream reads the metadata line and the declared length-prefixed segment files.

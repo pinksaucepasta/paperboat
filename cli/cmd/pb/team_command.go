@@ -37,7 +37,7 @@ func teamCobraCommand() *cobra.Command {
 		teamInvitationsCommand(), teamInvitationShowCommand(), teamActivityCommand(), teamReadCommand("list"), teamReadCommand("get"), teamCreateCommand(), teamInviteCommand(),
 		teamAcceptCommand(), teamDeclineCommand(), teamCancelInviteCommand(), teamMutationCommand("role"),
 		teamMutationCommand("remove"), teamMutationCommand("leave"), teamMutationCommand("transfer"),
-		teamMutationCommand("delete"), teamGrantCommand(), teamAttachCommand(), teamMachineCommand(), teamSSOCommand(), teamSCIMCommand(),
+		teamMutationCommand("delete"), teamGrantCommand(), teamAttachCommand(), teamMachineCommand(), teamSSOCommand(), teamSCIMCommand(), teamBucketCommand(),
 	)
 	nameSuspendedTeam(root)
 	return root
