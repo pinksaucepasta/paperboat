@@ -342,6 +342,35 @@ func TestOriginHTTPHeaderSanitizationPreservesApplicationCredentials(t *testing.
 	}
 }
 
+// A WebSocket handshake keeps the edge's forwarding facts like any request (the edge has already replaced the
+// visitor's values); the sanitizer re-adds the upgrade headers and drops transport references and X-Forwarded-Server.
+func TestOriginHTTPWebSocketUpgradeKeepsEdgeForwardedFactsOnly(t *testing.T) {
+	request := http.Header{
+		"Connection":         {"Upgrade, X-Spoof"},
+		"Upgrade":            {"websocket"},
+		"X-Spoof":            {"1"},
+		"Forwarded":          {"for=198.51.100.7;proto=https;host=app.example.test"},
+		"X-Forwarded-For":    {"198.51.100.7"},
+		"X-Forwarded-Host":   {"app.example.test"},
+		"X-Forwarded-Proto":  {"https"},
+		"X-Forwarded-Port":   {"443"},
+		"X-Real-Ip":          {"198.51.100.7"},
+		"X-Forwarded-Server": {"attacker"},
+	}
+	sanitizeOriginRequestHeaders(request, true, false)
+	if request.Get("Connection") != "Upgrade" || request.Get("Upgrade") != "websocket" || request.Get("X-Spoof") != "" {
+		t.Fatalf("upgrade headers = %v", request)
+	}
+	for name, want := range map[string]string{"Forwarded": "for=198.51.100.7;proto=https;host=app.example.test", "X-Forwarded-For": "198.51.100.7", "X-Forwarded-Host": "app.example.test", "X-Forwarded-Proto": "https", "X-Forwarded-Port": "443", "X-Real-IP": "198.51.100.7"} {
+		if request.Get(name) != want {
+			t.Fatalf("websocket edge fact %s = %q, want %q", name, request.Get(name), want)
+		}
+	}
+	if request.Get("X-Forwarded-Server") != "" {
+		t.Fatal("X-Forwarded-Server survived the websocket handshake")
+	}
+}
+
 func TestOriginHTTPOnlyPreservesValidatedWebSocketUpgrade(t *testing.T) {
 	valid, _ := http.NewRequest(http.MethodGet, "http://public.example.test/socket", nil)
 	valid.Header.Set("Connection", "keep-alive, Upgrade")
