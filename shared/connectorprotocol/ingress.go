@@ -22,6 +22,7 @@ func WriteIngressDecision(w io.Writer, d IngressDecision, now time.Time) error {
 	if w == nil || d.Validate(now) != nil {
 		return ErrIngressDenied
 	}
+	d.VisitorAssertion = "" // the app receives it as a request header; the agent never needs it
 	p, err := json.Marshal(d)
 	if err != nil || len(p) > MaxStreamOpenBytes {
 		return ErrIngressDenied
@@ -156,7 +157,7 @@ type IngressBinding struct {
 	TLSVerification         string `json:"tls_verification"`
 	CAReference             string `json:"ca_reference"`
 	MTLSCredentialReference string `json:"mtls_credential_reference"`
-	TLSPin                  string `json:"tls_pin"`
+	TLSPin                  string `json:"tls_pin,omitempty"`
 	PublicationID           string `json:"publication_id"`
 	PublicationGeneration   uint64 `json:"publication_generation"`
 	ListenerID              string `json:"listener_id"`
