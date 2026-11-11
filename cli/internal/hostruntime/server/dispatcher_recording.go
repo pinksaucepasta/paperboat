@@ -81,18 +81,28 @@ func (s *terminalOutputStream) recordingEvent(snapshot session.Snapshot) error {
 	return &StreamEvent{Payload: payload}
 }
 
+// recordingReadRequest reads a whole recording, or MaxSegments segments from FromSegment: a reader that
+// paces itself (the browser) or resumes with a fresh ticket asks for one range at a time.
 type recordingReadRequest struct {
 	Action      string `json:"action"`
 	RecordingID string `json:"recording_id"`
+	FromSegment uint32 `json:"from_segment,omitempty"`
+	MaxSegments uint32 `json:"max_segments,omitempty"`
 }
 
-// recordingReadResult declares what the stream after it carries: Segments segment files, each with
-// a 4-byte big-endian length before it, Bytes in all without the lengths.
+// maxRangedSegments bounds one ranged read (each segment is read once to size it, then sent).
+const maxRangedSegments = 4
+
+// recordingReadResult declares what the stream after it carries: Segments segment files from
+// FromSegment, each with a 4-byte big-endian length before it, Bytes in all without the lengths.
+// Final is set when the recording has ended and the range reaches its last segment.
 type recordingReadResult struct {
-	RecordingID string `json:"recording_id"`
-	Segments    uint32 `json:"segments"`
-	Bytes       int64  `json:"bytes"`
-	Final       bool   `json:"final"`
+	RecordingID   string `json:"recording_id"`
+	FromSegment   uint32 `json:"from_segment"`
+	Segments      uint32 `json:"segments"`
+	TotalSegments uint32 `json:"total_segments"`
+	Bytes         int64  `json:"bytes"`
+	Final         bool   `json:"final"`
 }
 
 // recordingRead answers a replay ticket's read of its one recording with the segments on disk now.
@@ -102,14 +112,34 @@ func (d *Dispatcher) recordingRead(authorization Authorization, payload json.Raw
 	if decodeStrict(payload, &request) != nil || request.Action != recording.ReadAction || !ok || claims.CredentialClass != recording.CredentialClass || request.RecordingID == "" || request.RecordingID != authorization.ResourceID {
 		return failure("not_found_or_forbidden")
 	}
+	if request.MaxSegments > maxRangedSegments || request.FromSegment > 0 && request.MaxSegments == 0 {
+		return failure("invalid_request")
+	}
 	metas, err := d.config.Sessions.Recordings()
 	if err != nil {
 		return failure(recording.ErrorUnavailable)
 	}
 	for _, meta := range metas {
-		if meta.ID == request.RecordingID {
-			return result(recordingReadResult{RecordingID: meta.ID, Segments: meta.Segments, Bytes: meta.Bytes, Final: meta.EndedAt != nil})
+		if meta.ID != request.RecordingID {
+			continue
 		}
+		if request.FromSegment > meta.Segments {
+			return failure("invalid_request")
+		}
+		declared := recordingReadResult{RecordingID: meta.ID, Segments: meta.Segments, TotalSegments: meta.Segments, Bytes: meta.Bytes, Final: meta.EndedAt != nil}
+		if request.MaxSegments == 0 {
+			return result(declared)
+		}
+		declared.FromSegment, declared.Segments, declared.Bytes = request.FromSegment, min(request.MaxSegments, meta.Segments-request.FromSegment), 0
+		for index := declared.FromSegment; index < declared.FromSegment+declared.Segments; index++ {
+			segment, err := d.config.Sessions.RecordingSegment(meta.ID, index)
+			if err != nil {
+				return failure(recording.ErrorNotFound)
+			}
+			declared.Bytes += int64(len(segment))
+		}
+		declared.Final = declared.Final && declared.FromSegment+declared.Segments == meta.Segments
+		return result(declared)
 	}
 	return failure(recording.ErrorNotFound)
 }
@@ -119,7 +149,7 @@ func (d *Dispatcher) openRecordingStream(authorization Authorization, outcome op
 	if json.Unmarshal(outcome.Result, &declared) != nil || declared.RecordingID != authorization.ResourceID {
 		return nil, false, ErrCredentialPolicy
 	}
-	return &recordingStream{sessions: d.config.Sessions, authorization: authorization, declared: declared}, true, nil
+	return &recordingStream{sessions: d.config.Sessions, authorization: authorization, declared: declared, index: declared.FromSegment}, true, nil
 }
 
 // recordingStream sends the declared segment files, ciphertext as stored, in 64 KiB frames whose
@@ -142,11 +172,11 @@ func (s *recordingStream) Next(ctx context.Context) (protocol.BinaryFrame, error
 		return protocol.BinaryFrame{}, &StreamError{Code: "credential_revoked"}
 	}
 	if len(s.pending) == 0 {
-		if s.index == s.declared.Segments {
+		if s.index == s.declared.FromSegment+s.declared.Segments {
 			payload, _ := json.Marshal(struct {
 				Event    string `json:"event"`
 				Segments uint32 `json:"segments"`
-			}{recording.EventStreamEnd, s.index})
+			}{recording.EventStreamEnd, s.declared.Segments})
 			return protocol.BinaryFrame{}, &StreamEnd{Payload: payload}
 		}
 		segment, err := s.sessions.RecordingSegment(s.declared.RecordingID, s.index)

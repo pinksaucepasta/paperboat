@@ -18,6 +18,9 @@ import (
 
 const (
 	websocketQueueDepth = 32
+	// recordingQueueDepth holds one replay segment (recording.MaxSegmentFile) in TLS records of up to
+	// 16 KiB, sent with no output window: a recording-mode connection reads one segment per request.
+	recordingQueueDepth = 512
 	websocketWriteLimit = 1 << 20
 	websocketWriteWait  = 10 * time.Second
 	terminalInputLimit  = protocol.MaxBinaryFrame - 13
@@ -60,8 +63,9 @@ type browserTerminal struct {
 	resizeSequence  uint64
 	cursorRequestID string
 	fileRequests    map[string]chan protocol.Frame
-	inspectorCalls  map[string]chan protocol.Frame
+	calls           map[string]pendingCall
 	inspectorReady  bool
+	recordingReady  bool
 	fileDone        chan struct{}
 	fileCloseOnce   sync.Once
 	filesAvailable  bool
@@ -121,6 +125,8 @@ func main() {
 	api.Set("hashFile", js.FuncOf(apiHashFile))
 	api.Set("fileRequest", js.FuncOf(apiFileRequest))
 	api.Set("inspectorRequest", js.FuncOf(apiInspectorRequest))
+	api.Set("recordingControl", js.FuncOf(apiRecordingControl))
+	api.Set("recordingRead", js.FuncOf(apiRecordingRead))
 	api.Set("leave", js.FuncOf(apiLeave))
 	js.Global().Set("paperboatBrowserTerminal", api)
 	select {}

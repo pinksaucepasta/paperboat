@@ -23,12 +23,12 @@ func TestInspectorHelloOffersInspectorOnlyInInspectorMode(t *testing.T) {
 }
 
 func TestInspectorRequestFrameIsBounded(t *testing.T) {
-	frame, encoded, ok := inspectorRequestFrame("inspector_request_1", "operation_12345678", json.RawMessage(`{"grant":"g","method":"GET","path":"/v1/inspector/records"}`))
+	frame, encoded, ok := callRequestFrame("call_request_1", "operation_12345678", inspectorCapability, json.RawMessage(`{"grant":"g","method":"GET","path":"/v1/inspector/records"}`))
 	if !ok || frame.Capability != "inspector.v1" || frame.DeadlineMS != 20000 || len(encoded) == 0 {
 		t.Fatalf("frame=%+v ok=%v", frame, ok)
 	}
 	large := json.RawMessage(`{"body":"` + strings.Repeat("a", 64<<10) + `"}`)
-	if _, _, ok := inspectorRequestFrame("inspector_request_2", "operation_12345678", large); ok {
+	if _, _, ok := callRequestFrame("call_request_2", "operation_12345678", inspectorCapability, large); ok {
 		t.Fatal("oversized inspector request accepted")
 	}
 }

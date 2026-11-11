@@ -19,6 +19,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcast"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
+	wire "github.com/pinksaucepasta/paperboat/shared/recording"
 )
 
 func parseTerminalConfig(value js.Value) (terminalConfig, error) {
@@ -53,10 +54,10 @@ func parseTerminalConfig(value js.Value) (terminalConfig, error) {
 	if config.Mode == "" {
 		config.Mode = connectionModeTerminal
 	}
-	if config.Mode != connectionModeTerminal && config.Mode != connectionModeInspector {
+	if config.Mode != connectionModeTerminal && config.Mode != connectionModeInspector && config.Mode != connectionModeRecording {
 		return terminalConfig{}, errors.New("invalid connection mode")
 	}
-	if config.Mode == connectionModeInspector {
+	if config.Mode != connectionModeTerminal {
 		config.Role, config.TerminalSessionID = "", ""
 	} else if config.Role != "owner" && config.Role != "viewer" && config.Role != "interactive" {
 		return terminalConfig{}, errors.New("invalid browser terminal role")
@@ -112,7 +113,11 @@ func (connection *browserTerminal) run() {
 }
 
 func (connection *browserTerminal) connectAndServe() error {
-	ws, err := newBrowserWSConn(connection.config.URL, connection.config.Subprotocols)
+	depth := websocketQueueDepth
+	if connection.config.Mode == connectionModeRecording {
+		depth = recordingQueueDepth
+	}
+	ws, err := newBrowserWSConn(connection.config.URL, connection.config.Subprotocols, depth)
 	if err != nil {
 		return &terminalConnectError{state: "transport-error", code: "connection_failed", message: "The encrypted terminal connection could not be opened.", cause: err}
 	}
@@ -175,8 +180,11 @@ func (connection *browserTerminal) connectAndServe() error {
 			if capability == inspectorCapability {
 				connection.inspectorReady = true
 			}
+			if capability == wire.Capability {
+				connection.recordingReady = true
+			}
 		}
-		if connection.config.Mode == connectionModeInspector {
+		if connection.config.Mode != connectionModeTerminal {
 			inspector = true
 			return nil
 		}
@@ -233,7 +241,7 @@ func (connection *browserTerminal) connectAndServe() error {
 		connection.mu.Lock()
 		connection.attached = true
 		connection.mu.Unlock()
-		// inspectorRequest enqueues its frames on connection.writes; without
+		// call enqueues its frames on connection.writes; without
 		// the write loop they would never leave the browser.
 		go connection.writeLoop(clientTLS, ws)
 		connection.emit("state", map[string]any{"state": "connected"})
@@ -267,6 +275,7 @@ func (connection *browserTerminal) emitAttached(attachState terminalAttachState,
 		"terminal_state":    attachState.State,
 		"screen":            jsByteArray(checkpoint),
 		"screen_sequence":   strconv.FormatUint(checkpointSequence, 10),
+		"recording":         attachState.recordingJSON(),
 	})
 }
 
@@ -345,7 +354,7 @@ func (connection *browserTerminal) readTerminalStream(stream io.Reader) error {
 		if decodeErr != nil {
 			return &terminalConnectError{state: "transport-error", code: "invalid_frame", message: "The machine sent an invalid terminal frame."}
 		}
-		if connection.deliverFileResponse(frame) || connection.deliverInspectorResponse(frame) {
+		if connection.deliverFileResponse(frame) || connection.deliverCallResponse(frame) {
 			continue
 		}
 		connection.mu.Lock()

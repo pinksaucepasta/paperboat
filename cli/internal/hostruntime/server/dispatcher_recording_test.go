@@ -144,4 +144,29 @@ func TestReplayTicketReadsOnlyItsRecording(t *testing.T) {
 	if !bytes.Equal(got, want) {
 		t.Fatalf("stream %d bytes, want %d", len(got), len(want))
 	}
+
+	// A paced reader asks for one segment at a time and gets exactly that range.
+	ranged := func(from, max uint32) operation.Outcome {
+		payload, _ := json.Marshal(map[string]any{"action": wire.ReadAction, "recording_id": replayID, "from_segment": from, "max_segments": max})
+		return d.recordingRead(ticket, payload)
+	}
+	outcome = ranged(1, 1)
+	var declared recordingReadResult
+	if outcome.ErrorCode != "" || json.Unmarshal(outcome.Result, &declared) != nil || declared.FromSegment != 1 || declared.Segments != 1 || declared.TotalSegments != 2 || declared.Bytes != 2 {
+		t.Fatalf("ranged read %+v %s", outcome, outcome.Result)
+	}
+	stream, _, _ = d.openRecordingStream(ticket, outcome)
+	frame, err := stream.Next(context.Background())
+	if err != nil || !bytes.Equal(frame.Data, []byte{0, 0, 0, 2, 'b', 'b'}) {
+		t.Fatalf("ranged frame %v %v", frame.Data, err)
+	}
+	var end *StreamEnd
+	if _, err := stream.Next(context.Background()); !errors.As(err, &end) {
+		t.Fatalf("ranged stream did not end: %v", err)
+	}
+	for _, r := range [][2]uint32{{3, 1}, {0, maxRangedSegments + 1}, {1, 0}} {
+		if outcome := ranged(r[0], r[1]); outcome.ErrorCode != "invalid_request" {
+			t.Fatalf("range %v: %+v", r, outcome)
+		}
+	}
 }

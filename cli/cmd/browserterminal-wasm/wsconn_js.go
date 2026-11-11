@@ -13,7 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/browserbroadcast"
 )
 
-func newBrowserWSConn(url string, protocols []string) (*browserWSConn, error) {
+func newBrowserWSConn(url string, protocols []string, depth int) (*browserWSConn, error) {
 	if len(protocols) != 2 || protocols[0] != websocketSubprotocol {
 		return nil, errors.New("invalid encrypted browser subprotocol")
 	}
@@ -27,7 +27,7 @@ func newBrowserWSConn(url string, protocols []string) (*browserWSConn, error) {
 	}
 	socket := constructor.New(url, protocolArray)
 	socket.Set("binaryType", "arraybuffer")
-	connection := &browserWSConn{socket: socket, messages: make(chan websocketMessage, websocketQueueDepth), broadcasts: newTerminalReceiveQueue(), opened: make(chan struct{}), done: make(chan struct{}), failure: make(chan error, 1)}
+	connection := &browserWSConn{socket: socket, messages: make(chan websocketMessage, depth), broadcasts: newTerminalReceiveQueue(), opened: make(chan struct{}), done: make(chan struct{}), failure: make(chan error, 1)}
 	connection.handlers = append(connection.handlers,
 		js.FuncOf(func(_ js.Value, _ []js.Value) any {
 			connection.openOnce.Do(func() { close(connection.opened) })

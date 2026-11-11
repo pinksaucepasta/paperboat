@@ -22,6 +22,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
+	wire "github.com/pinksaucepasta/paperboat/shared/recording"
 )
 
 const (
@@ -330,6 +331,7 @@ type terminalAttachState struct {
 	ReplayTo         uint64
 	EarliestSequence uint64
 	LatestSequence   uint64
+	Recording        *wire.State // the session's recording at attach (REC before the first output)
 }
 
 func parseAttachResponse(payload []byte) (terminalAttachState, error) {
@@ -348,8 +350,9 @@ func parseAttachResponse(payload []byte) (terminalAttachState, error) {
 						Columns int `json:"columns"`
 						Rows    int `json:"rows"`
 					} `json:"dimensions"`
-					EarliestSequence uint64 `json:"earliest_sequence"`
-					LatestSequence   uint64 `json:"latest_sequence"`
+					EarliestSequence uint64      `json:"earliest_sequence"`
+					LatestSequence   uint64      `json:"latest_sequence"`
+					Recording        *wire.State `json:"recording"`
 				} `json:"snapshot"`
 				Replay struct {
 					FromSequence uint64 `json:"from_sequence"`
@@ -365,13 +368,29 @@ func parseAttachResponse(payload []byte) (terminalAttachState, error) {
 	if result.StreamID == 0 || result.AttachmentID == "" || result.AttachmentLease == 0 || result.Session.Snapshot.Generation == 0 || result.Session.Snapshot.Dimensions.Columns < 1 || result.Session.Snapshot.Dimensions.Columns > maximumColumns || result.Session.Snapshot.Dimensions.Rows < 1 || result.Session.Snapshot.Dimensions.Rows > maximumRows {
 		return terminalAttachState{}, errors.New("terminal attach response is missing its stream or geometry")
 	}
+	if recording := result.Session.Snapshot.Recording; recording != nil && !recording.Valid() {
+		return terminalAttachState{}, errors.New("terminal attach response has an invalid recording")
+	}
 	return terminalAttachState{
 		StreamID: result.StreamID, AttachmentID: result.AttachmentID, AttachmentLease: result.AttachmentLease, InputSequence: result.InputSequence, Generation: result.Session.Snapshot.Generation,
 		Columns: result.Session.Snapshot.Dimensions.Columns, Rows: result.Session.Snapshot.Dimensions.Rows,
 		FirstAttachment: result.FirstAttachment,
 		State:           result.Session.Snapshot.State, ReplayFrom: result.Session.Replay.FromSequence, ReplayTo: result.Session.Replay.ToSequence,
 		EarliestSequence: result.Session.Snapshot.EarliestSequence, LatestSequence: result.Session.Snapshot.LatestSequence,
+		Recording: result.Session.Snapshot.Recording,
 	}, nil
+}
+
+// recordingJSON is the attach event's recording: the State as JSON, or null when not recording.
+func (s terminalAttachState) recordingJSON() any {
+	if s.Recording == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(s.Recording)
+	if err != nil {
+		return nil
+	}
+	return json.RawMessage(encoded)
 }
 
 func readScreenCheckpoint(stream io.Reader, streamID uint32) ([]byte, uint64, error) {
