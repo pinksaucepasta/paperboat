@@ -96,7 +96,7 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		request.CWD = machine.WorkspaceRoot
 	}
 	if !remoteAbsolutePath(machine.Platform, machine.WorkspaceRoot, request.CWD) {
-		err = invocationError(errors.New("--cwd must be an absolute path"))
+		err = cwdRefusal(machine.Platform)
 		return fail(2, "invalid_request", false, false, err)
 	}
 	if request.PTY {
@@ -595,4 +595,14 @@ func watchExecSignals(signals <-chan os.Signal, callerDone, execDone <-chan stru
 			return
 		}
 	}
+}
+
+// cwdRefusal names the working-directory form the target machine accepts: a Unix client cannot guess
+// that a Windows target wants a drive letter, nor a Windows client that a Unix target wants a slash.
+func cwdRefusal(platform string) error {
+	form := "starting with / such as /home/user"
+	if platform == "windows" {
+		form = `with a drive letter such as C:\Users\user`
+	}
+	return localArgumentError("--cwd must be an absolute path on the target machine, in its own form, " + form)
 }
