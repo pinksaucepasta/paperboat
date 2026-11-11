@@ -35,7 +35,11 @@ func (b *Bar) updateTitleLocked() {
 	if b.privacy {
 		project, session = "private", "session"
 	}
-	_, _ = fmt.Fprintf(b.serializedOut, "\x1b]0;Paperboat - %s / %s\x07", project, session)
+	mark := ""
+	if b.recording {
+		mark = "● REC · "
+	}
+	_, _ = fmt.Fprintf(b.serializedOut, "\x1b]0;%sPaperboat - %s / %s\x07", mark, project, session)
 }
 
 func (b *Bar) restoreTitleLocked() {
@@ -89,6 +93,16 @@ func (b *Bar) SetUsage(credits, storage string) {
 	b.mu.Lock()
 	b.credits = safeLabel(credits)
 	b.storage = safeLabel(storage)
+	b.drawLocked()
+	b.mu.Unlock()
+}
+
+// SetRecording shows or hides the REC mark, which no layout or width hides, and marks the terminal
+// title while the session is recorded.
+func (b *Bar) SetRecording(recording bool) {
+	b.mu.Lock()
+	b.recording = recording
+	b.updateTitleLocked()
 	b.drawLocked()
 	b.mu.Unlock()
 }

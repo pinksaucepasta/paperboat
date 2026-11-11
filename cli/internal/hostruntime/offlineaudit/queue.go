@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	recording "github.com/pinksaucepasta/paperboat/shared/recording"
 )
 
 const (
@@ -58,6 +59,9 @@ type Event struct {
 	Outcome    string `json:"outcome,omitempty"`
 	BytesIn    int64  `json:"bytes_in,omitempty"`
 	BytesOut   int64  `json:"bytes_out,omitempty"`
+	// Recording belongs to the recording_* kinds, which carry nothing else but the event id, kind
+	// and time.
+	Recording *recording.Report `json:"recording,omitempty"`
 }
 
 // Queue is the one owner of the backlog file.

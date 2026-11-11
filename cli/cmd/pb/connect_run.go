@@ -605,6 +605,27 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 			bar.SetDebugVersions(buildinfo.Version, tunnel.TerminalRuntimeVersion(freshConn))
 		}
 	}
+	// Every new link repeats the REC state; only a change is shown.
+	var recordingShown atomic.Int32 // 0 unknown, 1 recorded, 2 not recorded
+	showRecording := func(recording bool) {
+		state := int32(2)
+		if recording {
+			state = 1
+		}
+		if previous := recordingShown.Swap(state); previous == state || previous == 0 && !recording {
+			return
+		}
+		notice := "Recording stopped"
+		if recording {
+			notice = "● REC · your team records this session"
+		}
+		if useStatusBar {
+			bar.SetRecording(recording)
+			bar.Notice(notice)
+		} else {
+			fmt.Fprint(os.Stderr, "\r\n["+notice+"]\r\n")
+		}
+	}
 	conn = tunnel.NewObservedReconnectingConn(ctx, conn, tunnel.ReattachAttempts(d.cfg.Connect.DialRetries), time.Duration(d.cfg.Connect.DialRetrySeconds)*time.Second, func(reconnectCtx context.Context) (tunnel.Conn, error) {
 		// A held attachment needs no new grant: the daemon re-attaches it with the host's resume secret, so a redial after a
 		// clean close (a machine update) waits for no helper route and no network refresh. It keeps its access session;
@@ -657,6 +678,10 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		d.cfg.Connect.TerminalOutputQueueChunks,
 		time.Duration(d.cfg.Connect.TerminalOutputBatchMilliseconds)*time.Millisecond,
 	), tunnel.WithReconnectObserver(func(event tunnel.ReconnectEvent) {
+		if event == tunnel.ReconnectRecording || event == tunnel.ReconnectNotRecording {
+			showRecording(event == tunnel.ReconnectRecording)
+			return
+		}
 		if event == tunnel.ReconnectRecovered {
 			bar.ResetRemoteState()
 			cols, rows := remoteSize()

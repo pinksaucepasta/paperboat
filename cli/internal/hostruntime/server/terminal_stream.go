@@ -55,6 +55,10 @@ type terminalOutputStream struct {
 	received uint64
 	// resumeSecret is handed once to the attach response, never kept by the stream.
 	resumeSecret []byte
+	// recordingID is the recording this stream last told its client about ("" for none), and
+	// pendingRecording a change found by a liveness check, sent before the next output.
+	recordingID      string
+	pendingRecording error
 }
 
 // participantsInterval bounds how soon a viewer learns that someone joined, left or changed role.
@@ -71,6 +75,9 @@ func (s *terminalOutputStream) participantsEvent() error {
 	snapshot, err := s.snapshot()
 	if err != nil {
 		return nil
+	}
+	if err := s.recordingEvent(snapshot); err != nil {
+		return err
 	}
 	signature := participantSignature(snapshot.Participants)
 	if signature == s.participants {
@@ -170,7 +177,11 @@ func (d *Dispatcher) openTerminalStream(ctx context.Context, authorization Autho
 	if generation == 0 {
 		generation = response.Session.Snapshot.Generation
 	}
-	stream := &terminalOutputStream{manager: d.config.Sessions, sessionID: request.SessionID, attachmentID: response.AttachmentID, attachmentLease: response.AttachmentLease, expectedGeneration: expectedGeneration, checkpointSent: true, accountID: authorization.AccountID, clientID: authorization.ClientID, generation: generation}
+	recordingID := ""
+	if response.Session.Snapshot.Recording != nil {
+		recordingID = response.Session.Snapshot.Recording.ID
+	}
+	stream := &terminalOutputStream{recordingID: recordingID, manager: d.config.Sessions, sessionID: request.SessionID, attachmentID: response.AttachmentID, attachmentLease: response.AttachmentLease, expectedGeneration: expectedGeneration, checkpointSent: true, accountID: authorization.AccountID, clientID: authorization.ClientID, generation: generation}
 	if authorization.BrowserTerminal || request.AtLiveBoundary {
 		if err := d.prepareTerminalCheckpoint(ctx, authorization, request, response, stream); err != nil {
 			return nil, false, err

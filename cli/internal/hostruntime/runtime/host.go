@@ -37,6 +37,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/process"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/recordingcontrol"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/recordings"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
@@ -110,6 +111,8 @@ type HostDependencies struct {
 	NativeWorkerEpoch   uint64
 	ReconcileCarrierSSH func(context.Context, bool) error
 	Capabilities        server.CapabilityGate
+	// RecordingControl builds the team recordings controller over the host's sessions.
+	RecordingControl func(session.Service) (*recordingcontrol.Controller, error)
 }
 
 func previewPrivateTCPAccessHandler(value any) http.Handler {
@@ -324,7 +327,16 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 	if err != nil {
 		return nil, err
 	}
+	var recordingControl *recordingcontrol.Controller
+	var recordingDecisions server.RecordingControl
+	if dependencies.RecordingControl != nil {
+		if recordingControl, err = dependencies.RecordingControl(sessions); err != nil {
+			return nil, err
+		}
+		recordingDecisions = recordingControl
+	}
 	dispatcher, err := server.NewDispatcher(server.DispatcherConfig{
+		Recordings:         recordingDecisions,
 		Diagnostics:        diagnostics.FromContext(ctx),
 		RecordTerminalJoin: dependencies.RecordTerminalJoin,
 		BrowserOutput:      browserOutput,
@@ -609,6 +621,10 @@ func NewHost(ctx context.Context, config HostConfig, dependencies HostDependenci
 		// unavailable target authority must fail SSH closed without taking the
 		// terminal, file-transfer, or preview services down with it.
 		stableComponents = append(stableComponents, stablehostd.Component{Name: "managed_ssh_authority", Required: false, Service: dependencies.ManagedSSHService})
+	}
+	if recordingControl != nil {
+		// Recording is optional: a policy Paperboat cannot serve must not take terminals down.
+		stableComponents = append(stableComponents, stablehostd.Component{Name: "recording_control", Required: false, Service: recordingControl})
 	}
 	if dependencies.NetworkMonitor != nil {
 		stableComponents = append(stableComponents, stablehostd.Component{Name: "network_monitor", Required: true, Service: dependencies.NetworkMonitor})

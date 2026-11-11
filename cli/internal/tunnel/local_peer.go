@@ -34,6 +34,7 @@ const (
 	localPeerExecCancelAck
 	localPeerLaunchWarning
 	localPeerLinkState
+	localPeerRecording
 )
 
 // A localPeerFailure payload says why the terminal link failed; empty is a lost transport.
@@ -166,7 +167,7 @@ func readLocalPeerFrame(reader io.Reader) (byte, []byte, error) {
 		return 0, nil, err
 	}
 	size := binary.BigEndian.Uint32(header[1:])
-	if size > localPeerMaximumFrame || header[0] < localPeerData || header[0] > localPeerLinkState {
+	if size > localPeerMaximumFrame || header[0] < localPeerData || header[0] > localPeerRecording {
 		return 0, nil, ErrPeerTerminalInvalid
 	}
 	payload := make([]byte, size)
@@ -236,6 +237,15 @@ func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includ
 				state = 1
 			}
 			_ = writer.write(localPeerLinkState, []byte{state})
+		})
+	}
+	if observed, ok := remote.(RecordingObserver); ok && !isExec {
+		observed.ObserveRecording(func(recording bool) {
+			state := byte(0)
+			if recording {
+				state = 1
+			}
+			_ = writer.write(localPeerRecording, []byte{state})
 		})
 	}
 	if isExec {
@@ -490,6 +500,7 @@ type localPeerConn struct {
 	linkMu            sync.Mutex
 	linkStalled       bool
 	linkObserver      func(stalled bool)
+	recordingState    recordingState
 	once              sync.Once
 	stopOnce          sync.Once
 	closeErr          error
@@ -586,6 +597,14 @@ func (c *localBasicPeerConn) ObserveLinkState(observer func(stalled bool)) {
 	c.inner.ObserveLinkState(observer)
 }
 
+func (c *localPeerConn) ObserveRecording(observer func(recording bool)) {
+	c.recordingState.observe(observer)
+}
+
+func (c *localBasicPeerConn) ObserveRecording(observer func(recording bool)) {
+	c.inner.ObserveRecording(observer)
+}
+
 func (c *localBasicPeerConn) MarkTransportLost(err error) { c.inner.MarkTransportLost(err) }
 
 func (c *localBasicPeerConn) TerminalRuntimeVersion() string { return c.inner.runtimeVersion }
@@ -627,6 +646,12 @@ func (c *localPeerConn) readLoop() {
 			if !c.enqueue(localPeerOutput{sequence: binary.BigEndian.Uint64(payload)}) {
 				return
 			}
+		case localPeerRecording:
+			if c.exec || len(payload) != 1 {
+				c.publishResult(localPeerWaitResult{err: ErrPeerTerminalInvalid})
+				return
+			}
+			c.recordingState.report(payload[0] == 1)
 		case localPeerLinkState:
 			if c.exec || len(payload) != 1 {
 				c.publishResult(localPeerWaitResult{err: ErrPeerTerminalInvalid})

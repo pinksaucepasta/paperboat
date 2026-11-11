@@ -27,6 +27,7 @@ import (
 	jitterrand "math/rand/v2"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/shared/recording"
 )
 
 // Path is the control-plane endpoint a Hub waits on.
@@ -45,6 +46,8 @@ const (
 	// TopicMachineServices moves when a machine in this machine's audience publishes a changed
 	// service snapshot (ports).
 	TopicMachineServices Topic = "machine_services"
+	// TopicRecordingPolicy moves when the machine's team recording policy or key changed.
+	TopicRecordingPolicy Topic = recording.Topic
 )
 
 const (

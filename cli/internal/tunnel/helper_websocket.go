@@ -209,6 +209,7 @@ type helperTerminalConn struct {
 	hold                      helperHold
 	stallAfter                time.Duration // helperStallAfter when the connection was made; read only by watchSilence
 	linkState                 atomic.Pointer[func(stalled bool)]
+	recordingState            recordingState
 }
 
 func newHelperTerminalConn(message helperMessageConnection, target *resolver.TerminalTarget, queue int) *helperTerminalConn {
@@ -384,7 +385,8 @@ func (c *helperTerminalConn) finishAttachment(frame helperFrame, existingSession
 			InputSequence   uint64 `json:"input_sequence"`
 			Session         struct {
 				Snapshot struct {
-					Generation uint64 `json:"generation"`
+					Generation uint64           `json:"generation"`
+					Recording  *json.RawMessage `json:"recording"`
 				} `json:"snapshot"`
 			} `json:"session"`
 		} `json:"result"`
@@ -413,6 +415,7 @@ func (c *helperTerminalConn) finishAttachment(frame helperFrame, existingSession
 	if response.Result.Session.Snapshot.Generation != 0 {
 		c.generation = response.Result.Session.Snapshot.Generation
 	}
+	c.recordingState.report(response.Result.Session.Snapshot.Recording != nil)
 	if c.generation == 0 {
 		return errors.New("helper terminal session has no generation")
 	}
@@ -507,6 +510,10 @@ func (c *helperTerminalConn) nextWrite() (helperWrite, bool) {
 // for a 5 s keepalive (~/ref/EternalTerminal/src/base/Headers.hpp:226). The link is kept: it resumes on its own when the network
 // returns, with the input it queued, so a stall only changes what the user sees.
 var helperStallAfter = 10 * time.Second
+
+func (c *helperTerminalConn) ObserveRecording(observer func(recording bool)) {
+	c.recordingState.observe(observer)
+}
 
 // ObserveLinkState reports when the host goes silent (true) and when it is heard again (false).
 func (c *helperTerminalConn) ObserveLinkState(observer func(stalled bool)) {
@@ -618,10 +625,11 @@ func (c *helperTerminalConn) handleEvent(frame helperFrame) bool {
 		BytesWritten int    `json:"bytes_written"`
 		ErrorCode    string `json:"error_code,omitempty"`
 		// The host's cut for a lone Ctrl-C (helper_hold.go).
-		InterruptThrough   uint64 `json:"interrupt_through"`
-		InterruptDiscarded bool   `json:"interrupt_discarded"`
-		State              string `json:"state"`
-		FinalSequence      uint64 `json:"final_sequence"`
+		InterruptThrough   uint64           `json:"interrupt_through"`
+		InterruptDiscarded bool             `json:"interrupt_discarded"`
+		Recording          *json.RawMessage `json:"recording"`
+		State              string           `json:"state"`
+		FinalSequence      uint64           `json:"final_sequence"`
 		Exit               *struct {
 			Code   int    `json:"code"`
 			Signal string `json:"signal"`
@@ -652,6 +660,10 @@ func (c *helperTerminalConn) handleEvent(frame helperFrame) bool {
 		c.handedOver.Store(true)
 		c.finish(1, ErrHandedOver)
 		return true
+	}
+	if event.Event == "recording" {
+		c.recordingState.report(event.Recording != nil)
+		return false
 	}
 	if event.Event != "terminal_stream_end" {
 		// Newer hosts add events (for example participants for browser viewers); ignore what this

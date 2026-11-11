@@ -76,6 +76,9 @@ func (b *Bar) layoutRegionsLocked(layout Layout) (left, center, right string) {
 	left = b.regionLocked(layout.Left)
 	center = b.regionLocked(layout.Center)
 	right = b.regionLocked(layout.Right)
+	if b.recording {
+		left = joinWidgets(b.semanticLocked("● REC", "error"), left)
+	}
 	if b.localVersion != "" {
 		remote := b.remoteVersion
 		if remote == "" {

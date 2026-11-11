@@ -85,6 +85,10 @@ const (
 	// with the input typed meanwhile. ReconnectResumed: it is heard again.
 	ReconnectStalled ReconnectEvent = "stalled"
 	ReconnectResumed ReconnectEvent = "resumed"
+	// ReconnectRecording and ReconnectNotRecording: the session's team recording started or stopped
+	// (also said by every new link, so it holds across reconnects).
+	ReconnectRecording    ReconnectEvent = "recording"
+	ReconnectNotRecording ReconnectEvent = "not_recording"
 )
 
 type reconnectingOptions struct {
@@ -232,6 +236,15 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 		connection := rand.Text()
 		var silent atomic.Bool                             // this link's own state; linkStalled follows whichever link is current
 		probeCtx, cancelProbe := context.WithCancel(c.ctx) // this link's probe; ends once supervise is done with the link
+		if observed, ok := conn.(RecordingObserver); ok {
+			observed.ObserveRecording(func(recording bool) {
+				if recording {
+					c.notify(ReconnectRecording)
+				} else {
+					c.notify(ReconnectNotRecording)
+				}
+			})
+		}
 		if observed, ok := conn.(LinkStateObserver); ok {
 			stalledConn := conn
 			observed.ObserveLinkState(func(stalled bool) {

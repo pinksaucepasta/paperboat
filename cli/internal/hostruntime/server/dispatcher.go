@@ -42,6 +42,7 @@ type DispatcherConfig struct {
 	RecordTerminalJoin TerminalJoinRecorder
 	BrowserOutput      *browserbroadcastserver.Registry
 	Sessions           session.Service
+	Recordings         RecordingControl
 	ConfigApply        configapply.Handler
 	ConfigCompare      ConfigComparisonReader
 	Health             HealthSource
@@ -495,6 +496,11 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 	if !s.liveChecked(time.Now()) {
 		return protocol.BinaryFrame{}, ErrStreamClosed
 	}
+	if s.pendingRecording != nil {
+		event := s.pendingRecording
+		s.pendingRecording = nil
+		return protocol.BinaryFrame{}, event
+	}
 	for {
 		if s.idleWait == 0 {
 			s.idleWait = terminalExitObservationInterval
@@ -519,6 +525,9 @@ func (s *terminalOutputStream) Next(ctx context.Context) (protocol.BinaryFrame, 
 				return protocol.BinaryFrame{}, ErrStreamClosed
 			}
 			if snapshot.State != session.Exited && snapshot.State != session.Closed {
+				if err := s.recordingEvent(snapshot); err != nil {
+					return protocol.BinaryFrame{}, err
+				}
 				s.idleWait = min(2*s.idleWait, terminalIdleObservationMaximum)
 				continue
 			}
@@ -582,8 +591,12 @@ func (s *terminalOutputStream) liveChecked(now time.Time) bool {
 	if now.Sub(s.liveCheckedAt) < liveCheckInterval {
 		return true
 	}
-	if _, err := s.snapshot(); err != nil {
+	snapshot, err := s.snapshot()
+	if err != nil {
 		return false
+	}
+	if event := s.recordingEvent(snapshot); event != nil {
+		s.pendingRecording = event // sent before the next output
 	}
 	s.liveCheckedAt = now
 	return true
@@ -668,6 +681,8 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 		}{Snapshot: value, EligibleTransferDestinationMachineIDs: eligible})
 	case "create":
 		return d.createTerminal(ctx, authorization, request)
+	case "record-start", "record-stop":
+		return d.recordingAction(authorization, request)
 	case "attach", "replay":
 		attachmentID := request.AttachmentID
 		if authorization.BrowserTerminal {
@@ -688,6 +703,7 @@ func (d *Dispatcher) terminal(ctx context.Context, authorization Authorization, 
 			return domainResult(nil, err)
 		}
 		attachResponse := newTerminalAttachResponse(attachmentID, value)
+		d.attachedRecording(authorization, request.SessionID, &attachResponse)
 		if attachResponse.InputSequence, err = d.config.Sessions.InputSequence(request.SessionID, authorization.ClientID, attachmentID, value.Snapshot.Generation); err != nil {
 			errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "sessions", "input_sequence", "terminal_session_failed", err)
 			if participantBound {
@@ -808,7 +824,7 @@ func browserAttachmentMatches(authorization Authorization, attachmentID string) 
 
 func browserTerminalActionAllowed(role TerminalRole, request terminalRequest) bool {
 	switch request.Action {
-	case "attach", "replay", "detach", "cursor", "screen":
+	case "attach", "replay", "detach", "cursor", "screen", "record-start", "record-stop":
 		return role == TerminalRoleOwner || role == TerminalRoleViewer || role == TerminalRoleInteractive
 	case "resize", "signal":
 		return role == TerminalRoleOwner || role == TerminalRoleInteractive
@@ -821,6 +837,8 @@ func sharedTerminalActionAllowed(role TerminalRole, request terminalRequest) boo
 	switch request.Action {
 	case "list", "get", "snapshot", "attach", "replay", "detach":
 		return !request.AtLiveBoundary
+	case "record-start", "record-stop":
+		return true
 	case "resize", "signal":
 		return role == TerminalRoleInteractive
 	default:

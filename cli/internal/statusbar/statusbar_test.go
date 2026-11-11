@@ -689,3 +689,20 @@ func BenchmarkWriteANSIRemoteOutput(b *testing.B) {
 		}
 	}
 }
+
+func TestRecordingMarkLeadsAndSurvivesNarrowWidths(t *testing.T) {
+	bar, _ := newTestBar(t, ModeAuto, "xterm-256color", 80, 24, true, time.Second)
+	bar.SetIdentity("demo", "default")
+	bar.SetConnection("connected")
+	bar.SetRecording(true)
+	if line := bar.Render(80); !strings.HasPrefix(line, "● REC  demo") {
+		t.Fatalf("REC does not lead: %q", line)
+	}
+	if line := bar.Render(30); !strings.HasPrefix(line, "● REC") {
+		t.Fatalf("REC dropped at 30 columns: %q", line)
+	}
+	bar.SetRecording(false)
+	if line := bar.Render(80); strings.Contains(line, "REC") {
+		t.Fatalf("REC still shown: %q", line)
+	}
+}

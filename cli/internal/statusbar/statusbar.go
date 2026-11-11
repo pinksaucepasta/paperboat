@@ -93,6 +93,7 @@ type Bar struct {
 	credits         string
 	storage         string
 	configSync      string
+	recording       bool // the team records this session: REC is always shown
 	layout          Layout
 	notice          string
 	noticeUntil     time.Time

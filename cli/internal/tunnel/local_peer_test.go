@@ -897,3 +897,62 @@ func TestLocalPeerCarriesAHandoverEndToTheCLI(t *testing.T) {
 		t.Fatal("wait did not end")
 	}
 }
+
+type recordingPeerRemote struct {
+	*localPeerRemote
+	observer chan func(bool)
+	done     chan struct{}
+}
+
+func (c *recordingPeerRemote) ObserveRecording(observer func(bool)) { c.observer <- observer }
+func (c *recordingPeerRemote) Wait() (int, error)                   { <-c.done; return 0, nil }
+
+// Team recordings: the host's REC state crosses the daemon IPC to pb connect, which shows it, and every change
+// arrives in order.
+func TestRecordingStateReachesTheCLI(t *testing.T) {
+	localClient, localServer := net.Pipe()
+	remoteServer, remotePeer := net.Pipe()
+	defer remotePeer.Close()
+	remote := &recordingPeerRemote{localPeerRemote: &localPeerRemote{Conn: remoteServer}, observer: make(chan func(bool), 1), done: make(chan struct{})}
+	defer close(remote.done)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = ServeLocalPeerTerminalConn(ctx, localServer, remote, &LocalPeerCursorBridge{}) }()
+	local, err := NewLocalPeerConn(localClient, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := make(chan ReconnectEvent, 8)
+	conn := NewObservedReconnectingConn(ctx, local, 3, 0, func(context.Context) (Conn, error) {
+		return nil, errors.New("must not redial")
+	}, nil, nil, TelemetryContext{}, WithReconnectObserver(func(event ReconnectEvent) { events <- event }))
+	defer conn.Close()
+	report := <-remote.observer
+	for _, want := range []bool{true, false, true} {
+		report(want)
+		expected := ReconnectNotRecording
+		if want {
+			expected = ReconnectRecording
+		}
+		select {
+		case event := <-events:
+			if event != expected {
+				t.Fatalf("event=%q, want %q", event, expected)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("no %q event", expected)
+		}
+	}
+}
+
+func TestRecordingStateTellsALateObserverAndOnlyChanges(t *testing.T) {
+	var state recordingState
+	var seen []bool
+	state.report(true)
+	state.observe(func(recording bool) { seen = append(seen, recording) })
+	state.report(true)
+	state.report(false)
+	if len(seen) != 2 || !seen[0] || seen[1] {
+		t.Fatalf("seen=%v", seen)
+	}
+}
