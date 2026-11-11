@@ -604,8 +604,20 @@ func (WindowsController) Start(ctx context.Context, definitionPath string) error
 	if err != nil {
 		return err
 	}
-	if !windowsServiceConfigurationOwnsDefinition(config, definition) || config.StartType == mgr.StartDisabled {
+	if !windowsServiceConfigurationOwnsDefinition(config, definition) {
 		return ErrInvalidDefinition
+	}
+	if config.StartType == mgr.StartDisabled {
+		// Starting is enabling, as systemd's `enable --now`: a retired generation is disabled so it does not start at
+		// boot, and a rollback to it starts it again.
+		updated, err := windowsServiceConfigForDefinition(config, definition)
+		if err != nil {
+			return err
+		}
+		updated.StartType = mgr.StartAutomatic
+		if err := service.UpdateConfig(updated); err != nil {
+			return err
+		}
 	}
 	if err := service.Start(); err != nil && !errors.Is(err, windows.ERROR_SERVICE_ALREADY_RUNNING) && !errors.Is(err, windows.ERROR_SERVICE_REQUEST_TIMEOUT) {
 		return err
