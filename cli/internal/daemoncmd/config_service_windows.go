@@ -72,7 +72,7 @@ func ownerSIDMatches(ownerSID string) (bool, error) {
 	if want == nil || !want.IsValid() {
 		return false, errors.New("Paperboat Windows config sync owner is invalid")
 	}
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil {
 		return false, coordinatorFailure("Paperboat Windows config sync process owner could not be queried", err)
 	}

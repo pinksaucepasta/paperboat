@@ -28,7 +28,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/binarytarget"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
@@ -36,6 +35,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseindex"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
@@ -540,7 +540,7 @@ func migrateLegacyWindowsRuntimeSecurity() (returnedConfig WindowsRuntimeConfig,
 	if err != nil {
 		return WindowsRuntimeConfig{}, hostInstallFailure("read legacy Windows runtime config", err)
 	}
-	caller, err := windows.GetCurrentProcessToken().GetTokenUser()
+	caller, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil {
 		return WindowsRuntimeConfig{}, hostInstallFailure("resolve Windows repair caller", err)
 	}
@@ -774,16 +774,16 @@ var windowsActivationOps = struct {
 		_, err := PrepareWindowsSSHGeneration(ctx, request)
 		return err
 	},
-	prestage:    prepareStagedWindowsBinary,
-	stop:        stopWindowsRuntimeForActivation,
-	token:       ensureWindowsTokenAt,
-	pin:         ensureWindowsPinnedRuntime,
+	prestage:      prepareStagedWindowsBinary,
+	stop:          stopWindowsRuntimeForActivation,
+	token:         ensureWindowsTokenAt,
+	pin:           ensureWindowsPinnedRuntime,
 	stageCarrier:  stageWindowsCarrierUpgrade,
 	carrier:       activateWindowsCarrier,
 	switchCarrier: switchWindowsCarrier,
-	writeConfig: writeWindowsConfigAt,
-	startRoles:  installWindowsRoleServices,
-	awaitHostd:  awaitWindowsHostdServing,
+	writeConfig:   writeWindowsConfigAt,
+	startRoles:    installWindowsRoleServices,
+	awaitHostd:    awaitWindowsHostdServing,
 }
 
 // newWindowsActivation builds installWindows' activation. finish, run on every exit, removes a staged runtime that
@@ -4390,7 +4390,7 @@ func repairWindowsTreeACL(root, ownerSID string) (resultErr error) {
 }
 func isAdministrator() bool { allowed, err := checkAdministrator(); return err == nil && allowed }
 func checkAdministrator() (allowed bool, resultErr error) {
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return false, err
 	}
