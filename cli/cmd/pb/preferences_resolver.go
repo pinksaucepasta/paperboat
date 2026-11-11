@@ -311,7 +311,7 @@ func rawToolOption(tool, value string) (bool, bool) {
 		}
 		return false, longBool[name]
 	}
-	valueOpts := map[string]string{"scp": "cFiJoPSX", "sftp": "BbcDFiJloPRSsX", "rsync": "eBf"}[tool]
+	valueOpts := map[string]string{"scp": "cFiJoPSX", "sftp": "BbcDFiJloPRSsX", "rsync": rsyncShortValueOptions}[tool]
 	boolOpts := map[string]string{"scp": "346Cprqv", "sftp": "46Aaq", "rsync": "avzrtpoglncPhinqs"}[tool]
 	letters := strings.TrimPrefix(value, "-")
 	if letters == "" {

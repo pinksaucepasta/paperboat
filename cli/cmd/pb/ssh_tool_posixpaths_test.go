@@ -32,6 +32,12 @@ func TestRsyncRemoteShellChosen(t *testing.T) {
 		{args: []string{"--exclude=-e", "src/", "box:/x"}},
 		{args: []string{"--", "-e", "box:/x"}},
 		{args: []string{"-a", "src/", "box:/x"}, environment: []string{"Rsync_Rsh=ssh"}, want: true},
+		{args: []string{"-Te", "src/", "box:/x"}},
+		{args: []string{"-Me", "src/", "box:/x"}},
+		{args: []string{"-avTe", "src/", "box:/x"}},
+		{args: []string{"-T", "-e", "src/", "box:/x"}},
+		{args: []string{"--temp-dir", "-e", "src/", "box:/x"}},
+		{args: []string{"-a", "src/", "box:/x"}, environment: []string{"RSYNC_RSH="}},
 	} {
 		if got := rsyncRemoteShellChosen(test.args, test.environment); got != test.want {
 			t.Errorf("%q %q: got %v", test.args, test.environment, got)

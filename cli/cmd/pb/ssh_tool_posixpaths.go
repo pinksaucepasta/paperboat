@@ -33,26 +33,37 @@ func isDriveOperand(value string) bool {
 	return letter >= 'a' && letter <= 'z'
 }
 
-// rsyncRemoteShellChosen reports whether the user picked rsync's remote shell (-e, --rsh, RSYNC_RSH); pb then
-// leaves it alone.
+// rsyncShortValueOptions are rsync's short options that take a value (rsync options.c): in a cluster the first of
+// them takes the rest of the cluster, or the next argument when it is last.
+const rsyncShortValueOptions = "eBfTM@"
+
+// rsyncRemoteShellChosen reports whether the user picked rsync's remote shell (-e, --rsh, a non-empty RSYNC_RSH);
+// pb then leaves it alone.
 func rsyncRemoteShellChosen(args, environment []string) bool {
 	for _, entry := range environment {
-		if key, _, ok := strings.Cut(entry, "="); ok && strings.EqualFold(key, "RSYNC_RSH") {
+		if key, value, ok := strings.Cut(entry, "="); ok && strings.EqualFold(key, "RSYNC_RSH") && value != "" {
 			return true
 		}
 	}
-	for _, value := range args {
+	for index := 0; index < len(args); index++ {
+		value := args[index]
 		if value == "--" {
 			return false
 		}
 		if value == "--rsh" || strings.HasPrefix(value, "--rsh=") {
 			return true
 		}
-		if strings.HasPrefix(value, "-") && !strings.HasPrefix(value, "--") {
-			// In a short cluster the first value option (-e, -B, -f) takes the rest: "-ave ssh", not "-fe".
-			if index := strings.IndexAny(value[1:], "eBf"); index >= 0 && value[1+index] == 'e' {
+		if !strings.HasPrefix(value, "-") || value == "-" {
+			continue
+		}
+		if !strings.HasPrefix(value, "--") {
+			// "-ave ssh" picks the shell; in "-Te" or "-Me" the e is the value of -T or -M.
+			if at := strings.IndexAny(value[1:], rsyncShortValueOptions); at >= 0 && value[1+at] == 'e' {
 				return true
 			}
+		}
+		if takesNext, _ := rawToolOption("rsync", value); takesNext {
+			index++ // the next argument is this option's value, even when it starts with -e
 		}
 	}
 	return false
