@@ -26,6 +26,14 @@ if [ -n "$dups" ]; then
 fi
 head=$(git rev-parse HEAD)
 branch="lane-submit/$base/$head"
+# A follow-up commit updates the requested PR without rewriting its published history.
+if [ -n "${PB_PUSH_PR:-}" ]; then
+  branch=$(gh pr view "$PB_PUSH_PR" --repo "$repo" --json headRefName --jq .headRefName)
+  case "$branch" in
+    lane-submit/"$base"/*) ;;
+    *) echo 'push: the requested PR must use a lane-submit branch for this base' >&2; exit 1 ;;
+  esac
+fi
 git push origin "HEAD:refs/heads/$branch"
 url=$(gh pr list --repo "$repo" --head "$branch" --base "$base" --state all --json url --jq '.[0].url // empty')
 if [ -z "$url" ]; then
