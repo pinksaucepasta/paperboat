@@ -1,22 +1,43 @@
 name: End-to-end
 
-# R-02: real server services on PostgreSQL, two systemd containers each running a real pb.
-# Stages (E2E_STAGES): pair exec send preview. Not yet a required check.
-# Not on pull_request until it is a required check (R-02): its two jobs per PR, 30 minutes each, filled the hosted runners
-# and kept the required checks queued for 10+ minutes (2026-11-12). The merge queue will run it on merge_group then.
+# Core end-to-end (server/internal/app TestE2ECore): the real server on PostgreSQL, the real edge and relay, and two
+# real pb daemons in systemd containers: exec both ways, managed SSH, a file send, a preview and a tunnel through the
+# edge; a server restart and an edge restart like deploys, all of it again each time; exec through the relay only.
+# Required in the merge queue (merge_group, tools/branch-protection.json) and run on pushes to main that touch a core
+# path; before a push: tools/ci-test.sh e2e. Not on every pull_request: two 30-minute jobs per PR filled the hosted
+# runners and queued the required checks for 10+ minutes (2026-11-12). The multi job (tools/e2e/run.sh) is not required
+# and runs only on r21-e2e* pushes and dispatch.
 on:
   push:
-    branches: ['r21-e2e*']
+    branches: [main, 'r21-e2e*']
+    paths:
+      - 'server/**'
+      - 'tunnel/**'
+      - 'relay/**'
+      - 'shared/**'
+      - 'cli/cmd/pb/**'
+      - 'cli/internal/**'
+      - 'go.work'
+      - 'go.work.sum'
+      - 'tools/e2e/**'
+      - '.github/workflows/e2e.yml'
+  merge_group:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      core_only:
+        description: 'Run only the core job (tools/ci-test.sh e2e)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
-  e2e:
-    name: End-to-end
+  core:
+    name: End-to-end core
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     services:
       postgres:
         image: postgres:17
@@ -28,23 +49,33 @@ jobs:
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       PAPERBOAT_TEST_DATABASE_DSN: postgres://postgres:postgres@localhost:5432/e2e_test?sslmode=disable
-      E2E_STAGES: pair exec
-      # The branch r21-e2e-break proves the job goes red: its enrollment token is wrong.
-      E2E_BREAK: ${{ endsWith(github.ref_name, '-break') && 'token' || '' }}
+      PAPERBOAT_E2E_CORE: '1'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version-file: cli/go.mod
+          go-version-file: server/go.mod
           cache-dependency-path: |
             server/go.sum
             cli/go.sum
+            relay/go.sum
+            tunnel/go.sum
             go.work.sum
-      - run: tools/e2e/run.sh
+      # The edge's control client dials the server by name, and the edge serves HTTP and HTTPS on 80 and 443.
+      - run: |
+          echo "127.0.0.1 e2e-server.example.test" | sudo tee -a /etc/hosts
+          sudo sysctl -w net.ipv4.ip_unprivileged_port_start=80
+      # A skipped test exits 0 (the env line above is the only thing that runs it): the job needs the PASS line.
+      - working-directory: server
+        run: |
+          go test -count=1 -timeout 35m -v -run '^TestE2ECore$' ./internal/app | tee "$RUNNER_TEMP/core.log"
+          grep -q -- '^--- PASS: TestE2ECore ' "$RUNNER_TEMP/core.log"
 
-  # F21-57 / F21-55: three server instances behind one proxy, one SIGKILLed mid-run. Not a required check.
+  # F21-57 / F21-55: three server instances behind one proxy, one SIGKILLed mid-run. Not a required check, and
+  # not on main pushes or tools/ci-test.sh e2e.
   multi:
     name: End-to-end, 3 server instances
+    if: ${{ !inputs.core_only && github.event_name != 'merge_group' && github.ref != 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:

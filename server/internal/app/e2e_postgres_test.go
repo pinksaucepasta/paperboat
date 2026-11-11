@@ -3,31 +3,40 @@ package app
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/auth"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/tunnelcert"
 )
 
 // TestE2EServe is the server half of the CI end-to-end job (tools/e2e/run.sh): the real application
 // (app.New and Run, every route and worker) on PostgreSQL behind a TLS proxy, with one seeded account
 // that owns a signed-in browser session. It issues the account's enrollment tokens and API token over
 // HTTP like the console does, writes them to PAPERBOAT_E2E_DIR/tokens.json, and runs until
-// PAPERBOAT_E2E_DIR/stop exists.
+// PAPERBOAT_E2E_DIR/stop exists or SIGTERM (a deploy's graceful stop). Started again with tokens.json present it
+// only serves: TestE2ECore restarts it mid-run like a deploy.
 func TestE2EServe(t *testing.T) {
 	directory := os.Getenv("PAPERBOAT_E2E_DIR")
 	if directory == "" {
@@ -46,12 +55,20 @@ func TestE2EServe(t *testing.T) {
 	cfg.Database = config.Database{Driver: "postgres", DSN: dsn}
 	cfg.HTTP.Address, cfg.HTTP.PublicBaseURL, cfg.HTTP.BrowserLoginOrigin = internal, base, base
 	cfg.ReleaseBaseURL = base
-	if key := os.Getenv("PAPERBOAT_E2E_MINT_KEY"); key != "" { // multi stage: every instance signs with one key
-		cfg.ServerInstances, cfg.Secrets.MintSigningKeys, cfg.CLIAuth.MintActiveKeyID = 3, []string{key}, strings.SplitN(key, ":", 2)[0]
+	// One mint key across processes, as production keeps it: the multi stage's instances and TestE2ECore's restart
+	// (an ephemeral key per start would invalidate every grant the daemons hold).
+	if key := os.Getenv("PAPERBOAT_E2E_MINT_KEY"); key != "" {
+		cfg.Secrets.MintSigningKeys, cfg.CLIAuth.MintActiveKeyID = []string{key}, strings.SplitN(key, ":", 2)[0]
+	}
+	if os.Getenv("PAPERBOAT_E2E_INSTANCES") == "3" { // multi stage
+		cfg.ServerInstances = 3
 	}
 	cfg.CLIAuth.VerificationURL, cfg.CLIAuth.MachinesURL = base+"/cli", base+"/machines"
 	cfg.LocalAccessBaseDomain, cfg.RuntimeBaseDomain = "local.example.test", "runtime.example.test"
-	cfg.Preview.BaseDomain, cfg.Tunnel.BaseDomain = "preview.example.test", "tunnel.example.test"
+	cfg.Preview.BaseDomain, cfg.Tunnel.BaseDomain = "public.example.test", "public.example.test" // one public base, as production: the managed wildcard certificate covers both
+	if acme := os.Getenv("PAPERBOAT_E2E_ACME_URL"); acme != "" { // TestE2ECore's edge: claimed by the operator, certificates from Pebble
+		e2eEdgeConfig(t, &cfg, acme)
+	}
 	migrations, err := db.Open(cfg.Database)
 	if err != nil {
 		t.Fatal(err)
@@ -59,20 +76,30 @@ func TestE2EServe(t *testing.T) {
 	if err := db.Migrate(context.Background(), migrations); err != nil {
 		t.Fatal(err)
 	}
-	_ = migrations.Close()
-	application, err := New(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))})
+	defer migrations.Close()
+	opts := Options{Config: cfg}
+	if os.Getenv("PAPERBOAT_E2E_ACME_URL") != "" {
+		opts.CertificateRuntime = e2eCertificateRuntime(t, migrations, cfg)
+	}
+	opts.Logger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	application, err := New(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, stop := context.WithCancel(context.Background())
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 	defer stop()
 	running := make(chan error, 1)
 	go func() { running <- application.Run(ctx) }()
 
 	waitForStop := func() {
-		for tick := time.NewTicker(time.Second); ; <-tick.C {
+		tick := time.NewTicker(time.Second)
+		defer tick.Stop()
+		for ; ; <-tick.C {
 			select {
 			case err := <-running:
+				if ctx.Err() != nil { // SIGTERM: Run drained and returned
+					return
+				}
 				t.Fatalf("application stopped: %v", err)
 			default:
 			}
@@ -81,6 +108,8 @@ func TestE2EServe(t *testing.T) {
 			}
 		}
 	}
+	_, statErr := os.Stat(filepath.Join(directory, "tokens.json"))
+	seeded := statErr == nil
 	if os.Getenv("PAPERBOAT_E2E_FOLLOWER") != "" { // another instance of the multi stage: serve only
 		waitForStop()
 		return
@@ -95,6 +124,10 @@ func TestE2EServe(t *testing.T) {
 		defer tlsServer.Close()
 	}
 
+	if seeded { // a restart: the account and tokens exist
+		waitForStop()
+		return
+	}
 	// A signed-in console session for a seeded account, as perf_budgets does, plus a paid entitlement.
 	hash := func(value string) string { sum := sha256.Sum256([]byte(value)); return hex.EncodeToString(sum[:]) }
 	account, session, csrf := "usr_e2e", "e2e-session", "e2e-csrf"
@@ -107,6 +140,11 @@ func TestE2EServe(t *testing.T) {
 		}
 	}
 	if _, err := application.db.SQL().ExecContext(ctx, `INSERT INTO paperboat.sessions(id,user_id,session_hash,csrf_hash,expires_at,workos_session_id,workos_access_expires_at) VALUES('session_e2e',$1,$2,$3,now()+interval '1 day','session_e2e',now()+interval '1 day')`, account, hash(session), hash(csrf)); err != nil {
+		t.Fatal(err)
+	}
+	// A signed-in operator (e2eOperatorSession) claims TestE2ECore's edge as a managed one.
+	if _, err := application.db.SQL().ExecContext(ctx, `WITH a AS (INSERT INTO paperboat.operator_accounts(id,email,password_hash) VALUES('opr_`+strings.Repeat("e2", 16)+`','operator@example.test','unused') RETURNING id)
+		INSERT INTO paperboat.operator_sessions(token_hash,operator_id,csrf_hash,expires_at) SELECT $1,id,$2,now()+interval '1 day' FROM a`, hashBytes(e2eOperatorSession), hashBytes(e2eOperatorCSRF)); err != nil {
 		t.Fatal(err)
 	}
 	post := func(path, body string) map[string]any {
@@ -149,6 +187,42 @@ func TestE2EServe(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitForStop()
+}
+
+// The seeded operator's session cookie and CSRF token (fixtures of a throwaway database).
+const e2eOperatorSession, e2eOperatorCSRF = "e2e-operator-session", "e2e-operator-csrf"
+
+func hashBytes(value string) []byte { sum := sha256.Sum256([]byte(value)); return sum[:] }
+
+// e2eEdgeConfig turns on what a managed edge needs from the server: the edge control credential, private claim
+// addresses (the edge is on the CI host), and managed certificates over http-01 from a Pebble ACME directory whose
+// validation always passes. The secrets go to the environment references the server resolves.
+func e2eEdgeConfig(t *testing.T, cfg *config.Config, acme string) {
+	credential := os.Getenv("PAPERBOAT_E2E_EDGE_CREDENTIAL")
+	accountKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accountDER, err := x509.MarshalPKCS8PrivateKey(accountKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.SelfhostAllowPrivateIngress = true
+	cfg.Secrets.EdgeControlCredential = credential
+	cfg.Certificates = config.Certificates{Enabled: true, DirectoryURL: acme, Issuer: "pebble", Challenge: config.CertificateChallengeHTTP01,
+		AccountKeyReference: "e2e-account", MasterKeyReference: "e2e-master", DistributionCredentialReference: "e2e-distribution",
+		OwnerID: "e2e", CAAResolver: os.Getenv("PAPERBOAT_E2E_CAA_RESOLVER")}
+	for reference, value := range map[string]string{
+		"e2e-account":      string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: accountDER})),
+		"e2e-master":       credential + "-master", // the same on every start: it seals the stored certificate keys
+		"e2e-distribution": credential,
+	} {
+		name, err := tunnelcert.EnvironmentReferenceName("", reference)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv(name, value)
+	}
 }
 
 // logRequests prints one line per request so a failing run shows which route answered what.

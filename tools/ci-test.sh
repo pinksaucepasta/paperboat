@@ -5,15 +5,16 @@
 #   tools/ci-test.sh server -run 'TestTeams'   # server incl. its PostgreSQL suites, narrowed
 #   tools/ci-test.sh cli -run TestX -count 5   # repeat each matching test 5 times (flake check)
 #   tools/ci-test.sh smoke                     # the device-smoke harness's Python unit tests
+#   tools/ci-test.sh e2e                       # core end-to-end: real server + two pb daemons (TestE2ECore)
 #   tools/ci-test.sh                           # every module and the console
-# Modules: shared cli relay tunnel helper server console sdk/go smoke. server and tunnel also run their PostgreSQL
+# Modules: shared cli relay tunnel helper server console sdk/go smoke e2e. server and tunnel also run their PostgreSQL
 # suites against a throwaway postgres:17 service container. Only committed work is tested.
 # The script pushes HEAD to a throwaway branch ci/<worktree>-<sha>-<time> (never main, with no
 # build here and "[skip ci]" so only the dispatched run starts), waits, prints a pass/fail line and
 # duration per job plus the failing tests, and deletes the branch. Exit status is 0 only if all pass.
 set -euo pipefail
 
-usage() { sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
 modules=() run="" count=1
 while [ $# -gt 0 ]; do
@@ -21,10 +22,13 @@ while [ $# -gt 0 ]; do
     -run | --run) [ $# -ge 2 ] || usage; run=$2; shift 2 ;;
     -count | --count) [ $# -ge 2 ] || usage; count=$2; shift 2 ;;
     -h | --help) usage ;;
-    shared | cli | relay | tunnel | helper | server | console | sdk/go | smoke) modules+=("$1"); shift ;;
+    shared | cli | relay | tunnel | helper | server | console | sdk/go | smoke | e2e) modules+=("$1"); shift ;;
     *) echo "ci-test: unknown argument '$1'" >&2; usage ;;
   esac
 done
+
+case " ${modules[*]:-} " in *" e2e "*) [ -z "$run$count" ] || [ "$run$count" = 1 ] ||
+  echo "ci-test: note: -run and -count do not apply to e2e (it runs TestE2ECore once)" >&2 ;; esac
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
