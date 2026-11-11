@@ -3190,12 +3190,13 @@ func windowsRuntimeSecurityMatches(path string, owner *windows.SID, dacl string)
 func validateWindowsRuntimeSecurity(path string, owner *windows.SID, dacl, stage string) (resultErr error) {
 	handle, err := openWindowsRuntimeSecurityObject(path)
 	if err != nil {
-		return hostInstallFailure("opening Windows runtime security failed", err)
+		return hostInstallFailure("opening Windows runtime security failed at "+stage, err)
 	}
 	defer func() {
 		resultErr = withCleanup("validating Windows runtime security failed", resultErr, windows.CloseHandle(handle))
 	}()
-	return checkWindowsRuntimeHandleSecurity(handle, owner, dacl)
+	// The stage names the object whose owner or DACL is wrong (pin cleanup refused silently on winpool-4).
+	return hostInstallFailure("Windows runtime owner or DACL check failed at "+stage, checkWindowsRuntimeHandleSecurity(handle, owner, dacl))
 }
 func checkWindowsRuntimeHandleSecurity(handle windows.Handle, owner *windows.SID, dacl string) error {
 	matched, err := windowssecurity.CheckHandleOwnerMatchesSID(handle, owner)
@@ -3718,6 +3719,9 @@ func ensureWindowsExecutableDirectory(path, readerSID string) error {
 	if attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 		return ErrInvalidRequest
 	}
+	if err := requireWindowsAdministratorOwner(path); err != nil {
+		return err
+	}
 	if readerSID == "" {
 		readerSID = "BU"
 	} else if !validSID(readerSID) {
@@ -3729,6 +3733,33 @@ func ensureWindowsExecutableDirectory(path, readerSID string) error {
 		return err
 	}
 	return applyWindowsOwnedDACL(path, trustedOwner, dacl)
+}
+
+// requireWindowsAdministratorOwner refuses a directory another account created: Users may create folders under
+// ProgramData, so C:\ProgramData\Paperboat may be planted before install. Only SYSTEM or Administrators can own
+// one this install or an earlier one made; such a directory is re-secured, anything else is left untouched.
+func requireWindowsAdministratorOwner(path string) (resultErr error) {
+	handle, err := openWindowsRuntimeSecurityObject(path)
+	if err != nil {
+		return hostInstallFailure("opening "+path+" to check its owner failed", err)
+	}
+	defer func() {
+		resultErr = withCleanup("checking the owner of "+path+" failed", resultErr, windows.CloseHandle(handle))
+	}()
+	for _, kind := range []windows.WELL_KNOWN_SID_TYPE{windows.WinLocalSystemSid, windows.WinBuiltinAdministratorsSid} {
+		sid, err := windows.CreateWellKnownSid(kind)
+		if err != nil {
+			return err
+		}
+		matched, err := windowssecurity.CheckHandleOwnerMatchesSID(handle, sid)
+		if err != nil {
+			return hostInstallFailure("checking the owner of "+path+" failed", err)
+		}
+		if matched {
+			return nil
+		}
+	}
+	return hostInstallFailure("Paperboat refuses "+path+": another account owns it; remove it as an administrator and run pb install again", ErrInvalidRequest)
 }
 
 func repairWindowsRuntimeBinary(ctx context.Context, config WindowsRuntimeConfig, layout service.Layout) (resultErr error) {

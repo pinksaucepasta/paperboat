@@ -1045,7 +1045,7 @@ func validateNativeWindowsRebootMetadataShape(metadata nativeWindowsRebootMetada
 	if !filepath.IsAbs(metadata.ExecutableRoot) || root != metadata.ExecutableRoot || !strings.EqualFold(filepath.Dir(root), filepath.Clean(programData)) || !strings.HasPrefix(strings.ToLower(filepath.Base(root)), nativeWindowsServiceTestPrefix) {
 		return ErrInvalidDefinition
 	}
-	if metadata.Executable != filepath.Join(root, "service.test.exe") || metadata.ConfigRoot != filepath.Join(root, "config") || metadata.StateRoot != filepath.Join(root, "lifecycle") || metadataPath != filepath.Join(root, "reboot-state.json") {
+	if metadata.Executable != filepath.Join(root, "protected", "bin", "service.test.exe") || metadata.ConfigRoot != filepath.Join(root, "config") || metadata.StateRoot != filepath.Join(root, "lifecycle") || metadataPath != filepath.Join(root, "reboot-state.json") {
 		return ErrInvalidDefinition
 	}
 	if err := validateWindowsDirectoryNoReparse(root); err != nil {
@@ -1162,7 +1162,9 @@ func installNativeWindowsServiceTestExecutableWithCleanup(t *testing.T, cleanup 
 	if err != nil {
 		t.Fatalf("create native test executable root: %v", err)
 	}
-	if err := prepareAtomicDirectory(root); err != nil {
+	// ProgramData lets Users create folders, so the protected directory sits in a protected parent of its own.
+	protected := filepath.Join(root, "protected", "bin")
+	if err := prepareAtomicDirectory(protected); err != nil {
 		_ = os.RemoveAll(root)
 		t.Fatalf("protect native test executable root: %v", err)
 	}
@@ -1173,7 +1175,7 @@ func installNativeWindowsServiceTestExecutableWithCleanup(t *testing.T, cleanup 
 			}
 		})
 	}
-	destination := filepath.Join(root, "service.test.exe")
+	destination := filepath.Join(protected, "service.test.exe")
 	if err := copyNativeWindowsTestExecutable(source, destination); err != nil {
 		t.Fatalf("copy native test executable: %v", err)
 	}

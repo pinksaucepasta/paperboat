@@ -44,7 +44,7 @@ func TestNativeWindowsComponentsCanStageAllRolesBeforeReadiness(t *testing.T) {
 		// Keep this unit test isolated from the machine-wide production
 		// declaration directory. The Windows render/controller rules remain
 		// identical because the native boundary is injected below.
-		installer.definitionPath = filepath.Join(root, role.kind+".json")
+		installer.definitionPath = filepath.Join(root, "Paperboat", "services", role.kind+".json")
 		component, err := NewNativeTransactionalComponent(NativeTransactionalComponentConfig{
 			Installer: installer, Controller: control,
 			Probe: func(context.Context) error {

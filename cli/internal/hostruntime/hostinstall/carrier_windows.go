@@ -525,7 +525,7 @@ func reconcileInstalledCarrier(ctx context.Context, instance string, pinReferenc
 			return err
 		}
 		if err := pruneWindowsRuntimePins(ctx, config, retained, activation); err != nil {
-			return err
+			return pinCleanupFailure{cause: err}
 		}
 	}
 	if retained.Source.SHA256 == config.Source.SHA256 && retained.Source.Length == config.Source.Length {

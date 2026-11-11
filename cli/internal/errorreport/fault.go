@@ -241,7 +241,7 @@ func (r *Reporter) captureFault(ctx context.Context, f Fault, capture bool) Faul
 
 func faultStage(value string) string {
 	switch value {
-	case "uninstall_prepare", "uninstall_lock", "uninstall_recover", "uninstall_sessions", "uninstall_activator", "uninstall_services", "uninstall_power", "uninstall_journal", "uninstall_files", "uninstall_lock_close", "native_uninstall", "account_sweep", "machine_guard", "shared_manuals", "shared_payload_parents", "final_inventory", "reset_cli", "control_request", "local_gateway", "grant_issue", "peer_authority", "peer_connect", "stream_open", "target_connect", "reconciliation", "lifecycle", "component_start", "component_shutdown", "component_rollback", "command", "process", "diagnostic_storage", "delivery", "listener_bind", "listener_accept", "update_check", "update_download", "update_install", "relay_targets", "relay_probe", "relay_report":
+	case "uninstall_prepare", "uninstall_lock", "uninstall_recover", "uninstall_sessions", "uninstall_activator", "uninstall_services", "uninstall_power", "uninstall_journal", "uninstall_files", "uninstall_lock_close", "native_uninstall", "account_sweep", "machine_guard", "shared_manuals", "shared_payload_parents", "final_inventory", "reset_cli", "control_request", "local_gateway", "grant_issue", "peer_authority", "peer_connect", "stream_open", "target_connect", "reconciliation", "lifecycle", "component_start", "component_shutdown", "component_rollback", "command", "process", "diagnostic_storage", "delivery", "listener_bind", "listener_accept", "update_check", "update_download", "update_install", "relay_targets", "relay_probe", "relay_report", "pin_cleanup":
 		return value
 	}
 	return "unknown"

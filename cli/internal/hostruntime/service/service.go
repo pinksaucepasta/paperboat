@@ -320,8 +320,9 @@ func (i *Installer) writeDefinition(ctx context.Context) (previous []byte, upgra
 	if i.config.Platform == "windows" {
 		// Windows declarations live in the fixed machine state directory, not
 		// under caller ConfigRoot. Fresh MSI and portable-host setup must be able
-		// to create that protected declaration directory themselves.
-		if err := ensureRoot(filepath.Dir(i.definitionPath)); err != nil {
+		// to create that protected declaration directory themselves; a plain
+		// MkdirAll would leave C:\ProgramData\Paperboat writable by Users.
+		if err := prepareAtomicDirectory(filepath.Dir(i.definitionPath)); err != nil {
 			return nil, false, fmt.Errorf("prepare Windows service declaration root: %w", err)
 		}
 	}

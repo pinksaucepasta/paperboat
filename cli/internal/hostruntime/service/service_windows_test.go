@@ -63,10 +63,11 @@ func TestNativeWindowsRebootMetadataValidationIsFailClosed(t *testing.T) {
 	// for ProgramData.
 	programData := t.TempDir()
 	root := filepath.Join(programData, "paperboat-trk34-123456")
-	if err := os.Mkdir(root, 0o700); err != nil {
+	executable := filepath.Join(root, "protected", "bin", "service.test.exe")
+	if err := os.MkdirAll(filepath.Dir(executable), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "service.test.exe"), []byte("fixture"), 0o700); err != nil {
+	if err := os.WriteFile(executable, []byte("fixture"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	suffix := strings.TrimPrefix(instance, "trk34-reboot-")
@@ -75,7 +76,7 @@ func TestNativeWindowsRebootMetadataValidationIsFailClosed(t *testing.T) {
 		Instance:                instance,
 		OwnerSID:                "S-1-5-21-1-2-3-4",
 		ExecutableRoot:          root,
-		Executable:              filepath.Join(root, "service.test.exe"),
+		Executable:              executable,
 		ConfigRoot:              filepath.Join(root, "config"),
 		StateRoot:               filepath.Join(root, "lifecycle"),
 		HostdName:               windowsServiceName(HostdKind, instance),

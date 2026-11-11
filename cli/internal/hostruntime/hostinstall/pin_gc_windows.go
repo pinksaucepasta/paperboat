@@ -31,6 +31,16 @@ var windowsOfficialPinName = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+
 // This matches the existing 256KiB native lifecycle resource bound.
 const windowsPinSCMBytes = 256 << 10
 
+// pinCleanupFailure reports a refused or failed pin cleanup under its own stage, so the reconciliation fault says
+// which step stopped instead of a bare invalid request.
+type pinCleanupFailure struct{ cause error }
+
+func (e pinCleanupFailure) Error() string {
+	return "Paperboat runtime pin cleanup failed: " + e.cause.Error()
+}
+func (e pinCleanupFailure) Unwrap() error           { return e.cause }
+func (e pinCleanupFailure) DiagnosticStage() string { return "pin_cleanup" }
+
 // pruneWindowsRuntimePins requires the existing native publication lock and a
 // completed lifecycle recovery. Every reference is collected before deletion.
 func pruneWindowsRuntimePins(ctx context.Context, installed WindowsRuntimeConfig, carrier CarrierConfig, activation []string) error {
