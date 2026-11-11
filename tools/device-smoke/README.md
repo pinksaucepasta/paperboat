@@ -40,6 +40,32 @@ How it is wired: the runner starts sshd on loopback with the controller's public
 no shell and `/etc/ssh/sshd_config.d/70-winpool.conf` allows it only those fourteen loopback listeners; the key's own `permitlisten=` options in `~winpool/.ssh/authorized_keys` must list the same fourteen ports (a port missing from either place makes `ssh -R` fail forever, 2026-11-10 slots 7-10). The controller
 reaches a machine with `ProxyJump` through its own login on the jump host (`WINPOOL_JUMP`, default `ubuntu@anvit`).
 
+## Extra macOS machines (macpool)
+
+`macpool.sh` is `winpool.sh` for macOS: up to eight GitHub-hosted `macos-latest` runners (arm64, macOS 26, 3 cores) as
+temporary Mac test machines, so lanes need not queue on the single apple VM.
+
+```sh
+tools/device-smoke/macpool.sh start 1 3     # 1 machine for 3 hours (1-5); prints macpool-1 when SSH answers
+scp .build/$V/pb-darwin-arm64 macpool-1:pb-new
+ssh macpool-1 '(umask 077; cat > tok)' < token-file     # token: pb machine add --json on hp (the token file must be owner-only)
+ssh macpool-1 './pb-new install && ~/.local/bin/pb pair --enrollment-token-file ~/tok --name macpool-<lane>-1'
+tools/device-smoke/macpool.sh stop 1        # then revoke the machine record by exact id
+```
+
+- Machine N is the SSH host `macpool-N` (user `runner`, passwordless sudo, arm64; key `~/.ssh/winpool_controller`;
+  hosts in `~/.ssh/macpool.conf`). Same controller, start lock and claim records (`~/.ssh/macpool-claims`) as winpool.
+- Every login (command, shell, scp/sftp) runs in the runner user's GUI session (sshd `ForceCommand` wrapper), so the login
+  keychain works: `pb install`, `pb pair` and `pb doctor` are healthy, as in the Mac's own Terminal. A plain sshd login on
+  macOS is a Background session where the keychain refuses ("User interaction is not allowed", `pb pair` fails). The
+  daemon itself runs as a system LaunchDaemon, so `pb exec` into the machine has no keychain.
+- Limits: 8 slots, at most 5 hours, GitHub's macOS concurrency (5 jobs at once, shared with every workflow; extra
+  jobs queue, and macOS arm64 runners can queue for minutes). Nothing survives the run. No reboot, sleep or logout
+  (the tunnel dies), no LAN, no second OS user, no Spotlight/GUI-app rows. The final macOS pass stays on apple.
+- Name the Paperboat machine `macpool-…` so the cleanup finds it (`cleanup_test_account.py --prefix macpool- --apply`).
+- Wiring: `.github/workflows/macpool.yml` (manual dispatch only) reuses the winpool secrets and variable; the jump
+  host's `winpool` user also lists loopback ports 22301-22308 (`70-winpool.conf` and `permitlisten=` in its `authorized_keys`).
+
 ## SSO from the Windows CLI (F19-03, F19-04)
 
 `sso_windows.py` runs `pb login` (SSO sign-in, exit code read from the process) and the Require-SSO flow (a real non-SSO
