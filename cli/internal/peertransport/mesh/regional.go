@@ -204,6 +204,19 @@ func (b *locoBackend) setPeerRelayRegion(peer key.NodePublic, id tailcfg.DERPReg
 	return nil
 }
 
+// relayRegionIDs is every relay region this engine can send through.
+func (b *locoBackend) relayRegionIDs() []tailcfg.DERPRegionID {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var ids []tailcfg.DERPRegionID
+	for id, r := range b.dm.Regions {
+		if r.HasDERP() {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
 func (b *locoBackend) relayPeerAdmitted(peer key.NodePublic) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()

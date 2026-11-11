@@ -154,16 +154,22 @@ func (s *Server) Start() error {
 			return false
 		}
 		if IsMeowedPacket(pkt) {
-			s.peerReadyMu.Lock()
-			ready := s.peerReady[src]
-			if ready != nil {
-				select {
-				case <-ready:
-				default:
-					close(ready)
+			go func() {
+				// The peer answered on the region it is homed on: send to it there from now on, as magicsock
+				// learns a peer's derpRoute from where it was heard (derp.go addDerpPeerRoute). Recorded before
+				// the dial is released, so its first packets take that region.
+				_ = lb.setPeerRelayRegion(src, regionID)
+				s.peerReadyMu.Lock()
+				ready := s.peerReady[src]
+				if ready != nil {
+					select {
+					case <-ready:
+					default:
+						close(ready)
+					}
 				}
-			}
-			s.peerReadyMu.Unlock()
+				s.peerReadyMu.Unlock()
+			}()
 			return true
 		}
 		if _, discoPub, ok := ParseMeowPing(pkt); ok {
@@ -331,13 +337,37 @@ func (s *Server) awaitMeow(ctx context.Context, peer key.NodePublic) error {
 	packet := EncodeMeowPing(s.lb.pub, mc.DiscoPublicKey())
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+	// send delivers the handshake through region, connecting to it first when this engine has no carrier there: a
+	// peer's home is reached where it is, as magicsock opens a peer's home DERP on demand (derp.go derpWriteChanForRegion).
+	send := func(region tailcfg.DERPRegionID) error {
+		err := mc.SendDERPPacketToRegion(peer, region, packet)
+		if err != nil && ctx.Err() == nil {
+			prepare, cancel := context.WithTimeout(ctx, time.Second)
+			err = mc.PrepareDERP(prepare, region)
+			cancel()
+			if err == nil {
+				err = mc.SendDERPPacketToRegion(peer, region, packet)
+			}
+		}
+		return err
+	}
 	var lastSendErr error
-	for {
+	for attempt := 0; ; attempt++ {
 		// Regional recovery may promote a different rendezvous while bootstrap is
 		// waiting for admission. Retry on the current route, not the initial one.
 		region := s.lb.peerDERPRegion(peer)
-		lastSendErr = mc.SendDERPPacketToRegion(peer, region, packet)
+		lastSendErr = send(region)
 		diagnosticlog.TryInfo("native underlay session", "stage", "meow_send", "failed", lastSendErr != nil)
+		if attempt > 0 {
+			// Unanswered where the peer was last known: it may have moved to another relay before its new home
+			// reached us. Ask once per tick on every other relay (at most maxRelayRegions, each bounded by its 1 s
+			// connect); the answer comes back on the peer's home and is recorded there.
+			for _, other := range s.lb.relayRegionIDs() {
+				if other != region {
+					go func() { _ = send(other) }()
+				}
+			}
+		}
 		select {
 		case <-ready:
 			diagnosticlog.TryInfo("native underlay session", "stage", "meow_acked")

@@ -31,6 +31,9 @@ type regionalRelay struct {
 	stop func()
 }
 
+// regionalSettle is one regional probe round (regionalProbeInterval 3 s) plus its 5 s probe timeout.
+const regionalSettle = 8 * time.Second
+
 func TestNativeRegionalFailoverPreservesSession(t *testing.T) { testNativeRegionalFailover(t, false) }
 
 // A control outage longer than the signed candidate set withdraws the relays; when Paperboat answers again they
@@ -166,8 +169,15 @@ func testNativeRegionalFailover(t *testing.T, expiry bool) {
 		t.Fatalf("initial regional dial: %v; client=%+v server=%+v", err, clientAuthority.RegionalStatus(), serverAuthority.RegionalStatus())
 	}
 	assertRegionalBytes(t, ctx, session, "before-failover")
-	if got := clientAuthority.RegionalStatus(); got.NodeID != b.node.NodeID || got.Redundancy != tailnet.RedundancyReduced {
-		t.Fatalf("asymmetric candidate intersection: %+v", got)
+	// The dial can finish before recovery reports its choice: an unanswered handshake is also asked on the other
+	// relays, and the answer's region (b) carries the session. Recovery must still settle on b with reduced
+	// redundancy, within one probe round.
+	settled := time.Now().Add(regionalSettle)
+	for got := clientAuthority.RegionalStatus(); got.NodeID != b.node.NodeID || got.Redundancy != tailnet.RedundancyReduced; got = clientAuthority.RegionalStatus() {
+		if time.Now().After(settled) {
+			t.Fatalf("asymmetric candidate intersection: %+v", got)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	refresh()
 	waitRegional := func(within time.Duration, wantDifferent string, redundancy tailnet.Redundancy) tailnet.RegionalStatus {
