@@ -34,7 +34,12 @@ if [ -z "$url" ]; then
     --body "Lane batch ending at $head. Required CI checks gate the rebase merge; individual fix commits are preserved.")
 fi
 printf 'push: PR %s\n' "$url"
-gh pr merge "$url" --repo "$repo" --auto --rebase --match-head-commit "$head"
+# With a merge queue the method is the queue's: gh prints a notice (and may exit non-zero), so judge by the result.
+number=${url##*/}
+gh pr merge "$url" --repo "$repo" --auto --match-head-commit "$head" || true
+armed=$(gh api graphql -f query='query($o:String!,$n:String!,$p:Int!){repository(owner:$o,name:$n){pullRequest(number:$p){state isInMergeQueue autoMergeRequest{enabledAt}}}}' \
+  -F o="${repo%%/*}" -F n="${repo#*/}" -F p="$number" --jq '.data.repository.pullRequest | .state == "MERGED" or .isInMergeQueue or .autoMergeRequest != null')
+[ "$armed" = true ] || { echo "push: auto-merge is not enabled on $url; run: gh pr merge $number --auto" >&2; exit 1; }
 # The queue rebuilds every entry on the current main, so the next lane need not wait for this merge: release the lock
 # now (holding it until merged made lanes wait one after another, ~10 minutes each, 2026-11-12). Duplicate migration
 # numbers between parallel PRs are caught by the policy job on the queue's merge commit.
