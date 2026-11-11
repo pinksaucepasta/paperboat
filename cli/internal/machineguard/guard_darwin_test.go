@@ -56,6 +56,9 @@ func TestDarwinGuardOtherUser(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err = client.ApplyPolicy(ctx); err != nil {
+		t.Fatal(err)
+	}
 	defer listener.Close()
 	go func() {
 		connection, err := listener.Accept()
@@ -159,6 +162,9 @@ func TestDarwinGuardKernel(t *testing.T) {
 	address := netip.MustParseAddr("127.100.253.68")
 	listener, err := client.Acquire(ctx, "office.local.example.test", address, 54369)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err = client.ApplyPolicy(ctx); err != nil {
 		t.Fatal(err)
 	}
 	var accepted atomic.Int32

@@ -78,6 +78,7 @@ func coordinatorOperationFailure(operation string, cause error) error {
 type guardedNameClient interface {
 	Acquire(context.Context, string, netip.Addr, int) (net.Listener, error)
 	AcquireMachine(ctx context.Context, account, machine, hostname string, preferred netip.Addr, port int) (net.Listener, netip.Addr, error)
+	ApplyPolicy(context.Context) error
 	ReplaceClaims(ctx context.Context, account string, machines []string) error
 	ReplaceNames(context.Context, map[string]netip.Addr) error
 	ReplaceAliases(context.Context, map[string]string) error

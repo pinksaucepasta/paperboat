@@ -171,6 +171,9 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err = client.ApplyPolicy(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	var accepted atomic.Int32
 	go func() {
 		for {
@@ -238,6 +241,9 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err = client.ApplyPolicy(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	defer gateway.Close()
 	gatewayConn, err := net.DialTimeout("tcp4", splitdns.BrowserGatewayIP+":80", time.Second)
 	if err != nil {
@@ -274,6 +280,9 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 	// never releases a replacement's listener. Recovery retains durable reservations.
 	listener, err = client.Acquire(t.Context(), "office.local.example.test", address, port)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err = client.ApplyPolicy(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	other, err := Connect(t.Context(), cfg.Socket)
@@ -335,6 +344,9 @@ func TestLinuxMachineGuardNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err = client.ApplyPolicy(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	if extra, err := client.Acquire(t.Context(), "new.local.example.test", netip.MustParseAddr("127.100.23.47"), port); err == nil {
 		extra.Close()
 		t.Fatal("per-user permanent quota bypassed")
@@ -385,6 +397,9 @@ func TestMachineGuardOtherUserProbe(t *testing.T) {
 	listener, err := client.Acquire(t.Context(), "studio.local.example.test", otherIP, 48086)
 	if err != nil {
 		t.Fatalf("disjoint OS-user listener: %v", err)
+	}
+	if err = client.ApplyPolicy(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 	defer listener.Close()
 	if err = client.ReplaceNames(t.Context(), map[string]netip.Addr{"studio.local.example.test": otherIP}); err != nil {

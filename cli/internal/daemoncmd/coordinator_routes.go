@@ -266,6 +266,12 @@ func (c *Coordinator) replaceGuardedRoutes(ctx context.Context, peers []*daemonr
 	} else {
 		c.browserPending = false
 	}
+	// One policy transaction for every listener acquired above (one WFP Apply for N peers on Windows; victus
+	// with ~20 peers timed out applying one per acquire). Until it lands the new addresses stay denied.
+	if err := nameClient.ApplyPolicy(ctx); err != nil {
+		c.resetNameGenerationLocked(ctx)
+		return coordinatorOperationFailure("native_listener", err)
+	}
 	if err := nameClient.ReplaceAliases(ctx, aliases); err != nil {
 		c.resetNameGenerationLocked(ctx)
 		return coordinatorOperationFailure("browser_aliases", err)

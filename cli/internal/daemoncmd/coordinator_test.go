@@ -547,6 +547,9 @@ type coordinatorNameClient struct {
 	// aliasesReplaced is set by ReplaceAliases: like the real guard, names are known only after it.
 	aliasesReplaced atomic.Bool
 	claims          []string
+	acquires        int   // AcquireMachine calls
+	applies         int   // ApplyPolicy calls
+	failApply       error // ApplyPolicy answers this
 }
 
 func (c *coordinatorNameClient) Acquire(ctx context.Context, hostname string, _ netip.Addr, requestedPort int) (net.Listener, error) {
@@ -616,8 +619,17 @@ type pipeAddressConn struct{ net.Conn }
 func (pipeAddressConn) LocalAddr() net.Addr { return pipeAddress{} }
 
 func (c *coordinatorNameClient) AcquireMachine(ctx context.Context, _, _, hostname string, ip netip.Addr, port int) (net.Listener, netip.Addr, error) {
+	c.mu.Lock()
+	c.acquires++
+	c.mu.Unlock()
 	listener, err := c.Acquire(ctx, hostname, ip, port)
 	return listener, ip, err
+}
+func (c *coordinatorNameClient) ApplyPolicy(context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.applies++
+	return c.failApply
 }
 func (c *coordinatorNameClient) ReplaceClaims(_ context.Context, account string, machines []string) error {
 	c.mu.Lock()
@@ -694,6 +706,7 @@ type generationNameClient struct {
 	activeListeners []net.Listener
 }
 
+func (c *generationNameClient) ApplyPolicy(context.Context) error { return nil }
 func (c *generationNameClient) AcquireMachine(ctx context.Context, _, _, hostname string, ip netip.Addr, port int) (net.Listener, netip.Addr, error) {
 	listener, err := c.Acquire(ctx, hostname, ip, port)
 	return listener, ip, err

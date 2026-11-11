@@ -62,7 +62,14 @@ type guardServer struct {
 	certificateGate chan struct{}
 	certificates    map[controlConn]map[string]cachedCertificate
 	previewPAC      map[controlConn]string
+	// policyPending marks leases acquired since the last installed policy: an acquire only binds, and the
+	// daemon's one "apply" per reconcile installs the policy of all of them in one transaction (one WFP Apply
+	// for N peers, not N). Until then the new addresses stay denied (fail closed).
+	policyPending bool
 }
+
+// applyPolicy installs the whole access policy; tests replace it.
+var applyPolicy = applyProtection
 
 func Serve(ctx context.Context, cfg Config) (resultErr error) {
 	if cfg.StateDir == "" {
@@ -387,11 +394,13 @@ func (g *guardServer) handle(ctx context.Context, conn controlConn, uid string, 
 			return nil, fmt.Errorf("create protected listener: %w", err)
 		}
 		g.leases[key] = &guardedLease{hostname: in.Hostname, ip: in.IP, port: in.Port, uid: uid, owner: conn, listener: listener}
-		if err = g.applyRules(ctx); err != nil {
-			delete(g.leases, key)
-			return nil, errors.Join(err, listener.Close())
-		}
+		g.policyPending = true
 		return listener, nil
+	case "apply":
+		if !g.policyPending {
+			return nil, nil
+		}
+		return nil, g.applyRules(ctx)
 	case "release":
 		if in.IP == splitdns.BrowserGatewayIP && gatewayRouting {
 			key = gatewayRouteKey(key, uid)
@@ -568,7 +577,11 @@ func (g *guardServer) applyRules(ctx context.Context) error {
 		}
 		return leases[i].port < leases[j].port
 	})
-	return applyProtection(ctx, g.cfg, leases)
+	if err := applyPolicy(ctx, g.cfg, leases); err != nil {
+		return err
+	}
+	g.policyPending = false
+	return nil
 }
 
 // assignClaim gives a machine listener request its address from the uid's claim for (account, machine): the
@@ -619,10 +632,7 @@ func (g *guardServer) acquireGatewayRoute(ctx context.Context, conn controlConn,
 		return nil, fmt.Errorf("create protected listener: %w", err)
 	}
 	g.leases[key] = &guardedLease{hostname: in.Hostname, ip: in.IP, port: in.Port, uid: uid, owner: conn, listener: route}
-	if err = g.applyRules(ctx); err != nil {
-		delete(g.leases, key)
-		return nil, errors.Join(err, shutdownListener(route))
-	}
+	g.policyPending = true
 	return route, nil
 }
 

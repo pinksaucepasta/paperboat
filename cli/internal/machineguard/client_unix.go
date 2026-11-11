@@ -174,6 +174,13 @@ func (c *Client) AcquireMachine(ctx context.Context, account, machine, hostname 
 	return c.acquire(ctx, in)
 }
 
+// ApplyPolicy installs the access policy of every listener acquired since the last apply in one guard
+// transaction; until then their addresses stay denied.
+func (c *Client) ApplyPolicy(ctx context.Context) error {
+	_, _, err := c.exchange(ctx, request{Operation: "apply"})
+	return err
+}
+
 // ReplaceClaims sends the complete machine set of account from a verified configuration; the guard releases the
 // rest into its hold.
 func (c *Client) ReplaceClaims(ctx context.Context, account string, machines []string) error {

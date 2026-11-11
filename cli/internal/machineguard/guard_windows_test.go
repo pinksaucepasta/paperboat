@@ -50,6 +50,9 @@ func TestWindowsMalformedPrefacesDoNotStopGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err = client.ApplyPolicy(ctx); err != nil {
+		t.Fatal(err)
+	}
 	defer listener.Close()
 	proxy := listener.(*windowsOwnedListener).windowsProxyListener
 	badBroker, err := winio.DialPipeAccessImpLevel(ctx, proxy.path, pipeClientAccess, winio.PipeImpLevelImpersonation)
@@ -95,6 +98,9 @@ func TestWindowsProtectedGuardAcceptance(t *testing.T) {
 	ip := netip.MustParseAddr(windowsAcceptanceIP)
 	listener, err := client.Acquire(ctx, "taskguard.local.example.test", ip, windowsAcceptancePort)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err = client.ApplyPolicy(ctx); err != nil {
 		t.Fatal(err)
 	}
 	defer listener.Close()
