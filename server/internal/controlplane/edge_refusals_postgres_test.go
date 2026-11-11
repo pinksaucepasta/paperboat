@@ -77,29 +77,51 @@ func TestWithholdBlockedRemovesTakenDownNames(t *testing.T) {
 	}
 }
 
-// The snapshot carries a tunnel's rules for every hostname of its decisions and a preview's rules keyed
-// on the lease; hostnames without rules get none.
+// A tunnel's rules reach the edge through the routes of the tunnel, not through the decision's TunnelID (that is the
+// runtime carrier's identity): both routes of the ruled tunnel get its lists, the other tunnel's route none; a preview's
+// rules key on its publication.
 func TestOwnerIPRulesFollowTheirResource(t *testing.T) {
 	store := openControlPlaneTestDB(t)
 	ctx := context.Background()
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
-	tunnel, preview := "tun_rules_"+suffix, "prv_rules_"+suffix
-	t.Cleanup(func() {
-		_, _ = store.SQL().ExecContext(ctx, `DELETE FROM paperboat.access_ip_rules WHERE resource_id = ANY($1)`, []string{tunnel, preview})
-	})
-	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.access_ip_rules(resource_kind,resource_id,allow_cidrs,deny_cidrs,updated_by) VALUES('tunnel',$1,'{198.51.100.0/24}','{}','test'),('preview',$2,'{}','{203.0.113.0/24}','test')`, tunnel, preview); err != nil {
-		t.Fatal(err)
+	owner, machine := "user_rules_"+suffix, "host_rules_"+suffix
+	ruled, other, preview := "tunnel_rules_"+suffix, "tunnel_other_"+suffix, "prv_rules_"+suffix
+	routeA, routeB, routeX := "route_a_"+suffix, "route_b_"+suffix, "route_x_"+suffix
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, q, args...); err != nil {
+			t.Fatal(err)
+		}
 	}
-	decision := func(host, tunnelID, publication, lifecycle string) wire.IngressDecision {
+	t.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, _ = store.SQL().ExecContext(cleanup, `DELETE FROM paperboat.access_ip_rules WHERE resource_id = ANY($1)`, []string{ruled, other, preview})
+		_, _ = store.SQL().ExecContext(cleanup, `DELETE FROM paperboat.tunnels WHERE id = ANY($1)`, []string{ruled, other})
+		_, _ = store.SQL().ExecContext(cleanup, `DELETE FROM paperboat.user_machines WHERE id=$1`, machine)
+		_, _ = store.SQL().ExecContext(cleanup, `DELETE FROM paperboat.users WHERE id=$1`, owner)
+	})
+	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,email_verified,status) VALUES($1,$1,'owner@test.invalid',false,'active')`, owner)
+	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state) VALUES($1,$2,$3,'rules-host','linux','amd64','/workspace','offline','released')`, machine, owner, "env_rules_"+suffix)
+	for i, tunnel := range []string{ruled, other} {
+		endpoint := fmt.Sprintf("%08d-0000-4000-8000-%s", i, suffix[len(suffix)-12:])
+		exec(`INSERT INTO paperboat.tunnels(id,account_id,name,desired_state,access_mode,generation,stable_endpoint_id,stable_endpoint,created_by_host_id,created_by_actor_id,created_at,updated_at) VALUES($1,$2,$3,'active','public',1,$4,$5,$6,$2,$7,$7)`, tunnel, owner, "rules-"+tunnel, "endpoint_"+endpoint, "https://"+endpoint+".tunnels.example.test", machine, now)
+	}
+	for _, route := range []struct{ id, tunnel string }{{routeA, ruled}, {routeB, ruled}, {routeX, other}} {
+		exec(`INSERT INTO paperboat.tunnel_routes(id,tunnel_id,name,protocol,match_type,match_hostname,path_prefix,priority,origin_scheme,origin_address,desired_state,generation,created_by_actor_id,updated_by_actor_id,created_at,updated_at) VALUES($1,$2,$1,'http','managed',$1,'/',100,'http','127.0.0.1:3100','active',1,$3,$3,$4,$4)`, route.id, route.tunnel, owner, now)
+	}
+	exec(`INSERT INTO paperboat.access_ip_rules(resource_kind,resource_id,allow_cidrs,deny_cidrs,updated_by) VALUES('tunnel',$1,'{198.51.100.0/24}','{}','test'),('preview',$2,'{}','{203.0.113.0/24}','test')`, ruled, preview)
+	decision := func(host, carrierTunnel, route, publication, lifecycle string) wire.IngressDecision {
 		var d wire.IngressDecision
-		d.Binding.Hostname, d.Binding.TunnelID, d.Binding.PublicationID, d.Binding.Lifecycle = host, tunnelID, publication, lifecycle
+		d.Binding.Hostname, d.Binding.TunnelID, d.Binding.RouteID, d.Binding.PublicationID, d.Binding.Lifecycle = host, carrierTunnel, route, publication, lifecycle
 		return d
 	}
 	rules, err := ownerIPRules(ctx, store, []wire.IngressDecision{
-		decision("a.example.test", tunnel, "route_a", wire.TunnelDurable),
-		decision("b.example.test", tunnel, "route_b", wire.TunnelDurable),
-		decision("p.example.test", "tun_preview", preview, wire.TunnelEphemeral),
-		decision("other.example.test", "tun_other_"+suffix, "route_x", wire.TunnelDurable),
+		decision("a.example.test", "carrier_a", routeA, routeA, wire.TunnelDurable),
+		decision("b.example.test", "carrier_b", routeB, routeB, wire.TunnelDurable),
+		decision("p.example.test", "carrier_p", "", preview, wire.TunnelEphemeral),
+		decision("other.example.test", "carrier_x", routeX, routeX, wire.TunnelDurable),
 	})
 	if err != nil {
 		t.Fatal(err)
