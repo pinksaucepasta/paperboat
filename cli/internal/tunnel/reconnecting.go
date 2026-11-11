@@ -227,6 +227,7 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 	for {
 		connection := rand.Text()
 		var silent atomic.Bool // this link's own state; linkStalled follows whichever link is current
+		probeCtx, cancelProbe := context.WithCancel(c.ctx) // this link's probe; ends once supervise is done with the link
 		if observed, ok := conn.(LinkStateObserver); ok {
 			stalledConn := conn
 			observed.ObserveLinkState(func(stalled bool) {
@@ -236,7 +237,7 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 					c.recordOldLink(connection, "supervise", "stalled", nil)
 					c.notify(ReconnectStalled)
 					if !c.passive {
-						go c.probeStalled(stalledConn, connection)
+						go c.probeStalled(probeCtx, stalledConn, connection)
 					}
 				} else {
 					c.notify(ReconnectResumed)
@@ -288,9 +289,15 @@ func (c *ReconnectingConn) supervise(conn Conn) {
 			if c.probeWait != nil {
 				c.probeWait()
 			}
+			// The host ends the old link only once the probe's attachment completed there, so a handover leaves the probe
+			// one reply's trip from storing its link; a user's exit must not wait out a probe still dialing (resolve and
+			// QUIC are bounded only by ctx), so the probe is cancelled after probeHandoverGrace.
+			abandon := time.AfterFunc(probeHandoverGrace, cancelProbe)
 			c.probing.Lock()
 			c.probing.Unlock()
+			abandon.Stop()
 		}
+		cancelProbe()
 		if refused := c.refused.Swap(nil); refused != nil {
 			c.notify(ReconnectFailed)
 			c.done <- reconnectResult{1, *refused}
@@ -599,6 +606,14 @@ func (c *ReconnectingConn) Redial() {
 	_ = conn.Close()
 }
 
+const (
+	// probeHandoverGrace: how long a clean end of the old link waits for a running probe to store its link.
+	probeHandoverGrace = time.Second
+	// probeAttemptTimeout: a silent link is given up by TCP after about 2 min and then redialed by supervise, so a
+	// probe attempt that takes longer can only hold the probe slot.
+	probeAttemptTimeout = 2 * time.Minute
+)
+
 // probedLink is a fresh link and the stalled link it was dialed to replace.
 type probedLink struct{ stalled, conn Conn }
 
@@ -606,7 +621,7 @@ type probedLink struct{ stalled, conn Conn }
 // leaves it dead until TCP gives up (~2 min), while a network that comes back resumes it. A fresh link replaces
 // it; the daemon carries unanswered input to it by input owner. ET does the same on keepalive loss
 // (~/ref/EternalTerminal/src/base/ClientConnection.cpp:210).
-func (c *ReconnectingConn) probeStalled(stalled Conn, connection string) {
+func (c *ReconnectingConn) probeStalled(ctx context.Context, stalled Conn, connection string) {
 	if c.reconnect == nil || c.maxRetries <= 0 || !c.probing.TryLock() {
 		return
 	}
@@ -620,7 +635,9 @@ func (c *ReconnectingConn) probeStalled(stalled Conn, connection string) {
 	still := func() bool { return c.linkStalled.Load() && current() }
 	backoff := reattach.Backoff(c.delay, c.delay)
 	for attempt := 1; attempt <= c.maxRetries && still(); attempt++ {
-		next, err := c.dialReconnect(c.ctx, "probeStalled", connection)
+		dialCtx, cancel := context.WithTimeout(ctx, probeAttemptTimeout)
+		next, err := c.dialReconnect(dialCtx, "probeStalled", connection)
+		cancel()
 		var stop stopReconnectError
 		if errors.As(err, &stop) {
 			// Revoked access ends the terminal now; keeping the silent link only delayed it until the transport
@@ -656,7 +673,7 @@ func (c *ReconnectingConn) probeStalled(stalled Conn, connection string) {
 			_ = stalled.Close()
 			return
 		}
-		if reattach.Wait(c.ctx, backoff(attempt)) != nil {
+		if reattach.Wait(ctx, backoff(attempt)) != nil {
 			return
 		}
 	}

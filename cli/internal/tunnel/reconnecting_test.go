@@ -567,6 +567,37 @@ func TestReconnectingConnAdoptsTheProbeWhenTheOldLinkEndsBeforeTheProbeStoresIt(
 	}
 }
 
+// Review of 841635f63: a stall flapped back, then the user typed exit while the probe was still dialing; the clean end
+// waited on the probe, whose terminal dial has no watchdog, so exit hung as long as the dial (unbounded in resolve or
+// QUIC). The probe's dial here returns only when its context is cancelled.
+func TestReconnectingConnCleanExitDoesNotWaitOutAProbeStillDialing(t *testing.T) {
+	old := &handoverConn{blockingReconnectConn: &blockingReconnectConn{reconnectTestConn: &reconnectTestConn{}, stop: make(chan struct{})}}
+	dialing := make(chan struct{})
+	var once sync.Once
+	c := NewReconnectingConn(context.Background(), old, 600, time.Millisecond, func(ctx context.Context) (Conn, error) {
+		once.Do(func() { close(dialing) })
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	defer c.Close()
+	select {
+	case <-dialing:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stalled link was never probed")
+	}
+	old.handOver() // the stall clears and the shell exits cleanly
+	ended := make(chan error, 1)
+	go func() { _, err := c.Wait(); ended <- err }()
+	select {
+	case err := <-ended:
+		if err != nil {
+			t.Fatalf("clean exit ended with %v", err)
+		}
+	case <-time.After(probeHandoverGrace + 3*time.Second):
+		t.Fatal("clean exit is waiting for a probe that is still dialing")
+	}
+}
+
 // A target ready after several refusals must be retried promptly instead of
 // sitting in a 30 s exponential-backoff sleep after its update has finished.
 func TestReconnectingConnRetriesReadyTargetPromptly(t *testing.T) {
