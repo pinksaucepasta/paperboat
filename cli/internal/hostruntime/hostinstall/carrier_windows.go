@@ -132,13 +132,17 @@ func readWindowsCarrierFile(ctx context.Context, instance, path string) (Carrier
 	if path == "" || carrierConfigPath(instance) == "" {
 		return CarrierConfig{}, ErrInvalidRequest
 	}
+	// The first read only selects whose protected DACL to demand below, so it must not follow a link or open a device:
+	// only a regular file is opened here, the authority comes from the pinned handle's bytes.
+	if info, err := os.Lstat(path); err != nil {
+		return CarrierConfig{}, err
+	} else if !info.Mode().IsRegular() {
+		return CarrierConfig{}, ErrInvalidRequest
+	}
 	// The parent is protected before JSON is used as account custody input.
 	root, _ := WindowsInstanceRoot(instance)
 	trusted, err := windowsRuntimeTrustedOwner()
 	if err != nil {
-		return CarrierConfig{}, err
-	}
-	if _, err := os.Lstat(path); err != nil {
 		return CarrierConfig{}, err
 	}
 	// Decode is bounded and grants no authority until handle owner and exact ACL checks below.
