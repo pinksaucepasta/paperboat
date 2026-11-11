@@ -551,8 +551,15 @@ func (c *Config) Save() error {
 		}
 		c.path = p
 	}
-	if err := os.MkdirAll(filepath.Dir(c.path), 0o700); err != nil {
-		return safeConfigCause("config directory could not be created", err)
+	// Created like a shared-lock parent: from an elevated token a plain MkdirAll leaves Administrators as the
+	// owner, which the locks taken beside the config (LockLocalAccess) refuse.
+	if _, err := os.Lstat(filepath.Dir(c.path)); errors.Is(err, os.ErrNotExist) {
+		err = prepareSharedLockParent(filepath.Dir(c.path))
+		if err != nil {
+			return safeConfigCause("config directory could not be created", err)
+		}
+	} else if err != nil {
+		return safeConfigCause("config directory could not be read", err)
 	}
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {

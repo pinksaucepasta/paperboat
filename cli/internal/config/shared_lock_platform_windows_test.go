@@ -4,10 +4,12 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
 	"golang.org/x/sys/windows"
@@ -145,5 +147,156 @@ func TestSharedLockAcceptsAnEightDotThreePathSpelling(t *testing.T) {
 	}
 	if err := lock.Unlock(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// setFixtureDefaultOwnerToAdministrators gives the process the default owner an elevated token has, so plain
+// directory creation makes Administrators the owner, as it does in an Administrator PowerShell.
+func setFixtureDefaultOwnerToAdministrators(t *testing.T) {
+	t.Helper()
+	administrators, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var token windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY|windows.TOKEN_ADJUST_DEFAULT, &token); err != nil {
+		t.Fatal(err)
+	}
+	defer token.Close()
+	owner := struct{ Owner *windows.SID }{Owner: administrators}
+	if err := windows.SetTokenInformation(token, windows.TokenOwner, (*byte)(unsafe.Pointer(&owner)), uint32(unsafe.Sizeof(owner))); err != nil {
+		t.Skipf("Administrators as default owner needs an elevated token: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := setDefaultOwnerToCurrentUser(); err != nil {
+			t.Error(err)
+		}
+	})
+	probe := filepath.Join(t.TempDir(), "probe")
+	if err := os.Mkdir(probe, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if !windowssecurity.OwnerMatchesSID(probe, administrators) {
+		t.Fatal("fixture token did not make Administrators the default owner")
+	}
+}
+
+func assertSharedLockParentPrivate(t *testing.T, path string) {
+	t.Helper()
+	owner, err := currentUserSID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !windowssecurity.OwnerMatchesSID(path, owner) || !credentialFilePrivate(path) {
+		t.Fatalf("%s is not owned by the current user with the protected credential DACL", path)
+	}
+}
+
+func TestConfigDirectoryCreatedFromElevatedTokenIsOwnedByTheUser(t *testing.T) {
+	setFixtureDefaultOwnerToAdministrators(t)
+	root := filepath.Join(t.TempDir(), "root")
+	if err := createSharedLockDirectory(root); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(filepath.Join(root, "paperboat", "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	assertSharedLockParentPrivate(t, filepath.Dir(cfg.Path()))
+	unlock, err := cfg.LockLocalAccess()
+	if err != nil {
+		t.Fatalf("lock beside a config saved from an elevated token: %v", err)
+	}
+	if err := unlock(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSharedLockParentOwnedByAdministratorsIsRepairedToTheUser(t *testing.T) {
+	for _, inherited := range []bool{false, true} {
+		t.Run(map[bool]string{false: "protected", true: "inherited"}[inherited], func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "root")
+			if err := createSharedLockDirectory(root); err != nil {
+				t.Fatal(err)
+			}
+			directory := filepath.Join(root, "paperboat")
+			if inherited {
+				// What a plain MkdirAll under an elevated token leaves below a profile directory: SYSTEM,
+				// Administrators and the user with full control, all inherited.
+				owner, err := currentUserSID()
+				if err != nil {
+					t.Fatal(err)
+				}
+				setWindowsFixtureSecurity(t, root, owner, "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;"+owner.String()+")", true)
+				if err := os.Mkdir(directory, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := createSharedLockDirectory(directory); err != nil {
+				t.Fatal(err)
+			}
+			changeFixtureOwnerToAdministrators(t, directory)
+			cfg, err := Load(filepath.Join(directory, "config.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			unlock, err := cfg.LockLocalAccess()
+			if err != nil {
+				t.Fatalf("lock beside an Administrators-owned config directory: %v", err)
+			}
+			if err := unlock(); err != nil {
+				t.Fatal(err)
+			}
+			assertSharedLockParentPrivate(t, directory)
+		})
+	}
+}
+
+func TestSharedLockParentWithAForeignOwnerIsRefusedUnchanged(t *testing.T) {
+	users, err := windows.CreateWellKnownSid(windows.WinBuiltinUsersSid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sddl, err := currentUserCredentialSDDL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, fixture := range map[string]func(t *testing.T, path string) *windows.SID{
+		"another owner": func(t *testing.T, path string) *windows.SID {
+			if err := windowssecurity.WithRestorePrivilege(func() error {
+				return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, users, nil, nil, nil)
+			}); err != nil {
+				t.Skipf("assigning another owner needs an elevated token: %v", err)
+			}
+			return users
+		},
+		"Administrators with an extra ACE": func(t *testing.T, path string) *windows.SID {
+			administrators := changeFixtureOwnerToAdministrators(t, path)
+			setWindowsFixtureSecurity(t, path, administrators, sddl+"(A;;FR;;;WD)", true)
+			return administrators
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			directory := filepath.Join(t.TempDir(), "paperboat")
+			if err := createSharedLockDirectory(directory); err != nil {
+				t.Fatal(err)
+			}
+			foreign := fixture(t, directory)
+			cfg, err := Load(filepath.Join(directory, "config.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := cfg.LockLocalAccess(); !errors.Is(err, ErrCredentialStoreUnavailable) {
+				t.Fatalf("lock beside a foreign-owned directory: %v", err)
+			}
+			if !windowssecurity.OwnerMatchesSID(directory, foreign) {
+				t.Fatal("refused directory owner was changed")
+			}
+			if _, err := os.Lstat(filepath.Join(directory, "config.json.local-access.lock.d")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("lock was created in a refused directory: %v", err)
+			}
+		})
 	}
 }

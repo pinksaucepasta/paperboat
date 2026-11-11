@@ -142,7 +142,11 @@ func secureExistingSharedLockDirectory(path string, owner *windows.SID) error {
 	}
 	defer windows.CloseHandle(handle)
 	if !windowssecurity.HandleOwnerMatchesSID(handle, owner) {
-		return fmt.Errorf("shared lock parent %s has a foreign owner: %w", path, ErrCredentialStoreUnavailable)
+		// An elevated token makes Administrators the owner of what it creates. Adopt only the exact credential
+		// layout, as the DPAPI directories do; the open handle keeps the path from being swapped meanwhile.
+		if err := repairAdminOwnedDPAPIObject(path, sddl); err != nil || !windowssecurity.HandleOwnerMatchesSID(handle, owner) {
+			return fmt.Errorf("shared lock parent %s has a foreign owner: %w", path, errors.Join(ErrCredentialStoreUnavailable, err))
+		}
 	}
 	if windowssecurity.ProtectedHandleDACLMatches(handle, sddl) {
 		return nil
