@@ -608,6 +608,9 @@ func NewRouter(opts Options) http.Handler {
 				mux.Handle("GET /v1/machines/{machine_id}/inbox", userMachineAuth("machines:read", userMachineInboxList(opts.Machines, opts.Inbox)))
 				mux.Handle("GET /v1/machines/{machine_id}/inbox/{file_id}/content", userMachineAuth("machines:read", userMachineInboxContent(opts.Machines, opts.Inbox)))
 				mux.Handle("DELETE /v1/machines/{machine_id}/inbox/{file_id}", userMachineAuth("machines:connect", requireCSRF(opts.Auth, userMachineInboxDelete(opts.Machines, opts.Inbox))))
+				if opts.PreviewLeases != nil {
+					mux.Handle("POST /v1/machines/{machine_id}/inbox/{file_id}/share", userMachineAuth("previews:write", requireCSRF(opts.Auth, userMachineInboxShare(opts.Machines, opts.Inbox, opts.PreviewLeases, opts.Config.Preview.SharedFileMaxBytes))))
+				}
 			}
 			mux.Handle("GET /v1/machines/{machine_id}/maintenance-approvals", userMachineAuth("machines:read", userMachineMaintenanceApprovalsList(opts.Machines)))
 			mux.Handle("POST /v1/machines/{machine_id}/maintenance-approvals", userMachineAuth("machines:connect", requireCSRF(opts.Auth, userMachineMaintenanceApprovalRequest(opts.Machines))))

@@ -294,6 +294,8 @@ type TerminalSessions struct {
 
 type Preview struct {
 	BaseDomain string `json:"base_domain"`
+	// SharedFileMaxBytes is the largest Inbox file that can be shared as a link (a file preview).
+	SharedFileMaxBytes int64 `json:"shared_file_max_bytes"`
 }
 
 // TestFixtures confines the final re-check runner's DNS records: names must sit under Domain, in the Cloudflare zone
@@ -555,7 +557,7 @@ func Default() Config {
 		ManagedSSH:        ManagedSSH{ClientKeyActiveWindow: 30 * 24 * time.Hour},
 		UserMachines:      UserMachines{PairingLifetime: 10 * time.Minute, OfflineAfter: 2 * time.Minute, ExpiredAccessSessionRetention: 7 * 24 * time.Hour, AllowedPlatforms: []string{"darwin", "linux", "windows"}, RuntimeListenPort: 38080},
 		TerminalSessions:  TerminalSessions{OperationTimeout: 15 * time.Second, RetryBackoff: time.Second, WorkerInterval: time.Second, MaxAttemptsBeforeAlert: 10, OperationMaxAge: 30 * 24 * time.Hour},
-		Preview:           Preview{BaseDomain: "preview.localhost"},
+		Preview:           Preview{BaseDomain: "preview.localhost", SharedFileMaxBytes: 2 << 30},
 		Tunnel:            Tunnel{BaseDomain: "tunnels.localhost"},
 		ConfigSync: ConfigSync{
 			Mode:             "disabled",
@@ -785,6 +787,9 @@ func (c Config) Validate() error {
 		errs = append(errs, fmt.Errorf("terminal_sessions limits and timings must be positive"))
 	}
 
+	if c.Preview.SharedFileMaxBytes < 1<<20 || c.Preview.SharedFileMaxBytes > 1<<40 {
+		errs = append(errs, fmt.Errorf("preview.shared_file_max_bytes must be between 1 MiB and 1 TiB"))
+	}
 	if c.ConfigSync.MaxFileBytes < 1 || c.ConfigSync.MaxFileBytes > 100<<20 ||
 		c.ConfigSync.MaxBatchBytes < c.ConfigSync.MaxFileBytes || c.ConfigSync.MaxBatchBytes > 500<<20 ||
 		c.ConfigSync.ManifestContract != "paperboat-manifest-v1" ||

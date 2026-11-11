@@ -134,6 +134,11 @@ func (b IngressBinding) Validate() error {
 		if b.Protocol != "http" || len(b.OriginAddress) > 512 || !path.IsAbs(b.OriginAddress) || path.Clean(b.OriginAddress) != b.OriginAddress || strings.ContainsAny(b.OriginAddress, "\x00\r\n") {
 			return ErrIngressDenied
 		}
+	} else if b.OriginScheme == "file" {
+		// One Inbox file id on the host (16 lowercase hex); the host resolves it in its Inbox folder.
+		if b.Protocol != "http" || len(b.OriginAddress) != 16 || strings.Trim(b.OriginAddress, "0123456789abcdef") != "" {
+			return ErrIngressDenied
+		}
 	} else {
 		host, port, err := net.SplitHostPort(b.OriginAddress)
 		ip := net.ParseIP(host)
@@ -150,7 +155,7 @@ func (b IngressBinding) Validate() error {
 		if b.ListenerID != "" || b.PublicPort != 0 || !strings.HasPrefix(b.PathPrefix, "/") || strings.ContainsAny(b.PathPrefix, "?#\r\n") {
 			return ErrIngressDenied
 		}
-		if b.OriginScheme != "http" && b.OriginScheme != "https" && b.OriginScheme != "h2c" && b.OriginScheme != "unix" {
+		if b.OriginScheme != "http" && b.OriginScheme != "https" && b.OriginScheme != "h2c" && b.OriginScheme != "unix" && b.OriginScheme != "file" {
 			return ErrIngressDenied
 		}
 	case "tcp", "tls":

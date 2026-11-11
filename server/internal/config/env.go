@@ -341,8 +341,9 @@ func overlayEnv(c *Config, lookup func(string) (string, bool), readFile func(str
 		c.CLIAuth.AllowedScopes = splitCSV(v)
 	}
 	for name, target := range map[string]*int64{
-		"PAPERBOAT_CONFIG_SYNC_MAX_FILE_BYTES":  &c.ConfigSync.MaxFileBytes,
-		"PAPERBOAT_CONFIG_SYNC_MAX_BATCH_BYTES": &c.ConfigSync.MaxBatchBytes,
+		"PAPERBOAT_CONFIG_SYNC_MAX_FILE_BYTES":    &c.ConfigSync.MaxFileBytes,
+		"PAPERBOAT_CONFIG_SYNC_MAX_BATCH_BYTES":   &c.ConfigSync.MaxBatchBytes,
+		"PAPERBOAT_PREVIEW_SHARED_FILE_MAX_BYTES": &c.Preview.SharedFileMaxBytes,
 	} {
 		if v, ok := lookup(name); ok {
 			parsed, err := strconv.ParseInt(v, 10, 64)

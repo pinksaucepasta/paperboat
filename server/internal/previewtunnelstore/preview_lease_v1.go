@@ -1093,7 +1093,8 @@ func validPreviewDNSLabel(label string) bool {
 }
 
 // ValidPreviewTargetV1 accepts only local origins. HTTP-family targets are
-// loopback host:port values, Unix targets are absolute socket paths, and raw
+// loopback host:port values, Unix targets are absolute socket paths, file
+// targets are one Inbox file id on the owner machine, and raw
 // TCP is deliberately private-only and may address only loopback or RFC1918/
 // RFC4193 IP space. The server never turns a public preview into an arbitrary
 // network proxy.
@@ -1108,9 +1109,26 @@ func ValidPreviewTargetV1(scheme, raw, accessMode string) bool {
 		return validPreviewUnixPath(raw)
 	case "tcp":
 		return accessMode == "private" && validPreviewHostPort(raw, true)
+	case "file":
+		return ValidInboxFileID(raw)
 	default:
 		return false
 	}
+}
+
+// ValidInboxFileID is the shape of a machine's Inbox file id (16 lowercase hex), the address of a
+// "file" preview: the machine serves that one Inbox file and resolves the id itself, so the server
+// never names a path on it.
+func ValidInboxFileID(raw string) bool {
+	if len(raw) != 16 {
+		return false
+	}
+	for _, r := range raw {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // validPreviewTargetAddress is retained as the HTTP-family test helper used

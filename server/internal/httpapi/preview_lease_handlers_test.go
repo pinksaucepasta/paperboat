@@ -179,6 +179,18 @@ func TestPreviewLeaseCreateHandlerRequiresExplicitDomainsArray(t *testing.T) {
 	}
 }
 
+// File previews come only from sharing an Inbox file, which checks the file's size.
+func TestPreviewLeaseCreateHandlerRefusesFileTargets(t *testing.T) {
+	service := &fakePreviewLeaseAPI{}
+	request := previewLeaseHandlerRequest(http.MethodPost, "/v1/previews", `{"owner_machine_id":"machine_1","owner_session_id":"session_1","owner_session_kind":"foreground","target":{"scheme":"file","address":"0123456789abcdef"},"domains":[]}`)
+	request.Header.Set("Idempotency-Key", "create_1")
+	recorder := httptest.NewRecorder()
+	previewLeaseCreate(service).ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusBadRequest || service.createRequest.OwnerMachineID != "" {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestPreviewLeaseCreateHandlerReturnsOperationHeaderForReadyReplay(t *testing.T) {
 	now := time.Date(2026, 8, 30, 12, 0, 0, 0, time.UTC)
 	service := &fakePreviewLeaseAPI{create: previewv1.CreateResult{

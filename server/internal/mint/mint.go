@@ -1180,7 +1180,7 @@ func validatePreviewLaunchInput(input CredentialInput) error {
 	if !validPreviewLaunchTrace(input.IdempotencyKey, 1, 256) || !validPreviewLaunchTrace(input.RequestID, 3, 128) || !validPreviewLaunchTrace(input.CorrelationID, 3, 128) {
 		return errors.New("trace bindings are invalid")
 	}
-	if input.TargetScheme != "http" && input.TargetScheme != "https" && input.TargetScheme != "h2c" && input.TargetScheme != "unix" && input.TargetScheme != "tcp" {
+	if input.TargetScheme != "http" && input.TargetScheme != "https" && input.TargetScheme != "h2c" && input.TargetScheme != "unix" && input.TargetScheme != "tcp" && input.TargetScheme != "file" {
 		return errors.New("target scheme is invalid")
 	}
 	if input.TargetAddress == "" || len(input.TargetAddress) > 512 || strings.ContainsAny(input.TargetAddress, "\r\n") || (input.AccessMode != "public" && input.AccessMode != "private" && input.AccessMode != "team") {

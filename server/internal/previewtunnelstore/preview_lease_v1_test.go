@@ -31,6 +31,8 @@ func TestPreviewLeaseTargetAndEndpointValidation(t *testing.T) {
 		{"unix", "/run/paperboat.sock", "public"},
 		{"tcp", "10.0.0.4:5432", "private"},
 		{"tcp", "[fd00::4]:5432", "private"},
+		{"file", "0123456789abcdef", "public"},
+		{"file", "0123456789abcdef", "private"},
 	} {
 		if !ValidPreviewTargetV1(target.scheme, target.address, target.access) {
 			t.Errorf("rejected valid %s target %q (%s)", target.scheme, target.address, target.access)
@@ -44,6 +46,9 @@ func TestPreviewLeaseTargetAndEndpointValidation(t *testing.T) {
 		{"tcp", "10.0.0.4:5432", "public"},
 		{"tcp", "192.0.2.4:5432", "private"},
 		{"tcp", "example.test:5432", "private"},
+		{"file", "/home/user/Paperboat Inbox/a.txt", "public"},
+		{"file", "0123456789ABCDEF", "public"},
+		{"file", "0123456789abcde", "public"},
 	} {
 		if ValidPreviewTargetV1(target.scheme, target.address, target.access) {
 			t.Errorf("accepted invalid %s target %q (%s)", target.scheme, target.address, target.access)

@@ -139,7 +139,7 @@ func (s *Service) preview(ctx context.Context, a browseraccess.Authorization, no
 	if err != nil {
 		return d, err
 	}
-	if b.OriginScheme != "unix" {
+	if b.OriginScheme != "unix" && b.OriginScheme != "file" {
 		host, port, err := net.SplitHostPort(b.OriginAddress)
 		if err != nil {
 			return d, wire.ErrIngressDenied

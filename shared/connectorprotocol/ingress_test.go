@@ -196,3 +196,18 @@ func TestIngressVersionIgnoresPerAnswerValuesAndOrder(t *testing.T) {
 		t.Fatal("version ignores a changed decision")
 	}
 }
+
+// A file origin is one Inbox file id on the host, only behind an HTTP route.
+func TestIngressFileOriginIsAnInboxFileID(t *testing.T) {
+	d, _ := ingressFixture(time.Now())
+	d.Binding.OriginScheme, d.Binding.OriginAddress = "file", "0123456789abcdef"
+	if err := d.Binding.Validate(); err != nil {
+		t.Fatalf("file origin: %v", err)
+	}
+	for _, address := range []string{"/etc/passwd", "0123456789ABCDEF", "127.0.0.1:3000", "0123456789abcdef0"} {
+		d.Binding.OriginAddress = address
+		if d.Binding.Validate() == nil {
+			t.Fatalf("accepted file origin %q", address)
+		}
+	}
+}

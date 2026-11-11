@@ -1576,7 +1576,8 @@
               "https",
               "h2c",
               "unix",
-              "tcp"
+              "tcp",
+              "file"
             ]
           },
           "origin_address": {
@@ -2953,7 +2954,8 @@
               "https",
               "h2c",
               "unix",
-              "tcp"
+              "tcp",
+              "file"
             ]
           },
           "address": {
@@ -46105,6 +46107,149 @@
             "$ref": "#/components/responses/Error"
           },
           "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "413": {
+            "$ref": "#/components/responses/Error"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/machines/{machine_id}/inbox/{file_id}/share": {
+      "parameters": [
+        {
+          "name": "machine_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "file_id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{16}$"
+          }
+        }
+      ],
+      "post": {
+        "summary": "Share one Paperboat Inbox file as a link",
+        "description": "Creates a preview whose origin is that Inbox file on that machine (target scheme file, address the file id): the machine serves the file itself, the server never carries its bytes. HTML, Markdown, PDF, images and text open in the browser (HTML and SVG under a sandboxing Content-Security-Policy); anything else downloads. The file stays in the Inbox when the link ends. Needs the Inbox authority and the preview authority of POST /v1/previews, counts toward the plan's concurrent previews, and answers like it. Errors: 404 inbox_file_not_found or user_machine_not_found, 409 machine_offline or a plan limit, 413 file_too_large (over preview.shared_file_max_bytes).",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "previews:write"
+        ],
+        "operationId": "post_v1_user_machines_machine_id_inbox_file_id_share",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 63
+            },
+            "description": "Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expires_at"
+                ],
+                "properties": {
+                  "access_mode": {
+                    "type": "string",
+                    "enum": [
+                      "public",
+                      "private",
+                      "team"
+                    ]
+                  },
+                  "expires_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Preview lease created and ready.",
+            "headers": {
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "X-Paperboat-Operation-ID": {
+                "$ref": "#/components/headers/OperationID"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewLeaseResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Preview lease persisted and waiting for readiness.",
+            "headers": {
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Location": {
+                "$ref": "#/components/headers/Location"
+              },
+              "X-Paperboat-Operation-ID": {
+                "$ref": "#/components/headers/OperationID"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewTunnelOperationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
             "$ref": "#/components/responses/Error"
           },
           "413": {

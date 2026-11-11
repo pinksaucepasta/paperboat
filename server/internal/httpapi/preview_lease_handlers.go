@@ -78,6 +78,11 @@ func previewLeaseCreate(service PreviewLeaseAPI, machineIdentities ...machineReq
 			writePreviewLeaseError(w, r, fmt.Errorf("%w: domains is required and may be an empty array", previewv1.ErrInvalidInput))
 			return
 		}
+		// A file preview is made only by sharing an Inbox file, which checks the file and its size.
+		if body.Target.Scheme == "file" {
+			writePreviewLeaseError(w, r, fmt.Errorf("%w: share an Inbox file with POST /v1/machines/{id}/inbox/{file_id}/share", previewv1.ErrInvalidInput))
+			return
+		}
 		requestContext, ok := previewLeaseRequestContext(w, r, raw, key, machineIdentities...)
 		if !ok {
 			return
@@ -96,22 +101,27 @@ func previewLeaseCreate(service PreviewLeaseAPI, machineIdentities ...machineReq
 			writePreviewLeaseError(w, r, err)
 			return
 		}
-		w.Header().Set("Cache-Control", "no-store, no-transform")
-		w.Header().Set("ETag", result.ETag)
-		// The operation ID is durable server metadata needed by a host to
-		// resume its local carrier after an exact 200 replay. Keep it out of
-		// the public preview resource and expose it on every create response.
-		w.Header().Set("X-Paperboat-Operation-ID", result.Operation.ID)
-		status := http.StatusAccepted
-		var data any = result.Operation
-		if result.Operation.State == "succeeded" {
-			status = http.StatusOK
-			data = result.Preview
-		} else {
-			w.Header().Set("Location", "/v1/operations/"+result.Operation.ID)
-		}
-		writeJSON(w, status, SuccessResponse{Data: data})
+		writePreviewCreateResult(w, result)
 	}
+}
+
+// writePreviewCreateResult answers a create with the preview when it is ready, or its operation.
+func writePreviewCreateResult(w http.ResponseWriter, result previewv1.CreateResult) {
+	w.Header().Set("Cache-Control", "no-store, no-transform")
+	w.Header().Set("ETag", result.ETag)
+	// The operation ID is durable server metadata needed by a host to
+	// resume its local carrier after an exact 200 replay. Keep it out of
+	// the public preview resource and expose it on every create response.
+	w.Header().Set("X-Paperboat-Operation-ID", result.Operation.ID)
+	status := http.StatusAccepted
+	var data any = result.Operation
+	if result.Operation.State == "succeeded" {
+		status = http.StatusOK
+		data = result.Preview
+	} else {
+		w.Header().Set("Location", "/v1/operations/"+result.Operation.ID)
+	}
+	writeJSON(w, status, SuccessResponse{Data: data})
 }
 
 // previewLeaseMutationAuth keeps the browser/CLI mutation contract while

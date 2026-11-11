@@ -151,7 +151,7 @@ func (s SQLIngressSource) projectPreviews(ctx context.Context, node, epoch strin
 		if b.OriginScheme == "https" {
 			b.TLSVerification = "system"
 		}
-		if b.OriginScheme != "unix" {
+		if b.OriginScheme != "unix" && b.OriginScheme != "file" {
 			host, port, err := net.SplitHostPort(b.OriginAddress)
 			if err != nil {
 				if err = s.rowFailed(ctx, "preview_origin", b.RouteID, wire.ErrIngressDenied); err != nil {
