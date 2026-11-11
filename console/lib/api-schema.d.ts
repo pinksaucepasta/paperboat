@@ -8744,6 +8744,30 @@ export interface components {
         PreviewTunnelOperationResponse: {
             data: components["schemas"]["PreviewTunnelOperation"];
         };
+        /** @description Header, path-prefix and redirect rules the edge applies to an http route before the request goes to the app (set with pb tunnel route add/update). At most 8 request and 8 response header rules, one path rewrite and 4 redirects, 8 KiB in all. Rules cannot name headers the edge, the connection or the browser own (Forwarded, X-Forwarded-*, X-Real-IP, Host, Cookie, Set-Cookie, Authorization, X-Paperboat-*, Paperboat-*, Alt-Svc and the security headers); an update replaces the whole document and an empty object clears it. */
+        TunnelRouteRewriteRules: {
+            request_headers?: components["schemas"]["TunnelRouteHeaderRule"][];
+            response_headers?: components["schemas"]["TunnelRouteHeaderRule"][];
+            path_rewrite?: {
+                /** @description Absolute path prefix; /api maps /api and /api/x, never /apix. */
+                from: string;
+                to: string;
+            };
+            redirects?: {
+                from: string;
+                /** @enum {unknown} */
+                code: 301 | 302 | 307 | 308;
+                /** @description A path starting with a single /, or an https:// URL; what follows the matched prefix and the query are appended. */
+                to: string;
+            }[];
+        };
+        TunnelRouteHeaderRule: {
+            /** @enum {unknown} */
+            op: "add" | "set" | "remove";
+            name: string;
+            /** @description No line breaks; absent for remove. */
+            value?: string;
+        };
         TunnelRoute: {
             /** @constant */
             schema: "paperboat.preview-tunnel/v1";
@@ -8761,6 +8785,7 @@ export interface components {
             connect_timeout_ms: number;
             idle_timeout_ms: number;
             max_concurrent_streams: number;
+            rewrite_rules?: components["schemas"]["TunnelRouteRewriteRules"];
             /** @enum {unknown} */
             desired_state: "active" | "disabled" | "deleted";
             generation: number;
@@ -8817,6 +8842,7 @@ export interface components {
             connect_timeout_ms?: number;
             idle_timeout_ms?: number;
             max_concurrent_streams?: number;
+            rewrite_rules?: components["schemas"]["TunnelRouteRewriteRules"];
         };
         TunnelRoutePatchRequest: {
             name?: string;
@@ -8829,6 +8855,7 @@ export interface components {
             connect_timeout_ms?: number;
             idle_timeout_ms?: number;
             max_concurrent_streams?: number;
+            rewrite_rules?: components["schemas"]["TunnelRouteRewriteRules"];
             /** @enum {unknown} */
             desired_state?: "active" | "disabled";
         };
