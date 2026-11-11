@@ -46,9 +46,11 @@ const (
 	MaxWait = 25 * time.Second
 	// ClientHeaderTimeout is the response-header timeout released clients use; MaxWait must stay under it.
 	ClientHeaderTimeout = 30 * time.Second
-	// recheckInterval re-reads the generations while waiting, so a missed notification (a listener
-	// reconnecting) delays a change by seconds instead of losing it.
-	recheckInterval = 5 * time.Second
+	// recheckInterval re-reads the generations while waiting, as the backstop for a missed notification. Every
+	// listener session wakes all waiters when it starts or fails (listen, ListenFor), so a gap in listening loses
+	// nothing and the backstop fires at most once in a MaxWait wait: it used to run every 5 s, ~5 queries per held
+	// request, N/5 queries per second for N idle daemons.
+	recheckInterval = 20 * time.Second
 	maxMachinesPer  = 1024
 	channel         = "machine_events"
 )
