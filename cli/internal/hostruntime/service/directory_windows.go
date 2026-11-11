@@ -31,7 +31,15 @@ func prepareAtomicDirectory(directory string) error {
 	if err != nil {
 		return err
 	}
-	return windows.SetNamedSecurityInfo(directory, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil)
+	// SYSTEM owns the directory like the declarations in it: an elevated administrator's install otherwise leaves
+	// it owned by Administrators, and pin cleanup, which requires SYSTEM custody, refused every pass (winpool-4).
+	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
+	if err != nil {
+		return err
+	}
+	return windowssecurity.WithRestorePrivilege(func() error {
+		return windows.SetNamedSecurityInfo(directory, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, system, nil, dacl, nil)
+	})
 }
 
 // atomicfile.Write uses MOVEFILE_WRITE_THROUGH on Windows. Opening a directory

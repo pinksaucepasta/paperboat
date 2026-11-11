@@ -39,6 +39,10 @@ func TestNativeWindowsDeclarationPublishedWithSystemOwner(t *testing.T) {
 	if !windowssecurity.OwnerMatchesSID(path, system) || !windowssecurity.ProtectedDACLMatches(path, "D:P(A;;FA;;;SY)(A;;FA;;;BA)") {
 		t.Fatal("published declaration lacks canonical SYSTEM custody")
 	}
+	// Pin cleanup refuses a declaration directory an administrator owns (winpool-4, 2026-11-11: old pins never pruned).
+	if !windowssecurity.OwnerMatchesSID(root, system) || !windowssecurity.ProtectedDACLMatches(root, "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)") {
+		t.Fatal("declaration directory lacks canonical SYSTEM custody")
+	}
 	found, err := os.ReadFile(path)
 	if err != nil || string(found) != string(body) {
 		t.Fatal("declaration bytes changed", err)
