@@ -28,6 +28,7 @@ class Fake:
         self.calls, self.lock, self.deployed = [], None, False
         self.after = list(canary_after_deploy)  # canary results (ok bools) for runs after the switch
         self.deploy_rc = deploy_rc
+        self.rollout_error = ''  # when set, the server rollback command fails with this output
 
     def sh(self, target, script):
         self.calls.append((target, script))
@@ -47,6 +48,8 @@ class Fake:
             relay, tunnel = self.images[target]
             return 0, f'paperboat-pbh-x-relay {relay}\npaperboat-pbh-x-tunnel {tunnel}\n'
         if '--image' in script:
+            if self.rollout_error:
+                return 1, 'Draining servers retained: 1\n' + self.rollout_error
             self.images['server'] = script.rsplit('--image ', 1)[1].strip()
             return 0, ''
         if 'pbh install' in script:
@@ -114,6 +117,18 @@ class GatedDeployTest(unittest.TestCase):
         self.assertIn('--reap', rollback[0])  # server first, reaped so retained generations never block it
         self.assertIsNone(fake.lock)
         self.assertTrue(any('no green canary run within 300 s' in line for line in out))
+
+    def test_server_rollback_that_fails_on_a_retained_draining_server_is_loud_and_exits_2(self):
+        # 2026-11-12: 'Draining servers retained: 1 / Replacement container name already exists' left prod on the failed build.
+        fake = Fake([False] * 5 + [True])
+        fake.rollout_error = 'Replacement container name already exists; nothing was removed.'
+        code, out = gate(fake, self.status)
+        self.assertEqual(code, 2)
+        self.assertEqual(fake.images['server'], 'paperboat-server:2')  # still on the failed build, said so below
+        self.assertTrue(any('rollback: server rollout failed (exit 1)' in line and 'name already exists' in line for line in out))
+        self.assertTrue(any('a rollback step failed' in line for line in out))
+        rollout = [s for _, s in fake.calls if '--image' in s or '--reap' in s]
+        self.assertIn('--reap', rollout[0])  # the draining servers are reaped first; a retained one is reported, never forced
 
     def test_rollback_that_stays_red_exits_2(self):
         fake = Fake([False] * 20)
