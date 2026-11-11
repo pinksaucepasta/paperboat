@@ -766,6 +766,7 @@ var windowsActivationOps = struct {
 	switchCarrier  func(context.Context, *carrierUpgrade) error
 	writeConfig    func(WindowsRuntimeConfig, string) error
 	startRoles     func(ctx context.Context, request Request, layout service.Layout, upgradeMode string) error
+	awaitHostd     func(ctx context.Context, socket, tokenFile string) error
 }{
 	prepareOwner:   prepareSessionOwner,
 	carrierPresent: windowsCarrierPresentForSSH,
@@ -782,6 +783,7 @@ var windowsActivationOps = struct {
 	switchCarrier: switchWindowsCarrier,
 	writeConfig: writeWindowsConfigAt,
 	startRoles:  installWindowsRoleServices,
+	awaitHostd:  awaitWindowsHostdServing,
 }
 
 // newWindowsActivation builds installWindows' activation. finish, run on every exit, removes a staged runtime that
@@ -871,8 +873,16 @@ func newWindowsActivation(request Request, layout service.Layout, instanceRoot, 
 			// slot. Re-apply their SCM definitions so the newly staged image is started;
 			// UpgradeReload would treat existing declarations as stable and leave the
 			// services stopped.
-			return runWindowsInstallPhase(ctx, "install Paperboat Windows services", func() error {
+			if err := runWindowsInstallPhase(ctx, "install Paperboat Windows services", func() error {
 				return ops.startRoles(ctx, request, layout, "")
+			}); err != nil || upgrade == nil {
+				return err
+			}
+			// The new carrier takes the network next and serves through this generation's worker: it must already
+			// serve (design: the new hostd serves, then the network switches). Moving the network while the
+			// handed-over worker port was still unbound left the new carrier unreachable (winpool-14 r5).
+			return runWindowsInstallPhase(ctx, "wait for the new hostd generation to serve", func() error {
+				return ops.awaitHostd(ctx, config.HostdSocket, config.TokenFile)
 			})
 		},
 	}, finish
@@ -1815,6 +1825,24 @@ func EnsureCommittedWindowsHostdReady(ctx context.Context, request Request) erro
 			timer.Stop()
 			return hostInstallFailure("Paperboat host service health check did not stabilize", errors.Join(readyCtx.Err(), context.Cause(readyCtx), lastErr, windowsHostdServing(config.HostdSocket, config.TokenFile, config.OwnerSID)))
 		case <-timer.C:
+		}
+	}
+}
+
+// awaitWindowsHostdServing waits, for at most a minute, until socket's hostd reports an active worker with a
+// heartbeat (windowsHostdServing).
+func awaitWindowsHostdServing(ctx context.Context, socket, tokenFile string) error {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	for {
+		err := windowsHostdServing(socket, tokenFile)
+		if err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return hostInstallFailure("the new hostd generation did not start serving", err, ctx.Err())
+		case <-time.After(50 * time.Millisecond):
 		}
 	}
 }

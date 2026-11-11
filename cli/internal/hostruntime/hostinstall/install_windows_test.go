@@ -632,6 +632,7 @@ func TestWindowsActivationWiring(t *testing.T) {
 	}
 	ops.writeConfig = func(config WindowsRuntimeConfig, _ string) error { note("config:" + config.TokenFile); return nil }
 	ops.startRoles = func(context.Context, Request, service.Layout, string) error { note("roles"); return nil }
+	ops.awaitHostd = func(context.Context, string, string) error { note("hostd-serving"); return nil }
 
 	layout, err := service.WindowsUserLayout("S-1-5-21-111-222-333-1001")
 	if err != nil {
@@ -645,7 +646,7 @@ func TestWindowsActivationWiring(t *testing.T) {
 	if err := finish(); err != nil {
 		t.Fatal(err)
 	}
-	want := `owner,carrier-present,ssh,prestage,stage-carrier,cutover,stop,publish,token:C:\root\token,pin,carrier:staged=true,config:C:\root\token,roles,network:staged=true,discard,restore-config-worker`
+	want := `owner,carrier-present,ssh,prestage,stage-carrier,cutover,stop,publish,token:C:\root\token,pin,carrier:staged=true,config:C:\root\token,roles,hostd-serving,network:staged=true,discard,restore-config-worker`
 	if got := strings.Join(order, ","); got != want {
 		t.Fatalf("activation wiring:\n got %s\nwant %s", got, want)
 	}
