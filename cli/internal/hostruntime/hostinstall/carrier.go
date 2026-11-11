@@ -386,17 +386,19 @@ func waitCarrierReady(ctx context.Context, c CarrierConfig) error {
 	if err != nil {
 		return err
 	}
+	var probes probeErrors
 	for {
 		if err = client.Health(readyCtx); err == nil {
 			return nil
 		} else if !errors.Is(err, carriercontrol.ErrUnavailable) {
 			return err
 		}
+		probes.note(err)
 		timer := time.NewTimer(100 * time.Millisecond)
 		select {
 		case <-readyCtx.Done():
 			timer.Stop()
-			return errors.Join(readyCtx.Err(), err)
+			return errors.Join(readyCtx.Err(), probes.err())
 		case <-timer.C:
 		}
 	}

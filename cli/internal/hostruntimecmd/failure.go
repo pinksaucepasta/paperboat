@@ -332,3 +332,12 @@ func (e *installationStageError) Unwrap() error {
 	}
 	return e.Cause
 }
+
+// readinessFailures names what a timed-out readiness poll saw first and last: the last failure alone hides a different
+// cause that the later retries buried. One failed probe is reported once.
+func readinessFailures(first, last error, failedProbes int) error {
+	if failedProbes < 2 || first == nil {
+		return last
+	}
+	return errors.Join(runtimeFailure("first readiness failure", first), runtimeFailure("last readiness failure", last))
+}
