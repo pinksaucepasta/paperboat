@@ -248,7 +248,7 @@ func sanitizeOriginRequestHeaders(header http.Header, preserveWebSocketUpgrade, 
 		if control && keepControlPlane {
 			continue
 		}
-		if control || strings.HasPrefix(lower, "paperboat-") || strings.HasPrefix(lower, "x-forwarded-") && !edgeForwardedHeaders[lower] {
+		if control || strings.HasPrefix(lower, "paperboat-") && lower != "paperboat-visitor-assertion" || strings.HasPrefix(lower, "x-forwarded-") && !edgeForwardedHeaders[lower] {
 			header.Del(name)
 		}
 	}

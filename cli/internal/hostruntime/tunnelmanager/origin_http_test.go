@@ -298,24 +298,25 @@ func TestOriginHTTPTransportUsesRealH2C(t *testing.T) {
 
 func TestOriginHTTPHeaderSanitizationPreservesApplicationCredentials(t *testing.T) {
 	request := http.Header{
-		"Authorization":       {"Bearer application"},
-		"Proxy-Authorization": {"Bearer proxy"},
-		"Forwarded":           {"for=198.51.100.7;proto=https;host=app.example.test"},
-		"X-Forwarded-For":     {"198.51.100.7"},
-		"X-Forwarded-Host":    {"app.example.test"},
-		"X-Forwarded-Proto":   {"https"},
-		"X-Forwarded-Port":    {"443"},
-		"X-Real-Ip":           {"198.51.100.7"},
-		"X-Forwarded-Server":  {"attacker"},
-		"X-Paperboat-Grant":   {"secret"},
-		"Paperboat-Grant":     {"secret"},
-		"Cookie":              {"session=application; Paperboat-access=secret; __Host-Paperboat_csrf=secret; theme=dark"},
+		"Authorization":               {"Bearer application"},
+		"Proxy-Authorization":         {"Bearer proxy"},
+		"Forwarded":                   {"for=198.51.100.7;proto=https;host=app.example.test"},
+		"X-Forwarded-For":             {"198.51.100.7"},
+		"X-Forwarded-Host":            {"app.example.test"},
+		"X-Forwarded-Proto":           {"https"},
+		"X-Forwarded-Port":            {"443"},
+		"X-Real-Ip":                   {"198.51.100.7"},
+		"X-Forwarded-Server":          {"attacker"},
+		"Paperboat-Visitor-Assertion": {"signed.visitor.jwt"},
+		"X-Paperboat-Grant":           {"secret"},
+		"Paperboat-Grant":             {"secret"},
+		"Cookie":                      {"session=application; Paperboat-access=secret; __Host-Paperboat_csrf=secret; theme=dark"},
 	}
 	sanitizeOriginRequestHeaders(request, false, false)
 	if request.Get("Authorization") != "Bearer application" || request.Get("Cookie") != "session=application; theme=dark" {
 		t.Fatalf("application credentials changed: auth=%q cookie=%q", request.Get("Authorization"), request.Get("Cookie"))
 	}
-	for name, want := range map[string]string{"Forwarded": "for=198.51.100.7;proto=https;host=app.example.test", "X-Forwarded-For": "198.51.100.7", "X-Forwarded-Host": "app.example.test", "X-Forwarded-Proto": "https", "X-Forwarded-Port": "443", "X-Real-IP": "198.51.100.7"} {
+	for name, want := range map[string]string{"Forwarded": "for=198.51.100.7;proto=https;host=app.example.test", "X-Forwarded-For": "198.51.100.7", "X-Forwarded-Host": "app.example.test", "X-Forwarded-Proto": "https", "X-Forwarded-Port": "443", "X-Real-IP": "198.51.100.7", "Paperboat-Visitor-Assertion": "signed.visitor.jwt"} {
 		if request.Get(name) != want {
 			t.Fatalf("edge fact %s = %q, want %q", name, request.Get(name), want)
 		}

@@ -43,7 +43,24 @@ const (
 	NetworkConfigurationType    = "paperboat-network-config+jwt"
 	RegionalCandidatesType      = "paperboat-regional-candidates+jwt"
 	RelayGrantType              = "paperboat-relay-grant+jwt"
+	// VisitorAssertionType is the typ of the signed visitor identity an app behind a gated (team or
+	// private) route receives in Paperboat-Visitor-Assertion (see SignVisitorAssertion).
+	VisitorAssertionType = "paperboat-visitor+jwt"
 )
+
+// SignVisitorAssertion signs who is visiting a gated route, for the app behind it to verify against
+// the published JWKS (as Cloudflare Access's Cf-Access-Jwt-Assertion). aud is the route's public
+// hostname, so an assertion for one app is useless at another, and no Paperboat verifier accepts it.
+func (p *Provider) SignVisitorAssertion(issuer, hostname, subject, email, teamID string, issuedAt, expiresAt time.Time) (string, error) {
+	if p == nil || strings.TrimSpace(issuer) == "" || hostname == "" || subject == "" || !expiresAt.After(issuedAt) || expiresAt.Sub(issuedAt) > MaxProofTTL {
+		return "", errors.New("visitor assertion claims are invalid")
+	}
+	claims := map[string]any{"iss": issuer, "aud": hostname, "sub": subject, "email": email, "iat": issuedAt.Unix(), "nbf": issuedAt.Unix(), "exp": expiresAt.Unix()}
+	if teamID != "" {
+		claims["team_id"] = teamID
+	}
+	return p.signClaims(VisitorAssertionType, claims)
+}
 
 // SignNetworkConfiguration signs the already validated network-authority
 // document. Keeping this entry point separate prevents network configuration

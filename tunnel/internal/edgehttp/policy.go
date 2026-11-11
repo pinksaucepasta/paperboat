@@ -252,6 +252,14 @@ type appRouteKey struct{}
 
 type appRoute struct{ gated, preview bool }
 
+// setVisitorAssertion tells the app behind a gated route who is visiting, signed by the server; it
+// runs after stripPrivate dropped any copy the visitor sent. Public routes never carry one.
+func setVisitorAssertion(r *http.Request) {
+	if decision, ok := r.Context().Value(browserDecisionKey{}).(connectorprotocol.IngressDecision); ok && decision.VisitorAssertion != "" {
+		r.Header.Set("Paperboat-Visitor-Assertion", decision.VisitorAssertion)
+	}
+}
+
 func isAppRouteKind(kind string) bool {
 	return kind == string(route.TunnelHTTPSWSS) || kind == string(route.PreviewHTTPSWSS) || kind == dataCarrierPreviewPrivateRouteKind
 }
@@ -672,6 +680,7 @@ func (p *Policy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	stripPrivate(r.Header, expectedKind)
+	setVisitorAssertion(r)
 	r.Header.Set("X-Forwarded-For", clientIP)
 	r.Header.Set("X-Forwarded-Host", host)
 	r.Header.Set("X-Forwarded-Proto", "https")

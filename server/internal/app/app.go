@@ -543,7 +543,7 @@ func New(opts Options) (*App, error) {
 				return nil, err
 			}
 			browserService.MachineServiceDomain = opts.Config.Preview.BaseDomain
-			browserAccessHandlers = &httpapi.BrowserAccessHandlers{Lazy: lazyActivator, Access: browserService, Ingress: &browseringress.Service{DB: store, Access: browserService, Quota: workspaceBilling}, Edge: previewEdgeVerifier, Machine: previewAttachmentMachineVerifier}
+			browserAccessHandlers = &httpapi.BrowserAccessHandlers{Lazy: lazyActivator, Access: browserService, Ingress: &browseringress.Service{DB: store, Access: browserService, Quota: workspaceBilling, Visitor: mintKeys, Issuer: config.NormalizeIssuer(opts.Config.HTTP.PublicBaseURL)}, Edge: previewEdgeVerifier, Machine: previewAttachmentMachineVerifier}
 		}
 		privateAccessProduction, productionErr := privateaccess.NewProduction(
 			store, mintKeys,

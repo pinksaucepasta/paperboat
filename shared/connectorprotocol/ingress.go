@@ -216,6 +216,9 @@ type IngressDecision struct {
 	Action               string             `json:"action"`
 	IssuedAt             time.Time          `json:"issued_at"`
 	ExpiresAt            time.Time          `json:"expires_at"`
+	// VisitorAssertion is the signed visitor identity (paperboat-visitor+jwt) the edge hands a gated
+	// route's app; it grants nothing to Paperboat itself.
+	VisitorAssertion string `json:"visitor_assertion,omitempty"`
 }
 
 func (d IngressDecision) Validate(now time.Time) error { return d.validate(now, false) }

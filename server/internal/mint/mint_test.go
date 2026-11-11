@@ -1086,3 +1086,37 @@ func TestCheckRevocable(t *testing.T) {
 		}
 	}
 }
+
+// The visitor assertion is a typed EdDSA JWT for one hostname that an app verifies with the published
+// JWKS; it is short-lived and refuses a missing audience.
+func TestSignVisitorAssertion(t *testing.T) {
+	provider, err := New([]Key{{ID: "visitor-key", PrivateKey: testKey(32)}}, "visitor-key", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_700_000_000, 0)
+	token, err := provider.SignVisitorAssertion("https://api.example.test", "app.example.test", "account_1", "dev@example.test", "team_1", now, now.Add(MaxProofTTL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(token, ".")
+	var header, claims map[string]any
+	decodeJSONPart(t, parts[0], &header)
+	decodeJSONPart(t, parts[1], &claims)
+	if header["alg"] != "EdDSA" || header["typ"] != VisitorAssertionType || header["kid"] != "visitor-key" {
+		t.Fatalf("header = %#v", header)
+	}
+	if claims["aud"] != "app.example.test" || claims["sub"] != "account_1" || claims["email"] != "dev@example.test" || claims["team_id"] != "team_1" || claims["exp"] != float64(now.Add(MaxProofTTL).Unix()) {
+		t.Fatalf("claims = %#v", claims)
+	}
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil || !ed25519.Verify(testKey(32).Public().(ed25519.PublicKey), []byte(parts[0]+"."+parts[1]), signature) {
+		t.Fatal("signature does not verify with the published key")
+	}
+	if _, err := provider.SignVisitorAssertion("https://api.example.test", "", "account_1", "", "", now, now.Add(time.Minute)); err == nil {
+		t.Fatal("signed an assertion without an audience")
+	}
+	if _, err := provider.SignVisitorAssertion("https://api.example.test", "app.example.test", "account_1", "", "", now, now.Add(MaxProofTTL+time.Second)); err == nil {
+		t.Fatal("signed an assertion longer than MaxProofTTL")
+	}
+}

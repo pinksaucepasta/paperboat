@@ -367,7 +367,7 @@ func (b *BrowserAccess) authorize(w http.ResponseWriter, r *http.Request, m rout
 			return e
 		}
 		prior := d
-		prior.IssuedAt, prior.ExpiresAt, prior.DecisionID = next.IssuedAt, next.ExpiresAt, next.DecisionID
+		prior.IssuedAt, prior.ExpiresAt, prior.DecisionID, prior.VisitorAssertion = next.IssuedAt, next.ExpiresAt, next.DecisionID, next.VisitorAssertion
 		if !browserDecisionMatches(next, m) || prior != next {
 			return runtimeadmission.ErrRevoked
 		}

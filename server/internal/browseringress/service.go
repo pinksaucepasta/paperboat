@@ -13,6 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/browseraccess"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/ingressprojection"
+	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"github.com/pinksaucepasta/paperboat/server/internal/privateaccess"
 )
 
@@ -27,7 +28,14 @@ type Service struct {
 	DB     *db.DB
 	Access *browseraccess.Service
 	Quota  accountingauthority.QuotaChecker
+	// Visitor signs the visitor assertion of gated routes with Issuer; nil sends none.
+	Visitor *mint.Provider
+	Issuer  string
 }
+
+// visitorAssertionLifetime bounds the assertion an app receives; apps verify it on arrival, and a
+// longer window than the decision's tolerates clock skew between Paperboat and the app.
+const visitorAssertionLifetime = 5 * time.Minute
 
 func (s *Service) Resolve(ctx context.Context, a browseraccess.Authorization, node, epoch string) (wire.IngressDecision, error) {
 	var d wire.IngressDecision
@@ -104,6 +112,20 @@ func (s *Service) Resolve(ctx context.Context, a browseraccess.Authorization, no
 	}
 	if err := s.recordUsage(ctx, a, d); err != nil {
 		return wire.IngressDecision{}, err
+	}
+	if s.Visitor != nil && a.AccessMode != "public" && a.AccountID != "" {
+		var email string
+		if err := s.DB.Pool().QueryRow(ctx, `SELECT primary_email FROM users WHERE id=$1`, a.AccountID).Scan(&email); err != nil && err != pgx.ErrNoRows {
+			return wire.IngressDecision{}, err
+		}
+		now := time.Now().UTC()
+		expires := now.Add(visitorAssertionLifetime)
+		if a.SessionExpiresAt.After(now) && a.SessionExpiresAt.Before(expires) {
+			expires = a.SessionExpiresAt
+		}
+		if d.VisitorAssertion, err = s.Visitor.SignVisitorAssertion(s.Issuer, a.Hostname, a.AccountID, email, a.TeamID, now, expires); err != nil {
+			return wire.IngressDecision{}, err
+		}
 	}
 	return d, nil
 }

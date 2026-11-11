@@ -45,6 +45,7 @@ func (a *browserAuthorityTest) Authorize(context.Context, control.BrowserAuthori
 	next := a.decision
 	next.IssuedAt = time.Now().UTC()
 	next.ExpiresAt = next.IssuedAt.Add(150 * time.Millisecond)
+	next.VisitorAssertion = "visitor-jwt-" + next.IssuedAt.Format(time.RFC3339Nano) // fresh per answer, never a revocation
 	return next, a.failure
 }
 
@@ -268,5 +269,27 @@ func TestBrowserUnauthenticatedBeginStillRedirectsToSignIn(t *testing.T) {
 	b.begin(w, r, "app.example.test")
 	if w.Code != 303 || w.Header().Get("Location") != "https://login.example.test/.paperboat/access/login?transaction_id=bat_test" {
 		t.Fatalf("status=%d location=%s", w.Code, w.Header().Get("Location"))
+	}
+}
+
+// A gated route's app receives the server-signed visitor assertion; a visitor's own copy never survives,
+// and a request without a browser decision (public route) carries none.
+func TestVisitorAssertionReachesOnlyGatedApps(t *testing.T) {
+	_, d := browserTestMatch()
+	d.VisitorAssertion = "signed.visitor.jwt"
+	gated := httptest.NewRequest("GET", "https://app.example.test/", nil)
+	gated.Header.Set("Paperboat-Visitor-Assertion", "forged")
+	stripPrivate(gated.Header, string(route.TunnelHTTPSWSS))
+	gated = gated.WithContext(context.WithValue(gated.Context(), browserDecisionKey{}, d))
+	setVisitorAssertion(gated)
+	if values := gated.Header.Values("Paperboat-Visitor-Assertion"); len(values) != 1 || values[0] != "signed.visitor.jwt" {
+		t.Fatalf("gated assertion = %q", values)
+	}
+	public := httptest.NewRequest("GET", "https://app.example.test/", nil)
+	public.Header.Set("Paperboat-Visitor-Assertion", "forged")
+	stripPrivate(public.Header, string(route.TunnelHTTPSWSS))
+	setVisitorAssertion(public)
+	if public.Header.Get("Paperboat-Visitor-Assertion") != "" {
+		t.Fatal("a visitor's own assertion reached a public app")
 	}
 }

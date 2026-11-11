@@ -192,6 +192,14 @@ When a reverse proxy sits in front of your app, it decides what the app sees:
 | Traefik | `entryPoints.<name>.forwardedHeaders.trustedIPs=127.0.0.1/32,::1/128` (add the Docker bridge if Traefik runs in a container); put the HTTP-to-HTTPS redirect only on entrypoints the tunnel does not use |
 | Apache | `RemoteIPHeader X-Forwarded-For` with `RemoteIPInternalProxy 127.0.0.1`; `SetEnvIf X-Forwarded-Proto https HTTPS=on` and guard `RewriteCond %{HTTPS} off` redirects with it |
 
+On a team or private route the app also learns who is visiting:
+`Paperboat-Visitor-Assertion` carries a JWT (`typ` `paperboat-visitor+jwt`,
+EdDSA) signed by the Paperboat server, with `sub` (the visitor's account),
+`email`, `team_id` for team routes, `aud` (the route's public hostname), and a
+lifetime of at most five minutes. Verify it against the keys the server
+publishes at `/.well-known/jwks.json` on its API address, and check `aud` and
+`exp`. Public routes never carry it, and a visitor cannot send their own.
+
 Without the trusted-proxy line the proxy replaces the visitor's address with
 its own, so the app sees every visitor as one address; scheme and host still
 arrive. If the proxy's own port 80 redirects to HTTPS, point the route at the
