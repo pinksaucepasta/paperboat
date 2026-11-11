@@ -5,6 +5,7 @@ package hostdproto
 import (
 	"context"
 	"github.com/Microsoft/go-winio"
+	"github.com/pinksaucepasta/paperboat/internal/winpipe"
 	"golang.org/x/sys/windows"
 	"net"
 )
@@ -28,6 +29,6 @@ func DialWorkloads(ctx context.Context, path string) (net.Conn, error) {
 	if !validPipePath(path) {
 		return nil, ErrSocketConfig
 	}
-	return winio.DialPipeContext(ctx, path)
+	return winpipe.Dial(ctx, path)
 }
 func RemoveWorkloadSocket(string) error { return nil }

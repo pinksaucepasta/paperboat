@@ -4,11 +4,11 @@ package availability
 
 import (
 	"context"
+	"github.com/pinksaucepasta/paperboat/internal/winpipe"
 	"net"
 	"strings"
 	"time"
 
-	"github.com/Microsoft/go-winio"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
 	hostruntimeservice "github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
 	"golang.org/x/sys/windows"
@@ -33,7 +33,7 @@ func dialAvailabilityHostService(ctx context.Context, path string, timeout time.
 	}
 	dialCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return winio.DialPipeContext(dialCtx, canonical)
+	return winpipe.Dial(dialCtx, canonical)
 }
 
 // Named pipes preserve message completion without a half-close. The server

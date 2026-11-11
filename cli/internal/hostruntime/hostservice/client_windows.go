@@ -6,11 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/winpipe"
 	"io"
 	"regexp"
 	"time"
 
-	"github.com/Microsoft/go-winio"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 )
 
@@ -79,7 +79,7 @@ func (c *Client) call(ctx context.Context, request Request) (Response, error) {
 	}
 	dialCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
-	connection, err := winio.DialPipeContext(dialCtx, c.socketPath)
+	connection, err := winpipe.Dial(dialCtx, c.socketPath)
 	if err != nil {
 		return Response{}, err
 	}

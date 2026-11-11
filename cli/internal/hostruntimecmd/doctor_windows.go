@@ -8,12 +8,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/winpipe"
 	"io"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/Microsoft/go-winio"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostservice"
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
@@ -155,7 +155,7 @@ func windowsHostDiagnostics(ctx context.Context) (response hostservice.Response,
 	if err != nil {
 		return hostservice.Response{}, err
 	}
-	connection, err := winio.DialPipeContext(timed, socket)
+	connection, err := winpipe.Dial(timed, socket)
 	if err != nil {
 		return hostservice.Response{}, err
 	}
