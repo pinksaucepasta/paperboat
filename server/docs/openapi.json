@@ -575,6 +575,82 @@
         },
         "description": "The replay audit event was written before this answer. The browser form adds the same connect fields as a browser terminal ticket, so the browser pins the machine before any byte moves."
       },
+      "TeamBucketSegment": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "index",
+          "bytes",
+          "sha256"
+        ],
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 999999
+          },
+          "bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 1,
+            "maximum": 8388608
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "Hex SHA-256 of the segment file."
+          }
+        },
+        "description": "One recording segment file to upload."
+      },
+      "TeamBucketUploadRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "segments"
+        ],
+        "properties": {
+          "segments": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "items": {
+              "$ref": "#/components/schemas/TeamBucketSegment"
+            }
+          }
+        }
+      },
+      "TeamBucketUploads": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "uploads"
+        ],
+        "properties": {
+          "uploads": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TeamBucketRequest"
+            },
+            "description": "One presigned PUT per requested segment, in order; send exactly the headers returned."
+          }
+        }
+      },
+      "TeamBucketArchivedRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "segments"
+        ],
+        "properties": {
+          "segments": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000,
+            "description": "The recording's first this-many segments are in the bucket."
+          }
+        }
+      },
       "TeamBucketRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -50598,6 +50674,215 @@
           },
           "503": {
             "description": "team_bucket_unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/machine/recordings/{recording_id}/upload-urls": {
+      "post": {
+        "operationId": "machine_recording_upload_urls",
+        "summary": "Presigned uploads for closed recording segments",
+        "description": "A team machine asks where to put segment files it has closed. Authenticated with the machine's runtime credential and proof. Each URL is bound to the size and SHA-256 named and valid for 10 minutes. Only the recording's own machine may ask.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "recording_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^rec_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TeamBucketUploadRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The uploads.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TeamBucketUploads"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthenticated: the machine's runtime credential and proof are required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "recording_not_found: not a recording of this machine.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "bucket_not_configured: the team has no bucket chosen for recordings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "recordings_unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/machine/recordings/{recording_id}/archived": {
+      "post": {
+        "operationId": "machine_recording_archived",
+        "summary": "Report archived recording segments",
+        "description": "A team machine reports how many leading segments of its recording are now in the team bucket. The count only grows.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "recording_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^rec_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TeamBucketArchivedRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "recorded"
+                      ],
+                      "properties": {
+                        "recorded": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthenticated: the machine's runtime credential and proof are required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "recording_not_found: not a recording of this machine.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "bucket_not_configured: the team has no bucket chosen for recordings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "recordings_unavailable.",
             "content": {
               "application/json": {
                 "schema": {

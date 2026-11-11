@@ -1,0 +1,78 @@
+.nh
+.TH "PB-TEAM-BUCKET-SET" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-bucket-set - Connect or change the team's bucket
+
+
+.SH SYNOPSIS
+\fBpb team bucket set <team> [flags]\fP
+
+
+.SH DESCRIPTION
+Save the bucket after Paperboat writes, reads back and deletes a small check object in it; a failing step is named and nothing is saved. Give the secret access key on standard input (--secret-access-key-stdin), never as an argument. Changing only --use keeps the key. --use is recordings, files, or both separated by a comma.
+
+.PP
+JSON output is supported with --json.
+
+
+.SH OPTIONS
+\fB--access-key-id\fP=""
+	access key ID
+
+.PP
+\fB--bucket\fP=""
+	bucket name
+
+.PP
+\fB--endpoint\fP=""
+	https address of the S3 service, without a path
+
+.PP
+\fB-h\fP, \fB--help\fP[=false]
+	help for set
+
+.PP
+\fB--json\fP[=false]
+	print JSON
+
+.PP
+\fB--path-style\fP[=false]
+	address the bucket in the URL path (MinIO and some other services)
+
+.PP
+\fB--prefix\fP=""
+	optional folder inside the bucket
+
+.PP
+\fB--region\fP=""
+	region of the bucket
+
+.PP
+\fB--secret-access-key-stdin\fP[=false]
+	read the secret access key from standard input
+
+.PP
+\fB--use\fP=""
+	what the bucket is for: recordings, files, or recordings,files
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-team-bucket(1)\fP

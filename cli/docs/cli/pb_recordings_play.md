@@ -19,6 +19,7 @@ pb recordings play <recording-id> [flags]
 ### Options
 
 ```
+      --archive               replay the copy in the team bucket instead of asking the machine
   -h, --help                  help for play
       --idle-limit duration   longest pause between frames (default 2s)
       --speed float           playback speed (default 1)
