@@ -1,6 +1,7 @@
 package native
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
@@ -25,7 +26,7 @@ func TestOwnerShutdownInitiatesEverySessionBeforeWaitingForRelease(t *testing.T)
 		Self: tailnet.NetworkBinding{
 			AccountID: "account", EndpointID: "cli", Role: "cli", EndpointGeneration: 1,
 			QUICCertificateFingerprint: strings.Repeat("0", 64),
-			QUICPublicKey:              base64.RawURLEncoding.EncodeToString(make([]byte, 32)),
+			QUICPublicKey:              base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)),
 		},
 	})
 	if err != nil {
