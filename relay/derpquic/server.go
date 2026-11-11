@@ -367,7 +367,7 @@ func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 	}
 	id := g.AccountID + "\x00" + g.EndpointID
 	for id, old := range s.fences {
-		if old.ExpiresAt <= now.Unix() && s.liveGrantLocked(old.Grant) == nil {
+		if old.retainUntil <= now.Unix() && s.liveGrantLocked(old.Grant) == nil {
 			delete(s.fences, id)
 		}
 	}
@@ -393,7 +393,7 @@ func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 		}
 		count--
 	}
-	if p.key.IsZero() && (count >= s.accountShareLocked() || len(s.fences) >= MaxConnections && s.fences[id] == nil && !s.evictIdleFenceLocked()) {
+	if p.key.IsZero() && (count >= s.accountShareLocked() || len(s.fences) >= MaxConnections && s.fences[id] == nil) {
 		return ErrOverload
 	}
 	if old != nil && old != p {
@@ -418,8 +418,13 @@ func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 	// it) stays. Comparing the whole authority costs every peer the endpoint names, on every part.
 	if previous := s.fences[id]; previous != nil && (merging || sameGrantAuthority(previous.Grant, g)) {
 		previous.Grant = g
+		previous.retainUntil = max(previous.retainUntil, now.Add(MaxGrantLifetime+MaxClockSkew).Unix())
 	} else {
-		s.fences[id] = &grantFence{g}
+		next := newGrantFence(g, now)
+		if previous := s.fences[id]; previous != nil {
+			next.retainUntil = max(next.retainUntil, previous.retainUntil)
+		}
+		s.fences[id] = next
 	}
 	if s.accounts[g.AccountID] == nil {
 		if len(s.accounts) >= MaxConnections {
@@ -587,29 +592,6 @@ func (s *Server) QuotaDenied() []string {
 	return accounts
 }
 
-// evictIdleFenceLocked makes room in a full fence table: a grant lives MaxGrantLifetime, so the table holds every
-// endpoint admitted in that time, not only the connected ones, and would refuse new endpoints while the relay has
-// connection capacity. It drops the admission fence that ends soonest of an endpoint with no connection now. A
-// revocation's fence (no signed grant) is never dropped: that is what refuses a revoked endpoint's grants. Without
-// its admission fence an idle endpoint can present an older, unrevoked grant of its own until that grant ends.
-func (s *Server) evictIdleFenceLocked() bool {
-	connected := make(map[string]bool, len(s.peers))
-	for _, p := range s.peers {
-		connected[grantID(p.grant)] = true
-	}
-	victim, soonest := "", int64(0)
-	for id, f := range s.fences {
-		if f.AccountID != "" && !connected[id] && (victim == "" || f.ExpiresAt < soonest) {
-			victim, soonest = id, f.ExpiresAt
-		}
-	}
-	if victim == "" {
-		return false
-	}
-	delete(s.fences, victim)
-	return true
-}
-
 // Revoke fences an endpoint's grants below minGeneration, the first generation still valid: it
 // closes their connections now, and only a grant of minGeneration or later is admitted again.
 // ValidRevocation is the shape Revoke accepts: both ids present and bounded, and a first valid
@@ -633,14 +615,14 @@ func (s *Server) Revoke(account, endpoint string, minGeneration uint64) error {
 	if minGeneration <= g.Generation {
 		return nil
 	}
-	if g.Generation == 0 && len(s.fences) >= MaxConnections && !s.evictIdleFenceLocked() {
+	if g.Generation == 0 && len(s.fences) >= MaxConnections {
 		return ErrOverload
 	}
 	g.Generation = minGeneration
 	// A revoked grant stays valid on this relay until its exp, up to MaxGrantLifetime after issue on a
 	// clock up to MaxClockSkew behind the issuer's, so the fence outlives every such grant.
 	g.ExpiresAt = time.Now().Add(MaxGrantLifetime + MaxClockSkew).Unix()
-	s.fences[id] = &grantFence{Grant{RelayGrant: peernetwork.RelayGrant{Generation: g.Generation, ExpiresAt: g.ExpiresAt}}}
+	s.fences[id] = newGrantFence(Grant{RelayGrant: peernetwork.RelayGrant{Generation: g.Generation, ExpiresAt: g.ExpiresAt}}, time.Now())
 	for k, p := range s.peers {
 		if p.grant.AccountID == account && p.grant.EndpointID == endpoint {
 			delete(s.peers, k)
