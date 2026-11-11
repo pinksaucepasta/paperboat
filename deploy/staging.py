@@ -34,12 +34,41 @@ ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent
 
 
+def read_remote_env(host, path):
+    """Read env values only inside the consuming program; never shell-filter multiline secrets."""
+    program = ("import json,shlex;from pathlib import Path;"
+               f"p=Path({path!r}).expanduser();"
+               "items=shlex.split(p.read_text(),comments=True) if p.exists() else [];"
+               "print(json.dumps(dict(item.split('=',1) for item in items if '=' in item)))")
+    return json.loads(ssh(host, 'python3 -c ' + shell_quote(program)))
+
+
+def read_remote_secret(host, path):
+    program = f"from pathlib import Path;print(Path({path!r}).expanduser().read_text().strip())"
+    return ssh(host, 'python3 -c ' + shell_quote(program)).strip()
+
+
+def fixture_credentials():
+    """Random fixture authority stays private on staging; source code contains no usable cookie."""
+    program = """import json,os,secrets
+from pathlib import Path
+p=Path('.fixture-auth.json')
+if not p.exists():
+    with open(p,'x',opener=lambda path,flags:os.open(path,flags,0o600)) as f:
+        json.dump({'session':secrets.token_urlsafe(48),'csrf':secrets.token_urlsafe(48)},f)
+if p.stat().st_mode & 0o077:
+    raise SystemExit('staging fixture authority must be owner-only')
+print(p.read_text())
+"""
+    return json.loads(remote('python3 -c ' + shell_quote(program)))
+
+
 def api_url():
     return f"https://{REGION}.{domain()}:{PORT}"
 
 
 def domain():
-    got = os.environ.get("STAGING_DOMAIN") or remote("grep '^PAPERBOAT_STAGING_DOMAIN=' .env | cut -d= -f2", check=False).strip()
+    got = os.environ.get("STAGING_DOMAIN") or read_remote_env(HOST, "~/" + DIR + "/.env").get("PAPERBOAT_STAGING_DOMAIN", "")
     if not got:
         raise SystemExit("staging: no staging domain; run `staging.py init` first")
     return got
@@ -56,24 +85,6 @@ def remote(script, **kw):
     return ssh(HOST, f"cd ~/{DIR} && {script}", **kw)
 
 
-def parse_env(text):
-    """KEY=value lines; a single-quoted value may span lines (the ACME key)."""
-    out, key, buf = {}, None, []
-    for line in text.splitlines():
-        if key is None:
-            if "=" in line and not line.startswith("#"):
-                k, v = line.split("=", 1)
-                if v.startswith("'") and not (len(v) > 1 and v.endswith("'")):
-                    key, buf = k, [v[1:]]
-                else:
-                    out[k] = v.strip("'")
-        else:
-            buf.append(line.rstrip("'") if line.endswith("'") else line)
-            if line.endswith("'"):
-                out[key], key = "\n".join(buf), None
-    return out
-
-
 def new_acme_key():
     ec = subprocess.run(["openssl", "ecparam", "-genkey", "-name", "prime256v1"], capture_output=True, check=True).stdout
     return subprocess.run(["openssl", "pkcs8", "-topk8", "-nocrypt"], input=ec, capture_output=True, check=True).stdout.decode()
@@ -84,7 +95,7 @@ def build_env(existing, prod):
     keep = lambda k, make: existing.get(k) or make()
     api, DOMAIN = api_url(), domain()
     sub = lambda name: f"{name}.{DOMAIN}"
-    workos = lambda f: ssh(PROD, f"cat /opt/paperboat/secrets/{f}").strip()
+    workos = lambda f: read_remote_secret(PROD, f"/opt/paperboat/secrets/{f}")
     env = {
         "PAPERBOAT_ENV": "development", "PAPERBOAT_DATABASE_DRIVER": "postgres",
         "PAPERBOAT_DATABASE_DSN": f"postgres://postgres:{keep_password(existing)}@postgres:5432/paperboat_staging?sslmode=disable",
@@ -121,9 +132,8 @@ def keep_password(existing):
 
 
 def read_existing():
-    text = remote("cat server.env 2>/dev/null", check=False)
-    env = parse_env(text)
-    pw = remote("cat secrets/postgres_password 2>/dev/null", check=False).strip()
+    env = read_remote_env(HOST, "~/" + DIR + "/server.env")
+    pw = read_remote_secret(HOST, "~/" + DIR + "/secrets/postgres_password") if env else ""
     if pw:
         env["_postgres_password"] = pw
     return env
@@ -131,7 +141,7 @@ def read_existing():
 
 def init():
     existing = read_existing()
-    prod = parse_env(ssh(PROD, "cat /opt/paperboat/server.env"))
+    prod = read_remote_env(PROD, "/opt/paperboat/server.env")
     parent = prod["PAPERBOAT_PUBLIC_BASE_URL"].split("://", 1)[1].split("/")[0].split(":")[0].split(".", 1)[1]
     os.environ.setdefault("STAGING_DOMAIN", "stg." + parent)
     prod = {k: v for k, v in prod.items() if k in ("PAPERBOAT_OPERATOR_EMAIL", "PAPERBOAT_CERTIFICATES_DNS_ZONE_ID", DNS_ENV)}
@@ -164,7 +174,7 @@ def ensure_dns(prod):
 
 
 def existing_image():
-    out = remote("grep '^PAPERBOAT_SERVER_IMAGE=' .env 2>/dev/null | cut -d= -f2", check=False).strip()
+    out = read_remote_env(HOST, "~/" + DIR + "/.env").get("PAPERBOAT_SERVER_IMAGE", "")
     return out or "paperboat-server:unset"
 
 
@@ -224,31 +234,40 @@ def shell_quote(text):
     return "'" + text.replace("'", "'\\''") + "'"
 
 
-SESSION, CSRF = "staging-session", "staging-csrf"
-
-
 def seed():
+    authority = fixture_credentials()
+    session, csrf = authority["session"], authority["csrf"]
     sha = lambda v: subprocess.run(["sha256sum"], input=v.encode(), capture_output=True, check=True).stdout.split()[0].decode()
     sql("INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES('usr_staging','workos_staging','staging@example.test','active') ON CONFLICT DO NOTHING")
     sql("INSERT INTO paperboat.user_machine_entitlements (id,user_id,provider_subscription_id,product_code,state,seat_quantity,allowance_bytes,current_period_start,current_period_end) "
         "VALUES ('ume_staging','usr_staging','sub_staging','connected-test','active',64,1099511627776,now()-interval '1 hour',now()+interval '30 days') "
         "ON CONFLICT (id) DO UPDATE SET current_period_start=excluded.current_period_start, current_period_end=excluded.current_period_end, state='active'")
     sql("INSERT INTO paperboat.sessions(id,user_id,session_hash,csrf_hash,expires_at,workos_session_id,workos_access_expires_at) "
-        f"VALUES('session_staging','usr_staging','{sha(SESSION)}','{sha(CSRF)}',now()+interval '30 days','session_staging',now()+interval '30 days') "
-        "ON CONFLICT (id) DO UPDATE SET expires_at=excluded.expires_at, workos_access_expires_at=excluded.workos_access_expires_at")
+        f"VALUES('session_staging','usr_staging','{sha(session)}','{sha(csrf)}',now()+interval '30 days','session_staging',now()+interval '30 days') "
+        "ON CONFLICT (id) DO UPDATE SET session_hash=excluded.session_hash, csrf_hash=excluded.csrf_hash, expires_at=excluded.expires_at, workos_access_expires_at=excluded.workos_access_expires_at")
     print(json.dumps({"ok": True, "account": "usr_staging"}))
 
 
 def enroll(name):
-    base = api_url()
-    body = json.dumps({})
-    out = remote(f"curl -s -m20 -X POST http://127.0.0.1:{LOOPBACK}/v1/machine-enrollments "
-                 f"-H 'Cookie: __Host-pb-session={SESSION}; __Host-pb-csrf={CSRF}' -H 'X-CSRF-Token: {CSRF}' "
-                 f"-H 'Origin: {base}' -H 'Content-Type: application/json' -H 'Idempotency-Key: staging-{name}-{secrets.token_hex(8)}' -d '{body}'")
+    fixture_credentials()
+    # Read cookies inside the remote process; never put credentials in curl/ssh argv.
+    program = f"""import json,secrets,urllib.request,urllib.error
+from pathlib import Path
+c=json.loads(Path('.fixture-auth.json').read_text())
+request=urllib.request.Request('http://127.0.0.1:{LOOPBACK}/v1/machine-enrollments',data=b'{{}}',headers={{
+ 'Cookie':'__Host-pb-session='+c['session']+'; __Host-pb-csrf='+c['csrf'],
+ 'X-CSRF-Token':c['csrf'],'Origin':{api_url()!r},'Content-Type':'application/json',
+ 'Idempotency-Key':'staging-'+secrets.token_hex(16)}})
+try:
+ with urllib.request.urlopen(request,timeout=20) as response: print(response.read().decode())
+except urllib.error.HTTPError as error:
+ print(json.dumps({{'http_status':error.code}}))
+"""
+    out = remote('python3 -c ' + shell_quote(program))
     try:
         data = json.loads(out)["data"]["bootstrap_token"]
     except (ValueError, KeyError, TypeError):
-        raise SystemExit(f"staging: enrollment for {name} was refused (run `staging.py seed` first): {out[:200]}")
+        raise SystemExit(f"staging: enrollment for {name} was refused (run `staging.py seed` first)")
     sys.stdout.write(data)
 
 
@@ -303,7 +322,7 @@ def edge(image):
     for filename, content in files.items():
         remote(f"umask 077 && cat > {EDGE_DIR}/{filename}", stdin=content)
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-    sealing = remote("grep '^PAPERBOAT_ENCRYPTION_KEY=' server.env | cut -d= -f2-").strip()   # secrets.Encrypt: AES-256-GCM, key = sha256(key)
+    sealing = read_remote_env(HOST, "~/" + DIR + "/server.env")["PAPERBOAT_ENCRYPTION_KEY"]   # secrets.Encrypt: AES-256-GCM, key = sha256(key)
     nonce = os.urandom(12)
     sealed = nonce + AESGCM(hashlib.sha256(sealing.encode()).digest()).encrypt(nonce, credential.encode(), None)
     sql("DELETE FROM paperboat.selfhost_installations WHERE scope_id='usr_staging'")
