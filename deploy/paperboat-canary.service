@@ -1,0 +1,12 @@
+[Unit]
+Description=Paperboat production canary (exec both ways, ssh, file send, preview, tunnel between two canary machines)
+
+[Service]
+Type=oneshot
+# User unit on oracle (deploy/README.md "Production canary"). The mode-0600 EnvironmentFile holds RUN_A, RUN_B,
+# CANARY_A, CANARY_B, CANARY_TUNNEL_URL and CANARY_ALERT_THREAD.
+EnvironmentFile=%h/.config/paperboat-canary.env
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/python3 %h/paperboat/tools/probe/canary.py
+TimeoutStartSec=400
+Nice=10

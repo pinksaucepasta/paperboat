@@ -144,7 +144,8 @@ packages you touched) passed. Database tests run only in the isolated test Postg
 (`~/bin/lanebtest.sh <srcdir> <go test args>`, a container on `127.0.0.1:55433`), never on the
 production database.
 
-**2. Take the deploy lock.** One deploy at a time, server or edge. The lock is a file on coolify
+**2. Take the deploy lock.** One deploy at a time, server or edge. `gated-deploy.py` (step 6) takes and
+releases it for you; take it by hand only for work outside the gate. The lock is a file on coolify
 that names its owner; `noclobber` makes taking it atomic:
 
 ```sh
@@ -192,7 +193,8 @@ If `pbh` itself changed, install the new binary to `/usr/local/lib/paperboat-sel
 `/usr/local/bin/pbh` first: the old binary regenerates `tunnel/deployment.json` from its own config on
 start and drops new fields. The current tags are in `docker ps` on each edge and in the PLAN Log.
 
-**5. Roll back** at once, without asking, when the new build breaks anything that worked before:
+**5. Roll back** at once, without asking, when the new build breaks anything that worked before
+(`gated-deploy.py` does this by itself; by hand only for a break it did not see):
 `python3 rollout-server.py --directory /opt/paperboat --image paperboat-server:<previous>` (migrations are
 additive, so the previous server still runs on the new schema; a migration that removes or renames
 anything must not be deployed in the same step as the code that needs it). Edges: the same `pbh install`
@@ -215,6 +217,52 @@ server container with no new `level=ERROR` family. Then ask Lane A (thread "Lane
 devices") for one smoke run against the deployed server, naming the version and what changed. A check that
 passed before and fails now is a regression: roll back first, investigate second. Add one PLAN Log
 line (rows, commit, image tag) and keep the previous image tag until the smoke run is green.
+
+**Canary gate (required for every server or edge switch).** Run the step 6 command through
+`deploy/gated-deploy.py` on oracle, which holds the deploy lock from before the switch until the verdict:
+
+```sh
+python3 deploy/gated-deploy.py --what 'W4 server 2026.11.11.10 + oracle edge' \
+  --server-host root@coolify --edge local --edge ubuntu@anvit \
+  --deploy "PROBE='...' SQL='...' deploy/check-edges.sh --deploy '<the step 3 or 4 command>' local=<ip> anvit=<ip>"
+```
+
+It refuses (exit 3) when the production canary is red before the deploy; `--force '<reason>'` overrides
+and writes the reason into the lock. It notes the serving server image and both edges' relay/tunnel images,
+runs the command (check-edges.sh keeps the 5xx, preview and offline checks), then triggers canary runs
+until one that started after the switch passes, for up to `--wait` (300) seconds. A failed command or no
+green run rolls back every image that changed, server first (after `--reap`), then each edge with
+`pbh install` of the noted images, runs the canary again and reports (exit 1 green again, 2 still red or a
+rollback step failed; 0 kept). Previous images stay on the hosts; never prune the last two tags. Tests:
+`python3 deploy/test_gated_deploy.py`.
+
+## Production canary
+
+A user unit on oracle (`deploy/paperboat-canary.{service,timer}` in `~/.config/systemd/user/`) runs
+`tools/probe/canary.py` every minute: `pb exec` both ways, `pb ssh` with a command, a file send checked in
+the receiver's Inbox, a new preview and the permanent canary tunnel, each fetched through every edge
+address in DNS, between two dedicated machines: `canary-a` (container `pb-canary-a` on oracle, also the
+origin) and `canary-b` (container `pb-canary-b` on anvit). Oracle because the deploys are run from it and
+the gate reads the canary's state locally, and it is not the control-plane host, so a server outage cannot
+take the prober down with it. Results: `~/.local/state/paperboat-canary/` (`history.jsonl`, the last 1440
+runs; `status.json`; `alerts.log`), shown as the first card on the progress page and at its `/canary.json`.
+A step that fails two runs in a row sends one line to the coordinator thread (`t3 thread send`,
+`CANARY_ALERT_THREAD` in the mode-0600 `~/.config/paperboat-canary.env`) and its first pass sends one
+recovery line; both also go to `alerts.log`. Set the machines up with `tools/probe/canary-setup.sh`; keep
+them on a `main` build (copy the binary to `/home/pbt/pb` in the container, `./pb install` as `pbt`).
+They are in the shared test account, protected from `cleanup_test_account.py`; never revoke them.
+Not covered yet: the browser terminal attach (needs a signed-in browser), a machine behind NAT or forced
+onto the relay (both canaries are on public cloud hosts and usually connect directly), macOS and Windows
+canaries.
+
+**Staging before prod (design, not built).** The same canary runs against a staging control plane and
+edge before every prod switch: a staging Compose stack on a victus VM (its own PostgreSQL restored from
+the newest backup, its own API host and a staging wildcard preview domain), one staging edge installed
+with `pbh`, and a staging canary pair enrolled there (`canary-setup.sh` with the staging server URL, the
+machines' pb built with that `DefaultServerURL`). `gated-deploy.py` takes a `--stage` step: deploy the
+candidate images to staging, require one green canary run there, then deploy to prod under the prod gate.
+Staging keeps the previous prod images, so it also rehearses the rollback. Prior art: Google SRE
+canarying (stage, then a small prod slice, then all, with automatic rollback on a failed canary).
 
 ## Edge failover
 

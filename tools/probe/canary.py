@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""Production canary runner (R-06): runs probe.sh once, records the result, alerts on a repeated failure.
+
+State lives in CANARY_STATE (default ~/.local/state/paperboat-canary):
+  history.jsonl  one run per line, newest last, at most HISTORY_MAX runs (24 h at one run a minute)
+  status.json    the last run, consecutive failures per step, red/green, and the steps already alerted
+  alerts.log     every alert and recovery line, also sent to the coordinator thread (CANARY_ALERT_THREAD)
+A step that fails in two runs in a row alerts once; its first pass afterwards sends one recovery line.
+The probe's environment (RUN_A, CANARY_A, ...) comes from the unit's EnvironmentFile.
+"""
+import json, os, subprocess, sys, time
+from datetime import datetime, timezone
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+STATE = Path(os.environ.get("CANARY_STATE", Path.home() / ".local/state/paperboat-canary"))
+HISTORY_MAX = 1440
+ALERT_AFTER = 2
+
+
+def now():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def parse(stdout, rc):
+    """Steps from the probe's JSON lines. A run that printed no step (the runner itself broke) is one
+    failed 'probe' step, so it can never read as green."""
+    steps = []
+    for line in stdout.splitlines():
+        try:
+            item = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(item, dict) and isinstance(item.get("step"), str) and isinstance(item.get("ok"), bool):
+            steps.append(item)
+    if not steps:
+        steps = [{"step": "probe", "ok": False, "seconds": 0, "error": f"probe printed no result (exit {rc})"}]
+    elif rc != 0 and all(s["ok"] for s in steps):
+        steps.append({"step": "probe", "ok": False, "seconds": 0, "error": f"probe exited {rc} after passing steps"})
+    return steps
+
+
+def advance(status, run):
+    """New status from the previous one and this run, plus the alert lines to send."""
+    counts = dict(status.get("consecutive_failures", {}))
+    alerted = set(status.get("alerted", []))
+    lines = []
+    for s in run["steps"]:
+        name = s["step"]
+        if s["ok"]:
+            counts.pop(name, None)
+            if name in alerted:
+                alerted.discard(name)
+                lines.append(f"canary RECOVERED: {name} passes again ({run['started']})")
+        else:
+            counts[name] = counts.get(name, 0) + 1
+            if counts[name] >= ALERT_AFTER and name not in alerted:
+                alerted.add(name)
+                lines.append(f"canary RED: {name} failed {counts[name]} runs in a row "
+                             f"(last {run['started']}): {s.get('error', '')[:200]}")
+    red = not run["ok"]
+    since = status.get("red_since") if red and status.get("red") else (run["started"] if red else None)
+    new = {"updated": run["finished"], "last": run, "red": red, "red_since": since,
+           "consecutive_failures": counts, "alerted": sorted(alerted)}
+    return new, lines
+
+
+def record(run, alert):
+    STATE.mkdir(parents=True, exist_ok=True)
+    history = STATE / "history.jsonl"
+    lines = history.read_text().splitlines() if history.exists() else []
+    lines = (lines + [json.dumps(run)])[-HISTORY_MAX:]
+    write(history, "\n".join(lines) + "\n")
+    status_path = STATE / "status.json"
+    try:
+        status = json.loads(status_path.read_text())
+    except (OSError, ValueError):
+        status = {}
+    status, messages = advance(status, run)
+    write(status_path, json.dumps(status, indent=1) + "\n")
+    if messages:  # one message per run, however many steps crossed the threshold together
+        with open(STATE / "alerts.log", "a") as log:
+            log.write("".join(m + "\n" for m in messages))
+        alert("\n".join(messages))
+    return status
+
+
+def write(path, text):  # atomic, so the status page and the deploy gate never read half a file
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(text)
+    tmp.replace(path)
+
+
+def send_alert(message):
+    thread = os.environ.get("CANARY_ALERT_THREAD")
+    if not thread:
+        return
+    try:  # the alerts.log line is already written; a failed send must not fail the run
+        subprocess.run(["t3", "thread", "send", thread, message], timeout=30, capture_output=True)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def main():
+    started = now()
+    clock = time.monotonic()
+    try:
+        done = subprocess.run([str(HERE / "probe.sh")], capture_output=True, text=True, timeout=330)
+        stdout, rc = done.stdout, done.returncode
+    except subprocess.TimeoutExpired as error:  # its stdout may be bytes even with text=True
+        out = error.stdout or ""
+        stdout, rc = out.decode(errors="replace") if isinstance(out, bytes) else out, 124
+    steps = parse(stdout, rc)
+    run = {"started": started, "finished": now(), "seconds": round(time.monotonic() - clock, 1),
+           "ok": all(s["ok"] for s in steps), "steps": steps}
+    record(run, send_alert)
+    print(json.dumps(run))
+    return 0 if run["ok"] else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

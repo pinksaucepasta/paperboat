@@ -1,5 +1,5 @@
 [Unit]
-Description=Run the Paperboat synthetic probe every minute
+Description=Run the Paperboat production canary every minute
 
 [Timer]
 OnCalendar=minutely

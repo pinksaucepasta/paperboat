@@ -4,13 +4,16 @@
 Usage: tools/progress.py [--listen HOST:PORT]   (default 127.0.0.1:8090)
 Shows independently verified completion for Linux, macOS and Windows.
 """
-import argparse, html, re, subprocess, threading, time
+import argparse, collections, html, json, re, subprocess, threading, time
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 MARKS = ("[x]", "[ ]", "[!]", "[~]", "n/a", "—")
 FETCH_EVERY = 60
+CANARY = Path.home() / ".local/state/paperboat-canary"  # written by tools/probe/canary.py
+IST = timezone(timedelta(hours=5, minutes=30))
 _page = "progress: first read of CHECKLIST.md still running, reload in a minute"
 
 
@@ -50,6 +53,51 @@ def parse(text):
                "platforms": marks[:3], "evidence": cells[-1]}
         current["command" if cells[0].startswith("C") else "feature"].append(row)
     return sections
+
+
+def canary():
+    """The production canary's status and its last 60 runs; read on every request, never cached."""
+    try:
+        status = json.loads((CANARY / "status.json").read_text())
+    except (OSError, ValueError):
+        status = None
+    try:
+        with open(CANARY / "history.jsonl") as lines:
+            history = [json.loads(line) for line in collections.deque(lines, 60)]
+    except (OSError, ValueError):
+        history = []
+    return {"status": status, "history": history}
+
+
+def ist(stamp):
+    try:
+        return datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).astimezone(IST)
+    except (TypeError, ValueError):
+        return None
+
+
+def canary_line(state, now=None):
+    status, now = state["status"], now or datetime.now(IST)
+    run = (status or {}).get("last") or {}
+    started = ist(run.get("started"))
+    if not status or not started:
+        text, ok = "no result yet", False
+    elif (now - started).total_seconds() > 300:
+        text, ok = f"STALE: last run {started:%H:%M} IST (the prober on oracle is not running)", False
+    elif status.get("red"):
+        failed = ", ".join(s["step"] for s in run.get("steps", []) if not s.get("ok"))
+        since = ist(status.get("red_since")) or started
+        text, ok = f"RED since {since:%H:%M} IST: {failed}", False
+    else:
+        steps = run.get("steps", [])
+        text, ok = f"green: {len(steps)}/{len(steps)} checks, last run {started:%H:%M} IST", True
+    cells = "".join(
+        f'<i class="{"d" if r.get("ok") else "r"}" title="{html.escape(r.get("started", ""))}'
+        f'{"" if r.get("ok") else ": " + html.escape(", ".join(s["step"] for s in r.get("steps", []) if not s.get("ok")))}"></i>'
+        for r in state["history"])
+    return (f'<div class="card canary {"" if ok else "red"}"><div class="row"><span>Production canary '
+            f'(exec, ssh, send, preview, tunnel between two machines, every minute)</span></div>'
+            f'<div class="row"><b>{html.escape(text)}</b></div><div class="strip">{cells}</div></div>')
 
 
 def bar(done, total, blocked=0):
@@ -122,19 +170,24 @@ h1{{font-size:22px;margin:0}} .muted{{color:#888;font-size:13px;margin-bottom:24
 h2{{font-size:18px;margin:0 0 8px}} .row{{display:flex;gap:12px;margin-top:10px}}
 .row span{{flex:1}} .row em{{color:#888;font-style:normal;width:44px;text-align:right}}
 .bar{{height:10px;background:#eee;border-radius:5px;overflow:hidden;display:flex;margin-top:6px}}
-.bar i{{display:block;height:100%}} .d{{background:#1f7a3a}} .b{{background:#d9822b}}
+.bar i{{display:block;height:100%}} .d{{background:#1f7a3a}} .b{{background:#d9822b}} .r{{background:#c0392b}}
+.canary.red{{border-color:#c0392b}} .canary.red b{{color:#c0392b}} .strip{{display:flex;gap:2px;margin-top:8px}}
+.strip i{{display:block;width:6px;height:14px;border-radius:1px}}
 </style>
 <h1>Paperboat launch progress</h1>
 <div class="muted">Verified rows from CHECKLIST.md on main · green done, orange blocked · updated {stamp}</div>
-{content}
+<!--canary-->{content}
 """
 
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        body = _page.encode()
+        if self.path.split("?")[0] == "/canary.json":
+            body, kind = json.dumps(canary()).encode(), "application/json"
+        else:
+            body, kind = _page.replace("<!--canary-->", canary_line(canary()), 1).encode(), "text/html; charset=utf-8"
         self.send_response(200)
-        self.send_header("content-type", "text/html; charset=utf-8")
+        self.send_header("content-type", kind)
         self.send_header("cache-control", "no-store")
         self.end_headers()
         self.wfile.write(body)
