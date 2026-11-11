@@ -170,20 +170,36 @@ func ensureManagedSSHDirectory(path, sid string) error {
 	return verifyManagedSSHACL(path, sid)
 }
 
-// verifyCurrentUserOwnedPath applies Win32-OpenSSH's own rule for ~/.ssh (check_secure_file_permission in
-// PowerShell/openssh-portable contrib/win32/win32compat/w32-sshfileperm.c): the owner is the user, SYSTEM,
-// Administrators or TrustedInstaller, and no other principal holds a write-class right. An elevated shell makes
-// Administrators the owner of a folder it creates, so the user's own ~/.ssh is often owned that way.
-func verifyCurrentUserOwnedPath(path, sid string, requireDirectory bool) error {
+// openSecureSSHDirectory opens ~/.ssh without following a reparse point and checks that object against Win32-OpenSSH's
+// own rule (check_secure_file_permission in PowerShell/openssh-portable contrib/win32/win32compat/w32-sshfileperm.c):
+// the owner is the user, SYSTEM, Administrators or TrustedInstaller, and no other principal holds a write-class right.
+// An elevated shell makes Administrators the owner of a folder it creates, so the user's own ~/.ssh is often owned
+// that way. The handle is held without delete sharing, so the folder checked is the folder used until it is closed
+// (FILE_LIST_DIRECTORY: a handle with only metadata access does not enforce sharing).
+func openSecureSSHDirectory(path, sid string) (windows.Handle, error) {
 	if err := rejectWindowsReparseAncestors(path); err != nil {
-		return err
+		return windows.InvalidHandle, err
 	}
-	info, err := os.Lstat(path)
-	if err != nil || info.Mode()&os.ModeSymlink != 0 || (requireDirectory && !info.IsDir()) || (!requireDirectory && !info.Mode().IsRegular()) || windowsReparsePoint(path) {
-		return ErrOpenSSHConfigConflict
+	pointer, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return windows.InvalidHandle, err
 	}
-	descriptor, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
-	return sshDescriptorError(descriptor, err, path, sid)
+	handle, err := windows.CreateFile(pointer, windows.FILE_LIST_DIRECTORY|windows.READ_CONTROL|windows.FILE_READ_ATTRIBUTES, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if err != nil {
+		return windows.InvalidHandle, err
+	}
+	var information windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(handle, &information); err != nil ||
+		information.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY == 0 || information.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 ||
+		!windowsSSHHandlePathMatches(handle, path) {
+		windows.CloseHandle(handle)
+		return windows.InvalidHandle, errors.Join(ErrOpenSSHConfigConflict, err)
+	}
+	if err := verifySecureSSHHandle(handle, path, sid); err != nil {
+		windows.CloseHandle(handle)
+		return windows.InvalidHandle, err
+	}
+	return handle, nil
 }
 
 // verifySecureSSHHandle applies the same Win32-OpenSSH rule to an open file the user owns the content of
@@ -271,7 +287,7 @@ func windowsAccountName(sid *windows.SID) string {
 // verifyCurrentUserProfileRoot accepts SYSTEM ownership only for the existing
 // Windows profile root. Provisioning and profile migration commonly leave
 // C:\Users\<name> owned by SYSTEM even though the enrolled user owns .ssh.
-// Writable descendants continue through verifyCurrentUserOwnedPath and must be
+// Writable descendants continue through openSecureSSHDirectory and must be
 // owned by the exact current-user SID.
 func verifyCurrentUserProfileRoot(path, sid string) error {
 	if err := rejectWindowsReparseAncestors(path); err != nil {

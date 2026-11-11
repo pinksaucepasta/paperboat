@@ -380,14 +380,17 @@ func openWindowsSSHDirectory(home string, create bool) (string, string, func(), 
 		}
 	} else if err != nil {
 		return "", "", func() {}, err
-	} else if err := verifyCurrentUserOwnedPath(directory, sid, true); err != nil {
+	}
+	held, err := openSecureSSHDirectory(directory, sid)
+	if err != nil {
 		return "", "", func() {}, err
 	}
 	unlock, err := lockWindowsSSHConfig(directory, sid)
 	if err != nil {
+		windows.CloseHandle(held)
 		return "", "", func() {}, err
 	}
-	return directory, sid, unlock, nil
+	return directory, sid, func() { unlock(); windows.CloseHandle(held) }, nil
 }
 
 func lockWindowsSSHConfig(directory, sid string) (func(), error) {
@@ -633,13 +636,18 @@ func removeWindowsUserSSHConfig(directory, sid string) error {
 	return os.Remove(path)
 }
 
-// copyWindowsFileSecurity keeps the replaced file's group and access list. The owner is not copied: the
-// replacement is created owned by the user, which OpenSSH trusts as it trusts an Administrators or SYSTEM owner,
-// and a process that is not elevated cannot set an Administrators owner.
+// copyWindowsFileSecurity keeps the replaced file's group and access list, read from that pinned file. The owner is
+// not copied: the replacement is created owned by the user, which OpenSSH trusts as it trusts an Administrators or
+// SYSTEM owner, and a process that is not elevated cannot set an Administrators owner.
 func copyWindowsFileSecurity(source, destination string) error {
-	descriptor, err := windows.GetNamedSecurityInfo(source, windows.SE_FILE_OBJECT, windows.GROUP_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	pinned, exists, err := openPinnedWindowsSSHFile(source, 0)
+	if err != nil || !exists {
+		return errors.Join(ErrOpenSSHConfigConflict, err)
+	}
+	defer pinned.Close()
+	descriptor, err := windows.GetSecurityInfo(pinned.handle, windows.SE_FILE_OBJECT, windows.GROUP_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
 	if err != nil || descriptor == nil {
-		return err
+		return errors.Join(ErrOpenSSHConfigConflict, err)
 	}
 	group, _, err := descriptor.Group()
 	if err != nil {

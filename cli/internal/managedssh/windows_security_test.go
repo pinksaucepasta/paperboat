@@ -82,7 +82,7 @@ func TestSSHPathSecurityProblemFollowsWin32OpenSSH(t *testing.T) {
 
 // The real path check accepts a .ssh folder an elevated shell made (owner Administrators) and refuses, with the
 // folder and the cause named, one another user can write.
-func TestVerifyCurrentUserOwnedPathAcceptsAdministratorsOwnedSSHFolder(t *testing.T) {
+func TestOpenSecureSSHDirectoryAcceptsAdministratorsOwnedSSHFolder(t *testing.T) {
 	sid, err := currentManagedSSHSID()
 	if err != nil {
 		t.Fatal(err)
@@ -94,12 +94,17 @@ func TestVerifyCurrentUserOwnedPathAcceptsAdministratorsOwnedSSHFolder(t *testin
 	set := func(sddl string) { setTestSecurity(t, directory, sddl) }
 	protected := "(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;" + sid + ")"
 	set("O:BAD:P" + protected)
-	if err := verifyCurrentUserOwnedPath(directory, sid, true); err != nil {
+	held, err := openSecureSSHDirectory(directory, sid)
+	if err != nil {
 		t.Fatalf("Administrators-owned .ssh refused: %v", err)
 	}
+	if err := os.Rename(directory, directory+".moved"); err == nil {
+		t.Fatal("the checked folder could be renamed while held")
+	}
+	windows.CloseHandle(held)
 	set("O:BAD:P" + protected + "(A;OICI;FW;;;WD)")
 	var unsafePath *UnsafeSSHPathError
-	if err := verifyCurrentUserOwnedPath(directory, sid, true); !errors.As(err, &unsafePath) || unsafePath.Path != directory || !strings.Contains(err.Error(), "can change it") || !errors.Is(err, ErrOpenSSHConfigConflict) {
+	if _, err := openSecureSSHDirectory(directory, sid); !errors.As(err, &unsafePath) || unsafePath.Path != directory || !strings.Contains(err.Error(), "can change it") || !errors.Is(err, ErrOpenSSHConfigConflict) {
 		t.Fatalf("writable .ssh error = %v", err)
 	}
 }
@@ -149,5 +154,24 @@ func TestUserSSHConfigOwnedByAdministratorsIsReadAndRewritten(t *testing.T) {
 	var unsafePath *UnsafeSSHPathError
 	if _, _, err := readWindowsSSHFile(directory, "config", sid, false); !errors.As(err, &unsafePath) || unsafePath.Path != path || !strings.Contains(err.Error(), "can change it") {
 		t.Fatalf("writable config error = %v", err)
+	}
+}
+
+// The host-side authorized_keys path names an unsafe .ssh folder and its fix, instead of a bare conflict.
+func TestReconcileAuthorizedKeysNamesAnUnsafeSSHFolder(t *testing.T) {
+	home := managedSSHWindowsTestHome(t)
+	sid, err := currentManagedSSHSID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := filepath.Join(home, ".ssh")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	setTestSecurity(t, directory, "O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;"+sid+")(A;OICI;FW;;;WD)")
+	_, err = ReconcileAuthorizedKeys(home, 0, []string{authorizedPublicLine(t)})
+	var unsafePath *UnsafeSSHPathError
+	if !errors.Is(err, ErrAuthorizedKeysConflict) || !errors.As(err, &unsafePath) || unsafePath.Path != directory || !strings.Contains(err.Error(), "icacls") {
+		t.Fatalf("error = %v", err)
 	}
 }

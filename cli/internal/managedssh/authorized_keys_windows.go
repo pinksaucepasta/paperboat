@@ -31,38 +31,21 @@ type AuthorizedKeysResult struct {
 
 // ReconcileAuthorizedKeys only replaces Paperboat-marked entries. Existing
 // keys, comments, and administrator-managed entries remain byte-for-byte
-// unchanged. Existing content must be owned by the enrolled user; an
-// administrator-owned file is never modified by Paperboat.
+// unchanged. The folder and an existing file follow Win32-OpenSSH's own rule:
+// owned by the user, SYSTEM or Administrators, writable by no one else; a
+// refusal names the path and the fix (UnsafeSSHPathError).
 func ReconcileAuthorizedKeys(home string, _ uint32, publicKeys []string) (AuthorizedKeysResult, error) {
 	if !filepath.IsAbs(home) || len(publicKeys) > MaxAgentIdentities {
 		return AuthorizedKeysResult{}, ErrAuthorizedKeysConflict
 	}
-	sid, err := currentManagedSSHSID()
+	directory, sid, unlock, err := openWindowsSSHDirectory(home, true)
 	if err != nil {
-		return AuthorizedKeysResult{}, err
-	}
-	home = filepath.Clean(home)
-	if err := verifyCurrentUserProfileRoot(home, sid); err != nil {
-		return AuthorizedKeysResult{}, ErrAuthorizedKeysConflict
-	}
-	directory := filepath.Join(home, ".ssh")
-	if _, err := os.Lstat(directory); errors.Is(err, os.ErrNotExist) {
-		if err := ensureManagedSSHDirectory(directory, sid); err != nil {
-			return AuthorizedKeysResult{}, err
-		}
-	} else if err != nil {
-		return AuthorizedKeysResult{}, err
-	} else if err := verifyCurrentUserOwnedPath(directory, sid, true); err != nil {
-		return AuthorizedKeysResult{}, ErrAuthorizedKeysConflict
-	}
-	unlock, err := lockWindowsSSHConfig(directory, sid)
-	if err != nil {
-		return AuthorizedKeysResult{}, err
+		return AuthorizedKeysResult{}, errors.Join(ErrAuthorizedKeysConflict, err)
 	}
 	defer unlock()
 	existing, exists, err := readWindowsSSHFile(directory, "authorized_keys", sid, false)
 	if err != nil {
-		return AuthorizedKeysResult{}, ErrAuthorizedKeysConflict
+		return AuthorizedKeysResult{}, errors.Join(ErrAuthorizedKeysConflict, err)
 	}
 	if !exists {
 		existing = nil
