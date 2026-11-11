@@ -557,6 +557,63 @@ def target_block_control_plane(addrs, seconds=OFFLINE_OUTAGE_SECS + 90):
     return t[1] if t else None
 
 
+MAC_CUT_SCRIPT = r'''#!/bin/sh
+# Runs detached on the Mac under a perl alarm: cut, verify, hold, restore. The cut also severs the controller's ssh
+# (the tunnel edges are Paperboat addresses too), so nothing here may wait for the controller.
+A=%(anchor)s; V=/tmp/pbsmoke-verify.txt; T=
+rm -f "$V"
+restore() { /sbin/pfctl -a "$A" -F all >/dev/null 2>&1; [ -n "$T" ] && /sbin/pfctl -X "$T" >/dev/null 2>&1; }
+trap restore EXIT INT TERM
+printf '%%s\n' %(rules)s | /sbin/pfctl -a "$A" -f - >/dev/null 2>&1
+T=$(/sbin/pfctl -E 2>&1 | sed -n 's/.*Token : \([0-9]*\).*/\1/p')
+/sbin/pfctl -F states >/dev/null 2>&1
+bad=0; total=0
+for p in %(pairs)s; do
+  h=${p%%%%|*}; a=${p##*|}; total=$((total+1))
+  if curl -s -o /dev/null -m 6 --connect-timeout 5 -k --resolve "$h:443:$a" "https://$h/" 2>/dev/null; then bad=$((bad+1)); fi
+done
+echo "VERIFY bad=$bad total=$total" > "$V"
+[ "$bad" -eq 0 ] || exit 0
+sleep %(hold)d
+'''
+
+
+def mac_cut_detached(addrs, pairs, hold):
+    """macOS: start the whole cut-verify-hold-restore as one root script on the VM, detached, with a perl alarm
+    (hold + 60 s) as the hard stop, and return at once. Its result is read by mac_cut_result() after the restore."""
+    import base64, ipaddress
+    v4, v6 = [], []
+    for addr in addrs:
+        try:
+            (v4 if ipaddress.ip_address(addr).version == 4 else v6).append(addr)
+        except ValueError:
+            pass
+    rules = [r for r in ('block drop out quick proto { tcp udp } from any to { %s }' % ' '.join(v4) if v4 else '',
+                         'block drop out quick proto { tcp udp } from any to { %s }' % ' '.join(v6) if v6 else '') if r]
+    if not rules:
+        return False
+    script = MAC_CUT_SCRIPT % {'anchor': ANCHOR, 'rules': ' '.join(shlex.quote(r) for r in rules),
+                               'pairs': ' '.join(shlex.quote(x) for x in pairs), 'hold': hold}
+    mac('echo %s | base64 -d > /tmp/pbsmoke-cut.sh' % base64.b64encode(script.encode()).decode())
+    msudo('perl -e "alarm %d; exec @ARGV" sh /tmp/pbsmoke-cut.sh' % (hold + 60), bg=True)
+    return True
+
+
+def mac_cut_result(started, hold):
+    """Wait out the hold, then read the verify line once the VM answers ssh again (the cut is over), flush the anchor
+    as a backstop and return (bad, total), or None when no verify line was written."""
+    time.sleep(max(0, started + hold + 10 - time.time()))
+    out = ''
+    for _ in range(12):
+        out = mac('cat /tmp/pbsmoke-verify.txt 2>&1', 20)
+        if 'VERIFY' in out:
+            break
+        time.sleep(10)
+    msudo('/sbin/pfctl -a %s -F all; rm -f /tmp/pbsmoke-cut.sh /tmp/pbsmoke-verify.txt' % ANCHOR, timeout=60)
+    m = re.search(r'VERIFY bad=(\d+) total=(\d+)', out)
+    return (int(m[1]), int(m[2])) if m else None
+
+
 def target_unblock_control_plane(token):
     """Undo target_block_control_plane() on every exit path (the device-side timer is the backstop)."""
     if WIN:
@@ -594,26 +651,35 @@ def offline_audit():
     except ValueError:
         discovery = {}
     hosts = sorted(set([api] + discovery_hostnames(discovery)))
-    pairs, addrs = target_resolve(hosts)
-    if not addrs:
-        return report(row, 'FAIL', 'could not resolve any Paperboat address on the target or the client')
+    for _ in range(3):  # the target's resolver cache can answer empty once: a block from the client's view alone is not the full list
+        pairs, addrs = target_resolve(hosts)
+        if pairs:
+            break
+        time.sleep(5)
+    if not pairs:
+        return report(row, 'FAIL', 'the target could not resolve any Paperboat address')
     began = time.time()
     base_out = cl('~/.local/bin/pb ssh %s -- echo ssh-offline-baseline-%d </dev/null 2>&1' % (shlex.quote(ARGS.alias), began), 300)
     if 'ssh-offline-baseline-%d' % began not in base_out:
         return report(row, 'FAIL', 'pb ssh did not run before the outage: %s' % base_out[-200:].replace('\n', ' '))
     marker = 'ssh-offline-%d' % began
-    token, blackholed_at, off_out = None, None, ''
+    token, blackholed_at, off_out, hold, verified = None, None, '', OFFLINE_OUTAGE_SECS + 80, None
     try:
-        token = target_block_control_plane(addrs)
-        # The block must already hold before the outage window: every address times out from the target.
-        # Only a completed connect fails the check (counts only, never the addresses).
-        verified = target_verify_block(pairs)
-        if verified is None or verified[1] == 0:
-            return report(row, 'FAIL', 'could not verify the control-plane block from the target')
-        bad, total = verified
-        if bad:
-            return report(row, 'FAIL', 'control-plane verify failed: %d of %d addresses still connect' % (bad, total))
-        blackholed_at = time.time()
+        if WIN:
+            token = target_block_control_plane(addrs)
+            # The block must already hold before the outage window: every address times out from the target.
+            # Only a completed connect fails the check (counts only, never the addresses).
+            verified = target_verify_block(pairs)
+            if verified is None or verified[1] == 0:
+                return report(row, 'FAIL', 'could not verify the control-plane block from the target')
+            if verified[0]:
+                return report(row, 'FAIL', 'control-plane verify failed: %d of %d addresses still connect' % verified)
+            blackholed_at = time.time()
+        else:  # the cut severs the controller's ssh: the Mac verifies and restores by itself, we read it afterwards
+            if not mac_cut_detached(addrs, pairs, hold):
+                return report(row, 'FAIL', 'no addresses to block on the target')
+            blackholed_at = time.time()
+            time.sleep(30)  # the on-device verify runs first; dials before it ends are online and ignored
         # While still blocked: the client always sends the offline header, the host records origin offline
         # once it is past its refresh hint (OutOfSync, 2 min). Dial from early in the outage and accept the first
         # success past the hint: relayed dials flap (direct one minute, regional_relay the next), so one wobble
@@ -632,8 +698,15 @@ def offline_audit():
             return report(row, 'FAIL', 'pb ssh did not run during the %ds outage: %s'
                           % (OFFLINE_OUTAGE_SECS, off_out[-200:].replace('\n', ' ')))
     finally:
-        target_unblock_control_plane(token)  # also runs when the session above failed
+        if WIN:
+            target_unblock_control_plane(token)  # also runs when the session above failed
+        else:
+            verified = mac_cut_result(blackholed_at or time.time(), hold)  # waits out the cut, restores, reads verify
     reconnected_at = time.time()
+    if verified is None or verified[1] == 0:
+        return report(row, 'FAIL', 'could not verify the control-plane block from the target')
+    if verified[0]:
+        return report(row, 'FAIL', 'control-plane verify failed: %d of %d addresses still connect' % verified)
     db = os.environ.get('PB_AUDIT_DB_HOST', 'root@coolify')
     # Scope the read to this run: sessions start at or after the block went up (the baseline is online and
     # filtered by origin anyway). A began-anchored window would re-read a previous run's offline rows when runs
@@ -643,7 +716,7 @@ def offline_audit():
              "AND event_type IN ('machine.access_started','machine.access_ended') AND metadata->>'capability'='managed_ssh' "
              "AND created_at > now() - interval '%d seconds' ORDER BY created_at, id;" % (mid, int(time.time() - blackholed_at) + 30))
     rows = ''
-    for _ in range(30):  # the host uploads within its 30 s cadence
+    for _ in range(84):  # up to 7 min: the host's uploader backs off after failing during the outage (measured: 5 min late)
         rows = subprocess.run(['ssh', db, 'docker exec -i paperboat-postgres-1 psql -U postgres -d paperboat -qAt -F "|"'], input=query,
                               capture_output=True, text=True).stdout
         if re.search(r'^machine.access_ended\|offline\|', rows, re.M):
