@@ -3,8 +3,8 @@
 import { PlusIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
-import { api, idempotencyKey, useMachines, useWorkspace, type Machine } from "@/lib/api"
-import { terminalKeys } from "@/lib/terminal/queries"
+import { useMachines, useWorkspace, type Machine } from "@/lib/api"
+import { startShell, terminalKeys } from "@/lib/terminal/queries"
 import { pickerOption } from "@/components/crumb-picker"
 import { StatusDot } from "@/components/machine-status"
 import { Button } from "@/components/ui/button"
@@ -29,15 +29,7 @@ export function useStartShell() {
   const queryClient = useQueryClient()
   const workspace = useWorkspace()
   return useMutation({
-    mutationFn: (machine: Machine) =>
-      api<{ id: string }>(
-        `machines/${encodeURIComponent(machine.id)}/terminal-sessions?workspace=${encodeURIComponent(workspace?.id ?? "personal")}`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json", "idempotency-key": idempotencyKey() },
-          body: JSON.stringify({}),
-        },
-      ),
+    mutationFn: (machine: Machine) => startShell(machine.id, workspace?.id ?? "personal"),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: terminalKeys.list }),
   })
 }

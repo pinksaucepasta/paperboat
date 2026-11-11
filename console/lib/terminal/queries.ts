@@ -160,6 +160,14 @@ export function removeParticipant(session: TerminalSession, accountId: string) {
   )
 }
 
+/** Starts a shell on a machine in a workspace and returns its id. */
+export const startShell = (machineId: string, workspace: string) =>
+  api<{ id: string }>(`machines/${encodeURIComponent(machineId)}/terminal-sessions?workspace=${encodeURIComponent(workspace)}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "idempotency-key": idempotencyKey() },
+    body: JSON.stringify({}),
+  })
+
 /** Ends the shell on the machine for everyone. The server may queue it (202) until the machine confirms. */
 export function closeTerminal(machineId: string, sessionId: string) {
   return apiAction(

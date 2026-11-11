@@ -4,12 +4,10 @@
 // Uses the account's first two machines that can receive files (or MACHINES=<alias>,<alias>). Steps: (1) one machine: today's wording, no group
 // headings, the file is in that machine's Inbox; (2) two machines: both chips, group headings, "Sent N files to 2
 // machines' Inboxes.", the file is in both Inboxes; (3) the last chip has no remove button; (4) one machine refused
-// mid-send (its upload request answered 409 machine_offline in the browser, nothing real changes): the other still
-// gets the file, the status reads "Sent to 1 of 2 machines. 1 failed." and keeps the error text. Sent test files are
+// (its shell start answered with the plan's browser-terminal limit in the browser, nothing real changes): the other
+// still gets the file, the status reads "Sent to 1 of 2 machines. 1 failed." and keeps the error text.
+// Files travel over the terminal's encrypted browser connection (a shell session per machine, closed afterwards). Sent test files are
 // deleted from the Inboxes at the end. Prints PASS/FAIL per step; exits 1 on any FAIL.
-// STUB_UPLOAD=1: the server has no upload endpoint yet (inboxLive.upload is off in lib/files.ts and the production build
-// drops the button). Run against a build with the flag on; the browser then answers POST machines/{id}/inbox itself,
-// recording what each machine received, and "in the Inbox" means "that machine's upload request carried the file".
 import { mkdirSync } from "node:fs"
 
 const { chromium } = await import(process.env.PW_MODULE ?? "playwright-core")
@@ -32,22 +30,7 @@ const api = async (path) => {
   return body.data ?? body
 }
 const sent = []
-const stub = process.env.STUB_UPLOAD === "1"
-const uploads = []
-if (stub) {
-  await ctx.route(/\/api\/v1\/machines\/[^/]+\/inbox\?name=/, async (route) => {
-    const request = route.request()
-    if (request.method() !== "POST") return route.fallback()
-    const url = new URL(request.url())
-    const machine = url.pathname.split("/")[4]
-    const name = url.searchParams.get("name")
-    uploads.push({ machine, name, size: request.postDataBuffer()?.length ?? 0 })
-    await new Promise((resolve) => setTimeout(resolve, 400))
-    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: { id: `stub_${uploads.length}`, name, size: 0, received_at: new Date().toISOString() } }) })
-  })
-}
 const inboxHas = async (machine, name) => {
-  if (stub) return uploads.find((u) => u.machine === machine.id && u.name === name && u.size > 0)
   const list = await api(`machines/${machine.id}/inbox`)
   return (list.items ?? []).find((item) => item.name === name)
 }
@@ -92,7 +75,7 @@ log((await dialog.getByRole("button", { name: /^Remove / }).count()) === 0, "the
 const only = usable.find((m) => m.alias === defaultChips[0].trim()) ?? a
 const one = `multisend-one-${stamp}.txt`
 await chooseFile(one)
-await dialog.getByText(new RegExp(`^Sent 1 of 1 to ${only.alias}’s Inbox\\.$`)).waitFor({ timeout: 60000 }).catch(() => {})
+await dialog.getByText(new RegExp(`^Sent 1 of 1 to ${only.alias}’s Inbox\\.$`)).waitFor({ timeout: 120000 }).catch(() => {})
 log(await dialog.getByText(`Sent 1 of 1 to ${only.alias}’s Inbox.`).isVisible(), "one machine keeps today's status wording")
 log((await dialog.locator("h3").count()) === 0, "one machine shows no group heading")
 log(await inboxHasWithin(only, one), `the file is in ${only.alias}'s Inbox`)
@@ -106,7 +89,7 @@ log((await dialog.locator("span.rounded-full").count()) === 2, "adding a machine
 log(await dialog.getByText("Files land in each machine’s Paperboat Inbox, in its Downloads folder.").isVisible(), "the help text says each machine")
 await shot("desktop-picker")
 await chooseFile(two)
-await dialog.getByText("Sent 1 file to 2 machines’ Inboxes.").waitFor({ timeout: 90000 }).catch(() => {})
+await dialog.getByText("Sent 1 file to 2 machines’ Inboxes.").waitFor({ timeout: 120000 }).catch(() => {})
 log(await dialog.getByText("Sent 1 file to 2 machines’ Inboxes.").isVisible(), "the status reads Sent 1 file to 2 machines' Inboxes.")
 log((await dialog.locator("h3").allInnerTexts()).length === 2 && (await dialog.getByText("1 of 1 sent").count()) === 2, "each machine has a heading with its own count")
 await shot("desktop-sent")
@@ -123,16 +106,19 @@ await page.keyboard.press("Escape")
 
 // 4. one machine refused mid-send: the other still gets the file
 const partial = `multisend-partial-${stamp}.txt`
-await page.route(new RegExp(`/api/v1/machines/${b.id}/inbox\\?name=`), (route) =>
-  route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: { code: "machine_offline", message: `${b.alias} went offline.` } }) }),
+const refuseB = new RegExp(`/api/v1/machines/${b.id}/terminal-sessions\\?`)
+await page.route(refuseB, (route) =>
+  route.request().method() === "POST"
+    ? route.fulfill({ status: 403, contentType: "application/json", body: JSON.stringify({ error: { code: "browser_terminal_limit_reached", message: "Limit reached." } }) })
+    : route.fallback(),
 )
 await openDialog([a, b])
 await chooseFile(partial)
-await dialog.getByText("Sent to 1 of 2 machines. 1 failed.").waitFor({ timeout: 90000 }).catch(() => {})
+await dialog.getByText("Sent to 1 of 2 machines. 1 failed.").waitFor({ timeout: 120000 }).catch(() => {})
 log(await dialog.getByText("Sent to 1 of 2 machines. 1 failed.").isVisible(), "a refused machine reads Sent to 1 of 2 machines. 1 failed.")
-log(await dialog.locator("p.text-destructive").first().isVisible().catch(() => false), "the failed file keeps its error text", (await dialog.locator("p.text-destructive").first().innerText().catch(() => "")).slice(0, 80))
+log(/browser terminal limit/.test(await dialog.locator("p.text-destructive").first().innerText().catch(() => "")), "the failed file keeps its error text (the plan limit, in words)", (await dialog.locator("p.text-destructive").first().innerText().catch(() => "")).slice(0, 80))
 await shot("desktop-partial")
-await page.unroute(new RegExp(`/api/v1/machines/${b.id}/inbox\\?name=`))
+await page.unroute(refuseB)
 log(await inboxHasWithin(a, partial), `${a.alias} still got the file`)
 log(!(await inboxHas(b, partial)), `${b.alias} did not get it`)
 sent.push([a, partial])
@@ -144,7 +130,7 @@ if (shots) {
   await openDialog([a, b])
   await shot("mobile-picker")
   await chooseFile(`multisend-mobile-${stamp}.txt`)
-  await dialog.getByText(/^Sent 1 file to 2 machines/).waitFor({ timeout: 90000 }).catch(() => {})
+  await dialog.getByText(/^Sent 1 file to 2 machines/).waitFor({ timeout: 120000 }).catch(() => {})
   await shot("mobile-sent")
   sent.push([a, `multisend-mobile-${stamp}.txt`], [b, `multisend-mobile-${stamp}.txt`])
   await dialog.getByRole("button", { name: "Done" }).click()
@@ -157,7 +143,7 @@ if (shots) {
 }
 
 // Clean up: delete the test files from the Inboxes.
-for (const [machine, name] of stub ? [] : sent) {
+for (const [machine, name] of sent) {
   const item = await inboxHas(machine, name)
   if (!item) continue
   const res = await ctx.request.delete(`${origin}/api/v1/machines/${machine.id}/inbox/${encodeURIComponent(item.id)}`, {

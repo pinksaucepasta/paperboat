@@ -4,8 +4,9 @@ import { CheckCircleIcon, FileIcon, UploadSimpleIcon, WarningCircleIcon, XIcon }
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
-import { useMachines, type Machine } from "@/lib/api"
-import { fileKeys, sendToInbox, sendToMachine, shareInboxFile, type InboxFile } from "@/lib/files"
+import { useMachines, useWorkspace, type Machine } from "@/lib/api"
+import { uploadToInbox } from "@/lib/inbox-upload"
+import { fileKeys, sendToMachine, shareInboxFile, type InboxFile } from "@/lib/files"
 import { formatBytes } from "@/lib/format"
 import { opensInBrowser } from "@/lib/tunnels"
 import { cn } from "@/lib/utils"
@@ -139,6 +140,7 @@ export function SendFilesDialog({
 }) {
   const queryClient = useQueryClient()
   const machines = useMachines()
+  const workspace = useWorkspace()
   const usable = (machines.data ?? []).filter(canReceive)
   // Until the person changes it, the destination is the page's machine, else the first usable one.
   const [picked, setPicked] = useState<string[]>()
@@ -160,17 +162,25 @@ export function SendFilesDialog({
     )
 
   const sendTo = async (run: number, target: Machine, files: File[]) => {
-    // One file at a time per machine: it writes each file in full before the next starts.
-    for (const [index, file] of files.entries()) {
-      update(run, index, { state: "sending" })
-      const upload = sendToInbox(target.id, file, (progress) => update(run, index, { progress }))
-      cancels.current.push(upload.cancel)
-      try {
-        await upload.done
-        update(run, index, { state: "sent", progress: 1 })
-      } catch (error) {
-        update(run, index, { state: "failed", error: (error as Error).message })
-      }
+    // One connection per machine, which takes the files one after another (a terminal upload's batch).
+    // Bytes sent so far are shared out over the files in order for the per-file bars.
+    const total = files.reduce((sum, file) => sum + file.size, 0)
+    const upload = uploadToInbox(target, workspace?.id ?? "personal", files, ({ phase, transferredBytes }) => {
+      let before = 0
+      files.forEach((file, index) => {
+        const progress = phase === "uploading" && file.size ? Math.min(1, Math.max(0, (transferredBytes - before) / file.size)) : 0
+        before += file.size
+        update(run, index, { state: "sending", progress: total ? progress : 0 })
+      })
+    })
+    cancels.current.push(upload.cancel)
+    files.forEach((_, index) => update(run, index, { state: "sending" }))
+    try {
+      await upload.done
+      files.forEach((_, index) => update(run, index, { state: "sent", progress: 1 }))
+    } catch (error) {
+      // A refused batch is refused whole; every file of it keeps the machine's reason.
+      files.forEach((_, index) => update(run, index, { state: "failed", error: (error as Error).message }))
     }
   }
 

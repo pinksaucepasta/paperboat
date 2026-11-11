@@ -274,11 +274,11 @@ export function Choice({
         {label}
         {options.length >= min && <CaretDownIcon className="size-3 text-muted-foreground" />}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-40">
+      <DropdownMenuContent align="start" className="w-max max-w-72 min-w-40">
         <DropdownMenuRadioGroup value={value} onValueChange={onChange}>
           {options.map((option) => (
             <DropdownMenuRadioItem key={option.value} value={option.value}>
-              {option.label}
+              <span className="min-w-0 truncate">{option.label}</span>
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>

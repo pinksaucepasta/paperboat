@@ -4,7 +4,6 @@ import { queryOptions } from "@tanstack/react-query"
 import { queryKeys } from "@/lib/query-keys"
 import { api, apiAction, idempotencyKey } from "@/lib/api"
 import { resourceId, type OperationOrResource } from "@/lib/tunnels"
-import { uploadFile } from "@/lib/upload"
 
 /*
  * Files: each machine's Paperboat Inbox (Downloads/Paperboat Inbox on the machine), where files
@@ -15,7 +14,7 @@ import { uploadFile } from "@/lib/upload"
  */
 
 /** Which Inbox endpoints the deployed server answers. Flip one when its deploy is logged. */
-export const inboxLive = { upload: false, content: true, remove: true, send: false, share: false } as const
+export const inboxLive = { content: true, remove: true, send: false, share: false } as const
 
 export type InboxFile = {
   id: string
@@ -84,10 +83,6 @@ export const requestsQuery = (workspace: string) =>
       ).requests,
     refetchInterval: 30_000,
   })
-
-/** Sends one file to a machine's Inbox, streamed through with progress. */
-export const sendToInbox = (machineId: string, file: File, onProgress: (fraction: number) => void) =>
-  uploadFile<InboxFile>(`${inboxPath(machineId)}?${new URLSearchParams({ name: file.name })}`, file, onProgress)
 
 /** Where the browser downloads a file from; the machine streams it as it's read. */
 export const downloadUrl = (machineId: string, fileId: string) => `/api/v1/${filePath(machineId, fileId)}/content`

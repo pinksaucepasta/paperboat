@@ -8,7 +8,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { api, ApiError, type Data } from "@/lib/api"
 import { loadGhosttyCores } from "@/lib/terminal/ghostty-core"
 import { guestApi } from "@/lib/terminal/queries"
-import { verifyTicketKey, type RootPin } from "@/lib/terminal/browser-root-key"
+import type { RootPin } from "@/lib/terminal/browser-root-key"
+import { ticketConnectConfig, type Ticket, type TerminalRole } from "@/lib/terminal/browser-ticket"
 import {
   loadBrowserTerminal,
   type BrowserTerminalAPI,
@@ -43,7 +44,7 @@ import { paletteSequence, type TerminalTheme } from "@/lib/terminal/themes"
  */
 
 export type TerminalSession = Data<"/v1/terminal-sessions/{session_id}/sharing">
-export type TerminalRole = "owner" | "viewer" | "interactive"
+export type { TerminalRole }
 export type TerminalPhase =
   | "loading"
   | "connecting"
@@ -56,19 +57,6 @@ export type TerminalPhase =
   | "quota"
   /** The plan's browser-terminal limit is reached: `limit` holds the server's refusal. */
   | "limit"
-
-type Ticket = {
-  stream_url: string
-  edge_node_id: string
-  subprotocols: string[]
-  expires_at: string
-  role: TerminalRole
-  machine_id: string
-  owner_account_id: string
-  root_key_id: string
-  root_public_key: string
-  root_fingerprint: string
-}
 
 const offlineMessage = "You are offline. Reconnecting when the network is back."
 /** Why a reconnect is happening: while offline, that is the reason. */
@@ -947,47 +935,14 @@ export function useTerminalConnection({
           identityID = ""
           return
         }
-        if (ticket.owner_account_id !== current.owner_account || ticket.machine_id !== current.target.machine_id)
-          throw new Error("The ticket did not match this terminal's owner and machine.")
-        if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{2,127}$/.test(ticket.edge_node_id))
-          throw new Error("The terminal ticket has no valid edge identity.")
-        const pin = await verifyTicketKey(
+        const { config, pin } = await ticketConnectConfig(
           browser,
-          ticket.owner_account_id,
-          ticket.root_public_key,
-          ticket.root_fingerprint,
-          ticket.root_key_id,
+          ticket,
+          { id: current.id, ownerAccount: current.owner_account, machineId: current.target.machine_id },
+          ackSequenceRef.current,
         )
-        if (ticket.role !== "owner" && ticket.role !== "viewer" && ticket.role !== "interactive")
-          throw new Error("The ticket has an invalid access role.")
-        if (
-          !Array.isArray(ticket.subprotocols) ||
-          ticket.subprotocols.length !== 2 ||
-          ticket.subprotocols[0] !== "paperboat.browser-terminal.e2ee.v1" ||
-          !ticket.subprotocols[1].startsWith("pb-ticket.")
-        )
-          throw new Error("The encrypted terminal ticket is invalid.")
-        const expiresAt = Date.parse(ticket.expires_at)
-        if (!Number.isFinite(expiresAt) || expiresAt <= Date.now())
-          throw new Error("The ticket expired before connecting. Retry for a new one.")
-        const streamURL = new URL(ticket.stream_url)
-        if (streamURL.protocol !== "wss:" || streamURL.username || streamURL.password || streamURL.hash)
-          throw new Error("The terminal service did not provide a secure address.")
         setRole(ticket.role)
         roleRef.current = ticket.role
-        const config = {
-          url: streamURL.href,
-          subprotocols: ticket.subprotocols,
-          owner_account_id: current.owner_account,
-          machine_id: current.target.machine_id,
-          root_key_id: pin.rootKeyID,
-          root_public_key: pin.publicKey,
-          root_fingerprint: pin.fingerprint,
-          terminal_session_id: current.id,
-          role: ticket.role,
-          from_sequence: ackSequenceRef.current,
-          at_live_boundary: true,
-        }
         let startedID = ""
         ticketEdgeRef.current = ticket.edge_node_id
         if (startedOnceRef.current) setReconnects((count) => count + 1)

@@ -130,11 +130,9 @@ function MachineInbox({ machineId }: { machineId: string }) {
             </EmptyMedia>
             <EmptyTitle>{machine ? `${machine.alias}’s Inbox is empty` : "The Inbox is empty"}</EmptyTitle>
           </EmptyHeader>
-          {inboxLive.upload && (
-            <EmptyContent>
-              <SendFilesButton machine={machine} />
-            </EmptyContent>
-          )}
+          <EmptyContent>
+            <SendFilesButton machine={machine} />
+          </EmptyContent>
         </Empty>
       ) : (
         <div className="flex flex-col gap-3">
@@ -152,7 +150,7 @@ function MachineInbox({ machineId }: { machineId: string }) {
                   Delete {selectedRows.length}
                 </Button>
               )}
-              {inboxLive.upload && <SendFilesButton machine={machine} />}
+              <SendFilesButton machine={machine} />
             </div>
           </div>
 
