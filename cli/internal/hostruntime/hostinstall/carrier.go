@@ -429,3 +429,18 @@ func ReconcileInstalledCarrier(ctx context.Context, instance string, pinReferenc
 	}
 	return reconcileInstalledCarrier(ctx, instance, pinReferences...)
 }
+
+// removeOtherCarrierGenerations removes every generation keep does not name and tries them all: the errors are joined,
+// the first failure does not leave the remaining candidates behind.
+func removeOtherCarrierGenerations(ctx context.Context, generations []CarrierConfig, keep func(CarrierConfig) bool, remove func(context.Context, CarrierConfig) error) error {
+	var errs []error
+	for _, c := range generations {
+		if keep(c) {
+			continue
+		}
+		if err := remove(ctx, c); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
