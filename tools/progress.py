@@ -113,6 +113,21 @@ def count(rows, platform):
     return marks.count("[x]"), marks.count("[!]"), sum(m in ("[x]", "[ ]", "[!]", "[~]") for m in marks)
 
 
+def count_rows(rows):
+    """Single-total cards: a row counts once, done only when every platform it applies to is done."""
+    done = blocked = total = 0
+    for r in rows:
+        marks = [m for m in r["platforms"] if m in ("[x]", "[ ]", "[!]", "[~]")]
+        if not marks:
+            continue
+        total += 1
+        if all(m == "[x]" for m in marks):
+            done += 1
+        elif "[!]" in marks:
+            blocked += 1
+    return done, blocked, total
+
+
 def render(sections):
     # Product features count per platform; reliability/scale, the SDK, release safety and the
     # website/console get their own cards (user decision 2026-10-26).
@@ -136,7 +151,7 @@ def render(sections):
                          f'<em>{100*d//max(t,1)}%</em></div>{bar(d, t, b)}')
         cards.append(f'<div class="card"><h2>{name}</h2>{"".join(lines)}</div>')
     if server:
-        d, b, t = count(server, 0)
+        d, b, t = count_rows(server)
         cards.append(f'<div class="card"><h2>Server and console features</h2><div class="row"><span>Done</span>'
                      f'<b>{d}/{t}</b><em>{100*d//max(t,1)}%</em></div>{bar(d, t, b)}</div>')
     for title, ids in (("Reliability, scale and efficiency", groups["reliability"]),
@@ -145,7 +160,7 @@ def render(sections):
                        ("Website and console", groups["website"])):
         rows = rows_of(ids)
         if rows:
-            d, b, t = count(rows, 0)
+            d, b, t = count_rows(rows)
             cards.append(f'<div class="card"><h2>{title}</h2><div class="row"><span>Done</span>'
                          f'<b>{d}/{t}</b><em>{100*d//max(t,1)}%</em></div>{bar(d, t, b)}</div>')
     cross = [r for s in sections if s["id"] == "X" for r in s["feature"]]

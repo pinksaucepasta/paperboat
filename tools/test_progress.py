@@ -26,6 +26,11 @@ class CanaryLineTest(unittest.TestCase):
     def now(self, minutes):
         return progress.ist("2026-11-11T10:00:00Z") + progress.timedelta(minutes=minutes)
 
+    def test_single_total_cards_count_rows_on_any_platform(self):
+        rows = [{"platforms": ["[x]", "[x]", "n/a"]}, {"platforms": ["n/a", "n/a", "[ ]"]},
+                {"platforms": ["[x]", "[!]", "[ ]"]}, {"platforms": ["n/a", "—", "n/a"]}]
+        self.assertEqual(progress.count_rows(rows), (1, 1, 3))
+
     def test_green_red_stale_and_missing(self):
         self.assertIn("green: 2/2 checks, last run 15:30 IST", progress.canary_line(self.state(False), self.now(1)))
         red = progress.canary_line(self.state(True), self.now(1))
