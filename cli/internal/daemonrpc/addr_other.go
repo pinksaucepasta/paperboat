@@ -15,6 +15,10 @@ func defaultSocketAddress() string {
 		if env := os.Getenv("PAPERBOAT_DAEMON_PIPE"); env != "" {
 			return env
 		}
+		// The pipe is named for the SID of the account the process runs as (the listener uses the same call): the
+		// enrolled user's own session finds its daemon, and a process elevated as another administrator account
+		// addresses that account's pipe (not the enrolled user's), which is the intended isolation; dial then verifies
+		// the pipe is exclusive to that account (winpipe.Dial).
 		owner, err := user.Current()
 		if err != nil {
 			return ""
