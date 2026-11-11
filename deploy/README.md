@@ -253,6 +253,17 @@ provider null-route) still turns the canary red. A step that fails two runs in a
 recovery line; both also go to `alerts.log`. Set the machines up with `tools/probe/canary-setup.sh`; keep
 them on a `main` build (copy the binary to `/home/pbt/pb` in the container, `./pb install` as `pbt`).
 They are in the shared test account, protected from `cleanup_test_account.py`; never revoke them.
+**Account probe** (`tools/probe/account.py`, run by `canary.py --account` from `deploy/paperboat-canary-account.{service,timer}`
+every 10 minutes, not every minute: WorkOS rate-limits sign-ins and mails new-device alerts): a headless WorkOS password
+sign-in to the console, an enrollment token minted with that session, the pair host (container `pb-canary-pair`, made with
+`CANARY_SERVER=<api> TOKEN_CMD= tools/probe/canary-setup.sh local pb-canary-pair canary-pair-1 <pb>`) joins as
+`canary-pair-<epoch>` and is seen online, the CLI session is revoked and a new `pb auth login` is approved by the browser
+session, then the cleanup (CLI logout confirmed by the server, every `canary-pair-*` machine disconnected by exact id
+through the console session, which also removes what a killed run left) and the console sign-out (the WorkOS session ends;
+`/api/v1/me` answers 401). Steps `signin pair login cleanup signout` appear in `history.jsonl` and alert on their first
+failure. Unit environment: `ACCOUNT_RUN` (command prefix running its arguments as the pair host's pb user), `ACCOUNT_SERVER`,
+`ACCOUNT_ORIGIN`, `ACCOUNT_EMAIL`, `ACCOUNT_PASSWORD_FILE` (read by the browser script, never printed), `PW_MODULE`, `PW_CHROMIUM`.
+
 Not covered yet: the browser terminal attach (needs a signed-in browser), a machine behind NAT or forced
 onto the relay (both canaries are on public cloud hosts and usually connect directly), macOS and Windows
 canaries.

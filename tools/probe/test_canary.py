@@ -32,6 +32,15 @@ class Parse(unittest.TestCase):
         self.assertEqual(canary.parse('{"step":"x","ok":"true"}', 0)[0]["step"], "probe")
 
 
+class Account(unittest.TestCase):
+    def test_account_step_alerts_on_its_first_failure_others_on_the_second(self):
+        step_run = lambda step, ok: {"started": "t", "finished": "t", "ok": ok, "steps": [{"step": step, "ok": ok}]}
+        _, first = canary.advance({}, step_run("pair", False))
+        self.assertEqual(len(first), 1)
+        _, none = canary.advance({}, step_run("exec_a_to_b", False))
+        self.assertEqual(none, [])
+
+
 class Record(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()

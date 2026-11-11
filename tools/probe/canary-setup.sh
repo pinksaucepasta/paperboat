@@ -8,7 +8,8 @@
 # Updating pb later: copy the new binary to /home/pbt/pb in the container and run `./pb install` as pbt.
 set -eu
 host=$1 ct=$2 name=$3 bin=$4 origin=${5:-} port=${CANARY_PORT:-18099}
-: "${TOKEN_CMD:?}"
+#   TOKEN_CMD empty: install the daemon only (the account probe's pair host adds itself by browser approval, tools/probe/account.py)
+#   CANARY_SERVER  control plane URL for install and pair when the pb build's default is another server
 here=$(cd "$(dirname "$0")" && pwd)
 on() { if [ "$host" = local ]; then sh -c "$1"; else ssh -o BatchMode=yes "$host" "$1"; fi; }
 as_pbt() { on "sudo -n docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 -w /home/pbt $ct $1"; }
@@ -20,9 +21,10 @@ for _ in $(seq 30); do on "sudo -n docker exec $ct systemctl is-system-running -
 on "sudo -n docker exec $ct sh -c 'rm -f /etc/ssh/ssh_host_*; ssh-keygen -A >/dev/null; systemctl restart ssh'"
 on "sudo -n docker exec $ct sh -c 'loginctl enable-linger pbt && systemctl start user@1000.service'"
 on "sudo -n docker exec -i $ct sh -c 'cat >/home/pbt/pb && chmod 755 /home/pbt/pb && chown pbt:pbt /home/pbt/pb'" <"$bin"
-as_pbt "./pb install"
+as_pbt "./pb install${CANARY_SERVER:+ --server $CANARY_SERVER}"
+[ -n "${TOKEN_CMD:-}" ] || exit 0
 sh -c "$TOKEN_CMD $name" | on "sudo -n docker exec -i $ct sh -c 'umask 077; cat >/home/pbt/token; chown pbt /home/pbt/token'"
-as_pbt ".local/bin/pb pair --enrollment-token-file /home/pbt/token --name $name --json" | head -c 400; echo
+as_pbt ".local/bin/pb pair${CANARY_SERVER:+ --server $CANARY_SERVER} --enrollment-token-file /home/pbt/token --name $name --json" | head -c 400; echo
 as_pbt "rm -f /home/pbt/token"
 [ "$origin" = origin ] || exit 0
 as_pbt "sh -c 'mkdir -p canary-www .config/systemd/user && echo ok >canary-www/index.html && printf \"%s\n\" \
