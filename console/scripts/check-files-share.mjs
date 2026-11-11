@@ -51,9 +51,15 @@ const toolbar = (p) => p.getByRole("button", { name: "Share a file" })
 log((await toolbar(page).count()) === 1 && (await page.getByRole("button", { name: "Send files" }).count()) === 1, "Choose machine: Share a file sits with Send files")
 await page.goto(`${origin}/files?machine=${machine.id}`, { waitUntil: "networkidle", timeout: 120000 })
 await toolbar(page).first().waitFor({ timeout: 30000 }).catch(() => {})
-const sharePos = await toolbar(page).first().boundingBox()
-const sendPos = await page.getByRole("button", { name: "Send files" }).first().boundingBox()
-log(Boolean(sharePos && sendPos) && sharePos.x < sendPos.x && Math.abs(sharePos.y - sendPos.y) < 4, "a machine's Files page: Share a file is next to Send files, on its left")
+// The Inbox list loads after the buttons first paint and moves them, so measure until the layout settles.
+let sideBySide = false
+for (let attempt = 0; attempt < 10 && !sideBySide; attempt++) {
+  const sharePos = await toolbar(page).first().boundingBox()
+  const sendPos = await page.getByRole("button", { name: "Send files" }).first().boundingBox()
+  sideBySide = Boolean(sharePos && sendPos) && sharePos.x < sendPos.x && Math.abs(sharePos.y - sendPos.y) < 4
+  if (!sideBySide) await page.waitForTimeout(500)
+}
+log(sideBySide, "a machine's Files page: Share a file is next to Send files, on its left")
 await shot("share-machine-files")
 await page.goto(`${origin}/previews`, { waitUntil: "networkidle", timeout: 120000 })
 log((await toolbar(page).count()) === 0, "Previews has no Share a file button")

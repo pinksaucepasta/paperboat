@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { shareNewFile, type InboxFile } from "@/lib/files"
+import { pickHost, shareNewFile, type InboxFile } from "@/lib/files"
 import { inboxBasename } from "@/lib/terminal/inbox-upload"
 
 const item = (id: string, name: string): InboxFile => ({ id, name, size: 1, received_at: "2026-11-11T00:00:00Z" })
@@ -63,4 +63,11 @@ test("Inbox paths of either kind give the file name", () => {
   expect(inboxBasename("/home/u/Paperboat/Inbox/a b (2).txt")).toBe("a b (2).txt")
   expect(inboxBasename("C:\\Users\\u\\Paperboat Inbox\\a.txt")).toBe("a.txt")
   expect(inboxBasename("plain.txt")).toBe("plain.txt")
+})
+
+test("a share dialog pinned to a machine never hosts on another", () => {
+  const hosts = ["canary-a", "dadape"]
+  expect(pickHost(hosts, (host) => host === "dadape", true)).toBe("dadape")
+  expect(pickHost(["canary-a"], (host) => host === "dadape", true)).toBeUndefined()
+  expect(pickHost(hosts, (host) => host === "gone", false)).toBe("canary-a")
 })

@@ -145,3 +145,9 @@ export function shareNewFile(
   })
   return { done, cancel: upload.cancel }
 }
+
+/** The machine a share dialog hosts on: the chosen one, else the first. A dialog opened from one machine's page is
+ *  pinned to it, so a machine that cannot host leaves no destination rather than silently hosting on another. */
+export function pickHost<T>(hosts: T[], isChosen: (host: T) => boolean, pinned: boolean): T | undefined {
+  return hosts.find(isChosen) ?? (pinned ? undefined : hosts[0])
+}

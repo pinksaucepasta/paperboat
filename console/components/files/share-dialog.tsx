@@ -4,7 +4,7 @@ import { FileIcon, UploadSimpleIcon } from "@phosphor-icons/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
 import { useMachines, useWorkspace, type Machine } from "@/lib/api"
-import { inboxLive, shareInboxFile, shareNewFile, type InboxFile } from "@/lib/files"
+import { inboxLive, shareInboxFile, pickHost, shareNewFile, type InboxFile } from "@/lib/files"
 import { formatBytes } from "@/lib/format"
 import { opensInBrowser, type Preview } from "@/lib/tunnels"
 import { cn } from "@/lib/utils"
@@ -212,7 +212,7 @@ function UploadBody({
   const [chosen, setChosen] = useState<string | null>(() =>
     source.machine ? `machine:${source.machine.id}` : rememberedDestination(),
   )
-  const destination = destinations.find((entry) => destinationValue(entry) === chosen) ?? destinations[0]
+  const destination = pickHost(destinations, (entry) => destinationValue(entry) === chosen, Boolean(source.machine))
   const [file, setFile] = useState<File>()
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string>()
@@ -288,7 +288,7 @@ function UploadBody({
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-muted-foreground">
         <span>Hosted on</span>
         <Choice
-          label={destination?.label ?? (machines.isPending ? "…" : "no machine")}
+          label={destination?.label ?? (machines.isPending ? "…" : (source.machine?.alias ?? "no machine"))}
           value={destination ? destinationValue(destination) : ""}
           options={destinations.map((entry) => ({ value: destinationValue(entry), label: entry.label }))}
           onChange={setChosen}
@@ -328,7 +328,9 @@ function UploadBody({
         <p className="text-xs text-muted-foreground">
           {destination
             ? "Web pages, Markdown, PDFs and images open in the browser; other files download."
-            : "No machine can host files right now. Bring a machine online to share."}
+            : source.machine
+              ? `${source.machine.alias} cannot host files right now. Bring it online to share.`
+              : "No machine can host files right now. Bring a machine online to share."}
         </p>
       )}
       <input
