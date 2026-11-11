@@ -1,0 +1,1 @@
+{"at": "20261111T012225Z", "results": [{"id": "ssh-setup-time:victus", "status": "PASS", "seconds": 20, "detail": "{\"check\": \"ssh-mac-rows\", \"status\": \"PASS\", \"results\": [{\"row\": \"F5-07 setup\", \"status\": \"PASS\", \"detail\": \"RESULT plain_p50=653 pb_p50=670 plain=[ 623 667 614 653 650 657 742 ] pb=[ 683 688 659 658 701 670 635 ]\"}]}"}]}
