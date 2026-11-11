@@ -1,0 +1,230 @@
+{
+ "check": "origin-tunnel-matrix",
+ "platform": "L: disposable machine container small-t1 on pbvm4 (Docker host), pb dev-a31bef562s (main), production edge and server of 2026-11-12",
+ "tunnel": [
+  {
+   "server": "app",
+   "mode": "direct-http/C1-forwarded",
+   "result": "ok",
+   "detail": "status 200 host=tunnel-host.example.test xfp=https xfh=tunnel-host.example.test xff=198.51.100.7"
+  },
+  {
+   "server": "app",
+   "mode": "direct-http/F-force-ssl",
+   "result": "ok",
+   "detail": "status 200"
+  },
+  {
+   "server": "app",
+   "mode": "direct-http/C8-sse",
+   "result": "ok",
+   "detail": "first event after 42 ms"
+  },
+  {
+   "server": "app",
+   "mode": "direct-http/C12-range",
+   "result": "ok",
+   "detail": "status 206, 100 bytes"
+  },
+  {
+   "server": "app",
+   "mode": "direct-http/C13-expect",
+   "result": "ok",
+   "detail": "status 200"
+  },
+  {
+   "server": "app",
+   "mode": "direct-http/C11-slow",
+   "result": "ok",
+   "detail": "status 200 after 45 s"
+  },
+  {
+   "server": "caddy-certs",
+   "mode": "a-http/C2-loop",
+   "result": "ok",
+   "detail": "status 502 error 'origin_redirect_loop'"
+  },
+  {
+   "server": "caddy-certs",
+   "mode": "b-https",
+   "result": "blocked",
+   "detail": "the server refused --tls-verification insecure: \"retryable\": false, \"state_changed\": \"unknown\", \"outcome_uncertain\": false, \"support_reference\": \"support_19a17dbb-6f0b-"
+  },
+  {
+   "server": "caddy-internal",
+   "mode": "a-http/C2-loop",
+   "result": "ok",
+   "detail": "status 502 error 'origin_redirect_loop'"
+  },
+  {
+   "server": "caddy-internal",
+   "mode": "b-https",
+   "result": "blocked",
+   "detail": "the server refused --tls-verification insecure: \"retryable\": false, \"state_changed\": \"unknown\", \"outcome_uncertain\": false, \"support_reference\": \"support_bf03ef20-7188-"
+  },
+  {
+   "server": "traefik",
+   "mode": "a-http/C2-loop",
+   "result": "ok",
+   "detail": "status 502 error 'origin_redirect_loop'"
+  },
+  {
+   "server": "traefik",
+   "mode": "b-https",
+   "result": "blocked",
+   "detail": "the server refused --tls-verification insecure: \"retryable\": false, \"state_changed\": \"unknown\", \"outcome_uncertain\": false, \"support_reference\": \"support_5d1948df-618e-"
+  },
+  {
+   "server": "nginx",
+   "mode": "a-http/first-request",
+   "result": "retried",
+   "detail": "the first request answered upstream_unavailable; 2 tries to a stable answer"
+  },
+  {
+   "server": "nginx",
+   "mode": "a-http/C2-loop",
+   "result": "ok",
+   "detail": "status 502 error 'origin_redirect_loop'"
+  },
+  {
+   "server": "nginx",
+   "mode": "b-https",
+   "result": "blocked",
+   "detail": "the server refused --tls-verification insecure: \"retryable\": false, \"state_changed\": \"unknown\", \"outcome_uncertain\": false, \"support_reference\": \"support_fd464c9d-68f9-"
+  },
+  {
+   "server": "httpd",
+   "mode": "a-http/C2-loop",
+   "result": "ok",
+   "detail": "status 502 error 'origin_redirect_loop'"
+  },
+  {
+   "server": "httpd",
+   "mode": "b-https",
+   "result": "blocked",
+   "detail": "the server refused --tls-verification insecure: \"retryable\": false, \"state_changed\": \"unknown\", \"outcome_uncertain\": false, \"support_reference\": \"support_ea8ce83b-51fd-"
+  },
+  {
+   "server": "grpc",
+   "mode": "h2c-direct/C9-unary",
+   "result": "failed",
+   "detail": "{\"error\": \"StatusCode.UNAVAILABLE Received http2 header with status: 502\"}"
+  },
+  {
+   "server": "grpc",
+   "mode": "h2c-direct/C9-stream",
+   "result": "failed",
+   "detail": "\"StatusCode.UNAVAILABLE Received http2 header with status: 502\""
+  }
+ ],
+ "preview": [
+  {
+   "server": "app",
+   "mode": "direct-http/C1-forwarded",
+   "result": "ok",
+   "detail": "status 200 host=tunnel-host.example.test xfp=https xfh=tunnel-host.example.test xff=198.51.100.7"
+  },
+  {
+   "server": "app",
+   "mode": "direct-http/F-force-ssl",
+   "result": "ok",
+   "detail": "status 200"
+  },
+  {
+   "server": "app",
+   "mode": "direct-http/C8-sse",
+   "result": "ok",
+   "detail": "first event after 48 ms"
+  },
+  {
+   "server": "app",
+   "mode": "direct-http/C12-range",
+   "result": "ok",
+   "detail": "status 206, 100 bytes"
+  },
+  {
+   "server": "app",
+   "mode": "direct-http/C13-expect",
+   "result": "ok",
+   "detail": "status 200"
+  },
+  {
+   "server": "app",
+   "mode": "direct-http/C11-slow",
+   "result": "ok",
+   "detail": "status 200 after 45 s"
+  },
+  {
+   "server": "caddy-certs",
+   "mode": "a-http/C2-loop",
+   "result": "ok",
+   "detail": "status 502 error 'origin_redirect_loop'"
+  },
+  {
+   "server": "caddy-certs",
+   "mode": "b-https",
+   "result": "blocked",
+   "detail": "a preview takes no origin TLS options, so a private-CA https origin cannot be previewed"
+  },
+  {
+   "server": "caddy-internal",
+   "mode": "a-http/C2-loop",
+   "result": "ok",
+   "detail": "status 502 error 'origin_redirect_loop'"
+  },
+  {
+   "server": "caddy-internal",
+   "mode": "b-https",
+   "result": "blocked",
+   "detail": "a preview takes no origin TLS options, so a private-CA https origin cannot be previewed"
+  },
+  {
+   "server": "traefik",
+   "mode": "a-http/C2-loop",
+   "result": "ok",
+   "detail": "status 502 error 'origin_redirect_loop'"
+  },
+  {
+   "server": "traefik",
+   "mode": "b-https",
+   "result": "blocked",
+   "detail": "a preview takes no origin TLS options, so a private-CA https origin cannot be previewed"
+  },
+  {
+   "server": "nginx",
+   "mode": "a-http/C2-loop",
+   "result": "ok",
+   "detail": "status 502 error 'origin_redirect_loop'"
+  },
+  {
+   "server": "nginx",
+   "mode": "b-https",
+   "result": "blocked",
+   "detail": "a preview takes no origin TLS options, so a private-CA https origin cannot be previewed"
+  },
+  {
+   "server": "httpd",
+   "mode": "a-http/C2-loop",
+   "result": "ok",
+   "detail": "status 502 error 'origin_redirect_loop'"
+  },
+  {
+   "server": "httpd",
+   "mode": "b-https",
+   "result": "blocked",
+   "detail": "a preview takes no origin TLS options, so a private-CA https origin cannot be previewed"
+  },
+  {
+   "server": "grpc",
+   "mode": "h2c-direct/C9-unary",
+   "result": "failed",
+   "detail": "{\"error\": \"StatusCode.UNAVAILABLE Received http2 header with status: 502\"}"
+  },
+  {
+   "server": "grpc",
+   "mode": "h2c-direct/C9-stream",
+   "result": "failed",
+   "detail": "\"StatusCode.UNAVAILABLE Received http2 header with status: 502\""
+  }
+ ]
+}
