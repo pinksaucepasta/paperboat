@@ -132,8 +132,15 @@ func TestPostgresRecordingsArchive(t *testing.T) {
 		t.Fatalf("complete archive = %+v, %v", out, err)
 	}
 
+	// A recording deleted from its machine takes no further reports.
 	// The machine's copy is deleted and the machine is gone: the archive still plays, the machine path does not.
 	apply(f.prod, recording.KindDeleted, recording.Report{RecordingID: recID, Reason: recording.ReasonRetention})
+	if err := f.s.Archived(f.ctx, f.prod, recID, 3); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a deleted recording took a report: %v", err)
+	}
+	if err := f.s.Archived(f.ctx, f.prod, recID, maxArchiveSegments+1); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("an archive past the bound = %v", err)
+	}
 	f.exec(`UPDATE paperboat.user_machines SET revoked_at = now() WHERE id = $1`, f.prod)
 	if _, err := f.s.Replay(f.ctx, f.member, recID, f.native()); !errors.Is(err, ErrDeleted) {
 		t.Fatalf("machine replay of a deleted recording = %v", err)
@@ -148,6 +155,12 @@ func TestPostgresRecordingsArchive(t *testing.T) {
 	// Retention: past the bucket window the segments are deleted and forgotten; a failed delete keeps them for next time.
 	f.exec(`UPDATE paperboat.session_recordings SET started_at = now() - interval '61 days' WHERE id = $1`, recID)
 	f.s.cfg.BucketRetentionDays = 60
+	// A team that no longer has a bucket is skipped: its row keeps pointing at objects Paperboat cannot reach.
+	if err := f.s.PruneArchive(f.ctx); err != nil || archivedOf(t, f, recID) != 3 || len(bucket.deleted) != 0 {
+		t.Fatalf("a team without a bucket was pruned: %v archived %d deleted %v", err, archivedOf(t, f, recID), bucket.deleted)
+	}
+	f.exec(`INSERT INTO paperboat.team_buckets(team_id,endpoint,region,bucket,prefix,access_key_id,secret,use_recordings,use_files,checked_at)
+ VALUES($1,'https://s3.example.test','us-east-1','team-bucket','paperboat','AKIAEXAMPLE',decode('00','hex'),true,false,now())`, f.team)
 	bucket.deleteErr = errors.New("bucket down")
 	if err := f.s.PruneArchive(f.ctx); err == nil {
 		t.Fatal("a failed delete was swallowed")

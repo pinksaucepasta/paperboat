@@ -100,6 +100,15 @@ func (c *Controller) archiveBatch(ctx context.Context, meta recordings.Meta) err
 	specs := make([]teambucket.Segment, 0, last-first)
 	for index := first; index < last; index++ {
 		data, err := c.config.Sessions.RecordingSegment(meta.ID, uint32(index))
+		if errors.Is(err, recordings.ErrNotFound) {
+			// Pruned for quota before it was copied: nothing is left to upload, so the loop must not retry it forever.
+			c.ledger.mu.Lock()
+			c.ledger.Archived[meta.ID] = int(meta.Segments)
+			_ = c.ledger.save()
+			c.ledger.mu.Unlock()
+			diagnosticlog.TryWarn("a recording was deleted before it was copied to the team bucket")
+			return nil
+		}
 		if err != nil {
 			return fmt.Errorf("read segment %d: %w", index, err)
 		}

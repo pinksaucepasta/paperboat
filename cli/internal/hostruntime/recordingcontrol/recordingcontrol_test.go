@@ -116,6 +116,9 @@ func (f *fakeSessions) StopRecording(id, actor, reason string) (recordings.Meta,
 }
 func (f *fakeSessions) Recordings() ([]recordings.Meta, error) { return f.metas, nil }
 func (f *fakeSessions) RecordingSegment(id string, index uint32) ([]byte, error) {
+	if id == "rec_pruned" {
+		return nil, recordings.ErrNotFound
+	}
 	return []byte(fmt.Sprintf("segment %s %d", id, index)), nil
 }
 func (f *fakeSessions) PruneRecordings(time.Duration, int64) ([]recordings.Meta, error) {
