@@ -42,6 +42,12 @@ def wait_for(description, probe, timeout=60, interval=1.0):
         time.sleep(interval)
 
 
+def policy_set(path, team):
+    result = command_result(PB, 'policy', 'set', str(path), '--workspace', team, '--yes', '--message', 'recordings device check', timeout=90)  # no --json for this command
+    if result.returncode:
+        raise RuntimeError('pb policy set failed: exit %d' % result.returncode)
+
+
 def listing(team, machine=None):
     args = ['recordings', 'list', '--team', team]
     if machine:
@@ -101,6 +107,8 @@ class Session:
             self.terminal.settle()
             self.terminal.send(b'\x04')
             self.terminal.wait_exit()
+        except RuntimeError:
+            pass  # the terminal already closed: nothing left to end
         finally:
             self.terminal.close()
 
@@ -143,7 +151,7 @@ def phase_manual(team, target, directory):
     name = 'smoke-rec-' + uuid.uuid4().hex[:10]
     session = Session(target, name)
     try:
-        outside = [session.say('BEFORE')]
+        session.say('BEFORE')  # a recording starts with a snapshot of the screen, so earlier output may appear in it
         if session.saw_rec():
             raise RuntimeError('REC showed before anything was recorded')
         sid = session.session_id()
@@ -158,15 +166,15 @@ def phase_manual(team, target, directory):
         stopped = recording_control('stop', sid)
         if stopped.get('recording') is not None:
             raise RuntimeError('recordings stop did not clear the recording')
-        outside.append(session.say('AFTERSTOP'))
+        after = session.say('AFTERSTOP')
         ended = finished(team, recording['id'])
         if ended['id'] != recording['id']:
             raise RuntimeError('another recording ended')
         text = export_text(recording['id'], directory)
         if marker not in text or '"o"' not in text:
             raise RuntimeError('the export does not hold the output recorded while REC was on')
-        if any(token in text for token in outside):
-            raise RuntimeError('the recording holds output from outside its start and stop')
+        if after in text:
+            raise RuntimeError('the recording holds output printed after it was stopped')
         if played_text(recording['id']).count(marker) < 1:
             raise RuntimeError('pb recordings play did not show the recorded output')
         by_machine = listing(team, ended['machine_id'])
@@ -218,21 +226,21 @@ def phase_rule(team, target, directory):
     name = 'smoke-rec-' + uuid.uuid4().hex[:10]
     session = None
     try:
-        pb_json('policy', 'set', str(path), '--workspace', team)
+        policy_set(path, team)
         session = Session(target, name)
         marker = session.say('RULEOUT')
         recording = new_recording(team, target, before)
         if recording['trigger'] != 'rule' or recording['state'] != STARTED:
             raise RuntimeError('the rule did not start the recording')
         wait_for('REC in this client', session.saw_rec, timeout=30, interval=0.3)
-        pb_json('policy', 'set', str(restore), '--workspace', team)
+        policy_set(restore, team)
         ended = finished(team, recording['id'])
         if marker not in export_text(ended['id'], directory):
             raise RuntimeError('the rule recording does not hold its output')
         return ended['id']
     finally:
         try:
-            pb_json('policy', 'set', str(restore), '--workspace', team)
+            policy_set(restore, team)
         finally:
             if session is not None:
                 session.end()
