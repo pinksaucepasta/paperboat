@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/sha256"
@@ -107,5 +108,21 @@ func TestRecordingExportFileIsNewAndOwnerOnly(t *testing.T) {
 	}
 	if _, err := createExportFile(path); !errors.Is(err, os.ErrExist) {
 		t.Fatalf("an export replaced an existing file: %v", err)
+	}
+}
+
+// A replay that fails says why, instead of the generic "could not finish the command".
+func TestReplayFailureIsNamedAndTypedAnswersKeepTheirWords(t *testing.T) {
+	named := namedReplayFailure(errors.New("the recording's final segment is missing"))
+	var failure *recordingReplayFailure
+	if !errors.As(named, &failure) || !strings.Contains(commandFailureMessage(named, classifyCommandFailure(named)), "final segment is missing") {
+		t.Fatalf("not named: %v / %q", named, commandFailureMessage(named, classifyCommandFailure(named)))
+	}
+	usage := localArgumentError("not a recording id")
+	if namedReplayFailure(usage) != usage {
+		t.Fatal("a usage error was rewrapped")
+	}
+	if namedReplayFailure(nil) != nil || namedReplayFailure(context.Canceled) != context.Canceled {
+		t.Fatal("nil or cancellation was rewrapped")
 	}
 }

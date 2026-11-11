@@ -148,6 +148,8 @@ func commandFailureMessage(err error, failure commandFailure) string {
 		return owned.Error()
 	case *configComparisonFailure:
 		return owned.Error()
+	case *recordingReplayFailure:
+		return owned.Error()
 	case updateCompletionFailure:
 		return owned.Error()
 	case *hostruntimecmd.CommandFailure:
@@ -266,6 +268,8 @@ func typedCommandOwnerMessage(owner error, failure commandFailure) string {
 		}
 		return message
 	case *configComparisonFailure:
+		return owner.Error()
+	case *recordingReplayFailure:
 		return owner.Error()
 	case updateCompletionFailure:
 		return owner.Error()

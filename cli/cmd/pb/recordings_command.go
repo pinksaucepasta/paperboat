@@ -181,6 +181,7 @@ func recordingsPlay(c *command.Context) error {
 // account's vault, reads the recording's segments from its machine and hands each one's asciicast lines
 // to emit in order.
 func readRecording(c *command.Context, id string, emit func([]byte) error) (resultErr error) {
+	defer func() { resultErr = namedReplayFailure(resultErr) }()
 	if !wire.ValidRecordingID(id) {
 		return localArgumentError("not a recording id; see `pb recordings list`")
 	}
@@ -397,4 +398,28 @@ func (p *castPlayer) write(text []byte) error {
 			return err
 		}
 	}
+}
+
+// recordingReplayFailure is a replay that failed at a step this command can name: the text is shown as it is, because the
+// generic "could not finish the command" hid why a recording would not play.
+type recordingReplayFailure struct{ cause error }
+
+func (e *recordingReplayFailure) Error() string {
+	return "The recording could not be read: " + e.cause.Error() + "."
+}
+func (e *recordingReplayFailure) Unwrap() error { return e.cause }
+
+// namedReplayFailure wraps a failure of the replay itself; typed answers of Paperboat and the local service, usage
+// errors and cancellations keep their own messages.
+func namedReplayFailure(err error) error {
+	var remote *localapi.RemoteError
+	var apiFailure *api.APIError
+	if err == nil || errors.As(err, &remote) || errors.As(err, &apiFailure) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	var usage usageError
+	if errors.As(err, &usage) {
+		return err
+	}
+	return &recordingReplayFailure{cause: err}
 }
