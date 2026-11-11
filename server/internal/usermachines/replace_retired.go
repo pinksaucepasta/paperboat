@@ -100,7 +100,9 @@ func (s *Service) replaceMachineTx(ctx context.Context, tx *db.Tx, userID, retir
 	if err := adoptControlSyncLease(ctx, tx, retired.ID, replacement.ID); err != nil {
 		return false, err
 	}
-	if replacement.Alias != retired.Alias && isNumberedVariant(replacement.Alias, retired.Alias) {
+	// The explicit cutover (pb pair after a reset) keeps the exact name whatever the new record was called; the
+	// implicit host-key path only reclaims a name the new record got as a numbered variant of it.
+	if replacement.Alias != retired.Alias && (!onlyRetired || isNumberedVariant(replacement.Alias, retired.Alias)) {
 		if _, err := tx.Queries().RenameUserMachine(ctx, dbsqlc.RenameUserMachineParams{Alias: retired.Alias, ID: replacement.ID, UserID: userID}); err != nil {
 			return false, err
 		}
