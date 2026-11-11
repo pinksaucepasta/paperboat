@@ -52,3 +52,17 @@ func TestRecordUnconfirmedLeavesADiagnosticRecord(t *testing.T) {
 		t.Fatal("no diagnostic record")
 	}
 }
+
+// A caller with no error still leaves its record; the updater must not panic where it should proceed.
+func TestRecordUnconfirmedWithoutAnErrorStillRecords(t *testing.T) {
+	handler := captureHandler{records: make(chan slog.Record, 4)}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(handler))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	RecordUnconfirmed("updater", nil)
+	select {
+	case <-handler.records:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no diagnostic record")
+	}
+}
