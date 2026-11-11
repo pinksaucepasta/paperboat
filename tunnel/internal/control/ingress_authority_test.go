@@ -514,3 +514,30 @@ func TestAdmitsPreviewByHostname(t *testing.T) {
 		t.Error("a missing authority admitted a preview")
 	}
 }
+
+// A decision issued to another edge is that edge's preview: this edge answers 404 for it as before, not 503.
+func TestAdmitsPreviewOnlyForDecisionsIssuedToThisEdge(t *testing.T) {
+	mine, other := connectorprotocol.IngressDecision{EdgeNodeID: "edge_1"}, connectorprotocol.IngressDecision{EdgeNodeID: "edge_2"}
+	for _, d := range []*connectorprotocol.IngressDecision{&mine, &other} {
+		d.Binding.Audience, d.Binding.Lifecycle = "public", connectorprotocol.TunnelEphemeral
+	}
+	mine.Binding.Hostname, other.Binding.Hostname = "mine.preview.example.test", "theirs.preview.example.test"
+	a := &IngressAuthority{NodeID: "edge_1", decisions: []connectorprotocol.IngressDecision{mine, other}}
+	if !a.AdmitsPreview("mine.preview.example.test") || a.AdmitsPreview("theirs.preview.example.test") {
+		t.Fatalf("mine admitted %v, other edge's admitted %v", a.AdmitsPreview("mine.preview.example.test"), a.AdmitsPreview("theirs.preview.example.test"))
+	}
+}
+
+// Reads of the held snapshot do not queue behind each other or behind a scan: AdmitsPreview takes the read lock only.
+func TestAdmitsPreviewDoesNotTakeTheWriteLock(t *testing.T) {
+	a := &IngressAuthority{}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	done := make(chan struct{})
+	go func() { a.AdmitsPreview("any.preview.example.test"); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("AdmitsPreview blocked while another reader held the lock")
+	}
+}
