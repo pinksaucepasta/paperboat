@@ -155,6 +155,10 @@ func (s *Service) Policy(ctx context.Context, account string) (Policy, error) {
 	return out, err
 }
 
+// effectiveStatus reports a pending request past its expiry as expired without writing: reads never mutate. The stored
+// status changes when someone decides the request, and retention deletes it long after.
+const effectiveStatus = `(CASE WHEN r.status='pending' AND r.expires_at<=now() THEN 'expired' ELSE r.status END)`
+
 func (s *Service) List(ctx context.Context, account string) (Page, error) {
 	out, _, err := s.Inventory(ctx, account, "", "", "", 128, 0)
 	return out, err
@@ -163,16 +167,13 @@ func (s *Service) Inventory(ctx context.Context, account, q, state, owner string
 	if !safeID.MatchString(account) || limit < 1 || limit > 200 || offset < 0 {
 		return Page{}, 0, ErrInvalid
 	}
-	if _, err := s.db.SQL().ExecContext(ctx, `UPDATE paperboat.team_inbox_requests SET status='expired',decision_generation=decision_generation+1,updated_at=now() WHERE status='pending' AND expires_at<=now() AND (sender_account=$1 OR recipient_account=$1)`, account); err != nil {
-		return Page{}, 0, err
-	}
 	predicate := ` FROM paperboat.team_inbox_requests r LEFT JOIN paperboat.team_inbox_receipt_outbox o USING(request_id) WHERE (r.sender_account=$1 OR r.recipient_account=$1)
  AND ($2='' OR position(lower($2) in lower(r.request_id||' '||r.team_id||' '||r.sender_account||' '||r.recipient_account))>0)
- AND ($3='' OR r.status=$3)
+ AND ($3='' OR ` + effectiveStatus + `=$3)
  AND ($4='' OR ($4='mine' AND r.recipient_account=$1) OR ($4='shared' AND r.sender_account=$1) OR r.sender_account=$4 OR r.recipient_account=$4)`
 	args := []any{account, q, state, owner}
 	// Count and rows must describe one inventory snapshot even while requests
-	// are created or decided. Expiry reconciliation above remains a write.
+	// are created or decided.
 	tx, err := s.db.SQL().BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return Page{}, 0, err
@@ -182,7 +183,7 @@ func (s *Service) Inventory(ctx context.Context, account, q, state, owner string
 	if err := tx.QueryRowContext(ctx, "SELECT count(*)"+predicate, args...).Scan(&total); err != nil {
 		return Page{}, 0, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT r.request_id,r.team_id,r.sender_account,r.recipient_account,r.source_machine_id,r.destination_machine_id,r.source_machine_name,r.destination_machine_name,r.batch_id,r.manifest_digest,r.manifest,r.status,r.decision_generation,r.expires_at,coalesce(o.status,''),coalesce(r.transfer_mode,''),coalesce(r.transfer_state,''),coalesce(r.pause_reason,''),r.committed_bytes`+predicate+` ORDER BY r.created_at DESC,r.request_id DESC LIMIT $5 OFFSET $6`, append(args, limit, offset)...)
+	rows, err := tx.QueryContext(ctx, `SELECT r.request_id,r.team_id,r.sender_account,r.recipient_account,r.source_machine_id,r.destination_machine_id,r.source_machine_name,r.destination_machine_name,r.batch_id,r.manifest_digest,r.manifest,`+effectiveStatus+`,r.decision_generation,r.expires_at,coalesce(o.status,''),coalesce(r.transfer_mode,''),coalesce(r.transfer_state,''),coalesce(r.pause_reason,''),r.committed_bytes`+predicate+` ORDER BY r.created_at DESC,r.request_id DESC LIMIT $5 OFFSET $6`, append(args, limit, offset)...)
 	if err != nil {
 		return Page{}, 0, err
 	}
@@ -207,12 +208,9 @@ func (s *Service) Get(ctx context.Context, account, requestID string) (Request, 
 	if !safeID.MatchString(account) || !safeID.MatchString(requestID) {
 		return Request{}, ErrInvalid
 	}
-	if _, err := s.db.SQL().ExecContext(ctx, `UPDATE paperboat.team_inbox_requests SET status='expired',decision_generation=decision_generation+1,updated_at=now() WHERE request_id=$1 AND status='pending' AND expires_at<=now() AND (sender_account=$2 OR recipient_account=$2)`, requestID, account); err != nil {
-		return Request{}, err
-	}
 	var out Request
 	var manifest []byte
-	err := s.db.SQL().QueryRowContext(ctx, `SELECT r.request_id,r.team_id,r.sender_account,r.recipient_account,r.source_machine_id,r.destination_machine_id,r.source_machine_name,r.destination_machine_name,r.batch_id,r.manifest_digest,r.manifest,r.status,r.decision_generation,r.expires_at,coalesce(o.status,''),coalesce(r.transfer_mode,''),coalesce(r.transfer_state,''),coalesce(r.pause_reason,''),r.committed_bytes FROM paperboat.team_inbox_requests r LEFT JOIN paperboat.team_inbox_receipt_outbox o USING(request_id) WHERE r.request_id=$1 AND (r.sender_account=$2 OR r.recipient_account=$2)`, requestID, account).Scan(&out.RequestID, &out.TeamID, &out.SenderAccount, &out.RecipientAccount, &out.SourceMachineID, &out.DestinationMachineID, &out.SourceMachineName, &out.DestinationMachineName, &out.BatchID, &out.ManifestDigest, &manifest, &out.Status, &out.DecisionGeneration, &out.ExpiresAt, &out.ReceiptNotification, &out.TransferMode, &out.TransferState, &out.PauseReason, &out.CommittedBytes)
+	err := s.db.SQL().QueryRowContext(ctx, `SELECT r.request_id,r.team_id,r.sender_account,r.recipient_account,r.source_machine_id,r.destination_machine_id,r.source_machine_name,r.destination_machine_name,r.batch_id,r.manifest_digest,r.manifest,`+effectiveStatus+`,r.decision_generation,r.expires_at,coalesce(o.status,''),coalesce(r.transfer_mode,''),coalesce(r.transfer_state,''),coalesce(r.pause_reason,''),r.committed_bytes FROM paperboat.team_inbox_requests r LEFT JOIN paperboat.team_inbox_receipt_outbox o USING(request_id) WHERE r.request_id=$1 AND (r.sender_account=$2 OR r.recipient_account=$2)`, requestID, account).Scan(&out.RequestID, &out.TeamID, &out.SenderAccount, &out.RecipientAccount, &out.SourceMachineID, &out.DestinationMachineID, &out.SourceMachineName, &out.DestinationMachineName, &out.BatchID, &out.ManifestDigest, &manifest, &out.Status, &out.DecisionGeneration, &out.ExpiresAt, &out.ReceiptNotification, &out.TransferMode, &out.TransferState, &out.PauseReason, &out.CommittedBytes)
 	if noRows(err) {
 		return Request{}, ErrNotFound
 	}

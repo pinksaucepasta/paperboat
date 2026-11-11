@@ -261,6 +261,28 @@ func TestPostgresExactApprovalRevocationAndReceiptDelivery(t *testing.T) {
 	}
 	service.now = func() time.Time { return time.Now().UTC() }
 
+	// Reading a pending request past its expiry reports it expired and writes nothing.
+	stale, err := service.Create(ctx, RequestInput{RequestID: "tir_stale_" + suffix, OperationID: "op_stale_" + suffix, SenderAccount: sender, SourceMachineID: source, DestinationMachineID: destination, BatchID: "fb_stale_" + suffix, Files: files, ExpiresAt: time.Now().UTC().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.SQL().ExecContext(ctx, `UPDATE paperboat.team_inbox_requests SET expires_at=now()-interval '1 minute' WHERE request_id=$1`, stale.RequestID); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := service.Get(ctx, recipient, stale.RequestID); err != nil || got.Status != "expired" {
+		t.Fatalf("Get past expiry = %q, %v", got.Status, err)
+	}
+	if page, total, err := service.Inventory(ctx, recipient, stale.RequestID, "expired", "", 10, 0); err != nil || total != 1 || len(page.Requests) != 1 || page.Requests[0].Status != "expired" {
+		t.Fatalf("Inventory expired filter = %+v total %d, %v", page, total, err)
+	}
+	if page, total, err := service.Inventory(ctx, recipient, stale.RequestID, "pending", "", 10, 0); err != nil || total != 0 || len(page.Requests) != 0 {
+		t.Fatalf("Inventory pending filter shows an expired request: %+v total %d, %v", page, total, err)
+	}
+	var stored string
+	if err = store.SQL().QueryRowContext(ctx, `SELECT status FROM paperboat.team_inbox_requests WHERE request_id=$1`, stale.RequestID).Scan(&stored); err != nil || stored != "pending" {
+		t.Fatalf("a read wrote the request: stored status %q, %v", stored, err)
+	}
+
 	policy, err = service.SetPolicy(ctx, recipient, Policy{Acceptance: "automatic", ReceiptEmail: false}, policy.Generation)
 	if err != nil {
 		t.Fatal(err)
