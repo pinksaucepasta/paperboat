@@ -66,7 +66,7 @@ func TestE2EServe(t *testing.T) {
 	cfg.CLIAuth.VerificationURL, cfg.CLIAuth.MachinesURL = base+"/cli", base+"/machines"
 	cfg.LocalAccessBaseDomain, cfg.RuntimeBaseDomain = "local.example.test", "runtime.example.test"
 	cfg.Preview.BaseDomain, cfg.Tunnel.BaseDomain = "public.example.test", "public.example.test" // one public base, as production: the managed wildcard certificate covers both
-	if acme := os.Getenv("PAPERBOAT_E2E_ACME_URL"); acme != "" { // TestE2ECore's edge: claimed by the operator, certificates from Pebble
+	if acme := os.Getenv("PAPERBOAT_E2E_ACME_URL"); acme != "" {                                 // TestE2ECore's edge: claimed by the operator, certificates from Pebble
 		e2eEdgeConfig(t, &cfg, acme)
 	}
 	migrations, err := db.Open(cfg.Database)

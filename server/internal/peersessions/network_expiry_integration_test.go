@@ -172,8 +172,8 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, refs := range map[string][]AdmittedScope{
-		"oversized id":     {{ResourceKind: "machine_access", ResourceID: strings.Repeat("a", 257)}},
-		"over budget":      make([]AdmittedScope, 129),
+		"oversized id": {{ResourceKind: "machine_access", ResourceID: strings.Repeat("a", 257)}},
+		"over budget":  make([]AdmittedScope, 129),
 	} {
 		_, err := service.Configuration(ctx, NetworkConfigRequest{OperationID: "invalid_refs_" + suffix, UserID: account, EndpointID: cli, AdmittedScopes: refs})
 		if !errors.Is(err, ErrInvalid) {

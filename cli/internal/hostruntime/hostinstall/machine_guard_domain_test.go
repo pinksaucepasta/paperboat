@@ -60,7 +60,10 @@ func TestGuardInstallRecordsTheServersLocalAccessDomain(t *testing.T) {
 			existingMachineGuardReady = func(context.Context, string) error { return errors.New("machine guard requires upgrade") }
 			prepareMachineGuardForInstall = func() error { return nil }
 			var installedDomain string
-			installMissingMachineGuard = func(_ context.Context, _, domain string) (guardUndo, error) { installedDomain = domain; return nil, nil }
+			installMissingMachineGuard = func(_ context.Context, _, domain string) (guardUndo, error) {
+				installedDomain = domain
+				return nil, nil
+			}
 			if err := installMachineGuard(context.Background(), guardInstallRequest(t)); err != nil {
 				t.Fatal(err)
 			}

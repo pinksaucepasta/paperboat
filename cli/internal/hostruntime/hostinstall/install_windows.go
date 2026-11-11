@@ -28,7 +28,6 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/binarytarget"
-	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
@@ -36,6 +35,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/releaseindex"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/sessionowner"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/workerupdate"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
@@ -774,16 +774,16 @@ var windowsActivationOps = struct {
 		_, err := PrepareWindowsSSHGeneration(ctx, request)
 		return err
 	},
-	prestage:    prepareStagedWindowsBinary,
-	stop:        stopWindowsRuntimeForActivation,
-	token:       ensureWindowsTokenAt,
-	pin:         ensureWindowsPinnedRuntime,
+	prestage:      prepareStagedWindowsBinary,
+	stop:          stopWindowsRuntimeForActivation,
+	token:         ensureWindowsTokenAt,
+	pin:           ensureWindowsPinnedRuntime,
 	stageCarrier:  stageWindowsCarrierUpgrade,
 	carrier:       activateWindowsCarrier,
 	switchCarrier: switchWindowsCarrier,
-	writeConfig: writeWindowsConfigAt,
-	startRoles:  installWindowsRoleServices,
-	awaitHostd:  awaitWindowsHostdServing,
+	writeConfig:   writeWindowsConfigAt,
+	startRoles:    installWindowsRoleServices,
+	awaitHostd:    awaitWindowsHostdServing,
 }
 
 // newWindowsActivation builds installWindows' activation. finish, run on every exit, removes a staged runtime that

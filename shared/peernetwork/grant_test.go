@@ -11,7 +11,9 @@ import (
 	"time"
 )
 
-func testKey(seed byte) string { return base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{seed}, 32)) }
+func testKey(seed byte) string {
+	return base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{seed}, 32))
+}
 
 func validTestGrant(now time.Time) RelayGrant {
 	scope := Scope{ResourceKind: "machine_network", ResourceID: "network_1", ResourceGeneration: 1, Capability: "connect", Direction: "dial", Port: NetworkPort, ExpiresAt: now.Add(time.Minute).Unix()}
