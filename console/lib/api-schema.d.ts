@@ -6920,6 +6920,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/machines/{machine_id}/inbox/{file_id}/share": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                machine_id: string;
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Share one Paperboat Inbox file as a link
+         * @description Creates a preview whose origin is that Inbox file on that machine (target scheme file, address the file id): the machine serves the file itself, the server never carries its bytes. HTML, Markdown, PDF, images and text open in the browser (HTML and SVG under a sandboxing Content-Security-Policy); anything else downloads. The file stays in the Inbox when the link ends. Needs the Inbox authority and the preview authority of POST /v1/previews, counts toward the plan's concurrent previews, and answers like it. Errors: 404 inbox_file_not_found or user_machine_not_found, 409 machine_offline or a plan limit, 413 file_too_large (over preview.shared_file_max_bytes).
+         */
+        post: operations["post_v1_user_machines_machine_id_inbox_file_id_share"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/machines/{machine_id}/inbox/{file_id}": {
         parameters: {
             query?: never;
@@ -8184,7 +8207,7 @@ export interface components {
             hostname: string;
             path_prefix: string;
             /** @enum {string} */
-            origin_scheme: "http" | "https" | "h2c" | "unix" | "tcp";
+            origin_scheme: "http" | "https" | "h2c" | "unix" | "tcp" | "file";
             origin_address: string;
             tls_server_name: string;
             /** @enum {string} */
@@ -8488,7 +8511,7 @@ export interface components {
         };
         PreviewTunnelTarget: {
             /** @enum {string} */
-            scheme: "http" | "https" | "h2c" | "unix" | "tcp";
+            scheme: "http" | "https" | "h2c" | "unix" | "tcp" | "file";
             address: string;
         };
         PreviewLease: {
@@ -27271,6 +27294,64 @@ export interface operations {
                 };
             };
             401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    post_v1_user_machines_machine_id_inbox_file_id_share: {
+        parameters: {
+            query?: {
+                /** @description Explicit workspace: personal or canonical team slug. Validated against current authority; never falls back to Personal. Internal runtime requests without selection remain bound to their existing resource. Signed creation must carry the same selector in its signed JSON workspace field. */
+                workspace?: string;
+            };
+            header: {
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                machine_id: string;
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    access_mode?: "public" | "private" | "team";
+                    /** Format: date-time */
+                    expires_at: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Preview lease created and ready. */
+            200: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    "X-Paperboat-Operation-ID": components["headers"]["OperationID"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewLeaseResponse"];
+                };
+            };
+            /** @description Preview lease persisted and waiting for readiness. */
+            202: {
+                headers: {
+                    ETag: components["headers"]["ETag"];
+                    Location: components["headers"]["Location"];
+                    "X-Paperboat-Operation-ID": components["headers"]["OperationID"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewTunnelOperationResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
             413: components["responses"]["Error"];
