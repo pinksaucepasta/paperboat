@@ -97,7 +97,7 @@ func newWindowsTUFSource(config WindowsConfig) (workerupdate.TUFSource, error) {
 	if err != nil {
 		return workerupdate.TUFSource{}, err
 	}
-	client, err := hostdproto.NewClient(config.HostdSocket, token, 31*time.Minute)
+	client, err := hostdproto.NewClient(config.HostdSocket, token, 31*time.Minute, config.OwnerSID)
 	clear(token)
 	if err != nil {
 		return workerupdate.TUFSource{}, err

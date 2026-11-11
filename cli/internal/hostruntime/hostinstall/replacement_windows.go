@@ -376,8 +376,8 @@ var windowsHostdRunning = func(ctx context.Context, layout service.Layout) (bool
 // prepareWindowsReplacementMaintenance asks hostd to admit maintenance. Only when hostd cannot be asked and its
 // service is stopped is there no work to protect, so installing over a broken installation proceeds (the rule
 // repair follows). Asking first keeps a hostd that the service manager restarts in between under admission.
-func prepareWindowsReplacementMaintenance(ctx context.Context, layout service.Layout, tokenFile string, force bool, timeout time.Duration) (func() error, error) {
-	abort, err := prepareMaintenance(ctx, layout.HostdSocket, tokenFile, force, timeout)
+func prepareWindowsReplacementMaintenance(ctx context.Context, layout service.Layout, tokenFile, ownerSID string, force bool, timeout time.Duration) (func() error, error) {
+	abort, err := prepareMaintenance(ctx, layout.HostdSocket, tokenFile, force, timeout, ownerSID)
 	if err == nil {
 		return abort, nil
 	}
@@ -388,8 +388,8 @@ func prepareWindowsReplacementMaintenance(ctx context.Context, layout service.La
 }
 
 // PrepareWindowsSuppliedMaintenance is prepareWindowsReplacementMaintenance for the supplied-install command.
-func PrepareWindowsSuppliedMaintenance(ctx context.Context, layout service.Layout, tokenFile string, force bool) (func(), error) {
-	abort, err := prepareWindowsReplacementMaintenance(ctx, layout, tokenFile, force, 35*time.Second)
+func PrepareWindowsSuppliedMaintenance(ctx context.Context, layout service.Layout, tokenFile, ownerSID string, force bool) (func(), error) {
+	abort, err := prepareWindowsReplacementMaintenance(ctx, layout, tokenFile, ownerSID, force, 35*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -791,7 +791,7 @@ func replaceWindowsInstallationLocked(ctx context.Context, request Request, stat
 			if timeout == 0 {
 				timeout = 35 * time.Second
 			}
-			admitted, err := prepareWindowsReplacementMaintenance(ctx, layout, installed.TokenFile, request.Force, timeout)
+			admitted, err := prepareWindowsReplacementMaintenance(ctx, layout, installed.TokenFile, installed.OwnerSID, request.Force, timeout)
 			if err != nil {
 				return err
 			}

@@ -186,7 +186,7 @@ func Repair(ctx context.Context, request Request) (resultErr error) {
 				return err
 			}
 			if status.Running {
-				abort, err := PrepareSuppliedMaintenance(ctx, paths.hostdSocket, paths.hostdToken, false)
+				abort, err := PrepareSuppliedMaintenance(ctx, paths.hostdSocket, paths.hostdToken, false, "")
 				if err != nil {
 					return err
 				}

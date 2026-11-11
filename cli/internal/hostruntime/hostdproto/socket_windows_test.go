@@ -142,7 +142,7 @@ func startWindowsNativeServer(t *testing.T, config SocketConfig) *windowsNativeS
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- server.Run(ctx) }()
-	client, err := NewClient(config.SocketPath, config.Token, 3*time.Second)
+	client, err := NewClient(config.SocketPath, config.Token, 3*time.Second, "")
 	if err != nil {
 		cancel()
 		t.Fatalf("construct native named-pipe client: %v", err)

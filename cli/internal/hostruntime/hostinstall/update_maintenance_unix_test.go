@@ -38,7 +38,7 @@ func TestSuppliedMaintenanceBoundary(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	client, err := hostdproto.NewClient(socket, token, time.Second)
+	client, err := hostdproto.NewClient(socket, token, time.Second, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,18 +52,18 @@ func TestSuppliedMaintenanceBoundary(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	if _, err = PrepareSuppliedMaintenance(context.Background(), socket, tokenPath, false); !errors.Is(err, hostdproto.ErrMaintenanceBusy) {
+	if _, err = PrepareSuppliedMaintenance(context.Background(), socket, tokenPath, false, ""); !errors.Is(err, hostdproto.ErrMaintenanceBusy) {
 		t.Fatalf("ordinary replacement protected workload error=%v", err)
 	}
-	abort, err := PrepareSuppliedMaintenance(context.Background(), socket, tokenPath, true)
+	abort, err := PrepareSuppliedMaintenance(context.Background(), socket, tokenPath, true, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = PrepareSuppliedMaintenance(context.Background(), socket, tokenPath, true); !errors.Is(err, hostdproto.ErrMaintenanceBusy) {
+	if _, err = PrepareSuppliedMaintenance(context.Background(), socket, tokenPath, true, ""); !errors.Is(err, hostdproto.ErrMaintenanceBusy) {
 		t.Fatalf("concurrent maintenance accepted: %v", err)
 	}
 	abort()
-	abort, err = PrepareSuppliedMaintenance(context.Background(), socket, tokenPath, true)
+	abort, err = PrepareSuppliedMaintenance(context.Background(), socket, tokenPath, true, "")
 	if err != nil {
 		t.Fatal("abort did not reopen admission", err)
 	}
@@ -73,7 +73,7 @@ func TestSuppliedMaintenanceBoundary(t *testing.T) {
 	if err = os.WriteFile(tokenPath, wrongToken, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = PrepareSuppliedMaintenance(context.Background(), socket, tokenPath, true); err == nil {
+	if _, err = PrepareSuppliedMaintenance(context.Background(), socket, tokenPath, true, ""); err == nil {
 		t.Fatal("incorrect installation capability accepted")
 	}
 }
@@ -106,7 +106,7 @@ func TestSuppliedMaintenanceWaitTimeoutIsTheBusyOutcome(t *testing.T) {
 	defer func() { close(settle); cancel(); <-done }()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		client, clientErr := hostdproto.NewClient(socket, token, time.Second)
+		client, clientErr := hostdproto.NewClient(socket, token, time.Second, "")
 		if clientErr == nil {
 			if _, err = client.Active(context.Background()); err == nil {
 				break
@@ -118,7 +118,7 @@ func TestSuppliedMaintenanceWaitTimeoutIsTheBusyOutcome(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	start := time.Now()
-	_, err = prepareMaintenance(context.Background(), socket, tokenPath, false, 300*time.Millisecond)
+	_, err = prepareMaintenance(context.Background(), socket, tokenPath, false, 300*time.Millisecond, "")
 	var busy *MaintenanceBusyTimeoutError
 	if !errors.Is(err, hostdproto.ErrMaintenanceBusy) || !errors.As(err, &busy) || time.Since(start) > 3*time.Second {
 		t.Fatalf("running work past the wait bound: err=%v after %s", err, time.Since(start))

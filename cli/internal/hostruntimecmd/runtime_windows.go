@@ -84,7 +84,7 @@ func windowsHostdClient() (*hostdproto.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	client, err := hostdproto.NewClient(endpoint, token, 5*time.Second)
+	client, err := hostdproto.NewClient(endpoint, token, 5*time.Second, config.OwnerSID)
 	if err != nil {
 		return nil, fmt.Errorf("open Paperboat Windows host-runtime control pipe: %w", err)
 	}

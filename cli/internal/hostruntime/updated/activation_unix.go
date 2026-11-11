@@ -334,7 +334,7 @@ func (s *Service) queueActivationWithApproval(ctx context.Context, approvalID st
 	if prepared.ID != approvalID || current.ID != prepared.ID {
 		return result, ErrCandidateChanged
 	}
-	owner, err := hostdproto.NewClient(s.config.SocketPath, s.config.Token, 35*time.Second)
+	owner, err := hostdproto.NewClient(s.config.SocketPath, s.config.Token, 35*time.Second, "")
 	if err != nil {
 		return result, err
 	}

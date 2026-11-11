@@ -26,7 +26,7 @@ func TestWorkerStartupRequiresHealthyFeatureAndInitialHeartbeat(t *testing.T) {
 			server, endpoint, token, args := workerStartupFixture(t)
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			client, err := hostdproto.NewClient(endpoint, token, time.Second)
+			client, err := hostdproto.NewClient(endpoint, token, time.Second, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -121,7 +121,7 @@ func (f *startupReadinessFeature) Shutdown(context.Context) error {
 
 func TestWorkerStartupRetainsCleanupFailureAndAllowsFreshRecovery(t *testing.T) {
 	_, endpoint, token, args := workerStartupFixture(t)
-	client, err := hostdproto.NewClient(endpoint, token, time.Second)
+	client, err := hostdproto.NewClient(endpoint, token, time.Second, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func TestWorkerActivationCancellationRetainsBorrowedPipeAndRecovery(t *testing.T
 	_, endpoint, token, args := workerStartupFixture(t)
 	listenerCtx, stopListener := context.WithTimeout(context.Background(), 5*time.Second)
 	defer stopListener()
-	client, err := hostdproto.NewClient(endpoint, token, time.Second)
+	client, err := hostdproto.NewClient(endpoint, token, time.Second, "")
 	if err != nil {
 		t.Fatal(err)
 	}

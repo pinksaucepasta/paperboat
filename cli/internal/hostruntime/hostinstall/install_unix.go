@@ -209,7 +209,7 @@ func installWithIntent(ctx context.Context, request Request, nativeLockHeld bool
 					timeout = hooks.DrainTimeout + 5*time.Second
 				}
 				var err error
-				abortMaintenance, err = prepareMaintenance(ctx, paths.hostdSocket, paths.hostdToken, *suppliedForce, timeout)
+				abortMaintenance, err = prepareMaintenance(ctx, paths.hostdSocket, paths.hostdToken, *suppliedForce, timeout, "")
 				if err != nil {
 					return err
 				}

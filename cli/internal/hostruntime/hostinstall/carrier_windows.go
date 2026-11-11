@@ -536,7 +536,7 @@ func reconcileInstalledCarrier(ctx context.Context, instance string, pinReferenc
 	}
 	// The activation moves the carrier with the runtime; a carrier still on another source moves the same way,
 	// standby first and the network last, under maintenance and the lifecycle journal.
-	abort, err := PrepareSuppliedMaintenance(ctx, layout.HostdSocket, config.TokenFile, false)
+	abort, err := PrepareSuppliedMaintenance(ctx, layout.HostdSocket, config.TokenFile, false, config.OwnerSID)
 	if err != nil {
 		return err
 	}

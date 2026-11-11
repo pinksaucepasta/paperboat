@@ -997,7 +997,7 @@ func (b *windowsSCMActivationBackend) activeHostdStatus(ctx context.Context) (ho
 		return hostdproto.Status{}, err
 	}
 	defer clear(token)
-	hostd, err := hostdproto.NewClient(b.config.HostdSocket, token, 5*time.Second)
+	hostd, err := hostdproto.NewClient(b.config.HostdSocket, token, 5*time.Second, b.config.OwnerSID)
 	if err != nil {
 		return hostdproto.Status{}, err
 	}
@@ -1591,7 +1591,7 @@ func (b *windowsSCMActivationBackend) ownerControlClient() (*hostdproto.Client, 
 		return nil, err
 	}
 	defer clear(token)
-	return hostdproto.NewClient(b.config.HostdSocket, token, 31*time.Minute)
+	return hostdproto.NewClient(b.config.HostdSocket, token, 31*time.Minute, b.config.OwnerSID)
 }
 func (b *windowsSCMActivationBackend) featureGate(ctx context.Context, j windowsActivationJournal, operation string) (hostdproto.UpdateGateResponse, error) {
 	client, err := b.ownerControlClient()

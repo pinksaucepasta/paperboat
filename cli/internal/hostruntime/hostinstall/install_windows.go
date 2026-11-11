@@ -1683,7 +1683,7 @@ func Commit(request Request) error {
 		return err
 	}
 	defer clear(token)
-	client, err := hostdproto.NewClient(layout.HostdSocket, token, 5*time.Second)
+	client, err := hostdproto.NewClient(layout.HostdSocket, token, 5*time.Second, config.OwnerSID)
 	if err != nil {
 		return err
 	}
@@ -1759,20 +1759,20 @@ func EnsureCommittedWindowsHostdReady(ctx context.Context, request Request) erro
 		select {
 		case <-readyCtx.Done():
 			timer.Stop()
-			return hostInstallFailure("Paperboat host service health check did not stabilize", errors.Join(readyCtx.Err(), context.Cause(readyCtx), lastErr, windowsHostdStartPhase(layout.HostdSocket, config.TokenFile)))
+			return hostInstallFailure("Paperboat host service health check did not stabilize", errors.Join(readyCtx.Err(), context.Cause(readyCtx), lastErr, windowsHostdStartPhase(layout.HostdSocket, config.TokenFile, config.OwnerSID)))
 		case <-timer.C:
 		}
 	}
 }
 
 // windowsHostdStartPhase asks the host service how far its start got (hostdStartPhase).
-func windowsHostdStartPhase(socket, tokenFile string) error {
+func windowsHostdStartPhase(socket, tokenFile, ownerSID string) error {
 	token, err := os.ReadFile(tokenFile)
 	if err != nil {
 		return fmt.Errorf("host service start phase: its token could not be read: %w", err)
 	}
 	defer clear(token)
-	client, err := hostdproto.NewClient(socket, token, 3*time.Second)
+	client, err := hostdproto.NewClient(socket, token, 3*time.Second, ownerSID)
 	if err != nil {
 		return fmt.Errorf("host service start phase: %w", err)
 	}
@@ -2153,7 +2153,7 @@ func repairWindows(ctx context.Context, ownerSID string, identity *WindowsRollba
 			return err
 		}
 		if status.Running {
-			abort, err := PrepareSuppliedMaintenance(ctx, layout.HostdSocket, config.TokenFile, false)
+			abort, err := PrepareSuppliedMaintenance(ctx, layout.HostdSocket, config.TokenFile, false, config.OwnerSID)
 			if err != nil {
 				return err
 			}

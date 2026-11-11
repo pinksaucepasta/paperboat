@@ -70,8 +70,9 @@ func ResolveUpdateBundle(ctx context.Context, request Request, updateState strin
 
 // PrepareSuppliedMaintenance protects admitted mutations and ordinary protected
 // workloads before an enrolled installation stops any service. Force is explicit.
-func PrepareSuppliedMaintenance(ctx context.Context, socket, tokenFile string, force bool) (func(), error) {
-	abort, err := prepareMaintenance(ctx, socket, tokenFile, force, 35*time.Second)
+// ownerSID is the Windows account hostd runs as ("" on Unix).
+func PrepareSuppliedMaintenance(ctx context.Context, socket, tokenFile string, force bool, ownerSID string) (func(), error) {
+	abort, err := prepareMaintenance(ctx, socket, tokenFile, force, 35*time.Second, ownerSID)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +89,7 @@ func (e *MaintenanceBusyTimeoutError) Unwrap() []error {
 	return []error{hostdproto.ErrMaintenanceBusy, e.Cause}
 }
 
-func prepareMaintenance(ctx context.Context, socket, tokenFile string, force bool, timeout time.Duration) (func() error, error) {
+func prepareMaintenance(ctx context.Context, socket, tokenFile string, force bool, timeout time.Duration, ownerSID string) (func() error, error) {
 	info, err := os.Lstat(tokenFile)
 	if err != nil {
 		return nil, err
@@ -113,7 +114,7 @@ func prepareMaintenance(ctx context.Context, socket, tokenFile string, force boo
 	if len(token) != 32 {
 		return nil, ErrInvalidRequest
 	}
-	client, err := hostdproto.NewClient(socket, token, timeout)
+	client, err := hostdproto.NewClient(socket, token, timeout, ownerSID)
 	if err != nil {
 		return nil, err
 	}

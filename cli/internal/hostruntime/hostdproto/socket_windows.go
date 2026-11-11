@@ -356,9 +356,13 @@ type Client struct {
 	socketPath string
 	token      []byte
 	timeout    time.Duration
+	ownerSID   string
 }
 
-func NewClient(socketPath string, token []byte, timeout time.Duration) (*Client, error) {
+// NewClient talks to the hostd pipe at socketPath. ownerSID is the enrolled account hostd runs as: the pipe must
+// be that account's, SYSTEM's, Administrators' or the caller's (winpipe.Dial), so a SYSTEM or administrator
+// caller never sends its token to another account's squatted pipe.
+func NewClient(socketPath string, token []byte, timeout time.Duration, ownerSID string) (*Client, error) {
 	if !validPipePath(socketPath) || len(token) != installationTokenBytes {
 		return nil, ErrSocketConfig
 	}
@@ -368,7 +372,7 @@ func NewClient(socketPath string, token []byte, timeout time.Duration) (*Client,
 	if timeout < 100*time.Millisecond || timeout > 31*time.Minute {
 		return nil, ErrSocketConfig
 	}
-	return &Client{socketPath: socketPath, token: append([]byte(nil), token...), timeout: timeout}, nil
+	return &Client{socketPath: socketPath, token: append([]byte(nil), token...), timeout: timeout, ownerSID: ownerSID}, nil
 }
 
 func (c *Client) Request(ctx context.Context, request Message) (response Message, resultErr error) {
@@ -387,7 +391,7 @@ func (c *Client) Request(ctx context.Context, request Message) (response Message
 	failure := func(message string, cause error) error {
 		return causedFailure{message: message, cause: errors.Join(requestCtx.Err(), cause)}
 	}
-	connection, err := winpipe.Dial(requestCtx, c.socketPath, "")
+	connection, err := winpipe.Dial(requestCtx, c.socketPath, c.ownerSID)
 	if err != nil {
 		return nil, failure("hostd lifecycle pipe connection failed", err)
 	}

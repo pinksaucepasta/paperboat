@@ -254,7 +254,7 @@ func runWorkerWith(ctx context.Context, args []string, input io.Reader, output, 
 	if err != nil {
 		return err
 	}
-	client, err := hostdproto.NewClient(*socket, token, 5*time.Second)
+	client, err := hostdproto.NewClient(*socket, token, 5*time.Second, "")
 	if err != nil {
 		return err
 	}

@@ -420,7 +420,7 @@ func installWindowsRuntimeFromSuppliedBytesWithCommit(ctx context.Context, reque
 				if err != nil {
 					return err
 				}
-				abort, err := hostinstall.PrepareWindowsSuppliedMaintenance(ctx, layout, previous.TokenFile, request.Force)
+				abort, err := hostinstall.PrepareWindowsSuppliedMaintenance(ctx, layout, previous.TokenFile, previous.OwnerSID, request.Force)
 				if err != nil {
 					return err
 				}

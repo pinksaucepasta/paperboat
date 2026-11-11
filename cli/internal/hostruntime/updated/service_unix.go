@@ -120,7 +120,7 @@ func New(config Config) (*Service, error) {
 			return nil, err
 		}
 	}
-	client, err := hostdproto.NewClient(config.SocketPath, config.Token, 35*time.Second)
+	client, err := hostdproto.NewClient(config.SocketPath, config.Token, 35*time.Second, "")
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +128,7 @@ func New(config Config) (*Service, error) {
 		// Stability checks can span the signed policy's full 30-minute window.
 		// The request context bounds the check; short control RPC deadlines must
 		// not truncate it and roll back an otherwise healthy installation.
-		gateClient, clientErr := hostdproto.NewClient(config.SocketPath, config.Token, 31*time.Minute)
+		gateClient, clientErr := hostdproto.NewClient(config.SocketPath, config.Token, 31*time.Minute, "")
 		if clientErr != nil {
 			return nil, clientErr
 		}

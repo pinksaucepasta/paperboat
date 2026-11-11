@@ -54,7 +54,7 @@ func TestWindowsReplacementSkipsMaintenanceAdmissionWhenHostdIsStopped(t *testin
 	restore := windowsHostdRunning
 	t.Cleanup(func() { windowsHostdRunning = restore })
 	windowsHostdRunning = func(context.Context, service.Layout) (bool, error) { return false, nil }
-	abort, err := prepareWindowsReplacementMaintenance(context.Background(), layout, `C:\does-not-exist\hostd.token`, false, time.Second)
+	abort, err := prepareWindowsReplacementMaintenance(context.Background(), layout, `C:\does-not-exist\hostd.token`, "", false, time.Second)
 	if err != nil {
 		t.Fatalf("stopped hostd still required maintenance admission: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestWindowsReplacementSkipsMaintenanceAdmissionWhenHostdIsStopped(t *testin
 		t.Fatal(err)
 	}
 	windowsHostdRunning = func(context.Context, service.Layout) (bool, error) { return true, nil }
-	if _, err := prepareWindowsReplacementMaintenance(context.Background(), layout, `C:\does-not-exist\hostd.token`, false, time.Second); err == nil {
+	if _, err := prepareWindowsReplacementMaintenance(context.Background(), layout, `C:\does-not-exist\hostd.token`, "", false, time.Second); err == nil {
 		t.Fatal("a running hostd was not asked for maintenance admission")
 	}
 }

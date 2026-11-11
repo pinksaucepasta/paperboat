@@ -386,7 +386,7 @@ func runOwnerHostd(ctx context.Context, output io.Writer, install hostinstall.Wi
 	stopServer = serverCancel
 	serverDone = make(chan error, 1)
 	go func() { defer close(serverDone); serverDone <- server.Run(serverCtx) }()
-	if err := waitForWindowsHostdPipe(ctx, socket, token, serverDone); err != nil {
+	if err := waitForWindowsHostdPipe(ctx, socket, install.OwnerSID, token, serverDone); err != nil {
 		stopServer()
 		return err
 	}
@@ -485,7 +485,7 @@ func runWorkerWith(ctx context.Context, args []string, input io.Reader, output, 
 	if err != nil {
 		return err
 	}
-	client, err := hostdproto.NewClient(*socket, token, 5*time.Second)
+	client, err := hostdproto.NewClient(*socket, token, 5*time.Second, *ownerSID)
 	if err != nil {
 		return err
 	}
@@ -591,14 +591,14 @@ func validateWindowsWorkerExecutable(path string) error {
 	return nil
 }
 
-func waitForWindowsHostdPipe(ctx context.Context, socket string, token []byte, done <-chan error) error {
+func waitForWindowsHostdPipe(ctx context.Context, socket, ownerSID string, token []byte, done <-chan error) error {
 	deadline := time.NewTimer(15 * time.Second)
 	defer deadline.Stop()
 	tick := time.NewTicker(20 * time.Millisecond)
 	defer tick.Stop()
 	var lastErr error
 	for {
-		client, err := hostdproto.NewClient(socket, token, time.Second)
+		client, err := hostdproto.NewClient(socket, token, time.Second, ownerSID)
 		if err == nil {
 			probeCtx, cancel := context.WithTimeout(ctx, time.Second)
 			_, err = client.Active(probeCtx)

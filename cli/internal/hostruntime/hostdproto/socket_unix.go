@@ -466,7 +466,9 @@ type Client struct {
 	timeout    time.Duration
 }
 
-func NewClient(socketPath string, token []byte, timeout time.Duration) (*Client, error) {
+// NewClient talks to the hostd socket at socketPath; ownerSID names the Windows account hostd runs as and is
+// unused here (the socket's directory and peer credentials carry its custody).
+func NewClient(socketPath string, token []byte, timeout time.Duration, _ string) (*Client, error) {
 	if !filepath.IsAbs(socketPath) || len(token) != installationTokenBytes {
 		return nil, ErrSocketConfig
 	}

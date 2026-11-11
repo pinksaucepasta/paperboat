@@ -98,7 +98,7 @@ func TestTask39NativeUserFixture(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer clear(token)
-		own, err := hostdproto.NewClient(paths.hostdSocket, token, 2*time.Second)
+		own, err := hostdproto.NewClient(paths.hostdSocket, token, 2*time.Second, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -131,7 +131,7 @@ func TestTask39NativeUserFixture(t *testing.T) {
 		if _, err = os.ReadFile(other.hostdToken); !errors.Is(err, os.ErrPermission) {
 			t.Fatalf("other user's token access: %v", err)
 		}
-		foreign, err := hostdproto.NewClient(other.hostdSocket, token, time.Second)
+		foreign, err := hostdproto.NewClient(other.hostdSocket, token, time.Second, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -373,7 +373,7 @@ func TestTask39TwoUserNativeInstallUpdateRemove(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer clear(token)
-	client, err := hostdproto.NewClient(aPaths.hostdSocket, token, 30*time.Second)
+	client, err := hostdproto.NewClient(aPaths.hostdSocket, token, 30*time.Second, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +466,7 @@ func TestTask39TwoUserNativeInstallUpdateRemove(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer clear(bToken)
-	bClient, err := hostdproto.NewClient(bPaths.hostdSocket, bToken, time.Second)
+	bClient, err := hostdproto.NewClient(bPaths.hostdSocket, bToken, time.Second, "")
 	if err != nil {
 		t.Fatal(err)
 	}

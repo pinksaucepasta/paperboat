@@ -14,7 +14,7 @@ import (
 // workerOpenSSH asks the worker for the managed SSH connections it bridges itself (the
 // operation-based path); the participants report the daemon's and the carrier's.
 func (s *Service) workerOpenSSH(ctx context.Context) (int, error) {
-	owner, err := hostdproto.NewClient(s.config.SocketPath, s.config.Token, 5*time.Second)
+	owner, err := hostdproto.NewClient(s.config.SocketPath, s.config.Token, 5*time.Second, "")
 	if err != nil {
 		return 0, err
 	}

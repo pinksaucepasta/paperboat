@@ -104,7 +104,7 @@ func TestSocketRejectsUnauthorizedUIDAndCapability(t *testing.T) {
 	defer stopSocketServer(t, cancel, done)
 	wrongToken := append([]byte(nil), config.Token...)
 	wrongToken[0] ^= 0xff
-	client, err := NewClient(config.SocketPath, wrongToken, time.Second)
+	client, err := NewClient(config.SocketPath, wrongToken, time.Second, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestClientCancellationClosesEstablishedRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	client, err := NewClient(config.SocketPath, config.Token, 5*time.Second)
+	client, err := NewClient(config.SocketPath, config.Token, 5*time.Second, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -620,7 +620,7 @@ func stopSocketServer(t *testing.T, cancel context.CancelFunc, done <-chan error
 
 func testSocketClient(t *testing.T, config SocketConfig) *Client {
 	t.Helper()
-	client, err := NewClient(config.SocketPath, config.Token, time.Second)
+	client, err := NewClient(config.SocketPath, config.Token, time.Second, "")
 	if err != nil {
 		t.Fatal(err)
 	}

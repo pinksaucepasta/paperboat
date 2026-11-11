@@ -42,7 +42,7 @@ func workerOpenSSH(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	defer clear(token)
-	client, err := hostdproto.NewClient(layout.HostdSocket, token, localapi.WorkerOpenSSHTimeout)
+	client, err := hostdproto.NewClient(layout.HostdSocket, token, localapi.WorkerOpenSSHTimeout, sid)
 	if err != nil {
 		return 0, err
 	}
