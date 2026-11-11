@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"slices"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/teambucket"
 )
 
 // Topic is the machine-event topic that moves when a machine's Policy may have changed.
@@ -205,7 +207,9 @@ type Recording struct {
 	EndedAt     *time.Time `json:"ended_at,omitempty"`
 	Bytes       int64      `json:"bytes"`
 	Segments    int64      `json:"segments"`
-	State       string     `json:"state"`
+	// ArchivedSegments of the recording's leading segments are in the team bucket (0 without one).
+	ArchivedSegments int64  `json:"archived_segments"`
+	State            string `json:"state"`
 }
 
 // List is GET /v1/teams/{team}/recordings?machine=&session=&limit=&offset=.
@@ -234,22 +238,33 @@ type ChainLink struct {
 // until the ticket expires, and the ticket is bound to it. A browser sends its E2E public key hash
 // and gets a browser ticket (role "recording") and a stream URL instead of a machine ticket.
 type ReplayRequest struct {
+	// Source "bucket" replays the archive in the team bucket, which needs no machine: no ticket is issued and
+	// neither client field is sent. Empty replays from the recording's machine.
+	Source                 string `json:"source,omitempty"`
 	CLIClientSessionID     string `json:"cli_client_session_id,omitempty"`
 	BrowserPublicKeySHA256 string `json:"browser_public_key_sha256,omitempty"`
 }
+
+// SourceBucket is ReplayRequest.Source and Replay.Source of an archive replay.
+const SourceBucket = "bucket"
 
 // NativeConsumer is the peer stream consumer and network capability of a CLI replay.
 const NativeConsumer = "recording"
 
 // Replay answers ReplayRequest. The server wrote the replay audit event before answering.
 type Replay struct {
-	Ticket        string      `json:"ticket"`
-	StreamURL     string      `json:"stream_url,omitempty"` // browser form only
-	MachineID     string      `json:"machine_id"`
-	TeamID        string      `json:"team_id"`        // the aad of the viewer's copy and the chain
-	KeyGeneration int64       `json:"key_generation"` // the recording's
-	ViewerKey     SealedKey   `json:"viewer_key"`
-	Chain         []ChainLink `json:"chain"` // from ViewerKey.Generation down to KeyGeneration+1
+	// Source is "bucket" for an archive replay: Segments then holds one presigned download per archived segment, in
+	// order, and Final says the archive holds the whole recording. No ticket, stream or browser fields.
+	Source        string                 `json:"source,omitempty"`
+	Segments      []teambucket.Authority `json:"segments,omitempty"`
+	Final         bool                   `json:"final,omitempty"`
+	Ticket        string                 `json:"ticket,omitempty"`
+	StreamURL     string                 `json:"stream_url,omitempty"` // browser form only
+	MachineID     string                 `json:"machine_id"`
+	TeamID        string                 `json:"team_id"`        // the aad of the viewer's copy and the chain
+	KeyGeneration int64                  `json:"key_generation"` // the recording's
+	ViewerKey     SealedKey              `json:"viewer_key"`
+	Chain         []ChainLink            `json:"chain"` // from ViewerKey.Generation down to KeyGeneration+1
 	// Browser form only, as every browser ticket answer: the WebSocket subprotocols (the E2E protocol and
 	// "pb-ticket.<ticket>"), the ticket's expiry, role "recording", and the machine owner's transport root the
 	// browser pins before any byte moves (root_public_key base64url without padding, root_fingerprint hex).
