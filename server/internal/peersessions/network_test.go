@@ -2,6 +2,8 @@ package peersessions
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -184,7 +186,11 @@ func TestKeyedLocksSerializeOneKeyAndForgetIt(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			unlock := locks.lock("endpoint")
+			unlock, err := locks.lock(t.Context(), "endpoint")
+			if err != nil {
+				t.Error(err)
+				return
+			}
 			if n := atomic.AddInt32(&inside, 1); n > atomic.LoadInt32(&maximum) {
 				atomic.StoreInt32(&maximum, n)
 			}
@@ -199,5 +205,32 @@ func TestKeyedLocksSerializeOneKeyAndForgetIt(t *testing.T) {
 	}
 	if len(locks.locks) != 0 {
 		t.Fatal("lock entries outlived their holders")
+	}
+}
+
+// A stalled build must not hold canceled refresh requests in its wait queue.
+func TestConfigurationBuildLockHonorsCancellation(t *testing.T) {
+	s := &NetworkService{}
+	unlock, err := s.endpointBuilds.lock(t.Context(), "endpoint")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	done := make(chan error, 1)
+	go func() { _, err := s.Configuration(ctx, NetworkConfigRequest{EndpointID: "endpoint"}); done <- err }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Configuration = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled request still waits for the active build")
+	}
+	s.endpointBuilds.mu.Lock()
+	defer s.endpointBuilds.mu.Unlock()
+	if s.endpointBuilds.locks["endpoint"].refs != 1 {
+		t.Fatal("canceled waiter retained a lock reference")
 	}
 }

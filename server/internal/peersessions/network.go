@@ -13,7 +13,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/admission"
@@ -235,7 +234,10 @@ func (s *NetworkService) Configuration(ctx context.Context, in NetworkConfigRequ
 	// Wake bursts send several configuration requests for one endpoint at once;
 	// built concurrently they all bump the same generation row and abort each
 	// other past the retry budget. One build per endpoint at a time instead.
-	unlock := s.endpointBuilds.lock(in.EndpointID)
+	unlock, err := s.endpointBuilds.lock(ctx, in.EndpointID)
+	if err != nil {
+		return NetworkConfigResult{}, err
+	}
 	defer unlock()
 	for attempt := 1; ; attempt++ {
 		result, err := s.configuration(ctx, in)
@@ -1000,39 +1002,4 @@ func validWireGuardPublicKey(key []byte) bool {
 	}
 	_, err := curve25519.X25519(scalar[:], key)
 	return err == nil
-}
-
-// keyedLocks serializes work per key within this process; entries are removed
-// when their last holder leaves, so it never grows beyond the keys in use.
-type keyedLocks struct {
-	mu    sync.Mutex
-	locks map[string]*keyedLock
-}
-
-type keyedLock struct {
-	mu   sync.Mutex
-	refs int
-}
-
-func (k *keyedLocks) lock(key string) func() {
-	k.mu.Lock()
-	if k.locks == nil {
-		k.locks = map[string]*keyedLock{}
-	}
-	l := k.locks[key]
-	if l == nil {
-		l = &keyedLock{}
-		k.locks[key] = l
-	}
-	l.refs++
-	k.mu.Unlock()
-	l.mu.Lock()
-	return func() {
-		l.mu.Unlock()
-		k.mu.Lock()
-		if l.refs--; l.refs == 0 {
-			delete(k.locks, key)
-		}
-		k.mu.Unlock()
-	}
 }
