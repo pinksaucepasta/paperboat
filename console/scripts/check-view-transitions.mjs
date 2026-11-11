@@ -73,7 +73,10 @@ async function run(name, { reducedMotion, viewport, video }) {
       await page.screenshot({ path: `${shots}/${name}-${label}-frame${frame}.png` })
       await page.waitForTimeout(250)
     }
-    if (slow) await slow.send("Animation.setPlaybackRate", { playbackRate: 1 })
+    if (slow) {
+      await slow.send("Animation.setPlaybackRate", { playbackRate: 1 })
+      await slow.detach()
+    }
     await page.waitForURL(until, { timeout: 30000 })
     await page.waitForTimeout(1200)
     const all = await page.evaluate(() => window.__vt)

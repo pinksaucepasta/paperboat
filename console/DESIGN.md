@@ -177,7 +177,8 @@ SKILL.md and `references/`). React's `<ViewTransition>` (stable in React 19.3) a
     bar are outside it and stay still.
   - `SharedName` gives one element on both sides of a navigation the same name, so it moves instead of
     fading: a machine's name from its row in the Machines list to the machine page's title, and from
-    the Files machine list to the picker in the Files header.
+    the Files machine list to the picker in the Files header. Only the opened row is named, and only
+    its text: a named element can't be clicked while a transition runs.
   - Dialogs, popovers and menus keep their own open and close animation; no view transition on top.
 - **Never animated:** background refreshes, polling, list updates, filtering and typing, loading
   placeholders turning into data, live terminal output, tab switches inside a machine, and anything on

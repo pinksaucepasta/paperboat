@@ -27,6 +27,7 @@ export function MachineChooser({ href, action }: { href: (id: string) => string;
   const machines = useMachines()
   const { date } = useTimeFormat()
   const [search, setSearch] = useState("")
+  const [opened, setOpened] = useState<string>()
   const q = useDeferredValue(search.trim().toLowerCase())
   const lastRows = useLastCount(`machine-chooser:${useWorkspaceId()}`, machines.data?.length)
   const only = machines.data?.length === 1 ? machines.data[0].id : undefined
@@ -83,18 +84,20 @@ export function MachineChooser({ href, action }: { href: (id: string) => string;
               >
                 <td>
                   <div className="flex h-[1lh] min-w-0 items-center gap-2">
-                    <SharedName name={`machine-pick-${machine.id}`}>
-                      <Link
-                        href={href(machine.id)}
-                        data-machine
-                        className={cn(
-                          "truncate-x font-medium outline-none trim-cap after:absolute after:inset-0",
-                          !machine.online && "text-muted-foreground",
-                        )}
-                      >
-                        {machine.alias}
-                      </Link>
-                    </SharedName>
+                    <Link
+                      href={href(machine.id)}
+                      data-machine
+                      onClick={() => setOpened(machine.id)}
+                      className={cn(
+                        "min-w-0 font-medium outline-none after:absolute after:inset-0",
+                        !machine.online && "text-muted-foreground",
+                      )}
+                    >
+                      {/* Only the opened row is named (see MachineRow), so the others stay clickable mid-transition. */}
+                      <SharedName name={opened === machine.id ? `machine-pick-${machine.id}` : undefined}>
+                        <span className="block truncate-x trim-cap">{machine.alias}</span>
+                      </SharedName>
+                    </Link>
                     <StatusDot online={machine.online} />
                   </div>
                   {!machine.online && (
