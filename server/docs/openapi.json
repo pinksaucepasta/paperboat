@@ -343,7 +343,8 @@
           "started_at",
           "bytes",
           "segments",
-          "state"
+          "state",
+          "archived_segments"
         ],
         "properties": {
           "id": {
@@ -412,6 +413,12 @@
               "ended",
               "deleted"
             ]
+          },
+          "archived_segments": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "description": "How many of the recording's leading segments are in the team bucket (0 without one)."
           }
         },
         "description": "One recording index row. Content stays encrypted on its machine."
@@ -441,9 +448,9 @@
       "RecordingReplayRequest": {
         "type": "object",
         "additionalProperties": false,
-        "minProperties": 1,
-        "maxProperties": 1,
-        "description": "Exactly one field. The CLI names its client session (the peer network admits it to the machine for capability recording); a browser sends its E2E public key hash and gets a browser ticket and stream URL.",
+        "minProperties": 0,
+        "maxProperties": 2,
+        "description": "Either one client field (the CLI names its client session, and the peer network admits it to the machine for capability recording; a browser sends its E2E public key hash and gets a browser ticket and stream URL), or source \"bucket\" alone to replay the archive in the team bucket, which needs no machine.",
         "properties": {
           "cli_client_session_id": {
             "type": "string",
@@ -453,6 +460,10 @@
           "browser_public_key_sha256": {
             "type": "string",
             "minLength": 1
+          },
+          "source": {
+            "type": "string",
+            "const": "bucket"
           }
         }
       },
@@ -460,7 +471,6 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "ticket",
           "machine_id",
           "team_id",
           "key_generation",
@@ -544,9 +554,148 @@
             "type": "string",
             "pattern": "^[0-9a-f]{64}$",
             "description": "Browser form only: SHA-256 fingerprint of the transport root, hex."
+          },
+          "source": {
+            "type": "string",
+            "const": "bucket",
+            "description": "Archive replay: segments holds the presigned downloads and there is no ticket."
+          },
+          "segments": {
+            "type": "array",
+            "maxItems": 4096,
+            "items": {
+              "$ref": "#/components/schemas/TeamBucketRequest"
+            },
+            "description": "Archive replay: one presigned download per archived segment, in order."
+          },
+          "final": {
+            "type": "boolean",
+            "description": "Archive replay: the archive holds every segment of an ended recording."
           }
         },
         "description": "The replay audit event was written before this answer. The browser form adds the same connect fields as a browser terminal ticket, so the browser pins the machine before any byte moves."
+      },
+      "TeamBucketRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Headers to send with the request, unchanged."
+          }
+        },
+        "description": "One presigned request to the team bucket."
+      },
+      "TeamBucket": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "endpoint",
+          "region",
+          "bucket",
+          "prefix",
+          "path_style",
+          "access_key_id",
+          "use_recordings",
+          "use_files",
+          "checked_at"
+        ],
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "format": "uri"
+          },
+          "region": {
+            "type": "string"
+          },
+          "bucket": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "path_style": {
+            "type": "boolean"
+          },
+          "access_key_id": {
+            "type": "string"
+          },
+          "use_recordings": {
+            "type": "boolean",
+            "description": "Machines copy closed recordings here."
+          },
+          "use_files": {
+            "type": "boolean",
+            "description": "Files for offline machines wait here."
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When Paperboat last wrote, read and deleted a check object."
+          }
+        },
+        "description": "The team's own S3-compatible bucket. The secret key is never returned."
+      },
+      "TeamBucketInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "endpoint",
+          "region",
+          "bucket",
+          "prefix",
+          "path_style",
+          "access_key_id",
+          "use_recordings",
+          "use_files"
+        ],
+        "properties": {
+          "endpoint": {
+            "type": "string",
+            "format": "uri",
+            "description": "https address without a path."
+          },
+          "region": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "bucket": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "path_style": {
+            "type": "boolean"
+          },
+          "access_key_id": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "secret_access_key": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "Empty keeps the stored key when the bucket already exists."
+          },
+          "use_recordings": {
+            "type": "boolean"
+          },
+          "use_files": {
+            "type": "boolean"
+          }
+        },
+        "description": "At least one use is required."
       },
       "RecordingState": {
         "type": "object",
@@ -50129,6 +50278,330 @@
                       ]
                     }
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/teams/{team_id}/bucket": {
+      "get": {
+        "operationId": "team_bucket",
+        "summary": "The team's bucket",
+        "description": "Owners and admins. 404 bucket_not_configured when the team has none.",
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:read"
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The bucket.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TeamBucket"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "bucket_not_configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only owners and admins manage the team bucket; team_sso_required: sign in through the team's SSO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "team_plan_required: the team bucket is part of the Team plan.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "team_bucket_unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "team_bucket_save",
+        "summary": "Connect or change the team's bucket",
+        "description": "Owners and admins. Unless only the uses change, Paperboat first writes, reads back and deletes a check object; a failing step is refused as bucket_check_failed (422) and nothing is saved. The secret key is stored encrypted and never returned.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TeamBucketInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The saved bucket.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TeamBucket"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_team_bucket: names the field to fix.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "bucket_check_failed: names the failing step (write, read or delete) and what the bucket answered.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only owners and admins manage the team bucket; team_sso_required: sign in through the team's SSO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "team_plan_required: the team bucket is part of the Team plan.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "team_bucket_unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "team_bucket_remove",
+        "summary": "Disconnect the team's bucket",
+        "description": "Owners and admins. What the bucket already holds stays there.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          },
+          {
+            "bearerAccess": []
+          }
+        ],
+        "x-required-bearer-scopes": [
+          "machines:connect"
+        ],
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "removed"
+                      ],
+                      "properties": {
+                        "removed": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "bucket_not_configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthenticated.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "forbidden: only owners and admins manage the team bucket; team_sso_required: sign in through the team's SSO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "team_plan_required: the team bucket is part of the Team plan.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "team_bucket_unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
