@@ -8,6 +8,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	"io"
 	"sync"
+	"time"
 )
 
 type RemoteCall func(context.Context, string, json.RawMessage) (json.RawMessage, error)
@@ -59,6 +60,18 @@ func (m *RemoteManager) invoke(ctx context.Context, op string, request remoteReq
 	m.mu.Unlock()
 	return out, err
 }
+
+// remoteCallBound limits the calls that carry no caller context (the Service and ExecutionService methods take none):
+// a hostd that stops answering fails them after this long instead of hanging the command that asked. Calls that wait
+// by design (wait, next, reader_next) and calls with the caller's own context keep that context.
+var remoteCallBound = 30 * time.Second
+
+func (m *RemoteManager) invokeBounded(op string, request remoteRequest) (remoteResponse, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), remoteCallBound)
+	defer cancel()
+	return m.invoke(ctx, op, request)
+}
+
 func (m *RemoteManager) Start(ctx context.Context, request Request) (ExecutionService, bool, error) {
 	out, err := m.invoke(ctx, "start", remoteRequest{Request: &request, ManagedEnvironment: LaunchEnvironment(ctx)})
 	if err != nil {
@@ -67,14 +80,14 @@ func (m *RemoteManager) Start(ctx context.Context, request Request) (ExecutionSe
 	return &remoteExecution{manager: m, id: out.Snapshot.OperationID, snapshot: out.Snapshot}, out.Replay, nil
 }
 func (m *RemoteManager) Get(id string) (ExecutionService, error) {
-	out, err := m.invoke(context.Background(), "get", remoteRequest{OperationID: id})
+	out, err := m.invokeBounded("get", remoteRequest{OperationID: id})
 	if err != nil {
 		return nil, err
 	}
 	return &remoteExecution{manager: m, id: id, snapshot: out.Snapshot}, nil
 }
 func (m *RemoteManager) ActiveSnapshots() []Snapshot {
-	out, _ := m.invoke(context.Background(), "list", remoteRequest{})
+	out, _ := m.invokeBounded("list", remoteRequest{})
 	return out.Snapshots
 }
 
@@ -84,7 +97,7 @@ func (m *RemoteManager) BeginUpdate(ctx context.Context, transactionID string) e
 }
 
 func (m *RemoteManager) EndUpdate(transactionID string) error {
-	_, err := m.invoke(context.Background(), "end_update", remoteRequest{TransactionID: transactionID})
+	_, err := m.invokeBounded("end_update", remoteRequest{TransactionID: transactionID})
 	return err
 }
 
@@ -96,7 +109,7 @@ type remoteExecution struct {
 }
 
 func (e *remoteExecution) Snapshot() Snapshot {
-	out, err := e.invoke(context.Background(), "get", remoteRequest{})
+	out, err := e.invokeBounded("get", remoteRequest{})
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if err == nil {
@@ -107,6 +120,10 @@ func (e *remoteExecution) Snapshot() Snapshot {
 func (e *remoteExecution) invoke(ctx context.Context, op string, r remoteRequest) (remoteResponse, error) {
 	r.OperationID = e.id
 	return e.manager.invoke(ctx, op, r)
+}
+func (e *remoteExecution) invokeBounded(op string, r remoteRequest) (remoteResponse, error) {
+	r.OperationID = e.id
+	return e.manager.invokeBounded(op, r)
 }
 func (e *remoteExecution) Wait(ctx context.Context) (Snapshot, error) {
 	out, err := e.invoke(ctx, "wait", remoteRequest{})
@@ -126,7 +143,7 @@ func (e *remoteExecution) Next(ctx context.Context, from uint64) (Event, error) 
 	return out.Event, err
 }
 func (e *remoteExecution) OpenReader(from uint64) (ReaderService, error) {
-	out, err := e.invoke(context.Background(), "reader_open", remoteRequest{From: from})
+	out, err := e.invokeBounded("reader_open", remoteRequest{From: from})
 	if err != nil {
 		return nil, err
 	}
@@ -148,19 +165,19 @@ func (e *remoteExecution) WriteAt(ctx context.Context, offset uint64, data []byt
 	return err
 }
 func (e *remoteExecution) CloseInputAt(offset uint64) error {
-	_, err := e.invoke(context.Background(), "close_input_at", remoteRequest{Offset: offset})
+	_, err := e.invokeBounded("close_input_at", remoteRequest{Offset: offset})
 	return err
 }
 func (e *remoteExecution) CloseInput() error {
-	_, err := e.invoke(context.Background(), "close_input", remoteRequest{})
+	_, err := e.invokeBounded("close_input", remoteRequest{})
 	return err
 }
 func (e *remoteExecution) Signal(signal pty.Signal) error {
-	_, err := e.invoke(context.Background(), "signal", remoteRequest{Signal: signal})
+	_, err := e.invokeBounded("signal", remoteRequest{Signal: signal})
 	return err
 }
 func (e *remoteExecution) Resize(d pty.Dimensions) error {
-	_, err := e.invoke(context.Background(), "resize", remoteRequest{Dimensions: d})
+	_, err := e.invokeBounded("resize", remoteRequest{Dimensions: d})
 	return err
 }
 func (e *remoteExecution) Cancel(ctx context.Context) error {
@@ -196,7 +213,7 @@ func (r *remoteReader) Next(ctx context.Context) (Event, func(), error) {
 				r.ack = out.Event.Sequence + 1
 			}
 			r.mu.Unlock()
-			_, _ = r.execution.invoke(context.Background(), "reader_ack", remoteRequest{ReaderID: r.id, Ack: out.Event.Sequence + 1})
+			_, _ = r.execution.invokeBounded("reader_ack", remoteRequest{ReaderID: r.id, Ack: out.Event.Sequence + 1})
 		})
 	}, nil
 }
@@ -204,7 +221,7 @@ func (r *remoteReader) Close() error {
 	r.mu.Lock()
 	r.closed = true
 	r.mu.Unlock()
-	_, err := r.execution.invoke(context.Background(), "reader_close", remoteRequest{ReaderID: r.id})
+	_, err := r.execution.invokeBounded("reader_close", remoteRequest{ReaderID: r.id})
 	return err
 }
 
