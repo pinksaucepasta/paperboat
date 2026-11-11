@@ -7,6 +7,7 @@ package teambucket
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"slices"
@@ -112,6 +113,9 @@ func (in Input) Validate() error {
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" || len(in.Endpoint) > 512 {
 		return fmt.Errorf("%w: the endpoint must be an https address without a path", ErrInvalid)
 	}
+	if !publicHost(u.Hostname()) {
+		return fmt.Errorf("%w: the endpoint must be a public host name or address", ErrInvalid)
+	}
 	switch {
 	case !regionPattern.MatchString(in.Region):
 		return fmt.Errorf("%w: the region is letters, digits and dashes", ErrInvalid)
@@ -127,6 +131,15 @@ func (in Input) Validate() error {
 		return fmt.Errorf("%w: choose at least one use", ErrInvalid)
 	}
 	return nil
+}
+
+// publicHost: a dotted host name, or an IP literal that is not private, loopback, link-local or unspecified. Machines
+// and browsers fetch presigned URLs from this host themselves, so it must not point into anyone's network by name.
+func publicHost(host string) bool {
+	if ip, err := netip.ParseAddr(host); err == nil {
+		return ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast()
+	}
+	return strings.Contains(host, ".") && host != "localhost" && !strings.HasSuffix(host, ".localhost") && !strings.HasSuffix(host, ".internal") && !strings.HasSuffix(host, ".local")
 }
 
 func join(prefix, rest string) string {

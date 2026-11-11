@@ -15,6 +15,33 @@ export type ReplayLoad =
   | { phase: "ready"; cast: Cast }
   | { phase: "failed"; error: unknown }
 
+/** The largest segment file any recording holds (cli/internal/recording MaxSegmentFile: 4 MiB plus its header). */
+const maxSegmentFile = 4 * 1024 * 1024 + 64 * 1024
+
+async function readBounded(response: Response, limit: number): Promise<ArrayBuffer> {
+  const reader = response.body?.getReader()
+  if (!reader) throw new ApiError(0, "bucket_unavailable", "The team bucket sent no data.")
+  const chunks: Uint8Array[] = []
+  let size = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    size += value.byteLength
+    if (size > limit) {
+      void reader.cancel()
+      throw new ApiError(0, "bucket_unavailable", "The team bucket sent more than a recording segment can hold.")
+    }
+    chunks.push(value)
+  }
+  const file = new Uint8Array(size)
+  let offset = 0
+  for (const chunk of chunks) {
+    file.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return file.buffer
+}
+
 /** Why the machine could not serve the recording: its copy is gone or it cannot be reached. */
 const machineGone = (error: unknown) =>
   error instanceof ApiError && ["recording_deleted", "machine_unavailable", "connection_failed", "connection_lost"].includes(error.code)
@@ -52,9 +79,9 @@ async function loadArchive(
     update({ phase: "loading", received: index, total: segments.length })
     let file: ArrayBuffer
     try {
-      const response = await fetch(segment.url, { headers: segment.headers, cache: "no-store" })
+      const response = await fetch(segment.url, { headers: segment.headers, cache: "no-store", redirect: "error" })
       if (!response.ok) throw new ApiError(response.status, "bucket_unavailable", `The team bucket answered ${response.status}.`)
-      file = await response.arrayBuffer()
+      file = await readBounded(response, maxSegmentFile)
     } catch (error) {
       if (error instanceof ApiError) throw error
       throw new ApiError(0, "bucket_unreachable", "The browser couldn't read the team bucket. Its CORS settings must allow this console's address.")

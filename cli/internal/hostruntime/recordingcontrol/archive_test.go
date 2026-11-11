@@ -106,6 +106,14 @@ func TestArchiveCopiesClosedSegmentsInOrderAndResumes(t *testing.T) {
 		t.Fatalf("ledger %+v %v", reopened, err)
 	}
 
+	// A recording pruned for quota before it was copied is given up on, not retried forever.
+	sessions.metas = []recordings.Meta{{ID: "rec_pruned", Segments: 3}}
+	archive.asked = nil
+	controller.archive(context.Background())
+	if controller.archivedCount("rec_pruned") != 3 || len(archive.asked) != 0 || controller.archiveFailures != 0 {
+		t.Fatalf("a pruned recording: archived %d asked %v failures %d", controller.archivedCount("rec_pruned"), archive.asked, controller.archiveFailures)
+	}
+
 	// No bucket: asked once, then left alone for the wait.
 	sessions.metas = append(sessions.metas, recordings.Meta{ID: "rec_c", Segments: 1})
 	archive.noBucket = true
