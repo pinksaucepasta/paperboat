@@ -373,8 +373,13 @@ func ReadCarrierCapability(ctx context.Context, c CarrierConfig) ([]byte, error)
 
 func jsonCarrier(c CarrierConfig) ([]byte, error) { return json.Marshal(c) }
 
+// carrierReadyTimeout is how long a first carrier gets to answer its control pipe after its service starts: on a
+// laptop with Defender scanning the 99 MB executable at first start, 15 s was not enough (victus, 2026-11-11,
+// "initial carrier did not become ready" 31 s into a first pair).
+const carrierReadyTimeout = 60 * time.Second
+
 func waitCarrierReady(ctx context.Context, c CarrierConfig) error {
-	readyCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	readyCtx, cancel := context.WithTimeout(ctx, carrierReadyTimeout)
 	defer cancel()
 	capability, err := ReadCarrierCapability(readyCtx, c)
 	if err != nil {
