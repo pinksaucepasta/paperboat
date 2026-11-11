@@ -34,6 +34,7 @@ pb team [flags]
 * [pb team accept](pb_team_accept.md)	 - Accept an invitation bound to this account
 * [pb team activity](pb_team_activity.md)	 - Search the team audit log (owners, admins, auditors)
 * [pb team attach](pb_team_attach.md)	 - Attach or detach an explicitly selected personal resource
+* [pb team bucket](pb_team_bucket.md)	 - The team's own S3-compatible bucket (owners and admins)
 * [pb team cancel-invite](pb_team_cancel-invite.md)	 - Cancel an outstanding invitation
 * [pb team create](pb_team_create.md)	 - Create a team by paying for its seats
 * [pb team decline](pb_team_decline.md)	 - Decline an invitation bound to this account

@@ -7600,6 +7600,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/machine/recordings/{recording_id}/upload-urls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Presigned uploads for closed recording segments
+         * @description A team machine asks where to put segment files it has closed. Authenticated with the machine's runtime credential and proof. Each URL is bound to the size and SHA-256 named and valid for 10 minutes. Only the recording's own machine may ask.
+         */
+        post: operations["machine_recording_upload_urls"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/machine/recordings/{recording_id}/archived": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report archived recording segments
+         * @description A team machine reports how many leading segments of its recording are now in the team bucket. The count only grows.
+         */
+        post: operations["machine_recording_archived"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/teams/{team_id}/audit-streams": {
         parameters: {
             query?: never;
@@ -8225,6 +8265,25 @@ export interface components {
             segments?: components["schemas"]["TeamBucketRequest"][];
             /** @description Archive replay: the archive holds every segment of an ended recording. */
             final?: boolean;
+        };
+        /** @description One recording segment file to upload. */
+        TeamBucketSegment: {
+            index: number;
+            /** Format: int64 */
+            bytes: number;
+            /** @description Hex SHA-256 of the segment file. */
+            sha256: string;
+        };
+        TeamBucketUploadRequest: {
+            segments: components["schemas"]["TeamBucketSegment"][];
+        };
+        TeamBucketUploads: {
+            /** @description One presigned PUT per requested segment, in order; send exactly the headers returned. */
+            uploads: components["schemas"]["TeamBucketRequest"][];
+        };
+        TeamBucketArchivedRequest: {
+            /** @description The recording's first this-many segments are in the bucket. */
+            segments: number;
         };
         /** @description One presigned request to the team bucket. */
         TeamBucketRequest: {
@@ -29841,6 +29900,154 @@ export interface operations {
                 };
             };
             /** @description team_bucket_unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    machine_recording_upload_urls: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recording_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TeamBucketUploadRequest"];
+            };
+        };
+        responses: {
+            /** @description The uploads. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TeamBucketUploads"];
+                    };
+                };
+            };
+            /** @description invalid_request. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description unauthenticated: the machine's runtime credential and proof are required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recording_not_found: not a recording of this machine. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description bucket_not_configured: the team has no bucket chosen for recordings. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recordings_unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    machine_recording_archived: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recording_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TeamBucketArchivedRequest"];
+            };
+        };
+        responses: {
+            /** @description Recorded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            recorded: boolean;
+                        };
+                    };
+                };
+            };
+            /** @description invalid_request. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description unauthenticated: the machine's runtime credential and proof are required. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recording_not_found: not a recording of this machine. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description bucket_not_configured: the team has no bucket chosen for recordings. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description recordings_unavailable. */
             503: {
                 headers: {
                     [name: string]: unknown;

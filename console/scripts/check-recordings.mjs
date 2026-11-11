@@ -3,6 +3,7 @@
 //   [MACHINE=<team machine id, online, with a recording key set up>]  terminal rows: start, REC, stop
 //   [RECORDING=<recording id> VAULT_PASSWORD_FILE=<file holding the owner's vault password>]  replay rows
 //   [OFFLINE_RECORDING=<recording id on an offline machine>]  the offline state
+//   [LONG_RECORDING=<id of a recording of tens of MB> VAULT_PASSWORD_FILE]  removing replay permission closes an open replay
 //   node check-recordings.mjs
 // Rows without their variables are skipped and say so. Nothing secret is printed: no password, ticket or terminal text.
 import { readFileSync } from "node:fs"
@@ -151,6 +152,54 @@ try {
     log(await page.locator("[data-terminal-recording]").waitFor({ state: "detached", timeout: 15000 }).then(() => true, () => false), "Stop recording clears REC")
     if (session) await ctx.request.delete(`${origin}/api/v1/terminal-sessions/${session}`).catch(() => {})
   } else skip("terminal rows", "MACHINE not set")
+
+  // 6. Removing the viewer's replay permission closes a replay that is still downloading (F25-05). The team's replay
+  // rules are removed in the settings while the replay streams, then added back.
+  if (process.env.LONG_RECORDING && process.env.VAULT_PASSWORD_FILE) {
+    const settings = await ctx.newPage()
+    await settings.goto(`${origin}/team?team=${encodeURIComponent(team)}&tab=recordings`, { waitUntil: "networkidle", timeout: 120000 })
+    await settings.locator("[data-recording-settings]").waitFor({ timeout: 30000 })
+    const saveDialog = async () => {
+      await settings.getByRole("dialog").getByRole("button", { name: /^Save/ }).click({ timeout: 30000 })
+      await settings.getByRole("dialog").waitFor({ state: "detached", timeout: 30000 }).catch(() => {})
+    }
+    const ruleCount = () => settings.locator("[data-recording-rule=recording_view]").count()
+    const removed = await ruleCount()
+    const viewer = await ctx.newPage()
+    await viewer.goto(`${origin}/recordings/${encodeURIComponent(process.env.LONG_RECORDING)}`, { waitUntil: "networkidle", timeout: 120000 })
+    await viewer.getByLabel("Vault password").fill(readFileSync(process.env.VAULT_PASSWORD_FILE, "utf8").trim())
+    await viewer.getByRole("button", { name: "Unlock" }).click()
+    const downloading = await viewer.locator("[data-recording-loading]").waitFor({ timeout: 60000 }).then(() => true, () => false)
+    log(downloading, "the long recording is downloading")
+    for (let i = 0; i < removed; i++) {
+      await settings.locator("[data-recording-rule=recording_view]").first().getByRole("button", { name: "Remove rule" }).click()
+      await saveDialog()
+    }
+    const t0 = Date.now()
+    const outcome = await viewer.locator("main[data-recording-phase]").evaluate(async (main) => {
+      for (let i = 0; i < 60; i++) {
+        const phase = main.getAttribute("data-recording-phase")
+        if (phase === "failed" || phase === "ready") return phase
+        await new Promise((r) => setTimeout(r, 500))
+      }
+      return "loading"
+    }).catch(() => "unknown")
+    if (outcome === "ready") skip("permission removal closes the replay", "the whole recording had downloaded before the rule was removed; use a longer recording")
+    else log(outcome === "failed", "removing replay permission ends the open replay", `${outcome} after ${Math.round((Date.now() - t0) / 1000)} s`)
+    // Put the rules back: one for admins on every machine, as the team had.
+    if (removed > 0 && (await ruleCount()) === 0) {
+      await settings.getByRole("button", { name: "Add rule" }).click()
+      const dialog = settings.getByRole("dialog")
+      await dialog.getByText("Allow replay").click()
+      await dialog.getByText("Admins", { exact: true }).click()
+      await dialog.getByText("All machines").click()
+      await dialog.getByRole("button", { name: "Review" }).click()
+      await saveDialog()
+    }
+    log((await ruleCount()) >= removed, "the replay rules are back", `${await ruleCount()}`)
+    await viewer.close()
+    await settings.close()
+  } else skip("permission removal closes the replay", "LONG_RECORDING and VAULT_PASSWORD_FILE not set")
 } finally {
   await browser.close()
 }

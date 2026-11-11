@@ -1,0 +1,46 @@
+.nh
+.TH "PB-TEAM-BUCKET" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
+
+.SH NAME
+pb-team-bucket - The team's own S3-compatible bucket (owners and admins)
+
+
+.SH SYNOPSIS
+\fBpb team bucket [flags]\fP
+
+
+.SH DESCRIPTION
+A team connects its own S3-compatible bucket and chooses what it is used for: recordings (machines copy closed terminal recordings there, so they replay when the machine is offline), files (files for machines that are offline wait there), or both. Paperboat stores the access key encrypted and only signs short-lived links; everything in the bucket is encrypted before it leaves the machine or browser, and the bucket's own security is the team's.
+
+.PP
+With --json, this command group lists its available commands.
+
+
+.SH OPTIONS
+\fB-h\fP, \fB--help\fP[=false]
+	help for bucket
+
+
+.SH OPTIONS INHERITED FROM PARENT COMMANDS
+\fB--config\fP=""
+	path to the CLI config file
+
+.PP
+\fB--json\fP[=false]
+	print machine-readable JSON
+
+.PP
+\fB--no-customization\fP[=false]
+	ignore local shortcuts, command defaults, and TUI preferences
+
+.PP
+\fB--server\fP=""
+	paperboat-server base URL override
+
+.PP
+\fB--workspace\fP=""
+	resource workspace selector: personal or a team slug
+
+
+.SH SEE ALSO
+\fBpb-team(1)\fP, \fBpb-team-bucket-get(1)\fP, \fBpb-team-bucket-remove(1)\fP, \fBpb-team-bucket-set(1)\fP
