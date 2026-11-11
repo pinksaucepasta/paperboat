@@ -330,6 +330,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	var transferClient *filetransfer.NativeClient
 	var transferLease *localapi.FileTransferLease
 	createdSessionID, createdMachineID := "", ""
+	offlineSessionID := "" // an offline session is named only once its dial succeeds, so a retry mints another
 	for attempt := 0; attempt <= d.cfg.Connect.DialRetries; attempt++ {
 		resolveRequest := resolver.ConnectRequest{Machine: machineRef, Credential: cred, TerminalSessionID: terminalSessionID, CreateTerminalSession: createSession}
 		if target.kind == environmentUserMachine && resolvedMachine.ID != "" && resolvedMachine.InstallationGeneration > 0 {
@@ -340,8 +341,10 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 			if createSession != nil && info.TerminalSession != nil {
 				created := info.TerminalSession
 				if terminalSessionID == "" {
-					terminalSessionID = created.ID
-					if info.Terminal == nil || !info.Terminal.Auth.Offline { // the server never heard of an offline session
+					if info.Terminal != nil && info.Terminal.Auth.Offline { // the server never heard of an offline session
+						offlineSessionID = created.ID
+					} else {
+						terminalSessionID = created.ID
 						createdSessionID, createdMachineID = created.ID, info.MachineID
 					}
 				}
@@ -405,6 +408,9 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 			}
 		}
 		if err == nil {
+			if offlineSessionID != "" {
+				terminalSessionID = offlineSessionID
+			}
 			break
 		}
 		if errors.Is(err, api.ErrUnauthenticated) {
