@@ -646,3 +646,32 @@ func TestDaemonRefusesACallFromAnotherAPIVersion(t *testing.T) {
 		t.Fatalf("the current version was refused: %v", err)
 	}
 }
+
+// Through a real server: a raw client that sends no daemon API version is refused with FailedPrecondition before the
+// backend runs (interceptor wiring, not only checkAPIVersion), and the same call with the version succeeds.
+func TestServerRefusesARawClientWithoutTheAPIVersion(t *testing.T) {
+	backend := &rpcBoundaryBackend{}
+	listener := bufconn.Listen(1 << 20)
+	server := NewServer(backend)
+	go func() { _ = server.grpcServer.Serve(listener) }()
+	defer server.Stop()
+	defer listener.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	conn, err := grpc.DialContext(ctx, "bufnet",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	raw := pb.NewDaemonServiceClient(conn)
+	if _, err := raw.ResolveMachine(ctx, &pb.MachineQuery{Query: "m", AccountId: "user_test"}); status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("a client without the API version got %v, want FailedPrecondition", err)
+	}
+	if _, err := raw.ResolveMachine(rpcContext(ctx), &pb.MachineQuery{Query: "m", AccountId: "user_test"}); status.Code(err) == codes.FailedPrecondition {
+		t.Fatalf("a client with the API version was refused: %v", err)
+	}
+}
