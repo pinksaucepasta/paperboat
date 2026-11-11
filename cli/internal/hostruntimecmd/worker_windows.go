@@ -551,7 +551,7 @@ func awaitWindowsWorkerActivation(ctx context.Context, input io.Reader) error {
 }
 
 func currentWindowsSID() (string, error) {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil || !user.User.Sid.IsValid() {
 		return "", runtimeFailure("Windows hostd enrolled SID is unavailable", err)
 	}

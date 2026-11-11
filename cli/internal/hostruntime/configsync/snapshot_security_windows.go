@@ -22,14 +22,14 @@ func safeSnapshotPermissions(path string, _ fs.FileInfo) bool {
 	if err != nil || owner == nil {
 		return false
 	}
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil {
 		return false
 	}
 	if owner.Equals(user.User.Sid) {
 		return true
 	}
-	member, err := windows.GetCurrentProcessToken().IsMember(owner)
+	member, err := windows.GetCurrentThreadEffectiveToken().IsMember(owner)
 	return err == nil && member
 }
 

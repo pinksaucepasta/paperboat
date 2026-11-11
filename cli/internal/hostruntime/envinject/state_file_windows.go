@@ -8,7 +8,6 @@ import (
 	"os"
 
 	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
-	"golang.org/x/sys/windows"
 )
 
 // Windows does not expose meaningful POSIX permission bits. The atomic writer
@@ -18,7 +17,7 @@ func secureStateFile(path string, info fs.FileInfo, maximum int64) (ok bool, res
 	if info == nil || !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() < 1 || info.Size() > maximum {
 		return false, nil
 	}
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return false, err
 	}

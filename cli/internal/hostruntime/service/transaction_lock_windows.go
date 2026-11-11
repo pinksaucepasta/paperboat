@@ -13,7 +13,7 @@ import (
 )
 
 func lifecycleSecurity() (*windows.SID, string, error) {
-	token, err := windows.OpenCurrentProcessToken()
+	token, err := windowssecurity.OpenEffectiveToken()
 	if err != nil {
 		return nil, "", err
 	}

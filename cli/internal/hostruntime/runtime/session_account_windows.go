@@ -9,7 +9,7 @@ import (
 )
 
 func validateIndependentAccount(d sessionowner.Descriptor) error {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil {
 		return errors.Join(sessionowner.ErrInvalid, err)
 	}

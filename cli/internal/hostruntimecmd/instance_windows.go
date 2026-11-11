@@ -50,7 +50,7 @@ func resolveWindowsServiceInstance(service string, args []string) (windowsRuntim
 }
 
 func currentWindowsRuntimeInstance() (windowsRuntimeInstance, error) {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil {
 		return windowsRuntimeInstance{}, runtimeFailure("Windows runtime user is unavailable", err)
 	}

@@ -131,7 +131,7 @@ func validWindowsHostdTokenACLForSID(path, enrolledSID string) bool {
 }
 func checkWindowsHostdTokenACLForSID(path, enrolledSID string) (bool, error) {
 	if enrolledSID == "" {
-		user, err := windows.GetCurrentProcessToken().GetTokenUser()
+		user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 		if err != nil {
 			return false, err
 		}

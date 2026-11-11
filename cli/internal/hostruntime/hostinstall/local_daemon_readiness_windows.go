@@ -10,9 +10,9 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
-	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
+	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	"golang.org/x/sys/windows"
 )
 
@@ -170,7 +170,7 @@ func readWindowsLocalDaemonSnapshot(ctx context.Context, ownerSID, stateRoot str
 	if err != nil {
 		return localapi.Snapshot{}, err
 	}
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := windows.GetCurrentThreadEffectiveToken().GetTokenUser()
 	if err != nil || user == nil || user.User.Sid == nil {
 		return localapi.Snapshot{}, ErrNotPrivileged
 	}
