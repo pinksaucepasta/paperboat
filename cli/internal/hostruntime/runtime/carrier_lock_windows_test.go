@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
 
 // The role lock is this account's file with a protected DACL (the carrier runs as the enrolled owner's workload; a
@@ -48,5 +50,25 @@ func TestWindowsCarrierRoleLockCustody(t *testing.T) {
 	defer cancel()
 	if _, err := awaitRoleLock(ctx, dir); err == nil || carrierLockBusy(err) || time.Since(started) > 2*time.Second {
 		t.Fatalf("a role lock that cannot be a file was waited for (%v after %s)", err, time.Since(started))
+	}
+}
+
+// A user's carrier trusts only its own account as owner of the role lock (Unix: uid == self); SYSTEM, whose files are
+// owned by Administrators, also trusts that.
+func TestCarrierLockTrustedOwners(t *testing.T) {
+	user, err := windows.StringToSid("S-1-5-21-1-2-3-1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	trusted, err := carrierLockTrustedOwners(user)
+	if err != nil || len(trusted) != 1 || !trusted[0].Equals(user) {
+		t.Fatalf("a user's carrier trusts %d owners (%v), want only itself", len(trusted), err)
+	}
+	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trusted, err = carrierLockTrustedOwners(system); err != nil || len(trusted) != 2 {
+		t.Fatalf("SYSTEM trusts %d owners (%v), want itself and Administrators", len(trusted), err)
 	}
 }
