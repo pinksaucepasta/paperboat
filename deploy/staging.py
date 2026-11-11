@@ -8,12 +8,13 @@ Run from oracle; every remote step is `ssh ubuntu@anvit` (STAGING_HOST). Subcomm
   up <image>           start the stack on that image (migrate first), wait for /readyz
   seed                 account, paid entitlement and a console session for the staging test account (idempotent)
   enroll <name>        print one machine enrollment token on stdout only (TOKEN_CMD for tools/probe/canary-setup.sh)
+  edge <image>           register and run a staging edge (tunnel container, carrier on TCP 18445) for the staging account
   reset                new empty database; the regional certificate is kept (Let's Encrypt limits duplicates)
   status | down | logs
 The API is https://<region>.<regional domain>:<port>, served by the server itself (regional TLS with a Let's
 Encrypt wildcard, DNS-01 on the dev zone), the same way a production regional node serves its name.
 """
-import json, os, secrets, subprocess, sys, time, urllib.request
+import base64, datetime, hashlib, json, os, secrets, subprocess, sys, time, urllib.request
 from pathlib import Path
 
 HOST = os.environ.get("STAGING_HOST", "ubuntu@anvit")
@@ -92,6 +93,11 @@ def build_env(existing, prod):
         "PAPERBOAT_WORKOS_API_KEY": existing.get("PAPERBOAT_WORKOS_API_KEY") or workos("paperboat_workos_api_key"),
         "PAPERBOAT_SESSION_KEYS": keep("PAPERBOAT_SESSION_KEYS", lambda: secrets.token_urlsafe(48)),
         "PAPERBOAT_ENCRYPTION_KEY": keep("PAPERBOAT_ENCRYPTION_KEY", lambda: secrets.token_urlsafe(48)),
+        # without fixed mint keys every restart invalidates every machine identity (401 machine_identity_invalid)
+        "PAPERBOAT_MINT_SIGNING_KEYS": keep("PAPERBOAT_MINT_SIGNING_KEYS", lambda: "staging1:" + secrets.token_urlsafe(32)),
+        "PAPERBOAT_MINT_ACTIVE_KEY_ID": "staging1",
+        # mounts the edge control endpoints (/v1/edge/*, /v1/nodes/*); without it every edge gets 404
+        "PAPERBOAT_EDGE_CONTROL_CREDENTIAL": keep("PAPERBOAT_EDGE_CONTROL_CREDENTIAL", lambda: secrets.token_urlsafe(48)),
         "PAPERBOAT_RELEASE_DIRECTORY": "/srv/paperboat-releases", "PAPERBOAT_RELEASE_BASE_URL": api,
         "PAPERBOAT_CLI_VERIFICATION_URL": api + "/cli", "PAPERBOAT_MACHINES_URL": api + "/machines",
         "PAPERBOAT_BROWSER_LOGIN_ORIGIN": api,
@@ -199,7 +205,7 @@ def status():
 
 
 def sql(statement):
-    return remote("docker compose exec -T postgres psql -U postgres -d paperboat_staging -v ON_ERROR_STOP=1 -Atc " + shell_quote(statement))
+    return remote("docker compose exec -T -e PGOPTIONS=-csearch_path=paperboat,public postgres psql -U postgres -d paperboat_staging -v ON_ERROR_STOP=1 -Atc " + shell_quote(statement))
 
 
 def shell_quote(text):
@@ -234,6 +240,80 @@ def enroll(name):
     sys.stdout.write(data)
 
 
+EDGE_QUIC_PORT = 18448  # UDP is closed on the host; the config still needs a distinct QUIC port
+EDGE_PORT = 18445   # carrier TCP (inside anvit's open 10000-59999 range); the prod edge keeps 80/443/27443-27446
+EDGE_NAME, EDGE_DIR = "pb-stg-edge", "edge"
+
+
+def edge(image):
+    """Account-scoped self-hosted edge for usr_staging, as plain `docker run` (no pbh, no host firewall or nft change).
+    Registration mirrors server/internal/controlplane/selfhost_tunnel_process_test.go: what the claim flow would store.
+    Limits: no browser access (preview URLs never carry a port, so previews need 443) and no HTTP/3 (UDP is closed)."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+    from cryptography.x509.oid import NameOID
+    host = f"{REGION}.{domain()}"
+    api = api_url()
+    b64 = lambda raw: base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    seed = ed25519.Ed25519PrivateKey.generate()
+    raw_seed = seed.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
+    raw_pub = seed.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    key = ed25519.Ed25519PrivateKey.generate()   # the carrier certificate must be Ed25519
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, host)])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key()).serial_number(x509.random_serial_number())
+            .not_valid_before(now - datetime.timedelta(minutes=5)).not_valid_after(now + datetime.timedelta(days=365))
+            .add_extension(x509.SubjectAlternativeName([x509.DNSName(host)]), critical=False).sign(key, None))
+    pin = hashlib.sha256(cert.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)).hexdigest()
+    suffix = secrets.token_hex(6)
+    install, node, credential, usage = f"stg_install_{suffix}", f"stg_node_{suffix}", secrets.token_urlsafe(32), f"stg_usage_{suffix}"
+    jwks = remote(f"curl -sf -m10 http://127.0.0.1:{LOOPBACK}/.well-known/jwks.json")
+    files = {
+        "runtime.credential": credential, "jwks.json": jwks,
+        "revocations.json": json.dumps({"jtis": [], "environments": [], "connector_generations": [], "key_ids": []}),
+        "usage.key": json.dumps({"key_id": usage, "edge_node_id": node, "private_key": b64(raw_seed + raw_pub)}),
+        "tls.crt": cert.public_bytes(serialization.Encoding.PEM).decode(),
+        "tls.key": key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode(),
+        "deployment.json": json.dumps({
+            "self_hosted": True, "browser_access_enabled": False, "browser_login_origin": "", "control_url": api, "credential_issuer": api,
+            "control_credential_file": "/state/runtime.credential", "control_ca_file": "", "jwks_file": "/state/jwks.json",
+            "revocations_file": "/state/revocations.json", "usage_signing_key_file": "/state/usage.key",
+            "infrastructure_tls_cert_file": "/state/tls.crt", "infrastructure_tls_key_file": "/state/tls.key",
+            "connector_advertise_host": host, "carrier_tcp_listen_address": f"0.0.0.0:{EDGE_PORT}",
+            "carrier_quic_listen_address": f"0.0.0.0:{EDGE_QUIC_PORT}", "public_https_listen_address": "0.0.0.0:18446",
+            "private_https_listen_address": "127.0.0.1:9443", "public_http_listen_address": "0.0.0.0:18447",
+            "preview_base_domain": f"prev.{domain()}", "tunnel_base_domain": f"tun.{domain()}", "runtime_base_domain": f"rt.{domain()}",
+            "trusted_proxy_cidrs": [], "public_routes": [], "node_capacity": 32, "control_interval": 5_000_000_000,
+            "control_timeout": 5_000_000_000, "max_body_bytes": 52428800, "max_header_bytes": 32768}),
+    }
+    remote(f"docker rm -f {EDGE_NAME} >/dev/null 2>&1; rm -rf {EDGE_DIR}; mkdir -m 700 {EDGE_DIR}")
+    for filename, content in files.items():
+        remote(f"umask 077 && cat > {EDGE_DIR}/{filename}", stdin=content)
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    sealing = remote("grep '^PAPERBOAT_ENCRYPTION_KEY=' server.env | cut -d= -f2-").strip()   # secrets.Encrypt: AES-256-GCM, key = sha256(key)
+    nonce = os.urandom(12)
+    sealed = nonce + AESGCM(hashlib.sha256(sealing.encode()).digest()).encrypt(nonce, credential.encode(), None)
+    sql("DELETE FROM paperboat.selfhost_installations WHERE scope_id='usr_staging'")
+    sql("DELETE FROM paperboat.control_tunnel_nodes WHERE id LIKE 'stg_node_%'")
+    sql(f"INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,region,failure_domain,"
+        f"roles,transports,capacity_limit,capacity_observed_at,registry_expires_at,tls_spki_sha256) VALUES('{node}','{install}','1.0','initial_fixture','{host}',{EDGE_PORT},{EDGE_QUIC_PORT},"
+        f"'registered','{REGION}','{REGION}',ARRAY['edge'],ARRAY['http2','http3'],32,now(),now()+interval '1 hour',decode('{pin}','hex'))")
+    sql(f"INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) "
+        f"VALUES('{install}','{node}',decode('{raw_pub.hex()}','hex'),decode('{hashlib.sha256(credential.encode()).hexdigest()}','hex'),decode('{sealed.hex()}','hex'),"
+        f"'{EDGE_NAME}','tunnel','account','usr_staging','{install}',true)")
+    # Staging cannot pass the 443 ingress probe, so its edge is marked verified by hand, and the account is pinned to its own pool
+    # (a self-hosted edge serves only accounts whose pool policy is self-hosted-only).
+    sql(f"UPDATE paperboat.control_tunnel_nodes SET public_ingress_verified_at=now() WHERE id='{node}'")
+    sql(f"INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES('account','usr_staging','tunnel','self-hosted-only',ARRAY['{install}']) "
+        "ON CONFLICT (scope_kind,scope_id,capability) DO UPDATE SET mode=excluded.mode, installation_ids=excluded.installation_ids")
+    sql(f"INSERT INTO paperboat.control_usage_verification_keys(key_id,edge_node_id,public_key,not_before,expires_at) VALUES('{usage}','{node}',decode('{raw_pub.hex()}','hex'),now()-interval '1 minute',now()+interval '365 days')")
+    args = f"-node-id {node} -edge-pool {install} -relay-id {node} -relay-region {REGION} -relay-name {EDGE_NAME} -health-address 127.0.0.1:9090 -deployment-config /state/deployment.json -state-path /state/state.json"
+    remote(f"docker run -d --name {EDGE_NAME} --restart unless-stopped --user 0:0 -v $PWD/{EDGE_DIR}:/state -p {EDGE_PORT}:{EDGE_PORT} -p {EDGE_QUIC_PORT}:{EDGE_QUIC_PORT}/udp "
+           f"-p 18446:18446 -p 18447:18447 {image} {args}")
+    return {"node": node, "installation": install}
+
+
 def reset():
     remote("docker compose stop server")
     keep = "/tmp/pb-staging-acme-cache.sql"
@@ -247,7 +327,7 @@ def reset():
 
 
 COMMANDS = {"init": (init, 0), "build": (build, 1), "up": (up, 1), "seed": (seed, 0), "enroll": (enroll, 1), "reset": (reset, 0),
-            "status": (lambda: print(json.dumps(status())), 0), "down": (lambda: remote("docker compose down"), 0),
+            "status": (lambda: print(json.dumps(status())), 0), "edge": (lambda image: print(json.dumps(edge(image))), 1), "down": (lambda: remote("docker compose down"), 0),
             "logs": (lambda: print(remote("docker compose logs --no-color --tail 80 server")), 0)}
 
 if __name__ == "__main__":
