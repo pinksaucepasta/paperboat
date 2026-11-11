@@ -82,7 +82,7 @@ jobs:
           ELEVATED=$(grep -v '^#' "$GITHUB_WORKSPACE/cli/tools/win-test-exec/elevated_tests.txt" | grep . | paste -sd'|')
           status=0
           go test -exec "$RUNNER_TEMP/win-test-exec.exe" -skip "^($ELEVATED)\$" -timeout 15m -count "$COUNT" ${RUN:+-v -run "$RUN"} $PACKAGES || status=1
-          go test -exec "$RUNNER_TEMP/win-test-exec.exe -elevated" -run "^($ELEVATED)\$" -timeout 15m -count "$COUNT" $PACKAGES || status=1
+          go test -exec "$RUNNER_TEMP/win-test-exec.exe -elevated" ${RUN:+-v} -run "^($ELEVATED)\$" -timeout 15m -count "$COUNT" $PACKAGES || status=1
           exit $status
 
   # The device harness's own unit tests (no devices, no network), as lane-test's smoke job: a harness
