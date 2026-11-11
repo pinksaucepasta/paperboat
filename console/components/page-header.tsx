@@ -41,7 +41,10 @@ export function Crumb({ children }: { children: React.ReactNode }) {
 
 export function CrumbLink({ href, children }: { href: string; children: React.ReactNode }) {
   return (
-    <BreadcrumbLink className="truncate" render={<Link href={href} />}>
+    <BreadcrumbLink
+      className="truncate rounded-sm outline-none focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
+      render={<Link href={href} />}
+    >
       {children}
     </BreadcrumbLink>
   )
