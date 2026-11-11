@@ -1,0 +1,33 @@
+name: PR checks
+on:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  targeted:
+    name: Targeted Go checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: paperboat_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      PAPERBOAT_TEST_DATABASE_DSN: postgres://postgres:postgres@localhost:5432/paperboat_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: '**/go.sum'
+      - run: python3 tools/pr-checks.py '${{ github.event.pull_request.base.sha }}'
