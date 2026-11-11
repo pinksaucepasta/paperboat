@@ -523,7 +523,8 @@ func hostCPU() (busy, total uint64) {
 // TestLoadRestartStorm is F21-165: a server restart (deploy or crash, the port closed for PAPERBOAT_LOAD_DOWN_SECONDS)
 // under PAPERBOAT_LOAD_DAEMONS held event waits plus the daemon refresh mix, each daemon retrying a failed request
 // with the daemons' own schedule (shared/backoff.Retry, doubling and jittered). Pass: every daemon's wait loop is
-// answered again within 30 s of the new server listening, and the restarted server answers no 5xx.
+// served again (a wait begun on the new server and answered) within 30 s of the new server listening, and the
+// restarted server answers no 5xx.
 func TestLoadRestartStorm(t *testing.T) {
 	server := startLoadServer(t)
 	if server.restart == nil {
@@ -536,8 +537,10 @@ func TestLoadRestartStorm(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), warm+down+after+20*time.Second)
 	defer cancel()
 	var mu sync.Mutex
-	var upAt time.Time                        // set when the restarted server listens
-	firstAnswer := make([]time.Time, daemons) // per daemon, the first wait answered after upAt
+	var upAt time.Time // set when the restarted server listens
+	// Per daemon, when each successful wait began. A held wait answers only when its long poll ends (~25 s), so
+	// the moment a daemon is back is the start of its first wait that the new server accepted and served.
+	waitStarts := make([][]time.Time, daemons)
 	fiveXX := map[int]int{}
 	var wg sync.WaitGroup
 	body := `{"topics":{"inventory":0,"machine_services":0,"peer_network":0}}`
@@ -548,6 +551,7 @@ func TestLoadRestartStorm(t *testing.T) {
 			defer wg.Done()
 			failures := 0
 			for ctx.Err() == nil {
+				started := time.Now()
 				requestCtx, cancelRequest := context.WithTimeout(ctx, 40*time.Second)
 				status, err := server.request(requestCtx, client, http.MethodPost, "/v1/machines/"+machine+"/events/wait", body)
 				cancelRequest()
@@ -559,8 +563,8 @@ func TestLoadRestartStorm(t *testing.T) {
 				if err == nil && status >= 500 {
 					fiveXX[status]++
 				}
-				if ok && !upAt.IsZero() && firstAnswer[daemon].IsZero() {
-					firstAnswer[daemon] = time.Now()
+				if ok {
+					waitStarts[daemon] = append(waitStarts[daemon], started)
 				}
 				mu.Unlock()
 				if ok {
@@ -619,17 +623,24 @@ func TestLoadRestartStorm(t *testing.T) {
 	wg.Wait()
 	var slowest time.Duration
 	missing := 0
-	for _, answered := range firstAnswer {
-		if answered.IsZero() {
+	for _, starts := range waitStarts {
+		back := time.Time{}
+		for _, started := range starts {
+			if started.After(upAt) {
+				back = started
+				break
+			}
+		}
+		if back.IsZero() {
 			missing++
 			continue
 		}
-		slowest = max(slowest, answered.Sub(upAt))
+		slowest = max(slowest, back.Sub(upAt))
 	}
-	t.Logf("daemons=%d down=%v: slowest wait answered %v after the server listened, %d never answered, 5xx after restart: %v",
+	t.Logf("daemons=%d down=%v: slowest daemon back %v after the server listened, %d never back, 5xx after restart: %v",
 		daemons, down, slowest.Round(time.Millisecond), missing, fiveXX)
 	if missing > 0 || slowest > 30*time.Second {
-		t.Errorf("%d daemons never answered, slowest %v (want all within 30 s)", missing, slowest)
+		t.Errorf("%d daemons never came back, slowest %v (want all within 30 s)", missing, slowest)
 	}
 	for status, count := range fiveXX {
 		t.Errorf("%d x HTTP %d after the restart", count, status)
