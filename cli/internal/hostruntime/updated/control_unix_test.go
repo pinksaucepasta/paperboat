@@ -443,7 +443,9 @@ func TestControlHandlerDropsASilentConnection(t *testing.T) {
 }
 
 func TestControlOperationBudgets(t *testing.T) {
-	if controlOperationTimeout("status") != time.Minute || controlOperationTimeout("settings") != time.Minute || controlOperationTimeout("install") != maxUpdateControlTimeout || controlOperationTimeout("download") != maxUpdateControlTimeout {
-		t.Fatal("control operation budgets changed")
+	for operation, want := range map[string]time.Duration{"status": 30 * time.Second, "settings": 30 * time.Second, "check": 3 * time.Minute, "download": maxUpdateControlTimeout, "install": maxUpdateControlTimeout, "session-owner-start": maxUpdateControlTimeout} {
+		if got := controlOperationTimeout(operation); got != want {
+			t.Errorf("%s budget %s, want %s", operation, got, want)
+		}
 	}
 }
