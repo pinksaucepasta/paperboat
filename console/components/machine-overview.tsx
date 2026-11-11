@@ -149,7 +149,8 @@ function Network() {
   const machine = useCurrentMachine()
   const { data: edges, isPending, isError } = useApiQuery(edgesQuery)
   const loading = useMachineLoading()
-  const { data: measured } = useApiQuery(machineLatencyQuery(machine.id))
+  // The loading stand-in's id is not a machine: asking for its latency answers 404.
+  const { data: measured } = useApiQuery({ ...machineLatencyQuery(machine.id), enabled: !loading })
   const edgeLatency = new Map((measured ?? []).filter((item) => item.role === "edge").map((item) => [item.node_id, item]))
   const relays: Relay[] = (measured ?? [])
     .filter((item) => item.role === "relay")
