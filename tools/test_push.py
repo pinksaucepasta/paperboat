@@ -83,13 +83,19 @@ class PushTests(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn('refs/heads/lane-submit/', refs)
 
-    def test_followup_updates_requested_pr_branch_without_pushing_main(self):
+    def test_followup_keeps_published_history_when_main_advances(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Repo(Path(tmp))
             branch = 'lane-submit/main/original-head'
+            repo.commit(repo.lane, 'published fix')
+            published = git('git', 'rev-parse', 'HEAD', cwd=repo.lane, env=repo.env)
             git('git', 'push', 'origin', f'HEAD:refs/heads/{branch}', cwd=repo.lane, env=repo.env)
             repo.commit(repo.lane, 'renumber row')
             head = git('git', 'rev-parse', 'HEAD', cwd=repo.lane, env=repo.env)
+            tree = git('git', 'rev-parse', 'HEAD^{tree}', cwd=repo.lane, env=repo.env)
+            upstream = git('git', 'commit-tree', tree, '-p', repo.original, '-m', 'other lane',
+                           cwd=repo.lane, env=repo.env)
+            git('git', 'push', 'origin', f'{upstream}:refs/heads/main', cwd=repo.lane, env=repo.env)
             env = dict(repo.env, PB_PUSH_PR='50', PR_HEAD=branch, PR_STATE='MERGED',
                        COUNTER=str(Path(tmp) / 'counter'))
             done = subprocess.run(['sh', str(SCRIPT)], cwd=repo.lane, env=env,
@@ -97,8 +103,10 @@ class PushTests(unittest.TestCase):
             self.assertEqual(done.returncode, 0, done.stderr)
             remote_head = git('git', '--git-dir', str(repo.root / 'origin.git'),
                               'rev-parse', branch, cwd=repo.root, env=repo.env)
-            self.assertEqual(remote_head, head)
-            self.assertEqual(repo.main_head(), repo.original)
+            for ancestor in (published, head, upstream):
+                git('git', 'merge-base', '--is-ancestor', ancestor, remote_head,
+                    cwd=repo.lane, env=repo.env)
+            self.assertEqual(repo.main_head(), upstream)
             self.assertEqual(repo.refs().splitlines(), ['refs/heads/' + branch, 'refs/heads/main'])
 
     def test_failed_required_check_fails_the_push(self):
