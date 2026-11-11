@@ -168,6 +168,7 @@ func TestBrowserAuthorizationOutlivesTTLUntilRevokedAndDeniesNewAdmissions(t *te
 	b := BrowserAccess{Authority: a, LoginOrigin: "https://login.example.test"}
 	r := httptest.NewRequest("GET", "https://"+m.Host+"/", nil)
 	r.AddCookie(&http.Cookie{Name: browserEdgeCookie, Value: "token"})
+	r.Header.Set("Sec-Fetch-Site", "same-origin")
 	w := httptest.NewRecorder()
 	allowed, finish, ok := b.authorize(w, r, m)
 	if !ok {
@@ -209,19 +210,27 @@ func TestBrowserCookieRequestsFromSiblingHostsAreRefused(t *testing.T) {
 	m, d := browserTestMatch()
 	for _, c := range []struct {
 		name, site, mode, dest, method string
+		origin, referer                string
 		allowed                        bool
 	}{
-		{"no fetch metadata", "", "", "", "GET", true},
-		{"same origin fetch", "same-origin", "cors", "empty", "GET", true},
-		{"typed address", "none", "navigate", "document", "GET", true},
-		{"sibling top-level navigation", "same-site", "navigate", "document", "GET", true},
-		{"cross-site top-level navigation", "cross-site", "navigate", "document", "GET", true},
-		{"sibling fetch", "same-site", "cors", "empty", "GET", false},
-		{"sibling image", "same-site", "no-cors", "image", "GET", false},
-		{"sibling websocket", "same-site", "websocket", "websocket", "GET", false},
-		{"sibling iframe", "same-site", "navigate", "iframe", "GET", false},
-		{"sibling form post", "same-site", "navigate", "document", "POST", false},
-		{"cross-site fetch", "cross-site", "cors", "empty", "GET", false},
+		{"no fetch metadata", "", "", "", "GET", "", "", false},
+		{"no fetch metadata, same-origin Origin", "", "", "", "GET", "https://" + m.Host, "", true},
+		{"no fetch metadata, sibling Origin", "", "", "", "GET", "https://other.example.test", "", false},
+		{"no fetch metadata, null Origin", "", "", "", "GET", "null", "", false},
+		{"no fetch metadata, same-origin Referer", "", "", "", "GET", "", "https://" + m.Host + "/page", true},
+		{"no fetch metadata, sibling Referer", "", "", "", "GET", "", "https://other.example.test/page", false},
+		{"no fetch metadata, http Referer", "", "", "", "GET", "", "http://" + m.Host + "/page", false},
+		{"unknown fetch site, no Origin", "bogus", "cors", "empty", "GET", "", "", false},
+		{"same origin fetch", "same-origin", "cors", "empty", "GET", "", "", true},
+		{"typed address", "none", "navigate", "document", "GET", "", "", true},
+		{"sibling top-level navigation", "same-site", "navigate", "document", "GET", "", "", true},
+		{"cross-site top-level navigation", "cross-site", "navigate", "document", "GET", "", "", true},
+		{"sibling fetch", "same-site", "cors", "empty", "GET", "", "", false},
+		{"sibling image", "same-site", "no-cors", "image", "GET", "", "", false},
+		{"sibling websocket", "same-site", "websocket", "websocket", "GET", "", "", false},
+		{"sibling iframe", "same-site", "navigate", "iframe", "GET", "", "", false},
+		{"sibling form post", "same-site", "navigate", "document", "POST", "", "", false},
+		{"cross-site fetch", "cross-site", "cors", "empty", "GET", "", "", false},
 	} {
 		a := &browserAuthorityTest{decision: d}
 		b := BrowserAccess{Authority: a, LoginOrigin: "https://login.example.test"}
@@ -234,6 +243,12 @@ func TestBrowserCookieRequestsFromSiblingHostsAreRefused(t *testing.T) {
 		}
 		if c.method == "POST" {
 			r.Header.Set("Origin", "https://"+m.Host)
+		}
+		if c.origin != "" {
+			r.Header.Set("Origin", c.origin)
+		}
+		if c.referer != "" {
+			r.Header.Set("Referer", c.referer)
 		}
 		w := httptest.NewRecorder()
 		_, finish, ok := b.authorize(w, r, m)

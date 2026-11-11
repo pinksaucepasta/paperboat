@@ -315,7 +315,7 @@ func (b *BrowserAccess) authorize(w http.ResponseWriter, r *http.Request, m rout
 		b.begin(w, r, m.Host)
 		return r, func() {}, false
 	}
-	if !machine && crossSiteSubresource(r) {
+	if !machine && crossSiteSubresource(r, m.Host) {
 		writeErrorPage(w, 403, "This request came from another site and was blocked. Open the address directly in your browser.")
 		return r, func() {}, false
 	}
@@ -385,13 +385,21 @@ func hasBrowserDecision(ctx context.Context, m route.RouteMatch) bool {
 // crossSiteSubresource rejects cookie-authorized requests that another site, or
 // another preview/tunnel host sharing this registrable domain, started without a
 // top-level navigation. Without a public-suffix listing those hosts are
-// same-site, so SameSite=Lax alone does not separate them.
-func crossSiteSubresource(r *http.Request) bool {
-	site := r.Header.Get("Sec-Fetch-Site")
-	if site != "same-site" && site != "cross-site" {
+// same-site, so SameSite=Lax alone does not separate them. A request without
+// Sec-Fetch-Site (old browsers, scripts) is not proven same-site: it passes only
+// when its Origin, or else its Referer, names this host.
+func crossSiteSubresource(r *http.Request, host string) bool {
+	switch r.Header.Get("Sec-Fetch-Site") {
+	case "same-origin", "none":
 		return false
+	case "same-site", "cross-site":
+		return r.Header.Get("Sec-Fetch-Mode") != "navigate" || r.Header.Get("Sec-Fetch-Dest") != "document" || (r.Method != http.MethodGet && r.Method != http.MethodHead)
 	}
-	return r.Header.Get("Sec-Fetch-Mode") != "navigate" || r.Header.Get("Sec-Fetch-Dest") != "document" || (r.Method != http.MethodGet && r.Method != http.MethodHead)
+	if origin := r.Header.Values("Origin"); len(origin) > 0 {
+		return len(origin) != 1 || origin[0] != "https://"+host
+	}
+	ref, err := url.Parse(r.Header.Get("Referer"))
+	return err != nil || ref.Scheme != "https" || !strings.EqualFold(ref.Host, host)
 }
 
 // browserResourceID is the resource a browser session is bound to: the tunnel for a route that rides a

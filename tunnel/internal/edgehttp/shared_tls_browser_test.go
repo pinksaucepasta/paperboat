@@ -61,6 +61,7 @@ func TestSharedTLSBrowserAuthorization(t *testing.T) {
 			defer transport.CloseIdleConnections()
 			request, _ := http.NewRequest("GET", "https://"+match.Host+"/", nil)
 			request.AddCookie(&http.Cookie{Name: browserEdgeCookie, Value: "token"})
+			request.Header.Set("Sec-Fetch-Site", "same-origin")
 			response, err := (&http.Client{Transport: transport, Timeout: 10 * time.Second}).Do(request)
 			if err != nil {
 				t.Fatal(err)
