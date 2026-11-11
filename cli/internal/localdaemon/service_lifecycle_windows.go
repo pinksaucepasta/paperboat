@@ -16,10 +16,19 @@ var runElevatedDaemonService = func(ctx context.Context, executable, action stri
 	return elevation.RunRuntimeService(ctx, executable, action, nil)
 }
 
+// consentPromptAvailable is false in a session that cannot show the UAC prompt (a service or scheduled task): the
+// elevation would wait for an answer nobody can give.
+var consentPromptAvailable = func() bool { return elevation.IsCurrentProcessElevated() || elevation.ConsentPromptAvailable() }
+
+const noPromptReason = "This needs administrator rights, and this session cannot show the Windows approval prompt. Run the command from an administrator terminal."
+
 // runDaemonServiceAsAdministrator is the one path every service action takes once the service manager has
 // refused this terminal's token. A prompt that was declined, or that Windows could not show, becomes the
 // typed AdministratorRequiredError instead of an opaque failure.
 func runDaemonServiceAsAdministrator(ctx context.Context, executable, action string) error {
+	if !consentPromptAvailable() {
+		return &AdministratorRequiredError{Cause: elevation.ErrElevationUnavailable, Reason: noPromptReason}
+	}
 	err := runElevatedDaemonService(ctx, executable, action)
 	switch {
 	case errors.Is(err, elevation.ErrElevationRestrictedJob):

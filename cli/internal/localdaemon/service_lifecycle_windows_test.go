@@ -32,10 +32,11 @@ func installFakeWindowsDaemonService(t *testing.T, fake *fakeWindowsDaemonServic
 	if err := os.WriteFile(executable, []byte("fixture"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	previousSID, previousProbe, previousStart, previousElevated := currentWindowsServiceSID, windowsOwnerServiceInstalled, invokeWindowsOwnerServiceStart, runElevatedDaemonService
+	previousSID, previousProbe, previousStart, previousElevated, previousPrompt := currentWindowsServiceSID, windowsOwnerServiceInstalled, invokeWindowsOwnerServiceStart, runElevatedDaemonService, consentPromptAvailable
 	t.Cleanup(func() {
-		currentWindowsServiceSID, windowsOwnerServiceInstalled, invokeWindowsOwnerServiceStart, runElevatedDaemonService = previousSID, previousProbe, previousStart, previousElevated
+		currentWindowsServiceSID, windowsOwnerServiceInstalled, invokeWindowsOwnerServiceStart, runElevatedDaemonService, consentPromptAvailable = previousSID, previousProbe, previousStart, previousElevated, previousPrompt
 	})
+	consentPromptAvailable = func() bool { return true }
 	currentWindowsServiceSID = func() (string, error) { return testServiceOwnerSID, nil }
 	windowsOwnerServiceInstalled = func(owner string) (bool, error) {
 		if owner != testServiceOwnerSID {
@@ -252,5 +253,22 @@ func TestServiceActionsReportDeclinedElevationAsAdministratorRequired(t *testing
 	}
 	if err := UninstallCurrentUserService(context.Background(), executable); !errors.As(err, &needed) {
 		t.Fatalf("uninstall error=%v", err)
+	}
+}
+
+// A session with no desktop (a service, a scheduled task) cannot show the Windows prompt: the action says so at once
+// instead of starting an elevation that waits for an answer nobody can give.
+func TestServiceActionsNeedingAdministratorFailAtOnceWhereNoPromptCanBeShown(t *testing.T) {
+	fake := &fakeWindowsDaemonService{installed: true}
+	executable := installFakeWindowsDaemonService(t, fake)
+	consentPromptAvailable = func() bool { return false }
+	invokeWindowsOwnerServiceStart = func(context.Context, string) error { return deniedByServiceManager() }
+	err := StartCurrentUserService(context.Background(), executable)
+	var needed *AdministratorRequiredError
+	if !errors.As(err, &needed) || !strings.Contains(needed.Error(), "approval prompt") || !strings.Contains(needed.Error(), "administrator terminal") {
+		t.Fatalf("error=%v", err)
+	}
+	if len(fake.elevated) != 0 {
+		t.Fatalf("elevation started without a prompt: %q", fake.elevated)
 	}
 }
