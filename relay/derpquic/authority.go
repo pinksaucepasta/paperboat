@@ -242,10 +242,9 @@ func sameGrantIdentity(a, b Grant) bool {
 }
 
 // mergeGrants adds the peers of a further grant of the same identity. A peer named again takes the
-// newer grant's scopes (a refreshed chunk); the result stays within MaxMergedPeers. It costs the size of
-// next, not of current: current's lists and index are extended in place, so current is consumed and
-// must be replaced by the result (the caller holds the server lock, which every reader of a grant holds).
-// On an error nothing is changed.
+// newer grant's scopes (a refreshed chunk); the result stays within MaxMergedPeers. current is never changed:
+// a connection's grant, its fence and pair leases may still hold it, so the result gets its own lists and
+// index (copy on write, at most MaxMergedPeers entries). On an error nothing is changed.
 func mergeGrants(current, next Grant) (Grant, error) {
 	// Parts of one grant share its shape: memberships, or per-peer lists.
 	if len(current.Memberships) > 0 && len(next.Peers)+len(next.RelayControlPeers) > 0 || len(next.Memberships) > 0 && len(current.Peers)+len(current.RelayControlPeers) > 0 {
@@ -255,9 +254,8 @@ func mergeGrants(current, next Grant) (Grant, error) {
 	if len(memberships) > MaxGrantMemberships {
 		return Grant{}, ErrAdmission
 	}
-	if current.index == nil {
-		current = current.withIndex()
-	}
+	current.Peers, current.RelayControlPeers = slices.Clone(current.Peers), slices.Clone(current.RelayControlPeers)
+	current = current.withIndex()
 	index := current.index
 	addedPeers := make(map[string]bool, len(next.Peers))
 	for _, peer := range next.Peers {

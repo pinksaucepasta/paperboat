@@ -357,7 +357,7 @@ func (s *Server) admit(p *peerConn, g Grant, now time.Time) error {
 	defer s.mu.Unlock()
 	// An endpoint with more peers than one grant names sends one grant per chunk of peers, all of the
 	// same generation; on its admitted connection they add up.
-	// The part is merged at the commit below, after every refusal, because the merge extends p.grant in place.
+	// The part is merged at the commit below, after every refusal, so a refused part changes nothing.
 	merging := !p.key.IsZero() && p.grant.Generation == g.Generation && p.grant.signedHash != g.signedHash && sameGrantIdentity(p.grant, g)
 	if s.draining && (p.key.IsZero() || !now.Before(s.deadline)) {
 		return ErrOverload
