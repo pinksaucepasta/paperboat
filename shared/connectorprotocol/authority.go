@@ -481,11 +481,17 @@ func validateWireConfigRoute(route wireConfigRoute) error {
 		return ErrInvalidInput
 	}
 	switch route.TLSVerification {
-	case "not_applicable", "system", "custom_ca", "mutual_tls", "insecure", "pinned":
+	case "not_applicable", "system", "custom_ca", "insecure", "pinned":
 	default:
 		return ErrInvalidInput
 	}
 	if route.OriginScheme != "https" && route.TLSVerification != "not_applicable" {
+		return ErrInvalidInput
+	}
+	// The same equivalences the agent enforces (hoststate): a CA exactly for custom_ca, a pin exactly for pinned.
+	if route.OriginScheme == "https" && route.TLSVerification == "not_applicable" ||
+		(route.TLSVerification == "custom_ca") != (route.TLSCA != nil) ||
+		(route.TLSVerification == "pinned") != (route.TLSPin != nil) || route.TLSPin != nil && !originTLSPinPattern.MatchString(*route.TLSPin) {
 		return ErrInvalidInput
 	}
 	if route.PathPrefix != nil && (len(*route.PathPrefix) == 0 || len(*route.PathPrefix) > 512 || !strings.HasPrefix(*route.PathPrefix, "/") || strings.ContainsAny(*route.PathPrefix, "\r\n")) {
