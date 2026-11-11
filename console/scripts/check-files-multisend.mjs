@@ -1,12 +1,15 @@
 // Files page "Send files" to one or several machines at once. Signed-in console, live machines:
 //   STATE=<playwright storage state> CHROME=<Chromium> CONSOLE_ORIGIN=<console origin> [PW_MODULE=<playwright-core index.mjs>]
 //   [SHOTS=<dir for screenshots>] node check-files-multisend.mjs
-// Uses the account's first two machines that can receive files. Steps: (1) one machine: today's wording, no group
+// Uses the account's first two machines that can receive files (or MACHINES=<alias>,<alias>). Steps: (1) one machine: today's wording, no group
 // headings, the file is in that machine's Inbox; (2) two machines: both chips, group headings, "Sent N files to 2
 // machines' Inboxes.", the file is in both Inboxes; (3) the last chip has no remove button; (4) one machine refused
 // mid-send (its upload request answered 409 machine_offline in the browser, nothing real changes): the other still
 // gets the file, the status reads "Sent to 1 of 2 machines. 1 failed." and keeps the error text. Sent test files are
 // deleted from the Inboxes at the end. Prints PASS/FAIL per step; exits 1 on any FAIL.
+// STUB_UPLOAD=1: the server has no upload endpoint yet (inboxLive.upload is off in lib/files.ts and the production build
+// drops the button). Run against a build with the flag on; the browser then answers POST machines/{id}/inbox itself,
+// recording what each machine received, and "in the Inbox" means "that machine's upload request carried the file".
 import { mkdirSync } from "node:fs"
 
 const { chromium } = await import(process.env.PW_MODULE ?? "playwright-core")
@@ -29,7 +32,22 @@ const api = async (path) => {
   return body.data ?? body
 }
 const sent = []
+const stub = process.env.STUB_UPLOAD === "1"
+const uploads = []
+if (stub) {
+  await ctx.route(/\/api\/v1\/machines\/[^/]+\/inbox\?name=/, async (route) => {
+    const request = route.request()
+    if (request.method() !== "POST") return route.fallback()
+    const url = new URL(request.url())
+    const machine = url.pathname.split("/")[4]
+    const name = url.searchParams.get("name")
+    uploads.push({ machine, name, size: request.postDataBuffer()?.length ?? 0 })
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: { id: `stub_${uploads.length}`, name, size: 0, received_at: new Date().toISOString() } }) })
+  })
+}
 const inboxHas = async (machine, name) => {
+  if (stub) return uploads.find((u) => u.machine === machine.id && u.name === name && u.size > 0)
   const list = await api(`machines/${machine.id}/inbox`)
   return (list.items ?? []).find((item) => item.name === name)
 }
@@ -39,14 +57,18 @@ const inboxHasWithin = async (machine, name, ms = 15000) => {
   return false
 }
 
-const listing = await api("machines?page_size=100")
-const usable = (listing.items ?? []).filter((m) => m.online && m.capabilities?.file_receive?.configured && m.capabilities?.file_receive?.observed)
-if (usable.length < 2) throw new Error(`need two machines that can receive files, found ${usable.length}`)
-const [a, b] = usable
-const stamp = Date.now()
-
 const page = await ctx.newPage()
 await page.goto(`${origin}/files`, { waitUntil: "networkidle", timeout: 120000 })
+const workspace = (await page.evaluate(() => document.cookie.match(/(?:^|;\s*)pb-workspace=([a-z0-9-]+)/)?.[1])) ?? "personal"
+const listing = await api(`machines?${new URLSearchParams({ workspace, limit: "200" })}`)
+const usable = (listing.items ?? []).filter((m) => m.online && m.capabilities?.file_receive?.configured && m.capabilities?.file_receive?.observed)
+if (usable.length < 2) throw new Error(`need two machines that can receive files, found ${usable.length}`)
+const pick = process.env.MACHINES?.split(",").map((name) => usable.find((m) => m.alias === name))
+const [a, b] = pick ?? usable
+if (!a || !b) throw new Error(`MACHINES=${process.env.MACHINES} must name two machines that can receive files`)
+const stamp = Date.now()
+// "Send files" sits on a machine's Files page; the dialog starts with that machine.
+await page.goto(`${origin}/files?machine=${a.id}`, { waitUntil: "networkidle", timeout: 120000 })
 const dialog = page.getByRole("dialog")
 const shot = (name) => (shots ? page.screenshot({ path: `${shots}/${name}.png` }) : undefined)
 const openDialog = async (machines) => {
@@ -135,7 +157,7 @@ if (shots) {
 }
 
 // Clean up: delete the test files from the Inboxes.
-for (const [machine, name] of sent) {
+for (const [machine, name] of stub ? [] : sent) {
   const item = await inboxHas(machine, name)
   if (!item) continue
   const res = await ctx.request.delete(`${origin}/api/v1/machines/${machine.id}/inbox/${encodeURIComponent(item.id)}`, {

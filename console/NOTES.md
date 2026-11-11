@@ -352,7 +352,7 @@ credential per call, bound to the machine, the operation and the file):
   413 `file_too_large`, 503 `machine_unreachable`.
 
 Download and Delete are behind `inboxLive` in `lib/files.ts` until verified against a real machine
-after the server and daemon deploys. Not in the contract (so off): sending files from the console,
+after the server and daemon deploys. Send files (several machines at once, `SendFilesDialog`) is built and waits for `POST /v1/machines/{id}/inbox?name=` (raw body, answers `{ data: InboxFile }`) before `inboxLive.upload` goes on; `scripts/check-files-multisend.mjs` (STUB_UPLOAD=1 until then) covers it. Not in the contract (so off):
 Send to another machine, and Share link. Machines record no sender, so there is no From column.
 Team Inbox requests use the existing `GET /v1/team-inbox/requests` and `POST …/{id}/approve|decline`
 (`expected_generation`); they carry account IDs only, so a request reads "A teammate wants to send…".
