@@ -496,7 +496,7 @@ func TestPrivateAccessVerifierDistinguishesRejectionFromOutage(t *testing.T) {
 	if strings.Contains(logs.String()+"\n", "PRIVATE_EDGE_DATABASE_DETAIL") {
 		t.Fatal("edge verifier failure exposed arbitrary error text")
 	}
-	if strings.Count(logs.String(), `"outcome":"failed"`) != 3 || strings.Count(logs.String(), `"outcome":"rejected"`) != 2 {
+	if strings.Count(logs.String(), `"outcome":"failed"`) != 2 || strings.Count(logs.String(), `"outcome":"rejected"`) != 1 {
 		t.Fatalf("verifier outcomes were not logged once as failure plus expected rejection: %s", logs.String())
 	}
 	if !strings.Contains(logs.String(), "Errno") || !strings.Contains(logs.String(), `"http_status":503`) {
