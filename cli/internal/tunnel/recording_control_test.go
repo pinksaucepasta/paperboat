@@ -59,3 +59,25 @@ func TestCursorTerminalControlsItsSessionsRecording(t *testing.T) {
 		t.Fatalf("start %+v %v", state, err)
 	}
 }
+
+// The REC state of a link reaches an observer synchronously, so the local API can send it before the first output
+// (CHECKLIST F25-02). Through the reconnect supervisor it arrived after the first output on a device.
+func TestCursorTerminalTellsARecordingObserverAtOnce(t *testing.T) {
+	message := newEarlyOutputMessageConnection()
+	helper, err := newInitializedHelperTerminalConn(context.Background(), message, &resolver.TerminalTarget{SessionID: "ses_rec", CWD: "/workspace"}, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal := newCursorTerminal(context.Background(), helper, &atomic.Int64{}, func(int) {})
+	defer func() { _ = terminal.Close(); _ = message.Close(); helper.finish(0, nil) }()
+	helper.recordingState.report(true)
+	var got []bool
+	terminal.ObserveRecording(func(recording bool) { got = append(got, recording) })
+	if len(got) != 1 || !got[0] {
+		t.Fatalf("observer told %v at registration, want [true]", got)
+	}
+	helper.recordingState.report(false)
+	if len(got) != 2 || got[1] {
+		t.Fatalf("a change was not delivered in order: %v", got)
+	}
+}

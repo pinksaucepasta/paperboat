@@ -21,7 +21,6 @@ type cursorTerminal struct {
 	helper       *helperTerminalConn
 	sequence     *atomic.Int64
 	observer     atomic.Pointer[func(bool)]
-	recording    recordingState
 }
 
 func newCursorTerminal(ctx context.Context, helper *helperTerminalConn, sequence *atomic.Int64, sink func(int)) *cursorTerminal {
@@ -29,10 +28,6 @@ func newCursorTerminal(ctx context.Context, helper *helperTerminalConn, sequence
 	c.ReconnectingConn = NewObservedReconnectingConn(ctx, &cursorTerminalSource{helperTerminalConn: helper, owner: c}, 1, 0, nil, nil, nil, TelemetryContext{}, func(options *reconnectingOptions) {
 		options.passive = true
 		options.observer = func(event ReconnectEvent) {
-			if event == ReconnectRecording || event == ReconnectNotRecording {
-				c.recording.report(event == ReconnectRecording)
-				return
-			}
 			if observer := c.observer.Load(); observer != nil {
 				if event == ReconnectStalled {
 					(*observer)(true)
@@ -54,7 +49,11 @@ func (c *cursorTerminal) Close() error {
 }
 
 func (c *cursorTerminal) ObserveLinkState(observer func(bool)) { c.observer.Store(&observer) }
-func (c *cursorTerminal) ObserveRecording(observer func(bool)) { c.recording.observe(observer) }
+
+// ObserveRecording follows the helper link directly. The link learns its session's REC state from the attach answer, so
+// an observer is told at once and every later change reaches it in the order the host sent it, ahead of the output that
+// follows it. (Going through the reconnect supervisor made REC arrive after the first output.)
+func (c *cursorTerminal) ObserveRecording(observer func(bool)) { c.helper.ObserveRecording(observer) }
 func (c *cursorTerminal) Write(data []byte) (int, error) {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
