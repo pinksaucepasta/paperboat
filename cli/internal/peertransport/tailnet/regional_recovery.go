@@ -198,6 +198,12 @@ func (a *Authority) PrepareRegional(ctx context.Context, peerID string) error {
 		r.cancel = cancel
 		a.recoveryWorkers.Add(1)
 		go func() { defer a.recoveryWorkers.Done(); r.run(lifetime) }()
+		if peerID == "" {
+			// Establish listening reachability once, concurrently with receive.
+			// Magicsock owns reconnects afterwards; this is not an idle probe loop.
+			a.recoveryWorkers.Add(1)
+			go func() { defer a.recoveryWorkers.Done(); r.prepareListener(lifetime) }()
+		}
 	}
 	if peerID != "" {
 		r.peerID = peerID
