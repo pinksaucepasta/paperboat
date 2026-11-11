@@ -80,3 +80,23 @@ func TestWindowsFirstApprovalStillRefusesATamperedCandidateFile(t *testing.T) {
 		t.Fatalf("a tampered candidate passed verification after a first approval: %v", err)
 	}
 }
+
+// The scheduler's check is download-then-install: while a candidate waits for its first approval, check and
+// download must not be fenced (only an approved journal, which an activator may hold, fences them).
+func TestWindowsCheckAndDownloadStayOpenWhileACandidateAwaitsApproval(t *testing.T) {
+	journal := testWindowsActivationJournal()
+	journal.Stage, journal.ApprovedCandidateID = windowsActivationAwaitingApproval, ""
+	if !windowsAwaitsFirstApproval(journal) {
+		t.Fatal("an unapproved staged candidate fenced check and download")
+	}
+	journal.ApprovedCandidateID = journal.Candidate.ID
+	if windowsAwaitsFirstApproval(journal) {
+		t.Fatal("an approved candidate no longer fences check and download")
+	}
+	for _, stage := range []windowsActivationStage{windowsActivationStaged, windowsActivationSwitching, windowsActivationCommitReady} {
+		journal.Stage, journal.ApprovedCandidateID = stage, ""
+		if windowsAwaitsFirstApproval(journal) {
+			t.Fatalf("stage %q was treated as awaiting approval", string(stage))
+		}
+	}
+}

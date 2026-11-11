@@ -323,6 +323,19 @@ func (c *windowsController) invokeWithAutomatic(ctx context.Context, request Con
 	if blockErr != nil {
 		return response, blockErr
 	}
+	// A staged candidate that nobody approved yet holds the journal for no activator, so checking and downloading
+	// stay open: the scheduler's check is download-then-install, and the fence made every automatic check after
+	// the first staged candidate die with check_failed (slot 6, .7 to .8, 2026-11-11: the machine never updated
+	// itself; a manual 'update download' failed the same way).
+	if blocked && (request.Operation == "download" || request.Operation == "check") {
+		journal, err := loadWindowsActivationJournalForController(c.config)
+		if err != nil {
+			return response, err
+		}
+		if windowsAwaitsFirstApproval(journal) {
+			blocked = false
+		}
+	}
 	if blocked && request.Operation == "install" {
 		journal, err := loadWindowsActivationJournalForController(c.config)
 		if err != nil {
@@ -660,6 +673,10 @@ func compareWindowsInstalledVersion(candidate, active string, source installsour
 // windowsFirstApproval reports whether the request approves, for the first time, the candidate waiting in the
 // journal: nothing has been approved yet, so no activator can hold the journal.
 func windowsFirstApproval(journal windowsActivationJournal, approvalID string) bool {
-	return journal.Stage == windowsActivationAwaitingApproval && journal.ApprovedCandidateID == "" &&
-		approvalID != "" && approvalID == journal.Candidate.ID
+	return windowsAwaitsFirstApproval(journal) && approvalID != "" && approvalID == journal.Candidate.ID
+}
+
+// windowsAwaitsFirstApproval reports a staged candidate nobody approved: no activator can hold its journal.
+func windowsAwaitsFirstApproval(journal windowsActivationJournal) bool {
+	return journal.Stage == windowsActivationAwaitingApproval && journal.ApprovedCandidateID == ""
 }
