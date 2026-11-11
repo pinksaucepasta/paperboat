@@ -1,5 +1,6 @@
 import { api, ApiError } from "@/lib/api"
 import { verifyTicketKey, type RootPin } from "@/lib/terminal/browser-root-key"
+import { validTicketSubprotocols } from "@/lib/terminal/browser-ticket"
 import { loadBrowserTerminal, type BrowserTerminalAPI, type BrowserTerminalEvent } from "@/lib/terminal/browser-terminal-wasm"
 import { terminalCloseCodes, ticketCloseCode, workerCloseCode } from "@/lib/terminal/close-codes"
 import {
@@ -57,13 +58,7 @@ async function ticketConnectConfig(
   )
   if (ticket.role !== "owner" && ticket.role !== "viewer" && ticket.role !== "interactive")
     throw new Error("The ticket has an invalid access role.")
-  if (
-    !Array.isArray(ticket.subprotocols) ||
-    ticket.subprotocols.length !== 2 ||
-    ticket.subprotocols[0] !== "paperboat.browser-terminal.e2ee.v1" ||
-    !ticket.subprotocols[1].startsWith("pb-ticket.")
-  )
-    throw new Error("The encrypted terminal ticket is invalid.")
+  if (!validTicketSubprotocols(ticket.subprotocols)) throw new Error("The encrypted terminal ticket is invalid.")
   const expiresAt = Date.parse(ticket.expires_at)
   if (!Number.isFinite(expiresAt) || expiresAt <= Date.now())
     throw new Error("The ticket expired before connecting. Retry for a new one.")
