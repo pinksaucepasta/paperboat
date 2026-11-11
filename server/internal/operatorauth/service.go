@@ -126,7 +126,7 @@ func (s *Service) Discover(ctx context.Context, email string) (string, error) {
 	}
 	return "", ErrInvalid
 }
-func (s *Service) Setup(ctx context.Context, email, password string) (session Session, resultErr error) {
+func (s *Service) Setup(ctx context.Context, email, password string) (Session, error) {
 	email = canonicalEmail(email)
 	if email == "" || email != canonicalEmail(s.BootstrapEmail) {
 		return Session{}, ErrInvalid
@@ -150,35 +150,42 @@ func (s *Service) Setup(ctx context.Context, email, password string) (session Se
 	}
 	now := time.Now().UTC()
 	expires := now.Add(sessionLifetime)
-	tx, err := db.BeginSerializable(ctx, s.Store.SQL())
-	if err != nil {
-		return Session{}, err
-	}
-	defer captureOperatorAuthRollback(tx, &resultErr)
-	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(543882134)`); err != nil {
-		return Session{}, err
-	}
-	var consumed bool
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.operator_bootstrap)`).Scan(&consumed); err != nil {
-		return Session{}, err
-	}
-	if consumed {
-		return Session{}, ErrBootstrapConsumed
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO paperboat.operator_accounts(id,email,password_hash) VALUES($1,$2,$3)`, account.ID, email, encoded); err != nil {
-		return Session{}, err
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO paperboat.operator_bootstrap(singleton,consumed_at,operator_id) VALUES(true,now(),$1)`, account.ID); err != nil {
-		return Session{}, err
-	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO paperboat.operator_sessions(token_hash,operator_id,csrf_hash,expires_at) VALUES($1,$2,$3,$4)`, hash(token), account.ID, hash(csrf), expires); err != nil {
-		return Session{}, err
-	}
-	if err = tx.Commit(); err != nil {
+	// The transaction is replayed after a serialization failure; everything it writes was generated above.
+	if err = db.RetrySerializable(ctx, func() error {
+		return s.setupAttempt(ctx, account, encoded, hash(token), hash(csrf), expires)
+	}); err != nil {
 		return Session{}, err
 	}
 	account.AuthenticatedAt = now
 	return Session{Token: token, CSRF: csrf, ExpiresAt: expires, Account: account}, nil
+}
+
+func (s *Service) setupAttempt(ctx context.Context, account Account, encoded string, tokenHash, csrfHash []byte, expires time.Time) (resultErr error) {
+	tx, err := db.BeginSerializable(ctx, s.Store.SQL())
+	if err != nil {
+		return err
+	}
+	defer captureOperatorAuthRollback(tx, &resultErr)
+	if _, err = tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(543882134)`); err != nil {
+		return err
+	}
+	var consumed bool
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM paperboat.operator_bootstrap)`).Scan(&consumed); err != nil {
+		return err
+	}
+	if consumed {
+		return ErrBootstrapConsumed
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO paperboat.operator_accounts(id,email,password_hash) VALUES($1,$2,$3)`, account.ID, account.Email, encoded); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO paperboat.operator_bootstrap(singleton,consumed_at,operator_id) VALUES(true,now(),$1)`, account.ID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO paperboat.operator_sessions(token_hash,operator_id,csrf_hash,expires_at) VALUES($1,$2,$3,$4)`, tokenHash, account.ID, csrfHash, expires); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 func (s *Service) Login(ctx context.Context, email, password string) (session Session, resultErr error) {
 	email = canonicalEmail(email)
