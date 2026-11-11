@@ -377,5 +377,5 @@ The script refuses an unprotected target because auto-merge there could merge be
 The public organization repository supports GitHub's [merge queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue).
 `branch-protection.sh --apply` installs its rebase queue with no bypass actors and eight build
 slots. Required workflows run on both `pull_request` and `merge_group`; full health jobs run
-on main. Queue checks have a 20-minute response timeout (hosted runners took up to 5 minutes to pick a job up on 2026-11-11, and a 5-minute timeout ejected the first PR from the queue); each job keeps its own short timeout. Bootstrap order: land tooling, broadcast
+on main. Queue checks have a 45-minute response timeout (hosted runners took up to 5 minutes to pick a job up on 2026-11-11, and a 5-minute timeout ejected the first PR from the queue); each job keeps its own short timeout. Bootstrap order: land tooling, broadcast
 the switch to every lane, then apply the rules. Never enable protection ahead of the tooling.
