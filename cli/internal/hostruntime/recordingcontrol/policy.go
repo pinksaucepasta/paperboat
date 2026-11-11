@@ -37,41 +37,63 @@ type Fetcher struct {
 }
 
 func (f *Fetcher) Fetch(ctx context.Context) (wire.Policy, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, f.ServerURL+wire.PolicyPath, nil)
-	if err != nil {
-		return wire.Policy{}, err
-	}
-	token, err := f.Tokens.Token(ctx)
-	if err != nil {
-		return wire.Policy{}, fmt.Errorf("recording policy: runtime credential: %w", err)
-	}
-	operationID, err := f.OperationID()
-	if err != nil {
-		return wire.Policy{}, err
-	}
-	proof, err := f.Proofs.Proof(ctx, operationID, http.MethodGet, wire.PolicyPath, nil)
-	if err != nil {
-		return wire.Policy{}, fmt.Errorf("recording policy: machine proof: %w", err)
-	}
-	request.Header.Set("Authorization", "Bearer "+token)
-	request.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString(proof))
-	response, err := f.Client.Do(request)
-	if err != nil {
-		return wire.Policy{}, fmt.Errorf("recording policy: %w", err)
-	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, policyLimit+1))
-	if err != nil {
-		return wire.Policy{}, fmt.Errorf("recording policy: read the answer: %w", err)
-	}
-	if response.StatusCode != http.StatusOK || len(body) > policyLimit {
-		return wire.Policy{}, fmt.Errorf("recording policy: the server answered %d", response.StatusCode)
-	}
 	var policy wire.Policy
-	if err := wirejson.Decode(body, &policy); err != nil {
+	if _, err := f.call(ctx, http.MethodGet, wire.PolicyPath, nil, &policy); err != nil {
 		return wire.Policy{}, fmt.Errorf("recording policy: %w", err)
 	}
 	return policy, nil
+}
+
+// call sends one request with the machine's credential and proof and decodes the answer's data envelope (the shape
+// every Paperboat answer has) into out. A non-200 answer is an error that still returns its status.
+func (f *Fetcher) call(ctx context.Context, method, path string, in, out any) (int, error) {
+	var body []byte
+	if in != nil {
+		var err error
+		if body, err = json.Marshal(in); err != nil {
+			return 0, err
+		}
+	}
+	request, err := http.NewRequestWithContext(ctx, method, f.ServerURL+path, bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	token, err := f.Tokens.Token(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("runtime credential: %w", err)
+	}
+	operationID, err := f.OperationID()
+	if err != nil {
+		return 0, err
+	}
+	proof, err := f.Proofs.Proof(ctx, operationID, method, path, body)
+	if err != nil {
+		return 0, fmt.Errorf("machine proof: %w", err)
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString(proof))
+	if in != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	response, err := f.Client.Do(request)
+	if err != nil {
+		return 0, err
+	}
+	defer response.Body.Close()
+	answer, err := io.ReadAll(io.LimitReader(response.Body, policyLimit+1))
+	if err != nil {
+		return response.StatusCode, fmt.Errorf("read the answer: %w", err)
+	}
+	if response.StatusCode != http.StatusOK || len(answer) > policyLimit {
+		return response.StatusCode, fmt.Errorf("the server answered %d", response.StatusCode)
+	}
+	var envelope struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := wirejson.Decode(answer, &envelope); err != nil || len(envelope.Data) == 0 {
+		return response.StatusCode, errors.New("the answer has no data")
+	}
+	return response.StatusCode, wirejson.Decode(envelope.Data, out)
 }
 
 // cached is what the machine keeps across restarts: the last policy and the key it pinned. The pin
