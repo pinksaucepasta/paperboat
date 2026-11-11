@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/shared/peerconsumer"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
@@ -255,7 +256,7 @@ func (s *Session) AcceptAuthorized(ctx context.Context, authorize func(context.C
 	if err != nil {
 		return rejectAuthorizedStream(connection, err)
 	}
-	capability := capabilityForConsumer(header.Consumer)
+	capability := peerconsumer.NetworkCapability(header.Consumer)
 	if capability == "" {
 		return rejectAuthorizedStream(connection, tailnet.ErrAdmission)
 	}
@@ -335,31 +336,6 @@ func rejectAuthorizedStream(connection net.Conn, err error) (net.Conn, streamaut
 		stream.CancelRead(code)
 	}
 	return nil, streamauth.Header{}, errors.Join(ErrStreamRejected, err, connection.Close())
-}
-
-func capabilityForConsumer(consumer string) string {
-	switch consumer {
-	case "config_compare":
-		return "config_compare"
-	case "recording":
-		return "recording"
-	case "inspector":
-		return "inspector"
-	case "terminal":
-		return "terminal"
-	case "exec":
-		return "exec"
-	case "ssh":
-		return "managed_ssh"
-	case "codex":
-		return "codex"
-	case "file_transfer", "file_transfer_key":
-		return "file_transfer"
-	case "private_http", "private_tcp":
-		return "private_access"
-	default:
-		return ""
-	}
 }
 
 func writeHeader(writer io.Writer, encoded []byte) error {

@@ -90,30 +90,34 @@ func (s *capturedNativeApplicationSession) Close() error {
 }
 
 func TestCLINativeStreamGroupAuthorizesEveryApplicationStream(t *testing.T) {
-	now := time.Now().UTC()
-	session := &capturedNativeApplicationSession{}
-	target := &resolver.TerminalTarget{Auth: resolver.AuthTarget{Token: "operation-token", ExpiresAt: now.Add(time.Minute).Format(time.RFC3339), ResourceID: "access_session_1"}}
-	group := &cliNativeStreamGroup{session: session, target: target, application: peerApplication{operationID: "operation_1"}, consumer: "ssh", now: func() time.Time { return now }}
-	first, err := group.OpenStream(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := group.OpenStream(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = first.Close()
-	_ = second.Close()
-	_ = group.Close()
-	session.mu.Lock()
-	defer session.mu.Unlock()
-	if len(session.headers) != 2 || session.headers[0].StreamID == session.headers[1].StreamID {
-		t.Fatalf("headers = %#v", session.headers)
-	}
-	for i, header := range session.headers {
-		if header.Consumer != "ssh" || header.OperationID != "operation_1" || !header.Resumable || session.resources[i] != "access_session_1" || session.capabilities[i] != "managed_ssh" {
-			t.Fatalf("stream %d header=%#v resource=%q capability=%q", i, header, session.resources[i], session.capabilities[i])
-		}
+	for _, tc := range []struct{ consumer, capability string }{{"ssh", "managed_ssh"}, {"file_transfer_key", "file_transfer"}} {
+		t.Run(tc.consumer, func(t *testing.T) {
+			now := time.Now().UTC()
+			session := &capturedNativeApplicationSession{}
+			target := &resolver.TerminalTarget{Auth: resolver.AuthTarget{Token: "operation-token", ExpiresAt: now.Add(time.Minute).Format(time.RFC3339), ResourceID: "access_session_1"}}
+			group := &cliNativeStreamGroup{session: session, target: target, application: peerApplication{operationID: "operation_1"}, consumer: tc.consumer, now: func() time.Time { return now }}
+			first, err := group.OpenStream(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := group.OpenStream(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = first.Close()
+			_ = second.Close()
+			_ = group.Close()
+			session.mu.Lock()
+			defer session.mu.Unlock()
+			if len(session.headers) != 2 || session.headers[0].StreamID == session.headers[1].StreamID {
+				t.Fatalf("headers = %#v", session.headers)
+			}
+			for i, header := range session.headers {
+				if header.Consumer != tc.consumer || header.OperationID != "operation_1" || !header.Resumable || session.resources[i] != "access_session_1" || session.capabilities[i] != tc.capability {
+					t.Fatalf("stream %d header=%#v resource=%q capability=%q", i, header, session.resources[i], session.capabilities[i])
+				}
+			}
+		})
 	}
 }
 

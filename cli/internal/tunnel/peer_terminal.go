@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/diagnostics"
+	"github.com/pinksaucepasta/paperboat/shared/peerconsumer"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
@@ -186,7 +187,7 @@ func (t *PeerTerminalTunnel) dial(ctx context.Context, info resolver.ConnectInfo
 	t.nativeMu.Lock()
 	reused := t.nativeRuntime != nil
 	t.nativeMu.Unlock()
-	runtime, consumed, err := t.acquireNativeRuntime(ctx, profile.Account.ID, profile.CLIClientSessionID, authority, hostRulesAdmission(info.Terminal, info.MachineID, nativeCapability(consumer)))
+	runtime, consumed, err := t.acquireNativeRuntime(ctx, profile.Account.ID, profile.CLIClientSessionID, authority, hostRulesAdmission(info.Terminal, info.MachineID, peerconsumer.NetworkCapability(consumer)))
 	if err != nil && reused && info.Terminal.Auth.Offline && api.Unreachable(err) {
 		// The host admits this stream from its own rules and the refresh for a peer the cached document lacks cannot
 		// reach Paperboat: dial on the cached document, as an offline stream always did.
