@@ -17,15 +17,14 @@ func TestDefaultLimitsAreValidAndKeepOneStreamAbove150Mbps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = `{"publication":{"connections":64,"opens_per_second":10,"open_burst":32,"bytes_per_second":25165824,"byte_burst":1048576},"account":{"connections":128,"opens_per_second":50,"open_burst":128,"bytes_per_second":33554432,"byte_burst":1048576}}`
+	const want = `{"publication":{"bytes_per_second":25165824,"byte_burst":1048576},"account":{"bytes_per_second":33554432,"byte_burst":1048576}}`
 	if string(raw) != want {
 		t.Fatalf("wire = %s", raw)
 	}
 	for name, bad := range map[string]func(*IngressLimits){
-		"zero connections":        func(l *IngressLimits) { l.Publication.Connections = 0 },
+		"zero byte rate":          func(l *IngressLimits) { l.Publication.BytesPerSecond = 0 },
 		"tiny byte burst":         func(l *IngressLimits) { l.Account.ByteBurst = 1024 },
 		"account below its route": func(l *IngressLimits) { l.Account.BytesPerSecond = l.Publication.BytesPerSecond - 1 },
-		"no open rate":            func(l *IngressLimits) { l.Account.OpensPerSecond = 0 },
 	} {
 		l := Default()
 		bad(&l)

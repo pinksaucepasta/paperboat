@@ -92,10 +92,6 @@ func newCarrierComponentWithTelemetry(
 		},
 	}
 	carrierConfig := datacarrier.DefaultConfig()
-	// One runtime carrier may hold 100 browser-terminal participants plus
-	// their independent input streams and the shared output publisher stream.
-	// The listener shares this bound with the other authenticated carrier uses.
-	carrierConfig.MaximumStreams = 256
 	var authorizers []datacarrier.Authorizer
 	if runtimeWorker != nil {
 		authorizers = append(authorizers, runtimeWorker.Expected)

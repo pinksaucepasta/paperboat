@@ -60,7 +60,7 @@ type Config struct {
 	// (RFC 1918 / ULA) addresses: a staging stack on a LAN. Refused in production, where it would open the
 	// claim dialer to internal addresses.
 	SelfhostAllowPrivateIngress bool `json:"selfhost_allow_private_ingress"`
-	// EdgeIngressLimits are the per-publication and per-account ingress limits every edge enforces (T11), sent
+	// EdgeIngressLimits are the per-publication and per-account byte pacing every edge applies (T11), sent
 	// to edges in the heartbeat answer. One set for all plans, from this one place.
 	EdgeIngressLimits     edgelimits.IngressLimits `json:"edge_ingress_limits"`
 	LocalAccessBaseDomain string                   `json:"local_access_base_domain"`

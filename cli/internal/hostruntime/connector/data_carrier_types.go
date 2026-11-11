@@ -14,11 +14,12 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/connectorprotocol"
 )
 
-// Data-carrier limits are deliberately small.  They bound both the number of
-// streams which can hold a connection permit and the number of stream opens
-// waiting for a peer acknowledgement.
+// Data-carrier limits bound the number of streams which can hold a connection
+// permit and the number of stream opens waiting for a peer acknowledgement. One
+// carrier serves every publication on the machine, so its stream bound must not
+// refuse a popular preview's page loads (edge abuse plan, section 5).
 const (
-	defaultDataCarrierStreams      = 64
+	defaultDataCarrierStreams      = 1024
 	defaultDataCarrierBacklog      = 16
 	defaultDataCarrierQueue        = 16
 	defaultDataCarrierWindow       = 256 << 10

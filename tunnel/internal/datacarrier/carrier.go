@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	defaultMaximumStreams    = 64
+	defaultMaximumStreams    = 1024
 	defaultAcceptBacklog     = 16
 	defaultQueueDepth        = 16
 	defaultStreamWindow      = 256 << 10
@@ -29,6 +29,7 @@ const (
 	defaultOpenLimit         = 10 * time.Second
 	defaultCloseLimit        = 5 * time.Second
 	maxMaximumStreams        = 1024
+	streamPermitWait         = time.Second
 	maxAcceptBacklog         = 1024
 	maxQueueDepth            = 1024
 	maxStreamWindow          = 16 << 20
@@ -496,6 +497,9 @@ func (s *Server) openRaw(ctx context.Context) (StreamLink, error) {
 	if s.closed() {
 		return nil, ErrCarrierClosed
 	}
+	// A full carrier usually frees a permit within milliseconds (page loads); wait briefly before refusing.
+	wait := time.NewTimer(streamPermitWait)
+	defer wait.Stop()
 	select {
 	case s.permits <- struct{}{}:
 		s.active.Add(1)
@@ -503,7 +507,7 @@ func (s *Server) openRaw(ctx context.Context) (StreamLink, error) {
 		return nil, ErrCarrierClosed
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	default:
+	case <-wait.C:
 		return nil, ErrStreamLimit
 	}
 	select {

@@ -828,6 +828,10 @@ func valueOrZero(value *int32) int32 {
 	return *value
 }
 
+// DefaultRouteStreams is a route's concurrent stream bound when the owner sets none. It protects
+// the owner's origin, not the edge, so it is high enough for a popular page (edge abuse plan, section 5).
+const DefaultRouteStreams = 1024
+
 func normalizeRouteLimits(connectTimeout, idleTimeout, maxStreams int32) (int32, int32, int32, error) {
 	if connectTimeout == 0 {
 		connectTimeout = 10_000
@@ -836,7 +840,7 @@ func normalizeRouteLimits(connectTimeout, idleTimeout, maxStreams int32) (int32,
 		idleTimeout = 90_000
 	}
 	if maxStreams == 0 {
-		maxStreams = 128
+		maxStreams = DefaultRouteStreams
 	}
 	if connectTimeout < 100 || connectTimeout > 120_000 || idleTimeout < 1_000 || idleTimeout > 3_600_000 || maxStreams < 1 || maxStreams > 10_000 {
 		return 0, 0, 0, fmt.Errorf("%w: route timeout or stream limit is out of range", ErrInvalidInput)

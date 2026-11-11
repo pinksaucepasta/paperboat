@@ -188,11 +188,25 @@ func TestDataCarrierOverloadIsBounded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("accept first stream: %v", err)
 	}
+	started := time.Now()
 	if _, err := edge.OpenStream(context.Background(), testStreamOpen("route-a", "request-second")); !errors.Is(err, ErrStreamLimit) {
 		t.Fatalf("second stream error = %v, want stream limit", err)
 	}
-	_ = first.Close()
-	_ = accepted.Close()
+	if waited := time.Since(started); waited < streamPermitWait || waited > 3*streamPermitWait {
+		t.Fatalf("full carrier refused after %s, want about %s", waited, streamPermitWait)
+	}
+	// A permit freed while the next open waits is used instead of refusing it.
+	go func() { time.Sleep(100 * time.Millisecond); _ = first.Close(); _ = accepted.Close() }()
+	third, err := edge.OpenStream(context.Background(), testStreamOpen("route-a", "request-third"))
+	if err != nil {
+		t.Fatalf("open after a freed permit: %v", err)
+	}
+	thirdAccepted, _, err := connector.AcceptStream(context.Background())
+	if err != nil {
+		t.Fatalf("accept third stream: %v", err)
+	}
+	_ = third.Close()
+	_ = thirdAccepted.Close()
 	if !waitForCarrier(func() bool { return edge.ActiveStreams() == 0 && connector.ActiveStreams() == 0 }) {
 		t.Fatal("overload test leaked stream permits")
 	}

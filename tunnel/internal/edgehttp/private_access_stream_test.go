@@ -401,7 +401,7 @@ func TestPrivatePreviewGrantReachesTLSHTTPIngress(t *testing.T) {
 		t.Fatal(err)
 	}
 	recorder := &ingressUsageRecorder{}
-	metering, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 1, IngressLimits: testIngressLimits(1, 1<<20), Usage: recorder})
+	metering, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 1, IngressLimits: testIngressLimits(1 << 20), Usage: recorder})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,7 +13,7 @@ func TestEdgeIngressLimitsDefaultAndValidation(t *testing.T) {
 	if c.EdgeIngressLimits != edgelimits.Default() {
 		t.Fatalf("default ingress limits = %+v", c.EdgeIngressLimits)
 	}
-	c.EdgeIngressLimits.Publication.Connections = -1
+	c.EdgeIngressLimits.Publication.BytesPerSecond = -1
 	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "edge_ingress_limits") {
 		t.Fatalf("invalid ingress limits accepted: %v", err)
 	}

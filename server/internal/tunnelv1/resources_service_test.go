@@ -180,7 +180,7 @@ func TestResourceServiceRouteNormalizationAndCanonicalWireVocabulary(t *testing.
 	if repo.createRoute.Protocol != "private_tcp" || repo.createRoute.MatchType != "catch_all" || repo.createRoute.Hostname.Valid || repo.createRoute.WildcardSuffix.Valid || repo.createRoute.PathPrefix.Valid {
 		t.Fatalf("database route projection = %+v", repo.createRoute)
 	}
-	if repo.createRoute.ConnectTimeoutMS != 10000 || repo.createRoute.IdleTimeoutMS != 90000 || repo.createRoute.MaxConcurrentStreams != 128 {
+	if repo.createRoute.ConnectTimeoutMS != 10000 || repo.createRoute.IdleTimeoutMS != 90000 || repo.createRoute.MaxConcurrentStreams != DefaultRouteStreams {
 		t.Fatalf("default route limits = %d/%d/%d", repo.createRoute.ConnectTimeoutMS, repo.createRoute.IdleTimeoutMS, repo.createRoute.MaxConcurrentStreams)
 	}
 	if result.Route.Protocol != "tcp_private" || result.Route.HostMatch.Type != "catch_all" || result.Route.HostMatch.Hostname != "" {

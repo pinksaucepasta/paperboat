@@ -192,7 +192,7 @@ func routeAddCommand() *cobra.Command {
 	command.Flags().Int32("priority", 0, "route priority")
 	command.Flags().Duration("connect-timeout", 10*time.Second, "origin connect timeout")
 	command.Flags().Duration("idle-timeout", 5*time.Minute, "stream idle timeout")
-	command.Flags().Int32("max-streams", 128, "maximum concurrent streams")
+	command.Flags().Int32("max-streams", 1024, "maximum concurrent streams")
 	tunnelMutationWaitFlags(command)
 	tunnelJSONFlag(command)
 	return command

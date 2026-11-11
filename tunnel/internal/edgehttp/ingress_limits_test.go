@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/usage"
 	"io"
@@ -52,58 +53,72 @@ func (s *ingressMemoryStream) Write(payload []byte) (int, error) {
 func (s *ingressMemoryStream) Close() error      { s.closed = true; return nil }
 func (s *ingressMemoryStream) CloseWrite() error { return nil }
 
-func testIngressLimits(connections int, byteRate rate.Limit) *IngressLimits {
-	return &IngressLimits{Publication: IngressLimitConfig{Connections: connections, OpenRate: 100, OpenBurst: 100, ByteRate: byteRate, ByteBurst: ingressPacingChunk}, Account: IngressLimitConfig{Connections: connections, OpenRate: 100, OpenBurst: 100, ByteRate: byteRate, ByteBurst: ingressPacingChunk}}
+func testIngressLimits(byteRate rate.Limit) *IngressLimits {
+	return &IngressLimits{Publication: IngressLimitConfig{ByteRate: byteRate, ByteBurst: ingressPacingChunk}, Account: IngressLimitConfig{ByteRate: byteRate, ByteBurst: ingressPacingChunk}}
 }
 
-func TestIngressLimitsSharePublicationAndAccountAcrossCarriers(t *testing.T) {
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, IngressLimits: testIngressLimits(1, 1<<20)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer registry.Close()
-	first := publicTCPDecision(time.Now().UTC(), 4001)
-	lease, err := registry.AcquireIngress(context.Background(), first)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second := first
-	second.DecisionID, second.ConnectorID, second.SessionID = "decision_other", "connector_other", "session_other"
-	if _, err := registry.AcquireIngress(context.Background(), second); !errors.Is(err, ErrIngressLimitExceeded) {
-		t.Fatalf("shared publication limit error=%v", err)
-	}
-	lease.Release()
-	if next, err := registry.AcquireIngress(context.Background(), second); err != nil {
-		t.Fatal(err)
-	} else {
-		next.Release()
-	}
-}
-
-func TestIngressOpenRateIsSharedAfterConnectionsClose(t *testing.T) {
-	limits := testIngressLimits(4, 1<<20)
-	limits.Publication.OpenRate, limits.Publication.OpenBurst = rate.Limit(0.01), 1
-	limits.Account.OpenRate, limits.Account.OpenBurst = rate.Limit(0.01), 1
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, IngressLimits: limits})
+// Section 5 of the edge abuse plan: popularity is not abuse. Any number of concurrent streams and
+// opens of one publication are admitted; they share one byte pacer per publication and account.
+func TestIngressNeverRefusesStreamsAndSharesPacers(t *testing.T) {
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, IngressLimits: testIngressLimits(1 << 20)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer registry.Close()
 	decision := publicTCPDecision(time.Now().UTC(), 4001)
-	first, err := registry.AcquireIngress(context.Background(), decision)
+	var leases []*IngressLease
+	for i := 0; i < 2000; i++ {
+		lease, err := registry.AcquireIngress(context.Background(), decision)
+		if err != nil {
+			t.Fatalf("stream %d refused: %v", i, err)
+		}
+		leases = append(leases, lease)
+	}
+	if leases[0].publication != leases[1999].publication || leases[0].account != leases[1999].account {
+		t.Fatal("streams of one publication do not share its pacers")
+	}
+	if got := leases[0].publication.active; got != 2000 {
+		t.Fatalf("active=%d", got)
+	}
+	for _, lease := range leases {
+		lease.Release()
+	}
+	if got := leases[0].publication.active; got != 0 {
+		t.Fatalf("active after release=%d", got)
+	}
+	expired := decision
+	expired.ExpiresAt = time.Now().Add(-time.Minute)
+	if _, err := registry.AcquireIngress(context.Background(), expired); !errors.Is(err, ErrIngressDecisionInvalid) {
+		t.Fatalf("expired decision error=%v", err)
+	}
+}
+
+// A full table of keys with open streams gives a new key its own pacer, never a refusal.
+func TestIngressFullTableStillAdmits(t *testing.T) {
+	limits, err := newIngressLimits(testIngressLimits(1 << 20))
 	if err != nil {
 		t.Fatal(err)
 	}
-	first.Release()
-	decision.ConnectorID, decision.SessionID = "connector_other", "session_other"
-	if _, err := registry.AcquireIngress(context.Background(), decision); !errors.Is(err, ErrIngressLimitExceeded) {
-		t.Fatalf("shared open rate error=%v", err)
+	decision := publicTCPDecision(time.Now().UTC(), 4001)
+	for i := 0; i < maximumIngressLimitEntries; i++ {
+		decision.Binding.AccountID = fmt.Sprintf("account_%d", i)
+		limits.acquire(decision, nil)
+	}
+	if n := len(limits.publications) + len(limits.accounts); n != maximumIngressLimitEntries {
+		t.Fatalf("table size %d", n)
+	}
+	decision.Binding.AccountID = "account_new"
+	if lease := limits.acquire(decision, nil); lease == nil || lease.publication == nil {
+		t.Fatal("new key not admitted on a full table")
+	}
+	if n := len(limits.publications) + len(limits.accounts); n != maximumIngressLimitEntries {
+		t.Fatalf("table grew past its bound: %d", n)
 	}
 }
 
 func TestIngressPacingCancellationMetersSuccessfulPartialBytesAndReleases(t *testing.T) {
 	recorder := &ingressUsageRecorder{}
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, IngressLimits: testIngressLimits(1, 1), Usage: recorder})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, IngressLimits: testIngressLimits(1), Usage: recorder})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +154,7 @@ func TestIngressPacingCancellationMetersSuccessfulPartialBytesAndReleases(t *tes
 
 func TestIngressMeterRecordsBytesReturnedWithError(t *testing.T) {
 	recorder := &ingressUsageRecorder{}
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, IngressLimits: testIngressLimits(1, 1<<20), Usage: recorder})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, IngressLimits: testIngressLimits(1 << 20), Usage: recorder})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +180,7 @@ var _ interface{ CloseWrite() error } = (*ingressMemoryStream)(nil)
 var _ IngressUsage = (*ingressUsageRecorder)(nil)
 
 func TestIngressOutlivesAuthorityWindowUntilDisconnectedAndReleasesCapacity(t *testing.T) {
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, IngressLimits: testIngressLimits(1, 1<<20)})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, IngressLimits: testIngressLimits(1 << 20)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +246,7 @@ func TestIngressQuotaFeedbackIsolatesSharedRouteAndAllowsFreshAdmission(t *testi
 	now := time.Now().UTC()
 	q, _ := usage.NewQueue(4, 1<<20)
 	meter := &usage.Meter{Node: "edge", Epoch: "epoch", Counters: usage.NewCounters(), Queue: q, KeyID: "key", PrivateKey: private, Persist: func() error { return nil }}
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, IngressLimits: testIngressLimits(4, 1<<20), Usage: meter})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, IngressLimits: testIngressLimits(1 << 20), Usage: meter})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +328,7 @@ type failingIngressClose struct{ net.Conn }
 func (s failingIngressClose) Close() error { return errors.Join(s.Conn.Close(), syscall.EIO) }
 
 func TestIngressRetainsTransferAndCleanupCauses(t *testing.T) {
-	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, IngressLimits: testIngressLimits(1, 1<<20), Usage: &failingIngressUsage{}})
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 2, IngressLimits: testIngressLimits(1 << 20), Usage: &failingIngressUsage{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,23 +380,20 @@ func TestServerIngressLimitsApplyToCurrentKeys(t *testing.T) {
 	}
 	defer first.Release()
 	set := edgelimits.Default()
-	set.Publication.Connections, set.Publication.OpenBurst = 1, 1
+	set.Publication.BytesPerSecond = 1 << 20
 	if err := registry.SetIngressLimits(set); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := registry.AcquireIngress(context.Background(), decision); !errors.Is(err, ErrIngressLimitExceeded) {
-		t.Fatalf("second connection under a 1-connection limit: %v", err)
-	}
 	bad := set
-	bad.Account.Connections = 0
+	bad.Account.ByteBurst = 0
 	if err := registry.SetIngressLimits(bad); err == nil {
 		t.Fatal("invalid set applied")
 	}
-	if registry.ingressLimits.Publication.Connections != 1 || registry.ingressLimits.Account.Connections != set.Account.Connections {
+	if registry.ingressLimits.Publication.ByteRate != 1<<20 || registry.ingressLimits.Account != ingressLimitConfig(set.Account) {
 		t.Fatalf("limits after an invalid set: %+v", registry.ingressLimits.Publication)
 	}
 	state := registry.ingressLimits.publications[decision.Binding.AccountID+"\x00"+decision.Binding.PublicationID]
-	if state == nil || state.opens.Burst() != 1 || state.bytes.Limit() != rate.Limit(set.Publication.BytesPerSecond) {
+	if state == nil || state.bytes.Limit() != rate.Limit(set.Publication.BytesPerSecond) {
 		t.Fatalf("current key not reconfigured: %+v", state)
 	}
 }

@@ -53,7 +53,7 @@ func (e previewOriginConnectFailure) Unwrap() error         { return e.cause }
 
 const (
 	defaultDataCarrierPreviewQueue        = 16
-	defaultDataCarrierPreviewStreams      = 64
+	defaultDataCarrierPreviewStreams      = 1024
 	defaultDataCarrierPreviewDialTimeout  = 10 * time.Second
 	defaultDataCarrierPreviewCloseTimeout = 5 * time.Second
 )

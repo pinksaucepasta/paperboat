@@ -406,7 +406,7 @@ func TestHeartbeatAnswerCarriesIngressLimits(t *testing.T) {
 		t.Fatalf("204 heartbeat = %+v, %v", got, err)
 	}
 	set := edgelimits.Default()
-	set.Account.Connections = 500
+	set.Account.BytesPerSecond = 500 << 20
 	raw, err := json.Marshal(map[string]any{"ingress_limits": set})
 	if err != nil {
 		t.Fatal(err)
@@ -415,7 +415,7 @@ func TestHeartbeatAnswerCarriesIngressLimits(t *testing.T) {
 	if got, err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); err != nil || got.IngressLimits == nil || *got.IngressLimits != set {
 		t.Fatalf("heartbeat answer = %+v, %v", got, err)
 	}
-	set.Account.Connections = 0
+	set.Account.BytesPerSecond = 0
 	raw, _ = json.Marshal(map[string]any{"ingress_limits": set})
 	answer = string(raw)
 	if got, err := client.Heartbeat(context.Background(), NodeObservation{NodeID: "edge"}); !errors.Is(err, ErrControlUnavailable) || got.IngressLimits != nil {

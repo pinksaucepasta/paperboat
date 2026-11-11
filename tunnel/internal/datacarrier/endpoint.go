@@ -409,8 +409,8 @@ func endpointQUICConfig(config Config) *quic.Config {
 		MaxIncomingUniStreams:          -1,
 		InitialStreamReceiveWindow:     uint64(config.StreamWindow),
 		MaxStreamReceiveWindow:         uint64(max(config.StreamWindow, connectorprotocol.DataCarrierMaxStreamWindow)),
-		InitialConnectionReceiveWindow: uint64(config.StreamWindow) * uint64(config.MaximumStreams+config.QueueDepth+1),
-		MaxConnectionReceiveWindow:     uint64(config.StreamWindow) * uint64(config.MaximumStreams+config.QueueDepth+1),
+		InitialConnectionReceiveWindow: connectionReceiveWindow(config),
+		MaxConnectionReceiveWindow:     connectionReceiveWindow(config),
 	}
 }
 
@@ -523,4 +523,10 @@ func (s *quicStreamLink) StreamID() uint32 {
 		return 0
 	}
 	return uint32(s.Stream.StreamID())
+}
+
+// connectionReceiveWindow bounds what one peer may have in flight to this process. Streams beyond
+// the first 256 share that window instead of growing it, so 1024 streams cost no more memory.
+func connectionReceiveWindow(config Config) uint64 {
+	return uint64(config.StreamWindow) * uint64(min(config.MaximumStreams, 256)+config.QueueDepth+1)
 }

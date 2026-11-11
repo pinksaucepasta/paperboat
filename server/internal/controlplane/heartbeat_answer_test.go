@@ -13,7 +13,7 @@ import (
 // decoding strictly accepts it.
 func TestHeartbeatAnswerIsExactlyTheIngressLimits(t *testing.T) {
 	limits := edgelimits.Default()
-	limits.Publication.Connections = 77
+	limits.Publication.BytesPerSecond = 77 << 20
 	recorder := httptest.NewRecorder()
 	writeHeartbeatAnswer(recorder, limits)
 	var answer struct {

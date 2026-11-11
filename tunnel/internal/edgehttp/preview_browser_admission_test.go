@@ -85,7 +85,7 @@ func testPreviewMeteredAdmission(t *testing.T, accessMode string) {
 		t.Fatal(e)
 	}
 	recorder := &ingressUsageRecorder{}
-	metering, e := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 1, IngressLimits: testIngressLimits(1, 1<<20), Usage: recorder})
+	metering, e := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 1, IngressLimits: testIngressLimits(1 << 20), Usage: recorder})
 	if e != nil {
 		t.Fatal(e)
 	}

@@ -290,13 +290,6 @@ func configureProxyDiagnostics(proxy *httputil.ReverseProxy, observe func(contex
 			writeErrorPage(writer, http.StatusBadGateway, originRedirectLoopMessage)
 			return
 		}
-		if errors.Is(err, ErrIngressLimitExceeded) {
-			// The edge's abuse limits (edgelimits): too many connections or opens right now.
-			writer.Header().Set("X-Paperboat-Error", "edge_rate_limited")
-			writer.Header().Set("Retry-After", "1")
-			writeErrorPage(writer, http.StatusTooManyRequests, edgeRateLimitedMessage)
-			return
-		}
 		// A visitor hitting an address whose app is not running should learn that, not just "Bad Gateway".
 		// The reason is deliberately generic: it never carries the underlying cause.
 		writer.Header().Set("X-Paperboat-Error", "upstream_unavailable")

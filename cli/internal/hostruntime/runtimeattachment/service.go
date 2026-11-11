@@ -227,7 +227,6 @@ func New(config Config) (*Service, error) {
 	// Runtime attachments share one edge carrier; capacity comes from its
 	// streams, not from opening a carrier for each browser participant.
 	carrierConfig.MaximumCarriers = 1
-	carrierConfig.Carrier.MaximumStreams = 256
 	sessions, err := preview.NewMachineAttachmentSessionSource(preview.MachineAttachmentSessionSourceConfig{StateRoot: config.StateRoot, Carrier: carrierConfig})
 	if err != nil {
 		return nil, err
