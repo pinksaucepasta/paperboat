@@ -14,7 +14,12 @@ echo 'push: waiting for the PR queue…' >&2
 flock -w 3600 9
 [ -z "$(git status --porcelain)" ] || { echo 'push: commit your changes first' >&2; exit 1; }
 git fetch -q origin "$base"
-git rebase -q "origin/$base"
+if [ -n "${PB_PUSH_PR:-}" ]; then
+  # Published PR commits must remain ancestors: rebase would require a forbidden force-push.
+  git merge -q --no-edit "origin/$base"
+else
+  git rebase -q "origin/$base"
+fi
 if [ "$(git rev-list --count "origin/$base"..HEAD)" = 0 ]; then
   echo 'push: no commits to submit' >&2
   exit 0
