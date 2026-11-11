@@ -234,6 +234,21 @@ def phase_rule(team, target, directory):
             raise RuntimeError('the rule did not start the recording')
         wait_for('REC in this client', session.saw_rec, timeout=30, interval=0.3)
         policy_set(restore, team)
+        # The rule decides who is recorded from now on; a recording that already runs goes on until its session ends.
+        other_name = 'smoke-rec-' + uuid.uuid4().hex[:10]
+        known = {r['id'] for r in listing(team)}
+        other = Session(target, other_name)
+        try:
+            other.say('NORULE')
+            time.sleep(20)  # a start would be reported to the server within this
+            if {r['id'] for r in listing(team) if r['machine_name'] == target} - known:
+                raise RuntimeError('a session attached after the rule was removed was recorded')
+        finally:
+            other.end()
+            cleanup(PB, target, other_name)
+        session.say('STILLON')
+        session.end()
+        session = None
         ended = finished(team, recording['id'])
         if marker not in export_text(ended['id'], directory):
             raise RuntimeError('the rule recording does not hold its output')
@@ -268,7 +283,7 @@ def main():
             receipt['phases'].append('rec_on_attach')
         if 'rule' in phases:
             receipt['rule_recording'] = phase_rule(args.team, args.target, directory)
-            receipt['phases'] += ['rule_start', 'rule_removed_stops']
+            receipt['phases'] += ['rule_start', 'rule_removed_stops_new_recordings']
     receipt['seconds'] = round(time.monotonic() - started, 1)
     print(json.dumps(receipt), flush=True)
 
