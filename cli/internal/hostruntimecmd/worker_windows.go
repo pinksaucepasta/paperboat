@@ -762,6 +762,7 @@ func (w *windowsRuntimeWorker) closeOutput() error {
 	})
 	return w.outputErr
 }
+
 // handover writes one handover line to the active worker and checks its answer (serveWorkerControl).
 func (w *windowsRuntimeWorker) handover(ctx context.Context, line, answer string) error {
 	w.mu.Lock()
@@ -803,7 +804,9 @@ func (w *windowsRuntimeWorker) Drain(ctx context.Context) error {
 	return errors.Join(writeErr, w.stopWithin(ctx, 0))
 }
 
-func (w *windowsRuntimeWorker) Stop(ctx context.Context) error { return w.stopWithin(ctx, 5*time.Second) }
+func (w *windowsRuntimeWorker) Stop(ctx context.Context) error {
+	return w.stopWithin(ctx, 5*time.Second)
+}
 
 // stopWithin waits for the worker to exit for grace (until ctx ends when grace is 0), then kills it.
 func (w *windowsRuntimeWorker) stopWithin(ctx context.Context, grace time.Duration) error {
