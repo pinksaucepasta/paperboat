@@ -32,6 +32,7 @@ import { CopyButton } from "@/components/copy-button"
 import { InviteDialog } from "@/components/team/invite-dialog"
 import { TeamSecurity } from "@/components/team/team-security"
 import { RecordingSettings } from "@/components/recordings/recording-settings"
+import { TeamStorage } from "@/components/team/team-storage"
 import { RowMenus, type Entry } from "@/components/row-menus"
 import { ConfirmAction, SearchField, ViewToggle } from "@/components/list-toolbar"
 import { Time } from "@/components/time"
@@ -88,7 +89,7 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
   const [search, setSearch] = useState("")
   const [inviting, setInviting] = useState(false)
   const tabParam = useSearchParams().get("tab")
-  const tab = tabParam === "security" || tabParam === "recordings" ? tabParam : "members"
+  const tab = tabParam === "security" || tabParam === "recordings" || tabParam === "storage" ? tabParam : "members"
 
   if (team.isPending || me.isPending) return <TeamSkeleton />
   if (team.isError) return <p className="text-sm text-muted-foreground">{team.error.message}</p>
@@ -120,10 +121,12 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
   const securityTab = teamLive.security && ["owner", "admin", "auditor"].includes(actor)
   // Recording settings: owners and admins change them, auditors see them.
   const recordingsTab = ["owner", "admin", "auditor"].includes(actor)
-  const tabs = (["members", "security", "recordings"] as const).filter(
-    (value) => value === "members" || (value === "security" ? securityTab : recordingsTab),
+  // The team's bucket: owners and admins connect and change it.
+  const storageTab = admin
+  const tabs = (["members", "security", "recordings", "storage"] as const).filter(
+    (value) => value === "members" || (value === "security" ? securityTab : value === "recordings" ? recordingsTab : storageTab),
   )
-  const tabTitles = { members: "Members", security: "Security", recordings: "Recordings" }
+  const tabTitles = { members: "Members", security: "Security", recordings: "Recordings", storage: "Storage" }
 
   return (
     <div className="flex flex-col gap-10">
@@ -181,6 +184,8 @@ export function TeamManage({ workspace }: { workspace: Workspace }) {
         <TeamSecurity team={team.data} emails={emails} />
       ) : recordingsTab && tab === "recordings" ? (
         <RecordingSettings team={team.data} emails={emails} admin={admin} />
+      ) : storageTab && tab === "storage" ? (
+        <TeamStorage team={team.data.team_id} admin={admin} />
       ) : (
         <>
         <MachineRequests team={team.data} admin={admin} me={me.data} />

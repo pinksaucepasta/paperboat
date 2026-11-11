@@ -7572,6 +7572,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/teams/{team_id}/bucket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The team's bucket
+         * @description Owners and admins. 404 bucket_not_configured when the team has none.
+         */
+        get: operations["team_bucket"];
+        /**
+         * Connect or change the team's bucket
+         * @description Owners and admins. Unless only the uses change, Paperboat first writes, reads back and deletes a check object; a failing step is refused as bucket_check_failed (422) and nothing is saved. The secret key is stored encrypted and never returned.
+         */
+        put: operations["team_bucket_save"];
+        post?: never;
+        /**
+         * Disconnect the team's bucket
+         * @description Owners and admins. What the bucket already holds stays there.
+         */
+        delete: operations["team_bucket_remove"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/teams/{team_id}/audit-streams": {
         parameters: {
             query?: never;
@@ -8125,6 +8153,11 @@ export interface components {
             segments: number;
             /** @enum {string} */
             state: "recording" | "ended" | "deleted";
+            /**
+             * Format: int64
+             * @description How many of the recording's leading segments are in the team bucket (0 without one).
+             */
+            archived_segments: number;
         };
         RecordingList: {
             recordings: components["schemas"]["Recording"][];
@@ -8134,15 +8167,17 @@ export interface components {
              */
             total: number;
         };
-        /** @description Exactly one field. The CLI names its client session (the peer network admits it to the machine for capability recording); a browser sends its E2E public key hash and gets a browser ticket and stream URL. */
+        /** @description Either one client field (the CLI names its client session, and the peer network admits it to the machine for capability recording; a browser sends its E2E public key hash and gets a browser ticket and stream URL), or source "bucket" alone to replay the archive in the team bucket, which needs no machine. */
         RecordingReplayRequest: {
             cli_client_session_id?: string;
             browser_public_key_sha256?: string;
+            /** @constant */
+            source?: "bucket";
         };
         /** @description The replay audit event was written before this answer. The browser form adds the same connect fields as a browser terminal ticket, so the browser pins the machine before any byte moves. */
         RecordingReplay: {
             /** @description CLI: a machine JWT (class recording_replay, 5 minutes, single use). Browser: a single-use browser ticket for stream_url. */
-            ticket: string;
+            ticket?: string;
             /**
              * Format: uri
              * @description Browser form only.
@@ -8181,6 +8216,60 @@ export interface components {
             root_public_key?: string;
             /** @description Browser form only: SHA-256 fingerprint of the transport root, hex. */
             root_fingerprint?: string;
+            /**
+             * @description Archive replay: segments holds the presigned downloads and there is no ticket.
+             * @constant
+             */
+            source?: "bucket";
+            /** @description Archive replay: one presigned download per archived segment, in order. */
+            segments?: components["schemas"]["TeamBucketRequest"][];
+            /** @description Archive replay: the archive holds every segment of an ended recording. */
+            final?: boolean;
+        };
+        /** @description One presigned request to the team bucket. */
+        TeamBucketRequest: {
+            /** Format: uri */
+            url: string;
+            /** @description Headers to send with the request, unchanged. */
+            headers?: {
+                [key: string]: string;
+            };
+        };
+        /** @description The team's own S3-compatible bucket. The secret key is never returned. */
+        TeamBucket: {
+            /** Format: uri */
+            endpoint: string;
+            region: string;
+            bucket: string;
+            prefix: string;
+            path_style: boolean;
+            access_key_id: string;
+            /** @description Machines copy closed recordings here. */
+            use_recordings: boolean;
+            /** @description Files for offline machines wait here. */
+            use_files: boolean;
+            /**
+             * Format: date-time
+             * @description When Paperboat last wrote, read and deleted a check object.
+             */
+            checked_at: string;
+        };
+        /** @description At least one use is required. */
+        TeamBucketInput: {
+            /**
+             * Format: uri
+             * @description https address without a path.
+             */
+            endpoint: string;
+            region: string;
+            bucket: string;
+            prefix: string;
+            path_style: boolean;
+            access_key_id: string;
+            /** @description Empty keeps the stored key when the bucket already exists. */
+            secret_access_key?: string;
+            use_recordings: boolean;
+            use_files: boolean;
         };
         /** @description Live recording state of a terminal session (terminal.v1, not HTTP): Snapshot.recording in the attach response, absent when not recording. */
         RecordingState: {
@@ -29538,6 +29627,228 @@ export interface operations {
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
             503: components["responses"]["Error"];
+        };
+    };
+    team_bucket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The bucket. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TeamBucket"];
+                    };
+                };
+            };
+            /** @description unauthenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only owners and admins manage the team bucket; team_sso_required: sign in through the team's SSO. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description bucket_not_configured. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description team_plan_required: the team bucket is part of the Team plan. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description team_bucket_unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    team_bucket_save: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TeamBucketInput"];
+            };
+        };
+        responses: {
+            /** @description The saved bucket. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["TeamBucket"];
+                    };
+                };
+            };
+            /** @description invalid_team_bucket: names the field to fix. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description unauthenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only owners and admins manage the team bucket; team_sso_required: sign in through the team's SSO. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description team_plan_required: the team bucket is part of the Team plan. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description bucket_check_failed: names the failing step (write, read or delete) and what the bucket answered. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description team_bucket_unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    team_bucket_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                team_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            removed: boolean;
+                        };
+                    };
+                };
+            };
+            /** @description unauthenticated. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description forbidden: only owners and admins manage the team bucket; team_sso_required: sign in through the team's SSO. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description bucket_not_configured. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description team_plan_required: the team bucket is part of the Team plan. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description team_bucket_unavailable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     team_audit_streams: {
