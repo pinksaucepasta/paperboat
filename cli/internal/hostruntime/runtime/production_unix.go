@@ -346,6 +346,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, MachineID: machineID, InstallationGeneration: machineRegistration.InstallationGeneration, BootID: lazyBootID, OSBootID: bootState.OSBootID,
 		LocalControlToken: localControlToken, Transport: transport, RunContext: ctx,
 		InspectorStore: inspectorStore, InspectorRegistry: inspectorRegistry, InspectorHTTP: inspectorService, InboxPath: inboxPath,
+		PrivateRoutesEvents: machineEvents.Subscribe(machineevents.TopicPrivateRoutes),
 	})
 	if err != nil {
 		return nil, err

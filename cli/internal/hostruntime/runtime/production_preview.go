@@ -5,6 +5,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -64,6 +65,8 @@ type productionPreviewAssemblyConfig struct {
 	InspectorRegistry *inspector.Registry
 	InspectorHTTP     tunnelmanager.AuthenticatedInspectorHTTP
 	InboxPath         func() (string, error)
+	// PrivateRoutesEvents wakes when the machine's private routes change (nil: poll only).
+	PrivateRoutesEvents *machineevents.Subscription
 }
 
 func newProductionPreviewAssembly(config productionPreviewAssemblyConfig) (*productionPreviewAssembly, error) {
@@ -71,16 +74,17 @@ func newProductionPreviewAssembly(config productionPreviewAssemblyConfig) (*prod
 		return nil, errors.Join(ErrProductionInvalid, preview.ErrMachinePreviewRuntimeInvalid)
 	}
 	runtime, err := preview.NewMachinePreviewRuntime(preview.MachinePreviewRuntimeConfig{
-		ControlURL:    config.ControlURL,
-		StateRoot:     config.StateRoot,
-		RunContext:    config.RunContext,
-		Transport:     config.Transport,
-		Carrier:       config.Carrier,
-		OriginDial:    config.OriginDial,
-		Inspector:     config.InspectorStore,
-		Registry:      config.InspectorRegistry,
-		InspectorHTTP: config.InspectorHTTP,
-		InboxPath:     config.InboxPath,
+		ControlURL:          config.ControlURL,
+		StateRoot:           config.StateRoot,
+		RunContext:          config.RunContext,
+		Transport:           config.Transport,
+		Carrier:             config.Carrier,
+		OriginDial:          config.OriginDial,
+		Inspector:           config.InspectorStore,
+		Registry:            config.InspectorRegistry,
+		InspectorHTTP:       config.InspectorHTTP,
+		InboxPath:           config.InboxPath,
+		PrivateRoutesEvents: config.PrivateRoutesEvents,
 		ObserveStreamError: func(err error) {
 			if err != nil {
 				errorreport.Current().CaptureFailure(config.RunContext, "paperboat-daemon", "preview", "delivery", "transport_failed", err)

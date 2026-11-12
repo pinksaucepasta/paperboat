@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents/eventstest"
 	"io"
 	"net"
 	"net/http"
@@ -638,4 +640,56 @@ func registerTestRoute(t *testing.T, s *PrivateAccessSource, lease Lease, admiss
 	defer s.mu.Unlock()
 	s.next++
 	s.ownerRoutes[host] = privateAccessRoute{lease: lease, admission: admission, active: active, identity: identity, token: s.next}
+}
+
+// Revocation is pushed (P1/P3): while the private_routes event stream is healthy an unchanged snapshot is
+// not refetched every second, and a published route change refetches at once.
+func TestRoutesSnapshotIsPushDrivenWhileEventsAreHealthy(t *testing.T) {
+	now := time.Now().UTC()
+	admission := validAccessorAdmission(t, now, "private_tcp")
+	admission.Hostname = ""
+	var requests atomic.Int32
+	transport := privateAccessRoundTripper(func(request *http.Request) (*http.Response, error) {
+		requests.Add(1)
+		body, _ := json.Marshal(accessorSnapshot{Schema: connectorprotocol.PrivateAccessSchema, Kind: "private_access_carrier_snapshot", Complete: true, Admissions: []accessorAdmission{admission}})
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body)), Header: http.Header{"Content-Type": []string{"application/json"}}, Request: request}, nil
+	})
+	client, err := newAccessorDiscoveryClient("https://api.example.test", privateAccessTestAuth{}, transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub, subscriptions, plane := eventstest.Start(t, time.Minute, machineevents.TopicPrivateRoutes)
+	client.events = subscriptions[0]
+	for deadline := time.Now().Add(5 * time.Second); !hub.Healthy(); {
+		if time.Now().After(deadline) {
+			t.Fatal("the event stream never became healthy")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	clock := now
+	client.now = func() time.Time { return clock }
+	// The subscription's first wake (the topic is new) refetches once; after that nothing is pushed.
+	if _, err := client.snapshot(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for range 10 {
+		clock = clock.Add(accessorSnapshotReuse)
+		if _, err := client.snapshot(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settled := requests.Load()
+	if settled > 2 {
+		t.Fatalf("ten unchanged checks, one second apart, made %d requests", settled)
+	}
+	plane.Publish(machineevents.TopicPrivateRoutes)
+	for deadline := time.Now().Add(5 * time.Second); requests.Load() == settled; {
+		if time.Now().After(deadline) {
+			t.Fatal("a published route change did not refetch the snapshot")
+		}
+		time.Sleep(20 * time.Millisecond)
+		if _, err := client.snapshot(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
 }

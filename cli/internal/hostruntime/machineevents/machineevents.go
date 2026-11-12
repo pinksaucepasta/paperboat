@@ -43,6 +43,8 @@ const (
 	TopicTunnels       Topic = "tunnels"
 	TopicConfig        Topic = "config"
 	TopicInventory     Topic = "inventory"
+	// TopicPrivateRoutes moves when the private-access routes this machine can open change.
+	TopicPrivateRoutes Topic = "private_routes"
 	// TopicMachineServices moves when a machine in this machine's audience publishes a changed
 	// service snapshot (ports).
 	TopicMachineServices Topic = "machine_services"

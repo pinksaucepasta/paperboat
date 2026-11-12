@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net/http"
@@ -148,11 +149,17 @@ type accessorDiscoveryClient struct {
 	last    []accessorAdmission
 	lastErr error
 	now     func() time.Time
+	// events, when set, makes the snapshot push-driven: see snapshot.
+	events *machineevents.Subscription
 }
 
 // accessorSnapshotReuse is how long one routes snapshot answers every caller: the sessions' 1 s
 // revocation check, so sharing it adds no delay to a withdrawn route ending.
 const accessorSnapshotReuse = time.Second
+
+// accessorSnapshotFallback is how long a good snapshot is trusted while the private_routes event stream is
+// healthy and has not moved: pushes carry revocation, this only bounds a missed one.
+const accessorSnapshotFallback = 30 * time.Second
 
 func newAccessorDiscoveryClient(controlURL string, auth privateAccessMachineAuth, transport http.RoundTripper) (*accessorDiscoveryClient, error) {
 	u, err := url.Parse(strings.TrimSpace(controlURL))
@@ -173,7 +180,19 @@ func (c *accessorDiscoveryClient) snapshot(ctx context.Context) ([]accessorAdmis
 	if c.now != nil {
 		now = c.now
 	}
-	if !c.fetched.IsZero() && now().Sub(c.fetched) < accessorSnapshotReuse {
+	pushed := false
+	if c.events != nil {
+		select {
+		case <-c.events.Changed():
+			pushed = true // consumed before the fetch, so a change during it wakes the next call
+		default:
+		}
+	}
+	reuse := accessorSnapshotReuse
+	if c.events.Healthy() && c.lastErr == nil {
+		reuse = accessorSnapshotFallback
+	}
+	if !pushed && !c.fetched.IsZero() && now().Sub(c.fetched) < reuse {
 		return slices.Clone(c.last), c.lastErr
 	}
 	c.last, c.lastErr = c.fetchSnapshot(ctx)

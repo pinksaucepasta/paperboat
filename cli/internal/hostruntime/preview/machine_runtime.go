@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -55,6 +56,9 @@ type MachinePreviewRuntimeConfig struct {
 	InspectorHTTP tunnelmanager.AuthenticatedInspectorHTTP
 	// InboxPath is the machine's Inbox folder, served by "file" previews (shared Inbox files).
 	InboxPath func() (string, error)
+	// PrivateRoutesEvents ends the accessor snapshot reuse: a pushed route change refetches at once and,
+	// while the event stream is healthy, an unchanged snapshot is not refetched every second.
+	PrivateRoutesEvents *machineevents.Subscription
 }
 
 // MachinePreviewRuntime owns one authenticated machine carrier source and
@@ -123,6 +127,9 @@ func NewMachinePreviewRuntime(config MachinePreviewRuntimeConfig) (*MachinePrevi
 		return nil, errors.Join(ErrMachinePreviewRuntimeInvalid, err)
 	}
 	discovery, err := newAccessorDiscoveryClient(control.String(), auth, config.Transport)
+	if err == nil {
+		discovery.events = config.PrivateRoutesEvents
+	}
 	if err != nil {
 		_ = sessions.Close(context.WithoutCancel(config.RunContext))
 		return nil, errors.Join(ErrMachinePreviewRuntimeInvalid, err)
