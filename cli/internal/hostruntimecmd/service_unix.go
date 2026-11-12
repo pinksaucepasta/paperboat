@@ -80,8 +80,8 @@ func runServiceCommand(ctx context.Context, args []string, stdin io.Reader, stdo
 		return withInstallInventory(ctx, hostinstall.RepairPersisted(ctx))
 	}
 	if args[0] == "purge" {
-		removed, err := purgeSystemInstallationReport(ctx, preserveCLI)
-		return writePurgeResult(ctx, stdout, err, removed...)
+		removed, warnings, err := purgeSystemInstallationReport(ctx, preserveCLI)
+		return writePurgeReport(ctx, stdout, err, removed, warnings)
 	}
 	request, err := hostinstall.Decode(stdin)
 	if err != nil {

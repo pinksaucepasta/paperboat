@@ -17,7 +17,7 @@ import (
 )
 
 func TestPurgeResultRetainsAllStagesWithoutPrivatePayload(t *testing.T) {
-	original := errors.Join(withPurgeStage("native_uninstall", &os.PathError{Op: "remove", Path: "PRIVATE_PATH_SENTINEL", Err: syscall.EACCES}), withPurgeStage("shared_manuals", syscall.EIO), withPurgeStage("native_uninstall", nativePurgeFaultFixture{syscall.ENOSPC}))
+	original := errors.Join(withPurgeStage("native_uninstall", &os.PathError{Op: "remove", Path: "PRIVATE_PATH_SENTINEL", Err: syscall.EACCES}), withPurgeStage("machine_guard", syscall.EIO), withPurgeStage("native_uninstall", nativePurgeFaultFixture{syscall.ENOSPC}))
 	var output bytes.Buffer
 	if err := writePurgeResult(context.Background(), &output, original); !errors.Is(err, syscall.EACCES) {
 		t.Fatalf("writer lost original error: %v", err)
@@ -40,7 +40,7 @@ func TestPurgeResultRetainsAllStagesWithoutPrivatePayload(t *testing.T) {
 			faults[f.Stage] = errorreport.ProjectFault(t.Context(), "paperboat-cli", "uninstall", "command", "command_failed", f)
 		}
 	}
-	if len(faults) != 3 || faults["uninstall_power"].Errno != int(syscall.ENOSPC) || faults["uninstall_power"].Code != "purge_uninstall_power_failed" || faults["native_uninstall"].Errno != int(syscall.EACCES) || faults["shared_manuals"].Errno != int(syscall.EIO) || faults["native_uninstall"].Code != "purge_native_uninstall_failed" {
+	if len(faults) != 3 || faults["uninstall_power"].Errno != int(syscall.ENOSPC) || faults["uninstall_power"].Code != "purge_uninstall_power_failed" || faults["native_uninstall"].Errno != int(syscall.EACCES) || faults["machine_guard"].Errno != int(syscall.EIO) || faults["native_uninstall"].Code != "purge_native_uninstall_failed" {
 		t.Fatalf("finite stage/errno lost: %+v", faults)
 	}
 }

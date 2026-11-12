@@ -52,7 +52,10 @@ func runPurge(ctx context.Context, args []string, _ io.Reader, _, stderr io.Writ
 	if output.exceeded {
 		return nil, runtimeFailure("privileged cleanup result exceeded its bound", err)
 	}
-	removed, err := readPurgeReport(output.data, errors.Join(err, runtimeContextFailure(ctx)))
+	removed, warnings, err := readPurgeSummary(output.data, errors.Join(err, runtimeContextFailure(ctx)))
+	if len(warnings) > 0 {
+		fmt.Fprintln(stderr, "Paperboat's own files were removed, but its shared manual pages in /usr/local/share/man/man1 were left because that directory is not safe to clean as root. Remove them yourself with: sudo rm -f /usr/local/share/man/man1/pb.1 /usr/local/share/man/man1/pb-*.1")
+	}
 	if len(removed) > 0 {
 		fmt.Fprintf(stderr, "Paperboat's service state could not be read, so everything it owns was removed by its known names: %s.\n", strings.Join(removed, ", "))
 	}
@@ -68,28 +71,29 @@ func purgeSystemInstallation(ctx context.Context) error {
 }
 
 func purgeSystemInstallationScoped(ctx context.Context, preserveCLI bool) error {
-	_, err := purgeSystemInstallationReport(ctx, preserveCLI)
+	_, _, err := purgeSystemInstallationReport(ctx, preserveCLI)
 	return err
 }
 
 // purgeSystemInstallationReport is purgeSystemInstallationScoped that also returns the Paperboat items it removed
 // by their known names because the native lifecycle state could not be read (nil when it could).
-func purgeSystemInstallationReport(ctx context.Context, preserveCLI bool) (removed []string, _ error) {
+func purgeSystemInstallationReport(ctx context.Context, preserveCLI bool) (removed, warnings []string, _ error) {
 	if os.Geteuid() != 0 {
-		return nil, errors.New("complete uninstall requires administrator approval")
+		return nil, nil, errors.New("complete uninstall requires administrator approval")
 	}
 	plan, err := newUnixPurgePlan(runtime.GOOS, invokingServiceUID())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sweep := newHostUnixSweep(plan)
 	sweep.removedByName = &removed
+	sweep.warnings = &warnings
 	if preserveCLI {
 		err = sweep.purgeForReset(ctx, hostinstall.ResetCLIForCurrentAccount, hostinstall.UninstallPersistedPreservingCLI)
-		return removed, err
+		return removed, warnings, err
 	}
 	err = sweep.purgeAccount(ctx)
-	return removed, err
+	return removed, warnings, err
 }
 
 // purgeForReset keeps the account CLI that prove accepts. A CLI it cannot
@@ -276,7 +280,13 @@ type unixSweep struct {
 	killWait      time.Duration
 	// removedByName, when set, receives what the sweep removed after the native lifecycle state could not be read.
 	removedByName *[]string
+	// warnings, when set, receives the cleanups that did not finish but never block the user's own data
+	// (named by purgeWarning*). A warning is reported to the user next to the success.
+	warnings *[]string
 }
+
+// purgeWarningSharedManuals names the shared manual pages the purge could not prove safe to remove.
+const purgeWarningSharedManuals = "shared_manuals"
 
 const unixPurgePollInterval = 50 * time.Millisecond
 
@@ -349,8 +359,10 @@ func (s unixSweep) purgeAccount(ctx context.Context) error {
 		}
 	}
 	if s.plan.platform == "darwin" && s.keepCLI == "" {
-		if err := s.removeUnneededSharedManuals(); err != nil {
-			result = errors.Join(result, withPurgeStage("shared_manuals", err))
+		// The pages are shared with the machine, not the user's data: a custody refusal is a warning, never a
+		// failure that stops the user's own credentials, runtime and state from being removed.
+		if err := s.removeUnneededSharedManuals(); err != nil && s.warnings != nil {
+			*s.warnings = append(*s.warnings, purgeWarningSharedManuals)
 		}
 	}
 	if s.keepCLI == "" {
@@ -465,9 +477,12 @@ func (s unixSweep) removeUnneededSharedManuals() error {
 	if _, err := os.Lstat(section); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	// Check every parent without creating or repairing shared filesystem paths.
-	// Purge runs as root, so the effective uid is root here; tests run it unprivileged.
-	// The root prefix is the existing sweep's isolated filesystem fixture.
+	// Check the path without creating or repairing shared filesystem paths. Purge runs as root, so the
+	// effective uid is root here; tests run it unprivileged. The root prefix is the existing sweep's isolated
+	// filesystem fixture. Only the manual tree this removes from (man, man1) must be owned by the purging
+	// user and closed to group and others; the parents above it only have to be real directories, because
+	// stock layouts make them group-writable (Intel Homebrew: /usr/local/share is user:admin, mode 775) and
+	// nothing is written there.
 	current := s.at("/")
 	for _, component := range []string{"", "usr", "local", "share", "man", "man1"} {
 		current = filepath.Join(current, component)
@@ -476,7 +491,8 @@ func (s unixSweep) removeUnneededSharedManuals() error {
 			return err
 		}
 		stat, ok := info.Sys().(*syscall.Stat_t)
-		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0022 != 0 || !ok || int(stat.Uid) != os.Geteuid() {
+		strict := component == "man" || component == "man1"
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || !ok || strict && (info.Mode().Perm()&0022 != 0 || int(stat.Uid) != os.Geteuid()) {
 			return errors.New("shared manual directory custody is unsafe")
 		}
 	}

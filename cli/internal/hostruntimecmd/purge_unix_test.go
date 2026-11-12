@@ -3,6 +3,7 @@
 package hostruntimecmd
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -579,6 +580,8 @@ func TestDarwinPurgeSharedManualLifetime(t *testing.T) {
 				t.Fatal(err)
 			}
 			sweep := testSweep(root, plan, newPurgeFake())
+			var warnings []string
+			sweep.warnings = &warnings
 			switch remaining {
 			case "cli":
 				plantFile(t, root, "Library/PrivilegedHelperTools/Paperboat/users/u502/bin/pb")
@@ -592,12 +595,11 @@ func TestDarwinPurgeSharedManualLifetime(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			err = sweep.purgeAccount(context.Background())
-			if remaining == "unsafe" && err == nil {
-				t.Fatal("unsafe shared directory accepted")
-			}
-			if remaining != "unsafe" && err != nil {
+			if err = sweep.purgeAccount(context.Background()); err != nil {
 				t.Fatal(err)
+			}
+			if remaining == "unsafe" && len(warnings) != 1 {
+				t.Fatalf("unsafe shared directory was not reported as a warning: %v", warnings)
 			}
 			for _, page := range pages {
 				_, err := os.Lstat(page)
@@ -856,5 +858,78 @@ func TestPurgeRemovedByNameNamesEachItemOnce(t *testing.T) {
 		if !seen[want] {
 			t.Errorf("the report lacks %q: %v", want, removed)
 		}
+	}
+}
+
+// A shared-manuals custody refusal never stops the purge of the user's own data: it is a named warning with
+// what the user can do. Stock macOS layouts make the parents group-writable (Intel Homebrew: /usr/local/share
+// is user:admin, mode 775) and those parents only have to be real directories.
+func TestDarwinPurgeSharedManualCustodyNeverBlocksTheUsersData(t *testing.T) {
+	for name, tc := range map[string]struct {
+		shareMode, man1Mode os.FileMode
+		wantWarning         bool
+	}{
+		"group-writable parent is allowed":   {0775, 0755, false},
+		"group-writable man1 is a warning":   {0755, 0775, true},
+		"world-writable man1 is a warning":   {0755, 0777, true},
+		"group-writable share and man1 warn": {0775, 0775, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			manualRoot := filepath.Join(root, "usr/local/share/man")
+			if err := documentation.Install(manualRoot); err != nil {
+				t.Fatal(err)
+			}
+			for path, mode := range map[string]os.FileMode{
+				filepath.Join(root, "usr/local/share"): tc.shareMode, manualRoot: 0755, filepath.Join(manualRoot, "man1"): tc.man1Mode,
+			} {
+				if err := os.Chmod(path, mode); err != nil {
+					t.Fatal(err)
+				}
+			}
+			pages, err := filepath.Glob(filepath.Join(manualRoot, "man1", "pb*.1"))
+			if err != nil || len(pages) == 0 {
+				t.Fatal("bundled manual fixture missing", err)
+			}
+			plan, err := newUnixPurgePlan("darwin", 501)
+			if err != nil {
+				t.Fatal(err)
+			}
+			userData := "Library/Application Support/Paperboat/users/u501/state"
+			plantFile(t, root, userData)
+			var warnings []string
+			sweep := testSweep(root, plan, newPurgeFake())
+			sweep.warnings = &warnings
+			if err := sweep.purgeAccount(context.Background()); err != nil {
+				t.Fatalf("purge failed because of the shared manuals: %v", err)
+			}
+			if tc.wantWarning != (len(warnings) == 1 && warnings[0] == purgeWarningSharedManuals) || !tc.wantWarning && len(warnings) != 0 {
+				t.Fatalf("warnings = %v, want warning=%v", warnings, tc.wantWarning)
+			}
+			for _, page := range pages {
+				_, err := os.Lstat(page)
+				if tc.wantWarning && err != nil {
+					t.Fatalf("an unsafe directory lost %s: %v", filepath.Base(page), err)
+				}
+				if !tc.wantWarning && !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("the manual %s was kept in a safe layout: %v", filepath.Base(page), err)
+				}
+			}
+		})
+	}
+}
+
+func TestPurgeResultCarriesTheManualWarningAndRefusesAnyOther(t *testing.T) {
+	var output bytes.Buffer
+	if err := writePurgeReport(t.Context(), &output, nil, nil, []string{purgeWarningSharedManuals, "other"}); err != nil {
+		t.Fatal(err)
+	}
+	removed, warnings, err := readPurgeSummary(output.Bytes(), nil)
+	if err != nil || len(removed) != 0 || len(warnings) != 1 || warnings[0] != purgeWarningSharedManuals {
+		t.Fatalf("removed=%v warnings=%v err=%v", removed, warnings, err)
+	}
+	forged := []byte(`{"version":"paperboat.purge-result/v1","ok":true,"warnings":["delete_everything"]}`)
+	if _, _, err := readPurgeSummary(forged, nil); err == nil {
+		t.Fatal("an unknown warning was accepted")
 	}
 }

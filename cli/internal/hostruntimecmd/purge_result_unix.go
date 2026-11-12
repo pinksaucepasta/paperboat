@@ -32,6 +32,8 @@ type purgeResult struct {
 	Remaining []string `json:"remaining,omitempty"`
 	// RemovedByName names what a cleanup removed by known names because the native lifecycle state was unreadable.
 	RemovedByName []string `json:"removed_by_name,omitempty"`
+	// Warnings names cleanups that did not finish without failing the purge (purgeWarning*).
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 const purgeRemainingLimit = 32
@@ -45,8 +47,17 @@ func (f purgeFault) DiagnosticCause() string { return f.Cause }
 func (f purgeFault) DiagnosticErrno() int    { return f.Errno }
 
 func writePurgeResult(ctx context.Context, output io.Writer, err error, removedByName ...string) error {
+	return writePurgeReport(ctx, output, err, removedByName, nil)
+}
+
+func writePurgeReport(ctx context.Context, output io.Writer, err error, removedByName, warnings []string) error {
 	ok := err == nil
 	result := purgeResult{Version: "paperboat.purge-result/v1", OK: &ok}
+	for _, warning := range warnings {
+		if warning == purgeWarningSharedManuals {
+			result.Warnings = append(result.Warnings, warning)
+		}
+	}
 	for _, item := range removedByName {
 		if len(result.RemovedByName) < purgeRemainingLimit && validPurgeRemaining(item) {
 			result.RemovedByName = append(result.RemovedByName, item)
@@ -100,60 +111,71 @@ func readPurgeResult(data []byte, processErr error) error {
 
 // readPurgeReport is readPurgeResult that also returns what the cleanup removed by known names.
 func readPurgeReport(data []byte, processErr error) (removedByName []string, _ error) {
+	removed, _, err := readPurgeSummary(data, processErr)
+	return removed, err
+}
+
+// readPurgeSummary is readPurgeReport that also returns the warnings of a purge that otherwise succeeded.
+func readPurgeSummary(data []byte, processErr error) (removedByName, warnings []string, _ error) {
 	invalid := func() error { return runtimeFailure("privileged cleanup returned an invalid result", processErr) }
 	if len(data) > purgeResultLimit {
-		return nil, invalid()
+		return nil, nil, invalid()
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	var result purgeResult
 	if decoder.Decode(&result) != nil {
-		return nil, invalid()
+		return nil, nil, invalid()
 	}
 	var extra any
 	if decoder.Decode(&extra) != io.EOF || result.Version != "paperboat.purge-result/v1" || result.OK == nil || *result.OK != (processErr == nil) || len(result.Faults) > 16 {
-		return nil, invalid()
+		return nil, nil, invalid()
 	}
-	if len(result.RemovedByName) > purgeRemainingLimit {
-		return nil, invalid()
+	if len(result.RemovedByName) > purgeRemainingLimit || len(result.Warnings) > 1 {
+		return nil, nil, invalid()
+	}
+	for _, warning := range result.Warnings {
+		if warning != purgeWarningSharedManuals {
+			return nil, nil, invalid()
+		}
 	}
 	for _, item := range result.RemovedByName {
 		if !validPurgeRemaining(item) {
-			return nil, invalid()
+			return nil, nil, invalid()
 		}
 	}
 	if *result.OK {
 		if result.Faults != nil || result.Remaining != nil {
-			return nil, invalid()
+			return nil, nil, invalid()
 		}
-		return result.RemovedByName, nil
+		return result.RemovedByName, result.Warnings, nil
 	}
 	if len(result.Faults) == 0 || len(result.Remaining) > purgeRemainingLimit {
-		return nil, invalid()
+		return nil, nil, invalid()
 	}
 	for _, item := range result.Remaining {
 		if !validPurgeRemaining(item) {
-			return nil, invalid()
+			return nil, nil, invalid()
 		}
 	}
 	incomplete := PurgeIncomplete{Remaining: result.Remaining}
 	var retained []error
 	for _, f := range result.Faults {
 		if !validPurgeStage(f.Stage) || f.Code != "purge_"+f.Stage+"_failed" && !(f.Stage == "command" && f.Code == "command_failed") || !errorreport.ValidCause(f.Cause) || f.Errno < 0 || f.Errno > 65535 || !supportref.Valid(f.SupportReference) || len(f.ErrorType) > 64 {
-			return nil, invalid()
+			return nil, nil, invalid()
 		}
 		for _, c := range f.ErrorType {
 			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_') {
-				return nil, invalid()
+				return nil, nil, invalid()
 			}
 		}
 		if f.ErrorType == "" {
-			return nil, invalid()
+			return nil, nil, invalid()
 		}
 		retained = append(retained, f)
 		incomplete.Stages = append(incomplete.Stages, f.Stage)
 	}
-	return result.RemovedByName, errors.Join(append(retained, incomplete, processErr)...)
+	return result.RemovedByName, nil, errors.Join(append(retained, incomplete, processErr)...)
 }
 
 // validPurgeRemaining accepts only what the final inventory names: an absolute
@@ -171,7 +193,7 @@ func validPurgeRemaining(item string) bool {
 }
 func validPurgeStage(stage string) bool {
 	switch stage {
-	case "uninstall_prepare", "uninstall_lock", "uninstall_recover", "uninstall_sessions", "uninstall_activator", "uninstall_services", "uninstall_power", "uninstall_journal", "uninstall_files", "uninstall_lock_close", "native_uninstall", "account_sweep", "machine_guard", "shared_manuals", "shared_payload_parents", "final_inventory", "reset_cli", "command":
+	case "uninstall_prepare", "uninstall_lock", "uninstall_recover", "uninstall_sessions", "uninstall_activator", "uninstall_services", "uninstall_power", "uninstall_journal", "uninstall_files", "uninstall_lock_close", "native_uninstall", "account_sweep", "machine_guard", "shared_payload_parents", "final_inventory", "reset_cli", "command":
 		return true
 	}
 	return false
