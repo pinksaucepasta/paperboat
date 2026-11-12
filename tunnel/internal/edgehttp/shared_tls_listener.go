@@ -27,8 +27,11 @@ type SharedTLSListener struct {
 	infrastructureHostname string
 	ctx                    context.Context
 	cancel                 context.CancelFunc
-	ready                  chan net.Conn
-	slots                  chan struct{}
+	// hello bounds reading a ClientHello; Close ends it at once, so a client that sent nothing is not waited for.
+	hello       context.Context
+	cancelHello context.CancelFunc
+	ready       chan net.Conn
+	slots       chan struct{}
 	// passthrough bounds the TLS-passthrough streams handed off from dispatch; they are long-lived,
 	// so they must not hold the dispatch slots new HTTPS connections need (audit T3).
 	passthrough chan struct{}
@@ -36,14 +39,16 @@ type SharedTLSListener struct {
 	// slot is freed at hand-off (golang.org/x/net/netutil LimitListener holds its slot until Close).
 	https chan struct{}
 	// forward carries one passthrough stream (the route registry's ForwardPublicTCP).
-	forward   func(context.Context, net.Conn, connectorprotocol.IngressDecision, func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)) error
-	done      chan struct{}
-	workers   sync.WaitGroup
-	closeOnce sync.Once
-	mu        sync.Mutex
-	acceptErr error
-	onFailure func(context.Context, string, error)
-	closeErr  error
+	forward func(context.Context, net.Conn, connectorprotocol.IngressDecision, func(context.Context, connectorprotocol.IngressDecision) (connectorprotocol.IngressDecision, error)) error
+	done    chan struct{}
+	workers sync.WaitGroup
+	// dispatching counts connections accepted and not yet handed to the HTTP server or refused.
+	dispatching sync.WaitGroup
+	closeOnce   sync.Once
+	mu          sync.Mutex
+	acceptErr   error
+	onFailure   func(context.Context, string, error)
+	closeErr    error
 	// unknown completes TLS for a name with no live decision (a stopped or unknown preview) and answers
 	// only the branded "does not exist" page; it never reaches the HTTPS handler or an origin.
 	unknown *tls.Config
@@ -155,6 +160,7 @@ func newSharedTLSListener(listener net.Listener, authority PublicTCPAuthority, r
 	ctx, cancel := context.WithCancel(context.Background())
 	l := &SharedTLSListener{Listener: listener, authority: authority, routes: routes, httpsHostname: httpsHostname, admittedHTTPSHostname: admittedHTTPSHostname, previewHTTPSAuthority: previewHTTPSAuthority, infrastructureHostname: infrastructureHostname, ctx: ctx, cancel: cancel, ready: make(chan net.Conn), held: newHoldSet(takeoverHoldMax, takeoverHoldPerName, takeoverHoldReserve), slots: slots, passthrough: make(chan struct{}, cap(slots)), https: make(chan struct{}, cap(slots)), forward: routes.ForwardPublicTCP, done: make(chan struct{}), onFailure: observe,
 		handshakes: newAddressLimiter(addressHandshakeRate, addressRate{}, 0), names: newHoldSet(cap(slots), nameShare(cap(slots)), 0)}
+	l.hello, l.cancelHello = context.WithCancel(ctx)
 	go l.run()
 	return l
 }
@@ -169,6 +175,7 @@ func (l *SharedTLSListener) run() {
 			l.mu.Lock()
 			l.acceptErr = err
 			l.mu.Unlock()
+			l.finishDispatches()
 			l.cancel()
 			return
 		}
@@ -182,7 +189,13 @@ func (l *SharedTLSListener) run() {
 		select {
 		case l.slots <- struct{}{}:
 			l.workers.Add(1)
-			go func() { defer l.workers.Done(); defer func() { <-l.slots }(); l.dispatch(conn) }()
+			l.dispatching.Add(1)
+			go func() {
+				defer l.workers.Done()
+				defer func() { <-l.slots }()
+				defer l.dispatching.Done()
+				l.dispatch(conn)
+			}()
 		default:
 			_ = conn.Close()
 		}
@@ -196,7 +209,7 @@ func (l *SharedTLSListener) dispatch(conn net.Conn) {
 			_ = conn.Close()
 		}
 	}()
-	replay, host, err := inspectTLSInfrastructureClientHello(l.ctx, conn, l.infrastructureHostname)
+	replay, host, err := inspectTLSInfrastructureClientHello(l.hello, conn, l.infrastructureHostname)
 	if err != nil {
 		l.observe("tls_dispatch", err)
 		return
@@ -418,8 +431,24 @@ func (l *SharedTLSListener) Accept() (net.Conn, error) {
 	}
 }
 
+// dispatchDrainWait bounds how long a closing listener lets accepted connections finish their dispatch.
+const dispatchDrainWait = 5 * time.Second
+
+// finishDispatches lets the connections already accepted reach the HTTP server (still accepting while a drain
+// closes this listener first) before the context that bounds them is cancelled. Cancelled at once, a connection
+// accepted just before an edge handover's release was closed unanswered (2026-11-12 22:28Z: a preview 000).
+func (l *SharedTLSListener) finishDispatches() {
+	done := make(chan struct{})
+	go func() { l.dispatching.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(dispatchDrainWait):
+	}
+}
+
 func (l *SharedTLSListener) Close() error {
-	l.closeOnce.Do(func() { l.cancel(); l.closeErr = l.Listener.Close() })
+	// Accepting stops here; run cancels the dispatch context once accepted connections finished (finishDispatches).
+	l.closeOnce.Do(func() { l.cancelHello(); l.closeErr = l.Listener.Close() })
 	<-l.done
 	return l.closeErr
 }

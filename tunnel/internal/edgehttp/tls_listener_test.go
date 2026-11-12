@@ -497,3 +497,70 @@ func TestSharedTLSHTTPSConnectionsAreCapped(t *testing.T) {
 		t.Fatal("closing a connection did not free its slot")
 	}
 }
+
+// slowSnapshotAuthority holds Snapshot until release is closed (or the caller's context ends).
+type slowSnapshotAuthority struct {
+	tlsAuthorityFixture
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (a *slowSnapshotAuthority) Snapshot(ctx context.Context) ([]connectorprotocol.IngressDecision, error) {
+	select {
+	case a.entered <- struct{}{}:
+	default:
+	}
+	select {
+	case <-a.release:
+		return nil, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// A drain closes the shared listener first: a connection it accepted just before still finishes its dispatch and
+// reaches the HTTP server, instead of being closed unanswered (edge handover 2026-11-12 22:28Z: a preview 000).
+func TestSharedTLSCloseLetsAnAcceptedConnectionFinishItsDispatch(t *testing.T) {
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := probe.Addr().String()
+	registry, _ := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	defer registry.Close()
+	https := func(string) bool { return true }
+	authority := &slowSnapshotAuthority{entered: make(chan struct{}, 1), release: make(chan struct{})}
+	manager := newSharedTLSListener(probe, authority, registry, https, make(chan struct{}, 1), "", https, nil, nil)
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		if conn, err := manager.Accept(); err == nil {
+			accepted <- conn
+		}
+	}()
+	conn, err := net.Dial("tcp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	go func() { _ = tls.Client(conn, &tls.Config{ServerName: "app.example.test"}).Handshake() }()
+	select {
+	case <-authority.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dispatch never asked for the snapshot")
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- manager.Close() }()
+	time.Sleep(100 * time.Millisecond) // the drain's Close has begun
+	close(authority.release)
+	select {
+	case got := <-accepted:
+		_ = got.Close()
+	case <-time.After(2 * time.Second):
+		t.Fatal("a connection accepted before the close was dropped instead of handed to the server")
+	}
+	select {
+	case <-closed:
+	case <-time.After(dispatchDrainWait + time.Second):
+		t.Fatal("close did not return after the dispatch finished")
+	}
+}
