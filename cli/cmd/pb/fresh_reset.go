@@ -220,6 +220,9 @@ func (e machineReplacementError) Error() string {
 			return "This machine is paired and working. The old machine record " + e.retiredID + " belongs to a different team or account, so it was left as it is; see `pb machine list`."
 		}
 	}
+	if apiErr != nil && apiErr.Code != "" { // the server answered: its code says why, and a connection check would not help
+		return "This machine is paired and working, but its old machine record " + e.retiredID + " could not be replaced (" + apiErr.Code + "). Remove the old machine in the dashboard."
+	}
 	return "This machine is paired and working, but its old machine record " + e.retiredID + " could not be replaced. Check your connection, then remove the old machine in the dashboard."
 }
 

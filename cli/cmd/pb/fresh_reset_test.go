@@ -136,7 +136,7 @@ func TestMachineReplacementErrorNamesTheServerRefusal(t *testing.T) {
 	}{
 		{"already replaced", &api.APIError{Status: 409, Code: "user_machine_already_replaced"}, "Another machine already replaced machine_old. This machine is paired and working; see `pb machine list`.", "Check your connection"},
 		{"team mismatch", fmt.Errorf("replace: %w", &api.APIError{Status: 409, Code: "user_machine_replace_team_mismatch"}), "belongs to a different team or account, so it was left as it is", "Check your connection"},
-		{"other api error", &api.APIError{Status: 409, Code: "conflict"}, "Check your connection, then remove the old machine in the dashboard.", "Another machine"},
+		{"other api error", &api.APIError{Status: 409, Code: "conflict"}, "could not be replaced (conflict). Remove the old machine in the dashboard.", "Check your connection"},
 		{"network error", errors.New("dial tcp: timeout"), "Check your connection, then remove the old machine in the dashboard.", "Another machine"},
 	} {
 		got := classifyCLIJSONError(machineReplacementError{step: replaceStepCutover, retiredID: "machine_old", cause: test.cause}).Message

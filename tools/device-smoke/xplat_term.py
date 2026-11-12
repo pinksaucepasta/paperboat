@@ -34,15 +34,20 @@ except ImportError:  # the env leg is optional
 def client_argv(src, tail):
     """The local command that opens a terminal on `src` and runs `tail` (a list) there."""
     if src.os == 'linux':
-        return ['ssh', '-tt', fleet.L_HOST, 'docker', 'exec', '-it', '-u', 'tester', '-e', 'HOME=/home/tester', '-e', 'XDG_RUNTIME_DIR=/run/user/1001',
-                '-e', 'TERM=xterm-256color', fleet.L_CT, *tail]
+        user, uid = os.environ.get('XPLAT_L_USER', 'tester'), os.environ.get('XPLAT_L_UID', '1001')
+        return ['ssh', '-tt', fleet.L_HOST, *os.environ.get('XPLAT_L_DOCKER', 'docker').split(), 'exec', '-it', '-u', user, '-e', 'HOME=/home/' + user,
+                '-e', 'XDG_RUNTIME_DIR=/run/user/' + uid, '-e', 'TERM=xterm-256color', fleet.L_CT, *tail]
     if src.os == 'windows':
         quoted = ' '.join("'%s'" % part.replace("'", "''") for part in tail)
         # Windows OpenSSH returns 0 for every `ssh -tt` login whatever the command exits with: the exit code of pb connect
         # is printed in band (RC=<n>) and read from the screen
         return ['ssh', '-tt', src.device.target, 'powershell -NoProfile -Command "& ' + quoted.replace('"', '\\"') + "; Write-Output ('RC=' + $LASTEXITCODE)\""]
     host = os.environ.get('XPLAT_MAC_SSH')
-    return ['ssh', '-tt', host or 'admin@100.88.169.42', 'TERM=xterm-256color ' + ' '.join("'%s'" % part for part in tail)]
+    if host:
+        return ['ssh', '-tt', host, 'TERM=xterm-256color ' + ' '.join("'%s'" % part for part in tail)]
+    # the Mac VM: its login keychain is unlocked per command, and its host key is not in known_hosts
+    return ['ssh', '-tt', '-o', 'StrictHostKeyChecking=no', '-o', 'UserKnownHostsFile=/dev/null', '-o', 'LogLevel=ERROR', '-o', 'BatchMode=yes',
+            'admin@100.88.169.42', fleet.mac_unlock() + 'TERM=xterm-256color ' + ' '.join("'%s'" % part for part in tail)]
 
 
 class Terminal:
