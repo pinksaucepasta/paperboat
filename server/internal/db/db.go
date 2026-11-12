@@ -294,6 +294,35 @@ func (d *DB) InTx(ctx context.Context, fn func(context.Context, *Tx) error) erro
 	return err
 }
 
+// serializationFaults is how many upcoming serializable transactions fail at their start with the error PostgreSQL
+// gives the loser of a serialization race (40001). It is for tests only (F21-157): it proves that every caller
+// replays such a failure. Nothing sets it in production.
+var serializationFaults atomic.Int64
+
+// InjectSerializationFailures makes the next n serializable transactions fail with 40001 and returns how many are
+// still pending and a restore function.
+func InjectSerializationFailures(n int) (remaining func() int, restore func()) {
+	serializationFaults.Store(int64(n))
+	return func() int { return int(serializationFaults.Load()) }, func() { serializationFaults.Store(0) }
+}
+
+func injectedSerializationFailure() error {
+	for {
+		pending := serializationFaults.Load()
+		if pending <= 0 {
+			return nil
+		}
+		if serializationFaults.CompareAndSwap(pending, pending-1) {
+			return &pgconn.PgError{Code: "40001", Message: "injected serialization failure"}
+		}
+	}
+}
+
+// IsSerializationFailure reports whether err is (or wraps, through single-error wrapping only) a PostgreSQL
+// serialization failure or deadlock, the errors RetrySerializable replays. A caller that maps database errors into
+// its own type must let these through unchanged, or its transaction is never replayed.
+func IsSerializationFailure(err error) bool { return isSerializationFailure(err) }
+
 // serializableAttempts bounds how often a serializable transaction is replayed after a
 // serialization failure (40001) or deadlock (40P01).
 const serializableAttempts = 10
@@ -341,6 +370,9 @@ const serializableSetup = `SET LOCAL enable_seqscan TO off`
 // BeginSerializable starts a serializable database/sql transaction with the same setup as InTx, for code that
 // manages its own transaction. Prefer InTx; otherwise wrap the whole transaction in RetrySerializable.
 func BeginSerializable(ctx context.Context, database *sql.DB) (*sql.Tx, error) {
+	if err := injectedSerializationFailure(); err != nil {
+		return nil, err
+	}
 	tx, err := database.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return nil, err
@@ -467,6 +499,11 @@ type txBeginner interface {
 }
 
 func runInTxOn(ctx context.Context, conn txBeginner, options pgx.TxOptions, fn func(context.Context, *Tx) error) error {
+	if options.IsoLevel == pgx.Serializable {
+		if err := injectedSerializationFailure(); err != nil {
+			return err
+		}
+	}
 	tx, err := conn.BeginTx(ctx, options)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)

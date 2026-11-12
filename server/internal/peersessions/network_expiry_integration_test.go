@@ -78,8 +78,12 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 		if endpoint.role == wire.RoleMachine {
 			registration.MachineID, registration.MachineGeneration = machine, 1
 		}
-		if _, err := service.Register(ctx, registration); err != nil {
-			t.Fatal(err)
+		// F21-157: the registration replays two serialization failures (40001) instead of failing.
+		pending, restore := db.InjectSerializationFailures(2)
+		_, err := service.Register(ctx, registration)
+		restore()
+		if err != nil || pending() != 0 {
+			t.Fatalf("register after two forced 40001: err=%v pending=%d", err, pending())
 		}
 	}
 	access := "expiry_access_" + suffix

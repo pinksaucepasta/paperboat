@@ -183,3 +183,25 @@ func typedNilPostgresError() error {
 	var pgErr *pgconn.PgError
 	return pgErr
 }
+
+// F21-157: InTx and InTxUnderSessionLock replay serialization failures (40001) before their function runs the
+// first time, so the callers that use them (every caller but the BeginSerializable ones, which wrap
+// RetrySerializable and are tested in their packages) never see one.
+func TestInTxAndSessionLockedTxReplayInjectedSerializationFailures(t *testing.T) {
+	store := openTransactionFailureTestDB(t)
+	ctx := context.Background()
+	for name, run := range map[string]func(fn func(context.Context, *Tx) error) error{
+		"InTx": func(fn func(context.Context, *Tx) error) error { return store.InTx(ctx, fn) },
+		"InTxUnderSessionLock": func(fn func(context.Context, *Tx) error) error {
+			return store.InTxUnderSessionLock(ctx, "f21-157-session-lock", 1, fn)
+		},
+	} {
+		pending, restore := InjectSerializationFailures(2)
+		calls := 0
+		err := run(func(context.Context, *Tx) error { calls++; return nil })
+		restore()
+		if err != nil || calls != 1 || pending() != 0 {
+			t.Fatalf("%s after two forced 40001: err=%v calls=%d pending=%d", name, err, calls, pending())
+		}
+	}
+}

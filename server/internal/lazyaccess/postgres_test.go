@@ -58,9 +58,12 @@ func TestPolicyPostgres(t *testing.T) {
 	}
 	svc.now = func() time.Time { return now }
 	in := UpsertRequest{MachineID: machine, Target: Target{Scheme: "http", Address: "127.0.0.1:3210"}, AccessMode: "private", ExpiresAt: now.Add(time.Hour)}
+	// F21-157: the policy upsert replays two serialization failures (40001) instead of failing.
+	pending, restore := db.InjectSerializationFailures(2)
 	p, err := svc.Upsert(ctx, owner, in)
-	if err != nil {
-		t.Fatal(err)
+	restore()
+	if err != nil || pending() != 0 {
+		t.Fatalf("upsert after two forced 40001: err=%v pending=%d", err, pending())
 	}
 	if !regexp.MustCompile(`^[a-z]+-[a-z]+-[a-z]+-[0-9]{4}[.]preview[.]example[.]test$`).MatchString(p.Hostname) || p.InstallationGeneration != 4 || p.Generation != 1 {
 		t.Fatalf("policy=%#v", p)

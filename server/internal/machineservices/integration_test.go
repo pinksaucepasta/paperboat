@@ -78,9 +78,12 @@ func TestMachineServicePostgresAuthorityLifecycle(t *testing.T) {
 	if e = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.user_machine_access_sessions WHERE user_machine_id=$1`, machine).Scan(&count); e != nil || count != 0 {
 		t.Fatalf("unauthorized request mutated sessions: %d %v", count, e)
 	}
+	// F21-157: the grant's serializable read replays two serialization failures (40001) instead of failing.
+	pending, restore := db.InjectSerializationFailures(2)
 	target, e := resolver.ResolveNativePrivate(ctx, request(owner, 5432))
-	if e != nil {
-		t.Fatal(e)
+	restore()
+	if e != nil || pending() != 0 {
+		t.Fatalf("resolve after two forced 40001: err=%v pending=%d", e, pending())
 	}
 	if target.AccountID != owner || target.TargetAddress != "127.0.0.1:5432" {
 		t.Fatalf("target %+v", target)
@@ -102,9 +105,12 @@ func TestMachineServicePostgresAuthorityLifecycle(t *testing.T) {
 	if _, e = s.UpdatePolicy(ctx, other, machine, wire.PolicyUpdate{ExpectedGeneration: 1}); !errors.Is(e, machineservices.ErrDenied) {
 		t.Fatalf("outsider settings %v", e)
 	}
+	// F21-157: the policy update replays two serialization failures (40001) instead of failing.
+	pending, restore = db.InjectSerializationFailures(2)
 	_, e = s.UpdatePolicy(ctx, owner, machine, wire.PolicyUpdate{ExpectedGeneration: policy.Generation})
-	if e != nil {
-		t.Fatal(e)
+	restore()
+	if e != nil || pending() != 0 {
+		t.Fatalf("update policy after two forced 40001: err=%v pending=%d", e, pending())
 	}
 	denied(owner, 5432)
 	if _, e = resolver.MachineServiceCurrent(ctx, request(owner, 5432), target.AccessSessionID, target); !errors.Is(e, nativeprivateaccess.ErrDenied) {

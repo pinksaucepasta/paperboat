@@ -89,6 +89,9 @@ func (s *Service) upsertAttempt(ctx context.Context, accountID string, input Ups
 	}
 	tx, err := db.BeginSerializable(ctx, s.db.SQL())
 	if err != nil {
+		if db.IsSerializationFailure(err) {
+			return Policy{}, err
+		}
 		beginErr := policyFailure("begin lazy policy transaction failed", err)
 		return Policy{}, upsertContextFailure(ctx, beginErr)
 	}
@@ -342,7 +345,12 @@ func mapWriteError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if pg, ok := err.(*pgconn.PgError); ok && pg != nil && (pg.Code == "23505" || pg.Code == "40001") {
+	// A serialization failure or deadlock goes to RetrySerializable unchanged: mapping it to ErrConflict answered the
+	// client 409 for what a replay settles (F21-157). Only a unique violation is a real conflict.
+	if db.IsSerializationFailure(err) {
+		return err
+	}
+	if pg, ok := err.(*pgconn.PgError); ok && pg != nil && pg.Code == "23505" {
 		return policyFailure(ErrConflict.Error(), ErrConflict, err)
 	}
 	return policyFailure("persist lazy policy", err)
