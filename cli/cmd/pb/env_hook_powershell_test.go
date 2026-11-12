@@ -100,3 +100,26 @@ func TestPowerShellHookNamesTheOnlySupportedShellsOnWindows(t *testing.T) {
 		t.Fatalf("profiles = %v", files)
 	}
 }
+
+// A profile written with CRLF line endings (and a BOM) keeps them: the hook line is appended with CRLF, a second install changes
+// nothing, and uninstall returns the user's bytes.
+func TestPowerShellProfileWithCRLFKeepsItsLineEndings(t *testing.T) {
+	rc := filepath.Join(t.TempDir(), "PowerShell", "profile.ps1")
+	own := "\ufeff# mine\r\n$x = 1\r\n"
+	if err := os.MkdirAll(filepath.Dir(rc), 0o755); err != nil || os.WriteFile(rc, []byte(own), 0o600) != nil {
+		t.Fatal("setup")
+	}
+	line := envHookLine(envHookPowerShell, `C:\Users\a\pb.exe`)
+	for i, wantChanged := range []bool{true, false} {
+		if changed, err := writeEnvHookLine(rc, line, false); err != nil || changed != wantChanged {
+			t.Fatalf("install %d changed=%v err=%v", i, changed, err)
+		}
+	}
+	data, _ := os.ReadFile(rc)
+	if string(data) != own+line+"\r\n" {
+		t.Fatalf("profile = %q", data)
+	}
+	if kept, found := removeEnvHookLines(string(data)); found != 1 || kept != own {
+		t.Fatalf("uninstall kept %q found %d", kept, found)
+	}
+}

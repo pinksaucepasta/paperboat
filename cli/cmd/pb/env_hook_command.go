@@ -260,7 +260,11 @@ func writeEnvHookLine(path, line string, first bool) (bool, error) {
 		mode = info.Mode().Perm()
 	}
 	kept, found := removeEnvHookLines(string(data))
-	if found == 1 && strings.Contains(string(data), line+"\n") {
+	eol := "\n"
+	if strings.Contains(string(data), "\r\n") { // a CRLF file (a Windows profile) keeps its line endings
+		eol = "\r\n"
+	}
+	if found == 1 && strings.Contains(string(data), line+eol) {
 		return false, nil
 	}
 	var next string
@@ -269,11 +273,11 @@ func writeEnvHookLine(path, line string, first bool) (bool, error) {
 		// Windows PowerShell 5.1 reads a profile without a BOM as ANSI, which garbles a non-ASCII user path.
 		next = "\ufeff" + line + "\n"
 	case first:
-		next = line + "\n" + kept
+		next = line + eol + kept
 	case kept == "" || strings.HasSuffix(kept, "\n"):
-		next = kept + line + "\n"
+		next = kept + line + eol
 	default:
-		next = kept + "\n" + line + "\n"
+		next = kept + eol + line + eol
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return false, err
