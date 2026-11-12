@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -38,7 +39,10 @@ type IngressLimits struct {
 	Publication IngressLimitConfig
 	Account     IngressLimitConfig
 
-	mu           sync.Mutex
+	mu sync.Mutex
+	// reported is set once the applied set has been logged: the first heartbeat answer is logged even when it
+	// equals the defaults, so an operator can read back what this edge applies.
+	reported     bool
 	publications map[string]*ingressLimitState
 	accounts     map[string]*ingressLimitState
 }
@@ -75,9 +79,13 @@ func (l *IngressLimits) apply(publication, account IngressLimitConfig) error {
 	now := time.Now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.Publication == publication && l.Account == account {
+	if l.Publication == publication && l.Account == account && l.reported {
 		return nil
 	}
+	l.reported = true
+	slog.Info("ingress_limits_applied",
+		"publication_bytes_per_second", float64(publication.ByteRate), "publication_byte_burst", publication.ByteBurst,
+		"account_bytes_per_second", float64(account.ByteRate), "account_byte_burst", account.ByteBurst)
 	l.Publication, l.Account = publication, account
 	for _, state := range l.publications {
 		state.reconfigure(publication, now)

@@ -9,7 +9,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/usage"
 	"io"
+	"log/slog"
 	"net"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -409,5 +411,32 @@ func TestEdgeWithoutAnswerUsesTheSharedDefaultLimits(t *testing.T) {
 	set := edgelimits.Default()
 	if registry.ingressLimits.Publication != ingressLimitConfig(set.Publication) || registry.ingressLimits.Account != ingressLimitConfig(set.Account) {
 		t.Fatalf("edge limits = %+v / %+v", registry.ingressLimits.Publication, registry.ingressLimits.Account)
+	}
+}
+
+// An operator reads back what an edge applies from one log line, including the first answer, which equals
+// the defaults and used to change nothing silently (F21-47).
+func TestEdgeLogsTheIngressLimitsItApplies(t *testing.T) {
+	var logged bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	defer slog.SetDefault(previous)
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	set := edgelimits.Default()
+	for range 2 { // the same answer again is not logged twice
+		if err := registry.SetIngressLimits(set); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := strings.Count(logged.String(), "ingress_limits_applied"); got != 1 || !strings.Contains(logged.String(), "account_bytes_per_second=3.3554432e+07") {
+		t.Fatalf("log = %q", logged.String())
+	}
+	set.Publication.BytesPerSecond /= 2
+	if err := registry.SetIngressLimits(set); err != nil || strings.Count(logged.String(), "ingress_limits_applied") != 2 {
+		t.Fatalf("a changed set must be logged: err=%v log=%q", err, logged.String())
 	}
 }
