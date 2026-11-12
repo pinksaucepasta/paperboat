@@ -122,7 +122,14 @@ for edge in "$@"; do
 	control=$(count 'tunnel_control_request_failed|tunnel_route_reconcile_failed' "$log")
 	carrier=$(count 'carrier_connection_failed' "$log")
 	attach=$(count 'runtime_route_attach_refused' "$log")
-	edge5xx=$(count 'edge_http_5xx' "$log")
+	# Error pages for a visitor's own app (refused or timed out behind its tunnel) are not deploy failures; their
+	# support references resolve to code edge_error_page.
+	grep 'edge_http_5xx' "$log" >"$work/5xx-$target" || true
+	refs=$(grep -o '"reference":"support_[0-9a-f-]*"' "$work/5xx-$target" | cut -d'"' -f4 | sort -u | sed "s/.*/'&'/" | paste -sd, -)
+	: >"$work/pages-$target"
+	[ -z "$refs" ] || sql "select support_reference from paperboat.support_reports where support_reference in ($refs) and code = 'edge_error_page';" >"$work/pages-$target"
+	edge5xx=$(grep -c . "$work/5xx-$target" || true)
+	[ -s "$work/pages-$target" ] && edge5xx=$(grep -v -F -f "$work/pages-$target" "$work/5xx-$target" | grep -c . || true)
 	echo "edge $target: preview failures=$probes control=$control carrier=$carrier attach=$attach edge5xx=$edge5xx"
 	grep -h 'carrier_connection_failed' "$log" | grep -o '"reason":"[a-z_]*"' | sort | uniq -c | sed 's/^/  carrier refusals: /' || true
 	[ "$probes$control$carrier$attach$edge5xx" = 00000 ] || fail=1

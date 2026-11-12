@@ -26,6 +26,7 @@ case "$s" in
 *"state = 'online'"*) printf 'machine_1\\nmachine_2\\n' ;;
 *"not online"*) cat "$T/offline" 2>/dev/null ;;
 *support_reports*"code <> 'edge_error_page'"*) cat "$T/server5xx" ;;
+*"select support_reference"*"code = 'edge_error_page'"*) echo support_aaaa ;;  # only support_aaaa is a visitor app error page
 *support_reports*) echo 99 ;;  # a count that includes visitors' edge error pages fails every case
 esac
 ''',
@@ -100,6 +101,17 @@ class CheckEdgesTest(unittest.TestCase):
         code, out = self.run_gate(edge_log='{"msg":"edge_http_5xx","status":503}\n{"msg":"runtime_route_attach_refused","route_id":"r"}\n')
         self.assertEqual(code, 1, out)
         self.assertIn('attach=1 edge5xx=1', out)
+
+    def test_visitor_app_error_pages_pass(self):
+        code, out = self.run_gate(edge_log='{"msg":"edge_http_5xx","status":502,"reference":"support_aaaa"}\n')
+        self.assertEqual(code, 0, out)
+        self.assertIn('edge5xx=0', out)
+
+    def test_edge_5xx_that_is_not_an_app_error_page_fails(self):
+        code, out = self.run_gate(edge_log='{"msg":"edge_http_5xx","status":502,"reference":"support_aaaa"}\n'
+                                  '{"msg":"edge_http_5xx","status":502,"reference":"support_bbbb"}\n')
+        self.assertNotEqual(code, 0)
+        self.assertIn('edge5xx=1', out)
 
     def test_server_5xx_fails(self):
         code, out = self.run_gate(server5xx='2')
