@@ -29,9 +29,9 @@ EDGE_RECIPE = None
 
 
 class RemoteFailure(RuntimeError):
-    def __init__(self, code, reason=None):
+    def __init__(self, code, reason=None, reference=None):
         super().__init__(f'remote command exited {code}')
-        self.code, self.reason = code, reason
+        self.code, self.reason, self.reference = code, reason, reference
 
 
 def cells():
@@ -59,8 +59,14 @@ def invoke_pb(machine, *args, timeout=120, input=None):
 def pb(machine, *args, timeout=120):
     result = invoke_pb(machine, *args, timeout=timeout)
     if result.returncode:
-        raise RemoteFailure(result.returncode, error_code(result.stdout))
+        raise RemoteFailure(result.returncode, error_code(result.stdout), support_reference(result.stdout + result.stderr))
     return result.stdout
+
+
+def support_reference(output):
+    """The opaque `support_<uuid>` id pb prints with a failure (it finds the server log line), never other output."""
+    found = re.search(r'support_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', output)
+    return found.group(0) if found else None
 
 
 def error_code(output):
@@ -183,6 +189,8 @@ def check(name, action):
             result['exit_code'] = error.code
             if error.reason:
                 result['reason'] = error.reason
+            if error.reference:
+                result['support_reference'] = error.reference
     result['seconds'] = round(time.monotonic() - started, 1)
     return result
 
@@ -221,7 +229,7 @@ def verify_downgrade(old, new):
 def verify_continuity(args):
     install(args.new_client)
     staging.up(args.new_server)
-    stop = '/tmp/matrix-stop-' + str(time.time_ns())
+    stop = '/home/pbt/matrix-stop-' + str(time.time_ns())
     program = ("import os,time,sys\nend=time.monotonic()+900;i=0\n"
                f"while not os.path.exists({stop!r}) and time.monotonic()<end:\n"
                " print(i,flush=True);i+=1;time.sleep(0.25)\n"
