@@ -5,7 +5,7 @@
   xplat_fleet.py status  pb version and machine state per device
   xplat_fleet.py down    revoke the three machines by exact id and uninstall
 
-Devices (override with env): L = Docker container XPLAT_L_CT on XPLAT_L_HOST (user tester), M = the Mac VM's `admin` user
+Devices (override with env): L = Docker container XPLAT_L_CT on XPLAT_L_HOST (user XPLAT_L_USER, default tester; XPLAT_L_UID, XPLAT_L_DOCKER), M = the Mac VM's `admin` user
 (its machine `apple`, GUI session, keychain unlocked per command from ~/.pbmac/vm-login.pw), or with XPLAT_MAC_SSH=macpool-N a hosted macOS runner (machine `<prefix>-m`), W = winpool runner
 SMOKE_WINDOWS_SSH. L and W are named `<XPLAT_PREFIX>-l|-w`. The account is the Mac user's: enrollment tokens are minted by
 the Mac's own signed-in pb, so the three machines share one account. No secret is printed.
@@ -132,9 +132,11 @@ class Windows:
 
 
 def linux(name=None):
-    prefix = ['ssh', L_HOST, 'docker', 'exec', '-i', '-u', 'tester', '-e', 'HOME=/home/tester',
-              '-e', 'XDG_RUNTIME_DIR=/run/user/1001', L_CT]
-    return Unix(name or PREFIX + '-l', 'linux', prefix, '/home/tester', '/home/tester/.local/bin/pb')
+    user, uid = os.environ.get('XPLAT_L_USER', 'tester'), os.environ.get('XPLAT_L_UID', '1001')
+    docker = os.environ.get('XPLAT_L_DOCKER', 'docker').split()  # `sudo -n docker` on a host where the user is not in the docker group
+    prefix = ['ssh', L_HOST, *docker, 'exec', '-i', '-u', user, '-e', 'HOME=/home/' + user,
+              '-e', 'XDG_RUNTIME_DIR=/run/user/' + uid, L_CT]
+    return Unix(name or PREFIX + '-l', 'linux', prefix, '/home/' + user, '/home/%s/.local/bin/pb' % user)
 
 
 def mac_unlock():

@@ -13,6 +13,7 @@ import contextlib
 import hashlib
 import json
 import os
+import random
 import shlex
 import subprocess
 import sys
@@ -25,6 +26,7 @@ import xplat_fleet as fleet  # noqa: E402
 from config_sync_lifecycle import HTTP_SERVER  # noqa: E402
 
 REPO_HOST = os.environ.get('XPLAT_REPO_HOST', 'hp')
+REPO_ADDR = REPO_HOST.split('@')[-1]  # the host name as the controller dials it (ssh -R takes no user@)
 REPO_BRIDGE = os.environ.get('XPLAT_REPO_BRIDGE', '10.0.0.1')  # the repository host as the Linux container reaches it
 REPO_ROOT = '/tmp/xplat-cfg-repo'
 NAME = 'xplat-config-fixture'
@@ -81,7 +83,9 @@ class Repo:
         return done.stdout if done.returncode == 0 else None
 
     def serve(self, password):
-        self.sh('cat > %s/server.py' % REPO_ROOT, input=HTTP_SERVER.replace("('127.0.0.1', 0)", "('0.0.0.0', 0)").encode())
+        # a port inside the firewall's open range (anvit accepts 10000-59999 only), not an ephemeral one
+        bind = "('0.0.0.0', %d)" % random.randrange(20000, 30000)
+        self.sh('cat > %s/server.py' % REPO_ROOT, input=HTTP_SERVER.replace("('127.0.0.1', 0)", bind).encode())
         self.sh('cd %s && (setsid nohup python3 server.py %s cfguser %s > port 2>/dev/null < /dev/null & echo $! > pid)'
                 % (REPO_ROOT, REPO_ROOT, shlex.quote(password)))
         for _ in range(20):
@@ -151,7 +155,7 @@ class Context:
             if dev.os == 'linux':
                 self.urls[key] = 'http://%s:%d/pair.git' % (REPO_BRIDGE, port)
             elif dev.os == 'windows':
-                self.urls[key] = 'http://127.0.0.1:%d/pair.git' % self.forwards.enter_context(dev.device.forward(port, REPO_HOST))
+                self.urls[key] = 'http://127.0.0.1:%d/pair.git' % self.forwards.enter_context(dev.device.forward(port, REPO_ADDR))
             elif os.environ.get('XPLAT_MAC_SSH'):  # a hosted macOS runner cannot reach the repository host: ssh -R, as for Windows
                 self.urls[key] = 'http://127.0.0.1:%d/pair.git' % self.forwards.enter_context(ssh_forward(os.environ['XPLAT_MAC_SSH'], port))
             else:
@@ -198,7 +202,7 @@ def ssh_forward(host, port):
     """Reach REPO_HOST:port at 127.0.0.1:<remote port> on `host` while the context is open."""
     import random
     remote = random.randrange(20000, 60000)
-    tunnel = subprocess.Popen(['ssh', '-N', '-o', 'ExitOnForwardFailure=yes', '-R', '127.0.0.1:%d:%s:%d' % (remote, REPO_HOST, port), host],
+    tunnel = subprocess.Popen(['ssh', '-N', '-o', 'ExitOnForwardFailure=yes', '-R', '127.0.0.1:%d:%s:%d' % (remote, REPO_ADDR, port), host],
                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         time.sleep(5)
@@ -231,8 +235,8 @@ def delete_repository(dev, repository_id):
         print('repository delete: %s' % done.errtext[-200:], flush=True)
 
 
-def check(row, pair, action):
-    name = '%s:%s' % (row, pair)
+def check(row, pair, action, label=''):
+    name = '%s:%s%s' % (row, label + ':' if label else '', pair)  # a row has several checks: the label keeps their results apart
     started = time.time()
     try:
         detail = action()
@@ -433,7 +437,7 @@ def run_pairs(ctx, devices, only):
             continue
         for a_key, b_key in permutations(devices, 2):
             a, b = devices[a_key], devices[b_key]
-            check(row, '%s>%s' % (a_key, b_key), lambda: function(ctx, a, b, '%s>%s' % (a_key, b_key)))
+            check(row, '%s>%s' % (a_key, b_key), lambda: function(ctx, a, b, '%s>%s' % (a_key, b_key)), function.__name__)
 
 
 def main():

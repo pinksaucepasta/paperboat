@@ -1,0 +1,70 @@
+{
+ "check": "xplat-config",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-01:x01:L>M",
+   "status": "PASS",
+   "detail": "sha256 efb90abf6c7a..., dir rule include/exclude honoured"
+  },
+  {
+   "id": "X-01:x01:L>W",
+   "status": "PASS",
+   "detail": "sha256 dce8b7876378..., dir rule include/exclude honoured"
+  },
+  {
+   "id": "X-01:x01:M>L",
+   "status": "PASS",
+   "detail": "sha256 02c8b4f13336..., dir rule include/exclude honoured"
+  },
+  {
+   "id": "X-01:x01:M>W",
+   "status": "PASS",
+   "detail": "sha256 0713f7f36839..., dir rule include/exclude honoured"
+  },
+  {
+   "id": "X-01:x01:W>L",
+   "status": "PASS",
+   "detail": "sha256 d4536eb91245..., dir rule include/exclude honoured"
+  },
+  {
+   "id": "X-01:x01:W>M",
+   "status": "PASS",
+   "detail": "sha256 992c9a093efb..., dir rule include/exclude honoured"
+  },
+  {
+   "id": "X-01:x01_variables:L>M",
+   "status": "PASS",
+   "detail": "refused on every device, no substitute path"
+  },
+  {
+   "id": "X-01:x01_variables:L>W",
+   "status": "PASS",
+   "detail": "refused on every device, no substitute path"
+  },
+  {
+   "id": "X-01:x01_variables:M>L",
+   "status": "PASS",
+   "detail": "refused on every device, no substitute path"
+  },
+  {
+   "id": "X-01:x01_variables:M>W",
+   "status": "PASS",
+   "detail": "refused on every device, no substitute path"
+  },
+  {
+   "id": "X-01:x01_variables:W>L",
+   "status": "PASS",
+   "detail": "refused on every device, no substitute path"
+  },
+  {
+   "id": "X-01:x01_variables:W>M",
+   "status": "PASS",
+   "detail": "refused on every device, no substitute path"
+  }
+ ]
+}
