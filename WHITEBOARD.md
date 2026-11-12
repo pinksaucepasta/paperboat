@@ -417,3 +417,4 @@ certificates, so `pb machine rename` refuses `zoë-build` with the name rule (sh
 
 ## Folder send (tree, empty dirs) — after launch
 `pb send` takes regular files only today; a folder or symbolic link is refused with a clear message.
+- X-15 folder trees and symlinks in folders across OSes (moved from CHECKLIST X-15 with this line, 8e4412fe8): a folder keeps its structure on the receiver (nested folders, empty directories), symlinks inside a folder are refused or skipped the same way on every OS, plus the F6-01 folder case.
