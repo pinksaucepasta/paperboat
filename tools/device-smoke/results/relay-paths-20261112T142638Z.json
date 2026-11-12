@@ -1,0 +1,24 @@
+{
+ "checks": [
+  {
+   "check": "relay allowed: cold exec a->b",
+   "status": "PASS",
+   "detail": "2.6 s (limit 15 s)"
+  },
+  {
+   "check": "relay allowed: 1 MB output arrives",
+   "status": "PASS",
+   "detail": "1000000"
+  },
+  {
+   "check": "relay blocked (same LAN): cold exec a->b",
+   "status": "PASS",
+   "detail": "3.5 s (limit 15 s)"
+  },
+  {
+   "check": "direct path blocked, relay allowed: cold exec a->b",
+   "status": "PASS",
+   "detail": "3.1 s (limit 15 s)"
+  }
+ ]
+}
