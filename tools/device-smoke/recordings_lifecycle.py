@@ -202,7 +202,7 @@ def phase_manual(team, target, directory, replay=True):
         cleanup(PB, target, name)
 
 
-def phase_long(team, target, directory):
+def phase_long(team, target, directory, replay=True):
     """F25-04: a long recording (about 8 MB of terminal output, many segments) streams to the end and verifies."""
     before = {r['id'] for r in listing(team)}
     name = 'smoke-rec-' + uuid.uuid4().hex[:10]
@@ -217,23 +217,28 @@ def phase_long(team, target, directory):
                                   'for($i=0;$i -lt $s.Length;$i+=120){$s.Substring($i,[Math]::Min(120,$s.Length-$i))};(\'PB_LONGDONE_\'+\'' + done.split('_')[-1] + '\')"\r')
         else:
             session.terminal.send("head -c 6000000 /dev/urandom | base64 | fold -w 120; printf 'PB_LONGDONE_%s\\n' " + done.split('_')[-1] + '\r')
-        tail = b''
+        tail, seen, quiet_since = b'', 0, time.monotonic()
         deadline = time.monotonic() + 600
         while done.encode() not in tail:
             if time.monotonic() > deadline:
                 raise RuntimeError('the long output did not finish')
+            # A Windows client's ConPTY repaints the screen, so the end marker may never arrive whole: its output is over
+            # when most of it came and nothing has for 8 s.
+            if session.windows and seen > 4_000_000 and time.monotonic() - quiet_since > 8:
+                break
             if select.select([session.terminal.fd], [], [], 1)[0]:
                 chunk = os.read(session.terminal.fd, 1 << 16)  # drained, not kept: the recording is the evidence
-                tail = (tail + chunk)[-256:]
+                tail, seen, quiet_since = (tail + chunk)[-256:], seen + len(chunk), time.monotonic()
                 session.terminal.answer_queries(chunk)
         recording_control('stop', sid)
         recording = new_recording(team, target, before)
         ended = finished(team, recording['id'])
         if ended['segments'] < 4:
             raise RuntimeError('the long recording has only %d segments' % ended['segments'])
-        text = export_text(recording['id'], directory)
-        if text.count('\n') < 2 or len(text) < 6_000_000:
-            raise RuntimeError('the export is shorter than the output it recorded (%d bytes)' % len(text))
+        if replay:
+            text = export_text(recording['id'], directory)
+            if text.count('\n') < 2 or len(text) < 6_000_000:
+                raise RuntimeError('the export is shorter than the output it recorded (%d bytes)' % len(text))
         return recording['id']
     finally:
         session.end()
@@ -339,7 +344,7 @@ def main():
             receipt['manual_recording'] = phase_manual(args.team, args.target, directory, not args.no_replay)
             receipt['phases'] += ['manual_start_stop', 'rec_in_connect', 'cli_list'] + ([] if args.no_replay else ['cli_export', 'cli_play'])
         if 'long' in phases:
-            receipt['long_recording'] = phase_long(args.team, args.target, directory)
+            receipt['long_recording'] = phase_long(args.team, args.target, directory, not args.no_replay)
             receipt['phases'].append('cli_export_long')
         if 'second' in phases:
             phase_second_client(args.team, args.target)
