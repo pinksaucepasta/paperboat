@@ -558,11 +558,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		freshInfo, resolveErr := freshResolver.Resolve(reconnectCtx, reconnectRequest)
 		resolveEnd(resolveErr)
 		if resolveErr != nil {
-			var apiErr *api.APIError
-			if errors.As(resolveErr, &apiErr) && apiErr.Code == "machine_revoked" {
-				resolveErr = tunnel.Revoked(resolveErr)
-			}
-			return resolver.ConnectInfo{}, resolveErr
+			return resolver.ConnectInfo{}, reconnectResolveError(resolveErr)
 		}
 		if freshInfo.Terminal != nil {
 			prepareTarget(freshInfo.Terminal)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/google/uuid"
 	"io"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -256,11 +257,7 @@ func joinSharedTerminal(c *cobra.Command, args []string) (result error) {
 	conn := tunnel.NewReconnectingConn(c.Context(), initial, tunnel.ReattachAttempts(d.cfg.Connect.DialRetries), time.Duration(d.cfg.Connect.DialRetrySeconds)*time.Second, func(ctx context.Context) (tunnel.Conn, error) {
 		fresh, err := resolve(ctx)
 		if err != nil {
-			var apiErr *api.APIError
-			if errors.As(err, &apiErr) && (apiErr.Status == 403 || apiErr.Status == 404) {
-				return nil, tunnel.Revoked(err)
-			}
-			return nil, err
+			return nil, reconnectResolveError(err)
 		}
 		next, err := d.tunnel.Dial(ctx, fresh)
 		if err == nil && viewOnly.Swap(fresh.Terminal.ViewOnly()) != fresh.Terminal.ViewOnly() {
@@ -334,4 +331,15 @@ func sharedRoleNotice(viewOnly bool) string {
 		return "Your role on this shared terminal is now view only; typing stays local and Ctrl-C detaches."
 	}
 	return "Your role on this shared terminal is now interactive; typing reaches the shared shell."
+}
+
+// reconnectResolveError ends a reconnecting terminal when Paperboat refuses the new grant: a 403 or 404 is a
+// definite answer (the machine was revoked, unshared or the grant or membership removed), so retrying for minutes
+// only kept a revoked member's terminal open (X-21). Any other error stays retryable.
+func reconnectResolveError(err error) error {
+	var apiErr *api.APIError
+	if errors.As(err, &apiErr) && (apiErr.Status == http.StatusForbidden || apiErr.Status == http.StatusNotFound) {
+		return tunnel.Revoked(err)
+	}
+	return err
 }
