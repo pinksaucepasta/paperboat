@@ -1,0 +1,132 @@
+{
+ "check": "origin-tunnel-matrix",
+ "cells": [
+  {
+   "server": "app",
+   "mode": "direct-http/route-on-every-edge",
+   "result": "ok",
+   "detail": "seconds until each edge answered: {'198.51.100.7': 0.5, '198.51.100.7': 5.1} of ['198.51.100.7', '198.51.100.7'] (bound 30 s)"
+  },
+  {
+   "server": "app",
+   "mode": "direct-http/C1-forwarded",
+   "result": "ok",
+   "detail": "status 200 host=app.example.test xfp=https xfh=app.example.test xff=198.51.100.7"
+  },
+  {
+   "server": "app",
+   "mode": "direct-http/F-force-ssl",
+   "result": "ok",
+   "detail": "status 200"
+  },
+  {
+   "server": "app",
+   "mode": "direct-http/C8-sse",
+   "result": "buffered",
+   "detail": "first event after 1288 ms"
+  },
+  {
+   "server": "app",
+   "mode": "direct-http/C12-range",
+   "result": "ok",
+   "detail": "status 206 error None, 100 bytes"
+  },
+  {
+   "server": "app",
+   "mode": "direct-http/C13-expect",
+   "result": "ok",
+   "detail": "status 200 "
+  },
+  {
+   "server": "caddy-certs",
+   "mode": "a-http/route-on-every-edge",
+   "result": "ok",
+   "detail": "seconds until each edge answered: {'198.51.100.7': 0.1, '198.51.100.7': 4.3} of ['198.51.100.7', '198.51.100.7'] (bound 30 s)"
+  },
+  {
+   "server": "caddy-certs",
+   "mode": "a-http/C2-loop",
+   "result": "ok",
+   "detail": "status 502 error 'origin_redirect_loop'"
+  },
+  {
+   "server": "caddy-certs",
+   "mode": "b-https",
+   "result": "blocked",
+   "detail": "a preview takes no origin TLS options, so a private-CA https origin cannot be previewed"
+  },
+  {
+   "server": "caddy-internal",
+   "mode": "a-http/route-on-every-edge",
+   "result": "ok",
+   "detail": "seconds until each edge answered: {'198.51.100.7': 0.1, '198.51.100.7': 1.2} of ['198.51.100.7', '198.51.100.7'] (bound 30 s)"
+  },
+  {
+   "server": "caddy-internal",
+   "mode": "a-http/C2-loop",
+   "result": "ok",
+   "detail": "status 502 error 'origin_redirect_loop'"
+  },
+  {
+   "server": "caddy-internal",
+   "mode": "b-https",
+   "result": "blocked",
+   "detail": "a preview takes no origin TLS options, so a private-CA https origin cannot be previewed"
+  },
+  {
+   "server": "traefik",
+   "mode": "a-http/route-on-every-edge",
+   "result": "ok",
+   "detail": "seconds until each edge answered: {'198.51.100.7': 0.1, '198.51.100.7': 2.4} of ['198.51.100.7', '198.51.100.7'] (bound 30 s)"
+  },
+  {
+   "server": "traefik",
+   "mode": "a-http/C2-loop",
+   "result": "ok",
+   "detail": "status 502 error 'origin_redirect_loop'"
+  },
+  {
+   "server": "traefik",
+   "mode": "b-https",
+   "result": "blocked",
+   "detail": "a preview takes no origin TLS options, so a private-CA https origin cannot be previewed"
+  },
+  {
+   "server": "nginx",
+   "mode": "a-http/route-on-every-edge",
+   "result": "ok",
+   "detail": "seconds until each edge answered: {'198.51.100.7': 0.1, '198.51.100.7': 0.6} of ['198.51.100.7', '198.51.100.7'] (bound 30 s)"
+  },
+  {
+   "server": "nginx",
+   "mode": "a-http/C2-loop",
+   "result": "ok",
+   "detail": "status 502 error 'origin_redirect_loop'"
+  },
+  {
+   "server": "nginx",
+   "mode": "b-https",
+   "result": "blocked",
+   "detail": "a preview takes no origin TLS options, so a private-CA https origin cannot be previewed"
+  },
+  {
+   "server": "httpd",
+   "mode": "a-http/route-on-every-edge",
+   "result": "ok",
+   "detail": "seconds until each edge answered: {'198.51.100.7': 0.1, '198.51.100.7': 1.4} of ['198.51.100.7', '198.51.100.7'] (bound 30 s)"
+  },
+  {
+   "server": "httpd",
+   "mode": "a-http/C2-loop",
+   "result": "ok",
+   "detail": "status 502 error 'origin_redirect_loop'"
+  },
+  {
+   "server": "httpd",
+   "mode": "b-https",
+   "result": "blocked",
+   "detail": "a preview takes no origin TLS options, so a private-CA https origin cannot be previewed"
+  }
+ ],
+ "device": "L: tun-t1 container, pb dev-3ade53cb7, prod edges e832c2afc"
+}

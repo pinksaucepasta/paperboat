@@ -1,0 +1,39 @@
+{
+ "check": "tunnel-origin-rows",
+ "platform": "linux",
+ "cells": [
+  {
+   "scenario": "preview",
+   "cell": "F7-08 preview: forwarded headers, spoofs dropped, https, public host, one client IP",
+   "result": "ok",
+   "detail": "200 {'host': 'app.example.test', 'xfp': 'https', 'xfh': 'app.example.test', 'xff': '198.51.100.7', 'forwarded': 'for=198.51.100.7;proto=https;host=app.example.test', 'sni': None}"
+  },
+  {
+   "scenario": "preview",
+   "cell": "F7-08 preview: an app that redirects to its own https URL gets the loop page naming the fix",
+   "result": "ok",
+   "detail": "502 origin_redirect_loop"
+  },
+  {
+   "scenario": "preview",
+   "cell": "F7-08 preview: a slow app gets 100 s to its first byte, then the 504 origin_timeout page",
+   "result": "ok",
+   "detail": "504 origin_timeout after 100 s"
+  },
+  {
+   "scenario": "preview",
+   "cell": "F7-08 preview: an HTTPS origin on localhost is sent the public hostname as SNI",
+   "result": "ok",
+   "detail": "502 upstream_unavailable sni=['app.example.test']"
+  }
+ ],
+ "retried_requests": [
+  {
+   "host": "app.example.test",
+   "path": "/",
+   "tries": 15,
+   "status": 502
+  }
+ ],
+ "device": "L: tun-t1 container, pb dev-3ade53cb7, prod edges e832c2afc"
+}
