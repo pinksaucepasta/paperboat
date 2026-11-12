@@ -37,6 +37,7 @@ func (OpenSSHExecutor) Execute(ctx context.Context, executable string, arguments
 	if environment != nil {
 		command.Env = append([]string(nil), environment...)
 	}
+	defer bindChildToParent(command)()
 	// Do not create a process group or proxy stdio: the shell's foreground group
 	// delivers terminal stop/continue to both processes, and OpenSSH owns raw mode.
 	signals := make(chan os.Signal, 8)
