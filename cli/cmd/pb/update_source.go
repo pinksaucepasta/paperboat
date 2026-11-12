@@ -1,9 +1,12 @@
 package main
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -108,6 +111,11 @@ func installStagedUpdateSource(command *cobra.Command, ctx context.Context, stag
 				return err
 			}
 			return commandRejection{reason: commandRejectUpdateSource, detail: "the file is not a Paperboat executable, package or .pb-update bundle for this machine"}
+		}
+	}
+	if bundle != "" {
+		if made, wrong := bundleMadeForOtherOS(bundle, runtime.GOOS); wrong {
+			return commandRejection{reason: commandRejectUpdateSource, detail: "this .pb-update bundle was made on " + made + " and this machine is " + runtime.GOOS + "; run `pb update bundle` on a " + runtime.GOOS + " machine"}
 		}
 	}
 	if !force {
@@ -222,4 +230,39 @@ func actionForceOfficial(command *cobra.Command, ctx context.Context) error {
 		return bundleExportError(err)
 	}
 	return installStagedUpdateSource(command, ctx, bundle, true)
+}
+
+// bundleMadeForOtherOS tells from the file magic of the executable inside a .pb-update bundle (which records no platform) that it was made
+// on another OS than `current`. A bundle it cannot read, or an executable of an unknown kind, is left to the signature checks.
+func bundleMadeForOtherOS(path, current string) (made string, wrong bool) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", false
+	}
+	defer file.Close()
+	archive := tar.NewReader(file)
+	for {
+		header, err := archive.Next()
+		if err != nil {
+			return "", false
+		}
+		if strings.HasPrefix(header.Name, "metadata/") {
+			continue
+		}
+		magic := make([]byte, 4)
+		if _, err := io.ReadFull(archive, magic); err != nil {
+			return "", false
+		}
+		switch {
+		case bytes.Equal(magic, []byte("\x7fELF")):
+			made = "linux"
+		case bytes.Equal(magic, []byte{0xcf, 0xfa, 0xed, 0xfe}), bytes.Equal(magic, []byte{0xca, 0xfe, 0xba, 0xbe}):
+			made = "darwin"
+		case bytes.Equal(magic[:2], []byte("MZ")):
+			made = "windows"
+		default:
+			return "", false
+		}
+		return made, made != current
+	}
 }
