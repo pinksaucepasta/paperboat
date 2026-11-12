@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"hash/fnv"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -64,6 +65,15 @@ func Record(ctx context.Context, store *db.DB, b Binding, policy QuotaChecker) e
 	// transaction starts: taken inside it, a waiter (an edge's old and new process pulling at once during a switch)
 	// decided on a snapshot from before the wait and failed with 40001 until its retries ran out (503 on the edge's
 	// desired-state pull, 2026-11-12 17:17Z).
+	// Within this process the node's Records queue on a mutex, so only one at a time polls the session lock (its
+	// backoff let a busy node's waiters lose for over a second); the session lock orders processes.
+	nodeLock := nodeLocks[nodeStripe(b.Node)]
+	select {
+	case nodeLock <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-nodeLock }()
 	return store.InTxUnderSessionLock(ctx, b.Node, 369197, func(ctx context.Context, tx *db.Tx) error {
 		if _, err := tx.Exec(ctx, `DELETE FROM usage_accounting_authorities WHERE edge_node_id=$1 AND retain_until<=$2`, b.Node, b.IssuedAt); err != nil {
 			return err
@@ -102,6 +112,21 @@ func Record(ctx context.Context, store *db.DB, b Binding, policy QuotaChecker) e
 		}
 		return retainBindingTx(ctx, tx, b, workspace)
 	})
+}
+
+// nodeLocks stripes the per-node Record lock (a one-slot channel, so a cancelled caller stops waiting); nodes that share
+// a stripe only queue behind each other in this process.
+var nodeLocks = func() (locks [64]chan struct{}) {
+	for i := range locks {
+		locks[i] = make(chan struct{}, 1)
+	}
+	return locks
+}()
+
+func nodeStripe(node string) int {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(node))
+	return int(h.Sum32() % uint32(len(nodeLocks)))
 }
 
 func retainBindingTx(ctx context.Context, tx *db.Tx, b Binding, workspace string) error {

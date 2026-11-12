@@ -170,6 +170,9 @@ type Database struct {
 	// AcquireTimeout bounds the wait for a request-pool connection (0: 3 s): a full pool answers 503 with
 	// Retry-After instead of holding the request until its own deadline.
 	AcquireTimeout time.Duration `json:"acquire_timeout"`
+	// DirectMaxConns bounds the direct pool (0: 6). Each session lock (InTxUnderSessionLock: plan limits, a node's
+	// usage accounting) holds one of its connections for its transaction.
+	DirectMaxConns int32 `json:"direct_max_conns"`
 }
 
 // SendsStartupParams reports whether connections start with the session settings as startup parameters.

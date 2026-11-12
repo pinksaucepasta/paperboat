@@ -62,7 +62,7 @@ type Tx struct {
 	q  *dbsqlc.Queries
 }
 
-// directMaxConns bounds the direct pool: session state holds one connection each (the machine-events LISTEN, the
+// directMaxConns is the direct pool's default bound (config.Database.DirectMaxConns): session state holds one connection each (the machine-events LISTEN, the
 // worker leader, a team identity sync, each address reconcile, each InTxUnderSessionLock transaction), so it stays
 // small.
 const directMaxConns = 6
@@ -86,7 +86,7 @@ func Open(cfg config.Database) (*DB, error) {
 		poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheDescribe
 	}
 	poolConfig.ConnConfig.Tracer = boundedAcquire{queryObserver: observer, timeout: cmp.Or(cfg.AcquireTimeout, 3*time.Second)}
-	directConfig, err := newPoolConfig(cfg, cmp.Or(strings.TrimSpace(cfg.DirectDSN), cfg.DSN), directMaxConns, observer)
+	directConfig, err := newPoolConfig(cfg, cmp.Or(strings.TrimSpace(cfg.DirectDSN), cfg.DSN), cmp.Or(cfg.DirectMaxConns, directMaxConns), observer)
 	if err != nil {
 		return nil, fmt.Errorf("parse postgres direct dsn: %w", err)
 	}
