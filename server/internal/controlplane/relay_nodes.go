@@ -223,7 +223,11 @@ func (s *EdgeService) observeRelayNodeTx(ctx context.Context, in relayNodeObserv
 	if err != nil {
 		return out, set, required, err
 	}
-	if state == "retired" || (state == "offline" && !in.Draining) || !expires.After(now) || in.CapacityUsed > capacity {
+	// A heartbeat late past its lease, even after the reconciler marked the node offline as stale, comes from the
+	// process that owns this generation and epoch (the update below matches both): it renews the lease. Refusing it
+	// fenced the relay, which restarted under a new epoch and invalidated every grant whenever the control plane was
+	// slow (F21-01). A process that announced its own shutdown (offline within its lease) stays shut down.
+	if state == "retired" || (state == "offline" && !in.Draining && expires.After(now)) || in.CapacityUsed > capacity {
 		return out, set, required, invalidUsage("relay_nodes.go:166")
 	}
 	if state == "draining" && !in.Draining {

@@ -316,7 +316,7 @@ func (c *Client) Observe(ctx context.Context, server *derpquic.Server, draining 
 	}
 	stats := server.Snapshot()
 	draining = draining || stats.Draining
-	if c.lease.Generation == 0 || time.Now().Unix() >= c.lease.ExpiresAt {
+	if c.lease.Generation == 0 {
 		return ErrControl
 	}
 	subjects := server.AuthoritySubjects()
@@ -376,7 +376,14 @@ func (c *Client) leaseExpiry() int64 {
 	return c.lease.ExpiresAt
 }
 
-// Run tolerates transient control loss only within the acknowledged lease.
+// observeTimeout bounds one heartbeat once the lease has run out.
+const observeTimeout = 10 * time.Second
+
+// Run keeps the relay serving while the control plane does not answer: admitted connections carry signed grants
+// and end-to-end encrypted traffic, so only an explicit fence (another process, a retired node, a refused authority)
+// drains it. Exiting when a 15 s lease ran out restarted the relay under a new process epoch whenever the control
+// plane was slow (staging 2026-11-12, after an API cut: every 25 s), which invalidated every grant at once and
+// ended live relayed sessions (F21-01). Tailscale's derper likewise serves without control-plane liveness.
 func (c *Client) Run(ctx context.Context, server *derpquic.Server) error {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
@@ -388,9 +395,7 @@ func (c *Client) Run(ctx context.Context, server *derpquic.Server) error {
 		}
 		deadline := time.Unix(c.leaseExpiry(), 0)
 		if !time.Now().Before(deadline) {
-			server.Drain(time.Now())
-			server.Close()
-			return ErrControl
+			deadline = time.Now().Add(observeTimeout)
 		}
 		observe, stop := context.WithDeadline(ctx, deadline)
 		err := c.Observe(observe, server, false)
@@ -400,17 +405,9 @@ func (c *Client) Run(ctx context.Context, server *derpquic.Server) error {
 			server.Close()
 			return err
 		}
-		if err != nil && !time.Now().Before(deadline) {
-			server.Drain(time.Now())
-			server.Close()
-			return err
-		}
 		delay := Interval
-		if remain := time.Until(time.Unix(c.leaseExpiry(), 0)); remain < delay {
+		if remain := time.Until(time.Unix(c.leaseExpiry(), 0)); remain > 0 && remain < delay {
 			delay = remain
-		}
-		if delay < 0 {
-			delay = 0
 		}
 		timer.Reset(delay)
 	}

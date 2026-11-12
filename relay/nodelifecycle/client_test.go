@@ -190,9 +190,13 @@ func TestNativeRelayLifecycleRevokesConnectedCarrier(t *testing.T) {
 	if err = replayed.Connect(ctx); err == nil {
 		t.Fatal("revoked grant readmitted")
 	}
+	// A lease that ran out is renewed, not a reason to stop: only an explicit refusal fences the relay (F21-01,
+	// TestRelayKeepsServingWhileControlDoesNotAnswer).
 	c.lease.ExpiresAt = time.Now().Unix()
-	if err = c.Run(ctx, server); !errors.Is(err, ErrControl) || !server.Snapshot().Draining {
-		t.Fatal("expired lease did not stop relay")
+	running, stop := context.WithTimeout(ctx, 2*time.Second)
+	defer stop()
+	if err = c.Run(running, server); !errors.Is(err, context.DeadlineExceeded) || server.Snapshot().Draining || c.leaseExpiry() <= time.Now().Unix() {
+		t.Fatalf("an expired lease: err %v, draining %v; want the relay serving with a renewed lease", err, server.Snapshot().Draining)
 	}
 }
 
