@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -853,7 +854,11 @@ func dialPreviewOrigin(ctx context.Context, target LeaseTarget) (io.ReadWriteClo
 	if parsed, _, splitErr := net.SplitHostPort(target.Address); splitErr == nil {
 		host = strings.Trim(parsed, "[]")
 	}
-	tlsConnection := tls.Client(connection, &tls.Config{MinVersion: tls.VersionTLS12, ServerName: host})
+	serverName := host
+	if target.PublicHost != "" && connectorprotocol.OriginHostIsLocalhostOrIP(target.Address) {
+		serverName = target.PublicHost
+	}
+	tlsConnection := tls.Client(connection, &tls.Config{MinVersion: tls.VersionTLS12, ServerName: serverName})
 	if err := tlsConnection.HandshakeContext(ctx); err != nil {
 		_ = connection.Close()
 		return nil, err
@@ -864,6 +869,9 @@ func dialPreviewOrigin(ctx context.Context, target LeaseTarget) (io.ReadWriteClo
 func (c *DataCarrierPreviewCarrier) forward(ctx context.Context, stream *connector.DataCarrierStream, target LeaseTarget, lazy bool, lease Lease) error {
 	if stream == nil {
 		return ErrDataCarrierPreviewInvalid
+	}
+	if endpoint, err := url.Parse(lease.Endpoint); err == nil {
+		target.PublicHost = endpoint.Hostname()
 	}
 	// Public HTTP traffic is inspectable like browser traffic: sniff the
 	// start line without consuming bytes, and only then take the capturing

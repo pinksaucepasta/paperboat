@@ -60,14 +60,18 @@ def worker(n):
         except Exception as e:
             key = "error"; conn.close(); conn = http.client.HTTPSConnection(target, 443, timeout=20, context=ctx)
         with lock: counts[key] = counts.get(key, 0) + 1
-threads = [threading.Thread(target=worker, args=(i,)) for i in range(64)]
+threads = [threading.Thread(target=worker, args=(i,)) for i in range(40)]
 [t.start() for t in threads]
 time.sleep(seconds * 0.7)
 out = {}
 for name, accept in (("page", "text/html"), ("api", "application/json")):
     try:
-        for _ in range(40):  # the bucket refills 100 a second: ask until one request is the refused one
-            status, r, body = one(accept)
+        for _ in range(60):  # ask until one request is the refused one (a new connection may itself be refused at the handshake)
+            try:
+                status, r, body = one(accept)
+            except Exception:
+                time.sleep(0.2)
+                continue
             if status == 429:
                 break
         out[name] = {"status": status, "type": r.getheader("Content-Type"), "error": r.getheader("X-Paperboat-Error"), "retry_after": r.getheader("Retry-After"), "body": body[:60].decode("latin1")}

@@ -47,6 +47,9 @@ type LeaseTarget struct {
 	Address string `json:"address"`
 	// HostHeader is the Host the origin receives instead of the public host (http, https and h2c targets).
 	HostHeader string `json:"host_header,omitempty"`
+	// PublicHost is the preview's public name, set by the carrier for each forwarded stream (never serialized): an https origin
+	// on localhost or an IP literal is sent it as TLS SNI, as Caddy and Traefik choose their site by it.
+	PublicHost string `json:"-"`
 }
 
 // Lease is the in-memory, safe projection of a canonical preview lease. The
