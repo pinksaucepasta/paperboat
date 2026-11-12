@@ -464,7 +464,8 @@ CHECKS = [('X-01', x01), ('X-01', x01_variables), ('X-02', x02), ('X-03', x03_by
 
 
 def run_pairs(ctx, devices, only):
-    for row, function in CHECKS:
+    import xplat_config_rows
+    for row, function in CHECKS + xplat_config_rows.ROW_CHECKS:
         if only and row not in only:
             continue
         for a_key, b_key in permutations(devices, 2):
