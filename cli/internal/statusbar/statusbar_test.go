@@ -724,3 +724,16 @@ func TestRecordingMarkIsPaintedWhenSet(t *testing.T) {
 		t.Fatal("REC waits for the coalesced redraw")
 	}
 }
+
+func TestTerminalNameWindowsHasNoTERM(t *testing.T) {
+	for _, c := range []struct{ option, env, goos, want string }{
+		{"", "", "windows", "xterm-256color"}, // cmd.exe / PowerShell: no TERM
+		{"", "", "linux", ""},                 // no TERM on Unix stays ineligible
+		{"", "dumb", "windows", "dumb"},
+		{"xterm", "screen", "windows", "xterm"},
+	} {
+		if got := terminalName(c.option, c.env, c.goos); got != c.want {
+			t.Errorf("terminalName(%q, %q, %q) = %q, want %q", c.option, c.env, c.goos, got, c.want)
+		}
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -156,6 +157,18 @@ type failure struct {
 // New returns a bar which may be disabled when the local terminal cannot
 // safely support cursor-addressed output. Mode on still respects capability
 // checks, rather than corrupting redirected or dumb terminals.
+// terminalName picks the terminal type the bar checks. cmd.exe and PowerShell never set TERM, but
+// every Windows console that can run pb (Windows 10+) takes the VT sequences the bar draws with.
+func terminalName(option, env, goos string) string {
+	if name := strings.TrimSpace(option); name != "" {
+		return name
+	}
+	if env == "" && goos == "windows" {
+		return "xterm-256color"
+	}
+	return env
+}
+
 func New(options Options) *Bar {
 	output := options.Output
 	if output == nil {
@@ -177,10 +190,7 @@ func New(options Options) *Bar {
 	if mode == "" {
 		mode = ModeAuto
 	}
-	compatibleTerm := strings.TrimSpace(options.Term)
-	if compatibleTerm == "" {
-		compatibleTerm = os.Getenv("TERM")
-	}
+	compatibleTerm := terminalName(options.Term, os.Getenv("TERM"), runtime.GOOS)
 	eligible := mode != ModeOff && !strings.EqualFold(compatibleTerm, "dumb") && compatibleTerm != "" &&
 		isTerminal(int(input.Fd())) && isTerminal(int(output.Fd()))
 	if options.NoticeDuration <= 0 {
