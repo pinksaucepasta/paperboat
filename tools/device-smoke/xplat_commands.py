@@ -121,11 +121,27 @@ def wait_online(ctl, name, seconds=240):
 def uninstall(dev, ctl):
     """Back to a fresh machine: `pb uninstall`, then the dead record is revoked by exact id."""
     record = machine_record(ctl, dev.name)
-    if dev.exists(dev.pb_path):
+    if dev.pb_path and dev.exists(dev.pb_path):
         fleet.uninstall(dev)
     if record:
         token = json.loads(ctl.pb('machine', 'revoke', record['id'], '--json').text)['data']['confirmation_token']
         ctl.pb('machine', 'revoke', record['id'], '--json', '--confirm', token)
+
+
+def signin(dev):
+    """The account's pb sign-in on dev by a one-day API token (minted from STATE, passed on stdin) unless it is signed in already."""
+    if dev.pb('auth', 'status', '--json').rc == 0 and '"signed_in":true' in dev.pb('auth', 'status', '--json').text.replace(' ', ''):
+        return
+    token = subprocess.run(['node', str(HERE / 'mint_api_token.mjs'), 'xpe-x31'], capture_output=True, env=os.environ, timeout=180).stdout
+    done = dev.pb('login', '--api-token-file', '-', '--json', input=token, timeout=120)
+    assert done.rc == 0, 'sign-in on %s: %s' % (dev.name, mask(done.errtext)[-200:])
+
+
+def refresh(dev):
+    """A Windows device's pb.exe path after an install made it (the per-user install directory)."""
+    if dev.os == 'windows':
+        found = dev.sh("(Get-ChildItem 'C:\\Program Files\\Paperboat\\users\\*\\bin\\pb.exe' -ErrorAction SilentlyContinue | Select-Object -First 1).FullName").text.strip()
+        dev.pb_path = dev.device.pb_exe = found
 
 
 def check(name, pair, action):
@@ -210,6 +226,36 @@ def t_dialog(ctl, dev):
         len(steps), len(steps), 'PowerShell' if dev.os == 'windows' else 'POSIX', dev.os)
 
 
+def t_browser(ctl, dev):
+    """The same dialog check (console/scripts/check-add-machine.js, no machine connecting) in the browser installed on dev: Edge on Windows,
+    Chrome on macOS. The account's console session is copied there for the run and deleted again."""
+    scripts = HERE.parent.parent / 'console/scripts'
+    windows = dev.os == 'windows'
+    host = dev.device.target if windows else dev.prefix[1]
+    folder, channel = ('%USERPROFILE%\\xpe-pw', 'msedge') if windows else ('$HOME/xpe-pw', 'chrome')
+    shell = lambda line, timeout=300: subprocess.run(['ssh', host, line], capture_output=True, text=True, timeout=timeout)  # noqa: E731
+    shell(('if not exist %s mkdir %s' % (folder, folder)) if windows else 'mkdir -p ' + folder)
+    cd = ('cd /d ' if windows else 'cd ') + folder
+    npm = 'npm i playwright-core@1.58.2' if windows else 'test -d node_modules/playwright-core || (npm init -y >/dev/null && npm i playwright-core@1.58.2 >/dev/null)'
+    if windows:
+        shell(cd + ' && if not exist node_modules\\playwright-core (npm init -y >nul && ' + npm + ' >nul)', 400)
+    else:
+        shell(cd + ' && ' + npm, 400)
+    target = '%s:xpe-pw/' % host
+    subprocess.run(['scp', '-q', str(scripts / 'run-console-check.mjs'), str(scripts / 'check-add-machine.js'), os.environ['STATE'], target], check=True, timeout=120)
+    state = Path(os.environ['STATE']).name
+    try:
+        env = ('set ORIGIN=%s&& set STATE=%s&& set PW_CHANNEL=%s&& ' % (os.environ['ORIGIN'], state, channel)) if windows else \
+            ('ORIGIN=%s STATE=%s PW_CHANNEL=%s ' % (os.environ['ORIGIN'], state, channel))
+        done = shell(cd + ' && ' + env + 'node run-console-check.mjs check-add-machine.js /', 400)
+    finally:
+        shell(('del %s\\%s' % (folder, state)) if windows else 'rm -f %s/%s' % (folder, state))
+    steps = [l for l in done.stdout.splitlines() if l.startswith(('PASS', 'FAIL'))]
+    failed = [l for l in steps if l.startswith('FAIL')]
+    assert steps and not failed, 'dialog in the browser of %s: %s' % (dev.os, mask(' | '.join(failed or (done.stdout + done.stderr).splitlines()[-3:]))[:400])
+    return '%d/%d dialog steps passed in %s on %s (both commands shown, token the same, enrollment cancelled on close)' % (len(steps), len(steps), channel, dev.os)
+
+
 # --- pb machine add --------------------------------------------------------------------------------------------------------
 def t_addjson(ctl, dev):
     posix, powershell = printed(dev)
@@ -222,9 +268,11 @@ def t_install(ctl, src, dst):
     """The command printed on src for dst's platform installs and pairs dst (dst uninstalled first, its old record revoked)."""
     uninstall(dst, ctl)
     assert not leftovers(dst), 'uninstall left %r' % leftovers(dst)
+    signin(src)
     posix, powershell = printed(src)
     done = paste(dst, powershell if dst.os == 'windows' else posix)
     assert done.rc == 0, 'the command printed on %s failed on %s (rc %d): %s' % (src.os, dst.os, done.rc, mask(done.text + done.errtext)[-400:])
+    refresh(dst)
     wait_online(ctl, dst.name)
     return 'command printed on %s installed and paired %s (online)' % (src.name, dst.name)
 
@@ -256,6 +304,8 @@ def main():
             check('wrong', key, lambda: t_wrong(ctl, dev))
         if want('dialog'):
             check('dialog', key, lambda: t_dialog(ctl, dev))
+        if want('browser') and dev.os != 'linux':
+            check('browser', key, lambda: t_browser(ctl, dev))
     for key, dev in devs.items():
         if want('addjson'):
             check('addjson', key, lambda: t_addjson(ctl, dev))

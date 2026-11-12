@@ -34,17 +34,18 @@ OWNER_PREFIX, MEMBER_PREFIX = os.environ.get('XPLAT_PREFIX', 'xpe'), os.environ.
 
 
 def fleets():
-    owner = {'L': fleet.linux(OWNER_PREFIX + '-l'), 'M': fleet.mac(OWNER_PREFIX + '-m'), 'W': fleet.windows(OWNER_PREFIX + '-w')}
+    """Account A (the team owner: xpe-l, xpe-w) and account F (the shared fleet's account: lanex2-l, -m, -w)."""
+    own = {'L': fleet.linux(OWNER_PREFIX + '-l'), 'W': fleet.windows(OWNER_PREFIX + '-w')}
     saved = fleet.L_CT, os.environ.get('XPLAT_MAC_SSH'), os.environ.get('SMOKE_WINDOWS_SSH')
     try:
         fleet.L_CT = os.environ['XPE_MEMBER_L_CT']
         os.environ['XPLAT_MAC_SSH'] = os.environ['XPE_MEMBER_MAC_SSH']
-        member = {'L': fleet.linux(MEMBER_PREFIX + 'l'), 'M': fleet.mac(MEMBER_PREFIX + 'm'),
-                  'W': fleet.Windows(MEMBER_PREFIX + 'w', target=os.environ['XPE_MEMBER_WIN_SSH'])}
+        other = {'L': fleet.linux(MEMBER_PREFIX + 'l'), 'M': fleet.mac(MEMBER_PREFIX + 'm'),
+                 'W': fleet.Windows(MEMBER_PREFIX + 'w', target=os.environ['XPE_MEMBER_WIN_SSH'])}
     finally:
         fleet.L_CT = saved[0]
         os.environ['XPLAT_MAC_SSH'] = saved[1]
-    return owner, member
+    return own, other
 
 
 @contextmanager
@@ -63,8 +64,8 @@ def as_host(dev):
 
 
 class Team:
-    def __init__(self, admin, setter):
-        self.admin, self.setter = admin, setter  # an owner-account pb, and a Linux device whose pb session of the owner keeps its token in a file
+    def __init__(self, admin, setter, owner, member_probe):
+        self.admin, self.setter, self.owner, self.probe = admin, setter, owner, member_probe  # an owner-account pb, and a Linux device whose pb session of the owner keeps its token in a file
         self.id = TEAM
 
     def generation(self):
@@ -75,15 +76,22 @@ class Team:
         assert done.rc == 0, 'owner pb %s: %s' % (' '.join(args[:3]), (done.text + done.errtext)[-300:])
         return json.loads(done.text)
 
+    def owner_pb(self, *args):
+        """The same as admin_pb for the account that owns the shared machine."""
+        done = self.owner.pb(*args, '--json', timeout=120)
+        assert done.rc == 0, 'machine owner pb %s: %s' % (' '.join(args[:3]), (done.text + done.errtext)[-300:])
+        return json.loads(done.text)
+
     def member_account(self):
-        owner = fleet.json_pb(self.admin, 'auth', 'status')['account']['id']
-        members = fleet.json_pb(self.admin, 'team', 'get', self.id)['members']
-        return next(m['account_id'] for m in members if m['active'] and m['account_id'] != owner)
+        """The member's account: whoever the member fleet's signed-in pb is (the team has other members)."""
+        return fleet.json_pb(self.probe, 'auth', 'status')['account']['id']
 
     def share(self, machine_id, caps=CAPS):
         shared = any(x['machine_id'] == machine_id and x['active'] for x in fleet.json_pb(self.admin, 'team', 'get', self.id).get('machines', []))
         if not shared:
-            self.admin_pb('team', 'machine', 'share', self.id, machine_id, '--generation', self.generation())
+            self.owner_pb('team', 'machine', 'share', self.id, machine_id, '--generation', self.generation())
+            if self.owner is not self.admin:  # a member's machine waits for the team owner (machine admission)
+                self.admin_pb('team', 'machine', 'approve', self.id, machine_id, '--generation', self.generation())
         self.admin_pb('team', 'machine', 'grant', self.id, machine_id, '--member', self.member_account(), '--capability', caps,
                       '--generation', self.generation())
 
@@ -92,7 +100,7 @@ class Team:
                       '--active=false', '--generation', self.generation())
 
     def unshare(self, machine_id):
-        self.admin_pb('team', 'machine', 'unshare', self.id, machine_id, '--generation', self.generation())
+        self.owner_pb('team', 'machine', 'unshare', self.id, machine_id, '--generation', self.generation())
 
     def setting(self, on):
         """The team's allow_private_access, set with the owner's CLI session (private_access_permission.SETTING, as the F9 check does)."""
@@ -176,7 +184,7 @@ def send_with(team, o, m, name, content, action):
     try:
         with concurrent.futures.ThreadPoolExecutor(1) as pool:
             sending = pool.submit(m.pb, '--workspace', team.id, 'send', path, '--to', o.name, timeout=240)
-            decide(team.admin, o, m, name, action)
+            decide(team.owner, o, m, name, action)
             return sending.result()
     finally:
         m.remove(path)
@@ -254,7 +262,7 @@ def t_session(team, o, m, oid):
     types, removing the member ends it; an unshared session cannot be joined."""
     import uuid
     name = 'xpe-share-' + uuid.uuid4().hex[:8]
-    admin, member_id = team.admin, team.member_account()
+    admin, member_id = team.owner, team.member_account()
     with as_host(admin):
         owner = Raw(admin, o, ['connect', o.name, '--name', name, '--status-bar', 'off'])
     joined = identifier = None
@@ -268,7 +276,7 @@ def t_session(team, o, m, oid):
         sessions = fleet.json_pb(admin, 'session', 'list', o.name, '--all')['sessions']
         identifier = next(x['id'] for x in sessions if x['name'] == name)
         assert m.pb('--workspace', team.id, 'session', 'join', identifier, timeout=60).rc != 0, 'the member joined an unshared session'
-        team.admin_pb('session', 'share', identifier, '--team', team.id, '--member', member_id, '--role', 'viewer')
+        team.owner_pb('session', 'share', identifier, '--team', team.id, '--member', member_id, '--role', 'viewer')
         shared = True
         catalog = fleet.json_pb(m, '--workspace', team.id, 'session', 'shared', '--all')
         assert any(x['id'] == identifier for x in (catalog if isinstance(catalog, list) else catalog.get('sessions', []))), 'the shared catalog omits the session'
@@ -284,7 +292,7 @@ def t_session(team, o, m, oid):
         except Exception as error:  # noqa: BLE001
             if 'viewer input' in str(error):
                 raise
-        team.admin_pb('session', 'share', identifier, '--team', team.id, '--member', member_id, '--role', 'interactive')
+        team.owner_pb('session', 'share', identifier, '--team', team.id, '--member', member_id, '--role', 'interactive')
         typed_command, typed = owner.echo('typ' + old)
         deadline = time.time() + 40
         while True:
@@ -294,7 +302,7 @@ def t_session(team, o, m, oid):
                 break
             except Exception:  # noqa: BLE001
                 assert time.time() < deadline, 'interactive input never reached the shared shell'
-        team.admin_pb('session', 'remove', identifier, member_id)
+        team.owner_pb('session', 'remove', identifier, member_id)
         started = time.time()
         while joined.child.isalive() and time.time() - started < END_SECONDS + 15:
             time.sleep(1)
@@ -385,15 +393,19 @@ def main():
     argv = sys.argv[1:]
     pairs = argv[argv.index('--pairs') + 1].split(',') if '--pairs' in argv else ['L>M', 'M>L', 'L>W', 'W>L', 'M>W', 'W>M']
     only = set(argv[argv.index('--only') + 1].split(',')) if '--only' in argv else set()
-    owner, member = fleets()
+    own, other = fleets()
     saved = fleet.L_CT
     fleet.L_CT = os.environ['XPE_OWNER_CTL_CT']
     setter = fleet.linux('xpe-ctl')
     fleet.L_CT = saved
-    team = Team(owner['L'], setter)
     for pair in pairs:
         a, b = pair.split('>')
-        o, m = owner[a], member[b]
+        # a machine of OS L or W is the team owner's (account A) and the member is account F; the Mac's is F's, used from A's devices
+        if a == 'M':
+            o, m, owner_account, probe = other['M'], own[b], other['L'], own['L']
+        else:
+            o, m, owner_account, probe = own[a], other[b], own['L'], other['L']
+        team = Team(own['L'], setter, owner_account, probe)
         oid = machine_id(o)
         team.share(oid)
         try:
