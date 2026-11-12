@@ -152,6 +152,12 @@ func applyNativeTransport(snapshot *localapi.Snapshot, native tunnel.NativeTrans
 	if item, ok := relayFailoverHealth(native.Relay); ok {
 		snapshot.Health = append(snapshot.Health, item)
 	}
+	if home := native.Relay.NodeID; localapi.ValidRelayRegion(home) {
+		snapshot.HomeRelay = &localapi.HomeRelay{NodeID: home}
+		if localapi.ValidRelayRegion(native.Relay.Region) {
+			snapshot.HomeRelay.Region = native.Relay.Region
+		}
+	}
 }
 
 // noPathHealth is an error: a machine someone is trying to use is unreachable, unlike an idle machine

@@ -42,7 +42,15 @@ type Report struct {
 	CheckedAt     time.Time `json:"checked_at"`
 	Overall       string    `json:"overall"`
 	Machine       *Machine  `json:"machine,omitempty"`
-	Checks        []Check   `json:"checks"`
+	// HomeRelay is the relay the local machine advertises as its home (the selected one), from the daemon's snapshot.
+	HomeRelay *HomeRelay `json:"home_relay,omitempty"`
+	Checks    []Check    `json:"checks"`
+}
+
+// HomeRelay names the home relay by node id; the region label can be shared by several relays.
+type HomeRelay struct {
+	NodeID string `json:"node_id"`
+	Region string `json:"region,omitempty"`
 }
 
 func (r Report) Validate() error {

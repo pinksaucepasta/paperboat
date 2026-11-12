@@ -386,6 +386,15 @@ type Snapshot struct {
 	Machines      []MachineStatus `json:"machines"`
 	// SSHDomain is the alias domain of the managed OpenSSH configuration (<alias>.<domain>), once it is installed.
 	SSHDomain string `json:"ssh_domain,omitempty"`
+	// HomeRelay is the relay this machine advertises as its home to its peers: the selected (lowest latency) one.
+	// Absent while no relay is selected (no peer dialed yet, or no relay is usable).
+	HomeRelay *HomeRelay `json:"home_relay,omitempty"`
+}
+
+// HomeRelay names the home relay by its node id (the label, a region, can be shared by several relays).
+type HomeRelay struct {
+	NodeID string `json:"node_id"`
+	Region string `json:"region,omitempty"`
 }
 
 type StatusEvent struct {
@@ -429,6 +438,9 @@ func (s Snapshot) Validate() error {
 		if !validHealth(item) {
 			return ErrInvalidResponse
 		}
+	}
+	if s.HomeRelay != nil && (!safeValue(s.HomeRelay.NodeID) || s.HomeRelay.Region != "" && !safeValue(s.HomeRelay.Region)) {
+		return ErrInvalidResponse
 	}
 	seen := make(map[string]bool, len(s.Machines))
 	for _, machine := range s.Machines {

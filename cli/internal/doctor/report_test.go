@@ -1,6 +1,10 @@
 package doctor
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 // C020 (round 9, hp): `pb doctor` right after `pb setup` said "degraded" for a daemon that was only
 // starting. A pending check makes the report "starting", not degraded; a real warning or failure
@@ -21,5 +25,15 @@ func TestAStartingDaemonMakesTheReportStartingNotDegraded(t *testing.T) {
 		if got := overall(test.checks); got != test.want {
 			t.Errorf("%s: overall=%q, want %q", name, got, test.want)
 		}
+	}
+}
+
+func TestReportCarriesTheHomeRelayByNodeID(t *testing.T) {
+	encoded, err := json.Marshal(Report{Schema: SchemaV1, HomeRelay: &HomeRelay{NodeID: "relay_a", Region: "india"}})
+	if err != nil || !strings.Contains(string(encoded), `"home_relay":{"node_id":"relay_a","region":"india"}`) {
+		t.Fatalf("report = %s (%v)", encoded, err)
+	}
+	if encoded, _ = json.Marshal(Report{Schema: SchemaV1}); strings.Contains(string(encoded), "home_relay") {
+		t.Fatalf("a report without a home relay names one: %s", encoded)
 	}
 }

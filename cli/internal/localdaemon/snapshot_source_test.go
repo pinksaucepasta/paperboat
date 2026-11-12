@@ -4,6 +4,7 @@ package localdaemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -72,6 +73,10 @@ func TestNativeTransportReachesTheSnapshot(t *testing.T) {
 	if paths["machine_direct"] != "direct/" || paths["machine_relay"] != "relay/eu-central" || paths["machine_idle"] != "none/" {
 		t.Fatalf("paths = %v", paths)
 	}
+	// The home relay this machine advertises (the selected one) is in pb status --json by node id, with its region label.
+	if encoded, _ := json.Marshal(snapshot.HomeRelay); string(encoded) != `{"node_id":"relay_fra_2","region":"eu-central"}` {
+		t.Fatalf("home relay = %s", encoded)
+	}
 	if len(snapshot.Health) != 1 || snapshot.Health[0].Code != RelayFailoverCode || snapshot.Health[0].Severity != "info" ||
 		snapshot.Health[0].Title != "The relay failed over to eu-central: the previous relay became unreachable; probe failures: relay_fra_1 timeout" {
 		t.Fatalf("failover health = %+v", snapshot.Health)
@@ -80,6 +85,9 @@ func TestNativeTransportReachesTheSnapshot(t *testing.T) {
 	// This engine cannot use any relay: a warning with the reason; WebSocket relay transport is reported as wss.
 	native.Relay = tailnet.RegionalStatus{Reason: "regional_admission_denied", ProbeFailures: map[string]string{"relay_b": "udp_blocked", "relay_a": "timeout"}}
 	snapshot, _ = source.Snapshot(context.Background())
+	if snapshot.HomeRelay != nil {
+		t.Fatalf("no relay is selected, yet the home relay is %+v", snapshot.HomeRelay)
+	}
 	if len(snapshot.Health) != 1 || snapshot.Health[0].Severity != "warning" || snapshot.Validate() != nil ||
 		snapshot.Health[0].Title != "No relay is usable: the relays refused admission; probe failures: relay_a timeout, relay_b udp_blocked" {
 		t.Fatalf("unusable relay health = %+v", snapshot.Health)

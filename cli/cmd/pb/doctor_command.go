@@ -177,8 +177,12 @@ func doctorCommandV1() *cobra.Command {
 			var machine *localapi.MachineStatus
 			var reportMachine *doctorpkg.Machine
 			var probes []doctorpkg.Probe
+			var homeRelay *doctorpkg.HomeRelay
 			switch {
 			case err == nil:
+				if snapshot.HomeRelay != nil {
+					homeRelay = &doctorpkg.HomeRelay{NodeID: snapshot.HomeRelay.NodeID, Region: snapshot.HomeRelay.Region}
+				}
 				if len(args) == 1 {
 					selected, selectErr := selectStatusMachine(snapshot.Machines, args[0])
 					if selectErr != nil {
@@ -205,6 +209,7 @@ func doctorCommandV1() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			report.HomeRelay = homeRelay
 			recordDoctorResult(command.Context(), report)
 			jsonOutput, _ := command.Flags().GetBool("json")
 			if jsonOutput {
