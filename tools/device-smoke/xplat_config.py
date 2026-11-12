@@ -349,8 +349,9 @@ def refuses(dev, ctx, extra, what):
     assert done.rc != 0 and '"ok":false' in done.text.replace(' ', ''), '%s: %s was accepted: %s' % (dev.name, what, done.text[-200:])
 
 
-def accepted(dev, ctx, extra, what):
-    ctx.write_sync_file(dev, machine_file(ctx.repository_id, extra, ctx.urls[dev.key]))
+def accepted(dev, ctx, extra, what, mode='bidirectional', automatic=True):
+    text = machine_file(ctx.repository_id, extra, ctx.urls[dev.key], mode)
+    ctx.write_sync_file(dev, text if automatic else text.replace('automatic_updates = true', 'automatic_updates = false'))
     done = dev.pb('config', 'sync', 'validate', '--json')
     ctx.write_sync_file(dev, machine_file(ctx.repository_id, '', ctx.urls[dev.key]))
     assert done.rc == 0, '%s: %s was refused: %s' % (dev.name, what, done.text[-200:])
@@ -389,7 +390,41 @@ def x07_paths(ctx, a, b, direction):
     return 'drive-letter path accepted on Windows only'
 
 
-CHECKS = [('X-01', x01), ('X-01', x01_variables), ('X-03', x03_bytes), ('X-03', x03_merge), ('X-06', x06), ('X-07', x07_paths)]
+def x02(ctx, a, b, direction):
+    """X-02: machine file over [machine.<name>] over [os.<os>] over shared; one device overrides one field, the other does not."""
+    root_a = RULE_ROOT[a.os]
+    own = '[paths."cfg/settings.json"]\nlocal_path = "%s/settings-own.json"\n' % root_a
+    rule_a = rules(a, accepted(a, ctx, own, 'a path override'))['cfg/settings.json']
+    assert (rule_a['local_path'], rule_a['source']) == (root_a + '/settings-own.json', 'machine'), rule_a
+    rule_b = rules(b, pbj(b, 'config', 'sync', 'validate'))['cfg/settings.json']
+    assert (rule_b['local_path'], rule_b['source']) == (RULE_ROOT[b.os] + '/settings.json', 'os'), 'the override leaked: %s' % rule_b
+    pushed = accepted(a, ctx, '', 'mode push_only', mode='push_only')
+    assert pushed['mode'] == 'push_only' and pbj(b, 'config', 'sync', 'validate')['mode'] == 'bidirectional', pushed['mode']
+    manual = accepted(a, ctx, '', 'automatic_updates off', automatic=False)
+    assert manual['automatic_updates'] is False and pbj(b, 'config', 'sync', 'validate')['automatic_updates'] is True
+    plain = pbj(a, 'config', 'sync', 'validate')
+    assert {r['source'] for r in plain['path_rules']} <= {'os', 'shared'} and plain['mode'] == 'bidirectional', 'an empty machine file does not inherit'
+    refuses(a, ctx, '[os.linux.paths."cfg/zz.txt"]\nkind = "file"\nlocal_path = "~/zz"\n', 'an [os.*] section in a machine file')
+    refuses(a, ctx, '[machine.somebody.paths."cfg/zz.txt"]\nkind = "file"\nlocal_path = "~/zz"\n', 'a [machine.*] section in a machine file')
+    section = SHARED + '[machine.%s.paths."cfg/settings.json"]\nlocal_path = "%s/settings-section.json"\n' % (a.name, root_a)
+    ctx.repo.commit({'.paperboat/config-sync.toml': section.encode()})
+    try:
+        def seen():
+            return rules(a, pbj(a, 'config', 'sync', 'validate'))['cfg/settings.json']['source'] == 'machine_section'
+        wait('the [machine.%s] section reaches %s' % (a.name, a.name), seen, seconds=180, every=8)
+        sec = rules(a, pbj(a, 'config', 'sync', 'validate'))['cfg/settings.json']
+        assert sec['local_path'] == root_a + '/settings-section.json', sec
+        other = rules(b, pbj(b, 'config', 'sync', 'validate'))['cfg/settings.json']
+        assert other['source'] == 'os' and other['local_path'] == RULE_ROOT[b.os] + '/settings.json', 'the machine section leaked: %s' % other
+        typo = SHARED + '[machine.%s-typo.paths."cfg/settings.json"]\nlocal_path = "%s/x.json"\n' % (a.name, root_a)
+        ctx.repo.commit({'.paperboat/config-sync.toml': typo.encode()})
+        wait('the misspelled name is a warning', lambda: bool(pbj(a, 'config', 'sync', 'validate').get('warnings')), seconds=180, every=8)
+    finally:
+        ctx.repo.commit({'.paperboat/config-sync.toml': SHARED.encode()})
+    return 'machine file > [machine.%s] > [os.%s] > shared; override only on %s; [os.*]/[machine.*] refused in a machine file; typo warns' % (a.name, a.os, a.name)
+
+
+CHECKS = [('X-01', x01), ('X-01', x01_variables), ('X-02', x02), ('X-03', x03_bytes), ('X-03', x03_merge), ('X-06', x06), ('X-07', x07_paths)]
 
 
 def run_pairs(ctx, devices, only):
