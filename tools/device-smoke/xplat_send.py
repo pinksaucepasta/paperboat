@@ -85,7 +85,7 @@ def sender_dir(src):
 def one_name(src, dst, name, content, before):
     path = sender_dir(src) + ('\\' if src.os == 'windows' else '/') + name
     src.write(path, content)
-    done = src.pb('send', path, '--to', dst.alias, '--json', timeout=120)
+    done = src.pb('send', path, '--to', dst.alias, timeout=120)  # the human output reports where each file landed
     message = (done.text + done.errtext).strip()
     if done.rc != 0:
         ok = (name[:12] in message or any(r in message.lower() for r in REASONS)) and 'could not finish the command' not in message

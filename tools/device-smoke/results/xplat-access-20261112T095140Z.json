@@ -1,0 +1,40 @@
+{
+ "check": "xplat-access",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-19:tcp:L>M",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.7 byte-exact with half-close; non-loopback --listen refused (nd TUI preferences\n      --server string      paperboat-server base UR)"
+  },
+  {
+   "id": "X-19:tcp:L>W",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.6 byte-exact with half-close; non-loopback --listen refused (nd TUI preferences\n      --server string      paperboat-server base UR)"
+  },
+  {
+   "id": "X-19:tcp:M>L",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.2 byte-exact with half-close; non-loopback --listen refused (nd TUI preferences\n      --server string      paperboat-server base UR)"
+  },
+  {
+   "id": "X-19:tcp:M>W",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.3 byte-exact with half-close; non-loopback --listen refused (nd TUI preferences\n      --server string      paperboat-server base UR)"
+  },
+  {
+   "id": "X-19:tcp:W>L",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.2 byte-exact with half-close; non-loopback --listen refused (nd TUI preferences\n      --server string      paperboat-server base UR)"
+  },
+  {
+   "id": "X-19:tcp:W>M",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.4 byte-exact with half-close; non-loopback --listen refused (nd TUI preferences\n      --server string      paperboat-server base UR)"
+  }
+ ]
+}

@@ -1,0 +1,205 @@
+{
+ "check": "xplat-ssh",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-18:ssh:L>M",
+   "status": "PASS",
+   "detail": "pb ssh ran a command on the target (hostname sat12-bq151-0ee148cf-7421-4b44-9c37-7870d679be7a-86c2754f3b10.local)"
+  },
+  {
+   "id": "X-18:user:L>M",
+   "status": "PASS",
+   "detail": "--user and user@machine land as runner"
+  },
+  {
+   "id": "X-18:scp:L>M",
+   "status": "PASS",
+   "detail": "scp both ways sha256 equal (524291 bytes), remote path in forward-slash form"
+  },
+  {
+   "id": "X-18:scp-backslash:L>M",
+   "status": "PASS",
+   "detail": "n/a: the target is not Windows"
+  },
+  {
+   "id": "X-18:sftp:L>M",
+   "status": "PASS",
+   "detail": "sftp put and get sha256 equal (204800 bytes)"
+  },
+  {
+   "id": "X-18:rsync:L>M",
+   "status": "PASS",
+   "detail": "rsync -a sha256 equal; target: openrsync: protocol version 29"
+  },
+  {
+   "id": "X-18:ssh:L>W",
+   "status": "PASS",
+   "detail": "pb ssh ran a command on the target (hostname runnervmm7ud1)"
+  },
+  {
+   "id": "X-18:user:L>W",
+   "status": "PASS",
+   "detail": "--user and user@machine land as runneradmin"
+  },
+  {
+   "id": "X-18:scp:L>W",
+   "status": "PASS",
+   "detail": "scp both ways sha256 equal (524291 bytes), remote path in forward-slash form"
+  },
+  {
+   "id": "X-18:scp-backslash:L>W",
+   "status": "PASS",
+   "detail": "a backslash remote path was accepted"
+  },
+  {
+   "id": "X-18:sftp:L>W",
+   "status": "PASS",
+   "detail": "sftp put and get sha256 equal (204800 bytes)"
+  },
+  {
+   "id": "X-18:rsync:L>W",
+   "status": "PASS",
+   "detail": "clear message: rsync error: error in rsync protocol data stream (code 12) at io.c(232) [sender=3.2.7]"
+  },
+  {
+   "id": "X-18:ssh:M>L",
+   "status": "PASS",
+   "detail": "pb ssh ran a command on the target (hostname lanex2-l)"
+  },
+  {
+   "id": "X-18:user:M>L",
+   "status": "PASS",
+   "detail": "--user and user@machine land as tester"
+  },
+  {
+   "id": "X-18:scp:M>L",
+   "status": "PASS",
+   "detail": "scp both ways sha256 equal (524291 bytes), remote path in forward-slash form"
+  },
+  {
+   "id": "X-18:scp-backslash:M>L",
+   "status": "PASS",
+   "detail": "n/a: the target is not Windows"
+  },
+  {
+   "id": "X-18:sftp:M>L",
+   "status": "PASS",
+   "detail": "sftp put and get sha256 equal (204800 bytes)"
+  },
+  {
+   "id": "X-18:rsync:M>L",
+   "status": "PASS",
+   "detail": "rsync -a sha256 equal; target: rsync  version 3.2.7  protocol version 31"
+  },
+  {
+   "id": "X-18:ssh:M>W",
+   "status": "PASS",
+   "detail": "pb ssh ran a command on the target (hostname runnervmm7ud1)"
+  },
+  {
+   "id": "X-18:user:M>W",
+   "status": "PASS",
+   "detail": "--user and user@machine land as runneradmin"
+  },
+  {
+   "id": "X-18:scp:M>W",
+   "status": "PASS",
+   "detail": "scp both ways sha256 equal (524291 bytes), remote path in forward-slash form"
+  },
+  {
+   "id": "X-18:scp-backslash:M>W",
+   "status": "PASS",
+   "detail": "a backslash remote path was accepted"
+  },
+  {
+   "id": "X-18:sftp:M>W",
+   "status": "PASS",
+   "detail": "sftp put and get sha256 equal (204800 bytes)"
+  },
+  {
+   "id": "X-18:rsync:M>W",
+   "status": "PASS",
+   "detail": "clear message: rsync(5097): error: unexpected end of file"
+  },
+  {
+   "id": "X-18:ssh:W>L",
+   "status": "PASS",
+   "detail": "pb ssh ran a command on the target (hostname lanex2-l)"
+  },
+  {
+   "id": "X-18:user:W>L",
+   "status": "PASS",
+   "detail": "--user and user@machine land as tester"
+  },
+  {
+   "id": "X-18:scp:W>L",
+   "status": "PASS",
+   "detail": "scp both ways sha256 equal (49155 bytes), remote path in forward-slash form"
+  },
+  {
+   "id": "X-18:scp-backslash:W>L",
+   "status": "PASS",
+   "detail": "n/a: the target is not Windows"
+  },
+  {
+   "id": "X-18:sftp:W>L",
+   "status": "PASS",
+   "detail": "sftp put and get sha256 equal (49152 bytes)"
+  },
+  {
+   "id": "X-18:rsync:W>L",
+   "status": "PASS",
+   "detail": "clear message: pb: rsync was not found on this computer, so this command cannot run. Install rsync (or use pb scp or pb sftp, which Paperboat can"
+  },
+  {
+   "id": "X-18:ssh:W>M",
+   "status": "PASS",
+   "detail": "pb ssh ran a command on the target (hostname sat12-bq151-0ee148cf-7421-4b44-9c37-7870d679be7a-86c2754f3b10.local)"
+  },
+  {
+   "id": "X-18:user:W>M",
+   "status": "PASS",
+   "detail": "--user and user@machine land as runner"
+  },
+  {
+   "id": "X-18:scp:W>M",
+   "status": "PASS",
+   "detail": "scp both ways sha256 equal (49155 bytes), remote path in forward-slash form"
+  },
+  {
+   "id": "X-18:scp-backslash:W>M",
+   "status": "PASS",
+   "detail": "n/a: the target is not Windows"
+  },
+  {
+   "id": "X-18:sftp:W>M",
+   "status": "PASS",
+   "detail": "sftp put and get sha256 equal (49152 bytes)"
+  },
+  {
+   "id": "X-18:rsync:W>M",
+   "status": "PASS",
+   "detail": "clear message: pb: rsync was not found on this computer, so this command cannot run. Install rsync (or use pb scp or pb sftp, which Paperboat can"
+  },
+  {
+   "id": "X-18:self:L",
+   "status": "PASS",
+   "detail": "pb ssh to the machine itself ran a command"
+  },
+  {
+   "id": "X-18:self:M",
+   "status": "PASS",
+   "detail": "pb ssh to the machine itself ran a command"
+  },
+  {
+   "id": "X-18:self:W",
+   "status": "PASS",
+   "detail": "pb ssh to the machine itself ran a command"
+  }
+ ]
+}

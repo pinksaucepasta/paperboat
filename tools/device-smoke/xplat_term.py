@@ -10,6 +10,7 @@ Results: tools/device-smoke/results/xplat-term-<stamp>.json (`X-16:utf8:L>W`, `X
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 import uuid
@@ -64,12 +65,13 @@ class Terminal:
             raise AssertionError('timed out waiting for %r; screen tail: %r' % (pattern, (self.child.before or '')[-300:]))
 
     def echo(self, token):
-        """(command, expected text) printing `token` with something only the shell can compute."""
+        """(command, regex of its output). The output is computed by the shell, so the echo of the typed command cannot match.
+        COMPUTERNAME is not in a pb terminal's Windows environment: cmd computes with `set /a`, PowerShell with an expression."""
         if self.kind == 'unix':
             return 'echo M_%s_$((6*7))' % token, 'M_%s_42' % token
         if self.kind == 'powershell':
-            return 'echo "M_%s_${env:COMPUTERNAME}"' % token, 'M_%s_%s' % (token, self.computer)
-        return 'echo M_%s_%%COMPUTERNAME%%' % token, 'M_%s_%s' % (token, self.computer)
+            return 'echo ("M_%s_" + (6*7))' % token, 'M_%s_42' % token
+        return 'echo M_%s_& set /a 6*7' % token, r'M_%s_\s+42' % token
 
     def ready(self):
         kinds = [self.kind] if self.kind else ['cmd', 'powershell']
@@ -80,7 +82,7 @@ class Terminal:
                 command, want = self.echo(uuid.uuid4().hex[:6])
                 self.say(command)
                 try:
-                    self.child.expect(want.replace('$', r'\$'), timeout=10)
+                    self.child.expect(want, timeout=10)
                     return
                 except pexpect.TIMEOUT:
                     continue
@@ -91,6 +93,10 @@ class Terminal:
             self.child.close(force=True)
         except Exception:  # noqa: BLE001
             pass
+        # `docker exec` keeps the client alive when the ssh hop dies: reap this device's leftover `pb connect` clients, or
+        # hundreds of them end up holding terminal sessions and the machine's own pb can no longer open a transport
+        if self.src.os != 'windows':
+            self.src.sh("ps -eo pid,args | awk '$2 ~ /\\/pb$/ && $3==\"connect\" {print $1}' | xargs -r kill", timeout=60)
 
 
 def t_shell(src, dst):
@@ -191,7 +197,7 @@ def t_env(src, dst):
     try:
         term.ready()
         code = "import os,hashlib;[print('H:'+k+':'+hashlib.sha256(os.environ[k].encode()).hexdigest()) for k in sorted(os.environ) if k.startswith('XP_')]"
-        term.say(("python3 -c " if term.kind == 'unix' else "python -c ") + ('"%s"' % code if term.kind != 'unix' else "'%s'" % code))
+        term.say(("python3 -c " if term.kind == 'unix' else "python -c ") + '"%s"' % code)
         for name, value in VALUES.items():
             term.expect('H:%s:%s' % (name, hashlib.sha256(value.encode()).hexdigest()), timeout=60)
         return 'all %d values equal (sha256) in a new pb connect terminal on %s (%s)' % (len(VALUES), dst.name, term.kind)
