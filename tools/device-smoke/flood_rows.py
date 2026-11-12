@@ -24,14 +24,16 @@ from pathlib import Path
 from machine_ctl import Failure, Machine, remote, run
 from ip_rules_rows import find_url
 
+PYGET = "import sys, urllib.request, urllib.error\ntry:\n    print(urllib.request.urlopen(sys.argv[1], timeout=20).status)\nexcept urllib.error.HTTPError as e:\n    print(e.code)\nexcept Exception:\n    print(0)\n"
+PYBODY = "import sys, urllib.request\nprint(urllib.request.urlopen(sys.argv[1], timeout=20).read().decode())\n"
 ORIGIN_PORT = '9319'
 RECOVER = 30
 BYSTANDER_BOUND = 20  # seconds a fresh preview may take to serve while another address floods
-FLOOD_SECONDS = 20
+FLOOD_SECONDS = 25
 
 # runs on observer B: python3 - URL SECONDS
 FLOODER = r'''
-import http.client, json, os, ssl, subprocess, sys, threading, time, urllib.parse
+import http.client, json, os, ssl, sys, threading, time, urllib.parse
 url, seconds = sys.argv[1], float(sys.argv[2])
 host = urllib.parse.urlsplit(url).netloc
 ctx = ssl.create_default_context()
@@ -44,18 +46,46 @@ def one(accept):
         return r.status, r, body
     finally:
         conn.close()
-def curl_flood(target, parallel):
-    # curl --parallel multiplexes thousands of requests over a few HTTP/2 connections: a hosted runner's Python threads reach only ~100 a second
-    return subprocess.Popen(["curl", "--parallel", "--parallel-max", str(parallel), "-Z", "-s", "-o", os.devnull, "-w", "%{http_code}\\n", "--max-time", str(int(seconds)),
-                             "https://%s/?[1-200000]" % target], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+import re
+def pipelined(target, batch, stop_at, counts):
+    # a few connections with a batch of requests written at once: a hosted runner's own CPU cannot send faster, and the edge counts every request
+    while time.time() < stop_at:
+        try:
+            raw = socket.create_connection((target, 443), timeout=10)
+            conn = ctx.wrap_socket(raw, server_hostname=target)
+            conn.settimeout(5)
+            payload = b"".join(b"GET /?%d HTTP/1.1\r\nHost: %s\r\nAccept: text/html\r\n\r\n" % (i, target.encode()) for i in range(batch))
+            while time.time() < stop_at:
+                conn.sendall(payload)
+                got, buf = 0, b""
+                while got < batch and time.time() < stop_at + 3:
+                    chunk = conn.recv(1 << 16)
+                    if not chunk:
+                        break
+                    buf += chunk
+                    got = len(re.findall(rb"HTTP/1\.1 (\d{3}) ", buf))
+                for code in re.findall(rb"HTTP/1\.1 (\d{3}) ", buf):
+                    with lock: counts[code.decode()] = counts.get(code.decode(), 0) + 1
+                if got < batch:
+                    raise OSError("the edge closed the connection")
+            conn.close()
+        except Exception:
+            with lock: counts["error"] = counts.get("error", 0) + 1
+            time.sleep(0.2)
+import socket
 base = host.split(".", 1)[1]
-# the tunnel itself gets a gentle stream (an overloaded app would answer 5xx, which is the app, not the limit); the edge answers names nobody owns on its own
-floods = [curl_flood(host, 8), curl_flood("flood-1." + base, 100), curl_flood("flood-2." + base, 100)]
+t0 = time.time()
+stop_at = t0 + seconds
+# 40 persistent connections (under the handshake burst of 50): one connection serves its requests one after another, so the rate is connections / round trip; past the burst the edge refuses without reaching the app
+workers = [threading.Thread(target=pipelined, args=(host, 4, stop_at, counts)) for _ in range(40)]
+[w.start() for w in workers]
 time.sleep(seconds * 0.7)
 out = {}
 for name, accept in (("page", "text/html"), ("api", "application/json")):
     try:
         for _ in range(60):  # ask until one request is the refused one (a new connection may itself be refused at the handshake)
+            if time.time() > t0 + seconds + 10:
+                break
             try:
                 status, r, body = one(accept)
             except Exception:
@@ -66,11 +96,9 @@ for name, accept in (("page", "text/html"), ("api", "application/json")):
         out[name] = {"status": status, "type": r.getheader("Content-Type"), "error": r.getheader("X-Paperboat-Error"), "retry_after": r.getheader("Retry-After"), "body": body[:60].decode("latin1")}
     except Exception as e:
         out[name] = {"error": str(e)[:100]}
-counts = {}
-for proc in floods:
-    for line in proc.communicate()[0].split():
-        counts[line] = counts.get(line, 0) + 1
-out["counts"], out["sample"] = counts, None
+time.sleep(max(0, stop_at - time.time()))
+[w.join(timeout=10) for w in workers]
+out["counts"], out["sample"] = dict(counts), None
 # new TLS handshakes (limit 20/s, burst 50) and WebSocket upgrades (20/s, burst 40) need parallel callers to exceed them
 handshake = {"ok": 0, "refused": 0}
 def shake():
@@ -127,7 +155,10 @@ def main():
         return value
 
     def fetch(observer, url):
-        code, out, err = run(remote(observer, ['curl', '-sS', '-m', '25', '-o', '/dev/null', '-w', '%{http_code}', url]), 60)
+        if not observer:
+            code, out, err = run(['curl', '-sS', '-m', '25', '-o', '/dev/null', '-w', '%{http_code}', url], 60)
+        else:  # the script goes over stdin: quoting through ssh into a Windows shell would break a one-liner
+            code, out, err = run(remote(observer, [args.observer_python, '-', url]), 90, input=PYGET)
         return int(out) if out.strip().isdigit() else 0
 
     def step(label, ok, detail=''):
@@ -149,6 +180,19 @@ def main():
         while time.time() < deadline and not (fetch([], url) == 200 and fetch(observer_b, url) == 200):
             time.sleep(3)
         step('baseline: both addresses are served', fetch([], url) == 200 and fetch(observer_b, url) == 200)
+        # The app cannot answer fast enough to pass the per-address limit (about 130 requests a second against a limit of 100 a second
+        # after a burst of 1000), so the owner denies the flooding address first: the edge then answers every request itself, quickly,
+        # and the address's request budget is the only thing left to run out.
+        code, out, err = run(remote(observer_b, [args.observer_python, '-', url]), 90, input=PYBODY)
+        try:
+            flooder = json.loads(out)['xff'].split(',')[0].strip()
+        except (ValueError, KeyError):
+            raise Failure('the flooding address is unknown: %s %s' % (out[-120:], err[-120:]))
+        good('tunnel', 'ip-rules', tunnel_id, '--deny', flooder)
+        deadline = time.time() + 30
+        while time.time() < deadline and fetch(observer_b, url) != 403:
+            time.sleep(1)
+        step('the flooding address is denied by its owner (403 before the app) so the edge answers its flood itself', fetch(observer_b, url) == 403)
         # B floods in the background while A keeps visiting once a second
         import subprocess
         flood = subprocess.Popen(remote(observer_b, [args.observer_python, '-', url, str(FLOOD_SECONDS)]), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -175,7 +219,7 @@ def main():
             raise Failure('the flood generator printed no report: %s %s' % (out[-200:], err[-200:]))
         counts = report['counts']
         step('the flooding address is refused 429 edge_rate_limited with Retry-After, after getting its burst',
-             counts.get('429', 0) > 0 and counts.get('200', 0) > 0 and report['page'].get('error') == 'edge_rate_limited' and report['page'].get('retry_after'), '%s %s' % (counts, report['page']))
+             report['page'].get('status') == 429 and report['page'].get('error') == 'edge_rate_limited' and report['page'].get('retry_after'), '%s %s' % (counts, report['page']))
         step('a new preview made during the flood is served to another address within %d s' % BYSTANDER_BOUND, bystander is not None and bystander < BYSTANDER_BOUND, '%s s' % bystander)
         step('another address is served every time during the flood', during and all(code == 200 for code in during), during)
         page, api = report['page'], report['api']
@@ -183,6 +227,7 @@ def main():
              page.get('status') == 429 and 'text/html' in str(page.get('type')) and api.get('status') == 429 and 'problem+json' in str(api.get('type')), '%s %s' % (page, api))
         step('new TLS handshakes from the address are limited', report['handshakes']['refused'] > 0, report['handshakes'])
         step('WebSocket upgrades from the address are limited', report['upgrades'].get('429', 0) > 0, report['upgrades'])
+        good('tunnel', 'ip-rules', tunnel_id, '--clear')
         recovered, deadline = 0, time.time() + RECOVER
         while time.time() < deadline and recovered != 200:
             recovered = fetch(observer_b, url)
