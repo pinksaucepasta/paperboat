@@ -303,6 +303,8 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 		return localTerminalSize()
 	}
 
+	// Keys typed while the connection is made are held raw; session.Run delivers them once the shell attaches.
+	defer session.HoldInput()()
 	var conn tunnel.Conn
 	var lastTerminalSequence atomic.Int64
 	inputOwner := "owner_" + uuid.NewString() // one pb connect across redials: the daemon keeps its unanswered input
