@@ -55,7 +55,7 @@ def main():
         if refused.returncode == 0:
             raise RuntimeError('a recording started after the team lost its plan')
         receipt['phases'].append('new_start_refused')
-        session.say('PLANOFF')
+        # Team machine access ends with the plan (F13-04), so the attached terminal is cut: nothing is asserted about its echo.
         rec.wait_for('the plan to come back', lambda: not plan_lost(args.team), timeout=wait, interval=10)
         ended = rec.wait_for('the recording to be listed as ended', lambda: next((r for r in rec.listing(args.team) if r['id'] == recording['id'] and r['state'] == 'ended'), None), timeout=600, interval=10)
         if ended['segments'] < 1:
