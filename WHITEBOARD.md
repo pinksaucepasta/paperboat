@@ -310,6 +310,12 @@ Moved out of launch scope; the team bucket ships for session recordings only. Bu
 - **Share a file → "Team storage"** (was F25-09): Share a file, destination "Team storage" (needs a team bucket): no machine has to be online; the browser encrypts the file, uploads it through a short-lived signed link, and the share link carries the decryption key after the # so neither Paperboat nor the bucket can read it; expiry and the Only-me rule apply; without a bucket the destination is not offered and links are served by the chosen machine.
 - **Bucket files across OSes** (was X-32): Team bucket files across OSes (F25-06, F25-08, F25-09): with a team bucket for files, a file or folder sent from one OS to an offline recipient on another waits encrypted, is shown accept-first in the recipient's Inbox, and arrives byte-equal (sha256), with the same safe-name rules as X-14, after the recipient accepts; the client-side encryption written on one OS decrypts on every other (CLI on L, M, W and the browser); a Team storage share made in a browser on one OS downloads and decrypts in a browser on each other OS with the key only after the `#`, the Unicode or reserved file name is saved under a valid name on W, and expiry, the Only-me rule, decline and bucket cleanup behave the same; a bucket outage or wrong credential is named identically on every OS.
 
+## Dual-stack edges (IPv6) — after launch (user decision 2026-11-12)
+
+Edges are IPv4-only at launch (no public IPv6, no AAAA for the preview/tunnel domain). IPv6-only visitors still
+reach them through their carrier's NAT64/DNS64. Later: public IPv6 on every edge, wildcard AAAA records, owner IP
+rules and `--host-header` checked with real IPv6 client addresses (the IPv6 part of cross-platform row X-20).
+
 ## Batched integration queue — after launch (user decision 2026-11-12)
 
 Consider a bors-style queue that tests an actual combined batch once and bisects failed
