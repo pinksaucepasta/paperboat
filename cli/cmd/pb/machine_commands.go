@@ -114,7 +114,7 @@ func machineRenameCommand() *cobra.Command {
 	rename := &cobra.Command{Use: "rename <machine> <name>", Short: "Rename a machine", Args: commandArgs(cobra.ExactArgs(2)), RunE: func(command *cobra.Command, args []string) error {
 		newName := strings.TrimSpace(args[1])
 		if err := machinename.Validate(newName); err != nil {
-			return invocationError(fmt.Errorf("invalid machine name: %w", err))
+			return localArgumentError("invalid machine name: " + err.Error()) // the rule only, never the typed value
 		}
 		ctx := actionContext(command, args)
 		client, err := backendClient(ctx)

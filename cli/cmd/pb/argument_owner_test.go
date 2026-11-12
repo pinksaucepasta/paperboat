@@ -51,3 +51,20 @@ func TestLocalCommandArgumentsFailBeforeAuthenticationWithoutFaultCapture(t *tes
 		})
 	}
 }
+
+// X-42: a refused machine name says why (the name rule) instead of "the command arguments are invalid", and still never
+// echoes the typed value.
+func TestInvalidMachineNameStatesTheRule(t *testing.T) {
+	for _, args := range [][]string{{"machine", "rename", "PRIVATE_MACHINE", "rel-x-ünï-PRIVATE"}, {"machine", "add", "--name", "a b PRIVATE"}} {
+		root := t.TempDir()
+		isolateCommandCredentialLocation(t, root)
+		var stdout, stderr bytes.Buffer
+		if code := runWithReporter(t.Context(), append([]string{"--config", filepath.Join(root, "config.json")}, args...), &stdout, &stderr, nil); code != 2 {
+			t.Fatalf("%v returned %d; stdout=%s stderr=%s", args, code, stdout.String(), stderr.String())
+		}
+		output := stdout.String() + stderr.String()
+		if !strings.Contains(output, "ASCII letters, digits or hyphens") || strings.Contains(output, "PRIVATE") {
+			t.Fatalf("%v: the refusal does not state the rule, or echoes the input: %s", args, output)
+		}
+	}
+}

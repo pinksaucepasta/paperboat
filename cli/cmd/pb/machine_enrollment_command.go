@@ -19,7 +19,7 @@ func machineEnrollmentCommand() *cobra.Command {
 		name, _ := command.Flags().GetString("name")
 		if name != "" {
 			if err := machinename.Validate(name); err != nil {
-				return invocationError(fmt.Errorf("invalid machine name: %w", err))
+				return localArgumentError("invalid machine name: " + err.Error()) // the rule only, never the typed value
 			}
 		}
 		// machine add is workspace-independent, so the flag is read here: the token is for the workspace the user named.
