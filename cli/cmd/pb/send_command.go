@@ -360,9 +360,20 @@ func declaredTransferLimits(policy filetransfer.Limits, declared api.TransferDec
 	return policy
 }
 
-// missingSendSource names a source the user gave that does not exist; other preparation errors pass through.
+// missingSendSource names a source the user gave that does not exist or is not a regular file (a folder, a link); other preparation errors pass through.
 // Only a path from the command line is echoed, never one Paperboat opened itself.
 func missingSendSource(err error, sources []string) error {
+	var notRegular *filetransfer.NotRegularError
+	if errors.As(err, &notRegular) && slices.Contains(sources, notRegular.Path) {
+		message := notRegular.Path + " is not a regular file. Paperboat sends regular files only: send the file it points to, or its files (up to 10 at once)."
+		switch {
+		case notRegular.Directory:
+			message = notRegular.Path + " is a folder, and Paperboat sends files, not folders. Send its files (up to 10 at once) or archive the folder first (for example with tar or zip), then send the archive."
+		case notRegular.Symlink:
+			message = notRegular.Path + " is a symbolic link, and Paperboat does not send links. Send the file it points to instead."
+		}
+		return usageError{err: err, publicMessage: message, refusal: true}
+	}
 	var pathErr *os.PathError
 	if errors.As(err, &pathErr) && errors.Is(err, os.ErrNotExist) && slices.Contains(sources, pathErr.Path) {
 		message := fmt.Sprintf("%s does not exist. Check the path, then retry `pb send`.", pathErr.Path)

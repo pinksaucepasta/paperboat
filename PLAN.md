@@ -420,7 +420,7 @@ protects Downloads, and ad-hoc-signed builds count as a new app on every update,
 asks for permission again after each update (and stalls device smoke). Users may choose Downloads
 or another folder explicitly; then macOS asks once for that choice.
 
-- F6-01: Single and multiple files and folders up to the limits (50 MiB per file, 10 files, 500 MiB per batch); received hash matches — all pairs.
+- F6-01: Single and multiple files up to the limits (50 MiB per file, 10 files, 500 MiB per batch); received hash matches — all pairs.
 - F6-02: Interrupted transfer resumes from the committed offset; no corruption or duplicates.
 - F6-03: `pb send list/status/cancel/destination set/clear`.
 - F6-04: `pb inbox` (path, set, reset, requests, approve, decline, policy) and team file requests expire correctly.
@@ -1999,7 +1999,7 @@ peer's kernel uid is what Tailscale's LocalAPI does for its unix socket (peercre
 #### File transfer modes: Automatic and Unlimited (Lane A design; Lane B/O server, Lane R paths, Lane C console; user decision 2026-10-26)
 
 **Modes.** Exactly two; self-hosted relays add no third mode and do not lift Automatic's bound.
-- **Automatic** (default): total of one `pb send` (every file, directories expanded) <= 2,000,000,000 bytes. Path:
+- **Automatic** (default): total of one `pb send` (every file) <= 2,000,000,000 bytes. Path:
   P2P, else any relay including Paperboat-hosted. Hosted-relay bytes count toward plan bandwidth (relay quota, as today).
 - **Unlimited**: no Paperboat size bound. Path: P2P, else only the account's/team's self-hosted relays. File bytes never
   cross a Paperboat-hosted relay. With no eligible path the transfer pauses and resumes by itself when one returns.
@@ -2032,7 +2032,7 @@ workspace (the mode is the sender's choice of path, not a team policy).
 (enum above), `total_bytes`, `committed_bytes`. Errors: `transfer_too_large` {total_bytes,max_bytes},
 `file_transfer_path_not_allowed`.
 **Tests/rows.** CHECKLIST feature row F22-01 (two modes) and command rows for `pb send --unlimited`, `pb config set
-transfers.mode`: size boundary (2,000,000,000 ok, +1 refused, before any call), batch accounting (directory + files summed),
+transfers.mode`: size boundary (2,000,000,000 ok, +1 refused, before any call), batch accounting (files summed),
 unlimited never on hosted relay (failing-if-touched fake path), pause/resume on path loss, resume after daemon restart.
 **Rollout, in order (coordinator 2026-10-26; old clients fail only the new feature, never lose anything else).**
 Released pb validates the published transfer policy and the signed regional candidate set strictly, so a field or

@@ -83,6 +83,14 @@ func (b *PreparedBatch) Close() error {
 	return result
 }
 
+// NotRegularError is a source that is not a regular file: only regular files are sent (no folders, no symbolic links).
+type NotRegularError struct {
+	Path               string
+	Directory, Symlink bool
+}
+
+func (e *NotRegularError) Error() string { return e.Path + " is not a regular file" }
+
 func Prepare(paths []string, limits Limits) (*PreparedBatch, error) {
 	if limits.MaxFileBytes <= 0 {
 		limits.MaxFileBytes = 50 << 20
@@ -113,7 +121,7 @@ func Prepare(paths []string, limits Limits) (*PreparedBatch, error) {
 			return nil, fmt.Errorf("inspect file: %w", err)
 		}
 		if before.Mode()&os.ModeSymlink != 0 || !before.Mode().IsRegular() {
-			return nil, fmt.Errorf("%s is not a regular file", path)
+			return nil, &NotRegularError{Path: path, Directory: before.IsDir(), Symlink: before.Mode()&os.ModeSymlink != 0}
 		}
 		file, err := openSourceFile(path)
 		if err != nil {
