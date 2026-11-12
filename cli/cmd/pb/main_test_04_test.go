@@ -740,6 +740,19 @@ func writeAuthLoginTestProfile(t *testing.T, root, configPath, issuer string) co
 	return store
 }
 
+func TestSessionNameTakesTextAPersonTypes(t *testing.T) {
+	for _, name := range []string{"xd sp ünï LMW", "Zoë build 1", "東京"} {
+		if err := validateSessionName(name); err != nil {
+			t.Errorf("%q should be valid: %v", name, err)
+		}
+	}
+	for _, name := range []string{"default", " padded", "tab\tname", "bell\a"} {
+		if err := validateSessionName(name); err == nil {
+			t.Errorf("%q should be refused", name)
+		}
+	}
+}
+
 func TestSessionNameReservesOnlyAutomaticShellNames(t *testing.T) {
 	if err := validateSessionName("shell-tools"); err != nil {
 		t.Fatalf("shell-tools should be valid: %v", err)

@@ -78,7 +78,6 @@ func exactNoRows(err error) bool {
 	return err == sql.ErrNoRows || err == pgx.ErrNoRows
 }
 
-var terminalSessionNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 var execOperationIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{8,128}$`)
 
 // A consumed pairing may be recovered only for a short, bounded period after

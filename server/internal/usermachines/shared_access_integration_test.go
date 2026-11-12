@@ -106,6 +106,15 @@ func TestPostgresSharedMachineSessionIsolationAndRevocation(t *testing.T) {
 	if _, err = service.RenameTerminalSession(ctx, owner, machine, first.ID, "default"); !errors.Is(err, ErrTerminalSessionInvalidName) {
 		t.Fatalf("reserved name accepted: %v", err)
 	}
+	if renamed, renameErr := service.RenameTerminalSession(ctx, owner, machine, first.ID, "Zoë build 1"); renameErr != nil || renamed.Name != "Zoë build 1" {
+		t.Fatalf("a session name with a space, a capital and a non-ASCII letter: name=%q err=%v", renamed.Name, renameErr)
+	}
+	if _, err = service.RenameTerminalSession(ctx, owner, machine, first.ID, "bell\a"); !errors.Is(err, ErrTerminalSessionInvalidName) {
+		t.Fatalf("control character accepted: %v", err)
+	}
+	if _, err = service.RenameTerminalSession(ctx, owner, machine, first.ID, "api-debugging"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err = service.RenameTerminalSession(ctx, owner, machine, reservedID, "changed-default"); !errors.Is(err, ErrTerminalSessionNotFound) {
 		t.Fatalf("reserved default renamed: %v", err)
 	}

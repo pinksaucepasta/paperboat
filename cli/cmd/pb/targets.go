@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/localwait"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/internal/selector"
+	"github.com/pinksaucepasta/paperboat/shared/sessionname"
 	"golang.org/x/term"
 )
 
@@ -417,8 +418,6 @@ func resolveTerminalSession(ctx context.Context, client *api.Client, target envi
 	return api.TerminalSession{}, errors.New(message)
 }
 
-var sessionNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
-
 var automaticSessionNamePattern = regexp.MustCompile(`^shell-[0-9]+$`)
 
 func validateSessionNameOptional(name string) error {
@@ -429,8 +428,8 @@ func validateSessionNameOptional(name string) error {
 }
 
 func validateSessionName(name string) error {
-	if name == "default" || automaticSessionNamePattern.MatchString(name) || !sessionNamePattern.MatchString(name) {
-		return localArgumentError("session names must be lowercase 1-64 character values matching [a-z0-9][a-z0-9._-]{0,63}; default and shell-N are reserved")
+	if automaticSessionNamePattern.MatchString(name) || sessionname.Validate(name) != nil {
+		return localArgumentError("session names are 1-64 characters without control characters or surrounding spaces; default and shell-N are reserved")
 	}
 	return nil
 }

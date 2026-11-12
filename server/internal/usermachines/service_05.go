@@ -18,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
+	"github.com/pinksaucepasta/paperboat/shared/sessionname"
 	"path"
 	"slices"
 	"strconv"
@@ -325,7 +326,7 @@ func (s *Service) createTerminalSession(ctx context.Context, userID, sourceMachi
 			}
 		}
 	}
-	requestedName := strings.ToLower(strings.TrimSpace(name))
+	requestedName := strings.TrimSpace(name)
 	if requestedName != "" && !validUserMachineTerminalSessionName(requestedName) {
 		return TerminalSession{}, ErrTerminalSessionInvalidName
 	}
@@ -476,11 +477,11 @@ func canonicalTerminalLaunchCWD(platform, cwd string) (string, bool) {
 }
 
 func validUserMachineTerminalSessionName(name string) bool {
-	return name != "default" && terminalSessionNamePattern.MatchString(name)
+	return sessionname.Validate(name) == nil
 }
 
 func (s *Service) RenameTerminalSession(ctx context.Context, userID, userMachineID, id, name string) (TerminalSession, error) {
-	name = strings.ToLower(strings.TrimSpace(name))
+	name = strings.TrimSpace(name)
 	if !validUserMachineTerminalSessionName(name) {
 		return TerminalSession{}, ErrTerminalSessionInvalidName
 	}
