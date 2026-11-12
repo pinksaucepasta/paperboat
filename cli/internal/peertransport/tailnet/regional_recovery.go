@@ -426,6 +426,24 @@ func (r *regionalRecovery) relaysMoved() {
 	}
 }
 
+// relayDown is whether a listener with relays to use holds no relay connection at all. Its home carrier ends when a
+// refused re-admission during an outage latches it (relay/derpquic refused): magicsock's reader stops with it and nothing
+// redials it, so a parked listener stayed unreachable inbound until a restart (a Windows runner, 2026-11-12: outbound
+// worked, inbound never again). Tailscale's runDerpReader redials the home region for as long as it runs
+// (wgengine/magicsock/derp.go). Local state only: no request is made.
+func (r *regionalRecovery) relayDown() bool {
+	nodes, _, _, err := r.snapshot()
+	if err != nil || len(nodes) == 0 {
+		return false
+	}
+	for _, n := range nodes {
+		if r.engine.RelayTransport(regionalID(n.NodeID)) != "" {
+			return false
+		}
+	}
+	return true
+}
+
 // poke wakes demand without treating it as a network change (which lifts refusal fences).
 func (r *regionalRecovery) poke() {
 	select {
@@ -633,8 +651,11 @@ func (r *regionalRecovery) run(ctx context.Context) {
 		// (wgengine/magicsock/endpoint.go). With no pair, park before probes
 		// and map publications. receive still answers inbound relay control.
 		if r.pair() == "" && !r.repair.Load() {
-			timer.Stop()
-			continue
+			if !r.relayDown() {
+				timer.Stop()
+				continue
+			}
+			r.repair.Store(true) // the standing relay connection is gone: look again below
 		}
 		nodes, peers, generation, err := r.snapshot()
 		if err != nil || len(nodes) == 0 {

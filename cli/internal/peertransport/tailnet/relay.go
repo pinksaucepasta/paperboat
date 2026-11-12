@@ -109,8 +109,9 @@ func (a *Authority) ApplyRelayGrants(ctx context.Context, tokens []string) (resu
 		if recovery := a.relay.recovery; recovery != nil && resultErr == nil && moved {
 			recovery.relaysMoved()
 		}
-		if recovery := a.relay.recovery; recovery != nil && resultErr == nil && (recovery.pair() != "" || recovery.repair.Load()) {
-			// Tailscale re-STUNs at once on a DERP map update; do not wait out the probe delay.
+		if recovery := a.relay.recovery; recovery != nil && resultErr == nil {
+			// Tailscale re-STUNs at once on a DERP map update; do not wait out the probe delay. A parked listener
+			// wakes too, once per refresh, and looks (locally) whether it still holds a relay connection.
 			select {
 			case recovery.grantWake <- struct{}{}:
 			default:

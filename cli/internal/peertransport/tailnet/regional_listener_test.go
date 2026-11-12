@@ -21,6 +21,7 @@ import (
 type lateRelayEngine struct {
 	failingRegionalEngine
 	reachable atomic.Bool
+	connected atomic.Bool // a relay carrier is up: set by a successful prepare, cleared when the carrier ends
 	prepares  atomic.Int32
 	restuns   atomic.Int32
 	mu        sync.Mutex
@@ -38,7 +39,14 @@ func (e *lateRelayEngine) PrepareRelay(context.Context, tailcfg.DERPRegionID) er
 	if !e.reachable.Load() {
 		return errors.New("relay did not answer")
 	}
+	e.connected.Store(true)
 	return nil
+}
+func (e *lateRelayEngine) RelayTransport(tailcfg.DERPRegionID) string {
+	if e.connected.Load() {
+		return "derp_wss"
+	}
+	return ""
 }
 func (e *lateRelayEngine) ReSTUN(string) { e.restuns.Add(1) }
 
@@ -118,6 +126,23 @@ func TestRestoredListenerReachesRelaysThatArriveAfterStart(t *testing.T) {
 		synctest.Wait()
 		if got := e.prepares.Load(); got != quiet {
 			t.Fatalf("an unchanged relay renewal woke the idle listener: %d prepares", got-quiet)
+		}
+		// The standing carrier ends (a refused re-admission during an outage latched it, and nothing redials a latched
+		// carrier): the next refresh makes the parked listener connect again, then it goes quiet once more.
+		e.connected.Store(false)
+		if err := a.ApplyRelayGrants(t.Context(), []string{grant(node)}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(10 * time.Second)
+		synctest.Wait()
+		if e.prepares.Load() == quiet || !e.connected.Load() || r.repair.Load() {
+			t.Fatalf("a listener whose relay connection ended did not connect again: %d prepares, connected=%v, repair=%v", e.prepares.Load()-quiet, e.connected.Load(), r.repair.Load())
+		}
+		quiet = e.prepares.Load()
+		time.Sleep(5 * time.Minute)
+		synctest.Wait()
+		if got := e.prepares.Load(); got != quiet {
+			t.Fatalf("a reconnected idle listener kept probing: %d prepares in 5 min", got-quiet)
 		}
 		added := node
 		added.NodeID, added.ProcessEpoch = "relay_added", "epoch_added"
