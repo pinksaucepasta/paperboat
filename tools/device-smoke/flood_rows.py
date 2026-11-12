@@ -44,12 +44,13 @@ def one(accept):
         return r.status, r, body
     finally:
         conn.close()
-def curl_flood(target):
+def curl_flood(target, parallel):
     # curl --parallel multiplexes thousands of requests over a few HTTP/2 connections: a hosted runner's Python threads reach only ~100 a second
-    return subprocess.Popen(["curl", "--parallel", "--parallel-max", "100", "-Z", "-s", "-o", os.devnull, "-w", "%{http_code}\\n", "--max-time", str(int(seconds)),
+    return subprocess.Popen(["curl", "--parallel", "--parallel-max", str(parallel), "-Z", "-s", "-o", os.devnull, "-w", "%{http_code}\\n", "--max-time", str(int(seconds)),
                              "https://%s/?[1-200000]" % target], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
 base = host.split(".", 1)[1]
-floods = [curl_flood(host), curl_flood("flood-1." + base), curl_flood("flood-2." + base)]
+# the tunnel itself gets a gentle stream (an overloaded app would answer 5xx, which is the app, not the limit); the edge answers names nobody owns on its own
+floods = [curl_flood(host, 8), curl_flood("flood-1." + base, 100), curl_flood("flood-2." + base, 100)]
 time.sleep(seconds * 0.7)
 out = {}
 for name, accept in (("page", "text/html"), ("api", "application/json")):
