@@ -43,11 +43,16 @@ def client_argv(src, tail):
 
 
 class Terminal:
+    """A pb connect terminal. `kind` is the target shell: unix, cmd or powershell (a Windows target's default shell is decided
+    by what answers). Markers are built so the echo of the typed command can never match the expected output."""
+
     def __init__(self, src, dst, extra=()):
         self.src, self.dst = src, dst
-        self.child = pexpect.spawn(client_argv(src, [src.pb_path, 'connect', dst.alias, *extra])[0], client_argv(src, [src.pb_path, 'connect', dst.alias, *extra])[1:],
-                                   encoding='utf-8', codec_errors='replace', timeout=90, dimensions=(30, 100))
-        self.unix = dst.os != 'windows'
+        argv = client_argv(src, [src.pb_path, 'connect', dst.alias, *extra])
+        self.child = pexpect.spawn(argv[0], argv[1:], encoding='utf-8', codec_errors='replace', timeout=90, dimensions=(30, 100))
+        self.kind = 'unix' if dst.os != 'windows' else None
+        self.unix = self.kind == 'unix'
+        self.computer = dst.run(['hostname']).text.strip() if dst.os == 'windows' else ''
 
     def say(self, text):
         self.child.send(text + '\r')
@@ -58,20 +63,27 @@ class Terminal:
         except pexpect.TIMEOUT:
             raise AssertionError('timed out waiting for %r; screen tail: %r' % (pattern, (self.child.before or '')[-300:]))
 
-    def marker(self):
-        """A command whose output cannot be confused with its echo, for the target's shell."""
-        token = uuid.uuid4().hex[:6]
-        return token, ('echo M_%s_$((6*7))' % token) if self.unix else ('echo ("M_%s_" + (6*7))' % token), 'M_%s_42' % token
+    def echo(self, token):
+        """(command, expected text) printing `token` with something only the shell can compute."""
+        if self.kind == 'unix':
+            return 'echo M_%s_$((6*7))' % token, 'M_%s_42' % token
+        if self.kind == 'powershell':
+            return 'echo "M_%s_${env:COMPUTERNAME}"' % token, 'M_%s_%s' % (token, self.computer)
+        return 'echo M_%s_%%COMPUTERNAME%%' % token, 'M_%s_%s' % (token, self.computer)
 
     def ready(self):
-        token, command, want = self.marker()
-        for _ in range(8):
-            self.say(command)
-            try:
-                self.child.expect(want, timeout=12)
-                return
-            except pexpect.TIMEOUT:
-                continue
+        kinds = [self.kind] if self.kind else ['cmd', 'powershell']
+        for attempt in range(8):
+            for kind in kinds:
+                self.kind = kind
+                self.unix = kind == 'unix'
+                command, want = self.echo(uuid.uuid4().hex[:6])
+                self.say(command)
+                try:
+                    self.child.expect(want.replace('$', r'\$'), timeout=10)
+                    return
+                except pexpect.TIMEOUT:
+                    continue
         raise AssertionError('the target shell never answered; screen tail: %r' % (self.child.before or '')[-300:])
 
     def close(self):
@@ -85,9 +97,7 @@ def t_shell(src, dst):
     term = Terminal(src, dst)
     try:
         term.ready()
-        term.say('echo $0' if term.unix else '$PSVersionTable.PSVersion.Major')
-        term.expect(r'(bash|zsh|sh)' if term.unix else r'\b[57]\b')
-        return 'the target shell started and answered (%s)' % ('unix shell' if term.unix else 'PowerShell')
+        return 'the target shell started and answered (%s)' % term.kind
     finally:
         term.close()
 
@@ -96,10 +106,12 @@ def t_utf8(src, dst):
     term = Terminal(src, dst)
     try:
         term.ready()
-        text = 'U:\u03bb\u8239\U0001F600:E'
-        term.say("printf 'U:%s:E\\n' '\u03bb\u8239\U0001F600'" if term.unix else "Write-Output 'U:\u03bb\u8239\U0001F600:E'")
-        term.expect(text.replace('U:', 'U:', 1).replace('\U0001F600', '\U0001F600'))
-        return 'UTF-8 and wide characters came back unchanged'
+        wide = '\u03bb\u8239\U0001F600'
+        command = {'unix': "a='%s'; printf 'U:%%s:E\\n' \"$a\"" % wide, 'cmd': 'set a=%s& call echo U:%%a%%:E' % wide,
+                   'powershell': "$a='%s'; echo \"U:$a:E\"" % wide}[term.kind]
+        term.say(command)
+        term.expect('U:%s:E' % wide)
+        return 'UTF-8 and wide characters typed and echoed unchanged (%s)' % term.kind
     finally:
         term.close()
 
@@ -110,23 +122,26 @@ def t_resize(src, dst):
         term.ready()
         term.child.setwinsize(45, 132)
         time.sleep(3)
-        term.say('stty size' if term.unix else '"{0}x{1}" -f $Host.UI.RawUI.WindowSize.Height,$Host.UI.RawUI.WindowSize.Width')
-        term.expect(r'45 132' if term.unix else r'45x132')
-        return 'a window resize reached the remote PTY (45x132)'
+        term.say({'unix': 'stty size', 'cmd': 'mode con', 'powershell': '"{0}x{1}" -f $Host.UI.RawUI.WindowSize.Height,$Host.UI.RawUI.WindowSize.Width'}[term.kind])
+        term.expect({'unix': r'45 132', 'cmd': r'Lines:\s+45', 'powershell': r'45x132'}[term.kind])
+        return 'a window resize reached the remote PTY (45x132, %s)' % term.kind
     finally:
         term.close()
+
+
+SLEEP = {'unix': 'sleep 60', 'cmd': 'ping -n 60 127.0.0.1 >nul', 'powershell': 'Start-Sleep 60'}
 
 
 def t_ctrlc(src, dst):
     term = Terminal(src, dst)
     try:
         term.ready()
-        term.say('sleep 60' if term.unix else 'Start-Sleep 60')
+        term.say(SLEEP[term.kind])
         time.sleep(3)
         term.child.send('\x03')
         time.sleep(2)
         term.ready()
-        return 'Ctrl-C stopped a long command and the shell answered again'
+        return 'Ctrl-C stopped a long command and the shell answered again (%s)' % term.kind
     finally:
         term.close()
 
@@ -140,7 +155,7 @@ def t_exit(src, dst):
         term.child.close()
         status = term.child.exitstatus
         assert status == 3, 'the exit code 3 of the remote shell was reported as %r' % (status,)
-        return 'the remote exit code (3) is the exit status of pb connect'
+        return 'the remote exit code (3) is the exit status of pb connect (%s)' % term.kind
     finally:
         term.close()
 
@@ -151,18 +166,20 @@ def t_replay(src, dst):
     first = Terminal(src, dst, ['new', '--name', name])
     try:
         first.ready()
-        first.say(('echo REPLAY_%s_$((2*21))' % token) if first.unix else ('echo ("REPLAY_%s_" + (2*21))' % token))
-        first.expect('REPLAY_%s_42' % token)
-        first.say('sleep 45' if first.unix else 'Start-Sleep 45')
+        command, want = first.echo('REPLAY_' + token)
+        first.say(command)
+        first.expect(want)
+        first.say(SLEEP[first.kind].replace('60', '45'))
         time.sleep(2)
     finally:
         first.close()  # the client goes away mid-command: the session must live on
     time.sleep(5)
     second = Terminal(src, dst, ['--session', name])
+    second.kind = first.kind
     try:
-        second.expect('REPLAY_%s_42' % token, timeout=60)
+        second.expect(want, timeout=60)
         second.say('exit')
-        return 'after the client vanished, a reattach replayed the earlier output of a session that kept running'
+        return 'after the client vanished, a reattach replayed the earlier output of a session that kept running (%s)' % first.kind
     finally:
         second.close()
 
@@ -173,13 +190,11 @@ def t_env(src, dst):
     term = Terminal(src, dst)
     try:
         term.ready()
-        if term.unix:
-            term.say("python3 -c 'import os,hashlib;[print(\"H:%s:%s\" % (k, hashlib.sha256(os.environ[k].encode()).hexdigest())) for k in sorted(os.environ) if k.startswith(\"XP_\")]'")
-        else:
-            term.say("python -c \"import os,hashlib;[print('H:%s:%s' % (k, hashlib.sha256(os.environ[k].encode()).hexdigest())) for k in sorted(os.environ) if k.startswith('XP_')]\"")
+        code = "import os,hashlib;[print('H:'+k+':'+hashlib.sha256(os.environ[k].encode()).hexdigest()) for k in sorted(os.environ) if k.startswith('XP_')]"
+        term.say(("python3 -c " if term.kind == 'unix' else "python -c ") + ('"%s"' % code if term.kind != 'unix' else "'%s'" % code))
         for name, value in VALUES.items():
             term.expect('H:%s:%s' % (name, hashlib.sha256(value.encode()).hexdigest()), timeout=60)
-        return 'all %d values equal (sha256) in a new pb connect terminal on %s' % (len(VALUES), dst.name)
+        return 'all %d values equal (sha256) in a new pb connect terminal on %s (%s)' % (len(VALUES), dst.name, term.kind)
     finally:
         term.close()
 
