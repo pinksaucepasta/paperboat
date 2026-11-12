@@ -764,12 +764,14 @@ func (e *Execution) finish(ctx context.Context, state State, result Result, code
 		e.mu.Lock()
 		e.waitErr = persistenceErr
 		e.mu.Unlock()
-		close(e.done)
+		// The slot is released before done closes: a client that starts its next command as soon as Wait returns
+		// must not be refused with ErrCapacity.
 		e.manager.mu.Lock()
 		e.manager.active--
 		e.manager.order = append(e.manager.order, e.request.OperationID)
 		e.manager.signalChangedLocked()
 		e.manager.mu.Unlock()
+		close(e.done)
 	})
 }
 
