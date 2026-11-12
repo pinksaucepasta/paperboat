@@ -425,6 +425,7 @@ def ended_within(term, seconds):
 def t_removal(team, o, m, oid):
     """Removing a team member ends the open terminals that depend on the membership within END_SECONDS: the member's own, or, when the member is the
     team owner, those into the removed member's machine. The machine disappears from the member's list; the member is put back afterwards."""
+    team.share(oid)  # the end step leaves the machine unshared
     owner_id = fleet.json_pb(team.admin, 'auth', 'status')['account']['id']
     member_id = team.member_account()
     removed = member_id if member_id != owner_id else fleet.json_pb(team.owner, 'auth', 'status')['account']['id']
@@ -456,6 +457,7 @@ def t_suspension(team, o, m, oid):
     quoted = team.id.replace("'", "")
     suspend = "set search_path to paperboat; update paperboat.teams set suspended=true,suspended_at=now(),suspended_by=owner_account,generation=generation+1 where team_id='%s';" % quoted
     resume = "set search_path to paperboat; update paperboat.teams set suspended=false,suspended_at=null,suspended_by=null,generation=generation+1 where team_id='%s';" % quoted
+    team.share(oid)
     term = open_member_terminal(team, o, m)
     try:
         sql(suspend)
