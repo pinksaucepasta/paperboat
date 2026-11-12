@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/jobmonitor"
@@ -40,7 +41,11 @@ type Options struct {
 }
 
 type App struct {
-	draining             *atomic.Bool
+	draining *atomic.Bool
+	// warmed turns true once warm has run (readinessChecker reports not ready until then); warm primes the
+	// pool and the heavy cutover queries.
+	warmed               *atomic.Bool
+	warm                 func(context.Context)
 	machineEvents        *machineevents.Hub
 	supportReports       *supportreport.Service
 	healthMonitor        *jobmonitor.Monitor

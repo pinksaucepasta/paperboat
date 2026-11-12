@@ -196,6 +196,33 @@ func (d *DB) Close() error {
 	return sqlErr
 }
 
+// WarmPool opens n connections at once and runs one statement on each, then returns them idle: a freshly started
+// server otherwise opens its connections (and prepares every statement per connection) while the first burst of
+// real requests waits for it (2026-11-12 server swap: first answers 1.7-2.0 s against 150-700 ms in steady state).
+func (d *DB) WarmPool(ctx context.Context, n int) error {
+	if d == nil || d.pool == nil {
+		return errors.New("database is not open")
+	}
+	n = min(n, int(d.pool.Config().MaxConns))
+	held := make([]*pgxpool.Conn, 0, n)
+	defer func() {
+		for _, conn := range held {
+			conn.Release()
+		}
+	}()
+	for range n { // each Acquire finds the earlier ones busy, so it opens a new connection
+		conn, err := d.pool.Acquire(ctx)
+		if err != nil {
+			return fmt.Errorf("open warm connection: %w", err)
+		}
+		held = append(held, conn)
+		if _, err := conn.Exec(ctx, "SELECT 1"); err != nil {
+			return fmt.Errorf("warm connection: %w", err)
+		}
+	}
+	return nil
+}
+
 func (d *DB) Ping(ctx context.Context) error {
 	if d == nil || d.sql == nil {
 		return errors.New("database is not open")

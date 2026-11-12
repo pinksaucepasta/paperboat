@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/server/internal/accountingauthority"
 	wire "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"net/http"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
@@ -47,19 +49,7 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 		writeEdgeError(w, r, http.StatusConflict, state, false, 0)
 		return
 	}
-	quota, _ := s.scopedBandwidth.(accountingauthority.QuotaChecker)
-	var denied []wire.IngressQuotaDenial
-	decisions, err := (ingressprojection.SQLIngressSource{DB: s.store, Quota: quota, QuotaDenied: &denied}).Edge(r.Context(), input.NodeID, input.ProcessEpoch)
-	if err != nil {
-		writeEdgeError(w, r, http.StatusServiceUnavailable, "control_unavailable", true, 1000, err)
-		return
-	}
-	blocked, err := withholdBlocked(r.Context(), s.store, &decisions, &denied)
-	if err != nil {
-		writeEdgeError(w, r, http.StatusServiceUnavailable, "control_unavailable", true, 1000, err)
-		return
-	}
-	ipRules, err := ownerIPRules(r.Context(), s.store, decisions)
+	decisions, denied, blocked, ipRules, err := s.ingressProjection(r.Context(), input.NodeID, input.ProcessEpoch)
 	if err != nil {
 		writeEdgeError(w, r, http.StatusServiceUnavailable, "control_unavailable", true, 1000, err)
 		return
@@ -87,6 +77,60 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 		snapshotBody["http01_responses"] = responses
 	}
 	writeEdgeJSON(w, http.StatusOK, snapshotBody)
+}
+
+// ingressProjection is the database work behind one desired-state answer: the node's decisions, the quota
+// denials and takedowns that withhold some of them, and the owners' IP rules.
+func (s *EdgeService) ingressProjection(ctx context.Context, nodeID, epoch string) (decisions []wire.IngressDecision, denied []wire.IngressQuotaDenial, blocked []wire.IngressBlock, ipRules []wire.IngressIPRule, err error) {
+	quota, _ := s.scopedBandwidth.(accountingauthority.QuotaChecker)
+	decisions, err = (ingressprojection.SQLIngressSource{DB: s.store, Quota: quota, QuotaDenied: &denied}).Edge(ctx, nodeID, epoch)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	if blocked, err = withholdBlocked(ctx, s.store, &decisions, &denied); err != nil {
+		return nil, nil, nil, nil, err
+	}
+	ipRules, err = ownerIPRules(ctx, s.store, decisions)
+	return decisions, denied, blocked, ipRules, err
+}
+
+// Warm answers the desired-state projection internally for the verified edges, parallel times at once, so
+// every pooled connection has prepared its statements before the replacement server reports ready. It reads
+// only. A server with no verified edge has nothing to warm.
+func (s *EdgeService) Warm(ctx context.Context, parallel int) error {
+	rows, err := s.store.SQL().QueryContext(ctx, `SELECT id, process_epoch FROM control_tunnel_nodes WHERE roles @> ARRAY['edge']::text[] AND public_ingress_verified_at IS NOT NULL ORDER BY last_heartbeat_at DESC NULLS LAST LIMIT 3`)
+	if err != nil {
+		return fmt.Errorf("list edges to warm: %w", err)
+	}
+	type node struct{ id, epoch string }
+	var nodes []node
+	for rows.Next() {
+		var n node
+		if err := rows.Scan(&n.id, &n.epoch); err != nil {
+			rows.Close()
+			return err
+		}
+		nodes = append(nodes, n)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	var wg sync.WaitGroup
+	failures := make(chan error, len(nodes)*parallel)
+	for _, n := range nodes {
+		for range parallel {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if _, _, _, _, err := s.ingressProjection(ctx, n.id, n.epoch); err != nil {
+					failures <- err
+				}
+			}()
+		}
+	}
+	wg.Wait()
+	close(failures)
+	return <-failures
 }
 
 // latestIssuedAt is the newest issue time of the answer; a kept decision never gets a longer window.

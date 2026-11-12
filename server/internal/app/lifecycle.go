@@ -125,6 +125,7 @@ func (a *App) Run(ctx context.Context) error {
 	a.updateServiceTelemetry(telemetry.StatusReady, "running", "Control-plane service is running.", "", telemetry.RetryNone, time.Time{})
 	serverErrors := make(chan error, 1)
 	workerErrors := make(chan error, 1)
+	go a.runWarmUp(runContext)
 	go func() {
 		a.logger.Info("http server starting", "address", a.cfg.HTTP.Address)
 		if err := a.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -349,11 +350,16 @@ type readinessChecker struct {
 	db  *db.DB
 	// draining is set when shutdown starts, so the proxy stops sending new requests here (F21-09).
 	draining *atomic.Bool
+	// warmed, when set, holds readiness back until the warm-up ran: ready then means "answers in normal time".
+	warmed *atomic.Bool
 }
 
 func (r readinessChecker) Ready(ctx context.Context) error {
 	if r.draining.Load() {
 		return errors.New("server is shutting down")
+	}
+	if r.warmed != nil && !r.warmed.Load() {
+		return errors.New("server is warming up")
 	}
 	if err := r.db.Ping(ctx); err != nil {
 		return fmt.Errorf("database is not ready: %w", err)

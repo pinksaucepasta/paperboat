@@ -264,7 +264,8 @@ func New(opts Options) (*App, error) {
 		return nil, fmt.Errorf("configure inbox dispatcher: %w", err)
 	}
 	draining := new(atomic.Bool)
-	checker := readinessChecker{cfg: opts.Config, db: store, draining: draining}
+	warmed := new(atomic.Bool)
+	checker := readinessChecker{cfg: opts.Config, db: store, draining: draining, warmed: warmed}
 	userMachineService := usermachines.New(store, auditWriter, usermachines.Policy{ExpiredAccessSessionRetention: opts.Config.UserMachines.ExpiredAccessSessionRetention, PairingLifetime: opts.Config.UserMachines.PairingLifetime, OfflineAfter: opts.Config.UserMachines.OfflineAfter, AllowedPlatforms: opts.Config.UserMachines.AllowedPlatforms, TerminalCreateMaxAttempts: opts.Config.TerminalSessions.MaxAttemptsBeforeAlert, TerminalOperationMaxAge: opts.Config.TerminalSessions.OperationMaxAge}, workspaceBilling)
 	teamInboxService, err := teaminbox.New(store, opts.Config.Access.FileTransfer)
 	deviceAuthService.SetEnroller(usermachines.DeviceEnroller{Service: userMachineService})
@@ -995,6 +996,8 @@ func New(opts Options) (*App, error) {
 	}
 	application := &App{
 		draining:             draining,
+		warmed:               warmed,
+		warm:                 warmUp(store, edgeControlService, opts.Logger),
 		machineEvents:        machineEventHub,
 		supportReports:       supportService,
 		healthMonitor:        healthMonitor,
