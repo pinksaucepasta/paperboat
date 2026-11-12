@@ -64,14 +64,14 @@ func loadCarrierIdentity(ctx context.Context, version string, environ func(strin
 		}
 		return "operation_" + id.String(), nil
 	}
-	tokens, err := enrollment.NewRenewingTokenSource(enrollment.RenewingTokenConfig{ControlURL: controlURL.String(), StateRoot: config.StateRoot, Transport: transport, RenewBefore: 10 * time.Minute, Timeout: 15 * time.Second, Clock: func() time.Time { return time.Now().UTC() }, OperationID: operationID})
+	tokens, err := enrollment.NewRenewingTokenSource(enrollment.RenewingTokenConfig{ControlURL: controlURL.String(), StateRoot: config.StateRoot, Transport: transport, RenewBefore: 10 * time.Minute, Timeout: 15 * time.Second, OperationID: operationID})
 	if err != nil {
 		return nil, err
 	}
 	machineIdentity := renewingMachineIdentity{tokens: tokens, proofs: enrollment.ProofSource{StateRoot: config.StateRoot}}
 	// The carrier serves SSH under the signed network, so a withdrawn peer must reach it at once (F5-10): an access
 	// change wakes its renewal (carrierRenewalTopics). The 30 s wait gets its own identity source.
-	eventTokens, err := enrollment.NewRenewingTokenSource(enrollment.RenewingTokenConfig{ControlURL: controlURL.String(), StateRoot: config.StateRoot, Transport: transport, RenewBefore: 10 * time.Minute, Timeout: 15 * time.Second, Clock: func() time.Time { return time.Now().UTC() }, OperationID: operationID})
+	eventTokens, err := enrollment.NewRenewingTokenSource(enrollment.RenewingTokenConfig{ControlURL: controlURL.String(), StateRoot: config.StateRoot, Transport: transport, RenewBefore: 10 * time.Minute, Timeout: 15 * time.Second, OperationID: operationID})
 	if err != nil {
 		return nil, err
 	}

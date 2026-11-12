@@ -126,7 +126,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		}
 		return "operation_" + id.String(), nil
 	}
-	renewingTokens, err := enrollment.NewRenewingTokenSource(enrollment.RenewingTokenConfig{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport, RenewBefore: 10 * time.Minute, Timeout: 15 * time.Second, Clock: func() time.Time { return time.Now().UTC() }, OperationID: operationID, Metrics: metrics})
+	renewingTokens, err := enrollment.NewRenewingTokenSource(enrollment.RenewingTokenConfig{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport, RenewBefore: 10 * time.Minute, Timeout: 15 * time.Second, OperationID: operationID, Metrics: metrics})
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +215,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	// Machine events wake the refreshes below when the server changes what they cache. The wait is a
 	// 30 s request, so it gets its own renewable identity source instead of queueing behind the shared
 	// one; every consumer still polls at its own interval whenever the wait loop is unhealthy.
-	eventTokens, err := enrollment.NewRenewingTokenSource(enrollment.RenewingTokenConfig{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport, RenewBefore: 10 * time.Minute, Timeout: 15 * time.Second, Clock: func() time.Time { return time.Now().UTC() }, OperationID: operationID, Metrics: metrics})
+	eventTokens, err := enrollment.NewRenewingTokenSource(enrollment.RenewingTokenConfig{ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport, RenewBefore: 10 * time.Minute, Timeout: 15 * time.Second, OperationID: operationID, Metrics: metrics})
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +288,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 		// fail independently while the current identity remains shared on disk.
 		observationTokens, observationTokensErr := enrollment.NewRenewingTokenSource(enrollment.RenewingTokenConfig{
 			ControlURL: controlURL.String(), StateRoot: runtimeConfig.StateRoot, Transport: transport,
-			RenewBefore: 5 * time.Minute, Timeout: 15 * time.Second, Clock: func() time.Time { return time.Now().UTC() }, OperationID: operationID, Metrics: metrics,
+			RenewBefore: 5 * time.Minute, Timeout: 15 * time.Second, OperationID: operationID, Metrics: metrics,
 		})
 		if observationTokensErr != nil {
 			return nil, observationTokensErr
