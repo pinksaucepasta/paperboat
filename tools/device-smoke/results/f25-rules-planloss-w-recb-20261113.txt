@@ -1,0 +1,6 @@
+F25-03 policy rules on W, 2026-11-13 (IST): winpool-6 (GitHub-hosted Windows Server 2025), pb dev-7a9d9e376 (windows/amd64 built on anvit; main 988d7eadb + 7a9d9e376), machine recb-win-2 (team-owned) of own paid team recb-team (Stripe sandbox), prod server.
+recordings_lifecycle.py --only rule --no-replay (client: the Windows machine itself; this is the same build, run on winpool-2 as recb-win-1 at 2026-11-12 ~20:0xZ):
+{"check": "recordings", "target": "recb-win-1", "status": "PASS", "phases": ["rule_start", "rule_removed_stops_new_recordings"], "rule_recording": "rec_1cb22093-cbdd-4cd4-96eb-506213d7a2a8", "seconds": 249.8}
+recordings_planloss.py (plan revoked 20:23:18Z, restored 20:28:22Z by the operator; recording started before, stopped by nobody):
+{"armed": true, "recording": "rec_6d0dad7a-ac2b-4026-bf81-557ef3d84e32"}
+{"check": "recordings-plan-loss", "target": "recb-win-2", "status": "PASS", "phases": ["new_start_refused", "recording_stopped_without_a_stop", "recording_kept"], "seconds_from_loss_to_stop": -13.2}
