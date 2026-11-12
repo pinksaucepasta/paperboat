@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { convertBytes, editRecordingRules, formatClock, formatDuration, parseCast, recordingRules, SegmentFramer, toBase64 } from "@/lib/recordings"
+import { convertBytes, editRecordingRules, formatClock, formatDuration, parseCast, playerClock, recordingRules, SegmentFramer, toBase64 } from "@/lib/recordings"
 
 const policy = `{
   "tags": { "tag:prod": [] },
@@ -60,6 +60,11 @@ test("durations and the player clock read naturally", () => {
   expect(formatDuration(3725)).toBe("1h 02m")
   expect(formatClock(245)).toBe("4:05")
   expect(formatClock(3725)).toBe("1:02:05")
+  // A recording of a few keystrokes lasts under a second: it still has a length, and its end reads as the end.
+  expect(playerClock(0, 0.69)).toBe("0:00 / 0:01")
+  expect(playerClock(0.69, 0.69)).toBe("0:01 / 0:01")
+  expect(playerClock(61.2, 245.5)).toBe("1:01 / 4:06")
+  expect(playerClock(0, 0)).toBe("0:00 / 0:00")
 })
 
 test("the segment framer splits length-prefixed files across frames and refuses gaps", () => {

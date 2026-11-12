@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { ApiError } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
 import { subscribeVaultLock, vaultUnlocked } from "@/lib/envvault/crypto"
-import { formatClock, recordingMessage, type Cast } from "@/lib/recordings"
+import { playerClock, recordingMessage, type Cast } from "@/lib/recordings"
 import { useRecordingReplay } from "@/lib/recordings-replay"
 import { loadGhosttyCores } from "@/lib/terminal/ghostty-core"
 import { paletteSequence, terminalThemeStyle } from "@/lib/terminal/themes"
@@ -191,7 +191,7 @@ function Player({ cast }: { cast: Cast }) {
           onChange={(event) => void seek(Number(event.target.value))}
         />
         <span className="text-muted-foreground tabular-nums" data-recording-time>
-          {formatClock(time)} / {formatClock(cast.duration)}
+          {playerClock(time, cast.duration)}
         </span>
         <ToggleGroup
           value={[String(speed)]}

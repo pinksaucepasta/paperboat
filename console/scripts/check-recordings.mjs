@@ -2,6 +2,7 @@
 //   STATE=<storage state of a team owner> CHROME=<Chromium> CONSOLE_ORIGIN=<console origin> TEAM=<team workspace id>
 //   [MACHINE=<team machine id, online, with a recording key set up>]  terminal rows: start, REC, stop
 //   [RECORDING=<recording id> VAULT_PASSWORD_FILE=<file holding the owner's vault password>]  replay rows
+//   [TINY_RECORDING=<id of a recording under a second long> VAULT_PASSWORD_FILE]  a few keystrokes still replay with a length
 //   [OFFLINE_RECORDING=<recording id on an offline machine>]  the offline state
 //   [LONG_RECORDING=<id of a recording of tens of MB> VAULT_PASSWORD_FILE]  removing replay permission closes an open replay.
 //     DESTRUCTIVE: removing the team's only replay rule deletes the owner's sealed copy of the recording key (by design), and
@@ -132,6 +133,26 @@ try {
       // A keyboard seek to the start (an empty screen is right there: the first output comes after it).
       await page.getByLabel("Position").press("Home")
       log(await until(async () => (await clock())?.startsWith("0:00")), "the seek bar moves to the start", await clock())
+    }
+    // A recording of a few keystrokes lasts under a second: it still has a length, plays out and ends at its end.
+    if (process.env.TINY_RECORDING) {
+      await page.goto(`${origin}/recordings/${encodeURIComponent(process.env.TINY_RECORDING)}`, { waitUntil: "networkidle", timeout: 120000 })
+      await page.getByLabel("Vault password").fill(readFileSync(process.env.VAULT_PASSWORD_FILE, "utf8").trim())
+      await page.getByRole("button", { name: "Unlock" }).click()
+      const tinyReady = await page.locator("main[data-recording-phase=ready]").waitFor({ timeout: 120000 }).then(() => true, () => false)
+      log(tinyReady, "a very short recording loads and decrypts")
+      if (tinyReady) {
+        let label = ""
+        for (let waited = 0; waited < 8000; waited += 250) {
+          label = (await page.locator("[data-recording-time]").textContent()) ?? ""
+          const [position, total] = label.split(" / ")
+          if (total && total !== "0:00" && position === total) break
+          await page.waitForTimeout(250)
+        }
+        const [position, total] = label.split(" / ")
+        log(Boolean(total) && total !== "0:00" && position === total, "a very short recording has a length and plays to its end", label)
+        log((await page.locator(".terminal-host").innerHTML()).length > 0, "a very short recording shows its output")
+      }
     }
     // A full navigation locks the vault again: unlock before the error states, which sit behind it.
     const unlock = async () => {

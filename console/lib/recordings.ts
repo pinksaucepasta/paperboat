@@ -238,6 +238,15 @@ export function formatClock(seconds: number) {
 }
 
 /**
+ * The player's "position / total". The total rounds up, so a recording of a few keystrokes (under a second) never reads
+ * 0:00; at the end the position shows the total.
+ */
+export function playerClock(time: number, duration: number) {
+  const total = Math.ceil(duration)
+  return `${duration > 0 && time >= duration ? formatClock(total) : formatClock(time)} / ${formatClock(total)}`
+}
+
+/**
  * Reassembles the replay stream: binary frames whose start is their byte offset, carrying segment files each behind a
  * 4-byte big-endian length. Returns the segment files completed by each frame, in order.
  */
