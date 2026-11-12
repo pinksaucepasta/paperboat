@@ -99,6 +99,9 @@ func relayComparisonContent(ctx context.Context, message helperMessageConnection
 			continue
 		}
 		frame, err := decodeHelperFrame(data)
+		if err == nil && frame.Type == "heartbeat" {
+			continue // the host's 5 s heartbeat; a comparison on a slow path outlives it
+		}
 		var end struct {
 			Type     string `json:"type"`
 			StreamID uint32 `json:"stream_id"`

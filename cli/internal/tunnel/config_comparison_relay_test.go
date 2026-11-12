@@ -76,3 +76,21 @@ func TestComparisonSurvivesTheEndEventOvertakingItsContent(t *testing.T) {
 		t.Fatalf("a stream that ends short must fail, got %v", err)
 	}
 }
+
+func heartbeatMessage(t *testing.T) scriptedHelperMessage {
+	t.Helper()
+	data, err := json.Marshal(helperFrame{Type: "heartbeat", RequestID: "heartbeat", Version: helperProtocolVersion})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return scriptedHelperMessage{helperStructuredMessage, data}
+}
+
+// The host sends a heartbeat every 5 s. A comparison that takes longer than that on a slow path used to fail at the
+// first one ("comparison did not complete").
+func TestComparisonSurvivesAHeartbeatMidStream(t *testing.T) {
+	got, err := relayedComparison(t, comparisonContentMessage(t, protocol.TerminalStdout, 0, "machine side"), heartbeatMessage(t), comparisonContentMessage(t, protocol.TerminalStderr, 0, "repo side"), heartbeatMessage(t), comparisonEndMessage(t))
+	if err != nil || !bytes.Contains([]byte(got), []byte("machine side")) || !bytes.Contains([]byte(got), []byte("repo side")) {
+		t.Fatalf("stream with heartbeats = %q, %v", got, err)
+	}
+}

@@ -78,8 +78,10 @@ func relayRecording(ctx context.Context, message helperMessageConnection, writer
 		}
 		if kind != helperBinaryMessage {
 			frame, err := decodeHelperFrame(data)
-			if err == nil && frame.Type == "event" {
-				continue // the end event; the bytes it follows may still be on their way
+			if err == nil && (frame.Type == "event" || frame.Type == "heartbeat") {
+				// The end event (the bytes it follows may still be on their way) or the host's 5 s heartbeat, which a replay
+				// on a slow path always outlives: neither ends the stream.
+				continue
 			}
 			writer.CloseWithError(errors.New("the recording stream ended early"))
 			return
