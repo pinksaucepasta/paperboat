@@ -155,6 +155,19 @@ func TestScopedUsageSharedRouteDelayedCredentialAndReplay(t *testing.T) {
 		}
 
 		if i == len(teams)-1 {
+			// Past their admission the retained records keep late reports billable but are not capacity: a node that
+			// admitted one short-lived preview a minute for days must still admit the next (prod previews 404, 2026-11-12).
+			idle := binding
+			idle.ID = "grant:idle"
+			if _, err = store.SQL().ExecContext(ctx, `INSERT INTO usage_accounting_authorities(authority_id,edge_node_id,environment_id,route_id,route_revision,workspace_id,admitted_at,admission_expires_at,retain_until) SELECT 'idle:'||n,$1,$2,$3,1,$4,$5,$6,$7 FROM generate_series(1,$8) n`, binding.Node, binding.Environment, binding.Route, "team:"+team, now.Add(-time.Hour), now.Add(-time.Minute), now.Add(accountingauthority.DeliveryWindow), accountingauthority.MaximumPerNode); err != nil {
+				t.Fatal(err)
+			}
+			if err = accountingauthority.Record(ctx, store, idle, scopedTestQuota{}); err != nil {
+				t.Fatalf("records past their admission blocked a new one: %v", err)
+			}
+			if _, err = store.SQL().ExecContext(ctx, `DELETE FROM usage_accounting_authorities WHERE authority_id LIKE 'idle:%' OR authority_id=$1`, idle.ID); err != nil {
+				t.Fatal(err)
+			}
 			if _, err = store.SQL().ExecContext(ctx, `INSERT INTO usage_accounting_authorities(authority_id,edge_node_id,environment_id,route_id,route_revision,workspace_id,admitted_at,admission_expires_at,retain_until) SELECT 'capacity:'||n,$1,$2,$3,1,$4,$5,$6,$7 FROM generate_series(1,$8) n`, binding.Node, binding.Environment, binding.Route, "team:"+team, now, now.Add(time.Minute), now.Add(2*accountingauthority.DeliveryWindow+time.Minute), accountingauthority.MaximumPerNode); err != nil {
 				t.Fatal(err)
 			}

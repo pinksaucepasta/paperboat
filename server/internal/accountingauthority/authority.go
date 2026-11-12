@@ -16,8 +16,10 @@ import (
 // day bound in paperboat-tunnel/internal/usage/policy.go.
 const DeliveryWindow = 7 * 24 * time.Hour
 
-// MaximumPerNode matches the edge's 4096-report durable queue capacity. Admission
-// fails closed at capacity; old accounting records are never evicted early.
+// MaximumPerNode bounds the bindings a node holds admitted at once (the edge's 4096-route registry).
+// Admission fails closed at capacity. Records past their admission stay until retain_until so a delayed
+// report is still billed, but only pruning by time removes them: they do not count, or a node that
+// admitted one short-lived preview a minute for DeliveryWindow+ refused every new one (2026-11-12, prod previews 404).
 const MaximumPerNode = 4096
 
 var ErrQuotaExhausted = errors.New("workspace bandwidth allowance is exhausted")
@@ -104,7 +106,7 @@ func Record(ctx context.Context, store *db.DB, b Binding, policy QuotaChecker) e
 
 func retainBindingTx(ctx context.Context, tx *db.Tx, b Binding, workspace string) error {
 	var capacity bool
-	if err := tx.QueryRow(ctx, `SELECT count(*)<$6 OR coalesce(bool_or(authority_id=$2 AND environment_id=$3 AND route_id=$4 AND route_revision=$5),false) FROM usage_accounting_authorities WHERE edge_node_id=$1`, b.Node, b.ID, b.Environment, b.Route, b.Revision, MaximumPerNode).Scan(&capacity); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE admission_expires_at>$7)<$6 OR coalesce(bool_or(authority_id=$2 AND environment_id=$3 AND route_id=$4 AND route_revision=$5),false) FROM usage_accounting_authorities WHERE edge_node_id=$1`, b.Node, b.ID, b.Environment, b.Route, b.Revision, MaximumPerNode, b.IssuedAt).Scan(&capacity); err != nil {
 		return err
 	}
 	if !capacity {
