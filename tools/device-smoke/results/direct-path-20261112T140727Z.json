@@ -1,0 +1,29 @@
+{
+ "checks": [
+  {
+   "check": "baseline exec a->b",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "all 80 lines of the stream arrived",
+   "status": "PASS",
+   "detail": "80 lines"
+  },
+  {
+   "check": "stream resumed over the relay within 12 s of the drop",
+   "status": "PASS",
+   "detail": "longest stall after the drop 4.7 s"
+  },
+  {
+   "check": "link of a limited to 1350 bytes",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "20 MB exec output b->a intact over the limited link",
+   "status": "PASS",
+   "detail": "sha256 faa762b885a1719c want faa762b885a1719c"
+  }
+ ]
+}

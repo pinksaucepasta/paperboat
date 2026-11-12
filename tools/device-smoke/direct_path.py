@@ -12,7 +12,7 @@ Rules are removed on every exit path.
 
   direct_path.py --host ubuntu@anvit --a rel-nat-a --b rel-nat-b
 """
-import argparse, hashlib, json, subprocess, sys, threading, time
+import argparse, base64, hashlib, json, subprocess, sys, threading, time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -92,7 +92,11 @@ def main():
         chunk = b"0123456789abcdef\n"
         total = 20_000_000
         want.update((chunk * (total // len(chunk) + 1))[:total])
-        rc, out = ssh(host, f"{docker(args.a)} sh -c \"{PB} exec {args.b} -- sh -c 'yes 0123456789abcdef | head -c {total}' | sha256sum\"", 300)
+        # the pipeline goes in as a file so no shell layer re-quotes it
+        body = f"#!/bin/sh\ntimeout 250 {PB} exec {args.b} -- sh -c 'yes 0123456789abcdef | head -c {total}' 2>/dev/null | sha256sum\n"
+        encoded = base64.b64encode(body.encode()).decode()
+        ssh(host, f"echo {encoded} | base64 -d | sudo -n docker exec -i {args.a} sh -c 'cat > /tmp/mtu.sh'")
+        rc, out = ssh(host, f"{docker(args.a)} sh /tmp/mtu.sh", 300)
         got = out.split()[0] if out.split() else ""
         add("20 MB exec output b->a intact over the limited link", got == want.hexdigest(), f"sha256 {got[:16]} want {want.hexdigest()[:16]}")
     finally:
