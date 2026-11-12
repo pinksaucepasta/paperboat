@@ -16,7 +16,7 @@ func Merge(base, managed []string) ([]string, error) {
 		if !ok || !portableLaunchName(name) || strings.ContainsRune(value, '\x00') || !utf8.ValidString(value) {
 			return nil, ErrInvalidSnapshot
 		}
-		folded := strings.ToUpper(name)
+		folded := FoldName(name)
 		if prior := canonicalNames[folded]; prior != "" && prior != name {
 			return nil, ErrInvalidSnapshot
 		}
@@ -30,7 +30,7 @@ func Merge(base, managed []string) ([]string, error) {
 			return nil, ErrInvalidSnapshot
 		}
 		outputName := name
-		folded := strings.ToUpper(name)
+		folded := FoldName(name)
 		if _, duplicate := managedNames[folded]; duplicate {
 			return nil, ErrInvalidSnapshot
 		}

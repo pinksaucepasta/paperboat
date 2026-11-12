@@ -152,6 +152,7 @@ func (s *LayerStore) environment(ctx context.Context, binding LaunchContext, bun
 		}
 	}
 	values := map[string][]byte{}
+	byFold := map[string]string{}
 	defer func() {
 		for _, v := range values {
 			clear(v)
@@ -229,13 +230,7 @@ func (s *LayerStore) environment(ctx context.Context, binding LaunchContext, bun
 		if err != nil {
 			return nil, err
 		}
-		for name, value := range opened {
-			clear(values[name])
-			values[name] = value
-			if scopes != nil {
-				scopes[name] = layerScopeNames[n]
-			}
-		}
+		overlay(values, byFold, scopes, opened, layerScopeNames[n])
 		next := layerFloor{RecordFloors: recordFloors, RecordSequence: delivery.RecordSequence, Records: records, Generation: recipient.DeliveryGeneration, DocumentID: recipient.DocumentID, Fence: recipient.FenceGeneration, Epoch: source.KeyEpoch, Revision: source.Revision, SourceID: source.DocumentID, ObservationSeq: previous.ObservationSeq, ObservedState: previous.ObservedState, Pending: previous.Pending}
 		if previous.Generation != next.Generation || previous.DocumentID != next.DocumentID || previous.Fence != next.Fence || previous.ObservedState != "applied" {
 			keyID, err := env.KeyIDX25519(public[:])
@@ -285,6 +280,24 @@ func (s *LayerStore) environment(ctx context.Context, binding LaunchContext, bun
 		result = append(result, name+"="+string(values[name]))
 	}
 	return result, nil
+}
+
+// overlay lets a later layer's names replace the earlier ones. Where names ignore case (Windows) a later layer's Path
+// replaces an earlier layer's PATH: one variable, the most specific scope wins. Elsewhere both names stay.
+func overlay(values map[string][]byte, byFold map[string]string, scopes map[string]string, opened map[string][]byte, scope string) {
+	for name, value := range opened {
+		clear(values[name])
+		if prior, ok := byFold[FoldName(name)]; ok && prior != name {
+			clear(values[prior])
+			delete(values, prior)
+			delete(scopes, prior)
+		}
+		byFold[FoldName(name)] = name
+		values[name] = value
+		if scopes != nil {
+			scopes[name] = scope
+		}
+	}
 }
 
 func (s *LayerStore) pendingState(ctx context.Context) (layerHighWater, []byte, error) {

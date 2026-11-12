@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/envinject"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/pty"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
 )
@@ -452,7 +453,7 @@ func (m *Manager) validate(request Request) (Request, [sha256.Size]byte, error) 
 		if !environmentKey.MatchString(key) || len(value) > 4096 || envTotal > 64<<10 || strings.ContainsRune(value, '\x00') {
 			return Request{}, [sha256.Size]byte{}, ErrInvalid
 		}
-		folded := strings.ToUpper(key)
+		folded := envinject.FoldName(key)
 		if _, duplicate := envNames[folded]; duplicate {
 			return Request{}, [sha256.Size]byte{}, ErrInvalid
 		}
@@ -890,7 +891,7 @@ func validBaseEnvironment(values []string) bool {
 	for _, entry := range values {
 		total += len(entry)
 		key, value, ok := strings.Cut(entry, "=")
-		folded := strings.ToUpper(key)
+		folded := envinject.FoldName(key)
 		if !ok || !environmentKey.MatchString(key) || len(entry) > maximumProcessEnvironmentEntryBytes || total > maximumProcessEnvironmentBytes || strings.ContainsRune(value, '\x00') || seen[folded] {
 			return false
 		}
@@ -946,15 +947,15 @@ func mergedEnvironment(base []string, overrides map[string]string) []string {
 	canonicalNames := map[string]string{}
 	for _, entry := range base {
 		key, value, _ := strings.Cut(entry, "=")
-		canonicalNames[strings.ToUpper(key)] = key
+		canonicalNames[envinject.FoldName(key)] = key
 		values[key] = value
 	}
 	for key, value := range overrides {
 		outputName := key
-		if existing := canonicalNames[strings.ToUpper(key)]; existing != "" {
+		if existing := canonicalNames[envinject.FoldName(key)]; existing != "" {
 			outputName = existing
 		}
-		canonicalNames[strings.ToUpper(key)] = outputName
+		canonicalNames[envinject.FoldName(key)] = outputName
 		values[outputName] = value
 	}
 	keys := make([]string, 0, len(values))
@@ -974,16 +975,16 @@ func mergedEnvironmentLists(base, overrides []string) []string {
 	canonicalNames := make(map[string]string, len(base)+len(overrides))
 	for _, entry := range base {
 		key, value, _ := strings.Cut(entry, "=")
-		canonicalNames[strings.ToUpper(key)] = key
+		canonicalNames[envinject.FoldName(key)] = key
 		values[key] = value
 	}
 	for _, entry := range overrides {
 		key, value, _ := strings.Cut(entry, "=")
 		outputName := key
-		if existing := canonicalNames[strings.ToUpper(key)]; existing != "" {
+		if existing := canonicalNames[envinject.FoldName(key)]; existing != "" {
 			outputName = existing
 		}
-		canonicalNames[strings.ToUpper(key)] = outputName
+		canonicalNames[envinject.FoldName(key)] = outputName
 		values[outputName] = value
 	}
 	keys := make([]string, 0, len(values))
