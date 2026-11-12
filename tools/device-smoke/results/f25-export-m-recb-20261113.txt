@@ -1,0 +1,14 @@
+C276 pb recordings export, macOS client, 2026-11-13 (IST): macOS, 2026-11-13 (IST): macpool-7 runner user (GitHub-hosted macOS 26 arm64), pb dev-10e8894bb (darwin/arm64 built on anvit), machine recb-m (a personal machine shared into own paid team recb3, Stripe sandbox), prod server 2026.11.13.4 or later; a 8.4 MB recording (6 MB of terminal output, 4+ segments) of the Linux shared machine recb-l3 in team recb3, exported 12 times in a row from the Mac, each to a new file, identical bytes (sha-256 equal), each longer than the host's 5 s heartbeat:
+export 1 rc=0 8s bytes= 8458044 sha=077e800503635af7
+export 2 rc=0 5s bytes= 8458044 sha=077e800503635af7
+export 3 rc=0 5s bytes= 8458044 sha=077e800503635af7
+export 4 rc=0 6s bytes= 8458044 sha=077e800503635af7
+export 5 rc=0 6s bytes= 8458044 sha=077e800503635af7
+export 6 rc=0 6s bytes= 8458044 sha=077e800503635af7
+export 7 rc=0 6s bytes= 8458044 sha=077e800503635af7
+export 8 rc=0 6s bytes= 8458044 sha=077e800503635af7
+export 9 rc=0 6s bytes= 8458044 sha=077e800503635af7
+export 10 rc=0 5s bytes= 8458044 sha=077e800503635af7
+export 11 rc=0 6s bytes= 8458044 sha=077e800503635af7
+export 12 rc=0 6s bytes= 8458044 sha=077e800503635af7
+RESULT 12 of 12 identical exports

@@ -1,0 +1,6 @@
+F25-03 policy rules on M, macOS, 2026-11-13 (IST): macpool-7 runner user (GitHub-hosted macOS 26 arm64), pb dev-10e8894bb (darwin/arm64 built on anvit), machine recb-m (a personal machine shared into own paid team recb3, Stripe sandbox), prod server 2026.11.13.4 or later
+recordings_lifecycle.py --only rule (client: the Mac itself; a record rule starts a recording when the recorded account attaches; removing it stops the running recording within seconds and a later session is not recorded):
+{"check": "recordings", "target": "recb-m", "status": "PASS", "phases": ["rule_start", "rule_removed_stops_new_recordings"], "rule_recording": "rec_033a083f-10af-407c-a74c-2017090d9aad", "seconds": 101.4}
+recordings_planloss.py (plan revoked 22:59:49Z, restored 23:04:56Z by the operator; the recording started before it was stopped by nobody):
+{"armed": true, "recording": "rec_6690a7fe-cefc-48d0-9255-44b5661eec4f"}
+{"check": "recordings-plan-loss", "target": "recb-m", "status": "PASS", "phases": ["new_start_refused", "recording_stopped_without_a_stop", "recording_kept"], "seconds_from_loss_to_stop": -4.2}
