@@ -201,6 +201,20 @@ type live struct {
 // request, an edge probe and any follow-up request.
 const attachmentCheckTimeout = 10 * time.Second
 
+// revocationConfirmation is how long the control plane must keep refusing this machine (401, 403, 404) before the
+// attachment treats it as revoked and ends for good. A server swap or rollback answers a valid machine with a refusal
+// for a while (2026-11-12: canary-b's attachment ended at the first 401 of a rollback and never came back while the
+// daemon kept running). Tailscale also acts only on the server's explicit key-expired report, not on a refused request
+// (~/ref/tailscale/control/controlclient/direct.go:870).
+var revocationConfirmation = 2 * time.Minute
+
+// refusedAttachment is a control-plane refusal that may mean revoked; run ends the attachment only when the
+// refusals last revocationConfirmation.
+type refusedAttachment struct{ cause error }
+
+func (e *refusedAttachment) Error() string { return e.cause.Error() }
+func (e *refusedAttachment) Unwrap() error { return e.cause }
+
 type retryState struct {
 	attempts int
 	next     time.Time
@@ -352,6 +366,7 @@ func (s *Service) run(ctx context.Context) {
 	publisherKey := ""
 	var lastFailure *failureClass
 	var pacer roundPacer
+	var refusedSince time.Time
 	defer func() {
 		var cleanupErr error
 		if s.broadcaster != nil {
@@ -535,6 +550,18 @@ func (s *Service) run(ctx context.Context) {
 		if response.Backup != nil && response.Backup.ExpiresAt.Before(expiresAt) {
 			expiresAt = response.Backup.ExpiresAt
 		}
+		var refused *refusedAttachment
+		switch {
+		case errors.As(err, &refused):
+			if refusedSince.IsZero() {
+				refusedSince = time.Now()
+			}
+			if time.Since(refusedSince) >= revocationConfirmation {
+				err = errors.Join(lifetimeadmission.ErrRevoked, err)
+			}
+		case err == nil:
+			refusedSince = time.Time{}
+		}
 		pacer.finished(time.Now(), err == nil && wantedCount > 0 && len(lives) == wantedCount && carriersReady(lives, publisherKey), expiresAt)
 		if err != nil {
 			s.lastProbe = time.Time{}
@@ -652,7 +679,7 @@ func (s *Service) fetch(ctx context.Context, activeNode, activeEpoch string) (ou
 			statusErr = errors.Join(statusErr, drainErr)
 		}
 		if res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden || res.StatusCode == http.StatusNotFound {
-			statusErr = errors.Join(lifetimeadmission.ErrRevoked, statusErr)
+			statusErr = &refusedAttachment{cause: statusErr}
 		}
 		return out, controlFailure(statusErr)
 	}

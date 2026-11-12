@@ -227,6 +227,7 @@ func TestEdgeGoawayWithoutReplacementFallsBackToTheOtherEdge(t *testing.T) {
 
 // Revocation during the drain still ends the held stream at once.
 func TestRevocationDuringEdgeDrainEndsTheHeldStream(t *testing.T) {
+	confirmRevocationAfter(t, 300*time.Millisecond)
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	var revoked atomic.Bool
