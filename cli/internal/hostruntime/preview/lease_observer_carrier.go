@@ -23,6 +23,11 @@ var (
 const (
 	defaultLeaseObserverPoll = 250 * time.Millisecond
 	maxLeaseObserverPoll     = 5 * time.Second
+	// leaseObserverPendingCap bounds the backoff of the readiness poll: a preview that stays pending
+	// is read every 2 s, not every 250 ms.
+	leaseObserverPendingCap = 2 * time.Second
+	// leaseObserverQuickReads is how many readiness reads keep the configured interval before backing off.
+	leaseObserverQuickReads = 8
 	// leaseObserverIdleRefresh bounds re-reads of a ready lease when no change wait is available or it
 	// fails; while the wait works the hub's one-minute fallback applies.
 	leaseObserverIdleRefresh = 30 * time.Second
@@ -186,6 +191,7 @@ func (c *LeaseObserverCarrier) Run(ctx context.Context, lease Lease, ready func(
 		}
 	}()
 	lastETag := ""
+	delay, pending := poll, 0
 	for {
 		observed, err := reader.Get(runCtx, lease.ID)
 		if err != nil {
@@ -235,14 +241,31 @@ func (c *LeaseObserverCarrier) Run(ctx context.Context, lease Lease, ready func(
 			}
 			continue
 		}
-		timer := time.NewTimer(poll)
+		timer := time.NewTimer(delay)
 		select {
 		case <-timer.C:
 		case <-runCtx.Done():
 			timer.Stop()
 			return nil
 		}
+		// Readiness usually lands within seconds: stay quick first, then back off.
+		if pending++; pending > leaseObserverQuickReads {
+			delay = nextLeaseObserverDelay(delay, poll)
+		}
 	}
+}
+
+// nextLeaseObserverDelay doubles the pending-readiness poll up to leaseObserverPendingCap
+// (never below the configured interval).
+func nextLeaseObserverDelay(delay, poll time.Duration) time.Duration {
+	limit := leaseObserverPendingCap
+	if poll > limit {
+		limit = poll
+	}
+	if next := delay * 2; next < limit {
+		return next
+	}
+	return limit
 }
 
 func (c *LeaseObserverCarrier) Close(ctx context.Context) error {

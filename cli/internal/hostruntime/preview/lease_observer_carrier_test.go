@@ -256,3 +256,19 @@ func TestLeaseObserverCarrierReadsReadyLeaseOnlyOnChange(t *testing.T) {
 		t.Fatal("observer did not see the stop the previews topic announced")
 	}
 }
+
+func TestLeaseObserverPendingPollBacksOff(t *testing.T) {
+	delay := defaultLeaseObserverPoll
+	var waited time.Duration
+	for i := 0; i < 20; i++ {
+		waited += delay
+		delay = nextLeaseObserverDelay(delay, defaultLeaseObserverPoll)
+	}
+	// 250 ms, 500 ms, 1 s, then every 2 s (after eight quick reads): far fewer reads than a fixed 250 ms.
+	if delay != leaseObserverPendingCap || waited != 35750*time.Millisecond {
+		t.Fatalf("delay=%v waited=%v", delay, waited)
+	}
+	if got := nextLeaseObserverDelay(5*time.Second, 5*time.Second); got != 5*time.Second {
+		t.Fatalf("an interval above the cap must stay as configured, got %v", got)
+	}
+}
