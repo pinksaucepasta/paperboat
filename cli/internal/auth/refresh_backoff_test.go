@@ -98,3 +98,29 @@ func TestRuntimeRefreshProtocolFailureDoesNotSignOut(t *testing.T) {
 		t.Fatal("protocol failure incorrectly became permanent signed out")
 	}
 }
+
+// A bare 401 on refresh may be a server swap or rollback refusing a valid session: it is retried with backoff and
+// the session is signed out only once the 401s last the confirmation window (invalid_grant stays final at once).
+func TestRuntimeRefreshBare401SignsOutOnlyAfterConfirmation(t *testing.T) {
+	old := refreshRevocationConfirmation
+	refreshRevocationConfirmation = 5 * time.Second
+	t.Cleanup(func() { refreshRevocationConfirmation = old })
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(401)
+		_, _ = w.Write([]byte(`{"error":{"code":"unauthenticated"}}`))
+	}))
+	defer server.Close()
+	store, _ := credentialFailureFixture(t, server.URL)
+	source := (&Source{Store: store, Issuer: server.URL}).WithContext(context.Background())
+	var signedOut *SignedOutError
+	if _, err := source.Refresh(); err == nil || errors.As(err, &signedOut) {
+		t.Fatalf("first bare 401 signed the session out: %v", err)
+	}
+	time.Sleep(15*time.Second + 100*time.Millisecond)
+	if _, err := source.Refresh(); !errors.As(err, &signedOut) || calls.Load() != 2 {
+		t.Fatalf("lasting 401s did not sign out after the confirmation (calls %d): %v", calls.Load(), err)
+	}
+}

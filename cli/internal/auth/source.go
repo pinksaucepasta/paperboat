@@ -91,6 +91,7 @@ func (s *Source) credential(refreshWindow time.Duration) (result config.Credenti
 		if fingerprint != s.retry.fingerprint {
 			s.retry.fingerprint = fingerprint
 			s.retry.failure, s.retry.delay, s.retry.signedOut = nil, 0, false
+			s.retry.rejectedSince = time.Time{}
 		}
 		if s.retry.failure != nil && (s.retry.signedOut || time.Now().Before(s.retry.next)) {
 			return credential, s.retry.failure
@@ -98,6 +99,7 @@ func (s *Source) credential(refreshWindow time.Duration) (result config.Credenti
 		defer func() {
 			if err == nil {
 				s.retry.failure, s.retry.delay, s.retry.signedOut = nil, 0, false
+				s.retry.rejectedSince = time.Time{}
 				return
 			}
 			if !refreshAttempted {
@@ -107,7 +109,7 @@ func (s *Source) credential(refreshWindow time.Duration) (result config.Credenti
 				return
 			}
 			failure := accountCredentialFailure(err)
-			s.retry.signedOut = permanentRefreshRejection(err)
+			s.retry.signedOut = s.retry.confirmedRejection(err)
 			if s.retry.signedOut {
 				failure = &SignedOutError{Cause: failure}
 			}
@@ -153,13 +155,36 @@ type SignedOutError struct{ Cause error }
 func (*SignedOutError) Error() string   { return "Paperboat is signed out; sign in again" }
 func (e *SignedOutError) Unwrap() error { return e.Cause }
 
+// refreshRevocationConfirmation is how long a refresh must keep answering 401 before the session counts as signed
+// out. A server swap or rollback can refuse a valid session for a while, and signed out stops all retries until the
+// credential changes (2026-11-12: a Windows machine's CLI session died while idle across several swaps and stayed
+// down). invalid_grant is the server's own typed answer and is final at once.
+var refreshRevocationConfirmation = 2 * time.Minute
+
 type refreshRetry struct {
-	mu          sync.Mutex
-	fingerprint [32]byte
-	failure     error
-	signedOut   bool
-	delay       time.Duration
-	next        time.Time
+	rejectedSince time.Time
+	mu            sync.Mutex
+	fingerprint   [32]byte
+	failure       error
+	signedOut     bool
+	delay         time.Duration
+	next          time.Time
+}
+
+// confirmedRejection reports whether the refresh failure ends the session: invalid_grant at once, a bare 401 once
+// 401s have lasted refreshRevocationConfirmation; any other answer resets the clock only on success (see credential).
+func (r *refreshRetry) confirmedRejection(err error) bool {
+	if !permanentRefreshRejection(err) {
+		return false
+	}
+	var rejection *api.APIError
+	if errors.As(err, &rejection) && rejection.Status == http.StatusBadRequest {
+		return true
+	}
+	if r.rejectedSince.IsZero() {
+		r.rejectedSince = time.Now()
+	}
+	return time.Since(r.rejectedSince) >= refreshRevocationConfirmation
 }
 
 func permanentRefreshRejection(err error) bool {
