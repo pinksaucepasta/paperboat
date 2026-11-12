@@ -78,12 +78,10 @@ func (s *Service) Attach(ctx context.Context, account, team string, r AttachRequ
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM team_resource_bindings WHERE team_id=$1 AND resource_kind=$2 AND resource_id=$3)`, team, r.ResourceKind, r.ResourceID).Scan(&exists); err != nil {
 			return err
 		}
-		count, err := HeldBindingCount(ctx, tx, team)
-		if err != nil {
-			return err
-		}
-		if !exists && count >= MaximumResources {
-			return ErrLimit
+		if !exists {
+			if err := CheckResourceCapTx(ctx, tx, team, r.ResourceKind); err != nil {
+				return err
+			}
 		}
 		if _, err = tx.Exec(ctx, `INSERT INTO team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) VALUES($1,$2,$3,$4,$5,1) ON CONFLICT(team_id,resource_kind,resource_id) DO UPDATE SET active=EXCLUDED.active,generation=team_resource_bindings.generation+1`, team, r.ResourceKind, r.ResourceID, owner, r.Active); err != nil {
 			return err

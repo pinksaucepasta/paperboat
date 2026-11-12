@@ -10,6 +10,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 	"github.com/pinksaucepasta/paperboat/server/internal/teams"
 )
 
@@ -50,9 +51,9 @@ func TestWorkspaceBindingCapCountsOnlyHeldResources(t *testing.T) {
 	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, owner)
 	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true)`, team, owner)
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation)
-		SELECT $1,'terminal_session','ended_'||g,$2,false,1 FROM generate_series(1,$3::int) g`, team, owner, teams.MaximumResources)
+		SELECT $1,'terminal_session','ended_'||g,$2,false,1 FROM generate_series(1,$3::int) g`, team, owner, planlimits.TeamCeiling(planlimits.BrowserTerminals))
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation)
-		SELECT $1,'preview','gone_'||g,$2,true,1 FROM generate_series(1,$3::int) g`, team, owner, teams.MaximumResources)
+		SELECT $1,'preview','gone_'||g,$2,true,1 FROM generate_series(1,$3::int) g`, team, owner, planlimits.TeamCeiling(planlimits.Publications))
 	bind := func(id string) error {
 		return database.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 			return BindWorkspacePublisherTx(ctx, tx, team, "preview", id, owner)
@@ -61,10 +62,12 @@ func TestWorkspaceBindingCapCountsOnlyHeldResources(t *testing.T) {
 	if err := bind("prv_cap_ok_" + suffix); err != nil {
 		t.Fatalf("a team holding only ended resources cannot publish: %v", err)
 	}
+	// Publications cap at the plan's team ceiling (config.PlanLimits); live lazy policies (no lease lookup) fill it.
+	ceiling := planlimits.TeamCeiling(planlimits.Publications)
 	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation)
-		SELECT $1,'terminal_session','live_'||g,$2,true,1 FROM generate_series(1,$3::int) g`, team, owner, teams.MaximumResources)
+		SELECT $1,'lazy_policy','live_'||g,$2,true,1 FROM generate_series(1,$3::int) g`, team, owner, ceiling)
 	var limit *teams.LimitError
-	if err := bind("prv_cap_full_" + suffix); !errors.As(err, &limit) || limit.Limit != teams.MaximumResources {
-		t.Fatalf("a full team must get a typed limit error, got %v", err)
+	if err := bind("prv_cap_full_" + suffix); !errors.As(err, &limit) || limit.Limit != ceiling || limit.Used != ceiling {
+		t.Fatalf("a team at its plan's publication ceiling %d must get a typed limit error, got %v", ceiling, err)
 	}
 }

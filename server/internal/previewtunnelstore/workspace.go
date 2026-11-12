@@ -38,17 +38,13 @@ func nullableText(value string) sql.NullString {
 // BindWorkspacePublisherTx records ownership's grant boundary in the same
 // transaction as creation. It does not bind or grant access to the whole host.
 func BindWorkspacePublisherTx(ctx context.Context, tx *db.Tx, team, kind, id, account string) error {
-	count, err := teams.HeldBindingCount(ctx, tx, team)
-	if err != nil {
+	if err := teams.CheckResourceCapTx(ctx, tx, team, kind); err != nil {
 		return err
-	}
-	if count >= teams.MaximumResources {
-		return &teams.LimitError{Kind: kind, Used: count, Limit: teams.MaximumResources}
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,$2,$3,$4)`, team, kind, id, account); err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO team_resource_grants(team_id,account_id,resource_kind,resource_id,permission,generation,active) VALUES($1,$2,$3,$4,'use',1,true),($1,$2,$3,$4,'manage',1,true)`, team, account, kind, id)
+	_, err := tx.Exec(ctx, `INSERT INTO team_resource_grants(team_id,account_id,resource_kind,resource_id,permission,generation,active) VALUES($1,$2,$3,$4,'use',1,true),($1,$2,$3,$4,'manage',1,true)`, team, account, kind, id)
 	return err
 }
 

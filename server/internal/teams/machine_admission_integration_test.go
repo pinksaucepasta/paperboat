@@ -10,6 +10,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 )
 
 // A team that asks for approval holds machines members add until an owner or admin accepts them;
@@ -195,9 +196,9 @@ func TestPostgresMachineAdmission(t *testing.T) {
 	// Ended entries do not take capacity: a team whose binding rows are full of ended terminal
 	// sessions still takes a new machine (paperboat-smoke-paid refused every share at 128 rows,
 	// 92 of them inactive).
-	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) SELECT $1,'terminal_session','ended_'||g,$2,false,1 FROM generate_series(1,$3::int) g`, team, owner, MaximumResources)
+	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) SELECT $1,'terminal_session','ended_'||g,$2,false,1 FROM generate_series(1,$3::int) g`, team, owner, planlimits.TeamCeiling(planlimits.BrowserTerminals))
 	// An ended preview keeps an active binding; it holds no capacity either.
-	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) SELECT $1,'preview','gone_'||g,$2,true,1 FROM generate_series(1,$3::int) g`, team, owner, MaximumResources)
+	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) SELECT $1,'preview','gone_'||g,$2,true,1 FROM generate_series(1,$3::int) g`, team, owner, planlimits.TeamCeiling(planlimits.Publications))
 	m7 := machine("ma_m7", owner)
 	if _, err = act(owner, MachineRequest{MachineID: m7, Action: "share"}); err != nil || !bound(m7) {
 		t.Fatalf("a team full of ended entries refused a machine: %v", err)
@@ -224,16 +225,21 @@ func TestPostgresMachineAdmission(t *testing.T) {
 		t.Fatalf("unsharing a machine that never was in the team: %v", err)
 	}
 	exec(`DELETE FROM paperboat.team_resource_bindings WHERE team_id=$1 AND resource_kind='preview'`, team)
-	// At the cap the refusal names the count, so pb can say "N of N".
+	// The machine cap is the plan's team machine ceiling (config.PlanLimits), counted over machines only: live shared
+	// terminal sessions take none of it, and at the ceiling the refusal names the count, so pb can say "N of N".
+	ceiling := planlimits.TeamCeiling(planlimits.Machines)
+	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) SELECT $1,'terminal_session','live_'||g,$2,true,1 FROM generate_series(1,$3::int) g`, team, owner, planlimits.TeamCeiling(planlimits.BrowserTerminals))
 	var active int
-	if err = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.team_resource_bindings WHERE team_id=$1 AND active`, team).Scan(&active); err != nil {
+	if err = store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.team_resource_bindings WHERE team_id=$1 AND active AND resource_kind='machine'`, team).Scan(&active); err != nil {
 		t.Fatal(err)
 	}
-	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) SELECT $1,'terminal_session','live_'||g,$2,true,1 FROM generate_series(1,$3::int) g`, team, owner, MaximumResources-active)
-	m9 := machine("ma_m9", owner)
-	_, err = act(owner, MachineRequest{MachineID: m9, Action: "share"})
+	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account,active,generation) SELECT $1,'machine','live_'||g,$2,true,1 FROM generate_series(1,$3::int) g`, team, owner, ceiling-active-1)
+	if _, err = act(owner, MachineRequest{MachineID: machine("ma_m9", owner), Action: "share"}); err != nil {
+		t.Fatalf("the last machine under the plan ceiling was refused: %v", err)
+	}
+	_, err = act(owner, MachineRequest{MachineID: machine("ma_m10", owner), Action: "share"})
 	var limit *LimitError
-	if !errors.As(err, &limit) || !errors.Is(err, ErrLimit) || limit.Used != MaximumResources || limit.Limit != MaximumResources || limit.Kind != "machine" {
-		t.Fatalf("share at the cap: %v", err)
+	if !errors.As(err, &limit) || !errors.Is(err, ErrLimit) || limit.Used != ceiling || limit.Limit != ceiling || limit.Kind != "machine" {
+		t.Fatalf("share at the plan's machine ceiling %d: %v", ceiling, err)
 	}
 }

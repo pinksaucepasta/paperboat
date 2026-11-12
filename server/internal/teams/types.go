@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"github.com/pinksaucepasta/paperboat/server/internal/planlimits"
 )
 
 var (
@@ -30,29 +31,41 @@ var (
 
 const MaximumMembers = 128
 const MaximumInvitations = 128
-const MaximumResources = 128
 
-// LimitError is ErrLimit with the count a client names: Used of Limit active team entries,
-// refused while adding one of Kind.
+// LimitError is ErrLimit with the count a client names: Used of Limit held team entries of the
+// same group as Kind, refused while adding one of Kind.
 type LimitError struct {
 	Kind        string
 	Used, Limit int
 }
 
 func (e *LimitError) Error() string {
-	return fmt.Sprintf("team capacity reached: %d of %d active entries", e.Used, e.Limit)
+	return fmt.Sprintf("team limit reached: %d of %d %s entries", e.Used, e.Limit, e.Kind)
 }
 func (e *LimitError) Unwrap() error { return ErrLimit }
 
-// HeldBindingCount is how many of the team's bindings still hold a resource, the number the
-// MaximumResources cap limits. Ended terminal sessions are inactive; an ended preview or deleted
-// tunnel keeps an active binding, so they are excluded here.
-func HeldBindingCount(ctx context.Context, tx *db.Tx, team string) (int, error) {
+// CheckResourceCapTx refuses binding one more entry of kind when the team already holds its plan's team ceiling
+// for that group (config.PlanLimits, the one place limits live): machines count against Machines, previews,
+// tunnels and lazy policies against Publications, shared terminal sessions against BrowserTerminals. Ended
+// terminal sessions are inactive; an ended preview or deleted tunnel keeps an active binding, so neither counts.
+func CheckResourceCapTx(ctx context.Context, tx *db.Tx, team, kind string) error {
+	planKind, kinds := planlimits.Publications, []string{"preview", "tunnel", "lazy_policy"}
+	switch kind {
+	case "machine":
+		planKind, kinds = planlimits.Machines, []string{"machine"}
+	case "terminal_session":
+		planKind, kinds = planlimits.BrowserTerminals, []string{"terminal_session"}
+	}
 	var count int
-	err := tx.QueryRow(ctx, `SELECT count(*) FROM team_resource_bindings b WHERE b.team_id=$1 AND b.active
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM team_resource_bindings b WHERE b.team_id=$1 AND b.active AND b.resource_kind=ANY($2)
 		AND NOT (b.resource_kind='preview' AND NOT EXISTS(SELECT 1 FROM preview_leases p WHERE p.id=b.resource_id AND p.terminal_state='active'))
-		AND NOT (b.resource_kind='tunnel' AND NOT EXISTS(SELECT 1 FROM tunnels t WHERE t.id=b.resource_id AND t.deleted_at IS NULL))`, team).Scan(&count)
-	return count, err
+		AND NOT (b.resource_kind='tunnel' AND NOT EXISTS(SELECT 1 FROM tunnels t WHERE t.id=b.resource_id AND t.deleted_at IS NULL))`, team, kinds).Scan(&count); err != nil {
+		return err
+	}
+	if limit := planlimits.TeamCeiling(planKind); count >= limit {
+		return &LimitError{Kind: kind, Used: count, Limit: limit}
+	}
+	return nil
 }
 
 // MaximumOperationReceipts bounds exact stored-result/digest reconciliation to 4096 operations

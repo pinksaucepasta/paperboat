@@ -83,6 +83,9 @@ func Configure(limits config.PlanLimits, billingURL string) {
 }
 
 // ViewersPerSharedTerminal is the viewer cap of one shared terminal session.
+// TeamCeiling is the configured team plan limit of kind (config.PlanLimits.<kind>.TeamCeiling).
+func TeamCeiling(kind Kind) int { return limitFor(current.Load().limits, kind, Team) }
+
 func ViewersPerSharedTerminal() int { return current.Load().limits.ViewersPerSharedTerminal }
 
 // Scope is the workspace a resource belongs to: a team, or the account's personal workspace.
