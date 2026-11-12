@@ -1,0 +1,28 @@
+F25-06 and F25-07, Linux, 2026-11-13 (IST): recb-l2, a PERSONAL Linux container (Ubuntu aarch64 systemd on a build host, user pbt) SHARED into own paid team recb2 (Stripe sandbox), pb dev-52d8e2680 (linux/arm64 built on anvit), prod server 2026.11.13.4; the test S3 (versitygw) runs in a second container behind a public tunnel; browser checks from the Linux controller against the live console.
+team_bucket_offline.py (client: a Windows runner; the Linux container is stopped for the replays):
+{"check": "team-bucket-offline", "target": "recb-l2", "status": "PASS", "phases": ["bucket_get_set_refusals_keep_secret", "unreachable_bucket_named", "recordings_archived", "objects_are_ciphertext", "replay_from_bucket", "cli_replay_machine_offline", "browser_replay_machine_offline", "bucket_removed"], "archived_recording": "rec_a7abcc5e-2b50-428e-be97-3e4d91f19067", "archived_objects": 1, "seconds": 534.3}
+browser replay while the Linux machine is offline (check-recordings.mjs rows):
+PASS  Personal shows the Teams upgrade state
+PASS  the list shows the server's first page in order  (4 of 4)
+PASS  the pager follows the server total  (one page)
+PASS  a machine's tab lists only its recordings  (recb-l2)
+PASS  the key status matches the server  (ready)
+PASS  the admins-only switch changes the team setting  (anyone -> admins)
+PASS  switching back restores it
+PASS  every recording rule in the policy is listed  (1)
+PASS  Add rule opens its dialog
+PASS  a saved replay rule reaches the policy
+PASS  the new rule is listed
+PASS  removing it restores the policy
+PASS  a locked vault asks to unlock first
+PASS  the recording loads and decrypts
+PASS  it plays on its own  (0:00 / 0:02 -> 0:01 / 0:02)
+PASS  pause stops the clock  (0:01 / 0:02)
+PASS  the terminal renderer shows the recording
+PASS  speed 4× is selected
+PASS  the seek bar moves to the start  (0:00 / 0:02)
+PASS  an unknown recording says it doesn't exist
+SKIP  offline machine state  (OFFLINE_RECORDING not set)
+SKIP  terminal rows  (MACHINE not set)
+SKIP  permission removal closes the replay  (LONG_RECORDING and VAULT_PASSWORD_FILE not set)
+all passed

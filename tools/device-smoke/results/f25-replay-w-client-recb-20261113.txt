@@ -1,0 +1,2 @@
+F25-04 on W, 2026-11-13 (IST): recordings_lifecycle.py --only manual,long run FROM a Windows runner (winpool-6, Windows Server 2025, pb dev-7a9d9e376, machine recb-win-2) against the Linux shared machine recb-l2 of team recb2, prod server 2026.11.13.4:
+{"check": "recordings", "target": "recb-l2", "status": "PASS", "phases": ["manual_start_stop", "rec_in_connect", "cli_list", "cli_export", "cli_play", "cli_export_long"], "manual_recording": "rec_d2370116-9b46-4a56-b16d-e23a6a0fbe8f", "long_recording": "rec_f39c34a8-df80-4376-af02-3bb8bceace21", "seconds": 209.3}
