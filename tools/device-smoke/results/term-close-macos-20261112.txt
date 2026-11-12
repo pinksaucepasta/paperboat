@@ -1,0 +1,6 @@
+Terminal close on M, 2026-11-12 (IST), pb dev-7cbee8501 (includes 9608b7351, SIGHUP on close): xplat_term_close.py --devices L,M, client opens a terminal, replaces the shell by an interactive bash/zsh, a background sleep runs, the session is closed with pb session close; checked on the host.
+PASS term-close:bash:L>M 14s bash pid 36347: shell gone when the close returned, background job gone, close took 5.3 s
+PASS term-close:zsh:L>M 13s zsh pid 36502: shell gone when the close returned, background job gone, close took 5.2 s
+PASS term-close:bash:M>L 15s bash pid 70820: shell gone when the close returned, background job gone, close took 5.1 s
+PASS term-close:zsh:M>L 0s n/a: zsh is not installed on macx-l
+PASS /home/ubuntu/pb-wt/macos-lane/tools/device-smoke/results/xplat-term-close-20261112T171959Z.json

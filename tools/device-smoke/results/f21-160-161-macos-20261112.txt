@@ -1,0 +1,5 @@
+F21-160 (dead direct path) and F21-161 (home relay) device checks on M, 2026-11-12 (IST): the pbmac VM (Apple M4 virtual, macOS 26.6.2), pb dev-7cbee8501 (main, includes home_relay), peer macx-l (Linux container on anvit), prod server.
+dead_path_stream.py macx-l (pf drops this Mac's UDP; one exec stream line per 0.1 s):
+{"check": "dead-path-stream", "status": "PASS", "longest_gap_s": 0.2, "bound_s": 12.0, "lines_before": 33, "lines_after": 444, "path_while_blocked": "wss", "in_order": true}
+relay_home_wire.py macx-l --relay-ip <oracle> --relay-ip <anvit> (UDP dropped so the peer is reached through a relay; pf blocks one relay host at a time):
+{"check": "relay-home-wire", "status": "PASS", "home_before": "oracle", "home_after_block": "anvit", "failover_seconds": 13.7, "unchanged_when_other_blocked": true}
