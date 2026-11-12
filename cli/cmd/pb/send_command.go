@@ -278,7 +278,10 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 					fmt.Fprintln(cobraCommand.ErrOrStderr(), message)
 				}
 			}
-			batch, err = nativeClient.SendBatch(ctx.Context, batchID, sessionID, prepared.Sources)
+			err = queueWhileBusy(ctx.Context, destination.Alias, nativeClient.Waiting, func() (sendErr error) {
+				batch, sendErr = nativeClient.SendBatch(ctx.Context, batchID, sessionID, prepared.Sources)
+				return sendErr
+			})
 			if progress != nil {
 				if err != nil {
 					progress.finish("failed", 0)
