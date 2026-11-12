@@ -9,12 +9,10 @@ password or recording content is printed: only counts, ids and the marker tokens
 import argparse
 import json
 import os
-from pathlib import Path
 import re
 import select
 import subprocess
 import sys
-import tempfile
 import time
 import uuid
 
@@ -128,10 +126,10 @@ def finished(team, recording_id):
 
 
 def export_text(recording_id, directory):
-    path = Path(directory) / ('export-' + uuid.uuid4().hex + '.cast')
+    path = directory / ('export-' + uuid.uuid4().hex + '.cast')
     result = command_result(PB, 'recordings', 'export', recording_id, '--output', str(path), timeout=180)
     if result.returncode:
-        raise RuntimeError('pb recordings export failed: exit %d' % result.returncode)
+        raise RuntimeError('pb recordings export failed: exit %d: %s' % (result.returncode, (result.stderr or '')[-300:]))
     text = path.read_text()
     first = json.loads(text.splitlines()[0])
     if first.get('version') != 2:
@@ -254,9 +252,9 @@ def phase_rule(team, target, directory, replay=True):
         raise RuntimeError('pb policy get failed')
     document = json.loads(original.stdout)
     document['rules'] = [*document['rules'], {'src': ['role:admin'], 'dst': ['machine:' + target], 'allow': ['record']}]
-    path = Path(directory) / 'policy-rule.json'
+    path = directory / 'policy-rule.json'
     path.write_text(json.dumps(document))
-    restore = Path(directory) / 'policy-original.json'
+    restore = directory / 'policy-original.json'
     restore.write_text(original.stdout)
     before = {r['id'] for r in listing(team)}
     name = 'smoke-rec-' + uuid.uuid4().hex[:10]
@@ -267,7 +265,7 @@ def phase_rule(team, target, directory, replay=True):
         marker = session.say('RULEOUT')
         recording = new_recording(team, target, before)
         if recording['trigger'] != 'rule' or recording['state'] != STARTED:
-            raise RuntimeError('the rule did not start the recording')
+            raise RuntimeError('the rule did not start the recording (trigger %s, state %s)' % (recording['trigger'], recording['state']))
         wait_for('REC in this client', session.saw_rec, timeout=30, interval=0.3)
         policy_set(restore, team)
         # The rule decides who is recorded from now on; a recording that already runs goes on until its session ends.
@@ -313,7 +311,7 @@ def main():
     phases = args.only.split(',')
     started = time.monotonic()
     receipt = {'check': 'recordings', 'target': args.target, 'status': 'PASS', 'phases': []}
-    with tempfile.TemporaryDirectory(prefix='paperboat-recordings-') as directory:
+    with winhost.workdir('paperboat-recordings-') as directory:  # on the device under test
         if 'manual' in phases:
             receipt['manual_recording'] = phase_manual(args.team, args.target, directory, not args.no_replay)
             receipt['phases'] += ['manual_start_stop', 'rec_in_connect', 'cli_list'] + ([] if args.no_replay else ['cli_export', 'cli_play'])
