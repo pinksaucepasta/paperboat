@@ -79,7 +79,10 @@ class FailureEvidence(unittest.TestCase):
         self.assertEqual(matrix.error_code('{"ok":false,"error":{"code":"operation_failed","message":"private"}}'), 'operation_failed')
         self.assertIsNone(matrix.error_code('not json'))
         self.assertIsNone(matrix.error_code('{"error":{"code":"has a message-like value"}}'))
+        ref = 'support_8f613d65-5e4e-45a2-a5bc-6df4747e4485'
+        self.assertEqual(matrix.support_reference('pb: failed. Support reference: ' + ref + '. Run pb bugreport'), ref)
+        self.assertIsNone(matrix.support_reference('no id here'))
         def failed():
-            raise matrix.RemoteFailure(1, 'operation_failed')
+            raise matrix.RemoteFailure(1, 'operation_failed', ref)
         result = matrix.check('send', failed)
-        self.assertEqual((result['exit_code'], result['reason']), (1, 'operation_failed'))
+        self.assertEqual((result['exit_code'], result['reason'], result['support_reference']), (1, 'operation_failed', ref))
