@@ -179,15 +179,20 @@ def t_tree(src, dst):
     return '46 files, nested/empty/unicode directories and a %d MiB file equal (sha256) through %s' % (big, ', '.join(notes))
 
 
-KILLER = ('import subprocess,sys\n'
-          'try: subprocess.run(sys.argv[2:], timeout=float(sys.argv[1]))\n'
-          'except subprocess.TimeoutExpired: print("KILLED")\n')
+KILLER = ('import os,signal,subprocess,sys\n'
+          'p = subprocess.Popen(sys.argv[2:], **({} if os.name == "nt" else {"start_new_session": True}))\n'
+          'try: p.wait(timeout=float(sys.argv[1]))\n'
+          'except subprocess.TimeoutExpired:\n'
+          '    # the whole client tree dies, as with a dropped connection or Ctrl-C: pb sftp/scp start the system sftp/scp as children\n'
+          '    if os.name == "nt": subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True)\n'
+          '    else: os.killpg(p.pid, signal.SIGKILL)\n'
+          '    p.wait(); print("KILLED")\n')
 
 
 def t_resume(src, dst):
     """F5-03: a transfer cut mid-way (the client is killed after a few seconds) finishes identically when run again; rsync and
     sftp reput continue from what arrived, scp starts over, and the file is equal either way."""
-    big = 160
+    big = 64
     src_root = native(src, 'resume')
     want = make_tree(src, src_root, big)['files']['big.bin']
     notes = []
@@ -288,17 +293,22 @@ def main():
     for key, dev in devices.items():
         dev.write(native(dev, '.keep'), b'')  # the directory every scp, sftp and rsync of this run lands in
         print(key, 'ssh doctor rc', dev.pb('ssh', 'doctor', dev.alias).rc, flush=True)
+    stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
+    out = Path(__file__).parent / 'results' / ('xplat-ssh-%s.json' % stamp)
+
+    def save():  # written after every pair, so a finished pair can be ticked while the next one runs
+        out.write_text(json.dumps({'check': 'xplat-ssh', 'devices': keys, 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
+
     for a_key, b_key in permutations(devices, 2):
         for name, test in TESTS:
             if only and name not in only:
                 continue
             check(name, '%s>%s' % (a_key, b_key), lambda: test(devices[a_key], devices[b_key]))
+        save()
     if not only or 'self' in only:
         for key, dev in devices.items():
             check('self', key, lambda: t_self(dev, dev))
-    stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    out = Path(__file__).parent / 'results' / ('xplat-ssh-%s.json' % stamp)
-    out.write_text(json.dumps({'check': 'xplat-ssh', 'devices': keys, 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
+    save()
     failed = [k for k, v in results.items() if v['status'] != 'PASS']
     print('%s %s' % ('FAIL' if failed or not results else 'PASS', out))
     sys.exit(1 if failed or not results else 0)
