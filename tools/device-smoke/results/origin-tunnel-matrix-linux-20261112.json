@@ -1,0 +1,282 @@
+{
+ "check": "origin-tunnel-matrix",
+ "cells": [
+  {
+   "server": "app",
+   "mode": "direct-http/route-on-every-edge",
+   "result": "ok",
+   "detail": "seconds until each edge answered: {'198.51.100.7': 0.1, '198.51.100.7': 0.3} of ['198.51.100.7', '198.51.100.7'] (bound 30 s)"
+  },
+  {
+   "server": "app",
+   "mode": "direct-http/C1-forwarded",
+   "result": "ok",
+   "detail": "status 200 host=app.example.test xfp=https xfh=app.example.test xff=198.51.100.7"
+  },
+  {
+   "server": "app",
+   "mode": "direct-http/F-force-ssl",
+   "result": "ok",
+   "detail": "status 200"
+  },
+  {
+   "server": "app",
+   "mode": "direct-http/C8-sse",
+   "result": "ok",
+   "detail": "first event after 56 ms"
+  },
+  {
+   "server": "app",
+   "mode": "direct-http/C12-range",
+   "result": "ok",
+   "detail": "status 206 error None, 100 bytes"
+  },
+  {
+   "server": "app",
+   "mode": "direct-http/C13-expect",
+   "result": "ok",
+   "detail": "status 200 "
+  },
+  {
+   "server": "caddy-internal",
+   "mode": "a-http/route-on-every-edge",
+   "result": "ok",
+   "detail": "seconds until each edge answered: {'198.51.100.7': 3.8, '198.51.100.7': 6.9} of ['198.51.100.7', '198.51.100.7'] (bound 30 s)"
+  },
+  {
+   "server": "caddy-internal",
+   "mode": "a-http/C2-loop",
+   "result": "ok",
+   "detail": "status 502 error 'origin_redirect_loop'"
+  },
+  {
+   "server": "caddy-internal",
+   "mode": "b-https/route-on-every-edge",
+   "result": "ok",
+   "detail": "seconds until each edge answered: {'198.51.100.7': 0.2, '198.51.100.7': 0.4} of ['198.51.100.7', '198.51.100.7'] (bound 30 s)"
+  },
+  {
+   "server": "caddy-internal",
+   "mode": "b-https/C1-forwarded",
+   "result": "ok",
+   "detail": "status 200 host=app.example.test xfp=https xfh=app.example.test xff=127.0.0.1"
+  },
+  {
+   "server": "caddy-internal",
+   "mode": "b-https/F-force-ssl",
+   "result": "ok",
+   "detail": "status 200"
+  },
+  {
+   "server": "caddy-internal",
+   "mode": "b-https/C8-sse",
+   "result": "ok",
+   "detail": "first event after 61 ms"
+  },
+  {
+   "server": "caddy-internal",
+   "mode": "b-https/C12-range",
+   "result": "ok",
+   "detail": "status 206 error None, 100 bytes"
+  },
+  {
+   "server": "caddy-internal",
+   "mode": "b-https/C13-expect",
+   "result": "ok",
+   "detail": "status 200 "
+  },
+  {
+   "server": "httpd",
+   "mode": "a-http/route-on-every-edge",
+   "result": "ok",
+   "detail": "seconds until each edge answered: {'198.51.100.7': 5.4, '198.51.100.7': 6.4} of ['198.51.100.7', '198.51.100.7'] (bound 30 s)"
+  },
+  {
+   "server": "httpd",
+   "mode": "a-http/C2-loop",
+   "result": "ok",
+   "detail": "status 502 error 'origin_redirect_loop'"
+  },
+  {
+   "server": "httpd",
+   "mode": "b-https/route-on-every-edge",
+   "result": "ok",
+   "detail": "seconds until each edge answered: {'198.51.100.7': 0.3, '198.51.100.7': 0.6} of ['198.51.100.7', '198.51.100.7'] (bound 30 s)"
+  },
+  {
+   "server": "httpd",
+   "mode": "b-https/C1-forwarded",
+   "result": "ok",
+   "detail": "status 200 host=app.example.test xfp=https xfh=app.example.test, app.example.test xff=198.51.100.7, 127.0.0.1"
+  },
+  {
+   "server": "httpd",
+   "mode": "b-https/F-force-ssl",
+   "result": "ok",
+   "detail": "status 200"
+  },
+  {
+   "server": "httpd",
+   "mode": "b-https/C8-sse",
+   "result": "ok",
+   "detail": "first event after 59 ms"
+  },
+  {
+   "server": "httpd",
+   "mode": "b-https/C12-range",
+   "result": "ok",
+   "detail": "status 206 error None, 100 bytes"
+  },
+  {
+   "server": "httpd",
+   "mode": "b-https/C13-expect",
+   "result": "ok",
+   "detail": "status 200 "
+  },
+  {
+   "server": "caddy-certs",
+   "mode": "a-http/route-on-every-edge",
+   "result": "ok",
+   "detail": "seconds until each edge answered: {'198.51.100.7': 5.0, '198.51.100.7': 6.1} of ['198.51.100.7', '198.51.100.7'] (bound 30 s)"
+  },
+  {
+   "server": "caddy-certs",
+   "mode": "a-http/C2-loop",
+   "result": "ok",
+   "detail": "status 502 error 'origin_redirect_loop'"
+  },
+  {
+   "server": "caddy-certs",
+   "mode": "b-https/route-on-every-edge",
+   "result": "ok",
+   "detail": "seconds until each edge answered: {'198.51.100.7': 0.3, '198.51.100.7': 0.5} of ['198.51.100.7', '198.51.100.7'] (bound 30 s)"
+  },
+  {
+   "server": "caddy-certs",
+   "mode": "b-https/C1-forwarded",
+   "result": "ok",
+   "detail": "status 200 host=app.example.test xfp=https xfh=app.example.test xff=127.0.0.1"
+  },
+  {
+   "server": "caddy-certs",
+   "mode": "b-https/F-force-ssl",
+   "result": "ok",
+   "detail": "status 200"
+  },
+  {
+   "server": "caddy-certs",
+   "mode": "b-https/C8-sse",
+   "result": "ok",
+   "detail": "first event after 147 ms"
+  },
+  {
+   "server": "caddy-certs",
+   "mode": "b-https/C12-range",
+   "result": "ok",
+   "detail": "status 206 error None, 100 bytes"
+  },
+  {
+   "server": "caddy-certs",
+   "mode": "b-https/C13-expect",
+   "result": "ok",
+   "detail": "status 200 "
+  },
+  {
+   "server": "nginx",
+   "mode": "a-http/route-on-every-edge",
+   "result": "ok",
+   "detail": "seconds until each edge answered: {'198.51.100.7': 5.8, '198.51.100.7': 6.5} of ['198.51.100.7', '198.51.100.7'] (bound 30 s)"
+  },
+  {
+   "server": "nginx",
+   "mode": "a-http/C2-loop",
+   "result": "ok",
+   "detail": "status 502 error 'origin_redirect_loop'"
+  },
+  {
+   "server": "nginx",
+   "mode": "b-https/route-on-every-edge",
+   "result": "ok",
+   "detail": "seconds until each edge answered: {'198.51.100.7': 0.2, '198.51.100.7': 0.8} of ['198.51.100.7', '198.51.100.7'] (bound 30 s)"
+  },
+  {
+   "server": "nginx",
+   "mode": "b-https/C1-forwarded",
+   "result": "ok",
+   "detail": "status 200 host=app.example.test xfp=https xfh=app.example.test xff=198.51.100.7"
+  },
+  {
+   "server": "nginx",
+   "mode": "b-https/F-force-ssl",
+   "result": "ok",
+   "detail": "status 200"
+  },
+  {
+   "server": "nginx",
+   "mode": "b-https/C8-sse",
+   "result": "ok",
+   "detail": "first event after 48 ms"
+  },
+  {
+   "server": "nginx",
+   "mode": "b-https/C12-range",
+   "result": "ok",
+   "detail": "status 206 error None, 100 bytes"
+  },
+  {
+   "server": "nginx",
+   "mode": "b-https/C13-expect",
+   "result": "ok",
+   "detail": "status 200 "
+  },
+  {
+   "server": "traefik",
+   "mode": "a-http/route-on-every-edge",
+   "result": "ok",
+   "detail": "seconds until each edge answered: {'198.51.100.7': 5.0, '198.51.100.7': 6.1} of ['198.51.100.7', '198.51.100.7'] (bound 30 s)"
+  },
+  {
+   "server": "traefik",
+   "mode": "a-http/C2-loop",
+   "result": "ok",
+   "detail": "status 502 error 'origin_redirect_loop'"
+  },
+  {
+   "server": "traefik",
+   "mode": "b-https/route-on-every-edge",
+   "result": "ok",
+   "detail": "seconds until each edge answered: {'198.51.100.7': 0.3, '198.51.100.7': 11.4} of ['198.51.100.7', '198.51.100.7'] (bound 30 s)"
+  },
+  {
+   "server": "traefik",
+   "mode": "b-https/C1-forwarded",
+   "result": "ok",
+   "detail": "status 200 host=app.example.test xfp=https xfh=app.example.test xff=127.0.0.1"
+  },
+  {
+   "server": "traefik",
+   "mode": "b-https/F-force-ssl",
+   "result": "ok",
+   "detail": "status 200"
+  },
+  {
+   "server": "traefik",
+   "mode": "b-https/C8-sse",
+   "result": "ok",
+   "detail": "first event after 103 ms"
+  },
+  {
+   "server": "traefik",
+   "mode": "b-https/C12-range",
+   "result": "ok",
+   "detail": "status 206 error None, 100 bytes"
+  },
+  {
+   "server": "traefik",
+   "mode": "b-https/C13-expect",
+   "result": "ok",
+   "detail": "status 200 "
+  }
+ ],
+ "platform": "L: tun-t1 systemd container (hp host), pb dev-ee6287104, prod edges 2026.11.12.5; Caddy (certs and tls internal), Traefik, nginx, Apache each set to force https"
+}
