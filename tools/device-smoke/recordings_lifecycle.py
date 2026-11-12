@@ -120,7 +120,7 @@ class Session:
     def end(self):
         try:
             self.terminal.settle()
-            self.terminal.send(b'\x04')
+            self.terminal.send('exit\r' if self.windows else b'\x04')  # cmd.exe ignores Ctrl-D; a recording ends with its shell
             self.terminal.wait_exit()
         except RuntimeError:
             pass  # the terminal already closed: nothing left to end
@@ -212,7 +212,11 @@ def phase_long(team, target, directory):
         recording_control('start', sid)
         wait_for('REC in this client', session.saw_rec, timeout=30, interval=0.3)
         done = 'PB_LONGDONE_' + uuid.uuid4().hex
-        session.terminal.send("head -c 6000000 /dev/urandom | base64 | fold -w 120; printf 'PB_LONGDONE_%s\\n' " + done.split('_')[-1] + '\r')
+        if session.windows:  # about 6 MB of random base64 text, then the marker (typed split so the echo never holds it)
+            session.terminal.send('powershell -NoProfile -Command "$b=New-Object byte[] 4500000;(New-Object Random).NextBytes($b);$s=[Convert]::ToBase64String($b);'
+                                  'for($i=0;$i -lt $s.Length;$i+=120){$s.Substring($i,[Math]::Min(120,$s.Length-$i))};(\'PB_LONGDONE_\'+\'' + done.split('_')[-1] + '\')"\r')
+        else:
+            session.terminal.send("head -c 6000000 /dev/urandom | base64 | fold -w 120; printf 'PB_LONGDONE_%s\\n' " + done.split('_')[-1] + '\r')
         tail = b''
         deadline = time.monotonic() + 600
         while done.encode() not in tail:

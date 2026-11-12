@@ -267,12 +267,18 @@ def rows(args):
         ('C290', 'policy', ('get', 'set', 'test', 'explain', 'versions', 'restore', 'schema')),
         ('C291', 'team scim', ('status', 'setup', 'map')),
         ('C292', 'team sso', ('status', 'setup', 'enforce', 'exempt')),
+        ('C294', 'team bucket', ('get', 'set', 'remove')),
     ):
         r = Row(ident, name); r.help(); r.invalid('bogus', hint='invalid|unknown|usage|Usage')
         d = r.json_ok()
         listed = {c.get('command') for c in (d or {}).get('commands', [])} if isinstance(d, dict) else set()
         r.expect(listed >= {'pb %s %s' % (name, sub) for sub in wanted}, '%s --json misses subcommands %s' % (name, sorted(set('pb %s %s' % (name, sub) for sub in wanted) - listed)))
         r.expect(run('auth', 'status', '--json')[0] == 0, 'no longer signed in after %s' % name)
+        out.append(r)
+
+    # Their main use (save, show without the secret, remove) is team_bucket_lifecycle.py; here: help and invalid input.
+    for ident, name in (('C295', 'team bucket get'), ('C296', 'team bucket set'), ('C297', 'team bucket remove')):
+        r = Row(ident, name); r.help(); r.invalid(hint='accepts|Usage|usage|team'); r.invalid('no-such-team-recb', hint='.')
         out.append(r)
 
     for ident, name in (('C218', 'update check'), ('C219', 'update download')):
