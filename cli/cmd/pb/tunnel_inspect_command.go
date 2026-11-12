@@ -140,6 +140,13 @@ type inspectorCapture struct {
 	FinishedAt        time.Time           `json:"finished_at"`
 }
 
+func inspectorReplayMarker(original string) string {
+	if original == "" {
+		return ""
+	}
+	return " (replay of " + original + ")"
+}
+
 type inspectorReplayResult struct {
 	IdempotencyKey    string    `json:"idempotency_key,omitempty"`
 	OperationID       string    `json:"operation_id"`
@@ -460,7 +467,7 @@ func runInspectorView(command *cobra.Command, clients *inspectorClients, target 
 			if err := decodeInspectorPayload(payload, &record); err != nil {
 				return false, err
 			}
-			return false, tunnelOutput(command, record, fmt.Sprintf("%s\t%s\t%d\t%s", record.ID, record.Method, record.ResponseStatus, record.State))
+			return false, tunnelOutput(command, record, fmt.Sprintf("%s\t%s\t%d\t%s", record.ID, record.Method, record.ResponseStatus, record.State)+inspectorReplayMarker(record.ReplayOf))
 		default:
 			payload, status, err := clients.daemon.do(ctx, grant, http.MethodGet, "/v1/inspector/records", nil, url.Values{"kind": {target.kind}, "resource": {target.resource}, "route": {target.route}, "cursor": {options.cursor}, "limit": {strconv.Itoa(options.limit)}})
 			if err != nil {
