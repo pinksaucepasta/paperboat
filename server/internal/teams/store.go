@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/pinksaucepasta/paperboat/server/internal/config"
 
 	"github.com/jackc/pgx/v5"
@@ -311,7 +312,7 @@ func save(ctx context.Context, tx *db.Tx, account, op string, digest []byte, out
 		return err
 	}
 	if len(raw) > MaximumReceiptBytes {
-		return ErrLimit
+		return fmt.Errorf("%w: %d of %d bytes", ErrReceiptTooLarge, len(raw), MaximumReceiptBytes)
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO team_operations(account_id,operation_id,request_digest,result,created_at) VALUES($1,$2,$3,$4,clock_timestamp())`, account, op, digest, raw); err != nil {
 		return err
@@ -393,7 +394,7 @@ func (s *Service) List(ctx context.Context, account string) ([]Team, error) {
 			return err
 		}
 		if len(ids) > MaximumMembers {
-			return ErrLimit
+			return &LimitError{Kind: "team", Used: len(ids), Limit: MaximumMembers}
 		}
 		for _, id := range ids {
 			t, err := readSummaryTx(ctx, tx, id)

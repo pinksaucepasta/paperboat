@@ -18,8 +18,11 @@ func capacity(ctx context.Context, tx *db.Tx, account, team string) error {
 	if err != nil {
 		return err
 	}
-	if users >= MaximumMembers || members >= MaximumMembers {
-		return ErrLimit
+	if users >= MaximumMembers {
+		return &LimitError{Kind: "team", Used: users, Limit: MaximumMembers}
+	}
+	if members >= MaximumMembers {
+		return &LimitError{Kind: "member", Used: members, Limit: MaximumMembers}
 	}
 	return nil
 }

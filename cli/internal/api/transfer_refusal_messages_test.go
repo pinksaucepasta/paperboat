@@ -12,8 +12,20 @@ func TestTransferRefusalsRenderFromTheirDetails(t *testing.T) {
 
 // Lane O 44a17b1f: a team at its cap answers 409 team_limit; the CLI said "resource state changed".
 func TestTeamLimitRendersFromItsDetails(t *testing.T) {
-	if got := apiErrorMessageFor("team_limit", 409, map[string]any{"kind": "machine", "used": float64(128), "limit": float64(128)}); got != "Team machine limit reached (128 of 128). Remove a machine from the team or upgrade." {
-		t.Fatalf("machine team_limit = %q", got)
+	// XE item 9: every kind names its limit and the numbers, not only machines.
+	for kind, want := range map[string]string{
+		"machine":          "Team limit reached: 10000 of 10000 machines. Remove one the team no longer uses, then retry.",
+		"tunnel":           "Team limit reached: 10000 of 10000 previews and tunnels. Remove one the team no longer uses, then retry.",
+		"terminal_session": "Team limit reached: 1000 of 1000 shared terminal sessions. Remove one the team no longer uses, then retry.",
+		"member":           "Team limit reached: 128 of 128 members. Remove one the team no longer uses, then retry.",
+	} {
+		limit := map[string]float64{"terminal_session": 1000, "member": 128}[kind]
+		if limit == 0 {
+			limit = 10000
+		}
+		if got := apiErrorMessageFor("team_limit", 409, map[string]any{"kind": kind, "used": limit, "limit": limit}); got != want {
+			t.Errorf("%s team_limit = %q, want %q", kind, got, want)
+		}
 	}
 	if got := apiErrorMessageFor("team_limit", 409, nil); got != "Team capacity reached. Remove an entry the team no longer uses, then retry." {
 		t.Fatalf("generic team_limit = %q", got)

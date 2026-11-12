@@ -156,10 +156,12 @@ func registerTeamRoutes(mux *http.ServeMux, service teamAPI, read, write func(ht
 			case expectedHTTPErrorOnly(err, teams.ErrLimit):
 				var limit *teams.LimitError
 				if errors.As(err, &limit) {
-					writeErrorDetails(w, r, http.StatusConflict, "team_limit", fmt.Sprintf("Team capacity reached (%d of %d active entries). Remove an unused %s or entry before retrying.", limit.Used, limit.Limit, limit.Kind), map[string]any{"kind": limit.Kind, "used": limit.Used, "limit": limit.Limit})
+					writeErrorDetails(w, r, http.StatusConflict, "team_limit", fmt.Sprintf("Team limit reached: %d of %d %s. Remove one the team no longer uses before retrying.", limit.Used, limit.Limit, limit.Noun()), map[string]any{"kind": limit.Kind, "used": limit.Used, "limit": limit.Limit})
 				} else {
 					writeError(w, r, http.StatusConflict, "team_limit", "Team capacity reached. Remove unused entries before retrying.")
 				}
+			case expectedHTTPErrorOnly(err, teams.ErrReceiptTooLarge):
+				writeError(w, r, http.StatusInternalServerError, "team_receipt_too_large", "This team change was not made: its result is too large to record. Make the change in smaller steps.", err)
 			case err != nil:
 				writeError(w, r, http.StatusInternalServerError, "internal_error", "Team operation could not be confirmed. Retry the same operation to reconcile its result.", err)
 			default:

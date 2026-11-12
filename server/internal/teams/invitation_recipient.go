@@ -59,7 +59,7 @@ func checkNewInvitation(ctx context.Context, tx *db.Tx, team string, r InviteReq
 		return ErrConflict
 	}
 	if count >= MaximumInvitations {
-		return ErrLimit
+		return &LimitError{Kind: "invitation", Used: count, Limit: MaximumInvitations}
 	}
 	if err = capacity(ctx, tx, r.AccountID, team); err != nil {
 		return err

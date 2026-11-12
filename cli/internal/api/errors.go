@@ -90,8 +90,8 @@ func apiErrorMessageFor(code string, status int, details map[string]any) string 
 		kind, _ := details["kind"].(string)
 		used, _ := details["used"].(float64)
 		limit, _ := details["limit"].(float64)
-		if kind == "machine" && limit >= 1 && used == float64(int64(used)) && limit == float64(int64(limit)) {
-			return fmt.Sprintf("Team machine limit reached (%d of %d). Remove a machine from the team or upgrade.", int64(used), int64(limit))
+		if noun, ok := teamLimitNouns[kind]; ok && limit >= 1 && used == float64(int64(used)) && limit == float64(int64(limit)) {
+			return fmt.Sprintf("Team limit reached: %d of %d %s. Remove one the team no longer uses, then retry.", int64(used), int64(limit), noun)
 		}
 	case "transfer_too_large":
 		total, _ := details["total_bytes"].(float64)
@@ -165,6 +165,12 @@ func httpURL(value any) string {
 }
 
 // PublicMessage is the authored recovery advice for an audited protocol code, or "".
+// teamLimitNouns names what each team_limit kind counts (server teams.LimitError.Noun).
+var teamLimitNouns = map[string]string{
+	"machine": "machines", "preview": "previews and tunnels", "tunnel": "previews and tunnels", "lazy_policy": "previews and tunnels",
+	"terminal_session": "shared terminal sessions", "member": "members", "invitation": "pending invitations", "team": "teams for this account",
+}
+
 func PublicMessage(code string) string { return publicAPIMessages[code] }
 
 // PublicCode projects only audited protocol codes. The raw Code remains

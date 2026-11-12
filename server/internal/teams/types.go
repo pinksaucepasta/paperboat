@@ -25,8 +25,11 @@ var (
 	ErrBillingActive        = errors.New("cancel the team subscription before deleting the team")
 	ErrExpired              = errors.New("team invitation expired or already used")
 	ErrLimit                = errors.New("team capacity reached")
-	ErrSuspended            = errors.New("team is suspended")
-	ErrReservedSlug         = errors.New("team slug 'personal' is reserved for the personal workspace")
+	// ErrReceiptTooLarge is a team change whose result is larger than the stored operation receipt bound
+	// (MaximumReceiptBytes); nothing was changed. It is a server bound, not a team limit the user reached.
+	ErrReceiptTooLarge = errors.New("team operation result is larger than its stored receipt")
+	ErrSuspended       = errors.New("team is suspended")
+	ErrReservedSlug    = errors.New("team slug 'personal' is reserved for the personal workspace")
 )
 
 const MaximumMembers = 128
@@ -40,9 +43,26 @@ type LimitError struct {
 }
 
 func (e *LimitError) Error() string {
-	return fmt.Sprintf("team limit reached: %d of %d %s entries", e.Used, e.Limit, e.Kind)
+	return fmt.Sprintf("team limit reached: %d of %d %s", e.Used, e.Limit, e.Noun())
 }
 func (e *LimitError) Unwrap() error { return ErrLimit }
+
+// Noun names what Kind counts, for messages: "3 of 3 members".
+func (e *LimitError) Noun() string {
+	switch e.Kind {
+	case "machine":
+		return "machines"
+	case "terminal_session":
+		return "shared terminal sessions"
+	case "member":
+		return "members"
+	case "invitation":
+		return "pending invitations"
+	case "team":
+		return "teams for this account"
+	}
+	return "previews and tunnels"
+}
 
 // CheckResourceCapTx refuses binding one more entry of kind when the team already holds its plan's team ceiling
 // for that group (config.PlanLimits, the one place limits live): machines count against Machines, previews,
