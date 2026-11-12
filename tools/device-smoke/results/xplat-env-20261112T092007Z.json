@@ -1,0 +1,100 @@
+{
+ "check": "xplat-env",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-11:applied:L",
+   "status": "PASS",
+   "detail": "{\"published\": true, \"applied\": true, \"layers\": 1}"
+  },
+  {
+   "id": "X-11:applied:M",
+   "status": "PASS",
+   "detail": "{\"published\": true, \"applied\": true, \"layers\": 1}"
+  },
+  {
+   "id": "X-11:applied:W",
+   "status": "PASS",
+   "detail": "{\"published\": true, \"applied\": true, \"layers\": 1}"
+  },
+  {
+   "id": "X-11:run:L",
+   "status": "PASS",
+   "detail": "pb env run: 11 values equal on lanex2-l"
+  },
+  {
+   "id": "X-11:run:M",
+   "status": "PASS",
+   "detail": "pb env run: 11 values equal on lanex2-m"
+  },
+  {
+   "id": "X-11:run:W",
+   "status": "PASS",
+   "detail": "pb env run: 11 values equal on lanex2-w"
+  },
+  {
+   "id": "X-11:exec:L>M",
+   "status": "PASS",
+   "detail": "pb exec: 11 values equal (sha256) on lanex2-m"
+  },
+  {
+   "id": "X-11:ssh:L>M",
+   "status": "PASS",
+   "detail": "pb ssh command session: 11 values equal on lanex2-m"
+  },
+  {
+   "id": "X-11:exec:L>W",
+   "status": "PASS",
+   "detail": "pb exec: 11 values equal (sha256) on lanex2-w"
+  },
+  {
+   "id": "X-11:ssh:L>W",
+   "status": "PASS",
+   "detail": "pb ssh command session: 11 values equal on lanex2-w"
+  },
+  {
+   "id": "X-11:exec:M>L",
+   "status": "PASS",
+   "detail": "pb exec: 11 values equal (sha256) on lanex2-l"
+  },
+  {
+   "id": "X-11:ssh:M>L",
+   "status": "PASS",
+   "detail": "pb ssh command session: 11 values equal on lanex2-l"
+  },
+  {
+   "id": "X-11:exec:M>W",
+   "status": "PASS",
+   "detail": "pb exec: 11 values equal (sha256) on lanex2-w"
+  },
+  {
+   "id": "X-11:ssh:M>W",
+   "status": "PASS",
+   "detail": "pb ssh command session: 11 values equal on lanex2-w"
+  },
+  {
+   "id": "X-11:exec:W>L",
+   "status": "PASS",
+   "detail": "pb exec: 11 values equal (sha256) on lanex2-l"
+  },
+  {
+   "id": "X-11:ssh:W>L",
+   "status": "PASS",
+   "detail": "pb ssh command session: 11 values equal on lanex2-l"
+  },
+  {
+   "id": "X-11:exec:W>M",
+   "status": "PASS",
+   "detail": "pb exec: 11 values equal (sha256) on lanex2-m"
+  },
+  {
+   "id": "X-11:ssh:W>M",
+   "status": "PASS",
+   "detail": "pb ssh command session: 11 values equal on lanex2-m"
+  }
+ ]
+}
