@@ -1,0 +1,4 @@
+C276 pb recordings export, Windows client, long recording over the internet, 2026-11-12 (sanitized)
+Fixture: winpool-rec-3 (GitHub-hosted Windows Server runner, account of the team owner, vault unlocked from a password file) on build dev-851f2488d (replay heartbeat fix b8a644110); recording rec_3f73c062 (6.2 MB, 8 segments) on recorder-smoke-paid-2 (Linux container); prod 2026.11.12.3.
+12 consecutive exports, each to a new file: 12 of 12 exit 0 (9.0 s typical; 19.0, 22.7 and 26.0 s on three of them, i.e. well past the host's 5 s heartbeat).
+Before the fix (build dev-7b6266c96 and the logging build dev-recdbg): 3 failures of 22 exports with "unexpected EOF"; the logging build showed relayRecording ending at 3421172 of 6224537 bytes, 4.1 s in, "the recording stream ended early".
