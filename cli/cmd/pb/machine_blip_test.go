@@ -143,3 +143,28 @@ func TestSSHDialRetriesTheFirstDialAfterAccessAppears(t *testing.T) {
 		}
 	}
 }
+
+// pb exec waits a short bounded time for a machine the server calls offline (a host that just updated), and says
+// machine_offline when it stays offline; any other failure returns at once.
+func TestWaitForMachineOnline(t *testing.T) {
+	grace, interval := machineBlipGrace, machineBlipInterval
+	machineBlipGrace, machineBlipInterval = 2*time.Second, 5*time.Millisecond
+	t.Cleanup(func() { machineBlipGrace, machineBlipInterval = grace, interval })
+	calls := 0
+	machine, err := waitForMachineOnline(t.Context(), func() (api.UserMachine, error) {
+		calls++
+		return api.UserMachine{ID: "machine_a", Online: calls >= 3}, nil
+	})
+	if err != nil || !machine.Online || calls != 3 {
+		t.Fatalf("machine=%+v err=%v calls=%d, want online on the third read", machine, err, calls)
+	}
+	machineBlipGrace = 60 * time.Millisecond
+	if _, err := waitForMachineOnline(t.Context(), func() (api.UserMachine, error) { return api.UserMachine{ID: "machine_a"}, nil }); !machineOfflineError(err) {
+		t.Fatalf("a machine that stays offline: %v", err)
+	}
+	boom := errors.New("lookup failed")
+	calls = 0
+	if _, err := waitForMachineOnline(t.Context(), func() (api.UserMachine, error) { calls++; return api.UserMachine{}, boom }); !errors.Is(err, boom) || calls != 1 {
+		t.Fatalf("another failure was retried: err=%v calls=%d", err, calls)
+	}
+}

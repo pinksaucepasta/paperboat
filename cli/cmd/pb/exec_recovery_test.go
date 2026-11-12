@@ -236,6 +236,9 @@ func execRecoveryBackend(t *testing.T, machine api.UserMachine, descriptors *ato
 }
 
 func TestExecOfflineTargetReportsCertainFailureWithoutOpeningStream(t *testing.T) {
+	grace := machineBlipGrace
+	machineBlipGrace = 50 * time.Millisecond // the wait for a restarting host is not what this test is about
+	t.Cleanup(func() { machineBlipGrace = grace })
 	for _, jsonOutput := range []bool{false, true} {
 		t.Run(fmt.Sprintf("json=%t", jsonOutput), func(t *testing.T) {
 			var descriptors, opens atomic.Int32

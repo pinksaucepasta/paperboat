@@ -87,7 +87,15 @@ func actionRemoteExec(c *command.Context, requested string, request tunnel.ExecR
 		return fail(255, "machine_resolution_failed", false, false, err)
 	}
 	if !machine.Online {
-		return fail(255, "machine_offline", false, false, &api.APIError{Code: "machine_offline"})
+		// A host that just restarted its runtime (pb update) is reported offline for a moment: wait like send and ssh
+		// do, bounded by machineBlipGrace, before saying so.
+		machine, err = waitForMachineOnline(c.Context, func() (api.UserMachine, error) { return resolveUserMachine(c.Context, client, requested) })
+		if err != nil {
+			if machineOfflineError(err) {
+				return fail(255, "machine_offline", false, false, err)
+			}
+			return fail(255, "machine_resolution_failed", false, false, friendlyCommandError(err))
+		}
 	}
 	if machine.InstallationGeneration < 1 {
 		err = errors.New("machine has no active runtime generation")

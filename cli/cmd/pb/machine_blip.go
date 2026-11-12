@@ -44,3 +44,15 @@ func retryWhile[T any](ctx context.Context, grace time.Duration, retryable func(
 		}
 	}
 }
+
+// waitForMachineOnline reads the machine again while the server calls it offline, for at most machineBlipGrace, and
+// returns it once it is online; a machine that stays offline ends with the machine_offline error.
+func waitForMachineOnline(ctx context.Context, resolve func() (api.UserMachine, error)) (api.UserMachine, error) {
+	return retryWhileMachineOffline(ctx, func() (api.UserMachine, error) {
+		machine, err := resolve()
+		if err == nil && !machine.Online {
+			err = &api.APIError{Code: "machine_offline"}
+		}
+		return machine, err
+	})
+}
