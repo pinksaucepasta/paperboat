@@ -320,6 +320,12 @@ func CaptureFromContext(ctx context.Context, component, operation, stage, code s
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// A request whose caller hung up (a timeout, a closed connection, a client restart) did not meet a server
+	// failure: no report and no error log, the same rule as httpapi's captureSupportFailure. A 503 recorded for it
+	// made the deploy gate refuse a server swap on one such request (2026-11-12, status 499 in the server log).
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return ProjectFaultWithStack(ctx, component, operation, stage, code, err, nil)
+	}
 	if sc, ok := ctx.Value(signalContextKey{}).(signalContext); ok && sc.service != nil {
 		fault := sc.service.CaptureFailureWithStack(ctx, component, operation, stage, code, err, sentry.NewStacktrace())
 		sc.service.logFault(ctx, faultLogLevel(fault), "operation failed", fault)

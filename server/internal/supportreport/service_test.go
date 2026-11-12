@@ -554,3 +554,30 @@ func TestAcceptedReportSurvivesCancellationDuringSave(t *testing.T) {
 		t.Fatalf("accepted observation lost during cancellation: saved=%d", len(store.records))
 	}
 }
+
+// A caller that hung up did not meet a server failure: nothing is queued or logged for its cancelled request.
+func TestCaptureFromContextIgnoresARequestTheCallerCancelled(t *testing.T) {
+	store := &memoryStore{}
+	s, err := New(store, Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.SetLogger(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx, finish := s.Begin(context.Background(), "http_edge", NewReference(), "")
+	finish("failed")
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	CaptureFromContext(cancelled, "paperboat-server", "http_edge", "http_handler", "authorization_unavailable", WithDiagnosticStatus(http.StatusServiceUnavailable, context.Canceled))
+	select {
+	case queued := <-s.queue:
+		t.Fatalf("a cancelled request was reported: %+v", queued.record)
+	default:
+	}
+	CaptureFromContext(ctx, "paperboat-server", "http_edge", "http_handler", "authorization_unavailable", WithDiagnosticStatus(http.StatusServiceUnavailable, syscall.ETIMEDOUT))
+	select {
+	case <-s.queue:
+	default:
+		t.Fatal("a real failure on a live request was not reported")
+	}
+}

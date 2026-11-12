@@ -426,3 +426,74 @@ func TestDrainSignalStopsWorkersButKeepsServing(t *testing.T) {
 		t.Fatal("stop did not join the per-process listeners")
 	}
 }
+
+// A request in flight when shutdown starts finishes with its answer, and shutdown does not cancel its context:
+// a draining server must never be what cuts an admitted request (2026-11-12: a 503 context_canceled on the old
+// server during a swap was a client hang-up, not the drain, and this pins the drain half).
+func TestRequestInFlightAtShutdownCompletesWithItsAnswer(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	configureAppTestDatabase(t, &cfg)
+	cfg.HTTP.Address = address
+	cfg.HTTP.ShutdownTimeout = 5 * time.Second
+	application, err := New(Options{Config: cfg, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	application.worker = workers.NewSupervisor(func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	handlerStarted, releaseHandler := make(chan struct{}), make(chan struct{})
+	contextErr := make(chan error, 1)
+	application.server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(handlerStarted)
+		<-releaseHandler
+		contextErr <- r.Context().Err()
+		w.WriteHeader(http.StatusOK)
+	})
+	runCtx, cancelRun := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- application.Run(runCtx) }()
+	status := make(chan int, 1)
+	go func() {
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			response, requestErr := http.Get("http://" + address)
+			if requestErr == nil {
+				_ = response.Body.Close()
+				status <- response.StatusCode
+				return
+			}
+			if time.Now().After(deadline) {
+				status <- 0
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
+	select {
+	case <-handlerStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("HTTP handler did not start")
+	}
+	cancelRun()
+	time.Sleep(100 * time.Millisecond) // shutdown is under way while the handler is held
+	close(releaseHandler)
+	if err := <-contextErr; err != nil {
+		t.Fatalf("shutdown cancelled the in-flight request's context: %v", err)
+	}
+	if got := <-status; got != http.StatusOK {
+		t.Fatalf("the in-flight request got %d, want 200", got)
+	}
+	if err := <-runDone; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("run error = %v", err)
+	}
+}
