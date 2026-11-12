@@ -1,0 +1,153 @@
+ip_rules_rows.py --kind preview (C281) on W, 2026-11-13 (IST): resource and pb on winpool-1 (GitHub-hosted Windows Server, pb dev-3ef4b7b39 = main, machine plat-w), two client addresses (oracle, anvit), prod server. Bound 15 s. 7/7 steps PASS.
+{
+ "check": "ip-rules-rows",
+ "row": "C281",
+ "kind": "preview",
+ "status": "PASS",
+ "bound_seconds": 15,
+ "seconds_until_each_answer_changed": [
+  10.7,
+  9.8,
+  3.4,
+  14.0,
+  2.2,
+  15.9,
+  6.0,
+  2.4,
+  13.4,
+  2.6,
+  4.6,
+  9.0,
+  7.0
+ ],
+ "per_edge_seconds_to_stable": [
+  {
+   "step": "baseline a",
+   "seconds_to_stable_per_edge": {
+    "140.245.11.41": 7.0,
+    "152.67.0.60": 10.7
+   }
+  },
+  {
+   "step": "baseline b",
+   "seconds_to_stable_per_edge": {
+    "140.245.11.41": 9.2,
+    "152.67.0.60": 9.8
+   }
+  },
+  {
+   "step": "denied address A",
+   "seconds_to_stable_per_edge": {
+    "140.245.11.41": 3.3,
+    "152.67.0.60": 3.4
+   }
+  },
+  {
+   "step": "other address B stays allowed",
+   "seconds_to_stable_per_edge": {
+    "140.245.11.41": 12.9,
+    "152.67.0.60": 14.0
+   }
+  },
+  {
+   "step": "A is denied",
+   "seconds_to_stable_per_edge": {
+    "140.245.11.41": 2.2,
+    "152.67.0.60": 2.2
+   }
+  },
+  {
+   "step": "B is allowed",
+   "seconds_to_stable_per_edge": {
+    "140.245.11.41": 15.0,
+    "152.67.0.60": 15.9
+   }
+  },
+  {
+   "step": "B is both allowed and denied",
+   "seconds_to_stable_per_edge": {
+    "140.245.11.41": 5.7,
+    "152.67.0.60": 6.0
+   }
+  },
+  {
+   "step": "A is not on the allow list",
+   "seconds_to_stable_per_edge": {
+    "140.245.11.41": 2.3,
+    "152.67.0.60": 2.4
+   }
+  },
+  {
+   "step": "B allowed (allow list only)",
+   "seconds_to_stable_per_edge": {
+    "140.245.11.41": 12.7,
+    "152.67.0.60": 13.4
+   }
+  },
+  {
+   "step": "A not on the allow list",
+   "seconds_to_stable_per_edge": {
+    "140.245.11.41": 2.4,
+    "152.67.0.60": 2.6
+   }
+  },
+  {
+   "step": "A denied by its CIDR form",
+   "seconds_to_stable_per_edge": {
+    "140.245.11.41": 3.9,
+    "152.67.0.60": 4.6
+   }
+  },
+  {
+   "step": "B unaffected by the CIDR",
+   "seconds_to_stable_per_edge": {
+    "140.245.11.41": 8.4,
+    "152.67.0.60": 9.0
+   }
+  },
+  {
+   "step": "A served again after --clear",
+   "seconds_to_stable_per_edge": {
+    "140.245.11.41": 6.7,
+    "152.67.0.60": 7.0
+   }
+  }
+ ],
+ "steps": [
+  {
+   "step": "baseline: both source addresses served, new resource has no rules",
+   "status": "PASS",
+   "seconds": 26.3
+  },
+  {
+   "step": "deny one address: it gets 403, the other 200",
+   "status": "PASS",
+   "seconds": 28.2
+  },
+  {
+   "step": "--allow replaces only the allow list",
+   "status": "PASS",
+   "seconds": 28.1
+  },
+  {
+   "step": "deny beats allow",
+   "status": "PASS",
+   "seconds": 18.7
+  },
+  {
+   "step": "allow list alone admits only its addresses (after --clear)",
+   "status": "PASS",
+   "seconds": 31.7
+  },
+  {
+   "step": "--allow /0 and a malformed address are refused, rules unchanged",
+   "status": "PASS",
+   "seconds": 14.1
+  },
+  {
+   "step": "a CIDR form, then --clear serves everyone",
+   "status": "PASS",
+   "seconds": 40.6
+  }
+ ]
+}

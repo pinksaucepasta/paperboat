@@ -1,0 +1,8 @@
+F25-06, F25-07 and C294-C297, Linux, 2026-11-13 (IST): pb dev-3ef4b7b39 (main, no code change since) on an hp systemd container, machine plat-l (team-owned, owner granted terminal/exec/managed_ssh/files) of team paperboat-smoke-paid on the prod server; the test S3 (versitygw 1.11.0, posix backend, fresh random keys) runs in a second container behind a public durable tunnel (https://s3.example.test below).
+team_bucket_lifecycle.py plat-l --team paperboat-smoke-paid --endpoint https://s3.example.test --bucket plat-bucket (client: plat-l itself, PB_SMOKE_WORKSPACE=paperboat-smoke-paid):
+{"check": "team-bucket", "target": "plat-l", "status": "PASS", "phases": ["bucket_get_set_refusals_keep_secret", "recordings_archived", "objects_are_ciphertext", "replay_from_bucket", "bucket_removed"], "archived_recording": "rec_5f9a04d4-22b4-4907-b3bc-0f5f77a48650", "archived_objects": 1, "seconds": 54.8}
+command_rows.py plat-l --only C294,C295,C296,C297 (help, JSON, invalid input, group subcommands):
+{"check": "command-row", "row": "C294", "command": "pb team bucket", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C295", "command": "pb team bucket get", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C296", "command": "pb team bucket set", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C297", "command": "pb team bucket remove", "status": "PASS", "failures": []}
