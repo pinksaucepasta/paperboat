@@ -1,0 +1,94 @@
+{
+ "check": "terminal-scale",
+ "target": "lsc-ht",
+ "terminals": 100,
+ "host_loadavg_start": [
+  "13.11",
+  "12.64",
+  "8.48"
+ ],
+ "open": {
+  "ready": 45,
+  "all_ready": false,
+  "seconds": {
+   "p50": 21.288,
+   "p95": 90.806,
+   "max": 95.292,
+   "n": 45
+  },
+  "not_ready_last_line": {
+   "pb: Some local diagnostics could not be saved before shutdown. Run `pb doctor` to check diagnostic storage. Support refe": 28,
+   "pb: The target machine was reached but did not open the connection. Its Paperboat service may still be starting, or it h": 27
+  }
+ },
+ "echo": {
+  "seconds": {
+   "p50": 0.354,
+   "p95": 0.47,
+   "max": 0.495,
+   "n": 93
+  },
+  "missing": 42
+ },
+ "burst": {
+  "closed": 10,
+  "client_close_seconds": 40.25,
+  "others_echo": {
+   "p50": 0.294,
+   "p95": 0.352,
+   "max": 0.357,
+   "n": 21
+  },
+  "others_missing": 14,
+  "session_cleanup_failures": 0,
+  "session_cleanup_seconds": 54.4
+ },
+ "shared": {
+  "viewers": 50,
+  "stopped": 1,
+  "flood": {
+   "owner_MB_cumulative_per_second": [
+    1.5,
+    4.3,
+    4.3,
+    4.3,
+    4.3,
+    4.3,
+    4.3,
+    4.3,
+    4.3,
+    4.3,
+    4.3,
+    4.3
+   ],
+   "finished": 11,
+   "of": 50,
+   "seconds_to_finish": {
+    "p50": 3.018,
+    "p95": 3.018,
+    "max": 3.018,
+    "n": 11
+   }
+  },
+  "echo_after_flood": {
+   "p50": 0.287,
+   "p95": 0.338,
+   "max": 0.338,
+   "n": 11
+  },
+  "missing": 39,
+  "stopped_viewer_alive_after_continue": false
+ },
+ "final_cleanup": {
+  "closed_and_deleted": 91,
+  "expected": 91,
+  "seconds": 202.9
+ },
+ "host_loadavg_end": [
+  "3.41",
+  "6.12",
+  "7.82"
+ ],
+ "status": "FAIL",
+ "note": "prod, dadape container -> hp container, pb dev-router-256 (streams 512 + parallel admission + router 256/64), opens 3/s"
+}
