@@ -86,6 +86,11 @@ func TestRouteWorkerSeparatesCanonicalHTTPPublicAndPrivateTCPFromLegacyRoutes(t 
 		NodeID: "edge_1", ProcessEpoch: "edge_epoch_1", Carrier: carrier, PublicTCP: carrier, DurableAdmissions: durable,
 		Ready: func(context.Context, []route.RouteRule) error { return nil }, Pulse: make(chan time.Time),
 	}
+	select {
+	case <-worker.Admitted():
+		t.Fatal("the worker claims its admissions before it ran")
+	default:
+	}
 	if err := worker.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -94,6 +99,11 @@ func TestRouteWorkerSeparatesCanonicalHTTPPublicAndPrivateTCPFromLegacyRoutes(t 
 		defer cancel()
 		_ = worker.Shutdown(ctx)
 	}()
+	select {
+	case <-worker.Admitted():
+	default:
+		t.Fatal("the first reconcile installed the durable admissions but Admitted is not closed")
+	}
 	if !invalidated {
 		t.Fatal("ready route published without invalidating ingress authority")
 	}

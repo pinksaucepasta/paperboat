@@ -367,6 +367,9 @@ type RouteWorker struct {
 	mu                             sync.Mutex
 	cancel                         context.CancelFunc
 	done                           chan struct{}
+	admitted                       chan struct{} // closed once the first pass installed the route and accessor admissions (Admitted)
+	routesAdmitted                 bool
+	accessorAdmitted               bool
 	starting                       bool
 	lastErr                        error
 	canonicalSet                   bool
@@ -585,6 +588,37 @@ func (w *RouteWorker) LastError() error {
 	return w.lastErr
 }
 
+// Admitted is closed once the first reconcile has installed this process's carrier admissions for its routes (the
+// durable tunnel carriers) and for private access: a replacement edge process takes over only after that, or it
+// refuses a known machine's carrier as unknown_machine until its first route snapshot is applied.
+func (w *RouteWorker) Admitted() <-chan struct{} {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.admitted == nil {
+		w.admitted = make(chan struct{})
+	}
+	return w.admitted
+}
+
+// noteAdmitted records one half of the first pass and closes Admitted when both are in.
+func (w *RouteWorker) noteAdmitted(routes, accessor bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.routesAdmitted = w.routesAdmitted || routes
+	w.accessorAdmitted = w.accessorAdmitted || accessor
+	if !w.routesAdmitted || !w.accessorAdmitted {
+		return
+	}
+	if w.admitted == nil {
+		w.admitted = make(chan struct{})
+	}
+	select {
+	case <-w.admitted:
+	default:
+		close(w.admitted)
+	}
+}
+
 func (w *RouteWorker) reconcile(ctx context.Context) error {
 	if w.AccessorSource != nil || w.AccessorAdmissions != nil {
 		if w.AccessorSource == nil || w.AccessorAdmissions == nil {
@@ -604,6 +638,9 @@ func (w *RouteWorker) reconcile(ctx context.Context) error {
 }
 
 func (w *RouteWorker) reconcileAccessor(ctx context.Context) error {
+	if w.AccessorSource == nil && w.AccessorAdmissions == nil {
+		w.noteAdmitted(false, true)
+	}
 	if w.AccessorSource != nil || w.AccessorAdmissions != nil {
 		if w.AccessorSource == nil || w.AccessorAdmissions == nil {
 			return route.ErrInvalid
@@ -626,6 +663,7 @@ func (w *RouteWorker) reconcileAccessor(ctx context.Context) error {
 		if err = w.AccessorAdmissions.Replace(mapped, time.Now().UTC()); err != nil {
 			return err
 		}
+		w.noteAdmitted(false, true)
 	}
 	return nil
 }
@@ -661,6 +699,9 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) (result error) {
 				break
 			}
 		}
+	}
+	if !canonical {
+		w.noteAdmitted(true, false) // nothing durable to admit
 	}
 	if canonical {
 		// A canonical assignment is not safe to activate without both an
@@ -726,6 +767,7 @@ func (w *RouteWorker) reconcileRoutes(ctx context.Context) (result error) {
 			w.canonicalPendingAdmissions = true
 			w.canonicalPendingAdmissionsHash = candidateHash
 		}
+		w.noteAdmitted(true, false) // the candidate and last-known-good admissions are installed (or there are none)
 		activeAssignments := append([]control.RouteAssignment(nil), selectedAssignments...)
 		readyAssignments := append([]control.RouteAssignment(nil), selectedAssignments...)
 		var probeFailures []error
