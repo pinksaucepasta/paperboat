@@ -263,6 +263,25 @@ func TestPostgresTeamSSOAndDirectorySync(t *testing.T) {
 		}
 	}
 
+	// F19-06: a user DELETED from the directory (absent from its listing, not suspended) is removed the same way.
+	var bobBefore bool
+	_ = store.SQL().QueryRowContext(ctx, `SELECT active FROM paperboat.team_members WHERE team_id=$1 AND account_id=$2`, team, bob).Scan(&bobBefore)
+	fake.mu.Lock()
+	fake.state.Users = []DirectoryUser{{ID: "du_alice", Email: "alice@" + domain, Active: false}}
+	fake.mu.Unlock()
+	if err = s.Reconcile(ctx, team); err != nil {
+		t.Fatal(err)
+	}
+	var bobAfter bool
+	_ = store.SQL().QueryRowContext(ctx, `SELECT active FROM paperboat.team_members WHERE team_id=$1 AND account_id=$2`, team, bob).Scan(&bobAfter)
+	if !bobBefore || bobAfter {
+		t.Fatalf("a deleted directory user: active before=%v after=%v, want true then false", bobBefore, bobAfter)
+	}
+	// Bob's team token goes with his membership.
+	if _, err := tokens.Authenticate(ctx, credentials[3].secret); !errors.Is(err, apitokens.ErrInvalid) {
+		t.Fatalf("a deleted directory user's team token still authenticates: %v", err)
+	}
+
 	// JIT: dave signs in through the team's SSO and becomes a member.
 	jit := true
 	if _, err = s.UpdateSSO(ctx, owner, team, SSOSettings{JIT: &jit}); err != nil {
