@@ -60,11 +60,11 @@ func Record(ctx context.Context, store *db.DB, b Binding, policy QuotaChecker) e
 	if policy == nil || b.ID == "" || b.Node == "" || b.Environment == "" || b.Route == "" || b.User == "" || len(b.User) > 256 || b.Revision < 1 || b.ExpiresAt.Before(b.IssuedAt) {
 		return ErrUnavailable
 	}
-	return store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
-		// Serialize the node's capacity check and upsert without blocking unrelated nodes.
-		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,369197))`, b.Node); err != nil {
-			return err
-		}
+	// Serialize the node's capacity check and upsert without blocking unrelated nodes. The lock is taken before the
+	// transaction starts: taken inside it, a waiter (an edge's old and new process pulling at once during a switch)
+	// decided on a snapshot from before the wait and failed with 40001 until its retries ran out (503 on the edge's
+	// desired-state pull, 2026-11-12 17:17Z).
+	return store.InTxUnderSessionLock(ctx, b.Node, 369197, func(ctx context.Context, tx *db.Tx) error {
 		if _, err := tx.Exec(ctx, `DELETE FROM usage_accounting_authorities WHERE edge_node_id=$1 AND retain_until<=$2`, b.Node, b.IssuedAt); err != nil {
 			return err
 		}

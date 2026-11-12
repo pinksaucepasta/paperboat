@@ -137,3 +137,55 @@ type openQuota struct{}
 func (openQuota) CheckWorkspaceBandwidthTx(context.Context, *db.Tx, string, time.Time) (bool, error) {
 	return false, nil
 }
+
+// A Record that waits for its node's lock decides on what the holder committed: an edge's old and new process pull
+// at once during a switch, and a waiter that took its snapshot before the wait failed with 40001 until its retries
+// ran out (503 on the edge's desired-state pull, 2026-11-12 17:17Z). Here the holder changes the workspace row
+// Record locks; the waiter must succeed on its first attempt.
+func TestRecordWaitingForItsNodeDecidesOnTheHoldersCommitOnPostgres(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	suffix := fmt.Sprint(time.Now().UnixNano())
+	owner, node := "usr_record_wait_"+suffix, "record-wait-edge-"+suffix
+	insertUser(t, store, owner, owner+"@example.test")
+	t.Cleanup(func() {
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.usage_accounting_authorities WHERE edge_node_id=$1`, node)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.control_tunnel_nodes WHERE id=$1`, node)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.billing_workspaces WHERE user_id=$1`, owner)
+		_, _ = store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.users WHERE id=$1`, owner)
+	})
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch) VALUES($1,'default','1.0','epoch')`, node); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.billing_workspaces(id,user_id) VALUES('personal:'||$1,$1)`, owner); err != nil {
+		t.Fatal(err)
+	}
+	// The other process holds the node's lock.
+	holder, err := store.Direct().Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Release()
+	if _, err := holder.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1,369197))`, node); err != nil {
+		t.Fatal(err)
+	}
+	before := store.TransactionStats().Serializable
+	now := time.Now().UTC()
+	done := make(chan error, 1)
+	go func() {
+		done <- accountingauthority.Record(ctx, store, accountingauthority.Binding{ID: "record-wait-" + suffix, Node: node, Environment: "env-" + suffix, Route: "route-" + suffix, User: owner, Revision: 1, IssuedAt: now, ExpiresAt: now.Add(time.Minute)}, openQuota{})
+	}()
+	time.Sleep(300 * time.Millisecond) // the Record is waiting for the lock
+	if _, err := holder.Exec(ctx, `UPDATE paperboat.billing_workspaces SET revision=revision+1 WHERE user_id=$1`, owner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.Exec(ctx, `SELECT pg_advisory_unlock(hashtextextended($1,369197))`, node); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("record after waiting for the node: %v", err)
+	}
+	if after := store.TransactionStats().Serializable; after.Retries != before.Retries {
+		t.Fatalf("the waiting record was replayed %d times; it must decide on the holder's commit the first time", after.Retries-before.Retries)
+	}
+}
