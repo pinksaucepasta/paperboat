@@ -12,7 +12,7 @@ const acmeHTTP01Prefix = "/.well-known/acme-challenge/"
 // HTTP01Handler answers ACME http-01 on the plain HTTP listener for the
 // hostnames the current ingress snapshot holds a response for. Every other
 // request goes to next (the HTTPS redirect). The body is the key authorization
-// the server issued, so the edge never invents one.
+// the server issued, so the edge never invents one. An ACME path with no issued response goes to next too, which answers it.
 func (a *IngressAuthority) HTTP01Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, ok := strings.CutPrefix(r.URL.Path, acmeHTTP01Prefix)
@@ -26,7 +26,8 @@ func (a *IngressAuthority) HTTP01Handler(next http.Handler) http.Handler {
 		}
 		keyAuthorization, found := a.HTTP01KeyAuthorization(strings.ToLower(host), token)
 		if r.Method != http.MethodGet || !found {
-			http.NotFound(w, r)
+			// not a response the server issued: a server behind a tunnel asking for its own certificate gets the explanation
+			next.ServeHTTP(w, r)
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")

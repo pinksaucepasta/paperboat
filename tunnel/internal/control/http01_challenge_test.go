@@ -78,3 +78,17 @@ func TestHTTP01HandlerPassesOtherPathsToRedirect(t *testing.T) {
 		t.Fatalf("non-ACME path did not reach the redirect handler: %d", recorder.Code)
 	}
 }
+
+// An ACME validation for a name the edge holds no response for is a server behind the tunnel asking for its own
+// certificate: it reaches the handler that explains why, not a bare 404 (F8-12).
+func TestHTTP01HandlerPassesUnknownChallengesToTheExplanation(t *testing.T) {
+	authority := &IngressAuthority{}
+	handler := authority.HTTP01Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/.well-known/acme-challenge/tok_unknown", nil))
+	if recorder.Code != http.StatusTeapot {
+		t.Fatalf("unknown ACME token did not reach the explanation handler: %d", recorder.Code)
+	}
+}

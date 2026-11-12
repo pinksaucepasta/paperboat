@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/config"
+	"github.com/pinksaucepasta/paperboat/tunnel/internal/control"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/datacarrier"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/edgehttp"
 	edgetelemetry "github.com/pinksaucepasta/paperboat/tunnel/internal/telemetry"
@@ -244,5 +245,16 @@ func TestPortEightyAnswersOriginACMEInsteadOfRedirecting(t *testing.T) {
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "http://app.example.test:80/login?next=/", nil))
 	if recorder.Code != http.StatusPermanentRedirect || recorder.Header().Get("Location") != "https://app.example.test/login?next=/" {
 		t.Fatalf("redirect = %d %q", recorder.Code, recorder.Header().Get("Location"))
+	}
+}
+
+// The port 80 listener is the HTTP-01 handler in front of portEightyHandler, as main wires it: an origin's ACME
+// validation for a name the edge issued no response for reaches the explanation, not a bare 404 (F8-12).
+func TestPortEightyListenerExplainsOriginACMEBehindTheIssuedResponses(t *testing.T) {
+	handler := (&control.IngressAuthority{}).HTTP01Handler(portEightyHandler())
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "http://app.example.test/.well-known/acme-challenge/token123", nil))
+	if recorder.Code != http.StatusNotFound || recorder.Header().Get("X-Paperboat-Error") != "acme_behind_tunnel" || !strings.Contains(recorder.Body.String(), "needs none") {
+		t.Fatalf("ACME validation answer = %d %q", recorder.Code, recorder.Body.String())
 	}
 }
