@@ -6,8 +6,15 @@ Generate the autocompletion script for bash
 
 Generate the autocompletion script for the bash shell.
 
-This script depends on the 'bash-completion' package.
-If it is not installed already, you can install it via your OS's package manager.
+This script requires Bash 4.2+ and bash-completion v2. Stock macOS Bash 3.2
+is not supported. On macOS, install and load the prerequisites first:
+
+```sh
+brew install bash bash-completion@2
+exec "$(brew --prefix)/bin/bash"
+source "$(brew --prefix)/etc/profile.d/bash_completion.sh"
+source <(pb completion bash)
+```
 
 To load completions in your current shell session:
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -56,6 +57,35 @@ func configureShellCompletion(root *cobra.Command) {
 		command.ValidArgsFunction = transferTargetCompletion
 	}
 	root.ValidArgsFunction = personalizedMachineCompletion
+}
+
+const bashCompletionPrerequisite = "Bash completion requires Bash 4.2+ and bash-completion v2. On macOS: brew install bash bash-completion@2. Start the installed Bash and load bash_completion.sh before sourcing the pb completion script."
+
+func configureBashCompletion(root *cobra.Command) {
+	bash, _, err := root.Find([]string{"completion", "bash"})
+	if err != nil || bash == nil {
+		return
+	}
+	bash.Long += "\n\n" + bashCompletionPrerequisite + `
+
+On macOS, after installing:
+  exec "$(brew --prefix)/bin/bash"
+  source "$(brew --prefix)/etc/profile.d/bash_completion.sh"
+  source <(pb completion bash)
+`
+	bash.Run = nil
+	bash.RunE = func(command *cobra.Command, _ []string) error {
+		_, err := fmt.Fprintf(command.OutOrStdout(), `if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 2) )) || { ! declare -F _init_completion >/dev/null 2>&1 && ! declare -F _get_comp_words_by_ref >/dev/null 2>&1; }; then
+  printf '%%s\n' '%s' >&2
+  return 1 2>/dev/null || exit 1
+fi
+`, bashCompletionPrerequisite)
+		if err != nil {
+			return err
+		}
+		noDescriptions, _ := command.Flags().GetBool("no-descriptions")
+		return root.GenBashCompletionV2(command.OutOrStdout(), !noDescriptions)
+	}
 }
 
 func machineCompletion(command *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

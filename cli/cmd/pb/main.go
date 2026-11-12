@@ -547,6 +547,7 @@ mode, relays, and observation timestamps.`, Example: "  pb relay list\n  pb rela
 	root.AddCommand(platformUninstallHelperCommand())
 	configureShellCompletion(root)
 	root.InitDefaultCompletionCmd()
+	configureBashCompletion(root)
 	enrichCommandHelp(root)
 	installGroupCommandHandlers(root)
 	return root
