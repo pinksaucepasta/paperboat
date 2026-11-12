@@ -7,7 +7,8 @@ the target. TARGET is a hosted runner paired to the production account (macpool 
   device_paths.py relay      --windows (PB_SMOKE_WINDOWS_PB, SMOKE_WINDOWS_SSH) --name relmw-win --peer relmw-p1 --relay IP --relay IP
 
 rebind: the target loses its network for --outage-seconds (everything except the SSH that drives it), and while it is away
-its UDP source ports move (macOS: a pf nat rule; Windows: a WinDivert filter that rewrites the source port, pydivert),
+its UDP source ports move (macOS: the daemon restarts, pf's nat does not translate the host's own traffic; Windows: a WinDivert
+filter that rewrites the source port, pydivert),
 then the peer execs INTO it: the first exec must succeed within --limit s of the network returning, the next three too,
 and the outbound exec from the target works.
 relay: cold first contact (daemons restarted) target -> peer: relay allowed (then a 1 MB reply), every packet to the given
@@ -18,14 +19,19 @@ import argparse, base64, contextlib, json, os, re, shlex, subprocess, sys, time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+SSH = shlex.split(os.environ.get("PB_MAC_SSH", "ssh -o BatchMode=yes"))  # PB_MAC_SSH=~/.pbmac/ssh.sh for the apple VM (host: vm)
 sys.path.insert(0, str(HERE))
 RANGE = "41000-41999"
-PF_CUT, PF_NAT = "com.apple/pbsmoke-cut", "com.apple/pbsmoke-nat"
+PF_CUT = "com.apple/pbsmoke-cut"
 
 
-def ssh(host, script, timeout=120):
-    done = subprocess.run(["ssh", "-o", "BatchMode=yes", host, script], capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+def ssh(host, script, timeout=120, command=("ssh", "-o", "BatchMode=yes")):
+    done = subprocess.run([*command, host, script], capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
     return done.returncode, (done.stdout + done.stderr).strip()
+
+
+def msh(host, script, timeout=120):
+    return ssh(host, script, timeout, SSH)
 
 
 class Mac:
@@ -33,24 +39,24 @@ class Mac:
     echo = "echo"
     pb_path = "$HOME/.local/bin/pb"
 
-    def __init__(self, host, name):
-        self.host, self.name = host, name
+    def __init__(self, host, name, cut_ips):
+        self.host, self.name, self.cut_ips = host, name, cut_ips
 
     def pb(self, *args, timeout=120):
-        return ssh(self.host, f"timeout {timeout} {self.pb_path} {shlex.join(args)}", timeout + 20)
+        return msh(self.host, f"perl -e 'alarm shift; exec @ARGV' {timeout} {self.pb_path} {shlex.join(args)}", timeout + 20)  # macOS has no timeout(1)
 
     def restart_daemon(self):
-        return ssh(self.host, f"sudo -n {self.pb_path} service restart", 120)
+        return msh(self.host, f"sudo -n {self.pb_path} service restart", 120)
 
     def _pf(self, anchor, rules, seconds):
-        rc, out = ssh(self.host, f"printf %s {shlex.quote(rules)} | sudo -n pfctl -a {anchor} -f - 2>&1 && sudo -n pfctl -E 2>&1 | sed -n 's/.*Token : //p'", 60)
+        rc, out = msh(self.host, f"printf %s {shlex.quote(rules)} | sudo -n pfctl -a {anchor} -f - 2>&1 && sudo -n pfctl -E 2>&1 | sed -n 's/.*Token : //p'", 60)
         if rc:
             raise RuntimeError(f"pf anchor {anchor} not loaded: {out[-200:]}")
-        ssh(self.host, f"sudo -n pfctl -F states >/dev/null 2>&1; (sudo -n sh -c 'sleep {seconds}; /sbin/pfctl -a {anchor} -F all' >/dev/null 2>&1 &)", 60)
+        msh(self.host, f"sudo -n pfctl -F states >/dev/null 2>&1; (sudo -n sh -c 'sleep {seconds}; /sbin/pfctl -a {anchor} -F all' >/dev/null 2>&1 &)", 60)
         return out.splitlines()[-1] if out else ""
 
     def _unpf(self, anchor, token):
-        ssh(self.host, f"sudo -n pfctl -a {anchor} -F all; " + (f"sudo -n pfctl -X {token}" if token.isdigit() else "true"), 60)
+        msh(self.host, f"sudo -n pfctl -a {anchor} -F all; " + (f"sudo -n pfctl -X {token}" if token.isdigit() else "true"), 60)
 
     @contextlib.contextmanager
     def rules(self, anchor, rules, seconds):
@@ -60,14 +66,11 @@ class Mac:
         finally:
             self._unpf(anchor, token)
 
-    def control_ips(self):
-        """Remote addresses of the ssh connection(s) that drive this machine (the runner's tunnel): never cut."""
-        rc, out = ssh(self.host, "netstat -an -p tcp | awk '$6==\"ESTABLISHED\" && $5 ~ /\\.22$/ {print $5}'")
-        return sorted({".".join(item.split(".")[:4]) for item in out.split()})
-
     def cut_all(self, seconds):
-        keep = "".join(f"pass quick proto tcp from any to {ip} port 22 flags any keep state\npass quick proto tcp from {ip} port 22 to any flags any keep state\n" for ip in self.control_ips())
-        return self.rules(PF_CUT, "pass quick on lo0 all\n" + keep + "block drop quick all\n", seconds)
+        """Everything pb talks to (the API and the hosted relays, which here also host the peer) is dropped, except their port 22:
+        the SSH that drives the Mac may run over one of them, and a machine-wide cut would sever it."""
+        ips = " ".join(self.cut_ips)
+        return self.rules(PF_CUT, f"block drop quick proto {{ tcp udp }} from any to {{ {ips} }} port != 22\nblock drop quick proto {{ tcp udp }} from {{ {ips} }} port != 22 to any\n", seconds)
 
     def cut_addresses(self, addresses, ports, protocols, seconds):
         """Drop `protocols` traffic to and from `addresses` on `ports` (pf ranges a:b)."""
@@ -75,15 +78,17 @@ class Mac:
         return self.rules(PF_CUT, f"block drop quick proto {{ {' '.join(p.lower() for p in protocols)} }} from any to {{ {ip} }} port {{ {port} }}\n"
                                   f"block drop quick proto {{ {' '.join(p.lower() for p in protocols)} }} from {{ {ip} }} port {{ {port} }} to any\n", seconds)
 
-    def rebind(self, seconds):
-        rc, out = ssh(self.host, "route -n get default | awk '/interface:/{print $2}'")
-        return self.nat(f"nat on {out} inet proto udp from any to any -> ({out}) port {RANGE.replace('-', ':')}\n", seconds)
+    def udp_ports(self):
+        return set(msh(self.host, "sudo -n lsof -nP -iUDP 2>/dev/null | awk '$1==\"pb\" {print $9}' | sort -u")[1].split())
 
     @contextlib.contextmanager
-    def nat(self, rules, seconds):
-        with self.rules(PF_NAT, rules, seconds):
-            # UDP flows whose translated source port is in the range, read from the pf state table
-            yield lambda: int(ssh(self.host, "sudo -n pfctl -s state 2>/dev/null | grep -c ':4[01][0-9][0-9][0-9]) ->' || true")[1] or 0)
+    def rebind(self, seconds):
+        """pf's nat does not translate the Mac's own traffic (its state table keeps the source port, checked on macOS 26),
+        so the ports move by restarting the daemon while the network is cut: new sockets, new source ports."""
+        before = self.udp_ports()
+        self.restart_daemon()
+        time.sleep(5)
+        yield lambda: len(self.udp_ports() - before)  # daemon UDP endpoints that did not exist before
 
 
 class Windows:
@@ -206,7 +211,7 @@ def rebind(args, target, peer):
         report.add(f"network of the {target.kind} machine cut", True)
         time.sleep(min(30, args.outage_seconds // 4))
         with target.rebind(total) as moved:
-            report.add(f"rebinding of the {target.kind} machine's UDP source ports to {RANGE} armed", True)
+            report.add(f"UDP source ports of the {target.kind} machine rebound", True)
             time.sleep(args.outage_seconds - min(30, args.outage_seconds // 4))
             cut.close()  # the network returns
             returned = time.time()
@@ -217,7 +222,7 @@ def rebind(args, target, peer):
                     break
             report.add(f"first inbound exec peer->{target.kind} after the network returned", first is not None and first <= args.limit,
                        f"{first:.1f} s (limit {args.limit:.0f} s)" if first is not None else "no success within 90 s")
-            report.add(f"after the return the machine's UDP flows leave from {RANGE}", moved() > 0, f"{moved()} flows rewritten")
+            report.add("after the return the machine's UDP traffic uses rebound ports", moved() > 0, f"{moved()} rebound UDP ports/flows")
             report.add("the next three inbound execs succeed", all(peer.exec_into(target, 20)[0] for _ in range(3)))
             start = time.time()
             rc, out = target.pb("exec", peer.ct, "--", "true", timeout=60)
@@ -270,11 +275,12 @@ def main():
     parser.add_argument("--peer-address", help="the address the target reaches the peer at (default: the peer's public address)")
     parser.add_argument("--outage-seconds", type=int, default=120)
     parser.add_argument("--limit", type=float, default=10.0)
+    parser.add_argument("--cut-ip", action="append", default=[], help="Mac only, rebind: an address the cut drops (the API, the hosted relays); repeat")
     parser.add_argument("--relay", action="append", default=[], help="address of a hosted relay (repeat)")
     parser.add_argument("--same-lan", action="store_true", help="the peer is on the target's LAN: also check with no usable relay")
     parser.add_argument("--relay-ports", default="27445,27446", help="the relays' ports, first to last (TCP and UDP)")
     args = parser.parse_args()
-    target = Mac(args.mac, args.name) if args.mac else Windows(args.name)
+    target = Mac(args.mac, args.name, args.cut_ip) if args.mac else Windows(args.name)
     peer = Peer(args.peer_ssh or args.host, args.peer, direct=bool(args.peer_ssh))
     if args.check == "relay":
         args.limit = 15.0

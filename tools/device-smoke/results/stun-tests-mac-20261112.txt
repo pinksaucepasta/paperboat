@@ -1,0 +1,11 @@
+F21-29 on macOS 26.7.2 arm64 (macpool-4 hosted runner, test binaries cross-compiled from main 0c88f1782, run natively): 2026-11-12T18:28:56Z
+=== RUN   TestNoProductionFileNamesAStunServer
+--- PASS: TestNoProductionFileNamesAStunServer (0.03s)
+PASS
+=== RUN   TestTheDERPMapHoldsOnlyTheGivenRelays
+    relay_home_test.go:144: DERP httpsrv listener: 127.0.0.1:49367
+    relay_home_test.go:145: DERP httpsrv listener: 127.0.0.1:49369
+    stuntest.go:65: STUN server shutdown
+    stuntest.go:65: STUN server shutdown
+--- PASS: TestTheDERPMapHoldsOnlyTheGivenRelays (0.00s)
+PASS

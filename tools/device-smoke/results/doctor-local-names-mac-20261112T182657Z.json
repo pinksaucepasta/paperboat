@@ -1,0 +1,29 @@
+{
+ "checks": [
+  {
+   "check": "real resolver: local_names passes",
+   "status": "PASS",
+   "detail": "Local browser names resolve to this computer."
+  },
+  {
+   "check": "DNS dropped: local_names warns",
+   "status": "PASS",
+   "detail": "Local browser names under example.test do not resolve here (no internet DNS, or a router or DNS filter that blocks private answers). Allow example.test in your router or DNS filter, or add `127.100.0.1 <name>.example.test` to your hosts file for the names you open. Machine access with pb does not use these n"
+  },
+  {
+   "check": "the warning names the domain and says what to do",
+   "status": "PASS",
+   "detail": "Local browser names under example.test do not resolve here (no internet DNS, or a router or DNS filter that blocks private answers). Allow example.test in your router or DNS filter, or add `127.100.0.1 <name>.example.test` to your hosts file for the names you open. Machine access with pb does not use these n"
+  },
+  {
+   "check": "pb status still answers with DNS dropped",
+   "status": "PASS",
+   "detail": "Daemon: ready  Generation: 5  Observed: 2026-11-12T18:26:22Z\n\n7d54a427e2f2 (machine_365e927c-8720-4e99-8c62-a39e19da5a51"
+  },
+  {
+   "check": "DNS back: local_names passes again",
+   "status": "PASS",
+   "detail": "Local browser names resolve to this computer."
+  }
+ ]
+}

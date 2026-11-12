@@ -1,0 +1,44 @@
+{
+ "checks": [
+  {
+   "check": "baseline exec peer->mac",
+   "status": "PASS",
+   "detail": "4.2 s peer-ok"
+  },
+  {
+   "check": "baseline exec mac->peer",
+   "status": "PASS",
+   "detail": "7.5 s "
+  },
+  {
+   "check": "network of the mac machine cut",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "UDP source ports of the mac machine rebound",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "first inbound exec peer->mac after the network returned",
+   "status": "PASS",
+   "detail": "5.0 s (limit 10 s)"
+  },
+  {
+   "check": "after the return the machine's UDP traffic uses rebound ports",
+   "status": "PASS",
+   "detail": "5 rebound UDP ports/flows"
+  },
+  {
+   "check": "the next three inbound execs succeed",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "outbound exec mac->peer",
+   "status": "PASS",
+   "detail": "5.5 s "
+  }
+ ]
+}

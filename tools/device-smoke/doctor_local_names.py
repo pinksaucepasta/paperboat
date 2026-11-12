@@ -10,17 +10,18 @@
 3. the rule removed: local_names passes again
 The rule is removed on every exit path; a timer on the device removes it when this script dies.
 """
-import argparse, json, shlex, subprocess, sys, time
+import argparse, os, json, shlex, subprocess, sys, time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+SSH = shlex.split(os.environ.get("PB_MAC_SSH", "ssh -o BatchMode=yes"))  # PB_MAC_SSH=~/.pbmac/ssh.sh for the apple VM (host: vm)
 sys.path.insert(0, str(HERE))
 ANCHOR = "com.apple/pbsmoke-dns"
 
 
 def mac_runner(host):
     def ssh(script, timeout=120):
-        done = subprocess.run(["ssh", "-o", "BatchMode=yes", host, script], capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+        done = subprocess.run([*SSH, host, script], capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
         return done.returncode, done.stdout + done.stderr
 
     def pb(*args):
