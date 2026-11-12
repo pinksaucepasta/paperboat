@@ -8,12 +8,18 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 )
 
+// machineHasManagedSSH: only an online, not retired machine keeps its alias and trusted host keys. A machine that
+// uninstalled itself never tells the server, so presence is the only signal peers get (X-41); it returns with the machine.
+func machineHasManagedSSH(machine api.UserMachine) bool {
+	return machine.Online && machine.State != "revoked" && machine.State != "disconnected" && machine.State != "deleted"
+}
+
 // managedSSHAliasTargets builds the OpenSSH aliases from the machines the inventory refresh just
 // listed; it lists nothing itself (a second full listing per refresh was one of the largest loads).
 func managedSSHAliasTargets(machines []api.UserMachine) []managedssh.OpenSSHAliasTarget {
 	targets := make([]managedssh.OpenSSHAliasTarget, 0, len(machines))
 	for _, machine := range machines {
-		if machine.State == "revoked" || machine.State == "disconnected" || machine.State == "deleted" {
+		if !machineHasManagedSSH(machine) {
 			continue
 		}
 		if ssh, ok := machine.CurrentSSH(); ok {
@@ -31,7 +37,7 @@ func managedSSHKnownHosts(machines []api.UserMachine, domain string) []byte {
 	var content []byte
 	for _, machine := range machines {
 		ssh, ok := machine.CurrentSSH()
-		if !ok || machine.State == "revoked" || machine.State == "disconnected" || machine.State == "deleted" {
+		if !ok || !machineHasManagedSSH(machine) {
 			continue
 		}
 		keys, err := managedssh.ParseHostPublicKeys(ssh.HostKeys)
