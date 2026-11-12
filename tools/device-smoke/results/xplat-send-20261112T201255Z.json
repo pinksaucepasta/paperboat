@@ -1,0 +1,59 @@
+{
+ "check": "xplat-send",
+ "devices": [
+  "L",
+  "M"
+ ],
+ "results": [
+  {
+   "id": "X-15:batch:L>M",
+   "status": "PASS",
+   "detail": "ten files arrive (sha256 equal); eleven are refused: pb: That is 11 files and one send takes at most 10. Send them in smaller groups; nothing was sent. Support reference: su"
+  },
+  {
+   "id": "X-15:modes:L>M",
+   "status": "PASS",
+   "detail": "sender modes (4755, 0755, 0777, 0600) all arrive without setuid, group/other or exec bits"
+  },
+  {
+   "id": "X-15:refuse:L>M",
+   "status": "PASS",
+   "detail": "refused with the path and what to do: is a folder, is a symbolic link"
+  },
+  {
+   "id": "X-15:inboxset:L>M",
+   "status": "PASS",
+   "detail": "refused: relative and Windows form; accepted: ~, spaces/non-ASCII; each delivered"
+  },
+  {
+   "id": "X-15:resume:L>M",
+   "status": "PASS",
+   "detail": "send finished with equal bytes after lanex2-m restarted its daemon mid-transfer (restart rc=0)"
+  },
+  {
+   "id": "X-15:batch:M>L",
+   "status": "PASS",
+   "detail": "ten files arrive (sha256 equal); eleven are refused: pb: That is 11 files and one send takes at most 10. Send them in smaller groups; nothing was sent. Support reference: su"
+  },
+  {
+   "id": "X-15:modes:M>L",
+   "status": "PASS",
+   "detail": "sender modes (4755, 0755, 0777, 0600) all arrive without setuid, group/other or exec bits"
+  },
+  {
+   "id": "X-15:refuse:M>L",
+   "status": "PASS",
+   "detail": "refused with the path and what to do: is a folder, is a symbolic link"
+  },
+  {
+   "id": "X-15:inboxset:M>L",
+   "status": "PASS",
+   "detail": "refused: relative and Windows form; accepted: ~, spaces/non-ASCII; each delivered"
+  },
+  {
+   "id": "X-15:resume:M>L",
+   "status": "PASS",
+   "detail": "send finished with equal bytes after lanex2-l restarted its daemon mid-transfer (restart rc=0)"
+  }
+ ]
+}

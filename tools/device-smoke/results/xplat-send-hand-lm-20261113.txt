@@ -1,0 +1,11 @@
+X-15 L<->M, parts done by hand on the lanex2 fleet (dev-64973afc6 on L and M), 2026-11-13 ~01:45 IST. L = Linux container, M = the real apple Mac.
+
+Size limit (Automatic sends up to 2,000,000,000 bytes; a file of 2,000,000,001 bytes made with truncate):
+  L > M  exit 1: "This transfer is 2.0 GB. Automatic sends up to 2 GB. Use --unlimited to send directly or through your own relay. Nothing was sent."
+  M > L  exit 1: the same message, nothing sent.
+
+Team file request approved on one OS, received on the other (team with the fleet account as owner, a second account's Linux machine as member
+sender; both fleet machines shared into the team with the files capability for that member; inbox policy manual):
+  member sends a 1 KiB random file to M: the request appears, `pb inbox approve` is run on L, the send ends rc 0, the file is in M's Inbox with equal sha256, removed afterwards.
+  member sends a 1 KiB random file to L: `pb inbox approve` run on M, send rc 0, landed in L's Inbox with equal sha256, removed afterwards.
+Script: the two cases of tools/device-smoke/xplat_send.py helpers (inbox_listing/landed) driven by hand with pb team machine share/grant, pb --workspace TEAM send, pb inbox requests/approve.
