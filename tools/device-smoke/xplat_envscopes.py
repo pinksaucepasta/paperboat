@@ -59,14 +59,23 @@ def until(ctl, dev, want, seconds=WAIT):
         time.sleep(6)
 
 
+def unlock(dev):
+    return dev.pb('env', 'vault', 'unlock', '--password-stdin', input=PASSWORD.read_bytes().strip() + b'\n', timeout=120)
+
+
 def setv(ctl, name, value, machine=None):
     args = ['env', 'set', name, '--value-stdin'] + (['--machine', machine] if machine else [])
     done = ctl.pb(*args, input=value.encode(), timeout=120)
+    if done.rc != 0 and 'locked' in done.text + done.errtext:  # a Linux machine without a Secret Service forgets the unlock after 15 minutes
+        unlock(ctl)
+        done = ctl.pb(*args, input=value.encode(), timeout=120)
     assert done.rc == 0, 'set %s%s: %s' % (name, ' on ' + machine if machine else '', (done.text + done.errtext)[-200:])
 
 
 def unset(ctl, name, machine=None):
     base = ['env', 'unset', name] + (['--machine', machine] if machine else []) + ['--json']
+    if 'locked' in ctl.pb(*base, timeout=120).text:
+        unlock(ctl)
     token = (json.loads(ctl.pb(*base, timeout=120).text or '{}').get('data') or {}).get('confirmation_token')
     if token:
         ctl.pb(*base, '--confirm', token, timeout=120)
@@ -250,6 +259,11 @@ def main():
     for dev in devices.values():
         done = dev.pb('env', 'vault', 'unlock', '--password-stdin', input=password + b'\n', timeout=120)
         assert done.rc == 0, '%s: unlock failed' % dev.name
+    for scope in [None] + [d.alias for d in devices.values()]:  # leftovers of an interrupted run would leak into the exact comparisons below
+        listed = ctl.pb('env', 'list', *(['--machine', scope] if scope else []), '--json', timeout=120)
+        for stale in (json.loads(listed.text).get('data', {}).get('names', []) if listed.rc == 0 and listed.text.strip() else []):
+            if stale.startswith('XS_'):
+                unset(ctl, stale, machine=scope)
     want = lambda n: not only or n in only  # noqa: E731
     if want('override'):
         for key, dev in devices.items():
