@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -464,5 +465,29 @@ func TestHTTPClientRouteSnapshotAsksForAVersion(t *testing.T) {
 	}
 	if len(sent) != before {
 		t.Fatalf("%d route requests inside the quiet gap, want none", len(sent)-before)
+	}
+}
+
+// A process that released to its replacement (or has not taken over yet) is silent: a control request failing
+// then is not reported as a control failure; on the reporting process it is.
+func TestControlFailureIsReportedOnlyByTheReportingProcess(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "control down", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	var reported atomic.Int32
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second, ControlFailure: func(context.Context, string, error) { reported.Add(1) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	_, _ = client.IngressDecisions(ctx, "edge_01", "epoch_0001", "")
+	if reported.Load() != 1 {
+		t.Fatalf("a failure on the reporting process was reported %d times, want 1", reported.Load())
+	}
+	client.SetSilent(true)
+	_, _ = client.IngressDecisions(ctx, "edge_01", "epoch_0001", "")
+	if reported.Load() != 1 || !client.Silent() {
+		t.Fatalf("a failure on a silent process was reported (%d reports)", reported.Load())
 	}
 }

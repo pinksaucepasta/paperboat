@@ -311,6 +311,9 @@ type RouteWorker struct {
 	// Unavailable, when set, receives the hostnames of route groups whose probe failed.
 	Unavailable *route.UnavailableHosts
 	Reporter    *reporting.Reporter
+	// Quiet, when set, reports a process that is not the reporting one (control.HTTPClient.Silent): its reconcile
+	// failures are not reported.
+	Quiet func() bool
 	// Registry owns the canonical durable HTTP generation. Legacy helper and
 	// retained preview assignments use LegacyRegistry so a successful empty
 	// canonical snapshot cannot erase their independent ownership.
@@ -509,16 +512,18 @@ func (w *RouteWorker) recordReconcile(ctx context.Context, err error) {
 	if err != nil {
 		slog.Warn("route_reconcile_failed", "error", err.Error())
 	}
-	if reportRouteReconcileFailure(ctx, err) && w.Reporter != nil {
+	if reportRouteReconcileFailure(ctx, err, w.Quiet != nil && w.Quiet()) && w.Reporter != nil {
 		w.Reporter.ObserveFailure(ctx, "route_reconcile", err)
 	}
 }
 
-// reportRouteReconcileFailure is false once the worker's own context is done: a control request cut by this
-// process's shutdown is not a control failure (the anvit edge logged control_unavailable on carrier-admissions
-// 0.4 s before its own shutdown, and the deploy gate counted it).
-func reportRouteReconcileFailure(ctx context.Context, err error) bool {
-	return err != nil && ctx.Err() == nil
+// reportRouteReconcileFailure is false once the worker's own context is done or this process is quiet (it released
+// to its replacement, or has not taken over yet): a control request cut by a process's own handover and shutdown is
+// not a control failure. The old oracle edge logged control_unavailable on carrier-admissions 0.145 s before its
+// shutdown even with the context check, because the handover release (and the drain that follows) comes before
+// the workers' context is cancelled; the deploy gate counted it.
+func reportRouteReconcileFailure(ctx context.Context, err error, quiet bool) bool {
+	return err != nil && ctx.Err() == nil && !quiet
 }
 
 // transientControlUnavailable reports whether every leaf of a possibly joined

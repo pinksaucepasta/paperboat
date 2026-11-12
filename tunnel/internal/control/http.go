@@ -107,6 +107,10 @@ type HTTPClient struct {
 // SetSilent turns this process's node state reports off or on. Pulls and usage are unaffected.
 func (c *HTTPClient) SetSilent(silent bool) { c.silent.Store(silent) }
 
+// Silent reports whether this process is not the reporting one: a replacement still warming up, or the serving
+// process after it released to the replacement. Failures in that window are not control outages.
+func (c *HTTPClient) Silent() bool { return c.silent.Load() }
+
 // routeQuietGap is how long an unchanged route set is served from memory before the edge asks
 // again, so an idle edge makes at most one route request per gap whatever its control interval.
 const routeQuietGap = 10 * time.Second
@@ -680,7 +684,7 @@ func (c *HTTPClient) startRequest(ctx context.Context, operation string) (contex
 				if outcome == "failed" {
 					outcome, code = "rejected", "invalid"
 				}
-			} else if c.controlFailure != nil {
+			} else if c.controlFailure != nil && !c.silent.Load() {
 				c.controlFailure(ctx, controlReference(ctx), err)
 				code = "control_request_failed"
 			}

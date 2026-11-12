@@ -375,14 +375,17 @@ func waitForRouteWorkerState(t *testing.T, worker *RouteWorker, state *node.Stat
 func TestRouteReconcileFailureIsNotReportedAfterShutdownStarted(t *testing.T) {
 	failure := errors.New("control request failed")
 	live, cancel := context.WithCancel(context.Background())
-	if !reportRouteReconcileFailure(live, failure) {
+	if !reportRouteReconcileFailure(live, failure, false) {
 		t.Fatal("a failure on a live worker was not reported")
 	}
+	if reportRouteReconcileFailure(live, failure, true) {
+		t.Fatal("a failure after the handover release (quiet, context still live) was reported")
+	}
 	cancel()
-	if reportRouteReconcileFailure(live, failure) {
+	if reportRouteReconcileFailure(live, failure, false) {
 		t.Fatal("a failure after the worker's shutdown started was reported")
 	}
-	if reportRouteReconcileFailure(context.Background(), nil) {
+	if reportRouteReconcileFailure(context.Background(), nil, false) {
 		t.Fatal("no error was reported as a failure")
 	}
 }
