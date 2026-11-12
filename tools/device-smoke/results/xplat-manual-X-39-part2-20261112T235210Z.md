@@ -1,0 +1,3 @@
+# X-39 part 2: reboot of my own hosted Windows runner, UTC 20261112 23:00 (IST 04:30 13 Nov)
+
+`shutdown /r /t 3 /f` on the runner (machine xpq-w, runneradmin, service model current-user daemon), observed from the Linux machine: runtime stayed ok for 148 s (the machine was going down), then `pb wait --for runtime|transport` and `pb exec` failed for 20+ minutes; ssh to the runner closed and never answered again. A hosted runner does not survive its own reboot (the job that holds the VM and its ssh tunnel ends), so "a reboot brings the machine back without user action" cannot be shown on it; the only Windows machine that can reboot is the user's victus. Not run: fast startup, hibernation, RDP, service before sign-in, any macOS state.
