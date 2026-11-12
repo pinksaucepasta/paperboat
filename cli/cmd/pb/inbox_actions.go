@@ -192,10 +192,33 @@ func inboxResetCommand(c *command.Context) error {
 	return setInboxPath(c, path)
 }
 
-func setInboxPath(c *command.Context, path string) error {
-	path = filepath.Clean(strings.TrimSpace(path))
-	if err := inbox.EnsurePath(path); err != nil {
+// inboxDirectoryArgument turns what the user typed into this computer's own absolute form: `~` is the home directory (a shell
+// does not expand it for a Windows program); a relative path or one written for the other OS is refused, naming it.
+func inboxDirectoryArgument(typed string) (string, error) {
+	path := strings.TrimSpace(typed)
+	if home, err := os.UserHomeDir(); err == nil && (path == "~" || strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`)) {
+		path = filepath.Join(home, path[1:])
+	}
+	path = filepath.Clean(path)
+	if !filepath.IsAbs(path) {
+		form := "a path starting with / (or ~)"
+		if filepath.Separator == '\\' {
+			form = `a path starting with a drive letter such as C:\ or with \\server\share (or ~)`
+		}
+		return "", usageError{err: errors.New("inbox path is not absolute"), refusal: true,
+			publicMessage: fmt.Sprintf("\"%s\" is not a full path on this computer. Give %s, written the way this computer writes paths.", typed, form)}
+	}
+	return path, nil
+}
+
+func setInboxPath(c *command.Context, typed string) error {
+	path, err := inboxDirectoryArgument(typed)
+	if err != nil {
 		return err
+	}
+	if err := inbox.EnsurePath(path); err != nil {
+		return usageError{err: err, refusal: true,
+			publicMessage: fmt.Sprintf("Paperboat cannot use %s as the Inbox (%v). Choose a folder that exists or that you can create, and that only you can write to.", path, err)}
 	}
 	store, err := runtimeIdentityStore()
 	if err != nil {

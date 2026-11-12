@@ -3,9 +3,12 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -80,5 +83,24 @@ func TestInboxPolicyAndDecisionsReachTheirAuthenticatedOwners(t *testing.T) {
 				t.Fatal("decision response was not preserved")
 			}
 		})
+	}
+}
+
+func TestInboxSetExpandsHomeAndRefusesAPathThatIsNotFullHere(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	got, err := inboxDirectoryArgument("~/in box/üñí")
+	if err != nil || got != filepath.Join(home, "in box", "üñí") {
+		t.Fatalf("~ not expanded: %q %v", got, err)
+	}
+	for _, typed := range []string{"relative/dir", `C:\Users\x\In`, ""} {
+		if runtime.GOOS == "windows" && typed != "relative/dir" && typed != "" {
+			continue
+		}
+		_, err := inboxDirectoryArgument(typed)
+		if !errors.Is(err, errUsage) || !strings.Contains(err.Error(), "is not a full path on this computer") || !strings.Contains(err.Error(), typed) {
+			t.Fatalf("%q: %v", typed, err)
+		}
 	}
 }
