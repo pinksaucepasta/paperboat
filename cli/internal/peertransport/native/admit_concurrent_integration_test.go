@@ -46,7 +46,7 @@ func TestNativeAdmitsStreamsConcurrently(t *testing.T) {
 			}()
 		}
 	}
-		t.Setenv("IN_TS_TEST", "true")
+	t.Setenv("IN_TS_TEST", "true")
 	ctx, cancel := context.WithTimeout(t.Context(), admissionBound)
 	defer cancel()
 	dm := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")
