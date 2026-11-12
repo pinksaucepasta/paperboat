@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
@@ -122,13 +123,29 @@ func TestNativeCommitFinishesWithExistingUpdateState(t *testing.T) {
 	}
 }
 
+// rootOwnedTempDir is a temporary directory whose every ancestor is root-owned and not a link, which is what creating
+// the update-state directory demands: macOS's per-user temp directory (/var/folders, a link into a user-owned tree)
+// is not such a place, /private/var/tmp is.
+func rootOwnedTempDir(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS != "darwin" {
+		return t.TempDir()
+	}
+	root, err := os.MkdirTemp("/private/var/tmp", "pb-commit-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	return root
+}
+
 // A commit with no update state yet still takes the activation lock; the lock creates the state directory, so the
 // directory existing afterwards shows the commit did not run lock-free.
 func TestNativeCommitLocksEvenWithoutUpdateState(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("protected install transaction requires root")
 	}
-	root := t.TempDir()
+	root := rootOwnedTempDir(t)
 	paths := installPaths{worker: filepath.Join(root, "pb"), workerRollback: filepath.Join(root, "rollback"), workerNext: filepath.Join(root, "next"), metadata: filepath.Join(root, "metadata"), journal: filepath.Join(root, "journal"), updateState: filepath.Join(root, "updates")}
 	for path, body := range map[string]string{paths.worker: "new bytes", paths.metadata: "old metadata"} {
 		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
