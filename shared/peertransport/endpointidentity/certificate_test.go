@@ -243,3 +243,21 @@ func TestTLSLeafAcceptedAcrossTenMinutesOfClockSkew(t *testing.T) {
 		t.Fatal("a clock 30 minutes off was accepted")
 	}
 }
+
+// Relays (relay/derpquic Verifier) and peers (native boundTLS) refuse a leaf spanning more than 24 h + 1 min.
+func TestTLSLeafSpanStaysWithinTheRelayBound(t *testing.T) {
+	rootPublic, rootPrivate, _ := ed25519.GenerateKey(rand.Reader)
+	quicPublic, quicPrivate, _ := ed25519.GenerateKey(rand.Reader)
+	now := time.Unix(1_800_000_000, 0).UTC()
+	certificate, err := Sign(rootPrivate, Claims{AccountID: "account_01", Role: RoleMachine, EndpointID: "machine_01", QUICPublicKey: quicPublic, Generation: 1, Serial: 1, IssuedAt: now.Add(-time.Minute), ExpiresAt: now.Add(90 * 24 * time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := NewTLSCertificate(certificate, rootPublic, quicPrivate, now, maximumLeafLifetime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if span := leaf.Leaf.NotAfter.Sub(leaf.Leaf.NotBefore); span > 24*time.Hour+time.Minute {
+		t.Fatalf("leaf spans %v; relays and peers refuse more than 24h1m", span)
+	}
+}

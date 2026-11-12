@@ -9,6 +9,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/clientauthority"
+	"github.com/pinksaucepasta/paperboat/shared/clockleeway"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
@@ -32,8 +33,8 @@ func TestCLILeafIsStampedOnTheServerClock(t *testing.T) {
 			if err != nil {
 				t.Fatalf("leaf for a server-valid certificate refused: %v", err)
 			}
-			if now := serverclock.Now(); now.Before(leaf.Leaf.NotBefore) || !now.Before(leaf.Leaf.NotAfter) || now.Sub(leaf.Leaf.NotBefore) > 2*time.Minute {
-				t.Fatalf("leaf valid %s..%s, want it stamped from server-clock %s", leaf.Leaf.NotBefore, leaf.Leaf.NotAfter, now)
+			if now := serverclock.Now(); now.Before(leaf.Leaf.NotBefore) || !now.Before(leaf.Leaf.NotAfter) || now.Sub(leaf.Leaf.NotBefore) < clockleeway.Leeway || now.Sub(leaf.Leaf.NotBefore) > clockleeway.Leeway+time.Minute {
+				t.Fatalf("leaf valid %s..%s, want it stamped from server-clock %s minus the clock leeway", leaf.Leaf.NotBefore, leaf.Leaf.NotAfter, now)
 			}
 		})
 	}

@@ -43,7 +43,12 @@ func NewTLSCertificate(certificate Certificate, rootPublic ed25519.PublicKey, pr
 		return tls.Certificate{}, errors.New("invalid QUIC leaf lifetime")
 	}
 	notBefore := now.UTC().Add(-clockleeway.Leeway).Truncate(time.Second)
+	// The span from the backdated start stays within 24 h: relays and peers refuse a leaf longer than 24 h + 1 min
+	// (relay/derpquic authority.go, native owner.go), and a 24 h 15 min leaf was refused everywhere.
 	notAfter := now.UTC().Add(lifetime).Truncate(time.Second)
+	if limit := notBefore.Add(maximumLeafLifetime); notAfter.After(limit) {
+		notAfter = limit
+	}
 	if notAfter.After(verified.Claims.ExpiresAt) {
 		notAfter = verified.Claims.ExpiresAt
 	}
