@@ -16,12 +16,6 @@ Internal QUIC support does not constitute generic UDP forwarding. Define actual 
 limits and acceptance before implementation; this note is not implementation/deployment evidence.
 
 
-## Managed SSH: more OS users, session recording — not now (2026-10-26)
-
-From PLAN 3b "Managed SSH: review and fixes" (D3, D4). SSH as more than one OS user per machine (Tailscale
-SSHUsers, "=" never root; Teleport role logins) and session recording (Tailscale recorders, Teleport
-best-effort/strict recording). Both are new features; the slice-7 session audit events cover who and when.
-
 ## CLI UX review and fixes — before customizable shortcuts
 
 Recorded 2026-09-08 by Codex from the user's direction.
@@ -265,33 +259,6 @@ boundaries, and plan separation of ownership, authorization, database queries/mi
 API composition and dashboard consumers. Verify both standalone base operation and the
 complete private edition, including security and lifecycle behavior. This is substantial
 architecture work requiring a scoped task, not a feature-flag-only packaging change.
-
-## ENV in plain SSH and VS Code — moved to PLAN.md F16 (2026-10-22)
-
-**Moved to PLAN.md F16 (2026-10-22, user decision): built now.**
-
-ENV reaches Paperboat terminals and `pb exec` only; `pb ssh`, plain `ssh` and VS Code Remote-SSH
-get the machine's own sshd environment. An opt-in shell hook (`pb env hook` adding one line to
-bash/zsh/fish startup) would cover them. Open question first: a plain SSH login identifies only a
-unix user, not a Paperboat account or workspace, so the hook must not guess whose values to load.
-Must fail quietly when the vault is locked and never slow shell startup. Build only if users ask.
-
-## Unify tunnels and previews — later
-
-**Moved to PLAN.md section 3a (2026-10-20, user decision): built right after Linux, before macOS.
-Headless tunnel connectors (a token that runs without a Paperboat machine) are NOT part of it; they stay here as a
-post-launch idea. Tunnels run only on enrolled Paperboat machines.**
-
-Recorded 2026-10-18 at the user's direction.
-
-Explore one underlying implementation and consistent user workflow for tunnels and
-previews, sharing publication, readiness, renewal, routing, expiry and cleanup instead
-of maintaining duplicate lifecycle paths. Decide whether separate CLI names remain
-useful for temporary previews and persistent tunnels before changing the public UX.
-
-Preserve existing protocol support, access controls and privacy boundaries: private
-native access remains end-to-end encrypted; browser HTTP terminates TLS at the edge.
-This is a post-launch design item, not new implementation work or a launch requirement.
 
 ## Tunnel-only mode without a Paperboat machine (and an official container image)
 
