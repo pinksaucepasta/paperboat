@@ -495,6 +495,24 @@ func TestResolveTunnelSelectorAsksTheServerForOnlyTheMatchingTunnels(t *testing.
 	}
 }
 
+// `pb tunnel show <missing>` reached the user as "Paperboat could not finish the command, run pb doctor"
+// (operation_failed/local_io): a selector nothing matches is a typed not-found that says what to do.
+func TestResolveTunnelSelectorMissingIsATypedNotFound(t *testing.T) {
+	client := tunnelSelectorTestClient(t, func(writer http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(writer).Encode(map[string]any{"data": api.TunnelPage{}})
+	})
+	for _, selector := range []string{"tunnel_00000000-0000-4000-8000-000000000000", "no-such-tunnel"} {
+		_, err := resolveTunnelSelector(t.Context(), client, selector)
+		if err == nil {
+			t.Fatalf("%s: a missing tunnel resolved", selector)
+		}
+		value := classifyCLIJSONError(err)
+		if value.Code != "tunnel_not_found" || value.Category != "usage" || !strings.Contains(value.Message, "pb tunnel list") || strings.Contains(value.Message, "pb doctor") {
+			t.Fatalf("%s: error = %+v", selector, value)
+		}
+	}
+}
+
 func TestResolveTunnelSelectorPaginatesAndRejectsCursorCycle(t *testing.T) {
 	target := validCommandTunnel()
 	target.Name = "target"

@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"errors"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -80,7 +80,8 @@ func resolveTunnelSelector(ctx context.Context, client *api.Client, value string
 					return id, nil
 				}
 			}
-			return "", errors.New("tunnel was not found")
+			// a typed refusal, not a bare error: a bare one reaches the user as "could not finish the command, run pb doctor"
+			return "", &api.APIError{Status: http.StatusNotFound, Code: "tunnel_not_found", ServerMessage: "The tunnel was not found (tunnel_not_found). Run `pb tunnel list` to see your tunnels."}
 		}
 		if _, exists := seen[page.NextCursor]; exists {
 			return "", api.ErrUnsafeTunnelResponse

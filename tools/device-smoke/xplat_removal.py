@@ -47,6 +47,12 @@ def sign_in(dev, token):
     """Every device is signed in with the account's token, so any of them can mint an enrollment token."""
     done = dev.pb('auth', 'status', '--json')
     if done.rc == 0 and '"signed_in":true' in done.text.replace(' ', ''):
+        # signed in as WHOM matters: a device another lane signed in would mint this fleet's enrollment tokens for that lane's account
+        status = json.loads(done.text)
+        account = status.get('data', status).get('account', {}).get('id', '')
+        mine = os.environ.get('XPLAT_ACCOUNT_ID')
+        if mine and account != mine:
+            raise AssertionError('%s is signed in as another account (%s...), not this fleet\'s' % (dev.name, account[:13]))
         return
     if dev.os == 'linux':  # a container has no keyring: the session lives in a file the config allows
         shown = json.loads(dev.pb('config', 'show', '--json').text)
@@ -78,11 +84,12 @@ def alias_hosts(dev):
 
 
 def works(dev, target, tries=36):
-    last = None
+    """hostname of target through dev once it answers (the row's bound: 3 minutes); the seconds waited are returned with it."""
+    last, began = None, time.time()
     for _ in range(tries):
         last = dev.pb('exec', target.alias, '--', 'hostname', timeout=90)
         if last.rc == 0 and last.text.strip():
-            return last.text.strip()
+            return last.text.strip(), int(time.time() - began)
         time.sleep(5)
     doctor = dev.pb('doctor', target.alias, timeout=120).text
     failing = [line.strip()[:160] for line in doctor.splitlines() if ': fail:' in line or ': warning:' in line]
@@ -197,11 +204,12 @@ def flow(kind, target, observers, controller):
         enroll_again(target, controller, 'pair')
     new_id, new_key = identity(observers[0], target.alias)
     assert new_id != old_id and new_key != old_key, 'the machine enrolled again kept its identity (%s)' % new_id
-    waits = []
+    reach, waits = [], []
     for observer in observers:
-        works(observer, target)
+        reach.append(works(observer, target)[1])
         waits.append(ssh_works(observer, target))
-    return '%s; new identity after enrolling again, both observers exec and pb ssh it (pb ssh ready %s s after exec)' % ('; '.join(notes), '/'.join(map(str, waits)))
+    return '%s; new identity after enrolling again, both observers exec and pb ssh it (exec reachable %s s after the new identity was listed, pb ssh %s s later)' % (
+        '; '.join(notes), '/'.join(map(str, reach)), '/'.join(map(str, waits)))
 
 
 def check(name, ident, action):

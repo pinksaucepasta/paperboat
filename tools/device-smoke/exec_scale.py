@@ -19,11 +19,12 @@ import control_outage as c  # noqa: E402
 WORKER = r'''
 import json, subprocess, sys, threading, time
 count, sleep_s, target = int(sys.argv[1]), sys.argv[2], sys.argv[3]
+server = ["--server", sys.argv[4]] if len(sys.argv) > 4 else []
 windows = len(sys.argv) > 4 and sys.argv[4] == "windows"
 rows = [None] * count
 def run(i):
     start = time.time()
-    done = subprocess.run([".local/bin/pb", "exec", target, "--", *(["cmd", "/c", "ping", "-n", str(int(sleep_s) + 1), "127.0.0.1"] if windows else ["sleep", sleep_s])], capture_output=True, text=True, timeout=300)
+    done = subprocess.run([".local/bin/pb", *server, "exec", target, "--", *(["cmd", "/c", "ping", "-n", str(int(sleep_s) + 1), "127.0.0.1"] if windows else ["sleep", sleep_s])], capture_output=True, text=True, timeout=300)
     rows[i] = {"i": i, "seconds": round(time.time() - start, 2), "rc": done.returncode, "tail": (done.stdout + done.stderr).strip()[-160:]}
 gate = threading.Barrier(count)
 def go(i):
@@ -45,6 +46,7 @@ def main():
     parser.add_argument("--client-ct", default=c.NAMES["a"], help="the container whose pb starts the execs")
     parser.add_argument("--client-ssh", help="a macOS host (ssh) whose pb starts the execs instead of a container")
     parser.add_argument("--target-name", default=c.NAMES["b"], help="the machine every exec runs on (a container or a Mac)")
+    parser.add_argument("--server", default="", help="the control plane URL the client pb must talk to when its config names another one (staging)")
     args = parser.parse_args()
     encoded = base64.b64encode(WORKER.encode()).decode()
     if args.client_ssh:  # the worker runs in the Mac's home, where ./.local/bin/pb is the installed pb
