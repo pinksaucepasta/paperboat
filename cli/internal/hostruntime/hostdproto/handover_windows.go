@@ -32,7 +32,11 @@ import (
 // A new generation that fails before its 'C' leaves the old one serving. No 'A' within handoverAckTimeout of the
 // old one's 'C': the old one binds its names again and keeps serving.
 
-const handoverAckTimeout = 5 * time.Second
+// handoverAckTimeout covers the new worker's whole activation (it binds the loopback address when its control plane
+// component starts, after components that call the control plane, each bounded by its own request timeout). At 5 s
+// a slow control plane made the old generation take the address back before the new one bound it: the new worker
+// then failed with "address already in use" and the install timed out (winpool-7, 2026-11-12, staging server).
+const handoverAckTimeout = time.Minute
 
 // HandoverConfig is the old generation's side: Listener is the handover pipe it serves now, StopAccepting gives the
 // fixed names up and Resume takes them back (binding a new handover pipe that Listener then returns).
@@ -150,6 +154,10 @@ func (h *Handover) Commit(bind func() error) error {
 		return causedFailure{message: "the running hostd generation did not give its pipes up", cause: err}
 	}
 	if err := bind(); err != nil {
+		return err
+	}
+	// The activation may have run longer than the commit's step deadline.
+	if err := h.connection.SetDeadline(time.Now().Add(handoverStepTimeout)); err != nil {
 		return err
 	}
 	if err := writeAll(h.connection, []byte{handoverAck}); err != nil {

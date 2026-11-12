@@ -10,6 +10,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	clientconfig "github.com/pinksaucepasta/paperboat/internal/config"
@@ -49,7 +50,7 @@ func installUpdateSource(ctx context.Context, sourcePath string, source installs
 			return "", runtimeFailure("invalid Windows installation source identity", err)
 		}
 		if err := source.Verify(sourcePath); err != nil {
-			return "", err
+			return "", runtimeFailure("Windows installation failed while verifying the executable", err)
 		}
 	}
 	account, err := user.Current()
@@ -58,27 +59,27 @@ func installUpdateSource(ctx context.Context, sourcePath string, source installs
 	}
 	sid, err := currentBootstrapSID()
 	if err != nil {
-		return "", err
+		return "", runtimeFailure("Windows installation failed while resolving the installing account", err)
 	}
 	instance, err := hostinstall.WindowsInstanceForSID(sid)
 	if err != nil {
-		return "", err
+		return "", runtimeFailure("Windows installation failed while resolving the installing account", err)
 	}
 	layout, err := hostinstall.WindowsLayoutForInstance(instance)
 	if err != nil {
-		return "", err
+		return "", runtimeFailure("Windows installation failed while locating the installation directories", err)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", err
+		return "", runtimeFailure("Windows installation failed while locating the user profile", err)
 	}
 	stateRoot, err := helperconfig.DefaultStateRoot(os.Getenv)
 	if err != nil {
-		return "", err
+		return "", runtimeFailure("Windows installation failed while locating the user state directory", err)
 	}
 	client, err := clientconfig.Load("")
 	if err != nil {
-		return "", err
+		return "", runtimeFailure("Windows installation failed while reading the Paperboat configuration", err)
 	}
 	request := hostinstall.Request{Schema: hostinstall.SchemaV1, Platform: "windows", User: windowsAccountName(account.Username), Group: "Paperboat", OwnerSID: sid, Executable: sourcePath, Source: source, StateRoot: stateRoot, WorkspaceRoot: home, ControlURL: firstNonEmpty(controlURL, client.ServerURL), EnrollmentPending: true, UpdateBundle: bundlePath, Force: force, SuppliedUpdate: explicitUpdate}
 	action := elevation.ActionInstall
@@ -98,11 +99,11 @@ func installUpdateSource(ctx context.Context, sourcePath string, source installs
 			action = elevation.ActionInstallCommit
 		}
 	} else if !runtimeCausesOnly(loadErr, os.ErrNotExist, hostinstall.ErrNotInstalled) {
-		return "", loadErr
+		return "", runtimeFailure("Windows installation failed while reading the installed Paperboat configuration; if this build cannot read it, run `pb uninstall` and install again", loadErr)
 	}
 	installerExecutable, err := os.Executable()
 	if err != nil {
-		return "", err
+		return "", runtimeFailure("Windows installation failed while locating the installer executable", err)
 	}
 	elevatedPath, cleanup, err := stageWindowsElevationExecutable(installerExecutable)
 	if err != nil {
@@ -124,9 +125,26 @@ func installUpdateSource(ctx context.Context, sourcePath string, source installs
 				return "", hostinstall.ErrLegacyCarrierRunning
 			}
 		}
-		return "", err
+		return "", runtimeFailure(elevatedInstallFailureMessage(err), err)
 	}
 	return layout.Binary, nil
+}
+
+// elevatedInstallFailureMessage names the administrator step an elevated install ended in. A step that failed names
+// itself through its RemoteError code; one that timed out carries the step in the helper's message (the elevated
+// side reports the named step even when its deadline expired), and the caller says what to do.
+func elevatedInstallFailureMessage(err error) string {
+	var remote *elevation.RemoteError
+	if errors.As(err, &remote) {
+		if message := elevation.RuntimeInstallFailureMessage(remote.Code); message != "" {
+			return strings.TrimSuffix(message, ".")
+		}
+	}
+	if errors.Is(err, elevation.ErrElevationTimedOut) {
+		detail := strings.TrimSpace(strings.TrimPrefix(err.Error(), elevation.ErrElevationTimedOut.Error()+":"))
+		return "Windows installation timed out in the administrator step (" + detail + ")"
+	}
+	return "Windows installation failed in the administrator step"
 }
 
 const (

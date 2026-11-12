@@ -860,6 +860,10 @@ func newWindowsActivation(request Request, layout service.Layout, instanceRoot, 
 			var previous *WindowsRuntimeConfig
 			if installed, loadErr := LoadWindowsRuntimeConfigForInstance(layout.Instance); loadErr == nil {
 				previous = &installed
+			} else if !installNotExistOnly(loadErr) {
+				// Without the installed generation there is no handover: the new hostd would bind the address the running
+				// one still serves and fail with "address already in use".
+				return hostInstallFailure("read the installed runtime configuration before the new hostd generation starts", loadErr)
 			}
 			hostdSocket, handoverFrom, err := windowsHostdSockets(layout.Instance, request.Source, previous)
 			if err != nil {

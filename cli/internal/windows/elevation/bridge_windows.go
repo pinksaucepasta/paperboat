@@ -440,6 +440,13 @@ func Execute(ctx context.Context, requestPath, resultPath, cancelPath string, ha
 		result.Status, result.ErrorCode, result.ErrorMessage = statusCanceled, "canceled", boundedContextMessage(ErrElevationCanceled, operationErr)
 	case errors.Is(operationContextErr, context.DeadlineExceeded) || errors.Is(operationErr, context.DeadlineExceeded):
 		result.Status, result.ErrorCode, result.ErrorMessage = statusTimedOut, "deadline_exceeded", boundedContextMessage(ErrElevationTimedOut, operationErr)
+		// A step that ran out of time still names itself: the caller otherwise sees only the elapsed deadline.
+		var named interface{ ElevationFailureCode() string }
+		if errors.As(operationErr, &named) {
+			if message := RuntimeInstallFailureMessage(named.ElevationFailureCode()); message != "" {
+				result.ErrorMessage = sanitizeMessage(message+" "+result.ErrorMessage, 2048)
+			}
+		}
 	case operationErr == nil:
 	default:
 		result.Status, result.ErrorCode, result.ErrorMessage = statusError, operationFailed, sanitizeMessage(operationErr.Error(), 2048)
