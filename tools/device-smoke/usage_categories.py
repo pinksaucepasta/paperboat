@@ -8,12 +8,16 @@ usage and billing API (the CLI credential is read in memory, never printed) and 
   * each driven category shows relay bytes of at least what was driven;
   * billing usage_bytes grew by exactly the managed-relay plus edge growth of the same window
     (direct and relay bytes of an unidentified node are recorded, never debited).
-Usage: usage_categories.py TARGET
+Usage: usage_categories.py TARGET [--team TEAM --driver ACCOUNT [--idle ACCOUNT ...]]
+
+With --team the machine is team-owned and the numbers are the team's: the pool (the team's usage and billing
+usage_bytes, billed by exactly the charged paths) and per member (usage filtered by actor_account_id): the driving
+member's bytes equal the team's, every --idle member's bytes did not move.
 
 With PB_SMOKE_WINDOWS_PB set the controller is the Windows device (winhost.py; TARGET is a Unix machine of the same
 account): its UDP is blocked by a firewall rule, pb.exe drives every category (no rsync on Windows: scp and sftp stand
 for the ssh category), and the account's API credential, which Windows keeps under DPAPI where this controller cannot
-read it, comes from PB_SMOKE_API_CMD: a command that prints the access token and the server URL on two lines (for
+read it, comes from PB_SMOKE_API_CMD (also on Unix, for a controller with no user sign-in, such as a container: a team-scoped API token): a command that prints the access token and the server URL on two lines (for
 example ssh to a Unix machine signed in to the same account).
 """
 import argparse
@@ -56,7 +60,7 @@ def pb(*arguments, timeout=150):
 
 def credential():
     """(access token, server URL) of the account: this machine's CLI credential, or PB_SMOKE_API_CMD for the device."""
-    if DEVICE:
+    if os.environ.get('PB_SMOKE_API_CMD'):
         lines = subprocess.run(shlex.split(os.environ['PB_SMOKE_API_CMD']), capture_output=True, text=True, timeout=60,
                                stdin=subprocess.DEVNULL).stdout.split()
         assert len(lines) == 2, 'PB_SMOKE_API_CMD must print the access token and the server URL'
@@ -65,7 +69,8 @@ def credential():
 
 
 class Api:
-    def __init__(self):
+    def __init__(self, workspace='personal'):
+        self.workspace = workspace
         self.token, self.server = self.read_token(), credential()[1]
 
     @staticmethod
@@ -77,7 +82,7 @@ class Api:
     def get(self, path):
         for attempt in range(2):
             request = urllib.request.Request(self.server + path, headers={'Authorization': 'Bearer ' + self.token,
-                                                                          'X-Paperboat-Workspace': 'personal'})
+                                                                          'X-Paperboat-Workspace': self.workspace})
             try:
                 with urllib.request.urlopen(request, timeout=30) as response:
                     return json.loads(response.read())['data']
@@ -86,11 +91,16 @@ class Api:
                     raise
                 self.token = self.read_token()
 
-    def snapshot(self, start):
-        query = urllib.parse.urlencode({'start': start, 'end': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() + 60)),
-                                        'limit': '200', 'workspace': 'personal'})
-        usage = self.get('/v1/usage?' + query)
-        billing = self.get('/v1/billing/workspaces/personal')
+    def snapshot(self, start, actors=()):
+        end = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() + 60))
+
+        def usage_of(actor=''):
+            query = {'start': start, 'end': end, 'limit': '200', 'workspace': self.workspace}
+            if actor:
+                query['actor_account_id'] = actor
+            return self.get('/v1/usage?' + urllib.parse.urlencode(query))
+        usage = usage_of()
+        billing = self.get('/v1/billing/workspaces/' + ('personal' if self.workspace == 'personal' else 'teams/' + self.workspace))
         charged = sum(p['upload_bytes'] + p['download_bytes'] for p in usage['totals']['by_path']
                       if (p['mode'], p['hosting']) in CHARGED or p['mode'] == 'edge')
         kinds = {}
@@ -98,16 +108,18 @@ class Api:
             for path in resource['paths']:
                 if path['mode'] == 'relay':
                     kinds[resource['resource_kind']] = kinds.get(resource['resource_kind'], 0) + path['upload_bytes'] + path['download_bytes']
-        return {'billing': billing['usage_bytes'], 'charged': charged, 'kinds': kinds}
+        total = lambda u: sum(p['upload_bytes'] + p['download_bytes'] for p in u['totals']['by_path'])
+        return {'billing': billing['usage_bytes'], 'charged': charged, 'kinds': kinds, 'total': total(usage),
+                'actors': {actor: total(usage_of(actor)) for actor in actors}}
 
-    def quiet_snapshot(self, start, before=None):
+    def quiet_snapshot(self, start, before=None, actors=()):
         """Reads unchanged for SETTLE seconds (and, after a drive, every category reached): nothing is mid-flight.
 
         A recorder batches changed counters to one report per 5 minutes, so a driven flow shows up up to 5 minutes
         later and only reads unchanged for longer than that prove nothing is pending."""
         previous, since = None, time.monotonic()
         for _ in range(60):
-            current = self.snapshot(start)
+            current = self.snapshot(start, actors)
             reached = before is None or all(current['kinds'].get(k, 0) - before['kinds'].get(k, 0) >= floor
                                             for k, floor in FLOORS.items())
             if current != previous:
@@ -156,6 +168,11 @@ def wait_for_relay(target):
     while time.time() < end:
         report = json.loads(pb('ping', target, '--json').stdout)
         report = report.get('data', report)
+        if 'samples' not in report:
+            # A team machine refuses ping (permission_denied) to a member with exec access: with UDP blocked the
+            # direct path ends by itself; the relay bytes recorded per category prove the path afterwards.
+            time.sleep(45)
+            return
         paths = {s['path'] for s in report['samples'] if not s['lost']}
         if paths and 'direct' not in paths:
             return
@@ -218,15 +235,21 @@ def drive(target, work):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
-    target = parser.parse_args().target
-    api = Api()
+    parser.add_argument('--team', default='personal', help='the team that owns TARGET (default: the personal workspace)')
+    parser.add_argument('--driver', default='', help='account id of the member that drives the traffic (with --team)')
+    parser.add_argument('--idle', action='append', default=[], help='account id of a member that drives nothing (with --team)')
+    arguments = parser.parse_args()
+    target, team = arguments.target, arguments.team
+    assert team == 'personal' or arguments.driver, '--team needs --driver ACCOUNT_ID'
+    actors = [arguments.driver, *arguments.idle] if team != 'personal' else []
+    api = Api(team)
     start = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() - 3600))
     scratch = winhost.workdir('usage-categories-')  # on the device for a Windows controller
     work = scratch.__enter__()
     ok, detail = False, {}
     blocked = contextlib.ExitStack()
     try:
-        before = api.quiet_snapshot(start)
+        before = api.quiet_snapshot(start, actors=actors)
         block_udp(blocked)
         try:
             wait_for_relay(target)
@@ -234,14 +257,19 @@ def main():
         finally:
             unblock_udp(blocked)
         try:
-            after = api.quiet_snapshot(start, before)
+            after = api.quiet_snapshot(start, before, actors)
         except RuntimeError:
-            after = api.snapshot(start)
+            after = api.snapshot(start, actors)
         grew = {kind: after['kinds'].get(kind, 0) - before['kinds'].get(kind, 0) for kind in FLOORS}
         missing = [kind for kind in grew if grew[kind] < FLOORS[kind]]
         billed, charged = after['billing'] - before['billing'], after['charged'] - before['charged']
         detail = {'relay_bytes_by_category': grew, 'billing_delta': billed, 'charged_path_delta': charged}
         ok = not missing and billed == charged
+        if actors:
+            moved = {actor: after['actors'][actor] - before['actors'][actor] for actor in actors}
+            detail.update({'team': team, 'team_total_delta': after['total'] - before['total'], 'member_bytes_delta': moved})
+            # Per member: all of the window's bytes are the driver's, and an idle member's bytes did not move.
+            ok = ok and moved[arguments.driver] == detail['team_total_delta'] and all(moved[a] == 0 for a in arguments.idle)
         if missing:
             detail['categories_below_driven'] = missing
     finally:
