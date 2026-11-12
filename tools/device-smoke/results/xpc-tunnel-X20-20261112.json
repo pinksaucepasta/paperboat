@@ -141,6 +141,36 @@
    "id": "X-20:tcp-tls:W",
    "status": "PASS",
    "detail": "public raw TCP echo through :10000; TLS passthrough on :443 delivered the origin certificate"
+  },
+  {
+   "id": "X-20:low-port:L",
+   "status": "PASS",
+   "detail": "port 80 (a listener may bind it): \"Nothing answers on port 80 yet; the preview shows App not responding until your app starts\""
+  },
+  {
+   "id": "X-20:low-port:M",
+   "status": "PASS",
+   "detail": "port 80 (bind refused: Permission denied): \"Nothing answers on port 80 yet; the preview shows App not responding until your app starts\""
+  },
+  {
+   "id": "X-20:low-port:W",
+   "status": "PASS",
+   "detail": "port 49696 (bind refused: An attempt was made to access a socket in a way forbidden by its access permissions): \"Nothing answers on port 49696 yet; the preview shows App not responding until your app starts\""
+  },
+  {
+   "id": "X-20:browser:L",
+   "status": "PASS",
+   "detail": "page over HTTPS loads in a browser on L 156.0.8078.4, M 156.0.8078.80, W 156.0.4314.58"
+  },
+  {
+   "id": "X-20:browser:M",
+   "status": "PASS",
+   "detail": "page over HTTPS loads in a browser on L 156.0.8078.4, M 156.0.8078.80, W 156.0.4314.58"
+  },
+  {
+   "id": "X-20:browser:W",
+   "status": "PASS",
+   "detail": "page over HTTPS loads in a browser on L 156.0.8078.4, M 156.0.8078.80, W 156.0.4314.58"
   }
  ]
 }
