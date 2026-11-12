@@ -770,3 +770,20 @@ func TestResolveStartingMachineChecksReadinessPromptly(t *testing.T) {
 		}
 	}
 }
+
+// A self-hosted terminal route carries the edge-only /v1/runtime/<host> prefix; the file-transfer endpoint on the
+// same edge must not (the receiver serves /v1/file-transfers only).
+func TestValidateFileTransferSelfHostedEndpointHasNoEdgePrefix(t *testing.T) {
+	expires := time.Now().Add(time.Hour)
+	transfer := readyFileTransfer(expires)
+	transfer.Endpoint = "https://edge.example.test/v1/file-transfers"
+	terminalURL, _ := secureEndpoint("wss://edge.example.test/v1/runtime/machine.example.test", "wss")
+	r := newTestResolver(&fakeClient{})
+	if err := r.validateFileTransfer(transfer, terminalURL, expires); err != nil {
+		t.Fatal(err)
+	}
+	transfer.Endpoint = "https://edge.example.test/v1/runtime/machine.example.test/v1/file-transfers"
+	if err := r.validateFileTransfer(transfer, terminalURL, expires); err == nil {
+		t.Fatal("accepted the edge-prefixed endpoint")
+	}
+}
