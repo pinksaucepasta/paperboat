@@ -1,0 +1,31 @@
+F25 recordings in the console, live console f7f2eac89, prod 2026.11.12.2, 2026-11-12: console/scripts/check-recordings.mjs (MACHINE, RECORDING, TINY_RECORDING, VAULT_PASSWORD_FILE set; LONG_RECORDING not set, so the destructive permission-removal row did not run).
+PASS  Personal shows the Teams upgrade state
+PASS  the list shows the server's first page in order  (41 of 41)
+PASS  the pager follows the server total  (one page)
+PASS  a machine's tab lists only its recordings  (recorder-smoke-paid-2)
+PASS  the key status matches the server  (ready)
+PASS  the admins-only switch changes the team setting  (anyone -> admins)
+PASS  switching back restores it
+PASS  every recording rule in the policy is listed  (1)
+PASS  Add rule opens its dialog
+PASS  a saved replay rule reaches the policy
+PASS  the new rule is listed
+PASS  removing it restores the policy
+PASS  a locked vault asks to unlock first
+PASS  the recording loads and decrypts
+PASS  it plays on its own  (0:00 / 1:19 -> 0:01 / 1:19)
+PASS  pause stops the clock  (0:01 / 1:19)
+PASS  the terminal renderer shows the recording
+PASS  speed 4× is selected
+PASS  the seek bar moves to the start  (0:00 / 1:19)
+PASS  a very short recording loads and decrypts
+PASS  a very short recording has a length and plays to its end  (0:01 / 0:01)
+PASS  a very short recording shows its output
+PASS  an unknown recording says it doesn't exist
+SKIP  offline machine state  (OFFLINE_RECORDING not set)
+PASS  the terminal attaches  (terminal_3dc2058a-f9f1-4525-a15d-8adddd80dfe5)
+PASS  Start recording shows REC
+PASS  the server lists the live recording  (rec_0974ccbb-2e0b-49af-8233-fb2a08e94e5d)
+PASS  Stop recording clears REC
+SKIP  permission removal closes the replay  (LONG_RECORDING and VAULT_PASSWORD_FILE not set)
+all passed
