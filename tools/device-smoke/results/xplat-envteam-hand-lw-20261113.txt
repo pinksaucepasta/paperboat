@@ -1,0 +1,59 @@
+X-12 team scope across OSes, L<->W, own throwaway fleet xa2 (Linux container + winpool Windows runner, dev-64973afc6), 2026-11-13. Hand-driven with pb commands (script /tmp/claude-1001/xa2/handteam7.py), output verbatim, machine and account ids as printed:
+unlock xa2-l 0
+unlock xa2-w 0
+unlock xa2-l2 0
+T1 share xa2-l 0
+T1 PROBE owner exec xa2-l after share xa2-l rc 0
+T1 PROBE owner exec xa2-w after share xa2-l rc 0
+T1 grant xa2-l 0
+T1 PROBE owner exec xa2-l after grant xa2-l rc 0
+T1 PROBE owner exec xa2-w after grant xa2-l rc 0
+T1 share xa2-w 0
+T1 PROBE owner exec xa2-l after share xa2-w rc 0
+T1 PROBE owner exec xa2-w after share xa2-w rc 0
+T1 grant xa2-w 0
+T1 PROBE owner exec xa2-l after grant xa2-w rc 0
+T1 PROBE owner exec xa2-w after grant xa2-w rc 0
+T1 team scope reset 0
+T1 set 0
+T1 env read grant 0
+T1 env team grant 0
+T1 member sync xa2-l2 0 
+T1 owner unlock after the team changes (seals the hosts) 0
+T1 unlock after sync xa2-l2 0
+T1 deliver xa2-l2 > xa2-l rc 0 value True 
+T1 deliver xa2-l2 > xa2-w rc 0 value True 
+T1 revoke 0 8b83-3090c75e839f"],"rotated":true,"team":"paperboat-smoke-7f37869cf64a","values_discarded":false}}
+
+T1 after revoke xa2-l2 > xa2-l rc 1 value False rm this action. Check the selected account and target. Support reference: support_<ref>. 
+T1 after revoke xa2-l2 > xa2-w rc 1 value False rm this action. Check the selected account and target. Support reference: support_<ref>. 
+T2 share xa2-l2 0
+T2 PROBE owner exec xa2-l2 after share xa2-l2 rc 0
+T2 grant xa2-l2 0
+T2 PROBE owner exec xa2-l2 after grant xa2-l2 rc 0
+T2 team scope reset 0
+T2 set 0
+T2 env read grant 0
+T2 env team grant 0
+T2 member sync xa2-l 0 
+T2 member sync xa2-w 0 
+T2 owner unlock after the team changes (seals the hosts) 0
+T2 unlock after sync xa2-l 0
+T2 unlock after sync xa2-w 0
+T2 deliver xa2-l > xa2-l2 rc 0 value True 
+T2 deliver xa2-w > xa2-l2 rc 0 value True 
+T2 revoke 0 8460-deacbe2c215d"],"rotated":true,"team":"paperboat-smoke-2a92d389ccd8","values_discarded":false}}
+
+T2 after revoke xa2-l > xa2-l2 rc 1 value False rm this action. Check the selected account and target. Support reference: support_<ref>. 
+T2 after revoke xa2-w > xa2-l2 rc 1 value False rm this action. Check the selected account and target. Support reference: support_<ref>. 
+{
+ "T1:xa2-l2>xa2-l": "PASS",
+ "T1:xa2-l2>xa2-w": "PASS",
+ "T1-revoke:xa2-l2>xa2-l": "PASS",
+ "T1-revoke:xa2-l2>xa2-w": "PASS",
+ "T2:xa2-l>xa2-l2": "PASS",
+ "T2:xa2-w>xa2-l2": "PASS",
+ "T2-revoke:xa2-l>xa2-l2": "PASS",
+ "T2-revoke:xa2-w>xa2-l2": "PASS"
+}
+rc=0
