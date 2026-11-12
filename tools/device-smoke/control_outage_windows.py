@@ -36,6 +36,7 @@ class Env:
         self.ips = sorted({info[4][0] for info in socket.getaddrinfo(self.api, None, socket.AF_INET)})
 
     stem, echo, enter = "windows", "cmd /c echo", "r"  # what runs and presses Enter on this target (a Mac overrides them)
+    probe, answer = "%%OS%%", "Windows_NT"  # typed into the terminal's shell (cmd.exe: %OS%, doubled for printf) and what only that shell prints
 
     def long_command(self, seconds):
         return f"cmd /c 'ping -n {seconds} 127.0.0.1 >nul & echo long-lw-done'"
@@ -90,15 +91,15 @@ def refused_rw(env):
 
 
 def terminal_lw(env, marker):
-    """A new `pb connect` to the Windows machine: type a command and look for its result (the typed text shows $((6*7));
-    only PowerShell on the machine prints 42)."""
+    """A new `pb connect` to the Windows machine: type a command and look for its result (the terminal shell is cmd.exe:
+    the typed text shows %OS%, only the shell on the machine prints Windows_NT)."""
     script = f"""#!/bin/bash
-(sleep 15; printf 'echo {marker}-$((6*7))\\{env.enter}'; sleep 4; printf 'exit\\{env.enter}'; sleep 4) | timeout 90 script -qec '{PB} connect {W}' /dev/null 2>&1 | tr -d '\\r'
+(sleep 15; printf 'echo {marker}-{env.probe}\\{env.enter}'; sleep 4; printf 'exit\\{env.enter}'; sleep 4) | timeout 90 script -qec '{PB} connect {W}' /dev/null 2>&1 | tr -d '\\r'
 """
     encoded = base64.b64encode(script.encode()).decode()
     env.ct(L, f"echo {encoded} | base64 -d > /tmp/term-{marker}.sh", 30)
     rc, out = env.ct(L, f"bash /tmp/term-{marker}.sh", 110)
-    return f"{marker}-42" in out, out.strip()[-160:]
+    return f"{marker}-{env.answer}" in out, out.strip()[-160:]
 
 
 def status_unavailable(env):
