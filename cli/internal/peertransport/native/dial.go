@@ -148,7 +148,8 @@ func (o *Owner) DialShared(ctx context.Context, descriptor mesh.Addr, peerID str
 			if handle, ok := base.share(); ok {
 				return handle, nil
 			}
-			continue // closed before its first handle: dial again
+			_ = base.Close() // died before its first handle: release its flow and dial again
+			continue
 		}
 		o.mu.Unlock()
 		select {
