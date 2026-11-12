@@ -13,7 +13,7 @@ pb-ssh-doctor - Check SSH integration for a machine
 Check SSH integration for a machine
 
 .PP
-Check the selected machine's managed SSH configuration and local integration. It reports actionable findings without approving a changed host identity.
+Check the selected machine's managed SSH configuration and local integration. It reports actionable findings without approving a changed host identity. On Windows it also says when Git would use its own ssh, which cannot use the Paperboat agent, and the one command that points Git at the built-in OpenSSH: git config --global core.sshCommand C:/Windows/System32/OpenSSH/ssh.exe.
 
 .PP
 Managed SSH resolves the Paperboat machine and then runs OpenSSH with the selected target. Host identity checks remain in force. Standard SSH, SCP, SFTP, and rsync behavior is preserved while Paperboat supplies machine resolution and authorized connectivity.

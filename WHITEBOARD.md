@@ -407,3 +407,5 @@ What could be cut, largest first:
   handshake again; keeping the session for a few seconds would save 1 RTT on back-to-back commands.
 Each is a protocol or authorization change on both ends: not done before the launch freeze (audit and revocation fences depend
 on the per-operation grant). Re-measure with tools/device-smoke/perf_dataplane.py after any of them.
+
+- Socket-based agent that Git-for-Windows ssh can reach (after launch): the managed agent is a Windows named pipe, which MSYS OpenSSH cannot use; until then Git runs through `git config --global core.sshCommand C:/Windows/System32/OpenSSH/ssh.exe` (pb ssh doctor prints it). A single ~/.ssh config cannot name both agent kinds without a `Match exec`.

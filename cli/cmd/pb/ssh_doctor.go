@@ -108,10 +108,18 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 	if closeErr != nil && !errors.Is(closeErr, net.ErrClosed) {
 		return fmt.Errorf("close managed SSH readiness probe: %w", closeErr)
 	}
+	gitAdvice := sshDoctorGitAdvice()
 	if jsonOutput, _ := command.Flags().GetBool("json"); jsonOutput {
-		return writeCLIJSON(command.OutOrStdout(), map[string]any{"openssh": map[string]any{"version": capabilities.Version, "ready": true}, "local_configuration": "ready", "managed_agent": "ready", "machine": map[string]any{"id": machine.ID, "alias": machine.Alias}, "transport": "ready", "target": map[string]any{"state": "ready", "port": target.Port}, "host_identity": keys.Fingerprint, "managed_keys": "reconciled"})
+		result := map[string]any{"openssh": map[string]any{"version": capabilities.Version, "ready": true}, "local_configuration": "ready", "managed_agent": "ready", "machine": map[string]any{"id": machine.ID, "alias": machine.Alias}, "transport": "ready", "target": map[string]any{"state": "ready", "port": target.Port}, "host_identity": keys.Fingerprint, "managed_keys": "reconciled"}
+		if gitAdvice != "" {
+			result["git_for_windows"] = map[string]any{"state": "uses_its_own_ssh", "fix": gitAdvice}
+		}
+		return writeCLIJSON(command.OutOrStdout(), result)
 	}
 	fmt.Fprintf(command.OutOrStdout(), "OpenSSH: %s\nLocal configuration: ready\nManaged agent: ready\nMachine: %s\nTransport: ready\nTarget: ready on port %d\nHost identity: %s\nManaged keys: reconciled\n", capabilities.Version, machine.Alias, target.Port, keys.Fingerprint)
+	if gitAdvice != "" {
+		fmt.Fprintf(command.OutOrStdout(), "Git for Windows: git uses its own ssh, which cannot use the Paperboat agent. Run once:\n  %s\n", gitAdvice)
+	}
 	return nil
 }
 

@@ -8,7 +8,7 @@ Connect to a machine with OpenSSH over Paperboat.
 
 Forwarding follows the machine's sshd: port and agent forwarding work as it allows; pb never requests X11 and does not strip -X/-Y. Windows machines cannot forward an agent (a Microsoft OpenSSH limitation); port forwarding works there.
 
-Connect to an enrolled machine through OpenSSH using Paperboat resolution. Optional arguments after -- go to OpenSSH; the command preserves SSH host-key verification and reports identity changes for deliberate approval.
+On Windows, Git for Windows' own ssh cannot use the Paperboat agent: to run git over ssh to your machines, point Git at the built-in OpenSSH once with `git config --global core.sshCommand C:/Windows/System32/OpenSSH/ssh.exe`. pb ssh doctor says so when it applies.
 
 This command does not support --json output; it rejects that mode before execution. Use --help --json for structured command help.
 
