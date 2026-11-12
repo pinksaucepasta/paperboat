@@ -86,10 +86,11 @@ func waitForAuthenticatedTransport(ctx context.Context, command *cobra.Command, 
 		return localwait.Result{}, err
 	}
 	for {
-		localMachine, resolveErr := localwait.ResolveMachine(snapshot.Machines, target)
+		localMachine, resolved, resolveErr := localwait.ResolveMachineWithin(ctx, client, snapshot, target)
 		if resolveErr != nil {
 			return localwait.Result{}, resolveErr
 		}
+		snapshot = resolved
 		ready := localMachine.Eligible && localMachine.Generation > 0 && (localMachine.RuntimeState == "ready" || localMachine.RuntimeState == "degraded")
 		if condition == "ssh" {
 			ready = ready && localMachine.SSHReadiness == "ready"

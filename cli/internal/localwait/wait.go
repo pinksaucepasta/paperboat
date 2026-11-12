@@ -102,11 +102,40 @@ func WaitTargetFromSnapshot(ctx context.Context, client Client, snapshot localap
 	if !bounded(ctx) || client == nil || snapshot.Validate() != nil || strings.TrimSpace(target) == "" || !validCondition(condition) {
 		return Result{}, ErrInvalid
 	}
-	machine, err := ResolveMachine(snapshot.Machines, target)
+	machine, snapshot, err := ResolveMachineWithin(ctx, client, snapshot, target)
 	if err != nil {
 		return Result{}, err
 	}
 	return waitFromSnapshot(ctx, client, snapshot, machine.ID, condition)
+}
+
+// resolveRetryEvery is how often a name the daemon does not know yet is looked up again.
+var resolveRetryEvery = time.Second
+
+// ResolveMachineWithin resolves target in the daemon's status. A name the daemon does not list (yet) is not an answer while
+// ctx allows more waiting: after a daemon restart its inventory is empty until it has been rebuilt, and a machine that exists
+// would be reported "not found" (F21-01 drill, 2026-11-12). It looks again on a fresh snapshot until the name resolves and
+// returns ErrMachineNotFound only at the deadline; any other failure (ambiguous name, daemon error) is returned at once.
+func ResolveMachineWithin(ctx context.Context, client Client, snapshot localapi.Snapshot, target string) (localapi.MachineStatus, localapi.Snapshot, error) {
+	for {
+		machine, err := ResolveMachine(snapshot.Machines, target)
+		if !errors.Is(err, ErrMachineNotFound) {
+			return machine, snapshot, err
+		}
+		select {
+		case <-ctx.Done():
+			return localapi.MachineStatus{}, snapshot, err
+		case <-time.After(resolveRetryEvery):
+		}
+		next, snapshotErr := client.Snapshot(ctx)
+		if snapshotErr != nil {
+			if ctx.Err() != nil {
+				return localapi.MachineStatus{}, snapshot, err
+			}
+			return localapi.MachineStatus{}, snapshot, snapshotErr
+		}
+		snapshot = next
+	}
 }
 
 func bounded(ctx context.Context) bool {

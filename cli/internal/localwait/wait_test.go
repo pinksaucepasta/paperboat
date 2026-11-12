@@ -259,3 +259,57 @@ func TestWaitRequiresADeadline(t *testing.T) {
 		t.Fatalf("an unbounded target wait = %v, want ErrInvalid", err)
 	}
 }
+
+// otherMachine is a machine of the account that is not the one waited for: the daemon lists it while it lacks the target.
+func otherMachine() localapi.MachineStatus {
+	other := waitMachine()
+	other.ID, other.Alias = "machine_9", "Elsewhere"
+	return other
+}
+
+// laterClient lists the machine only from its n-th snapshot on: a daemon that restarted and has not rebuilt its inventory.
+type laterClient struct {
+	fakeClient
+	machine localapi.MachineStatus
+	appears int
+	calls   int
+}
+
+func (c *laterClient) Snapshot(context.Context) (localapi.Snapshot, error) {
+	c.calls++
+	if c.calls < c.appears {
+		return waitSnapshot(uint64(c.calls), otherMachine()), nil
+	}
+	return waitSnapshot(uint64(10+c.calls), c.machine), nil
+}
+
+// F21-01 drill 2026-11-12: after a daemon restart `pb wait` answered "machine was not found" for a machine that exists. A name
+// the daemon does not list yet is looked up again until the deadline, and only then is it "not found".
+func TestWaitKeepsLookingForANameWhileTheDaemonRebuildsItsInventory(t *testing.T) {
+	old := resolveRetryEvery
+	resolveRetryEvery = time.Millisecond
+	t.Cleanup(func() { resolveRetryEvery = old })
+	machine := waitMachine()
+	machine.RuntimeState = "ready"
+	client := &laterClient{machine: machine, appears: 4}
+	empty := waitSnapshot(1, otherMachine())
+	result, err := WaitTargetFromSnapshot(testDeadline(t), client, empty, machine.Alias, "runtime")
+	if err != nil || result.Outcome != "ready" || result.Machine.ID != machine.ID || client.calls < 4 {
+		t.Fatalf("result=%#v err=%v snapshots asked=%d", result, err, client.calls)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancel()
+	never := &laterClient{machine: machine, appears: 1 << 30}
+	if _, err := WaitTargetFromSnapshot(ctx, never, empty, machine.Alias, "runtime"); !errors.Is(err, ErrMachineNotFound) || never.calls < 2 {
+		t.Fatalf("a name that never appears must be 'not found' at the deadline: err=%v snapshots asked=%d", err, never.calls)
+	}
+
+	ambiguous := empty
+	twin := machine
+	twin.ID = "machine_2"
+	ambiguous.Machines = []localapi.MachineStatus{machine, twin}
+	if _, err := WaitTargetFromSnapshot(testDeadline(t), &laterClient{machine: machine, appears: 1}, ambiguous, machine.Alias, "runtime"); !errors.Is(err, ErrMachineAmbiguous) {
+		t.Fatalf("an ambiguous name is refused at once: %v", err)
+	}
+}
