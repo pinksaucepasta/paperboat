@@ -6,8 +6,8 @@ Run on the staging containers (never prod) from the orchestrating host:
 rel-sco-a starts COUNT execs at once to rel-sco-b (containers from control_outage.py setup); each must exit 0 within
 sleep + (budget - sleep) seconds. The result JSON has the start spread, the slowest and median times and every failure.
 
-A Windows peer (F21-166, W): --client win-stg-l --target win-stg-w2 --windows: the same from the container --client to the
-Windows machine --target, each exec running `ping -n SLEEP+1 127.0.0.1` (cmd.exe has no sleep).
+A Windows peer (F21-166, W): --client-ct win-stg-l --target-name win-stg-w2 --windows: the same from the container --client-ct to the
+Windows machine --target-name, each exec running `ping -n SLEEP+1 127.0.0.1` (cmd.exe has no sleep).
 """
 import argparse, base64, json, sys, time
 from pathlib import Path
@@ -41,8 +41,6 @@ def main():
     parser.add_argument("--count", type=int, default=32)
     parser.add_argument("--sleep", type=int, default=20)
     parser.add_argument("--budget", type=float, default=30.0, help="seconds each exec may take in all")
-    parser.add_argument("--client", default=c.NAMES["a"], help="the container that starts the execs")
-    parser.add_argument("--target", default=c.NAMES["b"], help="the machine they run on")
     parser.add_argument("--windows", action="store_true", help="the target is a Windows machine")
     parser.add_argument("--client-ct", default=c.NAMES["a"], help="the container whose pb starts the execs")
     parser.add_argument("--client-ssh", help="a macOS host (ssh) whose pb starts the execs instead of a container")
@@ -50,10 +48,10 @@ def main():
     args = parser.parse_args()
     encoded = base64.b64encode(WORKER.encode()).decode()
     if args.client_ssh:  # the worker runs in the Mac's home, where ./.local/bin/pb is the installed pb
-        rc, out = c.host_run(args.client_ssh, f"cd ~ && echo {encoded} | base64 -d > /tmp/exec_scale_worker.py && python3 /tmp/exec_scale_worker.py {args.count} {args.sleep} {args.target_name}", 430)
+        rc, out = c.host_run(args.client_ssh, f"cd ~ && echo {encoded} | base64 -d > /tmp/exec_scale_worker.py && python3 /tmp/exec_scale_worker.py {args.count} {args.sleep} {args.target_name}{' windows' if args.windows else ''}", 430)
     else:
         c.in_ct(args.host, args.client_ct, f"echo {encoded} | base64 -d > /tmp/exec_scale_worker.py", 30)
-        rc, out = c.in_ct(args.host, args.client_ct, f"python3 /tmp/exec_scale_worker.py {args.count} {args.sleep} {args.target_name}", 400)
+        rc, out = c.in_ct(args.host, args.client_ct, f"python3 /tmp/exec_scale_worker.py {args.count} {args.sleep} {args.target_name}{' windows' if args.windows else ''}", 400)
     try:
         rows = json.loads(out.strip().splitlines()[-1])
     except (ValueError, IndexError):
