@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/diskspace"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/autoupdate"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
@@ -36,9 +38,18 @@ func actionUpdateFrom(command *cobra.Command, input string, force bool) error {
 	defer os.RemoveAll(directory)
 	staged, err := installsource.StageInput(ctx, input, directory, nil)
 	if err != nil {
-		return commandRejection{reason: commandRejectUpdateSource, detail: err.Error()}
+		return updateSourceStagingFailure(err)
 	}
 	return installStagedUpdateSource(command, ctx, staged.Path, force)
+}
+
+// updateSourceStagingFailure says "disk full" when the copy of the update into the temporary directory ran out of
+// space (F14-03), instead of telling the user the file cannot be read.
+func updateSourceStagingFailure(err error) error {
+	if diskspace.IsFull(err) {
+		return hostinstall.ErrInsufficientSpace
+	}
+	return commandRejection{reason: commandRejectUpdateSource, detail: err.Error()}
 }
 
 var installUpdateSourceForCommand = hostruntimecmd.InstallUpdateSource

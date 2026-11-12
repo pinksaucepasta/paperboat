@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 // Available returns the bytes a normal user can still write to the disk holding path. A path that
@@ -24,4 +25,10 @@ func Available(path string) (uint64, error) {
 			return 0, os.ErrNotExist
 		}
 	}
+}
+
+// IsFull reports a write that failed because the disk or the user's quota is full: ENOSPC and EDQUOT, and on
+// Windows ERROR_HANDLE_DISK_FULL (39) and ERROR_DISK_FULL (112).
+func IsFull(err error) bool {
+	return errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT) || fullPlatform(err)
 }

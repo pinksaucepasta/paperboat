@@ -12,6 +12,8 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+
+	"github.com/pinksaucepasta/paperboat/internal/diskspace"
 )
 
 // ErrLegacyCarrierRunning is a refusal to perform the first independent
@@ -35,9 +37,19 @@ func UpdateNotReady(cause error) error {
 	return hostInstallFailure("the new version did not become ready; restoring the previous version", ErrUpdateNotReady, cause)
 }
 
+// notReadyIfRolledBack names a replacement whose candidate failed after the services were replaced and whose previous
+// version was then restored (Unix does the same in install_unix.go). A rollback that did not finish keeps its own error,
+// because the previous version is then not known to be running; a full disk keeps its own message.
+func notReadyIfRolledBack(err error, candidateFailed, recovered bool) error {
+	if err == nil || !candidateFailed || !recovered || diskFull(err) {
+		return err
+	}
+	return UpdateNotReady(err)
+}
+
 // diskFull reports a write that failed because the disk or the user's quota is full.
 func diskFull(err error) bool {
-	return errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT)
+	return diskspace.IsFull(err)
 }
 
 // installFailure keeps diagnostics available to the existing final caller while

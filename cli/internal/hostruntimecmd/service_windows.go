@@ -286,7 +286,13 @@ func installWindowsRuntimeFromSuppliedBytesWithCommit(ctx context.Context, reque
 	step := "install_source"
 	defer func() {
 		if resultErr != nil {
-			if remote, ok := resultErr.(*elevation.RemoteError); ok && (remote.Code == "maintenance_busy" || remote.Code == "update_verification_failed" || remote.Code == "legacy_carrier_running") {
+			// The two refusals that leave the installation as it was cross the elevation boundary by code.
+			if errors.Is(resultErr, hostinstall.ErrInsufficientSpace) {
+				resultErr = &elevation.RemoteError{Code: "insufficient_disk_space", Message: hostinstall.ErrInsufficientSpace.Error()}
+			} else if errors.Is(resultErr, hostinstall.ErrUpdateNotReady) {
+				resultErr = &elevation.RemoteError{Code: "update_not_ready", Message: hostinstall.ErrUpdateNotReady.Error()}
+			}
+			if remote, ok := resultErr.(*elevation.RemoteError); ok && (remote.Code == "maintenance_busy" || remote.Code == "update_verification_failed" || remote.Code == "legacy_carrier_running" || remote.Code == "insufficient_disk_space" || remote.Code == "update_not_ready") {
 				return
 			}
 			// The step's public message is finite; the cause stays readable here (owner-only, never uploaded).

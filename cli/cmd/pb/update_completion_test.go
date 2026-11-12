@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
@@ -114,6 +115,25 @@ func TestUpdateOnAFullDiskNamesTheDiskAndNothingChanged(t *testing.T) {
 	result := classifyCLIJSONError(err)
 	if result.Code != "insufficient_disk_space" || result.StateChanged != false || result.Retryable || !strings.Contains(result.Recovery, "Free disk space") {
 		t.Fatalf("json = %+v", result)
+	}
+}
+
+// F14-03 (Windows device, full system disk): the copy of the update into the temporary directory failed with the
+// disk-full error and was reported as "the update cannot be read".
+func TestUpdateStagedOnAFullDiskIsReportedAsDiskFullNotUnreadable(t *testing.T) {
+	staging := &os.PathError{Op: "write", Path: "input", Err: syscall.ENOSPC}
+	err := updateSourceStagingFailure(fmt.Errorf("manual input could not be staged: %w", staging))
+	failure := classifyCommandFailure(err)
+	message := commandFailureMessage(err, failure)
+	if !strings.Contains(message, "not enough free disk space") || strings.Contains(message, "cannot be read") {
+		t.Fatalf("message = %q", message)
+	}
+	if result := classifyCLIJSONError(err); result.Code != "insufficient_disk_space" || result.StateChanged != false {
+		t.Fatalf("json = %+v", result)
+	}
+	other := updateSourceStagingFailure(errors.New("not an executable"))
+	if !strings.Contains(commandFailureMessage(other, classifyCommandFailure(other)), "cannot be read") {
+		t.Fatal("an unreadable file lost its message")
 	}
 }
 

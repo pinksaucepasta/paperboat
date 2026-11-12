@@ -434,7 +434,13 @@ func replaceWindowsCandidate(ctx context.Context, manager *service.LifecycleMana
 		}
 		return undo, nil
 	}
-	err = replaceCandidate(ctx, manager.Replace, installGuard, replace, func(ctx context.Context) error {
+	replaceFailed := false
+	replaceAndNote := func(ctx context.Context) error {
+		err := replace(ctx)
+		replaceFailed = err != nil
+		return err
+	}
+	err = replaceCandidate(ctx, manager.Replace, installGuard, replaceAndNote, func(ctx context.Context) error {
 		// A rollback that did not finish keeps its journal and the record: recovery still owns both versions.
 		if manager.RequireRecovered(ctx) != nil {
 			return nil
@@ -444,6 +450,8 @@ func replaceWindowsCandidate(ctx context.Context, manager *service.LifecycleMana
 	if err == nil {
 		err = removeInstallFile(record) // committed: the candidate is the installation
 	}
+	recovered := manager.RequireRecovered(context.WithoutCancel(ctx)) == nil
+	err = notReadyIfRolledBack(err, replaceFailed, recovered)
 	return err
 }
 

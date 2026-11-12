@@ -461,7 +461,7 @@ func Execute(ctx context.Context, requestPath, resultPath, cancelPath string, ha
 				result.ErrorCode, result.ErrorMessage = named.ElevationFailureCode(), message
 			}
 		}
-		if typed, ok := operationErr.(*RemoteError); ok && (typed.Code == "maintenance_busy" || typed.Code == "activation_pending" || typed.Code == "update_verification_failed" || typed.Code == "legacy_carrier_running" || typed.Code == CodeOpenSSHUnobtainable) {
+		if typed, ok := operationErr.(*RemoteError); ok && (typed.Code == "maintenance_busy" || typed.Code == "activation_pending" || typed.Code == "update_verification_failed" || typed.Code == "legacy_carrier_running" || typed.Code == "insufficient_disk_space" || typed.Code == "update_not_ready" || typed.Code == CodeOpenSSHUnobtainable) {
 			result.ErrorCode = typed.Code
 		}
 	}

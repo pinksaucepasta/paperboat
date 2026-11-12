@@ -27,6 +27,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"github.com/pinksaucepasta/paperboat/internal/buildinfo"
+	"github.com/pinksaucepasta/paperboat/internal/diskspace"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/binarytarget"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
@@ -3716,6 +3717,9 @@ func stageWindowsRuntimeFile(ctx context.Context, body []byte, current, rollback
 		publicDACL = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;0x1200a9;;;" + ownerSID + ")"
 	}
 	if err := writeStagedWindowsRuntime(temporaryPath, body, "O:SY"+publicDACL); err != nil {
+		if diskspace.IsFull(err) {
+			return nil, nil, hostInstallFailure("staging installation failed: no free disk space", ErrInsufficientSpace, err)
+		}
 		return nil, nil, err
 	}
 	verify := func(ctx context.Context) error {

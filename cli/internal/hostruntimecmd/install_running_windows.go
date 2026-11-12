@@ -14,6 +14,7 @@ import (
 	"time"
 
 	clientconfig "github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/diskspace"
 	helperconfig "github.com/pinksaucepasta/paperboat/internal/hostruntime/config"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostdproto"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
@@ -123,6 +124,10 @@ func installUpdateSource(ctx context.Context, sourcePath string, source installs
 				return "", hostinstall.ErrUpdateVerificationFailed
 			case "legacy_carrier_running":
 				return "", hostinstall.ErrLegacyCarrierRunning
+			case "insufficient_disk_space":
+				return "", hostinstall.ErrInsufficientSpace
+			case "update_not_ready":
+				return "", hostinstall.ErrUpdateNotReady
 			}
 		}
 		return "", runtimeFailure(elevatedInstallFailureMessage(err), err)
@@ -198,6 +203,10 @@ func stageWindowsElevationExecutable(sourcePath string) (string, func() error, e
 		return "", func() error { return nil }, runtimeFailure("opening the elevation source failed", err, temporary.Close(), cleanup())
 	}
 	_, copyErr := io.Copy(temporary, source)
+	if diskspace.IsFull(copyErr) {
+		// The helper copy is the first write of an update to the system disk: say so, the install is untouched.
+		return "", func() error { return nil }, withCleanup("copying or cleaning the elevation executable failed", hostinstall.ErrInsufficientSpace, source.Close(), temporary.Close(), cleanup())
+	}
 	resultErr := runtimeFailureIfAny("copying the elevation executable failed", copyErr, source.Close(), temporary.Close())
 	if resultErr != nil {
 		return "", func() error { return nil }, withCleanup("copying or cleaning the elevation executable failed", resultErr, cleanup())

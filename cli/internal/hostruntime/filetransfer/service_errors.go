@@ -5,9 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"syscall"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+
+	"github.com/pinksaucepasta/paperboat/internal/diskspace"
 )
 
 type Code string
@@ -60,7 +61,7 @@ func lookupFailure(err error) error {
 
 // diskFull reports a write that failed because the disk or the user's quota is full.
 func diskFull(err error) bool {
-	return errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT) || diskFullPlatform(err)
+	return diskspace.IsFull(err)
 }
 
 type cleanupFailure struct{ cause error }
