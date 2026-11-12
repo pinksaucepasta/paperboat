@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -71,6 +72,21 @@ func TestTunnelInspectMarksAReplayAndJSONCarriesIt(t *testing.T) {
 	output, err = runInspectorCommand(t, tunnelCobraCommandV1, "inspect", "tun_01", "--json")
 	if err != nil || !strings.Contains(output, `"replay_of":"cap_00"`) {
 		t.Fatalf("json drops replay_of: err=%v output=%q", err, output)
+	}
+}
+
+func TestTunnelInspectListsStartTimesInTheViewersTimeZone(t *testing.T) {
+	previous := time.Local
+	time.Local = time.FixedZone("viewer", 5*3600+1800)
+	t.Cleanup(func() { time.Local = previous })
+	client, _ := newInspectorTestServer(t, http.StatusOK, inspectorTestRouteJSON)
+	var hits atomic.Int32
+	var grant string
+	inspectorTestDaemon(t, daemonListHandler(t, &hits, &grant, http.StatusOK, inspectorTestPage))
+	wireInspectorTestClients(client)
+	output, err := runInspectorCommand(t, tunnelCobraCommandV1, "inspect", "tun_01")
+	if err != nil || !strings.Contains(output, "2026-09-08T05:30:00+05:30") {
+		t.Fatalf("start time is not in the viewer's zone: err=%v output=%q", err, output)
 	}
 }
 

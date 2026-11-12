@@ -485,7 +485,7 @@ func runInspectorView(command *cobra.Command, clients *inspectorClients, target 
 				return false, err
 			}
 			for _, record := range page.Records {
-				if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%d\t%s%s\n", record.ID, record.Method, record.State, record.ResponseStatus, record.URL, replayMark(record)); err != nil {
+				if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%d\t%s\t%s%s\n", record.ID, record.Method, record.State, record.ResponseStatus, record.URL, localStart(record), replayMark(record)); err != nil {
 					return false, err
 				}
 			}
@@ -496,6 +496,14 @@ func runInspectorView(command *cobra.Command, clients *inspectorClients, target 
 			return false, nil
 		}
 	})
+}
+
+// localStart is when the request started in the viewer's time zone (--json keeps the captured UTC instant).
+func localStart(record inspectorCapture) string {
+	if record.StartedAt.IsZero() {
+		return "-"
+	}
+	return record.StartedAt.Local().Format(time.RFC3339)
 }
 
 // replayMark tells a replay from live traffic: the capture it replayed follows the URL.
