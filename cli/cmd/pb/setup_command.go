@@ -26,6 +26,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntimecmd"
 	"github.com/pinksaucepasta/paperboat/internal/inbox"
+	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/recoverykey"
 	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"github.com/spf13/cobra"
@@ -351,10 +352,16 @@ func setupCommand() *cobra.Command {
 			if err := verifySetupInstallSource(); err != nil {
 				return setupFailure(fmt.Errorf("verify supplied installation executable: %w", err))
 			}
-			if _, err := client.RegisterManagedSSHTarget(command.Context(), machine.ID, uint64(machine.InstallationGeneration), sshUser, uint16(sshPortValue), newIdempotencyKey()); err != nil {
-				return setupFailure(fmt.Errorf("register SSH target: %w", err))
+			// An OS account managed SSH cannot target (spaces or non-ASCII letters, e.g. a Windows user "Zoë Test") is set up
+			// without managed SSH instead of failing setup (X-28); terminals, exec and files do not need it.
+			if managedssh.ValidUsername(sshUser) {
+				if _, err := client.RegisterManagedSSHTarget(command.Context(), machine.ID, uint64(machine.InstallationGeneration), sshUser, uint16(sshPortValue), newIdempotencyKey()); err != nil {
+					return setupFailure(fmt.Errorf("register SSH target: %w", err))
+				}
+				registration.SSHUser, registration.SSHPort = sshUser, uint16(sshPortValue)
+			} else {
+				fmt.Fprintf(command.ErrOrStderr(), "Managed SSH is not set up for this OS account: its name has spaces or non-ASCII letters. Terminals, exec and file transfers still work.\n")
 			}
-			registration.SSHUser, registration.SSHPort = sshUser, uint16(sshPortValue)
 			if err := identityStore.SaveRegistration(registration); err != nil {
 				return setupFailure(fmt.Errorf("save registered SSH target: %w", err))
 			}

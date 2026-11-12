@@ -23,7 +23,7 @@ func ParseMachineTarget(value string) (target, username string, err error) {
 	}
 	if before, after, found := strings.Cut(value, "@"); found {
 		username, value = before, after
-		if !validSSHUsername(username) {
+		if !ValidUsername(username) {
 			return "", "", ErrSSHUsernameInvalid
 		}
 	}
@@ -34,7 +34,7 @@ func ParseMachineTarget(value string) (target, username string, err error) {
 }
 
 func ValidateUsername(value string) error {
-	if !validSSHUsername(strings.TrimSpace(value)) {
+	if !ValidUsername(strings.TrimSpace(value)) {
 		return ErrSSHUsernameInvalid
 	}
 	return nil
@@ -136,7 +136,7 @@ func ResolveUsernameForPlatform(requested, openSSH, registered, local string, ha
 	if selected == "" {
 		return "", ErrSSHUsernameMissing
 	}
-	if !validSSHUsername(selected) || (!strings.EqualFold(platform, "windows") && strings.ContainsRune(selected, '\\')) {
+	if !ValidUsername(selected) || (!strings.EqualFold(platform, "windows") && strings.ContainsRune(selected, '\\')) {
 		return "", ErrSSHUsernameInvalid
 	}
 	if hasRegistered && requested == "" && openSSH == "" {
@@ -171,7 +171,9 @@ func validAliasLabel(value string) bool {
 	return true
 }
 
-func validSSHUsername(value string) bool {
+// ValidUsername is an OS account managed SSH can target ([A-Za-z0-9._-], optionally DOMAIN\user); the server's
+// rule (managedssh.ValidOSUser) accepts every such name. Other accounts work without managed SSH.
+func ValidUsername(value string) bool {
 	if len(value) > 255 {
 		return false
 	}

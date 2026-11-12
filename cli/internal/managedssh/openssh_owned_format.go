@@ -86,7 +86,7 @@ func formatOwnedOpenSSH(domain string, owned ownedOpenSSH) ([]byte, error) {
 	seen := make(map[string]struct{}, len(owned.Targets))
 	for _, target := range owned.Targets {
 		host, err := AliasHost(target.Alias, domain)
-		if err != nil || target.Port == 0 || !validSSHUsername(target.User) {
+		if err != nil || target.Port == 0 || !ValidUsername(target.User) {
 			return nil, ErrOpenSSHConfigConflict
 		}
 		if _, exists := seen[host]; exists {

@@ -14,6 +14,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/bootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/inbox"
+	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 )
 
 // saveBootstrapRegistration establishes the local machine identity before a
@@ -65,8 +66,14 @@ func saveBootstrapRegistration(store *identity.Store, serverURL string, material
 	})
 }
 
+// bootstrapSSHFields is the managed SSH target saved for this OS account; an account managed SSH cannot target (a
+// Windows user named "Zoë Test") is saved without one, as the server pairs it (X-28).
 func bootstrapSSHFields(sshUser string, sshPort uint16) (string, uint16) {
-	return strings.TrimSpace(sshUser), sshPort
+	sshUser = strings.TrimSpace(sshUser)
+	if !managedssh.ValidUsername(sshUser) {
+		return "", 0
+	}
+	return sshUser, sshPort
 }
 
 func validateBootstrapFinalization(store *identity.Store, resume bootstrap.ResumeRecord) error {
