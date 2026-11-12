@@ -171,19 +171,19 @@ func TestHoldDropsOutputAlreadyQueuedForRead(t *testing.T) {
 	c.out <- frame(0, "flood1")
 	c.out <- frame(6, "flood2")
 	c.startHold(7)
-	c.resolveHold(7, 12, true) // the cut is the end of flood2
+	c.routeOutput(frame(12, "after")) // held, and past the cut: it ends the cut for arrivals, not for what is queued ahead of it
+	c.resolveHold(7, 12, true)        // the cut is the end of flood2
 	c.out <- helperOutput{checkpoint: true, data: []byte("SCREEN"), endSequence: 12}
-	c.out <- frame(12, "after")
 	var got bytes.Buffer
 	buf := make([]byte, 64)
-	for got.Len() < len("SCREENafter") {
+	for got.Len() < len("afterSCREEN") {
 		n, err := c.Read(buf)
 		if err != nil {
 			t.Fatal(err)
 		}
 		got.Write(buf[:n])
 	}
-	if got.String() != "SCREENafter" {
-		t.Fatalf("read %q, want the screen and the output after the cut only", got.String())
+	if got.String() != "afterSCREEN" {
+		t.Fatalf("read %q, want the output after the cut and the screen only", got.String())
 	}
 }

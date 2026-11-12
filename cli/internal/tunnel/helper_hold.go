@@ -31,7 +31,8 @@ type helperHold struct {
 	buffered  []helperOutput
 	bytes     int
 	timer     *time.Timer
-	dropBelow atomic.Uint64 // after a discarded answer: output that ends at or before this is dropped on arrival and when read
+	dropBelow atomic.Uint64 // after a discarded answer: output that ends at or before this is dropped on arrival
+	readDrop  atomic.Uint64 // the same cut for output already queued for Read: ends at the first queued chunk past it, which the arrivals above never see
 }
 
 // sendOut passes one output on to Read; false means the connection is done.
@@ -51,6 +52,7 @@ func (c *helperTerminalConn) startHold(etx uint64) {
 	defer h.mu.Unlock()
 	h.active, h.etx = true, etx
 	h.dropBelow.Store(0)
+	h.readDrop.Store(0)
 	if h.timer != nil {
 		h.timer.Stop()
 	}
@@ -156,6 +158,7 @@ func (c *helperTerminalConn) resolveHold(etx, through uint64, discarded bool) {
 		h.timer = nil
 	}
 	h.dropBelow.Store(through)
+	h.readDrop.Store(through)
 	for _, output := range held {
 		if kept, ok := trimBelow(output, through); ok {
 			h.dropBelow.Store(0)
@@ -171,13 +174,13 @@ func (c *helperTerminalConn) resolveHold(etx, through uint64, discarded bool) {
 // (measured X-24: 19 MB for 40 s after Ctrl-C). It takes no lock: routeOutput holds the hold's mutex while it waits
 // for Read to take from the same queue.
 func (c *helperTerminalConn) skipDropped(output helperOutput) (helperOutput, bool) {
-	limit := c.hold.dropBelow.Load()
+	limit := c.hold.readDrop.Load()
 	if limit == 0 || output.checkpoint || !output.byteCursor {
 		return output, true
 	}
 	kept, ok := trimBelow(output, limit)
 	if ok {
-		c.hold.dropBelow.CompareAndSwap(limit, 0)
+		c.hold.readDrop.CompareAndSwap(limit, 0)
 	}
 	return kept, ok
 }
