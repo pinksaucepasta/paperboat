@@ -13,3 +13,6 @@ mutation_load_postgres_test: 40 teams of 128 members, 20 s: 4746 mutations (237.
 mutation_load_postgres_test: neighbor alone p99 28.43709ms; under load p99 297.337714ms (232 samples), 0 failures; database: max idle-in-transaction 12, max sessions waiting on a lock 10
 mutation_load_postgres_test: failures under load: teams 46 (ERROR: could not serialize access due to read/write dependencies among transactions (SQLSTATE 40001)), neighbor 0
 --- FAIL: TestLoadTeamMutations (26.18s)
+# F21-165 simulation at 500 daemons (TestLoadRestartStorm, PAPERBOAT_LOAD_DAEMONS=500, server down 5 s):
+load_postgres_test: daemons=500 down=5s: slowest daemon back 11.493s after the server listened, 0 never back, 5xx after restart: map[]
+--- PASS: TestLoadRestartStorm (117.16s)
