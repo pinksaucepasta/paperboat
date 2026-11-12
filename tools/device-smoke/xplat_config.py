@@ -235,6 +235,14 @@ def delete_repository(dev, repository_id):
         print('repository delete: %s' % done.errtext[-200:], flush=True)
 
 
+RESULT_FILE = Path(__file__).parent / 'results' / ('xplat-config-%s.json' % time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))
+
+
+def save_results():
+    """Written after every check, so a run that is killed keeps what it saw."""
+    RESULT_FILE.write_text(json.dumps({'check': 'xplat-config', 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
+
+
 def check(row, pair, action, label=''):
     name = '%s:%s%s' % (row, label + ':' if label else '', pair)  # a row has several checks: the label keeps their results apart
     started = time.time()
@@ -242,9 +250,13 @@ def check(row, pair, action, label=''):
         detail = action()
         results[name] = {'status': 'PASS', 'detail': detail or ''}
         print('PASS %s %ds %s' % (name, time.time() - started, detail or ''), flush=True)
+        save_results()
+        return name
     except Exception as error:  # noqa: BLE001
         results[name] = {'status': 'FAIL', 'detail': (str(error) or repr(error))[:300] + ' @ ' + ' <- '.join('%s:%d' % (f.name, f.lineno) for f in reversed(__import__('traceback').extract_tb(error.__traceback__)))[:300]}
         print('FAIL %s %ds: %s' % (name, time.time() - started, results[name]['detail']), flush=True)
+        save_results()
+        return name
 
 
 SHARED = (
@@ -326,21 +338,22 @@ def conflicts(dev):
 
 
 def x03_merge(ctx, a, b, direction):
-    """X-03: independent edits on both sides of a CRLF file merge without mixing endings."""
-    name, base = 'app/merge.txt', ''.join('l%d\r\n' % i for i in range(1, 6)).encode()
-    a.write(real(a, 'app', 'merge.txt'), base)
-    arrives(b, real(b, 'app', 'merge.txt'), base, 'base on ' + b.name)
-    ctx.assign(b.key, automatic=False)
-    try:
-        mine = base.replace(b'l1\r\n', b'A1\r\n')
-        a.write(real(a, 'app', 'merge.txt'), mine)
-        wait('A published', lambda: ctx.repo.show('cfg/' + name) == mine)
-        theirs = base.replace(b'l5\r\n', b'B5\r\n')
-        b.write(real(b, 'app', 'merge.txt'), theirs)
-    finally:
-        ctx.assign(b.key)
+    """X-03: independent edits on both sides of a CRLF file, made together, merge without mixing endings.
+    No re-apply: every apply makes a new assignment id, which drops the merge ancestor."""
+    import threading
+    name, base = 'app/merge-%s.txt' % direction.replace('>', ''), ''.join('l%d\r\n' % i for i in range(1, 6)).encode()
+    path_a, path_b = real(a, *name.split('/')), real(b, *name.split('/'))
+    a.write(path_a, base)
+    arrives(b, path_b, base, 'base on ' + b.name)
+    wait('base is settled in the repository', lambda: ctx.repo.show('cfg/' + name) == base)
+    edits = [(a, path_a, base.replace(b'l1\r\n', b'A1\r\n')), (b, path_b, base.replace(b'l5\r\n', b'B5\r\n'))]
+    workers = [threading.Thread(target=dev.write, args=(path, data)) for dev, path, data in edits]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
     merged = base.replace(b'l1\r\n', b'A1\r\n').replace(b'l5\r\n', b'B5\r\n')
-    wait('merged result everywhere', lambda: b.read(real(b, 'app', 'merge.txt')) == merged and a.read(real(a, 'app', 'merge.txt')) == merged)
+    wait('merged result everywhere', lambda: b.read(path_b) == merged and a.read(path_a) == merged)
     assert merged.count(b'\r\n') == merged.count(b'\n') == 5
     return 'three-way merge kept CRLF on every line'
 
@@ -463,14 +476,22 @@ def x40_rename(ctx, a, b, direction):
 CHECKS = [('X-01', x01), ('X-01', x01_variables), ('X-02', x02), ('X-03', x03_bytes), ('X-03', x03_merge), ('X-06', x06), ('X-07', x07_paths), ('X-40', x40_rename)]
 
 
-def run_pairs(ctx, devices, only):
+def run_pairs(devices, only, fresh):
+    """Run every check for every ordered pair. After a failed check the fixture is rebuilt, so one failure never poisons the next check."""
     import xplat_config_rows
-    for row, function in CHECKS + xplat_config_rows.ROW_CHECKS:
-        if only and row not in only:
-            continue
-        for a_key, b_key in permutations(devices, 2):
-            a, b = devices[a_key], devices[b_key]
-            check(row, '%s>%s' % (a_key, b_key), lambda: function(ctx, a, b, '%s>%s' % (a_key, b_key)), function.__name__)
+    ctx = fresh()
+    try:
+        for row, function in CHECKS + xplat_config_rows.ROW_CHECKS:
+            if only and row not in only and function.__name__ not in only:
+                continue
+            for a_key, b_key in permutations(devices, 2):
+                a, b = devices[a_key], devices[b_key]
+                name = check(row, '%s>%s' % (a_key, b_key), lambda: function(ctx, a, b, '%s>%s' % (a_key, b_key)), function.__name__)
+                if results[name]['status'] != 'PASS':
+                    ctx.finish()
+                    ctx = fresh()
+    finally:
+        ctx.finish()
 
 
 def main():
@@ -480,17 +501,19 @@ def main():
     devices = {k: d for k, d in fleet.fleet().items() if k in keys}
     for key, dev in devices.items():
         dev.key = key
-    ctx = Context(devices)
-    try:
-        ctx.start({'.paperboat/config-sync.toml': SHARED.encode(), 'cfg/settings.json': b'{}\n'})
-        for key in devices:
-            ctx.assign(key)
-        run_pairs(ctx, devices, only)
-    finally:
-        ctx.finish()
-    stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-    out = Path(__file__).parent / 'results' / ('xplat-config-%s.json' % stamp)
-    out.write_text(json.dumps({'check': 'xplat-config', 'devices': keys, 'results': [dict(id=k, **v) for k, v in results.items()]}, indent=1))
+    def fresh():
+        ctx = Context(devices)
+        try:
+            ctx.start({'.paperboat/config-sync.toml': SHARED.encode(), 'cfg/settings.json': b'{}\n'})
+            for key in devices:
+                ctx.assign(key)
+        except BaseException:
+            ctx.finish()
+            raise
+        return ctx
+
+    run_pairs(devices, only, fresh)
+    out = RESULT_FILE
     failed = [k for k, v in results.items() if v['status'] != 'PASS']
     print('%s %s' % ('FAIL' if failed or not results else 'PASS', out))
     sys.exit(1 if failed or not results else 0)
