@@ -29,9 +29,9 @@ EDGE_RECIPE = None
 
 
 class RemoteFailure(RuntimeError):
-    def __init__(self, code):
+    def __init__(self, code, reason=None):
         super().__init__(f'remote command exited {code}')
-        self.code = code
+        self.code, self.reason = code, reason
 
 
 def cells():
@@ -59,8 +59,17 @@ def invoke_pb(machine, *args, timeout=120, input=None):
 def pb(machine, *args, timeout=120):
     result = invoke_pb(machine, *args, timeout=timeout)
     if result.returncode:
-        raise RemoteFailure(result.returncode)
+        raise RemoteFailure(result.returncode, error_code(result.stdout))
     return result.stdout
+
+
+def error_code(output):
+    """The static `error.code` of a `--json` envelope (never its message, which may carry user data), else None."""
+    try:
+        code = json.loads(output)['error']['code']
+    except (ValueError, KeyError, TypeError):
+        return None
+    return code if isinstance(code, str) and re.fullmatch(r'[a-z0-9_]{1,64}', code) else None
 
 
 def artifact_version(client):
@@ -69,20 +78,32 @@ def artifact_version(client):
 
 
 def install(client):
+    """Switch both machines to CLIENT the way a user does, `pb update --from FILE --force`: an official build's own
+    `install` demands release metadata (TUF) the staging server does not publish."""
     expected = artifact_version(client)
     for machine in MACHINES:
         source = '/home/pbt/matrix-' + str(time.time_ns())
         try:
             command(['docker', 'cp', client, f'{machine}:{source}'])
             command(['docker', 'exec', machine, 'chown', 'pbt:pbt', source])
-            command(['docker', 'exec', '-u', 'pbt', '-e', 'HOME=/home/pbt',
-                     '-e', 'XDG_RUNTIME_DIR=/run/user/1000', '-w', '/home/pbt',
-                     machine, source, '--server', staging.api_url(), 'install', '--json'])
+            pb(machine, 'update', '--from', source, '--force', '--json', timeout=600)
         finally:
             command(['docker', 'exec', machine, 'rm', '-f', source])
-        current = json.loads(pb(machine, 'version', '--json'))
-        if current.get('data', current).get('version') != expected:
-            raise RuntimeError('installed client version differs from the requested artifact')
+    deadline = time.monotonic() + 180
+    pending = list(MACHINES)
+    while pending:
+        machine = pending[0]
+        try:
+            version = json.loads(pb(machine, 'version', '--json'))
+            healthy = json.loads(pb(machine, 'doctor', '--json')) if version.get('data', version).get('version') == expected else {}
+            if healthy.get('data', healthy).get('overall') == 'healthy':
+                pending.pop(0)
+                continue
+        except (RemoteFailure, ValueError, subprocess.TimeoutExpired):
+            pass  # the daemon restarts during an update
+        if time.monotonic() >= deadline:
+            raise RuntimeError('client switch did not end ready on the requested version')
+        time.sleep(4)
 
 
 def edge(image):
@@ -153,6 +174,8 @@ def check(name, action):
         result = {'step': name, 'ok': False, 'error': type(error).__name__}
         if isinstance(error, RemoteFailure):
             result['exit_code'] = error.code
+            if error.reason:
+                result['reason'] = error.reason
     result['seconds'] = round(time.monotonic() - started, 1)
     return result
 

@@ -72,3 +72,14 @@ class EdgeReplacement(unittest.TestCase):
                     with self.assertRaises(matrix.RemoteFailure):
                         matrix.edge('paperboat-tunnel:stg-candidate')
                 self.assertEqual(containers, {name: {'image': 'previous', 'running': True}})
+
+
+class FailureEvidence(unittest.TestCase):
+    def test_cell_records_the_static_error_code_and_never_the_message(self):
+        self.assertEqual(matrix.error_code('{"ok":false,"error":{"code":"operation_failed","message":"private"}}'), 'operation_failed')
+        self.assertIsNone(matrix.error_code('not json'))
+        self.assertIsNone(matrix.error_code('{"error":{"code":"has a message-like value"}}'))
+        def failed():
+            raise matrix.RemoteFailure(1, 'operation_failed')
+        result = matrix.check('send', failed)
+        self.assertEqual((result['exit_code'], result['reason']), (1, 'operation_failed'))
