@@ -2,6 +2,8 @@ package splitdns
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
@@ -179,5 +181,34 @@ func TestLoadOrCreateConstrainedCARejectsWrongOrUnconstrainedRoot(t *testing.T) 
 	}
 	if _, err := LoadOrCreateConstrainedCA(unconstrained, testBrowserDomain); err == nil {
 		t.Fatal("unconstrained root was accepted for production TLS")
+	}
+}
+
+// reg-a/reg-b (anvit, load 24-46 on 4 cores), 2026-11-12: after a guard reset the daemon re-issues every machine's
+// browser leaf inside one 15 s reconcile; each RSA-2048 keygen took seconds there, the guard call hit its 5 s
+// deadline and local access never came back. Leaves use P-256, whose keygen is microseconds.
+func TestIssuedLeafUsesAP256Key(t *testing.T) {
+	ca, err := LoadOrCreateConstrainedCA(t.TempDir(), testBrowserDomain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafPEM, keyPEM, err := ca.IssueCertificate([]string{"*.hp." + testBrowserDomain})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pair, err := tls.X509KeyPair(leafPEM, keyPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, ok := pair.PrivateKey.(*ecdsa.PrivateKey)
+	if !ok || key.Curve != elliptic.P256() {
+		t.Fatalf("leaf key is %T, want a P-256 ECDSA key", pair.PrivateKey)
+	}
+	leaf, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leaf.KeyUsage != x509.KeyUsageDigitalSignature || leaf.CheckSignatureFrom(ca.caCert) != nil {
+		t.Fatalf("leaf key usage %v or signature is wrong", leaf.KeyUsage)
 	}
 }

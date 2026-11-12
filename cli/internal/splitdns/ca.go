@@ -1,6 +1,8 @@
 package splitdns
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -181,7 +183,9 @@ func (c *CA) IssueCertificate(domains []string) ([]byte, []byte, error) {
 	if len(domains) == 0 || len(domains) > 8 {
 		return nil, nil, errors.New("certificate requires 1 to 8 bounded names")
 	}
-	leafKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	// P-256, not RSA: a reset re-issues every machine's leaf inside one reconcile, and an RSA-2048 keygen takes
+	// seconds on a loaded host (tailscale feature/acme/cert.go uses P-256 leaves too). The CA key stays RSA.
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, fmt.Errorf("generate leaf key: %w", err)
 	}
@@ -242,7 +246,7 @@ func (c *CA) IssueCertificate(domains []string) ([]byte, []byte, error) {
 		},
 		NotBefore:             notBefore,
 		NotAfter:              notAfter,
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		KeyUsage:              x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		DNSNames:              dnsNames,
 		IPAddresses:           ipAddresses,
@@ -258,7 +262,11 @@ func (c *CA) IssueCertificate(domains []string) ([]byte, []byte, error) {
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDer})
 	// Bundle root CA
 	certPEM = append(certPEM, c.caCertPEM...)
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(leafKey)})
+	leafKeyDER, err := x509.MarshalECPrivateKey(leafKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode leaf key: %w", err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: leafKeyDER})
 
 	return certPEM, keyPEM, nil
 }
