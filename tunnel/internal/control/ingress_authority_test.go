@@ -599,3 +599,34 @@ func TestIngressAuthorityIsWarmOnlyAfterTheFirstSuccessfulFetch(t *testing.T) {
 		t.Fatal("not warm after the first successful fetch")
 	}
 }
+
+// A caller with a short deadline that starts the shared fetch gives up alone: the fetch keeps its own bound,
+// so a slow answer lands and no control failure is counted (server deploys 2026-11-12: a 2 s public TCP
+// reconcile cancelled 2-3 s desired-state answers, 499 on the server, a control failure on the edge).
+func TestIngressAuthoritySharedFetchOutlivesTheCallerThatStartedIt(t *testing.T) {
+	decision := ingressAuthorityTestDecision(time.Now().UTC())
+	var calls atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		time.Sleep(600 * time.Millisecond)
+		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": []connectorprotocol.IngressDecision{decision}})
+	}))
+	defer server.Close()
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := &IngressAuthority{Client: client, NodeID: decision.EdgeNodeID, ProcessEpoch: decision.EdgeProcessEpoch}
+	short, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if _, err := authority.Snapshot(short); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("short caller: %v, want its own deadline", err)
+	}
+	decisions, err := authority.Snapshot(context.Background())
+	if err != nil || len(decisions) != 1 || calls.Load() != 1 {
+		t.Fatalf("after the short caller: %d decisions, %v, %d fetches; want the one shared answer", len(decisions), err, calls.Load())
+	}
+	if _, out := authority.OutOfSync(); out || authority.failures != 0 {
+		t.Fatalf("a caller's deadline counted as a control failure (failures=%d)", authority.failures)
+	}
+}

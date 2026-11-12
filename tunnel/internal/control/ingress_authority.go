@@ -259,14 +259,26 @@ func (a *IngressAuthority) refresh(ctx context.Context, force bool) ([]connector
 		a.inflight = done
 		generation := a.invalidations
 		a.mu.Unlock()
-		fetch, cancel := context.WithTimeout(ctx, connectorprotocol.IngressFetchTimeout)
-		snapshot, err := a.Client.IngressDecisions(fetch, a.NodeID, a.ProcessEpoch, a.heldVersion())
-		cancel()
+		// The fetch is shared, so it keeps its own bound, never the starting caller's: a 2 s public TCP reconcile
+		// cancelled 2-3 s answers and counted a control failure for every waiter (server deploys 2026-11-12 19:54Z).
+		go func() {
+			fetch, cancel := context.WithTimeout(context.WithoutCancel(ctx), connectorprotocol.IngressFetchTimeout)
+			snapshot, err := a.Client.IngressDecisions(fetch, a.NodeID, a.ProcessEpoch, a.heldVersion())
+			cancel()
+			a.mu.Lock()
+			a.recordLocked(time.Now().UTC(), snapshot, err, generation == a.invalidations)
+			a.inflight = nil
+			close(done)
+			a.mu.Unlock()
+		}()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 		a.mu.Lock()
-		a.recordLocked(time.Now().UTC(), snapshot, err, generation == a.invalidations)
-		a.inflight = nil
-		close(done)
 		if a.fetched.IsZero() {
+			err := a.lastErr
 			a.mu.Unlock()
 			return nil, err
 		}
