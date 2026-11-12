@@ -341,10 +341,11 @@ class WindowsChecksRunner(unittest.TestCase):
         cut = device.cut_network(45)
         self.assertEqual(winhost.NET_CUT, calls[0][0])
         self.assertEqual(('add', winhost.NON_LOOPBACK, True), calls[0][1:])
-        self.assertIn('-Program $x', winhost.NET_CUT)  # program scope: the controller's SSH is not pb.exe
+        self.assertIn('Program=$x', winhost.NET_CUT)  # program scope: the controller's SSH is not pb.exe
         self.assertEqual(('start', 'powershell.exe'), calls[1])  # the timer that lifts it whatever happens here
         cut.release(), cut.release()
         self.assertEqual(['add', 'remove'], [c[1] for c in calls if c[0] == winhost.NET_CUT])
+        self.assertIn("RemotePort=@($req.ports)", winhost.NET_CUT)  # ports= narrows the cut to those TCP ports
         calls.clear()
         device.start = lambda argv, directory: (_ for _ in ()).throw(winhost.DeviceError('no timer'))
         with self.assertRaises(winhost.DeviceError):

@@ -13,11 +13,14 @@ import (
 
 // An elevated Windows runner gives new files and directories (including t.TempDir) the Administrators group
 // as owner, which the credential and shared-lock checks correctly refuse as a foreign owner. Making the
-// current user the process's default owner gives tests the ownership a normal session has.
+// current user the process's default owner gives tests the ownership a normal session has. An unelevated token
+// (win-test-exec, a normal user session) already owns what it creates and is refused this change.
 func TestMain(m *testing.M) {
-	if err := setDefaultOwnerToCurrentUser(); err != nil {
-		fmt.Fprintln(os.Stderr, "set default owner to the current user:", err)
-		os.Exit(1)
+	if windows.GetCurrentProcessToken().IsElevated() {
+		if err := setDefaultOwnerToCurrentUser(); err != nil {
+			fmt.Fprintln(os.Stderr, "set default owner to the current user:", err)
+			os.Exit(1)
+		}
 	}
 	os.Exit(m.Run())
 }

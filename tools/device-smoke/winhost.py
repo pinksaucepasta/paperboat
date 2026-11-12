@@ -141,7 +141,9 @@ NET_CUT = ("if($req.action -eq 'remove'){Remove-NetFirewallRule -DisplayName $re
            "$p=@(Get-ChildItem -LiteralPath (Join-Path $env:ProgramFiles 'Paperboat') -Recurse -Filter pb.exe -File|ForEach-Object{$_.FullName})\n"
            "if(-not $p.Count){throw 'no pb.exe under Program Files\\Paperboat'}\n"
            "foreach($d in @('Outbound')+$(if($req.inbound){@('Inbound')}else{@()})){foreach($x in $p){\n"
-           "[void](New-NetFirewallRule -DisplayName $req.name -Direction $d -Action Block -Program $x -RemoteAddress @($req.addr))}}")
+           "$a=@{DisplayName=$req.name;Direction=$d;Action='Block';Program=$x;RemoteAddress=@($req.addr)}\n"
+           "if($req.ports){$a.Protocol='TCP';$a.RemotePort=@($req.ports)}\n"
+           "[void](New-NetFirewallRule @a)}}")
 # Every non-loopback IPv4 and global/link-local/unique-local IPv6 address.
 NON_LOOPBACK = ['0.0.0.0-126.255.255.255', '128.0.0.0-255.255.255.255', '2000::/3', 'fe80::/10', 'fc00::/7']
 LISTENING = ("try{$c=New-Object Net.Sockets.TcpClient('127.0.0.1',[int]$req.port);$c.Close();'yes'}catch{'no'}")
@@ -545,11 +547,11 @@ class WindowsDevice:
             finally:
                 self.stop(pid)
 
-    def cut_network(self, seconds, addresses=None, inbound=True):
-        """Drop pb.exe's traffic to `addresses` (default: everything but loopback) until release(), or after `seconds`
+    def cut_network(self, seconds, addresses=None, inbound=True, ports=None):
+        """Drop pb.exe's traffic to `addresses` (default: everything but loopback), only those TCP `ports` when given, until release(), or after `seconds`
         when a detached timer on the device removes the rule whatever happens to this controller."""
         name = 'PaperboatSmoke-cut-' + uuid.uuid4().hex[:12]
-        self.ps('cut the network', NET_CUT, action='add', name=name, addr=list(addresses or NON_LOOPBACK), inbound=inbound)
+        self.ps('cut the network', NET_CUT, action='add', name=name, addr=list(addresses or NON_LOOPBACK), inbound=inbound, ports=ports)
         scratch = self.temp_dir('pb-cut')
         try:
             timer = "Start-Sleep %d; Remove-NetFirewallRule -DisplayName '%s' -ErrorAction SilentlyContinue" % (seconds, name)
