@@ -146,7 +146,7 @@ class Lab:
         try:
             seen = json.loads(body)
         except ValueError:
-            self.cell(server, mode + '/C1-forwarded', 'unexpected', 'status %s %.120r' % (response.status, body))
+            self.cell(server, mode + '/C1-forwarded', 'unexpected', 'status %s error %r %.120r' % (response.status, error, body))
             return
         xff, xfh = str(seen.get('xff')), str(seen.get('xfh'))
         proper = seen.get('xfp') == 'https' and host in xfh and 'evil.example.test' not in xfh + str(seen.get('host')) and '203.0.113.9' not in xff + str(seen.get('forwarded'))

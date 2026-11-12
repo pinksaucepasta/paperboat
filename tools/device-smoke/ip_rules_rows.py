@@ -14,30 +14,15 @@ import argparse
 import ipaddress
 import json
 import shlex
-import subprocess
 import sys
 import time
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
+from machine_ctl import Failure, Machine, remote, run
 # An owner's deny must hold within seconds: the edge refreshes its ingress snapshot every 5 s (IngressRefreshInterval) and the
 # server publishes a change at once, so the check allows 15 s from the PUT to the refusal, the same for tunnels and previews.
 RULE_BOUND = 15
-ORIGIN_PORT = '9317'  # app.py listens on 0.0.0.0:9000; the machine's daemon owns 127.100.0.x ports for local access, so it binds loopback on this port
-
-
-class Failure(Exception):
-    pass
-
-
-def remote(prefix, argv):
-    """prefix + argv; through ssh the whole command is one string the remote shell parses, so it is quoted."""
-    return prefix + ([shlex.join(argv)] if prefix and prefix[0] == 'ssh' else list(argv))
-
-
-def run(argv, timeout=120, input=None):
-    done = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, input=input)
-    return done.returncode, done.stdout, done.stderr
+ORIGIN_PORT = '9317'  # the machine's daemon owns 127.100.0.x ports for local access, so the origin binds loopback on this port
 
 
 def find_url(value):
@@ -53,26 +38,23 @@ def find_url(value):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--kind', choices=['tunnel', 'preview'], required=True)
-    parser.add_argument('--machine-cmd', required=True)
+    parser.add_argument('--machine-cmd', default='', help='command prefix that runs a command on the machine (not with --windows)')
+    parser.add_argument('--windows', action='store_true', help='the machine is the Windows device selected by SMOKE_WINDOWS_SSH and PB_SMOKE_WINDOWS_PB')
     parser.add_argument('--observer-b-cmd', required=True)
-    parser.add_argument('--pb', default='/home/pbt/.local/bin/pb')
+    parser.add_argument('--pb', default='/home/pbt/.local/bin/pb', help='pb on the machine (ignored with --windows)')
     parser.add_argument('--output', default='')
     parser.add_argument('--wait', type=int, default=RULE_BOUND, help='seconds a rule may take to reach the edge (the bound of the check)')
     args = parser.parse_args()
-    machine = shlex.split(args.machine_cmd)
+    try:
+        machine = Machine(args.machine_cmd, args.pb, args.windows)
+    except Failure as error:
+        parser.error(str(error))
     observer_b = shlex.split(args.observer_b_cmd)
     row = 'C280' if args.kind == 'tunnel' else 'C281'
     name = 'laners-ip-%d' % int(time.time())
     steps, cleanup, latencies = [], [], []
 
-    def pb(*arguments, timeout=180):
-        code, out, err = run(remote(machine, [args.pb, *arguments]), timeout)
-        try:
-            value = json.loads(out)
-            value = value.get('data', value) if isinstance(value, dict) else value
-        except ValueError:
-            value = out.strip() or err.strip()
-        return code, value
+    pb = machine.pb
 
     def good(*arguments, timeout=180):
         code, value = pb(*arguments, '--json', timeout=timeout)
@@ -112,11 +94,7 @@ def main():
 
     resource = {}
     try:
-        app = (HERE / 'origin_proxy_matrix' / 'app.py').read_text().replace('("0.0.0.0", 9000)', '("127.0.0.1", %s)' % ORIGIN_PORT)
-        code, _, err = run(remote(machine, ['sh', '-c', 'cat > /tmp/ip-rules-app.py && (nohup python3 /tmp/ip-rules-app.py >/dev/null 2>&1 &)']), 60, input=app)
-        if code != 0:
-            raise Failure('origin did not start: ' + err[:200])
-        cleanup.append(lambda: run(remote(machine, ['sh', '-c', 'pkill -f /tmp/ip-rules-app.py; rm -f /tmp/ip-rules-app.py']), 30))
+        cleanup.append(machine.start_origin(ORIGIN_PORT, 'ip-rules-app'))
         if args.kind == 'tunnel':
             created = good('tunnel', 'create', name, '--port', ORIGIN_PORT, '--duration', '30m', '--wait', '--timeout', '90s', timeout=200)
             resource['id'], resource['url'] = created['tunnel']['id'], created['tunnel']['stable_endpoint']
