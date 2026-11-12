@@ -1,0 +1,145 @@
+{
+ "check": "tunnel-origin-rows",
+ "platform": "darwin",
+ "cells": [
+  {
+   "scenario": "grpc",
+   "cell": "F8-11 gRPC over an h2c origin: unary, streaming and the grpc-status trailer arrive",
+   "result": "ok",
+   "detail": "{'unary': 'SERVING', 'trailer': 'NOT_FOUND', 'stream': ['NOT_SERVING', 'SERVING']}"
+  },
+  {
+   "scenario": "grpc",
+   "cell": "F8-11 gRPC over a TLS (h2) origin verified with --tls-ca: unary, streaming and the grpc-status trailer arrive",
+   "result": "ok",
+   "detail": "{'unary': 'SERVING', 'trailer': 'NOT_FOUND', 'stream': ['NOT_SERVING', 'SERVING']}"
+  },
+  {
+   "scenario": "headers",
+   "cell": "F8-09 forwarded headers: spoofs dropped, https, public host, one client IP",
+   "result": "ok",
+   "detail": "200 {'host': 'app.example.test', 'xfp': 'https', 'xfh': 'app.example.test', 'xff': '198.51.100.7', 'forwarded': 'for=198.51.100.7;proto=https;host=app.example.test', 'sni': None}"
+  },
+  {
+   "scenario": "failures",
+   "cell": "F8-12 an app that is not running: the origin_refused page says so",
+   "result": "ok",
+   "detail": "502 origin_refused"
+  },
+  {
+   "scenario": "headers",
+   "cell": "F8-09 the app's cookies, validators and headers arrive unchanged",
+   "result": "ok",
+   "detail": "200 ['a=1; Path=/x; HttpOnly; SameSite=Lax', 'b=2; Path=/; Secure; Max-Age=60']"
+  },
+  {
+   "scenario": "headers",
+   "cell": "F8-09 the app's redirects (relative and absolute Location) are not rewritten",
+   "result": "ok",
+   "detail": "302 /next?x=1&y=%2F / 302 http://127.0.0.1:50253/abs"
+  },
+  {
+   "scenario": "headers",
+   "cell": "F8-09/F8-12 an app that redirects to its own https URL gets the loop page naming the fix",
+   "result": "ok",
+   "detail": "502 origin_redirect_loop"
+  },
+  {
+   "scenario": "headers",
+   "cell": "F8-12 a body over the cap is 413 request_body_too_large",
+   "result": "ok",
+   "detail": "b'HTTP/1.1 413 Request Entity Too Large\\r\\nCache-Control: no-store\\r\\nContent-Security'"
+  },
+  {
+   "scenario": "edges",
+   "cell": "F8-15 a new tunnel is served by every edge (2) within 30 s",
+   "result": "ok",
+   "detail": "seconds to first 200 per edge: {'198.51.100.7': 1.2, '198.51.100.7': 3.5} of ['198.51.100.7', '198.51.100.7']"
+  },
+  {
+   "scenario": "headers",
+   "cell": "F8-12 oversized headers are 431, not 502 or 404",
+   "result": "ok",
+   "detail": "b'HTTP/1.1 431 Request Header Fields Too Large\\r\\nContent-Type: text/plain; charset='"
+  },
+  {
+   "scenario": "headers",
+   "cell": "F8-12 ACME validation on port 80 gets an explanation, any other request the https redirect",
+   "result": "ok",
+   "detail": "404 b'Paperboat serves HTTPS for this name and holds its certifica' / 308"
+  },
+  {
+   "scenario": "edges",
+   "cell": "F8-15 a new preview is served by every edge (2) within 30 s",
+   "result": "ok",
+   "detail": "seconds to first 200 per edge: {'198.51.100.7': 1.3, '198.51.100.7': 4.2} of ['198.51.100.7', '198.51.100.7']"
+  },
+  {
+   "scenario": "tls",
+   "cell": "F8-10 self-signed loopback origin works with --tls-verification insecure, and it was sent the public name as SNI",
+   "result": "ok",
+   "detail": "200 b'{\"host\": \"app.example.test\", \"xfp\": \"https\", \"xfh\": \"app.example.test\", \"xff\": \"13.1'"
+  },
+  {
+   "scenario": "tls",
+   "cell": "F8-10 --tls-verification pinned --tls-pin trusts exactly that certificate",
+   "result": "ok",
+   "detail": "200 None"
+  },
+  {
+   "scenario": "tls",
+   "cell": "F8-10/F8-12 a changed pin is refused with the origin_certificate_changed page",
+   "result": "ok",
+   "detail": "502 origin_certificate_changed"
+  },
+  {
+   "scenario": "tls",
+   "cell": "F8-10/F8-12 a self-signed certificate: origin_tls page and the doctor hint names pinning",
+   "result": "ok",
+   "detail": "502 origin_tls n http origin for this route.\nOrigin certificate (route default, seen from this machine): it is self-signed: pin it with --tls-verification pinned (or --tls-verification insecure for a local origin).\n"
+  },
+  {
+   "scenario": "tls",
+   "cell": "F8-10/F8-12 a private-CA certificate without --tls-ca: origin_tls page and the doctor hint names --tls-ca",
+   "result": "ok",
+   "detail": "502 origin_tls een from this machine): it is signed by CN=Tor Test CA, which this machine does not trust: trust that CA with --tls-ca <its PEM file>, pin it with --tls-verification pinned, or use an http:// origin.\n"
+  },
+  {
+   "scenario": "tls",
+   "cell": "F8-10 a private CA (Caddy tls internal style) works with --tls-ca",
+   "result": "ok",
+   "detail": "200 None"
+  },
+  {
+   "scenario": "tls",
+   "cell": "F8-10/F8-12 an expired certificate: origin_tls page and the doctor hint says expired",
+   "result": "ok",
+   "detail": "502 origin_tls  or use an http origin for this route.\nOrigin certificate (route default, seen from this machine): it expired on 2026-11-11: renew it on the origin, or pin the new one with --tls-verification pinned.\n"
+  },
+  {
+   "scenario": "preview",
+   "cell": "F7-08 preview: forwarded headers, spoofs dropped, https, public host, one client IP",
+   "result": "ok",
+   "detail": "200 {'host': 'app.example.test', 'xfp': 'https', 'xfh': 'app.example.test', 'xff': '198.51.100.7', 'forwarded': 'for=198.51.100.7;proto=https;host=app.example.test', 'sni': None}"
+  },
+  {
+   "scenario": "preview",
+   "cell": "F7-08 preview: an app that redirects to its own https URL gets the loop page naming the fix",
+   "result": "ok",
+   "detail": "502 origin_redirect_loop"
+  },
+  {
+   "scenario": "preview",
+   "cell": "F7-08 preview: a slow app gets 100 s to its first byte, then the 504 origin_timeout page",
+   "result": "ok",
+   "detail": "504 origin_timeout after 100 s"
+  },
+  {
+   "scenario": "preview",
+   "cell": "F7-08 preview: an HTTPS origin on localhost is sent the public hostname as SNI",
+   "result": "ok",
+   "detail": "502 upstream_unavailable sni=['app.example.test']"
+  }
+ ],
+ "device": "pb dev-ee6287104 (stage A cells) and dev-3ade53cb7 (preview cells), prod edges e832c2afc; stage A scenarios headers/tls/grpc/failures/edges plus the preview scenario rerun after the SNI fix"
+}

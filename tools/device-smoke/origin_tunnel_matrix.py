@@ -229,7 +229,14 @@ class Lab:
 
     def preview(self, url):
         """A preview of url (kind=preview); returns (host, preview id)."""
-        data = self.pb('preview', url, '--background', '--ttl', '3h', timeout=240)
+        for attempt in range(3):  # creating the preview is setup, not the behaviour under test: a preview that did not become ready is made again
+            try:
+                data = self.pb('preview', url, '--background', '--ttl', '3h', timeout=240)
+                break
+            except RuntimeError as failure:
+                if attempt == 2 or 'did not become ready' not in str(failure):
+                    raise
+                time.sleep(5)
         self.previews.append(data['id'])
         return data['endpoint'].split('://', 1)[1].rstrip('/'), data['id']
 

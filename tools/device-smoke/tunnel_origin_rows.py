@@ -694,7 +694,14 @@ def preview_scenario():
     previews = []
 
     def publish(target):
-        data = pb('preview', target, '--background', '--ttl', '3h', timeout=240)
+        for attempt in range(3):  # creating the preview is setup, not the behaviour under test
+            try:
+                data = pb('preview', target, '--background', '--ttl', '3h', timeout=240)
+                break
+            except RuntimeError as failure:
+                if attempt == 2 or not ('did not become ready' in str(failure) or 'did not keep the preview open' in str(failure)):
+                    raise
+                time.sleep(8)
         previews.append(data['id'])
         return data['endpoint'].split('://', 1)[1].rstrip('/')
     try:

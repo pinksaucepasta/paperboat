@@ -31,7 +31,7 @@ FLOOD_SECONDS = 20
 
 # runs on observer B: python3 - URL SECONDS
 FLOODER = r'''
-import http.client, json, ssl, sys, threading, time, urllib.parse
+import http.client, json, os, ssl, subprocess, sys, threading, time, urllib.parse
 url, seconds = sys.argv[1], float(sys.argv[2])
 host = urllib.parse.urlsplit(url).netloc
 ctx = ssl.create_default_context()
@@ -44,24 +44,12 @@ def one(accept):
         return r.status, r, body
     finally:
         conn.close()
-def worker(n):
-    # half the workers ask for a name nobody owns under the same domain: the edge answers those without the tunnel, so the
-    # address is counted at the edge's own speed (a slow machine behind the tunnel would otherwise never reach the limit)
-    target = host if n % 2 == 0 else "flood-%d.%s" % (n, host.split(".", 1)[1])
-    conn = http.client.HTTPSConnection(target, 443, timeout=20, context=ctx)
-    end = time.time() + seconds
-    while time.time() < end:
-        try:
-            conn.request("GET", "/")
-            r = conn.getresponse(); r.read()
-            key = str(r.status)
-            if r.status == 429:
-                samples.setdefault("429", (r.getheader("X-Paperboat-Error"), r.getheader("Retry-After")))
-        except Exception as e:
-            key = "error"; conn.close(); conn = http.client.HTTPSConnection(target, 443, timeout=20, context=ctx)
-        with lock: counts[key] = counts.get(key, 0) + 1
-threads = [threading.Thread(target=worker, args=(i,)) for i in range(40)]
-[t.start() for t in threads]
+def curl_flood(target):
+    # curl --parallel multiplexes thousands of requests over a few HTTP/2 connections: a hosted runner's Python threads reach only ~100 a second
+    return subprocess.Popen(["curl", "--parallel", "--parallel-max", "100", "-Z", "-s", "-o", os.devnull, "-w", "%{http_code}\\n", "--max-time", str(int(seconds)),
+                             "https://%s/?[1-200000]" % target], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+base = host.split(".", 1)[1]
+floods = [curl_flood(host), curl_flood("flood-1." + base), curl_flood("flood-2." + base)]
 time.sleep(seconds * 0.7)
 out = {}
 for name, accept in (("page", "text/html"), ("api", "application/json")):
@@ -77,8 +65,11 @@ for name, accept in (("page", "text/html"), ("api", "application/json")):
         out[name] = {"status": status, "type": r.getheader("Content-Type"), "error": r.getheader("X-Paperboat-Error"), "retry_after": r.getheader("Retry-After"), "body": body[:60].decode("latin1")}
     except Exception as e:
         out[name] = {"error": str(e)[:100]}
-[t.join() for t in threads]
-out["counts"], out["sample"] = counts, samples.get("429")
+counts = {}
+for proc in floods:
+    for line in proc.communicate()[0].split():
+        counts[line] = counts.get(line, 0) + 1
+out["counts"], out["sample"] = counts, None
 # new TLS handshakes (limit 20/s, burst 50) and WebSocket upgrades (20/s, burst 40) need parallel callers to exceed them
 handshake = {"ok": 0, "refused": 0}
 def shake():
@@ -183,7 +174,7 @@ def main():
             raise Failure('the flood generator printed no report: %s %s' % (out[-200:], err[-200:]))
         counts = report['counts']
         step('the flooding address is refused 429 edge_rate_limited with Retry-After, after getting its burst',
-             counts.get('429', 0) > 0 and counts.get('200', 0) > 0 and report['sample'] and report['sample'][0] == 'edge_rate_limited' and report['sample'][1], '%s %s' % (counts, report['sample']))
+             counts.get('429', 0) > 0 and counts.get('200', 0) > 0 and report['page'].get('error') == 'edge_rate_limited' and report['page'].get('retry_after'), '%s %s' % (counts, report['page']))
         step('a new preview made during the flood is served to another address within %d s' % BYSTANDER_BOUND, bystander is not None and bystander < BYSTANDER_BOUND, '%s s' % bystander)
         step('another address is served every time during the flood', during and all(code == 200 for code in during), during)
         page, api = report['page'], report['api']
