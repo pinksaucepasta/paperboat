@@ -1,0 +1,191 @@
+{
+ "check": "tunnel-origin-rows",
+ "platform": "linux",
+ "cells": [
+  {
+   "scenario": "preview",
+   "cell": "F7-08 preview: forwarded headers, spoofs dropped, https, public host, one client IP",
+   "result": "ok",
+   "detail": "200 {'host': 'app.example.test', 'xfp': 'https', 'xfh': 'app.example.test', 'xff': '198.51.100.7', 'forwarded': 'for=198.51.100.7;proto=https;host=app.example.test', 'sni': None}"
+  },
+  {
+   "scenario": "preview",
+   "cell": "F7-08 preview: an app that redirects to its own https URL gets the loop page naming the fix",
+   "result": "ok",
+   "detail": "502 origin_redirect_loop"
+  },
+  {
+   "scenario": "headers",
+   "cell": "F8-09 forwarded headers: spoofs dropped, https, public host, one client IP",
+   "result": "ok",
+   "detail": "200 {'host': 'app.example.test', 'xfp': 'https', 'xfh': 'app.example.test', 'xff': '198.51.100.7', 'forwarded': 'for=198.51.100.7;proto=https;host=app.example.test', 'sni': None}"
+  },
+  {
+   "scenario": "failures",
+   "cell": "F8-12 an app that is not running: the origin_refused page says so",
+   "result": "ok",
+   "detail": "502 origin_refused"
+  },
+  {
+   "scenario": "edges",
+   "cell": "F8-15 a new tunnel is served by every edge (2) within 30 s",
+   "result": "ok",
+   "detail": "seconds to first 200 per edge: {'198.51.100.7': 0.1, '198.51.100.7': 0.3} of ['198.51.100.7', '198.51.100.7']"
+  },
+  {
+   "scenario": "grpc",
+   "cell": "F8-11 gRPC over an h2c origin: unary, streaming and the grpc-status trailer arrive",
+   "result": "ok",
+   "detail": "{'unary': 'SERVING', 'trailer': 'NOT_FOUND', 'stream': ['SERVING', 'NOT_SERVING']}"
+  },
+  {
+   "scenario": "headers",
+   "cell": "F8-09 the app's cookies, validators and headers arrive unchanged",
+   "result": "ok",
+   "detail": "200 ['a=1; Path=/x; HttpOnly; SameSite=Lax', 'b=2; Path=/; Secure; Max-Age=60']"
+  },
+  {
+   "scenario": "headers",
+   "cell": "F8-09 the app's redirects (relative and absolute Location) are not rewritten",
+   "result": "ok",
+   "detail": "302 /next?x=1&y=%2F / 302 http://127.0.0.1:36289/abs"
+  },
+  {
+   "scenario": "headers",
+   "cell": "F8-09/F8-12 an app that redirects to its own https URL gets the loop page naming the fix",
+   "result": "ok",
+   "detail": "502 origin_redirect_loop"
+  },
+  {
+   "scenario": "headers",
+   "cell": "F8-12 a body over the cap is 413 request_body_too_large",
+   "result": "ok",
+   "detail": "b'HTTP/1.1 413 Request Entity Too Large\\r\\nCache-Control: no-store\\r\\nContent-Security'"
+  },
+  {
+   "scenario": "edges",
+   "cell": "F8-15 a new preview is served by every edge (2) within 30 s",
+   "result": "ok",
+   "detail": "seconds to first 200 per edge: {'198.51.100.7': 0.7, '198.51.100.7': 2.5} of ['198.51.100.7', '198.51.100.7']"
+  },
+  {
+   "scenario": "headers",
+   "cell": "F8-12 oversized headers are 431, not 502 or 404",
+   "result": "ok",
+   "detail": "b'HTTP/1.1 431 Request Header Fields Too Large\\r\\nContent-Type: text/plain; charset='"
+  },
+  {
+   "scenario": "headers",
+   "cell": "F8-12 ACME validation on port 80 gets an explanation, any other request the https redirect",
+   "result": "ok",
+   "detail": "404 b'Paperboat serves HTTPS for this name and holds its certifica' / 308"
+  },
+  {
+   "scenario": "grpc",
+   "cell": "F8-11 gRPC over a TLS (h2) origin verified with --tls-ca: unary, streaming and the grpc-status trailer arrive",
+   "result": "ok",
+   "detail": "{'unary': 'SERVING', 'trailer': 'NOT_FOUND', 'stream': ['NOT_SERVING', 'SERVING']}"
+  },
+  {
+   "scenario": "tls",
+   "cell": "F8-10 self-signed loopback origin works with --tls-verification insecure, and it was sent the public name as SNI",
+   "result": "ok",
+   "detail": "200 b'{\"host\": \"app.example.test\", \"xfp\": \"https\", \"xfh\": \"app.example.test\", \"xff\": \"122.17'"
+  },
+  {
+   "scenario": "tls",
+   "cell": "F8-10 --tls-verification pinned --tls-pin trusts exactly that certificate",
+   "result": "ok",
+   "detail": "200 None"
+  },
+  {
+   "scenario": "tls",
+   "cell": "F8-10/F8-12 a changed pin is refused with the origin_certificate_changed page",
+   "result": "ok",
+   "detail": "502 origin_certificate_changed"
+  },
+  {
+   "scenario": "tls",
+   "cell": "F8-10/F8-12 a self-signed certificate: origin_tls page and the doctor hint names pinning",
+   "result": "ok",
+   "detail": "502 origin_tls n http origin for this route.\nOrigin certificate (route default, seen from this machine): it is self-signed: pin it with --tls-verification pinned (or --tls-verification insecure for a local origin).\n"
+  },
+  {
+   "scenario": "tls",
+   "cell": "F8-10/F8-12 a private-CA certificate without --tls-ca: origin_tls page and the doctor hint names --tls-ca",
+   "result": "ok",
+   "detail": "502 origin_tls een from this machine): it is signed by CN=Tor Test CA, which this machine does not trust: trust that CA with --tls-ca <its PEM file>, pin it with --tls-verification pinned, or use an http:// origin.\n"
+  },
+  {
+   "scenario": "tls",
+   "cell": "F8-10 a private CA (Caddy tls internal style) works with --tls-ca",
+   "result": "ok",
+   "detail": "200 None"
+  },
+  {
+   "scenario": "keepalive",
+   "cell": "F8-09 Node-style keep-alive never races a pooled connection (120 requests at the origin's idle limit)",
+   "result": "ok",
+   "detail": "no failures"
+  },
+  {
+   "scenario": "tls",
+   "cell": "F8-10/F8-12 an expired certificate: origin_tls page and the doctor hint says expired",
+   "result": "ok",
+   "detail": "502 origin_tls  or use an http origin for this route.\nOrigin certificate (route default, seen from this machine): it expired on 2026-11-11: renew it on the origin, or pin the new one with --tls-verification pinned.\n"
+  },
+  {
+   "scenario": "preview",
+   "cell": "scenario ran to the end",
+   "result": "FAILED",
+   "detail": "TimeoutError: The read operation timed out"
+  },
+  {
+   "scenario": "ws",
+   "cell": "F8-09 a WebSocket stays open through 600 s of quiet",
+   "result": "FAILED",
+   "detail": "b'HTTP/1.1 101 Switchi' first=(1, b'first') late=None closed_after=600 s"
+  }
+ ],
+ "retried_requests": [
+  {
+   "host": "app.example.test",
+   "path": "/",
+   "tries": 4,
+   "status": 200
+  },
+  {
+   "host": "app.example.test",
+   "path": "/",
+   "tries": 2,
+   "status": 200
+  },
+  {
+   "host": "app.example.test",
+   "path": "/",
+   "tries": 2,
+   "status": 502
+  },
+  {
+   "host": "app.example.test",
+   "path": "/",
+   "tries": 3,
+   "status": 502
+  },
+  {
+   "host": "app.example.test",
+   "path": "/",
+   "tries": 4,
+   "status": 200
+  },
+  {
+   "host": "app.example.test",
+   "path": "/",
+   "tries": 3,
+   "status": 502
+  }
+ ],
+ "device": "pbt dev-ee6287104 in a systemd container on a Linux host",
+ "edges": "2026.11.12.5 (both)",
+ "note": "WebSocket quiet cell ran at 600 s = the 10 min idle bound exactly; rerun at 570 s. Preview slow cell hit the 200 s double wait (fixed, awaits edge deploy)."
+}

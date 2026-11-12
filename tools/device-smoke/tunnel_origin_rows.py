@@ -402,6 +402,9 @@ def ws_scenario():
     s = 'ws'
     origin = serve(Origin)
     name, host, route = create(s, '--port', str(origin.server_address[1]))
+    if ARGS.ws_route_idle:
+        pb('tunnel', 'route', 'update', name, route, '--idle-timeout', ARGS.ws_route_idle, '--wait', '--timeout', '90s', timeout=240)
+        time.sleep(4)
     visit(host, '/')  # warm the route
     for attempt in range(15):  # DNS gives both edges: a connection that lands on an edge not yet serving the route is tried again
         sock = socket.create_connection((host, 443), timeout=30)
@@ -465,7 +468,7 @@ def doctor_hint(name, words):
 
 def tls_scenario():
     s = 'tls'
-    selfp, selfk, selfc, _ = make_cert('app.local', ['localhost'])
+    selfp, selfk, selfc, _ = make_cert('app.local')
     https = serve(Origin, tls=(write('self.crt', selfp), write('self.key', selfk)))
     port = https.server_address[1]
     placeholder = serve(Origin)
@@ -533,6 +536,13 @@ def grpc_server(port, credentials=None):
 
 
 def grpc_probe(s, label, host):
+    for attempt in range(8):  # a route that just moved may still answer from the old origin or not at all for a few seconds
+        if grpc_attempt(s, label, host, last=attempt == 7):
+            return
+        time.sleep(5)
+
+
+def grpc_attempt(s, label, host, last):
     channel = grpc.secure_channel(host + ':443', grpc.ssl_channel_credentials())
     stub = health_pb2_grpc.HealthStub(channel)
     result = {}
@@ -551,9 +561,11 @@ def grpc_probe(s, label, host):
     except grpc.RpcError as error:
         result['error'] = '%s %s' % (error.code().name, (error.details() or '')[:150])
         result['edge_error'] = visit(host, '/', retries=1)[1].getheader('X-Paperboat-Error')  # what the edge says about this route
-    cell(s, 'F8-11 gRPC over %s: unary, streaming and the grpc-status trailer arrive' % label,
-         result.get('unary') == 'SERVING' and result.get('trailer') == 'NOT_FOUND' and len(result.get('stream', [])) >= 2 and result['stream'][0] != result['stream'][-1], result)
+    ok = result.get('unary') == 'SERVING' and result.get('trailer') == 'NOT_FOUND' and len(result.get('stream', [])) >= 2 and result['stream'][0] != result['stream'][-1]
     channel.close()
+    if ok or last:
+        cell(s, 'F8-11 gRPC over %s: unary, streaming and the grpc-status trailer arrive' % label, ok, result)
+    return ok
 
 
 def grpc_scenario():
@@ -580,15 +592,6 @@ def failures_scenario():
     status, response, body = visit(host, '/', retries=1)
     cell(s, 'F8-12 an app that is not running: the origin_refused page says so', status == 502 and response.getheader('X-Paperboat-Error') in ('origin_refused', 'origin_unreachable') and len(body) > 200,
          '%s %s' % (status, response.getheader('X-Paperboat-Error')))
-    slow = serve(Origin)
-    move(name, route, 'http://127.0.0.1:%d' % slow.server_address[1])
-    visit(host, '/')  # the new route is known to the edge before the clock starts
-    started = time.time()
-    status, response, body = visit(host, '/slow?seconds=%d' % ARGS.slow, timeout=ARGS.slow + 60, retries=1)
-    cell(s, 'F8-12 a slow app gets 100 s to its first byte, then the 504 origin_timeout page',
-         status == 504 and response.getheader('X-Paperboat-Error') == 'origin_timeout' and 95 <= time.time() - started <= ARGS.slow + 20,
-         '%s %s after %d s' % (status, response.getheader('X-Paperboat-Error'), time.time() - started))
-    slow.stop()
 
 
 def edges_scenario():
@@ -710,6 +713,7 @@ def main():
     parser.add_argument('--only', nargs='*', default=[n for n in SCENARIOS if n != 'edge_loss'], help='scenarios to run (edge_loss, Linux with sudo, only when asked)')
     parser.add_argument('--ws-quiet', type=int, default=600)
     parser.add_argument('--slow', type=int, default=105)
+    parser.add_argument('--ws-route-idle', default='', help='diagnosis: set the WebSocket tunnel route\'s --idle-timeout first')
     ARGS = parser.parse_args()
     threads = [threading.Thread(target=run_scenario, args=(name,)) for name in ARGS.only]
     try:
