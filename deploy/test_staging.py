@@ -135,6 +135,9 @@ class CertificateEnvironmentTest(unittest.TestCase):
         ):
             values = dict(item.split("=", 1) for item in shlex.split(staging.build_env(existing, prod)))
             self.assertEqual(values["PAPERBOAT_CERTIFICATES_ENABLED"], "true")
+            self.assertEqual(values["PAPERBOAT_PREVIEW_BASE_DOMAIN"], values["PAPERBOAT_TUNNEL_BASE_DOMAIN"])
+            self.assertNotEqual(values["PAPERBOAT_PREVIEW_BASE_DOMAIN"], values["PAPERBOAT_RUNTIME_BASE_DOMAIN"])
+            self.assertNotEqual(values["PAPERBOAT_PREVIEW_BASE_DOMAIN"], "api.stg.example.test")
             self.assertEqual(values["PAPERBOAT_CERTIFICATES_CHALLENGE_ZONE"], "acme.stg.example.test")
             self.assertEqual(values["PAPERBOAT_CERTIFICATES_DNS_WRITE_BASE"], "stg.example.test")
             self.assertEqual(values["PAPERBOAT_CERTIFICATES_DNS_ZONE_ID"], "test-zone")

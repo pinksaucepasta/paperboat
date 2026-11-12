@@ -22,6 +22,7 @@ HOST = os.environ.get("STAGING_HOST", "ubuntu@anvit")
 PROD = os.environ.get("STAGING_PROD_HOST", "root@coolify")
 DIR = "pb-release-staging"                     # on HOST, relative to its home
 REGION, INSTANCE = "anvit", "slot-01"
+PUBLIC_LABEL = "pub"
 # The regional domain is "stg." under the production API host's parent domain (read from the prod server env at init,
 # kept in the stack's .env): no domain is written in code.
 PORT = int(os.environ.get("STAGING_PORT", "18443"))           # inside anvit's open public range 10000-59999
@@ -100,6 +101,7 @@ def build_env(existing, prod):
     keep = lambda k, make: existing.get(k) or make()
     api, DOMAIN = api_url(), domain()
     sub = lambda name: f"{name}.{DOMAIN}"
+    public_base = sub(PUBLIC_LABEL)
     workos = lambda f: read_remote_secret(PROD, f"/opt/paperboat/secrets/{f}")
     control_credential = keep("PAPERBOAT_EDGE_CONTROL_CREDENTIAL", lambda: secrets.token_urlsafe(48))
     env = {
@@ -119,8 +121,8 @@ def build_env(existing, prod):
         "PAPERBOAT_RELEASE_DIRECTORY": "/srv/paperboat-releases", "PAPERBOAT_RELEASE_BASE_URL": api,
         "PAPERBOAT_CLI_VERIFICATION_URL": api + "/cli", "PAPERBOAT_MACHINES_URL": api + "/machines",
         "PAPERBOAT_BROWSER_LOGIN_ORIGIN": api,
-        "PAPERBOAT_LOCAL_ACCESS_BASE_DOMAIN": sub("loc"), "PAPERBOAT_PREVIEW_BASE_DOMAIN": sub("prev"),
-        "PAPERBOAT_TUNNEL_BASE_DOMAIN": sub("tun"), "PAPERBOAT_RUNTIME_BASE_DOMAIN": sub("rt"),
+        "PAPERBOAT_LOCAL_ACCESS_BASE_DOMAIN": sub("loc"), "PAPERBOAT_PREVIEW_BASE_DOMAIN": public_base,
+        "PAPERBOAT_TUNNEL_BASE_DOMAIN": public_base, "PAPERBOAT_RUNTIME_BASE_DOMAIN": sub("rt"),
         "PAPERBOAT_SELFHOST_ALLOW_PRIVATE_INGRESS": "true",
         "PAPERBOAT_SENTRY_REGION": REGION, "PAPERBOAT_SENTRY_INSTANCE": INSTANCE,
         "PAPERBOAT_REGIONAL_DOMAIN": DOMAIN, "PAPERBOAT_REGIONAL_DNS_ZONE_ID": prod["PAPERBOAT_CERTIFICATES_DNS_ZONE_ID"],
@@ -327,6 +329,7 @@ def edge(image):
     from cryptography.hazmat.primitives.asymmetric import ed25519
     host = f"{REGION}.{domain()}"
     api = api_url()
+    public_base = f"{PUBLIC_LABEL}.{domain()}"
     b64 = lambda raw: base64.urlsafe_b64encode(raw).decode().rstrip("=")
     seed = ed25519.Ed25519PrivateKey.generate()
     raw_seed = seed.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
@@ -348,7 +351,7 @@ def edge(image):
             "connector_advertise_host": host, "carrier_tcp_listen_address": f"0.0.0.0:{EDGE_PORT}",
             "carrier_quic_listen_address": f"0.0.0.0:{EDGE_QUIC_PORT}", "public_https_listen_address": "0.0.0.0:18446",
             "private_https_listen_address": "127.0.0.1:9443", "public_http_listen_address": "0.0.0.0:18447",
-            "preview_base_domain": f"prev.{domain()}", "tunnel_base_domain": f"tun.{domain()}", "runtime_base_domain": f"rt.{domain()}",
+            "preview_base_domain": public_base, "tunnel_base_domain": public_base, "runtime_base_domain": f"rt.{domain()}",
             "trusted_proxy_cidrs": [], "public_routes": [], "node_capacity": 32, "control_interval": 5_000_000_000,
             "control_timeout": 5_000_000_000, "max_body_bytes": 52428800, "max_header_bytes": 32768}),
     }
