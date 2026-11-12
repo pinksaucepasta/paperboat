@@ -16,6 +16,7 @@ import {
   type Shell,
 } from "@/lib/enrollment"
 import { CopyIcons, useCopy } from "@/components/copy-button"
+import { cn } from "@/lib/utils"
 import { ShareMachine } from "@/components/share-machine-dialog"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -360,7 +361,16 @@ function EnrollmentStatus({
  * stays one line (one per command when there are several) and scrolls sideways under the copy
  * icon, which fades the text out beneath it.
  */
-export function CommandBlock({ command, label = "Copy command" }: { command: string; label?: string }) {
+export function CommandBlock({
+  command,
+  label = "Copy command",
+  wrap,
+}: {
+  command: string
+  label?: string
+  /** Wrap a long value (a code shown once) instead of scrolling it sideways. */
+  wrap?: boolean
+}) {
   const { copied, copy } = useCopy(command)
   // The text stays readable (screen readers read the command); only the copy icon is the labelled
   // button. A click anywhere on the block copies too, for the mouse.
@@ -369,7 +379,12 @@ export function CommandBlock({ command, label = "Copy command" }: { command: str
       onClick={copy}
       className="group/copy relative flex w-full cursor-pointer rounded-lg bg-muted text-left hover:bg-accent has-focus-visible:ring-2 has-focus-visible:ring-ring/30"
     >
-      <code className="no-scrollbar min-w-0 flex-1 overflow-x-auto py-3 pr-12 pl-3.5 font-mono text-xs leading-relaxed whitespace-pre">
+      <code
+        className={cn(
+          "no-scrollbar min-w-0 flex-1 py-3 pr-12 pl-3.5 font-mono text-xs leading-relaxed",
+          wrap ? "break-all whitespace-normal" : "overflow-x-auto whitespace-pre"
+        )}
+      >
         {command}
       </code>
       <span className="pointer-events-none absolute inset-y-0 right-0 flex items-start rounded-r-lg bg-linear-to-l from-muted from-60% to-transparent py-3 pr-3 pl-8 group-hover/copy:from-accent">

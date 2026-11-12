@@ -37,7 +37,7 @@ export function RecoveryCodeStep({
   return (
     <div className="flex flex-col gap-3 text-sm">
       <p className="text-muted-foreground">Shown once. Keep it somewhere safe.{note && ` ${note}`}</p>
-      <CommandBlock command={code} label="Copy recovery code" />
+      <CommandBlock command={code} label="Copy recovery code" wrap />
       <Button type="button" variant="outline" className="self-start" onClick={download}>
         <DownloadSimpleIcon data-icon="inline-start" /> Download
       </Button>
