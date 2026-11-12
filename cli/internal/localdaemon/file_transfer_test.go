@@ -245,7 +245,8 @@ func TestUnlimitedTransferStreamsUseOnlyDirectOrOwnRelayPaths(t *testing.T) {
 }
 
 // After a daemon restart no traffic has crossed, so the peer reads as no path; an Unlimited transfer that only waited
-// would never find one (a paused send stayed paused after its daemon restarted). Refusing it wakes the peer.
+// would never find one (a paused send stayed paused after its daemon restarted). Refusing it wakes the peer, and
+// it also wakes a peer reached only through a hosted relay, which no traffic of its own would upgrade.
 func TestUnlimitedTransferWakesAPeerWithNoPath(t *testing.T) {
 	now := time.Unix(10_000, 0).UTC()
 	paths := newPathFake(tailnet.PathNone)
@@ -270,7 +271,14 @@ func TestUnlimitedTransferWakesAPeerWithNoPath(t *testing.T) {
 	}
 	paths.set(tailnet.PathHostedRelay)
 	_, _ = broker.OpenFileTransferStream(context.Background(), owner, result.Handle)
-	if paths.woken.Load() != 1 {
-		t.Fatal("a hosted relay path woke the peer: it already has traffic")
+	if paths.woken.Load() != 2 {
+		t.Fatalf("a hosted relay path did not wake the peer to look for a direct path: woken %d", paths.woken.Load())
+	}
+	paths.set(tailnet.PathDirect)
+	if _, err := broker.OpenFileTransferStream(context.Background(), owner, result.Handle); err != nil {
+		t.Fatalf("the stream did not open once the path was direct: %v", err)
+	}
+	if paths.woken.Load() != 2 {
+		t.Fatal("a direct path woke the peer")
 	}
 }

@@ -155,7 +155,9 @@ func eligiblePath(kind tailnet.PathKind) bool {
 func (b *FileTransferBroker) openEligibleStream(ctx context.Context, lease daemonTransferLease) (net.Conn, error) {
 	watch, stopWatch := context.WithCancel(context.Background())
 	kind, changed := b.tunnel.PathEligibility(watch, lease.machineID)
-	if kind == tailnet.PathNone {
+	// A peer with no path or only a hosted relay is probed for a direct path: waiting alone generates no
+	// traffic that could find one (WakePeer dedups the dials).
+	if kind == tailnet.PathNone || kind == tailnet.PathHostedRelay {
 		b.tunnel.WakePeer(lease.machineID)
 	}
 	if !eligiblePath(kind) {
