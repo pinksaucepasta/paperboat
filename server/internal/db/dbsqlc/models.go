@@ -2970,6 +2970,7 @@ type TunnelRoute struct {
 	PublicTcpPort           sql.NullInt32
 	TlsPin                  sql.NullString
 	TlsCa                   sql.NullString
+	RewriteRules            []byte
 }
 
 type TunnelRouteOriginHealth struct {
