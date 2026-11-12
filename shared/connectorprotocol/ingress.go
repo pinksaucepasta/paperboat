@@ -72,6 +72,11 @@ func readIngressDecision(r io.Reader, now time.Time, admitted bool) (IngressDeci
 const (
 	IngressAuthorityLifetime = 10 * time.Second
 	IngressRefreshInterval   = 5 * time.Second
+	// IngressFetchTimeout bounds one ingress decisions fetch. It exceeds the control timeout on purpose: the first
+	// answers of a freshly started server take about 2 s (2026-11-12, server swap: 1.7-2.0 s against a 2 s deadline,
+	// so both edges logged a control failure) and a slow answer beats a counted failure. The edge keeps serving the
+	// last decisions meanwhile.
+	IngressFetchTimeout = 10 * time.Second
 	TunnelEphemeral          = "ephemeral"
 	TunnelDurable            = "durable"
 )

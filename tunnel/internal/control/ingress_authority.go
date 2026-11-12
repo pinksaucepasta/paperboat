@@ -236,7 +236,7 @@ func (a *IngressAuthority) refresh(ctx context.Context, force bool) ([]connector
 		a.inflight = done
 		generation := a.invalidations
 		a.mu.Unlock()
-		fetch, cancel := context.WithTimeout(ctx, 2*time.Second)
+		fetch, cancel := context.WithTimeout(ctx, connectorprotocol.IngressFetchTimeout)
 		snapshot, err := a.Client.IngressDecisions(fetch, a.NodeID, a.ProcessEpoch, a.heldVersion())
 		cancel()
 		a.mu.Lock()

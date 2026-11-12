@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat/shared/strictjson"
@@ -81,7 +82,9 @@ type HTTPClient struct {
 	client     *http.Client
 	// onDemand sends the on-demand certificate request: the server waits there for an issuance
 	// already in flight (an ACME leaf takes seconds), longer than the control timeout.
-	onDemand       *http.Client
+	onDemand *http.Client
+	// ingress sends the ingress decisions fetch with its own, longer timeout (connectorprotocol.IngressFetchTimeout).
+	ingress        *http.Client
 	controlFailure func(context.Context, string, error)
 	controlTrace   func(context.Context, string) (string, string, func(string, string))
 	nodeReady      <-chan struct{}
@@ -140,7 +143,9 @@ func NewHTTPClient(config HTTPConfig) (*HTTPClient, error) {
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return ErrControlUnavailable }
 	onDemand := *client
 	onDemand.Timeout = max(config.Timeout, OnDemandCertificateTimeout)
-	return &HTTPClient{base: base, credential: config.Credential, client: client, onDemand: &onDemand, controlTrace: config.ControlTrace, controlFailure: config.ControlFailure, nodeReady: config.NodeReady}, nil
+	ingress := *client
+	ingress.Timeout = max(config.Timeout, connectorprotocol.IngressFetchTimeout)
+	return &HTTPClient{base: base, credential: config.Credential, client: client, onDemand: &onDemand, ingress: &ingress, controlTrace: config.ControlTrace, controlFailure: config.ControlFailure, nodeReady: config.NodeReady}, nil
 }
 
 // ErrNodeNotReady: the request was not sent because the edge process is not ready yet.
@@ -517,6 +522,8 @@ func (c *HTTPClient) postNodeWithMaximumAndIdentity(ctx context.Context, path, n
 	httpClient := c.client
 	if path == CertificateDistributionRequestPath {
 		httpClient = c.onDemand
+	} else if path == ingressDecisionsPath {
+		httpClient = c.ingress
 	}
 	var response *http.Response
 	for attempt := 1; ; attempt++ {

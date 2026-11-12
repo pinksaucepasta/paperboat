@@ -541,3 +541,24 @@ func TestAdmitsPreviewDoesNotTakeTheWriteLock(t *testing.T) {
 		t.Fatal("AdmitsPreview blocked while another reader held the lock")
 	}
 }
+
+// The first answers of a freshly started server take about 2 s (the 2026-11-12 server swap: 1.7-2.0 s against
+// the edge's 2 s deadline). A slow answer must still be taken, not counted as a control failure: the fetch has
+// its own timeout, longer than the control timeout.
+func TestIngressAuthorityTakesAnAnswerSlowerThanTheControlTimeout(t *testing.T) {
+	decision := ingressAuthorityTestDecision(time.Now().UTC())
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(1500 * time.Millisecond)
+		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": []connectorprotocol.IngressDecision{decision}})
+	}))
+	defer server.Close()
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := &IngressAuthority{Client: client, NodeID: decision.EdgeNodeID, ProcessEpoch: decision.EdgeProcessEpoch}
+	decisions, err := authority.Snapshot(context.Background())
+	if err != nil || len(decisions) != 1 {
+		t.Fatalf("a 1.5 s answer to a 1 s control timeout was refused: %d decisions, %v", len(decisions), err)
+	}
+}

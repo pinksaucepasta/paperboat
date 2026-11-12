@@ -28,6 +28,8 @@ type IngressSnapshot struct {
 	Expiries  []time.Time
 }
 
+const ingressDecisionsPath = "/v1/edge/ingress/desired-state"
+
 // IngressDecisions returns the current snapshot for this edge process; a non-empty version is the
 // one the edge holds (F21-38).
 func (c *HTTPClient) IngressDecisions(ctx context.Context, nodeID, epoch, version string) (IngressSnapshot, error) {
@@ -51,7 +53,7 @@ func (c *HTTPClient) IngressDecisions(ctx context.Context, nodeID, epoch, versio
 		IPRules         []connectorprotocol.IngressIPRule      `json:"ip_rules"`
 		HTTP01Responses []connectorprotocol.HTTP01Response     `json:"http01_responses"`
 	}
-	if err := c.postNodeWithMaximumAndIdentity(ctx, "/v1/edge/ingress/desired-state", nodeID, epoch, input, &output, 16<<20); err != nil {
+	if err := c.postNodeWithMaximumAndIdentity(ctx, ingressDecisionsPath, nodeID, epoch, input, &output, 16<<20); err != nil {
 		return IngressSnapshot{}, err
 	}
 	if output.Unchanged {
