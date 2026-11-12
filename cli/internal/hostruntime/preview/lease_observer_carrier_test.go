@@ -208,9 +208,8 @@ func (f *fakeLeaseChanges) readCount() int {
 	return f.reads
 }
 
-// A ready preview used to re-read its lease every 250 ms for its whole life (~2 GET/s per preview on
-// production). Once ready it now reads only when the owner machine's previews topic moves.
-func TestLeaseObserverCarrierReadsReadyLeaseOnlyOnChange(t *testing.T) {
+// Both pending and ready leases stay idle until the previews topic announces a change.
+func TestLeaseObserverCarrierReadsLeaseOnlyOnChange(t *testing.T) {
 	now := time.Now().UTC()
 	ready := Lease{
 		Schema: PreviewTunnelSchemaV1, Kind: PreviewLeaseKind, ID: "preview_observer_idle", AccountID: "account_01", ActorID: "actor_01",
@@ -218,42 +217,55 @@ func TestLeaseObserverCarrierReadsReadyLeaseOnlyOnChange(t *testing.T) {
 		Endpoint: "https://preview.example.test", EndpointState: "ready", LeaseDeadline: now.Add(time.Hour), State: "ready", AllocationState: "ready", EdgeState: "ready", OriginState: "ready",
 		CreatedAt: now.Add(-time.Minute), LastRenewedAt: now, CreateOperationID: "operation_observer_idle", ETag: formatLeaseETag("preview_observer_idle", 1), Generation: 1,
 	}
-	fake := &fakeLeaseChanges{lease: ready, generation: 7, moved: make(chan struct{})}
-	carrier, err := NewLeaseObserverCarrier(LeaseObserverCarrierConfig{PollInterval: time.Millisecond, Reader: fake})
-	if err != nil {
-		t.Fatal(err)
-	}
-	readyCalls := make(chan struct{}, 1)
-	done := make(chan error, 1)
-	go func() {
-		done <- carrier.Run(context.Background(), ready, func(Lease) error {
-			select {
-			case readyCalls <- struct{}{}:
-			default:
+	for _, state := range []string{"pending", "ready"} {
+		t.Run(state, func(t *testing.T) {
+			initial := ready
+			if state == "pending" {
+				initial.State, initial.AllocationState, initial.EdgeState, initial.OriginState = "connecting", "pending", "pending", "unknown"
+				initial.Endpoint, initial.EndpointState = "", "pending"
 			}
-			return nil
+			fake := &fakeLeaseChanges{lease: initial, generation: 7, moved: make(chan struct{})}
+			carrier, err := NewLeaseObserverCarrier(LeaseObserverCarrierConfig{PollInterval: time.Millisecond, Reader: fake})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			readyCalls := make(chan struct{}, 2)
+			done := make(chan error, 1)
+			go func() {
+				done <- carrier.Run(ctx, initial, func(Lease) error { readyCalls <- struct{}{}; return nil })
+			}()
+			time.Sleep(500 * time.Millisecond)
+			// Initial read and the event baseline, then no periodic pending/ready reads.
+			if reads := fake.readCount(); reads == 0 || reads > 2 {
+				t.Fatalf("%s lease read %d times in 500 ms, want 1 or 2", state, reads)
+			}
+			if state == "pending" {
+				select {
+				case <-readyCalls:
+					t.Fatal("pending lease reported readiness")
+				default:
+				}
+				fake.change(ready)
+			}
+			select {
+			case <-readyCalls:
+			case <-time.After(time.Second):
+				t.Fatal("observer did not report pushed readiness")
+			}
+			stopped := ready
+			stopped.State, stopped.Endpoint, stopped.EndpointState = "stopped", "", "ended"
+			fake.change(stopped)
+			select {
+			case err := <-done:
+				if !errors.Is(err, ErrLeaseObserverTerminal) {
+					t.Fatalf("observer after stop = %v, want terminal", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("observer did not see pushed stop")
+			}
 		})
-	}()
-	select {
-	case <-readyCalls:
-	case <-time.After(time.Second):
-		t.Fatal("observer did not report readiness")
-	}
-	time.Sleep(500 * time.Millisecond)
-	// One read reached readiness and one followed the first wait answer (the generation baseline).
-	if reads := fake.readCount(); reads > 2 {
-		t.Fatalf("ready lease read %d times in 500 ms with nothing changing, want at most 2", reads)
-	}
-	stopped := ready
-	stopped.State, stopped.Endpoint, stopped.EndpointState = "stopped", "", "ended"
-	fake.change(stopped)
-	select {
-	case err := <-done:
-		if !errors.Is(err, ErrLeaseObserverTerminal) {
-			t.Fatalf("observer run after stop = %v, want terminal", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("observer did not see the stop the previews topic announced")
 	}
 }
 

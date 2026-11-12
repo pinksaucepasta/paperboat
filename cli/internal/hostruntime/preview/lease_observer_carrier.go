@@ -34,8 +34,8 @@ const (
 )
 
 // LeaseChangeWaiter is an optional LeaseReader extension: one long-held request on the owner machine's
-// event topics (POST /v1/machines/{id}/events/wait). A ready lease is re-read only when its previews
-// topic moves, instead of on every poll tick.
+// event topics (POST /v1/machines/{id}/events/wait). Pending and ready leases are re-read when the
+// previews topic moves, instead of on every poll tick.
 type LeaseChangeWaiter interface {
 	WaitMachineEvents(ctx context.Context, machineID string, known map[string]int64) (map[string]int64, error)
 }
@@ -179,8 +179,8 @@ func (c *LeaseObserverCarrier) Run(ctx context.Context, lease Lease, ready func(
 		c.mu.Unlock()
 	}()
 
-	// Before readiness the observer polls; once ready it waits for the previews topic (stop, expiry,
-	// owner loss and target changes all move it) and otherwise re-reads only on the slow fallback.
+	// Readiness, stop, expiry, owner loss and target changes all move the previews topic.
+	// Subscribe while pending too, and re-read only on a change or the slow fallback.
 	var changes *machineevents.Subscription
 	var changeHub *machineevents.Hub
 	defer func() {
@@ -218,24 +218,24 @@ func (c *LeaseObserverCarrier) Run(ctx context.Context, lease Lease, ready func(
 				}
 				lastETag = observed.ETag
 			}
-			if waiter, ok := reader.(LeaseChangeWaiter); ok && changeHub == nil {
-				hub, hubErr := machineevents.NewWithWaiter(machineevents.UserWaiter(func(waitCtx context.Context, known map[string]int64) (map[string]int64, error) {
-					return waiter.WaitMachineEvents(waitCtx, lease.OwnerMachineID, known)
-				}), 0)
-				if hubErr != nil {
-					return hubErr
-				}
-				changeHub, changes = hub, hub.Subscribe(machineevents.TopicPreviews)
-				if hubErr := hub.Start(runCtx); hubErr != nil {
-					return hubErr
-				}
-			}
 		case observed.State == "expired":
 			return ErrLeaseExpired
 		case observed.State == "stopped", observed.State == "owner_disconnected":
 			return ErrLeaseObserverTerminal
 		}
-		if lastETag != "" {
+		if waiter, ok := reader.(LeaseChangeWaiter); ok && changeHub == nil {
+			hub, hubErr := machineevents.NewWithWaiter(machineevents.UserWaiter(func(waitCtx context.Context, known map[string]int64) (map[string]int64, error) {
+				return waiter.WaitMachineEvents(waitCtx, lease.OwnerMachineID, known)
+			}), 0)
+			if hubErr != nil {
+				return hubErr
+			}
+			changeHub, changes = hub, hub.Subscribe(machineevents.TopicPreviews)
+			if hubErr := hub.Start(runCtx); hubErr != nil {
+				return hubErr
+			}
+		}
+		if changeHub != nil || lastETag != "" {
 			if !changes.Wait(runCtx, leaseObserverIdleRefresh) {
 				return nil
 			}
