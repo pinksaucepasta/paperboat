@@ -16,11 +16,14 @@ Everything it creates it removes again. Usage: route_rules_rows.py --machine-cmd
 """
 import argparse
 import json
+import os
 import shlex
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+from machine_ctl import Failure, Machine, remote, run
 
 # A rule reaches the edge with the next route snapshot (seconds), the same bound as the ip-rules check.
 RULE_BOUND = 15
@@ -48,20 +51,6 @@ http.server.ThreadingHTTPServer(("127.0.0.1", __PORT__), H).serve_forever()
 '''
 
 
-class Failure(Exception):
-    pass
-
-
-def remote(prefix, argv):
-    """prefix + argv; through ssh the whole command is one string the remote shell parses, so it is quoted."""
-    return prefix + ([shlex.join(argv)] if prefix and prefix[0] == 'ssh' else list(argv))
-
-
-def run(argv, timeout=120, input=None):
-    done = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, input=input)
-    return done.returncode, done.stdout, done.stderr
-
-
 def curl(url, *headers):
     """(status, response headers lowercased, body) of one visitor request from this host; no redirect is followed."""
     argv = ['curl', '-sS', '-m', '25', '-D', '-', '-o', '-', '--path-as-is']
@@ -83,24 +72,21 @@ def curl(url, *headers):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--machine-cmd', required=True)
+    parser.add_argument('--machine-cmd', default='', help='command prefix that runs a command on the machine (not with --windows)')
+    parser.add_argument('--windows', action='store_true', help='the machine is the Windows device selected by SMOKE_WINDOWS_SSH and PB_SMOKE_WINDOWS_PB')
     parser.add_argument('--pb', default='/home/pbt/.local/bin/pb')
     parser.add_argument('--output', default='')
     parser.add_argument('--wait', type=int, default=RULE_BOUND, help='seconds a rule may take to reach the edge')
     args = parser.parse_args()
-    machine = shlex.split(args.machine_cmd)
-    name = 'laners-rr-%d' % int(time.time())
+    try:
+        machine = Machine(args.machine_cmd, args.pb, args.windows)
+    except Failure as error:
+        parser.error(str(error))
+    name = 'tor-rr-%d-%s' % (int(time.time()), os.urandom(2).hex())  # tunnel names are account-wide
     steps, cleanup, latencies = [], [], []
     state = {}
 
-    def pb(*arguments, timeout=180):
-        code, out, err = run(remote(machine, [args.pb, *arguments]), timeout)
-        try:
-            value = json.loads(out)
-            value = value.get('data', value) if isinstance(value, dict) else value
-        except ValueError:
-            value = out.strip() or err.strip()
-        return code, value
+    pb = machine.pb
 
     def good(*arguments, timeout=180):
         code, value = pb(*arguments, '--json', timeout=timeout)
@@ -115,7 +101,7 @@ def main():
         return json.dumps(value)
 
     def origin_count():
-        code, out, _ = run(remote(machine, ['curl', '-sS', '-m', '10', 'http://127.0.0.1:%s/__count' % ORIGIN_PORT]), 30)
+        code, out, _ = machine.run_command(['curl', '-sS', '-m', '10', 'http://127.0.0.1:%s/__count' % ORIGIN_PORT], 30)
         return json.loads(out)['count']
 
     def seen(path, *headers):
@@ -209,11 +195,7 @@ def main():
         eventually('redirect cleared', check)
 
     try:
-        code, _, err = run(remote(machine, ['sh', '-c', 'cat > /tmp/rr-origin.py && (nohup python3 /tmp/rr-origin.py >/dev/null 2>&1 &)']), 60,
-                           input=ECHO_ORIGIN.replace('__PORT__', ORIGIN_PORT))
-        if code != 0:
-            raise Failure('origin did not start: ' + err[:200])
-        cleanup.append(lambda: run(remote(machine, ['sh', '-c', 'pkill -f /tmp/rr-origin.py; rm -f /tmp/rr-origin.py']), 30))
+        cleanup.append(machine.start_origin(ORIGIN_PORT, 'rr-origin', source=ECHO_ORIGIN))
         created = good('tunnel', 'create', name, '--port', ORIGIN_PORT, '--duration', '30m', '--wait', '--timeout', '90s', timeout=200)
         state['id'], state['url'] = created['tunnel']['id'], created['tunnel']['stable_endpoint'].rstrip('/')
 

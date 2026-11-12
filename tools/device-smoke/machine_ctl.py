@@ -50,10 +50,17 @@ class Machine:
             value = out.strip() or err.strip()
         return code, value
 
-    def start_origin(self, port, tag):
+    def run_command(self, argv, timeout=30):
+        """(exit code, stdout, stderr) of a command on the machine."""
+        if self.windows:
+            done = self.device.run(list(argv), timeout=timeout)
+            return done.returncode, done.stdout, done.stderr
+        return run(remote(self.prefix, list(argv)), timeout)
+
+    def start_origin(self, port, tag, source=None):
         """origin_proxy_matrix/app.py on 127.0.0.1:port of the machine (the daemon owns 127.100.0.x ports for local access, so
-        loopback only); returns the function that stops it."""
-        app = APP.read_text().replace('(sys.argv[1] if len(sys.argv) > 1 else "0.0.0.0", 9000)', '("127.0.0.1", %s)' % port)
+        loopback only); returns the function that stops it. source is the origin's own program, with __PORT__ for the port."""
+        app = source.replace('__PORT__', str(port)) if source else APP.read_text().replace('(sys.argv[1] if len(sys.argv) > 1 else "0.0.0.0", 9000)', '("127.0.0.1", %s)' % port)
         if self.windows:
             path = 'C:\\Users\\Public\\%s.py' % tag
             stop = WINDOWS_STOP.format(tag=tag)
