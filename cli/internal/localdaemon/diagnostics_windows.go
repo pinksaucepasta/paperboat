@@ -4,7 +4,6 @@ package localdaemon
 
 import (
 	"context"
-	"encoding/json"
 	"path/filepath"
 	"time"
 
@@ -49,7 +48,7 @@ func (s *diagnosticService) CreateBugreport(ctx context.Context) (diagnostics.Bu
 	if err != nil {
 		return diagnostics.Bundle{}, err
 	}
-	status, err := json.Marshal(snapshot)
+	status, err := bugreportStatus(snapshot)
 	if err != nil {
 		return diagnostics.Bundle{}, err
 	}
