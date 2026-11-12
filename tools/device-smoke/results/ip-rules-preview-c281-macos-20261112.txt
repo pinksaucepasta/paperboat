@@ -1,0 +1,60 @@
+ip_rules_rows.py --kind preview (C281) on M, 2026-11-12 (IST): resource and pb on macpool-2 (GitHub-hosted macOS 26.7.2 arm64, pb dev-f7f2eac89, machine macpool-mac-1), two client addresses (oracle, anvit), prod server. Bound 15 s. First run of the original script failed one step (refusal page text read after one request); the check now holds the page to the same 15 s bound; this is the full passing run of the committed script.
+{
+ "check": "ip-rules-rows",
+ "row": "C281",
+ "kind": "preview",
+ "status": "PASS",
+ "bound_seconds": 15,
+ "seconds_until_each_answer_changed": [
+  0.3,
+  0.5,
+  0.1,
+  0.4,
+  0.1,
+  0.5,
+  0.2,
+  0.1,
+  0.4,
+  4.0,
+  4.1,
+  0.4,
+  1.4
+ ],
+ "steps": [
+  {
+   "step": "baseline: both source addresses served, new resource has no rules",
+   "status": "PASS",
+   "seconds": 4.4
+  },
+  {
+   "step": "deny one address: it gets 403, the other 200",
+   "status": "PASS",
+   "seconds": 8.6
+  },
+  {
+   "step": "--allow replaces only the allow list",
+   "status": "PASS",
+   "seconds": 8.5
+  },
+  {
+   "step": "deny beats allow",
+   "status": "PASS",
+   "seconds": 8.1
+  },
+  {
+   "step": "allow list alone admits only its addresses (after --clear)",
+   "status": "PASS",
+   "seconds": 16.6
+  },
+  {
+   "step": "--allow /0 and a malformed address are refused, rules unchanged",
+   "status": "PASS",
+   "seconds": 10.6
+  },
+  {
+   "step": "a CIDR form, then --clear serves everyone",
+   "status": "PASS",
+   "seconds": 22.8
+  }
+ ]
+}

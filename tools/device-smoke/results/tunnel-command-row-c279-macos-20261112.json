@@ -1,0 +1,15 @@
+{
+ "check": "tunnel-command-rows",
+ "build": "dev-f7f2eac89",
+ "version": "dev-f7f2eac89",
+ "server": "prod",
+ "run": "macl-c279",
+ "device": "macpool-2 (GitHub-hosted macOS 26.7.2 arm64)",
+ "rows": {
+  "C279": {
+   "main": true,
+   "error": true,
+   "failures": []
+  }
+ }
+}

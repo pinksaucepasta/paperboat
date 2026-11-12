@@ -164,8 +164,16 @@ def main():
                 raise Failure('lists after --deny: %s' % (lists(),))
             eventually([], url, 403, 'denied address A')
             eventually(observer_b, url, 200, 'other address B stays allowed')
-            if 'restricted' not in fetch([], url)[1]:
-                raise Failure('the refusal page does not say the link is restricted')
+            # An account's edges refresh their snapshots on their own 5 s ticks, so a second request may still reach an edge that has not
+            # applied the rule; the refusal page is held to the same bound as every other answer.
+            deadline = time.time() + args.wait
+            while True:
+                status, body = fetch([], url)
+                if status == 403 and 'restricted' in body:
+                    break
+                if time.time() > deadline:
+                    raise Failure('the refusal page does not say the link is restricted (last HTTP %d)' % status)
+                time.sleep(1)
 
         def allow_only_replaces_one_list():
             good(*group, '--allow', addresses['b'])
