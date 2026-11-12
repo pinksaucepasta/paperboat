@@ -173,6 +173,7 @@ def main():
     parser.add_argument('--terminals', type=int, default=100)
     parser.add_argument('--viewers', type=int, default=50)
     parser.add_argument('--burst', type=int, default=10)
+    parser.add_argument('--rate', type=float, default=3, help='terminals opened per second (a burst of 100 at once is a connect storm, not holding 100)')
     parser.add_argument('--flood-timeout', type=int, default=120)
     parser.add_argument('--flood-mb', type=int, default=3)
     parser.add_argument('--no-stall', action='store_true', help='control run: nobody is stopped')
@@ -183,8 +184,9 @@ def main():
     terms, viewers, receipt = [], [], {'check': 'terminal-scale', 'target': args.target, 'terminals': args.terminals,
                                        'host_loadavg_start': open('/proc/loadavg').read().split()[:3]}
     try:
-        for name in names:
+        for name in names:  # a person opens terminals one after another: --rate per second, not 100 at the same instant
             terms.append(Term(args.target, ['--name', name]))
+            pump_all(terms, 1 / args.rate)
         ok = wait_for(terms, lambda: all(t.ready_at is not None for t in terms), 180)
         ready = [t.ready_at for t in terms if t.ready_at is not None]
         receipt['open'] = {'ready': len(ready), 'all_ready': ok, 'seconds': quantiles(ready)}

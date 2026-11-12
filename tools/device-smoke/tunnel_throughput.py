@@ -47,8 +47,10 @@ def download(downloader, url, seconds):
     result = subprocess.run([str(PB), 'exec', downloader, '--timeout', f'{seconds}s', '--', 'curl', '-s', '-o', '/dev/null', '-w',
                              '%{size_download} %{time_total} %{http_code}', url],
                             capture_output=True, text=True, timeout=seconds + 30)
-    size, took, code = result.stdout.split()[-3:]
-    return int(size), float(took), code
+    parts = result.stdout.split()[-3:]
+    if len(parts) < 3:  # the exec itself failed (the downloader is unreachable): a retry for the caller, never a crash
+        return 0, 0.0, 'exec: ' + (result.stderr.strip().splitlines() or ['no output'])[-1][:100]
+    return int(parts[0]), float(parts[1]), parts[2]
 
 
 def main():
