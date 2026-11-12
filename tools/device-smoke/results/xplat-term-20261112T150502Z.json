@@ -1,0 +1,220 @@
+{
+ "check": "xplat-term",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-16:shell:L>M",
+   "status": "PASS",
+   "detail": "the target shell started and answered (unix)"
+  },
+  {
+   "id": "X-16:utf8:L>M",
+   "status": "PASS",
+   "detail": "UTF-8 and wide characters typed and echoed unchanged (unix)"
+  },
+  {
+   "id": "X-16:resize:L>M",
+   "status": "PASS",
+   "detail": "a window resize reached the remote PTY (45x132, unix)"
+  },
+  {
+   "id": "X-16:ctrlc:L>M",
+   "status": "PASS",
+   "detail": "Ctrl-C stopped a long command and the shell answered again (unix)"
+  },
+  {
+   "id": "X-16:exit:L>M",
+   "status": "PASS",
+   "detail": "the remote exit code (3) is the exit status of pb connect (unix)"
+  },
+  {
+   "id": "X-16:replay:L>M",
+   "status": "PASS",
+   "detail": "after the client vanished, a reattach replayed the earlier output of a session that kept running (unix)"
+  },
+  {
+   "id": "X-16:join:L>M",
+   "status": "PASS",
+   "detail": "a terminal started from lanex2-l was joined from lanex2-w: earlier and live output identical (unix)"
+  },
+  {
+   "id": "X-16:shell:L>W",
+   "status": "PASS",
+   "detail": "the target shell started and answered (cmd)"
+  },
+  {
+   "id": "X-16:utf8:L>W",
+   "status": "PASS",
+   "detail": "UTF-8 and wide characters typed and echoed unchanged (cmd)"
+  },
+  {
+   "id": "X-16:resize:L>W",
+   "status": "PASS",
+   "detail": "a window resize reached the remote PTY (45x132, cmd)"
+  },
+  {
+   "id": "X-16:ctrlc:L>W",
+   "status": "PASS",
+   "detail": "Ctrl-C stopped a long command and the shell answered again (cmd)"
+  },
+  {
+   "id": "X-16:exit:L>W",
+   "status": "PASS",
+   "detail": "the remote exit code (3) is the exit status of pb connect (cmd)"
+  },
+  {
+   "id": "X-16:replay:L>W",
+   "status": "PASS",
+   "detail": "after the client vanished, a reattach replayed the earlier output of a session that kept running (cmd)"
+  },
+  {
+   "id": "X-16:join:L>W",
+   "status": "PASS",
+   "detail": "a terminal started from lanex2-l was joined from lanex2-m: earlier and live output identical (cmd)"
+  },
+  {
+   "id": "X-16:shell:M>L",
+   "status": "PASS",
+   "detail": "the target shell started and answered (unix)"
+  },
+  {
+   "id": "X-16:utf8:M>L",
+   "status": "PASS",
+   "detail": "UTF-8 and wide characters typed and echoed unchanged (unix)"
+  },
+  {
+   "id": "X-16:resize:M>L",
+   "status": "PASS",
+   "detail": "a window resize reached the remote PTY (45x132, unix)"
+  },
+  {
+   "id": "X-16:ctrlc:M>L",
+   "status": "PASS",
+   "detail": "Ctrl-C stopped a long command and the shell answered again (unix)"
+  },
+  {
+   "id": "X-16:exit:M>L",
+   "status": "PASS",
+   "detail": "the remote exit code (3) is the exit status of pb connect (unix)"
+  },
+  {
+   "id": "X-16:replay:M>L",
+   "status": "PASS",
+   "detail": "after the client vanished, a reattach replayed the earlier output of a session that kept running (unix)"
+  },
+  {
+   "id": "X-16:join:M>L",
+   "status": "PASS",
+   "detail": "a terminal started from lanex2-m was joined from lanex2-w: earlier and live output identical (unix)"
+  },
+  {
+   "id": "X-16:shell:M>W",
+   "status": "PASS",
+   "detail": "the target shell started and answered (cmd)"
+  },
+  {
+   "id": "X-16:utf8:M>W",
+   "status": "PASS",
+   "detail": "UTF-8 and wide characters typed and echoed unchanged (cmd)"
+  },
+  {
+   "id": "X-16:resize:M>W",
+   "status": "PASS",
+   "detail": "a window resize reached the remote PTY (45x132, cmd)"
+  },
+  {
+   "id": "X-16:ctrlc:M>W",
+   "status": "PASS",
+   "detail": "Ctrl-C stopped a long command and the shell answered again (cmd)"
+  },
+  {
+   "id": "X-16:exit:M>W",
+   "status": "PASS",
+   "detail": "the remote exit code (3) is the exit status of pb connect (cmd)"
+  },
+  {
+   "id": "X-16:replay:M>W",
+   "status": "PASS",
+   "detail": "after the client vanished, a reattach replayed the earlier output of a session that kept running (cmd)"
+  },
+  {
+   "id": "X-16:join:M>W",
+   "status": "PASS",
+   "detail": "a terminal started from lanex2-m was joined from lanex2-l: earlier and live output identical (cmd)"
+  },
+  {
+   "id": "X-16:shell:W>L",
+   "status": "PASS",
+   "detail": "the target shell started and answered (unix)"
+  },
+  {
+   "id": "X-16:utf8:W>L",
+   "status": "PASS",
+   "detail": "UTF-8 and wide characters typed and echoed unchanged (unix)"
+  },
+  {
+   "id": "X-16:resize:W>L",
+   "status": "PASS",
+   "detail": "a window resize reached the remote PTY (45x132, unix)"
+  },
+  {
+   "id": "X-16:ctrlc:W>L",
+   "status": "PASS",
+   "detail": "Ctrl-C stopped a long command and the shell answered again (unix)"
+  },
+  {
+   "id": "X-16:exit:W>L",
+   "status": "PASS",
+   "detail": "the remote exit code (3) is the exit status of pb connect (unix)"
+  },
+  {
+   "id": "X-16:replay:W>L",
+   "status": "PASS",
+   "detail": "after the client vanished, a reattach replayed the earlier output of a session that kept running (unix)"
+  },
+  {
+   "id": "X-16:join:W>L",
+   "status": "PASS",
+   "detail": "a terminal started from lanex2-w was joined from lanex2-m: earlier and live output identical (unix)"
+  },
+  {
+   "id": "X-16:shell:W>M",
+   "status": "PASS",
+   "detail": "the target shell started and answered (unix)"
+  },
+  {
+   "id": "X-16:utf8:W>M",
+   "status": "PASS",
+   "detail": "UTF-8 and wide characters typed and echoed unchanged (unix)"
+  },
+  {
+   "id": "X-16:resize:W>M",
+   "status": "PASS",
+   "detail": "a window resize reached the remote PTY (45x132, unix)"
+  },
+  {
+   "id": "X-16:ctrlc:W>M",
+   "status": "PASS",
+   "detail": "Ctrl-C stopped a long command and the shell answered again (unix)"
+  },
+  {
+   "id": "X-16:exit:W>M",
+   "status": "PASS",
+   "detail": "the remote exit code (3) is the exit status of pb connect (unix)"
+  },
+  {
+   "id": "X-16:replay:W>M",
+   "status": "PASS",
+   "detail": "after the client vanished, a reattach replayed the earlier output of a session that kept running (unix)"
+  },
+  {
+   "id": "X-16:join:W>M",
+   "status": "PASS",
+   "detail": "a terminal started from lanex2-w was joined from lanex2-l: earlier and live output identical (unix)"
+  }
+ ]
+}

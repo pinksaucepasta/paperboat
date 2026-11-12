@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """X-16 and the `pb connect` leg of X-11: a terminal from each OS to each other OS, both directions.
 
-  xplat_term.py [--devices L,M,W] [--only shell,utf8,resize,ctrlc,exit,replay,env]
+  xplat_term.py [--devices L,M,W] [--only shell,utf8,resize,ctrlc,ctrld,exit,replay,env]
 
 The controller drives a real pseudo-terminal with pexpect: an `ssh -tt` hop (or `docker exec -it`) into the client device
 runs `pb connect <target>`, so the client's own terminal handling is what is tested, and the target's default shell answers.
@@ -154,6 +154,28 @@ def t_ctrlc(src, dst):
         term.close()
 
 
+def t_ctrld(src, dst):
+    """Ctrl-D reaches the target shell exactly as typed locally: a unix shell at an empty prompt exits (pb connect ends with 0),
+    cmd.exe and PowerShell do not treat it as end of input, so the session stays usable."""
+    term = Terminal(src, dst)
+    try:
+        term.ready()
+        term.child.send('\x04')
+        if term.kind == 'unix':
+            if term.src.os == 'windows':
+                term.expect(r'RC=0', timeout=60)
+            else:
+                term.child.expect(pexpect.EOF, timeout=60)
+                term.child.close()
+                assert term.child.exitstatus == 0, 'Ctrl-D ended the unix shell with status %r' % (term.child.exitstatus,)
+            return 'Ctrl-D at an empty prompt ended the unix shell and pb connect exited 0'
+        time.sleep(2)
+        term.ready()
+        return 'Ctrl-D did not end the %s session, which stays usable like a local one' % term.kind
+    finally:
+        term.close()
+
+
 def t_exit(src, dst):
     term = Terminal(src, dst)
     try:
@@ -235,7 +257,7 @@ def t_join(src, dst, third):
             second.close()
 
 
-TESTS = [('shell', t_shell, 'X-16'), ('utf8', t_utf8, 'X-16'), ('resize', t_resize, 'X-16'), ('ctrlc', t_ctrlc, 'X-16'),
+TESTS = [('shell', t_shell, 'X-16'), ('utf8', t_utf8, 'X-16'), ('resize', t_resize, 'X-16'), ('ctrlc', t_ctrlc, 'X-16'), ('ctrld', t_ctrld, 'X-16'),
          ('exit', t_exit, 'X-16'), ('replay', t_replay, 'X-16'), ('connect', t_env, 'X-11'), ('join', t_join, 'X-16')]
 
 

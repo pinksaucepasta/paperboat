@@ -1,0 +1,40 @@
+{
+ "check": "xplat-term",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-16:ctrld:L>M",
+   "status": "PASS",
+   "detail": "Ctrl-D at an empty prompt ended the unix shell and pb connect exited 0"
+  },
+  {
+   "id": "X-16:ctrld:L>W",
+   "status": "PASS",
+   "detail": "Ctrl-D did not end the cmd session, which stays usable like a local one"
+  },
+  {
+   "id": "X-16:ctrld:M>L",
+   "status": "PASS",
+   "detail": "Ctrl-D at an empty prompt ended the unix shell and pb connect exited 0"
+  },
+  {
+   "id": "X-16:ctrld:M>W",
+   "status": "PASS",
+   "detail": "Ctrl-D did not end the cmd session, which stays usable like a local one"
+  },
+  {
+   "id": "X-16:ctrld:W>L",
+   "status": "PASS",
+   "detail": "Ctrl-D at an empty prompt ended the unix shell and pb connect exited 0"
+  },
+  {
+   "id": "X-16:ctrld:W>M",
+   "status": "PASS",
+   "detail": "Ctrl-D at an empty prompt ended the unix shell and pb connect exited 0"
+  }
+ ]
+}
