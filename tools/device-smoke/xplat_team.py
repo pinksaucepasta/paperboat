@@ -39,12 +39,18 @@ def fleets():
     saved = fleet.L_CT, os.environ.get('XPLAT_MAC_SSH'), os.environ.get('SMOKE_WINDOWS_SSH')
     try:
         fleet.L_CT = os.environ['XPE_MEMBER_L_CT']
-        os.environ['XPLAT_MAC_SSH'] = os.environ['XPE_MEMBER_MAC_SSH']
+        if os.environ.get('XPE_MEMBER_MAC_SSH'):
+            os.environ['XPLAT_MAC_SSH'] = os.environ['XPE_MEMBER_MAC_SSH']
+        else:  # the real apple Mac
+            os.environ.pop('XPLAT_MAC_SSH', None)
         other = {'L': fleet.linux(MEMBER_PREFIX + 'l'), 'M': fleet.mac(MEMBER_PREFIX + 'm'),
                  'W': fleet.Windows(MEMBER_PREFIX + 'w', target=os.environ['XPE_MEMBER_WIN_SSH'])}
     finally:
         fleet.L_CT = saved[0]
-        os.environ['XPLAT_MAC_SSH'] = saved[1]
+        if saved[1] is None:
+            os.environ.pop('XPLAT_MAC_SSH', None)
+        else:
+            os.environ['XPLAT_MAC_SSH'] = saved[1]
     return own, other
 
 
@@ -55,12 +61,18 @@ def as_host(dev):
     if dev.os == 'linux':
         fleet.L_CT = dev.prefix[-1]
     elif dev.os == 'darwin':
-        os.environ['XPLAT_MAC_SSH'] = dev.prefix[-1]
+        if dev.prefix[0] == fleet.MAC_SSH:  # the real apple Mac: no host variable
+            os.environ.pop('XPLAT_MAC_SSH', None)
+        else:
+            os.environ['XPLAT_MAC_SSH'] = dev.prefix[1]
     try:
         yield
     finally:
         fleet.L_CT = saved[0]
-        os.environ['XPLAT_MAC_SSH'] = saved[1] or ''
+        if saved[1] is None:
+            os.environ.pop('XPLAT_MAC_SSH', None)
+        else:
+            os.environ['XPLAT_MAC_SSH'] = saved[1]
 
 
 class Team:
@@ -213,7 +225,17 @@ def t_files(team, o, m, oid):
 def t_private(team, o, m, oid):
     team.setting(True)
     try:
-        return xplat_access.t_access(m, o)
+        # X-19 owns the name and https checks of the same driver; here the grant decides: the forward and the private address carry
+        # 1 MiB byte-exact with half-close through the member's grant, and a non-loopback --listen is refused.
+        port = 21000 + sum(map(ord, m.name + o.name)) % 2000
+        done = m.run([xplat_access.py(m), '-c', xplat_access.DRIVER, m.pb_path, o.alias, str(port), str(port + 5000), xplat_access.ORIGIN,
+                      xplat_access.py(o), xplat_access.domain_of(m)], timeout=300)
+        assert done.rc == 0, 'driver: %s %s' % (done.text[-300:], done.errtext[-300:])
+        out = json.loads(done.text.strip().splitlines()[-1])
+        assert out.get('forward'), 'the 1 MiB exchange through the forward was not byte-exact with half-close: %s' % out
+        assert out.get('private_address'), 'the exchange through the private address %s failed: %s' % (out.get('address'), out)
+        assert out.get('non_loopback_refused'), '--listen accepted a non-loopback address: %s' % out
+        return 'member forward and private address %s byte-exact with half-close; non-loopback --listen refused' % out['address']
     finally:
         team.setting(False)
 
@@ -337,7 +359,7 @@ def t_manage(team, o, m, oid):
     """Tunnel and preview management follows the machine grant: a team tunnel and a team preview made on the shared machine are listed and
     paused, resumed and stopped by the member; without tunnel_manage and preview_manage the member sees neither."""
     port = 18900 + sum(map(ord, o.name + m.name)) % 90
-    name = 'xpe-mg-%s%s' % (o.os[:1], m.os[:1])
+    name = 'xpe-mg-%s%s-%s' % (o.os[:1], m.os[:1], os.urandom(3).hex())  # a deleted tunnel's name stays taken
     stop_origin = origin_start(o, port)
     tunnel = preview = None
     try:

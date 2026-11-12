@@ -31,7 +31,7 @@ BINARIES = {'L': 'pb-linux-amd64', 'M': 'pb-darwin-arm64', 'W': 'pb-windows-amd6
 # (script, extra args): the quick cases of each feature's own cross-OS check
 FEATURES = [('terminal', 'xplat_term.py', ['--only', 'shell,utf8']), ('exec', 'xplat_exec.py', ['--only', 'argv,exit']),
             ('ssh', 'xplat_ssh.py', ['--only', 'ssh,scp']), ('send', 'xplat_send.py', ['--only', 'names']),
-            ('access', 'xplat_access.py', []), ('tunnel', 'xplat_tunnel.py', ['--only', 'v4']),
+            ('access', 'xplat_access.py', ['--core']), ('tunnel', 'xplat_tunnel.py', ['--only', 'v4']),
             ('config', 'xplat_config.py', ['--only', 'X-01'])]
 NAMES_OLDER = re.compile(r'(older|update|upgrade|version)', re.I)
 
@@ -70,7 +70,7 @@ def fresh(dev, binary):
     fleet.pair(dev, 'windows' if dev.os == 'windows' else 'unix')
 
 
-def skew(old, old_dir, new_dir, keys):
+def skew(old, old_dir, new_dir, keys, features=()):
     devices = {k: d for k, d in fleet.fleet().items() if k in keys}
     victim = devices[old]
     fresh(victim, Path(old_dir) / BINARIES[old])
@@ -81,6 +81,8 @@ def skew(old, old_dir, new_dir, keys):
                 continue
             others = version(devices[other])
             for feature, script, args in FEATURES:
+                if features and feature not in features:
+                    continue
                 key = 'X-36:%s:%s:%s' % (feature, old, other)
 
                 def action():
@@ -133,7 +135,7 @@ def main():
     keys = argv[argv.index('--devices') + 1].split(',') if '--devices' in argv else ['L', 'M', 'W']
     option = lambda name: argv[argv.index(name) + 1]  # noqa: E731
     if mode == 'skew':
-        skew(option('--old'), option('--old-dir'), option('--new-dir'), keys)
+        skew(option('--old'), option('--old-dir'), option('--new-dir'), keys, option('--features').split(',') if '--features' in argv else ())
     else:
         bundle(option('--new-dir'), keys)
     out = HERE / 'results' / ('xplat-skew-%s.json' % time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))

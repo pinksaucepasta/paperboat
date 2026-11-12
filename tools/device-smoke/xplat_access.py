@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import xplat_fleet as fleet  # noqa: E402
 
 results = {}
+CORE = False  # --core: the forward and the private address only (version-skew and team checks), not the name and https forms
 
 ORIGIN = r'''
 import hashlib, socket, sys
@@ -114,8 +115,9 @@ def t_access(src, dst):
     out = json.loads(done.text.strip().splitlines()[-1])
     assert out.get('forward'), 'the 1 MiB exchange through the forward was not byte-exact with half-close: %s' % out
     assert out.get('private_address'), 'the exchange through the private address %s failed: %s' % (out.get('address'), out)
-    assert out.get('name_resolves'), 'the machine name did not resolve to its private address without a hosts edit: %s' % out
-    assert out.get('https_url'), 'https://<port>.<machine>.<domain> did not answer through the trust store of this OS: %s' % out
+    if not CORE:
+        assert out.get('name_resolves'), 'the machine name did not resolve to its private address without a hosts edit: %s' % out
+        assert out.get('https_url'), 'https://<port>.<machine>.<domain> did not answer through the trust store of this OS: %s' % out
     assert out.get('non_loopback_refused'), '--listen accepted a non-loopback address: %s' % out
     return 'forward and %s byte-exact with half-close; non-loopback --listen refused (%s)' % (out['address'], out['non_loopback_message'][:70])
 
@@ -135,6 +137,8 @@ def check(name, pair, action):
 def main():
     argv = sys.argv[1:]
     keys = argv[argv.index('--devices') + 1].split(',') if '--devices' in argv else ['L', 'M', 'W']
+    global CORE
+    CORE = '--core' in argv
     devices = {k: d for k, d in fleet.fleet().items() if k in keys}
     for a_key, b_key in permutations(devices, 2):
         check('tcp', '%s>%s' % (a_key, b_key), lambda: t_access(devices[a_key], devices[b_key]))
