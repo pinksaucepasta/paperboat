@@ -409,6 +409,9 @@ func TestDrainSignalStopsWorkersButKeepsServing(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("drain signal did not stop the workers")
 	}
+	if !application.machineEvents.Draining() {
+		t.Fatal("drain signal left held machine event waits unanswered: hosts stay on the retired server")
+	}
 	select {
 	case err := <-runDone:
 		t.Fatalf("server stopped on drain: %v", err)

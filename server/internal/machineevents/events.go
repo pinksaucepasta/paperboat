@@ -178,6 +178,16 @@ func (h *Hub) listen(ctx context.Context) error {
 // Drain answers every held and later wait with "no change" right away.
 func (h *Hub) Drain() { h.drainOnce.Do(func() { close(h.draining) }) }
 
+// Draining reports whether Drain has been called.
+func (h *Hub) Draining() bool {
+	select {
+	case <-h.draining:
+		return true
+	default:
+		return false
+	}
+}
+
 // Wait returns the topics the host waits on (the keys of known) whose generation is higher than the one it
 // knows, as soon as there is one. Topics the host did not list are not reported: they would wake it for
 // changes it does not consume. It returns an empty map when maxWait passes with

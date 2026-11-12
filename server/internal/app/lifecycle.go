@@ -148,6 +148,11 @@ func (a *App) Run(ctx context.Context) error {
 		case <-drainSignal:
 			a.logger.Info("server draining: stopping background workers")
 			drainWorkers()
+			// Held event waits answer now, so hosts wait again through the proxy, which sends them to the
+			// replacement; otherwise they stay on this server until their wait ends (2026-11-12, canary).
+			if a.machineEvents != nil {
+				a.machineEvents.Drain()
+			}
 		case <-workerContext.Done():
 		}
 	}()
