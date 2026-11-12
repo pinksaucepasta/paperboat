@@ -13,10 +13,10 @@ import (
 	shared "github.com/pinksaucepasta/paperboat/shared/teambucket"
 )
 
-// ErrNoBucket: the team has no bucket.
+// ErrNoBucket means the team has no bucket.
 var ErrNoBucket = errors.New("the team has no bucket for recordings")
 
-// ErrNotArchived: no segment of the recording is in the bucket.
+// ErrNotArchived means no segment of the recording is in the bucket.
 var ErrNotArchived = errors.New("the recording is not archived in the team bucket")
 
 // Buckets opens a team's bucket inside the caller's transaction (teambucket.Service).

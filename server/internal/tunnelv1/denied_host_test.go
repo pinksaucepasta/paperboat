@@ -20,7 +20,7 @@ func (failingDB) Exec(context.Context, string, ...any) (pgconn.CommandTag, error
 	return pgconn.CommandTag{}, nil
 }
 func (failingDB) Query(context.Context, string, ...any) (pgx.Rows, error) { return nil, nil }
-func (d failingDB) QueryRow(context.Context, string, ...any) pgx.Row      { return failingRow{d.err} }
+func (d failingDB) QueryRow(context.Context, string, ...any) pgx.Row      { return failingRow(d) }
 
 // A database failure while explaining a denied host is a failure, not "host not found": the caller answers 500, not 403.
 func TestDeniedHostKeepsDatabaseFailuresApartFromNoRows(t *testing.T) {

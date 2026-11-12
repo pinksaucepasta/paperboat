@@ -12,7 +12,7 @@ import (
 
 const TopupUnitBytes int64 = 100_000_000_000
 
-// ErrTopupAmountMismatch: the provider captured a payment that is not the amount or currency this purchase asked for.
+// ErrTopupAmountMismatch means the provider captured a payment that is not the amount or currency this purchase asked for.
 var ErrTopupAmountMismatch = errors.New("captured top-up payment does not match the purchase")
 var ErrTopupQuantity = errors.New("top-up quantity must be an integer within the configured limit")
 
