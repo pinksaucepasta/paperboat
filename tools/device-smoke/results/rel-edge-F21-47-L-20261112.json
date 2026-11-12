@@ -1,0 +1,49 @@
+{
+  "row": "F21-47",
+  "platform": "L",
+  "observed_at": "2026-11-12T23:02:06.976803+00:00",
+  "staging_load_at_start": 11.77783203125,
+  "host": "stage.example.test",
+  "build_commit": "62f0bc953ab5086a29288d716f1e3259f5b45e7b",
+  "source_equivalent_to_main": "f189d8f21",
+  "automated_checks": [
+    "TestHeartbeatAnswerCarriesIngressLimits",
+    "TestEdgeWithoutAnswerUsesTheSharedDefaultLimits",
+    "TestServerIngressLimitsApplyToCurrentKeys",
+    "TestEdgeLogsTheIngressLimitsItApplies"
+  ],
+  "expected_from": "shared/edgelimits.Default",
+  "expected_limits": {
+    "publication_bytes_per_second": 25165824,
+    "publication_byte_burst": 1048576,
+    "account_bytes_per_second": 33554432,
+    "account_byte_burst": 1048576
+  },
+  "edges": [
+    {
+      "edge": "edge-1",
+      "version": "paperboat-tunnel dev-62f0bc953",
+      "image_commit": "62f0bc953ab5086a29288d716f1e3259f5b45e7b",
+      "restart_count": 0,
+      "limits": {
+        "publication_bytes_per_second": 25165824.0,
+        "publication_byte_burst": 1048576.0,
+        "account_bytes_per_second": 33554432.0,
+        "account_byte_burst": 1048576.0
+      }
+    },
+    {
+      "edge": "edge-2",
+      "version": "paperboat-tunnel dev-62f0bc953",
+      "image_commit": "62f0bc953ab5086a29288d716f1e3259f5b45e7b",
+      "restart_count": 0,
+      "limits": {
+        "publication_bytes_per_second": 25165824.0,
+        "publication_byte_burst": 1048576.0,
+        "account_bytes_per_second": 33554432.0,
+        "account_byte_burst": 1048576.0
+      }
+    }
+  ],
+  "result": "PASS"
+}
