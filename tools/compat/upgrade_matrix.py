@@ -77,6 +77,14 @@ def artifact_version(client):
     return out.get('data', out)['version']
 
 
+def doctor_usable(machine):
+    """No failed doctor check. Staging has no relay, so `pb doctor` reports the warning daemon:relay_failover (overall
+    degraded) on every machine; only a failure counts there."""
+    result = invoke_pb(machine, 'doctor', '--json', timeout=60)  # a degraded doctor exits 1 but still prints its checks
+    report = json.loads(result.stdout)
+    return not any(c.get('status') == 'fail' for c in report.get('data', report).get('checks', []))
+
+
 def install(client):
     """Switch both machines to CLIENT the way a user does, `pb update --from FILE --force`: an official build's own
     `install` demands release metadata (TUF) the staging server does not publish."""
@@ -95,8 +103,7 @@ def install(client):
         machine = pending[0]
         try:
             version = json.loads(pb(machine, 'version', '--json'))
-            healthy = json.loads(pb(machine, 'doctor', '--json')) if version.get('data', version).get('version') == expected else {}
-            if healthy.get('data', healthy).get('overall') == 'healthy':
+            if version.get('data', version).get('version') == expected and doctor_usable(machine):
                 pending.pop(0)
                 continue
         except (RemoteFailure, ValueError, subprocess.TimeoutExpired):
@@ -206,9 +213,8 @@ def verify_downgrade(old, new):
     install(old)
     time.sleep(10)
     for machine, peer in zip(MACHINES, ('stg-b', 'stg-a')):
-        doctor = json.loads(pb(machine, 'doctor', '--json'))
-        if doctor.get('data', doctor).get('overall') != 'healthy':
-            raise RuntimeError('downgraded machine is not healthy')
+        if not doctor_usable(machine):
+            raise RuntimeError('downgraded machine has a failed doctor check')
         verify_exec(machine, peer)
 
 
