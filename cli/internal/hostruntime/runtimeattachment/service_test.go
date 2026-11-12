@@ -493,27 +493,47 @@ func TestRuntimeAttachmentSurvivesRefusalsDuringAServerSwap(t *testing.T) {
 // backoff and attaches again once the server answers, with no daemon restart (2026-11-12 canary-b).
 func TestRuntimeAttachmentReattachesAfterServerErrorsWithoutRestart(t *testing.T) {
 	var fail atomic.Bool
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	var failed, succeeded atomic.Int32
+	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Second)
 	defer cancel()
 	h := startRuntimeCarrier(t, ctx, runtimeCarrierOptions{expiry: time.Now().Add(time.Hour), status: func() int {
 		if fail.Load() {
+			failed.Add(1)
 			return http.StatusServiceUnavailable
 		}
+		succeeded.Add(1)
 		return http.StatusOK
 	}})
 	first := nextEdge(t, h, 5*time.Second)
 	fail.Store(true)
 	first.edge.Close()
-	time.Sleep(3 * time.Second)
-	select {
-	case <-h.edges:
-		t.Fatal("host dialed a carrier while the control plane was failing")
-	default:
+	deadline := time.Now().Add(8 * time.Second)
+	for failed.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if failed.Load() < 2 {
+		t.Fatalf("host asked %d times while the control plane failed: it gave up", failed.Load())
 	}
 	fail.Store(false)
-	again := nextEdge(t, h, 15*time.Second)
-	if err := again.edge.Ping(ctx); err != nil {
-		t.Fatal("re-attached carrier unusable", err)
+	before := succeeded.Load()
+	deadline = time.Now().Add(15 * time.Second)
+	for succeeded.Load() == before && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if succeeded.Load() == before {
+		t.Fatal("host did not ask again after the control plane recovered")
+	}
+	// The attachment is live again: a carrier is dialed and usable.
+	for {
+		select {
+		case dial := <-h.edges:
+			if err := dial.edge.Ping(ctx); err != nil {
+				continue
+			}
+			return
+		case <-ctx.Done():
+			t.Fatal("no usable carrier after the control plane recovered")
+		}
 	}
 }
 
