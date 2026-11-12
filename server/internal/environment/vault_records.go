@@ -101,6 +101,8 @@ func (s *Service) PutVaultRecords(ctx context.Context, account string, c VaultLa
 		sequence := head.Sequence + 1
 		seen := map[string]bool{}
 		total := 0
+		parsed := make([]parsedVaultRecord, 0, len(in.Records))
+		ids := make([]string, 0, len(in.Records))
 		for _, mutation := range in.Records {
 			raw, err := DecodeCanonicalBase64URL(mutation.Envelope, MaximumVaultRecordBytes)
 			if err != nil {
@@ -121,21 +123,49 @@ func (s *Service) PutVaultRecords(ctx context.Context, account string, c VaultLa
 				return ErrProtocolInvalid
 			}
 			seen[r.Claims.RecordID] = true
+			parsed = append(parsed, r)
+			ids = append(ids, r.Claims.RecordID)
+		}
+		// One read of every record's current revision and one insert for the batch, not two round trips per
+		// record: the batch holds the vault lock for that long (128 records: ~190 ms, F21-170).
+		current := make(map[string]uint64, len(ids))
+		rows, err := tx.Query(ctx, `SELECT DISTINCT ON(record_id) record_id,revision FROM environment_vault_record_versions WHERE `+recordScopePredicate+` AND record_id=ANY($6::text[]) ORDER BY record_id,revision DESC`, append(recordArgs(c, epoch), ids)...)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id string
 			var revision uint64
-			err = tx.QueryRow(ctx, `SELECT revision FROM environment_vault_record_versions WHERE `+recordScopePredicate+` AND record_id=$6 ORDER BY revision DESC LIMIT 1`, append(recordArgs(c, epoch), r.Claims.RecordID)...).Scan(&revision)
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			if err := rows.Scan(&id, &revision); err != nil {
+				rows.Close()
 				return err
 			}
-			if revision != mutation.ExpectedRevision {
+			current[id] = revision
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		var revisions []uint64
+		var deleted []bool
+		var documents []string
+		var envelopes [][]byte
+		var ciphertext []int
+		for i, r := range parsed {
+			if current[r.Claims.RecordID] != in.Records[i].ExpectedRevision {
 				return ErrVersionConflict
 			}
 			state := recordState(c, r, sequence, writer.WriterPublicKey[:])
-			args := append(recordArgs(c, epoch), state.RecordID, state.Revision, state.Deleted, sequence, state.DocumentID, raw, r.CiphertextBytes, writer.WriterPublicKey[:])
-			_, err = tx.Exec(ctx, `INSERT INTO environment_vault_record_versions(workspace_id,owner_kind,owner_id,machine_id,key_epoch,record_id,revision,deleted,sequence,document_id,envelope,ciphertext_bytes,writer_public) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, args...)
-			if err != nil {
-				return err
-			}
+			revisions, deleted, documents = append(revisions, state.Revision), append(deleted, state.Deleted), append(documents, state.DocumentID)
+			envelopes, ciphertext = append(envelopes, r.Raw), append(ciphertext, r.CiphertextBytes)
 			out.Records = append(out.Records, state)
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO environment_vault_record_versions(workspace_id,owner_kind,owner_id,machine_id,key_epoch,record_id,revision,deleted,sequence,document_id,envelope,ciphertext_bytes,writer_public)
+ SELECT $1,$2,$3,$4,$5,v.record_id,v.revision,v.deleted,$7,v.document_id,v.envelope,v.ciphertext_bytes,$8
+ FROM unnest($6::text[],$9::bigint[],$10::boolean[],$11::text[],$12::bytea[],$13::integer[]) AS v(record_id,revision,deleted,document_id,envelope,ciphertext_bytes)`,
+			append(recordArgs(c, epoch), ids, sequence, writer.WriterPublicKey[:], revisions, deleted, documents, envelopes, ciphertext)...)
+		if err != nil {
+			return err
 		}
 		var count, live, bytes int
 		err = tx.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE NOT deleted),COALESCE(sum(ciphertext_bytes) FILTER(WHERE NOT deleted),0) FROM(SELECT DISTINCT ON(record_id) deleted,ciphertext_bytes FROM environment_vault_record_versions WHERE `+recordScopePredicate+` ORDER BY record_id,revision DESC) current`, recordArgs(c, epoch)...).Scan(&count, &live, &bytes)
