@@ -9,6 +9,9 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// platformHasExecBits is false where files carry no POSIX executable bit (Windows): the executable intent then comes from the repository.
+const platformHasExecBits = false
+
 func safeSnapshotPermissions(path string, _ fs.FileInfo) bool {
 	attributes, err := windows.GetFileAttributes(windows.StringToUTF16Ptr(path))
 	if err != nil || attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {

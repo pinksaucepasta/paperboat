@@ -493,6 +493,11 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 	if err := worktree.AddWithOptions(&git.AddOptions{All: true}); err != nil {
 		return PreparedPublication{}, err
 	}
+	if !platformHasExecBits {
+		if err := keepExecutableIntent(repository); err != nil {
+			return PreparedPublication{}, err
+		}
+	}
 	status, err := worktree.Status()
 	if err != nil {
 		return PreparedPublication{}, err
