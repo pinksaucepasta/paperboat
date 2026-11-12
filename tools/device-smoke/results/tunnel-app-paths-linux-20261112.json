@@ -1,0 +1,62 @@
+{
+ "check": "tunnel-origin-rows",
+ "platform": "linux",
+ "cells": [
+  {
+   "scenario": "headers",
+   "cell": "F8-09 forwarded headers: spoofs dropped, https, public host, one client IP",
+   "result": "ok",
+   "detail": "200 {'host': 'app.example.test', 'xfp': 'https', 'xfh': 'app.example.test', 'xff': '198.51.100.7', 'forwarded': 'for=198.51.100.7;proto=https;host=app.example.test', 'sni': None}"
+  },
+  {
+   "scenario": "headers",
+   "cell": "F8-09 the app's cookies, validators and headers arrive unchanged",
+   "result": "ok",
+   "detail": "200 ['a=1; Path=/x; HttpOnly; SameSite=Lax', 'b=2; Path=/; Secure; Max-Age=60']"
+  },
+  {
+   "scenario": "headers",
+   "cell": "F8-09 the app's redirects (relative and absolute Location) are not rewritten",
+   "result": "ok",
+   "detail": "302 /next?x=1&y=%2F / 302 http://127.0.0.1:43017/abs"
+  },
+  {
+   "scenario": "headers",
+   "cell": "F8-09/F8-12 an app that redirects to its own https URL gets the loop page naming the fix",
+   "result": "ok",
+   "detail": "502 origin_redirect_loop"
+  },
+  {
+   "scenario": "headers",
+   "cell": "F8-12 a body over the cap is 413 request_body_too_large",
+   "result": "ok",
+   "detail": "b'HTTP/1.1 413 Request Entity Too Large\\r\\nCache-Control: no-store\\r\\nContent-Security'"
+  },
+  {
+   "scenario": "headers",
+   "cell": "F8-12 oversized headers are 431, not 502 or 404",
+   "result": "ok",
+   "detail": "b'HTTP/1.1 431 Request Header Fields Too Large\\r\\nContent-Type: text/plain; charset='"
+  },
+  {
+   "scenario": "headers",
+   "cell": "F8-12 ACME validation on port 80 gets an explanation, any other request the https redirect",
+   "result": "ok",
+   "detail": "404 b'Paperboat serves HTTPS for this name and holds its certifica' / 308"
+  },
+  {
+   "scenario": "keepalive",
+   "cell": "F8-09 Node-style keep-alive never races a pooled connection (120 requests at the origin's idle limit)",
+   "result": "ok",
+   "detail": "no failures"
+  },
+  {
+   "scenario": "ws",
+   "cell": "F8-09 a WebSocket stays open through 570 s of quiet",
+   "result": "ok",
+   "detail": "b'HTTP/1.1 101 Switchi' first=(1, b'first') late=(1, b'late') closed_after=None s"
+  }
+ ],
+ "retried_requests": [],
+ "device": "pb dev-ee6287104, prod edges 2026.11.12.5; scenarios headers keepalive ws (570 s quiet)"
+}

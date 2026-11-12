@@ -170,11 +170,11 @@ class Lab:
         conn, response, _ = self.request(host, 'GET', '/range', {'Range': 'bytes=100-199'})
         data = response.read()
         conn.close()
-        self.cell(server, mode + '/C12-range', 'ok' if response.status == 206 and len(data) == 100 else 'range_lost', 'status %s, %d bytes' % (response.status, len(data)))
+        self.cell(server, mode + '/C12-range', 'ok' if response.status == 206 and len(data) == 100 else 'range_lost', 'status %s error %r, %d bytes' % (response.status, response.getheader('X-Paperboat-Error'), len(data)))
         # C13: Expect: 100-continue with 5 MiB (curl, as a real client)
-        done = subprocess.run(['curl', '-sS', '-m', '60', '-o', '/dev/null', '-w', '%{http_code}', '-X', 'POST', '-H', 'Expect: 100-continue',
+        done = subprocess.run(['curl', '-sS', '-m', '60', '-D', '/dev/stderr', '-o', '/dev/null', '-w', '%{http_code}', '-X', 'POST', '-H', 'Expect: 100-continue',
                                '--data-binary', '@-', 'https://%s/upload' % host], input=b'x' * (5 << 20), capture_output=True)
-        self.cell(server, mode + '/C13-expect', 'ok' if done.stdout == b'200' else 'app_refuses', 'status %s' % done.stdout.decode())
+        self.cell(server, mode + '/C13-expect', 'ok' if done.stdout == b'200' else 'app_refuses', 'status %s %s' % (done.stdout.decode(), ' '.join(l for l in done.stderr.decode().splitlines() if l.lower().startswith('x-paperboat-error'))))
 
     # --- setup ----------------------------------------------------------------------------------------------
     def stage_windows(self):
