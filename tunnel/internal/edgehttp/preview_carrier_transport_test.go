@@ -1091,3 +1091,86 @@ func TestUploadOverTheCapMidStreamIs413(t *testing.T) {
 		t.Fatalf("status=%d error=%q", recorder.Code, recorder.Header().Get("X-Paperboat-Error"))
 	}
 }
+
+// A host that redials during an edge handover attaches the same registration (same session, same
+// generation) on a second live connection. That is not stale: the newer connection takes the route, the route
+// keeps serving, and a genuinely older generation is still refused.
+func TestDataCarrierPreviewRegistryRedialOfTheSameRegistrationIsNotStale(t *testing.T) {
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1", MaximumRoutes: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	identity := testEdgePreviewIdentity(2, 2)
+	firstServer, firstClient := testEdgePreviewCarrierPair(t, identity)
+	secondServer, secondClient := testEdgePreviewCarrierPair(t, identity)
+	defer firstClient.Close()
+	defer firstServer.Close()
+	defer secondClient.Close()
+	defer secondServer.Close()
+	route := func(server *datacarrier.Server, generation uint64) DataCarrierPreviewRoute {
+		return DataCarrierPreviewRoute{RouteID: "preview_01", Hostname: "app.preview.example.test", Kind: runtimewire.RouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: generation, Server: server}
+	}
+	if err := registry.Attach(route(firstServer, 6)); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Attach(route(secondServer, 6)); err != nil {
+		t.Fatalf("a redial of the same registration was refused: %v", err)
+	}
+	if got, ok := registry.Lookup("app.preview.example.test"); !ok || got.Server != secondServer {
+		t.Fatalf("the route is not served by the newer connection: %+v, ok=%v", got, ok)
+	}
+	if err := firstServer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-firstServer.Done():
+	case <-time.After(time.Second):
+		t.Fatal("the first connection did not close")
+	}
+	if got, ok := registry.Lookup("app.preview.example.test"); !ok || got.Server != secondServer {
+		t.Fatalf("closing the replaced connection unserved the route: %+v, ok=%v", got, ok)
+	}
+	if err := registry.Attach(route(firstServer, 5)); !errors.Is(err, ErrDataCarrierPreviewRegistryStale) {
+		t.Fatalf("an older generation was accepted: %v", err)
+	}
+}
+
+// When the serving connection of a redialed registration dies and the replaced one is still live, the route is
+// served by it at once, not left unserved until the next pull attaches it again.
+func TestDataCarrierPreviewRegistryPromotesTheLiveStandbyWhenTheServingConnectionDies(t *testing.T) {
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1", MaximumRoutes: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	identity := testEdgePreviewIdentity(2, 2)
+	firstServer, firstClient := testEdgePreviewCarrierPair(t, identity)
+	secondServer, secondClient := testEdgePreviewCarrierPair(t, identity)
+	defer firstClient.Close()
+	defer firstServer.Close()
+	defer secondClient.Close()
+	defer secondServer.Close()
+	route := func(server *datacarrier.Server) DataCarrierPreviewRoute {
+		return DataCarrierPreviewRoute{RouteID: "preview_01", Hostname: "app.preview.example.test", Kind: runtimewire.RouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: 6, Server: server}
+	}
+	for _, server := range []*datacarrier.Server{firstServer, secondServer} {
+		if err := registry.Attach(route(server)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := secondServer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if got, ok := registry.Lookup("app.preview.example.test"); ok && got.Server == firstServer {
+			return
+		}
+		if time.Now().After(deadline) {
+			got, ok := registry.Lookup("app.preview.example.test")
+			t.Fatalf("the route was not served by the live standby after the serving connection died: %+v, ok=%v", got, ok)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}

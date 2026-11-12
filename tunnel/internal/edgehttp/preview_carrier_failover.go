@@ -52,6 +52,31 @@ func (r *DataCarrierPreviewRegistry) retireLocked(old *dataCarrierPreviewRouteEn
 // that still serves streams); the oldest closes first.
 const maxStandbys = 8
 
+// promoteStandbyLocked makes the newest live standby of the route its serving carrier, so the loss of the serving
+// connection does not leave the route unserved until the next pull attaches it again.
+func (r *DataCarrierPreviewRegistry) promoteStandbyLocked(routeID string) {
+	standbys := r.standby[routeID]
+	for i := len(standbys) - 1; i >= 0; i-- {
+		next := standbys[i]
+		if next.route.Server == nil {
+			continue
+		}
+		select {
+		case <-next.route.Server.Done():
+			continue
+		default:
+		}
+		r.standby[routeID] = append(standbys[:i:i], standbys[i+1:]...)
+		if len(r.standby[routeID]) == 0 {
+			delete(r.standby, routeID)
+		}
+		r.byRoute[routeID] = next
+		r.byHost[next.host] = next
+		r.activateDesiredAliasesForRouteLocked(routeID)
+		return
+	}
+}
+
 // dropStandbyLocked closes every standby of the route.
 func (r *DataCarrierPreviewRegistry) dropStandbyLocked(routeID string) {
 	for _, standby := range r.standby[routeID] {

@@ -180,7 +180,7 @@ func (r *DataCarrierPreviewRegistry) Attach(route DataCarrierPreviewRoute) error
 			r.mu.Unlock()
 			return nil
 		}
-		if !newerDataCarrierPreviewRoute(old.route, validated) {
+		if !newerDataCarrierPreviewRoute(old.route, validated) && !redialedDataCarrierPreviewRoute(old.route, validated) {
 			r.mu.Unlock()
 			return ErrDataCarrierPreviewRegistryStale
 		}
@@ -305,13 +305,14 @@ func (r *DataCarrierPreviewRegistry) watchEntry(entry *dataCarrierPreviewRouteEn
 func (r *DataCarrierPreviewRegistry) detachEntry(entry *dataCarrierPreviewRouteEntry) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.removeStandbyLocked(entry.route.RouteID, func(standby *dataCarrierPreviewRouteEntry) bool { return standby == entry })
 	if current := r.byRoute[entry.route.RouteID]; current == entry {
 		delete(r.byRoute, entry.route.RouteID)
 		delete(r.byHost, entry.host)
 		r.removeAliasesForRouteLocked(entry.route.RouteID)
 		entry.close()
+		r.promoteStandbyLocked(entry.route.RouteID)
 	}
-	r.removeStandbyLocked(entry.route.RouteID, func(standby *dataCarrierPreviewRouteEntry) bool { return standby == entry })
 }
 
 // Detach removes a route only when its exact identity and revision are still
@@ -513,6 +514,23 @@ func (r *DataCarrierPreviewRegistry) Close() error {
 
 func sameDataCarrierPreviewRoute(left, right DataCarrierPreviewRoute) bool {
 	return left.RouteID == right.RouteID && left.Hostname == right.Hostname && left.Kind == right.Kind && left.Revision == right.Revision && left.Identity == right.Identity && left.Server == right.Server && left.PreviewID == right.PreviewID && left.OperationID == right.OperationID && left.OwnerMachineID == right.OwnerMachineID && left.OwnerSessionID == right.OwnerSessionID && left.AccessMode == right.AccessMode && left.EdgeNodeID == right.EdgeNodeID && left.EdgeProcessEpoch == right.EdgeProcessEpoch && left.LeaseGeneration == right.LeaseGeneration && left.AttachmentGeneration == right.AttachmentGeneration && left.ConfigContentHash == right.ConfigContentHash && left.Endpoint == right.Endpoint && left.EndpointRoute == right.EndpointRoute && left.ExpiresAt.Equal(right.ExpiresAt) && left.MachineIdentityPublicKey == right.MachineIdentityPublicKey && left.MachineIdentityThumbprint == right.MachineIdentityThumbprint
+}
+
+// redialedDataCarrierPreviewRoute is the same registration (route, session, generations) arriving on another
+// live connection of the same host session: a redial during an edge handover. It is not stale; the newer
+// connection replaces the older one, which stays as a standby while its streams finish (retireLocked).
+// Refusing it logged a route attach refusal for a route that kept serving (2026-11-12, gate .8).
+func redialedDataCarrierPreviewRoute(old, next DataCarrierPreviewRoute) bool {
+	if next.Server == nil || next.Server == old.Server {
+		return false
+	}
+	select {
+	case <-next.Server.Done():
+		return false
+	default:
+	}
+	next.Server, next.ExpiresAt = old.Server, old.ExpiresAt
+	return sameDataCarrierPreviewRoute(old, next)
 }
 
 func newerDataCarrierPreviewRoute(old, next DataCarrierPreviewRoute) bool {
