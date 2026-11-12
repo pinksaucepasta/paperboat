@@ -160,9 +160,9 @@ with pydivert.WinDivert("udp and !loopback and udp.DstPort != 53 and udp.SrcPort
 class Peer:
     """A Linux peer: a container ct on ssh host `host`, or (ct is the machine name, direct=True) the Linux machine at `host` itself."""
 
-    def __init__(self, host, ct, direct=False):
+    def __init__(self, host, ct, direct=False, user=None):
         self.host, self.ct = host, ct
-        self.prefix = "" if direct else f"sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 -w /home/pbt {ct}"
+        self.prefix = f"sudo -n -u {user} env HOME=/home/{user} XDG_RUNTIME_DIR=/run/user/$(id -u {user})" if user else "" if direct else f"sudo -n docker exec -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 -w /home/pbt {ct}"
 
     def run(self, command, timeout=60):
         return ssh(self.host, f"{self.prefix} sh -c {shlex.quote(f'timeout {timeout} {command}')}", timeout + 20)
@@ -272,6 +272,7 @@ def main():
     parser.add_argument("--name", required=True, help="the target's machine name")
     parser.add_argument("--peer", required=True, help="container of the Linux peer (also its machine name)")
     parser.add_argument("--peer-ssh", help="the peer is this Linux machine itself (--peer is its machine name), not a container on --host")
+    parser.add_argument("--peer-user", help="with --peer-ssh: the peer is this OS user's machine on that host")
     parser.add_argument("--peer-address", help="the address the target reaches the peer at (default: the peer's public address)")
     parser.add_argument("--outage-seconds", type=int, default=120)
     parser.add_argument("--limit", type=float, default=10.0)
@@ -281,7 +282,7 @@ def main():
     parser.add_argument("--relay-ports", default="27445,27446", help="the relays' ports, first to last (TCP and UDP)")
     args = parser.parse_args()
     target = Mac(args.mac, args.name, args.cut_ip) if args.mac else Windows(args.name)
-    peer = Peer(args.peer_ssh or args.host, args.peer, direct=bool(args.peer_ssh))
+    peer = Peer(args.peer_ssh or args.host, args.peer, direct=bool(args.peer_ssh), user=args.peer_user)
     if args.check == "relay":
         args.limit = 15.0
     sys.exit(rebind(args, target, peer) if args.check == "rebind" else relay(args, target, peer))
