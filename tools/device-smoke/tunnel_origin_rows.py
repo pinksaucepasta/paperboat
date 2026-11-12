@@ -613,6 +613,48 @@ def edges_scenario():
         origin.stop()
 
 
+def edge_loss_scenario():
+    """F8-15 (Linux, needs sudo nft): one edge becomes unreachable from the machine, as a dead edge is; the other edge keeps serving
+    a tunnel and a preview without a single failed request, and the lost edge serves again once it is reachable."""
+    s = 'edge_loss'
+    origin = serve(Origin)
+    port = origin.server_address[1]
+    name, host, route = create(s, '--port', str(port))
+    preview = pb('preview', 'http://127.0.0.1:%d' % port, '--background', '--ttl', '1h', timeout=240)
+    public = {'tunnel': host, 'preview': preview['endpoint'].split('://', 1)[1].rstrip('/')}
+    blocked = None
+    try:
+        def serve_on(kind, ip, seconds):
+            deadline = time.time() + seconds
+            while time.time() < deadline:
+                if status_via(public[kind], ip) == 200:
+                    return True
+                time.sleep(2)
+            return False
+        ips = edge_ips(host)
+        both = all(serve_on(kind, ip, 90) for kind in public for ip in ips)
+        cell(s, 'F8-15 before the loss every edge serves the tunnel and the preview', both and len(ips) >= 2, ips)
+        lost, survivor = ips[0], ips[1]
+        subprocess.run(['sudo', '-n', 'nft', '-f', '-'], input='table inet torblock { chain out { type filter hook output priority 0; ip daddr %s drop; } }\n' % lost, text=True, check=True)
+        blocked = lost
+        failures, deadline = [], time.time() + 75
+        while time.time() < deadline:
+            for kind in public:
+                status = status_via(public[kind], survivor)
+                if status != 200:
+                    failures.append((round(time.time() - deadline + 75), kind, status))
+            time.sleep(2)
+        cell(s, 'F8-15 with one edge lost the other keeps serving the tunnel and the preview for 75 s without a failed request', not failures, failures[:6] or 'no failures')
+        subprocess.run(['sudo', '-n', 'nft', 'delete', 'table', 'inet', 'torblock'], check=True)
+        blocked = None
+        cell(s, 'F8-15 the edge serves both again within 90 s of being reachable', all(serve_on(kind, lost, 90) for kind in public), lost)
+    finally:
+        if blocked:
+            subprocess.run(['sudo', '-n', 'nft', 'delete', 'table', 'inet', 'torblock'], check=False)
+        pb('preview', 'stop', preview['id'], check=False)
+        origin.stop()
+
+
 def preview_scenario():
     s = 'preview'
     origin = serve(Origin)
@@ -650,7 +692,7 @@ def preview_scenario():
         https.stop()
 
 
-SCENARIOS = {'headers': headers_scenario, 'keepalive': keepalive_scenario, 'ws': ws_scenario, 'tls': tls_scenario, 'grpc': grpc_scenario, 'failures': failures_scenario, 'preview': preview_scenario, 'edges': edges_scenario}
+SCENARIOS = {'headers': headers_scenario, 'keepalive': keepalive_scenario, 'ws': ws_scenario, 'tls': tls_scenario, 'grpc': grpc_scenario, 'failures': failures_scenario, 'preview': preview_scenario, 'edges': edges_scenario, 'edge_loss': edge_loss_scenario}
 
 
 def run_scenario(name):
@@ -665,7 +707,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--pb', required=True)
     parser.add_argument('--out', required=True)
-    parser.add_argument('--only', nargs='*', default=list(SCENARIOS))
+    parser.add_argument('--only', nargs='*', default=[n for n in SCENARIOS if n != 'edge_loss'], help='scenarios to run (edge_loss, Linux with sudo, only when asked)')
     parser.add_argument('--ws-quiet', type=int, default=600)
     parser.add_argument('--slow', type=int, default=105)
     ARGS = parser.parse_args()
