@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 // RecordTerminalJoin uses the existing signed observation transport, without
@@ -24,7 +25,7 @@ func (s *runtimeObservationSender) RecordTerminalJoin(ctx context.Context, join 
 		ReporterVersion string              `json:"reporter_version"`
 		SampledAt       time.Time           `json:"sampled_at"`
 		TerminalJoin    server.TerminalJoin `json:"terminal_join"`
-	}{s.environmentID, s.machineID, s.reporterVersion, time.Now().UTC(), join})
+	}{s.environmentID, s.machineID, s.reporterVersion, serverclock.Now().UTC(), join})
 	if err != nil {
 		return err
 	}

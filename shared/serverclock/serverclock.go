@@ -23,6 +23,34 @@ const maxRoundTrip = 10 * time.Second
 
 var offset atomic.Int64
 
+// reference is the local clock when the offset was learned: the monotonic reading says how long ago, the
+// wall reading shows whether the local clock was stepped since (X-27: a clock set back makes the learned offset wrong).
+type reference struct {
+	mono time.Time
+	wall int64
+}
+
+var (
+	learned     atomic.Pointer[reference]
+	remeasure   atomic.Pointer[func()]
+	remeasured  atomic.Pointer[time.Time]
+	wallNano    = func() int64 { return time.Now().UnixNano() } // replaced in tests
+	remeasureIn = 10 * time.Second
+)
+
+// SetRemeasure registers how to ask the server for its time again (a request whose response goes to Observe). It
+// runs, at most every 10 s, when the local clock was stepped since the offset was learned.
+func SetRemeasure(f func()) { remeasure.Store(&f) }
+
+// step is how far the local wall clock moved against the monotonic clock since the offset was learned.
+func step() time.Duration {
+	ref := learned.Load()
+	if ref == nil {
+		return 0
+	}
+	return time.Duration(wallNano()-ref.wall) - time.Since(ref.mono)
+}
+
 // Why a response could not place the server's clock.
 var (
 	ErrNoDate        = errors.New("the response has no Date header")
@@ -58,12 +86,25 @@ func Measure(date string, sent, received time.Time) (time.Duration, error) {
 func Observe(date string, sent, received time.Time) {
 	if delta, err := Measure(date, sent, received); err == nil {
 		offset.Store(int64(delta))
+		learned.Store(&reference{mono: received, wall: wallNano()})
 	}
 }
 
 // Offset is how far the server's clock is ahead of this machine's (negative: behind), or 0 below
-// Threshold.
-func Offset() time.Duration { return time.Duration(offset.Load()) }
+// Threshold. When the local clock was stepped since it was learned (an NTP fix, a clock set back), or the
+// machine slept, the offset may be stale: the server is asked for its time again, at most every 10 s, and
+// the old offset stays until that answer arrives (a step and a sleep cannot be told apart).
+func Offset() time.Duration {
+	if s := step(); s.Abs() >= Threshold {
+		if f, last := remeasure.Load(), remeasured.Load(); f != nil && (last == nil || time.Since(*last) >= remeasureIn) {
+			now := time.Now()
+			if remeasured.CompareAndSwap(last, &now) {
+				go (*f)()
+			}
+		}
+	}
+	return time.Duration(offset.Load())
+}
 
 // Now is the current time on the server's clock.
 func Now() time.Time { return time.Now().Add(Offset()) }

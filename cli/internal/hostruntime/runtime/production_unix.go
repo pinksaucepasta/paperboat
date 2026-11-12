@@ -130,7 +130,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 	if err != nil {
 		return nil, err
 	}
-	if _, loadErr := enrollment.LoadRuntimeIdentityForRenewal(runtimeConfig.StateRoot, time.Now().UTC()); loadErr != nil {
+	if _, loadErr := enrollment.LoadRuntimeIdentityForRenewal(runtimeConfig.StateRoot, serverclock.Now().UTC()); loadErr != nil {
 		enrollmentClient, clientErr := enrollment.NewClient(transport, 15*time.Second)
 		if clientErr != nil {
 			return nil, clientErr
@@ -153,7 +153,7 @@ func newProductionHost(ctx context.Context, version string, environ func(string)
 			return nil, err
 		}
 	}
-	identity, err := enrollment.LoadRuntimeIdentityForRenewal(runtimeConfig.StateRoot, time.Now().UTC())
+	identity, err := enrollment.LoadRuntimeIdentityForRenewal(runtimeConfig.StateRoot, serverclock.Now().UTC())
 	if err != nil {
 		return nil, err
 	}

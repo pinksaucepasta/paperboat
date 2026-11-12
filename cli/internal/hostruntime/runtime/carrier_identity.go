@@ -16,6 +16,7 @@ import (
 	runtimeidentity "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	peeridentityenrollment "github.com/pinksaucepasta/paperboat/internal/hostruntime/peeridentity"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 type carrierIdentity struct {
@@ -45,7 +46,7 @@ func loadCarrierIdentity(ctx context.Context, version string, environ func(strin
 		return nil, err
 	}
 	transport = &controlbackoff.Transport{Base: transport, Host: controlURL.Host}
-	identity, err := enrollment.LoadRuntimeIdentityForRenewal(config.StateRoot, time.Now().UTC())
+	identity, err := enrollment.LoadRuntimeIdentityForRenewal(config.StateRoot, serverclock.Now().UTC())
 	if err != nil || identity.MachineID != environ("PAPERBOAT_MACHINE_ID") {
 		return nil, errors.Join(ErrProductionInvalid, err)
 	}

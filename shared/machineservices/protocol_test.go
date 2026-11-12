@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 func TestSnapshotBoundsAndExactPorts(t *testing.T) {
@@ -12,7 +14,7 @@ func TestSnapshotBoundsAndExactPorts(t *testing.T) {
 	if e := ValidateSnapshot(good, now); e != nil {
 		t.Fatal(e)
 	}
-	for name, change := range map[string]func(*Snapshot){"duplicate": func(s *Snapshot) { s.Services = append(s.Services, Port{5432, "ipv6"}) }, "overflow": func(s *Snapshot) { s.Services = make([]Port, 65) }, "wildcard family": func(s *Snapshot) { s.Services = []Port{{5432, "0.0.0.0"}} }, "zero port": func(s *Snapshot) { s.Services = []Port{{0, "ipv4"}} }, "counter overflow": func(s *Snapshot) { s.Generation = 9007199254740992 }, "future boot": func(s *Snapshot) { s.StartedAt = now.Add(6 * time.Second) }, "invalid boot": func(s *Snapshot) { s.BootID = strings.Repeat("x", 65) }} {
+	for name, change := range map[string]func(*Snapshot){"duplicate": func(s *Snapshot) { s.Services = append(s.Services, Port{5432, "ipv6"}) }, "overflow": func(s *Snapshot) { s.Services = make([]Port, 65) }, "wildcard family": func(s *Snapshot) { s.Services = []Port{{5432, "0.0.0.0"}} }, "zero port": func(s *Snapshot) { s.Services = []Port{{0, "ipv4"}} }, "counter overflow": func(s *Snapshot) { s.Generation = 9007199254740992 }, "future boot": func(s *Snapshot) { s.StartedAt = now.Add(serverclock.Threshold + time.Second) }, "invalid boot": func(s *Snapshot) { s.BootID = strings.Repeat("x", 65) }} {
 		t.Run(name, func(t *testing.T) {
 			s := good
 			change(&s)

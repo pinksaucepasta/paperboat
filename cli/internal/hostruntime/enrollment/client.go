@@ -262,7 +262,7 @@ func (c *Client) enroll(ctx context.Context, config Config, endpointPath string,
 	result := envelope.Data
 	result.Version = 1
 	result.KeyID = key.ID
-	if result.HelperID == "" || result.MachineID == "" || result.EnvironmentID == "" || len(result.Credential) < 32 || result.ExpiresAt.Before(time.Now().UTC()) {
+	if result.HelperID == "" || result.MachineID == "" || result.EnvironmentID == "" || len(result.Credential) < 32 || result.ExpiresAt.Before(serverclock.Now().UTC()) {
 		return RuntimeIdentity{}, ErrInvalid
 	}
 	if err := writeIdentity(config.StateRoot, result); err != nil {

@@ -15,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/previewtunnelstore"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewv1"
 	"github.com/pinksaucepasta/paperboat/server/internal/supportreport"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 const ActivationTimeout = 10 * time.Second
@@ -130,7 +131,7 @@ func (s *Activator) ownerLease() time.Duration {
 // A reservation alone cannot register ownership or restore a forwarding lease.
 func (s *Activator) RecordLazyRuntimeObservation(ctx context.Context, environment, machine string, r RuntimeObservation) error {
 	now := time.Now().UTC()
-	if r.Schema != "paperboat.lazy-runtime/v1" || !validRuntimeBoot(r.BootID) || r.InstallationGeneration < 1 || r.StartedAt.IsZero() || r.StartedAt.After(now.Add(5*time.Second)) {
+	if r.Schema != "paperboat.lazy-runtime/v1" || !validRuntimeBoot(r.BootID) || r.InstallationGeneration < 1 || r.StartedAt.IsZero() || r.StartedAt.After(now.Add(serverclock.Threshold)) {
 		return ErrInvalid
 	}
 	lease := s.ownerLease()

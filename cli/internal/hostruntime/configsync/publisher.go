@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 var (
@@ -104,7 +106,7 @@ func NewPublisher(config PublisherConfig) (*Publisher, error) {
 		return nil, ErrControlClientInvalid
 	}
 	if config.Clock == nil {
-		config.Clock = func() time.Time { return time.Now().UTC() }
+		config.Clock = func() time.Time { return serverclock.Now().UTC() }
 	}
 	return &Publisher{
 		authority: config.Authority, repository: config.Repository,

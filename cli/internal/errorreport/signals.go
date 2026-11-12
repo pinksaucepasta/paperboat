@@ -239,6 +239,32 @@ type ownedTransport struct {
 	operation    string
 }
 
+// lastOwned is the most recent Paperboat server this process talked to; serverclock asks it for the time again
+// when the local clock was stepped.
+var lastOwned atomic.Pointer[ownedTransport]
+
+func init() { serverclock.SetRemeasure(remeasureServerClock) }
+
+func remeasureServerClock() {
+	t := lastOwned.Load()
+	if t == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, t.scheme+"://"+t.host+"/v1/server-version", nil)
+	if err != nil {
+		return
+	}
+	sent := time.Now()
+	response, err := t.base.RoundTrip(request)
+	if err != nil {
+		return
+	}
+	_ = response.Body.Close()
+	serverclock.Observe(response.Header.Get("Date"), sent, time.Now())
+}
+
 func (t ownedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	r := Current()
 	owned := req.URL.Scheme == t.scheme && req.URL.Host == t.host
@@ -249,6 +275,7 @@ func (t ownedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		clone.Header.Del(supportref.Header)
 		return t.base.RoundTrip(clone)
 	}
+	lastOwned.Store(&t)
 	reference := clone.Header.Get(supportref.Header)
 	if !supportref.Valid(reference) {
 		reference = supportref.FromContext(req.Context())

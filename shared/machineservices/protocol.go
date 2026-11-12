@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 const MaxServices = 64
@@ -67,7 +69,7 @@ func ParseRoute(route string) (int, error) {
 	return n, nil
 }
 func ValidateSnapshot(in Snapshot, now time.Time) error {
-	if in.Schema != "paperboat.machine-services/v1" || in.InstallationGeneration < 1 || in.Generation < 1 || in.Generation > 9007199254740991 || !ValidBoot(in.BootID) || in.StartedAt.IsZero() || in.StartedAt.After(now.Add(5*time.Second)) || len(in.Services) > MaxServices {
+	if in.Schema != "paperboat.machine-services/v1" || in.InstallationGeneration < 1 || in.Generation < 1 || in.Generation > 9007199254740991 || !ValidBoot(in.BootID) || in.StartedAt.IsZero() || in.StartedAt.After(now.Add(serverclock.Threshold)) || len(in.Services) > MaxServices {
 		return ErrInvalid
 	}
 	seen := map[int]bool{}

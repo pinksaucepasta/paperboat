@@ -29,6 +29,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/updated"
 	"github.com/pinksaucepasta/paperboat/internal/machineservices"
 	"github.com/pinksaucepasta/paperboat/shared/backoff"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
 
@@ -247,9 +248,15 @@ func (s *runtimeObservationSender) send(ctx context.Context, mayConfirm bool) er
 	if s.layers != nil {
 		s.observeEnvironmentFailure(ctx, 0, s.layers.FlushLayerObservations(ctx))
 	}
-	now := time.Now().UTC()
+	// The server compares these times with its own clock (X-27): a machine whose clock is off reports the server's.
+	now := serverclock.Now().UTC()
 	observedCapabilities := s.capabilitiesController.Observation(now)
 	availabilityState := availabilityObservation(ctx, s.availability)
+	if availabilityState != nil {
+		shifted := *availabilityState
+		shifted.ObservedAt = shifted.ObservedAt.Add(serverclock.Offset())
+		availabilityState = &shifted
+	}
 	var updaterState *updated.ControlResponse
 	var updaterErr error
 	if s.updater != nil {
@@ -422,7 +429,7 @@ func (s *runtimeObservationSender) lazyRuntimeObservation() *lazyRuntimeObservat
 	if s.lazyBootID == "" || s.installationGeneration == 0 || s.lazyStartedAt.IsZero() {
 		return nil
 	}
-	return &lazyRuntimeObservation{Schema: "paperboat.lazy-runtime/v1", BootID: s.lazyBootID, InstallationGeneration: s.installationGeneration, StartedAt: s.lazyStartedAt.UTC()}
+	return &lazyRuntimeObservation{Schema: "paperboat.lazy-runtime/v1", BootID: s.lazyBootID, InstallationGeneration: s.installationGeneration, StartedAt: s.startedOnServerClock()}
 }
 
 type runtimeUpdateObservation struct {
@@ -583,4 +590,9 @@ func availabilityObservation(ctx context.Context, source interface {
 		return nil
 	}
 	return source.Observation(ctx)
+}
+
+// startedOnServerClock is the process start time on the server's clock; it was read before the offset was known.
+func (s *runtimeObservationSender) startedOnServerClock() time.Time {
+	return s.lazyStartedAt.UTC().Add(serverclock.Offset())
 }

@@ -12,6 +12,7 @@ import (
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 var ErrWorkspaceReconcilerInvalid = errors.New("invalid config workspace reconciler")
@@ -136,7 +137,7 @@ func NewPlaintextWorkspaceReconciler(config WorkspaceReconcilerConfig) (*Plainte
 	}
 	config.Descriptor.Policy.AbsoluteRuntimeExclusionRoots = append(append([]string(nil), config.Descriptor.Policy.AbsoluteRuntimeExclusionRoots...), config.StateRoot)
 	if config.Clock == nil {
-		config.Clock = func() time.Time { return time.Now().UTC() }
+		config.Clock = func() time.Time { return serverclock.Now().UTC() }
 	}
 	approved := config.Descriptor
 	if config.ApprovedConfiguration != nil {

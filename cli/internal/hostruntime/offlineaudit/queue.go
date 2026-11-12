@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	recording "github.com/pinksaucepasta/paperboat/shared/recording"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 const (
@@ -75,7 +76,7 @@ type Queue struct {
 
 func Open(path string, now func() time.Time) (*Queue, error) {
 	if now == nil {
-		now = time.Now
+		now = serverclock.Now
 	}
 	q := &Queue{path: path, now: now, changed: make(chan struct{}, 1)}
 	data, err := os.ReadFile(path)

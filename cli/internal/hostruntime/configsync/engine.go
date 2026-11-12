@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 var ErrEngineInvalid = errors.New("invalid config sync engine")
@@ -96,7 +97,7 @@ func NewEngine(config EngineConfig) (*Engine, error) {
 		return nil, err
 	}
 	if config.Clock == nil {
-		config.Clock = func() time.Time { return time.Now().UTC() }
+		config.Clock = func() time.Time { return serverclock.Now().UTC() }
 	}
 	now := config.Clock().UTC()
 	syncRevision := config.Descriptor.SyncRevisionFloor

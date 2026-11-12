@@ -18,6 +18,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/machinealias"
 	"github.com/pinksaucepasta/paperboat/server/internal/naming"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 const MaxMachines = 128
@@ -288,7 +289,7 @@ func (s *Service) RuntimePolicy(ctx context.Context, environment, machine string
 }
 func (s *Service) RecordMachineServices(ctx context.Context, environment, machine string, in wire.Snapshot, observedAt time.Time) (resultErr error) {
 	now := s.now()
-	if observedAt.IsZero() || observedAt.After(now.Add(5*time.Second)) || !observedAt.Add(SnapshotLifetime).After(now) {
+	if observedAt.IsZero() || observedAt.After(now.Add(serverclock.Threshold)) || !observedAt.Add(SnapshotLifetime).After(now) {
 		return wire.ErrInvalid
 	}
 	lease := s.lease()

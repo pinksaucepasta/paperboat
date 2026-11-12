@@ -44,3 +44,47 @@ func TestMeasureNamesWhyItCannot(t *testing.T) {
 		t.Fatalf("hour ahead: %v %v", delta, err)
 	}
 }
+
+// X-27: a machine whose clock was 10 minutes fast and is then set back must not keep judging by the old
+// offset until some unrelated response: the step makes it ask the server for its time at once.
+func TestAClockSetBackMakesItAskTheServerAgain(t *testing.T) {
+	asked := make(chan struct{}, 4)
+	SetRemeasure(func() { asked <- struct{}{} })
+	realWall := wallNano
+	t.Cleanup(func() {
+		wallNano = realWall
+		remeasure.Store(nil)
+		offset.Store(0)
+		learned.Store(nil)
+		remeasured.Store(nil)
+	})
+	sent := time.Now()
+	Observe(sent.Add(-10*time.Minute).UTC().Format(http.TimeFormat), sent, sent.Add(100*time.Millisecond)) // local clock 10 min fast
+	if got := Offset(); got > -9*time.Minute-50*time.Second || got < -10*time.Minute-10*time.Second {
+		t.Fatalf("offset=%v", got)
+	}
+	select {
+	case <-asked:
+		t.Fatal("asked the server again without a clock step")
+	default:
+	}
+	wallNano = func() int64 { return realWall() - int64(10*time.Minute) } // the local clock is set back to the real time
+	_ = Offset()
+	select {
+	case <-asked:
+	case <-time.After(time.Second):
+		t.Fatal("the server was not asked for its time after the clock step")
+	}
+	// The answer: the local clock now matches the server's, so the offset is gone.
+	now := time.Now()
+	Observe(now.UTC().Format(http.TimeFormat), now, now.Add(50*time.Millisecond))
+	if got := Offset(); got != 0 {
+		t.Fatalf("offset after the answer: %v", got)
+	}
+	_ = Offset()
+	select {
+	case <-asked:
+		t.Fatal("asked again after the answer")
+	default:
+	}
+}

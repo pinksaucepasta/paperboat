@@ -110,7 +110,7 @@ func (s *runtimeObservationSender) machineServicesObservation(ctx context.Contex
 		s.machineServicesGeneration++
 		s.machineServicesPorts = ports
 	}
-	return &api.MachineServicesSnapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: s.installationGeneration, BootID: s.lazyBootID, StartedAt: s.lazyStartedAt.UTC(), Generation: s.machineServicesGeneration, Services: append([]api.MachineServicePort{}, ports...)}
+	return &api.MachineServicesSnapshot{Schema: "paperboat.machine-services/v1", InstallationGeneration: s.installationGeneration, BootID: s.lazyBootID, StartedAt: s.startedOnServerClock(), Generation: s.machineServicesGeneration, Services: append([]api.MachineServicePort{}, ports...)}
 }
 
 // machineServicesChanged re-reads the local listening ports and reports whether the announced set
