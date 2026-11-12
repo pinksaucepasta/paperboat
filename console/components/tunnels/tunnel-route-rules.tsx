@@ -84,6 +84,7 @@ function HeaderRows({
           type="button"
           variant="ghost"
           size="sm"
+          aria-label={`Add ${label.toLowerCase()}`}
           disabled={rules.length >= MAX_HEADERS}
           onClick={() => onChange([...rules, { op: "set", name: "", value: "" }])}
         >
@@ -236,6 +237,7 @@ export function RouteRulesDialog({ tunnel, route, onClose }: { tunnel: Tunnel; r
                 type="button"
                 variant="ghost"
                 size="sm"
+                aria-label="Add redirect"
                 disabled={redirects.length >= MAX_REDIRECTS}
                 onClick={() => setRedirects([...redirects, { from: "", code: 308, to: "" }])}
               >
