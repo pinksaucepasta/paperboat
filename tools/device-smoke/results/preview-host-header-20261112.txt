@@ -1,0 +1,28 @@
+preview_host_header.py on L after fix 4e31a4fde (a public preview applies --host-header even without the inspector): machine small-t1 (pbvm4, pb dev-f7f2eac89), prod server+edges 2026.11.12.3. The first run on dev-5a7a97818 failed (origin saw the public Host): same check, before the fix.
+2026-11-12T14:36:18Z
+{
+ "check": "preview-host-header",
+ "status": "PASS",
+ "steps": [
+  {
+   "step": "a plain preview: the origin refuses the visitor's Host (403)",
+   "status": "PASS",
+   "seconds": 14.0
+  },
+  {
+   "step": "--host-header: the origin sees the named Host and answers 200",
+   "status": "PASS",
+   "seconds": 16.7
+  },
+  {
+   "step": "preview status names the header",
+   "status": "PASS",
+   "seconds": 8.3
+  },
+  {
+   "step": "a malformed value, a port, a path, credentials and a unix target are refused",
+   "status": "PASS",
+   "seconds": 125.6
+  }
+ ]
+}
