@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"io"
 	"net"
@@ -1172,5 +1173,59 @@ func TestDataCarrierPreviewRegistryPromotesTheLiveStandbyWhenTheServingConnectio
 			t.Fatalf("the route was not served by the live standby after the serving connection died: %+v, ok=%v", got, ok)
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// A standby whose host sent a goaway is leaving: it is not promoted, the route waits for the next pull.
+func TestDataCarrierPreviewRegistryDoesNotPromoteADrainingStandby(t *testing.T) {
+	registry, err := NewDataCarrierPreviewRegistry(DataCarrierPreviewRegistryConfig{BaseDomain: "preview.example.test", ProcessEpoch: "edge_epoch_1", MaximumRoutes: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	identity := testEdgePreviewIdentity(2, 2)
+	firstServer, firstClient := testEdgePreviewCarrierPair(t, identity)
+	secondServer, secondClient := testEdgePreviewCarrierPair(t, identity)
+	defer firstClient.Close()
+	defer firstServer.Close()
+	defer secondClient.Close()
+	defer secondServer.Close()
+	route := func(server *datacarrier.Server) DataCarrierPreviewRoute {
+		return DataCarrierPreviewRoute{RouteID: "preview_01", Hostname: "app.preview.example.test", Kind: runtimewire.RouteKind, EdgeProcessEpoch: "edge_epoch_1", Revision: 1, AttachmentGeneration: 6, Server: server}
+	}
+	for _, server := range []*datacarrier.Server{firstServer, secondServer} {
+		if err := registry.Attach(route(server)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	goaway, err := firstClient.OpenStream(context.Background(), connectorprotocol.StreamOpen{Protocol: connectorprotocol.ProtocolName, Version: connectorprotocol.ProtocolVersion, AccountID: identity.AccountID, TunnelID: identity.TunnelID, ConnectorID: identity.ConnectorID, SessionID: identity.SessionID, ProcessGeneration: identity.ProcessGeneration, Generation: identity.Generation, RouteID: "preview_01", RequestID: "request_goaway", Kind: connectorprotocol.Goaway})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := connectorprotocol.WriteGoawayNotice(goaway, connectorprotocol.GoawayHostDraining, time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-firstServer.Draining():
+	case <-time.After(2 * time.Second):
+		t.Fatal("the first carrier did not drain")
+	}
+	if err := secondServer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	<-secondServer.Done()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, ok := registry.Lookup("app.preview.example.test"); !ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the dead serving connection was not detached")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if got, ok := registry.Lookup("app.preview.example.test"); ok {
+		t.Fatalf("a draining standby was promoted: %+v", got)
 	}
 }
