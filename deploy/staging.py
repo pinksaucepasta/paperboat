@@ -31,6 +31,10 @@ ACCOUNT_REF, DNS_REF = "secret://acme/account", "secret://cloudflare/dns"
 # PAPERBOAT_CERT_SECRET_ names are derived from the references (tunnelcert.EnvironmentReferenceName).
 ACCOUNT_ENV = "PAPERBOAT_CERT_SECRET_SECRET___ACME_ACCOUNT_27c59c1f5611"
 DNS_ENV = "PAPERBOAT_CERT_SECRET_SECRET___CLOUDFLARE_DNS_f9b5f91598d2"
+CERT_MASTER_REF = 'secret://staging/certificate-master'
+CERT_MASTER_ENV = 'PAPERBOAT_CERT_SECRET_SECRET___STAGING_CERTIFICATE_MASTER_b0f655ac3c53'
+CERT_DISTRIBUTION_REF = 'secret://staging/certificate-distribution'
+CERT_DISTRIBUTION_ENV = 'PAPERBOAT_CERT_SECRET_SECRET___STAGING_CERTIFICATE_DISTRIBUTION_582a6e05e22a'
 ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent
 
@@ -97,6 +101,7 @@ def build_env(existing, prod):
     api, DOMAIN = api_url(), domain()
     sub = lambda name: f"{name}.{DOMAIN}"
     workos = lambda f: read_remote_secret(PROD, f"/opt/paperboat/secrets/{f}")
+    control_credential = keep("PAPERBOAT_EDGE_CONTROL_CREDENTIAL", lambda: secrets.token_urlsafe(48))
     env = {
         "PAPERBOAT_ENV": "development", "PAPERBOAT_DATABASE_DRIVER": "postgres",
         "PAPERBOAT_DATABASE_DSN": f"postgres://postgres:{keep_password(existing)}@postgres:5432/paperboat_staging?sslmode=disable",
@@ -110,7 +115,7 @@ def build_env(existing, prod):
         "PAPERBOAT_MINT_SIGNING_KEYS": keep("PAPERBOAT_MINT_SIGNING_KEYS", lambda: "staging1:" + secrets.token_urlsafe(32)),
         "PAPERBOAT_MINT_ACTIVE_KEY_ID": "staging1",
         # mounts the edge control endpoints (/v1/edge/*, /v1/nodes/*); without it every edge gets 404
-        "PAPERBOAT_EDGE_CONTROL_CREDENTIAL": keep("PAPERBOAT_EDGE_CONTROL_CREDENTIAL", lambda: secrets.token_urlsafe(48)),
+        "PAPERBOAT_EDGE_CONTROL_CREDENTIAL": control_credential,
         "PAPERBOAT_RELEASE_DIRECTORY": "/srv/paperboat-releases", "PAPERBOAT_RELEASE_BASE_URL": api,
         "PAPERBOAT_CLI_VERIFICATION_URL": api + "/cli", "PAPERBOAT_MACHINES_URL": api + "/machines",
         "PAPERBOAT_BROWSER_LOGIN_ORIGIN": api,
@@ -120,6 +125,18 @@ def build_env(existing, prod):
         "PAPERBOAT_SENTRY_REGION": REGION, "PAPERBOAT_SENTRY_INSTANCE": INSTANCE,
         "PAPERBOAT_REGIONAL_DOMAIN": DOMAIN, "PAPERBOAT_REGIONAL_DNS_ZONE_ID": prod["PAPERBOAT_CERTIFICATES_DNS_ZONE_ID"],
         "PAPERBOAT_REGIONAL_HTTPS_ADDRESS": f":{PORT}",
+        "PAPERBOAT_CERTIFICATES_ENABLED": "true", "PAPERBOAT_CERTIFICATES_ISSUER": "acme",
+        "PAPERBOAT_CERTIFICATES_OWNER_ID": f"staging-{REGION}-{INSTANCE}",
+        "PAPERBOAT_CERTIFICATES_DNS_PROVIDER": "cloudflare",
+        "PAPERBOAT_CERTIFICATES_DNS_ZONE_ID": prod["PAPERBOAT_CERTIFICATES_DNS_ZONE_ID"],
+        "PAPERBOAT_CERTIFICATES_PUBLIC_DNS_ZONE_ID": prod["PAPERBOAT_CERTIFICATES_DNS_ZONE_ID"],
+        "PAPERBOAT_CERTIFICATES_CHALLENGE_ZONE": sub("acme"),
+        "PAPERBOAT_CERTIFICATES_DNS_WRITE_BASE": DOMAIN,
+        "PAPERBOAT_CERTIFICATES_CAA_RESOLVER": "1.1.1.1:53",
+        "PAPERBOAT_CERTIFICATES_MASTER_KEY_REFERENCE": CERT_MASTER_REF,
+        "PAPERBOAT_CERTIFICATES_DISTRIBUTION_CREDENTIAL_REFERENCE": CERT_DISTRIBUTION_REF,
+        CERT_MASTER_ENV: keep(CERT_MASTER_ENV, lambda: secrets.token_urlsafe(48)),
+        CERT_DISTRIBUTION_ENV: control_credential,
         "PAPERBOAT_CERTIFICATES_DIRECTORY_URL": ACME, "PAPERBOAT_CERTIFICATES_ACCOUNT_KEY_REFERENCE": ACCOUNT_REF,
         "PAPERBOAT_CERTIFICATES_DNS_TOKEN_REFERENCE": DNS_REF,
         DNS_ENV: existing.get(DNS_ENV) or prod[DNS_ENV],

@@ -120,3 +120,27 @@ class RegistrationTest(unittest.TestCase):
         statements, _ = self.register(staging.edge, 'paperboat-tunnel:stg-test')
         self.assertIn("scope_id='usr_staging' AND capability='tunnel'", statements[0])
         self.assertNotIn("capability='relay'", '\n'.join(statements))
+
+
+class CertificateEnvironmentTest(unittest.TestCase):
+    def test_staging_domains_have_a_complete_certificate_runtime_confined_to_staging(self):
+        import shlex
+        from unittest.mock import patch
+        prod = {"PAPERBOAT_CERTIFICATES_DNS_ZONE_ID": "test-zone", staging.DNS_ENV: "dns-test-token"}
+        existing = {"PAPERBOAT_WORKOS_CLIENT_ID": "client-test", "PAPERBOAT_WORKOS_API_KEY": "workos-test"}
+        with (
+            patch.object(staging, "api_url", return_value="https://api.stg.example.test"),
+            patch.object(staging, "domain", return_value="stg.example.test"),
+            patch.object(staging, "new_acme_key", return_value="test-signer"),
+        ):
+            values = dict(item.split("=", 1) for item in shlex.split(staging.build_env(existing, prod)))
+            self.assertEqual(values["PAPERBOAT_CERTIFICATES_ENABLED"], "true")
+            self.assertEqual(values["PAPERBOAT_CERTIFICATES_CHALLENGE_ZONE"], "acme.stg.example.test")
+            self.assertEqual(values["PAPERBOAT_CERTIFICATES_DNS_WRITE_BASE"], "stg.example.test")
+            self.assertEqual(values["PAPERBOAT_CERTIFICATES_DNS_ZONE_ID"], "test-zone")
+            self.assertEqual(values["PAPERBOAT_CERTIFICATES_PUBLIC_DNS_ZONE_ID"], "test-zone")
+            self.assertEqual(values[staging.CERT_DISTRIBUTION_ENV], values["PAPERBOAT_EDGE_CONTROL_CREDENTIAL"])
+            self.assertGreaterEqual(len(values[staging.CERT_MASTER_ENV]), 32)
+            again = dict(item.split("=", 1) for item in shlex.split(staging.build_env(values, prod)))
+            self.assertEqual(again[staging.CERT_MASTER_ENV], values[staging.CERT_MASTER_ENV])
+            self.assertEqual(again[staging.CERT_DISTRIBUTION_ENV], values[staging.CERT_DISTRIBUTION_ENV])
