@@ -146,8 +146,8 @@ func TestUsageWorkerDrainsAFullQueueInFewTicks(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if queue.Len() != 0 || sink.calls != reports || persisted != ticks {
-		t.Fatalf("queue=%d calls=%d persisted=%d ticks=%d", queue.Len(), sink.calls, persisted, ticks)
+	if queue.Len() != 0 || sink.calls != reports || persisted != reports/usagePersistEvery {
+		t.Fatalf("queue=%d calls=%d persisted=%d (want one per %d reports) ticks=%d", queue.Len(), sink.calls, persisted, usagePersistEvery, ticks)
 	}
 }
 

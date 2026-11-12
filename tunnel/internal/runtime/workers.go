@@ -93,8 +93,12 @@ func (w *UsageWorker) run(ctx context.Context) {
 // usageBatchLimit bounds one drain so a tick cannot starve shutdown or hold the loop forever.
 const usageBatchLimit = 2048
 
+// usagePersistEvery bounds how many acknowledged reports a crash can resend (the server
+// de-duplicates by operation id, so a resend is safe, only wasteful).
+const usagePersistEvery = 256
+
 // deliver sends queued reports until the queue is empty, a send fails or the batch limit is
-// reached, then persists once. One report per tick capped delivery at 1/Interval and let the
+// reached, then persists every usagePersistEvery reports and at the end. One report per tick capped delivery at 1/Interval and let the
 // queue fill, after which the meter refuses new streams.
 func (w *UsageWorker) deliver(ctx context.Context) (control.UsageResult, bool, error) {
 	// A failed flush (queue full for a new key) must not stop draining: delivering is what
@@ -106,6 +110,7 @@ func (w *UsageWorker) deliver(ctx context.Context) (control.UsageResult, bool, e
 	var last control.UsageResult
 	var sent bool
 	sendErr := flushErr
+	unsaved := 0
 	for i := 0; i < usageBatchLimit && ctx.Err() == nil; i++ {
 		result, delivered, err := control.DeliverNext(ctx, w.Queue, w.Sink)
 		if err != nil {
@@ -116,8 +121,14 @@ func (w *UsageWorker) deliver(ctx context.Context) (control.UsageResult, bool, e
 			break
 		}
 		last, sent = result, true
+		if unsaved++; unsaved >= usagePersistEvery && w.Persist != nil {
+			if err := w.Persist(); err != nil {
+				return control.UsageResult{}, true, errors.Join(sendErr, err)
+			}
+			unsaved = 0
+		}
 	}
-	if sent && w.Persist != nil {
+	if unsaved > 0 && w.Persist != nil {
 		if err := w.Persist(); err != nil {
 			return control.UsageResult{}, true, errors.Join(sendErr, err)
 		}

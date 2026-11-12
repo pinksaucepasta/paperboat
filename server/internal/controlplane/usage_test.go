@@ -304,3 +304,51 @@ func seedUsageScope(t *testing.T, store *db.DB, suffix string) {
 		t.Fatal(err)
 	}
 }
+
+type countingDebiter struct{ total int64 }
+
+func (d *countingDebiter) DebitEnvironmentBandwidthTx(_ context.Context, _ *db.Tx, _ string, bytes int64, _ time.Time) (int64, bool, error) {
+	d.total += bytes
+	return bytes, false, nil
+}
+
+// An edge that crashes mid-batch resends reports it already delivered, in any order. Every
+// resend answers from the stored receipt (usage.go: GetControlUsageReceipt by operation id), so
+// the counter, the receipts and the bandwidth debit each count the bytes once.
+func TestReconcileUsageResentBatchCountsOnce(t *testing.T) {
+	store := openControlPlaneTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	seedUsageScope(t, store, suffix)
+	base := usageReport("op_resend_1_"+suffix, "epoch_resend_"+suffix, 100, now)
+	base.EdgeNodeID, base.EnvironmentID, base.RouteID = "node_"+suffix, "env_"+suffix, "route_"+suffix
+	higher := base
+	higher.OperationID, higher.Bytes = "op_resend_2_"+suffix, 160
+	higher.IntervalStart, higher.IntervalEnd = base.IntervalEnd, base.IntervalEnd.Add(time.Minute)
+	other := base
+	other.OperationID, other.Direction, other.Bytes = "op_resend_3_"+suffix, "egress", 50
+	batch := []UsageReport{base, higher, other}
+	debiter := &countingDebiter{}
+	for _, report := range batch {
+		if receipt, err := ReconcileUsageWithBandwidth(ctx, store, report, now.Add(time.Hour), debiter); err != nil || receipt.Duplicate {
+			t.Fatalf("first delivery of %s = %#v, %v", report.OperationID, receipt, err)
+		}
+	}
+	for _, report := range []UsageReport{other, base, higher, base} {
+		receipt, err := ReconcileUsageWithBandwidth(ctx, store, report, now.Add(2*time.Hour), debiter)
+		if err != nil || !receipt.Duplicate {
+			t.Fatalf("resend of %s = %#v, %v", report.OperationID, receipt, err)
+		}
+	}
+	var receipts, counted int64
+	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.control_usage_receipts WHERE environment_id=$1`, "env_"+suffix).Scan(&receipts); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SQL().QueryRowContext(ctx, `SELECT COALESCE(sum(bytes),0) FROM paperboat.control_usage_counters WHERE environment_id=$1`, "env_"+suffix).Scan(&counted); err != nil {
+		t.Fatal(err)
+	}
+	if receipts != 3 || counted != 210 || debiter.total != 210 {
+		t.Fatalf("receipts=%d counter bytes=%d debited=%d, want 3, 210, 210", receipts, counted, debiter.total)
+	}
+}
