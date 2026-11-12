@@ -2,6 +2,7 @@ package enrollment
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -194,5 +195,52 @@ func TestRenewalClockSkewIsTransientAndNeverARefusal(t *testing.T) {
 	}
 	if got := requests.Load(); got != 2 {
 		t.Fatalf("%d requests, want 2", got)
+	}
+}
+
+// Every helper proof the CLI signs (an ordinary one and the renewal proof) carries a nonce and no two share one: the
+// server uses a proof once (F21-13).
+func TestHelperProofsCarryAFreshNonce(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	root, _ := enrolledRoot(t, now, func(w http.ResponseWriter, r *http.Request) {})
+	current, err := LoadRuntimeIdentityForRenewal(root, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.ExpiresAt = now.Add(time.Hour)
+	if err := writeIdentity(root, current); err != nil {
+		t.Fatal(err)
+	}
+	source := ProofSource{StateRoot: root, Clock: func() time.Time { return now }}
+	nonces := map[string]bool{}
+	for name, sign := range map[string]func() ([]byte, error){
+		"proof": func() ([]byte, error) {
+			return source.Proof(context.Background(), "operation-nonce-one", http.MethodPost, "/v1/x", []byte("{}"))
+		},
+		"proof again": func() ([]byte, error) {
+			return source.Proof(context.Background(), "operation-nonce-one", http.MethodPost, "/v1/x", []byte("{}"))
+		},
+		"renewal proof": func() ([]byte, error) {
+			return source.renewalProof("operation-nonce-two", http.MethodPost, "/v1/helper-identity-renewals", []byte("{}"))
+		},
+	} {
+		proof, err := sign()
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		var envelope struct {
+			Payload string `json:"payload"`
+		}
+		if json.Unmarshal(proof, &envelope) != nil {
+			t.Fatalf("%s: not a proof envelope", name)
+		}
+		payload, _ := base64.RawURLEncoding.DecodeString(envelope.Payload)
+		var claims struct {
+			Nonce string `json:"nonce"`
+		}
+		if json.Unmarshal(payload, &claims) != nil || len(claims.Nonce) < 16 || nonces[claims.Nonce] {
+			t.Fatalf("%s: nonce %q is missing, short or reused", name, claims.Nonce)
+		}
+		nonces[claims.Nonce] = true
 	}
 }
