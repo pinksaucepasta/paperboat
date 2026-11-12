@@ -116,6 +116,7 @@ def main():
     parser.add_argument('--machine-cmd', default='')
     parser.add_argument('--windows', action='store_true')
     parser.add_argument('--observer-b-cmd', required=True)
+    parser.add_argument('--observer-python', default='python3', help='python on the flooding host')
     parser.add_argument('--pb', default='/home/pbt/.local/bin/pb')
     parser.add_argument('--output', default='')
     args = parser.parse_args()
@@ -158,7 +159,7 @@ def main():
         step('baseline: both addresses are served', fetch([], url) == 200 and fetch(observer_b, url) == 200)
         # B floods in the background while A keeps visiting once a second
         import subprocess
-        flood = subprocess.Popen(remote(observer_b, ['python3', '-', url, str(FLOOD_SECONDS)]), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        flood = subprocess.Popen(remote(observer_b, [args.observer_python, '-', url, str(FLOOD_SECONDS)]), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         flood.stdin.write(FLOODER)
         flood.stdin.close()
         during, bystander = [], None
