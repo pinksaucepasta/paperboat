@@ -192,14 +192,14 @@ func productionConfigRepository(homeRoot, assignmentRoot, credentialRoot string,
 		source, _, err := configsync.ReadSharedAuthorizedRepositoryConfig(ctx, filepath.Join(assignmentRoot, "source-read"), credentialRoot, access, configsync.DefaultSourceConfigLimits())
 		return source, err
 	}
-	makeRepository := func(name, repositoryID string, mode configsync.AssignmentMode, direction string) (*configsync.GitRepository, *configsync.PlaintextWorkspaceReconciler, error) {
+	makeRepository := func(name, repositoryID string, mode configsync.AssignmentMode, direction string, merge bool) (*configsync.GitRepository, *configsync.PlaintextWorkspaceReconciler, error) {
 		stateRoot := filepath.Join(assignmentRoot, name)
 		if err := os.MkdirAll(stateRoot, 0o700); err != nil {
 			return nil, nil, err
 		}
 		child := descriptor
 		child.RepositoryID, child.Mode = repositoryID, mode
-		reconciler, err := configsync.NewPlaintextWorkspaceReconciler(configsync.WorkspaceReconcilerConfig{HomeRoot: homeRoot, StateRoot: stateRoot, ComparisonStatusPath: filepath.Join(assignmentRoot, "status.json"), Descriptor: child, MachineSource: machineSource, ApprovedConfiguration: &descriptor, SharedSource: sharedSource, Resolutions: client})
+		reconciler, err := configsync.NewPlaintextWorkspaceReconciler(configsync.WorkspaceReconcilerConfig{HomeRoot: homeRoot, StateRoot: stateRoot, ComparisonStatusPath: filepath.Join(assignmentRoot, "status.json"), Descriptor: child, MachineSource: machineSource, ApprovedConfiguration: &descriptor, SharedSource: sharedSource, Resolutions: client, MergeConcurrentEdits: merge})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -207,16 +207,16 @@ func productionConfigRepository(homeRoot, assignmentRoot, credentialRoot string,
 		return repository, reconciler, err
 	}
 	if descriptor.Mode == configsync.ModePullOnly {
-		return makeRepository("pull", descriptor.PullRepositoryID, configsync.ModePullOnly, "pull")
+		return makeRepository("pull", descriptor.PullRepositoryID, configsync.ModePullOnly, "pull", false)
 	}
 	if descriptor.Mode == configsync.ModePushOnly {
-		return makeRepository("push", descriptor.PushRepositoryID, configsync.ModePushOnly, "push")
+		return makeRepository("push", descriptor.PushRepositoryID, configsync.ModePushOnly, "push", false)
 	}
-	pull, pullReconciler, err := makeRepository("pull", descriptor.PullRepositoryID, configsync.ModePullOnly, "pull")
+	pull, pullReconciler, err := makeRepository("pull", descriptor.PullRepositoryID, configsync.ModePullOnly, "pull", false)
 	if err != nil {
 		return nil, nil, err
 	}
-	push, pushReconciler, err := makeRepository("push", descriptor.PushRepositoryID, configsync.ModePushOnly, "push")
+	push, pushReconciler, err := makeRepository("push", descriptor.PushRepositoryID, configsync.ModePushOnly, "push", true)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -27,6 +27,9 @@ type WorkspaceReconcilerConfig struct {
 	SharedSource          func(context.Context) (SourceConfig, error)
 	Resolutions           ConflictResolutionAuthority
 	Clock                 func() time.Time
+	// MergeConcurrentEdits lets a push-only half merge an edit made on both sides: a bidirectional assignment runs as a
+	// pull half and a push half, and neither is bidirectional on its own, so without it nothing ever merges.
+	MergeConcurrentEdits bool
 }
 
 type pendingBaseline struct {
@@ -105,6 +108,7 @@ type PlaintextWorkspaceReconciler struct {
 	sharedSource          func(context.Context) (SourceConfig, error)
 	resolutions           ConflictResolutionAuthority
 	clock                 func() time.Time
+	mergeConcurrentEdits  bool
 
 	mu          sync.Mutex
 	pending     *pendingBaseline
@@ -148,7 +152,7 @@ func NewPlaintextWorkspaceReconciler(config WorkspaceReconcilerConfig) (*Plainte
 		homeRoot: config.HomeRoot, stateRoot: config.StateRoot, comparisonStatusPath: config.ComparisonStatusPath,
 		baselinePath: filepath.Join(config.StateRoot, "baseline.json"),
 		descriptor:   config.Descriptor, machineSource: config.MachineSource, resolutions: config.Resolutions,
-		clock: config.Clock,
+		clock: config.Clock, mergeConcurrentEdits: config.MergeConcurrentEdits,
 	}
 	return reconciler, nil
 }
@@ -306,7 +310,7 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 		}
 		defer cleanup()
 	}
-	if writesEnabled && effectiveMode == ModeBidirectional && len(mergeCandidates) > 0 && baseHome != "" {
+	if writesEnabled && (effectiveMode == ModeBidirectional || r.mergeConcurrentEdits) && len(mergeCandidates) > 0 && baseHome != "" {
 		mergeCandidates, mergedContents, err = r.mergeConflicts(ctx, baseHome, remoteHome, baselineFiles, localFiles.Files, remoteFiles.Files, mergeCandidates)
 		if err != nil {
 			return PreparedPublication{}, err
