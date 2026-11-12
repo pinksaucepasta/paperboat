@@ -29,3 +29,13 @@ export async function verifyTicketKey(
     fingerprint: computed,
   }
 }
+
+/** The worker's identity-verified event names the pinned machine: its account (the machine's own, which on a
+ *  team-owned machine is not the shell owner), the expected machine and the pinned root key. */
+export function identityMatchesPin(
+  event: { owner_account_id?: string; machine_id?: string; root_key_id?: string },
+  machineId: string,
+  pin: RootPin,
+): boolean {
+  return event.owner_account_id === pin.ownerAccountID && event.machine_id === machineId && event.root_key_id === pin.rootKeyID
+}

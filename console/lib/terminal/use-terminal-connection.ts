@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { api, ApiError, type Data } from "@/lib/api"
 import { loadGhosttyCores } from "@/lib/terminal/ghostty-core"
 import { guestApi } from "@/lib/terminal/queries"
-import type { RootPin } from "@/lib/terminal/browser-root-key"
+import { identityMatchesPin, type RootPin } from "@/lib/terminal/browser-root-key"
 import type { components } from "@/lib/api-schema"
 import { openBrowserConnection, type Ticket, type TerminalRole } from "@/lib/terminal/inbox-upload"
 import {
@@ -741,12 +741,7 @@ export function useTerminalConnection({
       if (event.type === "probe") probeRef.current?.answered(event.request_id)
       if (event.type === "output") probeRef.current?.answered()
       if (event.type === "identity-verified") {
-        const current = sessionRef.current
-        if (
-          event.owner_account_id !== current.owner_account ||
-          event.machine_id !== current.target.machine_id ||
-          event.root_key_id !== pin.rootKeyID
-        ) {
+        if (!identityMatchesPin(event, sessionRef.current.target.machine_id, pin)) {
           setPhaseValue("denied")
           setError("The machine's identity did not match this terminal.")
           apiRef.current?.leave(connectionID)

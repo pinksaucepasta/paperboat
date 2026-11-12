@@ -1,5 +1,5 @@
 import { api, ApiError } from "@/lib/api"
-import { verifyTicketKey, type RootPin } from "@/lib/terminal/browser-root-key"
+import { identityMatchesPin, verifyTicketKey, type RootPin } from "@/lib/terminal/browser-root-key"
 import { validTicketSubprotocols } from "@/lib/terminal/browser-ticket"
 import { loadBrowserTerminal, type BrowserTerminalAPI, type BrowserTerminalEvent } from "@/lib/terminal/browser-terminal-wasm"
 import { terminalCloseCodes, ticketCloseCode, workerCloseCode } from "@/lib/terminal/close-codes"
@@ -215,7 +215,7 @@ export function uploadToInbox(
           cache: "no-store",
         }),
       onEvent: (_, pin, event) => {
-        if (event.type === "identity-verified" && (event.machine_id !== machine.id || event.root_key_id !== pin.rootKeyID))
+        if (event.type === "identity-verified" && !identityMatchesPin(event, machine.id, pin))
           attached.reject(new Error("The machine's identity did not match."))
         else if (event.type === "attached") attached.resolve()
         else if (event.type === "state" && ["reconnecting", "denied", "closed", "transport-error"].includes(event.state ?? "")) {
