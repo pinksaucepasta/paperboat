@@ -133,6 +133,7 @@ type inspectorCapture struct {
 	ErrorCode         string              `json:"error_code"`
 	State             string              `json:"state"`
 	ReplayIneligible  string              `json:"replay_ineligible"`
+	ReplayOf          string              `json:"replay_of"`
 	StartedAt         time.Time           `json:"started_at"`
 	FinishedAt        time.Time           `json:"finished_at"`
 }
@@ -484,7 +485,7 @@ func runInspectorView(command *cobra.Command, clients *inspectorClients, target 
 				return false, err
 			}
 			for _, record := range page.Records {
-				if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%d\t%s\n", record.ID, record.Method, record.State, record.ResponseStatus, record.URL); err != nil {
+				if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%d\t%s%s\n", record.ID, record.Method, record.State, record.ResponseStatus, record.URL, replayMark(record)); err != nil {
 					return false, err
 				}
 			}
@@ -495,6 +496,14 @@ func runInspectorView(command *cobra.Command, clients *inspectorClients, target 
 			return false, nil
 		}
 	})
+}
+
+// replayMark tells a replay from live traffic: the capture it replayed follows the URL.
+func replayMark(record inspectorCapture) string {
+	if record.ReplayOf == "" {
+		return ""
+	}
+	return "\treplay of " + record.ReplayOf
 }
 
 func tunnelReplayCommand() *cobra.Command {

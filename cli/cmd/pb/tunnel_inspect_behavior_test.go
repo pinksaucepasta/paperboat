@@ -57,6 +57,23 @@ func TestTunnelInspectIssuesAsUserAndLists(t *testing.T) {
 	}
 }
 
+func TestTunnelInspectMarksAReplayAndJSONCarriesIt(t *testing.T) {
+	page := strings.Replace(inspectorTestPage, `"state":"complete",`, `"state":"complete","replay_of":"cap_00",`, 1)
+	client, _ := newInspectorTestServer(t, http.StatusOK, inspectorTestRouteJSON)
+	var hits atomic.Int32
+	var grant string
+	inspectorTestDaemon(t, daemonListHandler(t, &hits, &grant, http.StatusOK, page))
+	wireInspectorTestClients(client)
+	output, err := runInspectorCommand(t, tunnelCobraCommandV1, "inspect", "tun_01")
+	if err != nil || !strings.Contains(output, "replay of cap_00") {
+		t.Fatalf("a replay is not marked: err=%v output=%q", err, output)
+	}
+	output, err = runInspectorCommand(t, tunnelCobraCommandV1, "inspect", "tun_01", "--json")
+	if err != nil || !strings.Contains(output, `"replay_of":"cap_00"`) {
+		t.Fatalf("json drops replay_of: err=%v output=%q", err, output)
+	}
+}
+
 func TestTunnelInspectRetriesOnceWithFreshIssuance(t *testing.T) {
 	client, fixture := newInspectorTestServer(t, http.StatusOK, inspectorTestRouteJSON)
 	var hits atomic.Int32

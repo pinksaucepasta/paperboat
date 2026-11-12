@@ -1,0 +1,20 @@
+{
+ "check": "xplat-removal",
+ "results": [
+  {
+   "id": "X-41:revoke:M",
+   "status": "PASS",
+   "detail": "macx-l: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_33f; macx-w: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_620; revoked target: 21 events/min; observers: 12, 13 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 3/6 s after the new identity was listed, pb ssh 3/5 s later)"
+  },
+  {
+   "id": "X-41:reset:M",
+   "status": "PASS",
+   "detail": "observers: 11, 14 events/min; new identity after enrolling again, both observers exec and pb ssh it (exec reachable 4/6 s after the new identity was listed, pb ssh 2/5 s later)"
+  },
+  {
+   "id": "X-41:uninstall:M",
+   "status": "FAIL",
+   "detail": "macx-l still sees macx-m after 120 s (alias file)"
+  }
+ ]
+}
