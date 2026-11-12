@@ -549,3 +549,46 @@ func TestRelayStartAnswersTrustDocumentPostgres(t *testing.T) {
 		t.Fatalf("start trust document = %s, want %s (%v)", lease.JWKS, want, err)
 	}
 }
+
+// A relay observation whose node row changes while it waits for the row lock (a relay restart or a second server
+// during a rollout) loses PostgreSQL's repeatable-read check with 40001. The server replays it: the relay gets 200,
+// never 503 control_unavailable (2026-11-12 rollback of release 2026.11.12.12).
+func TestRelayObservationReplaysConcurrentUpdateConflictPostgres(t *testing.T) {
+	n := newRelaySubjectsNode(t, "relay_conflict")
+	ctx := t.Context()
+	blocker, err := n.store.SQL().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Rollback()
+	var blockerPID int
+	if err := blocker.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&blockerPID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := blocker.ExecContext(ctx, `UPDATE control_tunnel_nodes SET updated_at=now() WHERE id=$1`, n.id); err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(relayNodeObservation{NodeID: n.id, Generation: n.generation, ProcessEpoch: n.epoch, Ready: true, Subjects: []relaySubject{}, SubjectsDigest: relaySubjectsDigestOf(t, []relaySubject{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/relay/nodes/observe", bytes.NewReader(body)).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { defer close(done); n.service.handleRelayObserve(rec, req) }()
+	deadline := time.Now().Add(10 * time.Second)
+	for n.count(`SELECT count(*) FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))`, blockerPID) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("observation never waited for the locked node row")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := blocker.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	if rec.Code != http.StatusOK {
+		t.Fatalf("observe status = %d, want 200 after replaying the conflict: %s", rec.Code, rec.Body.String())
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/telemetry"
 )
 
@@ -177,27 +178,56 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 		}
 		seen[k] = true
 	}
+	now := s.clock().UTC()
+	var set relaySubjectSet
+	var required bool
+	// The repeatable-read SELECT ... FOR UPDATE fails with 40001 when the relay's row changed after the
+	// snapshot (a relay restart's StartRelayNode, a second server during a rollout); replay it like InTx does.
+	err := db.RetrySerializable(ctx, func() (err error) {
+		out, set, required, err = s.observeRelayNodeTx(ctx, in, now)
+		return err
+	})
+	if err != nil {
+		return relayNodeLeaseDocument{}, err
+	}
+	s.countRelayObservation(in, required)
+	// After the commit and outside the transaction: read-only, cached, bounded, fail-open.
+	if s.relayQuota != nil && in.QuotaDeniedSupported {
+		accounts := make([]string, 0, len(set.list))
+		listed := map[string]bool{}
+		for _, subject := range set.list {
+			if !listed[subject.AccountID] {
+				listed[subject.AccountID] = true
+				accounts = append(accounts, subject.AccountID)
+			}
+		}
+		out.QuotaDenied = s.relayQuota.DeniedAmong(ctx, accounts, now, relayQuotaFreshLookups)
+	}
+	return out, nil
+}
+
+// observeRelayNodeTx is one attempt of ObserveRelayNode's transaction; RetrySerializable may replay it.
+func (s *EdgeService) observeRelayNodeTx(ctx context.Context, in relayNodeObservation, now time.Time) (out relayNodeLeaseDocument, set relaySubjectSet, required bool, err error) {
 	tx, err := s.store.SQL().BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
 	if err != nil {
-		return out, err
+		return out, set, required, err
 	}
 	defer tx.Rollback()
-	now := s.clock().UTC()
 	var capacity int64
 	var expires time.Time
 	var state string
 	err = tx.QueryRowContext(ctx, `SELECT capacity_limit,registry_expires_at,state FROM paperboat.control_tunnel_nodes WHERE id=$1 AND node_generation=$2 AND process_epoch=$3 AND roles @> ARRAY['relay']::text[] FOR UPDATE`, in.NodeID, in.Generation, in.ProcessEpoch).Scan(&capacity, &expires, &state)
 	if errors.Is(err, sql.ErrNoRows) {
-		return out, invalidUsage("relay_nodes.go:160")
+		return out, set, required, invalidUsage("relay_nodes.go:160")
 	}
 	if err != nil {
-		return out, err
+		return out, set, required, err
 	}
 	if state == "retired" || (state == "offline" && !in.Draining) || !expires.After(now) || in.CapacityUsed > capacity {
-		return out, invalidUsage("relay_nodes.go:166")
+		return out, set, required, invalidUsage("relay_nodes.go:166")
 	}
 	if state == "draining" && !in.Draining {
-		return out, invalidUsage("relay_nodes.go:169")
+		return out, set, required, invalidUsage("relay_nodes.go:169")
 	}
 	expires = now.Add(relayRegistryLease)
 	operatorDraining := state == "draining"
@@ -215,12 +245,12 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE paperboat.control_tunnel_nodes SET state=$4,ready=$5,capacity_used=$6,capacity_observed_at=$7,last_heartbeat_at=$7,registry_expires_at=$8,drain_deadline=CASE WHEN $4='draining' THEN coalesce(drain_deadline,$7) ELSE NULL END,updated_at=$7 WHERE id=$1 AND node_generation=$2 AND process_epoch=$3`, in.NodeID, in.Generation, in.ProcessEpoch, state, in.Ready && !in.Draining, in.CapacityUsed, now, expires)
 	if err != nil {
-		return out, err
+		return out, set, required, err
 	}
 	out = relayNodeLeaseDocument{NodeID: in.NodeID, Generation: in.Generation, ProcessEpoch: in.ProcessEpoch, ExpiresAt: now.Add(relayNodeLease).Unix(), CapacityLimit: capacity, Revocations: []relayRevocation{}}
-	set, required, err := relayObservedSubjects(ctx, tx, in)
+	set, required, err = relayObservedSubjects(ctx, tx, in)
 	if err != nil {
-		return relayNodeLeaseDocument{}, err
+		return relayNodeLeaseDocument{}, set, required, err
 	}
 	out.SubjectsRequired = required
 	if !required {
@@ -230,30 +260,14 @@ func (s *EdgeService) ObserveRelayNode(ctx context.Context, in relayNodeObservat
 			out.Revocations, err = relayRevocationsByGeneration(ctx, tx, in.NodeID, set)
 		}
 		if err != nil {
-			return relayNodeLeaseDocument{}, err
+			return relayNodeLeaseDocument{}, set, required, err
 		}
 	}
 	out.PeerRelay, err = relayServiceForNode(ctx, tx, in.NodeID)
 	if err != nil {
-		return relayNodeLeaseDocument{}, err
+		return relayNodeLeaseDocument{}, set, required, err
 	}
-	if err := tx.Commit(); err != nil {
-		return relayNodeLeaseDocument{}, err
-	}
-	s.countRelayObservation(in, required)
-	// After the commit and outside the transaction: read-only, cached, bounded, fail-open.
-	if s.relayQuota != nil && in.QuotaDeniedSupported {
-		accounts := make([]string, 0, len(set.list))
-		listed := map[string]bool{}
-		for _, subject := range set.list {
-			if !listed[subject.AccountID] {
-				listed[subject.AccountID] = true
-				accounts = append(accounts, subject.AccountID)
-			}
-		}
-		out.QuotaDenied = s.relayQuota.DeniedAmong(ctx, accounts, now, relayQuotaFreshLookups)
-	}
-	return out, nil
+	return out, set, required, tx.Commit()
 }
 
 // countRelayObservation records how an observation carried its subjects. Metrics are best-effort: an observation
