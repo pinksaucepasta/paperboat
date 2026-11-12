@@ -1,0 +1,18 @@
+F21-165 L: a prod server switch with a native terminal open (by hand, 2026-11-12 22:02-22:27Z, ~03:32-03:57 IST 2026-11-13)
+
+Machines: two throwaway machines paired to the production account in containers on the arm64 build host: rel-prod-a (client) and rel-prod-b
+(peer), pb dev-rel-30472b7fb (main 30472b7fb, built 20:2x UTC), no relay blocked, direct path.
+Held on rel-prod-a for 25 minutes (22:02:04-22:27:04Z):
+  - a native terminal: `pb connect rel-prod-b` under `script`, a command typed every 5 s that prints tick-<time> on the peer;
+  - a poll every 2 s of `pb status` (is "Control plane is unavailable" shown?) and, every 6 s, `pb exec rel-prod-b -- echo ok`.
+Prod server events inside the window (coordinator): switch to the new server and rollback at about 22:06Z. (The 22:28Z attempt and the 22:34-22:35Z switch to
+2026.11.13.7 came after the hold ended at 22:27Z, so they are not covered.)
+
+Result:
+  terminal: 299 ticks from 22:02:12 to 22:27:00, largest gap between two ticks 7 s (cadence 5 s), no gap over 8 s, no connection or error text in the session;
+  poll: 475 samples, "Control plane is unavailable" never shown (0 samples), `pb exec` ok in every sample from 22:05:14 on, including 22:06:06-22:07:02 around the switch;
+  the two exec failures (22:02:37 and 22:04:51) are before the switch (the first minutes after pairing).
+  Longest gap between samples 22 s (22:06:15 -> 22:06:37), inside the 30 s bound.
+Reading: across the 22:06Z switch every machine stayed reachable and the open terminal did not drop: nothing had to come back; no client saw the control plane
+as unreachable. Server-side 5xx for the window is the deploy gate's check (PASS), not read here.
+Also on file: TestLoadRestartStorm 100 daemons (11.1 s, 0 x 5xx) and 500 daemons (11.5 s, 0 x 5xx).
