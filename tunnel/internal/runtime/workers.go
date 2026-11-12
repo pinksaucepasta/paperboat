@@ -90,20 +90,38 @@ func (w *UsageWorker) run(ctx context.Context) {
 	}
 }
 
+// usageBatchLimit bounds one drain so a tick cannot starve shutdown or hold the loop forever.
+const usageBatchLimit = 512
+
+// deliver sends queued reports until the queue is empty, a send fails or the batch limit is
+// reached, then persists once. One report per tick capped delivery at 1/Interval and let the
+// queue fill, after which the meter refuses new streams.
 func (w *UsageWorker) deliver(ctx context.Context) (control.UsageResult, bool, error) {
 	if w.Prepare != nil {
 		if err := w.Prepare.Flush(); err != nil {
 			return control.UsageResult{}, false, err
 		}
 	}
-	result, delivered, err := control.DeliverNext(ctx, w.Queue, w.Sink)
-	if err != nil || !delivered || w.Persist == nil {
-		return result, delivered, err
+	var last control.UsageResult
+	var sent bool
+	var sendErr error
+	for i := 0; i < usageBatchLimit && ctx.Err() == nil; i++ {
+		result, delivered, err := control.DeliverNext(ctx, w.Queue, w.Sink)
+		if err != nil {
+			sendErr = err
+			break
+		}
+		if !delivered {
+			break
+		}
+		last, sent = result, true
 	}
-	if err := w.Persist(); err != nil {
-		return control.UsageResult{}, true, err
+	if sent && w.Persist != nil {
+		if err := w.Persist(); err != nil {
+			return control.UsageResult{}, true, errors.Join(sendErr, err)
+		}
 	}
-	return result, true, nil
+	return last, sent, sendErr
 }
 
 func (w *UsageWorker) recordError(ctx context.Context, err error) {

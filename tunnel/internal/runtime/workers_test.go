@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -121,6 +122,32 @@ func TestUsageWorkerPersistsAfterAcknowledgement(t *testing.T) {
 	}
 	if persisted != 1 || queue.Len() != 0 {
 		t.Fatalf("persisted=%d queue=%d", persisted, queue.Len())
+	}
+}
+
+// A full queue (the meter refuses new streams at this size) must drain in a few ticks, not
+// one report per tick: 4096 reports at one per 250 ms tick took 17 minutes and an outage.
+func TestUsageWorkerDrainsAFullQueueInFewTicks(t *testing.T) {
+	const reports = 4096
+	queue, _ := usage.NewQueue(reports, 1<<20)
+	for i := 0; i < reports; i++ {
+		id := fmt.Sprintf("op_%d", i)
+		if err := queue.Enqueue(usage.Report{OperationID: id, Key: usage.Key{Node: "n", Epoch: "e", Environment: "env", Route: id, Revision: 1, Direction: "egress"}, Bytes: 1, Payload: []byte("signed")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sink := &usageSink{}
+	persisted := 0
+	worker := &UsageWorker{Queue: queue, Sink: sink, Persist: func() error { persisted++; return nil }}
+	ticks := 0
+	for queue.Len() > 0 && ticks < reports/usageBatchLimit {
+		ticks++
+		if _, _, err := worker.deliver(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if queue.Len() != 0 || sink.calls != reports || persisted != ticks {
+		t.Fatalf("queue=%d calls=%d persisted=%d ticks=%d", queue.Len(), sink.calls, persisted, ticks)
 	}
 }
 
