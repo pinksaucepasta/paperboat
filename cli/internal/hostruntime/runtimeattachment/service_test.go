@@ -489,6 +489,34 @@ func TestRuntimeAttachmentSurvivesRefusalsDuringAServerSwap(t *testing.T) {
 	}
 }
 
+// The control plane fails (5xx) while the carrier drops, as in a server rollback: the host keeps asking with bounded
+// backoff and attaches again once the server answers, with no daemon restart (2026-11-12 canary-b).
+func TestRuntimeAttachmentReattachesAfterServerErrorsWithoutRestart(t *testing.T) {
+	var fail atomic.Bool
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	h := startRuntimeCarrier(t, ctx, runtimeCarrierOptions{expiry: time.Now().Add(time.Hour), status: func() int {
+		if fail.Load() {
+			return http.StatusServiceUnavailable
+		}
+		return http.StatusOK
+	}})
+	first := nextEdge(t, h, 5*time.Second)
+	fail.Store(true)
+	first.edge.Close()
+	time.Sleep(3 * time.Second)
+	select {
+	case <-h.edges:
+		t.Fatal("host dialed a carrier while the control plane was failing")
+	default:
+	}
+	fail.Store(false)
+	again := nextEdge(t, h, 15*time.Second)
+	if err := again.edge.Ping(ctx); err != nil {
+		t.Fatal("re-attached carrier unusable", err)
+	}
+}
+
 // Every machine POSTed its carrier attachment once per second even while healthy (2026-10-22: ~21/s
 // fleet-wide, the main writer of runtime_carrier_attachments during the storm). A healthy carrier
 // with a long admission asks again only after healthyRecheck.
