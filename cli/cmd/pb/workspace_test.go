@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -388,4 +389,26 @@ type workspaceCredentialSource struct {
 
 func (s *workspaceCredentialSource) Credential() (config.Credential, error) {
 	return *s.current.Load(), nil
+}
+
+type unreachableAuth struct{}
+
+func (unreachableAuth) Credential() (config.Credential, error) {
+	return config.Credential{}, &url.Error{Op: "Post", URL: "https://api.example.test/refresh", Err: errors.New("network is unreachable")}
+}
+
+// F21-01: an expired access token whose refresh cannot reach Paperboat must not stop the command before the
+// daemon opens its offline session; a refusal from the server stays an error.
+func TestWorkspaceAPIClientSurvivesAnUnreachableRefresh(t *testing.T) {
+	root := newRootCommand()
+	root.SetContext(context.Background())
+	if err := captureWorkspaceInvocation(root, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newWorkspaceAPIClient(actionContext(root, nil), "https://api.example.test", unreachableAuth{}); err != nil {
+		t.Fatalf("unreachable refresh stopped the command: %v", err)
+	}
+	if _, err := newWorkspaceAPIClient(actionContext(root, nil), "https://api.example.test", config.NoCredentialsSource{}); err == nil {
+		t.Fatal("signed-out account was let through")
+	}
 }

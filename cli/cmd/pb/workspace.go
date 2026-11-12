@@ -319,7 +319,7 @@ func workspaceForCommandContext(commandContext *command.Context) (string, error)
 
 func newWorkspaceAPIClient(commandContext *command.Context, server string, source config.AuthSource) (*api.Client, error) {
 	credential, err := source.Credential()
-	if err != nil {
+	if err != nil && !api.Unreachable(err) {
 		return nil, err
 	}
 	client := api.New(server, credential, nil)
