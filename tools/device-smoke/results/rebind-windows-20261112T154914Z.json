@@ -1,0 +1,44 @@
+{
+ "checks": [
+  {
+   "check": "baseline exec peer->windows",
+   "status": "PASS",
+   "detail": "5.1 s peer-ok"
+  },
+  {
+   "check": "baseline exec windows->peer",
+   "status": "PASS",
+   "detail": "7.5 s "
+  },
+  {
+   "check": "network of the windows machine cut",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "rebinding of the windows machine's UDP source ports to 41000-41999 armed",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "first inbound exec peer->windows after the network returned",
+   "status": "PASS",
+   "detail": "6.5 s (limit 10 s)"
+  },
+  {
+   "check": "after the return the machine's UDP flows leave from 41000-41999",
+   "status": "PASS",
+   "detail": "12 flows rewritten"
+  },
+  {
+   "check": "the next three inbound execs succeed",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "outbound exec windows->peer",
+   "status": "PASS",
+   "detail": "7.1 s "
+  }
+ ]
+}
