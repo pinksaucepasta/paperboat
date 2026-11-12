@@ -152,15 +152,19 @@ def true_argv(dev):
 
 def throwaway(prefix, container):
     """A disposable Linux container paired to the account: returns (device, machine id)."""
-    host_ssh = fleet.L_HOST
+    host_ssh = os.environ.get('XPLAT_ROT_HOST', fleet.L_HOST)  # a host whose docker has the systemd image and the arch of XPLAT_ROT_ARCH
     docker = os.environ.get('XPLAT_L_DOCKER', 'docker').split()
     sh = lambda script: subprocess.run(['ssh', host_ssh, script], capture_output=True, text=True, timeout=240)  # noqa: E731
     d = ' '.join(docker)
     sh('%s rm -f %s; %s run -d --name %s --hostname %s --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock f1407s-systemd' % (d, container, d, container, container))
     time.sleep(8)
     sh("%s exec %s bash -c \"useradd -m -u 1001 -s /bin/bash tester && echo 'tester ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/tester && loginctl enable-linger tester && systemctl start user@1001.service\"" % (d, container))
-    dev = fleet.linux(name=prefix + '-rot', ct=container)
-    fleet.install(dev, fleet.BUILD_DIR / ('pb-linux-' + os.environ.get('XPLAT_L_ARCH', 'amd64')))
+    controller_host, fleet.L_HOST = fleet.L_HOST, host_ssh
+    try:
+        dev = fleet.linux(name=prefix + '-rot', ct=container)
+    finally:
+        fleet.L_HOST = controller_host
+    fleet.install(dev, fleet.BUILD_DIR / ('pb-linux-' + os.environ.get('XPLAT_ROT_ARCH', os.environ.get('XPLAT_L_ARCH', 'amd64'))))
     machine_id = fleet.pair(dev, 'unix')
     return dev, machine_id
 

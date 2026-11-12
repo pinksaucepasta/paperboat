@@ -1,0 +1,49 @@
+{
+ "check": "xplat-envscopes",
+ "devices": [
+  "L",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-12:override:L",
+   "status": "PASS",
+   "detail": "each device sees only its own override: xa2-l, xa2-w"
+  },
+  {
+   "id": "X-12:override:W",
+   "status": "PASS",
+   "detail": "each device sees only its own override: xa2-l, xa2-w"
+  },
+  {
+   "id": "X-12:personal:L+W",
+   "status": "PASS",
+   "detail": "the personal value reaches xa2-l, xa2-w"
+  },
+  {
+   "id": "X-12:case:L",
+   "status": "PASS",
+   "detail": "xa2-l: two variables, each with its own value"
+  },
+  {
+   "id": "X-12:case:W",
+   "status": "PASS",
+   "detail": "xa2-w: one variable, the device override wins"
+  },
+  {
+   "id": "X-12:hoststate:L",
+   "status": "PASS",
+   "detail": "host show: published and applied; `pb env names` names the variable on xa2-l"
+  },
+  {
+   "id": "X-12:hoststate:W",
+   "status": "PASS",
+   "detail": "host show: published and applied; `pb env names` names the variable on xa2-w"
+  },
+  {
+   "id": "X-12:rotation:L+W",
+   "status": "PASS",
+   "detail": "revoke: pending on L, W, re-sealed by unlock at newer fences, value delivered, revoked machine not given the rotation"
+  }
+ ]
+}
