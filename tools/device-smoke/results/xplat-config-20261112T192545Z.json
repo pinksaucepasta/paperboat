@@ -1,0 +1,90 @@
+{
+ "check": "xplat-config",
+ "results": [
+  {
+   "id": "X-02:x02:L>M",
+   "status": "PASS",
+   "detail": "machine file > [machine.xpb-l] > [os.linux] > shared; override only on xpb-l; [os.*]/[machine.*] refused in a machine file; typo warns"
+  },
+  {
+   "id": "X-02:x02:L>W",
+   "status": "PASS",
+   "detail": "machine file > [machine.xpb-l] > [os.linux] > shared; override only on xpb-l; [os.*]/[machine.*] refused in a machine file; typo warns"
+  },
+  {
+   "id": "X-02:x02:M>L",
+   "status": "PASS",
+   "detail": "machine file > [machine.xpb-m] > [os.darwin] > shared; override only on xpb-m; [os.*]/[machine.*] refused in a machine file; typo warns"
+  },
+  {
+   "id": "X-02:x02:M>W",
+   "status": "PASS",
+   "detail": "machine file > [machine.xpb-m] > [os.darwin] > shared; override only on xpb-m; [os.*]/[machine.*] refused in a machine file; typo warns"
+  },
+  {
+   "id": "X-02:x02:W>L",
+   "status": "PASS",
+   "detail": "machine file > [machine.xpb-w] > [os.windows] > shared; override only on xpb-w; [os.*]/[machine.*] refused in a machine file; typo warns"
+  },
+  {
+   "id": "X-02:x02:W>M",
+   "status": "PASS",
+   "detail": "machine file > [machine.xpb-w] > [os.windows] > shared; override only on xpb-w; [os.*]/[machine.*] refused in a machine file; typo warns"
+  },
+  {
+   "id": "X-03:x03_bytes:L>M",
+   "status": "PASS",
+   "detail": "sha256 equal on xpb-m and in the repository for 5 line-ending shapes"
+  },
+  {
+   "id": "X-03:x03_bytes:L>W",
+   "status": "PASS",
+   "detail": "sha256 equal on xpb-w and in the repository for 5 line-ending shapes"
+  },
+  {
+   "id": "X-03:x03_bytes:M>L",
+   "status": "PASS",
+   "detail": "sha256 equal on xpb-l and in the repository for 5 line-ending shapes"
+  },
+  {
+   "id": "X-03:x03_bytes:M>W",
+   "status": "PASS",
+   "detail": "sha256 equal on xpb-w and in the repository for 5 line-ending shapes"
+  },
+  {
+   "id": "X-03:x03_bytes:W>L",
+   "status": "PASS",
+   "detail": "sha256 equal on xpb-l and in the repository for 5 line-ending shapes"
+  },
+  {
+   "id": "X-03:x03_bytes:W>M",
+   "status": "PASS",
+   "detail": "sha256 equal on xpb-m and in the repository for 5 line-ending shapes"
+  },
+  {
+   "id": "X-03:x03_merge:L>M",
+   "status": "FAIL",
+   "detail": "timed out waiting for merged result everywhere @ wait:122 <- x03_merge:356 <- <lambda>:489 <- check:250"
+  },
+  {
+   "id": "X-03:x03_merge:L>W",
+   "status": "FAIL",
+   "detail": "timed out waiting for merged result everywhere @ wait:122 <- x03_merge:356 <- <lambda>:489 <- check:250"
+  },
+  {
+   "id": "X-03:x03_merge:M>L",
+   "status": "FAIL",
+   "detail": "timed out waiting for merged result everywhere @ wait:122 <- x03_merge:356 <- <lambda>:489 <- check:250"
+  },
+  {
+   "id": "X-03:x03_merge:M>W",
+   "status": "FAIL",
+   "detail": "timed out waiting for merged result everywhere @ wait:122 <- x03_merge:356 <- <lambda>:489 <- check:250"
+  },
+  {
+   "id": "X-03:x03_merge:W>L",
+   "status": "FAIL",
+   "detail": "timed out waiting for merged result everywhere @ wait:122 <- x03_merge:356 <- <lambda>:489 <- check:250"
+  }
+ ]
+}
