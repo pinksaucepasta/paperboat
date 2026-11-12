@@ -32,6 +32,7 @@ import threading
 import time
 
 VENV_MARK = 'TOR_VENV'
+BOTH_EDGES = 30  # seconds a route may take to be served by the second edge after the CLI returned
 
 
 def bootstrap():
@@ -115,7 +116,7 @@ def delete_all():
 
 
 # --- visitors -----------------------------------------------------------------------------------------------
-def visit(host, path='/', method='GET', headers=None, body=None, timeout=60, retries=6):
+def visit(host, path='/', method='GET', headers=None, body=None, timeout=60, retries=15):
     """One HTTPS request to the public name; returns (status, headers, body). The first request after a route moved can
     reach the edge before every node knows the new origin, so an upstream_unavailable answer is retried."""
     for attempt in range(retries):
@@ -132,6 +133,46 @@ def visit(host, path='/', method='GET', headers=None, body=None, timeout=60, ret
                 LATE.append({'host': host, 'path': path, 'tries': attempt + 1, 'status': result[0]})
             return result
         time.sleep(4)
+
+
+def edge_ips(host):
+    return sorted({entry[4][0] for entry in socket.getaddrinfo(host, 443, socket.AF_INET)})
+
+
+class PinnedConnection(http.client.HTTPSConnection):
+    """HTTPS to the public name through one chosen edge address."""
+
+    def __init__(self, host, ip, **kwargs):
+        super().__init__(host, 443, **kwargs)
+        self.ip = ip
+
+    def connect(self):
+        sock = socket.create_connection((self.ip, 443), self.timeout)
+        self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+
+
+def status_via(host, ip, path='/'):
+    conn = PinnedConnection(host, ip, timeout=20, context=ssl.create_default_context())
+    try:
+        conn.request('GET', path)
+        response = conn.getresponse()
+        response.read(4096)
+        return response.status
+    except OSError:
+        return 0
+    finally:
+        conn.close()
+
+
+def serving_ip(host, seconds=120):
+    """An edge address that answers 200 for the name (DNS gives both edges; a route can reach one before the other)."""
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        for ip in edge_ips(host):
+            if status_via(host, ip) == 200:
+                return ip
+        time.sleep(3)
+    raise RuntimeError('no edge address serves %s' % host)
 
 
 def raw_tls(host, request, read=4096, timeout=30):
@@ -346,12 +387,12 @@ def keepalive_scenario():
     s = 'keepalive'
     origin = serve(KeepAliveOrigin)
     name, host, route = create(s, '--port', str(origin.server_address[1]))
-    failures, count = [], 0
+    failures, count, ip = [], 0, serving_ip(host)
     for index in range(120):  # requests at the origin's idle limit, +-0.15 s: a pooled connection the origin just closed must not fail one
-        status, response, _ = visit(host, '/', retries=1)
+        status = status_via(host, ip)
         count += 1
         if status != 200:
-            failures.append((index, status, response.getheader('X-Paperboat-Error')))
+            failures.append((index, status))
         time.sleep(0.85 + (index % 4) * 0.1)
     cell(s, 'F8-09 Node-style keep-alive never races a pooled connection (%d requests at the origin\'s idle limit)' % count, not failures, failures[:5] or 'no failures')
     origin.stop()
@@ -362,25 +403,50 @@ def ws_scenario():
     origin = serve(Origin)
     name, host, route = create(s, '--port', str(origin.server_address[1]))
     visit(host, '/')  # warm the route
-    sock = socket.create_connection((host, 443), timeout=30)
-    tls = ssl.create_default_context().wrap_socket(sock, server_hostname=host)
-    key = base64.b64encode(os.urandom(16)).decode()
-    tls.sendall(('GET /ws HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n' % (host, key)).encode())
-    reply = b''
-    while b'\r\n\r\n' not in reply:
-        reply += tls.recv(4096)
+    for attempt in range(15):  # DNS gives both edges: a connection that lands on an edge not yet serving the route is tried again
+        sock = socket.create_connection((host, 443), timeout=30)
+        tls = ssl.create_default_context().wrap_socket(sock, server_hostname=host)
+        key = base64.b64encode(os.urandom(16)).decode()
+        tls.sendall(('GET /ws HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n' % (host, key)).encode())
+        reply = b''
+        while b'\r\n\r\n' not in reply:
+            chunk = tls.recv(4096)
+            if not chunk:
+                break
+            reply += chunk
+        if reply.startswith(b'HTTP/1.1 101'):
+            break
+        tls.close()
+        time.sleep(4)
     stream = tls.makefile('rb')
     tls.sendall(frame_bytes(1, b'first', mask=True))
     first = read_frame(stream)
-    tls.settimeout(ARGS.ws_quiet + 60)
-    time.sleep(ARGS.ws_quiet)  # no frame either way: an idle proxy would drop it here
-    try:
+    # Quiet means no frame from this side: wait in 20 s steps and notice at once if the connection ends, and when.
+    started, closed_at, buffer = time.time(), None, b''
+    stream.close()
+    while time.time() - started < ARGS.ws_quiet and closed_at is None:
+        tls.settimeout(20)
+        try:
+            data = tls.recv(4096)
+            if not data:
+                closed_at = time.time() - started
+            buffer += data  # a ping would need a pong; none is expected from a quiet origin
+        except socket.timeout:
+            pass
+        except OSError:
+            closed_at = time.time() - started
+    late = None
+    if closed_at is None:
+        tls.settimeout(60)
         tls.sendall(frame_bytes(1, b'late', mask=True))
-        late = read_frame(stream)
-    except OSError as exc:
-        late = ('error', str(exc))
+        stream = tls.makefile('rb')
+        try:
+            late = read_frame(stream)
+        except OSError as exc:
+            late = ('error', str(exc))
     cell(s, 'F8-09 a WebSocket stays open through %d s of quiet' % ARGS.ws_quiet,
-         reply.startswith(b'HTTP/1.1 101') and first == (1, b'first') and late == (1, b'late'), '%s %s' % (reply[:20], late))
+         reply.startswith(b'HTTP/1.1 101') and first == (1, b'first') and late == (1, b'late'),
+         '%s first=%s late=%s closed_after=%s s' % (reply[:20], first, late, closed_at and round(closed_at)))
     tls.close()
     origin.stop()
 
@@ -525,6 +591,28 @@ def failures_scenario():
     slow.stop()
 
 
+def edges_scenario():
+    """F8-15: every edge of the pair serves a new tunnel and a new preview within BOTH_EDGES seconds of the CLI returning."""
+    s = 'edges'
+    origin = serve(Origin)
+    port = origin.server_address[1]
+    name, host, route = create(s, '--port', str(port))
+    preview = pb('preview', 'http://127.0.0.1:%d' % port, '--background', '--ttl', '1h', timeout=240)
+    try:
+        for kind, public in (('tunnel', host), ('preview', preview['endpoint'].split('://', 1)[1].rstrip('/'))):
+            started, first = time.time(), {}
+            ips = edge_ips(public)
+            while time.time() - started < BOTH_EDGES and len(first) < len(ips):
+                for ip in ips:
+                    if ip not in first and status_via(public, ip) == 200:
+                        first[ip] = round(time.time() - started, 1)
+                time.sleep(1)
+            cell(s, 'F8-15 a new %s is served by every edge (%d) within %d s' % (kind, len(ips), BOTH_EDGES), len(ips) >= 2 and len(first) == len(ips), 'seconds to first 200 per edge: %s of %s' % (first, ips))
+    finally:
+        pb('preview', 'stop', preview['id'], check=False)
+        origin.stop()
+
+
 def preview_scenario():
     s = 'preview'
     origin = serve(Origin)
@@ -562,7 +650,7 @@ def preview_scenario():
         https.stop()
 
 
-SCENARIOS = {'headers': headers_scenario, 'keepalive': keepalive_scenario, 'ws': ws_scenario, 'tls': tls_scenario, 'grpc': grpc_scenario, 'failures': failures_scenario, 'preview': preview_scenario}
+SCENARIOS = {'headers': headers_scenario, 'keepalive': keepalive_scenario, 'ws': ws_scenario, 'tls': tls_scenario, 'grpc': grpc_scenario, 'failures': failures_scenario, 'preview': preview_scenario, 'edges': edges_scenario}
 
 
 def run_scenario(name):
