@@ -33,3 +33,13 @@ func TestReconnectResolveErrorEndsTheTerminalOnARefusedGrant(t *testing.T) {
 		t.Errorf("a transient refusal stopped the reconnect: %T %v", got, got)
 	}
 }
+
+// The reconnect loop ends with the transport loss joined to the refusal; the user sees the reason, not the generic text.
+func TestRefusedGrantEndsTheCommandWithAccessEnded(t *testing.T) {
+	refusal := &api.APIError{Status: http.StatusNotFound, Code: "user_machine_not_found"}
+	ended := errors.Join(tunnel.ErrTransportLost, reconnectResolveError(refusal))
+	message := commandFailureMessage(ended, classifyCommandFailure(ended))
+	if !strings.HasPrefix(message, "access ended: ") {
+		t.Fatalf("message %q", message)
+	}
+}

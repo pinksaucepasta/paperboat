@@ -74,6 +74,11 @@ func commandFailureMessage(err error, failure commandFailure) string {
 	if message := sshFailureMessage(err); message != "" {
 		return message
 	}
+	// A terminal whose access was withdrawn ends with the reason, not the generic message (X-21).
+	var ended accessEndedError
+	if boundedErrorWalk(err, func(e error) bool { v, ok := e.(accessEndedError); ended = v; return ok }) {
+		return ended.Error()
+	}
 	// Linux and macOS register the service again from any command that needs the daemon. Windows needs
 	// administrator rights for that, so its commands stop here and name the one that asks for them.
 	if boundedErrorWalk(err, func(e error) bool { return e == localdaemon.ErrServiceNotInstalled }) && failure.kind != commandCanceled && failure.kind != commandInteractiveCanceled {
