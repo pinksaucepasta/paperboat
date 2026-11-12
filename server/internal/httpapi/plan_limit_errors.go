@@ -43,7 +43,7 @@ func planLimitMessage(l *planlimits.LimitError) string {
 func writePreviewTunnelLimitReached(w http.ResponseWriter, r *http.Request, err error) bool {
 	var teamLimit *teams.LimitError
 	if errors.As(err, &teamLimit) {
-		writePreviewTunnelError(w, r, http.StatusConflict, "team_limit", fmt.Sprintf("This team workspace holds %d of %d machines, terminals, previews and tunnels. Remove one you no longer need and retry. No resource was created.", teamLimit.Used, teamLimit.Limit), "unchanged", false, "remove_unused_entries")
+		writePreviewTunnelError(w, r, http.StatusConflict, "team_limit", fmt.Sprintf("Team limit reached: %d of %d %s. Remove one you no longer need and retry. No resource was created.", teamLimit.Used, teamLimit.Limit, teamLimit.Noun()), "unchanged", false, "remove_unused_entries")
 		return true
 	}
 	var limit *planlimits.LimitError

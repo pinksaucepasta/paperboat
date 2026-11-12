@@ -135,6 +135,8 @@ func writeTerminalSharingMutation(w http.ResponseWriter, r *http.Request, item u
 		writeError(w, r, 404, "terminal_session_not_found", "Terminal session was not found.")
 	case errors.Is(err, usermachines.ErrMachineCapabilityUnavailable):
 		writeError(w, r, http.StatusConflict, "terminal_host_unavailable", "The machine running this session did not answer. Check it with `pb status`, then retry the same command.")
+	case errors.Is(err, teams.ErrReceiptTooLarge):
+		writeError(w, r, 500, "team_receipt_too_large", "This sharing change was not made: its result is too large to record. Make the change in smaller steps.", err)
 	case err != nil:
 		writeError(w, r, 500, "internal_error", "Terminal sharing could not be changed. Retry the same operation.", err)
 	default:
