@@ -1,0 +1,1 @@
+{"at": "20261112T213839Z", "results": [{"id": "doctor:victus", "status": "PASS", "seconds": 136, "detail": "{\"check\": \"doctor-lifecycle\", \"target\": \"reg-d\", \"status\": \"PASS\", \"healthy_requires_terminal_and_exec\": true, \"failure_explained\": true, \"repair_recovers\": true}"}]}

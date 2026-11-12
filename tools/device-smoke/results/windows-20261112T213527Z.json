@@ -1,0 +1,1 @@
+{"at": "20261112T213527Z", "results": [{"id": "install-crash-service:victus", "status": "PASS", "seconds": 45, "detail": "{\"check\": \"crash-service\", \"status\": \"PASS\", \"seconds\": 37.1, \"enrollment_preserved\": true}"}]}

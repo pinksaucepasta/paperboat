@@ -1,0 +1,1 @@
+{"at": "20261112T213442Z", "results": [{"id": "install-setup:victus", "status": "PASS", "seconds": 120, "detail": "{\"check\": \"setup\", \"status\": \"PASS\", \"seconds\": 113.2, \"enrollment_preserved\": true, \"native_exec\": true}"}]}

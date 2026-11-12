@@ -1,0 +1,17 @@
+approve-refusals:victus            PASS     19s  {"check": "approve-refusals", "status": "PASS", "refusals": ["machine_not_found", "approval_not_pend
+bugreport:victus                   PASS    120s  {"check": "bugreport-lifecycle", "target": "reg-d", "status": "PASS", "bundle_secret_free": true, "d
+cli-budget:victus                  PASS     19s  {"status": "PASS", "check": "cli-budget", "metrics": {"cli_start_ms": 100, "status_ms": 209}, "budge
+completion:victus                  PASS     63s  {"check": "completion-lifecycle", "status": "PASS", "machine": "reg-d", "scripts": ["bash", "fish", 
+config-customize:victus            PASS     65s  {"check": "config-customize", "status": "PASS", "C231_import_validate_show": true, "C230_explain_no_
+doctor:victus                      FAIL      4s  exit 1: e/doctor_lifecycle.py", line 98, in <module>
+exec-cancel:victus                 PASS    123s  {"check": "exec-cancel", "target": "reg-d", "status": "PASS", "phases": ["timeout", "ctrl_c", "remot
+exec-main:victus                   PASS     92s  {"check": "exec-main", "target": "reg-d", "status": "PASS", "enrollment_unchanged": true}
+free-plan:victus                   FAIL     15s  exit 1: 5, in <module>
+local-access:victus                FAIL    471s  exit 1: es or failed
+machine-availability:victus        PASS     73s  {"check": "machine-availability", "status": "PASS", "enrollment_preserved": true, "original_settings
+machine-capabilities:victus        PASS    126s  {"check": "machine-capabilities", "status": "PASS", "enrollment_preserved": true, "original_settings
+network-drop:victus                PASS    126s  {"check": "network-drop", "target": "reg-d", "status": "PASS", "drop_seconds": 20, "same_shell": tru
+network-inventory:victus           PASS     20s  {"check": "network-inventory", "status": "PASS", "edges_and_verified_relays": true, "enrollment_pres
+path-display:victus                PASS     48s  {"check": "path-display", "status": "PASS", "forced_path": "wss", "region": "india"}
+preview-protocols:victus           PASS     41s  {"check": "preview-protocols", "target": "victus", "status": "PASS", "enrollment_unchanged": true, "
+preview-survival:victus            PASS    143s  {"check": "preview-survival", "status": "PASS", "daemon_restart": true, "origin_unavailable": true, 

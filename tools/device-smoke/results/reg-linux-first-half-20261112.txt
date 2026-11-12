@@ -1,0 +1,89 @@
+version:reg-a                PASS       1s  
+doctor:reg-a                 PASS       1s  
+inventory:reg-a              PASS       1s  
+version:reg-b                PASS       2s  
+doctor:reg-b                 PASS       1s  
+inventory:reg-b              PASS       1s  
+exec:reg-a                   PASS       2s  
+terminal:reg-a               PASS      11s  
+cleanup-terminal:reg-a       PASS       9s  
+ssh:reg-a                    PASS       1s  
+transfer:reg-a               PASS       3s  
+exec:reg-b                   PASS       2s  
+terminal:reg-b               PASS      11s  
+cleanup-terminal:reg-b       PASS      12s  
+ssh:reg-b                    PASS       1s  
+transfer:reg-b               PASS      28s  
+preview:reg-a                PASS      11s  
+cleanup-preview:reg-a        PASS      18s  
+preview:reg-b                PASS       4s  
+cleanup-preview:reg-b        PASS       9s  
+session-manage:reg-a-reg-a   PASS      30s  
+session-manage:reg-a-reg-b   PASS      27s  
+terminal-new:reg-a           FAIL      65s  command failed; private diagnostics: /home/ubuntu/pb-wt/reg/tools/device-smoke/results/diagnostics/smoke18072527119.Lo5Rn1
+session-manage:reg-b-reg-a   PASS      31s  
+session-manage:reg-b-reg-b   PASS      27s  
+terminal-new:reg-b           FAIL      68s  command failed; private diagnostics: /home/ubuntu/pb-wt/reg/tools/device-smoke/results/diagnostics/smoke18072527119.ne4zVm
+terminal-entry:reg-a         FAIL      64s  command failed; private diagnostics: /home/ubuntu/pb-wt/reg/tools/device-smoke/results/diagnostics/smoke18072527119.9FopZz
+status-bar:reg-a             FAIL      65s  command failed; private diagnostics: /home/ubuntu/pb-wt/reg/tools/device-smoke/results/diagnostics/smoke18072527119.8dSCSZ
+session-sharing-owner:reg-a  PASS      46s  
+terminal-entry:reg-b         FAIL      65s  command failed; private diagnostics: /home/ubuntu/pb-wt/reg/tools/device-smoke/results/diagnostics/smoke18072527119.FwefK0
+status-bar:reg-b             FAIL      75s  command failed; private diagnostics: /home/ubuntu/pb-wt/reg/tools/device-smoke/results/diagnostics/smoke18072527119.XOEcA4
+session-sharing-owner:reg-b  PASS      56s  
+terminal-main:reg-a-reg-a    FAIL      64s  command failed; private diagnostics: /home/ubuntu/pb-wt/reg/tools/device-smoke/results/diagnostics/smoke18072527119.uxxhJo
+terminal-main:reg-a-reg-b    FAIL      66s  command failed; private diagnostics: /home/ubuntu/pb-wt/reg/tools/device-smoke/results/diagnostics/smoke18072527119.gA2Mon
+terminal-main:reg-b-reg-a    FAIL      65s  command failed; private diagnostics: /home/ubuntu/pb-wt/reg/tools/device-smoke/results/diagnostics/smoke18072527119.BRyrLz
+terminal-main:reg-b-reg-b    FAIL      63s  command failed; private diagnostics: /home/ubuntu/pb-wt/reg/tools/device-smoke/results/diagnostics/smoke18072527119.PZUeoF
+terminal-replay:reg-a        PASS      34s  
+terminal-replay:reg-b        PASS      32s  
+exec-main:reg-a-reg-a        PASS      14s  
+exec-main:reg-a-reg-b        PASS      14s  
+exec-main:reg-b-reg-a        PASS      12s  
+exec-main:reg-b-reg-b        PASS      14s  
+ssh-main:reg-a-reg-a         PASS       3s  
+ssh-main:reg-a-reg-b         PASS       2s  
+ssh-main:reg-b-reg-a         PASS       3s  
+ssh-main:reg-b-reg-b         PASS       5s  
+ssh-tools:reg-a-reg-b        FAIL       5s  command failed; private diagnostics: /home/ubuntu/pb-wt/reg/tools/device-smoke/results/diagnostics/smoke18072527119.l1I8Ly
+ssh-tools:reg-b-reg-a        FAIL       6s  command failed; private diagnostics: /home/ubuntu/pb-wt/reg/tools/device-smoke/results/diagnostics/smoke18072527119.U8XweH
+transfer-multi:reg-a-reg-b   PASS      13s  
+transfer-multi:reg-b-reg-a   PASS      14s  
+transfer-resume:reg-a-reg-b  SKIP       0s  two containers on one Docker host: the transfer ends before the check can interrupt it; judged on two real hosts
+transfer-resume:reg-b-reg-a  SKIP       0s  two containers on one Docker host: the transfer ends before the check can interrupt it; judged on two real hosts
+transfer-errors:reg-a-reg-b  PASS      18s  
+transfer-errors:reg-b-reg-a  PASS      18s  
+exec-repeat:reg-a-reg-b      PASS      85s  
+exec-repeat:reg-b-reg-a      PASS      92s  
+readiness-main:reg-a-reg-a   PASS       3s  
+readiness-main:reg-a-reg-b   PASS       3s  
+readiness-main:reg-b-reg-a   PASS       3s  
+readiness-main:reg-b-reg-b   PASS       7s  
+exec-cancel:reg-a-reg-b      PASS      29s  
+exec-cancel:reg-b-reg-a      PASS      32s  
+ssh-doctor:reg-a-reg-b       PASS       4s  
+ssh-doctor:reg-b-reg-a       PASS       2s  
+ssh-alias:reg-a-reg-a        PASS       9s  
+ssh-alias:reg-a-reg-b        PASS       7s  
+ssh-alias:reg-b-reg-a        PASS       5s  
+ssh-alias:reg-b-reg-b        PASS       7s  
+inventory-freshness:reg-a-reg-a PASS      23s  
+inventory-freshness:reg-a-reg-b PASS      21s  
+inventory-freshness:reg-b-reg-a PASS      17s  
+inventory-freshness:reg-b-reg-b PASS      18s  
+inbox-manage:reg-a-reg-b     PASS      19s  
+inbox-manage:reg-b-reg-a     PASS      17s  
+access-machine:reg-a-reg-a   PASS       5s  exact binary bytes; TCP half-close; origin and forward cleaned
+access-machine:reg-a-reg-b   PASS       8s  exact binary bytes; TCP half-close; origin and forward cleaned
+access-machine:reg-b-reg-a   PASS       8s  exact binary bytes; TCP half-close; origin and forward cleaned
+access-machine:reg-b-reg-b   PASS       7s  exact binary bytes; TCP half-close; origin and forward cleaned
+private-address:reg-a-reg-a  PASS       9s  exact binary bytes; TCP half-close; origin and forward cleaned
+private-address:reg-a-reg-b  PASS       5s  exact binary bytes; TCP half-close; origin and forward cleaned
+private-address:reg-b-reg-a  PASS       7s  exact binary bytes; TCP half-close; origin and forward cleaned
+private-address:reg-b-reg-b  PASS       5s  exact binary bytes; TCP half-close; origin and forward cleaned
+private-https:reg-a-reg-a    PASS       7s  both private URL forms; OS-trusted TLS and normal DNS; exact response
+private-https:reg-a-reg-b    PASS       7s  both private URL forms; OS-trusted TLS and normal DNS; exact response
+private-https:reg-b-reg-a    PASS       8s  both private URL forms; OS-trusted TLS and normal DNS; exact response
+private-https:reg-b-reg-b    PASS       8s  both private URL forms; OS-trusted TLS and normal DNS; exact response
+transfer-manage:reg-a-reg-b  SKIP       0s  two containers on one Docker host: the transfer ends before the check can interrupt it; judged on two real hosts
+transfer-manage:reg-b-reg-a  SKIP       0s  two containers on one Docker host: the transfer ends before the check can interrupt it; judged on two real hosts
+preview-manage:reg-a-reg-a   PASS      72s  

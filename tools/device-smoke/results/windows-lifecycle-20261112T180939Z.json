@@ -1,0 +1,24 @@
+{
+ "version": "dev-d670926d1",
+ "device": "winpool-11",
+ "results": [
+  {
+   "id": "windows:install-pair",
+   "status": "PASS",
+   "seconds": 114,
+   "detail": ""
+  },
+  {
+   "id": "windows:doctor",
+   "status": "PASS",
+   "seconds": 5,
+   "detail": ""
+  },
+  {
+   "id": "windows:status",
+   "status": "PASS",
+   "seconds": 4,
+   "detail": ""
+  }
+ ]
+}

@@ -1,0 +1,1 @@
+{"at": "20261112T204721Z", "results": [{"id": "install-setup:victus", "status": "FAIL", "seconds": 102, "detail": "exit 1: {\"status\": \"FAIL\", \"reason\": \"doctor did not report healthy after daemon recovery\"}"}]}
