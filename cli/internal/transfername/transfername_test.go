@@ -32,3 +32,18 @@ func TestUnixReceiversOnlyRefuseWhatNoFileSystemStores(t *testing.T) {
 		}
 	}
 }
+
+func TestPortableNameIsSavedUnchangedOnEveryOS(t *testing.T) {
+	for name, want := range map[string]string{
+		"a:b.txt": "a_b.txt", `q"u*?.txt`: "q_u__.txt", "trail.": "trail_", "sp ": "sp_", "CON.txt": "_CON.txt", "com1": "_com1",
+		"plain.txt": "plain.txt", "café-nfd.txt": "café-nfd.txt", "-lead.txt": "-lead.txt", "A.txt": "A.txt",
+	} {
+		got := Portable(name)
+		if got != want {
+			t.Fatalf("Portable(%q) = %q, want %q", name, got, want)
+		}
+		if reason := Refusal("windows", got); reason != "" {
+			t.Fatalf("Portable(%q) = %q is still refused by Windows: %s", name, got, reason)
+		}
+	}
+}

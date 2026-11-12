@@ -15,6 +15,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/auth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
 	"github.com/pinksaucepasta/paperboat/internal/inbox"
+	"github.com/pinksaucepasta/paperboat/internal/transfername"
 )
 
 const (
@@ -176,7 +177,7 @@ func serveInboxRead(ctx context.Context, writer http.ResponseWriter, root, id st
 	header.Set("X-Content-Type-Options", "nosniff")
 	// The file name travels in the standard header: the edge removes X-Paperboat-* headers from every
 	// response, so a private header never reached the control plane.
-	header.Set("Content-Disposition", "attachment; filename*=UTF-8''"+inboxDispositionName(file.Name))
+	header.Set("Content-Disposition", "attachment; filename*=UTF-8''"+inboxDispositionName(transfername.Portable(file.Name)))
 	writer.WriteHeader(http.StatusOK)
 	// Exactly the announced size: a file that grows while it is read is cut off, not extended.
 	if _, err := io.Copy(writer, io.LimitReader(&contextReader{ctx: ctx, reader: handle}, file.Size)); err != nil {

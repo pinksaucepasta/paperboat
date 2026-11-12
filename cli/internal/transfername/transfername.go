@@ -62,3 +62,25 @@ func windowsRefusal(name string) string {
 	}
 	return ""
 }
+
+// Portable is the name a browser on any OS saves a downloaded Inbox file under without changing it: the characters Windows
+// does not allow become "_", a trailing dot or space becomes "_", and a reserved device name gets a leading "_" (what Chrome
+// on Windows does on its own; Linux and macOS browsers keep that result as it is). The Inbox keeps the original name; only
+// the download name is made portable, so the same item is saved under the same name on every OS.
+func Portable(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		if unicode.IsControl(r) || strings.ContainsRune(`\:*?"<>|/`, r) {
+			r = '_'
+		}
+		b.WriteRune(r)
+	}
+	out := b.String()
+	if n := len(out); n > 0 && (out[n-1] == ' ' || out[n-1] == '.') {
+		out = out[:n-1] + "_"
+	}
+	if windowsRefusal(out) != "" {
+		out = "_" + out
+	}
+	return out
+}

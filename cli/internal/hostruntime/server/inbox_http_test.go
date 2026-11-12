@@ -23,9 +23,14 @@ func (capabilitiesOff) Enabled(string) bool { return false }
 
 func inboxFixture(t *testing.T, claimsFor func(id, class string) auth.Claims) (http.Handler, string) {
 	t.Helper()
+	return inboxFixtureWithFile(t, "report final.pdf", claimsFor)
+}
+
+func inboxFixtureWithFile(t *testing.T, file string, claimsFor func(id, class string) auth.Claims) (http.Handler, string) {
+	t.Helper()
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "report final.pdf"), []byte("hello inbox"), 0o600); err != nil {
-		t.Fatal(err)
+	if err := os.WriteFile(filepath.Join(root, file), []byte("hello inbox"), 0o600); err != nil {
+		t.Skip("this OS cannot store", file)
 	}
 	handler, err := NewInboxHandler(InboxHandlerConfig{
 		MachineID: "machine_1", InboxPath: func() (string, error) { return root, nil },
@@ -38,7 +43,7 @@ func inboxFixture(t *testing.T, claimsFor func(id, class string) auth.Claims) (h
 				if class == "" || frame.OperationID == "" {
 					t.Fatalf("frame = %+v", frame)
 				}
-				return Authorization{MachineID: "machine_1", Value: claimsFor(inbox.FileID("report final.pdf"), class)}, nil
+				return Authorization{MachineID: "machine_1", Value: claimsFor(inbox.FileID(file), class)}, nil
 			}), nil
 		},
 	})
@@ -76,6 +81,18 @@ func TestInboxHandlerStreamsTheFileBoundByTheCredential(t *testing.T) {
 		recorder.Header().Get("Content-Type") != "application/octet-stream" || recorder.Header().Get("X-Content-Type-Options") != "nosniff" ||
 		recorder.Header().Get("Content-Disposition") != "attachment; filename*=UTF-8''report%20final.pdf" {
 		t.Fatalf("status=%d headers=%v body=%q", recorder.Code, recorder.Header(), body)
+	}
+}
+
+// The download is announced under a name every OS's browser keeps as it is (the Inbox keeps the original).
+func TestInboxHandlerAnnouncesAPortableDownloadName(t *testing.T) {
+	for name, want := range map[string]string{"trail.": "trail_", "CON.txt": "_CON.txt", "a:b.txt": "a_b.txt"} {
+		handler, _ := inboxFixtureWithFile(t, name, goodInboxClaims)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, inboxRequest(http.MethodGet, inbox.FileID(name)))
+		if got := recorder.Header().Get("Content-Disposition"); recorder.Code != http.StatusOK || got != "attachment; filename*=UTF-8''"+want {
+			t.Fatalf("%q: status=%d disposition=%q, want %q", name, recorder.Code, got, want)
+		}
 	}
 }
 
