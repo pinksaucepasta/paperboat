@@ -91,7 +91,7 @@ func (w *UsageWorker) run(ctx context.Context) {
 }
 
 // usageBatchLimit bounds one drain so a tick cannot starve shutdown or hold the loop forever.
-const usageBatchLimit = 512
+const usageBatchLimit = 2048
 
 // deliver sends queued reports until the queue is empty, a send fails or the batch limit is
 // reached, then persists once. One report per tick capped delivery at 1/Interval and let the
