@@ -20,7 +20,6 @@ const (
 	attachmentResponseMaxBytes   = 64 << 10
 	attachmentProofMaxBytes      = 16 << 10
 	attachmentIdentityMaxBytes   = 16 << 10
-	attachmentAdmissionPoll      = 250 * time.Millisecond
 )
 
 var (
@@ -30,7 +29,6 @@ var (
 	ErrAttachmentBinding           = errors.New("preview carrier attachment binding is invalid")
 	ErrAttachmentSessionInvalid    = errors.New("preview carrier attachment session is invalid")
 	ErrAttachmentLeaseETagStale    = errors.New("preview lease ETag is stale")
-	ErrAttachmentAdmissionPending  = errors.New("preview carrier attachment is waiting for edge admission")
 )
 
 // Binding is the server-authenticated identity and generation projection.
