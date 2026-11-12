@@ -1,0 +1,8 @@
+command_rows.py --only C286..C292 on M, 2026-11-12 (IST). Run on the Mac itself: macpool-2 (GitHub-hosted macOS 26.7.2 arm64), pb dev-f7f2eac89 (darwin/arm64 built on anvit), paired as macpool-mac-1 to the operator account, prod server.
+{"check": "command-row", "row": "C286", "command": "pb env names access", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C287", "command": "pb version", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C288", "command": "pb account", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C289", "command": "pb api-token", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C290", "command": "pb policy", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C291", "command": "pb team scim", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C292", "command": "pb team sso", "status": "PASS", "failures": []}
