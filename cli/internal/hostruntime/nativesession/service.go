@@ -60,26 +60,41 @@ func (s *Service) Serve(ctx context.Context, session *native.Session) error {
 		return s.config.ServeHTTP3(ctx, session, s.config.Authorize)
 	}
 	ctx = native.ContextWithPeer(ctx, session)
+	// Admission of each stream (credential header, server check) runs in its own goroutine, at most maximumAdmissions
+	// at a time: a slow admission must not hold up the accept loop and the streams behind it.
+	admitting := make(chan struct{}, maximumAdmissions)
 	for {
-		var authorizationResource string
-		connection, header, err := session.AcceptAuthorized(ctx, func(authorizeCtx context.Context, value streamauth.Header) (string, error) {
-			var authorizeErr error
-			authorizationResource, authorizeErr = s.config.Authorize(authorizeCtx, value)
-			return authorizationResource, authorizeErr
-		})
-		if errors.Is(err, native.ErrStreamRejected) {
-			continue
-		}
+		connection, err := session.Accept(ctx)
 		if err != nil {
 			return err
+		}
+		select {
+		case admitting <- struct{}{}:
+		case <-ctx.Done():
+			_ = connection.Close()
+			return ctx.Err()
 		}
 		s.workers.Add(1)
 		go func() {
 			defer s.workers.Done()
-			s.serveOne(ctx, header, connection)
+			var authorizationResource string
+			admitted, header, err := session.Admit(ctx, connection, func(authorizeCtx context.Context, value streamauth.Header) (string, error) {
+				var authorizeErr error
+				authorizationResource, authorizeErr = s.config.Authorize(authorizeCtx, value)
+				return authorizationResource, authorizeErr
+			})
+			<-admitting
+			if err != nil {
+				return // a rejected stream was refused and closed by Admit
+			}
+			s.serveOne(ctx, header, admitted)
 		}()
 	}
 }
+
+// maximumAdmissions bounds the streams of one peer session being admitted at once (a served stream no longer counts);
+// QUIC's own incoming-stream credit (peerquic maxInteractiveStreams) bounds how many can wait for this.
+const maximumAdmissions = 512
 
 // Wait joins application handlers after the owning native sessions are closed.
 func (s *Service) Wait() { s.workers.Wait() }

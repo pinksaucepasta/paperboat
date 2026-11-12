@@ -248,6 +248,14 @@ func (s *Session) AcceptAuthorized(ctx context.Context, authorize func(context.C
 	if err != nil {
 		return nil, streamauth.Header{}, err
 	}
+	return s.Admit(ctx, connection, authorize)
+}
+
+// Admit is the admission half of AcceptAuthorized for a stream Accept already returned. A listener calls it from the
+// stream's own goroutine: admission reads the credential header and asks the server, so doing it inside the accept
+// loop admitted one stream at a time (about two seconds each; a client got ~44 terminals through before their
+// credentials expired, F21-164).
+func (s *Session) Admit(ctx context.Context, connection net.Conn, authorize func(context.Context, streamauth.Header) (string, error)) (net.Conn, streamauth.Header, error) {
 	encoded, err := readAuthorizationHeader(connection)
 	if err != nil {
 		return rejectAuthorizedStream(connection, err)
