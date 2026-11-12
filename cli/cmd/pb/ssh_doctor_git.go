@@ -31,6 +31,7 @@ func gitForWindowsSSHAdvice(goos string, lookPath func(string) (string, error), 
 func gitCoreSSHCommand() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	// user-console: the git child of the user's own `pb ssh doctor`.
 	out, err := exec.CommandContext(ctx, "git", "config", "--global", "--get", "core.sshCommand").Output()
 	if err != nil {
 		return ""
