@@ -3815,6 +3815,19 @@ func (q *Queries) ListStaleControlTunnelNodesForUpdate(ctx context.Context, arg 
 }
 
 const listTunnelEdgeRouteAssignmentsForNodeV1 = `-- name: ListTunnelEdgeRouteAssignmentsForNodeV1 :many
+WITH valid_carrier AS MATERIALIZED (
+ -- runtime_carrier_valid and the account's edge eligibility run once per carrier and per account on this edge, not
+ -- once per route (~1 ms per call each: 1,000 routes took 2 s).
+ SELECT a.route_id FROM runtime_carrier_attachments a
+ WHERE a.edge_node_id = $1 AND a.edge_process_epoch = $2
+   AND paperboat.runtime_carrier_valid(a.route_id, a.edge_node_id, a.edge_process_epoch, false)
+), managed_account AS MATERIALIZED (
+ SELECT DISTINCT t.account_id, t.owner_team_id FROM endpoint_edge_assignments x
+ JOIN endpoints e ON e.id = x.endpoint_id JOIN tunnels t ON t.id = e.tunnel_id
+ WHERE x.edge_node_id = $1 AND x.edge_process_epoch = $2 AND x.desired = 'active'
+   AND paperboat.workspace_edge_mode(t.account_id, t.owner_team_id) = 'managed-only'
+   AND paperboat.node_workspace_edge_eligible($1, t.account_id, t.owner_team_id)
+)
 SELECT ('epa_' || x.route_id)::text AS assignment_id,
        x.route_id AS route_id,
        x.generation AS assignment_generation,
@@ -3896,13 +3909,17 @@ WHERE x.edge_node_id = $1
   AND t.desired_state = 'active' AND t.deleted_at IS NULL
   AND (t.expires_at IS NULL OR t.expires_at > $3)
   AND tr.desired_state = 'active' AND tr.deleted_at IS NULL AND tr.protocol IN ('http', 'tcp', 'tls', 'private_tcp')
-  AND paperboat.runtime_carrier_valid(ra.route_id, ra.edge_node_id, ra.edge_process_epoch, false)
+  AND ra.route_id IN (SELECT route_id FROM valid_carrier)
   AND node.process_epoch = x.edge_process_epoch
   AND node.state = 'ready' AND node.ready = true
   AND node.registry_expires_at > $3
   AND node.roles @> ARRAY['edge']::text[]
   AND node.drain_deadline IS NULL
-  AND paperboat.node_route_eligible(node.id, t.account_id, tr.id)
+ -- A managed-only account eligible on this edge with a tunnel placed on no self-hosted node is node_route_eligible by
+ -- its definition; anything else takes the full check.
+ AND ((EXISTS(SELECT 1 FROM managed_account ma WHERE ma.account_id=t.account_id AND ma.owner_team_id IS NOT DISTINCT FROM t.owner_team_id)
+   AND NOT EXISTS(SELECT 1 FROM selfhost_placements sp WHERE sp.resource_kind='tunnel' AND sp.resource_id=t.id))
+  OR paperboat.node_route_eligible(node.id,t.account_id,tr.id))
 ORDER BY x.route_id, x.generation
 `
 

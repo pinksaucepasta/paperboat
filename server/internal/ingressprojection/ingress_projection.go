@@ -75,6 +75,19 @@ func (s SQLIngressSource) Edge(ctx context.Context, nodeID, epoch string) ([]wir
 // tunnel id are that carrier's identity, which is what the edge's stream preface carries. The route
 // id names the tunnel route. Parameters: now, edge node, edge epoch, audience, route, hostname.
 const engineTunnelIngressSQL = `
+WITH valid_carrier AS MATERIALIZED (
+ -- runtime_carrier_valid and the account's edge eligibility run once per carrier and per account on this edge, not
+ -- once per route (~1 ms per call each: 1,000 routes took 2 s).
+ SELECT a.route_id FROM runtime_carrier_attachments a
+ WHERE a.edge_node_id = $2 AND a.edge_process_epoch = $3
+   AND paperboat.runtime_carrier_valid(a.route_id, a.edge_node_id, a.edge_process_epoch, false)
+), managed_account AS MATERIALIZED (
+ SELECT DISTINCT t.account_id, t.owner_team_id FROM endpoint_edge_assignments x
+ JOIN endpoints e ON e.id = x.endpoint_id JOIN tunnels t ON t.id = e.tunnel_id
+ WHERE x.edge_node_id = $2 AND x.edge_process_epoch = $3 AND x.desired = 'active'
+   AND paperboat.workspace_edge_mode(t.account_id, t.owner_team_id) = 'managed-only'
+   AND paperboat.node_workspace_edge_eligible($2, t.account_id, t.owner_team_id)
+)
 SELECT t.account_id,environment.id,(ra.admission->'binding'->>'tunnel_id'),t.generation,r.id,r.generation,ra.machine_id,m.installation_generation,
  publication.hostname,CASE WHEN r.protocol IN ('tcp','tls') THEN '' ELSE COALESCE(r.path_prefix,'/') END,r.origin_scheme,r.origin_address,
  r.tls_verification,COALESCE(r.tls_server_name,''),COALESCE(r.tls_ca,''),COALESCE(r.mtls_credential_reference,''),COALESCE(r.tls_pin,''),
@@ -88,7 +101,9 @@ JOIN endpoints e ON e.id=x.endpoint_id AND e.kind='tunnel' AND e.desired_state='
 JOIN tunnels t ON t.id=e.tunnel_id
 JOIN endpoint_routes er ON er.id=x.route_id
 JOIN tunnel_routes r ON r.id=er.tunnel_route_id AND r.tunnel_id=t.id
-JOIN paperboat.current_tunnel_route_viewer_policy viewer_policy ON viewer_policy.route_id=r.id
+-- A lateral lookup by route id, fenced (OFFSET 0): under this query's written join order a plain join to the view
+-- recomputed it over every route in the database for each row.
+CROSS JOIN LATERAL (SELECT v.effective_access_mode,v.viewer_policy_generation FROM paperboat.current_tunnel_route_viewer_policy v WHERE v.route_id=r.id OFFSET 0) viewer_policy
 LEFT JOIN LATERAL (
  SELECT COALESCE(r.match_hostname,substring(t.stable_endpoint from 9)) AS hostname,r.id AS publication_id,r.generation AS publication_generation
  WHERE paperboat.workspace_edge_mode(t.account_id,t.owner_team_id)='managed-only' OR r.protocol='tcp'
@@ -118,7 +133,7 @@ JOIN control_environments environment ON environment.id=m.environment_id AND env
 JOIN machine_control_sessions identity ON identity.machine_id=m.id AND identity.installation_generation=m.installation_generation
 JOIN control_tunnel_nodes node ON node.id=x.edge_node_id AND node.process_epoch=x.edge_process_epoch
 WHERE x.edge_node_id=$2 AND x.edge_process_epoch=$3 AND x.desired='active' AND node.tunnel_endpoints_epoch=x.edge_process_epoch
- AND paperboat.runtime_carrier_valid(ra.route_id,ra.edge_node_id,ra.edge_process_epoch,false)
+ AND ra.route_id IN (SELECT route_id FROM valid_carrier)
  AND (t.owner_team_id IS NULL OR paperboat.workspace_tunnel_management_allowed(t.account_id,t.owner_team_id,t.id))
  AND t.desired_state='active' AND t.deleted_at IS NULL AND (t.expires_at IS NULL OR t.expires_at>$1)
  AND environment.desired_state='active' AND environment.revoked_at IS NULL
@@ -134,7 +149,11 @@ WHERE x.edge_node_id=$2 AND x.edge_process_epoch=$3 AND x.desired='active' AND n
  AND m.seat_state='occupied' AND m.public_identity_key=ra.public_identity_key
  AND identity.issued_at<=$1 AND identity.expires_at>$1
  AND node.registry_expires_at>$1 AND node.roles @> ARRAY['edge']::text[] AND node.drain_deadline IS NULL
- AND paperboat.node_route_eligible(node.id,t.account_id,r.id)
+ -- A managed-only account eligible on this edge with a tunnel placed on no self-hosted node is node_route_eligible by
+ -- its definition; anything else takes the full check.
+ AND ((EXISTS(SELECT 1 FROM managed_account ma WHERE ma.account_id=t.account_id AND ma.owner_team_id IS NOT DISTINCT FROM t.owner_team_id)
+   AND NOT EXISTS(SELECT 1 FROM selfhost_placements sp WHERE sp.resource_kind='tunnel' AND sp.resource_id=t.id))
+  OR paperboat.node_route_eligible(node.id,t.account_id,r.id))
  AND node.state='ready' AND node.ready=true AND node.last_heartbeat_at>$1::timestamptz-interval '15 seconds'
 ORDER BY x.route_id,publication.hostname,publication.publication_id
 LIMIT 4097`
