@@ -1,0 +1,39 @@
+{
+ "checks": [
+  {
+   "check": "baseline exec rel-nat-a->rel-nat-b",
+   "status": "PASS",
+   "detail": "1.6 s "
+  },
+  {
+   "check": "baseline exec rel-nat-b->rel-nat-a",
+   "status": "PASS",
+   "detail": "1.9 s "
+  },
+  {
+   "check": "network of the rebound machine cut",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "UDP source ports of the rebound machine moved to 41000-41999",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "first inbound exec rel-nat-b->rel-nat-a after the network returned",
+   "status": "PASS",
+   "detail": "8.0 s (limit 10 s)"
+  },
+  {
+   "check": "the next three inbound execs succeed",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "outbound exec rel-nat-a->rel-nat-b",
+   "status": "PASS",
+   "detail": "2.3 s "
+  }
+ ]
+}

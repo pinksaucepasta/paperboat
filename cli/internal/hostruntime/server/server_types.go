@@ -75,6 +75,7 @@ type Authorization struct {
 	SourceMachineID     string
 	UserID              string
 	AccountID           string
+	Offline             bool // admitted from the host's own signed rules while Paperboat was unreachable (F21-11)
 	ClientID            string
 	SessionID           string
 	TerminalRole        TerminalRole

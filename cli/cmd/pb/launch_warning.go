@@ -10,6 +10,7 @@ type launchWarning struct {
 
 const (
 	environmentPendingMessage       = "Paperboat ENV not applied: delivery to this machine is pending. The command ran without your managed values; run `pb env vault unlock` on any of your devices."
+	environmentOfflineMessage       = "Paperboat ENV not applied: ENV needs Paperboat online. The command ran without your managed values; run it again once `pb status` shows Paperboat is reachable."
 	environmentUndeliverableMessage = "Paperboat ENV not applied: delivery to this machine failed. The command ran without your managed values; run `pb env host show` to see its delivery state."
 )
 
@@ -19,6 +20,8 @@ func launchWarnings(codes []string) []launchWarning {
 		switch code {
 		case envinject.LaunchNoticePending:
 			out = append(out, launchWarning{Code: code, Message: environmentPendingMessage})
+		case envinject.LaunchNoticeOffline:
+			out = append(out, launchWarning{Code: code, Message: environmentOfflineMessage})
 		case envinject.LaunchNoticeUndeliverable:
 			out = append(out, launchWarning{Code: code, Message: environmentUndeliverableMessage})
 		}

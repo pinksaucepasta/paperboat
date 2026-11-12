@@ -44,3 +44,10 @@ func TestUndeliverableEnvironmentLaunchPointsAtHostShowNotVaultUnlock(t *testing
 		t.Fatalf("undeliverable line=%q", failed)
 	}
 }
+
+func TestOfflineEnvironmentLaunchSaysItNeedsPaperboatOnline(t *testing.T) {
+	line := launchWarningLine([]string{"environment_offline"})
+	if !strings.Contains(line, "needs Paperboat online") || !strings.Contains(line, "pb status") || strings.Contains(line, "\n") || strings.Contains(line, "pending") {
+		t.Fatalf("offline line=%q", line)
+	}
+}

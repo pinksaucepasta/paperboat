@@ -109,13 +109,16 @@ func (d *Dispatcher) Handle(ctx context.Context, authorization Authorization, ca
 		ctx = diagnostics.WithRecorder(ctx, d.config.Diagnostics)
 	}
 	ctx, notices := envinject.WithLaunchNotices(ctx)
-	return withLaunchWarnings(d.handle(ctx, authorization, capability, payload), notices)
+	return withLaunchWarnings(d.handle(ctx, authorization, capability, payload), notices, authorization.Offline)
 }
 
 // withLaunchWarnings reports, inside a successful object result, that managed
 // ENV was not applied to the launch. The launch itself already ran.
-func withLaunchWarnings(outcome operation.Outcome, notices *envinject.LaunchNotices) operation.Outcome {
+func withLaunchWarnings(outcome operation.Outcome, notices *envinject.LaunchNotices, offline bool) operation.Outcome {
 	codes := notices.Codes()
+	if offline {
+		codes = envinject.OfflineNotice(codes)
+	}
 	if len(codes) == 0 || outcome.ErrorCode != "" || len(outcome.Result) == 0 {
 		return outcome
 	}

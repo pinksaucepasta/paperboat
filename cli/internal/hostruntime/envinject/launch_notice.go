@@ -13,6 +13,22 @@ const LaunchNoticePending = "environment_pending"
 // LaunchNoticeUndeliverable says delivery was attempted and failed, which a pending delivery is not.
 const LaunchNoticeUndeliverable = "environment_undeliverable"
 
+// LaunchNoticeOffline says the launch was admitted from the host's own rules while Paperboat was unreachable, so
+// managed ENV could not be delivered: it needs Paperboat online.
+const LaunchNoticeOffline = "environment_offline"
+
+// OfflineNotice is the notice a launch admitted offline reports in place of a pending delivery.
+func OfflineNotice(codes []string) []string {
+	out := make([]string, 0, len(codes))
+	for _, code := range codes {
+		if code == LaunchNoticePending {
+			code = LaunchNoticeOffline
+		}
+		out = append(out, code)
+	}
+	return out
+}
+
 // LaunchNoticeFor names the notice for an ENV delivery failure: pending when the target has not
 // received its environment yet, undeliverable when delivery itself failed.
 func LaunchNoticeFor(err error) string {

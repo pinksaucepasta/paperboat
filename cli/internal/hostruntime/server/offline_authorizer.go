@@ -44,6 +44,7 @@ func (a *offlineAuthorizer) Authorize(_ context.Context, frame protocol.Frame) (
 		ClientID:       a.endpointID,
 		OperationID:    a.operationID,
 		ExpiresAt:      a.deadline,
+		Offline:        true,
 	}
 	if a.consumer == "terminal" {
 		authorization.SessionID = a.operationID
