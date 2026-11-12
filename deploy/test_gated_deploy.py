@@ -127,6 +127,7 @@ class GatedDeployTest(unittest.TestCase):
         rollback = [s for _, s in fake.calls if '--image' in s or 'pbh install' in s]
         self.assertEqual(len(rollback), 2)
         self.assertIn('--reap', rollback[0])  # server first, reaped so retained generations never block it
+        self.assertIn('--rollback --image', rollback[0])  # two draining servers never refuse a rollback
         self.assertIsNone(fake.lock)
         self.assertTrue(any('no green canary run within 300 s' in line for line in out))
 

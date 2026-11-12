@@ -100,7 +100,8 @@ finish. Install `paperboat-server-reap.service` and `.timer` in `/etc/systemd/sy
 and enable the timer to perform this check every minute. Each check is bounded;
 it retains live connections for the next check. There is no session-killing
 retirement deadline. Two retained generations
-block the next rollout with an actionable message instead of accumulating processes.
+block the next rollout with an actionable message instead of accumulating processes;
+`--rollback --image <previous>` (what `gated-deploy.py` runs) never waits on them.
 Caddy retains in-flight HTTP responses during reload; server browser WebSocket
 endpoints would additionally need explicit proxy stream preservation before use.
 Use `server-rollout.json`'s `active` container for logs/exec after the first rollout,

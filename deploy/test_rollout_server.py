@@ -77,7 +77,7 @@ class ServerRolloutTest(unittest.TestCase):
             return json.dumps([{'Id': self.image}]).encode()
         if args[:2] == ['docker', 'inspect']:
             return json.dumps([{'Name': '/paperboat-server-1', 'Image': 'old-image', 'State': {'Running': True}}]).encode()
-        if args[:3] == ['docker', 'exec', 'paperboat-server-1'] and args[3] == 'cat':
+        if args[:2] == ['docker', 'exec'] and args[3] == 'cat':
             text = 'header\n 0: 00000000:1F90 00000000:0000 0A\n'
             if self.live:
                 text += ' 1: 0100007F:1F90 0100007F:ABCD 01\n'
@@ -122,6 +122,20 @@ class ServerRolloutTest(unittest.TestCase):
         self.assertEqual(state['retired'], ['paperboat-server-1'])
         self.assertIn(['docker', 'compose', 'run', '-d', '--no-deps', '--name', self.candidate + '-r2', 'server'], self.operations)
         self.assertFalse(any(a[:2] in (['docker', 'stop'], ['docker', 'rm']) for a in self.operations))  # the draining one stays
+
+    def test_two_draining_servers_block_a_deploy_but_never_a_rollback(self):
+        # 2026-11-12 19:59Z: the gate's rollback was refused 'Two previous servers still hold live connections'.
+        self.live = True
+        self.rollout.save(self.rollout.state_path, {'active': 'paperboat-server-1', 'retired': ['old-a', 'old-b']})
+        with patch.object(self.rollout, 'run', side_effect=self.docker):
+            with self.assertRaisesRegex(module.RolloutError, 'Two previous servers'):
+                self.rollout.deploy('new-image')
+            self.assertFalse(any('reload' in a for a in self.operations))
+            self.rollout.deploy('new-image', rollback=True)
+        state = json.loads(self.rollout.state_path.read_text())
+        self.assertEqual(state['active'], self.candidate)
+        self.assertEqual(state['retired'], ['old-a', 'old-b', 'paperboat-server-1'])
+        self.assertFalse(any(a[:2] in (['docker', 'stop'], ['docker', 'rm']) for a in self.operations))  # nothing draining is cut
 
     def test_all_replacement_names_taken_fails_loudly_and_removes_nothing(self):
         self.taken = {self.candidate} | {f'{self.candidate}-r{n}' for n in range(2, 12)}

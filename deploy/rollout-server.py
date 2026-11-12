@@ -155,12 +155,14 @@ class Rollout:
         self.save(self.state_path, old)
         self.journal.unlink()
 
-    def deploy(self, image):
+    def deploy(self, image, rollback=False):
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/@:-]{0,511}", image):
             raise RolloutError("Use one valid Docker image reference.")
         self.recover()
         before = self.current()
-        if self.reap(before) >= 2:
+        # The limit keeps forward deploys from piling up processes; a rollback restores service, so it never waits
+        # (2026-11-12 19:59Z: the gate's rollback of .13.4 was refused here and prod stayed on the failed build).
+        if self.reap(before) >= 2 and not rollback:
             raise RolloutError('Two previous servers still hold live connections. '
                                'Run --reap after those sessions finish; none were stopped.')
         info = json.loads(self.run(['docker', 'image', 'inspect', image]))[0]
@@ -235,6 +237,7 @@ def main():
     parser.add_argument('--directory', default='/opt/paperboat')
     parser.add_argument('--image')
     parser.add_argument('--reap', action='store_true')
+    parser.add_argument('--rollback', action='store_true', help='with --image: deploy even while two servers drain')
     args = parser.parse_args()
     if bool(args.image) == args.reap:
         parser.error('choose --image or --reap')
@@ -248,7 +251,7 @@ def main():
                 rollout.recover()
                 print('Draining servers retained:', rollout.reap(rollout.current()))
             else:
-                print(rollout.deploy(args.image))
+                print(rollout.deploy(args.image, args.rollback))
         finally:
             rollout.log.close()
 

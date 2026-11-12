@@ -76,7 +76,7 @@ class Gate:
             d = shlex.quote(self.a.directory)
             self.say(f"rollback: server {now['server']} -> {before['server']}")
             rc, out = self.sh(self.a.server_host, f"python3 {d}/rollout-server.py --directory {d} --reap; "
-                              f"python3 {d}/rollout-server.py --directory {d} --image {shlex.quote(before['server'])}")
+                              f"python3 {d}/rollout-server.py --directory {d} --rollback --image {shlex.quote(before['server'])}")
             ok &= rc == 0 or bool(self.say(f"rollback: server rollout failed (exit {rc}): {out[-300:]}"))
         for edge in self.a.edge:
             if now[edge] != before[edge]:
