@@ -346,6 +346,23 @@ func decodeCarrier(body []byte) (CarrierConfig, error) {
 	return c, err
 }
 
+// CarrierOpenSSH is the number of SSH connections into this machine that the instance's carrier bridges now.
+func CarrierOpenSSH(ctx context.Context, instance string) (int, error) {
+	config, err := ReadCarrierConfig(ctx, instance)
+	if err != nil {
+		return 0, err
+	}
+	capability, err := ReadCarrierCapability(ctx, config)
+	if err != nil {
+		return 0, err
+	}
+	client, err := carriercontrol.NewClient(config.ControlEndpoint, capability, config.Source.SHA256, config.OwnerSID)
+	if err != nil {
+		return 0, err
+	}
+	return client.OpenSSH(ctx)
+}
+
 func ReadCarrierCapability(ctx context.Context, c CarrierConfig) ([]byte, error) {
 	if ctx == nil || c.Validate() != nil {
 		return nil, ErrInvalidRequest

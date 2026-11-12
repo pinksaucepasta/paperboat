@@ -6,19 +6,33 @@ import (
 	"context"
 	"errors"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"github.com/pinksaucepasta/paperboat/internal/liveconnections"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/localdaemon"
 )
 
-// openConnectionsForUpdate counts the SSH streams and access forwards the user's daemon carries now, over its local API
+// daemonConnectionsForUpdate counts the SSH streams and access forwards the user's daemon carries, over its local API
 // pipe like the Unix probe.
-func openConnectionsForUpdate(ctx context.Context) (liveconnections.Counts, error) {
+func daemonConnectionsForUpdate(ctx context.Context) (liveconnections.Counts, error) {
 	paths, err := localdaemon.CurrentUserPaths()
 	if err != nil {
 		return liveconnections.Counts{}, err
 	}
 	return openConnectionsOver(ctx, paths.SocketPath)
+}
+
+// carrierSSHForUpdate counts the SSH connections into this machine that the user's carrier bridges.
+func carrierSSHForUpdate(ctx context.Context) (int, error) {
+	sid, err := localdaemon.CurrentUserSID()
+	if err != nil {
+		return 0, err
+	}
+	instance, err := hostinstall.WindowsInstanceForSID(sid)
+	if err != nil {
+		return 0, err
+	}
+	return hostinstall.CarrierOpenSSH(ctx, instance)
 }
 
 // openConnectionsOver asks the daemon listening on the pipe. A daemon that is not running (no pipe to dial) carries none.

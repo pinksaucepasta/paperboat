@@ -62,7 +62,7 @@ func TestUpdateCountsSSHConnectionsIntoThisMachine(t *testing.T) {
 		{name: "daemon down", daemonErr: down, daemon: liveconnections.Counts{SSH: 9}, incoming: 1, want: liveconnections.Counts{SSH: 1}},
 		{name: "neither", daemonErr: down, carrierErr: down, wantErr: true},
 	} {
-		got, err := combineOpenConnections(test.daemon, test.daemonErr, test.incoming, test.carrierErr)
+		got, err := liveconnections.Combine(test.daemon, test.daemonErr, test.incoming, test.carrierErr)
 		if (err != nil) != test.wantErr || got != test.want {
 			t.Fatalf("%s: %+v, %v", test.name, got, err)
 		}

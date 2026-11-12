@@ -49,3 +49,18 @@ func RecordUnconfirmed(source string, err error) {
 	}
 	diagnosticlog.TryWarn("open connections could not be confirmed; the update proceeds", "source", source, "error", err.Error())
 }
+
+// Combine adds the SSH connections a machine serves (the carrier's count, incoming) to what its daemon carries as a
+// client: an update cuts both. It fails only when neither side can answer.
+func Combine(daemon Counts, daemonErr error, incoming int, carrierErr error) (Counts, error) {
+	if daemonErr != nil && carrierErr != nil {
+		return Counts{}, errors.Join(daemonErr, carrierErr)
+	}
+	if daemonErr != nil {
+		daemon = Counts{}
+	}
+	if carrierErr == nil {
+		daemon.SSH += incoming
+	}
+	return daemon, nil
+}
