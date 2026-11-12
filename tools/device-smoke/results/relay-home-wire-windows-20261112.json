@@ -1,0 +1,1 @@
+{"check": "relay-home-wire", "status": "PASS", "home_before": "oracle", "home_after_block": "anvit", "failover_seconds": 24.1, "unchanged_when_other_blocked": true}

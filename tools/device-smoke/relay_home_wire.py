@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """F21-161 wire check: the relay a machine advertises as its home is the one its peers use, and it moves when that relay dies.
 
-  relay_home_wire.py PEER --relay-ip NAME=ADDRESS --relay-ip NAME=ADDRESS    (a paired Linux or macOS machine; sudo -n iptables or pfctl)
+  relay_home_wire.py PEER --relay-ip NAME=ADDRESS --relay-ip NAME=ADDRESS    (a paired Linux or macOS machine; sudo -n iptables or pfctl;
+  with PB_SMOKE_WINDOWS_PB the Windows device, blocked with a firewall rule on its pb.exe)
   NAME is a relay's name in `pb relay list`, ADDRESS the public IPv4 of its host (two relays are needed).
   1. UDP is dropped (path_display.udp_blocked) so PEER is reached through a relay; `pb status --json` names the home relay
      (home_relay.node_id, which is one of the relay ids of `pb relay list`) once a pair is bound;
@@ -18,6 +19,7 @@ import sys
 import time
 
 import path_display as pd
+import winhost
 
 
 def sudo(*args, **kw):
@@ -26,7 +28,16 @@ def sudo(*args, **kw):
 
 @contextlib.contextmanager
 def blocked(address):
-    """Drop every packet from this machine to ADDRESS (the relay's host) while the context lasts."""
+    """Drop every packet from this machine to ADDRESS (the relay's host) while the context lasts. A Windows device: a firewall
+    block of its pb.exe to ADDRESS (a timer on the device lifts it whatever happens here)."""
+    device = winhost.device()
+    if device:
+        cut = device.cut_network(900, addresses=[address])
+        try:
+            yield
+        finally:
+            cut.release()
+        return
     if pd.DARWIN:
         anchor = 'com.apple/pbsmoke-relay'
         sudo('pfctl', '-a', anchor, '-f', '-', input='block drop out quick to %s\n' % address)
