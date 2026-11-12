@@ -624,6 +624,16 @@ func recoverWindowsInstallationLocked(ctx context.Context, ownerSID string, stat
 		return nil, err
 	}
 	request := windowsRepairRequest(config)
+	restored, err := restoreInterruptedBaseline(ctx, request, layout, state)
+	if err != nil {
+		return nil, err
+	}
+	if restored {
+		if config, err = LoadWindowsRuntimeConfigForInstance(layout.Instance); err != nil {
+			return nil, err
+		}
+		request = windowsRepairRequest(config)
+	}
 	manager, err := newWindowsLifecycleManager(request, layout, true)
 	if err != nil {
 		return nil, err
@@ -648,6 +658,27 @@ func recoverWindowsInstallationLocked(ctx context.Context, ownerSID string, stat
 	}
 	// The services are restored: the caller's own last step stays owed even when the candidate cannot be withdrawn.
 	return finishSelf, withdrawRecordedWindowsCandidate(ctx, ownerSID)
+}
+
+// restoreInterruptedBaseline puts the installation of a killed replacement (config, pins, carrier, the attempt's
+// hostd generation) back to what its journal captured, before the lifecycle manager is built from it. A killed
+// install has already written the candidate's config, so a manager built first held the candidate's hostd and
+// carrier services and pins, and restoring the journal's baseline definitions through them failed ("restore
+// hostd: invalid service definition"): one install left the machine without a working generation and a second
+// one repaired it. It reports whether a replacement journal was found.
+func restoreInterruptedBaseline(ctx context.Context, request Request, layout service.Layout, state service.NativeInstallationState) (bool, error) {
+	probe, err := newWindowsLifecycleManager(request, layout, true)
+	if err != nil {
+		return false, err
+	}
+	snapshot, err := probe.CapturedInstallation(ctx)
+	if err != nil {
+		return false, nil // no replacement journal: nothing was interrupted (a journal that is invalid fails Recover)
+	}
+	if state == nil {
+		state = windowsInstallationState{layout: layout}
+	}
+	return true, state.Restore(ctx, snapshot)
 }
 
 // PrepareWindowsReplacement pins both the protected prior image and candidate
@@ -763,6 +794,9 @@ func replaceWindowsInstallation(ctx context.Context, request Request, state serv
 func replaceWindowsInstallationLocked(ctx context.Context, request Request, state service.NativeInstallationState, replace func(context.Context, func(context.Context) error) error, hooks PreparedUpdateHooks) error {
 	layout, err := service.WindowsUserLayout(request.OwnerSID)
 	if err != nil {
+		return err
+	}
+	if _, err := restoreInterruptedBaseline(ctx, request, layout, state); err != nil {
 		return err
 	}
 	manager, err := newWindowsLifecycleWithState(request, layout, state)
