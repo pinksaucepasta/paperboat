@@ -120,9 +120,9 @@ func TestUpdateOnAFullDiskNamesTheDiskAndNothingChanged(t *testing.T) {
 
 // F14-03 (Windows device, full system disk): the copy of the update into the temporary directory failed with the
 // disk-full error and was reported as "the update cannot be read".
-func TestUpdateStagedOnAFullDiskIsReportedAsDiskFullNotUnreadable(t *testing.T) {
+func TestUpdateStagingOnAFullDiskIsReportedAsDiskFullNotUnreadable(t *testing.T) {
 	staging := &os.PathError{Op: "write", Path: "input", Err: syscall.ENOSPC}
-	err := updateSourceStagingFailure(fmt.Errorf("manual input could not be staged: %w", staging))
+	err := stagingFailure(fmt.Errorf("manual input could not be staged: %w", staging), errors.New("unreadable"))
 	failure := classifyCommandFailure(err)
 	message := commandFailureMessage(err, failure)
 	if !strings.Contains(message, "not enough free disk space") || strings.Contains(message, "cannot be read") {
@@ -131,9 +131,12 @@ func TestUpdateStagedOnAFullDiskIsReportedAsDiskFullNotUnreadable(t *testing.T) 
 	if result := classifyCLIJSONError(err); result.Code != "insufficient_disk_space" || result.StateChanged != false {
 		t.Fatalf("json = %+v", result)
 	}
-	other := updateSourceStagingFailure(errors.New("not an executable"))
-	if !strings.Contains(commandFailureMessage(other, classifyCommandFailure(other)), "cannot be read") {
-		t.Fatal("an unreadable file lost its message")
+	mkdir := stagingFailure(&os.PathError{Op: "mkdir", Path: "/tmp/paperboat-update-1", Err: syscall.ENOSPC}, errors.New("unreadable"))
+	if mkdir != hostinstall.ErrInsufficientSpace {
+		t.Fatalf("a full disk while creating the staging directory was reported as %v", mkdir)
+	}
+	if other := stagingFailure(errors.New("not an executable"), errors.New("unreadable")); other.Error() != "unreadable" {
+		t.Fatal("an unrelated failure was taken for a full disk")
 	}
 }
 

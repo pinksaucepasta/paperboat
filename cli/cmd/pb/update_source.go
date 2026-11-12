@@ -33,23 +33,23 @@ func actionUpdateFrom(command *cobra.Command, input string, force bool) error {
 	defer cancel()
 	directory, err := os.MkdirTemp("", "paperboat-update-")
 	if err != nil {
-		return err
+		return stagingFailure(err, err)
 	}
 	defer os.RemoveAll(directory)
 	staged, err := installsource.StageInput(ctx, input, directory, nil)
 	if err != nil {
-		return updateSourceStagingFailure(err)
+		return stagingFailure(err, commandRejection{reason: commandRejectUpdateSource, detail: err.Error()})
 	}
 	return installStagedUpdateSource(command, ctx, staged.Path, force)
 }
 
-// updateSourceStagingFailure says "disk full" when the copy of the update into the temporary directory ran out of
-// space (F14-03), instead of telling the user the file cannot be read.
-func updateSourceStagingFailure(err error) error {
+// stagingFailure says "disk full" when the copy of the update into the temporary directory (or creating that directory)
+// ran out of space (F14-03), instead of telling the user the file cannot be read; any other failure is otherwise.
+func stagingFailure(err, otherwise error) error {
 	if diskspace.IsFull(err) {
 		return hostinstall.ErrInsufficientSpace
 	}
-	return commandRejection{reason: commandRejectUpdateSource, detail: err.Error()}
+	return otherwise
 }
 
 var installUpdateSourceForCommand = hostruntimecmd.InstallUpdateSource
