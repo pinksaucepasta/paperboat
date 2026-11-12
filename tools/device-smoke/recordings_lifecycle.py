@@ -19,7 +19,8 @@ import uuid
 import winhost
 from pairing_lifecycle import command_result, invoke
 from session_cleanup import cleanup, inventory
-from terminal_lifecycle import Terminal
+import windows_target
+from terminal_lifecycle import Terminal, wait_windows_shell
 
 PB = winhost.pb_path()
 REC_MARK = '\u25cf REC'.encode()  # the status bar's mark (statusbar_layout.go)
@@ -63,18 +64,29 @@ def unlock(password_file):
         raise RuntimeError('the vault did not unlock; recordings cannot be replayed without it')
 
 
+def target_is_windows(target):
+    """A team machine is not in the personal list windows_target.is_windows reads, so ask the team's."""
+    machines = pb_json('--workspace', os.environ['PB_SMOKE_WORKSPACE'], 'machine', 'list', '--all')['machines']
+    match = next((m for m in machines if target in (m['id'], m['alias'])), None)
+    return bool(match) and str(match.get('platform', '')).lower().startswith('windows')
+
+
 class Session:
     """One pb connect to the target, with the REC mark's presence read from its own output."""
 
     def __init__(self, target, name, status_bar='on', existing=False):
         self.target, self.name = target, name
+        self.windows = target_is_windows(target)  # PowerShell prompt: markers are typed with windows_target, not printf
         arguments = ['connect', target, '--session', name] if existing else ['connect', target, '--name', name]
         arguments += ['--workspace', os.environ['PB_SMOKE_WORKSPACE']]  # a team machine is not in the personal list
         # A fresh attach can lose its first connection attempts while the peer network settles after an install.
         for attempt in range(4):
             self.terminal = Terminal(winhost.terminal_argv(PB, [*arguments, '--status-bar', status_bar]), env=winhost.terminal_env(PB))
             try:
-                self.terminal.expect(self.terminal.marker('READY', 'stty -echo; '), timeout=90)
+                if self.windows:
+                    wait_windows_shell(self.terminal)
+                else:
+                    self.terminal.expect(self.terminal.marker('READY', 'stty -echo; '), timeout=90)
                 return
             except RuntimeError:
                 self.terminal.close()
@@ -86,7 +98,11 @@ class Session:
 
     def say(self, label, timeout=45):
         """A line only the shell's printf produces: the output reached this client."""
-        token = self.terminal.marker(label)
+        if self.windows:
+            token = 'PB_%s_%s' % (label, uuid.uuid4().hex)
+            self.terminal.send(windows_target.typed_marker(token) + '\r')
+        else:
+            token = self.terminal.marker(label)
         self.terminal.expect(token, timeout=timeout)
         return token
 
@@ -235,7 +251,9 @@ def phase_second_client(team, target):
         seen = bytes(second.terminal.output)
         if REC_MARK not in seen:
             raise RuntimeError('a client attaching mid-recording does not show REC')
-        if history.encode() in seen and seen.index(REC_MARK) > seen.index(history.encode()):
+        # A Windows client's ConPTY repaints the screen by rows and the status bar is the last row: the same Mac host shows
+        # REC first to a Mac client, so byte order is only meaningful on a Unix client.
+        if not hasattr(PB, 'device') and history.encode() in seen and seen.index(REC_MARK) > seen.index(history.encode()):
             raise RuntimeError('REC appeared only after the session\'s earlier output')
         recording_control('stop', sid)
     finally:
