@@ -163,13 +163,18 @@ func (c *Controller) Attached(sessionID, accountID string) bool {
 }
 
 // reconcile applies a policy to the running sessions: a team that stopped recording (plan, owner
-// team) stops every recording, and people a new rule records are recorded from now on.
+// team) stops every recording, a rule recording stops when its rule no longer records anyone attached, and people a
+// new rule records are recorded from now on.
 func (c *Controller) reconcile(policy Policy) {
 	for _, snapshot := range c.config.Sessions.List() {
 		if snapshot.State != session.Running {
 			continue
 		}
 		if !policy.Enabled && snapshot.Recording != nil {
+			_, _ = c.config.Sessions.StopRecording(snapshot.ID, "", recordings.ReasonPolicy)
+			continue
+		}
+		if snapshot.Recording != nil && snapshot.Recording.Trigger == recordings.TriggerRule && !ruleStillRecords(snapshot, policy) {
 			_, _ = c.config.Sessions.StopRecording(snapshot.ID, "", recordings.ReasonPolicy)
 			continue
 		}
@@ -182,6 +187,17 @@ func (c *Controller) reconcile(policy Policy) {
 			}
 		}
 	}
+}
+
+// ruleStillRecords: a rule recording goes on while someone attached is still recorded by the policy; with nobody
+// attached it goes on while any account is recorded (the session outlives its viewers).
+func ruleStillRecords(snapshot session.Snapshot, policy Policy) bool {
+	for _, participant := range snapshot.Participants {
+		if policy.Records(participant.AccountID) {
+			return true
+		}
+	}
+	return len(snapshot.Participants) == 0 && len(policy.RecordAccounts) > 0
 }
 
 func (c *Controller) refreshPolicy(ctx context.Context) {

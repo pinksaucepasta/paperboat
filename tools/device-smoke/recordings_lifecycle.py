@@ -290,7 +290,9 @@ def phase_rule(team, target, directory, replay=True):
             raise RuntimeError('the rule did not start the recording (trigger %s, state %s)' % (recording['trigger'], recording['state']))
         wait_for('REC in this client', session.saw_rec, timeout=30, interval=0.3)
         policy_set(restore, team)
-        # The rule decides who is recorded from now on; a recording that already runs goes on until its session ends.
+        # Removing the rule stops the recording it started within seconds (the session itself goes on).
+        ended = finished(team, recording['id'])
+        wait_for('the client to see the recording stop', lambda: (session.terminal.settle(0.2), b'Recording stopped' in bytes(session.terminal.output))[1], timeout=60, interval=1)
         other_name = 'smoke-rec-' + uuid.uuid4().hex[:10]
         known = {r['id'] for r in listing(team)}
         other = Session(target, other_name)
@@ -302,10 +304,9 @@ def phase_rule(team, target, directory, replay=True):
         finally:
             other.end()
             cleanup(PB, target, other_name)
-        session.say('STILLON')
+        session.say('STILLON')  # the session outlives its recording
         session.end()
         session = None
-        ended = finished(team, recording['id'])
         if replay and marker not in export_text(ended['id'], directory):
             raise RuntimeError('the rule recording does not hold its output')
         return ended['id']

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -207,6 +208,40 @@ func TestWhoMayStartAndStop(t *testing.T) {
 	}
 	if _, err := controller.StartRecording("s1", "admin"); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("start without the plan: %v", err)
+	}
+}
+
+func TestRemovingARuleStopsTheRecordingsItStarted(t *testing.T) {
+	first := newKey(t, "team_1", 1, nil)
+	sessions := &fakeSessions{snapshots: map[string]session.Snapshot{"watched": running("watched"), "manual": running("dev"), "left": running(), "both": running("watched", "other")}}
+	policy := policyWith(1, first.key)
+	policy.RecordAccounts = []string{"watched", "other"}
+	controller, _ := testController(t, policy, sessions)
+	if !controller.Attached("watched", "watched") || !controller.Attached("left", "watched") || !controller.Attached("both", "other") {
+		t.Fatal("the rule did not start its recordings")
+	}
+	if _, err := controller.StartRecording("manual", "dev"); err != nil {
+		t.Fatal(err)
+	}
+	// "watched" is no longer recorded: its session stops; "both" still holds a recorded account; "left" has nobody attached
+	// and the rule still records someone, so it goes on; a manual recording is nobody's rule.
+	policy.Version, policy.RecordAccounts = 2, []string{"other"}
+	got, _ := controller.config.Policies.Replace(policy)
+	controller.reconcile(got)
+	if sessions.snapshots["watched"].Recording != nil || sessions.snapshots["both"].Recording == nil || sessions.snapshots["left"].Recording == nil || sessions.snapshots["manual"].Recording == nil {
+		t.Fatalf("a rule change stopped the wrong recordings: %v", sessions.stopped)
+	}
+	// The last rule removed stops every rule recording and still leaves the manual one.
+	policy.Version, policy.RecordAccounts = 3, nil
+	got, _ = controller.config.Policies.Replace(policy)
+	controller.reconcile(got)
+	if sessions.snapshots["both"].Recording != nil || sessions.snapshots["left"].Recording != nil || sessions.snapshots["manual"].Recording == nil {
+		t.Fatalf("removing the last rule left rule recordings running: %v", sessions.stopped)
+	}
+	for _, stop := range sessions.stopped {
+		if !strings.HasSuffix(stop, ":"+recordings.ReasonPolicy) {
+			t.Fatalf("a rule recording ended for another reason: %v", sessions.stopped)
+		}
 	}
 }
 
