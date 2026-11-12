@@ -2,18 +2,18 @@
 .TH "PB-SESSION-LIST" "1" "Sep 2026" "Paperboat" "Paperboat CLI"
 
 .SH NAME
-pb-session-list - List durable terminal sessions
+pb-session-list - List terminal sessions on every machine, or on one
 
 
 .SH SYNOPSIS
-\fBpb session list [environment] [flags]\fP
+\fBpb session list [machine] [flags]\fP
 
 
 .SH DESCRIPTION
-List durable terminal sessions
+List terminal sessions on every machine, or on one
 
 .PP
-List durable sessions with automatic application title or foreground process and current directory where observed. “Started in” labels the launch directory when current metadata is unavailable. --wide adds the session ID; choose an exact session ID for attach, rename, close, or sharing.
+Without a machine, list the sessions on every machine of the workspace (the same list on every computer); with one, only that machine's. Shows the automatic application title or foreground process and current directory where observed. “Started in” labels the launch directory when current metadata is unavailable. --wide adds the session ID; choose an exact session ID for attach, rename, close, or sharing.
 
 .PP
 Terminal sessions persist independently of a single connection and can be reattached after a disconnect. Sharing grants explicit access to a named session. Closing, deleting, and removing a participant have different effects; inspect the selected session before acting.

@@ -198,7 +198,7 @@ Read the [CLI guide](../cli.md) for interactive use, scripting, installation of 
 | [pb session close](pb_session_close.md) | Close one or all terminal sessions |
 | [pb session delete](pb_session_delete.md) | Delete a closed terminal session record |
 | [pb session join](pb_session_join.md) | Join an explicitly shared terminal with recent output |
-| [pb session list](pb_session_list.md) | List durable terminal sessions |
+| [pb session list](pb_session_list.md) | List terminal sessions on every machine, or on one |
 | [pb session participants](pb_session_participants.md) | Show terminal sharing and connected participants |
 | [pb session remove](pb_session_remove.md) | Remove a teammate, including access through an all-team grant |
 | [pb session rename](pb_session_rename.md) | Rename a terminal session |

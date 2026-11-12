@@ -1,19 +1,19 @@
 ## pb session list
 
-List durable terminal sessions
+List terminal sessions on every machine, or on one
 
 ### Synopsis
 
-List durable terminal sessions
+List terminal sessions on every machine, or on one
 
-List durable sessions with automatic application title or foreground process and current directory where observed. “Started in” labels the launch directory when current metadata is unavailable. --wide adds the session ID; choose an exact session ID for attach, rename, close, or sharing.
+Without a machine, list the sessions on every machine of the workspace (the same list on every computer); with one, only that machine's. Shows the automatic application title or foreground process and current directory where observed. “Started in” labels the launch directory when current metadata is unavailable. --wide adds the session ID; choose an exact session ID for attach, rename, close, or sharing.
 
 Terminal sessions persist independently of a single connection and can be reattached after a disconnect. Sharing grants explicit access to a named session. Closing, deleting, and removing a participant have different effects; inspect the selected session before acting.
 
 JSON output is supported with --json.
 
 ```
-pb session list [environment] [flags]
+pb session list [machine] [flags]
 ```
 
 ### Options

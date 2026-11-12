@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/pinksaucepasta/paperboat/internal/config"
 	"os"
 	"slices"
 	"strings"
@@ -77,7 +76,7 @@ func sessionCobraCommand() *cobra.Command {
 	attach.Flags().Bool("debug", false, "show the pb versions used by this terminal session")
 	addStatusBarFlags(attach)
 	group.AddCommand(attach)
-	list := &cobra.Command{Use: "list [environment]", Short: "List durable terminal sessions", Args: commandArgs(cobra.MaximumNArgs(1)), RunE: actionRun(sessionList)}
+	list := &cobra.Command{Use: "list [machine]", Short: "List terminal sessions on every machine, or on one", Args: commandArgs(cobra.MaximumNArgs(1)), RunE: actionRun(sessionList)}
 	list.Flags().Bool("wide", false, "include immutable IDs")
 	list.Flags().Bool("json", false, "print JSON")
 	inventoryFilterFlags(list)
@@ -113,18 +112,14 @@ func sessionList(c *command.Context) error {
 		return err
 	}
 	requested := strings.TrimSpace(c.Args().First())
-	var cfg *config.Config
-	if requested == "" {
-		var loadErr error
-		if cfg, loadErr = workspaceConfig(c.String("config"), c.String("server")); loadErr != nil {
-			return loadErr
-		}
-	}
-	target, err := resolveTerminalTargetOrDefault(c.Context, c, client, cfg, requested)
+	maxItems, err := commandListPagingMax(c)
 	if err != nil {
 		return err
 	}
-	maxItems, err := commandListPagingMax(c)
+	if requested == "" {
+		return sessionListAll(c, client, maxItems)
+	}
+	target, err := resolveTerminalEnvironmentTarget(c.Context, client, requested)
 	if err != nil {
 		return err
 	}
@@ -152,6 +147,38 @@ func sessionList(c *command.Context) error {
 		} else {
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", selector.SanitizeText(s.Name), sessionActivityLabel(s), sessionDirectoryLabel(s), s.State, attached, relativeTime(s.LastActiveAt), relativeTimestamp(s.CreatedAt))
 		}
+	}
+	return w.Flush()
+}
+
+// sessionListAll lists every terminal session of the workspace, on all machines, from the server's catalog. Without a
+// machine, `pb session list` once showed the sessions of the machine this client last connected to, so the same
+// account saw a different list on each computer (X-25).
+func sessionListAll(c *command.Context, client *api.Client, maxItems int) error {
+	sessions, total, err := client.SharedTerminalSessionsPage(c.Context, commandInventoryFilters(c), maxItems)
+	if err != nil {
+		return friendlyCommandError(err)
+	}
+	if c.Bool("json") {
+		return json.NewEncoder(c.Writer).Encode(map[string]any{"version": "1", "sessions": sessions, "total": total})
+	}
+	defer writeListFooter(c.ErrWriter, len(sessions), total, "sessions")
+	w := tabwriter.NewWriter(c.Writer, 0, 4, 2, ' ', 0)
+	wide := c.Bool("wide")
+	if wide {
+		fmt.Fprintln(w, "MACHINE\tNAME\tID\tTITLE / PROCESS\tDIRECTORY\tSTATE\tLAST ACTIVE\tCREATED")
+	} else {
+		fmt.Fprintln(w, "MACHINE\tNAME\tTITLE / PROCESS\tDIRECTORY\tSTATE\tLAST ACTIVE\tCREATED")
+	}
+	for _, s := range sessions {
+		activity := sessionActivityLabel(api.TerminalSession{Title: s.Title, ForegroundProcess: s.ForegroundProcess})
+		directory := sessionDirectoryLabel(api.TerminalSession{CurrentDirectory: s.CurrentDirectory, StartedIn: s.StartedIn})
+		columns := []string{selector.SanitizeText(s.Target.Name), selector.SanitizeText(s.Name)}
+		if wide {
+			columns = append(columns, s.ID)
+		}
+		columns = append(columns, activity, directory, s.State, relativeTime(s.LastActiveAt), relativeTimestamp(s.CreatedAt))
+		fmt.Fprintln(w, strings.Join(columns, "\t"))
 	}
 	return w.Flush()
 }
