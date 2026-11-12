@@ -3425,6 +3425,10 @@ The coolify format (S1) also removes the old dev deployment and its test backups
 
 ## 5. Log
 
+2026-11-13 | REL-EDGE F21-17/22/28/36/37/38/47 L[~]: first-pass automated checks PASS at 261b23966; result tools/device-smoke/results/rel-edge-first-pass-20261112T214806Z.md; no ticks or deploy.
+Live edge checks wait for anvit load <16 (51.49 then 44.91); F21-28 edge blackhole proof missing.
+Waits for CLI hostruntime owner: F21-22 pending preview attachment must wait on push; current lease_observer_carrier.go polls 250 ms -> 2 s (ready-only push already tested).
+
 2026-11-12 | W28 PR50 queue regression: missing mandatory quota checker reproduced on head and base; fixture now uses initialized billing policy, unchanged route/handover assertions; runtimeattachment PostgreSQL -race PASS at cd98bdafb (25.694s).
 Result: tools/device-smoke/results/w28-queue-regression.json. Existing-PR updates preserve published ancestry as main advances; eight push-tool tests PASS, new ancestry check failed before fix.
 
