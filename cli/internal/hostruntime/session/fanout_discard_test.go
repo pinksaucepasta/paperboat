@@ -52,18 +52,18 @@ func TestDiscardPendingOutputResyncsViewersWithAFloodBacklog(t *testing.T) {
 	}
 }
 
-// A backlog under the threshold drains by itself: no resync, nothing dropped.
+// A backlog under the threshold, printed at a modest rate, drains by itself: no resync, nothing dropped.
 func TestDiscardPendingOutputLeavesASmallBacklog(t *testing.T) {
 	f := NewFanout()
 	if err := f.Attach("live", 1<<20); err != nil {
 		t.Fatal(err)
 	}
 	var next uint64
-	publishText(t, f, &next, strings.Repeat("x", interruptDiscardThreshold-1))
+	publishText(t, f, &next, strings.Repeat("x", interruptDiscardThreshold/2-1))
 	f.DiscardPendingOutput(f.PublishedEnd())
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if event, err := f.WaitNext(ctx, "live"); err != nil || len(event.Data) != interruptDiscardThreshold-1 {
+	if event, err := f.WaitNext(ctx, "live"); err != nil || len(event.Data) != interruptDiscardThreshold/2-1 {
 		t.Fatalf("small backlog: %d bytes, %v; want it delivered whole", len(event.Data), err)
 	}
 }
@@ -101,5 +101,44 @@ func TestDiscardPendingOutputKeepsAViewerWithAQueuedResizeWhole(t *testing.T) {
 	}
 	if got != -1 {
 		t.Fatal("the queued resize never reached the viewer")
+	}
+}
+
+// X-24: under a flood the transport already holds megabytes the cursor has passed, so the queue here is empty at Ctrl-C
+// while the viewer is far behind. A viewer with nothing queued is resynced when the program was printing a flood.
+func TestDiscardPendingOutputResyncsADrainedViewerUnderAFlood(t *testing.T) {
+	f := NewFanout()
+	if err := f.Attach("live", 1<<20); err != nil {
+		t.Fatal(err)
+	}
+	var next uint64
+	publishText(t, f, &next, strings.Repeat("x", interruptDiscardThreshold))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := f.WaitNext(ctx, "live"); err != nil { // the stream writer took it: the cursor is at the end
+		t.Fatal(err)
+	}
+	f.DiscardPendingOutput(f.PublishedEnd())
+	if !f.Lagged("live") {
+		t.Fatal("a drained viewer under a flood was not sent to a fresh screen")
+	}
+}
+
+// The same viewer at a trickle (a prompt, a progress line) keeps its stream: no resync.
+func TestDiscardPendingOutputLeavesADrainedViewerAtATrickle(t *testing.T) {
+	f := NewFanout()
+	if err := f.Attach("live", 1<<20); err != nil {
+		t.Fatal(err)
+	}
+	var next uint64
+	publishText(t, f, &next, "$ sleep 100\r\n")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := f.WaitNext(ctx, "live"); err != nil {
+		t.Fatal(err)
+	}
+	f.DiscardPendingOutput(f.PublishedEnd())
+	if f.Lagged("live") {
+		t.Fatal("a quiet viewer was resynced")
 	}
 }

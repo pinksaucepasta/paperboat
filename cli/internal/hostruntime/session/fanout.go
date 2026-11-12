@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"sync"
 	"time"
@@ -48,6 +49,7 @@ type attachmentCursor struct {
 	cursor       uint64
 	enqueuedEnd  uint64
 	hasCursor    bool
+	rate         outputRate
 	notify       chan struct{}
 }
 
@@ -71,6 +73,21 @@ type Fanout struct {
 	// room wakes the producer waiting in WaitRoom when a consumer drains.
 	room chan struct{}
 }
+
+// outputRate is how much a viewer was sent over about the last second (an exponential window).
+type outputRate struct {
+	bytes float64
+	at    time.Time
+}
+
+func (r *outputRate) now(at time.Time) float64 {
+	if r.at.IsZero() || at.Before(r.at) {
+		return r.bytes
+	}
+	return r.bytes * math.Exp(-float64(at.Sub(r.at))/float64(time.Second))
+}
+
+func (r *outputRate) add(at time.Time, size int) { r.bytes, r.at = r.now(at)+float64(size), at }
 
 func NewFanout() *Fanout {
 	return &Fanout{attachments: make(map[string]*attachmentCursor), room: make(chan struct{}, 1)}
@@ -257,15 +274,26 @@ const interruptDiscardThreshold = 64 << 10
 func (f *Fanout) DiscardPendingOutput(through uint64) (resynced []string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	now := time.Now()
 	for id, cursor := range f.attachments {
 		if cursor.state != Attached || !cursor.receiveOutput || !cursor.hasCursor {
 			continue
 		}
 		target := min(through, cursor.enqueuedEnd)
-		if target <= cursor.cursor || target-cursor.cursor < interruptDiscardThreshold || f.hasControlLocked(cursor.cursor, target) {
+		lag := uint64(0)
+		if target > cursor.cursor {
+			lag = target - cursor.cursor
+		}
+		// A flood leaves megabytes in the transport that the cursor has already passed, so the queue here can be empty
+		// while the viewer is minutes behind (measured X-24: 19 MB painted after Ctrl-C): the recent rate decides too.
+		flood := cursor.rate.now(now) >= interruptDiscardThreshold/2 // half: the window decays between the last chunk and the key
+		if lag < interruptDiscardThreshold && !flood || f.hasControlLocked(cursor.cursor, target) {
 			continue
 		}
-		cursor.cursor, cursor.queuedBytes, cursor.lagged = target, cursor.enqueuedEnd-target, true
+		if lag > 0 {
+			cursor.cursor, cursor.queuedBytes = target, cursor.enqueuedEnd-target
+		}
+		cursor.lagged = true
 		notify(cursor.notify)
 		resynced = append(resynced, id)
 	}
@@ -310,6 +338,7 @@ func (f *Fanout) PublishOwned(event history.Event) ([]Eviction, error) {
 	}
 	f.insertEventLocked(event)
 	f.published = event.EndSequence
+	now := time.Now()
 	var evictions []Eviction
 	for id, cursor := range f.attachments {
 		if cursor.state != Attached || !cursor.receiveOutput {
@@ -337,6 +366,7 @@ func (f *Fanout) PublishOwned(event history.Event) ([]Eviction, error) {
 		}
 		cursor.enqueuedEnd = event.EndSequence
 		cursor.queuedBytes += uint64(len(event.Data))
+		cursor.rate.add(now, len(event.Data))
 		notify(cursor.notify)
 	}
 	f.compactLocked()
