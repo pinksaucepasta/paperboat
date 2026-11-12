@@ -334,12 +334,31 @@ func sharedRoleNotice(viewOnly bool) string {
 }
 
 // reconnectResolveError ends a reconnecting terminal when Paperboat refuses the new grant: a 403 or 404 is a
-// definite answer (the machine was revoked, unshared or the grant or membership removed), so retrying for minutes
-// only kept a revoked member's terminal open (X-21). Any other error stays retryable.
+// definite answer (the machine was revoked, unshared, the grant or membership removed, or the team's plan
+// suspended), so retrying for minutes only kept a revoked member's terminal open (X-21). The terminal ends with the
+// reason in words. Any other error stays retryable.
 func reconnectResolveError(err error) error {
 	var apiErr *api.APIError
 	if errors.As(err, &apiErr) && (apiErr.Status == http.StatusForbidden || apiErr.Status == http.StatusNotFound) {
-		return tunnel.Revoked(err)
+		return tunnel.Revoked(accessEndedError{reason: accessEndedReason(apiErr.Code), cause: err})
 	}
 	return err
+}
+
+type accessEndedError struct {
+	reason string
+	cause  error
+}
+
+func (e accessEndedError) Error() string { return "access ended: " + e.reason }
+func (e accessEndedError) Unwrap() error { return e.cause }
+
+func accessEndedReason(code string) string {
+	switch code {
+	case "machine_revoked":
+		return "this machine was disconnected or revoked. Repair or reconnect it in the Paperboat dashboard."
+	case "workspace_unavailable":
+		return "this workspace is no longer available to your account (you were removed or the team's plan is suspended). Ask the team admin."
+	}
+	return "this machine is no longer shared with you, or the team's plan is suspended. Ask its owner or team admin."
 }

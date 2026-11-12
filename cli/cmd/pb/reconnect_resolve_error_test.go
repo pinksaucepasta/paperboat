@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -20,6 +21,9 @@ func TestReconnectResolveErrorEndsTheTerminalOnARefusedGrant(t *testing.T) {
 		{Status: http.StatusForbidden, Code: "workspace_unavailable"},
 	} {
 		got := reconnectResolveError(refusal)
+		if !strings.HasPrefix(got.Error(), "access ended: ") || !strings.Contains(got.Error(), ".") {
+			t.Errorf("%s: the terminal ends with %q, want an \"access ended: <reason>\" message", refusal.Code, got)
+		}
 		if inner := errors.Unwrap(got); inner == nil || reflect.TypeOf(inner) != revoked || !errors.Is(got, refusal) {
 			t.Errorf("%s: %T %v is not a revoked refusal", refusal.Code, got, got)
 		}
