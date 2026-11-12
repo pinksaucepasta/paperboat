@@ -13,6 +13,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/internal/localwait"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/internal/splitdns"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
@@ -267,6 +269,9 @@ func doctorProbes(command *cobra.Command, snapshot localapi.Snapshot, machine *l
 		{Code: "clock", Run: func(ctx context.Context) doctorpkg.Check { return probeDoctorClock(ctx, command) }},
 		{Code: "machine_guard_version", Run: func(ctx context.Context) doctorpkg.Check { return probeDoctorGuardVersion(ctx) }},
 		{Code: "machine_credentials", Run: func(ctx context.Context) doctorpkg.Check { return probeDoctorCredentials(ctx) }},
+		{Code: "local_names", Run: func(ctx context.Context) doctorpkg.Check {
+			return doctorLocalNamesCheck(ctx, localAccessDomain(ctx), lookupLocalName)
+		}},
 		{Code: "udp_ipv4", Run: func(ctx context.Context) doctorpkg.Check {
 			return probeDoctorUDP(ctx, "udp4", "0.0.0.0:0", "udp_ipv4", "IPv4")
 		}},
@@ -647,6 +652,36 @@ func doctorCaptivePortalCheck(value string) doctorpkg.Check {
 		check.Status = doctorpkg.StatusUnavailable
 		check.Summary = "Captive portal status could not be observed."
 	}
+	return check
+}
+
+// lookupLocalName resolves one name through the system resolver, as a browser's lookup would.
+func lookupLocalName(ctx context.Context, name string) ([]string, error) {
+	return net.DefaultResolver.LookupHost(ctx, name)
+}
+
+// doctorLocalNamesCheck: the names of local browser access (<machine>.<domain>) are a public wildcard that answers the
+// loopback gateway, so they fail offline and behind DNS-rebinding filters that drop private answers (F21-50). The check
+// resolves one such name and says what to do when it does not come back as the gateway.
+func doctorLocalNamesCheck(ctx context.Context, domain string, lookup func(context.Context, string) ([]string, error)) doctorpkg.Check {
+	check := doctorpkg.Check{Category: "local", Code: "local_names"}
+	if domain == "" {
+		check.Status = doctorpkg.StatusUnavailable
+		check.Summary = "Local browser names are not set up on this computer."
+		return check
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	name := "dns-check." + domain
+	addresses, err := lookup(ctx, name)
+	if err == nil && slices.Contains(addresses, splitdns.BrowserGatewayIP) {
+		check.Status = doctorpkg.StatusPass
+		check.Summary = "Local browser names resolve to this computer."
+		return check
+	}
+	check.Status = doctorpkg.StatusWarning
+	check.Summary = "Local browser names under " + domain + " do not resolve here (no internet DNS, or a router or DNS filter that blocks private answers)."
+	check.Recovery = "Allow " + domain + " in your router or DNS filter, or add `" + splitdns.BrowserGatewayIP + " <name>." + domain + "` to your hosts file for the names you open. Machine access with pb does not use these names."
 	return check
 }
 
