@@ -83,7 +83,9 @@ func runWindowsInstaller(t *testing.T, installer string, fake []byte, served []b
 		"function Get-AuthenticodeSignature { param($LiteralPath) $p = $env:FAKE_SIG -split '[|]'; $c = New-Object psobject; " +
 		"$c | Add-Member -MemberType ScriptMethod -Name GetNameInfo -Value { param($t, $f) $p[1] }.GetNewClosure(); " +
 		"[pscustomobject]@{ Status = $p[0]; SignerCertificate = $c } }\n" +
-		"$env:FAKE_SIGNATURE_CHECKED = ''\n$ErrorActionPreference = 'Stop'\nInvoke-Expression (Get-Content -Raw -LiteralPath '" + installer + "')\n"
+		"$env:FAKE_SIGNATURE_CHECKED = ''\n$ErrorActionPreference = 'Stop'\n" +
+		// pwsh on Linux is not Windows: the installer's OS guard (checked by its own test) is cut out so its download logic runs here.
+		"$text = (Get-Content -Raw -LiteralPath '" + installer + "') -replace '(?m)^if \\(\\$PSVersionTable\\.PSEdition -eq ''Core'' -and -not \\$IsWindows\\).*$', ''\nInvoke-Expression $text\n"
 	if err := os.WriteFile(harness, []byte(script), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -223,5 +225,21 @@ func TestInstallPowerShellRefusesANonWindowsHostBeforeDownloading(t *testing.T) 
 	download := strings.Index(string(text), "Download-HttpsFile")
 	if guard < 0 || download < 0 || guard > download || !strings.Contains(string(text), "macOS and Linux paste the curl command") {
 		t.Fatalf("guard at %d, first download at %d", guard, download)
+	}
+}
+
+// Run for real under pwsh on macOS or Linux, the one-liner stops with the message and downloads nothing.
+func TestInstallPowerShellOnANonWindowsHostSaysWhichCommandToUse(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the guard is for macOS and Linux hosts")
+	}
+	shell, err := exec.LookPath("pwsh")
+	if err != nil {
+		t.Skip("pwsh not installed")
+	}
+	installer := renderWindowsInstaller(t, []byte("fake pb"), false)
+	out, err := exec.Command(shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", installer).CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "this command is for Windows") || strings.Contains(string(out), "Download") {
+		t.Fatalf("pwsh on this host: err %v, output %q", err, out)
 	}
 }
