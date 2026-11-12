@@ -467,7 +467,7 @@ func runInspectorView(command *cobra.Command, clients *inspectorClients, target 
 			if err := decodeInspectorPayload(payload, &record); err != nil {
 				return false, err
 			}
-			return false, tunnelOutput(command, record, fmt.Sprintf("%s\t%s\t%d\t%s", record.ID, record.Method, record.ResponseStatus, record.State)+inspectorReplayMarker(record.ReplayOf))
+			return false, tunnelOutput(command, record, fmt.Sprintf("%s\t%s\t%d\t%s\t%s -> %s", record.ID, record.Method, record.ResponseStatus, record.State, record.StartedAt.Local().Format(time.RFC3339), record.FinishedAt.Local().Format(time.RFC3339))+inspectorReplayMarker(record.ReplayOf))
 		default:
 			payload, status, err := clients.daemon.do(ctx, grant, http.MethodGet, "/v1/inspector/records", nil, url.Values{"kind": {target.kind}, "resource": {target.resource}, "route": {target.route}, "cursor": {options.cursor}, "limit": {strconv.Itoa(options.limit)}})
 			if err != nil {
@@ -629,6 +629,9 @@ func writeTunnelReplayResult(command *cobra.Command, result inspectorReplayResul
 		"Request: " + result.Method + " (retained bytes, same origin only)",
 		"Side effects: " + result.SideEffects,
 		"Idempotency key: " + key + " (reuse it to recover this outcome; never retry with a new key after an ambiguous result)",
+	}
+	if !result.StartedAt.IsZero() {
+		lines = append(lines, "Time: "+result.StartedAt.Local().Format(time.RFC3339)+" -> "+result.FinishedAt.Local().Format(time.RFC3339))
 	}
 	if result.ReplayRecordID != "" {
 		lines = append(lines, "Replay response stored as "+result.ReplayRecordID)
