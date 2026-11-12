@@ -278,6 +278,8 @@ func (b *BrowserAccess) begin(w http.ResponseWriter, r *http.Request, host strin
 	http.Redirect(w, r, b.LoginOrigin+"/.paperboat/access/login?transaction_id="+url.QueryEscape(tx.TransactionID), http.StatusSeeOther)
 }
 
+// A decision on a newer route generation than the active rule (a route update the edge has not activated yet) still serves it:
+// audience, policy, carrier and tunnel must match exactly, so it widens nothing. An older decision never serves a newer rule.
 func browserDecisionMatches(d connectorprotocol.IngressDecision, m route.RouteMatch) bool {
 	r := m.Rule
 	id := r.RouteID
@@ -288,7 +290,7 @@ func browserDecisionMatches(d connectorprotocol.IngressDecision, m route.RouteMa
 	if generation == 0 {
 		generation = r.Revision
 	}
-	return d.Validate(time.Now().UTC()) == nil && d.Binding.Hostname == m.Host && d.Binding.RouteID == id && d.Binding.RouteGeneration == generation && d.Binding.AccountID == r.AccountID && ((r.ResourceKind == "preview" && d.Binding.PublicationID == r.TunnelID) || (r.ResourceKind != "preview" && d.Binding.TunnelID == r.TunnelID)) && d.Binding.Audience == r.AccessMode && (r.ViewerPolicyGeneration == 0 || d.PolicyGeneration == r.ViewerPolicyGeneration) && d.EdgeNodeID == r.Node && d.EdgeProcessEpoch == r.EdgeProcessEpoch && d.ConnectorID == r.ConnectorID && d.SessionID == r.ConnectorSessionID && d.ProcessGeneration == r.ConnectorProcessGeneration && d.ConfigGeneration == r.ConfigGeneration
+	return d.Validate(time.Now().UTC()) == nil && d.Binding.Hostname == m.Host && d.Binding.RouteID == id && d.Binding.RouteGeneration >= generation && d.Binding.AccountID == r.AccountID && ((r.ResourceKind == "preview" && d.Binding.PublicationID == r.TunnelID) || (r.ResourceKind != "preview" && d.Binding.TunnelID == r.TunnelID)) && d.Binding.Audience == r.AccessMode && (r.ViewerPolicyGeneration == 0 || d.PolicyGeneration == r.ViewerPolicyGeneration) && d.EdgeNodeID == r.Node && d.EdgeProcessEpoch == r.EdgeProcessEpoch && d.ConnectorID == r.ConnectorID && d.SessionID == r.ConnectorSessionID && d.ProcessGeneration == r.ConnectorProcessGeneration && d.ConfigGeneration == r.ConfigGeneration
 }
 
 // authorize owns one request's refresh loop. Context cancellation closes the

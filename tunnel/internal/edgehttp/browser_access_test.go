@@ -162,6 +162,18 @@ func TestBrowserDecisionRequiresExactViewerPolicyGeneration(t *testing.T) {
 	}
 }
 
+func TestBrowserDecisionOnANewerRouteGenerationServesTheActiveRule(t *testing.T) {
+	match, decision := browserTestMatch()
+	decision.Binding.RouteGeneration++
+	if !browserDecisionMatches(decision, match) {
+		t.Fatal("decision on the newer route generation was refused while the route update is applied")
+	}
+	match.Rule.RouteGeneration += 2
+	if browserDecisionMatches(decision, match) {
+		t.Fatal("decision older than the rule was accepted")
+	}
+}
+
 func TestBrowserAuthorizationOutlivesTTLUntilRevokedAndDeniesNewAdmissions(t *testing.T) {
 	m, d := browserTestMatch()
 	a := &browserAuthorityTest{decision: d}

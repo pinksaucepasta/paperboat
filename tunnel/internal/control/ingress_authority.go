@@ -501,9 +501,15 @@ func (a *IngressAuthority) Resolve(ctx context.Context, r route.RouteRule) (conn
 	if id == "" {
 		id = r.ID
 	}
-	for _, d := range decisions {
-		if d.Binding.Hostname == r.Hostname && d.Binding.RouteID == id && d.Binding.TunnelID == r.TunnelID && d.Binding.AccountID == r.AccountID && d.ConnectorID == r.ConnectorID && d.SessionID == r.ConnectorSessionID && d.ProcessGeneration == r.ConnectorProcessGeneration && d.ConfigGeneration == r.ConfigGeneration && d.AssignmentGeneration == r.AssignmentGeneration && d.Binding.RouteGeneration == r.RouteGeneration && d.Binding.Audience == r.AccessMode && d.PolicyGeneration == r.ViewerPolicyGeneration && d.Validate(time.Now().UTC()) == nil {
-			return d, nil
+	// A route update bumps only the route generation. The server publishes the new decision at once, the edge activates
+	// the new rule a moment later: until then the active rule still names the older generation. Serve it on the newer
+	// decision of the same route (same audience, policy, carrier and assignment, so no wider access) instead of a 502.
+	for _, newer := range []bool{false, true} {
+		for _, d := range decisions {
+			generation := d.Binding.RouteGeneration == r.RouteGeneration || newer && d.Binding.RouteGeneration > r.RouteGeneration
+			if d.Binding.Hostname == r.Hostname && d.Binding.RouteID == id && d.Binding.TunnelID == r.TunnelID && d.Binding.AccountID == r.AccountID && d.ConnectorID == r.ConnectorID && d.SessionID == r.ConnectorSessionID && d.ProcessGeneration == r.ConnectorProcessGeneration && d.ConfigGeneration == r.ConfigGeneration && d.AssignmentGeneration == r.AssignmentGeneration && generation && d.Binding.Audience == r.AccessMode && d.PolicyGeneration == r.ViewerPolicyGeneration && d.Validate(time.Now().UTC()) == nil {
+				return d, nil
+			}
 		}
 	}
 	// The route exists but its workspace is out of allowance: say so, never forward.

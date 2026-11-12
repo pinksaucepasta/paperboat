@@ -659,3 +659,28 @@ func TestIngressAuthorityFencedCallerGetsTheHeldSetWhenTheRefreshIsSlow(t *testi
 		t.Fatalf("fenced caller during a slow refresh: %d decisions, %v; want the held one", len(got), err)
 	}
 }
+
+// A route update publishes the new decision before the edge activates the new rule: the active rule (older route
+// generation) is served on it, but nothing else may differ and a rule newer than the decision is refused.
+func TestIngressAuthorityServesAnOlderRuleOnTheNewerDecisionOfTheSameRoute(t *testing.T) {
+	now := time.Now().UTC()
+	decision := ingressAuthorityTestDecision(now)
+	decision.Binding.RouteGeneration = 5
+	authority := &IngressAuthority{Client: &HTTPClient{}, NodeID: decision.EdgeNodeID, ProcessEpoch: decision.EdgeProcessEpoch, fetched: now, decisions: []connectorprotocol.IngressDecision{decision}}
+	rule := route.RouteRule{RouteID: decision.Binding.RouteID, TunnelID: decision.Binding.TunnelID, AccountID: decision.Binding.AccountID, ConnectorID: decision.ConnectorID, ConnectorSessionID: decision.SessionID, ConnectorProcessGeneration: decision.ProcessGeneration, ConfigGeneration: decision.ConfigGeneration, AssignmentGeneration: decision.AssignmentGeneration, RouteGeneration: 4, AccessMode: decision.Binding.Audience, ViewerPolicyGeneration: decision.PolicyGeneration, Hostname: decision.Binding.Hostname}
+	if got, err := authority.Resolve(context.Background(), rule); err != nil || got.Binding.RouteGeneration != 5 {
+		t.Fatalf("older rule on the newer decision: generation=%d err=%v", got.Binding.RouteGeneration, err)
+	}
+	for name, mutate := range map[string]func(*route.RouteRule){
+		"rule newer than the decision": func(r *route.RouteRule) { r.RouteGeneration = 6 },
+		"audience changed":             func(r *route.RouteRule) { r.AccessMode = "private" },
+		"policy generation changed":    func(r *route.RouteRule) { r.ViewerPolicyGeneration++ },
+		"another carrier session":      func(r *route.RouteRule) { r.ConnectorSessionID = "session_other" },
+	} {
+		denied := rule
+		mutate(&denied)
+		if _, err := authority.Resolve(context.Background(), denied); !errors.Is(err, connectorprotocol.ErrIngressDenied) {
+			t.Fatalf("%s: %v, want denied", name, err)
+		}
+	}
+}

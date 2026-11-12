@@ -17,6 +17,8 @@ func carrierForRoute(entry *dataCarrierRouteEntry, rule route.RouteRule) bool {
 // The route matcher retains a representative assignment. Every eligible replica
 // must carry its own server-issued binding for the same immutable route/config.
 // Capacity is checked when opening a stream, not when identifying TLS ownership.
+// A carrier already on a newer revision of the route serves the rule that still names the older one: during a route
+// update the host applies the new config before the edge activates the new rule (an older carrier never serves a newer rule).
 func readyRouteReplica(entry *dataCarrierRouteEntry, rule route.RouteRule) bool {
 	if !carrierForRoute(entry, rule) {
 		return false
@@ -26,5 +28,5 @@ func readyRouteReplica(entry *dataCarrierRouteEntry, rule route.RouteRule) bool 
 	return entry.state.Ready && entry.state.Generation == rule.ConfigGeneration &&
 		entry.identity.Generation == rule.ConfigGeneration &&
 		sortedContains(entry.state.RouteIDs, routeID) && sortedContains(entry.state.HealthyRoutes, routeID) &&
-		ok && binding.RouteGeneration == rule.RouteGeneration && binding.ConfigContentHash == rule.ConfigContentHash
+		ok && binding.RouteGeneration >= rule.RouteGeneration && binding.ConfigContentHash == rule.ConfigContentHash
 }

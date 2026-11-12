@@ -293,3 +293,34 @@ func TestDurableReplicaSkipsDrainingAndRetriesFailedOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A route update bumps the route generation: the host applies it before the edge activates the new rule, so the
+// active rule still names the older generation while the carrier already reports the newer one. That is served,
+// never a 502; a carrier older than the rule is not.
+func TestDurableReplicaServesAnOlderRuleFromACarrierOnANewerRouteGeneration(t *testing.T) {
+	registry, err := NewDataCarrierRouteRegistry(DataCarrierRouteRegistryConfig{MaximumRoutes: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer registry.Close()
+	rule := replicaRule()
+	server, client := testEdgePreviewCarrierPair(t, replicaIdentity("host_a", "connector_a", "session_a", 3))
+	defer server.Close()
+	defer client.Close()
+	state := replicaState(rule, 3, "assignment_a", "zone_a", time.Millisecond, 10)
+	if err := registry.AttachReplica(server, "key", "thumb", state); err != nil {
+		t.Fatal(err)
+	}
+	state.RouteBindings[0].RouteGeneration++
+	if err := registry.UpdateReplicaState(server, state); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.entryFor(rule, "request_old_rule"); err != nil {
+		t.Fatalf("old rule on a newer carrier binding: %v", err)
+	}
+	newer := rule
+	newer.RouteGeneration += 2
+	if _, err := registry.entryFor(newer, "request_new_rule"); !errors.Is(err, ErrDataCarrierRouteUnavailable) {
+		t.Fatalf("rule newer than the carrier: %v, want unavailable", err)
+	}
+}
