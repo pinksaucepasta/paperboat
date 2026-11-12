@@ -1,0 +1,208 @@
+{
+ "check": "exec-scale",
+ "client": "win-stg-l",
+ "target": "win-stg-w2",
+ "count": 32,
+ "sleep_s": 20,
+ "budget_s": 30.0,
+ "fastest_s": 24.55,
+ "median_s": 28.87,
+ "slowest_s": 32.85,
+ "failed": [],
+ "over_budget": 11,
+ "status": "FAIL",
+ "rows": [
+  {
+   "i": 0,
+   "seconds": 31.22,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 1,
+   "seconds": 27.95,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 2,
+   "seconds": 30.21,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 3,
+   "seconds": 28.58,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 4,
+   "seconds": 32.85,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 5,
+   "seconds": 25.57,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 6,
+   "seconds": 30.71,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 7,
+   "seconds": 29.11,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 8,
+   "seconds": 24.79,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 9,
+   "seconds": 32.53,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 10,
+   "seconds": 29.36,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 11,
+   "seconds": 28.3,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 12,
+   "seconds": 31.74,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 13,
+   "seconds": 26.9,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 14,
+   "seconds": 29.93,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 15,
+   "seconds": 29.67,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 16,
+   "seconds": 31.51,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 17,
+   "seconds": 25.27,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 18,
+   "seconds": 25.01,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 19,
+   "seconds": 26.59,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 20,
+   "seconds": 27.18,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 21,
+   "seconds": 30.97,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 22,
+   "seconds": 25.84,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 23,
+   "seconds": 30.45,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 24,
+   "seconds": 26.1,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 25,
+   "seconds": 27.7,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 26,
+   "seconds": 26.32,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 27,
+   "seconds": 32.32,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 28,
+   "seconds": 27.42,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 29,
+   "seconds": 28.87,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 30,
+   "seconds": 32.01,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  },
+  {
+   "i": 31,
+   "seconds": 24.55,
+   "rc": 0,
+   "tail": "0.0.1:\n    Packets: Sent = 21, Received = 21, Lost = 0 (0% loss),\nApproximate round trip times in milli-seconds:\n    Minimum = 0ms, Maximum = 0ms, Average = 0ms"
+  }
+ ]
+}

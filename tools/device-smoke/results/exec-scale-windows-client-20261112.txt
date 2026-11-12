@@ -1,0 +1,3 @@
+F21-166 W, the Windows machine as the CLIENT: 32 concurrent `pb exec win-stg-l -- sleep 20` started together on winpool-8 (GitHub-hosted Windows, pb dev-bdb1db804 = main with the handshake change) against a Linux container peer over the staging relay (RTT ~260 ms), 2026-11-12 (IST), script w2scale.py (a Python thread per exec, barrier start, wall time per exec):
+before the change (dev-5ea56bb2a): ok 27 of 32 (25.5-33.4 s), 5 failed rc 1; the first run: ok 21 (26.7-34.2 s), 11 failed rc 1 after 14-16 s.
+after the change (dev-bdb1db804): ok 32 of 32, min 27.73 s, max 29.87 s, 0 failed, all within the 30 s budget.
