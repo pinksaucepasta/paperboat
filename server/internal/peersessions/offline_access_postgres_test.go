@@ -184,7 +184,17 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 		t.Errorf("an account without access has host scopes %v in its CLI document", got)
 	}
 
+	// The owner's busy endpoints (a fleet of daemons, all used just now) do not crowd a member out of the host's
+	// document: at a 32-endpoint cut the member's pb ssh to the team machine was refused (scope_rejected).
+	for i := range 40 {
+		cli := fmt.Sprintf("offline_busy_%d_%s", i, suffix)
+		exec(`INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at,last_used_at) VALUES($1,$2,$1,'busy','desktop','test',ARRAY['machines:connect'],'active',$3,$3,now())`, cli, owner, now)
+		register(owner, cli, wire.RoleCLI)
+	}
 	offline, mesh := read(AuthorityUntilRevoked)
+	if got := offline["offline_cli_"+shellMember]; !slices.Equal(got, []string{"exec", "managed_ssh"}) {
+		t.Errorf("member behind 40 busy owner endpoints: host offline scopes %v, want [exec managed_ssh]", got)
+	}
 	for cli, account := range clis {
 		var want []string
 		for _, c := range offlineCapabilities {

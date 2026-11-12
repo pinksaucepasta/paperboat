@@ -7,9 +7,12 @@ import (
 	"time"
 )
 
-// maximumOfflinePeers bounds the CLI endpoints a host's document names for offline session starts: the most
-// recently used sessions of every account that may start a session there.
-const maximumOfflinePeers = 32
+// maximumOfflinePeers bounds the CLI endpoints a host's document names for offline session starts (the most recently
+// used sessions of every account that may start a session there), and the team hosts a member's CLI document names.
+// At 32 an account's busy endpoints crowded a member's out, and its pb ssh to a team machine was refused
+// (scope_rejected). 400 peers at five capabilities stay within half of peernetwork.MaxScopes; the document loops stop
+// adding at the bound rather than failing (Tailscale's netmap names every peer the policy allows).
+const maximumOfflinePeers = 400
 
 // offlineCapabilities maps the policy capability that decides a session (machine_capability_allowed, the same
 // function online descriptors use) to the network scope capability the daemon checks.

@@ -546,6 +546,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		if err != nil {
 			return NetworkConfigResult{}, err
 		}
+	teamHosts:
 		for _, h := range hosts {
 			p := byPeer[h.binding.EndpointID]
 			if p == nil {
@@ -560,7 +561,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 			}
 			for _, capability := range h.capabilities {
 				if scopes >= peernetwork.MaxScopes {
-					return NetworkConfigResult{}, ErrResourceLimit
+					break teamHosts
 				}
 				p.Scopes = append(p.Scopes, networkScope{ResourceKind: "machine_access", ResourceID: h.binding.EndpointID, ResourceGeneration: uint64(h.generation), Capability: capability, Direction: "dial", Port: peernetwork.NetworkPort, ExpiresAt: 0})
 				scopes++
@@ -572,6 +573,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 		if err != nil {
 			return NetworkConfigResult{}, err
 		}
+	offlinePeers:
 		for _, o := range offline {
 			p := byPeer[o.binding.EndpointID]
 			if p == nil {
@@ -586,7 +588,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 			}
 			for _, capability := range o.capabilities {
 				if scopes >= peernetwork.MaxScopes {
-					return NetworkConfigResult{}, ErrResourceLimit
+					break offlinePeers
 				}
 				p.Scopes = append(p.Scopes, networkScope{ResourceKind: "machine_access", ResourceID: self.EndpointID, ResourceGeneration: uint64(o.generation), Capability: capability, Direction: "accept", Port: peernetwork.NetworkPort, ExpiresAt: 0})
 				scopes++
