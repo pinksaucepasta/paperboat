@@ -22,6 +22,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/identitybootstrap"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/trustedkeys"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 // StatusError is a refused peer identity request. It is ErrInvalid; Transient lets the runtime retry
@@ -89,7 +90,7 @@ func New(config Config, credentials CredentialSource) (*Client, error) {
 		config.Timeout = 15 * time.Second
 	}
 	if config.Clock == nil {
-		config.Clock = func() time.Time { return time.Now().UTC() }
+		config.Clock = func() time.Time { return serverclock.Now().UTC() }
 	}
 	return &Client{config: config, base: base, creds: credentials, http: &http.Client{Transport: errorreport.TransportOperation(config.Transport, base.String(), "peer_identity"), Timeout: config.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrInvalid }}}, nil
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	identitystore "github.com/pinksaucepasta/paperboat/internal/hostruntime/identity"
 	"github.com/pinksaucepasta/paperboat/shared/peertransport/endpointidentity"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 type staticCredentials struct{}
@@ -197,5 +198,20 @@ func TestApprovalResponseWithTheLargestTrustSetIsRead(t *testing.T) {
 	status, err := client.post(context.Background(), "/v1/machine-peer-identity/status", "op_peer_machine_status_test", []byte(`{}`), &approved)
 	if err != nil || status != http.StatusOK || len(approved.TrustedKeys) != endpointidentity.MaxTrustedKeys {
 		t.Fatalf("status=%d keys=%d err=%v", status, len(approved.TrustedKeys), err)
+	}
+}
+
+// A machine whose clock is 10 minutes fast (X-27) must date its endpoint certificate on the server's
+// clock, or the server refuses it as issued in the future.
+func TestDefaultClockFollowsTheServerClock(t *testing.T) {
+	sent := time.Now()
+	serverclock.Observe(sent.Add(-10*time.Minute).UTC().Format(http.TimeFormat), sent, sent.Add(100*time.Millisecond))
+	t.Cleanup(func() { serverclock.Observe(time.Now().UTC().Format(http.TimeFormat), time.Now(), time.Now()) })
+	client, err := New(Config{ControlURL: "https://example.test", StateRoot: t.TempDir()}, staticCredentials{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skew := time.Since(client.config.Clock()); skew < 9*time.Minute {
+		t.Fatalf("default clock ignores the learned server offset: local - clock = %v", skew)
 	}
 }

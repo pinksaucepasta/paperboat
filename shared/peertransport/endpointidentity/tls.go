@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"math/big"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/clockleeway"
 )
 
 const maximumLeafLifetime = 24 * time.Hour
@@ -40,7 +42,7 @@ func NewTLSCertificate(certificate Certificate, rootPublic ed25519.PublicKey, pr
 	if lifetime <= 0 || lifetime > maximumLeafLifetime {
 		return tls.Certificate{}, errors.New("invalid QUIC leaf lifetime")
 	}
-	notBefore := now.UTC().Add(-time.Minute).Truncate(time.Second)
+	notBefore := now.UTC().Add(-clockleeway.Leeway).Truncate(time.Second)
 	notAfter := now.UTC().Add(lifetime).Truncate(time.Second)
 	if notAfter.After(verified.Claims.ExpiresAt) {
 		notAfter = verified.Claims.ExpiresAt
@@ -96,7 +98,7 @@ func tlsConfig(local tls.Certificate, peer PeerExpectation, alpn string, now fun
 			return errors.New("peer presented an invalid certificate chain")
 		}
 		leaf := state.PeerCertificates[0]
-		if now().Before(leaf.NotBefore) || !now().Before(leaf.NotAfter) || leaf.NotAfter.Sub(leaf.NotBefore) > maximumLeafLifetime+time.Minute {
+		if !clockleeway.Valid(now(), leaf.NotBefore, leaf.NotAfter) || leaf.NotAfter.Sub(leaf.NotBefore) > maximumLeafLifetime+clockleeway.Leeway {
 			return errors.New("peer QUIC leaf is not currently valid")
 		}
 		public, ok := leaf.PublicKey.(ed25519.PublicKey)

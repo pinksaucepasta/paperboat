@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/clockleeway"
 )
 
 const (
@@ -115,7 +117,7 @@ func Verify(raw []byte, rootPublic ed25519.PublicKey, expected Expected, now tim
 		expected.Generation != 0 && claims.Generation != expected.Generation {
 		return Certificate{}, errors.New("endpoint certificate identity does not match")
 	}
-	if now.Before(claims.IssuedAt) || !now.Before(claims.ExpiresAt) {
+	if !clockleeway.Valid(now, claims.IssuedAt, claims.ExpiresAt) {
 		return Certificate{}, errors.New("endpoint certificate is not currently valid")
 	}
 	return certificate, nil

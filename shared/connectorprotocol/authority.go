@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 )
 
 type AuthRequest struct {
@@ -836,7 +837,8 @@ func (f ClockFunc) Now() time.Time { return f() }
 
 type RealClock struct{}
 
-func (RealClock) Now() time.Time { return time.Now().UTC() }
+// RealClock is the server's clock as this process has learned it (a machine whose own clock is off).
+func (RealClock) Now() time.Time { return serverclock.Now().UTC() }
 
 // canonicalJSON validates duplicate keys, depth, trailing data and forbidden
 // secret-bearing fields before a payload is hashed or handed to an applier.

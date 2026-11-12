@@ -10,6 +10,8 @@ import (
 	"encoding/hex"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/clockleeway"
 )
 
 func TestCertificateIsDeterministicAndIdentityBound(t *testing.T) {
@@ -71,7 +73,7 @@ func TestCertificateRejectsTamperingSubstitutionAndExpiry(t *testing.T) {
 		{name: "wrong endpoint", raw: raw, root: rootPublic, expected: Expected{EndpointID: "cli_02"}, now: now},
 		{name: "wrong role", raw: raw, root: rootPublic, expected: Expected{Role: RoleMachine}, now: now},
 		{name: "wrong generation", raw: raw, root: rootPublic, expected: Expected{Generation: 3}, now: now},
-		{name: "expired", raw: raw, root: rootPublic, expected: Expected{AccountID: "account_01"}, now: now.Add(time.Minute)},
+		{name: "expired", raw: raw, root: rootPublic, expected: Expected{AccountID: "account_01"}, now: now.Add(time.Minute + clockleeway.Leeway)},
 	}
 	tampered := append([]byte(nil), raw...)
 	tampered[12] ^= 1
@@ -205,5 +207,39 @@ func TestTLSVerifierSelectsPeerCertificateFromTrustedKeyID(t *testing.T) {
 	}
 	if _, err := ClientTLS(localLeaf, PeerExpectation{RootPublic: localRoot, TrustedKeys: trusted, CertificateKeyID: keyID(localRoot), Certificate: peerRaw, Expected: Expected{AccountID: "account_01", Role: RoleMachine, EndpointID: "machine_01", Generation: 2}}, "paperboat-test-v1", func() time.Time { return now }); err == nil {
 		t.Fatal("peer certificate accepted with the wrong trusted key ID")
+	}
+}
+
+// A machine whose clock is 10 minutes fast or slow (X-27) must still build its QUIC leaf and be accepted by a
+// peer on the true time, and the other way round.
+func TestTLSLeafAcceptedAcrossTenMinutesOfClockSkew(t *testing.T) {
+	rootPublic, rootPrivate, _ := ed25519.GenerateKey(rand.Reader)
+	quicPublic, quicPrivate, _ := ed25519.GenerateKey(rand.Reader)
+	truth := time.Unix(1_800_000_000, 0).UTC()
+	certificate, err := Sign(rootPrivate, Claims{AccountID: "account_01", Role: RoleMachine, EndpointID: "machine_01", QUICPublicKey: quicPublic, Generation: 1, Serial: 1, IssuedAt: truth.Add(-time.Minute), ExpiresAt: truth.Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := certificate.MarshalBinary()
+	peer := PeerExpectation{RootPublic: rootPublic, Certificate: raw, Expected: Expected{AccountID: "account_01", Role: RoleMachine, EndpointID: "machine_01", Generation: 1}}
+	for _, skew := range []time.Duration{10 * time.Minute, -10 * time.Minute} {
+		leaf, err := NewTLSCertificate(certificate, rootPublic, quicPrivate, truth.Add(skew), time.Hour)
+		if err != nil {
+			t.Fatalf("skew %v: leaf: %v", skew, err)
+		}
+		for _, viewer := range []time.Duration{0, skew, -skew} {
+			at := truth.Add(viewer)
+			config, err := ClientTLS(leaf, peer, "paperboat-test-v1", func() time.Time { return at })
+			if err != nil {
+				t.Fatalf("skew %v viewer %v: %v", skew, viewer, err)
+			}
+			state := tls.ConnectionState{PeerCertificates: []*x509.Certificate{leaf.Leaf}, NegotiatedProtocol: "paperboat-test-v1"}
+			if err := config.VerifyConnection(state); err != nil {
+				t.Fatalf("skew %v viewer %v: %v", skew, viewer, err)
+			}
+		}
+	}
+	if _, err := NewTLSCertificate(certificate, rootPublic, quicPrivate, truth.Add(-2*clockleeway.Leeway), time.Hour); err == nil {
+		t.Fatal("a clock 30 minutes off was accepted")
 	}
 }
