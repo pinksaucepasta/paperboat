@@ -928,7 +928,7 @@ export function useTerminalConnection({
         apiRef.current = browser
         const ticketPath = `terminal-sessions/${encodeURIComponent(current.id)}/${accessMethod === "code" ? "guest-browser-ticket" : "browser-ticket"}`
         const opened = await openBrowserConnection(browser, {
-          session: { id: current.id, ownerAccount: current.owner_account, machineId: current.target.machine_id },
+          session: { id: current.id, machineId: current.target.machine_id },
           fromSequence: ackSequenceRef.current,
           canceled: () => disposedRef.current,
           fetchTicket: (key) =>

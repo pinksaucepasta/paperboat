@@ -11,7 +11,6 @@ import {
   type FilePasteProgress,
 } from "@/lib/terminal/file-paste"
 import { closeTerminal, startShell } from "@/lib/terminal/queries"
-import type { TerminalSession } from "@/lib/terminal/use-terminal-connection"
 
 /**
  * Everything about putting files in a machine's Paperboat Inbox over the terminal's end-to-end encrypted
@@ -36,7 +35,7 @@ export type Ticket = {
   root_fingerprint: string
 }
 
-export type ConnectionSession = { id: string; ownerAccount: string; machineId: string }
+export type ConnectionSession = { id: string; machineId: string }
 
 /** Checks a ticket against the terminal it was asked for and the machine's pinned key; builds the worker's connect config. */
 async function ticketConnectConfig(
@@ -45,8 +44,9 @@ async function ticketConnectConfig(
   session: ConnectionSession,
   fromSequence: string,
 ): Promise<{ config: Record<string, unknown>; pin: RootPin }> {
-  if (ticket.owner_account_id !== session.ownerAccount || ticket.machine_id !== session.machineId)
-    throw new Error("The ticket did not match this terminal's owner and machine.")
+  // owner_account_id is the machine's account, whose root signs its certificate; on a team-owned machine it
+  // is not the shell's owner, so only the machine is checked here and the worker verifies the certificate.
+  if (ticket.machine_id !== session.machineId) throw new Error("The ticket did not match this terminal's machine.")
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{2,127}$/.test(ticket.edge_node_id))
     throw new Error("The terminal ticket has no valid edge identity.")
   const pin = await verifyTicketKey(
@@ -70,7 +70,7 @@ async function ticketConnectConfig(
     config: {
       url: streamURL.href,
       subprotocols: ticket.subprotocols,
-      owner_account_id: session.ownerAccount,
+      owner_account_id: ticket.owner_account_id,
       machine_id: session.machineId,
       root_key_id: pin.rootKeyID,
       root_public_key: pin.publicKey,
@@ -204,10 +204,8 @@ export function uploadToInbox(
   let cancelUpload: () => unknown = () => undefined
   let filesDone = 0
   const connect = async (browser: BrowserTerminalAPI, sessionID: string, attached: { resolve: () => void; reject: (error: Error) => void }) => {
-    // The shell's owner is who the ticket must be for, as the terminal page checks.
-    const owner = await api<TerminalSession>(`terminal-sessions/${encodeURIComponent(sessionID)}/sharing`)
     return openBrowserConnection(browser, {
-      session: { id: sessionID, ownerAccount: owner.owner_account, machineId: machine.id },
+      session: { id: sessionID, machineId: machine.id },
       canceled: () => canceled,
       fetchTicket: (key) =>
         api<Ticket>(`terminal-sessions/${encodeURIComponent(sessionID)}/browser-ticket`, {

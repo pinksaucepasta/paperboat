@@ -96,7 +96,7 @@ func TestTerminalCodeAccessLifecycleAndBoundsPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	decision, err := service.ResolveTerminalGuestRole(ctx, guest.ID, session)
-	if err != nil || decision.Role != TerminalBrowserRoleViewer || decision.GuestSessionID != guest.ID || decision.AccountID != "" || decision.WorkspaceID != "personal" {
+	if err != nil || decision.Role != TerminalBrowserRoleViewer || decision.GuestSessionID != guest.ID || decision.AccountID != "" || decision.WorkspaceID != "personal" || decision.MachineAccountID != owner {
 		t.Fatalf("guest viewer %+v: %v", decision, err)
 	}
 	metadata, err := service.TerminalBrowserSession(ctx, "", guest.ID, session)

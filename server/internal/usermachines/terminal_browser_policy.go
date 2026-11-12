@@ -61,9 +61,12 @@ type TerminalBrowserAccessPolicyMutation struct {
 // attachment. ProcessGeneration is deliberately absent: the control plane
 // must fetch it from the current host snapshot before minting a host token.
 type TerminalBrowserDecision struct {
-	GuestSessionID       string              `json:"-"`
-	AccountID            string              `json:"account_id"`
-	OwnerAccountID       string              `json:"owner_account_id"`
+	GuestSessionID string `json:"-"`
+	AccountID      string `json:"account_id"`
+	OwnerAccountID string `json:"owner_account_id"`
+	// MachineAccountID is the machine's own account (it differs from the shell's owner on a team-owned machine):
+	// its endpoint certificate, and so the transport root a browser pins, belong to that account.
+	MachineAccountID     string              `json:"-"`
 	WorkspaceID          string              `json:"workspace_id"`
 	SessionID            string              `json:"terminal_session_id"`
 	MachineID            string              `json:"machine_id"`
@@ -206,7 +209,7 @@ func (s *Service) ResolveTerminalBrowserRole(ctx context.Context, accountID, ses
 	var actorVerified, actorIsOwner, member, teamPaid, ownerMember bool
 	var allowed, interactive []string
 	err := s.db.Pool().QueryRow(ctx, `
-SELECT s.id,s.owner_account,coalesce(s.owner_team_id,'personal'),m.id,m.environment_id,s.desired_state,s.runtime_state,
+SELECT s.id,s.owner_account,m.user_id,coalesce(s.owner_team_id,'personal'),m.id,m.environment_id,s.desired_state,s.runtime_state,
        actor.primary_email,actor.email_verified,
        p.audience,coalesce(p.team_id,''),p.allowed_emails,p.interactive_emails,p.generation,
        (s.owner_account=actor.id),
@@ -221,7 +224,7 @@ LEFT JOIN team_members tm ON tm.team_id=p.team_id AND tm.account_id=actor.id AND
 LEFT JOIN team_members owner_member ON owner_member.team_id=p.team_id AND owner_member.account_id=s.owner_account AND owner_member.active
 LEFT JOIN team_resource_bindings b ON b.team_id=p.team_id AND b.resource_kind='terminal_session' AND b.resource_id=s.id AND b.owner_account=s.owner_account AND b.active
 WHERE s.id=$1 AND s.deleted_at IS NULL`, sessionID, accountID).Scan(
-		&decision.SessionID, &decision.OwnerAccountID, &decision.WorkspaceID, &decision.MachineID, &decision.EnvironmentID, &desiredState, &runtimeState,
+		&decision.SessionID, &decision.OwnerAccountID, &decision.MachineAccountID, &decision.WorkspaceID, &decision.MachineID, &decision.EnvironmentID, &desiredState, &runtimeState,
 		&actorEmail, &actorVerified, &audience, &decision.TeamID, &allowed, &interactive, &decision.PolicyGeneration,
 		&actorIsOwner, &member, &teamPaid, &decision.TeamGeneration, &decision.MembershipGeneration, &decision.BindingGeneration, &ownerMember)
 	if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
@@ -472,6 +475,7 @@ func terminalBrowserPoliciesEqual(a, b TerminalBrowserAccessPolicy) bool {
 
 func sameTerminalBrowserDecision(want, got TerminalBrowserDecision) bool {
 	return want.GuestSessionID == got.GuestSessionID && want.AccountID == got.AccountID && want.OwnerAccountID == got.OwnerAccountID &&
+		want.MachineAccountID == got.MachineAccountID &&
 		want.WorkspaceID == got.WorkspaceID && want.SessionID == got.SessionID && want.Role == got.Role && want.PolicyGeneration == got.PolicyGeneration &&
 		want.MachineID == got.MachineID && want.EnvironmentID == got.EnvironmentID &&
 		want.HostWSSURL == got.HostWSSURL && want.TeamID == got.TeamID && want.TeamGeneration == got.TeamGeneration &&

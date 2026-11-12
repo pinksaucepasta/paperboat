@@ -28,12 +28,14 @@ func TestTerminalBrowserAccessPolicyPostgres(t *testing.T) {
 	session := "tbp_terminal_" + suffix
 	otherSession := "tbp_other_terminal_" + suffix
 	workspace := "tbp_workspace_" + suffix
+	teamMachine := "tbp_team_machine_" + suffix
+	teamSession := "tbp_team_terminal_" + suffix
 
 	cleanup := func() {
 		cleanupCtx, done := context.WithTimeout(context.Background(), 10*time.Second)
 		defer done()
-		_, _ = store.SQL().ExecContext(cleanupCtx, `DELETE FROM paperboat.user_machine_terminal_sessions WHERE id IN ($1,$2)`, session, otherSession)
-		_, _ = store.SQL().ExecContext(cleanupCtx, `DELETE FROM paperboat.user_machines WHERE id=$1`, machine)
+		_, _ = store.SQL().ExecContext(cleanupCtx, `DELETE FROM paperboat.user_machine_terminal_sessions WHERE id IN ($1,$2,$3)`, session, otherSession, teamSession)
+		_, _ = store.SQL().ExecContext(cleanupCtx, `DELETE FROM paperboat.user_machines WHERE id IN ($1,$2)`, machine, teamMachine)
 		_, _ = store.SQL().ExecContext(cleanupCtx, `DELETE FROM paperboat.teams WHERE team_id IN ($1,$2)`, team, unassociatedTeam)
 		_, _ = store.SQL().ExecContext(cleanupCtx, `DELETE FROM paperboat.users WHERE id IN ($1,$2,$3,$4,$5,$6,$7,$8)`, owner, viewer, domainViewer, subdomainViewer, suffixViewer, unverifiedViewer, teamMember, outsider)
 	}
@@ -74,7 +76,20 @@ VALUES($1,'terminal_session',$2,$3,1)`, team, session, owner)
 	}
 	if decision, err := service.ResolveTerminalBrowserRole(ctx, owner, session); err != nil || decision.Role != TerminalBrowserRoleOwner || decision.PolicyGeneration != 1 {
 		t.Fatalf("owner default decision=%+v err=%v", decision, err)
+	} else if decision.MachineAccountID != owner {
+		t.Fatalf("personal machine account=%q, want %q", decision.MachineAccountID, owner)
 	}
+	// A member's shell on a team-owned machine another account installed: the browser pins the
+	// machine's account, not the shell owner's (a member's console terminal never attached).
+	insert(`INSERT INTO paperboat.user_machines(id,user_id,owner_team_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online,configured_capabilities,observed_capabilities)
+VALUES($1,$2,$3,$4,'team-host','linux','amd64','/workspace','online','occupied',true,ARRAY['terminal_host'],ARRAY['terminal_host'])`, teamMachine, owner, team, "env_team_"+suffix)
+	insert(`INSERT INTO paperboat.user_machine_terminal_sessions(id,user_machine_id,owner_account,owner_team_id,name,launch_cwd,desired_state,runtime_state)
+VALUES($1,$2,$3,$4,'member','/workspace','open','running')`, teamSession, teamMachine, teamMember, team)
+	if decision, err := service.ResolveTerminalBrowserRole(ctx, teamMember, teamSession); err != nil || decision.Role != TerminalBrowserRoleOwner ||
+		decision.OwnerAccountID != teamMember || decision.MachineAccountID != owner || decision.WorkspaceID != team {
+		t.Fatalf("member shell on team machine decision=%+v err=%v", decision, err)
+	}
+	insert(`DELETE FROM paperboat.user_machine_terminal_sessions WHERE id=$1`, teamSession) // later catalog checks count the member's terminals
 	if _, err = service.TerminalBrowserAccessPolicy(ctx, viewer, session); !errors.Is(err, ErrTerminalSessionNotFound) {
 		t.Fatalf("nonowner policy read: %v", err)
 	}

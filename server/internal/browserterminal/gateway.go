@@ -41,7 +41,7 @@ var ErrBrowserKeyInvalid = errors.New("browser terminal key digest is invalid")
 type Decision struct {
 	GuestSessionID        string
 	UserID                string
-	OwnerAccountID        string
+	OwnerAccountID        string // the machine's account, whose transport root the browser pins (not the viewer's or the shell owner's)
 	WorkspaceID           string
 	TerminalSessionID     string
 	InspectorCredentialID string

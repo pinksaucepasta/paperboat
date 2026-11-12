@@ -60,7 +60,7 @@ func machineBrowserDecision(current usermachines.TerminalBrowserDecision, err er
 	if current.GuestSessionID != "" {
 		subjectID = current.GuestSessionID
 	}
-	return Decision{GuestSessionID: current.GuestSessionID, UserID: subjectID, OwnerAccountID: current.OwnerAccountID, WorkspaceID: current.WorkspaceID, TerminalSessionID: current.SessionID, MachineID: current.MachineID, EnvironmentID: current.EnvironmentID, HostWSSURL: current.HostWSSURL, EdgeNodeID: current.EdgeNodeID, EdgeProcessEpoch: current.EdgeProcessEpoch, EdgeEndpointHost: current.EdgeEndpointHost, Role: string(current.Role), PolicyGeneration: int64(current.PolicyGeneration), TeamGeneration: int64(current.TeamGeneration), MembershipGeneration: int64(current.MembershipGeneration), BindingGeneration: int64(current.BindingGeneration)}, nil
+	return Decision{GuestSessionID: current.GuestSessionID, UserID: subjectID, OwnerAccountID: current.MachineAccountID, WorkspaceID: current.WorkspaceID, TerminalSessionID: current.SessionID, MachineID: current.MachineID, EnvironmentID: current.EnvironmentID, HostWSSURL: current.HostWSSURL, EdgeNodeID: current.EdgeNodeID, EdgeProcessEpoch: current.EdgeProcessEpoch, EdgeEndpointHost: current.EdgeEndpointHost, Role: string(current.Role), PolicyGeneration: int64(current.PolicyGeneration), TeamGeneration: int64(current.TeamGeneration), MembershipGeneration: int64(current.MembershipGeneration), BindingGeneration: int64(current.BindingGeneration)}, nil
 }
 
 func (a MachineAuthorizer) SnapshotProcess(ctx context.Context, admission Decision) (int64, error) {

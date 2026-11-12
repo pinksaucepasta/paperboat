@@ -5,7 +5,7 @@ import { ApiError } from "@/lib/api"
 import { FilePasteError } from "@/lib/terminal/file-paste"
 
 const fingerprint = "a".repeat(64)
-const session = { id: "term_1", ownerAccount: "acct_1", machineId: "machine_1" }
+const session = { id: "term_1", machineId: "machine_1" }
 const ticket = (change: Partial<Ticket> = {}): Ticket => ({
   stream_url: "wss://edge.example.test/stream",
   edge_node_id: "edge-1",
@@ -49,13 +49,17 @@ test("a ticket for this terminal opens the connection with the pinned key, and e
   })
   expect(opened?.id).toBe("connection_1")
   expect(calls.config).toMatchObject({ terminal_session_id: "term_1", from_sequence: "7", root_key_id: "root_1", role: "owner" })
+  // The worker verifies the machine certificate under the ticket's account: the machine's, not the shell owner's.
+  const { browser: teamBrowser, calls: teamCalls } = fakeBrowser()
+  await openBrowserConnection(teamBrowser, { session, fetchTicket: async () => ticket({ owner_account_id: "acct_installer" }), onEvent: () => undefined })
+  expect(teamCalls.config).toMatchObject({ owner_account_id: "acct_installer" })
   expect(calls.discarded).toEqual([]) // the connect took the key
   emit({ type: "attached" })
   expect(seen).toEqual(["connection_1:root_1"])
 })
 
-test("a ticket for another owner, machine or an insecure address is refused and the key is discarded", async () => {
-  for (const change of [{ owner_account_id: "acct_2" }, { machine_id: "machine_2" }, { stream_url: "ws://edge.example.test/s" }, { role: "admin" as never }]) {
+test("a ticket for another machine or an insecure address is refused and the key is discarded", async () => {
+  for (const change of [{ machine_id: "machine_2" }, { stream_url: "ws://edge.example.test/s" }, { role: "admin" as never }]) {
     const { browser, calls } = fakeBrowser()
     await expect(openBrowserConnection(browser, { session, fetchTicket: async () => ticket(change), onEvent: () => undefined })).rejects.toThrow()
     expect(calls.discarded).toEqual(["identity_1"])

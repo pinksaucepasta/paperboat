@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"errors"
 	"reflect"
 	"strings"
 	"time"
@@ -17,9 +16,14 @@ import (
 	"golang.org/x/crypto/blake2s"
 )
 
-var (
-	ErrConflict    = errors.New("endpoint certificate registration conflicts with current authority")
-	ErrUnavailable = errors.New("endpoint certificate authority is unavailable")
+// AuthorityError is a refusal from the endpoint certificate authority, named so a support report shows its source.
+type AuthorityError string
+
+func (e AuthorityError) Error() string { return string(e) }
+
+const (
+	ErrConflict    AuthorityError = "endpoint certificate registration conflicts with current authority"
+	ErrUnavailable AuthorityError = "endpoint certificate authority is unavailable"
 )
 
 type RegisterRequest struct {
