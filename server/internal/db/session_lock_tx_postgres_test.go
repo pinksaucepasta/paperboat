@@ -81,8 +81,12 @@ func TestInTxUnderSessionLockReleasesOnEveryExitOnPostgres(t *testing.T) {
 		defer func() { _ = recover() }()
 		_ = store.InTxUnderSessionLock(ctx, key, seed, func(context.Context, *Tx) error { panic("boom") })
 	}()
-	if !free() {
-		t.Fatal("a panicking transaction left its session lock held")
+	// The backend ends the closed session, and its locks, a moment after the client closes the socket: wait for it
+	// (a waiter polls the same way); under load the immediate check once saw the lock still held.
+	for deadline := time.Now().Add(5 * time.Second); !free(); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("a panicking transaction left its session lock held")
+		}
 	}
 
 	// A committed transaction releases it, and the same session may take it again as a transaction lock.
