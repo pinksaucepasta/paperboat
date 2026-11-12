@@ -50,7 +50,7 @@ func TestScopedMeterSeparatesSharedRouteAndPreservesExpiredDelivery(t *testing.T
 	}
 }
 
-func TestScopedMeterBoundsCountersAndRotatesPrunedIdentity(t *testing.T) {
+func TestScopedMeterNeverRefusesAndRotatesPrunedIdentity(t *testing.T) {
 	_, key, _ := ed25519.GenerateKey(nil)
 	now := time.Now().UTC()
 	q, _ := NewQueue(1, 1<<20)
@@ -58,11 +58,12 @@ func TestScopedMeterBoundsCountersAndRotatesPrunedIdentity(t *testing.T) {
 	if err := m.Record("env", "route", 1, 1, 0, "grant:a"); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.Record("env", "route", 1, 1, 0, "grant:b"); !errors.Is(err, ErrQueueFull) {
-		t.Fatalf("unbounded counter=%v", err)
+	// Past the queue size the stream is still served; the counter waits for room.
+	if err := m.Record("env", "route", 1, 1, 0, "grant:b"); err != nil {
+		t.Fatalf("stream refused: %v", err)
 	}
-	if err := m.Flush(); err != nil {
-		t.Fatal(err)
+	if err := m.Flush(); !errors.Is(err, ErrQueueFull) {
+		t.Fatalf("flush with a full queue = %v", err)
 	}
 	before, _ := q.Next()
 	q.Ack(before.OperationID)
@@ -70,14 +71,18 @@ func TestScopedMeterBoundsCountersAndRotatesPrunedIdentity(t *testing.T) {
 	if err := m.Record("env", "route", 1, 1, 0, "grant:a"); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.Flush(); err != nil {
-		t.Fatal(err)
+	reported := map[Key]bool{}
+	for i := 0; i < 4 && len(reported) < 2; i++ {
+		_ = m.Flush()
+		if r, ok := q.Next(); ok {
+			reported[r.Key.counterIdentity()] = true
+			q.Ack(r.OperationID)
+		}
 	}
-	after, _ := q.Next()
-	if before.Key.counterIdentity() == after.Key.counterIdentity() {
-		t.Fatal("pruned absolute counter reused its server identity")
+	if len(reported) != 2 || reported[before.Key.counterIdentity()] {
+		t.Fatalf("pruned absolute counter reused its server identity or a counter was lost: %v", reported)
 	}
-	if len(m.Counters.Snapshot()) != 1 {
+	if len(m.Counters.Snapshot()) != 2 {
 		t.Fatal("expired delivered counter retained")
 	}
 }

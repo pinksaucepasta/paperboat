@@ -97,18 +97,19 @@ const usageBatchLimit = 2048
 // reached, then persists once. One report per tick capped delivery at 1/Interval and let the
 // queue fill, after which the meter refuses new streams.
 func (w *UsageWorker) deliver(ctx context.Context) (control.UsageResult, bool, error) {
+	// A failed flush (queue full for a new key) must not stop draining: delivering is what
+	// makes room again.
+	var flushErr error
 	if w.Prepare != nil {
-		if err := w.Prepare.Flush(); err != nil {
-			return control.UsageResult{}, false, err
-		}
+		flushErr = w.Prepare.Flush()
 	}
 	var last control.UsageResult
 	var sent bool
-	var sendErr error
+	sendErr := flushErr
 	for i := 0; i < usageBatchLimit && ctx.Err() == nil; i++ {
 		result, delivered, err := control.DeliverNext(ctx, w.Queue, w.Sink)
 		if err != nil {
-			sendErr = err
+			sendErr = errors.Join(sendErr, err)
 			break
 		}
 		if !delivered {

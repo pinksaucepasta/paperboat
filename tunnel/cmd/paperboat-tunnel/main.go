@@ -1145,8 +1145,16 @@ func (l *telemetryLifecycle) exportMetrics(ctx context.Context) {
 	if l.usageQueue != nil {
 		pending := l.usageQueue()
 		snapshots = append(snapshots, reporting.Snapshot{Name: edgetelemetry.MetricQueueDepth, Kind: "gauge", Value: float64(pending.Reports), Labels: map[string]string{"queue": "usage"}})
+		if usageQueueDeep(pending) {
+			l.reporter.Observe(ctx, "backlog", "failed", "capacity", "", -1)
+		}
 	}
 	l.reporter.MetricSnapshots(ctx, snapshots)
+}
+
+// usageQueueDeep is the alert threshold: half the queue is pending, so delivery is falling behind.
+func usageQueueDeep(stats usage.QueueStats) bool {
+	return stats.MaxReports > 0 && stats.Reports*2 >= stats.MaxReports
 }
 
 func (l *telemetryLifecycle) updateHealth(status edgetelemetry.HealthStatus, code, summary, repair string, retry edgetelemetry.RetryDecision) error {

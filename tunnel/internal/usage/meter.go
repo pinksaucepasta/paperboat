@@ -26,6 +26,8 @@ type Meter struct {
 	mu    sync.Mutex
 	start map[Key]time.Time
 	last  map[Key]uint64
+	// lastPrune throttles pruneDelivered once the counter map passes the queue size.
+	lastPrune time.Time
 }
 
 // RestoreBaseline marks durable counters as already represented by the
@@ -72,13 +74,14 @@ func (m *Meter) Record(environment, route string, revision uint64, ingress, egre
 	if egress != 0 {
 		keys = append(keys, Key{Authority: authorityID, Node: m.Node, Epoch: epoch, Environment: environment, Route: route, Direction: "egress"})
 	}
-	if !m.Counters.canAdd(keys, m.Queue.maxReports) {
-		for _, k := range m.Counters.pruneDelivered(m.now(), m.Queue, m.last) {
+	// Never refuse a stream because usage bookkeeping is full: counters are absolute, so a key
+	// that cannot be queued yet loses nothing and is retried by Flush. Past the soft limit,
+	// delivered idle counters are pruned at most once a minute (the scan is quadratic).
+	if now := m.now(); !m.Counters.canAdd(keys, m.Queue.maxReports) && now.Sub(m.lastPrune) >= time.Minute {
+		m.lastPrune = now
+		for _, k := range m.Counters.pruneDelivered(now, m.Queue, m.last) {
 			delete(m.last, k)
 			delete(m.start, k)
-		}
-		if !m.Counters.canAdd(keys, m.Queue.maxReports) {
-			return ErrQueueFull
 		}
 	}
 	if ingress != 0 {
@@ -106,6 +109,7 @@ func (m *Meter) Flush() error {
 	if m.Now != nil {
 		now = m.Now().UTC()
 	}
+	var enqueueErr error
 	for _, record := range m.Counters.Snapshot() {
 		if record.Bytes == 0 || record.Bytes <= m.last[record.Key.counterIdentity()] {
 			continue
@@ -124,12 +128,14 @@ func (m *Meter) Flush() error {
 			return err
 		}
 		if err := m.Queue.EnqueueLatest(report); err != nil {
-			return err
+			// Full queue: keep the absolute counter, report the rest, retry this key next flush.
+			enqueueErr = err
+			continue
 		}
 		m.last[record.Key.counterIdentity()] = record.Bytes
 		m.start[record.Key.counterIdentity()] = end
 	}
-	return m.Persist()
+	return errors.Join(enqueueErr, m.Persist())
 }
 
 func meterOperationID(key Key, absolute uint64) string {
