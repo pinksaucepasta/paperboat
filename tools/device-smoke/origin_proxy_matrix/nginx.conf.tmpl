@@ -12,6 +12,7 @@ http {
     ssl_certificate_key /certs/leaf.key;
     location / {
       proxy_pass http://app:9000;
+      proxy_buffering off;  # the usual setting for an app that streams (SSE): nginx otherwise holds a small response until it ends
       proxy_set_header Host $host;
       proxy_set_header X-Forwarded-Proto $scheme;
       proxy_set_header X-Forwarded-Host $host;

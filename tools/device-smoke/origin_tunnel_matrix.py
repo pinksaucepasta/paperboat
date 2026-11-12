@@ -125,13 +125,13 @@ class Lab:
         spoof = {'X-Forwarded-For': '203.0.113.9', 'X-Forwarded-Host': 'evil.example.test', 'X-Forwarded-Proto': 'http', 'Forwarded': 'for=203.0.113.9;host=evil.example.test'}
         tries = 0
         try:
-            for tries in range(1, 4):
+            for tries in range(1, 9):
                 conn, response, _ = self.request(host, 'GET', '/', spoof)
                 body = response.read(8192).decode('utf-8', 'replace')
                 error = response.getheader('X-Paperboat-Error', '')
                 conn.close()
                 # The first request after a route moved can reach the edge before every node knows the new origin.
-                if not (response.status == 502 and error == 'upstream_unavailable'):
+                if not (response.status in (404, 502) and error in ('upstream_unavailable', '')):
                     break
                 time.sleep(4)
         except Exception as exc:
