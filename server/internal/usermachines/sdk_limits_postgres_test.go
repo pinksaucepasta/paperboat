@@ -104,14 +104,19 @@ func TestSDKSessionRateLimits(t *testing.T) {
 	if _, err := f.service.ExecDescriptor(personal, f.account, source, f.machine, "ordinary-cli", "operation_ordinary_login", true); err != nil {
 		t.Fatal("SDK quota affected ordinary login")
 	}
-	// Expired admission credentials still reserve live operations until a destination outcome.
+	// An operation nobody ends (a terminal, a client dropped before it connected) is released when its admission
+	// expires: ~10 dropped runs once held a token's cap until the token was revoked (2026-11-12).
 	if _, err := f.store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machine_access_sessions SET expires_at=now()-interval '1 minute' WHERE cli_client_session_id=$1`, session); err != nil {
 		t.Fatal(err)
 	}
-	_, err = f.service.ExecDescriptor(ctx, f.account, "", f.machine, session, "operation_sdk_limit_expired", true)
+	if _, err := f.service.ExecDescriptor(ctx, f.account, "", f.machine, session, "operation_sdk_limit_expired", true); err != nil {
+		t.Fatalf("expired admissions still held the reservation: %v", err)
+	}
+	// A live operation still holds it until its destination outcome.
+	_, err = f.service.ExecDescriptor(ctx, f.account, "", f.machine, session, "operation_sdk_limit_live", true)
 	limited(err, "operations")
 	var access, operation string
-	if err := f.store.SQL().QueryRowContext(ctx, `SELECT id,operation_id FROM paperboat.user_machine_access_sessions WHERE cli_client_session_id=$1 AND state='active'`, session).Scan(&access, &operation); err != nil {
+	if err := f.store.SQL().QueryRowContext(ctx, `SELECT id,operation_id FROM paperboat.user_machine_access_sessions WHERE cli_client_session_id=$1 AND state='active' AND expires_at>now()`, session).Scan(&access, &operation); err != nil {
 		t.Fatal(err)
 	}
 	end := OfflineAuditEvent{EventID: "sdk_limit_end_" + f.suffix, Kind: "sdk_operation_ended", Capability: "exec", PeerAccountID: f.account, PeerEndpointID: session, SessionID: access, OperationID: operation, Outcome: "succeeded", OccurredAt: time.Now().UTC()}
