@@ -293,3 +293,59 @@ func TestHTTPServiceHoldsMoreCarriersThanItsQueueDepthUpToItsMaximum(t *testing.
 		t.Fatalf("carrier past the maximum = %d, want 503", status)
 	}
 }
+
+// A live carrier is closed once no admission names its machine key (the machine was removed), not left idle until
+// an edge handover cuts it and its redial is refused there (gated edge deploy 2026-11-12 22:06Z). A miss that still
+// knows the key (here: no live admission, as during a control outage) keeps it.
+func TestHTTPServiceClosesACarrierWhoseMachineKeyIsNoLongerAdmitted(t *testing.T) {
+	saved := carrierRebindInterval
+	carrierRebindInterval = 20 * time.Millisecond
+	defer func() { carrierRebindInterval = saved }()
+	clientTLS, serverTLS, _ := testEndpointCertificates(t)
+	identity := testCarrierIdentity()
+	var refusal atomic.Int32 // 0: admitted
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	service, err := NewHTTPService(ctx, ServiceConfig{Carrier: testCarrierConfig(1), TCP: &EndpointConfig{Address: "127.0.0.1:0", TLS: serverTLS, PeerBinding: func(tls.ConnectionState) (Identity, error) {
+		if r := refusal.Load(); r != 0 {
+			return Identity{}, carrierFailure{sentinel: ErrDurableAdmissionMissing, cause: CarrierRefusal(r)}
+		}
+		return identity, nil
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	clientTLS.NextProtos = []string{"h2"}
+	transport := &http2.Transport{TLSClientConfig: clientTLS}
+	defer transport.CloseIdleConnections()
+	reader, writer := io.Pipe()
+	defer writer.Close()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodConnect, "https://"+service.TCPAddr().String()+httpCarrierPath, reader)
+	response, err := transport.RoundTrip(req)
+	if err != nil || response.StatusCode != http.StatusOK {
+		t.Fatalf("CONNECT: %v", err)
+	}
+	defer response.Body.Close()
+	server, err := service.Accept(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := NewClient(ctx, &testHTTPLink{Reader: response.Body, Writer: writer}, testCarrierConfig(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	refusal.Store(int32(RefusalNoLiveAdmission))
+	select {
+	case <-server.Done():
+		t.Fatal("a carrier whose machine key is still known was closed")
+	case <-time.After(3 * time.Second): // well past the carrier's keepalive
+	}
+	refusal.Store(int32(RefusalUnknownMachine))
+	select {
+	case <-server.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("a carrier whose machine key no admission names stayed open")
+	}
+}

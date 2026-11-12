@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
@@ -206,12 +207,30 @@ func (s *HTTPService) handler(endpoint EndpointConfig, alpn string) http.Handler
 		case <-s.done:
 			_ = server.Close()
 		}
-		select {
-		case <-server.Done():
-		case <-r.Context().Done():
-			_ = server.Close()
-		case <-s.done:
-			_ = server.Close()
+		// A carrier whose machine key no admission names any more (the machine was removed or revoked) is closed
+		// now. Left open it sat idle until the next edge handover cut it, and its redial was refused there
+		// (gated edge deploy 2026-11-12 22:06Z: 34 unknown_machine refusals). A miss that leaves the key known
+		// (a newer session, an expired admission during a control outage) keeps the carrier.
+		recheck := time.NewTicker(carrierRebindInterval)
+		defer recheck.Stop()
+	serving:
+		for {
+			select {
+			case <-server.Done():
+				break serving
+			case <-r.Context().Done():
+				_ = server.Close()
+				break serving
+			case <-s.done:
+				_ = server.Close()
+				break serving
+			case <-recheck.C:
+				var refusal CarrierRefusal
+				if _, err := bindEndpointPeer(endpoint, *state); errors.As(err, &refusal) && refusal == RefusalUnknownMachine {
+					_ = server.Close()
+					break serving
+				}
+			}
 		}
 		_ = link.Close()
 		s.serversMu.Lock()
@@ -221,6 +240,9 @@ func (s *HTTPService) handler(endpoint EndpointConfig, alpn string) http.Handler
 }
 
 type httpTLSConnectionKey struct{}
+
+// carrierRebindInterval is how often a live carrier's machine key is checked against the current admissions.
+var carrierRebindInterval = 30 * time.Second
 
 func (s *HTTPService) Accept(ctx context.Context) (*Server, error) {
 	if s == nil || ctx == nil {
