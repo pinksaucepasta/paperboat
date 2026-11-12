@@ -1,0 +1,11 @@
+{
+ "check": "participants-poll",
+ "status": "PASS",
+ "seconds": 180,
+ "participants_requests": 2,
+ "allowed": 4,
+ "by_path": {
+  "/api/v1/terminal-sessions/terminalID/sharing": 2
+ },
+ "note": "live console, one browser terminal on throwaway prod machine lsc-t, 180 s, commit 29af443ac console build (participantsPollMs 60 s after a push)"
+}

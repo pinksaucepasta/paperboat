@@ -1,0 +1,27 @@
+{
+ "client": {
+  "status": "PASS",
+  "check": "perf-idle",
+  "metrics": {
+   "cpu_percent": 0.62,
+   "wakeups_per_s": 161.5,
+   "tls_mb_per_hour": 0.0,
+   "pb_processes": 8,
+   "seconds": 600
+  },
+  "budget_failures": []
+ },
+ "server": {
+  "status": "FAIL",
+  "check": "perf-idle-server",
+  "metrics": {
+   "api_requests_per_s": 0.12,
+   "api_requests": 72,
+   "seconds": 600
+  },
+  "budget_failures": [
+   "api_requests_per_s"
+  ]
+ },
+ "note": "staging, pb build dev-29af443ac-idle (unique version so its requests are counted by User-Agent), 600 s each, 2026-11-12"
+}

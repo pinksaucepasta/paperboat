@@ -1,0 +1,89 @@
+{
+ "check": "terminal-scale",
+ "target": "lsc-bt",
+ "terminals": 100,
+ "host_loadavg_start": [
+  "7.30",
+  "4.16",
+  "2.63"
+ ],
+ "open": {
+  "ready": 24,
+  "all_ready": false,
+  "seconds": {
+   "p50": 14.168,
+   "p95": 17.347,
+   "max": 17.414,
+   "n": 24
+  }
+ },
+ "echo": {
+  "seconds": {
+   "p50": 0.985,
+   "p95": 2.761,
+   "max": 2.925,
+   "n": 72
+  },
+  "missing": 0
+ },
+ "burst": {
+  "closed": 10,
+  "client_close_seconds": 50.13,
+  "others_echo": {
+   "p50": 0.283,
+   "p95": 0.583,
+   "max": 0.583,
+   "n": 14
+  },
+  "others_missing": 0,
+  "session_cleanup_failures": 0,
+  "session_cleanup_seconds": 32.5
+ },
+ "shared": {
+  "viewers": 50,
+  "stopped": 1,
+  "flood": {
+   "owner_MB_cumulative_per_second": [
+    1.6,
+    4.3,
+    4.3,
+    4.3,
+    4.3,
+    4.3,
+    4.3,
+    4.3,
+    4.3,
+    4.3,
+    4.3,
+    4.3
+   ],
+   "finished": 17,
+   "of": 50,
+   "seconds_to_finish": {
+    "p50": 2.036,
+    "p95": 2.036,
+    "max": 2.036,
+    "n": 17
+   }
+  },
+  "echo_after_flood": {
+   "p50": 0.272,
+   "p95": 0.533,
+   "max": 0.533,
+   "n": 17
+  },
+  "missing": 33,
+  "stopped_viewer_alive_after_continue": true
+ },
+ "final_cleanup": {
+  "closed_and_deleted": 91,
+  "expected": 91,
+  "seconds": 204.5
+ },
+ "host_loadavg_end": [
+  "0.67",
+  "1.33",
+  "2.14"
+ ],
+ "status": "FAIL"
+}

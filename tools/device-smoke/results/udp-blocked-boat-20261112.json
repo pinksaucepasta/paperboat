@@ -1,0 +1,9 @@
+{
+ "status": "PASS",
+ "target": "lsc-bt",
+ "check": "udp-blocked",
+ "recovery_seconds": 2.8,
+ "block_removed": true,
+ "enrollment_unchanged": true,
+ "note": "prod, throwaway pair lsc-bc -> lsc-bt on two Boat VMs, pb dev-29af443ac-lsc, outbound UDP except 53/443 dropped on the target, carrier restarted"
+}

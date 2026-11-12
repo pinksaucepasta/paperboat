@@ -1,0 +1,31 @@
+{
+ "check": "tunnel-throughput",
+ "status": "FAIL",
+ "rtt_ms": 50,
+ "netem_dev": "eth0",
+ "ping_to_gateway": "",
+ "runs": [
+  {
+   "bytes": 209715200,
+   "seconds": 43.35,
+   "http": "200",
+   "mbit_s": 38.7
+  },
+  {
+   "bytes": 209715200,
+   "seconds": 38.78,
+   "http": "200",
+   "mbit_s": 43.3
+  },
+  {
+   "bytes": 209715200,
+   "seconds": 43.61,
+   "http": "200",
+   "mbit_s": 38.5
+  }
+ ],
+ "median_mbit_s": 38.7,
+ "budget_mbit_s": 150,
+ "enrollment_unchanged": true,
+ "note": "prod edge, throwaway lsc-bt (origin, netem 50 ms on its egress) -> lsc-bc download, Boat VMs, build dev-29af443ac-lsc2"
+}
