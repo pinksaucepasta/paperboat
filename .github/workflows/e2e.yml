@@ -3,8 +3,8 @@ name: End-to-end
 # Core end-to-end (server/internal/app TestE2ECore): the real server on PostgreSQL, the real edge and relay, and two
 # real pb daemons in systemd containers: exec both ways, managed SSH, a file send, a preview and a tunnel through the
 # edge; a server restart and an edge restart like deploys, all of it again each time; exec through the relay only.
-# Required check `End-to-end core` (tools/branch-protection.json): it runs in the merge queue (merge_group) and on pushes to main
-# that touch a core path; before a push: tools/ci-test.sh e2e. On pull_request its jobs are skipped (reported as passed): two
+# Required check `End-to-end core` (tools/branch-protection.json): merge_group and explicit test runs.
+# Before a push: tools/ci-test.sh e2e. On pull_request its jobs are skipped (reported as passed): two
 # 30-minute jobs per PR filled the hosted runners and queued the required checks for 10+ minutes (2026-11-12). The multi job (tools/e2e/run.sh) is not required
 # and runs only on r21-e2e* pushes and dispatch.
 on:

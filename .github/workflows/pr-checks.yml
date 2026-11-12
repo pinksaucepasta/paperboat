@@ -14,7 +14,7 @@ concurrency:
   group: pr-checks-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
-  # Pull requests get the fast Go check only; the heavy one runs once per merge-queue group (the combined tree of up to 8 PRs).
+  # Pull requests get the fast Go check only; the heavy one runs on each speculative merge-queue build.
   fast:
     name: Go format and vet
     if: github.event_name != 'push'
@@ -35,7 +35,8 @@ jobs:
     # merge_group only: on a pull request this job is skipped, which GitHub reports as passed, so the PR can enter the queue.
     if: github.event_name == 'merge_group'
     runs-on: ubuntu-latest
-    # A cold cache compiles every importer with -race (PRs #3 and #5 were cut off at 5 minutes); a group holds up to 8 PRs.
+    # A cold cache compiles every importer with -race (PRs #3 and #5 were cut off at 5 minutes).
+    # Queue builds include preceding queued changes.
     timeout-minutes: 45
     services:
       postgres:

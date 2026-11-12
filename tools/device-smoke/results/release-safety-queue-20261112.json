@@ -1,0 +1,63 @@
+{
+  "window_start": "2026-11-11T21:15:00Z",
+  "window_end": "2026-11-11T23:15:00Z",
+  "window_hours": 2,
+  "merged_pr_count": 9,
+  "prs_per_hour": 4.5,
+  "merged_pr_numbers": [
+    37,
+    38,
+    43,
+    49,
+    51,
+    54,
+    56,
+    57,
+    59
+  ],
+  "queue_group_builds": 36,
+  "group_workflow_outcomes": {
+    "success": 27,
+    "failed": 9
+  },
+  "group_workflow_wall_median_seconds": 583.5,
+  "prs_with_multiple_group_heads": {
+    "73": 2,
+    "72": 2,
+    "70": 2,
+    "71": 2,
+    "69": 2,
+    "65": 3,
+    "64": 3,
+    "63": 3,
+    "10": 2,
+    "38": 2,
+    "37": 2,
+    "54": 2,
+    "51": 2
+  },
+  "oldest_run_fetched": "2026-11-11T18:12:00Z",
+  "interpretation": "Historical baseline under previous settings, before five-build tuning. Queue is currently disabled for the direct-push window; this is not a five-build throughput measurement. Group outcome uses all fetched workflow conclusions; rebuilding a PR is not evidence of bisection.",
+  "ruleset_round_trip": {
+    "id": 27052448,
+    "enforcement": "disabled",
+    "parameters": {
+      "merge_method": "REBASE",
+      "max_entries_to_build": 5,
+      "min_entries_to_merge": 1,
+      "max_entries_to_merge": 1,
+      "min_entries_to_merge_wait_minutes": 0,
+      "grouping_strategy": "ALLGREEN",
+      "check_response_timeout_minutes": 60
+    }
+  },
+  "workflow_split_commit": "1a0166d2c24f064511c319d358362485617859d3",
+  "method": "Merged pull requests with base main within the half-open UTC window, divided by two hours; merge-group workflows grouped by head SHA. Source: GitHub pulls REST endpoint and both pages of merge_group workflow runs.",
+  "checks": {
+    "ruleset_api_round_trip": "passed; parameters match; enforcement preserved disabled",
+    "workflow_yaml_behavior": "unchanged from merged #47; comments only",
+    "domain_policy": "passed",
+    "relative_markdown_links": "passed",
+    "json_and_shell_syntax": "passed"
+  }
+}

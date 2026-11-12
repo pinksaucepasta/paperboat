@@ -378,16 +378,17 @@ force pushes. Fetch the landed tooling before submitting from an older lane chec
 `PB_PUSH_BASE` selects a protected throwaway target for testing the same submission path.
 
 Required checks are `Go format and vet`, `Repository policy checks`, `Console lint and types`, `Targeted Go checks` and
-`End-to-end core`. The merge queue is batched (user decision 2026-11-12, prior art: GitHub's merge queue groups and
-bors-ng batching): a group of up to 8 PRs (the queue waits 3 minutes to collect one) is built on the combined tree and
-tested once, and GitHub bisects a group that fails. The heavy checks run only on the queue's `merge_group` event:
+`End-to-end core`. GitHub's native per-PR merge queue uses five concurrent speculative builds
+(user decision 2026-11-12), rebase merges and no collection delay. Each queued PR gets its own
+integration build, including preceding queue entries; merge limits do not combine those builds
+or provide bors-style batching. The heavy checks run only on the queue's `merge_group` event:
 `Targeted Go checks` (vet and -race tests of the changed packages and their importers, every package on its own fresh
 `paperboat_pr_<n>_test` PostgreSQL database; the group's diff selects the packages) and `End-to-end core` (the real
 server, edge, relay and two daemons: exec, ssh, send, preview, tunnel, restarts; green three times in a row before it was
 required). On a pull request those two jobs are skipped, which GitHub reports as passed, so a PR can enter the queue;
-pull requests run only the seconds-long `Go format and vet` (gofmt of the changed files, go vet of the changed
-packages), the policy checks and the console checks. Every change is still tested before it lands, in its group. PostgreSQL
-and race checks run on GitHub, never on oracle. Pushes to main run only the newest tip's health runs (CI, Cross-platform, Terminal drain;
+pull requests run only the fast `Go format and vet` (gofmt of the changed files, go vet of the changed
+packages), the policy checks and the console checks. Every change is tested on its speculative
+integration tree before it lands. PostgreSQL and race checks run on GitHub, never on oracle. Pushes to main run only the newest tip's health runs (CI, Cross-platform, Terminal drain;
 older runs are cancelled), and the Go cache is warmed only when the dependency set changes. `PB_PUSH_BASE` selects a
 protected throwaway target for testing the same submission path.
 
@@ -398,8 +399,9 @@ are disabled: serialized submissions and the merge queue validate integration wi
 forcing every lane to rebase and restart CI after each unrelated merge.
 The script refuses an unprotected target because auto-merge there could merge before CI.
 The public organization repository supports GitHub's [merge queue](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue).
-`branch-protection.sh --apply` installs its rebase queue with no bypass actors, groups of 1 to 8 and a 3-minute
-collection wait. Required workflows run on both `pull_request` and `merge_group` (the heavy jobs skip on pull requests);
+`branch-protection.sh --apply` installs its rebase queue with no bypass actors, five parallel builds and one PR per merge.
+The API requires minimum-group fields: one entry and zero wait make collection inactive.
+Required workflows run on both `pull_request` and `merge_group` (the heavy jobs skip on pull requests);
 full health jobs run on main. Queue checks have a 60-minute response timeout (hosted runners took up to 5 minutes to pick a job up on 2026-11-11, and a 5-minute timeout ejected the first PR from the queue); each job keeps its own short timeout. Bootstrap order: land tooling, broadcast
 the switch to every lane, then apply the rules. Never enable protection ahead of the tooling.
 
