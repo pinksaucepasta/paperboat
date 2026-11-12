@@ -54,7 +54,8 @@ func executeManagedSSH(cobraCommand *cobra.Command, ctx *command.Context, machin
 		identity      config.ManagedSSHIdentity
 		remoteCommand string
 	)
-	if includePassthrough {
+	inProcess := includePassthrough && !opensshOptionsFirst(passthrough)
+	if inProcess {
 		remoteCommand, err = windowsSSHRemoteCommand(passthrough)
 		if err != nil {
 			return invocationError(err)
@@ -84,7 +85,7 @@ func executeManagedSSH(cobraCommand *cobra.Command, ctx *command.Context, machin
 	if err != nil {
 		return err
 	}
-	if includePassthrough {
+	if inProcess {
 		input, err := windowsSSHCommandInput(cobraCommand.InOrStdin())
 		if err != nil {
 			_ = connection.Close()

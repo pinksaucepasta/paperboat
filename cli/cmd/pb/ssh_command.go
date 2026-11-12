@@ -618,6 +618,12 @@ func agentForwardingNotice(platform string, args []string) string {
 	return ""
 }
 
+// opensshOptionsFirst reports whether the arguments after `--` start with an OpenSSH option (-N, -L, -o ...). They are for ssh,
+// not a remote command: a Windows client then hands them to ssh.exe instead of running them through its in-process command client.
+func opensshOptionsFirst(args []string) bool {
+	return len(args) > 0 && strings.HasPrefix(args[0], "-") && args[0] != "-"
+}
+
 // requestsAgentForwarding reports whether OpenSSH arguments ask for agent forwarding: -A (alone or inside a flag cluster)
 // or -o ForwardAgent=yes, before the remote command starts. A later -a turns it off again.
 func requestsAgentForwarding(args []string) bool {
