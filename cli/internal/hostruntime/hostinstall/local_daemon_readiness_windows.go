@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -200,11 +201,11 @@ func waitWindowsLocalDaemonVersion(ctx context.Context, request Request) error {
 			return err
 		}
 		state, err := readWindowsLocalDaemonSnapshot(bounded, request.OwnerSID, request.StateRoot)
-		if err == nil && state.DaemonVersion == request.Source.Version && state.DaemonState == "ready" {
+		if err == nil && localDaemonServing(state, request.Source.Version, windowsMachineRegistered(request.StateRoot)) {
 			return nil
 		}
 		if err == nil {
-			err = fmt.Errorf("local daemon reports version %q, state %q; want version %q, state ready", state.DaemonVersion, state.DaemonState, request.Source.Version)
+			err = fmt.Errorf("local daemon reports version %q, state %q; want version %q, state ready (or signed out on an enrolled machine)", state.DaemonVersion, state.DaemonState, request.Source.Version)
 		}
 		probes.note(err)
 		select {
@@ -213,6 +214,12 @@ func waitWindowsLocalDaemonVersion(ctx context.Context, request Request) error {
 		case <-tick.C:
 		}
 	}
+}
+
+// windowsMachineRegistered reports whether this account's machine registration is on disk under stateRoot.
+func windowsMachineRegistered(stateRoot string) bool {
+	info, err := os.Lstat(filepath.Join(stateRoot, "machine-registration.json"))
+	return err == nil && info.Mode().IsRegular()
 }
 
 // A stable declaration can still have an older loaded child after an interrupted
