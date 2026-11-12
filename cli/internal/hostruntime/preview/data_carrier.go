@@ -870,7 +870,8 @@ func (c *DataCarrierPreviewCarrier) forward(ctx context.Context, stream *connect
 	// path. Non-HTTP bytes (including TCP/unix origins, which stay opaque)
 	// keep the exact raw path below.
 	if c != nil && c.inspector != nil && isPreviewHTTPScheme(target.Scheme) {
-		if identity := previewCaptureIdentity(lease, c.browserRouteGeneration); identity != nil && c.inspector.Enabled(identity.ResourceID) {
+		// A Host header to apply needs the parsed request too: a byte copy would hand the origin the visitor's public Host.
+		if identity := previewCaptureIdentity(lease, c.browserRouteGeneration); identity != nil && (c.inspector.Enabled(identity.ResourceID) || target.HostHeader != "") {
 			buffered := bufio.NewReader(stream)
 			if peekHTTPExchange(buffered) {
 				return c.forwardPublicHTTP(ctx, stream, buffered, target, lease, *identity)
