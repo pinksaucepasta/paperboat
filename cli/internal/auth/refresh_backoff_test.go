@@ -124,3 +124,24 @@ func TestRuntimeRefreshBare401SignsOutOnlyAfterConfirmation(t *testing.T) {
 		t.Fatalf("lasting 401s did not sign out after the confirmation (calls %d): %v", calls.Load(), err)
 	}
 }
+
+// A command's source does not wait out a second refresh of an unreachable server in the same process: pb exec asked
+// for its credential twice and spent two refresh timeouts before the daemon could open the session offline.
+func TestCommandSourceDoesNotRetryAFailedRefreshInTheSameProcess(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(503)
+	}))
+	defer server.Close()
+	store, _ := credentialFailureFixture(t, server.URL)
+	source := commandSource(store, server.URL)
+	for range 3 {
+		if _, err := source.Refresh(); err == nil {
+			t.Fatal("a refresh of an unavailable server succeeded")
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("one command made %d refresh requests to an unavailable server, want 1", calls.Load())
+	}
+}

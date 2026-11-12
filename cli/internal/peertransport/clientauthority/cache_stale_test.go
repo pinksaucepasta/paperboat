@@ -9,8 +9,9 @@ import (
 )
 
 // A command after a short idle gap must not wait for two control-plane round trips: a stale
-// local identity is served while exactly one background refresh replaces it, and only an entry
-// past localServeStaleFor makes the caller wait for the server.
+// local identity is served while exactly one background refresh replaces it, however old it is
+// (F21-01: it stays usable until revoked or replaced), and only a certificate within
+// localCertificateMargin of its expiry makes the caller wait for the server.
 func TestResolveLocalServesStaleIdentityWhileOneRefreshRuns(t *testing.T) {
 	var calls atomic.Int32
 	release := make(chan struct{})
@@ -65,8 +66,12 @@ func TestResolveLocalServesStaleIdentityWhileOneRefreshRuns(t *testing.T) {
 		}
 	}
 	before := calls.Load()
-	resolve(start.Sub(start) + localServeStaleFor + time.Hour)
+	if got := resolve(3 * time.Hour); got.RootPublic[0] != 2 || calls.Load() != before {
+		t.Fatal("an identity hours old (Paperboat unreachable all along) made the caller wait for the server")
+	}
+	// The refreshed certificate (issued at 25 s, 24 h) is within the margin of its expiry: wait for a renewal.
+	resolve(25*time.Second + 24*time.Hour - localCertificateMargin/2)
 	if calls.Load() != before+1 {
-		t.Fatal("an identity past localServeStaleFor was served without waiting for the server")
+		t.Fatal("a certificate about to expire was served without waiting for the server")
 	}
 }

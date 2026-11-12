@@ -51,7 +51,14 @@ func NewSource(cfg *config.Config) (*Source, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Source{Store: store, Issuer: cfg.ServerURL}, nil
+	return commandSource(store, cfg.ServerURL), nil
+}
+
+// commandSource remembers a failed refresh for this process, as a runtime source does: with Paperboat unreachable
+// a command asked for its credential several times and each ask waited out a refresh (pb exec spent 60-90 s on
+// two before the daemon opened the session offline, F21-01).
+func commandSource(store config.ProfileStore, issuer string) *Source {
+	return &Source{Store: store, Issuer: issuer, retry: &refreshRetry{}}
 }
 
 // WithContext binds refresh work to the owning runtime's lifetime. The returned

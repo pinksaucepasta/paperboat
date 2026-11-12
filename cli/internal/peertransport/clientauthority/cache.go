@@ -3,6 +3,7 @@ package clientauthority
 import (
 	"context"
 	"crypto/ed25519"
+	"errors"
 	"sync"
 	"time"
 
@@ -24,11 +25,12 @@ type cacheEntry struct {
 
 const trustRefreshInterval = 15 * time.Second
 
-// localServeStaleFor is how long ResolveLocal answers from an older cached local identity while
-// one background refresh replaces it, so a command after a short idle gap does not wait for two
-// control-plane round trips before it can dial. Past it, or once the local certificate is about
-// to expire, resolution waits for the server as before.
-const localServeStaleFor = 2 * time.Minute
+// localCertificateMargin: ResolveLocal answers from the cached local identity while its certificate
+// has more than this left, and one background refresh replaces an entry older than
+// trustRefreshInterval. The identity stays usable until revoked or replaced, not until it ages: with
+// Paperboat unreachable a wait for the server hung every new session (F21-01, a staging relay-only
+// cut failed every exec from ~2 min). Only a certificate about to expire makes resolution wait.
+const localCertificateMargin = 2 * time.Minute
 
 // localRefreshTimeout bounds one background local refresh.
 const localRefreshTimeout = 30 * time.Second
@@ -90,7 +92,7 @@ func (c *Cache) ResolveLocal(ctx context.Context, request Request) (Authority, e
 	if cached, ok := c.entries[key]; ok && !now.Before(cached.refreshedAt) &&
 		cached.authority.LocalCertificate.Claims.ExpiresAt.After(now.Add(time.Second)) {
 		age := now.Sub(cached.refreshedAt)
-		if age < trustRefreshInterval || age < localServeStaleFor && cached.authority.LocalCertificate.Claims.ExpiresAt.After(now.Add(localServeStaleFor)) {
+		if age < trustRefreshInterval || cached.authority.LocalCertificate.Claims.ExpiresAt.After(now.Add(localCertificateMargin)) {
 			if age >= trustRefreshInterval && !c.refreshing[key] {
 				c.refreshing[key] = true
 				go c.refreshLocal(key, request)
@@ -121,8 +123,9 @@ func (c *Cache) ResolveLocal(ctx context.Context, request Request) (Authority, e
 	return resolved, nil
 }
 
-// refreshLocal replaces a stale local identity in the background. A failure leaves the stale
-// entry to age out; the next resolution after localServeStaleFor then waits for the server.
+// refreshLocal replaces a stale local identity in the background. An unanswered refresh keeps the
+// entry, and so does a 408/429 or a 5xx; a refusal the server answered (401/403/404/410: revoked, signed
+// out, removed) drops it, so the next resolution waits for the server and reports the refusal.
 func (c *Cache) refreshLocal(key cacheKey, request Request) {
 	defer func() {
 		c.mu.Lock()
@@ -133,6 +136,15 @@ func (c *Cache) refreshLocal(key cacheKey, request Request) {
 	defer cancel()
 	request.Now = serverclock.Now().UTC()
 	resolved, err := c.resolveLocal(ctx, request)
+	var refused *api.APIError
+	if errors.As(err, &refused) && (refused.Status == 401 || refused.Status == 403 || refused.Status == 404 || refused.Status == 410) {
+		c.mu.Lock()
+		if cached, ok := c.entries[key]; ok {
+			cached.authority.Clear()
+			delete(c.entries, key)
+		}
+		c.mu.Unlock()
+	}
 	if err != nil {
 		return
 	}
