@@ -9,6 +9,7 @@ Run from oracle; every remote step is `ssh ubuntu@anvit` (STAGING_HOST). Subcomm
   seed                 account, paid entitlement and a console session for the staging test account (idempotent)
   enroll <name>        print one machine enrollment token on stdout only (TOKEN_CMD for tools/probe/canary-setup.sh)
   edge <image>           register and run a staging edge (tunnel container, carrier on TCP 18445) for the staging account
+  relay <image>          register and run a staging relay (DERP/WSS on TCP 18444, reachable from outside anvit) for the staging account
   reset                new empty database; the regional certificate is kept (Let's Encrypt limits duplicates)
   status | down | logs
 The API is https://<region>.<regional domain>:<port>, served by the server itself (regional TLS with a Let's
@@ -276,20 +277,12 @@ EDGE_PORT = 18445   # carrier TCP (inside anvit's open 10000-59999 range); the p
 EDGE_NAME, EDGE_DIR = "pb-stg-edge", "edge"
 
 
-def edge(image):
-    """Account-scoped self-hosted edge for usr_staging, as plain `docker run` (no pbh, no host firewall or nft change).
-    Registration mirrors server/internal/controlplane/selfhost_tunnel_process_test.go: what the claim flow would store.
-    Limits: no browser access (preview URLs never carry a port, so previews need 443) and no HTTP/3 (UDP is closed)."""
+def carrier_certificate(host):
+    """Self-signed Ed25519 carrier certificate for HOST: (cert PEM, key PEM, SHA-256 hex of its SubjectPublicKeyInfo = the node's tls_spki_sha256 pin)."""
     from cryptography import x509
-    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import ed25519
     from cryptography.x509.oid import NameOID
-    host = f"{REGION}.{domain()}"
-    api = api_url()
-    b64 = lambda raw: base64.urlsafe_b64encode(raw).decode().rstrip("=")
-    seed = ed25519.Ed25519PrivateKey.generate()
-    raw_seed = seed.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
-    raw_pub = seed.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
     key = ed25519.Ed25519PrivateKey.generate()   # the carrier certificate must be Ed25519
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, host)])
     now = datetime.datetime.now(datetime.timezone.utc)
@@ -297,6 +290,31 @@ def edge(image):
             .not_valid_before(now - datetime.timedelta(minutes=5)).not_valid_after(now + datetime.timedelta(days=365))
             .add_extension(x509.SubjectAlternativeName([x509.DNSName(host)]), critical=False).sign(key, None))
     pin = hashlib.sha256(cert.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)).hexdigest()
+    return (cert.public_bytes(serialization.Encoding.PEM).decode(),
+            key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode(), pin)
+
+
+def sealed_credential(credential):
+    """secrets.Encrypt: AES-256-GCM, key = sha256(PAPERBOAT_ENCRYPTION_KEY), 12-byte nonce first; hex."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    sealing = read_remote_env(HOST, "~/" + DIR + "/server.env")["PAPERBOAT_ENCRYPTION_KEY"]
+    nonce = os.urandom(12)
+    return (nonce + AESGCM(hashlib.sha256(sealing.encode()).digest()).encrypt(nonce, credential.encode(), None)).hex()
+
+
+def edge(image):
+    """Account-scoped self-hosted edge for usr_staging, as plain `docker run` (no pbh, no host firewall or nft change).
+    Registration mirrors server/internal/controlplane/selfhost_tunnel_process_test.go: what the claim flow would store.
+    Limits: no browser access (preview URLs never carry a port, so previews need 443) and no HTTP/3 (UDP is closed)."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+    host = f"{REGION}.{domain()}"
+    api = api_url()
+    b64 = lambda raw: base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    seed = ed25519.Ed25519PrivateKey.generate()
+    raw_seed = seed.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
+    raw_pub = seed.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    cert_pem, key_pem, pin = carrier_certificate(host)
     suffix = secrets.token_hex(6)
     install, node, credential, usage = f"stg_install_{suffix}", f"stg_node_{suffix}", secrets.token_urlsafe(32), f"stg_usage_{suffix}"
     jwks = remote(f"curl -sf -m10 http://127.0.0.1:{LOOPBACK}/.well-known/jwks.json")
@@ -304,8 +322,7 @@ def edge(image):
         "runtime.credential": credential, "jwks.json": jwks,
         "revocations.json": json.dumps({"jtis": [], "environments": [], "connector_generations": [], "key_ids": []}),
         "usage.key": json.dumps({"key_id": usage, "edge_node_id": node, "private_key": b64(raw_seed + raw_pub)}),
-        "tls.crt": cert.public_bytes(serialization.Encoding.PEM).decode(),
-        "tls.key": key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode(),
+        "tls.crt": cert_pem, "tls.key": key_pem,
         "deployment.json": json.dumps({
             "self_hosted": True, "browser_access_enabled": False, "browser_login_origin": "", "control_url": api, "credential_issuer": api,
             "control_credential_file": "/state/runtime.credential", "control_ca_file": "", "jwks_file": "/state/jwks.json",
@@ -321,18 +338,15 @@ def edge(image):
     remote(f"docker rm -f {EDGE_NAME} >/dev/null 2>&1; rm -rf {EDGE_DIR}; mkdir -m 700 {EDGE_DIR}")
     for filename, content in files.items():
         remote(f"umask 077 && cat > {EDGE_DIR}/{filename}", stdin=content)
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-    sealing = read_remote_env(HOST, "~/" + DIR + "/server.env")["PAPERBOAT_ENCRYPTION_KEY"]   # secrets.Encrypt: AES-256-GCM, key = sha256(key)
-    nonce = os.urandom(12)
-    sealed = nonce + AESGCM(hashlib.sha256(sealing.encode()).digest()).encrypt(nonce, credential.encode(), None)
-    sql("DELETE FROM paperboat.selfhost_installations WHERE scope_id='usr_staging'")
+    sealed = sealed_credential(credential)
+    sql("DELETE FROM paperboat.selfhost_installations WHERE scope_id='usr_staging' AND capability='tunnel'")
     # Replaced fixture nodes still have route/carrier/audit FKs. Drain them; the isolated DB reset owns their teardown.
     sql("UPDATE paperboat.control_tunnel_nodes SET state='draining',registry_expires_at=now() WHERE id LIKE 'stg_node_%'")
     sql(f"INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,region,failure_domain,"
         f"roles,transports,capacity_limit,capacity_observed_at,registry_expires_at,tls_spki_sha256) VALUES('{node}','{install}','1.0','initial_fixture','{host}',{EDGE_PORT},{EDGE_QUIC_PORT},"
         f"'registered','{REGION}','{REGION}',ARRAY['edge'],ARRAY['http2','http3'],32,now(),now()+interval '1 hour',decode('{pin}','hex'))")
     sql(f"INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) "
-        f"VALUES('{install}','{node}',decode('{raw_pub.hex()}','hex'),decode('{hashlib.sha256(credential.encode()).hexdigest()}','hex'),decode('{sealed.hex()}','hex'),"
+        f"VALUES('{install}','{node}',decode('{raw_pub.hex()}','hex'),decode('{hashlib.sha256(credential.encode()).hexdigest()}','hex'),decode('{sealed}','hex'),"
         f"'{EDGE_NAME}','tunnel','account','usr_staging','{install}',true)")
     # Staging cannot pass the 443 ingress probe, so its edge is marked verified by hand, and the account is pinned to its own pool
     # (a self-hosted edge serves only accounts whose pool policy is self-hosted-only).
@@ -343,6 +357,44 @@ def edge(image):
     args = f"-node-id {node} -edge-pool {install} -relay-id {node} -relay-region {REGION} -relay-name {EDGE_NAME} -health-address 127.0.0.1:9090 -deployment-config /state/deployment.json -state-path /state/state.json"
     remote(f"docker run -d --name {EDGE_NAME} --restart unless-stopped --user 0:0 -v $PWD/{EDGE_DIR}:/state -p {EDGE_PORT}:{EDGE_PORT} -p {EDGE_QUIC_PORT}:{EDGE_QUIC_PORT}/udp "
            f"-p 18446:18446 -p 18447:18447 {image} {args}")
+    return {"node": node, "installation": install}
+
+
+RELAY_NAME, RELAY_DIR = "pb-stg-relay", "relay"
+RELAY_TCP_PORT, RELAY_QUIC_PORT = 18444, 18449   # both inside anvit's open 10000-59999 range; the QUIC (UDP) one is closed on the host
+
+
+def relay(image):
+    """Account-scoped self-hosted relay for usr_staging, as plain `docker run` (no pbh, no host firewall change). Machines outside anvit
+    (UDP dropped) reach it over its DERP/WSS carrier on TCP RELAY_TCP_PORT after the 5 s QUIC fallback. Registration mirrors the claim
+    flow for capability 'relay' (server/internal/selfhost/enrollment.go); a relay needs no usage key and no 443 ingress probe."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+    host, api = f"{REGION}.{domain()}", api_url()
+    cert_pem, key_pem, pin = carrier_certificate(host)
+    raw_pub = ed25519.Ed25519PrivateKey.generate().public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    suffix = secrets.token_hex(6)
+    install, node, credential = f"stg_relay_install_{suffix}", f"stg_relay_{suffix}", secrets.token_urlsafe(32)
+    files = {"runtime.credential": credential, "jwks.json": remote(f"curl -sf -m10 http://127.0.0.1:{LOOPBACK}/.well-known/jwks.json"),
+             "tls.crt": cert_pem, "tls.key": key_pem}
+    remote(f"docker rm -f {RELAY_NAME} >/dev/null 2>&1; rm -rf {RELAY_DIR}; mkdir -m 700 {RELAY_DIR}")
+    for filename, content in files.items():
+        remote(f"umask 077 && cat > {RELAY_DIR}/{filename}", stdin=content)
+    sealed = sealed_credential(credential)
+    sql("DELETE FROM paperboat.selfhost_installations WHERE scope_id='usr_staging' AND capability='relay'")
+    sql("UPDATE paperboat.control_tunnel_nodes SET state='draining',registry_expires_at=now() WHERE id LIKE 'stg_relay_%' AND id NOT LIKE 'stg_relay_install_%'")
+    sql(f"INSERT INTO paperboat.control_tunnel_nodes(id,edge_pool,protocol_version,process_epoch,endpoint_host,endpoint_tcp_port,endpoint_quic_port,state,region,failure_domain,"
+        f"roles,transports,capacity_limit,capacity_observed_at,registry_expires_at,tls_spki_sha256) VALUES('{node}','{install}','1.0','initial_fixture','{host}',{RELAY_TCP_PORT},{RELAY_QUIC_PORT},"
+        f"'registered','{REGION}','{REGION}',ARRAY['relay'],ARRAY['derp_quic','derp_wss'],256,now(),now()+interval '1 hour',decode('{pin}','hex'))")
+    sql(f"INSERT INTO paperboat.selfhost_installations(id,node_id,installation_public_key,runtime_hash,runtime_ciphertext,name,capability,scope_kind,scope_id,claim_id,claim_complete) "
+        f"VALUES('{install}','{node}',decode('{raw_pub.hex()}','hex'),decode('{hashlib.sha256(credential.encode()).hexdigest()}','hex'),decode('{sealed}','hex'),"
+        f"'{RELAY_NAME}','relay','account','usr_staging','{install}',true)")
+    sql(f"INSERT INTO paperboat.selfhost_pool_policies(scope_kind,scope_id,capability,mode,installation_ids) VALUES('account','usr_staging','relay','self-hosted-only',ARRAY['{install}']) "
+        "ON CONFLICT (scope_kind,scope_id,capability) DO UPDATE SET mode=excluded.mode, installation_ids=excluded.installation_ids")
+    args = (f"-listen 0.0.0.0:{RELAY_QUIC_PORT} -wss-listen 0.0.0.0:{RELAY_TCP_PORT} -tls-cert /state/tls.crt -tls-key /state/tls.key -jwks /state/jwks.json "
+            f"-issuer {api} -node-id {node} -node-generation 1 -control-url {api} -control-credential-file /state/runtime.credential -node-state /state/node-state.json")
+    remote(f"docker run -d --name {RELAY_NAME} --restart unless-stopped --user 0:0 -v $PWD/{RELAY_DIR}:/state "
+           f"-p {RELAY_TCP_PORT}:{RELAY_TCP_PORT} -p {RELAY_QUIC_PORT}:{RELAY_QUIC_PORT}/udp {image} {args}")
     return {"node": node, "installation": install}
 
 
@@ -359,7 +411,7 @@ def reset():
 
 
 COMMANDS = {"init": (init, 0), "build": (build, 1), "up": (up, 1), "seed": (seed, 0), "enroll": (enroll, 1), "reset": (reset, 0),
-            "status": (lambda: print(json.dumps(status())), 0), "edge": (lambda image: print(json.dumps(edge(image))), 1), "down": (lambda: remote("docker compose down"), 0),
+            "status": (lambda: print(json.dumps(status())), 0), "edge": (lambda image: print(json.dumps(edge(image))), 1), "relay": (lambda image: print(json.dumps(relay(image))), 1), "down": (lambda: remote("docker compose down"), 0),
             "logs": (lambda: print(remote("docker compose logs --no-color --tail 80 server")), 0)}
 
 if __name__ == "__main__":
