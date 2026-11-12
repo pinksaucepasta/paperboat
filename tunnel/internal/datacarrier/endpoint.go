@@ -401,10 +401,11 @@ func (l *QUICListener) closed() bool {
 	}
 }
 
+// A final keepalive restarts QUIC's idle clock; idle plus keepalive stays within 15 s.
 func endpointQUICConfig(config Config) *quic.Config {
 	return &quic.Config{
-		MaxIdleTimeout:                 2 * time.Minute,
-		KeepAlivePeriod:                config.KeepAliveInterval,
+		MaxIdleTimeout:                 10 * time.Second,
+		KeepAlivePeriod:                min(config.KeepAliveInterval, 5*time.Second),
 		MaxIncomingStreams:             int64(config.MaximumStreams + config.QueueDepth + 1),
 		MaxIncomingUniStreams:          -1,
 		InitialStreamReceiveWindow:     uint64(config.StreamWindow),
