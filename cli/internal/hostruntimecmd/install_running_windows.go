@@ -130,6 +130,10 @@ func installUpdateSource(ctx context.Context, sourcePath string, source installs
 				return "", hostinstall.ErrUpdateNotReady
 			}
 		}
+		if diskspace.IsFull(err) {
+			// The helper could not be staged (its protected copy, or the bridge files): nothing was installed.
+			return "", hostinstall.ErrInsufficientSpace
+		}
 		return "", runtimeFailure(elevatedInstallFailureMessage(err), err)
 	}
 	return layout.Binary, nil
