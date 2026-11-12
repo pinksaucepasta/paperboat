@@ -610,7 +610,7 @@ func normalizeAccessMode(value string) (string, error) {
 	if value == "" {
 		return AccessPublic, nil
 	}
-	if value != AccessPublic && value != AccessPrivate && value != "team" {
+	if !validAccessMode(value) {
 		return "", fmt.Errorf("%w: access_mode must be public, private or team", ErrInvalidInput)
 	}
 	return value, nil

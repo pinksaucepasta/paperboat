@@ -531,8 +531,8 @@ func validateEffectiveRouteCandidate(tunnel dbsqlc.Tunnel, candidate dbsqlc.Tunn
 		}
 	}
 	if candidate.Protocol == "private_tcp" {
-		if tunnel.AccessMode != AccessPrivate || candidate.OriginScheme != "tcp" {
-			return fmt.Errorf("%w: tcp_private routes require a private tunnel and tcp origin", ErrInvalidInput)
+		if tunnel.AccessMode == AccessPublic || candidate.OriginScheme != "tcp" {
+			return fmt.Errorf("%w: tcp_private routes require a private or team tunnel and tcp origin", ErrInvalidInput)
 		}
 		if candidate.MatchType != "catch_all" || candidate.MatchHostname.Valid || candidate.WildcardSuffix.Valid || candidate.PathPrefix.Valid {
 			return fmt.Errorf("%w: tcp_private routes require a catch-all host match without a path prefix", ErrInvalidInput)

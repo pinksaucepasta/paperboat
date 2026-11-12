@@ -101,10 +101,14 @@ func validateCreateRecord(input CreateRecord) error {
 	if !validActorType(input.ActorType) {
 		return fmt.Errorf("%w: actor type is invalid", ErrInvalidInput)
 	}
-	if input.AccessMode != AccessPublic && input.AccessMode != AccessPrivate {
+	if !validAccessMode(input.AccessMode) {
 		return fmt.Errorf("%w: access mode is invalid", ErrInvalidInput)
 	}
 	return validateOrigin(input.Origin)
+}
+
+func validAccessMode(value string) bool {
+	return value == AccessPublic || value == AccessPrivate || value == AccessTeam
 }
 
 func validatePatchRecord(input PatchRecord) error {
@@ -135,7 +139,7 @@ func validatePatchRecord(input PatchRecord) error {
 			return err
 		}
 	}
-	if input.AccessMode != nil && *input.AccessMode != AccessPublic && *input.AccessMode != AccessPrivate {
+	if input.AccessMode != nil && !validAccessMode(*input.AccessMode) {
 		return fmt.Errorf("%w: access mode is invalid", ErrInvalidInput)
 	}
 	if input.ExpiresAt != nil && !input.Now.IsZero() && !input.ExpiresAt.After(input.Now.UTC()) {

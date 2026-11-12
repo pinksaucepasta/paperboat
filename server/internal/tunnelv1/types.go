@@ -17,6 +17,7 @@ const (
 	DesiredDeleted = "deleted"
 	AccessPublic   = "public"
 	AccessPrivate  = "private"
+	AccessTeam     = "team"
 )
 
 // OriginRequest is the initial route target supplied when a durable tunnel is

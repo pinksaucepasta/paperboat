@@ -188,3 +188,54 @@ func TestPublisherWorkspaceOwnershipOnPostgres(t *testing.T) {
 		t.Fatalf("revoked preview stop: %v", err)
 	}
 }
+
+// X-21: `pb --workspace T tunnel create NAME --port P --team` on a machine in the team was refused invalid_request.
+func TestTeamAccessTunnelCreateInTeamWorkspaceOnPostgres(t *testing.T) {
+	f := newTRK07PostgresFixture(t)
+	ctx := context.Background()
+	owner, host := f.addAccount(t, "team-access-owner")
+	team := "ws-t-" + strings.ReplaceAll(f.suffix, "_", "-")
+	ids := []string{"workspace-team-http-" + f.suffix, "workspace-team-tcp-" + f.suffix}
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := f.database.SQL().ExecContext(ctx, query, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		exec(`DELETE FROM paperboat.tunnels WHERE id=ANY($1::text[])`, ids)
+		exec(`DELETE FROM paperboat.managed_hostnames WHERE resource_id=ANY($1::text[])`, ids)
+		exec(`DELETE FROM paperboat.billing_workspaces WHERE team_id=$1`, team)
+		exec(`DELETE FROM paperboat.teams WHERE team_id=$1`, team)
+	})
+	exec(`UPDATE paperboat.user_machines SET online=true WHERE id=$1`, host)
+	exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, team, owner)
+	exec(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true)`, team, owner)
+	exec(`INSERT INTO paperboat.billing_workspaces(id,team_id,state,product_code,quantity,period_start,period_end) VALUES($1,$2,'active','team-pro',2,now()-interval '1 hour',now()+interval '1 hour')`, "team:"+team, team)
+	exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, team, host, owner)
+	scope, err := workspace.Parse(team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The tcp tunnel must get a private_tcp route: a team tunnel is never a public TCP listener.
+	for i, origin := range []OriginRequest{{Scheme: "http", Address: "127.0.0.1:3000"}, {Scheme: "tcp", Address: "127.0.0.1:5432"}} {
+		id := ids[i]
+		hash := sha256.Sum256([]byte(id))
+		endpoint := testutil.EndpointID(id)
+		input := CreateRecord{OperationID: "op-" + id, TunnelID: id, AccountID: owner, Name: "team-access-" + origin.Scheme, AccessMode: AccessTeam, StableEndpointID: endpoint, StableEndpoint: "https://" + testutil.EndpointLabel(endpoint) + ".tunnels.example.test", HostID: host, ActorID: owner, AuditActorID: owner, ActorType: "host", AuditEventID: "audit-" + id, Origin: origin, IdempotencyKey: id, RequestHash: hash, CorrelationID: id, RequestID: id}
+		result, err := f.repository.Create(workspace.WithContext(ctx, scope), input)
+		if err != nil {
+			t.Fatalf("team-access %s tunnel create in the team workspace: %v", origin.Scheme, err)
+		}
+		if result.Tunnel.OwnerTeamID.String != team || result.Tunnel.AccessMode != AccessTeam {
+			t.Fatalf("tunnel=%+v", result.Tunnel)
+		}
+		var protocol string
+		if err := f.database.SQL().QueryRowContext(ctx, `SELECT protocol FROM paperboat.tunnel_routes WHERE tunnel_id=$1`, id).Scan(&protocol); err != nil {
+			t.Fatal(err)
+		}
+		if want := map[string]string{"http": "http", "tcp": "private_tcp"}[origin.Scheme]; protocol != want {
+			t.Fatalf("%s team tunnel route protocol=%s, want %s", origin.Scheme, protocol, want)
+		}
+	}
+}
