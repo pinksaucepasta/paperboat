@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"bytes"
+	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"testing"
 	"time"
 )
@@ -158,5 +159,31 @@ func TestFlushHoldOnStreamEndReleasesTheHeldOutput(t *testing.T) {
 	c.flushHold()
 	if got := joined(drain(c)); got != "tail" {
 		t.Fatalf("released %q on stream end, want tail", got)
+	}
+}
+
+// X-24: output already queued for Read when a discarded answer arrives (up to 16 MiB after a flood) is dropped too, not
+// painted for as long as the flood took to print; the screen and what follows the cut are kept.
+func TestHoldDropsOutputAlreadyQueuedForRead(t *testing.T) {
+	c := holdConn()
+	c.target = &resolver.TerminalTarget{}
+	c.ackNotify = make(chan struct{}, 1)
+	c.out <- frame(0, "flood1")
+	c.out <- frame(6, "flood2")
+	c.startHold(7)
+	c.resolveHold(7, 12, true) // the cut is the end of flood2
+	c.out <- helperOutput{checkpoint: true, data: []byte("SCREEN"), endSequence: 12}
+	c.out <- frame(12, "after")
+	var got bytes.Buffer
+	buf := make([]byte, 64)
+	for got.Len() < len("SCREENafter") {
+		n, err := c.Read(buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got.Write(buf[:n])
+	}
+	if got.String() != "SCREENafter" {
+		t.Fatalf("read %q, want the screen and the output after the cut only", got.String())
 	}
 }

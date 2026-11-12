@@ -706,6 +706,9 @@ func (c *helperTerminalConn) Read(p []byte) (int, error) {
 			}
 			return 0, io.EOF
 		}
+		if output, ok = c.skipDropped(output); !ok {
+			continue
+		}
 		c.current = &output
 	}
 	start := uint64(0)

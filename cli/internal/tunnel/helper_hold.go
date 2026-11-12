@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -30,7 +31,7 @@ type helperHold struct {
 	buffered  []helperOutput
 	bytes     int
 	timer     *time.Timer
-	dropBelow uint64 // after a discarded answer: output that ends at or before this is dropped on arrival
+	dropBelow atomic.Uint64 // after a discarded answer: output that ends at or before this is dropped on arrival and when read
 }
 
 // sendOut passes one output on to Read; false means the connection is done.
@@ -48,7 +49,8 @@ func (c *helperTerminalConn) startHold(etx uint64) {
 	h := &c.hold
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.active, h.etx, h.dropBelow = true, etx, 0
+	h.active, h.etx = true, etx
+	h.dropBelow.Store(0)
 	if h.timer != nil {
 		h.timer.Stop()
 	}
@@ -71,12 +73,12 @@ func (c *helperTerminalConn) routeOutput(output helperOutput) bool {
 		h.bytes += len(output.data)
 		return true
 	}
-	if h.dropBelow != 0 {
+	if limit := h.dropBelow.Load(); limit != 0 {
 		var keep bool
-		if output, keep = trimBelow(output, h.dropBelow); !keep {
+		if output, keep = trimBelow(output, limit); !keep {
 			return true
 		}
-		h.dropBelow = 0
+		h.dropBelow.Store(0)
 	}
 	return c.sendOut(output)
 }
@@ -153,13 +155,29 @@ func (c *helperTerminalConn) resolveHold(etx, through uint64, discarded bool) {
 		h.timer.Stop()
 		h.timer = nil
 	}
-	h.dropBelow = through
+	h.dropBelow.Store(through)
 	for _, output := range held {
 		if kept, ok := trimBelow(output, through); ok {
-			h.dropBelow = 0
+			h.dropBelow.Store(0)
 			if !c.sendOut(kept) {
 				return
 			}
 		}
 	}
+}
+
+// skipDropped applies a discarded Ctrl-C's cut to output that was already queued for Read when the answer came: a flood
+// leaves up to helperOutputQueueDecodedLimit (16 MiB) there, and painting it takes as long as the flood took to print
+// (measured X-24: 19 MB for 40 s after Ctrl-C). It takes no lock: routeOutput holds the hold's mutex while it waits
+// for Read to take from the same queue.
+func (c *helperTerminalConn) skipDropped(output helperOutput) (helperOutput, bool) {
+	limit := c.hold.dropBelow.Load()
+	if limit == 0 || output.checkpoint || !output.byteCursor {
+		return output, true
+	}
+	kept, ok := trimBelow(output, limit)
+	if ok {
+		c.hold.dropBelow.CompareAndSwap(limit, 0)
+	}
+	return kept, ok
 }
