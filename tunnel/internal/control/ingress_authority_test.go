@@ -630,3 +630,32 @@ func TestIngressAuthoritySharedFetchOutlivesTheCallerThatStartedIt(t *testing.T)
 		t.Fatalf("a caller's deadline counted as a control failure (failures=%d)", authority.failures)
 	}
 }
+
+// A caller fenced by Invalidate whose deadline passes during a slow refresh gets the held decisions, not an error:
+// a TLS handshake that got the error was dropped (edge handover 2026-11-12 22:28Z: a preview closed after 2 s).
+func TestIngressAuthorityFencedCallerGetsTheHeldSetWhenTheRefreshIsSlow(t *testing.T) {
+	decision := ingressAuthorityTestDecision(time.Now().UTC())
+	var calls atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) > 1 {
+			time.Sleep(600 * time.Millisecond)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": []connectorprotocol.IngressDecision{decision}})
+	}))
+	defer server.Close()
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := &IngressAuthority{Client: client, NodeID: decision.EdgeNodeID, ProcessEpoch: decision.EdgeProcessEpoch}
+	if got, err := authority.Snapshot(context.Background()); err != nil || len(got) != 1 {
+		t.Fatalf("first fetch: %d decisions, %v", len(got), err)
+	}
+	authority.Invalidate()
+	short, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	got, err := authority.Snapshot(short)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("fenced caller during a slow refresh: %d decisions, %v; want the held one", len(got), err)
+	}
+}

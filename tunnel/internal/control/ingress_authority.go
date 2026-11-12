@@ -224,6 +224,19 @@ func (a *IngressAuthority) snapshot(ctx context.Context, force bool) ([]connecto
 // refresh returns the current decisions, fetching first when the set is missing, invalidated,
 // forced, or holds an expired decision, unless refreshes are backing off after a failure.
 func (a *IngressAuthority) refresh(ctx context.Context, force bool) ([]connectorprotocol.IngressDecision, error) {
+	// A caller fenced only by Invalidate whose deadline passes while the fetch runs gets the held set: its routes
+	// stay valid, and a TLS handshake dropped instead was a failed request (edge handover 2026-11-12 22:28Z: the
+	// replacement activated a route generation, the server answered slowly, a preview handshake closed after 2 s).
+	// A forced refresh (a route this edge has not heard of) still fails with the deadline.
+	fenced := !force
+	timedOut := func(err error) ([]connectorprotocol.IngressDecision, error) {
+		a.mu.Lock() // servedLocked renews public decisions in place
+		defer a.mu.Unlock()
+		if !fenced || a.fetched.IsZero() {
+			return nil, err
+		}
+		return a.servedLocked(time.Now().UTC()), nil
+	}
 	for {
 		a.mu.Lock()
 		now := time.Now().UTC()
@@ -252,7 +265,7 @@ func (a *IngressAuthority) refresh(ctx context.Context, force bool) ([]connector
 				force = false
 				continue
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				return timedOut(ctx.Err())
 			}
 		}
 		done := make(chan struct{})
@@ -274,7 +287,7 @@ func (a *IngressAuthority) refresh(ctx context.Context, force bool) ([]connector
 		select {
 		case <-done:
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return timedOut(ctx.Err())
 		}
 		a.mu.Lock()
 		if a.fetched.IsZero() {
