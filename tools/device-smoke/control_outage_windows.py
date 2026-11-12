@@ -21,7 +21,8 @@ import control_outage as c  # noqa: E402
 import winhost  # noqa: E402
 
 import os  # noqa: E402
-L, R, W = "win-stg-l", "win-stg-r", os.environ.get("OUTAGE_WINDOWS_NAME", "win-stg-w")
+L, R = os.environ.get("OUTAGE_L", "win-stg-l"), os.environ.get("OUTAGE_R", "win-stg-r")
+W = os.environ.get("OUTAGE_WINDOWS_NAME", "win-stg-w")  # the target machine; control_outage_mac sets it to the Mac
 PB = c.PB
 
 
@@ -33,6 +34,17 @@ class Env:
             raise SystemExit("PB_SMOKE_WINDOWS_PB (and SMOKE_WINDOWS_SSH) must name the Windows device")
         self.api, self.port = urlsplit(args.server).hostname, urlsplit(args.server).port or 443
         self.ips = sorted({info[4][0] for info in socket.getaddrinfo(self.api, None, socket.AF_INET)})
+
+    stem, echo, enter = "windows", "cmd /c echo", "r"  # what runs and presses Enter on this target (a Mac overrides them)
+
+    def long_command(self, seconds):
+        return f"cmd /c 'ping -n {seconds} 127.0.0.1 >nul & echo long-lw-done'"
+
+    def scratch(self):
+        return self.device.temp_dir("pb-outage")
+
+    def spawn_wl(self, seconds, directory):
+        return self.device.spawn([str(self.pb), "exec", L, "--", "sh", "-c", f"sleep {seconds}; echo long-wl-done"], directory)
 
     def ct(self, name, command, timeout=120):
         return c.in_ct(self.host, name, command, timeout)
@@ -58,7 +70,7 @@ class Env:
 
 
 def exec_lw(env, marker):
-    rc, out = env.ct(L, f"{PB} exec {W} -- cmd /c echo {marker}", 90)
+    rc, out = env.ct(L, f"{PB} exec {W} -- {env.echo} {marker}", 90)
     return rc == 0 and marker in out, out.strip()[-200:]
 
 
@@ -68,12 +80,12 @@ def exec_wl(env, marker):
 
 
 def exec_rw(env, marker):
-    rc, out = env.ct(R, f"{PB} exec {W} -- cmd /c echo {marker}", 90)
+    rc, out = env.ct(R, f"{PB} exec {W} -- {env.echo} {marker}", 90)
     return rc == 0 and marker in out, out.strip()[-200:]
 
 
 def refused_rw(env):
-    rc, out = env.ct(R, f"{PB} exec {W} -- cmd /c echo should-not-run", 90)
+    rc, out = env.ct(R, f"{PB} exec {W} -- {env.echo} should-not-run", 90)
     return rc != 0 and "should-not-run" not in out, out.strip()[-200:]
 
 
@@ -81,7 +93,7 @@ def terminal_lw(env, marker):
     """A new `pb connect` to the Windows machine: type a command and look for its result (the typed text shows $((6*7));
     only PowerShell on the machine prints 42)."""
     script = f"""#!/bin/bash
-(sleep 15; printf 'echo {marker}-$((6*7))\\r'; sleep 4; printf 'exit\\r'; sleep 4) | timeout 90 script -qec '{PB} connect {W}' /dev/null 2>&1 | tr -d '\\r'
+(sleep 15; printf 'echo {marker}-$((6*7))\\{env.enter}'; sleep 4; printf 'exit\\{env.enter}'; sleep 4) | timeout 90 script -qec '{PB} connect {W}' /dev/null 2>&1 | tr -d '\\r'
 """
     encoded = base64.b64encode(script.encode()).decode()
     env.ct(L, f"echo {encoded} | base64 -d > /tmp/term-{marker}.sh", 30)
@@ -101,8 +113,8 @@ def status_healthy(env):
 
 def start_long(env, seconds, directory):
     """One long exec each way, started before the cut: L -> W in the container, W -> L as a detached process."""
-    c.detached(env.host, L, f"rm -f /tmp/long-lw.out /tmp/long-lw.rc; {PB} exec {W} -- cmd /c 'ping -n {seconds} 127.0.0.1 >nul & echo long-lw-done' < /dev/null > /tmp/long-lw.out 2>&1; echo $? > /tmp/long-lw.rc")
-    return env.device.spawn([str(env.pb), "exec", L, "--", "sh", "-c", f"sleep {seconds}; echo long-wl-done"], directory)
+    c.detached(env.host, L, f"rm -f /tmp/long-lw.out /tmp/long-lw.rc; {PB} exec {W} -- {env.long_command(seconds)} < /dev/null > /tmp/long-lw.out 2>&1; echo $? > /tmp/long-lw.rc")
+    return env.spawn_wl(seconds, directory)
 
 
 def long_running(env, wl):
@@ -115,7 +127,7 @@ def drill(env, args):
     for label, fn in (("L->W", exec_lw), ("W->L", exec_wl)):
         ok, detail = c.eventually(lambda: fn(env, "baseline-" + label[0] + label[-1]), 180)
         res.add(f"baseline exec {label}", ok, detail)
-    with env.device.temp_dir("pb-outage") as directory:
+    with env.scratch() as directory:
         wl = start_long(env, args.outage_seconds + 120, directory)
         time.sleep(15)
         stopped = time.time()
@@ -158,7 +170,7 @@ def drill(env, args):
         except Exception as error:  # noqa: BLE001 - the result names the step
             code = f"not finished: {error}"
         res.add("recovery: long W->L finished rc 0 with its output", code == 0 and b"long-wl-done" in wl.stdout(), f"rc={code} out={wl.stdout()[-60:]!r}")
-    return write(res, "control-outage-windows", {"outage_seconds": args.outage_seconds})
+    return write(res, f"control-outage-{env.stem}", {"outage_seconds": args.outage_seconds})
 
 
 def revoke(env, args):
@@ -181,7 +193,7 @@ def revoke(env, args):
     began = time.time()
     ok, detail = c.eventually(lambda: refused_rw(env), args.revoke_wait, 10)
     res.add(f"after the connection returned R is refused within {args.revoke_wait} s", ok, f"{int(time.time() - began)} s; {detail}")
-    return write(res, "control-outage-revoke-windows", {})
+    return write(res, f"control-outage-revoke-{env.stem}", {})
 
 
 def write(res, stem, extra):
