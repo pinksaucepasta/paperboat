@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """X-22: the daily loop on a mixed fleet (one L, one M, one W machine of ONE account), then a reboot and a network change.
 
-  xpc_daily.py [--devices L,M,W] [--skip-recovery] [--m-vm] [--victus]
+  xpc_daily.py [--devices L,M,W] [--skip-recovery] [--recovery-only] [--m-vm] [--victus]
 
 For every ordered pair A>B: name resolution (`pb resolve`), `pb exec` (the target's own hostname comes back), ENV (one variable set
 once is seen by the target), a file sent into the target's Inbox (sha256), private TCP (xplat_access.t_access). Per machine: the console
@@ -233,18 +233,21 @@ def main():
     argv = sys.argv[1:]
     keys = argv[argv.index('--devices') + 1].split(',') if '--devices' in argv else ['L', 'M', 'W']
     devices = {k: d for k, d in fleet.fleet().items() if k in keys}
-    record('X-22:env-setup', lambda: setup_env(devices) or 'vault unlocked on every machine, X22_VALUE set')
-    record('X-22:inventory', lambda: t_inventory(devices))
-    for a, b in permutations(devices, 2):
+    daily = '--recovery-only' not in argv
+    if daily:
+        record('X-22:env-setup', lambda: setup_env(devices) or 'vault unlocked on every machine, X22_VALUE set')
+        record('X-22:inventory', lambda: t_inventory(devices))
+    for a, b in permutations(devices if daily else {}, 2):
         for name, action in (('resolve', t_resolve), ('exec', t_exec), ('env', t_env), ('send', t_send), ('access', xplat_access.t_access)):
             record('X-22:%s:%s>%s' % (name, a, b), lambda: action(devices[a], devices[b]))
-    for key, dev in devices.items():
+    for key, dev in (devices if daily else {}).items():
         record('X-22:preview:' + key, lambda: t_preview(dev))
         record('X-22:doctor:' + key, lambda: t_doctor(dev))
-    record('X-22:config', t_config)
+    if daily:
+        record('X-22:config', t_config)
     if 'L' in devices and '--skip-recovery' not in argv:
+        flap_network(devices)  # first: a hosted runner expires after 5 hours
         recovery(devices, '--m-vm' in argv, victus_device() if '--victus' in argv else None)
-        flap_network(devices)
         for key, dev in devices.items():
             record('X-22:doctor-after:' + key, lambda: t_doctor(dev))
     out = HERE / 'results' / ('xpc-daily-%s.json' % time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))
