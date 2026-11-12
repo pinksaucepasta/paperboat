@@ -20,7 +20,8 @@ sys.path.insert(0, str(HERE))
 import control_outage as c  # noqa: E402
 import winhost  # noqa: E402
 
-L, R, W = "win-stg-l", "win-stg-r", "win-stg-w"
+import os  # noqa: E402
+L, R, W = "win-stg-l", "win-stg-r", os.environ.get("OUTAGE_WINDOWS_NAME", "win-stg-w")
 PB = c.PB
 
 

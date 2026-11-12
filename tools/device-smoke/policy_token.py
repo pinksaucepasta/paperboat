@@ -47,9 +47,11 @@ def main():
     p.add_argument('--owner-cmd', required=True)
     p.add_argument('--token-cmd', required=True)
     p.add_argument('--pb', default='/home/pbt/.local/bin/pb')
+    p.add_argument('--server', help='API base URL passed to every pb call (a pb built for another server, e.g. staging)')
     a = p.parse_args()
-    owner = lambda *args, **kw: sh(a.owner_cmd, a.pb, args, **kw)
-    holder = lambda *args, **kw: sh(a.token_cmd, a.pb, args, **kw)
+    lead = ['--server', a.server] if a.server else []
+    owner = lambda *args, **kw: sh(a.owner_cmd, a.pb, [*lead, *args], **kw)
+    holder = lambda *args, **kw: sh(a.token_cmd, a.pb, [*lead, *args], **kw)
     fails = []
 
     def step(name, ok, detail=''):

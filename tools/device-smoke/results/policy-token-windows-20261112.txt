@@ -1,0 +1,18 @@
+tools/device-smoke/policy_token.py on a hosted Windows runner (winpool-7, windows-latest, pb.exe dev-dcf93cf6f, paired to the staging server), 2026-11-12 (IST). The Windows pb.exe is the TOKEN HOLDER: it signs in with 'pb login --api-token-file -' and execs with the token. Owner: win-stg-l (Linux container, signed in as the token's creator), allowed machine win-stg-l, other machine win-stg-x. Command: policy_token.py --allowed win-stg-l --other win-stg-x --owner-cmd <docker exec win-stg-l> --token-cmd windows --server <staging API>
+
+PASS create a token scoped to exec on win-stg-l
+PASS pb login --api-token-file signs in with the token
+PASS exec on the scoped machine works
+PASS exec on another machine is outside the scope
+PASS a write outside the scope is refused
+PASS revoke the token
+PASS revoking ends the token session
+PASS tag the scoped machine tag:ci in the personal policy
+PASS create a token that may only exec on tag:ci
+PASS sign in with the tag:ci token
+PASS exec on the tag:ci machine works
+PASS the use is attributed to the token (last_used_at)
+PASS restore the personal policy (the machine loses tag:ci)
+PASS without the tag the token may not exec there
+PASS revoke the tag:ci token
+RESULT PASS
