@@ -575,7 +575,7 @@ func TestPeerEnrollmentRuntimeServicePersistsApprovalAfterStartup(t *testing.T) 
 }
 
 // Cloned host keys (another machine already uses them) keep the runtime up, ask the control plane
-// rarely instead of every interval, and report the typed reason.
+// rarely instead of every interval (first retry after 30 s), and report the typed reason.
 func TestManagedSSHKeyReconcilerBacksOffWhenHostKeysAreAnotherMachines(t *testing.T) {
 	inUse := &clientapi.APIError{Status: http.StatusConflict, Code: "ssh_host_key_in_use"}
 	client := &rotatingManagedSSHClient{observeErrors: []error{inUse, inUse, inUse, inUse}}
@@ -591,7 +591,7 @@ func TestManagedSSHKeyReconcilerBacksOffWhenHostKeysAreAnotherMachines(t *testin
 	if calls != 1 {
 		t.Fatalf("host keys observed %d times in 150 ms; the refusal must back off", calls)
 	}
-	if got := service.CapabilityHealth(); got.Reason != "ssh_host_key_in_use" || got.RetryAfterMs != uint64((10*time.Minute)/time.Millisecond) {
+	if got := service.CapabilityHealth(); got.Reason != "ssh_host_key_in_use" || got.RetryAfterMs != uint64(managedSSHHostKeyInUseFirstRetry/time.Millisecond) {
 		t.Fatalf("health = %#v", got)
 	}
 }

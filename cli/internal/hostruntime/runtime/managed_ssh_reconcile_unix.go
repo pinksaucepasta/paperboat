@@ -36,6 +36,7 @@ type managedSSHKeyReconciler struct {
 	keyWatch      <-chan struct{}
 	keyWatchLost  bool
 	refusedAt     time.Time
+	refusals      atomic.Uint32 // consecutive refusals of the host keys as another machine's: sets the next retry (inUseDelay)
 	// keyChanges counts host-key sets re-read after start. The server keeps one set per observation
 	// generation, so each changed set is observed under its own generation (observationGeneration).
 	keyChanges   uint64
@@ -141,6 +142,9 @@ func (s *managedSSHKeyReconciler) reconcile(ctx context.Context) error {
 	s.hostKeyInUse.Store(hostKeysInUseElsewhere(err))
 	if s.hostKeyInUse.Load() {
 		s.refusedAt = time.Now()
+		s.refusals.Add(1)
+	} else {
+		s.refusals.Store(0)
 	}
 	if err != nil {
 		// Paperboat unreachable: the last verified keys stay until a revocation the host receives, as
@@ -213,16 +217,32 @@ func (s *managedSSHKeyReconciler) CapabilityHealth() health.Capability {
 		return health.Capability{State: health.Ready}
 	}
 	if s.hostKeyInUse.Load() {
-		return health.Capability{State: health.Unavailable, Reason: managedSSHHostKeyInUseCode, RetryAfterMs: uint64(managedSSHHostKeyInUseRetry / time.Millisecond)}
+		return health.Capability{State: health.Unavailable, Reason: managedSSHHostKeyInUseCode, RetryAfterMs: uint64(s.inUseDelay() / time.Millisecond)}
 	}
 	return health.Capability{State: health.Unavailable, Reason: "authority_unavailable", RetryAfterMs: uint64(s.interval / time.Millisecond)}
 }
 
 // managedSSHHostKeyInUseCode is the server's refusal of host keys another machine already uses (a
-// cloned VM or container image). It does not change by retrying, so the machine asks rarely.
+// cloned VM or container image, or the live record of this same computer before its reset or reinstall
+// replaces it). Asking again changes nothing for a clone, but the same computer enrolled again is
+// accepted as soon as its old record is removed, so the first retry comes quickly and each later one
+// waits twice as long, up to managedSSHHostKeyInUseRetry (a cloned machine ends up asking rarely).
 const managedSSHHostKeyInUseCode = "ssh_host_key_in_use"
 
-const managedSSHHostKeyInUseRetry = 10 * time.Minute
+const (
+	managedSSHHostKeyInUseFirstRetry = 30 * time.Second
+	managedSSHHostKeyInUseRetry      = 10 * time.Minute
+)
+
+// inUseDelay is how long after a refusal the host keys are asked for again: 30 s after the first, doubling
+// per consecutive refusal.
+func (s *managedSSHKeyReconciler) inUseDelay() time.Duration {
+	delay := managedSSHHostKeyInUseFirstRetry
+	for refused := s.refusals.Load(); refused > 1 && delay < managedSSHHostKeyInUseRetry; refused-- {
+		delay *= 2
+	}
+	return min(delay, managedSSHHostKeyInUseRetry)
+}
 
 type managedSSHHostKeyInUse struct{ cause error }
 
@@ -253,8 +273,8 @@ func (s *managedSSHKeyReconciler) observationGeneration() uint64 {
 
 // reconcileDue reports whether this wake-up asks the server. Changed host keys on disk always do; they are read
 // when the watch signalled, at the fallback, and every wake-up while no watch is open.
-// Refused host keys do not change by asking again, so while they are refused only managedSSHHostKeyInUseRetry
-// passing does.
+// Refused host keys are asked for again after inUseDelay, or at once when a key change is published for this machine
+// (the server publishes one when it removes the record that held the keys).
 func (s *managedSSHKeyReconciler) reconcileDue(now, last time.Time, failed, published, keysSignalled bool) bool {
 	if s.readPublicKeys != nil && (keysSignalled || s.keyWatch == nil || now.Sub(last) >= managedSSHKeyFallback) {
 		if keys, err := s.readPublicKeys(); err == nil && len(keys) > 0 && !slices.Equal(keys, s.publicKeys) {
@@ -264,7 +284,7 @@ func (s *managedSSHKeyReconciler) reconcileDue(now, last time.Time, failed, publ
 		}
 	}
 	if s.hostKeyInUse.Load() {
-		return now.Sub(s.refusedAt) >= managedSSHHostKeyInUseRetry
+		return published || now.Sub(s.refusedAt) >= s.inUseDelay()
 	}
 	return published || failed || !s.events.Healthy() || now.Sub(last) >= managedSSHKeyFallback
 }
