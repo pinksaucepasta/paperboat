@@ -142,3 +142,23 @@ func TestDiscardPendingOutputLeavesADrainedViewerAtATrickle(t *testing.T) {
 		t.Fatal("a quiet viewer was resynced")
 	}
 }
+
+// The flood rate counts for a viewer that falls behind and has its backlog dropped (the case that matters): the
+// overflow path must not skip it.
+func TestDiscardPendingOutputCountsAViewerThatOverflowed(t *testing.T) {
+	f := NewFanout()
+	if err := f.Attach("live", 1<<16); err != nil { // a 64 KiB queue that the flood overflows
+		t.Fatal(err)
+	}
+	var next uint64
+	publishText(t, f, &next, strings.Repeat("x", 1<<17)) // overflows at once: backlog dropped, viewer lagged
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := f.WaitNext(ctx, "live"); !errors.Is(err, ErrAttachmentLagged) { // the screen was sent: lagged is cleared
+		t.Fatalf("setup: %v", err)
+	}
+	f.DiscardPendingOutput(f.PublishedEnd())
+	if !f.Lagged("live") {
+		t.Fatal("a viewer that overflowed under a flood was not resynced at Ctrl-C")
+	}
+}

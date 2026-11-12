@@ -344,6 +344,7 @@ func (f *Fanout) PublishOwned(event history.Event) ([]Eviction, error) {
 		if cursor.state != Attached || !cursor.receiveOutput {
 			continue
 		}
+		cursor.rate.add(now, len(event.Data)) // before the overflow branch: a viewer that lags under a flood is the one that counts
 		if uint64(len(event.Data)) > cursor.maxBytes-cursor.queuedBytes {
 			if !cursor.backpressure {
 				// Drop the backlog, this event included: the consumer restores a screen covering all of it.
@@ -366,7 +367,6 @@ func (f *Fanout) PublishOwned(event history.Event) ([]Eviction, error) {
 		}
 		cursor.enqueuedEnd = event.EndSequence
 		cursor.queuedBytes += uint64(len(event.Data))
-		cursor.rate.add(now, len(event.Data))
 		notify(cursor.notify)
 	}
 	f.compactLocked()
