@@ -393,11 +393,10 @@ func validEnvironment(environment []string) bool {
 	for _, entry := range environment {
 		total += len(entry)
 		key, value, ok := strings.Cut(entry, "=")
-		folded := strings.ToUpper(key)
-		if !ok || key == "" || len(entry) > maximumProcessEnvironmentEntryBytes || total > maximumProcessEnvironmentBytes || strings.ContainsAny(key, "\x00\r\n") || strings.ContainsRune(value, '\x00') || seen[folded] {
+		if !ok || key == "" || len(entry) > maximumProcessEnvironmentEntryBytes || total > maximumProcessEnvironmentBytes || strings.ContainsAny(key, "\x00\r\n") || strings.ContainsRune(value, '\x00') || seen[key] {
 			return false
 		}
-		seen[folded] = true
+		seen[key] = true
 	}
 	return true
 }
