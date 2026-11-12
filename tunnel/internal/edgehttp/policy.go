@@ -526,6 +526,9 @@ func retryablePreviewRequest(request *http.Request) bool {
 }
 
 func retryablePreviewTransportError(err error) bool {
+	if errors.Is(err, ErrDataCarrierPreviewResponseHeaderTimeout) {
+		return false // a slow app already used its whole first-byte budget; asking again doubles the visitor's wait
+	}
 	if errors.Is(err, errPreviewRouteReplaced) {
 		return true
 	}

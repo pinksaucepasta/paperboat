@@ -311,6 +311,20 @@ func TestPreviewTransportDoesNotReplayUnsafeOrUpgradedRequests(t *testing.T) {
 	}
 }
 
+// A slow app's first-byte timeout is a net.Error (Timeout() true) joined with the stream reset it caused: it must not be
+// asked again, or the visitor waits two budgets (200 s) for the 504 (F7-08, found on a real preview).
+func TestPreviewTransportDoesNotRetryASlowApp(t *testing.T) {
+	calls := 0
+	transport := retryPreviewTransport{next: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.Join(ErrDataCarrierPreviewTransport, io.EOF, &dataCarrierPreviewResponseHeaderTimeoutError{timeout: time.Second})
+	})}
+	request := httptest.NewRequest(http.MethodGet, "http://app.preview.example.test/resource", nil)
+	if _, err := transport.RoundTrip(request); !errors.Is(err, ErrDataCarrierPreviewResponseHeaderTimeout) || calls != 1 {
+		t.Fatalf("err=%v calls=%d", err, calls)
+	}
+}
+
 func TestPreviewTransportDoesNotRetryCallerCancellation(t *testing.T) {
 	for _, cause := range []error{context.Canceled, context.DeadlineExceeded} {
 		calls := 0
