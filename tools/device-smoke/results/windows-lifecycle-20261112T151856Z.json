@@ -1,0 +1,12 @@
+{
+ "version": "dev-181d4e571-a",
+ "device": "winpool-9",
+ "results": [
+  {
+   "id": "windows:update-restart-failure",
+   "status": "PASS",
+   "seconds": 133,
+   "detail": ""
+  }
+ ]
+}

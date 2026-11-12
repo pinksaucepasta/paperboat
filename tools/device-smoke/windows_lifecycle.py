@@ -4,7 +4,7 @@ client. The device is SMOKE_WINDOWS_SSH (default pujan@victus, password VICTUS_P
 the peer is SMOKE_PEER_SSH (default anvit@hp), a paired Unix machine of the same account.
 
   VICTUS_PASS=... windows_lifecycle.py --expect-version V --windows-install-json FILE CHECK...
-  CHECK: install-pair update update-failures version doctor status service crash availability exec exec-self reset-pair uninstall
+  CHECK: install-pair update update-failures update-restart-failure update-disk-full version doctor status service crash availability exec exec-self reset-pair uninstall
   install-pair and update need --build (the new pb.exe already copied to victus); install-pair writes the install receipt to the
   --windows-install-json file. install-pair and reset-pair mint tokens on hp. Results go to results/windows-lifecycle-<UTC>.json.
 
@@ -224,6 +224,80 @@ def check_update_failures(win, args):
         victus(f"Remove-Item -Recurse -Force '{work}' -ErrorAction SilentlyContinue")
 
 
+def update_json(out):
+    """The JSON receipt `pb update --json` printed, parsed from the last line that starts one."""
+    return json.loads(out[out.index('{"schema_version"'):])
+
+
+def paperboat_temp_leftovers():
+    code, out = victus("Get-ChildItem $env:TEMP -Force | Where-Object { $_.Name -like '.pb-elevated-*' -or $_.Name -like 'paperboat-update-*' } | ForEach-Object Name")
+    return out.split()
+
+
+def service_paths():
+    return victus("Get-CimInstance Win32_Service | Where-Object { $_.Name -like 'Paperboat*' } | ForEach-Object PathName")[1]
+
+
+def versions_dir():
+    return victus("Get-ChildItem 'C:\\Program Files\\Paperboat\\users\\*\\releases\\versions' -Directory | ForEach-Object Name")[1].split()
+
+
+def check_update_restart_failure(win, args):
+    """F14-03 failed restart: the new version's services are killed as they start, after the old ones were stopped.
+
+    The update ends with update_rolled_back and a plain message, the old version runs again (doctor healthy, exec works, every
+    service on the old version's directory, no directory left for the failed one), and a clean retry installs it."""
+    assert args.build, 'update-restart-failure needs --build <good pb.exe> on victus'
+    original = installed_version(win)
+    good_version = installed_version(Windows(args.build))
+    assert original != good_version, 'the installed build and --build are the same version'
+    before = set(versions_dir())
+    script = (f"$sha = (Get-FileHash '{args.build}' -Algorithm SHA256).Hash.ToLower(); "
+              "$job = Start-Job -ScriptBlock { param($n) while ($true) { Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and "
+              "$_.ExecutablePath -like \"*custom-$n*\" -and $_.CommandLine -like '*__runtime-*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force "
+              "-ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 200 } } -ArgumentList $sha; "
+              f"try {{ & '{win.pb}' update --from '{args.build}' --json 2>&1 | Out-String -Width 4000 }} finally {{ Stop-Job $job; Remove-Job $job -Force }}")
+    code, out = victus(script, 900)
+    receipt = update_json(out)
+    error = receipt.get('error', {})
+    assert receipt.get('ok') is False and error.get('code') == 'update_rolled_back', 'the failed restart was reported as: ' + json.dumps(error)[:300]
+    assert 'previous version was restored' in error.get('message', '') and error.get('state_changed') is False, json.dumps(error)[:300]
+    wait_for(lambda: doctor_ok(win.run('doctor')[1]), 240, 'doctor healthy after the failed restart')
+    check_exec(win, args)
+    assert installed_version(win) == original, 'the failed restart changed the installed version'
+    sha = victus(f"(Get-FileHash '{args.build}' -Algorithm SHA256).Hash.ToLower()")[1].strip()
+    assert sha not in service_paths().lower(), 'a service still runs the failed version'
+    assert set(versions_dir()) == before, 'the failed version left a directory: ' + ' '.join(set(versions_dir()) - before)
+    code, receipt = win.json('update', '--from', args.build, timeout=900)
+    assert code == 0 and receipt.get('ok'), 'the retried update failed: ' + json.dumps(receipt.get('error', {}))[:200]
+    wait_for(lambda: doctor_ok(win.run('doctor')[1]), 240, 'doctor healthy after the retried update')
+    assert installed_version(win) == good_version, 'the retried update did not install the build'
+
+
+def check_update_disk_full(win, args):
+    """F14-03 disk full: the system disk has 30 MB (the update cannot be copied to the temporary directory), 140 MB (the
+    elevation executable cannot be copied), 250 MB (the protected helper cannot be staged) and 350 MB (the protected copy
+    of the runtime inside the elevated helper fails) free. Each ends with insufficient_disk_space and
+    a message naming the disk, nothing changed (version, doctor, exec, no temporary copy left), and a retry with space works."""
+    assert args.build, 'update-disk-full needs --build <good pb.exe> on victus'
+    original = installed_version(win)
+    fill = 'C:\\pb-fill.bin'
+    for free_mb in (30, 140, 250, 350):
+        script = (f"$fill = '{fill}'; $size = (Get-PSDrive C).Free - {free_mb}MB; "
+                  f"try {{ fsutil file createnew $fill $size | Out-Null; & '{win.pb}' update --from '{args.build}' --json 2>&1 | Out-String -Width 4000 }} "
+                  "finally { Remove-Item $fill -Force -ErrorAction SilentlyContinue }")
+        code, out = victus(script, 900)
+        error = update_json(out).get('error', {})
+        assert error.get('code') == 'insufficient_disk_space' and error.get('state_changed') is False, f'{free_mb} MB free: ' + json.dumps(error)[:300]
+        assert 'not enough free disk space' in error.get('message', ''), f'{free_mb} MB free: message ' + error.get('message', '')[:200]
+        wait_for(lambda: doctor_ok(win.run('doctor')[1]), 240, 'doctor healthy after the full disk')
+        check_exec(win, args)
+        assert installed_version(win) == original, f'{free_mb} MB free changed the installed version'
+        assert not paperboat_temp_leftovers(), f'{free_mb} MB free left temporary copies: ' + ' '.join(paperboat_temp_leftovers())
+    code, receipt = win.json('update', '--from', args.build, timeout=900)
+    assert code == 0 and receipt.get('ok'), 'the update with space failed: ' + json.dumps(receipt.get('error', {}))[:200]
+
+
 def check_uninstall_after_failed_update(win, args):
     """F1-09: an uninstall after an update killed mid-way (candidate record and install log left) removes everything."""
     assert args.build, 'uninstall-after-failed-update needs --build <good pb.exe> on victus'
@@ -360,7 +434,7 @@ def inventory(args):
     assert code == 0 and 'inventory: clean' in out, 'leftovers: ' + ' | '.join(l for l in out.splitlines() if l.startswith('leftover'))[:400]
 
 
-CHECKS = {'install-pair': check_install_pair, 'pair-firewall-failure': check_pair_firewall_failure, 'update': check_update, 'update-failures': check_update_failures, 'exec-self': check_exec_self, 'version': check_version, 'doctor': check_doctor, 'status': check_status, 'service': check_service, 'crash': check_crash,
+CHECKS = {'install-pair': check_install_pair, 'pair-firewall-failure': check_pair_firewall_failure, 'update': check_update, 'update-failures': check_update_failures, 'update-restart-failure': check_update_restart_failure, 'update-disk-full': check_update_disk_full, 'exec-self': check_exec_self, 'version': check_version, 'doctor': check_doctor, 'status': check_status, 'service': check_service, 'crash': check_crash,
           'availability': check_availability, 'exec': check_exec, 'reset-pair': check_reset_pair, 'uninstall': check_uninstall, 'uninstall-after-failed-update': check_uninstall_after_failed_update}
 
 

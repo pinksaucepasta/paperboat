@@ -1,0 +1,18 @@
+{
+ "version": "dev-181d4e571",
+ "device": "winpool-9",
+ "results": [
+  {
+   "id": "windows:update-disk-full",
+   "status": "PASS",
+   "seconds": 205,
+   "detail": ""
+  },
+  {
+   "id": "windows:update-restart-failure",
+   "status": "FAIL",
+   "seconds": 7,
+   "detail": "the installed build and --build are the same version"
+  }
+ ]
+}
