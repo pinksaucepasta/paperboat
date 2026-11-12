@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,5 +33,24 @@ func TestClockSkewIsAnsweredApartFromProofDenials(t *testing.T) {
 	writePreviewMachineProofFailure(w, httptest.NewRequest(http.MethodPost, "/v1/previews", nil), controlplane.ErrClockSkew)
 	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "clock_skew") {
 		t.Fatalf("preview path clock skew = %d %s", w.Code, w.Body.String())
+	}
+}
+
+// Identity renewal answers a skewed proof as clock_skew with the server's time, and keeps 401 for a machine or credential
+// that is gone: the client stops renewing on 401, so a clock that is merely off must not get it.
+func TestHelperRenewalAnswersClockSkewApartFromARemovedMachine(t *testing.T) {
+	answer := func(err error) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		writeHelperRenewalFailure(w, httptest.NewRequest(http.MethodPost, "/v1/helper-identity-renewals", nil), err)
+		return w
+	}
+	if skew := answer(controlplane.ErrClockSkew); skew.Code != http.StatusBadRequest || !strings.Contains(skew.Body.String(), `"code":"clock_skew"`) || !strings.Contains(skew.Body.String(), `"server_time"`) {
+		t.Fatalf("skewed renewal = %d %s", skew.Code, skew.Body.String())
+	}
+	if removed := answer(controlplane.ErrHelperProof); removed.Code != http.StatusUnauthorized || !strings.Contains(removed.Body.String(), "credential_invalid") {
+		t.Fatalf("refused renewal = %d %s", removed.Code, removed.Body.String())
+	}
+	if down := answer(errors.New("database unavailable")); down.Code != http.StatusServiceUnavailable {
+		t.Fatalf("outage = %d", down.Code)
 	}
 }

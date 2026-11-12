@@ -3,6 +3,7 @@ package enrollment
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -162,5 +163,36 @@ func TestRenewalBackoffGrowsAndIsCapped(t *testing.T) {
 		if delay < renewalBackoffMaximum/2 || delay >= renewalBackoffMaximum*3/2 {
 			t.Fatalf("late delay %v outside the jittered cap %v: %v", delay, renewalBackoffMaximum, delays)
 		}
+	}
+}
+
+// A renewal answered clock_skew (400, the server's time in the body) is a transient failure: no refusal is recorded
+// (doctor does not say the machine was removed), the daemon does not stop for an hour, and the next attempt, made with
+// the corrected clock, renews.
+func TestRenewalClockSkewIsTransientAndNeverARefusal(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	var requests atomic.Int32
+	root, server := enrolledRoot(t, now, func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "clock_skew", "details": map[string]any{"server_time": now.Format(time.RFC3339)}}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"helper_id": "hlp_1", "machine_id": "machine_1", "environment_id": "env_1", "credential": strings.Repeat("r", 40), "expires_at": now.Add(time.Hour)}})
+	})
+	source := renewalSourceFor(t, server.URL, root, now, server.Client().Transport)
+	_, err := source.Token(context.Background())
+	if fault := errorreport.ProjectFault(context.Background(), "paperboatd", "identity_renewal", "control_request", "control_request_failed", err); err == nil || !errors.Is(err, ErrUnavailable) || fault.HTTPStatus != http.StatusBadRequest {
+		t.Fatalf("skewed renewal err=%v status=%d, want a transient unavailable answer carrying the 400", err, fault.HTTPStatus)
+	}
+	if RenewalRefused(root, now) {
+		t.Fatal("clock skew was recorded as a refusal")
+	}
+	if token, err := source.Token(context.Background()); err != nil || token != strings.Repeat("r", 40) {
+		t.Fatalf("the retry did not renew: %q %v", token, err)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("%d requests, want 2", got)
 	}
 }

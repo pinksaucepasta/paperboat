@@ -38,20 +38,30 @@ func helperIdentityRenew(service *controlplane.EnrollmentService) http.HandlerFu
 		}
 		identity, err := service.Renew(r.Context(), proof, body)
 		if err != nil {
-			noStore(w)
-			switch {
-			case errors.Is(err, controlplane.ErrUsageOperationConflict):
-				writeError(w, r, http.StatusConflict, "operation_id_conflict", "Helper identity renewal is unavailable.")
-			case errors.Is(err, controlplane.ErrHelperProof), errors.Is(err, controlplane.ErrEnrollmentInvalid):
-				logHTTPRejection(r, http.StatusUnauthorized, "credential_invalid", err)
-				writeError(w, r, http.StatusUnauthorized, "credential_invalid", "Helper identity renewal is unavailable.")
-			default:
-				writeError(w, r, http.StatusServiceUnavailable, "authorization_unavailable", "Helper identity renewal is temporarily unavailable.", err)
-			}
+			writeHelperRenewalFailure(w, r, err)
 			return
 		}
 		noStore(w)
 		writeJSON(w, http.StatusOK, SuccessResponse{Data: identity})
+	}
+}
+
+// writeHelperRenewalFailure answers a refused identity renewal. A proof signed with a clock outside the server's window
+// is clock_skew (400, with the server's time), not 401: 401 here means the machine or its credential is gone and the
+// client stops renewing for it, which a machine whose clock is merely off must never be.
+func writeHelperRenewalFailure(w http.ResponseWriter, r *http.Request, err error) {
+	noStore(w)
+	switch {
+	case errors.Is(err, controlplane.ErrUsageOperationConflict):
+		writeError(w, r, http.StatusConflict, "operation_id_conflict", "Helper identity renewal is unavailable.")
+	case errors.Is(err, controlplane.ErrClockSkew):
+		logHTTPRejection(r, http.StatusBadRequest, "clock_skew", err)
+		writeClockSkewAnswer(w, r)
+	case errors.Is(err, controlplane.ErrHelperProof), errors.Is(err, controlplane.ErrEnrollmentInvalid):
+		logHTTPRejection(r, http.StatusUnauthorized, "credential_invalid", err)
+		writeError(w, r, http.StatusUnauthorized, "credential_invalid", "Helper identity renewal is unavailable.")
+	default:
+		writeError(w, r, http.StatusServiceUnavailable, "authorization_unavailable", "Helper identity renewal is temporarily unavailable.", err)
 	}
 }
 
