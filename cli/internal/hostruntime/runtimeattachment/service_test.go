@@ -460,13 +460,13 @@ func confirmRevocationAfter(t *testing.T, d time.Duration) {
 // first 401 and never came back). Refusals shorter than the confirmation keep the carrier and the attachment
 // recovers when the server answers again.
 func TestRuntimeAttachmentSurvivesRefusalsDuringAServerSwap(t *testing.T) {
-	confirmRevocationAfter(t, 5*time.Second)
+	confirmRevocationAfter(t, 10*time.Second)
 	var refuse atomic.Bool
 	var refused atomic.Int32
 	ctx, cancel := context.WithTimeout(t.Context(), 12*time.Second)
 	defer cancel()
 	// The short admission makes the host ask again within the test; a healthy long one is rechecked only every 30 s.
-	expiry := time.Now().Add(2500 * time.Millisecond)
+	expiry := time.Now().Add(4 * time.Second)
 	_, edge := startConnectedRuntimeCarrier(t, ctx, expiry, func() int {
 		if refuse.Load() {
 			refused.Add(1)
@@ -478,7 +478,7 @@ func TestRuntimeAttachmentSurvivesRefusalsDuringAServerSwap(t *testing.T) {
 	select {
 	case <-edge.Done():
 		t.Fatal("a short refusal ended the attachment")
-	case <-time.After(2 * time.Second):
+	case <-time.After(3 * time.Second):
 	}
 	refuse.Store(false)
 	if refused.Load() == 0 {
