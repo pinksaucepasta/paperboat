@@ -97,3 +97,75 @@ func (o *Owner) Dial(ctx context.Context, descriptor mesh.Addr, peerID string, c
 		}
 	}
 }
+
+// sharedDial is one in-flight or finished association of DialShared.
+type sharedDial struct {
+	done chan struct{}
+	base *Session
+	err  error
+}
+
+type sharedKey struct {
+	peerID string
+	class  peerquic.Class
+}
+
+// DialShared is Dial with one QUIC association per peer and class: every caller gets a handle on the same association and
+// opens its terminals and commands as streams on it, as Tailscale carries every connection to a peer over one tunnel. A
+// dial per terminal pinned one of the client's 64 UDP flows each (tailnet.MaxFlows) and stopped a client at ~40 terminals
+// (F21-164). The association closes when its last handle does, or with the peer; a closed one is dialed again.
+func (o *Owner) DialShared(ctx context.Context, descriptor mesh.Addr, peerID string, class peerquic.Class) (*Session, error) {
+	key := sharedKey{peerID, class}
+	for {
+		o.mu.Lock()
+		if o.shared == nil {
+			o.shared = make(map[sharedKey]*sharedDial)
+		}
+		entry := o.shared[key]
+		if entry != nil && entry.base != nil {
+			if handle, ok := entry.base.share(); ok {
+				o.mu.Unlock()
+				return handle, nil
+			}
+			delete(o.shared, key)
+			entry = nil
+		}
+		if entry == nil {
+			entry = &sharedDial{done: make(chan struct{})}
+			o.shared[key] = entry
+			o.mu.Unlock()
+			base, err := o.Dial(ctx, descriptor, peerID, class)
+			o.mu.Lock()
+			entry.base, entry.err = base, err
+			if err != nil {
+				delete(o.shared, key)
+			}
+			close(entry.done)
+			o.mu.Unlock()
+			if err != nil {
+				return nil, err
+			}
+			if handle, ok := base.share(); ok {
+				return handle, nil
+			}
+			continue // closed before its first handle: dial again
+		}
+		o.mu.Unlock()
+		select {
+		case <-entry.done:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		// A leader's own cancellation says nothing about the peer: retry. Any other failure is the peer's answer.
+		if entry.err != nil && !errors.Is(entry.err, context.Canceled) && !errors.Is(entry.err, context.DeadlineExceeded) {
+			return nil, entry.err
+		}
+	}
+}
+
+// OpenSessions is how many QUIC associations the owner holds (each pins one UDP flow).
+func (o *Owner) OpenSessions() int {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return len(o.sessions)
+}

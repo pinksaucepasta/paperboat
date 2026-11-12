@@ -216,6 +216,7 @@ type Owner struct {
 	mu               sync.Mutex
 	closed           bool
 	sessions         map[*Session]struct{}
+	shared           map[sharedKey]*sharedDial // guarded by mu
 	handshakes       map[string]*peerHandshake
 	restart          restartTracker       // clean closes of peers, the short handshake waits they open, measured handshakes; guarded by mu
 	relayPaths       map[string]time.Time // peer relay paths found by a failed handshake, kept until; guarded by mu

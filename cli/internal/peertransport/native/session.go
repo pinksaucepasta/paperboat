@@ -40,6 +40,13 @@ type Session struct {
 	scopeMu      sync.Mutex
 	http3Scope   *scopeKey
 	carrier      *admission.Lease
+
+	// A shared session (Owner.DialShared) is one QUIC association many callers open streams on. The association itself
+	// counts its handles; a handle is a *Session whose base is the association, and closing a handle only releases it.
+	handlesMu sync.Mutex
+	handles   int
+	dead      bool
+	base      *Session
 }
 
 // MeterBinding contains only verified accounting metadata, never credentials.
@@ -385,7 +392,40 @@ func readHeader(reader io.Reader) ([]byte, error) {
 	_, err := io.ReadFull(reader, encoded)
 	return encoded, err
 }
+
+// share returns a new handle on the association, or false once it is closing, closed or its last handle left.
+func (s *Session) share() (*Session, bool) {
+	s.handlesMu.Lock()
+	defer s.handlesMu.Unlock()
+	if s.dead || s.closing.Load() || s.quic.Connection.Context().Err() != nil {
+		return nil, false
+	}
+	s.handles++
+	s.routerMu.Lock()
+	router := s.router
+	s.routerMu.Unlock()
+	return &Session{traceLabel: s.traceLabel, owner: s.owner, peerID: s.peerID, binding: s.binding, quic: s.quic, router: router, carrier: s.carrier, base: s}, true
+}
+
+// release is a handle's Close: the association closes with its last handle.
+func (s *Session) release() {
+	s.handlesMu.Lock()
+	s.handles--
+	last := s.handles <= 0
+	if last {
+		s.dead = true
+	}
+	s.handlesMu.Unlock()
+	if last {
+		_ = s.Close()
+	}
+}
+
 func (s *Session) Close() error {
+	if s.base != nil { // a handle: it ends its own use, never the association other callers share
+		s.once.Do(s.base.release)
+		return nil
+	}
 	s.closing.Store(true)
 	s.once.Do(func() {
 		s.err = errors.Join(s.err, s.quic.Close())

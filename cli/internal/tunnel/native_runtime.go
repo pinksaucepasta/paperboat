@@ -751,7 +751,7 @@ func (r *cliNativeRuntime) Dial(ctx context.Context, machineID string, class pee
 		}
 		return nil, &nativePhaseFailure{stage: "peer_authority", code: "peer_authority_failed", err: err}
 	}
-	session, err := r.owner.Dial(ctx, descriptor, machineID, class)
+	session, err := r.owner.DialShared(ctx, descriptor, machineID, class)
 	switch {
 	case err == nil:
 		r.failedDials.Delete(machineID)
