@@ -34,7 +34,8 @@ export const recordingSentences: Record<string, string> = {
   recording_not_found: "This recording doesn't exist or isn't shared with you.",
   recording_deleted: "This recording was deleted from its machine.",
   machine_unavailable: "The recording's machine is offline. Replay works again once it's back online.",
-  recording_unavailable: "Recording isn't available for this terminal. A team admin turns it on under Team, Recordings.",
+  recording_unavailable:
+    "Recording isn't available for this terminal. Its machine must belong to the team (a shared personal machine can't be recorded), and a team admin turns it on under Team, Recordings.",
   recording_active: "This terminal is already being recorded.",
   recording_inactive: "This terminal isn't being recorded.",
   credential_expired: "The replay link expired. Open the recording again.",

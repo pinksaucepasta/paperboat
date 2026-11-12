@@ -4,7 +4,7 @@ The team's own S3-compatible bucket (owners and admins)
 
 ### Synopsis
 
-A team connects its own S3-compatible bucket and its machines copy closed terminal recordings there, so a recording replays when its machine is offline. Paperboat stores the access key encrypted and only signs short-lived links; everything in the bucket is encrypted before it leaves the machine, and the bucket's own security is the team's.
+A team connects its own S3-compatible bucket and its machines copy closed terminal recordings there, so a recording replays when its machine is offline. Paperboat stores the access key encrypted and only signs short-lived links; everything in the bucket is encrypted before it leaves the machine, and the bucket's own security is the team's. To play a recording in the browser, the bucket's CORS settings must allow GET from the console's address.
 
 With --json, this command group lists its available commands.
 

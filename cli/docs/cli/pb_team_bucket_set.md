@@ -4,7 +4,7 @@ Connect or change the team's bucket
 
 ### Synopsis
 
-Save the bucket after Paperboat writes, reads back and deletes a small check object in it; a failing step is named and nothing is saved. Give the secret access key on standard input (--secret-access-key-stdin), never as an argument; leave it out to keep the stored key while changing another field.
+Save the bucket after Paperboat writes, reads back and deletes a small check object in it; a failing step is named and nothing is saved. Give the secret access key on standard input (--secret-access-key-stdin), never as an argument; leave it out to keep the stored key while changing another field. For browser replay, the bucket's CORS settings must allow GET from the console's address.
 
 JSON output is supported with --json.
 

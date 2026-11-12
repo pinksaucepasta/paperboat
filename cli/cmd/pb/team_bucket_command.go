@@ -14,7 +14,7 @@ import (
 
 // teamBucketCommand declares `pb team bucket`: the team's own S3-compatible bucket and what it is used for.
 func teamBucketCommand() *cobra.Command {
-	root := &cobra.Command{Use: "bucket", Short: "The team's own S3-compatible bucket (owners and admins)", Long: "A team connects its own S3-compatible bucket and its machines copy closed terminal recordings there, so a recording replays when its machine is offline. Paperboat stores the access key encrypted and only signs short-lived links; everything in the bucket is encrypted before it leaves the machine, and the bucket's own security is the team's.", Args: commandArgs(cobra.NoArgs), RunE: func(c *cobra.Command, _ []string) error { return c.Help() }}
+	root := &cobra.Command{Use: "bucket", Short: "The team's own S3-compatible bucket (owners and admins)", Long: "A team connects its own S3-compatible bucket and its machines copy closed terminal recordings there, so a recording replays when its machine is offline. Paperboat stores the access key encrypted and only signs short-lived links; everything in the bucket is encrypted before it leaves the machine, and the bucket's own security is the team's. To play a recording in the browser, the bucket's CORS settings must allow GET from the console's address.", Args: commandArgs(cobra.NoArgs), RunE: func(c *cobra.Command, _ []string) error { return c.Help() }}
 	get := &cobra.Command{Use: "get <team>", Short: "Show the team's bucket and its uses", Long: "Show the team's bucket: its endpoint, region, bucket name, folder prefix, access key ID and when Paperboat last wrote, read and deleted a check object in it. The secret access key is stored encrypted and is never shown, by this command or anywhere else.", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(c *cobra.Command, args []string) error {
 		client, err := backendForCommand(c)
 		if err != nil {
@@ -27,7 +27,7 @@ func teamBucketCommand() *cobra.Command {
 		return printBucket(c.OutOrStdout(), config, jsonRequested(c))
 	}}
 	get.Flags().Bool("json", false, "print JSON")
-	set := &cobra.Command{Use: "set <team>", Short: "Connect or change the team's bucket", Long: "Save the bucket after Paperboat writes, reads back and deletes a small check object in it; a failing step is named and nothing is saved. Give the secret access key on standard input (--secret-access-key-stdin), never as an argument; leave it out to keep the stored key while changing another field.", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(c *cobra.Command, args []string) error {
+	set := &cobra.Command{Use: "set <team>", Short: "Connect or change the team's bucket", Long: "Save the bucket after Paperboat writes, reads back and deletes a small check object in it; a failing step is named and nothing is saved. Give the secret access key on standard input (--secret-access-key-stdin), never as an argument; leave it out to keep the stored key while changing another field. For browser replay, the bucket's CORS settings must allow GET from the console's address.", Args: commandArgs(cobra.ExactArgs(1)), RunE: func(c *cobra.Command, args []string) error {
 		in, err := bucketInput(c)
 		if err != nil {
 			return err

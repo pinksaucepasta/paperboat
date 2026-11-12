@@ -175,6 +175,7 @@ function BucketDialog({ team, bucket, onClose }: { team: string; bucket?: TeamBu
             <Switch id="bucket-path-style" checked={pathStyle} onCheckedChange={setPathStyle} />
           </SettingRow>
           <p className="text-xs text-muted-foreground">The key needs permission to put, get and delete objects.</p>
+          <p className="text-xs text-muted-foreground">Browser replay needs the bucket’s CORS to allow GET from {window.location.origin}.</p>
           {save.isError && <p className="text-sm text-destructive">{bucketMessage(save.error)}</p>}
           <DialogFooter>
             <Button type="submit" size="lg" disabled={save.isPending}>
