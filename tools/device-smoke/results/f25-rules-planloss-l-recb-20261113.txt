@@ -1,0 +1,6 @@
+F25-03 policy rules on L, 2026-11-13 (IST): recb-l2, a personal Linux container (aarch64) shared into own paid team recb2 (Stripe sandbox), pb dev-52d8e2680, prod 2026.11.13.4 (client: the container itself).
+recordings_lifecycle.py --only manual,second,rule (rule_start: a record rule starts a recording when the recorded account attaches; rule_removed_stops_new_recordings: removing it stops the running recording within seconds and a later session is not recorded):
+{"check": "recordings", "target": "recb-l2", "status": "PASS", "phases": ["manual_start_stop", "rec_in_connect", "cli_list", "cli_export", "cli_play", "rec_on_attach", "rule_start", "rule_removed_stops_new_recordings"], "manual_recording": "rec_a465f273-cb18-4585-9d8c-f83af9d48827", "rule_recording": "rec_fcc042e1-7f4f-4476-9a65-7a75cf596252", "seconds": 229.5}
+recordings_planloss.py (plan revoked 21:01:08Z, restored 21:06Z by the operator; the recording started before it was stopped by nobody):
+{"armed": true, "recording": "rec_a05732a5-367c-4b96-b0bb-e840fa4a8ae0"}
+{"check": "recordings-plan-loss", "target": "recb-l2", "status": "PASS", "phases": ["new_start_refused", "recording_stopped_without_a_stop", "recording_kept"], "seconds_from_loss_to_stop": -5.6}
