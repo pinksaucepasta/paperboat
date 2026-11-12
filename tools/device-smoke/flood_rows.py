@@ -44,8 +44,11 @@ def one(accept):
         return r.status, r, body
     finally:
         conn.close()
-def worker():
-    conn = http.client.HTTPSConnection(host, 443, timeout=20, context=ctx)
+def worker(n):
+    # half the workers ask for a name nobody owns under the same domain: the edge answers those without the tunnel, so the
+    # address is counted at the edge's own speed (a slow machine behind the tunnel would otherwise never reach the limit)
+    target = host if n % 2 == 0 else "flood-%d.%s" % (n, host.split(".", 1)[1])
+    conn = http.client.HTTPSConnection(target, 443, timeout=20, context=ctx)
     end = time.time() + seconds
     while time.time() < end:
         try:
@@ -55,41 +58,50 @@ def worker():
             if r.status == 429:
                 samples.setdefault("429", (r.getheader("X-Paperboat-Error"), r.getheader("Retry-After")))
         except Exception as e:
-            key = "error"; conn.close(); conn = http.client.HTTPSConnection(host, 443, timeout=20, context=ctx)
+            key = "error"; conn.close(); conn = http.client.HTTPSConnection(target, 443, timeout=20, context=ctx)
         with lock: counts[key] = counts.get(key, 0) + 1
-threads = [threading.Thread(target=worker) for _ in range(48)]
+threads = [threading.Thread(target=worker, args=(i,)) for i in range(64)]
 [t.start() for t in threads]
 time.sleep(seconds * 0.7)
 out = {}
 for name, accept in (("page", "text/html"), ("api", "application/json")):
     try:
-        status, r, body = one(accept)
+        for _ in range(40):  # the bucket refills 100 a second: ask until one request is the refused one
+            status, r, body = one(accept)
+            if status == 429:
+                break
         out[name] = {"status": status, "type": r.getheader("Content-Type"), "error": r.getheader("X-Paperboat-Error"), "retry_after": r.getheader("Retry-After"), "body": body[:60].decode("latin1")}
     except Exception as e:
         out[name] = {"error": str(e)[:100]}
 [t.join() for t in threads]
 out["counts"], out["sample"] = counts, samples.get("429")
-# new TLS handshakes: each connection completes one handshake and closes
+# new TLS handshakes (limit 20/s, burst 50) and WebSocket upgrades (20/s, burst 40) need parallel callers to exceed them
 handshake = {"ok": 0, "refused": 0}
-for _ in range(150):
-    try:
-        import socket
-        with socket.create_connection((host, 443), timeout=10) as s, ctx.wrap_socket(s, server_hostname=host):
-            handshake["ok"] += 1
-    except Exception:
-        handshake["refused"] += 1
+def shake():
+    for _ in range(12):
+        try:
+            import socket
+            with socket.create_connection((host, 443), timeout=10) as s, ctx.wrap_socket(s, server_hostname=host):
+                key = "ok"
+        except Exception:
+            key = "refused"
+        with lock: handshake[key] += 1
+ts = [threading.Thread(target=shake) for _ in range(24)]
+[t.start() for t in ts]; [t.join() for t in ts]
 out["handshakes"] = handshake
-# WebSocket upgrades: only the edge's admission matters, the answer may be 4xx from the origin
 upgrades = {}
 time.sleep(5)
-for _ in range(100):
-    try:
-        conn = http.client.HTTPSConnection(host, 443, timeout=10, context=ctx)
-        conn.request("GET", "/", headers={"Connection": "Upgrade", "Upgrade": "websocket", "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Version": "13"})
-        r = conn.getresponse(); r.read(); key = str(r.status); conn.close()
-    except Exception:
-        key = "error"
-    upgrades[key] = upgrades.get(key, 0) + 1
+def upgrade():
+    for _ in range(8):
+        try:
+            conn = http.client.HTTPSConnection(host, 443, timeout=10, context=ctx)
+            conn.request("GET", "/", headers={"Connection": "Upgrade", "Upgrade": "websocket", "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Version": "13"})
+            r = conn.getresponse(); r.read(); key = str(r.status); conn.close()
+        except Exception:
+            key = "error"
+        with lock: upgrades[key] = upgrades.get(key, 0) + 1
+ts = [threading.Thread(target=upgrade) for _ in range(24)]
+[t.start() for t in ts]; [t.join() for t in ts]
 out["upgrades"] = upgrades
 print(json.dumps(out))
 '''
