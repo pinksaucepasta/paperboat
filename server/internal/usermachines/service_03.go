@@ -152,7 +152,7 @@ func (s *Service) fileTransferDescriptor(ctx context.Context, userID, sourceMach
 		return FileTransferDescriptor{}, err
 	}
 	return FileTransferDescriptor{
-		Endpoint: httpBaseURL + "/v1/file-transfers", SourceMachineID: sourceMachineID,
+		Endpoint: nativeFileTransferEndpoint(httpBaseURL), SourceMachineID: sourceMachineID,
 		DestinationMachineID: destination.ID, InitiatingUserID: userID, Policy: s.fileTransferPolicy,
 		Auth: map[string]any{"method": "bearer", "token": token, "expires_at": expiresAt, "scopes": []string{"file:transfer"}, "access_session_id": accessSessionID},
 	}, nil
@@ -510,7 +510,7 @@ func (s *Service) ConnectTerminalSession(ctx context.Context, userID, sourceMach
 	setCanonicalMachineIdentity(&response, row)
 	response.Terminal = map[string]any{"protocol": terminalprotocol.TerminalSubprotocol, "endpoints": machineTerminalEndpoints(websocketBaseURL), "session_id": terminalSession.ID, "cwd": terminalSession.LaunchCwd, "auth": credentials.TerminalAuth}
 	if credentials.FileTransferAuth != nil {
-		response.FileTransfer = map[string]any{"endpoint": httpBaseURL + "/v1/file-transfers", "source_machine_id": sourceMachineID, "destination_machine_id": row.ID, "initiating_user_id": userID, "policy": s.fileTransferPolicy, "auth": credentials.FileTransferAuth}
+		response.FileTransfer = map[string]any{"endpoint": nativeFileTransferEndpoint(httpBaseURL), "source_machine_id": sourceMachineID, "destination_machine_id": row.ID, "initiating_user_id": userID, "policy": s.fileTransferPolicy, "auth": credentials.FileTransferAuth}
 	}
 	return response, nil
 }

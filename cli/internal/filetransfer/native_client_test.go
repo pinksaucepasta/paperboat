@@ -179,3 +179,26 @@ func TestNativeClientResumesLostCommitAndRetainsBatchAcrossOutage(t *testing.T) 
 		})
 	}
 }
+
+// A self-hosted descriptor once carried the edge-only /v1/runtime/<host> prefix; the receiver answered every
+// request with 404 and pb send failed as local_io. The client now refuses that endpoint up front, naming why.
+func TestNativeClientRejectsEdgeRoutedEndpoint(t *testing.T) {
+	var requests atomic.Int32
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.NotFound(w, r)
+	}))
+	defer receiver.Close()
+	open := func(ctx context.Context) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", receiver.Listener.Addr().String())
+	}
+	for _, endpoint := range []string{receiver.URL + "/v1/runtime/host.example.test/v1/file-transfers", receiver.URL + "/v1/runtime/host.example.test", receiver.URL} {
+		client, err := NewNativeClient(endpoint, Auth{Token: "token"}, testBinding(), open)
+		if err == nil || !strings.Contains(err.Error(), NativeEndpointPath) || client != nil {
+			t.Fatalf("endpoint %q: client=%v err=%v", endpoint, client, err)
+		}
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("requests = %d", requests.Load())
+	}
+}

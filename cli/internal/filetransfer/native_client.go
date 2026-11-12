@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"reflect"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,10 +27,17 @@ import (
 // HTTP never dials a public endpoint or falls back to a resource relay.
 type NativeClient struct{ *Client }
 
+// NativeEndpointPath is the only path a native descriptor endpoint carries.
+const NativeEndpointPath = "/v1/file-transfers"
+
 func NewNativeClient(endpoint string, auth Auth, binding Binding, open func(context.Context) (net.Conn, error)) (*NativeClient, error) {
 	u, err := url.Parse(endpoint)
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") || auth.Token == "" || binding.SourceMachineID == "" || binding.DestinationMachineID == "" || binding.InitiatingUserID == "" || binding.SourceMachineID == binding.DestinationMachineID {
 		return nil, errors.New("invalid native file transfer configuration")
+	}
+	// The stream reaches the receiver directly, so an edge-routing prefix would only be a 404 there.
+	if strings.TrimRight(u.Path, "/") != NativeEndpointPath {
+		return nil, errors.New("invalid native file transfer configuration: endpoint path must be " + NativeEndpointPath)
 	}
 	transport, err := NewNativeRoundTripper(open)
 	if err != nil {
