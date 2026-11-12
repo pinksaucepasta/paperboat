@@ -1,0 +1,146 @@
+{
+ "check": "xpc-tunnel",
+ "build": "dev-fdf5775a6 (L linux/arm64 container, M macOS 26 arm64 hosted runner, W Windows hosted runner)",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-20:bind-v4:L",
+   "status": "PASS",
+   "detail": "H1+H2 marker; 16 MiB sha256; SSE 5 events over 1.2s; xff=140.245.11.41; H3+WebSocket+16 MiB POST; owner deny of 140.245.11.41 refused the visitor, clear served it again; stopped -> 57e4de9ab638"
+  },
+  {
+   "id": "X-20:bind-v6:L",
+   "status": "PASS",
+   "detail": "H1+H2 marker; 16 MiB sha256; SSE 5 events over 1.2s; xff=140.245.11.41; stopped -> 57e4de9ab638"
+  },
+  {
+   "id": "X-20:bind-all:L",
+   "status": "PASS",
+   "detail": "H1+H2 marker; 16 MiB sha256; SSE 5 events over 1.2s; xff=140.245.11.41; stopped -> 57e4de9ab638"
+  },
+  {
+   "id": "X-20:https:L",
+   "status": "PASS",
+   "detail": "self-signed origin: refused by default, served with pinned fingerprint, refused with a wrong pin, served with --tls-ca xpc-cert.pem and --tls-server-name"
+  },
+  {
+   "id": "X-20:host-header:L",
+   "status": "PASS",
+   "detail": "--host-header xpc.example.test reached the origin"
+  },
+  {
+   "id": "X-20:preview:L",
+   "status": "PASS",
+   "detail": "H1+H2 marker; 16 MiB sha256; SSE 5 events over 1.2s; H3+WebSocket+16 MiB POST; owner deny of 140.245.11.41 refused the visitor, clear served it again"
+  },
+  {
+   "id": "X-20:grpc:L",
+   "status": "PASS",
+   "detail": "gRPC over h2c: unary, 3-message stream, grpc-status trailers 0 and 5"
+  },
+  {
+   "id": "X-20:closed-port:L",
+   "status": "PASS",
+   "detail": "status names origin 127.0.0.1:32118; edge page sha 513b88e39847"
+  },
+  {
+   "id": "X-20:tcp-tls:L",
+   "status": "PASS",
+   "detail": "public raw TCP echo through :10000; TLS passthrough on :443 delivered the origin certificate"
+  },
+  {
+   "id": "X-20:bind-v4:M",
+   "status": "PASS",
+   "detail": "H1+H2 marker; 16 MiB sha256; SSE 5 events over 1.4s; xff=140.245.11.41; H3+WebSocket+16 MiB POST; owner deny of 140.245.11.41 refused the visitor, clear served it again; stopped -> 57e4de9ab638"
+  },
+  {
+   "id": "X-20:bind-v6:M",
+   "status": "PASS",
+   "detail": "H1+H2 marker; 16 MiB sha256; SSE 5 events over 1.7s; xff=140.245.11.41; stopped -> 57e4de9ab638"
+  },
+  {
+   "id": "X-20:bind-all:M",
+   "status": "PASS",
+   "detail": "H1+H2 marker; 16 MiB sha256; SSE 5 events over 1.6s; xff=140.245.11.41; stopped -> 57e4de9ab638"
+  },
+  {
+   "id": "X-20:https:M",
+   "status": "PASS",
+   "detail": "self-signed origin: refused by default, served with pinned fingerprint, refused with a wrong pin, served with --tls-ca xpc-cert.pem and --tls-server-name"
+  },
+  {
+   "id": "X-20:host-header:M",
+   "status": "PASS",
+   "detail": "--host-header xpc.example.test reached the origin"
+  },
+  {
+   "id": "X-20:preview:M",
+   "status": "PASS",
+   "detail": "H1+H2 marker; 16 MiB sha256; SSE 5 events over 1.7s; H3+WebSocket+16 MiB POST; owner deny of 140.245.11.41 refused the visitor, clear served it again"
+  },
+  {
+   "id": "X-20:grpc:M",
+   "status": "PASS",
+   "detail": "gRPC over h2c: unary, 3-message stream, grpc-status trailers 0 and 5"
+  },
+  {
+   "id": "X-20:closed-port:M",
+   "status": "PASS",
+   "detail": "status names origin 127.0.0.1:32119; edge page sha 77cedf1868c2"
+  },
+  {
+   "id": "X-20:tcp-tls:M",
+   "status": "PASS",
+   "detail": "public raw TCP echo through :10000; TLS passthrough on :443 delivered the origin certificate"
+  },
+  {
+   "id": "X-20:bind-v4:W",
+   "status": "PASS",
+   "detail": "H1+H2 marker; 16 MiB sha256; SSE 5 events over 1.2s; xff=140.245.11.41; H3+WebSocket+16 MiB POST; owner deny of 140.245.11.41 refused the visitor, clear served it again; stopped -> 57e4de9ab638"
+  },
+  {
+   "id": "X-20:bind-v6:W",
+   "status": "PASS",
+   "detail": "H1+H2 marker; 16 MiB sha256; SSE 5 events over 1.2s; xff=140.245.11.41; stopped -> 57e4de9ab638"
+  },
+  {
+   "id": "X-20:bind-all:W",
+   "status": "PASS",
+   "detail": "H1+H2 marker; 16 MiB sha256; SSE 5 events over 1.2s; xff=140.245.11.41; stopped -> 57e4de9ab638"
+  },
+  {
+   "id": "X-20:https:W",
+   "status": "PASS",
+   "detail": "self-signed origin: refused by default, served with pinned fingerprint, refused with a wrong pin, served with --tls-ca xpc-cert.pem and --tls-server-name"
+  },
+  {
+   "id": "X-20:host-header:W",
+   "status": "PASS",
+   "detail": "--host-header xpc.example.test reached the origin"
+  },
+  {
+   "id": "X-20:preview:W",
+   "status": "PASS",
+   "detail": "H1+H2 marker; 16 MiB sha256; SSE 5 events over 1.2s; H3+WebSocket+16 MiB POST; owner deny of 140.245.11.41 refused the visitor, clear served it again"
+  },
+  {
+   "id": "X-20:grpc:W",
+   "status": "PASS",
+   "detail": "gRPC over h2c: unary, 3-message stream, grpc-status trailers 0 and 5"
+  },
+  {
+   "id": "X-20:closed-port:W",
+   "status": "PASS",
+   "detail": "status names origin 127.0.0.1:32129; edge page sha 04ccb8be2ac9"
+  },
+  {
+   "id": "X-20:tcp-tls:W",
+   "status": "PASS",
+   "detail": "public raw TCP echo through :10000; TLS passthrough on :443 delivered the origin certificate"
+  }
+ ]
+}

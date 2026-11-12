@@ -55,6 +55,12 @@ def port_for(dev, key):
 
 def put(dev, name, data, mode='755'):
     path = dev.home + sep(dev) + name
+    if dev.os == 'windows' and len(data) > 1 << 20:  # the chunked PowerShell upload takes minutes for a binary: scp it
+        with tempfile.NamedTemporaryFile() as local:
+            local.write(data)
+            local.flush()
+            subprocess.run(['scp', '-q', local.name, '%s:%s' % (dev.device.target, path.replace('\\', '/'))], check=True, timeout=600)
+        return path
     dev.write(path, data, mode=mode)
     return path
 
