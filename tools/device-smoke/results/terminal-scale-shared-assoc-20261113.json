@@ -1,0 +1,78 @@
+{
+ "check": "terminal-scale",
+ "target": "lsc-ht",
+ "terminals": 100,
+ "host_loadavg_start": [
+  "1.18",
+  "1.47",
+  "1.68"
+ ],
+ "open": {
+  "ready": 34,
+  "all_ready": false,
+  "seconds": {
+   "p50": 3.882,
+   "p95": 4.946,
+   "max": 5.315,
+   "n": 34
+  },
+  "not_ready_last_line": {
+   "pb: The target machine was reached but did not open the connection. Its Paperboat service may still be starting, or it h": 66
+  }
+ },
+ "echo": {
+  "seconds": {
+   "p50": 0.136,
+   "p95": 0.241,
+   "max": 0.265,
+   "n": 96
+  },
+  "missing": 6
+ },
+ "burst": {
+  "closed": 10,
+  "client_close_seconds": 45.34,
+  "others_echo": null,
+  "others_missing": 24,
+  "session_cleanup_failures": 0,
+  "session_cleanup_seconds": 9.2
+ },
+ "shared": {
+  "viewers": 50,
+  "stopped": 1,
+  "flood": {
+   "owner_MB_cumulative_per_second": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "finished": 0,
+   "of": 50,
+   "seconds_to_finish": null
+  },
+  "echo_after_flood": null,
+  "missing": 50,
+  "stopped_viewer_alive_after_continue": false
+ },
+ "final_cleanup": {
+  "closed_and_deleted": 91,
+  "expected": 91,
+  "seconds": 126.3
+ },
+ "host_loadavg_end": [
+  "2.67",
+  "1.96",
+  "1.97"
+ ],
+ "status": "FAIL",
+ "note": "prod, hp containers lsc-hc -> lsc-ht, pb dev-shared-assoc (one association per peer, 512 stream credit, parallel admission), opens 3/s"
+}
