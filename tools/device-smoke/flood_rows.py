@@ -22,9 +22,11 @@ import time
 from pathlib import Path
 
 from machine_ctl import Failure, Machine, remote, run
+from ip_rules_rows import find_url
 
 ORIGIN_PORT = '9319'
 RECOVER = 30
+BYSTANDER_BOUND = 20  # seconds a fresh preview may take to serve while another address floods
 FLOOD_SECONDS = 20
 
 # runs on observer B: python3 - URL SECONDS
@@ -143,11 +145,21 @@ def main():
         flood = subprocess.Popen(remote(observer_b, ['python3', '-', url, str(FLOOD_SECONDS)]), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         flood.stdin.write(FLOODER)
         flood.stdin.close()
-        during = []
+        during, bystander = [], None
         while flood.poll() is None and len(during) < FLOOD_SECONDS:
             during.append(fetch([], url))
+            if bystander is None and len(during) == 4:
+                # a bystander's NEW publication while the flood runs: created, then served to a third address within the normal bound
+                made = good('preview', ORIGIN_PORT, '--background', '--ttl', '30m', timeout=200)
+                preview_id = made.get('id') or (made.get('preview') or {}).get('id')
+                cleanup.append(lambda: machine.pb('preview', 'stop', preview_id, '--json'))
+                preview_url = find_url(made)
+                started = time.time()
+                while time.time() - started < BYSTANDER_BOUND and fetch([], preview_url) != 200:
+                    time.sleep(1)
+                bystander = round(time.time() - started, 1)
             time.sleep(1)
-        out, err = flood.communicate(timeout=300)
+        out, err = flood.stdout.read(), flood.stderr.read()  # the generator has exited: its stdin was closed after the script went in
         try:
             report = json.loads(out.strip().splitlines()[-1])
         except (ValueError, IndexError):
@@ -155,6 +167,7 @@ def main():
         counts = report['counts']
         step('the flooding address is refused 429 edge_rate_limited with Retry-After, after getting its burst',
              counts.get('429', 0) > 0 and counts.get('200', 0) > 0 and report['sample'] and report['sample'][0] == 'edge_rate_limited' and report['sample'][1], '%s %s' % (counts, report['sample']))
+        step('a new preview made during the flood is served to another address within %d s' % BYSTANDER_BOUND, bystander is not None and bystander < BYSTANDER_BOUND, '%s s' % bystander)
         step('another address is served every time during the flood', during and all(code == 200 for code in during), during)
         page, api = report['page'], report['api']
         step('a browser gets a page, an API client problem+json',

@@ -616,8 +616,36 @@ def edges_scenario():
         origin.stop()
 
 
+PF_WAS_ENABLED = []
+
+
+def block_edge(ip):
+    """Make one edge address unreachable from this machine, the way a dead edge is, with the OS's own firewall."""
+    if sys.platform == 'win32':
+        subprocess.run(['powershell', '-NoProfile', '-Command', "New-NetFirewallRule -DisplayName torblock -Direction Outbound -RemoteAddress %s -Action Block | Out-Null" % ip], check=True)
+    elif sys.platform == 'darwin':
+        # the hosted runner's pf is off and its ruleset is only Apple's anchors: a one-rule ruleset replaces it until unblock_edge
+        info = subprocess.run(['sudo', '-n', 'pfctl', '-s', 'info'], capture_output=True, text=True).stdout
+        PF_WAS_ENABLED.append('Status: Enabled' in info)
+        subprocess.run(['sudo', '-n', 'pfctl', '-f', '-'], input='block drop out quick to %s\n' % ip, text=True, check=True)
+        subprocess.run(['sudo', '-n', 'pfctl', '-e'], check=False)
+    else:
+        subprocess.run(['sudo', '-n', 'nft', '-f', '-'], input='table inet torblock { chain out { type filter hook output priority 0; ip daddr %s drop; } }\n' % ip, text=True, check=True)
+
+
+def unblock_edge(check=True):
+    if sys.platform == 'win32':
+        subprocess.run(['powershell', '-NoProfile', '-Command', 'Remove-NetFirewallRule -DisplayName torblock -ErrorAction SilentlyContinue'], check=False)
+    elif sys.platform == 'darwin':
+        subprocess.run(['sudo', '-n', 'pfctl', '-f', '/etc/pf.conf'], check=False)
+        if PF_WAS_ENABLED and not PF_WAS_ENABLED[-1]:
+            subprocess.run(['sudo', '-n', 'pfctl', '-d'], check=False)
+    else:
+        subprocess.run(['sudo', '-n', 'nft', 'delete', 'table', 'inet', 'torblock'], check=check)
+
+
 def edge_loss_scenario():
-    """F8-15 (Linux, needs sudo nft): one edge becomes unreachable from the machine, as a dead edge is; the other edge keeps serving
+    """F8-15 (every OS; Linux nft, macOS pf, Windows firewall rule; needs administrator): one edge becomes unreachable from the machine, as a dead edge is; the other edge keeps serving
     a tunnel and a preview without a single failed request, and the lost edge serves again once it is reachable."""
     s = 'edge_loss'
     origin = serve(Origin)
@@ -638,7 +666,7 @@ def edge_loss_scenario():
         both = all(serve_on(kind, ip, 90) for kind in public for ip in ips)
         cell(s, 'F8-15 before the loss every edge serves the tunnel and the preview', both and len(ips) >= 2, ips)
         lost, survivor = ips[0], ips[1]
-        subprocess.run(['sudo', '-n', 'nft', '-f', '-'], input='table inet torblock { chain out { type filter hook output priority 0; ip daddr %s drop; } }\n' % lost, text=True, check=True)
+        block_edge(lost)
         blocked = lost
         failures, deadline = [], time.time() + 75
         while time.time() < deadline:
@@ -648,12 +676,12 @@ def edge_loss_scenario():
                     failures.append((round(time.time() - deadline + 75), kind, status))
             time.sleep(2)
         cell(s, 'F8-15 with one edge lost the other keeps serving the tunnel and the preview for 75 s without a failed request', not failures, failures[:6] or 'no failures')
-        subprocess.run(['sudo', '-n', 'nft', 'delete', 'table', 'inet', 'torblock'], check=True)
+        unblock_edge()
         blocked = None
         cell(s, 'F8-15 the edge serves both again within 90 s of being reachable', all(serve_on(kind, lost, 90) for kind in public), lost)
     finally:
         if blocked:
-            subprocess.run(['sudo', '-n', 'nft', 'delete', 'table', 'inet', 'torblock'], check=False)
+            unblock_edge(check=False)
         pb('preview', 'stop', preview['id'], check=False)
         origin.stop()
 

@@ -1,0 +1,61 @@
+{
+ "check": "ip-rules-rows",
+ "row": "C281",
+ "kind": "preview",
+ "status": "PASS",
+ "bound_seconds": 15,
+ "seconds_until_each_answer_changed": [
+  0.3,
+  0.5,
+  0.0,
+  0.4,
+  0.0,
+  0.4,
+  1.6,
+  0.1,
+  0.4,
+  2.8,
+  6.5,
+  0.4,
+  0.3
+ ],
+ "steps": [
+  {
+   "step": "baseline: both source addresses served, new resource has no rules",
+   "status": "PASS",
+   "seconds": 5.1
+  },
+  {
+   "step": "deny one address: it gets 403, the other 200",
+   "status": "PASS",
+   "seconds": 8.9
+  },
+  {
+   "step": "--allow replaces only the allow list",
+   "status": "PASS",
+   "seconds": 9.0
+  },
+  {
+   "step": "deny beats allow",
+   "status": "PASS",
+   "seconds": 10.0
+  },
+  {
+   "step": "allow list alone admits only its addresses (after --clear)",
+   "status": "PASS",
+   "seconds": 16.9
+  },
+  {
+   "step": "--allow /0 and a malformed address are refused, rules unchanged",
+   "status": "PASS",
+   "seconds": 13.4
+  },
+  {
+   "step": "a CIDR form, then --clear serves everyone",
+   "status": "PASS",
+   "seconds": 28.1
+  }
+ ],
+ "device": "hosted Windows Server runner (winpool), pb dev-ee6287104, prod edges 2026.11.12.5",
+ "observers": "A = oracle host, B = anvit (two client addresses at the edge)"
+}

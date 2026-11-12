@@ -13,6 +13,7 @@ Usage: ip_rules_rows.py --kind tunnel|preview --machine-cmd '<prefix>' --observe
 import argparse
 import ipaddress
 import json
+import os
 import shlex
 import sys
 import time
@@ -23,6 +24,27 @@ from machine_ctl import Failure, Machine, remote, run
 # server publishes a change at once, so the check allows 15 s from the PUT to the refusal, the same for tunnels and previews.
 RULE_BOUND = 15
 ORIGIN_PORT = '9317'  # the machine's daemon owns 127.100.0.x ports for local access, so the origin binds loopback on this port
+
+
+# runs on an observer: python3 -c RAW HOST PORT tcp|tls -> "answered" when the origin behind the edge spoke, "refused" when the edge closed first
+RAW = r'''
+import socket, ssl, sys
+host, port, mode = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+try:
+    s = socket.create_connection((host, port), timeout=10)
+    if mode == "tls":
+        ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+        try:
+            ctx.wrap_socket(s, server_hostname=host); print("answered")
+        except ssl.SSLError as e:
+            print("answered" if "WRONG_VERSION" in str(e) or "HTTP" in str(e).upper() else "refused")
+        except OSError:
+            print("refused")
+    else:
+        s.sendall(b"GET / HTTP/1.0\r\n\r\n"); print("answered" if s.recv(100).startswith(b"HTTP") else "refused")
+except OSError:
+    print("refused")
+'''
 
 
 def find_url(value):
@@ -51,7 +73,7 @@ def main():
         parser.error(str(error))
     observer_b = shlex.split(args.observer_b_cmd)
     row = 'C280' if args.kind == 'tunnel' else 'C281'
-    name = 'laners-ip-%d' % int(time.time())
+    name = 'tor-ip-%d-%s' % (int(time.time()), os.urandom(2).hex())  # tunnel names are account-wide
     steps, cleanup, latencies = [], [], []
 
     pb = machine.pb
@@ -68,8 +90,9 @@ def main():
             raise Failure('%s succeeded but must be refused' % ' '.join(arguments))
         return value
 
-    def fetch(observer, url):
-        code, out, err = run(remote(observer, ['curl', '-sS', '-m', '25', '-o', '-', '-w', '\\n%{http_code}', url]), 60)
+    def fetch(observer, url, *headers):
+        flags = [x for header in headers for x in ('-H', header)]
+        code, out, err = run(remote(observer, ['curl', '-sS', '-m', '25', *flags, '-o', '-', '-w', '\\n%{http_code}', url]), 60)
         body, _, status = out.rpartition('\n')
         return (int(status) if status.strip().isdigit() else 0), body
 
@@ -191,6 +214,75 @@ def main():
                 raise Failure('--clear left rules')
             eventually([], url, 200, 'A served again after --clear')
 
+
+        def spoofed_header_is_not_believed():
+            good(*group, '--clear')
+            good(*group, '--deny', addresses['a'])
+            eventually([], url, 403, 'A denied')
+            claimed = 'X-Forwarded-For: ' + addresses['b']
+            if fetch([], url, claimed, 'Forwarded: for=' + addresses['b'], 'X-Real-IP: ' + addresses['b'])[0] != 403:
+                raise Failure('a denied address got in by naming an allowed one in X-Forwarded-For / Forwarded / X-Real-IP')
+            good(*group, '--clear')
+            good(*group, '--allow', addresses['b'])
+            eventually([], url, 403, 'A not on the allow list')
+            if fetch([], url, claimed)[0] != 403:
+                raise Failure('an address outside the allow list got in by naming an allowed one in X-Forwarded-For')
+            good(*group, '--clear')
+            eventually([], url, 200, 'A served again after --clear')
+
+        def confirmed(*arguments):
+            code, preview = pb(*arguments, '--json')  # a destructive command first answers with its confirmation token (and a non-zero exit)
+            if not isinstance(preview, dict) or 'confirmation_token' not in preview:
+                raise Failure('%s gave no confirmation token: %s' % (' '.join(arguments), str(preview)[:200]))
+            good(*arguments, '--confirm', preview['confirmation_token'])
+
+        def raw_answer(observer, host, port, mode):
+            code, out, err = run(remote(observer, ['python3', '-c', RAW, host, str(port), mode]), 60)
+            return out.strip() or 'refused'
+
+        def raw_protocol(mode):
+            suffix = name + '-' + mode
+            if mode == 'tcp':
+                made = good('tunnel', 'create', suffix, '--from', 'tcp://127.0.0.1:' + ORIGIN_PORT, '--duration', '30m', '--wait', '--timeout', '90s', timeout=200)
+            else:
+                made = good('tunnel', 'create', suffix, '--port', ORIGIN_PORT, '--duration', '30m', '--wait', '--timeout', '90s', timeout=200)
+            tid = made['tunnel']['id']
+
+            def remove():
+                code, value = pb('tunnel', 'delete', tid, '--json')
+                token = (value.get('confirmation_token') if isinstance(value, dict) else None)
+                if token:
+                    pb('tunnel', 'delete', tid, '--confirm', token, '--json')
+            cleanup.append(remove)
+            if mode == 'tls':
+                default = good('tunnel', 'route', 'list', tid)['items'][0]
+                confirmed('tunnel', 'route', 'remove', tid, default['id'])
+                good('tunnel', 'route', 'add', tid, '--name', 'tls1', '--protocol', 'tls', '--to', 'tcp://127.0.0.1:' + ORIGIN_PORT, '--wait', '--timeout', '90s', timeout=200)
+            route = good('tunnel', 'route', 'list', tid)['items'][0]
+            host, port = route['host_match']['hostname'], route['public_tcp_port']
+            ip_group = ['tunnel', 'ip-rules', tid]
+
+            def wait_for(observer, want, label, seconds=None):
+                deadline = time.time() + (seconds or args.wait)
+                last = None
+                while time.time() < deadline:
+                    last = raw_answer(observer, host, port, mode)
+                    if last == want:
+                        return
+                    time.sleep(1)
+                raise Failure('%s: wanted %s, last %s' % (label, want, last))
+            wait_for([], 'answered', 'baseline A', 180)
+            wait_for(observer_b, 'answered', 'baseline B', 180)
+            good(*ip_group, '--deny', addresses['a'])
+            wait_for([], 'refused', 'denied A')
+            wait_for(observer_b, 'answered', 'B unaffected')
+            good(*ip_group, '--clear')
+            good(*ip_group, '--allow', addresses['b'])
+            wait_for([], 'refused', 'A not on the allow list')
+            wait_for(observer_b, 'answered', 'B allowed')
+            good(*ip_group, '--clear')
+            wait_for([], 'answered', 'A served after --clear')
+
         step('baseline: both source addresses served, new resource has no rules', baseline)
         if steps[-1]['status'] != 'PASS':
             raise Failure('the baseline failed: the rule steps need two reachable observers')
@@ -201,6 +293,10 @@ def main():
                                 ('--allow /0 and a malformed address are refused, rules unchanged', refusals),
                                 ('a CIDR form, then --clear serves everyone', cidr_and_clear)):
             step(label, function)
+        if args.kind == 'tunnel':
+            step('a forwarded-for header naming an allowed address does not admit a denied one', spoofed_header_is_not_believed)
+            step('a public TCP tunnel refuses a denied or not-allowed address and serves the other', lambda: raw_protocol('tcp'))
+            step('a TLS passthrough tunnel refuses a denied or not-allowed address and serves the other', lambda: raw_protocol('tls'))
     except Exception as error:  # noqa: BLE001
         steps.append({'step': 'fixture', 'status': 'FAIL', 'detail': str(error)[:400]})
     finally:
