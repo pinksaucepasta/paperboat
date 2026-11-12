@@ -263,7 +263,8 @@ func TestRuntimeCarrierGatewayRequiresHelperAuthAndPreservesRenewedStream(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, path := range []string{"/v1/browser-terminal", "/arbitrary"} {
+			// /v1/runtime is the terminal endpoint a self-hosted descriptor issues as wss://edge/v1/runtime/<host>/v1/runtime.
+			for _, path := range []string{"/v1/browser-terminal", "/v1/runtime", "/arbitrary"} {
 				req := httptest.NewRequest("GET", endpoint(path), nil)
 				rec := httptest.NewRecorder()
 				gateway.ServeHTTP(rec, req)
