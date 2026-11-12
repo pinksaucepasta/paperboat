@@ -1,0 +1,355 @@
+{
+  "schema": 1,
+  "client_versions": {
+    "old": "2026.11.10.11",
+    "new": "dev-5a7a97818"
+  },
+  "cells": [
+    {
+      "client": "new",
+      "server": "new",
+      "edge": "new",
+      "checks": [
+        {
+          "step": "client_install",
+          "ok": true,
+          "seconds": 18.2
+        },
+        {
+          "step": "server_switch",
+          "ok": true,
+          "seconds": 2.1
+        },
+        {
+          "step": "edge_switch",
+          "ok": true,
+          "seconds": 13.4
+        },
+        {
+          "step": "exec_a_to_b",
+          "ok": true,
+          "seconds": 0.6
+        },
+        {
+          "step": "exec_b_to_a",
+          "ok": true,
+          "seconds": 1.6
+        },
+        {
+          "step": "send",
+          "ok": true,
+          "seconds": 1.2
+        }
+      ],
+      "ok": true
+    },
+    {
+      "client": "new",
+      "server": "new",
+      "edge": "old",
+      "checks": [
+        {
+          "step": "client_install",
+          "ok": true,
+          "seconds": 21.8
+        },
+        {
+          "step": "server_switch",
+          "ok": true,
+          "seconds": 2.1
+        },
+        {
+          "step": "edge_switch",
+          "ok": false,
+          "error": "RuntimeError",
+          "seconds": 52.8
+        }
+      ],
+      "ok": false
+    },
+    {
+      "client": "new",
+      "server": "old",
+      "edge": "new",
+      "checks": [
+        {
+          "step": "client_install",
+          "ok": true,
+          "seconds": 19.1
+        },
+        {
+          "step": "server_switch",
+          "ok": true,
+          "seconds": 2.9
+        },
+        {
+          "step": "edge_switch",
+          "ok": true,
+          "seconds": 7.7
+        },
+        {
+          "step": "exec_a_to_b",
+          "ok": true,
+          "seconds": 0.8
+        },
+        {
+          "step": "exec_b_to_a",
+          "ok": true,
+          "seconds": 1.6
+        },
+        {
+          "step": "send",
+          "ok": false,
+          "error": "RemoteFailure",
+          "exit_code": 1,
+          "reason": "operation_failed",
+          "seconds": 0.8
+        }
+      ],
+      "ok": false
+    },
+    {
+      "client": "new",
+      "server": "old",
+      "edge": "old",
+      "checks": [
+        {
+          "step": "client_install",
+          "ok": true,
+          "seconds": 18.9
+        },
+        {
+          "step": "server_switch",
+          "ok": true,
+          "seconds": 2.4
+        },
+        {
+          "step": "edge_switch",
+          "ok": true,
+          "seconds": 12.7
+        },
+        {
+          "step": "exec_a_to_b",
+          "ok": true,
+          "seconds": 0.5
+        },
+        {
+          "step": "exec_b_to_a",
+          "ok": true,
+          "seconds": 1.6
+        },
+        {
+          "step": "send",
+          "ok": false,
+          "error": "RemoteFailure",
+          "exit_code": 1,
+          "reason": "operation_failed",
+          "seconds": 0.8
+        }
+      ],
+      "ok": false
+    },
+    {
+      "client": "old",
+      "server": "new",
+      "edge": "new",
+      "checks": [
+        {
+          "step": "client_install",
+          "ok": true,
+          "seconds": 26.4
+        },
+        {
+          "step": "server_switch",
+          "ok": true,
+          "seconds": 2.9
+        },
+        {
+          "step": "edge_switch",
+          "ok": true,
+          "seconds": 11.7
+        },
+        {
+          "step": "exec_a_to_b",
+          "ok": true,
+          "seconds": 0.7
+        },
+        {
+          "step": "exec_b_to_a",
+          "ok": true,
+          "seconds": 2.6
+        },
+        {
+          "step": "send",
+          "ok": true,
+          "seconds": 1.5
+        }
+      ],
+      "ok": true
+    },
+    {
+      "client": "old",
+      "server": "new",
+      "edge": "old",
+      "checks": [
+        {
+          "step": "client_install",
+          "ok": true,
+          "seconds": 21.1
+        },
+        {
+          "step": "server_switch",
+          "ok": true,
+          "seconds": 2.2
+        },
+        {
+          "step": "edge_switch",
+          "ok": false,
+          "error": "RuntimeError",
+          "seconds": 52.5
+        }
+      ],
+      "ok": false
+    },
+    {
+      "client": "old",
+      "server": "old",
+      "edge": "new",
+      "checks": [
+        {
+          "step": "client_install",
+          "ok": true,
+          "seconds": 18.7
+        },
+        {
+          "step": "server_switch",
+          "ok": true,
+          "seconds": 2.8
+        },
+        {
+          "step": "edge_switch",
+          "ok": true,
+          "seconds": 7.8
+        },
+        {
+          "step": "exec_a_to_b",
+          "ok": true,
+          "seconds": 0.7
+        },
+        {
+          "step": "exec_b_to_a",
+          "ok": true,
+          "seconds": 2.6
+        },
+        {
+          "step": "send",
+          "ok": false,
+          "error": "RemoteFailure",
+          "exit_code": 1,
+          "reason": "operation_failed",
+          "seconds": 1.0
+        }
+      ],
+      "ok": false
+    },
+    {
+      "client": "old",
+      "server": "old",
+      "edge": "old",
+      "checks": [
+        {
+          "step": "client_install",
+          "ok": true,
+          "seconds": 18.7
+        },
+        {
+          "step": "server_switch",
+          "ok": true,
+          "seconds": 2.1
+        },
+        {
+          "step": "edge_switch",
+          "ok": true,
+          "seconds": 12.6
+        },
+        {
+          "step": "exec_a_to_b",
+          "ok": true,
+          "seconds": 0.6
+        },
+        {
+          "step": "exec_b_to_a",
+          "ok": true,
+          "seconds": 2.6
+        },
+        {
+          "step": "send",
+          "ok": false,
+          "error": "RemoteFailure",
+          "exit_code": 1,
+          "reason": "operation_failed",
+          "seconds": 0.8
+        }
+      ],
+      "ok": false
+    }
+  ],
+  "restoration": [
+    {
+      "step": "candidate_server",
+      "ok": true,
+      "seconds": 2.3
+    },
+    {
+      "step": "candidate_edge",
+      "ok": true,
+      "seconds": 12.3
+    },
+    {
+      "step": "candidate_clients",
+      "ok": true,
+      "seconds": 19.2
+    }
+  ],
+  "checks": [
+    {
+      "step": "client_downgrade",
+      "ok": true,
+      "seconds": 212.3
+    },
+    {
+      "step": "held_session_rolling_server_and_edge",
+      "ok": false,
+      "error": "TimeoutExpired",
+      "seconds": 117.2
+    }
+  ],
+  "ok": false,
+  "scope": "native access (exec, send, held exec); terminal creation, preview, tunnel and QUIC need the edge on 443 and stay with the production check-edges gate; forced relay is a separate gate",
+  "inputs": {
+    "old_client": "/home/ubuntu/r03/old-pb",
+    "new_client": "/home/ubuntu/r03/new-pb",
+    "old_server": "paperboat-server:stg-c716f4012",
+    "new_server": "paperboat-server:stg-5a7a97818",
+    "old_edge": "paperboat-tunnel:stg-c716f4012",
+    "new_edge": "paperboat-tunnel:stg-5a7a97818",
+    "window_end": "2026-11-12T12:51:51+00:00"
+  },
+  "baseline": [
+    {
+      "step": "exec_a_to_b",
+      "ok": true,
+      "seconds": 0.6
+    },
+    {
+      "step": "exec_b_to_a",
+      "ok": true,
+      "seconds": 1.6
+    },
+    {
+      "step": "send",
+      "ok": true,
+      "seconds": 1.2
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+R-03 version-skew terminal rows, 2026-11-12 (release-safety lane). Production control plane 2026.11.12.x.
+Old = official 2026.11.10.11 (c716f4012), new = main dev-713fdd21b. Rows: terminal_matrix.py --only two,resize,keys
+(two windows share output, size follows the typing window, resize storm, 2000 keystrokes with no stream reopen,
+shell answers right after typing, bound 2 s). Throwaway machines rls-*, revoked by cleanup_test_account.py --prefix rls-.
+
+pbvm2 containers (RAM-starved shared VM, load 2.7-3 from other lanes; unfit for latency checks):
+  old client -> new host: all rows PASS, answer 0.7 s / 1.1 s / 1.0 s
+  new client -> old host: all rows PASS except answer latency: 9.2 / 3.5 / 2.7 s; with roles swapped 1.3 s then 10.9 s
+  same version (both new): 4.4 s then 1.7 s; both old: 6.7 s, 9.4 s   -> not skew
+anvit containers (4 cores, load 1.5-5 before each run; the test itself drives it to 7-19):
+  new client -> new host: answer 0.1 / 0.0 / 0.1 s, PASS x3
+  new client -> old host: 0.0 / 0.3 / 0.3 s, PASS x3
+  old client -> new host: 0.0 / 0.0 / 0.0 s, PASS x3
+Every functional row (two windows, size, resize storm, no reopen) PASS in every direction on both hosts.
+Conclusion: no skew defect; the slow answers came from the pbvm2 host.
