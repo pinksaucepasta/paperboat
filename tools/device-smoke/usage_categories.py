@@ -8,7 +8,10 @@ usage and billing API (the CLI credential is read in memory, never printed) and 
   * each driven category shows relay bytes of at least what was driven;
   * billing usage_bytes grew by exactly the managed-relay plus edge growth of the same window
     (direct and relay bytes of an unidentified node are recorded, never debited).
-Usage: usage_categories.py TARGET [--team TEAM --driver ACCOUNT [--idle ACCOUNT ...]]
+Usage: usage_categories.py TARGET [--no-ssh] [--team TEAM --driver ACCOUNT [--idle ACCOUNT ...]]
+
+--no-ssh leaves out ssh, scp, rsync and sftp (the ssh category): an account at its managed-SSH client capacity
+(doctor code ssh_client_key_capacity) cannot start them.
 
 With --team the machine is team-owned and the numbers are the team's: the pool (the team's usage and billing
 usage_bytes, billed by exactly the charged paths) and per member (usage filtered by actor_account_id): the driving
@@ -80,7 +83,7 @@ class Api:
         return credential()[0]
 
     def get(self, path):
-        for attempt in range(2):
+        for attempt in range(4):
             request = urllib.request.Request(self.server + path, headers={'Authorization': 'Bearer ' + self.token,
                                                                           'X-Paperboat-Workspace': self.workspace})
             try:
@@ -90,6 +93,11 @@ class Api:
                 if error.code != 401 or attempt:
                     raise
                 self.token = self.read_token()
+            except (urllib.error.URLError, TimeoutError):
+                # A handshake or read timeout of the control-plane API during a long run: retry, then give up.
+                if attempt == 3:
+                    raise
+                time.sleep(10)
 
     def snapshot(self, start, actors=()):
         end = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() + 60))
@@ -206,7 +214,10 @@ def terminal(target, name):
         raise RuntimeError('terminal output did not arrive over the relay')
 
 
-def drive(target, work):
+SSH_STEPS = ('ssh', 'scp', 'rsync', 'sftp')
+
+
+def drive(target, work, skip=()):
     data = work / 'data.bin'
     if DEVICE:
         data.write_random(SIZE)
@@ -223,7 +234,7 @@ def drive(target, work):
     }
     (work / 'sftp.batch').write_text('put %s %s.sftp\nrm %s.sftp\n' % (data, remote, remote))
     for name, step in steps.items():
-        if DEVICE and name == 'rsync':
+        if DEVICE and name == 'rsync' or name in skip:
             continue
         result = step()
         if result.returncode != 0:
@@ -235,12 +246,16 @@ def drive(target, work):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
+    parser.add_argument('--no-ssh', action='store_true', help='leave out the ssh category (ssh, scp, rsync, sftp)')
     parser.add_argument('--team', default='personal', help='the team that owns TARGET (default: the personal workspace)')
     parser.add_argument('--driver', default='', help='account id of the member that drives the traffic (with --team)')
     parser.add_argument('--idle', action='append', default=[], help='account id of a member that drives nothing (with --team)')
     arguments = parser.parse_args()
     target, team = arguments.target, arguments.team
     assert team == 'personal' or arguments.driver, '--team needs --driver ACCOUNT_ID'
+    skip = SSH_STEPS if arguments.no_ssh else ()
+    if arguments.no_ssh:
+        FLOORS.pop('ssh')
     actors = [arguments.driver, *arguments.idle] if team != 'personal' else []
     api = Api(team)
     start = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() - 3600))
@@ -253,7 +268,7 @@ def main():
         block_udp(blocked)
         try:
             wait_for_relay(target)
-            drive(target, work)
+            drive(target, work, skip)
         finally:
             unblock_udp(blocked)
         try:

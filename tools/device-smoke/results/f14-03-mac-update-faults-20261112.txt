@@ -1,0 +1,20 @@
+# update_faults.py on macpool-8 (GitHub-hosted macOS 26.7 arm64 runner), builds dev-bc59414d6-a / dev-bc59414d6 (main bc59414d6 content), peer hp
+## run 1: restart-failure disk-full (2026-11-12 ~16:00Z)
+{"step": "restart-failure-message", "status": "PASS", "error": "update_rolled_back", "message": "The new version did not become ready (the failing step is printed above, for example local machine access), so the previ"}
+{"step": "restart-failure-previous-version-runs", "status": "PASS", "version": "dev-bc59414d6-a"}
+{"step": "restart-failure-nothing-left", "status": "PASS", "pins": 1, "jobs": 5}
+{"step": "restart-failure-retry-installs", "status": "PASS", "version": "dev-bc59414d6"}
+{"step": "disk-full-30mb-message", "status": "PASS", "error": "insufficient_disk_space", "message": "There is not enough free disk space to stage the update. Free space on the disk that holds the Paperboat installation (o"}
+{"step": "disk-full-30mb-nothing-changed", "status": "PASS", "version": "dev-bc59414d6"}
+{"step": "disk-full-30mb-no-leftovers", "status": "PASS", "leftover": []}
+{"step": "disk-full-140mb-message", "status": "FAIL", "error": "update_source_unreadable", "message": "The update to install cannot be read (manual input is invalid or could not be staged). --from takes the path of an execu"}
+FAIL disk-full-140mb-message
+## rerun: disk-full only (the 140 MB step of run 1 did not repeat: update_source_unreadable once)
+{"step": "disk-full-30mb-message", "status": "PASS", "error": "insufficient_disk_space", "message": "There is not enough free disk space to stage the update. Free space on the disk that holds the Paperboat installation (o"}
+{"step": "disk-full-30mb-nothing-changed", "status": "PASS", "version": "dev-bc59414d6"}
+{"step": "disk-full-30mb-no-leftovers", "status": "PASS", "leftover": []}
+{"step": "disk-full-140mb-message", "status": "PASS", "error": "insufficient_disk_space", "message": "There is not enough free disk space to stage the update. Free space on the disk that holds the Paperboat installation (o"}
+{"step": "disk-full-140mb-nothing-changed", "status": "PASS", "version": "dev-bc59414d6"}
+{"step": "disk-full-140mb-no-leftovers", "status": "PASS", "leftover": []}
+{"step": "disk-full-retry-installs", "status": "PASS", "version": "dev-bc59414d6-a"}
+{"check": "update-faults", "device": "macpool-8", "status": "PASS", "checks": ["disk-full"]}
