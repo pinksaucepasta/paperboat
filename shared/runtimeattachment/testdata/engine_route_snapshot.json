@@ -33,6 +33,7 @@
       "public_host": "16941b5b-3abe-4ac1-9aec-dfab5c852fd5.tunnels.example.test",
       "public_tcp_listener_id": null,
       "public_tcp_port": null,
+      "rewrite_rules": {},
       "route_id": "route_tunnelep_225354727613071",
       "route_revision": 3,
       "state": "active",
