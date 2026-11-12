@@ -72,3 +72,10 @@ func TestSessionConfigAcceptsMeasuredKeepaliveAndVerifiedPacketSize(t *testing.T
 		})
 	}
 }
+
+// One client must be able to hold 100 terminals and 50 viewers of one: two streams each (F21-164).
+func TestInteractiveSessionAdmitsTheStreamsOfHundredTerminalsAndFiftyViewers(t *testing.T) {
+	if got, want := quicConfig(DevelopmentSessionConfig(ClassInteractive)).MaxIncomingStreams, int64(2*(100+50)); got < want {
+		t.Fatalf("interactive MaxIncomingStreams = %d, want at least %d", got, want)
+	}
+}

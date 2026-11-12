@@ -435,6 +435,11 @@ func config(class Class) *quic.Config {
 	return quicConfig(DevelopmentSessionConfig(class))
 }
 
+// maxInteractiveStreams is how many streams one peer may have open on an interactive session. A terminal holds two (control
+// and output) and a machine holds 100 terminals plus the viewers of a shared one (F21-164): the previous 64 stopped a client
+// at 32 terminals, the rest waiting out their credential. It is only stream credit; the connection window still bounds memory.
+const maxInteractiveStreams = 512
+
 func quicConfig(sessionConfig SessionConfig) *quic.Config {
 	maximumStreams := int64(64)
 	maximumUniStreams := int64(-1)
@@ -450,6 +455,7 @@ func quicConfig(sessionConfig SessionConfig) *quic.Config {
 	case ClassTransfer:
 		maximumStreams = 16
 	case ClassInteractive:
+		maximumStreams = maxInteractiveStreams
 	default:
 		maximumStreams = -1
 	}
