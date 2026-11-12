@@ -82,8 +82,8 @@ func (s *Service) MachinePolicy(ctx context.Context, machineID string) (recordin
 	err := s.db.InReadOnlySnapshot(ctx, func(ctx context.Context, tx *db.Tx) error {
 		var team *string
 		var enabled, adminsOnly bool
-		err := tx.QueryRow(ctx, `SELECT m.owner_team_id, coalesce(t.deleted_at IS NULL AND NOT t.suspended AND team_paid_entitled(t.team_id), false), coalesce(t.recording_admins_only, false)
- FROM user_machines m LEFT JOIN teams t ON t.team_id = m.owner_team_id WHERE m.id = $1 AND m.deleted_at IS NULL AND m.revoked_at IS NULL`, machineID).Scan(&team, &enabled, &adminsOnly)
+		err := tx.QueryRow(ctx, `SELECT paperboat.recording_team(m.id), coalesce(t.deleted_at IS NULL AND NOT t.suspended AND team_paid_entitled(t.team_id), false), coalesce(t.recording_admins_only, false)
+ FROM user_machines m LEFT JOIN teams t ON t.team_id = paperboat.recording_team(m.id) WHERE m.id = $1 AND m.deleted_at IS NULL AND m.revoked_at IS NULL`, machineID).Scan(&team, &enabled, &adminsOnly)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrMachineGone
 		}

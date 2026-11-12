@@ -11,13 +11,14 @@ import (
 
 // ApplyReportTx updates the index from one machine report (already validated with Report.Validate) inside the
 // audit backlog's transaction. Every step is idempotent, because the backlog may be uploaded again. Only the
-// reporting machine's own rows change. A recording reported by a machine that has no entitled owner team is not
+// reporting machine's own rows change. A recording reported by a machine that has no entitled recording team (the team
+// that owns it or that it is shared into) is not
 // indexed (its audit event still is).
 func ApplyReportTx(ctx context.Context, tx *db.Tx, machineID, kind string, r recording.Report) error {
 	switch kind {
 	case recording.KindStarted:
 		var team, name string
-		err := tx.QueryRow(ctx, `SELECT m.owner_team_id, m.alias FROM user_machines m JOIN teams t ON t.team_id = m.owner_team_id
+		err := tx.QueryRow(ctx, `SELECT paperboat.recording_team(m.id), m.alias FROM user_machines m JOIN teams t ON t.team_id = paperboat.recording_team(m.id)
  WHERE m.id = $1 AND t.deleted_at IS NULL AND team_paid_entitled(t.team_id)`, machineID).Scan(&team, &name)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil

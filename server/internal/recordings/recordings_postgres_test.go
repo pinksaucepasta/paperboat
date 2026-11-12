@@ -398,3 +398,68 @@ func sorted(s []string) []string {
 	slices.Sort(out)
 	return out
 }
+
+// A personal machine shared into a team records under that team's policy, key and index; unshared it records nothing,
+// and sharing or unsharing moves the machine's recording_policy topic. Several teams: the lowest team id decides.
+func TestPostgresRecordingsOnASharedPersonalMachine(t *testing.T) {
+	f := newFixture(t)
+	shared, loose, other := "mshared_"+f.team, "mloose_"+f.team, "aaa-"+f.team
+	for m, alias := range map[string]string{shared: "shared", loose: "loose"} {
+		f.exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online) VALUES($1,$2,$1,$3,'linux','amd64','/w','online','occupied',true)`, m, f.member, alias)
+	}
+	f.exec(`INSERT INTO paperboat.teams(team_id,owner_account,generation) VALUES($1,$2,1)`, other, f.owner)
+	t.Cleanup(func() {
+		_, _ = f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.team_resource_bindings WHERE resource_id=ANY($1)`, []string{shared, loose})
+		_, _ = f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.session_recordings WHERE machine_id=ANY($1)`, []string{shared, loose})
+		_, _ = f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.user_machines WHERE id=ANY($1)`, []string{shared, loose})
+		_, _ = f.store.SQL().ExecContext(context.Background(), `DELETE FROM paperboat.teams WHERE team_id=$1`, other)
+	})
+	f.paid()
+	if p := f.machinePolicy(shared); p.Enabled || p.TeamID != "" {
+		t.Fatalf("a personal machine shared with no team records: %+v", p)
+	}
+	before := f.topic(shared)
+	f.exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, f.team, shared, f.member)
+	if f.topic(shared) <= before {
+		t.Fatal("sharing the machine did not move its recording_policy topic")
+	}
+	if err := f.policy(`{"rules": [{"src": ["role:member"], "dst": ["machine:shared"], "allow": ["record"]}, {"src": ["role:admin"], "dst": ["machine:shared"], "allow": ["recording_view"]}]}`); err != nil {
+		t.Fatal(err)
+	}
+	k1, _ := newKey(t, f.team, 1, nil)
+	if _, err := f.s.CreateKey(f.ctx, f.owner, f.team, recording.KeyCreate{Key: k1, Grants: []recording.Grant{f.grant(f.owner)}}); err != nil {
+		t.Fatal(err)
+	}
+	p := f.machinePolicy(shared)
+	if !p.Valid() || !p.Enabled || p.TeamID != f.team || len(p.Keys) != 1 || !slices.Contains(p.RecordAccounts, f.member) {
+		t.Fatalf("a shared personal machine does not follow the team's policy: %+v", p)
+	}
+	now := time.Now().UTC()
+	report := recording.Report{RecordingID: "rec_89abcdef-0123-4567-89ab-cdef01234567", SessionID: "sess_s", Trigger: recording.TriggerRule, KeyGeneration: 1, Accounts: []string{f.member}, StartedAt: now}
+	if err := report.Validate(recording.KindStarted, now); err != nil {
+		t.Fatal(err)
+	}
+	for machine, want := range map[string]int{shared: 1, loose: 0} {
+		if err := f.store.InTx(f.ctx, func(ctx context.Context, tx *db.Tx) error {
+			return ApplyReportTx(ctx, tx, machine, recording.KindStarted, report)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		var n int
+		_ = f.store.SQL().QueryRowContext(f.ctx, `SELECT count(*) FROM paperboat.session_recordings WHERE machine_id=$1 AND team_id=$2`, machine, f.team).Scan(&n)
+		if n != want {
+			t.Fatalf("%s: %d indexed recordings, want %d", machine, n, want)
+		}
+		f.exec(`DELETE FROM paperboat.session_recordings WHERE machine_id=$1`, machine)
+	}
+	// A second team holding the machine: the lowest team id decides, and unsharing from that team hands it back.
+	f.exec(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, other, shared, f.member)
+	if p := f.machinePolicy(shared); p.TeamID == f.team {
+		t.Fatalf("the lowest team id (%s) should decide: %+v", other, p)
+	}
+	f.exec(`UPDATE paperboat.team_resource_bindings SET active=false WHERE team_id=$1 AND resource_id=$2`, other, shared)
+	f.exec(`UPDATE paperboat.team_resource_bindings SET active=false WHERE team_id=$1 AND resource_id=$2`, f.team, shared)
+	if p := f.machinePolicy(shared); p.Enabled || p.TeamID != "" {
+		t.Fatalf("an unshared machine still records: %+v", p)
+	}
+}

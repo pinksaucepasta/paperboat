@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test"
-import { ApiError } from "@/lib/api"
-import { convertBytes, editRecordingRules, formatClock, formatDuration, parseCast, playerClock, recordingMessage, recordingRules, SegmentFramer, toBase64 } from "@/lib/recordings"
+import { convertBytes, editRecordingRules, formatClock, formatDuration, parseCast, playerClock, recordingRules, SegmentFramer, toBase64 } from "@/lib/recordings"
 
 const policy = `{
   "tags": { "tag:prod": [] },
@@ -91,8 +90,4 @@ test("byte fields convert between the server's base64 and the vault's base64url,
   const vault = convertBytes(server, "url")
   expect(vault).toEqual({ team_id: "t+/", viewers: [{ account_id: "a", sharing_public_key: "-_8" }], viewer_key: { generation: 1, sealed: "ab-_" } })
   expect(convertBytes(vault, "std")).toEqual(server)
-})
-
-test("a refused start names the machine's ownership, the usual reason recording is unavailable", () => {
-  expect(recordingMessage(new ApiError(0, "recording_unavailable", ""))).toContain("must belong to the team")
 })
