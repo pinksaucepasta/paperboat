@@ -102,6 +102,11 @@ func secureWriteFile(target string, value []byte, mode os.FileMode) error {
 	}
 	defer unix.Unlinkat(parent, name, 0)
 	file := os.NewFile(uintptr(fd), name)
+	// The creation mode is cut by the process umask (a service runs with 077): set it exactly, so a replaced file keeps its bits.
+	if err := unix.Fchmod(fd, uint32(mode.Perm())); err != nil {
+		file.Close()
+		return err
+	}
 	_, writeErr := file.Write(value)
 	syncErr := file.Sync()
 	closeErr := file.Close()
