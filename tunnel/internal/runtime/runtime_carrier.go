@@ -63,13 +63,15 @@ type RuntimeCarrierWorker struct {
 	// request has finished.
 	pullWake chan struct{}
 	pullDone chan struct{}
-	// pulled is closed after the first successful runtime pull (Pulled).
-	pulled chan struct{}
-	closed bool
+	// pulled is closed after the first successful runtime pull and the first successful endpoint pull (Pulled).
+	pulled          chan struct{}
+	endpointsPulled bool
+	closed          bool
 }
 
-// Pulled is closed once the first runtime pull installed this process's admissions: a replacement
-// process takes over from the one it replaces only after that.
+// Pulled is closed once the first runtime pull AND the first endpoint pull installed this process's admissions
+// (previews and endpoint tunnels ride the endpoint pull): a replacement process takes over from the one it
+// replaces only after that, so it never denies a route it simply has not loaded yet.
 func (w *RuntimeCarrierWorker) Pulled() <-chan struct{} {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -77,6 +79,21 @@ func (w *RuntimeCarrierWorker) Pulled() <-chan struct{} {
 		w.pulled = make(chan struct{})
 	}
 	return w.pulled
+}
+
+// markPulled closes Pulled once both first pulls are applied. Only the worker's own goroutine calls it.
+func (w *RuntimeCarrierWorker) markPulled() {
+	if w.pulls == 0 || !w.endpointsPulled {
+		return
+	}
+	w.Pulled() // makes the channel
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	select {
+	case <-w.pulled:
+	default:
+		close(w.pulled)
+	}
 }
 
 // missPullInterval bounds pulls asked for by carriers that matched no admission, so unadmitted
@@ -137,6 +154,7 @@ func (w *RuntimeCarrierWorker) Start(ctx context.Context) error {
 			}
 		}
 		w.reconcile(run)
+		w.reconcileEndpoints(run) // the first endpoint set is part of being warm, not a tick away
 		var lastMissPull time.Time
 		ticker := time.NewTicker(w.Interval)
 		defer ticker.Stop()
@@ -245,12 +263,7 @@ func (w *RuntimeCarrierWorker) reconcile(parent context.Context) (failure error)
 			return err
 		}
 		w.pulls++
-		if w.pulls == 1 {
-			w.Pulled() // makes the channel
-			w.mu.Lock()
-			close(w.pulled)
-			w.mu.Unlock()
-		}
+		w.markPulled()
 		if w.OnPull != nil && (w.pulls == 1 || len(w.runtimeSet) != w.pulledCount) {
 			w.OnPull(w.pulls, len(w.runtimeSet), w.pulledCount)
 		}
@@ -296,6 +309,8 @@ func (w *RuntimeCarrierWorker) reconcileEndpoints(parent context.Context) (failu
 		w.endpointFullAt = time.Now()
 	}
 	w.endpointCursor = update.Cursor
+	w.endpointsPulled = true
+	defer w.markPulled()
 	changed := !endpointSetEqual(w.endpointSet, next)
 	if !changed && expiry.Sub(w.endpointExpiry) < endpointRenewStep {
 		return nil

@@ -562,3 +562,40 @@ func TestIngressAuthorityTakesAnAnswerSlowerThanTheControlTimeout(t *testing.T) 
 		t.Fatalf("a 1.5 s answer to a 1 s control timeout was refused: %d decisions, %v", len(decisions), err)
 	}
 }
+
+// Warm closes with the first successful fetch only, never with a failed one: a replacement edge process
+// must not take traffic before it knows its routes, or it denies a route it has not loaded.
+func TestIngressAuthorityIsWarmOnlyAfterTheFirstSuccessfulFetch(t *testing.T) {
+	decision := ingressAuthorityTestDecision(time.Now().UTC())
+	var calls atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			http.Error(w, "control down", http.StatusServiceUnavailable)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"complete": true, "decisions": []connectorprotocol.IngressDecision{decision}})
+	}))
+	defer server.Close()
+	client, err := NewHTTPClient(HTTPConfig{BaseURL: server.URL, Client: server.Client(), Credential: strings.Repeat("x", 32), Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority := &IngressAuthority{Client: client, NodeID: decision.EdgeNodeID, ProcessEpoch: decision.EdgeProcessEpoch}
+	if _, err := authority.Snapshot(context.Background()); err == nil {
+		t.Fatal("the failing first fetch succeeded")
+	}
+	select {
+	case <-authority.Warm():
+		t.Fatal("warm after a failed fetch")
+	default:
+	}
+	authority.retryAt = time.Time{}
+	if _, err := authority.Snapshot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-authority.Warm():
+	default:
+		t.Fatal("not warm after the first successful fetch")
+	}
+}

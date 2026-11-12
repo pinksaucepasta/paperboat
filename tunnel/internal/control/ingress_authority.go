@@ -41,6 +41,7 @@ type IngressAuthority struct {
 	lastErr       error
 	outOfSync     time.Time // first failed refresh after a good one; zero while in sync
 	inflight      chan struct{}
+	warm          chan struct{} // closed by the first successful fetch (Warm)
 	wake          chan struct{}
 	stop          context.CancelFunc
 	done          chan struct{}
@@ -104,6 +105,28 @@ func (a *IngressAuthority) OutOfSync() (time.Time, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.outOfSync, !a.outOfSync.IsZero()
+}
+
+// Warm is closed once the first fetch of the ingress decisions has been applied: until then a route this edge
+// simply has not loaded yet would be denied, so a replacement edge process takes traffic only after it.
+func (a *IngressAuthority) Warm() <-chan struct{} {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.warm == nil {
+		a.warm = make(chan struct{})
+	}
+	return a.warm
+}
+
+func (a *IngressAuthority) markWarmLocked() {
+	if a.warm == nil {
+		a.warm = make(chan struct{})
+	}
+	select {
+	case <-a.warm:
+	default:
+		close(a.warm)
+	}
 }
 
 func (a *IngressAuthority) Snapshot(ctx context.Context) ([]connectorprotocol.IngressDecision, error) {
@@ -268,6 +291,7 @@ func (a *IngressAuthority) recordLocked(now time.Time, snapshot IngressSnapshot,
 			a.version = ""
 			a.recordLocked(now, IngressSnapshot{}, err, fenced)
 		} else {
+			a.markWarmLocked()
 			a.fetched = now
 			if fenced {
 				a.invalidated = false
@@ -277,6 +301,7 @@ func (a *IngressAuthority) recordLocked(now time.Time, snapshot IngressSnapshot,
 		return
 	}
 	a.decisions, a.fetched, a.version = snapshot.Decisions, now, snapshot.Version
+	a.markWarmLocked()
 	if fenced {
 		a.invalidated = false
 	}

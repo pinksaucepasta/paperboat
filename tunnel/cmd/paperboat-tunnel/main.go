@@ -793,7 +793,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	}
 	service := edgeruntime.New(cfg, state, telemetryLifecycle, assembly, carrierTrustLifetime, telemetryReady{lifecycle: telemetryLifecycle})
 	service.Reporter = reporter
-	service.Handover = edgeruntime.Handover{Epoch: processEpoch, Drain: assembly.Drain, MoveTerminals: browserTerminalHub.HandOver, SetSilent: client.SetSilent, Warm: runtimeWorker.Pulled(),
+	service.Handover = edgeruntime.Handover{Epoch: processEpoch, Drain: assembly.Drain, MoveTerminals: browserTerminalHub.HandOver, SetSilent: client.SetSilent, Warm: edgeruntime.AllClosed(runtimeWorker.Pulled(), ingressAuthority.Warm()),
 		ExportCertificates: certificateRegistry.ExportEncoded,
 		ImportCertificates: func(ctx context.Context, records [][]byte) tlscert.ImportReport {
 			return certificateRegistry.ImportEncoded(ctx, cfg.NodeID, processEpoch, records)

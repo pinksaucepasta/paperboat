@@ -129,13 +129,26 @@ type Handover struct {
 	MoveTerminals func(grace time.Duration)
 	// SetSilent turns this process's node state reports off or on (control.HTTPClient.SetSilent).
 	SetSilent func(bool)
-	// Warm is closed once this process has pulled its admissions.
+	// Warm is closed once this process has applied its first admissions (runtime and endpoint pulls) and its first
+	// ingress decisions.
 	Warm <-chan struct{}
 	// ExportCertificates returns the active TLS certificates as opaque records for the replacement
 	// (tlscert.Registry.ExportEncoded); ImportCertificates stages the ones a serving process handed
 	// over, before this process starts (tlscert.Registry.ImportEncoded).
 	ExportCertificates func() ([][]byte, error)
 	ImportCertificates func(ctx context.Context, records [][]byte) tlscert.ImportReport
+}
+
+// AllClosed returns a channel that closes once every given channel is closed.
+func AllClosed(channels ...<-chan struct{}) <-chan struct{} {
+	all := make(chan struct{})
+	go func() {
+		for _, channel := range channels {
+			<-channel
+		}
+		close(all)
+	}()
+	return all
 }
 
 func (s *Service) Done() <-chan error { return s.done }

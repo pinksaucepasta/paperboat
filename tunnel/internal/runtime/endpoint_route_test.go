@@ -167,3 +167,60 @@ func TestEndpointRouteIsAdmittedByTheFastPullBetweenFullPulls(t *testing.T) {
 		t.Fatal("a failed fast pull withdrew an admitted endpoint route")
 	}
 }
+
+// A replacement edge process takes over only once it has applied its first runtime AND endpoint admissions
+// (previews ride the endpoint pull); a request in that window is still served by the serving process.
+func TestRuntimeCarrierWorkerIsWarmOnlyAfterTheFirstEndpointPull(t *testing.T) {
+	runtimeRoute := runtimeAdmission(t)
+	epoch := runtimeRoute.Binding.EdgeProcessEpoch
+	releaseEndpoints := make(chan struct{})
+	source := &runtimeSourceFake{admissions: []runtimewire.Admission{runtimeRoute}}
+	source.endpointUpdate = func(string) control.EndpointUpdate {
+		<-releaseEndpoints
+		return control.EndpointUpdate{Complete: true, Admissions: []runtimewire.Admission{}, Cursor: "cursor"}
+	}
+	expected, err := datacarrier.NewExpectedAdmissionRegistry(datacarrier.ExpectedAdmissionRegistryConfig{NodeID: runtimeRoute.Binding.EdgeNodeID, ProcessEpoch: epoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err := edgehttp.NewDataCarrierPreviewRegistry(edgehttp.DataCarrierPreviewRegistryConfig{BaseDomain: "runtime.example.test", ProcessEpoch: epoch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := &RuntimeCarrierWorker{Source: source, Expected: expected, Routes: routes, Endpoints: endpointRegistry(t, epoch), Interval: 5 * time.Minute, EndpointInterval: 5 * time.Minute, Timeout: 5 * time.Second}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := w.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = w.Shutdown(context.Background()) }()
+	waitRuntime(t, func() bool { return len(expected.Snapshot()) == 1 }) // the runtime pull is applied
+	select {
+	case <-w.Pulled():
+		t.Fatal("warm before the first endpoint pull was applied")
+	case <-time.After(200 * time.Millisecond):
+	}
+	close(releaseEndpoints)
+	select {
+	case <-w.Pulled():
+	case <-time.After(2 * time.Second):
+		t.Fatal("not warm after both first pulls were applied")
+	}
+}
+
+func TestAllClosedWaitsForEveryChannel(t *testing.T) {
+	first, second := make(chan struct{}), make(chan struct{})
+	all := AllClosed(first, second)
+	close(first)
+	select {
+	case <-all:
+		t.Fatal("closed with one channel still open")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(second)
+	select {
+	case <-all:
+	case <-time.After(time.Second):
+		t.Fatal("not closed after both closed")
+	}
+}
