@@ -256,8 +256,10 @@ func inventoryFilter(ctx context.Context, account string, opts InventoryOptions)
   JOIN team_resource_bindings b ON b.team_id=r.team_id AND b.resource_kind='machine' AND b.active AND b.resource_id=tg.machine_id WHERE r.target_kind='tag'
  UNION SELECT b.resource_id FROM rules r JOIN team_resource_bindings b ON b.team_id=r.team_id AND b.resource_kind='machine' AND b.active WHERE r.target_kind='all_machines'
 ) `
-	predicate = ` FROM live_user_machines m WHERE m.id IN (SELECT id FROM candidates)
- AND (
+	// OFFSET 0 keeps the candidates a fence: without it the planner scanned every machine in the database and ran
+	// the access functions on each before applying the candidate list (1 s per unscoped list on prod at ~300
+	// machines in total, 2026-11-12; the edges' and daemons' control calls queued behind it).
+	predicate = ` FROM (SELECT * FROM live_user_machines WHERE id IN (SELECT id FROM candidates) OFFSET 0) m WHERE (
  (NOT $2::boolean AND ((m.owner_team_id IS NULL AND m.user_id=$1) OR machine_management_allowed($1,m.id) OR EXISTS(SELECT 1 FROM unnest(ARRAY['terminal','exec','managed_ssh','files','preview_manage','tunnel_manage']) cap WHERE machine_capability_allowed($1,m.id,cap))))
  OR ($2::boolean AND $3::text IS NULL AND m.user_id=$1 AND m.owner_team_id IS NULL)
  OR ($2::boolean AND $3::text IS NOT NULL AND EXISTS(SELECT 1 FROM teams t JOIN team_members member USING(team_id) WHERE t.team_id=$3 AND t.deleted_at IS NULL AND NOT t.suspended AND member.account_id=$1 AND member.active)
