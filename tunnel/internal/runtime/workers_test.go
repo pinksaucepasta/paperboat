@@ -370,3 +370,19 @@ func waitForRouteWorkerState(t *testing.T, worker *RouteWorker, state *node.Stat
 		time.Sleep(time.Millisecond)
 	}
 }
+
+// A reconcile cut by the worker's own shutdown is not a control failure; one on a live worker still is.
+func TestRouteReconcileFailureIsNotReportedAfterShutdownStarted(t *testing.T) {
+	failure := errors.New("control request failed")
+	live, cancel := context.WithCancel(context.Background())
+	if !reportRouteReconcileFailure(live, failure) {
+		t.Fatal("a failure on a live worker was not reported")
+	}
+	cancel()
+	if reportRouteReconcileFailure(live, failure) {
+		t.Fatal("a failure after the worker's shutdown started was reported")
+	}
+	if reportRouteReconcileFailure(context.Background(), nil) {
+		t.Fatal("no error was reported as a failure")
+	}
+}

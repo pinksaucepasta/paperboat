@@ -509,9 +509,16 @@ func (w *RouteWorker) recordReconcile(ctx context.Context, err error) {
 	if err != nil {
 		slog.Warn("route_reconcile_failed", "error", err.Error())
 	}
-	if err != nil && w.Reporter != nil {
+	if reportRouteReconcileFailure(ctx, err) && w.Reporter != nil {
 		w.Reporter.ObserveFailure(ctx, "route_reconcile", err)
 	}
+}
+
+// reportRouteReconcileFailure is false once the worker's own context is done: a control request cut by this
+// process's shutdown is not a control failure (the anvit edge logged control_unavailable on carrier-admissions
+// 0.4 s before its own shutdown, and the deploy gate counted it).
+func reportRouteReconcileFailure(ctx context.Context, err error) bool {
+	return err != nil && ctx.Err() == nil
 }
 
 // transientControlUnavailable reports whether every leaf of a possibly joined
