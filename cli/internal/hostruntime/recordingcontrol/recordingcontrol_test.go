@@ -245,6 +245,19 @@ func TestRemovingARuleStopsTheRecordingsItStarted(t *testing.T) {
 	}
 }
 
+func TestAddingARuleRecordsTheAccountsAlreadyAttached(t *testing.T) {
+	first := newKey(t, "team_1", 1, nil)
+	sessions := &fakeSessions{snapshots: map[string]session.Snapshot{"late": running("late"), "other": running("dev")}}
+	policy := policyWith(1, first.key)
+	controller, _ := testController(t, policy, sessions)
+	policy.Version, policy.RecordAccounts = 2, []string{"watched", "late"}
+	got, _ := controller.config.Policies.Replace(policy)
+	controller.reconcile(got)
+	if rec := sessions.snapshots["late"].Recording; rec == nil || rec.Trigger != recordings.TriggerRule || sessions.snapshots["other"].Recording != nil {
+		t.Fatalf("a new rule did not start recording the attached account only: %+v", sessions.started)
+	}
+}
+
 func TestReportsReachTheAuditQueueOnceEach(t *testing.T) {
 	first := newKey(t, "team_1", 1, nil)
 	now := time.Now().UTC()
