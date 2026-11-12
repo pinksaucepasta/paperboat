@@ -1,0 +1,55 @@
+{
+ "check": "xplat-vault",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-13:lock:L",
+   "status": "PASS",
+   "detail": "lock refuses ENV, a wrong secret fails, the password unlocks, the recovery code opens it through recover (recover replaced the password and the recovery code)"
+  },
+  {
+   "id": "X-13:lock:M",
+   "status": "PASS",
+   "detail": "lock refuses ENV, a wrong secret fails, the password unlocks, the recovery code opens it through recover (recover replaced the password and the recovery code)"
+  },
+  {
+   "id": "X-13:lock:W",
+   "status": "PASS",
+   "detail": "lock refuses ENV, a wrong secret fails, the password unlocks, the recovery code opens it through recover (recover replaced the password and the recovery code)"
+  },
+  {
+   "id": "X-13:leak:L",
+   "status": "PASS",
+   "detail": "no ENV value in pb config/diagnostics/logs or shell history on lanex2-l (3 locations)"
+  },
+  {
+   "id": "X-13:leak:M",
+   "status": "PASS",
+   "detail": "no ENV value in pb config/diagnostics/logs or shell history on lanex2-m (4 locations)"
+  },
+  {
+   "id": "X-13:leak:W",
+   "status": "PASS",
+   "detail": "no ENV value in pb config/diagnostics/logs or shell history on lanex2-w (3 locations)"
+  },
+  {
+   "id": "X-13:reset:L>M",
+   "status": "PASS",
+   "detail": "a reset on lanex2-l was honoured on lanex2-m (old password refused, new accepted); account secrets rotated and kept"
+  },
+  {
+   "id": "X-13:reset:M>W",
+   "status": "PASS",
+   "detail": "a reset on lanex2-m was honoured on lanex2-w (old password refused, new accepted); account secrets rotated and kept"
+  },
+  {
+   "id": "X-13:reset:W>L",
+   "status": "PASS",
+   "detail": "a reset on lanex2-w was honoured on lanex2-l (old password refused, new accepted); account secrets rotated and kept"
+  }
+ ]
+}

@@ -38,7 +38,9 @@ def client_argv(src, tail):
                 '-e', 'TERM=xterm-256color', fleet.L_CT, *tail]
     if src.os == 'windows':
         quoted = ' '.join("'%s'" % part.replace("'", "''") for part in tail)
-        return ['ssh', '-tt', src.device.target, 'powershell -NoProfile -Command "& ' + quoted.replace('"', '\\"') + '; exit `$LASTEXITCODE"']
+        # Windows OpenSSH returns 0 for every `ssh -tt` login whatever the command exits with: the exit code of pb connect
+        # is printed in band (RC=<n>) and read from the screen
+        return ['ssh', '-tt', src.device.target, 'powershell -NoProfile -Command "& ' + quoted.replace('"', '\\"') + "; Write-Output ('RC=' + $LASTEXITCODE)\""]
     host = os.environ.get('XPLAT_MAC_SSH')
     return ['ssh', '-tt', host or 'admin@100.88.169.42', 'TERM=xterm-256color ' + ' '.join("'%s'" % part for part in tail)]
 
@@ -157,9 +159,13 @@ def t_exit(src, dst):
     try:
         term.ready()
         term.say('exit 3')
-        term.child.expect(pexpect.EOF, timeout=60)
-        term.child.close()
-        status = term.child.exitstatus
+        if term.src.os == 'windows':
+            term.expect(r'RC=3', timeout=60)
+            status = 3
+        else:
+            term.child.expect(pexpect.EOF, timeout=60)
+            term.child.close()
+            status = term.child.exitstatus
         assert status == 3, 'the exit code 3 of the remote shell was reported as %r' % (status,)
         return 'the remote exit code (3) is the exit status of pb connect (%s)' % term.kind
     finally:
@@ -205,8 +211,32 @@ def t_env(src, dst):
         term.close()
 
 
+def t_join(src, dst, third):
+    """A shared terminal: a session started from `src` is joined live from `third` (the other OS) and shows the same output."""
+    name = 'xplat-' + uuid.uuid4().hex[:6]
+    token = uuid.uuid4().hex[:6]
+    first = Terminal(src, dst, ['new', '--name', name])
+    second = None
+    try:
+        first.ready()
+        command, want = first.echo('JOINA_' + token)
+        first.say(command)
+        first.expect(want)
+        second = Terminal(third, dst, ['--session', name])
+        second.kind = first.kind
+        second.expect(want, timeout=60)  # what was already printed is replayed to the joiner
+        command, want = first.echo('JOINB_' + token)
+        first.say(command)
+        second.expect(want, timeout=60)  # and what is typed later reaches the joiner live
+        return 'a terminal started from %s was joined from %s: earlier and live output identical (%s)' % (src.name, third.name, first.kind)
+    finally:
+        first.close()
+        if second:
+            second.close()
+
+
 TESTS = [('shell', t_shell, 'X-16'), ('utf8', t_utf8, 'X-16'), ('resize', t_resize, 'X-16'), ('ctrlc', t_ctrlc, 'X-16'),
-         ('exit', t_exit, 'X-16'), ('replay', t_replay, 'X-16'), ('connect', t_env, 'X-11')]
+         ('exit', t_exit, 'X-16'), ('replay', t_replay, 'X-16'), ('connect', t_env, 'X-11'), ('join', t_join, 'X-16')]
 
 
 def check(row, name, pair, action):
@@ -229,6 +259,11 @@ def main():
     for a_key, b_key in permutations(devices, 2):
         for name, test, row in TESTS:
             if only and name not in only:
+                continue
+            if name == 'join':
+                third = [k for k in devices if k not in (a_key, b_key)]
+                if third:
+                    check(row, name, '%s>%s' % (a_key, b_key), lambda: test(devices[a_key], devices[b_key], devices[third[0]]))
                 continue
             check(row, name, '%s>%s' % (a_key, b_key), lambda: test(devices[a_key], devices[b_key]))
     stamp = time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())

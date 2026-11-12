@@ -21,6 +21,12 @@ results = {}
 
 ORIGIN = r'''
 import hashlib, socket, sys
+import http.server, threading
+class Page(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        body = b"xplat-https-ok"; self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+threading.Thread(target=http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1]) + 3000), Page).serve_forever, daemon=True).start()
 srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 srv.bind(("127.0.0.1", int(sys.argv[1]))); srv.listen(4); srv.settimeout(90)
 while True:
@@ -34,7 +40,7 @@ while True:
 
 DRIVER = r'''
 import hashlib, json, os, socket, subprocess, sys, time
-pb, machine, origin_port, listen_port, origin_code, origin_py = sys.argv[1:7]
+pb, machine, origin_port, listen_port, origin_code, origin_py, domain = sys.argv[1:8]
 PAYLOAD = (("private TCP λ船\n".encode() + bytes(range(256))) * 4096)[:1 << 20]
 want = "%d %s" % (len(PAYLOAD), hashlib.sha256(PAYLOAD).hexdigest())
 quiet = dict(stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -72,6 +78,17 @@ try:
         address = None
     out["address"] = address
     out["private_address"] = bool(address) and exchange(address, origin_port) == want
+    try:
+        out["name_resolves"] = socket.gethostbyname("%s.%s" % (machine, domain)) == address
+    except OSError as error:
+        out["name_resolves"] = False; out["name_error"] = str(error)[:80]
+    curl = "curl.exe" if os.name == "nt" else "/usr/bin/curl"
+    url = "https://%d.%s.%s/" % (int(origin_port) + 3000, machine, domain)
+    for _ in range(6):
+        got = subprocess.run([curl, "-sS", "-m", "20", url], capture_output=True, text=True)
+        if got.stdout == "xplat-https-ok": break
+        time.sleep(5)
+    out["https_url"] = got.stdout == "xplat-https-ok"; out["https_detail"] = (got.stderr or got.stdout)[-120:]
 finally:
     for p in (access, origin):
         if p and p.poll() is None:
@@ -86,13 +103,19 @@ def py(dev):
     return 'python' if dev.os == 'windows' else 'python3'
 
 
+def domain_of(dev):
+    return json.loads(dev.pb('config', 'local-access', 'show', '--json').text)['data']['domain']
+
+
 def t_access(src, dst):
     port = 21000 + sum(map(ord, src.name + dst.name)) % 2000
-    done = src.run([py(src), '-c', DRIVER, src.pb_path, dst.alias, str(port), str(port + 5000), ORIGIN, py(dst)], timeout=240)
+    done = src.run([py(src), '-c', DRIVER, src.pb_path, dst.alias, str(port), str(port + 5000), ORIGIN, py(dst), domain_of(src)], timeout=300)
     assert done.rc == 0, 'driver: %s %s' % (done.text[-300:], done.errtext[-300:])
     out = json.loads(done.text.strip().splitlines()[-1])
     assert out.get('forward'), 'the 1 MiB exchange through the forward was not byte-exact with half-close: %s' % out
     assert out.get('private_address'), 'the exchange through the private address %s failed: %s' % (out.get('address'), out)
+    assert out.get('name_resolves'), 'the machine name did not resolve to its private address without a hosts edit: %s' % out
+    assert out.get('https_url'), 'https://<port>.<machine>.<domain> did not answer through the trust store of this OS: %s' % out
     assert out.get('non_loopback_refused'), '--listen accepted a non-loopback address: %s' % out
     return 'forward and %s byte-exact with half-close; non-loopback --listen refused (%s)' % (out['address'], out['non_loopback_message'][:70])
 
