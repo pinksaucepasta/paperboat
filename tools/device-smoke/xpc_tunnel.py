@@ -13,6 +13,8 @@ The origins run ON the device (xpc_origin.py, xpc_grpc); `pb tunnel create` publ
   host-header  --host-header reaches the origin
   grpc         gRPC over h2c: unary, streaming, grpc-status trailers
   closed-port  a tunnel to a port nothing listens on names the origin in `pb tunnel status`
+  browser      the tunnel URL opens in a headless browser on each OS (Chromium on L, Chrome on M, Edge on W)
+  low-port     `pb preview` of port 80 (L, M) or a Windows excluded port names the port and says nothing answers
   preview      `pb preview` of a local origin: HTTP/1.1, HTTP/2, 16 MiB, SSE, HTTP/3, WebSocket, POST, owner IP deny and clear
                (bind-v4 also runs the IP deny on its tunnel)
 Results: results/xpc-tunnel-<stamp>.json (`X-20:<check>:<L|M|W>`), tunnels are deleted on every exit path.
@@ -333,6 +335,65 @@ def t_closed_port(dev):
         confirm_delete(dev, name)
 
 
+# Browsers: one per OS the controller or a runner has (headless): Chromium on L (the controller), Chrome on M, Edge on W.
+BROWSERS = {
+    'L': (['bash', '-c'], 'PW_MODULE=%s PW_CHROMIUM=%s node %s %%s %%s' % (Path.home() / '.pbmac/xpc/pw/node_modules/playwright-core/index.mjs',
+          Path.home() / '.cache/ms-playwright/chromium-1248/chrome-linux-arm64/chrome', HERE / 'xpc_browser.mjs')),
+    'M': (['ssh', 'macpool-5'], 'cd ~/xpc-pw && PW_CHANNEL=chrome node xpc_browser.mjs %s %s'),
+    'W': (['ssh', 'winpool-4'], 'cd %%USERPROFILE%%\\xpc-pw && set PW_CHANNEL=msedge&& node xpc_browser.mjs %s %s'),
+}
+
+
+def install_browser_probes():
+    for key, setup in (('M', 'mkdir -p ~/xpc-pw && cd ~/xpc-pw && (test -d node_modules/playwright-core || (npm init -y >/dev/null && npm i playwright-core@1.58.2 >/dev/null))'),
+                       ('W', 'if not exist %USERPROFILE%\\xpc-pw\\node_modules\\playwright-core (mkdir %USERPROFILE%\\xpc-pw & cd /d %USERPROFILE%\\xpc-pw & npm init -y >nul & npm i playwright-core@1.58.2 >nul)')):
+        host = BROWSERS[key][0]
+        subprocess.run(host + [setup], check=True, capture_output=True, timeout=600)
+        subprocess.run(['scp', '-q', str(HERE / 'xpc_browser.mjs'), '%s:%s' % (host[1], 'xpc-pw/xpc_browser.mjs')], check=True, timeout=120)
+
+
+def browse(client, url, marker):
+    prefix, command = BROWSERS[client]
+    done = subprocess.run(prefix + [command % (url, marker)], capture_output=True, text=True, timeout=180)
+    assert done.returncode == 0, '%s browser: %s' % (client, (done.stderr or done.stdout)[-300:])
+    seen = json.loads(done.stdout.strip().splitlines()[-1])
+    assert seen['status'] == 200 and seen['marker'], '%s browser: %s' % (client, seen)
+    return '%s %s' % (client, seen['browser'])
+
+
+def t_browser(dev):
+    port, marker = port_for(dev, 'browser'), 'xpc-browser-' + dev.os
+    name = 'xpc-' + uuid.uuid4().hex[:8]
+    install_browser_probes()
+    with Origin(dev, 'http', '127.0.0.1', str(port), marker):
+        created, url = create(dev, name, '--port', str(port))
+        try:
+            retry(lambda: marker_h1_h2(url, marker), 12)
+            return 'page over HTTPS loads in a browser on ' + ', '.join(browse(client, url, marker) for client in BROWSERS)
+        finally:
+            confirm_delete(dev, name)
+
+
+def t_low_port(dev):
+    """A port the OS keeps from an unprivileged listener (Windows excluded range) or that is below 1024: `pb preview` names the port and says nothing answers."""
+    if dev.os == 'windows':
+        listing = dev.run(['netsh', 'int', 'ipv4', 'show', 'excludedportrange', 'protocol=tcp']).text
+        ranges = [(int(a), int(b)) for a, b in re.findall(r'^\s*(\d+)\s+(\d+)\s*\*?\s*$', listing, re.M)]
+        port = next(a for a, b in ranges if a >= 49000 and b > a)
+    else:
+        port = 80
+    bind = dev.run([py(dev), '-c', "import socket\ns = socket.socket()\ntry:\n    s.bind(('127.0.0.1', %d))\n    print('a listener may bind it')\nexcept OSError as e:\n    print('bind refused: ' + e.strerror)" % port]).text.strip()
+    done = dev.pb('preview', str(port), '--background', '--ttl', '5m', timeout=180)
+    text = done.text + done.errtext
+    ident = re.search(r'preview_[0-9a-f-]{36}', text) or re.search(r'"id"\s*:\s*"([^"]+)"', dev.pb('preview', 'list', '--json').text)
+    try:
+        assert done.rc == 0 and ('Nothing answers on port %d' % port) in text, 'preview of port %d: %s' % (port, text[-300:])
+    finally:
+        if ident:
+            dev.pb('preview', 'stop', ident.group(0) if ident.group(0).startswith('preview_') else ident.group(1), '--json', timeout=60)
+    return 'port %d (%s): "Nothing answers on port %d yet; the preview shows App not responding until your app starts"' % (port, bind, port)
+
+
 def deny_rule(dev, kind, ident, url, marker):
     """The owner's IP deny list sees the client address the edge saw (/xff): denied -> refused, cleared -> served again."""
     xff = json.loads(curl(url + '/xff', '--http1.1').stdout.decode().rsplit('\n', 1)[0])['xff'].split(',')[0].strip()
@@ -366,7 +427,7 @@ def t_preview(dev):
 
 
 CHECKS = {'bind-v4': lambda d: t_bind(d, 'v4'), 'bind-v6': lambda d: t_bind(d, 'v6'), 'bind-all': lambda d: t_bind(d, 'all'),
-          'https': t_https, 'tcp-tls': t_tcp_tls, 'host-header': t_host_header, 'preview': t_preview, 'grpc': t_grpc, 'closed-port': t_closed_port}
+          'https': t_https, 'tcp-tls': t_tcp_tls, 'host-header': t_host_header, 'preview': t_preview, 'browser': t_browser, 'low-port': t_low_port, 'grpc': t_grpc, 'closed-port': t_closed_port}
 
 
 def main():
