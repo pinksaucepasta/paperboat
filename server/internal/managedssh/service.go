@@ -156,7 +156,7 @@ type Repository interface {
 }
 
 func (s *Service) RegisterTarget(ctx context.Context, request RegisterTargetRequest) (MachineTarget, error) {
-	if s == nil || s.repository == nil || ctx == nil || !validOperationID(request.OperationID) || !bounded(request.ActorUserID) || !bounded(request.UserMachineID) || request.MachineGeneration == 0 || request.MachineGeneration > math.MaxInt64 || !validOSUser(request.OSUser) || request.TargetPort == 0 || request.Now.IsZero() {
+	if s == nil || s.repository == nil || ctx == nil || !validOperationID(request.OperationID) || !bounded(request.ActorUserID) || !bounded(request.UserMachineID) || request.MachineGeneration == 0 || request.MachineGeneration > math.MaxInt64 || !ValidOSUser(request.OSUser) || request.TargetPort == 0 || request.Now.IsZero() {
 		return MachineTarget{}, wire.ErrInvalid
 	}
 	request.Now = request.Now.UTC()
@@ -287,7 +287,9 @@ func bounded(value string) bool {
 	return len(value) > 0 && len(value) <= 128 && !strings.ContainsAny(value, "\r\n\x00")
 }
 
-func validOSUser(value string) bool {
+// ValidOSUser is an OS account managed SSH can target: printable ASCII without spaces or @, the same rule as the
+// machine_ssh_targets CHECK and the CLI's OpenSSH configuration.
+func ValidOSUser(value string) bool {
 	if value == "" || len(value) > 255 || value[0] == '-' || strings.TrimSpace(value) != value || strings.ContainsAny(value, "\r\n\x00@") {
 		return false
 	}

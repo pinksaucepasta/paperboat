@@ -3958,3 +3958,50 @@ func TestTerminalOperationsOfRevokedAndDeletedMachinesEnd(t *testing.T) {
 		}
 	}
 }
+
+// X-28: a second OS user of the same Windows host pairs into the same account. "Zoë Test" is a Windows account managed
+// SSH cannot target (space, non-ASCII), so that machine pairs without a managed SSH target; writing the target hit the
+// machine_ssh_targets CHECK and failed the pairing with HTTP 500. The first user keeps its target.
+func TestSecondWindowsOSUserPairsWithoutAManagedSSHTarget(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	userID := "usr_winusers_" + suffix
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.users (id, workos_subject, primary_email, status) VALUES ($1,$2,$3,'active')`, userID, "workos_"+suffix, "winusers-"+suffix+"@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.user_machine_entitlements (id,user_id,provider_subscription_id,product_code,state,seat_quantity,allowance_bytes,current_period_start,current_period_end) VALUES ($1,$2,$3,'connected-test','active',2,1048576,now()-interval '1 hour',now()+interval '1 hour')`, "ume_winusers_"+suffix, userID, "sub_winusers_"+suffix); err != nil {
+		t.Fatal(err)
+	}
+	service := New(store, audit.NewWriter(store), Policy{PairingLifetime: 10 * time.Minute, AllowedPlatforms: []string{"windows"}}, testSeatAuthorizer{})
+	service.ConfigureInstallationEncryption("test-enrollment-key")
+	service.ConfigureAccess(nil, "https://api.paperboat.test")
+	service.ConfigureBootstrapCommand("pb machine bootstrap")
+	if err := service.ConfigureRuntimeRoute("runtime.example.test", 38080); err != nil {
+		t.Fatal(err)
+	}
+	service.ConfigureHelperEnrollment(func(_ context.Context, _, _, _ string, _ time.Duration) (HelperEnrollmentGrant, error) {
+		return HelperEnrollmentGrant{EnrollmentID: "henr_winusers_" + uuid.NewString(), HelperID: "hlp_winusers_" + uuid.NewString(), Credential: "enrollment-credential", ExpiresAt: time.Now().UTC().Add(10 * time.Minute)}, nil
+	})
+	for i, osUser := range []string{"runneradmin", "Zoë Test"} {
+		start, err := service.StartEnrollment(ctx, userID, fmt.Sprintf("idem-winusers-%d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		alias := []string{"xpc-w", "xpc-zoe"}[i]
+		if _, err := service.CreatePairing(ctx, PairingInput{EnrollmentToken: start.BootstrapToken, Verifier: fmt.Sprintf("verifier-winusers-%d-%s", i, suffix), Alias: alias, Platform: "windows", Architecture: "amd64", WorkspaceRoot: `C:\Users\` + osUser, RuntimeVersions: json.RawMessage(`{"pb":"test"}`), PublicIdentityKey: newIntegrationPublicIdentityKey(t), SSHUser: osUser, SSHPort: 22}); err != nil {
+			t.Fatalf("OS user %q could not pair: %v", osUser, err)
+		}
+		status, err := service.Enrollment(ctx, userID, start.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var targets int
+		if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.machine_ssh_targets WHERE user_machine_id=$1`, status.UserMachineID).Scan(&targets); err != nil {
+			t.Fatal(err)
+		}
+		if want := 1 - i; targets != want {
+			t.Fatalf("OS user %q: %d managed SSH targets, want %d", osUser, targets, want)
+		}
+	}
+}

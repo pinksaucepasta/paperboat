@@ -695,7 +695,7 @@ func hostKeySetFromRow(row dbsqlc.MachineSshHostKeySet) (HostKeySet, error) {
 }
 
 func machineTargetFromRow(row dbsqlc.MachineSshTarget) (MachineTarget, error) {
-	if row.MachineGeneration <= 0 || row.TargetPort <= 0 || row.TargetPort > 65535 || row.ReconciliationVersion <= 0 || !validOSUser(row.OsUser) || row.CreatedAt.IsZero() || row.UpdatedAt.Before(row.CreatedAt) {
+	if row.MachineGeneration <= 0 || row.TargetPort <= 0 || row.TargetPort > 65535 || row.ReconciliationVersion <= 0 || !ValidOSUser(row.OsUser) || row.CreatedAt.IsZero() || row.UpdatedAt.Before(row.CreatedAt) {
 		return MachineTarget{}, ErrUnavailable
 	}
 	return MachineTarget{UserMachineID: row.UserMachineID, MachineGeneration: uint64(row.MachineGeneration), OSUser: row.OsUser, TargetPort: uint16(row.TargetPort), ReconciliationVersion: uint64(row.ReconciliationVersion), CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}, nil
