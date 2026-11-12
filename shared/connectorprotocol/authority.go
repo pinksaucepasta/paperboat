@@ -357,6 +357,7 @@ type wireConfigRoute struct {
 	HostOverride            *string `json:"host_override"`
 	TLSVerification         string  `json:"tls_verification"`
 	TLSServerName           *string `json:"tls_server_name"`
+	CAReference             *string `json:"ca_reference,omitempty"` // retired; stored snapshots of older tunnels carry null (see hoststate)
 	TLSCA                   *string `json:"tls_ca,omitempty"`
 	TLSPin                  *string `json:"tls_pin,omitempty"`
 	MTLSCredentialReference *string `json:"mtls_credential_reference"`
@@ -487,6 +488,9 @@ func validateWireConfigRoute(route wireConfigRoute) error {
 		return ErrInvalidInput
 	}
 	if route.OriginScheme != "https" && route.TLSVerification != "not_applicable" {
+		return ErrInvalidInput
+	}
+	if route.CAReference != nil {
 		return ErrInvalidInput
 	}
 	// The same equivalences the agent enforces (hoststate): a CA exactly for custom_ca, a pin exactly for pinned.
