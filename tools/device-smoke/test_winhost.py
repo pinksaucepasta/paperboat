@@ -1800,7 +1800,7 @@ class TeamFamily(unittest.TestCase):
             (['team', 'activity'], lambda command, words: (0, {'items': [{'action': 'team.machine_' + kind} for kind in ('share', 'grant', 'unshare')]})
              if command == 'windows' else (1, {'error': {'code': 'forbidden'}})),
         ]
-        code, printed, calls = self.two_account(replies, '--skip', 'approval,resources,suspension,transfer')
+        code, printed, calls = self.two_account(replies, '--skip', 'approval,approval_rows,resources,suspension,transfer')
         self.assertEqual(0, code, printed)
         self.assertEqual({'windows', 'windows-teammate'}, {command for command, _ in calls})
         self.assertEqual(2, printed.count('PASS  '))
@@ -1825,7 +1825,7 @@ class TeamFamily(unittest.TestCase):
             (['preview', '41234'], lambda command, words: (events.append('preview') or 1, {'error': {'code': 'refused'}})),
         ]
         with patch.object(winhost, 'device', lambda: SimpleNamespace(origin=lambda body: Origin())):
-            code, printed, calls = self.two_account(replies, '--skip', 'share,approval,suspension,transfer')
+            code, printed, calls = self.two_account(replies, '--skip', 'share,approval,approval_rows,suspension,transfer')
         self.assertEqual(1, code)
         self.assertEqual(['start', 'preview', 'stop'], events)
         self.assertIn('FAIL  F12-05 attach preview', printed)
