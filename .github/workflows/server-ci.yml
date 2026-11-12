@@ -53,7 +53,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [shared, cli, relay, tunnel, helper, sdk/go]
+        module: [shared, cli, relay, tunnel, helper]
     defaults:
       run:
         working-directory: ${{ matrix.module }}

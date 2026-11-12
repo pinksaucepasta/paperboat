@@ -41,7 +41,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
-        module: [shared, cli, sdk/go]
+        module: [shared, cli]
     defaults:
       run:
         shell: bash
@@ -55,7 +55,6 @@ jobs:
           cache-dependency-path: |
             cli/go.sum
             shared/go.sum
-            sdk/go/go.sum
             go.work.sum
       - run: go build ./...
       - run: go vet ./...

@@ -77,7 +77,7 @@ jobs:
           path: |
             ${{ steps.paths.outputs.build }}
             ${{ steps.paths.outputs.mod }}
-          key: lane-test-go-cli-${{ hashFiles('src/go.work.sum', 'src/*/go.sum', 'src/sdk/go/go.sum') }}
+          key: lane-test-go-cli-${{ hashFiles('src/go.work.sum', 'src/*/go.sum') }}
           restore-keys: |
             lane-test-go-cli-
       - name: Headless browser for the browser-terminal row

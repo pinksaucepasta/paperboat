@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-MODULES = ('shared', 'server', 'cli', 'relay', 'tunnel', 'helper', 'sdk/go')
+MODULES = ('shared', 'server', 'cli', 'relay', 'tunnel', 'helper')
 ROOT = Path(__file__).resolve().parents[1]
 DATABASE_MODULES = ('server', 'tunnel', 'helper')
 

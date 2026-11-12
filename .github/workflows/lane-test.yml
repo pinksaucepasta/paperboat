@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       modules:
-        description: 'Modules to test: shared cli relay tunnel helper server console sdk/go smoke e2e (empty = all)'
+        description: 'Modules to test: shared cli relay tunnel helper server console smoke e2e (empty = all)'
         default: ''
       run:
         description: 'go test -run pattern (empty = all tests)'
@@ -45,7 +45,7 @@ jobs:
         env:
           MODULES: ${{ inputs.modules }}
         run: |
-          all="shared cli relay tunnel helper server console sdk/go smoke e2e"
+          all="shared cli relay tunnel helper server console smoke e2e"
           want="${MODULES:-$all}"
           for m in $want; do
             case " $all " in *" $m "*) ;; *) echo "unknown module '$m' (modules: $all)" >&2; exit 1 ;; esac
@@ -106,7 +106,7 @@ jobs:
             ${{ steps.paths.outputs.mod }}
           # One entry per module and dependency set: the Go build cache is content addressed, so an
           # entry from an older commit still serves everything that did not change.
-          key: lane-test-go-${{ matrix.module }}-${{ hashFiles('go.work.sum', '*/go.sum', 'sdk/go/go.sum') }}
+          key: lane-test-go-${{ matrix.module }}-${{ hashFiles('go.work.sum', '*/go.sum') }}
           restore-keys: |
             lane-test-go-${{ matrix.module }}-
       - name: Check shared import boundary
@@ -288,30 +288,6 @@ jobs:
     uses: ./.github/workflows/e2e.yml
     with:
       core_only: true
-
-  sdk-macos:
-    name: SDK macOS
-    timeout-minutes: 15
-    needs: plan
-    if: contains(fromJSON(needs.plan.outputs.go).*.module, 'sdk/go')
-    runs-on: macos-latest
-    defaults:
-      run:
-        working-directory: sdk/go
-    env:
-      RUN: ${{ inputs.run }}
-      COUNT: ${{ inputs.count || '1' }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version-file: sdk/go/go.mod
-          cache: false
-      - run: go vet ./...
-      - name: go test -race
-        run: |
-          run=(); [ -z "$RUN" ] || run=(-v -run "$RUN")
-          go test -race -count="$COUNT" -timeout 10m "${run[@]}" ./...
 
   # No silent skips: a Go test that skipped in every step above (missing DSN, not root, no PgBouncer) and ran in
   # none fails the run, unless tools/skip-allowlist.txt names the job that runs it. tools/skip-baseline.txt holds
