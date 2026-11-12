@@ -8,6 +8,7 @@
 -- generation, so a cut-off endpoint keeps relaying on its last grant until it is revoked (the Tailscale model:
 -- tailscale derp/derpserver/derpserver.go verifyClient admits any node key the tailnet still knows; liveness never revokes it). A
 -- counterpart of a removed endpoint needs no fence: the removed endpoint is itself fenced off the relay.
+SET LOCAL lock_timeout = '5s';
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION paperboat.advance_peer_network_for_machine() RETURNS trigger LANGUAGE plpgsql SET enable_seqscan = off AS $$
 DECLARE
@@ -60,6 +61,7 @@ END $$;
 -- +goose StatementEnd
 
 -- +goose Down
+SET LOCAL lock_timeout = '5s';
 -- +goose StatementBegin
 CREATE OR REPLACE FUNCTION paperboat.advance_peer_network_for_machine() RETURNS trigger LANGUAGE plpgsql SET enable_seqscan = off AS $$
 BEGIN
