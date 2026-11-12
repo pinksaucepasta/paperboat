@@ -169,6 +169,10 @@ func (s *SnapshotStore) Watch(ctx context.Context, after uint64) (Snapshot, erro
 
 func cloneSnapshot(snapshot Snapshot) Snapshot {
 	copy := snapshot
+	if snapshot.HomeRelay != nil {
+		home := *snapshot.HomeRelay
+		copy.HomeRelay = &home
+	}
 	copy.Health = cloneHealth(snapshot.Health)
 	copy.Machines = append([]MachineStatus(nil), snapshot.Machines...)
 	for index := range copy.Machines {

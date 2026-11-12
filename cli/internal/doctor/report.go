@@ -57,6 +57,9 @@ func (r Report) Validate() error {
 	if r.Schema != SchemaV1 || !safeIdentifier.MatchString(r.CorrelationID) || r.CheckedAt.IsZero() || !oneOf(r.Overall, "healthy", "starting", "degraded", "unhealthy") || len(r.Checks) == 0 || len(r.Checks) > 64 {
 		return errors.New("invalid doctor report")
 	}
+	if r.HomeRelay != nil && (!safeText(r.HomeRelay.NodeID, 128) || r.HomeRelay.Region != "" && !safeText(r.HomeRelay.Region, 128)) {
+		return errors.New("invalid doctor home relay")
+	}
 	if r.Machine != nil && (!safeIdentifier.MatchString(r.Machine.ID) || !safeText(r.Machine.Alias, 256)) {
 		return errors.New("invalid doctor machine")
 	}
