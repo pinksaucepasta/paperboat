@@ -18,8 +18,14 @@ import (
 )
 
 // A CLI session recording replay: the viewer's CLI endpoint reaches the team machine for capability recording while
-// its admission lives and the policy still lets the viewer replay there; losing recording_view withdraws it.
+// its admission lives and the policy still lets the viewer replay there; losing recording_view withdraws it. The
+// machine is owned by the team or is a personal machine shared into it.
 func TestRecordingReplayAdmissionReachesBothEndpointsOnPostgres(t *testing.T) {
+	t.Run("team-owned", func(t *testing.T) { recordingReplayAdmission(t, false) })
+	t.Run("shared personal machine", func(t *testing.T) { recordingReplayAdmission(t, true) })
+}
+
+func recordingReplayAdmission(t *testing.T, shared bool) {
 	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
 	if dsn == "" {
 		t.Skip("isolated PostgreSQL DSN required")
@@ -51,7 +57,14 @@ func TestRecordingReplayAdmissionReachesBothEndpointsOnPostgres(t *testing.T) {
 	execute(`INSERT INTO paperboat.team_members(team_id,account_id,membership_generation,role,active) VALUES($1,$2,1,'admin',true)`, team, account)
 	execute(`INSERT INTO paperboat.cli_client_sessions(id,user_id,client_id,client_label,device_type,os,scopes,state,created_at,approved_at) VALUES($1,$2,$1,'recording test','desktop','test',ARRAY['machines:connect'],'active',$3,$3)`, cli, account, now)
 	execute(`INSERT INTO paperboat.control_environments(id,workspace_id,owner_user_id) VALUES($1,$1,$2)`, environment, account)
-	execute(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation,owner_team_id) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1,$4)`, machine, account, environment, team)
+	owner := &team
+	if shared {
+		owner = nil
+	}
+	execute(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,platform,architecture,workspace_root,state,seat_state,online,installation_generation,owner_team_id) VALUES($1,$2,$3,'linux','amd64','/workspace','online','occupied',true,1,$4)`, machine, account, environment, owner)
+	if shared {
+		execute(`INSERT INTO paperboat.team_resource_bindings(team_id,resource_kind,resource_id,owner_account) VALUES($1,'machine',$2,$3)`, team, machine, account)
+	}
 	execute(`INSERT INTO paperboat.workspace_policies(team_id,version,source,digest) VALUES($1,1,'{}','test')`, team)
 	allow := func() {
 		execute(`INSERT INTO paperboat.workspace_policy_rules(policy_id,rule,deny,subject_kind,subject_id,target_kind,target_id,action,ports) SELECT id,0,false,'account',$2,'machine',$3,'recording_view','[1,65536)' FROM paperboat.workspace_policies WHERE team_id=$1`, team, account, machine)
