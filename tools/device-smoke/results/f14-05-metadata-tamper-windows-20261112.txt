@@ -1,0 +1,8 @@
+# tuf_metadata_tamper.py on winpool-9 (GitHub-hosted Windows Server runner, official pb.exe 2026.11.10.11 from the GitHub release, paired), 2026-11-12
+{"step": "trust-ca", "status": "PASS"}
+{"step": "updater-restarted", "status": "PASS"}
+{"step": "control-untampered", "status": "PASS", "check_rc": 0, "download_rc": 0}
+{"step": "tampered-timestamp-refused", "status": "PASS", "check_rc": 1, "download_rc": 1, "check_error": "updater_check_failed", "download_error": "updater_check_failed", "version": "2026.11.10.11"}
+{"step": "tampered-snapshot-refused", "status": "PASS", "check_rc": 1, "download_rc": 1, "check_error": "updater_check_failed", "download_error": "updater_check_failed", "version": "2026.11.10.11"}
+{"step": "tampered-targets-refused", "status": "PASS", "check_rc": 1, "download_rc": 1, "check_error": "updater_check_failed", "download_error": "updater_check_failed", "version": "2026.11.10.11"}
+{"check": "tuf-metadata-tamper", "os": "Windows", "status": "PASS"}

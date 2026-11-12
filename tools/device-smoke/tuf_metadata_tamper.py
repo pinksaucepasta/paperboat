@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """F14-05 metadata half, on a device (Linux, macOS or Windows): an official `pb` refuses altered signed update metadata.
 
-Runs ON the device, as root (Windows: elevated), with an official install of pb and Python 3:
-  tuf_metadata_tamper.py --pb PB --host RELEASE_HOST --ca CA.pem --cert SERVER.pem --key SERVER.key
+Runs ON the device, as root (Windows: elevated), with a paired official install of pb and Python 3:
+  tuf_metadata_tamper.py --pb PB --host RELEASE_HOST --ca CA.pem --cert SERVER.pem --key SERVER.key [--pb-prefix 'sudo -u USER -H env XDG_RUNTIME_DIR=...']
 
 The official client fetches `https://RELEASE_HOST/tuf/metadata/*.json` and trusts only the pinned root, over the system
 TLS roots. The script puts a local mirror in front of that host: it adds the test CA to the system trust store, points
@@ -14,11 +14,14 @@ must fail, `pb update status` must stay readable and the installed version uncha
 and the mirror are removed on every exit path. Never prints keys or tokens.
 """
 import argparse
+import glob
+import http.client
 import http.server
 import json
 import os
 import platform
 import re
+import shlex
 import shutil
 import socket
 import ssl
@@ -26,6 +29,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.request
 
 SYSTEM = platform.system()
@@ -70,6 +74,30 @@ def hosts(host, add):
         run(['dscacheutil', '-flushcache'])
 
 
+def cached_metadata(name):
+    """The updater's cached copy of one TUF metadata document (it keeps snapshot and targets while timestamp says they are current,
+    so an altered one is only fetched when the cached copy is gone)."""
+    roots = {'Linux': ['/var/lib/paperboat-updated-*'], 'Darwin': ['/Library/Application Support/Paperboat/updated-*'],
+             'Windows': [r'C:\ProgramData\Paperboat\updated']}[SYSTEM]
+    return [path for root in roots for path in glob.glob(os.path.join(root, '**', 'metadata', name + '.json'), recursive=True)]
+
+
+def restart_updater(pb):
+    """The updater loads the system TLS roots and resolves the host once per process: kill it, its service manager starts
+    a new one, and wait until it answers `pb update status` again."""
+    if SYSTEM == 'Windows':
+        run(['powershell', '-NoProfile', '-Command', "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*__runtime-updated*' } | "
+             "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"])
+    else:
+        run(['pkill', '-KILL', '-f', '__runtime-updated'])
+    deadline = time.time() + 180
+    while time.time() < deadline:
+        time.sleep(3)
+        if pb_json(pb, 'update', 'status')[0] == 0:
+            return True
+    return False
+
+
 def tamper_signature(body):
     """Flip one hex digit inside the first "sig":"..." value, keeping the document valid JSON."""
     found = re.search(rb'"sig":"([0-9a-f]+)"', body)
@@ -85,21 +113,17 @@ class Mirror(http.server.BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        connection = socket.create_connection((self.real_ip, 443), timeout=30)
-        context = ssl.create_default_context()
-        with context.wrap_socket(connection, server_hostname=self.host) as upstream:
-            upstream.sendall(f'GET {self.path} HTTP/1.1\r\nHost: {self.host}\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n'.encode())
-            raw = b''
-            while True:
-                chunk = upstream.recv(65536)
-                if not chunk:
-                    break
-                raw += chunk
-        head, _, body = raw.partition(b'\r\n\r\n')
-        status = int(head.split(b' ')[1])
+        # The live repository, reached through the address the host had before the hosts entry (SNI and Host stay the host).
+        connection = http.client.HTTPSConnection(self.host, 443, timeout=60, context=ssl.create_default_context())
+        connection.sock = connection._context.wrap_socket(socket.create_connection((self.real_ip, 443), timeout=30), server_hostname=self.host)
+        connection.request('GET', self.path, headers={'Accept-Encoding': 'identity'})
+        answer = connection.getresponse()
+        status, body = answer.status, answer.read()
+        connection.close()
         name = self.path.rsplit('/', 1)[-1]
-        if status == 200 and TAMPER['doc'] and name == TAMPER['doc'] + '.json' and '/metadata/' in self.path:
+        if status == 200 and TAMPER['doc'] and re.fullmatch(r'(\d+\.)?' + TAMPER['doc'] + r'\.json', name) and '/metadata/' in self.path:
             body = tamper_signature(body)
+        print(json.dumps({'mirror': self.path, 'status': status, 'bytes': len(body), 'altered': bool(TAMPER['doc'])}), file=sys.stderr, flush=True)
         self.send_response(status)
         self.send_header('Content-Type', 'application/json' if self.path.endswith('.json') else 'application/octet-stream')
         self.send_header('Content-Length', str(len(body)))
@@ -107,12 +131,15 @@ class Mirror(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+PREFIX = []
+
+
 def version(pb):
-    return json.loads(run([pb, '--version', '--json'])[1])['data']['version']
+    return json.loads(run([*PREFIX, pb, '--version', '--json'])[1])['data']['version']
 
 
 def pb_json(pb, *arguments):
-    code, out = run([pb, *arguments, '--json'], 400)
+    code, out = run([*PREFIX, pb, *arguments, '--json'], 400)
     try:
         return code, json.loads(out[out.index('{'):])
     except ValueError:
@@ -128,7 +155,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('pb', 'host', 'ca', 'cert', 'key'):
         parser.add_argument('--' + name, required=True)
+    parser.add_argument('--pb-prefix', default='', help="command that runs pb as the installing user when this script runs as root, e.g. 'sudo -u runner -H'")
     args = parser.parse_args()
+    PREFIX[:] = shlex.split(args.pb_prefix)
     Mirror.host, Mirror.real_ip = args.host, socket.gethostbyname(args.host)
     installed = version(args.pb)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -140,8 +169,12 @@ def main():
     try:
         ok = step('trust-ca', trust(args.ca, True)) and ok
         hosts(args.host, True)
+        ok = step('updater-restarted', restart_updater(args.pb)) and ok
         for doc in (None, 'timestamp', 'snapshot', 'targets'):
             TAMPER['doc'] = doc
+            for dropped in {'snapshot': ('snapshot', 'targets'), 'targets': ('targets',)}.get(doc, ()):
+                for path in cached_metadata(dropped):
+                    os.remove(path)
             check, download = pb_json(args.pb, 'update', 'check'), pb_json(args.pb, 'update', 'download')
             status = pb_json(args.pb, 'update', 'status')
             unchanged = version(args.pb) == installed
@@ -156,6 +189,7 @@ def main():
         hosts(args.host, False)
         trust(args.ca, False)
         server.shutdown()
+        restart_updater(args.pb)
     print(json.dumps({'check': 'tuf-metadata-tamper', 'os': SYSTEM, 'status': 'PASS' if ok else 'FAIL'}), flush=True)
     sys.exit(0 if ok else 1)
 
