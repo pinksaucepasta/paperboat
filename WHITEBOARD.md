@@ -414,4 +414,6 @@ on the per-operation grant). Re-measure with tools/device-smoke/perf_dataplane.p
 Machine names are ASCII DNS labels: they appear in `<name>.<domain>`, `https://<port>.<name>.<domain>`, SSH host names and local
 certificates, so `pb machine rename` refuses `zoë-build` with the name rule (shared/machinename). Allowing them needs IDNA
 (punycode) in all of those paths and in the server's machinealias. Prior art: Tailscale MagicDNS also keeps ASCII host labels.
-- Folder send (tree, empty dirs) — after launch. `pb send` takes regular files only today; a folder or symbolic link is refused with a clear message.
+
+## Folder send (tree, empty dirs) — after launch
+`pb send` takes regular files only today; a folder or symbolic link is refused with a clear message.
