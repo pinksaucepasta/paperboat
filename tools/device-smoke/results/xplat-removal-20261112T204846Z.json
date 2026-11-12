@@ -1,0 +1,25 @@
+{
+ "check": "xplat-removal",
+ "results": [
+  {
+   "id": "X-41:revoke:W",
+   "status": "PASS",
+   "detail": "xpr-l: pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_075; revoked target: 33 events/min; observers: 11 events/min; new identity after enrolling again, both observers exec and pb ssh it (pb ssh ready 3 s after exec)"
+  },
+  {
+   "id": "X-41:reset:W",
+   "status": "PASS",
+   "detail": "observers: 11 events/min; new identity after enrolling again, both observers exec and pb ssh it (pb ssh ready 4 s after exec)"
+  },
+  {
+   "id": "X-41:revoke:L",
+   "status": "FAIL",
+   "detail": "xpr-w: pb ssh xpr-l after 3 s:  pb: SSH to xpr-l is not ready: Managed SSH is not ready. Run pb ssh doctor <machine>. Support reference: support_11c4e326-7de4-4c97-a4a6-dc42ef9cb3ea. Run `pb bugreport --upload` to send the details.\n"
+  },
+  {
+   "id": "X-41:reset:L",
+   "status": "FAIL",
+   "detail": "xpr-w: pb ssh xpr-l after 3 s:  pb: SSH to xpr-l is not ready: Managed SSH is not ready. Run pb ssh doctor <machine>. Support reference: support_1a98ce0e-46d5-44a4-964d-da591ad59ebc. Run `pb bugreport --upload` to send the details.\n"
+  }
+ ]
+}
