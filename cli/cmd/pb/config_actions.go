@@ -344,6 +344,9 @@ func configStatus(c *command.Context) error {
 		fmt.Fprintf(c.Writer, "%s: %s, %s, manifest %s, %d managed, %d pending clean\n",
 			name, item.State, strings.ReplaceAll(item.Mode, "_", "-"), item.ManifestHealth,
 			item.ManagedPathCount, item.PendingCleanPathCount)
+		for _, line := range configSkippedLines(item) {
+			fmt.Fprintln(c.Writer, line)
+		}
 		switch item.ErrorCode {
 		case "configuration_changed":
 			fmt.Fprintln(c.Writer, "  Configuration changed; run pb config sync apply on this machine to approve it.")
@@ -352,6 +355,15 @@ func configStatus(c *command.Context) error {
 		}
 	}
 	return nil
+}
+
+// configSkippedLines names each file the machine left out of the sync and why (a link, an unsafe file, a name clash).
+func configSkippedLines(item api.ConfigSyncEnvironmentState) []string {
+	lines := make([]string, 0, len(item.Skipped))
+	for _, skipped := range item.Skipped {
+		lines = append(lines, fmt.Sprintf("  skipped %s: %s", skipped.Path, strings.ReplaceAll(skipped.Reason, "_", " ")))
+	}
+	return lines
 }
 
 func configConflictCobraCommand() *cobra.Command {

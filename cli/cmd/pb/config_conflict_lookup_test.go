@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -25,5 +26,20 @@ func TestConfigRefusalsDoNotPrintCommandHelp(t *testing.T) {
 	_, err := findConfigConflict(api.ConfigSyncEnvironmentState{Alias: "dadape"}, "/x")
 	if printsUsage(err) || !printsUsage(usageError{publicMessage: "bad flag"}) {
 		t.Fatalf("printsUsage: refusal=%v, misuse=%v", printsUsage(err), printsUsage(usageError{publicMessage: "bad flag"}))
+	}
+}
+
+// pb config status once dropped the skipped paths the server holds, so a link or an unsafe file was never named.
+func TestConfigStatusNamesSkippedPaths(t *testing.T) {
+	var item api.ConfigSyncEnvironmentState
+	if err := json.Unmarshal([]byte(`{"alias":"m","skipped":[{"path":"cfg/app/link.txt","reason":"unsupported_file_type"}]}`), &item); err != nil {
+		t.Fatal(err)
+	}
+	lines := configSkippedLines(item)
+	if len(lines) != 1 || lines[0] != "  skipped cfg/app/link.txt: unsupported file type" {
+		t.Fatalf("lines = %q", lines)
+	}
+	if encoded, _ := json.Marshal(item); !strings.Contains(string(encoded), `"skipped":[{"path":"cfg/app/link.txt"`) {
+		t.Fatalf("--json drops the skipped paths: %s", encoded)
 	}
 }

@@ -252,6 +252,7 @@ type ConfigSyncEnvironmentState struct {
 	PendingCleanPathCount int                     `json:"pending_clean_path_count"`
 	LastAppliedRevision   string                  `json:"last_applied_revision"`
 	LastPublishedRevision string                  `json:"last_published_revision"`
+	Skipped               []ConfigSyncPathSummary `json:"skipped"`
 	Conflicts             []ConfigSyncPathSummary `json:"conflicts"`
 	Review                []ConfigSyncPathSummary `json:"review"`
 	ErrorCode             string                  `json:"error_code,omitempty"`
