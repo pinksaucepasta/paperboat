@@ -1,0 +1,72 @@
+go test -v -count=1 on winpool-7 (GitHub-hosted Windows Server, amd64, Go 1.27.4), cli module at main dcf93cf6f (+ the load-test port of this commit), 2026-11-12 (IST). win-test-exec private root; unelevated token unless noted. Tests for CHECKLIST rows F21-159, F21-160, F21-161, F21-166.
+
+Note: internal/config is run elevated below because its TestMain (main_windows_test.go) sets the default token owner, which an unelevated token is refused ("Access is denied"); its other unelevated results are outside these rows.
+
+== F21-159/160/161, unelevated token (cmd/pb, configsync, inbox, filelock, mesh, tailnet)
+--- PASS: TestStaleRepositoryLockIsClearedAndALiveOneIsNot (0.01s)
+--- PASS: TestHeldRepositoryLockStaysFreshWhileItsHolderWorks (0.01s)
+ok  	github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync	0.188s
+--- PASS: TestConcurrentDeliveriesFromSeparateInboxesKeepEveryReceipt (0.56s)
+--- PASS: TestUnreadableReceiptJournalIsSetAsideAndDeliveryContinues (0.10s)
+ok  	github.com/pinksaucepasta/paperboat/internal/inbox	0.828s
+--- PASS: TestLockExcludesAndIsBoundedByTheContext (0.10s)
+ok  	github.com/pinksaucepasta/paperboat/internal/filelock	0.168s
+--- PASS: TestNewerPreferencesVersionNamesTheRecoveryAndRecoveryWorks (0.00s)
+ok  	github.com/pinksaucepasta/paperboat/cmd/pb	0.226s
+--- PASS: TestDeadDirectPathFallsBackToTheRelayInSeconds (6.69s)
+--- PASS: TestUDPPayloadFitsTheSafeTunnelMTU (0.00s)
+--- PASS: TestAdvertisedHomeIsTheSelectedRegionNotTheLowestID (0.03s)
+ok  	github.com/pinksaucepasta/paperboat/internal/peertransport/mesh	6.822s
+--- PASS: TestAdvertisedHomeIsTheSelectedRelay (0.00s)
+ok  	github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet	0.185s
+
+== F21-159 auth lock (internal/config), elevated token: its TestMain sets the user as default owner, which an unelevated token may not do
+--- PASS: TestSharedLockIsNotTrustedAcrossAReusedPID (0.06s)
+ok  	github.com/pinksaucepasta/paperboat/internal/config	0.122s
+EXIT 0
+
+== F21-159 hostd.token on Windows: written by atomicfile.Write (temp file + replace), ensureWindowsTokenAt; atomicfile tests, unelevated then elevated
+== atomicfile (unelevated)
+=== RUN   TestWindowsAtomicReplacementFailureRetainsCauseAndRecovers
+--- PASS: TestWindowsAtomicReplacementFailureRetainsCauseAndRecovers (0.03s)
+=== RUN   TestWindowsAtomicNativeHandleProbeFailureAndRecovery
+--- PASS: TestWindowsAtomicNativeHandleProbeFailureAndRecovery (0.01s)
+=== RUN   TestWriteDefaultDescriptorAllowsOwnerAtomicReplacement
+--- PASS: TestWriteDefaultDescriptorAllowsOwnerAtomicReplacement (0.02s)
+=== RUN   TestWriteAppliesExplicitOwnerBeforeReplacement
+--- PASS: TestWriteAppliesExplicitOwnerBeforeReplacement (0.01s)
+=== RUN   TestWriteTransfersTrustedCreationOwnerToSystemBeforeReplacement
+--- SKIP: TestWriteTransfersTrustedCreationOwnerToSystemBeforeReplacement (0.00s)
+=== RUN   TestAbsentOrBlockedTellsAFileInThePathFromAbsence
+--- PASS: TestAbsentOrBlockedTellsAFileInThePathFromAbsence (0.00s)
+=== RUN   TestSyncedCopyNeverLeavesMoreThanOneChunkUnsynced
+--- PASS: TestSyncedCopyNeverLeavesMoreThanOneChunkUnsynced (0.02s)
+ok  	github.com/pinksaucepasta/paperboat/internal/atomicfile	0.145s
+EXIT 0
+== atomicfile (elevated)
+=== RUN   TestWindowsAtomicReplacementFailureRetainsCauseAndRecovers
+--- PASS: TestWindowsAtomicReplacementFailureRetainsCauseAndRecovers (0.03s)
+=== RUN   TestWindowsAtomicNativeHandleProbeFailureAndRecovery
+--- PASS: TestWindowsAtomicNativeHandleProbeFailureAndRecovery (0.01s)
+=== RUN   TestWriteDefaultDescriptorAllowsOwnerAtomicReplacement
+--- PASS: TestWriteDefaultDescriptorAllowsOwnerAtomicReplacement (0.02s)
+=== RUN   TestWriteAppliesExplicitOwnerBeforeReplacement
+--- PASS: TestWriteAppliesExplicitOwnerBeforeReplacement (0.01s)
+=== RUN   TestWriteTransfersTrustedCreationOwnerToSystemBeforeReplacement
+--- PASS: TestWriteTransfersTrustedCreationOwnerToSystemBeforeReplacement (0.02s)
+=== RUN   TestAbsentOrBlockedTellsAFileInThePathFromAbsence
+--- PASS: TestAbsentOrBlockedTellsAFileInThePathFromAbsence (0.00s)
+=== RUN   TestSyncedCopyNeverLeavesMoreThanOneChunkUnsynced
+--- PASS: TestSyncedCopyNeverLeavesMoreThanOneChunkUnsynced (0.02s)
+ok  	github.com/pinksaucepasta/paperboat/internal/atomicfile	0.166s
+EXIT 0
+== exec load
+
+== F21-166 exec load (go test -tags load -run TestLoad, elevated token: the unelevated token cannot create the exec pipes)
+    load_test.go:108: 32 busy executions started in 628.6313ms; the next one: exec capacity reached after 761.6µs
+    load_test.go:126: 32 × 4 MiB output delivered in 4.3716884s
+    load_test.go:173: churn: 2000 executions in 45.543s (44/s), p50 698ms p99 1.284s, 0 failed map[]
+    load_test.go:188: after shutdown: goroutines 3 (baseline 2), fds 609 (baseline 609)
+--- PASS: TestLoadExecConcurrencyAndChurn (50.02s)
+ok  	github.com/pinksaucepasta/paperboat/internal/hostruntime/execprocess	50.073s
+EXIT 0

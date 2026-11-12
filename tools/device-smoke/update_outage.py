@@ -10,8 +10,10 @@ is exactly one such outage. Containers come from `control_outage.py setup`.
 A macOS target (F21-162, M): --target-ssh HOST --target-name ALIAS --probe-ct CONTAINER: the probe runs in CONTAINER on --host
 (a Linux machine of the same account) against the Mac ALIAS, and the Mac reinstalls ~/pb-new over its install; the install is
 timed on the Mac's clock, the dark window is a gap between probe completions so clock skew does not enter it.
+A Windows target (F21-162, W): --target-ssh HOST --target-windows PB_NEW: the same, with PowerShell on HOST running PB_NEW (a
+pb.exe already on the device) as `PB_NEW install` over the install.
 """
-import argparse, base64, json, sys, time
+import argparse, base64, json, re, sys, time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -41,12 +43,21 @@ for thread in threads:
 '''
 
 
+def windows_install(host, pb_new):
+    """(rc, output) of `pb_new install` on a Windows host, bracketed by two Unix-time stamps in the output."""
+    stamp = "[Console]::Out.WriteLine(([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000).ToString('F3', [cultureinfo]::InvariantCulture))"
+    script = f"$ProgressPreference='SilentlyContinue'; {stamp}; & '{pb_new}' install *> $null; [Console]::Out.WriteLine('rc=' + $LASTEXITCODE); {stamp}"
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode()
+    return c.host_run(host, f"powershell -NoProfile -NonInteractive -EncodedCommand {encoded}", 330)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="ubuntu@anvit")
     parser.add_argument("--budget", type=float, default=8.0, help="seconds without a completing exec (Linux baseline 3.7 s)")
     parser.add_argument("--seconds", type=int, default=90)
     parser.add_argument("--target-ssh", help="ssh host of a macOS target that runs ~/pb-new install (default: the rel-sco-b container)")
+    parser.add_argument("--target-windows", help="with --target-ssh: the pb.exe on the Windows target to run `install` with")
     parser.add_argument("--target-name", default=c.NAMES["b"])
     parser.add_argument("--probe-ct", default=c.NAMES["a"])
     args = parser.parse_args()
@@ -58,12 +69,14 @@ def main():
     c.detached(host, probe_ct, f"rm -f /tmp/update-probe.log; python3 {probe_script} {args.seconds} {args.target_name} < /dev/null > /tmp/update-probe.log 2>&1")
     time.sleep(20)  # warm: the probe completes before the install starts
     # The install is timed on the container's clock, the same clock the probe log uses.
-    if args.target_ssh:
+    if args.target_ssh and args.target_windows:
+        rc, out = windows_install(args.target_ssh, args.target_windows)
+    elif args.target_ssh:
         stamp = "python3 -c 'import time;print(time.time())'"
         rc, out = c.host_run(args.target_ssh, f"{stamp}; ~/pb-new install >/dev/null 2>&1; echo rc=$?; {stamp}", 330)
     else:
         rc, out = c.in_ct(host, c.NAMES["b"], 'date +%s.%N; ./pb install >/dev/null 2>&1; echo rc=$?; date +%s.%N', 300)
-    lines = out.split()
+    lines = [token for token in out.split() if token.startswith("rc=") or re.fullmatch(r"\d+\.\d+", token)]
     started, finished = float(lines[0]), float(lines[-1])
     rc = int(next(x for x in lines if x.startswith("rc="))[3:])
     time.sleep(args.seconds - 20 - (finished - started) + 20)
