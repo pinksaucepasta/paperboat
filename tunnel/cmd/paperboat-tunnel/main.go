@@ -679,6 +679,15 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 				ctx = reporting.WithSupportReference(ctx, reporting.SupportReference(processCtx))
 			}
 		}
+		// The reporter keeps only the error's class (an unclassified failure is just "errorString"); the text, bounded, is what names
+		// a one-off 502 afterwards, as the preview path already logs it (preview_carrier_request_failed). No headers, no bodies.
+		if cause != nil {
+			detail := cause.Error()
+			if len(detail) > 300 {
+				detail = detail[:300]
+			}
+			slog.Warn("tunnel_forward_failed", "reference", reporting.SupportReference(ctx), "error", detail)
+		}
 		reporter.ObserveFailure(ctx, "upstream_request", cause)
 	}, RouteUnavailable: unavailableRoutes.Has, RouteGrace: routeGrace, SelfHosted: deployment.SelfHosted, RuntimeCarrierTransport: runtimeTransport, BrowserTerminalHub: browserTerminalHub, BrowserTerminalEdgeHost: deployment.ConnectorAdvertiseHost, BrowserAccess: browserAccess, BrowserTerminal: &control.BrowserTerminalClient{HTTP: client, NodeID: cfg.NodeID, ProcessEpoch: processEpoch}, InspectorAccess: inspectorAccess, PreviewBaseDomain: deployment.PreviewBaseDomain, TunnelBaseDomain: deployment.TunnelBaseDomain, RuntimeBaseDomain: deployment.RuntimeBaseDomain, TrustedProxies: trusted, MaxHeaderBytes: deployment.MaxHeaderBytes, MaxBodyBytes: deployment.MaxBodyBytes, BodyIdleTimeout: deployment.RequestBodyIdle(), Routes: routeMatcher, PrivateAccessConnections: privateConnections, Readiness: previewReadiness{Canonical: previewRoutes, Fallback: routes}, PreviewPending: func(host string) bool {
 		now := time.Now()
