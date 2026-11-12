@@ -1,0 +1,280 @@
+{
+ "check": "xpc-daily",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-22:env-setup",
+   "status": "PASS",
+   "detail": "vault unlocked on every machine, X22_VALUE set"
+  },
+  {
+   "id": "X-22:inventory",
+   "status": "PASS",
+   "detail": "console inventory: xpc-l, xpc-mv, xpc-w online with their OS"
+  },
+  {
+   "id": "X-22:resolve:L>M",
+   "status": "PASS",
+   "detail": "resolved 127.100.0.5"
+  },
+  {
+   "id": "X-22:exec:L>M",
+   "status": "PASS",
+   "detail": "hostname Manageds-Virtual-Machine.local"
+  },
+  {
+   "id": "X-22:env:L>M",
+   "status": "PASS",
+   "detail": "X22_VALUE equal (sha256) on xpc-mv"
+  },
+  {
+   "id": "X-22:send:L>M",
+   "status": "PASS",
+   "detail": "file arrived (sha256) in xpc-mv Inbox"
+  },
+  {
+   "id": "X-22:access:L>M",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.5 byte-exact with half-close; non-loopback --listen refused (nd TUI preferences\n      --server string      paperboat-server base UR)"
+  },
+  {
+   "id": "X-22:resolve:L>W",
+   "status": "PASS",
+   "detail": "resolved 127.100.0.6"
+  },
+  {
+   "id": "X-22:exec:L>W",
+   "status": "PASS",
+   "detail": "hostname runnervmm7ud1"
+  },
+  {
+   "id": "X-22:env:L>W",
+   "status": "PASS",
+   "detail": "X22_VALUE equal (sha256) on xpc-w"
+  },
+  {
+   "id": "X-22:send:L>W",
+   "status": "PASS",
+   "detail": "file arrived (sha256) in xpc-w Inbox"
+  },
+  {
+   "id": "X-22:access:L>W",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.6 byte-exact with half-close; non-loopback --listen refused (nd TUI preferences\n      --server string      paperboat-server base UR)"
+  },
+  {
+   "id": "X-22:resolve:M>L",
+   "status": "PASS",
+   "detail": "resolved 127.100.0.2"
+  },
+  {
+   "id": "X-22:exec:M>L",
+   "status": "PASS",
+   "detail": "hostname xpc-l"
+  },
+  {
+   "id": "X-22:env:M>L",
+   "status": "PASS",
+   "detail": "X22_VALUE equal (sha256) on xpc-l"
+  },
+  {
+   "id": "X-22:send:M>L",
+   "status": "PASS",
+   "detail": "file arrived (sha256) in xpc-l Inbox"
+  },
+  {
+   "id": "X-22:access:M>L",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.2 byte-exact with half-close; non-loopback --listen refused (nd TUI preferences\n      --server string      paperboat-server base UR)"
+  },
+  {
+   "id": "X-22:resolve:M>W",
+   "status": "PASS",
+   "detail": "resolved 127.100.0.5"
+  },
+  {
+   "id": "X-22:exec:M>W",
+   "status": "PASS",
+   "detail": "hostname runnervmm7ud1"
+  },
+  {
+   "id": "X-22:env:M>W",
+   "status": "PASS",
+   "detail": "X22_VALUE equal (sha256) on xpc-w"
+  },
+  {
+   "id": "X-22:send:M>W",
+   "status": "PASS",
+   "detail": "file arrived (sha256) in xpc-w Inbox"
+  },
+  {
+   "id": "X-22:access:M>W",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.5 byte-exact with half-close; non-loopback --listen refused (nd TUI preferences\n      --server string      paperboat-server base UR)"
+  },
+  {
+   "id": "X-22:resolve:W>L",
+   "status": "PASS",
+   "detail": "resolved 127.100.0.2"
+  },
+  {
+   "id": "X-22:exec:W>L",
+   "status": "PASS",
+   "detail": "hostname xpc-l"
+  },
+  {
+   "id": "X-22:env:W>L",
+   "status": "PASS",
+   "detail": "X22_VALUE equal (sha256) on xpc-l"
+  },
+  {
+   "id": "X-22:send:W>L",
+   "status": "PASS",
+   "detail": "file arrived (sha256) in xpc-l Inbox"
+  },
+  {
+   "id": "X-22:access:W>L",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.2 byte-exact with half-close; non-loopback --listen refused (nd TUI preferences\n      --server string      paperboat-server base UR)"
+  },
+  {
+   "id": "X-22:resolve:W>M",
+   "status": "PASS",
+   "detail": "resolved 127.100.0.10"
+  },
+  {
+   "id": "X-22:exec:W>M",
+   "status": "PASS",
+   "detail": "hostname Manageds-Virtual-Machine.local"
+  },
+  {
+   "id": "X-22:env:W>M",
+   "status": "PASS",
+   "detail": "X22_VALUE equal (sha256) on xpc-mv"
+  },
+  {
+   "id": "X-22:send:W>M",
+   "status": "PASS",
+   "detail": "file arrived (sha256) in xpc-mv Inbox"
+  },
+  {
+   "id": "X-22:access:W>M",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.10 byte-exact with half-close; non-loopback --listen refused (nd TUI preferences\n      --server string      paperboat-server base UR)"
+  },
+  {
+   "id": "X-22:preview:L",
+   "status": "PASS",
+   "detail": "preview mild-winter-po serves the marker"
+  },
+  {
+   "id": "X-22:doctor:L",
+   "status": "PASS",
+   "detail": "doctor healthy (12 checks)"
+  },
+  {
+   "id": "X-22:preview:M",
+   "status": "PASS",
+   "detail": "preview playful-ivory- serves the marker"
+  },
+  {
+   "id": "X-22:doctor:M",
+   "status": "PASS",
+   "detail": "doctor healthy (10 checks)"
+  },
+  {
+   "id": "X-22:preview:W",
+   "status": "PASS",
+   "detail": "preview simple-silver- serves the marker"
+  },
+  {
+   "id": "X-22:doctor:W",
+   "status": "PASS",
+   "detail": "doctor healthy (9 checks)"
+  },
+  {
+   "id": "X-22:config",
+   "status": "PASS",
+   "detail": "config sync with one shared TOML (xplat_config X-01): 5 checks PASS"
+  },
+  {
+   "id": "X-22:network:L>M",
+   "status": "PASS",
+   "detail": "reachable again after 5s (15 s network cut)"
+  },
+  {
+   "id": "X-22:network:W>M",
+   "status": "PASS",
+   "detail": "reachable again after 12s (15 s network cut)"
+  },
+  {
+   "id": "X-22:network:L>W",
+   "status": "PASS",
+   "detail": "reachable again after 8s (15 s network cut)"
+  },
+  {
+   "id": "X-22:network:M>W",
+   "status": "PASS",
+   "detail": "reachable again after 5s (15 s network cut)"
+  },
+  {
+   "id": "X-22:reboot:M>L",
+   "status": "PASS",
+   "detail": "the rebooted machine reaches it again (hostname 4.9726645946502686)"
+  },
+  {
+   "id": "X-22:reboot:L>M",
+   "status": "PASS",
+   "detail": "reachable again after 55s with no user action"
+  },
+  {
+   "id": "X-22:reboot:W>L",
+   "status": "PASS",
+   "detail": "reachable again after 11s with no user action"
+  },
+  {
+   "id": "X-22:reboot:L>W",
+   "status": "PASS",
+   "detail": "the rebooted machine reaches it again (hostname 5.345335960388184)"
+  },
+  {
+   "id": "X-22:reboot:W>M",
+   "status": "PASS",
+   "detail": "reachable again after 10s with no user action"
+  },
+  {
+   "id": "X-22:reboot:M>W",
+   "status": "PASS",
+   "detail": "the rebooted machine reaches it again (hostname 7.572876691818237)"
+  },
+  {
+   "id": "X-22:network:M>L",
+   "status": "PASS",
+   "detail": "reachable again after 4s of lost and regained network"
+  },
+  {
+   "id": "X-22:network:W>L",
+   "status": "PASS",
+   "detail": "reachable again after 10s of lost and regained network"
+  },
+  {
+   "id": "X-22:doctor-after:L",
+   "status": "PASS",
+   "detail": "doctor healthy (12 checks)"
+  },
+  {
+   "id": "X-22:doctor-after:M",
+   "status": "PASS",
+   "detail": "doctor healthy (10 checks)"
+  },
+  {
+   "id": "X-22:doctor-after:W",
+   "status": "PASS",
+   "detail": "doctor healthy (9 checks)"
+  }
+ ]
+}
