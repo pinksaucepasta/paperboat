@@ -20,6 +20,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/edgelimits"
 	runtimewire "github.com/pinksaucepasta/paperboat/shared/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat/shared/strictjson"
+	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 	"github.com/pinksaucepasta/paperboat/tunnel/internal/admission"
 )
 
@@ -262,46 +263,47 @@ func (c *HTTPClient) Heartbeat(ctx context.Context, observation NodeObservation)
 }
 
 type routeAssignmentWire struct {
-	RouteID                    string          `json:"route_id"`
-	Revision                   uint64          `json:"route_revision"`
-	Environment                string          `json:"environment_id"`
-	AccountID                  string          `json:"account_id"`
-	HostID                     string          `json:"host_id"`
-	MachineIdentityPublicKey   string          `json:"machine_identity_public_key"`
-	MachineIdentityThumbprint  string          `json:"machine_identity_thumbprint"`
-	TunnelID                   string          `json:"tunnel_id"`
-	ResourceID                 string          `json:"resource_id,omitempty"`
-	ConnectorID                string          `json:"connector_id"`
-	Generation                 uint64          `json:"connector_generation"`
-	ConnectorSessionID         string          `json:"connector_session_id"`
-	ConnectorProcessGeneration uint64          `json:"connector_process_generation"`
-	ConfigGeneration           uint64          `json:"config_generation"`
-	ConfigContentHash          string          `json:"config_content_hash"`
-	AssignmentID               string          `json:"assignment_id"`
-	AssignmentGeneration       uint64          `json:"assignment_generation"`
-	EdgeFailureDomain          string          `json:"edge_failure_domain"`
-	EdgeProcessEpoch           string          `json:"edge_process_epoch"`
-	NodeID                     string          `json:"edge_node_id"`
-	Kind                       string          `json:"kind"`
-	PublicHost                 string          `json:"public_host"`
-	MatchType                  string          `json:"match_type"`
-	MatchHostname              string          `json:"match_hostname"`
-	WildcardSuffix             string          `json:"wildcard_suffix"`
-	PathPrefix                 string          `json:"path_prefix"`
-	Priority                   int             `json:"priority"`
-	Protocol                   string          `json:"protocol"`
-	PublicTCPListenerID        string          `json:"public_tcp_listener_id"`
-	PublicTCPPort              uint16          `json:"public_tcp_port"`
-	OriginScheme               string          `json:"origin_scheme"`
-	AccessMode                 string          `json:"access_mode"`
-	ViewerPolicyGeneration     uint64          `json:"viewer_policy_generation"`
-	OriginAddress              string          `json:"origin_address"`
-	PreserveHost               bool            `json:"preserve_host"`
-	HostOverride               string          `json:"host_override"`
-	DomainBindings             []DomainBinding `json:"domain_bindings"`
-	State                      string          `json:"state"`
-	DesiredState               string          `json:"desired_state"`
-	ObservedState              string          `json:"observed_state"`
+	RouteID                    string                  `json:"route_id"`
+	Revision                   uint64                  `json:"route_revision"`
+	Environment                string                  `json:"environment_id"`
+	AccountID                  string                  `json:"account_id"`
+	HostID                     string                  `json:"host_id"`
+	MachineIdentityPublicKey   string                  `json:"machine_identity_public_key"`
+	MachineIdentityThumbprint  string                  `json:"machine_identity_thumbprint"`
+	TunnelID                   string                  `json:"tunnel_id"`
+	ResourceID                 string                  `json:"resource_id,omitempty"`
+	ConnectorID                string                  `json:"connector_id"`
+	Generation                 uint64                  `json:"connector_generation"`
+	ConnectorSessionID         string                  `json:"connector_session_id"`
+	ConnectorProcessGeneration uint64                  `json:"connector_process_generation"`
+	ConfigGeneration           uint64                  `json:"config_generation"`
+	ConfigContentHash          string                  `json:"config_content_hash"`
+	AssignmentID               string                  `json:"assignment_id"`
+	AssignmentGeneration       uint64                  `json:"assignment_generation"`
+	EdgeFailureDomain          string                  `json:"edge_failure_domain"`
+	EdgeProcessEpoch           string                  `json:"edge_process_epoch"`
+	NodeID                     string                  `json:"edge_node_id"`
+	Kind                       string                  `json:"kind"`
+	PublicHost                 string                  `json:"public_host"`
+	MatchType                  string                  `json:"match_type"`
+	MatchHostname              string                  `json:"match_hostname"`
+	WildcardSuffix             string                  `json:"wildcard_suffix"`
+	PathPrefix                 string                  `json:"path_prefix"`
+	Priority                   int                     `json:"priority"`
+	Protocol                   string                  `json:"protocol"`
+	PublicTCPListenerID        string                  `json:"public_tcp_listener_id"`
+	PublicTCPPort              uint16                  `json:"public_tcp_port"`
+	OriginScheme               string                  `json:"origin_scheme"`
+	AccessMode                 string                  `json:"access_mode"`
+	ViewerPolicyGeneration     uint64                  `json:"viewer_policy_generation"`
+	OriginAddress              string                  `json:"origin_address"`
+	PreserveHost               bool                    `json:"preserve_host"`
+	HostOverride               string                  `json:"host_override"`
+	RewriteRules               *tunnelrouterules.Rules `json:"rewrite_rules"`
+	DomainBindings             []DomainBinding         `json:"domain_bindings"`
+	State                      string                  `json:"state"`
+	DesiredState               string                  `json:"desired_state"`
+	ObservedState              string                  `json:"observed_state"`
 	Target                     struct {
 		Host                       string `json:"host"`
 		Port                       uint16 `json:"port"`
@@ -405,7 +407,7 @@ func (c *HTTPClient) DesiredRouteSnapshot(ctx context.Context, nodeID, processEp
 			Priority: wire.Priority, Protocol: wire.Protocol, OriginScheme: wire.OriginScheme, AccessMode: wire.AccessMode,
 			PublicTCPListenerID: wire.PublicTCPListenerID, PublicTCPPort: wire.PublicTCPPort,
 			ViewerPolicyGeneration: wire.ViewerPolicyGeneration, OriginAddress: originAddress,
-			PreserveHost: wire.PreserveHost, HostOverride: wire.HostOverride, DomainBindings: append([]DomainBinding(nil), wire.DomainBindings...), State: wire.State,
+			PreserveHost: wire.PreserveHost, HostOverride: wire.HostOverride, RewriteRules: wire.RewriteRules, DomainBindings: append([]DomainBinding(nil), wire.DomainBindings...), State: wire.State,
 			DesiredState: wire.DesiredState, ObservedState: wire.ObservedState, TargetHost: wire.Target.Host,
 			TargetPort: wire.Target.Port, TargetRouteID: wire.Target.RouteID,
 			TargetConnectorSessionID:  wire.Target.ConnectorSessionID,
