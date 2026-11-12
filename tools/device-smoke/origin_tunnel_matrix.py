@@ -73,6 +73,7 @@ class Lab:
     def __init__(self, args):
         self.args = args
         self.cells = []
+        self.home = self.on_host('echo $HOME').stdout.strip() if not args.windows else ''
         self.tunnels = []
         self.containers = []
         self.previews = []
@@ -180,13 +181,13 @@ class Lab:
         """The app of origin_proxy_matrix on the device itself (127.0.0.1:9000): the agent's dialer and upload path are the
         parts that differ per OS, so Windows runs the app cells, not the Docker proxies."""
         device = winhost.device()
-        path = 'C:\\Users\\Public\\small-app.py'
+        path = 'C:\\Users\\Public\\tun-app.py'
         with open(os.path.join(MATRIX, 'app.py'), 'rb') as app:
             device.write_bytes(path, app.read())
-        device.ps('start app', "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*small-app.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }\n"
+        device.ps('start app', "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*tun-app.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }\n"
                   "$py=(Get-Command python).Source\n"
                   # created by WMI, outside the SSH session, which ends its own processes when it closes (see winhost.START)
-                  "$r=Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=('\"'+$py+'\" '+$req.path)}\n"
+                  "$r=Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine=('\"'+$py+'\" '+$req.path+' 127.0.0.1')}\n"
                   "if($r.ReturnValue -ne 0){throw ('process create failed: '+$r.ReturnValue)}", path=path)
         time.sleep(3)
 
@@ -195,10 +196,10 @@ class Lab:
             return self.stage_windows()
         self.on_host('rm -rf ~/small-matrix && mkdir -p ~/small-matrix')
         subprocess.run(['scp', '-q', '-r', '-o', 'BatchMode=yes', MATRIX, '%s:small-matrix/' % self.args.host], check=True)
-        self.docker('rm', '-f', 'small-app', check=False)
-        self.docker('run', '-d', '--name', 'small-app', '--network', 'container:' + self.args.container,
-                    '-v', '/home/pb/small-matrix/origin_proxy_matrix/app.py:/app.py:ro', 'python:3-alpine', 'python', '/app.py')
-        self.containers.append('small-app')
+        self.docker('rm', '-f', 'tun-app', check=False)
+        self.docker('run', '-d', '--name', 'tun-app', '--network', 'container:' + self.args.container,
+                    '-v', self.home + '/small-matrix/origin_proxy_matrix/app.py:/app.py:ro', 'python:3-alpine', 'python', '/app.py', '127.0.0.1')
+        self.containers.append('tun-app')
 
     def preview(self, url):
         """A preview of url (kind=preview); returns (host, preview id)."""
@@ -231,7 +232,7 @@ class Lab:
         time.sleep(4)
 
     def certs(self, host):
-        directory = '/home/pb/small-matrix/certs-' + host.split('.')[0]
+        directory = self.home + '/small-matrix/certs-' + host.split('.')[0]
         self.on_host('mkdir -p %s && openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=%s -addext subjectAltName=DNS:%s -keyout %s/leaf.key -out %s/leaf.crt 2>/dev/null && chmod 644 %s/leaf.key'
                      % (directory, host, host, directory, directory, directory))
         return directory
@@ -241,30 +242,30 @@ class Lab:
             r"s/^Listen \(80\|443\)$/Listen 127.0.0.1:\1/", r"s/<VirtualHost \*:/<VirtualHost 127.0.0.1:/", r's/address: ":\(80\|443\)"/address: "127.0.0.1:\1"/']
 
     def render(self, template, host, name):
-        path = '/home/pb/small-matrix/%s' % name
+        path = self.home + '/small-matrix/%s' % name
         edits = ' '.join('-e ' + shlex.quote(item) for item in self.BIND)
-        self.on_host("sed -e 's/@HOST@/%s/g' -e 's/app:9000/127.0.0.1:9000/g' %s %s/origin_proxy_matrix/%s > %s" % (host, edits, '/home/pb/small-matrix', template, path))
+        self.on_host("sed -e 's/@HOST@/%s/g' -e 's/app:9000/127.0.0.1:9000/g' %s %s/origin_proxy_matrix/%s > %s" % (host, edits, self.home + '/small-matrix', template, path))
         return path
 
     def run_proxy(self, name, image, mounts, env=(), command=()):
-        self.docker('rm', '-f', 'small-' + name, check=False)
-        argv = ['run', '-d', '--name', 'small-' + name, '--network', 'container:' + self.args.container]
+        self.docker('rm', '-f', 'tun-' + name, check=False)
+        argv = ['run', '-d', '--name', 'tun-' + name, '--network', 'container:' + self.args.container]
         for item in env:
             argv += ['-e', item]
         for item in mounts:
             argv += ['-v', item]
         self.docker(*argv, image, *command)
-        self.containers.append('small-' + name)
+        self.containers.append('tun-' + name)
         time.sleep(9)
 
     def stop_proxy(self, name):
-        self.docker('rm', '-f', 'small-' + name, check=False)
+        self.docker('rm', '-f', 'tun-' + name, check=False)
 
     def run(self):
         self.stage()
-        base = '/home/pb/small-matrix'
+        base = self.home + '/small-matrix'
         # the app alone
-        host, route = self.tunnel('small-%s-app' % self.suffix, '--port', '9000')
+        host, route = self.tunnel('tun-%s-app' % self.suffix, '--port', '9000')
         self.probe_all('app', 'direct-http', host)
         conn, response, started = self.request(host, 'GET', '/slow?seconds=%d' % self.args.slow, timeout=150) if self.args.slow else (None, None, None)
         if response is not None:
@@ -277,7 +278,7 @@ class Lab:
             self.grpc_cells()
 
     def proxy_cells(self, proxy, base):
-        name = 'small-%s-%s' % (self.suffix, proxy)
+        name = 'tun-%s-%s' % (self.suffix, proxy)
         try:
             host, route = self.tunnel(name, '--port', '80' if self.args.kind == 'preview' else '9000')  # a preview is made for the proxy's own port
             tunnel = name
@@ -315,18 +316,18 @@ class Lab:
 
     def grpc_cells(self):
         try:
-            self.docker('rm', '-f', 'small-grpc', check=False)
-            self.docker('run', '-d', '--name', 'small-grpc', '--network', 'container:' + self.args.container, 'python:3-alpine', 'sleep', 'infinity')
-            self.containers.append('small-grpc')
-            self.docker('exec', 'small-grpc', 'pip', 'install', '-q', '--no-cache-dir', 'grpcio', 'grpcio-health-checking', timeout=600)
+            self.docker('rm', '-f', 'tun-grpc', check=False)
+            self.docker('run', '-d', '--name', 'tun-grpc', '--network', 'container:' + self.args.container, 'python:3-alpine', 'sleep', 'infinity')
+            self.containers.append('tun-grpc')
+            self.docker('exec', 'tun-grpc', 'pip', 'install', '-q', '--no-cache-dir', 'grpcio', 'grpcio-health-checking', timeout=600)
             self.on_host('cat > ~/small-matrix/grpc_server.py <<"EOF"\n%s\nEOF\ncat > ~/small-matrix/grpc_client.py <<"EOF"\n%s\nEOF' % (GRPC_SERVER, GRPC_CLIENT))
-            self.docker('cp', '/home/pb/small-matrix/grpc_server.py', 'small-grpc:/grpc_server.py')
-            self.docker('cp', '/home/pb/small-matrix/grpc_client.py', 'small-grpc:/grpc_client.py')
-            self.on_host('sudo docker exec -d small-grpc python /grpc_server.py')
+            self.docker('cp', self.home + '/small-matrix/grpc_server.py', 'tun-grpc:/grpc_server.py')
+            self.docker('cp', self.home + '/small-matrix/grpc_client.py', 'tun-grpc:/grpc_client.py')
+            self.on_host('sudo docker exec -d tun-grpc python /grpc_server.py')
             time.sleep(3)
-            host, route = self.tunnel('small-%s-grpc' % self.suffix, '--from', 'h2c://127.0.0.1:50051')
+            host, route = self.tunnel('tun-%s-grpc' % self.suffix, '--from', 'h2c://127.0.0.1:50051')
             time.sleep(4)
-            done = self.docker('exec', 'small-grpc', 'python', '/grpc_client.py', host, check=False, timeout=90)
+            done = self.docker('exec', 'tun-grpc', 'python', '/grpc_client.py', host, check=False, timeout=90)
             try:
                 result = json.loads(done.stdout.strip().splitlines()[-1])
             except (ValueError, IndexError):
@@ -357,7 +358,7 @@ class Lab:
             except Exception as exc:
                 print('cleanup: preview %s not stopped: %s' % (identity, exc), file=sys.stderr)
         if self.args.windows:
-            winhost.device().ps('stop app', "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*small-app.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }")
+            winhost.device().ps('stop app', "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*tun-app.py*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }")
             return
         for name in self.containers:
             self.docker('rm', '-f', name, check=False)

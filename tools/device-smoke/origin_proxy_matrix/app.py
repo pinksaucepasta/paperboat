@@ -1,7 +1,7 @@
 # The app behind the proxy. "/" is happy only when the proxy tells it the visitor used https;
 # /force-ssl behaves like Rails force_ssl and Django SECURE_SSL_REDIRECT; /sse, /range and /upload
 # are the streaming, partial-content and Expect: 100-continue probes.
-import http.server, json, time
+import http.server, json, sys, time
 
 class H(http.server.BaseHTTPRequestHandler):
     def seen(self):
@@ -53,4 +53,5 @@ class H(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-http.server.ThreadingHTTPServer(("0.0.0.0", 9000), H).serve_forever()
+# a machine's daemon owns 127.100.0.x:9000 for local access to peers, so a tunnel check binds loopback only: app.py 127.0.0.1
+http.server.ThreadingHTTPServer((sys.argv[1] if len(sys.argv) > 1 else "0.0.0.0", 9000), H).serve_forever()
