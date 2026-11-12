@@ -584,7 +584,7 @@ func TestBrowserLifecycleMutationsFenceRestartedGeneration(t *testing.T) {
 
 func TestCloseDeadlineRetainsProcessOwnershipUntilCleanup(t *testing.T) {
 	manager, root, shell := realManager(t)
-	created, err := manager.Create(context.Background(), CreateRequest{Name: "deadline-close", Command: shellCommand(shell, root, "trap '' TERM; echo ready; while :; do sleep 1; done")})
+	created, err := manager.Create(context.Background(), CreateRequest{Name: "deadline-close", Command: shellCommand(shell, root, "trap '' TERM HUP; echo ready; while :; do sleep 1; done")})
 	if err != nil {
 		t.Fatal(err)
 	}

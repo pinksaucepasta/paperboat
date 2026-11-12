@@ -279,6 +279,10 @@ func (p *Process) CloseIO() error {
 	p.closeOnce.Do(func() { p.closeErr = p.file.Close() })
 	return p.closeErr
 }
+
+// hangupWindow is how long a hung-up process may take to leave before SIGTERM follows.
+const hangupWindow = 250 * time.Millisecond
+
 func (p *Process) Terminate(ctx context.Context, grace time.Duration) (ExitResult, error) {
 	if grace < 0 {
 		return ExitResult{}, ErrInvalidCommand
@@ -292,7 +296,20 @@ func (p *Process) Terminate(ctx context.Context, grace time.Duration) (ExitResul
 		return result, err
 	default:
 	}
-	signalErr := p.Signal(Terminate)
+	// Closing a terminal hangs up its shell, as tmux and ttyd do (ttyd's default close signal is SIGHUP): an interactive
+	// shell ignores SIGTERM, so SIGTERM alone sat out the whole grace before SIGKILL on every close. What ignores SIGHUP
+	// (nohup) gets SIGTERM after hangupWindow, so a child that handles TERM for cleanup is not hit by both at once.
+	signalErr := p.Signal(Hangup)
+	if signalErr == nil {
+		select {
+		case <-p.done:
+		case <-ctx.Done():
+		case <-time.After(min(grace, hangupWindow)):
+			if termErr := p.Signal(Terminate); termErr != nil && !processGone(termErr) {
+				signalErr = termErr
+			}
+		}
+	}
 	// Darwin refuses a signal to a group whose leader has exited but is not reaped yet (EPERM; ESRCH once
 	// reaped, macOS run 42033323127). Such a refusal stands only if the process is still there after grace.
 	if signalErr != nil && !processGone(signalErr) && !errors.Is(signalErr, syscall.EPERM) {

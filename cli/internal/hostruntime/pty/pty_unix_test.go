@@ -175,7 +175,7 @@ func TestProcessPolicyRejectsUnboundedOrNULStaticValues(t *testing.T) {
 }
 
 func TestTerminateEscalatesWithinBound(t *testing.T) {
-	process, _ := startShell(t, "trap '' TERM; while :; do sleep 1; done")
+	process, _ := startShell(t, "trap '' TERM HUP; while :; do sleep 1; done")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	result, err := process.Terminate(ctx, 10*time.Millisecond)
@@ -184,6 +184,39 @@ func TestTerminateEscalatesWithinBound(t *testing.T) {
 	}
 	if result.Signal == "" && result.Code == 0 {
 		t.Fatalf("result=%#v", result)
+	}
+}
+
+// Closing a session must not wait out the grace for a shell that ignores SIGTERM (an interactive shell does): it is hung up.
+func TestTerminateHangsUpAShellThatIgnoresTerminateWithoutWaitingOutTheGrace(t *testing.T) {
+	process, _ := startShell(t, "trap '' TERM; echo ready; while :; do sleep 1; done")
+	if _, err := process.Read(make([]byte, 64)); err != nil { // the trap is installed once it printed
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	started := time.Now()
+	result, err := process.Terminate(ctx, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(started); took > 2*time.Second {
+		t.Fatalf("Terminate took %v with a 5 s grace: the shell was not hung up (result=%#v)", took, result)
+	}
+}
+
+// A process that ignores SIGHUP (nohup) still gets SIGTERM, and its handler runs: the hangup is not followed by a
+// SIGKILL before the process had its termination window.
+func TestTerminateStillTerminatesAProcessThatIgnoresHangup(t *testing.T) {
+	process, _ := startShell(t, "trap '' HUP; trap 'exit 42' TERM; echo ready; while :; do sleep 1; done")
+	if _, err := process.Read(make([]byte, 64)); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, err := process.Terminate(ctx, 5*time.Second)
+	if err != nil || result.Code != 42 {
+		t.Fatalf("result=%#v err=%v, want the TERM handler's exit 42", result, err)
 	}
 }
 
