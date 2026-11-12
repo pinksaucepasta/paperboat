@@ -153,7 +153,7 @@ func TestMachineControlRequestRejectsSupersededAndRevokedSessions(t *testing.T) 
 	for generation, values := range []struct{ operation, jti string }{{"machine-control-old-" + suffix, "mcc_old_" + suffix}, {"machine-control-current-" + suffix, "mcc_current_" + suffix}} {
 		if _, err := store.SQL().ExecContext(ctx, `INSERT INTO paperboat.machine_control_renewals (operation_id,machine_id,installation_generation,credential_jti,issued_at,expires_at,session_generation,superseded_at) VALUES ($1,$2,3,$3,$4,$5,$6,$7)`, values.operation, machineID, values.jti, now.Add(time.Duration(generation)*time.Minute), now.Add(time.Hour), generation+1, func() any {
 			if generation == 0 {
-				return now
+				return now.Add(-time.Hour)
 			}
 			return nil
 		}()); err != nil {
@@ -189,6 +189,29 @@ func TestMachineControlRequestRejectsSupersededAndRevokedSessions(t *testing.T) 
 	claims, err := service.VerifyMachineControlRequest(ctx, sign("mcc_current_"+suffix, 2), proof, "POST", GrantPathForMachineProofTest, body)
 	if err != nil || claims.CredentialJTI != "mcc_current_"+suffix || claims.SessionGeneration != 2 {
 		t.Fatalf("current claims=%+v err=%v", claims, err)
+	}
+	// A request built with the credential a renewal just replaced is still in flight when the renewal commits:
+	// accepted within the grace, refused after it (2026-11-12 canary-b).
+	freshProof := func() []byte {
+		claims := proofClaims
+		claims.Nonce = proofTestNonce()
+		payload, _ := json.Marshal(claims)
+		out, _ := json.Marshal(helperProofEnvelope{Algorithm: "EdDSA", Payload: base64.RawURLEncoding.EncodeToString(payload), Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(privateKey, payload))})
+		return out
+	}
+	setSuperseded := func(at time.Time) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.machine_control_renewals SET superseded_at=$2 WHERE machine_id=$1 AND credential_jti=$3`, machineID, at, "mcc_old_"+suffix); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setSuperseded(now.Add(-5 * time.Second))
+	if claims, err := service.VerifyMachineControlRequest(ctx, sign("mcc_old_"+suffix, 1), freshProof(), "POST", GrantPathForMachineProofTest, body); err != nil || claims.SessionGeneration != 1 {
+		t.Fatalf("credential replaced 5 s ago refused: %+v %v", claims, err)
+	}
+	setSuperseded(now.Add(-time.Minute))
+	if _, err := service.VerifyMachineControlRequest(ctx, sign("mcc_old_"+suffix, 1), freshProof(), "POST", GrantPathForMachineProofTest, body); !errors.Is(err, ErrHelperProof) {
+		t.Fatalf("credential replaced a minute ago err=%v", err)
 	}
 	if _, err := store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET revoked_at=$2,state='revoked',online=false WHERE id=$1`, machineID, now); err != nil {
 		t.Fatal(err)

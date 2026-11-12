@@ -5,9 +5,12 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
+	"github.com/pinksaucepasta/paperboat/server/internal/controlplane"
+	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 	"github.com/pinksaucepasta/paperboat/server/internal/previewattachment"
 )
 
@@ -48,6 +51,10 @@ func (v *PreviewAttachmentMachineProofVerifier) VerifyMachineRequest(ctx context
 	claims, err := v.identities.VerifyMachineRequest(ctx, identity, proof, r.Method, r.URL.Path, body)
 	if err != nil {
 		if machineProofRejected(err) {
+			if reason := controlplane.ProofRejectionReason(err); reason != "" {
+				// A fixed reason code (no credential or request content) names the check that refused it.
+				serverdiagnostics.LoggerWithRequest(ctx, slog.Default()).WarnContext(ctx, "machine proof rejected", "reason", reason, "path", r.URL.Path)
+			}
 			return previewattachment.MachineProof{}, previewattachment.ErrUnauthorized
 		}
 		return previewattachment.MachineProof{}, fmt.Errorf("verify preview attachment machine proof: %w", err)

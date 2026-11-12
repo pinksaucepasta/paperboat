@@ -94,6 +94,9 @@ func (s *EnrollmentService) VerifyMachineControlRequest(ctx context.Context, ide
 		MachineID: machine.ID, InstallationGeneration: machine.InstallationGeneration,
 		CredentialJti: identity.JTI, Now: now,
 	})
+	if errors.Is(err, sql.ErrNoRows) {
+		current, err = s.recentlySupersededControlSession(ctx, machine.ID, machine.InstallationGeneration, identity.JTI, now)
+	}
 	if err != nil {
 		return MachineRequestClaims{}, machineProofLookupError(err)
 	}
@@ -112,6 +115,26 @@ func (s *EnrollmentService) VerifyMachineControlRequest(ctx context.Context, ide
 		InstallationGeneration: machine.InstallationGeneration, OperationID: claims.OperationID,
 		CredentialJTI: current.CredentialJti, SessionGeneration: current.SessionGeneration,
 	}, nil
+}
+
+// machineControlSupersededGrace is how long a machine-control credential keeps working after a renewal replaced it.
+// Requests built with the previous credential are still in flight when the renewal commits (2026-11-12: canary-b's
+// carrier attachment got a 401 one second after a renewal and its host never recovered), so the replaced credential
+// is accepted briefly; its machine-key proof is still checked and it still expires on its own.
+const machineControlSupersededGrace = 30 * time.Second
+
+// recentlySupersededControlSession returns the session a renewal replaced within machineControlSupersededGrace,
+// identified by the replaced credential; sql.ErrNoRows when there is none.
+func (s *EnrollmentService) recentlySupersededControlSession(ctx context.Context, machineID string, installationGeneration int64, credentialJTI string, now time.Time) (dbsqlc.MachineControlSession, error) {
+	var session dbsqlc.MachineControlSession
+	err := s.store.SQL().QueryRowContext(ctx, `SELECT x.machine_id,x.installation_generation,x.session_generation,x.operation_id,x.credential_jti,x.issued_at,x.expires_at,x.created_at
+ FROM paperboat.machine_control_renewals x
+ JOIN paperboat.machine_control_sessions cur ON cur.machine_id=x.machine_id AND cur.installation_generation=x.installation_generation AND cur.session_generation=x.session_generation+1
+ WHERE x.machine_id=$1 AND x.installation_generation=$2 AND x.credential_jti=$3
+  AND x.superseded_at IS NOT NULL AND x.superseded_at>$4 AND x.expires_at>$5`,
+		machineID, installationGeneration, credentialJTI, now.Add(-machineControlSupersededGrace), now).Scan(
+		&session.MachineID, &session.InstallationGeneration, &session.SessionGeneration, &session.OperationID, &session.CredentialJti, &session.IssuedAt, &session.ExpiresAt, &session.UpdatedAt)
+	return session, err
 }
 
 func machineProofLookupError(err error) error {
