@@ -1,0 +1,29 @@
+{
+ "checks": [
+  {
+   "check": "relay allowed: cold exec windows->peer",
+   "status": "PASS",
+   "detail": "6.8 s (limit 15 s)"
+  },
+  {
+   "check": "relay allowed: 1 MB output arrives",
+   "status": "PASS",
+   "detail": "937500 of 937500 bytes"
+  },
+  {
+   "check": "no usable relay (both hosted relays dropped): cold exec windows->peer",
+   "status": "PASS",
+   "detail": "5.3 s (limit 15 s)"
+  },
+  {
+   "check": "address of the peer found",
+   "status": "PASS",
+   "detail": "192.168.31.149"
+  },
+  {
+   "check": "direct path dropped, relay allowed: cold exec windows->peer",
+   "status": "PASS",
+   "detail": "5.2 s (limit 15 s)"
+  }
+ ]
+}

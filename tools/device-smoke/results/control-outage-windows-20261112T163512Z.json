@@ -1,0 +1,165 @@
+{
+ "outage_seconds": 660,
+ "checks": [
+  {
+   "check": "baseline exec L->W",
+   "status": "PASS",
+   "detail": "baseline-LW"
+  },
+  {
+   "check": "baseline exec W->L",
+   "status": "PASS",
+   "detail": "baseline-WL"
+  },
+  {
+   "check": "control plane unreachable for W (firewall) and L (iptables)",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "W: pb status shows the control plane as unreachable",
+   "status": "PASS",
+   "detail": "Daemon: degraded  Generation: 6  Observed: 2026-11-12T16:13:27Z Health: error: Control plane is unavailable  Recovery: Check network access and Paperboat authentication  macx-sb-2 (machine_f3694384-30d1-419b-980d-2fdba648df1e)   Runtime: offline  Eligible: true  Generation: 1  Last observed: 2026-11"
+  },
+  {
+   "check": "outage 30 s: new exec L->W",
+   "status": "PASS",
+   "detail": "outage-30s-LW Paperboat ENV not applied: ENV needs Paperboat online. The command ran without your managed values; run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "check": "outage 30 s: new exec W->L",
+   "status": "PASS",
+   "detail": "outage-30s-WL Paperboat ENV not applied: ENV needs Paperboat online. The command ran without your managed values; run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "check": "outage 30 s: new pb connect terminal L->W",
+   "status": "FAIL",
+   "detail": "echo outage-30s-term-$((6*7)) exit  Session terminated, killing shell... ...killed."
+  },
+  {
+   "check": "outage 30 s: new pb ssh L->W",
+   "status": "FAIL",
+   "detail": "rvice is not running; check it in `pb status`. Support reference: support_ea18b904-623c-46c7-bd54-747a5b214009. Run `pb bugreport --upload` to send the details. Connection closed by UNKNOWN port 65535"
+  },
+  {
+   "check": "outage 30 s: long L->W still running",
+   "status": "FAIL",
+   "detail": ""
+  },
+  {
+   "check": "outage 30 s: long W->L still running",
+   "status": "FAIL",
+   "detail": ""
+  },
+  {
+   "check": "outage 30 s: W pb status still shows the control plane as unreachable",
+   "status": "PASS",
+   "detail": "Daemon: degraded  Generation: 6  Observed: 2026-11-12T16:13:27Z Health: error: Control plane is unavailable  Recovery: Check network access and Paperboat authentication  macx-sb-2 (machine_f3694384-30d1-419b-980d-2fdba648df1e)   Runtime: offline  Eligible: true  Generation: 1  Last observed: 2026-11"
+  },
+  {
+   "check": "outage 5 min: new exec L->W",
+   "status": "FAIL",
+   "detail": "ck your network connection and retry; if the service is recovering, retry in a moment. Support reference: support_4218f034-5de6-4de4-a8b5-ec60f24e0e38. Run `pb bugreport --upload` to send the details."
+  },
+  {
+   "check": "outage 5 min: new exec W->L",
+   "status": "FAIL",
+   "detail": " service is not ready yet. Check that its Runtime is ready in `pb status`, then retry. Support reference: support_9dbaae5f-d479-476d-b84d-73a3d7ee4ccd. Run `pb bugreport --upload` to send the details."
+  },
+  {
+   "check": "outage 5 min: new pb connect terminal L->W",
+   "status": "FAIL",
+   "detail": "echo outage-5min-term-$((6*7)) exit  Session terminated, killing shell... ...killed."
+  },
+  {
+   "check": "outage 5 min: new pb ssh L->W",
+   "status": "FAIL",
+   "detail": "rvice is not running; check it in `pb status`. Support reference: support_4c789fb5-2115-4b87-ab59-a945ec087287. Run `pb bugreport --upload` to send the details. Connection closed by UNKNOWN port 65535"
+  },
+  {
+   "check": "outage 5 min: long L->W still running",
+   "status": "FAIL",
+   "detail": ""
+  },
+  {
+   "check": "outage 5 min: long W->L still running",
+   "status": "FAIL",
+   "detail": ""
+  },
+  {
+   "check": "outage 5 min: W pb status still shows the control plane as unreachable",
+   "status": "PASS",
+   "detail": "Daemon: degraded  Generation: 6  Observed: 2026-11-12T16:13:27Z Health: error: Control plane is unavailable  Recovery: Check network access and Paperboat authentication  macx-sb-2 (machine_f3694384-30d1-419b-980d-2fdba648df1e)   Runtime: offline  Eligible: true  Generation: 1  Last observed: 2026-11"
+  },
+  {
+   "check": "outage end: new exec L->W",
+   "status": "FAIL",
+   "detail": " service is not ready yet. Check that its Runtime is ready in `pb status`, then retry. Support reference: support_df319e72-6c84-4708-8837-b096bab3246b. Run `pb bugreport --upload` to send the details."
+  },
+  {
+   "check": "outage end: new exec W->L",
+   "status": "FAIL",
+   "detail": " service is not ready yet. Check that its Runtime is ready in `pb status`, then retry. Support reference: support_8c1dce38-63d0-451f-b4fb-025f2f109907. Run `pb bugreport --upload` to send the details."
+  },
+  {
+   "check": "outage end: new pb connect terminal L->W",
+   "status": "FAIL",
+   "detail": "echo outage-end-term-$((6*7)) exit  Session terminated, killing shell... ...killed."
+  },
+  {
+   "check": "outage end: new pb ssh L->W",
+   "status": "FAIL",
+   "detail": "rvice is not running; check it in `pb status`. Support reference: support_9798e6c3-764e-4dff-ac9a-cb1c71b31273. Run `pb bugreport --upload` to send the details. Connection closed by UNKNOWN port 65535"
+  },
+  {
+   "check": "outage end: long L->W still running",
+   "status": "FAIL",
+   "detail": ""
+  },
+  {
+   "check": "outage end: long W->L still running",
+   "status": "FAIL",
+   "detail": ""
+  },
+  {
+   "check": "outage end: W pb status still shows the control plane as unreachable",
+   "status": "PASS",
+   "detail": "Daemon: degraded  Generation: 6  Observed: 2026-11-12T16:13:27Z Health: error: Control plane is unavailable  Recovery: Check network access and Paperboat authentication Health: warning: No relay is usable: the relays refused admission; probe failures: stg_relay_438f2a2b71d6 prepare_failed  Recovery:"
+  },
+  {
+   "check": "outage: W pb doctor runs and names the control plane",
+   "status": "PASS",
+   "detail": "Paperboat doctor: unhealthy Correlation: support_e2332109-fdb2-437d-ada5-e067f0a8e85f authentication: pass: The Paperboat server accepted the current credential. clock: pass: This machine's clock matc"
+  },
+  {
+   "check": "control plane reachable again",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "recovery: W pb status healthy again",
+   "status": "PASS",
+   "detail": "20 s after the start; Daemon: ready  Generation: 7  Observed: 2026-11-12T16:30:38Z Health: warning: Browser URLs are off because another program is using port 80/443 (Windows HTTP service (HTTP.sys, for example IIS), PID 4)  Recovery: Stop that program, and Paperboat turns browser URLs back on by it"
+  },
+  {
+   "check": "recovery: new exec L->W",
+   "status": "PASS",
+   "detail": "recovered-LW"
+  },
+  {
+   "check": "recovery: new exec W->L",
+   "status": "PASS",
+   "detail": "recovered-WL"
+  },
+  {
+   "check": "recovery: long L->W finished rc 0 with its output",
+   "status": "FAIL",
+   "detail": "pb: Remote execution did not finish. Check the machine connection and retry; the remote outcome may be unknown."
+  },
+  {
+   "check": "recovery: long W->L finished rc 0 with its output",
+   "status": "FAIL",
+   "detail": "rc=255 out=b''"
+  }
+ ]
+}
