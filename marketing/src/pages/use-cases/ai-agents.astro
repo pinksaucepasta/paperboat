@@ -1,27 +1,11 @@
 ---
 import UseCase from "../../layouts/UseCase.astro"
 import Sheet from "../../components/Sheet.astro"
-import Code from "../../components/Code.astro"
 
 const hero = [
   { lines: ["$ pb connect gpu-box", "ana@gpu-box:~/repo$ claude"], note: "Start the agent in a Paperboat terminal on the machine with the code and the GPU." },
   { lines: ["# close the laptop; the agent keeps working"], note: "The session lives on gpu-box." },
   { lines: ["$ pb connect gpu-box"], note: "Check on it from another computer, or from the console in a browser." },
-]
-
-const mcp = `{
-  "mcpServers": {
-    "paperboat": {
-      "command": "pb",
-      "args": ["mcp", "--allow-send-dir", "/home/ana/artifacts"]
-    }
-  }
-}`
-
-const tools = [
-  ["list_machines", "The machines this login may use, a page at a time."],
-  ["exec", "Run an exact argument list on one machine. No shell, output is bounded, five minutes at most."],
-  ["send_file", "Deliver a file to a machine's Inbox. Only from directories you allowed; symlinks cannot escape them."],
 ]
 
 const token = [
@@ -37,10 +21,6 @@ const faq = [
     a: "No. Paperboat decides which machines and which actions a token can reach. Once a command runs, it has the permissions of the operating-system user it runs as. Use a dedicated user or a container on the target machine for real isolation.",
   },
   {
-    q: "Which MCP clients work?",
-    a: "Any client that launches a local MCP server over standard input and output. Point it at <code>pb mcp</code>. The computer running the client needs pb installed and signed in.",
-  },
-  {
     q: "Can the agent read my secrets?",
     a: "It can run commands that receive them, and a command could print its environment, so scope the token and choose the machines with that in mind. What Paperboat adds is that the agent never needs the value in its prompt, its arguments or a file. A workspace owner can also stop commands from listing ENV names.",
   },
@@ -50,7 +30,7 @@ const faq = [
   },
   {
     q: "Is there an SDK?",
-    a: "Not yet. Today the interfaces are the pb command with <code>--json</code>, and MCP. Both are stable enough to build on.",
+    a: "Not yet. Today the interface is the pb command with <code>--json</code>, which is stable enough to build on.",
   },
 ]
 ---
@@ -59,7 +39,7 @@ const faq = [
   slug="ai-agents"
   name="AI agents"
   title="Run AI coding agents on remote machines, with scoped access | Paperboat"
-  description="Keep a coding agent running on a remote machine after your laptop sleeps, give it other machines through MCP or pb exec, limit it with an expiring scoped token, and let it use secrets without seeing them."
+  description="Keep a coding agent running on a remote machine after your laptop sleeps, give it other machines through pb exec, limit it with an expiring scoped token, and let it use secrets without seeing them."
   headline="Give a coding agent your other machines"
   faq={faq}
   related={["exec", "env", "teams", "terminal"]}
@@ -69,25 +49,6 @@ const faq = [
     running where the work is, and gives it exactly the reach you decide.
   </p>
   <Sheet slot="aside" steps={hero} />
-
-  <section class="section section-tint" aria-labelledby="mcp-title">
-    <div class="wrap cols">
-      <div class="stack-loose">
-        <div class="stack">
-          <h2 class="h2" id="mcp-title">Other machines as tools</h2>
-          <p class="lede">
-            <code>pb mcp</code> serves three tools to an MCP client, using the login pb already has on that computer.
-          </p>
-        </div>
-        <table class="facts">
-          <tbody>
-            {tools.map(([name, text]) => <tr><th scope="row"><code>{name}</code></th><td>{text}</td></tr>)}
-          </tbody>
-        </table>
-      </div>
-      <Code name="MCP client configuration" text={mcp} />
-    </div>
-  </section>
 
   <section class="section" aria-labelledby="token-title">
     <div class="wrap">
