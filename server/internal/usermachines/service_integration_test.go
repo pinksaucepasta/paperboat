@@ -2986,7 +2986,7 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	if err != nil || terminalUUID.Version() != 4 || terminalUUID.Variant() != uuid.RFC4122 || created.ID != "terminal_"+terminalUUID.String() {
 		t.Fatalf("invalid canonical terminal identity %q: %v", created.ID, err)
 	}
-	runtime := &terminalCompositionRuntime{signer: signer, machineID: userMachineID, environmentID: environmentID, userID: userID, sessionID: created.ID}
+	runtime := &terminalCompositionRuntime{signer: signer, machineID: userMachineID, environmentID: environmentID, userID: userID, sessionID: created.ID, name: "bench-run", cwd: "/tmp/local project"}
 	service.controlRuntime = runtime
 	pending, err := service.ConnectTerminalSession(ctx, userID, userMachineID, userMachineID, "cls_mc_1", created.ID)
 	if err != nil || pending.Connectable || pending.Reason != "terminal_session_operation_pending" {
@@ -3010,6 +3010,17 @@ VALUES ($1,$2,$3,1,1,$4,1,$5,$6,$7,1,$8,$9,'{}',now()+interval '1 hour',true,now
 	replay, err := service.CreateConfiguredTerminalSessionInDirectory(ctx, userID, userMachineID, userMachineID, "bench-run", "pb-mc-key", "/tmp/changed")
 	if err != nil || replay.ID != created.ID || replay.StartedIn != "/tmp/local project" {
 		t.Fatalf("idempotent replay = %+v, %v", replay, err)
+	}
+
+	// The console's create starts the shell on the host before it answers; no worker iteration runs here.
+	consoleRuntime := &terminalCompositionRuntime{signer: signer, machineID: userMachineID, environmentID: environmentID, userID: userID, name: "console-run", cwd: "/Users/paperboat", ready: true}
+	service.controlRuntime = consoleRuntime
+	console, err := service.CreateConfiguredTerminalSession(ctx, userID, userMachineID, "console-run", "console-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SQL().QueryRowContext(ctx, `SELECT o.state='applied' AND s.runtime_state='running' FROM paperboat.user_machine_terminal_session_operations o JOIN paperboat.user_machine_terminal_sessions s ON s.id=o.terminal_session_id WHERE s.id=$1 AND o.operation='create'`, console.ID).Scan(&applied); err != nil || !applied || consoleRuntime.sessionID != console.ID {
+		t.Fatalf("console create applied on return = %v (host saw %q), %v", applied, consoleRuntime.sessionID, err)
 	}
 }
 
@@ -3630,18 +3641,19 @@ type terminalCompositionRuntime struct {
 	helperruntime.Client
 	signer                                                   *mint.Provider
 	machineID, environmentID, userID, sessionID, operationID string
+	name, cwd                                                string
 	ready                                                    bool
 }
 
 func (r *terminalCompositionRuntime) CreateTerminal(_ context.Context, route, credential, sessionID, operationID, name, cwd string) (helperruntime.Snapshot, error) {
 	claims, err := r.signer.VerifyCredential(credential, "https://api.paperboat.test", "terminal_operation", time.Now().UTC())
-	if err != nil || route == "" || claims.MachineID != r.machineID || claims.EnvironmentID != r.environmentID || claims.UserID != r.userID || claims.SessionID != r.sessionID || claims.CLIClientSessionID != operationID || sessionID != r.sessionID || operationID == "" || name != "bench-run" || cwd != "/tmp/local project" {
+	if err != nil || route == "" || claims.MachineID != r.machineID || claims.EnvironmentID != r.environmentID || claims.UserID != r.userID || claims.SessionID != sessionID || claims.CLIClientSessionID != operationID || r.sessionID != "" && sessionID != r.sessionID || operationID == "" || name != r.name || cwd != r.cwd {
 		return helperruntime.Snapshot{}, fmt.Errorf("terminal create binding mismatch: %w", err)
 	}
 	if r.operationID != "" && r.operationID != operationID {
 		return helperruntime.Snapshot{}, errors.New("terminal create retry changed operation identity")
 	}
-	r.operationID = operationID
+	r.operationID, r.sessionID = operationID, sessionID
 	if !r.ready {
 		return helperruntime.Snapshot{}, errors.New("fixture terminal host not ready")
 	}

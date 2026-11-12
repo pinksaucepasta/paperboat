@@ -452,8 +452,15 @@ func userMachineTerminalSessionUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
+// CreateConfiguredTerminalSession is the console's create: it starts the shell on the host now, as ConnectTerminalSession
+// does for the CLI, so a browser attach never waits behind the worker's queue (an 80-create burst held one 110 s). A
+// host that does not answer leaves the operation pending for the worker.
 func (s *Service) CreateConfiguredTerminalSession(ctx context.Context, userID, userMachineID, name, idempotencyKey string) (TerminalSession, error) {
-	return s.CreateTerminalSession(ctx, userID, userMachineID, name, idempotencyKey)
+	created, err := s.CreateTerminalSession(ctx, userID, userMachineID, name, idempotencyKey)
+	if err == nil {
+		_ = s.applyTerminalSessionOperationsForSession(ctx, userMachineID, created.ID)
+	}
+	return created, err
 }
 
 // CreateConfiguredTerminalSessionInDirectory creates an owner-machine session at
