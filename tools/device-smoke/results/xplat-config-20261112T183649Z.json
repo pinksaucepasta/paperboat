@@ -1,0 +1,65 @@
+{
+ "check": "xplat-config",
+ "results": [
+  {
+   "id": "X-04:x04_exec:L>M",
+   "status": "PASS",
+   "detail": "repository 100755, xpb-m executable=True"
+  },
+  {
+   "id": "X-04:x04_exec:L>W",
+   "status": "PASS",
+   "detail": "repository 100755, xpb-w executable=n/a; kept through a Windows edit and back"
+  },
+  {
+   "id": "X-04:x04_exec:M>L",
+   "status": "PASS",
+   "detail": "repository 100755, xpb-l executable=True"
+  },
+  {
+   "id": "X-04:x04_exec:M>W",
+   "status": "PASS",
+   "detail": "repository 100755, xpb-w executable=n/a; kept through a Windows edit and back"
+  },
+  {
+   "id": "X-04:x04_exec:W>L",
+   "status": "PASS",
+   "detail": "repository 100644, xpb-l executable=False"
+  },
+  {
+   "id": "X-04:x04_exec:W>M",
+   "status": "PASS",
+   "detail": "repository 100644, xpb-m executable=False"
+  },
+  {
+   "id": "X-04:x04_local_bits:L>M",
+   "status": "PASS",
+   "detail": "mode 640 kept on xpb-m"
+  },
+  {
+   "id": "X-04:x04_local_bits:L>W",
+   "status": "PASS",
+   "detail": "n/a: xpb-w has no permission bits (the executable intent is covered by x04_exec)"
+  },
+  {
+   "id": "X-04:x04_local_bits:M>L",
+   "status": "PASS",
+   "detail": "mode 640 kept on xpb-l"
+  },
+  {
+   "id": "X-04:x04_local_bits:M>W",
+   "status": "PASS",
+   "detail": "n/a: xpb-w has no permission bits (the executable intent is covered by x04_exec)"
+  },
+  {
+   "id": "X-04:x04_local_bits:W>L",
+   "status": "PASS",
+   "detail": "mode 640 kept on xpb-l"
+  },
+  {
+   "id": "X-04:x04_local_bits:W>M",
+   "status": "FAIL",
+   "detail": "timed out waiting for xpb-m has v2 @ wait:122 <- x04_local_bits:82 <- <lambda>:488 <- check:250"
+  }
+ ]
+}

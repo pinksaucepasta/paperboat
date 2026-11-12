@@ -1,0 +1,135 @@
+{
+ "check": "xplat-config",
+ "results": [
+  {
+   "id": "X-04:x04_unsafe:L>M",
+   "status": "PASS",
+   "detail": "skipped as unsafe_permissions, sibling synced, travelled once safe"
+  },
+  {
+   "id": "X-04:x04_unsafe:L>W",
+   "status": "PASS",
+   "detail": "skipped as unsafe_permissions, sibling synced, travelled once safe"
+  },
+  {
+   "id": "X-04:x04_unsafe:M>L",
+   "status": "PASS",
+   "detail": "skipped as unsafe_permissions, sibling synced, travelled once safe"
+  },
+  {
+   "id": "X-04:x04_unsafe:M>W",
+   "status": "PASS",
+   "detail": "skipped as unsafe_permissions, sibling synced, travelled once safe"
+  },
+  {
+   "id": "X-04:x04_unsafe:W>L",
+   "status": "FAIL",
+   "detail": "timed out waiting for the file travels once it is safe @ wait:122 <- x04_unsafe:117 <- <lambda>:489 <- check:250"
+  },
+  {
+   "id": "X-04:x04_unsafe:W>M",
+   "status": "FAIL",
+   "detail": "timed out waiting for the file travels once it is safe @ wait:122 <- x04_unsafe:117 <- <lambda>:489 <- check:250"
+  },
+  {
+   "id": "X-05:x05_local_links:L>M",
+   "status": "FAIL",
+   "detail": "timed out waiting for xpb-l reports cfg/app/x-app/dirlink-LM as unsupported_file_type @ wait:122 <- wait_skipped:38 <- x05_local_links:151 <- <lambda>:489 <- check:250"
+  },
+  {
+   "id": "X-05:x05_local_links:L>W",
+   "status": "FAIL",
+   "detail": "timed out waiting for xpb-l reports cfg/app/x-app/dirlink-LW as unsupported_file_type @ wait:122 <- wait_skipped:38 <- x05_local_links:151 <- <lambda>:489 <- check:250"
+  },
+  {
+   "id": "X-05:x05_local_links:M>L",
+   "status": "FAIL",
+   "detail": "timed out waiting for xpb-m reports cfg/app/x-app/dirlink-ML as unsupported_file_type @ wait:122 <- wait_skipped:38 <- x05_local_links:151 <- <lambda>:489 <- check:250"
+  },
+  {
+   "id": "X-05:x05_local_links:M>W",
+   "status": "FAIL",
+   "detail": "timed out waiting for xpb-m reports cfg/app/x-app/dirlink-MW as unsupported_file_type @ wait:122 <- wait_skipped:38 <- x05_local_links:151 <- <lambda>:489 <- check:250"
+  },
+  {
+   "id": "X-05:x05_local_links:W>L",
+   "status": "FAIL",
+   "detail": "timed out waiting for xpb-w reports cfg/app/x-app/junction-WL as unsupported_file_type @ wait:122 <- wait_skipped:38 <- x05_local_links:151 <- <lambda>:489 <- check:250"
+  },
+  {
+   "id": "X-05:x05_local_links:W>M",
+   "status": "FAIL",
+   "detail": "xpb-w: pb config status failed: Paperboat could not finish the command. Check the current state before retrying; run `pb doctor` if this continues. @ pbj:111 <- status_of:27 <- skipped:34 <- <lambda>:38 <- wait:119 <- wait_skipped:38 <- x05_local_links:151 <- <lambda>:489 <- check:250"
+  },
+  {
+   "id": "X-05:x05_repo_link:L>M",
+   "status": "FAIL",
+   "detail": "timed out waiting for xpb-l reports cfg/app/x-app/repolink-LM.txt as unsupported_file_type @ wait:122 <- wait_skipped:38 <- x05_repo_link:174 <- <lambda>:489 <- check:250"
+  },
+  {
+   "id": "X-05:x05_repo_link:L>W",
+   "status": "FAIL",
+   "detail": "timed out waiting for xpb-l reports cfg/app/x-app/repolink-LW.txt as unsupported_file_type @ wait:122 <- wait_skipped:38 <- x05_repo_link:174 <- <lambda>:489 <- check:250"
+  },
+  {
+   "id": "X-05:x05_repo_link:M>L",
+   "status": "FAIL",
+   "detail": "timed out waiting for xpb-m reports cfg/app/x-app/repolink-ML.txt as unsupported_file_type @ wait:122 <- wait_skipped:38 <- x05_repo_link:174 <- <lambda>:489 <- check:250"
+  },
+  {
+   "id": "X-05:x05_repo_link:M>W",
+   "status": "FAIL",
+   "detail": "timed out waiting for xpb-m reports cfg/app/x-app/repolink-MW.txt as unsupported_file_type @ wait:122 <- wait_skipped:38 <- x05_repo_link:174 <- <lambda>:489 <- check:250"
+  },
+  {
+   "id": "X-05:x05_repo_link:W>L",
+   "status": "FAIL",
+   "detail": "timed out waiting for xpb-w reports cfg/app/x-app/repolink-WL.txt as unsupported_file_type @ wait:122 <- wait_skipped:38 <- x05_repo_link:174 <- <lambda>:489 <- check:250"
+  },
+  {
+   "id": "X-05:x05_repo_link:W>M",
+   "status": "FAIL",
+   "detail": "timed out waiting for xpb-w reports cfg/app/x-app/repolink-WM.txt as unsupported_file_type @ wait:122 <- wait_skipped:38 <- x05_repo_link:174 <- <lambda>:489 <- check:250"
+  },
+  {
+   "id": "X-05:x05_ancestor:L>M",
+   "status": "PASS",
+   "detail": "a destination behind a link is refused on xpb-l and xpb-m; target untouched"
+  },
+  {
+   "id": "X-05:x05_ancestor:L>W",
+   "status": "PASS",
+   "detail": "a destination behind a link is refused on xpb-l and xpb-w; target untouched"
+  },
+  {
+   "id": "X-05:x05_ancestor:M>L",
+   "status": "PASS",
+   "detail": "a destination behind a link is refused on xpb-m and xpb-l; target untouched"
+  },
+  {
+   "id": "X-05:x05_ancestor:M>W",
+   "status": "PASS",
+   "detail": "a destination behind a link is refused on xpb-m and xpb-w; target untouched"
+  },
+  {
+   "id": "X-05:x05_ancestor:W>L",
+   "status": "PASS",
+   "detail": "a destination behind a link is refused on xpb-w and xpb-l; target untouched"
+  },
+  {
+   "id": "X-05:x05_ancestor:W>M",
+   "status": "PASS",
+   "detail": "a destination behind a link is refused on xpb-w and xpb-m; target untouched"
+  },
+  {
+   "id": "X-06:x06_case_collision:L>M",
+   "status": "FAIL",
+   "detail": "timed out waiting for xpb-m reports cfg/app/x-app/Case-LM.txt as case_collision @ wait:122 <- wait_skipped:38 <- x06_case_collision:212 <- <lambda>:489 <- check:250"
+  },
+  {
+   "id": "X-06:x06_case_collision:L>W",
+   "status": "FAIL",
+   "detail": "timed out waiting for xpb-w reports cfg/app/x-app/Case-LW.txt as case_collision @ wait:122 <- wait_skipped:38 <- x06_case_collision:212 <- <lambda>:489 <- check:250"
+  }
+ ]
+}
