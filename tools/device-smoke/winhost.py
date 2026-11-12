@@ -564,11 +564,16 @@ class WindowsDevice:
         return NetCut(self, name, scratch)
 
     @contextlib.contextmanager
-    def udp_blocked(self):
-        """Outgoing UDP except DNS dropped on the device for the duration; removed on every exit path."""
+    def udp_blocked(self, allow=(53,)):
+        """Outgoing UDP except the `allow` ports (DNS by default) dropped on the device for the duration; removed on every exit path."""
         name = 'PaperboatSmoke-udp-' + uuid.uuid4().hex[:12]
+        ranges, low = [], 1
+        for port in sorted(allow) + [65536]:
+            if port > low:
+                ranges.append('%d-%d' % (low, port - 1))
+            low = port + 1
         try:
-            self.ps('block outgoing UDP', UDP_BLOCK, action='add', name=name)
+            self.ps('block outgoing UDP', UDP_BLOCK, action='add', name=name, ports=ranges)
             yield
         finally:
             self.ps('unblock outgoing UDP', UDP_BLOCK, action='remove', name=name)

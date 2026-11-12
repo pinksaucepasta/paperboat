@@ -57,7 +57,8 @@ class MacCut:
         self.env, self.token = env, token
 
     def release(self):
-        ssh(self.env.mac, f"sudo -n pfctl -a {ANCHOR} -F all; " + (f"sudo -n pfctl -X {self.token}" if self.token else "true"), 60)
+        # only this anchor's rules go: `-F all` also flushes the whole state table and kills the live peer flows
+        ssh(self.env.mac, f"sudo -n pfctl -a {ANCHOR} -F rules; " + (f"sudo -n pfctl -X {self.token}" if self.token else "true"), 60)
 
 
 class MacEnv:
@@ -70,7 +71,7 @@ class MacEnv:
         self.ips = sorted({info[4][0] for info in socket.getaddrinfo(self.api, None, socket.AF_INET)})
 
     def long_command(self, seconds):
-        return f"sh -c 'sleep {seconds}; echo long-lw-done'"
+        return f"sh -c 'echo started; sleep {seconds}; echo long-lw-done'"
 
     @contextlib.contextmanager
     def scratch(self):
@@ -78,7 +79,7 @@ class MacEnv:
 
     def spawn_wl(self, seconds, directory):
         ssh(self.mac, "rm -f /tmp/long-wl.out /tmp/long-wl.rc", 30)
-        inner = f"{PB} exec {w.L} -- sh -c 'sleep {seconds}; echo long-wl-done' > /tmp/long-wl.out 2>&1; echo $? > /tmp/long-wl.rc"
+        inner = f"{PB} exec {w.L} -- sh -c 'echo started; sleep {seconds}; echo long-wl-done' > /tmp/long-wl.out 2>&1; echo $? > /tmp/long-wl.rc"
         ssh(self.mac, f"nohup sh -c {shlex.quote(inner)} < /dev/null > /dev/null 2>&1 &", 30)
         return MacProcess(self.mac, "long-wl")
 
@@ -94,7 +95,9 @@ class MacEnv:
         if rc:
             raise RuntimeError("pf rule not loaded on the Mac: " + out[-200:])
         # established connections keep passing on their pf state until it is flushed; the root timer lifts the rule whatever happens here
-        ssh(self.mac, f"sudo -n pfctl -F states >/dev/null 2>&1; (sudo -n sh -c 'sleep {seconds}; /sbin/pfctl -a {ANCHOR} -F all' >/dev/null 2>&1 &)", 60)
+        # an established connection to the API passes on its pf state: kill those states only, not the table
+        kills = "; ".join(f"sudo -n pfctl -k 0.0.0.0/0 -k {ip}" for ip in self.ips)
+        ssh(self.mac, f"{kills} >/dev/null 2>&1; (sudo -n sh -c 'sleep {seconds}; /sbin/pfctl -a {ANCHOR} -F rules' >/dev/null 2>&1 &)", 60)
         token = out.strip().splitlines()[-1] if out.strip() else ""
         return MacCut(self, token if token.isdigit() else ""), c.host_run(self.host, self.rules("-I", containers, " && "), 60)
 
@@ -107,9 +110,26 @@ class MacEnv:
         return c.host_run(self.host, self.rules("-D", containers, "; "), 60)
 
 
+def revoked_before(env, args):
+    """After `revoke` R is revoked and signed out: with the control plane cut again, the Mac still refuses R and L still reaches it."""
+    res = c.Result(args.redact)
+    block, routes = env.cut([w.L], 300)
+    try:
+        res.add("Mac and L cut off from the control plane", routes[0] == 0, routes[1].strip()[-120:])
+        time.sleep(20)
+        ok, detail = c.eventually(lambda: w.refused_rw(env), 90, 10)
+        res.add("a user revoked before the outage (R) is refused by the Mac", ok, detail)
+        ok, detail = c.eventually(lambda: w.exec_lw(env, "prerevoked-LW"), 90, 10)
+        res.add("a user that was not revoked (L) still reaches the Mac", ok, detail)
+    finally:
+        restored = env.restore(block, [w.L])
+    res.add("control plane reachable again", restored[0] == 0, restored[1].strip()[-120:])
+    return w.write(res, "control-outage-revoked-mac", {})
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("phase", choices=["drill", "revoke"])
+    parser.add_argument("phase", choices=["drill", "revoke", "revoked"])
     parser.add_argument("--host", default="ubuntu@anvit")
     parser.add_argument("--server", required=True)
     parser.add_argument("--mac", required=True, help="SSH host of the Mac")
@@ -120,7 +140,7 @@ def main():
     args = parser.parse_args()
     w.W = args.name
     env = MacEnv(args)
-    sys.exit(w.drill(env, args) if args.phase == "drill" else w.revoke(env, args))
+    sys.exit({"drill": w.drill, "revoke": w.revoke, "revoked": revoked_before}[args.phase](env, args))
 
 
 if __name__ == "__main__":

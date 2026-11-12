@@ -39,13 +39,13 @@ class Env:
     probe, answer = "%%OS%%", "Windows_NT"  # typed into the terminal's shell (cmd.exe: %OS%, doubled for printf) and what only that shell prints
 
     def long_command(self, seconds):
-        return f"cmd /c 'ping -n {seconds} 127.0.0.1 >nul & echo long-lw-done'"
+        return f"cmd /c 'echo started & ping -n {seconds} 127.0.0.1 >nul & echo long-lw-done'"
 
     def scratch(self):
         return self.device.temp_dir("pb-outage")
 
     def spawn_wl(self, seconds, directory):
-        return self.device.spawn([str(self.pb), "exec", L, "--", "sh", "-c", f"sleep {seconds}; echo long-wl-done"], directory)
+        return self.device.spawn([str(self.pb), "exec", L, "--", "sh", "-c", f"echo started; sleep {seconds}; echo long-wl-done"], directory)
 
     def ct(self, name, command, timeout=120):
         return c.in_ct(self.host, name, command, timeout)
@@ -118,6 +118,11 @@ def start_long(env, seconds, directory):
     return env.spawn_wl(seconds, directory)
 
 
+def long_started(env, wl):
+    rc, out = env.ct(L, "cat /tmp/long-lw.out", 30)
+    return "started" in out and b"started" in wl.stdout(), f"L->W {'started' in out}, W->L {b'started' in wl.stdout()}"
+
+
 def long_running(env, wl):
     rc, out = env.ct(L, "test ! -e /tmp/long-lw.rc && pgrep -f long-lw-done >/dev/null && echo running", 30)
     return {"long L->W": "running" in out, "long W->L": wl.returncode() is None}
@@ -129,7 +134,9 @@ def drill(env, args):
         ok, detail = c.eventually(lambda: fn(env, "baseline-" + label[0] + label[-1]), 180)
         res.add(f"baseline exec {label}", ok, detail)
     with env.scratch() as directory:
-        wl = start_long(env, args.outage_seconds + 120, directory)
+        wl = start_long(env, args.outage_seconds + 420, directory)
+        ok, detail = c.eventually(lambda: long_started(env, wl), 90, 3)  # a long exec that never started proves nothing across the cut
+        res.add("both long execs printed their start marker before the cut", ok, detail)
         time.sleep(15)
         stopped = time.time()
         block, routes = env.cut([L], args.outage_seconds + 300)

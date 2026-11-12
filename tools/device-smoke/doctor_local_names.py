@@ -32,11 +32,11 @@ def mac_runner(host):
         rc, out = ssh(f"printf %s {shlex.quote(rules)} | sudo -n pfctl -a {ANCHOR} -f - && sudo -n pfctl -E 2>&1 | sed -n 's/.*Token : //p'")
         if rc:
             raise RuntimeError("pf rule not loaded: " + out[-200:])
-        ssh(f"sudo -n pfctl -F states >/dev/null 2>&1; (sudo -n sh -c 'sleep 300; /sbin/pfctl -a {ANCHOR} -F all' >/dev/null 2>&1 &); dscacheutil -flushcache; sudo -n killall -HUP mDNSResponder")
+        ssh(f"sudo -n pfctl -F states >/dev/null 2>&1; (sudo -n sh -c 'sleep 300; /sbin/pfctl -a {ANCHOR} -F rules' >/dev/null 2>&1 &); dscacheutil -flushcache; sudo -n killall -HUP mDNSResponder")
         return out.strip().splitlines()[-1] if out.strip() else ""
 
     def unblock(token):
-        ssh(f"sudo -n pfctl -a {ANCHOR} -F all; " + (f"sudo -n pfctl -X {token}" if token.isdigit() else "true"))
+        ssh(f"sudo -n pfctl -a {ANCHOR} -F rules; " + (f"sudo -n pfctl -X {token}" if token.isdigit() else "true"))
 
     return pb, block, unblock
 

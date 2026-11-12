@@ -48,19 +48,21 @@ class Mac:
     def restart_daemon(self):
         return msh(self.host, f"sudo -n {self.pb_path} service restart", 120)
 
-    def _pf(self, anchor, rules, seconds):
+    def _pf(self, anchor, rules, seconds, kill_ips=()):
         rc, out = msh(self.host, f"printf %s {shlex.quote(rules)} | sudo -n pfctl -a {anchor} -f - 2>&1 && sudo -n pfctl -E 2>&1 | sed -n 's/.*Token : //p'", 60)
         if rc:
             raise RuntimeError(f"pf anchor {anchor} not loaded: {out[-200:]}")
-        msh(self.host, f"sudo -n pfctl -F states >/dev/null 2>&1; (sudo -n sh -c 'sleep {seconds}; /sbin/pfctl -a {anchor} -F all' >/dev/null 2>&1 &)", 60)
+        # kill only the states of the cut addresses (an established flow passes on its state); `-F states`/`-F all` would kill every live flow
+        kills = "; ".join(f"sudo -n pfctl -k 0.0.0.0/0 -k {ip}" for ip in kill_ips) or "true"
+        msh(self.host, f"{kills} >/dev/null 2>&1; (sudo -n sh -c 'sleep {seconds}; /sbin/pfctl -a {anchor} -F rules' >/dev/null 2>&1 &)", 60)
         return out.splitlines()[-1] if out else ""
 
     def _unpf(self, anchor, token):
-        msh(self.host, f"sudo -n pfctl -a {anchor} -F all; " + (f"sudo -n pfctl -X {token}" if token.isdigit() else "true"), 60)
+        msh(self.host, f"sudo -n pfctl -a {anchor} -F rules; " + (f"sudo -n pfctl -X {token}" if token.isdigit() else "true"), 60)
 
     @contextlib.contextmanager
-    def rules(self, anchor, rules, seconds):
-        token = self._pf(anchor, rules, seconds)
+    def rules(self, anchor, rules, seconds, kill_ips=()):
+        token = self._pf(anchor, rules, seconds, kill_ips)
         try:
             yield
         finally:
@@ -70,13 +72,17 @@ class Mac:
         """Everything pb talks to (the API and the hosted relays, which here also host the peer) is dropped, except their port 22:
         the SSH that drives the Mac may run over one of them, and a machine-wide cut would sever it."""
         ips = " ".join(self.cut_ips)
-        return self.rules(PF_CUT, f"block drop quick proto {{ tcp udp }} from any to {{ {ips} }} port != 22\nblock drop quick proto {{ tcp udp }} from {{ {ips} }} port != 22 to any\n", seconds)
+        return self.rules(PF_CUT, f"block drop quick proto {{ tcp udp }} from any to {{ {ips} }} port != 22\nblock drop quick proto {{ tcp udp }} from {{ {ips} }} port != 22 to any\n", seconds, self.cut_ips)
+
+    def udp_blocked(self, allow, seconds):
+        ports = " ".join(str(p) for p in allow)
+        return self.rules(PF_CUT, f"pass out quick proto udp from any to any port {{ {ports} }}\nblock drop out quick proto udp from any to any\n", seconds)
 
     def cut_addresses(self, addresses, ports, protocols, seconds):
         """Drop `protocols` traffic to and from `addresses` on `ports` (pf ranges a:b)."""
         ip, port = " ".join(addresses), " ".join(p.replace("-", ":") for p in ports)
         return self.rules(PF_CUT, f"block drop quick proto {{ {' '.join(p.lower() for p in protocols)} }} from any to {{ {ip} }} port {{ {port} }}\n"
-                                  f"block drop quick proto {{ {' '.join(p.lower() for p in protocols)} }} from {{ {ip} }} port {{ {port} }} to any\n", seconds)
+                                  f"block drop quick proto {{ {' '.join(p.lower() for p in protocols)} }} from {{ {ip} }} port {{ {port} }} to any\n", seconds, addresses)
 
     def udp_ports(self):
         return set(msh(self.host, "sudo -n lsof -nP -iUDP 2>/dev/null | awk '$1==\"pb\" {print $9}' | sort -u")[1].split())
@@ -110,6 +116,9 @@ class Windows:
 
     def cut_all(self, seconds):
         return self.device.cut_network(seconds)
+
+    def udp_blocked(self, allow, seconds):
+        return self.device.udp_blocked(allow)
 
     def cut_addresses(self, addresses, ports, protocols, seconds):
         return self.device.cut_network(seconds, addresses=addresses, ports=ports, protocols=protocols)
@@ -263,9 +272,31 @@ def relay(args, target, peer):
     return report.finish()
 
 
+def udp443(args, target, peer):
+    """PR-02: outbound UDP except 53/443 dropped on the target, its carrier restarted: exec both ways works (the edge carrier falls back to HTTP/2)."""
+    report = Report(f"udp-blocked-{target.kind}")
+    ok, took, out = peer.exec_into(target, 60)
+    report.add("exec peer->target before the block", ok, f"{took:.1f} s {out}")
+    with target.udp_blocked((53, 443), 600):
+        report.add("outbound UDP except 53 and 443 dropped on the target", True)
+        target.restart_daemon()
+        start, first = time.time(), None
+        while time.time() < start + 90:
+            if peer.exec_into(target, 20)[0]:
+                first = time.time() - start
+                break
+        report.add("exec peer->target with UDP blocked, daemon restarted", first is not None, f"{first:.1f} s" if first is not None else "no success within 90 s")
+        t = time.time()
+        rc, out = target.pb("exec", peer.ct, "--", "echo", "udp-blocked-out", timeout=90)
+        report.add("exec target->peer with UDP blocked", rc == 0 and "udp-blocked-out" in out, f"{time.time() - t:.1f} s {out[-100:]}")
+    ok, took, out = peer.exec_into(target, 60)
+    report.add("exec peer->target after the block was removed", ok, f"{took:.1f} s {out}")
+    return report.finish()
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("check", choices=["rebind", "relay"])
+    parser.add_argument("check", choices=["rebind", "relay", "udp443"])
     parser.add_argument("--host", default="ubuntu@anvit")
     parser.add_argument("--mac", help="SSH host of the Mac")
     parser.add_argument("--windows", action="store_true")
@@ -285,7 +316,7 @@ def main():
     peer = Peer(args.peer_ssh or args.host, args.peer, direct=bool(args.peer_ssh), user=args.peer_user)
     if args.check == "relay":
         args.limit = 15.0
-    sys.exit(rebind(args, target, peer) if args.check == "rebind" else relay(args, target, peer))
+    sys.exit({"rebind": rebind, "relay": relay, "udp443": udp443}[args.check](args, target, peer))
 
 
 if __name__ == "__main__":
