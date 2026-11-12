@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-var ErrInvalid = errors.New("machine name must be a DNS hostname label: 1-63 ASCII letters, digits or hyphens (no spaces or accented letters); it cannot start or end with a hyphen")
+var ErrInvalid = errors.New("machine name must be 1-63 ASCII letters, digits or hyphens, not starting or ending with a hyphen; e.g. zoe-build")
 
 // Validate accepts the intersection of hostname rules used by Linux, macOS,
 // and Windows. A Paperboat machine name is one DNS label, not a command-line

@@ -409,3 +409,8 @@ Each is a protocol or authorization change on both ends: not done before the lau
 on the per-operation grant). Re-measure with tools/device-smoke/perf_dataplane.py after any of them.
 
 - Socket-based agent that Git-for-Windows ssh can reach (after launch): the managed agent is a Windows named pipe, which MSYS OpenSSH cannot use; until then Git runs through `git config --global core.sshCommand C:/Windows/System32/OpenSSH/ssh.exe` (pb ssh doctor prints it). A single ~/.ssh config cannot name both agent kinds without a `Match exec`.
+
+## IDNA (non-ASCII) machine names — after launch (coordinator decision 2026-11-13)
+Machine names are ASCII DNS labels: they appear in `<name>.<domain>`, `https://<port>.<name>.<domain>`, SSH host names and local
+certificates, so `pb machine rename` refuses `zoë-build` with the name rule (shared/machinename). Allowing them needs IDNA
+(punycode) in all of those paths and in the server's machinealias. Prior art: Tailscale MagicDNS also keeps ASCII host labels.

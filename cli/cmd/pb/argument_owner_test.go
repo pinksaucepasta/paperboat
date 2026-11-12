@@ -63,7 +63,7 @@ func TestInvalidMachineNameStatesTheRule(t *testing.T) {
 			t.Fatalf("%v returned %d; stdout=%s stderr=%s", args, code, stdout.String(), stderr.String())
 		}
 		output := stdout.String() + stderr.String()
-		if !strings.Contains(output, "ASCII letters, digits or hyphens") || strings.Contains(output, "PRIVATE") {
+		if !strings.Contains(output, "1-63 ASCII letters, digits or hyphens") || strings.Contains(output, "PRIVATE") {
 			t.Fatalf("%v: the refusal does not state the rule, or echoes the input: %s", args, output)
 		}
 	}
