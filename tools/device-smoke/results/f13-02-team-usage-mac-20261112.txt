@@ -1,0 +1,2 @@
+# usage_categories.py --team --no-ssh, controller macpool-8 (macOS 26.7 arm64 runner, official pb 2026.11.10.11, pf UDP block), team-owned target reo-t1
+{"check": "usage-categories", "target": "reo-t1", "status": "PASS", "relay_bytes_by_category": {"exec": 715449, "terminal": 1094366, "file_transfer": 1055642}, "billing_delta": 2864098, "charged_path_delta": 2864098, "team": "paperboat-smoke-9a46fcdb0b09", "team_total_delta": 2864098, "member_bytes_delta": {"user_5ae46801-d921-4983-be1c-db50ad886304": 2864098}}

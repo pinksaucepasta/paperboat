@@ -10,6 +10,8 @@ usage and billing API (the CLI credential is read in memory, never printed) and 
     (direct and relay bytes of an unidentified node are recorded, never debited).
 Usage: usage_categories.py TARGET [--no-ssh] [--team TEAM --driver ACCOUNT [--idle ACCOUNT ...]]
 
+--private-port PORT drives private access too: `pb access machine` forwards a loopback port to PORT on TARGET (an HTTP
+server serving /blob.bin, 1 MiB or more) and the blob is fetched through it (the machine_service category).
 --no-ssh leaves out ssh, scp, rsync and sftp (the ssh category): an account at its managed-SSH client capacity
 (doctor code ssh_client_key_capacity) cannot start them.
 
@@ -55,7 +57,12 @@ def sh(command):
     return subprocess.run(command, shell=True, capture_output=True, text=True)
 
 
+WORKSPACE = ['personal']  # the team of --team: the older official pb names a team machine only with --workspace
+
+
 def pb(*arguments, timeout=150):
+    if WORKSPACE[0] != 'personal':
+        arguments = ('--workspace', WORKSPACE[0], *arguments)
     if DEVICE:
         return DEVICE.run([DEVICE.pb_exe, *arguments], timeout=timeout)
     return subprocess.run(['pb', *arguments], capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
@@ -188,11 +195,11 @@ def wait_for_relay(target):
     raise RuntimeError('the flow never left the direct path')
 
 
-def terminal(target, name):
+def terminal(target, name, workspace='personal'):
     marker = 'DONE_$((1+1))'
     child, descriptor = pty.fork()
     if child == 0:
-        argv = winhost.terminal_argv(PB, ['connect', target, 'new', '--name', name])
+        argv = winhost.terminal_argv(PB, ['--workspace', workspace, 'connect', target, 'new', '--name', name])
         os.execvpe(argv[0], argv, dict(os.environ, **winhost.terminal_env(PB)))
     output = bytearray()
 
@@ -217,7 +224,25 @@ def terminal(target, name):
 SSH_STEPS = ('ssh', 'scp', 'rsync', 'sftp')
 
 
-def drive(target, work, skip=()):
+def private_access(target, port, workspace):
+    """One fetch of /blob.bin through `pb access machine` (private TCP to PORT on target, over the relay)."""
+    forward = subprocess.Popen([str(PB), *(['--workspace', workspace] if workspace != 'personal' else []), 'access', 'machine', target,
+                                '--port', str(port), '--listen', '127.0.0.1:18081'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        for _ in range(30):
+            time.sleep(2)
+            try:
+                if len(urllib.request.urlopen('http://127.0.0.1:18081/blob.bin', timeout=60).read()) >= SIZE:
+                    return
+            except OSError:
+                continue
+        raise RuntimeError('private access never served the blob')
+    finally:
+        forward.terminate()
+        forward.wait()
+
+
+def drive(target, work, skip=(), workspace='personal', private_port=0):
     data = work / 'data.bin'
     if DEVICE:
         data.write_random(SIZE)
@@ -239,7 +264,9 @@ def drive(target, work, skip=()):
         result = step()
         if result.returncode != 0:
             raise RuntimeError('%s failed over the relay: %s' % (name, result.stderr.strip()[-160:]))
-    terminal(target, 'usage-cat-%d' % os.getpid())
+    terminal(target, 'usage-cat-%d' % os.getpid(), workspace)
+    if private_port:
+        private_access(target, private_port, workspace)
     pb('exec', target, '--', 'sh', '-c', 'rm -f %s.*' % remote)
 
 
@@ -247,15 +274,19 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('target')
     parser.add_argument('--no-ssh', action='store_true', help='leave out the ssh category (ssh, scp, rsync, sftp)')
+    parser.add_argument('--private-port', type=int, default=0, help='also drive private access to this port on TARGET')
     parser.add_argument('--team', default='personal', help='the team that owns TARGET (default: the personal workspace)')
     parser.add_argument('--driver', default='', help='account id of the member that drives the traffic (with --team)')
     parser.add_argument('--idle', action='append', default=[], help='account id of a member that drives nothing (with --team)')
     arguments = parser.parse_args()
     target, team = arguments.target, arguments.team
+    WORKSPACE[0] = team
     assert team == 'personal' or arguments.driver, '--team needs --driver ACCOUNT_ID'
     skip = SSH_STEPS if arguments.no_ssh else ()
     if arguments.no_ssh:
         FLOORS.pop('ssh')
+    if arguments.private_port:
+        FLOORS['machine_service'] = SIZE
     actors = [arguments.driver, *arguments.idle] if team != 'personal' else []
     api = Api(team)
     start = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() - 3600))
@@ -268,7 +299,7 @@ def main():
         block_udp(blocked)
         try:
             wait_for_relay(target)
-            drive(target, work, skip)
+            drive(target, work, skip, team, arguments.private_port)
         finally:
             unblock_udp(blocked)
         try:
@@ -278,7 +309,7 @@ def main():
         grew = {kind: after['kinds'].get(kind, 0) - before['kinds'].get(kind, 0) for kind in FLOORS}
         missing = [kind for kind in grew if grew[kind] < FLOORS[kind]]
         billed, charged = after['billing'] - before['billing'], after['charged'] - before['charged']
-        detail = {'relay_bytes_by_category': grew, 'billing_delta': billed, 'charged_path_delta': charged}
+        detail = {'all_relay_kinds_delta': {k: after['kinds'][k] - before['kinds'].get(k, 0) for k in after['kinds']}, 'relay_bytes_by_category': grew, 'billing_delta': billed, 'charged_path_delta': charged}
         ok = not missing and billed == charged
         if actors:
             moved = {actor: after['actors'][actor] - before['actors'][actor] for actor in actors}
