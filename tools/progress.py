@@ -129,13 +129,13 @@ def count_rows(rows):
 
 
 def render(sections):
-    # Product features count per platform; reliability/scale, the SDK, release safety and the
+    # Product features count per platform; reliability/scale, release safety and the
     # website/console get their own cards (user decision 2026-10-26).
-    groups = {"reliability": ("F21", "P"), "sdk": ("F24",), "release": ("R",), "website": ("W",)}
+    groups = {"reliability": ("F21", "P"), "release": ("R",), "website": ("W",)}
     def rows_of(ids):
         return [r for s in sections if s["id"] in ids for r in s["feature"]]
     product = [r for s in sections if s["id"].startswith("F")
-               and s["id"] not in groups["reliability"] + groups["sdk"] for r in s["feature"]]
+               and s["id"] not in groups["reliability"] for r in s["feature"]]
     # A row that is n/a on macOS and Windows is server or console work, not an OS feature: it gets its
     # own card so every OS card counts the same features (user 2026-11-05).
     neutral = lambda r: all(m in ("n/a", "—") for m in r["platforms"][1:3])
@@ -155,7 +155,6 @@ def render(sections):
         cards.append(f'<div class="card"><h2>Server and console features</h2><div class="row"><span>Done</span>'
                      f'<b>{d}/{t}</b><em>{100*d//max(t,1)}%</em></div>{bar(d, t, b)}</div>')
     for title, ids in (("Reliability, scale and efficiency", groups["reliability"]),
-                       ("SDK and agent tools", groups["sdk"]),
                        ("Release safety", groups["release"]),
                        ("Website and console", groups["website"])):
         rows = rows_of(ids)
