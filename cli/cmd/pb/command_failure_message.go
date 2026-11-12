@@ -6,8 +6,11 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
+	"strings"
 	"syscall"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -169,8 +172,8 @@ func commandFailureMessage(err error, failure commandFailure) string {
 		return cleanup.Error()
 	}
 	if failure.kind == commandUnexpected {
-		if _, ok := failure.owner.(managedssh.NativeLaunchError); ok {
-			return "The native SSH or transfer tool could not start. Check that the required tool is installed and executable, then retry; run `pb ssh doctor` to check SSH setup."
+		if launch, ok := failure.owner.(managedssh.NativeLaunchError); ok {
+			return nativeLaunchMessage(launch)
 		}
 
 		if _, ok := failure.owner.(*os.PathError); ok {
@@ -415,4 +418,15 @@ func sshFailureMessage(err error) string {
 		}
 	}
 	return ""
+}
+
+// nativeLaunchMessage names the tool that could not start and, when the system says it does not exist, that it is missing:
+// `pb rsync` on a Windows computer without rsync used to say only 'the native SSH or transfer tool' (X-18).
+func nativeLaunchMessage(launch managedssh.NativeLaunchError) string {
+	var missing *exec.Error
+	if errors.As(launch.Err, &missing) && errors.Is(missing.Err, exec.ErrNotFound) {
+		tool := strings.TrimSuffix(filepath.Base(missing.Name), ".exe")
+		return fmt.Sprintf("%s was not found on this computer, so this command cannot run. Install %s (or use pb scp or pb sftp, which Paperboat can run with the tools Windows, macOS and Linux ship), then retry; run `pb ssh doctor` to check SSH setup.", tool, tool)
+	}
+	return "The native SSH or transfer tool could not start. Check that the required tool is installed and executable, then retry; run `pb ssh doctor` to check SSH setup."
 }

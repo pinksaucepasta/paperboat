@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -45,5 +46,19 @@ func TestSSHRefusalForADeniedRemoteLoginUserNamesTheUserAndTheSetting(t *testing
 		if !strings.Contains(message, want) {
 			t.Fatalf("message %q lacks %q", message, want)
 		}
+	}
+}
+
+func TestNativeLaunchMessageNamesAMissingTool(t *testing.T) {
+	missing := managedssh.NativeLaunchError{Err: &exec.Error{Name: "rsync", Err: exec.ErrNotFound}}
+	got := nativeLaunchMessage(missing)
+	for _, want := range []string{"rsync was not found on this computer", "pb scp", "pb ssh doctor"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("message %q lacks %q", got, want)
+		}
+	}
+	other := nativeLaunchMessage(managedssh.NativeLaunchError{Err: errors.New("permission denied")})
+	if !strings.Contains(other, "native SSH or transfer tool could not start") {
+		t.Fatalf("other launch failures keep the generic message: %q", other)
 	}
 }
