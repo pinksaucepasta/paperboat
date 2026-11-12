@@ -41,3 +41,15 @@ func TestKeepExecutableIntentStagesAnEditedExecutableFileAsExecutable(t *testing
 		t.Fatalf("staged mode %v: %v", index.Entries, err)
 	}
 }
+
+// With the executable bit invisible, a working-tree-only mode difference is not a change.
+func TestStagedCleanIgnoresTheWorkingTreeColumnWithoutExecBits(t *testing.T) {
+	status := git.Status{"run.sh": &git.FileStatus{Staging: git.Unmodified, Worktree: git.Modified}}
+	if !stagedClean(status) {
+		t.Fatal("a mode-only working-tree difference counted as a change")
+	}
+	status["new.txt"] = &git.FileStatus{Staging: git.Added, Worktree: git.Unmodified}
+	if stagedClean(status) {
+		t.Fatal("a staged file counted as clean")
+	}
+}

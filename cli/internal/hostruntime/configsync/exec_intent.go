@@ -39,3 +39,22 @@ func keepExecutableIntent(repository *git.Repository) error {
 	}
 	return repository.Storer.SetIndex(index)
 }
+
+// repositoryClean reports that nothing is staged. Where files carry no POSIX bits the working-tree column of the status
+// reports every executable file as modified for its mode alone; that is not a change to publish (an empty commit would be
+// pushed on every cycle and fail against the peer's head), so only what is staged counts.
+func repositoryClean(status git.Status) bool {
+	if platformHasExecBits {
+		return status.IsClean()
+	}
+	return stagedClean(status)
+}
+
+func stagedClean(status git.Status) bool {
+	for _, file := range status {
+		if file.Staging != git.Unmodified {
+			return false
+		}
+	}
+	return true
+}

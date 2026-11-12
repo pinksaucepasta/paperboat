@@ -502,7 +502,7 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 	if err != nil {
 		return PreparedPublication{}, err
 	}
-	if status.IsClean() {
+	if repositoryClean(status) {
 		merged, snapshotErr := r.mapping.SnapshotContext(ctx, r.descriptor.Policy, manifest, repositoryRoot, true)
 		if snapshotErr != nil {
 			return PreparedPublication{}, snapshotErr
