@@ -1,0 +1,57 @@
+{
+ "check": "flood-rows",
+ "row": "F8-14",
+ "status": "PASS",
+ "steps": [
+  {
+   "step": "baseline: both addresses are served",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "step": "the flooding address is denied by its owner (403 before the app) so the edge answers its flood itself",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "step": "the flooding address is refused 429 edge_rate_limited with Retry-After, after getting its burst",
+   "status": "PASS",
+   "detail": "{'403': 3426, '429': 11854} {'status': 429, 'type': 'text/html; charset=utf-8', 'error': 'edge_rate_limited', 'retry_after': '1', 'body': '<!doctype html>\\n<html lang=\"en\"><head><meta charset=\"utf-8\">'}"
+  },
+  {
+   "step": "a new preview made during the flood is served to another address within 20 s",
+   "status": "PASS",
+   "detail": "0.8 s"
+  },
+  {
+   "step": "another address is served every time during the flood",
+   "status": "PASS",
+   "detail": "[200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200]"
+  },
+  {
+   "step": "a browser gets a page, an API client problem+json",
+   "status": "PASS",
+   "detail": "{'status': 429, 'type': 'text/html; charset=utf-8', 'error': 'edge_rate_limited', 'retry_after': '1', 'body': '<!doctype html>\\n<html lang=\"en\"><head><meta charset=\"utf-8\">'} {'status': 429, 'type': 'application/problem+json', 'error': 'edge_rate_limited', 'retry_after': '1', 'body': '{\"type\":\"urn:paperboat:error:edge_rate_limited\",\"title\":\"Thi'}"
+  },
+  {
+   "step": "new TLS handshakes from the address are limited",
+   "status": "PASS",
+   "detail": "{'ok': 155, 'refused': 133}"
+  },
+  {
+   "step": "WebSocket upgrades from the address are limited",
+   "status": "PASS",
+   "detail": "{'403': 140, '429': 10, 'error': 42}"
+  },
+  {
+   "step": "the address is served again after it stops (within 30 s)",
+   "status": "PASS",
+   "detail": "200"
+  },
+  {
+   "step": "the owner sees the refusals in pb tunnel status (flood_protection)",
+   "status": "PASS",
+   "detail": "{'refused': 11866, 'since': '2026-11-12T22:00:00Z', 'summary': \"Paperboat's flood protection refused 11866 requests to this tunnel since 22:00 UTC: some client addresses sent more than the edge allows.\"}"
+  }
+ ]
+}
