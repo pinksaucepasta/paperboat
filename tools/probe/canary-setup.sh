@@ -15,7 +15,7 @@ on() { if [ "$host" = local ]; then sh -c "$1"; else ssh -o BatchMode=yes "$host
 as_pbt() { on "sudo -n docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 -w /home/pbt $ct $1"; }
 on "sudo -n docker build -q -t pb-canary -" <"$here/canary.Dockerfile"
 on "sudo -n docker rm -f $ct >/dev/null 2>&1; sudo -n docker run -d --name $ct --hostname $name --restart unless-stopped \
-  --memory 768m --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock pb-canary"
+  --memory ${CANARY_MEMORY:-768m} --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock pb-canary"
 for _ in $(seq 30); do on "sudo -n docker exec $ct systemctl is-system-running --wait" >/dev/null 2>&1 && break; sleep 2; done
 # every container of the image starts with the same baked SSH host keys; Paperboat refuses a clone's keys
 on "sudo -n docker exec $ct sh -c 'rm -f /etc/ssh/ssh_host_*; ssh-keygen -A >/dev/null; systemctl restart ssh'"

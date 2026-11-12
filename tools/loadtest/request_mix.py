@@ -6,6 +6,8 @@ Run on the staging server host while the machines are idle (F21-19, F21-22) or h
 machine-side requests by path (ids collapsed), divides by the number of machines and scales to 10 minutes, and checks
 them against perf_budgets.BUDGETS['request_mix']. Staging only; edge, node and trust calls and the edge's
 Go-http-client/1.1 are not machine requests. Prints one JSON receipt with numbers only.
+With LOG_CMD set (e.g. ssh to the Compose host's `docker compose logs --no-log-prefix --since $START --until $END server`) the
+log comes from that command instead of journalctl, START/END in RFC 3339.
 Usage: request_mix.py --machines 2 [--seconds 600] [--unit pb-staging-server] [--budget request_mix|stream_open]
 """
 import argparse
@@ -26,8 +28,12 @@ ID = re.compile(r'(machine|session|env|endpoint)_[0-9a-f-]+')
 
 
 def counts(unit, start, end):
-    log = subprocess.run(['sudo', 'journalctl', '-u', unit, '--since', start, '--until', end, '--no-pager', '-o', 'cat'],
-                         capture_output=True, text=True, timeout=120, check=True).stdout
+    if os.environ.get('LOG_CMD'):  # a command printing the server log between $START and $END (staging in Compose: docker compose logs)
+        log = subprocess.run(['bash', '-c', os.environ['LOG_CMD']], capture_output=True, text=True, timeout=300, check=True,
+                             env=dict(os.environ, START=start, END=end)).stdout
+    else:
+        log = subprocess.run(['sudo', 'journalctl', '-u', unit, '--since', start, '--until', end, '--no-pager', '-o', 'cat'],
+                             capture_output=True, text=True, timeout=120, check=True).stdout
     out = collections.Counter()
     for line in log.splitlines():
         if 'msg=http_request' not in line or SKIP.search(line):
@@ -45,7 +51,7 @@ def main():
     parser.add_argument('--unit', default='pb-staging-server')
     parser.add_argument('--budget', default='request_mix', choices=['request_mix', 'stream_open'])
     args = parser.parse_args()
-    fmt = '%Y-%m-%d %H:%M:%S'
+    fmt = '%Y-%m-%dT%H:%M:%SZ' if os.environ.get('LOG_CMD') else '%Y-%m-%d %H:%M:%S'
     start = time.strftime(fmt, time.gmtime())
     time.sleep(args.seconds)
     end = time.strftime(fmt, time.gmtime())

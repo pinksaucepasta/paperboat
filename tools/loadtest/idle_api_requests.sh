@@ -1,16 +1,16 @@
 #!/bin/bash
 # PR-03 server half: an idle machine's API requests per second over an interval, from the staging server's log,
-# checked against perf_budgets.BUDGETS['idle_server']. Staging only, with exactly one active machine (the host
-# runtime's requests carry no machine id, so every machine-side request is counted; edge, node and trust calls,
-# and the edge's Go-http-client/1.1, are not). Run it next to tools/device-smoke/perf_idle.py on the machine.
-#   idle_api_requests.sh [seconds=600] [server unit=pb-staging-server] [sql runner=~/lanem/sq.sh]
+# checked against perf_budgets.BUDGETS['idle_server']. Staging only. The machine is told apart from the rest of a shared
+# stack by its build: install a pb whose version string is unique to this machine (-X ...buildinfo.Version=dev-<sha>-idle),
+# the access log's `client=paperboat/<version>` then counts exactly its requests (edge/node/trust calls and the edge's
+# Go-http-client are not the machine's). Run it next to tools/device-smoke/perf_idle.py on the machine.
+#   VERSION=dev-<sha>-idle LOG_CMD='ssh ubuntu@anvit "cd ~/pb-release-staging && docker compose logs --no-log-prefix --since \$START --until \$END server"' \
+#     idle_api_requests.sh [seconds=600]
+# LOG_CMD prints the server's log between the UTC times in $START and $END (RFC 3339).
 set -euo pipefail
-SECONDS_WINDOW=${1:-600}; UNIT=${2:-pb-staging-server}; SQL=${3:-$HOME/lanem/sq.sh}
-active=$(echo "SELECT count(*) FROM paperboat.user_machines WHERE revoked_at IS NULL AND deleted_at IS NULL AND seat_state='occupied' AND online" | "$SQL" -At)
-[ "$active" = 1 ] || { echo "{\"status\":\"FAIL\",\"check\":\"perf-idle-server\",\"error\":\"$active online machines on staging, want exactly 1\"}"; exit 1; }
-start=$(date -u "+%Y-%m-%d %H:%M:%S"); sleep "$SECONDS_WINDOW"; end=$(date -u "+%Y-%m-%d %H:%M:%S")
-count=$(sudo journalctl -u "$UNIT" --since "$start" --until "$end" --no-pager -o cat | grep 'msg=http_request' \
-  | grep -vE 'path=/v1/(edge|nodes|trust)/|client=Go-http-client/1\.1' | wc -l)
+SECONDS_WINDOW=${1:-600}; : "${VERSION:?unique pb build version of the idle machine}" "${LOG_CMD:?command printing the server log between START and END}"
+start=$(date -u +%Y-%m-%dT%H:%M:%SZ); sleep "$SECONDS_WINDOW"; end=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+count=$(START=$start END=$end bash -c "$LOG_CMD" | grep 'msg=http_request' | grep -c "client=paperboat/$VERSION\$" || true)
 python3 - "$count" "$SECONDS_WINDOW" "$(cd "$(dirname "$0")/../device-smoke" && pwd)" <<'PY'
 import json, sys
 count, seconds, path = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
