@@ -273,3 +273,45 @@ func TestOriginStreamForwardsRequestBodyAsItArrives(t *testing.T) {
 		t.Fatal("streaming request did not finish")
 	}
 }
+
+// A real gRPC server (grpc-go, grpc-core/Python, Envoy) sends grpc-status in a trailer it never announced with a Trailer
+// header. The agent writes the origin's answer to the carrier as HTTP/1.1, which must still end with that trailer, or the
+// client sees "Data frame with END_STREAM" and no status (F8-11, found on a real tunnel).
+func TestOriginStreamCarriesUnannouncedTrailersFromAnH2COrigin(t *testing.T) {
+	origin := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		_, _ = io.Copy(io.Discard, request.Body)
+		writer.Header().Set("Content-Type", "application/grpc")
+		writer.WriteHeader(http.StatusOK)
+		writer.(http.Flusher).Flush() // a gRPC server sends its headers first: no Content-Length
+		_, _ = writer.Write([]byte{0, 0, 0, 0, 0})
+		writer.Header().Set(http.TrailerPrefix+"Grpc-Status", "5")
+		writer.Header().Set(http.TrailerPrefix+"Grpc-Message", "not found")
+	}))
+	origin.Config.Protocols = new(http.Protocols)
+	origin.Config.Protocols.SetUnencryptedHTTP2(true)
+	origin.Start()
+	defer origin.Close()
+	route := hoststate.TunnelConfigRoute{ID: "route_grpc", Protocol: "http", OriginScheme: "h2c", OriginAddress: origin.Listener.Addr().String(), PreserveHost: true, TLSVerification: "not_applicable", ConnectTimeoutMs: 1000, IdleTimeoutMs: 2000, DesiredState: "active"}
+	client, daemon := net.Pipe()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	transport := (&OriginHTTPTransport{}).newGeneration()
+	defer transport.CloseIdleConnections()
+	done := make(chan error, 1)
+	go func() { done <- (OriginStreamForwarder{}).serveHTTP(ctx, daemon, route, transport) }()
+	_ = client.SetDeadline(time.Now().Add(5 * time.Second)) // a stream that never ends fails the read instead of hanging
+	if _, err := io.WriteString(client, "POST /pkg.Service/Method HTTP/1.1\r\nHost: public.example.test\r\nContent-Type: application/grpc\r\nTe: trailers\r\nContent-Length: 5\r\n\r\n\x00\x00\x00\x00\x00"); err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.ReadResponse(bufio.NewReader(client), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, response.Body)
+	_ = response.Body.Close()
+	if response.Trailer.Get("Grpc-Status") != "5" || response.Trailer.Get("Grpc-Message") != "not found" {
+		t.Fatalf("trailers after the body = %v", response.Trailer)
+	}
+	_ = client.Close()
+	<-done
+}

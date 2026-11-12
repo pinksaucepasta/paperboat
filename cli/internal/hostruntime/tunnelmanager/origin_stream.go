@@ -659,6 +659,15 @@ func writeOriginResponse(ctx context.Context, stream io.ReadWriteCloser, reader 
 		}
 		return bridgeOriginUpgrade(ctx, stream, reader, upgraded)
 	}
+	if response.ProtoMajor == 2 && response.ContentLength < 0 && len(response.TransferEncoding) == 0 {
+		// An HTTP/2 origin streams without a length. Write would end such an answer by closing the stream, with no room
+		// for trailers: chunked encoding keeps the stream open for them, and the trailers (grpc-status), announced or not,
+		// are filled into this map when the origin's body ends (Write takes the map it holds when it starts).
+		response.TransferEncoding = []string{"chunked"}
+		if response.Trailer == nil {
+			response.Trailer = http.Header{}
+		}
+	}
 	return response.Write(stream)
 }
 
