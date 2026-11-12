@@ -217,25 +217,22 @@ func TestTeamAccessTunnelCreateInTeamWorkspaceOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The tcp tunnel must get a private_tcp route: a team tunnel is never a public TCP listener.
-	for i, origin := range []OriginRequest{{Scheme: "http", Address: "127.0.0.1:3000"}, {Scheme: "tcp", Address: "127.0.0.1:5432"}} {
-		id := ids[i]
-		hash := sha256.Sum256([]byte(id))
-		endpoint := testutil.EndpointID(id)
-		input := CreateRecord{OperationID: "op-" + id, TunnelID: id, AccountID: owner, Name: "team-access-" + origin.Scheme, AccessMode: AccessTeam, StableEndpointID: endpoint, StableEndpoint: "https://" + testutil.EndpointLabel(endpoint) + ".tunnels.example.test", HostID: host, ActorID: owner, AuditActorID: owner, ActorType: "host", AuditEventID: "audit-" + id, Origin: origin, IdempotencyKey: id, RequestHash: hash, CorrelationID: id, RequestID: id}
-		result, err := f.repository.Create(workspace.WithContext(ctx, scope), input)
-		if err != nil {
-			t.Fatalf("team-access %s tunnel create in the team workspace: %v", origin.Scheme, err)
-		}
-		if result.Tunnel.OwnerTeamID.String != team || result.Tunnel.AccessMode != AccessTeam {
-			t.Fatalf("tunnel=%+v", result.Tunnel)
-		}
-		var protocol string
-		if err := f.database.SQL().QueryRowContext(ctx, `SELECT protocol FROM paperboat.tunnel_routes WHERE tunnel_id=$1`, id).Scan(&protocol); err != nil {
-			t.Fatal(err)
-		}
-		if want := map[string]string{"http": "http", "tcp": "private_tcp"}[origin.Scheme]; protocol != want {
-			t.Fatalf("%s team tunnel route protocol=%s, want %s", origin.Scheme, protocol, want)
-		}
+	id := ids[0]
+	hash := sha256.Sum256([]byte(id))
+	endpoint := testutil.EndpointID(id)
+	input := CreateRecord{OperationID: "op-" + id, TunnelID: id, AccountID: owner, Name: "team-access", AccessMode: AccessTeam, StableEndpointID: endpoint, StableEndpoint: "https://" + testutil.EndpointLabel(endpoint) + ".tunnels.example.test", HostID: host, ActorID: owner, AuditActorID: owner, ActorType: "host", AuditEventID: "audit-" + id, Origin: OriginRequest{Scheme: "http", Address: "127.0.0.1:3000"}, IdempotencyKey: id, RequestHash: hash, CorrelationID: id, RequestID: id}
+	result, err := f.repository.Create(workspace.WithContext(ctx, scope), input)
+	if err != nil {
+		t.Fatalf("team-access tunnel create in the team workspace: %v", err)
+	}
+	if result.Tunnel.OwnerTeamID.String != team || result.Tunnel.AccessMode != AccessTeam {
+		t.Fatalf("tunnel=%+v", result.Tunnel)
+	}
+	// The edge and native private access open TCP only for private tunnels: a team TCP tunnel is refused, never a public listener.
+	tcp := input
+	tcp.TunnelID, tcp.OperationID, tcp.IdempotencyKey, tcp.AuditEventID, tcp.Name = ids[1], "op-"+ids[1], ids[1], "audit-"+ids[1], "team-access-tcp"
+	tcp.Origin = OriginRequest{Scheme: "tcp", Address: "127.0.0.1:5432"}
+	if _, err := f.repository.Create(workspace.WithContext(ctx, scope), tcp); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("a team TCP tunnel was not refused: %v", err)
 	}
 }

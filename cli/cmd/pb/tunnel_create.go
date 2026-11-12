@@ -145,6 +145,9 @@ func tunnelCreateCommand() *cobra.Command {
 		if team, _ := command.Flags().GetBool("team"); team {
 			mode = "team"
 		}
+		if mode == "team" && scheme == "tcp" {
+			return errors.New("a team tunnel serves HTTP; create a TCP tunnel with --private")
+		}
 		var expires *time.Time
 		if expiry > 0 {
 			value := time.Now().UTC().Add(expiry)

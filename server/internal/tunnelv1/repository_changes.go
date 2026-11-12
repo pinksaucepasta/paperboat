@@ -104,6 +104,10 @@ func validateCreateRecord(input CreateRecord) error {
 	if !validAccessMode(input.AccessMode) {
 		return fmt.Errorf("%w: access mode is invalid", ErrInvalidInput)
 	}
+	// The edge and native private access open TCP for private tunnels only; a team tunnel serves HTTP.
+	if input.AccessMode == AccessTeam && input.Origin.Scheme == "tcp" {
+		return fmt.Errorf("%w: a team tunnel serves HTTP; create a TCP tunnel as private", ErrInvalidInput)
+	}
 	return validateOrigin(input.Origin)
 }
 

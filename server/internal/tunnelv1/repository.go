@@ -867,7 +867,7 @@ func createInitialRoute(ctx context.Context, queries *dbsqlc.Queries, input Crea
 	}
 	if input.Origin.Scheme == "tcp" {
 		preserveHost = false
-		if input.AccessMode != AccessPublic {
+		if input.AccessMode == AccessPrivate {
 			protocol = "private_tcp"
 			matchType = "catch_all"
 			matchHostname = sql.NullString{}
