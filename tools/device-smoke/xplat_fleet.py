@@ -181,6 +181,13 @@ def controller():
     """The device whose own signed-in pb mints tokens and lists machines: the Mac (account of the fleet of the Mac VM) or, with
     XPLAT_CONTROLLER=L, the Linux container (a fresh account that was signed in with an API token), or with XPLAT_CONTROLLER=hp
     the operator account's pb on hp."""
+    if os.environ.get('XPE_CTL_CT'):  # a Docker container of the account that is never reinstalled (a build swap of L needs one)
+        saved = globals()['L_CT']
+        globals()['L_CT'] = os.environ['XPE_CTL_CT']
+        try:
+            return linux('ctl')
+        finally:
+            globals()['L_CT'] = saved
     if os.environ.get('XPLAT_CONTROLLER') == 'hp':  # the operator account's signed-in pb on hp: the fleet is that account's
         return Unix('hp', 'linux', ['ssh', 'hp'], '/home/anvit', '/home/anvit/.local/bin/pb')
     return linux() if os.environ.get('XPLAT_CONTROLLER') == 'L' else mac()
