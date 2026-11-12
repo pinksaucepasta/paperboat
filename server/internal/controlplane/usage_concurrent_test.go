@@ -97,3 +97,46 @@ func TestReconcileUsageFromManyEdgesAtOnceNeverFailsAndCountsExactly(t *testing.
 		t.Errorf("debited %d bytes, want %d", consumed, want)
 	}
 }
+
+// An edge that resends a report while its first send is still in flight posts the same operation
+// twice at once: one of them counts, the others answer from its receipt, none fails.
+func TestReconcileUsageSameOperationAtOnceCountsOnce(t *testing.T) {
+	store := openControlPlaneTestDB(t)
+	ctx := context.Background()
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	seedUsageScope(t, store, suffix)
+	report := usageReport("op_same_"+suffix, "epoch_same_"+suffix, 500, now)
+	report.EdgeNodeID, report.EnvironmentID, report.RouteID = "node_"+suffix, "env_"+suffix, "route_"+suffix
+	debiter := &countingDebiter{}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	fresh := 0
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			receipt, err := ReconcileUsageWithBandwidth(ctx, store, report, now, debiter)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if !receipt.Duplicate {
+				fresh++
+			}
+			if receipt.DeltaBytes != 500 {
+				t.Errorf("delta = %d, want 500", receipt.DeltaBytes)
+			}
+		}()
+	}
+	wg.Wait()
+	var receipts int64
+	if err := store.SQL().QueryRowContext(ctx, `SELECT count(*) FROM paperboat.control_usage_receipts WHERE environment_id=$1`, "env_"+suffix).Scan(&receipts); err != nil {
+		t.Fatal(err)
+	}
+	if fresh != 1 || receipts != 1 || debiter.total != 500 {
+		t.Fatalf("fresh=%d receipts=%d debited=%d, want 1, 1, 500", fresh, receipts, debiter.total)
+	}
+}

@@ -51,7 +51,7 @@ type BandwidthDebiter interface {
 }
 
 // ReconcileUsage persists an edge report and advances its absolute counter in one
-// serializable transaction. It returns the original result for an exact operation
+// short READ COMMITTED transaction. It returns the original result for an exact operation
 // retry, and never decreases a counter for a lower or delayed observation.
 func ReconcileUsage(ctx context.Context, store *db.DB, report UsageReport, now time.Time) (UsageReceipt, error) {
 	return reconcileUsage(ctx, store, report, now, nil, nil)
@@ -66,7 +66,12 @@ func reconcileUsage(ctx context.Context, store *db.DB, report UsageReport, now t
 		return UsageReceipt{}, err
 	}
 	var result UsageReceipt
-	err := store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// READ COMMITTED, not SERIALIZABLE: the rows every edge of one machine or workspace shares (bandwidth
+	// period, topups) are updated by row-locked atomic statements, so concurrent reports queue on the row
+	// lock and read its latest value instead of aborting each other with a serialization failure (8 edges
+	// plus heartbeats exhausted ten serializable retries and answered 503). Duplicates are settled by the
+	// receipt's unique operation_id; the counter row is created and locked before its delta is read.
+	err := store.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		existing, err := tx.Queries().GetControlUsageReceipt(ctx, report.OperationID)
 		if err == nil {
 			if !sameUsageReport(existing, report) {
@@ -79,6 +84,13 @@ func reconcileUsage(ctx context.Context, store *db.DB, report UsageReport, now t
 			return fmt.Errorf("look up usage receipt: %w", err)
 		}
 
+		// The row must exist before it is locked: two concurrent first reports of one counter would otherwise
+		// both read no row and both count the whole value as new.
+		if _, err := tx.Exec(ctx, `INSERT INTO control_usage_counters (authority_id, edge_node_id, counter_epoch, environment_id, route_id, route_revision, direction, bytes, observed_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,0,$8) ON CONFLICT (edge_node_id, counter_epoch, environment_id, route_id, direction, authority_id) DO NOTHING`,
+			report.AuthorityID, report.EdgeNodeID, report.CounterEpoch, report.EnvironmentID, report.RouteID, report.RouteRevision, report.Direction, report.IntervalEnd); err != nil {
+			return fmt.Errorf("create usage counter: %w", err)
+		}
 		previous, err := tx.Queries().GetControlUsageCounterForUpdate(ctx, dbsqlc.GetControlUsageCounterForUpdateParams{
 			EdgeNodeID: report.EdgeNodeID, CounterEpoch: report.CounterEpoch, EnvironmentID: report.EnvironmentID,
 			RouteID: report.RouteID, Direction: report.Direction, AuthorityID: report.AuthorityID,
@@ -100,6 +112,17 @@ func reconcileUsage(ctx context.Context, store *db.DB, report UsageReport, now t
 			Direction: report.Direction, AuthorityID: report.AuthorityID, ObservedBytes: report.Bytes, DeltaBytes: delta,
 			IntervalStart: report.IntervalStart, IntervalEnd: report.IntervalEnd,
 		}); err != nil {
+			if errors.Is(err, sql.ErrNoRows) { // the same operation committed first: answer from its receipt
+				stored, lookupErr := tx.Queries().GetControlUsageReceipt(ctx, report.OperationID)
+				if lookupErr != nil {
+					return fmt.Errorf("look up usage receipt: %w", lookupErr)
+				}
+				if !sameUsageReport(stored, report) {
+					return ErrUsageOperationConflict
+				}
+				result = UsageReceipt{QuotaExhausted: stored.QuotaExhausted, Disposition: stored.Disposition, OperationID: report.OperationID, DeltaBytes: stored.DeltaBytes, ObservedBytes: stored.ObservedBytes, Duplicate: true}
+				return nil
+			}
 			return fmt.Errorf("persist usage receipt: %w", err)
 		}
 		disposition := "accounted"
