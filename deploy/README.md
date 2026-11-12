@@ -198,7 +198,7 @@ start and drops new fields. The current tags are in `docker ps` on each edge and
 `python3 rollout-server.py --directory /opt/paperboat --image paperboat-server:<previous>` (migrations are
 additive, so the previous server still runs on the new schema; a migration that removes or renames
 anything must not be deployed in the same step as the code that needs it). Edges: the same `pbh install`
-with the previous tags. Release the lock, then tell the lane that was waiting what happened.
+with the previous tags; roll edges back only after the server is back on the matching version (an edge older than the server is refused: the edge limits heartbeat answer changed in 643706cc4, so a previous edge never becomes ready against a newer server). Release the lock, then tell the lane that was waiting what happened.
 
 **6. Recheck and smoke.** Every server or edge deploy runs inside the deploy gate (from oracle):
 `PROBE='<runs a shell on the paired probe machine>' SQL='<runs read-only psql on the production database,
