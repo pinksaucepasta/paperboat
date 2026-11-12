@@ -137,7 +137,7 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 			return err
 		}
 	}
-	prepared, err := filetransfer.Prepare(preparedPaths, automaticTransferLimits)
+	prepared, err := prepareSendSources(ctx.Context, cobraCommand, client, preparedPaths)
 	if err != nil {
 		return missingSendSource(err, preparedPaths)
 	}
@@ -215,7 +215,7 @@ func runSendCommand(cobraCommand *cobra.Command, paths []string) error {
 			Auth:   resolver.AuthTarget{Method: descriptor.Auth.Method, Token: descriptor.Auth.Token, ExpiresAt: descriptor.Auth.ExpiresAt.UTC().Format(time.RFC3339Nano), ResourceID: descriptor.Auth.AccessSessionID},
 			Policy: descriptor.Policy,
 		}
-		if err := filetransfer.ValidateSources(prepared.Sources, fileTransferLimits(target)); err != nil {
+		if err := filetransfer.ValidateSources(prepared.Sources, declaredTransferLimits(fileTransferLimits(target), declared)); err != nil {
 			return err
 		}
 		if target.Endpoint == "" || target.Auth.Method != "bearer" || target.Auth.Token == "" {
@@ -336,6 +336,21 @@ func fileTransferLeaseRequest(machineID, environmentID string, generation uint64
 
 // unlimitedTransferLimits bound an Unlimited send only by file count: no Paperboat size limit applies.
 var unlimitedTransferLimits = filetransfer.Limits{MaxFileBytes: 1 << 40, MaxBatchFiles: 10, MaxBatchBytes: 1 << 40}
+
+// prepareSendSources prepares the files with the Automatic bound before any network call; only a send that
+// exceeds it asks for the account's mode, and an Unlimited send (the flag or the account's preference) is
+// prepared without a size bound.
+func prepareSendSources(ctx context.Context, command *cobra.Command, client *api.Client, paths []string) (*filetransfer.PreparedBatch, error) {
+	if unlimited, _ := command.Flags().GetBool("unlimited"); unlimited {
+		return filetransfer.Prepare(paths, unlimitedTransferLimits)
+	}
+	prepared, err := filetransfer.Prepare(paths, automaticTransferLimits)
+	var limit *filetransfer.LimitError
+	if errors.As(err, &limit) && sendTransferMode(ctx, command, client) == "unlimited" {
+		return filetransfer.Prepare(paths, unlimitedTransferLimits)
+	}
+	return prepared, err
+}
 
 // sendTransferMode is --unlimited, else the account's preference, else Automatic.
 func sendTransferMode(ctx context.Context, command *cobra.Command, client *api.Client) string {

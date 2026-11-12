@@ -1,15 +1,19 @@
 package main
 
 import (
+	"context"
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
+	"github.com/spf13/cobra"
 )
 
 // PLAN 3b File transfer modes: Automatic sends at most 2,000,000,000 bytes in total (directories expanded, every
@@ -101,4 +105,28 @@ func TestSendTransferModeFollowsFlagThenAccountPreference(t *testing.T) {
 	if got := sendTransferMode(t.Context(), command, client); got != "unlimited" {
 		t.Fatalf("--unlimited gave %q", got)
 	}
+}
+
+// Unlimited sends were refused over 2 GB before any network call: the files were prepared with the Automatic
+// bound whatever the mode was.
+func TestPrepareBoundFollowsTheTransferMode(t *testing.T) {
+	big := filepath.Join(t.TempDir(), "big.bin")
+	file, err := os.Create(big)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Truncate(api.AutomaticTransferLimit + 1); err != nil {
+		t.Skipf("no sparse file support: %v", err)
+	}
+	file.Close()
+	if _, err := filetransfer.Prepare([]string{big}, automaticTransferLimits); err == nil {
+		t.Fatal("an Automatic send over 2 GB was prepared")
+	}
+	command := &cobra.Command{}
+	command.Flags().Bool("unlimited", true, "")
+	prepared, err := prepareSendSources(context.Background(), command, nil, []string{big})
+	if err != nil {
+		t.Fatalf("an Unlimited send over 2 GB was refused: %v", err)
+	}
+	prepared.Close()
 }
