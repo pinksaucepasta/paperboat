@@ -1,0 +1,195 @@
+{
+ "outage_seconds": 660,
+ "checks": [
+  {
+   "check": "baseline exec a->b",
+   "status": "PASS",
+   "detail": "baseline-ab"
+  },
+  {
+   "check": "baseline exec b->a",
+   "status": "PASS",
+   "detail": "baseline-ba"
+  },
+  {
+   "check": "baseline exec r->b before sign-out",
+   "status": "PASS",
+   "detail": "baseline-rb"
+  },
+  {
+   "check": "machine r revoked by its owner (pb machine revoke, exact enrollment)",
+   "status": "PASS",
+   "detail": "s\":\"rel-sco-r\",\"id\":\"machine_3a512060-f736-42e3-9eb7-3936dbb12a20\",\"state\":\"disconnected\"},\"outcome\":\"confirmed\",\"retry\":\"not_required\",\"version\":\"1\"}"
+  },
+  {
+   "check": "revoked machine r is refused (control plane up)",
+   "status": "PASS",
+   "detail": "`pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_9cd94f57-f771-4398-8ffe-8f4576485005."
+  },
+  {
+   "check": "control plane unreachable",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "outage 30 s: new exec a->b",
+   "status": "PASS",
+   "detail": "outage-30s-ab Paperboat ENV not applied: ENV needs Paperboat online. The command ran without your managed values; run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "check": "outage 30 s: new exec b->a",
+   "status": "PASS",
+   "detail": "outage-30s-ba Paperboat ENV not applied: ENV needs Paperboat online. The command ran without your managed values; run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "check": "outage 30 s: new pb connect terminal a->b",
+   "status": "PASS",
+   "detail": "004h\u001b]0;pbt@rel-sco-b: ~\u0007\u001b[01;32mpbt@rel-sco-b\u001b[00m:\u001b[01;34m~\u001b[00m$ exit \u001b[?2004llogout \u001b[?1000l\u001b[?1002l\u001b[?1003l\u001b[?1006l\u001b[?1015l\u001b[?2004l\u001b[?1049l\u001b[?25h\u001b[r\u001b[2J\u001b[H"
+  },
+  {
+   "check": "outage 30 s: new pb ssh a->b",
+   "status": "PASS",
+   "detail": "outage-ssh"
+  },
+  {
+   "check": "outage 30 s: revoked r still refused",
+   "status": "PASS",
+   "detail": "e command. Check the current state before retrying; run `pb doctor` if this continues. Support reference: support_07051c0d-51f0-4dae-8df1-941a45dc1984. Run `pb bugreport --upload` to send the details."
+  },
+  {
+   "check": "outage 30 s: long-ab still running",
+   "status": "PASS",
+   "detail": "running"
+  },
+  {
+   "check": "outage 30 s: long-ba still running",
+   "status": "PASS",
+   "detail": "running"
+  },
+  {
+   "check": "outage 30 s: pb status shows the control plane as unreachable",
+   "status": "PASS",
+   "detail": "Daemon: degraded  Generation: 12  Observed: 2026-11-12T10:58:57Z Health: error: Control plane is unavailable  Recovery: Check network access and Paperboat authentication Health: warning: No relay is usable: no relay is authorized for both machines  Recovery: Direct connections keep working. Paperboa"
+  },
+  {
+   "check": "outage 5 min: new exec a->b",
+   "status": "PASS",
+   "detail": "outage-5min-ab Paperboat ENV not applied: ENV needs Paperboat online. The command ran without your managed values; run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "check": "outage 5 min: new exec b->a",
+   "status": "PASS",
+   "detail": "outage-5min-ba Paperboat ENV not applied: ENV needs Paperboat online. The command ran without your managed values; run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "check": "outage 5 min: new pb connect terminal a->b",
+   "status": "PASS",
+   "detail": "004h\u001b]0;pbt@rel-sco-b: ~\u0007\u001b[01;32mpbt@rel-sco-b\u001b[00m:\u001b[01;34m~\u001b[00m$ exit \u001b[?2004llogout \u001b[?1000l\u001b[?1002l\u001b[?1003l\u001b[?1006l\u001b[?1015l\u001b[?2004l\u001b[?1049l\u001b[?25h\u001b[r\u001b[2J\u001b[H"
+  },
+  {
+   "check": "outage 5 min: new pb ssh a->b",
+   "status": "PASS",
+   "detail": "outage-ssh"
+  },
+  {
+   "check": "outage 5 min: revoked r still refused",
+   "status": "PASS",
+   "detail": "e command. Check the current state before retrying; run `pb doctor` if this continues. Support reference: support_0720d4ae-d9ee-42be-95db-460dbbf50885. Run `pb bugreport --upload` to send the details."
+  },
+  {
+   "check": "outage 5 min: long-ab still running",
+   "status": "PASS",
+   "detail": "running"
+  },
+  {
+   "check": "outage 5 min: long-ba still running",
+   "status": "PASS",
+   "detail": "running"
+  },
+  {
+   "check": "outage 5 min: pb status shows the control plane as unreachable",
+   "status": "PASS",
+   "detail": "Daemon: degraded  Generation: 12  Observed: 2026-11-12T10:58:57Z Health: error: Control plane is unavailable  Recovery: Check network access and Paperboat authentication Health: warning: No relay is usable: no relay is authorized for both machines  Recovery: Direct connections keep working. Paperboa"
+  },
+  {
+   "check": "outage end: new exec a->b",
+   "status": "PASS",
+   "detail": "outage-end-ab Paperboat ENV not applied: ENV needs Paperboat online. The command ran without your managed values; run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "check": "outage end: new exec b->a",
+   "status": "PASS",
+   "detail": "outage-end-ba Paperboat ENV not applied: ENV needs Paperboat online. The command ran without your managed values; run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "check": "outage end: new pb connect terminal a->b",
+   "status": "PASS",
+   "detail": "004h\u001b]0;pbt@rel-sco-b: ~\u0007\u001b[01;32mpbt@rel-sco-b\u001b[00m:\u001b[01;34m~\u001b[00m$ exit \u001b[?2004llogout \u001b[?1000l\u001b[?1002l\u001b[?1003l\u001b[?1006l\u001b[?1015l\u001b[?2004l\u001b[?1049l\u001b[?25h\u001b[r\u001b[2J\u001b[H"
+  },
+  {
+   "check": "outage end: new pb ssh a->b",
+   "status": "PASS",
+   "detail": "outage-ssh"
+  },
+  {
+   "check": "outage end: revoked r still refused",
+   "status": "PASS",
+   "detail": "e command. Check the current state before retrying; run `pb doctor` if this continues. Support reference: support_97aff536-4468-40ac-a6bb-cbb85812232c. Run `pb bugreport --upload` to send the details."
+  },
+  {
+   "check": "outage end: long-ab still running",
+   "status": "PASS",
+   "detail": "running"
+  },
+  {
+   "check": "outage end: long-ba still running",
+   "status": "PASS",
+   "detail": "running"
+  },
+  {
+   "check": "outage end: pb status shows the control plane as unreachable",
+   "status": "PASS",
+   "detail": "Daemon: degraded  Generation: 12  Observed: 2026-11-12T10:58:57Z Health: error: Control plane is unavailable  Recovery: Check network access and Paperboat authentication Health: warning: No relay is usable: no relay is authorized for both machines  Recovery: Direct connections keep working. Paperboa"
+  },
+  {
+   "check": "outage: pb doctor runs and names the control plane",
+   "status": "PASS",
+   "detail": "Paperboat doctor: unhealthy Correlation: support_3b579973-d9d2-4ce5-9d40-9deae7727dd0 authentication: fail: Paperboat authentication is unavailable.   Recovery: Check local credential storage and the "
+  },
+  {
+   "check": "control plane reachable again",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "recovery: pb status healthy again",
+   "status": "PASS",
+   "detail": "63 s after the start; Daemon: ready  Generation: 13  Observed: 2026-11-12T11:10:38Z Health: warning: No relay is usable: no relay is authorized for both machines  Recovery: Direct connections keep working. Paperboat retries the relays automatically; check that UDP and HTTPS to the relays are allowed"
+  },
+  {
+   "check": "recovery: new exec a->b",
+   "status": "PASS",
+   "detail": "recovered-ab"
+  },
+  {
+   "check": "recovery: new exec b->a",
+   "status": "PASS",
+   "detail": "recovered-ba"
+  },
+  {
+   "check": "recovery: revoked r still refused",
+   "status": "PASS",
+   "detail": "`pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_94638b58-c1f3-419c-a493-c6aedac8c7ff."
+  },
+  {
+   "check": "recovery: long-ab finished rc 0 with its output",
+   "status": "PASS",
+   "detail": "long-ab-done"
+  },
+  {
+   "check": "recovery: long-ba finished rc 0 with its output",
+   "status": "PASS",
+   "detail": "long-ba-done"
+  }
+ ]
+}

@@ -369,3 +369,41 @@ Go SDK rows below are planned acceptance checks; named checks to add are not pas
 | ID | Command | Purpose | L | M | W | Evidence |
 |---|---|---|---|---|---|---|
 | C293 | `pb mcp` | Serve Paperboat tools over MCP stdio | [x] | [ ] | [x] | L [x] 2026-11-12: command_rows.py C293: --json refused before start, initialize + tools/list stdio handshake lists list_machines/exec/send_file, clean exit on EOF (Windows: PowerShell keeps stdin open, winhost MCP_HANDSHAKE). PASS on hp (pb dev-a427ba5f6r3). W [x] 2026-11-12: same row PASS on winpool-13 (Windows Server 2025 hosted runner, dev-36f2a7735). M waits for the Mac (one light run). Result tools/device-smoke/results/command-rows-c286-c293-20261112.txt. Flags: cli/docs/cli/pb_mcp.md. Behavior rows: F24-00 and following. |
+
+## One exec costs about 12 round trips on a slow path — measured 2026-11-12 (rel lane)
+
+Found by the macOS lane: `pb exec true` over a ~290 ms relayed path takes 3-4 s. Measured on two throwaway machines on one host
+(warm daemon, direct path, `tc netem delay 290ms` on the client's egress so every dependent exchange costs 290 ms):
+
+| | time |
+|---|---|
+| no delay | 1.4-1.9 s (about 1.7 s of local work: process start, daemon IPC, WireGuard and QUIC crypto) |
+| all traffic +290 ms | 5.2 s, so about 12 dependent exchanges |
+| only the peer path (UDP) delayed | 3.3 s, about 5-6 exchanges |
+| only the control-plane path (TCP) delayed | 2.4 s, about 2-3 exchanges |
+
+Timeline of one exec at +290 ms (packet capture, 4.65 s):
+1. 0-0.4 s local: `pb exec` start, daemon IPC, warm machine lookup. 0 round trips.
+2. 0.4-2.7 s control plane: descriptor request (1 RTT, creates the per-operation access session and its peer grant), then
+   `network_refresh` (`acquireNativeRuntime` -> `RefreshForAdmission`): the client downloads the whole signed peer network document
+   because the new grant's resource id is not in its cached copy (`hostRulesAdmission`, cli/internal/tunnel/peer_terminal.go:226).
+   On the prod test account that document is about 265 KB, so TCP slow start alone adds about 4 RTT. A normal account with a few
+   machines is a few KB: about 1 RTT.
+3. 2.7-4.9 s peer: WireGuard handshake (1), stream open and admission (1), preface/token and welcome (1), application
+   authenticate (1), exec start request and ack (1), started/exit events (1-2), close (1): 7-9 RTT.
+
+Prior art: Tailscale SSH evaluates its policy locally from the cached netmap for every session (ssh/tailssh/tailssh.go
+`evaluatePolicy`, no control-plane call unless the action is `check`); Teleport's node checks the user certificate it already holds
+(lib/srv/authhandlers.go `PublicKeyCallback`), with the auth server only recording the session. Neither fetches a document or
+creates a grant per command, and a multiplexed SSH exec adds 1-2 RTT.
+
+What could be cut, largest first:
+- The per-exec network refresh (2-5 RTT): return the signed scope of the new grant inside the descriptor response, or fetch the
+  document conditionally (revision / ETag), or let two machines of one owner use a standing `exec` scope (the host already admits
+  from its own `machine_access` scopes offline, F21-11) and keep the per-operation grant only for audit.
+- The stream setup frames (3-4 RTT): send authenticate and the exec start request in the same flight as the preface (the server
+  answers in order), instead of waiting for the welcome and the authenticate ack.
+- The second WireGuard handshake seen in the capture (1.4 s and 2.8 s): a session closed after each exec makes the next exec
+  handshake again; keeping the session for a few seconds would save 1 RTT on back-to-back commands.
+Each is a protocol or authorization change on both ends: not done before the launch freeze (audit and revocation fences depend
+on the per-operation grant). Re-measure with tools/device-smoke/perf_dataplane.py after any of them.
