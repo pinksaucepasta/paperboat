@@ -479,6 +479,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if err := meter.RestoreBaseline(); err != nil {
 		return nil, fmt.Errorf("restore usage baseline: %w", err)
 	}
+	telemetryLifecycle.usageCounters = meter.CounterPressure
 	runtimeTransport, err := edgehttp.NewDataCarrierPreviewTransport(edgehttp.DataCarrierPreviewTransportConfig{Registry: runtimeRoutes, StreamOpenTimeout: deployment.ControlTimeout, RuntimeUsage: meter})
 	if err != nil {
 		return nil, err
@@ -953,6 +954,8 @@ type telemetryLifecycle struct {
 	clock      func() time.Time
 	reporter   *reporting.Reporter
 	usageQueue func() usage.QueueStats
+	// usageCounters is the counters held and their limit.
+	usageCounters func() (held, limit int)
 
 	mu           sync.Mutex
 	started      bool
@@ -1149,6 +1152,12 @@ func (l *telemetryLifecycle) exportMetrics(ctx context.Context) {
 			l.reporter.Observe(ctx, "backlog", "failed", "capacity", "", -1)
 		}
 	}
+	// Counters at their limit are all undelivered: streams are still served, delivery is behind.
+	if l.usageCounters != nil {
+		if held, limit := l.usageCounters(); held >= limit {
+			l.reporter.Observe(ctx, "backlog", "failed", "capacity", "", -1)
+		}
+	}
 	l.reporter.MetricSnapshots(ctx, snapshots)
 }
 
@@ -1241,7 +1250,7 @@ func restoreState(path string) (*operation.Journal, *usage.Counters, *usage.Queu
 	saved, err := store.Load(path)
 	if errors.Is(err, os.ErrNotExist) {
 		journal, journalErr := operation.NewJournal(4096)
-		queue, queueErr := usage.NewQueue(4096, 64<<20)
+		queue, queueErr := usage.NewQueue(usage.QueueReports, usage.QueueBytes)
 		return journal, usage.NewCounters(), queue, errors.Join(journalErr, queueErr)
 	}
 	if err != nil {
@@ -1251,7 +1260,7 @@ func restoreState(path string) (*operation.Journal, *usage.Counters, *usage.Queu
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	queue, err := usage.RestoreQueue(saved.PendingUsage, 4096, 64<<20)
+	queue, err := usage.RestoreQueue(saved.PendingUsage, usage.QueueReports, usage.QueueBytes)
 	return journal, usage.RestoreCounters(saved.Counters), queue, err
 }
 

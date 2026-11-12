@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"sort"
 	"sync"
 	"time"
 )
@@ -316,6 +317,17 @@ func (q *Queue) HasKey(key Key) bool {
 	return false
 }
 
+// pendingKeys is the set of counters that still have an undelivered report.
+func (q *Queue) pendingKeys() map[Key]struct{} {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	keys := make(map[Key]struct{}, len(q.pending))
+	for _, report := range q.pending {
+		keys[report.Key.counterIdentity()] = struct{}{}
+	}
+	return keys
+}
+
 func (q *Queue) Snapshot() QueueState {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -355,6 +367,37 @@ func (c *Counters) pruneDelivered(now time.Time, q *Queue, reported map[Key]uint
 	}
 	return removed
 }
+func (c *Counters) len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.values)
+}
+
+// evictDelivered removes the oldest counters whose latest value is already delivered (reported
+// and not pending) until at most target remain, and returns the evicted keys.
+func (c *Counters) evictDelivered(target int, reported map[Key]uint64, pending map[Key]struct{}) []Key {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var delivered []CounterRecord
+	for k, r := range c.values {
+		if _, queued := pending[k]; !queued && reported[k] >= r.Bytes {
+			delivered = append(delivered, r)
+		}
+	}
+	sort.Slice(delivered, func(i, j int) bool { return delivered[i].ObservedAt.Before(delivered[j].ObservedAt) })
+	var removed []Key
+	for _, r := range delivered {
+		if len(c.values) <= target {
+			break
+		}
+		k := r.Key.counterIdentity()
+		delete(c.values, k)
+		delete(c.restoredBaseline, k)
+		removed = append(removed, k)
+	}
+	return removed
+}
+
 func (c *Counters) canAdd(keys []Key, limit int) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()

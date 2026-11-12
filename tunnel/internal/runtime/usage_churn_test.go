@@ -18,7 +18,7 @@ func TestUsageChurnNeverRefusesAStreamAndKeepsTheQueueFlat(t *testing.T) {
 	_, private, _ := ed25519.GenerateKey(nil)
 	queue, _ := usage.NewQueue(queueSize, 1<<22)
 	now := time.Unix(1000, 0)
-	meter := &usage.Meter{Node: "edge", Epoch: "epoch", Counters: usage.NewCounters(), Queue: queue, KeyID: "k", PrivateKey: private, Persist: func() error { return nil }, Now: func() time.Time { return now }}
+	meter := &usage.Meter{Node: "edge", Epoch: "epoch", Counters: usage.NewCounters(), Queue: queue, KeyID: "k", PrivateKey: private, MaxCounters: 1000, Persist: func() error { return nil }, Now: func() time.Time { return now }}
 	sink := &usageSink{}
 	worker := &UsageWorker{Queue: queue, Sink: sink, Prepare: meter, Persist: meter.Persist}
 	deepest := 0
@@ -39,6 +39,9 @@ func TestUsageChurnNeverRefusesAStreamAndKeepsTheQueueFlat(t *testing.T) {
 	}
 	if _, _, err := worker.deliver(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	if held, limit := meter.CounterPressure(); held > limit {
+		t.Fatalf("%d counters held, limit %d", held, limit)
 	}
 	if sink.calls != ticks*perTick || queue.Len() != 0 || deepest > perTick {
 		t.Fatalf("reported %d of %d, queue=%d, deepest=%d", sink.calls, ticks*perTick, queue.Len(), deepest)

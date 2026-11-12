@@ -26,8 +26,11 @@ type Meter struct {
 	mu    sync.Mutex
 	start map[Key]time.Time
 	last  map[Key]uint64
-	// lastPrune throttles pruneDelivered once the counter map passes the queue size.
-	lastPrune time.Time
+	// MaxCounters bounds the counter map; 0 means the policy default.
+	MaxCounters int
+
+	evictions int
+	lastEvict time.Time
 }
 
 // RestoreBaseline marks durable counters as already represented by the
@@ -61,36 +64,78 @@ func (m *Meter) Record(environment, route string, revision uint64, ingress, egre
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	keys := m.keys(environment, route, 0, ingress, egress, authorityID)
+	// Never refuse a stream because usage bookkeeping is full: counters are absolute, so a
+	// key that cannot be queued yet loses nothing and is retried by Flush.
+	if !m.Counters.canAdd(keys, m.counterLimit()) {
+		m.makeRoom()
+	}
+	at := m.now()
+	for _, key := range m.keys(environment, route, revision, ingress, egress, authorityID) {
+		n := ingress
+		if key.Direction == "egress" {
+			n = egress
+		}
+		m.Counters.addAt(key, n, at)
+	}
+	return nil
+}
+
+// keys are the counters a record touches, one per non-zero direction.
+func (m *Meter) keys(environment, route string, revision, ingress, egress uint64, authorityID string) []Key {
 	epoch := m.Epoch
 	// Scoped counters rotate by delivery window, so pruning an acknowledged old
 	// counter cannot restart its absolute value under the same server identity.
 	if authorityID != "" {
 		epoch += ":" + strconv.FormatInt(m.now().Unix()/int64(DeliveryWindow/time.Second), 10)
 	}
+	// An evicted counter's route may resume; a new generation keeps it from restarting the
+	// absolute value under the identity the server already knows.
+	if m.evictions > 0 {
+		epoch += ":e" + strconv.Itoa(m.evictions)
+	}
 	var keys []Key
 	if ingress != 0 {
-		keys = append(keys, Key{Authority: authorityID, Node: m.Node, Epoch: epoch, Environment: environment, Route: route, Direction: "ingress"})
+		keys = append(keys, Key{Authority: authorityID, Node: m.Node, Epoch: epoch, Environment: environment, Route: route, Revision: revision, Direction: "ingress"})
 	}
 	if egress != 0 {
-		keys = append(keys, Key{Authority: authorityID, Node: m.Node, Epoch: epoch, Environment: environment, Route: route, Direction: "egress"})
+		keys = append(keys, Key{Authority: authorityID, Node: m.Node, Epoch: epoch, Environment: environment, Route: route, Revision: revision, Direction: "egress"})
 	}
-	// Never refuse a stream because usage bookkeeping is full: counters are absolute, so a key
-	// that cannot be queued yet loses nothing and is retried by Flush. Past the soft limit,
-	// delivered idle counters are pruned at most once a minute (the scan is quadratic).
-	if now := m.now(); !m.Counters.canAdd(keys, m.Queue.maxReports) && now.Sub(m.lastPrune) >= time.Minute {
-		m.lastPrune = now
-		for _, k := range m.Counters.pruneDelivered(now, m.Queue, m.last) {
-			delete(m.last, k)
-			delete(m.start, k)
+	return keys
+}
+
+func (m *Meter) counterLimit() int {
+	if m.MaxCounters > 0 {
+		return m.MaxCounters
+	}
+	return MaxCounters
+}
+
+// CounterPressure reports the counters held and the limit, for the capacity alert.
+func (m *Meter) CounterPressure() (held, limit int) {
+	return m.Counters.len(), m.counterLimit()
+}
+
+// makeRoom drops delivered counters past the age window, then the oldest delivered ones down to
+// 90% of the limit, at most once a second (the scan is O(counters)). With nothing delivered it
+// frees nothing: the stream is still served.
+func (m *Meter) makeRoom() {
+	now := m.now()
+	if now.Sub(m.lastEvict) < time.Second {
+		return
+	}
+	m.lastEvict = now
+	removed := m.Counters.pruneDelivered(now, m.Queue, m.last)
+	if m.Counters.len() >= m.counterLimit() {
+		removed = append(removed, m.Counters.evictDelivered(m.counterLimit()*9/10, m.last, m.Queue.pendingKeys())...)
+		if len(removed) > 0 {
+			m.evictions++
 		}
 	}
-	if ingress != 0 {
-		m.Counters.addAt(Key{Authority: authorityID, Node: m.Node, Epoch: epoch, Environment: environment, Route: route, Revision: revision, Direction: "ingress"}, ingress, m.now())
+	for _, k := range removed {
+		delete(m.last, k)
+		delete(m.start, k)
 	}
-	if egress != 0 {
-		m.Counters.addAt(Key{Authority: authorityID, Node: m.Node, Epoch: epoch, Environment: environment, Route: route, Revision: revision, Direction: "egress"}, egress, m.now())
-	}
-	return nil
 }
 
 func (m *Meter) Flush() error {

@@ -54,7 +54,7 @@ func TestScopedMeterNeverRefusesAndRotatesPrunedIdentity(t *testing.T) {
 	_, key, _ := ed25519.GenerateKey(nil)
 	now := time.Now().UTC()
 	q, _ := NewQueue(1, 1<<20)
-	m := &Meter{Node: "n", Epoch: "e", Counters: NewCounters(), Queue: q, KeyID: "k", PrivateKey: key, Persist: func() error { return nil }, Now: func() time.Time { return now }}
+	m := &Meter{Node: "n", Epoch: "e", Counters: NewCounters(), Queue: q, KeyID: "k", PrivateKey: key, MaxCounters: 1, Persist: func() error { return nil }, Now: func() time.Time { return now }}
 	if err := m.Record("env", "route", 1, 1, 0, "grant:a"); err != nil {
 		t.Fatal(err)
 	}
