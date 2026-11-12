@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import xplat_fleet as fleet  # noqa: E402
 
 results = {}
-PASSWORD = Path.home() / '.pbmac/xplat2-vault.pw'
+PASSWORD = Path(os.environ.get('XPLAT_VAULT_PW', Path.home() / '.pbmac/xplat2-vault.pw'))
 VALUES = {
     'XP_1_PLAIN': 'plain',
     'XP_2_SPACES': '  leading and  inner   spaces and trailing  ',

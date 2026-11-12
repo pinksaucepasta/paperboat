@@ -131,11 +131,11 @@ class Windows:
         self.device.unlink(path)
 
 
-def linux(name=None):
+def linux(name=None, ct=None):
     user, uid = os.environ.get('XPLAT_L_USER', 'tester'), os.environ.get('XPLAT_L_UID', '1001')
     docker = os.environ.get('XPLAT_L_DOCKER', 'docker').split()  # `sudo -n docker` on a host where the user is not in the docker group
     prefix = ['ssh', L_HOST, *docker, 'exec', '-i', '-u', user, '-e', 'HOME=/home/' + user,
-              '-e', 'XDG_RUNTIME_DIR=/run/user/' + uid, L_CT]
+              '-e', 'XDG_RUNTIME_DIR=/run/user/' + uid, ct or L_CT]
     return Unix(name or PREFIX + '-l', 'linux', prefix, '/home/' + user, '/home/%s/.local/bin/pb' % user)
 
 
@@ -254,9 +254,37 @@ def state(dev):
     return done.rc
 
 
+def login_controller(dev):
+    """Sign the Linux controller in with the fresh account's API token (XPLAT_API_TOKEN_FILE, read here, never printed); a
+    systemd container has no keyring, so the session goes to a file."""
+    shown = json.loads(dev.pb('config', 'show', '--json').text)
+    shown = shown.get('data', shown)
+    dev.write(dev.home + '/.config/paperboat/config.json', json.dumps({'server_url': shown['server_url'], 'auth': {'allow_file_fallback': True}}).encode())
+    token = Path(os.environ['XPLAT_API_TOKEN_FILE']).read_bytes().strip()
+    done = dev.pb('login', '--api-token-file', '-', input=token + b'\n', timeout=120)
+    assert done.rc == 0, 'login failed: ' + (done.text + done.errtext)[-300:]
+
+
+def up(devices):
+    """Install the build (BUILD_DIR/pb-<os>-<arch>) on every device, sign the Linux controller in, pair all."""
+    files = {'linux': 'pb-linux-' + os.environ.get('XPLAT_L_ARCH', 'amd64'), 'darwin': 'pb-darwin-arm64', 'windows': 'pb-windows-amd64.exe'}
+    for dev in devices.values():
+        if dev.os != 'windows' or not dev.pb_path:
+            install(dev, BUILD_DIR / files[dev.os])
+        print('installed', dev.name, flush=True)
+    assert os.environ.get('XPLAT_CONTROLLER') == 'L', 'up signs the Linux device in as the controller: set XPLAT_CONTROLLER=L'
+    login_controller(devices['L'])
+    for key in ('L', 'M', 'W'):
+        if key in devices:
+            print('paired', devices[key].name, pair(devices[key], 'windows' if key == 'W' else 'unix'), flush=True)
+
+
 def main():
     action = sys.argv[1] if len(sys.argv) > 1 else 'status'
-    devices = fleet()
+    keys = sys.argv[sys.argv.index('--devices') + 1].split(',') if '--devices' in sys.argv else ['L', 'M', 'W']
+    devices = {k: d for k, d in fleet().items() if k in keys}
+    if action == 'up':
+        return up(devices)
     if action == 'status':
         for key, dev in devices.items():
             done = dev.pb('version')
@@ -273,7 +301,7 @@ def main():
                 controller_pb('machine', 'revoke', mid, '--json', '--confirm', token)
                 print('revoked', dev.name, mid)
     else:
-        raise SystemExit('usage: xplat_fleet.py status|down')
+        raise SystemExit('usage: xplat_fleet.py up|status|down')
 
 
 if __name__ == '__main__':

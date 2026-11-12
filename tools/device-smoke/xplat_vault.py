@@ -21,8 +21,8 @@ import xplat_fleet as fleet  # noqa: E402
 import xplat_env as env  # noqa: E402
 
 results = {}
-PASSWORD = Path.home() / '.pbmac/xplat2-vault.pw'
-RECOVERY = Path.home() / '.pbmac/xplat2-recovery'
+PASSWORD = Path(os.environ.get('XPLAT_VAULT_PW', Path.home() / '.pbmac/xplat2-vault.pw'))
+RECOVERY = Path(os.environ.get('XPLAT_VAULT_RECOVERY', Path.home() / '.pbmac/xplat2-recovery'))
 
 SEARCH = r'''
 import os, sys
@@ -123,6 +123,27 @@ def t_lock(dev):
     return 'lock refuses ENV, a wrong secret fails, the password unlocks, the recovery code opens it through recover (%s)' % return_value
 
 
+def t_persist(dev, other):
+    """The unlock survives a daemon restart where the OS has a secure store (Keychain on M, Credential Manager on W) and is
+    gone on Linux without a Secret Service (keys only in daemon memory, as `pb env vault init --help` says); locking here
+    leaves the other device's vault open."""
+    password = PASSWORD.read_bytes().strip()
+    assert unlock(dev, password).rc == 0 and unlock(other, password).rc == 0
+    assert dev.pb('env', 'vault', 'lock').rc == 0 and other.pb('env', 'list').rc == 0, 'locking %s locked %s' % (dev.name, other.name)
+    assert unlock(dev, password).rc == 0
+    assert dev.pb('service', 'restart', timeout=180).rc == 0, 'service restart failed'
+    deadline, readable = time.time() + 90, False
+    while time.time() < deadline and not readable:
+        time.sleep(5)
+        readable = dev.pb('env', 'list').rc == 0
+    if dev.os == 'linux':
+        assert not readable, 'a Linux machine without a Secret Service kept the unlock across a daemon restart'
+        assert unlock(dev, password).rc == 0
+        return 'after a daemon restart %s asks for the password again (memory-only custody); locking it left %s open' % (dev.name, other.name)
+    assert readable, 'the unlock did not survive a daemon restart on %s (secure store)' % dev.name
+    return 'the unlock survived a daemon restart on %s (secure store); locking it left %s open' % (dev.name, other.name)
+
+
 def t_remove(dev, other):
     """Removing this machine's custody leaves the account's values and the other machine's vault alone."""
     account = fleet.json_pb(dev, 'auth', 'status')['account']['id']
@@ -197,6 +218,8 @@ def main():
     order = list(devices)
     for i, key in enumerate(order):
         check('remove', key, lambda: t_remove(devices[key], devices[order[(i + 1) % len(order)]]))
+    for i, key in enumerate(order):
+        check('persist', key, lambda: t_persist(devices[key], devices[order[(i + 1) % len(order)]]))
     for key, dev in devices.items():
         check('leak', key, lambda: t_leak(dev))
     for i, a_key in enumerate(order):
