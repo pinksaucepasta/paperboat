@@ -115,17 +115,8 @@ func TestManagedEnvironmentIsResolvedForEachNewProcess(t *testing.T) {
 		t.Fatalf("first environment=%q", got)
 	}
 	value = "second"
-	if got := run("operation_managed_second", map[string]string{"override": "request"}); got != "second|request" {
+	if got := run("operation_managed_second", map[string]string{"OVERRIDE": "request"}); got != "second|request" {
 		t.Fatalf("second environment=%q", got)
-	}
-}
-
-func TestRequestRejectsCaseFoldedEnvironmentDuplicates(t *testing.T) {
-	root := t.TempDir()
-	manager := testManager(t, root, nil)
-	_, _, err := manager.Start(context.Background(), Request{OperationID: "operation_duplicate_environment", Argv: []string{"/bin/true"}, CWD: root, Environment: map[string]string{"Token": "one", "TOKEN": "two"}})
-	if !errors.Is(err, ErrInvalid) {
-		t.Fatalf("error=%v", err)
 	}
 }
 

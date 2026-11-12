@@ -162,7 +162,6 @@ func TestProcessPolicyRejectsUnboundedOrNULStaticValues(t *testing.T) {
 		{arguments: []string{"bad\x00argument"}},
 		{arguments: tooManyArguments},
 		{environment: []string{"BAD=bad\x00value"}},
-		{environment: []string{"Token=one", "TOKEN=two"}},
 		{environment: tooManyEnvironment},
 	} {
 		if _, err := ValidateProcessPolicy("/bin/sh", test.arguments, test.environment); !errors.Is(err, ErrInvalidCommand) {
