@@ -17,6 +17,10 @@ Checks (every one is a line in the result JSON; the drill exits 1 on any FAIL):
              "No relay is usable" warning is present throughout and is not part of the check)
   recovery   pb status is healthy again, both long execs finished rc 0 with their output, new exec works,
              r is still refused
+
+  control_outage.py revoke   (r freshly paired, not revoked) the owner machine a revokes r while b and r are cut off:
+                             r still reaches b from b's rules during the outage (nobody was told yet), and within
+                             --revoke-wait seconds of the connection returning r is refused (F21-01)
 TOKEN_CMD prints one enrollment token on stdout for the machine name given as its last argument.
 """
 import argparse, base64, json, os, re, shlex, subprocess, sys, time
@@ -223,6 +227,35 @@ def finish(host, res, args, stopped, restored):
     return 0 if all(c["status"] == "PASS" for c in res.checks) else 1
 
 
+def revoke_drill(args):
+    host = load()["host"]
+    res = Result(args.redact)
+    ok, detail = eventually(lambda: exec_ok(host, "r", "b", "revoke-baseline"), 120)
+    res.add("baseline exec r->b before the revocation", ok, detail)
+    cut = " && ".join(f"sudo -n docker exec {NAMES[k]} ip route add blackhole {args.api_ip}" for k in ("b", "r"))
+    restore = "; ".join(f"sudo -n docker exec {NAMES[k]} ip route del blackhole {args.api_ip}" for k in ("b", "r"))
+    rc, out = host_run(host, cut, 60)
+    res.add("b and r cut off from the control plane", rc == 0, out.strip()[-120:])
+    restored = None
+    try:
+        time.sleep(30)
+        ok, detail = revoke_machine(host, NAMES["a"], active_name(host, NAMES["a"], NAMES["r"]))
+        res.add("a revokes r during the outage", ok, detail)
+        time.sleep(30)
+        ok, detail = exec_ok(host, "r", "b", "revoke-in-outage")
+        res.add("during the outage r still reaches b from b's rules (the revocation has not arrived)", ok, detail)
+    finally:
+        restored = host_run(host, restore, 60)
+    res.add("control plane reachable again", restored[0] == 0, restored[1].strip()[-120:])
+    started = time.time()
+    ok, detail = eventually(lambda: refused(host, "r", "b"), args.revoke_wait, 10)
+    res.add(f"after the connection returned r is refused within {args.revoke_wait} s", ok, f"{int(time.time() - started)} s; {detail}")
+    path = HERE / "results" / f"control-outage-revoke-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.json"
+    path.write_text(json.dumps({"checks": res.checks}, indent=1) + "\n")
+    print("result:", path)
+    return 0 if all(c["status"] == "PASS" for c in res.checks) else 1
+
+
 def active_name(host, from_ct, stem):
     """The online enrollment named stem or stem-N: a name already used by an earlier, revoked record is numbered."""
     rc, out = in_ct(host, from_ct, f"{PB} machine list", 60)
@@ -251,7 +284,7 @@ def cleanup(args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("phase", choices=["setup", "drill", "cleanup"])
+    parser.add_argument("phase", choices=["setup", "drill", "revoke", "cleanup"])
     parser.add_argument("--host", default="ubuntu@anvit")
     parser.add_argument("--binary")
     parser.add_argument("--token-cmd")
@@ -259,12 +292,15 @@ def main():
     parser.add_argument("--outage-seconds", type=int, default=660)
     parser.add_argument("--mode", choices=["blackhole", "stop"], default="blackhole")
     parser.add_argument("--api-ip", help="the staging API address to cut off in --mode blackhole")
+    parser.add_argument("--revoke-wait", type=int, default=180)
     parser.add_argument("--redact", action="append", default=[], help="host names to replace with example.test in the result")
     args = parser.parse_args()
     if args.phase == "setup":
         setup(args)
     elif args.phase == "drill":
         sys.exit(drill(args))
+    elif args.phase == "revoke":
+        sys.exit(revoke_drill(args))
     else:
         cleanup(args)
 

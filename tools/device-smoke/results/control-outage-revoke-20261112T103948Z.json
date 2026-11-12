@@ -1,0 +1,34 @@
+{
+ "checks": [
+  {
+   "check": "baseline exec r->b before the revocation",
+   "status": "PASS",
+   "detail": "revoke-baseline"
+  },
+  {
+   "check": "b and r cut off from the control plane",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "a revokes r during the outage",
+   "status": "PASS",
+   "detail": "s\":\"rel-sco-r\",\"id\":\"machine_a66a3037-0167-4884-92c3-5f3dcb993c97\",\"state\":\"disconnected\"},\"outcome\":\"confirmed\",\"retry\":\"not_required\",\"version\":\"1\"}"
+  },
+  {
+   "check": "during the outage r still reaches b from b's rules (the revocation has not arrived)",
+   "status": "PASS",
+   "detail": "revoke-in-outage Paperboat ENV not applied: delivery to this machine is pending. The command ran without your managed values; run `pb env vault unlock` on any of your devices."
+  },
+  {
+   "check": "control plane reachable again",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "after the connection returned r is refused within 180 s",
+   "status": "PASS",
+   "detail": "0 s; The printed link works on another device when this machine has no browser. Then retry. Support reference: support_bb1311ae-accc-455a-95a1-76f1c06079ad. Run `pb bugreport --upload` to send the details."
+  }
+ ]
+}

@@ -1,0 +1,24 @@
+cut at 09:19:41
+min 1 09:21:00 EXEC-OK term_lines=1 | m1-ok 
+min 2 09:21:59 EXEC-OK term_lines=1 | m2-ok 
+min 3 09:23:00 EXEC-OK term_lines=1 | m3-ok 
+min 4 09:24:00 EXEC-OK term_lines=1 | m4-ok 
+min 5 09:24:59 EXEC-OK term_lines=1 | m5-ok 
+min 6 09:25:59 EXEC-OK term_lines=1 | m6-ok 
+min 7 09:27:00 EXEC-OK term_lines=1 | m7-ok 
+min 8 09:28:00 EXEC-OK term_lines=1 | m8-ok 
+min 9 09:28:59 EXEC-OK term_lines=1 | m9-ok 
+min 10 09:30:00 EXEC-OK term_lines=1 | m10-ok 
+min 11 09:30:59 EXEC-OK term_lines=1 | m11-ok 
+min 12 09:31:59 EXEC-OK term_lines=1 | m12-ok 
+min 13 09:33:00 EXEC-OK term_lines=1 | m13-ok 
+min 14 09:33:59 EXEC-OK term_lines=1 | m14-ok 
+min 15 09:35:00 EXEC-OK term_lines=1 | m15-ok 
+min 16 09:35:59 EXEC-OK term_lines=1 | m16-ok 
+min 17 09:37:00 EXEC-OK term_lines=1 | m17-ok 
+min 18 09:37:59 EXEC-OK term_lines=1 | m18-ok 
+min 19 09:39:00 EXEC-OK term_lines=1 | m19-ok 
+min 20 09:39:59 EXEC-OK term_lines=1 | m20-ok 
+min 21 09:40:59 EXEC-OK term_lines=1 | m21-ok 
+min 22 09:42:00 EXEC-OK term_lines=1 | m22-ok 
+restored at 09:42:00
