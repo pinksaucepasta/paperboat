@@ -396,7 +396,91 @@ def t_manage(team, o, m, oid):
         stop_origin()
 
 
-STEPS = [('visible', t_visible), ('exec', t_exec), ('terminal', t_terminal), ('session', t_session), ('files', t_files), ('manage', t_manage), ('private', t_private), ('end', t_end)]
+def readd_members():
+    """final_fixtures.py puts the throwaway accounts back as active members after a removal step (the test-fixtures endpoint)."""
+    emails = [json.load(open(path))['email'] for path in os.environ['XPE_ACCOUNT_FILES'].split(',')]
+    args = [sys.executable, str(HERE / 'final_fixtures.py'), '--email', emails[0]]
+    for email in emails[1:]:
+        args += ['--member', email]
+    token = Path(os.path.expanduser('~/.pbmac/fixtures.token')).read_text().strip()
+    done = subprocess.run(args, capture_output=True, text=True, timeout=300,
+                          env=dict(os.environ, FINAL_FIXTURES_URL=os.environ['XPE_FIXTURES_URL'], FINAL_FIXTURES_TOKEN=token))
+    assert done.returncode == 0, 'could not put the members back: ' + done.stderr[-200:]
+
+
+def open_member_terminal(team, o, m):
+    with as_host(m):
+        term = xplat_term.Terminal(m, o, ['--workspace', team.id])
+    term.ready()
+    return term
+
+
+def ended_within(term, seconds):
+    started = time.time()
+    while term.child.isalive() and time.time() - started < seconds + 15:
+        time.sleep(1)
+    return None if term.child.isalive() else time.time() - started
+
+
+def t_removal(team, o, m, oid):
+    """Removing a team member ends the open terminals that depend on the membership within END_SECONDS: the member's own, or, when the member is the
+    team owner, those into the removed member's machine. The machine disappears from the member's list; the member is put back afterwards."""
+    owner_id = fleet.json_pb(team.admin, 'auth', 'status')['account']['id']
+    member_id = team.member_account()
+    removed = member_id if member_id != owner_id else fleet.json_pb(team.owner, 'auth', 'status')['account']['id']
+    term = open_member_terminal(team, o, m)
+    try:
+        team.admin_pb('team', 'remove', team.id, removed, '--generation', team.generation())
+        took = ended_within(term, END_SECONDS)
+        assert took is not None, 'the open terminal was still open %ds after the member was removed' % (END_SECONDS + 15)
+        assert took <= END_SECONDS, 'the terminal ended %ds after the removal (bound %ds)' % (took, END_SECONDS)
+        visible = [x for x in (fleet.json_pb(m, '--workspace', team.id, 'machine', 'list')['machines'] if m.pb('--workspace', team.id, 'machine', 'list', '--json').rc == 0 else [])
+                   if x['alias'] == o.name]
+        assert not visible, 'the machine is still listed for the member after the removal'
+        return 'removing %s ended the open terminal in %ds and hid the machine (member OS %s, machine OS %s)' % ('the member' if removed == member_id else 'the machine owner', took, m.os, o.os)
+    finally:
+        term.close()
+        readd_members()
+        team.share(oid)
+
+
+def sql(statement):
+    done = subprocess.run(['ssh', 'root@coolify', "docker exec -i paperboat-postgres-1 sh -c 'psql -U \"$POSTGRES_USER\" -d \"${POSTGRES_DB:-$POSTGRES_USER}\" -v ON_ERROR_STOP=1'"],
+                          input=statement, capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, 'sql: ' + done.stderr[-200:]
+
+
+def t_suspension(team, o, m, oid):
+    """Suspending the team (the operator's update; the same single-row update team_two_account.py uses, on this throwaway team only) ends the open terminal
+    within END_SECONDS and hides the machine; resuming brings access back."""
+    quoted = team.id.replace("'", "")
+    suspend = "set search_path to paperboat; update paperboat.teams set suspended=true,suspended_at=now(),suspended_by=owner_account,generation=generation+1 where team_id='%s';" % quoted
+    resume = "set search_path to paperboat; update paperboat.teams set suspended=false,suspended_at=null,suspended_by=null,generation=generation+1 where team_id='%s';" % quoted
+    term = open_member_terminal(team, o, m)
+    try:
+        sql(suspend)
+        took = ended_within(term, END_SECONDS)
+        assert took is not None and took <= END_SECONDS, 'the open terminal was %s after the suspension' % ('still open %ds' % (END_SECONDS + 15) if took is None else 'closed after %ds (bound %ds)' % (took, END_SECONDS))
+        listed = m.pb('--workspace', team.id, 'machine', 'list', '--json')
+        gone = listed.rc != 0 or not any(x['alias'] == o.name for x in json.loads(listed.text)['machines'])
+        assert gone, 'the suspended team still shows the machine to the member'
+        refused = team.admin.pb('team', 'machine', 'grant', team.id, oid, '--all-members', '--capability', 'files', '--generation', team.generation(), '--json')
+        assert refused.rc != 0 and 'suspend' in (refused.text + refused.errtext).lower(), 'a mutation during the suspension was not refused naming the suspension: ' + (refused.text + refused.errtext)[-160:]
+        sql(resume)
+        for _ in range(12):
+            back = m.pb('--workspace', team.id, 'machine', 'list', '--json')
+            if back.rc == 0 and any(x['alias'] == o.name for x in json.loads(back.text)['machines']):
+                break
+            time.sleep(5)
+        else:
+            raise AssertionError('access did not return after the team resumed')
+        return 'suspension ended the open terminal in %ds, hid the machine and refused a mutation naming it; resume brought access back (member OS %s, machine OS %s)' % (took, m.os, o.os)
+    finally:
+        sql(resume)
+        term.close()
+
+
+STEPS = [('visible', t_visible), ('exec', t_exec), ('terminal', t_terminal), ('session', t_session), ('files', t_files), ('manage', t_manage), ('private', t_private), ('end', t_end), ('removal', t_removal), ('suspension', t_suspension)]
 
 
 def check(name, pair, action):
@@ -423,8 +507,8 @@ def main():
     for pair in pairs:
         a, b = pair.split('>')
         # a machine of OS L or W is the team owner's (account A) and the member is account F; the Mac's is F's, used from A's devices
-        if a == 'M':
-            o, m, owner_account, probe = other['M'], own[b], other['L'], own['L']
+        if a in os.environ.get('XPE_OTHER_OWNS', 'M'):  # OS letters whose machine is the other account's (default: the fleet Mac)
+            o, m, owner_account, probe = other[a], own[b], other['L'], own['L']
         else:
             o, m, owner_account, probe = own[a], other[b], own['L'], other['L']
         team = Team(own['L'], setter, owner_account, probe)
