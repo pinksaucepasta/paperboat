@@ -166,10 +166,12 @@ func (a *Assembly) Drain(ctx context.Context, deadline time.Time) {
 	ctx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
 	var done sync.WaitGroup
-	for _, server := range []Component{a.Gateway, a.Private, a.Redirect, a.HTTP3} {
+	for _, server := range []*HTTPServer{a.Gateway, a.Private, a.Redirect} {
 		done.Add(1)
-		go func() { defer done.Done(); _ = server.Shutdown(ctx) }()
+		go func() { defer done.Done(); _ = server.Drain(ctx) }()
 	}
+	done.Add(1)
+	go func() { defer done.Done(); _ = a.HTTP3.Shutdown(ctx) }()
 	if carrier, ok := a.dataPlane.spec.Carrier.(interface {
 		Drain(context.Context, time.Time)
 	}); ok {

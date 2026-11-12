@@ -161,7 +161,8 @@ func TestEdgeHandoverHelperProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var drainer edgeruntime.Drainer
+	server := &http.Server{Handler: drainer.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		deadline := time.Now().Add(5 * time.Second)
 		for {
 			if route, ok := routes.Lookup(handoverHost); ok {
@@ -187,7 +188,7 @@ func TestEdgeHandoverHelperProcess(t *testing.T) {
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
-	})}
+	}))}
 	go func() { _ = server.Serve(public) }()
 	if inheritance != nil {
 		select {
@@ -213,7 +214,7 @@ func TestEdgeHandoverHelperProcess(t *testing.T) {
 	defer stopDrain()
 	var drained sync.WaitGroup
 	drained.Add(2)
-	go func() { defer drained.Done(); _ = server.Shutdown(drainCtx) }()
+	go func() { defer drained.Done(); _ = drainer.Drain(drainCtx, server, public, 2*time.Second) }()
 	go func() {
 		defer drained.Done()
 		component.(interface {
