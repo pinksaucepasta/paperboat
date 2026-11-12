@@ -9,7 +9,8 @@ const { chromium } = await import(process.env.PW_MODULE ?? "playwright-core")
 
 const origin = process.env.ORIGIN
 const [script, path = "/", globals = "{}"] = process.argv.slice(2)
-const browser = await chromium.launch({ executablePath: process.env.PW_CHROMIUM })
+// PW_CHANNEL (chrome, msedge) runs the check in the browser installed on that machine instead of a downloaded Chromium.
+const browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : { channel: process.env.PW_CHANNEL })
 const page = await (await browser.newContext({ storageState: process.env.STATE })).newPage()
 await page.goto(origin + path)
 await page.waitForLoadState("networkidle").catch(() => {})
