@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"net/url"
 	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -20,7 +21,7 @@ func findTunnelByExactName(ctx context.Context, client *api.Client, name string)
 	seen := make(map[string]struct{})
 	for pageNumber := 0; pageNumber < 10; pageNumber++ {
 		page, err := retryTunnelRead(ctx, func() (api.TunnelPage, error) {
-			return client.ListTunnelsV1(ctx, cursor, 200)
+			return client.ListTunnelsV1Filtered(ctx, cursor, 200, tunnelSelectorFilter(name))
 		})
 		if err != nil {
 			return api.Tunnel{}, err
@@ -42,36 +43,25 @@ func findTunnelByExactName(ctx context.Context, client *api.Client, name string)
 	return api.Tunnel{}, api.ErrUnsafeTunnelResponse
 }
 
+// tunnelSelectorFilter asks the server for the tunnels whose id, name, address or host contain the selector, so one
+// command reads the few tunnels that can match instead of every tunnel of the account (each list page costs the server
+// a permission decision per tunnel: with ~240 tunnels every `pb tunnel delete` made two 4 s lists). A selector is
+// matched exactly (id or name) on what comes back, as before.
+func tunnelSelectorFilter(selector string) url.Values {
+	return url.Values{"q": {selector}}
+}
+
 func resolveTunnelSelector(ctx context.Context, client *api.Client, value string) (string, error) {
 	if ctx == nil || client == nil || strings.TrimSpace(value) == "" || value != strings.TrimSpace(value) ||
 		!validTunnelCLIName(value, 63) && !validTunnelCLIResourceID(value) {
 		return "", api.ErrUnsafeTunnelResponse
 	}
-	canonicalID := ""
-	if strings.HasPrefix(value, "tun_") && validTunnelCLIResourceID(value) {
-		tunnel, err := retryTunnelRead(ctx, func() (api.Tunnel, error) {
-			return client.GetTunnelV1(ctx, value)
-		})
-		switch {
-		case err == nil:
-			if tunnel.ID != value {
-				return "", api.ErrUnsafeTunnelResponse
-			}
-			canonicalID = tunnel.ID
-		case api.IsNotFound(err):
-		default:
-			return "", err
-		}
-	}
 	cursor := ""
 	seen := map[string]struct{}{cursor: {}}
 	matches := make(map[string]struct{})
-	if canonicalID != "" {
-		matches[canonicalID] = struct{}{}
-	}
 	for pageNumber := 0; pageNumber < 10; pageNumber++ {
 		page, err := retryTunnelRead(ctx, func() (api.TunnelPage, error) {
-			return client.ListTunnelsV1(ctx, cursor, 200)
+			return client.ListTunnelsV1Filtered(ctx, cursor, 200, tunnelSelectorFilter(value))
 		})
 		if err != nil {
 			return "", err

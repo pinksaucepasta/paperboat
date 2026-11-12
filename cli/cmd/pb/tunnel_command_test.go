@@ -463,11 +463,8 @@ func TestResolveTunnelSelectorRejectsIDNameCollision(t *testing.T) {
 	other.ID, other.Name, other.ETag = "tun_2", "tun_1", `"tunnel:tun_2:4"`
 	client := tunnelSelectorTestClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
-		case "/v1/tunnels/tun_1":
-			writer.Header().Set("ETag", canonical.ETag)
-			_ = json.NewEncoder(writer).Encode(map[string]any{"data": canonical})
 		case "/v1/tunnels":
-			_ = json.NewEncoder(writer).Encode(map[string]any{"data": api.TunnelPage{Items: []api.Tunnel{other}}})
+			_ = json.NewEncoder(writer).Encode(map[string]any{"data": api.TunnelPage{Items: []api.Tunnel{canonical, other}}})
 		default:
 			t.Fatalf("request=%s", request.URL.String())
 		}
@@ -478,27 +475,23 @@ func TestResolveTunnelSelectorRejectsIDNameCollision(t *testing.T) {
 	}
 }
 
-func TestResolveTunnelSelectorPreservesCanonicalIDWhenUnambiguous(t *testing.T) {
+// One command must read the few tunnels that can match its selector, not every tunnel of the account: the server filters
+// by q, and an exact id or name is matched on what comes back.
+func TestResolveTunnelSelectorAsksTheServerForOnlyTheMatchingTunnels(t *testing.T) {
 	canonical := validCommandTunnel()
 	canonical.Name = "canonical"
-	var requests []string
-	client := tunnelSelectorTestClient(t, func(writer http.ResponseWriter, request *http.Request) {
-		requests = append(requests, request.URL.Path)
-		switch request.URL.Path {
-		case "/v1/tunnels/tun_1":
-			writer.Header().Set("ETag", canonical.ETag)
-			_ = json.NewEncoder(writer).Encode(map[string]any{"data": canonical})
-		case "/v1/tunnels":
-			_ = json.NewEncoder(writer).Encode(map[string]any{"data": api.TunnelPage{}})
-		default:
-			t.Fatalf("request=%s", request.URL.String())
+	for _, selector := range []string{"tun_1", "canonical"} {
+		var requests []string
+		client := tunnelSelectorTestClient(t, func(writer http.ResponseWriter, request *http.Request) {
+			requests = append(requests, request.URL.Path+"?q="+request.URL.Query().Get("q")+"&limit="+request.URL.Query().Get("limit"))
+			_ = json.NewEncoder(writer).Encode(map[string]any{"data": api.TunnelPage{Items: []api.Tunnel{canonical}}})
+		})
+		if id, err := resolveTunnelSelector(t.Context(), client, selector); err != nil || id != "tun_1" {
+			t.Fatalf("selector %q = %q, %v", selector, id, err)
 		}
-	})
-	if id, err := resolveTunnelSelector(t.Context(), client, "tun_1"); err != nil || id != "tun_1" {
-		t.Fatalf("canonical selector = %q, %v", id, err)
-	}
-	if strings.Join(requests, ",") != "/v1/tunnels/tun_1,/v1/tunnels" {
-		t.Fatalf("requests=%v", requests)
+		if want := "/v1/tunnels?q=" + selector + "&limit=200"; strings.Join(requests, ",") != want {
+			t.Fatalf("selector %q requests=%v, want one request %s", selector, requests, want)
+		}
 	}
 }
 
