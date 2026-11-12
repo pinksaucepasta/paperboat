@@ -202,3 +202,36 @@ func TestVaultJSONRecoverReadsSeparateRecoveryInputFile(t *testing.T) {
 		t.Fatalf("replacement recovery file mode=%o value=%q", mode, replacement)
 	}
 }
+
+// --password-stdin and --password-file drop ONE trailing newline (\n or \r\n), as `docker login --password-stdin` does, and nothing else.
+func TestVaultPasswordSourcesTrimOneTrailingNewlineOnEveryCommand(t *testing.T) {
+	for in, want := range map[string]string{"pw\n": "pw", "pw\r\n": "pw", "pw": "pw", "pw\n\n": "pw\n", " pw \n": " pw ", "pw\r": "pw\r", "\n": ""} {
+		if got := string(trimOneTrailingNewline([]byte(in))); got != want {
+			t.Fatalf("%q -> %q, want %q", in, got, want)
+		}
+	}
+	fixture := newCommandVaultFixture(t)
+	installPasswordVaultCommandDependencies(t, fixture.manager, map[string][][]byte{})
+	root := environmentVariablesCobraCommand()
+	root.SetArgs([]string{"vault", "init", "--json", "--password-stdin"})
+	root.SetIn(strings.NewReader("trim me\r\n"))
+	var output, errorOutput bytes.Buffer
+	root.SetOut(&output)
+	root.SetErr(&errorOutput)
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := executePasswordVaultCommand(t, "vault", "lock", "--json"); err != nil {
+		t.Fatal(err)
+	}
+	for _, content := range []string{"trim me", "trim me\n", "trim me\r\n"} {
+		path := writeVaultInputFile(t, []byte(content), 0o600)
+		if _, _, err := executePasswordVaultCommand(t, "vault", "unlock", "--json", "--password-file", path); err != nil {
+			t.Fatalf("file %q did not unlock a vault initialised from stdin %q: %v", content, "trim me\r\n", err)
+		}
+	}
+	extra := writeVaultInputFile(t, []byte("trim me\n\n"), 0o600)
+	if _, _, err := executePasswordVaultCommand(t, "vault", "unlock", "--json", "--password-file", extra); err == nil {
+		t.Fatal("a second trailing newline was also removed")
+	}
+}

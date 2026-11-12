@@ -42,8 +42,10 @@ func vaultPasswordSource(command *cobra.Command) (path string, stdin bool, err e
 }
 
 // readVaultPasswordSource returns an explicitly supplied password and whether
-// a source was selected. It deliberately preserves every byte, including
-// whitespace and a trailing newline.
+// a source was selected. Like `docker login --password-stdin` it removes ONE
+// trailing newline (\n or \r\n) and nothing else, so `printf 'pw\n' |` at init
+// and a file holding `pw` at unlock are the same password; all other bytes,
+// including other whitespace, are kept.
 func readVaultPasswordSource(command *cobra.Command) ([]byte, bool, error) {
 	path, stdin, err := vaultPasswordSource(command)
 	if err != nil {
@@ -58,7 +60,7 @@ func readVaultPasswordSource(command *cobra.Command) ([]byte, bool, error) {
 			clear(value)
 			return nil, true, userInputFileError("--password-file must be an owner-only regular file no larger than 1024 bytes; check its path and permissions", err)
 		}
-		return value, true, nil
+		return trimOneTrailingNewline(value), true, nil
 	}
 	if !stdin {
 		return nil, false, nil
@@ -71,7 +73,18 @@ func readVaultPasswordSource(command *cobra.Command) ([]byte, bool, error) {
 		clear(value)
 		return nil, true, err
 	}
-	return value, true, nil
+	return trimOneTrailingNewline(value), true, nil
+}
+
+// trimOneTrailingNewline drops a single final "\n" or "\r\n" (the end of the line a shell or editor added).
+func trimOneTrailingNewline(value []byte) []byte {
+	if n := len(value); n > 0 && value[n-1] == '\n' {
+		value = value[:n-1]
+		if m := len(value); m > 0 && value[m-1] == '\r' {
+			value = value[:m-1]
+		}
+	}
+	return value
 }
 
 func readBoundedVaultSecret(input io.Reader) ([]byte, error) {
