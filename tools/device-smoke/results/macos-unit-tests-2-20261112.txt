@@ -1,0 +1,24 @@
+go test -v -count=1 on macpool-2 (GitHub-hosted macOS 26.7.2 arm64, Go 1.27.4), cli module at main ffd027f5d, 2026-11-12 (IST). Tests for CHECKLIST rows F21-159, F21-160, F21-161.
+
+--- PASS: TestNewHostdTokenIsCompleteAndAtomic (0.04s)
+ok  	github.com/pinksaucepasta/paperboat/internal/hostruntime/hostinstall	0.092s
+--- PASS: TestStaleRepositoryLockIsClearedAndALiveOneIsNot (0.00s)
+--- PASS: TestHeldRepositoryLockStaysFreshWhileItsHolderWorks (0.03s)
+ok  	github.com/pinksaucepasta/paperboat/internal/hostruntime/configsync	0.071s
+--- PASS: TestSharedLockIsNotTrustedAcrossAReusedPID (0.00s)
+ok  	github.com/pinksaucepasta/paperboat/internal/config	0.025s
+--- PASS: TestConcurrentDeliveriesFromSeparateInboxesKeepEveryReceipt (0.29s)
+--- PASS: TestUnreadableReceiptJournalIsSetAsideAndDeliveryContinues (0.04s)
+    --- PASS: TestUnreadableReceiptJournalIsSetAsideAndDeliveryContinues/newer_version (0.01s)
+    --- PASS: TestUnreadableReceiptJournalIsSetAsideAndDeliveryContinues/damaged (0.03s)
+ok  	github.com/pinksaucepasta/paperboat/internal/inbox	0.353s
+--- PASS: TestLockExcludesAndIsBoundedByTheContext (0.11s)
+ok  	github.com/pinksaucepasta/paperboat/internal/filelock	0.121s
+--- PASS: TestNewerPreferencesVersionNamesTheRecoveryAndRecoveryWorks (0.00s)
+ok  	github.com/pinksaucepasta/paperboat/cmd/pb	0.288s
+--- PASS: TestDeadDirectPathFallsBackToTheRelayInSeconds (6.65s)
+--- PASS: TestUDPPayloadFitsTheSafeTunnelMTU (0.00s)
+--- PASS: TestAdvertisedHomeIsTheSelectedRegionNotTheLowestID (0.01s)
+ok  	github.com/pinksaucepasta/paperboat/internal/peertransport/mesh	6.721s
+--- PASS: TestAdvertisedHomeIsTheSelectedRelay (0.00s)
+ok  	github.com/pinksaucepasta/paperboat/internal/peertransport/tailnet	0.155s
