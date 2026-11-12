@@ -226,6 +226,14 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 	if err != nil {
 		return PreparedPublication{}, err
 	}
+	// A path one side cannot carry (a link, an unsafe file, a case collision) is left alone on both sides: its absence
+	// must not read as a deletion.
+	for _, skipped := range localFiles.Skipped {
+		delete(remoteFiles.Files, skipped.Path)
+	}
+	for _, skipped := range remoteFiles.Skipped {
+		delete(localFiles.Files, skipped.Path)
+	}
 	r.diagnostics.Skipped = boundPathSummaries(
 		append(append([]PathSummary(nil), localFiles.Skipped...), remoteFiles.Skipped...),
 		r.descriptor.Policy.SummaryLimit,

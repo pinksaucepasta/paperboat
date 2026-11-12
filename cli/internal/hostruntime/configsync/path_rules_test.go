@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/fsnotify/fsnotify"
@@ -460,5 +461,123 @@ func TestMappedSecretExclusionCannotBeBypassedByCaseAlias(t *testing.T) {
 	snapshot, err := m.Snapshot(testRuntimeDescriptor().Policy, manifest, home, true)
 	if err != nil || len(snapshot.Files) != 0 {
 		t.Fatalf("case alias secret exposed: %#v %v", snapshot, err)
+	}
+}
+
+func TestMappedSnapshotSkipsFilesItCannotCarryInsteadOfFailing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits and symlink creation")
+	}
+	home := resolvedTempDir(t)
+	repository := resolvedTempDir(t)
+	dir := filepath.Join(home, "app")
+	outside := filepath.Join(resolvedTempDir(t), "target")
+	writeTestFile(t, outside, "target")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(dir, "ok.txt"), "ok")
+	writeTestFile(t, filepath.Join(dir, "world.txt"), "world")
+	if err := os.Chmod(filepath.Join(dir, "world.txt"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "link.txt")); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(dir, "Same.txt"), "upper")
+	writeTestFile(t, filepath.Join(dir, "same.txt"), "lower")
+	entries, _ := os.ReadDir(dir)
+	caseSensitive := len(entries) == 5 // a case-insensitive volume holds one of Same.txt and same.txt
+	manifest, err := ParseManifest([]byte("app/\n"), nil, DefaultManifestLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := ResolvePathRules(home, []PathRule{{ID: "app", RepositoryPath: "app", LocalPath: dir, Kind: "directory"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := m.Snapshot(testRuntimeDescriptor().Policy, manifest, repository, true)
+	if err != nil {
+		t.Fatalf("one unsafe file failed the whole snapshot: %v", err)
+	}
+	if !caseSensitive {
+		delete(snapshot.Files, "app/Same.txt")
+		delete(snapshot.Files, "app/same.txt")
+	}
+	if _, ok := snapshot.Files["app/ok.txt"]; !ok || len(snapshot.Files) != 1 {
+		t.Fatalf("only ok.txt may travel: %#v", snapshot.Files)
+	}
+	got := map[string]string{}
+	for _, skipped := range snapshot.Skipped {
+		got[skipped.Path] = skipped.Reason
+	}
+	want := map[string]string{"app/link.txt": "unsupported_file_type", "app/world.txt": "unsafe_permissions",
+		"app/Same.txt": "case_collision", "app/same.txt": "case_collision"}
+	if !caseSensitive {
+		delete(want, "app/Same.txt")
+		delete(want, "app/same.txt")
+	}
+	for name, reason := range want {
+		if got[name] != reason {
+			t.Fatalf("%s: skipped as %q, want %q (all: %v)", name, got[name], reason, got)
+		}
+	}
+	if data, _ := os.ReadFile(outside); string(data) != "target" {
+		t.Fatalf("link target changed: %q", data)
+	}
+}
+
+func TestMappedReconcileLeavesALocalLinkAndItsRepositoryFileAlone(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privilege on Windows")
+	}
+	home, state, repoRoot, external := resolvedTempDir(t), resolvedTempDir(t), resolvedTempDir(t), resolvedTempDir(t)
+	if err := os.Mkdir(filepath.Join(repoRoot, "editor"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(repoRoot, "editor/config.json"), "from repository")
+	repo, err := git.PlainInit(repoRoot, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := commitAll(t, repo, "initial")
+	descriptor := testRuntimeDescriptor()
+	descriptor.PathRules = []PathRule{{ID: "editor", RepositoryPath: "editor", LocalPath: external, Kind: "directory"}}
+	r, err := newTestFileReconciler(t, WorkspaceReconcilerConfig{HomeRoot: home, StateRoot: state, Descriptor: descriptor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reconcile := func() {
+		t.Helper()
+		p, err := r.Reconcile(context.Background(), repoRoot, RemoteSnapshot{Revision: revision})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := r.PublicationCommitted(context.Background(), p, p.CommitID); err != nil {
+			t.Fatal(err)
+		}
+		revision = p.CommitID
+	}
+	reconcile()
+	linkTarget := filepath.Join(resolvedTempDir(t), "target")
+	writeTestFile(t, linkTarget, "link target")
+	if err := os.Remove(filepath.Join(external, "config.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(linkTarget, filepath.Join(external, "config.json")); err != nil {
+		t.Fatal(err)
+	}
+	reconcile()
+	if got, _ := os.ReadFile(filepath.Join(repoRoot, "editor/config.json")); string(got) != "from repository" {
+		t.Fatalf("the link read as a deletion or an edit: repository file is %q", got)
+	}
+	if got, _ := os.ReadFile(linkTarget); string(got) != "link target" {
+		t.Fatalf("link target changed: %q", got)
+	}
+	if info, err := os.Lstat(filepath.Join(external, "config.json")); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the link was replaced: %v %v", info, err)
+	}
+	if len(r.diagnostics.Skipped) != 1 || r.diagnostics.Skipped[0].Reason != "unsupported_file_type" {
+		t.Fatalf("the link is not reported: %#v", r.diagnostics.Skipped)
 	}
 }

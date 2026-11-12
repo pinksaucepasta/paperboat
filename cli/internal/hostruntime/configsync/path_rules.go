@@ -76,7 +76,7 @@ func resolvePathRules(home string, rules []PathRule, inspect bool) (*PathMapping
 		}
 		r.LocalPath = local
 		if inspect {
-			if err := checkSafeAbsolutePath(local); err != nil {
+			if err := checkSafeAbsolutePath(linkCheckedPath(r.Kind, local)); err != nil {
 				return fail("unsafe_destination")
 			}
 		}
@@ -159,6 +159,15 @@ func safePortableRepositoryPath(value string) bool {
 
 // Every existing component must be a real directory/file, never a link. This
 // check is repeated immediately before IO, including after parent creation.
+// linkCheckedPath is the path whose every component must be a plain directory. A mapped file may itself be a link:
+// that is reported as unsupported_file_type when it is read, while a link in front of it is refused here.
+func linkCheckedPath(kind, path string) string {
+	if kind == "file" {
+		return filepath.Dir(path)
+	}
+	return path
+}
+
 func checkSafeAbsolutePath(value string) error {
 	if !canonicalAbsolutePath(value) {
 		return ErrPathRuleInvalid
@@ -264,6 +273,11 @@ func (m *PathMapping) SnapshotContext(ctx context.Context, policy RuntimePolicy,
 	result := Snapshot{Files: map[string]FileState{}}
 	var total int64
 	seen := map[string]string{}
+	collided := map[string]bool{}
+	// A file the mapping cannot carry safely is reported and left alone, so one bad file does not stop the rest.
+	skip := func(name, reason string) {
+		result.Skipped = append(result.Skipped, PathSummary{Path: name, Reason: reason})
+	}
 	add := func(name, source string) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -276,13 +290,18 @@ func (m *PathMapping) SnapshotContext(ctx context.Context, policy RuntimePolicy,
 			return nil
 		}
 		key := strings.ToLower(name)
+		if collided[key] {
+			skip(name, "case_collision")
+			return nil
+		}
 		if old, ok := seen[key]; ok && old != name {
-			return &PathRuleError{Code: "case_collision"}
+			delete(result.Files, old) // neither spelling syncs: a case-insensitive peer could hold only one of them
+			collided[key] = true
+			skip(old, "case_collision")
+			skip(name, "case_collision")
+			return nil
 		}
 		seen[key] = name
-		if err := checkSafeAbsolutePath(source); err != nil {
-			return &PathRuleError{Code: "unsafe_source"}
-		}
 		info, err := os.Lstat(source)
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -290,11 +309,16 @@ func (m *PathMapping) SnapshotContext(ctx context.Context, policy RuntimePolicy,
 		if err != nil {
 			return err
 		}
-		if !info.Mode().IsRegular() {
-			return &PathRuleError{Code: "unsupported_file_type"}
+		if !info.Mode().IsRegular() { // a link, junction or special file: reported, never followed
+			skip(name, "unsupported_file_type")
+			return nil
+		}
+		if err := checkSafeAbsolutePath(source); err != nil {
+			return &PathRuleError{Code: "unsafe_source"}
 		}
 		if !safeSnapshotPermissions(source, info) {
-			return &PathRuleError{Code: "unsafe_permissions"}
+			skip(name, "unsafe_permissions")
+			return nil
 		}
 		if info.Size() > policy.MaxFileBytes || info.Size() > policy.MaxBatchBytes-total {
 			return ErrSnapshotInvalid
@@ -330,7 +354,7 @@ func (m *PathMapping) SnapshotContext(ctx context.Context, policy RuntimePolicy,
 		if !local {
 			start = filepath.Join(repositoryRoot, filepath.FromSlash(r.RepositoryPath))
 		}
-		if err := checkSafeAbsolutePath(start); err != nil {
+		if err := checkSafeAbsolutePath(linkCheckedPath(r.Kind, start)); err != nil {
 			return result, err
 		}
 		if _, err := os.Lstat(start); errors.Is(err, os.ErrNotExist) {
