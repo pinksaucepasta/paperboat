@@ -12,6 +12,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	serverdiagnostics "github.com/pinksaucepasta/paperboat/server/internal/diagnostics"
 	pbgithub "github.com/pinksaucepasta/paperboat/server/internal/github"
+	"github.com/pinksaucepasta/paperboat/server/internal/httpapi"
 	"github.com/pinksaucepasta/paperboat/server/internal/mint"
 	"github.com/pinksaucepasta/paperboat/server/internal/runtimeattachment"
 	"github.com/pinksaucepasta/paperboat/server/internal/servernodes"
@@ -356,10 +357,10 @@ type readinessChecker struct {
 
 func (r readinessChecker) Ready(ctx context.Context) error {
 	if r.draining.Load() {
-		return errors.New("server is shutting down")
+		return fmt.Errorf("%w: shutting down", httpapi.ErrNotReady)
 	}
 	if r.warmed != nil && !r.warmed.Load() {
-		return errors.New("server is warming up")
+		return fmt.Errorf("%w: warming up", httpapi.ErrNotReady)
 	}
 	if err := r.db.Ping(ctx); err != nil {
 		return fmt.Errorf("database is not ready: %w", err)

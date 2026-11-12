@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -65,6 +66,11 @@ import (
 type ReadinessChecker interface {
 	Ready(context.Context) error
 }
+
+// ErrNotReady marks a readiness answer that is expected, not a failure: the server is warming up or draining.
+// The probe gets its 503 and nothing is reported (2026-11-12: the warm-up's readyz 503s were captured as three
+// http_health support reports and the deploy gate refused the release).
+var ErrNotReady = errors.New("server is not ready")
 
 type Options struct {
 	Activity               *activity.Service
@@ -833,6 +839,10 @@ func ready(checker ReadinessChecker) http.HandlerFunc {
 			return
 		}
 		if err := checker.Ready(r.Context()); err != nil {
+			if errors.Is(err, ErrNotReady) {
+				writeJSON(w, http.StatusServiceUnavailable, ErrorResponse{Error: APIError{Code: "provider_unavailable", Message: "Service dependencies are not ready.", RequestID: requestIDFromContext(r.Context()), Details: map[string]any{}}})
+				return
+			}
 			writeError(w, r, http.StatusServiceUnavailable, "provider_unavailable", "Service dependencies are not ready.", err)
 			return
 		}

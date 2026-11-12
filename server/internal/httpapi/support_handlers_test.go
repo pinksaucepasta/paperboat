@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -415,4 +416,36 @@ func TestRefusalIsStoredUnderTheReferenceItsResponseCarries(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("the refusal's support reference was not stored")
+}
+
+// A readiness probe answered "not ready" while the server warms up or drains is expected, not a failure: it gets its
+// 503 and nothing is reported (a real provider failure still is: TestReadinessFailureRetainsUnderlyingCause).
+func TestReadinessWhileWarmingUpAnswers503WithoutAReport(t *testing.T) {
+	store := &supportTestStore{}
+	service, err := supportreport.New(store, supportreport.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runCtx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { _ = service.Run(runCtx); close(done) }()
+	defer func() { cancel(); <-done }()
+	router := NewRouter(Options{
+		Config: config.Default(), SupportReports: service,
+		Logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
+		ReadinessChecker: readinessFunc(func(context.Context) error { return fmt.Errorf("%w: warming up", ErrNotReady) }),
+	})
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/readyz", nil)
+	request.RemoteAddr = "127.0.0.1:43210"
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("readiness status=%d body=%s", response.Code, response.Body.String())
+	}
+	time.Sleep(300 * time.Millisecond)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.records) != 0 {
+		t.Fatalf("an expected not-ready answer was reported: %+v", store.records)
+	}
 }
