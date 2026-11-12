@@ -29,7 +29,7 @@ type capturedHelperMessageConnection struct {
 
 func TestHelperResponseTerminalModesRestoresOnlyRecordedModes(t *testing.T) {
 	frame := helperFrame{Payload: json.RawMessage(`{"result":{"session":{"snapshot":{"terminal_modes":{"alternate_screen":true,"mouse_sgr":true,"bracketed_paste":true}}}}}`)}
-	if got, want := helperResponseTerminalModes(frame), "\x1b[?1049h\x1b[?1006h\x1b[?2004h"; got != want {
+	if got, want := helperResponseTerminalModes(frame), "\x1b[?1006h\x1b[?2004h"; got != want {
 		t.Fatalf("modes = %q, want %q", got, want)
 	}
 }

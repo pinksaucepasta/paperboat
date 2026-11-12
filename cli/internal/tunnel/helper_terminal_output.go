@@ -66,6 +66,9 @@ func (c *helperTerminalConn) decodeScreenCheckpoint(frame protocol.TerminalOutpu
 	return output, nil
 }
 
+// helperResponseTerminalModes lists the modes to re-assert for a joiner. The alternate screen is not one of them: the
+// screen checkpoint (main rows, ESC[?1049h, alternate rows) enters it itself, and entering it first would write the
+// main rows into the alternate buffer, where they are lost when the application leaves it.
 func helperResponseTerminalModes(frame helperFrame) string {
 	var response struct {
 		Result struct {
@@ -93,7 +96,7 @@ func helperResponseTerminalModes(frame helperFrame) string {
 	for _, item := range []struct {
 		on bool
 		id string
-	}{{m.AlternateScreen, "1049"}, {m.MouseClick, "1000"}, {m.MouseDrag, "1002"}, {m.MouseMotion, "1003"}, {m.MouseURXVT, "1015"}, {m.MouseSGR, "1006"}, {m.BracketedPaste, "2004"}, {m.FocusEvents, "1004"}} {
+	}{{m.MouseClick, "1000"}, {m.MouseDrag, "1002"}, {m.MouseMotion, "1003"}, {m.MouseURXVT, "1015"}, {m.MouseSGR, "1006"}, {m.BracketedPaste, "2004"}, {m.FocusEvents, "1004"}} {
 		if item.on {
 			out.WriteString("\x1b[?")
 			out.WriteString(item.id)
