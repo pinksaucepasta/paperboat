@@ -29,6 +29,10 @@ type SQLIngressSource struct {
 	// QuotaDenied, when set, receives each public route left out of a projection solely
 	// because its workspace is out of bandwidth allowance (never an authority).
 	QuotaDenied *[]wire.IngressQuotaDenial
+	// ReadOnly projects without retaining accounting bindings: a replacement server's warm-up primes the queries
+	// and must not take the edges' accounting locks while the serving server answers their pulls (2026-11-12 19:54Z
+	// and 19:57Z: the old server's desired-state answers waited on the warm-up's locks and 40001s, edges hit 2 s).
+	ReadOnly bool
 	// edge marks an edge's complete snapshot (Edge): there one route whose decision cannot be
 	// issued is withheld and named in the log instead of failing every route on that edge.
 	edge bool
@@ -212,6 +216,10 @@ func (s SQLIngressSource) project(ctx context.Context, nodeID, epoch, audience, 
 				continue
 			}
 			if !entitled {
+				continue
+			}
+			if s.ReadOnly {
+				admitted = append(admitted, d)
 				continue
 			}
 			if err = accountingauthority.Record(ctx, s.DB, accountingauthority.Binding{ID: fmt.Sprintf("public:%s:%d", b.PublicationID, b.PublicationGeneration), Node: d.EdgeNodeID, Environment: b.EnvironmentID, Route: b.RouteID, Revision: int64(b.RouteGeneration), User: b.AccountID, Team: team, IssuedAt: d.IssuedAt, ExpiresAt: d.ExpiresAt}, s.Quota); err != nil {

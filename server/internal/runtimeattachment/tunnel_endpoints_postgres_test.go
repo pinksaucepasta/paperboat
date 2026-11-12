@@ -322,6 +322,17 @@ VALUES($1,1,sha256(convert_to($1::text,'UTF8')),convert_to(json_build_object('ro
 		decision.Binding.Hostname != endpointID+".tunnels.example.test" || decision.Binding.OriginAddress != "127.0.0.1:3000" || decision.Binding.Audience != "public" {
 		t.Fatalf("engine ingress decision = %+v (of %d)", decision, len(decisions))
 	}
+	// A replacement server's warm-up projects read-only: the same decisions, and no accounting binding written, so it
+	// never queues on the session lock the serving server's desired-state answer takes (deploys 2026-11-12 19:54Z/19:57Z).
+	f.exec(t, `DELETE FROM usage_accounting_authorities WHERE edge_node_id=$1`, f.node)
+	warm, err := ingressprojection.SQLIngressSource{DB: f.database, ReadOnly: true}.Edge(f.ctx, f.node, f.edge.ProcessEpoch)
+	var bindings int
+	if err == nil {
+		err = f.database.SQL().QueryRowContext(f.ctx, `SELECT count(*) FROM usage_accounting_authorities WHERE edge_node_id=$1`, f.node).Scan(&bindings)
+	}
+	if err != nil || len(warm) != len(decisions) || bindings != 0 {
+		t.Fatalf("read-only projection: %d decisions (want %d), %d accounting bindings written, %v", len(warm), len(decisions), bindings, err)
+	}
 	// F21-38: with nothing changed between two pulls the ingress and route answers keep the same
 	// version (decision ids and times are outside it), so an edge holding it gets "unchanged".
 	again, err := ingressprojection.SQLIngressSource{DB: f.database, Quota: openQuota{}}.Edge(f.ctx, f.node, f.edge.ProcessEpoch)

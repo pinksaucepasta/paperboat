@@ -196,6 +196,9 @@ func (s SQLIngressSource) projectPreviews(ctx context.Context, node, epoch strin
 	if rowsErr != nil || closeErr != nil {
 		return nil, errors.Join(rowsErr, closeErr)
 	}
+	if s.ReadOnly {
+		return out, nil
+	}
 	admitted := out[:0]
 	for i, d := range out {
 		b := d.Binding

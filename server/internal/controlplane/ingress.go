@@ -49,7 +49,7 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 		writeEdgeError(w, r, http.StatusConflict, state, false, 0)
 		return
 	}
-	decisions, denied, blocked, ipRules, err := s.ingressProjection(r.Context(), input.NodeID, input.ProcessEpoch)
+	decisions, denied, blocked, ipRules, err := s.ingressProjection(r.Context(), input.NodeID, input.ProcessEpoch, false)
 	if err != nil {
 		writeEdgeError(w, r, http.StatusServiceUnavailable, "control_unavailable", true, 1000, err)
 		return
@@ -81,9 +81,9 @@ func (s *EdgeService) handleIngress(w http.ResponseWriter, r *http.Request) {
 
 // ingressProjection is the database work behind one desired-state answer: the node's decisions, the quota
 // denials and takedowns that withhold some of them, and the owners' IP rules.
-func (s *EdgeService) ingressProjection(ctx context.Context, nodeID, epoch string) (decisions []wire.IngressDecision, denied []wire.IngressQuotaDenial, blocked []wire.IngressBlock, ipRules []wire.IngressIPRule, err error) {
+func (s *EdgeService) ingressProjection(ctx context.Context, nodeID, epoch string, readOnly bool) (decisions []wire.IngressDecision, denied []wire.IngressQuotaDenial, blocked []wire.IngressBlock, ipRules []wire.IngressIPRule, err error) {
 	quota, _ := s.scopedBandwidth.(accountingauthority.QuotaChecker)
-	decisions, err = (ingressprojection.SQLIngressSource{DB: s.store, Quota: quota, QuotaDenied: &denied}).Edge(ctx, nodeID, epoch)
+	decisions, err = (ingressprojection.SQLIngressSource{DB: s.store, Quota: quota, QuotaDenied: &denied, ReadOnly: readOnly}).Edge(ctx, nodeID, epoch)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -96,7 +96,7 @@ func (s *EdgeService) ingressProjection(ctx context.Context, nodeID, epoch strin
 
 // Warm answers the desired-state projection internally for the verified edges, parallel times at once, so
 // every pooled connection has prepared its statements before the replacement server reports ready. It reads
-// only. A server with no verified edge has nothing to warm.
+// only: no accounting binding is retained, so it never takes an edge's accounting lock. A server with no verified edge has nothing to warm.
 func (s *EdgeService) Warm(ctx context.Context, parallel int) error {
 	rows, err := s.store.SQL().QueryContext(ctx, `SELECT id, process_epoch FROM control_tunnel_nodes WHERE roles @> ARRAY['edge']::text[] AND public_ingress_verified_at IS NOT NULL ORDER BY last_heartbeat_at DESC NULLS LAST LIMIT 3`)
 	if err != nil {
@@ -122,7 +122,7 @@ func (s *EdgeService) Warm(ctx context.Context, parallel int) error {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if _, _, _, _, err := s.ingressProjection(ctx, n.id, n.epoch); err != nil {
+				if _, _, _, _, err := s.ingressProjection(ctx, n.id, n.epoch, true); err != nil {
 					failures <- err
 				}
 			}()
