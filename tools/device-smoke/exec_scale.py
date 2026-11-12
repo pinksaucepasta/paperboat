@@ -37,10 +37,16 @@ def main():
     parser.add_argument("--count", type=int, default=32)
     parser.add_argument("--sleep", type=int, default=20)
     parser.add_argument("--budget", type=float, default=30.0, help="seconds each exec may take in all")
+    parser.add_argument("--client-ct", default=c.NAMES["a"], help="the container whose pb starts the execs")
+    parser.add_argument("--client-ssh", help="a macOS host (ssh) whose pb starts the execs instead of a container")
+    parser.add_argument("--target-name", default=c.NAMES["b"], help="the machine every exec runs on (a container or a Mac)")
     args = parser.parse_args()
     encoded = base64.b64encode(WORKER.encode()).decode()
-    c.in_ct(args.host, c.NAMES["a"], f"echo {encoded} | base64 -d > /tmp/exec_scale_worker.py", 30)
-    rc, out = c.in_ct(args.host, c.NAMES["a"], f"python3 /tmp/exec_scale_worker.py {args.count} {args.sleep} {c.NAMES['b']}", 400)
+    if args.client_ssh:  # the worker runs in the Mac's home, where ./.local/bin/pb is the installed pb
+        rc, out = c.host_run(args.client_ssh, f"cd ~ && echo {encoded} | base64 -d > /tmp/exec_scale_worker.py && python3 /tmp/exec_scale_worker.py {args.count} {args.sleep} {args.target_name}", 430)
+    else:
+        c.in_ct(args.host, args.client_ct, f"echo {encoded} | base64 -d > /tmp/exec_scale_worker.py", 30)
+        rc, out = c.in_ct(args.host, args.client_ct, f"python3 /tmp/exec_scale_worker.py {args.count} {args.sleep} {args.target_name}", 400)
     try:
         rows = json.loads(out.strip().splitlines()[-1])
     except (ValueError, IndexError):
@@ -49,7 +55,7 @@ def main():
     times = sorted(r["seconds"] for r in rows)
     failed = [r for r in rows if r["rc"] != 0]
     slow = [r for r in rows if r["seconds"] > args.budget]
-    result = {"check": "exec-scale", "count": args.count, "sleep_s": args.sleep, "budget_s": args.budget,
+    result = {"check": "exec-scale", "client": args.client_ssh or args.client_ct, "target": args.target_name, "count": args.count, "sleep_s": args.sleep, "budget_s": args.budget,
               "fastest_s": times[0], "median_s": times[len(times) // 2], "slowest_s": times[-1],
               "failed": [{"i": r["i"], "rc": r["rc"], "tail": r["tail"]} for r in failed][:8], "over_budget": len(slow),
               "status": "PASS" if not failed and not slow else "FAIL"}

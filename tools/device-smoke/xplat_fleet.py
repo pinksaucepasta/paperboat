@@ -159,7 +159,7 @@ def fleet():
     return {'L': linux(), 'M': mac(), 'W': windows()}
 
 
-def mint_token(kind):
+def mint_token(kind, name=None, controller_dev=None):
     """A one-shot enrollment token from the account's signed-in pb (on the Mac); `kind` is `unix` or `windows`."""
     script = ('import json,re,subprocess,sys\n'
               'name,kind=sys.argv[1:3]\n'
@@ -169,8 +169,8 @@ def mint_token(kind):
               'url=re.search(r"\'(https?://[^\']+)\'",cmd).group(1)\n'
               'body=subprocess.run(["curl","-fsSL",url],capture_output=True,text=True).stdout\n'
               'print(re.search(r"ENROLLMENT_TOKEN\\W+([A-Za-z0-9]+)",body).group(1))\n')
-    name = PREFIX + '-' + ('w' if kind == 'windows' else 'l')
-    ctl = controller()
+    name = name or PREFIX + '-' + ('w' if kind == 'windows' else 'l')
+    ctl = controller_dev or controller()
     done = ctl.run(['python3', '-', name, kind, ctl.pb_path], input=script.encode(), timeout=90)
     token = done.text.strip()
     assert done.rc == 0 and re.fullmatch(r'[A-Za-z0-9]+', token), 'no enrollment token: ' + done.errtext[-200:]
@@ -179,7 +179,10 @@ def mint_token(kind):
 
 def controller():
     """The device whose own signed-in pb mints tokens and lists machines: the Mac (account of the fleet of the Mac VM) or, with
-    XPLAT_CONTROLLER=L, the Linux container (a fresh account that was signed in with an API token)."""
+    XPLAT_CONTROLLER=L, the Linux container (a fresh account that was signed in with an API token), or with XPLAT_CONTROLLER=hp
+    the operator account's pb on hp."""
+    if os.environ.get('XPLAT_CONTROLLER') == 'hp':  # the operator account's signed-in pb on hp: the fleet is that account's
+        return Unix('hp', 'linux', ['ssh', 'hp'], '/home/anvit', '/home/anvit/.local/bin/pb')
     return linux() if os.environ.get('XPLAT_CONTROLLER') == 'L' else mac()
 
 
@@ -237,6 +240,13 @@ def json_pb(dev, *args, timeout=120):
     done = dev.pb(*args, '--json', timeout=timeout)
     value = json.loads(done.text)
     return value.get('data', value) if isinstance(value, dict) else value
+
+
+def machines():
+    """The controller's machine list as {alias: record}."""
+    listed = json.loads(controller_pb('machine', 'list', '--json').text)
+    listed = listed.get('data', listed)
+    return {m['alias']: m for m in listed['machines']}
 
 
 def state(dev):

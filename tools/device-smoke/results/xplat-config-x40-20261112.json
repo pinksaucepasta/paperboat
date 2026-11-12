@@ -1,0 +1,40 @@
+{
+ "check": "xplat-config",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-40:x40_rename:L>M",
+   "status": "PASS",
+   "detail": "the [machine.macx-l] section stopped applying after the rename (warning names it) and applied again under the old name"
+  },
+  {
+   "id": "X-40:x40_rename:L>W",
+   "status": "PASS",
+   "detail": "the [machine.macx-l] section stopped applying after the rename (warning names it) and applied again under the old name"
+  },
+  {
+   "id": "X-40:x40_rename:M>L",
+   "status": "PASS",
+   "detail": "the [machine.macx-m] section stopped applying after the rename (warning names it) and applied again under the old name"
+  },
+  {
+   "id": "X-40:x40_rename:M>W",
+   "status": "PASS",
+   "detail": "the [machine.macx-m] section stopped applying after the rename (warning names it) and applied again under the old name"
+  },
+  {
+   "id": "X-40:x40_rename:W>L",
+   "status": "PASS",
+   "detail": "the [machine.macx-w] section stopped applying after the rename (warning names it) and applied again under the old name"
+  },
+  {
+   "id": "X-40:x40_rename:W>M",
+   "status": "PASS",
+   "detail": "the [machine.macx-w] section stopped applying after the rename (warning names it) and applied again under the old name"
+  }
+ ]
+}

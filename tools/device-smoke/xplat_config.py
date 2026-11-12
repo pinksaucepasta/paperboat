@@ -243,8 +243,8 @@ def check(row, pair, action, label=''):
         results[name] = {'status': 'PASS', 'detail': detail or ''}
         print('PASS %s %ds %s' % (name, time.time() - started, detail or ''), flush=True)
     except Exception as error:  # noqa: BLE001
-        results[name] = {'status': 'FAIL', 'detail': str(error)[:600]}
-        print('FAIL %s %ds: %s' % (name, time.time() - started, str(error)[:600]), flush=True)
+        results[name] = {'status': 'FAIL', 'detail': (str(error) or repr(error))[:300] + ' @ ' + ' <- '.join('%s:%d' % (f.name, f.lineno) for f in reversed(__import__('traceback').extract_tb(error.__traceback__)))[:300]}
+        print('FAIL %s %ds: %s' % (name, time.time() - started, results[name]['detail']), flush=True)
 
 
 SHARED = (
@@ -428,7 +428,39 @@ def x02(ctx, a, b, direction):
     return 'machine file > [machine.%s] > [os.%s] > shared; override only on %s; [os.*]/[machine.*] refused in a machine file; typo warns' % (a.name, a.os, a.name)
 
 
-CHECKS = [('X-01', x01), ('X-01', x01_variables), ('X-02', x02), ('X-03', x03_bytes), ('X-03', x03_merge), ('X-06', x06), ('X-07', x07_paths)]
+def put(ctx, text):
+    """The shared file is `text` on main: a commit only when it differs (a failed earlier check can leave the repository as it is)."""
+    if ctx.repo.show('.paperboat/config-sync.toml') != text.encode():
+        ctx.repo.commit({'.paperboat/config-sync.toml': text.encode()})
+
+
+def x40_rename(ctx, a, b, direction):
+    """X-40: a [machine.<name>] section follows the machine's NAME: after another OS renames the machine the section stops applying
+    (a warning names the unknown machine), and it applies again when the machine has its name back."""
+    root_a = RULE_ROOT[a.os]
+    section = SHARED + '[machine.%s.paths."cfg/settings.json"]\nlocal_path = "%s/settings-section.json"\n' % (a.name, root_a)
+    put(ctx, section)
+    machine_id = fleet.machines()[a.name]['id']
+
+    def source():
+        return rules(a, pbj(a, 'config', 'sync', 'validate'))['cfg/settings.json']['source']
+    try:
+        wait('the [machine.%s] section reaches %s' % (a.name, a.name), lambda: source() == 'machine_section', seconds=180, every=8)
+        assert b.pb('machine', 'rename', machine_id, a.name + '-r', '--json').rc == 0, 'rename refused'
+        wait('the section stops applying after the rename', lambda: source() != 'machine_section', seconds=180, every=8)
+        warnings = pbj(a, 'config', 'sync', 'validate').get('warnings')
+        assert warnings and a.name in json.dumps(warnings), 'no warning names the unmatched section: %s' % warnings
+    finally:
+        b.pb('machine', 'rename', machine_id, a.name, '--json')
+        put(ctx, section)
+    try:
+        wait('the section applies again under the old name', lambda: source() == 'machine_section', seconds=180, every=8)
+    finally:
+        put(ctx, SHARED)
+    return 'the [machine.%s] section stopped applying after the rename (warning names it) and applied again under the old name' % a.name
+
+
+CHECKS = [('X-01', x01), ('X-01', x01_variables), ('X-02', x02), ('X-03', x03_bytes), ('X-03', x03_merge), ('X-06', x06), ('X-07', x07_paths), ('X-40', x40_rename)]
 
 
 def run_pairs(ctx, devices, only):

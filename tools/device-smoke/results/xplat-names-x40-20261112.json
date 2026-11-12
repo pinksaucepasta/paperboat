@@ -1,0 +1,130 @@
+{
+ "check": "xplat-names",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-40:refused:L>M",
+   "status": "PASS",
+   "detail": "9 invalid names refused at rename and at enroll with a message, name unchanged"
+  },
+  {
+   "id": "X-40:case:L>M",
+   "status": "PASS",
+   "detail": "upper case stored lower-case, a case-only difference is the same name (one record), 63 characters accepted"
+  },
+  {
+   "id": "X-40:reserved:L>M",
+   "status": "PASS",
+   "detail": "CON stored as con, exec by that name works from both other OSes; nul stored as nul, exec by that name works from both other OSes; COM1 stored as com1, exec by that name works from both other OSes"
+  },
+  {
+   "id": "X-40:propagate:L>M",
+   "status": "PASS",
+   "detail": "new name resolves from both other OSes (exec, pb ssh, completion); old name gone (pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_529c8981-ebed); the freed name reaches only its new owner"
+  },
+  {
+   "id": "X-40:refused:L>W",
+   "status": "PASS",
+   "detail": "9 invalid names refused at rename and at enroll with a message, name unchanged"
+  },
+  {
+   "id": "X-40:case:L>W",
+   "status": "PASS",
+   "detail": "upper case stored lower-case, a case-only difference is the same name (one record), 63 characters accepted"
+  },
+  {
+   "id": "X-40:reserved:L>W",
+   "status": "PASS",
+   "detail": "CON stored as con, exec by that name works from both other OSes; nul stored as nul, exec by that name works from both other OSes; COM1 stored as com1, exec by that name works from both other OSes"
+  },
+  {
+   "id": "X-40:propagate:L>W",
+   "status": "PASS",
+   "detail": "new name resolves from both other OSes (exec, pb ssh, completion); old name gone (pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_76027c2b-1a32); the freed name reaches only its new owner"
+  },
+  {
+   "id": "X-40:refused:M>L",
+   "status": "PASS",
+   "detail": "9 invalid names refused at rename and at enroll with a message, name unchanged"
+  },
+  {
+   "id": "X-40:case:M>L",
+   "status": "PASS",
+   "detail": "upper case stored lower-case, a case-only difference is the same name (one record), 63 characters accepted"
+  },
+  {
+   "id": "X-40:reserved:M>L",
+   "status": "PASS",
+   "detail": "CON stored as con, exec by that name works from both other OSes; nul stored as nul, exec by that name works from both other OSes; COM1 stored as com1, exec by that name works from both other OSes"
+  },
+  {
+   "id": "X-40:propagate:M>L",
+   "status": "PASS",
+   "detail": "new name resolves from both other OSes (exec, pb ssh, completion); old name gone (pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_9b7e3892-8eab); the freed name reaches only its new owner"
+  },
+  {
+   "id": "X-40:refused:M>W",
+   "status": "PASS",
+   "detail": "9 invalid names refused at rename and at enroll with a message, name unchanged"
+  },
+  {
+   "id": "X-40:case:M>W",
+   "status": "PASS",
+   "detail": "upper case stored lower-case, a case-only difference is the same name (one record), 63 characters accepted"
+  },
+  {
+   "id": "X-40:reserved:M>W",
+   "status": "PASS",
+   "detail": "CON stored as con, exec by that name works from both other OSes; nul stored as nul, exec by that name works from both other OSes; COM1 stored as com1, exec by that name works from both other OSes"
+  },
+  {
+   "id": "X-40:propagate:M>W",
+   "status": "PASS",
+   "detail": "new name resolves from both other OSes (exec, pb ssh, completion); old name gone (pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_2d26df1b-e76c); the freed name reaches only its new owner"
+  },
+  {
+   "id": "X-40:refused:W>L",
+   "status": "PASS",
+   "detail": "9 invalid names refused at rename and at enroll with a message, name unchanged"
+  },
+  {
+   "id": "X-40:case:W>L",
+   "status": "PASS",
+   "detail": "upper case stored lower-case, a case-only difference is the same name (one record), 63 characters accepted"
+  },
+  {
+   "id": "X-40:reserved:W>L",
+   "status": "PASS",
+   "detail": "CON stored as con, exec by that name works from both other OSes; nul stored as nul, exec by that name works from both other OSes; COM1 stored as com1, exec by that name works from both other OSes"
+  },
+  {
+   "id": "X-40:propagate:W>L",
+   "status": "PASS",
+   "detail": "new name resolves from both other OSes (exec, pb ssh, completion); old name gone (pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_1c53ff4a-fdfa); the freed name reaches only its new owner"
+  },
+  {
+   "id": "X-40:refused:W>M",
+   "status": "PASS",
+   "detail": "9 invalid names refused at rename and at enroll with a message, name unchanged"
+  },
+  {
+   "id": "X-40:case:W>M",
+   "status": "PASS",
+   "detail": "upper case stored lower-case, a case-only difference is the same name (one record), 63 characters accepted"
+  },
+  {
+   "id": "X-40:reserved:W>M",
+   "status": "PASS",
+   "detail": "CON stored as con, exec by that name works from both other OSes; nul stored as nul, exec by that name works from both other OSes; COM1 stored as com1, exec by that name works from both other OSes"
+  },
+  {
+   "id": "X-40:propagate:W>M",
+   "status": "PASS",
+   "detail": "new name resolves from both other OSes (exec, pb ssh, completion); old name gone (pb: No machine has that name or ID. Run `pb machine list` to see your machines. Support reference: support_3790f694-0387); the freed name reaches only its new owner"
+  }
+ ]
+}
