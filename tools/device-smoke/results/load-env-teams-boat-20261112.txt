@@ -1,0 +1,15 @@
+# ENV and teams load tests on a quiet PostgreSQL 17 (Boat VM, 4 vCPU, tmpfs), 2026-11-12, build of this commit
+# ENV: TestLoadVaultRecords; teams: TestLoadTeamMutations (daily profile, then the saturating profile PAPERBOAT_LOAD_PAUSE_MS=100)
+vault_records_load_postgres_test: neighbor alone: read p99 12.573587ms, write p99 17.125944ms
+vault_records_load_postgres_test: daily: 20 accounts, 8-record batches every 1s for 20 s: 395 batches (19.8/s), 395 scope reads, 0 worker errors (first: <nil>)
+vault_records_load_postgres_test: daily: neighbor read p99 23.883898ms (1106 samples), write p99 19.694656ms (1106 samples), 0 failures; database: max idle-in-transaction 1, max sessions waiting on a lock 18
+vault_records_load_postgres_test: full-batches: 8 accounts, 128-record batches every 0s for 20 s: 308 batches (15.4/s), 308 scope reads, 0 worker errors (first: <nil>)
+vault_records_load_postgres_test: full-batches: neighbor read p99 939.836049ms (39 samples), write p99 277.863457ms (39 samples), 0 failures; database: max idle-in-transaction 1, max sessions waiting on a lock 8
+--- PASS: TestLoadVaultRecords (48.63s)
+mutation_load_postgres_test: 40 teams of 128 members, 20 s: 788 mutations (39.4/s), 0 failures (first: <nil>)
+mutation_load_postgres_test: neighbor alone p99 32.005243ms; under load p99 87.645865ms (365 samples), 0 failures; database: max idle-in-transaction 7, max sessions waiting on a lock 8
+--- PASS: TestLoadTeamMutations (27.05s)
+mutation_load_postgres_test: 40 teams of 128 members, 20 s: 4746 mutations (237.3/s), 46 failures (first: ERROR: could not serialize access due to read/write dependencies among transactions (SQLSTATE 40001))
+mutation_load_postgres_test: neighbor alone p99 28.43709ms; under load p99 297.337714ms (232 samples), 0 failures; database: max idle-in-transaction 12, max sessions waiting on a lock 10
+mutation_load_postgres_test: failures under load: teams 46 (ERROR: could not serialize access due to read/write dependencies among transactions (SQLSTATE 40001)), neighbor 0
+--- FAIL: TestLoadTeamMutations (26.18s)
