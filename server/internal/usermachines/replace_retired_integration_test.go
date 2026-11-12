@@ -213,8 +213,20 @@ func TestReplaceMachineCutsOverToTheVerifiedNewRecordAndKeepsTheAddress(t *testi
 	if own := slotOf(newID); own == oldSlot {
 		t.Fatalf("fixture: the new record already has the old slot %d", own)
 	}
+	accessGeneration := func(id string) (generation int64) {
+		t.Helper()
+		if err := store.SQL().QueryRowContext(ctx, `SELECT coalesce(max(generation),0) FROM paperboat.machine_topic_generations WHERE machine_id=$1 AND topic='machine_access'`, id).Scan(&generation); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	accessBefore := accessGeneration(newID)
 	if err := service.ReplaceMachine(ctx, userA, oldID, newID); err != nil {
 		t.Fatalf("replace: %v", err)
+	}
+	// The new machine's SSH host keys were refused while the old record held them: it is woken to publish them now.
+	if after := accessGeneration(newID); after <= accessBefore {
+		t.Fatalf("the cutover published no machine_access change for the replacement (generation %d -> %d)", accessBefore, after)
 	}
 	if _, deleted := state(oldID); !deleted {
 		t.Fatal("the old record was not removed after the cutover")

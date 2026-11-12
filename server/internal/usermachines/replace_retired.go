@@ -13,6 +13,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/environment"
 	"github.com/pinksaucepasta/paperboat/server/internal/machinealias"
+	"github.com/pinksaucepasta/paperboat/server/internal/machineevents"
 )
 
 // ReplaceRetiredMachineTx removes the disconnected, revoked or offline record of a computer that was
@@ -131,6 +132,11 @@ func (s *Service) replaceMachineTx(ctx context.Context, tx *db.Tx, userID, retir
 		if _, err := tx.Queries().RenameUserMachine(ctx, dbsqlc.RenameUserMachineParams{Alias: retired.Alias, ID: replacement.ID, UserID: userID}); err != nil {
 			return false, err
 		}
+	}
+	// The replacement's host keys were refused while the old record held them; wake it (it listens to machine_access)
+	// so it publishes them now instead of at its next retry.
+	if err := machineevents.Publish(ctx, tx, []string{replacement.ID}, machineevents.TopicMachineAccess); err != nil {
+		return false, err
 	}
 	return true, nil
 }
