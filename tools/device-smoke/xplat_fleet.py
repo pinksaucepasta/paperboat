@@ -6,7 +6,7 @@
   xplat_fleet.py down    revoke the three machines by exact id and uninstall
 
 Devices (override with env): L = Docker container XPLAT_L_CT on XPLAT_L_HOST (user tester), M = the Mac VM's `admin` user
-(its machine `apple`, GUI session, keychain unlocked per command from ~/.pbmac/vm-login.pw), W = winpool runner
+(its machine `apple`, GUI session, keychain unlocked per command from ~/.pbmac/vm-login.pw), or with XPLAT_MAC_SSH=macpool-N a hosted macOS runner (machine `<prefix>-m`), W = winpool runner
 SMOKE_WINDOWS_SSH. L and W are named `<XPLAT_PREFIX>-l|-w`. The account is the Mac user's: enrollment tokens are minted by
 the Mac's own signed-in pb, so the three machines share one account. No secret is printed.
 """
@@ -143,6 +143,9 @@ def mac_unlock():
 
 
 def mac(name=None):
+    host = os.environ.get('XPLAT_MAC_SSH')  # a macpool-N runner instead of the Mac VM (its logins run in the GUI session)
+    if host:
+        return Unix(name or PREFIX + '-m', 'darwin', ['ssh', host], '/Users/runner', '/Users/runner/.local/bin/pb')
     return Unix(name or M_NAME, 'darwin', [MAC_SSH, 'vm'], '/Users/admin', '/Users/admin/.local/bin/pb', pre=mac_unlock())
 
 

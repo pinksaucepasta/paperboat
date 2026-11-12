@@ -17,7 +17,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 import xplat_fleet as fleet  # noqa: E402
 
 results = {}
-USER = {'linux': 'tester', 'darwin': 'admin', 'windows': 'runneradmin'}
 
 
 def slash(dev, *parts):
@@ -47,7 +46,7 @@ def t_ssh(src, dst):
 
 
 def t_user(src, dst):
-    user = USER[dst.os]
+    user = dst.run(['whoami']).text.strip().split('\\')[-1].lower()  # the OS user the target's pb runs as
     for form in (['--user', user, dst.alias], [user + '@' + dst.alias]):
         done = src.pb('ssh', *form, '--', 'whoami', timeout=120)
         assert done.rc == 0 and user in done.text.lower(), 'pb ssh %s -> rc %d %r %s' % (form, done.rc, done.text[-80:], done.errtext[-150:])

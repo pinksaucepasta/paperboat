@@ -69,7 +69,7 @@ def setup(devices):
         done = dev.pb('env', 'vault', 'unlock', '--password-stdin', input=password + b'\n', timeout=120)
         assert done.rc == 0, '%s: unlock failed: %s' % (dev.name, (done.text + done.errtext)[-200:])
     for dev in devices.values():  # the startup-file hook is how a plain command session (pb ssh) receives ENV
-        shell = {'linux': 'bash', 'darwin': 'zsh', 'windows': 'powershell'}[dev.os]
+        shell = 'powershell' if dev.os == 'windows' else dev.sh('basename "$SHELL"').text.strip() or 'bash'  # the user's own login shell
         done = dev.pb('env', 'hook', shell, '--install', timeout=120)
         assert done.rc == 0, '%s: hook install failed: %s' % (dev.name, (done.text + done.errtext)[-200:])
     ctl = fleet.controller()

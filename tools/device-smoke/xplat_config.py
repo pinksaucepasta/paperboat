@@ -152,6 +152,8 @@ class Context:
                 self.urls[key] = 'http://%s:%d/pair.git' % (REPO_BRIDGE, port)
             elif dev.os == 'windows':
                 self.urls[key] = 'http://127.0.0.1:%d/pair.git' % self.forwards.enter_context(dev.device.forward(port, REPO_HOST))
+            elif os.environ.get('XPLAT_MAC_SSH'):  # a hosted macOS runner cannot reach the repository host: ssh -R, as for Windows
+                self.urls[key] = 'http://127.0.0.1:%d/pair.git' % self.forwards.enter_context(ssh_forward(os.environ['XPLAT_MAC_SSH'], port))
             else:
                 self.urls[key] = 'http://%s:%d/pair.git' % (os.environ.get('XPLAT_REPO_LAN', REPO_HOST), port)
         first = self.unix()
@@ -189,6 +191,21 @@ class Context:
             delete_repository(self.unix(), self.repository_id)
         self.forwards.close()
         self.repo.close()
+
+
+@contextlib.contextmanager
+def ssh_forward(host, port):
+    """Reach REPO_HOST:port at 127.0.0.1:<remote port> on `host` while the context is open."""
+    import random
+    remote = random.randrange(20000, 60000)
+    tunnel = subprocess.Popen(['ssh', '-N', '-o', 'ExitOnForwardFailure=yes', '-R', '127.0.0.1:%d:%s:%d' % (remote, REPO_HOST, port), host],
+                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        time.sleep(5)
+        assert tunnel.poll() is None, 'ssh -R to %s failed' % host
+        yield remote
+    finally:
+        tunnel.terminate()
 
 
 def winhost_private(dev, path):
