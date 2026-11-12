@@ -3,5 +3,5 @@
 package managedssh
 
 func ownerAgentSocket(runtimeDirectory string) (string, error) {
-	return InstalledAgentSocket(runtimeDirectory), nil
+	return InstalledAgentSocket(runtimeDirectory)
 }

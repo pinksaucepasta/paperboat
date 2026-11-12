@@ -21,8 +21,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const windowsManagedAgentPipe = managedssh.WindowsInstalledAgentPipe
-
 const (
 	windowsManagedSSHMarker      = "paperboat-managed-ssh-v1"
 	windowsManagedSSHBeginMarker = "# BEGIN paperboat-managed-ssh-v1"
@@ -141,7 +139,11 @@ func startWindowsAgent(parent context.Context, signer ssh.Signer, inherited stri
 	if err != nil {
 		return nil, err
 	}
-	listener, err := winio.ListenPipe(windowsManagedAgentPipe, &winio.PipeConfig{
+	pipe, err := managedssh.InstalledAgentSocket("")
+	if err != nil {
+		return nil, err
+	}
+	listener, err := winio.ListenPipe(pipe, &winio.PipeConfig{
 		SecurityDescriptor: "D:P(A;;GA;;;" + ownerSID + ")",
 		MessageMode:        false,
 		InputBufferSize:    managedssh.MaxAgentRequestBytes + 4,
@@ -157,7 +159,7 @@ func startWindowsAgent(parent context.Context, signer ssh.Signer, inherited stri
 	var delegate agent.ExtendedAgent
 	var delegateConnection net.Conn
 	if inherited != "" {
-		if !validWindowsAgentPipe(inherited) || strings.EqualFold(inherited, windowsManagedAgentPipe) {
+		if !validWindowsAgentPipe(inherited) || strings.EqualFold(inherited, pipe) {
 			return nil, errors.Join(managedssh.ErrAgentDenied, listener.Close())
 		}
 		delegateConnection, err = winio.DialPipeContext(parent, inherited)
@@ -175,7 +177,7 @@ func startWindowsAgent(parent context.Context, signer ssh.Signer, inherited stri
 		return nil, errors.Join(err, cleanupErr)
 	}
 	runCtx, cancel := context.WithCancel(parent)
-	runtime := &windowsAgentRuntime{socket: windowsManagedAgentPipe, cancel: cancel, done: make(chan error, 1), delegate: delegateConnection}
+	runtime := &windowsAgentRuntime{socket: pipe, cancel: cancel, done: make(chan error, 1), delegate: delegateConnection}
 	go func() {
 		runtime.done <- (managedssh.Server{Agent: aggregate, MaxConnections: 32, IdleTimeout: 2 * time.Minute}).Serve(runCtx, listener)
 	}()

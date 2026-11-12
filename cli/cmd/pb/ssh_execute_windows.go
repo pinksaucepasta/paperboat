@@ -123,7 +123,11 @@ func executeManagedSSH(cobraCommand *cobra.Command, ctx *command.Context, machin
 		return commandPreparationFailure{step: prepareMachineUser, cause: err}
 	}
 	defer connection.Close()
-	identityArguments := managedssh.ManagedIdentityArguments(managedssh.InstalledAgentSocket(""), managedssh.ManagedIdentityPublicKeyPath(home))
+	agentSocket, err := managedssh.InstalledAgentSocket("")
+	if err != nil {
+		return commandPreparationFailure{step: prepareMachineUser, cause: err}
+	}
+	identityArguments := managedssh.ManagedIdentityArguments(agentSocket, managedssh.ManagedIdentityPublicKeyPath(home))
 	return (managedssh.LoopbackOpenSSHExecutor{}).Execute(cobraCommand.Context(), "ssh", func(port uint16) []string {
 		return windowsLoopbackOpenSSHArguments(destination, port, executable, identityArguments, passthrough, includePassthrough)
 	}, environment, stream)

@@ -56,7 +56,10 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	agentSocket := managedssh.InstalledAgentSocket(paths.RuntimeRoot)
+	agentSocket, err := managedssh.InstalledAgentSocket(paths.RuntimeRoot)
+	if err != nil {
+		return err
+	}
 	if err := managedssh.ValidateInstalledOpenSSHConfig(home, uint32(os.Geteuid()), agentSocket, domain); err != nil {
 		return fmt.Errorf("managed OpenSSH configuration is not ready; rerun `pb login`: %w", err)
 	}
