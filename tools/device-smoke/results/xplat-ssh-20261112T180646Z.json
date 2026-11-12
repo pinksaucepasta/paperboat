@@ -1,0 +1,19 @@
+{
+ "check": "xplat-ssh",
+ "devices": [
+  "L",
+  "M"
+ ],
+ "results": [
+  {
+   "id": "X-18:tree:L>M",
+   "status": "PASS",
+   "detail": "46 files, nested/empty/unicode directories and a 12 MiB file equal (sha256) through scp, sftp, rsync"
+  },
+  {
+   "id": "X-18:tree:M>L",
+   "status": "PASS",
+   "detail": "46 files, nested/empty/unicode directories and a 12 MiB file equal (sha256) through scp, sftp, rsync"
+  }
+ ]
+}
