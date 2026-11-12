@@ -1,0 +1,280 @@
+{
+ "check": "xplat-term",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-16:shell:L>M",
+   "status": "PASS",
+   "detail": "the target shell started and answered (unix)"
+  },
+  {
+   "id": "X-16:utf8:L>M",
+   "status": "PASS",
+   "detail": "UTF-8 and wide characters typed and echoed unchanged (unix)"
+  },
+  {
+   "id": "X-16:resize:L>M",
+   "status": "PASS",
+   "detail": "a window resize reached the remote PTY (45x132, unix)"
+  },
+  {
+   "id": "X-16:ctrlc:L>M",
+   "status": "PASS",
+   "detail": "Ctrl-C stopped a long command and the shell answered again (unix)"
+  },
+  {
+   "id": "X-16:ctrld:L>M",
+   "status": "PASS",
+   "detail": "Ctrl-D at an empty prompt ended the unix shell and pb connect exited 0"
+  },
+  {
+   "id": "X-16:exit:L>M",
+   "status": "PASS",
+   "detail": "the remote exit code (3) is the exit status of pb connect (unix)"
+  },
+  {
+   "id": "X-16:replay:L>M",
+   "status": "PASS",
+   "detail": "after the client vanished, a reattach replayed the earlier output of a session that kept running (unix)"
+  },
+  {
+   "id": "X-11:connect:L>M",
+   "status": "PASS",
+   "detail": "all 11 values equal (sha256) in a new pb connect terminal on lanex2-m (unix)"
+  },
+  {
+   "id": "X-16:join:L>M",
+   "status": "PASS",
+   "detail": "a terminal started from lanex2-l was joined from lanex2-w: earlier and live output identical (unix)"
+  },
+  {
+   "id": "X-16:shell:L>W",
+   "status": "PASS",
+   "detail": "the target shell started and answered (cmd)"
+  },
+  {
+   "id": "X-16:utf8:L>W",
+   "status": "PASS",
+   "detail": "UTF-8 and wide characters typed and echoed unchanged (cmd)"
+  },
+  {
+   "id": "X-16:resize:L>W",
+   "status": "PASS",
+   "detail": "a window resize reached the remote PTY (45x132, cmd)"
+  },
+  {
+   "id": "X-16:ctrlc:L>W",
+   "status": "PASS",
+   "detail": "Ctrl-C stopped a long command and the shell answered again (cmd)"
+  },
+  {
+   "id": "X-16:ctrld:L>W",
+   "status": "PASS",
+   "detail": "Ctrl-D did not end the cmd session, which stays usable like a local one"
+  },
+  {
+   "id": "X-16:exit:L>W",
+   "status": "PASS",
+   "detail": "the remote exit code (3) is the exit status of pb connect (cmd)"
+  },
+  {
+   "id": "X-16:replay:L>W",
+   "status": "PASS",
+   "detail": "after the client vanished, a reattach replayed the earlier output of a session that kept running (cmd)"
+  },
+  {
+   "id": "X-11:connect:L>W",
+   "status": "PASS",
+   "detail": "all 11 values equal (sha256) in a new pb connect terminal on lanex2-w (cmd)"
+  },
+  {
+   "id": "X-16:join:L>W",
+   "status": "PASS",
+   "detail": "a terminal started from lanex2-l was joined from lanex2-m: earlier and live output identical (cmd)"
+  },
+  {
+   "id": "X-16:shell:M>L",
+   "status": "PASS",
+   "detail": "the target shell started and answered (unix)"
+  },
+  {
+   "id": "X-16:utf8:M>L",
+   "status": "PASS",
+   "detail": "UTF-8 and wide characters typed and echoed unchanged (unix)"
+  },
+  {
+   "id": "X-16:resize:M>L",
+   "status": "PASS",
+   "detail": "a window resize reached the remote PTY (45x132, unix)"
+  },
+  {
+   "id": "X-16:ctrlc:M>L",
+   "status": "PASS",
+   "detail": "Ctrl-C stopped a long command and the shell answered again (unix)"
+  },
+  {
+   "id": "X-16:ctrld:M>L",
+   "status": "PASS",
+   "detail": "Ctrl-D at an empty prompt ended the unix shell and pb connect exited 0"
+  },
+  {
+   "id": "X-16:exit:M>L",
+   "status": "PASS",
+   "detail": "the remote exit code (3) is the exit status of pb connect (unix)"
+  },
+  {
+   "id": "X-16:replay:M>L",
+   "status": "PASS",
+   "detail": "after the client vanished, a reattach replayed the earlier output of a session that kept running (unix)"
+  },
+  {
+   "id": "X-11:connect:M>L",
+   "status": "PASS",
+   "detail": "all 11 values equal (sha256) in a new pb connect terminal on lanex2-l (unix)"
+  },
+  {
+   "id": "X-16:join:M>L",
+   "status": "PASS",
+   "detail": "a terminal started from lanex2-m was joined from lanex2-w: earlier and live output identical (unix)"
+  },
+  {
+   "id": "X-16:shell:M>W",
+   "status": "PASS",
+   "detail": "the target shell started and answered (cmd)"
+  },
+  {
+   "id": "X-16:utf8:M>W",
+   "status": "FAIL",
+   "detail": "End Of File (EOF). Braindead platform.\n<pexpect.pty_spawn.spawn object at 0xf2294376e330>\ncommand: /usr/bin/ssh\nargs: [b'/usr/bin/ssh', b'-tt', b'macpool-1', b\"TERM=xterm-256color '/Users/runner/.local/bin/pb' 'connect' 'lanex2-w'\"]\nbuffer (last 100 chars): ''\nbefore (last 100 chars): '5-88f30c9f010c. Run `pb bugreport --upload` to send the details.\\r\\nConnection to 127.0.0.1 closed.\\r\\r\\n'\nafter: <class 'pexpect.exceptions.EOF'>\nmatch: None\nmatch_index: None\nexitstatus: 1\nflag_eof: True\npid: 2463056\nchild_fd: 5\nclosed: False\ntimeout: 90\ndelimiter: <class 'pexpect.exceptions.EOF'>\nlogfile: None\nlogfile_read: None\nlogfile_send: None\nmaxread: 2000\nignorecase: False\nsearchwindowsize: None\ndelay"
+  },
+  {
+   "id": "X-16:resize:M>W",
+   "status": "PASS",
+   "detail": "a window resize reached the remote PTY (45x132, cmd)"
+  },
+  {
+   "id": "X-16:ctrlc:M>W",
+   "status": "PASS",
+   "detail": "Ctrl-C stopped a long command and the shell answered again (cmd)"
+  },
+  {
+   "id": "X-16:ctrld:M>W",
+   "status": "PASS",
+   "detail": "Ctrl-D did not end the cmd session, which stays usable like a local one"
+  },
+  {
+   "id": "X-16:exit:M>W",
+   "status": "PASS",
+   "detail": "the remote exit code (3) is the exit status of pb connect (cmd)"
+  },
+  {
+   "id": "X-16:replay:M>W",
+   "status": "FAIL",
+   "detail": "End Of File (EOF). Exception style platform.\n<pexpect.pty_spawn.spawn object at 0xf2294376e060>\ncommand: /usr/bin/ssh\nargs: [b'/usr/bin/ssh', b'-tt', b'macpool-1', b\"TERM=xterm-256color '/Users/runner/.local/bin/pb' 'connect' 'lanex2-w' 'new' '--name' 'xplat-8c8ea8'\"]\nbuffer (last 100 chars): ''\nbefore (last 100 chars): '   connecting\\x1b[27m\\x1b[u\\x1b[s\\x1b[30;1H\\x1b[2K\\x1b[r\\x1b[upb: Operation canceled.\\r\\nConnection to 127.0.0.1 closed.\\r\\r\\n'\nafter: <class 'pexpect.exceptions.EOF'>\nmatch: None\nmatch_index: None\nexitstatus: 130\nflag_eof: True\npid: 2476738\nchild_fd: 5\nclosed: False\ntimeout: 90\ndelimiter: <class 'pexpect.exceptions.EOF'>\nlogfile: None\nlogfile_read: None\nlogfile_send: None\nm"
+  },
+  {
+   "id": "X-11:connect:M>W",
+   "status": "PASS",
+   "detail": "all 11 values equal (sha256) in a new pb connect terminal on lanex2-w (cmd)"
+  },
+  {
+   "id": "X-16:join:M>W",
+   "status": "PASS",
+   "detail": "a terminal started from lanex2-m was joined from lanex2-l: earlier and live output identical (cmd)"
+  },
+  {
+   "id": "X-16:shell:W>L",
+   "status": "PASS",
+   "detail": "the target shell started and answered (unix)"
+  },
+  {
+   "id": "X-16:utf8:W>L",
+   "status": "PASS",
+   "detail": "UTF-8 and wide characters typed and echoed unchanged (unix)"
+  },
+  {
+   "id": "X-16:resize:W>L",
+   "status": "PASS",
+   "detail": "a window resize reached the remote PTY (45x132, unix)"
+  },
+  {
+   "id": "X-16:ctrlc:W>L",
+   "status": "PASS",
+   "detail": "Ctrl-C stopped a long command and the shell answered again (unix)"
+  },
+  {
+   "id": "X-16:ctrld:W>L",
+   "status": "PASS",
+   "detail": "Ctrl-D at an empty prompt ended the unix shell and pb connect exited 0"
+  },
+  {
+   "id": "X-16:exit:W>L",
+   "status": "PASS",
+   "detail": "the remote exit code (3) is the exit status of pb connect (unix)"
+  },
+  {
+   "id": "X-16:replay:W>L",
+   "status": "PASS",
+   "detail": "after the client vanished, a reattach replayed the earlier output of a session that kept running (unix)"
+  },
+  {
+   "id": "X-11:connect:W>L",
+   "status": "PASS",
+   "detail": "all 11 values equal (sha256) in a new pb connect terminal on lanex2-l (unix)"
+  },
+  {
+   "id": "X-16:join:W>L",
+   "status": "PASS",
+   "detail": "a terminal started from lanex2-w was joined from lanex2-m: earlier and live output identical (unix)"
+  },
+  {
+   "id": "X-16:shell:W>M",
+   "status": "PASS",
+   "detail": "the target shell started and answered (unix)"
+  },
+  {
+   "id": "X-16:utf8:W>M",
+   "status": "PASS",
+   "detail": "UTF-8 and wide characters typed and echoed unchanged (unix)"
+  },
+  {
+   "id": "X-16:resize:W>M",
+   "status": "PASS",
+   "detail": "a window resize reached the remote PTY (45x132, unix)"
+  },
+  {
+   "id": "X-16:ctrlc:W>M",
+   "status": "PASS",
+   "detail": "Ctrl-C stopped a long command and the shell answered again (unix)"
+  },
+  {
+   "id": "X-16:ctrld:W>M",
+   "status": "PASS",
+   "detail": "Ctrl-D at an empty prompt ended the unix shell and pb connect exited 0"
+  },
+  {
+   "id": "X-16:exit:W>M",
+   "status": "PASS",
+   "detail": "the remote exit code (3) is the exit status of pb connect (unix)"
+  },
+  {
+   "id": "X-16:replay:W>M",
+   "status": "PASS",
+   "detail": "after the client vanished, a reattach replayed the earlier output of a session that kept running (unix)"
+  },
+  {
+   "id": "X-11:connect:W>M",
+   "status": "PASS",
+   "detail": "all 11 values equal (sha256) in a new pb connect terminal on lanex2-m (unix)"
+  },
+  {
+   "id": "X-16:join:W>M",
+   "status": "PASS",
+   "detail": "a terminal started from lanex2-w was joined from lanex2-l: earlier and live output identical (unix)"
+  }
+ ]
+}

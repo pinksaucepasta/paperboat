@@ -1,0 +1,29 @@
+{
+ "check": "xplat-term",
+ "devices": [
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-16:utf8:M>W",
+   "status": "PASS",
+   "detail": "UTF-8 and wide characters typed and echoed unchanged (cmd)"
+  },
+  {
+   "id": "X-16:replay:M>W",
+   "status": "PASS",
+   "detail": "after the client vanished, a reattach replayed the earlier output of a session that kept running (cmd)"
+  },
+  {
+   "id": "X-16:utf8:W>M",
+   "status": "PASS",
+   "detail": "UTF-8 and wide characters typed and echoed unchanged (unix)"
+  },
+  {
+   "id": "X-16:replay:W>M",
+   "status": "PASS",
+   "detail": "after the client vanished, a reattach replayed the earlier output of a session that kept running (unix)"
+  }
+ ]
+}
