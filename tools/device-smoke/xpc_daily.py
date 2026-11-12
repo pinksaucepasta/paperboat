@@ -232,8 +232,18 @@ def flap_network(devices):
 def main():
     argv = sys.argv[1:]
     keys = argv[argv.index('--devices') + 1].split(',') if '--devices' in argv else ['L', 'M', 'W']
-    devices = {k: d for k, d in fleet.fleet().items() if k in keys}
-    daily = '--recovery-only' not in argv
+    make = {'L': fleet.linux, 'M': fleet.mac, 'W': fleet.windows}
+    devices = {k: make[k]() for k in keys}  # only the machines asked for: a stopped runner must not be dialled
+    if '--victus-only' in argv:  # the Windows reboot: victus alone, the others only watch it come back
+        victus = victus_device()
+        reboot(victus)
+        for key, src in devices.items():
+            record('X-22:reboot:%s>V' % key, lambda: 'reachable again after %.0fs with no user action' % wait_online(src, victus, 900))
+            record('X-22:reboot:V>%s' % key, lambda: 'the rebooted Windows machine reaches it again (hostname %s)' % wait_online(victus, src, 600))
+        record('X-22:doctor-after-reboot:V', lambda: t_doctor(victus))
+        daily = False
+        argv = argv + ['--skip-recovery']
+    daily = '--recovery-only' not in argv and '--victus-only' not in argv
     if daily:
         record('X-22:env-setup', lambda: setup_env(devices) or 'vault unlocked on every machine, X22_VALUE set')
         record('X-22:inventory', lambda: t_inventory(devices))
