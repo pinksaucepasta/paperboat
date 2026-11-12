@@ -1,0 +1,6 @@
+perf_dataplane.py --cli-only (PR-07) on M, 2026-11-12 (IST), pb dev-f7f2eac89 (darwin/arm64 built on anvit).
+pbmac VM on apple (Tart, Apple M4 virtual, 2 vCPU, macOS 26.6.2, idle, load ~2.4), three runs, budget start <= 50 ms, status <= 300 ms:
+{"status": "PASS", "check": "cli-budget", "metrics": {"cli_start_ms": 40, "status_ms": 41}, "budget_failures": [], "enrollment_unchanged": true}
+{"status": "PASS", "check": "cli-budget", "metrics": {"cli_start_ms": 41, "status_ms": 43}, "budget_failures": [], "enrollment_unchanged": true}
+{"status": "PASS", "check": "cli-budget", "metrics": {"cli_start_ms": 45, "status_ms": 41}, "budget_failures": [], "enrollment_unchanged": true}
+Not counted: the GitHub-hosted Mac runner (macpool-2, Apple M1 virtual, 3 vCPU, shared and noisy) measured start 58-71 ms in 6 of 7 runs (one 38 ms) and failed the 50 ms bound; hosted runners are not a timing reference.
