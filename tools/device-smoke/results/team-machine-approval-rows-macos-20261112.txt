@@ -1,0 +1,6 @@
+team_two_account.py C282-C285 on M: owner = operator account on macpool-2 (GitHub-hosted macOS 26.7.2 arm64, pb dev-f7f2eac89, machine macpool-mac-1), team paperboat-smoke-paid, member = second test account (plain member) with machine macl-m1 (Linux container on pbvm4, pb dev-f7f2eac89) paired by member_machine_fixture.sh; prod server. 2026-11-12 (IST). Run: --skip share,resources,suspension,transfer.
+PASS  F12-04 member-shared machine waits for approval; approve; decline  64.6s  
+PASS  C282 team machine approval on/off, refusals                        70.7s  
+PASS  C285 team machine requests lists who asked                         36.4s  
+PASS  C283 team machine approve, refusals                                61.9s  
+PASS  C284 team machine decline, refusals                                83.1s  
