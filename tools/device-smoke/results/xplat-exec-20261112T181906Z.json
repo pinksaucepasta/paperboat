@@ -1,0 +1,290 @@
+{
+ "check": "xplat-exec",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-17:argv:L>M",
+   "status": "PASS",
+   "detail": "15 arguments exact (spaces, empty, quotes, trailing backslashes, unicode, shell metacharacters)"
+  },
+  {
+   "id": "X-17:cmd:L>M",
+   "status": "PASS",
+   "detail": "sh -c runs exactly as given"
+  },
+  {
+   "id": "X-17:stdin:L>M",
+   "status": "PASS",
+   "detail": "stdin sha256 equal for 922176 bytes (binary, CRLF, BOM, NUL)"
+  },
+  {
+   "id": "X-17:cwd:L>M",
+   "status": "PASS",
+   "detail": "--cwd /Users/runner accepted, C:\\Windows\\Temp refused: pb: --cwd must be an absolute path on the target machine, in its own form, starting with / such as /home/user"
+  },
+  {
+   "id": "X-17:cwd-outside:L>M",
+   "status": "PASS",
+   "detail": "refused with: pb: The working directory given with --cwd does not exist on the target machine or is outside its workspace (i"
+  },
+  {
+   "id": "X-17:env:L>M",
+   "status": "PASS",
+   "detail": "--env arrives byte for byte; stdout and stderr stay separate"
+  },
+  {
+   "id": "X-17:exit:L>M",
+   "status": "PASS",
+   "detail": "codes 0,1,7,255 exact; SIGKILL = 137"
+  },
+  {
+   "id": "X-17:pty:L>M",
+   "status": "PASS",
+   "detail": "--pty allocates a terminal on the target"
+  },
+  {
+   "id": "X-17:big:L>M",
+   "status": "PASS",
+   "detail": "8 MiB output byte-exact"
+  },
+  {
+   "id": "X-17:argv:L>W",
+   "status": "PASS",
+   "detail": "15 arguments exact (spaces, empty, quotes, trailing backslashes, unicode, shell metacharacters)"
+  },
+  {
+   "id": "X-17:cmd:L>W",
+   "status": "PASS",
+   "detail": "cmd /c \"<one command line>\" and powershell -Command run as given"
+  },
+  {
+   "id": "X-17:stdin:L>W",
+   "status": "PASS",
+   "detail": "stdin sha256 equal for 922176 bytes (binary, CRLF, BOM, NUL)"
+  },
+  {
+   "id": "X-17:cwd:L>W",
+   "status": "PASS",
+   "detail": "--cwd C:\\Users\\runneradmin accepted, /tmp refused: pb: --cwd must be an absolute path on the target machine, in its own form, with a drive letter such as C:\\User"
+  },
+  {
+   "id": "X-17:cwd-outside:L>W",
+   "status": "PASS",
+   "detail": "refused with: pb: The working directory given with --cwd does not exist on the target machine or is outside its workspace (i"
+  },
+  {
+   "id": "X-17:env:L>W",
+   "status": "PASS",
+   "detail": "--env arrives byte for byte; stdout and stderr stay separate"
+  },
+  {
+   "id": "X-17:exit:L>W",
+   "status": "PASS",
+   "detail": "codes 0,1,7,255 and 3221225477 exact"
+  },
+  {
+   "id": "X-17:pty:L>W",
+   "status": "PASS",
+   "detail": "--pty allocates a terminal on the target"
+  },
+  {
+   "id": "X-17:big:L>W",
+   "status": "PASS",
+   "detail": "8 MiB output byte-exact"
+  },
+  {
+   "id": "X-17:argv:M>L",
+   "status": "PASS",
+   "detail": "15 arguments exact (spaces, empty, quotes, trailing backslashes, unicode, shell metacharacters)"
+  },
+  {
+   "id": "X-17:cmd:M>L",
+   "status": "PASS",
+   "detail": "sh -c runs exactly as given"
+  },
+  {
+   "id": "X-17:stdin:M>L",
+   "status": "PASS",
+   "detail": "stdin sha256 equal for 922176 bytes (binary, CRLF, BOM, NUL)"
+  },
+  {
+   "id": "X-17:cwd:M>L",
+   "status": "PASS",
+   "detail": "--cwd /home/tester accepted, C:\\Windows\\Temp refused: pb: --cwd must be an absolute path on the target machine, in its own form, starting with / such as /home/user"
+  },
+  {
+   "id": "X-17:cwd-outside:M>L",
+   "status": "PASS",
+   "detail": "refused with: pb: The working directory given with --cwd does not exist on the target machine or is outside its workspace (i"
+  },
+  {
+   "id": "X-17:env:M>L",
+   "status": "PASS",
+   "detail": "--env arrives byte for byte; stdout and stderr stay separate"
+  },
+  {
+   "id": "X-17:exit:M>L",
+   "status": "PASS",
+   "detail": "codes 0,1,7,255 exact; SIGKILL = 137"
+  },
+  {
+   "id": "X-17:pty:M>L",
+   "status": "PASS",
+   "detail": "--pty allocates a terminal on the target"
+  },
+  {
+   "id": "X-17:big:M>L",
+   "status": "PASS",
+   "detail": "8 MiB output byte-exact"
+  },
+  {
+   "id": "X-17:argv:M>W",
+   "status": "PASS",
+   "detail": "15 arguments exact (spaces, empty, quotes, trailing backslashes, unicode, shell metacharacters)"
+  },
+  {
+   "id": "X-17:cmd:M>W",
+   "status": "PASS",
+   "detail": "cmd /c \"<one command line>\" and powershell -Command run as given"
+  },
+  {
+   "id": "X-17:stdin:M>W",
+   "status": "PASS",
+   "detail": "stdin sha256 equal for 922176 bytes (binary, CRLF, BOM, NUL)"
+  },
+  {
+   "id": "X-17:cwd:M>W",
+   "status": "PASS",
+   "detail": "--cwd C:\\Users\\runneradmin accepted, /tmp refused: pb: --cwd must be an absolute path on the target machine, in its own form, with a drive letter such as C:\\User"
+  },
+  {
+   "id": "X-17:cwd-outside:M>W",
+   "status": "PASS",
+   "detail": "refused with: pb: The working directory given with --cwd does not exist on the target machine or is outside its workspace (i"
+  },
+  {
+   "id": "X-17:env:M>W",
+   "status": "PASS",
+   "detail": "--env arrives byte for byte; stdout and stderr stay separate"
+  },
+  {
+   "id": "X-17:exit:M>W",
+   "status": "PASS",
+   "detail": "codes 0,1,7,255 and 3221225477 exact"
+  },
+  {
+   "id": "X-17:pty:M>W",
+   "status": "PASS",
+   "detail": "--pty allocates a terminal on the target"
+  },
+  {
+   "id": "X-17:big:M>W",
+   "status": "PASS",
+   "detail": "8 MiB output byte-exact"
+  },
+  {
+   "id": "X-17:argv:W>L",
+   "status": "PASS",
+   "detail": "15 arguments exact (spaces, empty, quotes, trailing backslashes, unicode, shell metacharacters)"
+  },
+  {
+   "id": "X-17:cmd:W>L",
+   "status": "PASS",
+   "detail": "sh -c runs exactly as given"
+  },
+  {
+   "id": "X-17:stdin:W>L",
+   "status": "PASS",
+   "detail": "stdin sha256 equal for 62016 bytes (binary, CRLF, BOM, NUL)"
+  },
+  {
+   "id": "X-17:cwd:W>L",
+   "status": "PASS",
+   "detail": "--cwd /home/tester accepted, C:\\Windows\\Temp refused: pb: --cwd must be an absolute path on the target machine, in its own form, starting with / such as /home/user"
+  },
+  {
+   "id": "X-17:cwd-outside:W>L",
+   "status": "PASS",
+   "detail": "refused with: pb: The working directory given with --cwd does not exist on the target machine or is outside its workspace (i"
+  },
+  {
+   "id": "X-17:env:W>L",
+   "status": "PASS",
+   "detail": "--env arrives byte for byte; stdout and stderr stay separate"
+  },
+  {
+   "id": "X-17:exit:W>L",
+   "status": "PASS",
+   "detail": "codes 0,1,7,255 exact; SIGKILL = 137"
+  },
+  {
+   "id": "X-17:pty:W>L",
+   "status": "PASS",
+   "detail": "--pty allocates a terminal on the target"
+  },
+  {
+   "id": "X-17:big:W>L",
+   "status": "PASS",
+   "detail": "8 MiB output byte-exact"
+  },
+  {
+   "id": "X-17:argv:W>M",
+   "status": "PASS",
+   "detail": "15 arguments exact (spaces, empty, quotes, trailing backslashes, unicode, shell metacharacters)"
+  },
+  {
+   "id": "X-17:cmd:W>M",
+   "status": "PASS",
+   "detail": "sh -c runs exactly as given"
+  },
+  {
+   "id": "X-17:stdin:W>M",
+   "status": "PASS",
+   "detail": "stdin sha256 equal for 62016 bytes (binary, CRLF, BOM, NUL)"
+  },
+  {
+   "id": "X-17:cwd:W>M",
+   "status": "PASS",
+   "detail": "--cwd /Users/runner accepted, C:\\Windows\\Temp refused: pb: --cwd must be an absolute path on the target machine, in its own form, starting with / such as /home/user"
+  },
+  {
+   "id": "X-17:cwd-outside:W>M",
+   "status": "PASS",
+   "detail": "refused with: pb: The working directory given with --cwd does not exist on the target machine or is outside its workspace (i"
+  },
+  {
+   "id": "X-17:env:W>M",
+   "status": "PASS",
+   "detail": "--env arrives byte for byte; stdout and stderr stay separate"
+  },
+  {
+   "id": "X-17:exit:W>M",
+   "status": "PASS",
+   "detail": "codes 0,1,7,255 exact; SIGKILL = 137"
+  },
+  {
+   "id": "X-17:pty:W>M",
+   "status": "PASS",
+   "detail": "--pty allocates a terminal on the target"
+  },
+  {
+   "id": "X-17:big:W>M",
+   "status": "PASS",
+   "detail": "8 MiB output byte-exact"
+  },
+  {
+   "id": "X-17:offline:M>L",
+   "status": "PASS",
+   "detail": "message: pb: the machine is offline; start or repair Paperboat on it (`pb doctor`), then retry. Support reference: support_ed2278 (attempt 2)"
+  },
+  {
+   "id": "X-17:offline:W>L",
+   "status": "PASS",
+   "detail": "message: pb: the machine is offline; start or repair Paperboat on it (`pb doctor`), then retry. Support reference: support_1c2306 (attempt 1)"
+  }
+ ]
+}
