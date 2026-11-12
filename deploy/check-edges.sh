@@ -127,7 +127,8 @@ for edge in "$@"; do
 	grep -h 'carrier_connection_failed' "$log" | grep -o '"reason":"[a-z_]*"' | sort | uniq -c | sed 's/^/  carrier refusals: /' || true
 	[ "$probes$control$carrier$attach$edge5xx" = 00000 ] || fail=1
 done
-server5xx=$(sql "select count(*) from paperboat.support_reports where created_at >= '$start' and http_status >= 500;")
+# Edge error pages (a visitor's app refused/timed out) are counted from the edge logs above, not as server failures.
+server5xx=$(sql "select count(*) from paperboat.support_reports where created_at >= '$start' and http_status >= 500 and code <> 'edge_error_page';")
 offline=$(sort -u "$work/offline" | grep -c . || true)
 echo "server: 5xx=$server5xx; machines online before and offline during the deploy=$offline"
 sort -u "$work/offline" | sed 's/^/  offline: /'

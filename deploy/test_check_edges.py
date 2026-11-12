@@ -25,7 +25,8 @@ case "$s" in *default_transaction_read_only*) echo SET ;; esac
 case "$s" in
 *"state = 'online'"*) printf 'machine_1\\nmachine_2\\n' ;;
 *"not online"*) cat "$T/offline" 2>/dev/null ;;
-*support_reports*) cat "$T/server5xx" ;;
+*support_reports*"code <> 'edge_error_page'"*) cat "$T/server5xx" ;;
+*support_reports*) echo 99 ;;  # a count that includes visitors' edge error pages fails every case
 esac
 ''',
     'sudo': '#!/bin/sh\n[ "$1" = -n ] && shift\nexec "$@"\n',
