@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"time"
 
@@ -164,6 +165,12 @@ func (s *managedSession) answerInterrupt(key InputKey, decision *InputDecision) 
 		return
 	}
 	decision.InterruptThrough = s.fanout.PublishedEnd()
+	// Written normally because the worker was not stuck on input: in a cooked terminal that byte is still the interrupt, and over
+	// a flood the viewer is megabytes behind (X-24: `yes` and Ctrl-C painted 19 MB for 60 s; only a stuck paste ever reached
+	// Interrupt). A viewer whose output was not a flood keeps its stream.
+	if slices.Contains(s.fanout.DiscardPendingOutput(decision.InterruptThrough), key.AttachmentID) {
+		decision.InterruptDiscarded = true
+	}
 }
 
 func sameInputCursor(a, b InputKey) bool {

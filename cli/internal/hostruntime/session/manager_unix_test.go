@@ -1253,6 +1253,14 @@ func TestInterruptRecordIsDroppedWhenTheAttachmentDetaches(t *testing.T) {
 	if _, err := manager.Attach(created.ID, "att_rec", 0); err != nil {
 		t.Fatal(err)
 	}
+	// The replay backlog would be cut by any Ctrl-C now (a flooded viewer's answer): drain it, so only a stale record can say discarded.
+	for {
+		if _, ok, err := manager.Next(created.ID, "att_rec"); err != nil {
+			t.Fatal(err)
+		} else if !ok {
+			break
+		}
+	}
 	decision, err := manager.WriteContext(context.Background(), created.ID, key, []byte{3}) // same ids, numbering over
 	if err != nil || decision.Status != InputAccepted {
 		t.Fatalf("write: %#v, %v", decision, err)

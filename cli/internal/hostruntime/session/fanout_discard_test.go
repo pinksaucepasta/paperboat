@@ -162,3 +162,32 @@ func TestDiscardPendingOutputCountsAViewerThatOverflowed(t *testing.T) {
 		t.Fatal("a viewer that overflowed under a flood was not resynced at Ctrl-C")
 	}
 }
+
+// X-24: a lone Ctrl-C the worker writes normally (nothing stuck on input) used to be answered "nothing discarded" whatever
+// the flood: `yes` and Ctrl-C painted 19 MB for 60 s. The answer now cuts a flooded viewer and leaves a quiet one alone.
+func TestAnswerInterruptCutsAFloodedViewerWhoseKeyWasWrittenNormally(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		bytes   int
+		discard bool
+	}{{"flood", interruptDiscardThreshold, true}, {"prompt", 20, false}} {
+		t.Run(c.name, func(t *testing.T) {
+			s := &managedSession{fanout: NewFanout()}
+			if err := s.fanout.Attach("live", 1<<20); err != nil {
+				t.Fatal(err)
+			}
+			var next uint64
+			publishText(t, s.fanout, &next, strings.Repeat("x", c.bytes))
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if _, err := s.fanout.WaitNext(ctx, "live"); err != nil {
+				t.Fatal(err)
+			}
+			var decision InputDecision
+			s.answerInterrupt(InputKey{AttachmentID: "live", InputSequence: 5}, &decision)
+			if decision.InterruptDiscarded != c.discard || decision.InterruptThrough != s.fanout.PublishedEnd() {
+				t.Fatalf("discarded=%v through=%d, want discarded=%v through=%d", decision.InterruptDiscarded, decision.InterruptThrough, c.discard, s.fanout.PublishedEnd())
+			}
+		})
+	}
+}
