@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
+	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 	"os"
 	"sync"
 	"testing"
@@ -217,8 +218,8 @@ func TestPersonalNetworkAdmissionOnPostgres(t *testing.T) {
 		t.Fatal("session-free machines did not receive reciprocal network-only scopes")
 	}
 	claims := networkClaims(t, a.Configuration)
-	if claims["exp"].(float64)-claims["iat"].(float64) > 300 {
-		t.Fatal("network admission exceeded five-minute validity")
+	if claims["exp"].(float64)-claims["iat"].(float64) > relaylimits.MaxGrantLifetime.Seconds() {
+		t.Fatal("network configuration outlived the relay grants it travels with")
 	}
 	// Concurrent refreshes must commit distinct generations without 503-causing
 	// serializable errors. No access sessions or application grants are created.

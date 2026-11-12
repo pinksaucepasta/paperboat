@@ -267,6 +267,8 @@ func (h *Hub) run(ctx context.Context) {
 			case h.recovered <- struct{}{}:
 			default:
 			}
+			// A change made while the stream was down was never announced: every consumer renews once now.
+			h.wakeAll()
 		}
 		h.deliver(moved)
 	}

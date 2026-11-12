@@ -58,6 +58,8 @@ type productionNativePeerConfig struct {
 	// (peer_network) or a machine joining or leaving (inventory): a newly paired machine enters the mesh
 	// when it first comes online, which moves only inventory. nil leaves the periodic renewal alone.
 	networkEvents *machineevents.Subscription
+	// idleRenewal is the engine's renewal when no event announced a change (tailnet.AuthorityOptions.IdleRefresh).
+	idleRenewal time.Duration
 }
 
 type productionNativePeerService struct {
@@ -251,7 +253,7 @@ func (s *productionNativePeerService) buildGeneration(ctx context.Context) (*pro
 	if err != nil {
 		return nil, err
 	}
-	authority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: clientconfig.ProfileStore{Path: filepath.Join(s.config.stateRoot, "peer-network"), Secrets: clientconfig.FileSecretStore{Dir: filepath.Join(s.config.stateRoot, "peer-network", "secrets")}}, Issuer: s.config.issuer, Self: self, Keys: s.config.keys})
+	authority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: clientconfig.ProfileStore{Path: filepath.Join(s.config.stateRoot, "peer-network"), Secrets: clientconfig.FileSecretStore{Dir: filepath.Join(s.config.stateRoot, "peer-network", "secrets")}}, Issuer: s.config.issuer, Self: self, Keys: s.config.keys, IdleRefresh: s.config.idleRenewal})
 	if err != nil {
 		return nil, err
 	}
@@ -407,7 +409,7 @@ func (g *productionNativePeerGeneration) stop() error {
 }
 
 func (s *productionNativePeerService) supervise(ctx context.Context, generation *productionNativePeerGeneration) {
-	identityCheck := time.NewTicker(tailnet.RefreshInterval)
+	identityCheck := time.NewTicker(30 * time.Second) // a local read of the identity, no request
 	defer identityCheck.Stop()
 	defer func() {
 		var cleanupErr error
@@ -578,13 +580,14 @@ func (s *productionNativePeerService) LastError() error {
 	return s.lastErr
 }
 
-// paperboatAnswering reports whether the signed network in force is current: false once Paperboat has not
-// answered past its refresh hint (the host then runs offline on its last verified rules).
+// paperboatAnswering reports whether Paperboat answers: false once a renewal failed or the machine-event stream
+// is down (renewals are rare when nothing changes; the host then runs offline on its last verified rules).
 func (s *productionNativePeerService) paperboatAnswering() bool {
 	s.mu.Lock()
 	generation := s.current
 	s.mu.Unlock()
-	return generation != nil && generation.authority != nil && !generation.authority.OutOfSync()
+	events := s.config.networkEvents == nil || s.config.networkEvents.Healthy()
+	return events && generation != nil && generation.authority != nil && !generation.authority.OutOfSync()
 }
 
 // PathEligibility reports which kind of path carries the peer endpointID's traffic to this host and a

@@ -25,6 +25,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/shared/jwks"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/pinksaucepasta/paperboat/shared/recording"
+	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 )
 
 const (
@@ -69,7 +70,9 @@ func (p *Provider) SignNetworkConfiguration(c peernetwork.Configuration) (string
 	if err := c.Check(time.Unix(c.IssuedAt, 0)); err != nil {
 		return "", fmt.Errorf("network configuration claims are invalid: %w", err)
 	}
-	if c.ExpiresAt-c.IssuedAt > int64(MaxProofTTL/time.Second) { // the server refreshes a configuration well within
+	// Its exp is a refresh hint: the configuration stays in force until replaced or revoked, and lives no longer than
+	// the relay grants it travels with.
+	if c.ExpiresAt-c.IssuedAt > int64(relaylimits.MaxGrantLifetime/time.Second) {
 		return "", errors.New("network configuration lifetime is too long")
 	}
 	return p.signClaims(peernetwork.ConfigurationType, c)

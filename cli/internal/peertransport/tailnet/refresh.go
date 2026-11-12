@@ -1,6 +1,7 @@
 package tailnet
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -96,6 +97,7 @@ func (a *Authority) RegisterOrRestore(ctx context.Context, client NetworkAPI, ro
 		return errors.Join(err, restoreErr)
 	}
 	diagnosticlog.TryWarn("Paperboat is unreachable; using the last verified peer network configuration", "error", err)
+	a.renewalFailing.Store(true)
 	return nil
 }
 
@@ -171,6 +173,7 @@ func (a *Authority) refresh(ctx context.Context, client NetworkAPI, since time.T
 	request.MembershipGrants = a.membershipGrants.Load()
 	request.Authority = api.PeerNetworkAuthorityUntilRevoked
 	result, err := client.PeerNetworkConfiguration(ctx, request)
+	a.renewalFailing.Store(err != nil) // every renewal path (Run, Refresh, admission) says whether Paperboat answered
 	diagnosticlog.TryInfo("native packet lifecycle", "stage", "refresh_answered", "failed", err != nil, "duration_ms", time.Since(started).Milliseconds())
 	if err == nil && request.Endpoints != nil {
 		a.endpointsReported(*request.Endpoints)
@@ -359,7 +362,7 @@ const (
 // nextRefresh is the wait before the next refresh after one that ended with err (nil on success),
 // failures consecutive failures and unusable consecutive renewals that brought no usable relay.
 func (a *Authority) nextRefresh(err error, failures, unusable int) time.Duration {
-	delay := regionalRefreshDelay()
+	delay := a.idleRefreshDelay()
 	a.relay.mu.Lock()
 	recovery := a.relay.recovery
 	a.relay.mu.Unlock()
@@ -367,16 +370,15 @@ func (a *Authority) nextRefresh(err error, failures, unusable int) time.Duration
 	// made, not after they were issued. Active regional recovery renews before the
 	// earliest one ends, so its relays are not withdrawn between renewals.
 	recovering := recovery != nil && (recovery.pair() != "" || recovery.repair.Load())
-	if recovery != nil && !recovering {
-		// An idle listener needs lease renewal, not fresh relay observations.
-		// Machine events still request urgent refreshes for access changes.
-		delay *= 2
-	}
-	if recovering {
+	switch {
+	case recovering:
 		delay = backoff.Retry(unusable, regionalUnusableRetry, regionalUnusableRetryMaximum)
 		if due, ok := a.regionalRenewalDelay(serverclock.Now()); ok {
 			delay = due
 		}
+	case unusable > 0:
+		// No relay is usable and no topic announces one coming back: retry on the regional backoff.
+		delay = backoff.Retry(unusable, regionalUnusableRetry, regionalUnusableRetryMaximum)
 	}
 	// A signed configuration may be much shorter than the regional cadence.
 	// Reserve half its remaining lifetime (at most the request bound) for
@@ -439,14 +441,18 @@ const urgentRefreshSpacing = 2 * time.Second
 // onDemandRefreshSpacing bounds how often RequestRefresh can make Run call the server.
 const onDemandRefreshSpacing = time.Second
 
-func regionalRefreshDelay() time.Duration {
+// idleRefreshDelay is the fallback renewal of a configuration nobody announced a change to, 15 to 25 minutes
+// by default (three quarters to five quarters of the engine's IdleRefresh).
+// The signed network stays in force until a newer one or a revocation replaces it (Tailscale's netmap has no
+// expiry), every change wakes a renewal through machine events, and an event stream that reconnects wakes one
+// too, so this only bounds how long a missed event can leave an endpoint stale.
+func (a *Authority) idleRefreshDelay() time.Duration {
+	base := cmp.Or(a.options.IdleRefresh, IdleRefresh)
 	var random [1]byte
 	if _, err := rand.Read(random[:]); err != nil {
-		return RefreshInterval
+		return base
 	}
-	// The declared ±20% jitter is bounded to whole milliseconds and never
-	// changes the 30-second average refresh cadence.
-	return 24*time.Second + time.Duration(uint64(random[0])*12_000/255)*time.Millisecond
+	return base*3/4 + time.Duration(uint64(random[0])*uint64(base/2)/255)
 }
 
 // refreshDelay never extends signed validity and avoids a busy loop when the

@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/google/uuid"
-	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	wire "github.com/pinksaucepasta/paperboat/shared/peeridentity"
 	"os"
 	"strings"
@@ -125,8 +124,9 @@ func TestNetworkApplicationExpiryOnPostgres(t *testing.T) {
 				t.Fatal("network signature invalid")
 			}
 			claims := networkClaims(t, result.Configuration)
-			if claims["exp"].(float64) != float64(now.Add(admission.DefaultLifetime).Unix()) {
-				t.Fatal("application scope shortened unrelated network binding")
+			// The configuration lasts as long as its certificates (one hour here), not an admission lifetime.
+			if claims["exp"].(float64) != float64(now.Add(time.Hour).Unix()) {
+				t.Fatalf("network binding ends at %v, want the certificates' expiry %v (an application scope must not shorten it)", claims["exp"], now.Add(time.Hour).Unix())
 			}
 			assertNetworkScope(t, result.Configuration, "inspector", inspector, "inspector")
 			assertNetworkScope(t, result.Configuration, "config_compare", assignment, "config_compare")

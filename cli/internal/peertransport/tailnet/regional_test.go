@@ -79,15 +79,6 @@ func TestRegionalCandidatesDifferentFailureDomainIsObservable(t *testing.T) {
 	}
 }
 
-func TestRegionalCandidateRefreshJitterIsBounded(t *testing.T) {
-	for range 256 {
-		delay := regionalRefreshDelay()
-		if delay < 24*time.Second || delay > 36*time.Second {
-			t.Fatalf("refresh delay = %s", delay)
-		}
-	}
-}
-
 func TestRegionalCandidatesRejectAnotherEndpoint(t *testing.T) {
 	a, network, signer, _ := networkTestAuthority(t)
 	if err := a.Apply(t.Context(), networkToken(t, signer, network)); err != nil {

@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pinksaucepasta/paperboat/server/internal/admission"
 	"github.com/pinksaucepasta/paperboat/server/internal/bandwidthgate"
 	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
@@ -469,7 +468,10 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
 	byPeer := map[string]*networkPeer{}
 	admittedPeers := map[string]bool{}
 	scopes := 0
-	expiry := admission.Expiry(s.signer, now)
+	// exp is a refresh hint, not a deadline: the endpoint keeps its last configuration in force until a newer one
+	// or a revocation replaces it (Tailscale's netmap has no expiry), and machine events wake a renewal on every
+	// change. It is bounded by the relay grants it travels with and by the certificates it names.
+	expiry := now.Add(relaylimits.MaxGrantLifetime)
 	if certExpiry.After(now) && certExpiry.Before(expiry) {
 		expiry = certExpiry
 	}

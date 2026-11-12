@@ -37,8 +37,8 @@ func TestNetworkOutageKeepsPeersUntilARevocationArrives(t *testing.T) {
 		requests++
 		elapsed += a.nextRefresh(errors.New("paperboat unreachable"), failures, 0)
 	}
-	// The failure backoff is capped by the healthy cadence (24-36 s), so an outage costs no more than a healthy
-	// engine: at most 10 min / 24 s plus the first backoff steps. The 100 ms floor would be ~6,000.
+	// The failure backoff grows to about a minute: at most 10 min / 24 s plus the first backoff steps. The 100 ms
+	// floor would be ~6,000.
 	if limit := int(10*time.Minute/(24*time.Second)) + 7; requests > limit {
 		t.Fatalf("%d refresh requests in a 10-minute outage, want at most %d", requests, limit)
 	}

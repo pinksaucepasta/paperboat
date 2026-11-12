@@ -52,3 +52,38 @@ func TestRecoveredSignalsWhenTheWaitLoopSucceedsAgainAfterFailing(t *testing.T) 
 	case <-time.After(200 * time.Millisecond):
 	}
 }
+
+// A change made while the stream was down is never announced, so the stream coming back wakes every consumer
+// once, whatever topics moved: the peer-network renewal then idles on a 15-25 minute fallback, not a short poll.
+func TestRecoveryWakesEveryConsumer(t *testing.T) {
+	var calls atomic.Int32
+	wait := func(ctx context.Context, _ map[machineevents.Topic]int64) (map[machineevents.Topic]int64, error) {
+		switch calls.Add(1) {
+		case 1:
+			return nil, errors.New("dial: no route")
+		case 2: // back, and nothing moved
+			return map[machineevents.Topic]int64{}, nil
+		default:
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+	}
+	hub, err := machineevents.NewWithWaiter(wait, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub := hub.Subscribe(machineevents.TopicPeerNetwork)
+	if err := hub.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = hub.Shutdown(ctx)
+	})
+	select {
+	case <-sub.Changed():
+	case <-time.After(10 * time.Second): // the loop's first backoff is about a second
+		t.Fatalf("the stream came back after %d waits and the consumer was not woken", calls.Load())
+	}
+}

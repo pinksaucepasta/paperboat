@@ -39,7 +39,9 @@ const (
 	MaxConfigurationPeers  = peernetwork.MaxEndpoints
 	MaxConfigurationScopes = peernetwork.MaxScopes
 )
-const RefreshInterval = 30 * time.Second
+
+// IdleRefresh is the average fallback renewal when no machine event announced a change (idleRefreshDelay).
+const IdleRefresh = 20 * time.Minute
 const NetworkPort = peernetwork.NetworkPort
 
 var ErrAuthority = errors.New("peer network authority is invalid")
@@ -74,6 +76,9 @@ type AuthorityOptions struct {
 	// LocalMachineID is the machine this engine runs on (its enrolled registration), so a dial to that
 	// machine's own host runtime is known to be local; empty when the machine is not enrolled.
 	LocalMachineID string
+	// IdleRefresh is the average renewal when no change was announced; zero is the default IdleRefresh. An engine
+	// that does not hear every change (the carrier wakes on machine_access only) sets a shorter one.
+	IdleRefresh time.Duration
 	// TestOnlyPacketListener supplies real filtered UDP sockets to network fault tests.
 	TestOnlyPacketListener nettype.PacketListener
 	// TestOnlyDERPCarrier wraps the authenticated carrier for network fault tests.
@@ -88,19 +93,21 @@ type Authority struct {
 	admitted     map[api.AdmittedNetworkScope]int
 	carrierPeers map[string]int // peers retained by live WireGuard-backed QUIC associations
 	// expiresAt gates new flows; admitted flows are fenced by revocation.
-	expiresAt    atomic.Int64
-	mu           sync.Mutex
-	updateMu     sync.Mutex // custody I/O must never hold the expiry/lifecycle lock
-	options      AuthorityOptions
-	current      *NetworkConfiguration
-	private      key.NodePrivate
-	closed       bool
-	expired      bool
-	lastVerified time.Time
-	relayDenied  *api.APIError
-	done         chan struct{}
-	server       *UDPServer
-	clientEngine *mesh.Server
+	expiresAt atomic.Int64
+	// renewalFailing is set while the last renewal failed: Paperboat is not answering.
+	renewalFailing atomic.Bool
+	mu             sync.Mutex
+	updateMu       sync.Mutex // custody I/O must never hold the expiry/lifecycle lock
+	options        AuthorityOptions
+	current        *NetworkConfiguration
+	private        key.NodePrivate
+	closed         bool
+	expired        bool
+	lastVerified   time.Time
+	relayDenied    *api.APIError
+	done           chan struct{}
+	server         *UDPServer
+	clientEngine   *mesh.Server
 	// clientRelay: the client engine was started with at least one relay region (from a descriptor or configured nodes).
 	clientRelay bool
 	// reportMu guards the endpoint report schedule (endpoint_report.go).
@@ -554,12 +561,13 @@ func (a *Authority) Close() error {
 	return nil
 }
 
-// OutOfSync reports whether the configuration in force is past its refresh hint: Paperboat has not answered
-// since, and the daemon is running on its last verified state (pb status/doctor "out of sync with Paperboat").
+// OutOfSync reports whether Paperboat has not answered the last renewal (or the configuration in force is past
+// its refresh hint): the daemon is running on its last verified state (pb status/doctor "out of sync with
+// Paperboat").
 func (a *Authority) OutOfSync() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.current != nil && serverclock.Now().Unix() >= a.current.ExpiresAt
+	return a.current != nil && (a.renewalFailing.Load() || serverclock.Now().Unix() >= a.current.ExpiresAt)
 }
 
 // LastVerifiedAt is when the configuration in force was verified and installed; zero without one.
