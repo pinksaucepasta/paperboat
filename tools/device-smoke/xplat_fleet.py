@@ -280,7 +280,8 @@ def up(devices):
             install(dev, BUILD_DIR / files[dev.os])
         print('installed', dev.name, flush=True)
     assert os.environ.get('XPLAT_CONTROLLER') == 'L', 'up signs the Linux device in as the controller: set XPLAT_CONTROLLER=L'
-    login_controller(devices['L'])
+    if 'L' in devices:
+        login_controller(devices['L'])
     for key in ('L', 'M', 'W'):
         if key in devices:
             print('paired', devices[key].name, pair(devices[key], 'windows' if key == 'W' else 'unix'), flush=True)

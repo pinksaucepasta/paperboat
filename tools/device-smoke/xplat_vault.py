@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """X-13: the ENV vault across OSes — a vault made on one OS opens on the others, lock and reset are honoured, no value leaks.
 
-  xplat_vault.py [--devices L,M,W]     (fresh-account fleet, vault password in ~/.pbmac/xplat2-vault.pw, recovery code in
+  xplat_vault.py [--devices L,M,W] [--only lock,remove,persist,leak,reset]     (fresh-account fleet, vault password in ~/.pbmac/xplat2-vault.pw, recovery code in
                                         ~/.pbmac/xplat2-recovery; both read inside this script, never printed)
 
 Per device: lock -> the ENV is not delivered/readable; unlock with the password; lock -> unlock with the recovery code.
@@ -192,7 +192,12 @@ def t_reset(src, dst):
     return 'a reset on %s was honoured on %s (old password refused, new accepted); account secrets rotated and kept' % (src.name, dst.name)
 
 
+ONLY = set(sys.argv[sys.argv.index('--only') + 1].split(',')) if '--only' in sys.argv else set()
+
+
 def check(name, who, action):
+    if ONLY and name not in ONLY:
+        return
     key = 'X-13:%s:%s' % (name, who)
     started = time.time()
     try:
@@ -209,7 +214,7 @@ def main():
     keys = argv[argv.index('--devices') + 1].split(',') if '--devices' in argv else ['L', 'M', 'W']
     devices = {k: d for k, d in fleet.fleet().items() if k in keys}
     first = next(iter(devices.values()))
-    assert unlock(first, PASSWORD.read_bytes().strip()).rc == 0
+    unlock(first, PASSWORD.read_bytes().strip())  # a vault made by an older build may not open: the reset below makes a known one
     reset_vault(first, b'xplat-' + os.urandom(12).hex().encode())  # a vault whose recovery code this run knows
     for dev in devices.values():
         assert unlock(dev, PASSWORD.read_bytes().strip()).rc == 0

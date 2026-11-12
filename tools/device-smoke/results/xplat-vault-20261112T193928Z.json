@@ -1,0 +1,59 @@
+{
+ "check": "xplat-vault",
+ "devices": [
+  "L",
+  "M"
+ ],
+ "results": [
+  {
+   "id": "X-13:lock:L",
+   "status": "PASS",
+   "detail": "lock refuses ENV, a wrong secret fails, the password unlocks, the recovery code opens it through recover (recover replaced the password and the recovery code)"
+  },
+  {
+   "id": "X-13:lock:M",
+   "status": "PASS",
+   "detail": "lock refuses ENV, a wrong secret fails, the password unlocks, the recovery code opens it through recover (recover replaced the password and the recovery code)"
+  },
+  {
+   "id": "X-13:remove:L",
+   "status": "PASS",
+   "detail": "remove on lanex2-l dropped only its own custody; apple kept reading ENV; the password opens it again"
+  },
+  {
+   "id": "X-13:remove:M",
+   "status": "PASS",
+   "detail": "remove on apple dropped only its own custody; lanex2-l kept reading ENV; the password opens it again"
+  },
+  {
+   "id": "X-13:persist:L",
+   "status": "PASS",
+   "detail": "after a daemon restart lanex2-l asks for the password again (memory-only custody); locking it left apple open"
+  },
+  {
+   "id": "X-13:persist:M",
+   "status": "PASS",
+   "detail": "the unlock survived a daemon restart on apple (secure store); locking it left lanex2-l open"
+  },
+  {
+   "id": "X-13:leak:L",
+   "status": "PASS",
+   "detail": "no ENV value in pb config/diagnostics/logs or shell history on lanex2-l (3 locations)"
+  },
+  {
+   "id": "X-13:leak:M",
+   "status": "PASS",
+   "detail": "no ENV value in pb config/diagnostics/logs or shell history on apple (4 locations)"
+  },
+  {
+   "id": "X-13:reset:L>M",
+   "status": "PASS",
+   "detail": "a reset on lanex2-l was honoured on apple (old password refused, new accepted); account secrets rotated and kept"
+  },
+  {
+   "id": "X-13:reset:M>L",
+   "status": "PASS",
+   "detail": "a reset on apple was honoured on lanex2-l (old password refused, new accepted); account secrets rotated and kept"
+  }
+ ]
+}
