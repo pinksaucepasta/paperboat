@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"unicode/utf16"
 
 	"github.com/spf13/cobra"
 
@@ -86,6 +89,9 @@ func readPolicyFile(command *cobra.Command, path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read the policy file: %w", err)
 	}
+	if data, err = policyFileText(data); err != nil {
+		return "", localArgumentError(fmt.Sprintf("the policy file %s: %v; save it as UTF-8 and try again", path, err))
+	}
 	if _, problems := policy.Parse(data); len(problems) > 0 {
 		for _, problem := range problems {
 			fmt.Fprintln(command.ErrOrStderr(), problem.String())
@@ -93,6 +99,30 @@ func readPolicyFile(command *cobra.Command, path string) (string, error) {
 		return "", localArgumentError(fmt.Sprintf("the policy file has %d error(s); fix them and try again", len(problems)))
 	}
 	return string(data), nil
+}
+
+// policyFileText is the file's text as UTF-8: a UTF-8 byte order mark is dropped and a UTF-16 file (what a PowerShell 5.1
+// redirect writes: little-endian with a byte order mark, CRLF line endings) is converted, so the same policy is accepted
+// from every OS and the saved text is always UTF-8.
+func policyFileText(data []byte) ([]byte, error) {
+	switch {
+	case bytes.HasPrefix(data, []byte{0xEF, 0xBB, 0xBF}):
+		return data[3:], nil
+	case bytes.HasPrefix(data, []byte{0xFF, 0xFE}), bytes.HasPrefix(data, []byte{0xFE, 0xFF}):
+		body, order := data[2:], binary.ByteOrder(binary.LittleEndian)
+		if data[0] == 0xFE {
+			order = binary.BigEndian
+		}
+		if len(body)%2 != 0 {
+			return nil, errors.New("starts like UTF-16 text but ends in the middle of a character")
+		}
+		units := make([]uint16, len(body)/2)
+		for i := range units {
+			units[i] = order.Uint16(body[2*i:])
+		}
+		return []byte(string(utf16.Decode(units))), nil
+	}
+	return data, nil
 }
 
 func printPolicyErrors(w io.Writer, problems []api.PolicyError) {

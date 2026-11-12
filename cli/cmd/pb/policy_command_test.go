@@ -362,3 +362,44 @@ func TestPolicyVersionsPagesWithTheServersTotal(t *testing.T) {
 		t.Fatalf("--limit 201: code=%d err=%s", code, errOut)
 	}
 }
+
+// X-34: PowerShell 5.1 writes UTF-16 with a byte order mark and CRLF line endings; a Windows editor may add a UTF-8 mark.
+// The same policy is accepted from every OS and the server receives UTF-8 text; a file cut in the middle of a character is
+// refused naming the file, before anything is sent or saved.
+func TestPolicySetAcceptsWindowsEncodedFiles(t *testing.T) {
+	crlf := strings.ReplaceAll(testPolicyText, "\n", "\r\n")
+	utf16le := []byte{0xFF, 0xFE}
+	utf16be := []byte{0xFE, 0xFF}
+	for _, r := range crlf {
+		utf16le = append(utf16le, byte(r), byte(r>>8))
+		utf16be = append(utf16be, byte(r>>8), byte(r))
+	}
+	files := map[string][]byte{"utf16le-bom-crlf": utf16le, "utf16be-bom-crlf": utf16be, "utf8-bom-crlf": append([]byte{0xEF, 0xBB, 0xBF}, crlf...)}
+	for name, content := range files {
+		t.Run(name, func(t *testing.T) {
+			fake, url := newPolicyFake(t)
+			fake.on("GET "+policyBase, 200, data(testPolicyJSON))
+			fake.on("POST "+policyBase+"/validate", 200, data(`{"valid":true,"errors":[],"tests":{"passed":2,"failed":0},"access_changes":`+changesJSON+`,"confirm":"sha256:c1"}`))
+			path := filepath.Join(t.TempDir(), "policy.hujson")
+			if err := os.WriteFile(path, content, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			code, out, errOut := runPolicyCLI(t, url, "policy", "set", path, "--dry-run")
+			if code != 0 {
+				t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
+			}
+			if got := fake.sent("POST " + policyBase + "/validate"); len(got) != 1 || got[0]["policy"] != crlf {
+				t.Fatalf("the server did not get the file as UTF-8 text with its CRLF line endings: %v", got)
+			}
+		})
+	}
+	fake, url := newPolicyFake(t)
+	path := filepath.Join(t.TempDir(), "cut.hujson")
+	if err := os.WriteFile(path, []byte{0xFF, 0xFE, '{', 0, '}'}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, _, errOut := runPolicyCLI(t, url, "policy", "set", path, "--yes")
+	if code == 0 || !strings.Contains(errOut, path) || !strings.Contains(errOut, "UTF-16") || len(fake.sent("PUT "+policyBase)) != 0 {
+		t.Fatalf("code=%d err=%s", code, errOut)
+	}
+}
