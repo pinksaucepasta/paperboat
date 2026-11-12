@@ -252,7 +252,7 @@ func (r PeerStreamRequest) ValidatePending(now time.Time) error {
 	if api.ValidateWorkspaceSelector(r.Workspace) != nil {
 		return ErrInvalidConfig
 	}
-	if r.Credential != "" || r.Resume {
+	if r.Credential != "" || r.Resume || r.Offline { // an offline request is complete: the host admits it from its own rules
 		return r.Validate(now)
 	}
 	if r.Schema != PeerStreamSchemaV1 || !safeValue(r.MachineID) || !safeValue(r.EnvironmentID) || r.MachineGeneration == 0 || !peerconsumer.Pending(r.Consumer) || !safeValue(r.OperationID) || r.Deadline.IsZero() || r.Deadline.Sub(now) > 24*time.Hour || r.MaximumBytes == 0 || len(r.Payload) > 64<<10 || len(r.Payload) > 0 && !json.Valid(r.Payload) {
