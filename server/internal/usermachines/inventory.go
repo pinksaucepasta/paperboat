@@ -2,10 +2,10 @@ package usermachines
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/pinksaucepasta/paperboat/server/internal/db"
 	"github.com/pinksaucepasta/paperboat/server/internal/db/dbsqlc"
 	"github.com/pinksaucepasta/paperboat/server/internal/workspace"
 )
@@ -52,6 +52,9 @@ func (s *Service) ListInventory(ctx context.Context, account string, opts Invent
 	return items, total, false, nil
 }
 
+// inventoryIDsRead, when set (tests only), runs between reading a page's ids and loading their rows.
+var inventoryIDsRead func()
+
 // listInventory computes one inventory page; ListInventory shares it between identical requests.
 func (s *Service) listInventory(ctx context.Context, account string, opts InventoryOptions) ([]UserMachine, int, error) {
 	with, predicate, args := inventoryFilter(ctx, account, opts)
@@ -66,35 +69,47 @@ func (s *Service) listInventory(ctx context.Context, account string, opts Invent
 	}
 	n := len(args)
 	page := fmt.Sprintf(`) AS x WHERE $%d::text IS NULL OR (x.k,x.id) > ($%d::text,$%d::text) ORDER BY x.k,x.id LIMIT $%d OFFSET $%d`, n+1, n+1, n+2, n+3, n+4)
-	rows, err := s.db.SQL().QueryContext(ctx, with+`SELECT x.id,x.total FROM (SELECT m.id,lower(m.alias) AS k,count(*) OVER () AS total`+predicate+page,
-		append(args, afterKey, afterID, opts.Limit+1, opts.Offset)...)
-	if err != nil {
-		return nil, 0, err
-	}
 	ids := []string{}
-	for rows.Next() {
-		var id string
-		if err = rows.Scan(&id, &total); err != nil {
-			return nil, 0, errors.Join(err, rows.Close())
+	var loaded []dbsqlc.UserMachine
+	// The page's ids and their rows come from one snapshot: read separately, a machine retired (disconnected,
+	// revoked, deleted) between the two reads failed the whole list with 500.
+	err := s.db.InReadOnlySnapshot(ctx, func(ctx context.Context, tx *db.Tx) error {
+		ids, total = ids[:0], -1
+		rows, err := tx.Query(ctx, with+`SELECT x.id,x.total FROM (SELECT m.id,lower(m.alias) AS k,count(*) OVER () AS total`+predicate+page,
+			append(args, afterKey, afterID, opts.Limit+1, opts.Offset)...)
+		if err != nil {
+			return err
 		}
-		ids = append(ids, id)
-	}
-	err = errors.Join(rows.Err(), rows.Close())
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id, &total); err != nil {
+				rows.Close()
+				return err
+			}
+			ids = append(ids, id)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if total < 0 && (opts.Offset != 0 || opts.After != nil) {
+			if err := tx.QueryRow(ctx, with+"SELECT count(*)"+predicate, args...).Scan(&total); err != nil {
+				return err
+			}
+		}
+		if inventoryIDsRead != nil {
+			inventoryIDsRead()
+		}
+		// One query for the rows and one for their access description, not a Get (two queries, ~15 function calls
+		// per machine) for each of up to 200 machines: an account with ~50 machines paid seconds per list.
+		loaded, err = tx.Queries().ListUserMachinesByIDs(ctx, ids)
+		return err
+	})
 	if err != nil {
 		return nil, 0, err
 	}
-	if total < 0 && opts.Offset == 0 && opts.After == nil {
+	if total < 0 {
 		total = 0
-	} else if total < 0 {
-		if err := s.db.SQL().QueryRowContext(ctx, with+"SELECT count(*)"+predicate, args...).Scan(&total); err != nil {
-			return nil, 0, err
-		}
-	}
-	// One query for the rows and one for their access description, not a Get (two queries, ~15 function calls
-	// per machine) for each of up to 200 machines: an account with ~50 machines paid seconds per list.
-	loaded, err := s.db.Queries().ListUserMachinesByIDs(ctx, ids)
-	if err != nil {
-		return nil, 0, err
 	}
 	byID := make(map[string]dbsqlc.UserMachine, len(loaded))
 	for _, row := range loaded {

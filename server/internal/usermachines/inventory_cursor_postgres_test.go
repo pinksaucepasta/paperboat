@@ -120,3 +120,56 @@ SELECT $1||'_m'||g,$1,$1||'_e'||g,(ARRAY['bravo','alpha','delta','charlie','echo
 		}
 	}
 }
+
+// A machine removed between the page's id read and its row load (15:36:05Z on 2026-11-12: a disconnect committed
+// 30 ms before two machine lists) failed the whole list with 500 "machine inventory changed". Both reads are one
+// snapshot now: the list answers as of its start.
+func TestMachineListSurvivesRemovalDuringListOnPostgres(t *testing.T) {
+	dsn := os.Getenv("PAPERBOAT_TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("requires isolated PostgreSQL")
+	}
+	if err := db.ValidateIsolatedTestDSN(dsn, os.Getenv("PAPERBOAT_DATABASE_DSN")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	store, err := db.Open(config.Database{Driver: "postgres", DSN: dsn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if err := db.Migrate(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	user := fmt.Sprintf("removal_user_%d", time.Now().UnixNano())
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := store.SQL().ExecContext(ctx, query, args...); err != nil {
+			t.Fatalf("%v\n%s", err, query)
+		}
+	}
+	exec(`INSERT INTO paperboat.users(id,workos_subject,primary_email,status) VALUES($1,$1,$1||'@example.test','active')`, user)
+	exec(`INSERT INTO paperboat.user_machines(id,user_id,environment_id,alias,platform,architecture,workspace_root,state,seat_state,online)
+SELECT $1||'_m'||g,$1,$1||'_e'||g,'m'||g,'linux','amd64','/w','online','occupied',true FROM generate_series(1,2) g`, user)
+	// The hook runs on the inventory flight's goroutine, where t.Fatal would hang the list: it records its error.
+	var removeErr error
+	inventoryIDsRead = func() {
+		_, removeErr = store.SQL().ExecContext(ctx, `UPDATE paperboat.user_machines SET deleted_at=now() WHERE id=$1`, user+"_m2")
+	}
+	t.Cleanup(func() { inventoryIDsRead = nil })
+	service := New(store, nil, Policy{}, nil)
+	personal := workspace.WithContext(ctx, workspace.Scope{ID: "personal"})
+	items, total, _, err := service.ListInventory(personal, user, InventoryOptions{Limit: 200})
+	if removeErr != nil {
+		t.Fatal(removeErr)
+	}
+	if err != nil || total != 2 || len(items) != 2 {
+		t.Fatalf("list during removal: %d items, total %d, %v; want both machines as of the list's start", len(items), total, err)
+	}
+	inventoryIDsRead = nil
+	// Unscoped, so the flight cannot hand back the first list (it shares identical lists for inventoryShareWindow).
+	if items, total, _, err = service.ListInventory(ctx, user, InventoryOptions{Limit: 200}); err != nil || total != 1 || len(items) != 1 {
+		t.Fatalf("list after removal: %d items, total %d, %v; want one machine", len(items), total, err)
+	}
+}
