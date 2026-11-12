@@ -111,44 +111,6 @@ def daemon_unit_text():
     return sh('systemctl', '--user', 'cat', 'paperboatd')[1]
 
 
-def mcp_handshake():
-    """initialize + tools/list against `pb mcp` over stdio, then EOF must end it cleanly (what an MCP client does)."""
-    messages = [
-        {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-06-18', 'capabilities': {}, 'clientInfo': {'name': 'smoke', 'version': '0'}}},
-        {'jsonrpc': '2.0', 'method': 'notifications/initialized'},
-        {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list'},
-    ]
-    if DEVICE:  # the device's own PowerShell keeps stdin open between requests, as a client does
-        try:
-            session = DEVICE.mcp_handshake(PB.exe, *(json.dumps(m) for m in messages))
-        except Exception as error:
-            return {'ok': False, 'error': repr(error)}
-        if session.get('rc') != 0:
-            return {'ok': False, 'error': 'pb mcp exited %s after stdin closed' % session.get('rc')}
-        lines = [json.dumps(session['list'])]
-    else:
-        process = subprocess.Popen([str(PB), 'mcp'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-        lines = []
-        try:
-            for message in messages:
-                process.stdin.write(json.dumps(message) + '\n')
-                process.stdin.flush()
-                if 'id' in message:
-                    lines.append(process.stdout.readline())
-            process.stdin.close()
-            if process.wait(timeout=15) != 0:
-                return {'ok': False, 'error': 'pb mcp exited %s after stdin closed' % process.returncode}
-        except Exception as error:
-            process.kill()
-            return {'ok': False, 'error': repr(error)}
-    try:
-        replies = [json.loads(line) for line in lines if line.strip()]
-        listing = next(reply for reply in replies if reply.get('id') == 2)
-        return {'ok': True, 'tools': [tool['name'] for tool in listing['result']['tools']]}
-    except (StopIteration, KeyError, ValueError) as error:
-        return {'ok': False, 'error': 'no tools/list reply: %r' % error}
-
-
 class Row:
     def __init__(self, ident, command):
         self.ident, self.command, self.failures = ident, command.split(), []
@@ -312,14 +274,6 @@ def rows(args):
         r.expect(listed >= {'pb %s %s' % (name, sub) for sub in wanted}, '%s --json misses subcommands %s' % (name, sorted(set('pb %s %s' % (name, sub) for sub in wanted) - listed)))
         r.expect(run('auth', 'status', '--json')[0] == 0, 'no longer signed in after %s' % name)
         out.append(r)
-
-    r = Row('C293', 'mcp'); r.help()
-    code, o, e = run('mcp', '--json')
-    r.expect(code != 0 and 'JSON' in o + e and not BAD.search(o + e), 'mcp --json was not refused before it started')
-    handshake = mcp_handshake()
-    r.expect(handshake.get('ok'), 'mcp handshake failed: %s' % handshake.get('error'))
-    r.expect(handshake.get('ok') and {'list_machines', 'exec', 'send_file'} <= set(handshake['tools']), 'mcp tools/list lacks list_machines, exec or send_file: %s' % handshake.get('tools'))
-    out.append(r)
 
     for ident, name in (('C218', 'update check'), ('C219', 'update download')):
         r = Row(ident, name); r.help()

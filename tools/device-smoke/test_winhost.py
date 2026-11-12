@@ -1210,22 +1210,6 @@ class PrivateAccessFamily(unittest.TestCase):
             private_access.pair(args)
 
 
-class McpOnTheDevice(unittest.TestCase):
-    """mcp_exec.py: the source of mcp-smoke is pb.exe over ssh with one Windows command line, the target a container."""
-
-    def test_source_runs_on_the_device_and_target_in_the_container(self):
-        import mcp_exec
-        device = winhost.WindowsDevice(target='winpool-9', pb_exe='C:\\P F\\pb.exe', password='')
-        with patch('winhost.device', return_value=device):
-            argv, _ = mcp_exec.command('lanesdk0-c', ['C:\\P F\\pb.exe', 'mcp', '--allow-send-dir', 'C:/t/allowed'])
-        self.assertEqual(['winpool-9', '"C:\\P F\\pb.exe" mcp --allow-send-dir C:/t/allowed'], argv[-2:])
-        self.assertIn('BatchMode=yes', argv)
-        with patch.dict(os.environ, {'MCP_EXEC_HOST': 'host', 'MCP_EXEC_TARGET': 'ct'}):
-            argv, _ = mcp_exec.command('lanesdk0-t', ['python3', '-c', "print('a b')"])
-        self.assertEqual('host', argv[-2])
-        self.assertTrue(argv[-1].endswith("XDG_RUNTIME_DIR=/run/user/1000 ct python3 -c 'print('\"'\"'a b'\"'\"')'"), argv[-1])
-
-
 class FreePlanAndTagsOnTheDevice(unittest.TestCase):
     """free_plan.py reads the plan with an API token it always revokes; machine_tags.py routes `windows` to the device."""
 

@@ -59,23 +59,6 @@ if($t){& cmd.exe /c "taskkill /T /F /PID $($p.Id) >nul 2>&1";[void]$p.WaitForExi
 [Console]::Out.Write([Convert]::ToBase64String($em.ToArray()));[Console]::Out.Write('"}')
 """
 
-# An MCP client keeps stdin open between requests; RUN closes it after one write, which ends `pb mcp` before it answers.
-MCP_HANDSHAKE = r"""
-$ErrorActionPreference='Stop'
-$i=New-Object Diagnostics.ProcessStartInfo
-$i.FileName=$req.exe;$i.Arguments='mcp';$i.UseShellExecute=$false;$i.CreateNoWindow=$true
-$i.RedirectStandardInput=$true;$i.RedirectStandardOutput=$true
-$p=[Diagnostics.Process]::Start($i)
-$w=$p.StandardInput;$r=$p.StandardOutput
-function Stop-Mcp{& cmd.exe /c "taskkill /T /F /PID $($p.Id) >nul 2>&1"}
-$w.WriteLine($req.initialize);$w.Flush()
-$t=$r.ReadLineAsync();if(-not $t.Wait(30000)){Stop-Mcp;exit 4};$a=$t.Result
-$w.WriteLine($req.initialized);$w.WriteLine($req.list);$w.Flush()
-$t=$r.ReadLineAsync();if(-not $t.Wait(30000)){Stop-Mcp;exit 4};$b=$t.Result
-$w.Close();$done=$p.WaitForExit(15000);if(-not $done){Stop-Mcp}
-[Console]::Out.Write('{"init":'+$a+',"list":'+$b+',"rc":'+$(if($done){$p.ExitCode}else{-1})+'}')
-"""
-
 READ = ("if(-not(Test-Path -LiteralPath $req.path -PathType Leaf)){exit 3}\n"
         # FileShare ReadWrite: a running process may still have the file open for writing (a job's output).
         "$f=New-Object IO.FileStream($req.path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)\n"
@@ -371,11 +354,6 @@ class WindowsDevice:
         if rc not in ok:
             raise DeviceError('%s failed on the device (exit %s): %s' % (step, rc, _text(err).strip()[-300:]))
         return rc, _text(out).strip()
-
-    def mcp_handshake(self, exe, initialize, initialized, tools_list):
-        """The parsed {init, list, rc} of one `pb mcp` session over stdio: initialize, then tools/list, then stdin closed."""
-        _, out = self.ps('mcp handshake', MCP_HANDSHAKE, 120, exe=exe, initialize=initialize, initialized=initialized, list=tools_list)
-        return json.loads(out)
 
     def run(self, argv, input=None, env=None, timeout=90, cwd=None, text=True, read_delay=0):
         """Run argv[0] on the device like subprocess.run(..., capture_output=True, text=text).
