@@ -1,0 +1,30 @@
+go test -v -count=1 on macpool-2 (GitHub-hosted macOS 26.7.2 arm64, Go 1.27.4), cli module at main fb34d9d9d, 2026-11-12 (IST). Tests for CHECKLIST rows F21-19, F21-24, F21-27, PR-04 and F3-21; each package run with -run on the named tests only.
+
+--- PASS: TestMachineServicesAreFetchedOnlyOnTopicOrNudge (2.52s)
+ok  	github.com/pinksaucepasta/paperboat/internal/daemoncmd	2.666s
+--- PASS: TestASnapshotOfTheMostMachinesFits (0.06s)
+ok  	github.com/pinksaucepasta/paperboat/internal/localapi	0.241s
+--- PASS: TestResolvingAMachineAsksOnlyForItsName (0.00s)
+--- PASS: TestStatusProjectsSelectedWorkspaceBeforeRendering (0.12s)
+    --- PASS: TestStatusProjectsSelectedWorkspaceBeforeRendering/personal (0.01s)
+    --- PASS: TestStatusProjectsSelectedWorkspaceBeforeRendering/team-a (0.02s)
+    --- PASS: TestStatusProjectsSelectedWorkspaceBeforeRendering/empty (0.03s)
+    --- PASS: TestStatusProjectsSelectedWorkspaceBeforeRendering/denied (0.01s)
+ok  	github.com/pinksaucepasta/paperboat/cmd/pb	0.220s
+--- PASS: TestEndpointTargetsAdvertiseToTheStartingPeerOnly (0.00s)
+--- PASS: TestUsagePathIsComputedOncePerTTLPerPeer (0.06s)
+ok  	github.com/pinksaucepasta/paperboat/internal/peertransport/mesh	0.086s
+--- PASS: TestCompletionInventoryListsSessionsInOneCatalogRequest (0.00s)
+--- PASS: TestManagedSSHAliasTargetsReconcilesChangedAndRemovedMachines (0.00s)
+--- PASS: TestManagedSSHUsesDiscoveredDomainAndRefreshesAliases (0.13s)
+--- PASS: TestNativeTransportReachesTheSnapshot (0.00s)
+--- PASS: TestAuthenticatedMachineSourceReconcilesSSHAuthority (0.00s)
+ok  	github.com/pinksaucepasta/paperboat/internal/localdaemon	0.194s
+--- PASS: TestMachineAccessUsesProductionNativeSession (0.11s)
+ok  	github.com/pinksaucepasta/paperboat/internal/tunnel	0.157s
+--- PASS: TestContinuousOutputKeepsHistoryStorageBounded (0.10s)
+ok  	github.com/pinksaucepasta/paperboat/internal/hostruntime/history	0.119s
+--- PASS: TestInputJournalKeepsARecentWindowForLongSessions (0.00s)
+ok  	github.com/pinksaucepasta/paperboat/internal/hostruntime/session	0.055s
+--- PASS: TestInputDecisionsArePrunedToTheWindow (0.03s)
+ok  	github.com/pinksaucepasta/paperboat/internal/hostruntime/store	0.073s
