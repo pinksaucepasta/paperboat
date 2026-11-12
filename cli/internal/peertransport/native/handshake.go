@@ -14,12 +14,16 @@ import (
 )
 
 type peerHandshake struct {
-	token chan struct{}
-	users int
+	token  chan struct{}
+	users  int
+	warm   chan struct{} // closed once a dial to this peer got through: its WireGuard lease is up, so setups no longer take turns
+	warmed bool
 }
 
-// Pending QUIC handshakes must not keep each other's stale WireGuard lease
-// alive. Serialize setup per peer; admitted sessions and other peers stay free.
+// Pending QUIC handshakes must not keep each other's stale WireGuard lease alive. Serialize setup per peer until one
+// dial has got through (the lease is then up and later setups are independent); admitted sessions and other peers stay
+// free. A failed dial makes the peer cold again. Taking turns after the first success cost one round trip per exec:
+// 32 concurrent execs over a 260 ms relay finished up to 8 s late (F21-166).
 func (o *Owner) dialAttempt(ctx context.Context, descriptor mesh.Addr, peerID string, class peerquic.Class) (*Session, error) {
 	end := diagnostics.ReconnectStep(ctx, "handshake_lease")
 	release, err := o.acquireHandshake(ctx, peerID)
@@ -28,7 +32,26 @@ func (o *Owner) dialAttempt(ctx context.Context, descriptor mesh.Addr, peerID st
 		return nil, err
 	}
 	defer release()
-	return o.dialOnce(ctx, descriptor, peerID, class)
+	session, err := o.dialOnce(ctx, descriptor, peerID, class)
+	o.markHandshakeWarm(peerID, err == nil)
+	return session, err
+}
+
+// markHandshakeWarm records whether the last dial to peerID got through.
+func (o *Owner) markHandshakeWarm(peerID string, through bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	slot := o.handshakes[peerID]
+	if slot == nil {
+		return
+	}
+	switch {
+	case through && !slot.warmed:
+		slot.warmed = true
+		close(slot.warm)
+	case !through && slot.warmed:
+		slot.warmed, slot.warm = false, make(chan struct{})
+	}
 }
 
 func (o *Owner) acquireHandshake(ctx context.Context, peerID string) (func(), error) {
@@ -42,10 +65,11 @@ func (o *Owner) acquireHandshake(ctx context.Context, peerID string) (func(), er
 	}
 	slot := o.handshakes[peerID]
 	if slot == nil {
-		slot = &peerHandshake{token: make(chan struct{}, 1)}
+		slot = &peerHandshake{token: make(chan struct{}, 1), warm: make(chan struct{})}
 		o.handshakes[peerID] = slot
 	}
 	slot.users++
+	warm := slot.warm
 	o.mu.Unlock()
 	release := func(held bool) {
 		if held {
@@ -61,6 +85,8 @@ func (o *Owner) acquireHandshake(ctx context.Context, peerID string) (func(), er
 	select {
 	case slot.token <- struct{}{}:
 		return func() { release(true) }, nil
+	case <-warm:
+		return func() { release(false) }, nil
 	case <-ctx.Done():
 		release(false)
 		return nil, ctx.Err()
