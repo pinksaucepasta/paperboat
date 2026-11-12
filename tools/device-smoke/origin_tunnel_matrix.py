@@ -23,11 +23,13 @@ import shlex
 import ssl
 import subprocess
 import sys
+import socket
 import time
 import http.client
 
 import winhost
 
+SETTLE_BOUND = 30  # seconds a new or moved route may take to be answered by every edge
 HERE = os.path.dirname(os.path.abspath(__file__))
 MATRIX = os.path.join(HERE, 'origin_proxy_matrix')
 GRPC_SERVER = r'''
@@ -121,7 +123,31 @@ class Lab:
         response = connection.getresponse()
         return connection, response, started
 
+    def settle(self, server, mode, host):
+        """Every edge address answers for the name (not 404 / upstream_unavailable) within SETTLE_BOUND seconds of the route moving;
+        the per-edge times are recorded. DNS gives both edges and each learns a moved route on its own refresh."""
+        ips = sorted({entry[4][0] for entry in socket.getaddrinfo(host, 443, socket.AF_INET)})
+        started, seen = time.time(), {}
+        while time.time() - started < SETTLE_BOUND and len(seen) < len(ips):
+            for ip in ips:
+                if ip in seen:
+                    continue
+                try:
+                    conn = http.client.HTTPSConnection(ip, 443, timeout=20, context=ssl.create_default_context())
+                    conn.sock = ssl.create_default_context().wrap_socket(socket.create_connection((ip, 443), 10), server_hostname=host)
+                    conn.request('GET', '/', headers={'Host': host})
+                    response = conn.getresponse()
+                    response.read(1024)
+                    if response.status != 404 and response.getheader('X-Paperboat-Error') != 'upstream_unavailable':
+                        seen[ip] = round(time.time() - started, 1)
+                    conn.close()
+                except OSError:
+                    pass
+            time.sleep(0.5)
+        self.cell(server, mode + '/route-on-every-edge', 'ok' if len(seen) == len(ips) else 'failed', 'seconds until each edge answered: %s of %s (bound %d s)' % (seen, ips, SETTLE_BOUND))
+
     def probe_all(self, server, mode, host, expect_loop=False, deep=True):
+        self.settle(server, mode, host)
         spoof = {'X-Forwarded-For': '203.0.113.9', 'X-Forwarded-Host': 'evil.example.test', 'X-Forwarded-Proto': 'http', 'Forwarded': 'for=203.0.113.9;host=evil.example.test'}
         tries = 0
         try:
