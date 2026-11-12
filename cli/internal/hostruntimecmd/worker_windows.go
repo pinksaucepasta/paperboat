@@ -405,14 +405,17 @@ func runOwnerHostd(ctx context.Context, output io.Writer, install hostinstall.Wi
 	if err == nil {
 		_, err = owned.HandleWorkerControl(ctx, hostdproto.WorkerControlRequest{Operation: "ready", WorkerID: template.WorkerID})
 	}
-	activate := func() error {
-		_, err := owned.HandleWorkerControl(ctx, hostdproto.WorkerControlRequest{Operation: "activate", WorkerID: template.WorkerID})
-		return err
+	// The worker starts every component, those that call the control plane included, BEFORE the previous
+	// generation gives its address up; only the bind comes after it, so the address is dark for milliseconds
+	// whatever the control plane's speed (a bind that waited for the components made an update's exec outage as
+	// long as the slowest of them: 11 s on a slow server).
+	if err == nil {
+		_, err = owned.HandleWorkerControl(ctx, hostdproto.WorkerControlRequest{Operation: "activate", WorkerID: template.WorkerID})
 	}
 	if err == nil && handover != nil {
-		err = handover.Commit(activate)
+		err = handover.Commit(func() error { return owned.bindControlPlane(ctx) })
 	} else if err == nil {
-		err = activate()
+		err = owned.bindControlPlane(ctx)
 	}
 	if err != nil {
 		stopServer()
@@ -538,8 +541,12 @@ func runWorkerWith(ctx context.Context, args []string, input io.Reader, output, 
 	}
 	fmt.Fprintf(output, "ready %d %d\n", ready.Epoch, ready.APIVersion)
 	if *waitActivation {
-		if err := awaitWindowsWorkerActivation(ctx, input); err != nil {
+		unbound, err := awaitWindowsWorkerActivation(ctx, input)
+		if err != nil {
 			return err
+		}
+		if unbound {
+			ctx = context.WithValue(ctx, deferControlPlaneBindKey{}, true)
 		}
 	}
 	active, err := candidate.Activate(ctx)
@@ -597,8 +604,20 @@ func runWorkerWith(ctx context.Context, args []string, input io.Reader, output, 
 	}
 }
 
-func awaitWindowsWorkerActivation(ctx context.Context, input io.Reader) error {
-	return awaitWorkerActivation(ctx, input)
+// awaitWindowsWorkerActivation reads the activation line; "activate-unbound" starts the feature without binding
+// its loopback address (the hostd then sends "bind").
+func awaitWindowsWorkerActivation(ctx context.Context, input io.Reader) (unbound bool, _ error) {
+	line, err := readWorkerControlLine(ctx, input)
+	if err != nil {
+		return false, err
+	}
+	switch line {
+	case "activate\n":
+		return false, nil
+	case "activate-unbound\n":
+		return true, nil
+	}
+	return false, runtimeFailure("invalid worker activation")
 }
 
 func currentWindowsSID() (string, error) {
@@ -739,7 +758,7 @@ func (w *windowsRuntimeWorker) Activate(ctx context.Context) (hostdproto.Status,
 	if w.ready.Epoch == 0 || w.control == nil || w.active {
 		return hostdproto.Status{}, errors.New("worker is not ready")
 	}
-	if _, err := io.WriteString(w.control, "activate\n"); err != nil {
+	if _, err := io.WriteString(w.control, "activate-unbound\n"); err != nil {
 		return hostdproto.Status{}, err
 	}
 	w.active = true
@@ -781,6 +800,11 @@ func (w *windowsRuntimeWorker) handover(ctx context.Context, line, answer string
 		return errors.New("invalid Windows worker handover answer")
 	}
 	return nil
+}
+
+// BindControlPlane takes the worker's loopback address, left alone by its unbound activation.
+func (w *windowsRuntimeWorker) BindControlPlane(ctx context.Context) error {
+	return w.handover(ctx, "bind\n", "bound\n")
 }
 
 // StopAccepting closes the worker's loopback listener; its accepted connections keep running.

@@ -931,8 +931,15 @@ func (h *Host) Shutdown(ctx context.Context) error {
 
 // StopAccepting closes the loopback listener and keeps the accepted connections; ResumeAccepting binds it again.
 // A Windows hostd handover moves the address to the next generation's worker this way (it cannot pass sockets).
-func (h *Host) StopAccepting()                            { h.http.StopAccepting() }
+func (h *Host) StopAccepting() { h.http.StopAccepting() }
+
 func (h *Host) ResumeAccepting(ctx context.Context) error { return h.http.ResumeAccepting(ctx) }
+
+// DeferControlPlaneBind makes Start leave the loopback address alone until BindControlPlane (before Start).
+func (h *Host) DeferControlPlaneBind() { h.http.DeferBind() }
+
+// BindControlPlane takes the loopback address after a deferred Start.
+func (h *Host) BindControlPlane(ctx context.Context) error { return h.http.Bind(ctx) }
 
 // DrainLocal stops accepting on the loopback listener and waits, until ctx
 // ends, for in-flight local requests and, each up to runtimewire.DrainLimit,

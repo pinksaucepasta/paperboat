@@ -39,6 +39,7 @@ type HTTPService struct {
 	running  bool
 	stopped  bool
 	retiring bool // StopAccepting closed the listener
+	deferred bool // Start waits for Bind: a Windows hostd handover binds only once the previous generation gave the address up
 	// connections counts accepted HTTP connections that have not closed.
 	connections atomic.Int64
 }
@@ -68,6 +69,32 @@ func (s *HTTPService) Start(ctx context.Context) error {
 	if s.running || s.stopped {
 		return ErrHTTPState
 	}
+	if s.deferred {
+		return nil
+	}
+	return s.bindLocked(ctx)
+}
+
+// DeferBind makes Start leave the address alone until Bind: the components that start before this one may call a
+// slow control plane, and a Windows handover must not hold the previous generation's address that long.
+func (s *HTTPService) DeferBind() {
+	s.mu.Lock()
+	s.deferred = true
+	s.mu.Unlock()
+}
+
+// Bind takes the address a deferred Start left alone and serves it.
+func (s *HTTPService) Bind(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.deferred || s.running || s.stopped {
+		return ErrHTTPState
+	}
+	s.deferred = false
+	return s.bindLocked(ctx)
+}
+
+func (s *HTTPService) bindLocked(ctx context.Context) error {
 	listener, err := s.listen(ctx)
 	if err != nil {
 		return err

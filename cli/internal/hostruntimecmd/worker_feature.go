@@ -31,6 +31,9 @@ type activeFeature struct {
 func (f *activeFeature) Health(ctx context.Context) error     { return f.bridge.Health(ctx) }
 func (f *activeFeature) DrainLocal(ctx context.Context) error { return f.host.DrainLocal(ctx) }
 func (f *activeFeature) StopAccepting()                       { f.host.StopAccepting() }
+func (f *activeFeature) BindControlPlane(ctx context.Context) error {
+	return f.host.BindControlPlane(ctx)
+}
 func (f *activeFeature) ResumeAccepting(ctx context.Context) error {
 	return f.host.ResumeAccepting(ctx)
 }
@@ -87,6 +90,9 @@ func newWorkerFeature(ctx context.Context, endpoint string, token []byte, worker
 	}
 	if err = host.BindOwnerUpdateGate(token); err != nil {
 		return nil, runtimeFailure("runtime feature startup failed", err, host.Shutdown(ctx))
+	}
+	if ctx.Value(deferControlPlaneBindKey{}) != nil {
+		host.DeferControlPlaneBind()
 	}
 	if err = host.Start(ctx); err != nil {
 		return nil, runtimeFailure("runtime feature startup failed", err, host.Shutdown(ctx))

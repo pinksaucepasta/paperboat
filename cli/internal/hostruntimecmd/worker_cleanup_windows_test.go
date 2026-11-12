@@ -28,14 +28,14 @@ func TestWindowsWorkerActivationBorrowedPipeCancellationAndRecovery(t *testing.T
 	ctx, cancel := context.WithCancelCause(context.Background())
 	cause := errors.New("private activation cancellation")
 	cancel(cause)
-	if err := awaitWindowsWorkerActivation(ctx, reader); !errors.Is(err, context.Canceled) || !errors.Is(err, cause) {
+	if _, err := awaitWindowsWorkerActivation(ctx, reader); !errors.Is(err, context.Canceled) || !errors.Is(err, cause) {
 		t.Fatalf("cancellation cause lost: %T", err)
 	}
 	sent := make(chan error, 1)
 	go func() { _, err := io.WriteString(writer, "activate\n"); sent <- err }()
 	recoveryCtx, stop := context.WithTimeout(context.Background(), time.Second)
 	defer stop()
-	if err := awaitWindowsWorkerActivation(recoveryCtx, reader); err != nil {
+	if _, err := awaitWindowsWorkerActivation(recoveryCtx, reader); err != nil {
 		t.Fatalf("borrowed pipe recovery: %T", err)
 	}
 	if err := <-sent; err != nil {

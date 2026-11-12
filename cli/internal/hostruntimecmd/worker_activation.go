@@ -24,6 +24,10 @@ func awaitWorkerActivation(ctx context.Context, input io.Reader) error {
 	return nil
 }
 
+// deferControlPlaneBindKey marks a context whose feature starts without binding its loopback address: the Windows
+// hostd binds it with a "bind" line once the previous generation gave it up (see serveWorkerControl).
+type deferControlPlaneBindKey struct{}
+
 // readWorkerControlLine reads one line of at most 64 bytes from the supervisor's control input.
 func readWorkerControlLine(ctx context.Context, input io.Reader) (string, error) {
 	var readByte func(context.Context) (byte, error)
@@ -83,6 +87,7 @@ func serveWorkerControl(ctx context.Context, input io.Reader, output io.Writer, 
 		StopAccepting()
 		ResumeAccepting(context.Context) error
 		DrainLocal(context.Context) error
+		BindControlPlane(context.Context) error
 	})
 	for {
 		line, err := readWorkerControlLine(ctx, input)
@@ -93,6 +98,10 @@ func serveWorkerControl(ctx context.Context, input io.Reader, output io.Writer, 
 			return runtimeFailure("the runtime feature cannot hand its listener over")
 		}
 		switch line {
+		case "bind\n":
+			if err = accepting.BindControlPlane(ctx); err == nil {
+				_, err = io.WriteString(output, "bound\n")
+			}
 		case "stop\n":
 			accepting.StopAccepting()
 			_, err = io.WriteString(output, "stopped\n")

@@ -208,6 +208,12 @@ var errWorkerExited = errors.New("runtime worker exited")
 type listenerHandover interface {
 	StopAccepting(context.Context) error
 	ResumeAccepting(context.Context) error
+	BindControlPlane(context.Context) error
+}
+
+// bindControlPlane has the active worker take its loopback address after its unbound activation.
+func (o *ownedWorkers) bindControlPlane(ctx context.Context) error {
+	return o.withActiveListener(func(worker listenerHandover) error { return worker.BindControlPlane(ctx) })
 }
 
 // stopAccepting closes the active worker's loopback listener for the next hostd generation's worker.
