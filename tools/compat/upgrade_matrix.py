@@ -63,34 +63,6 @@ def pb(machine, *args, timeout=120):
     return result.stdout
 
 
-def close_session(name):
-    # The smoke suite owns exact resource and confirmation validation, including deletion.
-    sys.path.insert(0, str(ROOT / 'tools/device-smoke'))
-    from session_cleanup import cleanup
-
-    class RemotePb:
-        def run_remote(self, args, **kwargs):
-            result = invoke_pb(MACHINES[0], *args, timeout=kwargs.get('timeout', 30))
-            if kwargs.get('text') is False:
-                result.stdout = result.stdout.encode()
-            return result
-
-    cleanup(RemotePb(), 'stg-b', name)
-
-
-def verify_terminal():
-    name = 'smoke-matrix-' + str(time.time_ns())
-    marker = name + '-ready'
-    try:
-        result = invoke_pb(MACHINES[0], 'connect', 'stg-b', '--name', name, '--status-bar', 'off',
-                           timeout=45, input="printf '\\n" + marker + "\\n'\nexit\n")
-        plain = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', result.stdout).replace('\r', '')
-        if result.returncode or marker not in plain.splitlines():
-            raise RuntimeError('new terminal did not execute its marker')
-    finally:
-        close_session(name)
-
-
 def artifact_version(client):
     out = json.loads(command([client, 'version', '--json']))
     return out.get('data', out)['version']
@@ -296,13 +268,12 @@ def main():
     if versions['old'] == versions['new']:
         parser.error('old and candidate clients must have different verified versions')
     report = {'schema': 1, 'client_versions': versions, 'cells': [], 'restoration': [], 'checks': [], 'ok': False,
-              'scope': 'native access; isolated public HTTPS and forced-relay coverage remain separate gates',
+              'scope': 'native access (exec, send, held exec); terminal creation, preview, tunnel and QUIC need the edge on 443 and stay with the production check-edges gate; forced relay is a separate gate',
               'inputs': {k:v for k,v in vars(args).items() if k != 'output'}}
     # A broken current fixture is not a compatibility finding. Stop before changing any axis.
     report['baseline'] = [check('exec_a_to_b', lambda: verify_exec(MACHINES[0], 'stg-b')),
                           check('exec_b_to_a', lambda: verify_exec(MACHINES[1], 'stg-a')),
-                          check('send', verify_send),
-                          check('terminal_creation_through_edge', verify_terminal)]
+                          check('send', verify_send)]
     if not all(item['ok'] for item in report['baseline']):
         report['blocked'] = 'current_fixture_failed_before_matrix'
         Path(args.output).write_text(json.dumps(report, indent=2) + '\n')
@@ -321,8 +292,7 @@ def main():
             if all(r['ok'] for r in setup):
                 results += [check('exec_a_to_b', lambda: verify_exec(MACHINES[0], 'stg-b')),
                             check('exec_b_to_a', lambda: verify_exec(MACHINES[1], 'stg-a')),
-                            check('send', verify_send),
-                            check('terminal_creation_through_edge', verify_terminal)]
+                            check('send', verify_send)]
             report['cells'].append(dict(cell, checks=results, ok=all(r['ok'] for r in results)))
             Path(args.output).write_text(json.dumps(report, indent=2) + '\n')
         if time.time() < window_end - 300:
