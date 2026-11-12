@@ -1,0 +1,2 @@
+perf_dataplane.py apple (PR-05) on M, 2026-11-12 (IST): client = pbmac VM on apple (Tart, Apple M4 virtual, macOS 26.6.2, pb dev-f7f2eac89), target = apple (macOS host, same LAN), path direct, prod server; budgets perf_budgets.py 'direct' + 'cli'.
+{"status": "PASS", "target": "apple", "check": "perf", "metrics": {"cli_start_ms": 41, "status_ms": 42, "path": "direct", "exec_true_median_ms": 1475, "exec_true_max_ms": 1720, "send_mbit_s": 413.4, "scp_mbit_s": 137.1, "rsync_small_files_s": 957.5}, "budget_failures": [], "enrollment_unchanged": true}
