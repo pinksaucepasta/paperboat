@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """F21-06: pb status, pb doctor and the bug report show the selected path; a forced relay-only path is reported as such.
 
-  path_display.py TARGET     (run as root-capable user on a paired Linux machine; needs sudo -n iptables; with
-                             PB_SMOKE_WINDOWS_PB the client is the Windows device and the block is a firewall rule)
+  path_display.py TARGET     (run as root-capable user on a paired Linux or macOS machine; needs sudo -n iptables or pfctl;
+                             with PB_SMOKE_WINDOWS_PB the client is the Windows device and the block is a firewall rule)
   1. direct: after a ping, `pb status` names the direct path for TARGET, `pb doctor TARGET` peer_reachability says direct
   2. UDP blocked (iptables, always removed): pings go over the regional relay, `pb status` reports selected_path
      wss or relay with a relay_region, doctor says regional_relay, and the bug report's status.json carries both
@@ -10,6 +10,8 @@
 import contextlib
 import io
 import json
+import os
+import re
 import subprocess
 import sys
 import time
@@ -19,6 +21,10 @@ from pairing_lifecycle import command_result
 import winhost
 
 PB = winhost.pb_path()
+DARWIN = os.uname().sysname == 'Darwin'
+# The stock macOS pf.conf evaluates com.apple/* anchors, so no change to the main ruleset is needed.
+PF_ANCHOR = 'com.apple/pbsmoke-path'
+PF_RULE = 'block drop out quick on ! lo0 proto udp from any to any port != 53\n'
 BLOCK = ['sudo', '-n', 'iptables', '{}', 'OUTPUT', '-p', 'udp', '!', '--dport', '53', '-j', 'DROP']
 
 
@@ -33,6 +39,25 @@ def udp_blocked():
     if device:
         with device.udp_blocked():
             yield
+        return
+    if DARWIN:
+        sudo = lambda *args, **kw: subprocess.run(['sudo', '-n', *args], capture_output=True, text=True, timeout=30, **kw)
+        # A root failsafe drops the rule even if this process dies; the rule is UDP only, so the ssh/TCP session survives.
+        failsafe = subprocess.Popen(['sudo', '-n', 'sh', '-c', 'sleep 600; /sbin/pfctl -a %s -F all' % PF_ANCHOR],
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        try:
+            if sudo('pfctl', '-a', PF_ANCHOR, '-f', '-', input=PF_RULE).returncode:
+                raise RuntimeError('pfctl could not load the UDP drop rule into ' + PF_ANCHOR)
+            token = re.search(r'Token : (\d+)', sudo('pfctl', '-E').stderr)
+            sudo('pfctl', '-F', 'states')  # an established UDP flow keeps passing on its state until flushed
+            try:
+                yield
+            finally:
+                sudo('pfctl', '-a', PF_ANCHOR, '-F', 'all')
+                if token:
+                    sudo('pfctl', '-X', token.group(1))
+        finally:
+            failsafe.terminate()
         return
     rule = lambda flag: [flag if part == '{}' else part for part in BLOCK]
     subprocess.run(rule('-I'), check=True)
