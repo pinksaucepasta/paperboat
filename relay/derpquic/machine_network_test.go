@@ -49,7 +49,7 @@ func TestRelayIssuedAtToleratesBoundedClockSkewWithoutExtendingExpiry(t *testing
 	if _, err := f.verifier.Verify(f.token(g), state, now); err != nil {
 		t.Fatal("small clock skew rejected", err)
 	}
-	g.IssuedAt = now.Unix() + 61
+	g.IssuedAt = now.Unix() + int64(MaxClockSkew/time.Second) + 1
 	g.ExpiresAt = g.IssuedAt + 60
 	if _, err := f.verifier.Verify(f.token(g), state, now); err == nil {
 		t.Fatal("excessive clock skew accepted")

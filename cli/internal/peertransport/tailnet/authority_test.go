@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -22,6 +23,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/config"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
 	"github.com/pinksaucepasta/paperboat/relay/derpquic"
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 	"tailscale.com/tailcfg"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=authority-tests
 	"tailscale.com/tstest/integration"
@@ -892,12 +894,13 @@ func TestNetworkProducedConfiguration(t *testing.T) {
 func TestNetworkIssuedAtToleratesClockSkewWithoutExtendingExpiry(t *testing.T) {
 	a, c, signer, _ := networkTestAuthority(t)
 	token := networkToken(t, signer, c)
-	for _, seconds := range []int64{1, 3, 60} {
+	limit := int64(peernetwork.MaxClockSkew / time.Second)
+	for _, seconds := range []int64{1, 3, 60, 600, limit} { // 600: a machine whose clock is 10 minutes behind (X-27)
 		if _, _, err := a.verify(t.Context(), token, time.Unix(c.IssuedAt-seconds, 0), false); err != nil {
 			t.Fatalf("%ds clock skew: %v", seconds, err)
 		}
 	}
-	if _, _, err := a.verify(t.Context(), token, time.Unix(c.IssuedAt-61, 0), false); err == nil {
+	if _, _, err := a.verify(t.Context(), token, time.Unix(c.IssuedAt-limit-1, 0), false); err == nil {
 		t.Fatal("excessive clock skew accepted")
 	}
 	if _, _, err := a.verify(t.Context(), token, time.Unix(c.ExpiresAt, 0), false); err == nil {
@@ -1329,5 +1332,63 @@ func TestEveryAcceptedScopeKindCanBeTrackedAsAdmitted(t *testing.T) {
 			t.Fatalf("%s scope not trackable: %v", kind, err)
 		}
 		release()
+	}
+}
+
+// X-27: a refused configuration names the tripped check (never a bare "authority is invalid"), and a Self that
+// differs from the pinned identity is its own error naming the fields.
+func TestNetworkAuthorityRefusalNamesTheTrippedCheck(t *testing.T) {
+	a, c, signer, _ := networkTestAuthority(t)
+	token := networkToken(t, signer, c)
+	_, _, err := a.verify(t.Context(), token, time.Unix(c.IssuedAt-3600, 0), false)
+	if !errors.Is(err, ErrAuthority) || !strings.Contains(err.Error(), "configuration lifetime") || !strings.Contains(err.Error(), "iat") {
+		t.Fatalf("clock refusal does not name the lifetime check: %v", err)
+	}
+	parts := strings.Split(token, ".")
+	if _, _, err := a.verify(t.Context(), parts[0]+"."+parts[1]+"."+parts[0], time.Now(), false); !errors.Is(err, ErrAuthority) || !strings.Contains(err.Error(), "signature does not verify with key") {
+		t.Fatalf("bad signature: %v", err)
+	}
+	other := c
+	other.Self.QUICCertificateFingerprint = hex.EncodeToString(make([]byte, 32))
+	other.Self.EndpointGeneration += 5
+	_, _, err = a.verify(t.Context(), networkToken(t, signer, other), time.Now(), false)
+	if !errors.Is(err, ErrAuthority) || !errors.Is(err, ErrSelfMismatch) || !strings.Contains(err.Error(), "quic_certificate_fingerprint") || !strings.Contains(err.Error(), "endpoint_generation") {
+		t.Fatalf("self mismatch does not name the fields: %v", err)
+	}
+}
+
+// X-27: a server holding another identity for this machine than the pinned one (a renewed certificate) is
+// registered over once, not refused on every refresh forever; the outcome reaches OnAuthority either way.
+func TestNetworkRefreshRegistersAgainOnASelfMismatchAndReportsTheRefusal(t *testing.T) {
+	a, c, signer, _ := networkTestAuthority(t)
+	var outcomes []error
+	a.options.OnAuthority = func(err error) { outcomes = append(outcomes, err) }
+	stale := c
+	stale.Self.QUICCertificateFingerprint = hex.EncodeToString(make([]byte, 32))
+	registered := 0
+	client := networkAPIFunc{
+		register: func(_ context.Context, r api.PeerNetworkRegistration) (api.PeerNetworkRegistrationResult, error) {
+			registered++
+			if r.QUICCertificateFingerprint != a.options.Self.QUICCertificateFingerprint {
+				t.Error("registration did not carry the pinned certificate fingerprint")
+			}
+			return api.PeerNetworkRegistrationResult{KeyGeneration: c.Self.KeyGeneration, VirtualAddress: c.Self.VirtualAddress}, nil
+		},
+		configuration: func(context.Context, string) (string, error) { return networkToken(t, signer, stale), nil },
+	}
+	for range 2 {
+		if err := a.Refresh(t.Context(), client); !errors.Is(err, ErrSelfMismatch) {
+			t.Fatalf("refresh: %v", err)
+		}
+	}
+	if registered != 1 {
+		t.Fatalf("registered %d times; once per %v is the bound", registered, reregisterAfter)
+	}
+	if len(outcomes) != 2 || outcomes[0] == nil || !strings.Contains(outcomes[0].Error(), "quic_certificate_fingerprint") {
+		t.Fatalf("refusals not reported with the tripped field: %v", outcomes)
+	}
+	client.configuration = func(context.Context, string) (string, error) { c.Generation++; return networkToken(t, signer, c), nil }
+	if err := a.Refresh(t.Context(), client); err != nil || outcomes[len(outcomes)-1] != nil {
+		t.Fatalf("accepted configuration: %v %v", err, outcomes)
 	}
 }

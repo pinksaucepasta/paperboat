@@ -36,6 +36,8 @@ type PeerTerminalConfig struct {
 	Now               func() time.Time
 	// LocalMachineID is the machine the daemon runs on, if enrolled (see tailnet.AuthorityOptions).
 	LocalMachineID string
+	// AuthorityHealth is told whether the signed peer network configuration was accepted (nil) or refused (why).
+	AuthorityHealth func(error)
 }
 
 // PeerTerminalTunnel owns native client authority and sessions for the daemon.

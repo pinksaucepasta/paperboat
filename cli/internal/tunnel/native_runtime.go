@@ -483,7 +483,7 @@ func (t *PeerTerminalTunnel) acquireNativeRuntime(ctx context.Context, accountID
 		_ = t.nativeRuntime.Close()
 		t.nativeRuntime = nil
 	}
-	runtime, err := newCLINativeRuntime(ctx, t.config.Issuer, t.config.Store, networkAPI, t.config.HTTPClient, t.config.TLS, accountID, endpointID, identity, t.config.LocalMachineID)
+	runtime, err := newCLINativeRuntime(ctx, t.config.Issuer, t.config.Store, networkAPI, t.config.HTTPClient, t.config.TLS, accountID, endpointID, identity, t.config.LocalMachineID, t.config.AuthorityHealth)
 	if err != nil {
 		return nil, false, err
 	}
@@ -614,15 +614,15 @@ func (t *PeerTerminalTunnel) RegisterNetwork(ctx context.Context) error {
 	}
 	defer identity.Clear()
 	networkAPI := cliNativeNetworkAPI{issuer: t.config.Issuer, auth: t.config.Auth, http: t.config.HTTPClient}
-	authority, _, _, err := newCLINativeAuthority(ctx, t.config.Issuer, t.config.Store, networkAPI, t.config.HTTPClient, t.config.TLS, profile.Account.ID, profile.CLIClientSessionID, identity, t.config.LocalMachineID)
+	authority, _, _, err := newCLINativeAuthority(ctx, t.config.Issuer, t.config.Store, networkAPI, t.config.HTTPClient, t.config.TLS, profile.Account.ID, profile.CLIClientSessionID, identity, t.config.LocalMachineID, t.config.AuthorityHealth)
 	if err != nil {
 		return err
 	}
 	return authority.Close()
 }
 
-func newCLINativeRuntime(ctx context.Context, issuer string, store config.ProfileStore, networkAPI tailnet.NetworkAPI, httpClient *http.Client, relayTrust *tls.Config, accountID, endpointID string, identity clientauthority.Authority, localMachineID string) (*cliNativeRuntime, error) {
-	authority, peerTLS, relayTLS, err := newCLINativeAuthority(ctx, issuer, store, networkAPI, httpClient, relayTrust, accountID, endpointID, identity, localMachineID)
+func newCLINativeRuntime(ctx context.Context, issuer string, store config.ProfileStore, networkAPI tailnet.NetworkAPI, httpClient *http.Client, relayTrust *tls.Config, accountID, endpointID string, identity clientauthority.Authority, localMachineID string, onAuthority func(error)) (*cliNativeRuntime, error) {
+	authority, peerTLS, relayTLS, err := newCLINativeAuthority(ctx, issuer, store, networkAPI, httpClient, relayTrust, accountID, endpointID, identity, localMachineID, onAuthority)
 	if err != nil {
 		return nil, err
 	}
@@ -654,7 +654,7 @@ func issueCLILeaf(identity clientauthority.Authority) (tls.Certificate, error) {
 
 // newCLINativeAuthority builds the daemon's signed-network authority and registers its identity; it
 // returns the peer and relay TLS configurations the engine needs.
-func newCLINativeAuthority(ctx context.Context, issuer string, store config.ProfileStore, networkAPI tailnet.NetworkAPI, httpClient *http.Client, relayTrust *tls.Config, accountID, endpointID string, identity clientauthority.Authority, localMachineID string) (*tailnet.Authority, *tls.Config, *tls.Config, error) {
+func newCLINativeAuthority(ctx context.Context, issuer string, store config.ProfileStore, networkAPI tailnet.NetworkAPI, httpClient *http.Client, relayTrust *tls.Config, accountID, endpointID string, identity clientauthority.Authority, localMachineID string, onAuthority func(error)) (*tailnet.Authority, *tls.Config, *tls.Config, error) {
 	if ctx == nil || issuer == "" || store.Path == "" || store.Secrets == nil || networkAPI == nil || httpClient == nil || relayTrust == nil || accountID == "" || endpointID == "" {
 		return nil, nil, nil, ErrPeerTerminalInvalid
 	}
@@ -694,7 +694,7 @@ func newCLINativeAuthority(ctx context.Context, issuer string, store config.Prof
 	relayTLS.Certificates = []tls.Certificate{leaf}
 	relayTLS.GetClientCertificate = getClientCertificate
 	self := tailnet.NetworkBinding{AccountID: accountID, EndpointID: endpointID, Role: peernetwork.RoleCLI, EndpointGeneration: identity.LocalCertificate.Claims.Generation, QUICCertificateFingerprint: identity.LocalCertificate.Fingerprint(), QUICPublicKey: base64.RawURLEncoding.EncodeToString(identity.LocalCertificate.Claims.QUICPublicKey)}
-	authority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: store, Issuer: issuer, Self: self, Keys: keys, LocalMachineID: localMachineID})
+	authority, err := tailnet.NewAuthority(tailnet.AuthorityOptions{Store: store, Issuer: issuer, Self: self, Keys: keys, LocalMachineID: localMachineID, OnAuthority: onAuthority})
 	if err != nil {
 		return nil, nil, nil, err
 	}

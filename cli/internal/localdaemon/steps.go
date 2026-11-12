@@ -15,11 +15,13 @@ import (
 // (health/health.go), which tailscale status prints (cmd/tailscale/cli/status.go).
 const (
 	StepRegisterNetwork = "register_network"
+	StepPeerAuthority   = "peer_authority"
 	StepMachineServices = "machine_services"
 )
 
 var stepTitles = map[string]string{
 	StepRegisterNetwork: "Registering this computer with the Paperboat network",
+	StepPeerAuthority:   "Verifying the peer network configuration",
 	StepMachineServices: "Reading the services your machines announce for the browser",
 }
 

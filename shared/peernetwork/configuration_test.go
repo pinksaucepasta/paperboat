@@ -70,3 +70,16 @@ func TestConfigurationReceiversDropUnknownScopes(t *testing.T) {
 		t.Fatalf("peers after dropping unknown scopes: %+v", c.Peers)
 	}
 }
+
+// X-27: a configuration issued by a server whose clock is 10 minutes ahead of the verifier's is accepted.
+func TestConfigurationCheckToleratesTenMinutesOfClockSkew(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	ahead := validTestConfiguration(now.Add(10 * time.Minute))
+	if err := ahead.Check(now); err != nil {
+		t.Fatalf("a configuration issued 10 minutes ahead was refused: %v", err)
+	}
+	tooFar := validTestConfiguration(now.Add(MaxClockSkew + time.Minute))
+	if tooFar.Check(now) == nil {
+		t.Fatal("a configuration issued beyond the allowance was accepted")
+	}
+}

@@ -24,7 +24,7 @@ func TestRegionalCandidatesSigningContract(t *testing.T) {
 		{"unbounded generation", func(c *RegionalCandidates) { c.Generation = MaxSafeInteger + 1 }, false},
 		{"no authorization", func(c *RegionalCandidates) { c.AuthorizationGeneration = 0 }, false},
 		{"no issue time", func(c *RegionalCandidates) { c.IssuedAt = 0 }, false},
-		{"future", func(c *RegionalCandidates) { c.IssuedAt = now.Add(2 * time.Minute).Unix() }, false},
+		{"future", func(c *RegionalCandidates) { c.IssuedAt = now.Add(2 * MaxClockSkew).Unix() }, false},
 		{"reversed lifetime", func(c *RegionalCandidates) { c.ExpiresAt = c.IssuedAt }, false},
 		{"overlong lifetime", func(c *RegionalCandidates) { c.ExpiresAt = now.Add(24 * time.Hour).Unix() }, false},
 	} {

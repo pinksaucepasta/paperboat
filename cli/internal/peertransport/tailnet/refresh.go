@@ -30,6 +30,15 @@ type NetworkAPI interface {
 // operation identity makes a lost response retryable after process restart.
 // Only a verified configuration commits the staged key.
 func (a *Authority) Register(ctx context.Context, client NetworkAPI, rotate bool) error {
+	if err := a.registerKey(ctx, client, rotate); err != nil {
+		return err
+	}
+	return a.Refresh(ctx, client)
+}
+
+// registerKey sends the public registration material; the server keeps the network key generation when only the
+// endpoint certificate changed.
+func (a *Authority) registerKey(ctx context.Context, client NetworkAPI, rotate bool) error {
 	if client == nil || ctx == nil {
 		return ErrAuthority
 	}
@@ -48,7 +57,29 @@ func (a *Authority) Register(ctx context.Context, client NetworkAPI, rotate bool
 	if err != nil {
 		return a.rejectRefusedAuthority(err)
 	}
-	return a.Refresh(ctx, client)
+	return nil
+}
+
+// reregisterAfter bounds how often a refused identity is registered again.
+const reregisterAfter = 5 * time.Minute
+
+// refusedConfiguration is what a refresh does with a configuration this authority refuses: it names why in the log and to the
+// daemon's health, and re-registers when the server holds another identity for this machine than the pinned one
+// (a renewed certificate), so every later refresh is not refused for the same reason.
+func (a *Authority) refusedConfiguration(ctx context.Context, client NetworkAPI, err error) {
+	diagnosticlog.TryWarn("peer network configuration refused", "reason", err)
+	if a.options.OnAuthority != nil {
+		a.options.OnAuthority(err)
+	}
+	last := a.reregistered.Load()
+	if !errors.Is(err, ErrSelfMismatch) || last != nil && time.Since(*last) < reregisterAfter {
+		return
+	}
+	now := time.Now()
+	a.reregistered.Store(&now)
+	if regErr := a.registerKey(ctx, client, false); regErr != nil {
+		diagnosticlog.TryWarn("registering this machine again failed", "error", regErr)
+	}
 }
 
 // An explicit denial revokes the restart cache too; an outage never does.
@@ -193,7 +224,13 @@ func (a *Authority) refresh(ctx context.Context, client NetworkAPI, since time.T
 			a.refreshedFrom = started
 			return nil
 		}
+		if errors.Is(err, ErrAuthority) {
+			a.refusedConfiguration(ctx, client, err)
+		}
 		return err
+	}
+	if a.options.OnAuthority != nil {
+		a.options.OnAuthority(nil)
 	}
 	a.refreshedFrom = started
 	a.setRelayDenial(result.RelayDenial())

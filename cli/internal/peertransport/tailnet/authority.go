@@ -46,6 +46,17 @@ const NetworkPort = peernetwork.NetworkPort
 
 var ErrAuthority = errors.New("peer network authority is invalid")
 var ErrStaleAuthority = errors.New("peer network authority is stale")
+
+// refused is ErrAuthority naming the check that tripped (never a secret: field names, key ids, generations), so a
+// log line or `pb doctor` says why every peer is refused (X-27: a bare "authority is invalid" hid a clock check).
+func refused(format string, args ...any) error {
+	return fmt.Errorf("%w: %s", ErrAuthority, fmt.Sprintf(format, args...))
+}
+
+// ErrSelfMismatch is a signed configuration whose Self is not the identity this authority pinned: a registration
+// the server holds for an older identity (a renewed certificate). Registering again replaces it.
+var ErrSelfMismatch = errors.New("configuration describes another identity than this machine's")
+
 var ErrExpiredAuthority = errors.New("peer network authority expired; reconnect to Paperboat")
 
 // ErrRelayGrantExpired is a relay grant past its expiry on the server clock (F21-02), e.g. after a long control
@@ -79,6 +90,9 @@ type AuthorityOptions struct {
 	// IdleRefresh is the average renewal when no change was announced; zero is the default IdleRefresh. An engine
 	// that does not hear every change (the carrier wakes on machine_access only) sets a shorter one.
 	IdleRefresh time.Duration
+	// OnAuthority is told the outcome of every renewed configuration: the refusal naming the tripped check, or nil
+	// when it was accepted. The daemon shows it in pb status and pb doctor.
+	OnAuthority func(error)
 	// TestOnlyPacketListener supplies real filtered UDP sockets to network fault tests.
 	TestOnlyPacketListener nettype.PacketListener
 	// TestOnlyDERPCarrier wraps the authenticated carrier for network fault tests.
@@ -88,6 +102,7 @@ type AuthorityOptions struct {
 // Authority owns verified configuration and every engine attached through it.
 // Application operation credentials and QUIC certificate validation remain mandatory.
 type Authority struct {
+	reregistered atomic.Pointer[time.Time]
 	streamScopes bool
 	scopeChanges chan struct{}
 	admitted     map[api.AdmittedNetworkScope]int
@@ -246,11 +261,11 @@ func privateKey(raw []byte) (key.NodePrivate, error) {
 func (a *Authority) verify(ctx context.Context, token string, now time.Time, restored bool) (NetworkConfiguration, string, error) {
 	var cfg NetworkConfiguration
 	if len(token) > MaxConfigurationBytes {
-		return cfg, "", ErrAuthority
+		return cfg, "", refused("configuration is %d bytes, over %d", len(token), MaxConfigurationBytes)
 	}
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
-		return cfg, "", ErrAuthority
+		return cfg, "", refused("configuration has %d parts, not 3", len(parts))
 	}
 	decode := func(s string) ([]byte, error) {
 		b, e := base64.RawURLEncoding.Strict().DecodeString(s)
@@ -268,30 +283,57 @@ func (a *Authority) verify(ctx context.Context, token string, now time.Time, res
 		KeyID     string `json:"kid"`
 	}
 	if e1 != nil || e2 != nil || e3 != nil || len(header) > 1024 || peernetwork.DecodeSigned(header, &h) != nil || h.Algorithm != "EdDSA" || h.Type != peernetwork.ConfigurationType || !peernetwork.ValidID(h.KeyID) {
-		return cfg, "", ErrAuthority
+		return cfg, "", refused("configuration header is malformed (alg %q, typ %q, kid %q)", h.Algorithm, h.Type, h.KeyID)
 	}
 	if !restored {
 		pub, found, err := a.options.Keys.Lookup(ctx, h.KeyID)
-		if err != nil || !found || len(pub) != ed25519.PublicKeySize || !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sig) {
-			return cfg, "", ErrAuthority
+		switch {
+		case err != nil:
+			return cfg, "", refused("signing key %q lookup failed: %v", h.KeyID, err)
+		case !found || len(pub) != ed25519.PublicKeySize:
+			return cfg, "", refused("signing key %q is not known", h.KeyID)
+		case !ed25519.Verify(pub, []byte(parts[0]+"."+parts[1]), sig):
+			return cfg, "", refused("signature does not verify with key %q", h.KeyID)
 		}
 	}
-	if peernetwork.DecodeSigned(body, &cfg) != nil {
-		return cfg, "", ErrAuthority
+	if err := peernetwork.DecodeSigned(body, &cfg); err != nil {
+		return cfg, "", refused("configuration body is invalid: %v", err)
 	}
 	cfg.DropUnknownScopes()
-	if cfg.Check(now) != nil || cfg.Issuer != a.options.Issuer {
-		return cfg, "", ErrAuthority
+	if err := cfg.Check(now); err != nil {
+		return cfg, "", refused("%v (iat %d, exp %d, now %d, generation %d)", err, cfg.IssuedAt, cfg.ExpiresAt, now.Unix(), cfg.Generation)
+	}
+	if cfg.Issuer != a.options.Issuer {
+		return cfg, "", refused("configuration issuer is not the configured server")
 	}
 	if cfg.ExpiresAt <= now.Unix() && !restored {
 		return cfg, "", ErrExpiredAuthority
 	}
-	s, want := cfg.Self, a.options.Self
-	if s.AccountID != want.AccountID || s.EndpointID != want.EndpointID || s.Role != want.Role || s.MachineID != want.MachineID || s.EndpointGeneration != want.EndpointGeneration || s.MachineGeneration != want.MachineGeneration || s.QUICCertificateFingerprint != want.QUICCertificateFingerprint || s.QUICPublicKey != want.QUICPublicKey {
-		return cfg, "", ErrAuthority
+	if fields := selfDifferences(cfg.Self, a.options.Self); len(fields) > 0 {
+		return cfg, "", fmt.Errorf("%w: %w: differs in %s (configuration endpoint generation %d, machine generation %d; pinned %d, %d)", ErrAuthority, ErrSelfMismatch, strings.Join(fields, ", "), cfg.Self.EndpointGeneration, cfg.Self.MachineGeneration, a.options.Self.EndpointGeneration, a.options.Self.MachineGeneration)
 	}
 	hash := sha256.Sum256(body)
 	return cfg, hex.EncodeToString(hash[:]), nil
+}
+
+// selfDifferences names the fields of a configuration's Self that differ from the pinned identity.
+func selfDifferences(s, want NetworkBinding) []string {
+	var fields []string
+	for _, f := range []struct {
+		name string
+		diff bool
+	}{
+		{"account_id", s.AccountID != want.AccountID}, {"endpoint_id", s.EndpointID != want.EndpointID}, {"role", s.Role != want.Role},
+		{"machine_id", s.MachineID != want.MachineID}, {"endpoint_generation", s.EndpointGeneration != want.EndpointGeneration},
+		{"machine_generation", s.MachineGeneration != want.MachineGeneration},
+		{"quic_certificate_fingerprint", s.QUICCertificateFingerprint != want.QUICCertificateFingerprint},
+		{"quic_public_key", s.QUICPublicKey != want.QUICPublicKey},
+	} {
+		if f.diff {
+			fields = append(fields, f.name)
+		}
+	}
+	return fields
 }
 
 // PrepareKey returns only the public registration material. Repeated calls reuse
@@ -378,10 +420,10 @@ func (a *Authority) Apply(ctx context.Context, token string) error {
 			return ErrStaleAuthority
 		}
 		if cfg.Generation == s.Generation && hash != s.ConfigHash {
-			return ErrAuthority
+			return refused("generation %d is already held with different content", cfg.Generation)
 		}
 		if s.VirtualAddress != "" && s.VirtualAddress != cfg.Self.VirtualAddress {
-			return ErrAuthority
+			return refused("the virtual address changed")
 		}
 		match := func(raw []byte) bool {
 			k, e := privateKey(raw)
@@ -403,7 +445,7 @@ func (a *Authority) Apply(ctx context.Context, token string) error {
 			s.PendingKey = nil
 			s.KeyGeneration = cfg.Self.KeyGeneration
 		} else {
-			return ErrAuthority
+			return refused("configuration key generation %d does not match the local key (generation %d)", cfg.Self.KeyGeneration, s.KeyGeneration)
 		}
 		s.Generation = cfg.Generation
 		s.ConfigHash = hash

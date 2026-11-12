@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/shared/clockleeway"
 	"github.com/pinksaucepasta/paperboat/shared/relaylimits"
 )
 
@@ -19,7 +20,7 @@ import (
 // tailcfg is the one wire contract of control, clients and DERP).
 const (
 	// MaxClockSkew tolerates issuer clock drift without extending a signed expiry.
-	MaxClockSkew = time.Minute
+	MaxClockSkew = clockleeway.Leeway
 	// MaxGrantMemberships bounds the memberships one grant carries.
 	MaxGrantMemberships = 256
 	// MaxGrantParts covers peer-full chunks plus scope-full chunks. Each pair of

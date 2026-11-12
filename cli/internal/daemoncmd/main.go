@@ -306,7 +306,16 @@ func localDaemonCommand() *cobra.Command {
 			// about it rarely instead of once per loop iteration.
 			controlTransport := &controlbackoff.Transport{Base: peerHTTPTransport, Host: controlHost(cfg.ServerURL)}
 			source.HTTPClient = &http.Client{Transport: controlTransport}
-			peerTunnel, err := tunnel.NewPeerTerminalTunnel(tunnel.PeerTerminalConfig{Issuer: cfg.ServerURL, Store: store, Auth: authSource, TLS: transportConfig.TLSConfig, HTTPClient: &http.Client{Transport: controlTransport}, OutputQueueChunks: cfg.Connect.TerminalOutputQueueChunks, LocalMachineID: machineID})
+			// steps is the daemon's one step tracker: failing start steps and loops show in pb status and pb doctor.
+			steps := health.New(buildinfo.Version, nil, nil)
+			authorityHealth := func(err error) {
+				if err == nil {
+					steps.Set(localdaemon.StepPeerAuthority, health.Ready, "", 0)
+				} else {
+					steps.Fail(localdaemon.StepPeerAuthority, err, 0)
+				}
+			}
+			peerTunnel, err := tunnel.NewPeerTerminalTunnel(tunnel.PeerTerminalConfig{Issuer: cfg.ServerURL, Store: store, Auth: authSource, TLS: transportConfig.TLSConfig, HTTPClient: &http.Client{Transport: controlTransport}, OutputQueueChunks: cfg.Connect.TerminalOutputQueueChunks, AuthorityHealth: authorityHealth, LocalMachineID: machineID})
 			if err != nil {
 				return err
 			}
@@ -315,8 +324,6 @@ func localDaemonCommand() *cobra.Command {
 					resultErr = coordinatorFailure("Paperboat daemon cleanup failed", resultErr, cleanupErr)
 				}
 			}()
-			// steps is the daemon's one step tracker: failing start steps and loops show in pb status and pb doctor.
-			steps := health.New(buildinfo.Version, nil, nil)
 			if profileErr == nil {
 				// Peers learn this daemon's identity before its first command, so a failed registration is
 				// retried with backoff until it succeeds instead of waiting for that command.

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/shared/peernetwork"
 )
 
 func regionalToken(t *testing.T, private ed25519.PrivateKey, candidates RegionalCandidates) string {
@@ -106,8 +108,8 @@ func TestRegionalIssuedAtToleratesBoundedClockSkew(t *testing.T) {
 		t.Fatal("small clock skew rejected", err)
 	}
 	c.Generation++
-	c.IssuedAt = now + 65
-	c.ExpiresAt = now + 125
+	c.IssuedAt = now + int64(peernetwork.MaxClockSkew/time.Second) + 5
+	c.ExpiresAt = c.IssuedAt + 60
 	if err := a.ApplyRegionalCandidates(t.Context(), regionalToken(t, signer, c)); err == nil {
 		t.Fatal("excessive clock skew accepted")
 	}
