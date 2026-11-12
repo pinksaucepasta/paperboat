@@ -211,3 +211,17 @@ func TestInstallPowerShellConfirmsTheResetWithTheHostNamePbReads(t *testing.T) {
 		t.Fatalf("installer host name %q (%v), pb host name %q (%v)", got, err, want, hostErr)
 	}
 }
+
+// The PowerShell one-liner pasted on macOS or Linux (pwsh) stops before it downloads anything and says which command is for that machine.
+func TestInstallPowerShellRefusesANonWindowsHostBeforeDownloading(t *testing.T) {
+	installer := renderWindowsInstaller(t, []byte("fake pb"), false)
+	text, err := os.ReadFile(installer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard := strings.Index(string(text), "-not $IsWindows")
+	download := strings.Index(string(text), "Download-HttpsFile")
+	if guard < 0 || download < 0 || guard > download || !strings.Contains(string(text), "macOS and Linux paste the curl command") {
+		t.Fatalf("guard at %d, first download at %d", guard, download)
+	}
+}

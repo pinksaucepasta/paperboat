@@ -5,6 +5,7 @@
    a pb.exe downloaded by hand in a browser may. #>
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+if ($PSVersionTable.PSEdition -eq 'Core' -and -not $IsWindows) { throw 'pb installer: this command is for Windows. On macOS and Linux paste the curl command that Add machine shows for them.' }
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 $server = [string]$env:PAPERBOAT_SERVER
 $requestedVersion = if ($env:PAPERBOAT_VERSION) { [string]$env:PAPERBOAT_VERSION } else { 'latest' }
