@@ -37,7 +37,7 @@ func (s *EdgeService) OperationRevocations(ctx context.Context, environment stri
  WHERE a.machine_id=(SELECT id FROM paperboat.user_machines WHERE environment_id=$1) AND (a.expires_at>$3 OR a.id=ANY($2::text[]))
  AND NOT EXISTS(SELECT 1 FROM paperboat.cli_client_sessions c
   JOIN paperboat.users u ON u.id=c.user_id AND u.status='active'
-  JOIN paperboat.teams t ON t.team_id=m.owner_team_id AND t.deleted_at IS NULL AND NOT t.suspended
+  JOIN paperboat.teams t ON t.team_id=paperboat.recording_team(m.id) AND t.deleted_at IS NULL AND NOT t.suspended
   WHERE c.id=a.native_cli_session_id AND c.user_id=a.account_id AND c.state='active' AND c.revoked_at IS NULL
   AND m.revoked_at IS NULL AND m.deleted_at IS NULL
   AND NOT isempty(paperboat.workspace_policy_rule_ports(a.account_id, t.team_id, a.machine_id, 'recording_view')))) revoked ORDER BY jti LIMIT $4`, environment, live, s.clock().UTC(), operationrevocation.MaxLiveJTIs+1)

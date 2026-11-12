@@ -436,7 +436,7 @@ func (s *NetworkService) configuration(ctx context.Context, in NetworkConfigRequ
  JOIN cli_client_sessions c ON c.id = a.native_cli_session_id AND c.user_id = a.account_id AND c.state = 'active' AND c.revoked_at IS NULL
  JOIN users u ON u.id = a.account_id AND u.status = 'active'
  JOIN user_machines m ON m.id = a.machine_id AND m.revoked_at IS NULL AND m.deleted_at IS NULL
- JOIN teams t ON t.team_id = m.owner_team_id AND t.deleted_at IS NULL AND NOT t.suspended
+ JOIN teams t ON t.team_id = paperboat.recording_team(m.id) AND t.deleted_at IS NULL AND NOT t.suspended
  WHERE ((a.native_cli_session_id = $1 AND a.account_id = $2) OR (a.machine_id = $1 AND m.user_id = $2))
  AND (a.expires_at > $3 OR a.recording_id = ANY($4::text[]))
  AND NOT isempty(paperboat.workspace_policy_rule_ports(a.account_id, t.team_id, a.machine_id, 'recording_view'))
