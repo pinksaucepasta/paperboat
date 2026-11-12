@@ -1,0 +1,53 @@
+F25-03 rule recording and F25-05 browser replay, Windows, 2026-11-12 (IST): winpool-2 (GitHub-hosted Windows Server 2025), pb dev-e5d9146b3 built on anvit (windows/amd64), machine recb-win-1 (team-owned) of team recb-team (own paid team, Stripe sandbox) on the prod server; a second Windows runner hosts the test S3 (versitygw) behind a public tunnel; browser checks from the Linux controller against the live console.
+recordings_lifecycle.py --only rule,manual (client: the Windows machine itself; manual and rule phases):
+{"check": "recordings", "target": "recb-win-1", "status": "PASS", "phases": ["manual_start_stop", "rec_in_connect", "cli_list", "cli_export", "cli_play", "rule_start", "rule_removed_stops_new_recordings"], "manual_recording": "rec_313fbda6-1722-48a9-a7cc-f42738e614dc", "rule_recording": "rec_53842583-0058-4898-bab7-db1fed5e7ade", "seconds": 425.7}
+check-recordings.mjs, 10-minute recording of the Windows machine, machine online, terminal REC rows:
+PASS  Personal shows the Teams upgrade state
+PASS  the list shows the server's first page in order  (26 of 26)
+PASS  the pager follows the server total  (one page)
+PASS  a machine's tab lists only its recordings  (recb-mac-1)
+PASS  the key status matches the server  (ready)
+PASS  the admins-only switch changes the team setting  (anyone -> admins)
+PASS  switching back restores it
+PASS  every recording rule in the policy is listed  (1)
+PASS  Add rule opens its dialog
+PASS  a saved replay rule reaches the policy
+PASS  the new rule is listed
+PASS  removing it restores the policy
+PASS  a locked vault asks to unlock first
+PASS  the recording loads and decrypts
+PASS  it plays on its own  (0:00 / 10:04 -> 0:01 / 10:04)
+PASS  pause stops the clock  (0:01 / 10:04)
+PASS  the terminal renderer shows the recording
+PASS  speed 4× is selected
+PASS  the seek bar moves to the start  (0:00 / 10:04)
+PASS  a very short recording loads and decrypts
+PASS  a very short recording has a length and plays to its end  (0:02 / 0:02)
+PASS  a very short recording shows its output
+PASS  an unknown recording says it doesn't exist
+SKIP  offline machine state  (OFFLINE_RECORDING not set)
+PASS  the terminal attaches  (terminal_947ac5a4-9fba-45d5-8a70-2cdf5d9e35e7)
+PASS  Start recording shows REC
+PASS  the server lists the live recording  (rec_41d53eab-0c29-4153-84e8-233df0b580fd)
+PASS  Stop recording clears REC
+SKIP  permission removal closes the replay  (LONG_RECORDING and VAULT_PASSWORD_FILE not set)
+all passed
+same script, LONG_RECORDING (removing replay permission closes the open replay):
+PASS  Personal shows the Teams upgrade state
+PASS  the list shows the server's first page in order  (27 of 27)
+PASS  the pager follows the server total  (one page)
+PASS  a machine's tab lists only its recordings  (recb-win-1)
+PASS  the key status matches the server  (ready)
+PASS  the admins-only switch changes the team setting  (anyone -> admins)
+PASS  switching back restores it
+PASS  every recording rule in the policy is listed  (1)
+PASS  Add rule opens its dialog
+PASS  a saved replay rule reaches the policy
+PASS  the new rule is listed
+PASS  removing it restores the policy
+SKIP  replay rows  (RECORDING and VAULT_PASSWORD_FILE not set)
+SKIP  terminal rows  (MACHINE not set)
+PASS  the long recording is downloading
+PASS  removing replay permission ends the open replay  (failed after 1 s)
+PASS  the replay rules are back  (1)
+all passed

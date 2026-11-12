@@ -1,0 +1,35 @@
+F25-06, F25-07 and C294-C297, Windows, 2026-11-12 (IST): winpool-2 (GitHub-hosted Windows Server 2025), pb dev-e5d9146b3 built on anvit (windows/amd64), machine recb-win-1 (team-owned) of team recb-team (own paid team, Stripe sandbox) on the prod server; a second Windows runner hosts the test S3 (versitygw) behind a public tunnel; browser checks from the Linux controller against the live console.
+team_bucket_lifecycle.py (client: the Windows machine itself):
+{"check": "team-bucket", "target": "recb-win-1", "status": "PASS", "phases": ["bucket_get_set_refusals_keep_secret", "recordings_archived", "objects_are_ciphertext", "replay_from_bucket", "bucket_removed"], "archived_recording": "rec_0e5df1c2-eb6f-4ea7-b0b2-eae386671996", "archived_objects": 1, "seconds": 232.4}
+team_bucket_offline.py (client: another Windows runner; recb-win-1 is taken offline for the replays):
+{"check": "team-bucket-offline", "target": "recb-win-1", "status": "PASS", "phases": ["bucket_get_set_refusals_keep_secret", "unreachable_bucket_named", "recordings_archived", "objects_are_ciphertext", "replay_from_bucket", "cli_replay_machine_offline", "browser_replay_machine_offline", "bucket_removed"], "archived_recording": "rec_ffa3f32b-2d15-4f0d-8818-e28ddb4ab80e", "archived_objects": 1, "seconds": 431.4}
+browser replay while recb-win-1 is offline (check-recordings.mjs rows):
+PASS  Personal shows the Teams upgrade state
+PASS  the list shows the server's first page in order  (23 of 23)
+PASS  the pager follows the server total  (one page)
+PASS  a machine's tab lists only its recordings  (recb-win-1)
+PASS  the key status matches the server  (ready)
+PASS  the admins-only switch changes the team setting  (anyone -> admins)
+PASS  switching back restores it
+PASS  every recording rule in the policy is listed  (1)
+PASS  Add rule opens its dialog
+PASS  a saved replay rule reaches the policy
+PASS  the new rule is listed
+PASS  removing it restores the policy
+PASS  a locked vault asks to unlock first
+PASS  the recording loads and decrypts
+PASS  it plays on its own  (0:00 / 0:02 -> 0:01 / 0:02)
+PASS  pause stops the clock  (0:01 / 0:02)
+PASS  the terminal renderer shows the recording
+PASS  speed 4× is selected
+PASS  the seek bar moves to the start  (0:00 / 0:02)
+PASS  an unknown recording says it doesn't exist
+SKIP  offline machine state  (OFFLINE_RECORDING not set)
+SKIP  terminal rows  (MACHINE not set)
+SKIP  permission removal closes the replay  (LONG_RECORDING and VAULT_PASSWORD_FILE not set)
+all passed
+command_rows.py --only C294,C295,C296,C297 (on the Windows machine):
+{"check": "command-row", "row": "C294", "command": "pb team bucket", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C295", "command": "pb team bucket get", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C296", "command": "pb team bucket set", "status": "PASS", "failures": []}
+{"check": "command-row", "row": "C297", "command": "pb team bucket remove", "status": "PASS", "failures": []}
