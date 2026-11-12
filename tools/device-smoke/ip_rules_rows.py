@@ -15,6 +15,7 @@ import ipaddress
 import json
 import os
 import shlex
+import socket
 import sys
 import time
 from pathlib import Path
@@ -23,15 +24,16 @@ from machine_ctl import Failure, Machine, remote, run
 # An owner's deny must hold within seconds: the edge refreshes its ingress snapshot every 5 s (IngressRefreshInterval) and the
 # server publishes a change at once, so the check allows 15 s from the PUT to the refusal, the same for tunnels and previews.
 RULE_BOUND = 15
+STABLE = 8  # consecutive matching answers before a rule counts as applied (both edges)
 ORIGIN_PORT = '9317'  # the machine's daemon owns 127.100.0.x ports for local access, so the origin binds loopback on this port
 
 
-# runs on an observer: python3 -c RAW HOST PORT tcp|tls -> "answered" when the origin behind the edge spoke, "refused" when the edge closed first
+# runs on an observer: python3 -c RAW HOST PORT tcp|tls EDGE_IP -> "answered" when the origin behind the edge spoke, "refused" when the edge closed first
 RAW = r'''
 import socket, ssl, sys
-host, port, mode = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+host, port, mode, ip = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
 try:
-    s = socket.create_connection((host, port), timeout=10)
+    s = socket.create_connection((ip, port), timeout=10)
     if mode == "tls":
         ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
         try:
@@ -74,7 +76,7 @@ def main():
     observer_b = shlex.split(args.observer_b_cmd)
     row = 'C280' if args.kind == 'tunnel' else 'C281'
     name = 'tor-ip-%d-%s' % (int(time.time()), os.urandom(2).hex())  # tunnel names are account-wide
-    steps, cleanup, latencies = [], [], []
+    steps, cleanup, latencies, per_edge = [], [], [], []
 
     pb = machine.pb
 
@@ -90,22 +92,36 @@ def main():
             raise Failure('%s succeeded but must be refused' % ' '.join(arguments))
         return value
 
-    def fetch(observer, url, *headers):
+    def fetch(observer, url, *headers, resolve=None):
         flags = [x for header in headers for x in ('-H', header)]
+        if resolve:
+            flags += ['--resolve', '%s:443:%s' % resolve]
         code, out, err = run(remote(observer, ['curl', '-sS', '-m', '25', *flags, '-o', '-', '-w', '\\n%{http_code}', url]), 60)
         body, _, status = out.rpartition('\n')
         return (int(status) if status.strip().isdigit() else 0), body
 
     def eventually(observer, url, want, label, seconds=None):
-        deadline, last = time.time() + (seconds or args.wait), None
+        # Each edge applies a rule on its own refresh, and DNS gives both: the answer is pinned to every edge address in turn, and
+        # the rule counts as applied only when EVERY edge has answered `want` STABLE times in a row within the bound.
+        host = url.split('://', 1)[1].split('/', 1)[0]
+        ips = sorted({entry[4][0] for entry in socket.getaddrinfo(host, 443, socket.AF_INET)})
         started = time.time()
-        while time.time() < deadline:
-            last = fetch(observer, url)
-            if last[0] == want:
-                latencies.append(round(time.time() - started, 1))
-                return last
-            time.sleep(1)
-        raise Failure('%s: wanted HTTP %d, last %s' % (label, want, last and last[0]))
+        deadline = started + (seconds or args.wait)
+        streak, stable_at, last = {ip: 0 for ip in ips}, {}, {}
+        while time.time() < deadline and len(stable_at) < len(ips):
+            for ip in ips:
+                if ip in stable_at:
+                    continue
+                last[ip] = fetch(observer, url, resolve=(host, ip))
+                streak[ip] = streak[ip] + 1 if last[ip][0] == want else 0
+                if streak[ip] >= STABLE:
+                    stable_at[ip] = round(time.time() - started, 1)
+            time.sleep(0.2)
+        if len(stable_at) < len(ips):
+            raise Failure('%s: wanted HTTP %d on every edge within %ds, got %s (stable at %s)' % (label, want, seconds or args.wait, {ip: last[ip][0] for ip in last}, stable_at))
+        latencies.append(max(stable_at.values()))
+        per_edge.append({'step': label, 'seconds_to_stable_per_edge': stable_at})
+        return last[ips[0]]
 
     def step(label, function):
         started = time.time()
@@ -220,13 +236,15 @@ def main():
             good(*group, '--deny', addresses['a'])
             eventually([], url, 403, 'A denied')
             claimed = 'X-Forwarded-For: ' + addresses['b']
-            if fetch([], url, claimed, 'Forwarded: for=' + addresses['b'], 'X-Real-IP: ' + addresses['b'])[0] != 403:
-                raise Failure('a denied address got in by naming an allowed one in X-Forwarded-For / Forwarded / X-Real-IP')
+            answer = fetch([], url, claimed, 'Forwarded: for=' + addresses['b'], 'X-Real-IP: ' + addresses['b'])
+            if answer[0] != 403:
+                raise Failure('a denied address naming an allowed one in X-Forwarded-For / Forwarded / X-Real-IP got HTTP %s, want 403: %.120s' % (answer[0], answer[1]))
             good(*group, '--clear')
             good(*group, '--allow', addresses['b'])
             eventually([], url, 403, 'A not on the allow list')
-            if fetch([], url, claimed)[0] != 403:
-                raise Failure('an address outside the allow list got in by naming an allowed one in X-Forwarded-For')
+            answer = fetch([], url, claimed)
+            if answer[0] != 403:
+                raise Failure('an address outside the allow list naming an allowed one in X-Forwarded-For got HTTP %s, want 403: %.120s' % (answer[0], answer[1]))
             good(*group, '--clear')
             eventually([], url, 200, 'A served again after --clear')
 
@@ -236,8 +254,8 @@ def main():
                 raise Failure('%s gave no confirmation token: %s' % (' '.join(arguments), str(preview)[:200]))
             good(*arguments, '--confirm', preview['confirmation_token'])
 
-        def raw_answer(observer, host, port, mode):
-            code, out, err = run(remote(observer, ['python3', '-c', RAW, host, str(port), mode]), 60)
+        def raw_answer(observer, host, port, mode, ip):
+            code, out, err = run(remote(observer, ['python3', '-c', RAW, host, str(port), mode, ip]), 60)
             return out.strip() or 'refused'
 
         def raw_protocol(mode):
@@ -263,14 +281,22 @@ def main():
             ip_group = ['tunnel', 'ip-rules', tid]
 
             def wait_for(observer, want, label, seconds=None):
-                deadline = time.time() + (seconds or args.wait)
-                last = None
-                while time.time() < deadline:
-                    last = raw_answer(observer, host, port, mode)
-                    if last == want:
-                        return
-                    time.sleep(1)
-                raise Failure('%s: wanted %s, last %s' % (label, want, last))
+                # every edge address must give `want` STABLE times in a row within the bound (each edge applies a rule on its own refresh)
+                ips = sorted({entry[4][0] for entry in socket.getaddrinfo(host, port, socket.AF_INET)})
+                started = time.time()
+                deadline = started + (seconds or args.wait)
+                streak, stable_at, last = {ip: 0 for ip in ips}, {}, {}
+                while time.time() < deadline and len(stable_at) < len(ips):
+                    for ip in ips:
+                        if ip in stable_at:
+                            continue
+                        last[ip] = raw_answer(observer, host, port, mode, ip)
+                        streak[ip] = streak[ip] + 1 if last[ip] == want else 0
+                        if streak[ip] >= STABLE:
+                            stable_at[ip] = round(time.time() - started, 1)
+                if len(stable_at) < len(ips):
+                    raise Failure('%s: wanted %s on every edge within %ds, got %s' % (label, want, seconds or args.wait, last))
+                per_edge.append({'step': '%s %s' % (mode, label), 'seconds_to_stable_per_edge': stable_at})
             wait_for([], 'answered', 'baseline A', 180)
             wait_for(observer_b, 'answered', 'baseline B', 180)
             good(*ip_group, '--deny', addresses['a'])
@@ -306,7 +332,7 @@ def main():
             except Exception as error:  # noqa: BLE001
                 print('cleanup failed:', str(error)[:200], file=sys.stderr)
     ok = bool(steps) and all(s['status'] == 'PASS' for s in steps)
-    report = {'check': 'ip-rules-rows', 'row': row, 'kind': args.kind, 'status': 'PASS' if ok else 'FAIL', 'bound_seconds': args.wait, 'seconds_until_each_answer_changed': latencies, 'steps': steps}
+    report = {'check': 'ip-rules-rows', 'row': row, 'kind': args.kind, 'status': 'PASS' if ok else 'FAIL', 'bound_seconds': args.wait, 'seconds_until_each_answer_changed': latencies, 'per_edge_seconds_to_stable': per_edge, 'steps': steps}
     print(json.dumps(report, indent=1))
     if args.output:
         Path(args.output).write_text(json.dumps(report, indent=1))

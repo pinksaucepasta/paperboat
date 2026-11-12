@@ -630,7 +630,7 @@ def block_edge(ip):
         subprocess.run(['sudo', '-n', 'pfctl', '-f', '-'], input='block drop out quick to %s\n' % ip, text=True, check=True)
         subprocess.run(['sudo', '-n', 'pfctl', '-e'], check=False)
     else:
-        subprocess.run(['sudo', '-n', 'nft', '-f', '-'], input='table inet torblock { chain out { type filter hook output priority 0; ip daddr %s drop; } }\n' % ip, text=True, check=True)
+        subprocess.run(['sudo', '-n', 'nft', '-f', '-'], input='table inet torblock {\n chain out {\n  type filter hook output priority 0;\n  ip daddr %s drop\n }\n}\n' % ip, text=True, check=True)
 
 
 def unblock_edge(check=True):

@@ -1,0 +1,260 @@
+{
+ "check": "ip-rules-rows",
+ "row": "C280",
+ "kind": "tunnel",
+ "status": "PASS",
+ "bound_seconds": 15,
+ "seconds_until_each_answer_changed": [
+  28.8,
+  8.3,
+  2.2,
+  8.0,
+  2.2,
+  7.9,
+  4.6,
+  2.4,
+  8.0,
+  2.2,
+  2.2,
+  7.9,
+  6.4,
+  7.2,
+  6.8,
+  6.9
+ ],
+ "per_edge_seconds_to_stable": [
+  {
+   "step": "baseline a",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 28.8
+   }
+  },
+  {
+   "step": "baseline b",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 8.3
+   }
+  },
+  {
+   "step": "denied address A",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 2.2
+   }
+  },
+  {
+   "step": "other address B stays allowed",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 8.0
+   }
+  },
+  {
+   "step": "A is denied",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 2.2
+   }
+  },
+  {
+   "step": "B is allowed",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 7.9
+   }
+  },
+  {
+   "step": "B is both allowed and denied",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 4.6
+   }
+  },
+  {
+   "step": "A is not on the allow list",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 2.4
+   }
+  },
+  {
+   "step": "B allowed (allow list only)",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 8.0
+   }
+  },
+  {
+   "step": "A not on the allow list",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 2.2
+   }
+  },
+  {
+   "step": "A denied by its CIDR form",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 2.2
+   }
+  },
+  {
+   "step": "B unaffected by the CIDR",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 7.9
+   }
+  },
+  {
+   "step": "A served again after --clear",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 6.4
+   }
+  },
+  {
+   "step": "A denied",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 7.2
+   }
+  },
+  {
+   "step": "A not on the allow list",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 6.8
+   }
+  },
+  {
+   "step": "A served again after --clear",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 6.9
+   }
+  },
+  {
+   "step": "tcp baseline A",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 5.2
+   }
+  },
+  {
+   "step": "tcp baseline B",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 7.8
+   }
+  },
+  {
+   "step": "tcp denied A",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 2.2
+   }
+  },
+  {
+   "step": "tcp B unaffected",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 6.5
+   }
+  },
+  {
+   "step": "tcp A not on the allow list",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 12.5
+   }
+  },
+  {
+   "step": "tcp B allowed",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 6.7
+   }
+  },
+  {
+   "step": "tcp A served after --clear",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 7.6
+   }
+  },
+  {
+   "step": "tls baseline A",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 5.4
+   }
+  },
+  {
+   "step": "tls baseline B",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 6.3
+   }
+  },
+  {
+   "step": "tls denied A",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 3.9
+   }
+  },
+  {
+   "step": "tls B unaffected",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 6.3
+   }
+  },
+  {
+   "step": "tls A not on the allow list",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 2.1
+   }
+  },
+  {
+   "step": "tls B allowed",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 6.2
+   }
+  },
+  {
+   "step": "tls A served after --clear",
+   "seconds_to_stable_per_edge": {
+    "198.51.100.7": 6.7
+   }
+  }
+ ],
+ "steps": [
+  {
+   "step": "baseline: both source addresses served, new resource has no rules",
+   "status": "PASS",
+   "seconds": 41.6
+  },
+  {
+   "step": "deny one address: it gets 403, the other 200",
+   "status": "PASS",
+   "seconds": 19.1
+  },
+  {
+   "step": "--allow replaces only the allow list",
+   "status": "PASS",
+   "seconds": 18.7
+  },
+  {
+   "step": "deny beats allow",
+   "status": "PASS",
+   "seconds": 15.7
+  },
+  {
+   "step": "allow list alone admits only its addresses (after --clear)",
+   "status": "PASS",
+   "seconds": 23.1
+  },
+  {
+   "step": "--allow /0 and a malformed address are refused, rules unchanged",
+   "status": "PASS",
+   "seconds": 11.5
+  },
+  {
+   "step": "a CIDR form, then --clear serves everyone",
+   "status": "PASS",
+   "seconds": 33.9
+  },
+  {
+   "step": "a forwarded-for header naming an allowed address does not admit a denied one",
+   "status": "PASS",
+   "seconds": 43.0
+  },
+  {
+   "step": "a public TCP tunnel refuses a denied or not-allowed address and serves the other",
+   "status": "PASS",
+   "seconds": 86.2
+  },
+  {
+   "step": "a TLS passthrough tunnel refuses a denied or not-allowed address and serves the other",
+   "status": "PASS",
+   "seconds": 105.2
+  }
+ ],
+ "device": "pb dev-ee6287104, prod edges 2026.11.12.5; observers A = oracle host, B = anvit; every edge address pinned and 8 answers in a row within 15 s"
+}

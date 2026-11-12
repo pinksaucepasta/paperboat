@@ -1,0 +1,26 @@
+{
+ "check": "tunnel-origin-rows",
+ "platform": "darwin",
+ "cells": [
+  {
+   "scenario": "edge_loss",
+   "cell": "F8-15 before the loss every edge serves the tunnel and the preview",
+   "result": "ok",
+   "detail": "['198.51.100.7', '198.51.100.7']"
+  },
+  {
+   "scenario": "edge_loss",
+   "cell": "F8-15 with one edge lost the other keeps serving the tunnel and the preview for 75 s without a failed request",
+   "result": "ok",
+   "detail": "no failures"
+  },
+  {
+   "scenario": "edge_loss",
+   "cell": "F8-15 the edge serves both again within 90 s of being reachable",
+   "result": "ok",
+   "detail": "198.51.100.7"
+  }
+ ],
+ "retried_requests": [],
+ "device": "pb dev-ee6287104, prod edges 2026.11.12.5; one edge address blocked from the machine with pf"
+}
