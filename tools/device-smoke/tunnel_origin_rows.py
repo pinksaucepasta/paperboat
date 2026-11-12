@@ -57,9 +57,10 @@ from grpc_health.v1 import health, health_pb2, health_pb2_grpc  # noqa: E402
 
 ARGS = None
 CELLS = []
+LATE = []  # requests that needed a retry because the edge did not yet serve the route
 LOCK = threading.Lock()
 TUNNELS = []
-SUFFIX = time.strftime('%d%H%M')  # a deleted tunnel keeps its name, so every run names its own
+SUFFIX = time.strftime('%d%H%M') + sys.platform[:2] + os.urandom(2).hex()  # tunnel names are account-wide and a deleted tunnel keeps its name
 WORK = tempfile.mkdtemp(prefix='tor-')
 SPOOF = {'X-Forwarded-For': '203.0.113.9', 'X-Forwarded-Host': 'evil.example.test', 'X-Forwarded-Proto': 'http',
          'Forwarded': 'for=203.0.113.9;host=evil.example.test'}
@@ -114,7 +115,7 @@ def delete_all():
 
 
 # --- visitors -----------------------------------------------------------------------------------------------
-def visit(host, path='/', method='GET', headers=None, body=None, timeout=60, retries=3):
+def visit(host, path='/', method='GET', headers=None, body=None, timeout=60, retries=6):
     """One HTTPS request to the public name; returns (status, headers, body). The first request after a route moved can
     reach the edge before every node knows the new origin, so an upstream_unavailable answer is retried."""
     for attempt in range(retries):
@@ -127,6 +128,8 @@ def visit(host, path='/', method='GET', headers=None, body=None, timeout=60, ret
         finally:
             conn.close()
         if not (result[0] == 502 and result[1].getheader('X-Paperboat-Error') == 'upstream_unavailable') or attempt == retries - 1:
+            if attempt:
+                LATE.append({'host': host, 'path': path, 'tries': attempt + 1, 'status': result[0]})
             return result
         time.sleep(4)
 
@@ -260,10 +263,32 @@ def frame_bytes(opcode, data, mask=False):
     return out + key + bytes(byte ^ key[index % 4] for index, byte in enumerate(data))
 
 
+class Server(http.server.ThreadingHTTPServer):
+    """stop() ends the app the way a crash does: the listener and every open connection go, so nothing keeps answering."""
+    daemon_threads = True
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.open_connections = set()
+
+    def process_request(self, request, client_address):
+        self.open_connections.add(request)
+        super().process_request(request, client_address)
+
+    def stop(self):
+        self.shutdown()
+        self.server_close()
+        for connection in list(self.open_connections):
+            try:
+                connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            connection.close()
+
+
 def serve(handler, tls=None, port=0):
     """An origin on 127.0.0.1 in a thread; tls is (cert_pem_path, key_pem_path). Returns the server."""
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', port), handler)
-    server.daemon_threads = True
+    server = Server(('127.0.0.1', port), handler)
     if tls:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(*tls)
@@ -272,12 +297,6 @@ def serve(handler, tls=None, port=0):
         server.socket = context.wrap_socket(server.socket, server_side=True)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
-
-
-def free_port():
-    with socket.socket() as sock:
-        sock.bind(('127.0.0.1', 0))
-        return sock.getsockname()[1]
 
 
 # --- scenarios ----------------------------------------------------------------------------------------------
@@ -320,7 +339,7 @@ def headers_scenario():
     cell(s, 'F8-12 ACME validation on port 80 gets an explanation, any other request the https redirect',
          answer.status == 404 and answer.getheader('X-Paperboat-Error') == 'acme_behind_tunnel' and len(text) > 40 and other.status in (301, 308),
          '%s %s / %s' % (answer.status, text[:60], other.status))
-    origin.shutdown()
+    origin.stop()
 
 
 def keepalive_scenario():
@@ -335,7 +354,7 @@ def keepalive_scenario():
             failures.append((index, status, response.getheader('X-Paperboat-Error')))
         time.sleep(0.85 + (index % 4) * 0.1)
     cell(s, 'F8-09 Node-style keep-alive never races a pooled connection (%d requests at the origin\'s idle limit)' % count, not failures, failures[:5] or 'no failures')
-    origin.shutdown()
+    origin.stop()
 
 
 def ws_scenario():
@@ -363,7 +382,7 @@ def ws_scenario():
     cell(s, 'F8-09 a WebSocket stays open through %d s of quiet' % ARGS.ws_quiet,
          reply.startswith(b'HTTP/1.1 101') and first == (1, b'first') and late == (1, b'late'), '%s %s' % (reply[:20], late))
     tls.close()
-    origin.shutdown()
+    origin.stop()
 
 
 def doctor_hint(name, words):
@@ -403,7 +422,7 @@ def tls_scenario():
     ok, text = doctor_hint(name, ['self-signed', '--tls-verification pinned'])
     cell(s, 'F8-10/F8-12 a self-signed certificate: origin_tls page and the doctor hint names pinning', status == 502 and response.getheader('X-Paperboat-Error') == 'origin_tls' and ok,
          '%s %s %s' % (status, response.getheader('X-Paperboat-Error'), text[-200:]))
-    https.shutdown()
+    https.stop()
     # the CA-signed leaf: the loopback origin is dialled with the public name, so the leaf names it
     ca_pem, ca_key, ca_cert, ca_priv = make_cert('Tor Test CA', ca=True, valid=(-1, 3))
     leaf_pem, leaf_key, _, _ = make_cert(host, [host], issuer=(ca_cert, ca_priv))
@@ -417,7 +436,7 @@ def tls_scenario():
     move(name, route, target, '--tls-ca', write('ca.pem', ca_pem))
     status, response, body = visit(host, '/')
     cell(s, 'F8-10 a private CA (Caddy tls internal style) works with --tls-ca', status == 200, '%s %s' % (status, response.getheader('X-Paperboat-Error')))
-    signed.shutdown()
+    signed.stop()
     expired_pem, expired_key, _, _ = make_cert(host, [host], issuer=(ca_cert, ca_priv), valid=(-30, -1))
     old = serve(Origin, tls=(write('old.crt', expired_pem + ca_pem), write('old.key', expired_key)))
     move(name, route, 'https://127.0.0.1:%d' % old.server_address[1], '--tls-ca', write('ca2.pem', ca_pem))
@@ -425,13 +444,14 @@ def tls_scenario():
     ok, text = doctor_hint(name, ['expired'])
     cell(s, 'F8-10/F8-12 an expired certificate: origin_tls page and the doctor hint says expired', status == 502 and response.getheader('X-Paperboat-Error') == 'origin_tls' and ok,
          '%s %s %s' % (status, response.getheader('X-Paperboat-Error'), text[-200:]))
-    old.shutdown()
+    old.stop()
 
 
 def grpc_server(port, credentials=None):
     server = grpc.server(__import__('concurrent.futures', fromlist=['x']).ThreadPoolExecutor(max_workers=8))
     servicer = health.HealthServicer()
     servicer.set('', health_pb2.HealthCheckResponse.SERVING)
+    servicer.set('up', health_pb2.HealthCheckResponse.SERVING)  # never flips: the unary call's service
     health_pb2_grpc.add_HealthServicer_to_server(servicer, server)
     bound = server.add_secure_port('127.0.0.1:%d' % port, credentials) if credentials else server.add_insecure_port('127.0.0.1:%d' % port)
     server.start()
@@ -451,7 +471,7 @@ def grpc_probe(s, label, host):
     stub = health_pb2_grpc.HealthStub(channel)
     result = {}
     try:
-        result['unary'] = health_pb2.HealthCheckResponse.ServingStatus.Name(stub.Check(health_pb2.HealthCheckRequest(service=''), timeout=30).status)
+        result['unary'] = health_pb2.HealthCheckResponse.ServingStatus.Name(stub.Check(health_pb2.HealthCheckRequest(service='up'), timeout=30).status)
         try:
             stub.Check(health_pb2.HealthCheckRequest(service='missing'), timeout=30)
         except grpc.RpcError as error:  # the status travels in the trailers: grpc-status 5 reaches the client as NOT_FOUND
@@ -464,6 +484,7 @@ def grpc_probe(s, label, host):
         result['stream'] = seen
     except grpc.RpcError as error:
         result['error'] = '%s %s' % (error.code().name, (error.details() or '')[:150])
+        result['edge_error'] = visit(host, '/', retries=1)[1].getheader('X-Paperboat-Error')  # what the edge says about this route
     cell(s, 'F8-11 gRPC over %s: unary, streaming and the grpc-status trailer arrive' % label,
          result.get('unary') == 'SERVING' and result.get('trailer') == 'NOT_FOUND' and len(result.get('stream', [])) >= 2 and result['stream'][0] != result['stream'][-1], result)
     channel.close()
@@ -488,23 +509,60 @@ def failures_scenario():
     s = 'failures'
     origin = serve(Origin)
     name, host, route = create(s, '--port', str(origin.server_address[1]))
-    status, _, _ = visit(host, '/')
-    origin.shutdown()
-    origin.server_close()  # the port now refuses
-    status, response, body = visit(host, '/')
+    visit(host, '/')
+    origin.stop()  # the app dies while the tunnel is up
+    status, response, body = visit(host, '/', retries=1)
     cell(s, 'F8-12 an app that is not running: the origin_refused page says so', status == 502 and response.getheader('X-Paperboat-Error') in ('origin_refused', 'origin_unreachable') and len(body) > 200,
          '%s %s' % (status, response.getheader('X-Paperboat-Error')))
     slow = serve(Origin)
     move(name, route, 'http://127.0.0.1:%d' % slow.server_address[1])
+    visit(host, '/')  # the new route is known to the edge before the clock starts
     started = time.time()
     status, response, body = visit(host, '/slow?seconds=%d' % ARGS.slow, timeout=ARGS.slow + 60, retries=1)
     cell(s, 'F8-12 a slow app gets 100 s to its first byte, then the 504 origin_timeout page',
          status == 504 and response.getheader('X-Paperboat-Error') == 'origin_timeout' and 95 <= time.time() - started <= ARGS.slow + 20,
          '%s %s after %d s' % (status, response.getheader('X-Paperboat-Error'), time.time() - started))
-    slow.shutdown()
+    slow.stop()
 
 
-SCENARIOS = {'headers': headers_scenario, 'keepalive': keepalive_scenario, 'ws': ws_scenario, 'tls': tls_scenario, 'grpc': grpc_scenario, 'failures': failures_scenario}
+def preview_scenario():
+    s = 'preview'
+    origin = serve(Origin)
+    selfp, selfk, _, _ = make_cert('app.local', ['localhost'])
+    https = serve(Origin, tls=(write('prev.crt', selfp), write('prev.key', selfk)))
+    previews = []
+
+    def publish(target):
+        data = pb('preview', target, '--background', '--ttl', '3h', timeout=240)
+        previews.append(data['id'])
+        return data['endpoint'].split('://', 1)[1].rstrip('/')
+    try:
+        host = publish('http://127.0.0.1:%d' % origin.server_address[1])
+        status, response, body = visit(host, '/', headers=SPOOF)
+        seen = json.loads(body) if status == 200 else {}
+        cell(s, 'F7-08 preview: forwarded headers, spoofs dropped, https, public host, one client IP',
+             status == 200 and seen.get('xfp') == 'https' and host in str(seen.get('xfh')) and 'evil.example.test' not in str(seen.get('xfh')) + str(seen.get('host'))
+             and '203.0.113.9' not in str(seen.get('xff')) + str(seen.get('forwarded')) and ',' not in str(seen.get('xff')), '%s %s' % (status, seen))
+        status, response, body = visit(host, '/force')
+        cell(s, 'F7-08 preview: an app that redirects to its own https URL gets the loop page naming the fix',
+             status == 502 and response.getheader('X-Paperboat-Error') == 'origin_redirect_loop' and b'HTTP-to-HTTPS redirect' in body, '%s %s' % (status, response.getheader('X-Paperboat-Error')))
+        started = time.time()
+        status, response, body = visit(host, '/slow?seconds=%d' % ARGS.slow, timeout=ARGS.slow + 60, retries=1)
+        cell(s, 'F7-08 preview: a slow app gets 100 s to its first byte, then the 504 origin_timeout page',
+             status == 504 and response.getheader('X-Paperboat-Error') == 'origin_timeout' and 95 <= time.time() - started <= ARGS.slow + 20,
+             '%s %s after %d s' % (status, response.getheader('X-Paperboat-Error'), time.time() - started))
+        secure_host = publish('https://127.0.0.1:%d' % https.server_address[1])
+        status, response, _ = visit(secure_host, '/', retries=1)
+        cell(s, 'F7-08 preview: an HTTPS origin on localhost is sent the public hostname as SNI (its self-signed certificate is then refused with origin_tls)',
+             Origin.sni and Origin.sni[-1] == secure_host and status == 502 and response.getheader('X-Paperboat-Error') == 'origin_tls', '%s %s sni=%s' % (status, response.getheader('X-Paperboat-Error'), Origin.sni[-1:]))
+    finally:
+        for identity in previews:
+            pb('preview', 'stop', identity, check=False)
+        origin.stop()
+        https.stop()
+
+
+SCENARIOS = {'headers': headers_scenario, 'keepalive': keepalive_scenario, 'ws': ws_scenario, 'tls': tls_scenario, 'grpc': grpc_scenario, 'failures': failures_scenario, 'preview': preview_scenario}
 
 
 def run_scenario(name):
@@ -532,7 +590,7 @@ def main():
     finally:
         delete_all()
         with open(ARGS.out, 'w') as out:
-            json.dump({'check': 'tunnel-origin-rows', 'platform': sys.platform, 'cells': CELLS}, out, indent=1)
+            json.dump({'check': 'tunnel-origin-rows', 'platform': sys.platform, 'cells': CELLS, 'retried_requests': LATE}, out, indent=1)
     sys.exit(1 if any(c['result'] != 'ok' for c in CELLS) else 0)
 
 
