@@ -25,7 +25,7 @@ func TestBootstrapFinalizationRetainsExpiredMaterialWithoutRenewingAuthority(t *
 		t.Fatalf("finalization checkpoint lost: ready=%t err=%v", reloaded.RuntimeReady, err)
 	}
 	working := *reloaded.Material
-	if err := prepareBootstrapListener(root, &working, &reloaded); err != nil {
+	if err := prepareBootstrapListener(root, &working, &reloaded, "test-user"); err != nil {
 		t.Fatalf("local finalization must survive expired pairing material: %v", err)
 	}
 	working.ReuseIdentity, working.EnrollmentCredential = true, ""

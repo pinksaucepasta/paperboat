@@ -6,6 +6,7 @@ import (
 	"net"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -50,44 +51,50 @@ func TestFreshBootstrapCannotReplaceExistingEnrollment(t *testing.T) {
 	}
 }
 
-func TestBootstrapListenerUsesPrimaryThenSecondary(t *testing.T) {
-	if runtimeport.Primary != "127.0.0.1:38080" || runtimeport.Secondary != "127.0.0.1:48080" {
-		t.Fatal("runtime listener defaults changed")
+// A host serves any number of OS users: each account starts at its own port and probes forward, so no count of users
+// exhausts a fixed pair (the third Windows user of one host could not install with 38080 and 48080).
+func TestBootstrapListenerPicksAFreePortPerUser(t *testing.T) {
+	firstPorts := map[string]bool{}
+	for _, seed := range []string{"S-1-5-21-1-1001", "S-1-5-21-1-1002", "S-1-5-21-1-1003", "1000", "1001", "1002"} {
+		candidates := runtimeport.Candidates(seed)
+		if len(candidates) != runtimeport.Attempts || candidates[0] != runtimeport.Candidates(seed)[0] {
+			t.Fatalf("%s: %d candidates, first not stable", seed, len(candidates))
+		}
+		for _, address := range candidates {
+			_, port, err := net.SplitHostPort(address)
+			number, convErr := strconv.Atoi(port)
+			if err != nil || convErr != nil || number < runtimeport.First || number >= runtimeport.First+runtimeport.Span {
+				t.Fatalf("%s: candidate %q is outside the runtime port range", seed, address)
+			}
+		}
+		firstPorts[candidates[0]] = true
 	}
-	primary, err := net.Listen("tcp4", "127.0.0.1:0")
+	if len(firstPorts) < 5 {
+		t.Fatalf("users share their first port: %v", firstPorts)
+	}
+	free, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	primaryAddress := primary.Addr().String()
-	if err := primary.Close(); err != nil {
+	freeAddress := free.Addr().String()
+	if err := free.Close(); err != nil {
 		t.Fatal(err)
 	}
-	secondary, err := net.Listen("tcp4", "127.0.0.1:0")
+	taken, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondaryAddress := secondary.Addr().String()
-	if err := secondary.Close(); err != nil {
-		t.Fatal(err)
+	defer taken.Close()
+	takenAddress := taken.Addr().String()
+	if got, err := chooseBootstrapLoopbackAddress([]string{freeAddress, takenAddress}); err != nil || got != freeAddress {
+		t.Fatalf("free first candidate: %q, %v", got, err)
 	}
-	if got, err := chooseBootstrapLoopbackAddress(primaryAddress, secondaryAddress); err != nil || got != primaryAddress {
-		t.Fatalf("primary choice = %q, %v", got, err)
+	if got, err := chooseBootstrapLoopbackAddress([]string{takenAddress, freeAddress}); err != nil || got != freeAddress {
+		t.Fatalf("taken first candidate was not probed past: %q, %v", got, err)
 	}
-	primary, err = net.Listen("tcp4", primaryAddress)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer primary.Close()
-	if got, err := chooseBootstrapLoopbackAddress(primaryAddress, secondaryAddress); err != nil || got != secondaryAddress {
-		t.Fatalf("secondary choice = %q, %v", got, err)
-	}
-	secondary, err = net.Listen("tcp4", secondaryAddress)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer secondary.Close()
-	if got, err := chooseBootstrapLoopbackAddress(primaryAddress, secondaryAddress); err == nil || got != "" {
-		t.Fatalf("occupied ports choice = %q, %v", got, err)
+	got, err := chooseBootstrapLoopbackAddress([]string{takenAddress})
+	if got != "" || err == nil || !strings.Contains(runtimeFailureMessage(err), "are in use") {
+		t.Fatalf("occupied ports choice = %q, %v (message %q)", got, err, runtimeFailureMessage(err))
 	}
 }
 
@@ -97,7 +104,7 @@ func TestBootstrapListenerSurvivesCredentialConsumptionAndMaterialRecovery(t *te
 	publicKey := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	record := bootstrap.NewResumeRecord(material.ControlURL, publicKey, "token", "Laptop", strings.Repeat("v", 40), now.Add(time.Hour))
 	record.PairingStarted, record.Material = true, &material
-	if err := prepareBootstrapListener(root, &material, &record); err != nil {
+	if err := prepareBootstrapListener(root, &material, &record, "test-user"); err != nil {
 		t.Fatal(err)
 	}
 	address := material.HelperListenAddress
@@ -114,7 +121,7 @@ func TestBootstrapListenerSurvivesCredentialConsumptionAndMaterialRecovery(t *te
 	// remains the authority for the already selected per-user address.
 	recovered := testClientBootstrapMaterial(record.ServerURL, now.Add(time.Hour))
 	reloaded.Material = &recovered
-	if err := prepareBootstrapListener(root, &recovered, &reloaded); err != nil {
+	if err := prepareBootstrapListener(root, &recovered, &reloaded, "test-user"); err != nil {
 		t.Fatal(err)
 	}
 	if recovered.HelperListenAddress != address || reloaded.RuntimeListenAddress != address {

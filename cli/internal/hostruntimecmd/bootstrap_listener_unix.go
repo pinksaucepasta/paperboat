@@ -20,7 +20,7 @@ func prepareRetainedBootstrapListener(stateRoot string, material *bootstrap.Mate
 		return bootstrap.ErrResumeBinding
 	}
 	resume.RuntimeListenAddress = carrier.WorkerAddress
-	return prepareBootstrapListener(stateRoot, material, resume)
+	return prepareBootstrapListener(stateRoot, material, resume, carrier.Instance)
 }
 
 func prepareUnixBootstrapListener(ctx context.Context, stateRoot string, material *bootstrap.Material, resume *bootstrap.ResumeRecord, uid int) error {
@@ -36,5 +36,5 @@ func prepareUnixBootstrapListener(ctx context.Context, stateRoot string, materia
 			return runtimeFailure("verify the installed Paperboat listener before setup", err)
 		}
 	}
-	return prepareBootstrapListener(stateRoot, material, resume)
+	return prepareBootstrapListener(stateRoot, material, resume, strconv.Itoa(uid))
 }

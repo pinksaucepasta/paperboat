@@ -10,8 +10,9 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/runtimeport"
 )
 
-func chooseBootstrapLoopbackAddress(primary, secondary string) (string, error) {
-	for _, address := range []string{primary, secondary} {
+// chooseBootstrapLoopbackAddress returns the first candidate nothing listens on.
+func chooseBootstrapLoopbackAddress(candidates []string) (string, error) {
+	for _, address := range candidates {
 		listener, err := net.Listen("tcp4", address)
 		if err != nil {
 			if !bootstrapAddressInUse(err) {
@@ -24,21 +25,18 @@ func chooseBootstrapLoopbackAddress(primary, secondary string) (string, error) {
 		}
 		return address, nil
 	}
-	return "", fmt.Errorf("Paperboat cannot install: local ports %s and %s are unavailable", primary, secondary)
+	return "", runtimeFailure(fmt.Sprintf("Paperboat cannot install: all %d local ports it tries (127.0.0.1:%d and the ones after it) are in use. Close the programs using them, then retry.", len(candidates), runtimeport.First))
 }
 
 // Checkpoint the locally selected listener before consuming runtime enrollment
 // credentials. Server material can be renewed independently of this local choice.
-func prepareBootstrapListener(stateRoot string, material *bootstrap.Material, resume *bootstrap.ResumeRecord) error {
+// seed names the OS account: its first candidate port differs from every other user's on the host.
+func prepareBootstrapListener(stateRoot string, material *bootstrap.Material, resume *bootstrap.ResumeRecord, seed string) error {
 	if material == nil || resume == nil || resume.Material == nil {
 		return bootstrap.ErrResumeBinding
 	}
 	if resume.RuntimeListenAddress == "" {
-		primary := material.HelperListenAddress
-		if primary == "" {
-			primary = runtimeport.Primary
-		}
-		address, err := chooseBootstrapLoopbackAddress(primary, runtimeport.Secondary)
+		address, err := chooseBootstrapLoopbackAddress(runtimeport.Candidates(seed))
 		if err != nil {
 			return err
 		}
