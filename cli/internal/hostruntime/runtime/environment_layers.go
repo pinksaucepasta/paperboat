@@ -73,68 +73,15 @@ func (s *layerEnvironmentService) layerEnvironment(ctx context.Context, names *l
 	if err := s.registerLayerRecipient(ctx); err != nil {
 		return nil, err
 	}
+	bundle, err := s.fetchLayerContext(ctx, binding)
+	if err != nil {
+		return nil, err
+	}
 	s.layerMu.Lock()
 	defer s.layerMu.Unlock()
 	if s.isClosed() {
 		return nil, envinject.ErrNotReady
 	}
-	path := "/v1/environment/hosts/" + url.PathEscape(s.registration.MachineID) + "/layers"
-	operation, err := uuid.NewRandom()
-	if err != nil {
-		return nil, err
-	}
-	operationID := "operation_" + operation.String()
-	body, err := json.Marshal(struct {
-		OperationID    string `json:"operation_id"`
-		WorkspaceID    string `json:"workspace_id"`
-		ActorAccountID string `json:"actor_account_id"`
-	}{operationID, binding.WorkspaceID, binding.ActorAccountID})
-	if err != nil {
-		return nil, err
-	}
-	token, err := s.credentials.Token(ctx)
-	if err != nil {
-		return nil, err
-	}
-	proof, err := s.credentials.Proof(ctx, operationID, http.MethodPost, path, body)
-	if err != nil {
-		return nil, err
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, s.base.ResolveReference(&url.URL{Path: path}).String(), bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	request.Header.Set("Authorization", "Bearer "+token)
-	request.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString(proof))
-	request.Header.Set("Idempotency-Key", operationID)
-	request.Header.Set("Accept", "application/json")
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Cache-Control", "no-store")
-	client := &http.Client{Transport: s.transport, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrProductionInvalid }}
-	response, err := client.Do(request)
-	if err != nil {
-		return nil, err
-	}
-	raw, bodyErr := readLayerControlBody(response, 1<<20)
-	if response.StatusCode != http.StatusOK {
-		if bodyErr != nil {
-			return nil, layerControlResponseFailure{cause: errors.Join(envinject.ErrNotReady, bodyErr)}
-		}
-		return nil, envinject.ErrNotReady
-	}
-	if bodyErr != nil {
-		return nil, bodyErr
-	}
-	var envelope struct {
-		Data *api.VaultLayerContext `json:"data"`
-	}
-	if decodeErr := json.Unmarshal(raw, &envelope); decodeErr != nil {
-		return nil, layerControlResponseFailure{cause: errors.Join(envinject.ErrInvalidSnapshot, decodeErr)}
-	}
-	if envelope.Data == nil {
-		return nil, envinject.ErrInvalidSnapshot
-	}
-	bundle := *envelope.Data
 	if names != nil {
 		names.Listable = bundle.NamesListable
 	}
@@ -172,6 +119,68 @@ func (s *layerEnvironmentService) layerEnvironment(ctx context.Context, names *l
 		errorreport.Current().ObserveFailure(ctx, "paperboat-daemon", "environment_observation", "control_request", "control_request_failed", flushErr)
 	}
 	return values, err
+}
+
+// fetchLayerContext asks the control plane what this launch's layers are. It holds no lock: one round
+// trip per exec start must not queue behind the others (32 starts at 0.65 s RTT took 21 s serialized).
+func (s *layerEnvironmentService) fetchLayerContext(ctx context.Context, binding envinject.LaunchContext) (api.VaultLayerContext, error) {
+	path := "/v1/environment/hosts/" + url.PathEscape(s.registration.MachineID) + "/layers"
+	operation, err := uuid.NewRandom()
+	if err != nil {
+		return api.VaultLayerContext{}, err
+	}
+	operationID := "operation_" + operation.String()
+	body, err := json.Marshal(struct {
+		OperationID    string `json:"operation_id"`
+		WorkspaceID    string `json:"workspace_id"`
+		ActorAccountID string `json:"actor_account_id"`
+	}{operationID, binding.WorkspaceID, binding.ActorAccountID})
+	if err != nil {
+		return api.VaultLayerContext{}, err
+	}
+	token, err := s.credentials.Token(ctx)
+	if err != nil {
+		return api.VaultLayerContext{}, err
+	}
+	proof, err := s.credentials.Proof(ctx, operationID, http.MethodPost, path, body)
+	if err != nil {
+		return api.VaultLayerContext{}, err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, s.base.ResolveReference(&url.URL{Path: path}).String(), bytes.NewReader(body))
+	if err != nil {
+		return api.VaultLayerContext{}, err
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("X-Paperboat-Machine-Proof", base64.RawURLEncoding.EncodeToString(proof))
+	request.Header.Set("Idempotency-Key", operationID)
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Cache-Control", "no-store")
+	client := &http.Client{Transport: s.transport, Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return ErrProductionInvalid }}
+	response, err := client.Do(request)
+	if err != nil {
+		return api.VaultLayerContext{}, err
+	}
+	raw, bodyErr := readLayerControlBody(response, 1<<20)
+	if response.StatusCode != http.StatusOK {
+		if bodyErr != nil {
+			return api.VaultLayerContext{}, layerControlResponseFailure{cause: errors.Join(envinject.ErrNotReady, bodyErr)}
+		}
+		return api.VaultLayerContext{}, envinject.ErrNotReady
+	}
+	if bodyErr != nil {
+		return api.VaultLayerContext{}, bodyErr
+	}
+	var envelope struct {
+		Data *api.VaultLayerContext `json:"data"`
+	}
+	if decodeErr := json.Unmarshal(raw, &envelope); decodeErr != nil {
+		return api.VaultLayerContext{}, layerControlResponseFailure{cause: errors.Join(envinject.ErrInvalidSnapshot, decodeErr)}
+	}
+	if envelope.Data == nil {
+		return api.VaultLayerContext{}, envinject.ErrInvalidSnapshot
+	}
+	return *envelope.Data, nil
 }
 
 func (s *layerEnvironmentService) FlushLayerObservations(ctx context.Context) error {
