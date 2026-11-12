@@ -2,6 +2,7 @@
 """The cross-OS fleet of the X-20..X-44 rows: one Linux container, one hosted Mac and one hosted Windows runner of ONE throwaway account.
 
   xpc_setup.py up BUILD_DIR    install the build on L, M and W, sign the Linux container in with an API token, pair all three
+  xpc_setup.py revoke NAME...  revoke our records of replaced machines (a hosted runner that expired)
   xpc_setup.py status          pb version and machine state per device
   xpc_setup.py down            revoke the three machines by exact id and uninstall
 
@@ -39,6 +40,16 @@ def machines():
     return {m['alias']: m for m in json.loads(done.text)['machines']}
 
 
+def revoke(names):
+    """Revoke our records of these machine names by exact id (a replaced runner leaves its record behind)."""
+    known = machines()
+    for name in names:
+        if name in known:
+            token = json.loads(fleet.controller_pb('machine', 'revoke', known[name]['id'], '--json').text)['data']['confirmation_token']
+            fleet.controller_pb('machine', 'revoke', known[name]['id'], '--json', '--confirm', token)
+            print('revoked', name, known[name]['id'], flush=True)
+
+
 def up(build, keys='L,M,W'):
     devices = {k: d for k, d in fleet.fleet().items() if k in keys.split(',')}
     binaries = {'L': 'pb-linux-' + os.environ.get('XPC_L_ARCH', 'arm64'), 'M': 'pb-darwin-arm64', 'W': 'pb-windows-amd64.exe'}
@@ -73,4 +84,4 @@ def status():
 
 if __name__ == '__main__':
     action = sys.argv[1] if len(sys.argv) > 1 else 'status'
-    {'up': lambda: up(*sys.argv[2:4]), 'down': down, 'status': status}[action]()
+    {'up': lambda: up(*sys.argv[2:4]), 'down': down, 'status': status, 'revoke': lambda: revoke(sys.argv[2:])}[action]()

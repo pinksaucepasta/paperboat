@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """X-22: the daily loop on a mixed fleet (one L, one M, one W machine of ONE account), then a reboot and a network change.
 
-  xpc_daily.py [--devices L,M,W] [--skip-recovery]
+  xpc_daily.py [--devices L,M,W] [--skip-recovery] [--m-vm] [--victus]
 
 For every ordered pair A>B: name resolution (`pb resolve`), `pb exec` (the target's own hostname comes back), ENV (one variable set
 once is seen by the target), a file sent into the target's Inbox (sha256), private TCP (xplat_access.t_access). Per machine: the console
@@ -150,26 +150,83 @@ def t_config():
 def wait_online(src, target, seconds=240):
     end = time.time() + seconds
     while time.time() < end:
-        listed = fleet.json_pb(src, 'machine', 'list', '--q', target.alias)['machines']
-        if any(m['alias'] == target.alias and (m.get('state') == 'online' or m.get('online')) for m in listed):
-            done = src.pb('exec', target.alias, '--', 'hostname', timeout=90)
-            if done.rc == 0:
-                return time.time() - end + seconds
+        try:  # the source itself may still be booting: its ssh or pb fails until then
+            listed = fleet.json_pb(src, 'machine', 'list', '--q', target.alias)['machines']
+            if any(m['alias'] == target.alias and (m.get('state') == 'online' or m.get('online')) for m in listed):
+                done = src.pb('exec', target.alias, '--', 'hostname', timeout=90)
+                if done.rc == 0:
+                    return time.time() - end + seconds
+        except (ValueError, KeyError):
+            pass
         time.sleep(6)
     raise AssertionError('%s was not reachable again within %ds' % (target.alias, seconds))
 
 
-def recovery(devices):
+def victus_device():
+    """victus's own Windows install, paired into the X account as xpc-v (the login is in REMOTE_TESTING.md, read here, never printed)."""
+    import os
+    import re
+    text = open(os.path.expanduser('~/paperboat/REMOTE_TESTING.md')).read()
+    os.environ['VICTUS_PASS'] = re.search(r'pujan@victus with pass (\S+)', text).group(1)
+    return fleet.Windows('xpc-v', target='pujan@victus')
+
+
+def reboot(dev):
+    """Linux: the container restarts (systemd boots again). macOS: only the Mac VM can reboot (`--m-vm`); a hosted runner loses its job."""
+    if dev.os == 'linux':
+        subprocess.run(['ssh', fleet.L_HOST, 'docker', 'restart', fleet.L_CT], check=True, capture_output=True, timeout=180)
+    elif dev.os == 'windows':
+        dev.run(['shutdown', '/r', '/t', '5'], timeout=60)
+    else:
+        subprocess.Popen(['bash', '-c', "~/.pbmac/ssh.sh vm 'sudo shutdown -r now' >/dev/null 2>&1"])
+    time.sleep(40 if dev.os == 'windows' else 20)
+
+
+def recovery(devices, mac_vm, victus=None):
+    for key in ('L', 'M'):
+        if key not in devices or (key == 'M' and not mac_vm):
+            continue
+        target = devices[key]
+        reboot(target)
+        for other_key, src in devices.items():
+            if other_key != key:
+                record('X-22:reboot:%s>%s' % (other_key, key), lambda: 'reachable again after %.0fs with no user action' % wait_online(src, target, 600))
+                record('X-22:reboot:%s>%s' % (key, other_key), lambda: 'the rebooted machine reaches it again (hostname %s)' % wait_online(target, src, 300))
+    if victus:
+        reboot(victus)
+        for key, src in devices.items():
+            record('X-22:reboot:%s>V' % key, lambda: 'reachable again after %.0fs with no user action' % wait_online(src, victus, 900))
+            record('X-22:reboot:V>%s' % key, lambda: 'the rebooted Windows machine reaches it again (hostname %s)' % wait_online(victus, src, 600))
+        record('X-22:doctor-after-reboot:V', lambda: t_doctor(victus))
     target = devices['L']
-    others = [d for k, d in devices.items() if k != 'L']
-    subprocess.run(['ssh', fleet.L_HOST, 'docker', 'restart', fleet.L_CT], check=True, capture_output=True, timeout=180)
-    for src in others:
-        record('X-22:reboot:%s>L' % src.os[0].upper(), lambda: 'reachable again after %.0fs with no user action' % wait_online(src, target, 360))
     subprocess.run(['ssh', fleet.L_HOST, 'docker', 'network', 'disconnect', 'bridge', fleet.L_CT], check=True, capture_output=True, timeout=60)
     time.sleep(20)
     subprocess.run(['ssh', fleet.L_HOST, 'docker', 'network', 'connect', 'bridge', fleet.L_CT], check=True, capture_output=True, timeout=60)
-    for src in others:
-        record('X-22:network:%s>L' % src.os[0].upper(), lambda: 'reachable again after %.0fs of lost and regained network' % wait_online(src, target, 360))
+    for key, src in devices.items():
+        if key != 'L':
+            record('X-22:network:%s>L' % key, lambda: 'reachable again after %.0fs of lost and regained network' % wait_online(src, target, 360))
+
+
+FLAP = {
+    'darwin': ('nohup sh -c \'i=$(route -n get default | awk "/interface:/{print \\$2}"); sudo ifconfig $i down; sleep 15; sudo ifconfig $i up\' >/dev/null 2>&1 &'),
+    'windows': ("Start-Process powershell -WindowStyle Hidden -ArgumentList '-NoProfile','-Command',"
+                "\"New-NetFirewallRule -DisplayName xpcflap -Direction Outbound -Action Block | Out-Null; Start-Sleep 15; Remove-NetFirewallRule -DisplayName xpcflap\""),
+}
+
+
+def flap_network(devices):
+    """A hosted runner cannot reboot, but its network can be cut for 15 s (interface down on the Mac, outbound firewall block on
+    Windows) and restored: the daemon loses its server and relay connections and must find them again by itself."""
+    for key in ('M', 'W'):
+        if key not in devices:
+            continue
+        dev = devices[key]
+        done = dev.run(['sh', '-c', FLAP['darwin']]) if dev.os == 'darwin' else dev.sh(FLAP['windows'])
+        assert done.rc == 0, 'could not start the network cut: ' + done.errtext[-200:]
+        time.sleep(25)
+        peers = [d for k, d in devices.items() if k != key]
+        for src in peers:
+            record('X-22:network:%s>%s' % ({'linux': 'L', 'darwin': 'M', 'windows': 'W'}[src.os], key), lambda: 'reachable again after %.0fs (15 s network cut)' % wait_online(src, dev, 360))
 
 
 def main():
@@ -186,7 +243,8 @@ def main():
         record('X-22:doctor:' + key, lambda: t_doctor(dev))
     record('X-22:config', t_config)
     if 'L' in devices and '--skip-recovery' not in argv:
-        recovery(devices)
+        recovery(devices, '--m-vm' in argv, victus_device() if '--victus' in argv else None)
+        flap_network(devices)
         for key, dev in devices.items():
             record('X-22:doctor-after:' + key, lambda: t_doctor(dev))
     out = HERE / 'results' / ('xpc-daily-%s.json' % time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()))
