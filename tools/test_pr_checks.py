@@ -47,3 +47,17 @@ class DatabaseTests(unittest.TestCase):
         }
         self.assertEqual(checks.affected(packages, ['shared/a/x.go']), ['m/a', 'm/b'])
         self.assertEqual(checks.affected(packages, ['shared/a/x.go'], transitive=False), ['m/a'])
+
+
+class FormatTests(unittest.TestCase):
+    def test_unformatted_file_anywhere_in_a_module_is_reported_even_if_unchanged(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as root:
+            for module, text in (('shared/deep/pkg', 'package p\nvar x   = 1\n'), ('cli', 'package p\n\nvar y = 1\n')):
+                directory = Path(root, module)
+                directory.mkdir(parents=True)
+                (directory / 'f.go').write_text(text)
+            for module in checks.MODULES:
+                Path(root, module).mkdir(parents=True, exist_ok=True)
+            self.assertEqual([Path(p).name for p in checks.unformatted(root)], ['f.go'])
+            self.assertEqual(checks.unformatted(root)[0], 'shared/deep/pkg/f.go')

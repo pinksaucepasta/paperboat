@@ -5,8 +5,8 @@ import (
 	"context"
 	"crypto/ecdh"
 	"encoding/json"
-	"os"
 	env "github.com/pinksaucepasta/paperboat/internal/environmente2ee"
+	"os"
 	"testing"
 )
 
@@ -743,8 +743,12 @@ func TestConsoleFixtureIsANativeVaultWithRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, open := range []func() ([]byte, error){
-		func() ([]byte, error) { return env.OpenPasswordVault(context.Background(), head, []byte(fixture.Password), raw) },
-		func() ([]byte, error) { return env.OpenRecoveryVault(context.Background(), head, []byte(fixture.RecoveryCode), raw) },
+		func() ([]byte, error) {
+			return env.OpenPasswordVault(context.Background(), head, []byte(fixture.Password), raw)
+		},
+		func() ([]byte, error) {
+			return env.OpenRecoveryVault(context.Background(), head, []byte(fixture.RecoveryCode), raw)
+		},
 	} {
 		payload, err := open()
 		if err != nil {

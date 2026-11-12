@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """R-01: check changed Go packages.
-  pr-checks.py BASE          vet and -race test the changed packages and their workspace reverse dependencies (merge queue groups)
-  pr-checks.py BASE --fast   gofmt of the changed Go files and go vet of the changed packages only (pull requests: seconds, no tests)"""
+  pr-checks.py BASE          gofmt of every module, then vet and -race test the changed packages and their workspace reverse dependencies (merge queue groups)
+  pr-checks.py BASE --fast   gofmt of every module, then go vet of the changed packages only (pull requests: seconds, no tests)"""
 import json
 import os
 import subprocess
@@ -75,16 +75,15 @@ def output(*argv, cwd=ROOT):
     return subprocess.check_output(argv, cwd=cwd, text=True)
 
 
-def unformatted(paths):
-    """Changed Go files that gofmt would rewrite (deleted files are skipped)."""
-    files = [str(ROOT / p) for p in paths if p.endswith('.go') and (ROOT / p).is_file()]
-    return output('gofmt', '-l', *files).split() if files else []
+def unformatted(root=ROOT):
+    """Go files of every module that gofmt would rewrite: the whole tree, not the diff (seconds, no compile)."""
+    return output('gofmt', '-l', *MODULES, cwd=root).split()
 
 
 def main():
     fast = '--fast' in sys.argv[2:]
     paths = output('git', 'diff', '--name-only', sys.argv[1], 'HEAD').splitlines()
-    if fast and (bad := unformatted(paths)):
+    if bad := unformatted():
         sys.exit('gofmt would change: ' + ' '.join(bad) + ' (run gofmt -w on them)')
     packages = {}
     for module in MODULES:
