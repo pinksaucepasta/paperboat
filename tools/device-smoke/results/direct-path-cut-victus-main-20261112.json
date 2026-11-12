@@ -1,0 +1,30 @@
+{
+ "check": "direct-path-cut",
+ "peer": "win-probe",
+ "status": "PASS",
+ "steps": [
+  {
+   "step": "a direct path to the peer exists before the cut",
+   "ok": true,
+   "detail": "pb status Path: direct"
+  },
+  {
+   "step": "the stream runs before the cut",
+   "ok": true,
+   "detail": "30 lines in 15 s"
+  },
+  {
+   "step": "the stream continues after the direct path is cut",
+   "ok": true,
+   "detail": "133 lines in all"
+  },
+  {
+   "step": "the longest gap in the stream stays under the budget (a dead path is noticed in seconds)",
+   "ok": true,
+   "detail": "longest gap 6.1 s, budget 15.0 s, 2 min QUIC idle timeout is the number to beat"
+  }
+ ],
+ "lines": 133,
+ "longest_gap_s": 6.1,
+ "cut_seconds": 30
+}

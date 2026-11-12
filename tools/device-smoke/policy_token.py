@@ -11,6 +11,10 @@ from OWNER's stdout to TOKEN's stdin; it is never printed. Then the solo case: a
 only exec on tag:ci works on the tagged machine, its use is attributed to it, and removing the tag
 (a policy change) takes the access from the token.
 
+The TOKEN machine's CLI session is replaced by the token's and ends signed out when the token is revoked (by design): use a
+throwaway machine (a Linux container, or a hosted Windows runner you pair again afterwards), never the only signed-in session
+of a device you still need; a Windows TOKEN machine needs `pb login` again afterwards.
+
 Usage: policy_token.py --allowed lk-a --other lk-b \
          --owner-cmd 'ssh pbvm2 sudo docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 lk-a' \
          --token-cmd 'ssh pbvm2 sudo docker exec -i -u pbt -e HOME=/home/pbt -e XDG_RUNTIME_DIR=/run/user/1000 lk-b'

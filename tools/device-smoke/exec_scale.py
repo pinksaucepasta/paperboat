@@ -5,6 +5,9 @@ Run on the staging containers (never prod) from the orchestrating host:
   exec_scale.py --host ubuntu@anvit [--count 32] [--sleep 20] [--budget 30]
 rel-sco-a starts COUNT execs at once to rel-sco-b (containers from control_outage.py setup); each must exit 0 within
 sleep + (budget - sleep) seconds. The result JSON has the start spread, the slowest and median times and every failure.
+
+A Windows peer (F21-166, W): --client win-stg-l --target win-stg-w2 --windows: the same from the container --client to the
+Windows machine --target, each exec running `ping -n SLEEP+1 127.0.0.1` (cmd.exe has no sleep).
 """
 import argparse, base64, json, sys, time
 from pathlib import Path
@@ -16,10 +19,11 @@ import control_outage as c  # noqa: E402
 WORKER = r'''
 import json, subprocess, sys, threading, time
 count, sleep_s, target = int(sys.argv[1]), sys.argv[2], sys.argv[3]
+windows = len(sys.argv) > 4 and sys.argv[4] == "windows"
 rows = [None] * count
 def run(i):
     start = time.time()
-    done = subprocess.run([".local/bin/pb", "exec", target, "--", "sleep", sleep_s], capture_output=True, text=True, timeout=300)
+    done = subprocess.run([".local/bin/pb", "exec", target, "--", *(["cmd", "/c", "ping", "-n", str(int(sleep_s) + 1), "127.0.0.1"] if windows else ["sleep", sleep_s])], capture_output=True, text=True, timeout=300)
     rows[i] = {"i": i, "seconds": round(time.time() - start, 2), "rc": done.returncode, "tail": (done.stdout + done.stderr).strip()[-160:]}
 gate = threading.Barrier(count)
 def go(i):
@@ -37,6 +41,9 @@ def main():
     parser.add_argument("--count", type=int, default=32)
     parser.add_argument("--sleep", type=int, default=20)
     parser.add_argument("--budget", type=float, default=30.0, help="seconds each exec may take in all")
+    parser.add_argument("--client", default=c.NAMES["a"], help="the container that starts the execs")
+    parser.add_argument("--target", default=c.NAMES["b"], help="the machine they run on")
+    parser.add_argument("--windows", action="store_true", help="the target is a Windows machine")
     parser.add_argument("--client-ct", default=c.NAMES["a"], help="the container whose pb starts the execs")
     parser.add_argument("--client-ssh", help="a macOS host (ssh) whose pb starts the execs instead of a container")
     parser.add_argument("--target-name", default=c.NAMES["b"], help="the machine every exec runs on (a container or a Mac)")
