@@ -90,6 +90,9 @@ func Observe(date string, sent, received time.Time) {
 	}
 }
 
+// Learned is whether any server answer has placed the server's clock in this process yet.
+func Learned() bool { return learned.Load() != nil }
+
 // Offset is how far the server's clock is ahead of this machine's (negative: behind), or 0 below
 // Threshold. When the local clock was stepped since it was learned (an NTP fix, a clock set back), or the
 // machine slept, the offset may be stale: the server is asked for its time again, at most every 10 s, and
