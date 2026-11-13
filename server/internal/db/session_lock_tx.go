@@ -29,6 +29,18 @@ var ErrSessionLockBusy = errors.New("database: the lock stayed held by another t
 // it ends at ctx or sessionLockWait. The lock is released on every exit; a connection whose unlock fails, or that a
 // panic left inside a transaction, is closed instead of returned to the pool.
 func (d *DB) InTxUnderSessionLock(ctx context.Context, key string, seed int64, fn func(context.Context, *Tx) error) error {
+	return d.underSessionLock(ctx, key, seed, pgx.Serializable, &d.serializable, fn)
+}
+
+// InReadCommittedTxUnderSessionLock is InTxUnderSessionLock at READ COMMITTED, for a transaction that only takes
+// row locks and atomic updates on rows other transactions share (a workspace's bandwidth period): at serializable
+// those concurrent updates abort each other with 40001 instead of queuing on the row lock. The caller must not
+// rely on a snapshot taken before its first lock.
+func (d *DB) InReadCommittedTxUnderSessionLock(ctx context.Context, key string, seed int64, fn func(context.Context, *Tx) error) error {
+	return d.underSessionLock(ctx, key, seed, pgx.ReadCommitted, &d.readCommitted, fn)
+}
+
+func (d *DB) underSessionLock(ctx context.Context, key string, seed int64, iso pgx.TxIsoLevel, counters *transactionCounters, fn func(context.Context, *Tx) error) error {
 	conn, err := d.acquireSessionLock(ctx, key, seed)
 	if err != nil {
 		return err
@@ -39,18 +51,18 @@ func (d *DB) InTxUnderSessionLock(ctx context.Context, key string, seed int64, f
 			discardSessionConn(conn) // a panic in fn: its transaction may still be open
 		}
 	}()
-	d.serializable.calls.Add(1)
+	counters.calls.Add(1)
 	attempts := 0
 	err = retrySerializable(ctx, func() error {
 		attempts++
-		d.serializable.attempts.Add(1)
+		counters.attempts.Add(1)
 		if attempts > 1 {
-			d.serializable.retries.Add(1)
+			counters.retries.Add(1)
 		}
-		return runInTxOn(ctx, conn, pgx.TxOptions{IsoLevel: pgx.Serializable}, fn)
+		return runInTxOn(ctx, conn, pgx.TxOptions{IsoLevel: iso}, fn)
 	})
 	if attempts >= serializableAttempts && isSerializationFailure(err) {
-		d.serializable.exhausted.Add(1)
+		counters.exhausted.Add(1)
 	}
 	released = true
 	releaseSessionLock(conn, key, seed)

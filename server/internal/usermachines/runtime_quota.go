@@ -93,7 +93,8 @@ func (s *Service) CheckBrowserTerminalBandwidth(ctx context.Context, machineID, 
 	if s.runtimeQuota == nil {
 		return nil
 	}
-	return s.db.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// READ COMMITTED: the allowance check locks the workspace's period row and queues behind other reports; serializable aborted them.
+	return s.db.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
 		var workspace string
 		err := tx.QueryRow(ctx, `SELECT w.id FROM paperboat.user_machines m
 			JOIN billing_workspaces w ON (m.owner_team_id IS NOT NULL AND w.team_id=m.owner_team_id AND w.user_id IS NULL)

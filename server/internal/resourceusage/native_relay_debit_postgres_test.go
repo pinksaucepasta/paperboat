@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,14 +17,21 @@ type recordedDebit struct {
 	bytes     int64
 }
 
-type fakeDebiter struct{ calls []recordedDebit }
+type fakeDebiter struct {
+	mu    sync.Mutex
+	calls []recordedDebit
+}
 
 func (f *fakeDebiter) DebitWorkspaceBandwidthTx(_ context.Context, _ *db.Tx, workspace string, bytes int64, _ time.Time) (int64, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, recordedDebit{workspace, bytes})
 	return bytes, false, nil
 }
 
 func (f *fakeDebiter) total() (sum int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	for _, c := range f.calls {
 		sum += c.bytes
 	}
@@ -111,6 +119,21 @@ func TestNativeRelayBytesAreDebitedOnceByGrowthPostgres(t *testing.T) {
 	want(150, "a lower out-of-order report charges nothing")
 	send(report("hosted", "relay", node, 300, 50))
 	want(350, "only the growth of the cumulative record is charged")
+	// The same report posted by several connections at once (a resend while the first is in flight) is charged
+	// once: the batches of one machine run one at a time, so none reads the record before its predecessor wrote it.
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			receipt, err := service.RecordNative(ctx, machine, 1, NativeBatch{Reports: []NativeReport{report("burst", "relay", node, 200, 100)}})
+			if err != nil || receipt.Accepted != 1 {
+				t.Errorf("concurrent replay: %+v %v", receipt, err)
+			}
+		}()
+	}
+	wg.Wait()
+	want(650, "a report replayed concurrently is charged once")
 	for _, c := range debiter.calls {
 		if c.workspace != "personal:"+user {
 			t.Fatalf("charged workspace %q, want the host owner's personal workspace", c.workspace)

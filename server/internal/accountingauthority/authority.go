@@ -74,7 +74,7 @@ func Record(ctx context.Context, store *db.DB, b Binding, policy QuotaChecker) e
 		return ctx.Err()
 	}
 	defer func() { <-nodeLock }()
-	return store.InTxUnderSessionLock(ctx, b.Node, 369197, func(ctx context.Context, tx *db.Tx) error {
+	return store.InReadCommittedTxUnderSessionLock(ctx, b.Node, 369197, func(ctx context.Context, tx *db.Tx) error {
 		if _, err := tx.Exec(ctx, `DELETE FROM usage_accounting_authorities WHERE edge_node_id=$1 AND retain_until<=$2`, b.Node, b.IssuedAt); err != nil {
 			return err
 		}

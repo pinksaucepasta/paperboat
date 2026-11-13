@@ -102,7 +102,13 @@ func (s *Service) RecordNative(ctx context.Context, machine string, generation i
 			return receipt, err
 		}
 	}
-	err := s.Store.InTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+	// READ COMMITTED, like control usage reports: the workspace's period row is debited under its row lock, so
+	// concurrent machines queue instead of aborting each other with 40001. This machine's batches are serialized by
+	// an advisory lock, so the previous-value and capacity reads below cannot be raced by a replay of the same report.
+	err := s.Store.InReadCommittedTx(ctx, func(ctx context.Context, tx *db.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('native-usage:'||$1,0))`, machine); err != nil {
+			return fmt.Errorf("lock native usage: %w", err)
+		}
 		receipt = NativeReceipt{RejectedIndices: []int{}}
 		for index, r := range batch.Reports {
 			var ws, kind, id, name, machineName, admittedNode, resourceRoute string
