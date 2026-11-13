@@ -20,12 +20,12 @@ func TestWindowsReceiverRefusesWhatWindowsCannotStore(t *testing.T) {
 
 func TestUnixReceiversOnlyRefuseWhatNoFileSystemStores(t *testing.T) {
 	for _, platform := range []string{"linux", "darwin"} {
-		for _, name := range []string{"a:b.txt", "trail.", "sp ", "CON.txt", `q"u*?.txt`, "-lead", "café"} {
+		for _, name := range []string{"a:b.txt", "trail.", "CON.txt", `q"u*?.txt`, "-lead", "café", "sp ace"} {
 			if reason := Refusal(platform, name); reason != "" {
 				t.Errorf("%s refused %q: %s", platform, name, reason)
 			}
 		}
-		for _, name := range []string{"", ".", "..", "a/b", "a\x00b", strings.Repeat("x", 256), "bad\xffutf8"} {
+		for _, name := range []string{"", ".", "..", "a/b", "a\x00b", strings.Repeat("x", 256), "bad\xffutf8", "sp ", " lead", "a\\b", "a\nb"} {
 			if Refusal(platform, name) == "" {
 				t.Errorf("%s accepted %q", platform, name)
 			}

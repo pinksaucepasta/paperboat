@@ -25,3 +25,10 @@ func TestSendRefusesNamesTheReceiverCannotStoreBeforeSending(t *testing.T) {
 		t.Fatalf("a Linux receiver stores these names: %v", err)
 	}
 }
+
+func TestSendRefusesSurroundingWhiteSpaceForEveryReceiver(t *testing.T) {
+	err := receiverNameRefusal("macbox", "darwin", []filetransfer.Source{{Basename: "sp "}})
+	if err == nil || !strings.Contains(err.Error(), `"sp "`) || !strings.Contains(err.Error(), "Nothing was sent") {
+		t.Fatalf("the Team Inbox refuses this name for every receiver, the message must name it: %v", err)
+	}
+}

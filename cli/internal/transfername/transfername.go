@@ -34,6 +34,13 @@ func Refusal(platform, name string) string {
 	if i := strings.IndexAny(name, "/\x00"); i >= 0 {
 		return fmt.Sprintf("the name contains %q, which no file system allows", name[i])
 	}
+	// The Team Inbox (server/internal/teaminbox canonicalFiles) refuses these for every receiver, so a sender must say so.
+	if i := strings.IndexAny(name, "\\\r\n"); i >= 0 {
+		return fmt.Sprintf("the name contains %q, which a Team Inbox transfer does not carry", name[i])
+	}
+	if name != strings.TrimSpace(name) {
+		return "the name starts or ends with white space, which a Team Inbox transfer does not carry"
+	}
 	if platform == "windows" {
 		return windowsRefusal(name)
 	}
