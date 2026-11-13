@@ -69,16 +69,11 @@ func rsyncRemoteShellChosen(args, environment []string) bool {
 	return false
 }
 
-// rsyncRemoteShellArgument names OpenSSH for rsync's -e through the MSYS2/Cygwin bash beside rsync: rsync talks to its
-// remote shell over a Cygwin socketpair, which the native Windows ssh.exe cannot read (the target got 0 bytes and
-// rsync died with "connection unexpectedly closed"). Two cats turn the sockets into pipes ssh.exe can use; pipefail
-// keeps ssh's exit status. The input cat is a process substitution so the wrapper ends when ssh.exe does: rsync keeps
-// its end of the socket open until the shell exits, and a waited-for cat would never see EOF.
-// Resolve cat beside bash: a Git/Cygwin cat earlier on PATH cannot read another MSYS2 runtime's sockets.
+// rsyncRemoteShellArgument names native OpenSSH directly. An MSYS2 shell/cat
+// bridge can select Git's incompatible runtime and can deadlock binary transfers.
 // rsync splits the command on spaces and keeps a quoted argument whole, a quote inside doubled.
-func rsyncRemoteShellArgument(bash, ssh string) string {
-	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
-	return "--rsh=" + quote(bash) + ` -c 'set -o pipefail; cat="${BASH%/*}/cat"; "$0" "$@" < <("$cat") | "$cat"' ` + quote(ssh)
+func rsyncRemoteShellArgument(ssh string) string {
+	return "--rsh='" + strings.ReplaceAll(ssh, "'", "''") + "'"
 }
 
 // withDefaultEnvironment adds key=value unless the environment already sets key (any case, as on Windows).

@@ -15,20 +15,10 @@ import (
 	shlex "github.com/anmitsu/go-shlex"
 )
 
-func TestRsyncRemoteShellUsesOwnRuntime(t *testing.T) {
-	bash, err := exec.LookPath("bash")
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestRsyncRemoteShellPreservesBinaryStream(t *testing.T) {
 	cat, err := exec.LookPath("cat")
 	if err != nil {
 		t.Fatal(err)
-	}
-	runtime := t.TempDir()
-	for name, source := range map[string]string{"bash": bash, "cat": cat} {
-		if err := os.Symlink(source, filepath.Join(runtime, name)); err != nil {
-			t.Fatal(err)
-		}
 	}
 	foreign := t.TempDir()
 	if err := os.WriteFile(filepath.Join(foreign, "cat"), []byte("#!/bin/sh\nexit 42\n"), 0700); err != nil {
@@ -43,7 +33,7 @@ func TestRsyncRemoteShellUsesOwnRuntime(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			args, err := shlex.Split(strings.TrimPrefix(rsyncRemoteShellArgument(filepath.Join(runtime, "bash"), shell), "--rsh="), true)
+			args, err := shlex.Split(strings.TrimPrefix(rsyncRemoteShellArgument(shell), "--rsh="), true)
 			if err != nil {
 				t.Fatal(err)
 			}

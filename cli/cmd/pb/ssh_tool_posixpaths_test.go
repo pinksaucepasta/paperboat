@@ -46,11 +46,10 @@ func TestRsyncRemoteShellChosen(t *testing.T) {
 }
 
 func TestRsyncRemoteShellArgumentAndDefaultEnvironment(t *testing.T) {
-	const pipes = ` -c 'set -o pipefail; cat="${BASH%/*}/cat"; "$0" "$@" < <("$cat") | "$cat"' `
-	if got := rsyncRemoteShellArgument("/usr/bin/bash", "/c/Program Files/OpenSSH/ssh.exe"); got != "--rsh='/usr/bin/bash'"+pipes+"'/c/Program Files/OpenSSH/ssh.exe'" {
+	if got := rsyncRemoteShellArgument("/c/Program Files/OpenSSH/ssh.exe"); got != "--rsh="+"'/c/Program Files/OpenSSH/ssh.exe'" {
 		t.Fatalf("rsh = %q", got)
 	}
-	if got := rsyncRemoteShellArgument("/usr/bin/bash", "/c/it's/ssh"); got != "--rsh='/usr/bin/bash'"+pipes+"'/c/it''s/ssh'" {
+	if got := rsyncRemoteShellArgument("/c/it's/ssh"); got != "--rsh="+"'/c/it''s/ssh'" {
 		t.Fatalf("quoted rsh = %q", got)
 	}
 	got := withDefaultEnvironment([]string{"PATH=x"}, "MSYS2_ARG_CONV_EXCL", "*")
