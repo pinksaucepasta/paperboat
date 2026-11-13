@@ -1,0 +1,352 @@
+{
+  "check": "X-19-team-private-end",
+  "direction": "holder>shared target",
+  "versions": {
+    "rx19d-a": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-ac409910b\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580",
+    "rx19d-b": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-ac409910b\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580",
+    "rx19d-m": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-ac409910b\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580",
+    "rx19d-w": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-ac409910b\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+  },
+  "results": {
+    "M>L": {
+      "fixture": {
+        "team": "rx19d-team",
+        "owner": "rx19d-b",
+        "member": "rx19d-m",
+        "machine_id": "machine_2826abf5-4fe0-4ce8-a823-1f9b25dca514",
+        "origin_port": "38489",
+        "granted": [
+          "exec",
+          "private_access"
+        ]
+      },
+      "grant_revoke": {
+        "status": "PASS",
+        "seconds": 9.69,
+        "echoes": 17,
+        "flows": {
+          "raw": {
+            "reason": "EOF",
+            "echoes": 17
+          },
+          "access": {
+            "reason": "EOF",
+            "echoes": 17
+          }
+        },
+        "address": "127.100.0.6",
+        "refusal": "{\"schema_version\":\"1.0\",\"ok\":false,\"error\":{\"code\":\"operation_refused\",\"category\":\"conflict\",\"message\":\"You do not have private access to this machine in this team. Ask a team owner or admin to give you its private_access permission.\",\"retryable\":false,\"state_changed\":false,\"outcome_uncertain\":false,\"support_reference\":\"support_c74ae46b-7bb3-4e45-ae4a-000fa9b2a3ce\"}}",
+        "raw_refusal": {
+          "phase": "connect",
+          "outcome": "timeout"
+        }
+      },
+      "setting_off": {
+        "status": "PASS",
+        "seconds": 5.41,
+        "echoes": 11,
+        "flows": {
+          "raw": {
+            "reason": "EOF",
+            "echoes": 11
+          },
+          "access": {
+            "reason": "EOF",
+            "echoes": 11
+          }
+        },
+        "address": "127.100.0.6",
+        "refusal": "{\"schema_version\":\"1.0\",\"ok\":false,\"error\":{\"code\":\"operation_refused\",\"category\":\"conflict\",\"message\":\"Private access is turned off for this team, so its machines' ports are not reachable. A team owner or admin can turn it on in the team settings.\",\"retryable\":false,\"state_changed\":false,\"outcome_uncertain\":false,\"support_reference\":\"support_25eafbf8-9320-43a7-9fbf-da3cf8acadef\"}}",
+        "raw_refusal": {
+          "phase": "connect",
+          "outcome": "timeout"
+        }
+      }
+    },
+    "L>W": {
+      "fixture": {
+        "team": "rx19d-team",
+        "owner": "rx19d-w",
+        "member": "rx19d-a",
+        "machine_id": "machine_7a27ef1c-f23c-4902-8664-6ffca4a31037",
+        "origin_port": "31407",
+        "granted": [
+          "exec",
+          "private_access"
+        ]
+      },
+      "grant_revoke": {
+        "status": "PASS",
+        "seconds": 4.21,
+        "echoes": 7,
+        "flows": {
+          "access": {
+            "reason": "EOF",
+            "echoes": 7
+          },
+          "raw": {
+            "reason": "EOF",
+            "echoes": 7
+          }
+        },
+        "address": "127.100.0.9",
+        "refusal": "{\"schema_version\":\"1.0\",\"ok\":false,\"error\":{\"code\":\"operation_refused\",\"category\":\"conflict\",\"message\":\"You do not have private access to this machine in this team. Ask a team owner or admin to give you its private_access permission.\",\"retryable\":false,\"state_changed\":false,\"outcome_uncertain\":false,\"support_reference\":\"support_33374a35-31b9-4079-bc65-85dd33fb2673\"}}",
+        "raw_refusal": {
+          "phase": "connect",
+          "outcome": "ConnectionRefusedError"
+        }
+      },
+      "setting_off": {
+        "status": "PASS",
+        "seconds": 2.83,
+        "echoes": 6,
+        "flows": {
+          "access": {
+            "reason": "EOF",
+            "echoes": 6
+          },
+          "raw": {
+            "reason": "EOF",
+            "echoes": 6
+          }
+        },
+        "address": "127.100.0.9",
+        "refusal": "{\"schema_version\":\"1.0\",\"ok\":false,\"error\":{\"code\":\"operation_refused\",\"category\":\"conflict\",\"message\":\"Private access is turned off for this team, so its machines' ports are not reachable. A team owner or admin can turn it on in the team settings.\",\"retryable\":false,\"state_changed\":false,\"outcome_uncertain\":false,\"support_reference\":\"support_2e435ac0-4485-4fa3-8459-e43ac2f3c0c2\"}}",
+        "raw_refusal": {
+          "phase": "connect",
+          "outcome": "ConnectionRefusedError"
+        }
+      }
+    },
+    "W>L": {
+      "fixture": {
+        "team": "rx19d-team",
+        "owner": "rx19d-a",
+        "member": "rx19d-w",
+        "machine_id": "machine_43b0d5df-dbaa-42b5-be8b-981c393cff8e",
+        "origin_port": "34567",
+        "granted": [
+          "exec",
+          "private_access"
+        ]
+      },
+      "grant_revoke": {
+        "status": "PASS",
+        "seconds": 10.95,
+        "echoes": 16,
+        "flows": {
+          "raw": {
+            "reason": "EOF",
+            "echoes": 16
+          },
+          "access": {
+            "reason": "EOF",
+            "echoes": 17
+          }
+        },
+        "address": "127.100.0.5",
+        "refusal": "{\"schema_version\":\"1.0\",\"ok\":false,\"error\":{\"code\":\"operation_refused\",\"category\":\"conflict\",\"message\":\"You do not have private access to this machine in this team. Ask a team owner or admin to give you its private_access permission.\",\"retryable\":false,\"state_changed\":false,\"outcome_uncertain\":false,\"support_reference\":\"support_10048d2b-751a-4fc3-9e5e-cdd5d49861fe\"}}",
+        "raw_refusal": {
+          "phase": "connect",
+          "outcome": "permission",
+          "winerror": 10013
+        }
+      },
+      "setting_off": {
+        "status": "PASS",
+        "seconds": 5.69,
+        "echoes": 6,
+        "flows": {
+          "access": {
+            "reason": "EOF",
+            "echoes": 6
+          },
+          "raw": {
+            "reason": "EOF",
+            "echoes": 6
+          }
+        },
+        "address": "127.100.0.5",
+        "refusal": "{\"schema_version\":\"1.0\",\"ok\":false,\"error\":{\"code\":\"operation_refused\",\"category\":\"conflict\",\"message\":\"Private access is turned off for this team, so its machines' ports are not reachable. A team owner or admin can turn it on in the team settings.\",\"retryable\":false,\"state_changed\":false,\"outcome_uncertain\":false,\"support_reference\":\"support_d9bae592-ae7b-4b83-81f4-d4a5ab21a2bc\"}}",
+        "raw_refusal": {
+          "phase": "connect",
+          "outcome": "permission",
+          "winerror": 10013
+        }
+      }
+    },
+    "M>W": {
+      "fixture": {
+        "team": "rx19d-team",
+        "owner": "rx19d-w",
+        "member": "rx19d-m",
+        "machine_id": "machine_7a27ef1c-f23c-4902-8664-6ffca4a31037",
+        "origin_port": "29748",
+        "granted": [
+          "exec",
+          "private_access"
+        ]
+      },
+      "grant_revoke": {
+        "status": "PASS",
+        "seconds": 9.98,
+        "echoes": 27,
+        "flows": {
+          "raw": {
+            "reason": "EOF",
+            "echoes": 27
+          },
+          "access": {
+            "reason": "EOF",
+            "echoes": 27
+          }
+        },
+        "address": "127.100.0.8",
+        "refusal": "{\"schema_version\":\"1.0\",\"ok\":false,\"error\":{\"code\":\"operation_refused\",\"category\":\"conflict\",\"message\":\"You do not have private access to this machine in this team. Ask a team owner or admin to give you its private_access permission.\",\"retryable\":false,\"state_changed\":false,\"outcome_uncertain\":false,\"support_reference\":\"support_d4266edf-a5d3-417a-8642-2ddc7a80c244\"}}",
+        "raw_refusal": {
+          "phase": "connect",
+          "outcome": "timeout"
+        }
+      },
+      "setting_off": {
+        "status": "PASS",
+        "seconds": 5.24,
+        "echoes": 8,
+        "flows": {
+          "access": {
+            "reason": "EOF",
+            "echoes": 8
+          },
+          "raw": {
+            "reason": "EOF",
+            "echoes": 8
+          }
+        },
+        "address": "127.100.0.8",
+        "refusal": "{\"schema_version\":\"1.0\",\"ok\":false,\"error\":{\"code\":\"operation_refused\",\"category\":\"conflict\",\"message\":\"Private access is turned off for this team, so its machines' ports are not reachable. A team owner or admin can turn it on in the team settings.\",\"retryable\":false,\"state_changed\":false,\"outcome_uncertain\":false,\"support_reference\":\"support_891ad231-a1b5-4b82-bbba-3643023ff998\"}}",
+        "raw_refusal": {
+          "phase": "connect",
+          "outcome": "timeout"
+        }
+      }
+    },
+    "W>M": {
+      "fixture": {
+        "team": "rx19d-team",
+        "owner": "rx19d-m",
+        "member": "rx19d-w",
+        "machine_id": "machine_b206536c-475f-41ca-8a4b-7922f978e308",
+        "origin_port": "30519",
+        "granted": [
+          "exec",
+          "private_access"
+        ]
+      },
+      "grant_revoke": {
+        "status": "PASS",
+        "seconds": 10.65,
+        "echoes": 44,
+        "flows": {
+          "raw": {
+            "reason": "EOF",
+            "echoes": 44
+          },
+          "access": {
+            "reason": "EOF",
+            "echoes": 44
+          }
+        },
+        "address": "127.100.0.4",
+        "refusal": "{\"schema_version\":\"1.0\",\"ok\":false,\"error\":{\"code\":\"operation_refused\",\"category\":\"conflict\",\"message\":\"You do not have private access to this machine in this team. Ask a team owner or admin to give you its private_access permission.\",\"retryable\":false,\"state_changed\":false,\"outcome_uncertain\":false,\"support_reference\":\"support_46434742-bed4-45b2-88fa-ff9f134859e9\"}}",
+        "raw_refusal": {
+          "phase": "connect",
+          "outcome": "permission",
+          "winerror": 10013
+        }
+      },
+      "setting_off": {
+        "status": "PASS",
+        "seconds": 5.8,
+        "echoes": 18,
+        "flows": {
+          "access": {
+            "reason": "EOF",
+            "echoes": 18
+          },
+          "raw": {
+            "reason": "EOF",
+            "echoes": 18
+          }
+        },
+        "address": "127.100.0.4",
+        "refusal": "{\"schema_version\":\"1.0\",\"ok\":false,\"error\":{\"code\":\"operation_refused\",\"category\":\"conflict\",\"message\":\"Private access is turned off for this team, so its machines' ports are not reachable. A team owner or admin can turn it on in the team settings.\",\"retryable\":false,\"state_changed\":false,\"outcome_uncertain\":false,\"support_reference\":\"support_5b10cc3e-cef2-454c-b789-f6007ee89d7d\"}}",
+        "raw_refusal": {
+          "phase": "connect",
+          "outcome": "permission",
+          "winerror": 10013
+        }
+      }
+    },
+    "L>M": {
+      "fixture": {
+        "team": "rx19d-team",
+        "owner": "rx19d-m",
+        "member": "rx19d-b",
+        "machine_id": "machine_b206536c-475f-41ca-8a4b-7922f978e308",
+        "origin_port": "26706",
+        "granted": [
+          "exec",
+          "private_access"
+        ]
+      },
+      "grant_revoke": {
+        "status": "PASS",
+        "seconds": 4.31,
+        "echoes": 10,
+        "flows": {
+          "raw": {
+            "reason": "EOF",
+            "echoes": 10
+          },
+          "access": {
+            "reason": "EOF",
+            "echoes": 10
+          }
+        },
+        "address": "127.100.0.4",
+        "refusal": "{\"schema_version\":\"1.0\",\"ok\":false,\"error\":{\"code\":\"operation_refused\",\"category\":\"conflict\",\"message\":\"You do not have private access to this machine in this team. Ask a team owner or admin to give you its private_access permission.\",\"retryable\":false,\"state_changed\":false,\"outcome_uncertain\":false,\"support_reference\":\"support_160f8b23-1e68-4218-95cf-aef3b0891119\"}}"
+      },
+      "setting_off": {
+        "status": "PASS",
+        "seconds": 2.71,
+        "echoes": 5,
+        "flows": {
+          "access": {
+            "reason": "EOF",
+            "echoes": 5
+          },
+          "raw": {
+            "reason": "EOF",
+            "echoes": 5
+          }
+        },
+        "address": "127.100.0.4",
+        "refusal": "{\"schema_version\":\"1.0\",\"ok\":false,\"error\":{\"code\":\"operation_refused\",\"category\":\"conflict\",\"message\":\"Private access is turned off for this team, so its machines' ports are not reachable. A team owner or admin can turn it on in the team settings.\",\"retryable\":false,\"state_changed\":false,\"outcome_uncertain\":false,\"support_reference\":\"support_8fd0d243-62b6-416a-b60f-dadae8aacb3a\"}}"
+      }
+    }
+  },
+  "build_commit": "ac409910b",
+  "harness_commit": "de44c7516",
+  "cleanup": "Mac and Windows uninstalled; four exact own machine IDs revoked; team rx19d-team deleted and test entitlement removed; anvit rx19d-a/b containers deleted; macpool-3 released; winpool-5 stopped.",
+  "notes": [
+    "holder>shared target; seconds conservatively bound both transports, measured before mutation until both EOF/reset observations",
+    "Mac fresh SYN is denied by PF drop (connect timeout only); Windows by WSAEACCES 10013; Linux by rejection/EOF",
+    "L>M from first run; remaining pairs from corrected checkpointed run; earlier incomplete/terminated attempts excluded",
+    "First account token candidate had expired; replaced with a valid controlled test-account token. No credentials recorded.",
+    "No product bug reproduced. Daemon resolve readiness prerequisite succeeded; no product code changed."
+  ],
+  "validation": {
+    "focused": "python3 -m unittest discover -s tools/device-smoke -p test_xplat_team_private_end.py (2 PASS)",
+    "ci": "https://github.com/pinksaucepasta/paperboat/actions/runs/43515822853 (smoke PASS)"
+  }
+}
