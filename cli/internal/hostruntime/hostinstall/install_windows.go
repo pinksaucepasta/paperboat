@@ -1666,6 +1666,9 @@ func PrepareWindowsSSHGeneration(ctx context.Context, request Request) (windowso
 		}
 	} else if err != nil {
 		return windowsopenssh.GenerationDescriptor{}, err
+	} else if _, err := windowsopenssh.EnsureHostKey(ctx, config); err != nil {
+		// Repair of an installation whose host key files were deleted: recreate them as install does.
+		return windowsopenssh.GenerationDescriptor{}, err
 	}
 	return windowsopenssh.PrepareGeneration(ctx, windowsopenssh.GenerationRequest{OwnerSID: request.OwnerSID, Source: request.Source, Executable: pinned})
 }
