@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 )
 
@@ -351,7 +352,7 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 					// broken installation: "repair the installation" cannot fix it (pbvm2, 2026-11-09).
 					signedOutSnapshot(&desired)
 				case controlPlaneUnreachable(reconcileErr, i.apiHost()):
-					desired.Health = controlPlaneUnavailableHealth(current, now)
+					desired.Health = controlPlaneUnavailableHealth(current, now, reconcileErr)
 				default:
 					item := healthSince(current, now, localapi.HealthItem{
 						Code:     "local_access_unavailable",
@@ -368,7 +369,7 @@ func (i *Inventory) Refresh(ctx context.Context) (refreshErr error) {
 			}
 		} else {
 			desired.DaemonState = "degraded"
-			desired.Health = controlPlaneUnavailableHealth(current, now)
+			desired.Health = controlPlaneUnavailableHealth(current, now, sourceErr)
 			if !controlPlaneUnreachable(sourceErr, i.apiHost()) {
 				// A local step of the listing failed (configuration, credentials, alias validation), not the server.
 				desired.Health = []localapi.HealthItem{healthSince(current, now, localapi.HealthItem{
@@ -421,13 +422,19 @@ func (i *Inventory) apiHost() string {
 	return ""
 }
 
-func controlPlaneUnavailableHealth(current *localapi.Snapshot, now time.Time) []localapi.HealthItem {
-	return []localapi.HealthItem{healthSince(current, now, localapi.HealthItem{
+func controlPlaneUnavailableHealth(current *localapi.Snapshot, now time.Time, cause error) []localapi.HealthItem {
+	item := localapi.HealthItem{
 		Code:     "control_plane_unavailable",
 		Severity: "error",
 		Title:    "Control plane is unavailable",
 		Recovery: "Check network access and Paperboat authentication",
-	})}
+	}
+	var proxy *httptransport.ProxyError
+	if errors.As(cause, &proxy) && proxy.Failure == httptransport.ProxyUnreachable {
+		item.Title = "Control plane is unavailable: the configured proxy did not accept the connection"
+		item.Recovery = "Start the proxy, or remove PAPERBOAT_HTTPS_PROXY (service environment) and the system proxy setting, then restart the daemon"
+	}
+	return []localapi.HealthItem{healthSince(current, now, item)}
 }
 
 // healthSince completes a single health item, keeping when it broke if the current snapshot already

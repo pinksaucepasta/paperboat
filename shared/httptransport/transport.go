@@ -24,6 +24,8 @@ const (
 	ProxyInvalid ProxyFailure = iota + 1
 	ProxyAuthenticationRequired
 	ProxyAutomaticConfigurationUnsupported
+	// ProxyUnreachable is a configured proxy that refused or never answered the connection.
+	ProxyUnreachable
 )
 
 type ProxyError struct {
@@ -42,6 +44,8 @@ func (e *ProxyError) Error() string {
 		return "HTTP proxy authentication is required"
 	case ProxyAutomaticConfigurationUnsupported:
 		return "automatic HTTP proxy configuration is unsupported; configure an explicit credential-free proxy"
+	case ProxyUnreachable:
+		return "the configured HTTP proxy is unreachable"
 	default:
 		return "HTTP proxy failure"
 	}
@@ -162,6 +166,10 @@ func (t *Transport) RoundTrip(request *http.Request) (*http.Response, error) {
 		response, err = base.RoundTrip(retry)
 	}
 	if err != nil {
+		var op *net.OpError
+		if errors.As(err, &op) && op.Op == "proxyconnect" { // Go's name for a failed connection to the proxy itself
+			return nil, &ProxyError{Failure: ProxyUnreachable, Cause: err}
+		}
 		return nil, err
 	}
 	if response.StatusCode == http.StatusProxyAuthRequired {

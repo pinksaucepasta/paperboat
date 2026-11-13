@@ -84,6 +84,28 @@ func TestPACOnlyAllowsOnlyExplicitNoProxyDestinations(t *testing.T) {
 	}
 }
 
+func TestTransportReturnsTypedProxyUnreachableFailure(t *testing.T) {
+	closed, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := closed.Addr().String()
+	_ = closed.Close() // nothing listens here any more: the proxy refuses the connection
+	config := DevelopmentConfig()
+	config.ProxySource = StaticProxySource{Value: ProxySnapshot{HTTPSProxy: "http://" + address}}
+	transport, err := New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer transport.CloseIdleConnections()
+	request, _ := http.NewRequest(http.MethodGet, "https://remote.test/resource", nil)
+	_, err = transport.RoundTrip(request)
+	var proxyErr *ProxyError
+	if !errors.As(err, &proxyErr) || proxyErr.Failure != ProxyUnreachable {
+		t.Fatalf("a refused proxy was not typed: %v", err)
+	}
+}
+
 func TestTransportReturnsTypedProxyAuthenticationFailure(t *testing.T) {
 	var calls atomic.Uint32
 	proxy := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {

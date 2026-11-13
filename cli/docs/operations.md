@@ -218,7 +218,7 @@ native-editor compatibility and full editor recovery are not claimed.
 
 Machine runtime services may set `PAPERBOAT_HTTP_PROXY`, `PAPERBOAT_HTTPS_PROXY`, and
 `PAPERBOAT_NO_PROXY` as administrator policy. These settings take precedence over the
-standard process environment and native macOS proxy settings for all runtime-owned
+standard process environment and native macOS and Windows (WinINET, WinHTTP) proxy settings for all runtime-owned
 control, WebSocket, update, artifact, and configuration traffic. Proxy URLs must use
 `http` or `https`, contain a host, and contain no credentials, path, query, or fragment;
 invalid policy prevents the runtime from starting. Paperboat never downloads or executes

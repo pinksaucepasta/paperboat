@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/machineevents/eventstest"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
+	"github.com/pinksaucepasta/paperboat/shared/httptransport"
 )
 
 type machineResult struct {
@@ -739,6 +740,18 @@ func TestInventoryReconcileDoesNotInheritTheListingsTimeBudget(t *testing.T) {
 // sent people to their local settings and made an update treat a slow server as a broken installation
 // and roll back at once (lanel-a, 2026-10-23). It reports the control plane instead; any other reconcile
 // failure stays local.
+func TestControlPlaneUnavailableNamesAnUnreachableProxy(t *testing.T) {
+	proxy := &url.Error{Op: "Get", URL: "https://api.example.test/v1/me", Err: &httptransport.ProxyError{Failure: httptransport.ProxyUnreachable}}
+	named := controlPlaneUnavailableHealth(nil, time.Unix(1, 0), fmt.Errorf("refresh: %w", proxy))[0]
+	plain := controlPlaneUnavailableHealth(nil, time.Unix(1, 0), &url.Error{Op: "Get", URL: "https://api.example.test/v1/me", Err: context.DeadlineExceeded})[0]
+	if named.Code != "control_plane_unavailable" || !strings.Contains(named.Title, "proxy") || !strings.Contains(named.Recovery, "PAPERBOAT_HTTPS_PROXY") {
+		t.Fatalf("an unreachable proxy is not named: %+v", named)
+	}
+	if strings.Contains(plain.Title, "proxy") || plain.Code != named.Code {
+		t.Fatalf("a plain outage mentions a proxy: %+v", plain)
+	}
+}
+
 func TestInventoryReconcileFailureCausedByTheServerReportsTheControlPlane(t *testing.T) {
 	for name, test := range map[string]struct {
 		err  error

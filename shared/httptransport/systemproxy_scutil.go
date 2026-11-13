@@ -87,6 +87,11 @@ func parseScutilProxy(output string) ProxySnapshot {
 	if result.HTTPProxy != "" || result.HTTPSProxy != "" {
 		result.PACOnly = false
 	}
+	return withGeneration(result)
+}
+
+// withGeneration stamps the snapshot with a hash of its settings, so a changed setting rebuilds the transport.
+func withGeneration(result ProxySnapshot) ProxySnapshot {
 	hash := fnv.New64a()
 	_, _ = hash.Write([]byte(result.HTTPProxy + "\x00" + result.HTTPSProxy + "\x00" + result.NoProxy + "\x00" + strconv.FormatBool(result.ExcludeSimpleHosts) + "\x00" + strconv.FormatBool(result.PACOnly)))
 	result.Generation = hash.Sum64()

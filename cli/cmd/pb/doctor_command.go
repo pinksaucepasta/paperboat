@@ -755,6 +755,11 @@ func doctorProxyDiagnosis(err error) (proxyDoctorDiagnosis, bool) {
 			State:    "authentication_required",
 			Recovery: "The configured proxy requires authentication, which Paperboat does not accept in proxy URLs. Configure a credential-free explicit proxy, then retry `pb doctor`.",
 		}, true
+	case httptransport.ProxyUnreachable:
+		return proxyDoctorDiagnosis{
+			State:    "unreachable",
+			Recovery: "The configured proxy did not accept the connection. Start it, or remove HTTPS_PROXY (PAPERBOAT_HTTPS_PROXY for a managed service) and the system proxy setting, then retry `pb doctor`.",
+		}, true
 	case httptransport.ProxyInvalid:
 		return proxyDoctorDiagnosis{
 			State:    "invalid_configuration",

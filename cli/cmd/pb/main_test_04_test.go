@@ -623,6 +623,7 @@ func TestDoctorProxyDiagnosisIsTypedAndActionable(t *testing.T) {
 		"pac":            {httptransport.ProxyAutomaticConfigurationUnsupported, "pac_unsupported", "HTTPS_PROXY"},
 		"authentication": {httptransport.ProxyAuthenticationRequired, "authentication_required", "credential-free"},
 		"invalid":        {httptransport.ProxyInvalid, "invalid_configuration", "no path"},
+		"unreachable":    {httptransport.ProxyUnreachable, "unreachable", "did not accept the connection"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			diagnosis, ok := doctorProxyDiagnosis(fmt.Errorf("backend: %w", &httptransport.ProxyError{Failure: test.failure}))
