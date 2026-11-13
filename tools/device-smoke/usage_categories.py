@@ -224,10 +224,30 @@ def terminal(target, name, workspace='personal'):
 SSH_STEPS = ('ssh', 'scp', 'rsync', 'sftp')
 
 
+FETCH_BLOB = r'''
+$ok = $false
+for ($i = 0; $i -lt 30 -and -not $ok; $i++) {
+  Start-Sleep 2
+  try { $r = Invoke-WebRequest -UseBasicParsing -Uri http://127.0.0.1:18081/blob.bin -TimeoutSec 60; if ($r.RawContentLength -ge $req.size) { $ok = $true } } catch {}
+}
+if (-not $ok) { throw 'private access never served the blob' }
+'''
+
+
 def private_access(target, port, workspace):
     """One fetch of /blob.bin through `pb access machine` (private TCP to PORT on target, over the relay)."""
-    forward = subprocess.Popen([str(PB), *(['--workspace', workspace] if workspace != 'personal' else []), 'access', 'machine', target,
-                                '--port', str(port), '--listen', '127.0.0.1:18081'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    arguments = [*(['--workspace', workspace] if workspace != 'personal' else []), 'access', 'machine', target,
+                 '--port', str(port), '--listen', '127.0.0.1:18081']
+    if DEVICE:
+        # The forward and the fetch both run on the Windows device: its loopback is where pb listens.
+        with DEVICE.temp_dir('pb-access') as directory:
+            pid = DEVICE.start([DEVICE.pb_exe, *arguments], directory)
+            try:
+                DEVICE.ps('private access fetch', FETCH_BLOB, timeout=240, size=SIZE)
+            finally:
+                DEVICE.stop(pid)
+        return
+    forward = subprocess.Popen([str(PB), *arguments], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         for _ in range(30):
             time.sleep(2)
