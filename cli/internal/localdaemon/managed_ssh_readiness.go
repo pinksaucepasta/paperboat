@@ -31,9 +31,10 @@ func reportManagedSSHStartup(ctx context.Context, source MachineSource, recorder
 	// Do not record startupErr: it can contain operating-system or credential
 	// details. The typed code and recovery action are sufficient for support.
 	// The event comes first: whoever sees the machine degraded reads the diagnostics next.
-	_ = recorder.RecordWithSupportReference("ssh", "managed_startup", "warning", supportref.FromContext(ctx), map[string]string{
-		"outcome": "degraded",
-		"reason":  code,
-	})
+	fields := map[string]string{"outcome": "degraded", "reason": code}
+	if refusal := managedSSHServerRefusal(startupErr); refusal != "" {
+		fields["server_code"] = refusal
+	}
+	_ = recorder.RecordWithSupportReference("ssh", "managed_startup", "warning", supportref.FromContext(ctx), fields)
 	readiness.SetManagedSSHReadiness(false, code)
 }

@@ -44,6 +44,8 @@ func TestManagedSSHHealthCodeUsesOnlyGenuineAuthenticationRejections(t *testing.
 		{name: "unauthorized response", err: &api.APIError{Status: http.StatusUnauthorized}, want: "ssh_key_rejected"},
 		{name: "forbidden response", err: &api.APIError{Status: http.StatusForbidden}, want: "ssh_key_rejected"},
 		{name: "server failure", err: &api.APIError{Status: http.StatusBadGateway}, want: "ssh_target_not_ready"},
+		// A 409 from key registration was hidden as "target not ready" on every fleet machine (FIX-SSHREG).
+		{name: "server refusal", err: managedSSHAuthorityError(&api.APIError{Status: http.StatusConflict, Code: "operation_conflict"}), want: "ssh_server_refused"},
 		{name: "filesystem failure", err: fs.ErrPermission, want: "ssh_target_not_ready"},
 		{name: "unknown failure", err: operational, want: "ssh_target_not_ready"},
 		{name: "rejection joined with operation failure", err: errors.Join(&api.APIError{Status: http.StatusUnauthorized}, operational), want: "ssh_target_not_ready"},
@@ -64,6 +66,16 @@ type managedSSHCyclicError struct{}
 func (*managedSSHCyclicError) Error() string { return "cycle" }
 
 func (e *managedSSHCyclicError) Unwrap() error { return e }
+
+func TestManagedSSHServerRefusalNamesServerCode(t *testing.T) {
+	err := managedSSHAuthorityError(fmt.Errorf("register: %w", &api.APIError{Status: http.StatusConflict, Code: "operation_conflict"}))
+	if got := managedSSHServerRefusal(err); got != "operation_conflict" {
+		t.Fatalf("refusal = %q", got)
+	}
+	if got := managedSSHServerRefusal(&api.APIError{Status: http.StatusBadGateway, Code: "unavailable"}); got != "" {
+		t.Fatalf("5xx refusal = %q", got)
+	}
+}
 
 func TestManagedSSHHealthCodeBoundsCyclicCause(t *testing.T) {
 	if got := ManagedSSHHealthCode(&managedSSHCyclicError{}); got != "ssh_target_not_ready" {

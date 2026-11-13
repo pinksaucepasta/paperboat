@@ -3,6 +3,7 @@ package localdaemon
 import (
 	"context"
 	"reflect"
+	"strconv"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
@@ -44,8 +45,32 @@ func managedSSHHealthCode(err error) string {
 	if hasCause(err, func(current error) bool { _, ok := current.(*managedssh.UnsafeSSHPathError); return ok }) {
 		return managedSSHUnsafeDirectoryCode
 	}
+	if managedSSHServerRefusal(err) != "" {
+		return managedSSHServerRefusedCode
+	}
 	return "ssh_target_not_ready"
 }
+
+// managedSSHServerRefusal is the server's error code when it answered a managed SSH request with a 4xx other
+// than 401/403 (authentication, see managedSSHAuthenticationRejection), else "".
+func managedSSHServerRefusal(err error) string {
+	code := ""
+	hasCause(err, func(current error) bool {
+		response, ok := current.(*api.APIError)
+		if ok && response != nil && response.Status >= 400 && response.Status < 500 && response.Status != 401 && response.Status != 403 {
+			code = response.Code
+			if code == "" {
+				code = "http_" + strconv.Itoa(response.Status)
+			}
+		}
+		return code != ""
+	})
+	return code
+}
+
+// managedSSHServerRefusedCode: the server refused this computer's managed SSH registration or configuration
+// request (the diagnostics event names the server's code). Retrying unchanged repeats it.
+const managedSSHServerRefusedCode = "ssh_server_refused"
 
 // hasAPIErrorCode walks at most 16 causes (errors.As would loop on a cyclic chain, see BoundsCyclicCause).
 func hasAPIErrorCode(err error, code string) bool {

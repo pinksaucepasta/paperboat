@@ -91,6 +91,14 @@ func (r *SQLRepository) RegisterClient(ctx context.Context, request RegisterClie
 			return err
 		}
 		active, err := q.GetActiveManagedSSHClientKeyForUpdate(ctx, request.CLIClientSessionID)
+		if err == nil && active.PublicKey != proposed.PublicKey {
+			// The session's endpoint replaced its key (lost local secret, key scope change): its own login
+			// moves to the new key, as a logout + login would. Tailscale rotates node keys the same way.
+			if _, err := q.RevokeManagedSSHClientKey(ctx, dbsqlc.RevokeManagedSSHClientKeyParams{RevokedAt: sql.NullTime{Time: request.Now, Valid: true}, RevocationReason: sql.NullString{String: "key_rotated", Valid: true}, Fingerprint: active.Fingerprint}); err != nil {
+				return err
+			}
+			err = pgx.ErrNoRows
+		}
 		if err == nil {
 			if !sameClientKey(active, proposed) {
 				return ErrConflict

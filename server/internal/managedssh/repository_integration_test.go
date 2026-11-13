@@ -596,4 +596,14 @@ func TestSQLRepositoryManagedSSHIdleClientSessionsDoNotCount(t *testing.T) {
 	if err != nil || len(set.Keys) != 1 {
 		t.Fatalf("keys after fresh registration=%d err=%v", len(set.Keys), err)
 	}
+	// The same login registering another key (an upgrade moved the local key scope) replaces its old one
+	// instead of answering operation_conflict for the life of the session (FIX-SSHREG, fleet 2026-11-13).
+	rotated, err := service.RegisterClient(ctx, RegisterClientRequest{OperationID: "operation_idle_rotate_" + suffix, UserID: userID, CLIClientSessionID: fresh, PublicKey: publicLine(t, "ed25519"), Now: now.Add(time.Second)})
+	if err != nil {
+		t.Fatalf("same-session key rotation: %v", err)
+	}
+	set, err = service.ListClientKeys(ctx, ListClientKeysRequest{ActorUserID: userID, UserMachineID: machineID, MachineGeneration: 1})
+	if err != nil || len(set.Keys) != 1 || set.Keys[0].Fingerprint != rotated.Fingerprint {
+		t.Fatalf("keys after rotation=%+v err=%v", set.Keys, err)
+	}
 }

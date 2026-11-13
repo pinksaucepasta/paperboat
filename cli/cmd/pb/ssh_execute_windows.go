@@ -73,7 +73,7 @@ func executeManagedSSH(cobraCommand *cobra.Command, ctx *command.Context, machin
 		if err != nil {
 			return err
 		}
-		identity, err = store.ManagedSSHIdentity(d.cfg.ServerURL, profile.CLIClientSessionID)
+		identity, err = store.ManagedSSHIdentity(d.cfg.ServerURL, profile.Account.ID)
 		if err != nil {
 			return err
 		}

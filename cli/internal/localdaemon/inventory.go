@@ -543,6 +543,10 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 				status.Health[0].Title = "This computer cannot use managed SSH: the account's limit of " + strconv.Itoa(wire.MaxClientKeys) + " signed-in computers using managed SSH is reached"
 				status.Health[0].Recovery = "Sign out on a computer you no longer use (pb logout there) or revoke it (pb machine revoke <machine>), then retry"
 			}
+			if code == managedSSHServerRefusedCode {
+				status.Health[0].Title = "Managed SSH is not ready: the server refused this computer's managed SSH request"
+				status.Health[0].Recovery = "Run pb ssh doctor <machine>; if it repeats, run pb logout and pb login, then pb bugreport --upload"
+			}
 			if code == managedSSHUnsafeDirectoryCode {
 				status.Health[0].Title = "This computer cannot use managed SSH: its .ssh folder or config is owned by another account or writable by other users"
 				status.Health[0].Recovery = "Run pb ssh doctor <machine>: it names the folder or file, the account at fault and the icacls commands that fix it"

@@ -40,7 +40,7 @@ func actionSSHDoctor(command *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	identity, err := store.ManagedSSHIdentity(cfg.ServerURL, profile.CLIClientSessionID)
+	identity, err := store.ManagedSSHIdentity(cfg.ServerURL, profile.Account.ID)
 	if err != nil {
 		return err
 	}
