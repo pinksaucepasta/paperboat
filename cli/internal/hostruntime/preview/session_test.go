@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -719,5 +720,20 @@ func TestSessionAcceptsEndedLeaseAsTerminal(t *testing.T) {
 	ended.State = "ready"
 	if err := validateSessionLease(ended, session.config, time.Now()); !errors.Is(err, ErrSessionInvalid) {
 		t.Fatalf("ended ready lease accepted: %v", err)
+	}
+}
+
+func TestRenewalRetriesNetworkFailuresThatAreNotTimeouts(t *testing.T) {
+	// a PC just woken from sleep: the dial or DNS lookup fails at once (X-26: the preview lease was lost after hibernation)
+	for name, err := range map[string]error{
+		"unreachable": &url.Error{Op: "Post", URL: "https://api.example.test", Err: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("network is unreachable")}},
+		"dns":         &net.DNSError{Err: "no such host", Name: "api.example.test", IsNotFound: true},
+	} {
+		if !retryableLeaseError(err) {
+			t.Fatalf("%s: a network failure during renewal was treated as lease loss", name)
+		}
+	}
+	if retryableLeaseError(errors.New("lease is terminal")) {
+		t.Fatal("a non-network renewal failure was retried")
 	}
 }

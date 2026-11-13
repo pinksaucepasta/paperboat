@@ -630,8 +630,10 @@ func retryableLeaseError(err error) bool {
 	if errors.As(err, &retryable) {
 		return retryable.Retryable()
 	}
+	// Any network failure, not only a timeout: a PC just woken from sleep fails its first renewals with "network is
+	// unreachable" or a DNS error, and giving up there loses the lease for good (X-26).
 	var networkErr net.Error
-	return errors.As(err, &networkErr) && networkErr.Timeout()
+	return errors.As(err, &networkErr)
 }
 
 func reconnectDelay(initial, maximum time.Duration, attempt int) time.Duration {
