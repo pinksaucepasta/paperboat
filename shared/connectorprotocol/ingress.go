@@ -77,8 +77,8 @@ const (
 	// so both edges logged a control failure) and a slow answer beats a counted failure. The edge keeps serving the
 	// last decisions meanwhile.
 	IngressFetchTimeout = 10 * time.Second
-	TunnelEphemeral          = "ephemeral"
-	TunnelDurable            = "durable"
+	TunnelEphemeral     = "ephemeral"
+	TunnelDurable       = "durable"
 )
 
 var ErrIngressDenied = errors.New("connector ingress authority denied")
