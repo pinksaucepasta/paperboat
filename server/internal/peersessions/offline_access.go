@@ -63,12 +63,16 @@ func offlineAccessPeers(ctx context.Context, tx *sql.Tx, self networkBinding, no
  WHERE c.state='active' AND c.revoked_at IS NULL AND c.api_token_id IS NULL
  GROUP BY c.id,c.user_id,c.last_used_at
  ORDER BY c.last_used_at DESC NULLS LAST,c.id LIMIT $3
+), allowed AS MATERIALIZED (
+ -- A capability is decided per account, not per endpoint: the policy functions run once per (account, capability)
+ -- instead of once per CLI endpoint (a team-shared host took 1.5 s of CPU per document with 66 endpoints).
+ SELECT u.user_id,cap.network FROM (SELECT DISTINCT user_id FROM endpoints) u CROSS JOIN host h
+ CROSS JOIN unnest($4::text[],$5::text[]) AS cap(policy,network)
+ WHERE (u.user_id=h.user_id AND paperboat.machine_capability_allowed(u.user_id,h.id,cap.policy))
+  OR (NOT cap.network=ANY($6::text[]) AND EXISTS(SELECT 1 FROM host_teams ht WHERE paperboat.team_machine_capability_allowed(u.user_id,ht.team_id,h.id,cap.policy)))
 )
-SELECT e.id,e.user_id,array_to_json(array_agg(cap.network ORDER BY cap.network)),e.generation
-FROM endpoints e CROSS JOIN host h
-CROSS JOIN unnest($4::text[],$5::text[]) AS cap(policy,network)
-WHERE (e.user_id=h.user_id AND paperboat.machine_capability_allowed(e.user_id,h.id,cap.policy))
- OR (NOT cap.network=ANY($6::text[]) AND EXISTS(SELECT 1 FROM host_teams ht WHERE paperboat.team_machine_capability_allowed(e.user_id,ht.team_id,h.id,cap.policy)))
+SELECT e.id,e.user_id,array_to_json(array_agg(a.network ORDER BY a.network)),e.generation
+FROM endpoints e JOIN allowed a ON a.user_id=e.user_id
 GROUP BY e.id,e.user_id,e.generation ORDER BY e.id`, self.EndpointID, self.AccountID, maximumOfflinePeers, policyNames(), networkNames(), offlineOwnerOnly)
 	if err != nil {
 		return nil, err
