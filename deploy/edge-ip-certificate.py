@@ -42,6 +42,16 @@ def subject_flags(host):
     return ["--ip-address", str(address)]
 
 
+def http01_address(state):
+    """Certbot binds HTTP-01 to the edge's own address: a host service on 127.100.0.1:80 (the machine guard) blocks a wildcard bind."""
+    try:
+        listen = json.loads((state / "selfhost.json").read_text())["config"]["listen"]
+    except FileNotFoundError:
+        return []
+    host = listen.rsplit(":", 1)[0].strip("[]")
+    return [] if host in ("", "0.0.0.0", "::") else ["--http-01-address", host]
+
+
 def renew(args):
     os.umask(0o077)
     state = Path(args.state_dir).resolve()
@@ -72,7 +82,7 @@ def renew(args):
                 "type=bind,source=" + str(acme) + ",target=/etc/letsencrypt",
                 args.certbot_image, "certonly", "--standalone", "--non-interactive",
                 "--agree-tos", "--email", args.email, "--preferred-profile", "shortlived",
-                *subject, "--cert-name", "paperboat-edge-ip", "--force-renewal",
+                *subject, *http01_address(state), "--cert-name", "paperboat-edge-ip", "--force-renewal",
             ], timeout=180)
             run("configure public HTTPS", [args.pbh, "configure-tls", "--state-dir", str(state),
                                            "--https-cert", str(certificate), "--https-key", str(private_key)], timeout=90)

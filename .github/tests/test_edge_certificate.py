@@ -78,6 +78,22 @@ if name=='pbh' and not (root/'issued').exists(): sys.exit(24)
             with self.assertRaises(ValueError, msg=refused):
                 module.subject_flags(refused)
 
+    def test_http01_address_binds_the_edge_listen_host_not_the_wildcard(self):
+        # prod 2026-11-13: the machine guard holds 127.100.0.1:80, so certbot's wildcard bind failed on oracle.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("edge_certificate", ROOT / "deploy/edge-ip-certificate.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        for listen, flags in [("10.0.0.221:8443", ["--http-01-address", "10.0.0.221"]),
+                              ("[2001:db8::1]:8443", ["--http-01-address", "2001:db8::1"]),
+                              ("0.0.0.0:8443", []), ("[::]:8443", [])]:
+            with self.subTest(listen=listen), tempfile.TemporaryDirectory() as directory:
+                state = Path(directory)
+                (state / "selfhost.json").write_text(json.dumps({"config": {"listen": listen}}))
+                self.assertEqual(module.http01_address(state), flags)
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(module.http01_address(Path(directory)), [])
+
     def test_timer_retries_a_failed_renewal_inside_the_window(self):
         # The renewal window is two days; a collision with a service restart must leave many retries.
         timer = (ROOT / "deploy/paperboat-edge-certificate.timer").read_text()
