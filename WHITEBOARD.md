@@ -427,3 +427,23 @@ Design (prior art: headscale compiles policy once per change and caches per-node
 ## Remove the reliance on the Tailscale fork — after launch (user decision 2026-11-13)
 
 The CLI's peer data plane builds on our fork github.com/pinksaucepasta/tailscale (WireGuard/magicsock/DERP-style relay, netstack). Carrying a fork means rebasing on every upstream release, owning its security fixes, and a large dependency surface for what we use. Goal: depend only on upstream libraries (wireguard-go, gvisor netstack, quic-go) or our own small packages, with no fork in go.mod. Steps to plan: inventory every fork package we import (cli/internal/peertransport/*, mesh, DERP map, tsnet-like pieces), classify each as "upstream library exists", "our code already replaces it", or "needs a small own implementation"; replace one area at a time behind the existing peer transport interfaces with device checks per area (direct path, relay, NAT rebind, update handover). Keep wire compatibility only with the current main (zero-users rule). Related: post-launch year plan (shed the fork).
+
+### Findings 2026-11-13 (fork 2d32e5f0 vs its upstream base 610b05c5)
+
+The fork is 4 commits, 20 files, +1110/-113 (about 400 non-test lines), 340 commits behind upstream main.
+`cli/internal/peertransport` (92 files) and `relay/` (7) import ~43 `tailscale.com` packages; none of the
+Tailscale control plane. Dropping Tailscale itself is a rewrite; dropping the fork is small. Per patch:
+
+| Patch | Plan |
+|---|---|
+| Underlay packet trace (magicsock, ~60) | Delete; `mesh/underlay_diagnostics.go` reads it, so drop that too or use upstream `Conn.InstallCaptureHook` |
+| Cloud metadata probe skip (cloudenv, -7) | Delete; call `cloudenv.Get()` in a goroutine at daemon start (cached, takes the 2 s off the connect path) |
+| STUN-only regions never home (netcheck, derp.go, `HasDERP`, ~90) | Server never publishes a STUN-only region; put STUN-only nodes inside a region with a relay node, then delete |
+| Per-family local endpoints (~40), relay re-discovery after rebind (3) | Upstream PRs with their tests; drop when merged |
+| Peer relay policy (udprelay, ~230) | Upstream authorizes once, before `AllocateEndpoint`, via `PeerCapabilityRelay`/`RelayTarget` (`feature/relayserver/relayserver.go:136`) and revokes by stock lifetimes (30 s unbound, 5 min idle; `net/udprelay/server.go:60`). Copy that: drop the per-packet authorizer and policy deadline; keep `RevokeEndpoint` only if instant revocation is a product promise and the limiter only for per-plan bandwidth (USER DECIDES). ~230 -> ~60 or 0 |
+| DERP carrier factory (~350) | Keep. Upstream relays are TCP only; Tailscale documents DERP head-of-line blocking and TCP meltdown under load/loss and moved to UDP peer relays. Our fallback, QUIC datagrams (`relay/derpquic`), is the better design there |
+
+Also: the derpquic relay drops on its 64-slot per-peer queue (`server.go` select/default); a loaded loopback
+benchmark lost up to 1.5 %. Tune before measuring under loss (two victus VMs, forced relay, `tc netem` 1/3/5 %
+loss + 100 ms: transfer rate, terminal echo, network switch). `cli/upstream/PATCHES.md` names fork commit
+ac1095ce while both go.mod files pin 2d32e5f0.
