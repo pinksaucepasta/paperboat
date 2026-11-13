@@ -196,3 +196,5 @@ require (
 )
 
 replace github.com/pinksaucepasta/paperboat/shared => ../shared
+
+replace github.com/tailscale/wireguard-go => github.com/pinksaucepasta/wireguard-go v0.0.0-20261113093208-ae0ab7cc1486
