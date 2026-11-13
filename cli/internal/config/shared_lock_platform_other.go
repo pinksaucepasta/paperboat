@@ -2,7 +2,10 @@
 
 package config
 
-import "os"
+import (
+	"errors"
+	"os"
+)
 
 func prepareSharedLockParent(path string) error {
 	return os.MkdirAll(path, 0o700)
@@ -14,8 +17,28 @@ func createSharedLockDirectory(path string) error {
 
 func validateSharedLockDirectory(string) error { return nil }
 
-func writeSharedLockOwner(path string, data []byte) error {
-	return os.WriteFile(path, data, 0o600)
+// writeSharedLockOwner publishes owner.json whole or not at all: a full disk or a crash leaves no empty owner.
+func writeSharedLockOwner(path string, data []byte) (resultErr error) {
+	tmp, err := os.OpenFile(path+".tmp", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if resultErr != nil {
+			resultErr = errors.Join(resultErr, os.Remove(path+".tmp"))
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		return errors.Join(err, tmp.Close())
+	}
+	if err := tmp.Sync(); err != nil {
+		return errors.Join(err, tmp.Close())
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	//paperboat:allow-source-policy atomic-replacement owner=runtime-auth reason=atomic-owner-publish
+	return os.Rename(path+".tmp", path)
 }
 
 func quarantineSharedLock(path, stalePath string) error {

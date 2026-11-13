@@ -107,13 +107,12 @@ func (l *sharedLock) Lock() error {
 		stale, err := sharedLockIsStale(l.path, hostname)
 		lastOwnerErr = err
 		if err == nil && stale {
-			if os.IsNotExist(ownerErr) {
-				// Empty-only removal is atomic: if a creator publishes ownership
-				// after this check, removal fails without touching its record.
-				if cleanupNewSharedLock(l.path) == nil {
-					continue
-				}
-			} else if ownerErr == nil {
+			// Empty-only removal is atomic: if a creator publishes ownership after this check, removal fails
+			// without touching its record. A directory holding only a dead creator's temp file is quarantined.
+			if os.IsNotExist(ownerErr) && cleanupNewSharedLock(l.path) == nil {
+				continue
+			}
+			if ownerErr == nil || os.IsNotExist(ownerErr) {
 				stalePath := l.path + ".stale-" + strconv.Itoa(os.Getpid()) + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
 				//paperboat:allow-source-policy atomic-replacement owner=runtime-auth reason=stale-lock-quarantine
 				if quarantineSharedLock(l.path, stalePath) == nil {
@@ -143,7 +142,15 @@ func sharedLockIsStale(path, hostname string) (bool, error) {
 	}
 	var owner sharedLockOwner
 	if err := json.Unmarshal(b, &owner); err != nil {
-		return false, safeConfigCause("shared credential lock owner is invalid", err)
+		// An empty or truncated owner (disk full or a crash while it was written) never names a live holder; waiting
+		// on it forever took a machine's carrier down (canary-a 2026-11-13). Same age rule as an ownerless directory,
+		// so an owner being written right now is not taken. Prior art: gofrs/flock and lockedfile hold no owner file
+		// and rely on the kernel dropping the lock with the process.
+		info, statErr := os.Stat(filepath.Join(path, "owner.json"))
+		if statErr != nil {
+			return false, safeConfigCause("shared credential lock owner could not be inspected", statErr)
+		}
+		return time.Since(info.ModTime()) > sharedLockOwnerlessStaleAfter, nil
 	}
 	if owner.Hostname != hostname {
 		return time.Since(owner.CreatedAt) > sharedLockRemoteStaleAfter, nil
