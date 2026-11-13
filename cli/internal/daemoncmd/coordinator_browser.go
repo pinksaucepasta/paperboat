@@ -224,7 +224,7 @@ func (c *Coordinator) observeBrowserTrustFailure(ctx context.Context, err error)
 func browserListenerPorts(routes map[string]splitdns.BrowserRoute) map[int]bool {
 	ports := make(map[int]bool)
 	for name, route := range routes {
-		if strings.HasPrefix(name, "*.") || route.Port == 80 || route.Port == 443 || route.Port < 1024 {
+		if strings.HasPrefix(name, "*.") || route.Port == 80 || route.Port == 443 {
 			continue
 		}
 		ports[route.Port] = true
@@ -237,15 +237,6 @@ func browserListenerPorts(routes map[string]splitdns.BrowserRoute) map[int]bool 
 // other browser URLs: it is logged with its cause, pb doctor names the step (browser_port_listener) and the
 // reconcile retry tries it again.
 func (c *Coordinator) addBrowserPortListeners(ctx context.Context, client guardedNameClient, ip netip.Addr, routes map[string]splitdns.BrowserRoute, proxy *splitdns.Proxy, served map[int]bool) {
-	privileged := 0
-	for name, route := range routes {
-		if !strings.HasPrefix(name, "*.") && route.Port != 80 && route.Port != 443 && route.Port < 1024 {
-			privileged++
-		}
-	}
-	if privileged > 0 {
-		diagnosticlog.TryInfo("browser port URLs skip privileged machine ports; use the numeric browser URL or pb access machine", "count", privileged)
-	}
 	for _, port := range slices.Sorted(maps.Keys(browserListenerPorts(routes))) {
 		if served[port] {
 			continue

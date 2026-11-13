@@ -370,7 +370,8 @@ func (p *Proxy) AddPortListener(port int, listener net.Listener) error {
 	if !p.started || p.httpsServer == nil {
 		return errors.New("splitdns proxy: port listeners need a started HTTPS proxy")
 	}
-	if port < 1024 || port > 65535 {
+	// 80 and 443 are the proxy's own listeners; every other port, below 1024 included, may be served.
+	if port < 1 || port > 65535 || port == 80 || port == 443 {
 		return errors.New("splitdns proxy: invalid port listener")
 	}
 	if slices.Contains(p.portNumbers, port) {

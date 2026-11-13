@@ -818,8 +818,8 @@ func testCoordinatorServesMachineHostOnPublishedPorts(t *testing.T, names *coord
 	names.mu.Lock()
 	gatewayPorts, address := slices.Clone(names.gatewayPorts), names.gateway[6767]
 	names.mu.Unlock()
-	if !slices.Contains(gatewayPorts, 6767) || slices.Contains(gatewayPorts, 22) {
-		t.Fatalf("gateway acquired ports %v: want 6767 served and privileged 22 skipped", gatewayPorts)
+	if !slices.Contains(gatewayPorts, 6767) || !slices.Contains(gatewayPorts, 22) {
+		t.Fatalf("gateway acquired ports %v: want 6767 and privileged 22 served", gatewayPorts)
 	}
 	roots := x509.NewCertPool()
 	roots.AppendCertsFromPEM(ca.CertPEM())

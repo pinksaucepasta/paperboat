@@ -315,11 +315,10 @@ func validProtectedBindAddress(address, cidr string) bool {
 	return validAddressInCIDR(host, cidr) || host == splitdns.BrowserGatewayIP && gatewayPortAllowed(number)
 }
 
-// gatewayPortAllowed is the set of ports the browser gateway address may serve: the web ports
-// and unprivileged ports, where https://<machine>.<domain>:<port> reaches a machine service.
-func gatewayPortAllowed(port int) bool {
-	return port == 80 || port == 443 || port >= 1024 && port <= 65535
-}
+// gatewayPortAllowed is the set of ports the browser gateway address may serve: 80 and 443 for the web
+// gateway and every other port for https://<machine>.<domain>:<port>. The guard is root and binds on behalf
+// of the caller, so a port below 1024 needs no extra right; only the address is restricted.
+func gatewayPortAllowed(port int) bool { return port >= 1 && port <= 65535 }
 
 // protectedLoopbackCIDRs is the set of prefixes the guard denies by default and serves leases from: the one fixed
 // machine range.

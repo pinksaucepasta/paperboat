@@ -114,9 +114,9 @@ resolve hp` shows it (another OS user on this computer may get a different
 one for the same machine), and `pb access machine hp --port 5432 --listen
 127.0.0.1:5432` forwards the same port to a local one. Names never resolve to
 that address, because Paperboat does not change this computer's DNS, resolver,
-hosts file or VPN settings. The `host:port` form serves ports from 1024
-upward; privileged ports (below 1024) other than 80 and 443 are not served
-under a name. Use the machine's address or `pb access machine` for those.
+hosts file or VPN settings. The `host:port` form serves every published port
+except 80 and 443, which belong to the gateway itself (reach those with
+`https://80.<machine>.<domain>` and `https://443.<machine>.<domain>`).
 
 ### Coolify and other reverse proxies
 

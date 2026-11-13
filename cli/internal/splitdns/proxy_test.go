@@ -359,7 +359,14 @@ func TestProxyServesMachineHostOnItsPublishedPort(t *testing.T) {
 		}
 	}
 	if err := proxy.AddPortListener(80, published); err == nil {
-		t.Fatal("privileged port accepted")
+		t.Fatal("the proxy's own port 80 accepted as a port listener")
+	}
+	low, err := net.Listen("tcp", "127.0.0.1:0") // stands in for the guard's listener on a port below 1024
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := proxy.AddPortListener(22, low); err != nil {
+		t.Fatalf("port below 1024 refused: %v", err)
 	}
 	roots := x509.NewCertPool()
 	roots.AppendCertsFromPEM(ca.CertPEM())
