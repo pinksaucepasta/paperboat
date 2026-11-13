@@ -12,7 +12,7 @@ import (
 // Alias targets come from the inventory's own list: no lookup per machine and no second listing.
 func TestManagedSSHAliasTargetsReconcilesChangedAndRemovedMachines(t *testing.T) {
 	machines := []api.UserMachine{{
-		ID: "machine_1", Alias: "victus", State: "active", Online: true, InstallationGeneration: 1,
+		ID: "machine_1", Alias: "victus", State: "active", InstallationGeneration: 1,
 		SSH: &api.MachineSSH{OSUser: "Pujan", Port: 38222, TargetGeneration: 1},
 	}}
 	assertManagedSSHAliasTarget(t, managedSSHAliasTargets(machines), managedSSHExpectedAliasTarget{alias: "victus", user: "Pujan", port: 38222})
@@ -47,12 +47,12 @@ func writeManagedSSHTestResponse(writer http.ResponseWriter, value any) {
 }
 
 func TestSharedSSHMachinesGetAliasAndKnownHostsOwnWinsClash(t *testing.T) {
-	own := []api.UserMachine{{ID: "machine_own", Alias: "box", State: "active", Online: true, InstallationGeneration: 1,
+	own := []api.UserMachine{{ID: "machine_own", Alias: "box", State: "active", InstallationGeneration: 1,
 		SSH: &api.MachineSSH{OSUser: "me", Port: 22, TargetGeneration: 1}}}
 	shared := []api.UserMachine{
-		{ID: "machine_t", Alias: "t", State: "active", Online: true, InstallationGeneration: 1, SSH: &api.MachineSSH{OSUser: "ubuntu", Port: 22, TargetGeneration: 1}},
-		{ID: "machine_clash", Alias: "box", State: "active", Online: true, InstallationGeneration: 1, SSH: &api.MachineSSH{OSUser: "other", Port: 22, TargetGeneration: 1}},
-		{ID: "machine_own", Alias: "renamed", State: "active", Online: true, InstallationGeneration: 1, SSH: &api.MachineSSH{OSUser: "dup", Port: 22, TargetGeneration: 1}},
+		{ID: "machine_t", Alias: "t", State: "active", InstallationGeneration: 1, SSH: &api.MachineSSH{OSUser: "ubuntu", Port: 22, TargetGeneration: 1}},
+		{ID: "machine_clash", Alias: "box", State: "active", InstallationGeneration: 1, SSH: &api.MachineSSH{OSUser: "other", Port: 22, TargetGeneration: 1}},
+		{ID: "machine_own", Alias: "renamed", State: "active", InstallationGeneration: 1, SSH: &api.MachineSSH{OSUser: "dup", Port: 22, TargetGeneration: 1}},
 	}
 	targets := managedSSHAliasTargets(withSharedSSHMachines(own, shared))
 	if len(targets) != 2 || targets[0].Alias != "box" || targets[0].User != "me" || targets[1].Alias != "t" || targets[1].User != "ubuntu" {

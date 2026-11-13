@@ -25,15 +25,13 @@ func TestManagedSSHKnownHostsListsEachCurrentMachine(t *testing.T) {
 	machine := func(alias, state string, port uint16) api.UserMachine {
 		return api.UserMachine{ID: "machine_" + alias, Alias: alias, State: state, Online: true, InstallationGeneration: 2, SSH: &api.MachineSSH{OSUser: "pbt", Port: port, TargetGeneration: 2, HostKeyGeneration: 2, HostKeys: []string{line}}}
 	}
-	asleep := machine("asleep", "ready", 22)
-	asleep.Online = false
-	got := string(managedSSHKnownHosts([]api.UserMachine{machine("box", "ready", 22), machine("alt", "ready", 2222), machine("gone", "revoked", 22), asleep}, "example.test"))
+	got := string(managedSSHKnownHosts([]api.UserMachine{machine("box", "ready", 22), machine("alt", "ready", 2222), machine("gone", "revoked", 22)}, "example.test"))
 	for _, want := range []string{"box.example.test " + line, "[alt.example.test]:2222 " + line} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("known_hosts lacks %q:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "gone.example.test") || strings.Contains(got, "asleep.example.test") {
+	if strings.Contains(got, "gone.example.test") {
 		t.Fatalf("a revoked machine is trusted:\n%s", got)
 	}
 }

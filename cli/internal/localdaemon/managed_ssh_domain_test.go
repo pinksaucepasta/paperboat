@@ -51,7 +51,7 @@ func TestManagedSSHUsesDiscoveredDomainAndRefreshesAliases(t *testing.T) {
 		t.Error("managed SSH listed the machines again instead of using the inventory's list")
 		http.NotFound(w, r)
 	})
-	machines := []api.UserMachine{{ID: "machine_1", Alias: "build", State: "active", Online: true, InstallationGeneration: 1,
+	machines := []api.UserMachine{{ID: "machine_1", Alias: "build", State: "active", InstallationGeneration: 1,
 		SSH: &api.MachineSSH{OSUser: "fixture-user", Port: 38222, TargetGeneration: 1}}}
 	server := httptest.NewServer(mux)
 	defer server.Close()
