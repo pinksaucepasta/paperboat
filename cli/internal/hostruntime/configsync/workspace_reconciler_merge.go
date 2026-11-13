@@ -188,6 +188,34 @@ func (r *PlaintextWorkspaceReconciler) mergeConflicts(
 	return remaining, merged, nil
 }
 
+// mergesEqualToRemote is the pull half's share of a merge. It cannot publish one, but when the other machine already
+// merged both edits (its push half published them) the three-way merge equals the remote file, so the remote is simply
+// applied; any other merge stays a conflict for the push half to merge and publish.
+func (r *PlaintextWorkspaceReconciler) mergesEqualToRemote(
+	ctx context.Context,
+	baseHome, remoteHome string,
+	baseline, local, remote map[string]FileState,
+	conflicts []PathSummary,
+) ([]PathSummary, []string, error) {
+	remaining, merged, err := r.mergeConflicts(ctx, baseHome, remoteHome, baseline, local, remote, conflicts)
+	if err != nil {
+		return nil, nil, err
+	}
+	var adopted []string
+	for _, conflict := range conflicts {
+		value, ok := merged[conflict.Path]
+		if !ok {
+			continue
+		}
+		if hashSnapshotBytes(value.Value) == remote[conflict.Path].Hash && value.Mode == remote[conflict.Path].Mode.Perm() {
+			adopted = append(adopted, conflict.Path)
+		} else {
+			remaining = append(remaining, conflict)
+		}
+	}
+	return remaining, adopted, nil
+}
+
 func readVerifiedState(root, relative string, expected FileState, maxBytes int64) ([]byte, error) {
 	if !safeRelativeStatusPath(relative) || expected.Bytes < 0 || expected.Bytes > maxBytes {
 		return nil, ErrSourceChanged

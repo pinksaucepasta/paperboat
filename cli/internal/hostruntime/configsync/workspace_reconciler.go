@@ -321,6 +321,14 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 		sort.Strings(plan.PublishUpdates)
 		plan.PublishUpdates = uniqueSortedStrings(plan.PublishUpdates)
 	}
+	if effectiveMode == ModePullOnly && !r.mergeConcurrentEdits && len(mergeCandidates) > 0 && baseHome != "" {
+		var adopted []string
+		mergeCandidates, adopted, err = r.mergesEqualToRemote(ctx, baseHome, remoteHome, baselineFiles, localFiles.Files, remoteFiles.Files, mergeCandidates)
+		if err != nil {
+			return PreparedPublication{}, err
+		}
+		plan.ApplyRemote = uniqueSortedStrings(append(plan.ApplyRemote, adopted...))
+	}
 	plan.Conflicts = append(frozenConflicts, mergeCandidates...)
 	sort.Slice(plan.Conflicts, func(i, j int) bool { return plan.Conflicts[i].Path < plan.Conflicts[j].Path })
 	if len(plan.Conflicts) > 0 || r.resolutions != nil {
