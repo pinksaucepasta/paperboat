@@ -1,0 +1,33 @@
+﻿outputCP 65001 inputCP 65001
+window 100x30 buffer 100x30
+日本語 ✓ é
+M-fM-^WM-%M-fM-^\M-,M-hM-*M-^^ M-bM-^\M-^S M-CM-)
+
+
+
+
+
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+lanex2-l2  fair-orange-tower                                                            connected  d겠
+

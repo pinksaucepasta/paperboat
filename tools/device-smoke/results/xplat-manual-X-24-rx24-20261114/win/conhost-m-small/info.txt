@@ -1,0 +1,8 @@
+﻿outputCP 65001 inputCP 437
+window 20x5 buffer 20x5
+UTF-8               깸
+日本語 ✓ é
+admin@Manageds-Virtu겠
+al-Machine ~ %      겠
+        connected  d겠
+

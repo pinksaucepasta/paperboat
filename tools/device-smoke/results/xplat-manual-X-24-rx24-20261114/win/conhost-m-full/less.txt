@@ -1,0 +1,33 @@
+﻿outputCP 65001 inputCP 437
+window 100x30 buffer 100x30
+man.conf                                                                                            샢
+manpaths                                                                                            겠
+manpaths.d                                                                                          겠
+master.passwd                                                                                       겠
+networks                                                                                            겠
+newsyslog.conf                                                                                      겠
+newsyslog.d                                                                                         겠
+nfs.conf                                                                                            겠
+notify.conf                                                                                         겠
+ntp_opendirectory.conf                                                                              겠
+openldap                                                                                            겠
+pam.d                                                                                               겠
+passwd                                                                                              겠
+paths                                                                                               겠
+paths.d                                                                                             겠
+pf.anchors                                                                                          겠
+pf.conf                                                                                             겠
+pf.os                                                                                               겠
+postfix                                                                                             겠
+ppp                                                                                                 겠
+profile                                                                                             겠
+protocols                                                                                           겠
+racoon                                                                                              겠
+rc.common                                                                                           沐꺂
+rc.netboot                                                                                          겠
+resolv.conf                                                                                         겠
+resolver                                                                                            겠
+rmtab                                                                                               沐꺂
+rpc                                                                                                 沐꺂
+:                                                                                                   沐꺂
+

@@ -1,0 +1,103 @@
+﻿outputCP 65001 inputCP 437
+window 300x100 buffer 300x100
+TERM=xterm-256color COLORTERM=truecolor LANG=en_US.UTF-8 LC_ALL=
+99 300
+UTF-8
+日本語 ✓ é
+admin@Manageds-Virtual-Machine ~ %
+
+
+
+
+
+                                                                                                                                                                                                                                                                                                            隐笒
+
+
+
+
+
+
+
+
+
+                                                                                                                                                                                                                                                                                                            隐笒
+
+
+                                                                                                                                                                                                                                                                                                            隐笒
+
+                                                                                                                                                                                                                                                                                                            隐笒
+
+
+
+                                                                                                                                                                                                                                                                                                            隐笒
+                                                                                                                                                                                                                                                                                                            隐笒
+
+
+
+                                                                                                                                                                                                                                                                                                            隐笒
+                                                                                                                                                                                                                                                                                                            隐笒
+
+
+
+
+
+
+
+                                                                                                                                                                                                                                                                                                            隐笒
+
+                                                                                                                                                                                                                                                                                                            隐笒
+
+
+
+
+                                                                                                                                                                                                                                                                                                            隐笒
+
+
+
+
+
+
+
+                                                                                                                                                                                                                                                                                                            隐笒
+
+
+
+
+
+
+
+
+
+                                                                                                                                                                                                                                                                                                            隐笒
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                                                                                                                                                                                                                            隐笒
+
+                                                                                                                                                                                                                                                                                                            隐笒
+
+
+
+
+                                                                                                                                                                                                                                                                                                            隐笒
+
+
+
+lanex2-m  ready-silver-sail                                                                                                                                                                                                                                                                     connected  d
+

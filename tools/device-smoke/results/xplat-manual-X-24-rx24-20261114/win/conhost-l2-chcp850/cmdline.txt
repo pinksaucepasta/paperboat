@@ -1,0 +1,1 @@
+title RX24conhost & chcp 850 >nul & mode con: cols=100 lines=30 & "C:\Program Files\Paperboat\users\uba6bceb9290ebd807a30e102\bin\pb.exe" connect lanex2-l2 --no-customization 2>"C:\Users\Public\rx24\conhost-l2-chcp850\pb-err.txt"

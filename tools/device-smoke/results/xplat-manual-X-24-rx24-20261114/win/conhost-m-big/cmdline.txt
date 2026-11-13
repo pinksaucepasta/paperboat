@@ -1,0 +1,1 @@
+title RX24conhost & mode con: cols=300 lines=100 & "C:\Program Files\Paperboat\users\uba6bceb9290ebd807a30e102\bin\pb.exe" connect lanex2-m --no-customization 2>"C:\Users\Public\rx24\conhost-m-big\pb-err.txt"

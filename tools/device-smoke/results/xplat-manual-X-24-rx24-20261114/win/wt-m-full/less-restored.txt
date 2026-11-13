@@ -1,0 +1,33 @@
+﻿outputCP 65001 inputCP 437
+window 100x30 buffer 100x30
+admin@Manageds-Virtual-Machine ~ %                                                                  鼘扃
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+                                                                                                    겠
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+lanex2-m  agile-orange-marker                                                           connected  d沐꺂
+

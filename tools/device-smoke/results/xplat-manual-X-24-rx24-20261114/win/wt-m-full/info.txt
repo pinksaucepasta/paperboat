@@ -1,0 +1,33 @@
+﻿outputCP 65001 inputCP 437
+window 100x30 buffer 100x30
+TERM=xterm-256color COLORTERM=truecolor LANG=en_US.UTF-8 LC_ALL=                                    깸
+29 100                                                                                              겠
+UTF-8                                                                                               겠
+日本語 ✓ é
+admin@Manageds-Virtual-Machine ~ %                                                                  겠
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                    鸰秧
+                                                                                                    鸰秧
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+lanex2-m  agile-orange-marker                                                           connected  d겠
+

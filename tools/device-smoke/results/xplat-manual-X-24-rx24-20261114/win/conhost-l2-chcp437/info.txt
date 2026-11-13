@@ -1,0 +1,33 @@
+﻿outputCP 65001 inputCP 437
+window 100x30 buffer 100x30
+TERM=xterm-256color COLORTERM=truecolor LANG=C.UTF-8 LC_ALL=                                        깸
+29 100                                                                                              겠
+UTF-8                                                                                               겠
+日本語 ✓ é
+tester@76e658e8b65b:~$                                                                              겠
+                                                                                                    겠
+                                                                                                    沐꺂
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+
+
+
+
+
+
+
+lanex2-l2  glad-shaded-orchard                                                          connected  d
+

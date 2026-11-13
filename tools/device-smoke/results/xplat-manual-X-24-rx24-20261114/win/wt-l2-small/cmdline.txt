@@ -1,0 +1,1 @@
+title RX24wt & "C:\Program Files\Paperboat\users\uba6bceb9290ebd807a30e102\bin\pb.exe" connect lanex2-l2 --no-customization 2>"C:\Users\Public\rx24\wt-l2-small\pb-err.txt"

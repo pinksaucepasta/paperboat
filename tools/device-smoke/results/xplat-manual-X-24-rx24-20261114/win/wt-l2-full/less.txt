@@ -1,0 +1,33 @@
+﻿outputCP 65001 inputCP 437
+window 100x30 buffer 100x30
+gshadow                                                                                             髐蚑
+gshadow-                                                                                            겠
+gss                                                                                                 겠
+host.conf                                                                                           겠
+hostname                                                                                            겠
+hosts                                                                                               겠
+init.d                                                                                              겠
+inputrc                                                                                             겠
+iproute2                                                                                            겠
+issue                                                                                               겠
+issue.net                                                                                           겠
+kernel                                                                                              겠
+ld.so.cache                                                                                         겠
+ld.so.conf                                                                                          겠
+ld.so.conf.d                                                                                        겠
+ldap                                                                                                겠
+legal                                                                                               겠
+libaudit.conf                                                                                       겠
+libnl-3                                                                                             沐꺂
+locale.conf                                                                                         沐꺂
+localtime                                                                                           沐꺂
+login.defs                                                                                          沐꺂
+logrotate.d                                                                                         沐꺂
+lsb-release                                                                                         沐꺂
+machine-id                                                                                          겠
+mime.types                                                                                          겠
+mke2fs.conf                                                                                         겠
+modules-load.d                                                                                      겠
+mtab                                                                                                겠
+:                                                                                                   겠
+

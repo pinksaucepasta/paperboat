@@ -1,0 +1,33 @@
+﻿outputCP 65001 inputCP 437
+window 100x30 buffer 100x30
+TRUECOLOR redgreen                                                                                  齨蚳
+tester@76e658e8b65b:~$                                                                              겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+                                                                                                    겠
+
+
+
+
+
+
+
+
+
+
+
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+                                                                                                    沐꺂
+lanex2-l2  sharp-green-pier                                                             connected  d沐꺂
+
