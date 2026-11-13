@@ -915,8 +915,8 @@ SET state = 'pending', attempts = 0, last_error = NULL, next_attempt_at = NULL,
 WHERE id = sqlc.arg(id) AND state = 'dead_letter';
 
 -- name: RegisterControlTunnelNode :one
-INSERT INTO control_tunnel_nodes (id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, state, ready, capacity, last_heartbeat_at)
-VALUES (sqlc.arg(id), sqlc.arg(edge_pool), sqlc.arg(protocol_version), sqlc.arg(process_epoch), sqlc.arg(endpoint_host), sqlc.arg(endpoint_tcp_port), sqlc.arg(endpoint_quic_port), sqlc.narg(carrier_endpoint_host), sqlc.narg(carrier_endpoint_tcp_port), sqlc.narg(carrier_endpoint_quic_port), sqlc.narg(carrier_server_spki_sha256), sqlc.narg(carrier_server_certificate_chain_pem), 'registered', false,
+INSERT INTO control_tunnel_nodes (id, edge_pool, protocol_version, process_epoch, endpoint_host, endpoint_tcp_port, endpoint_quic_port, carrier_endpoint_host, carrier_endpoint_tcp_port, carrier_endpoint_quic_port, carrier_server_spki_sha256, carrier_server_certificate_chain_pem, public_https_port, state, ready, capacity, last_heartbeat_at)
+VALUES (sqlc.arg(id), sqlc.arg(edge_pool), sqlc.arg(protocol_version), sqlc.arg(process_epoch), sqlc.arg(endpoint_host), sqlc.arg(endpoint_tcp_port), sqlc.arg(endpoint_quic_port), sqlc.narg(carrier_endpoint_host), sqlc.narg(carrier_endpoint_tcp_port), sqlc.narg(carrier_endpoint_quic_port), sqlc.narg(carrier_server_spki_sha256), sqlc.narg(carrier_server_certificate_chain_pem), sqlc.narg(public_https_port), 'registered', false,
         coalesce(sqlc.arg(capacity)::jsonb, '{}'::jsonb), sqlc.arg(now))
 ON CONFLICT (id) DO UPDATE
 SET edge_pool = EXCLUDED.edge_pool,
@@ -925,6 +925,7 @@ SET edge_pool = EXCLUDED.edge_pool,
     carrier_endpoint_host = EXCLUDED.carrier_endpoint_host, carrier_endpoint_tcp_port = EXCLUDED.carrier_endpoint_tcp_port, carrier_endpoint_quic_port = EXCLUDED.carrier_endpoint_quic_port,
     carrier_server_spki_sha256 = EXCLUDED.carrier_server_spki_sha256,
     carrier_server_certificate_chain_pem = EXCLUDED.carrier_server_certificate_chain_pem,
+    public_https_port = EXCLUDED.public_https_port,
     state = 'registered', ready = false, capacity = EXCLUDED.capacity,
     observation = '{}'::jsonb, last_heartbeat_at = EXCLUDED.last_heartbeat_at,
     drain_deadline = NULL, version = control_tunnel_nodes.version + 1, updated_at = EXCLUDED.last_heartbeat_at

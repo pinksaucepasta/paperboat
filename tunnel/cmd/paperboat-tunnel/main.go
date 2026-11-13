@@ -492,9 +492,13 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if err != nil {
 		return nil, fmt.Errorf("create durable carrier route registry: %w", err)
 	}
-	publicListenHost, _, err := net.SplitHostPort(deployment.PublicHTTPSListenAddress)
+	publicListenHost, publicListenPort, err := net.SplitHostPort(deployment.PublicHTTPSListenAddress)
 	if err != nil {
 		return nil, fmt.Errorf("parse public listener address: %w", err)
+	}
+	publicHTTPSPort, err := strconv.ParseUint(publicListenPort, 10, 16)
+	if err != nil || publicHTTPSPort == 0 {
+		return nil, fmt.Errorf("parse public listener port %q: want 1-65535", publicListenPort)
 	}
 	if publicListenHost == "" {
 		publicListenHost = "0.0.0.0"
@@ -554,7 +558,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	if err != nil {
 		return nil, fmt.Errorf("schedule process carrier trust refresh: %w", err)
 	}
-	nodeWorker := &edgeruntime.NodeWorker{Reporter: reporter, Manager: manager, Sink: client, Registration: control.NodeRegistration{NodeID: cfg.NodeID, EdgePool: cfg.EdgePool, Artifact: "paperboat-connector-v1", Protocol: "1.0", ProcessEpoch: processEpoch, Capacity: deployment.NodeCapacity, Endpoint: control.ConnectorEndpoint{Host: deployment.ConnectorAdvertiseHost, TCPPort: carrierEndpoint.TCPPort, QUICPort: carrierEndpoint.QUICPort}, CarrierEndpoint: *carrierEndpoint, CarrierServerSPKISHA256: carrierTrust.SPKISHA256, CarrierServerCertificateChainPEM: carrierTrust.CertificateChainPEM}, Interval: deployment.ControlInterval, Ready: nodeReady, OnAnswer: func(answer control.NodeAnswer) error {
+	nodeWorker := &edgeruntime.NodeWorker{Reporter: reporter, Manager: manager, Sink: client, Registration: control.NodeRegistration{NodeID: cfg.NodeID, EdgePool: cfg.EdgePool, Artifact: "paperboat-connector-v1", Protocol: "1.0", ProcessEpoch: processEpoch, Capacity: deployment.NodeCapacity, Endpoint: control.ConnectorEndpoint{Host: deployment.ConnectorAdvertiseHost, TCPPort: carrierEndpoint.TCPPort, QUICPort: carrierEndpoint.QUICPort}, CarrierEndpoint: *carrierEndpoint, CarrierServerSPKISHA256: carrierTrust.SPKISHA256, CarrierServerCertificateChainPEM: carrierTrust.CertificateChainPEM, PublicHTTPSPort: uint16(publicHTTPSPort)}, Interval: deployment.ControlInterval, Ready: nodeReady, OnAnswer: func(answer control.NodeAnswer) error {
 		if answer.IngressLimits == nil {
 			return nil
 		}

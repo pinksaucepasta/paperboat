@@ -4,7 +4,9 @@ import (
 	"context"
 	"github.com/jackc/pgx/v5"
 	"github.com/pinksaucepasta/paperboat/server/internal/db"
+	"net"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -68,7 +70,7 @@ func IngressURLs(ctx context.Context, database *db.DB, hosts map[string]string) 
 		return out, nil
 	}
 	// The active carrier's edge first; any other valid carrier serves while that edge restarts.
-	rows, err = database.Pool().Query(ctx, `SELECT DISTINCT ON (r.environment_id) r.environment_id,n.endpoint_host
+	rows, err = database.Pool().Query(ctx, `SELECT DISTINCT ON (r.environment_id) r.environment_id,n.endpoint_host,coalesce(n.public_https_port,0)
  FROM unnest($1::text[],$2::text[]) AS w(environment_id,public_host)
  JOIN paperboat.control_routes r ON r.environment_id=w.environment_id AND r.public_host=w.public_host
  JOIN paperboat.runtime_carrier_attachments a ON a.route_id=r.id
@@ -81,14 +83,19 @@ func IngressURLs(ctx context.Context, database *db.DB, hosts map[string]string) 
 	defer rows.Close()
 	for rows.Next() {
 		var environment, edgeHost string
-		if err := rows.Scan(&environment, &edgeHost); err != nil {
+		var port int
+		if err := rows.Scan(&environment, &edgeHost, &port); err != nil {
 			return nil, err
 		}
 		publicHost := hosts[environment]
 		if edgeHost == "" || publicHost == "" || strings.ContainsAny(edgeHost+publicHost, "/:@?# \t\r\n") {
 			continue
 		}
-		out[environment] = Ingress{URL: (&url.URL{Scheme: "https", Host: edgeHost, Path: "/v1/runtime/" + publicHost}).String()}
+		host := edgeHost
+		if port != 0 && port != 443 {
+			host = net.JoinHostPort(edgeHost, strconv.Itoa(port))
+		}
+		out[environment] = Ingress{URL: (&url.URL{Scheme: "https", Host: host, Path: "/v1/runtime/" + publicHost}).String()}
 	}
 	return out, rows.Err()
 }

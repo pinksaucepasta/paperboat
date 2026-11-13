@@ -177,6 +177,8 @@ type NodeRegistration struct {
 	// this exact node registration and process epoch. It is non-secret.
 	CarrierServerSPKISHA256          string `json:"carrier_server_spki_sha256"`
 	CarrierServerCertificateChainPEM string `json:"carrier_server_certificate_chain_pem"`
+	// PublicHTTPSPort is where the public HTTPS listener is published; the control plane dispatches there.
+	PublicHTTPSPort uint16 `json:"public_https_port"`
 }
 
 type ConnectorEndpoint struct {

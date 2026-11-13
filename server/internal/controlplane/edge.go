@@ -576,6 +576,9 @@ type edgeNodeRegistration struct {
 	} `json:"carrier_endpoint"`
 	CarrierServerSPKISHA256          string `json:"carrier_server_spki_sha256"`
 	CarrierServerCertificateChainPEM string `json:"carrier_server_certificate_chain_pem"`
+	// PublicHTTPSPort is the port the edge's public HTTPS listener is published on; the server dispatches runtime
+	// requests there. 0: 443.
+	PublicHTTPSPort uint16 `json:"public_https_port"`
 }
 
 type edgeNodeObservation struct {
@@ -688,6 +691,7 @@ func (s *EdgeService) RegisterNode(ctx context.Context, r edgeNodeRegistration) 
 		CarrierEndpointHost: sql.NullString{String: r.CarrierEndpoint.Host, Valid: true}, CarrierEndpointTcpPort: sql.NullInt32{Int32: int32(r.CarrierEndpoint.TCPPort), Valid: true}, CarrierEndpointQuicPort: sql.NullInt32{Int32: int32(r.CarrierEndpoint.QUICPort), Valid: true},
 		CarrierServerSpkiSha256:          sql.NullString{String: r.CarrierServerSPKISHA256, Valid: true},
 		CarrierServerCertificateChainPem: sql.NullString{String: r.CarrierServerCertificateChainPEM, Valid: true},
+		PublicHttpsPort:                  sql.NullInt32{Int32: int32(r.PublicHTTPSPort), Valid: r.PublicHTTPSPort != 0},
 		Capacity:                         capacity, Now: now,
 	})
 	return err

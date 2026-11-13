@@ -25,7 +25,9 @@ services:
   server:
     image: ${PAPERBOAT_SERVER_IMAGE:?set PAPERBOAT_SERVER_IMAGE}
     env_file: [server.env]
-    volumes: [./secrets:/run/secrets:ro, ./releases:/srv/paperboat-releases:ro]
+    volumes: [./secrets:/run/secrets:ro, ./releases:/srv/paperboat-releases:ro, ./edge-trust:/etc/paperboat-edge-trust:ro]
+    environment:
+      SSL_CERT_DIR: /etc/paperboat-edge-trust
     command: [paperboat-server, serve]
     restart: unless-stopped
     stop_grace_period: 30s

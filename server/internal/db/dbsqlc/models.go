@@ -943,6 +943,7 @@ type ControlTunnelNode struct {
 	TunnelEndpointsEpoch             sql.NullString
 	TunnelSnapshotAt                 sql.NullTime
 	Site                             sql.NullString
+	PublicHttpsPort                  sql.NullInt32
 }
 
 type ControlUsageCounter struct {

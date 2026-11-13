@@ -628,6 +628,12 @@ WHERE r.id=$1 AND r.public_host=$2 AND r.applied_node_id IS NOT NULL AND r.appli
 		t.Fatalf("valid carrier that is not the active one: URL=%q error=%v", actual, err)
 	}
 	exec(`UPDATE runtime_carrier_attachments SET active=true WHERE route_id=$1`, route)
+	// An edge whose public HTTPS listener is published on another port advertises it; the URL carries it.
+	exec(`UPDATE control_tunnel_nodes SET public_https_port=18446 WHERE id=$1`, backupNode)
+	if actual, err := IngressURL(ctx, database, env, customer.Hostname); err != nil || actual != "https://backup.example.test:18446/v1/runtime/"+customer.Hostname {
+		t.Fatalf("advertised public HTTPS port: URL=%q error=%v", actual, err)
+	}
+	exec(`UPDATE control_tunnel_nodes SET public_https_port=NULL WHERE id=$1`, backupNode)
 	exec(`UPDATE control_tunnel_nodes SET ready=false WHERE id=$1`, backupNode)
 	if _, err := service.Attach(ctx, proof, request); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("customer outage used managed fallback: %v", err)

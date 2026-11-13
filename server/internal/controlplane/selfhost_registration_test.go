@@ -67,7 +67,8 @@ func TestSelfhostControlNodeRegistrationFenceOnPostgres(t *testing.T) {
 	})
 	now := time.Now().UTC()
 	base := dbsqlc.RegisterControlTunnelNodeParams{ID: installed.NodeID, EdgePool: installed.EdgePool, ProtocolVersion: "1.0", ProcessEpoch: "epoch-restart", EndpointHost: sql.NullString{String: registration.EndpointHost, Valid: true}, EndpointTcpPort: sql.NullInt32{Int32: int32(registration.TCPPort), Valid: true}, EndpointQuicPort: sql.NullInt32{Int32: int32(registration.QUICPort), Valid: true}, CarrierEndpointHost: sql.NullString{String: registration.EndpointHost, Valid: true}, CarrierEndpointTcpPort: sql.NullInt32{Int32: int32(registration.TCPPort), Valid: true}, CarrierEndpointQuicPort: sql.NullInt32{Int32: int32(registration.QUICPort), Valid: true}, CarrierServerSpkiSha256: sql.NullString{String: "sha256:" + strings.Repeat("b", 64), Valid: true}, CarrierServerCertificateChainPem: sql.NullString{String: "certificate", Valid: true}, Capacity: []byte(`{"connections":8}`), Now: sql.NullTime{Time: now, Valid: true}}
-	if row, err := database.Queries().RegisterControlTunnelNode(ctx, base); err != nil || row.ID != installed.NodeID || row.EdgePool != installed.EdgePool {
+	base.PublicHttpsPort = sql.NullInt32{Int32: 18446, Valid: true}
+	if row, err := database.Queries().RegisterControlTunnelNode(ctx, base); err != nil || row.ID != installed.NodeID || row.EdgePool != installed.EdgePool || row.PublicHttpsPort.Int32 != 18446 {
 		t.Fatalf("valid restart: row=%+v err=%v", row, err)
 	}
 	rejected := func(name string, mutate func(*dbsqlc.RegisterControlTunnelNodeParams)) {

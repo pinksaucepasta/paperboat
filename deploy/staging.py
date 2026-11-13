@@ -167,7 +167,7 @@ def init():
     prod = {k: v for k, v in prod.items() if k in ("PAPERBOAT_OPERATOR_EMAIL", "PAPERBOAT_CERTIFICATES_DNS_ZONE_ID", DNS_ENV)}
     password = keep_password(existing)
     existing["_postgres_password"] = password
-    ssh(HOST, f"mkdir -p ~/{DIR}/secrets ~/{DIR}/releases && chmod 700 ~/{DIR} ~/{DIR}/secrets")
+    ssh(HOST, f"mkdir -p ~/{DIR}/secrets ~/{DIR}/releases ~/{DIR}/{EDGE_TRUST} && chmod 700 ~/{DIR} ~/{DIR}/secrets")
     remote("umask 077 && cat > server.env", stdin=build_env(existing, prod))
     remote("umask 077 && cat > secrets/postgres_password", stdin=password)
     remote("cat > compose.yaml", stdin=(ROOT / "staging.compose.yaml").read_text())
@@ -294,6 +294,7 @@ except urllib.error.HTTPError as error:
 EDGE_QUIC_PORT = 18448  # UDP is closed on the host; the config still needs a distinct QUIC port
 EDGE_PORT = 18445   # carrier TCP (inside anvit's open 10000-59999 range); the prod edge keeps 80/443/27443-27446
 EDGE_NAME, EDGE_DIR = "pb-stg-edge", "edge"
+EDGE_TRUST = "edge-trust"  # certificates of the staging edges, read by the server (compose mounts it)
 
 
 def carrier_certificate(host):
@@ -324,7 +325,8 @@ def sealed_credential(credential):
 def edge(image):
     """Account-scoped self-hosted edge for usr_staging, as plain `docker run` (no pbh, no host firewall or nft change).
     Registration mirrors server/internal/controlplane/selfhost_tunnel_process_test.go: what the claim flow would store.
-    Limits: no browser access (preview URLs never carry a port, so previews need 443) and no HTTP/3 (UDP is closed)."""
+    Limits: no browser access (preview URLs never carry a port, so a browser cannot reach a preview here; the server
+    and curl --resolve use the advertised public HTTPS port) and no HTTP/3 (UDP is closed)."""
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import ed25519
     host = f"{REGION}.{domain()}"
@@ -348,6 +350,9 @@ def edge(image):
             "control_credential_file": "/state/runtime.credential", "control_ca_file": "", "jwks_file": "/state/jwks.json",
             "revocations_file": "/state/revocations.json", "usage_signing_key_file": "/state/usage.key",
             "infrastructure_tls_cert_file": "/state/tls.crt", "infrastructure_tls_key_file": "/state/tls.key",
+            # staging has no browser certificate for the infrastructure name: the public listener presents the same self-signed
+            # certificate, and the server trusts it from EDGE_TRUST (compose mounts it; SSL_CERT_DIR) to dispatch previews there
+            "public_https_cert_file": "/state/tls.crt", "public_https_key_file": "/state/tls.key",
             "connector_advertise_host": host, "carrier_tcp_listen_address": f"0.0.0.0:{EDGE_PORT}",
             "carrier_quic_listen_address": f"0.0.0.0:{EDGE_QUIC_PORT}", "public_https_listen_address": "0.0.0.0:18446",
             "private_https_listen_address": "127.0.0.1:9443", "public_http_listen_address": "0.0.0.0:18447",
@@ -358,6 +363,7 @@ def edge(image):
     remote(f"docker rm -f {EDGE_NAME} >/dev/null 2>&1; rm -rf {EDGE_DIR}; mkdir -m 700 {EDGE_DIR}")
     for filename, content in files.items():
         remote(f"umask 077 && cat > {EDGE_DIR}/{filename}", stdin=content)
+    remote(f"mkdir -p {EDGE_TRUST} && cat > {EDGE_TRUST}/{node}.crt", stdin=cert_pem)
     sealed = sealed_credential(credential)
     sql("DELETE FROM paperboat.selfhost_installations WHERE scope_id='usr_staging' AND capability='tunnel'")
     # Replaced fixture nodes still have route/carrier/audit FKs. Drain them; the isolated DB reset owns their teardown.
