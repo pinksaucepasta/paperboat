@@ -45,3 +45,28 @@ func TestEnableVirtualTerminalOutputTurnsOnAndRestores(t *testing.T) {
 		t.Fatalf("old mode not restored: mode %#x", after)
 	}
 }
+
+// The output code page becomes UTF-8 for a console handle and is put back afterwards.
+func TestUseUTF8OutputCodePageSwitchesAndRestores(t *testing.T) {
+	buffer, err := createConsoleScreenBuffer()
+	if err != nil {
+		t.Skipf("no console attached to this test process: %v", err)
+	}
+	defer windows.CloseHandle(buffer)
+	previous, err := windows.GetConsoleOutputCP()
+	if err != nil {
+		t.Skipf("no console code page: %v", err)
+	}
+	defer func() { _ = windows.SetConsoleOutputCP(previous) }()
+	if err := windows.SetConsoleOutputCP(437); err != nil {
+		t.Skipf("cannot set a code page: %v", err)
+	}
+	restore := useUTF8OutputCodePage(buffer)
+	if cp, _ := windows.GetConsoleOutputCP(); cp != cpUTF8 {
+		t.Fatalf("output code page %d, want 65001", cp)
+	}
+	restore()
+	if cp, _ := windows.GetConsoleOutputCP(); cp != 437 {
+		t.Fatalf("code page not restored: %d", cp)
+	}
+}

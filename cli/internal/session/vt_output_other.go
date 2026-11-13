@@ -2,5 +2,5 @@
 
 package session
 
-// EnableVirtualTerminalOutput is a no-op: Unix terminals interpret VT sequences already.
-func EnableVirtualTerminalOutput() (restore func()) { return func() {} }
+// PrepareConsoleOutput is a no-op: Unix terminals interpret VT sequences already.
+func PrepareConsoleOutput() (restore func()) { return func() {} }

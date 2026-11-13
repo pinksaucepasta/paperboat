@@ -173,7 +173,7 @@ func actionConnectTargetInDirectory(c *command.Context, requested, cwd string) e
 	if value := strings.TrimSpace(c.String("status-bar-theme")); value != "" {
 		statusConfig.Theme = strings.ToLower(value)
 	}
-	defer session.EnableVirtualTerminalOutput()() // before the status bar writes its first escape sequence
+	defer session.PrepareConsoleOutput()() // before the status bar writes its first escape sequence
 	bar := statusbar.New(statusbar.Options{
 		Mode:          statusConfig.Mode,
 		Fullscreen:    statusConfig.Fullscreen,

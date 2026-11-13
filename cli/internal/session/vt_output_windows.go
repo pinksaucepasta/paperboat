@@ -8,12 +8,16 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// EnableVirtualTerminalOutput turns on VT processing for stdout and returns the call that puts the old mode back. A legacy
-// conhost window (cmd.exe started by conhost.exe) leaves it off, so the status bar and the remote shell's colours and cursor
-// moves printed as literal "←[...m" text (X-24, found in a real console window); Windows Terminal and ConPTY have it on.
-// Docker's CLI does the same (moby/term EnableVirtualTerminalProcessing).
-func EnableVirtualTerminalOutput() (restore func()) {
-	return enableVirtualTerminalOutput(windows.Handle(os.Stdout.Fd()))
+// PrepareConsoleOutput makes a Windows console show what pb connect writes: VT processing on and UTF-8 as the output code page. It
+// returns the call that puts both back. A legacy conhost window (cmd.exe started by conhost.exe) leaves VT processing off, so the status
+// bar and the remote shell's colours and cursor moves printed as literal "←[...m" text; without UTF-8 the remote shell's non-ASCII
+// output printed as mojibake ("æ—¥æœ¬èªž" for 日本語) in a real Windows Terminal window (X-24, both found on the victus desktop).
+// Docker's CLI enables VT the same way (moby/term EnableVirtualTerminalProcessing).
+func PrepareConsoleOutput() (restore func()) {
+	handle := windows.Handle(os.Stdout.Fd())
+	restoreMode := enableVirtualTerminalOutput(handle)
+	restoreCodePage := useUTF8OutputCodePage(handle)
+	return func() { restoreCodePage(); restoreMode() }
 }
 
 func enableVirtualTerminalOutput(handle windows.Handle) func() {
@@ -25,4 +29,18 @@ func enableVirtualTerminalOutput(handle windows.Handle) func() {
 		return func() {}
 	}
 	return func() { _ = windows.SetConsoleMode(handle, mode) }
+}
+
+const cpUTF8 = 65001 // x/sys/windows has no CP_UTF8
+
+func useUTF8OutputCodePage(handle windows.Handle) func() {
+	var mode uint32
+	if windows.GetConsoleMode(handle, &mode) != nil {
+		return func() {}
+	}
+	previous, err := windows.GetConsoleOutputCP()
+	if err != nil || previous == cpUTF8 || windows.SetConsoleOutputCP(cpUTF8) != nil {
+		return func() {}
+	}
+	return func() { _ = windows.SetConsoleOutputCP(previous) }
 }
