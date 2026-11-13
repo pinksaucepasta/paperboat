@@ -97,7 +97,9 @@ def make_safe(dev, path):
     if unix(dev):
         dev.sh('chmod 644 %s' % shlex.quote(path))
     else:
-        dev.sh("icacls '%s' /setowner \"$env:USERDOMAIN\\$env:USERNAME\" | Out-Null" % path)
+        # whoami, not %USERDOMAIN%\%USERNAME%: the domain variable is WORKGROUP on a runner and icacls fails with 1332
+        done = dev.sh("icacls '%s' /setowner (whoami) | Out-Null; exit $LASTEXITCODE" % path)
+        assert done.rc == 0, done.errtext[-200:]
 
 
 def x04_unsafe(ctx, a, b, direction):
