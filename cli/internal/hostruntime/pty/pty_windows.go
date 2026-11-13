@@ -251,6 +251,11 @@ func (p *Process) WriteContext(ctx context.Context, data []byte) (int, error) {
 	return n, err
 }
 
+// consoleModeQueryTimeout bounds the helper that reads the console mode before the key is acted on: it starts inside the
+// session's pseudoconsole, and under an output flood it took over a second (X-24: the cut and the screen came 1.4 s after
+// the key), where it takes 10-40 ms otherwise. A timeout is the unknown answer, which keeps the key an interrupt.
+const consoleModeQueryTimeout = 200 * time.Millisecond
+
 // Interrupt delivers a lone Ctrl-C (ETX) ahead of input stuck in a full ConPTY input pipe: a paste the foreground
 // program never reads (a flood such as `yes`) blocks WriteFile, and the key would wait behind it for the 20 s input
 // timeout, holding writeMu (the unix twin aborts the pending write by deadline, pty_unix.go Interrupt). CancelIoEx
@@ -268,7 +273,7 @@ func (p *Process) Interrupt(key byte, accepted func()) (bool, error) {
 	// vim-like editor, PSReadLine mid-edit) gets 0x03 as data, so nothing is cut or discarded and the caller writes it
 	// normally. Unknown (no console, helper failed or timed out) keeps the key an interrupt, as before.
 	if p.console != 0 {
-		if processed, err := p.inputIsProcessed(time.Second); err == nil && !processed {
+		if processed, err := p.inputIsProcessed(consoleModeQueryTimeout); err == nil && !processed {
 			return false, nil
 		}
 	}
