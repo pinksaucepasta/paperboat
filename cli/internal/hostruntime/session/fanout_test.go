@@ -421,3 +421,30 @@ func TestWaitNextFromRedeliversALostReply(t *testing.T) {
 		t.Fatalf("queued=%d, want only the unconfirmed RS34", queued)
 	}
 }
+
+// An attached browser (control-only) that stops asking for screens must not pin the output ring.
+func TestFanoutControlOnlyAttachmentDoesNotPinRing(t *testing.T) {
+	f := NewFanout()
+	if err := f.AttachControl("browser", 16); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SkipTo("browser", 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Attach("viewer", 16); err != nil {
+		t.Fatal(err)
+	}
+	for sequence := range uint64(3) {
+		if _, err := f.PublishOwned(history.Event{StartSequence: sequence, EndSequence: sequence + 1, Data: []byte{'x'}}); err != nil {
+			t.Fatal(err)
+		}
+		event, err := f.WaitNextOwned(context.Background(), "viewer")
+		if err != nil {
+			t.Fatal(err)
+		}
+		event.Release()
+	}
+	if len(f.ring) != 0 {
+		t.Fatalf("control-only attachment pins %d ring events", len(f.ring))
+	}
+}

@@ -697,7 +697,9 @@ func (f *Fanout) compactLocked() {
 	var minimum uint64
 	haveMinimum, atMinimum := false, 0
 	for _, cursor := range f.attachments {
-		if cursor.state != Attached || !cursor.hasCursor {
+		// A control-only attachment queues nothing and never reads the ring; counting it would pin every
+		// event published since its last screen for as long as it stays attached.
+		if cursor.state != Attached || !cursor.hasCursor || !cursor.receiveOutput {
 			continue
 		}
 		switch {
