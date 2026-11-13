@@ -31,7 +31,9 @@ var tailcatBlocks = flag.Int("tailcat-blocks", 8, "32 KiB blocks each Tailcat st
 // The in-process upstream DERP/STUN fixture binds only remote-host loopback.
 func TestTailcatQUIC(t *testing.T) {
 	leaks := goleak.IgnoreCurrent()
-	t.Cleanup(func() { goleak.VerifyNone(t, leaks) })
+	// The diagnostic log's worker lives for the process and starts at the first log line; run alone, that is inside this test.
+	logWorker := goleak.IgnoreTopFunction("github.com/pinksaucepasta/paperboat/shared/diagnosticlog.ensureWorker.func1.1")
+	t.Cleanup(func() { goleak.VerifyNone(t, leaks, logWorker) })
 	var maximum atomic.Uint32
 	t.Setenv("IN_TS_TEST", "true")
 	dm := integration.RunDERPAndSTUN(t, func(string, ...any) {}, "127.0.0.1")

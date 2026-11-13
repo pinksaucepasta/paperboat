@@ -283,6 +283,8 @@ def main():
     keys = argv[argv.index('--devices') + 1].split(',') if '--devices' in argv else ['L', 'M', 'W']
     only = set(argv[argv.index('--only') + 1].split(',')) if '--only' in argv else set()
     devices = {k: d for k, d in fleet.fleet().items() if k in keys}
+    if VALUES and (not only or 'connect' in only):
+        xplat_env.provision(devices)  # the connect check reads values another row's vault test may have removed
     for a_key, b_key in permutations(devices, 2):
         for name, test, row in TESTS:
             if only and name not in only:

@@ -63,19 +63,24 @@ def parse(text):
     return json.loads(text.strip().splitlines()[-1])
 
 
-def setup(devices):
+def provision(devices):
+    """Unlock every device's vault and set the XP_ values once: what each ENV delivery check (also xplat_term's connect) reads."""
     password = PASSWORD.read_bytes().strip()
     for dev in devices.values():
         done = dev.pb('env', 'vault', 'unlock', '--password-stdin', input=password + b'\n', timeout=120)
         assert done.rc == 0, '%s: unlock failed: %s' % (dev.name, (done.text + done.errtext)[-200:])
-    for dev in devices.values():  # the startup-file hook is how a plain command session (pb ssh) receives ENV
-        shell = 'powershell' if dev.os == 'windows' else dev.sh('basename "$SHELL"').text.strip() or 'bash'  # the user's own login shell
-        done = dev.pb('env', 'hook', shell, '--install', timeout=120)
-        assert done.rc == 0, '%s: hook install failed: %s' % (dev.name, (done.text + done.errtext)[-200:])
     ctl = fleet.controller()
     for name, value in VALUES.items():
         done = ctl.pb('env', 'set', name, '--value-stdin', input=value.encode(), timeout=120)
         assert done.rc == 0, 'set %s: %s' % (name, (done.text + done.errtext)[-200:])
+
+
+def setup(devices):
+    provision(devices)
+    for dev in devices.values():  # the startup-file hook is how a plain command session (pb ssh) receives ENV
+        shell = 'powershell' if dev.os == 'windows' else dev.sh('basename "$SHELL"').text.strip() or 'bash'  # the user's own login shell
+        done = dev.pb('env', 'hook', shell, '--install', timeout=120)
+        assert done.rc == 0, '%s: hook install failed: %s' % (dev.name, (done.text + done.errtext)[-200:])
 
 
 def host_state(dev):
