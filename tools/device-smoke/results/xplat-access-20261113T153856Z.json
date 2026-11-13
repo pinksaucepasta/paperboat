@@ -1,0 +1,19 @@
+{
+ "check": "xplat-access",
+ "devices": [
+  "L",
+  "M"
+ ],
+ "results": [
+  {
+   "id": "X-19:tcp:L>M",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.4 byte-exact with half-close; non-loopback --listen refused (pb: --listen must be a literal loopback address such as 127.0.0.1:8080)"
+  },
+  {
+   "id": "X-19:tcp:M>L",
+   "status": "PASS",
+   "detail": "forward and 127.100.0.34 byte-exact with half-close; non-loopback --listen refused (pb: --listen must be a literal loopback address such as 127.0.0.1:8080)"
+  }
+ ]
+}

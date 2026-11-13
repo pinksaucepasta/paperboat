@@ -30,3 +30,12 @@ macOS and Windows not run (no free Mac; victus down, no spare winpool runner).
 
 ## Team grant/setting revoke ending a held flow
 Delegated harness (branch rx19t-team-private-end, 876bc4620, not merged): 0 of 6 pairs complete (hp down; fixture containers lost). Only W>L isolated runs 6.99 s / 17.55 s for the grant revoke, excluded. Not a pass.
+
+## Sweep failure "access tcp name-resolve" (SWEEP1) = the check, fixed; L<->M rerun passes (22:10 IST)
+The check compared `gethostbyname(<machine>.<domain>)` with the machine's private address; the public wildcard answers the gateway 127.100.0.1, and the printed message was the tail of pb's usage text after the refusal. Fixed (commit aa6e69db9, pushed 9cdace229). Rerun on fleet lanex2-l2 and lanex2-m (`pb version` both dev-8cf17c4b0), results/xplat-access-20261113T153856Z.json, run under fleet-mac.lock:
+```
+PASS X-19:tcp:L>M forward and 127.100.0.4 byte-exact with half-close; non-loopback --listen refused
+PASS X-19:tcp:M>L forward and 127.100.0.34 byte-exact with half-close; non-loopback --listen refused
+```
+In non-core mode each pair also asserts: name resolves to 127.100.0.1, `https://<port>.<machine>.<domain>` and `https://<machine>.<domain>:720` (port below 1024, explicit `pb tunnel policy allow`) answer through the OS trust store. So the M client low-port failure seen earlier was the revoked `lanex2-l` record, not a product result.
+Not rerun: any pair with the Windows runner (winpool-4 ssh dropped, victus down).
