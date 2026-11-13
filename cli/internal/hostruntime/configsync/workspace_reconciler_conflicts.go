@@ -14,7 +14,7 @@ import (
 func (r *PlaintextWorkspaceReconciler) preserveConflicts(
 	baseline, local, remote map[string]FileState,
 	conflicts []PathSummary,
-	baseHome, remoteHome, baseRevision, remoteRevision string,
+	baseHomes map[string]string, remoteHome, baseRevision, remoteRevision string,
 ) error {
 	for _, conflict := range conflicts {
 		conflictRoot := filepath.Join(r.stateRoot, "conflicts", conflict.Revision)
@@ -27,7 +27,7 @@ func (r *PlaintextWorkspaceReconciler) preserveConflicts(
 			state FileState
 			ok    bool
 		}{
-			{"base", baseHome, baseline[conflict.Path], hasState(baseline, conflict.Path)},
+			{"base", baseHomes[conflict.Path], baseline[conflict.Path], hasState(baseline, conflict.Path)},
 			{"local", r.homeRoot, local[conflict.Path], hasState(local, conflict.Path)},
 			{"remote", remoteHome, remote[conflict.Path], hasState(remote, conflict.Path)},
 		} {

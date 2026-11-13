@@ -7,23 +7,33 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 
 	git "github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 )
 
-func partitionFrozenConflicts(conflicts []PathSummary, frozen map[string]FrozenPath) ([]PathSummary, []PathSummary) {
+// partitionFrozenConflicts splits the conflicts into those to merge now and those still frozen. A conflict frozen by an
+// earlier round stays frozen only while it is the same disagreement (same local and remote content): once either side
+// moved, it is merged again, with the ancestor it was frozen at (returned per path) because the baseline moved on.
+func partitionFrozenConflicts(conflicts []PathSummary, frozen map[string]FrozenPath) ([]PathSummary, []PathSummary, map[string]string) {
 	mergeCandidates := make([]PathSummary, 0, len(conflicts))
 	frozenConflicts := make([]PathSummary, 0, len(conflicts))
+	ancestors := map[string]string{}
 	for _, conflict := range conflicts {
-		if ancestry, ok := frozen[conflict.Path]; ok {
+		ancestry, ok := frozen[conflict.Path]
+		switch {
+		case !ok:
+			mergeCandidates = append(mergeCandidates, conflict)
+		case ancestry.ConflictRevision != conflict.Revision && ancestry.BaseRevision != "absent":
+			ancestors[conflict.Path] = ancestry.BaseRevision
+			mergeCandidates = append(mergeCandidates, conflict)
+		default:
 			conflict.Revision = ancestry.ConflictRevision
 			frozenConflicts = append(frozenConflicts, conflict)
-		} else {
-			mergeCandidates = append(mergeCandidates, conflict)
 		}
 	}
-	return mergeCandidates, frozenConflicts
+	return mergeCandidates, frozenConflicts, ancestors
 }
 
 func nextFrozenPaths(previous map[string]FrozenPath, conflicts []PathSummary, baseRevision string) map[string]FrozenPath {
@@ -32,13 +42,114 @@ func nextFrozenPaths(previous map[string]FrozenPath, conflicts []PathSummary, ba
 	}
 	result := make(map[string]FrozenPath, len(conflicts))
 	for _, conflict := range conflicts {
+		base := baseRevision
 		if frozen, ok := previous[conflict.Path]; ok {
-			result[conflict.Path] = frozen
-		} else {
-			result[conflict.Path] = FrozenPath{BaseRevision: baseRevision, ConflictRevision: conflict.Revision}
+			base = frozen.BaseRevision // the ancestor stays the one the disagreement started from
 		}
+		result[conflict.Path] = FrozenPath{BaseRevision: base, ConflictRevision: conflict.Revision}
 	}
 	return result
+}
+
+// mergeRun is what mergeByAncestor needs from one reconciliation round.
+type mergeRun struct {
+	repositoryRoot   string
+	worktree         *git.Worktree
+	remoteHash       plumbing.Hash
+	remoteHome       string
+	baselineRevision string
+	mode             AssignmentMode
+	writesEnabled    bool
+	baseline         map[string]FileState
+	local, remote    map[string]FileState
+	ancestors        map[string]string // ancestor revision of conflicts released from a freeze
+	baseHomes        map[string]string // ancestor checkout of each conflict, for the saved conflict sides
+	cleanups         []func()
+}
+
+func (m *mergeRun) cleanup() {
+	for _, cleanup := range m.cleanups {
+		cleanup()
+	}
+}
+
+// mergeByAncestor merges (push half) or adopts an already merged remote (pull half) for each candidate, with the
+// ancestor that belongs to it: the baseline revision, or the revision a released conflict was frozen at. It returns the
+// candidates that stay conflicts and adds merged paths to the plan.
+func (r *PlaintextWorkspaceReconciler) mergeByAncestor(
+	ctx context.Context, run *mergeRun, candidates []PathSummary, plan *ReconcilePlan, mergedContents map[string]mergedContent,
+) ([]PathSummary, error) {
+	groups := map[string][]PathSummary{}
+	for _, conflict := range candidates {
+		revision := run.baselineRevision
+		if ancestor, released := run.ancestors[conflict.Path]; released {
+			revision = ancestor
+		}
+		groups[revision] = append(groups[revision], conflict)
+	}
+	revisions := make([]string, 0, len(groups))
+	for revision := range groups {
+		revisions = append(revisions, revision)
+	}
+	sort.Strings(revisions)
+	var remaining []PathSummary
+	for _, revision := range revisions {
+		left, err := r.mergeGroup(ctx, run, revision, groups[revision], plan, mergedContents)
+		if err != nil {
+			return nil, err
+		}
+		remaining = append(remaining, left...)
+	}
+	plan.PublishUpdates = uniqueSortedStrings(sortedCopy(plan.PublishUpdates))
+	plan.ApplyRemote = uniqueSortedStrings(sortedCopy(plan.ApplyRemote))
+	return remaining, nil
+}
+
+func sortedCopy(values []string) []string {
+	result := append([]string(nil), values...)
+	sort.Strings(result)
+	return result
+}
+
+func (r *PlaintextWorkspaceReconciler) mergeGroup(
+	ctx context.Context, run *mergeRun, revision string, group []PathSummary, plan *ReconcilePlan, mergedContents map[string]mergedContent,
+) ([]PathSummary, error) {
+	if revision == "" {
+		return group, nil
+	}
+	baseHome, cleanup, err := r.materializeRevision(ctx, run.repositoryRoot, run.worktree, run.remoteHash, revision)
+	if err != nil {
+		for _, conflict := range group {
+			if _, released := run.ancestors[conflict.Path]; !released {
+				return nil, err
+			}
+		}
+		return group, nil // a released conflict whose ancestor is gone simply stays a conflict
+	}
+	run.cleanups = append(run.cleanups, cleanup)
+	for _, conflict := range group {
+		run.baseHomes[conflict.Path] = baseHome
+	}
+	if run.writesEnabled && (run.mode == ModeBidirectional || r.mergeConcurrentEdits) {
+		var merged map[string]mergedContent
+		group, merged, err = r.mergeConflicts(ctx, baseHome, run.remoteHome, run.baseline, run.local, run.remote, group)
+		if err != nil {
+			return nil, err
+		}
+		for name, value := range merged {
+			mergedContents[name] = value
+			plan.PublishUpdates = append(plan.PublishUpdates, name)
+		}
+	}
+	if run.mode == ModePullOnly && !r.mergeConcurrentEdits {
+		var adopted []string
+		group, adopted, err = r.mergesEqualToRemote(ctx, baseHome, run.remoteHome, run.baseline, run.local, run.remote, group)
+		if err != nil {
+			return nil, err
+		}
+		plan.ApplyRemote = append(plan.ApplyRemote, adopted...)
+	}
+	return group, nil
 }
 
 func forcePlanPath(plan *ReconcilePlan, path, action string, local, remote map[string]FileState) {

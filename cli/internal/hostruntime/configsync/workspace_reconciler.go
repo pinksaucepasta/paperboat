@@ -309,35 +309,22 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 		plan.PublishDeletes = nil
 	}
 	mergedContents := map[string]mergedContent{}
-	baseHome := ""
-	mergeCandidates, frozenConflicts := partitionFrozenConflicts(plan.Conflicts, baselineFrozen)
-	if len(mergeCandidates) > 0 && baselineRevision != "" {
-		var cleanup func()
-		var baseErr error
-		baseHome, cleanup, baseErr = r.materializeRevision(ctx, repositoryRoot, worktree, remoteHash, baselineRevision)
-		if baseErr != nil {
-			return PreparedPublication{}, baseErr
-		}
-		defer cleanup()
+	// The identity of each disagreement is needed up front: a frozen conflict is only still frozen while it is the same one.
+	plan.Conflicts = identifyConflicts(
+		r.descriptor.RepositoryID, r.descriptor.AssignmentID, remote.Revision,
+		localFiles.Files, remoteFiles.Files, plan.Conflicts,
+	)
+	mergeCandidates, frozenConflicts, ancestors := partitionFrozenConflicts(plan.Conflicts, baselineFrozen)
+	run := mergeRun{
+		repositoryRoot: repositoryRoot, worktree: worktree, remoteHash: remoteHash, remoteHome: remoteHome,
+		baselineRevision: baselineRevision, mode: effectiveMode, writesEnabled: writesEnabled,
+		baseline: baselineFiles, local: localFiles.Files, remote: remoteFiles.Files, ancestors: ancestors,
+		baseHomes: map[string]string{},
 	}
-	if writesEnabled && (effectiveMode == ModeBidirectional || r.mergeConcurrentEdits) && len(mergeCandidates) > 0 && baseHome != "" {
-		mergeCandidates, mergedContents, err = r.mergeConflicts(ctx, baseHome, remoteHome, baselineFiles, localFiles.Files, remoteFiles.Files, mergeCandidates)
-		if err != nil {
-			return PreparedPublication{}, err
-		}
-		for name := range mergedContents {
-			plan.PublishUpdates = append(plan.PublishUpdates, name)
-		}
-		sort.Strings(plan.PublishUpdates)
-		plan.PublishUpdates = uniqueSortedStrings(plan.PublishUpdates)
-	}
-	if effectiveMode == ModePullOnly && !r.mergeConcurrentEdits && len(mergeCandidates) > 0 && baseHome != "" {
-		var adopted []string
-		mergeCandidates, adopted, err = r.mergesEqualToRemote(ctx, baseHome, remoteHome, baselineFiles, localFiles.Files, remoteFiles.Files, mergeCandidates)
-		if err != nil {
-			return PreparedPublication{}, err
-		}
-		plan.ApplyRemote = uniqueSortedStrings(append(plan.ApplyRemote, adopted...))
+	defer run.cleanup()
+	mergeCandidates, err = r.mergeByAncestor(ctx, &run, mergeCandidates, &plan, mergedContents)
+	if err != nil {
+		return PreparedPublication{}, err
 	}
 	plan.Conflicts = append(frozenConflicts, mergeCandidates...)
 	sort.Slice(plan.Conflicts, func(i, j int) bool { return plan.Conflicts[i].Path < plan.Conflicts[j].Path })
@@ -419,13 +406,13 @@ func (r *PlaintextWorkspaceReconciler) Reconcile(ctx context.Context, repository
 		if len(plan.Conflicts) > 0 {
 			newConflicts := make([]PathSummary, 0, len(plan.Conflicts))
 			for _, conflict := range plan.Conflicts {
-				if _, frozen := baselineFrozen[conflict.Path]; !frozen {
+				if frozen, ok := baselineFrozen[conflict.Path]; !ok || frozen.ConflictRevision != conflict.Revision {
 					newConflicts = append(newConflicts, conflict)
 				}
 			}
 			if err := r.preserveConflicts(
 				baselineFiles, localFiles.Files, remoteFiles.Files, newConflicts,
-				baseHome, remoteHome, baselineRevision, remote.Revision,
+				run.baseHomes, remoteHome, baselineRevision, remote.Revision,
 			); err != nil {
 				return PreparedPublication{}, err
 			}
