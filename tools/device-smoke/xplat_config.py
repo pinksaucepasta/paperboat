@@ -28,14 +28,15 @@ from config_sync_lifecycle import HTTP_SERVER  # noqa: E402
 REPO_HOST = os.environ.get('XPLAT_REPO_HOST', 'hp')
 REPO_ADDR = REPO_HOST.split('@')[-1]  # the host name as the controller dials it (ssh -R takes no user@)
 REPO_BRIDGE = os.environ.get('XPLAT_REPO_BRIDGE', '10.0.0.1')  # the repository host as the Linux container reaches it
-REPO_ROOT = '/tmp/xplat-cfg-repo'
-NAME = 'xplat-config-fixture'
+REPO_ROOT = os.environ.get('XPLAT_REPO_ROOT', '/tmp/xplat-cfg-repo')  # one per lane: lanes share hp and the account
+NAME = os.environ.get('XPLAT_REPO_NAME', 'xplat-config-fixture')
 SYNC_WAIT = 240
 GIT_ENV = 'GIT_AUTHOR_NAME=x GIT_AUTHOR_EMAIL=x@example.test GIT_COMMITTER_NAME=x GIT_COMMITTER_EMAIL=x@example.test'
 
 # Where an app's files live on each OS, as written in the TOML and as the filesystem sees them (below the home directory).
-RULE_ROOT = {'linux': '~/.config/xplat', 'darwin': '~/Library/Application Support/xplat', 'windows': '%APPDATA%/xplat'}
-REAL_ROOT = {'linux': '.config/xplat', 'darwin': 'Library/Application Support/xplat', 'windows': 'AppData/Roaming/xplat'}
+APP_DIR = os.environ.get('XPLAT_APP_DIR', 'xplat')  # one per lane: a run starts by deleting this directory on every device
+RULE_ROOT = {'linux': '~/.config/' + APP_DIR, 'darwin': '~/Library/Application Support/' + APP_DIR, 'windows': '%APPDATA%/' + APP_DIR}
+REAL_ROOT = {'linux': '.config/' + APP_DIR, 'darwin': 'Library/Application Support/' + APP_DIR, 'windows': 'AppData/Roaming/' + APP_DIR}
 results = {}
 
 
