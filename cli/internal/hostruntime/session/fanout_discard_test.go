@@ -191,3 +191,47 @@ func TestAnswerInterruptCutsAFloodedViewerWhoseKeyWasWrittenNormally(t *testing.
 		})
 	}
 }
+
+// X-24: a controlling owner has at most ownerWindowBytes in flight (taken by the stream, not acknowledged by the client): the
+// PTY waits in WaitRoom until the client acknowledges, and an interrupt's cut frees the window it covers.
+func TestWaitRoomPacesTheOwnerByItsAcknowledgements(t *testing.T) {
+	f := NewFanout()
+	if err := f.AttachBackpressured("owner", 64<<20); err != nil {
+		t.Fatal(err)
+	}
+	f.SetController("owner")
+	var next uint64
+	chunk := strings.Repeat("x", 64<<10)
+	for range ownerWindowBytes / len(chunk) {
+		publishText(t, f, &next, chunk)
+	}
+	for { // the stream took everything: the queue is empty, the window is not
+		if _, ok, err := f.Next("owner"); err != nil || !ok {
+			break
+		}
+	}
+	blocked := func() bool {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		started := time.Now()
+		f.WaitRoom(ctx, uint64(len(chunk)), time.Minute)
+		return time.Since(started) >= 90*time.Millisecond
+	}
+	if !blocked() {
+		t.Fatal("the PTY was not held with a full window in flight")
+	}
+	f.Acked("owner", next)
+	if blocked() {
+		t.Fatal("the PTY stayed held after the client acknowledged everything")
+	}
+	for range ownerWindowBytes / len(chunk) {
+		publishText(t, f, &next, chunk)
+	}
+	if !blocked() {
+		t.Fatal("the PTY was not held again")
+	}
+	f.DiscardPendingOutput(next)
+	if blocked() {
+		t.Fatal("the PTY stayed held after an interrupt cut the whole window")
+	}
+}

@@ -48,9 +48,12 @@ type attachmentCursor struct {
 	evictedBytes uint64
 	cursor       uint64
 	enqueuedEnd  uint64
-	hasCursor    bool
-	rate         outputRate
-	notify       chan struct{}
+	// ackedEnd is how far the client acknowledged (or was moved past by a screen or an interrupt): what the host sent beyond
+	// it is in flight, in the transport and the client's queues.
+	ackedEnd  uint64
+	hasCursor bool
+	rate      outputRate
+	notify    chan struct{}
 }
 
 // Fanout retains one ordered ring of immutable chunks. Attachments track only
@@ -127,15 +130,33 @@ func (f *Fanout) SetController(attachmentID string) {
 	notify(f.room)
 }
 
-// WaitRoom holds the producer until every backpressured attachment has room for size more bytes. An owner
-// that drains nothing for stall is treated as gone (a dead link): WaitRoom returns and the next publish evicts
-// it, so a suspended laptop never freezes the program; it reconnects and replays from history.
+// ownerWindowBytes bounds what a controlling owner has in flight (sent, not yet acknowledged). Compressed, a flood fits
+// the transport windows many times over, and the host's answer to Ctrl-C queues behind all of it: past the client's Ctrl-C
+// hold (8 MiB decoded) the cut no longer applies and the whole flood is painted (X-24: 18 MB, 20 s). The PTY blocks on write
+// instead, like the receive window of ttyd (libwebsockets pause) and tmux (client backlog), so the key is answered within
+// a window.
+const ownerWindowBytes = 1 << 20
+
+// Acked records that the client has taken everything before next; it frees window for the PTY.
+func (f *Fanout) Acked(attachmentID string, next uint64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if cursor := f.attachments[attachmentID]; cursor != nil && next > cursor.ackedEnd {
+		cursor.ackedEnd, cursor.progressAt = next, time.Now()
+		notify(f.room)
+	}
+}
+
+// WaitRoom holds the producer until every backpressured attachment has room for size more bytes, both in its queue
+// and in its in-flight window. An owner that drains nothing for stall is treated as gone (a dead link): WaitRoom
+// returns and the next publish evicts it, so a suspended laptop never freezes the program; it reconnects and replays
+// from history.
 func (f *Fanout) WaitRoom(ctx context.Context, size uint64, stall time.Duration) {
 	for {
 		f.mu.Lock()
 		full := false
 		for _, cursor := range f.attachments {
-			if cursor.state == Attached && cursor.backpressure && size > cursor.maxBytes-cursor.queuedBytes && time.Since(cursor.progressAt) < stall {
+			if cursor.state == Attached && cursor.backpressure && (size > cursor.maxBytes-cursor.queuedBytes || cursor.inFlightFull(size)) && time.Since(cursor.progressAt) < stall {
 				full = true
 				break
 			}
@@ -160,6 +181,13 @@ func (f *Fanout) WaitRoom(ctx context.Context, size uint64, stall time.Duration)
 // revocation while a shared encrypted output feed serves the browser.
 func (f *Fanout) AttachControl(attachmentID string, maxPendingBytes uint64) error {
 	return f.attach(attachmentID, maxPendingBytes, false, false)
+}
+
+// inFlightFull reports that sending size more bytes would put more than ownerWindowBytes ahead of the client's
+// acknowledgement. A window with nothing in flight always takes one chunk.
+func (c *attachmentCursor) inFlightFull(size uint64) bool {
+	inFlight := c.enqueuedEnd - min(c.ackedEnd, c.enqueuedEnd)
+	return c.hasCursor && inFlight > 0 && inFlight+size > ownerWindowBytes
 }
 
 func (f *Fanout) attach(attachmentID string, maxPendingBytes uint64, receiveOutput, backpressure bool) error {
@@ -229,7 +257,7 @@ func (f *Fanout) SkipTo(attachmentID string, nextSequence uint64) error {
 	if !cursor.receiveOutput {
 		// A control-only attachment (a browser fed by the shared publisher) queues nothing, so its end never
 		// advances: every screen moves it to the current boundary (repeated screens under a flood, F3-13).
-		cursor.cursor, cursor.enqueuedEnd, cursor.hasCursor, cursor.queuedBytes = nextSequence, nextSequence, true, 0
+		cursor.cursor, cursor.enqueuedEnd, cursor.ackedEnd, cursor.hasCursor, cursor.queuedBytes = nextSequence, nextSequence, nextSequence, true, 0
 		f.compactLocked()
 		return nil
 	}
@@ -241,7 +269,7 @@ func (f *Fanout) SkipTo(attachmentID string, nextSequence uint64) error {
 		cursor.enqueuedEnd = nextSequence
 		cursor.hasCursor = true
 	}
-	cursor.cursor = nextSequence
+	cursor.cursor, cursor.ackedEnd = nextSequence, max(cursor.ackedEnd, nextSequence)
 	cursor.queuedBytes = cursor.enqueuedEnd - nextSequence
 	if moved {
 		f.compactAfterAdvanceLocked(previous)
@@ -293,6 +321,7 @@ func (f *Fanout) DiscardPendingOutput(through uint64) (resynced []string) {
 		if lag > 0 {
 			cursor.cursor, cursor.queuedBytes = target, cursor.enqueuedEnd-target
 		}
+		cursor.ackedEnd = max(cursor.ackedEnd, target) // the client drops what the cut covers and never acknowledges it
 		cursor.lagged = true
 		notify(cursor.notify)
 		resynced = append(resynced, id)
@@ -348,7 +377,7 @@ func (f *Fanout) PublishOwned(event history.Event) ([]Eviction, error) {
 		if uint64(len(event.Data)) > cursor.maxBytes-cursor.queuedBytes {
 			if !cursor.backpressure {
 				// Drop the backlog, this event included: the consumer restores a screen covering all of it.
-				cursor.cursor, cursor.enqueuedEnd, cursor.hasCursor = event.EndSequence, event.EndSequence, true
+				cursor.cursor, cursor.enqueuedEnd, cursor.ackedEnd, cursor.hasCursor = event.EndSequence, event.EndSequence, event.EndSequence, true
 				cursor.queuedBytes, cursor.lagged = 0, true
 				notify(cursor.notify)
 				continue
@@ -362,7 +391,7 @@ func (f *Fanout) PublishOwned(event history.Event) ([]Eviction, error) {
 			continue
 		}
 		if !cursor.hasCursor {
-			cursor.cursor = event.StartSequence
+			cursor.cursor, cursor.ackedEnd = event.StartSequence, event.StartSequence
 			cursor.hasCursor = true
 		}
 		cursor.enqueuedEnd = event.EndSequence
@@ -409,7 +438,7 @@ func (f *Fanout) EnqueueOwned(attachmentID string, event history.Event) (*Evicti
 	}
 	f.insertEventLocked(event)
 	if !cursor.hasCursor {
-		cursor.cursor = event.StartSequence
+		cursor.cursor, cursor.ackedEnd = event.StartSequence, event.StartSequence
 		cursor.hasCursor = true
 	}
 	cursor.enqueuedEnd = event.EndSequence

@@ -972,7 +972,10 @@ func TestSlowOwnerGetsEveryByteAndAStalledViewerLags(t *testing.T) {
 		}
 		next = event.EndSequence
 		received += uint64(bytes.Count(event.Data, []byte("x")))
-		time.Sleep(time.Millisecond) // a slow link
+		time.Sleep(time.Millisecond)                                                                   // a slow link
+		if err := manager.Acknowledge(created.ID, owner.AttachmentID, event.EndSequence); err != nil { // the owner paces the PTY by these
+			t.Fatal(err)
+		}
 	}
 	if _, err := manager.WaitNext(ctx, created.ID, viewer.AttachmentID, 0); !errors.Is(err, ErrAttachmentLagged) {
 		t.Fatalf("stalled viewer: %v, want lagged (never evicted)", err)

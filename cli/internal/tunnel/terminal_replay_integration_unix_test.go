@@ -30,29 +30,7 @@ func TestNativeTerminalReattachRestoresCoherentScreenWithoutReplayingInput(t *te
 	var committed atomic.Int64
 	target.SequenceSink = func(sequence int) { committed.Store(int64(sequence)) }
 	attach := func() *helperTerminalConn {
-		t.Helper()
-		wire := newExecCanaryWire()
-		done := make(chan struct{})
-		go func() { defer close(done); _ = host.ServeAuthenticated(wire, authorizer) }()
-		t.Cleanup(func() {
-			_ = wire.Close()
-			select {
-			case <-done:
-			case <-time.After(time.Second):
-				t.Error("terminal server did not join")
-			}
-		})
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, err := helperHandshake(ctx, wire); err != nil {
-			t.Fatal(err)
-		}
-		connection, err := newInitializedHelperTerminalConn(ctx, wire, &target, 16)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = connection.Close() })
-		return connection
+		return attachReplayTerminal(t, host, authorizer, &target, newExecCanaryWire())
 	}
 	first := attach()
 	if _, err := first.Write([]byte("stty -echo; PB_OWNED=retained; printf 'PB_FIRST_%s\\n' \"$PB_OWNED\"\n")); err != nil {
@@ -83,6 +61,32 @@ func TestNativeTerminalReattachRestoresCoherentScreenWithoutReplayingInput(t *te
 	if uint64(committed.Load()) > after.LatestSequence {
 		t.Fatal("screen byte length advanced the output cursor")
 	}
+}
+
+// attachReplayTerminal serves one wire from host and returns the attached client end.
+func attachReplayTerminal(t *testing.T, host *server.Server, authorizer server.Authorizer, target *resolver.TerminalTarget, wire *execCanaryWire) *helperTerminalConn {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { defer close(done); _ = host.ServeAuthenticated(wire, authorizer) }()
+	t.Cleanup(func() {
+		_ = wire.Close()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Error("terminal server did not join")
+		}
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := helperHandshake(ctx, wire); err != nil {
+		t.Fatal(err)
+	}
+	connection, err := newInitializedHelperTerminalConn(ctx, wire, target, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
+	return connection
 }
 
 func terminalReadUntil(t *testing.T, connection *helperTerminalConn, marker []byte) {
