@@ -224,3 +224,11 @@ func TestUpdateRequiredNamesTheFloorFromTheServersDetails(t *testing.T) {
 		}
 	}
 }
+
+// The clock_skew message agrees with `pb doctor`: a clock set back by minutes delays connections until it catches up.
+func TestClockSkewMessageNamesTheSetBackDelay(t *testing.T) {
+	got := publicAPIMessages["clock_skew"]
+	if !strings.Contains(got, "NTP") || !strings.Contains(got, "until it catches up") {
+		t.Fatalf("clock_skew message: %q", got)
+	}
+}
