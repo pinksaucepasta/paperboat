@@ -1,8 +1,11 @@
 package transfername
 
 import (
+	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestWindowsReceiverRefusesWhatWindowsCannotStore(t *testing.T) {
@@ -52,5 +55,21 @@ func TestPortableNameIsSavedUnchangedOnEveryOS(t *testing.T) {
 		if reason := Refusal("windows", got); reason != "" {
 			t.Fatalf("Portable(%q) = %q is still refused by Windows: %s", name, got, reason)
 		}
+	}
+}
+
+func TestNumberedNameStaysWithinTheFileSystemLimit(t *testing.T) {
+	long := strings.Repeat("x", 250) + ".txt"
+	multibyte := strings.Repeat("é", 125) + ".txt" // 254 bytes, every character two bytes
+	for _, name := range []string{"data.bin", long, multibyte, strings.Repeat("y", 255)} {
+		for _, index := range []int{2, 10, 10000} {
+			got := Numbered(name, index)
+			if len(got) > MaxBytes || !utf8.ValidString(got) || !strings.HasSuffix(got, fmt.Sprintf(" (%d)%s", index, filepath.Ext(name))) {
+				t.Errorf("Numbered(%.20q, %d) = %.30q (%d bytes)", name, index, got, len(got))
+			}
+		}
+	}
+	if Numbered("data.bin", 1) != "data.bin" || Numbered("data.bin", 2) != "data (2).bin" {
+		t.Error("a short name changed")
 	}
 }

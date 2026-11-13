@@ -1386,3 +1386,36 @@ func TestReceiverRefusesNamesItsOwnPlatformCannotStore(t *testing.T) {
 		}
 	}
 }
+
+// X-14: a 254-byte name that is already in the Inbox gets its collision number inside the 255-byte limit; the old
+// 'name (2).txt' was 258 bytes, the file system refused it, and the send never finished.
+func TestPublishedNameStaysWithinTheFileNameLimitOnCollision(t *testing.T) {
+	service, _, root := newService(t)
+	inbox := filepath.Join(root, "Paperboat Inbox")
+	service.config.PublishRoot = func() (string, error) { return inbox, nil }
+	if err := os.MkdirAll(inbox, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	name := strings.Repeat("x", 250) + ".txt"
+	if err := os.WriteFile(filepath.Join(inbox, name), []byte("existing"), 0o600); err != nil {
+		t.Skipf("the file system holds no 254-byte name: %v", err)
+	}
+	data := []byte("new data")
+	created, err := service.Create(context.Background(), CreateRequest{BatchID: "fb_long", SourceMachineID: "machine_source", DestinationMachineID: "machine_local", InitiatingUserID: "user_1", Files: []File{{Basename: name, Size: int64(len(data)), SHA256: digest(data)}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Append(context.Background(), created[0].ID, 0, bytes.NewReader(data)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Complete(context.Background(), created[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	path, err := service.PublishedPath(context.Background(), created[0].ID)
+	if err != nil {
+		t.Fatalf("a colliding long name could not be published: %v", err)
+	}
+	if base := filepath.Base(path); len(base) > 255 || !strings.HasSuffix(base, " (2).txt") || base == name {
+		t.Fatalf("published as %q (%d bytes)", base, len(base))
+	}
+}

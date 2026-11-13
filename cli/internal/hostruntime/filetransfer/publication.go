@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
+	"github.com/pinksaucepasta/paperboat/internal/transfername"
 )
 
 // Inbox changes apply when a transfer first publishes. Its exact destination is
@@ -144,7 +145,7 @@ func (s *Service) publishToRoot(ctx context.Context, transfer store.FileTransfer
 			continue
 		}
 		if index > 0 {
-			path = filepath.Join(root, publishedName(base, index))
+			path = filepath.Join(root, transfername.Numbered(base, index))
 		}
 		info, statErr := os.Lstat(path)
 		if statErr == nil {

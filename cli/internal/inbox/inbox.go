@@ -22,6 +22,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/filelock"
 	"github.com/pinksaucepasta/paperboat/internal/filetransfer"
+	"github.com/pinksaucepasta/paperboat/internal/transfername"
 	"github.com/pinksaucepasta/paperboat/shared/backoff"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
 )
@@ -626,13 +627,8 @@ func localBasename(name, goos string) string {
 }
 
 func availableName(root, basename string) (string, error) {
-	extension := filepath.Ext(basename)
-	stem := strings.TrimSuffix(basename, extension)
 	for index := 1; index <= 10000; index++ {
-		name := basename
-		if index > 1 {
-			name = fmt.Sprintf("%s (%d)%s", stem, index, extension)
-		}
+		name := transfername.Numbered(basename, index)
 		_, err := os.Lstat(filepath.Join(root, name))
 		if errors.Is(err, os.ErrNotExist) {
 			return name, nil

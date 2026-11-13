@@ -3,10 +3,7 @@ package filetransfer
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
 )
@@ -78,15 +75,6 @@ func (s *Service) OpenContent(ctx context.Context, id string) (*os.File, store.F
 		return nil, transfer, &Error{Code: StorageUnavailable, Cause: err}
 	}
 	return file, transfer, nil
-}
-
-func publishedName(basename string, index int) string {
-	if index <= 1 {
-		return basename
-	}
-	extension := filepath.Ext(basename)
-	stem := strings.TrimSuffix(basename, extension)
-	return fmt.Sprintf("%s (%d)%s", stem, index, extension)
 }
 
 func (s *Service) Cancel(ctx context.Context, id string) error {

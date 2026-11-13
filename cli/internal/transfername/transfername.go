@@ -9,6 +9,7 @@ package transfername
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -94,4 +95,20 @@ func Portable(name string) string {
 		out = out[:len(out)-size]
 	}
 	return out
+}
+
+// Numbered is the name a second file with the same name gets, "stem (2).ext". The stem is shortened (on a character
+// boundary) so the result is never longer than MaxBytes: a 254-byte name plus " (2)" is refused by the file system.
+func Numbered(name string, index int) string {
+	if index <= 1 {
+		return name
+	}
+	extension := filepath.Ext(name)
+	stem := strings.TrimSuffix(name, extension)
+	suffix := fmt.Sprintf(" (%d)%s", index, extension)
+	for len(stem)+len(suffix) > MaxBytes && stem != "" {
+		_, size := utf8.DecodeLastRuneInString(stem)
+		stem = stem[:len(stem)-size]
+	}
+	return stem + suffix
 }

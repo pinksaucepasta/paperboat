@@ -18,6 +18,9 @@ func TestSendRefusesNamesTheReceiverCannotStoreBeforeSending(t *testing.T) {
 			t.Errorf("message %q lacks %q", err.Error(), want)
 		}
 	}
+	if printsUsage(err) {
+		t.Errorf("a refused name is not wrong arguments: the command help must not follow the message")
+	}
 	if strings.Contains(err.Error(), `"ok.txt"`) {
 		t.Errorf("a storable name is listed: %q", err.Error())
 	}

@@ -103,7 +103,7 @@ def one_name(src, dst, name, content, before):
     done = src.pb('send', path, '--to', dst.alias, timeout=120)  # the human output reports where each file landed
     message = (done.text + done.errtext).strip()
     if done.rc != 0:
-        ok = name[:12] in message and any(r in message.lower() for r in REASONS) and 'could not finish the command' not in message  # X-14: names the file AND the reason
+        ok = name[:12].replace('"', '\\"') in message and any(r in message.lower() for r in REASONS) and 'could not finish the command' not in message  # X-14: names the file AND the reason
         return ('refused', ok, message[-200:])
     stored = [n for n, h in inbox_listing(dst)['files'].items() if h == hashlib.sha256(content).hexdigest() and n not in before['files']]
     if not stored:

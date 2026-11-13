@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -21,7 +22,8 @@ func receiverNameRefusal(alias, platform string, sources []filetransfer.Source) 
 	if len(reasons) == 0 {
 		return nil
 	}
-	return localArgumentError(fmt.Sprintf("Nothing was sent: %s cannot store %s. Rename the file%s and send again.", alias, strings.Join(reasons, "; "), plural(len(reasons))))
+	message := fmt.Sprintf("Nothing was sent: %s cannot store %s. Rename the file%s and send again.", alias, strings.Join(reasons, "; "), plural(len(reasons)))
+	return usageError{err: errors.New(message), publicMessage: message, refusal: true} // the arguments are right, the name is not: no command help
 }
 
 func plural(count int) string {

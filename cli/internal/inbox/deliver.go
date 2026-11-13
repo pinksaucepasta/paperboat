@@ -9,7 +9,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
+
+	"github.com/pinksaucepasta/paperboat/internal/transfername"
 )
 
 // maxDeliveredNames bounds the " (n)" suffixes tried when a name is taken.
@@ -53,7 +54,7 @@ func Deliver(root, name string, size int64, digest [sha256.Size]byte, content io
 		return "", ErrDeliveredDigest
 	}
 	for index := 1; index <= maxDeliveredNames; index++ {
-		candidate := filepath.Join(root, numberedName(name, index))
+		candidate := filepath.Join(root, transfername.Numbered(name, index))
 		linkErr := os.Link(staging, candidate)
 		if linkErr == nil {
 			return candidate, nil
@@ -63,14 +64,6 @@ func Deliver(root, name string, size int64, digest [sha256.Size]byte, content io
 		}
 	}
 	return "", fmt.Errorf("the Inbox already holds %d files named like %q", maxDeliveredNames, name)
-}
-
-func numberedName(name string, index int) string {
-	if index <= 1 {
-		return name
-	}
-	extension := filepath.Ext(name)
-	return fmt.Sprintf("%s (%d)%s", strings.TrimSuffix(name, extension), index, extension)
 }
 
 func hmacEqual(a, b []byte) bool {
