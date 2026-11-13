@@ -304,6 +304,29 @@ func TestTerminalTitleIsPushedAndRestored(t *testing.T) {
 	}
 }
 
+// X-25: a screen checkpoint that enters the alternate screen must not be written under the bar's scroll margin: its last
+// CRLF would scroll the first row away on a terminal that keeps the margin across the switch (seen through ConPTY).
+func TestScrollMarginIsClearedBeforeTheChunkThatEntersTheAlternateScreen(t *testing.T) {
+	input, _, _ := os.Pipe()
+	reader, output, _ := os.Pipe()
+	defer input.Close()
+	defer reader.Close()
+	bar := New(Options{
+		Mode: ModeAuto, Term: "xterm-256color", Input: input, Output: output,
+		IsTerminal: func(int) bool { return true }, GetSize: func(int) (int, int, error) { return 80, 24, nil },
+	})
+	_, _ = bar.Write([]byte("main row\r\n"))
+	_, _ = bar.Write([]byte("\x1b[?1049h\x1b[HALT_ROW\r\nrow2"))
+	_ = bar.Close()
+	_ = output.Close()
+	raw, _ := io.ReadAll(reader)
+	text := string(raw)
+	enter, clear := strings.Index(text, "\x1b[?1049h"), strings.LastIndex(text[:strings.Index(text, "\x1b[?1049h")], "\x1b[r")
+	if enter < 0 || clear < 0 || strings.Index(text, "main row") > clear {
+		t.Fatalf("no margin reset between the main row and the alternate-screen chunk: %q", text)
+	}
+}
+
 func TestLoadingSpinnerAdvances(t *testing.T) {
 	bar, _ := newTestBar(t, ModeAuto, "xterm-256color", 80, 24, true, time.Second)
 	bar.Loading("Preparing connection")

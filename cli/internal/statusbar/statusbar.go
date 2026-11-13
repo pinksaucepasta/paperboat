@@ -3,6 +3,7 @@
 package statusbar
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -231,6 +232,17 @@ func New(options Options) *Bar {
 	return b
 }
 
+// clearMarginBeforeFullscreen drops the bar's scroll margin before a chunk that enters the alternate screen is written: the
+// chunk is often a whole screen checkpoint (rows separated by CRLF), and with the margin still set its last LF scrolls the
+// top row away. consumeANSI clears it only after the chunk. shortcut: a sequence split across two writes is not seen.
+func (b *Bar) clearMarginBeforeFullscreen(data []byte) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.alternate && bytes.Contains(data, []byte("\x1b[?1049h")) {
+		_, _ = fmt.Fprint(b.serializedOut, "\x1b[r")
+	}
+}
+
 func (b *Bar) runOutputOwner() {
 	defer close(b.ownerDone)
 	var redrawTimer *time.Timer
@@ -238,6 +250,7 @@ func (b *Bar) runOutputOwner() {
 	for {
 		select {
 		case request := <-b.remoteWrites:
+			b.clearMarginBeforeFullscreen(request.data)
 			n, err := b.serializedOut.Write(request.data)
 			if n > 0 {
 				b.mu.Lock()
@@ -253,6 +266,7 @@ func (b *Bar) runOutputOwner() {
 		}
 		select {
 		case request := <-b.remoteWrites:
+			b.clearMarginBeforeFullscreen(request.data)
 			n, err := b.serializedOut.Write(request.data)
 			if n > 0 {
 				b.mu.Lock()
