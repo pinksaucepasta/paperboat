@@ -1,0 +1,36 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      multiple: true
+      options: [Linux, macOS, Windows, Other]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Paperboat version
+      description: Output of `pb version`
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: pb doctor output
+      description: Output of `pb doctor`. Remove anything you do not want to share.
+      render: text
