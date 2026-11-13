@@ -1,0 +1,15 @@
+{
+ "check": "xplat-config",
+ "results": [
+  {
+   "id": "X-07:x07_unicode:L>M",
+   "status": "PASS",
+   "detail": "NFD/NFC name is one file on both devices, edit round-trips, CJK name intact"
+  },
+  {
+   "id": "X-07:x07_unicode:M>L",
+   "status": "PASS",
+   "detail": "NFD/NFC name is one file on both devices, edit round-trips, CJK name intact"
+  }
+ ]
+}

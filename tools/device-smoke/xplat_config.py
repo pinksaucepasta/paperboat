@@ -504,7 +504,7 @@ def main():
     argv = sys.argv[1:]
     only = set(argv[argv.index('--only') + 1].split(',')) if '--only' in argv else set()
     keys = argv[argv.index('--devices') + 1].split(',') if '--devices' in argv else ['L', 'M']
-    devices = {k: d for k, d in fleet.fleet().items() if k in keys}
+    devices = fleet.fleet(keys)
     for key, dev in devices.items():
         dev.key = key
     def fresh():

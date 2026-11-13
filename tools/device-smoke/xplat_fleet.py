@@ -155,8 +155,10 @@ def windows(name=None):
     return Windows(name or PREFIX + '-w')
 
 
-def fleet():
-    return {'L': linux(), 'M': mac(), 'W': windows()}
+def fleet(keys=('L', 'M', 'W')):
+    """Only the requested devices are contacted: a dead runner must not stop a run that never uses it."""
+    builders = {'L': linux, 'M': mac, 'W': windows}
+    return {k: builders[k]() for k in keys}
 
 
 def mint_token(kind, name=None, controller_dev=None):
