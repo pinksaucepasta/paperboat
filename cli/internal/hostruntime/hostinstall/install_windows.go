@@ -1767,9 +1767,7 @@ func Commit(request Request) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	return client.CompleteMaintenance(ctx)
+	return completeMaintenanceRetrying(completeMaintenanceBudget, completeMaintenanceGap, client.CompleteMaintenance)
 }
 
 // EnsureCommittedWindowsHostdReady checks the enrolled-owner workload after
