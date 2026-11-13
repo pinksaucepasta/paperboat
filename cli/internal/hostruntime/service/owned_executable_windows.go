@@ -55,7 +55,7 @@ func VerifyOwnedWindowsRoleExecutable(kind, instance, path string) (WindowsExecu
 		return WindowsExecutableIdentity{}, ErrInvalidDefinition
 	}
 	if err := installsource.VerifyDigest(path, identity.Length, identity.SHA256); err != nil {
-		if errors.Is(err, installsource.ErrInvalid) {
+		if !errors.Is(err, os.ErrNotExist) && errors.Is(err, installsource.ErrInvalid) {
 			err = ErrInvalidDefinition
 		}
 		return WindowsExecutableIdentity{}, err

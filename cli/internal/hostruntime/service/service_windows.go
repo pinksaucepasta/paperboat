@@ -4,8 +4,6 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
@@ -294,20 +293,20 @@ func renderWindowsService(config Config) ([]byte, error) {
 		Account: config.User,
 	}
 	if config.Instance != "" && (config.Kind == HostdKind || config.Kind == UpdaterKind || config.Kind == DaemonKind || config.Kind == SessionOwnerKind || config.Kind == CarrierKind) {
-		file, err := os.Open(config.Executable)
+		length, sum, err := installsource.Digest(config.Executable)
 		if err == nil {
-			digest := sha256.New()
-			length, copyErr := io.Copy(digest, io.LimitReader(file, (256<<20)+1))
-			closeErr := file.Close()
-			if copyErr != nil || closeErr != nil || length < 1 || length > 256<<20 {
+			if length > 256<<20 {
 				return nil, ErrInvalidDefinition
 			}
-			definition.ExecutableSHA256, definition.ExecutableLength = hex.EncodeToString(digest.Sum(nil)), length
-			if config.ExecutableSHA256 != "" && (definition.ExecutableSHA256 != config.ExecutableSHA256 || length != config.ExecutableLength) {
+			definition.ExecutableSHA256, definition.ExecutableLength = sum, length
+			if config.ExecutableSHA256 != "" && (sum != config.ExecutableSHA256 || length != config.ExecutableLength) {
 				return nil, ErrInvalidDefinition
 			}
 		} else if config.ExecutableSHA256 != "" || !errors.Is(err, os.ErrNotExist) {
-			return nil, err
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, err
+			}
+			return nil, ErrInvalidDefinition
 		}
 	}
 	return json.MarshalIndent(definition, "", "  ")

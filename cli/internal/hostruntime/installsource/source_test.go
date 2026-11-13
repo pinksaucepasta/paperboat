@@ -86,12 +86,12 @@ func TestVerifyCachesByFileIdentityAndRehashesAfterAnyRewrite(t *testing.T) {
 	if !cacheable {
 		t.Skip("no inode/ctime identity on this platform; every Verify hashes")
 	}
-	if !verifiedFiles.matches(path, identity, source.Length, source.SHA256) {
+	if length, sum, ok := verifiedFiles.lookup(path, identity); !ok || length != source.Length || sum != source.SHA256 {
 		t.Fatal("a verified executable was not remembered")
 	}
 	other := source
 	other.SHA256 = strings.Repeat("0", 64)
-	if verifiedFiles.matches(path, identity, other.Length, other.SHA256) {
+	if other.Verify(path) == nil {
 		t.Fatal("a remembered file matched a different source")
 	}
 	info, err := os.Stat(path)
@@ -123,13 +123,32 @@ func TestVerifyDigestRemembersAMatchAndRefusesAnythingElse(t *testing.T) {
 	if err := VerifyDigest(path, int64(len(body)), digest); err != nil {
 		t.Fatal(err)
 	}
-	if identity, cacheable := fileIdentityOf(path); cacheable && !verifiedFiles.matches(path, identity, int64(len(body)), digest) {
-		t.Fatal("a verified file was not remembered")
+	if identity, cacheable := fileIdentityOf(path); cacheable {
+		if length, sum, ok := verifiedFiles.lookup(path, identity); !ok || length != int64(len(body)) || sum != digest {
+			t.Fatal("a verified file was not remembered")
+		}
 	}
 	if err := VerifyDigest(path, int64(len(body))+1, digest); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("wrong length: %v", err)
 	}
 	if err := VerifyDigest(path, int64(len(body)), strings.Repeat("0", 64)); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("wrong digest: %v", err)
+	}
+}
+
+// Digest follows the file: the remembered value is used while its identity is unchanged and never after a rewrite.
+func TestDigestIsRehashedAfterARewrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "pb")
+	for _, body := range []string{"first body", "other body"} {
+		if err := os.WriteFile(path, []byte(body), 0700); err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256([]byte(body))
+		for range 2 {
+			length, got, err := Digest(path)
+			if err != nil || length != int64(len(body)) || got != hex.EncodeToString(sum[:]) {
+				t.Fatalf("Digest(%q) = %d %s %v", body, length, got, err)
+			}
+		}
 	}
 }

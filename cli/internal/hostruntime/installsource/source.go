@@ -109,25 +109,36 @@ func (s Source) Verify(path string) error {
 	return binarytarget.Validate(path, s.Platform, s.Architecture)
 }
 
-// VerifyDigest checks that path holds exactly length bytes with the given SHA-256, hashing the file only when its
-// on-disk identity changed since a match. Callers that verify an executable against a recorded digest (the Windows
-// service definitions) use it so the 5 s reconciliation does not re-read ~100 MB per call.
+// VerifyDigest checks that path holds exactly length bytes with the given SHA-256 (see Digest).
 func VerifyDigest(path string, length int64, sha256 string) error {
-	identity, cacheable := fileIdentityOf(path)
-	if cacheable && verifiedFiles.matches(path, identity, length, sha256) {
-		return nil
-	}
-	got, digest, err := digestFile(path)
+	got, sum, err := Digest(path)
 	if err != nil {
 		return err
 	}
-	if got != length || digest != sha256 {
+	if got != length || sum != sha256 {
 		return ErrInvalid
 	}
-	if after, ok := fileIdentityOf(path); cacheable && ok && after == identity {
-		verifiedFiles.remember(path, identity, length, sha256)
-	}
 	return nil
+}
+
+// Digest returns the length and SHA-256 of the executable at path, hashing the file only when its on-disk identity
+// changed since the last time. The Windows service definitions are rendered and verified from it on every 5 s
+// reconciliation pass, which otherwise re-read ~100 MB per call (PR-03: 75 MB/s on an idle machine).
+func Digest(path string) (int64, string, error) {
+	identity, cacheable := fileIdentityOf(path)
+	if cacheable {
+		if length, sum, ok := verifiedFiles.lookup(path, identity); ok {
+			return length, sum, nil
+		}
+	}
+	length, sum, err := digestFile(path)
+	if err != nil {
+		return 0, "", err
+	}
+	if after, ok := fileIdentityOf(path); cacheable && ok && after == identity {
+		verifiedFiles.remember(path, identity, length, sum)
+	}
+	return length, sum, nil
 }
 
 // verifiedFiles remembers files whose bytes matched a source, keyed by their exact on-disk
@@ -150,11 +161,14 @@ type verificationCache struct {
 	entries map[string]verifiedFile
 }
 
-func (c *verificationCache) matches(path string, identity fileIdentity, length int64, sha256 string) bool {
+func (c *verificationCache) lookup(path string, identity fileIdentity) (int64, string, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	entry, ok := c.entries[path]
-	return ok && entry == verifiedFile{identity, length, sha256}
+	if !ok || entry.identity != identity {
+		return 0, "", false
+	}
+	return entry.length, entry.sha256, true
 }
 
 func (c *verificationCache) remember(path string, identity fileIdentity, length int64, sha256 string) {
