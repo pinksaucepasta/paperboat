@@ -18,6 +18,7 @@ import (
 	sessionauth "github.com/pinksaucepasta/paperboat/internal/auth"
 	"github.com/pinksaucepasta/paperboat/internal/command"
 	"github.com/pinksaucepasta/paperboat/internal/config"
+	"github.com/pinksaucepasta/paperboat/internal/hostruntime/store"
 	"github.com/pinksaucepasta/paperboat/internal/selector"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -488,7 +489,9 @@ func rememberWorkspaceEnvironment(commandContext *command.Context, cfg *config.C
 }
 
 func writeWorkspaceRecord(path string, value any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	// A plain MkdirAll on Windows gives the directory the creating token's default DACL: made from an elevated ssh session it
+	// excludes the user, and a normal console then fails with "Access is denied" (X-24, pb connect).
+	if err := store.EnsurePrivateDirectory(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("create workspace preference directory: %w", err)
 	}
 	data, err := json.MarshalIndent(value, "", "  ")
