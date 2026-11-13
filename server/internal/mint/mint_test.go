@@ -470,6 +470,23 @@ func TestPreviewLaunchCredentialBindsLeaseAndTraceFields(t *testing.T) {
 			t.Fatalf("%s preview launch credential not verifiable: %v", mode, err)
 		}
 	}
+	// A shared (team-owned) machine's lease is capped at five minutes while the user's own deadline stays later;
+	// the user deadline never ends before the lease (the store refuses that too), so only an earlier one is invalid.
+	userDeadline := input.LeaseDeadline.Add(25 * time.Minute)
+	shared := input
+	shared.LeaseDeadline, shared.UserDeadline = now.Add(5*time.Minute), &userDeadline
+	sharedToken, err := provider.SignCredential(shared)
+	if err != nil {
+		t.Fatalf("lease shorter than the user deadline refused: %v", err)
+	}
+	if _, err := provider.VerifyCredential(sharedToken, input.Issuer, input.CredentialClass, now); err != nil {
+		t.Fatalf("lease shorter than the user deadline not verifiable: %v", err)
+	}
+	early := now.Add(time.Minute)
+	shared.UserDeadline = &early
+	if _, err := provider.SignCredential(shared); err == nil {
+		t.Fatal("user deadline before the lease deadline accepted")
+	}
 	unknown := input
 	unknown.AccessMode = "everyone"
 	if _, err := provider.SignCredential(unknown); err == nil {

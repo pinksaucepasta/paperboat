@@ -1074,7 +1074,7 @@ func validatePreviewLaunchInput(input CredentialInput) error {
 	if input.Endpoint == "" || !strings.HasPrefix(input.Endpoint, "https://") || strings.ContainsAny(input.Endpoint, "\r\n") {
 		return errors.New("endpoint binding is invalid")
 	}
-	if input.LeaseDeadline.IsZero() || !input.LeaseDeadline.After(input.IssuedAt.UTC()) || input.UserDeadline != nil && (input.UserDeadline.IsZero() || input.UserDeadline.Before(input.IssuedAt.UTC()) || input.UserDeadline.After(input.LeaseDeadline)) {
+	if input.LeaseDeadline.IsZero() || !input.LeaseDeadline.After(input.IssuedAt.UTC()) || input.UserDeadline != nil && (input.UserDeadline.IsZero() || input.UserDeadline.Before(input.IssuedAt.UTC()) || input.UserDeadline.Before(input.LeaseDeadline)) {
 		return errors.New("lease deadline binding is invalid")
 	}
 	if input.CreatedAt.IsZero() || input.LastRenewedAt.IsZero() || input.LastRenewedAt.Before(input.CreatedAt) || input.CreatedAt.After(input.LeaseDeadline) {
@@ -1138,7 +1138,7 @@ func validatePreviewLaunchClaims(claims CredentialClaims) error {
 	if claims.TargetAddress == "" || len(claims.TargetAddress) > 512 || strings.ContainsAny(claims.TargetAddress, "\r\n") || (claims.AccessMode != "public" && claims.AccessMode != "private" && claims.AccessMode != "team") {
 		return errors.New("target binding is invalid")
 	}
-	if claims.Endpoint == "" || !strings.HasPrefix(claims.Endpoint, "https://") || strings.ContainsAny(claims.Endpoint, "\r\n") || claims.LeaseDeadline <= claims.IssuedAt || claims.UserDeadline != nil && (*claims.UserDeadline <= claims.IssuedAt || *claims.UserDeadline > claims.LeaseDeadline) {
+	if claims.Endpoint == "" || !strings.HasPrefix(claims.Endpoint, "https://") || strings.ContainsAny(claims.Endpoint, "\r\n") || claims.LeaseDeadline <= claims.IssuedAt || claims.UserDeadline != nil && (*claims.UserDeadline <= claims.IssuedAt || *claims.UserDeadline < claims.LeaseDeadline) {
 		return errors.New("lease deadline binding is invalid")
 	}
 	if claims.CreatedAt <= 0 || claims.LastRenewedAt < claims.CreatedAt || claims.CreatedAt > claims.LeaseDeadline {
