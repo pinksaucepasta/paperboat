@@ -172,7 +172,7 @@ def stop_origin(controller, owner, stop):
     assert done.rc == 0, 'origin cleanup: ' + (done.text + done.errtext)[-400:]
 
 
-def run_pair(team, owner, member, oid, records, origin_controller):
+def run_pair(team, owner, member, oid, records, origin_controller, save):
     original = fleet.json_pb(team.admin, 'team', 'get', team.id)['allow_private_access']
     suffix = uuid.uuid4().hex[:8]
     sep = '\\' if member.os == 'windows' else '/'
@@ -230,8 +230,10 @@ def run_pair(team, owner, member, oid, records, origin_controller):
                     assert raw.rc == 0, 'raw probe failed: ' + raw.errtext[-200:]
                     probe = json.loads(raw.text)
                     records[mutation]['raw_refusal'] = probe
+                    save()
                     assert raw_denied(member.os, probe), 'raw TCP fresh attempt: %r' % probe
                     records[mutation]['status'] = 'PASS'
+                    save()
                     print('PASS X-19:%s:%s>%s %.2fs' % (mutation, member.os, owner.os, seconds), flush=True)
                 finally:
                     member.write(stop, b'stop')
@@ -282,6 +284,10 @@ def main():
         assert version.rc == 0, d.name + ' version unavailable'
         assert 'dev-ac409910b' in version.text, 'wrong cycle build: ' + d.name
         versions[d.name] = version.text.strip()
+    def save():
+        out.write_text(json.dumps({'check': 'X-19-team-private-end',
+            'direction': 'holder>shared target', 'versions': versions, 'results': results}, indent=2))
+    save()
     try:
         for pair in args.pairs.split(','):
             client, target = combinations[pair]
@@ -292,7 +298,7 @@ def main():
                 matches = [x for x in fleet.json_pb(target_ctl,'machine','list')['machines']
                            if x['alias'] == target.alias and x['online']]
                 assert len(matches) == 1, 'target not online: ' + target.alias
-                run_pair(team,target,client,matches[0]['id'],results[pair],target)
+                run_pair(team,target,client,matches[0]['id'],results[pair],target,save)
             except Exception as error:
                 results[pair].update(status='FAIL',error=str(error))
                 print('FAIL X-19:' + pair + ': ' + str(error), flush=True)
