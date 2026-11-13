@@ -157,7 +157,7 @@ func configuredInboxPath() (string, error) {
 		return "", commandPreparationFailure{step: prepareInboxRegistration, cause: err}
 	}
 	if err := inbox.ValidatePath(registration.InboxPath); err != nil {
-		return "", err
+		return registration.InboxPath, err
 	}
 	return registration.InboxPath, nil
 }
@@ -165,13 +165,23 @@ func configuredInboxPath() (string, error) {
 func inboxPathCommand(c *command.Context) error {
 	path, err := configuredInboxPath()
 	if err != nil {
-		return err
+		return inboxPathRefusal(path, err)
 	}
 	if c.Bool("json") {
 		return json.NewEncoder(c.Writer).Encode(map[string]any{"schema_version": "1.0", "ok": true, "data": map[string]string{"path": path}})
 	}
 	fmt.Fprintln(c.Writer, path)
 	return nil
+}
+
+// inboxPathRefusal names the configured folder and the OS cause when ValidatePath refused it (path is "" when the
+// registration itself could not be read, which keeps its own error).
+func inboxPathRefusal(path string, err error) error {
+	if path == "" {
+		return err
+	}
+	return usageError{err: err, refusal: true,
+		publicMessage: fmt.Sprintf("This machine's Inbox folder %s cannot be used (%v). Choose another folder with `pb inbox set <folder>`.", path, err)}
 }
 
 func inboxSetCommand(c *command.Context) error {

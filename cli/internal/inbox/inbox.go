@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -565,7 +566,12 @@ func ValidatePath(path string) error {
 	//paperboat:allow-source-policy atomic-replacement owner=inbox reason=destination-writability-probe
 	probe, err := os.CreateTemp(path, ".paperboat-inbox-probe-*")
 	if err != nil {
-		return errors.New("inbox path is not writable")
+		// The OS error without the probe's path, the same cause wording the receiver sends a sender.
+		var pathErr *fs.PathError
+		if errors.As(err, &pathErr) {
+			err = pathErr.Err
+		}
+		return fmt.Errorf("inbox path is not writable: %w", err)
 	}
 	probePath := probe.Name()
 	if closeErr := probe.Close(); closeErr != nil {
