@@ -1,0 +1,34 @@
+{
+ "checks": [
+  {
+   "check": "baseline exec R->W before the revocation",
+   "status": "PASS",
+   "detail": "revoke-baseline"
+  },
+  {
+   "check": "W and R cut off from the control plane",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "L revokes R during the outage",
+   "status": "PASS",
+   "detail": "as\":\"relmw2-l\",\"id\":\"machine_eaad067c-7f89-413e-b2d6-3020dace6074\",\"state\":\"disconnected\"},\"outcome\":\"confirmed\",\"retry\":\"not_required\",\"version\":\"1\"}"
+  },
+  {
+   "check": "during the outage R still reaches W from W's rules (the revocation has not arrived)",
+   "status": "FAIL",
+   "detail": " service is not ready yet. Check that its Runtime is ready in `pb status`, then retry. Support reference: support_4be85f03-3678-4f25-8098-b2a624a8132c. Run `pb bugreport --upload` to send the details."
+  },
+  {
+   "check": "control plane reachable again",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "after the connection returned R is refused within 180 s",
+   "status": "PASS",
+   "detail": "0 s; `pb login` and approve this CLI in your browser. The printed link works on another device when this machine has no browser. Then retry. Support reference: support_e3a2fe66-a058-43ef-974f-1ce93f27fc06."
+  }
+ ]
+}

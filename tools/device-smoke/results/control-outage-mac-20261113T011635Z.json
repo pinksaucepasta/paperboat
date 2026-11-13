@@ -1,0 +1,170 @@
+{
+ "outage_seconds": 660,
+ "checks": [
+  {
+   "check": "baseline exec L->W",
+   "status": "PASS",
+   "detail": "baseline-LW"
+  },
+  {
+   "check": "baseline exec W->L",
+   "status": "PASS",
+   "detail": "baseline-WL"
+  },
+  {
+   "check": "both long execs printed their start marker before the cut",
+   "status": "PASS",
+   "detail": "L->W True, W->L True"
+  },
+  {
+   "check": "control plane unreachable for W (firewall) and L (iptables)",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "W: pb status shows the control plane as unreachable",
+   "status": "PASS",
+   "detail": "Daemon: degraded  Generation: 29  Observed: 2026-11-13T00:59:10Z Health: error: Control plane is unavailable  Recovery: Check network access and Paperboat authentication  fixr-p1 (machine_4de0f7c7-ed8b-4c59-9e46-208e22018a2c)   Runtime: ready  Eligible: true  Generation: 1  Last observed: 2026-11-13"
+  },
+  {
+   "check": "outage 30 s: new exec L->W",
+   "status": "PASS",
+   "detail": "outage-30s-LW Paperboat ENV not applied: ENV needs Paperboat online. The command ran without your managed values; run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "check": "outage 30 s: new exec W->L",
+   "status": "PASS",
+   "detail": "outage-30s-WL Paperboat ENV not applied: ENV needs Paperboat online. The command ran without your managed values; run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "check": "outage 30 s: new pb connect terminal L->W",
+   "status": "PASS",
+   "detail": "          \u001b[0m\u001b[27m\u001b[24m\u001b[Jadmin@Manageds-Virtual-Machine ~ % \u001b[K\u001b[?2004he\bexit\u001b[?2004l \u001b[?1000l\u001b[?1002l\u001b[?1003l\u001b[?1006l\u001b[?1015l\u001b[?2004l\u001b[?1049l\u001b[?25h\u001b[r\u001b[2J\u001b[H"
+  },
+  {
+   "check": "outage 30 s: new pb ssh L->W",
+   "status": "PASS",
+   "detail": "outage-ssh"
+  },
+  {
+   "check": "outage 30 s: long L->W still running",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "outage 30 s: long W->L still running",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "outage 30 s: W pb status still shows the control plane as unreachable",
+   "status": "PASS",
+   "detail": "Daemon: degraded  Generation: 29  Observed: 2026-11-13T00:59:10Z Health: error: Control plane is unavailable  Recovery: Check network access and Paperboat authentication  fixr-p1 (machine_4de0f7c7-ed8b-4c59-9e46-208e22018a2c)   Runtime: ready  Eligible: true  Generation: 1  Last observed: 2026-11-13"
+  },
+  {
+   "check": "outage 5 min: new exec L->W",
+   "status": "PASS",
+   "detail": "outage-5min-LW Paperboat ENV not applied: ENV needs Paperboat online. The command ran without your managed values; run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "check": "outage 5 min: new exec W->L",
+   "status": "PASS",
+   "detail": "outage-5min-WL Paperboat ENV not applied: ENV needs Paperboat online. The command ran without your managed values; run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "check": "outage 5 min: new pb connect terminal L->W",
+   "status": "PASS",
+   "detail": "          \u001b[0m\u001b[27m\u001b[24m\u001b[Jadmin@Manageds-Virtual-Machine ~ % \u001b[K\u001b[?2004he\bexit\u001b[?2004l \u001b[?1000l\u001b[?1002l\u001b[?1003l\u001b[?1006l\u001b[?1015l\u001b[?2004l\u001b[?1049l\u001b[?25h\u001b[r\u001b[2J\u001b[H"
+  },
+  {
+   "check": "outage 5 min: new pb ssh L->W",
+   "status": "PASS",
+   "detail": "outage-ssh"
+  },
+  {
+   "check": "outage 5 min: long L->W still running",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "outage 5 min: long W->L still running",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "outage 5 min: W pb status still shows the control plane as unreachable",
+   "status": "PASS",
+   "detail": "Daemon: degraded  Generation: 29  Observed: 2026-11-13T00:59:10Z Health: error: Control plane is unavailable  Recovery: Check network access and Paperboat authentication  fixr-p1 (machine_4de0f7c7-ed8b-4c59-9e46-208e22018a2c)   Runtime: ready  Eligible: true  Generation: 1  Last observed: 2026-11-13"
+  },
+  {
+   "check": "outage end: new exec L->W",
+   "status": "PASS",
+   "detail": "outage-end-LW Paperboat ENV not applied: ENV needs Paperboat online. The command ran without your managed values; run it again once `pb status` shows Paperboat is reachable."
+  },
+  {
+   "check": "outage end: new exec W->L",
+   "status": "FAIL",
+   "detail": "pb: the machine is offline; start or repair Paperboat on it (`pb doctor`), then retry. Support reference: support_f168ba25-be06-4119-a6d0-f6afd2c5ffff. Run `pb bugreport --upload` to send the details."
+  },
+  {
+   "check": "outage end: new pb connect terminal L->W",
+   "status": "PASS",
+   "detail": "          \u001b[0m\u001b[27m\u001b[24m\u001b[Jadmin@Manageds-Virtual-Machine ~ % \u001b[K\u001b[?2004he\bexit\u001b[?2004l \u001b[?1000l\u001b[?1002l\u001b[?1003l\u001b[?1006l\u001b[?1015l\u001b[?2004l\u001b[?1049l\u001b[?25h\u001b[r\u001b[2J\u001b[H"
+  },
+  {
+   "check": "outage end: new pb ssh L->W",
+   "status": "PASS",
+   "detail": "outage-ssh"
+  },
+  {
+   "check": "outage end: long L->W still running",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "outage end: long W->L still running",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "outage end: W pb status still shows the control plane as unreachable",
+   "status": "FAIL",
+   "detail": "Daemon: ready  Generation: 32  Observed: 2026-11-13T01:11:05Z  fixr-p1 (machine_4de0f7c7-ed8b-4c59-9e46-208e22018a2c)   Runtime: ready  Eligible: true  Generation: 1  Last observed: 2026-11-13T01:10:56Z   Path: none  Consumers: 0  Transfer: ready  Preview: ready  SSH: ready  fixr-p2 (machine_b4eb7d3"
+  },
+  {
+   "check": "outage: W pb doctor runs and names the control plane",
+   "status": "PASS",
+   "detail": "Paperboat doctor: degraded Correlation: support_0c3c2bd3-e6cb-4989-9bed-98636d62c04e authentication: pass: The Paperboat server accepted the current credential. clock: pass: This machine's clock match"
+  },
+  {
+   "check": "control plane reachable again",
+   "status": "PASS",
+   "detail": ""
+  },
+  {
+   "check": "recovery: W pb status healthy again",
+   "status": "PASS",
+   "detail": "0 s after the start; Daemon: ready  Generation: 32  Observed: 2026-11-13T01:11:05Z  fixr-p1 (machine_4de0f7c7-ed8b-4c59-9e46-208e22018a2c)   Runtime: ready  Eligible: true  Generation: 1  Last observed: 2026-11-13T01:10:56Z   Path: none  Consumers: 0  Transfer: ready  Preview: ready  SSH: ready  fix"
+  },
+  {
+   "check": "recovery: new exec L->W",
+   "status": "PASS",
+   "detail": "recovered-LW"
+  },
+  {
+   "check": "recovery: new exec W->L",
+   "status": "PASS",
+   "detail": "recovered-WL"
+  },
+  {
+   "check": "recovery: long L->W finished rc 0 with its output",
+   "status": "FAIL",
+   "detail": "started"
+  },
+  {
+   "check": "recovery: long W->L finished rc 0 with its output",
+   "status": "PASS",
+   "detail": "rc=0 out=b'started\\nlong-wl-done\\n'"
+  }
+ ]
+}
