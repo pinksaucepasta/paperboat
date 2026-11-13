@@ -10,6 +10,9 @@ import (
 )
 
 const MaxHostKeys = 8
+
+// MaxClientKeys is how many live client keys one account may register, and the most a host authorizes.
+const MaxClientKeys = 64
 const MaxHostKeyBytes = 8192
 
 var ErrInvalid = errors.New("managed SSH request is invalid")

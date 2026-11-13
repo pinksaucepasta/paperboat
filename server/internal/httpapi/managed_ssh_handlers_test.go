@@ -6,6 +6,7 @@ import (
 	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -41,6 +42,10 @@ func TestManagedSSHErrorPreservesPureResponsesAndReportsOperationalFailures(t *t
 			}
 			if body.Error.Code != tc.code {
 				t.Fatalf("code=%s want%s", body.Error.Code, tc.code)
+			}
+			// The refusal names the limit and the way out, so a user at the cap knows what to free.
+			if tc.code == "managed_ssh_client_key_capacity" && (!strings.Contains(body.Error.Message, "64 signed-in computers") || !strings.Contains(body.Error.Message, "pb logout")) {
+				t.Fatalf("capacity message = %q", body.Error.Message)
 			}
 			if tc.status < 500 {
 				if logs.Len() != 0 {

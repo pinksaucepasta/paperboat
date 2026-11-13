@@ -27,3 +27,17 @@ func TestSSHToATargetThatIsNotReadyNamesTheReason(t *testing.T) {
 		t.Fatalf("a ready target was refused: %v", err)
 	}
 }
+
+// pb scp, sftp and rsync stop at the account's managed-SSH key limit with the daemon's reason instead of
+// letting OpenSSH fail with "Permission denied (publickey)" (hp 2026-11-13, a full test account).
+func TestSSHToolsNameTheClientKeyLimit(t *testing.T) {
+	previous := readDaemonSnapshot
+	t.Cleanup(func() { readDaemonSnapshot = previous })
+	readDaemonSnapshot = func(context.Context) (localapi.Snapshot, error) {
+		return localapi.Snapshot{Machines: []localapi.MachineStatus{{ID: "machine_b", Alias: "box", SSHReadiness: "degraded", Health: []localapi.HealthItem{{Code: "ssh_client_key_capacity", Severity: "warning", Title: "This computer cannot use managed SSH: the account's limit of 64 signed-in computers using managed SSH is reached", Recovery: "Sign out on a computer you no longer use (pb logout there) or revoke it (pb machine revoke <machine>), then retry"}}}}}, nil
+	}
+	err := sshTargetHealth(context.Background(), "machine_b", "box")
+	if err == nil || !strings.Contains(err.Error(), "limit of 64") || !strings.Contains(err.Error(), "pb logout") {
+		t.Fatalf("err=%v", err)
+	}
+}

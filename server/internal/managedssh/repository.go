@@ -108,7 +108,7 @@ func (r *SQLRepository) RegisterClient(ctx context.Context, request RegisterClie
 		if err != nil {
 			return err
 		}
-		if activeCount >= 64 {
+		if activeCount >= wire.MaxClientKeys {
 			return ErrClientKeyCapacity
 		}
 		existing, err := q.GetManagedSSHClientKeyByFingerprint(ctx, proposed.Fingerprint[:])
@@ -199,7 +199,7 @@ func (r *SQLRepository) ListClientKeys(ctx context.Context, request ListClientKe
 		if err != nil {
 			return err
 		}
-		if len(rows) > 64 {
+		if len(rows) > wire.MaxClientKeys {
 			return errors.Join(ErrUnavailable, ErrMachineKeyCapacity)
 		}
 		result.Keys = make([]ClientKey, 0, len(rows))

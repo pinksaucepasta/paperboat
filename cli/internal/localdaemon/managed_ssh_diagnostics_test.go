@@ -80,7 +80,7 @@ func TestManagedSSHClientKeyCapacityIsNamed(t *testing.T) {
 	}
 	machine := api.UserMachine{ID: "machine_1", Alias: "studio", Online: true, InstallationGeneration: 1, SSHLocalCode: "ssh_client_key_capacity"}
 	item := mapMachines([]api.UserMachine{machine})[0].Health[0]
-	if item.Code != "ssh_client_key_capacity" || !strings.Contains(item.Title, "limit") || !strings.Contains(item.Recovery, "pb logout") {
+	if item.Code != "ssh_client_key_capacity" || !strings.Contains(item.Title, "limit of 64") || !strings.Contains(item.Recovery, "pb logout") || !strings.Contains(item.Recovery, "pb machine revoke") {
 		t.Fatalf("health = %+v", item)
 	}
 }

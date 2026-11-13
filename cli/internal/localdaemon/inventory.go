@@ -17,6 +17,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/errorreport"
 	"github.com/pinksaucepasta/paperboat/internal/localapi"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
+	wire "github.com/pinksaucepasta/paperboat/shared/managedssh"
 )
 
 const (
@@ -539,8 +540,8 @@ func mapMachines(machines []api.UserMachine) []localapi.MachineStatus {
 			code := machine.SSHLocalCode
 			status.Health = []localapi.HealthItem{{Code: code, Severity: "warning", Title: "Managed SSH is not ready", Recovery: managedSSHDoctorRecovery, ETag: code}}
 			if code == managedSSHClientKeyCapacityCode {
-				status.Health[0].Title = "This computer cannot use managed SSH: the account's signed-in computer limit is reached"
-				status.Health[0].Recovery = "Sign out on a computer you no longer use (pb logout there) or remove it, then retry"
+				status.Health[0].Title = "This computer cannot use managed SSH: the account's limit of " + strconv.Itoa(wire.MaxClientKeys) + " signed-in computers using managed SSH is reached"
+				status.Health[0].Recovery = "Sign out on a computer you no longer use (pb logout there) or revoke it (pb machine revoke <machine>), then retry"
 			}
 			if code == managedSSHUnsafeDirectoryCode {
 				status.Health[0].Title = "This computer cannot use managed SSH: its .ssh folder or config is owned by another account or writable by other users"
