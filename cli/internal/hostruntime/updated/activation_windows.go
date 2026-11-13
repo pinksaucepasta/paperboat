@@ -272,6 +272,9 @@ func stageWindowsActivation(ctx context.Context, config WindowsConfig, release w
 	if err := stageWindowsComponent(ctx, source, release, "pb", paths.Runtime, target, config.OwnerSID); err != nil {
 		return windowsActivationJournal{}, err
 	}
+	if err := hostinstall.AllowWindowsFirewall(ctx, layout, paths.Runtime); err != nil {
+		return windowsActivationJournal{}, err
+	}
 	staged := windowsActivationComponent{Path: paths.Runtime, SHA256: target.SHA256, Length: target.Length}
 	// The retained carrier owns accepted SSH streams. Preserve the original
 	// wrapper declaration; selected-source wrappers are published separately.

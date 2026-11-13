@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/installsource"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/service"
+	"github.com/pinksaucepasta/paperboat/internal/windowsfirewall"
 	"golang.org/x/sys/windows"
 	"os"
 	"path/filepath"
@@ -39,6 +40,28 @@ func ensureWindowsPinnedRuntime(ctx context.Context, layout service.Layout, sour
 	return ensureWindowsPinnedRuntimeFrom(ctx, layout, source, ownerSID, layout.Binary)
 }
 func ensureWindowsPinnedRuntimeFrom(ctx context.Context, layout service.Layout, source installsource.Source, ownerSID, executable string) (string, error) {
+	path, err := stageWindowsPinnedRuntime(ctx, layout, source, ownerSID, executable)
+	if err != nil {
+		return "", err
+	}
+	// The pin and the installed slot run in the user's session; a rule per path keeps the firewall dialog away.
+	if err := AllowWindowsFirewall(ctx, layout, path, layout.Binary); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// AllowWindowsFirewall adds the inbound allow rules for the given pb.exe paths of layout's instance.
+func AllowWindowsFirewall(ctx context.Context, layout service.Layout, programs ...string) error {
+	for _, program := range programs {
+		if err := windowsfirewall.Allow(ctx, service.ExecRunner{}, windowsfirewall.Group(layout.Instance), program); err != nil {
+			return hostInstallFailure("allow the runtime through Windows Firewall (run pb doctor from an elevated prompt)", err)
+		}
+	}
+	return nil
+}
+
+func stageWindowsPinnedRuntime(ctx context.Context, layout service.Layout, source installsource.Source, ownerSID, executable string) (string, error) {
 	if err := prepareWindowsAccountPinRoot(ctx, layout, ownerSID); err != nil {
 		return "", err
 	}

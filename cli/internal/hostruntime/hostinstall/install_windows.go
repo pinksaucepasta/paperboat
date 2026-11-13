@@ -44,6 +44,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/processlaunch"
 	"github.com/pinksaucepasta/paperboat/internal/windows/elevation"
 	winenv "github.com/pinksaucepasta/paperboat/internal/windowsenvironment"
+	"github.com/pinksaucepasta/paperboat/internal/windowsfirewall"
 	"github.com/pinksaucepasta/paperboat/internal/windowsopenssh"
 	"github.com/pinksaucepasta/paperboat/internal/windowssecurity"
 	"github.com/pinksaucepasta/paperboat/shared/diagnosticlog"
@@ -2635,6 +2636,12 @@ func uninstallWindowsKeepingCLI(ctx context.Context, layout service.Layout, purg
 	// A purge is a recovery boundary: a step that fails is reported under its name and the later steps still run,
 	// so a half-upgraded installation loses everything that can be removed in one run. Uninstall stops at once.
 	var result error
+	if err := windowsfirewall.Remove(ctx, service.ExecRunner{}, windowsfirewall.Group(layout.Instance)); err != nil {
+		if !purge {
+			return hostInstallFailure("remove the Windows Firewall rules", err)
+		}
+		result = hostInstallFailure("remove the Windows Firewall rules", err)
+	}
 	if err := removeWindowsRuntimeGenerations(ctx, layout, ownerSID, purge); err != nil {
 		if !purge {
 			return err
