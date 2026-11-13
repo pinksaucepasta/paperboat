@@ -187,3 +187,23 @@ func TestErrorProjectionUsesOwnedCodesAndRecovery(t *testing.T) {
 		t.Fatal("typed nil accepted")
 	}
 }
+
+// Dev edges served 7 carrier sessions holding 8 distinct routes; readiness must
+// compare distinct live routes with distinct admitted routes, not session counts.
+func TestReadyzSevenSessionsEightRoutesIsReady(t *testing.T) {
+	state := node.New("edge_test")
+	if !state.MarkReady() {
+		t.Fatal("mark ready")
+	}
+	manager, _ := node.NewManager(state, 8)
+	queue, _ := usage.NewQueue(4, 4096)
+	handler, err := NewHandler(Sources{Node: state.Snapshot, Manager: manager.Snapshot, Sessions: func() int { return 7 }, SessionRoutes: func() int { return 8 }, ActiveStreams: func() uint32 { return 0 }, RouteCount: func() int { return 8 }, Usage: queue.Stats, ControlErr: func() error { return nil }, RouteErr: func() error { return nil }, UsageErr: func() error { return nil }, CarrierRunning: func() bool { return true }, Traffic: usage.NewCounters().Snapshot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready := httptest.NewRecorder()
+	handler.ServeHTTP(ready, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if ready.Code != http.StatusOK || !strings.Contains(ready.Body.String(), `"session_routes":8`) || strings.Contains(ready.Body.String(), `"route_drift":true`) {
+		t.Fatalf("readyz = %d %s", ready.Code, ready.Body.String())
+	}
+}

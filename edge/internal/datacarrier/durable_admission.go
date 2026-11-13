@@ -243,6 +243,25 @@ func (r *DurableAdmissionRegistry) Snapshot() []DurableAdmission {
 	return result
 }
 
+// RouteCount is the number of distinct route ids with a staged or active
+// assignment, however many carrier identities own them.
+func (r *DurableAdmissionRegistry) RouteCount() int {
+	if r == nil {
+		return 0
+	}
+	routes := map[string]struct{}{}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, entry := range r.byID {
+		for id, admission := range entry.byRoute {
+			if admission.State == "staged" || admission.State == "active" {
+				routes[id] = struct{}{}
+			}
+		}
+	}
+	return len(routes)
+}
+
 // HasIdentity reports whether the edge has a currently usable staged or
 // active assignment for this exact connector carrier identity. A single
 // identity may own many route IDs, so this is intentionally broader than a

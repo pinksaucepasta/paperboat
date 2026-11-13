@@ -779,15 +779,12 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 		return nil, err
 	}
 	health, err := edgediagnostics.NewHandler(edgediagnostics.Sources{
-		Node:          state.Snapshot,
-		Manager:       manager.Snapshot,
-		Sessions:      func() int { return durableRoutes.Stats().Sessions },
-		SessionRoutes: func() int { return durableRoutes.Stats().Routes },
-		ActiveStreams: func() uint32 { return durableRoutes.Stats().ActiveStreams },
-		RouteCount: func() int {
-			_, canonical, _ := canonicalRoutes.CanonicalSnapshot()
-			return len(routes.Snapshot()) + len(canonical)
-		},
+		Node:           state.Snapshot,
+		Manager:        manager.Snapshot,
+		Sessions:       func() int { return durableRoutes.Stats().Sessions },
+		SessionRoutes:  func() int { return durableRoutes.Stats().Routes },
+		ActiveStreams:  func() uint32 { return durableRoutes.Stats().ActiveStreams },
+		RouteCount:     durableAdmissions.RouteCount,
 		Usage:          queue.Stats,
 		ControlErr:     nodeWorker.LastError,
 		RouteErr:       routeWorker.LastError,

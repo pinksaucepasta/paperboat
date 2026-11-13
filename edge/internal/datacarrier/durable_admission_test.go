@@ -181,3 +181,30 @@ func TestDurableAdmissionFenceIsPerAssignment(t *testing.T) {
 		t.Fatalf("the conflict does not name the assignment and both generations: %v", err)
 	}
 }
+
+func TestDurableAdmissionRouteCountIsDistinctActiveOrStaged(t *testing.T) {
+	public := make(ed25519.PublicKey, ed25519.PublicKeySize)
+	for i := range public {
+		public[i] = byte(i + 11)
+	}
+	thumbprint, err := connectorprotocol.IdentityThumbprint(public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, time.August, 31, 2, 0, 0, 0, time.UTC)
+	registry, err := NewDurableAdmissionRegistry(DurableAdmissionRegistryConfig{NodeID: "edge_1", ProcessEpoch: "_edgeepoch1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admission := func(host, route, state string) DurableAdmission {
+		id := Identity{AccountID: "account_1", HostID: host, TunnelID: "tunnel_1", ConnectorID: "connector_1", SessionID: "session_1", ProcessGeneration: 3, Generation: 7}
+		return DurableAdmission{Identity: id, EdgeNodeID: "edge_1", EdgeProcessEpoch: "_edgeepoch1", AssignmentID: "assignment_" + host + route, RouteID: route, AssignmentGeneration: 4, RouteGeneration: 2, ConfigContentHash: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", MachineIdentityPublicKey: base64.RawURLEncoding.EncodeToString(public), MachineIdentityThumbprint: thumbprint, State: state}
+	}
+	// route_1 is owned by two carriers, route_3 is draining.
+	if err := registry.Replace([]DurableAdmission{admission("host_1", "route_1", "active"), admission("host_2", "route_1", "staged"), admission("host_2", "route_2", "active"), admission("host_2", "route_3", "draining")}, now); err != nil {
+		t.Fatal(err)
+	}
+	if got := registry.RouteCount(); got != 2 {
+		t.Fatalf("RouteCount = %d, want 2", got)
+	}
+}

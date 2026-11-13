@@ -165,6 +165,7 @@ type Snapshot struct {
 	Connectors            int                           `json:"connectors"`
 	ActiveStreams         uint32                        `json:"active_streams"`
 	AttachedRoutes        int                           `json:"attached_routes"`
+	SessionRoutes         int                           `json:"session_routes"`
 	RouteDrift            bool                          `json:"route_drift"`
 	UsagePendingReports   int                           `json:"usage_pending_reports"`
 	UsagePendingBytes     int                           `json:"usage_pending_bytes"`
@@ -212,11 +213,13 @@ func snapshot(s Sources) Snapshot {
 	if s.TelemetryDrops != nil {
 		result.TelemetryDrops = s.TelemetryDrops()
 	}
-	// Desired routes may legitimately outnumber active session routes while an
-	// admitted connector is offline. Active routes must, however, always remain
-	// a subset of the authoritative registry. A larger active set proves that a
-	// stale or unauthorized route survived reconciliation.
-	result.RouteDrift = s.SessionRoutes() > result.AttachedRoutes
+	// Both counts are distinct route ids: admitted (attached_routes) and live on
+	// carrier sessions (session_routes). Admitted routes may outnumber live ones
+	// while a connector is offline; live routes must stay a subset of admitted.
+	// A larger live set proves a stale or unauthorized route survived
+	// reconciliation. One route on two carriers is still one route.
+	result.SessionRoutes = s.SessionRoutes()
+	result.RouteDrift = result.SessionRoutes > result.AttachedRoutes
 	if result.RouteDrift {
 		result.Routes = Degraded
 	}
