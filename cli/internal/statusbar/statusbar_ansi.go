@@ -106,11 +106,22 @@ func (b *Bar) trackSynchronizedOutput(sequence []byte) {
 	}
 }
 
+// cursorSaveSequences returns how the bar saves and restores the cursor. CSI s / CSI u keep the bar out of the remote application's DECSC slot,
+// but Terminal.app ignores both (measured: printf 'abc\e[s\e[10;1HXYZ\e[uDEF' printed DEF after XYZ), so after a bar draw the cursor stayed on the
+// bar row and the shell wrote over it (X-24, vim then the prompt in a Terminal.app window, which sets TERM_PROGRAM=Apple_Terminal).
+// There ESC 7 / ESC 8 work, and share the slot with the remote application, so its ESC 7 is tracked like a CSI s.
+func cursorSaveSequences(termProgram string) (save, restore string) {
+	if termProgram == "Apple_Terminal" {
+		return "\x1b7", "\x1b8"
+	}
+	return "\x1b[s", "\x1b[u"
+}
+
 func (b *Bar) trackRemoteCursorSave(sequence []byte) {
-	switch string(sequence) {
-	case "\x1b[s":
+	switch s := string(sequence); {
+	case s == "\x1b[s" || (s == "\x1b7" && b.cursorSave == "\x1b7"):
 		b.appCursorSaved = true
-	case "\x1b[u":
+	case s == "\x1b[u" || (s == "\x1b8" && b.cursorSave == "\x1b7"):
 		b.appCursorSaved = false
 	}
 }

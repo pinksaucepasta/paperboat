@@ -108,6 +108,8 @@ type Bar struct {
 	parser          *ansi.Parser
 	ansiState       byte
 	appCursorSaved  bool
+	cursorSave      string // how the bar saves and restores the cursor around its own writes: see cursorSaveSequences
+	cursorRestore   string
 	appInverse      bool
 	appSGR          []byte
 	appSGROverflow  bool
@@ -198,7 +200,10 @@ func New(options Options) *Bar {
 		options.NoticeDuration = 5 * time.Second
 	}
 	serializedOut := &serializedWriter{out: output}
+	save, restore := cursorSaveSequences(os.Getenv("TERM_PROGRAM"))
 	b := &Bar{
+		cursorSave:      save,
+		cursorRestore:   restore,
 		out:             output,
 		serializedOut:   serializedOut,
 		outputFD:        int(output.Fd()),
@@ -375,7 +380,7 @@ func (b *Bar) clearLocked() {
 	if b.lastRows < 1 {
 		return
 	}
-	_, _ = fmt.Fprintf(b.serializedOut, "\x1b[s\x1b[%d;1H\x1b[2K\x1b[r\x1b[u", b.lastRows)
+	_, _ = fmt.Fprintf(b.serializedOut, b.cursorSave+"\x1b[%d;1H\x1b[2K\x1b[r"+b.cursorRestore, b.lastRows)
 	b.scrollRows = 0
 	b.scrollDirty = true
 }

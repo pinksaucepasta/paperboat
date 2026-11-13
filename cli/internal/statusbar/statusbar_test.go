@@ -473,6 +473,33 @@ func TestDefersRedrawWhileRemoteUsesANSICursorSave(t *testing.T) {
 	}
 }
 
+func TestAppleTerminalSavesTheCursorWithDECSCAndDefersToTheRemotesSave(t *testing.T) {
+	t.Setenv("TERM_PROGRAM", "Apple_Terminal")
+	bar, reader := newTestBar(t, ModeAuto, "xterm-256color", 40, 3, true, time.Second)
+	if _, err := bar.Write([]byte("\x1b7")); err != nil {
+		t.Fatal(err)
+	}
+	bar.Notice("Uploading image")
+	if _, err := bar.Write([]byte("remote output\x1b8")); err != nil {
+		t.Fatal(err)
+	}
+	_ = bar.Close()
+	if output, ok := bar.out.(*os.File); ok {
+		_ = output.Close()
+	}
+	raw, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(raw)
+	if strings.Contains(s, "\x1b[s") || strings.Contains(s, "\x1b[u") {
+		t.Fatalf("Terminal.app ignores CSI s/u, the bar wrote one: %q", s)
+	}
+	if got := strings.Count(s, "\x1b[3;1H"); got != 3 { // initial draw, post-restore draw, cleanup
+		t.Fatalf("redraw while the remote's DECSC was pending: %d, raw=%q", got, s)
+	}
+}
+
 func TestDefersRedrawDuringSynchronizedOutput(t *testing.T) {
 	bar, reader := newTestBar(t, ModeAuto, "xterm-256color", 40, 3, true, time.Second)
 	if _, err := bar.Write([]byte("\x1b[?2026hframe-a")); err != nil {

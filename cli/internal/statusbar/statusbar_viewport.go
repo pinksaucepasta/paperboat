@@ -156,7 +156,7 @@ func (b *Bar) drawNowLocked() {
 	text := b.layoutLocked(w)
 	b.ensureScrollRegionLocked(h - 1)
 	style, restore := b.barStyleLocked()
-	_, _ = fmt.Fprintf(b.serializedOut, "\x1b[s\x1b[%d;1H\x1b[2K%s%s%s\x1b[u", h, style, text, restore)
+	_, _ = fmt.Fprintf(b.serializedOut, b.cursorSave+"\x1b[%d;1H\x1b[2K%s%s%s"+b.cursorRestore, h, style, text, restore)
 	b.redrawPending = false
 }
 
@@ -173,7 +173,7 @@ func (b *Bar) ensureScrollRegionLocked(rows int) {
 	if rows < 1 || (!b.scrollDirty && b.scrollRows == rows) {
 		return
 	}
-	_, _ = fmt.Fprintf(b.serializedOut, "\x1b[s\x1b[1;%dr\x1b[u", rows)
+	_, _ = fmt.Fprintf(b.serializedOut, b.cursorSave+"\x1b[1;%dr"+b.cursorRestore, rows)
 	b.scrollRows = rows
 	b.scrollDirty = false
 }
