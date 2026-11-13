@@ -56,6 +56,14 @@ func (s *Session) acceptOffline(ctx context.Context, connection net.Conn, header
 		return nil, errors.Join(tailnet.ErrAdmission, err)
 	}
 	allowed := s.owner.authority.Allows(s.peerID, self.MachineID, capability, "accept")
+	if !allowed && s.owner.refreshAuthority != nil {
+		// A CLI endpoint that signed in after this host's last signed document is not in it yet (SSH to a team machine
+		// makes no control-plane request, so nothing else delivers it): one on-demand refresh before refusing, as
+		// authorizeIncoming does. A failed refresh leaves the refusal, the same as an unreachable control plane.
+		if s.owner.refreshAuthority(ctx) == nil {
+			allowed = s.owner.authority.Allows(s.peerID, self.MachineID, capability, "accept")
+		}
+	}
 	if !allowed && header.Consumer == "ssh" {
 		streamauth.WriteSSHRefusal(connection, "no_access") // managedssh.RefusedNoAccess: pb says so, not OpenSSH
 	}
