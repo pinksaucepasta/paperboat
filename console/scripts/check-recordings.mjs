@@ -179,6 +179,11 @@ try {
     log(attached, "the terminal attaches", session)
     await page.getByRole("button", { name: "Start recording" }).click()
     log(await page.locator("[data-terminal-recording]").waitFor({ timeout: 15000 }).then(() => true, () => false), "Start recording shows REC")
+    // Typing right after the click goes to the shell: a button that kept focus would stop and restart the recording on Space and Enter.
+    await page.keyboard.type("echo recfocus", { delay: 10 })
+    await page.keyboard.press("Enter")
+    await page.waitForTimeout(1500)
+    log(await page.locator("[data-terminal-recording]").count() > 0, "typing after Start recording does not toggle it")
     let live
     for (let i = 0; i < 20 && !live; i++) {
       await page.waitForTimeout(1000)

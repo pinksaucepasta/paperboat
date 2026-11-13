@@ -204,11 +204,13 @@ export function TerminalRoom({
               <Action
                 label={connection.recording ? "Stop recording" : "Start recording"}
                 disabled={connection.phase !== "attached"}
-                onClick={() =>
+                onClick={() => {
+                  // Focus stays on this button after a click, so the next Space or Enter typed into the shell would toggle recording.
+                  connection.focus()
                   void connection
                     .controlRecording(connection.recording ? "record-stop" : "record-start")
                     .then((code) => code && toast.error(recordingSentences[code] ?? "Recording could not be changed. Try again."))
-                }
+                }}
               >
                 {connection.recording ? <StopIcon /> : <RecordIcon />}
               </Action>
