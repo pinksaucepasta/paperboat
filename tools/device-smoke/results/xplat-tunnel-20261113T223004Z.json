@@ -1,0 +1,13 @@
+{
+ "check": "xplat-tunnel",
+ "devices": [
+  "M"
+ ],
+ "results": [
+  {
+   "id": "X-20:v4:M",
+   "status": "PASS",
+   "detail": "public smooth-river: marker on HTTP/1.1 and HTTP/2, 16 MiB sha256 equal; origin stopped -> ' 000 0'"
+  }
+ ]
+}

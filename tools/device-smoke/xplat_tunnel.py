@@ -74,31 +74,36 @@ def confirm_delete(dev, name):
         dev.pb('tunnel', 'delete', name, '--confirm', token, '--json', timeout=120)
 
 
+# A cold `python -m`-style origin can listen without accepting for ~35 s on a fresh macOS runner (connects sit in SYN_SENT), so the
+# tunnel's 5 s dial times out with a 504 origin_timeout page: that is the origin not being up, not a tunnel that is not ready.
+WAIT_ORIGIN = ('import socket,sys,time\n'
+               'host,port=sys.argv[1],int(sys.argv[2]);end=time.time()+150\n'
+               'while time.time()<end:\n'
+               '    try:\n'
+               '        c=socket.create_connection((host,port),2);c.sendall(b"GET / HTTP/1.0\\r\\n\\r\\n");ok=c.recv(12).startswith(b"HTTP/");c.close()\n'
+               '        if ok: sys.exit(0)\n'
+               '    except OSError: pass\n'
+               '    time.sleep(0.5)\n'
+               'sys.exit(1)\n')
+
+
 def t_origin(dev, key):
     bind, port = BINDS[key], 31000 + sum(map(ord, dev.name + key)) % 2000
     marker = 'xplat-%s-%s' % (dev.os, key)
     name = 'xplat-' + uuid.uuid4().hex[:8]
     origin = threading.Thread(target=lambda: dev.run([py(dev), '-c', ORIGIN, bind, str(port), marker], timeout=300), daemon=True)
     origin.start()
-    time.sleep(5)
+    assert dev.run([py(dev), '-c', WAIT_ORIGIN, bind, str(port)], timeout=180).rc == 0, 'origin %s:%d never answered on the device' % (bind, port)
     # --port dials 127.0.0.1; `localhost` is dialed as written and reaches an app on ::1 only (as in xpc_tunnel.py)
     origin_flag = ('--from', 'http://localhost:%d' % port) if key == 'v6' else ('--port', str(port))
     created = fleet.json_pb(dev, 'tunnel', 'create', name, *origin_flag, '--wait', timeout=240)
     try:
         url = endpoint(created)
-        time.sleep(5)
         for flag, version in (('--http1.1', '1.1'), ('--http2', '2')):
             def first_fetch(flag=flag, version=version):
                 out = curl(url + '/', flag).stdout.decode().rsplit('\n', 1)
                 assert out[0] == marker and out[1].split()[0] == '200' and out[1].split()[1] == version, '%s %s -> %r' % (flag, url, out)
-            for attempt in range(12):  # a fresh tunnel's first request may meet the edge's route warm-up (xpc_tunnel.py retries the same way)
-                try:
-                    first_fetch()
-                    break
-                except AssertionError:
-                    if attempt == 11:
-                        raise
-                    time.sleep(4)
+            first_fetch()  # `--wait` returned: the first public request must already succeed
         big = curl(url + '/big', '--http1.1', timeout=120).stdout.rsplit(b'\n', 1)[0]
         assert hashlib.sha256(big).hexdigest() == hashlib.sha256(BIG).hexdigest(), 'download differs (%d bytes)' % len(big)
         curl(url + '/__stop', '--http1.1')
