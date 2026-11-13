@@ -1,0 +1,40 @@
+{
+ "check": "xplat-commands",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-31:install:L>M",
+   "status": "PASS",
+   "detail": "command printed on x31b-l installed and paired x31b-m (online)"
+  },
+  {
+   "id": "X-31:install:L>W",
+   "status": "PASS",
+   "detail": "command printed on x31b-l installed and paired x31b-w (online)"
+  },
+  {
+   "id": "X-31:install:M>L",
+   "status": "PASS",
+   "detail": "command printed on x31b-m installed and paired x31b-l (online)"
+  },
+  {
+   "id": "X-31:install:M>W",
+   "status": "PASS",
+   "detail": "command printed on x31b-m installed and paired x31b-w (online)"
+  },
+  {
+   "id": "X-31:install:W>L",
+   "status": "PASS",
+   "detail": "command printed on x31b-w installed and paired x31b-l (online)"
+  },
+  {
+   "id": "X-31:install:W>M",
+   "status": "PASS",
+   "detail": "command printed on x31b-w installed and paired x31b-m (online)"
+  }
+ ]
+}

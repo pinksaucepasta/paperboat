@@ -1,0 +1,100 @@
+{
+ "check": "xplat-commands",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-31:wrong:L",
+   "status": "PASS",
+   "detail": "the PowerShell command in pwsh stopped with \"this command is for Windows\", nothing left behind"
+  },
+  {
+   "id": "X-31:dialog:L",
+   "status": "PASS",
+   "detail": "19/19 dialog steps passed; the POSIX command pasted on linux installed and paired it (dialog: Machine connected)"
+  },
+  {
+   "id": "X-31:wrong:M",
+   "status": "PASS",
+   "detail": "the PowerShell command in pwsh stopped with \"this command is for Windows\", nothing left behind"
+  },
+  {
+   "id": "X-31:dialog:M",
+   "status": "PASS",
+   "detail": "19/19 dialog steps passed; the POSIX command pasted on darwin installed and paired it (dialog: Machine connected)"
+  },
+  {
+   "id": "X-31:wrong:W",
+   "status": "PASS",
+   "detail": "the POSIX command in Git bash stopped with \"only macOS and Linux are supported\", nothing left behind"
+  },
+  {
+   "id": "X-31:dialog:W",
+   "status": "PASS",
+   "detail": "19/19 dialog steps passed; the PowerShell command pasted on windows installed and paired it (dialog: Machine connected)"
+  },
+  {
+   "id": "X-31:addjson:L",
+   "status": "PASS",
+   "detail": "pb machine add --json on linux names the POSIX and the PowerShell command, both of the published shape"
+  },
+  {
+   "id": "X-31:tunnel:L",
+   "status": "PASS",
+   "detail": "the line \"pb tunnel create xpe-cmd-lin --port 18931\" ran verbatim on linux (no quoting or path in it: a name slug and a port)"
+  },
+  {
+   "id": "X-31:addjson:M",
+   "status": "PASS",
+   "detail": "pb machine add --json on darwin names the POSIX and the PowerShell command, both of the published shape"
+  },
+  {
+   "id": "X-31:tunnel:M",
+   "status": "PASS",
+   "detail": "the line \"pb tunnel create xpe-cmd-dar --port 18931\" ran verbatim on darwin (no quoting or path in it: a name slug and a port)"
+  },
+  {
+   "id": "X-31:addjson:W",
+   "status": "FAIL",
+   "detail": "run  failed on the device (exit 1): Exception calling \"Start\" with \"1\" argument(s): \"Cannot start process because a file name has not been provided.\""
+  },
+  {
+   "id": "X-31:tunnel:W",
+   "status": "FAIL",
+   "detail": "run  failed on the device (exit 1): Exception calling \"Start\" with \"1\" argument(s): \"Cannot start process because a file name has not been provided.\""
+  },
+  {
+   "id": "X-31:install:L>M",
+   "status": "FAIL",
+   "detail": "'data'"
+  },
+  {
+   "id": "X-31:install:L>W",
+   "status": "FAIL",
+   "detail": "uninstall left ['C:\\\\Program', 'Files\\\\Paperboat', 'C:\\\\Users\\\\runneradmin\\\\AppData\\\\Local\\\\Paperboat', 'service']"
+  },
+  {
+   "id": "X-31:install:M>L",
+   "status": "FAIL",
+   "detail": "'data'"
+  },
+  {
+   "id": "X-31:install:M>W",
+   "status": "FAIL",
+   "detail": "uninstall left ['C:\\\\Program', 'Files\\\\Paperboat', 'C:\\\\Users\\\\runneradmin\\\\AppData\\\\Local\\\\Paperboat', 'service']"
+  },
+  {
+   "id": "X-31:install:W>L",
+   "status": "FAIL",
+   "detail": "run  failed on the device (exit 1): Exception calling \"Start\" with \"1\" argument(s): \"Cannot start process because a file name has not been provided.\""
+  },
+  {
+   "id": "X-31:install:W>M",
+   "status": "FAIL",
+   "detail": "run  failed on the device (exit 1): Exception calling \"Start\" with \"1\" argument(s): \"Cannot start process because a file name has not been provided.\""
+  }
+ ]
+}

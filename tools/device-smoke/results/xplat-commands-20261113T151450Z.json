@@ -1,0 +1,40 @@
+{
+ "check": "xplat-commands",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-31:addjson:L",
+   "status": "PASS",
+   "detail": "pb machine add --json on linux names the POSIX and the PowerShell command, both of the published shape"
+  },
+  {
+   "id": "X-31:tunnel:L",
+   "status": "PASS",
+   "detail": "the line \"pb tunnel create xpe-cmd-lin --port 18931\" ran verbatim on linux (no quoting or path in it: a name slug and a port)"
+  },
+  {
+   "id": "X-31:addjson:M",
+   "status": "PASS",
+   "detail": "pb machine add --json on darwin names the POSIX and the PowerShell command, both of the published shape"
+  },
+  {
+   "id": "X-31:tunnel:M",
+   "status": "PASS",
+   "detail": "the line \"pb tunnel create xpe-cmd-dar --port 18931\" ran verbatim on darwin (no quoting or path in it: a name slug and a port)"
+  },
+  {
+   "id": "X-31:addjson:W",
+   "status": "PASS",
+   "detail": "pb machine add --json on windows names the POSIX and the PowerShell command, both of the published shape"
+  },
+  {
+   "id": "X-31:tunnel:W",
+   "status": "PASS",
+   "detail": "the line \"pb tunnel create xpe-cmd-win --port 18931\" ran verbatim on windows (no quoting or path in it: a name slug and a port)"
+  }
+ ]
+}
