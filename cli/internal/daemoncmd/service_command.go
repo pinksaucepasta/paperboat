@@ -279,18 +279,17 @@ func serviceStatusCommand() *cobra.Command {
 		if err != nil {
 			return fmt.Errorf("read Paperboat local daemon service status: %w", err)
 		}
-		status := "not-installed"
-		if state.Installed {
-			status = "stopped"
+		status, hostServing := daemonServiceStatus(ctx, state)
+		message := fmt.Sprintf("Paperboat daemon service status: %s", status)
+		if hostServing {
+			message += " (machine services are running, remote access is served)"
 		}
-		if state.Running {
-			status = "running"
-		}
-		return writeDaemonCommandResult(cmd, map[string]any{"service": daemonServiceName, "status": status}, fmt.Sprintf("Paperboat daemon service status: %s", status))
+		return writeDaemonCommandResult(cmd, map[string]any{"service": daemonServiceName, "status": status, "host_services_running": hostServing}, message)
 	}
 	cmd.Flags().Bool("json", false, "print JSON")
 	return cmd
 }
+
 func runDaemonCommand() *cobra.Command {
 	cmd := localDaemonCommand()
 	cmd.Use = "run"
