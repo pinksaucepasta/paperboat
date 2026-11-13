@@ -519,3 +519,42 @@ func TestCertificateFailureRetainsTypedCauseAndRecoversPrivately(t *testing.T) {
 		t.Fatal("hostname conflict leaked private name")
 	}
 }
+
+// A preview lease renews as a new preview generation every few seconds. The server revokes the generation it last
+// issued when the preview ends, but an edge that was cut off from control never received the newest renewals. The
+// revoke must still drop the older generation the edge serves: left active, it blocks every later preview on the
+// same hostname with a hostname conflict (F21-17 recovery, staging 2026-11-13).
+func TestRegistryRevokeOfANewerPreviewGenerationDropsTheServedOlderOne(t *testing.T) {
+	now := time.Date(2026, time.November, 13, 15, 0, 0, 0, time.UTC)
+	registry, err := NewRegistry(Config{Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview := func(domain string, generation uint64) Binding {
+		b := testBinding("preview.example.test", 1)
+		b.TunnelID, b.DomainID = "", domain
+		b.TargetKind, b.PreviewID, b.PreviewGeneration, b.PreviewState = TargetPreviewLease, "preview_1", generation, "active"
+		b.PreviewExpiresAt = now.Add(30 * time.Minute)
+		return b
+	}
+	bundle := testBundle(t, "preview.example.test", now, 1)
+	served := preview("domain_a", 5)
+	for _, step := range []func(Binding) error{
+		func(b Binding) error { return registry.Stage(context.Background(), b, bundle) },
+		func(b Binding) error { return registry.MarkReady(context.Background(), b) },
+		func(b Binding) error { return registry.Activate(context.Background(), b) },
+	} {
+		if err := step(served); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := registry.Revoke(context.Background(), preview("domain_a", 51)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.GetCertificate(tlsClientHello("preview.example.test")); err == nil {
+		t.Fatal("the revoked preview's older generation still serves")
+	}
+	if err := registry.Stage(context.Background(), preview("domain_b", 2), bundle); err != nil {
+		t.Fatalf("a new preview on the hostname is refused after the revoke: %v", err)
+	}
+}

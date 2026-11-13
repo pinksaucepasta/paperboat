@@ -96,6 +96,27 @@ func TestCertificateDomainDistributionFailureDoesNotRequestRenewal(t *testing.T)
 	}
 }
 
+func TestPreviewDomainWithLiveCertificateStaysReadyWhenAnAttemptFails(t *testing.T) {
+	now := time.Date(2026, 11, 13, 16, 0, 0, 0, time.UTC)
+	row := dbsqlc.PreviewDomain{CertificateState: "ready", CertificateReference: sql.NullString{String: "tcert_1", Valid: true},
+		CertificateExpiresAt: sql.NullTime{Time: now.Add(24 * time.Hour), Valid: true}}
+	for name, test := range map[string]struct {
+		change func(*dbsqlc.PreviewDomain)
+		want   string
+	}{
+		"live ready certificate keeps serving": {func(*dbsqlc.PreviewDomain) {}, "ready"},
+		"expired certificate renews":           {func(r *dbsqlc.PreviewDomain) { r.CertificateExpiresAt.Time = now.Add(-time.Second) }, "renewing"},
+		"already renewing stays renewing":      {func(r *dbsqlc.PreviewDomain) { r.CertificateState = "renewing" }, "renewing"},
+		"first issuance fails":                 {func(r *dbsqlc.PreviewDomain) { r.CertificateState, r.CertificateReference.Valid = "issuing", false }, "failed"},
+	} {
+		r := row
+		test.change(&r)
+		if got := previewCertificateStateAfterFailure(r, now); got != test.want {
+			t.Fatalf("%s: state %q, want %q", name, got, test.want)
+		}
+	}
+}
+
 type placementPendingIssuer struct{ calls atomic.Int32 }
 
 func (i *placementPendingIssuer) Issue(context.Context, tunnelcert.IssueRequest) (tunnelcert.CertificateBundle, error) {

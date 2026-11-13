@@ -501,12 +501,25 @@ func (w *CertificateWorker) markDomainCertificateFailure(ctx context.Context, ro
 }
 
 func (w *CertificateWorker) recordPreviewCertificateFailure(ctx context.Context, row dbsqlc.PreviewDomain, failureCode string, now time.Time) error {
-	state := "failed"
-	if row.CertificateReference.Valid {
-		state = "renewing"
-	}
+	state := previewCertificateStateAfterFailure(row, now)
 	_, err := w.db.Queries().ApplyPreviewDomainCertificateObservationV1(ctx, dbsqlc.ApplyPreviewDomainCertificateObservationV1Params{CertificateState: state, CertificateReference: row.CertificateReference, CertificateExpiresAt: row.CertificateExpiresAt, Now: sql.NullTime{Time: now, Valid: true}, FailureCode: sql.NullString{String: failureCode, Valid: true}, CaaState: row.CaaState, DomainID: row.ID, AccountID: row.AccountID, PreviewID: row.PreviewID, ExpectedGeneration: row.Generation})
 	return err
+}
+
+// previewCertificateStateAfterFailure is the state a preview domain takes when an attempt on its certificate
+// fails. A certificate that is ready and still has life keeps serving: only a ready domain is published to the
+// edge (ingressprojection/preview_ingress.go), so flipping it to renewing over an edge that was unreachable for
+// a moment took the live public preview down after a control outage (F21-17, staging 2026-11-13). The failure
+// code is still recorded, and the due query retries it after its cooldown.
+func previewCertificateStateAfterFailure(row dbsqlc.PreviewDomain, now time.Time) string {
+	switch {
+	case row.CertificateState == "ready" && row.CertificateReference.Valid && row.CertificateExpiresAt.Valid && row.CertificateExpiresAt.Time.After(now):
+		return "ready"
+	case row.CertificateReference.Valid:
+		return "renewing"
+	default:
+		return "failed"
+	}
 }
 
 func certificateFailureCode(err error) string {

@@ -567,21 +567,46 @@ func (r *Registry) revoke(ctx context.Context, binding Binding, expectedFingerpr
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	e, ok := r.entries[bindingKey(binding)]
-	if !ok || e.binding != binding {
-		return nil
+	if ok && e.binding != binding {
+		ok = false
 	}
-	if expectedFingerprint != nil && *expectedFingerprint != [sha256.Size]byte{} && e.fingerprint != *expectedFingerprint {
+	if ok && expectedFingerprint != nil && *expectedFingerprint != [sha256.Size]byte{} && e.fingerprint != *expectedFingerprint {
 		return fmt.Errorf("%w: certificate fingerprint does not match distribution", ErrGenerationConflict)
 	}
+	// A preview lease renews as a new preview generation every few seconds; an edge cut off from control misses
+	// renewals, so the revoke names a newer generation than the one it serves. The older generations of the same
+	// lease are revoked with it, or the served one outlives the preview and blocks the hostname's next owner.
+	for key, old := range r.entries {
+		if key == bindingKey(binding) || binding.Target().normalizedKind() != TargetPreviewLease || !supersededPreview(old.binding, binding) {
+			continue
+		}
+		job = r.revokeEntryLocked(key, old, now, job)
+	}
+	if ok {
+		job = r.revokeEntryLocked(bindingKey(binding), e, now, job)
+	}
+	return nil
+}
+
+// supersededPreview reports whether old is an earlier generation of the preview lease binding names, on the same
+// edge process, with the same domain binding.
+func supersededPreview(old, binding Binding) bool {
+	return old.Target().normalizedKind() == TargetPreviewLease && old.PreviewID == binding.PreviewID && old.DomainID == binding.DomainID &&
+		old.AccountID == binding.AccountID && old.Hostname == binding.Hostname && old.EdgeNodeID == binding.EdgeNodeID &&
+		old.EdgeProcessEpoch == binding.EdgeProcessEpoch && old.PreviewGeneration < binding.PreviewGeneration
+}
+
+// revokeEntryLocked drops one entry and returns the persistence job that forgets its active certificate, if any.
+func (r *Registry) revokeEntryLocked(key string, e *entry, now time.Time, job *persistJob) *persistJob {
 	e.state = StateRevoked
 	e.revokedAt = now
-	if r.active[hostKey(e.hostname, e.wildcard)] == bindingKey(binding) {
+	if r.active[hostKey(e.hostname, e.wildcard)] == key {
 		delete(r.active, hostKey(e.hostname, e.wildcard))
 		job = &persistJob{key: hostKey(e.hostname, e.wildcard), remove: true}
 	}
 	wipeTLSCertificate(&e.certificate)
-	delete(r.entries, bindingKey(binding))
-	return nil
+	delete(r.entries, key)
+	return job
 }
 
 func (r *Registry) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
