@@ -1,0 +1,78 @@
+{
+ "os": "Windows",
+ "machine": "machine_7985e977-eaf8-4f0b-b0f9-3c0d22ed747a",
+ "rows": [
+  {
+   "item": "sp ace and üñí.txt",
+   "suggested": "sp ace and üñí.txt",
+   "saved": "sp ace and üñí.txt",
+   "bytes": 33
+  },
+  {
+   "item": "-lead.txt",
+   "suggested": "-lead.txt",
+   "saved": "-lead.txt",
+   "bytes": 21
+  },
+  {
+   "item": "café-nfd.txt",
+   "suggested": "café-nfd.txt",
+   "saved": "café-nfd.txt",
+   "bytes": 26
+  },
+  {
+   "item": "café-nfc.txt",
+   "suggested": "café-nfc.txt",
+   "saved": "café-nfc.txt",
+   "bytes": 25
+  },
+  {
+   "item": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.txt",
+   "suggested": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.txt",
+   "saved": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.txt",
+   "bytes": 266
+  },
+  {
+   "item": "a.txt",
+   "suggested": "a.txt",
+   "saved": "a.txt",
+   "bytes": 17
+  },
+  {
+   "item": "A.txt",
+   "suggested": "A.txt",
+   "saved": null,
+   "bytes": 0
+  },
+  {
+   "item": "q\"u*?.txt",
+   "suggested": "q_u__.txt",
+   "saved": "q_u__.txt",
+   "bytes": 21
+  },
+  {
+   "item": "CON.txt",
+   "suggested": "_CON.txt",
+   "saved": "_CON.txt",
+   "bytes": 19
+  },
+  {
+   "item": "sp",
+   "suggested": "sp_",
+   "saved": "sp_",
+   "bytes": 15
+  },
+  {
+   "item": "trail.",
+   "suggested": "trail_",
+   "saved": "trail_",
+   "bytes": 18
+  },
+  {
+   "item": "a:b.txt",
+   "suggested": "a_b.txt",
+   "saved": "a_b.txt",
+   "bytes": 19
+  }
+ ]
+}
