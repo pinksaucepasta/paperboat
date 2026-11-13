@@ -595,3 +595,45 @@ func TestExplicitLocalPathRefusesWindowsFormsOnUnix(t *testing.T) {
 		}
 	}
 }
+
+func TestMappedReconcileReportsARepositoryLinkAndKeepsSyncingTheRest(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs privilege on Windows")
+	}
+	home, state, repoRoot, external := resolvedTempDir(t), resolvedTempDir(t), resolvedTempDir(t), resolvedTempDir(t)
+	outside := filepath.Join(resolvedTempDir(t), "target")
+	writeTestFile(t, outside, "outside")
+	if err := os.Mkdir(filepath.Join(repoRoot, "editor"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(repoRoot, "editor/ok.txt"), "from repository")
+	if err := os.Symlink(outside, filepath.Join(repoRoot, "editor/link.txt")); err != nil {
+		t.Fatal(err)
+	}
+	repo, err := git.PlainInit(repoRoot, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := commitAll(t, repo, "initial")
+	descriptor := testRuntimeDescriptor()
+	descriptor.PathRules = []PathRule{{ID: "editor", RepositoryPath: "editor", LocalPath: external, Kind: "directory"}}
+	r, err := newTestFileReconciler(t, WorkspaceReconcilerConfig{HomeRoot: home, StateRoot: state, Descriptor: descriptor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Reconcile(context.Background(), repoRoot, RemoteSnapshot{Revision: revision}); err != nil {
+		t.Fatalf("a repository link must not stop the repository: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(external, "ok.txt")); string(got) != "from repository" {
+		t.Fatalf("the sibling did not sync: %q", got)
+	}
+	if _, err := os.Lstat(filepath.Join(external, "link.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the repository link was materialised: %v", err)
+	}
+	if got, _ := os.ReadFile(outside); string(got) != "outside" {
+		t.Fatalf("link target changed: %q", got)
+	}
+	if len(r.diagnostics.Skipped) != 1 || r.diagnostics.Skipped[0].Path != "editor/link.txt" || r.diagnostics.Skipped[0].Reason != "unsupported_file_type" {
+		t.Fatalf("the repository link is not reported: %#v", r.diagnostics.Skipped)
+	}
+}

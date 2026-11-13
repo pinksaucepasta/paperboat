@@ -2,7 +2,6 @@ package configsync
 
 import (
 	"errors"
-	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/atomicfile"
 	"io/fs"
 	"os"
@@ -35,7 +34,9 @@ func ValidateConfigRepository(root string) error {
 			return ErrConfigRepositoryInvalid
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("%w: repository symlink at %q", ErrConfigRepositoryInvalid, relative)
+			// Never followed (WalkDir does not descend): a mapped one is reported unsupported_file_type by the snapshot,
+			// the rest of the repository keeps syncing.
+			return nil
 		}
 		if !entry.IsDir() {
 			info, infoErr := entry.Info()

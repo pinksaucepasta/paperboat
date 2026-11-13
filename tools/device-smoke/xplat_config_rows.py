@@ -142,9 +142,9 @@ def x05_local_links(ctx, a, b, direction):
     a.write(target + sep_of(a) + 'file.txt', b'target file\n')
     checks = {'filelink-%s.txt' % tag: lambda p: link(a, target + sep_of(a) + 'file.txt', p)}
     if unix(a):
-        checks['dirlink-%s' % tag] = lambda p: link(a, target, p)
+        checks['dirlink-%s.txt' % tag] = lambda p: link(a, target, p)
     else:
-        checks['junction-%s' % tag] = lambda p: junction(a, target, p)
+        checks['junction-%s.txt' % tag] = lambda p: junction(a, target, p)
     a.write(app_path(a, APP, 'x05-ok-%s.txt' % tag), b'ok\n')
     for name, make in checks.items():
         make(app_path(a, APP, name))
@@ -152,7 +152,7 @@ def x05_local_links(ctx, a, b, direction):
     for name in checks:
         wait_skipped(a, 'cfg/app/%s/%s' % (APP, name), 'unsupported_file_type')
         assert ctx.repo.show('cfg/app/%s/%s' % (APP, name)) is None and not b.exists(app_path(b, APP, name)), name + ' travelled'
-    assert not b.exists(app_path(b, APP, 'dirlink-%s' % tag, 'inside.txt')) and not b.exists(app_path(b, APP, 'junction-%s' % tag, 'inside.txt'))
+    assert not b.exists(app_path(b, APP, 'dirlink-%s.txt' % tag, 'inside.txt')) and not b.exists(app_path(b, APP, 'junction-%s.txt' % tag, 'inside.txt'))
     assert a.read(target + sep_of(a) + 'inside.txt') == b'inside the target\n' and a.read(target + sep_of(a) + 'file.txt') == b'target file\n', 'a link target changed'
     return 'links reported unsupported_file_type: %s; targets untouched' % ', '.join(sorted(checks))
 
