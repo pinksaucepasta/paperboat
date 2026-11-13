@@ -1,0 +1,12 @@
+perf_dataplane.py lanex2-w (PR-05 W), 2026-11-13 11:30-11:40 IST, PERF_TARGET_OS=windows.
+Client: Linux container rpr05-ct on pbvm2 (Hyper-V guest on the same LAN/host as victus), paired into the fleet account, pb dev-051c1f7f2.
+Target: lanex2-w = victus (Windows 11), pb.exe dev-051c1f7f2 (fleet build, `pb version` read on it just before the run), MSYS2 rsync on PATH. Path: direct.
+Victus CPU before the runs: 13-34 % (Hyper-V guests of other lanes only; nothing heavy started by this check).
+
+Run 1: {"cli_start_ms": 65, "status_ms": 65, "path": "direct", "exec_true_median_ms": 1322, "exec_true_max_ms": 2327, "send_mbit_s": 64.0, "scp_mbit_s": 172.9, "rsync_small_files_s": 35.9}
+Run 2: {"cli_start_ms": 64, "status_ms": 66, "path": "direct", "exec_true_median_ms": 1575, "exec_true_max_ms": 1876, "send_mbit_s": 72.4, "scp_mbit_s": 145.8, "rsync_small_files_s": 35.4}
+
+Budgets (direct): exec true median <= 7000 / max <= 20000 ms, pb send >= 30 Mbit/s, scp >= 25 Mbit/s, rsync >= 35 small files/s: all five PASS in both runs.
+The script's overall status is FAIL in both runs on one metric only: cli_start_ms 64-65 (Linux client budget 50 ms), a local `pb --version` timing inside the pbvm2 container
+(standalone python timing of the same binary there: median 26 ms), i.e. the client-side PR-07 row, not the data plane to the Windows target.
+Cleanup: machine_05747284-61e5-4068-9ea1-3307c5ee7dfc (rpr05-ct) revoked by exact id, container removed.
