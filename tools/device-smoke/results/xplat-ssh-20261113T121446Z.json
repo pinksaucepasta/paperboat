@@ -1,0 +1,285 @@
+{
+ "check": "xplat-ssh",
+ "devices": [
+  "L",
+  "M",
+  "W"
+ ],
+ "results": [
+  {
+   "id": "X-18:ssh:L>M",
+   "status": "PASS",
+   "detail": "pb ssh ran a command on the target (hostname manageds-virtual-machine.local)"
+  },
+  {
+   "id": "X-18:user:L>M",
+   "status": "PASS",
+   "detail": "--user and user@machine land as admin"
+  },
+  {
+   "id": "X-18:scp:L>M",
+   "status": "PASS",
+   "detail": "scp both ways sha256 equal (524291 bytes), remote path in forward-slash form"
+  },
+  {
+   "id": "X-18:scp-backslash:L>M",
+   "status": "PASS",
+   "detail": "n/a: the target is not Windows"
+  },
+  {
+   "id": "X-18:sftp:L>M",
+   "status": "PASS",
+   "detail": "sftp put and get sha256 equal (204800 bytes)"
+  },
+  {
+   "id": "X-18:rsync:L>M",
+   "status": "PASS",
+   "detail": "rsync -a sha256 equal; target: openrsync: protocol version 29"
+  },
+  {
+   "id": "X-18:tree:L>M",
+   "status": "PASS",
+   "detail": "46 files, nested/empty/unicode directories and a 12 MiB file equal (sha256) through scp, sftp, rsync"
+  },
+  {
+   "id": "X-18:resume:L>M",
+   "status": "PASS",
+   "detail": "cut mid-transfer, rerun finished identically: scp (5222400 of 64 MiB had arrived at the cut); sftp (2611200 of 64 MiB had arrived at the cut); rsync (6750208 of 64 MiB had arrived at the cut)"
+  },
+  {
+   "id": "X-18:scp-legacy:L>M",
+   "status": "PASS",
+   "detail": "scp -O (legacy protocol) delivered 307200 bytes, sha256 equal"
+  },
+  {
+   "id": "X-18:rsync-flags:L>M",
+   "status": "PASS",
+   "detail": "--info=progress2 ok; --protect-args refused clearly; --partial ok (target: openrsync: protocol version 29)"
+  },
+  {
+   "id": "X-18:doctor:L>M",
+   "status": "PASS",
+   "detail": "pb ssh doctor lanex2-m is healthy"
+  },
+  {
+   "id": "X-18:ssh:L>W",
+   "status": "PASS",
+   "detail": "pb ssh ran a command on the target (hostname runnervmm7ud1)"
+  },
+  {
+   "id": "X-18:user:L>W",
+   "status": "PASS",
+   "detail": "--user and user@machine land as runneradmin"
+  },
+  {
+   "id": "X-18:scp:L>W",
+   "status": "PASS",
+   "detail": "scp both ways sha256 equal (524291 bytes), remote path in forward-slash form"
+  },
+  {
+   "id": "X-18:scp-backslash:L>W",
+   "status": "PASS",
+   "detail": "a backslash remote path was accepted"
+  },
+  {
+   "id": "X-18:sftp:L>W",
+   "status": "PASS",
+   "detail": "sftp put and get sha256 equal (204800 bytes)"
+  },
+  {
+   "id": "X-18:rsync:L>W",
+   "status": "PASS",
+   "detail": "clear message: rsync error: error in rsync protocol data stream (code 12) at io.c(232) [sender=3.2.7]"
+  },
+  {
+   "id": "X-18:tree:L>W",
+   "status": "PASS",
+   "detail": "46 files, nested/empty/unicode directories and a 12 MiB file equal (sha256) through scp, sftp"
+  },
+  {
+   "id": "X-18:resume:L>W",
+   "status": "PASS",
+   "detail": "cut mid-transfer, rerun finished identically: scp (0 of 64 MiB had arrived at the cut); sftp (0 of 64 MiB had arrived at the cut)"
+  },
+  {
+   "id": "X-18:scp-legacy:L>W",
+   "status": "PASS",
+   "detail": "scp -O (legacy protocol) delivered 307200 bytes, sha256 equal"
+  },
+  {
+   "id": "X-18:rsync-flags:L>W",
+   "status": "PASS",
+   "detail": "n/a: no rsync on Windows"
+  },
+  {
+   "id": "X-18:doctor:L>W",
+   "status": "PASS",
+   "detail": "pb ssh doctor lanex2-w2 is healthy"
+  },
+  {
+   "id": "X-18:ssh:M>L",
+   "status": "PASS",
+   "detail": "pb ssh ran a command on the target (hostname lanex2-l)"
+  },
+  {
+   "id": "X-18:user:M>L",
+   "status": "PASS",
+   "detail": "--user and user@machine land as tester"
+  },
+  {
+   "id": "X-18:scp:M>L",
+   "status": "PASS",
+   "detail": "scp both ways sha256 equal (524291 bytes), remote path in forward-slash form"
+  },
+  {
+   "id": "X-18:scp-backslash:M>L",
+   "status": "PASS",
+   "detail": "n/a: the target is not Windows"
+  },
+  {
+   "id": "X-18:sftp:M>L",
+   "status": "PASS",
+   "detail": "sftp put and get sha256 equal (204800 bytes)"
+  },
+  {
+   "id": "X-18:rsync:M>L",
+   "status": "PASS",
+   "detail": "rsync -a sha256 equal; target: rsync  version 3.2.7  protocol version 31"
+  },
+  {
+   "id": "X-18:tree:M>L",
+   "status": "PASS",
+   "detail": "46 files, nested/empty/unicode directories and a 12 MiB file equal (sha256) through scp, sftp, rsync"
+  },
+  {
+   "id": "X-18:resume:M>L",
+   "status": "PASS",
+   "detail": "cut mid-transfer, rerun finished identically: scp (7311360 of 64 MiB had arrived at the cut); sftp (5483520 of 64 MiB had arrived at the cut); rsync (4587520 of 64 MiB had arrived at the cut)"
+  },
+  {
+   "id": "X-18:scp-legacy:M>L",
+   "status": "PASS",
+   "detail": "scp -O (legacy protocol) delivered 307200 bytes, sha256 equal"
+  },
+  {
+   "id": "X-18:rsync-flags:M>L",
+   "status": "PASS",
+   "detail": "--info=progress2 refused clearly; --protect-args refused clearly; --partial ok (target: rsync  version 3.2.7  protocol version 31)"
+  },
+  {
+   "id": "X-18:doctor:M>L",
+   "status": "PASS",
+   "detail": "pb ssh doctor lanex2-l is healthy"
+  },
+  {
+   "id": "X-18:ssh:M>W",
+   "status": "PASS",
+   "detail": "pb ssh ran a command on the target (hostname runnervmm7ud1)"
+  },
+  {
+   "id": "X-18:user:M>W",
+   "status": "PASS",
+   "detail": "--user and user@machine land as runneradmin"
+  },
+  {
+   "id": "X-18:scp:M>W",
+   "status": "PASS",
+   "detail": "scp both ways sha256 equal (524291 bytes), remote path in forward-slash form"
+  },
+  {
+   "id": "X-18:scp-backslash:M>W",
+   "status": "PASS",
+   "detail": "a backslash remote path was accepted"
+  },
+  {
+   "id": "X-18:sftp:M>W",
+   "status": "PASS",
+   "detail": "sftp put and get sha256 equal (204800 bytes)"
+  },
+  {
+   "id": "X-18:rsync:M>W",
+   "status": "PASS",
+   "detail": "clear message: rsync(38466): error: unexpected end of file"
+  },
+  {
+   "id": "X-18:tree:M>W",
+   "status": "PASS",
+   "detail": "46 files, nested/empty/unicode directories and a 12 MiB file equal (sha256) through scp, sftp"
+  },
+  {
+   "id": "X-18:resume:M>W",
+   "status": "FAIL",
+   "detail": "sftp rerun after the cut: sftp> reput \"/Users/admin/xplat-ssh/resume/big.bin\" \"xplat-ssh/resume-sftp/big.bin\"\nstat remote: No such file or directory\r\n"
+  },
+  {
+   "id": "X-18:scp-legacy:M>W",
+   "status": "PASS",
+   "detail": "scp -O (legacy protocol) delivered 307200 bytes, sha256 equal"
+  },
+  {
+   "id": "X-18:rsync-flags:M>W",
+   "status": "PASS",
+   "detail": "n/a: no rsync on Windows"
+  },
+  {
+   "id": "X-18:doctor:M>W",
+   "status": "PASS",
+   "detail": "pb ssh doctor lanex2-w2 is healthy"
+  },
+  {
+   "id": "X-18:ssh:W>L",
+   "status": "PASS",
+   "detail": "pb ssh ran a command on the target (hostname lanex2-l)"
+  },
+  {
+   "id": "X-18:user:W>L",
+   "status": "PASS",
+   "detail": "--user and user@machine land as tester"
+  },
+  {
+   "id": "X-18:scp:W>L",
+   "status": "PASS",
+   "detail": "scp both ways sha256 equal (49155 bytes), remote path in forward-slash form"
+  },
+  {
+   "id": "X-18:scp-backslash:W>L",
+   "status": "PASS",
+   "detail": "n/a: the target is not Windows"
+  },
+  {
+   "id": "X-18:sftp:W>L",
+   "status": "PASS",
+   "detail": "sftp put and get sha256 equal (49152 bytes)"
+  },
+  {
+   "id": "X-18:rsync:W>L",
+   "status": "PASS",
+   "detail": "clear message: pb: rsync was not found on this computer, so this command cannot run. Install rsync (or use pb scp or pb sftp, which Paperboat can"
+  },
+  {
+   "id": "X-18:tree:W>L",
+   "status": "PASS",
+   "detail": "46 files, nested/empty/unicode directories and a 12 MiB file equal (sha256) through scp, sftp"
+  },
+  {
+   "id": "X-18:resume:W>L",
+   "status": "FAIL",
+   "detail": "Command '['C:\\\\Program Files\\\\Paperboat\\\\users\\\\ue655ce475da61ffc2e916d1d\\\\bin\\\\pb.exe', 'sftp', '-b', 'C:\\\\Users\\\\runneradmin\\\\xplat-ssh\\\\resume-reput.txt', 'lanex2-l']' timed out after 900 seconds"
+  },
+  {
+   "id": "X-18:scp-legacy:W>L",
+   "status": "PASS",
+   "detail": "scp -O (legacy protocol) delivered 49152 bytes, sha256 equal"
+  },
+  {
+   "id": "X-18:rsync-flags:W>L",
+   "status": "PASS",
+   "detail": "n/a: no rsync on Windows"
+  },
+  {
+   "id": "X-18:doctor:W>L",
+   "status": "PASS",
+   "detail": "pb ssh doctor lanex2-l is healthy"
+  }
+ ]
+}
