@@ -196,3 +196,35 @@ func TestHTTPDispatchReadinessWaitsForSignedPublicationRead(t *testing.T) {
 		})
 	}
 }
+
+// A preview that stays pending is read with a growing delay, not every 250 ms: 4 s holds the 8 quick reads
+// (2 s), then 0.5 s and 1 s gaps, about 11 requests; a fixed 250 ms interval makes 17.
+func TestHTTPDispatchReadinessPendingBacksOff(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	lease := testDispatchRequest(t, time.Now().UTC()).Lease()
+	lease.Endpoint, lease.EndpointState = "", "custom_domain_not_ready"
+	calls := 0
+	transport := readinessRoundTripper(func(*http.Request) (*http.Response, error) {
+		calls++
+		observed := lease
+		observed.State = "connecting"
+		observed.AllocationState, observed.EdgeState, observed.OriginState = "ready", "ready", "ready"
+		data, err := json.Marshal(map[string]any{"data": observed})
+		if err != nil {
+			t.Fatal(err)
+		}
+		headers := make(http.Header)
+		headers.Set("ETag", formatLeaseETag(lease.ID, 2))
+		return &http.Response{StatusCode: http.StatusOK, Header: headers, Body: io.NopCloser(strings.NewReader(string(data)))}, nil
+	})
+	proofs := &readinessProofSource{t: t, operation: "operation_dispatch_1", path: "/v1/previews/prv_dispatch_1/readiness"}
+	observer, err := NewHTTPDispatchReadinessObserver(HTTPDispatchReadinessObserverConfig{ControlURL: "https://api.example.test", AllowedHosts: []string{"api.example.test"}, Identities: readinessTokenSource("machine-identity"), Proofs: proofs, Transport: transport})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = observer.ObservePreviewReadiness(ctx, DispatchReadiness{OperationID: "operation_dispatch_1", IdempotencyKey: "create-key", RequestID: "request_dispatch_1", CorrelationID: "correlation_dispatch_1"}, lease, 1)
+	if !errors.Is(err, context.DeadlineExceeded) || calls < 9 || calls > 13 {
+		t.Fatalf("pending readiness: calls=%d err=%v", calls, err)
+	}
+}

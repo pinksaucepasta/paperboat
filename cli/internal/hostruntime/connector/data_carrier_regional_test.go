@@ -19,11 +19,13 @@ func TestRegionalCarriersStandbyRepairAndConcurrentIngress(t *testing.T) {
 	var mu sync.Mutex
 	failed := true
 	desired := append([]DataCarrierTarget(nil), config.Targets...)
-	config.TargetsExpireAt = time.Now().Add(15 * time.Second)
+	// A healthy pool re-reads placement when the descriptor nears expiry (targetRefreshMargin), so the
+	// descriptor lives 3 s here for the replacement below to be seen within the test.
+	config.TargetsExpireAt = time.Now().Add(3 * time.Second)
 	config.RefreshTargets = func(context.Context) ([]DataCarrierTarget, time.Time, error) {
 		mu.Lock()
 		defer mu.Unlock()
-		return append([]DataCarrierTarget(nil), desired...), time.Now().Add(15 * time.Second), nil
+		return append([]DataCarrierTarget(nil), desired...), time.Now().Add(3 * time.Second), nil
 	}
 	servers := map[string]*DataCarrier{}
 	dialer := func(ctx context.Context, r DataCarrierDialRequest) (DataCarrierDialResult, error) {

@@ -80,6 +80,7 @@ func (o *HTTPDispatchReadinessObserver) ObservePreviewReadiness(ctx context.Cont
 	defer cancel()
 	method := http.MethodPost
 	current, err := o.observeLease(ctx, metadata, lease, expectedGeneration, method)
+	delay, reads := PreviewLeaseDefaultReconnect, 0
 	for err == nil {
 		if err := readinessProjectionFailure(method, 0, lease, current, expectedGeneration); err != nil {
 			return Lease{}, err
@@ -90,8 +91,12 @@ func (o *HTTPDispatchReadinessObserver) ObservePreviewReadiness(ctx context.Cont
 		if isReadyLease(current) {
 			return current, nil
 		}
-		if err = waitReconnect(ctx, PreviewLeaseDefaultReconnect); err != nil {
+		if err = waitReconnect(ctx, delay); err != nil {
 			break
+		}
+		// Readiness usually lands within seconds: stay quick first, then back off like the lease observer.
+		if reads++; reads > leaseObserverQuickReads {
+			delay = nextLeaseObserverDelay(delay, PreviewLeaseDefaultReconnect)
 		}
 		previous := current.Generation
 		method = http.MethodGet

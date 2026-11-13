@@ -125,7 +125,7 @@ func (p *DataCarrierPool) Connect(ctx context.Context) error {
 	p.mu.Unlock()
 
 	var errs []error
-	if p.config.RefreshTargets != nil && time.Since(p.refreshedAt) >= 4*time.Second {
+	if p.config.RefreshTargets != nil && time.Since(p.refreshedAt) >= 4*time.Second && p.targetsNeedRefresh() {
 		refreshCtx, stopRefresh := context.WithTimeout(ctx, 5*time.Second)
 		stopPool := context.AfterFunc(p.ctx, stopRefresh)
 		targets, expiry, err := p.config.RefreshTargets(refreshCtx)
@@ -335,6 +335,27 @@ func (p *DataCarrierPool) edgeDraining(carrier *DataCarrier) {
 		p.connectMu.Unlock()
 		_ = p.Connect(p.ctx)
 	}()
+}
+
+// targetRefreshMargin is how long before the descriptor expires a healthy pool re-reads it.
+const targetRefreshMargin = 5 * time.Second
+
+// targetsNeedRefresh is false while every slot holds a live carrier and the descriptor is not about to
+// expire: a healthy connector then makes no descriptor request (cloudflared applies remote config only
+// on a version change). Caller holds connectMu.
+func (p *DataCarrierPool) targetsNeedRefresh() bool {
+	if !p.targetExpiry.IsZero() && serverclock.Until(p.targetExpiry) < targetRefreshMargin {
+		return true
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	filled := map[int]bool{}
+	for _, carrier := range p.carriers {
+		if !carrier.draining && carrier.carrier.State() != DataCarrierClosed {
+			filled[carrier.slot] = true
+		}
+	}
+	return len(filled) < p.maximumCarriers
 }
 
 // EdgeDraining reports whether the pool has carriers but every one is draining: open streams
