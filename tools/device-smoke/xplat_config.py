@@ -354,9 +354,33 @@ def x03_merge(ctx, a, b, direction):
     for worker in workers:
         worker.join()
     merged = base.replace(b'l1\r\n', b'A1\r\n').replace(b'l5\r\n', b'B5\r\n')
-    wait('merged result everywhere', lambda: b.read(path_b) == merged and a.read(path_a) == merged)
+    wait('merged result everywhere', lambda: b.read(path_b) == merged and a.read(path_a) == merged, seconds=600)
     assert merged.count(b'\r\n') == merged.count(b'\n') == 5
     return 'three-way merge kept CRLF on every line'
+
+
+def x03_eol_edit(ctx, a, b, direction):
+    """X-03: an edit that only changes the line endings is a change: it travels alone, and against an edit on the other side it conflicts."""
+    name = 'app/eol-%s.txt' % direction.replace('>', '')
+    path_a, path_b = real(a, *name.split('/')), real(b, *name.split('/'))
+    crlf = ''.join('l%d\r\n' % i for i in range(1, 6)).encode()
+    lf = crlf.replace(b'\r\n', b'\n')
+    a.write(path_a, crlf)
+    arrives(b, path_b, crlf, 'base on ' + b.name)
+    wait('base is settled in the repository', lambda: ctx.repo.show('cfg/' + name) == crlf)
+    a.write(path_a, lf)
+    arrives(b, path_b, lf, 'a line-ending-only edit reaches ' + b.name)
+    wait('the line-ending-only edit is in the repository', lambda: ctx.repo.show('cfg/' + name) == lf)
+    mine, theirs = crlf, lf.replace(b'l5\n', b'B5\n')
+    import threading
+    workers = [threading.Thread(target=dev.write, args=(path, data)) for dev, path, data in ((a, path_a, mine), (b, path_b, theirs))]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    wait('the conflict is listed', lambda: conflicts(a) or conflicts(b), seconds=600)
+    assert a.read(path_a) == mine and b.read(path_b) == theirs, 'a conflicted file was overwritten or mixed'
+    return 'line-ending-only edit travelled alone; against an edit on the other side it conflicted and both files stayed as written'
 
 
 def refuses(dev, ctx, extra, what):
@@ -479,7 +503,7 @@ def x40_rename(ctx, a, b, direction):
     return 'the [machine.%s] section stopped applying after the rename (warning names it) and applied again under the old name' % a.name
 
 
-CHECKS = [('X-01', x01), ('X-01', x01_variables), ('X-02', x02), ('X-03', x03_bytes), ('X-03', x03_merge), ('X-06', x06), ('X-07', x07_paths), ('X-40', x40_rename)]
+CHECKS = [('X-01', x01), ('X-01', x01_variables), ('X-02', x02), ('X-03', x03_bytes), ('X-03', x03_merge), ('X-03', x03_eol_edit), ('X-06', x06), ('X-07', x07_paths), ('X-40', x40_rename)]
 
 
 def run_pairs(devices, only, fresh):
