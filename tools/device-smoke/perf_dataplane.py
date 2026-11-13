@@ -4,7 +4,7 @@
 Measures `pb exec true` latency, pb send / managed scp throughput of a 50 MiB file,
 managed rsync of many small files, the selected path, and how fast `pb --version` and
 `pb status` answer locally, then compares each number with the budget for that path. Prints
-one JSON receipt (numbers only; no file or command contents). Usage: perf_dataplane.py <target> [--no-budget].
+one JSON receipt (numbers only; no file or command contents). Usage: perf_dataplane.py <target> [--no-budget]; PERF_TARGET_OS=windows for a Windows target.
 `perf_dataplane.py --cli-only` measures the local binary/daemon without a peer, including on Windows via winhost.
 """
 import argparse
@@ -24,6 +24,10 @@ from perf_budgets import BUDGETS, cli_budget
 import winhost
 
 PB = winhost.pb_path()
+# PERF_TARGET_OS=windows: the target has `python` and no `true` (and needs MSYS2 rsync on its PATH).
+WINDOWS_TARGET = os.environ.get('PERF_TARGET_OS') == 'windows'
+TARGET_PYTHON = 'python' if WINDOWS_TARGET else 'python3'
+TRUE_COMMAND = ['cmd', '/c', 'exit', '0'] if WINDOWS_TARGET else ['true']
 LARGE_BYTES = 50 << 20
 SMALL_FILES, SMALL_BYTES = 500, 4096
 
@@ -63,7 +67,7 @@ def pb(*arguments, timeout=600):
 
 def remote(target, script, timeout=120):
     """Run a short python3 script on the target and return its stdout (expected to be small)."""
-    result = subprocess.run([str(PB), 'exec', target, '--', 'python3', '-c', script], capture_output=True,
+    result = subprocess.run([str(PB), 'exec', target, '--', TARGET_PYTHON, '-c', script], capture_output=True,
                             text=True, stdin=subprocess.DEVNULL, timeout=timeout)
     if result.returncode != 0 or len(result.stdout) > 4096:
         raise RuntimeError('remote helper failed')
@@ -94,15 +98,16 @@ def local_command_ms(*arguments, runs=7):
 
 
 def exec_latency(target, runs=9):
-    pb('exec', target, '--', 'true', timeout=120)  # warm the session and path
-    samples = sorted(pb('exec', target, '--', 'true', timeout=120) for _ in range(runs))
+    pb('exec', target, '--', *TRUE_COMMAND, timeout=120)  # warm the session and path
+    samples = sorted(pb('exec', target, '--', *TRUE_COMMAND, timeout=120) for _ in range(runs))
     return round(statistics.median(samples) * 1000), round(samples[-1] * 1000)
 
 
 def find_and_hash(target, name):
     return remote(target, (
         'import hashlib,pathlib\n'
-        f'm=[p for p in pathlib.Path.home().rglob({name!r}) if "/tmp/" not in str(p)][:1]\n'
+        'r=pathlib.Path.home()/"Paperboat"\n'
+        f'm=[p for p in r.rglob({name!r}) if "/tmp/" not in str(p)][:1]\n'
         'print(hashlib.sha256(m[0].read_bytes()).hexdigest() if m else "")\n'
         'm and m[0].unlink()\n'))
 

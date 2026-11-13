@@ -1,0 +1,7 @@
+perf_dataplane.py relmw-victus (PR-05) on W, 2026-11-13 05:40-05:53 IST: client = Linux container prw-lin on pbvm2 (Hyper-V guest on the same physical host as the target, pb dev-aee62911e), target = relmw-victus (victus, Windows 11 26100, pb.exe dev-aee62911e after `pb update --from`, MSYS2 rsync 3.5.2 on the machine PATH), same LAN, path direct (pb ping: direct, 2.9-6.2 ms), prod server. Run with PERF_TARGET_OS=windows (python, `cmd /c exit 0` as the true command). Budgets: perf_budgets.py 'direct' + 'cli'.
+
+Run 1 (rsync not installed on the target, aborted at the rsync step, nothing recorded for it): exec true median 1623 ms / max 2322 ms, send 45.4 Mbit/s, scp 143.0 Mbit/s; client cli_start_ms 72 (pbvm2 had a Go compile running, load 7) = FAIL on the client-side cli_start_ms only.
+Run 2 (rsync step skipped): not kept.
+Run 3, full (all five metrics), pbvm2 load 2.2:
+{"status": "FAIL", "target": "relmw-victus", "check": "perf", "metrics": {"cli_start_ms": 32, "status_ms": 32, "path": "direct", "exec_true_median_ms": 2576, "exec_true_max_ms": 4585, "send_mbit_s": 28.3, "scp_mbit_s": 172.9, "rsync_small_files_s": 32.8}, "budget_failures": ["send_mbit_s", "rsync_small_files_s"], "enrollment_unchanged": true}
+Within budget: exec true (7000/20000 ms), scp (>=25), client cli_start_ms/status_ms. Over budget: pb send 28.3 Mbit/s (>=30), pb rsync 32.8 small files/s (>=35).
