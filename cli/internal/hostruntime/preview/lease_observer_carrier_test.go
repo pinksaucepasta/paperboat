@@ -202,14 +202,22 @@ func (f *fakeLeaseChanges) change(lease Lease) {
 	f.moved = make(chan struct{})
 }
 
+// setQuietly changes the lease without moving the previews generation: edge and origin readiness do not move it.
+func (f *fakeLeaseChanges) setQuietly(lease Lease) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lease = lease
+}
+
 func (f *fakeLeaseChanges) readCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.reads
 }
 
-// Both pending and ready leases stay idle until the previews topic announces a change.
-func TestLeaseObserverCarrierReadsLeaseOnlyOnChange(t *testing.T) {
+// A ready preview used to re-read its lease every 250 ms for its whole life (~2 GET/s per preview on
+// production). Once ready it now reads only when the owner machine's previews topic moves.
+func TestLeaseObserverCarrierReadsReadyLeaseOnlyOnChange(t *testing.T) {
 	now := time.Now().UTC()
 	ready := Lease{
 		Schema: PreviewTunnelSchemaV1, Kind: PreviewLeaseKind, ID: "preview_observer_idle", AccountID: "account_01", ActorID: "actor_01",
@@ -217,55 +225,42 @@ func TestLeaseObserverCarrierReadsLeaseOnlyOnChange(t *testing.T) {
 		Endpoint: "https://preview.example.test", EndpointState: "ready", LeaseDeadline: now.Add(time.Hour), State: "ready", AllocationState: "ready", EdgeState: "ready", OriginState: "ready",
 		CreatedAt: now.Add(-time.Minute), LastRenewedAt: now, CreateOperationID: "operation_observer_idle", ETag: formatLeaseETag("preview_observer_idle", 1), Generation: 1,
 	}
-	for _, state := range []string{"pending", "ready"} {
-		t.Run(state, func(t *testing.T) {
-			initial := ready
-			if state == "pending" {
-				initial.State, initial.AllocationState, initial.EdgeState, initial.OriginState = "connecting", "pending", "pending", "unknown"
-				initial.Endpoint, initial.EndpointState = "", "pending"
-			}
-			fake := &fakeLeaseChanges{lease: initial, generation: 7, moved: make(chan struct{})}
-			carrier, err := NewLeaseObserverCarrier(LeaseObserverCarrierConfig{PollInterval: time.Millisecond, Reader: fake})
-			if err != nil {
-				t.Fatal(err)
-			}
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			readyCalls := make(chan struct{}, 2)
-			done := make(chan error, 1)
-			go func() {
-				done <- carrier.Run(ctx, initial, func(Lease) error { readyCalls <- struct{}{}; return nil })
-			}()
-			time.Sleep(500 * time.Millisecond)
-			// Initial read and the event baseline, then no periodic pending/ready reads.
-			if reads := fake.readCount(); reads == 0 || reads > 2 {
-				t.Fatalf("%s lease read %d times in 500 ms, want 1 or 2", state, reads)
-			}
-			if state == "pending" {
-				select {
-				case <-readyCalls:
-					t.Fatal("pending lease reported readiness")
-				default:
-				}
-				fake.change(ready)
-			}
+	fake := &fakeLeaseChanges{lease: ready, generation: 7, moved: make(chan struct{})}
+	carrier, err := NewLeaseObserverCarrier(LeaseObserverCarrierConfig{PollInterval: time.Millisecond, Reader: fake})
+	if err != nil {
+		t.Fatal(err)
+	}
+	readyCalls := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- carrier.Run(context.Background(), ready, func(Lease) error {
 			select {
-			case <-readyCalls:
-			case <-time.After(time.Second):
-				t.Fatal("observer did not report pushed readiness")
+			case readyCalls <- struct{}{}:
+			default:
 			}
-			stopped := ready
-			stopped.State, stopped.Endpoint, stopped.EndpointState = "stopped", "", "ended"
-			fake.change(stopped)
-			select {
-			case err := <-done:
-				if !errors.Is(err, ErrLeaseObserverTerminal) {
-					t.Fatalf("observer after stop = %v, want terminal", err)
-				}
-			case <-time.After(time.Second):
-				t.Fatal("observer did not see pushed stop")
-			}
+			return nil
 		})
+	}()
+	select {
+	case <-readyCalls:
+	case <-time.After(time.Second):
+		t.Fatal("observer did not report readiness")
+	}
+	time.Sleep(500 * time.Millisecond)
+	// One read reached readiness and one followed the first wait answer (the generation baseline).
+	if reads := fake.readCount(); reads > 2 {
+		t.Fatalf("ready lease read %d times in 500 ms with nothing changing, want at most 2", reads)
+	}
+	stopped := ready
+	stopped.State, stopped.Endpoint, stopped.EndpointState = "stopped", "", "ended"
+	fake.change(stopped)
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrLeaseObserverTerminal) {
+			t.Fatalf("observer run after stop = %v, want terminal", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("observer did not see the stop the previews topic announced")
 	}
 }
 
@@ -282,5 +277,43 @@ func TestLeaseObserverPendingPollBacksOff(t *testing.T) {
 	}
 	if got := nextLeaseObserverDelay(5*time.Second, 5*time.Second); got != 5*time.Second {
 		t.Fatalf("an interval above the cap must stay as configured, got %v", got)
+	}
+}
+
+// The previews topic does not move when a pending preview becomes ready (only insert, stop, access and target
+// changes move it), so a pending lease is polled: waiting for the topic left `pb preview --background` waiting 30 s
+// for readiness that had landed (end-to-end core, 2026-11-13).
+func TestLeaseObserverCarrierPollsPendingLeaseWithoutTopicMove(t *testing.T) {
+	now := time.Now().UTC()
+	pending := Lease{
+		Schema: PreviewTunnelSchemaV1, Kind: PreviewLeaseKind, ID: "preview_observer_pending", AccountID: "account_01", ActorID: "actor_01",
+		OwnerMachineID: "machine_01", OwnerSessionID: "session_01", OwnerSessionKind: "terminal", Target: LeaseTarget{Scheme: "http", Address: "127.0.0.1:3000"}, AccessMode: "public",
+		EndpointState: "pending", LeaseDeadline: now.Add(time.Hour), State: "connecting", AllocationState: "pending", EdgeState: "pending", OriginState: "unknown",
+		CreatedAt: now.Add(-time.Minute), LastRenewedAt: now, CreateOperationID: "operation_observer_pending", ETag: formatLeaseETag("preview_observer_pending", 1), Generation: 1,
+	}
+	fake := &fakeLeaseChanges{lease: pending, generation: 7, moved: make(chan struct{})}
+	carrier, err := NewLeaseObserverCarrier(LeaseObserverCarrierConfig{PollInterval: time.Millisecond, Reader: fake})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	readyCalls := make(chan struct{}, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- carrier.Run(ctx, pending, func(Lease) error { readyCalls <- struct{}{}; return nil })
+	}()
+	time.Sleep(100 * time.Millisecond)
+	ready := pending
+	ready.State, ready.AllocationState, ready.EdgeState, ready.OriginState = "ready", "ready", "ready", "ready"
+	ready.Endpoint, ready.EndpointState = "https://preview.example.test", "ready"
+	ready.ETag, ready.Generation = formatLeaseETag("preview_observer_pending", 2), 2
+	fake.setQuietly(ready)
+	select {
+	case <-readyCalls:
+	case err := <-done:
+		t.Fatalf("observer ended before readiness: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("observer did not report readiness that landed without a previews topic move")
 	}
 }
