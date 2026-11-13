@@ -16,6 +16,7 @@ import json
 import math
 import os
 import sys
+import subprocess
 from pathlib import Path
 import time
 import uuid
@@ -124,6 +125,18 @@ def wait_state(dev, path, predicate, seconds):
         time.sleep(.3)
 
 
+def start_origin(controller, owner, stop, port):
+    argv = [xplat_access.py(owner), '-c', ORIGIN, stop, port]
+    if owner.os == 'windows':
+        # Same detached CIM lifecycle as xplat_team.origin_start / winhost.start.
+        command = subprocess.list2cmdline(argv).replace("'", "''")
+        script = ("$r=Invoke-CimMethod -ClassName Win32_Process -MethodName Create "
+                  "-Arguments @{CommandLine='%s'}; "
+                  "if($r.ReturnValue -ne 0){throw 'origin CIM launch failed'}; $r.ProcessId") % command
+        argv = ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', script]
+    return controller.pb('exec', owner.alias, '--', *argv, timeout=540)
+
+
 def run_pair(team, owner, member, oid, records, origin_controller):
     original = fleet.json_pb(team.admin, 'team', 'get', team.id)['allow_private_access']
     suffix = uuid.uuid4().hex[:8]
@@ -154,8 +167,7 @@ def run_pair(team, owner, member, oid, records, origin_controller):
                     assert time.monotonic() < deadline, 'member daemon never learned the granted peer'
                     time.sleep(1)
                 if origin is None:
-                    origin = pool.submit(origin_controller.pb, 'exec', owner.alias, '--',
-                        xplat_access.py(owner), '-c', ORIGIN, origin_stop, port, timeout=540)
+                    origin = pool.submit(start_origin, origin_controller, owner, origin_stop, port)
                     time.sleep(3)
                 state, stop = base + '-' + mutation, base + '-' + mutation + '.stop'
                 holder = pool.submit(member.run, [xplat_access.py(member), '-c', HOLDER,
@@ -190,7 +202,10 @@ def run_pair(team, owner, member, oid, records, origin_controller):
             if origin is not None:
                 actions.append(lambda: origin_controller.pb('exec', owner.alias, '--',
                     xplat_access.py(owner), '-c',
-                    'import pathlib,sys; pathlib.Path(sys.argv[1]).touch()', origin_stop, timeout=60))
+                    'import pathlib,sys,time; p=pathlib.Path(sys.argv[1]); p.touch(); '
+                    'end=time.monotonic()+15\n'
+                    'while p.exists() and time.monotonic()<end: time.sleep(.2)\n'
+                    'assert not p.exists(), \"origin did not stop\"', origin_stop, timeout=60))
             actions.extend([lambda: team.setting(original),
                             lambda: team.revoke(oid, 'exec,private_access'),
                             lambda: team.unshare(oid)])
