@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -35,6 +36,7 @@ const (
 	localPeerLaunchWarning
 	localPeerLinkState
 	localPeerRecording
+	localPeerTerminalAck
 )
 
 // A localPeerFailure payload says why the terminal link failed; empty is a lost transport.
@@ -142,6 +144,48 @@ type localPeerMetadataPayload struct {
 	RuntimeVersion string `json:"runtime_version,omitempty"`
 }
 
+// A client of the local stream tells the daemon how many output bytes it has taken (localPeerTerminalAck, a running total),
+// and the daemon keeps at most localPeerWindowBytes ahead of that. Without it the stream, the pipe or socket buffers and the
+// client's queue hold output the Ctrl-C cut cannot reach, and a slow console (a Windows ConPTY, 160 KB/s) paints it for
+// seconds after the key (X-24); what stays behind the window is cut by the host. Prior art: ttyd pauses the PTY while its
+// websocket send buffer is full, tmux stops reading a pane while the client's backlog is large.
+const (
+	localPeerWindowBytes  = 64 << 10
+	localPeerAckStepBytes = 8 << 10
+)
+
+type localPeerPacer struct {
+	sent, acked atomic.Uint64
+	wake        chan struct{}
+}
+
+func newLocalPeerPacer() *localPeerPacer { return &localPeerPacer{wake: make(chan struct{}, 1)} }
+
+func (p *localPeerPacer) ack(total uint64) {
+	for {
+		current := p.acked.Load()
+		if total <= current || p.acked.CompareAndSwap(current, total) {
+			break
+		}
+	}
+	select {
+	case p.wake <- struct{}{}:
+	default:
+	}
+}
+
+// wait blocks while the client has more than the window to take; false means the bridge is done.
+func (p *localPeerPacer) wait(stop <-chan struct{}) bool {
+	for p.sent.Load()-min(p.acked.Load(), p.sent.Load()) >= localPeerWindowBytes {
+		select {
+		case <-p.wake:
+		case <-stop:
+			return false
+		}
+	}
+	return true
+}
+
 type localPeerWriter struct {
 	writer io.Writer
 	mu     sync.Mutex
@@ -167,7 +211,7 @@ func readLocalPeerFrame(reader io.Reader) (byte, []byte, error) {
 		return 0, nil, err
 	}
 	size := binary.BigEndian.Uint32(header[1:])
-	if size > localPeerMaximumFrame || header[0] < localPeerData || header[0] > localPeerRecording {
+	if size > localPeerMaximumFrame || header[0] < localPeerData || header[0] > localPeerTerminalAck {
 		return 0, nil, ErrPeerTerminalInvalid
 	}
 	payload := make([]byte, size)
@@ -228,6 +272,7 @@ func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includ
 		}
 	}
 	done := make(chan error, 3)
+	pacer := newLocalPeerPacer()
 	outputDone := make(chan struct{})
 	waitStarted := false
 	if observed, ok := remote.(LinkStateObserver); ok && !isExec {
@@ -320,6 +365,9 @@ func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includ
 			}
 			buffer := make([]byte, 32<<10)
 			for {
+				if !pacer.wait(stop) {
+					return
+				}
 				cursor.beginRead()
 				count, err := remote.Read(buffer)
 				sequence := cursor.endRead()
@@ -331,6 +379,7 @@ func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includ
 						done <- writeErr
 						return
 					}
+					pacer.sent.Add(uint64(count))
 				}
 				if err != nil {
 					if count == 0 && sequence > 0 {
@@ -365,6 +414,12 @@ func serveLocalPeerConn(ctx context.Context, local net.Conn, remote Conn, includ
 					done <- err
 					return
 				}
+			case localPeerTerminalAck:
+				if isExec || len(payload) != 8 {
+					done <- ErrPeerTerminalInvalid
+					return
+				}
+				pacer.ack(binary.BigEndian.Uint64(payload))
 			case localPeerResize:
 				if len(payload) != 4 {
 					done <- ErrPeerTerminalInvalid
@@ -490,6 +545,7 @@ type localPeerConn struct {
 	mu                sync.Mutex
 	pending           []byte
 	pendingSequence   uint64
+	taken, ackedTaken uint64 // output bytes handed to Read, and the total the daemon was last told
 	committedSequence uint64
 	sequenceSink      func(int)
 	delivered         func() int // see SkipDelivered
@@ -807,6 +863,7 @@ func (c *localPeerConn) Read(value []byte) (int, error) {
 			}
 			c.pendingSequence = 0
 		}
+		c.ackTaken(count)
 		return count, nil
 	}
 	if c.delivered != nil {
@@ -845,7 +902,22 @@ func (c *localPeerConn) Read(value []byte) (int, error) {
 	} else if err := c.commitSequence(output.sequence); err != nil {
 		return 0, err
 	}
+	c.ackTaken(count)
 	return count, nil
+}
+
+// ackTaken tells the daemon (localPeerTerminalAck) how much output Read has handed out, every localPeerAckStepBytes. A failed
+// write is the lost link, which the read loop reports.
+func (c *localPeerConn) ackTaken(count int) {
+	c.taken += uint64(count)
+	if c.exec || c.taken-c.ackedTaken < localPeerAckStepBytes {
+		return
+	}
+	var total [8]byte
+	binary.BigEndian.PutUint64(total[:], c.taken)
+	if c.writer.write(localPeerTerminalAck, total[:]) == nil {
+		c.ackedTaken = c.taken
+	}
 }
 
 // Write sends one data frame; the daemon acts only on whole frames, so a failed write sent nothing.
