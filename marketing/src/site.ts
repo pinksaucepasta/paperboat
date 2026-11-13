@@ -23,7 +23,7 @@ export const localDomain = config.local_access_base_domain
 export const previewDomain = config.preview_base_domain
 export const tunnelDomain = config.tunnel_base_domain
 
-/** The public source repository (LICENSING.md: PolyForm Noncommercial). */
+/** The public source repository (LICENSING.md: MIT and AGPL-3.0). */
 export const sourceUrl = "https://github.com/pinksaucepasta/paperboat"
 
 /** Launch platforms (PLAN 1.1): macOS on Apple Silicon and Linux; Windows follows after launch. */
