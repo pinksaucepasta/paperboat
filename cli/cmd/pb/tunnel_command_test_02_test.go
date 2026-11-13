@@ -334,22 +334,26 @@ func TestTunnelCreateHumanOutputExplainsPendingCustomerDomain(t *testing.T) {
 	}
 }
 
-func TestPublicTLSRouteRequiresVerifiedDomainWhenStableEndpointIsPending(t *testing.T) {
+func TestPublicTLSRouteMayLeaveTheHostnameToTheServer(t *testing.T) {
 	withTunnelCommandClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/v1/tunnels/tun_1" {
-			t.Fatalf("unexpected request = %s %s", r.Method, r.URL.Path)
+		var input api.TunnelRouteInput
+		// No GET of the tunnel: a self-hosted-only account's stable_endpoint is empty, and the server names the managed hostname.
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/tunnels/tun_1/routes" || json.NewDecoder(r.Body).Decode(&input) != nil {
+			t.Fatalf("request=%s %s", r.Method, r.URL.Path)
 		}
-		tunnel := validCommandTunnel()
-		tunnel.StableEndpoint = ""
-		tunnel.SummaryCode = "custom_domain_required"
-		w.Header().Set("ETag", tunnel.ETag)
-		_ = json.NewEncoder(w).Encode(map[string]any{"data": tunnel})
+		if input.Protocol != "tls" || input.HostMatch.Type != "managed_exact" || input.HostMatch.Hostname != "" || input.Origin.Scheme != "tcp" {
+			t.Fatalf("public TLS input=%+v", input)
+		}
+		route := validCommandRoute("route_tls_1", "postgres")
+		route.Protocol, route.Origin = "tls", input.Origin
+		route.HostMatch = api.TunnelRouteHostMatch{Type: "managed_exact", Hostname: "123e4567-e89b-42d3-a456-426614174000.tunnels.example.test"}
+		route.PublicTCPListenerID, route.PublicTCPPort = "listener_tls_443", 443
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": api.TunnelRouteMutation{Route: route, Operation: validCommandOperation("route", route.ID), Changed: true}})
 	})
 	command := tunnelCobraCommandV1()
-	command.SetArgs([]string{"route", "add", "tun_1", "--name", "postgres", "--protocol", "tls", "--to", "tcp://127.0.0.1:5432"})
-	err := command.Execute()
-	if err == nil || !strings.Contains(err.Error(), "verified customer domain") || !strings.Contains(err.Error(), "pb tunnel domain add tun_1 HOSTNAME") {
-		t.Fatalf("error = %v", err)
+	command.SetArgs([]string{"route", "add", "tun_1", "--name", "postgres", "--protocol", "tls", "--to", "tcp://127.0.0.1:5432", "--json"})
+	if err := command.Execute(); err != nil {
+		t.Fatal(err)
 	}
 }
 

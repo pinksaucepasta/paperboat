@@ -270,8 +270,12 @@ func TestPublicTCPRouteMayLeaveTheHostnameToTheServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	tcp.Protocol = "tls"
-	if _, err := normalizeRouteCreate(tcp); !errors.Is(err, ErrInvalidInput) {
+	if _, err := normalizeRouteCreate(tcp); err != nil {
 		t.Fatalf("TLS without hostname error=%v", err)
+	}
+	tcp.MatchType = "exact"
+	if _, err := normalizeRouteCreate(tcp); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("TLS with an exact match and no hostname error=%v", err)
 	}
 }
 

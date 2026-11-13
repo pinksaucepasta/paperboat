@@ -732,8 +732,8 @@ func normalizeRouteCreate(input RouteCreateRequest) (normalizedRouteCreate, erro
 	if err != nil {
 		return normalizedRouteCreate{}, err
 	}
-	// A public TCP route may leave the host out: the repository names the tunnel's managed hostname.
-	serverNamed := protocol == "tcp" && input.Hostname == "" && (input.MatchType == "managed_exact" || input.MatchType == "managed")
+	// A public TCP or TLS route may leave the host out: the repository names the tunnel's managed hostname.
+	serverNamed := (protocol == "tcp" || protocol == "tls") && input.Hostname == "" && (input.MatchType == "managed_exact" || input.MatchType == "managed")
 	matchType, hostname, wildcard, err := "managed", sql.NullString{}, sql.NullString{}, error(nil)
 	if !serverNamed {
 		matchType, hostname, wildcard, err = normalizeRouteMatch(input.MatchType, input.Hostname, input.WildcardSuffix)

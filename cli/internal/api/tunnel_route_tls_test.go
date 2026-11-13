@@ -9,6 +9,10 @@ func TestTLSPassthroughRouteInputUsesTheManagedHostnameAndATCPOrigin(t *testing.
 	if err := validateTunnelRouteInput(tls, true); err != nil {
 		t.Fatalf("TLS passthrough route refused: %v", err)
 	}
+	tls.HostMatch.Hostname = "" // the server names the managed hostname (a self-hosted-only account has no endpoint to copy it from)
+	if err := validateTunnelRouteInput(tls, true); err != nil {
+		t.Fatalf("TLS passthrough route without a hostname refused: %v", err)
+	}
 	tls.Origin.PreserveHost = true
 	if err := validateTunnelRouteInput(tls, true); err == nil {
 		t.Fatal("TLS passthrough route preserving an HTTP Host header accepted")

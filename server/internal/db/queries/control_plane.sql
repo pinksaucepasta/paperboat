@@ -1177,7 +1177,8 @@ JOIN control_tunnel_nodes AS node ON node.id = x.edge_node_id
 LEFT JOIN LATERAL (
   SELECT d.hostname, d.match_type
   FROM tunnel_domains d
-  WHERE tr.match_type = 'managed'
+  -- Only an HTTP route is served at the customer's name; a TLS route keeps its managed name and carries the customer's names as domain_bindings.
+  WHERE tr.match_type = 'managed' AND tr.protocol = 'http'
     AND EXISTS (SELECT 1 FROM selfhost_installations i WHERE i.node_id = node.id AND i.scope_kind <> 'global')
     AND d.route_id = tr.id AND d.tunnel_id = tr.tunnel_id AND d.account_id = t.account_id
     AND d.deleted_at IS NULL AND d.ownership_state = 'verified' AND d.conflict_state = 'clear'

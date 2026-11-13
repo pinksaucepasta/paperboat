@@ -227,7 +227,7 @@ func validateTunnelRouteInput(in TunnelRouteInput, allowDefaults bool) error {
 		return errors.New("route protocol must be http, tcp, tls, or tcp_private")
 	}
 	// A request for a public TCP route names no host: the server owns the tunnel's managed hostname.
-	serverNamed := allowDefaults && in.Protocol == "tcp" && in.HostMatch.Type == "managed_exact" && in.HostMatch.Hostname == ""
+	serverNamed := allowDefaults && (in.Protocol == "tcp" || in.Protocol == "tls") && in.HostMatch.Type == "managed_exact" && in.HostMatch.Hostname == ""
 	if err := validateHostMatch(in.HostMatch); err != nil && !serverNamed {
 		return err
 	}
