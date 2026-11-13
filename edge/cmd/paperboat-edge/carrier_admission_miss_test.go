@@ -96,7 +96,7 @@ func TestCarrierAdmittedOnFirstDialWhenItsAdmissionIsNewerThanTheEdgePull(t *tes
 
 	component, closeService, err := newCarrierComponentWithTelemetry(
 		config.Deployment{CarrierTCPListenAddress: tcpAddress, CarrierQUICListenAddress: quicAddress, ControlInterval: time.Hour, NodeCapacity: 8},
-		dynamicCarrierCertificate(t, "edge-carrier", nil, nil), nil, nil, nil, nil, nil, nil, worker,
+		dynamicCarrierCertificate(t, "edge-carrier", nil, nil), nil, nil, nil, nil, nil, nil, nil, worker,
 	)
 	if err != nil {
 		t.Fatal(err)

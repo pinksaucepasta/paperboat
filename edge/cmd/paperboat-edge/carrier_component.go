@@ -32,6 +32,7 @@ func newCarrierComponentWithTelemetry(
 	privateAccess *edgehttp.PrivateAccessStreamBridge,
 	carrierTelemetry *datacarrier.CarrierTelemetry,
 	reporter *reporting.Reporter,
+	firstAdmission <-chan struct{},
 	runtimeWorkers ...*edgeruntime.RuntimeCarrierWorker,
 ) (edgeruntime.Component, func() error, error) {
 	if durableExpected == nil && durableRoutes != nil || durableExpected != nil && durableRoutes == nil {
@@ -73,6 +74,18 @@ func newCarrierComponentWithTelemetry(
 		ClientAuth: tls.RequireAnyClientCert,
 		VerifyConnection: func(state tls.ConnectionState) error {
 			_, err := peerBinding(state)
+			if err != nil && firstAdmission != nil {
+				// A cold start opens this listener before the route worker's first reconcile has
+				// installed the durable admissions: wait for it instead of refusing every machine
+				// that redials in that first minute (dev edges 2026-11-13: ~190-280 refusals).
+				timer := time.NewTimer(admissionMissWait)
+				select {
+				case <-firstAdmission:
+					_, err = peerBinding(state)
+				case <-timer.C:
+				}
+				timer.Stop()
+			}
 			if err != nil && runtimeWorker != nil {
 				// A machine can hold its admission for this process before the edge's next pull
 				// brings it here: one shared, rate-limited pull closes that gap instead of

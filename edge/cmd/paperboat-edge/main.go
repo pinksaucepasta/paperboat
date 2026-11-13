@@ -742,7 +742,7 @@ func buildServiceAssembly(cfg config.Config, deployment config.Deployment, carri
 	carrierComponent := carrier
 	var carrierCleanup func() error
 	if carrierComponent == nil {
-		carrierComponent, carrierCleanup, err = newCarrierComponentWithTelemetry(deployment, carrierTrust.Certificate, durableAdmissions, accessorAdmissions, durableRoutes, privateAccessBridge, carrierTelemetry, reporter, runtimeWorker)
+		carrierComponent, carrierCleanup, err = newCarrierComponentWithTelemetry(deployment, carrierTrust.Certificate, durableAdmissions, accessorAdmissions, durableRoutes, privateAccessBridge, carrierTelemetry, reporter, routeWorker.Admitted(), runtimeWorker)
 		if err != nil {
 			return nil, err
 		}

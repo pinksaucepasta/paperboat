@@ -134,7 +134,7 @@ func engineRouteThroughRealEdge(t *testing.T, routesFirst bool) {
 	assembly, closeService, err := newCarrierComponentWithTelemetry(
 		config.Deployment{CarrierTCPListenAddress: tcpAddress, CarrierQUICListenAddress: quicAddress, ControlInterval: time.Hour, NodeCapacity: 8},
 		dynamicCarrierCertificate(t, "edge-carrier", nil, nil), durable, nil,
-		routes, nil, nil, nil,
+		routes, nil, nil, nil, nil,
 		&edgeruntime.RuntimeCarrierWorker{Expected: runtimeExpected, Routes: runtimeRoutes},
 	)
 	if err != nil {

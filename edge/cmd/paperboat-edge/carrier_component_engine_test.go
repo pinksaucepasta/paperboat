@@ -90,7 +90,7 @@ func TestRuntimeCarrierBecomesTheReplicaOfItsEngineTunnelRoutes(t *testing.T) {
 	assembly, closeService, err := newCarrierComponentWithTelemetry(
 		config.Deployment{CarrierTCPListenAddress: tcpAddress, CarrierQUICListenAddress: quicAddress, ControlInterval: time.Hour, NodeCapacity: 8},
 		dynamicCarrierCertificate(t, "edge-carrier", nil, nil), durableExpected, nil,
-		routes, nil, nil, nil, worker,
+		routes, nil, nil, nil, nil, worker,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -233,7 +233,7 @@ func TestRuntimeRouteAttachesWhenItsAdmissionArrivesAfterTheEngineCarrierConnect
 	assembly, closeService, err := newCarrierComponentWithTelemetry(
 		config.Deployment{CarrierTCPListenAddress: tcpAddress, CarrierQUICListenAddress: quicAddress, ControlInterval: time.Hour, NodeCapacity: 8},
 		dynamicCarrierCertificate(t, "edge-carrier", nil, nil), durableExpected, nil,
-		routes, nil, nil, nil, worker,
+		routes, nil, nil, nil, nil, worker,
 	)
 	if err != nil {
 		t.Fatal(err)
