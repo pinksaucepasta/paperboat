@@ -187,3 +187,23 @@ func TestHoldDropsOutputAlreadyQueuedForRead(t *testing.T) {
 		t.Fatalf("read %q, want the output after the cut and the screen only", got.String())
 	}
 }
+
+// X-24: a discarded answer that arrives while Read is part-way through a chunk drops the rest of that chunk: on a slow
+// console (Windows) one 256 KiB chunk is seconds of painting.
+func TestHoldDropsTheRestOfAChunkReadHalfWay(t *testing.T) {
+	c := holdConn()
+	c.target = &resolver.TerminalTarget{}
+	c.ackNotify = make(chan struct{}, 1)
+	c.out <- frame(0, "floodflood")
+	buf := make([]byte, 5)
+	if n, err := c.Read(buf); err != nil || string(buf[:n]) != "flood" {
+		t.Fatalf("first read %q, %v", buf[:n], err)
+	}
+	c.startHold(7)
+	c.resolveHold(7, 10, true) // the cut is the end of the chunk
+	c.out <- frame(10, "after")
+	n, err := c.Read(buf)
+	if err != nil || string(buf[:n]) != "after" {
+		t.Fatalf("read %q, %v, want the output after the cut only", buf[:n], err)
+	}
+}

@@ -698,6 +698,13 @@ func (c *helperTerminalConn) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
+	if c.current != nil { // a cut that came while this chunk was half painted drops its rest too (X-24)
+		if kept, ok := c.skipDropped(*c.current); ok {
+			c.current = &kept
+		} else {
+			c.current = nil
+		}
+	}
 	for c.current == nil {
 		output, ok := <-c.out
 		if !ok {
