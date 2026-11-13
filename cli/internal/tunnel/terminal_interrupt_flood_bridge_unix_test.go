@@ -10,9 +10,11 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/pinksaucepasta/paperboat/internal/config"
 )
 
-// X-24 on a real client: `pb connect` reads the daemon's terminal through the local stream (ServeLocalPeerConn), and the
+// X-24 on a real client: `pb connect` reads the daemon's terminal through the local stream (ServeLocalPeerConn) and its own queue, and the
 // console paints at a few hundred KB/s (a Windows ConPTY, measured 160 KB/s: 5-8 MB kept coming 30-50 s after Ctrl-C).
 // Whatever the local stream holds below the Ctrl-C cut is painted after it, so the bound is what the stream may hold.
 func TestCtrlCUnderAFloodStopsThePaintThroughTheLocalStream(t *testing.T) {
@@ -36,10 +38,14 @@ func TestCtrlCUnderAFloodStopsThePaintThroughTheLocalStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	connection, err := NewLocalPeerConn(client, nil, nil)
+	local, err := NewLocalPeerConn(client, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// What pb connect reads from: its own queue sits between the stream and the screen (Connect.TerminalOutputQueueChunks).
+	connection := NewObservedReconnectingConn(context.Background(), local, 0, time.Second,
+		func(context.Context) (Conn, error) { return nil, ErrTransportLost }, nil, nil, TelemetryContext{},
+		WithReconnectingOutput(config.DefaultTerminalOutputQueueChunks, 0))
 	defer connection.Close()
 	var painted atomic.Int64
 	marker := make(chan time.Time, 1)
