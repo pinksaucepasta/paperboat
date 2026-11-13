@@ -1,0 +1,8 @@
+# F13-02 team previews and tunnels bytes on L, 2026-11-13 ~03:20-03:34Z, server .12 (main 35ff839a8 incl. a034bedd6), team-owned Linux target f1302-t (cycle build dev-2762a3cad), controller/usage reader f1302-c
+# Created from the team-owned machine: `pb --workspace TEAM preview http://127.0.0.1:8081 --background --team` and `--private` (both answered 500 control_unavailable before a034bedd6; now "Preview ready"), `pb --workspace TEAM tunnel create f1302-tun --port 8081 --team` (created, connecting).
+# Fetched /blob.bin (2 MiB) three times each through a signed-in headless Chromium (console session of the team owner): team preview 6,291,456 B, team tunnel 6,291,456 B. The --private preview's browser sign-in ended at /.paperboat/access/callback 401 in 3 of 3 tries (failures.md).
+# Usage API (team workspace, member filter) before -> after settle (recorder batch 5 min):
+before: {"billing": 115420085, "charged": 12749655, "total": 12752758, "by_path": [["direct","none",3103],["relay","managed",12749655]], "member_total": 12752758}
+after:  {"billing": 149339407, "charged": 46668977, "total": 46675182, "by_path": [["direct","none",6205],["edge","managed",33919322],["relay","managed",12749655]], "member_total": 46675182}
+delta:  edge managed 33,919,322 B (driven payload 12,582,912 B, the edge counts both hops and headers); billing delta 33,919,322 == charged-path delta 33,919,322; total delta 33,922,424 == charged + direct 3,102; member bytes delta 33,922,424 == team total delta
+PASS: edge bytes recorded for team previews and tunnels; billing moves by exactly the charged paths; member split == pool.
