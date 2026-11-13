@@ -1,0 +1,35 @@
+{
+ "check": "xplat-config",
+ "results": [
+  {
+   "id": "X-07:x07_paths:M>W",
+   "status": "PASS",
+   "detail": "drive-letter and backslash paths accepted on Windows only, refused on Unix with a clear message"
+  },
+  {
+   "id": "X-07:x07_paths:W>M",
+   "status": "PASS",
+   "detail": "drive-letter and backslash paths accepted on Windows only, refused on Unix with a clear message"
+  },
+  {
+   "id": "X-07:x07_unicode:M>W",
+   "status": "PASS",
+   "detail": "NFD/NFC name is one file on both devices, edit round-trips, CJK name intact"
+  },
+  {
+   "id": "X-07:x07_unicode:W>M",
+   "status": "PASS",
+   "detail": "NFD/NFC name is one file on both devices, edit round-trips, CJK name intact"
+  },
+  {
+   "id": "X-07:x07_long_path:M>W",
+   "status": "PASS",
+   "detail": "a 390-character destination path arrived byte-identical on lanex2-w"
+  },
+  {
+   "id": "X-07:x07_long_path:W>M",
+   "status": "PASS",
+   "detail": "a 390-character destination path arrived byte-identical on lanex2-w"
+  }
+ ]
+}
