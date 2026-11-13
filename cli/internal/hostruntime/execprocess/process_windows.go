@@ -302,11 +302,15 @@ func (p *ptyProcess) WriteContext(ctx context.Context, data []byte) (int, error)
 	}
 	return p.process.WriteContext(ctx, data)
 }
+
+// CloseInput is a no-op for a terminal: closing it is a hangup that kills the command mid-run, while stdin EOF at the
+// client (`pb exec --pty host cmd </dev/null`) only means no more keystrokes. Wait releases the terminal when the
+// command ends.
 func (p *ptyProcess) CloseInput() error {
 	if p.process == nil {
 		return ErrInvalid
 	}
-	return p.process.CloseIO()
+	return nil
 }
 func (p *ptyProcess) Signal(signal pty.Signal) error {
 	if p.process == nil {
@@ -331,6 +335,7 @@ func (p *ptyProcess) Wait(ctx context.Context) (Result, error) {
 		case <-ctx.Done():
 			return Result{}, ctx.Err()
 		}
+		_ = p.process.CloseIO() // released after exit and output are done; a close failure is not the command's
 	}
 	return Result{Code: value.Code, Signal: value.Signal, ExitedAt: value.ExitedAt}, err
 }

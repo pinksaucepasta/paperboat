@@ -15,6 +15,9 @@ var errManagedToolOperand = errors.New("managed SSH tool operand is invalid")
 
 type managedToolTargetResolver func(*command.Context, string, string) (managedssh.Destination, error)
 
+// remoteDrivePathConverter turns a drive-letter path on a Windows target into the form its rsync reads as absolute.
+type remoteDrivePathConverter func(destination managedssh.Destination, user, path string) (string, error)
+
 func newManagedSSHToolCommand(name string) *cobra.Command {
 	command := &cobra.Command{
 		Use:                name + " <standard " + name + " arguments...>",
@@ -50,18 +53,20 @@ func actionManagedSSHTool(cobraCommand *cobra.Command, tool string, args []strin
 			HasRegisteredUser: true, Platform: machine.Platform,
 		})
 	}
-	rewritten, err := rewriteManagedToolArguments(ctx, tool, args, domain, resolve)
+	environment, err := managedSSHEnvironment(ctx, os.Environ())
 	if err != nil {
 		return err
 	}
-	environment, err := managedSSHEnvironment(ctx, os.Environ())
+	rewritten, err := rewriteManagedToolArguments(ctx, tool, args, domain, resolve, func(destination managedssh.Destination, user, path string) (string, error) {
+		return targetRsyncPath(ctx.Context, environment, destination, user, path)
+	})
 	if err != nil {
 		return err
 	}
 	return executeManagedSSHTool(cobraCommand.Context(), tool, rewritten, environment)
 }
 
-func rewriteManagedToolArguments(ctx *command.Context, tool string, args []string, domain string, resolve managedToolTargetResolver) ([]string, error) {
+func rewriteManagedToolArguments(ctx *command.Context, tool string, args []string, domain string, resolve managedToolTargetResolver, drivePath remoteDrivePathConverter) ([]string, error) {
 	if ctx == nil || resolve == nil || len(args) == 0 {
 		return nil, errManagedToolOperand
 	}
@@ -89,6 +94,11 @@ func rewriteManagedToolArguments(ctx *command.Context, tool string, args []strin
 			user := requestedUser
 			if user == "" {
 				user = destination.User
+			}
+			if tool == "rsync" && drivePath != nil && strings.EqualFold(destination.Platform, "windows") && isDriveOperand(path) {
+				if path, err = drivePath(destination, user, path); err != nil {
+					return nil, err
+				}
 			}
 			result[index] = user + "@" + destination.Host + ":" + path
 			managed++

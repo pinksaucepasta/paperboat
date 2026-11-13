@@ -50,6 +50,8 @@ type Destination struct {
 	// with the automatic per-session key. Any other user goes through the same transport and
 	// authenticates with their own key, agent or password.
 	Managed bool
+	// Platform is the target machine's OS as the server records it ("windows", "linux", "darwin").
+	Platform string
 }
 
 type DestinationInput struct {
@@ -83,7 +85,7 @@ func ResolveDestination(input DestinationInput) (Destination, error) {
 		return Destination{}, err
 	}
 	managed := input.HasRegisteredUser && usernamesEqual(user, input.RegisteredUser, input.Platform)
-	return Destination{AliasDomain: input.AliasDomain, Alias: strings.ToLower(input.Alias), Host: host, Port: input.RegisteredPort, User: user, Managed: managed}, nil
+	return Destination{AliasDomain: input.AliasDomain, Alias: strings.ToLower(input.Alias), Host: host, Port: input.RegisteredPort, User: user, Managed: managed, Platform: input.Platform}, nil
 }
 
 func AliasHost(alias, domain string) (string, error) {

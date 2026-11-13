@@ -30,7 +30,7 @@ func managedToolTestResolver(calls *[]string) managedToolTargetResolver {
 func TestRewriteManagedSCPOperandsPreservesFlagsAndLocalPaths(t *testing.T) {
 	var calls []string
 	input := []string{"-q", "-o", "ProxyCommand=helper:x", "./local:file", "mac:/tmp/file"}
-	got, err := rewriteManagedToolArguments(managedToolTestContext(), "scp", input, managedToolTestDomain, managedToolTestResolver(&calls))
+	got, err := rewriteManagedToolArguments(managedToolTestContext(), "scp", input, managedToolTestDomain, managedToolTestResolver(&calls), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,15 +46,15 @@ func TestRewriteManagedSCPOperandsPreservesFlagsAndLocalPaths(t *testing.T) {
 func TestRewriteManagedToolsApplyExplicitUserAndNamespace(t *testing.T) {
 	var calls []string
 	resolver := managedToolTestResolver(&calls)
-	scp, err := rewriteManagedToolArguments(managedToolTestContext(), "scp", []string{"payload", "bob@mac.machines.example.test:dest"}, managedToolTestDomain, resolver)
+	scp, err := rewriteManagedToolArguments(managedToolTestContext(), "scp", []string{"payload", "bob@mac.machines.example.test:dest"}, managedToolTestDomain, resolver, nil)
 	if err != nil || !reflect.DeepEqual(scp, []string{"payload", "bob@mac.machines.example.test:dest"}) {
 		t.Fatalf("scp=%q error=%v", scp, err)
 	}
-	sftp, err := rewriteManagedToolArguments(managedToolTestContext(), "sftp", []string{"-o", "ConnectTimeout=5", "mac"}, managedToolTestDomain, resolver)
+	sftp, err := rewriteManagedToolArguments(managedToolTestContext(), "sftp", []string{"-o", "ConnectTimeout=5", "mac"}, managedToolTestDomain, resolver, nil)
 	if err != nil || !reflect.DeepEqual(sftp, []string{"-o", "ConnectTimeout=5", "adam@mac.machines.example.test"}) {
 		t.Fatalf("sftp=%q error=%v", sftp, err)
 	}
-	rsync, err := rewriteManagedToolArguments(managedToolTestContext(), "rsync", []string{"-a", "bob@mac:src", "C:\\local\\dest"}, managedToolTestDomain, resolver)
+	rsync, err := rewriteManagedToolArguments(managedToolTestContext(), "rsync", []string{"-a", "bob@mac:src", "C:\\local\\dest"}, managedToolTestDomain, resolver, nil)
 	if err != nil || !reflect.DeepEqual(rsync, []string{"-a", "bob@mac.machines.example.test:src", "C:\\local\\dest"}) {
 		t.Fatalf("rsync=%q error=%v", rsync, err)
 	}
@@ -66,7 +66,7 @@ func TestRewriteManagedToolsApplyExplicitUserAndNamespace(t *testing.T) {
 
 func TestRewriteManagedToolRejectsMissingRemoteOperand(t *testing.T) {
 	var calls []string
-	if _, err := rewriteManagedToolArguments(managedToolTestContext(), "scp", []string{"local-a", "local-b"}, managedToolTestDomain, managedToolTestResolver(&calls)); err == nil {
+	if _, err := rewriteManagedToolArguments(managedToolTestContext(), "scp", []string{"local-a", "local-b"}, managedToolTestDomain, managedToolTestResolver(&calls), nil); err == nil {
 		t.Fatal("missing remote operand accepted")
 	}
 	if len(calls) != 0 {
@@ -80,7 +80,7 @@ func TestRewriteManagedToolUsesCanonicalMachineSuffix(t *testing.T) {
 		target = value
 		return managedssh.Destination{Host: value + "." + managedToolTestDomain, User: user, Port: 22}, nil
 	}
-	got, err := rewriteManagedToolArguments(managedToolTestContext(), "scp", []string{"file", "bob@studio.machines.example.test:/tmp"}, managedToolTestDomain, resolver)
+	got, err := rewriteManagedToolArguments(managedToolTestContext(), "scp", []string{"file", "bob@studio.machines.example.test:/tmp"}, managedToolTestDomain, resolver, nil)
 	if err != nil || target != "studio" || !reflect.DeepEqual(got, []string{"file", "bob@studio.machines.example.test:/tmp"}) {
 		t.Fatalf("rewrite=%q target=%q err=%v", got, target, err)
 	}
@@ -114,7 +114,7 @@ func TestRewriteManagedSFTPDestinationPreservesTransferPaths(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var calls []string
 			got, err := rewriteManagedToolArguments(managedToolTestContext(), "sftp", test.arguments,
-				managedToolTestDomain, managedToolTestResolver(&calls))
+				managedToolTestDomain, managedToolTestResolver(&calls), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -122,5 +122,33 @@ func TestRewriteManagedSFTPDestinationPreservesTransferPaths(t *testing.T) {
 				t.Fatalf("rewrite=%q calls=%q, want %q and resolution %q", got, calls, test.want, test.resolution)
 			}
 		})
+	}
+}
+
+// Regression X-18 L>W, M>W: rsync on a Windows target read "C:/Users/me/x" as relative and joined it onto its working
+// directory. Only an rsync drive-letter path to a Windows target is converted; scp and POSIX-form paths are left alone.
+func TestRewriteRsyncConvertsDrivePathsForWindowsTargetsOnly(t *testing.T) {
+	var calls []string
+	resolve := func(ctx *command.Context, target, requestedUser string) (managedssh.Destination, error) {
+		platform := "windows"
+		if target == "box" {
+			platform = "linux"
+		}
+		return managedssh.Destination{Alias: target, Host: target + "." + managedToolTestDomain, User: "adam", Platform: platform}, nil
+	}
+	drivePath := func(destination managedssh.Destination, user, path string) (string, error) {
+		calls = append(calls, destination.Alias+" "+user+" "+path)
+		return "/c" + strings.TrimPrefix(path, "C:"), nil
+	}
+	got, err := rewriteManagedToolArguments(managedToolTestContext(), "rsync", []string{"-a", "src/", "win:C:/Users/me/x/", "win:/c/y", "box:C:/z"}, managedToolTestDomain, resolve, drivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"-a", "src/", "adam@win.machines.example.test:/c/Users/me/x/", "adam@win.machines.example.test:/c/y", "adam@box.machines.example.test:C:/z"}
+	if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(calls, []string{"win adam C:/Users/me/x/"}) {
+		t.Fatalf("rewrite=%q calls=%q, want %q", got, calls, want)
+	}
+	if got, err = rewriteManagedToolArguments(managedToolTestContext(), "scp", []string{"f", "win:C:/Users/me/x"}, managedToolTestDomain, resolve, drivePath); err != nil || got[1] != "adam@win.machines.example.test:C:/Users/me/x" {
+		t.Fatalf("scp rewrite=%q err=%v", got, err)
 	}
 }

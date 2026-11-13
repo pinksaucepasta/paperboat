@@ -435,6 +435,31 @@ func TestPTYMergesOutputAndReportsExit(t *testing.T) {
 	}
 }
 
+// Regression X-17 M>W: `pb exec --pty host cmd </dev/null` sends stdin EOF at once. Closing the terminal for it hung
+// the command up before it finished (exec_wait_failed on Windows, SIGHUP on Unix).
+func TestPTYInputEOFDoesNotEndARunningCommand(t *testing.T) {
+	root := t.TempDir()
+	manager := testManager(t, root, nil)
+	execution, _, err := manager.Start(context.Background(), Request{OperationID: "operation_pty_eof", Argv: []string{"/bin/sh", "-c", `sleep 1; echo finished`}, CWD: root, PTY: true, Dimensions: pty.Dimensions{Columns: 80, Rows: 24}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := execution.CloseInput(); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := execution.Wait(context.Background())
+	if err != nil || snapshot.State != StateExited || snapshot.Result == nil || snapshot.Result.Code != 0 {
+		t.Fatalf("snapshot=%#v err=%v", snapshot, err)
+	}
+	var output strings.Builder
+	for _, event := range collect(t, execution) {
+		output.Write(event.Data)
+	}
+	if !strings.Contains(output.String(), "finished") {
+		t.Fatalf("output=%q", output.String())
+	}
+}
+
 // Output nobody has read yet is never dropped: a client that attaches after the buffer filled (a slow
 // dial, a reconnect) gets every byte, and the process waits meanwhile instead of losing output.
 func TestUnreadOutputIsNeverEvictedWhileNoReaderIsAttached(t *testing.T) {
