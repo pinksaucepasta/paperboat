@@ -40,11 +40,11 @@ func (m *Manager) capture(session *managedSession, process PTYProcess) {
 					diagnostics.TerminalHop("pty_operation_locked", session.id, event.StartSequence, event.EndSequence, operationLockAt)
 					diagnostics.TerminalHop("pty_publish", session.id, event.StartSequence, event.EndSequence, time.Now())
 					if session.screen != nil {
-						_, _ = session.screen.Write(buffer[:n])
-						session.continuation.feed(buffer[:n])
+						_, _ = session.screen.Write(event.Data)
+						session.continuation.feed(event.Data)
 					}
 					if session.recordings != nil {
-						session.recordings.Output(session.id, readAt, buffer[:n]) // copies; never blocks
+						session.recordings.Output(session.id, readAt, event.Data) // copies; never blocks
 					}
 					_, deliveryErr = session.fanout.PublishOwned(event)
 					m.queueOutputPersistence(session, event)

@@ -44,8 +44,17 @@ func ReleaseBuffer(buffer []byte) {
 	}
 }
 
-// AppendBuffer transfers ownership of a buffer obtained from AcquireBuffer.
+// AppendBuffer transfers ownership of a buffer obtained from AcquireBuffer. The producer reads the
+// data afterwards through the returned event, never through the buffer it passed in.
 func (h *History) AppendBuffer(channel byte, data []byte) (Event, error) {
+	// A retained event pins its whole pooled buffer: 64 KiB of history made of 1-byte reads would
+	// hold 2 GiB. Small reads (ConPTY echo, line-by-line output) are copied out and the buffer
+	// goes back to the pool; tmux likewise bounds what it keeps by bytes held, not by reads.
+	if len(data) < PooledBufferSize/2 {
+		owned := append([]byte(nil), data...)
+		ReleaseBuffer(data)
+		return h.appendOwned(channel, owned, false, true)
+	}
 	return h.appendOwned(channel, data, true, true)
 }
 

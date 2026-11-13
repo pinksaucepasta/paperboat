@@ -210,3 +210,41 @@ func TestContinuousOutputKeepsHistoryStorageBounded(t *testing.T) {
 		t.Fatalf("retained %d events in a slice of capacity %d", retained, capacity)
 	}
 }
+
+// A retained event must not pin its 32 KiB pooled read buffer when it holds a few bytes: 64 KiB of
+// history made of 1-byte reads held 2 GiB (victus session owner, 5.9 GB working set).
+func TestSmallPooledReadsDoNotPinTheirBuffers(t *testing.T) {
+	h, _ := New(64 << 10)
+	for range 1000 {
+		buffer := AcquireBuffer()
+		buffer[0] = 'x'
+		event, err := h.AppendBuffer(1, buffer[:1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(event.Data) != "x" {
+			t.Fatalf("producer data = %q", event.Data)
+		}
+		event.Release()
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, event := range h.events[h.head:] {
+		if event.owner.pool || cap(event.Data) >= PooledBufferSize/2 {
+			t.Fatalf("1-byte event pins a buffer: pool=%v cap=%d", event.owner.pool, cap(event.Data))
+		}
+	}
+}
+
+func TestLargePooledReadsStayZeroCopy(t *testing.T) {
+	h, _ := New(1 << 20)
+	buffer := AcquireBuffer()
+	event, err := h.AppendBuffer(1, buffer[:PooledBufferSize/2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !event.owner.pool {
+		t.Fatal("a half-buffer read was copied")
+	}
+	event.Release()
+}
