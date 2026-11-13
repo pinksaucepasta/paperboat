@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Renew the enrolled edge's public IP certificate without changing its identity."""
+"""Renew the enrolled edge's public certificate (for its IP address or DNS name) without changing its identity."""
 import argparse
 import ipaddress
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 
@@ -28,13 +29,24 @@ def stop_owned_edge(state, log):
                        stdout=log, stderr=subprocess.STDOUT, check=True, timeout=20)
 
 
+def subject_flags(host):
+    """Certbot flags for the advertised host: an IP gets a short-lived IP certificate, a DNS name a short-lived name one."""
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[A-Za-z0-9])?)*", host) or len(host) > 253:
+            raise ValueError("the enrolled edge advertises an invalid host name")
+        return ["--domain", host]
+    if not address.is_global:
+        raise ValueError("the enrolled edge must advertise a public IP address or a DNS name")
+    return ["--ip-address", str(address)]
+
+
 def renew(args):
     os.umask(0o077)
     state = Path(args.state_dir).resolve()
     deployment = json.loads((state / "tunnel/deployment.json").read_text())
-    address = ipaddress.ip_address(deployment["connector_advertise_host"])
-    if not address.is_global:
-        raise ValueError("the enrolled edge must advertise a public IP address")
+    subject = subject_flags(deployment["connector_advertise_host"])
     acme = state / "public-acme"
     acme.mkdir(mode=0o700, exist_ok=True)
     certificate = acme / "live/paperboat-edge-ip/fullchain.pem"
@@ -60,7 +72,7 @@ def renew(args):
                 "type=bind,source=" + str(acme) + ",target=/etc/letsencrypt",
                 args.certbot_image, "certonly", "--standalone", "--non-interactive",
                 "--agree-tos", "--email", args.email, "--preferred-profile", "shortlived",
-                "--ip-address", str(address), "--cert-name", "paperboat-edge-ip", "--force-renewal",
+                *subject, "--cert-name", "paperboat-edge-ip", "--force-renewal",
             ], timeout=180)
             run("configure public HTTPS", [args.pbh, "configure-tls", "--state-dir", str(state),
                                            "--https-cert", str(certificate), "--https-key", str(private_key)], timeout=90)

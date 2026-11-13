@@ -66,9 +66,12 @@ func Dial(ctx context.Context, address string, tlsConf *tls.Config, conf *quic.C
 	return connection, nil
 }
 
+// lookup is the system resolver; tests replace it.
+var lookup = net.DefaultResolver.LookupIPAddr
+
 // resolve returns the first address of host that a UDP socket can be connected to (a route exists), else the first.
 func resolve(ctx context.Context, host string, port int) (*net.UDPAddr, error) {
-	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	ips, err := lookup(ctx, host)
 	if err != nil {
 		return nil, err
 	}

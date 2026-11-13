@@ -67,6 +67,17 @@ if name=='pbh' and not (root/'issued').exists(): sys.exit(24)
                     self.assertFalse((root / "issued").exists())
 
 
+    def test_subject_flags_cover_ip_and_dns_names(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("edge_certificate", ROOT / "deploy/edge-ip-certificate.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.assertEqual(module.subject_flags("93.184.216.34"), ["--ip-address", "93.184.216.34"])
+        self.assertEqual(module.subject_flags("edge-1.example.test"), ["--domain", "edge-1.example.test"])
+        for refused in ["10.0.0.1", "127.0.0.1", "bad host", "-bad.example.test", "a..b", "x" * 254]:
+            with self.assertRaises(ValueError, msg=refused):
+                module.subject_flags(refused)
+
     def test_timer_retries_a_failed_renewal_inside_the_window(self):
         # The renewal window is two days; a collision with a service restart must leave many retries.
         timer = (ROOT / "deploy/paperboat-edge-certificate.timer").read_text()

@@ -62,25 +62,49 @@ func trusting(certificate tls.Certificate) *tls.Config {
 	return &tls.Config{RootCAs: roots, NextProtos: []string{"t"}, MinVersion: tls.VersionTLS13}
 }
 
-// A name with both an A and an AAAA record must reach a server that only listens on IPv6: quic.DialAddr binds an
-// IPv4 socket and cannot (the v6-only NAT64 host case). Skipped where localhost lacks ::1 or 127.0.0.1.
+// quic.DialAddr binds an IPv4 socket, so it can never reach an IPv6 address; the dial must use a socket of the
+// server's family. The name resolves (fake resolver) only to ::1, as a DNS64 resolver answers a v6-only host.
 func TestDialNameReachesIPv6OnlyServer(t *testing.T) {
 	certificate := serverCertificate(t)
 	port := listen(t, "udp6", net.IPv6loopback, certificate)
-	if ips, err := net.DefaultResolver.LookupIPAddr(context.Background(), "localhost"); err != nil || len(ips) == 0 {
-		t.Skip("localhost does not resolve")
+	defer func(previous func(context.Context, string) ([]net.IPAddr, error)) { lookup = previous }(lookup)
+	lookup = func(_ context.Context, host string) ([]net.IPAddr, error) {
+		if host != "edge.example.test" {
+			t.Fatalf("resolved %q", host)
+		}
+		return []net.IPAddr{{IP: net.IPv6loopback}}, nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	connection, err := Dial(ctx, net.JoinHostPort("localhost", strconv.Itoa(port)), trusting(certificate), nil, false)
+	conf := trusting(certificate)
+	conf.ServerName = "localhost" // the test certificate names localhost
+	connection, err := Dial(ctx, net.JoinHostPort("edge.example.test", strconv.Itoa(port)), conf, nil, false)
 	if err != nil {
-		t.Fatalf("dial localhost over IPv6: %v", err)
+		t.Fatalf("dial over IPv6: %v", err)
 	}
 	if got := connection.RemoteAddr().(*net.UDPAddr).IP; !got.Equal(net.IPv6loopback) {
 		t.Fatalf("remote %v, want ::1", got)
 	}
-	if connection.ConnectionState().TLS.ServerName != "localhost" {
-		t.Fatalf("server name %q, want the host name", connection.ConnectionState().TLS.ServerName)
+	_ = connection.CloseWithError(0, "")
+}
+
+// Without a configured ServerName the host name is used, not the resolved address.
+func TestDialServerNameDefaultsToTheHost(t *testing.T) {
+	certificate := serverCertificate(t)
+	port := listen(t, "udp4", net.IPv4(127, 0, 0, 1), certificate)
+	defer func(previous func(context.Context, string) ([]net.IPAddr, error)) { lookup = previous }(lookup)
+	lookup = func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.IPv4(127, 0, 0, 1)}}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conf := trusting(certificate)
+	connection, err := Dial(ctx, net.JoinHostPort("localhost", strconv.Itoa(port)), conf, nil, false)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	if got := connection.ConnectionState().TLS.ServerName; got != "localhost" {
+		t.Fatalf("server name %q, want localhost", got)
 	}
 	_ = connection.CloseWithError(0, "")
 }
