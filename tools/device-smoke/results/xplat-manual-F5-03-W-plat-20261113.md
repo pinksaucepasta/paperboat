@@ -108,3 +108,29 @@ bytes when an incompatible cat precedes the runtime on PATH. The final
 `TestRsyncRemoteShellPreservesBinaryStream` tests binary bytes and exact exit
 status through the actual generated remote-shell argument with a hostile
 helper PATH. The earlier string-only coverage missed this behavior.
+
+The unmodified harness completed all four rsync parts, reporting:
+
+```text
+FAIL rsync up resume interrupted=False partial=None resumed ok 182s hash match=True
+FAIL rsync down resume interrupted=False partial=None resumed ok 48s hash match=True
+SUMMARY 2/4 parts PASS
+```
+
+Those initial transfers omitted partial-file retention, so terminating the
+process tree did not expose the destination basename. Both resume parts were
+therefore rerun explicitly with retention enabled, as recorded above; the
+harness itself was not changed.
+
+Cleanup: the harness removed exactly `/tmp/f503-3928` and its local temporary
+directory; the manual check removed `/tmp/f503-wimpl-20261113` and
+`C:\Users\runneradmin\AppData\Local\Temp\f503-wimpl-ms3cb4l1`.
+Removed `/tmp/rx`, `r10.bin`, and this implementation session's explicitly named
+probe scripts/logs. Other runs' scratch and all installations were preserved.
+
+CLI validation: `tools/ci-test.sh cli -run
+'Test(Rsync|ConvertDriveOperands|WithEnvironment|RewriteManaged)'` passed on
+source commit `b2feb8a78` (CLI vet, race tests and filtered root tests; job 8m8s).
+[GitHub run](https://github.com/pinksaucepasta/paperboat/actions/runs/43354627060).
+No Go build/vet/test ran on oracle. No fixed binary was built or installed on
+the Windows runner; next-cycle verification of the default command is pending.
