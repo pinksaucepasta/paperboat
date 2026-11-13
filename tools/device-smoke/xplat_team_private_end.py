@@ -147,6 +147,12 @@ def run_pair(team, owner, member, oid, records, origin_controller):
                     if visible and {'exec', 'private_access'} <= set(visible[0]['permissions']): break
                     assert time.monotonic() < deadline, 'allowed target not visible with exec/private_access: %r' % visible
                     time.sleep(1)
+                # Server grants arrive before the member daemon's peer snapshot (F9 uses
+                # eventually for the same readiness). This check measures revocation, not enrollment.
+                deadline = time.monotonic() + 60
+                while member.pb('resolve', oid, '--json', timeout=20).rc != 0:
+                    assert time.monotonic() < deadline, 'member daemon never learned the granted peer'
+                    time.sleep(1)
                 if origin is None:
                     origin = pool.submit(origin_controller.pb, 'exec', owner.alias, '--',
                         xplat_access.py(owner), '-c', ORIGIN, origin_stop, port, timeout=540)
