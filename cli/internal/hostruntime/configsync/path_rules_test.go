@@ -581,3 +581,17 @@ func TestMappedReconcileLeavesALocalLinkAndItsRepositoryFileAlone(t *testing.T) 
 		t.Fatalf("the link is not reported: %#v", r.diagnostics.Skipped)
 	}
 }
+
+func TestExplicitLocalPathRefusesWindowsFormsOnUnix(t *testing.T) {
+	if os.PathSeparator == '\\' {
+		t.Skip("Windows accepts these forms")
+	}
+	home := resolvedTempDir(t)
+	for _, path := range []string{`C:\Users\someone\x.txt`, `~\x\back.txt`, `~/x\back.txt`, `/tmp/a\b`} {
+		_, err := ResolvePathRules(home, []PathRule{{ID: "rule", RepositoryPath: "config", LocalPath: path, Kind: "file"}})
+		var rule *PathRuleError
+		if !errors.As(err, &rule) || rule.Code != "unsupported_destination" {
+			t.Fatalf("%s: %v", path, err)
+		}
+	}
+}
