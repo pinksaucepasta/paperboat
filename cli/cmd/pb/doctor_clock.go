@@ -42,7 +42,7 @@ func probeDoctorClock(ctx context.Context, command *cobra.Command) doctorpkg.Che
 	if offset != 0 {
 		check.Status = doctorpkg.StatusWarning
 		check.Summary = "This machine's clock is off by " + describeClockOffset(offset) + "; Paperboat corrects for it."
-		check.Recovery = "Turn on automatic time (NTP) for this machine."
+		check.Recovery = "Turn on automatic time (NTP) for this machine. A clock set back by minutes can keep other machines from connecting to this one until it catches up."
 	}
 	return check
 }

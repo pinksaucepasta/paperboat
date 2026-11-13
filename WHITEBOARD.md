@@ -428,10 +428,6 @@ Design (prior art: headscale compiles policy once per change and caches per-node
 
 The CLI's peer data plane builds on our fork github.com/pinksaucepasta/tailscale (WireGuard/magicsock/DERP-style relay, netstack). Carrying a fork means rebasing on every upstream release, owning its security fixes, and a large dependency surface for what we use. Goal: depend only on upstream libraries (wireguard-go, gvisor netstack, quic-go) or our own small packages, with no fork in go.mod. Steps to plan: inventory every fork package we import (cli/internal/peertransport/*, mesh, DERP map, tsnet-like pieces), classify each as "upstream library exists", "our code already replaces it", or "needs a small own implementation"; replace one area at a time behind the existing peer transport interfaces with device checks per area (direct path, relay, NAT rebind, update handover). Keep wire compatibility only with the current main (zero-users rule). Related: post-launch year plan (shed the fork).
 
-### wireguard-go fork (added 2026-11-13, fb95e62dd) — remove after launch
-
-A one-commit fork github.com/pinksaucepasta/wireguard-go (branch paperboat) stamps WireGuard handshakes on the server clock, so a machine whose wall clock was set back is not refused by peers as a replay (TAI64N check, upstream `device/noise-protocol.go` stamps raw `time.Now()`). Kept for launch because the no-fork routes need new security-sensitive work: (a) a WireGuard node-key rotation path (none exists: the key is tied to enrollment; server + client + peer distribution), or (b) an authenticated "my clock went back" message so peers `RemovePeer`/re-add. Tailscale does neither (`net/netmon/netmon.go` only detects forward jumps after sleep). After launch: build (a), then remove `cli/go.mod` replace and `cli/internal/peertransport/mesh/handshake_clock.go`. Lanes must not add forks without asking (LANE_RULES).
-
 ### Findings 2026-11-13 (fork 2d32e5f0 vs its upstream base 610b05c5)
 
 The fork is 4 commits, 20 files, +1110/-113 (about 400 non-test lines), 340 commits behind upstream main.
