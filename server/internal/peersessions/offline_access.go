@@ -101,13 +101,15 @@ func networkNames() []string {
 // host's own document applies). SSH to a team machine makes no control-plane request, so no access session puts the host
 // in the CLI's document; without these dial scopes the client refuses the peer ("peer network admission refused").
 // The generation is the greatest of the deciding inputs' versions, as for the host's side.
+// A team-owned machine enrolled by this very account (the usual owner who transferred it) belongs to no personal mesh
+// (personalNetworkPeers takes owner_team_id IS NULL), so it is named here too.
 func teamHostPeers(ctx context.Context, tx *sql.Tx, self networkBinding, now time.Time) ([]offlinePeer, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT n.endpoint_id,m.user_id,array_to_json(array_agg(cap.network ORDER BY cap.network)),
  max(greatest(b.generation,coalesce(policy.version,1),member.membership_generation))
 FROM paperboat.team_members member
 JOIN paperboat.teams t ON t.team_id=member.team_id AND NOT t.suspended AND t.deleted_at IS NULL
 JOIN paperboat.team_resource_bindings b ON b.team_id=member.team_id AND b.resource_kind='machine' AND b.active
-JOIN paperboat.user_machines m ON m.id=b.resource_id AND m.user_id<>member.account_id AND m.revoked_at IS NULL AND m.deleted_at IS NULL
+JOIN paperboat.user_machines m ON m.id=b.resource_id AND (m.user_id<>member.account_id OR m.owner_team_id IS NOT NULL) AND m.revoked_at IS NULL AND m.deleted_at IS NULL
 JOIN paperboat.users owner ON owner.id=m.user_id AND owner.status='active'
 JOIN paperboat.control_environments environment ON environment.id=m.environment_id AND environment.desired_state='active' AND environment.revoked_at IS NULL
 JOIN paperboat.peer_network_identities n ON n.machine_id=m.id AND n.user_id=m.user_id AND n.role='machine' AND n.revoked_at IS NULL

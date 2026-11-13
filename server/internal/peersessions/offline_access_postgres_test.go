@@ -183,6 +183,16 @@ func TestOfflineSessionRightsEqualTheDescriptorDecisionOnPostgres(t *testing.T) 
 	if got := cliHostScopes(outsider, AuthorityUntilRevoked); len(got) != 0 {
 		t.Errorf("an account without access has host scopes %v in its CLI document", got)
 	}
+	// A team-owned machine enrolled by the owner's own account is in no personal mesh (owner_team_id is set), so the
+	// owner's CLI document must name it the way a member's does: the first pb ssh of a new session found no peer
+	// ('could not reach') until an exec had created an access session.
+	teamstest.SetMachineAccess(t, store, team, host, owner, "managed_ssh")
+	exec(`UPDATE paperboat.user_machines SET owner_team_id=$2 WHERE id=$1`, host, team)
+	if got := cliHostScopes(owner, AuthorityUntilRevoked); !slices.Contains(got, "managed_ssh") {
+		t.Errorf("owner of a team-owned machine it enrolled: its CLI document has host scopes %v, want managed_ssh among them", got)
+	}
+	exec(`UPDATE paperboat.user_machines SET owner_team_id=NULL WHERE id=$1`, host)
+	teamstest.SetMachineAccess(t, store, team, host, owner)
 
 	// The owner's busy endpoints (a fleet of daemons, all used just now) do not crowd a member out of the host's
 	// document: at a 32-endpoint cut the member's pb ssh to the team machine was refused (scope_rejected).
