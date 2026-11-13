@@ -91,6 +91,10 @@ VALUES('external_issuer',$1||'_access',$2,$1,$1||'_env',$3,'https://invalid.test
 	step("machine back online", `UPDATE paperboat.user_machines SET state='online',online=true WHERE user_id=$1`)
 	step("CLI certificate superseded", `UPDATE paperboat.peer_endpoint_certificates SET revoked_at=now(),revocation_reason='certificate_superseded' WHERE user_id=$1 AND role='cli'`, cli)
 	step("CLI key rotated", `UPDATE paperboat.peer_network_identities SET wireguard_public_key=sha256(convert_to('rotated'||endpoint_id,'UTF8')),key_generation=2 WHERE user_id=$1 AND role='cli'`, cli)
+	// Revoking an account E2EE key fences only the endpoint it belongs to (migration 302): it fenced every endpoint
+	// of the account, and the fleet's same-account peers were refused at the relay (2026-11-12 20:39Z).
+	exec(`INSERT INTO paperboat.account_e2ee_keys(key_id,user_id,public_key,fingerprint,cli_client_session_id) VALUES('aek_'||md5($1),$1,sha256(convert_to('pk'||$1,'UTF8')),sha256(convert_to('fp'||$1,'UTF8')),$2)`, user, cli)
+	step("CLI's E2EE key revoked", `UPDATE paperboat.account_e2ee_keys SET revoked_at=now(),revocation_reason='machine_removed' WHERE user_id=$1`, cli)
 	step("machine reinstalled", `UPDATE paperboat.user_machines SET installation_generation=2 WHERE user_id=$1`, machine)
 	// Revoking the session also revokes its access sessions (revoke_access_sessions_on_client_revocation): an
 	// explicit pair revocation, which fences both ends.
