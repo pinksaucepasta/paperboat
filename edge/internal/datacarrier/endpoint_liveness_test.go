@@ -3,12 +3,15 @@ package datacarrier
 import (
 	"context"
 	"crypto/tls"
+	"io"
 	"net"
+	"net/http"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	quic "github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/http3"
 )
 
 // The edge must detect a silent path even when its peer advertises a long idle timeout.
@@ -92,4 +95,54 @@ func endpointUDPBlackhole(t *testing.T, target *net.UDPAddr) (*atomic.Bool, stri
 		}
 	}()
 	return dropped, front.LocalAddr().String()
+}
+
+// The production carrier is HTTP/3 CONNECT; its edge side must also find a silent path within 15 s
+// when the machine advertises a long idle timeout and sends no keepalives of its own.
+func TestHTTPServiceHTTP3CarrierDetectsABlackholedPath(t *testing.T) {
+	clientTLS, serverTLS, _ := testEndpointCertificates(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+	config := ServiceConfig{Carrier: testCarrierConfig(2)}
+	config.Carrier.KeepAliveInterval = DefaultConfig().KeepAliveInterval
+	config.QUIC = &EndpointConfig{Address: "127.0.0.1:0", TLS: serverTLS,
+		PeerBinding: func(tls.ConnectionState) (Identity, error) { return config.Carrier.Identity, nil }}
+	service, err := NewHTTPService(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	dropped, address := endpointUDPBlackhole(t, service.QUICAddr().(*net.UDPAddr))
+	clientTLS.NextProtos = []string{"h3"}
+	transport := &http3.Transport{TLSClientConfig: clientTLS, QUICConfig: &quic.Config{MaxIdleTimeout: 2 * time.Minute}}
+	defer transport.Close()
+	bodyReader, bodyWriter := io.Pipe()
+	defer bodyWriter.Close()
+	request, err := http.NewRequestWithContext(ctx, http.MethodConnect, "https://"+address+httpCarrierPath, bodyReader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := transport.RoundTrip(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	carrier, err := service.Accept(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer carrier.Close()
+	select {
+	case <-carrier.Done():
+		t.Fatal("live idle HTTP/3 carrier closed")
+	case <-time.After(16 * time.Second):
+	}
+	dropped.Store(true)
+	started := time.Now()
+	select {
+	case <-carrier.Done():
+		t.Logf("edge detected blackholed HTTP/3 carrier after %v", time.Since(started))
+	case <-time.After(18 * time.Second):
+		t.Fatal("edge kept a blackholed HTTP/3 carrier beyond the 15-second idle limit")
+	}
 }
