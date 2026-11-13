@@ -1,0 +1,241 @@
+{
+  "check": "X-19-team-private-end",
+  "status": "NOT_PROVEN",
+  "whole_pairs_passed": 0,
+  "versions": {
+    "lanex2-l": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-79203d6e5\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580",
+    "lanex2-m": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-79203d6e5\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580",
+    "lanex2-w": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-cf0c0a620\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580",
+    "rx19t-l": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-d77a40713\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580",
+    "rx19t-w": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-d77a40713\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580",
+    "rx19t-l-hp": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-d77a40713\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+  },
+  "results": {
+    "L>M": {
+      "status": "NOT_PROVEN",
+      "grant_revoke": null,
+      "setting_off": null,
+      "reason": "shared Linux controller unavailable; matrix stopped"
+    },
+    "M>L": {
+      "status": "NOT_PROVEN",
+      "grant_revoke": null,
+      "setting_off": null,
+      "reason": "first fixture attempt timed out through pbvm2 before held flow; later Victus SSH unavailable"
+    },
+    "L>W": {
+      "status": "NOT_PROVEN",
+      "grant_revoke": null,
+      "setting_off": null,
+      "reason": "No machine has that name or ID, despite server inventory showing exec/private_access; probable daemon snapshot readiness race"
+    },
+    "W>L": {
+      "status": "NOT_PROVEN",
+      "grant_revoke": null,
+      "setting_off": null,
+      "reason": "grant revoke passed alone; new held flow for setting-off phase hit command timeout",
+      "isolated_grant_seconds": [
+        6.99,
+        17.55
+      ]
+    },
+    "M>W": {
+      "status": "NOT_PROVEN",
+      "grant_revoke": null,
+      "setting_off": null,
+      "reason": "shared Linux controller unavailable; matrix stopped"
+    },
+    "W>M": {
+      "status": "NOT_PROVEN",
+      "grant_revoke": null,
+      "setting_off": null,
+      "reason": "shared Linux controller unavailable; matrix stopped"
+    }
+  },
+  "cleanup": {
+    "exact_machine_ids_revoked": [
+      "machine_684e257d-ebf0-4174-9f8b-4f030fb7af7f",
+      "machine_c4ffee54-ed38-4c73-94f1-297dcd8161db",
+      "machine_9616119f-1222-45d5-82ee-cd97ca3e927b"
+    ],
+    "team": "rx19t-ce118da5",
+    "team_deleted": true,
+    "team_setting_restored": true,
+    "setting_original_and_final": false,
+    "shares_and_grants_inactive": true,
+    "windows_pool_stopped": "winpool-11",
+    "macpool_claimed": false,
+    "pending_remote_cleanup": [
+      "hp: container rx19t-l-hp",
+      "pbvm2: container rx19t-l and ~/laneh/rx19t-pb"
+    ],
+    "coordinator_notified": true,
+    "member_account_deleted": true
+  },
+  "attempts": [
+    {
+      "file": "xplat-team-private-end-20261113T130200Z.json",
+      "check": "X-19-team-private-end",
+      "versions": {
+        "owner:L": {
+          "machine": "lanex2-l",
+          "version": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-79203d6e5\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+        },
+        "owner:M": {
+          "machine": "lanex2-m",
+          "version": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-79203d6e5\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+        },
+        "owner:W": {
+          "machine": "lanex2-w",
+          "version": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-cf0c0a620\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+        },
+        "member:L": {
+          "machine": "rx19t-l",
+          "version": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-d77a40713\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+        },
+        "member:W": {
+          "machine": "rx19t-w",
+          "version": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-d77a40713\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+        }
+      },
+      "results": {
+        "M>L": {
+          "status": "FAIL",
+          "error": "Expecting value: line 1 column 1 (char 0)"
+        }
+      }
+    },
+    {
+      "file": "xplat-team-private-end-20261113T130833Z.json",
+      "check": "X-19-team-private-end",
+      "versions": {
+        "member:W": {
+          "machine": "rx19t-w",
+          "version": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-d77a40713\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+        },
+        "owner:L": {
+          "machine": "lanex2-l",
+          "version": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-79203d6e5\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+        },
+        "owner:M": {
+          "machine": "lanex2-m",
+          "version": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-79203d6e5\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+        }
+      },
+      "results": {
+        "L>W": {
+          "status": "FAIL",
+          "error": "{'error': 'access did not publish listener', 'receipt': {'schema_version': '1.0', 'ok': False, 'error': {'code': 'operation_failed', 'category': 'local_io', 'message': 'No machine has that name or ID. Run `pb machine list` to see your machines.', 'retryable': False, 'state_changed': 'unknown', 'outcome_uncertain': False, 'support_reference': 'support_d1270d86-eaae-4075-b664-f48f979265cb'}}}"
+        }
+      }
+    },
+    {
+      "file": "xplat-team-private-end-20261113T131600Z.json",
+      "check": "X-19-team-private-end",
+      "versions": {
+        "member:W": {
+          "machine": "rx19t-w",
+          "version": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-d77a40713\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+        },
+        "owner:L": {
+          "machine": "lanex2-l",
+          "version": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-79203d6e5\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+        },
+        "owner:M": {
+          "machine": "lanex2-m",
+          "version": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-79203d6e5\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+        }
+      },
+      "results": {
+        "L>W": {
+          "status": "FAIL",
+          "error": "{'error': 'access did not publish listener', 'receipt': {'schema_version': '1.0', 'ok': False, 'error': {'code': 'operation_failed', 'category': 'local_io', 'message': 'No machine has that name or ID. Run `pb machine list` to see your machines.', 'retryable': False, 'state_changed': 'unknown', 'outcome_uncertain': False, 'support_reference': 'support_4677cd7b-88eb-4fa6-9d7d-2a8b6e7113a2'}}}"
+        }
+      }
+    },
+    {
+      "file": "xplat-team-private-end-20261113T131746Z.json",
+      "check": "X-19-team-private-end",
+      "versions": {
+        "member:L": {
+          "machine": "rx19t-l-hp",
+          "version": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-d77a40713\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+        },
+        "member:W": {
+          "machine": "rx19t-w",
+          "version": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-d77a40713\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+        },
+        "owner:L": {
+          "machine": "lanex2-l",
+          "version": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-79203d6e5\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+        },
+        "owner:M": {
+          "machine": "lanex2-m",
+          "version": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-79203d6e5\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+        }
+      },
+      "results": {
+        "W>L": {
+          "grant_revoke": {
+            "status": "PASS",
+            "seconds": 6.99,
+            "echoes": 16,
+            "reason": "EOF",
+            "refusal": "{\"schema_version\":\"1.0\",\"ok\":false,\"error\":{\"code\":\"operation_refused\",\"category\":\"conflict\",\"message\":\"You do not have private access to this machine in this team. Ask a team owner or admin to give you its private_access permission.\",\"retryable\":false,\"state_changed\":false,\"outcome_uncertain\":false,\"support_reference\":\"support_6541ac64-72df-42c7-a0dd-9fd4f3680108\"}}"
+          },
+          "status": "FAIL",
+          "error": "{'error': 'access did not publish listener', 'receipt': {'schema_version': '1.0', 'ok': False, 'error': {'code': 'operation_failed', 'category': 'local_io', 'message': 'No machine has that name or ID. Run `pb machine list` to see your machines.', 'retryable': False, 'state_changed': 'unknown', 'outcome_uncertain': False, 'support_reference': 'support_9fed336b-e072-4c89-8aaf-94a858889cda'}}}"
+        }
+      }
+    },
+    {
+      "file": "xplat-team-private-end-20261113T132008Z.json",
+      "check": "X-19-team-private-end",
+      "versions": {
+        "member:W": {
+          "machine": "rx19t-w",
+          "version": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-d77a40713\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+        },
+        "owner:L": {
+          "machine": "lanex2-l",
+          "version": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-79203d6e5\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+        }
+      },
+      "results": {
+        "L>W": {
+          "status": "FAIL",
+          "error": "{'error': 'access did not publish listener', 'receipt': {'schema_version': '1.0', 'ok': False, 'error': {'code': 'operation_failed', 'category': 'local_io', 'message': 'No machine has that name or ID. Run `pb machine list` to see your machines.', 'retryable': False, 'state_changed': 'unknown', 'outcome_uncertain': False, 'support_reference': 'support_8177f370-cda3-4bf4-bec2-096d6df89e34'}}}"
+        }
+      }
+    },
+    {
+      "file": "xplat-team-private-end-20261113T132303Z.json",
+      "check": "X-19-team-private-end",
+      "versions": {
+        "member:L": {
+          "machine": "rx19t-l-hp",
+          "version": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-d77a40713\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+        },
+        "member:W": {
+          "machine": "rx19t-w",
+          "version": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-d77a40713\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+        },
+        "owner:L": {
+          "machine": "lanex2-l",
+          "version": "\u2584\u2588\u2584       Paperboat\n  \u2584\u2584\u259d\u2580\u2580\u2580\u2580\u2580\u2598\u2584\u2584   Version dev-79203d6e5\n   \u2580\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2580"
+        }
+      },
+      "results": {
+        "W>L": {
+          "grant_revoke": {
+            "status": "PASS",
+            "seconds": 17.55,
+            "echoes": 60,
+            "reason": "EOF",
+            "refusal": "{\"schema_version\":\"1.0\",\"ok\":false,\"error\":{\"code\":\"operation_refused\",\"category\":\"conflict\",\"message\":\"You do not have private access to this machine in this team. Ask a team owner or admin to give you its private_access permission.\",\"retryable\":false,\"state_changed\":false,\"outcome_uncertain\":false,\"support_reference\":\"support_ed40cf25-d557-4a7f-a126-e564289c170a\"}}"
+          }
+        }
+      }
+    }
+  ]
+}
