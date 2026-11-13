@@ -1,0 +1,25 @@
+{
+ "check": "xplat-config",
+ "results": [
+  {
+   "id": "X-04:x04_exec:M>W",
+   "status": "PASS",
+   "detail": "repository 100755, lanex2-w executable=n/a; kept through a Windows edit and back"
+  },
+  {
+   "id": "X-04:x04_exec:W>M",
+   "status": "PASS",
+   "detail": "repository 100644, lanex2-m executable=False"
+  },
+  {
+   "id": "X-04:x04_unsafe:M>W",
+   "status": "PASS",
+   "detail": "skipped as unsafe_permissions, sibling synced, travelled once safe"
+  },
+  {
+   "id": "X-04:x04_unsafe:W>M",
+   "status": "PASS",
+   "detail": "skipped as unsafe_permissions, sibling synced, travelled once safe"
+  }
+ ]
+}
