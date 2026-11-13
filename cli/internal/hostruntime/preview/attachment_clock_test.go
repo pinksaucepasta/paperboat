@@ -17,8 +17,8 @@ func TestMachineAttachmentAdmissionUsesServerClock(t *testing.T) {
 	ctx := context.Background()
 	stateRoot, store := newMachineAttachmentIdentity(t)
 	local := time.Now()
-	serverclock.Observe(local.Add(-10*time.Minute).Format(http.TimeFormat), local, local)
-	t.Cleanup(func() { now := time.Now(); serverclock.Observe(now.Format(http.TimeFormat), now, now) })
+	serverclock.Observe(local.Add(-10*time.Minute).UTC().Format(http.TimeFormat), local, local)
+	t.Cleanup(func() { now := time.Now(); serverclock.Observe(now.UTC().Format(http.TimeFormat), now, now) })
 	if serverclock.Offset() > -9*time.Minute {
 		t.Fatal("server clock offset was not learned")
 	}

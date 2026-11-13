@@ -12,8 +12,8 @@ import (
 
 func TestDataCarrierTargetsUseServerClock(t *testing.T) {
 	local := time.Now()
-	serverclock.Observe(local.Add(-10*time.Minute).Format(http.TimeFormat), local, local)
-	t.Cleanup(func() { now := time.Now(); serverclock.Observe(now.Format(http.TimeFormat), now, now) })
+	serverclock.Observe(local.Add(-10*time.Minute).UTC().Format(http.TimeFormat), local, local)
+	t.Cleanup(func() { now := time.Now(); serverclock.Observe(now.UTC().Format(http.TimeFormat), now, now) })
 	for _, refresh := range []bool{false, true} {
 		for _, fresh := range []bool{true, false} {
 			t.Run(fmt.Sprintf("refresh=%t/fresh=%t", refresh, fresh), func(t *testing.T) {
