@@ -52,7 +52,7 @@ func fileRequest(t *testing.T, root func() (string, error), id, raw string) *htt
 func TestSharedFileContentTypes(t *testing.T) {
 	root := sharedFileRoot(t, map[string]string{
 		"page.html": "<script>alert(1)</script>", "notes.md": "# hi", "doc.pdf": "%PDF-1.4", "pic.png": "png",
-		"draw.svg": "<svg/>", "tool.exe": "MZ", "noext": "data",
+		"draw.svg": "<svg/>", "tool.exe": "MZ", "noext": "data", "trail.": "x",
 	})
 	cases := []struct {
 		name, contentType, disposition string
