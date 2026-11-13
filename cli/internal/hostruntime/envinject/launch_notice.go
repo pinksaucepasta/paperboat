@@ -3,6 +3,7 @@ package envinject
 import (
 	"context"
 	"errors"
+	"net"
 	"sync"
 )
 
@@ -30,10 +31,15 @@ func OfflineNotice(codes []string) []string {
 }
 
 // LaunchNoticeFor names the notice for an ENV delivery failure: pending when the target has not
-// received its environment yet, undeliverable when delivery itself failed.
+// received its environment yet, offline when Paperboat could not be reached (ENV needs it online),
+// undeliverable when delivery itself failed.
 func LaunchNoticeFor(err error) string {
 	if errors.Is(err, ErrNotReady) {
 		return LaunchNoticePending
+	}
+	var network net.Error
+	if errors.As(err, &network) || errors.Is(err, context.DeadlineExceeded) {
+		return LaunchNoticeOffline
 	}
 	return LaunchNoticeUndeliverable
 }

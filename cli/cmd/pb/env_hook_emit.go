@@ -181,7 +181,7 @@ func requestShellEnvironment(ctx context.Context, endpoint, token, path string, 
 	case "names_listing_disabled":
 		return envHookResult{disabled: true}
 	case "environment_pending":
-		return envHookResult{reason: "ENV delivery to this machine is pending (no network, or run `pb env vault unlock`)"}
+		return envHookResult{reason: "ENV needs Paperboat online, or run `pb env vault unlock` (delivery to this machine is pending)"}
 	case "environment_undeliverable":
 		return envHookResult{reason: "ENV delivery to this machine failed; see `pb env host show`"}
 	}

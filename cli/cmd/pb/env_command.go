@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -495,7 +496,11 @@ func safeEnvironmentVariableCommandError(err error) error {
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrVaultTeamGrantRequired) }):
 		return envCommandError(err, "ENV team access needs a key grant; ask a surviving team member to regrant access, then run `pb env grants sync`")
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return leaf == config.ErrSecretNotFound }):
-		// The account's vault record is absent here: ENV was never set up or unlocked on this computer.
+		// The account's vault record is absent here: ENV was never set up or unlocked on this computer. Offline that
+		// cannot be told from an account that uses ENV: unlocking needs Paperboat.
+		if paperboatUnreachable(context.Background()) {
+			return envCommandError(environmentmanager.ErrVaultNotSetUp, envNeedsOnlineMessage)
+		}
 		return envCommandError(environmentmanager.ErrVaultNotSetUp, envNotSetUpMessage)
 	case onlyEnvironmentFailureLeaves(err, func(leaf error) bool { return errors.Is(leaf, environmentmanager.ErrNoRotationInProgress) }):
 		return envCommandError(err, "No personal ENV key rotation is in progress; nothing was changed.")
@@ -534,6 +539,24 @@ func safeEnvironmentVariableCommandError(err error) error {
 	// A submitted value must not be retained in arbitrary transport or server
 	// error text, even if it was escaped or embedded in structured details.
 	return envCommandError(err, "environment variable update failed")
+}
+
+const envNeedsOnlineMessage = "ENV needs Paperboat online: this computer has no ENV vault yet and Paperboat is unreachable, so it cannot tell whether this account uses ENV. Nothing was changed; run it again once `pb status` shows Paperboat is reachable."
+
+// paperboatUnreachable asks the local daemon whether the control plane is unavailable.
+func paperboatUnreachable(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, relayDenialLookupTimeout)
+	defer cancel()
+	snapshot, err := readDaemonSnapshot(ctx)
+	if err != nil {
+		return false
+	}
+	for _, item := range snapshot.Health {
+		if item.Code == "control_plane_unavailable" {
+			return true
+		}
+	}
+	return false
 }
 
 const envNotSetUpMessage = "ENV is not set up for this account on this computer; nothing was changed. Run `pb env vault unlock` if this account already uses ENV, or `pb env vault init` to set it up."

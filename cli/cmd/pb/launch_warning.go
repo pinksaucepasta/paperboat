@@ -9,7 +9,7 @@ type launchWarning struct {
 }
 
 const (
-	environmentPendingMessage       = "Paperboat ENV not applied: delivery to this machine is pending. The command ran without your managed values; run `pb env vault unlock` on any of your devices."
+	environmentPendingMessage       = "Paperboat ENV not applied: ENV needs Paperboat online or an unlocked vault; delivery to this machine is pending. The command ran without your managed values; run `pb env vault unlock` on any of your devices, or run it again once `pb status` shows Paperboat is reachable."
 	environmentOfflineMessage       = "Paperboat ENV not applied: ENV needs Paperboat online. The command ran without your managed values; run it again once `pb status` shows Paperboat is reachable."
 	environmentUndeliverableMessage = "Paperboat ENV not applied: delivery to this machine failed. The command ran without your managed values; run `pb env host show` to see its delivery state."
 )
