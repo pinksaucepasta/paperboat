@@ -109,6 +109,9 @@ func correspondingSourceOverlap(a, b PathRule) bool {
 	return false
 }
 func expandExplicitLocalPath(home, value string) (string, error) {
+	if os.PathSeparator != '\\' && strings.Contains(value, "\\") { // a Windows form would become a file literally named with backslashes
+		return "", ErrPathRuleInvalid
+	}
 	for _, part := range strings.Split(strings.ReplaceAll(value, "\\", "/"), "/") {
 		if part == ".." || part == "." {
 			return "", ErrPathRuleInvalid

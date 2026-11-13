@@ -232,6 +232,18 @@ func configSyncRefusal(message string) error {
 	return usageError{err: errors.New(message), publicMessage: message, refusal: true}
 }
 
+// configSyncPathRuleRefusal turns a rejected path rule into a message that names the rule and what to change.
+func configSyncPathRuleRefusal(err error) error {
+	var rule *configsync.PathRuleError
+	if !errors.As(err, &rule) {
+		return err
+	}
+	if rule.Code == "unsupported_destination" {
+		return configSyncRefusal(fmt.Sprintf("Config path rule %s: local_path is not a valid destination on this machine. Use ~/... or an absolute path of this system without .. parts or unset variables; backslashes and drive letters (C:\\...) work only on Windows, so put a Windows path in an [os.windows] section.", rule.RuleID))
+	}
+	return configSyncRefusal(rule.Error())
+}
+
 func configAssignmentMissingOnly(err error) bool {
 	var response *api.APIError
 	if !errors.As(err, &response) || response == nil || response.Status != http.StatusNotFound {
@@ -322,7 +334,7 @@ func buildConfigSyncProjection(ctx context.Context, backend configSyncSourceBack
 		shared = configsync.SourceConfig{}
 	}
 	if _, err := configsync.ResolveEffectiveConfig(home, effective); err != nil {
-		return configSyncProjection{}, err
+		return configSyncProjection{}, configSyncPathRuleRefusal(err)
 	}
 	projection := configSyncProjection{Revision: effective.Revision, SharedRevision: sharedRevision, Enabled: effective.Enabled, Mode: string(effective.Mode), AutomaticUpdates: effective.AutomaticUpdates, PathRules: []api.ConfigPathRule{}, RepositoryBindings: []api.ConfigRepositoryBinding{}, Warnings: names.unknownSections(shared)}
 	for _, rule := range effective.PathRules {

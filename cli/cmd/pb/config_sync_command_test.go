@@ -584,3 +584,15 @@ func TestConfigSyncSourceIgnoresARevokedAssignmentsRepositories(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigSyncPathRuleRefusalNamesTheRuleAndTheFix(t *testing.T) {
+	err := configSyncPathRuleRefusal(&configsync.PathRuleError{RuleID: "machine:cfg/a.txt", Code: "unsupported_destination"})
+	var usage usageError
+	if !errors.As(err, &usage) || !usage.refusal || !strings.Contains(usage.publicMessage, "machine:cfg/a.txt") || !strings.Contains(usage.publicMessage, "[os.windows]") {
+		t.Fatalf("refusal = %#v", err)
+	}
+	other := errors.New("not a path rule")
+	if configSyncPathRuleRefusal(other) != other {
+		t.Fatal("an unrelated error was rewritten")
+	}
+}
