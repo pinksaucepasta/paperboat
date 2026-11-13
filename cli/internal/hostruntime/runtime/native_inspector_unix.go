@@ -8,6 +8,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/inspectorauth"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/server"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"net"
 	"net/http"
 	"strings"
@@ -59,7 +60,7 @@ func (s *productionNativePeerService) serveInspector(ctx context.Context, h stre
 	if err != nil || s.config.inspector == nil {
 		return ErrProductionInvalid
 	}
-	deadline := time.Unix(h.DeadlineUnix, 0)
+	deadline := time.Now().Add(serverclock.Until(time.Unix(h.DeadlineUnix, 0)))
 	if ceiling := time.Now().Add(45 * time.Second); ceiling.Before(deadline) {
 		deadline = ceiling
 	}

@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"os"
 	"path/filepath"
 	"time"
@@ -82,7 +83,7 @@ func (s ProfileStore) credentialWithRefresh(issuer string, refreshBefore time.Du
 		}
 		attempt = refreshAttempt{}
 	}
-	if refresh == nil || attempt.ID == "" && time.Now().Add(refreshBefore).Before(p.AccessExpiresAt) {
+	if refresh == nil || attempt.ID == "" && serverclock.Now().Add(refreshBefore).Before(p.AccessExpiresAt) {
 		return cred, nil
 	}
 	attempt, original, err := s.prepareRefreshAttempt(p, cred, attempt)

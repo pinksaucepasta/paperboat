@@ -2,6 +2,7 @@ package tailnet
 
 import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/mesh"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"time"
 	//paperboat:allow-source-policy tailscale-import owner=peer-networking reason=peer-path-accounting
 	"tailscale.com/types/key"
@@ -88,7 +89,7 @@ func (r *relayAuthority) generationUsageNode(namespace [32]byte, peer key.NodePu
 	}
 	current := r.nodes[regionalID(seen.node.NodeID)]
 	grant, found := r.grants[seen.node.NodeID]
-	if current.NodeID != seen.node.NodeID || current.NodeGeneration != seen.node.NodeGeneration || current.ProcessEpoch != seen.node.ProcessEpoch || !found || grant.NodeGeneration != seen.node.NodeGeneration || grant.ProcessEpoch != seen.node.ProcessEpoch || grant.ExpiresAt <= now.Unix() {
+	if current.NodeID != seen.node.NodeID || current.NodeGeneration != seen.node.NodeGeneration || current.ProcessEpoch != seen.node.ProcessEpoch || !found || grant.NodeGeneration != seen.node.NodeGeneration || grant.ProcessEpoch != seen.node.ProcessEpoch || grant.ExpiresAt <= now.Add(serverclock.Offset()).Unix() {
 		return ""
 	}
 	return seen.node.NodeID

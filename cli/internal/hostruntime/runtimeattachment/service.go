@@ -562,7 +562,7 @@ func (s *Service) run(ctx context.Context) {
 		case err == nil:
 			refusedSince = time.Time{}
 		}
-		pacer.finished(time.Now(), err == nil && wantedCount > 0 && len(lives) == wantedCount && carriersReady(lives, publisherKey), expiresAt)
+		pacer.finished(time.Now(), err == nil && wantedCount > 0 && len(lives) == wantedCount && carriersReady(lives, publisherKey), time.Now().Add(serverclock.Until(expiresAt)))
 		if err != nil {
 			s.lastProbe = time.Time{}
 			lastFailure = s.observeFailure(ctx, err, lastFailure)

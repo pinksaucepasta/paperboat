@@ -64,7 +64,7 @@ func NewLocalOwnerSessionClient(endpoint, controlToken string, client *http.Clie
 	// The endpoint is a local capability boundary. Redirects could otherwise
 	// disclose the bearer control token to an attacker-controlled destination.
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return ErrOwnerSessionLeaseInvalid }
-	return &LocalOwnerSessionClient{base: base, token: strings.TrimSpace(controlToken), http: client, now: func() time.Time { return time.Now().UTC() }}, nil
+	return &LocalOwnerSessionClient{base: base, token: strings.TrimSpace(controlToken), http: client, now: serverclock.Now}, nil
 }
 
 func (c *LocalOwnerSessionClient) Acquire(ctx context.Context, ownerSessionID string, target LeaseTarget) (OwnerSessionLease, error) {

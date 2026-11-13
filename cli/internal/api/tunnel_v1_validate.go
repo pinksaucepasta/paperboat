@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	sharedprotocol "github.com/pinksaucepasta/paperboat/shared/connectorprotocol"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"net"
 	"net/http"
 	"net/url"
@@ -10,7 +11,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 )
@@ -557,7 +557,7 @@ func validateTunnelPrivateAccessAdmission(v TunnelPrivateAccessAdmission) error 
 	} else if v.Protocol != "http" || v.Hostname == "" {
 		return ErrUnsafeTunnelResponse
 	}
-	if len(v.EdgeProcessEpoch) < 8 || len(v.EdgeProcessEpoch) > 128 || containsTunnelControl(v.EdgeProcessEpoch) || !v.ExpiresAt.After(time.Now().UTC()) {
+	if len(v.EdgeProcessEpoch) < 8 || len(v.EdgeProcessEpoch) > 128 || containsTunnelControl(v.EdgeProcessEpoch) || !v.ExpiresAt.After(serverclock.Now().UTC()) {
 		return ErrUnsafeTunnelResponse
 	}
 	for _, endpoint := range v.EdgeEndpoints {

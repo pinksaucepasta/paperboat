@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net/http"
 	"net/url"
@@ -123,7 +124,7 @@ func NewOwnerSessionLeaseManager(config OwnerSessionLeaseManagerConfig) (*OwnerS
 		return nil, ErrOwnerSessionLeaseInvalid
 	}
 	if config.Now == nil {
-		config.Now = func() time.Time { return time.Now().UTC() }
+		config.Now = serverclock.Now
 	}
 	if config.Random == nil {
 		config.Random = rand.Reader
@@ -163,8 +164,8 @@ func (m *OwnerSessionLeaseManager) watchContext() {
 		case <-m.done:
 			_ = m.Close()
 			return
-		case now := <-ticker.C:
-			m.Sweep(now)
+		case <-ticker.C:
+			m.Sweep(m.now())
 		}
 	}
 }

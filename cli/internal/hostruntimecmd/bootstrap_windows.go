@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net/http"
 	"os"
@@ -121,7 +122,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		return err
 	}
 	publicIdentityKey := base64.RawURLEncoding.EncodeToString(identityStore.Current().Public())
-	resume, resumeErr := bootstrap.LoadResume(*stateRoot, *serverURL, publicIdentityKey, token, *name, time.Now().UTC())
+	resume, resumeErr := bootstrap.LoadResume(*stateRoot, *serverURL, publicIdentityKey, token, *name, serverclock.Now().UTC())
 	if err := rejectFreshBootstrapOverEnrollment(identityStore, resumeErr); err != nil {
 		return err
 	}

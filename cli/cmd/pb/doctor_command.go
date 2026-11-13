@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
 	"os"
@@ -858,8 +859,8 @@ func collectLocalDoctor(ctx context.Context) (report localDoctorReport) {
 	} else {
 		report.InboxState = "ready"
 	}
-	if control, err := store.MachineControl(time.Now().UTC(), time.Hour); err == nil {
-		if control.ExpiresAt.Before(time.Now().UTC()) {
+	if control, err := store.MachineControl(serverclock.Now().UTC(), time.Hour); err == nil {
+		if control.ExpiresAt.Before(serverclock.Now().UTC()) {
 			report.CredentialState = "grace"
 		} else {
 			report.CredentialState = "valid"

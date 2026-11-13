@@ -496,7 +496,7 @@ func (a *Authority) idleRefreshDelay() time.Duration {
 // issuer repeatedly returns a configuration at the end of its grant lifetime.
 func (a *Authority) refreshDelay(cadence time.Duration) time.Duration {
 	if expiry := a.expiresAt.Load(); expiry != 0 {
-		remaining := time.Until(time.Unix(expiry, 0))
+		remaining := serverclock.Until(time.Unix(expiry, 0))
 		margin := remaining / 2
 		if margin > 10*time.Second {
 			margin = 10 * time.Second

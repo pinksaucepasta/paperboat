@@ -9,6 +9,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/clientauthority"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/peerquic"
 	"github.com/pinksaucepasta/paperboat/internal/peertransport/streamauth"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
 	"net/http"
@@ -55,12 +56,12 @@ func (t *PeerTerminalTunnel) InspectorRequest(ctx context.Context, access api.In
 		action = "replay"
 	}
 	target, _ := json.Marshal(map[string]string{"resource_kind": access.ResourceKind, "resource_id": access.ResourceID, "route_id": access.RouteID, "action": action})
-	deadline := time.Now().Add(45 * time.Second)
+	deadline := serverclock.Now().Add(45 * time.Second)
 	if access.ExpiresAt.Before(deadline) {
 		deadline = access.ExpiresAt
 	}
-	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
-		deadline = d
+	if d, ok := ctx.Deadline(); ok && d.Before(time.Now().Add(serverclock.Until(deadline))) {
+		deadline = serverclock.Now().Add(time.Until(d))
 	}
 	header, err := streamauth.NewNativePrivate(access.CredentialID, "inspector", "inspector_request", grant, deadline, (2<<20)+(64<<10), target)
 	if err != nil {

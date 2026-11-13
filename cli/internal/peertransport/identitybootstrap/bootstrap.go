@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -125,7 +126,7 @@ func EnrollExistingRoot(ctx context.Context, request ExistingRootRequest) (Resul
 	if ctx == nil || request.Client == nil || request.Store.Path == "" || request.Store.Secrets == nil || !boundedID(request.AccountID) || !boundedID(request.CLIClientSessionID) {
 		return Result{}, ErrInvalid
 	}
-	now := time.Now().UTC()
+	now := serverclock.Now().UTC()
 	if request.Now != nil {
 		now = request.Now().UTC()
 	}
@@ -215,7 +216,7 @@ func EnrollExistingRoot(ctx context.Context, request ExistingRootRequest) (Resul
 	for {
 		document, certErr := request.Client.EndpointCertificate(pollCtx, request.CLIClientSessionID, 1)
 		if certErr == nil {
-			current := time.Now().UTC()
+			current := serverclock.Now().UTC()
 			if request.Now != nil {
 				current = request.Now().UTC()
 			}
@@ -347,7 +348,7 @@ func Bootstrap(ctx context.Context, request Request) (Result, error) {
 	if ctx == nil || request.Client == nil || request.Store.Path == "" || request.Store.Secrets == nil || !boundedID(request.AccountID) || !boundedID(request.CLIClientSessionID) {
 		return Result{}, invalidResponseError{Stage: "request"}
 	}
-	now := time.Now().UTC()
+	now := serverclock.Now().UTC()
 	if request.Now != nil {
 		now = request.Now().UTC()
 	}

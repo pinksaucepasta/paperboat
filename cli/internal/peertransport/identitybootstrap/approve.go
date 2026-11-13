@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/api"
@@ -45,7 +46,7 @@ func approveEndpoint(ctx context.Context, request ApprovalRequest, wantRole endp
 	if ctx == nil || request.Client == nil || !boundedID(request.AccountID) || !boundedID(request.CLIClientSessionID) || !boundedID(request.RequestID) || len(request.SafetyCode) != 11 || request.SafetyCode[5] != '-' {
 		return Result{}, ErrInvalid
 	}
-	now := time.Now().UTC()
+	now := serverclock.Now().UTC()
 	if request.Now != nil {
 		now = request.Now().UTC()
 	}

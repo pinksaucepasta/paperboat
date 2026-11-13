@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/originhealth"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
 	"net/http"
@@ -549,7 +550,7 @@ func (c *DataCarrierPreviewCarrier) Run(ctx context.Context, lease Lease, ready 
 		if registry != nil && strings.TrimSpace(lease.ID) != "" {
 			registry.Unregister(lease.ID)
 		}
-		if store != nil && strings.TrimSpace(lease.ID) != "" && (ctx.Err() != nil || !time.Now().UTC().Before(lease.LeaseDeadline) || c.isClosed()) {
+		if store != nil && strings.TrimSpace(lease.ID) != "" && (ctx.Err() != nil || !serverclock.Now().UTC().Before(lease.LeaseDeadline) || c.isClosed()) {
 			store.Revoke(lease.ID)
 		}
 	}()

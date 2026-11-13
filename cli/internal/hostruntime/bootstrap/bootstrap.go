@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pinksaucepasta/paperboat/internal/neterr"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
 	"net/http"
@@ -114,7 +115,7 @@ func CreatePairing(ctx context.Context, config Config) (Pairing, error) {
 	if err := request(ctx, client(config), http.MethodPost, base+"/v1/machines/pairings", body, &pairing); err != nil {
 		return Pairing{}, err
 	}
-	if pairing.ID == "" || pairing.UserCode == "" || !time.Now().UTC().Before(pairing.ExpiresAt) {
+	if pairing.ID == "" || pairing.UserCode == "" || !serverclock.Now().UTC().Before(pairing.ExpiresAt) {
 		return Pairing{}, bootstrapRequestFailure(ErrInvalid)
 	}
 	return pairing, nil
@@ -129,7 +130,7 @@ func WaitForMaterial(ctx context.Context, config Config, expiresAt time.Time, in
 		interval = 2 * time.Second
 	}
 	body, _ := json.Marshal(map[string]string{"verifier": config.Verifier, "public_identity_key": config.PublicIdentityKey})
-	for time.Now().UTC().Before(expiresAt) {
+	for serverclock.Now().UTC().Before(expiresAt) {
 		material, err := requestMaterial(ctx, config, base, body, false)
 		if err == nil {
 			return material, nil
@@ -203,7 +204,7 @@ func validateMaterialFreshness(material Material, requireFresh, runtimeEnrolled 
 		{!validLoopbackAddress(material.HelperListenAddress), "helper listen address"},
 		{material.InstallationGeneration < 1, "installation generation"},
 		{!validClientSession, "client session"},
-		{requireFresh && !time.Now().UTC().Before(material.ExpiresAt), "expiration"},
+		{requireFresh && !serverclock.Now().UTC().Before(material.ExpiresAt), "expiration"},
 	}
 	for _, check := range checks {
 		if check.invalid {

@@ -14,6 +14,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net"
 	"net/http"
@@ -103,7 +104,7 @@ func New(config Config) (*Service, error) {
 	}
 	now := config.Now
 	if now == nil {
-		now = func() time.Time { return time.Now().UTC() }
+		now = serverclock.Now
 	}
 	return &Service{store: config.Store, manager: manager, registry: config.Registry, authorize: config.Authorize, now: now, reads: make(chan struct{}, inspector.MaxConcurrentReads)}, nil
 }
@@ -159,7 +160,7 @@ func (s *Service) Manager() *inspector.Manager { return s.manager }
 
 func (s *Service) currentTime() time.Time {
 	if s == nil || s.now == nil {
-		return time.Now().UTC()
+		return serverclock.Now().UTC()
 	}
 	return s.now().UTC()
 }

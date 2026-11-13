@@ -3,6 +3,7 @@ package inspector
 import (
 	"context"
 	"github.com/pinksaucepasta/paperboat/shared/admission"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"sync"
 	"time"
 )
@@ -80,7 +81,7 @@ func (r *Registry) Current(resourceID string, now time.Time) (ReplayBinding, boo
 		return ReplayBinding{}, false
 	}
 	if now.IsZero() {
-		now = time.Now().UTC()
+		now = serverclock.Now().UTC()
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"net/http"
 	"time"
 
@@ -57,7 +58,7 @@ func (c *Client) IssueNativePrivateGrant(ctx context.Context, request NativePriv
 		binding.CLIClientSessionID = t.CLIClientSessionID
 		binding.AccessSessionID = t.AccessSessionID
 	}
-	if grant.Credential == "" || len(grant.Credential) > 16<<10 || binding.Validate(time.Now().UTC()) != nil || t.AccountID == "" || t.UserID == "" || t.EnvironmentID == "" || t.AccessSessionID == "" {
+	if grant.Credential == "" || len(grant.Credential) > 16<<10 || binding.Validate(serverclock.Now().UTC()) != nil || t.AccountID == "" || t.UserID == "" || t.EnvironmentID == "" || t.AccessSessionID == "" {
 		return NativePrivateGrant{}, errors.New("unsafe native private grant")
 	}
 	return grant, nil

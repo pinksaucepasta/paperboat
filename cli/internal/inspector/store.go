@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"net/http"
 	"sync"
 	"time"
@@ -177,7 +178,7 @@ type Store struct {
 
 func NewStore() *Store {
 	return &Store{
-		now:          func() time.Time { return time.Now().UTC() },
+		now:          serverclock.Now,
 		policies:     make(map[string]ResourcePolicy),
 		policyEpochs: make(map[string]uint64),
 		pending:      make(map[string]*Pending),
@@ -201,7 +202,7 @@ func (s *Store) currentTime() time.Time {
 	if s.now != nil {
 		return s.now().UTC()
 	}
-	return time.Now().UTC()
+	return serverclock.Now().UTC()
 }
 
 func (s *Store) resourceUsageLocked(resourceID string) *resourceUsage {

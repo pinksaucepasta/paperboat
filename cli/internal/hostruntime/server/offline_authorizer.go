@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"time"
 
 	"github.com/pinksaucepasta/paperboat/internal/hostruntime/protocol"
@@ -33,7 +34,7 @@ func newOfflineAuthorizer(conn OfflinePeerConn) (*offlineAuthorizer, error) {
 func (a *offlineAuthorizer) Authorize(_ context.Context, frame protocol.Frame) (Authorization, error) {
 	terminalFrame := frame.Capability == "terminal.v1" || frame.Capability == "health.v1" || frame.Type == "ack" || frame.Type == "detach"
 	execFrame := frame.Capability == "exec.v1" && frame.OperationID == a.operationID
-	if a.consumer == "terminal" && !terminalFrame || a.consumer == "exec" && !execFrame || time.Now().After(a.deadline) {
+	if a.consumer == "terminal" && !terminalFrame || a.consumer == "exec" && !execFrame || serverclock.Now().After(a.deadline) {
 		return Authorization{}, ErrCredentialPolicy
 	}
 	authorization := Authorization{

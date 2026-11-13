@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"net/http"
 	"net/url"
 	"time"
@@ -49,7 +50,7 @@ func (c *Client) ResolveInspectorAccess(ctx context.Context, token, kind, resour
 	if err != nil {
 		return InspectorAccess{}, err
 	}
-	if out.CredentialID == "" || out.MachineID == "" || out.MachineGeneration == 0 || out.ResourceKind != kind || out.ResourceID != resource || out.RouteID != route || !out.ExpiresAt.After(time.Now().UTC()) {
+	if out.CredentialID == "" || out.MachineID == "" || out.MachineGeneration == 0 || out.ResourceKind != kind || out.ResourceID != resource || out.RouteID != route || !out.ExpiresAt.After(serverclock.Now().UTC()) {
 		return InspectorAccess{}, errors.New("unsafe inspector access route")
 	}
 	return out, nil

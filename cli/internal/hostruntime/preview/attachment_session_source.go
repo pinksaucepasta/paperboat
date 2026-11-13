@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"net"
 	"net/url"
 	"path/filepath"
@@ -160,7 +161,7 @@ func NewMachineAttachmentSessionSource(config MachineAttachmentSessionSourceConf
 		return nil, ErrMachineAttachmentSessionInvalid
 	}
 	if config.Clock == nil {
-		config.Clock = func() time.Time { return time.Now().UTC() }
+		config.Clock = serverclock.Now
 	}
 	if config.SessionFactory == nil {
 		config.SessionFactory = newMachineAttachmentNetworkSessionSource
@@ -544,7 +545,7 @@ func (s *MachineAttachmentSessionSource) endpointConfigsValues(edgeEndpoints []s
 			return expected, nil
 		}
 		tlsConfig := &tls.Config{
-			MinVersion: tls.VersionTLS13, MaxVersion: tls.VersionTLS13,
+			MinVersion: tls.VersionTLS13, MaxVersion: tls.VersionTLS13, Time: s.clock,
 			Certificates: []tls.Certificate{leaf}, RootCAs: roots, ServerName: serverName,
 			NextProtos: []string{connector.DataCarrierALPN}, InsecureSkipVerify: false,
 		}

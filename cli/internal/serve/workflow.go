@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"net"
 	"net/http"
 	"strconv"
@@ -355,7 +356,7 @@ func StartForeground(ctx context.Context, config ForegroundConfig) (*Foreground,
 		var expiry <-chan time.Time
 		var expiryTimer *time.Timer
 		if lease.UserDeadline != nil {
-			remaining := time.Until(lease.UserDeadline.UTC())
+			remaining := serverclock.Until(lease.UserDeadline.UTC())
 			if remaining < 0 {
 				remaining = 0
 			}

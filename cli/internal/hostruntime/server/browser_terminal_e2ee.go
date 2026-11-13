@@ -13,6 +13,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"github.com/pinksaucepasta/paperboat/shared/terminalprotocol"
 	"io"
 	"net"
@@ -224,7 +225,7 @@ func (h *BrowserTerminalWebSocketHandler) ServeHTTP(writer http.ResponseWriter, 
 		Certificates: []tls.Certificate{identity.TLSCertificate},
 		ClientAuth:   tls.RequireAnyClientCert,
 		VerifyPeerCertificate: func(rawCertificates [][]byte, _ [][]*x509.Certificate) error {
-			return verifyBrowserTerminalClientCertificate(rawCertificates, pinnedDigest, time.Now().UTC())
+			return verifyBrowserTerminalClientCertificate(rawCertificates, pinnedDigest, serverclock.Now().UTC())
 		},
 	})
 	_ = stream.SetDeadline(time.Now().Add(browserTerminalHandshakeTimeout))

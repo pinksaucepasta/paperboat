@@ -10,6 +10,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net/http"
 	"os"
@@ -125,7 +126,7 @@ func runBootstrap(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	}
 	publicIdentityKey := base64.RawURLEncoding.EncodeToString(identityStore.Current().Public())
 	pairingSSHUser, pairingSSHPort := unixBootstrapSSHFields(account.Username)
-	resume, resumeErr := bootstrap.LoadResume(*stateRoot, *serverURL, publicIdentityKey, token, *name, time.Now().UTC())
+	resume, resumeErr := bootstrap.LoadResume(*stateRoot, *serverURL, publicIdentityKey, token, *name, serverclock.Now().UTC())
 	if err := rejectFreshBootstrapOverEnrollment(identityStore, resumeErr); err != nil {
 		return err
 	}

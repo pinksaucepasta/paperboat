@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"net/http"
 	"path"
@@ -92,7 +93,7 @@ func (h *LocalFileTransferHandler) create(writer http.ResponseWriter, request *h
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	var input localFileTransferCreate
-	if decoder.Decode(&input) != nil || decoder.Decode(&struct{}{}) != io.EOF || input.BatchID == "" || input.SessionID == "" || input.DestinationMachineID == "" || input.InitiatingUserID == "" || !input.ExpiresAt.After(time.Now().UTC()) || input.ExpiresAt.Nanosecond() != 0 {
+	if decoder.Decode(&input) != nil || decoder.Decode(&struct{}{}) != io.EOF || input.BatchID == "" || input.SessionID == "" || input.DestinationMachineID == "" || input.InitiatingUserID == "" || !input.ExpiresAt.After(serverclock.Now().UTC()) || input.ExpiresAt.Nanosecond() != 0 {
 		writeHTTPError(writer, request.Header.Get(HeaderRequestID), "invalid_request", http.StatusBadRequest, false)
 		return
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"io"
 	"log"
 	"net/http"
@@ -38,7 +39,7 @@ func NewPreviewDispatchHandler(config PreviewDispatchHandlerConfig) (http.Handle
 		return nil, errors.New("invalid preview dispatch handler configuration")
 	}
 	if config.Now == nil {
-		config.Now = func() time.Time { return time.Now().UTC() }
+		config.Now = serverclock.Now
 	}
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodPost {
