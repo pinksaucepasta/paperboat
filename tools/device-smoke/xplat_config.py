@@ -26,7 +26,7 @@ import xplat_fleet as fleet  # noqa: E402
 from config_sync_lifecycle import HTTP_SERVER  # noqa: E402
 
 REPO_HOST = os.environ.get('XPLAT_REPO_HOST', 'hp')
-REPO_ADDR = REPO_HOST.split('@')[-1]  # the host name as the controller dials it (ssh -R takes no user@)
+REPO_ADDR = os.environ.get('XPLAT_REPO_ADDR') or REPO_HOST.split('@')[-1]  # the host name as the controller dials it (ssh -R takes no user@); XPLAT_REPO_ADDR=127.0.0.1 with a pre-made `ssh -L` when the controller cannot reach the host's ports
 REPO_BRIDGE = os.environ.get('XPLAT_REPO_BRIDGE', '10.0.0.1')  # the repository host as the Linux container reaches it
 REPO_ROOT = os.environ.get('XPLAT_REPO_ROOT', '/tmp/xplat-cfg-repo')  # one per lane: lanes share hp and the account
 NAME = os.environ.get('XPLAT_REPO_NAME', 'xplat-config-fixture')
@@ -85,7 +85,7 @@ class Repo:
 
     def serve(self, password):
         # a port inside the firewall's open range (anvit accepts 10000-59999 only), not an ephemeral one
-        bind = "('0.0.0.0', %d)" % random.randrange(20000, 30000)
+        bind = "('0.0.0.0', %d)" % int(os.environ.get('XPLAT_REPO_PORT') or random.randrange(20000, 30000))
         self.sh('cat > %s/server.py' % REPO_ROOT, input=HTTP_SERVER.replace("('127.0.0.1', 0)", bind).encode())
         self.sh('cd %s && (setsid nohup python3 server.py %s cfguser %s > port 2>/dev/null < /dev/null & echo $! > pid)'
                 % (REPO_ROOT, REPO_ROOT, shlex.quote(password)))
