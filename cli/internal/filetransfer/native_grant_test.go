@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -63,8 +64,9 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 	// destination (no_eligible_path); the upload waits, says so, and resumes at the committed offset.
 	// offline: after the carrier is lost the server answers the renewal machine_offline twice (the destination's path
 	// blipped; F14-02 on winpool-12 failed the send here); the transfer waits and resumes instead of failing.
+	// unreachable: the renewal fails on the network twice (the PC just woke from sleep); the transfer waits and resumes.
 	// gone: the server says the destination was removed or revoked (404 user_machine_not_found): the send stops at once.
-	for _, mode := range []string{"allowed", "denied", "restarting", "stopping", "waiting", "lease-lost", "offline", "gone"} {
+	for _, mode := range []string{"allowed", "denied", "restarting", "stopping", "waiting", "lease-lost", "offline", "unreachable", "gone"} {
 		t.Run(mode, func(t *testing.T) {
 			denied := mode == "denied" || mode == "gone"
 			daemonDown := 0
@@ -178,6 +180,11 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 					daemonDown++
 					return NativeGrant{}, fmt.Errorf("renew file transfer grant: %w", &api.APIError{Status: http.StatusConflict, Code: "machine_offline"})
 				}
+				if mode == "unreachable" && daemonDown < 2 {
+					// the PC woke from sleep: the renewal's dial to the server fails before any answer
+					daemonDown++
+					return NativeGrant{}, fmt.Errorf("renew file transfer grant: %w", &url.Error{Op: "Post", URL: "https://api.example.test", Err: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("network is unreachable")}})
+				}
 				if (mode == "restarting" || mode == "stopping") && daemonDown < 3 {
 					daemonDown++
 					restarting.Store(daemonDown < 3)
@@ -243,6 +250,9 @@ func TestNativeTransferReauthorizesLostConnectionWithoutNewBatch(t *testing.T) {
 			}
 			if mode == "offline" && (daemonDown != 2 || len(waits) == 0 || waits[0] != "Waiting for macl to come back online (up to 32 min)") {
 				t.Fatalf("renewal did not wait for the offline machine, or did not say so: %d %q", daemonDown, waits)
+			}
+			if mode == "unreachable" && (daemonDown != 2 || len(waits) == 0 || waits[0] != "Waiting for Paperboat to be reachable (up to 32 min)") {
+				t.Fatalf("renewal did not wait for the server, or did not say so: %d %q", daemonDown, waits)
 			}
 			if !denied && maintenanceResponses != 6 {
 				t.Fatal("transfer did not recover beyond the former four-failure limit")

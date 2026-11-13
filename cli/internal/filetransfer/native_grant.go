@@ -71,6 +71,11 @@ func NewRenewableNativeClient(initial NativeGrant, renew func(context.Context) (
 			// transfer waits for it inside the native recovery window and resumes from the committed offset.
 			return Auth{}, &machineUnavailable{err}
 		}
+		if err != nil && serverUnreachable(err) {
+			// The renewal could not reach the Paperboat server (the PC just woke from sleep and its network is not back
+			// yet): the transfer waits inside the native recovery window and resumes from the committed offset.
+			return Auth{}, &serverUnavailable{err}
+		}
 		if err != nil {
 			return Auth{}, &nativeAuthorizationFailure{err}
 		}
@@ -227,6 +232,21 @@ func (e *machineUnavailable) Error() string {
 	return "waiting for the machine to come back online: " + e.cause.Error()
 }
 func (e *machineUnavailable) Unwrap() error { return e.cause }
+
+// serverUnavailable is a renewal that failed on the network (no route, DNS, timeout) before the server answered; it is retried.
+type serverUnavailable struct{ cause error }
+
+func (e *serverUnavailable) Error() string {
+	return "waiting for Paperboat to be reachable: " + e.cause.Error()
+}
+func (e *serverUnavailable) Unwrap() error { return e.cause }
+
+func serverUnreachable(err error) bool {
+	var dial *net.OpError
+	var lookup *net.DNSError
+	var network net.Error
+	return errors.As(err, &dial) || errors.As(err, &lookup) || errors.As(err, &network) && network.Timeout()
+}
 
 func machineOffline(err error) bool {
 	var remote *api.APIError

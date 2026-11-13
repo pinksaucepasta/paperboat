@@ -929,10 +929,13 @@ func (c *Client) refreshRequestAdmission(ctx context.Context) error {
 func (c *Client) noteWaiting(err error) {
 	var waiting *PathWaitingError
 	var offline *machineUnavailable
+	var noServer *serverUnavailable
 	switch {
 	case c.Waiting == nil:
 	case errors.As(err, &waiting):
 		c.Waiting(waiting.Message)
+	case errors.As(err, &noServer):
+		c.Waiting(fmt.Sprintf("Waiting for Paperboat to be reachable (up to %d min)", int(nativeRecoveryWindow/time.Minute)))
 	case errors.As(err, &offline):
 		name := c.DestinationName
 		if name == "" {
