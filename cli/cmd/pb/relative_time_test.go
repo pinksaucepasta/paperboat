@@ -15,7 +15,7 @@ func TestRelativeTimeIsOnTheServerClock(t *testing.T) {
 	serverNow := sent.Add(-10 * time.Minute) // the server is 10 minutes behind this machine
 	serverclock.Observe(serverNow.UTC().Format(http.TimeFormat), sent, sent)
 	t.Cleanup(func() { serverclock.Observe(time.Now().UTC().Format(http.TimeFormat), time.Now(), time.Now()) })
-	created := serverNow.Add(-5 * time.Minute)
+	created := serverNow.Add(-5*time.Minute - 30*time.Second) // Date has second resolution
 	if got := relativeTimestamp(created); got != "5m ago" {
 		t.Fatalf("session created 5 minutes ago on the server read %q on a machine 10 minutes ahead", got)
 	}
