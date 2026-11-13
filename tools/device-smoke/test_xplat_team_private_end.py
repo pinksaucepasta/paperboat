@@ -1,6 +1,6 @@
 import unittest
 
-from xplat_team_private_end import closure_seconds
+from xplat_team_private_end import closure_seconds, raw_denied
 
 
 class ClosureTimingTest(unittest.TestCase):
@@ -13,6 +13,16 @@ class ClosureTimingTest(unittest.TestCase):
                                 (closed, 130.01), (closed, 99), (closed, float('nan'))]:
             with self.subTest(state=state, observed=observed), self.assertRaises(AssertionError):
                 closure_seconds(state, 100, observed)
+
+
+class FreshRawDenialTest(unittest.TestCase):
+    def test_only_mac_connect_drop_counts_as_denial(self):
+        for platform in ('linux', 'darwin', 'windows'):
+            with self.subTest(platform=platform):
+                self.assertEqual(raw_denied(platform, {'phase': 'connect', 'outcome': 'timeout'}), platform == 'darwin')
+                self.assertFalse(raw_denied(platform, {'phase': 'receive', 'outcome': 'timeout'}))
+                self.assertFalse(raw_denied(platform, {'phase': 'receive', 'outcome': 'data'}))
+                self.assertTrue(raw_denied(platform, {'phase': 'receive', 'outcome': 'EOF'}))
 
 
 if __name__ == '__main__': unittest.main()

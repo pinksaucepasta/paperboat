@@ -99,6 +99,28 @@ finally:
 '''
 
 
+RAW_PROBE = r'''
+import json, socket, sys
+phase='connect'
+try:
+    s=socket.create_connection((sys.argv[1],int(sys.argv[2])),timeout=5)
+    phase='receive'
+    s.settimeout(5); s.sendall(b'denied'); b=s.recv(6)
+    result={'phase':phase,'outcome':'EOF' if not b else 'data'}
+    s.close()
+except socket.timeout: result={'phase':phase,'outcome':'timeout'}
+except (ConnectionRefusedError,ConnectionResetError,BrokenPipeError) as error:
+    result={'phase':phase,'outcome':type(error).__name__}
+print(json.dumps(result))
+'''
+
+def raw_denied(os_name, probe):
+    if probe.get('outcome') in ('EOF', 'ConnectionRefusedError', 'ConnectionResetError', 'BrokenPipeError'):
+        return True
+    # macOS PF deliberately drops unleased SYNs; a connected but silent socket is never proof.
+    return os_name == 'darwin' and probe == {'phase': 'connect', 'outcome': 'timeout'}
+
+
 def closure_seconds(state, started, observed):
     """Only a previously flowing connection's observed EOF/reset proves closure."""
     elapsed = observed - started
@@ -198,15 +220,15 @@ def run_pair(team, owner, member, oid, records, origin_controller):
                     message = refused.text + refused.errtext
                     needle = 'private_access' if mutation == 'grant_revoke' else 'turned off'
                     assert refused.rc != 0 and needle in message, 'wrong refusal: ' + message[-500:]
-                    raw = member.run([xplat_access.py(member), '-c',
-                        "import socket,sys\ntry:\n s=socket.create_connection((sys.argv[1],int(sys.argv[2])),timeout=5); "
-                        "s.settimeout(5); s.sendall(b'denied'); sys.exit(0 if s.recv(6)==b'' else 1)\n"
-                        "except (ConnectionRefusedError,ConnectionResetError,BrokenPipeError): sys.exit(0)\n"
-                        "except socket.timeout: sys.exit(2)",
-                        ended['address'], port], timeout=15)
-                    assert raw.rc == 0, 'raw TCP not explicitly refused after revocation: ' + raw.errtext[-200:]
-                    records[mutation] = {'status': 'PASS', 'seconds': seconds, 'echoes': ended['echoes'],
+                    records[mutation] = {'status': 'CLOSURE_ONLY', 'seconds': seconds, 'echoes': ended['echoes'],
                                          'flows': ended['flows'], 'address': ended['address'], 'refusal': message.strip()}
+                    raw = member.run([xplat_access.py(member), '-c', RAW_PROBE,
+                                      ended['address'], port], timeout=15)
+                    assert raw.rc == 0, 'raw probe failed: ' + raw.errtext[-200:]
+                    probe = json.loads(raw.text)
+                    records[mutation]['raw_refusal'] = probe
+                    assert raw_denied(member.os, probe), 'raw TCP fresh attempt: %r' % probe
+                    records[mutation]['status'] = 'PASS'
                     print('PASS X-19:%s:%s>%s %.2fs' % (mutation, member.os, owner.os, seconds), flush=True)
                 finally:
                     member.write(stop, b'stop')
@@ -270,7 +292,7 @@ def main():
                 run_pair(team,target,client,matches[0]['id'],results[pair],target)
             except Exception as error:
                 results[pair].update(status='FAIL',error=str(error))
-                raise
+                print('FAIL X-19:' + pair + ': ' + str(error), flush=True)
     finally:
         out.write_text(json.dumps({'check':'X-19-team-private-end',
             'direction':'holder>shared target', 'versions':versions,'results':results},indent=2))
