@@ -1,0 +1,35 @@
+{
+ "check": "xplat-config",
+ "results": [
+  {
+   "id": "X-03:x03_bytes:L>M",
+   "status": "PASS",
+   "detail": "sha256 equal on lanex2-m and in the repository for 5 line-ending shapes"
+  },
+  {
+   "id": "X-03:x03_bytes:M>L",
+   "status": "PASS",
+   "detail": "sha256 equal on lanex2-l2 and in the repository for 5 line-ending shapes"
+  },
+  {
+   "id": "X-03:x03_merge:L>M",
+   "status": "PASS",
+   "detail": "three-way merge kept CRLF on every line"
+  },
+  {
+   "id": "X-03:x03_merge:M>L",
+   "status": "PASS",
+   "detail": "three-way merge kept CRLF on every line"
+  },
+  {
+   "id": "X-03:x03_eol_edit:L>M",
+   "status": "PASS",
+   "detail": "line-ending-only edit travelled alone; against an edit on the other side it conflicted and both files stayed as written"
+  },
+  {
+   "id": "X-03:x03_eol_edit:M>L",
+   "status": "PASS",
+   "detail": "line-ending-only edit travelled alone; against an edit on the other side it conflicted and both files stayed as written"
+  }
+ ]
+}
