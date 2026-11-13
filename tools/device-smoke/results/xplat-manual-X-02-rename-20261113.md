@@ -176,3 +176,25 @@ M>W before rename: machine_section {"alias": "fx02f-m", "state": "pending", "err
   apply 17 {"alias": "fx02f-m-r", "state": "healthy", "error_code": null, "recovery_actions": null}
 RESULT M>W paused_configuration_changed=False apply_restored=True
 ```
+
+Run 3 (L>W, L>M, healthy baseline, 480 s window): no configuration_changed in either; the "pass" results in runs 1-2 above come from the shared-file edit pausing the machine, not from the rename. CONCLUSION: the rename part FAILS.
+```
+/tmp/claude-1001/-home-ubuntu-paperboat/e4362ca1-99c1-46cd-b9fe-f6c42796f0f5/scratchpad/rename2.py:45: SyntaxWarning: invalid escape sequence '\|'
+  j = a.run(['sh', '-c', "journalctl --user -u paperboatd --since @%d --no-pager | grep -i 'config\|alias\|descriptor\|machine\|sync' | cut -c1-240 | tail -n 40" % t_rename]).text
+L>W before rename: machine_section {"alias": "fx02f-l", "state": "healthy", "error_code": null, "recovery_actions": null}
+ rename returned after 8 s
+  44 {"alias": "fx02f-l-r", "state": "syncing", "error_code": null, "recovery_actions": null}
+ warnings ["The shared configuration has a [machine.fx02f-l] section, but no machine of yours is named \"fx02f-l\". Check the name with `pb machine list`."] source os
+ JOURNAL 
+  apply 2 {"alias": "fx02f-l-r", "state": "healthy", "error_code": null, "recovery_actions": null}
+RESULT L>W paused_configuration_changed=False apply_restored=True
+L>M before rename: machine_section {"alias": "fx02f-l", "state": "healthy", "error_code": null, "recovery_actions": null}
+ rename returned after 9 s
+  291 {"alias": "fx02f-l-r", "state": "syncing", "error_code": null, "recovery_actions": null}
+  411 {"alias": "fx02f-l-r", "state": "syncing", "error_code": null, "recovery_actions": null}
+ warnings ["The shared configuration has a [machine.fx02f-l] section, but no machine of yours is named \"fx02f-l\". Check the name with `pb machine list`."] source os
+ JOURNAL 
+  apply 1 {"alias": "fx02f-l-r", "state": "syncing", "error_code": null, "recovery_actions": null}
+  apply 12 {"alias": "fx02f-l-r", "state": "healthy", "error_code": null, "recovery_actions": null}
+RESULT L>M paused_configuration_changed=False apply_restored=True
+```
