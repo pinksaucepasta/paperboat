@@ -14,8 +14,10 @@ export type Capture = {
   response_headers: Record<string, string[]> | null
   headers_truncated: boolean
   request_body?: string
+  request_body_encoding?: string
   request_body_state: string
   response_body?: string
+  response_body_encoding?: string
   response_body_state: string
   response_status: number
   error_code: string

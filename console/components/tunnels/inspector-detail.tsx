@@ -4,6 +4,7 @@ import { ArrowClockwiseIcon } from "@phosphor-icons/react"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import type { Capture } from "@/lib/inspector/feed"
+import { bodyText } from "@/lib/inspector/body"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useTimeFormat } from "@/lib/use-time-format"
@@ -80,22 +81,26 @@ const bodyStates: Record<string, string> = {
   expired: "Expired.",
 }
 
-function Body({ text, state, machine }: { text?: string; state: string; machine: string }) {
+function Body({ text, encoding, state, machine }: { text?: string; encoding?: string; state: string; machine: string }) {
   if (!text) {
     const why = state === "dropped" ? `Not captured: ${machine} hit its capture limit.` : bodyStates[state]
     return <p className="text-sm text-muted-foreground">{why ?? "No body."}</p>
   }
-  let shown = text
-  try {
-    shown = JSON.stringify(JSON.parse(text), null, 2)
-  } catch {
-    /* Not JSON: shown as captured. */
+  const { shown: raw, note } = bodyText(text, encoding)
+  let shown = raw
+  if (!note) {
+    try {
+      shown = JSON.stringify(JSON.parse(raw), null, 2)
+    } catch {
+      /* Not JSON: shown as captured. */
+    }
   }
   return (
     <div className="flex flex-col gap-1">
       <pre className="max-h-96 overflow-auto rounded-md bg-surface p-3 font-mono text-code whitespace-pre-wrap break-all">
         {shown}
       </pre>
+      {note && <p className="text-xs text-muted-foreground">{note}</p>}
       {state === "truncated" && <p className="text-xs text-muted-foreground">Truncated at the capture limit.</p>}
     </div>
   )
@@ -187,7 +192,7 @@ export function CaptureDetail({
         <Headers headers={record.request_headers} truncated={record.headers_truncated} />
       </Section>
       <Section title="Request body">
-        <Body text={record.request_body} state={record.request_body_state} machine={machine} />
+        <Body text={record.request_body} encoding={record.request_body_encoding} state={record.request_body_state} machine={machine} />
       </Section>
       <Section
         title={
@@ -203,7 +208,7 @@ export function CaptureDetail({
         <Headers headers={record.response_headers} truncated={record.headers_truncated} />
       </Section>
       <Section title="Response body">
-        <Body text={record.response_body} state={record.response_body_state} machine={machine} />
+        <Body text={record.response_body} encoding={record.response_body_encoding} state={record.response_body_state} machine={machine} />
       </Section>
     </div>
   )
