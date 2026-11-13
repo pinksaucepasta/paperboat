@@ -80,10 +80,7 @@ func machineListCommand() *cobra.Command {
 		writer := tabwriter.NewWriter(command.OutOrStdout(), 0, 4, 2, ' ', 0)
 		fmt.Fprintln(writer, "NAME\tOWNERSHIP\tSTATE\tPERMISSIONS\tTAGS\tID")
 		for _, item := range machines {
-			state := item.State
-			if item.Online {
-				state = "online"
-			}
+			state := machineListState(item)
 			ownership := item.Ownership
 			if item.OwnerTeamID != "" {
 				ownership = "team:" + item.OwnerTeamID

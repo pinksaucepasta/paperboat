@@ -115,3 +115,21 @@ func TestStatusShowsMachineTags(t *testing.T) {
 		t.Fatalf("%s", out.String())
 	}
 }
+
+func TestMachineListStateSaysAnOfflineMachineMayBeAsleep(t *testing.T) {
+	sleepy := api.UserMachine{State: "offline", Availability: api.AvailabilityPolicy{DesiredMode: "allow_sleep"}}
+	awake := api.UserMachine{State: "offline", Availability: api.AvailabilityPolicy{DesiredMode: "keep_awake"}}
+	for machine, want := range map[*api.UserMachine]string{&sleepy: "offline (allowed to sleep)", &awake: "offline"} {
+		if got := machineListState(*machine); got != want {
+			t.Fatalf("%s: got %q want %q", machine.Availability.DesiredMode, got, want)
+		}
+	}
+	sleepy.Online = true
+	if got := machineListState(sleepy); got != "online" {
+		t.Fatalf("online: %q", got)
+	}
+	sleepy.Online, sleepy.State = false, "revoked"
+	if got := machineListState(sleepy); got != "revoked" {
+		t.Fatalf("revoked keeps its state: %q", got)
+	}
+}

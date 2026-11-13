@@ -384,6 +384,19 @@ func machineAvailabilityLabel(machine api.UserMachine) string {
 	}
 }
 
+// machineListState is the STATE column of the machine lists: an offline machine that is allowed to
+// sleep says so, because that is the likely reason it is unreachable.
+func machineListState(machine api.UserMachine) string {
+	if machine.Online {
+		return "online"
+	}
+	state := machine.State
+	if machine.Availability.DesiredMode == "allow_sleep" && state != "revoked" && state != "deleted" {
+		return "offline (allowed to sleep)"
+	}
+	return state
+}
+
 func machineCapabilityLabel(machine api.UserMachine) string {
 	count := 0
 	for _, enabled := range []bool{machine.MachineCapabilities.Desired.Terminal, machine.MachineCapabilities.Desired.ManagedSSH, machine.MachineCapabilities.Desired.FileReceive, machine.MachineCapabilities.Desired.PreviewTunnel} {
