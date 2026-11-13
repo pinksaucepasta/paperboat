@@ -1,0 +1,35 @@
+{
+ "check": "xplat-config",
+ "results": [
+  {
+   "id": "X-03:x03_bytes:M>W",
+   "status": "PASS",
+   "detail": "sha256 equal on laner-x03b-w and in the repository for 5 line-ending shapes"
+  },
+  {
+   "id": "X-03:x03_bytes:W>M",
+   "status": "PASS",
+   "detail": "sha256 equal on laner-x03b-m and in the repository for 5 line-ending shapes"
+  },
+  {
+   "id": "X-03:x03_merge:M>W",
+   "status": "PASS",
+   "detail": "three-way merge kept CRLF on every line"
+  },
+  {
+   "id": "X-03:x03_merge:W>M",
+   "status": "PASS",
+   "detail": "three-way merge kept CRLF on every line"
+  },
+  {
+   "id": "X-03:x03_eol_edit:M>W",
+   "status": "PASS",
+   "detail": "line-ending-only edit travelled alone; against an edit on the other side it conflicted and both files stayed as written"
+  },
+  {
+   "id": "X-03:x03_eol_edit:W>M",
+   "status": "PASS",
+   "detail": "line-ending-only edit travelled alone; against an edit on the other side it conflicted and both files stayed as written"
+  }
+ ]
+}
