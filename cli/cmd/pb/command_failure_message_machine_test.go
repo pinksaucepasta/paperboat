@@ -7,6 +7,7 @@ import (
 
 	"github.com/pinksaucepasta/paperboat/internal/managedssh"
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
+	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 )
 
 func TestUnknownAndAmbiguousMachinesAreExplained(t *testing.T) {
@@ -42,5 +43,16 @@ func TestUnsafeSSHFolderIsExplained(t *testing.T) {
 		if !strings.Contains(message, want) {
 			t.Fatalf("message %q lacks %q", message, want)
 		}
+	}
+}
+
+// F8-16: a route rule the shared validator refuses shows its own message (the blocked header's name), not the generic one.
+func TestRefusedRouteRuleNamesTheHeader(t *testing.T) {
+	_, err := tunnelrouterules.Normalize(tunnelrouterules.Rules{RequestHeaders: []tunnelrouterules.HeaderRule{{Op: tunnelrouterules.OpSet, Name: "X-Forwarded-For", Value: "evil"}}})
+	err = fmt.Errorf("update route: %w", err)
+	failure := classifyCommandFailure(err)
+	message := commandFailureMessage(err, failure)
+	if failure.kind != commandRejected || !strings.Contains(message, "X-Forwarded-For") || strings.Contains(message, "could not finish") {
+		t.Fatalf("kind=%v message=%q", failure.kind, message)
 	}
 }

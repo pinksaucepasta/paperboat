@@ -33,6 +33,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/selector"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 )
 
 func presentedCommandExitCode(failure commandFailure) int {
@@ -325,7 +326,7 @@ func classifyCommandFailure(err error) (failure commandFailure) {
 		case errUsage:
 			set(commandUsage, current)
 			continue
-		case api.ErrUnauthenticated, config.ErrSecretNotFound, config.ErrNoCredentials, environmentmanager.ErrVaultPending, environmentmanager.ErrVaultNotSetUp, environmentmanager.ErrVaultLocked, environmentmanager.ErrVaultChanged, environmentmanager.ErrVaultTeamGrantRequired, environmentmanager.ErrVariableNotConfigured, identitybootstrap.ErrPairingRequired, identitybootstrap.ErrEnrollmentExpired, preferences.ErrChanged, preferences.ErrBusy, localwait.ErrMachineNotFound, localwait.ErrMachineAmbiguous, resolver.ErrMachineNotFound, resolver.ErrMachineAmbiguous, resolver.ErrSharedSessionAuthority, localwait.ErrInvalid, tailnet.ErrAuthority, tailnet.ErrAdmission:
+		case tunnelrouterules.ErrInvalid, api.ErrUnauthenticated, config.ErrSecretNotFound, config.ErrNoCredentials, environmentmanager.ErrVaultPending, environmentmanager.ErrVaultNotSetUp, environmentmanager.ErrVaultLocked, environmentmanager.ErrVaultChanged, environmentmanager.ErrVaultTeamGrantRequired, environmentmanager.ErrVariableNotConfigured, identitybootstrap.ErrPairingRequired, identitybootstrap.ErrEnrollmentExpired, preferences.ErrChanged, preferences.ErrBusy, localwait.ErrMachineNotFound, localwait.ErrMachineAmbiguous, resolver.ErrMachineNotFound, resolver.ErrMachineAmbiguous, resolver.ErrSharedSessionAuthority, localwait.ErrInvalid, tailnet.ErrAuthority, tailnet.ErrAdmission:
 			set(commandRejected, current)
 			continue
 		case tunnel.ErrTransportLost, localapi.ErrTransportUnavailable:

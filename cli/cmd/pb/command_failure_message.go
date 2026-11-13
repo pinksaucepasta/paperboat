@@ -27,6 +27,7 @@ import (
 	"github.com/pinksaucepasta/paperboat/internal/resolver"
 	"github.com/pinksaucepasta/paperboat/internal/tunnel"
 	"github.com/pinksaucepasta/paperboat/shared/supportref"
+	"github.com/pinksaucepasta/paperboat/shared/tunnelrouterules"
 )
 
 // commandGOOS is the platform whose rules a command follows; tests check the Windows ones on any host.
@@ -210,6 +211,8 @@ func commandFailureMessage(err error, failure commandFailure) string {
 		return "The native command did not finish successfully."
 	}
 	switch failure.owner {
+	case tunnelrouterules.ErrInvalid: // names the rule and what to change (the blocked header, the bad redirect)
+		return err.Error()
 	case localwait.ErrMachineNotFound:
 		return "The selected machine was not found. Run `pb status` and select an available machine."
 	case resolver.ErrMachineNotFound:
