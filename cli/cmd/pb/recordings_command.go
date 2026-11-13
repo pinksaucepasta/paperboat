@@ -89,7 +89,7 @@ func recordingsList(c *command.Context) error {
 		if r.EndedAt != nil {
 			ended = r.EndedAt.Sub(r.StartedAt).Round(time.Second).String()
 		}
-		if _, err := fmt.Fprintf(c.Writer, "%s  %s  %s  %s  %s  %s\n", r.ID, r.MachineName, r.StartedAt.Local().Format("2006-01-02 15:04"), ended, r.Trigger, r.State); err != nil {
+		if _, err := fmt.Fprintf(c.Writer, "%s  %s  %s  %s  %s  %s\n", r.ID, r.MachineName, r.StartedAt.Local().Format("2006-01-02 15:04 MST"), ended, r.Trigger, r.State); err != nil {
 			return err
 		}
 	}

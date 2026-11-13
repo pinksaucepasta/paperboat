@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/pinksaucepasta/paperboat/internal/command"
+	"github.com/pinksaucepasta/paperboat/shared/serverclock"
 	"github.com/spf13/cobra"
 )
 
@@ -47,17 +48,25 @@ func relativeTime(at *time.Time) string {
 	if at == nil {
 		return "-"
 	}
-	d := time.Since(*at)
+	// Server-issued times are judged on the server's clock: a machine whose clock is off must not show them shifted.
+	d := serverclock.Now().Sub(*at)
+	if d <= -time.Minute {
+		return "in " + roundedSpan(-d)
+	}
 	if d < time.Minute {
 		return "now"
 	}
+	return roundedSpan(d) + " ago"
+}
+
+func roundedSpan(d time.Duration) string {
 	if d < time.Hour {
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+		return fmt.Sprintf("%dm", int(d.Minutes()))
 	}
 	if d < 24*time.Hour {
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
+		return fmt.Sprintf("%dh", int(d.Hours()))
 	}
-	return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	return fmt.Sprintf("%dd", int(d.Hours()/24))
 }
 
 func editDistance(a, b string) int {
