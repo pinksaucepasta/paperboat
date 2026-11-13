@@ -148,7 +148,7 @@ func TestTunnelV1RejectsUnsafeEndpointIdentityAndURL(t *testing.T) {
 	}
 }
 
-func TestTunnelV1AllowsEmptyEndpointOnlyWhileCustomDomainIsRequired(t *testing.T) {
+func TestTunnelV1AllowsEmptyEndpointOnlyWithAStableIdentity(t *testing.T) {
 	value := validTunnelTestValue()
 	value.StableEndpoint = ""
 	value.SummaryCode = "custom_domain_required"
@@ -157,7 +157,6 @@ func TestTunnelV1AllowsEmptyEndpointOnlyWhileCustomDomainIsRequired(t *testing.T
 	}
 
 	for name, mutate := range map[string]func(*Tunnel){
-		"empty endpoint with another summary":    func(value *Tunnel) { value.SummaryCode = "ready" },
 		"empty endpoint without stable identity": func(value *Tunnel) { value.StableEndpointID = "" },
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -169,6 +168,11 @@ func TestTunnelV1AllowsEmptyEndpointOnlyWhileCustomDomainIsRequired(t *testing.T
 		})
 	}
 
+	value.SummaryCode = "pending" // TCP-only tunnel on a self-hosted-only account
+	if err := validateTunnel(value); err != nil {
+		t.Fatalf("TCP-only self-hosted tunnel rejected: %v", err)
+	}
+	value.SummaryCode = "custom_domain_required"
 	value.StableEndpoint = "https://app.example.test"
 	if err := validateTunnel(value); !errors.Is(err, ErrUnsafeTunnelResponse) {
 		t.Fatalf("custom_domain_required with a public URL error = %v, want ErrUnsafeTunnelResponse", err)

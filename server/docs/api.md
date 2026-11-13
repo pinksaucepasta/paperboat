@@ -294,7 +294,8 @@ the pinned carrier identity. Node or address changes require explicit DNS
 verification before the new placement is eligible.
 
 A new self-hosted tunnel may exist before its domain is ready, with an empty
-`stable_endpoint` and `summary_code: custom_domain_required`. A preview similarly
+`stable_endpoint` and `summary_code: custom_domain_required`; a TCP-only tunnel keeps an
+empty `stable_endpoint` for good, with any other summary. A preview similarly
 has `endpoint_state: custom_domain_not_ready` and an empty `endpoint`. Domain
 instructions expose all required address and ACME delegation records before
 readiness waits. Ready resources expose only the verified customer URL. Native

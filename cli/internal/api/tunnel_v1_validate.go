@@ -360,7 +360,9 @@ func validateTunnel(v Tunnel) error {
 		return ErrUnsafeTunnelResponse
 	}
 	if v.StableEndpoint == "" {
-		if v.SummaryCode != "custom_domain_required" || !tunnelEndpointUUIDPattern.MatchString(v.StableEndpointID) {
+		// A self-hosted-only tunnel has no served URL until a customer domain is verified:
+		// custom_domain_required for HTTP/TLS routes, any other summary for TCP-only tunnels.
+		if !tunnelEndpointUUIDPattern.MatchString(v.StableEndpointID) {
 			return ErrUnsafeTunnelResponse
 		}
 		return nil

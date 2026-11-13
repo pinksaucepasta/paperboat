@@ -68,6 +68,7 @@ func (r *SQLRepository) CreateResourceRoute(ctx context.Context, input RouteReco
 		if tunnel.DesiredState == DesiredDeleted {
 			return ErrTerminalState
 		}
+		input.Hostname = serverOwnedTLSHostname(tunnel, input)
 		candidate := routeCandidate(input)
 		if err := rejectManagedHTTPForSelfhostOnly(ctx, tx, input.AccountID, candidate.Protocol, candidate.MatchType, input.RouteID); err != nil {
 			return err
@@ -506,6 +507,19 @@ func routeCandidateFromRecord(current dbsqlc.TunnelRoute, input RouteRecord) dbs
 		candidate.DesiredState = input.DesiredState
 	}
 	return candidate
+}
+
+// serverOwnedTLSHostname gives a managed TLS route the tunnel's authoritative
+// endpoint host. A self-hosted-only account sees its customer URL as the tunnel
+// endpoint, so the client cannot know the managed name the edge keys the route on.
+func serverOwnedTLSHostname(tunnel dbsqlc.Tunnel, input RouteRecord) sql.NullString {
+	if input.Protocol != "tls" || input.MatchType != "managed" {
+		return input.Hostname
+	}
+	if endpoint, err := url.Parse(tunnel.StableEndpoint); err == nil && endpoint.Hostname() != "" {
+		return nullableString(strings.ToLower(endpoint.Hostname()))
+	}
+	return input.Hostname
 }
 
 // validateEffectiveRouteCandidate validates the merged post-mutation route,

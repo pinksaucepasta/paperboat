@@ -240,6 +240,24 @@ func TestTLSRouteManagedHostnameCannotClaimAnotherName(t *testing.T) {
 	}
 }
 
+func TestTLSRouteCreateUsesTheManagedEndpointNotTheCustomerURLTheClientSaw(t *testing.T) {
+	tunnel := dbsqlc.Tunnel{AccessMode: AccessPublic, StableEndpoint: "https://Managed.example.test"}
+	input := RouteRecord{Protocol: "tls", MatchType: "managed", Hostname: sql.NullString{String: "customer.example.test", Valid: true}}
+	got := serverOwnedTLSHostname(tunnel, input)
+	if got.String != "managed.example.test" {
+		t.Fatalf("hostname=%q, want the managed endpoint host", got.String)
+	}
+	candidate := routeCandidate(RouteRecord{Protocol: "tls", MatchType: "managed", Hostname: got, Origin: RouteOriginRequest{Scheme: "tcp"}})
+	candidate.TlsVerification = "not_applicable"
+	if err := validateEffectiveRouteCandidate(tunnel, candidate); err != nil {
+		t.Fatal(err)
+	}
+	input.Protocol = "tcp"
+	if got := serverOwnedTLSHostname(tunnel, input); got.String != "customer.example.test" {
+		t.Fatalf("non-TLS hostname changed to %q", got.String)
+	}
+}
+
 func TestPublicHTTPRouteRejectsCatchAll(t *testing.T) {
 	route := dbsqlc.TunnelRoute{Protocol: "http", MatchType: "catch_all", OriginScheme: "http", TlsVerification: "not_applicable"}
 	if err := validateEffectiveRouteCandidate(dbsqlc.Tunnel{AccessMode: AccessPublic}, route); !errors.Is(err, ErrInvalidInput) {
