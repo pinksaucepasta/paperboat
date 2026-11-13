@@ -1,0 +1,3 @@
+# usage_categories.py --team --no-ssh --private-port, 2026-11-13, cycle 1 build dev-aee62911e (pb version on controller f1302-c and team-owned target f1302-t, containers on pbvm2, UDP blocked on the controller so every flow takes the hosted relay)
+{"check": "usage-categories", "target": "f1302-t", "status": "PASS", "all_relay_kinds_delta": {"exec": 715642, "file_transfer": 1054992, "machine_service": 2097486, "terminal": 1090110}, "billing_delta": 4957332, "charged_path_delta": 4957332, "team": "paperboat-smoke-TEAM", "team_total_delta": 4957332, "member_bytes_delta": {"user_driver": 4957332}}
+# ssh category on the same build: pb ssh to the team-owned machine refused before an exec reached the host (fixed in the next cycle, see failures.md)
