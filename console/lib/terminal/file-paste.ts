@@ -173,6 +173,15 @@ function fileItems(data: Pick<DataTransfer, "files" | "items">): { files: File[]
   return { files, hasFileItem: hasFileItem || files.length > 0 }
 }
 
+/**
+ * Pasted text as a terminal wants it: every line break is a carriage return (what Enter sends), as xterm.js,
+ * Windows Terminal and VS Code do. A bare LF reaches PowerShell as Ctrl+J, which inserts a line above the
+ * cursor and reverses a multi-line paste.
+ */
+export function terminalPasteText(text: string): string {
+  return text.replace(/\r?\n/g, "\r")
+}
+
 export function classifyFilePaste(data: Pick<DataTransfer, "files" | "items" | "getData"> | null): FilePasteSelection {
   if (!data) return { kind: "text" }
   const found = fileItems(data)

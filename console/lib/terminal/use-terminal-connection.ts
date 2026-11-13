@@ -21,6 +21,7 @@ import {
   FilePasteError,
   FilePasteUploader,
   filePasteMessage,
+  terminalPasteText,
   type FilePasteProgress,
 } from "@/lib/terminal/file-paste"
 import {
@@ -529,7 +530,16 @@ export function useTerminalConnection({
     }
     const onPasteCapture = (event: ClipboardEvent) => {
       const selection = classifyFilePaste(event.clipboardData)
-      if (selection.kind === "text") return
+      if (selection.kind === "text") {
+        const text = event.clipboardData?.getData("text") ?? ""
+        const textarea = event.target instanceof HTMLTextAreaElement ? event.target : null
+        if (!textarea || !/\n/.test(text)) return
+        // wterm sends (and wraps) the converted text; the repeat has no LF, so it passes this check.
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        pasteIntoWTerm(textarea, terminalPasteText(text))
+        return
+      }
       event.preventDefault()
       event.stopImmediatePropagation()
       if (selection.kind === "files") void uploadFiles(selection.files)

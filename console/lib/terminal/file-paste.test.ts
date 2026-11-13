@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { FilePasteError, parsePolicy, validateBatch } from "@/lib/terminal/file-paste"
+import { FilePasteError, parsePolicy, terminalPasteText, validateBatch } from "@/lib/terminal/file-paste"
 
 // What the machine answers to the browser's "policy" request: its published policy. The server publishes the one Automatic
 // bound; the old per-file and per-batch fields are 0 or absent.
@@ -37,4 +37,9 @@ test("a file or a batch over the Automatic bound, or too many files, is refused"
   expect(() => validateBatch([file(2_000_000_001)], policy)).toThrow(FilePasteError)
   expect(() => validateBatch([file(1_500_000_000), file(600_000_000)], policy)).toThrow(FilePasteError)
   expect(() => validateBatch(Array.from({ length: 11 }, () => file(1)), policy)).toThrow(FilePasteError)
+})
+
+test("pasted line breaks become one carriage return each, never a bare LF or a doubled CRLF", () => {
+  expect(terminalPasteText("a\nb\r\nc")).toBe("a\rb\rc")
+  expect(terminalPasteText("one line")).toBe("one line")
 })
