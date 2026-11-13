@@ -172,6 +172,20 @@ func TestBrowserAccessPostgres(t *testing.T) {
 	if _, err = svc.IssueMachineCredential(ctx, MachineCredentialRequest{AccountID: viewer, Host: host, ResourceKind: "tunnel", ResourceID: tunnel, RouteID: route, Action: "use", TTL: time.Minute}); err != nil {
 		t.Fatalf("paid private team viewer denied: %v", err)
 	}
+	// The same viewer opens the private tunnel of the team-owned machine in a browser: the session carries the team
+	// authority although the mode is private (migration 305; the baseline check refused it and redeem answered 503).
+	teamBegin, _ := svc.Begin(ctx, BeginRequest{Host: host, ReturnPath: "/team-private"})
+	teamIssue, err := svc.Issue(ctx, IssueRequest{TransactionID: teamBegin.TransactionID, Principal: auth.Session{ID: session + "_viewer", UserID: viewer}})
+	if err != nil || teamIssue.Denied {
+		t.Fatalf("team member of a team-owned private tunnel: %+v %v", teamIssue, err)
+	}
+	teamSession, err := svc.Redeem(ctx, RedeemRequest{TransactionID: teamBegin.TransactionID, State: teamBegin.State, Handoff: teamIssue.Handoff, Host: host})
+	if err != nil {
+		t.Fatalf("redeem for a team-owned private tunnel: %v", err)
+	}
+	if a, e := svc.Authorize(ctx, AuthorizeRequest{Token: teamSession.Token, Host: host, ResourceKind: "tunnel", ResourceID: tunnel, RouteID: route}); e != nil || a.AccessMode != "private" || a.TeamID != team {
+		t.Fatalf("team-owned private session: %#v %v", a, e)
+	}
 	exec(`UPDATE paperboat.team_members SET active=false,membership_generation=membership_generation+1 WHERE team_id=$1 AND account_id=$2`, team, owner)
 	if _, err = svc.IssueMachineCredential(ctx, MachineCredentialRequest{AccountID: owner, Host: host, ResourceKind: "tunnel", ResourceID: tunnel, RouteID: route, Action: "use", TTL: time.Minute}); !errors.Is(err, ErrNotAuthorized) {
 		t.Fatalf("removed private publisher authorized: %v", err)
