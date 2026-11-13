@@ -93,6 +93,8 @@ class Terminal:
                     return
                 except pexpect.TIMEOUT:
                     continue
+                except pexpect.EOF:  # pb connect itself ended: its own message says why
+                    raise AssertionError('pb connect ended before the target shell answered: %r' % (self.child.before or '')[-700:])
         raise AssertionError('the target shell never answered; screen tail: %r' % (self.child.before or '')[-300:])
 
     def close(self):

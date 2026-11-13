@@ -43,8 +43,11 @@ def fleets():
             os.environ['XPLAT_MAC_SSH'] = os.environ['XPE_MEMBER_MAC_SSH']
         else:  # the real apple Mac
             os.environ.pop('XPLAT_MAC_SSH', None)
-        other = {'L': fleet.linux(MEMBER_PREFIX + 'l'), 'M': fleet.mac(MEMBER_PREFIX + 'm'),
-                 'W': fleet.Windows(MEMBER_PREFIX + 'w', target=os.environ['XPE_MEMBER_WIN_SSH'])}
+        other = {'L': fleet.linux(MEMBER_PREFIX + 'l'), 'M': fleet.mac(MEMBER_PREFIX + 'm')}
+        try:  # the other account's Windows device is only needed by pairs that use it
+            other['W'] = fleet.Windows(MEMBER_PREFIX + 'w', target=os.environ['XPE_MEMBER_WIN_SSH'])
+        except Exception:  # noqa: BLE001
+            other['W'] = None
     finally:
         fleet.L_CT = saved[0]
         if saved[1] is None:
@@ -349,8 +352,11 @@ def t_session(team, o, m, oid):
 def origin_start(dev, port):
     """A tiny HTTP origin on the device's loopback; returns how to stop it."""
     if dev.os == 'windows':
-        pid = dev.sh("(Start-Process python -ArgumentList '-m','http.server','%d','--bind','127.0.0.1' -WindowStyle Hidden -PassThru).Id" % port).text.strip()
-        return lambda: dev.sh('Stop-Process -Id %s -Force -ErrorAction SilentlyContinue' % pid)
+        # detached through CIM like every other long-lived Windows process of the suite: a Start-Process child dies with the ssh session
+        directory = dev.home + '\\pb-origin-%d' % port
+        dev.sh("New-Item -ItemType Directory -Force '%s' | Out-Null" % directory)
+        pid = dev.device.start(['python', '-m', 'http.server', str(port), '--bind', '127.0.0.1'], directory)
+        return lambda: dev.device.stop(pid)
     pid = dev.sh('nohup python3 -m http.server %d --bind 127.0.0.1 >/dev/null 2>&1 & echo $!' % port).text.strip()
     return lambda: dev.run(['kill', pid])
 
