@@ -134,20 +134,37 @@ func initializeProductionManagedSSH(ctx context.Context, host *managedssh.Host, 
 		return nil, errors.Join(ErrManagedSSHUnavailable, rootErr)
 	}
 	sshStateRoot := filepath.Join(instanceRoot, "ssh")
-	paths := []string{filepath.Join(sshStateRoot, "hostkeys", "ssh_host_ed25519_key.pub")}
-	inventory, err := managedssh.ReadHostPublicKeys(paths, 0)
+	hostKeyDir := filepath.Join(sshStateRoot, "hostkeys")
+	// Re-read on every change: pb doctor --repair recreates deleted host keys while hostd keeps running, and the
+	// server must learn the new key (Unix does the same with its /etc/ssh watch).
+	readPublicKeys := windowsHostPublicKeys(hostKeyDir)
+	publicKeys, err := readPublicKeys()
 	if err != nil {
 		return nil, errors.Join(ErrManagedSSHUnavailable, errors.New("read Windows Paperboat host keys"), err)
 	}
-	if len(inventory.Keys) == 0 || generation == 0 {
+	if len(publicKeys) == 0 || generation == 0 {
 		return nil, errors.Join(ErrManagedSSHUnavailable, errors.New("Windows Paperboat host-key inventory is empty"))
 	}
-	publicKeys := make([]string, len(inventory.Keys))
-	for i := range inventory.Keys {
-		publicKeys[i] = inventory.Keys[i].PublicKey
+	watchHostKeys := func(ctx context.Context) (<-chan struct{}, error) {
+		return watchHostKeyFiles(ctx, hostKeyDir, sshHostKeyQuiet)
 	}
 	client := api.New(controlURL, config.Credential{}, &http.Client{Transport: transport, Timeout: 15 * time.Second})
-	return &managedSSHKeyReconciler{client: client, identity: identity, registration: registration, workerGeneration: generation, publicKeys: publicKeys, home: sshStateRoot, interval: 30 * time.Second, timeout: 10 * time.Second, events: keyEvents}, nil
+	return &managedSSHKeyReconciler{client: client, identity: identity, registration: registration, workerGeneration: generation, publicKeys: publicKeys, readPublicKeys: readPublicKeys, watchHostKeys: watchHostKeys, home: sshStateRoot, interval: 30 * time.Second, timeout: 10 * time.Second, events: keyEvents}, nil
+}
+
+// windowsHostPublicKeys reads the managed sshd's host public key from dir, at every call.
+func windowsHostPublicKeys(dir string) func() ([]string, error) {
+	return func() ([]string, error) {
+		inventory, err := managedssh.ReadHostPublicKeys([]string{filepath.Join(dir, "ssh_host_ed25519_key.pub")}, 0)
+		if err != nil {
+			return nil, err
+		}
+		publicKeys := make([]string, len(inventory.Keys))
+		for i := range inventory.Keys {
+			publicKeys[i] = inventory.Keys[i].PublicKey
+		}
+		return publicKeys, nil
+	}
 }
 
 func validatedMachineShell(path string) (string, error) {
